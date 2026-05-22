@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+list_staged() {
+  git diff --cached --name-only --diff-filter=ACM --no-renames 2>/dev/null || true
+}
+
+filter_pat_leaks() {
+  local f
+  while read -r f; do
+    [[ -z ${f} ]] && continue
+    git diff --cached --no-color "${f}" \
+      | grep -vE '^\+\+\+ ' \
+      | grep -E '^\+' \
+      | grep -qE '(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}' \
+      && printf '%s\n' "${f}"
+  done
+}
+
+main() {
+  local -a leaks
+  mapfile -t leaks < <(list_staged | filter_pat_leaks)
+  (( ${#leaks[@]} == 0 )) && exit 0
+
+  printf 'PAT leak in %s\n' "${leaks[@]}"
+  echo
+  echo "ERROR: ${#leaks[@]} file(s) contain a GitHub PAT in staged changes."
+  echo "Move secrets to ~/dotfiles-wsl/secrets/secrets.yaml (SOPS + age) and reference via sops.placeholder."
+  exit 1
+}
+
+main "$@"

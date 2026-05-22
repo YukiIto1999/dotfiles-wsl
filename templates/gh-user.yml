@@ -1,0 +1,3 @@
+        @accountUsername@:
+            oauth_token: @accountToken@
+            git_protocol: https

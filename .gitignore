@@ -1,0 +1,15 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*~
+*.swp
+
+# Secret
+*.plain
+*.unencrypted
+secrets.yaml
+secrets.yml
+!secrets/secrets.yaml
+

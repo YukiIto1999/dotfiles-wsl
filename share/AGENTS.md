@@ -63,7 +63,7 @@ Think in English. Respond in Japanese.
 ## dotfiles
 
 - 初回 setup: `sudo bash ~/dotfiles-wsl/scripts/bootstrap.sh`
-- 通常 rebuild: `sudo nixos-rebuild boot --flake "git+file:///etc/nixos?submodules=1#nixos" -L` 後、PowerShell で `wsl -t NixOS && wsl -d NixOS`。
+- 通常 rebuild: `sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl?submodules=1#nixos" -L` 後、PowerShell で `wsl -t NixOS && wsl -d NixOS`。
 - 実用状態検証: `~/dotfiles-wsl/scripts/doctor.sh`
 - 不要物整理: `~/dotfiles-wsl/scripts/cleanup-local.sh --delete`。system backup と VS Code server も整理する場合は `--system --vscode-server` を付ける。
 - CI 相当 check: `cd ~/dotfiles-wsl && nix flake check "git+file://${PWD}?submodules=1" -L`

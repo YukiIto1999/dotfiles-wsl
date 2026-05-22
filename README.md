@@ -70,7 +70,7 @@ wsl -d NixOS
 WSL では systemd restart により VS Code Remote WSL セッションが切れるため、通常更新も boot generation として入れる。
 
 ```bash
-sudo nixos-rebuild boot --flake "git+file:///etc/nixos?submodules=1#nixos" -L
+sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl?submodules=1#nixos" -L
 ```
 
 その後 PowerShell から再起動し、`doctor.sh` を実行する。
@@ -172,7 +172,7 @@ Docker、MCP containers、agentgateway は NixOS configuration により一括�
 変更後は以下を実行する。
 
 ```bash
-sudo nixos-rebuild boot --flake "git+file:///etc/nixos?submodules=1#nixos" -L
+sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl?submodules=1#nixos" -L
 ```
 
 PowerShell から WSL を再起動し、`scripts/doctor.sh` を実行する。

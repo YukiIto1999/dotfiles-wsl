@@ -62,5 +62,36 @@ install_codex() {
   "$HOME/.local/bin/codex" --version || fail "codex installed but version check failed"
 }
 
+opencode_asset() {
+  case "$(uname -m)" in
+    x86_64|amd64)  printf '%s\n' "opencode-linux-x64.tar.gz" ;;
+    aarch64|arm64) printf '%s\n' "opencode-linux-arm64.tar.gz" ;;
+    *) fail "unsupported architecture for OpenCode: $(uname -m)" ;;
+  esac
+}
+
+install_opencode() {
+  local asset api url tmp
+  asset="$(opencode_asset)"
+  api="https://api.github.com/repos/anomalyco/opencode/releases/latest"
+
+  log "install/update OpenCode from GitHub release: ${asset}"
+  url="$(curl -fsSL "$api" | jq -r --arg asset "$asset" '.assets[] | select(.name == $asset) | .browser_download_url' | head -n1)"
+  [[ -n "$url" && "$url" != "null" ]] || fail "release asset not found: ${asset}"
+
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  curl -fL "$url" -o "$tmp/$asset"
+  tar -xzf "$tmp/$asset" -C "$tmp"
+
+  [[ -f "$tmp/opencode" ]] || fail "opencode binary not found in archive"
+  install -m 0755 "$tmp/opencode" "$HOME/.local/bin/opencode"
+
+  "$HOME/.local/bin/opencode" --version || fail "opencode installed but version check failed"
+}
+
+
 install_claude
 install_codex
+install_opencode

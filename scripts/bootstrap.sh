@@ -51,12 +51,15 @@ verify_tracked_flake_files() {
     templates/agentmemory.yaml
     templates/agent-claude.md
     templates/agent-codex.toml
+    templates/agent-opencode.md
     templates/gh-user.yml
     templates/searxng-settings.yml
     home/nixos/.claude/CLAUDE.md
     home/nixos/.claude/settings.json
     home/nixos/.codex/AGENTS.md
     home/nixos/.codex/config.toml
+    home/nixos/.config/opencode/AGENTS.md
+    home/nixos/.config/opencode/opencode.json
     home/nixos/.config/git/ignore
     home/nixos/.config/git/hooks/pre-commit
     home/nixos/.config/git/hooks/commit-msg

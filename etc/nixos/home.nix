@@ -50,12 +50,57 @@ let
       (builtins.attrNames localSkills);
   allSkills        = pluginSkills // localSkills;
 
+  # CLI definitions
+  cliDefs = {
+    claude = {
+      skillDir   = ".claude/skills";
+      agentDir   = ".claude/agents";
+      agentExt   = "md";
+      buildAgent = _: srcPath: pkgs.replaceVars ../../templates/agent-claude.md {
+        agentBody = builtins.readFile srcPath;
+      };
+    };
+    codex = {
+      skillDir   = ".codex/skills";
+      agentDir   = ".codex/agents";
+      agentExt   = "toml";
+      buildAgent = name: srcPath: pkgs.runCommand "${name}.toml" {
+        nativeBuildInputs = [ pkgs.remarshal pkgs.gawk pkgs.gnused ];
+      } ''
+        set -euo pipefail
+        src=${srcPath}
+        tpl=${../../templates/agent-codex.toml}
+        awk '/^---$/{c++; next} c==1' "$src" > fm.yaml
+        remarshal -if yaml -of toml fm.yaml > fm.toml
+        awk '/^---$/{c++; next} c>=2' "$src" > body.txt
+        sed -i 's/&/\\&/g' fm.toml body.txt
+        awk -v fm_file=fm.toml -v body_file=body.txt '
+          BEGIN {
+            while ((getline l < fm_file)  > 0) fm = fm (fm == "" ? "" : "\n") l
+            while ((getline l < body_file) > 0) bd = bd (bd == "" ? "" : "\n") l
+          }
+          { gsub(/@frontmatter@/, fm); gsub(/@body@/, bd); print }
+        ' "$tpl" > "$out"
+      '';
+    };
+    opencode = {
+      skillDir   = ".config/opencode/skills";
+      agentDir   = ".config/opencode/agents";
+      agentExt   = "md";
+      buildAgent = _: srcPath: pkgs.replaceVars ../../templates/agent-opencode.md {
+        agentBody = builtins.readFile srcPath;
+      };
+    };
+  };
+
+  # Skill files for all CLIs
   skillFiles = lib.listToAttrs (lib.concatMap (cli:
+      let def = cliDefs.${cli}; in
       lib.mapAttrsToList (name: src: {
-        name = ".${cli}/skills/${name}";
+        name  = "${def.skillDir}/${name}";
         value = { source = symlink src; };
       }) allSkills
-    ) [ "claude" "codex" ]);
+    ) (builtins.attrNames cliDefs));
 
   # Agents
   agents = lib.mapAttrs' (filename: _:
@@ -65,38 +110,14 @@ let
          t == "regular" && (lib.hasSuffix ".md" n)
        ) (builtins.readDir ../../share/agents));
 
-  buildClaudeAgentMd = srcPath:
-    pkgs.replaceVars ../../templates/agent-claude.md {
-      agentBody = builtins.readFile srcPath;
-    };
-
-  buildCodexAgentToml = name: srcPath:
-    pkgs.runCommand "${name}.toml" {
-      nativeBuildInputs = [ pkgs.remarshal pkgs.gawk pkgs.gnused ];
-    } ''
-      set -euo pipefail
-      src=${srcPath}
-      tpl=${../../templates/agent-codex.toml}
-      awk '/^---$/{c++; next} c==1' "$src" > fm.yaml
-      remarshal -if yaml -of toml fm.yaml > fm.toml
-      awk '/^---$/{c++; next} c>=2' "$src" > body.txt
-      sed -i 's/&/\\&/g' fm.toml body.txt
-      awk -v fm_file=fm.toml -v body_file=body.txt '
-        BEGIN {
-          while ((getline l < fm_file)  > 0) fm = fm (fm == "" ? "" : "\n") l
-          while ((getline l < body_file) > 0) bd = bd (bd == "" ? "" : "\n") l
-        }
-        { gsub(/@frontmatter@/, fm); gsub(/@body@/, bd); print }
-      ' "$tpl" > "$out"
-    '';
-
-  claudeAgentFiles = lib.mapAttrs' (name: srcPath:
-      lib.nameValuePair ".claude/agents/${name}.md" { source = buildClaudeAgentMd srcPath; }
-    ) agents;
-
-  codexAgentFiles = lib.mapAttrs' (name: srcPath:
-      lib.nameValuePair ".codex/agents/${name}.toml" { source = buildCodexAgentToml name srcPath; }
-    ) agents;
+  # Agent files for all CLIs
+  agentFiles = lib.listToAttrs (lib.concatMap (cli:
+      let def = cliDefs.${cli}; in
+      lib.mapAttrsToList (name: srcPath: {
+        name  = "${def.agentDir}/${name}.${def.agentExt}";
+        value = { source = def.buildAgent name srcPath; };
+      }) agents
+    ) (builtins.attrNames cliDefs));
 
   # Helpers
   agentsBody  = builtins.readFile (../../share/AGENTS.md);
@@ -109,12 +130,18 @@ let
     executable = true;
   };
 
-  # Roots
+  # Root config files
   rootFiles = {
+    # Claude Code
     ".claude/CLAUDE.md".source     = pkgs.replaceVars ../../home/nixos/.claude/CLAUDE.md     { inherit agentsBody; };
-    ".codex/AGENTS.md".source      = pkgs.replaceVars ../../home/nixos/.codex/AGENTS.md      { inherit agentsBody; };
     ".claude/settings.json".source = pkgs.replaceVars ../../home/nixos/.claude/settings.json { inherit gatewayUrl; };
+    # Codex CLI
+    ".codex/AGENTS.md".source      = pkgs.replaceVars ../../home/nixos/.codex/AGENTS.md      { inherit agentsBody; };
     ".codex/config.toml".source    = pkgs.replaceVars ../../home/nixos/.codex/config.toml    { inherit gatewayUrl; };
+    # OpenCode
+    ".config/opencode/AGENTS.md".source     = pkgs.replaceVars ../../home/nixos/.config/opencode/AGENTS.md     { inherit agentsBody; };
+    ".config/opencode/opencode.json".source = pkgs.replaceVars ../../home/nixos/.config/opencode/opencode.json { inherit gatewayUrl; };
+    # Git
     ".config/git/ignore".source    = symlink "${dotfilesAbs}/home/nixos/.config/git/ignore";
     ".config/git/hooks/pre-commit" = mkGitHook "pre-commit";
     ".config/git/hooks/commit-msg" = mkGitHook "commit-msg";
@@ -191,5 +218,5 @@ in
   } // lib.genAttrs [ "gh" "bash" "fzf" "zoxide" "bat" "eza" ] (_: { enable = true; });
 
   # Files
-  home.file = rootFiles // skillFiles // claudeAgentFiles // codexAgentFiles;
+  home.file = rootFiles // skillFiles // agentFiles;
 }

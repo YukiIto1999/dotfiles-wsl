@@ -70,7 +70,7 @@
         sops = pkgs.sops;
         ai-cli-install-tools = pkgs.buildEnv {
           name = "ai-cli-install-tools";
-          paths = with pkgs; [ curl jq gnutar gzip ];
+          paths = with pkgs; [ curl jq gnutar gzip nodejs_24 ];
         };
       };
 

@@ -52,6 +52,7 @@ verify_tracked_flake_files() {
     templates/agent-claude.md
     templates/agent-codex.toml
     templates/agent-opencode.md
+    templates/agent-gemini.md
     templates/gh-user.yml
     templates/searxng-settings.yml
     home/nixos/.claude/CLAUDE.md
@@ -60,6 +61,8 @@ verify_tracked_flake_files() {
     home/nixos/.codex/config.toml
     home/nixos/.config/opencode/AGENTS.md
     home/nixos/.config/opencode/opencode.json
+    home/nixos/.gemini/GEMINI.md
+    home/nixos/.gemini/settings.json
     home/nixos/.config/git/ignore
     home/nixos/.config/git/hooks/pre-commit
     home/nixos/.config/git/hooks/commit-msg

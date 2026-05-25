@@ -18,6 +18,7 @@ require tar
 require gzip
 require install
 require uname
+require npm
 
 install_claude() {
   log "install/update Claude Code from Anthropic upstream"
@@ -91,7 +92,18 @@ install_opencode() {
   "$HOME/.local/bin/opencode" --version || fail "opencode installed but version check failed"
 }
 
+install_gemini() {
+  log "install/update Gemini CLI from npm"
+  NPM_CONFIG_PREFIX="$HOME/.local" npm install -g @google/gemini-cli
+
+  if ! command -v gemini >/dev/null 2>&1; then
+    fail "gemini not found after npm install; ensure ~/.local/bin is in PATH"
+  fi
+
+  gemini --version || fail "gemini installed but version check failed"
+}
 
 install_claude
 install_codex
 install_opencode
+install_gemini

@@ -106,6 +106,7 @@ system backup と VS Code server runtime も整理する場合。
 | `claude` | `~/.local/bin/claude` | Anthropic 公式 installer |
 | `codex` | `~/.local/bin/codex` | OpenAI GitHub Release |
 | `opencode` | `~/.local/bin/opencode` | Anomaly GitHub Release |
+| `gemini` | `~/.local/bin/gemini` | npm `@google/gemini-cli` |
 
 bootstrap は `scripts/install-ai-clis.sh` を通常ユーザーで実行し、最新の upstream binary を配置する。Nix が管理するのはインストールに必要な一時ツール、OS 設定、MCP、Home Manager 管理ファイルだけ。
 
@@ -125,6 +126,10 @@ bootstrap は `scripts/install-ai-clis.sh` を通常ユーザーで実行し、�
 | `~/.config/opencode/AGENTS.md` | `share/AGENTS.md` 由来の共通ルール |
 | `~/.config/opencode/agents/<name>.md` | `share/agents/*.md` 由来 |
 | `~/.config/opencode/skills/<name>` | local / plugin skill への symlink |
+| `~/.gemini/settings.json` | gateway MCP、context fileName |
+| `~/.gemini/GEMINI.md` | `share/AGENTS.md` 由来の共通ルール |
+| `~/.gemini/agents/<name>.md` | `share/agents/*.md` 由来 |
+| `~/.gemini/skills/<name>` | local / plugin skill への symlink |
 
 `doctor.sh` は CLI が Nix 管理の `/nix/store`、`/run/current-system`、`/etc/profiles` から解決される場合に失敗する。
 
@@ -133,7 +138,7 @@ bootstrap は `scripts/install-ai-clis.sh` を通常ユーザーで実行し、�
 全 CLI は gateway だけを見る。
 
 ```text
-Claude Code / Codex CLI / OpenCode
+Claude Code / Codex CLI / OpenCode / Gemini CLI
         |
         v
 http://localhost:8765/mcp

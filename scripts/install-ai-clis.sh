@@ -18,8 +18,6 @@ require tar
 require gzip
 require install
 require uname
-require npm
-
 install_claude() {
   log "install/update Claude Code from Anthropic upstream"
   curl -fsSL https://claude.ai/install.sh | bash
@@ -92,18 +90,18 @@ install_opencode() {
   "$HOME/.local/bin/opencode" --version || fail "opencode installed but version check failed"
 }
 
-install_gemini() {
-  log "install/update Gemini CLI from npm"
-  NPM_CONFIG_PREFIX="$HOME/.local" npm install -g @google/gemini-cli
+install_antigravity() {
+  log "install/update Antigravity CLI from Google upstream"
+  curl -fsSL https://antigravity.google/cli/install.sh | bash
 
-  if ! command -v gemini >/dev/null 2>&1; then
-    fail "gemini not found after npm install; ensure ~/.local/bin is in PATH"
+  if ! command -v agy >/dev/null 2>&1; then
+    fail "agy not found after upstream installer; ensure ~/.local/bin is in PATH"
   fi
 
-  gemini --version || fail "gemini installed but version check failed"
+  agy --version || fail "agy installed but version check failed"
 }
 
 install_claude
 install_codex
 install_opencode
-install_gemini
+install_antigravity

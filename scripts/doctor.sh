@@ -72,17 +72,27 @@ check_file "$repo/secrets/secrets.yaml"
 
 check_command_upstream claude
 check_command_upstream codex
+check_command_upstream opencode
+check_command_upstream agy
 
 check_file "$HOME/.claude/settings.json"
 check_file "$HOME/.claude/CLAUDE.md"
 check_file "$HOME/.codex/config.toml"
 check_file "$HOME/.codex/AGENTS.md"
+check_file "$HOME/.config/opencode/opencode.json"
+check_file "$HOME/.config/opencode/AGENTS.md"
+check_file "$HOME/.gemini/AGENTS.md"
+check_file "$HOME/.gemini/antigravity-cli/mcp_config.json"
 check_file "$HOME/.config/git/identity.conf"
 check_file "$HOME/.config/gh/hosts.yml"
 check_dir "$HOME/.claude/agents"
 check_dir "$HOME/.codex/agents"
+check_dir "$HOME/.config/opencode/agents"
+check_dir "$HOME/.gemini/agents"
 check_dir "$HOME/.claude/skills"
 check_dir "$HOME/.codex/skills"
+check_dir "$HOME/.config/opencode/skills"
+check_dir "$HOME/.gemini/antigravity-cli/skills"
 
 if [[ -f "$HOME/.claude/settings.json" ]]; then
   grep -q 'http://localhost:8765/mcp' "$HOME/.claude/settings.json" \
@@ -94,6 +104,18 @@ if [[ -f "$HOME/.codex/config.toml" ]]; then
   grep -q 'http://localhost:8765/mcp' "$HOME/.codex/config.toml" \
     && ok "Codex gateway URL configured" \
     || bad "Codex gateway URL missing"
+fi
+
+if [[ -f "$HOME/.config/opencode/opencode.json" ]]; then
+  grep -q 'http://localhost:8765/mcp' "$HOME/.config/opencode/opencode.json" \
+    && ok "OpenCode gateway URL configured" \
+    || bad "OpenCode gateway URL missing"
+fi
+
+if [[ -f "$HOME/.gemini/antigravity-cli/mcp_config.json" ]]; then
+  grep -q 'http://localhost:8765/mcp' "$HOME/.gemini/antigravity-cli/mcp_config.json" \
+    && ok "Antigravity gateway URL configured" \
+    || bad "Antigravity gateway URL missing"
 fi
 
 check_file /etc/agentgateway/config.yaml

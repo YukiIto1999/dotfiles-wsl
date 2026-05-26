@@ -91,11 +91,11 @@ let
         agentBody = builtins.readFile srcPath;
       };
     };
-    gemini = {
-      skillDir   = ".gemini/skills";
+    antigravity = {
+      skillDir   = ".gemini/antigravity-cli/skills";
       agentDir   = ".gemini/agents";
       agentExt   = "md";
-      buildAgent = _: srcPath: pkgs.replaceVars ../../templates/agent-gemini.md {
+      buildAgent = _: srcPath: pkgs.replaceVars ../../templates/agent-antigravity.md {
         agentBody = builtins.readFile srcPath;
       };
     };
@@ -149,9 +149,9 @@ let
     # OpenCode
     ".config/opencode/AGENTS.md".source     = pkgs.replaceVars ../../home/nixos/.config/opencode/AGENTS.md     { inherit agentsBody; };
     ".config/opencode/opencode.json".source = pkgs.replaceVars ../../home/nixos/.config/opencode/opencode.json { inherit gatewayUrl; };
-    # Gemini CLI
-    ".gemini/GEMINI.md".source        = pkgs.replaceVars ../../home/nixos/.gemini/GEMINI.md        { inherit agentsBody; };
-    ".gemini/settings.json".source    = pkgs.replaceVars ../../home/nixos/.gemini/settings.json    { inherit gatewayUrl; };
+    # Antigravity CLI
+    ".gemini/AGENTS.md".source                       = pkgs.replaceVars ../../home/nixos/.gemini/AGENTS.md                       { inherit agentsBody; };
+    ".gemini/antigravity-cli/mcp_config.json".source = pkgs.replaceVars ../../home/nixos/.gemini/antigravity-cli/mcp_config.json { inherit gatewayUrl; };
     # Git
     ".config/git/ignore".source    = symlink "${dotfilesAbs}/home/nixos/.config/git/ignore";
     ".config/git/hooks/pre-commit" = mkGitHook "pre-commit";

@@ -70,7 +70,7 @@ Think in English. Respond in Japanese.
 - flake input 更新: `cd ~/dotfiles-wsl && nix flake update`
 - `/etc/nixos` は `~/dotfiles-wsl` repo root への symlink。
 - flake root は repo root。`etc/nixos/` は NixOS / Home Manager module 置き場であり、単独 flake ではない。
-- CLI 本体（`claude` / `codex` / `opencode` / `gemini`）は Nix から入れない。公式 upstream 配布を `~/.local/bin` に置き、dotfiles は設定・agents・skills を管理する。
+- CLI 本体（`claude` / `codex` / `opencode` / `agy`）は Nix から入れない。公式 upstream 配布を `~/.local/bin` に置き、dotfiles は設定・agents・skills を管理する。
 - `/home/nixos` の設定ファイルは `~/dotfiles-wsl/home/nixos`、`~/dotfiles-wsl/share`、`~/dotfiles-wsl/templates` から再生成される。
 - MCP は agentgateway 経由で集約される。全 CLI が同じ gateway URL を使う。
 - subagent と skill は `~/dotfiles-wsl/share/agents/`、`~/dotfiles-wsl/share/skills/` から全 CLI へ配備される。

@@ -52,7 +52,7 @@ verify_tracked_flake_files() {
     templates/agent-claude.md
     templates/agent-codex.toml
     templates/agent-opencode.md
-    templates/agent-gemini.md
+    templates/agent-antigravity.md
     templates/gh-user.yml
     templates/searxng-settings.yml
     home/nixos/.claude/CLAUDE.md
@@ -61,8 +61,8 @@ verify_tracked_flake_files() {
     home/nixos/.codex/config.toml
     home/nixos/.config/opencode/AGENTS.md
     home/nixos/.config/opencode/opencode.json
-    home/nixos/.gemini/GEMINI.md
-    home/nixos/.gemini/settings.json
+    home/nixos/.gemini/AGENTS.md
+    home/nixos/.gemini/antigravity-cli/mcp_config.json
     home/nixos/.config/git/ignore
     home/nixos/.config/git/hooks/pre-commit
     home/nixos/.config/git/hooks/commit-msg
@@ -125,7 +125,7 @@ verify_secrets() {
 
 install_ai_clis() {
   as_user nix shell "${FLAKE_REF}#ai-cli-install-tools" -c "${DOTFILES}/scripts/install-ai-clis.sh"
-  step "Claude Code / Codex CLI installed from upstream"
+  step "AI CLIs installed from upstream"
 }
 
 install_boot_generation() {

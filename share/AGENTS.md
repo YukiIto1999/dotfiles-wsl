@@ -27,7 +27,7 @@ Think in English. Respond in Japanese.
 ## memory
 
 - working state は native memory `~/.claude/projects/<X>/memory/` に置く。
-- セッション越えで保持すべき長期情報は agentmemory MCP target `memory` に転記する。
+- セッション越えで保持すべき長期情報は agentmemory REST API に転記する。
 - 同じ訂正を繰り返し受けた場合、または明示的に「覚えて」と言われた場合は memory に保存する。
 - 資格情報、トークン、秘密鍵、個人情報、未検証の推測、短期タスク専用の作業メモは memory に保存しない。
 

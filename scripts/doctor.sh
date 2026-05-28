@@ -94,11 +94,9 @@ check_dir "$HOME/.codex/skills"
 check_dir "$HOME/.config/opencode/skills"
 check_dir "$HOME/.gemini/antigravity-cli/skills"
 
-if [[ -f "$HOME/.claude/settings.json" ]]; then
-  grep -q 'http://localhost:8765/mcp' "$HOME/.claude/settings.json" \
-    && ok "Claude gateway URL configured" \
-    || bad "Claude gateway URL missing"
-fi
+claude mcp get gateway 2>/dev/null | grep -q 'http://localhost:8765/mcp' \
+  && ok "Claude gateway registered" \
+  || bad "Claude gateway not registered"
 
 if [[ -f "$HOME/.codex/config.toml" ]]; then
   grep -q 'http://localhost:8765/mcp' "$HOME/.codex/config.toml" \

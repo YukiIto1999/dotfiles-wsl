@@ -142,7 +142,7 @@ let
   rootFiles = {
     # Claude Code
     ".claude/CLAUDE.md".source     = pkgs.replaceVars ../../home/nixos/.claude/CLAUDE.md     { inherit agentsBody; };
-    ".claude/settings.json".source = pkgs.replaceVars ../../home/nixos/.claude/settings.json { inherit gatewayUrl; };
+    ".claude/settings.json".source = ../../home/nixos/.claude/settings.json;
     # Codex CLI
     ".codex/AGENTS.md".source      = pkgs.replaceVars ../../home/nixos/.codex/AGENTS.md      { inherit agentsBody; };
     ".codex/config.toml".source    = pkgs.replaceVars ../../home/nixos/.codex/config.toml    { inherit gatewayUrl; };
@@ -230,4 +230,12 @@ in
 
   # Files
   home.file = rootFiles // skillFiles // agentFiles;
+
+  # Claude only: register gateway via `claude mcp add` (settings.json ignores mcpServers)
+  home.activation.claudeMcpRegister = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    CLAUDE=$HOME/.local/bin/claude
+    [ -x "$CLAUDE" ] || exit 0
+    $CLAUDE mcp remove gateway --scope user >/dev/null 2>&1 || true
+    $CLAUDE mcp add --transport http gateway "${gatewayUrl}" --scope user >/dev/null
+  '';
 }

@@ -71,6 +71,7 @@ verify_tracked_flake_files() {
     services/context7-mcp/package-lock.json
     services/github-mcp/default.nix
     services/probe-mcp/default.nix
+    services/probe-mcp/package-lock.json
     scripts/bootstrap.sh
     scripts/doctor.sh
     scripts/cleanup-local.sh

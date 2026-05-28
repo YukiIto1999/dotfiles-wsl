@@ -6,10 +6,26 @@ Thumbs.db
 *~
 *.swp
 
+# Nix
+/result
+/result-*
+/.direnv/
+/.devenv/
+
+# Editor
+/.vscode/
+/.idea/
+
+# Agent
+/.antigravitycli/
+/.playwright-mcp/
+/.claude/
+/.codex/
+/.opencode/
+
 # Secret
 *.plain
 *.unencrypted
 secrets.yaml
 secrets.yml
 !secrets/secrets.yaml
-

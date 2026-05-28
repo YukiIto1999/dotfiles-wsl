@@ -13,14 +13,11 @@ binds:
             mcp:
               host: http://playwright:@playwrightPort@/mcp
 @accountTargets@
-          - name: memory
-            mcp:
-              host: http://agentmemory:@agentmemoryHttpPort@/mcp
           - name: searxng-mcp
             mcp:
               host: http://searxng-mcp:@searxngMcpPort@/mcp
           - name: crawl4ai
-            mcp:
+            sse:
               host: http://crawl4ai:@crawl4aiPort@/mcp/sse
           - name: probe-mcp
             mcp:

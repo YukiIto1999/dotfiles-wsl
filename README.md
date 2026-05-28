@@ -114,7 +114,7 @@ bootstrap は `scripts/install-ai-clis.sh` を通常ユーザーで実行し、�
 
 | path | 内容 |
 |---|---|
-| `~/.claude/settings.json` | gateway MCP、prompt cache、UI 設定 |
+| `~/.claude/settings.json` | prompt cache、UI 設定 |
 | `~/.claude/CLAUDE.md` | `share/AGENTS.md` 由来の共通ルール |
 | `~/.claude/agents/<name>.md` | `share/agents/*.md` 由来 |
 | `~/.claude/skills/<name>` | local / plugin skill への symlink |
@@ -147,7 +147,7 @@ http://localhost:8765/mcp
 agentgateway
 ```
 
-`gatewayPort` は `flake.nix` の `gatewayPort` で宣言する。各 CLI の設定ファイルは同じ URL を使う。
+`gatewayPort` は `flake.nix` の `gatewayPort` で宣言する。各 CLI は upstream API に従って同じ URL を見る。
 
 Docker、MCP containers、agentgateway は NixOS configuration により一括管理する。
 

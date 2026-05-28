@@ -78,7 +78,7 @@ let
     streamPort = agentmemoryStreamPort;
   };
   agentgatewayConfig    = builtins.readFile (pkgs.replaceVars ../agentgateway/config.yaml {
-    inherit gatewayPort agentmemoryHttpPort context7Port playwrightPort
+    inherit gatewayPort context7Port playwrightPort
             searxngMcpPort crawl4aiPort probeMcpPort;
     accountTargets = lib.concatMapStrings buildAccountTarget accounts;
   });
@@ -122,7 +122,7 @@ let
       entrypoint = "node";
       cmd = [
         "/app/cli.js" "--headless" "--browser=chromium" "--no-sandbox"
-        "--port=${playwrightPort}" "--host=0.0.0.0"
+        "--port=${playwrightPort}" "--host=0.0.0.0" "--allowed-hosts" "*"
       ];
       extraOptions = [ "--network=mcp" "--init" ];
       deps = [ ];
@@ -170,7 +170,7 @@ let
 
   # Gateway
   gatewayContainer = {
-    image = "ghcr.io/agentgateway/agentgateway:0.10.5@sha256:caebb6eb01058df7e01c2cf86556c16dbf875f75922b27a32a15b0bcfc4fcd4b";
+    image = "cr.agentgateway.dev/agentgateway:v1.2.1@sha256:60f7d4fbb7cec7f31aae5c2834c2e94ee46d88381fbca0600596b9e38efce760";
     cmd = [ "-f" "/etc/agentgateway/config.yaml" ];
     volumes = [ "/etc/agentgateway/config.yaml:/etc/agentgateway/config.yaml:ro" ];
     extraOptions = [ "--network=mcp" "-p" "127.0.0.1:${gatewayPort}:${gatewayPort}" ];
@@ -239,7 +239,7 @@ in
   sops.templates = {
     "agentgateway-config.yaml" = {
       path         = "/etc/agentgateway/config.yaml";
-      mode         = "0400";
+      mode         = "0444";
       owner        = "root";
       group        = "root";
       restartUnits = [ "docker-agentgateway.service" ];

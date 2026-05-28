@@ -6,11 +6,6 @@
   "permissions": {
     "defaultMode": "auto"
   },
-  "mcpServers": {
-    "gateway": {
-      "url": "@gatewayUrl@"
-    }
-  },
   "effortLevel": "xhigh",
   "skipDangerousModePermissionPrompt": true,
   "theme": "dark",

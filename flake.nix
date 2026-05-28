@@ -32,7 +32,7 @@
       gatewayUrl  = "http://localhost:${gatewayPort}/mcp";
 
       # Accounts
-      accounts = [ "account_1" "account_2" "account_3" ];
+      accounts = [ "account-1" "account-2" "account-3" ];
 
       # Identity
       workIdentity = "~/projects/business/";

@@ -87,9 +87,14 @@ let
       skillDir   = ".config/opencode/skills";
       agentDir   = ".config/opencode/agents";
       agentExt   = "md";
-      buildAgent = _: srcPath: pkgs.replaceVars ../../templates/agent-opencode.md {
-        agentBody = builtins.readFile srcPath;
-      };
+      buildAgent = name: srcPath: pkgs.runCommand "${name}.md" {
+        nativeBuildInputs = [ pkgs.yq ];
+      } ''
+        awk '/^---$/{c++;next} c==1' ${srcPath} \
+          | yq -y '.tools |= (map({(.):true})|add)' > fm.yaml
+        awk '/^---$/{c++;next} c>=2' ${srcPath} > body.md
+        { echo '---'; cat fm.yaml; echo '---'; cat body.md; } > $out
+      '';
     };
     antigravity = {
       skillDir   = ".gemini/antigravity-cli/skills";

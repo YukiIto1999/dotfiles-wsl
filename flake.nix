@@ -47,7 +47,7 @@
       # System
       nixosConfigurations.${username} = nixpkgs.lib.nixosSystem {
         inherit system;
-        specialArgs = { inherit username gatewayPort accounts workIdentity; };
+        specialArgs = { inherit username gatewayPort gatewayUrl accounts workIdentity; };
         modules = [
           ./etc/nixos/configuration.nix
 

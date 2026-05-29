@@ -148,15 +148,20 @@ let
     source     = ../../home/nixos/.config/git/hooks + "/${name}";
     executable = true;
   };
+  seedConfig = rel: src: ''
+    f="${homeDir}/${rel}"
+    if [ -L "$f" ] || [ ! -e "$f" ]; then
+      rm -f "$f"
+      install -Dm600 ${src} "$f"
+    fi
+  '';
 
   # Root config files
   rootFiles = {
     # Claude Code
     ".claude/CLAUDE.md".source     = ../../share/AGENTS.md;
-    ".claude/settings.json".source = ../../home/nixos/.claude/settings.json;
     # Codex CLI
     ".codex/AGENTS.md".source      = ../../share/AGENTS.md;
-    ".codex/config.toml".source    = pkgs.replaceVars ../../home/nixos/.codex/config.toml    { inherit gatewayUrl; };
     # OpenCode
     ".config/opencode/AGENTS.md".source     = ../../share/AGENTS.md;
     ".config/opencode/opencode.json".source = pkgs.replaceVars ../../home/nixos/.config/opencode/opencode.json { inherit gatewayUrl; };
@@ -242,7 +247,11 @@ in
   # Files
   home.file = rootFiles // skillFiles // agentFiles;
 
-  # Claude only: register gateway via `claude mcp add` (settings.json ignores mcpServers)
+  # CLI
+  home.activation.seedMutableConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] (
+    seedConfig ".claude/settings.json" ../../home/nixos/.claude/settings.json
+    + seedConfig ".codex/config.toml"   ../../home/nixos/.codex/config.toml
+  );
   home.activation.claudeMcpRegister = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     CLAUDE=$HOME/.local/bin/claude
     [ -x "$CLAUDE" ] || exit 0

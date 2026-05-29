@@ -3,7 +3,6 @@
 let
   # Versions
   probeVersion = "0.6.0-rc319";
-  mcpProxyTag  = "v0.12.0";
 
   # Sources
   probePkg = pkgs.buildNpmPackage {
@@ -37,12 +36,7 @@ let
     install -m 755 /tmp/probe-v${probeVersion}-x86_64-unknown-linux-musl/probe $out/bin/probe
   '';
 
-  mcpProxyBase = pkgs.dockerTools.pullImage {
-    imageName     = "sparfenyuk/mcp-proxy";
-    imageDigest   = "sha256:8c69321db9cfcd39b1f8e13cabf433ba60669adeb8e44ab39330c43de89f0578";
-    finalImageTag = mcpProxyTag;
-    hash          = "sha256-Zqg4hm3P5ZTYBChtn1NhvPGlTWi/1ch3BrzoZB/WMWM=";
-  };
+  mcpProxyBase = pkgs.callPackage ../mcp-proxy-base.nix { };
 
   runtimeRoot = pkgs.buildEnv {
     name  = "probe-mcp-root";

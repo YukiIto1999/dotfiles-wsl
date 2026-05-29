@@ -3,7 +3,6 @@
 let
   # Versions
   githubMcpVersion = "1.0.5";
-  mcpProxyTag      = "v0.12.0";
 
   # Sources
   githubMcpTar = pkgs.fetchurl {
@@ -11,12 +10,7 @@ let
     hash = "sha256-IBCC9WmoRurv1DGPE7zLXZInws7EUDfR0pLugxERc8E=";
   };
 
-  mcpProxyBase = pkgs.dockerTools.pullImage {
-    imageName     = "sparfenyuk/mcp-proxy";
-    imageDigest   = "sha256:8c69321db9cfcd39b1f8e13cabf433ba60669adeb8e44ab39330c43de89f0578";
-    finalImageTag = mcpProxyTag;
-    hash          = "sha256-Zqg4hm3P5ZTYBChtn1NhvPGlTWi/1ch3BrzoZB/WMWM=";
-  };
+  mcpProxyBase = pkgs.callPackage ../mcp-proxy-base.nix { };
 
   runtimeRoot = pkgs.runCommand "github-mcp-root" { } ''
     mkdir -p $out/usr/local/bin

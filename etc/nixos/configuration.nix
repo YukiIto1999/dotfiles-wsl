@@ -1,4 +1,4 @@
-{ config, lib, pkgs, username, gatewayPort, accounts, workIdentity, ... }:
+{ config, lib, pkgs, username, gatewayPort, gatewayUrl, accounts, workIdentity, ... }:
 
 let
   # Constants
@@ -235,6 +235,12 @@ in
   };
   environment.localBinInPath = true;
   programs.nix-ld.enable = true;
+
+  # CLI
+  environment.etc."claude-code/managed-settings.json".source =
+    ../../home/nixos/.claude/managed-settings.json;
+  environment.etc."codex/config.toml".source =
+    pkgs.replaceVars ../../home/nixos/.codex/config-system.toml { inherit gatewayUrl; };
 
   # Secrets
   sops.defaultSopsFile = ../../secrets/secrets.yaml;

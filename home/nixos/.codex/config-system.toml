@@ -1,0 +1,5 @@
+personality = "pragmatic"
+commit_attribution = ""
+
+[mcp_servers.gateway]
+url = "@gatewayUrl@"

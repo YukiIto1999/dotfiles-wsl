@@ -98,8 +98,8 @@ claude mcp get gateway 2>/dev/null | grep -q 'http://localhost:8765/mcp' \
   && ok "Claude gateway registered" \
   || bad "Claude gateway not registered"
 
-if [[ -f "$HOME/.codex/config.toml" ]]; then
-  grep -q 'http://localhost:8765/mcp' "$HOME/.codex/config.toml" \
+if [[ -f /etc/codex/config.toml ]]; then
+  grep -q 'http://localhost:8765/mcp' /etc/codex/config.toml \
     && ok "Codex gateway URL configured" \
     || bad "Codex gateway URL missing"
 fi
@@ -118,6 +118,8 @@ fi
 
 check_file /etc/agentgateway/config.yaml
 check_file /etc/searxng/settings.yml
+check_file /etc/claude-code/managed-settings.json
+check_file /etc/codex/config.toml
 
 check_unit_not_failed home-manager-nixos.service
 wait_unit_active docker.service

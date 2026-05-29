@@ -43,7 +43,7 @@ bootstrap は次だけを行う。
 | 順序 | 内容 |
 |---|---|
 | preflight | repo root flake、lock、secrets、age key の存在確認 |
-| verify_tracked_flake_files | flake に必要なファイルが Git 管理対象であることを確認 |
+| verify_tracked_flake_files | flake build から全ファイルが見えることを確認 |
 | sync_submodules | submodule を初期化し、`.gitmodules` の `sparse-checkout` を適用 |
 | verify_secrets | `nix shell "git+file://${HOME}/dotfiles-wsl?submodules=1#sops" -c sops -d secrets/secrets.yaml` |
 | install_ai_clis | `scripts/install-ai-clis.sh` を通常ユーザーで実行し、CLI 本体を upstream から `~/.local/bin` に配置 |

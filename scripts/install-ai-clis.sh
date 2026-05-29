@@ -19,7 +19,7 @@ require gzip
 require install
 require uname
 install_claude() {
-  log "install/update Claude Code from Anthropic upstream"
+  log "claude"
   curl -fsSL https://claude.ai/install.sh | bash
 
   if ! command -v claude >/dev/null 2>&1; then
@@ -43,7 +43,7 @@ install_codex() {
   asset="codex-${target}.tar.gz"
   api="https://api.github.com/repos/openai/codex/releases/latest"
 
-  log "install/update Codex CLI from OpenAI GitHub release: ${asset}"
+  log "codex"
   url="$(curl -fsSL "$api" | jq -r --arg asset "$asset" '.assets[] | select(.name == $asset) | .browser_download_url' | head -n1)"
   [[ -n "$url" && "$url" != "null" ]] || fail "release asset not found: ${asset}"
 
@@ -74,7 +74,7 @@ install_opencode() {
   asset="$(opencode_asset)"
   api="https://api.github.com/repos/anomalyco/opencode/releases/latest"
 
-  log "install/update OpenCode from GitHub release: ${asset}"
+  log "opencode"
   url="$(curl -fsSL "$api" | jq -r --arg asset "$asset" '.assets[] | select(.name == $asset) | .browser_download_url' | head -n1)"
   [[ -n "$url" && "$url" != "null" ]] || fail "release asset not found: ${asset}"
 
@@ -91,7 +91,7 @@ install_opencode() {
 }
 
 install_antigravity() {
-  log "install/update Antigravity CLI from Google upstream"
+  log "agy"
   curl -fsSL https://antigravity.google/cli/install.sh | bash
 
   if ! command -v agy >/dev/null 2>&1; then

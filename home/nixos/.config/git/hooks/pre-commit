@@ -22,10 +22,8 @@ main() {
   mapfile -t leaks < <(list_staged | filter_pat_leaks)
   (( ${#leaks[@]} == 0 )) && exit 0
 
-  printf 'PAT leak in %s\n' "${leaks[@]}"
-  echo
-  echo "ERROR: ${#leaks[@]} file(s) contain a GitHub PAT in staged changes."
-  echo "Move secrets to ~/dotfiles-wsl/secrets/secrets.yaml (SOPS + age) and reference via sops.placeholder."
+  printf 'PAT leak in %s\n' "${leaks[@]}" >&2
+  echo "move secrets to secrets/secrets.yaml (SOPS + age)" >&2
   exit 1
 }
 

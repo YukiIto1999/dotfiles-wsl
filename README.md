@@ -186,3 +186,7 @@ sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl?submodules=
 ```
 
 PowerShell から WSL を再起動し、`scripts/doctor.sh` を実行する。
+
+## License
+
+[MIT](LICENSE)

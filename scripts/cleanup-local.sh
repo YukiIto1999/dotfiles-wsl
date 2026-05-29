@@ -38,8 +38,9 @@ remove_path() {
   fi
 }
 
-shopt -s nullglob
+shopt -s nullglob globstar
 
+# *.hm-back backups under each managed CLI root
 for path in \
   "$HOME"/.claude.bak.* \
   "$HOME"/.codex.bak.* \
@@ -49,7 +50,9 @@ for path in \
   "$HOME"/.claude/**/*.hm-back \
   "$HOME"/.codex/**/*.hm-back \
   "$HOME"/.config/git/**/*.hm-back \
-  "$HOME"/.config/gh/**/*.hm-back; do
+  "$HOME"/.config/gh/**/*.hm-back \
+  "$HOME"/.config/opencode/**/*.hm-back \
+  "$HOME"/.gemini/**/*.hm-back; do
   remove_path "$path"
 done
 

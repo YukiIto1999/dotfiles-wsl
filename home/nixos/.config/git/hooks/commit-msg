@@ -12,10 +12,8 @@ main() {
   mapfile -t hits < <(scan_ai_attribution "$msg")
   (( ${#hits[@]} == 0 )) && exit 0
 
-  printf 'AI attribution: %s\n' "${hits[@]}"
-  echo
-  echo "ERROR: ${#hits[@]} AI attribution line(s) in commit message."
-  echo "Remove Co-authored-by / Generated-with referencing Claude / Codex / Copilot / Cursor / ChatGPT."
+  printf 'AI attribution: %s\n' "${hits[@]}" >&2
+  echo "remove Co-authored-by / Generated-with lines" >&2
   exit 1
 }
 

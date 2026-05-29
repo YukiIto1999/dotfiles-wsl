@@ -37,57 +37,14 @@ register_safe_directories() {
 }
 
 verify_tracked_flake_files() {
-  local f missing=0
-  local -a required=(
-    flake.nix
-    flake.lock
-    .gitmodules
-    secrets/secrets.yaml
-    secrets/.sops.yaml
-    etc/nixos/configuration.nix
-    etc/nixos/home.nix
-    etc/agentgateway/config.yaml
-    templates/account-target.yaml
-    templates/agentmemory.yaml
-    templates/agent-claude.md
-    templates/agent-codex.toml
-    templates/agent-opencode.md
-    templates/agent-antigravity.md
-    templates/gh-user.yml
-    templates/searxng-settings.yml
-    home/nixos/.claude/CLAUDE.md
-    home/nixos/.claude/settings.json
-    home/nixos/.codex/AGENTS.md
-    home/nixos/.codex/config.toml
-    home/nixos/.config/opencode/AGENTS.md
-    home/nixos/.config/opencode/opencode.json
-    home/nixos/.gemini/AGENTS.md
-    home/nixos/.gemini/antigravity-cli/mcp_config.json
-    home/nixos/.config/git/ignore
-    home/nixos/.config/git/hooks/pre-commit
-    home/nixos/.config/git/hooks/commit-msg
-    share/AGENTS.md
-    services/context7-mcp/default.nix
-    services/context7-mcp/package-lock.json
-    services/github-mcp/default.nix
-    services/probe-mcp/default.nix
-    services/probe-mcp/package-lock.json
-    scripts/bootstrap.sh
-    scripts/doctor.sh
-    scripts/cleanup-local.sh
-    scripts/fetch-mcp-info.sh
-    scripts/install-ai-clis.sh
-    .github/workflows/check.yml
-  )
-
-  for f in "${required[@]}"; do
-    if ! as_user git -C "${DOTFILES}" ls-files --error-unmatch "$f" >/dev/null 2>&1; then
-      echo "untracked required file: $f" >&2
-      missing=1
-    fi
-  done
-  [[ ${missing} -eq 0 ]] || die "stage required files before running bootstrap: git add <files>"
-  step "required flake files are tracked"
+  # untracked files are invisible to the git+file flake build
+  local untracked
+  untracked=$(as_user git -C "${DOTFILES}" ls-files --others --exclude-standard)
+  if [[ -n ${untracked} ]]; then
+    printf '%s\n' "${untracked}" >&2
+    die "untracked files block the flake build; git add them"
+  fi
+  step "no untracked files in flake tree"
 }
 
 list_sparse_specs() {

@@ -3,7 +3,6 @@
 let
   # Versions
   context7Version = "2.2.5";
-  mcpProxyTag     = "v0.12.0";
 
   # Sources
   context7Pkg = pkgs.buildNpmPackage {
@@ -20,12 +19,7 @@ let
     npmFlags     = [ "--ignore-scripts" ];
   };
 
-  mcpProxyBase = pkgs.dockerTools.pullImage {
-    imageName     = "sparfenyuk/mcp-proxy";
-    imageDigest   = "sha256:8c69321db9cfcd39b1f8e13cabf433ba60669adeb8e44ab39330c43de89f0578";
-    finalImageTag = mcpProxyTag;
-    hash          = "sha256-Zqg4hm3P5ZTYBChtn1NhvPGlTWi/1ch3BrzoZB/WMWM=";
-  };
+  mcpProxyBase = pkgs.callPackage ../mcp-proxy-base.nix { };
 
   runtimeRoot = pkgs.buildEnv {
     name  = "context7-mcp-root";

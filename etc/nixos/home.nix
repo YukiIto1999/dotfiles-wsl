@@ -34,7 +34,7 @@ let
   pluginSkillDupes =
     let
       flat = lib.concatMap (p: builtins.attrNames (findSkillsIn p)) pluginPaths;
-      counts = builtins.foldl' (acc: n:
+      counts = lib.foldl' (acc: n:
         acc // { ${n} = (acc.${n} or 0) + 1; }
       ) { } flat;
     in
@@ -50,59 +50,66 @@ let
       (builtins.attrNames localSkills);
   allSkills        = pluginSkills // localSkills;
 
+  # Agent frontmatter
+  splitFrontmatter = src:
+    let parts = lib.splitString "\n---\n" (builtins.readFile src);
+    in {
+      frontmatter = lib.removePrefix "---\n" (builtins.head parts);
+      body        = lib.concatStringsSep "\n---\n" (builtins.tail parts);
+    };
+  codexModel = "gpt-5.5";
+
   # CLI definitions
   cliDefs = {
     claude = {
       skillDir   = ".claude/skills";
       agentDir   = ".claude/agents";
       agentExt   = "md";
-      buildAgent = _: srcPath: pkgs.replaceVars ../../templates/agent-claude.md {
-        agentBody = builtins.readFile srcPath;
-      };
+      buildAgent = _: srcPath: srcPath;
     };
     codex = {
       skillDir   = ".codex/skills";
       agentDir   = ".codex/agents";
       agentExt   = "toml";
-      buildAgent = name: srcPath: pkgs.runCommand "${name}.toml" {
-        nativeBuildInputs = [ pkgs.remarshal pkgs.gawk pkgs.gnused ];
-      } ''
-        set -euo pipefail
-        src=${srcPath}
-        tpl=${../../templates/agent-codex.toml}
-        awk '/^---$/{c++; next} c==1' "$src" > fm.yaml
-        remarshal -if yaml -of toml fm.yaml > fm.toml
-        awk '/^---$/{c++; next} c>=2' "$src" > body.txt
-        sed -i 's/&/\\&/g' fm.toml body.txt
-        awk -v fm_file=fm.toml -v body_file=body.txt '
-          BEGIN {
-            while ((getline l < fm_file)  > 0) fm = fm (fm == "" ? "" : "\n") l
-            while ((getline l < body_file) > 0) bd = bd (bd == "" ? "" : "\n") l
-          }
-          { gsub(/@frontmatter@/, fm); gsub(/@body@/, bd); print }
-        ' "$tpl" > "$out"
-      '';
+      buildAgent = name: srcPath:
+        let fm = splitFrontmatter srcPath; in
+        pkgs.runCommand "${name}.toml" {
+          nativeBuildInputs = [ pkgs.remarshal ];
+          inherit (fm) frontmatter body;
+        } ''
+          remarshal -if yaml -of toml <<<"$frontmatter" > "$out"
+          {
+            printf 'model = "${codexModel}"\n'
+            printf 'developer_instructions = """\n'
+            printf '%s\n' "$body"
+            printf '"""\n'
+          } >> "$out"
+        '';
     };
     opencode = {
       skillDir   = ".config/opencode/skills";
       agentDir   = ".config/opencode/agents";
       agentExt   = "md";
-      buildAgent = name: srcPath: pkgs.runCommand "${name}.md" {
-        nativeBuildInputs = [ pkgs.yq ];
-      } ''
-        awk '/^---$/{c++;next} c==1' ${srcPath} \
-          | yq -y '.tools |= (map({(.):true})|add)' > fm.yaml
-        awk '/^---$/{c++;next} c>=2' ${srcPath} > body.md
-        { echo '---'; cat fm.yaml; echo '---'; cat body.md; } > $out
-      '';
+      buildAgent = name: srcPath:
+        let fm = splitFrontmatter srcPath; in
+        pkgs.runCommand "${name}.md" {
+          nativeBuildInputs = [ pkgs.yq ];
+          inherit (fm) frontmatter body;
+        } ''
+          tools=$(yq -y '.tools |= (map({(.):true}) | add)' <<<"$frontmatter")
+          {
+            printf '%s\n' '---'
+            printf '%s\n' "$tools"
+            printf '%s\n' '---'
+            printf '%s\n' "$body"
+          } > "$out"
+        '';
     };
     antigravity = {
       skillDir   = ".gemini/antigravity-cli/skills";
       agentDir   = ".gemini/agents";
       agentExt   = "md";
-      buildAgent = _: srcPath: pkgs.replaceVars ../../templates/agent-antigravity.md {
-        agentBody = builtins.readFile srcPath;
-      };
+      buildAgent = _: srcPath: srcPath;
     };
   };
 
@@ -133,7 +140,6 @@ let
     ) (builtins.attrNames cliDefs));
 
   # Helpers
-  agentsBody  = builtins.readFile (../../share/AGENTS.md);
   mkDupAssert = label: dupes: {
     assertion = dupes == [ ];
     message   = "Duplicate skill names ${label}: " + lib.concatStringsSep ", " dupes;
@@ -146,16 +152,16 @@ let
   # Root config files
   rootFiles = {
     # Claude Code
-    ".claude/CLAUDE.md".source     = pkgs.replaceVars ../../home/nixos/.claude/CLAUDE.md     { inherit agentsBody; };
+    ".claude/CLAUDE.md".source     = ../../share/AGENTS.md;
     ".claude/settings.json".source = ../../home/nixos/.claude/settings.json;
     # Codex CLI
-    ".codex/AGENTS.md".source      = pkgs.replaceVars ../../home/nixos/.codex/AGENTS.md      { inherit agentsBody; };
+    ".codex/AGENTS.md".source      = ../../share/AGENTS.md;
     ".codex/config.toml".source    = pkgs.replaceVars ../../home/nixos/.codex/config.toml    { inherit gatewayUrl; };
     # OpenCode
-    ".config/opencode/AGENTS.md".source     = pkgs.replaceVars ../../home/nixos/.config/opencode/AGENTS.md     { inherit agentsBody; };
+    ".config/opencode/AGENTS.md".source     = ../../share/AGENTS.md;
     ".config/opencode/opencode.json".source = pkgs.replaceVars ../../home/nixos/.config/opencode/opencode.json { inherit gatewayUrl; };
     # Antigravity CLI
-    ".gemini/AGENTS.md".source                       = pkgs.replaceVars ../../home/nixos/.gemini/AGENTS.md                       { inherit agentsBody; };
+    ".gemini/AGENTS.md".source                       = ../../share/AGENTS.md;
     ".gemini/antigravity-cli/mcp_config.json".source = pkgs.replaceVars ../../home/nixos/.gemini/antigravity-cli/mcp_config.json { inherit gatewayUrl; };
     # Git
     ".config/git/ignore".source    = symlink "${dotfilesAbs}/home/nixos/.config/git/ignore";

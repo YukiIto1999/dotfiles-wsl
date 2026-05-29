@@ -10,8 +10,8 @@ binds:
             mcp:
               host: http://context7:@context7Port@/mcp
           - name: playwright
-            mcp:
-              host: http://playwright:@playwrightPort@/mcp
+            sse:
+              host: http://playwright:@playwrightPort@/sse
 @accountTargets@
           - name: searxng-mcp
             mcp:

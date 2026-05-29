@@ -119,12 +119,26 @@ let
     };
     playwright = {
       image = "mcr.microsoft.com/playwright/mcp:latest@sha256:d238ec7bc98cc4e22df0696d6031dad5b8a4b46781f4f0abaa3bfadeedb43b9a";
-      entrypoint = "node";
-      cmd = [
-        "/app/cli.js" "--headless" "--browser=chromium" "--no-sandbox"
-        "--port=${playwrightPort}" "--host=0.0.0.0" "--allowed-hosts" "*"
+      entrypoint = "sh";
+      cmd = [ "-c" ''
+        CHROME=$(ls /ms-playwright/chromium-*/chrome-linux64/chrome | head -1)
+        "$CHROME" --no-sandbox --remote-debugging-port=9222 \
+          --user-data-dir=/tmp/chrome-data about:blank >/tmp/chrome.log 2>&1 &
+        CPID=$!
+        until node -e 'fetch("http://localhost:9222/json/version").then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))' 2>/dev/null; do
+          kill -0 $CPID 2>/dev/null || exit 1
+          sleep 0.2
+        done
+        exec node /app/cli.js --browser=chromium --no-sandbox \
+          --cdp-endpoint http://localhost:9222 \
+          --port=${playwrightPort} --host=0.0.0.0 --allowed-hosts '*'
+      '' ];
+      environment.DISPLAY = ":0";
+      volumes = [
+        "/tmp/.X11-unix:/tmp/.X11-unix"
+        "/mnt/wslg:/mnt/wslg"
       ];
-      extraOptions = [ "--network=mcp" "--init" ];
+      extraOptions = [ "--network=mcp" "--init" "--ipc=host" ];
       deps = [ ];
     };
     valkey = {

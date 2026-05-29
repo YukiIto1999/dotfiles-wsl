@@ -122,15 +122,15 @@ let
       entrypoint = "sh";
       cmd = [ "-c" ''
         CHROME=$(ls /ms-playwright/chromium-*/chrome-linux64/chrome | head -1)
-        "$CHROME" --no-sandbox --remote-debugging-port=9222 \
+        "$CHROME" --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-port=9222 \
           --user-data-dir=/tmp/chrome-data about:blank >/tmp/chrome.log 2>&1 &
         CPID=$!
-        until node -e 'fetch("http://localhost:9222/json/version").then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))' 2>/dev/null; do
+        until node -e 'fetch("http://127.0.0.1:9222/json/version").then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))' 2>/dev/null; do
           kill -0 $CPID 2>/dev/null || exit 1
           sleep 0.2
         done
         exec node /app/cli.js --browser=chromium --no-sandbox \
-          --cdp-endpoint http://localhost:9222 \
+          --cdp-endpoint http://127.0.0.1:9222 \
           --port=${playwrightPort} --host=0.0.0.0 --allowed-hosts '*'
       '' ];
       environment.DISPLAY = ":0";

@@ -297,7 +297,12 @@ in
 
   # Services
   systemd.services =
-    { docker-agentgateway = gatewayService; docker-mcp-network = networkService; }
+    {
+      docker-agentgateway = gatewayService;
+      docker-mcp-network = networkService;
+      # crates.io rejects curl's default UA (403); give fetchurl an accepted one
+      nix-daemon.environment.NIX_CURL_FLAGS = "--user-agent=Nixpkgs";
+    }
     // mcpServices
     // lib.listToAttrs (map buildAccountService accounts);
 

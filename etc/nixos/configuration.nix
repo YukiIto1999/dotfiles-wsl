@@ -122,23 +122,20 @@ let
       entrypoint = "sh";
       cmd = [ "-c" ''
         CHROME=$(ls /ms-playwright/chromium-*/chrome-linux64/chrome | head -1)
-        "$CHROME" --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-port=9222 \
+        "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-port=9222 \
           --user-data-dir=/tmp/chrome-data about:blank >/tmp/chrome.log 2>&1 &
         CPID=$!
         until node -e 'fetch("http://127.0.0.1:9222/json/version").then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))' 2>/dev/null; do
           kill -0 $CPID 2>/dev/null || exit 1
           sleep 0.2
         done
+        node /viewer/server.js >/tmp/viewer.log 2>&1 &
         exec node /app/cli.js --browser=chromium --no-sandbox \
           --cdp-endpoint http://127.0.0.1:9222 \
           --port=${playwrightPort} --host=0.0.0.0 --allowed-hosts '*'
       '' ];
-      environment.DISPLAY = ":0";
-      volumes = [
-        "/tmp/.X11-unix:/tmp/.X11-unix"
-        "/mnt/wslg:/mnt/wslg"
-      ];
-      extraOptions = [ "--network=mcp" "--init" "--ipc=host" ];
+      volumes = [ "${../playwright/viewer}:/viewer:ro" ];
+      extraOptions = [ "--network=mcp" "--init" "-p" "9224:9224" ];
       deps = [ ];
     };
     valkey = {

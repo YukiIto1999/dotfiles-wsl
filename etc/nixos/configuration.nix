@@ -13,6 +13,7 @@ let
   searxngPort           = "8080";
   valkeyPort            = "6379";
   crawl4aiPort          = "11235";
+  crawl4aiMcpPort       = "11236";
   probeMcpPort          = "3005";
   primaryAccount        = builtins.head accounts;
 
@@ -20,6 +21,7 @@ let
   context7McpImage = pkgs.callPackage ../../services/context7-mcp { };
   githubMcpImage   = pkgs.callPackage ../../services/github-mcp   { };
   probeMcpImage    = pkgs.callPackage ../../services/probe-mcp    { };
+  crawl4aiMcpImage = pkgs.callPackage ../../services/crawl4ai-mcp { };
 
   # Helpers
   userTpl = path: content: {
@@ -69,6 +71,7 @@ let
     "docker-searxng.service"
     "docker-valkey.service"
     "docker-crawl4ai.service"
+    "docker-crawl4ai-mcp.service"
     "docker-probe-mcp.service"
   ] ++ accountServices;
 
@@ -79,7 +82,7 @@ let
   };
   agentgatewayConfig    = builtins.readFile (pkgs.replaceVars ../agentgateway/config.yaml {
     inherit gatewayPort context7Port playwrightPort
-            searxngMcpPort crawl4aiPort probeMcpPort;
+            searxngMcpPort crawl4aiMcpPort probeMcpPort;
     accountTargets = lib.concatMapStrings buildAccountTarget accounts;
   });
   searxngSettingsConfig = builtins.readFile (pkgs.replaceVars ../../templates/searxng-settings.yml {
@@ -162,6 +165,13 @@ let
       image = "unclecode/crawl4ai:latest@sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
       extraOptions = [ "--network=mcp" "--memory=2g" "--shm-size=1g" ];
       deps = [ ];
+    };
+    crawl4ai-mcp = {
+      image     = "${crawl4aiMcpImage.imageName}:${crawl4aiMcpImage.imageTag}";
+      imageFile = crawl4aiMcpImage;
+      environment.CRAWL4AI_URL = "http://crawl4ai:${crawl4aiPort}";
+      extraOptions = [ "--network=mcp" ];
+      deps = [ "docker-crawl4ai.service" ];
     };
     probe-mcp = {
       image     = "${probeMcpImage.imageName}:${probeMcpImage.imageTag}";

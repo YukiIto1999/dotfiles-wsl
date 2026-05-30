@@ -10,15 +10,15 @@ binds:
             mcp:
               host: http://context7:@context7Port@/mcp
           - name: playwright
-            sse:
-              host: http://playwright:@playwrightPort@/sse
+            mcp:
+              host: http://playwright:@playwrightPort@/mcp
 @accountTargets@
           - name: searxng-mcp
             mcp:
               host: http://searxng-mcp:@searxngMcpPort@/mcp
           - name: crawl4ai
-            sse:
-              host: http://crawl4ai:@crawl4aiPort@/mcp/sse
+            mcp:
+              host: http://crawl4ai-mcp:@crawl4aiMcpPort@/mcp
           - name: probe-mcp
             mcp:
               host: http://probe-mcp:@probeMcpPort@/mcp

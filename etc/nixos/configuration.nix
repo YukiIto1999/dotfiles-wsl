@@ -226,6 +226,7 @@ in
   # WSL
   wsl.enable = true;
   wsl.defaultUser = username;
+  wsl.useWindowsDriver = true;
   wsl.wslConf = {
     boot.systemd = true;
     interop.appendWindowsPath = false;

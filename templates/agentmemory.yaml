@@ -46,7 +46,6 @@ workers:
       logs_console_output: true
   - name: iii-exec
     config:
-      watch:
-        - src/**/*.ts
       exec:
-        - node dist/index.mjs
+        - /bin/node
+        - /opt/agentmemory/node_modules/@agentmemory/agentmemory/dist/index.mjs

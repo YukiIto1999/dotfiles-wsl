@@ -22,3 +22,6 @@ binds:
           - name: probe-mcp
             mcp:
               host: http://probe-mcp:@probeMcpPort@/mcp
+          - name: memory
+            mcp:
+              host: http://agentmemory-mcp:@agentmemoryMcpPort@/mcp

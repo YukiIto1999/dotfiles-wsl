@@ -6,6 +6,7 @@ let
   agentmemoryUid        = "65532";
   agentmemoryHttpPort   = "3111";
   agentmemoryStreamPort = "3112";
+  agentmemoryMcpPort    = "3006";
   context7Port          = "3001";
   playwrightPort        = "8931";
   githubMcpPort         = "3002";
@@ -18,10 +19,12 @@ let
   primaryAccount        = builtins.head accounts;
 
   # Images
-  context7McpImage = pkgs.callPackage ../../services/context7-mcp { };
-  githubMcpImage   = pkgs.callPackage ../../services/github-mcp   { };
-  probeMcpImage    = pkgs.callPackage ../../services/probe-mcp    { };
-  crawl4aiMcpImage = pkgs.callPackage ../../services/crawl4ai-mcp { };
+  context7McpImage     = pkgs.callPackage ../../services/context7-mcp    { };
+  githubMcpImage       = pkgs.callPackage ../../services/github-mcp      { };
+  probeMcpImage        = pkgs.callPackage ../../services/probe-mcp       { };
+  crawl4aiMcpImage     = pkgs.callPackage ../../services/crawl4ai-mcp    { };
+  agentmemoryImage     = pkgs.callPackage ../../services/agentmemory     { };
+  agentmemoryMcpImage  = pkgs.callPackage ../../services/agentmemory-mcp { };
 
   # Helpers
   userTpl = path: content: {
@@ -65,6 +68,7 @@ let
   allMcpServices = [
     "docker-mcp-network.service"
     "docker-agentmemory.service"
+    "docker-agentmemory-mcp.service"
     "docker-context7.service"
     "docker-playwright.service"
     "docker-searxng-mcp.service"
@@ -82,7 +86,7 @@ let
   };
   agentgatewayConfig    = builtins.readFile (pkgs.replaceVars ../agentgateway/config.yaml {
     inherit gatewayPort context7Port playwrightPort
-            searxngMcpPort crawl4aiMcpPort probeMcpPort;
+            searxngMcpPort crawl4aiMcpPort probeMcpPort agentmemoryMcpPort;
     accountTargets = lib.concatMapStrings buildAccountTarget accounts;
   });
   searxngSettingsConfig = builtins.readFile (pkgs.replaceVars ../../templates/searxng-settings.yml {
@@ -106,13 +110,21 @@ let
   # MCP containers
   mcp = {
     agentmemory = {
-      image = "iiidev/iii:0.11.2@sha256:15f8d4ed16c0bec350b98f4e18ed04498b1fc5ccc50585e087b736717300cf26";
+      image     = "${agentmemoryImage.imageName}:${agentmemoryImage.imageTag}";
+      imageFile = agentmemoryImage;
       volumes = [
         "${agentmemoryConfig}:/app/config.yaml:ro"
         "/var/lib/agentmemory/data:/data"
       ];
       extraOptions = [ "--network=mcp" "--user=${agentmemoryUid}:${agentmemoryUid}" ];
       deps = [ ];
+    };
+    agentmemory-mcp = {
+      image     = "${agentmemoryMcpImage.imageName}:${agentmemoryMcpImage.imageTag}";
+      imageFile = agentmemoryMcpImage;
+      environment.AGENTMEMORY_URL = "http://agentmemory:${agentmemoryHttpPort}";
+      extraOptions = [ "--network=mcp" ];
+      deps = [ "docker-agentmemory.service" ];
     };
     context7 = {
       image     = "${context7McpImage.imageName}:${context7McpImage.imageTag}";

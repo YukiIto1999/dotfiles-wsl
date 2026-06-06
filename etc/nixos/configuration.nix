@@ -138,6 +138,7 @@ let
       cmd = [ "-c" ''
         CHROME=$(ls /ms-playwright/chromium-*/chrome-linux64/chrome | head -1)
         "$CHROME" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --remote-debugging-port=9222 \
+          --user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36" \
           --user-data-dir=/tmp/chrome-data about:blank >/tmp/chrome.log 2>&1 &
         CPID=$!
         until node -e 'fetch("http://127.0.0.1:9222/json/version").then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))' 2>/dev/null; do

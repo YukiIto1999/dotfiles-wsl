@@ -162,9 +162,13 @@ in
 {
   users.users.${cfg.username}.extraGroups = [ "docker" ];
 
-  virtualisation.docker.enable = true;
-  virtualisation.oci-containers.backend = "docker";
-  virtualisation.oci-containers.containers = backendContainers;
+  virtualisation = {
+    docker.enable = true;
+    oci-containers = {
+      backend = "docker";
+      containers = backendContainers;
+    };
+  };
 
   systemd.tmpfiles.settings."agentmemory" = {
     "/var/lib/agentmemory/data".d = {

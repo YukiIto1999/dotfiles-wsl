@@ -1,7 +1,7 @@
 { config, lib, osConfig, ... }:
 
 let
-  my          = osConfig.my;
+  inherit (osConfig) my;
   homeDir     = "/home/${my.username}";
   dotfilesAbs = "${homeDir}/dotfiles-wsl";
   symlink     = config.lib.file.mkOutOfStoreSymlink;

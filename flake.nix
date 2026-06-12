@@ -63,8 +63,22 @@
           };
         };
 
-      checks.${system} = {
-        nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
-      };
+      checks.${system} =
+        let
+          pkgs = self.nixosConfigurations.${hostName}.pkgs;
+        in
+        {
+          nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
+
+          deadnix = pkgs.runCommandLocal "check-deadnix" { nativeBuildInputs = [ pkgs.deadnix ]; } ''
+            deadnix --fail ${self}
+            touch $out
+          '';
+
+          shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
+            shellcheck --severity=warning ${self}/scripts/*.sh ${self}/home/nixos/.config/git/hooks/*
+            touch $out
+          '';
+        };
     };
 }

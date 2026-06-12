@@ -140,4 +140,11 @@ else
   warn "nix-ld dynamic linker path not found at standard location"
 fi
 
+gw_code="$(curl -s -m 3 -o /dev/null -w '%{http_code}' "http://localhost:8765/mcp" 2>/dev/null || echo 000)"
+[[ $gw_code != 000 ]] && ok "gateway responds on :8765 (HTTP $gw_code)" || bad "gateway not reachable on :8765"
+
+if [[ -f "$HOME/.config/sops/age/keys.txt" ]]; then
+  warn "age key at ~/.config/sops/age/keys.txt decrypts every secret and is readable by any user process; remove it and edit via 'sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops ...'"
+fi
+
 exit "$fail"

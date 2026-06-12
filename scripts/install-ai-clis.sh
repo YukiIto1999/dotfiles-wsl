@@ -6,7 +6,7 @@ log()  { printf '== %s\n' "$*"; }
 
 [[ ${EUID} -ne 0 ]] || fail "run as the target user, not root"
 
-install -d -m 0755 "$HOME/.local/bin" "$HOME/.local/share/dotfiles-wsl"
+install -d -m 0755 "$HOME/.local/bin"
 
 require() {
   command -v "$1" >/dev/null 2>&1 || fail "$1 not found in PATH"

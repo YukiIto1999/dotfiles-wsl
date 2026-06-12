@@ -8,8 +8,8 @@ usage:
   fetch-mcp-info.sh image <IMAGE>
 
 Examples:
-  fetch-mcp-info.sh url https://github.com/probelabs/probe/releases/download/v0.6.0-rc316/probe-v0.6.0-rc316-x86_64-unknown-linux-musl.tar.gz
-  fetch-mcp-info.sh image ghcr.io/agentgateway/agentgateway:0.10.5
+  fetch-mcp-info.sh url https://github.com/agentgateway/agentgateway/releases/download/v1.2.1/agentgateway-linux-amd64
+  fetch-mcp-info.sh image mcr.microsoft.com/playwright/mcp:latest
 USAGE
 }
 

@@ -55,6 +55,7 @@ let
       frontmatter = lib.removePrefix "---\n" (builtins.head parts);
       body        = lib.concatStringsSep "\n---\n" (builtins.tail parts);
     };
+  # 生成 codex agent TOML に焼き込むモデル
   codexModel = "gpt-5.5";
 
   cliDefs = {

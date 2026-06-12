@@ -131,13 +131,11 @@ let
           kill -0 $CPID 2>/dev/null || exit 1
           sleep 0.2
         done
-        node /viewer/server.js >/tmp/viewer.log 2>&1 &
         exec node /app/cli.js --browser=chromium --no-sandbox \
           --cdp-endpoint http://127.0.0.1:9222 \
           --port=${playwrightPort} --host=0.0.0.0 --allowed-hosts '*'
       '' ];
-      volumes = [ "${../etc/playwright/viewer}:/viewer:ro" ];
-      extraOptions = [ "--network=mcp" "--init" "-p" "9224:9224" ];
+      extraOptions = [ "--network=mcp" "--init" ];
       deps = [ ];
     };
     valkey = {

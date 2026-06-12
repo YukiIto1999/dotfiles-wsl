@@ -24,20 +24,13 @@ preflight() {
 }
 
 register_safe_directories() {
-  git config --global --add safe.directory "${DOTFILES}" || true
-
-  if [[ -f "${DOTFILES}/.gitmodules" ]]; then
-    while read -r path; do
-      [[ -n ${path:-} ]] || continue
-      git config --global --add safe.directory "${DOTFILES}/${path}" || true
-    done < <(as_user git -C "${DOTFILES}" config -f .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null | awk '{print $2}')
-  fi
-
+  git config --global --get-all safe.directory 2>/dev/null | grep -qxF "${DOTFILES}" \
+    || git config --global --add safe.directory "${DOTFILES}"
   step "git safe.directory registered"
 }
 
 verify_tracked_flake_files() {
-  # untracked files are invisible to the git+file flake build
+  # git+file の flake build では未追跡ファイルが見えない
   local untracked
   untracked=$(as_user git -C "${DOTFILES}" ls-files --others --exclude-standard)
   if [[ -n ${untracked} ]]; then
@@ -45,33 +38,6 @@ verify_tracked_flake_files() {
     die "untracked files block the flake build; git add them"
   fi
   step "no untracked files in flake tree"
-}
-
-list_sparse_specs() {
-  as_user git -C "${DOTFILES}" config -f .gitmodules --get-regexp '\.sparse-checkout$' || true
-}
-
-apply_sparse() {
-  local key patterns name path abs
-  while read -r key patterns; do
-    [[ -n ${key:-} ]] || continue
-    name=${key%.sparse-checkout}
-    name=${name#submodule.}
-    path=$(as_user git -C "${DOTFILES}" config -f .gitmodules --get "submodule.${name}.path")
-    abs=$(readlink -m "${DOTFILES}/${path}")
-    [[ ${abs} == "${DOTFILES}/upstream/"* ]] \
-      || die "submodule path escapes \$DOTFILES/upstream/: ${path}"
-    # shellcheck disable=SC2086
-    as_user git -C "${abs}" sparse-checkout set -- ${patterns}
-  done
-}
-
-sync_submodules() {
-  as_user git -C "${DOTFILES}" submodule update --init --recursive
-  set -f
-  list_sparse_specs | apply_sparse
-  set +f
-  step "submodules synced + sparse-checkout applied"
 }
 
 verify_secrets() {
@@ -119,12 +85,11 @@ main() {
   local -r DOTFILES="${USER_HOME}/dotfiles-wsl"
   local -r SECRETS_FILE="${DOTFILES}/secrets/secrets.yaml"
   local -r AGE_KEY="/var/lib/sops-nix/key.txt"
-  local -r FLAKE_REF="git+file://${DOTFILES}?submodules=1"
+  local -r FLAKE_REF="git+file://${DOTFILES}"
   local -ra stages=(
     register_safe_directories
     preflight
     verify_tracked_flake_files
-    sync_submodules
     verify_secrets
     install_ai_clis
     install_boot_generation

@@ -25,7 +25,7 @@ in
     shellcheck
     shfmt
     just
-    nixfmt-rfc-style
+    nixfmt
     nixd
     nvd
   ];

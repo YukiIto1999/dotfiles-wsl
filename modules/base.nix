@@ -2,6 +2,11 @@
 
 let
   cfg = config.my;
+
+  # wslu removed in nixpkgs 26.05; minimal wslview via cmd.exe (default /mnt/c mount).
+  wslview = pkgs.writeShellScriptBin "wslview" ''
+    exec /mnt/c/Windows/System32/cmd.exe /c start "" "$1" 2>/dev/null
+  '';
 in
 {
   # "docker" is added by mcp.nix, which owns the docker stack.
@@ -11,17 +16,16 @@ in
     extraGroups = [ "wheel" ];
   };
 
-  environment.systemPackages = with pkgs; [
+  environment.systemPackages = (with pkgs; [
     wget
     curl
     vim
-    wslu
     direnv
     nix-direnv
     devenv
     sops
     age
-  ];
+  ]) ++ [ wslview ];
 
   programs.direnv = {
     enable = true;

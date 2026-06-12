@@ -1,32 +1,27 @@
 { pkgs }:
 
+# GitHub MCP server binary. The gateway spawns "github-mcp-server stdio" per
+# account, injecting that account's PAT (see modules/mcp.nix).
 let
-  # Versions
-  githubMcpVersion = "1.0.5";
+  version = "1.0.5";
+in
+pkgs.stdenv.mkDerivation {
+  pname   = "github-mcp-server";
+  inherit version;
 
-  # Sources
-  githubMcpTar = pkgs.fetchurl {
-    url  = "https://github.com/github/github-mcp-server/releases/download/v${githubMcpVersion}/github-mcp-server_Linux_x86_64.tar.gz";
+  src = pkgs.fetchurl {
+    url  = "https://github.com/github/github-mcp-server/releases/download/v${version}/github-mcp-server_Linux_x86_64.tar.gz";
     hash = "sha256-IBCC9WmoRurv1DGPE7zLXZInws7EUDfR0pLugxERc8E=";
   };
 
-  mcpProxyBase = pkgs.callPackage ../mcp-proxy-base.nix { };
+  sourceRoot        = ".";
+  nativeBuildInputs = [ pkgs.autoPatchelfHook ];
 
-  runtimeRoot = pkgs.runCommand "github-mcp-root" { } ''
-    mkdir -p $out/usr/local/bin
-    tar -xzf ${githubMcpTar} -C /tmp
-    install -m 755 /tmp/github-mcp-server $out/usr/local/bin/github-mcp-server
+  installPhase = ''
+    runHook preInstall
+    install -Dm755 github-mcp-server $out/bin/github-mcp-server
+    runHook postInstall
   '';
-in
-pkgs.dockerTools.buildLayeredImage {
-  name      = "github-mcp";
-  tag       = githubMcpVersion;
-  fromImage = mcpProxyBase;
-  contents  = [ runtimeRoot ];
-  config = {
-    Entrypoint   = [ "catatonit" "--" "mcp-proxy" ];
-    Cmd          = [ "--port=3002" "--host=0.0.0.0" "--pass-environment" "--" "github-mcp-server" "stdio" ];
-    ExposedPorts = { "3002/tcp" = { }; };
-    Env          = [ "PATH=/app/.venv/bin:/usr/local/bin:/usr/bin:/bin" ];
-  };
+
+  meta.mainProgram = "github-mcp-server";
 }

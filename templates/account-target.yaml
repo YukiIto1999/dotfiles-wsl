@@ -1,3 +1,0 @@
-          - name: github-mcp-@accountName@
-            mcp:
-              host: http://github-mcp-@accountName@:@githubMcpPort@/mcp

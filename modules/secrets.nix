@@ -50,7 +50,8 @@ in
     "identity/work/email" = { };
   } // lib.listToAttrs (lib.concatMap (a: [
     { name = "accounts/${a}/username"; value = { }; }
-    { name = "accounts/${a}/token";    value = { }; }
+    # gateway の github wrapper が runtime に cfg.username で読む token file
+    { name = "accounts/${a}/token";    value = { owner = cfg.username; }; }
   ]) cfg.accounts);
 
   sops.templates = {

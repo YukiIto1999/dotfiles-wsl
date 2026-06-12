@@ -1,12 +1,16 @@
-{ config, lib, pkgs, username, gatewayPort, gatewayUrl, accounts, workIdentity, ... }:
+{ config, pkgs, lib, ... }:
+
+# MCP stack: per-server Docker containers on the "mcp" network, aggregated by
+# agentgateway into one loopback endpoint. Step A keeps the existing Docker
+# design verbatim; the transport redesign happens in a later step.
 
 let
-  # Constants
-  userHome              = "/home/${username}";
-  agentmemoryUid        = "65532";
-  agentmemoryHttpPort   = "3111";
-  agentmemoryStreamPort = "3112";
-  agentmemoryMcpPort    = "3006";
+  cfg      = config.my;
+  userHome = "/home/${cfg.username}";
+  gwPort   = toString cfg.gatewayPort;
+  ph       = config.sops.placeholder;
+
+  # Ports
   context7Port          = "3001";
   playwrightPort        = "8931";
   githubMcpPort         = "3002";
@@ -16,23 +20,21 @@ let
   crawl4aiPort          = "11235";
   crawl4aiMcpPort       = "11236";
   probeMcpPort          = "3005";
-  primaryAccount        = builtins.head accounts;
+  agentmemoryUid        = "65532";
+  agentmemoryHttpPort   = "3111";
+  agentmemoryStreamPort = "3112";
+  agentmemoryMcpPort    = "3006";
+  primaryAccount        = builtins.head cfg.accounts;
 
   # Images
-  context7McpImage     = pkgs.callPackage ../../services/context7-mcp    { };
-  githubMcpImage       = pkgs.callPackage ../../services/github-mcp      { };
-  probeMcpImage        = pkgs.callPackage ../../services/probe-mcp       { };
-  crawl4aiMcpImage     = pkgs.callPackage ../../services/crawl4ai-mcp    { };
-  agentmemoryImage     = pkgs.callPackage ../../services/agentmemory     { };
-  agentmemoryMcpImage  = pkgs.callPackage ../../services/agentmemory-mcp { };
+  context7McpImage     = pkgs.callPackage ../services/context7-mcp    { };
+  githubMcpImage       = pkgs.callPackage ../services/github-mcp      { };
+  probeMcpImage        = pkgs.callPackage ../services/probe-mcp       { };
+  crawl4aiMcpImage     = pkgs.callPackage ../services/crawl4ai-mcp    { };
+  agentmemoryImage     = pkgs.callPackage ../services/agentmemory     { };
+  agentmemoryMcpImage  = pkgs.callPackage ../services/agentmemory-mcp { };
 
   # Helpers
-  userTpl = path: content: {
-    inherit path content;
-    mode  = "0600";
-    owner = username;
-    group = "users";
-  };
   restartCfg = {
     Restart    = "always";
     RestartSec = "5s";
@@ -42,13 +44,9 @@ let
     requires = [ "docker-mcp-network.service" ] ++ extraDeps;
     serviceConfig = restartCfg;
   };
-  buildAccountTarget = name: builtins.readFile (pkgs.replaceVars ../../templates/account-target.yaml {
+  buildAccountTarget = name: builtins.readFile (pkgs.replaceVars ../templates/account-target.yaml {
     accountName = name;
     inherit githubMcpPort;
-  });
-  buildGhUser = name: builtins.readFile (pkgs.replaceVars ../../templates/gh-user.yml {
-    accountUsername = config.sops.placeholder."accounts/${name}/username";
-    accountToken    = config.sops.placeholder."accounts/${name}/token";
   });
   buildAccountContainer = name: lib.nameValuePair "github-mcp-${name}" {
     image            = "${githubMcpImage.imageName}:${githubMcpImage.imageTag}";
@@ -61,10 +59,10 @@ let
     owner        = "root";
     group        = "root";
     restartUnits = [ "docker-github-mcp-${name}.service" ];
-    content      = "GITHUB_PERSONAL_ACCESS_TOKEN=${config.sops.placeholder."accounts/${name}/token"}\n";
+    content      = "GITHUB_PERSONAL_ACCESS_TOKEN=${ph."accounts/${name}/token"}\n";
   };
   buildAccountService = name: lib.nameValuePair "docker-github-mcp-${name}" (mkMcpService [ ]);
-  accountServices = map (a: "docker-github-mcp-${a}.service") accounts;
+  accountServices = map (a: "docker-github-mcp-${a}.service") cfg.accounts;
   allMcpServices = [
     "docker-mcp-network.service"
     "docker-agentmemory.service"
@@ -79,35 +77,22 @@ let
     "docker-probe-mcp.service"
   ] ++ accountServices;
 
-  # Templates
-  agentmemoryConfig     = pkgs.replaceVars ../../templates/agentmemory.yaml {
+  # Generated config
+  agentmemoryConfig = pkgs.replaceVars ../templates/agentmemory.yaml {
     httpPort   = agentmemoryHttpPort;
     streamPort = agentmemoryStreamPort;
   };
-  agentgatewayConfig    = builtins.readFile (pkgs.replaceVars ../agentgateway/config.yaml {
-    inherit gatewayPort context7Port playwrightPort
-            searxngMcpPort crawl4aiMcpPort probeMcpPort agentmemoryMcpPort;
-    accountTargets = lib.concatMapStrings buildAccountTarget accounts;
+  agentgatewayConfig = builtins.readFile (pkgs.replaceVars ../etc/agentgateway/config.yaml {
+    gatewayPort = gwPort;
+    inherit context7Port playwrightPort searxngMcpPort crawl4aiMcpPort probeMcpPort agentmemoryMcpPort;
+    accountTargets = lib.concatMapStrings buildAccountTarget cfg.accounts;
   });
-  searxngSettingsConfig = builtins.readFile (pkgs.replaceVars ../../templates/searxng-settings.yml {
-    searxngSecret = config.sops.placeholder."searxng/secret_key";
+  searxngSettingsConfig = builtins.readFile (pkgs.replaceVars ../templates/searxng-settings.yml {
+    searxngSecret = ph."searxng/secret_key";
     inherit searxngPort valkeyPort;
   });
-  gitIdentityConfig     = builtins.readFile (pkgs.replaceVars ../../home/nixos/.config/git/identity.conf {
-    userName  = config.sops.placeholder."identity/default/name";
-    userEmail = config.sops.placeholder."identity/default/email";
-  });
-  gitWorkIdentityConfig = builtins.readFile (pkgs.replaceVars ../../home/nixos/.config/git/work-identity.conf {
-    userName  = config.sops.placeholder."identity/work/name";
-    userEmail = config.sops.placeholder."identity/work/email";
-  });
-  ghHostsConfig         = builtins.readFile (pkgs.replaceVars ../../home/nixos/.config/gh/hosts.yml {
-    accountUsers    = lib.concatMapStrings buildGhUser accounts;
-    primaryUsername = config.sops.placeholder."accounts/${primaryAccount}/username";
-    primaryToken    = config.sops.placeholder."accounts/${primaryAccount}/token";
-  });
 
-  # MCP containers
+  # Containers
   mcp = {
     agentmemory = {
       image     = "${agentmemoryImage.imageName}:${agentmemoryImage.imageTag}";
@@ -150,7 +135,7 @@ let
           --cdp-endpoint http://127.0.0.1:9222 \
           --port=${playwrightPort} --host=0.0.0.0 --allowed-hosts '*'
       '' ];
-      volumes = [ "${../playwright/viewer}:/viewer:ro" ];
+      volumes = [ "${../etc/playwright/viewer}:/viewer:ro" ];
       extraOptions = [ "--network=mcp" "--init" "-p" "9224:9224" ];
       deps = [ ];
     };
@@ -207,7 +192,7 @@ let
     image = "cr.agentgateway.dev/agentgateway:v1.2.1@sha256:60f7d4fbb7cec7f31aae5c2834c2e94ee46d88381fbca0600596b9e38efce760";
     cmd = [ "-f" "/etc/agentgateway/config.yaml" ];
     volumes = [ "/etc/agentgateway/config.yaml:/etc/agentgateway/config.yaml:ro" ];
-    extraOptions = [ "--network=mcp" "-p" "127.0.0.1:${gatewayPort}:${gatewayPort}" ];
+    extraOptions = [ "--network=mcp" "-p" "127.0.0.1:${gwPort}:${gwPort}" ];
   };
   gatewayService = {
     after    = allMcpServices;
@@ -229,54 +214,31 @@ let
   };
 in
 {
-  system.stateVersion = "25.11";
+  users.users.${cfg.username}.extraGroups = [ "docker" ];
 
+  virtualisation.docker.enable = true;
+  virtualisation.oci-containers.backend = "docker";
+  virtualisation.oci-containers.containers =
+    { agentgateway = gatewayContainer; }
+    // mcpContainers
+    // lib.listToAttrs (map buildAccountContainer cfg.accounts);
 
-  # Nix
-  nix.settings = {
-    experimental-features = [ "nix-command" "flakes" ];
-    substituters = [
-      "https://cache.nixos.org"
-      "https://devenv.cachix.org"
-    ];
-    trusted-public-keys = [
-      "cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY="
-      "devenv.cachix.org-1:w1cLUi8dv3hnoSPGAuibQv+f9TZLr6cv/Hm9XgU50cw="
-    ];
-    trusted-users = [ "root" username ];
+  systemd.tmpfiles.settings."agentmemory" = {
+    "/var/lib/agentmemory/data".d = {
+      user = agentmemoryUid;
+      group = agentmemoryUid;
+      mode = "0755";
+    };
   };
 
-  # WSL
-  wsl.enable = true;
-  wsl.defaultUser = username;
-  wsl.useWindowsDriver = true;
-  wsl.wslConf = {
-    boot.systemd = true;
-    interop.appendWindowsPath = false;
-  };
-  environment.localBinInPath = true;
-  programs.nix-ld.enable = true;
+  systemd.services =
+    {
+      docker-agentgateway = gatewayService;
+      docker-mcp-network = networkService;
+    }
+    // mcpServices
+    // lib.listToAttrs (map buildAccountService cfg.accounts);
 
-  # CLI
-  environment.etc."claude-code/managed-settings.json".source =
-    ../../home/nixos/.claude/managed-settings.json;
-  environment.etc."codex/config.toml".source =
-    pkgs.replaceVars ../../home/nixos/.codex/config-system.toml { inherit gatewayUrl; };
-
-  # Secrets
-  sops.defaultSopsFile = ../../secrets/secrets.yaml;
-  sops.age.keyFile = "/var/lib/sops-nix/key.txt";
-  sops.secrets = {
-    "identity/default/name"  = { };
-    "identity/default/email" = { };
-    "searxng/secret_key"     = { };
-  } // lib.optionalAttrs (workIdentity != null) {
-    "identity/work/name"  = { };
-    "identity/work/email" = { };
-  } // lib.listToAttrs (lib.concatMap (a: [
-    { name = "accounts/${a}/username"; value = { }; }
-    { name = "accounts/${a}/token";    value = { }; }
-  ]) accounts);
   sops.templates = {
     "agentgateway-config.yaml" = {
       path         = "/etc/agentgateway/config.yaml";
@@ -294,88 +256,5 @@ in
       restartUnits = [ "docker-searxng.service" ];
       content      = searxngSettingsConfig;
     };
-    "git-identity" = userTpl "${userHome}/.config/git/identity.conf" gitIdentityConfig;
-    "gh-hosts.yml" = userTpl "${userHome}/.config/gh/hosts.yml"      ghHostsConfig;
-  } // lib.optionalAttrs (workIdentity != null) {
-    "git-work-identity" = userTpl "${userHome}/.config/git/work-identity.conf" gitWorkIdentityConfig;
-  } // lib.listToAttrs (map buildAccountEnvTemplate accounts);
-
-  # Docker
-  virtualisation.docker.enable = true;
-  users.users.${username} = {
-    isNormalUser = true;
-    home = userHome;
-    extraGroups = [ "wheel" "docker" ];
-  };
-  virtualisation.oci-containers.backend = "docker";
-  virtualisation.oci-containers.containers =
-    { agentgateway = gatewayContainer; }
-    // mcpContainers
-    // lib.listToAttrs (map buildAccountContainer accounts);
-
-  # Memory
-  systemd.tmpfiles.settings."agentmemory" = {
-    "/var/lib/agentmemory/data".d = {
-      user = agentmemoryUid;
-      group = agentmemoryUid;
-      mode = "0755";
-    };
-  };
-
-  # Services
-  systemd.services =
-    {
-      docker-agentgateway = gatewayService;
-      docker-mcp-network = networkService;
-      # crates.io rejects curl's default UA (403); give fetchurl an accepted one
-      nix-daemon.environment.NIX_CURL_FLAGS = "--user-agent=Nixpkgs";
-    }
-    // mcpServices
-    // lib.listToAttrs (map buildAccountService accounts);
-
-  # Packages
-  environment.systemPackages = with pkgs; [
-
-    # CLI
-    wget
-    curl
-    vim
-
-    # WSL
-    wslu
-
-    # Dev
-    direnv
-    nix-direnv
-    devenv
-
-    # Secrets
-    sops
-    age
-  ];
-
-  # Direnv
-  programs.direnv = {
-    enable = true;
-    enableBashIntegration = true;
-    nix-direnv.enable = true;
-  };
-
-  # Fonts
-  fonts.enableDefaultPackages = true;
-  fonts.packages = with pkgs; [
-    noto-fonts
-    noto-fonts-cjk-sans
-    noto-fonts-cjk-serif
-    noto-fonts-color-emoji
-  ];
-  fonts.fontconfig = {
-    enable = true;
-    defaultFonts = {
-      serif     = [ "Noto Serif CJK JP" "Noto Serif" ];
-      sansSerif = [ "Noto Sans CJK JP" "Noto Sans" ];
-      monospace = [ "Noto Sans Mono CJK JP" "Noto Sans Mono" ];
-      emoji     = [ "Noto Color Emoji" ];
-    };
-  };
+  } // lib.listToAttrs (map buildAccountEnvTemplate cfg.accounts);
 }

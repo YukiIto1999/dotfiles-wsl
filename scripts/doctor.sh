@@ -66,8 +66,8 @@ actual_etc="$(readlink -f /etc/nixos 2>/dev/null || true)"
 
 check_file "$repo/flake.nix"
 check_file "$repo/flake.lock"
-check_file "$repo/etc/nixos/configuration.nix"
-check_file "$repo/etc/nixos/home.nix"
+check_file "$repo/modules/default.nix"
+check_file "$repo/home/default.nix"
 check_file "$repo/secrets/secrets.yaml"
 
 check_command_upstream claude

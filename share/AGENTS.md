@@ -26,8 +26,8 @@ Think in English. Respond in Japanese.
 
 ## memory
 
-- working state は native memory `~/.claude/projects/<X>/memory/` に置く。
-- セッション越えで保持すべき長期情報は agentmemory REST API に転記する。
+- Claude Code では、作業状態を native memory `~/.claude/projects/<X>/memory/` に置く。
+- セッションをまたいで保持する長期情報は gateway の `memory` MCP target(`memory_*` tools)に転記する。
 - 同じ訂正を繰り返し受けた場合、または明示的に「覚えて」と言われた場合は memory に保存する。
 - 資格情報、トークン、秘密鍵、個人情報、未検証の推測、短期タスク専用の作業メモは memory に保存しない。
 
@@ -63,13 +63,13 @@ Think in English. Respond in Japanese.
 ## dotfiles
 
 - 初回 setup: `sudo bash ~/dotfiles-wsl/scripts/bootstrap.sh`
-- 通常 rebuild: `sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl?submodules=1#nixos" -L` 後、PowerShell で `wsl -t NixOS && wsl -d NixOS`。
+- 通常 rebuild: `sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl#nixos" -L` 後、PowerShell で `wsl -t NixOS && wsl -d NixOS`。
 - 実用状態検証: `~/dotfiles-wsl/scripts/doctor.sh`
 - 不要物整理: `~/dotfiles-wsl/scripts/cleanup-local.sh --delete`。system backup と VS Code server も整理する場合は `--system --vscode-server` を付ける。
-- CI 相当 check: `cd ~/dotfiles-wsl && nix flake check "git+file://${PWD}?submodules=1" -L`
+- CI 相当 check: `cd ~/dotfiles-wsl && nix flake check "git+file://${PWD}" -L`
 - flake input 更新: `cd ~/dotfiles-wsl && nix flake update`
 - `/etc/nixos` は `~/dotfiles-wsl` repo root への symlink。
-- flake root は repo root。`etc/nixos/` は NixOS / Home Manager module 置き場であり、単独 flake ではない。
+- flake root は repo root。`modules/` が NixOS module、`home/` が Home Manager module の置き場。
 - CLI 本体（`claude` / `codex` / `opencode` / `agy`）は Nix から入れない。公式 upstream 配布を `~/.local/bin` に置き、dotfiles は設定・agents・skills を管理する。
 - `/home/nixos` の設定ファイルは `~/dotfiles-wsl/home/nixos`、`~/dotfiles-wsl/share`、`~/dotfiles-wsl/templates` から再生成される。
 - MCP は agentgateway 経由で集約される。全 CLI が同じ gateway URL を使う。
@@ -82,6 +82,6 @@ Think in English. Respond in Japanese.
 
 - dotfiles で管理している設定ファイルは直接編集しない。変更は dotfiles に入れる。
 - パッケージマネージャでグローバルインストールしない。パッケージは nix / devenv で導入する。
-- `gh auth login` / `gh auth switch` は使わない。トークン交替は `sops ~/dotfiles-wsl/secrets/secrets.yaml` 編集後の rebuild で行う。
+- `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops ~/dotfiles-wsl/secrets/secrets.yaml` 編集後の rebuild で行う。
 - 資格情報を平文に書かない。GitHub PAT は `~/dotfiles-wsl/secrets/secrets.yaml`(SOPS + age)に集約する。
 - commit message に AI attribution(`Co-authored-by`、`Generated with ...`)を入れない。commit-msg hook が block する。

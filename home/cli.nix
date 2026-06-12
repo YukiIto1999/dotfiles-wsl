@@ -5,7 +5,7 @@
 # each CLI's native layout and pointed at the same MCP gateway.
 
 let
-  my          = osConfig.my;
+  inherit (osConfig) my;
   homeDir     = "/home/${my.username}";
   dotfilesAbs = "${homeDir}/dotfiles-wsl";
   symlink     = config.lib.file.mkOutOfStoreSymlink;

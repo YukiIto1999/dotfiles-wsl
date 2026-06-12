@@ -1,7 +1,7 @@
 { pkgs, lib, osConfig, ... }:
 
 let
-  my = osConfig.my;
+  inherit (osConfig) my;
 in
 {
   imports = [

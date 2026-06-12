@@ -40,7 +40,7 @@ remove_path() {
 
 shopt -s nullglob globstar
 
-# *.hm-back backups under each managed CLI root
+# managed CLI root 下の HM backup と手動復旧の残骸
 for path in \
   "$HOME"/.claude.bak.* \
   "$HOME"/.codex.bak.* \

@@ -54,7 +54,7 @@ URL から完全には見分けられない。次の step で本文を取って�
 
 ### 3. 本文取得
 
-`crawl4ai` target の MCP tool を呼ぶ。`unclecode/crawl4ai` container の `/mcp/sse` endpoint が次を提供する。
+`crawl4ai` target の MCP tool を呼ぶ。gateway が spawn する stdio front(`crawl4ai-mcp`)が crawl4ai engine の REST を中継し、次を提供する。
 
 | tool | 入力 | 出力 |
 |---|---|---|

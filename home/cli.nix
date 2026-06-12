@@ -172,8 +172,9 @@ in
     + seedConfig ".codex/config.toml" ./nixos/.codex/config.toml
   );
 
-  # Register the gateway with Claude Code when it is installed. A plain if-guard,
-  # not `exit`, so it never aborts the rest of the activation script.
+  # Claude owns ~/.claude.json at runtime, so the gateway is registered imperatively
+  # rather than via a declarative file like the other three CLIs. if-guard (not exit)
+  # so a missing claude binary never aborts the rest of activation.
   home.activation.claudeMcpRegister = lib.hm.dag.entryAfter [ "seedMutableConfigs" ] ''
     CLAUDE=$HOME/.local/bin/claude
     if [ -x "$CLAUDE" ]; then

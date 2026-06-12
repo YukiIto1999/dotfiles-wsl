@@ -13,7 +13,7 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 | `flake.nix` | inputs(nixpkgs / nixos-wsl / home-manager / sops-nix / plugin sources)と nixosSystem の定義、checks |
 | `modules/` | NixOS module。`options.nix`(`my.*` 型付き設定)、`wsl` / `nix` / `base` / `secrets` / `mcp` / `home` |
 | `home/` | Home Manager module。`default` / `cli`(agents・skills を全 CLI へ配備)/ `git`。`home/nixos/` は配備元の生 config |
-| `services/` | MCP server の build 定義。stdio 実行 package と agentgateway の binary、agentmemory のバックエンド用 Docker image |
+| `pkgs/` | MCP server の build 定義。stdio 実行 package(共通 `mk-mcp-server` helper 使用)、agentgateway の binary、Chromium 起動設定、agentmemory のバックエンド用 Docker image |
 | `share/` | `AGENTS.md`(共通ルール)、`agents/`(subagent)、`skills/`(local skill) |
 | `templates/` | SOPS / 生成 config の template(`gh-user` / `searxng-settings` / `agentmemory`) |
 | `secrets/` | `secrets.yaml`(SOPS + age)と `.sops.yaml` |
@@ -91,21 +91,20 @@ Claude Code / Codex / OpenCode / Antigravity
         |  http://localhost:8765/mcp  (loopback)
         v
    agentgateway (systemd)
-        |                         \
-        | stdio (spawn)            \ http (loopback)
-        v                           v
- context7 / probe-mcp /       searxng-mcp / playwright
- memory / crawl4ai /                |
- github-mcp-<account>               | docker network: mcp-backends
-        |                           v
-        | http (loopback)     searxng + valkey / crawl4ai /
-        +------------------>  agentmemory engine
+        |  stdio (MCP server を起動)
+        v
+ context7 / probe-mcp / memory / crawl4ai /
+ searxng-mcp / playwright / github-mcp-<account>
+        |  loopback (常駐プロセスを使う target のみ)
+        v
+ docker network mcp-backends:
+ searxng + valkey / crawl4ai / agentmemory engine / chromium
 ```
 
 - gateway は `127.0.0.1:8765` のみで待ち受ける。`my.gatewayPort` で宣言する。
-- stdio server は gateway が子プロセスとして起動する。OCI image も mcp-proxy も要らない。
+- MCP server はすべて stdio で gateway から起動する。HTTP target、OCI image、mcp-proxy は使わない。
 - github は account ごとに wrapper を spawn し、`/run/secrets` から PAT を読んで exec する。`docker inspect` への露出は無い。
-- 常駐プロセス(searxng / valkey / crawl4ai / agentmemory engine / playwright)だけ `mcp-backends` network の Docker container で動かし、必要な port を `127.0.0.1` に公開する。GitHub MCP は Docker network へ置かない。
+- 常駐プロセス(searxng / valkey / crawl4ai / agentmemory engine / Chromium)だけ `mcp-backends` network の Docker で動かす。stdio server は `127.0.0.1` に公開した port 経由で接続する。Playwright MCP は stdio で起動し、Chromium daemon に CDP 接続する。GitHub MCP は Docker network へ置かない。
 
 ## Secrets と identity
 
@@ -132,7 +131,7 @@ Claude Code / Codex / OpenCode / Antigravity
 | subagent を足す | `share/agents/<name>.md` |
 | 共通ルールを変える | `share/AGENTS.md` |
 | CLI 設定を変える | `home/nixos/` 配下の各 CLI テンプレート |
-| MCP target を増減 | `modules/mcp.nix`(stdio server は `services/<name>` を足して target に追加) |
+| MCP server を増減 | `pkgs/<name>` を `mk-mcp-server` で足し、`modules/mcp/servers.nix` の target に追加。backing daemon は `modules/mcp/backends.nix` |
 
 変更後は rebuild する。
 

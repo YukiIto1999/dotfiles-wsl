@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "claudePlugins": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779213348,
+        "narHash": "sha256-opaIiwDnSlbZHfpLv9TSOF+amNg41/NqPMvG7OfodEQ=",
+        "owner": "anthropics",
+        "repo": "claude-plugins-official",
+        "rev": "ae21a9367949f92df4e31231d7efe43eaa08207c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "anthropics",
+        "repo": "claude-plugins-official",
+        "rev": "ae21a9367949f92df4e31231d7efe43eaa08207c",
+        "type": "github"
+      }
+    },
     "flake-compat": {
       "flake": false,
       "locked": {
@@ -75,12 +92,32 @@
         "type": "github"
       }
     },
+    "openaiPlugins": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1779213345,
+        "narHash": "sha256-65QHWoAF4XNqGfZhsu4kH9mhgJeZxFvd+9yopGAuN80=",
+        "owner": "openai",
+        "repo": "plugins",
+        "rev": "ed8ce2eacc07964f0f556519e0737a420da14e00",
+        "type": "github"
+      },
+      "original": {
+        "owner": "openai",
+        "repo": "plugins",
+        "rev": "ed8ce2eacc07964f0f556519e0737a420da14e00",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
+        "claudePlugins": "claudePlugins",
         "home-manager": "home-manager",
         "nixos-wsl": "nixos-wsl",
         "nixpkgs": "nixpkgs",
-        "sops-nix": "sops-nix"
+        "openaiPlugins": "openaiPlugins",
+        "sops-nix": "sops-nix",
+        "superpowers": "superpowers"
       }
     },
     "sops-nix": {
@@ -100,6 +137,23 @@
       "original": {
         "owner": "Mic92",
         "repo": "sops-nix",
+        "type": "github"
+      }
+    },
+    "superpowers": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1777932301,
+        "narHash": "sha256-3E3rO6hR87JUfS3XV1Eaoz6SDWOftleWvN9UPNFEMjw=",
+        "owner": "obra",
+        "repo": "superpowers",
+        "rev": "f2cbfbefebbfef77321e4c9abc9e949826bea9d7",
+        "type": "github"
+      },
+      "original": {
+        "owner": "obra",
+        "ref": "v5.1.0",
+        "repo": "superpowers",
         "type": "github"
       }
     }

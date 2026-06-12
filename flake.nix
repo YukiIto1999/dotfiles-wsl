@@ -12,17 +12,22 @@
 
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
+
+    # vendored な agent/skill source、flake = false で plain tree 扱い
+    superpowers   = { url = "github:obra/superpowers/v5.1.0"; flake = false; };
+    openaiPlugins = { url = "github:openai/plugins/ed8ce2eacc07964f0f556519e0737a420da14e00"; flake = false; };
+    claudePlugins = { url = "github:anthropics/claude-plugins-official/ae21a9367949f92df4e31231d7efe43eaa08207c"; flake = false; };
   };
 
-  outputs = { self, nixpkgs, nixos-wsl, home-manager, sops-nix, ... }:
+  outputs = { self, nixpkgs, nixos-wsl, home-manager, sops-nix, superpowers, openaiPlugins, claudePlugins, ... }:
     let
       system   = "x86_64-linux";
       hostName = "nixos";
 
       pluginSources = {
-        superpowers             = ./upstream/superpowers;
-        openai-plugins          = ./upstream/openai-plugins;
-        claude-plugins-official = ./upstream/claude-plugins-official;
+        superpowers             = superpowers;
+        openai-plugins          = openaiPlugins;
+        claude-plugins-official = claudePlugins;
       };
     in
     {

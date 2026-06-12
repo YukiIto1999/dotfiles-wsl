@@ -17,8 +17,6 @@ jobs:
       NIX_CURL_FLAGS: --user-agent=Nixpkgs
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          submodules: recursive
 
       - uses: cachix/install-nix-action@8aa03977d8d733052d78f4e008a241fd1dbf36b3 # v31.10.6
         with:
@@ -28,4 +26,4 @@ jobs:
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
       - name: flake check
-        run: nix flake check "git+file://${GITHUB_WORKSPACE}?submodules=1" -L
+        run: nix flake check "git+file://${GITHUB_WORKSPACE}" -L

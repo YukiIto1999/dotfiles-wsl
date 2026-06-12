@@ -35,8 +35,9 @@ let
   agentmemoryMcpImage  = pkgs.callPackage ../services/agentmemory-mcp { };
 
   # Helpers
+  # 26.05 oci-containers sets Restart=on-failure itself; force "always" to keep prior behaviour.
   restartCfg = {
-    Restart    = "always";
+    Restart    = lib.mkForce "always";
     RestartSec = "5s";
   };
   mkMcpService = extraDeps: {

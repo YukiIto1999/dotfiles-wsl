@@ -9,7 +9,7 @@ let
   '';
 in
 {
-  # "docker" is added by mcp.nix, which owns the docker stack.
+  # docker group は modules/mcp/backends.nix が追加
   users.users.${cfg.username} = {
     isNormalUser = true;
     home = "/home/${cfg.username}";

@@ -1,7 +1,6 @@
 { config, pkgs, lib, ... }:
 
-# sops-nix: secret declarations and the identity files rendered from them.
-# MCP-specific secret files (gateway, searxng, github tokens) live in mcp.nix.
+# searxng settings template の secret は modules/mcp/backends.nix
 
 let
   cfg            = config.my;

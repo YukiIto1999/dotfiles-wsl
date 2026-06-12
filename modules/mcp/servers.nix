@@ -8,7 +8,11 @@ let
 
   agentgateway = pkgs.callPackage ../../pkgs/agentgateway { };
 
-  # Target names are kept stable so the gateway's tool prefixes never change.
+  # bot 判定を避ける Windows UA
+  userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+
+  # target は skills が参照する安定した公開契約
+  # bin は package の実行ファイル名
   github = account: {
     target = "github-mcp-${account}";
     bin    = "github-mcp";
@@ -25,7 +29,7 @@ let
       { target = "crawl4ai";    bin = "crawl4ai-mcp";    pkg = pkgs.callPackage ../../pkgs/crawl4ai-mcp    { inherit mkMcpServer; inherit (ep) crawl4aiUrl; }; }
       { target = "memory";      bin = "agentmemory-mcp"; pkg = pkgs.callPackage ../../pkgs/agentmemory-mcp { inherit mkMcpServer; inherit (ep) agentmemoryUrl; }; }
       { target = "searxng-mcp"; bin = "searxng-mcp";     pkg = pkgs.callPackage ../../pkgs/searxng-mcp     { inherit mkMcpServer; inherit (ep) searxngUrl; }; }
-      { target = "playwright";  bin = "playwright-mcp";  pkg = pkgs.callPackage ../../pkgs/playwright-mcp  { inherit mkMcpServer; inherit (ep) cdpEndpoint userAgent; }; }
+      { target = "playwright";  bin = "playwright-mcp";  pkg = pkgs.callPackage ../../pkgs/playwright-mcp  { inherit mkMcpServer userAgent; }; }
     ]
     ++ map github cfg.accounts;
 

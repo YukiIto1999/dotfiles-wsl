@@ -63,16 +63,6 @@ let
       deps = [ ];
       gatewayDep = true;
     };
-    chromium = {
-      image = "mcr.microsoft.com/playwright/mcp:latest@sha256:d238ec7bc98cc4e22df0696d6031dad5b8a4b46781f4f0abaa3bfadeedb43b9a";
-      entrypoint = "sh";
-      cmd = [ "/launch.sh" ];
-      volumes = [ "${../../pkgs/chromium/launch.sh}:/launch.sh:ro" ];
-      environment.CHROME_UA = ep.userAgent;
-      extraOptions = [ "--init" ] ++ loopback ep.ports.cdp;
-      deps = [ ];
-      gatewayDep = true;
-    };
   };
 
   withNetwork = v: v // { extraOptions = [ "--network=mcp-backends" ] ++ (v.extraOptions or [ ]); };

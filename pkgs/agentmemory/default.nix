@@ -50,6 +50,7 @@ pkgs.dockerTools.buildLayeredImage {
     Entrypoint   = [ "/app/iii" ];
     Cmd          = [ "--config" "/app/config.yaml" ];
     WorkingDir   = "/opt/agentmemory";
+    # 記載のみ、port の正は modules/mcp/endpoints.nix
     ExposedPorts = { "3111/tcp" = { }; "3112/tcp" = { }; };
     Env = [
       "PATH=/bin:/app:/usr/local/bin:/usr/bin"

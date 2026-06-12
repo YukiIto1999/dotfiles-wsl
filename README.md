@@ -98,13 +98,14 @@ Claude Code / Codex / OpenCode / Antigravity
         |  loopback (常駐プロセスを使う target のみ)
         v
  docker network mcp-backends:
- searxng + valkey / crawl4ai / agentmemory engine / chromium
+ searxng + valkey / crawl4ai / agentmemory engine
 ```
 
 - gateway は `127.0.0.1:8765` のみで待ち受ける。`my.gatewayPort` で宣言する。
 - MCP server はすべて stdio で gateway から起動する。HTTP target、OCI image、mcp-proxy は使わない。
 - github は account ごとに wrapper を spawn し、`/run/secrets` から PAT を読んで exec する。`docker inspect` への露出は無い。
-- 常駐プロセス(searxng / valkey / crawl4ai / agentmemory engine / Chromium)だけ `mcp-backends` network の Docker で動かす。stdio server は `127.0.0.1` に公開した port 経由で接続する。Playwright MCP は stdio で起動し、Chromium daemon に CDP 接続する。GitHub MCP は Docker network へ置かない。
+- 常駐プロセス(searxng / valkey / crawl4ai / agentmemory engine)だけ `mcp-backends` network の Docker で動かす。stdio server は `127.0.0.1` に公開した port 経由で接続する。
+- Playwright MCP は host の Chromium を headless で起動する。専用 daemon と Docker image は使わない。GitHub MCP は Docker network へ置かない。
 
 ## Secrets と identity
 

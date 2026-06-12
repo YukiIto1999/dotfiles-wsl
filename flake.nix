@@ -76,7 +76,7 @@
           '';
 
           shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-            shellcheck --severity=warning ${self}/scripts/*.sh ${self}/home/nixos/.config/git/hooks/* ${self}/pkgs/chromium/launch.sh
+            shellcheck --severity=warning ${self}/scripts/*.sh ${self}/home/nixos/.config/git/hooks/*
             touch $out
           '';
         };

@@ -123,13 +123,13 @@ check_file /etc/codex/config.toml
 
 check_unit_not_failed home-manager-nixos.service
 wait_unit_active docker.service
-wait_unit_active docker-mcp-network.service
-wait_unit_active docker-agentgateway.service
+wait_unit_active docker-mcp-backends-network.service
+wait_unit_active agentgateway.service
 
-if docker network inspect mcp >/dev/null 2>&1; then
-  ok "docker network mcp exists"
+if docker network inspect mcp-backends >/dev/null 2>&1; then
+  ok "docker network mcp-backends exists"
 else
-  bad "docker network mcp missing"
+  bad "docker network mcp-backends missing"
 fi
 
 command -v wslview >/dev/null 2>&1 && ok "wslview exists" || bad "wslview missing"

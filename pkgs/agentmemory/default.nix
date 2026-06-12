@@ -1,11 +1,11 @@
 { pkgs }:
 
 let
-  # Versions
+  # バージョン
   agentmemoryVersion = "0.9.26";
   iiiVersion         = "0.11.2";
 
-  # Sources
+  # 取得元
   iiiEngineBase = pkgs.dockerTools.pullImage {
     imageName     = "iiidev/iii";
     imageDigest   = "sha256:15f8d4ed16c0bec350b98f4e18ed04498b1fc5ccc50585e087b736717300cf26";

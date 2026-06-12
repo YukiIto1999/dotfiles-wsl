@@ -7,7 +7,7 @@
     ./nix.nix
     ./base.nix
     ./secrets.nix
-    ./mcp.nix
+    ./mcp
     ./home.nix
   ];
 

@@ -35,6 +35,13 @@ in
       example = "~/projects/business/";
       description = "gitdir glob that selects the work git identity. null disables it.";
     };
+
+    gatewayBackendUnits = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      internal = true;
+      description = "Backend systemd units the gateway waits for. Set by modules/mcp/backends.nix.";
+    };
   };
 
   config.my.gatewayUrl = lib.mkDefault "http://localhost:${toString cfg.gatewayPort}/mcp";

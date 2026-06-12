@@ -1,7 +1,6 @@
-{ pkgs }:
+{ pkgs, mkMcpServer }:
 
-# probe MCP server. Bundles the probe binary on PATH and runs the node entry
-# over stdio. Reads the user's code directly, so no bind mounts are needed.
+# user の repo を検索する code search、probe binary を PATH に同梱
 let
   version = "0.6.0-rc319";
 
@@ -34,7 +33,8 @@ let
     install -m755 /tmp/probe-v${version}-x86_64-unknown-linux-musl/probe $out/bin/probe
   '';
 in
-pkgs.writeShellScriptBin "probe-mcp" ''
-  export PATH=${probeBin}/bin:$PATH
-  exec ${pkgs.nodejs_24}/bin/node ${probePkg}/lib/node_modules/@probelabs/probe/build/mcp/index.js "$@"
-''
+mkMcpServer {
+  name    = "probe-mcp";
+  env.PATH = "${probeBin}/bin:$PATH";
+  command = "${pkgs.nodejs_24}/bin/node ${probePkg}/lib/node_modules/@probelabs/probe/build/mcp/index.js";
+}

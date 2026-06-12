@@ -1,6 +1,6 @@
 { pkgs }:
 
-# agentgateway: upstream static-musl release binary (not in nixpkgs).
+# nixpkgs 未収録の upstream static-musl release binary
 pkgs.stdenvNoCC.mkDerivation rec {
   pname   = "agentgateway";
   version = "1.2.1";

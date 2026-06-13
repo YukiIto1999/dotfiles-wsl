@@ -1,10 +1,7 @@
-{ config, lib, osConfig, ... }:
+{ lib, osConfig, dotfilesAbs, symlink, ... }:
 
 let
   inherit (osConfig) my;
-  homeDir     = "/home/${my.username}";
-  dotfilesAbs = "${homeDir}/dotfiles-wsl";
-  symlink     = config.lib.file.mkOutOfStoreSymlink;
 
   mkGitHook = name: {
     source     = ./nixos/.config/git/hooks + "/${name}";
@@ -20,12 +17,12 @@ in
       core.excludesFile   = "~/.config/git/ignore";
       core.hooksPath      = "~/.config/git/hooks";
       merge.conflictstyle = "diff3";
-      include.path        = "${homeDir}/.config/git/identity.conf";
+      include.path        = "${my.homeDir}/.config/git/identity.conf";
     };
     includes = lib.optionals (my.workIdentity != null) [
       {
         condition = "gitdir:${my.workIdentity}";
-        path      = "${homeDir}/.config/git/work-identity.conf";
+        path      = "${my.homeDir}/.config/git/work-identity.conf";
       }
     ];
   };

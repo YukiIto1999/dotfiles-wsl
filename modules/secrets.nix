@@ -4,7 +4,7 @@
 
 let
   cfg            = config.my;
-  userHome       = "/home/${cfg.username}";
+  userHome       = cfg.homeDir;
   primaryAccount = builtins.head cfg.accounts;
   ph             = config.sops.placeholder;
 
@@ -15,7 +15,7 @@ let
     group = "users";
   };
 
-  render = path: vars: builtins.readFile (pkgs.replaceVars path vars);
+  render = import ./render.nix { inherit pkgs; };
 
   buildGhUser = name: render ../templates/gh-user.yml {
     accountUsername = ph."accounts/${name}/username";

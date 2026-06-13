@@ -80,7 +80,9 @@ CLI 本体は Nix でインストールしない。更新頻度が高く常に�
 | `opencode` | `~/.local/bin/opencode` | Anomaly GitHub Release |
 | `agy` | `~/.local/bin/agy` | Google 公式 installer |
 
-`share/AGENTS.md` / `share/agents/*.md` と、plugin・local の skills を、`home/cli.nix` が各 CLI のネイティブ形式へ変換して配備する。Codex は agent frontmatter を TOML 化、OpenCode は tools を変換、Claude / Antigravity はそのまま symlink する。
+`share/AGENTS.md`(共通ルール)、`share/agents/*.md`(subagent)、plugin・local の skills を、`home/cli.nix` が各 CLI のネイティブ形式へ配備する。agent は Claude=md そのまま / Codex=TOML 化 / OpenCode=tools 変換。Antigravity は plugin ベースで static agent 機構を持たないため agent は配備せず、rules + skills + gateway だけを受け取る。
+
+MCP gateway の登録方法は CLI ごとに異なる。Claude は CLI が実行時に管理する `~/.claude.json` に `claude mcp add` で登録する。Codex は `/etc/codex/config.toml` に管理設定を置き、ユーザーが初期化する home 配下の config と分ける。OpenCode / Antigravity は home の MCP 設定ファイルへ置く。
 
 ## MCP
 

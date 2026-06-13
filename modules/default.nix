@@ -6,6 +6,8 @@
     ./wsl.nix
     ./nix.nix
     ./base.nix
+    ./fonts.nix
+    ./ai-cli.nix
     ./secrets.nix
     ./mcp
     ./home.nix

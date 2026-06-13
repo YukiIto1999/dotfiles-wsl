@@ -1,54 +1,13 @@
-{ config, pkgs, lib, osConfig, pluginSources, ... }:
-
-# Deploy one shared set of rules, agents and skills to every AI CLI.
-# share/AGENTS.md, share/agents/*.md and the discovered skills are converted to
-# each CLI's native layout and pointed at the same MCP gateway.
+{ pkgs, lib, osConfig, pluginSources, dotfilesAbs, symlink, ... }:
 
 let
   inherit (osConfig) my;
-  homeDir     = "/home/${my.username}";
-  dotfilesAbs = "${homeDir}/dotfiles-wsl";
-  symlink     = config.lib.file.mkOutOfStoreSymlink;
-  gatewayUrl  = my.gatewayUrl;
+  inherit (my) gatewayUrl;
 
-  # Skill discovery
-  pluginPaths = [
-    "${pluginSources.superpowers}"
-    "${pluginSources.openai-plugins}/plugins/codex-security"
-    "${pluginSources.claude-plugins-official}/plugins/frontend-design"
-    "${pluginSources.claude-plugins-official}/plugins/skill-creator"
-  ];
+  skills    = import ./skills.nix { inherit lib pluginSources dotfilesAbs; localSkillsRoot = ../share/skills; };
+  allSkills = skills.all;
 
-  findSkillsIn = pluginPath:
-    let
-      skillsRoot = "${pluginPath}/skills";
-      entries =
-        if builtins.pathExists skillsRoot
-        then builtins.readDir skillsRoot
-        else { };
-      dirs = lib.filterAttrs (n: t:
-        t == "directory" && builtins.pathExists "${skillsRoot}/${n}/SKILL.md"
-      ) entries;
-    in
-      lib.mapAttrs' (name: _: lib.nameValuePair name "${skillsRoot}/${name}") dirs;
-
-  pluginSkills = lib.foldl' (acc: p: acc // (findSkillsIn p)) { } pluginPaths;
-  pluginSkillDupes =
-    let
-      flat   = lib.concatMap (p: builtins.attrNames (findSkillsIn p)) pluginPaths;
-      counts = lib.foldl' (acc: n: acc // { ${n} = (acc.${n} or 0) + 1; }) { } flat;
-    in
-      builtins.attrNames (lib.filterAttrs (_: c: c > 1) counts);
-  localSkills = lib.mapAttrs' (name: _:
-      lib.nameValuePair name "${dotfilesAbs}/share/skills/${name}"
-    ) (lib.filterAttrs (n: t:
-         t == "directory" && builtins.pathExists (../share/skills + "/${n}/SKILL.md")
-       ) (builtins.readDir ../share/skills));
-  localVsPluginDupes =
-    builtins.filter (n: builtins.hasAttr n pluginSkills) (builtins.attrNames localSkills);
-  allSkills = pluginSkills // localSkills;
-
-  # Per-CLI agent layout
+  # agent frontmatter の分割
   splitFrontmatter = src:
     let parts = lib.splitString "\n---\n" (builtins.readFile src);
     in {
@@ -58,6 +17,7 @@ let
   # 生成 codex agent TOML に焼き込むモデル
   codexModel = "gpt-5.5";
 
+  # agentDir 未定義の CLI は static agent を配備しない
   cliDefs = {
     claude = {
       skillDir   = ".claude/skills";
@@ -72,10 +32,10 @@ let
       buildAgent = name: srcPath:
         let fm = splitFrontmatter srcPath; in
         pkgs.runCommand "${name}.toml" {
-          nativeBuildInputs = [ pkgs.remarshal ];
+          nativeBuildInputs = [ pkgs.remarshal pkgs.yq ];
           inherit (fm) frontmatter body;
         } ''
-          remarshal -if yaml -of toml <<<"$frontmatter" > "$out"
+          yq -y 'del(.tools)' <<<"$frontmatter" | remarshal -if yaml -of toml > "$out"
           {
             printf 'model = "${codexModel}"\n'
             printf 'developer_instructions = """\n'
@@ -94,7 +54,7 @@ let
           nativeBuildInputs = [ pkgs.yq ];
           inherit (fm) frontmatter body;
         } ''
-          tools=$(yq -y '.tools |= (map({(.):true}) | add)' <<<"$frontmatter")
+          tools=$(yq -y '.tools |= (map({(ascii_downcase):true}) | add)' <<<"$frontmatter")
           {
             printf '%s\n' '---'
             printf '%s\n' "$tools"
@@ -104,10 +64,7 @@ let
         '';
     };
     antigravity = {
-      skillDir   = ".gemini/antigravity-cli/skills";
-      agentDir   = ".gemini/agents";
-      agentExt   = "md";
-      buildAgent = _: srcPath: srcPath;
+      skillDir = ".gemini/antigravity-cli/skills";
     };
   };
 
@@ -126,15 +83,16 @@ let
          t == "regular" && (lib.hasSuffix ".md" n)
        ) (builtins.readDir ../share/agents));
 
+  agentClis  = lib.filter (cli: cliDefs.${cli} ? agentDir) (builtins.attrNames cliDefs);
   agentFiles = lib.listToAttrs (lib.concatMap (cli:
       let def = cliDefs.${cli}; in
       lib.mapAttrsToList (name: srcPath: {
         name  = "${def.agentDir}/${name}.${def.agentExt}";
         value = { source = def.buildAgent name srcPath; };
       }) agents
-    ) (builtins.attrNames cliDefs));
+    ) agentClis);
 
-  # The shared rules and per-CLI gateway registration
+  # 共有 rule と CLI ごとの gateway 登録
   ruleFiles = {
     ".claude/CLAUDE.md".source          = ../share/AGENTS.md;
     ".codex/AGENTS.md".source           = ../share/AGENTS.md;
@@ -153,7 +111,7 @@ let
 
   # CLI が runtime 所有する seed config、欠落か stale symlink 時のみ書き込み
   seedConfig = rel: src: ''
-    f="${homeDir}/${rel}"
+    f="${my.homeDir}/${rel}"
     if [ -L "$f" ] || [ ! -e "$f" ]; then
       rm -f "$f"
       install -Dm600 ${src} "$f"
@@ -162,8 +120,8 @@ let
 in
 {
   assertions = [
-    (mkDupAssert "between local and plugins" localVsPluginDupes)
-    (mkDupAssert "across plugins" pluginSkillDupes)
+    (mkDupAssert "between local and plugins" skills.localVsPluginDupes)
+    (mkDupAssert "across plugins" skills.pluginSkillDupes)
   ];
 
   home.file = ruleFiles // skillFiles // agentFiles;
@@ -173,9 +131,8 @@ in
     + seedConfig ".codex/config.toml" ./nixos/.codex/config.toml
   );
 
-  # Claude owns ~/.claude.json at runtime, so the gateway is registered imperatively
-  # rather than via a declarative file like the other three CLIs. if-guard (not exit)
-  # so a missing claude binary never aborts the rest of activation.
+  # claude は ~/.claude.json を runtime 所有するため gateway を imperative 登録
+  # claude バイナリ欠落でも後続 activation を止めない if ガード
   home.activation.claudeMcpRegister = lib.hm.dag.entryAfter [ "seedMutableConfigs" ] ''
     CLAUDE=$HOME/.local/bin/claude
     if [ -x "$CLAUDE" ]; then

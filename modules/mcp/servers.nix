@@ -2,7 +2,7 @@
 
 let
   cfg         = config.my;
-  userHome    = "/home/${cfg.username}";
+  userHome    = cfg.homeDir;
   ep          = import ./endpoints.nix;
   mkMcpServer = pkgs.callPackage ../../pkgs/mk-mcp-server.nix { };
 

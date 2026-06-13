@@ -11,6 +11,12 @@ in
       description = "Primary login user and WSL default user.";
     };
 
+    homeDir = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      description = "Primary user's home directory. Derived from username.";
+    };
+
     gatewayPort = lib.mkOption {
       type = lib.types.port;
       default = 8765;
@@ -44,5 +50,8 @@ in
     };
   };
 
-  config.my.gatewayUrl = lib.mkDefault "http://localhost:${toString cfg.gatewayPort}/mcp";
+  config.my = {
+    homeDir    = "/home/${cfg.username}";
+    gatewayUrl = lib.mkDefault "http://localhost:${toString cfg.gatewayPort}/mcp";
+  };
 }

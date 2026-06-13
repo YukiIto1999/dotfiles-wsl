@@ -4,6 +4,7 @@ let
   cfg = config.my;
   ep  = import ./endpoints.nix;
   ph  = config.sops.placeholder;
+  render = import ../render.nix { inherit pkgs; };
 
   agentmemoryUid   = "65532";
   agentmemoryImage = pkgs.callPackage ../../pkgs/agentmemory { };
@@ -22,11 +23,11 @@ let
     httpPort   = ep.ports.agentmemory;
     streamPort = ep.ports.agentmemoryStream;
   };
-  searxngSettings = builtins.readFile (pkgs.replaceVars ../../templates/searxng-settings.yml {
+  searxngSettings = render ../../templates/searxng-settings.yml {
     searxngSecret = ph."searxng/secret_key";
     searxngPort   = ep.ports.searxng;
     valkeyPort    = ep.ports.valkey;
-  });
+  };
 
   loopback = port: [ "-p" "127.0.0.1:${port}:${port}" ];
 

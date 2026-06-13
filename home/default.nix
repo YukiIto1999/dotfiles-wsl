@@ -1,4 +1,4 @@
-{ pkgs, lib, osConfig, ... }:
+{ config, pkgs, lib, osConfig, ... }:
 
 let
   inherit (osConfig) my;
@@ -10,8 +10,14 @@ in
   ];
 
   home.username      = my.username;
-  home.homeDirectory = "/home/${my.username}";
+  home.homeDirectory = my.homeDir;
   home.stateVersion  = "25.11";
+
+  # home module 間で共有する値
+  _module.args = {
+    dotfilesAbs = "${my.homeDir}/dotfiles-wsl";
+    symlink     = config.lib.file.mkOutOfStoreSymlink;
+  };
 
   home.packages = with pkgs; [
     nodejs_24

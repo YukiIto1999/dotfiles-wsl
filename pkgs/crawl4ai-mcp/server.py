@@ -34,7 +34,7 @@ async def listTools():
     ]
 
 
-# crawl4ai は tool 名と REST パスが一致
+# crawl4ai の tool 名は REST path と 1:1 対応
 @server.call_tool()
 async def callTool(name, arguments):
     async with httpx.AsyncClient(timeout=None) as client:

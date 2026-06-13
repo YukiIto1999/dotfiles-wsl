@@ -13,7 +13,7 @@ let
     hash          = "sha256-AfxRkLYb8Q6UtRQ6FIYaY5KxQOoaon6De5OAG1fleq4=";
   };
 
-  # iii-sdk を engine と同 version に固定
+  # engine と同 version に固定した iii-sdk
   agentmemoryPkg = pkgs.buildNpmPackage {
     pname        = "agentmemory-deploy";
     version      = agentmemoryVersion;
@@ -30,7 +30,7 @@ let
     ln -s ${agentmemoryModule} $out/opt/agentmemory
   '';
 
-  # iii-exec の sh -c 起動用に shell 同梱、/bin のみ link し base の /lib 動的リンカ温存
+  # iii-exec の sh -c 向けに shell を同梱し /bin のみ link、base image の /lib loader を温存
   runtimeRoot = pkgs.buildEnv {
     name        = "agentmemory-root";
     paths       = [ pkgs.nodejs_24 pkgs.bashInteractive pkgs.coreutils ];

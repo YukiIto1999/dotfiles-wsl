@@ -1,6 +1,11 @@
-{ config, ... }:
+{ config, pkgs, ... }:
 
-# WSL integration. NixOS-WSL supplies WSLg, interop and the Windows driver mount.
+let
+  # cmd.exe 経由の最小 wslview
+  wslview = pkgs.writeShellScriptBin "wslview" ''
+    exec /mnt/c/Windows/System32/cmd.exe /c start "" "$1" 2>/dev/null
+  '';
+in
 {
   wsl = {
     enable = true;
@@ -17,5 +22,6 @@
   };
 
   environment.localBinInPath = true;
+  environment.systemPackages = [ wslview ];
   programs.nix-ld.enable = true;
 }

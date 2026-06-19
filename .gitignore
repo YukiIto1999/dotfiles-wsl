@@ -17,7 +17,6 @@ Thumbs.db
 /.idea/
 
 # Agent
-/.antigravitycli/
 /.playwright-mcp/
 /.claude/
 /.codex/

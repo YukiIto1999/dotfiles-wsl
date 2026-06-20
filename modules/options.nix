@@ -17,6 +17,12 @@ in
       description = "Primary user's home directory. Derived from username.";
     };
 
+    dotfilesDir = lib.mkOption {
+      type = lib.types.str;
+      default = "${cfg.homeDir}/dotfiles-wsl";
+      description = "Absolute path to the dotfiles checkout that the out-of-store symlink and scripts reference.";
+    };
+
     gatewayPort = lib.mkOption {
       type = lib.types.port;
       default = 8765;
@@ -25,6 +31,7 @@ in
 
     gatewayUrl = lib.mkOption {
       type = lib.types.str;
+      readOnly = true;
       description = "MCP gateway URL every AI CLI points at. Derived from gatewayPort.";
     };
 
@@ -32,7 +39,7 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       example = [ "account-1" "account-2" ];
-      description = "GitHub account ids. Each maps to a sops secret pair, a gh host user and a github MCP target.";
+      description = "GitHub account ids. Each maps to a sops secret pair, a gh host user and a github MCP target. The first entry is primary: gh's active user and the default token in hosts.yml.";
     };
 
     workIdentity = lib.mkOption {
@@ -52,6 +59,6 @@ in
 
   config.my = {
     homeDir    = "/home/${cfg.username}";
-    gatewayUrl = lib.mkDefault "http://localhost:${toString cfg.gatewayPort}/mcp";
+    gatewayUrl = "http://localhost:${toString cfg.gatewayPort}/mcp";
   };
 }

@@ -15,7 +15,7 @@ in
 
   # home module 間で共有する値
   _module.args = {
-    dotfilesAbs = "${my.homeDir}/dotfiles-wsl";
+    dotfilesAbs = my.dotfilesDir;
     symlink     = config.lib.file.mkOutOfStoreSymlink;
   };
 

@@ -9,6 +9,7 @@
     ./fonts.nix
     ./ai-cli.nix
     ./secrets.nix
+    ./accounts.nix
     ./mcp
     ./home.nix
   ];

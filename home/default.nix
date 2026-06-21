@@ -22,7 +22,6 @@ in
   home.packages = with pkgs; [
     nodejs_24
     uv
-    chromium
     ripgrep
     fd
     jq

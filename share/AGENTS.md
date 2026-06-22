@@ -17,10 +17,10 @@ Think in English. Respond in Japanese.
 ## 行動
 
 - 既存コンテキストは `AGENTS.md` / `CLAUDE.md` / README / docs を確認する。
-- ローカルコードの検索は Read / Grep / Glob を、広域探索・構造把握が必要なら `probe-mcp` を使う。
+- ローカルコードの検索は Read / Grep / Glob を、広域探索・構造把握が必要なら `probe` を使う。
 - ライブラリ・フレームワーク仕様は `context7` を先に使う。
 - Web 調査は `web-researcher` を使う。
-- GitHub 操作は対象アカウントの `github-mcp-<account>` を使う。`gh` の active user は `accounts` 先頭固定。
+- GitHub 操作は対象アカウントの `github-<account>` を使う。`gh` の active user は `accounts` 先頭固定。
 - 検索は `rg`、列挙は `fd`、表示は `bat`、一覧は `eza`、diff は `delta` が使える。
 - JSON / YAML / HTTP は `jq` / `yq` / `xh` が使える。
 

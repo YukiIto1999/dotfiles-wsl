@@ -1,6 +1,6 @@
 { config, pkgs, lib, ... }:
 
-# searxng settings template の secret は modules/mcp/backends.nix
+# searxng settings template の secret は modules/mcp/servers/searxng.nix
 # github account 関連は modules/accounts.nix
 
 let
@@ -24,7 +24,6 @@ in
   sops.secrets = {
     "identity/default/name"  = { };
     "identity/default/email" = { };
-    "searxng/secret_key"     = { };
   } // lib.optionalAttrs (cfg.workIdentity != null) {
     "identity/work/name"  = { };
     "identity/work/email" = { };

@@ -1,13 +1,13 @@
 ---
 name: web-researcher
-description: 外部 Web の事実を、searxng-mcp で URL を列挙し、crawl4ai で本文を取って、複数源比較で引用付き回答する手順。snippet 推測 / 単一源の断定 / library docs を web で始める / 古い記事を新しいと誤認、の 4 失敗を構造的に塞ぐ。Claude / Codex が独力で WebSearch を投げると起きがちな失敗を MCP target の責務固定で防ぐ。
+description: 外部 Web の事実を、searxng で URL を列挙し、crawl4ai で本文を取って、複数源比較で引用付き回答する手順。snippet 推測 / 単一源の断定 / library docs を web で始める / 古い記事を新しいと誤認、の 4 失敗を構造的に塞ぐ。Claude / Codex が独力で WebSearch を投げると起きがちな失敗を MCP target の責務固定で防ぐ。
 ---
 
 # Web Researcher
 
 Web を調べるとき、agent は snippet で答えを推測したり、1 件だけ読んで断定したり、ライブラリ公式 docs を取りこぼしたまま二次資料を信じたりしがち。本 skill は次の 3 つを分業に固定する。
 
-- 検索 = URL を列挙するだけ(`searxng-mcp.searxng_web_search`)
+- 検索 = URL を列挙するだけ(`searxng.searxng_web_search`)
 - 本文取得 = URL から markdown を作る(`crawl4ai`)
 - 判断 = 複数源を比較して引用付きで答える(agent 自身)
 
@@ -15,13 +15,13 @@ Web を調べるとき、agent は snippet で答えを推測したり、1 件�
 
 ## いつ使うか
 
-- 外部 Web の事実が必要で、`context7` と `probe-mcp` だけでは足りないとき
+- 外部 Web の事実が必要で、`context7` と `probe` だけでは足りないとき
 - 一次資料を引用付きで提示する必要があるとき
 - 時系列で動く話題(リリース、価格、議論の経緯、最近の API 変更)を扱うとき
 
 使わない場面:
 - ライブラリ / フレームワークの公式 docs を引きたい → `context7` を先に試す
-- 自リポ内のコードを理解したい → `probe-mcp` を先に試す
+- 自リポ内のコードを理解したい → `probe` を先に試す
 - 計算や推論で答えが出る、検索する必要のない話題
 - 自分のメンタル知識で十分自明な事実(検索する前に答えられる)
 
@@ -29,14 +29,14 @@ Web を調べるとき、agent は snippet で答えを推測したり、1 件�
 
 ### 1. クエリ設計
 
-`searxng-mcp.searxng_web_search` を呼ぶ前に、漠然と `<query>` を投げるのをやめる。次の 4 つを組み立ててから検索する。
+`searxng.searxng_web_search` を呼ぶ前に、漠然と `<query>` を投げるのをやめる。次の 4 つを組み立ててから検索する。
 
 - **bang で source を絞る**: `!so`(Stack Overflow)/ `!gh`(GitHub)/ `!arxiv` / `!scholar` / `!wp`(Wikipedia)。複数併用可。コード例なら `!so !gh`、論文なら `!arxiv !scholar`。
 - **site filter**: 出元が決まっているなら `site:docs.<project>.org <query>` のように絞る。
 - **time_range**: 時系列を効かせたいときに `time_range=day` / `week` / `month` / `year`。リリース / 議論 / 価格などの動く話題で必須。
 - **言語**: 日本語固有の議論なら `:ja`、英語 primary なら `:en`。
 
-`searxng-mcp.web_url_read` は呼ばない。本文取得は `crawl4ai` の責務。
+`searxng.web_url_read` は呼ばない。本文取得は `crawl4ai` の責務。
 
 ### 2. URL 選別
 
@@ -106,7 +106,7 @@ URL から完全には見分けられない。次の step で本文を取って�
 | 制約 | 回避 |
 |---|---|
 | Cloudflare bot 保護で 403 | 別 source を当たる。MCP からは stealth 機能が制限される |
-| login wall | API 経路に切替(GitHub なら `github-mcp-<account>`) |
+| login wall | API 経路に切替(GitHub なら `github-<account>`) |
 | 古い記事が SEO で上位 | URL の日付 + 本文中の年月日を必ず照合、`time_range` で絞る |
 | 検索 engine の偏り | bang で複数 engine を散らす |
 | 日本語固有の話題で英語結果しか出ない | `:ja` を付ける、`site:zenn.dev` / `site:qiita.com` を試す |
@@ -140,8 +140,8 @@ URL から完全には見分けられない。次の step で本文を取って�
 | snippet で答えが書いてある、本文要らない | snippet は HTML 先頭の機械抽出。誤誘導が多い。本文を取る |
 | 1 件で十分 | 1 件は反証されない、矛盾も検知できない。最低 2 件 |
 | 公式 docs を web で検索すれば速い | `context7` を先に試す。`context7` で取れる範囲を web に投げると劣化 |
-| 自リポのコードも web で見つかる | `probe-mcp` を先に。web の検索結果は時系列で古い可能性 |
-| `searxng-mcp.web_url_read` で本文取れる | `node-html-markdown` の機械変換のみでノイズ除去なし。`crawl4ai.md` を使う |
+| 自リポのコードも web で見つかる | `probe` を先に。web の検索結果は時系列で古い可能性 |
+| `searxng.web_url_read` で本文取れる | `node-html-markdown` の機械変換のみでノイズ除去なし。`crawl4ai.md` を使う |
 | snippet と順位だけで信頼性を判断できる | SEO スパムも順位を取る。本文を読む |
 | 最新の話題だから上位 = 新しい | 古い記事も SEO で上位に残る。日付を確認 |
 | 英語で検索すれば日本語固有の話題も拾える | 日本語の議論は日本語 source にしかない。`:ja` を付ける |
@@ -159,6 +159,6 @@ URL から完全には見分けられない。次の step で本文を取って�
 ## 関連
 
 - `context7` MCP target — library / framework の公式 docs。本 skill より先に試す
-- `probe-mcp` MCP target — 自リポのコード検索。本 skill より先に試す
-- `WebSearch` 内蔵 tool — Claude / Codex の内蔵検索。`searxng-mcp` が落ちているときの fallback。snippet ベースで本 skill の用途には届かない
+- `probe` MCP target — 自リポのコード検索。本 skill より先に試す
+- `WebSearch` 内蔵 tool — Claude / Codex の内蔵検索。`searxng` が落ちているときの fallback。snippet ベースで本 skill の用途には届かない
 - memory `reference-searxng-crawl4ai-usage` — SearXNG bang / time_range / Crawl4AI tool 群の詳細リファレンス

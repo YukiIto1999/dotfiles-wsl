@@ -1,25 +1,20 @@
-{ pkgs, mkMcpServer }:
+{ pkgs, mkMcpServer, mkNpmMcp }:
 
 # user の repo を検索する code search、probe binary を PATH に同梱
 let
   version = "0.6.0-rc319";
 
-  probePkg = pkgs.buildNpmPackage {
-    pname   = "probe-mcp";
+  probePkg = mkNpmMcp {
+    pname        = "probe-mcp";
     inherit version;
-    src = pkgs.fetchurl {
-      url  = "https://registry.npmjs.org/@probelabs/probe/-/probe-${version}.tgz";
-      hash = "sha256-pis7TU9WWL/EEyfkQfpjkRWMt3U6KwxjysrW4SNoOR0=";
-    };
-    sourceRoot = "package";
-    postPatch = ''
-      cp ${./package-lock.json} ./package-lock.json
+    registryPath = "@probelabs/probe";
+    hash         = "sha256-pis7TU9WWL/EEyfkQfpjkRWMt3U6KwxjysrW4SNoOR0=";
+    lockFile     = ./package-lock.json;
+    npmDepsHash  = "sha256-TKYjQiGW7WwBjDJfS6OhEC79NgfLwvCSHExJnwP4WZ8=";
+    extraPostPatch = ''
       ${pkgs.jq}/bin/jq 'del(.devDependencies, .scripts)' package.json > package.json.tmp
       mv package.json.tmp package.json
     '';
-    npmDepsHash       = "sha256-TKYjQiGW7WwBjDJfS6OhEC79NgfLwvCSHExJnwP4WZ8=";
-    dontNpmBuild      = true;
-    npmFlags          = [ "--ignore-scripts" ];
     npmInstallFlags   = [ "--ignore-scripts" ];
     makeCacheWritable = true;
   };

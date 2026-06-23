@@ -5,13 +5,12 @@
     ./options.nix
     ./wsl.nix
     ./nix.nix
-    ./base.nix
     ./fonts.nix
-    ./ai-cli.nix
     ./secrets.nix
     ./accounts.nix
     ./mcp
-    ./home.nix
+    ./clis
+    ./user
   ];
 
   system.stateVersion = "25.11";

@@ -20,7 +20,7 @@ in
     dotfilesDir = lib.mkOption {
       type = lib.types.str;
       default = "${cfg.homeDir}/dotfiles-wsl";
-      description = "Absolute path to the dotfiles checkout that the out-of-store symlink and scripts reference.";
+      description = "Absolute path to the dotfiles checkout that out-of-store symlinks and scripts reference.";
     };
 
     gatewayPort = lib.mkOption {

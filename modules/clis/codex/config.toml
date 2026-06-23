@@ -1,5 +1,5 @@
-model = "gpt-5.5"
+model = "@codexModel@"
 model_reasoning_effort = "xhigh"
 
 [tui.model_availability_nux]
-"gpt-5.5" = 4
+"@codexModel@" = 4

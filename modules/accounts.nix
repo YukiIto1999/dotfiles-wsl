@@ -27,7 +27,7 @@ in
   sops.templates = lib.optionalAttrs (cfg.accounts != [ ]) (
     let
       primaryAccount = builtins.head cfg.accounts;
-      ghHosts = builtins.readFile (pkgs.replaceVars ../home/nixos/.config/gh/hosts.yml {
+      ghHosts = builtins.readFile (pkgs.replaceVars ./user/gh/hosts.yml {
         accountUsers    = lib.concatMapStrings buildGhUser cfg.accounts;
         primaryUsername = placeholder."accounts/${primaryAccount}/username";
         primaryToken    = placeholder."accounts/${primaryAccount}/token";

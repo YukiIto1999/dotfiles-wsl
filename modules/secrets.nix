@@ -15,7 +15,7 @@ let
     group = "users";
   };
 
-  gitIdentity = vars: builtins.readFile (pkgs.replaceVars ../home/nixos/.config/git/identity.conf vars);
+  gitIdentity = vars: builtins.readFile (pkgs.replaceVars ./user/git/identity.conf vars);
 in
 {
   sops.defaultSopsFile = ../secrets/secrets.yaml;

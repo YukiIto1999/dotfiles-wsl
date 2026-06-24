@@ -12,7 +12,7 @@ let
     group = "users";
   };
 
-  buildGhUser = name: builtins.readFile (pkgs.replaceVars ./gh-user.yml {
+  buildGhUser = name: builtins.readFile (pkgs.replaceVars ./user.yml {
     accountUsername = placeholder."accounts/${name}/username";
     accountToken    = placeholder."accounts/${name}/token";
   });
@@ -27,7 +27,7 @@ in
   sops.templates = lib.optionalAttrs (cfg.accounts != [ ]) (
     let
       primaryAccount = builtins.head cfg.accounts;
-      ghHosts = builtins.readFile (pkgs.replaceVars ./user/gh/hosts.yml {
+      ghHosts = builtins.readFile (pkgs.replaceVars ./hosts.yml {
         accountUsers    = lib.concatMapStrings buildGhUser cfg.accounts;
         primaryUsername = placeholder."accounts/${primaryAccount}/username";
         primaryToken    = placeholder."accounts/${primaryAccount}/token";

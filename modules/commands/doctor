@@ -1,0 +1,182 @@
+fail=0
+dotfiles="@dotfilesDir@"
+gateway_url="@gatewayUrl@"
+
+ok()   { printf 'OK: %s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+bad()  { printf 'FAIL: %s\n' "$*" >&2; fail=1; }
+
+check_file() {
+  local path=$1
+  [[ -e $path || -L $path ]] && ok "$path exists" || bad "missing $path"
+}
+
+check_dir() {
+  local path=$1
+  [[ -d $path ]] && ok "$path exists" || bad "missing directory $path"
+}
+
+check_command_upstream() {
+  local cmd=$1 path version
+  path=$(type -P "$cmd" 2>/dev/null || true)
+  if [[ -z $path ]]; then
+    bad "$cmd not found in PATH"
+    return
+  fi
+
+  case "$path" in
+    /nix/store/*|/run/current-system/*|/etc/profiles/*)
+      bad "$cmd resolves to Nix-managed binary: $path"
+      return
+      ;;
+  esac
+
+  version="$($cmd --version 2>/dev/null | head -n1 || true)"
+  [[ -n $version ]] && ok "$cmd -> $path ($version)" || bad "$cmd exists but version check failed: $path"
+}
+
+check_unit_not_failed() {
+  local unit=$1
+  if systemctl is-failed --quiet "$unit" 2>/dev/null; then
+    bad "$unit is failed"
+    systemctl status "$unit" --no-pager 2>/dev/null || true
+  else
+    ok "$unit is not failed"
+  fi
+}
+
+wait_unit_active() {
+  local unit=$1 tries=${2:-30} sleep_s=${3:-2} i
+  for ((i = 1; i <= tries; i++)); do
+    if systemctl is-active --quiet "$unit" 2>/dev/null; then
+      ok "$unit is active"
+      return 0
+    fi
+    sleep "$sleep_s"
+  done
+  bad "$unit is not active after $((tries * sleep_s))s"
+  systemctl status "$unit" --no-pager 2>/dev/null || true
+}
+
+actual_etc="$(readlink -f /etc/nixos 2>/dev/null || true)"
+[[ $actual_etc == "$dotfiles" ]] && ok "/etc/nixos -> $actual_etc" || bad "/etc/nixos -> ${actual_etc:-<none>}; expected $dotfiles"
+
+check_file "$dotfiles/flake.nix"
+check_file "$dotfiles/flake.lock"
+check_file "$dotfiles/modules/default.nix"
+check_file "$dotfiles/secrets/secrets.yaml"
+
+# roster から導出する CLI ごとの検査。1 行 1 CLI(name|binary|rulesFile|skillsDir|agentsDir|gatewayFile)
+declare -A seen_skills=()
+
+while IFS='|' read -r name binary rules skills agents gateway; do
+  [[ -n $name ]] || continue
+
+  check_command_upstream "$binary"
+  check_file "$HOME/$rules"
+  check_dir "$HOME/$skills"
+
+  if [[ -n $agents ]]; then
+    check_dir "$HOME/$agents"
+  fi
+
+  if [[ -n $gateway ]]; then
+    if grep -qF -- "$gateway_url" "$HOME/$gateway" 2>/dev/null; then
+      ok "$name gateway file references gateway URL"
+    else
+      bad "$name gateway file missing or stale: $HOME/$gateway"
+    fi
+  fi
+
+  if [[ -d "$HOME/$skills" ]]; then
+    while IFS= read -r -d '' entry; do
+      seen_skills["$(basename "$entry")"]=1
+    done < <(find "$HOME/$skills" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>/dev/null)
+  fi
+done <<< "
+@cliTable@
+"
+
+# codex は home seed と別に /etc/codex/config.toml を常時管理する
+if [[ -f /etc/codex/config.toml ]]; then
+  if grep -qF -- "$gateway_url" /etc/codex/config.toml; then
+    ok "codex system gateway URL configured"
+  else
+    bad "codex system gateway URL missing in /etc/codex/config.toml"
+  fi
+else
+  bad "missing /etc/codex/config.toml"
+fi
+
+# share/AGENTS.md の skills 表と配備実体の同期
+agents_md="$dotfiles/share/AGENTS.md"
+if [[ -f $agents_md ]]; then
+  table_skills=$(awk '/^## skills$/{flag=1; next} /^## /{flag=0} flag' "$agents_md" | grep -oE '`[A-Za-z0-9_-]+`' | tr -d '`' | sort -u || true)
+  actual_skills=$(printf '%s\n' "${!seen_skills[@]}" | sort -u)
+
+  only_table=$(comm -23 <(printf '%s\n' "$table_skills") <(printf '%s\n' "$actual_skills"))
+  only_actual=$(comm -13 <(printf '%s\n' "$table_skills") <(printf '%s\n' "$actual_skills"))
+
+  [[ -z $only_table ]]  || warn "share/AGENTS.md lists skills with no deployed dir: $(tr '\n' ' ' <<< "$only_table")"
+  [[ -z $only_actual ]] || warn "deployed skills missing from share/AGENTS.md table: $(tr '\n' ' ' <<< "$only_actual")"
+else
+  bad "missing $agents_md"
+fi
+
+wait_unit_active docker.service
+wait_unit_active docker-mcp-backends-network.service
+wait_unit_active agentgateway.service
+
+read -ra gateway_wait_units <<< '@gatewayWaitUnits@'
+for unit in "${gateway_wait_units[@]}"; do
+  wait_unit_active "$unit"
+done
+
+check_unit_not_failed "home-manager-@username@.service"
+
+# MCP 実働検査: initialize で session を取り、tools/list に my.mcp.targets の全 target が現れるか
+read -ra mcp_targets <<< '@mcpTargetNames@'
+
+sid=$(curl -s -m 5 -X POST "$gateway_url" \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"dotfiles-doctor","version":"1"}}}' \
+  -D - -o /dev/null 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower($1) == "mcp-session-id" { print $2 }' || true)
+
+if [[ -z $sid ]]; then
+  bad "gateway MCP initialize failed: no session id from $gateway_url"
+else
+  tools_json=$(curl -s -m 5 -X POST "$gateway_url" \
+    -H 'Content-Type: application/json' \
+    -H 'Accept: application/json, text/event-stream' \
+    -H "Mcp-Session-Id: $sid" \
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' 2>/dev/null || true)
+  tools_json=${tools_json#data: }
+
+  missing=""
+  for target in "${mcp_targets[@]}"; do
+    if ! jq -e --arg t "$target" 'any(.result.tools[]?; .name | startswith($t + "_"))' <<< "$tools_json" >/dev/null 2>&1; then
+      missing="$missing $target"
+    fi
+  done
+
+  if [[ -z $missing ]]; then
+    ok "gateway tools/list covers all MCP targets"
+  else
+    bad "gateway tools/list missing targets:$missing"
+  fi
+fi
+
+command -v wslview >/dev/null 2>&1 && ok "wslview exists" || bad "wslview missing"
+
+if [[ -e /lib64/ld-linux-x86-64.so.2 || -e /lib/ld-linux-x86-64.so.2 ]]; then
+  ok "nix-ld dynamic linker path exists"
+else
+  warn "nix-ld dynamic linker path not found at standard location"
+fi
+
+if [[ -f "$HOME/.config/sops/age/keys.txt" ]]; then
+  warn "age key at ~/.config/sops/age/keys.txt decrypts every secret and is readable by any user process; remove it and edit via 'sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops ...'"
+fi
+
+exit "$fail"

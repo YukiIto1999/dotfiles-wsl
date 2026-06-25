@@ -17,7 +17,7 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 | `share/` | `AGENTS.md`(共通ルール)、`agents/`(subagent)、`skills/`(local skill) |
 | `templates/` | SOPS / 生成 config の template(`gh-user` / `searxng-settings` / `agentmemory`) |
 | `secrets/` | `secrets.yaml`(SOPS + age)と `.sops.yaml` |
-| `scripts/` | `bootstrap` / `doctor` / `install-ai-clis` / `cleanup-local` / `fetch-mcp-info` |
+| `scripts/` | `bootstrap`(初回セットアップ) / `pin-hash`(pin 更新補助)。doctor / rebuild / install-clis / cleanup は `modules/commands.nix` が config から生成する `dotfiles-*` コマンド |
 
 ## 前提
 
@@ -44,7 +44,7 @@ bootstrap は次を実行する。
 | preflight | flake / lock / secrets / age key の存在確認 |
 | verify_tracked_flake_files | untracked file が flake build から見えないため、無いことを確認 |
 | verify_secrets | `nix shell .#sops -c sops -d secrets/secrets.yaml` で復号確認 |
-| install_ai_clis | CLI 本体を upstream から `~/.local/bin` へ配置 |
+| install_ai_clis | `nix run .#dotfiles-install-clis` で CLI 本体を upstream から `~/.local/bin` へ配置 |
 | install_boot_generation | `nixos-rebuild boot --flake "git+file://${HOME}/dotfiles-wsl#nixos" -L` |
 | link_nixos | `/etc/nixos` を `~/dotfiles-wsl` に向ける |
 
@@ -56,18 +56,18 @@ wsl -d NixOS
 ```
 
 ```bash
-~/dotfiles-wsl/scripts/doctor.sh
+dotfiles-doctor
 ```
 
 ## 再ビルド
 
-WSL では systemd の再起動で VS Code Remote セッションが切れるため、通常更新は次回起動時に使う generation として反映する。
+WSL では systemd の再起動で VS Code Remote セッションが切れるため、通常更新は次回起動時に使う generation として反映する。通常更新は `dotfiles-rebuild` を使う。
 
 ```bash
-sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl#nixos" -L
+dotfiles-rebuild
 ```
 
-その後 PowerShell から再起動し、`doctor.sh` を実行する。flake input の更新は `nix flake update`。
+その後 PowerShell から再起動し、`dotfiles-doctor` を実行する。flake input の更新は `nix flake update`。
 
 ## AI コーディング CLI
 
@@ -139,15 +139,15 @@ Claude Code / Codex / OpenCode / Antigravity
 変更後は rebuild する。
 
 ```bash
-sudo nixos-rebuild boot --flake "git+file:///home/nixos/dotfiles-wsl#nixos" -L
+dotfiles-rebuild
 ```
 
-PowerShell から WSL を再起動し、`scripts/doctor.sh` を実行する。
+PowerShell から WSL を再起動し、`dotfiles-doctor` を実行する。
 
 ## セキュリティ
 
 - gateway は loopback 限定で認証は持たない。同一ユーザーのプロセスは gateway 経由で GitHub の書き込み操作などを実行できる。被害を絞るため、PAT は fine-grained + 最小スコープにする。
-- age 鍵は `/var/lib/sops-nix/key.txt`(root `0400`)だけに置く。`~/.config/sops/age/keys.txt` の複製は全 secret を平文で読める状態にするため置かない。編集は `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops secrets/secrets.yaml`。`doctor.sh` が複製を検出して警告する。
+- age 鍵は `/var/lib/sops-nix/key.txt`(root `0400`)だけに置く。`~/.config/sops/age/keys.txt` の複製は全 secret を平文で読める状態にするため置かない。編集は `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops secrets/secrets.yaml`。`dotfiles-doctor` が複製を検出して警告する。
 - 鍵紛失に備え、`.sops.yaml` にオフライン保管の recovery recipient を 1 つ追加して `sops updatekeys` しておく。
 
 ## CI

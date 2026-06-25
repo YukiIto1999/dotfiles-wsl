@@ -11,6 +11,7 @@
     ./mcp
     ./clis
     ./user
+    ./commands.nix
   ];
 
   system.stateVersion = "25.11";

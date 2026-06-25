@@ -1,12 +1,9 @@
-#!/usr/bin/env bash
-set -Eeuo pipefail
-
 usage() {
   cat <<'USAGE'
-usage: cleanup-local.sh [--delete] [--system] [--vscode-server]
+usage: dotfiles-cleanup [--delete] [--system] [--vscode-server]
 
 Without --delete, prints cleanup targets only.
-With --delete, removes local failure leftovers.
+With --delete, removes local Home Manager backup leftovers.
 With --system, also removes /etc/nixos backup/failure leftovers.
 With --vscode-server, also removes ~/.vscode-server so VS Code Remote WSL reinstalls it.
 USAGE
@@ -40,20 +37,12 @@ remove_path() {
 
 shopt -s nullglob globstar
 
-# managed CLI root 下の HM backup と手動復旧の残骸
-for path in \
-  "$HOME"/.claude.bak.* \
-  "$HOME"/.codex.bak.* \
-  "$HOME"/.claude.failed.* \
-  "$HOME"/.codex.failed.* \
-  "$HOME"/dotfiles-wsl.assistant-broken-*.diff \
-  "$HOME"/.claude/**/*.hm-back \
-  "$HOME"/.codex/**/*.hm-back \
-  "$HOME"/.config/git/**/*.hm-back \
-  "$HOME"/.config/gh/**/*.hm-back \
-  "$HOME"/.config/opencode/**/*.hm-back \
-  "$HOME"/.gemini/**/*.hm-back; do
-  remove_path "$path"
+# my.clis の各ディレクトリ宣言 + git/gh 設定 root 下の Home Manager backup 拡張子
+roots=(@cliRootsBashArray@)
+for root in "${roots[@]}"; do
+  for path in "$HOME/$root"/**/*.@hmBackupExt@; do
+    remove_path "$path"
+  done
 done
 
 if [[ $system -eq 1 ]]; then

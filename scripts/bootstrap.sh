@@ -48,7 +48,7 @@ verify_secrets() {
 }
 
 install_ai_clis() {
-  as_user nix shell "${FLAKE_REF}#ai-cli-install-tools" -c "${DOTFILES}/scripts/install-ai-clis.sh"
+  as_user nix run "${FLAKE_REF}#dotfiles-install-clis"
   step "AI CLIs installed from upstream"
 }
 
@@ -80,6 +80,7 @@ link_nixos() {
 }
 
 main() {
+  # config 生成前に実行するため my.username を参照できない。既定値と同じ "nixos" を使う。
   local -r TARGET_USER="nixos"
   local -r USER_HOME="/home/${TARGET_USER}"
   local -r DOTFILES="${USER_HOME}/dotfiles-wsl"
@@ -116,7 +117,7 @@ Restart this WSL distribution from PowerShell:
 
 Then run:
 
-  ~/dotfiles-wsl/scripts/doctor.sh
+  dotfiles-doctor
 
 MSG
 }

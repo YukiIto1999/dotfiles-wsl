@@ -1,0 +1,27 @@
+die() { echo "FATAL: $*" >&2; exit 1; }
+
+dotfiles="@dotfilesDir@"
+
+# untracked file は git+file flake から見えず、無言で配備から落ちる
+untracked=$(git -C "$dotfiles" ls-files --others --exclude-standard)
+if [[ -n $untracked ]]; then
+  printf '%s\n' "$untracked" >&2
+  die "untracked files block the flake build; run: git -C $dotfiles add -A"
+fi
+
+sudo nixos-rebuild boot --flake "git+file://$dotfiles#nixos" -L
+
+cat <<MSG
+
+Rebuild complete (boot generation only; not yet active).
+
+Restart this WSL distribution from PowerShell:
+
+  wsl -t NixOS
+  wsl -d NixOS
+
+Then run:
+
+  dotfiles-doctor
+
+MSG

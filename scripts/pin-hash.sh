@@ -4,12 +4,12 @@ set -Eeuo pipefail
 usage() {
   cat <<'USAGE'
 usage:
-  fetch-mcp-info.sh url <URL>
-  fetch-mcp-info.sh image <IMAGE>
+  pin-hash.sh url <URL>
+  pin-hash.sh image <IMAGE>
 
 Examples:
-  fetch-mcp-info.sh url https://github.com/agentgateway/agentgateway/releases/download/v1.2.1/agentgateway-linux-amd64
-  fetch-mcp-info.sh image mcr.microsoft.com/playwright/mcp:latest
+  pin-hash.sh url https://github.com/agentgateway/agentgateway/releases/download/v1.2.1/agentgateway-linux-amd64
+  pin-hash.sh image valkey/valkey:latest
 USAGE
 }
 

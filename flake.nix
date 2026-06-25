@@ -53,14 +53,13 @@
 
       packages.${system} =
         let
-          pkgs = self.nixosConfigurations.${hostName}.pkgs;
+          hostConfig = self.nixosConfigurations.${hostName}.config;
+          pkgs       = self.nixosConfigurations.${hostName}.pkgs;
         in
         {
           sops = pkgs.sops;
-          ai-cli-install-tools = pkgs.buildEnv {
-            name  = "ai-cli-install-tools";
-            paths = with pkgs; [ curl jq gnutar gzip ];
-          };
+          # bootstrap が最初の rebuild 前、system closure が無い状態から呼ぶ
+          dotfiles-install-clis = hostConfig.my.commands.installClis;
         };
 
       checks.${system} =

@@ -1,17 +1,25 @@
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 # doctor / rebuild / install-clis / cleanup を my.clis roster と my.mcp から生成する
 # writeShellApplication は shellcheck を build に含むため、規約逸脱は nix build 時点で落ちる
 let
-  cfg   = config.my;
-  clis  = cfg.clis;
+  cfg = config.my;
+  inherit (cfg) clis;
   names = builtins.attrNames clis;
 
   orElse = v: default: if v == null then default else v;
 
   # roster を「1 行 1 CLI」の pipe 区切りテーブルへ変換、doctor / install-clis はこれを読むだけ
-  cliRow = name:
-    let c = clis.${name}; in
+  cliRow =
+    name:
+    let
+      c = clis.${name};
+    in
     lib.concatStringsSep "|" [
       name
       c.binary
@@ -21,10 +29,21 @@ let
       (orElse c.gatewayFile "")
     ];
 
-  installRow = name:
-    let c = clis.${name}; in
+  installRow =
+    name:
+    let
+      c = clis.${name};
+    in
     if c.install.kind == "installer-script" then
-      lib.concatStringsSep "|" [ name c.install.kind c.binary c.install.scriptUrl "" "" "" ]
+      lib.concatStringsSep "|" [
+        name
+        c.install.kind
+        c.binary
+        c.install.scriptUrl
+        ""
+        ""
+        ""
+      ]
     else
       lib.concatStringsSep "|" [
         name
@@ -37,58 +56,94 @@ let
       ];
 
   # cleanup が hm-back を掃く root。.config/<x> は 2 段まで、それ以外は先頭 1 段
-  cliRootOf = path:
-    let segs = lib.splitString "/" path; in
-    if builtins.head segs == ".config"
-    then lib.concatStringsSep "/" (lib.sublist 0 2 segs)
-    else builtins.head segs;
+  cliRootOf =
+    path:
+    let
+      segs = lib.splitString "/" path;
+    in
+    if builtins.head segs == ".config" then
+      lib.concatStringsSep "/" (lib.sublist 0 2 segs)
+    else
+      builtins.head segs;
 
-  cliRoots = lib.unique (map (name: cliRootOf clis.${name}.rulesFile) names)
-    ++ [ ".config/git" ".config/gh" ];
+  cliRoots = lib.unique (map (name: cliRootOf clis.${name}.rulesFile) names) ++ [
+    ".config/git"
+    ".config/gh"
+  ];
 
-  substitute = vars: text:
-    builtins.replaceStrings
-      (map (k: "@${k}@") (builtins.attrNames vars))
-      (builtins.attrValues vars)
-      text;
+  substitute =
+    vars: text:
+    builtins.replaceStrings (map (k: "@${k}@") (
+      builtins.attrNames vars
+    )) (builtins.attrValues vars) text;
 
   commonVars = {
-    dotfilesDir       = cfg.dotfilesDir;
-    gatewayUrl        = cfg.gatewayUrl;
-    username          = cfg.username;
-    cliTable          = lib.concatStringsSep "\n" (map cliRow names);
-    installTable      = lib.concatStringsSep "\n" (map installRow names);
-    mcpTargetNames    = lib.concatStringsSep " " (builtins.attrNames cfg.mcp.targets);
-    gatewayWaitUnits  = lib.concatStringsSep " " cfg.mcp.gatewayWaitUnits;
+    inherit (cfg) dotfilesDir;
+    inherit (cfg) gatewayUrl;
+    inherit (cfg) username;
+    cliTable = lib.concatStringsSep "\n" (map cliRow names);
+    installTable = lib.concatStringsSep "\n" (map installRow names);
+    mcpTargetNames = lib.concatStringsSep " " (builtins.attrNames cfg.mcp.targets);
+    gatewayWaitUnits = lib.concatStringsSep " " cfg.mcp.gatewayWaitUnits;
     cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
-    hmBackupExt       = config.home-manager.backupFileExtension;
+    hmBackupExt = config.home-manager.backupFileExtension;
   };
 
-  mkCommand = name: srcFile: runtimeInputs: extra: pkgs.writeShellApplication ({
-    inherit name runtimeInputs;
-    text = substitute commonVars (builtins.readFile srcFile);
-  } // extra);
+  mkCommand =
+    name: srcFile: runtimeInputs: extra:
+    pkgs.writeShellApplication (
+      {
+        inherit name runtimeInputs;
+        text = substitute commonVars (builtins.readFile srcFile);
+      }
+      // extra
+    );
 
   # ok/bad の A && B || C は本 repo の一貫した idiom(元 scripts/*.sh も同型)、SC2015/16 は許容
-  doctorChecks = { excludeShellChecks = [ "SC2015" "SC2016" ]; };
+  doctorChecks = {
+    excludeShellChecks = [
+      "SC2015"
+      "SC2016"
+    ];
+  };
 
-  doctor      = mkCommand "dotfiles-doctor" ./commands/doctor
-    (with pkgs; [ curl jq gnugrep gawk coreutils findutils systemd ]) doctorChecks;
-  rebuild     = mkCommand "dotfiles-rebuild" ./commands/rebuild
-    (with pkgs; [ git coreutils ]) { };
-  installClis = mkCommand "dotfiles-install-clis" ./commands/install-clis
-    (with pkgs; [ curl jq gnutar gzip coreutils ]) { };
-  cleanup     = mkCommand "dotfiles-cleanup" ./commands/cleanup
-    (with pkgs; [ coreutils ]) { };
+  doctor = mkCommand "dotfiles-doctor" ./commands/doctor (with pkgs; [
+    curl
+    jq
+    gnugrep
+    gawk
+    coreutils
+    findutils
+    systemd
+  ]) doctorChecks;
+  rebuild = mkCommand "dotfiles-rebuild" ./commands/rebuild (with pkgs; [
+    git
+    coreutils
+  ]) { };
+  installClis = mkCommand "dotfiles-install-clis" ./commands/install-clis (with pkgs; [
+    curl
+    jq
+    gnutar
+    gzip
+    coreutils
+  ]) { };
+  cleanup = mkCommand "dotfiles-cleanup" ./commands/cleanup (with pkgs; [ coreutils ]) { };
 in
 {
   options.my.commands = lib.mkOption {
-    type        = lib.types.attrsOf lib.types.package;
-    internal    = true;
+    type = lib.types.attrsOf lib.types.package;
+    internal = true;
     description = "config から生成する運用コマンド。flake.nix の packages 出力が nixosConfiguration 経由でここを参照する。";
   };
 
-  config.my.commands = { inherit doctor rebuild cleanup installClis; };
+  config.my.commands = {
+    inherit
+      doctor
+      rebuild
+      cleanup
+      installClis
+      ;
+  };
 
   config.environment.systemPackages = builtins.attrValues cfg.commands;
 }

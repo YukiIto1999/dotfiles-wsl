@@ -1,4 +1,10 @@
-{ lib, pkgs, mkMcpServer, mkNpmMcp, ... }:
+{
+  lib,
+  pkgs,
+  mkMcpServer,
+  mkNpmMcp,
+  ...
+}:
 
 let
   front = pkgs.callPackage ../../../pkgs/probe-mcp { inherit mkMcpServer mkNpmMcp; };

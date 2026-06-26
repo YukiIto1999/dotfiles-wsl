@@ -1,12 +1,21 @@
-{ lib, pkgs, mkMcpServer, mkMcpBackend, ... }:
+{
+  lib,
+  pkgs,
+  mkMcpServer,
+  mkMcpBackend,
+  ...
+}:
 
 let
   port = "11235";
 
   backend = mkMcpBackend "crawl4ai" {
-    image        = "unclecode/crawl4ai:latest@sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
-    extraOptions = [ "--memory=2g" "--shm-size=1g" ];
-    ports        = [ port ];
+    image = "unclecode/crawl4ai:latest@sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
+    extraOptions = [
+      "--memory=2g"
+      "--shm-size=1g"
+    ];
+    ports = [ port ];
   };
 
   front = pkgs.callPackage ../../../pkgs/crawl4ai-mcp {

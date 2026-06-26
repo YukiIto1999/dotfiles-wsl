@@ -1,4 +1,10 @@
-{ config, pkgs, lib, pluginSources, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  pluginSources,
+  ...
+}:
 
 let
   cfg = config.my;
@@ -30,15 +36,15 @@ in
     nix-direnv.enable = true;
   };
 
-  home-manager.useGlobalPkgs       = true;
-  home-manager.useUserPackages     = true;
+  home-manager.useGlobalPkgs = true;
+  home-manager.useUserPackages = true;
   home-manager.backupFileExtension = "hm-back";
-  home-manager.extraSpecialArgs    = { inherit pluginSources; };
+  home-manager.extraSpecialArgs = { inherit pluginSources; };
 
-  home-manager.users.${cfg.username} = { ... }: {
-    home.username      = cfg.username;
+  home-manager.users.${cfg.username} = _: {
+    home.username = cfg.username;
     home.homeDirectory = cfg.homeDir;
-    home.stateVersion  = "25.11";
+    home.stateVersion = "25.11";
 
     home.packages = with pkgs; [
       nodejs_24
@@ -59,6 +65,8 @@ in
     home.sessionVariables.BROWSER = "wslview";
     home.sessionPath = [ "$HOME/.local/bin" ];
 
-    programs = lib.genAttrs [ "gh" "bash" "fzf" "zoxide" "bat" "eza" ] (_: { enable = true; });
+    programs = lib.genAttrs [ "gh" "bash" "fzf" "zoxide" "bat" "eza" ] (_: {
+      enable = true;
+    });
   };
 }

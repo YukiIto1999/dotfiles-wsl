@@ -1,4 +1,10 @@
-{ lib, pkgs, mkMcpServer, mkMcpBackend, ... }:
+{
+  lib,
+  pkgs,
+  mkMcpServer,
+  mkMcpBackend,
+  ...
+}:
 
 let
   uid = "65532";
@@ -17,22 +23,22 @@ let
   };
 
   backend = mkMcpBackend "agentmemory" {
-    image     = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
+    image = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
     imageFile = agentmemory.image;
     volumes = [
       "${agentmemoryConfig}:/app/config.yaml:ro"
       "/var/lib/agentmemory/data:/data"
     ];
     extraOptions = [ "--user=${uid}:${uid}" ];
-    ports        = [ httpPort ];
+    ports = [ httpPort ];
   };
 in
 {
   systemd.tmpfiles.settings."agentmemory" = {
     "/var/lib/agentmemory/data".d = {
-      user  = uid;
+      user = uid;
       group = uid;
-      mode  = "0755";
+      mode = "0755";
     };
   };
 

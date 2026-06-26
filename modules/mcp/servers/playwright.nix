@@ -1,4 +1,9 @@
-{ lib, pkgs, mkMcpServer, ... }:
+{
+  lib,
+  pkgs,
+  mkMcpServer,
+  ...
+}:
 
 let
   front = pkgs.callPackage ../../../pkgs/playwright-mcp { inherit mkMcpServer; };

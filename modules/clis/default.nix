@@ -1,15 +1,23 @@
-{ config, lib, pluginSources, ... }:
+{
+  config,
+  lib,
+  pluginSources,
+  ...
+}:
 
 # my.clis roster と share/ fan-out engine。CLI を 1 つ足す単位はこのディレクトリ配下。
 let
-  cfg   = config.my;
-  clis  = cfg.clis;
+  cfg = config.my;
+  inherit (cfg) clis;
   names = builtins.attrNames clis;
 
   installType = lib.types.submodule {
     freeformType = lib.types.attrsOf lib.types.anything;
     options.kind = lib.mkOption {
-      type = lib.types.enum [ "installer-script" "github-release" ];
+      type = lib.types.enum [
+        "installer-script"
+        "github-release"
+      ];
       description = "goal 05 の installer 生成が分岐に使う種別。";
     };
   };
@@ -58,12 +66,13 @@ let
     "${pluginSources.claude-plugins-official}/plugins/skill-creator"
   ];
 
-  findSkillsIn = pluginPath:
+  findSkillsIn =
+    pluginPath:
     let
       skillsRoot = "${pluginPath}/skills";
       entries = if builtins.pathExists skillsRoot then builtins.readDir skillsRoot else { };
-      dirs = lib.filterAttrs (n: t:
-        t == "directory" && builtins.pathExists "${skillsRoot}/${n}/SKILL.md"
+      dirs = lib.filterAttrs (
+        n: t: t == "directory" && builtins.pathExists "${skillsRoot}/${n}/SKILL.md"
       ) entries;
     in
     lib.mapAttrs' (name: _: lib.nameValuePair name "${skillsRoot}/${name}") dirs;
@@ -71,39 +80,47 @@ let
   pluginSkills = lib.foldl' (acc: p: acc // findSkillsIn p) { } pluginPaths;
   pluginSkillDupes =
     let
-      flat   = lib.concatMap (p: builtins.attrNames (findSkillsIn p)) pluginPaths;
+      flat = lib.concatMap (p: builtins.attrNames (findSkillsIn p)) pluginPaths;
       counts = lib.foldl' (acc: n: acc // { ${n} = (acc.${n} or 0) + 1; }) { } flat;
     in
     builtins.attrNames (lib.filterAttrs (_: c: c > 1) counts);
 
   localSkillsRoot = ../../share/skills;
-  localSkills = lib.mapAttrs' (name: _:
-      lib.nameValuePair name "${cfg.dotfilesDir}/share/skills/${name}"
-    ) (lib.filterAttrs (n: t:
-         t == "directory" && builtins.pathExists (localSkillsRoot + "/${n}/SKILL.md")
-       ) (builtins.readDir localSkillsRoot));
+  localSkills =
+    lib.mapAttrs' (name: _: lib.nameValuePair name "${cfg.dotfilesDir}/share/skills/${name}")
+      (
+        lib.filterAttrs (
+          n: t: t == "directory" && builtins.pathExists (localSkillsRoot + "/${n}/SKILL.md")
+        ) (builtins.readDir localSkillsRoot)
+      );
 
-  localVsPluginDupes =
-    builtins.filter (n: builtins.hasAttr n pluginSkills) (builtins.attrNames localSkills);
+  localVsPluginDupes = builtins.filter (n: builtins.hasAttr n pluginSkills) (
+    builtins.attrNames localSkills
+  );
 
   allSkills = pluginSkills // localSkills;
 
   # share/agents/*.md の素材一覧、名前は拡張子抜き
-  agentSrcs = lib.mapAttrs' (filename: _:
-      lib.nameValuePair (lib.removeSuffix ".md" filename) (../../share/agents + "/${filename}")
-    ) (lib.filterAttrs (n: t:
-         t == "regular" && lib.hasSuffix ".md" n
-       ) (builtins.readDir ../../share/agents));
+  agentSrcs =
+    lib.mapAttrs'
+      (
+        filename: _:
+        lib.nameValuePair (lib.removeSuffix ".md" filename) (../../share/agents + "/${filename}")
+      )
+      (
+        lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".md" n) (
+          builtins.readDir ../../share/agents
+        )
+      );
 
   agentClis = lib.filter (name: clis.${name}.agentsDir != null) names;
 
   # 変換結果の配備ファイル名。derivation は自身の name、素通しは srcPath の basename を使う
-  destBaseName = out:
-    if lib.isDerivation out then out.name else builtins.baseNameOf (toString out);
+  destBaseName = out: if lib.isDerivation out then out.name else builtins.baseNameOf (toString out);
 
   mkDupAssert = label: dupes: {
     assertion = dupes == [ ];
-    message   = "Duplicate skill names ${label}: " + lib.concatStringsSep ", " dupes;
+    message = "Duplicate skill names ${label}: " + lib.concatStringsSep ", " dupes;
   };
 in
 {
@@ -130,33 +147,47 @@ in
     fi
   '';
 
-  config.home-manager.users.${cfg.username} = { config, lib, ... }: {
-    assertions = [
-      (mkDupAssert "between local and plugins" localVsPluginDupes)
-      (mkDupAssert "across plugins" pluginSkillDupes)
-    ];
+  config.home-manager.users.${cfg.username} =
+    { config, lib, ... }:
+    {
+      assertions = [
+        (mkDupAssert "between local and plugins" localVsPluginDupes)
+        (mkDupAssert "across plugins" pluginSkillDupes)
+      ];
 
-    home.file =
-      (lib.listToAttrs (map (name:
-        lib.nameValuePair clis.${name}.rulesFile { source = ../../share/AGENTS.md; }
-      ) names))
-      // (lib.listToAttrs (lib.concatMap (name:
-          let dir = clis.${name}.skillsDir; in
-          lib.mapAttrsToList (skillName: src:
-            lib.nameValuePair "${dir}/${skillName}" {
-              source =
-                if builtins.hasAttr skillName pluginSkills
-                then src
-                else config.lib.file.mkOutOfStoreSymlink src;
-            }
-          ) allSkills
-        ) names))
-      // (lib.listToAttrs (lib.concatMap (name:
-          let def = clis.${name}; in
-          lib.mapAttrsToList (agentName: srcPath:
-            let out = def.buildAgent agentName srcPath; in
-            lib.nameValuePair "${def.agentsDir}/${destBaseName out}" { source = out; }
-          ) agentSrcs
-        ) agentClis));
-  };
+      home.file =
+        (lib.listToAttrs (
+          map (name: lib.nameValuePair clis.${name}.rulesFile { source = ../../share/AGENTS.md; }) names
+        ))
+        // (lib.listToAttrs (
+          lib.concatMap (
+            name:
+            let
+              dir = clis.${name}.skillsDir;
+            in
+            lib.mapAttrsToList (
+              skillName: src:
+              lib.nameValuePair "${dir}/${skillName}" {
+                source =
+                  if builtins.hasAttr skillName pluginSkills then src else config.lib.file.mkOutOfStoreSymlink src;
+              }
+            ) allSkills
+          ) names
+        ))
+        // (lib.listToAttrs (
+          lib.concatMap (
+            name:
+            let
+              def = clis.${name};
+            in
+            lib.mapAttrsToList (
+              agentName: srcPath:
+              let
+                out = def.buildAgent agentName srcPath;
+              in
+              lib.nameValuePair "${def.agentsDir}/${destBaseName out}" { source = out; }
+            ) agentSrcs
+          ) agentClis
+        ));
+    };
 }

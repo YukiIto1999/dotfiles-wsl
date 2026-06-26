@@ -38,7 +38,10 @@ in
     accounts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      example = [ "account-1" "account-2" ];
+      example = [
+        "account-1"
+        "account-2"
+      ];
       description = "GitHub account ids. Each maps to a sops secret pair, a gh host user and a github MCP target. The first entry is primary: gh's active user and the default token in hosts.yml.";
     };
 
@@ -51,7 +54,7 @@ in
   };
 
   config.my = {
-    homeDir    = "/home/${cfg.username}";
+    homeDir = "/home/${cfg.username}";
     gatewayUrl = "http://localhost:${toString cfg.gatewayPort}/mcp";
   };
 }

@@ -12,10 +12,19 @@
     fontconfig = {
       enable = true;
       defaultFonts = {
-        serif     = [ "Noto Serif CJK JP" "Noto Serif" ];
-        sansSerif = [ "Noto Sans CJK JP" "Noto Sans" ];
-        monospace = [ "Noto Sans Mono CJK JP" "Noto Sans Mono" ];
-        emoji     = [ "Noto Color Emoji" ];
+        serif = [
+          "Noto Serif CJK JP"
+          "Noto Serif"
+        ];
+        sansSerif = [
+          "Noto Sans CJK JP"
+          "Noto Sans"
+        ];
+        monospace = [
+          "Noto Sans Mono CJK JP"
+          "Noto Sans Mono"
+        ];
+        emoji = [ "Noto Color Emoji" ];
       };
     };
   };

@@ -1,0 +1,2 @@
+# home-manager / nixos module の dotted attr 反復は既存規約、noise を避けるため無効化
+disabled = ["repeated_keys"]

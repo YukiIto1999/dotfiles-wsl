@@ -89,6 +89,45 @@
       checks.${system} =
         let
           inherit (self.nixosConfigurations.${hostName}) pkgs;
+          inherit (pkgs) lib;
+
+          # config-syntax check 専用の @var@ 埋め、実際の値は各 module 側にありここでは構文検査用
+          dummyVars = {
+            gatewayUrl = "http://127.0.0.1:1/mcp";
+            codexModel = "dummy-model";
+            httpPort = "1";
+            streamPort = "2";
+            searxngSecret = "dummy";
+            searxngPort = "3";
+            valkeyPort = "4";
+          };
+
+          jsonConfigs = [
+            ./modules/clis/claude/managed-settings.json
+            ./modules/clis/claude/settings.json
+            (pkgs.replaceVars ./modules/clis/antigravity/mcp_config.json {
+              inherit (dummyVars) gatewayUrl;
+            })
+            (pkgs.replaceVars ./modules/clis/opencode/opencode.json { inherit (dummyVars) gatewayUrl; })
+          ];
+
+          tomlConfigs = [
+            (pkgs.replaceVars ./modules/clis/codex/config-system.toml {
+              inherit (dummyVars) gatewayUrl;
+            })
+            (pkgs.replaceVars ./modules/clis/codex/config.toml { inherit (dummyVars) codexModel; })
+          ];
+
+          yamlConfigs = [
+            (pkgs.replaceVars ./modules/mcp/servers/agentmemory.yaml {
+              inherit (dummyVars) httpPort streamPort;
+            })
+            (pkgs.replaceVars ./modules/mcp/servers/searxng-settings.yml {
+              inherit (dummyVars) searxngSecret searxngPort valkeyPort;
+            })
+          ];
+
+          asArgs = files: lib.concatMapStringsSep " " (f: "${f}") files;
         in
         {
           nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
@@ -102,6 +141,39 @@
             shellcheck --severity=warning ${self}/scripts/*.sh ${self}/modules/user/git/hooks/*
             touch $out
           '';
+
+          statix = pkgs.runCommandLocal "check-statix" { nativeBuildInputs = [ pkgs.statix ]; } ''
+            statix check --config ${self} ${self}
+            touch $out
+          '';
+
+          nixfmt = pkgs.runCommandLocal "check-nixfmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
+            find ${self} -name '*.nix' -print0 | xargs -0 nixfmt --check
+            touch $out
+          '';
+
+          # 配備対象 config の構文検査、@var@ 込みの template は dummy 値を焼き込んだ derivation を対象にする
+          config-syntax =
+            pkgs.runCommandLocal "check-config-syntax"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.taplo
+                  pkgs.yq
+                ];
+              }
+              ''
+                for f in ${asArgs jsonConfigs}; do
+                  jq empty "$f"
+                done
+                for f in ${asArgs tomlConfigs}; do
+                  taplo lint "$f"
+                done
+                for f in ${asArgs yamlConfigs}; do
+                  yq . "$f" > /dev/null
+                done
+                touch $out
+              '';
         };
     };
 }

@@ -1,20 +1,53 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# $1 は <(...) 等 seek 不能な fd の場合があるため、以降は引数で受けた in-memory 行配列だけを見る
+# claude/codex/copilot/cursor/chatgpt に加え、この repo が配備する opencode / antigravity(gemini)も検出対象
 scan_ai_attribution() {
-  local -r msg="$1"
-  grep -inE 'Co-authored-by:.*(claude|codex|copilot|cursor|chatgpt|noreply@(anthropic|openai))|Generated with.*(Claude|Codex|Copilot|Cursor|ChatGPT)' "$msg" || true
+  printf '%s\n' "$@" | grep -inE 'Co-authored-by:.*(claude|codex|copilot|cursor|chatgpt|gemini|antigravity|opencode|google-labs|noreply@(anthropic|openai|google))|Generated with.*(claude|codex|copilot|cursor|chatgpt|gemini|antigravity|opencode|google-labs)' || true
+}
+
+# コメント行(#)と末尾空行を除いた実効行数が 1 を超えたら reject、subject 1 行のみ・body なしの規約 enforcement
+effective_lines() {
+  local -a body=()
+  local line
+  for line in "$@"; do
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    body+=("$line")
+  done
+
+  local last=$(( ${#body[@]} - 1 ))
+  while (( last >= 0 )) && [[ "${body[$last]}" =~ ^[[:space:]]*$ ]]; do
+    unset "body[$last]"
+    last=$(( last - 1 ))
+  done
+
+  printf '%s\n' "${body[@]}"
 }
 
 main() {
   local -r msg="$1"
-  local -a hits
-  mapfile -t hits < <(scan_ai_attribution "$msg")
-  (( ${#hits[@]} == 0 )) && exit 0
+  local -a raw
+  mapfile -t raw < "$msg"
 
-  printf 'AI attribution: %s\n' "${hits[@]}" >&2
-  echo "remove Co-authored-by / Generated-with lines" >&2
-  exit 1
+  local -a hits
+  mapfile -t hits < <(scan_ai_attribution "${raw[@]}")
+  if (( ${#hits[@]} > 0 )); then
+    printf 'AI attribution: %s\n' "${hits[@]}" >&2
+    echo "remove Co-authored-by / Generated-with lines" >&2
+    exit 1
+  fi
+
+  local -a body
+  mapfile -t body < <(effective_lines "${raw[@]}")
+  if (( ${#body[@]} > 1 )); then
+    echo "commit message: subject 1 行のみ・body なし" >&2
+    printf '  %s\n' "${body[@]}" >&2
+    echo "fix: 2 行目以降(body / trailer)を削除する" >&2
+    exit 1
+  fi
+
+  exit 0
 }
 
 main "$@"

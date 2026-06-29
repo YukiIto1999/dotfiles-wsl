@@ -33,7 +33,7 @@ Think in English. Respond in Japanese.
 
 ## subagents
 
-複雑な作業、独立した視点が必要な作業、レビュー・セキュリティ確認では subagent を使う。
+複雑な作業、独立した視点が必要な作業、レビュー・セキュリティ確認では subagent を使う。agent は Claude / Codex / OpenCode に配備する。Antigravity は静的な agent 機能を持たないため対象外。
 
 | 目的 | subagent |
 |---|---|
@@ -47,7 +47,7 @@ Think in English. Respond in Japanese.
 
 ## skills
 
-繰り返し作業は手で再現せず、対応する skill を読む。
+繰り返し作業は手で再現せず、対応する skill を読む。`dotfiles-doctor` は `share/skills/` と plugin skills の配備を検査する。subagents 表の自動検査は無い。
 
 | 目的 | skill |
 |---|---|
@@ -56,27 +56,18 @@ Think in English. Respond in Japanese.
 | staged diff から commit message 作成 | `git-commit-writer` |
 | branch diff から PR description 作成 | `pr-description-writer` |
 | Conventional Commits から changelog 作成 | `changelog-generator` |
-| セキュリティ分析 | `codex-security` |
+| セキュリティ分析(全体スキャンの起点) | `security-scan` |
+| セキュリティ分析(個別 phase: 脅威モデル・候補洗い出し・検証・攻撃経路・修正) | `threat-model` / `finding-discovery` / `validation` / `attack-path-analysis` / `fix-finding` |
 | UI / frontend 方針 | `frontend-design` |
 | skill 作成 | `skill-creator` |
 
 ## dotfiles
 
-- 初回 setup: `sudo bash ~/dotfiles-wsl/scripts/bootstrap.sh`
-- 通常 rebuild: `dotfiles-rebuild`(untracked 検査 → boot generation → PowerShell 再起動案内)。
+- 通常 rebuild: `dotfiles-rebuild`
 - 実用状態検証: `dotfiles-doctor`
-- 不要物整理: `dotfiles-cleanup --delete`。system backup と VS Code server も整理する場合は `--system --vscode-server` を付ける。
-- CI 相当 check: `cd ~/dotfiles-wsl && nix flake check "git+file://${PWD}" -L`
-- flake input 更新: `cd ~/dotfiles-wsl && nix flake update`
-- `/etc/nixos` は `~/dotfiles-wsl` repo root への symlink。
-- flake root は repo root。`modules/` が NixOS module、`home/` が Home Manager module の置き場。
-- CLI 本体（`claude` / `codex` / `opencode` / `agy`）は Nix から入れない。公式 upstream 配布を `~/.local/bin` に置き、dotfiles は設定・agents・skills を管理する。
-- `/home/nixos` の設定ファイルは `~/dotfiles-wsl/home/nixos`、`~/dotfiles-wsl/share`、`~/dotfiles-wsl/templates` から再生成される。
-- MCP は agentgateway 経由で集約される。全 CLI が同じ gateway URL を使う。
-- subagent と skill は `~/dotfiles-wsl/share/agents/`、`~/dotfiles-wsl/share/skills/` から全 CLI へ配備される。
-- 共通ルールは `~/dotfiles-wsl/share/AGENTS.md` から全 CLI へ配備される。
-- GitHub アカウントは `~/dotfiles-wsl/flake.nix` の `accounts` list で宣言する。
-- 資格情報は `~/dotfiles-wsl/secrets/secrets.yaml` に集約する。
+- 不要物整理: `dotfiles-cleanup --delete`(`--system --vscode-server` で対象を拡大)
+- secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops ~/dotfiles-wsl/secrets/secrets.yaml`
+- 詳細手順、構成、変更箇所は `~/dotfiles-wsl/README.md` に集約する。
 
 ## 禁則
 

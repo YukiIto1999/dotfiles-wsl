@@ -10,14 +10,13 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 
 | パス | 役割 |
 |---|---|
-| `flake.nix` | inputs(nixpkgs / nixos-wsl / home-manager / sops-nix / plugin sources)と nixosSystem の定義、checks |
-| `modules/` | NixOS module。`options.nix`(`my.*` 型付き設定)、`wsl` / `nix` / `base` / `secrets` / `mcp` / `home` |
-| `home/` | Home Manager module。`default` / `cli`(agents・skills を全 CLI へ配備)/ `git`。`home/nixos/` は配備元の生 config |
-| `pkgs/` | MCP server の build 定義。stdio 実行 package(共通 `mk-mcp-server` helper 使用)、agentgateway の binary、Chromium 起動設定、agentmemory のバックエンド用 Docker image |
+| `flake.nix` | inputs(nixpkgs / nixos-wsl / home-manager / sops-nix / plugin sources)、nixosSystem の定義、`packages`(`dotfiles-install-clis` など)、`checks` |
+| `modules/` | NixOS module 一式。`default.nix`(imports)、`options.nix`(`my.*` 型)、`wsl.nix` / `nix.nix` / `fonts.nix` / `secrets.nix`(git identity)、`accounts/`(GitHub account ごとの secrets と `gh` hosts 生成)、`mcp/`(gateway・docker network・`servers/<name>.nix`)、`clis/`(`my.clis` の CLI 一覧と CLI ごとの config、`share/` の配備)、`user/`(base user・git)、`commands.nix` + `commands/`(`dotfiles-*` 運用コマンドの生成元) |
+| `pkgs/` | MCP server の build 定義(共通 `mk-mcp-server.nix` / `mk-npm-mcp.nix` helper 使用)、`agentgateway`、`agentmemory` の MCP server とバックエンド用 Docker image |
 | `share/` | `AGENTS.md`(共通ルール)、`agents/`(subagent)、`skills/`(local skill) |
-| `templates/` | SOPS / 生成 config の template(`gh-user` / `searxng-settings` / `agentmemory`) |
-| `secrets/` | `secrets.yaml`(SOPS + age)と `.sops.yaml` |
-| `scripts/` | `bootstrap`(初回セットアップ) / `pin-hash`(pin 更新補助)。doctor / rebuild / install-clis / cleanup は `modules/commands.nix` が config から生成する `dotfiles-*` コマンド |
+| `scripts/` | `bootstrap.sh`(初回セットアップ)、`pin-hash.sh`(pin 更新補助) |
+| `secrets/` | `secrets.yaml`(SOPS + age)、`.sops.yaml` |
+| `docs/adr/` | 構造に影響する決定の記録 |
 
 ## 前提
 
@@ -69,6 +68,10 @@ dotfiles-rebuild
 
 その後 PowerShell から再起動し、`dotfiles-doctor` を実行する。flake input の更新は `nix flake update`。
 
+## 検証
+
+検証は `dotfiles-doctor` で行う。CLI 本体が upstream 配布のままか、rules / skills / agents / gateway ファイルが配備されているか、systemd unit が起動しているかを確認する。さらに gateway へ MCP `initialize` → `tools/list` を実行し、`my.mcp.targets` の全 target の応答を検査する。
+
 ## AI コーディング CLI
 
 CLI 本体は Nix でインストールしない。更新頻度が高く常に最新が望ましいため、各 CLI の公式配布を `~/.local/bin` に置く。dotfiles は設定・agents・skills を管理する。
@@ -80,7 +83,7 @@ CLI 本体は Nix でインストールしない。更新頻度が高く常に�
 | `opencode` | `~/.local/bin/opencode` | Anomaly GitHub Release |
 | `agy` | `~/.local/bin/agy` | Google 公式 installer |
 
-`share/AGENTS.md`(共通ルール)、`share/agents/*.md`(subagent)、plugin・local の skills を、`home/cli.nix` が各 CLI のネイティブ形式へ配備する。agent は Claude=md そのまま / Codex=TOML 化 / OpenCode=tools 変換。Antigravity は plugin ベースで static agent 機構を持たないため agent は配備せず、rules + skills + gateway だけを受け取る。
+`modules/clis/` は `share/AGENTS.md`、`share/agents/*.md`、plugin / local skills を各 CLI の形式で配備する。Claude は agent の Markdown をそのまま使う。Codex は TOML、OpenCode は tools 用の形式へ変換する。Antigravity は静的な agent 機能を持たないため、rules / skills / gateway 設定だけを配備する。
 
 MCP gateway の登録方法は CLI ごとに異なる。Claude は CLI が実行時に管理する `~/.claude.json` に `claude mcp add` で登録する。Codex は `/etc/codex/config.toml` に管理設定を置き、ユーザーが初期化する home 配下の config と分ける。OpenCode / Antigravity は home の MCP 設定ファイルへ置く。
 
@@ -95,8 +98,8 @@ Claude Code / Codex / OpenCode / Antigravity
    agentgateway (systemd)
         |  stdio (MCP server を起動)
         v
- context7 / probe-mcp / memory / crawl4ai /
- searxng-mcp / playwright / github-mcp-<account>
+ context7 / probe / searxng / crawl4ai /
+ memory / playwright / github-<account>
         |  loopback (常駐プロセスを使う target のみ)
         v
  docker network mcp-backends:
@@ -105,9 +108,9 @@ Claude Code / Codex / OpenCode / Antigravity
 
 - gateway は `127.0.0.1:8765` のみで待ち受ける。`my.gatewayPort` で宣言する。
 - MCP server はすべて stdio で gateway から起動する。HTTP target、OCI image、mcp-proxy は使わない。
-- github は account ごとに wrapper を spawn し、`/run/secrets` から PAT を読んで exec する。`docker inspect` への露出は無い。
+- GitHub MCP は account ごとの wrapper が `/run/secrets` から PAT を読んで起動する。Docker コンテナではないため、`mcp-backends` network と `docker inspect` には露出しない。
 - 常駐プロセス(searxng / valkey / crawl4ai / agentmemory engine)だけ `mcp-backends` network の Docker で動かす。stdio server は `127.0.0.1` に公開した port 経由で接続する。
-- Playwright MCP は host の Chromium を headless で起動する。専用 daemon と Docker image は使わない。GitHub MCP は Docker network へ置かない。
+- Playwright MCP は host の Chromium を headless で起動する。専用 daemon と Docker image は使わない。
 
 ## Secrets と identity
 
@@ -127,14 +130,16 @@ Claude Code / Codex / OpenCode / Antigravity
 
 | やりたいこと | 触る場所 |
 |---|---|
-| GitHub account を増減 | `flake.nix` の `my.accounts`、`secrets/secrets.yaml` の `accounts/<account>` |
-| work identity を変える | `flake.nix` の `my.workIdentity`、必要なら `identity/work/*` |
+| GitHub account を増減 | `flake.nix` の `my.accounts`、`secrets/secrets.yaml` の `accounts/<account>/*` |
+| work identity を変える | `flake.nix` の `my.workIdentity`、必要なら `secrets/secrets.yaml` の `identity/work/*` |
 | default git identity を変える | `secrets/secrets.yaml` の `identity/default/*` |
-| local skill を足す | `share/skills/<name>/SKILL.md` |
-| subagent を足す | `share/agents/<name>.md` |
+| local skill を足す | `share/skills/<name>/SKILL.md` を置いて `git add` + `dotfiles-rebuild` |
+| subagent を足す | `share/agents/<name>.md` を置いて `git add` + `dotfiles-rebuild` |
 | 共通ルールを変える | `share/AGENTS.md` |
-| CLI 設定を変える | `home/nixos/` 配下の各 CLI テンプレート |
-| MCP server を増減 | `pkgs/<name>` を `mk-mcp-server` で足し、`modules/mcp/servers.nix` の target に追加。backing daemon は `modules/mcp/backends.nix` |
+| CLI 固有の設定を変える | `modules/clis/<name>/` 配下のテンプレート |
+| CLI を増減 | `modules/clis/<name>/` を足し、`modules/clis/default.nix` の imports に登録 |
+| MCP server を増減 | `pkgs/<name>` を build 定義として足し、`modules/mcp/servers/<name>.nix` に target を追加、`modules/mcp/default.nix` の imports に登録 |
+| secret を足す | 消費する module に `sops.secrets` を宣言し、`secrets/secrets.yaml` に値を足す |
 
 変更後は rebuild する。
 
@@ -148,11 +153,11 @@ PowerShell から WSL を再起動し、`dotfiles-doctor` を実行する。
 
 - gateway は loopback 限定で認証は持たない。同一ユーザーのプロセスは gateway 経由で GitHub の書き込み操作などを実行できる。被害を絞るため、PAT は fine-grained + 最小スコープにする。
 - age 鍵は `/var/lib/sops-nix/key.txt`(root `0400`)だけに置く。`~/.config/sops/age/keys.txt` の複製は全 secret を平文で読める状態にするため置かない。編集は `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops secrets/secrets.yaml`。`dotfiles-doctor` が複製を検出して警告する。
-- 鍵紛失に備え、`.sops.yaml` にオフライン保管の recovery recipient を 1 つ追加して `sops updatekeys` しておく。
+- `.sops.yaml` の recipient は現在 primary age key 1 つのみで、鍵紛失時の復旧経路が無い。復旧用の recipient を 1 つ追加し、`sops updatekeys` で反映する。
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は system toplevel の build、`deadnix`、`shellcheck`。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`--check`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
 
 ## License
 

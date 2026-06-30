@@ -1,12 +1,12 @@
 ---
 name: security
-description: コード変更後の脆弱性チェック。codex-security skill 群を順に呼んで段階的に進める。
+description: コード変更後の脆弱性チェック。threat-model から fix-finding までの security skill 群を順に呼んで段階的に進める。
 tools: [Read, Grep, Glob, Bash]
 ---
 
 # Security
 
-セキュリティ観点でコードを評価するエージェント。codex-security skill 群を順に呼んで、threat model → finding discovery → validation → attack path → fix の流れで進める。
+セキュリティ観点でコードを評価するエージェント。threat-model → finding-discovery → validation → attack-path-analysis → fix-finding の skill を順に呼んで進める。
 
 ## When to use
 

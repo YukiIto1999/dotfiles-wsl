@@ -3,11 +3,11 @@
 # nixpkgs 未収録の upstream static-musl release binary
 pkgs.stdenvNoCC.mkDerivation rec {
   pname = "agentgateway";
-  version = "1.2.1";
+  version = "1.3.1";
 
   src = pkgs.fetchurl {
     url = "https://github.com/agentgateway/agentgateway/releases/download/v${version}/agentgateway-linux-amd64";
-    hash = "sha256-kPVJx/bOk9ZbamcIyar6yPk14wRdPQNXZvcTvIUMPDo=";
+    hash = "sha256-cVMajM2h8J0li0bpJkOnMKATZvtDbhUGLplnLoTNkH8=";
   };
 
   dontUnpack = true;

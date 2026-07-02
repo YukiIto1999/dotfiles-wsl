@@ -1,7 +1,9 @@
 {
   pkgs,
+  lib,
   mkMcpServer,
   tokenFile,
+  toolsets,
 }:
 
 # account ごとに 1 instance、PAT は spawn 時に sops file から読む
@@ -22,5 +24,5 @@ in
 mkMcpServer {
   name = "github-mcp";
   env.GITHUB_PERSONAL_ACCESS_TOKEN = "$(<${tokenFile})";
-  command = "${bin}/bin/github-mcp-server stdio";
+  command = "${bin}/bin/github-mcp-server stdio --toolsets ${lib.concatStringsSep "," toolsets}";
 }

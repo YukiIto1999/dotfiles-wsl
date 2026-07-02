@@ -10,12 +10,21 @@
 let
   cfg = config.my;
 
+  # upstream default から copilot を除いた採用 toolset
+  toolsets = [
+    "context"
+    "issues"
+    "pull_requests"
+    "repos"
+    "users"
+  ];
+
   mkTarget =
     account:
     lib.nameValuePair "github-${account}" {
       command = lib.getExe (
         pkgs.callPackage ../../../pkgs/github-mcp {
-          inherit mkMcpServer;
+          inherit mkMcpServer toolsets;
           tokenFile = config.sops.secrets."accounts/${account}/token".path;
         }
       );

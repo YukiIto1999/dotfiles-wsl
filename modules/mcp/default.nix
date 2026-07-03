@@ -27,6 +27,7 @@
   imports = [
     ./docker.nix
     ./gateway.nix
+    ./servers/codex.nix
     ./servers/context7.nix
     ./servers/probe.nix
     ./servers/searxng.nix

@@ -51,8 +51,7 @@ in
 
   # opencode は plugins dir の自動ロードのみ、設定エントリ不要
   home-manager.users.${config.my.username} = _: {
-    home.file.".config/opencode/plugins/agentmemory-capture.ts".source =
-      agentmemory.opencodePlugin;
+    home.file.".config/opencode/plugins/agentmemory-capture.ts".source = agentmemory.opencodePlugin;
   };
 
   my.mcp.gatewayWaitUnits = [ "docker-agentmemory.service" ];

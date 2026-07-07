@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   mkMcpServer,
@@ -44,6 +45,15 @@ in
 
   virtualisation.oci-containers.containers = backend.containers;
   systemd.services = backend.systemdServices;
+
+  # lifecycle hooks は各 CLI 設定から /run/current-system/sw/bin の stable 名で参照
+  environment.systemPackages = [ agentmemory.hooks ];
+
+  # opencode は plugins dir の自動ロードのみ、設定エントリ不要
+  home-manager.users.${config.my.username} = _: {
+    home.file.".config/opencode/plugins/agentmemory-capture.ts".source =
+      agentmemory.opencodePlugin;
+  };
 
   my.mcp.gatewayWaitUnits = [ "docker-agentmemory.service" ];
   my.mcp.targets.memory.command = lib.getExe agentmemory.front;

@@ -112,6 +112,22 @@ Claude Code / Codex / OpenCode / Antigravity
 - 常駐プロセス(searxng / valkey / crawl4ai / agentmemory engine)だけ `mcp-backends` network の Docker で動かす。stdio server は `127.0.0.1` に公開した port 経由で接続する。
 - Playwright MCP は host の Chromium を headless で起動する。専用 daemon と Docker image は使わない。
 
+## agentmemory
+
+長期記憶。MCP target `memory` の tools に加え、engine 同梱の lifecycle hooks が全 CLI のセッションを自動観測する。
+
+```
+Claude Code (managed-settings.json) --\
+Codex (/etc/codex/config.toml)      ---+-- agentmemory-hook-<event> --> REST 127.0.0.1:3111/agentmemory/observe
+OpenCode (plugins/ 自動ロード)      --/
+```
+
+- hook 実体は `pkgs/agentmemory` が engine 同梱 script を `agentmemory-hook-<event>` として `/run/current-system/sw/bin` に公開する。宣言は `modules/mcp/servers/memory.nix` に集約。
+- `session-start` は `AGENTMEMORY_INJECT_CONTEXT=true` で過去記憶をセッション冒頭に注入する。`stop` / `session-end` がセッション要約と登録を行う。
+- OpenCode は `~/.config/opencode/plugins/agentmemory-capture.ts` の自動ロードで同等の観測を行う。
+- LLM provider は未設定。noop mode で観測記録・BM25 検索・注入まで動く。要約 / reflect / consolidation を有効にする場合は engine コンテナに provider key を渡す。
+- 状態確認: `xh GET http://127.0.0.1:3111/agentmemory/health`、`memory_diagnose` / `memory_audit` tools。
+
 ## Secrets と identity
 
 | key | 用途 |

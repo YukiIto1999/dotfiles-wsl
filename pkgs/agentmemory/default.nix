@@ -1,4 +1,5 @@
 {
+  lib,
   pkgs,
   mkMcpServer,
   agentmemoryUrl,
@@ -92,7 +93,49 @@ let
     env.AGENTMEMORY_URL = agentmemoryUrl;
     command = "${pkgs.nodejs_24}/bin/node ${mcpPkg}/lib/node_modules/agentmemory-mcp-deploy/node_modules/@agentmemory/mcp/bin.mjs";
   };
+
+  agentmemoryPkg = "${engineModule}/node_modules/@agentmemory/agentmemory";
+
+  # CLI lifecycle hook。engine 同梱 script を stable 名の bin で公開し REST /observe へ送る
+  mkHook =
+    name: extraEnv:
+    pkgs.writeShellScriptBin "agentmemory-hook-${name}" ''
+      export AGENTMEMORY_URL=${agentmemoryUrl}
+      ${extraEnv}exec ${agentmemoryPkg}/dist/hooks/${name}.mjs "$@"
+    '';
+
+  hookNames = [
+    "session-start"
+    "session-end"
+    "stop"
+    "prompt-submit"
+    "pre-tool-use"
+    "post-tool-use"
+    "post-tool-failure"
+    "pre-compact"
+    "notification"
+    "subagent-start"
+    "subagent-stop"
+    "task-completed"
+  ];
+
+  hooks = pkgs.symlinkJoin {
+    name = "agentmemory-hooks-${version}";
+    paths = lib.map (
+      name:
+      mkHook name (
+        lib.optionalString (name == "session-start") "export AGENTMEMORY_INJECT_CONTEXT=true\n"
+      )
+    ) hookNames;
+  };
+
+  opencodePlugin = "${agentmemoryPkg}/plugin/opencode/agentmemory-capture.ts";
 in
 {
-  inherit image front;
+  inherit
+    image
+    front
+    hooks
+    opencodePlugin
+    ;
 }

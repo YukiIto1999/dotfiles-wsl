@@ -3,3 +3,36 @@ commit_attribution = ""
 
 [mcp_servers.gateway]
 url = "@gatewayUrl@"
+
+# agentmemory lifecycle hooks、upstream hooks.codex.json と同じ 6 event
+[[hooks.SessionStart]]
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = "/run/current-system/sw/bin/agentmemory-hook-session-start"
+statusMessage = "agentmemory: loading session context"
+
+[[hooks.UserPromptSubmit]]
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = "/run/current-system/sw/bin/agentmemory-hook-prompt-submit"
+
+[[hooks.PreToolUse]]
+matcher = "Edit|Write|Read|Glob|Grep"
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "/run/current-system/sw/bin/agentmemory-hook-pre-tool-use"
+
+[[hooks.PostToolUse]]
+[[hooks.PostToolUse.hooks]]
+type = "command"
+command = "/run/current-system/sw/bin/agentmemory-hook-post-tool-use"
+
+[[hooks.PreCompact]]
+[[hooks.PreCompact.hooks]]
+type = "command"
+command = "/run/current-system/sw/bin/agentmemory-hook-pre-compact"
+
+[[hooks.Stop]]
+[[hooks.Stop.hooks]]
+type = "command"
+command = "/run/current-system/sw/bin/agentmemory-hook-stop"

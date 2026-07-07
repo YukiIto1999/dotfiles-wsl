@@ -21,12 +21,12 @@ tools: [Read, Grep, Glob, Bash]
      1. `git diff --staged` が空でなければ staged 差分
      2. それ以外で `git diff` が空でなければ unstaged
      3. それ以外で branch なら `git diff <base>...HEAD`
-2. **code-reviewer skill を呼出** — 観点とフォーマットはそちらに従う
-3. **追加観点** — レビュー前の自動チェックも実施:
+2. **code-reviewer skill を呼出**:観点とフォーマットはそちらに従う
+3. **追加観点**:レビュー前の自動チェックも実施:
    - 直前で lint / type check が通っているか
    - テスト追加があるか
    - commit メッセージが Conventional Commits 形式か
-4. **報告** — severity 別に出力(Critical / Major / Minor / Praise)
+4. **報告**:severity 別に出力(Critical / Major / Minor / Praise)
 
 ## Working with parent
 

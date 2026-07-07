@@ -12,11 +12,11 @@ description: Use when writing a Pull Request body for the current branch(`git di
 
 ## Process
 
-1. **base branch 確認** — `git symbolic-ref refs/remotes/origin/HEAD` または明示指定
-2. **差分取得** — `git log <base>..HEAD --oneline` でコミット列、`git diff <base>...HEAD --stat` で変更ファイル
-3. **目的把握** — コミットメッセージとファイル変更から、ユーザーから見た価値を抽出
-4. **テスト方法** — 追加された tests、手動検証手順、影響範囲
-5. **リスク評価** — ロールバック可否、依存変更、breaking change
+1. **base branch 確認**:`git symbolic-ref refs/remotes/origin/HEAD` または明示指定
+2. **差分取得**:`git log <base>..HEAD --oneline` でコミット列、`git diff <base>...HEAD --stat` で変更ファイル
+3. **目的把握**:コミットメッセージとファイル変更から、ユーザーから見た価値を抽出
+4. **テスト方法**:追加された tests、手動検証手順、影響範囲
+5. **リスク評価**:ロールバック可否、依存変更、breaking change
 
 ## Output format
 

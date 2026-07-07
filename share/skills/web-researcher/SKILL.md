@@ -148,17 +148,16 @@ URL から完全には見分けられない。次の step で本文を取って�
 
 ## よくある失敗
 
-- クエリが漠然 — `<query>` だけで bang / site / time_range / 言語のどれも付けない。一次資料が埋もれる
-- 取った 2 件が同じ source の copy — source の多様性を確保していない
-- 本文を読まずに snippet で結論 — `crawl4ai` を呼んだ意味がない
-- URL 日付と本文日付を見ていない — 古い記事を新しいと誤認する典型
-- PDF / SPA に普通の `crawl4ai.md` を投げて空が返ったので諦める — tool 切替で取れる
-- 引用なしで断定 — 後から検証不能、`Sources` 節を必ず付ける
-- `crawl4ai` の SDK 機能を MCP から呼ぼうとする — MCP 経由では使えない、Python SDK を別途立てる
+- クエリが漠然。`<query>` だけで bang / site / time_range / 言語のどれも付けない。一次資料が埋もれる
+- 取った 2 件が同じ source の copy。source の多様性を確保していない
+- 本文を読まずに snippet で結論。`crawl4ai` を呼んだ意味がない
+- URL 日付と本文日付を見ていない。古い記事を新しいと誤認する典型
+- PDF / SPA に普通の `crawl4ai.md` を投げて空が返ったので諦める。tool 切替で取れる
+- 引用なしで断定。後から検証不能、`Sources` 節を必ず付ける
+- `crawl4ai` の SDK 機能を MCP から呼ぼうとする。MCP 経由では使えない、Python SDK を別途立てる
 
 ## 関連
 
-- `context7` MCP target — library / framework の公式 docs。本 skill より先に試す
-- `probe` MCP target — 自リポのコード検索。本 skill より先に試す
-- `WebSearch` 内蔵 tool — Claude / Codex の内蔵検索。`searxng` が落ちているときの fallback。snippet ベースで本 skill の用途には届かない
-- memory `reference-searxng-crawl4ai-usage` — SearXNG bang / time_range / Crawl4AI tool 群の詳細リファレンス
+- `context7` MCP target:library / framework の公式 docs。本 skill より先に試す
+- `probe` MCP target:自リポのコード検索。本 skill より先に試す
+- `WebSearch` 内蔵 tool:Claude / Codex の内蔵検索。`searxng` が落ちているときの fallback。snippet ベースで本 skill の用途には届かない

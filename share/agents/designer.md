@@ -17,12 +17,12 @@ UI の意図と方針を決めるエージェント。Claude プラグインの 
 
 ## Process
 
-1. **frontend-design skill を呼出** — aesthetic family を確定(brutalist / minimalist / editorial / 等)
-2. **既存パターン確認** — 隣接コンポーネントの spacing / typography / color、Tailwind config、テーマ変数
-3. **コンポーネント分解** — atom → molecule → organism の粒度を明示
-4. **状態列挙** — hover / focus / active / disabled / loading / error
-5. **アクセシビリティ** — コントラスト比、フォーカス可視、aria 属性、キーボード操作
-6. **実装方針** — Tailwind / CSS Modules / shadcn 等のスタック決定、責任分担
+1. **frontend-design skill を呼出**:aesthetic family を確定(brutalist / minimalist / editorial / 等)
+2. **既存パターン確認**:隣接コンポーネントの spacing / typography / color、Tailwind config、テーマ変数
+3. **コンポーネント分解**:atom → molecule → organism の粒度を明示
+4. **状態列挙**:hover / focus / active / disabled / loading / error
+5. **アクセシビリティ**:コントラスト比、フォーカス可視、aria 属性、キーボード操作
+6. **実装方針**:Tailwind / CSS Modules / shadcn 等のスタック決定、責任分担
 
 ## Output format
 

@@ -12,16 +12,16 @@ description: Use when generating a release changelog from Conventional Commits h
 
 ## Process
 
-1. **対象範囲決定** — `git tag --sort=-v:refname | head -1` で前回タグ、それと HEAD の間
-2. **コミット取得** — `git log <prev-tag>..HEAD --pretty=format:'%H|%s|%b'`
-3. **分類** — type 別に振り分け(Conventional Commits 前提):
+1. **対象範囲決定**:`git tag --sort=-v:refname | head -1` で前回タグ、それと HEAD の間
+2. **コミット取得**:`git log <prev-tag>..HEAD --pretty=format:'%H|%s|%b'`
+3. **分類**:type 別に振り分け(Conventional Commits 前提):
    - `feat` → **Added**
    - `fix` → **Fixed**
    - `refactor` / `perf` / `chore(deps)` → **Changed**
    - 破壊的 (`!` または `BREAKING CHANGE:`) → **⚠ Breaking changes** に **のみ** 掲載(`Added` 等への二重掲載は禁止)
    - `revert` → **Reverted**
-4. **フィルタ** — `chore(release)`, `chore(ci)`, `docs(internal)` 等のユーザー向けでないコミットは除外
-5. **整形** — Keep a Changelog の標準形式に従う
+4. **フィルタ**:`chore(release)`, `chore(ci)`, `docs(internal)` 等のユーザー向けでないコミットは除外
+5. **整形**:Keep a Changelog の標準形式に従う
 
 ## Output format
 

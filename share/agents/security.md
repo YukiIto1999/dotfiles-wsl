@@ -17,11 +17,11 @@ tools: [Read, Grep, Glob, Bash]
 
 ## Process
 
-1. **threat-model skill** — 変更範囲の信頼境界、攻撃面、データ流路を整理
-2. **finding-discovery skill** — 候補 finding を列挙
-3. **validation skill** — 各 finding の有効性を検証(false positive を除外)
-4. **attack-path-analysis skill** — 有効な finding について source → sink の経路を辿る
-5. **fix-finding skill** — 修正方針を提案(自分では実装せず、implementer に渡す)
+1. **threat-model skill**:変更範囲の信頼境界、攻撃面、データ流路を整理
+2. **finding-discovery skill**:候補 finding を列挙
+3. **validation skill**:各 finding の有効性を検証(false positive を除外)
+4. **attack-path-analysis skill**:有効な finding について source → sink の経路を辿る
+5. **fix-finding skill**:修正方針を提案(自分では実装せず、implementer に渡す)
 
 ## 観点(OWASP Top 10 ベース)
 

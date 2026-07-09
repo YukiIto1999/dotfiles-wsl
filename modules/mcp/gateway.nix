@@ -14,11 +14,25 @@ let
     stdio.cmd = target.command;
   }) cfg.mcp.targets;
 
+  # probe の grep は npm package と native binary の subcommand が食い違い、呼ぶと常に失敗する
+  deniedTools = [ "grep" ];
+
   gatewayConfig = (pkgs.formats.yaml { }).generate "agentgateway-config.yaml" {
     binds = [
       {
         port = cfg.gatewayPort;
-        listeners = [ { routes = [ { backends = [ { mcp.targets = targets; } ]; } ]; } ];
+        listeners = [
+          {
+            routes = [
+              {
+                backends = [ { mcp.targets = targets; } ];
+                policies.mcpAuthorization.rules = map (name: {
+                  deny = ''mcp.tool.name == "${name}"'';
+                }) deniedTools;
+              }
+            ];
+          }
+        ];
       }
     ];
   };

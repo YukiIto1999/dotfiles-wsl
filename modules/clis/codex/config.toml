@@ -1,5 +1,10 @@
 model = "@codexModel@"
 model_reasoning_effort = "xhigh"
+approval_policy = "never"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = true
 
 [tui.model_availability_nux]
 "@codexModel@" = 4

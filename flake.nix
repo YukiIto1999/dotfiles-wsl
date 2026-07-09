@@ -105,6 +105,9 @@
           jsonConfigs = [
             ./modules/clis/claude/managed-settings.json
             ./modules/clis/claude/settings.json
+            (pkgs.replaceVars ./modules/clis/claude/managed-mcp.json {
+              inherit (dummyVars) gatewayUrl;
+            })
             (pkgs.replaceVars ./modules/clis/antigravity/mcp_config.json {
               inherit (dummyVars) gatewayUrl;
             })

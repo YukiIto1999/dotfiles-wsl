@@ -96,7 +96,6 @@ let
 
   agentmemoryPkg = "${engineModule}/node_modules/@agentmemory/agentmemory";
 
-  # CLI lifecycle hook。engine 同梱 script を stable 名の bin で公開し REST /observe へ送る
   mkHook =
     name: extraEnv:
     pkgs.writeShellScriptBin "agentmemory-hook-${name}" ''

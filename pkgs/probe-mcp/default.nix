@@ -37,5 +37,7 @@ in
 mkMcpServer {
   name = "probe-mcp";
   env.PATH = "${probeBin}/bin:$PATH";
+  # npm パッケージのバイナリ解決は PROBE_PATH を要求する
+  env.PROBE_PATH = "${probeBin}/bin/probe";
   command = "${pkgs.nodejs_24}/bin/node ${probePkg}/lib/node_modules/@probelabs/probe/build/mcp/index.js";
 }

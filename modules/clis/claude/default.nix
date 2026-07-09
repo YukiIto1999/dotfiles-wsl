@@ -1,4 +1,9 @@
-{ config, seedConfig, ... }:
+{
+  config,
+  pkgs,
+  seedConfig,
+  ...
+}:
 
 let
   cfg = config.my;
@@ -19,21 +24,16 @@ in
 
   environment.etc."claude-code/managed-settings.json".source = ./managed-settings.json;
 
+  # nix 所有 config パターンで gateway 登録を宣言的化
+  environment.etc."claude-code/managed-mcp.json".source = pkgs.replaceVars ./managed-mcp.json {
+    inherit (cfg) gatewayUrl;
+  };
+
   home-manager.users.${cfg.username} =
     { lib, ... }:
     {
       home.activation.seedClaudeConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] (
         seedConfig ".claude/settings.json" ./settings.json
       );
-
-      # claude は ~/.claude.json を runtime 所有するため gateway を imperative 登録
-      # claude バイナリ欠落でも後続 activation を止めない if ガード
-      home.activation.claudeMcpRegister = lib.hm.dag.entryAfter [ "seedClaudeConfig" ] ''
-        CLAUDE=$HOME/.local/bin/claude
-        if [ -x "$CLAUDE" ]; then
-          $CLAUDE mcp remove gateway --scope user >/dev/null 2>&1 || true
-          $CLAUDE mcp add --transport http gateway "${cfg.gatewayUrl}" --scope user >/dev/null
-        fi
-      '';
     };
 }

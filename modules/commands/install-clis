@@ -82,7 +82,7 @@ install_github_release() {
   "$HOME/.local/bin/$binary" --version || fail "$binary installed but version check failed"
 }
 
-# roster から導出する install 手順。1 行 1 CLI(name|kind|binary|arg1|arg2|arg3|arg4)
+# roster から導出する install 手順
 while IFS='|' read -r name kind binary arg1 arg2 arg3 arg4; do
   [[ -n $name ]] || continue
 

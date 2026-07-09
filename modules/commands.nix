@@ -5,7 +5,6 @@
   ...
 }:
 
-# doctor / rebuild / install-clis / cleanup を my.clis roster と my.mcp から生成する
 # writeShellApplication は shellcheck を build に含むため、規約逸脱は nix build 時点で落ちる
 let
   cfg = config.my;
@@ -55,7 +54,7 @@ let
         (orElse (c.install.binaryInArchive or null) "")
       ];
 
-  # cleanup が hm-back を掃く root。.config/<x> は 2 段まで、それ以外は先頭 1 段
+  # cleanup が hm-back を掃く root、.config/<x> は 2 段まで、それ以外は先頭 1 段
   cliRootOf =
     path:
     let
@@ -99,7 +98,7 @@ let
       // extra
     );
 
-  # ok/bad の A && B || C は本 repo の一貫した idiom(元 scripts/*.sh も同型)、SC2015/16 は許容
+  # ok/bad の A && B || C は本 repo の一貫した idiom、元 scripts/*.sh も同型で SC2015/16 は許容
   doctorChecks = {
     excludeShellChecks = [
       "SC2015"

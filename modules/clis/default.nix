@@ -5,7 +5,6 @@
   ...
 }:
 
-# my.clis roster と share/ fan-out engine。CLI を 1 つ足す単位はこのディレクトリ配下。
 let
   cfg = config.my;
   inherit (cfg) clis;
@@ -58,7 +57,7 @@ let
     };
   };
 
-  # plugin skill(pluginSources 直下)と local skill(dotfilesDir の live symlink)を探索
+  # plugin skill は pluginSources 直下、local skill は dotfilesDir の live symlink を探索
   pluginPaths = [
     "${pluginSources.superpowers}"
     "${pluginSources.openai-plugins}/plugins/codex-security"
@@ -100,7 +99,7 @@ let
 
   allSkills = pluginSkills // localSkills;
 
-  # share/agents/*.md の素材一覧、名前は拡張子抜き
+  # share/agents/*.md の素材一覧
   agentSrcs =
     lib.mapAttrs'
       (
@@ -115,7 +114,6 @@ let
 
   agentClis = lib.filter (name: clis.${name}.agentsDir != null) names;
 
-  # 変換結果の配備ファイル名。derivation は自身の name、素通しは srcPath の basename を使う
   destBaseName = out: if lib.isDerivation out then out.name else builtins.baseNameOf (toString out);
 
   mkDupAssert = label: dupes: {
@@ -138,7 +136,7 @@ in
     description = "AI CLI ごとの roster 宣言。1 CLI を足す単位は modules/clis/<name>/。";
   };
 
-  # per-CLI module が使う write-once seed installer。CLI が runtime 所有する設定を欠落 / stale symlink 時のみ書き込む
+  # per-CLI module が使う write-once seed installer、CLI が runtime 所有する設定を欠落 / stale symlink 時のみ書き込む
   config._module.args.seedConfig = rel: src: ''
     f="${cfg.homeDir}/${rel}"
     if [ -L "$f" ] || [ ! -e "$f" ]; then

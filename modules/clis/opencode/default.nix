@@ -8,7 +8,6 @@
 let
   cfg = config.my;
 
-  # agent frontmatter の分割
   splitFrontmatter =
     src:
     let

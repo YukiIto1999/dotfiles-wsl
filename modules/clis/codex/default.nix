@@ -9,10 +9,9 @@
 let
   cfg = config.my;
 
-  # 生成 agent TOML に焼き込むモデル。config.toml の model / tui.model_availability_nux も同じ定数
+  # 生成 agent TOML に焼き込むモデル、config.toml の model / tui.model_availability_nux も同じ定数を使う
   codexModel = "gpt-5.5";
 
-  # agent frontmatter の分割
   splitFrontmatter =
     src:
     let

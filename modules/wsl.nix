@@ -1,7 +1,6 @@
 { config, pkgs, ... }:
 
 let
-  # cmd.exe 経由の最小 wslview
   wslview = pkgs.writeShellScriptBin "wslview" ''
     exec /mnt/c/Windows/System32/cmd.exe /c start "" "$1" 2>/dev/null
   '';

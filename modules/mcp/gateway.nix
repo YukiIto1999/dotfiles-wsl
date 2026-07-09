@@ -53,6 +53,5 @@ in
     };
   };
 
-  # 生成 config の /etc への複製
   environment.etc."agentgateway/config.yaml".source = gatewayConfig;
 }

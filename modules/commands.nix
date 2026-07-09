@@ -120,6 +120,7 @@ let
     coreutils
   ]) { };
   installClis = mkCommand "dotfiles-install-clis" ./commands/install-clis (with pkgs; [
+    bash
     curl
     jq
     gnutar
@@ -145,4 +146,27 @@ in
   };
 
   config.environment.systemPackages = builtins.attrValues cfg.commands;
+
+  config.systemd.services.dotfiles-cli-autoupdate = {
+    description = "AI CLI を latest へ更新";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = cfg.username;
+      Environment = [
+        "HOME=${cfg.homeDir}"
+        "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
+      ];
+      ExecStart = lib.getExe installClis;
+    };
+  };
+
+  config.systemd.timers.dotfiles-cli-autoupdate = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "daily";
+      Persistent = true;
+    };
+  };
 }

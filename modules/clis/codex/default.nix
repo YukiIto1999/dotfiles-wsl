@@ -63,6 +63,9 @@ in
     };
   };
 
+  # codex の workspace-write sandbox が PATH 上に要求する bubblewrap
+  environment.systemPackages = [ pkgs.bubblewrap ];
+
   # codex は user seed の ~/.codex/config.toml をこの上に merge
   # gateway は seed でなくここに置き gatewayUrl 変更を常に反映
   environment.etc."codex/config.toml".source = pkgs.replaceVars ./config-system.toml {

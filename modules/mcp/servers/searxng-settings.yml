@@ -9,3 +9,13 @@ server:
   port: @searxngPort@
 valkey:
   url: valkey://valkey:@valkeyPort@/0
+# default の google / ddg 等はブロックされる
+engines:
+  - name: bing
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: yandex
+    disabled: false
+  - name: presearch
+    disabled: false

@@ -17,5 +17,6 @@ in
 mkMcpServer {
   name = "searxng-mcp";
   env.SEARXNG_URL = searxngUrl;
+  env.FETCH_TIMEOUT_MS = "30000";
   command = "${pkg}/bin/mcp-searxng";
 }

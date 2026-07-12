@@ -12,7 +12,7 @@ let
   backend = mkMcpBackend "crawl4ai" {
     image = "unclecode/crawl4ai:latest@sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
     extraOptions = [
-      "--memory=2g"
+      "--memory=4g"
       "--shm-size=1g"
     ];
     ports = [ port ];

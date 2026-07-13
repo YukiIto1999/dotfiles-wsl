@@ -18,6 +18,8 @@ let
   deniedTools = [ "grep" ];
 
   gatewayConfig = (pkgs.formats.yaml { }).generate "agentgateway-config.yaml" {
+    # idle session の reap 猶予
+    config.mcp.sessionTtl = "4h";
     binds = [
       {
         port = cfg.gatewayPort;

@@ -48,6 +48,7 @@ in
 
     home.packages = with pkgs; [
       nodejs_24
+      python3
       uv
       ripgrep
       fd

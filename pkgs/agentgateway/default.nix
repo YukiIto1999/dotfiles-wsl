@@ -1,22 +1,46 @@
-{ pkgs }:
+{
+  lib,
+  rustPlatform,
+  fetchFromGitHub,
+  cmake,
+  perl,
+}:
 
-# nixpkgs 未収録の upstream static-musl release binary
-pkgs.stdenvNoCC.mkDerivation rec {
+rustPlatform.buildRustPackage rec {
   pname = "agentgateway";
   version = "1.3.1";
 
-  src = pkgs.fetchurl {
-    url = "https://github.com/agentgateway/agentgateway/releases/download/v${version}/agentgateway-linux-amd64";
-    hash = "sha256-cVMajM2h8J0li0bpJkOnMKATZvtDbhUGLplnLoTNkH8=";
+  src = fetchFromGitHub {
+    owner = "agentgateway";
+    repo = "agentgateway";
+    tag = "v${version}";
+    hash = "sha256-Sx/7ClG3D+o1p6+tam61O3K0EfcaDe7xKXnodUxwOtE=";
   };
 
-  dontUnpack = true;
+  cargoHash = "sha256-AtdPXCxSf/PHHnCDOzLojQyRRbXraObpim6RNF2gybw=";
 
-  installPhase = ''
-    runHook preInstall
-    install -Dm755 $src $out/bin/agentgateway
-    runHook postInstall
-  '';
+  # idle reap 後 session の 404 化と backend error の 200 化
+  patches = [ ./mcp-session-recovery.patch ];
+
+  # aws-lc-sys / jemalloc-sys の C ビルド
+  nativeBuildInputs = [
+    cmake
+    perl
+  ];
+
+  cargoBuildFlags = [
+    "-p"
+    "agentgateway-app"
+  ];
+
+  # tokio unstable cfg と sandbox で欠落する build info
+  env = {
+    RUSTFLAGS = "--cfg tokio_unstable";
+    AGENTGATEWAY_BUILD_buildVersion = version;
+    AGENTGATEWAY_BUILD_buildGitRevision = "v${version}";
+  };
+
+  doCheck = false;
 
   meta.mainProgram = "agentgateway";
 }

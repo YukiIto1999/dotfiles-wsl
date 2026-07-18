@@ -97,11 +97,18 @@
             hostConfig.virtualisation.oci-containers.containers.agentmemory.environmentFiles;
           agentmemoryApiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";
           agentmemoryTemplateFile = pkgs.writeText "agentmemory.env" agentmemoryTemplate.content;
+          codexSystemConfig = hostConfig.environment.etc."codex/config.toml".source;
+          codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
+          codexProjectConfig =
+            hostConfig.home-manager.users.${hostConfig.my.username}.home.file.${codexProjectHomePath}.source;
+          codexSeedConfig = pkgs.replaceVars ./modules/clis/codex/config.toml {
+            codexModel = "dummy-model";
+          };
+          codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
 
           # config-syntax check 専用の @var@ 埋め、実際の値は各 module 側にありここでは構文検査用
           dummyVars = {
             gatewayUrl = "http://127.0.0.1:1/mcp";
-            codexModel = "dummy-model";
             httpPort = "1";
             streamPort = "2";
             searxngSecret = "dummy";
@@ -125,7 +132,8 @@
             (pkgs.replaceVars ./modules/clis/codex/config-system.toml {
               inherit (dummyVars) gatewayUrl;
             })
-            (pkgs.replaceVars ./modules/clis/codex/config.toml { inherit (dummyVars) codexModel; })
+            codexProjectConfig
+            codexSeedConfig
           ];
 
           yamlConfigs = [
@@ -203,6 +211,17 @@
                 for f in ${asArgs yamlConfigs}; do
                   yq . "$f" > /dev/null
                 done
+                for global_config in ${codexSystemConfig} ${codexSeedConfig}; do
+                  if taplo get --output-format json --file-path "$global_config" \
+                    sandbox_workspace_write.writable_roots > /dev/null 2>&1; then
+                    echo "checkout-specific writable root leaked into global config: $global_config" >&2
+                    exit 1
+                  fi
+                done
+                taplo get --output-format json --file-path ${codexProjectConfig} \
+                  sandbox_workspace_write.writable_roots \
+                  | jq --exit-status --arg expected ${lib.escapeShellArg codexWritableRoot} \
+                    '. == [$expected]' > /dev/null
                 touch $out
               '';
         };

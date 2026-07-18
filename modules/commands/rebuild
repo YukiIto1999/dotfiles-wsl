@@ -1,5 +1,7 @@
 set -euo pipefail
 
+@operationLockFunctions@
+
 usage() {
   cat <<'USAGE'
 usage: dotfiles-rebuild [--plan]
@@ -41,6 +43,47 @@ fi
 
 dotfiles="@dotfilesDir@"
 flake="git+file://$dotfiles"
+common_git_dir=$(git -C "$dotfiles" rev-parse --path-format=absolute --git-common-dir) || \
+  die 2 "failed to resolve the Git common directory"
+dotfiles_acquire_operation_lock "$common_git_dir" "$EUID" "$(id -g)" || \
+  die 1 "failed to acquire the dotfiles operation lock"
+
+active_enrollment=$common_git_dir/dotfiles-sops-enroll/active.json
+if [[ -e $active_enrollment || -L $active_enrollment ]]; then
+  [[ ! -L $active_enrollment && -f $active_enrollment ]] || \
+    die 1 "the SOPS enrollment marker must be a regular file"
+  [[ $(stat -c '%u|%a|%h' -- "$active_enrollment") == "$EUID|600|1" ]] || \
+    die 1 "the SOPS enrollment marker has invalid owner, mode, or link count"
+  marker=$(cat -- "$active_enrollment")
+  # shellcheck disable=SC2016 # worktree is a jq variable.
+  jq -e \
+    --arg worktree "$dotfiles" '
+      .version == 2 and
+      (.transactionId | type == "string" and test("^[0-9a-f]{32}$")) and
+      (.hostId | type == "string" and test("^[a-z0-9][a-z0-9-]{0,62}$")) and
+      .worktree == $worktree and
+      (.phase | IN("staging", "prepared", "generation-pending", "generation-checking")) and
+      all(.oldConfigHash, .oldSecretsHash, .newConfigHash, .newSecretsHash;
+        . == null or (type == "string" and test("^[0-9a-f]{64}$")))
+    ' <<< "$marker" >/dev/null || die 1 "the SOPS enrollment marker is invalid"
+  [[ $(jq -r '.phase' <<< "$marker") == generation-pending ]] || \
+    die 1 "an enrollment transaction blocks normal rebuild"
+  new_config_hash=$(jq -er '.newConfigHash | select(type == "string")' <<< "$marker")
+  new_secrets_hash=$(jq -er '.newSecretsHash | select(type == "string")' <<< "$marker")
+  [[ $(sha256sum "$dotfiles/secrets/.sops.yaml" | cut -d ' ' -f 1) == "$new_config_hash" &&
+    $(sha256sum "$dotfiles/secrets/secrets.yaml" | cut -d ' ' -f 1) == "$new_secrets_hash" ]] || \
+    die 1 "the prepared SOPS files do not match the enrollment marker"
+  mapfile -t enrollment_changes < <(git -C "$dotfiles" diff --name-only | sort)
+  [[ ${#enrollment_changes[@]} -eq 2 &&
+    ${enrollment_changes[0]} == secrets/.sops.yaml &&
+    ${enrollment_changes[1]} == secrets/secrets.yaml ]] || \
+    die 1 "only the prepared SOPS files may differ during enrollment rebuild"
+  git -C "$dotfiles" diff --cached --quiet HEAD || \
+    die 1 "staged changes block enrollment rebuild"
+  git -C "$dotfiles" diff --check -- secrets/.sops.yaml secrets/secrets.yaml || \
+    die 1 "the prepared SOPS patch is invalid"
+  echo "==> SOPS enrollment generation"
+fi
 
 # untracked file は Git flake snapshot から見えず、無言で配備から落ちる
 untracked=$(git -C "$dotfiles" ls-files --others --exclude-standard)

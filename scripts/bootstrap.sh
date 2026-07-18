@@ -2,6 +2,9 @@
 set -Eeuo pipefail
 shopt -s inherit_errexit 2>/dev/null || true
 
+# shellcheck source=lib/operation-lock.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib/operation-lock.sh"
+
 die()     { trap - ERR; echo "FATAL: $*" >&2; exit 1; }
 as_user() { sudo -u "${SUDO_USER}" "$@"; }
 step()    { printf '[%d/%d] %s\n' "$((++STEP))" "${TOTAL}" "$*"; }
@@ -40,6 +43,27 @@ register_safe_directories() {
   git config --global --get-all safe.directory 2>/dev/null | grep -qxF "${DOTFILES}" \
     || git config --global --add safe.directory "${DOTFILES}"
   step "git safe.directory registered"
+}
+
+acquire_operation_lock() {
+  local common_git_dir target_gid target_uid
+  common_git_dir=$(as_user git -C "${DOTFILES}" rev-parse --path-format=absolute --git-common-dir) \
+    || die "cannot resolve Git common directory"
+  target_gid=$(id -g "${SUDO_USER}")
+  target_uid=$(id -u "${SUDO_USER}")
+  dotfiles_acquire_operation_lock "${common_git_dir}" "${target_uid}" "${target_gid}" \
+    || die "failed to acquire the dotfiles operation lock"
+  step "dotfiles operation lock acquired"
+}
+
+reject_active_enrollment() {
+  local common_git_dir active_marker
+  common_git_dir=$(as_user git -C "${DOTFILES}" rev-parse --path-format=absolute --git-common-dir) \
+    || die "cannot resolve Git common directory"
+  active_marker=${common_git_dir}/dotfiles-sops-enroll/active.json
+  [[ ! -e ${active_marker} && ! -L ${active_marker} ]] \
+    || die "an active SOPS enrollment transaction blocks bootstrap"
+  step "no active SOPS enrollment transaction"
 }
 
 verify_tracked_flake_files() {
@@ -101,6 +125,8 @@ main() {
   local -r AGE_KEY="/var/lib/sops-nix/key.txt"
   local -r FLAKE_REF="git+file://${DOTFILES}"
   local -ra stages=(
+    acquire_operation_lock
+    reject_active_enrollment
     register_safe_directories
     preflight
     verify_tracked_flake_files

@@ -60,6 +60,21 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 
 現在の暗号文には `secrets/.sops.yaml` の `recovery` recipient 1 つだけが登録され、その秘密鍵が runtime key と home 側に複製されている。二つ目の host recipient を登録し、両鍵の復号を確認してから旧 runtime key と home 複製を除く作業は、コード変更とは別の runtime migration として行う。
 
+### 別ホストで再現する手順
+
+再現対象は tracked source と `flake.lock` から生成する system / Home Manager 設定である。age の host key、AI CLI が保持する login session、agentmemory のデータはホスト固有なので複製しない。AI CLI 本体も bootstrap 時点の latest を取得する外部状態であり、`flake.lock` から同じ版を再現しない。
+
+1. NixOS-WSL を用意し、このリポジトリを `~/dotfiles-wsl` へ clone する。
+2. 新しい host key を生成し、公開 recipient だけを enrollment 済みの既存ホストへ渡す。既存ホストがない場合は、新規ホストへ一時的に recovery key を接続する。
+3. 前節の手順で host recipient を追加し、`secrets/secrets.yaml` を再暗号化する。
+4. 更新した2ファイルを一時転送し、新規ホストの host identity と offline recovery identity の両方で復号する。既存ホストで再暗号化した場合も、commit 前に新規ホストへ暗号文だけを渡して host identity を検証する。
+5. recovery key をホストから外す。
+6. `secrets/.sops.yaml` と `secrets/secrets.yaml` を同じ commit に記録し、利用する全ホストへ同期する。
+7. `sudo bash scripts/bootstrap.sh` を実行する。
+8. 初回の boot generation を読むため WSL を一度停止・起動し、`dotfiles-doctor` を実行する。
+
+2台目以降も同じ手順を使う。既存ホストの `/var/lib/sops-nix/key.txt` や `~/.config/sops/age/keys.txt` をコピーして済ませない。
+
 ## 初回セットアップ
 
 ```bash
@@ -128,7 +143,21 @@ PowerShell で実行する正確な command は rebuild の終了時に表示す
 
 ## 検証
 
-検証は `dotfiles-doctor` で行う。CLI 本体が upstream 配布のままか、rules / skills / agents / gateway ファイルが配備されているか、systemd unit が起動しているかを確認する。さらに gateway へ MCP `initialize` → `tools/list` を実行し、`my.mcp.targets` の全 target の応答を検査する。
+`nix flake check` と `dotfiles-doctor` は検査対象が異なるため、どちらも必要になる。flake check は評価した source から system closure と設定を生成できることを apply 前に検査する。doctor は apply 後の current generation が宣言した期待値と、system profile、systemd、SOPS host key、home 配下の CLI、MCP gateway の実状態が一致することを検査する。
+
+doctor の期待値は current generation の `/run/current-system/etc/dotfiles/doctor.json` に収録する。mutable な checkout や `share/AGENTS.md` の表は inventory として読まない。次をすべて満たした場合だけ status 0 になる。
+
+- system profile と実行中の doctor が current generation を指す
+- WSL cold-start state が `switch` で、追加の停止・起動を必要としない
+- 必須 unit の `LoadState` が `loaded`、`ActiveState` が `active`
+- `/var/lib/sops-nix` が root `0700`、host key が root `0400` になっている。host/recovery key の移行中は home 側の旧 age key を警告し、移行完了後に policy を `reject` へ切り替えて残存を失敗にする
+- health registry に登録した Claude、Codex、agentgateway の管理ファイルと、trusted project 用の `.codex/config.toml` が current generation の source と byte 単位で一致する
+- 各 AI CLI が `~/.local/bin` の宣言パスから実行され、rules file が source と一致し、期待する各 `SKILL.md` と各 agent file が存在する
+- OpenCode と Antigravity の gateway file が current generation の gateway URL を含む
+- `wslview` が current generation の宣言した実体を指し、`cmd.exe /d /c exit 0` の probe が5秒以内に成功する
+- MCP が `initialize`、`notifications/initialized`、全ページの `tools/list`、session `DELETE` を完走し、全 target が tool を公開する
+
+doctor は secret の値、AI CLI の配布元・内容・版・login session、skill 本文と agent file の内容、checkout の clean 状態を検査しない。source と build の検査は `dotfiles-rebuild` と flake check が行う。enrollment では host identity と recovery identity、bootstrap では host identity による秘密値の復号を確認する。
 
 ## AI コーディング CLI
 
@@ -224,17 +253,18 @@ OpenCode (plugins/ 自動ロード)      --/
 dotfiles-rebuild
 ```
 
-PowerShell から WSL を再起動し、`dotfiles-doctor` を実行する。
+`dotfiles-rebuild` が `switch` と判定した変更は WSL を止めず、live switch 後に doctor まで実行する。停止・起動が必要な場合だけ、終了時に表示される PowerShell command を実行する。
 
 ## セキュリティ
 
 - gateway は loopback 限定で認証は持たない。同一ユーザーのプロセスは gateway 経由で GitHub の書き込み操作などを実行できる。被害を絞るため、PAT は fine-grained + 最小スコープにする。
 - runtime migration 完了後は、ホスト固有の `/var/lib/sops-nix/key.txt`(directory は root `0700`、key は root `0400`)だけを置く。`~/.config/sops/age/keys.txt` に複製しない。通常の secret 編集は `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops secrets/secrets.yaml` を使う。
+- 現在の doctor manifest は移行中を示す `sops.homeKey.policy = "warn"` である。host key とオフライン復旧鍵の双方で復号を実測した後、`modules/secrets.nix` を `reject` へ変更し、旧 home key を削除する。
 - オフライン復旧鍵は host key と同じ age key group に登録するが、通常運用するホストへ常置しない。recipient の追加と削除には `sops updatekeys` を使い、変更後は各 identity で個別に復号を確認する。
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`--check`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`--check`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
 
 ## License
 

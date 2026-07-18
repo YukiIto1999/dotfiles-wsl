@@ -29,6 +29,17 @@ in
     inherit (cfg) gatewayUrl;
   };
 
+  my.doctor.managedFiles = {
+    claude-settings = {
+      path = "/etc/claude-code/managed-settings.json";
+      source = config.environment.etc."claude-code/managed-settings.json".source;
+    };
+    claude-mcp = {
+      path = "/etc/claude-code/managed-mcp.json";
+      source = config.environment.etc."claude-code/managed-mcp.json".source;
+    };
+  };
+
   home-manager.users.${cfg.username} =
     { lib, ... }:
     {

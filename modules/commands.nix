@@ -10,23 +10,9 @@ let
   cfg = config.my;
   inherit (cfg) clis;
   names = builtins.attrNames clis;
+  homeConfig = config.home-manager.users.${cfg.username};
 
   orElse = v: default: if v == null then default else v;
-
-  # roster を「1 行 1 CLI」の pipe 区切りテーブルへ変換、doctor / install-clis はこれを読むだけ
-  cliRow =
-    name:
-    let
-      c = clis.${name};
-    in
-    lib.concatStringsSep "|" [
-      name
-      c.binary
-      c.rulesFile
-      c.skillsDir
-      (orElse c.agentsDir "")
-      (orElse c.gatewayFile "")
-    ];
 
   installRow =
     name:
@@ -70,6 +56,101 @@ let
     ".config/gh"
   ];
 
+  rootProbe = pkgs.writeShellApplication {
+    name = "dotfiles-doctor-root-probe";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      if [[ $# -ne 0 ]]; then
+        echo "dotfiles-doctor-root-probe does not accept arguments" >&2
+        exit 2
+      fi
+
+      directory_metadata=$(stat --format='%u|%g|%a' /var/lib/sops-nix)
+      key_metadata=$(stat --format='%u|%g|%a' /var/lib/sops-nix/key.txt)
+      IFS='|' read -r directory_uid directory_gid directory_mode <<< "$directory_metadata"
+      IFS='|' read -r key_uid key_gid key_mode <<< "$key_metadata"
+
+      printf '{"directory":{"uid":%s,"gid":%s,"mode":"%s"},"key":{"uid":%s,"gid":%s,"mode":"%s"}}\n' \
+        "$directory_uid" \
+        "$directory_gid" \
+        "$directory_mode" \
+        "$key_uid" \
+        "$key_gid" \
+        "$key_mode"
+    '';
+  };
+
+  doctorManifest = (pkgs.formats.json { }).generate "doctor-manifest-v2.json" {
+    schemaVersion = 2;
+    user = {
+      name = cfg.username;
+      home = cfg.homeDir;
+    };
+    generation = {
+      current = "/run/current-system";
+      booted = "/run/booted-system";
+      profile = "/nix/var/nix/profiles/system";
+    };
+    sops = {
+      rootProbe = lib.getExe rootProbe;
+      homeKey = {
+        path = "${cfg.homeDir}/.config/sops/age/keys.txt";
+        policy = cfg.doctor.sopsHomeKeyPolicy;
+      };
+    };
+    units = lib.unique cfg.doctor.units;
+    managedFiles = lib.mapAttrsToList (_: file: {
+      inherit (file) path source;
+    }) cfg.doctor.managedFiles;
+    clis = map (
+      name:
+      let
+        cli = clis.${name};
+      in
+      {
+        inherit name;
+        binaryName = cli.binary;
+        binaryPath = "${cfg.homeDir}/.local/bin/${cli.binary}";
+        rules = {
+          path = "${cfg.homeDir}/${cli.rulesFile}";
+          source = homeConfig.home.file.${cli.rulesFile}.source;
+        };
+        skills = {
+          directory = "${cfg.homeDir}/${cli.skillsDir}";
+          names = cfg.doctor.skillNames;
+        };
+        agents =
+          if cli.agentsDir == null then
+            null
+          else
+            {
+              directory = "${cfg.homeDir}/${cli.agentsDir}";
+              files = cfg.doctor.agentFiles.${name};
+            };
+        gatewayFile =
+          if cli.gatewayFile == null then
+            null
+          else
+            {
+              path = "${cfg.homeDir}/${cli.gatewayFile}";
+              contains = cfg.gatewayUrl;
+            };
+      }
+    ) names;
+    mcp = {
+      url = cfg.gatewayUrl;
+      targets = builtins.attrNames cfg.mcp.targets;
+      requestedProtocolVersion = "2025-06-18";
+      supportedProtocolVersions = [
+        "2024-11-05"
+        "2025-03-26"
+        "2025-06-18"
+      ];
+    };
+    wslInterop = cfg.doctor.wslInterop;
+    nixLdPath = "/lib64/ld-linux-x86-64.so.2";
+  };
+
   substitute =
     vars: text:
     builtins.replaceStrings (map (k: "@${k}@") (
@@ -78,14 +159,10 @@ let
 
   commonVars = {
     inherit (cfg) dotfilesDir;
-    inherit (cfg) gatewayUrl;
-    inherit (cfg) username;
-    cliTable = lib.concatStringsSep "\n" (map cliRow names);
     installTable = lib.concatStringsSep "\n" (map installRow names);
-    mcpTargetNames = lib.concatStringsSep " " (builtins.attrNames cfg.mcp.targets);
-    gatewayWaitUnits = lib.concatStringsSep " " cfg.mcp.gatewayWaitUnits;
     cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
     hmBackupExt = config.home-manager.backupFileExtension;
+    doctorManifestPath = "/run/current-system/etc/dotfiles/doctor.json";
   };
 
   mkCommand =
@@ -98,23 +175,16 @@ let
       // extra
     );
 
-  # ok/bad の A && B || C は本 repo の一貫した idiom、元 scripts/*.sh も同型で SC2015/16 は許容
-  doctorChecks = {
-    excludeShellChecks = [
-      "SC2015"
-      "SC2016"
-    ];
-  };
-
   doctor = mkCommand "dotfiles-doctor" ./commands/doctor (with pkgs; [
     curl
     jq
     gnugrep
-    gawk
     coreutils
-    findutils
     systemd
-  ]) doctorChecks;
+    sudo
+    rootProbe
+    wslRestartRequired
+  ]) { };
   wslRestartRequired = mkCommand "dotfiles-wsl-restart-required" ./commands/wsl-restart-required (
     with pkgs; [ coreutils ]) { };
   rebuild = mkCommand "dotfiles-rebuild" ./commands/rebuild (
@@ -158,6 +228,26 @@ in
   };
 
   config.environment.systemPackages = builtins.attrValues cfg.commands;
+
+  config.environment.etc."dotfiles/doctor.json".source = doctorManifest;
+
+  config.my.doctor.units = [
+    "home-manager-${cfg.username}.service"
+    "dotfiles-cli-autoupdate.timer"
+  ];
+
+  config.security.sudo.extraRules = [
+    {
+      users = [ cfg.username ];
+      runAs = "root";
+      commands = [
+        {
+          command = ''${lib.getExe rootProbe} ""'';
+          options = [ "NOPASSWD" ];
+        }
+      ];
+    }
+  ];
 
   config.systemd.services.dotfiles-cli-autoupdate = {
     description = "AI CLI を latest へ更新";

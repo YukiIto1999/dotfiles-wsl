@@ -70,4 +70,5 @@ in
 
   my.mcp.gatewayWaitUnits = [ "docker-agentmemory.service" ];
   my.mcp.targets.memory.command = lib.getExe agentmemory.front;
+  my.doctor.units = map (name: "${name}.service") (builtins.attrNames backend.systemdServices);
 }

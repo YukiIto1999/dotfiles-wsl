@@ -1,8 +1,10 @@
 { config, pkgs, ... }:
 
 let
-  wslview = pkgs.writeShellScriptBin "wslview" ''
-    exec /mnt/c/Windows/System32/cmd.exe /c start "" "$1" 2>/dev/null
+  launcherName = "wslview";
+  windowsCommand = "/mnt/c/Windows/System32/cmd.exe";
+  wslview = pkgs.writeShellScriptBin launcherName ''
+    exec ${windowsCommand} /c start "" "$1" 2>/dev/null
   '';
 in
 {
@@ -23,4 +25,10 @@ in
   environment.localBinInPath = true;
   environment.systemPackages = [ wslview ];
   programs.nix-ld.enable = true;
+
+  my.doctor.wslInterop = {
+    inherit launcherName windowsCommand;
+    launcherPath = "/run/current-system/sw/bin/${launcherName}";
+    launcherSource = "${wslview}/bin/${launcherName}";
+  };
 }

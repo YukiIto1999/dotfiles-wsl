@@ -56,4 +56,12 @@ in
   };
 
   environment.etc."agentgateway/config.yaml".source = gatewayConfig;
+
+  my.doctor = {
+    units = [ "agentgateway.service" ];
+    managedFiles.agentgateway = {
+      path = "/etc/agentgateway/config.yaml";
+      source = gatewayConfig;
+    };
+  };
 }

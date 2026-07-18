@@ -145,6 +145,15 @@ in
     fi
   '';
 
+  config.my.doctor.skillNames = builtins.attrNames allSkills;
+  config.my.doctor.agentFiles = lib.genAttrs agentClis (
+    name:
+    let
+      def = clis.${name};
+    in
+    lib.mapAttrsToList (agentName: srcPath: destBaseName (def.buildAgent agentName srcPath)) agentSrcs
+  );
+
   config.home-manager.users.${cfg.username} =
     { config, lib, ... }:
     {

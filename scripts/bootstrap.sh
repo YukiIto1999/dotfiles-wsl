@@ -15,11 +15,24 @@ ensure_root() {
 }
 
 preflight() {
-  local f
+  local f key_dir
   for f in "${DOTFILES}/flake.nix" "${DOTFILES}/flake.lock" "${SECRETS_FILE}" "${AGE_KEY}"; do
     [[ -f ${f} ]] || die "${f} not found"
   done
   [[ -d ${DOTFILES}/.git ]] || die "${DOTFILES} is not a git repository"
+
+  key_dir=$(dirname -- "${AGE_KEY}")
+  [[ -d ${key_dir} && ! -L ${key_dir} ]] \
+    || die "${key_dir} must be a directory, not a symlink"
+  [[ ! -L ${AGE_KEY} ]] || die "${AGE_KEY} must not be a symlink"
+  [[ $(stat -c '%u:%g' -- "${key_dir}") == 0:0 ]] \
+    || die "${key_dir} must be owned by root:root"
+  [[ $(stat -c '%a' -- "${key_dir}") == 700 ]] \
+    || die "${key_dir} must have mode 0700"
+  [[ $(stat -c '%u:%g' -- "${AGE_KEY}") == 0:0 ]] \
+    || die "${AGE_KEY} must be owned by root:root"
+  [[ $(stat -c '%a' -- "${AGE_KEY}") == 400 ]] \
+    || die "${AGE_KEY} must have mode 0400"
   step "preflight complete"
 }
 
@@ -122,4 +135,6 @@ Then run:
 MSG
 }
 
-main "$@"
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+  main "$@"
+fi

@@ -26,7 +26,39 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 | age 秘密鍵 | `/var/lib/sops-nix/key.txt`(root 専用、`0400`) |
 | SOPS ファイル | `~/dotfiles-wsl/secrets/secrets.yaml` |
 
-`secrets/secrets.yaml` は `/var/lib/sops-nix/key.txt` で復号できる必要がある。新規マシンでは既存の age 鍵を `install -m600` で置くか `age-keygen -o /var/lib/sops-nix/key.txt` で作り、その公開鍵を `.sops.yaml` に登録して `sops updatekeys` する。
+`/var/lib/sops-nix/key.txt` はホスト固有鍵とし、別ホストへ複製しない。通常の rebuild は既存鍵を読むだけで、鍵の生成や recipient の変更は行わない。
+
+### age 鍵の enrollment
+
+新規ホストは bootstrap の前に enrollment する。復旧鍵はオフラインで保管し、enrollment と復旧の間だけマウントする。
+
+既存構成を移行するときは、最初に recovery identity を読み取り専用の外部媒体へ保管する。その identity の公開 recipient が `secrets/.sops.yaml` の `recovery` と一致し、現在の暗号文を復号できることを確認してから次へ進む。
+
+1. 新規ホストで host key を生成する。
+
+   ```bash
+   age_keygen="$(nix build --no-link --print-out-paths .#age)/bin/age-keygen"
+   sudo install -d -o root -g root -m 0700 /var/lib/sops-nix
+   sudo "$age_keygen" -o /var/lib/sops-nix/key.txt
+   sudo chmod 0400 /var/lib/sops-nix/key.txt
+   sudo "$age_keygen" -y /var/lib/sops-nix/key.txt
+   ```
+
+2. 既存 recipient を削除せず、オフライン復旧鍵の公開 recipient と、直前に表示した新しい host recipient を `secrets/.sops.yaml` の同じ age key group に追加する。
+3. 復旧鍵を一時的に指定し、`SOPS_AGE_KEY_FILE=/path/to/recovery-key nix shell .#sops -c sops --config secrets/.sops.yaml updatekeys secrets/secrets.yaml` を実行する。
+4. host key と recovery key を一つずつ指定し、どちらでも復号できることを確認する。
+
+   ```bash
+   sops_bin="$(nix build --no-link --print-out-paths .#sops)/bin/sops"
+   sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
+     "$sops_bin" --decrypt secrets/secrets.yaml >/dev/null
+   SOPS_AGE_KEY_FILE=/path/to/recovery-key \
+     "$sops_bin" --decrypt secrets/secrets.yaml >/dev/null
+   ```
+
+5. 復旧鍵をホストから取り外してから bootstrap を実行する。
+
+現在の暗号文には `secrets/.sops.yaml` の `recovery` recipient 1 つだけが登録され、その秘密鍵が runtime key と home 側に複製されている。二つ目の host recipient を登録し、両鍵の復号を確認してから旧 runtime key と home 複製を除く作業は、コード変更とは別の runtime migration として行う。
 
 ## 初回セットアップ
 
@@ -40,7 +72,7 @@ bootstrap は次を実行する。
 | 順序 | 内容 |
 |---|---|
 | register_safe_directories | root がリポジトリを扱えるよう `safe.directory` を登録(冪等) |
-| preflight | flake / lock / secrets / age key の存在確認 |
+| preflight | flake / lock / secrets の存在と、enrollment 済み age key の owner / mode を確認 |
 | verify_tracked_flake_files | untracked file が flake build から見えないため、無いことを確認 |
 | verify_secrets | `nix shell .#sops -c sops -d secrets/secrets.yaml` で復号確認 |
 | install_ai_clis | `nix run .#dotfiles-install-clis` で CLI 本体を upstream から `~/.local/bin` へ配置 |
@@ -171,12 +203,12 @@ PowerShell から WSL を再起動し、`dotfiles-doctor` を実行する。
 ## セキュリティ
 
 - gateway は loopback 限定で認証は持たない。同一ユーザーのプロセスは gateway 経由で GitHub の書き込み操作などを実行できる。被害を絞るため、PAT は fine-grained + 最小スコープにする。
-- age 鍵は `/var/lib/sops-nix/key.txt`(root `0400`)だけに置く。`~/.config/sops/age/keys.txt` の複製は全 secret を平文で読める状態にするため置かない。編集は `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops secrets/secrets.yaml`。`dotfiles-doctor` が複製を検出して警告する。
-- `.sops.yaml` の recipient は現在 primary age key 1 つのみで、鍵紛失時の復旧経路が無い。復旧用の recipient を 1 つ追加し、`sops updatekeys` で反映する。
+- runtime migration 完了後は、ホスト固有の `/var/lib/sops-nix/key.txt`(directory は root `0700`、key は root `0400`)だけを置く。`~/.config/sops/age/keys.txt` に複製しない。通常の secret 編集は `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops secrets/secrets.yaml` を使う。
+- オフライン復旧鍵は host key と同じ age key group に登録するが、通常運用するホストへ常置しない。recipient の追加と削除には `sops updatekeys` を使い、変更後は各 identity で個別に復号を確認する。
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`--check`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`--check`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
 
 ## License
 

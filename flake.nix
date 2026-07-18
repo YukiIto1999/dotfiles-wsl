@@ -109,6 +109,7 @@
           hostConfig = self.nixosConfigurations.${hostName}.config;
           inherit (self.nixosConfigurations.${hostName}) pkgs;
           inherit (pkgs) lib;
+          homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 
           mkMcpServer = pkgs.callPackage ./pkgs/mk-mcp-server.nix { };
           fakeChromium = pkgs.writeShellScriptBin "chromium" "exit 0";
@@ -173,14 +174,13 @@
           agentmemoryTemplateFile = pkgs.writeText "agentmemory.env" agentmemoryTemplate.content;
           codexSystemConfig = hostConfig.environment.etc."codex/config.toml".source;
           codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
-          codexProjectConfig =
-            hostConfig.home-manager.users.${hostConfig.my.username}.home.file.${codexProjectHomePath}.source;
+          codexProjectConfig = homeConfig.home.file.${codexProjectHomePath}.source;
           codexSeedConfig = pkgs.replaceVars ./modules/clis/codex/config.toml {
             codexModel = "dummy-model";
           };
           codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
           doctorManifest = hostConfig.environment.etc."dotfiles/doctor.json".source;
-          homeFiles = hostConfig.home-manager.users.${hostConfig.my.username}.home.file;
+          homeFiles = homeConfig.home.file;
           directHomeFilesIn =
             directory:
             lib.sort builtins.lessThan (
@@ -554,6 +554,39 @@
               grep -Fqx 'OPENAI_MODEL=minimax-m2.7' ${agentmemoryTemplateFile}
               grep -Fqx 'EMBEDDING_PROVIDER=none' ${agentmemoryTemplateFile}
               grep -Fqx ${lib.escapeShellArg agentmemoryApiKeyLine} ${agentmemoryTemplateFile}
+              touch $out
+            '';
+
+          development-tool-ownership =
+            let
+              systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
+              homePackageNames = map lib.getName homeConfig.home.packages;
+              nixDirenvSource = "${homeConfig.programs.direnv.nix-direnv.package}/share/nix-direnv/direnvrc";
+              binaryCaches = import ./modules/nix-caches.nix;
+              devenvCache = lib.findFirst (
+                cache: cache.name == "devenv"
+              ) (throw "devenv cache is missing") binaryCaches;
+              substituters = map (lib.removeSuffix "/") hostConfig.nix.settings.substituters;
+              trustedPublicKeys = hostConfig.nix.settings.trusted-public-keys;
+            in
+            assert !hostConfig.programs.direnv.enable;
+            assert homeConfig.programs.direnv.enable;
+            assert homeConfig.programs.direnv.enableBashIntegration;
+            assert homeConfig.programs.direnv.nix-direnv.enable;
+            assert
+              lib.intersectLists [
+                "devenv"
+                "direnv"
+                "nix-direnv"
+              ] systemPackageNames == [ ];
+            assert lib.elem "devenv" homePackageNames;
+            assert lib.elem "direnv" homePackageNames;
+            assert toString homeConfig.xdg.configFile."direnv/lib/hm-nix-direnv.sh".source == nixDirenvSource;
+            assert lib.count (substituter: substituter == devenvCache.substituter) substituters == 1;
+            assert lib.count (key: key == devenvCache.publicKey) trustedPublicKeys == 1;
+            assert lib.count (substituter: substituter == "https://cache.nixos.org") substituters == 1;
+            assert lib.count (lib.hasPrefix "cache.nixos.org-1:") trustedPublicKeys == 1;
+            pkgs.runCommandLocal "check-development-tool-ownership" { } ''
               touch $out
             '';
 

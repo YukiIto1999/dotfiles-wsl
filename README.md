@@ -129,6 +129,8 @@ nix fmt
 
 flake の devShell はこのリポジトリ固有の保守 toolchain、checks は CI の検査を所有する。Home Manager は日常操作と editor 連携の tool を所有する。`jq`、`yq`、`shellcheck` は用途が異なるため Home と devShell の両方に含める。formatter は devShell と checks で `nixfmt-tree` に統一し、Home Manager の `nixfmt` は editor から単一ファイルを整形するために残す。
 
+`devenv` は各プロジェクトの `devenv.nix` から開発環境を構築するため、Home Manager がユーザー環境へ配備する。`direnv` と nix-direnv の Bash 連携も Home Manager に集約する。devenv の project environment を取得する `devenv.cachix.org` は NixOS の substituter に維持する。
+
 仕様は [Nix の `nix develop`](https://nix.dev/manual/nix/2.33/command-ref/new-cli/nix3-develop)、[devenv の導入手順](https://devenv.sh/getting-started/)、[nixfmt の project formatter](https://github.com/NixOS/nixfmt#in-a-project)を参照する。
 
 ## 再ビルド
@@ -271,6 +273,7 @@ OpenCode (plugins/ 自動ロード)      --/
 | CLI 固有の設定を変える | `modules/clis/<name>/` 配下のテンプレート |
 | CLI を増減 | `modules/clis/<name>/` を足し、`modules/clis/default.nix` の imports に登録 |
 | MCP server を増減 | `pkgs/<name>` を build 定義として足し、`modules/mcp/servers/<name>.nix` に target を追加、`modules/mcp/default.nix` の imports に登録 |
+| binary cache を増減 | `modules/nix-caches.nix` |
 | secret を足す | 消費する module に `sops.secrets` を宣言し、`secrets/secrets.yaml` に値を足す |
 
 変更後は rebuild する。
@@ -290,7 +293,7 @@ dotfiles-rebuild
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
 
 ## License
 

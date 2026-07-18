@@ -51,6 +51,71 @@ in
       example = "~/projects/business/";
       description = "gitdir glob that selects the work git identity. null disables it.";
     };
+
+    doctor = {
+      units = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        internal = true;
+        description = "dotfiles-doctor が loaded/active を要求する systemd unit。";
+      };
+
+      managedFiles = lib.mkOption {
+        type = lib.types.attrsOf (
+          lib.types.submodule {
+            options = {
+              path = lib.mkOption {
+                type = lib.types.str;
+                description = "current generation が管理する runtime file の絶対パス。";
+              };
+              source = lib.mkOption {
+                type = lib.types.path;
+                description = "runtime file と比較する immutable source。";
+              };
+            };
+          }
+        );
+        default = { };
+        internal = true;
+        description = "dotfiles-doctor が current generation の source と比較する file。";
+      };
+
+      skillNames = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        internal = true;
+        description = "各 CLI に配備されることを要求する skill 名。";
+      };
+
+      agentFiles = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+        default = { };
+        internal = true;
+        description = "CLI ごとに配備を要求する agent file 名。";
+      };
+
+      sopsHomeKeyPolicy = lib.mkOption {
+        type = lib.types.enum [
+          "warn"
+          "reject"
+        ];
+        internal = true;
+        description = "旧 home age key を migration 中の警告にするか、移行完了後の失敗にするか。";
+      };
+
+      wslInterop = lib.mkOption {
+        type = lib.types.submodule {
+          options = {
+            launcherName = lib.mkOption { type = lib.types.str; };
+            launcherPath = lib.mkOption { type = lib.types.str; };
+            launcherSource = lib.mkOption { type = lib.types.path; };
+            windowsCommand = lib.mkOption { type = lib.types.str; };
+          };
+        };
+        internal = true;
+        description = "WSL から Windows を起動する launcher と固定 command の検査契約。";
+      };
+    };
   };
 
   config.my = {

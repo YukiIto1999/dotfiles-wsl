@@ -1,181 +1,640 @@
+set +e
+
 fail=0
-dotfiles="@dotfilesDir@"
-gateway_url="@gatewayUrl@"
+manifest="@doctorManifestPath@"
 
-ok()   { printf 'OK: %s\n' "$*"; }
+ok()  { printf 'OK: %s\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
-bad()  { printf 'FAIL: %s\n' "$*" >&2; fail=1; }
+bad() { printf 'FAIL: %s\n' "$*" >&2; fail=1; }
 
-check_file() {
-  local path=$1
-  [[ -e $path || -L $path ]] && ok "$path exists" || bad "missing $path"
-}
+if [[ ! -r $manifest ]]; then
+  bad "doctor manifest is not readable: $manifest"
+  exit "$fail"
+fi
 
-check_dir() {
-  local path=$1
-  [[ -d $path ]] && ok "$path exists" || bad "missing directory $path"
-}
+if ! jq -e '
+  .schemaVersion == 2 and
+  (.user.name | type) == "string" and
+  (.user.home | type) == "string" and
+  (.generation.current | type) == "string" and
+  (.generation.booted | type) == "string" and
+  (.generation.profile | type) == "string" and
+  (.sops.rootProbe | type) == "string" and
+  (.sops.homeKey.path | type) == "string" and
+  (.sops.homeKey.policy == "warn" or .sops.homeKey.policy == "reject") and
+  (.units | type) == "array" and
+  all(.units[]; type == "string") and
+  (.managedFiles | type) == "array" and
+  all(.managedFiles[];
+    (.path | type) == "string" and
+    (.source | type) == "string"
+  ) and
+  (.clis | type) == "array" and
+  all(.clis[];
+    (.name | type) == "string" and
+    (.binaryName | type) == "string" and
+    (.binaryPath | type) == "string" and
+    (.rules.path | type) == "string" and
+    (.rules.source | type) == "string" and
+    (.skills.directory | type) == "string" and
+    (.skills.names | type) == "array" and
+    all(.skills.names[]; type == "string") and
+    (.agents == null or (
+      (.agents.directory | type) == "string" and
+      (.agents.files | type) == "array" and
+      all(.agents.files[]; type == "string")
+    )) and
+    (.gatewayFile == null or (
+      (.gatewayFile.path | type) == "string" and
+      (.gatewayFile.contains | type) == "string"
+    ))
+  ) and
+  (.mcp | type) == "object" and
+  (.mcp.url | type) == "string" and
+  (.mcp.targets | type) == "array" and
+  all(.mcp.targets[]; type == "string") and
+  (.mcp.requestedProtocolVersion | type) == "string" and
+  (.mcp.supportedProtocolVersions | type) == "array" and
+  all(.mcp.supportedProtocolVersions[]; type == "string") and
+  (.wslInterop.launcherName | type) == "string" and
+  (.wslInterop.launcherPath | type) == "string" and
+  (.wslInterop.launcherSource | type) == "string" and
+  (.wslInterop.windowsCommand | type) == "string" and
+  (.nixLdPath | type) == "string"
+' "$manifest" >/dev/null 2>&1; then
+  bad "doctor manifest does not match schema version 2: $manifest"
+  exit "$fail"
+fi
 
-check_command_upstream() {
-  local cmd=$1 path version
-  path=$(type -P "$cmd" 2>/dev/null || true)
-  if [[ -z $path ]]; then
-    bad "$cmd not found in PATH"
-    return
+current=$(jq -r '.generation.current' "$manifest")
+booted=$(jq -r '.generation.booted' "$manifest")
+profile=$(jq -r '.generation.profile' "$manifest")
+
+current_canonical=$(readlink -e -- "$current" 2>/dev/null)
+if [[ -z $current_canonical ]]; then
+  bad "current generation cannot be resolved: $current"
+fi
+
+profile_canonical=$(readlink -e -- "$profile" 2>/dev/null)
+if [[ -z $profile_canonical ]]; then
+  bad "system profile cannot be resolved: $profile"
+elif [[ -n $current_canonical && $profile_canonical != "$current_canonical" ]]; then
+  bad "system profile does not match current generation"
+else
+  ok "system profile matches current generation"
+fi
+
+running_canonical=$(readlink -e -- "$0" 2>/dev/null)
+expected_doctor_canonical=''
+if [[ -n $current_canonical ]]; then
+  expected_doctor_canonical=$(readlink -e -- "$current/sw/bin/dotfiles-doctor" 2>/dev/null)
+fi
+
+if [[ -z $running_canonical ]]; then
+  bad "running doctor cannot be resolved: $0"
+elif [[ -z $expected_doctor_canonical ]]; then
+  bad "current generation doctor cannot be resolved: $current/sw/bin/dotfiles-doctor"
+elif [[ $running_canonical != "$expected_doctor_canonical" ]]; then
+  bad "running doctor does not match current generation"
+else
+  ok "running doctor matches current generation"
+fi
+
+effect=$(dotfiles-wsl-restart-required \
+  --plan \
+  --booted-system "$booted" \
+  --current-system "$current" \
+  "$current" 2>/dev/null)
+effect_status=$?
+if [[ $effect_status -ne 0 || -z $effect ]]; then
+  bad "WSL cold-start state could not be classified"
+elif [[ $effect != switch ]]; then
+  bad "WSL cold-start state requires $effect"
+else
+  ok "WSL cold-start state is current"
+fi
+
+while IFS= read -r unit; do
+  load_state=$(systemctl show --property=LoadState --value "$unit" 2>/dev/null)
+  load_status=$?
+  if [[ $load_status -ne 0 || -z $load_state ]]; then
+    bad "$unit LoadState could not be queried"
+  elif [[ $load_state != loaded ]]; then
+    bad "$unit LoadState is not loaded: $load_state"
+  else
+    ok "$unit is loaded"
   fi
 
-  case "$path" in
-    /nix/store/*|/run/current-system/*|/etc/profiles/*)
-      bad "$cmd resolves to Nix-managed binary: $path"
-      return
+  active_state=$(systemctl show --property=ActiveState --value "$unit" 2>/dev/null)
+  active_status=$?
+  if [[ $active_status -ne 0 || -z $active_state ]]; then
+    bad "$unit ActiveState could not be queried"
+  elif [[ $active_state != active ]]; then
+    bad "$unit ActiveState is not active: $active_state"
+  else
+    ok "$unit is active"
+  fi
+done < <(jq -r '.units[]' "$manifest")
+
+root_probe=$(jq -r '.sops.rootProbe' "$manifest")
+root_metadata=$(sudo -n -- "$root_probe" 2>/dev/null)
+root_probe_status=$?
+if [[ $root_probe_status -eq 0 ]] && jq -e '
+  .directory.uid == 0 and
+  .directory.gid == 0 and
+  .directory.mode == "700" and
+  .key.uid == 0 and
+  .key.gid == 0 and
+  .key.mode == "400"
+' <<< "$root_metadata" >/dev/null 2>&1; then
+  ok "SOPS host key metadata matches root policy"
+else
+  bad "SOPS host key metadata does not match root policy"
+fi
+
+home_key=$(jq -r '.sops.homeKey.path' "$manifest")
+home_key_policy=$(jq -r '.sops.homeKey.policy' "$manifest")
+if [[ -e $home_key || -L $home_key ]]; then
+  if [[ $home_key_policy == reject ]]; then
+    bad "user SOPS age key must not exist after migration"
+  else
+    warn "user SOPS age key still exists during migration"
+  fi
+else
+  ok "user SOPS age key is absent"
+fi
+
+while IFS= read -r managed_file; do
+  path=$(jq -r '.path' <<< "$managed_file")
+  source=$(jq -r '.source' <<< "$managed_file")
+  if cmp --silent -- "$path" "$source" 2>/dev/null; then
+    ok "managed file is current: $path"
+  else
+    bad "managed file is stale: $path"
+  fi
+done < <(jq -c '.managedFiles[]' "$manifest")
+
+while IFS= read -r cli; do
+  name=$(jq -r '.name' <<< "$cli")
+  binary_name=$(jq -r '.binaryName' <<< "$cli")
+  binary_path=$(jq -r '.binaryPath' <<< "$cli")
+
+  if [[ -x $binary_path ]]; then
+    ok "$name CLI is executable"
+  else
+    bad "CLI is not executable: $binary_path"
+  fi
+
+  resolved_binary=$(type -P -- "$binary_name" 2>/dev/null)
+  if [[ $resolved_binary != "$binary_path" ]]; then
+    bad "$binary_name does not resolve to $binary_path"
+  else
+    ok "$binary_name resolves to $binary_path"
+  fi
+
+  version=$(timeout 5s "$binary_path" --version 2>/dev/null)
+  version_status=$?
+  if [[ $version_status -eq 0 && -n $version ]]; then
+    ok "$binary_name version check passed"
+  else
+    bad "$binary_name version check failed"
+  fi
+
+  rules_path=$(jq -r '.rules.path' <<< "$cli")
+  rules_source=$(jq -r '.rules.source' <<< "$cli")
+  if cmp --silent -- "$rules_path" "$rules_source" 2>/dev/null; then
+    ok "$name rules file is current"
+  else
+    bad "$name rules file is stale: $rules_path"
+  fi
+
+  skills_directory=$(jq -r '.skills.directory' <<< "$cli")
+  while IFS= read -r skill_name; do
+    skill_file="$skills_directory/$skill_name/SKILL.md"
+    if [[ -f $skill_file ]]; then
+      ok "$name skill is deployed: $skill_name"
+    else
+      bad "$name skill is missing: $skill_file"
+    fi
+  done < <(jq -r '.skills.names[]' <<< "$cli")
+
+  agents_directory=$(jq -r '.agents.directory // empty' <<< "$cli")
+  if [[ -n $agents_directory ]]; then
+    while IFS= read -r agent_file; do
+      agent_path="$agents_directory/$agent_file"
+      if [[ -f $agent_path ]]; then
+        ok "$name agent is deployed: $agent_file"
+      else
+        bad "$name agent is missing: $agent_path"
+      fi
+    done < <(jq -r '.agents.files[]' <<< "$cli")
+  fi
+
+  gateway_path=$(jq -r '.gatewayFile.path // empty' <<< "$cli")
+  gateway_contains=$(jq -r '.gatewayFile.contains // empty' <<< "$cli")
+  if [[ -n $gateway_path ]]; then
+    if [[ -n $gateway_contains ]] && grep -qF -- "$gateway_contains" "$gateway_path" 2>/dev/null; then
+      ok "$name gateway file is current"
+    else
+      bad "$name gateway file is missing or stale: $gateway_path"
+    fi
+  fi
+done < <(jq -c '.clis[]' "$manifest")
+
+wsl_launcher_name=$(jq -r '.wslInterop.launcherName' "$manifest")
+wsl_launcher_path=$(jq -r '.wslInterop.launcherPath' "$manifest")
+wsl_launcher_source=$(jq -r '.wslInterop.launcherSource' "$manifest")
+wsl_launcher_canonical=$(readlink -e -- "$wsl_launcher_path" 2>/dev/null)
+wsl_launcher_source_canonical=$(readlink -e -- "$wsl_launcher_source" 2>/dev/null)
+if [[ -x $wsl_launcher_path \
+  && -n $wsl_launcher_canonical \
+  && $wsl_launcher_canonical == "$wsl_launcher_source_canonical" ]]; then
+  ok "WSL launcher is current: $wsl_launcher_path"
+else
+  bad "WSL launcher is missing or stale: $wsl_launcher_path"
+fi
+
+resolved_wsl_launcher=$(type -P -- "$wsl_launcher_name" 2>/dev/null)
+if [[ $resolved_wsl_launcher == "$wsl_launcher_path" ]]; then
+  ok "$wsl_launcher_name resolves to $wsl_launcher_path"
+else
+  bad "$wsl_launcher_name does not resolve to $wsl_launcher_path"
+fi
+
+windows_command=$(jq -r '.wslInterop.windowsCommand' "$manifest")
+if [[ ! -x $windows_command ]]; then
+  bad "Windows interop command is not executable: $windows_command"
+else
+  timeout 5s "$windows_command" /d /c exit 0 >/dev/null 2>&1
+  windows_probe_status=$?
+  if [[ $windows_probe_status -eq 0 ]]; then
+    ok "Windows interop probe passed"
+  else
+    bad "Windows interop probe failed: $windows_command"
+  fi
+fi
+
+check_mcp() {
+  local requested_protocol initialize_payload initialized_payload
+  local mcp_phase_failed=0 mcp_request_id=2 page_count=0
+  local has_next_cursor=0 next_cursor='' cursor_key
+  local all_tools='[]' target prefix
+  declare -A seen_cursors=()
+
+  mcp_url=$(jq -r '.mcp.url' "$manifest")
+  requested_protocol=$(jq -r '.mcp.requestedProtocolVersion' "$manifest")
+  mcp_cleanup_protocol=$requested_protocol
+  initialize_payload=$(jq -cn \
+    --arg protocol "$requested_protocol" \
+    '{
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: $protocol,
+        capabilities: {},
+        clientInfo: {name: "dotfiles-doctor", version: "1"}
+      }
+    }')
+
+  mcp_request POST "$mcp_url" "$initialize_payload" '' ''
+
+  if [[ $mcp_curl_status -ne 0 ]]; then
+    bad "MCP initialize request failed"
+    mcp_phase_failed=1
+  elif [[ $mcp_http_status != 200 ]]; then
+    bad "MCP initialize failed with HTTP $mcp_http_status"
+    mcp_phase_failed=1
+  elif ! mcp_parse_response 1; then
+    if [[ $mcp_parse_error == content-type ]]; then
+      bad "MCP initialize response has unsupported content type: $mcp_content_type"
+    else
+      bad "MCP initialize response has an invalid JSON-RPC envelope"
+    fi
+    mcp_phase_failed=1
+  else
+    mcp_protocol=$(jq -r '.result.protocolVersion // empty' <<< "$mcp_response_json" 2>/dev/null)
+    if [[ -n $mcp_protocol ]]; then
+      mcp_cleanup_protocol=$mcp_protocol
+    fi
+
+    if ! jq -e '
+      .jsonrpc == "2.0" and
+      .id == 1 and
+      (.result | type) == "object" and
+      (.result.protocolVersion | type) == "string" and
+      (.result.capabilities | type) == "object"
+    ' <<< "$mcp_response_json" >/dev/null 2>&1; then
+      bad "MCP initialize response has an invalid JSON-RPC envelope"
+      mcp_phase_failed=1
+    elif ! jq -e '(.result.capabilities.tools | type) == "object"' \
+      <<< "$mcp_response_json" >/dev/null 2>&1; then
+      bad "MCP initialize response does not advertise tools capability"
+      mcp_phase_failed=1
+    elif [[ -z $mcp_session ]]; then
+      bad "MCP initialize response is missing a session ID"
+      mcp_phase_failed=1
+    elif ! jq -e --arg protocol "$mcp_protocol" \
+      '.mcp.supportedProtocolVersions | index($protocol) != null' \
+      "$manifest" >/dev/null 2>&1; then
+      bad "MCP negotiated unsupported protocol version: $mcp_protocol"
+      mcp_phase_failed=1
+    fi
+  fi
+
+  if [[ $mcp_phase_failed -eq 0 ]]; then
+    initialized_payload='{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    mcp_request POST "$mcp_url" "$initialized_payload" "$mcp_session" "$mcp_protocol"
+    if [[ $mcp_curl_status -ne 0 ]]; then
+      bad "MCP initialized notification request failed"
+      mcp_phase_failed=1
+    elif [[ $mcp_http_status != 202 ]]; then
+      bad "MCP initialized notification failed with HTTP $mcp_http_status"
+      mcp_phase_failed=1
+    fi
+  fi
+
+  while [[ $mcp_phase_failed -eq 0 ]]; do
+    local tools_payload tools_page
+    if [[ $page_count -ge 100 ]]; then
+      bad "MCP tools/list pagination exceeded 100 pages"
+      mcp_phase_failed=1
+      break
+    fi
+
+    if [[ $has_next_cursor -eq 0 ]]; then
+      tools_payload=$(jq -cn \
+        --argjson id "$mcp_request_id" \
+        '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{}}')
+    else
+      tools_payload=$(jq -cn \
+        --argjson id "$mcp_request_id" \
+        --arg cursor "$next_cursor" \
+        '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{cursor:$cursor}}')
+    fi
+
+    mcp_request POST "$mcp_url" "$tools_payload" "$mcp_session" "$mcp_protocol"
+    if [[ $mcp_curl_status -ne 0 ]]; then
+      bad "MCP tools/list request failed"
+      mcp_phase_failed=1
+      break
+    elif [[ $mcp_http_status != 200 ]]; then
+      bad "MCP tools/list failed with HTTP $mcp_http_status"
+      mcp_phase_failed=1
+      break
+    elif ! mcp_parse_response "$mcp_request_id"; then
+      bad "MCP tools/list response is invalid"
+      mcp_phase_failed=1
+      break
+    elif ! jq -e --argjson id "$mcp_request_id" '
+      .jsonrpc == "2.0" and
+      .id == $id and
+      (.result | type) == "object" and
+      (.result.tools | type) == "array" and
+      all(.result.tools[]; (.name | type) == "string") and
+      (.result.nextCursor == null or (.result.nextCursor | type) == "string")
+    ' <<< "$mcp_response_json" >/dev/null 2>&1; then
+      bad "MCP tools/list response is invalid"
+      mcp_phase_failed=1
+      break
+    fi
+
+    tools_page=$(jq -c '.result.tools' <<< "$mcp_response_json")
+    all_tools=$(jq -cn \
+      --argjson existing "$all_tools" \
+      --argjson page "$tools_page" \
+      '$existing + $page')
+    if jq -e '.result | has("nextCursor") and .nextCursor != null' \
+      <<< "$mcp_response_json" >/dev/null 2>&1; then
+      has_next_cursor=1
+      next_cursor=$(jq -r '.result.nextCursor' <<< "$mcp_response_json")
+    else
+      has_next_cursor=0
+      next_cursor=''
+    fi
+    page_count=$((page_count + 1))
+    mcp_request_id=$((mcp_request_id + 1))
+
+    if [[ $has_next_cursor -eq 0 ]]; then
+      break
+    fi
+
+    cursor_key="cursor:$next_cursor"
+    if [[ -n ${seen_cursors[$cursor_key]+x} ]]; then
+      bad "MCP tools/list pagination cursor repeated"
+      mcp_phase_failed=1
+      break
+    fi
+    seen_cursors[$cursor_key]=1
+  done
+
+  if [[ $mcp_phase_failed -eq 0 ]]; then
+    while IFS= read -r target; do
+      prefix="${target}_"
+      if jq -e --arg prefix "$prefix" \
+        'any(.[]; .name | startswith($prefix))' \
+        <<< "$all_tools" >/dev/null 2>&1; then
+        ok "MCP target exposes tools: $target"
+      else
+        bad "MCP target has no tools: $target"
+        mcp_phase_failed=1
+      fi
+    done < <(jq -r '.mcp.targets[]' "$manifest")
+  fi
+
+  if ! mcp_cleanup_session; then
+    mcp_phase_failed=1
+  fi
+
+  if [[ $mcp_phase_failed -eq 0 ]]; then
+    ok "MCP session lifecycle completed"
+  fi
+}
+
+mcp_request() {
+  local method=$1 url=$2 payload=$3 session=$4 protocol=$5
+  local -a curl_args
+
+  mcp_request_number=$((mcp_request_number + 1))
+  mcp_headers_file="$mcp_tmp/headers-$mcp_request_number"
+  mcp_body_file="$mcp_tmp/body-$mcp_request_number"
+  curl_args=(
+    --silent
+    --show-error
+    --max-time 5
+    --request "$method"
+    --header 'Accept: application/json, text/event-stream'
+    --dump-header "$mcp_headers_file"
+    --output "$mcp_body_file"
+    --write-out '%{http_code}'
+  )
+  if [[ -n $payload ]]; then
+    curl_args+=(
+      --header 'Content-Type: application/json'
+      --data "$payload"
+    )
+  fi
+  if [[ -n $session ]]; then
+    curl_args+=(--header "Mcp-Session-Id: $session")
+  fi
+  if [[ -n $protocol ]]; then
+    curl_args+=(--header "MCP-Protocol-Version: $protocol")
+  fi
+  curl_args+=("$url")
+
+  mcp_http_status=$(curl "${curl_args[@]}")
+  mcp_curl_status=$?
+  mcp_response_session=''
+  mcp_content_type=''
+  mcp_response_json=''
+
+  if [[ -r $mcp_headers_file ]]; then
+    while IFS= read -r header_line; do
+      header_line=${header_line%$'\r'}
+      case ${header_line,,} in
+        mcp-session-id:*)
+          mcp_response_session=${header_line#*:}
+          mcp_response_session=${mcp_response_session# }
+          ;;
+        content-type:*)
+          mcp_content_type=${header_line#*:}
+          mcp_content_type=${mcp_content_type# }
+          ;;
+      esac
+    done < "$mcp_headers_file"
+  fi
+
+  if [[ $method == POST && -z $session && -n $mcp_response_session ]]; then
+    mcp_session=$mcp_response_session
+  fi
+}
+
+mcp_cleanup_session() {
+  if [[ $mcp_cleanup_done -eq 1 ]]; then
+    return 0
+  fi
+  mcp_cleanup_done=1
+
+  if [[ -z $mcp_session ]]; then
+    return 0
+  fi
+
+  mcp_request DELETE "$mcp_url" '' "$mcp_session" "$mcp_cleanup_protocol"
+  if [[ $mcp_curl_status -ne 0 ]]; then
+    bad "MCP session cleanup request failed"
+    return 1
+  elif [[ ! $mcp_http_status =~ ^2[0-9][0-9]$ ]]; then
+    bad "MCP session cleanup failed with HTTP $mcp_http_status"
+    return 1
+  fi
+  return 0
+}
+
+mcp_remove_temp() {
+  if [[ -n $mcp_tmp ]]; then
+    rm -rf -- "$mcp_tmp"
+    mcp_tmp=''
+  fi
+}
+
+# ShellCheck cannot infer function calls made by trap.
+# shellcheck disable=SC2329
+mcp_exit_trap() {
+  local status=$?
+  mcp_cleanup_session
+  mcp_remove_temp
+  return "$status"
+}
+
+# shellcheck disable=SC2329
+mcp_signal_trap() {
+  local status=$1
+  trap - INT TERM
+  mcp_cleanup_session
+  mcp_remove_temp
+  exit "$status"
+}
+
+mcp_parse_response() {
+  local expected_id=$1 content_type_lower=${mcp_content_type,,}
+  local line event_data=''
+  mcp_parse_error=body
+  case $content_type_lower in
+    application/json*)
+      mcp_response_json=$(< "$mcp_body_file")
+      if [[ -n $mcp_response_json ]] && jq -e -s 'length == 1' \
+        <<< "$mcp_response_json" >/dev/null 2>&1; then
+        return 0
+      fi
+      ;;
+    text/event-stream*)
+      while IFS= read -r line; do
+        line=${line%$'\r'}
+        if [[ -z $line ]]; then
+          if mcp_select_sse_response "$expected_id" "$event_data"; then
+            return 0
+          fi
+          event_data=''
+        elif [[ $line == data:* ]]; then
+          line=${line#data:}
+          line=${line# }
+          if [[ -n $event_data ]]; then
+            event_data+=$'\n'
+          fi
+          event_data+=$line
+        fi
+      done < "$mcp_body_file"
+      if mcp_select_sse_response "$expected_id" "$event_data"; then
+        return 0
+      fi
+      ;;
+    *)
+      mcp_parse_error=content-type
+      return 1
       ;;
   esac
 
-  version="$($cmd --version 2>/dev/null | head -n1 || true)"
-  [[ -n $version ]] && ok "$cmd -> $path ($version)" || bad "$cmd exists but version check failed: $path"
+  return 1
 }
 
-check_unit_not_failed() {
-  local unit=$1
-  if systemctl is-failed --quiet "$unit" 2>/dev/null; then
-    bad "$unit is failed"
-    systemctl status "$unit" --no-pager 2>/dev/null || true
-  else
-    ok "$unit is not failed"
+mcp_select_sse_response() {
+  local expected_id=$1 event_data=$2
+  [[ -n $event_data ]] || return 1
+  if jq -e -s --argjson id "$expected_id" \
+    'length == 1 and .[0].jsonrpc == "2.0" and .[0].id == $id' \
+    <<< "$event_data" >/dev/null 2>&1; then
+    mcp_response_json=$event_data
+    return 0
   fi
+  return 1
 }
 
-wait_unit_active() {
-  local unit=$1 tries=${2:-30} sleep_s=${3:-2} i
-  for ((i = 1; i <= tries; i++)); do
-    if systemctl is-active --quiet "$unit" 2>/dev/null; then
-      ok "$unit is active"
-      return 0
-    fi
-    sleep "$sleep_s"
-  done
-  bad "$unit is not active after $((tries * sleep_s))s"
-  systemctl status "$unit" --no-pager 2>/dev/null || true
-}
+mcp_tmp=$(mktemp -d)
+mcp_request_number=0
+mcp_http_status=''
+mcp_curl_status=0
+mcp_headers_file=''
+mcp_body_file=''
+mcp_response_session=''
+mcp_content_type=''
+mcp_response_json=''
+mcp_parse_error=''
+mcp_url=''
+mcp_session=''
+mcp_protocol=''
+mcp_cleanup_protocol=''
+mcp_cleanup_done=0
+trap mcp_exit_trap EXIT
+trap 'mcp_signal_trap 130' INT
+trap 'mcp_signal_trap 143' TERM
+check_mcp
+mcp_remove_temp
 
-actual_etc="$(readlink -f /etc/nixos 2>/dev/null || true)"
-[[ $actual_etc == "$dotfiles" ]] && ok "/etc/nixos -> $actual_etc" || bad "/etc/nixos -> ${actual_etc:-<none>}; expected $dotfiles"
-
-check_file "$dotfiles/flake.nix"
-check_file "$dotfiles/flake.lock"
-check_file "$dotfiles/modules/default.nix"
-check_file "$dotfiles/secrets/secrets.yaml"
-
-# roster から導出する CLI ごとの検査
-declare -A seen_skills=()
-
-while IFS='|' read -r name binary rules skills agents gateway; do
-  [[ -n $name ]] || continue
-
-  check_command_upstream "$binary"
-  check_file "$HOME/$rules"
-  check_dir "$HOME/$skills"
-
-  if [[ -n $agents ]]; then
-    check_dir "$HOME/$agents"
-  fi
-
-  if [[ -n $gateway ]]; then
-    if grep -qF -- "$gateway_url" "$HOME/$gateway" 2>/dev/null; then
-      ok "$name gateway file references gateway URL"
-    else
-      bad "$name gateway file missing or stale: $HOME/$gateway"
-    fi
-  fi
-
-  if [[ -d "$HOME/$skills" ]]; then
-    while IFS= read -r -d '' entry; do
-      seen_skills["$(basename "$entry")"]=1
-    done < <(find "$HOME/$skills" -mindepth 1 -maxdepth 1 \( -type d -o -type l \) -print0 2>/dev/null)
-  fi
-done <<< "
-@cliTable@
-"
-
-# codex は home seed と別に /etc/codex/config.toml を常時管理する
-if [[ -f /etc/codex/config.toml ]]; then
-  if grep -qF -- "$gateway_url" /etc/codex/config.toml; then
-    ok "codex system gateway URL configured"
-  else
-    bad "codex system gateway URL missing in /etc/codex/config.toml"
-  fi
-else
-  bad "missing /etc/codex/config.toml"
-fi
-
-agents_md="$dotfiles/share/AGENTS.md"
-if [[ -f $agents_md ]]; then
-  table_skills=$(awk '/^## skills$/{flag=1; next} /^## /{flag=0} flag' "$agents_md" | grep -oE '`[A-Za-z0-9_-]+`' | tr -d '`' | sort -u || true)
-  actual_skills=$(printf '%s\n' "${!seen_skills[@]}" | sort -u)
-
-  only_table=$(comm -23 <(printf '%s\n' "$table_skills") <(printf '%s\n' "$actual_skills"))
-  only_actual=$(comm -13 <(printf '%s\n' "$table_skills") <(printf '%s\n' "$actual_skills"))
-
-  [[ -z $only_table ]]  || warn "share/AGENTS.md lists skills with no deployed dir: $(tr '\n' ' ' <<< "$only_table")"
-  [[ -z $only_actual ]] || warn "deployed skills missing from share/AGENTS.md table: $(tr '\n' ' ' <<< "$only_actual")"
-else
-  bad "missing $agents_md"
-fi
-
-wait_unit_active docker.service
-wait_unit_active docker-mcp-backends-network.service
-wait_unit_active agentgateway.service
-
-read -ra gateway_wait_units <<< '@gatewayWaitUnits@'
-for unit in "${gateway_wait_units[@]}"; do
-  wait_unit_active "$unit"
-done
-
-check_unit_not_failed "home-manager-@username@.service"
-
-# MCP 実働検査: initialize で session を取り、tools/list に my.mcp.targets の全 target が現れるか
-read -ra mcp_targets <<< '@mcpTargetNames@'
-
-sid=$(curl -s -m 5 -X POST "$gateway_url" \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"dotfiles-doctor","version":"1"}}}' \
-  -D - -o /dev/null 2>/dev/null | tr -d '\r' | awk -F': ' 'tolower($1) == "mcp-session-id" { print $2 }' || true)
-
-if [[ -z $sid ]]; then
-  bad "gateway MCP initialize failed: no session id from $gateway_url"
-else
-  tools_json=$(curl -s -m 5 -X POST "$gateway_url" \
-    -H 'Content-Type: application/json' \
-    -H 'Accept: application/json, text/event-stream' \
-    -H "Mcp-Session-Id: $sid" \
-    -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' 2>/dev/null || true)
-  tools_json=${tools_json#data: }
-
-  missing=""
-  for target in "${mcp_targets[@]}"; do
-    if ! jq -e --arg t "$target" 'any(.result.tools[]?; .name | startswith($t + "_"))' <<< "$tools_json" >/dev/null 2>&1; then
-      missing="$missing $target"
-    fi
-  done
-
-  if [[ -z $missing ]]; then
-    ok "gateway tools/list covers all MCP targets"
-  else
-    bad "gateway tools/list missing targets:$missing"
-  fi
-fi
-
-command -v wslview >/dev/null 2>&1 && ok "wslview exists" || bad "wslview missing"
-
-if [[ -e /lib64/ld-linux-x86-64.so.2 || -e /lib/ld-linux-x86-64.so.2 ]]; then
+nix_ld_path=$(jq -r '.nixLdPath' "$manifest")
+if [[ -e $nix_ld_path ]]; then
   ok "nix-ld dynamic linker path exists"
 else
-  warn "nix-ld dynamic linker path not found at standard location"
-fi
-
-if [[ -f "$HOME/.config/sops/age/keys.txt" ]]; then
-  warn "age key at ~/.config/sops/age/keys.txt decrypts every secret and is readable by any user process; remove it and edit via 'sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops ...'"
+  bad "nix-ld dynamic linker path is missing: $nix_ld_path"
 fi
 
 exit "$fail"

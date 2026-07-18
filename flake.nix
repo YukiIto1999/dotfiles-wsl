@@ -106,6 +106,36 @@
             codexModel = "dummy-model";
           };
           codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
+          doctorManifest = hostConfig.environment.etc."dotfiles/doctor.json".source;
+          homeFiles = hostConfig.home-manager.users.${hostConfig.my.username}.home.file;
+          directHomeFilesIn =
+            directory:
+            lib.sort builtins.lessThan (
+              map (lib.removePrefix "${directory}/") (
+                builtins.filter (
+                  path:
+                  let
+                    relative = lib.removePrefix "${directory}/" path;
+                  in
+                  lib.hasPrefix "${directory}/" path && !lib.hasInfix "/" relative
+                ) (builtins.attrNames homeFiles)
+              )
+            );
+          expectedAgents = lib.mapAttrs (
+            _: cli:
+            if cli.agentsDir == null then
+              null
+            else
+              {
+                directory = "${hostConfig.my.homeDir}/${cli.agentsDir}";
+                files = directHomeFilesIn cli.agentsDir;
+              }
+          ) hostConfig.my.clis;
+          expectedAgentsJson = (pkgs.formats.json { }).generate "doctor-agents.json" expectedAgents;
+          expectedWslInteropJson =
+            (pkgs.formats.json { }).generate "doctor-wsl-interop.json"
+              hostConfig.my.doctor.wslInterop;
+          codexProjectRuntimePath = "${hostConfig.my.dotfilesDir}/.codex/config.toml";
           sopsKeyFile = "/var/lib/sops-nix/key.txt";
           sopsKeyDirectoryPolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix".d;
           sopsKeyFilePolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z;
@@ -352,6 +382,65 @@
                   ${self}/modules/commands/rebuild \
                   ${pkgs.bash}/bin/bash \
                   ${lib.getExe pkgs.fakeroot}
+                touch $out
+              '';
+
+          doctor-runtime =
+            pkgs.runCommandLocal "check-doctor-runtime"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.gnugrep
+                  pkgs.gnused
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${self}/scripts/tests/doctor-runtime.sh \
+                  ${self}/modules/commands/doctor \
+                  ${pkgs.bash}/bin/bash
+                touch $out
+              '';
+
+          doctor-manifest-contract =
+            pkgs.runCommandLocal "check-doctor-manifest-contract"
+              {
+                nativeBuildInputs = [ pkgs.jq ];
+              }
+              ''
+                set -euo pipefail
+
+                jq --exit-status \
+                  --arg expectedPolicy ${lib.escapeShellArg hostConfig.my.doctor.sopsHomeKeyPolicy} \
+                  '.schemaVersion == 2 and .sops.homeKey.policy == $expectedPolicy' \
+                  ${doctorManifest} > /dev/null
+
+                jq --sort-keys '
+                  [.clis[] | {
+                    key: .name,
+                    value: (if .agents == null then null else {
+                      directory: .agents.directory,
+                      files: (.agents.files | sort)
+                    } end)
+                  }] | from_entries
+                ' ${doctorManifest} > actual-agents.json
+                jq --sort-keys \
+                  'with_entries(.value |= if . == null then null else (.files |= sort) end)' \
+                  ${expectedAgentsJson} > expected-agents.json
+                diff --unified expected-agents.json actual-agents.json
+
+                jq --exit-status \
+                  --slurpfile expected ${expectedWslInteropJson} \
+                  '.wslInterop == $expected[0]' \
+                  ${doctorManifest} > /dev/null
+
+                jq --exit-status \
+                  --arg path ${lib.escapeShellArg codexProjectRuntimePath} \
+                  --arg source ${lib.escapeShellArg (toString codexProjectConfig)} \
+                  'any(.managedFiles[]; .path == $path and .source == $source)' \
+                  ${doctorManifest} > /dev/null
+
                 touch $out
               '';
 

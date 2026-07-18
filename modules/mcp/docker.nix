@@ -69,4 +69,9 @@ in
         || ${pkgs.docker}/bin/docker network create mcp-backends
     '';
   };
+
+  my.doctor.units = [
+    "docker.service"
+    "docker-mcp-backends-network.service"
+  ];
 }

@@ -89,6 +89,17 @@ in
     inherit (cfg) gatewayUrl;
   };
 
+  my.doctor.managedFiles = {
+    codex-system = {
+      path = "/etc/codex/config.toml";
+      source = config.environment.etc."codex/config.toml".source;
+    };
+    codex-project = {
+      path = "${cfg.dotfilesDir}/.codex/config.toml";
+      source = codexProjectConfig;
+    };
+  };
+
   home-manager.users.${cfg.username} =
     { lib, ... }:
     {

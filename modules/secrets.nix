@@ -23,6 +23,9 @@ let
   gitIdentity = vars: builtins.readFile (pkgs.replaceVars ./user/git/identity.conf vars);
 in
 {
+  # host/recovery 両 identity の復号実測後に reject へ切り替え、旧 home key を削除する
+  my.doctor.sopsHomeKeyPolicy = "warn";
+
   sops.defaultSopsFile = ../secrets/secrets.yaml;
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
   sops.age.generateKey = false;

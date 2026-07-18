@@ -48,7 +48,12 @@ in
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       User = cfg.username;
-      Environment = [ "HOME=${cfg.homeDir}" ];
+      Environment = [
+        "HOME=${cfg.homeDir}"
+        "PLAYWRIGHT_MCP_RUNTIME_DIR=/run/agentgateway"
+      ];
+      RuntimeDirectory = "agentgateway";
+      RuntimeDirectoryMode = "0700";
       ExecStart = "${agentgateway}/bin/agentgateway -f ${gatewayConfig}";
       Restart = "always";
       RestartSec = "5s";

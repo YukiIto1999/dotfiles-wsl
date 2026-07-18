@@ -49,6 +49,8 @@
         openai-plugins = openaiPlugins;
         claude-plugins-official = claudePlugins;
       };
+
+      maintenancePkgs = nixpkgs.legacyPackages.${system};
     in
     {
       nixosConfigurations.${hostName} = nixpkgs.lib.nixosSystem {
@@ -86,6 +88,21 @@
           dotfiles-install-clis = hostConfig.my.commands.installClis;
           dotfiles-rebuild = hostConfig.my.commands.rebuild;
         };
+
+      devShells.${system}.default = maintenancePkgs.mkShellNoCC {
+        packages = with maintenancePkgs; [
+          actionlint
+          deadnix
+          jq
+          nixfmt-tree
+          shellcheck
+          statix
+          taplo
+          yq
+        ];
+      };
+
+      formatter.${system} = maintenancePkgs.nixfmt-tree;
 
       checks.${system} =
         let
@@ -540,6 +557,13 @@
               touch $out
             '';
 
+          actionlint = pkgs.runCommandLocal "check-actionlint" { nativeBuildInputs = [ pkgs.actionlint ]; } ''
+            workflow_dir=${self}/.github/workflows
+            test -n "$(find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
+            find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -exec actionlint {} +
+            touch $out
+          '';
+
           deadnix = pkgs.runCommandLocal "check-deadnix" { nativeBuildInputs = [ pkgs.deadnix ]; } ''
             deadnix --fail ${self}
             touch $out
@@ -558,8 +582,8 @@
             touch $out
           '';
 
-          nixfmt = pkgs.runCommandLocal "check-nixfmt" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-            find ${self} -name '*.nix' -print0 | xargs -0 nixfmt --check
+          nixfmt = pkgs.runCommandLocal "check-nixfmt" { nativeBuildInputs = [ pkgs.nixfmt-tree ]; } ''
+            treefmt --ci --tree-root ${self}
             touch $out
           '';
 

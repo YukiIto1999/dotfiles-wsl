@@ -10,7 +10,7 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 
 | パス | 役割 |
 |---|---|
-| `flake.nix` | inputs(nixpkgs / nixos-wsl / home-manager / sops-nix / plugin sources)、nixosSystem の定義、`packages`(`dotfiles-install-clis` など)、`checks` |
+| `flake.nix` | inputs(nixpkgs / nixos-wsl / home-manager / sops-nix / plugin sources)、nixosSystem の定義、`packages`(`dotfiles-install-clis` など)、`devShells`、`formatter`、`checks` |
 | `modules/` | NixOS module 一式。`default.nix`(imports)、`options.nix`(`my.*` 型)、`wsl.nix` / `nix.nix` / `fonts.nix` / `secrets.nix`(git identity)、`accounts/`(GitHub account ごとの secrets と `gh` hosts 生成)、`mcp/`(gateway・docker network・`servers/<name>.nix`)、`clis/`(`my.clis` の CLI 一覧と CLI ごとの config、`share/` の配備)、`user/`(base user・git)、`commands.nix` + `commands/`(`dotfiles-*` 運用コマンドの生成元) |
 | `pkgs/` | MCP server の build 定義(共通 `mk-mcp-server.nix` / `mk-npm-mcp.nix` helper 使用)、`agentgateway`、`agentmemory` の MCP server とバックエンド用 Docker image |
 | `share/` | `AGENTS.md`(共通ルール)、`agents/`(subagent)、`skills/`(local skill) |
@@ -104,6 +104,32 @@ wsl -d NixOS
 ```bash
 dotfiles-doctor
 ```
+
+## 保守環境
+
+clone 後に `direnv` を許可すると、リポジトリへ入ったときに flake の devShell が有効になる。
+
+```bash
+direnv allow
+```
+
+`.envrc` は nix-direnv の fallback を無効にする。flake の評価に失敗した場合は過去の開発環境へ戻さず、その場で失敗させる。
+
+direnv を使わない場合は、同じ環境へ明示的に入る。
+
+```bash
+nix develop
+```
+
+devShell は `flake.lock` で固定した `actionlint`、`deadnix`、`jq`、`nixfmt-tree`、`shellcheck`、`statix`、`taplo`、`yq` を提供する。リポジトリの Nix ファイルを整形するコマンドは次のとおり。
+
+```bash
+nix fmt
+```
+
+flake の devShell はこのリポジトリ固有の保守 toolchain、checks は CI の検査を所有する。Home Manager は日常操作と editor 連携の tool を所有する。`jq`、`yq`、`shellcheck` は用途が異なるため Home と devShell の両方に含める。formatter は devShell と checks で `nixfmt-tree` に統一し、Home Manager の `nixfmt` は editor から単一ファイルを整形するために残す。
+
+仕様は [Nix の `nix develop`](https://nix.dev/manual/nix/2.33/command-ref/new-cli/nix3-develop)、[devenv の導入手順](https://devenv.sh/getting-started/)、[nixfmt の project formatter](https://github.com/NixOS/nixfmt#in-a-project)を参照する。
 
 ## 再ビルド
 
@@ -264,7 +290,7 @@ dotfiles-rebuild
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`--check`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
 
 ## License
 

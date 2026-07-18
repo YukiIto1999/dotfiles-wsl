@@ -16,6 +16,7 @@ in
       image,
       imageFile ? null,
       volumes ? [ ],
+      environmentFiles ? [ ],
       extraOptions ? [ ],
       ports ? [ ],
       deps ? [ ],
@@ -26,6 +27,7 @@ in
       }
       // lib.optionalAttrs (imageFile != null) { inherit imageFile; }
       // lib.optionalAttrs (volumes != [ ]) { inherit volumes; }
+      // lib.optionalAttrs (environmentFiles != [ ]) { inherit environmentFiles; }
       // {
         extraOptions = [
           "--network=mcp-backends"

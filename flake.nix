@@ -88,8 +88,15 @@
 
       checks.${system} =
         let
+          hostConfig = self.nixosConfigurations.${hostName}.config;
           inherit (self.nixosConfigurations.${hostName}) pkgs;
           inherit (pkgs) lib;
+
+          agentmemoryTemplate = hostConfig.sops.templates."agentmemory.env";
+          agentmemoryEnvironmentFiles =
+            hostConfig.virtualisation.oci-containers.containers.agentmemory.environmentFiles;
+          agentmemoryApiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";
+          agentmemoryTemplateFile = pkgs.writeText "agentmemory.env" agentmemoryTemplate.content;
 
           # config-syntax check 専用の @var@ 埋め、実際の値は各 module 側にありここでは構文検査用
           dummyVars = {
@@ -134,6 +141,27 @@
         in
         {
           nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
+
+          agentmemory-env =
+            assert agentmemoryEnvironmentFiles == [ agentmemoryTemplate.path ];
+            pkgs.runCommandLocal "check-agentmemory-env" { } ''
+              set -eu
+
+              printf '%s\n' \
+                EMBEDDING_PROVIDER \
+                OPENAI_API_KEY \
+                OPENAI_BASE_URL \
+                OPENAI_MODEL \
+                | sort > expected-keys
+              cut -d= -f1 ${agentmemoryTemplateFile} | sort > actual-keys
+              diff -u expected-keys actual-keys
+
+              grep -Fqx 'OPENAI_BASE_URL=https://opencode.ai/zen/go/v1' ${agentmemoryTemplateFile}
+              grep -Fqx 'OPENAI_MODEL=minimax-m2.7' ${agentmemoryTemplateFile}
+              grep -Fqx 'EMBEDDING_PROVIDER=none' ${agentmemoryTemplateFile}
+              grep -Fqx ${lib.escapeShellArg agentmemoryApiKeyLine} ${agentmemoryTemplateFile}
+              touch $out
+            '';
 
           deadnix = pkgs.runCommandLocal "check-deadnix" { nativeBuildInputs = [ pkgs.deadnix ]; } ''
             deadnix --fail ${self}

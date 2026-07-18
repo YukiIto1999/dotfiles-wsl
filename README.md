@@ -125,7 +125,7 @@ OpenCode (plugins/ 自動ロード)      --/
 - hook 実体は `pkgs/agentmemory` が engine 同梱 script を `agentmemory-hook-<event>` として `/run/current-system/sw/bin` に公開する。宣言は `modules/mcp/servers/memory.nix` に集約。
 - `session-start` は `AGENTMEMORY_INJECT_CONTEXT=true` で過去記憶をセッション冒頭に注入する。`stop` / `session-end` がセッション要約と登録を行う。
 - OpenCode は `~/.config/opencode/plugins/agentmemory-capture.ts` の自動ロードで同等の観測を行う。
-- LLM provider は未設定。noop mode で観測記録・BM25 検索・注入まで動く。要約 / reflect / consolidation を有効にする場合は engine コンテナに provider key を渡す。
+- LLM provider は OpenCode Go の OpenAI 互換 endpoint を使う。model は `minimax-m2.7`、embedding provider は `none`。
 - 状態確認: `xh GET http://127.0.0.1:3111/agentmemory/health`、`memory_diagnose` / `memory_audit` tools。
 
 ## Secrets と identity
@@ -138,6 +138,7 @@ OpenCode (plugins/ 自動ロード)      --/
 | `identity/work/email` | work identity の git user.email |
 | `accounts/<account>/username` | `gh` と GitHub MCP の username |
 | `accounts/<account>/token` | `gh` と GitHub MCP の PAT |
+| `opencode/go_api_key` | agentmemory が OpenCode Go を呼び出す API key |
 | `searxng/secret_key` | SearXNG の `server.secret_key` |
 
 `identity/work/*` は `my.workIdentity != null` のときだけ必要。

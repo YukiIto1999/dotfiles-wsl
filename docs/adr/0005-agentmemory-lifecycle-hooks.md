@@ -23,7 +23,8 @@ engine 同梱 script を `pkgs/agentmemory` で `agentmemory-hook-<event>` と�
 
 recall 側は `session-start` の `AGENTMEMORY_INJECT_CONTEXT=true` による注入で自動化する。
 LLM provider は設定しない。noop mode で開始し、要約 / reflect / consolidation は provider key
-導入時に有効化する。
+導入時に有効化する。この時点の判断は履歴として残し、provider の導入は
+[ADR 0006](0006-agentmemory-llm-provider.md)で変更する。
 
 ## 検討した代替案
 

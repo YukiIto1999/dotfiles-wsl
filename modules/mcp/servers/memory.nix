@@ -30,11 +30,25 @@ let
       "${agentmemoryConfig}:/app/config.yaml:ro"
       "/var/lib/agentmemory/data:/data"
     ];
+    environmentFiles = [ config.sops.templates."agentmemory.env".path ];
     extraOptions = [ "--user=${uid}:${uid}" ];
     ports = [ httpPort ];
   };
 in
 {
+  sops.secrets."opencode/go_api_key" = { };
+
+  # LLM は OpenCode Go の OpenAI 互換 endpoint
+  sops.templates."agentmemory.env" = {
+    mode = "0400";
+    restartUnits = [ "docker-agentmemory.service" ];
+    content = ''
+      OPENAI_API_KEY=${config.sops.placeholder."opencode/go_api_key"}
+      OPENAI_BASE_URL=https://opencode.ai/zen/go/v1
+      OPENAI_MODEL=minimax-m2.7
+      EMBEDDING_PROVIDER=none
+    '';
+  };
   systemd.tmpfiles.settings."agentmemory" = {
     "/var/lib/agentmemory/data".d = {
       user = uid;

@@ -79,6 +79,7 @@ Think in English. Respond in Japanese.
 - 通常 rebuild: `dotfiles-rebuild`
 - 実用状態検証: `dotfiles-doctor`
 - 不要物整理: `dotfiles-cleanup --delete` (`--system --vscode-server` で対象を拡大)
+- secrets enrollment: `nix run .#dotfiles-sops-enroll -- prepare --recovery-key <absolute-path> --host-id <unique-id>` の後、`apply --recovery-key <absolute-path> --yes`
 - secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops ~/dotfiles-wsl/secrets/secrets.yaml`
 - 詳細手順、構成、変更箇所は `~/dotfiles-wsl/README.md` に集約する。
 

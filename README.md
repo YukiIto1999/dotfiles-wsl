@@ -30,48 +30,78 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 
 ### age 鍵の enrollment
 
-新規ホストは bootstrap の前に enrollment する。復旧鍵はオフラインで保管し、enrollment と復旧の間だけマウントする。
+新規ホストは bootstrap の前に enrollment する。既存ホストを recovery identity から分離するときも同じ command を使うが、世代移行の有無は分けて扱う。復旧鍵は読み取り専用の外部媒体へ保管し、transaction が完了するまでだけホストへ接続する。
 
-既存構成を移行するときは、最初に recovery identity を読み取り専用の外部媒体へ保管する。その identity の公開 recipient が `secrets/.sops.yaml` の `recovery` と一致し、現在の暗号文を復号できることを確認してから次へ進む。
+`dotfiles-sops-enroll` は、鍵生成、recipient 更新、暗号文更新、root key 交換を一つの transaction として扱う。手作業で `/var/lib/sops-nix/key.txt` を上書きしたり、tracked file に対して `sops updatekeys` を直接実行したりしない。
+すべての operation は configured worktree の `~/dotfiles-wsl` から実行する。linked worktree や別 clone からの `prepare`、`apply`、`status`、`abort` は拒否する。
 
-1. 新規ホストで host key を生成する。
-
-   ```bash
-   age_keygen="$(nix build --no-link --print-out-paths .#age)/bin/age-keygen"
-   sudo install -d -o root -g root -m 0700 /var/lib/sops-nix
-   sudo "$age_keygen" -o /var/lib/sops-nix/key.txt
-   sudo chmod 0400 /var/lib/sops-nix/key.txt
-   sudo "$age_keygen" -y /var/lib/sops-nix/key.txt
-   ```
-
-2. 既存 recipient を削除せず、オフライン復旧鍵の公開 recipient と、直前に表示した新しい host recipient を `secrets/.sops.yaml` の同じ age key group に追加する。
-3. 復旧鍵を一時的に指定し、`SOPS_AGE_KEY_FILE=/path/to/recovery-key nix shell .#sops -c sops --config secrets/.sops.yaml updatekeys secrets/secrets.yaml` を実行する。
-4. host key と recovery key を一つずつ指定し、どちらでも復号できることを確認する。
+1. 作業ツリー全体を commit 済みにする。既存ホストの移行では、先にこの enrollment command と generation contract を通常 rebuild で配備し、`dotfiles-doctor` が current system と system profile の収束を確認できる状態にする。
+2. ホストを一意に識別する ID を決める。`nixos` のように複数環境で重なる名前は避け、`desktop-nixos` などの安定した ID にする。
+3. recovery identity で現在の暗号文を復号できることを確認し、host key と `secrets/` の候補を作る。
 
    ```bash
-   sops_bin="$(nix build --no-link --print-out-paths .#sops)/bin/sops"
-   sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-     "$sops_bin" --decrypt secrets/secrets.yaml >/dev/null
-   SOPS_AGE_KEY_FILE=/path/to/recovery-key \
-     "$sops_bin" --decrypt secrets/secrets.yaml >/dev/null
+   cd ~/dotfiles-wsl
+   nix run .#dotfiles-sops-enroll -- prepare \
+     --recovery-key /media/offline/recovery-key.txt \
+     --host-id desktop-nixos
+   nix run .#dotfiles-sops-enroll -- status
    ```
 
-5. 復旧鍵をホストから取り外してから bootstrap を実行する。
+   `prepare` は新しい identity を `/var/lib/sops-nix/key.next` に置き、候補を `.git/dotfiles-sops-enroll/` に置く。候補は既存 recipient を残したまま `sops updatekeys` し、recovery identity と `key.next` の両方で復号する。`secrets/.sops.yaml` と `secrets/secrets.yaml` はまだ変えない。作業ツリーに別の差分や untracked file があれば開始しない。
 
-現在の暗号文には `secrets/.sops.yaml` の `recovery` recipient 1 つだけが登録され、その秘密鍵が runtime key と home 側に複製されている。二つ目の host recipient を登録し、両鍵の復号を確認してから旧 runtime key と home 複製を除く作業は、コード変更とは別の runtime migration として行う。
+4. `PREPARED` の host ID と追加 recipient を確認し、適用する。
+
+   ```bash
+   nix run .#dotfiles-sops-enroll -- apply \
+     --recovery-key /media/offline/recovery-key.txt \
+     --yes
+   ```
+
+   新規ホストには旧 host key と旧 system generation がないため、この `apply` で鍵を昇格する。既存ホストでは repository だけを交換し、`key.txt` に旧鍵、`key.next` に新鍵を残して `PENDING` になる。鍵はまだ昇格しない。
+
+5. 既存ホストで `PENDING` になった場合だけ、準備済み暗号文から system generation を作る。
+
+   ```bash
+   nix run .#dotfiles-rebuild
+   ```
+
+   enrollment marker がある間、通常の rebuild は拒否される。`generation-pending` だけは例外で、差分が `secrets/.sops.yaml` と `secrets/secrets.yaml` の二つに限定され、両方の hash が transaction と一致した場合だけ build と apply を許可する。`apply` が generation を検証している間は marker が `generation-checking` になり、rebuild は再び拒否される。`dotfiles-rebuild` が WSL の停止と起動を指示した場合は、その手順を終えてから先へ進む。
+
+6. 既存ホストでは同じ `apply` を再実行する。
+
+   ```bash
+   nix run .#dotfiles-sops-enroll -- apply \
+     --recovery-key /media/offline/recovery-key.txt \
+     --yes
+   ```
+
+   current system と system profile が新しい generation に一致し、その generation の暗号文を旧鍵と新鍵の両方で復号できた場合だけ続行する。次に、新鍵で復号できない system profile generation の番号と store path を表示し、その generation だけを削除する。残存 generation を新鍵で再検証してから `key.txt` と `key.next` を交換し、current generation が固定した sops-nix installer を新鍵で実行する。`--yes` は、この rollback history の削除も承認する指定である。削除対象は receipt の `closedGenerations` に残る。
+
+7. 中断した場合は同じ `apply` を再実行する。journal の状態名だけではなく、旧・新ファイルの hash、current と next の recipient、current system、system profile、残存 generation を観測して再開位置を決める。`prepare` 完了後、`apply` が swap intent を記録する前までなら `nix run .#dotfiles-sops-enroll -- abort` で取り消せる。swap intent 以後は repository 交換前でも rollback せず、`apply` で前進復旧する。交換直前または交換後に tracked file や退避側が変わった場合は削除せず、表示された `.git/dotfiles-sops-enroll/<transaction-id>/secrets` を保全して停止する。
+8. `git diff -- secrets` で二つの tracked file だけが変わったことを確認し、同じ commit に記録する。復旧鍵をホストから取り外してから bootstrap または通常運用へ戻る。
+
+enrollment command、`dotfiles-rebuild`、bootstrap は Git common dir の同じ operation lock を使う。同時実行は失敗する。command 間では persistent marker が transaction を保護する。bootstrap は marker がある限り失敗し、rebuild は前述の `generation-pending` 経路だけを許可する。`generation-checking` は generation barrier の検証中またはその直後に停止した状態なので、rebuild ではなく `apply` を再実行する。`status` が `idle` になり、`apply` が recovery と current host の復号成功を表示してから次へ進む。
+
+既存ホストで閉じた enrollment 前の system generation は、通常の `nixos-rebuild --rollback` では使えない。旧 Git commit へ戻す場合も、外部の recovery identity を使って現在の recipient model へ更新し、新しい generation として build する。旧 store closure の `activate` を直接実行しない。
+
+現在の repository metadata は recovery recipient だけを持ち、`modules/secrets.nix` の `my.sops.enrollmentState` も `migration` である。実環境で上の transaction を完了し、home 側の旧鍵を削除してから `enrolled` へ変更する。コードの配備だけを migration 完了とは扱わない。
 
 ### 別ホストで再現する手順
 
 再現対象は tracked source と `flake.lock` から生成する system / Home Manager 設定である。age の host key、AI CLI が保持する login session、agentmemory のデータはホスト固有なので複製しない。AI CLI 本体も bootstrap 時点の latest を取得する外部状態であり、`flake.lock` から同じ版を再現しない。
 
 1. NixOS-WSL を用意し、このリポジトリを `~/dotfiles-wsl` へ clone する。
-2. 新しい host key を生成し、公開 recipient だけを enrollment 済みの既存ホストへ渡す。既存ホストがない場合は、新規ホストへ一時的に recovery key を接続する。
-3. 前節の手順で host recipient を追加し、`secrets/secrets.yaml` を再暗号化する。
-4. 更新した2ファイルを一時転送し、新規ホストの host identity と offline recovery identity の両方で復号する。既存ホストで再暗号化した場合も、commit 前に新規ホストへ暗号文だけを渡して host identity を検証する。
-5. recovery key をホストから外す。
-6. `secrets/.sops.yaml` と `secrets/secrets.yaml` を同じ commit に記録し、利用する全ホストへ同期する。
-7. `sudo bash scripts/bootstrap.sh` を実行する。
-8. 初回の boot generation を読むため WSL を一度停止・起動し、`dotfiles-doctor` を実行する。
+2. recovery key を一時的に接続し、前節の `prepare` と `apply` を新規ホスト上で実行する。host key は command が root 領域へ生成するため、既存ホストから秘密鍵をコピーしない。
+3. `git diff --check` と `git diff -- secrets` で、変更が `secrets/.sops.yaml` と `secrets/secrets.yaml` だけであることを確認する。初回 bootstrap 前は Git identity がまだ配備されていないため、この時点では commit しない。必要なら暗号化済み差分を外部媒体へ退避する。
+4. recovery key をホストから外し、`sudo bash scripts/bootstrap.sh` を実行する。bootstrap は tracked file の変更を含む Git flake を build するため、enrollment の差分を消さない。
+5. 初回の boot generation を読むため WSL を一度停止・起動し、`dotfiles-doctor` を実行する。
+6. sops-nix が配備した Git identity を使い、二つの secrets file を同じ commit に記録する。その commit を利用する全ホストへ同期してから、別の新規ホストを enrollment する。
+
+暗号化済み差分を退避する場合は、平文ではなく Git patch を保存する。
+
+```bash
+git diff --binary -- secrets > /media/offline/desktop-nixos-enrollment.patch
+```
 
 2台目以降も同じ手順を使う。既存ホストの `/var/lib/sops-nix/key.txt` や `~/.config/sops/age/keys.txt` をコピーして済ませない。
 
@@ -86,6 +116,8 @@ bootstrap は次を実行する。
 
 | 順序 | 内容 |
 |---|---|
+| acquire_operation_lock | enrollment、rebuild、bootstrap の同時実行を拒否 |
+| reject_active_enrollment | command 間に残る enrollment marker があれば bootstrap を拒否 |
 | register_safe_directories | root がリポジトリを扱えるよう `safe.directory` を登録(冪等) |
 | preflight | flake / lock / secrets の存在と、enrollment 済み age key の owner / mode を確認 |
 | verify_tracked_flake_files | untracked file が flake build から見えないため、無いことを確認 |
@@ -153,6 +185,8 @@ rebuild は untracked file を拒否した後、作業ツリーを Nix store へ
 snapshot に対して flake check と candidate build を実行し、`nvd` で current system との差分を表示する。
 `--plan` はここで終了するため system profile と runtime は変えない。ただし、archive と build により
 Nix store と cache は更新される。
+
+snapshot 取得から activation と doctor の終了までは Git common dir の operation lock を保持する。linked worktree を含め、SOPS enrollment が同時に repository と host key を遷移させることはない。
 
 apply では build 済み candidate の store path だけを `nixos-rebuild --store-path --no-reexec --sudo` へ渡す。
 checkout の評価と build は一般ユーザー、system profile の更新と activation だけは root で実行する。
@@ -288,12 +322,13 @@ dotfiles-rebuild
 
 - gateway は loopback 限定で認証は持たない。同一ユーザーのプロセスは gateway 経由で GitHub の書き込み操作などを実行できる。被害を絞るため、PAT は fine-grained + 最小スコープにする。
 - runtime migration 完了後は、ホスト固有の `/var/lib/sops-nix/key.txt`(directory は root `0700`、key は root `0400`)だけを置く。`~/.config/sops/age/keys.txt` に複製しない。通常の secret 編集は `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops secrets/secrets.yaml` を使う。
-- 現在の doctor manifest は移行中を示す `sops.homeKey.policy = "warn"` である。host key とオフライン復旧鍵の双方で復号を実測した後、`modules/secrets.nix` を `reject` へ変更し、旧 home key を削除する。
+- 現在の `my.sops.enrollmentState = "migration"` から doctor manifest の `sops.homeKey.policy = "warn"` を導出する。host key とオフライン復旧鍵の双方で復号し、旧 home key を削除した後に state を `enrolled` へ変更すると、policy は `reject` になる。
 - オフライン復旧鍵は host key と同じ age key group に登録するが、通常運用するホストへ常置しない。recipient の追加と削除には `sops updatekeys` を使い、変更後は各 identity で個別に復号を確認する。
+- enrollment の root helper は任意 path を開かない。候補 ciphertext は stdin で transient service に渡し、host identity は systemd credential として `DynamicUser` の verifier にだけ公開する。verifier は private network、read-only system、空の環境で実行する。
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
 
 ## License
 

@@ -12,11 +12,48 @@ trap - ERR
 DOTFILES="$test_root/dotfiles-wsl"
 SECRETS_FILE="$DOTFILES/secrets/secrets.yaml"
 AGE_KEY="$test_root/var/lib/sops-nix/key.txt"
-export TOTAL=1
+export SUDO_USER
+SUDO_USER=$(id -un)
+export TOTAL=2
 export STEP=0
 
-mkdir -p "$DOTFILES/.git" "$DOTFILES/secrets" "$(dirname -- "$AGE_KEY")"
+mkdir -p "$DOTFILES/secrets" "$(dirname -- "$AGE_KEY")"
+git -C "$DOTFILES" init -q
 touch "$DOTFILES/flake.nix" "$DOTFILES/flake.lock" "$SECRETS_FILE" "$AGE_KEY"
+
+as_user() {
+  "$@"
+}
+
+operation_lock=$DOTFILES/.git/dotfiles-operation.lock
+lock_target=$test_root/lock-target
+printf '%s\n' 'preserve-lock-target' > "$lock_target"
+ln -s "$lock_target" "$operation_lock"
+if (acquire_operation_lock >/dev/null 2>&1); then
+  echo 'bootstrap accepted a symlinked operation lock' >&2
+  exit 1
+fi
+grep -Fqx 'preserve-lock-target' "$lock_target"
+rm "$operation_lock"
+
+exec 9> "$operation_lock"
+chmod 0600 "$operation_lock"
+flock -n 9
+if (acquire_operation_lock >/dev/null 2>&1); then
+  echo 'bootstrap ignored the shared dotfiles operation lock' >&2
+  exit 1
+fi
+flock -u 9
+acquire_operation_lock >/dev/null
+
+mkdir -p -- "$DOTFILES/.git/dotfiles-sops-enroll"
+touch "$DOTFILES/.git/dotfiles-sops-enroll/active.json"
+if (reject_active_enrollment >/dev/null 2>&1); then
+  echo 'bootstrap ignored an active SOPS enrollment transaction' >&2
+  exit 1
+fi
+rm -r -- "$DOTFILES/.git/dotfiles-sops-enroll"
+reject_active_enrollment >/dev/null
 
 STAT_PROFILE=valid
 stat() {

@@ -52,6 +52,14 @@ in
       description = "gitdir glob that selects the work git identity. null disables it.";
     };
 
+    sops.enrollmentState = lib.mkOption {
+      type = lib.types.enum [
+        "migration"
+        "enrolled"
+      ];
+      description = "SOPS host identity migration state. Doctor derives the legacy home-key policy from this domain state.";
+    };
+
     doctor = {
       units = lib.mkOption {
         type = lib.types.listOf lib.types.str;
@@ -92,15 +100,6 @@ in
         default = { };
         internal = true;
         description = "CLI ごとに配備を要求する agent file 名。";
-      };
-
-      sopsHomeKeyPolicy = lib.mkOption {
-        type = lib.types.enum [
-          "warn"
-          "reject"
-        ];
-        internal = true;
-        description = "旧 home age key を migration 中の警告にするか、移行完了後の失敗にするか。";
       };
 
       wslInterop = lib.mkOption {

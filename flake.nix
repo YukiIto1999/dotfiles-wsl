@@ -81,7 +81,7 @@
           inherit (self.nixosConfigurations.${hostName}) pkgs;
         in
         {
-          inherit (pkgs) sops;
+          inherit (pkgs) age sops;
           # bootstrap が最初の rebuild 前、system closure が無い状態から呼ぶ
           dotfiles-install-clis = hostConfig.my.commands.installClis;
         };
@@ -105,6 +105,9 @@
             codexModel = "dummy-model";
           };
           codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
+          sopsKeyFile = "/var/lib/sops-nix/key.txt";
+          sopsKeyDirectoryPolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix".d;
+          sopsKeyFilePolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z;
 
           # config-syntax check 専用の @var@ 埋め、実際の値は各 module 側にありここでは構文検査用
           dummyVars = {
@@ -150,6 +153,44 @@
         {
           nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
 
+          sops-policy =
+            assert hostConfig.sops.age.keyFile == sopsKeyFile;
+            assert hostConfig.sops.age.generateKey == false;
+            assert sopsKeyDirectoryPolicy.type == "d";
+            assert sopsKeyDirectoryPolicy.user == "root";
+            assert sopsKeyDirectoryPolicy.group == "root";
+            assert sopsKeyDirectoryPolicy.mode == "0700";
+            assert sopsKeyFilePolicy.type == "z";
+            assert sopsKeyFilePolicy.user == "root";
+            assert sopsKeyFilePolicy.group == "root";
+            assert sopsKeyFilePolicy.mode == "0400";
+            pkgs.runCommandLocal "check-sops-policy"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.yq
+                ];
+              }
+              ''
+                set -euo pipefail
+
+                yq -r '.creation_rules[].key_groups[].age[]' ${self}/secrets/.sops.yaml \
+                  | sort > configured-recipients
+                yq -r '.sops.age[].recipient' ${self}/secrets/secrets.yaml \
+                  | sort > encrypted-recipients
+                test -s configured-recipients
+                test -s encrypted-recipients
+                diff --brief configured-recipients encrypted-recipients
+
+                for backend in kms gcp_kms azure_kv hc_vault pgp; do
+                  yq --exit-status ".sops.$backend // [] | length == 0" \
+                    ${self}/secrets/secrets.yaml > /dev/null
+                done
+                bash ${self}/scripts/tests/bootstrap-age-key.sh ${self}/scripts/bootstrap.sh
+
+                touch $out
+              '';
+
           agentmemory-env =
             assert agentmemoryEnvironmentFiles == [ agentmemoryTemplate.path ];
             pkgs.runCommandLocal "check-agentmemory-env" { } ''
@@ -177,7 +218,10 @@
           '';
 
           shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-            shellcheck --severity=warning ${self}/scripts/*.sh ${self}/modules/user/git/hooks/*
+            shellcheck --severity=warning \
+              ${self}/scripts/*.sh \
+              ${self}/scripts/tests/*.sh \
+              ${self}/modules/user/git/hooks/*
             touch $out
           '';
 

@@ -25,6 +25,20 @@ in
 {
   sops.defaultSopsFile = ../secrets/secrets.yaml;
   sops.age.keyFile = "/var/lib/sops-nix/key.txt";
+  sops.age.generateKey = false;
+
+  systemd.tmpfiles.settings."sops-key" = {
+    "/var/lib/sops-nix".d = {
+      user = "root";
+      group = "root";
+      mode = "0700";
+    };
+    "/var/lib/sops-nix/key.txt".z = {
+      user = "root";
+      group = "root";
+      mode = "0400";
+    };
+  };
 
   sops.secrets = {
     "identity/default/name" = { };

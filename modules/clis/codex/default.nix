@@ -10,6 +10,17 @@ let
   cfg = config.my;
 
   codexModel = "gpt-5.6-sol";
+  dotfilesHomeRelative = lib.removePrefix "${cfg.homeDir}/" cfg.dotfilesDir;
+  dotfilesPathComponents = lib.splitString "/" dotfilesHomeRelative;
+  dotfilesDirIsBelowHome =
+    lib.hasPrefix "${cfg.homeDir}/" cfg.dotfilesDir
+    && lib.all (
+      component: component != "" && component != "." && component != ".."
+    ) dotfilesPathComponents;
+  codexProjectHomePath = "${dotfilesHomeRelative}/.codex/config.toml";
+  codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
+    sandbox_workspace_write.writable_roots = [ "${cfg.dotfilesDir}/.git" ];
+  };
 
   splitFrontmatter =
     src:
@@ -65,8 +76,15 @@ in
   # codex の workspace-write sandbox が PATH 上に要求する bubblewrap
   environment.systemPackages = [ pkgs.bubblewrap ];
 
+  assertions = [
+    {
+      assertion = dotfilesDirIsBelowHome;
+      message = "my.dotfilesDir must be a normalized path below my.homeDir for Codex project config deployment";
+    }
+  ];
+
   # codex は user seed の ~/.codex/config.toml をこの上に merge
-  # gateway は seed でなくここに置き gatewayUrl 変更を常に反映
+  # gateway と hooks は全 project 共通、checkout の Git 権限は trusted project config に限定
   environment.etc."codex/config.toml".source = pkgs.replaceVars ./config-system.toml {
     inherit (cfg) gatewayUrl;
   };
@@ -74,6 +92,7 @@ in
   home-manager.users.${cfg.username} =
     { lib, ... }:
     {
+      home.file.${codexProjectHomePath}.source = codexProjectConfig;
       home.activation.seedCodexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] (
         seedConfig ".codex/config.toml" (pkgs.replaceVars ./config.toml { inherit codexModel; })
       );

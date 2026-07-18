@@ -87,6 +87,8 @@ CLI 本体は Nix でインストールしない。更新頻度が高く常に�
 
 MCP gateway の登録方法は CLI ごとに異なる。Claude は CLI が実行時に管理する `~/.claude.json` に `claude mcp add` で登録する。Codex は `/etc/codex/config.toml` に管理設定を置き、ユーザーが初期化する home 配下の config と分ける。OpenCode / Antigravity は home の MCP 設定ファイルへ置く。
 
+Codex の `workspace-write` sandbox は作業ディレクトリに加え、この checkout の `.git` だけを書き込み可能にする。許可パスは Home Manager が `my.dotfilesDir/.codex/config.toml` へ生成し、Codex がこのリポジトリを trusted project として読む場合だけ有効になる。`/etc/codex/config.toml` には全 project 共通の gateway と hooks だけを置く。
+
 ## MCP
 
 全 CLI は MCP gateway だけに接続する。gateway は systemd service として動作し、stdio server を子プロセスとして起動する。SearXNG など常駐が必要なプロセスだけ Docker で動かす。

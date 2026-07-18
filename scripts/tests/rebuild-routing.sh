@@ -4,6 +4,7 @@ set -euo pipefail
 rebuild_source=${1:?rebuild source path is required}
 bash_path=${2:?bash path is required}
 fakeroot_path=${3:?fakeroot path is required}
+operation_lock_source=${4:?operation lock source path is required}
 test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT
 
@@ -17,7 +18,10 @@ candidate=$test_root/nix/store/test-system
 rebuild=$test_root/dotfiles-rebuild
 
 mkdir -p "$repo/.git" "$fake_bin" "$candidate/sw/bin"
-sed "s|@dotfilesDir@|$repo|g" "$rebuild_source" > "$rebuild"
+sed "s|@dotfilesDir@|$repo|g" "$rebuild_source" \
+  | sed "/@operationLockFunctions@/ { r $operation_lock_source
+    d
+  }" > "$rebuild"
 chmod +x "$rebuild"
 
 cat > "$fake_bin/command-stub" <<'STUB'
@@ -40,7 +44,17 @@ esac
 
 case $name in
   git)
-    printf '%s' "${TEST_UNTRACKED:-}"
+    if [[ ${1:-} == -C && ${3:-} == rev-parse ]]; then
+      printf '%s\n' "$TEST_COMMON_GIT_DIR"
+    elif [[ ${1:-} == -C && ${3:-} == diff && ${4:-} == --name-only ]]; then
+      printf '%s' "${TEST_CHANGED_PATHS:-}"
+    elif [[ ${1:-} == -C && ${3:-} == diff && ${4:-} == --cached ]]; then
+      exit "${TEST_STAGED_STATUS:-0}"
+    elif [[ ${1:-} == -C && ${3:-} == diff && ${4:-} == --check ]]; then
+      exit "${TEST_DIFF_CHECK_STATUS:-0}"
+    else
+      printf '%s' "${TEST_UNTRACKED:-}"
+    fi
     ;;
   nix)
     case "${1:-} ${2:-}" in
@@ -83,6 +97,7 @@ chmod +x "$candidate/sw/bin/dotfiles-doctor"
 export CALL_LOG=$call_log
 export TEST_SOURCE_PATH=$source_path
 export TEST_CANDIDATE=$candidate
+export TEST_COMMON_GIT_DIR=$repo/.git
 
 run_rebuild() {
   : > "$call_log"
@@ -91,6 +106,9 @@ run_rebuild() {
   export TEST_EFFECT=$1
   export TEST_UNTRACKED=${2:-}
   export TEST_FAIL_AT=${3:-}
+  export TEST_CHANGED_PATHS=${TEST_CHANGED_PATHS:-}
+  export TEST_STAGED_STATUS=${TEST_STAGED_STATUS:-0}
+  export TEST_DIFF_CHECK_STATUS=${TEST_DIFF_CHECK_STATUS:-0}
   shift 3 || true
 
   set +e
@@ -138,6 +156,7 @@ assert_before() {
 }
 
 assert_snapshot_pipeline() {
+  require_exact_call "git -C $repo rev-parse --path-format=absolute --git-common-dir"
   require_exact_call "git -C $repo ls-files --others --exclude-standard"
   require_exact_call "nix flake archive --json --no-write-lock-file git+file://$repo"
   require_exact_call "nix flake check --no-write-lock-file --log-format internal-json -v path:$source_path"
@@ -150,6 +169,7 @@ assert_snapshot_pipeline() {
   [[ $(grep -c "^nix flake check .*path:$source_path" "$call_log") -eq 1 ]]
   [[ $(grep -c "^nix build .*path:$source_path#nixosConfigurations" "$call_log") -eq 1 ]]
 
+  assert_before "git -C $repo rev-parse" "git -C $repo ls-files"
   assert_before "git -C $repo ls-files" 'nix flake archive --json'
   assert_before 'nix flake archive --json' 'nix flake check'
   assert_before 'nix flake check' 'nix build'
@@ -198,6 +218,78 @@ set -e
 [[ ! -s $call_log ]]
 grep -F 'run dotfiles-rebuild as the regular user' "$stderr_log" > /dev/null
 export DOTFILES_REBUILD_ALLOW_ROOT=1
+
+lock_target=$test_root/lock-target
+printf '%s\n' 'preserve-lock-target' > "$lock_target"
+ln -s "$lock_target" "$repo/.git/dotfiles-operation.lock"
+run_rebuild switch '' ''
+[[ $rebuild_status -ne 0 ]]
+grep -F 'lock must be a regular file' "$stderr_log" > /dev/null
+grep -Fqx 'preserve-lock-target' "$lock_target"
+reject_call 'nix flake archive'
+rm "$repo/.git/dotfiles-operation.lock"
+
+exec 9> "$repo/.git/dotfiles-operation.lock"
+chmod 0600 "$repo/.git/dotfiles-operation.lock"
+flock -n 9
+run_rebuild switch '' ''
+[[ $rebuild_status -ne 0 ]]
+grep -F 'another dotfiles state transition is running' "$stderr_log" > /dev/null
+reject_call 'nix flake archive'
+flock -u 9
+
+marker_dir=$repo/.git/dotfiles-sops-enroll
+marker=$marker_dir/active.json
+mkdir -m 0700 -- "$marker_dir"
+cat > "$marker" <<EOF
+{"version":2,"transactionId":"0123456789abcdef0123456789abcdef","hostId":"fixture-nixos",
+ "worktree":"$repo","phase":"prepared","oldConfigHash":null,"oldSecretsHash":null,
+ "newConfigHash":null,"newSecretsHash":null}
+EOF
+chmod 0600 "$marker"
+run_rebuild switch '' ''
+[[ $rebuild_status -ne 0 ]]
+grep -F 'an enrollment transaction blocks normal rebuild' "$stderr_log" > /dev/null
+reject_call 'nix flake archive'
+
+mkdir -p -- "$repo/secrets"
+printf '%s\n' 'config' > "$repo/secrets/.sops.yaml"
+printf '%s\n' 'ciphertext' > "$repo/secrets/secrets.yaml"
+config_hash=$(sha256sum "$repo/secrets/.sops.yaml" | cut -d ' ' -f 1)
+secrets_hash=$(sha256sum "$repo/secrets/secrets.yaml" | cut -d ' ' -f 1)
+jq -n \
+  --arg worktree "$repo" \
+  --arg configHash "$config_hash" \
+  --arg secretsHash "$secrets_hash" '
+    {version: 2, transactionId: "0123456789abcdef0123456789abcdef", hostId: "fixture-nixos",
+     worktree: $worktree, phase: "generation-pending",
+     oldConfigHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     oldSecretsHash: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+     newConfigHash: $configHash, newSecretsHash: $secretsHash}
+  ' > "$marker"
+chmod 0600 "$marker"
+TEST_CHANGED_PATHS=$'secrets/.sops.yaml\nsecrets/secrets.yaml\n'
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 0 ]]
+assert_snapshot_pipeline
+reject_call 'nixos-rebuild'
+
+TEST_CHANGED_PATHS=$'README.md\nsecrets/.sops.yaml\nsecrets/secrets.yaml\n'
+run_rebuild switch '' ''
+[[ $rebuild_status -ne 0 ]]
+grep -F 'only the prepared SOPS files may differ' "$stderr_log" > /dev/null
+reject_call 'nix flake archive'
+
+jq '.phase = "generation-checking"' "$marker" > "$marker.tmp"
+mv "$marker.tmp" "$marker"
+chmod 0600 "$marker"
+TEST_CHANGED_PATHS=$'secrets/.sops.yaml\nsecrets/secrets.yaml\n'
+run_rebuild switch '' ''
+[[ $rebuild_status -ne 0 ]]
+grep -F 'an enrollment transaction blocks normal rebuild' "$stderr_log" > /dev/null
+reject_call 'nix flake archive'
+unset TEST_CHANGED_PATHS
+rm -r -- "$marker_dir"
 
 run_rebuild switch '' ''
 [[ $rebuild_status -eq 0 ]]

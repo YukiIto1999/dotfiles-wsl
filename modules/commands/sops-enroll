@@ -1,0 +1,776 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+@operationLockFunctions@
+
+keyctl=@sopsKeyctl@
+sudo_command=@sudoCommand@
+allow_test_hooks=@allowTestHooks@
+sops_runtime_path=@sopsRuntimePath@
+if (( allow_test_hooks == 1 )); then
+  configured_dotfiles=${SOPS_ENROLL_TEST_DOTFILES:?SOPS_ENROLL_TEST_DOTFILES is required by the test build}
+else
+  configured_dotfiles=@configuredDotfiles@
+fi
+
+die() {
+  printf 'dotfiles-sops-enroll: %s\n' "$*" >&2
+  exit 1
+}
+
+usage() {
+  cat >&2 <<'EOF'
+usage:
+  dotfiles-sops-enroll prepare --recovery-key PATH --host-id ID
+  dotfiles-sops-enroll apply --recovery-key PATH --yes
+  dotfiles-sops-enroll status
+  dotfiles-sops-enroll abort
+
+prepare builds and verifies an additive recipient update without changing tracked files.
+apply atomically exchanges the verified secrets directory and requires --yes. On an existing
+host it keeps the previous key until a compatible current generation is active, deletes only
+incompatible system-profile generations, then promotes the staged key. status and abort do
+not accept key paths.
+EOF
+  exit 2
+}
+
+[[ $# -ge 1 ]] || usage
+operation=$1
+shift
+
+recovery_key=
+host_id=
+confirmed=0
+while (( $# > 0 )); do
+  case $1 in
+    --recovery-key)
+      [[ -z $recovery_key && $# -ge 2 ]] || usage
+      recovery_key=$2
+      shift 2
+      ;;
+    --host-id)
+      [[ -z $host_id && $# -ge 2 ]] || usage
+      host_id=$2
+      shift 2
+      ;;
+    --yes)
+      (( confirmed == 0 )) || usage
+      confirmed=1
+      shift
+      ;;
+    -h | --help)
+      usage
+      ;;
+    *) usage ;;
+  esac
+done
+
+case $operation in
+  prepare)
+    [[ -n $recovery_key && -n $host_id && $confirmed -eq 0 ]] || usage
+    [[ $host_id =~ ^[a-z0-9][a-z0-9-]{0,62}$ ]] || die 'host id must match ^[a-z0-9][a-z0-9-]{0,62}$'
+    ;;
+  apply)
+    [[ -n $recovery_key && -z $host_id && $confirmed -eq 1 ]] || die 'apply requires --recovery-key PATH and explicit --yes'
+    ;;
+  status | abort)
+    [[ -z $recovery_key && -z $host_id && $confirmed -eq 0 ]] || usage
+    ;;
+  *) usage ;;
+esac
+
+dotfiles=$(git rev-parse --show-toplevel 2>/dev/null) || die 'run this command inside the dotfiles Git worktree'
+dotfiles=$(realpath -e -- "$dotfiles") || die 'dotfiles worktree cannot be resolved'
+configured_dotfiles=$(realpath -e -- "$configured_dotfiles") || die 'configured dotfiles worktree cannot be resolved'
+[[ ! -L $configured_dotfiles && -d $configured_dotfiles && $dotfiles == "$configured_dotfiles" ]] || \
+  die 'enrollment is restricted to the configured dotfiles worktree'
+secrets_dir=$dotfiles/secrets
+config=$secrets_dir/.sops.yaml
+encrypted=$secrets_dir/secrets.yaml
+common_git_dir=$(git -C "$dotfiles" rev-parse --path-format=absolute --git-common-dir)
+transaction_root=$common_git_dir/dotfiles-sops-enroll
+active_marker=$transaction_root/active.json
+
+umask 077
+dotfiles_acquire_operation_lock "$common_git_dir" "$EUID" "$(id -g)" || \
+  die 'failed to acquire the dotfiles operation lock'
+if [[ ! -e $transaction_root ]]; then
+  mkdir -m 0700 -- "$transaction_root"
+fi
+[[ ! -L $transaction_root && -d $transaction_root ]] || \
+  die 'transaction root must be a real directory'
+[[ $(stat -c '%u|%a' -- "$transaction_root") == "$EUID|700" ]] || \
+  die 'transaction root has invalid owner or mode'
+
+root_call() {
+  "$sudo_command" -- "$keyctl" "$@"
+}
+
+authorize_root() {
+  "$sudo_command" -v
+}
+
+validate_repository_shape() {
+  git -C "$dotfiles" ls-files --error-unmatch \
+    secrets/.sops.yaml secrets/secrets.yaml >/dev/null || \
+    die 'SOPS target files must be tracked'
+  [[ ! -L $secrets_dir && -d $secrets_dir ]] || die 'secrets must be a real directory'
+  [[ ! -L $config && -f $config && ! -L $encrypted && -f $encrypted ]] || \
+    die 'SOPS targets must be regular files'
+  [[ $(stat -c '%a|%h' -- "$config") == '644|1' && $(stat -c '%a|%h' -- "$encrypted") == '644|1' ]] || \
+    die 'SOPS targets must have mode 0644 and one hard link'
+
+  mapfile -t entries < <(find "$secrets_dir" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+  [[ ${#entries[@]} -eq 2 && ${entries[0]} == .sops.yaml && ${entries[1]} == secrets.yaml ]] || \
+    die 'secrets directory must contain only .sops.yaml and secrets.yaml'
+}
+
+validate_candidate_shape() {
+  local transaction_directory=$1 candidate_directory=$2
+  [[ ! -L $transaction_directory && -d $transaction_directory ]] || \
+    die 'transaction path must be a real directory'
+  [[ ! -L $candidate_directory && -d $candidate_directory ]] || \
+    die 'candidate secrets path must be a real directory'
+  [[ ! -L $candidate_directory/.sops.yaml && -f $candidate_directory/.sops.yaml ]] || \
+    die 'candidate .sops.yaml must be a regular file'
+  [[ ! -L $candidate_directory/secrets.yaml && -f $candidate_directory/secrets.yaml ]] || \
+    die 'candidate secrets.yaml must be a regular file'
+  [[ $(stat -c '%a|%h' -- "$candidate_directory/.sops.yaml") == '644|1' &&
+    $(stat -c '%a|%h' -- "$candidate_directory/secrets.yaml") == '644|1' ]] || \
+    die 'candidate SOPS files must have mode 0644 and one hard link'
+  mapfile -t candidate_entries < <(find "$candidate_directory" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+  [[ ${#candidate_entries[@]} -eq 2 && ${candidate_entries[0]} == .sops.yaml && ${candidate_entries[1]} == secrets.yaml ]] || \
+    die 'candidate secrets directory has unexpected entries'
+  mapfile -t transaction_entries < <(find "$transaction_directory" -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+  [[ ${#transaction_entries[@]} -eq 1 && ${transaction_entries[0]} == secrets ]] || \
+    die 'transaction directory has unexpected entries'
+}
+
+require_clean_worktree() {
+  if ! git -C "$dotfiles" diff --quiet ||
+    ! git -C "$dotfiles" diff --cached --quiet HEAD; then
+    die 'the entire worktree must be clean before enrollment'
+  fi
+  [[ -z $(git -C "$dotfiles" ls-files --others --exclude-standard) ]] || \
+    die 'untracked files must be committed or removed before enrollment'
+}
+
+require_enrollment_worktree_delta() {
+  mapfile -t changed_paths < <(git -C "$dotfiles" diff --name-only | sort)
+  [[ ${#changed_paths[@]} -eq 2 &&
+    ${changed_paths[0]} == secrets/.sops.yaml &&
+    ${changed_paths[1]} == secrets/secrets.yaml ]] || \
+    die 'only the two prepared SOPS files may differ while enrollment is active'
+  git -C "$dotfiles" diff --cached --quiet HEAD || \
+    die 'staged changes are not allowed while enrollment is active'
+  git -C "$dotfiles" diff --check -- secrets/.sops.yaml secrets/secrets.yaml || \
+    die 'prepared SOPS files contain an invalid patch'
+  [[ -z $(git -C "$dotfiles" ls-files --others --exclude-standard) ]] || \
+    die 'untracked files are not allowed while enrollment is active'
+}
+
+validate_recipient_contract() {
+  local target_config=$1 target_encrypted=$2 configured_file encrypted_file metadata_file
+  configured_file=$(mktemp "$transaction_root/.configured.XXXXXX")
+  encrypted_file=$(mktemp "$transaction_root/.encrypted.XXXXXX")
+  metadata_file=$(mktemp "$transaction_root/.metadata.XXXXXX")
+  trap 'rm -f -- "$configured_file" "$encrypted_file" "$metadata_file"' RETURN
+
+  yq --exit-status '
+    (.creation_rules | type == "array" and length == 1) and
+    (.creation_rules[0].path_regex == "^secrets\\.yaml$") and
+    (.creation_rules[0].key_groups | type == "array" and length == 1) and
+    ((.creation_rules[0].key_groups[0] | keys | sort) == ["age"]) and
+    (.creation_rules[0].key_groups[0].age | type == "array" and length > 0) and
+    all(.creation_rules[0].key_groups[0].age[]; type == "string" and startswith("age1")) and
+    (
+      ((.keys | type) == "array" and all(.keys[]; type == "string" and startswith("age1"))) or
+      (
+        (.keys | type) == "object" and
+        ((.keys | keys | sort) == ["hosts", "recovery"]) and
+        (.keys.recovery | type == "string" and startswith("age1")) and
+        (.keys.hosts | type == "object") and
+        all((.keys.hosts | keys[]); test("^[a-z0-9][a-z0-9-]{0,62}$")) and
+        all(.keys.hosts[]; type == "string" and startswith("age1"))
+      )
+    )
+  ' "$target_config" >/dev/null || die 'SOPS config must contain one age-only secrets.yaml creation rule'
+
+  yq -r '.creation_rules[].key_groups[].age[]' "$target_config" | sort > "$configured_file"
+  yq -r '
+    if (.keys | type) == "object" then
+      [.keys.recovery] + [.keys.hosts[]] | .[]
+    else
+      .keys[]
+    end
+  ' "$target_config" | sort > "$metadata_file"
+  yq -r '.sops.age[].recipient' "$target_encrypted" | sort > "$encrypted_file"
+  [[ -s $configured_file && -s $metadata_file && -s $encrypted_file ]] || die 'SOPS recipient sets must not be empty'
+  [[ $(wc -l < "$configured_file") -eq $(sort -u "$configured_file" | wc -l) ]] || \
+    die 'configured SOPS recipients contain duplicates'
+  [[ $(wc -l < "$encrypted_file") -eq $(sort -u "$encrypted_file" | wc -l) ]] || \
+    die 'encrypted SOPS recipients contain duplicates'
+  diff --brief "$configured_file" "$encrypted_file" >/dev/null || \
+    die 'configured and encrypted SOPS recipient sets differ'
+  diff --brief "$configured_file" "$metadata_file" >/dev/null || \
+    die 'named and configured SOPS recipient sets differ'
+  for backend in kms gcp_kms azure_kv hc_vault pgp; do
+    yq --exit-status ".sops.$backend // [] | length == 0" "$target_encrypted" >/dev/null || \
+      die "unsupported SOPS backend is present: $backend"
+  done
+  trap - RETURN
+  rm -f -- "$configured_file" "$encrypted_file" "$metadata_file"
+}
+
+open_recovery_identity() {
+  [[ $recovery_key == /* ]] || die 'recovery key path must be absolute'
+  [[ ! -L $recovery_key && -f $recovery_key && -r $recovery_key ]] || \
+    die 'recovery key must be a readable regular file, not a symlink'
+  recovery_metadata=$(stat -c '%d|%i|%a|%h' -- "$recovery_key")
+  recovery_mode=${recovery_metadata#*|*|}
+  recovery_mode=${recovery_mode%|*}
+  [[ $recovery_mode == 400 || $recovery_mode == 600 ]] || \
+    die 'recovery key mode must be 0400 or 0600'
+  [[ ${recovery_metadata##*|} == 1 ]] || die 'recovery key must have one hard link'
+  exec {recovery_fd}< "$recovery_key"
+  fd_metadata=$(stat -Lc '%d|%i|%a|%h' -- "/proc/$$/fd/$recovery_fd")
+  [[ $fd_metadata == "$recovery_metadata" ]] || die 'recovery key changed while it was opened'
+  recovery_identity=/proc/$$/fd/$recovery_fd
+  recovery_recipient=$(age-keygen -y "$recovery_identity") || die 'recovery key is not a valid age identity'
+  [[ $recovery_recipient != *$'\n'* && $recovery_recipient =~ ^age1[0-9a-z]+$ ]] || \
+    die 'recovery key must contain exactly one age identity'
+}
+
+decrypt_with_recovery() {
+  local ciphertext=$1 message=$2
+  env -i \
+    HOME=/var/empty \
+    PATH="$sops_runtime_path" \
+    SOPS_AGE_KEY_FILE="$recovery_identity" \
+    sops decrypt --filename-override secrets.yaml "$ciphertext" >/dev/null || die "$message"
+}
+
+hash_file() {
+  sha256sum "$1" | cut -d ' ' -f 1
+}
+
+matches_hashes() {
+  local directory=$1 config_hash=$2 secrets_hash=$3
+  [[ -f $directory/.sops.yaml && -f $directory/secrets.yaml ]] &&
+    [[ $(hash_file "$directory/.sops.yaml") == "$config_hash" ]] &&
+    [[ $(hash_file "$directory/secrets.yaml") == "$secrets_hash" ]]
+}
+
+status_json() {
+  root_call status
+}
+
+write_active_marker() {
+  local transaction_id=$1 transaction_host_id=$2 phase=$3
+  local old_config_hash=${4:-} old_secrets_hash=${5:-} new_config_hash=${6:-} new_secrets_hash=${7:-}
+  local temporary
+  temporary=$(mktemp "$transaction_root/.active.XXXXXX")
+  jq -n \
+    --arg transactionId "$transaction_id" \
+    --arg hostId "$transaction_host_id" \
+    --arg worktree "$dotfiles" \
+    --arg phase "$phase" \
+    --arg oldConfigHash "$old_config_hash" \
+    --arg oldSecretsHash "$old_secrets_hash" \
+    --arg newConfigHash "$new_config_hash" \
+    --arg newSecretsHash "$new_secrets_hash" \
+    '{version: 2, transactionId: $transactionId, hostId: $hostId, worktree: $worktree,
+      phase: $phase,
+      oldConfigHash: (if $oldConfigHash == "" then null else $oldConfigHash end),
+      oldSecretsHash: (if $oldSecretsHash == "" then null else $oldSecretsHash end),
+      newConfigHash: (if $newConfigHash == "" then null else $newConfigHash end),
+      newSecretsHash: (if $newSecretsHash == "" then null else $newSecretsHash end)}' > "$temporary"
+  chmod 0600 "$temporary"
+  sync -d "$temporary"
+  mv -fT -- "$temporary" "$active_marker"
+  sync -f "$transaction_root"
+}
+
+read_active_marker() {
+  local marker marker_metadata
+  [[ ! -L $active_marker && -f $active_marker ]] || \
+    die 'user transaction marker is missing; inspect status before recovery'
+  marker_metadata=$(stat -c '%u|%a|%h' -- "$active_marker")
+  [[ $marker_metadata == "$(id -u)|600|1" ]] || die 'user transaction marker has invalid metadata'
+  marker=$(cat -- "$active_marker")
+  jq -ce \
+    '
+      .version == 2 and
+      (.transactionId | type == "string" and test("^[0-9a-f]{32}$")) and
+      (.hostId | type == "string" and test("^[a-z0-9][a-z0-9-]{0,62}$")) and
+      (.worktree | type == "string" and startswith("/")) and
+      (.phase | IN("staging", "prepared", "generation-pending", "generation-checking")) and
+      all(.oldConfigHash, .oldSecretsHash, .newConfigHash, .newSecretsHash;
+        . == null or (type == "string" and test("^[0-9a-f]{64}$")))
+    ' <<< "$marker" >/dev/null || die 'user transaction marker is invalid'
+  jq -c . <<< "$marker"
+}
+
+require_active_marker() {
+  local transaction_id=$1 expected_host_id=${2:-} marker
+  marker=$(read_active_marker)
+  jq -e \
+    --arg transactionId "$transaction_id" \
+    --arg hostId "$expected_host_id" \
+    --arg worktree "$dotfiles" '
+      .transactionId == $transactionId and
+      ($hostId == "" or .hostId == $hostId) and
+      .worktree == $worktree
+    ' <<< "$marker" >/dev/null || \
+    die 'enrollment belongs to a different worktree or transaction'
+}
+
+cleanup_user_transaction() {
+  local transaction_id=$1 expected_config_hash=${2:-} expected_secrets_hash=${3:-}
+  local current_config_hash current_secrets_hash transaction_directory transaction_candidate
+  [[ $transaction_id =~ ^[0-9a-f]{32}$ ]] || die 'transaction cleanup id is invalid'
+  transaction_directory=$transaction_root/$transaction_id
+  transaction_candidate=$transaction_directory/secrets
+  if [[ -e $transaction_directory ]]; then
+    if [[ -n $expected_config_hash || -n $expected_secrets_hash ]]; then
+      [[ $expected_config_hash =~ ^[0-9a-f]{64}$ && $expected_secrets_hash =~ ^[0-9a-f]{64}$ ]] || \
+        die 'transaction cleanup hashes are invalid'
+      validate_candidate_shape "$transaction_directory" "$transaction_candidate"
+      matches_hashes "$transaction_candidate" "$expected_config_hash" "$expected_secrets_hash" || \
+        die "transaction backup changed; preserved at $transaction_candidate"
+    else
+      [[ ! -L $transaction_directory && -d $transaction_directory ]] || \
+        die 'transaction cleanup path is not a real directory'
+      if [[ -z $(find "$transaction_directory" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
+        rmdir -- "$transaction_directory"
+        transaction_directory=
+      else
+        validate_candidate_shape "$transaction_directory" "$transaction_candidate"
+        current_config_hash=$(hash_file "$config")
+        current_secrets_hash=$(hash_file "$encrypted")
+        matches_hashes "$transaction_candidate" "$current_config_hash" "$current_secrets_hash" || \
+          die "unrecorded transaction content changed; preserved at $transaction_candidate"
+      fi
+    fi
+    if [[ -n $transaction_directory ]]; then
+      rm -r -- "$transaction_directory"
+    fi
+  fi
+  rm -f -- "$active_marker"
+  sync -f "$transaction_root"
+}
+
+cleanup_failed_prepare() {
+  local status=$?
+  local cleanup_config_hash='' cleanup_secrets_hash='' marker=''
+  trap - EXIT
+  if (( status != 0 && staged == 1 && prepared == 0 )); then
+    if [[ -e $active_marker ]]; then
+      marker=$(read_active_marker 2>/dev/null || true)
+      if jq -e --arg transactionId "${transaction_id:-}" \
+        '.transactionId == $transactionId' <<< "$marker" >/dev/null 2>&1; then
+        cleanup_config_hash=$(jq -r '.newConfigHash // ""' <<< "$marker")
+        cleanup_secrets_hash=$(jq -r '.newSecretsHash // ""' <<< "$marker")
+      fi
+    fi
+    if [[ ${transaction_id:-} =~ ^[0-9a-f]{32}$ ]] && \
+      root_call abort "$transaction_id" >/dev/null 2>&1; then
+      cleanup_user_transaction \
+        "$transaction_id" "$cleanup_config_hash" "$cleanup_secrets_hash" || true
+    fi
+  fi
+  exit "$status"
+}
+
+case $operation in
+  status)
+    authorize_root
+    status_json
+    ;;
+
+  prepare)
+    validate_repository_shape
+    require_clean_worktree
+    validate_recipient_contract "$config" "$encrypted"
+    open_recovery_identity
+    decrypt_with_recovery "$encrypted" 'recovery identity cannot decrypt the current ciphertext'
+
+    current_recovery=$(yq -r '
+      if (.keys | type) == "object" then
+        .keys.recovery // ""
+      else
+        .creation_rules[0].key_groups[0].age[0] // ""
+      end
+    ' "$config")
+    [[ $current_recovery == "$recovery_recipient" ]] || \
+      die 'recovery identity does not match the configured recovery recipient'
+    # shellcheck disable=SC2016 # hostId is a yq variable.
+    if yq --exit-status --arg hostId "$host_id" \
+      '(.keys | type) == "object" and (.keys.hosts // {} | has($hostId))' "$config" >/dev/null; then
+      die 'host id is already enrolled; use a separate rotation workflow'
+    fi
+
+    authorize_root
+    root_status=$(status_json)
+    [[ $(jq -r '.state' <<< "$root_status") == idle ]] || \
+      die 'an enrollment transaction already exists; use status, apply, or abort'
+    observed_current_recipient=$(jq -r '.currentRecipient // ""' <<< "$root_status")
+    if [[ -n $observed_current_recipient && $observed_current_recipient != "$recovery_recipient" ]]; then
+      # shellcheck disable=SC2016 # recipient is a yq variable.
+      current_host_id=$(yq -r --arg recipient "$observed_current_recipient" '
+        if (.keys | type) == "object" then
+          [.keys.hosts | to_entries[] | select(.value == $recipient) | .key][0] // ""
+        else
+          ""
+        end
+      ' "$config")
+      if [[ -n $current_host_id ]]; then
+        die "current host identity is already enrolled as $current_host_id; use a separate rotation workflow"
+      fi
+      die 'current host identity is neither recovery nor an enrolled host'
+    fi
+    if [[ -n $observed_current_recipient ]]; then
+      root_call validate-baseline "$(hash_file "$encrypted")" >/dev/null
+    else
+      root_call validate-fresh >/dev/null
+    fi
+
+    staged=0
+    prepared=0
+    trap cleanup_failed_prepare EXIT
+    root_status=$(root_call stage)
+    staged=1
+    transaction_id=$(jq -er '.transactionId | select(test("^[0-9a-f]{32}$"))' <<< "$root_status")
+    next_recipient=$(jq -r '.nextRecipient' <<< "$root_status")
+    previous_recipient=$(jq -r '.previousRecipient // ""' <<< "$root_status")
+    [[ $previous_recipient == "$observed_current_recipient" ]] || \
+      die 'current host identity changed while enrollment was starting'
+    [[ $next_recipient != "$recovery_recipient" ]] || \
+      die 'new host recipient must differ from the recovery recipient'
+    if yq -r '.creation_rules[].key_groups[].age[]' "$config" | grep -Fqx "$next_recipient"; then
+      die 'new host recipient already exists in the configured set'
+    fi
+    if [[ -n $previous_recipient ]]; then
+      root_call verify-previous "$transaction_id" < "$encrypted"
+    fi
+
+    transaction_dir=$transaction_root/$transaction_id
+    candidate=$transaction_dir/secrets
+    [[ ! -e $transaction_dir ]] || die 'transaction directory already exists'
+    write_active_marker "$transaction_id" "$host_id" staging
+    mkdir -m 0700 -- "$transaction_dir"
+    cp -a -- "$secrets_dir" "$candidate"
+
+    # shellcheck disable=SC2016 # recovery, hostId, and hostRecipient are yq variables.
+    yq -y -i \
+      --arg recovery "$recovery_recipient" \
+      --arg hostId "$host_id" \
+      --arg hostRecipient "$next_recipient" '
+        .keys = {
+          "recovery": $recovery,
+          "hosts": (
+            (if (.keys | type) == "object" then (.keys.hosts // {}) else {} end) *
+            {($hostId): $hostRecipient}
+          )
+        } |
+        .creation_rules[].key_groups[0].age =
+          ([.keys.recovery] + (.keys.hosts | to_entries | sort_by(.key) | map(.value)))
+      ' "$candidate/.sops.yaml"
+
+    (
+      cd "$candidate"
+      env -i \
+        HOME=/var/empty \
+        PATH="$sops_runtime_path" \
+        SOPS_AGE_KEY_FILE="$recovery_identity" \
+        sops --config .sops.yaml --filename-override secrets.yaml \
+          updatekeys --yes secrets.yaml >/dev/null
+    )
+
+    validate_recipient_contract "$candidate/.sops.yaml" "$candidate/secrets.yaml"
+    old_recipients=$(mktemp "$transaction_root/.old-recipients.XXXXXX")
+    new_recipients=$(mktemp "$transaction_root/.new-recipients.XXXXXX")
+    yq -r '.creation_rules[].key_groups[].age[]' "$config" | sort -u > "$old_recipients"
+    yq -r '.creation_rules[].key_groups[].age[]' "$candidate/.sops.yaml" | sort -u > "$new_recipients"
+    [[ -z $(comm -23 "$old_recipients" "$new_recipients") ]] || \
+      die 'enrollment candidate removed an existing recipient'
+    rm -f -- "$old_recipients" "$new_recipients"
+    decrypt_with_recovery "$candidate/secrets.yaml" 'recovery identity cannot decrypt the candidate ciphertext'
+    if [[ $allow_test_hooks == 1 && \
+      ${SOPS_ENROLL_TEST_FAIL_BEFORE_CANDIDATE_HASH_MARKER:-0} == 1 ]]; then
+      exit 78
+    fi
+    old_config_hash=$(hash_file "$config")
+    old_secrets_hash=$(hash_file "$encrypted")
+    new_config_hash=$(hash_file "$candidate/.sops.yaml")
+    new_secrets_hash=$(hash_file "$candidate/secrets.yaml")
+    write_active_marker \
+      "$transaction_id" "$host_id" staging \
+      "$old_config_hash" "$old_secrets_hash" "$new_config_hash" "$new_secrets_hash"
+    root_call verify-next "$transaction_id" < "$candidate/secrets.yaml"
+    if [[ $allow_test_hooks == 1 && \
+      ${SOPS_ENROLL_TEST_MUTATE_CANDIDATE_BEFORE_ROOT_PREPARE:-0} == 1 ]]; then
+      printf '%s\n' '# concurrent staged candidate edit' >> "$candidate/.sops.yaml"
+    fi
+    matches_hashes "$candidate" "$new_config_hash" "$new_secrets_hash" || \
+      die "prepared candidate changed before root journal update; preserved at $candidate"
+    jq -n \
+      --arg hostId "$host_id" \
+      --arg oldConfigHash "$old_config_hash" \
+      --arg oldSecretsHash "$old_secrets_hash" \
+      --arg newConfigHash "$new_config_hash" \
+      --arg newSecretsHash "$new_secrets_hash" \
+      '{hostId: $hostId, oldConfigHash: $oldConfigHash, oldSecretsHash: $oldSecretsHash,
+        newConfigHash: $newConfigHash, newSecretsHash: $newSecretsHash}' | \
+      root_call prepare "$transaction_id"
+    prepared=1
+    write_active_marker \
+      "$transaction_id" "$host_id" prepared \
+      "$old_config_hash" "$old_secrets_hash" "$new_config_hash" "$new_secrets_hash"
+    trap - EXIT
+    printf 'PREPARED: %s\n' "$host_id"
+    printf '  transaction: %s\n' "$transaction_id"
+    printf '  add recipient: %s\n' "$next_recipient"
+    printf '%s\n' '  tracked files: unchanged'
+    ;;
+
+  apply)
+    validate_repository_shape
+    open_recovery_identity
+    authorize_root
+    root_status=$(status_json)
+    state=$(jq -r '.state' <<< "$root_status")
+    receipt_prefix=
+    if [[ $state == idle ]]; then
+      [[ $(jq -r '.lastReceipt // empty' <<< "$root_status") != "" ]] || \
+        die 'no prepared enrollment transaction exists'
+      receipt_prefix=.lastReceipt
+    fi
+    transaction_id=$(jq -r "${receipt_prefix}.transactionId" <<< "$root_status")
+    transaction_host_id=$(jq -r "${receipt_prefix}.hostId // \"\"" <<< "$root_status")
+    [[ -n $transaction_host_id ]] || die 'transaction has no host id'
+    old_config_hash=$(jq -r "${receipt_prefix}.oldConfigHash // \"\"" <<< "$root_status")
+    old_secrets_hash=$(jq -r "${receipt_prefix}.oldSecretsHash // \"\"" <<< "$root_status")
+    new_config_hash=$(jq -r "${receipt_prefix}.newConfigHash // \"\"" <<< "$root_status")
+    new_secrets_hash=$(jq -r "${receipt_prefix}.newSecretsHash // \"\"" <<< "$root_status")
+    transaction_dir=$transaction_root/$transaction_id
+    candidate=$transaction_dir/secrets
+    require_active_marker "$transaction_id" "$transaction_host_id"
+
+    if [[ $state == idle ]]; then
+      matches_hashes "$secrets_dir" "$new_config_hash" "$new_secrets_hash" || \
+        die 'active SOPS files do not match the completed enrollment receipt'
+      validate_recipient_contract "$config" "$encrypted"
+      decrypt_with_recovery "$encrypted" 'recovery identity cannot decrypt the completed ciphertext'
+      root_call verify-installed < "$encrypted"
+      cleanup_user_transaction "$transaction_id" "$old_config_hash" "$old_secrets_hash"
+      printf 'APPLIED: %s\n' "$transaction_host_id"
+      printf '%s\n' '  recovered cleanup after completed root finalization'
+      exit 0
+    fi
+
+    git -C "$dotfiles" diff --cached --quiet HEAD -- secrets/.sops.yaml secrets/secrets.yaml || \
+      die 'SOPS target files must not have staged changes during enrollment'
+
+    if matches_hashes "$secrets_dir" "$old_config_hash" "$old_secrets_hash"; then
+      [[ $state == prepared || $state == swap-intent ]] || \
+        die 'repository is old but the root journal records a later state'
+      validate_candidate_shape "$transaction_dir" "$candidate"
+      matches_hashes "$candidate" "$new_config_hash" "$new_secrets_hash" || \
+        die 'prepared candidate hashes do not match the root journal'
+      validate_recipient_contract "$candidate/.sops.yaml" "$candidate/secrets.yaml"
+      decrypt_with_recovery "$candidate/secrets.yaml" 'recovery identity cannot decrypt the prepared candidate'
+      root_call verify-next "$transaction_id" < "$candidate/secrets.yaml"
+      [[ $(stat -c %d -- "$secrets_dir") == $(stat -c %d -- "$candidate") ]] || \
+        die 'repository and candidate are on different filesystems; atomic exchange is unavailable'
+      if [[ $state == prepared ]]; then
+        root_call arm-swap "$transaction_id"
+        state=swap-intent
+      fi
+      if [[ $allow_test_hooks == 1 && ${SOPS_ENROLL_TEST_MUTATE_BEFORE_REPO_SWAP:-0} == 1 ]]; then
+        printf '\n# concurrent worktree edit\n' >> "$config"
+      fi
+      validate_repository_shape
+      validate_candidate_shape "$transaction_dir" "$candidate"
+      matches_hashes "$secrets_dir" "$old_config_hash" "$old_secrets_hash" || \
+        die 'repository SOPS files changed immediately before exchange'
+      matches_hashes "$candidate" "$new_config_hash" "$new_secrets_hash" || \
+        die "prepared candidate changed immediately before exchange; preserved at $candidate"
+      mv -T --exchange --no-copy -- "$secrets_dir" "$candidate"
+      sync -f "$dotfiles"
+      if [[ $allow_test_hooks == 1 && ${SOPS_ENROLL_TEST_MUTATE_BACKUP_AFTER_REPO_SWAP:-0} == 1 ]]; then
+        printf '\n# concurrent backup edit\n' >> "$candidate/.sops.yaml"
+      fi
+      validate_repository_shape
+      validate_candidate_shape "$transaction_dir" "$candidate"
+      matches_hashes "$secrets_dir" "$new_config_hash" "$new_secrets_hash" || \
+        die 'repository SOPS files changed immediately after exchange'
+      matches_hashes "$candidate" "$old_config_hash" "$old_secrets_hash" || \
+        die "repository backup changed after exchange; preserved at $candidate"
+    elif matches_hashes "$secrets_dir" "$new_config_hash" "$new_secrets_hash"; then
+      validate_candidate_shape "$transaction_dir" "$candidate"
+      matches_hashes "$candidate" "$old_config_hash" "$old_secrets_hash" || \
+        die "repository backup changed after exchange; preserved at $candidate"
+    else
+      die 'repository SOPS hashes match neither side of the prepared transaction'
+    fi
+
+    if [[ $state == swap-intent ]]; then
+      root_call mark-repo-swapped "$transaction_id"
+      state=repo-swapped
+    fi
+    previous_recipient=$(jq -r '.previousRecipient // ""' <<< "$root_status")
+    require_enrollment_worktree_delta
+    validate_recipient_contract "$config" "$encrypted"
+    decrypt_with_recovery "$encrypted" 'recovery identity cannot decrypt the active ciphertext'
+
+    if [[ -n $previous_recipient ]]; then
+      if [[ $state == repo-swapped ]]; then
+        root_call mark-generation-pending "$transaction_id"
+        state=generation-pending
+      fi
+      if [[ $state == generation-pending ]]; then
+        write_active_marker \
+          "$transaction_id" "$transaction_host_id" generation-checking \
+          "$old_config_hash" "$old_secrets_hash" "$new_config_hash" "$new_secrets_hash"
+        generation_status=$(root_call advance-generation "$transaction_id")
+        if [[ $(jq -r '.ready' <<< "$generation_status") != true ]]; then
+          write_active_marker \
+            "$transaction_id" "$transaction_host_id" generation-pending \
+            "$old_config_hash" "$old_secrets_hash" "$new_config_hash" "$new_secrets_hash"
+          printf 'PENDING: activate the prepared SOPS generation\n'
+          printf '  reason: %s\n' "$(jq -r '.reason' <<< "$generation_status")"
+          printf '%s\n' '  run dotfiles-rebuild, complete any requested WSL restart, then rerun this apply command'
+          printf '%s\n' '  previous key remains active; key.next remains staged'
+          exit 0
+        fi
+        state=generation-ready
+        if [[ $allow_test_hooks == 1 && ${SOPS_ENROLL_TEST_FAIL_AFTER_GENERATION_READY:-0} == 1 ]]; then
+          exit 76
+        fi
+      fi
+      if [[ $state == generation-ready || $state == history-close-intent ]]; then
+        history_plan=$(root_call arm-history-close "$transaction_id")
+        state=history-close-intent
+        history_count=$(jq '.incompatible | length' <<< "$history_plan")
+        if (( history_count > 0 )); then
+          printf '%s\n' 'CLOSING: incompatible system generations'
+          jq -r '.incompatible[] | "  generation \(.generation): \(.system) (\(.reason))"' \
+            <<< "$history_plan"
+        fi
+        root_call close-history "$transaction_id"
+        state=history-closed
+        printf '  closed incompatible system generations: %d\n' "$history_count"
+      fi
+      [[ $state == history-closed || $state == key-promoted || $state == verified ]] || \
+        die "unsupported migration state during apply: $state"
+    else
+      [[ $state == repo-swapped || $state == key-promoted || $state == verified ]] || \
+        die "unsupported fresh-host state during apply: $state"
+    fi
+
+    if [[ $state == repo-swapped || $state == history-closed ]]; then
+      if [[ $(jq -r '.currentRecipient // ""' <<< "$root_status") != $(jq -r '.nextRecipient' <<< "$root_status") ]]; then
+        root_call verify-next "$transaction_id" < "$encrypted"
+      fi
+      root_call promote "$transaction_id"
+      state=key-promoted
+    fi
+    if [[ $state == key-promoted ]]; then
+      root_call verify-current "$transaction_id" < "$encrypted"
+      if [[ -n $previous_recipient ]]; then
+        root_call reinstall-current "$transaction_id"
+      fi
+      decrypt_with_recovery "$encrypted" 'recovery identity failed after host key promotion'
+      matches_hashes "$secrets_dir" "$new_config_hash" "$new_secrets_hash" || \
+        die 'active SOPS files changed during key verification'
+      root_call mark-verified "$transaction_id"
+      state=verified
+      if [[ $allow_test_hooks == 1 && ${SOPS_ENROLL_TEST_FAIL_AFTER_MARK_VERIFIED:-0} == 1 ]]; then
+        exit 74
+      fi
+    fi
+    if [[ $state == verified ]]; then
+      root_call verify-current "$transaction_id" < "$encrypted"
+      if [[ -n $previous_recipient ]]; then
+        root_call reinstall-current "$transaction_id"
+      fi
+      decrypt_with_recovery "$encrypted" 'recovery identity failed before finalization'
+      if [[ $allow_test_hooks == 1 && ${SOPS_ENROLL_TEST_MUTATE_BEFORE_FINAL_HASH:-0} == 1 ]]; then
+        printf '\n' >> "$encrypted"
+      fi
+      matches_hashes "$secrets_dir" "$new_config_hash" "$new_secrets_hash" || \
+        die 'active SOPS files changed after verification'
+      root_call finalize "$transaction_id"
+      if [[ $allow_test_hooks == 1 && ${SOPS_ENROLL_TEST_FAIL_AFTER_FINALIZE:-0} == 1 ]]; then
+        exit 72
+      fi
+    fi
+    cleanup_user_transaction "$transaction_id" "$old_config_hash" "$old_secrets_hash"
+    printf 'APPLIED: %s\n' "$transaction_host_id"
+    printf '%s\n' '  recovery and current host identities verified'
+    ;;
+
+  abort)
+    validate_repository_shape
+    authorize_root
+    root_status=$(status_json)
+    state=$(jq -r '.state' <<< "$root_status")
+    if [[ $state == orphaned-next ]]; then
+      root_call abort-orphan
+      printf '%s\n' 'ABORTED: orphaned key.next'
+      exit 0
+    fi
+    if [[ $state == idle && -e $active_marker ]]; then
+      marker=$(read_active_marker)
+      transaction_id=$(jq -r '.transactionId' <<< "$marker")
+      transaction_host_id=$(jq -r '.hostId' <<< "$marker")
+      require_active_marker "$transaction_id" "$transaction_host_id"
+      if [[ $(jq -r '.lastReceipt.transactionId // ""' <<< "$root_status") == "$transaction_id" ]]; then
+        die 'enrollment is complete; resume apply to verify and clean user state'
+      fi
+      marker_new_config_hash=$(jq -r '.newConfigHash // ""' <<< "$marker")
+      marker_new_secrets_hash=$(jq -r '.newSecretsHash // ""' <<< "$marker")
+      cleanup_user_transaction "$transaction_id" "$marker_new_config_hash" "$marker_new_secrets_hash"
+      printf 'ABORTED: %s\n' "$transaction_host_id"
+      printf '%s\n' '  recovered cleanup after completed root abort'
+      exit 0
+    fi
+    [[ $state == staged || $state == prepared ]] || \
+      die 'only a staged, prepared, or orphaned-next transaction can be aborted'
+    transaction_id=$(jq -r '.transactionId' <<< "$root_status")
+    transaction_host_id=$(jq -r '.hostId // "unassigned"' <<< "$root_status")
+    marker_new_config_hash=
+    marker_new_secrets_hash=
+    if [[ $state == prepared ]]; then
+      require_active_marker "$transaction_id" "$transaction_host_id"
+    elif [[ -e $active_marker ]]; then
+      require_active_marker "$transaction_id"
+      marker=$(read_active_marker)
+      marker_new_config_hash=$(jq -r '.newConfigHash // ""' <<< "$marker")
+      marker_new_secrets_hash=$(jq -r '.newSecretsHash // ""' <<< "$marker")
+    fi
+    if [[ $state == prepared ]]; then
+      old_config_hash=$(jq -r '.oldConfigHash' <<< "$root_status")
+      old_secrets_hash=$(jq -r '.oldSecretsHash' <<< "$root_status")
+      matches_hashes "$secrets_dir" "$old_config_hash" "$old_secrets_hash" || \
+        die 'repository was already exchanged; resume apply instead of aborting'
+    fi
+    root_call abort "$transaction_id"
+    if [[ $allow_test_hooks == 1 && ${SOPS_ENROLL_TEST_FAIL_AFTER_ROOT_ABORT:-0} == 1 ]]; then
+      exit 75
+    fi
+    if [[ $state == prepared ]]; then
+      cleanup_user_transaction "$transaction_id" \
+        "$(jq -r '.newConfigHash' <<< "$root_status")" \
+        "$(jq -r '.newSecretsHash' <<< "$root_status")"
+    elif [[ -n $marker_new_config_hash || -n $marker_new_secrets_hash ]]; then
+      cleanup_user_transaction \
+        "$transaction_id" "$marker_new_config_hash" "$marker_new_secrets_hash"
+    else
+      cleanup_user_transaction "$transaction_id"
+    fi
+    printf 'ABORTED: %s\n' "$transaction_host_id"
+    ;;
+esac

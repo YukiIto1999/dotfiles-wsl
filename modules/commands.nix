@@ -80,6 +80,8 @@ let
     '';
   };
 
+  sopsGeneration = import ./lib/sops-generation-contract.nix { inherit config pkgs; };
+
   doctorManifest = (pkgs.formats.json { }).generate "doctor-manifest-v2.json" {
     schemaVersion = 2;
     user = {
@@ -95,7 +97,7 @@ let
       rootProbe = lib.getExe rootProbe;
       homeKey = {
         path = "${cfg.homeDir}/.config/sops/age/keys.txt";
-        policy = cfg.doctor.sopsHomeKeyPolicy;
+        policy = if cfg.sops.enrollmentState == "enrolled" then "reject" else "warn";
       };
     };
     units = lib.unique cfg.doctor.units;
@@ -159,6 +161,7 @@ let
 
   commonVars = {
     inherit (cfg) dotfilesDir;
+    operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
     installTable = lib.concatStringsSep "\n" (map installRow names);
     cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
     hmBackupExt = config.home-manager.backupFileExtension;
@@ -197,6 +200,7 @@ let
       nix-output-monitor
       nvd
       sudo
+      util-linux
     ])
     ++ [ wslRestartRequired ]
   ) { };
@@ -209,6 +213,115 @@ let
     coreutils
   ]) { };
   cleanup = mkCommand "dotfiles-cleanup" ./commands/cleanup (with pkgs; [ coreutils ]) { };
+
+  sopsVerifier = pkgs.writeShellApplication {
+    name = "dotfiles-sops-verifier";
+    runtimeInputs = with pkgs; [
+      coreutils
+      sops
+    ];
+    text = substitute {
+      sopsRuntimePath = lib.escapeShellArg (
+        lib.makeBinPath [
+          pkgs.coreutils
+          pkgs.sops
+        ]
+      );
+    } (builtins.readFile ./commands/sops-verifier);
+  };
+
+  mkSopsKeyctl =
+    name: allowTestHooks:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = with pkgs; [
+        age
+        coreutils
+        jq
+        nix
+        sops
+        util-linux
+      ];
+      text = substitute {
+        inherit allowTestHooks;
+        nixEnv = lib.escapeShellArg (lib.getExe' pkgs.nix "nix-env");
+        sopsKeyDirectory = lib.escapeShellArg (builtins.dirOf config.sops.age.keyFile);
+        sopsRuntimePath = lib.escapeShellArg (
+          lib.makeBinPath [
+            pkgs.age
+            pkgs.coreutils
+            pkgs.sops
+          ]
+        );
+        sopsVerifier = lib.escapeShellArg (lib.getExe sopsVerifier);
+        systemdRun = lib.escapeShellArg (lib.getExe' pkgs.systemd "systemd-run");
+      } (builtins.readFile ./commands/sops-keyctl);
+    };
+
+  sopsKeyctl = mkSopsKeyctl "dotfiles-sops-keyctl" "0";
+  sopsKeyctlTest = mkSopsKeyctl "dotfiles-sops-keyctl-test" "1";
+  sopsTestSudo = pkgs.writeShellApplication {
+    name = "dotfiles-sops-test-sudo";
+    text = ''
+      case ''${1-} in
+        -v)
+          [[ $# -eq 1 ]]
+          ;;
+        --)
+          shift
+          exec "$@"
+          ;;
+        *)
+          exit 2
+          ;;
+      esac
+    '';
+  };
+
+  mkSopsEnroll =
+    name: allowTestHooks: keyctl: sudoCommand:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = with pkgs; [
+        age
+        coreutils
+        diffutils
+        findutils
+        git
+        gnugrep
+        jq
+        sops
+        util-linux
+        yq
+      ];
+      text = substitute {
+        inherit allowTestHooks;
+        configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
+        operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
+        sopsKeyctl = lib.escapeShellArg (lib.getExe keyctl);
+        sopsRuntimePath = lib.escapeShellArg (
+          lib.makeBinPath [
+            pkgs.coreutils
+            pkgs.sops
+          ]
+        );
+        sudoCommand = lib.escapeShellArg sudoCommand;
+      } (builtins.readFile ./commands/sops-enroll);
+    };
+
+  sopsEnrollTest = mkSopsEnroll "dotfiles-sops-enroll-test" "1" sopsKeyctlTest (
+    lib.getExe sopsTestSudo
+  );
+  sopsEnroll =
+    (mkSopsEnroll "dotfiles-sops-enroll" "0" sopsKeyctl (lib.getExe pkgs.sudo)).overrideAttrs
+      (old: {
+        passthru = (old.passthru or { }) // {
+          testPackage = sopsEnrollTest;
+          testKeyctl = sopsKeyctlTest;
+          productionKeyctl = sopsKeyctl;
+          productionVerifier = sopsVerifier;
+        };
+      });
 in
 {
   options.my.commands = lib.mkOption {
@@ -224,12 +337,14 @@ in
       wslRestartRequired
       cleanup
       installClis
+      sopsEnroll
       ;
   };
 
   config.environment.systemPackages = builtins.attrValues cfg.commands;
 
   config.environment.etc."dotfiles/doctor.json".source = doctorManifest;
+  config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;
 
   config.my.doctor.units = [
     "home-manager-${cfg.username}.service"

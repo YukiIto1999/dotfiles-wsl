@@ -1,14 +1,73 @@
 usage() {
   cat <<'USAGE'
-usage: dotfiles-wsl-restart-required [--quiet] [--booted-system PATH] [--current-system PATH] CANDIDATE_SYSTEM
+usage: dotfiles-wsl-restart-required [--plan] [--quiet] [--booted-system PATH] [--current-system PATH] CANDIDATE_SYSTEM
 
 Exit 0 when WSL must be restarted, 1 when it is not required, and 2 on an invalid input.
+With --plan, print switch, switch-restart, boot-restart, or boot-two-stage and exit 0.
 USAGE
+}
+
+trim_space() {
+  local value=$1
+
+  value=${value#"${value%%[![:space:]]*}"}
+  value=${value%"${value##*[![:space:]]}"}
+  printf '%s' "$value"
+}
+
+read_default_user() {
+  local file=$1
+  local line trimmed section='' key value user='' found=0
+
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%$'\r'}
+    trimmed=$(trim_space "$line")
+
+    [[ -z $trimmed || $trimmed == \#* || $trimmed == \;* ]] && continue
+
+    if [[ $trimmed =~ ^\[([^][]+)\][[:space:]]*$ ]]; then
+      section=$(trim_space "${BASH_REMATCH[1]}")
+      section=${section,,}
+      continue
+    fi
+
+    [[ $section == user && $trimmed == *=* ]] || continue
+    key=$(trim_space "${trimmed%%=*}")
+    key=${key,,}
+    [[ $key == default ]] || continue
+
+    value=$(trim_space "${trimmed#*=}")
+    [[ -n $value && $found -eq 0 ]] || return 1
+    user=$value
+    found=1
+  done < "$file" || return 2
+
+  [[ $found -eq 1 ]] || return 1
+  printf '%s\n' "$user"
+}
+
+compare_files() {
+  local left=$1
+  local right=$2
+  local label=$3
+  local status=0
+
+  cmp --silent -- "$left" "$right" || status=$?
+  case $status in
+    0 | 1)
+      return "$status"
+      ;;
+    *)
+      echo "failed to compare $label" >&2
+      exit 2
+      ;;
+  esac
 }
 
 booted_system=/run/booted-system
 current_system=/run/current-system
 quiet=0
+plan=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -24,6 +83,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --quiet)
       quiet=1
+      shift
+      ;;
+    --plan)
+      plan=1
       shift
       ;;
     -h|--help)
@@ -57,45 +120,71 @@ if [[ ! -f $candidate_conf || ! -r $candidate_conf || ! -f $candidate_interface 
   exit 2
 fi
 
+if candidate_default_user=$(read_default_user "$candidate_conf"); then
+  :
+else
+  candidate_user_status=$?
+  if [[ $candidate_user_status -eq 2 ]]; then
+    echo "failed to read candidate WSL default user: $candidate_conf" >&2
+  else
+    echo "candidate system does not contain one valid [user] default entry: $candidate_conf" >&2
+  fi
+  exit 2
+fi
+
 if [[ ! -f $current_interface || ! -r $current_interface ]]; then
-  [[ $quiet -eq 1 ]] || echo "required: current activation interface is unavailable"
+  effect=boot-two-stage
+else
+  interface_changed=0
+  if compare_files "$current_interface" "$candidate_interface" "NixOS activation interfaces"; then
+    :
+  else
+    interface_changed=1
+  fi
+
+  if [[ ! -f $booted_conf || ! -r $booted_conf ]]; then
+    effect=boot-two-stage
+  elif booted_default_user=$(read_default_user "$booted_conf"); then
+    manifest_changed=0
+    if compare_files "$booted_conf" "$candidate_conf" "WSL manifests"; then
+      :
+    else
+      manifest_changed=1
+    fi
+
+    if [[ $booted_default_user != "$candidate_default_user" ]]; then
+      effect=boot-two-stage
+    elif [[ $interface_changed -eq 1 && $manifest_changed -eq 1 ]]; then
+      effect=boot-two-stage
+    elif [[ $interface_changed -eq 1 ]]; then
+      effect=boot-restart
+    elif [[ $manifest_changed -eq 1 ]]; then
+      effect=switch-restart
+    else
+      effect=switch
+    fi
+  else
+    effect=boot-two-stage
+  fi
+fi
+
+if [[ $plan -eq 1 ]]; then
+  printf '%s\n' "$effect"
   exit 0
 fi
 
-interface_status=0
-cmp --silent -- "$current_interface" "$candidate_interface" || interface_status=$?
-
-case $interface_status in
-  0) ;;
-  1)
-    [[ $quiet -eq 1 ]] || echo "required: NixOS activation interface changed"
-    exit 0
-    ;;
-  *)
-    echo "failed to compare NixOS activation interfaces" >&2
-    exit 2
-    ;;
-esac
-
-if [[ ! -f $booted_conf || ! -r $booted_conf ]]; then
-  [[ $quiet -eq 1 ]] || echo "required: booted WSL manifest is unavailable"
-  exit 0
-fi
-
-manifest_status=0
-cmp --silent -- "$booted_conf" "$candidate_conf" || manifest_status=$?
-
-case $manifest_status in
-  0)
-    [[ $quiet -eq 1 ]] || echo "not-required: WSL cold-start manifest is unchanged"
+case $effect in
+  switch)
+    [[ $quiet -eq 1 ]] || echo "not-required: WSL cold-start state is unchanged"
     exit 1
     ;;
-  1)
+  switch-restart)
     [[ $quiet -eq 1 ]] || echo "required: WSL cold-start manifest changed"
-    exit 0
     ;;
-  *)
-    echo "failed to compare WSL manifests" >&2
-    exit 2
+  boot-restart)
+    [[ $quiet -eq 1 ]] || echo "required: NixOS activation interface changed"
+    ;;
+  boot-two-stage)
+    [[ $quiet -eq 1 ]] || echo "required: two-stage WSL boot migration"
     ;;
 esac

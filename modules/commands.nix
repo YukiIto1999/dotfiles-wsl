@@ -115,12 +115,21 @@ let
     findutils
     systemd
   ]) doctorChecks;
-  rebuild = mkCommand "dotfiles-rebuild" ./commands/rebuild (with pkgs; [
-    git
-    coreutils
-  ]) { };
   wslRestartRequired = mkCommand "dotfiles-wsl-restart-required" ./commands/wsl-restart-required (
     with pkgs; [ coreutils ]) { };
+  rebuild = mkCommand "dotfiles-rebuild" ./commands/rebuild (
+    (with pkgs; [
+      git
+      coreutils
+      jq
+      nix
+      nixos-rebuild-ng
+      nix-output-monitor
+      nvd
+      sudo
+    ])
+    ++ [ wslRestartRequired ]
+  ) { };
   installClis = mkCommand "dotfiles-install-clis" ./commands/install-clis (with pkgs; [
     bash
     curl

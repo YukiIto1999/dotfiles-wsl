@@ -82,8 +82,9 @@
         in
         {
           inherit (pkgs) age sops;
-          # bootstrap が最初の rebuild 前、system closure が無い状態から呼ぶ
+          # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
           dotfiles-install-clis = hostConfig.my.commands.installClis;
+          dotfiles-rebuild = hostConfig.my.commands.rebuild;
         };
 
       checks.${system} =
@@ -203,12 +204,72 @@
           wsl-restart-policy = pkgs.runCommandLocal "check-wsl-restart-policy" { } ''
             set -euo pipefail
 
-            mkdir -p booted/etc current/etc candidate/etc missing/etc invalid/etc/wsl.conf fake-bin
+            mkdir -p booted/etc bad-booted/etc current/etc candidate/etc missing/etc invalid/etc/wsl.conf fake-bin
             cp ${wslConfig} booted/etc/wsl.conf
+            cp ${wslConfig} bad-booted/etc/wsl.conf
             cp ${wslConfig} candidate/etc/wsl.conf
             cp ${hostConfig.system.build.toplevel}/init-interface-version current/init-interface-version
             cp ${hostConfig.system.build.toplevel}/init-interface-version candidate/init-interface-version
-            chmod u+w candidate/etc/wsl.conf candidate/init-interface-version
+            chmod u+w bad-booted/etc/wsl.conf candidate/etc/wsl.conf candidate/init-interface-version
+
+            assert_plan() {
+              expected=$1
+              shift
+              actual=$(${lib.getExe wslRestartRequired} --plan \
+                --booted-system booted --current-system current "$@")
+              test "$actual" = "$expected"
+            }
+
+            assert_invalid_candidate() {
+              if ${lib.getExe wslRestartRequired} --plan \
+                --booted-system booted --current-system current candidate 2>/dev/null; then
+                echo "invalid candidate WSL user metadata was accepted" >&2
+                exit 1
+              else
+                test "$?" -eq 2
+              fi
+              cp ${wslConfig} candidate/etc/wsl.conf
+            }
+
+            assert_plan switch candidate
+
+            printf '\n[interop]\nappendWindowsPath=true\n' >> candidate/etc/wsl.conf
+            assert_plan switch-restart candidate
+            cp ${wslConfig} candidate/etc/wsl.conf
+
+            printf 'incompatible\n' >> candidate/init-interface-version
+            assert_plan boot-restart candidate
+
+            printf '\n[interop]\nappendWindowsPath=true\n' >> candidate/etc/wsl.conf
+            assert_plan boot-two-stage candidate
+            cp ${wslConfig} candidate/etc/wsl.conf
+            cp current/init-interface-version candidate/init-interface-version
+
+            sed -i '/^\[user\]$/,/^\[/ s/^default=.*/  default = other-user  /' \
+              candidate/etc/wsl.conf
+            assert_plan boot-two-stage candidate
+            printf 'incompatible\n' >> candidate/init-interface-version
+            assert_plan boot-two-stage candidate
+            cp ${wslConfig} candidate/etc/wsl.conf
+            cp current/init-interface-version candidate/init-interface-version
+
+            sed -i '/^\[user\]$/,$d' candidate/etc/wsl.conf
+            assert_invalid_candidate
+
+            sed -i '/^\[user\]$/,/^\[/ s/^default=.*/default=/' candidate/etc/wsl.conf
+            assert_invalid_candidate
+
+            sed -i '/^default=/a default=duplicate-user' candidate/etc/wsl.conf
+            assert_invalid_candidate
+
+            sed -i '/^\[user\]$/,$d' bad-booted/etc/wsl.conf
+            test "$(${lib.getExe wslRestartRequired} --plan \
+              --booted-system bad-booted --current-system current candidate)" = boot-two-stage
+
+            test "$(${lib.getExe wslRestartRequired} --plan \
+              --booted-system missing --current-system current candidate)" = boot-two-stage
+            test "$(${lib.getExe wslRestartRequired} --plan \
+              --booted-system booted --current-system missing candidate)" = boot-two-stage
 
             if ${lib.getExe wslRestartRequired} --quiet \
               --booted-system booted --current-system current candidate; then
@@ -274,6 +335,25 @@
             cmp --silent ${wslConfig} ${hostConfig.system.build.toplevel}/etc/wsl.conf
             touch $out
           '';
+
+          rebuild-routing =
+            pkgs.runCommandLocal "check-rebuild-routing"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.gnugrep
+                  pkgs.gnused
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${self}/scripts/tests/rebuild-routing.sh \
+                  ${self}/modules/commands/rebuild \
+                  ${pkgs.bash}/bin/bash \
+                  ${lib.getExe pkgs.fakeroot}
+                touch $out
+              '';
 
           agentmemory-env =
             assert agentmemoryEnvironmentFiles == [ agentmemoryTemplate.path ];

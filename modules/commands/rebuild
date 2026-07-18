@@ -1,21 +1,109 @@
-die() { echo "FATAL: $*" >&2; exit 1; }
+set -euo pipefail
+
+usage() {
+  cat <<'USAGE'
+usage: dotfiles-rebuild [--plan]
+
+Build and verify one immutable flake snapshot, show the system diff and activation effect,
+then apply the pre-built candidate. With --plan, stop before privileged activation.
+USAGE
+}
+
+die() {
+  local status=$1
+  shift
+  echo "FATAL: $*" >&2
+  exit "$status"
+}
+
+plan_only=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --plan)
+      plan_only=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+if [[ $EUID -eq 0 && ${DOTFILES_REBUILD_ALLOW_ROOT:-0} != 1 ]]; then
+  die 2 "run dotfiles-rebuild as the regular user; only activation is elevated"
+fi
 
 dotfiles="@dotfilesDir@"
+flake="git+file://$dotfiles"
 
-# untracked file は git+file flake から見えず、無言で配備から落ちる
+# untracked file は Git flake snapshot から見えず、無言で配備から落ちる
 untracked=$(git -C "$dotfiles" ls-files --others --exclude-standard)
 if [[ -n $untracked ]]; then
   printf '%s\n' "$untracked" >&2
-  die "untracked files block the flake build; run: git -C $dotfiles add -A"
+  die 1 "untracked files block the flake snapshot; run: git -C $dotfiles add -A"
 fi
 
-sudo nixos-rebuild boot --flake "git+file://$dotfiles#nixos" -L
+echo "==> snapshot"
+source_path=$(
+  nix flake archive --json --no-write-lock-file "$flake" \
+    | jq --exit-status --raw-output '.path | select(type == "string" and startswith("/nix/store/"))'
+)
+[[ -n $source_path ]] || die 2 "flake archive did not return a store path"
+source_flake="path:$source_path"
 
-cat <<MSG
+echo "==> check"
+nix flake check --no-write-lock-file --log-format internal-json -v "$source_flake" |& nom --json
 
-Rebuild complete (boot generation only; not yet active).
+echo "==> build"
+candidate=$(
+  nix build --no-link --print-out-paths --no-write-lock-file \
+    "$source_flake#nixosConfigurations.nixos.config.system.build.toplevel"
+)
+[[ $candidate != *$'\n'* && -d $candidate ]] || die 2 "candidate build did not return one system path"
 
-Restart this WSL distribution from PowerShell:
+echo "==> diff"
+nvd diff /run/current-system "$candidate"
+
+if ! effect=$(dotfiles-wsl-restart-required --plan "$candidate"); then
+  die 2 "failed to classify the candidate activation effect"
+fi
+
+case $effect in
+  switch | switch-restart)
+    action=switch
+    ;;
+  boot-restart | boot-two-stage)
+    action=boot
+    ;;
+  *)
+    die 2 "unknown activation effect: $effect"
+    ;;
+esac
+
+printf '\nCandidate: %s\nEffect:    %s\nAction:    %s\n' "$candidate" "$effect" "$action"
+
+if [[ $plan_only -eq 1 ]]; then
+  echo "Plan complete; no system profile or runtime state was changed."
+  exit 0
+fi
+
+echo "==> apply"
+nixos-rebuild "$action" --sudo --no-reexec --store-path "$candidate" -L
+
+case $effect in
+  switch)
+    "$candidate/sw/bin/dotfiles-doctor"
+    ;;
+  switch-restart | boot-restart)
+    cat <<'MSG'
+
+The candidate is installed. Apply its WSL cold-start state from PowerShell:
 
   wsl -t NixOS
   wsl -d NixOS
@@ -23,5 +111,21 @@ Restart this WSL distribution from PowerShell:
 Then run:
 
   dotfiles-doctor
-
 MSG
+    ;;
+  boot-two-stage)
+    cat <<'MSG'
+
+The candidate requires a two-stage WSL boot migration. Run from PowerShell:
+
+  wsl -t NixOS
+  wsl -d NixOS --user root exit
+  wsl -t NixOS
+  wsl -d NixOS
+
+Then run:
+
+  dotfiles-doctor
+MSG
+    ;;
+esac

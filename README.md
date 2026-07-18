@@ -92,13 +92,39 @@ dotfiles-doctor
 
 ## 再ビルド
 
-WSL では systemd の再起動で VS Code Remote セッションが切れるため、通常更新は次回起動時に使う generation として反映する。通常更新は `dotfiles-rebuild` を使う。
+通常更新は `dotfiles-rebuild` を使う。先に適用内容だけを確認する場合は `--plan` を付ける。
 
 ```bash
+dotfiles-rebuild --plan
 dotfiles-rebuild
 ```
 
-その後 PowerShell から再起動し、`dotfiles-doctor` を実行する。flake input の更新は `nix flake update`。
+current generation の command を更新する前でも、checkout から同じ処理を実行できる。
+
+```bash
+nix run .#dotfiles-rebuild -- --plan
+nix run .#dotfiles-rebuild
+```
+
+rebuild は untracked file を拒否した後、作業ツリーを Nix store へ一度だけ archive する。同じ immutable
+snapshot に対して flake check と candidate build を実行し、`nvd` で current system との差分を表示する。
+`--plan` はここで終了するため system profile と runtime は変えない。ただし、archive と build により
+Nix store と cache は更新される。
+
+apply では build 済み candidate の store path だけを `nixos-rebuild --store-path --no-reexec --sudo` へ渡す。
+checkout の評価と build は一般ユーザー、system profile の更新と activation だけは root で実行する。
+変更内容に応じた処理は次のとおり。
+
+| effect | apply | WSL 操作 |
+|---|---|---|
+| `switch` | live switch 後に candidate の doctor を実行 | 不要 |
+| `switch-restart` | live switch | 停止と起動を 1 回、その後 doctor |
+| `boot-restart` | boot generation へ登録 | 停止と起動を 1 回、その後 doctor |
+| `boot-two-stage` | boot generation へ登録 | root 起動を挟んで 2 回停止、その後 doctor |
+
+`wsl.conf` と activation interface が同時に変わる場合と `wsl.defaultUser` の変更だけが二段階になる。
+PowerShell で実行する正確な command は rebuild の終了時に表示する。flake input の更新は build と分け、
+明示的に `nix flake update` を実行してから rebuild する。
 
 ## 検証
 

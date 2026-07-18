@@ -108,6 +108,15 @@
           sopsKeyFile = "/var/lib/sops-nix/key.txt";
           sopsKeyDirectoryPolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix".d;
           sopsKeyFilePolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z;
+          wslRestartRequired = hostConfig.my.commands.wslRestartRequired;
+          wslConfig = hostConfig.environment.etc."wsl.conf".source;
+          failingCmp = pkgs.writeShellScript "cmp-always-fails" "exit 2";
+          failingManifestCmp = pkgs.writeShellScript "cmp-manifest-fails" ''
+            if [[ $3 == */init-interface-version ]]; then
+              exec ${pkgs.coreutils}/bin/cmp "$@"
+            fi
+            exit 2
+          '';
 
           # config-syntax check 専用の @var@ 埋め、実際の値は各 module 側にありここでは構文検査用
           dummyVars = {
@@ -190,6 +199,81 @@
 
                 touch $out
               '';
+
+          wsl-restart-policy = pkgs.runCommandLocal "check-wsl-restart-policy" { } ''
+            set -euo pipefail
+
+            mkdir -p booted/etc current/etc candidate/etc missing/etc invalid/etc/wsl.conf fake-bin
+            cp ${wslConfig} booted/etc/wsl.conf
+            cp ${wslConfig} candidate/etc/wsl.conf
+            cp ${hostConfig.system.build.toplevel}/init-interface-version current/init-interface-version
+            cp ${hostConfig.system.build.toplevel}/init-interface-version candidate/init-interface-version
+            chmod u+w candidate/etc/wsl.conf candidate/init-interface-version
+
+            if ${lib.getExe wslRestartRequired} --quiet \
+              --booted-system booted --current-system current candidate; then
+              echo "unchanged manifest was classified as restart-required" >&2
+              exit 1
+            else
+              test "$?" -eq 1
+            fi
+
+            ${lib.getExe wslRestartRequired} --quiet \
+              --booted-system booted --current-system missing candidate
+
+            ln -s ${failingCmp} fake-bin/cmp
+            if PATH="$PWD/fake-bin:$PATH" ${pkgs.bash}/bin/bash \
+              ${self}/modules/commands/wsl-restart-required \
+              --quiet --booted-system booted --current-system current candidate 2>/dev/null; then
+              echo "cmp I/O error was accepted" >&2
+              exit 1
+            else
+              test "$?" -eq 2
+            fi
+
+            ln -sf ${failingManifestCmp} fake-bin/cmp
+            if PATH="$PWD/fake-bin:$PATH" ${pkgs.bash}/bin/bash \
+              ${self}/modules/commands/wsl-restart-required \
+              --quiet --booted-system booted --current-system current candidate 2>/dev/null; then
+              echo "manifest cmp I/O error was accepted" >&2
+              exit 1
+            else
+              test "$?" -eq 2
+            fi
+
+            printf 'incompatible\n' >> candidate/init-interface-version
+            ${lib.getExe wslRestartRequired} --quiet \
+              --booted-system booted --current-system current candidate
+            cp current/init-interface-version candidate/init-interface-version
+
+            printf '\n[interop]\nappendWindowsPath=true\n' >> candidate/etc/wsl.conf
+            ${lib.getExe wslRestartRequired} --quiet \
+              --booted-system booted --current-system current candidate
+
+            ${lib.getExe wslRestartRequired} --quiet \
+              --booted-system missing --current-system current candidate
+
+            if ${lib.getExe wslRestartRequired} --quiet \
+              --booted-system booted --current-system current missing 2>/dev/null; then
+              echo "missing candidate manifest was accepted" >&2
+              exit 1
+            else
+              test "$?" -eq 2
+            fi
+
+            if ${lib.getExe wslRestartRequired} --quiet \
+              --booted-system booted --current-system current invalid 2>/dev/null; then
+              echo "invalid candidate manifest was accepted" >&2
+              exit 1
+            else
+              test "$?" -eq 2
+            fi
+
+            test -r ${hostConfig.system.build.toplevel}/etc/wsl.conf
+            test -r ${hostConfig.system.build.toplevel}/init-interface-version
+            cmp --silent ${wslConfig} ${hostConfig.system.build.toplevel}/etc/wsl.conf
+            touch $out
+          '';
 
           agentmemory-env =
             assert agentmemoryEnvironmentFiles == [ agentmemoryTemplate.path ];

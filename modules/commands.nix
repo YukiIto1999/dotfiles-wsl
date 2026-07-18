@@ -119,6 +119,8 @@ let
     git
     coreutils
   ]) { };
+  wslRestartRequired = mkCommand "dotfiles-wsl-restart-required" ./commands/wsl-restart-required (
+    with pkgs; [ coreutils ]) { };
   installClis = mkCommand "dotfiles-install-clis" ./commands/install-clis (with pkgs; [
     bash
     curl
@@ -140,6 +142,7 @@ in
     inherit
       doctor
       rebuild
+      wslRestartRequired
       cleanup
       installClis
       ;

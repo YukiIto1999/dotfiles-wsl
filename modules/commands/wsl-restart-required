@@ -1,0 +1,101 @@
+usage() {
+  cat <<'USAGE'
+usage: dotfiles-wsl-restart-required [--quiet] [--booted-system PATH] [--current-system PATH] CANDIDATE_SYSTEM
+
+Exit 0 when WSL must be restarted, 1 when it is not required, and 2 on an invalid input.
+USAGE
+}
+
+booted_system=/run/booted-system
+current_system=/run/current-system
+quiet=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --booted-system)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      booted_system=$2
+      shift 2
+      ;;
+    --current-system)
+      [[ $# -ge 2 ]] || { usage >&2; exit 2; }
+      current_system=$2
+      shift 2
+      ;;
+    --quiet)
+      quiet=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+[[ $# -eq 1 ]] || { usage >&2; exit 2; }
+
+candidate_conf=$1/etc/wsl.conf
+candidate_interface=$1/init-interface-version
+booted_conf=$booted_system/etc/wsl.conf
+current_interface=$current_system/init-interface-version
+
+if [[ ! -f $candidate_conf || ! -r $candidate_conf || ! -f $candidate_interface || ! -r $candidate_interface ]]; then
+  echo "candidate system does not contain readable WSL activation metadata: $1" >&2
+  exit 2
+fi
+
+if [[ ! -f $current_interface || ! -r $current_interface ]]; then
+  [[ $quiet -eq 1 ]] || echo "required: current activation interface is unavailable"
+  exit 0
+fi
+
+interface_status=0
+cmp --silent -- "$current_interface" "$candidate_interface" || interface_status=$?
+
+case $interface_status in
+  0) ;;
+  1)
+    [[ $quiet -eq 1 ]] || echo "required: NixOS activation interface changed"
+    exit 0
+    ;;
+  *)
+    echo "failed to compare NixOS activation interfaces" >&2
+    exit 2
+    ;;
+esac
+
+if [[ ! -f $booted_conf || ! -r $booted_conf ]]; then
+  [[ $quiet -eq 1 ]] || echo "required: booted WSL manifest is unavailable"
+  exit 0
+fi
+
+manifest_status=0
+cmp --silent -- "$booted_conf" "$candidate_conf" || manifest_status=$?
+
+case $manifest_status in
+  0)
+    [[ $quiet -eq 1 ]] || echo "not-required: WSL cold-start manifest is unchanged"
+    exit 1
+    ;;
+  1)
+    [[ $quiet -eq 1 ]] || echo "required: WSL cold-start manifest changed"
+    exit 0
+    ;;
+  *)
+    echo "failed to compare WSL manifests" >&2
+    exit 2
+    ;;
+esac

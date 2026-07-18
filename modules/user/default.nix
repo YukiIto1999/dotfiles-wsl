@@ -23,18 +23,9 @@ in
     wget
     curl
     vim
-    direnv
-    nix-direnv
-    devenv
     sops
     age
   ];
-
-  programs.direnv = {
-    enable = true;
-    enableBashIntegration = true;
-    nix-direnv.enable = true;
-  };
 
   home-manager.useGlobalPkgs = true;
   home-manager.useUserPackages = true;
@@ -60,14 +51,32 @@ in
       just
       nixfmt
       nixd
+      devenv
       nvd
     ];
 
     home.sessionVariables.BROWSER = "wslview";
     home.sessionPath = [ "$HOME/.local/bin" ];
 
-    programs = lib.genAttrs [ "gh" "bash" "fzf" "zoxide" "bat" "eza" ] (_: {
-      enable = true;
-    });
+    programs =
+      lib.genAttrs
+        [
+          "gh"
+          "bash"
+          "fzf"
+          "zoxide"
+          "bat"
+          "eza"
+        ]
+        (_: {
+          enable = true;
+        })
+      // {
+        direnv = {
+          enable = true;
+          enableBashIntegration = true;
+          nix-direnv.enable = true;
+        };
+      };
   };
 }

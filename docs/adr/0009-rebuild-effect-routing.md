@@ -26,10 +26,17 @@ rebuild を snapshot、check、build、plan、receipt、apply、verify の pipel
    out-link は build command 自身に作らせる。
 4. current、booted、system profile の store path を固定する。`nvd diff` は表示だけに使い、固定した
    current/booted と `dotfiles-wsl-restart-required --plan` から effect を決める。
-5. source、candidate、開始時の system state、effect を persistent receipt に固定する。
-6. flake が固定した `config.system.build.nixos-rebuild` の store path へ、candidate だけを
+5. candidate の OCI image manifest が schema v2 であることを確認し、candidate 内の
+   `dotfiles-sync-images --status` で OCI image readiness を検査する。
+6. source、candidate、開始時の system state、effect を persistent receipt に固定する。
+7. flake が固定した `config.system.build.nixos-rebuild` の store path へ、candidate だけを
    `--store-path --no-reexec --sudo` 付きで渡す。
-7. candidate closure 内の `dotfiles-doctor` で runtime convergence を検証する。
+8. candidate closure 内の `dotfiles-doctor` で runtime convergence を検証する。
+
+特権昇格の正本は NixOS が評価した `config.security.wrapperDir/sudo` とする。store 上の `pkgs.sudo` は setuid
+wrapper ではないため、rebuild command の runtimeInputs に含めない。`nixos-rebuild-ng` は昇格 command を
+`sudo` という実行名で組み立て、絶対パスを受け取らない。この上流 command を呼ぶ範囲だけ
+`config.security.wrapperDir` を PATH の先頭へ置く。ほかの PATH を探索して権限境界を決めない。
 
 effect と適用方法を次の 4 種類に固定する。
 
@@ -70,14 +77,29 @@ source、candidate、recovery target、booted、displaced profile は transactio
 
 receipt の作成、更新、archive と GC root の作成、削除は、file data と rename、link、unlink 後の親 directory を
 `sync` する。GC root の作成では user-facing directory と Nix auto-root directory の両方を barrier に含める。
-activation の結果と次の state は一回の atomic receipt 更新で確定する。activation 後に WSL を停止しても、
-再開に必要な receipt と closure が先に永続化された状態にする。
+receipt schema v3 は activation を一つの戻り値として直接書かない。attempt ごとに intent、runner start、結合した
+stdout/stderr、outcome を append-only journal へ順に永続化し、receipt は各 artifact の path、byte 数、SHA-256 を
+参照する。receipt は attempt の連番、ID、方向、runtime baseline、開始直前の boot instance、時刻、終了結果も投影し、
+artifact の内容と照合する。
+末尾以外の attempt は終端状態、aggregate result は末尾 attempt と一致しなければならない。directory は `0700`、
+JSON は `0600`、確定 log は `0400` とし、owner と link count も再開前に照合する。
+activation 後に WSL を停止しても、再開に必要な receipt、journal、closure が先に永続化された状態にする。
 途中の barrier が失敗した場合も実行可能な残りの barrier を試し、activation や WSL 停止手順へは進まない。
 
 effect の計算後、persistent GC root の作成後、receipt の公開後、activation intent の公開前、intent の永続化後に、
-current、booted、system profile を固定した runtime baseline と照合する。receipt schema v2 は activation attempt
+current、booted、system profile を固定した runtime baseline と照合する。receipt schema v3 は activation attempt
 ごとの baseline と、drift を検出した境界を持つ。`aborted` と `.abort != null` は同値とし、expected はその方向の
 activation baseline と一致し、observed とは異ならなければならない。
+
+operation lock を新しい process が取得した後も receipt が `activating` なら、前の runner は終了済みである。partial
+log だけが残った attempt は log を確定し、current、booted、profile と system profile generation から
+`before-profile-commit`、`after-profile-commit`、`unknown` のいずれかへ分類して `indeterminate` に閉じる。
+final log と outcome が両方あれば、transaction ID、attempt ID、終了コード、runtime snapshot を検証して receipt へ
+再結合する。final log だけなら結果不明の attempt として閉じる。書き込み順に反する outcome 単独と、partial log と
+final log の同居は拒否する。`chmod 0400` 後、rename 前の partial log は確定途中の状態として final 名へ進める。
+durable outcome の runtime と boot instance が現在値、およびその attempt の baseline と一致し、action と
+profile commit 境界に矛盾しない場合だけ再結合する。通常実行も outcome 公開前に同じ意味検査を通す。
+target を指す runtime だけから、journal のない activation 成功を推定しない。
 
 中断後も観測した別 generation を新しい baseline と見なさない。`switch` が所有できる遷移は current/profile の
 baseline から target までであり、booted は変えない。`boot` は再起動前には profile だけを target へ変え、
@@ -117,10 +139,27 @@ WSL 停止が必要な場合は activation 成功後も receipt を `restart-pen
 `boot-two-stage` は first boot が beforeApply と異なり、final boot が beforeApply と first boot の両方と
 異なる場合だけ doctor へ進む。
 
-`--resume` は receipt の candidate を再適用または再検証する。`--rollback` は recovery target をその時点の
-current/booted state に対して再分類し、同じ effect state machine で適用する。rollback object は一度だけ作り、
+`--resume` は receipt の candidate を再適用または再検証する。activation を再試行する state では、target の OCI
+image readiness を先に再検査する。`--rollback` は schema v4 の recovery target をその時点の current/booted
+state に対して再分類し、同じ effect state machine で適用する。schema v3 / v2 target は暗黙 pull の可能性を排除できないため、
+新しい rollback object を作らない。rollback object は一度だけ作り、
 `--rollback` の再実行で beforeApply と firstBoot を上書きしない。active な `complete` receipt が archive 前に
 残った場合も、terminal marker を戻して rollback を開始できる。
+
+失敗時の回復案内は capability から生成する。固定 candidate の `--resume` は表示する。recovery target が doctor
+schema v4 と OCI image manifest schema v2 を持つ場合だけ `--rollback` を表示する。profile commit 前で runtime、
+boot instance、system profile generation が baseline のままと実測できる場合だけ `--abort` を表示する。
+`--abort` は `cancelled` receipt を archive し、外部 runtime drift を表す `aborted` と区別する。schema v2 の既存
+transaction は、配備時の source template、candidate helper、nixpkgs revision、上流 driver invocation が監査済み
+allowlist と一致する場合だけ扱う。candidate helper は system closure 内の symlink であることと、その解決先が Nix store
+配下の通常ファイルであることを確認してから内容を監査する。zero-effect を先に実測し、安全でなければ active schema v2
+receipt を変更しない。
+安全な場合は元 receipt を読み取り専用 artifact として保存し、schema v3 と `cancelled` を一度の active receipt 更新で
+公開する。artifact 公開後に停止した場合は、owner、mode、link count と元 receipt の byte 列が一致するときだけ
+冪等に再利用する。
+schema v2 を作った current/candidate helper は `--abort` を持たないため、review 済み commit の checkout から
+`nix run .#dotfiles-rebuild -- --abort <transaction-id>` を一度だけ実行する。この経路も同じ operation lock と
+zero-effect 検査を通り、旧 candidate を activation しない。schema v3 以後は receipt 固定 helper を使う。
 
 activation 失敗は終了 status 4、doctor 失敗は 5 とし、どちらも active receipt と GC root を残す。成功時と
 runtime drift の中止時は receipt を `$GIT_COMMON_DIR/dotfiles-rebuild/receipts/<transaction-id>.json` へ移し、
@@ -149,8 +188,10 @@ host で新しい rebuild を current generation へ入れる前は、flake pack
 
 - [nixos-rebuild-ng: store path activation](https://github.com/NixOS/nixpkgs/blob/bd0ff2d3eac24699c3664d5966b9ef36f388e2ca/pkgs/by-name/ni/nixos-rebuild-ng/src/nixos_rebuild/services.py#L297-L335)
 - [nixos-rebuild-ng: re-exec](https://github.com/NixOS/nixpkgs/blob/bd0ff2d3eac24699c3664d5966b9ef36f388e2ca/pkgs/by-name/ni/nixos-rebuild-ng/src/nixos_rebuild/services.py#L29-L84)
-- [nixos-rebuild-ng: sudo boundary](https://github.com/NixOS/nixpkgs/blob/bd0ff2d3eac24699c3664d5966b9ef36f388e2ca/pkgs/by-name/ni/nixos-rebuild-ng/src/nixos_rebuild/nix.py#L634-L672)
+- [nixos-rebuild-ng: sudo command の構築](https://github.com/NixOS/nixpkgs/blob/bd0ff2d3eac24699c3664d5966b9ef36f388e2ca/pkgs/by-name/ni/nixos-rebuild-ng/src/nixos_rebuild/process.py#L153-L187)
 - [nixos-rebuild-ng: profile 更新と activation の順序](https://github.com/NixOS/nixpkgs/blob/bd0ff2d3eac24699c3664d5966b9ef36f388e2ca/pkgs/by-name/ni/nixos-rebuild-ng/src/nixos_rebuild/services.py#L224-L240)
+- [NixOS: security.wrapperDir と shell PATH](https://github.com/NixOS/nixpkgs/blob/bd0ff2d3eac24699c3664d5966b9ef36f388e2ca/nixos/modules/security/wrappers/default.nix#L236-L277)
+- [NixOS: session PATH での wrapper 優先](https://github.com/NixOS/nixpkgs/blob/bd0ff2d3eac24699c3664d5966b9ef36f388e2ca/nixos/modules/config/system-environment.nix#L19-L29)
 - [NixOS-WSL: Change the username](https://github.com/nix-community/NixOS-WSL/blob/add6b01c7ca72240046b5d541a74845423f1ee35/docs/src/how-to/change-username.md#L9-L20)
 - [systemd v260: UserspaceTimestampMonotonic](https://github.com/systemd/systemd/blob/v260/man/org.freedesktop.systemd1.xml#L1777-L1793)
 - [systemd v260: manager timestamp の serialize](https://github.com/systemd/systemd/blob/v260/src/core/manager-serialize.c#L121-L132)

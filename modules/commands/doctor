@@ -7,6 +7,7 @@ manifest=''
 manifest_schema_version="@doctorSchemaVersion@"
 report_schema_version=1
 format=human
+sudo_command=@sudoCommand@
 
 usage() {
   printf '%s\n' 'usage: dotfiles-doctor [--format human|json]' >&2
@@ -771,7 +772,7 @@ fi
 
 root_probe=$(jq -r '.sops.rootProbe' "$manifest")
 started=$(now_ms)
-root_metadata=$(timeout "${system_timeout}s" sudo -n -- "$root_probe" 2>/dev/null)
+root_metadata=$(timeout "${system_timeout}s" "$sudo_command" -n -- "$root_probe" 2>/dev/null)
 root_probe_status=$?
 if [[ $root_probe_status -eq 0 ]] && jq -e '
   .directory.uid == 0 and .directory.gid == 0 and .directory.mode == "700" and

@@ -188,3 +188,15 @@ bootstrap_pid=
 (exec 8< "$operation_lock"; flock -n 8)
 printf '%s\n' ensure_root "${BOOTSTRAP_STAGES[@]}" > "$test_root/expected-bootstrap-stages.log"
 cmp "$test_root/expected-bootstrap-stages.log" "$bootstrap_stage_log"
+
+# bootstrap は初回 boot 後の収束順を一つの continuation として表示する。
+bootstrap_output=$test_root/bootstrap-output.log
+run_bootstrap_stages() { :; }
+main > "$bootstrap_output"
+terminate_line=$(grep -nFx '  wsl -t NixOS' "$bootstrap_output" | cut -d: -f1)
+launch_line=$(grep -nFx '  wsl -d NixOS' "$bootstrap_output" | cut -d: -f1)
+sync_line=$(grep -nFx '  dotfiles-sync-images' "$bootstrap_output" | cut -d: -f1)
+rebuild_line=$(grep -nFx '  dotfiles-rebuild' "$bootstrap_output" | cut -d: -f1)
+doctor_line=$(grep -nFx '  dotfiles-doctor' "$bootstrap_output" | cut -d: -f1)
+[[ $terminate_line -lt $launch_line && $launch_line -lt $sync_line &&
+  $sync_line -lt $rebuild_line && $rebuild_line -lt $doctor_line ]]

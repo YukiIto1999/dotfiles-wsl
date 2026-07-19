@@ -4,6 +4,10 @@ set -euo pipefail
 
 @rebuildReceiptFunctions@
 
+@rebuildAttemptFunctions@
+
+sudo_command=@sudoCommand@
+
 usage() {
   cat <<'USAGE'
 usage:
@@ -12,11 +16,13 @@ usage:
   dotfiles-rebuild --resume TRANSACTION_ID
   dotfiles-rebuild --first-boot TRANSACTION_ID
   dotfiles-rebuild --rollback TRANSACTION_ID
+  dotfiles-rebuild --abort TRANSACTION_ID
   dotfiles-rebuild --status
 
 Build and verify one immutable flake snapshot, then apply the pre-built candidate. A persistent
 receipt records activation and verification separately. Restart-required transactions remain
-active until --resume verifies the candidate. --rollback restores the recorded previous system.
+active until --resume verifies the candidate. --rollback restores a compatible previous system.
+--abort closes a transaction only when the profile commit and activation did not occur.
 USAGE
 }
 
@@ -42,6 +48,9 @@ elif (( $# == 2 )) && [[ $1 == --first-boot ]]; then
 elif (( $# == 2 )) && [[ $1 == --rollback ]]; then
   mode=rollback
   transaction_argument=$2
+elif (( $# == 2 )) && [[ $1 == --abort ]]; then
+  mode=abort
+  transaction_argument=$2
 elif (( $# == 1 )) && [[ $1 == -h || $1 == --help ]]; then
   usage
   exit 0
@@ -57,6 +66,11 @@ fi
 dotfiles="@dotfilesDir@"
 nix_store_dir="@nixStoreDir@"
 nix_gc_auto_roots_dir="@nixGcAutoRootDir@"
+system_profile_path="@systemProfilePath@"
+legacy_schema2_rebuild_source_sha256="@legacySchema2RebuildSourceSha256@"
+legacy_schema2_candidate_helper_sha256="@legacySchema2CandidateHelperSha256@"
+legacy_schema2_nixpkgs_rev="@legacySchema2NixpkgsRev@"
+legacy_schema2_nixos_rebuild_path="@legacySchema2NixosRebuildPath@"
 configured_user="@username@"
 boot_id_file="@bootIdFile@"
 flake="git+file://$dotfiles"
@@ -87,9 +101,13 @@ if [[ $mode == status ]]; then
     echo '{"state":"idle"}'
     exit 0
   fi
-  dotfiles_rebuild_read_active_receipt \
-    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" || \
+  active=$(dotfiles_rebuild_read_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
     die 2 "the active rebuild receipt is invalid"
+  dotfiles_rebuild_verify_receipt_artifacts \
+    "$state_root" "$active" "$EUID" "$(id -g)" || \
+    die 2 "the active rebuild activation journal is invalid"
+  printf '%s\n' "$active"
   exit 0
 fi
 
@@ -99,17 +117,23 @@ case $mode in
       active=$(dotfiles_rebuild_read_active_receipt \
         "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
         die 2 "the active rebuild receipt is invalid"
+      dotfiles_rebuild_verify_receipt_artifacts \
+        "$state_root" "$active" "$EUID" "$(id -g)" || \
+        die 2 "the active rebuild activation journal is invalid"
       active_id=$(jq -r '.transactionId' <<< "$active")
       active_state=$(jq -r '.state' <<< "$active")
-      die 1 "active rebuild transaction $active_id ($active_state) blocks a new build; run --resume or --rollback"
+      die 1 "active rebuild transaction $active_id ($active_state) blocks a new build; use its recovery instructions"
     fi
     ;;
-  resume | first-boot | rollback)
+  resume | first-boot | rollback | abort)
     [[ $transaction_argument =~ ^[0-9a-f]{32}$ ]] || die 2 "transaction ID must contain 32 lowercase hexadecimal characters"
     [[ $active_exists -eq 1 ]] || die 2 "there is no active rebuild transaction"
     active=$(dotfiles_rebuild_read_active_receipt \
       "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
       die 2 "the active rebuild receipt is invalid"
+    dotfiles_rebuild_verify_receipt_artifacts \
+      "$state_root" "$active" "$EUID" "$(id -g)" || \
+      die 2 "the active rebuild activation journal is invalid"
     [[ $(jq -r '.transactionId' <<< "$active") == "$transaction_argument" ]] || \
       die 2 "the active rebuild transaction does not match $transaction_argument"
     ;;
@@ -172,7 +196,7 @@ runtime_snapshot() {
   local current booted profile generation
   current=$(readlink -f -- /run/current-system) || return 1
   booted=$(readlink -f -- /run/booted-system) || return 1
-  profile=$(readlink -f -- /nix/var/nix/profiles/system) || return 1
+  profile=$(readlink -f -- "$system_profile_path") || return 1
   for generation in "$current" "$booted" "$profile"; do
     [[ $generation == "$nix_store_dir/"* && -d $generation ]] || return 1
   done
@@ -265,6 +289,46 @@ activation_snapshot_is_owned() {
   esac
 }
 
+activation_outcome_snapshot_is_valid() {
+  local action=$1 target=$2 baseline=$3 observed=$4 boundary=$5 exit_code=$6
+  local baseline_current baseline_booted baseline_profile
+  local observed_current observed_booted observed_profile expected_boundary
+
+  activation_snapshot_is_owned "$action" "$target" "$baseline" "$observed" || return 1
+  baseline_current=$(jq -r '.current' <<< "$baseline")
+  baseline_booted=$(jq -r '.booted' <<< "$baseline")
+  baseline_profile=$(jq -r '.profile' <<< "$baseline")
+  observed_current=$(jq -r '.current' <<< "$observed")
+  observed_booted=$(jq -r '.booted' <<< "$observed")
+  observed_profile=$(jq -r '.profile' <<< "$observed")
+
+  if [[ $exit_code -eq 0 ]]; then
+    [[ $boundary == after-profile-commit ]] || return 1
+    case $action in
+      switch)
+        [[ $observed_current == "$target" && $observed_profile == "$target" &&
+          $observed_booted == "$baseline_booted" ]]
+        ;;
+      boot)
+        [[ $observed_current == "$baseline_current" &&
+          $observed_booted == "$baseline_booted" && $observed_profile == "$target" ]]
+        ;;
+      *) return 1 ;;
+    esac
+    return
+  fi
+
+  if same_runtime_snapshot "$baseline" "$observed" &&
+    [[ $baseline_profile != "$target" ]]; then
+    expected_boundary=before-profile-commit
+  elif [[ $observed_profile == "$target" ]]; then
+    expected_boundary=after-profile-commit
+  else
+    expected_boundary=unknown
+  fi
+  [[ $boundary == "$expected_boundary" ]]
+}
+
 read_enrollment_marker() {
   local marker
   [[ -e $active_enrollment || -L $active_enrollment ]] || return 3
@@ -341,9 +405,22 @@ print_recovery() {
 Recovery target: $previous
 Retry the immutable candidate:
   $helper --resume $transaction_id
+MSG
+  if recovery_target_supports_rollback_protocol "$previous"; then
+    cat >&2 <<MSG
 Restore the recorded previous system:
   $helper --rollback $transaction_id
 MSG
+  else
+    echo "Rollback unavailable: recovery target lacks the required doctor or OCI protocol." >&2
+  fi
+  evaluate_cancellation "$receipt"
+  if [[ -z $cancellation_blocker ]]; then
+    cat >&2 <<MSG
+Close this zero-effect transaction without changing the system:
+  $helper --abort $transaction_id
+MSG
+  fi
 }
 
 print_restart_instructions() {
@@ -405,6 +482,617 @@ finish_transaction() {
   dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
     die 1 "failed to remove completed rebuild GC roots"
   printf 'Rebuild transaction %s: %s\n' "$transaction_id" "$final_state"
+}
+
+target_has_profile_generation() {
+  local target=$1 profile_directory generation
+  profile_directory=${system_profile_path%/*}
+  [[ -d $profile_directory && ! -L $profile_directory ]] || return 2
+  for generation in "$profile_directory"/system-*-link; do
+    [[ -L $generation ]] || continue
+    [[ $(readlink -f -- "$generation" 2>/dev/null || true) == "$target" ]] && return 0
+  done
+  return 1
+}
+
+recovery_target_supports_rollback_protocol() {
+  local target=$1
+  [[ $(read_doctor_manifest_schema "$target" 2>/dev/null || true) == 4 &&
+    $(read_oci_image_manifest_schema "$target" 2>/dev/null || true) == 2 &&
+    -x $target/sw/bin/dotfiles-sync-images ]]
+}
+
+evaluate_cancellation() {
+  local receipt=$1 audited_schema2=${2:-0} schema state target generation_status
+
+  cancellation_blocker=
+  cancellation_expected_runtime=
+  cancellation_observed_runtime=
+  cancellation_expected_boot=
+  cancellation_observed_boot=
+  schema=$(jq -r '.schemaVersion' <<< "$receipt")
+  state=$(jq -r '.state' <<< "$receipt")
+  if [[ $schema -eq 2 && $audited_schema2 -eq 1 ]]; then
+    :
+  elif [[ $schema -ne 3 ]]; then
+    cancellation_blocker="receipt schema $schema cannot be cancelled"
+    return 0
+  fi
+  if [[ $(jq -r '.sopsEnrollmentTransactionId // empty' <<< "$receipt") != "" ]]; then
+    cancellation_blocker="a SOPS enrollment-bound rebuild cannot be cancelled independently"
+    return 0
+  fi
+  if [[ $(jq -r '.rollback == null' <<< "$receipt") != true ]]; then
+    cancellation_blocker="a rebuild with rollback intent cannot be cancelled"
+    return 0
+  fi
+  if [[ $(jq -r '.verification.status' <<< "$receipt") != pending ]]; then
+    cancellation_blocker="a rebuild that entered verification cannot be cancelled"
+    return 0
+  fi
+  case $state in
+    prepared)
+      if [[ $(jq -r '.activation.status' <<< "$receipt") != pending ||
+        $(jq -r '.activation.attempts | length' <<< "$receipt") -ne 0 ]]; then
+        cancellation_blocker="prepared rebuild contains an activation attempt"
+        return 0
+      fi
+      ;;
+    activation-failed)
+      if [[ $schema -eq 2 ]]; then
+        if [[ $(jq -r '.activation.status' <<< "$receipt") != failed ]]; then
+          cancellation_blocker="the audited schema 2 activation failure is invalid"
+          return 0
+        fi
+      elif ! jq -e '
+          .activation.status == "failed" and (
+            (
+              .activation.attempts[-1].status == "failed" and
+              .activation.attempts[-1].boundary == "before-profile-commit"
+            ) or (
+              (.activation.attempts | length) == 0 and
+              .migration.fromSchema == 2 and
+              .migration.classification == "before-profile-commit"
+            )
+          )
+        ' <<< "$receipt" > /dev/null; then
+        cancellation_blocker="the activation failure is not proven to precede the profile commit"
+        return 0
+      fi
+      ;;
+    activation-indeterminate)
+      if ! jq -e '
+        .activation.status == "indeterminate" and
+        .activation.attempts[-1].status == "indeterminate" and
+        .activation.attempts[-1].boundary == "before-profile-commit"
+      ' <<< "$receipt" > /dev/null; then
+        cancellation_blocker="the interrupted activation is not proven to precede the profile commit"
+        return 0
+      fi
+      ;;
+    *)
+      cancellation_blocker="rebuild state $state cannot be cancelled"
+      return 0
+      ;;
+  esac
+
+  target=$(jq -r '.candidate' <<< "$receipt")
+  cancellation_expected_runtime=$(jq -c '.activationBaseline' <<< "$receipt")
+  if [[ $(jq -r '.profile' <<< "$cancellation_expected_runtime") == "$target" ]]; then
+    cancellation_blocker="the target was already the baseline profile; profile commit cannot prove zero activation"
+    return 0
+  fi
+  if ! cancellation_observed_runtime=$(runtime_snapshot); then
+    cancellation_blocker="failed to observe runtime before cancellation"
+    return 0
+  fi
+  if ! same_runtime_snapshot "$cancellation_expected_runtime" "$cancellation_observed_runtime"; then
+    cancellation_blocker="runtime differs from the activation baseline; cancellation is unsafe"
+    return 0
+  fi
+  cancellation_expected_boot=$(jq -c '.bootInstances.beforeApply' <<< "$receipt")
+  if ! cancellation_observed_boot=$(boot_instance); then
+    cancellation_blocker="failed to observe boot instance before cancellation"
+    return 0
+  fi
+  if ! same_boot_instance "$cancellation_expected_boot" "$cancellation_observed_boot"; then
+    cancellation_blocker="boot instance differs from the activation baseline; cancellation is unsafe"
+    return 0
+  fi
+  set +e
+  target_has_profile_generation "$target"
+  generation_status=$?
+  set -e
+  case $generation_status in
+    0) cancellation_blocker="the target has a residual system profile generation; cancellation is unsafe" ;;
+    1) ;;
+    *) cancellation_blocker="the system profile generation directory is invalid; cancellation is unsafe" ;;
+  esac
+}
+
+reconcile_interrupted_activation() {
+  local direction=$1 receipt transaction_id target baseline attempt number attempt_id attempt_root
+  local partial_log partial_mode truncation_marker observed_runtime observed_boot boundary generation_status
+  local timestamp log_metadata outcome_json outcome_metadata state failure_stage
+  local final_log outcome_file durable_outcome exit_code capture_exit_code truncated finished_at
+  local attempt_status activation_status effect action current_runtime current_boot before_boot
+
+  receipt=$(receipt_read) || die 1 "failed to read interrupted activation receipt"
+  transaction_id=$(jq -r '.transactionId' <<< "$receipt")
+  if [[ $direction == forward ]]; then
+    attempt=$(jq -c '.activation.attempts[-1]' <<< "$receipt")
+    target=$(jq -r '.candidate' <<< "$receipt")
+    baseline=$(jq -c '.activationBaseline' <<< "$receipt")
+    state=activation-indeterminate
+    failure_stage=activation-indeterminate
+  else
+    attempt=$(jq -c '.rollback.activation.attempts[-1]' <<< "$receipt")
+    target=$(jq -r '.rollback.target' <<< "$receipt")
+    baseline=$(jq -c '.rollback.activationBaseline' <<< "$receipt")
+    state=rollback-activation-indeterminate
+    failure_stage=rollback-activation-indeterminate
+  fi
+  [[ $(jq -r '.status' <<< "$attempt") == running ]] || \
+    die 2 "interrupted activation does not contain a running attempt"
+  number=$(jq -r '.number' <<< "$attempt")
+  attempt_id=$(jq -r '.attemptId' <<< "$attempt")
+  attempt_root=$state_root/attempts/$transaction_id/$number-$attempt_id
+  partial_log=$attempt_root/activation.log.partial
+  final_log=$attempt_root/activation.log
+  outcome_file=$attempt_root/outcome.json
+  if [[ ( -e $final_log || -L $final_log ) && ( -e $outcome_file || -L $outcome_file ) ]]; then
+    [[ ! -e $partial_log && ! -L $partial_log ]] || \
+      die 2 "interrupted activation contains both partial and final logs"
+    dotfiles_rebuild_validate_attempt_file "$final_log" "$EUID" 400 || \
+      die 2 "interrupted activation final log is invalid"
+    dotfiles_rebuild_validate_attempt_file "$outcome_file" "$EUID" 600 || \
+      die 2 "interrupted activation outcome is invalid"
+    durable_outcome=$(cat -- "$outcome_file") || \
+      die 2 "failed to read interrupted activation outcome"
+    jq -e \
+      --arg transactionId "$transaction_id" \
+      --argjson number "$number" \
+      --arg attemptId "$attempt_id" \
+      --arg store "$nix_store_dir/" '
+        .schemaVersion == 1 and
+        .transactionId == $transactionId and
+        .number == $number and
+        .attemptId == $attemptId and
+        (.exitCode | type == "number" and . >= 0 and . <= 255 and floor == .) and
+        (.captureExitCode | type == "number" and . >= 0 and . <= 255 and floor == .) and
+        (.truncated | type == "boolean") and
+        (.boundary | IN("before-profile-commit", "after-profile-commit", "unknown")) and
+        ([.observedRuntime.current, .observedRuntime.booted, .observedRuntime.profile] |
+          all(type == "string" and startswith($store))) and
+        (.observedBootInstance.kernelBootId | type == "string" and
+          test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")) and
+        (.observedBootInstance.userspaceTimestampMonotonic | type == "string" and
+          test("^[1-9][0-9]*$")) and
+        (.finishedAt | type == "string" and length > 0)
+      ' <<< "$durable_outcome" > /dev/null || \
+      die 2 "interrupted activation outcome does not match its receipt"
+    exit_code=$(jq -r '.exitCode' <<< "$durable_outcome")
+    capture_exit_code=$(jq -r '.captureExitCode' <<< "$durable_outcome")
+    truncated=$(jq -r '.truncated' <<< "$durable_outcome")
+    boundary=$(jq -r '.boundary' <<< "$durable_outcome")
+    finished_at=$(jq -r '.finishedAt' <<< "$durable_outcome")
+    observed_runtime=$(jq -c '.observedRuntime' <<< "$durable_outcome")
+    observed_boot=$(jq -c '.observedBootInstance' <<< "$durable_outcome")
+    current_runtime=$(runtime_snapshot) || \
+      die 2 "failed to observe runtime while restoring activation outcome"
+    current_boot=$(boot_instance) || \
+      die 2 "failed to observe boot instance while restoring activation outcome"
+    if ! same_runtime_snapshot "$observed_runtime" "$current_runtime" ||
+      ! same_boot_instance "$observed_boot" "$current_boot"; then
+      die 2 "durable activation outcome no longer matches current runtime"
+    fi
+    action=$(jq -r '.action' <<< "$attempt")
+    before_boot=$(jq -c '.bootBaseline' <<< "$attempt")
+    if ! activation_outcome_snapshot_is_valid \
+      "$action" "$target" "$baseline" "$observed_runtime" "$boundary" "$exit_code" ||
+      ! same_boot_instance "$before_boot" "$observed_boot"; then
+      die 2 "durable activation outcome contradicts its activation boundary"
+    fi
+    log_metadata=$(dotfiles_rebuild_attempt_artifact_metadata \
+      "$state_root" "$final_log" "$EUID" 400) || \
+      die 1 "failed to bind interrupted activation final log"
+    outcome_metadata=$(dotfiles_rebuild_attempt_artifact_metadata \
+      "$state_root" "$outcome_file" "$EUID" 600) || \
+      die 1 "failed to bind interrupted activation outcome"
+    timestamp=$(now)
+    if [[ $exit_code -eq 0 ]]; then
+      attempt_status=succeeded
+      activation_status=succeeded
+      failure_stage=
+      if [[ $direction == forward ]]; then
+        effect=$(jq -r '.effect' <<< "$receipt")
+        [[ $effect == switch ]] && state=verifying || state=restart-pending
+      else
+        effect=$(jq -r '.rollback.effect' <<< "$receipt")
+        [[ $effect == switch ]] && state=rollback-verifying || state=rollback-restart-pending
+      fi
+    else
+      attempt_status=failed
+      activation_status=failed
+      if [[ $direction == forward ]]; then
+        state=activation-failed
+        failure_stage=activation
+      else
+        state=rollback-activation-failed
+        failure_stage=rollback-activation
+      fi
+    fi
+    if [[ $direction == forward ]]; then
+      receipt_update \
+        --arg state "$state" \
+        --arg activationStatus "$activation_status" \
+        --arg attemptStatus "$attempt_status" \
+        --arg failureStage "$failure_stage" \
+        --arg timestamp "$timestamp" \
+        --arg finishedAt "$finished_at" \
+        --arg attemptId "$attempt_id" \
+        --arg boundary "$boundary" \
+        --argjson log "$log_metadata" \
+        --argjson outcome "$outcome_metadata" \
+        --argjson truncated "$truncated" \
+        --argjson captureExitCode "$capture_exit_code" \
+        --argjson exitCode "$exit_code" '
+          .state = $state |
+          .activation.status = $activationStatus |
+          .activation.exitCode = $exitCode |
+          (.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+            .status = $attemptStatus |
+            .boundary = $boundary |
+            .finishedAt = $finishedAt |
+            .exitCode = $exitCode |
+            .log = ($log + {truncated: $truncated, captureExitCode: $captureExitCode}) |
+            .outcome = $outcome
+          ) |
+          .failureStage = (if $failureStage == "" then null else $failureStage end) |
+          .updatedAt = $timestamp
+        '
+    else
+      receipt_update \
+        --arg state "$state" \
+        --arg activationStatus "$activation_status" \
+        --arg attemptStatus "$attempt_status" \
+        --arg failureStage "$failure_stage" \
+        --arg timestamp "$timestamp" \
+        --arg finishedAt "$finished_at" \
+        --arg attemptId "$attempt_id" \
+        --arg boundary "$boundary" \
+        --argjson log "$log_metadata" \
+        --argjson outcome "$outcome_metadata" \
+        --argjson truncated "$truncated" \
+        --argjson captureExitCode "$capture_exit_code" \
+        --argjson exitCode "$exit_code" '
+          .state = $state |
+          .rollback.activation.status = $activationStatus |
+          .rollback.activation.exitCode = $exitCode |
+          (.rollback.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+            .status = $attemptStatus |
+            .boundary = $boundary |
+            .finishedAt = $finishedAt |
+            .exitCode = $exitCode |
+            .log = ($log + {truncated: $truncated, captureExitCode: $captureExitCode}) |
+            .outcome = $outcome
+          ) |
+          .failureStage = (if $failureStage == "" then null else $failureStage end) |
+          .updatedAt = $timestamp
+        '
+    fi
+    receipt=$(receipt_read) || die 1 "failed to read restored activation outcome"
+    dotfiles_rebuild_verify_receipt_artifacts \
+      "$state_root" "$receipt" "$EUID" "$(id -g)" || \
+      die 1 "restored activation journal is invalid"
+    echo "Restored durable $direction activation outcome for attempt $number." >&2
+    return 0
+  fi
+  if [[ -e $final_log || -L $final_log ]]; then
+    [[ ! -e $outcome_file && ! -L $outcome_file &&
+      ! -e $partial_log && ! -L $partial_log ]] || \
+      die 2 "interrupted activation has conflicting finalized artifacts"
+    dotfiles_rebuild_validate_attempt_file "$final_log" "$EUID" 400 || \
+      die 2 "interrupted activation final log is invalid"
+    log_metadata=$(dotfiles_rebuild_attempt_artifact_metadata \
+      "$state_root" "$final_log" "$EUID" 400) || \
+      die 1 "failed to bind interrupted activation final log"
+  else
+    [[ ! -e $outcome_file && ! -L $outcome_file ]] || \
+      die 2 "interrupted activation has an outcome without a final log"
+    partial_mode=$(stat -c '%a' -- "$partial_log" 2>/dev/null) || \
+      die 2 "interrupted activation partial log is missing"
+    if [[ $partial_mode != 600 && $partial_mode != 400 ]] ||
+      ! dotfiles_rebuild_validate_attempt_file "$partial_log" "$EUID" "$partial_mode"; then
+      die 2 "interrupted activation partial log is invalid"
+    fi
+    truncation_marker=$attempt_root/truncated.partial
+    if [[ -e $truncation_marker || -L $truncation_marker ]]; then
+      dotfiles_rebuild_validate_attempt_file "$truncation_marker" "$EUID" 600 || \
+        die 2 "interrupted activation truncation marker is invalid"
+      rm -- "$truncation_marker" || die 1 "failed to remove interrupted truncation marker"
+      sync "$attempt_root" || die 1 "failed to persist interrupted truncation marker removal"
+    fi
+    dotfiles_rebuild_finalize_attempt_log "$attempt_root" "$EUID" "$(id -g)" || \
+      die 1 "failed to finalize interrupted activation log"
+    log_metadata=$(dotfiles_rebuild_attempt_artifact_metadata \
+      "$state_root" "$final_log" "$EUID" 400) || \
+      die 1 "failed to bind interrupted activation log"
+  fi
+
+  observed_runtime=$(runtime_snapshot) || \
+    die 2 "failed to observe runtime after interrupted activation"
+  observed_boot=$(boot_instance) || \
+    die 2 "failed to observe boot instance after interrupted activation"
+  boundary=unknown
+  if same_runtime_snapshot "$baseline" "$observed_runtime" &&
+    [[ $(jq -r '.profile' <<< "$baseline") != "$target" ]]; then
+    set +e
+    target_has_profile_generation "$target"
+    generation_status=$?
+    set -e
+    [[ $generation_status -ne 1 ]] || boundary=before-profile-commit
+  elif [[ $(jq -r '.profile' <<< "$observed_runtime") == "$target" ]]; then
+    boundary=after-profile-commit
+  fi
+
+  timestamp=$(now)
+  outcome_json=$(jq -cn \
+    --argjson schemaVersion 1 \
+    --arg transactionId "$transaction_id" \
+    --argjson number "$number" \
+    --arg attemptId "$attempt_id" \
+    --argjson captureExitCode 255 \
+    --argjson truncated true \
+    --arg boundary "$boundary" \
+    --argjson observedRuntime "$observed_runtime" \
+    --argjson observedBootInstance "$observed_boot" \
+    --arg finishedAt "$timestamp" '
+      {
+        schemaVersion: $schemaVersion,
+        transactionId: $transactionId,
+        number: $number,
+        attemptId: $attemptId,
+        exitCode: null,
+        captureExitCode: $captureExitCode,
+        truncated: $truncated,
+        boundary: $boundary,
+        observedRuntime: $observedRuntime,
+        observedBootInstance: $observedBootInstance,
+        reconciled: true,
+        finishedAt: $finishedAt
+      }
+    ') || die 1 "failed to encode interrupted activation outcome"
+  printf '%s\n' "$outcome_json" | dotfiles_rebuild_create_attempt_json \
+    "$attempt_root" "$EUID" "$(id -g)" outcome.json || \
+    die 1 "failed to persist interrupted activation outcome"
+  outcome_metadata=$(dotfiles_rebuild_attempt_artifact_metadata \
+    "$state_root" "$attempt_root/outcome.json" "$EUID" 600) || \
+    die 1 "failed to bind interrupted activation outcome"
+
+  if [[ $direction == forward ]]; then
+    receipt_update \
+      --arg state "$state" \
+      --arg failureStage "$failure_stage" \
+      --arg timestamp "$timestamp" \
+      --arg attemptId "$attempt_id" \
+      --arg boundary "$boundary" \
+      --argjson log "$log_metadata" \
+      --argjson outcome "$outcome_metadata" '
+        .state = $state |
+        .activation.status = "indeterminate" |
+        .activation.exitCode = null |
+        (.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+          .status = "indeterminate" |
+          .boundary = $boundary |
+          .finishedAt = $timestamp |
+          .exitCode = null |
+          .log = ($log + {truncated: true, captureExitCode: 255}) |
+          .outcome = $outcome
+        ) |
+        .failureStage = $failureStage |
+        .updatedAt = $timestamp
+      '
+  else
+    receipt_update \
+      --arg state "$state" \
+      --arg failureStage "$failure_stage" \
+      --arg timestamp "$timestamp" \
+      --arg attemptId "$attempt_id" \
+      --arg boundary "$boundary" \
+      --argjson log "$log_metadata" \
+      --argjson outcome "$outcome_metadata" '
+        .state = $state |
+        .rollback.activation.status = "indeterminate" |
+        .rollback.activation.exitCode = null |
+        (.rollback.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+          .status = "indeterminate" |
+          .boundary = $boundary |
+          .finishedAt = $timestamp |
+          .exitCode = null |
+          .log = ($log + {truncated: true, captureExitCode: 255}) |
+          .outcome = $outcome
+        ) |
+        .failureStage = $failureStage |
+        .updatedAt = $timestamp
+      '
+  fi
+  receipt=$(receipt_read) || die 1 "failed to read reconciled activation receipt"
+  dotfiles_rebuild_verify_receipt_artifacts \
+    "$state_root" "$receipt" "$EUID" "$(id -g)" || \
+    die 1 "reconciled activation journal is invalid"
+  echo "Reconciled interrupted $direction activation attempt $number as $boundary." >&2
+}
+
+audit_schema2_for_cancellation() {
+  local receipt=$1 source helper helper_resolved invocation
+  [[ $(jq -r '.schemaVersion' <<< "$receipt") -eq 2 ]] || \
+    die 2 "cancellation audit requires a schema 2 receipt"
+  [[ $(jq -r '.state' <<< "$receipt") == activation-failed &&
+    $(jq -r '.rollback == null' <<< "$receipt") == true &&
+    $(jq -r '.sopsEnrollmentTransactionId // empty' <<< "$receipt") == "" ]] || \
+    die 2 "schema 2 receipt is outside the audited cancellation migration"
+  source=$(jq -r '.source' <<< "$receipt")
+  helper=$(jq -r '.helperPath' <<< "$receipt")
+  [[ -f $source/modules/commands/rebuild && ! -L $source/modules/commands/rebuild &&
+    -f $source/flake.lock && ! -L $source/flake.lock && -L $helper ]] || \
+    die 2 "schema 2 receipt lacks its audited source or helper"
+  helper_resolved=$(readlink -f -- "$helper") || \
+    die 2 "schema 2 helper cannot be resolved"
+  [[ $helper_resolved == "$nix_store_dir/"* && -f $helper_resolved &&
+    ! -L $helper_resolved ]] || \
+    die 2 "schema 2 helper does not resolve to a Nix store file"
+  schema2_source_hash=$(sha256sum "$source/modules/commands/rebuild" | cut -d ' ' -f 1)
+  schema2_helper_hash=$(sha256sum "$helper_resolved" | cut -d ' ' -f 1)
+  schema2_nixpkgs_rev=$(jq -er '.nodes.nixpkgs.locked.rev | select(type == "string")' "$source/flake.lock") || \
+    die 2 "schema 2 source lacks its pinned nixpkgs revision"
+  [[ $schema2_source_hash == "$legacy_schema2_rebuild_source_sha256" &&
+    $schema2_helper_hash == "$legacy_schema2_candidate_helper_sha256" &&
+    $schema2_nixpkgs_rev == "$legacy_schema2_nixpkgs_rev" ]] || \
+    die 2 "schema 2 receipt does not match the audited historical driver"
+  invocation="$legacy_schema2_nixos_rebuild_path \"\$action\" --sudo --no-reexec --store-path \"\$target\" -L"
+  grep -Fqx -- "  $invocation" "$helper_resolved" || \
+    die 2 "schema 2 helper does not use the audited activation invocation"
+}
+
+cancel_audited_schema2_transaction() {
+  local receipt=$1 transaction_id=$2 state=$3 expected_runtime observed_runtime
+  local expected_boot observed_boot receipt_sha migration_file migration_metadata timestamp
+
+  receipt_sha=$(sha256sum "$active_receipt" | cut -d ' ' -f 1) || \
+    die 1 "failed to fingerprint schema 2 receipt before cancellation"
+  audit_schema2_for_cancellation "$receipt"
+  evaluate_cancellation "$receipt" 1
+  [[ -z $cancellation_blocker ]] || die 2 "$cancellation_blocker"
+  expected_runtime=$cancellation_expected_runtime
+  observed_runtime=$cancellation_observed_runtime
+  expected_boot=$cancellation_expected_boot
+  observed_boot=$cancellation_observed_boot
+
+  migration_file=$(dotfiles_rebuild_preserve_schema2_receipt \
+    "$state_root" "$EUID" "$(id -g)" "$transaction_id" "$active_receipt") || \
+    die 1 "failed to preserve schema 2 receipt before migration"
+  migration_metadata=$(dotfiles_rebuild_attempt_artifact_metadata \
+    "$state_root" "$migration_file" "$EUID" 400) || \
+    die 1 "failed to bind preserved schema 2 receipt"
+  [[ $(sha256sum "$active_receipt" | cut -d ' ' -f 1) == "$receipt_sha" ]] || \
+    die 2 "schema 2 receipt changed during cancellation audit"
+  receipt=$(receipt_read) || die 1 "failed to re-read schema 2 receipt before cancellation"
+  audit_schema2_for_cancellation "$receipt"
+  evaluate_cancellation "$receipt" 1
+  [[ -z $cancellation_blocker ]] || die 2 "$cancellation_blocker"
+  expected_runtime=$cancellation_expected_runtime
+  observed_runtime=$cancellation_observed_runtime
+  expected_boot=$cancellation_expected_boot
+  observed_boot=$cancellation_observed_boot
+
+  timestamp=$(now)
+  receipt_update \
+    --arg driverExecutable "$legacy_schema2_nixos_rebuild_path" \
+    --arg sourceTemplateSha256 "$schema2_source_hash" \
+    --arg candidateHelperSha256 "$schema2_helper_hash" \
+    --arg nixpkgsRev "$schema2_nixpkgs_rev" \
+    --arg fromState "$state" \
+    --argjson expectedRuntime "$expected_runtime" \
+    --argjson observedRuntime "$observed_runtime" \
+    --argjson expectedBootInstance "$expected_boot" \
+    --argjson observedBootInstance "$observed_boot" \
+    --arg timestamp "$timestamp" \
+    --argjson migrationReceipt "$migration_metadata" '
+      .schemaVersion = 3 |
+      .activationDriver = {
+        protocol: "nixos-rebuild-ng-profile-before-activation-v1",
+        executable: $driverExecutable
+      } |
+      .activation.attempts = [] |
+      .state = "cancelled" |
+      .cancellation = {
+        kind: "manual-zero-effect",
+        fromState: $fromState,
+        boundary: "before-profile-commit",
+        driverContract: "nixos-rebuild-ng-profile-before-activation-v1",
+        expectedRuntime: $expectedRuntime,
+        observedRuntime: $observedRuntime,
+        expectedBootInstance: $expectedBootInstance,
+        observedBootInstance: $observedBootInstance,
+        requestedAt: $timestamp
+      } |
+      .migration = {
+        fromSchema: 2,
+        classification: "before-profile-commit",
+        receipt: $migrationReceipt,
+        sourceTemplateSha256: $sourceTemplateSha256,
+        candidateHelperSha256: $candidateHelperSha256,
+        nixpkgsRev: $nixpkgsRev,
+        driverContract: "nixos-rebuild-ng-profile-before-activation-v1",
+        driverExecutable: $driverExecutable,
+        migratedAt: $timestamp
+      } |
+      .failureStage = null |
+      .updatedAt = $timestamp |
+      .finishedAt = $timestamp
+    '
+}
+
+cancel_transaction() {
+  local receipt schema state transaction_id expected_runtime observed_runtime
+  local expected_boot observed_boot timestamp
+  receipt=$(receipt_read) || die 1 "failed to read rebuild transaction for cancellation"
+  schema=$(jq -r '.schemaVersion' <<< "$receipt")
+  state=$(jq -r '.state' <<< "$receipt")
+  transaction_id=$(jq -r '.transactionId' <<< "$receipt")
+
+  if [[ $state == cancelled ]]; then
+    dotfiles_rebuild_archive_active_receipt \
+      "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" "$transaction_id" || \
+      die 1 "failed to archive cancelled rebuild receipt"
+    dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
+      die 1 "failed to remove cancelled rebuild GC roots"
+    printf 'Rebuild transaction %s: cancelled\n' "$transaction_id"
+    return 0
+  fi
+
+  if [[ $schema -eq 2 ]]; then
+    cancel_audited_schema2_transaction "$receipt" "$transaction_id" "$state"
+  else
+    evaluate_cancellation "$receipt"
+    [[ -z $cancellation_blocker ]] || die 2 "$cancellation_blocker"
+    expected_runtime=$cancellation_expected_runtime
+    observed_runtime=$cancellation_observed_runtime
+    expected_boot=$cancellation_expected_boot
+    observed_boot=$cancellation_observed_boot
+
+    timestamp=$(now)
+    receipt_update \
+      --arg fromState "$state" \
+      --argjson expectedRuntime "$expected_runtime" \
+      --argjson observedRuntime "$observed_runtime" \
+      --argjson expectedBootInstance "$expected_boot" \
+      --argjson observedBootInstance "$observed_boot" \
+      --arg timestamp "$timestamp" '
+        .state = "cancelled" |
+        .cancellation = {
+          kind: "manual-zero-effect",
+          fromState: $fromState,
+          boundary: "before-profile-commit",
+          driverContract: "nixos-rebuild-ng-profile-before-activation-v1",
+          expectedRuntime: $expectedRuntime,
+          observedRuntime: $observedRuntime,
+          expectedBootInstance: $expectedBootInstance,
+          observedBootInstance: $observedBootInstance,
+          requestedAt: $timestamp
+        } |
+        .failureStage = null |
+        .updatedAt = $timestamp |
+        .finishedAt = $timestamp
+      '
+  fi
+  dotfiles_rebuild_archive_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" "$transaction_id" || \
+    die 1 "failed to archive cancelled rebuild receipt"
+  dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
+    die 1 "failed to remove cancelled rebuild GC roots"
+  printf 'Rebuild transaction %s: cancelled\n' "$transaction_id"
 }
 
 verification_failed() {
@@ -480,6 +1168,51 @@ doctor_manifest_route() {
   esac
 }
 
+read_oci_image_manifest_schema() {
+  local target=$1 manifest canonical
+  manifest=$target/etc/dotfiles/oci-images.json
+  canonical=$(readlink -e -- "$manifest" 2>/dev/null) || return 1
+  [[ $canonical == "$nix_store_dir/"* && -r $canonical ]] || return 1
+  jq -ers '
+    if length == 1 and (.[0] | type) == "object" and
+      (.[0].schemaVersion | type) == "number" and
+      .[0].schemaVersion > 0 and
+      (.[0].schemaVersion | floor) == .[0].schemaVersion
+    then .[0].schemaVersion
+    else error("invalid OCI image manifest schema")
+    end
+  ' "$canonical" 2>/dev/null
+}
+
+require_target_oci_readiness() {
+  local target=$1 role=$2 helper status
+  [[ $(read_oci_image_manifest_schema "$target" 2>/dev/null || true) == 2 ]] || \
+    die 2 "$role target requires OCI image manifest schema version 2"
+  helper=$target/sw/bin/dotfiles-sync-images
+  [[ -x $helper ]] || \
+    die 2 "target does not contain an executable OCI image sync helper: $helper"
+
+  echo "==> OCI image readiness"
+  set +e
+  "$helper" --status
+  status=$?
+  set -e
+  case $status in
+    0)
+      return 0
+      ;;
+    1)
+      echo "FATAL: OCI images for target are not synchronized: $target" >&2
+      echo "Run: $helper" >&2
+      return 1
+      ;;
+    *)
+      echo "FATAL: target OCI readiness check is invalid (status $status): $helper" >&2
+      return 2
+      ;;
+  esac
+}
+
 observe_first_boot() {
   local direction=$1 target=$2 expected_user=$3 receipt state effect
   local before_boot current_boot current profile booted timestamp next_state
@@ -503,7 +1236,7 @@ observe_first_boot() {
     die 2 "first boot observer must run as $expected_user"
 
   current=$(readlink -f -- /run/current-system 2>/dev/null || true)
-  profile=$(readlink -f -- /nix/var/nix/profiles/system 2>/dev/null || true)
+  profile=$(readlink -f -- "$system_profile_path" 2>/dev/null || true)
   booted=$(readlink -f -- /run/booted-system 2>/dev/null || true)
   [[ $current == "$target" && $profile == "$target" && $booted == "$target" ]] || \
     die 3 "the first boot has not converged current/profile/booted to $target"
@@ -578,7 +1311,7 @@ verify_target() {
     verification_failed "$direction" distro 20 "resume is running in ${WSL_DISTRO_NAME:-<none>}, expected $expected_distro"
 
   actual_current=$(readlink -f -- /run/current-system 2>/dev/null || true)
-  actual_profile=$(readlink -f -- /nix/var/nix/profiles/system 2>/dev/null || true)
+  actual_profile=$(readlink -f -- "$system_profile_path" 2>/dev/null || true)
   actual_booted=$(readlink -f -- /run/booted-system 2>/dev/null || true)
   if [[ $actual_current != "$target" || $actual_profile != "$target" ]]; then
     if [[ $target_effect != switch ]]; then
@@ -762,6 +1495,324 @@ verify_target() {
   finish_transaction "$direction"
 }
 
+next_activation_attempt_number() {
+  jq -r '
+    ([.activation.attempts[]?.number, .rollback.activation.attempts[]?.number] |
+      (max // 0) + 1)
+  ' "$active_receipt"
+}
+
+prepare_activation_attempt() {
+  local direction=$1 target=$2 action=$3 baseline=$4 state timestamp intent_json started_json
+  local attempt_relative_prefix boot_baseline
+
+  boot_baseline=$(boot_instance) || die 2 "failed to identify the activation attempt boot instance"
+  activation_attempt_boot_baseline=$boot_baseline
+  activation_attempt_number=$(next_activation_attempt_number) || \
+    die 1 "failed to allocate an activation attempt number"
+  [[ $activation_attempt_number =~ ^[1-9][0-9]*$ ]] || \
+    die 1 "activation attempt number is invalid"
+  activation_attempt_id=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  [[ $activation_attempt_id =~ ^[0-9a-f]{32}$ ]] || \
+    die 1 "failed to create an activation attempt ID"
+  activation_attempt_root=$(dotfiles_rebuild_prepare_attempt_directory \
+    "$state_root" "$EUID" "$(id -g)" "$(jq -r '.transactionId' "$active_receipt")" \
+    "$activation_attempt_number" "$activation_attempt_id") || \
+    die 1 "failed to prepare activation attempt storage"
+  dotfiles_rebuild_prepare_partial_log "$activation_attempt_root" "$EUID" "$(id -g)" || \
+    die 1 "failed to prepare activation attempt log"
+  attempt_relative_prefix=${activation_attempt_root#"$state_root/"}
+  activation_attempt_partial_log=$activation_attempt_root/activation.log.partial
+  timestamp=$(now)
+  intent_json=$(jq -cn \
+    --argjson schemaVersion 1 \
+    --arg transactionId "$(jq -r '.transactionId' "$active_receipt")" \
+    --argjson number "$activation_attempt_number" \
+    --arg attemptId "$activation_attempt_id" \
+    --arg direction "$direction" \
+    --arg target "$target" \
+    --arg action "$action" \
+    --arg driverProtocol "nixos-rebuild-ng-profile-before-activation-v1" \
+    --arg driverExecutable "@nixosRebuildPath@" \
+    --argjson activationBaseline "$baseline" \
+    --argjson bootBaseline "$boot_baseline" \
+    --arg createdAt "$timestamp" '
+      {
+        schemaVersion: $schemaVersion,
+        transactionId: $transactionId,
+        number: $number,
+        attemptId: $attemptId,
+        direction: $direction,
+        target: $target,
+        action: $action,
+        driver: {protocol: $driverProtocol, executable: $driverExecutable},
+        activationBaseline: $activationBaseline,
+        bootBaseline: $bootBaseline,
+        createdAt: $createdAt
+      }
+    ') || die 1 "failed to encode activation attempt intent"
+  printf '%s\n' "$intent_json" | dotfiles_rebuild_create_attempt_json \
+    "$activation_attempt_root" "$EUID" "$(id -g)" intent.json || \
+    die 1 "failed to persist activation attempt intent"
+  activation_attempt_intent=$(dotfiles_rebuild_attempt_artifact_metadata \
+    "$state_root" "$activation_attempt_root/intent.json" "$EUID" 600) || \
+    die 1 "failed to bind activation attempt intent"
+
+  if [[ $direction == forward ]]; then
+    state=apply-intent
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --argjson baseline "$baseline" \
+      --argjson bootBaseline "$boot_baseline" \
+      --argjson number "$activation_attempt_number" \
+      --arg attemptId "$activation_attempt_id" \
+      --arg direction "$direction" \
+      --arg target "$target" \
+      --arg action "$action" \
+      --arg partialLogPath "$attempt_relative_prefix/activation.log.partial" \
+      --argjson intent "$activation_attempt_intent" '
+        .state = $state |
+        .activationBaseline = $baseline |
+        .activation.status = "pending" |
+        .activation.exitCode = null |
+        .activation.attempts += [{
+          number: $number,
+          attemptId: $attemptId,
+          direction: $direction,
+          target: $target,
+          action: $action,
+          activationBaseline: $baseline,
+          bootBaseline: $bootBaseline,
+          status: "intent",
+          boundary: null,
+          createdAt: $timestamp,
+          startedAt: null,
+          finishedAt: null,
+          exitCode: null,
+          intent: $intent,
+          started: null,
+          partialLogPath: $partialLogPath,
+          log: null,
+          outcome: null
+        }] |
+        .failureStage = null |
+        .updatedAt = $timestamp
+      '
+  else
+    state=rollback-intent
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --argjson baseline "$baseline" \
+      --argjson bootBaseline "$boot_baseline" \
+      --argjson number "$activation_attempt_number" \
+      --arg attemptId "$activation_attempt_id" \
+      --arg direction "$direction" \
+      --arg target "$target" \
+      --arg action "$action" \
+      --arg partialLogPath "$attempt_relative_prefix/activation.log.partial" \
+      --argjson intent "$activation_attempt_intent" '
+        .state = $state |
+        .rollback.activationBaseline = $baseline |
+        .rollback.activation.status = "pending" |
+        .rollback.activation.exitCode = null |
+        .rollback.activation.attempts += [{
+          number: $number,
+          attemptId: $attemptId,
+          direction: $direction,
+          target: $target,
+          action: $action,
+          activationBaseline: $baseline,
+          bootBaseline: $bootBaseline,
+          status: "intent",
+          boundary: null,
+          createdAt: $timestamp,
+          startedAt: null,
+          finishedAt: null,
+          exitCode: null,
+          intent: $intent,
+          started: null,
+          partialLogPath: $partialLogPath,
+          log: null,
+          outcome: null
+        }] |
+        .failureStage = null |
+        .updatedAt = $timestamp
+      '
+  fi
+
+  assert_activation_baseline "$direction" activation-handoff "$baseline"
+  timestamp=$(now)
+  started_json=$(jq -cn \
+    --argjson schemaVersion 1 \
+    --arg transactionId "$(jq -r '.transactionId' "$active_receipt")" \
+    --argjson number "$activation_attempt_number" \
+    --arg attemptId "$activation_attempt_id" \
+    --arg runnerPid "$$" \
+    --arg startedAt "$timestamp" '
+      {
+        schemaVersion: $schemaVersion,
+        transactionId: $transactionId,
+        number: $number,
+        attemptId: $attemptId,
+        runnerPid: $runnerPid,
+        startedAt: $startedAt
+      }
+    ') || die 1 "failed to encode activation start marker"
+  printf '%s\n' "$started_json" | dotfiles_rebuild_create_attempt_json \
+    "$activation_attempt_root" "$EUID" "$(id -g)" started.json || \
+    die 1 "failed to persist activation start marker"
+  activation_attempt_started=$(dotfiles_rebuild_attempt_artifact_metadata \
+    "$state_root" "$activation_attempt_root/started.json" "$EUID" 600) || \
+    die 1 "failed to bind activation start marker"
+  if [[ $direction == forward ]]; then
+    state=activating
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --arg attemptId "$activation_attempt_id" \
+      --argjson started "$activation_attempt_started" '
+        .state = $state |
+        (.activation.attempts[] | select(.attemptId == $attemptId)) |=
+          (.status = "running" | .started = $started | .startedAt = $timestamp) |
+        .updatedAt = $timestamp
+      '
+  else
+    state=rollback-activating
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --arg attemptId "$activation_attempt_id" \
+      --argjson started "$activation_attempt_started" '
+        .state = $state |
+        (.rollback.activation.attempts[] | select(.attemptId == $attemptId)) |=
+          (.status = "running" | .started = $started | .startedAt = $timestamp) |
+        .updatedAt = $timestamp
+      '
+  fi
+}
+
+run_activation_attempt() {
+  local direction=$1 target=$2 action=$3 baseline=$4
+  local truncation_marker observed_runtime observed_boot outcome_json
+  local activation_status capture_status timestamp
+  local -a pipeline_status
+
+  truncation_marker=$activation_attempt_root/truncated.partial
+  if ! (umask 077; set -o noclobber; printf '%s\n' false > "$truncation_marker"); then
+    die 1 "failed to prepare activation truncation marker"
+  fi
+  dotfiles_rebuild_validate_attempt_file "$truncation_marker" "$EUID" 600 || \
+    die 1 "activation truncation marker is invalid"
+
+  echo "==> $direction activation"
+  set +e
+  PATH="${sudo_command%/*}:$PATH" LC_ALL=C \
+    @nixosRebuild@ "$action" --sudo --no-reexec --store-path "$target" -L 2>&1 |
+    LC_ALL=C @awk@ \
+      -v log_path="$activation_attempt_partial_log" \
+      -v marker_path="$truncation_marker" \
+      -v limit=@activationLogLimitBytes@ '
+        {
+          chunk = $0 ORS
+          printf "%s", chunk
+          fflush()
+          remaining = limit - stored
+          if (remaining > 0) {
+            if (length(chunk) > remaining) {
+              printf "%s", substr(chunk, 1, remaining) >> log_path
+              stored = limit
+              truncated = 1
+            } else {
+              printf "%s", chunk >> log_path
+              stored += length(chunk)
+            }
+          } else {
+            truncated = 1
+          }
+        }
+        END {
+          close(log_path)
+          print (truncated ? "true" : "false") > marker_path
+          close(marker_path)
+        }
+      '
+  pipeline_status=("${PIPESTATUS[@]}")
+  set -e
+  activation_status=${pipeline_status[0]}
+  capture_status=${pipeline_status[1]}
+  [[ $activation_status =~ ^[0-9]+$ && $activation_status -le 255 ]] || activation_status=255
+  [[ $capture_status =~ ^[0-9]+$ && $capture_status -le 255 ]] || capture_status=255
+  activation_attempt_truncated=$(<"$truncation_marker")
+  [[ $activation_attempt_truncated == true || $activation_attempt_truncated == false ]] || {
+    activation_attempt_truncated=true
+    capture_status=255
+  }
+  rm -f -- "$truncation_marker" || die 1 "failed to remove activation truncation marker"
+  sync "$activation_attempt_root" || die 1 "failed to persist activation truncation marker removal"
+  dotfiles_rebuild_finalize_attempt_log "$activation_attempt_root" "$EUID" "$(id -g)" || \
+    die 1 "failed to finalize activation attempt log"
+  activation_attempt_log=$(dotfiles_rebuild_attempt_artifact_metadata \
+    "$state_root" "$activation_attempt_root/activation.log" "$EUID" 400) || \
+    die 1 "failed to bind activation attempt log"
+
+  observed_runtime=$(runtime_snapshot) || die 1 "failed to observe runtime after activation attempt"
+  observed_boot=$(boot_instance) || die 1 "failed to observe boot instance after activation attempt"
+  if [[ $activation_status -eq 0 ]]; then
+    activation_attempt_boundary=after-profile-commit
+  elif same_runtime_snapshot "$baseline" "$observed_runtime" &&
+    [[ $(jq -r '.profile' <<< "$baseline") != "$target" ]]; then
+    activation_attempt_boundary=before-profile-commit
+  elif [[ $(jq -r '.profile' <<< "$observed_runtime") == "$target" ]]; then
+    activation_attempt_boundary=after-profile-commit
+  else
+    activation_attempt_boundary=unknown
+  fi
+  if ! same_boot_instance "$activation_attempt_boot_baseline" "$observed_boot" ||
+    ! activation_outcome_snapshot_is_valid \
+      "$action" "$target" "$baseline" "$observed_runtime" \
+      "$activation_attempt_boundary" "$activation_status"; then
+    die 2 "activation outcome contradicts its activation boundary"
+  fi
+  timestamp=$(now)
+  outcome_json=$(jq -cn \
+    --argjson schemaVersion 1 \
+    --arg transactionId "$(jq -r '.transactionId' "$active_receipt")" \
+    --argjson number "$activation_attempt_number" \
+    --arg attemptId "$activation_attempt_id" \
+    --argjson exitCode "$activation_status" \
+    --argjson captureExitCode "$capture_status" \
+    --argjson truncated "$activation_attempt_truncated" \
+    --arg boundary "$activation_attempt_boundary" \
+    --argjson observedRuntime "$observed_runtime" \
+    --argjson observedBootInstance "$observed_boot" \
+    --arg finishedAt "$timestamp" '
+      {
+        schemaVersion: $schemaVersion,
+        transactionId: $transactionId,
+        number: $number,
+        attemptId: $attemptId,
+        exitCode: $exitCode,
+        captureExitCode: $captureExitCode,
+        truncated: $truncated,
+        boundary: $boundary,
+        observedRuntime: $observedRuntime,
+        observedBootInstance: $observedBootInstance,
+        finishedAt: $finishedAt
+      }
+    ') || die 1 "failed to encode activation outcome"
+  printf '%s\n' "$outcome_json" | dotfiles_rebuild_create_attempt_json \
+    "$activation_attempt_root" "$EUID" "$(id -g)" outcome.json || \
+    die 1 "failed to persist activation outcome"
+  activation_attempt_outcome=$(dotfiles_rebuild_attempt_artifact_metadata \
+    "$state_root" "$activation_attempt_root/outcome.json" "$EUID" 600) || \
+    die 1 "failed to bind activation outcome"
+  activation_attempt_exit_code=$activation_status
+  activation_attempt_capture_exit_code=$capture_status
+  activation_attempt_finished_at=$timestamp
+}
+
 activation_failed() {
   local direction=$1 exit_code=$2 state timestamp
   timestamp=$(now)
@@ -770,9 +1821,25 @@ activation_failed() {
     receipt_update \
       --arg state "$state" \
       --arg timestamp "$timestamp" \
+      --arg finishedAt "$activation_attempt_finished_at" \
+      --arg attemptId "$activation_attempt_id" \
+      --arg boundary "$activation_attempt_boundary" \
+      --argjson log "$activation_attempt_log" \
+      --argjson outcome "$activation_attempt_outcome" \
+      --argjson truncated "$activation_attempt_truncated" \
+      --argjson captureExitCode "$activation_attempt_capture_exit_code" \
       --argjson exitCode "$exit_code" '
         .state = $state |
-        .activation = {status: "failed", exitCode: $exitCode} |
+        .activation.status = "failed" |
+        .activation.exitCode = $exitCode |
+        (.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+          .status = "failed" |
+          .boundary = $boundary |
+          .finishedAt = $finishedAt |
+          .exitCode = $exitCode |
+          .log = ($log + {truncated: $truncated, captureExitCode: $captureExitCode}) |
+          .outcome = $outcome
+        ) |
         .failureStage = "activation" |
         .updatedAt = $timestamp
       '
@@ -781,61 +1848,53 @@ activation_failed() {
     receipt_update \
       --arg state "$state" \
       --arg timestamp "$timestamp" \
+      --arg finishedAt "$activation_attempt_finished_at" \
+      --arg attemptId "$activation_attempt_id" \
+      --arg boundary "$activation_attempt_boundary" \
+      --argjson log "$activation_attempt_log" \
+      --argjson outcome "$activation_attempt_outcome" \
+      --argjson truncated "$activation_attempt_truncated" \
+      --argjson captureExitCode "$activation_attempt_capture_exit_code" \
       --argjson exitCode "$exit_code" '
         .state = $state |
-        .rollback.activation = {status: "failed", exitCode: $exitCode} |
+        .rollback.activation.status = "failed" |
+        .rollback.activation.exitCode = $exitCode |
+        (.rollback.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+          .status = "failed" |
+          .boundary = $boundary |
+          .finishedAt = $finishedAt |
+          .exitCode = $exitCode |
+          .log = ($log + {truncated: $truncated, captureExitCode: $captureExitCode}) |
+          .outcome = $outcome
+        ) |
         .failureStage = "rollback-activation" |
         .updatedAt = $timestamp
       '
   fi
   echo "FATAL: nixos-rebuild activation failed with status $exit_code" >&2
+  echo "Activation log: $state_root/$(jq -r '.path' <<< "$activation_attempt_log")" >&2
   print_recovery
   return 4
 }
 
 activate_target() {
   local direction=$1 target=$2 effect=$3 action=$4 expected_user=$5 baseline=$6
-  local state pending_state success_state timestamp activation_status=0
+  local pending_state success_state timestamp
   assert_activation_baseline "$direction" intent-publication "$baseline"
   if [[ $direction == forward ]]; then
-    state=apply-intent
     pending_state=restart-pending
     success_state=verifying
-    timestamp=$(now)
-    receipt_update \
-      --arg state "$state" \
-      --arg timestamp "$timestamp" \
-      --argjson baseline "$baseline" '
-        .state = $state |
-        .activationBaseline = $baseline |
-        .activation = {status: "pending", exitCode: null} |
-        .failureStage = null |
-        .updatedAt = $timestamp
-      '
   else
-    state=rollback-intent
     pending_state=rollback-restart-pending
     success_state=rollback-verifying
-    timestamp=$(now)
-    receipt_update \
-      --arg state "$state" \
-      --arg timestamp "$timestamp" \
-      --argjson baseline "$baseline" '
-        .state = $state |
-        .rollback.activationBaseline = $baseline |
-        .rollback.activation = {status: "pending", exitCode: null} |
-        .failureStage = null |
-        .updatedAt = $timestamp
-      '
   fi
 
-  assert_activation_baseline "$direction" activation-handoff "$baseline"
-  echo "==> $direction activation"
-  set +e
-  @nixosRebuild@ "$action" --sudo --no-reexec --store-path "$target" -L
-  activation_status=$?
-  set -e
-  [[ $activation_status -eq 0 ]] || activation_failed "$direction" "$activation_status"
+  prepare_activation_attempt "$direction" "$target" "$action" "$baseline"
+  run_activation_attempt "$direction" "$target" "$action" "$baseline"
+  if [[ $activation_attempt_exit_code -ne 0 ]]; then
+    activation_failed "$direction" "$activation_attempt_exit_code"
+    return $?
+  fi
 
   if [[ $effect != switch ]]; then
     success_state=$pending_state
@@ -844,9 +1903,25 @@ activate_target() {
   if [[ $direction == forward ]]; then
     receipt_update \
       --arg state "$success_state" \
-      --arg timestamp "$timestamp" '
+      --arg timestamp "$timestamp" \
+      --arg finishedAt "$activation_attempt_finished_at" \
+      --arg attemptId "$activation_attempt_id" \
+      --arg boundary "$activation_attempt_boundary" \
+      --argjson log "$activation_attempt_log" \
+      --argjson outcome "$activation_attempt_outcome" \
+      --argjson truncated "$activation_attempt_truncated" \
+      --argjson captureExitCode "$activation_attempt_capture_exit_code" '
         .state = $state |
-        .activation = {status: "succeeded", exitCode: 0} |
+        .activation.status = "succeeded" |
+        .activation.exitCode = 0 |
+        (.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+          .status = "succeeded" |
+          .boundary = $boundary |
+          .finishedAt = $finishedAt |
+          .exitCode = 0 |
+          .log = ($log + {truncated: $truncated, captureExitCode: $captureExitCode}) |
+          .outcome = $outcome
+        ) |
         .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
         .failureStage = null |
         .updatedAt = $timestamp
@@ -854,9 +1929,25 @@ activate_target() {
   else
     receipt_update \
       --arg state "$success_state" \
-      --arg timestamp "$timestamp" '
+      --arg timestamp "$timestamp" \
+      --arg finishedAt "$activation_attempt_finished_at" \
+      --arg attemptId "$activation_attempt_id" \
+      --arg boundary "$activation_attempt_boundary" \
+      --argjson log "$activation_attempt_log" \
+      --argjson outcome "$activation_attempt_outcome" \
+      --argjson truncated "$activation_attempt_truncated" \
+      --argjson captureExitCode "$activation_attempt_capture_exit_code" '
         .state = $state |
-        .rollback.activation = {status: "succeeded", exitCode: 0} |
+        .rollback.activation.status = "succeeded" |
+        .rollback.activation.exitCode = 0 |
+        (.rollback.activation.attempts[] | select(.attemptId == $attemptId)) |= (
+          .status = "succeeded" |
+          .boundary = $boundary |
+          .finishedAt = $finishedAt |
+          .exitCode = 0 |
+          .log = ($log + {truncated: $truncated, captureExitCode: $captureExitCode}) |
+          .outcome = $outcome
+        ) |
         .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
         .failureStage = null |
         .updatedAt = $timestamp
@@ -873,10 +1964,8 @@ activate_target() {
 
 resume_activation() {
   local direction=$1 target=$2 effect=$3 action=$4 expected_user=$5
-  local current profile state timestamp baseline persisted_baseline
+  local baseline persisted_baseline
   baseline=$(runtime_snapshot) || die 2 "failed to resolve runtime generation before resuming activation"
-  current=$(jq -r '.current' <<< "$baseline")
-  profile=$(jq -r '.profile' <<< "$baseline")
 
   if [[ $direction == forward ]]; then
     persisted_baseline=$(jq -c '.activationBaseline' "$active_receipt")
@@ -885,46 +1974,6 @@ resume_activation() {
   fi
   activation_snapshot_is_owned "$action" "$target" "$persisted_baseline" "$baseline" ||
     abort_runtime_drift "$direction" activation-handoff "$persisted_baseline" "$baseline"
-
-  if [[ ( $action == switch && $current == "$target" && $profile == "$target" ) ||
-    ( $action == boot && $profile == "$target" ) ]]; then
-    if [[ $direction == forward ]]; then
-      if [[ $effect == switch ]]; then
-        state=verifying
-      else
-        state=restart-pending
-      fi
-    elif [[ $effect == switch ]]; then
-      state=rollback-verifying
-    else
-      state=rollback-restart-pending
-    fi
-    timestamp=$(now)
-    if [[ $direction == forward ]]; then
-      receipt_update \
-        --arg state "$state" \
-        --arg timestamp "$timestamp" '
-          .state = $state |
-          .activation = {status: "succeeded", exitCode: 0} |
-          .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
-          .failureStage = null |
-          .updatedAt = $timestamp
-        '
-    else
-      receipt_update \
-        --arg state "$state" \
-        --arg timestamp "$timestamp" '
-          .state = $state |
-          .rollback.activation = {status: "succeeded", exitCode: 0} |
-          .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
-          .failureStage = null |
-          .updatedAt = $timestamp
-        '
-    fi
-    verify_target "$direction" "$target" "$expected_user" "$effect"
-    return $?
-  fi
-
   activate_target "$direction" "$target" "$effect" "$action" "$expected_user" "$baseline"
 }
 
@@ -994,7 +2043,7 @@ if [[ $mode == apply || $mode == plan ]]; then
 
   previous_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system"
   previous_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system"
-  previous_profile=$(readlink -f -- /nix/var/nix/profiles/system) || die 2 "failed to resolve system profile"
+  previous_profile=$(readlink -f -- "$system_profile_path") || die 2 "failed to resolve system profile"
   for generation in "$previous_current" "$previous_booted" "$previous_profile"; do
     [[ $generation == "$nix_store_dir/"* && -d $generation ]] || \
       die 2 "a previous generation is not a readable Nix store path: $generation"
@@ -1027,6 +2076,8 @@ if [[ $mode == apply || $mode == plan ]]; then
     die 2 "candidate WSL default user $candidate_user does not match configured user $configured_user"
   [[ $previous_user == "$configured_user" ]] || \
     die 2 "previous WSL default user $previous_user does not match configured user $configured_user"
+
+  require_target_oci_readiness "$candidate" candidate || exit $?
 
   if [[ $mode == plan ]]; then
     cleanup_temporary_gc_roots
@@ -1086,7 +2137,7 @@ if [[ $mode == apply || $mode == plan ]]; then
     --argjson activationBaseline "$previous_runtime" \
     --arg timestamp "$timestamp" '
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         transactionId: $transactionId,
         worktree: $worktree,
         source: $source,
@@ -1110,9 +2161,15 @@ if [[ $mode == apply || $mode == plan ]]; then
         bootInstances: {beforeApply: $beforeApplyBoot, firstBoot: null},
         activationBaseline: $activationBaseline,
         state: "prepared",
-        activation: {status: "pending", exitCode: null},
+        activationDriver: {
+          protocol: "nixos-rebuild-ng-profile-before-activation-v1",
+          executable: "@nixosRebuildPath@"
+        },
+        activation: {status: "pending", exitCode: null, attempts: []},
         verification: {status: "pending", exitCode: null, failedCheckIds: []},
         abort: null,
+        cancellation: null,
+        migration: null,
         failureStage: null,
         rollback: null,
         startedAt: $timestamp,
@@ -1143,6 +2200,18 @@ state=$(jq -r '.state' <<< "$active")
 candidate=$(jq -r '.candidate' <<< "$active")
 candidate_user=$(jq -r '.candidateDefaultUser' <<< "$active")
 
+case $state in
+  activating) reconcile_interrupted_activation forward ;;
+  rollback-activating) reconcile_interrupted_activation rollback ;;
+esac
+active=$(receipt_read) || die 1 "failed to read the active rebuild receipt after reconciliation"
+state=$(jq -r '.state' <<< "$active")
+
+if [[ $mode == abort ]]; then
+  cancel_transaction
+  exit $?
+fi
+
 if [[ $mode == first-boot ]]; then
   set +e
   case $state in
@@ -1168,11 +2237,12 @@ fi
 if [[ $mode == rollback && $state != aborted ]] && jq -e '.rollback == null' <<< "$active" >/dev/null; then
   previous=$(jq -r '.recoveryTarget' <<< "$active")
   previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
-  doctor_manifest_route rollback "$previous" >/dev/null || \
-    die 2 "recovery target does not contain a supported doctor manifest"
+  [[ $(read_doctor_manifest_schema "$previous" 2>/dev/null || true) == 4 ]] || \
+    die 2 "recovery target requires doctor manifest schema version 4"
+  require_target_oci_readiness "$previous" recovery || exit $?
   rollback_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system for rollback"
   rollback_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system for rollback"
-  rollback_profile=$(readlink -f -- /nix/var/nix/profiles/system) || \
+  rollback_profile=$(readlink -f -- "$system_profile_path") || \
     die 2 "failed to resolve system profile for rollback"
   for generation in "$rollback_current" "$rollback_booted" "$rollback_profile"; do
     [[ $generation == "$nix_store_dir/"* && -d $generation ]] || \
@@ -1210,7 +2280,7 @@ if [[ $mode == rollback && $state != aborted ]] && jq -e '.rollback == null' <<<
         action: $action,
         activationBaseline: $activationBaseline,
         bootInstances: {beforeApply: $beforeApplyBoot, firstBoot: null},
-        activation: {status: "pending", exitCode: null}
+        activation: {status: "pending", exitCode: null, attempts: []}
       } |
       .state = "rollback-intent" |
       .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
@@ -1223,7 +2293,8 @@ if [[ $mode == rollback && $state != aborted ]] && jq -e '.rollback == null' <<<
 fi
 
 case $state in
-  prepared | apply-intent | activation-failed)
+  prepared | apply-intent | activation-indeterminate | activation-failed)
+    require_target_oci_readiness "$candidate" candidate || exit $?
     effect=$(jq -r '.effect' <<< "$active")
     action=$(jq -r '.action' <<< "$active")
     resume_activation forward "$candidate" "$effect" "$action" "$candidate_user"
@@ -1240,8 +2311,9 @@ case $state in
     effect=$(jq -r '.effect' <<< "$active")
     verify_target forward "$candidate" "$candidate_user" "$effect"
     ;;
-  rollback-intent | rollback-activation-failed)
+  rollback-intent | rollback-activation-indeterminate | rollback-activation-failed)
     previous=$(jq -r '.rollback.target' <<< "$active")
+    require_target_oci_readiness "$previous" recovery || exit $?
     previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
     rollback_effect=$(jq -r '.rollback.effect' <<< "$active")
     rollback_action=$(jq -r '.rollback.action' <<< "$active")

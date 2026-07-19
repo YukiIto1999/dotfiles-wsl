@@ -2,6 +2,7 @@ set -euo pipefail
 
 @operationLockFunctions@
 @ociImageStateFunctions@
+@rebuildReceiptFunctions@
 
 usage() {
   cat <<'USAGE'
@@ -39,6 +40,7 @@ docker_command=@dockerCommand@
 dotfiles=@configuredDotfiles@
 # shellcheck disable=SC2034 # production setup fragment enforces the configured user.
 expected_user=@ociImageSyncUser@
+nix_store_dir=@nixStoreDir@
 @imageSyncEnvironmentSetup@
 receipts_dir=$state_root/receipts
 expected_uid=$EUID
@@ -48,7 +50,7 @@ umask 077
 [[ $manifest == /* && -f $manifest && ! -L $manifest ]] || die 2 "OCI image manifest is not a regular file: $manifest"
 manifest_data=$(cat -- "$manifest") || die 2 "failed to read OCI image manifest"
 jq -e '
-  .schemaVersion == 1 and
+  .schemaVersion == 2 and
   (.images | type) == "array" and (.images | length) > 0 and
   ([.images[].id] | length) == ([.images[].id] | unique | length) and
   ([.images[].container] | length) == ([.images[].container] | unique | length) and
@@ -72,7 +74,7 @@ jq -e '
       (.imageFile | type == "string" and startswith("/nix/store/"))
     else false end
   )
-' <<< "$manifest_data" >/dev/null || die 2 "OCI image manifest does not match schema version 1"
+' <<< "$manifest_data" >/dev/null || die 2 "OCI image manifest does not match schema version 2"
 manifest_hash=$(sha256sum -- "$manifest" | cut -d ' ' -f 1)
 
 validate_receipt_file() {
@@ -222,10 +224,39 @@ if [[ $mode == sync ]]; then
     die 1 "failed to acquire the dotfiles operation lock"
   active_rebuild=$common_git_dir/dotfiles-rebuild/active.json
   active_enrollment=$common_git_dir/dotfiles-sops-enroll/active.json
-  [[ ! -e $active_rebuild && ! -L $active_rebuild ]] || \
-    die 1 "an active rebuild transaction blocks OCI image synchronization"
   [[ ! -e $active_enrollment && ! -L $active_enrollment ]] || \
     die 1 "an active SOPS enrollment transaction blocks OCI image synchronization"
+  if [[ -e $active_rebuild || -L $active_rebuild ]]; then
+    rebuild_state_root=${active_rebuild%/*}
+    dotfiles_rebuild_validate_state_root "$rebuild_state_root" "$expected_uid" "$expected_gid" || \
+      die 2 "the active rebuild receipt storage is invalid"
+    active_rebuild_data=$(dotfiles_rebuild_read_active_receipt \
+      "$rebuild_state_root" "$expected_uid" "$dotfiles" "$nix_store_dir" "$expected_user") || \
+      die 2 "the active rebuild receipt is invalid"
+    active_rebuild_state=$(jq -r '.state' <<< "$active_rebuild_data")
+    [[ $(jq -r '.sopsEnrollmentTransactionId' <<< "$active_rebuild_data") == null ]] || \
+      die 1 "SOPS enrollment-bound rebuild blocks OCI image synchronization"
+    case $active_rebuild_state in
+      rolled-back | aborted)
+        die 1 "a terminal rebuild receipt blocks OCI image synchronization until it is archived"
+        ;;
+    esac
+
+    manifest_canonical=$(readlink -e -- "$manifest") || \
+      die 2 "failed to resolve the OCI image manifest: $manifest"
+    candidate_manifest=$(jq -r '.candidate + "/etc/dotfiles/oci-images.json"' <<< "$active_rebuild_data")
+    recovery_manifest=$(jq -r '.recoveryTarget + "/etc/dotfiles/oci-images.json"' <<< "$active_rebuild_data")
+    candidate_manifest_canonical=$(readlink -e -- "$candidate_manifest" 2>/dev/null || true)
+    recovery_manifest_canonical=$(readlink -e -- "$recovery_manifest" 2>/dev/null || true)
+    if [[ $active_rebuild_state == complete ]]; then
+      [[ $manifest_canonical == "$recovery_manifest_canonical" ]] || \
+        die 1 "a complete rebuild receipt only permits recovery target OCI image synchronization"
+    else
+      [[ $manifest_canonical == "$candidate_manifest_canonical" || \
+        $manifest_canonical == "$recovery_manifest_canonical" ]] || \
+        die 1 "active rebuild target does not match this OCI image manifest"
+    fi
+  fi
 fi
 
 if [[ $mode == status ]]; then

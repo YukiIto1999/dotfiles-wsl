@@ -33,7 +33,7 @@ doctor は process の user と `HOME` が manifest の configured identity と�
 
 unit は待機せず、1回の `systemctl show` で宣言済み property を取得して一つの check result にする。systemd と SOPS root probe は5秒で打ち切る。managed file、rules、gateway file は URL の部分一致ではなく、manifest が指す immutable source と byte 単位で比較する。
 
-SOPS host key は一般ユーザーから読めない。固定した `/var/lib/sops-nix` と `key.txt` の UID、GID、mode だけを返す immutable な root probe を生成し、その引数なし command だけを sudo rule に登録する。probe は鍵本文を開かない。directory は root `0700`、key は root `0400` を要求する。home 側の旧 age key は移行中の `warn` では警告し、host key とオフライン復旧鍵の復号実測後に `reject` へ切り替えて失敗にする。
+SOPS host key は一般ユーザーから読めない。固定した `/var/lib/sops-nix` と `key.txt` の UID、GID、mode だけを返す immutable な root probe を生成し、その引数なし command だけを sudo rule に登録する。probe は鍵本文を開かない。doctor は NixOS が評価した `config.security.wrapperDir/sudo` の絶対パスから probe を呼び、Nix store 上の `pkgs.sudo` と呼び出し元の PATH を権限境界に使わない。directory は root `0700`、key は root `0400` を要求する。home 側の旧 age key は移行中の `warn` では警告し、host key とオフライン復旧鍵の復号実測後に `reject` へ切り替えて失敗にする。
 
 agents 対応 CLI は directory の存在だけでなく、`share/agents` と各 CLI の変換規則から導出した全ファイル名を検査する。`wslview` は current generation の system path が宣言した store source を指すこと、PATH の解決先がその system path であることを要求する。さらに `cmd.exe /d /c exit 0` を5秒上限で実行し、WSLInterop の binfmt を含む起動経路を検査する。browser や Windows application は開かない。
 

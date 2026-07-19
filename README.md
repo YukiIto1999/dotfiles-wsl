@@ -96,8 +96,9 @@ enrollment command、`dotfiles-rebuild`、bootstrap は Git common dir の同じ
 4. recovery key をホストから外し、`sudo bash scripts/bootstrap.sh` を実行する。bootstrap は tracked file の変更を含む Git flake を build するため、enrollment の差分を消さない。
 5. 初回の boot generation を読むため WSL を一度停止・起動する。
 6. `dotfiles-sync-images` を通常ユーザーで実行し、upstream OCI image の取得結果を receipt に記録する。
-7. `dotfiles-doctor` を実行し、system generation、OCI image、稼働 container を含む実用状態の収束を確認する。
-8. sops-nix が配備した Git identity を使い、二つの secrets file を同じ commit に記録する。その commit を利用する全ホストへ同期してから、別の新規ホストを enrollment する。
+7. `dotfiles-rebuild` を実行し、同期済み image を前提に通常の apply transaction で service を収束させる。
+8. `dotfiles-doctor` を実行し、system generation、OCI image、稼働 container を含む実用状態の収束を確認する。
+9. sops-nix が配備した Git identity を使い、二つの secrets file を同じ commit に記録する。その commit を利用する全ホストへ同期してから、別の新規ホストを enrollment する。
 
 暗号化済み差分を退避する場合は、平文ではなく Git patch を保存する。
 
@@ -129,7 +130,7 @@ bootstrap は次を実行する。
 | install_boot_generation | flake が固定した `config.system.build.nixos-rebuild` を store path へ build し、`boot --no-reexec` を実行 |
 | link_nixos | `/etc/nixos` を `~/dotfiles-wsl` に向ける |
 
-完了後、PowerShell から WSL を再起動して検証する。
+完了後、PowerShell から WSL を再起動する。
 
 ```powershell
 wsl -t NixOS
@@ -137,8 +138,13 @@ wsl -d NixOS
 ```
 
 ```bash
+dotfiles-sync-images
+dotfiles-rebuild
 dotfiles-doctor
 ```
+
+初回 boot では upstream image がまだ Docker cache にないため、`pull = "never"` の container unit は失敗し得る。
+Docker の起動後に明示同期し、通常 rebuild で同じ generation を適用してから doctor で検証する。
 
 ## 保守環境
 
@@ -189,6 +195,8 @@ source と candidate は、それぞれの build command が作る temporary GC 
 同じ immutable snapshot に対して flake check と candidate build を実行し、`nvd` で current system との差分を表示する。
 `--plan` はここで終了するため system profile と runtime は変えない。ただし、snapshot と candidate の build により
 Nix store と cache は更新される。candidate と実行中 generation の WSL default user も検査する。
+最後に OCI image manifest schema v2 を確認してから、candidate の `dotfiles-sync-images --status` を実行し、upstream image が manifest と一致することを
+読み取り専用で確認する。未同期なら candidate 内の同期 command を表示し、receipt と persistent GC root を作らずに終了する。
 `my.username` や `wsl.defaultUser` の変更は home、repository path、所有権を伴う host identity migration
 なので、通常 rebuild と `--plan` は終了 status 2 で拒否する。
 
@@ -197,6 +205,10 @@ snapshot 取得から activation と doctor の終了までは Git common dir �
 apply では build 済み candidate の store path だけを、flake が固定した上流 `nixos-rebuild` の store path へ
 `--store-path --no-reexec --sudo` 付きで渡す。
 checkout の評価と build は一般ユーザー、system profile の更新と activation だけは root で実行する。
+特権昇格の入口は NixOS が評価した `security.wrapperDir/sudo` に限定する。doctor と SOPS enrollment はこの
+絶対パスを呼ぶ。上流 `nixos-rebuild` は `sudo` の実行名を固定しているため、その呼び出しに限って同じ wrapper
+directory を PATH の先頭へ置く。生成 command の runtimeInputs には、setuid wrapper ではない Nix store 上の
+`pkgs.sudo` を含めない。呼び出し元 shell の可変な PATH にも依存しない。
 effect の計算前に current、booted、system profile の store path を固定する。`nvd` と classifier はその
 current/booted closure だけを参照する。persistent GC root の作成後と activation の直前にも同じ三つを照合する。
 
@@ -205,9 +217,19 @@ generation、既存 system profile、effect、activation と verification の結
 回復対象は indirect GC root で保護する。再開時も `nix-store --add-root ROOT --realise STORE_PATH` を冪等に実行し、user-facing
 root と `/nix/var/nix/gcroots/auto` の登録を照合する。receipt storage の三つの directory は owner、mode、
 symlink でないことを全操作の前に検査する。receipt と GC root の file、link、rename は Nix の auto-root
-directory を含む親 directory まで同期してから activation または WSL 停止手順へ進む。receipt schema v2 は
-activation attempt ごとの runtime baseline を保持する。再開時も baseline から外部 generation へ勝手に追随しない。
-activation の結果と次の state は一回の atomic receipt 更新で確定し、矛盾する中間 state を永続化しない。
+directory を含む親 directory まで同期してから activation または WSL 停止手順へ進む。receipt schema v3 は
+activation attempt ごとに `intent.json`、`started.json`、上限 8 MiB の `activation.log`、`outcome.json` を
+`$GIT_COMMON_DIR/dotfiles-rebuild/attempts/<transaction-id>/` へ残す。receipt は各 artifact の固定 path、byte 数、
+SHA-256 に加え、attempt 番号、ID、方向、runtime baseline、boot instance、時刻、終了結果の投影を持つ。再開前に ledger の連番と状態遷移、
+artifact の owner、mode、link count、hash、内容を照合する。標準出力と標準エラーは端末へ流しながら同じ log へ
+保存する。activation runner が receipt 更新前に終了しても、partial log を `indeterminate` attempt として
+閉じる。final log だけなら結果不明のまま閉じ、final log と outcome が両方あれば終了コードを再結合する。
+書き込み順に反する outcome 単独や、partial log と final log の同居は自動再開しない。
+finalize の `chmod` 後、rename 前に残った読み取り専用 partial log も同じ中断状態として回収する。各 attempt は開始直前の
+boot instance を記録する。durable outcome は、その attempt の runtime と boot instance、再開時の実測値が一致し、
+action と profile commit 境界にも矛盾しない場合だけ再結合する。通常実行でも同じ意味検査を outcome 公開前に通す。
+runtime が target を指すという観測だけで、attempt のない activation を成功扱いしない。
+再開時も baseline から外部 generation へ勝手に追随しない。
 baseline の照合に失敗した transaction は activation と自動 rollback を行わず、観測した三つの path を
 `aborted` receipt に記録して archive する。
 
@@ -218,7 +240,7 @@ baseline の照合に失敗した transaction は activation と自動 rollback 
 root が `nix-env --profile /nix/var/nix/profiles/system`、古い generation の store path、
 `switch-to-configuration`、`nix run nixpkgs#nixos-rebuild` を直接実行する操作は transaction の保証外である。
 receipt と operation lock を迂回し、再開時に runtime drift として中止されるか、照合直後へ割り込む可能性がある。
-緊急復旧でもこれらを通常手順にはせず、まず receipt の `--resume` または `--rollback` を使う。
+緊急復旧でもこれらを通常手順にはせず、まず失敗時に表示された receipt 固定の回復 command を使う。
 
 再開時に transaction が所有できる変化も action ごとに限定する。`switch` は current と profile について
 baseline または target を許可し、booted は baseline のまま要求する。`boot` は profile だけに baseline または
@@ -253,18 +275,47 @@ distribution 名、candidate 内の helper、transaction ID を単一引用符�
 dotfiles-rebuild --status
 dotfiles-rebuild --resume <transaction-id>
 dotfiles-rebuild --rollback <transaction-id>
+dotfiles-rebuild --abort <transaction-id>
 ```
 
 `--resume` は receipt に固定した candidate を再適用または再検証する。`--rollback` は開始時の running
-generation を現在の状態に対して再分類し、同じ一段階または二段階の state machine で戻す。active receipt
+generation を現在の状態に対して再分類し、同じ一段階または二段階の state machine で戻す。recovery target が
+doctor schema v4 と OCI image manifest schema v2 を持たない場合、実行不能な `--rollback` は案内しない。
+`--abort` は SOPS enrollment と rollback intent がなく、runtime と boot instance が activation baseline のままで、
+candidate の system profile generation も存在しない場合に限り、profile commit 前の transaction を
+`cancelled` として閉じる。runtime drift を記録する `aborted` とは別の終端 state である。配備済み schema v2 の
+失敗 transaction は、固定した旧 source、helper、nixpkgs revision が監査済み allowlist と一致する場合だけ扱う。
+candidate の `sw/bin/dotfiles-rebuild` は system closure の symlink として検証し、解決先を Nix store 配下の通常ファイルに
+限定してから hash と invocation を照合する。store 外へ向く同内容の helper は受理しない。
+active receipt を変える前に zero-effect 条件をすべて実測し、安全でなければ schema v2 の byte 列を維持する。
+安全性を証明できた場合は元 receipt を読み取り専用 artifact として保存し、active receipt を schema v3 と
+`cancelled` へ一度に更新する。artifact 保存後、active receipt 更新前に停止しても、既存 artifact が元 receipt と
+完全一致する場合だけ再利用する。
+
+schema v2 transaction を作った generation と receipt 固定の candidate には `--abort` がまだない。新実装を
+review 済み commit に記録し、`git status --short` が空であることを確認してから、checkout が公開する package を
+一度だけ control plane として使う。
+
+```bash
+nix run .#dotfiles-rebuild -- --abort <transaction-id>
+```
+
+この command は candidate を activation しない。旧 receipt の allowlist、runtime、boot instance、system profile
+generation を実測し、zero-effect と証明できた transaction だけを `cancelled` にする。以後に schema v3 が作る
+失敗 transaction は、receipt 固定 helper の通常の `--abort` を使う。
+
+失敗時の表示は、その時点で実行可能な操作だけに絞る。`--resume` は常に固定 candidate を指す。`--rollback` は
+recovery protocol がある場合だけ、`--abort` は上の zero-effect 条件を実測できた場合だけ表示する。active receipt
 がある間は新しい build を開始しない。終了 status 4 は activation 失敗、5 は target doctor 失敗、
 2 は不正な引数、receipt、runtime state を表す。activation と doctor の失敗を同じ成功・失敗へ丸めない。
 schema v4 の target doctor は report v1 を JSON で返す。rebuild は report が単一の JSON document であること、manifest schema、
 check、summary、doctor の終了 status と outcome の対応を検証する。doctor が `fail` または `error` にした安定 ID は
 receipt の `verification.failedCheckIds` に保存する。旧 receipt ではこの field の欠落を受理するが、明示的な `null` や
-重複 ID は不正とする。forward candidate は schema v4 だけを activation 前に受理する。rollback は schema v4 / v3 の
-JSON report と schema v2 の旧 doctor だけを受理する。schema v2 では旧 doctor を引数なしで1回実行し、status 0 / 1 を
-`legacy.doctor` check を持つ report v1 へ変換する。欠落、破損、複数 JSON document、未定義 schema の doctor は実行しない。
+重複 ID は不正とする。forward candidate と通常 rollback の recovery target は doctor schema v4 と
+OCI image manifest schema v2 だけを activation 前に受理する。
+schema v3 / v2 の doctor adapter は既存 transaction の verification 用に残すが、新しい rollback は開始しない。
+schema v4 target は activation attempt の直前にも OCI 同期状態を再検査する。欠落、破損、複数 JSON document、
+未定義 schema の doctor は実行しない。
 完了または drift で中止した receipt は
 `$GIT_COMMON_DIR/dotfiles-rebuild/receipts/<transaction-id>.json` へ移し、transaction 用 GC root を削除する。
 
@@ -288,7 +339,19 @@ nix run .#dotfiles-sync-images
 dotfiles-rebuild
 ```
 
-command は `/etc/dotfiles/oci-images.json` と同じ生成元の immutable manifest を読む。upstream image は
+rebuild が OCI 未同期で停止した場合は、表示された target 内の command をそのまま実行する。
+
+```text
+Run: /nix/store/<target-system>/sw/bin/dotfiles-sync-images
+```
+
+active rebuild がある間も、その receipt の candidate または recovery target と同じ manifest を持つ schema v2 command だけは同期できる。
+どちらとも manifest を共有しない command と壊れた receipt は拒否する。`complete` receipt では recovery target だけを許可し、
+`rolled-back` と `aborted` は拒否する。同期後は同じ `--resume` または `--rollback` を再実行する。active marker の有無にかかわらず、
+SOPS enrollment に束縛された rebuild transaction では同期しない。
+
+command は `/etc/dotfiles/oci-images.json` と同じ生成元の immutable schema v2 manifest を読む。schema v2 は
+`pull = "never"` と active rebuild 中の修復契約を持つ世代を識別する。upstream image は
 `repository@sha256:...` と Docker の `RepoDigests` を照合し、結果を
 `~/.local/state/dotfiles-wsl/image-sync/receipts/<image-id>.json` に記録する。agentmemory は Nix が生成した
 `imageFile` を OCI service が load するため、registry から pull しない。同期 command は設定された通常ユーザーで実行し、
@@ -301,12 +364,12 @@ doctor は mutable な tag だけを信用せず、この sidecar、tag の loca
 | status | 意味 |
 |---:|---|
 | `0` | 全 upstream image が manifest の digest と一致する |
-| `1` | 未同期、pull 失敗、repository 共通 lock を取得不能、別の同期処理が実行中、または rebuild / SOPS enrollment が active |
-| `2` | 実行ユーザー、manifest、state directory、image sync lock、receipt の形式または所有条件が不正 |
+| `1` | 未同期、pull 失敗、repository 共通 lock を取得不能、別の同期処理が実行中、target が異なる active rebuild、同期を許可しない rebuild state、または active SOPS enrollment |
+| `2` | 実行ユーザー、manifest、state directory、image sync lock、image receipt、active rebuild receipt の形式または所有条件が不正 |
 
 `--status` は image を pull せず、state root がなければ作成しない。同期は image ごとに続行するため、一つの
-registry failure が別 image の receipt 更新を妨げない。最初の配備では OCI service の `pull = "missing"` を維持し、
-同期 command と診断の移行後に `pull = "never"` へ切り替える。
+registry failure が別 image の receipt 更新を妨げない。全 OCI service は `pull = "never"` を使う。
+registry 取得は `dotfiles-sync-images` だけが担当し、activation と service restart は network pull を行わない。
 
 ## 検証
 
@@ -468,7 +531,7 @@ dotfiles-rebuild
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix、OCI 収束、MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL / OCI 宣言の一致)、`config-artifact-contract`(実配備 source と構文検査 projection の同一性、実値の反映)、`oci-image-contract`(typed inventory、pull policy、同期 transaction の failure matrix)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(各 module が実配備へ渡す JSON / TOML / YAML artifact の構文検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`rebuild-routing`(apply、resume、rollback、abort、中断復旧の failure matrix)、`rebuild-attempt`(journal artifact の改変、path 置換、hard link の拒否)、`doctor-runtime`(runtime failure matrix、OCI 収束、MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL / OCI 宣言の一致)、`config-artifact-contract`(実配備 source と構文検査 projection の同一性、実値の反映)、`oci-image-contract`(typed inventory、pull policy、同期 transaction の failure matrix)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(各 module が実配備へ渡す JSON / TOML / YAML artifact の構文検査)。
 
 ## License
 

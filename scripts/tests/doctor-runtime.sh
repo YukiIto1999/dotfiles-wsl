@@ -457,6 +457,7 @@ reset_fixture() {
 }
 
 run_doctor() {
+  local -a doctor_args=("$@")
   set +e
   HOME=$home \
     PATH="$doctor_path" \
@@ -472,7 +473,7 @@ run_doctor() {
     DOCTOR_TEST_MCP_CALL_LOG=$mcp_call_log \
     DOCTOR_TEST_MCP_URL='http://127.0.0.1:1/mcp' \
     DOCTOR_TEST_MCP_REQUESTED_PROTOCOL='2025-06-18' \
-    "$store_bash" "$rendered_doctor" > "$doctor_output" 2>&1
+    "$store_bash" "$rendered_doctor" "${doctor_args[@]}" > "$doctor_output" 2>&1
   doctor_status=$?
   set -e
 }
@@ -610,6 +611,36 @@ windows_command_missing() { chmod -x "$windows_command"; }
 windows_command_failed() { printf '%s\n' '1' > "$windows_command_state"; }
 windows_command_timed_out() { printf '%s\n' 'hang' > "$windows_command_state"; }
 nix_ld_missing() { rm -f "$nix_ld_path"; }
+
+reset_fixture
+run_doctor --format json
+if [[ $doctor_status -ne 0 ]]; then
+  echo "result schema v1 / manifest schema v2 baseline: expected status 0, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! jq -e '
+  .schemaVersion == 1 and
+  .manifestSchemaVersion == 2 and
+  .outcome == "healthy" and
+  (.summary | keys | sort) == ["blocked", "error", "fail", "pass", "total", "warn"] and
+  (.checks | type) == "array" and
+  (.checks | length) > 0 and
+  all(.checks[];
+    (.id | type) == "string" and
+    (.phase == "foundation" or .phase == "local" or .phase == "system" or .phase == "active") and
+    (.status == "pass" or .status == "warn" or .status == "fail" or .status == "error" or .status == "blocked") and
+    (.subject | type) == "string" and
+    has("expected") and
+    has("observed") and
+    (.message | type) == "string" and (.message | length) > 0 and
+    (.durationMs | type) == "number" and .durationMs >= 0
+  ) and
+  ([.checks[].id] | length) == ([.checks[].id] | unique | length)
+' "$doctor_output" >/dev/null; then
+  echo 'result schema v1 / manifest schema v2 baseline: report contract mismatch' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
 
 expect_failure 'profile mismatch' 'FAIL: system profile does not match current generation' profile_mismatch
 expect_failure 'schema version mismatch' "FAIL: doctor manifest does not match schema version 2: $manifest" schema_version_mismatch

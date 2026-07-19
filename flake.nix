@@ -50,31 +50,35 @@
         claude-plugins-official = claudePlugins;
       };
 
+      mkNixosSystem =
+        machineModule:
+        nixpkgs.lib.nixosSystem {
+          inherit system;
+          specialArgs = { inherit pluginSources; };
+          modules = [
+            ./modules
+
+            nixos-wsl.nixosModules.default
+            sops-nix.nixosModules.sops
+            home-manager.nixosModules.home-manager
+
+            machineModule
+          ];
+        };
+
       maintenancePkgs = nixpkgs.legacyPackages.${system};
     in
     {
-      nixosConfigurations.${hostName} = nixpkgs.lib.nixosSystem {
-        inherit system;
-        specialArgs = { inherit pluginSources; };
-        modules = [
-          ./modules
-
-          nixos-wsl.nixosModules.default
-          sops-nix.nixosModules.sops
-          home-manager.nixosModules.home-manager
-
-          # マシン固有の値のみ、他は modules/options.nix の default
-          {
-            my = {
-              accounts = [
-                "account-1"
-                "account-2"
-                "account-3"
-              ];
-              workIdentity = "~/projects/business/";
-            };
-          }
-        ];
+      nixosConfigurations.${hostName} = mkNixosSystem {
+        # マシン固有の値のみ、他は modules/options.nix の default
+        my = {
+          accounts = [
+            "account-1"
+            "account-2"
+            "account-3"
+          ];
+          workIdentity = "~/projects/business/";
+        };
       };
 
       packages.${system} =
@@ -116,6 +120,13 @@
           inherit (self.nixosConfigurations.${hostName}) pkgs;
           inherit (pkgs) lib;
           homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
+          artifactVariantConfig =
+            (mkNixosSystem {
+              my = {
+                accounts = [ ];
+                gatewayPort = 9876;
+              };
+            }).config;
 
           mkMcpServer = pkgs.callPackage ./pkgs/mk-mcp-server.nix { };
           fakeChromium = pkgs.writeShellScriptBin "chromium" "exit 0";
@@ -188,12 +199,17 @@
             hostConfig.virtualisation.oci-containers.containers.agentmemory.environmentFiles;
           agentmemoryApiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";
           agentmemoryTemplateFile = pkgs.writeText "agentmemory.env" agentmemoryTemplate.content;
-          codexSystemConfig = hostConfig.environment.etc."codex/config.toml".source;
+          configArtifacts = hostConfig.my.configArtifacts;
+          artifactSource = id: configArtifacts.${id}.source;
+          artifactSourcesFor =
+            format:
+            map (artifact: artifact.source) (
+              builtins.attrValues (lib.filterAttrs (_: artifact: artifact.format == format) configArtifacts)
+            );
+          codexSystemConfig = artifactSource "clis/codex/system";
           codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
           codexProjectConfig = homeConfig.home.file.${codexProjectHomePath}.source;
-          codexSeedConfig = pkgs.replaceVars ./modules/clis/codex/config.toml {
-            codexModel = "dummy-model";
-          };
+          codexSeedConfig = artifactSource "clis/codex/user-seed";
           codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
           doctorManifest = hostConfig.environment.etc."dotfiles/doctor.json".source;
           sopsGenerationContract = hostConfig.environment.etc."dotfiles/sops-generation.json".source;
@@ -272,16 +288,30 @@
           expectedMcpTargetsJson = (pkgs.formats.json { }).generate "doctor-mcp-targets.json" (
             builtins.attrNames hostConfig.my.mcp.targets
           );
-          expectedProbePolicyJson = (pkgs.formats.json { }).generate "doctor-probe-policy.json" {
-            cliTimeoutSeconds = 5;
-            systemTimeoutSeconds = 5;
-            windowsTimeoutSeconds = 5;
-            mcpRequestTimeoutSeconds = 5;
-            mcpCleanupTimeoutSeconds = 5;
-            totalTimeoutSeconds = 30;
-            maxPages = 20;
-            maxResponseBytes = 1048576;
+          expectedProbePolicyJson =
+            (pkgs.formats.json { }).generate "doctor-probe-policy.json"
+              hostConfig.my.doctor.probePolicy;
+          expectedConfigArtifactFormats = {
+            "clis/antigravity/mcp" = "json";
+            "clis/claude/managed-mcp" = "json";
+            "clis/claude/managed-settings" = "json";
+            "clis/claude/user-settings-seed" = "json";
+            "clis/codex/project" = "toml";
+            "clis/codex/system" = "toml";
+            "clis/codex/user-seed" = "toml";
+            "clis/opencode/config" = "json";
+            "mcp/agentgateway/config" = "yaml";
+            "mcp/agentmemory/config" = "yaml";
+            "mcp/searxng/settings-template" = "yaml";
+          }
+          // lib.optionalAttrs (hostConfig.my.accounts != [ ]) {
+            "accounts/gh-hosts" = "yaml";
           };
+          actualConfigArtifactFormats = lib.mapAttrs (_: artifact: artifact.format) configArtifacts;
+          variantConfigArtifactFormats = lib.mapAttrs (
+            _: artifact: artifact.format
+          ) artifactVariantConfig.my.configArtifacts;
+          variantClaudeMcp = artifactVariantConfig.my.configArtifacts."clis/claude/managed-mcp".source;
           codexProjectRuntimePath = "${hostConfig.my.dotfilesDir}/.codex/config.toml";
           sopsKeyFile = "/var/lib/sops-nix/key.txt";
           sopsKeyDirectoryPolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix".d;
@@ -296,49 +326,83 @@
             exit 2
           '';
 
-          # config-syntax check 専用の @var@ 埋め、実際の値は各 module 側にありここでは構文検査用
-          dummyVars = {
-            gatewayUrl = "http://127.0.0.1:1/mcp";
-            httpPort = "1";
-            streamPort = "2";
-            searxngSecret = "dummy";
-            searxngPort = "3";
-            valkeyPort = "4";
-          };
-
-          jsonConfigs = [
-            ./modules/clis/claude/managed-settings.json
-            ./modules/clis/claude/settings.json
-            (pkgs.replaceVars ./modules/clis/claude/managed-mcp.json {
-              inherit (dummyVars) gatewayUrl;
-            })
-            (pkgs.replaceVars ./modules/clis/antigravity/mcp_config.json {
-              inherit (dummyVars) gatewayUrl;
-            })
-            (pkgs.replaceVars ./modules/clis/opencode/opencode.json { inherit (dummyVars) gatewayUrl; })
-          ];
-
-          tomlConfigs = [
-            (pkgs.replaceVars ./modules/clis/codex/config-system.toml {
-              inherit (dummyVars) gatewayUrl;
-            })
-            codexProjectConfig
-            codexSeedConfig
-          ];
-
-          yamlConfigs = [
-            (pkgs.replaceVars ./modules/mcp/servers/agentmemory.yaml {
-              inherit (dummyVars) httpPort streamPort;
-            })
-            (pkgs.replaceVars ./modules/mcp/servers/searxng-settings.yml {
-              inherit (dummyVars) searxngSecret searxngPort valkeyPort;
-            })
-          ];
+          jsonConfigs = artifactSourcesFor "json";
+          tomlConfigs = artifactSourcesFor "toml";
+          yamlConfigs = artifactSourcesFor "yaml";
 
           asArgs = files: lib.concatMapStringsSep " " (f: "${f}") files;
         in
         {
           nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
+
+          config-artifact-contract =
+            assert actualConfigArtifactFormats == expectedConfigArtifactFormats;
+            assert
+              variantConfigArtifactFormats
+              == builtins.removeAttrs expectedConfigArtifactFormats [ "accounts/gh-hosts" ];
+            assert !(builtins.hasAttr "gh-hosts.yml" artifactVariantConfig.sops.templates);
+            assert
+              hostConfig.environment.etc."claude-code/managed-settings.json".source
+              == artifactSource "clis/claude/managed-settings";
+            assert
+              hostConfig.environment.etc."claude-code/managed-mcp.json".source
+              == artifactSource "clis/claude/managed-mcp";
+            assert hostConfig.environment.etc."codex/config.toml".source == artifactSource "clis/codex/system";
+            assert codexProjectConfig == artifactSource "clis/codex/project";
+            assert
+              homeConfig.home.file.".config/opencode/opencode.json".source
+              == artifactSource "clis/opencode/config";
+            assert
+              homeConfig.home.file.".gemini/antigravity-cli/mcp_config.json".source
+              == artifactSource "clis/antigravity/mcp";
+            assert
+              hostConfig.environment.etc."agentgateway/config.yaml".source
+              == artifactSource "mcp/agentgateway/config";
+            assert lib.elem "${artifactSource "mcp/agentmemory/config"}:/app/config.yaml:ro"
+              hostConfig.virtualisation.oci-containers.containers.agentmemory.volumes;
+            assert
+              hostConfig.sops.templates."searxng-settings.yml".content
+              == builtins.readFile (artifactSource "mcp/searxng/settings-template");
+            assert
+              hostConfig.my.accounts == [ ]
+              ||
+                hostConfig.sops.templates."gh-hosts.yml".content
+                == builtins.readFile (artifactSource "accounts/gh-hosts");
+            pkgs.runCommandLocal "check-config-artifact-contract"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.taplo
+                  pkgs.yq
+                ];
+              }
+              ''
+                  jq --exit-status \
+                    --arg expected ${lib.escapeShellArg hostConfig.my.gatewayUrl} \
+                    '.mcpServers.gateway.url == $expected' \
+                    ${artifactSource "clis/claude/managed-mcp"} > /dev/null
+                  jq --exit-status \
+                    --arg expected 'http://localhost:9876/mcp' \
+                    '.mcpServers.gateway.url == $expected' \
+                    ${variantClaudeMcp} > /dev/null
+                  jq --exit-status \
+                    --arg expected ${lib.escapeShellArg hostConfig.my.gatewayUrl} \
+                    '.mcpServers.gateway.serverUrl == $expected' \
+                    ${artifactSource "clis/antigravity/mcp"} > /dev/null
+                  jq --exit-status \
+                    --arg expected ${lib.escapeShellArg hostConfig.my.gatewayUrl} \
+                    '.mcp.gateway.url == $expected' \
+                    ${artifactSource "clis/opencode/config"} > /dev/null
+                  test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/system"} mcp_servers.gateway.url | jq -r .)" = \
+                    ${lib.escapeShellArg hostConfig.my.gatewayUrl}
+                  test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/user-seed"} model | jq -r .)" = \
+                    gpt-5.6-sol
+                  test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3111
+                  test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3112
+                  test "$(yq -r '.server.port' ${artifactSource "mcp/searxng/settings-template"})" = 8080
+                  test "$(yq -r '.valkey.url' ${artifactSource "mcp/searxng/settings-template"})" = valkey://valkey:6379/0
+                touch $out
+              '';
 
           playwright-runtime =
             assert (agentgatewayService.RuntimeDirectory or null) == "agentgateway";
@@ -1022,7 +1086,7 @@
             touch $out
           '';
 
-          # 配備対象 config の構文検査、@var@ 込みの template は dummy 値を焼き込んだ derivation を対象にする
+          # 各 producer が実配備へ渡す immutable source を形式別に検査する。
           config-syntax =
             pkgs.runCommandLocal "check-config-syntax"
               {

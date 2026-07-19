@@ -172,16 +172,7 @@ let
             "2025-11-25"
           ];
         };
-        probePolicy = {
-          cliTimeoutSeconds = 5;
-          systemTimeoutSeconds = 5;
-          windowsTimeoutSeconds = 5;
-          mcpRequestTimeoutSeconds = 5;
-          mcpCleanupTimeoutSeconds = 5;
-          totalTimeoutSeconds = 30;
-          maxPages = 20;
-          maxResponseBytes = 1048576;
-        };
+        probePolicy = cfg.doctor.probePolicy;
         wslInterop = cfg.doctor.wslInterop;
         nixLdPath = "/lib64/ld-linux-x86-64.so.2";
       };
@@ -413,6 +404,11 @@ in
     {
       assertion = builtins.length managedFilePaths == builtins.length (lib.unique managedFilePaths);
       message = "my.doctor.managedFiles contains duplicate runtime paths";
+    }
+    {
+      assertion =
+        cfg.doctor.probePolicy.mcpCleanupTimeoutSeconds < cfg.doctor.probePolicy.totalTimeoutSeconds;
+      message = "my.doctor.probePolicy must reserve time for active MCP requests";
     }
   ];
 

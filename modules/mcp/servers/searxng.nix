@@ -15,13 +15,11 @@ let
   port = "8080";
   valkeyPort = "6379";
 
-  settings = builtins.readFile (
-    pkgs.replaceVars ./searxng-settings.yml {
-      searxngSecret = placeholder."searxng/secret_key";
-      searxngPort = port;
-      inherit valkeyPort;
-    }
-  );
+  settingsTemplate = pkgs.replaceVars ./searxng-settings.yml {
+    searxngSecret = placeholder."searxng/secret_key";
+    searxngPort = port;
+    inherit valkeyPort;
+  };
 
   valkey = mkMcpBackend "valkey" {
     image = "valkey/valkey:latest@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9";
@@ -42,6 +40,11 @@ let
   };
 in
 {
+  my.configArtifacts."mcp/searxng/settings-template" = {
+    format = "yaml";
+    source = settingsTemplate;
+  };
+
   sops.secrets."searxng/secret_key" = { };
 
   sops.templates."searxng-settings.yml" = {
@@ -50,7 +53,7 @@ in
     owner = "root";
     group = "root";
     restartUnits = [ "docker-searxng.service" ];
-    content = settings;
+    content = builtins.readFile settingsTemplate;
   };
 
   virtualisation.oci-containers.containers = valkey.containers // searxng.containers;

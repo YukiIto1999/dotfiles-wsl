@@ -255,8 +255,14 @@ dotfiles-rebuild --rollback <transaction-id>
 
 `--resume` は receipt に固定した candidate を再適用または再検証する。`--rollback` は開始時の running
 generation を現在の状態に対して再分類し、同じ一段階または二段階の state machine で戻す。active receipt
-がある間は新しい build を開始しない。終了 status 4 は activation 失敗、5 は candidate doctor 失敗、
+がある間は新しい build を開始しない。終了 status 4 は activation 失敗、5 は target doctor 失敗、
 2 は不正な引数、receipt、runtime state を表す。activation と doctor の失敗を同じ成功・失敗へ丸めない。
+schema v3 の target doctor は report v1 を JSON で返す。rebuild は report が単一の JSON document であること、manifest schema、
+check、summary、doctor の終了 status と outcome の対応を検証する。doctor が `fail` または `error` にした安定 ID は
+receipt の `verification.failedCheckIds` に保存する。旧 receipt ではこの field の欠落を受理するが、明示的な `null` や
+重複 ID は不正とする。schema v3 の generation から schema v2 の recovery target へ戻す場合に限り、rebuild は
+旧 doctor を引数なしで1回実行し、status 0 / 1 を `legacy.doctor` check を持つ report v1 へ変換する。この移行経路を
+forward verification や schema が不明な target には適用しない。
 完了または drift で中止した receipt は
 `$GIT_COMMON_DIR/dotfiles-rebuild/receipts/<transaction-id>.json` へ移し、transaction 用 GC root を削除する。
 
@@ -266,19 +272,50 @@ flake input の更新は build と分け、明示的に `nix flake update` を�
 
 `nix flake check` と `dotfiles-doctor` は検査対象が異なるため、どちらも必要になる。flake check は評価した source から system closure と設定を生成できることを apply 前に検査する。doctor は apply 後の current generation が宣言した期待値と、system profile、systemd、SOPS host key、home 配下の CLI、MCP gateway の実状態が一致することを検査する。
 
-doctor の期待値は current generation の `/run/current-system/etc/dotfiles/doctor.json` に収録する。mutable な checkout や `share/AGENTS.md` の表は inventory として読まない。次をすべて満たした場合だけ status 0 になる。
+通常は人向け出力を使う。rebuild や診断ツールからは同じ result core を JSON で取得する。
+
+```bash
+dotfiles-doctor
+dotfiles-doctor --format json
+```
+
+| status | outcome | 意味 |
+|---:|---|---|
+| `0` | `healthy` | `pass` と `warn` だけで、実用状態に収束している |
+| `1` | `degraded` | runtime の不一致または依存 probe の `blocked` がある |
+| `2` | `invalid` | 有効な形式で起動したが、manifest または result core の contract が壊れている |
+| `2` | なし | 引数が不正で、result core を生成する前に終了した |
+| `130` / `143` | なし | INT / TERM を受け、session cleanup を試行して終了した |
+
+JSON report v1 は `schemaVersion`、`manifestSchemaVersion`、`outcome`、status 別件数を持つ `summary`、
+`checks` を返す。各 check は安定 `id`、`foundation` / `local` / `system` / `active` の phase、
+`pass` / `warn` / `fail` / `error` / `blocked`、subject、expected、observed、message、`durationMs` を持つ。
+human 出力もこの result core だけから生成する。
+
+doctor の期待値は current generation の `/run/current-system/etc/dotfiles/doctor.json` に manifest v3 として収録する。
+開始時に manifest を immutable な store path へ固定し、configured user と `HOME`、current generation、system profile、
+実行中 doctor、WSL cold-start state を foundation で検査する。foundation が失敗した場合は local、system、active phase を
+実行せず `blocked` とする。全 probe の後にも current、profile、manifest が同じ generation を指すことを再確認する。
+mutable な checkout や `share/AGENTS.md` の表は inventory として読まない。次をすべて満たした場合だけ status 0 になる。
 
 - system profile と実行中の doctor が current generation を指す
 - WSL cold-start state が `switch` で、追加の停止・起動を必要としない
-- 必須 unit の `LoadState` が `loaded`、`ActiveState` が `active`
+- 必須 unit の `LoadState`、`ActiveState` と、宣言した場合の `SubState`、`Result` が一致する。各 unit は1回の `systemctl show` で検査する
 - `/var/lib/sops-nix` が root `0700`、host key が root `0400` になっている。host/recovery key の移行中は home 側の旧 age key を警告し、移行完了後に policy を `reject` へ切り替えて残存を失敗にする
-- health registry に登録した Claude、Codex、agentgateway の管理ファイルと、trusted project 用の `.codex/config.toml` が current generation の source と byte 単位で一致する
+- health registry に登録した Claude、Codex、agentgateway、OpenCode の agentmemory capture plugin と、trusted project 用の `.codex/config.toml` が current generation の source と byte 単位で一致する
 - 各 AI CLI が `~/.local/bin` の宣言パスから実行され、rules file が source と一致し、期待する各 `SKILL.md` と各 agent file が存在する
-- OpenCode と Antigravity の gateway file が current generation の gateway URL を含む
+- OpenCode と Antigravity の gateway file が current generation の immutable source と byte 単位で一致する
 - `wslview` が current generation の宣言した実体を指し、`cmd.exe /d /c exit 0` の probe が5秒以内に成功する
 - MCP が `initialize`、`notifications/initialized`、全ページの `tools/list`、session `DELETE` を完走し、全 target が tool を公開する
 
-doctor は secret の値、AI CLI の配布元・内容・版・login session、skill 本文と agent file の内容、checkout の clean 状態を検査しない。source と build の検査は `dotfiles-rebuild` と flake check が行う。enrollment では host identity と recovery identity、bootstrap では host identity による秘密値の復号を確認する。
+systemd と root probe、CLI `--version`、Windows probe、MCP request の上限は各5秒である。MCP lifecycle 全体は30秒以内とし、
+そのうち5秒を session `DELETE` 用に予約する。pagination は20ページ、response は1 requestあたり1 MiBまでとする。
+MCP client は最新 stable の `2025-11-25` を要求する。agentgateway 1.3.1 は multiplex した upstream の最小 version を
+Streamable HTTP front の negotiated version として返し、この構成では `2024-11-05` が実測される。そのため
+`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25` を bridge の許容値にする。これは汎用 client として
+旧 HTTP+SSE transport fallback を実装したという意味ではない。
+
+doctor は secret の値、AI CLI の配布元・内容・期待版・login session、skill 本文と agent file の内容、checkout の clean 状態を検査しない。CLI は `--version` が上限内に非空で成功することだけを確認し、版を期待値と比較しない。source と build の検査は `dotfiles-rebuild` と flake check が行う。enrollment では host identity と recovery identity、bootstrap では host identity による秘密値の復号を確認する。MCP lifecycle は [MCP 2025-11-25 lifecycle](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle) と [Streamable HTTP transport](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports) に従う。agentgateway の version 集約は [v1.3.1 `merge_initialize`](https://github.com/agentgateway/agentgateway/blob/v1.3.1/crates/agentgateway/src/mcp/handler.rs#L360-L396) に基づく。
 
 ## AI コーディング CLI
 

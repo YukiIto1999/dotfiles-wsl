@@ -6,7 +6,7 @@ Accepted
 
 ## 背景
 
-従来の `dotfiles-doctor` は probe の途中で `OK`、`WARN`、`FAIL` を直接表示し、global counter で終了 status を決めていた。この構造では、人向け表示と機械処理が別の事実を読む。
+従来の `dotfiles-doctor` は probe の途中で `OK`、`WARN`、`FAIL` を直接表示し、global counter で終了 status を決めていた。この構造では、人向け表示と機械処理が別の事実を読む。rebuild が文章を解析すれば表示変更が transaction の成功判定を壊し、終了 status だけを読めば失敗した check を receipt に残せない。
 
 manifest の破損、runtime の不収束、依存元の失敗による未実行も区別できなかった。current generation が成立しない状態で高コストな probe を続けると、異なる世代や user identity の外部状態を診断結果へ混ぜる。
 
@@ -33,10 +33,12 @@ result core を生成した場合、終了 status と outcome を次の対応に
 | `2` | report なし | 引数が不正で、result core を生成する前に終了した |
 | `130` / `143` | report なし | INT / TERM を受け、所有する session の cleanup を試行した |
 
+rebuild は forward target と schema v3 の rollback target について、closure 内の doctor を `--format json` で1回だけ実行する。doctor の raw status を成功判定の正本にしつつ、JSON document 数、report と manifest の schema、全 check field、ID 一意性、summary 再計算、status / outcome の対応を検証する。検証できない report は `doctor.report` の contract failure とし、doctor が0を返していても status 2へ正規化する。検証できた `fail` / `error` の ID は receipt schema v2 の `verification.failedCheckIds` に保存する。
 
+schema v3 を導入する最初の世代では、recovery target が schema v2 の旧 generation になり得る。rollback target の manifest が schema v2 だと確認できた場合だけ、rebuild は旧 doctor を引数なしで1回実行する。旧 doctor の human 出力を保持したうえで、status 0を `healthy`、status 1を `degraded` とする report v1へ変換し、`legacy.doctor` check と manifest schema 2を明示して同じ validator に通す。それ以外の status は変換せず `doctor.report` とする。この互換経路は forward target、schema v3、schema が不明な target には広げない。schema v2 の generation を recovery target として扱わなくなった時点で削除する。
 
 ## 影響
 
-probe の副作用と表示を分離できる。human 文言と JSON report は同じ result core から生成する。
+probe の副作用と表示を分離できる。human 文言を変更しても rebuild の判定は変わらず、rebuild は report の outcome だけで doctor の raw status を上書きしない。失敗した transaction は store path と check ID を同じ receipt に残すため、resume は同じ candidate の再検証から再開できる。
 
 report は観測結果であり、宣言状態の新しい正本ではない。期待値は ADR 0010 の manifest v3 だけに置く。report を checkout に保存したり、次回 doctor の入力として再利用したりしない。

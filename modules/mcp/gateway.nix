@@ -40,6 +40,11 @@ let
   };
 in
 {
+  my.configArtifacts."mcp/agentgateway/config" = {
+    format = "yaml";
+    source = gatewayConfig;
+  };
+
   # probe 等の user コード読み取りに必要な user 権限
   systemd.services.agentgateway = {
     description = "agentgateway MCP aggregator";

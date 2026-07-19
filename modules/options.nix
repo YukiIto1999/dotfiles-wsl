@@ -60,6 +60,30 @@ in
       description = "SOPS host identity migration state. Doctor derives the legacy home-key policy from this domain state.";
     };
 
+    configArtifacts = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            format = lib.mkOption {
+              type = lib.types.enum [
+                "json"
+                "toml"
+                "yaml"
+              ];
+              description = "構文検査に使う serialization format。";
+            };
+            source = lib.mkOption {
+              type = lib.types.path;
+              description = "配備側と検査側が共有する immutable source。";
+            };
+          };
+        }
+      );
+      default = { };
+      internal = true;
+      description = "実配備 producer が一度だけ生成する不変設定 artifact。配備方法は各 module が所有する。";
+    };
+
     doctor = {
       schemaVersion = lib.mkOption {
         type = lib.types.ints.positive;
@@ -122,6 +146,33 @@ in
         default = { };
         internal = true;
         description = "dotfiles-doctor が current generation の source と比較する file。";
+      };
+
+      probePolicy = lib.mkOption {
+        type = lib.types.submodule {
+          options = {
+            cliTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+            systemTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+            windowsTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+            mcpRequestTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+            mcpCleanupTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+            totalTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+            maxPages = lib.mkOption { type = lib.types.ints.positive; };
+            maxResponseBytes = lib.mkOption { type = lib.types.ints.positive; };
+          };
+        };
+        default = {
+          cliTimeoutSeconds = 5;
+          systemTimeoutSeconds = 5;
+          windowsTimeoutSeconds = 5;
+          mcpRequestTimeoutSeconds = 5;
+          mcpCleanupTimeoutSeconds = 5;
+          totalTimeoutSeconds = 30;
+          maxPages = 20;
+          maxResponseBytes = 1048576;
+        };
+        internal = true;
+        description = "doctor の bounded probe が共有する制限値。";
       };
 
       skillNames = lib.mkOption {

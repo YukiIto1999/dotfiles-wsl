@@ -21,6 +21,10 @@ let
   codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
     sandbox_workspace_write.writable_roots = [ "${cfg.dotfilesDir}/.git" ];
   };
+  codexSystemConfig = pkgs.replaceVars ./config-system.toml {
+    inherit (cfg) gatewayUrl;
+  };
+  codexUserSeed = pkgs.replaceVars ./config.toml { inherit codexModel; };
 
   splitFrontmatter =
     src:
@@ -76,6 +80,21 @@ in
   # codex の workspace-write sandbox が PATH 上に要求する bubblewrap
   environment.systemPackages = [ pkgs.bubblewrap ];
 
+  my.configArtifacts = {
+    "clis/codex/system" = {
+      format = "toml";
+      source = codexSystemConfig;
+    };
+    "clis/codex/project" = {
+      format = "toml";
+      source = codexProjectConfig;
+    };
+    "clis/codex/user-seed" = {
+      format = "toml";
+      source = codexUserSeed;
+    };
+  };
+
   assertions = [
     {
       assertion = dotfilesDirIsBelowHome;
@@ -85,9 +104,7 @@ in
 
   # codex は user seed の ~/.codex/config.toml をこの上に merge
   # gateway と hooks は全 project 共通、checkout の Git 権限は trusted project config に限定
-  environment.etc."codex/config.toml".source = pkgs.replaceVars ./config-system.toml {
-    inherit (cfg) gatewayUrl;
-  };
+  environment.etc."codex/config.toml".source = codexSystemConfig;
 
   my.doctor.managedFiles = {
     codex-system = {
@@ -105,7 +122,7 @@ in
     {
       home.file.${codexProjectHomePath}.source = codexProjectConfig;
       home.activation.seedCodexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] (
-        seedConfig ".codex/config.toml" (pkgs.replaceVars ./config.toml { inherit codexModel; })
+        seedConfig ".codex/config.toml" codexUserSeed
       );
     };
 }

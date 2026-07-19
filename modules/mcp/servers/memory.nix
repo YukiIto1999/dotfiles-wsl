@@ -36,6 +36,11 @@ let
   };
 in
 {
+  my.configArtifacts."mcp/agentmemory/config" = {
+    format = "yaml";
+    source = agentmemoryConfig;
+  };
+
   sops.secrets."opencode/go_api_key" = { };
 
   # LLM は OpenCode Go の OpenAI 互換 endpoint

@@ -7,6 +7,9 @@
 
 let
   cfg = config.my;
+  opencodeConfig = pkgs.replaceVars ./opencode.json {
+    inherit (cfg) gatewayUrl;
+  };
 
   splitFrontmatter =
     src:
@@ -57,9 +60,12 @@ in
     };
   };
 
+  my.configArtifacts."clis/opencode/config" = {
+    format = "json";
+    source = opencodeConfig;
+  };
+
   home-manager.users.${cfg.username} = _: {
-    home.file.".config/opencode/opencode.json".source = pkgs.replaceVars ./opencode.json {
-      inherit (cfg) gatewayUrl;
-    };
+    home.file.".config/opencode/opencode.json".source = opencodeConfig;
   };
 }

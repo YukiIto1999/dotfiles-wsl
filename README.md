@@ -424,7 +424,7 @@ dotfiles-rebuild
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(配備する JSON / TOML / YAML の構文検査、`@var@` 埋め込み箇所は dummy 値を埋めた derivation で検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`config-artifact-contract`(実配備 source と構文検査 projection の同一性、実値の反映)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(各 module が実配備へ渡す JSON / TOML / YAML artifact の構文検査)。
 
 ## License
 

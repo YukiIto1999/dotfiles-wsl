@@ -25,6 +25,11 @@ let
         accountToken = placeholder."accounts/${name}/token";
       }
     );
+  ghHostsTemplate = pkgs.replaceVars ./hosts.yml {
+    accountUsers = lib.concatMapStrings buildGhUser cfg.accounts;
+    primaryUsername = placeholder."accounts/${builtins.head cfg.accounts}/username";
+    primaryToken = placeholder."accounts/${builtins.head cfg.accounts}/token";
+  };
 in
 {
   sops.secrets = lib.listToAttrs (
@@ -43,19 +48,14 @@ in
     ]) cfg.accounts
   );
 
-  sops.templates = lib.optionalAttrs (cfg.accounts != [ ]) (
-    let
-      primaryAccount = builtins.head cfg.accounts;
-      ghHosts = builtins.readFile (
-        pkgs.replaceVars ./hosts.yml {
-          accountUsers = lib.concatMapStrings buildGhUser cfg.accounts;
-          primaryUsername = placeholder."accounts/${primaryAccount}/username";
-          primaryToken = placeholder."accounts/${primaryAccount}/token";
-        }
-      );
-    in
-    {
-      "gh-hosts.yml" = userTpl "${userHome}/.config/gh/hosts.yml" ghHosts;
-    }
-  );
+  my.configArtifacts = lib.optionalAttrs (cfg.accounts != [ ]) {
+    "accounts/gh-hosts" = {
+      format = "yaml";
+      source = ghHostsTemplate;
+    };
+  };
+
+  sops.templates = lib.optionalAttrs (cfg.accounts != [ ]) {
+    "gh-hosts.yml" = userTpl "${userHome}/.config/gh/hosts.yml" (builtins.readFile ghHostsTemplate);
+  };
 }

@@ -671,18 +671,18 @@ mcp_record_fail() {
 mcp_request() {
   local method=$1 url=$2 payload=$3 session=$4 protocol=$5
   local -a curl_args
-  local request_timeout cleanup_timeout remaining elapsed now max_response
+  local request_timeout cleanup_timeout remaining elapsed max_response
 
   request_timeout=$(jq -r '.probePolicy.mcpRequestTimeoutSeconds' "$manifest")
   cleanup_timeout=$(jq -r '.probePolicy.mcpCleanupTimeoutSeconds' "$manifest")
   max_response=$(jq -r '.probePolicy.maxResponseBytes' "$manifest")
-  now=$(date +%s)
-  elapsed=$((now - mcp_started_epoch))
+  elapsed=$((SECONDS - mcp_started_seconds))
   remaining=$((mcp_total_timeout - elapsed))
   if [[ $mcp_cleanup_done -eq 1 ]]; then
     request_timeout=$cleanup_timeout
-  elif [[ -n $mcp_session ]]; then
-    remaining=$((remaining - cleanup_timeout))
+  else
+    # 整数秒の境界をまたぐ scheduling 分も確保し、cleanup reserve を active request に渡さない。
+    remaining=$((remaining - cleanup_timeout - 1))
   fi
   if [[ $remaining -le 0 ]]; then
     mcp_curl_status=124
@@ -923,7 +923,7 @@ else
     "MCP health unit is healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
   mcp_url=$(jq -r '.mcp.url' "$manifest")
   mcp_total_timeout=$(jq -r '.probePolicy.totalTimeoutSeconds' "$manifest")
-  mcp_started_epoch=$(date +%s)
+  mcp_started_seconds=$SECONDS
   mcp_tmp=$(mktemp -d)
   mcp_check_started_ms=$(now_ms)
   check_mcp

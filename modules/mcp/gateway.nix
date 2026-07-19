@@ -63,7 +63,12 @@ in
   environment.etc."agentgateway/config.yaml".source = gatewayConfig;
 
   my.doctor = {
-    units = [ "agentgateway.service" ];
+    units."agentgateway.service".expected = {
+      LoadState = "loaded";
+      ActiveState = "active";
+      SubState = "running";
+      Result = "success";
+    };
     managedFiles.agentgateway = {
       path = "/etc/agentgateway/config.yaml";
       source = gatewayConfig;

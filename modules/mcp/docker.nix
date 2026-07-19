@@ -21,6 +21,18 @@ in
       ports ? [ ],
       deps ? [ ],
     }:
+    let
+      backendSystemdServices = {
+        "docker-${name}" = {
+          after = [ "docker-mcp-backends-network.service" ] ++ deps;
+          requires = [ "docker-mcp-backends-network.service" ] ++ deps;
+          serviceConfig = {
+            Restart = lib.mkForce "always";
+            RestartSec = "5s";
+          };
+        };
+      };
+    in
     {
       containers."${name}" = {
         inherit image;
@@ -38,14 +50,18 @@ in
           "127.0.0.1:${port}:${port}"
         ]) ports;
       };
-      systemdServices."docker-${name}" = {
-        after = [ "docker-mcp-backends-network.service" ] ++ deps;
-        requires = [ "docker-mcp-backends-network.service" ] ++ deps;
-        serviceConfig = {
-          Restart = lib.mkForce "always";
-          RestartSec = "5s";
-        };
-      };
+      systemdServices = backendSystemdServices;
+      doctorUnits = lib.mapAttrs' (
+        unitName: _:
+        lib.nameValuePair "${unitName}.service" {
+          expected = {
+            LoadState = "loaded";
+            ActiveState = "active";
+            SubState = "running";
+            Result = "success";
+          };
+        }
+      ) backendSystemdServices;
     };
 
   users.users.${cfg.username}.extraGroups = [ "docker" ];
@@ -70,8 +86,18 @@ in
     '';
   };
 
-  my.doctor.units = [
-    "docker.service"
-    "docker-mcp-backends-network.service"
-  ];
+  my.doctor.units = {
+    "docker.service".expected = {
+      LoadState = "loaded";
+      ActiveState = "active";
+      SubState = "running";
+      Result = "success";
+    };
+    "docker-mcp-backends-network.service".expected = {
+      LoadState = "loaded";
+      ActiveState = "active";
+      SubState = "exited";
+      Result = "success";
+    };
+  };
 }

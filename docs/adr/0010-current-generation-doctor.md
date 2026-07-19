@@ -14,19 +14,23 @@ MCP 検査は `initialize` で session ID を得た後、初期化完了通知�
 
 ## 決定
 
-評価済み NixOS / Home Manager 設定から version 2 の JSON manifest を生成し、current system closure の `etc/dotfiles/doctor.json` に収録する。doctor は `/run/current-system/etc/dotfiles/doctor.json` だけを期待値として読み、checkout と Markdown の表を参照しない。
+評価済み NixOS / Home Manager 設定から version 3 の JSON manifest を生成し、current system closure の `etc/dotfiles/doctor.json` に収録する。doctor は開始時に `/run/current-system/etc/dotfiles/doctor.json` を immutable な store path へ固定する。以後は固定した manifest だけを期待値として読み、checkout と Markdown の表を参照しない。全 probe の後に current、system profile、manifest の canonical path を再取得し、開始時の generation から変わっていれば失敗にする。
 
 unit と managed file の health 宣言は、対象を定義する module に隣接させる。CLI と skill の一覧は既存の `my.clis` と `allSkills` から導出する。manifest は次を保持する。
 
 - current、booted、system profile の論理パス
-- 必須 systemd unit
-- runtime file と比較する immutable source
+- configured user と home
+- 安定 ID を持つ必須 systemd unit と、`LoadState`、`ActiveState`、任意の `SubState`、`Result`
+- 安定 ID を持つ runtime file と、比較する immutable source
 - CLI ごとの固定 binary path、rules、skills、agent file 名、gateway file
 - SOPS metadata probe と、旧 home key のパス、移行状態を表す `warn` / `reject` policy
 - current generation の `wslview` と Windows 側 `cmd.exe` の固定パス
-- MCP URL、target、要求 version、許容する negotiated version の一覧
+- MCP URL、health unit、target、要求 version、許容する negotiated version の一覧
+- system、CLI、Windows、MCP request、MCP cleanup、MCP lifecycle、page 数、response size の probe policy
 
-doctor は system profile と実行中の doctor が current generation を指すことを canonical path で確認する。WSL の状態は ADR 0008 の classifier を使い、effect が `switch` の場合だけ成功とする。unit は待機せず `LoadState=loaded` と `ActiveState=active` を要求する。
+doctor は process の user と `HOME` が manifest の configured identity と一致し、system profile と実行中の doctor が current generation を指すことを canonical path で確認する。WSL の状態は ADR 0008 の classifier を使い、effect が `switch` の場合だけ成功とする。これら foundation check が失敗した場合、別 user の home へ設定を生成し得る CLI や、system、Windows、MCP probe を実行しない。
+
+unit は待機せず、1回の `systemctl show` で宣言済み property を取得して一つの check result にする。systemd と SOPS root probe は5秒で打ち切る。managed file、rules、gateway file は URL の部分一致ではなく、manifest が指す immutable source と byte 単位で比較する。
 
 SOPS host key は一般ユーザーから読めない。固定した `/var/lib/sops-nix` と `key.txt` の UID、GID、mode だけを返す immutable な root probe を生成し、その引数なし command だけを sudo rule に登録する。probe は鍵本文を開かない。directory は root `0700`、key は root `0400` を要求する。home 側の旧 age key は移行中の `warn` では警告し、host key とオフライン復旧鍵の復号実測後に `reject` へ切り替えて失敗にする。
 
@@ -39,11 +43,15 @@ MCP は一つの session で次を順番どおり実行する。
 3. 同じ header で `tools/list` を全ページ取得し、各 target の prefix を持つ tool を確認する。
 4. 正常終了、検査失敗、INT、TERM のいずれでも同じ冪等 cleanup から session を `DELETE` する。
 
-JSON と SSE の両 response を受け付ける。SSE は event 境界を保ち、notification を読み飛ばして要求 ID に対応する response を選ぶ。request は5秒、pagination は100ページで上限を設ける。この構成では gateway を所有しているため、session `DELETE` は 2xx 以外を失敗とする。
+JSON と SSE の両 response を受け付ける。SSE は event 境界を保ち、notification を読み飛ばして要求 ID に対応する response を選ぶ。各 request は5秒、lifecycle 全体は30秒、pagination は20ページ、response は1 requestあたり1 MiBで上限を設ける。30秒のうち5秒は cleanup 用に予約し、通常 request が使い切らないようにする。この構成では gateway を所有しているため、session `DELETE` は 2xx 以外を失敗とする。
+
+要求 protocol version は最新 stable の `2025-11-25` とする。agentgateway 1.3.1 は multiplex した upstream の最小 version を initialize result に集約する。稼働中 gateway へ `2025-11-25` を要求して `2024-11-05` が返ることを initialize と DELETE の一 session で実測した。そのため `2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25` を negotiated version として許容する。`2024-11-05` は agentgateway の Streamable HTTP bridge に対する構成固有の互換値であり、doctor が旧 HTTP+SSE transport fallback を実装するという決定ではない。
 
 ## 影響
 
 flake check は宣言から artifact を作れること、doctor は current generation の宣言と外部状態が収束したことを担当する。両者は代替関係ではない。
+
+doctor の probe、集約、表示、終了 status の関係は ADR 0011 の report contract に従う。
 
 doctor は checkout の clean 状態、secret の値、AI CLI 本体の配布元・内容・版と認証状態、skill 本文、agent file の内容、agentmemory の保存内容を保証しない。これらは rebuild の preflight、enrollment と bootstrap の復号確認、各 application の診断に分ける。
 
@@ -51,5 +59,6 @@ manifest は秘密値を持たず、runtime の期待値を増やす独立した
 
 ## 一次資料
 
-- [MCP lifecycle 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/basic/lifecycle)
-- [MCP transports 2025-06-18](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
+- [MCP lifecycle 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle)
+- [MCP transports 2025-11-25](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports)
+- [agentgateway v1.3.1: multiplex initialize result の version 集約](https://github.com/agentgateway/agentgateway/blob/v1.3.1/crates/agentgateway/src/mcp/handler.rs#L360-L396)

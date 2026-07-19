@@ -228,6 +228,60 @@
           expectedWslInteropJson =
             (pkgs.formats.json { }).generate "doctor-wsl-interop.json"
               hostConfig.my.doctor.wslInterop;
+          expectedDoctorUnits = lib.mapAttrsToList (id: unit: {
+            inherit id;
+            expected = lib.filterAttrs (_: value: value != null) unit.expected;
+          }) hostConfig.my.doctor.units;
+          expectedDoctorUnitsJson = (pkgs.formats.json { }).generate "doctor-units.json" expectedDoctorUnits;
+          expectedManagedFiles = lib.mapAttrsToList (id: file: {
+            inherit id;
+            inherit (file) path source;
+          }) hostConfig.my.doctor.managedFiles;
+          expectedManagedFilesJson =
+            (pkgs.formats.json { }).generate "doctor-managed-files.json"
+              expectedManagedFiles;
+          expectedCliContracts = map (
+            name:
+            let
+              cli = hostConfig.my.clis.${name};
+            in
+            {
+              inherit name;
+              binaryName = cli.binary;
+              binaryPath = "${hostConfig.my.homeDir}/.local/bin/${cli.binary}";
+              rules = {
+                path = "${hostConfig.my.homeDir}/${cli.rulesFile}";
+                source = homeFiles.${cli.rulesFile}.source;
+              };
+              skills = {
+                directory = "${hostConfig.my.homeDir}/${cli.skillsDir}";
+                names = directHomeFilesIn cli.skillsDir;
+              };
+              agents = expectedAgents.${name};
+              gatewayFile =
+                if cli.gatewayFile == null then
+                  null
+                else
+                  {
+                    path = "${hostConfig.my.homeDir}/${cli.gatewayFile}";
+                    source = homeFiles.${cli.gatewayFile}.source;
+                  };
+            }
+          ) (builtins.attrNames hostConfig.my.clis);
+          expectedCliContractsJson = (pkgs.formats.json { }).generate "doctor-clis.json" expectedCliContracts;
+          expectedMcpTargetsJson = (pkgs.formats.json { }).generate "doctor-mcp-targets.json" (
+            builtins.attrNames hostConfig.my.mcp.targets
+          );
+          expectedProbePolicyJson = (pkgs.formats.json { }).generate "doctor-probe-policy.json" {
+            cliTimeoutSeconds = 5;
+            systemTimeoutSeconds = 5;
+            windowsTimeoutSeconds = 5;
+            mcpRequestTimeoutSeconds = 5;
+            mcpCleanupTimeoutSeconds = 5;
+            totalTimeoutSeconds = 30;
+            maxPages = 20;
+            maxResponseBytes = 1048576;
+          };
           codexProjectRuntimePath = "${hostConfig.my.dotfilesDir}/.codex/config.toml";
           sopsKeyFile = "/var/lib/sops-nix/key.txt";
           sopsKeyDirectoryPolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix".d;
@@ -795,6 +849,10 @@
               '';
 
           doctor-manifest-contract =
+            assert lib.all (id: builtins.hasAttr id hostConfig.systemd.units) (
+              builtins.attrNames hostConfig.my.doctor.units
+            );
+            assert builtins.hasAttr "agentgateway.service" hostConfig.my.doctor.units;
             pkgs.runCommandLocal "check-doctor-manifest-contract"
               {
                 nativeBuildInputs = [ pkgs.jq ];
@@ -806,8 +864,40 @@
                   --arg expectedPolicy ${
                     lib.escapeShellArg (if hostConfig.my.sops.enrollmentState == "enrolled" then "reject" else "warn")
                   } \
-                  '.schemaVersion == 2 and .sops.homeKey.policy == $expectedPolicy' \
+                  --argjson expectedSchemaVersion ${toString hostConfig.my.doctor.schemaVersion} \
+                  '.schemaVersion == $expectedSchemaVersion and .sops.homeKey.policy == $expectedPolicy' \
                   ${doctorManifest} > /dev/null
+
+                jq --sort-keys 'sort_by(.id)' ${expectedDoctorUnitsJson} > expected-units.json
+                jq --sort-keys '.units | sort_by(.id)' ${doctorManifest} > actual-units.json
+                diff --unified expected-units.json actual-units.json
+
+                jq --sort-keys 'sort_by(.id)' ${expectedManagedFilesJson} > expected-managed-files.json
+                jq --sort-keys '.managedFiles | sort_by(.id)' ${doctorManifest} > actual-managed-files.json
+                diff --unified expected-managed-files.json actual-managed-files.json
+
+                jq --sort-keys 'sort_by(.name)' ${expectedCliContractsJson} > expected-clis.json
+                jq --sort-keys '.clis | sort_by(.name)' ${doctorManifest} > actual-clis.json
+                diff --unified expected-clis.json actual-clis.json
+
+                jq --sort-keys '.' ${expectedMcpTargetsJson} > expected-mcp-targets.json
+                jq --sort-keys '.mcp.targets' ${doctorManifest} > actual-mcp-targets.json
+                diff --unified expected-mcp-targets.json actual-mcp-targets.json
+
+                jq --exit-status '
+                  .mcp.healthUnit == "agentgateway.service" and
+                  .mcp.requestedProtocolVersion == "2025-11-25" and
+                  .mcp.supportedProtocolVersions == [
+                    "2024-11-05",
+                    "2025-03-26",
+                    "2025-06-18",
+                    "2025-11-25"
+                  ]
+                ' ${doctorManifest} > /dev/null
+
+                jq --sort-keys '.' ${expectedProbePolicyJson} > expected-probe-policy.json
+                jq --sort-keys '.probePolicy' ${doctorManifest} > actual-probe-policy.json
+                diff --unified expected-probe-policy.json actual-probe-policy.json
 
                 jq --sort-keys '
                   [.clis[] | {
@@ -831,7 +921,17 @@
                 jq --exit-status \
                   --arg path ${lib.escapeShellArg codexProjectRuntimePath} \
                   --arg source ${lib.escapeShellArg (toString codexProjectConfig)} \
-                  'any(.managedFiles[]; .path == $path and .source == $source)' \
+                  'any(.managedFiles[]; .id == "codex-project" and .path == $path and .source == $source)' \
+                  ${doctorManifest} > /dev/null
+
+                jq --exit-status \
+                  --arg path ${lib.escapeShellArg "${hostConfig.my.homeDir}/.config/opencode/plugins/agentmemory-capture.ts"} \
+                  --arg source ${lib.escapeShellArg (toString hostConfig.my.doctor.managedFiles.agentmemory-opencode-capture.source)} \
+                  'any(.managedFiles[];
+                    .id == "agentmemory-opencode-capture" and
+                    .path == $path and
+                    .source == $source
+                  )' \
                   ${doctorManifest} > /dev/null
 
                 touch $out

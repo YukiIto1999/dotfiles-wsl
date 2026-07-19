@@ -26,6 +26,7 @@ root_state=$test_root/root-state.json
 cli_version_state=$test_root/cli-version-state
 mcp_scenario=$test_root/mcp-scenario
 mcp_call_log=$test_root/mcp-call-log
+mcp_timeout_log=$test_root/mcp-timeout-log
 managed_source=$test_root/store/managed.conf
 managed_runtime=$test_root/runtime/managed.conf
 rules_source=$test_root/store/AGENTS.md
@@ -231,6 +232,7 @@ fi
 request_data=$data
 [[ -n $request_data ]] || request_data='{}'
 rpc_method=$(jq -r '.method // "delete"' <<< "$request_data")
+printf '%s|%s\n' "$rpc_method" "$max_time" >> "$DOCTOR_TEST_MCP_TIMEOUT_LOG"
 cursor_present=0
 cursor='<absent>'
 if jq -e '(.params | type) == "object" and (.params | has("cursor"))' \
@@ -535,6 +537,7 @@ reset_fixture() {
   mcp_max_times=5
   mcp_max_filesize=1048576
   : > "$mcp_call_log"
+  : > "$mcp_timeout_log"
   : > "$systemctl_call_log"
   : > "$sudo_call_log"
   : > "$cli_call_log"
@@ -566,6 +569,7 @@ run_doctor() {
     DOCTOR_TEST_WINDOWS_CALL_LOG=$windows_call_log \
     DOCTOR_TEST_MCP_SCENARIO=$mcp_scenario \
     DOCTOR_TEST_MCP_CALL_LOG=$mcp_call_log \
+    DOCTOR_TEST_MCP_TIMEOUT_LOG=$mcp_timeout_log \
     DOCTOR_TEST_MCP_URL='http://127.0.0.1:1/mcp' \
     DOCTOR_TEST_MCP_REQUESTED_PROTOCOL='2025-11-25' \
     DOCTOR_TEST_MCP_MAX_TIMES=$mcp_max_times \
@@ -673,6 +677,21 @@ assert_mcp_call_log() {
   fi
 }
 
+assert_reserved_cleanup_timeouts() {
+  local label=$1
+  if ! awk -F '|' '
+    NR == 1 { valid = ($1 == "initialize" && ($2 == 1 || $2 == 2)) }
+    NR == 2 { valid = valid && ($1 == "notifications/initialized" && ($2 == 1 || $2 == 2)) }
+    NR == 3 { valid = valid && ($1 == "tools/list" && ($2 == 1 || $2 == 2)) }
+    NR == 4 { valid = valid && ($1 == "delete" && $2 == 1) }
+    END { exit !(NR == 4 && valid) }
+  ' "$mcp_timeout_log"; then
+    echo "$label: MCP timeout reservation mismatch" >&2
+    sed 's/^/  /' "$mcp_timeout_log" >&2
+    failed=1
+  fi
+}
+
 expect_mcp_success() {
   local label=$1 scenario=$2 expected_calls=$3
   reset_fixture
@@ -765,7 +784,7 @@ configured_user_mismatch() { jq '.user.name = "different-user"' "$manifest" > "$
 generation_switch_during_active() { printf '%s\n' 'switch-generation' > "$cli_version_state"; }
 mcp_page_limit_one() { jq '.probePolicy.maxPages = 1' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 mcp_response_limit_small() { jq '.probePolicy.maxResponseBytes = 256' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; mcp_max_filesize=256; }
-mcp_total_budget_short() { jq '.probePolicy.totalTimeoutSeconds = 4 | .probePolicy.mcpCleanupTimeoutSeconds = 1' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; mcp_max_times=1,2,3,4; }
+mcp_total_budget_short() { jq '.probePolicy.totalTimeoutSeconds = 4 | .probePolicy.mcpCleanupTimeoutSeconds = 1' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; mcp_max_times=1,2; }
 
 reset_fixture
 run_doctor
@@ -1102,6 +1121,7 @@ $tools_call
 $delete_call" \
   mcp_total_budget_short \
   10
+assert_reserved_cleanup_timeouts 'MCP total budget with reserved cleanup'
 
 expect_mcp_failure \
   'MCP repeated empty cursor' \

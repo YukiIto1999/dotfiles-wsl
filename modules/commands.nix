@@ -115,8 +115,8 @@ let
     imageFile = if image.imageFile == null then null else toString image.imageFile;
   }) cfg.ociImages;
 
-  ociImageManifest = (pkgs.formats.json { }).generate "dotfiles-oci-images-v1.json" {
-    schemaVersion = 1;
+  ociImageManifest = (pkgs.formats.json { }).generate "dotfiles-oci-images-v2.json" {
+    schemaVersion = 2;
     images = ociImageManifestEntries;
   };
 
@@ -281,9 +281,19 @@ let
     bootIdFile = "/proc/sys/kernel/random/boot_id";
     nixGcAutoRootDir = "/nix/var/nix/gcroots/auto";
     nixStoreDir = builtins.storeDir;
+    systemProfilePath = "/nix/var/nix/profiles/system";
     nixosRebuild = lib.escapeShellArg (lib.getExe config.system.build.nixos-rebuild);
+    nixosRebuildPath = lib.getExe config.system.build.nixos-rebuild;
+    sudoCommand = lib.escapeShellArg "${config.security.wrapperDir}/sudo";
+    awk = lib.escapeShellArg (lib.getExe pkgs.gawk);
+    activationLogLimitBytes = toString (8 * 1024 * 1024);
+    legacySchema2RebuildSourceSha256 = "6981dc736aa6c38070e448b8568aa96ea67802611675129cea60ef5bfbe0c710";
+    legacySchema2CandidateHelperSha256 = "6a88d31acbc01b0da1c474757bcfd02dfd58a0fc95230a1fb1ef168af57a6ae5";
+    legacySchema2NixpkgsRev = "bd0ff2d3eac24699c3664d5966b9ef36f388e2ca";
+    legacySchema2NixosRebuildPath = "/nix/store/gi6qsdlby13jf9szb23blh8rmywvi81i-nixos-rebuild-ng-26.05/bin/nixos-rebuild";
     operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
     ociImageStateFunctions = builtins.readFile ../scripts/lib/oci-image-state.sh;
+    rebuildAttemptFunctions = builtins.readFile ../scripts/lib/rebuild-attempt.sh;
     rebuildReceiptFunctions = builtins.readFile ../scripts/lib/rebuild-receipt.sh;
     installTable = lib.concatStringsSep "\n" (map installRow names);
     cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
@@ -309,7 +319,6 @@ let
       gnugrep
       coreutils
       systemd
-      sudo
       util-linux
       rootProbe
       wslRestartRequired
@@ -326,12 +335,12 @@ let
       (
         (with pkgs; [
           git
+          gawk
           coreutils
           jq
           nix
           nix-output-monitor
           nvd
-          sudo
           systemd
           util-linux
         ])
@@ -353,6 +362,8 @@ let
     name: allowTestHooks:
     pkgs.writeShellApplication {
       inherit name;
+      # active rebuild の判定に同じ full receipt validator を埋め込む。validator library 内の更新関数は呼ばない。
+      excludeShellChecks = [ "SC2329" ];
       runtimeInputs = with pkgs; [
         coreutils
         git
@@ -373,6 +384,9 @@ let
                 manifest=''${DOTFILES_IMAGE_SYNC_TEST_MANIFEST:-$manifest}
                 state_root=''${DOTFILES_IMAGE_SYNC_TEST_STATE_ROOT:-$state_root}
                 docker_command=''${DOTFILES_IMAGE_SYNC_TEST_DOCKER:-$docker_command}
+                dotfiles=''${DOTFILES_IMAGE_SYNC_TEST_DOTFILES:-$dotfiles}
+                nix_store_dir=''${DOTFILES_IMAGE_SYNC_TEST_NIX_STORE_DIR:-$nix_store_dir}
+                expected_user=''${DOTFILES_IMAGE_SYNC_TEST_EXPECTED_USER:-$expected_user}
               ''
             else
               ''
@@ -501,7 +515,8 @@ let
     lib.getExe sopsTestSudo
   );
   sopsEnroll =
-    (mkSopsEnroll "dotfiles-sops-enroll" "0" sopsKeyctl (lib.getExe pkgs.sudo)).overrideAttrs
+    (mkSopsEnroll "dotfiles-sops-enroll" "0" sopsKeyctl "${config.security.wrapperDir}/sudo")
+    .overrideAttrs
       (old: {
         passthru = (old.passthru or { }) // {
           testPackage = sopsEnrollTest;

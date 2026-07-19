@@ -491,6 +491,7 @@ awk -v library="$oci_image_state_source" '
 ' "$doctor_source" | sed \
   -e "s|@doctorManifestPath@|$manifest|g" \
   -e 's|@doctorSchemaVersion@|4|g' \
+  -e "s|@sudoCommand@|$fake_bin/sudo|g" \
   > "$rendered_doctor"
 chmod +x "$rendered_doctor"
 sed '/local id=\$1 phase=\$2 status=\$3 subject=\$4 expected=\$5 observed=\$6 message=\$7 duration=\$8/a\  message=' \

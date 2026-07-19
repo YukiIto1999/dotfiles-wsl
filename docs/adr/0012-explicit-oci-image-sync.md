@@ -20,14 +20,16 @@ Nix で生成した artifact と外部 registry から取得する cache entry �
 `my.ociImages` を OCI image の typed inventory とする。各 entry は container 名、実行時の image
 reference、取得責任を持つ。upstream entry は repository と sha256 digest を必須にし、Nix entry は
 `imageFile` を必須にする。inventory が全 container 宣言を一度ずつ被覆し、image と `imageFile` の一致を
-評価時に検証する。`/etc/dotfiles/oci-images.json` と同期 command は inventory から生成する。
+評価時に検証する。`/etc/dotfiles/oci-images.json` と同期 command は inventory から生成する。ADR 0014 で manifest を
+schema v2 に更新し、`pull = "never"` と active rebuild 中の修復に対応する世代の能力境界にした。
 
 `dotfiles-sync-images` は upstream entry だけを同期する。manifest に固定した digest reference を
 Docker へ pull し、`docker image inspect` が返す `RepoDigests` に `repository@digest` が含まれることを
 確認する。Nix entry は pull せず、OCI container module の `imageFile` 経路に残す。
 
 同期 state は `~/.local/state/dotfiles-wsl/image-sync` に置く。変更操作は repository 共通 operation lock を
-取得し、active な rebuild または SOPS enrollment があれば開始しない。その内側で image sync 専用 lock を
+取得する。active SOPS enrollment は同期を拒否する。active rebuild 中は、receipt の candidate または recovery
+target と同じ manifest を埋め込んだ command に限り同期を許可する。その内側で image sync 専用 lock を
 取得し、image ごとの receipt に manifest hash、image reference、digest、local image ID、成否を記録する。
 receipt は同じ filesystem 上の temporary file を同期してから atomic rename し、親 directory も同期する。
 一つの image が失敗しても残りの同期を続け、最後に失敗を集約する。古い image の削除は同期 command の
@@ -37,9 +39,9 @@ receipt は同じ filesystem 上の temporary file を同期してから atomic 
 照合する。state root が存在しない場合は未同期として status 1 を返し、directory や lock を作らない。
 部分的または不正な state tree は修復せず status 2 とする。
 
-最初の配備では OCI container の `pull = "missing"` を維持する。同期 command と検査側の schema を先に
-配備できるようにし、rollback 可能な generation が揃った後で `pull = "never"` へ切り替える。暗黙 pull の
-廃止は別の変更として検証する。
+移行時の最初の配備では OCI container の `pull = "missing"` を維持し、同期 command と検査側の schema を先に
+配備した。ADR 0014 で readiness precondition と active receipt に束縛した修復経路を追加し、全 container を
+`pull = "never"` へ切り替えた。
 
 ## 検討した代替案
 
@@ -57,8 +59,7 @@ manifest を読み、mutable な Docker cache と receipt の照合で同期済�
 外部 registry へ問い合わせない。digest を更新するときは candidate の `dotfiles-sync-images` を実行してから
 system generation を適用する。
 
-この決定だけでは service 起動時の暗黙 pull は消えない。rebuild と doctor が未同期 image を扱う contract は
-ADR 0013 で確定する。`pull = "never"` への移行は後続変更とする。
+doctor の収束 contract は ADR 0013、activation 前の同期条件と `pull = "never"` は ADR 0014 で確定する。
 
 ## 一次資料
 

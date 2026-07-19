@@ -1,16 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+report_test_failure() {
+  local status=$?
+  if [[ $- == *e* ]]; then
+    printf 'rebuild routing test stopped at line %s (status %s)\n' \
+      "${BASH_LINENO[0]}" "$status" >&2
+  fi
+  return "$status"
+}
+trap report_test_failure ERR
+
 rebuild_source=${1:?rebuild source path is required}
 bash_path=${2:?bash path is required}
 fakeroot_path=${3:?fakeroot path is required}
 operation_lock_source=${4:?operation lock source path is required}
 receipt_source=${5:?rebuild receipt source path is required}
+attempt_source=${6:?rebuild attempt source path is required}
 test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT
 
 repo=$test_root/dotfiles-wsl
 fake_bin=$test_root/fake-bin
+wrapper_bin=$test_root/run/wrappers/bin
+sudo_wrapper=$wrapper_bin/sudo
 call_log=$test_root/calls.log
 stdout_log=$test_root/stdout.log
 stderr_log=$test_root/stderr.log
@@ -22,6 +35,7 @@ candidate=$test_root/nix/store/test-system
 previous=$store_dir/previous-system
 displaced_profile=$store_dir/displaced-profile
 json_doctor_template=$test_root/doctor-json-template
+image_sync_template=$test_root/image-sync-template
 v3_doctor_fixture=$test_root/doctor-v3
 v2_doctor_fixture=$test_root/doctor-v2
 rebuild=$test_root/dotfiles-rebuild
@@ -29,22 +43,52 @@ boot_id_file=$test_root/boot-id
 current_state=$test_root/current-system
 booted_state=$test_root/booted-system
 profile_state=$test_root/profile-system
+system_profile_path=$test_root/nix/var/nix/profiles/system
 test_user=$(id -un)
 real_readlink=$(command -v readlink)
+legacy_nixpkgs_rev=bd0ff2d3eac24699c3664d5966b9ef36f388e2ca
+legacy_nixos_rebuild_path=$store_dir/legacy-nixos-rebuild/bin/nixos-rebuild
+legacy_helper_fixture=$store_dir/legacy-dotfiles-rebuild/bin/dotfiles-rebuild
 
 mkdir -p \
-  "$repo/.git" "$fake_bin" "$candidate/sw/bin" "$candidate/etc/dotfiles" "$source_path" \
-  "$previous/sw/bin" "$previous/etc/dotfiles" "$displaced_profile" "$nix_gc_auto_roots"
+  "$repo/.git" "$fake_bin" "$wrapper_bin" "$candidate/sw/bin" "$candidate/etc/dotfiles" "$source_path" \
+  "$previous/sw/bin" "$previous/etc/dotfiles" "$displaced_profile" "$nix_gc_auto_roots" \
+  "$source_path/modules/commands" "${system_profile_path%/*}" "${legacy_helper_fixture%/*}"
+printf '%s\n' 'legacy schema 2 rebuild source fixture' > "$source_path/modules/commands/rebuild"
+printf '{"nodes":{"nixpkgs":{"locked":{"rev":"%s"}}}}\n' "$legacy_nixpkgs_rev" > "$source_path/flake.lock"
+cat > "$legacy_helper_fixture" <<LEGACY_HELPER
+#!$bash_path
+if [[ \${1:-} == --abort ]]; then
+  echo 'unknown option: --abort' >&2
+  exit 2
+fi
+  $legacy_nixos_rebuild_path "\$action" --sudo --no-reexec --store-path "\$target" -L
+LEGACY_HELPER
+chmod +x "$legacy_helper_fixture"
+legacy_source_hash=$(sha256sum "$source_path/modules/commands/rebuild" | cut -d ' ' -f 1)
+legacy_helper_hash=$(sha256sum "$legacy_helper_fixture" | cut -d ' ' -f 1)
 sed "s|@dotfilesDir@|$repo|g" "$rebuild_source" \
   | sed "s|@nixStoreDir@|$store_dir|g" \
   | sed "s|@nixGcAutoRootDir@|$nix_gc_auto_roots|g" \
+  | sed "s|@systemProfilePath@|$system_profile_path|g" \
   | sed "s|@nixosRebuild@|$fake_bin/system-activator|g" \
+  | sed "s|@nixosRebuildPath@|$fake_bin/system-activator|g" \
+  | sed "s|@sudoCommand@|$sudo_wrapper|g" \
+  | sed "s|@awk@|$(command -v awk)|g" \
+  | sed "s|@activationLogLimitBytes@|1024|g" \
+  | sed "s|@legacySchema2RebuildSourceSha256@|$legacy_source_hash|g" \
+  | sed "s|@legacySchema2CandidateHelperSha256@|$legacy_helper_hash|g" \
+  | sed "s|@legacySchema2NixpkgsRev@|$legacy_nixpkgs_rev|g" \
+  | sed "s|@legacySchema2NixosRebuildPath@|$legacy_nixos_rebuild_path|g" \
   | sed "s|@username@|$test_user|g" \
   | sed "s|@bootIdFile@|$boot_id_file|g" \
   | sed "/@operationLockFunctions@/ { r $operation_lock_source
     d
   }" \
   | sed "/@rebuildReceiptFunctions@/ { r $receipt_source
+    d
+  }" \
+  | sed "/@rebuildAttemptFunctions@/ { r $attempt_source
     d
   }" > "$rebuild"
 chmod +x "$rebuild"
@@ -67,11 +111,18 @@ for argument in "$@"; do
 done
 printf '%s\n' "$call" >> "$CALL_LOG"
 
+if [[ $name == system-activator && $(command -v sudo) != "$TEST_SUDO_COMMAND" ]]; then
+  printf 'unexpected sudo command: %s\n' "$(command -v sudo || true)" >&2
+  exit 72
+fi
+
 case "${TEST_FAIL_AT:-}:$name:${1:-}:${2:-}" in
   snapshot:nix:build:* | check:nix:flake:check | build:nix:build:* | nvd:nvd:* | helper:dotfiles-wsl-restart-required:*)
     exit 70
     ;;
   activation:system-activator:*:* | activation:nixos-rebuild:*:* | activation:sudo:*:*)
+    printf '%s\n' 'fixture activation stdout'
+    printf '%s\n' 'fixture activation stderr' >&2
     exit 71
     ;;
 esac
@@ -165,15 +216,17 @@ case $name in
       fi
       shift
     done
-    case $action in
-      switch)
-        printf '%s\n' "$target" > "$TEST_CURRENT_STATE"
-        printf '%s\n' "$target" > "$TEST_PROFILE_STATE"
-        ;;
-      boot)
-        printf '%s\n' "$target" > "$TEST_PROFILE_STATE"
-        ;;
-    esac
+    if [[ ${TEST_ACTIVATION_NO_EFFECT:-0} != 1 ]]; then
+      case $action in
+        switch)
+          printf '%s\n' "$target" > "$TEST_CURRENT_STATE"
+          printf '%s\n' "$target" > "$TEST_PROFILE_STATE"
+          ;;
+        boot)
+          printf '%s\n' "$target" > "$TEST_PROFILE_STATE"
+          ;;
+      esac
+    fi
     ;;
   nix-store)
     [[ ${1:-} == --add-root && ${3:-} == --realise ]]
@@ -193,7 +246,7 @@ case $name in
     case $path in
       /run/current-system) cat "$TEST_CURRENT_STATE" ;;
       /run/booted-system) cat "$TEST_BOOTED_STATE" ;;
-      /nix/var/nix/profiles/system) cat "$TEST_PROFILE_STATE" ;;
+      "$TEST_SYSTEM_PROFILE_PATH") cat "$TEST_PROFILE_STATE" ;;
       *) "$REAL_READLINK" "$@" ;;
     esac
     ;;
@@ -210,9 +263,10 @@ STUB
 sed -i "1s|@bash@|$bash_path|" "$fake_bin/command-stub"
 chmod +x "$fake_bin/command-stub"
 
-for command in git nix nom nvd dotfiles-wsl-restart-required nixos-rebuild system-activator sudo nix-store readlink systemctl sync; do
+for command in git nix nom nvd dotfiles-wsl-restart-required nixos-rebuild system-activator nix-store readlink systemctl sync; do
   ln -s command-stub "$fake_bin/$command"
 done
+ln -s "$fake_bin/command-stub" "$sudo_wrapper"
 
 cat > "$json_doctor_template" <<'DOCTOR'
 #!@bash@
@@ -264,6 +318,37 @@ chmod +x "$v3_doctor_fixture"
 cp -- "$candidate/sw/bin/dotfiles-doctor" "$previous/sw/bin/dotfiles-doctor"
 printf '%s\n' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json"
 printf '%s\n' '{"schemaVersion":4}' > "$previous/etc/dotfiles/doctor.json"
+printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$candidate/etc/dotfiles/oci-images.json"
+printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$previous/etc/dotfiles/oci-images.json"
+
+cat > "$image_sync_template" <<'SYNC_IMAGES'
+#!@bash@
+set -euo pipefail
+
+label=@label@
+printf 'dotfiles-sync-images:%s' "$label" >> "$CALL_LOG"
+for argument in "$@"; do
+  printf ' %q' "$argument" >> "$CALL_LOG"
+done
+printf '\n' >> "$CALL_LOG"
+[[ $# -eq 1 && $1 == --status ]] || exit 2
+exec 8<> "$TEST_COMMON_GIT_DIR/dotfiles-operation.lock"
+if flock -n 8; then
+  echo "fixture OCI readiness ran without the repository operation lock" >&2
+  exit 2
+fi
+status_variable=TEST_OCI_STATUS_${label^^}
+status=${!status_variable:-0}
+printf 'OCI readiness fixture %s returned %s\n' "$label" "$status"
+exit "$status"
+SYNC_IMAGES
+for label in candidate previous; do
+  target=$candidate
+  [[ $label != previous ]] || target=$previous
+  sed -e "1s|@bash@|$bash_path|" -e "s|@label@|$label|g" \
+    "$image_sync_template" > "$target/sw/bin/dotfiles-sync-images"
+  chmod +x "$target/sw/bin/dotfiles-sync-images"
+done
 
 cat > "$v2_doctor_fixture" <<'DOCTOR'
 #!@bash@
@@ -293,6 +378,7 @@ export TEST_COMMON_GIT_DIR=$repo/.git
 export TEST_CURRENT_STATE=$current_state
 export TEST_BOOTED_STATE=$booted_state
 export TEST_PROFILE_STATE=$profile_state
+export TEST_SYSTEM_PROFILE_PATH=$system_profile_path
 export TEST_NIX_AUTO_ROOTS_DIR=$nix_gc_auto_roots
 export TEST_BOOT_MONOTONIC=100
 export TEST_USER=$test_user
@@ -307,6 +393,10 @@ export TEST_SYNC_FAIL_MATCH=
 export TEST_SYNC_FAIL_EXACT=
 export TEST_SYNC_FAIL_AFTER=1
 export TEST_SYNC_COUNT_FILE=$sync_count
+export TEST_OCI_STATUS_CANDIDATE=0
+export TEST_OCI_STATUS_PREVIOUS=0
+export TEST_ACTIVATION_NO_EFFECT=0
+export TEST_SUDO_COMMAND=$sudo_wrapper
 export REAL_READLINK=$real_readlink
 export WSL_DISTRO_NAME=NixOS
 
@@ -323,6 +413,9 @@ run_rebuild() {
   export TEST_STAGED_STATUS=${TEST_STAGED_STATUS:-0}
   export TEST_DIFF_CHECK_STATUS=${TEST_DIFF_CHECK_STATUS:-0}
   export TEST_DOCTOR_STATUS=${TEST_DOCTOR_STATUS:-0}
+  export TEST_OCI_STATUS_CANDIDATE=${TEST_OCI_STATUS_CANDIDATE:-0}
+  export TEST_OCI_STATUS_PREVIOUS=${TEST_OCI_STATUS_PREVIOUS:-0}
+  export TEST_ACTIVATION_NO_EFFECT=${TEST_ACTIVATION_NO_EFFECT:-0}
   export TEST_RUNTIME_AFTER_PLAN=${TEST_RUNTIME_AFTER_PLAN:-}
   export TEST_RUNTIME_AFTER_PERSISTENT_ROOT=${TEST_RUNTIME_AFTER_PERSISTENT_ROOT:-}
   export TEST_RUNTIME_AFTER_APPLY_INTENT=${TEST_RUNTIME_AFTER_APPLY_INTENT:-}
@@ -391,6 +484,7 @@ assert_before() {
 }
 
 assert_snapshot_pipeline() {
+  local readiness_expected=${1:-yes}
   require_exact_call "git -C $repo rev-parse --path-format=absolute --git-common-dir"
   require_exact_call "git -C $repo ls-files --others --exclude-standard"
   require_call "nix build --out-link "
@@ -412,6 +506,13 @@ assert_snapshot_pipeline() {
   assert_before 'nix flake check' "path:$source_path#nixosConfigurations"
   assert_before "path:$source_path#nixosConfigurations" 'nvd diff'
   assert_before 'nvd diff' 'dotfiles-wsl-restart-required'
+  if [[ $readiness_expected == yes ]]; then
+    require_exact_call "dotfiles-sync-images:candidate --status"
+    assert_before "dotfiles-wsl-restart-required --default-user $expected_pipeline_current" \
+      'dotfiles-sync-images:candidate --status'
+  else
+    reject_call 'dotfiles-sync-images:candidate --status'
+  fi
 }
 
 assert_apply() {
@@ -581,8 +682,64 @@ for invalid_candidate_manifest in schema-3 schema-5 malformed multiple missing; 
   printf '%s\n' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json"
 done
 
-# active receipt がなくても、recovery state tree の owner/mode/実体性を先に検証する。
+# candidate の OCI readiness は plan と apply のどちらでも receipt 公開前に検査する。
 receipt_root=$repo/.git/dotfiles-rebuild
+printf '%s\n' '{"schemaVersion":1,"images":[]}' > "$candidate/etc/dotfiles/oci-images.json"
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 2 ]]
+grep -F 'candidate target requires OCI image manifest schema version 2' "$stderr_log" > /dev/null
+reject_call 'dotfiles-sync-images:candidate --status'
+reject_call 'nix-store --add-root'
+reject_call 'system-activator'
+[[ ! -e $receipt_root/active.json && ! -L $receipt_root/active.json ]]
+printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$candidate/etc/dotfiles/oci-images.json"
+
+export TEST_OCI_STATUS_CANDIDATE=1
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 1 ]]
+grep -Fqx 'OCI readiness fixture candidate returned 1' "$stdout_log"
+grep -Fqx "Run: $candidate/sw/bin/dotfiles-sync-images" "$stderr_log"
+reject_call 'nix-store --add-root'
+reject_call 'system-activator'
+[[ ! -e $receipt_root/active.json && ! -L $receipt_root/active.json ]]
+
+run_rebuild switch '' ''
+[[ $rebuild_status -eq 1 ]]
+reject_call 'nix-store --add-root'
+reject_call 'system-activator'
+[[ ! -e $receipt_root/active.json && ! -L $receipt_root/active.json ]]
+
+export TEST_OCI_STATUS_CANDIDATE=2
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 2 ]]
+grep -Fqx 'OCI readiness fixture candidate returned 2' "$stdout_log"
+grep -F "target OCI readiness check is invalid" "$stderr_log" > /dev/null
+reject_call 'nix-store --add-root'
+
+export TEST_OCI_STATUS_CANDIDATE=9
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 2 ]]
+grep -F "target OCI readiness check is invalid (status 9)" "$stderr_log" > /dev/null
+reject_call 'nix-store --add-root'
+
+mv "$candidate/sw/bin/dotfiles-sync-images" "$candidate/sw/bin/dotfiles-sync-images.fixture"
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 2 ]]
+grep -F "target does not contain an executable OCI image sync helper" "$stderr_log" > /dev/null
+reject_call 'nix-store --add-root'
+mv "$candidate/sw/bin/dotfiles-sync-images.fixture" "$candidate/sw/bin/dotfiles-sync-images"
+chmod -x "$candidate/sw/bin/dotfiles-sync-images"
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 2 ]]
+grep -F "target does not contain an executable OCI image sync helper" "$stderr_log" > /dev/null
+reject_call 'nix-store --add-root'
+chmod +x "$candidate/sw/bin/dotfiles-sync-images"
+export TEST_OCI_STATUS_CANDIDATE=0
+run_rebuild switch '' '' --plan
+[[ $rebuild_status -eq 0 ]]
+require_exact_call 'dotfiles-sync-images:candidate --status'
+
+# active receipt がなくても、recovery state tree の owner/mode/実体性を先に検証する。
 for state_directory in "$receipt_root" "$receipt_root/receipts" "$receipt_root/roots"; do
   chmod 0755 "$state_directory"
   run_rebuild switch '' '' --status
@@ -650,7 +807,7 @@ reject_call 'nixos-rebuild'
 mapfile -t aborted_receipts < <(
   jq -er --arg previous "$previous" --arg displaced "$displaced_profile" '
     select(
-      .schemaVersion == 2 and .state == "aborted" and
+      .schemaVersion == 3 and .state == "aborted" and
       .failureStage == "runtime-drift" and .abort.direction == "forward" and
       .abort.point == "activation-handoff" and
       .recoveryTarget == $previous and
@@ -791,7 +948,11 @@ publication_failure_id=$(jq -r '.transactionId' "$publication_failure_receipt")
 [[ -d $repo/.git/dotfiles-rebuild/roots/$publication_failure_id ]]
 export TEST_SYNC_FAIL_MATCH=
 run_rebuild switch '' '' --resume "$publication_failure_id"
-[[ $rebuild_status -eq 0 ]]
+if [[ $rebuild_status -ne 0 ]]; then
+  printf 'receipt publication recovery returned %s, expected 0\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
 rm -- "$repo/.git/dotfiles-rebuild/receipts/$publication_failure_id.json"
 
 # profile が current と不一致でも、rollback 対象は実行中 closure に固定する。
@@ -815,7 +976,7 @@ mapfile -t completed_receipts < <(
 )
 [[ ${#completed_receipts[@]} -eq 1 ]]
 jq -e --arg displacedProfile "$displaced_profile" '
-  .schemaVersion == 2 and
+  .schemaVersion == 3 and
   .state == "complete" and
   .previous.running == .recoveryTarget and
   .previous.running != .previous.displacedProfile and
@@ -880,7 +1041,7 @@ assert_apply switch
 reject_call 'dotfiles-doctor'
 active_receipt=$receipt_root/active.json
 jq -e '
-  .schemaVersion == 2 and
+  .schemaVersion == 3 and
   .state == "restart-pending" and
   .effect == "switch-restart" and
   .activation.status == "succeeded" and
@@ -1086,62 +1247,495 @@ run_rebuild switch '' '' --status
 grep -F 'active rebuild receipt is invalid' "$stderr_log" > /dev/null
 rm -- "$active_receipt"
 
-# activation failure はstatus 4でcandidateとrecovery targetを保持し、同じclassifierでrollbackする。
+# exit 0 でも runtime が target へ遷移しなければ成功として記録せず、再開時に回収する。
 printf '%s\n' "$previous" > "$current_state"
 printf '%s\n' "$displaced_profile" > "$profile_state"
 printf '%s\n' "$previous" > "$booted_state"
-  cp -- "$v2_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
-  printf '%s\n' '{"schemaVersion":5}' > "$previous/etc/dotfiles/doctor.json"
+export TEST_BOOT_MONOTONIC=600
+export TEST_ACTIVATION_NO_EFFECT=1
+run_rebuild switch '' ''
+[[ $rebuild_status -eq 2 ]]
+grep -F 'activation outcome contradicts its activation boundary' "$stderr_log" > /dev/null
+contradictory_receipt=$receipt_root/active.json
+contradictory_id=$(jq -r '.transactionId' "$contradictory_receipt")
+contradictory_attempt_root=$receipt_root/$(dirname -- \
+  "$(jq -r '.activation.attempts[-1].partialLogPath' "$contradictory_receipt")")
+jq -e '
+  .state == "activating" and
+  .activation.status == "pending" and
+  .activation.attempts[-1].status == "running" and
+  .activation.attempts[-1].log == null and
+  .activation.attempts[-1].outcome == null
+' "$contradictory_receipt" > /dev/null
+[[ -f $contradictory_attempt_root/activation.log &&
+  ! -e $contradictory_attempt_root/outcome.json ]]
+reject_call 'dotfiles-doctor'
+
+export TEST_ACTIVATION_NO_EFFECT=0
+run_rebuild switch '' '' --resume "$contradictory_id"
+[[ $rebuild_status -eq 0 ]]
+jq -e '
+  .state == "complete" and
+  (.activation.attempts | length) == 2 and
+  .activation.attempts[0].status == "indeterminate" and
+  .activation.attempts[1].status == "succeeded"
+' "$receipt_root/receipts/$contradictory_id.json" > /dev/null
+
+# activation failure の forward resume は固定 candidate の OCI readiness を再検査する。
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+printf '%s\n' "$previous" > "$booted_state"
 export TEST_BOOT_MONOTONIC=600
 run_rebuild switch '' activation
 [[ $rebuild_status -eq 4 ]]
 active_receipt=$receipt_root/active.json
 transaction_id=$(jq -r '.transactionId' "$active_receipt")
 jq -e --arg previous "$previous" --arg displacedProfile "$displaced_profile" '
+  .schemaVersion == 3 and
   .state == "activation-failed" and
   .activation.exitCode == 71 and
+  .activationDriver.protocol == "nixos-rebuild-ng-profile-before-activation-v1" and
+  (.activationDriver.executable | type == "string" and length > 0) and
+  (.activation.attempts | length) == 1 and
+  .activation.attempts[0].number == 1 and
+  .activation.attempts[0].status == "failed" and
+  .activation.attempts[0].exitCode == 71 and
+  .activation.attempts[0].finishedAt != null and
+  .activation.attempts[0].log.captureExitCode == 0 and
+  (.activation.attempts[0].log.sha256 | test("^[0-9a-f]{64}$")) and
   .recoveryTarget == .previous.running and
   .previous.running == $previous and
   .previous.displacedProfile == $displacedProfile
 ' "$active_receipt" > /dev/null
-  grep -F "$candidate/sw/bin/dotfiles-rebuild --rollback $transaction_id" "$stderr_log" > /dev/null
-  [[ -L $receipt_root/roots/$transaction_id/candidate ]]
 
+# aggregate failure は末尾 attempt の failure 証拠と一致しなければならない。
+cp -- "$stderr_log" "$test_root/activation-failed.stderr"
+receipt_backup=$test_root/activation-failed.aggregate-backup.json
+cp -p -- "$active_receipt" "$receipt_backup"
+rewrite_receipt "$active_receipt" '
+  .activation.attempts[-1].status = "succeeded" |
+  .activation.attempts[-1].boundary = "after-profile-commit" |
+  .activation.attempts[-1].exitCode = 0
+'
+run_rebuild switch '' '' --status
+[[ $rebuild_status -eq 2 ]]
+grep -F 'active rebuild receipt is invalid' "$stderr_log" > /dev/null
+mv -T -- "$receipt_backup" "$active_receipt"
+
+# hash を更新しても outcome の投影が receipt と矛盾すれば journal として受理しない。
+receipt_backup=$test_root/activation-failed.outcome-receipt-backup.json
+cp -p -- "$active_receipt" "$receipt_backup"
+outcome_file=$receipt_root/$(jq -r '.activation.attempts[0].outcome.path' "$active_receipt")
+outcome_backup=$test_root/activation-failed.outcome-backup.json
+cp -p -- "$outcome_file" "$outcome_backup"
+rewrite_receipt "$outcome_file" '.exitCode = 0'
+outcome_sha=$(sha256sum "$outcome_file" | cut -d ' ' -f 1)
+outcome_bytes=$(stat -c '%s' "$outcome_file")
+rewrite_receipt "$active_receipt" '
+  .activation.attempts[0].outcome.sha256 = $sha |
+  .activation.attempts[0].outcome.bytes = $bytes
+' --arg sha "$outcome_sha" --argjson bytes "$outcome_bytes"
+run_rebuild switch '' '' --status
+[[ $rebuild_status -eq 2 ]]
+grep -F 'active rebuild activation journal is invalid' "$stderr_log" > /dev/null
+mv -T -- "$outcome_backup" "$outcome_file"
+mv -T -- "$receipt_backup" "$active_receipt"
+
+# receipt が投影しない runtime/boot も、attempt の action と baseline に対して検証する。
+for outcome_semantic_tamper in runtime boot; do
+  receipt_backup=$test_root/activation-failed.$outcome_semantic_tamper-receipt-backup.json
+  outcome_backup=$test_root/activation-failed.$outcome_semantic_tamper-outcome-backup.json
+  cp -p -- "$active_receipt" "$receipt_backup"
+  cp -p -- "$outcome_file" "$outcome_backup"
+  if [[ $outcome_semantic_tamper == runtime ]]; then
+    rewrite_receipt "$outcome_file" '.observedRuntime.current = $candidate' \
+      --arg candidate "$candidate"
+  else
+    rewrite_receipt "$outcome_file" \
+      '.observedBootInstance.userspaceTimestampMonotonic = "999"'
+  fi
+  outcome_sha=$(sha256sum "$outcome_file" | cut -d ' ' -f 1)
+  outcome_bytes=$(stat -c '%s' "$outcome_file")
+  rewrite_receipt "$active_receipt" '
+    .activation.attempts[0].outcome.sha256 = $sha |
+    .activation.attempts[0].outcome.bytes = $bytes
+  ' --arg sha "$outcome_sha" --argjson bytes "$outcome_bytes"
+  run_rebuild switch '' '' --status
+  [[ $rebuild_status -eq 2 ]]
+  grep -F 'active rebuild activation journal is invalid' "$stderr_log" > /dev/null
+  mv -T -- "$outcome_backup" "$outcome_file"
+  mv -T -- "$receipt_backup" "$active_receipt"
+done
+cp -- "$test_root/activation-failed.stderr" "$stderr_log"
+
+activation_log_relative=$(jq -r '.activation.attempts[0].log.path' "$active_receipt")
+activation_log=$receipt_root/$activation_log_relative
+[[ -f $activation_log && ! -L $activation_log ]]
+[[ $(stat -c '%u|%a|%h' "$activation_log") == "$EUID|400|1" ]]
+grep -F 'fixture activation stdout' "$activation_log" > /dev/null
+grep -F 'fixture activation stderr' "$activation_log" > /dev/null
+[[ $(sha256sum "$activation_log" | cut -d ' ' -f 1) == \
+  $(jq -r '.activation.attempts[0].log.sha256' "$active_receipt") ]]
+grep -F "Activation log: $activation_log" "$stderr_log" > /dev/null
+grep -F "$candidate/sw/bin/dotfiles-rebuild --rollback $transaction_id" "$stderr_log" > /dev/null
+[[ -L $receipt_root/roots/$transaction_id/candidate ]]
+
+activation_log_backup=$test_root/activation.log.backup
+cp -p -- "$activation_log" "$activation_log_backup"
+chmod 0600 "$activation_log"
+printf '%s\n' 'tampered activation log' >> "$activation_log"
+chmod 0400 "$activation_log"
+run_rebuild switch '' '' --status
+[[ $rebuild_status -eq 2 ]]
+grep -F 'activation journal is invalid' "$stderr_log" > /dev/null
+mv -T -- "$activation_log_backup" "$activation_log"
+
+# runner が receipt 更新前に消えた attempt は、partial log を保存してから新しい attempt へ進む。
+activation_attempt_root=${activation_log%/*}
+mv -T -- "$activation_log" "$activation_attempt_root/activation.log.partial"
+chmod 0600 "$activation_attempt_root/activation.log.partial"
+rm -- "$activation_attempt_root/outcome.json"
+rewrite_receipt "$active_receipt" '
+  .state = "activating" |
+  .activation.status = "pending" |
+  .activation.exitCode = null |
+  .activation.attempts[0].status = "running" |
+  .activation.attempts[0].boundary = null |
+  .activation.attempts[0].finishedAt = null |
+  .activation.attempts[0].exitCode = null |
+  .activation.attempts[0].log = null |
+  .activation.attempts[0].outcome = null |
+  .failureStage = null
+'
+# WSL 再起動後の retry は transaction 開始時ではなく、その attempt の boot instance に束縛する。
+export TEST_BOOT_MONOTONIC=601
+run_rebuild switch '' activation --resume "$transaction_id"
+if [[ $rebuild_status -ne 4 ]]; then
+  printf 'interrupted activation resume returned %s, expected 4\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
+assert_apply switch
+if ! jq -e '
+  .state == "activation-failed" and
+  (.activation.attempts | length) == 2 and
+  .activation.attempts[0].status == "indeterminate" and
+  .activation.attempts[0].boundary == "before-profile-commit" and
+  .activation.attempts[0].exitCode == null and
+  .activation.attempts[0].log.captureExitCode == 255 and
+  .activation.attempts[0].outcome != null and
+  .activation.attempts[1].status == "failed" and
+  .activation.attempts[1].exitCode == 71 and
+  .activation.attempts[1].bootBaseline.userspaceTimestampMonotonic == "601"
+' "$active_receipt" > /dev/null; then
+  jq '{state, activation, failureStage}' "$active_receipt" >&2
+  exit 1
+fi
+
+# handler が [-1] を最新と扱うため、attempt ledger の順序も receipt 契約に含める。
+receipt_backup=$test_root/activation-failed.order-backup.json
+cp -p -- "$active_receipt" "$receipt_backup"
+rewrite_receipt "$active_receipt" '.activation.attempts |= reverse'
+run_rebuild switch '' '' --status
+[[ $rebuild_status -eq 2 ]]
+grep -F 'active rebuild receipt is invalid' "$stderr_log" > /dev/null
+mv -T -- "$receipt_backup" "$active_receipt"
+
+activation_log_relative=$(jq -r '.activation.attempts[0].log.path' "$active_receipt")
+activation_log=$receipt_root/$activation_log_relative
+[[ -f $activation_log && ! -e $activation_attempt_root/activation.log.partial ]]
+[[ $(stat -c '%u|%a|%h' "$activation_log") == "$EUID|400|1" ]]
+grep -F 'fixture activation stderr' "$activation_log" > /dev/null
+
+# outcome と final log が durable なら、receipt 更新前に途切れても終了コードを復元する。
+rewrite_receipt "$active_receipt" '
+  .state = "activating" |
+  .activation.status = "pending" |
+  .activation.exitCode = null |
+  .activation.attempts[-1].status = "running" |
+  .activation.attempts[-1].boundary = null |
+  .activation.attempts[-1].finishedAt = null |
+  .activation.attempts[-1].exitCode = null |
+  .activation.attempts[-1].log = null |
+  .activation.attempts[-1].outcome = null |
+  .failureStage = null
+'
+# 改ざん outcome と現在値を一致させても、attempt baseline との矛盾は復元しない。
+durable_attempt_root=$receipt_root/$(dirname -- \
+  "$(jq -r '.activation.attempts[-1].partialLogPath' "$active_receipt")")
+durable_outcome_file=$durable_attempt_root/outcome.json
+for durable_semantic_tamper in runtime boot; do
+  durable_outcome_backup=$test_root/durable-outcome.$durable_semantic_tamper-backup.json
+  cp -p -- "$durable_outcome_file" "$durable_outcome_backup"
+  if [[ $durable_semantic_tamper == runtime ]]; then
+    rewrite_receipt "$durable_outcome_file" '.observedRuntime.current = $candidate' \
+      --arg candidate "$candidate"
+    printf '%s\n' "$candidate" > "$current_state"
+    printf '%s\n' "$displaced_profile" > "$profile_state"
+  else
+    rewrite_receipt "$durable_outcome_file" \
+      '.observedBootInstance.userspaceTimestampMonotonic = "602"'
+    printf '%s\n' "$previous" > "$current_state"
+    printf '%s\n' "$displaced_profile" > "$profile_state"
+    export TEST_BOOT_MONOTONIC=602
+  fi
+  run_rebuild switch '' '' --resume "$transaction_id"
+  [[ $rebuild_status -eq 2 ]]
+  grep -F 'durable activation outcome contradicts its activation boundary' \
+    "$stderr_log" > /dev/null
+  reject_call 'system-activator'
+  jq -e '.state == "activating" and .activation.attempts[-1].status == "running"' \
+    "$active_receipt" > /dev/null
+  mv -T -- "$durable_outcome_backup" "$durable_outcome_file"
+  export TEST_BOOT_MONOTONIC=601
+done
+
+printf '%s\n' "$candidate" > "$current_state"
+printf '%s\n' "$candidate" > "$profile_state"
+run_rebuild switch '' '' --resume "$transaction_id"
+if [[ $rebuild_status -ne 2 ]]; then
+  printf 'drifted durable outcome resume returned %s, expected 2\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
+grep -F 'durable activation outcome no longer matches current runtime' \
+  "$stderr_log" > /dev/null
+reject_call 'system-activator'
+reject_call 'dotfiles-doctor'
+jq -e '.state == "activating" and .activation.attempts[-1].status == "running"' \
+  "$active_receipt" > /dev/null
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+run_rebuild switch '' activation --resume "$transaction_id"
+if [[ $rebuild_status -ne 4 ]]; then
+  printf 'durable outcome resume returned %s, expected 4\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
+assert_apply switch
+jq -e '
+  .state == "activation-failed" and
+  (.activation.attempts | length) == 3 and
+  .activation.attempts[1].status == "failed" and
+  .activation.attempts[1].boundary == "before-profile-commit" and
+  .activation.attempts[1].exitCode == 71 and
+  .activation.attempts[1].log.captureExitCode == 0 and
+  .activation.attempts[2].status == "failed" and
+  .activation.attempts[2].exitCode == 71
+' "$active_receipt" > /dev/null
+
+# final log だけが durable な crash window も、結果不明の attempt として閉じて再試行する。
+final_only_root=$receipt_root/$(dirname -- "$(jq -r '.activation.attempts[-1].log.path' \
+  "$active_receipt")")
+rm -- "$final_only_root/outcome.json"
+rewrite_receipt "$active_receipt" '
+  .state = "activating" |
+  .activation.status = "pending" |
+  .activation.exitCode = null |
+  .activation.attempts[-1].status = "running" |
+  .activation.attempts[-1].boundary = null |
+  .activation.attempts[-1].finishedAt = null |
+  .activation.attempts[-1].exitCode = null |
+  .activation.attempts[-1].log = null |
+  .activation.attempts[-1].outcome = null |
+  .failureStage = null
+'
+run_rebuild switch '' activation --resume "$transaction_id"
+if [[ $rebuild_status -ne 4 ]]; then
+  printf 'final-only outcome resume returned %s, expected 4\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
+assert_apply switch
+jq -e '
+  .state == "activation-failed" and
+  (.activation.attempts | length) == 4 and
+  .activation.attempts[2].status == "indeterminate" and
+  .activation.attempts[2].boundary == "before-profile-commit" and
+  .activation.attempts[2].exitCode == null and
+  .activation.attempts[3].status == "failed" and
+  .activation.attempts[3].exitCode == 71
+' "$active_receipt" > /dev/null
+
+# active activation retry でも旧 OCI schema を helper 実行前に拒否する。
+printf '%s\n' '{"schemaVersion":1,"images":[]}' > "$candidate/etc/dotfiles/oci-images.json"
+run_rebuild switch '' '' --resume "$transaction_id"
+[[ $rebuild_status -eq 2 ]]
+grep -F 'candidate target requires OCI image manifest schema version 2' "$stderr_log" > /dev/null
+reject_call 'dotfiles-sync-images:candidate --status'
+reject_call 'system-activator'
+jq -e '.state == "activation-failed" and .rollback == null' "$active_receipt" > /dev/null
+printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$candidate/etc/dotfiles/oci-images.json"
+
+export TEST_OCI_STATUS_CANDIDATE=1
+rm -- "$receipt_root/roots/$transaction_id/candidate"
+run_rebuild switch '' '' --resume "$transaction_id"
+[[ $rebuild_status -eq 1 ]]
+grep -Fqx "Run: $candidate/sw/bin/dotfiles-sync-images" "$stderr_log"
+reject_call 'system-activator'
+[[ -L $receipt_root/roots/$transaction_id/candidate &&
+  $(readlink -f -- "$receipt_root/roots/$transaction_id/candidate") == "$candidate" ]]
+jq -e '.state == "activation-failed" and .rollback == null' "$active_receipt" > /dev/null
+export TEST_OCI_STATUS_CANDIDATE=0
+run_rebuild switch '' '' --resume "$transaction_id"
+[[ $rebuild_status -eq 0 ]]
+require_exact_call 'dotfiles-sync-images:candidate --status'
+assert_apply switch
+
+# rollback は schema v4 readiness contract のない legacy generation を通常経路で拒否する。
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+printf '%s\n' "$previous" > "$booted_state"
+run_rebuild switch '' activation
+[[ $rebuild_status -eq 4 ]]
+active_receipt=$receipt_root/active.json
+transaction_id=$(jq -r '.transactionId' "$active_receipt")
+
+for legacy_schema in 2 3; do
+  if [[ $legacy_schema -eq 2 ]]; then
+    cp -- "$v2_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+  else
+    cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+  fi
+  printf '{"schemaVersion":%s}\n' "$legacy_schema" > "$previous/etc/dotfiles/doctor.json"
   run_rebuild switch '' '' --rollback "$transaction_id"
   [[ $rebuild_status -eq 2 ]]
-  grep -F 'recovery target does not contain a supported doctor manifest' "$stderr_log" > /dev/null
+  grep -F 'recovery target requires doctor manifest schema version 4' "$stderr_log" > /dev/null
+  reject_call 'dotfiles-sync-images:previous --status'
   reject_call 'system-activator'
-  reject_call 'nixos-rebuild'
   reject_call 'dotfiles-doctor'
   jq -e '.state == "activation-failed" and .rollback == null' "$active_receipt" > /dev/null
+done
 
-  printf '%s\n' '{"schemaVersion":2}' > "$previous/etc/dotfiles/doctor.json"
+# phase 4 より前に rollback object が記録済みの transaction は、旧 doctor protocol で verification を再開できる。
+forward_failure_receipt=$test_root/forward-activation-failed.json
+cp -- "$active_receipt" "$forward_failure_receipt"
+rewrite_receipt "$forward_failure_receipt" '
+  .schemaVersion = 2 |
+  del(.activationDriver, .cancellation, .activation.attempts)
+'
+for legacy_schema in 3 2; do
+  cp -- "$forward_failure_receipt" "$active_receipt"
+  chmod 0600 "$active_receipt"
+  rewrite_receipt "$active_receipt" '
+    .rollback = {
+      target: .recoveryTarget,
+      effect: "switch",
+      action: "switch",
+      activationBaseline: .activationBaseline,
+      bootInstances: {beforeApply: .bootInstances.beforeApply, firstBoot: null},
+      activation: {status: "succeeded", exitCode: 0}
+    } |
+    .state = "rollback-verification-failed" |
+    .verification = {status: "failed", exitCode: 1, failedCheckIds: ["fixture.previous"]} |
+    .failureStage = "doctor" |
+    .finishedAt = null
+  '
+  printf '%s\n' "$previous" > "$current_state"
+  printf '%s\n' "$previous" > "$profile_state"
+  printf '%s\n' "$previous" > "$booted_state"
+  if [[ $legacy_schema -eq 3 ]]; then
+    cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+    printf '%s\n' '{"schemaVersion":3}' > "$previous/etc/dotfiles/doctor.json"
+    export TEST_DOCTOR_STATUS=0
+    run_rebuild switch '' '' --rollback "$transaction_id"
+    [[ $rebuild_status -eq 0 ]]
+    require_exact_call 'dotfiles-doctor --format json'
+  else
+    cp -- "$v2_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+    printf '%s\n' '{"schemaVersion":2}' > "$previous/etc/dotfiles/doctor.json"
+    export TEST_DOCTOR_STATUS=1
+    run_rebuild switch '' '' --rollback "$transaction_id"
+    [[ $rebuild_status -eq 5 ]]
+    require_exact_call 'dotfiles-doctor'
+    grep -Fqx 'FAIL: legacy doctor fixture is degraded' "$stderr_log"
+    jq -e '
+      .state == "rollback-verification-failed" and
+      .verification.exitCode == 1 and
+      .verification.failedCheckIds == ["legacy.doctor"]
+    ' "$active_receipt" > /dev/null
+    export TEST_DOCTOR_STATUS=0
+    run_rebuild switch '' '' --rollback "$transaction_id"
+    [[ $rebuild_status -eq 0 ]]
+    require_exact_call 'dotfiles-doctor'
+    grep -Fqx 'OK: legacy doctor fixture is healthy' "$stdout_log"
+  fi
+  jq -e '.state == "rolled-back"' "$receipt_root/receipts/$transaction_id.json" > /dev/null
+  rm -- "$receipt_root/receipts/$transaction_id.json"
+done
 
+cp -- "$forward_failure_receipt" "$active_receipt"
+chmod 0600 "$active_receipt"
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+printf '%s\n' "$previous" > "$booted_state"
+
+cp -- "$candidate/sw/bin/dotfiles-doctor" "$previous/sw/bin/dotfiles-doctor"
+printf '%s\n' '{"schemaVersion":4}' > "$previous/etc/dotfiles/doctor.json"
+
+# doctor schema v4 だけでは phase 4 の pull=never / active repair capability を証明しない。
+printf '%s\n' '{"schemaVersion":1,"images":[]}' > "$previous/etc/dotfiles/oci-images.json"
+run_rebuild switch '' '' --rollback "$transaction_id"
+[[ $rebuild_status -eq 2 ]]
+grep -F 'recovery target requires OCI image manifest schema version 2' "$stderr_log" > /dev/null
+reject_call 'dotfiles-sync-images:previous --status'
+reject_call 'system-activator'
+jq -e '.state == "activation-failed" and .rollback == null' "$active_receipt" > /dev/null
+printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$previous/etc/dotfiles/oci-images.json"
+
+export TEST_OCI_STATUS_PREVIOUS=1
+run_rebuild switch '' '' --rollback "$transaction_id"
+[[ $rebuild_status -eq 1 ]]
+grep -Fqx "Run: $previous/sw/bin/dotfiles-sync-images" "$stderr_log"
+reject_call 'system-activator'
+jq -e '.state == "activation-failed" and .rollback == null' "$active_receipt" > /dev/null
+
+export TEST_OCI_STATUS_PREVIOUS=0
+run_rebuild switch '' activation --rollback "$transaction_id"
+[[ $rebuild_status -eq 4 ]]
+require_exact_call 'dotfiles-sync-images:previous --status'
+jq -e '.state == "rollback-activation-failed" and .rollback != null' "$active_receipt" > /dev/null
+
+# rollback activation resume も固定 recovery target を再検査する。
+printf '%s\n' '{"schemaVersion":1,"images":[]}' > "$previous/etc/dotfiles/oci-images.json"
+run_rebuild switch '' '' --rollback "$transaction_id"
+[[ $rebuild_status -eq 2 ]]
+grep -F 'recovery target requires OCI image manifest schema version 2' "$stderr_log" > /dev/null
+reject_call 'dotfiles-sync-images:previous --status'
+reject_call 'system-activator'
+jq -e '.state == "rollback-activation-failed" and .rollback != null' "$active_receipt" > /dev/null
+printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$previous/etc/dotfiles/oci-images.json"
+
+export TEST_OCI_STATUS_PREVIOUS=1
+run_rebuild switch '' '' --rollback "$transaction_id"
+[[ $rebuild_status -eq 1 ]]
+reject_call 'system-activator'
+jq -e '.state == "rollback-activation-failed"' "$active_receipt" > /dev/null
+
+export TEST_OCI_STATUS_PREVIOUS=0
 export TEST_DOCTOR_STATUS=1
 run_rebuild switch '' '' --rollback "$transaction_id"
 [[ $rebuild_status -eq 5 ]]
 assert_apply switch "$previous"
-reject_call "nixos-rebuild switch --sudo --no-reexec --store-path $displaced_profile"
-require_exact_call 'dotfiles-doctor'
-grep -Fqx 'FAIL: legacy doctor fixture is degraded' "$stderr_log"
+require_exact_call 'dotfiles-doctor --format json'
 jq -e '
   .state == "rollback-verification-failed" and
   .verification.exitCode == 1 and
-  .verification.failedCheckIds == ["legacy.doctor"] and
+  .verification.failedCheckIds == ["systemd.fixture"] and
   .failureStage == "doctor"
 ' "$active_receipt" > /dev/null
 
+# verification-only retry は OCI readiness を再検査せず doctor に委ねる。
+export TEST_OCI_STATUS_PREVIOUS=1
 export TEST_DOCTOR_STATUS=0
 run_rebuild switch '' '' --rollback "$transaction_id"
 [[ $rebuild_status -eq 0 ]]
-reject_call 'nixos-rebuild'
-require_exact_call 'dotfiles-doctor'
-grep -Fqx 'OK: legacy doctor fixture is healthy' "$stdout_log"
+reject_call 'dotfiles-sync-images:previous --status'
+require_exact_call 'dotfiles-doctor --format json'
 rolled_back_receipt=$receipt_root/receipts/$transaction_id.json
 jq -e '.state == "rolled-back"' "$rolled_back_receipt" > /dev/null
-  [[ ! -e $receipt_root/roots/$transaction_id && ! -L $receipt_root/roots/$transaction_id ]]
-  cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
-  printf '%s\n' '{"schemaVersion":3}' > "$previous/etc/dotfiles/doctor.json"
+[[ ! -e $receipt_root/roots/$transaction_id && ! -L $receipt_root/roots/$transaction_id ]]
+export TEST_OCI_STATUS_PREVIOUS=0
 
 cp -- "$rolled_back_receipt" "$active_receipt"
 chmod 0600 "$active_receipt"
@@ -1246,6 +1840,8 @@ transaction_id=$(jq -r '.transactionId' "$active_receipt")
 printf '%s\n' "$candidate" > "$current_state"
 printf '%s\n' "$candidate" > "$profile_state"
 jq '
+  .schemaVersion = 2 |
+  del(.activationDriver, .cancellation) |
   .state = "apply-intent" |
   .activation = {status: "pending", exitCode: null} |
   .failureStage = null
@@ -1479,6 +2075,238 @@ grep -Fqx 'preserve-receipt-target' "$receipt_symlink_target"
 reject_call '#sourceSnapshot'
 rm "$receipt_root/active.json"
 
+# profile commit より前に失敗した attempt は、runtime と boot instance が baseline のままなら閉じられる。
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$previous" > "$booted_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+printf '%s\n' '11111111-1111-1111-1111-111111111111' > "$boot_id_file"
+export TEST_BOOT_MONOTONIC=600
+run_rebuild switch '' activation
+[[ $rebuild_status -eq 4 ]]
+cancel_receipt=$receipt_root/active.json
+cancel_id=$(jq -r '.transactionId' "$cancel_receipt")
+cancel_log_relative=$(jq -r '.activation.attempts[-1].log.path' "$cancel_receipt")
+run_rebuild switch '' '' --abort "$cancel_id"
+[[ $rebuild_status -eq 0 ]]
+reject_call 'system-activator'
+reject_call 'dotfiles-doctor'
+[[ ! -e $cancel_receipt && ! -L $cancel_receipt ]]
+[[ ! -e $receipt_root/roots/$cancel_id && ! -L $receipt_root/roots/$cancel_id ]]
+[[ -f $receipt_root/$cancel_log_relative ]]
+jq -e '
+  .schemaVersion == 3 and
+  .state == "cancelled" and
+  .cancellation.kind == "manual-zero-effect" and
+  .cancellation.boundary == "before-profile-commit" and
+  .cancellation.driverContract == "nixos-rebuild-ng-profile-before-activation-v1" and
+  .cancellation.expectedRuntime == .cancellation.observedRuntime and
+  .cancellation.expectedBootInstance == .cancellation.observedBootInstance and
+  .activation.status == "failed" and
+  .activation.attempts[-1].boundary == "before-profile-commit" and
+  .verification.status == "pending" and
+  .rollback == null and .abort == null and .failureStage == null and
+  .finishedAt != null
+' "$receipt_root/receipts/$cancel_id.json" > /dev/null
+
+# 配備済み schema v2 driver は source と helper の allowlist が一致する場合だけ v3 へ移行して閉じる。
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$previous" > "$booted_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+run_rebuild switch '' activation
+[[ $rebuild_status -eq 4 ]]
+legacy_cancel_receipt=$receipt_root/active.json
+legacy_cancel_id=$(jq -r '.transactionId' "$legacy_cancel_receipt")
+rewrite_receipt "$legacy_cancel_receipt" '
+  .schemaVersion = 2 |
+  del(.activationDriver, .activation.attempts, .cancellation, .migration)
+'
+rm -- "$candidate/sw/bin/dotfiles-rebuild"
+ln -s -- "$legacy_helper_fixture" "$candidate/sw/bin/dotfiles-rebuild"
+# 配備前 helper では閉じられず、flake package の新 runner が migration を担う。
+set +e
+"$candidate/sw/bin/dotfiles-rebuild" --abort "$legacy_cancel_id" \
+  > "$stdout_log" 2> "$stderr_log"
+legacy_helper_status=$?
+set -e
+if [[ $legacy_helper_status -ne 2 ]]; then
+  printf 'legacy helper abort returned %s, expected 2\n' "$legacy_helper_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
+grep -F 'unknown option: --abort' "$stderr_log" > /dev/null
+[[ -f $legacy_cancel_receipt ]]
+
+# 同じ内容でも Nix store 外へ解決する helper symlink は監査対象にしない。
+outside_legacy_helper=$test_root/legacy-helper-outside-store
+cp -- "$legacy_helper_fixture" "$outside_legacy_helper"
+rm -- "$candidate/sw/bin/dotfiles-rebuild"
+ln -s -- "$outside_legacy_helper" "$candidate/sw/bin/dotfiles-rebuild"
+legacy_cancel_sha=$(sha256sum "$legacy_cancel_receipt" | cut -d ' ' -f 1)
+run_rebuild switch '' '' --abort "$legacy_cancel_id"
+[[ $rebuild_status -eq 2 ]]
+grep -F 'schema 2 helper does not resolve to a Nix store file' "$stderr_log" > /dev/null
+[[ $(sha256sum "$legacy_cancel_receipt" | cut -d ' ' -f 1) == "$legacy_cancel_sha" ]]
+[[ ! -e $receipt_root/migrations/$legacy_cancel_id/schema-2.json ]]
+rm -- "$candidate/sw/bin/dotfiles-rebuild"
+ln -s -- "$legacy_helper_fixture" "$candidate/sw/bin/dotfiles-rebuild"
+
+# 安全性を証明できない場合、旧 helper が読める schema v2 receipt を一切変更しない。
+legacy_cancel_sha=$(sha256sum "$legacy_cancel_receipt" | cut -d ' ' -f 1)
+export TEST_BOOT_MONOTONIC=601
+run_rebuild switch '' '' --abort "$legacy_cancel_id"
+[[ $rebuild_status -eq 2 ]]
+grep -F 'boot instance differs from the activation baseline; cancellation is unsafe' \
+  "$stderr_log" > /dev/null
+[[ $(sha256sum "$legacy_cancel_receipt" | cut -d ' ' -f 1) == "$legacy_cancel_sha" ]]
+jq -e '.schemaVersion == 2' "$legacy_cancel_receipt" > /dev/null
+[[ ! -e $receipt_root/migrations/$legacy_cancel_id/schema-2.json ]]
+
+export TEST_BOOT_MONOTONIC=600
+run_rebuild switch '' '' --abort "$legacy_cancel_id"
+[[ $rebuild_status -eq 0 ]]
+[[ ! -e $legacy_cancel_receipt && ! -L $legacy_cancel_receipt ]]
+legacy_cancel_archive=$receipt_root/receipts/$legacy_cancel_id.json
+jq -e --arg sourceHash "$legacy_source_hash" --arg helperHash "$legacy_helper_hash" '
+  .schemaVersion == 3 and .state == "cancelled" and
+  .migration.fromSchema == 2 and
+  .migration.classification == "before-profile-commit" and
+  .migration.sourceTemplateSha256 == $sourceHash and
+  .migration.candidateHelperSha256 == $helperHash and
+  .migration.receipt.path == ("migrations/" + .transactionId + "/schema-2.json") and
+  .activation.attempts == [] and
+  .cancellation.fromState == "activation-failed"
+' "$legacy_cancel_archive" > /dev/null
+legacy_receipt_artifact=$receipt_root/$(jq -r '.migration.receipt.path' "$legacy_cancel_archive")
+[[ -f $legacy_receipt_artifact && ! -L $legacy_receipt_artifact ]]
+[[ $(stat -c '%u|%a|%h' "$legacy_receipt_artifact") == "$EUID|400|1" ]]
+[[ $(sha256sum "$legacy_receipt_artifact" | cut -d ' ' -f 1) == \
+  $(jq -r '.migration.receipt.sha256' "$legacy_cancel_archive") ]]
+rm -- "$candidate/sw/bin/dotfiles-rebuild"
+cp -- "$rebuild" "$candidate/sw/bin/dotfiles-rebuild"
+chmod +x "$candidate/sw/bin/dotfiles-rebuild"
+
+# rollback protocol を持たない recovery target には、実行不能な rollback を案内しない。
+mv -- "$previous/etc/dotfiles/doctor.json" "$test_root/previous-doctor.json"
+mv -- "$previous/etc/dotfiles/oci-images.json" "$test_root/previous-oci-images.json"
+run_rebuild switch '' activation
+[[ $rebuild_status -eq 4 ]]
+guidance_receipt=$receipt_root/active.json
+guidance_id=$(jq -r '.transactionId' "$guidance_receipt")
+if grep -F -- '--rollback' "$stderr_log" > /dev/null; then
+  echo 'incompatible recovery target was advertised for rollback' >&2
+  exit 1
+fi
+grep -F 'Rollback unavailable: recovery target lacks the required doctor or OCI protocol.' \
+  "$stderr_log" > /dev/null
+grep -F "$candidate/sw/bin/dotfiles-rebuild --abort $guidance_id" "$stderr_log" > /dev/null
+mv -- "$test_root/previous-doctor.json" "$previous/etc/dotfiles/doctor.json"
+mv -- "$test_root/previous-oci-images.json" "$previous/etc/dotfiles/oci-images.json"
+run_rebuild switch '' '' --abort "$guidance_id"
+[[ $rebuild_status -eq 0 ]]
+
+# profile commit 後でも outcome がなければ成功を推定せず、activator を再実行する。
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$previous" > "$booted_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+run_rebuild switch '' activation
+[[ $rebuild_status -eq 4 ]]
+post_commit_receipt=$receipt_root/active.json
+post_commit_id=$(jq -r '.transactionId' "$post_commit_receipt")
+post_commit_log=$receipt_root/$(jq -r '.activation.attempts[-1].log.path' \
+  "$post_commit_receipt")
+post_commit_root=${post_commit_log%/*}
+mv -T -- "$post_commit_log" "$post_commit_root/activation.log.partial"
+# finalize の chmod 後、rename 前で停止した durable transitional state。
+chmod 0400 "$post_commit_root/activation.log.partial"
+rm -- "$post_commit_root/outcome.json"
+rewrite_receipt "$post_commit_receipt" '
+  .state = "activating" |
+  .activation.status = "pending" |
+  .activation.exitCode = null |
+  .activation.attempts[-1].status = "running" |
+  .activation.attempts[-1].boundary = null |
+  .activation.attempts[-1].finishedAt = null |
+  .activation.attempts[-1].exitCode = null |
+  .activation.attempts[-1].log = null |
+  .activation.attempts[-1].outcome = null |
+  .failureStage = null
+'
+printf '%s\n' "$candidate" > "$current_state"
+printf '%s\n' "$candidate" > "$profile_state"
+run_rebuild switch '' activation --resume "$post_commit_id"
+if [[ $rebuild_status -ne 4 ]]; then
+  printf 'post-profile indeterminate resume returned %s, expected 4\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  sed 's/^/  call: /' "$call_log" >&2
+  exit 1
+fi
+assert_apply switch
+jq -e '
+  .state == "activation-failed" and
+  (.activation.attempts | length) == 2 and
+  .activation.attempts[0].status == "indeterminate" and
+  .activation.attempts[0].boundary == "after-profile-commit" and
+  .activation.attempts[1].status == "failed" and
+  .activation.attempts[1].exitCode == 71
+' "$post_commit_receipt" > /dev/null
+run_rebuild switch '' '' --rollback "$post_commit_id"
+if [[ $rebuild_status -ne 0 ]]; then
+  printf 'post-profile rollback returned %s, expected 0\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
+jq -e '.state == "rolled-back"' "$receipt_root/receipts/$post_commit_id.json" > /dev/null
+
+# 成功 outcome が durable なら、target を再 activation せず verification へ進む。
+printf '%s\n' "$previous" > "$current_state"
+printf '%s\n' "$previous" > "$booted_state"
+printf '%s\n' "$displaced_profile" > "$profile_state"
+run_rebuild switch '' activation
+[[ $rebuild_status -eq 4 ]]
+durable_success_receipt=$receipt_root/active.json
+durable_success_id=$(jq -r '.transactionId' "$durable_success_receipt")
+durable_success_log=$receipt_root/$(jq -r '.activation.attempts[-1].log.path' \
+  "$durable_success_receipt")
+durable_success_root=${durable_success_log%/*}
+jq --arg candidate "$candidate" --arg booted "$previous" '
+  .exitCode = 0 |
+  .boundary = "after-profile-commit" |
+  .observedRuntime = {current: $candidate, booted: $booted, profile: $candidate}
+' "$durable_success_root/outcome.json" > "$durable_success_root/outcome.json.tmp"
+mv -T -- "$durable_success_root/outcome.json.tmp" "$durable_success_root/outcome.json"
+chmod 0600 "$durable_success_root/outcome.json"
+rewrite_receipt "$durable_success_receipt" '
+  .state = "activating" |
+  .activation.status = "pending" |
+  .activation.exitCode = null |
+  .activation.attempts[-1].status = "running" |
+  .activation.attempts[-1].boundary = null |
+  .activation.attempts[-1].finishedAt = null |
+  .activation.attempts[-1].exitCode = null |
+  .activation.attempts[-1].log = null |
+  .activation.attempts[-1].outcome = null |
+  .failureStage = null
+'
+printf '%s\n' "$candidate" > "$current_state"
+printf '%s\n' "$candidate" > "$profile_state"
+run_rebuild switch '' '' --resume "$durable_success_id"
+if [[ $rebuild_status -ne 0 ]]; then
+  printf 'durable successful outcome resume returned %s, expected 0\n' "$rebuild_status" >&2
+  sed 's/^/  /' "$stderr_log" >&2
+  exit 1
+fi
+reject_call 'system-activator'
+require_call 'dotfiles-doctor'
+jq -e '
+  .state == "complete" and
+  .activation.status == "succeeded" and
+  .activation.exitCode == 0 and
+  .activation.attempts[-1].status == "succeeded" and
+  .activation.attempts[-1].boundary == "after-profile-commit" and
+  .activation.attempts[-1].exitCode == 0 and
+  .verification.status == "succeeded"
+' "$receipt_root/receipts/$durable_success_id.json" > /dev/null
+
 run_rebuild switch '' '' --status
 [[ $rebuild_status -eq 0 ]]
 jq -e '.state == "idle"' "$stdout_log" > /dev/null
@@ -1505,7 +2333,7 @@ printf '%s\n' '11111111-1111-1111-1111-111111111111' > "$boot_id_file"
 
 run_rebuild invalid '' ''
 [[ $rebuild_status -eq 2 ]]
-assert_snapshot_pipeline
+assert_snapshot_pipeline no
 reject_call 'nixos-rebuild'
 reject_call 'dotfiles-doctor'
 

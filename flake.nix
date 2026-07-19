@@ -383,8 +383,12 @@
           actualOciPullModes = lib.mapAttrs (
             _: container: container.pull
           ) hostConfig.virtualisation.oci-containers.containers;
+          ociContainerStartScripts = map (
+            containerName:
+            lib.removeSuffix " " hostConfig.systemd.services."docker-${containerName}".serviceConfig.ExecStart
+          ) (builtins.attrNames hostConfig.virtualisation.oci-containers.containers);
           expectedOciImageManifest = {
-            schemaVersion = 1;
+            schemaVersion = 2;
             images = lib.mapAttrsToList (id: image: {
               inherit id;
               inherit (image)
@@ -519,10 +523,10 @@
             assert builtins.attrNames nixImageIdentityFiles == [ "agentmemory" ];
             assert
               actualOciPullModes == {
-                agentmemory = "missing";
-                crawl4ai = "missing";
-                searxng = "missing";
-                valkey = "missing";
+                agentmemory = "never";
+                crawl4ai = "never";
+                searxng = "never";
+                valkey = "never";
               };
             assert
               hostConfig.environment.etc."dotfiles/oci-images.json".source
@@ -555,6 +559,9 @@
                   echo 'production dotfiles-sync-images contains test hooks' >&2
                   exit 1
                 fi
+                for start_script in ${lib.escapeShellArgs ociContainerStartScripts}; do
+                  grep --fixed-strings -- '--pull never' "$start_script" > /dev/null
+                done
                 bash ${self}/scripts/tests/sync-images-runtime.sh ${lib.getExe syncImagesTest}
                 touch $out
               '';
@@ -1019,7 +1026,23 @@
                   ${pkgs.bash}/bin/bash \
                   ${lib.getExe pkgs.fakeroot} \
                   ${self}/scripts/lib/operation-lock.sh \
-                  ${self}/scripts/lib/rebuild-receipt.sh
+                  ${self}/scripts/lib/rebuild-receipt.sh \
+                  ${self}/scripts/lib/rebuild-attempt.sh
+                touch $out
+              '';
+
+          rebuild-attempt =
+            pkgs.runCommandLocal "check-rebuild-attempt"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${self}/scripts/tests/rebuild-attempt.sh \
+                  ${self}/scripts/lib/rebuild-attempt.sh
                 touch $out
               '';
 
@@ -1046,6 +1069,40 @@
               grep -Fqx \
                 'Use dotfiles-rebuild for normal changes; use scripts/bootstrap.sh only for initial provisioning.' \
                 stderr
+              touch $out
+            '';
+
+          privilege-boundary =
+            let
+              sudoWrapper = "${hostConfig.security.wrapperDir}/sudo";
+              rawSudo = lib.getExe pkgs.sudo;
+              sudoWrapperConfig = hostConfig.security.wrappers.sudo;
+            in
+            assert hostConfig.security.enableWrappers;
+            assert hostConfig.security.sudo.enable;
+            assert sudoWrapperConfig.enable;
+            assert sudoWrapperConfig.program == "sudo";
+            assert sudoWrapperConfig.owner == "root";
+            assert sudoWrapperConfig.setuid;
+            assert sudoWrapperConfig.source == rawSudo;
+            pkgs.runCommandLocal "check-privilege-boundary" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+              set -euo pipefail
+
+              for command in \
+                ${lib.escapeShellArg (lib.getExe hostConfig.my.commands.rebuild)} \
+                ${lib.escapeShellArg (lib.getExe hostConfig.my.commands.doctor)} \
+                ${lib.escapeShellArg (lib.getExe hostConfig.my.commands.sopsEnroll)}
+              do
+                if ! grep -F -- ${lib.escapeShellArg sudoWrapper} "$command" > /dev/null; then
+                  echo "configured sudo wrapper is absent: $command" >&2
+                  exit 1
+                fi
+                if grep -F -- ${lib.escapeShellArg rawSudo} "$command" > /dev/null; then
+                  echo "raw store sudo crossed the privilege boundary: $command" >&2
+                  exit 1
+                fi
+              done
+
               touch $out
             '';
 

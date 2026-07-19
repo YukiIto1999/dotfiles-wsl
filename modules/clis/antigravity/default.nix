@@ -2,6 +2,9 @@
 
 let
   cfg = config.my;
+  mcpConfig = pkgs.replaceVars ./mcp_config.json {
+    inherit (cfg) gatewayUrl;
+  };
 in
 {
   my.clis.antigravity = {
@@ -17,9 +20,12 @@ in
     };
   };
 
+  my.configArtifacts."clis/antigravity/mcp" = {
+    format = "json";
+    source = mcpConfig;
+  };
+
   home-manager.users.${cfg.username} = _: {
-    home.file.".gemini/antigravity-cli/mcp_config.json".source = pkgs.replaceVars ./mcp_config.json {
-      inherit (cfg) gatewayUrl;
-    };
+    home.file.".gemini/antigravity-cli/mcp_config.json".source = mcpConfig;
   };
 }

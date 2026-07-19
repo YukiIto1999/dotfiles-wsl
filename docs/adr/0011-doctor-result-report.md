@@ -33,9 +33,9 @@ result core を生成した場合、終了 status と outcome を次の対応に
 | `2` | report なし | 引数が不正で、result core を生成する前に終了した |
 | `130` / `143` | report なし | INT / TERM を受け、所有する session の cleanup を試行した |
 
-rebuild は forward target の schema v4 と、rollback target の schema v4 / v3 について、closure 内の doctor を `--format json` で1回だけ実行する。doctor の raw status を成功判定の正本にしつつ、JSON document 数、report と manifest の schema、全 check field、ID 一意性、summary 再計算、status / outcome の対応を検証する。検証できない report は `doctor.report` の contract failure とし、doctor が 0 を返していても status 2 へ正規化する。検証できた `fail` / `error` の ID は receipt schema v2 の `verification.failedCheckIds` に保存する。
+rebuild は forward target の schema v4 と、rollback target の schema v4 / v3 について、closure 内の doctor を `--format json` で1回だけ実行する。ADR 0014 以後、schema v3 は既存 rollback transaction の verification に限り、新しい rollback activation は schema v4 だけを許可する。doctor の raw status を成功判定の正本にしつつ、JSON document 数、report と manifest の schema、全 check field、ID 一意性、summary 再計算、status / outcome の対応を検証する。検証できない report は `doctor.report` の contract failure とし、doctor が 0 を返していても status 2 へ正規化する。検証できた `fail` / `error` の ID は receipt schema v2 の `verification.failedCheckIds` に保存する。
 
-schema v3 を導入した世代へ戻せるよう、rollback target の schema v3 は JSON report を受理する。さらに schema v2 の旧 generation へ戻す場合だけ、旧 doctor を引数なしで1回実行する。旧 doctor の human 出力を保持したうえで、status 0 を `healthy`、status 1 を `degraded` とする report v1 へ変換し、`legacy.doctor` check と manifest schema 2 を明示して同じ validator に通す。それ以外の status は変換せず `doctor.report` とする。forward は schema v4 だけを受理する。欠落、破損、複数 JSON document、未定義 schema は doctor を実行する前に拒否する。schema v2 の generation を recovery target として扱わなくなった時点で legacy adapter を削除する。
+phase 4 より前に rollback object が記録済みの transaction を検証できるよう、schema v3 target は JSON report を受理する。schema v2 target は旧 doctor を引数なしで1回実行する。旧 doctor の human 出力を保持したうえで、status 0 を `healthy`、status 1 を `degraded` とする report v1 へ変換し、`legacy.doctor` check と manifest schema 2 を明示して同じ validator に通す。それ以外の status は変換せず `doctor.report` とする。forward と新しい rollback は schema v4 だけを受理する。欠落、破損、複数 JSON document、未定義 schema は doctor を実行する前に拒否する。移行前に記録された rollback transaction を保持しなくなった時点で legacy adapter を削除する。
 
 ## 影響
 

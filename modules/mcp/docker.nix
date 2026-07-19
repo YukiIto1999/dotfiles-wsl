@@ -81,6 +81,7 @@ in
       {
         containers."${name}" = {
           inherit image;
+          pull = "never";
         }
         // lib.optionalAttrs (imageFile != null) { inherit imageFile; }
         // lib.optionalAttrs (volumes != [ ]) { inherit volumes; }
@@ -129,8 +130,9 @@ in
           builtins.hasAttr image.container configuredContainers
           && configuredContainers.${image.container}.image == image.image
           && (configuredContainers.${image.container}.imageFile or null) == image.imageFile
+          && configuredContainers.${image.container}.pull == "never"
         ) imageDefinitions;
-        message = "my.ociImages must match the deployed OCI container image and imageFile";
+        message = "my.ociImages must match an OCI container with the declared image, imageFile, and pull=never";
       }
       {
         assertion =

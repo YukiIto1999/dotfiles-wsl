@@ -28,15 +28,15 @@ active phase は image と対応する container unit が成功した場合だ�
 
 check ID は `system.oci.lock`、`system.oci.sync`、`system.oci.image.<id>`、`active.oci.container.<id>` とする。report schema は version 1 のまま維持し、`manifestSchemaVersion` だけを 4 にする。
 
-rebuild は doctor manifest を実行前に単一 JSON document として読む。forward candidate は schema v4 だけを activation 前に受理する。rollback target は schema v4 / v3 の JSON protocol と schema v2 の legacy adapter だけを受理する。欠落、破損、複数 JSON document、未定義 schema の doctor は実行しない。verification 中にこの不整合を検出した場合は `doctor.manifest` を receipt の失敗 ID にする。
+rebuild は doctor manifest を実行前に単一 JSON document として読む。forward candidate は schema v4 だけを activation 前に受理する。doctor router は schema v4 / v3 の JSON protocol と schema v2 の legacy adapter を識別する。ADR 0014 以後、新しい activation は doctor schema v4 に加えて OCI image manifest schema v2 を必須とし、旧 adapter は既存 transaction の verification 互換に限定する。欠落、破損、複数 JSON document、未定義 schema の doctor は実行しない。verification 中にこの不整合を検出した場合は `doctor.manifest` を receipt の失敗 ID にする。
 
 ## 影響
 
 明示 sync の receipt、Nix archive 由来の期待 image ID、Docker cache、稼働 container を別の証拠として診断できる。receipt が古くても偶然 cache が残っている状態、Nix 生成 image の tag が別 image を指す状態、cache は正しいが container が旧 image ID で動いている状態を成功にしない。doctor は state を作成、修復、pull、restart しない。
 
-新規ホストでは OCI sync state が存在しないため、`dotfiles-sync-images` を実行してから doctor を実行する。同期中の standalone doctor は競合せず `blocked` を返す。rebuild transaction が image shared lock を precondition にする変更と、OCI container の `pull = "never"` への変更は次の決定に分ける。
+新規ホストでは OCI sync state が存在しないため、WSL 再起動後に `dotfiles-sync-images`、`dotfiles-rebuild`、doctor の順で収束させる。同期中の standalone doctor は競合せず `blocked` を返す。ADR 0014 で rebuild が target の同期 status を activation 前に検査し、OCI container を `pull = "never"` へ切り替えた。
 
-schema v3 / v2 の rollback 対応は recovery generation が残る間だけ維持する。互換経路を forward へ広げない。
+schema v3 / v2 の doctor adapter は既存 transaction の verification 用にだけ維持する。forward と新しい rollback へ互換経路を広げない。
 
 ## 一次資料
 

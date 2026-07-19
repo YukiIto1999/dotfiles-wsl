@@ -178,6 +178,8 @@ Restart this WSL distribution from PowerShell:
 
 Then run:
 
+  dotfiles-sync-images
+  dotfiles-rebuild
   dotfiles-doctor
 
 MSG

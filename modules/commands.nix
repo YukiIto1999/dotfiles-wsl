@@ -103,6 +103,23 @@ let
 
   managedFilePaths = map (file: file.path) (builtins.attrValues cfg.doctor.managedFiles);
 
+  ociImageManifestEntries = lib.mapAttrsToList (id: image: {
+    inherit id;
+    inherit (image)
+      kind
+      container
+      image
+      repository
+      digest
+      ;
+    imageFile = if image.imageFile == null then null else toString image.imageFile;
+  }) cfg.ociImages;
+
+  ociImageManifest = (pkgs.formats.json { }).generate "dotfiles-oci-images-v1.json" {
+    schemaVersion = 1;
+    images = ociImageManifestEntries;
+  };
+
   doctorManifest =
     (pkgs.formats.json { }).generate "doctor-manifest-v${toString cfg.doctor.schemaVersion}.json"
       {
@@ -248,6 +265,57 @@ let
     gzip
     coreutils
   ]) { };
+  mkSyncImages =
+    name: allowTestHooks:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = with pkgs; [
+        coreutils
+        git
+        jq
+        util-linux
+      ];
+      text = substitute (
+        commonVars
+        // {
+          configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
+          dockerCommand = lib.escapeShellArg (lib.getExe pkgs.docker);
+          ociImageManifest = lib.escapeShellArg ociImageManifest;
+          ociImageStateRoot = lib.escapeShellArg "${cfg.homeDir}/.local/state/dotfiles-wsl/image-sync";
+          ociImageSyncUser = lib.escapeShellArg cfg.username;
+          imageSyncEnvironmentSetup =
+            if allowTestHooks then
+              ''
+                manifest=''${DOTFILES_IMAGE_SYNC_TEST_MANIFEST:-$manifest}
+                state_root=''${DOTFILES_IMAGE_SYNC_TEST_STATE_ROOT:-$state_root}
+                docker_command=''${DOTFILES_IMAGE_SYNC_TEST_DOCKER:-$docker_command}
+              ''
+            else
+              ''
+                if [[ $(id -un) != "$expected_user" ]]; then
+                  die 2 "dotfiles-sync-images must run as $expected_user"
+                fi
+              '';
+          imageSyncCommonGitDirSetup =
+            if allowTestHooks then
+              ''
+                common_git_dir=''${DOTFILES_IMAGE_SYNC_TEST_GIT_COMMON_DIR:?DOTFILES_IMAGE_SYNC_TEST_GIT_COMMON_DIR is required}
+              ''
+            else
+              ''
+                common_git_dir=$(git -C "$dotfiles" rev-parse --path-format=absolute --git-common-dir) || \
+                  die 2 "failed to resolve the Git common directory"
+              '';
+        }
+      ) (builtins.readFile ./commands/sync-images);
+    };
+  syncImagesTest = mkSyncImages "dotfiles-sync-images-test" true;
+  syncImages = (mkSyncImages "dotfiles-sync-images" false).overrideAttrs (old: {
+    passthru = (old.passthru or { }) // {
+      manifest = ociImageManifest;
+      testPackage = syncImagesTest;
+    };
+  });
   cleanup = mkCommand "dotfiles-cleanup" ./commands/cleanup (with pkgs; [ coreutils ]) { };
 
   sopsVerifier = pkgs.writeShellApplication {
@@ -373,6 +441,7 @@ in
       wslRestartRequired
       cleanup
       installClis
+      syncImages
       sopsEnroll
       ;
   };
@@ -383,6 +452,7 @@ in
   config.environment.systemPackages = builtins.attrValues cfg.commands ++ [ nixosRebuildGuard ];
 
   config.environment.etc."dotfiles/doctor.json".source = doctorManifest;
+  config.environment.etc."dotfiles/oci-images.json".source = ociImageManifest;
   config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;
 
   config.my.doctor.units = {

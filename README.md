@@ -268,6 +268,40 @@ forward verification や schema が不明な target には適用しない。
 
 flake input の更新は build と分け、明示的に `nix flake update` を実行してから rebuild する。
 
+## OCI image の同期
+
+MCP backend の upstream OCI image は digest まで固定し、Docker cache への取得を
+`dotfiles-sync-images` に分ける。現在の manifest に対する状態確認と同期は次の順で行う。
+
+```bash
+dotfiles-sync-images --status
+dotfiles-sync-images
+```
+
+checkout で image digest を変更し、まだ current generation に command が入っていない場合は flake package を使う。
+
+```bash
+nix run .#dotfiles-sync-images -- --status
+nix run .#dotfiles-sync-images
+dotfiles-rebuild
+```
+
+command は `/etc/dotfiles/oci-images.json` と同じ生成元の immutable manifest を読む。upstream image は
+`repository@sha256:...` と Docker の `RepoDigests` を照合し、結果を
+`~/.local/state/dotfiles-wsl/image-sync/receipts/<image-id>.json` に記録する。agentmemory は Nix が生成した
+`imageFile` を OCI service が load するため、registry から pull しない。同期 command は設定された通常ユーザーで実行し、
+`sudo` では起動しない。古い image の削除も行わない。
+
+| status | 意味 |
+|---:|---|
+| `0` | 全 upstream image が manifest の digest と一致する |
+| `1` | 未同期、pull 失敗、repository 共通 lock を取得不能、別の同期処理が実行中、または rebuild / SOPS enrollment が active |
+| `2` | 実行ユーザー、manifest、state directory、image sync lock、receipt の形式または所有条件が不正 |
+
+`--status` は image を pull せず、state root がなければ作成しない。同期は image ごとに続行するため、一つの
+registry failure が別 image の receipt 更新を妨げない。最初の配備では OCI service の `pull = "missing"` を維持し、
+同期 command と診断の移行後に `pull = "never"` へ切り替える。
+
 ## 検証
 
 `nix flake check` と `dotfiles-doctor` は検査対象が異なるため、どちらも必要になる。flake check は評価した source から system closure と設定を生成できることを apply 前に検査する。doctor は apply 後の current generation が宣言した期待値と、system profile、systemd、SOPS host key、home 配下の CLI、MCP gateway の実状態が一致することを検査する。
@@ -403,6 +437,7 @@ OpenCode (plugins/ 自動ロード)      --/
 | CLI 固有の設定を変える | `modules/clis/<name>/` 配下のテンプレート |
 | CLI を増減 | `modules/clis/<name>/` を足し、`modules/clis/default.nix` の imports に登録 |
 | MCP server を増減 | `pkgs/<name>` を build 定義として足し、`modules/mcp/servers/<name>.nix` に target を追加、`modules/mcp/default.nix` の imports に登録 |
+| upstream OCI image を更新 | `modules/mcp/servers/<name>.nix` の repository、digest、image reference を同時に変更し、`nix run .#dotfiles-sync-images` |
 | binary cache を増減 | `modules/nix-caches.nix` |
 | secret を足す | 消費する module に `sops.secrets` を宣言し、`secrets/secrets.yaml` に値を足す |
 
@@ -424,7 +459,7 @@ dotfiles-rebuild
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`config-artifact-contract`(実配備 source と構文検査 projection の同一性、実値の反映)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(各 module が実配備へ渡す JSON / TOML / YAML artifact の構文検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`config-artifact-contract`(実配備 source と構文検査 projection の同一性、実値の反映)、`oci-image-contract`(typed inventory、pull policy、同期 transaction の failure matrix)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(各 module が実配備へ渡す JSON / TOML / YAML artifact の構文検査)。
 
 ## License
 

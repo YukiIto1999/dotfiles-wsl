@@ -120,6 +120,75 @@ let
     images = ociImageManifestEntries;
   };
 
+  mkNixImageIdentity =
+    id: image:
+    pkgs.runCommandLocal "dotfiles-oci-${id}-image-identity-v1.json"
+      {
+        nativeBuildInputs = with pkgs; [
+          coreutils
+          gnutar
+          gzip
+          jq
+        ];
+        inherit (image) imageFile;
+        imageReference = image.image;
+      }
+      ''
+        set -euo pipefail
+
+        work_dir=$(mktemp -d)
+        trap 'rm -rf -- "$work_dir"' EXIT
+        manifest_json=$work_dir/manifest.json
+        config_json=$work_dir/config.json
+
+        tar --extract --to-stdout --file "$imageFile" manifest.json > "$manifest_json"
+        jq --exit-status --slurp --arg reference "$imageReference" '
+          length == 1 and
+          (.[0] | type) == "array" and (.[0] | length) == 1 and
+          (.[0][0].Config | type == "string" and test("^[0-9a-f]{64}\\.json$")) and
+          .[0][0].RepoTags == [$reference] and
+          (.[0][0].Layers | type) == "array" and (.[0][0].Layers | length) > 0 and
+          all(.[0][0].Layers[];
+            type == "string" and
+            test("^([0-9a-f]{64}\\.tar|[0-9a-f]{64}/layer\\.tar)$")
+          )
+        ' "$manifest_json" > /dev/null
+
+        config_member=$(jq --raw-output '.[0].Config' "$manifest_json")
+        tar --extract --to-stdout --file "$imageFile" -- "$config_member" > "$config_json"
+        jq --exit-status --slurp 'length == 1 and (.[0] | type) == "object"' \
+          "$config_json" > /dev/null
+
+        expected_hash=$(jq --raw-output '.[0].Config | rtrimstr(".json")' "$manifest_json")
+        actual_hash=$(sha256sum -- "$config_json" | cut -d ' ' -f 1)
+        test "$actual_hash" = "$expected_hash"
+
+        jq --null-input \
+          --arg imageReference "$imageReference" \
+          --arg imageFile "$imageFile" \
+          --arg imageId "sha256:$expected_hash" \
+          '{
+            schemaVersion: 1,
+            imageReference: $imageReference,
+            imageFile: $imageFile,
+            imageId: $imageId
+          }' > "$out"
+      '';
+
+  nixImageIdentityFiles = lib.mapAttrs mkNixImageIdentity (
+    lib.filterAttrs (_: image: image.kind == "nix") cfg.ociImages
+  );
+
+  doctorOciImageManifestEntries = map (
+    image:
+    image
+    // {
+      unit = "docker-${image.container}.service";
+      expectedImageIdFile =
+        if image.kind == "nix" then toString nixImageIdentityFiles.${image.id} else null;
+    }
+  ) ociImageManifestEntries;
+
   doctorManifest =
     (pkgs.formats.json { }).generate "doctor-manifest-v${toString cfg.doctor.schemaVersion}.json"
       {
@@ -189,6 +258,13 @@ let
             "2025-11-25"
           ];
         };
+        oci = {
+          healthUnit = "docker.service";
+          stateRoot = "${cfg.homeDir}/.local/state/dotfiles-wsl/image-sync";
+          dockerCommand = lib.getExe pkgs.docker;
+          syncStatusCommand = lib.getExe syncImages;
+          images = doctorOciImageManifestEntries;
+        };
         probePolicy = cfg.doctor.probePolicy;
         wslInterop = cfg.doctor.wslInterop;
         nixLdPath = "/lib64/ld-linux-x86-64.so.2";
@@ -207,6 +283,7 @@ let
     nixStoreDir = builtins.storeDir;
     nixosRebuild = lib.escapeShellArg (lib.getExe config.system.build.nixos-rebuild);
     operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
+    ociImageStateFunctions = builtins.readFile ../scripts/lib/oci-image-state.sh;
     rebuildReceiptFunctions = builtins.readFile ../scripts/lib/rebuild-receipt.sh;
     installTable = lib.concatStringsSep "\n" (map installRow names);
     cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
@@ -225,16 +302,23 @@ let
       // extra
     );
 
-  doctor = mkCommand "dotfiles-doctor" ./commands/doctor (with pkgs; [
-    curl
-    jq
-    gnugrep
-    coreutils
-    systemd
-    sudo
-    rootProbe
-    wslRestartRequired
-  ]) { };
+  doctor =
+    (mkCommand "dotfiles-doctor" ./commands/doctor (with pkgs; [
+      curl
+      jq
+      gnugrep
+      coreutils
+      systemd
+      sudo
+      util-linux
+      rootProbe
+      wslRestartRequired
+    ]) { }).overrideAttrs
+      (old: {
+        passthru = (old.passthru or { }) // {
+          inherit nixImageIdentityFiles;
+        };
+      });
   wslRestartRequired = mkCommand "dotfiles-wsl-restart-required" ./commands/wsl-restart-required (
     with pkgs; [ coreutils ]) { };
   rebuild =

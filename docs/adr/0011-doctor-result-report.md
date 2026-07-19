@@ -33,12 +33,12 @@ result core を生成した場合、終了 status と outcome を次の対応に
 | `2` | report なし | 引数が不正で、result core を生成する前に終了した |
 | `130` / `143` | report なし | INT / TERM を受け、所有する session の cleanup を試行した |
 
-rebuild は forward target と schema v3 の rollback target について、closure 内の doctor を `--format json` で1回だけ実行する。doctor の raw status を成功判定の正本にしつつ、JSON document 数、report と manifest の schema、全 check field、ID 一意性、summary 再計算、status / outcome の対応を検証する。検証できない report は `doctor.report` の contract failure とし、doctor が0を返していても status 2へ正規化する。検証できた `fail` / `error` の ID は receipt schema v2 の `verification.failedCheckIds` に保存する。
+rebuild は forward target の schema v4 と、rollback target の schema v4 / v3 について、closure 内の doctor を `--format json` で1回だけ実行する。doctor の raw status を成功判定の正本にしつつ、JSON document 数、report と manifest の schema、全 check field、ID 一意性、summary 再計算、status / outcome の対応を検証する。検証できない report は `doctor.report` の contract failure とし、doctor が 0 を返していても status 2 へ正規化する。検証できた `fail` / `error` の ID は receipt schema v2 の `verification.failedCheckIds` に保存する。
 
-schema v3 を導入する最初の世代では、recovery target が schema v2 の旧 generation になり得る。rollback target の manifest が schema v2 だと確認できた場合だけ、rebuild は旧 doctor を引数なしで1回実行する。旧 doctor の human 出力を保持したうえで、status 0を `healthy`、status 1を `degraded` とする report v1へ変換し、`legacy.doctor` check と manifest schema 2を明示して同じ validator に通す。それ以外の status は変換せず `doctor.report` とする。この互換経路は forward target、schema v3、schema が不明な target には広げない。schema v2 の generation を recovery target として扱わなくなった時点で削除する。
+schema v3 を導入した世代へ戻せるよう、rollback target の schema v3 は JSON report を受理する。さらに schema v2 の旧 generation へ戻す場合だけ、旧 doctor を引数なしで1回実行する。旧 doctor の human 出力を保持したうえで、status 0 を `healthy`、status 1 を `degraded` とする report v1 へ変換し、`legacy.doctor` check と manifest schema 2 を明示して同じ validator に通す。それ以外の status は変換せず `doctor.report` とする。forward は schema v4 だけを受理する。欠落、破損、複数 JSON document、未定義 schema は doctor を実行する前に拒否する。schema v2 の generation を recovery target として扱わなくなった時点で legacy adapter を削除する。
 
 ## 影響
 
 probe の副作用と表示を分離できる。human 文言を変更しても rebuild の判定は変わらず、rebuild は report の outcome だけで doctor の raw status を上書きしない。失敗した transaction は store path と check ID を同じ receipt に残すため、resume は同じ candidate の再検証から再開できる。
 
-report は観測結果であり、宣言状態の新しい正本ではない。期待値は ADR 0010 の manifest v3 だけに置く。report を checkout に保存したり、次回 doctor の入力として再利用したりしない。
+report は観測結果であり、宣言状態の新しい正本ではない。期待値は ADR 0010 の current generation manifest だけに置く。report を checkout に保存したり、次回 doctor の入力として再利用したりしない。

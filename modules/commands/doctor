@@ -1,5 +1,7 @@
 set +e
 
+@ociImageStateFunctions@
+
 manifest_entry="@doctorManifestPath@"
 manifest=''
 manifest_schema_version="@doctorSchemaVersion@"
@@ -131,6 +133,7 @@ cleanup_all() {
   if declare -F mcp_cleanup_session >/dev/null; then
     mcp_cleanup_session >/dev/null 2>&1
   fi
+  dotfiles_oci_release_image_lock
   mcp_remove_temp
   rm -rf -- "$report_tmp"
   return "$status"
@@ -144,6 +147,7 @@ signal_exit() {
   if declare -F mcp_cleanup_session >/dev/null; then
     mcp_cleanup_session >/dev/null 2>&1
   fi
+  dotfiles_oci_release_image_lock
   mcp_remove_temp
   rm -rf -- "$report_tmp"
   exit "$status"
@@ -169,6 +173,7 @@ fi
 # $schema などは shell 変数ではなく、--arg で渡す jq 変数。
 # shellcheck disable=SC2016
 manifest_contract='
+  . as $root |
   .schemaVersion == ($schema | tonumber) and
   (.user.name | type) == "string" and
   (.user.home | type) == "string" and
@@ -228,6 +233,41 @@ manifest_contract='
   all(.mcp.supportedProtocolVersions[]; type == "string" and length > 0) and
   ([.mcp.supportedProtocolVersions[]] | length) == ([.mcp.supportedProtocolVersions[]] | unique | length) and
   (.mcp.requestedProtocolVersion as $requested | .mcp.supportedProtocolVersions | index($requested) != null) and
+  .oci.healthUnit == "docker.service" and
+  (.oci.healthUnit as $health | any(.units[]; .id == $health)) and
+  .oci.stateRoot == (.user.home + "/.local/state/dotfiles-wsl/image-sync") and
+  (.oci.stateRoot | contains("\n") | not) and
+  (.oci.dockerCommand | type) == "string" and (.oci.dockerCommand | startswith("/")) and
+  (.oci.dockerCommand | contains("\n") | not) and
+  (.oci.syncStatusCommand | type) == "string" and (.oci.syncStatusCommand | startswith("/")) and
+  (.oci.syncStatusCommand | contains("\n") | not) and
+  (.oci.images | type) == "array" and (.oci.images | length) > 0 and
+  ([.oci.images[].id] | length) == ([.oci.images[].id] | unique | length) and
+  ([.oci.images[].container] | length) == ([.oci.images[].container] | unique | length) and
+  ([.oci.images[].unit] | length) == ([.oci.images[].unit] | unique | length) and
+  all(.oci.images[];
+    (.id | type == "string" and test("^[a-z0-9][a-z0-9-]{0,62}$")) and
+    (.container | type == "string" and test("^[a-z0-9][a-z0-9_.-]{0,62}$")) and
+    .unit == ("docker-" + .container + ".service") and
+    (.unit as $unit | any($root.units[]; .id == $unit)) and
+    (.image | type == "string" and length > 0 and (contains("\n") | not)) and
+    if .kind == "upstream" then
+      (.repository | type == "string" and length > 0 and (contains("\n") | not)) and
+      (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
+      (.repository as $repository | .digest as $digest | .image |
+        split("@") as $parts |
+        ($parts | length) == 2 and $parts[1] == $digest and
+        ($parts[0] == $repository or
+          (($parts[0] | startswith($repository + ":")) and
+            ($parts[0] | ltrimstr($repository + ":") |
+              test("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"))))) and
+      .imageFile == null and .expectedImageIdFile == null
+    elif .kind == "nix" then
+      .repository == null and .digest == null and
+      (.imageFile | type == "string" and test("^/nix/store/[0-9a-z]{32}-[^/\\n]+$")) and
+      (.expectedImageIdFile | type == "string" and test("^/nix/store/[0-9a-z]{32}-[^/\\n]+$"))
+    else false end
+  ) and
   (.probePolicy | type) == "object" and
   all([
     .probePolicy.cliTimeoutSeconds,
@@ -587,6 +627,148 @@ while IFS= read -r unit; do
   fi
 done < <(jq -c '.units[]' "$manifest")
 
+declare -A oci_image_check_status=()
+declare -A oci_image_id=()
+oci_health_unit=$(jq -r '.oci.healthUnit' "$manifest")
+oci_state_root=$(jq -r '.oci.stateRoot' "$manifest")
+oci_docker_command=$(jq -r '.oci.dockerCommand' "$manifest")
+oci_sync_status_command=$(jq -r '.oci.syncStatusCommand' "$manifest")
+oci_lock_state=invalid
+started=$(now_ms)
+if dotfiles_oci_validate_state_root "$oci_state_root" "$EUID" "$(id -g)"; then
+  dotfiles_oci_acquire_image_lock "$oci_state_root" "$EUID" "$(id -g)" shared
+  oci_lock_status=$?
+  if [[ $oci_lock_status -eq 0 ]]; then
+    oci_lock_state=acquired
+    add_check system.oci.lock system pass "$oci_state_root/operation.lock" \
+      shared-lock acquired "OCI image state is valid and shared lock was acquired" \
+      "$(duration_since "$started")"
+  elif [[ $oci_lock_status -eq 1 ]]; then
+    oci_lock_state=busy
+    add_check system.oci.lock system blocked "$oci_state_root/operation.lock" \
+      shared-lock busy "OCI image checks are blocked by an active synchronization" \
+      "$(duration_since "$started")"
+  else
+    add_check system.oci.lock system fail "$oci_state_root/operation.lock" \
+      valid-lock invalid "OCI image sync state and lock are invalid" \
+      "$(duration_since "$started")"
+  fi
+else
+  add_check system.oci.lock system fail "$oci_state_root/operation.lock" \
+    valid-state-tree invalid "OCI image sync state and lock are invalid" \
+    "$(duration_since "$started")"
+fi
+
+oci_docker_healthy=${unit_check_status[$oci_health_unit]:-fail}
+if [[ $oci_lock_state != acquired ]]; then
+  add_check system.oci.sync system blocked "$oci_sync_status_command" synchronized blocked \
+    "upstream OCI image synchronization check is blocked by the image state lock" 0
+  while IFS= read -r oci_image; do
+    oci_id=$(jq -r '.id' <<< "$oci_image")
+    oci_component=$(stable_component "$oci_id")
+    oci_image_check_status["$oci_id"]=blocked
+    add_check "system.oci.image.$oci_component" system blocked "$oci_id" desired-image blocked \
+      "OCI image check is blocked by the image state lock: $oci_id" 0
+  done < <(jq -c '.oci.images[]' "$manifest")
+elif [[ $oci_docker_healthy != pass ]]; then
+  add_check system.oci.sync system blocked "$oci_sync_status_command" synchronized blocked \
+    "upstream OCI image synchronization check is blocked by Docker health unit" 0
+  while IFS= read -r oci_image; do
+    oci_id=$(jq -r '.id' <<< "$oci_image")
+    oci_component=$(stable_component "$oci_id")
+    oci_image_check_status["$oci_id"]=blocked
+    add_check "system.oci.image.$oci_component" system blocked "$oci_id" desired-image blocked \
+      "OCI image check is blocked by Docker health unit: $oci_id" 0
+  done < <(jq -c '.oci.images[]' "$manifest")
+else
+  started=$(now_ms)
+  timeout "${system_timeout}s" "$oci_sync_status_command" --status >/dev/null 2>&1
+  sync_status=$?
+  if [[ $sync_status -eq 0 ]]; then
+    add_check system.oci.sync system pass "$oci_sync_status_command" synchronized synchronized \
+      "upstream OCI images match their synchronization receipts" "$(duration_since "$started")"
+  else
+    add_check system.oci.sync system fail "$oci_sync_status_command" synchronized "status-$sync_status" \
+      "upstream OCI image synchronization is stale" "$(duration_since "$started")"
+  fi
+
+  while IFS= read -r oci_image; do
+    oci_id=$(jq -r '.id' <<< "$oci_image")
+    oci_kind=$(jq -r '.kind' <<< "$oci_image")
+    oci_reference=$(jq -r '.image' <<< "$oci_image")
+    oci_repository=$(jq -r '.repository // empty' <<< "$oci_image")
+    oci_digest=$(jq -r '.digest // empty' <<< "$oci_image")
+    oci_image_file=$(jq -r '.imageFile // empty' <<< "$oci_image")
+    oci_expected_image_id_file=$(jq -r '.expectedImageIdFile // empty' <<< "$oci_image")
+    oci_component=$(stable_component "$oci_id")
+    started=$(now_ms)
+    expected_nix_image_id=''
+    expected_nix_image_status=1
+    oci_expected_image_id_canonical=''
+    if [[ $oci_kind == nix ]]; then
+      oci_expected_image_id_canonical=$(readlink -e -- "$oci_expected_image_id_file" 2>/dev/null)
+    fi
+    if [[ $oci_kind == nix && $oci_expected_image_id_canonical == "$oci_expected_image_id_file" \
+      && -f $oci_expected_image_id_file && ! -L $oci_expected_image_id_file ]]; then
+      expected_nix_image_id=$(jq -er --slurp \
+        --arg reference "$oci_reference" \
+        --arg imageFile "$oci_image_file" '
+          if length == 1 and
+            .[0].schemaVersion == 1 and
+            .[0].imageReference == $reference and
+            .[0].imageFile == $imageFile and
+            (.[0].imageId | type == "string" and test("^sha256:[0-9a-f]{64}$"))
+          then .[0].imageId
+          else error("invalid Nix image identity")
+          end
+        ' "$oci_expected_image_id_file" 2>/dev/null)
+      expected_nix_image_status=$?
+    fi
+    image_inspect=$(timeout "${system_timeout}s" "$oci_docker_command" image inspect "$oci_reference" 2>/dev/null)
+    image_inspect_status=$?
+    desired_image_id=$(jq -er '
+      if type == "array" and length == 1 then .[0].Id else error("expected one image") end |
+      select(type == "string" and test("^sha256:[0-9a-f]{64}$"))
+    ' <<< "$image_inspect" 2>/dev/null)
+    image_id_status=$?
+    image_matches=0
+    if [[ $image_inspect_status -eq 0 && $image_id_status -eq 0 ]]; then
+      if [[ $oci_kind == upstream ]]; then
+        expected_repo_digest="${oci_repository}@${oci_digest}"
+        if jq -e --arg expected "$expected_repo_digest" '
+          type == "array" and length == 1 and
+          (.[0].RepoDigests | type) == "array" and
+          (.[0].RepoDigests | index($expected)) != null
+        ' <<< "$image_inspect" >/dev/null 2>&1; then
+          image_matches=1
+        fi
+      elif [[ $expected_nix_image_status -eq 0 && $desired_image_id == "$expected_nix_image_id" ]]; then
+        image_matches=1
+      fi
+    fi
+
+    if [[ $image_matches -eq 1 ]]; then
+      oci_image_check_status["$oci_id"]=pass
+      oci_image_id["$oci_id"]=$desired_image_id
+      add_check "system.oci.image.$oci_component" system pass "$oci_reference" desired-image "$desired_image_id" \
+        "OCI image matches the desired source: $oci_id" "$(duration_since "$started")"
+    else
+      oci_image_check_status["$oci_id"]=fail
+      if [[ $oci_kind == upstream ]]; then
+        add_check "system.oci.image.$oci_component" system fail "$oci_reference" \
+          "${oci_repository}@${oci_digest}" "status-$image_inspect_status" \
+          "OCI image does not match the desired digest: $oci_id" "$(duration_since "$started")"
+      else
+        add_check "system.oci.image.$oci_component" system fail "$oci_reference" \
+          "${expected_nix_image_id:-immutable-image-id}" \
+          "${desired_image_id:-status-$image_inspect_status}" \
+          "OCI image does not match the immutable Nix image identity: $oci_id" \
+          "$(duration_since "$started")"
+      fi
+    fi
+  done < <(jq -c '.oci.images[]' "$manifest")
+fi
+
 root_probe=$(jq -r '.sops.rootProbe' "$manifest")
 started=$(now_ms)
 root_metadata=$(timeout "${system_timeout}s" sudo -n -- "$root_probe" 2>/dev/null)
@@ -619,6 +801,50 @@ else
 fi
 
 # Active probes are deliberately sequential because they may share HOME and external state.
+while IFS= read -r oci_image; do
+  oci_id=$(jq -r '.id' <<< "$oci_image")
+  oci_container=$(jq -r '.container' <<< "$oci_image")
+  oci_unit=$(jq -r '.unit' <<< "$oci_image")
+  oci_component=$(stable_component "$oci_id")
+  started=$(now_ms)
+  if [[ ${oci_image_check_status[$oci_id]:-blocked} != pass ]]; then
+    add_check "active.oci.container.$oci_component" active blocked "$oci_container" desired-image blocked \
+      "OCI container check is blocked because its image did not converge: $oci_id" \
+      "$(duration_since "$started")"
+    continue
+  fi
+  if [[ ${unit_check_status[$oci_unit]:-fail} != pass ]]; then
+    add_check "active.oci.container.$oci_component" active blocked "$oci_container" running-desired-image blocked \
+      "OCI container check is blocked by its systemd unit: $oci_unit" \
+      "$(duration_since "$started")"
+    continue
+  fi
+
+  container_inspect=$(timeout "${system_timeout}s" "$oci_docker_command" container inspect "$oci_container" 2>/dev/null)
+  container_inspect_status=$?
+  observed_container=$(jq -cer '
+    if type == "array" and length == 1 then .[0] else error("expected one container") end |
+    {
+      image: (.Image | select(type == "string" and test("^sha256:[0-9a-f]{64}$"))),
+      running: (.State.Running | select(type == "boolean"))
+    }
+  ' <<< "$container_inspect" 2>/dev/null)
+  observed_container_status=$?
+  desired_image_id=${oci_image_id[$oci_id]}
+  if [[ $container_inspect_status -eq 0 && $observed_container_status -eq 0 ]] \
+    && jq -e --arg image "$desired_image_id" '.image == $image and .running == true' \
+      <<< "$observed_container" >/dev/null 2>&1; then
+    add_check "active.oci.container.$oci_component" active pass "$oci_container" \
+      "running:$desired_image_id" "$observed_container" \
+      "OCI container runs the desired image: $oci_id" "$(duration_since "$started")"
+  else
+    add_check "active.oci.container.$oci_component" active fail "$oci_container" \
+      "running:$desired_image_id" "${observed_container:-status-$container_inspect_status}" \
+      "OCI container does not run the desired image: $oci_id" "$(duration_since "$started")"
+  fi
+done < <(jq -c '.oci.images[]' "$manifest")
+dotfiles_oci_release_image_lock
+
 cli_timeout=$(jq -r '.probePolicy.cliTimeoutSeconds' "$manifest")
 while IFS= read -r cli; do
   name=$(jq -r '.name' <<< "$cli")

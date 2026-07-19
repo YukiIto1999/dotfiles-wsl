@@ -2,8 +2,24 @@
 set -euo pipefail
 
 bootstrap=${1:?bootstrap script path is required}
+test_upstream_rebuild=${2:?test nixos-rebuild package is required}
 test_root=$(mktemp -d)
-trap 'rm -rf -- "$test_root"' EXIT
+bootstrap_pid=
+bootstrap_rebuild_release=
+cleanup() {
+  local status=$?
+
+  if [[ -n ${bootstrap_rebuild_release} ]]; then
+    : > "$bootstrap_rebuild_release"
+  fi
+  if [[ -n ${bootstrap_pid} ]]; then
+    kill "$bootstrap_pid" 2>/dev/null || true
+    wait "$bootstrap_pid" 2>/dev/null || true
+  fi
+  rm -rf -- "$test_root"
+  exit "$status"
+}
+trap cleanup EXIT
 
 # shellcheck source=/dev/null
 source "$bootstrap"
@@ -55,6 +71,15 @@ fi
 rm -r -- "$DOTFILES/.git/dotfiles-sops-enroll"
 reject_active_enrollment >/dev/null
 
+mkdir -p -- "$DOTFILES/.git/dotfiles-rebuild"
+touch "$DOTFILES/.git/dotfiles-rebuild/active.json"
+if (reject_active_rebuild >/dev/null 2>&1); then
+  echo 'bootstrap ignored an active rebuild transaction' >&2
+  exit 1
+fi
+rm -r -- "$DOTFILES/.git/dotfiles-rebuild"
+reject_active_rebuild >/dev/null
+
 STAT_PROFILE=valid
 stat() {
   local format path
@@ -85,6 +110,16 @@ for profile in bad-dir-owner bad-dir-mode bad-key-owner bad-key-mode; do
   fi
 done
 
+bootstrap_call_log=$test_root/bootstrap-calls.log
+export BOOTSTRAP_CALL_LOG=$bootstrap_call_log
+FLAKE_REF="git+file://$DOTFILES"
+nix() {
+  [[ $* == "build --no-link --print-out-paths --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.nixos.config.system.build.nixos-rebuild" ]]
+  printf '%s\n' "$test_upstream_rebuild"
+}
+install_boot_generation >/dev/null
+grep -Fqx "boot --no-reexec --flake ${FLAKE_REF}#nixos -L " "$bootstrap_call_log"
+
 real_key="$AGE_KEY.real"
 mv "$AGE_KEY" "$real_key"
 ln -s "$real_key" "$AGE_KEY"
@@ -103,3 +138,53 @@ if (preflight >/dev/null 2>&1); then
   printf 'preflight accepted a symlinked age key directory\n' >&2
   exit 1
 fi
+
+# main と同じ stage runner が operation lock を activation 完了まで保持する。
+exec {DOTFILES_OPERATION_LOCK_FD}>&-
+bootstrap_stage_log=$test_root/bootstrap-stages.log
+bootstrap_rebuild_ready=$test_root/bootstrap-rebuild.ready
+bootstrap_rebuild_release=$test_root/bootstrap-rebuild.release
+export BOOTSTRAP_REBUILD_READY=$bootstrap_rebuild_ready
+export BOOTSTRAP_REBUILD_RELEASE=$bootstrap_rebuild_release
+
+eval "$(declare -f acquire_operation_lock | sed '1s/acquire_operation_lock/production_acquire_operation_lock/')"
+record_bootstrap_stage() {
+  printf '%s\n' "$1" >> "$bootstrap_stage_log"
+}
+ensure_root() { record_bootstrap_stage ensure_root; }
+acquire_operation_lock() {
+  record_bootstrap_stage acquire_operation_lock
+  unset -f stat
+  production_acquire_operation_lock >/dev/null
+}
+reject_active_enrollment() { record_bootstrap_stage reject_active_enrollment; }
+reject_active_rebuild() { record_bootstrap_stage reject_active_rebuild; }
+register_safe_directories() { record_bootstrap_stage register_safe_directories; }
+preflight() { record_bootstrap_stage preflight; }
+verify_tracked_flake_files() { record_bootstrap_stage verify_tracked_flake_files; }
+verify_secrets() { record_bootstrap_stage verify_secrets; }
+install_ai_clis() { record_bootstrap_stage install_ai_clis; }
+install_boot_generation() {
+  record_bootstrap_stage install_boot_generation
+  "$test_upstream_rebuild/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#nixos" -L
+}
+link_nixos() { record_bootstrap_stage link_nixos; }
+
+run_bootstrap_stages >/dev/null &
+bootstrap_pid=$!
+for _ in {1..500}; do
+  [[ -e $bootstrap_rebuild_ready ]] && break
+  kill -0 "$bootstrap_pid" 2>/dev/null || break
+  sleep 0.01
+done
+[[ -e $bootstrap_rebuild_ready ]]
+if (exec 8< "$operation_lock"; flock -n 8); then
+  echo 'bootstrap released the operation lock before activation completed' >&2
+  exit 1
+fi
+: > "$bootstrap_rebuild_release"
+wait "$bootstrap_pid"
+bootstrap_pid=
+(exec 8< "$operation_lock"; flock -n 8)
+printf '%s\n' ensure_root "${BOOTSTRAP_STAGES[@]}" > "$test_root/expected-bootstrap-stages.log"
+cmp "$test_root/expected-bootstrap-stages.log" "$bootstrap_stage_log"

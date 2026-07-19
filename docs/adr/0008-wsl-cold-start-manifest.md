@@ -31,20 +31,31 @@ booted manifest または current activation interface が読めない場合は�
 live activation だけで完了する。manifest が異なり `user.default` が同じ変更は、先に live activation で
 `/etc/wsl.conf` を更新してから WSL を一度再起動する。
 
+effect を返す `--plan` と、system closure から検証済みの default user を返す `--default-user` を分ける。
+両方を同時には指定できない。rebuild は candidate と current generation の default user が構成済み user
+と一致する場合だけ transaction を開始する。
+
 activation interface だけが異なる場合は live activation を試さず、boot generation に登録して WSL を
 一度再起動する。manifest と activation interface が同時に異なる場合は、boot 時の activation より前に
 WSL が古い `wsl.conf` を読むため、default user 変更と同じ二段階の適用が必要になる。
 
 `wsl.defaultUser` の変更は一般の cold-start 変更より制約が強い。NixOS-WSL の手順どおり
-`nixos-rebuild boot`、root で一度起動、再停止の二段階で適用し、live switch は使わない。この途中では
+boot generation への登録、root で一度起動、再停止の二段階で適用し、live switch は使わない。この途中では
 booted manifest と candidate が一致しても、WSL が新しい `user.default` をまだ読んでいないため、
 predicate 単独で二段階目を省略しない。
 
+このリポジトリでは `my.username` から `homeDir`、`dotfilesDir`、`wsl.defaultUser` を同時に導出する。
+default user の変更は repository path と所有権も移す host identity migration であり、通常 rebuild の
+rollback helper だけでは閉じない。classifier は `boot-two-stage` を返すが、通常 rebuild と `--plan` は
+default user の不一致を終了 status 2 で拒否する。identity migration は別の transaction として設計する。
+
 ## 影響
 
-判定用 manifest や mutable marker は新設しない。NixOS がすでに生成した artifact と boot generation を
-正本にするため、option 一覧の二重管理と初回 switch 時の誤記録がない。WSL を停止する条件は
-`wsl.wslConf` の明示値、NixOS-WSL が生成する default、NixOS activation interface の変化に追従する。
+classifier の入力として判定用 manifest や mutable marker は新設しない。NixOS がすでに生成した artifact
+と boot generation を正本にするため、option 一覧の二重管理と初回 switch 時の誤記録がない。rebuild の
+receipt は effect を決める入力ではなく、中断後も同じ判定結果と boot 観測を再開する運用 state である。
+WSL を停止する条件は `wsl.wslConf` の明示値、NixOS-WSL が生成する default、NixOS activation interface
+の変化に追従する。
 
 ## 一次資料
 

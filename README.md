@@ -65,7 +65,7 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
    nix run .#dotfiles-rebuild
    ```
 
-   enrollment marker がある間、通常の rebuild は拒否される。`generation-pending` だけは例外で、差分が `secrets/.sops.yaml` と `secrets/secrets.yaml` の二つに限定され、両方の hash が transaction と一致した場合だけ build と apply を許可する。`apply` が generation を検証している間は marker が `generation-checking` になり、rebuild は再び拒否される。`dotfiles-rebuild` が WSL の停止と起動を指示した場合は、その手順を終えてから先へ進む。
+   enrollment marker がある間、通常の rebuild は拒否される。`generation-pending` だけは例外で、差分が `secrets/.sops.yaml` と `secrets/secrets.yaml` の二つに限定され、両方の hash が transaction と一致した場合だけ build と apply を許可する。この rebuild receipt は enrollment transaction ID に束縛される。WSL の停止後も `generation-pending` の同じ marker が残っていなければ再開しない。`apply` が generation を検証している間は marker が `generation-checking` になり、rebuild は再び拒否される。`dotfiles-rebuild` が WSL の停止と起動を指示した場合は、表示された transaction ID の手順を終えてから先へ進む。
 
 6. 既存ホストでは同じ `apply` を再実行する。
 
@@ -80,7 +80,7 @@ WSL2 上の NixOS ホスト設定、AI コーディング CLI の共通ルール
 7. 中断した場合は同じ `apply` を再実行する。journal の状態名だけではなく、旧・新ファイルの hash、current と next の recipient、current system、system profile、残存 generation を観測して再開位置を決める。`prepare` 完了後、`apply` が swap intent を記録する前までなら `nix run .#dotfiles-sops-enroll -- abort` で取り消せる。swap intent 以後は repository 交換前でも rollback せず、`apply` で前進復旧する。交換直前または交換後に tracked file や退避側が変わった場合は削除せず、表示された `.git/dotfiles-sops-enroll/<transaction-id>/secrets` を保全して停止する。
 8. `git diff -- secrets` で二つの tracked file だけが変わったことを確認し、同じ commit に記録する。復旧鍵をホストから取り外してから bootstrap または通常運用へ戻る。
 
-enrollment command、`dotfiles-rebuild`、bootstrap は Git common dir の同じ operation lock を使う。同時実行は失敗する。command 間では persistent marker が transaction を保護する。bootstrap は marker がある限り失敗し、rebuild は前述の `generation-pending` 経路だけを許可する。`generation-checking` は generation barrier の検証中またはその直後に停止した状態なので、rebuild ではなく `apply` を再実行する。`status` が `idle` になり、`apply` が recovery と current host の復号成功を表示してから次へ進む。
+enrollment command、`dotfiles-rebuild`、bootstrap は Git common dir の同じ operation lock を使う。同時実行は失敗する。command 間では SOPS marker と rebuild receipt が transaction を保護する。active rebuild があれば enrollment の変更操作と bootstrap を拒否し、enrollment の `status` だけを許可する。active enrollment があれば bootstrap を拒否し、rebuild は前述の `generation-pending` 経路だけを許可する。`generation-checking` は generation barrier の検証中またはその直後に停止した状態なので、rebuild ではなく enrollment の `apply` を再実行する。`dotfiles-rebuild --status` が `idle`、enrollment の `status` も `idle` になり、`apply` が recovery と current host の復号成功を表示してから次へ進む。
 
 既存ホストで閉じた enrollment 前の system generation は、通常の `nixos-rebuild --rollback` では使えない。旧 Git commit へ戻す場合も、外部の recovery identity を使って現在の recipient model へ更新し、新しい generation として build する。旧 store closure の `activate` を直接実行しない。
 
@@ -118,12 +118,13 @@ bootstrap は次を実行する。
 |---|---|
 | acquire_operation_lock | enrollment、rebuild、bootstrap の同時実行を拒否 |
 | reject_active_enrollment | command 間に残る enrollment marker があれば bootstrap を拒否 |
+| reject_active_rebuild | command 間に残る rebuild receipt があれば bootstrap を拒否 |
 | register_safe_directories | root がリポジトリを扱えるよう `safe.directory` を登録(冪等) |
 | preflight | flake / lock / secrets の存在と、enrollment 済み age key の owner / mode を確認 |
 | verify_tracked_flake_files | untracked file が flake build から見えないため、無いことを確認 |
 | verify_secrets | `nix shell .#sops -c sops -d secrets/secrets.yaml` で復号確認 |
 | install_ai_clis | `nix run .#dotfiles-install-clis` で CLI 本体を upstream から `~/.local/bin` へ配置 |
-| install_boot_generation | `nixos-rebuild boot --flake "git+file://${HOME}/dotfiles-wsl#nixos" -L` |
+| install_boot_generation | flake が固定した `config.system.build.nixos-rebuild` を store path へ build し、`boot --no-reexec` を実行 |
 | link_nixos | `/etc/nixos` を `~/dotfiles-wsl` に向ける |
 
 完了後、PowerShell から WSL を再起動して検証する。
@@ -181,15 +182,51 @@ nix run .#dotfiles-rebuild -- --plan
 nix run .#dotfiles-rebuild
 ```
 
-rebuild は untracked file を拒否した後、作業ツリーを Nix store へ一度だけ archive する。同じ immutable
-snapshot に対して flake check と candidate build を実行し、`nvd` で current system との差分を表示する。
-`--plan` はここで終了するため system profile と runtime は変えない。ただし、archive と build により
-Nix store と cache は更新される。
+rebuild は untracked file を拒否した後、flake の `sourceSnapshot` を `nix build --out-link` で一度だけ生成する。
+source と candidate は、それぞれの build command が作る temporary GC root で生成中から保護する。
+同じ immutable snapshot に対して flake check と candidate build を実行し、`nvd` で current system との差分を表示する。
+`--plan` はここで終了するため system profile と runtime は変えない。ただし、snapshot と candidate の build により
+Nix store と cache は更新される。candidate と実行中 generation の WSL default user も検査する。
+`my.username` や `wsl.defaultUser` の変更は home、repository path、所有権を伴う host identity migration
+なので、通常 rebuild と `--plan` は終了 status 2 で拒否する。
 
 snapshot 取得から activation と doctor の終了までは Git common dir の operation lock を保持する。linked worktree を含め、SOPS enrollment が同時に repository と host key を遷移させることはない。
 
-apply では build 済み candidate の store path だけを `nixos-rebuild --store-path --no-reexec --sudo` へ渡す。
+apply では build 済み candidate の store path だけを、flake が固定した上流 `nixos-rebuild` の store path へ
+`--store-path --no-reexec --sudo` 付きで渡す。
 checkout の評価と build は一般ユーザー、system profile の更新と activation だけは root で実行する。
+effect の計算前に current、booted、system profile の store path を固定する。`nvd` と classifier はその
+current/booted closure だけを参照する。persistent GC root の作成後と activation の直前にも同じ三つを照合する。
+
+apply の前に `$GIT_COMMON_DIR/dotfiles-rebuild/active.json` を作り、source、candidate、実行中 generation、booted
+generation、既存 system profile、effect、activation と verification の結果を記録する。candidate と
+回復対象は indirect GC root で保護する。再開時も `nix-store --add-root ROOT --realise STORE_PATH` を冪等に実行し、user-facing
+root と `/nix/var/nix/gcroots/auto` の登録を照合する。receipt storage の三つの directory は owner、mode、
+symlink でないことを全操作の前に検査する。receipt と GC root の file、link、rename は Nix の auto-root
+directory を含む親 directory まで同期してから activation または WSL 停止手順へ進む。receipt schema v2 は
+activation attempt ごとの runtime baseline を保持する。再開時も baseline から外部 generation へ勝手に追随しない。
+activation の結果と次の state は一回の atomic receipt 更新で確定し、矛盾する中間 state を永続化しない。
+baseline の照合に失敗した transaction は activation と自動 rollback を行わず、観測した三つの path を
+`aborted` receipt に記録して archive する。
+
+生成された環境の `nixos-rebuild` は直接実行を status 2 で拒否する。通常の system generation 更新を
+`dotfiles-rebuild` に限定し、bootstrap も同じ operation lock の内側から flake 固定の上流実体を呼ぶ。
+これらの対応経路では、baseline の照合から activation まで別の対応経路が割り込まない。
+
+root が `nix-env --profile /nix/var/nix/profiles/system`、古い generation の store path、
+`switch-to-configuration`、`nix run nixpkgs#nixos-rebuild` を直接実行する操作は transaction の保証外である。
+receipt と operation lock を迂回し、再開時に runtime drift として中止されるか、照合直後へ割り込む可能性がある。
+緊急復旧でもこれらを通常手順にはせず、まず receipt の `--resume` または `--rollback` を使う。
+
+再開時に transaction が所有できる変化も action ごとに限定する。`switch` は current と profile について
+baseline または target を許可し、booted は baseline のまま要求する。`boot` は profile だけに baseline または
+target を許可し、current と booted は baseline のまま要求する。三つすべてが target へ収束済みの場合だけ、
+再起動済みの boot として受け入れる。これ以外の mixed state は外部変更として `aborted` にする。
+
+回復対象は rebuild 開始時の `/run/current-system` である。既存 system profile が current と違っていても
+開始を拒否せず、profile は `previous.displacedProfile` として記録するだけで自動 rollback には使わない。
+profile に登録済みでも、実際に起動または live activation された証拠にはならないためである。
+
 変更内容に応じた処理は次のとおり。
 
 | effect | apply | WSL 操作 |
@@ -199,9 +236,31 @@ checkout の評価と build は一般ユーザー、system profile の更新と 
 | `boot-restart` | boot generation へ登録 | 停止と起動を 1 回、その後 doctor |
 | `boot-two-stage` | boot generation へ登録 | root 起動を挟んで 2 回停止、その後 doctor |
 
-`wsl.conf` と activation interface が同時に変わる場合と `wsl.defaultUser` の変更だけが二段階になる。
-PowerShell で実行する正確な command は rebuild の終了時に表示する。flake input の更新は build と分け、
-明示的に `nix flake update` を実行してから rebuild する。
+`wsl.conf` と activation interface が同時に変わる場合、または比較に必要な boot metadata がない場合は
+二段階になる。`wsl.defaultUser` の差も classifier では二段階に分類するが、通常 rebuild は前述の identity
+migration として apply 前に拒否する。
+
+停止が必要な transaction は終了 status 3 で active のまま残る。PowerShell で実行する command は、
+distribution 名、candidate 内の helper、transaction ID を単一引用符で固定して表示する。再起動の完了は
+`/proc/sys/kernel/random/boot_id` と systemd の `UserspaceTimestampMonotonic` の組で確認する。
+`boot-two-stage` は first boot と final boot が異なる systemd manager instance になるまで完了しない。
+
+中断後の操作は次のとおり。
+
+```bash
+dotfiles-rebuild --status
+dotfiles-rebuild --resume <transaction-id>
+dotfiles-rebuild --rollback <transaction-id>
+```
+
+`--resume` は receipt に固定した candidate を再適用または再検証する。`--rollback` は開始時の running
+generation を現在の状態に対して再分類し、同じ一段階または二段階の state machine で戻す。active receipt
+がある間は新しい build を開始しない。終了 status 4 は activation 失敗、5 は candidate doctor 失敗、
+2 は不正な引数、receipt、runtime state を表す。activation と doctor の失敗を同じ成功・失敗へ丸めない。
+完了または drift で中止した receipt は
+`$GIT_COMMON_DIR/dotfiles-rebuild/receipts/<transaction-id>.json` へ移し、transaction 用 GC root を削除する。
+
+flake input の更新は build と分け、明示的に `nix flake update` を実行してから rebuild する。
 
 ## 検証
 

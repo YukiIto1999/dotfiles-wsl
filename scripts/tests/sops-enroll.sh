@@ -237,6 +237,22 @@ fi
 grep -Fq 'another dotfiles state transition is running' "$test_root/enrollment-lock-output"
 flock -u 7
 
+# command 間に残る rebuild receipt は enrollment の repository/key 遷移を止める。status は読み取り専用で許可する。
+active_rebuild_dir=$common_git_dir/dotfiles-rebuild
+mkdir -m 0700 -- "$active_rebuild_dir"
+printf '%s\n' '{}' > "$active_rebuild_dir/active.json"
+chmod 0600 "$active_rebuild_dir/active.json"
+if run_enroll prepare \
+  --recovery-key "$recovery_key" \
+  --host-id blocked-by-rebuild > "$test_root/rebuild-marker-output" 2>&1; then
+  echo 'enrollment ignored an active rebuild transaction' >&2
+  exit 1
+fi
+grep -Fq 'an active rebuild transaction blocks SOPS enrollment changes' \
+  "$test_root/rebuild-marker-output"
+run_enroll status > /dev/null
+rm -r -- "$active_rebuild_dir"
+
 # existing host は current/profile が同じ旧暗号文 generation に収束していなければ開始しない。
 profile_target=$(readlink -f -- "$system_profile")
 mismatched_target=$generation_root/store/mismatched-system

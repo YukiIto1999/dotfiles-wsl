@@ -14,7 +14,7 @@ MCP 検査は `initialize` で session ID を得た後、初期化完了通知�
 
 ## 決定
 
-評価済み NixOS / Home Manager 設定から version 3 の JSON manifest を生成し、current system closure の `etc/dotfiles/doctor.json` に収録する。doctor は開始時に `/run/current-system/etc/dotfiles/doctor.json` を immutable な store path へ固定する。以後は固定した manifest だけを期待値として読み、checkout と Markdown の表を参照しない。全 probe の後に current、system profile、manifest の canonical path を再取得し、開始時の generation から変わっていれば失敗にする。
+評価済み NixOS / Home Manager 設定から versioned JSON manifest を生成し、current system closure の `etc/dotfiles/doctor.json` に収録する。初期版は version 3、OCI runtime 収束を加えた現行版は version 4 とする。doctor は開始時に `/run/current-system/etc/dotfiles/doctor.json` を immutable な store path へ固定する。以後は固定した manifest だけを期待値として読み、checkout と Markdown の表を参照しない。全 probe の後に current、system profile、manifest の canonical path を再取得し、開始時の generation から変わっていれば失敗にする。
 
 unit と managed file の health 宣言は、対象を定義する module に隣接させる。CLI と skill の一覧は既存の `my.clis` と `allSkills` から導出する。manifest は次を保持する。
 
@@ -26,6 +26,7 @@ unit と managed file の health 宣言は、対象を定義する module に隣
 - SOPS metadata probe と、旧 home key のパス、移行状態を表す `warn` / `reject` policy
 - current generation の `wslview` と Windows 側 `cmd.exe` の固定パス
 - MCP URL、health unit、target、要求 version、許容する negotiated version の一覧
+- OCI image inventory、Docker health unit、同期 state、実行する immutable command
 - system、CLI、Windows、MCP request、MCP cleanup、MCP lifecycle、page 数、response size の probe policy
 
 doctor は process の user と `HOME` が manifest の configured identity と一致し、system profile と実行中の doctor が current generation を指すことを canonical path で確認する。WSL の状態は ADR 0008 の classifier を使い、effect が `switch` の場合だけ成功とする。これら foundation check が失敗した場合、別 user の home へ設定を生成し得る CLI や、system、Windows、MCP probe を実行しない。
@@ -52,6 +53,7 @@ JSON と SSE の両 response を受け付ける。SSE は event 境界を保ち�
 flake check は宣言から artifact を作れること、doctor は current generation の宣言と外部状態が収束したことを担当する。両者は代替関係ではない。
 
 doctor の probe、集約、表示、終了 status の関係は ADR 0011 の report contract に従う。
+OCI image と container の収束、image sync lock、schema v4 の関係は ADR 0013 に従う。
 
 doctor は checkout の clean 状態、secret の値、AI CLI 本体の配布元・内容・版と認証状態、skill 本文、agent file の内容、agentmemory の保存内容を保証しない。これらは rebuild の preflight、enrollment と bootstrap の復号確認、各 application の診断に分ける。
 

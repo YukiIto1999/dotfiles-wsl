@@ -1,6 +1,7 @@
 set -euo pipefail
 
 @operationLockFunctions@
+@ociImageStateFunctions@
 
 usage() {
   cat <<'USAGE'
@@ -73,73 +74,6 @@ jq -e '
   )
 ' <<< "$manifest_data" >/dev/null || die 2 "OCI image manifest does not match schema version 1"
 manifest_hash=$(sha256sum -- "$manifest" | cut -d ' ' -f 1)
-
-validate_directory() {
-  local directory=$1 metadata
-  [[ -d $directory && ! -L $directory ]] || return 1
-  metadata=$(stat -c '%u|%g|%a' -- "$directory") || return 1
-  [[ $metadata == "$expected_uid|$expected_gid|700" ]]
-}
-
-prepare_state_root() {
-  local directory parent
-  for directory in "$state_root" "$receipts_dir"; do
-    if [[ ! -e $directory && ! -L $directory ]]; then
-      parent=${directory%/*}
-      mkdir -p -- "$directory" || return 1
-      chmod 0700 -- "$directory" || return 1
-      sync "$parent" || return 1
-    fi
-    validate_directory "$directory" || return 1
-  done
-}
-
-validate_state_root() {
-  validate_directory "$state_root" && validate_directory "$receipts_dir"
-}
-
-ensure_lock_file() {
-  local lock_file=$state_root/operation.lock temporary
-  if [[ ! -e $lock_file && ! -L $lock_file ]]; then
-    temporary=$(mktemp "$state_root/.operation-lock.XXXXXX") || return 1
-    if ! chmod 0600 "$temporary"; then
-      rm -f -- "$temporary"
-      return 1
-    fi
-    if ! ln -- "$temporary" "$lock_file" 2>/dev/null \
-      && [[ ! -e $lock_file && ! -L $lock_file ]]; then
-      rm -f -- "$temporary"
-      return 1
-    fi
-    rm -f -- "$temporary" || return 1
-    sync "$state_root" || return 1
-  fi
-}
-
-acquire_image_lock() {
-  local lock_file=$state_root/operation.lock fd_path path_metadata fd_metadata
-  local _device _inode lock_uid lock_gid lock_mode lock_links
-  [[ -f $lock_file && ! -L $lock_file ]] || return 2
-  exec {image_sync_lock_fd}< "$lock_file" || return 2
-  fd_path=/proc/$$/fd/$image_sync_lock_fd
-  [[ -f $lock_file && ! -L $lock_file && -f $fd_path ]] || return 2
-  path_metadata=$(stat -c '%d|%i|%u|%g|%a|%h' -- "$lock_file") || return 2
-  fd_metadata=$(stat -Lc '%d|%i|%u|%g|%a|%h' -- "$fd_path") || return 2
-  [[ $path_metadata == "$fd_metadata" ]] || return 2
-  IFS='|' read -r _device _inode lock_uid lock_gid lock_mode lock_links <<< "$fd_metadata"
-  [[ $lock_uid == "$expected_uid" && $lock_gid == "$expected_gid" \
-    && $lock_mode == 600 && $lock_links == 1 ]] || return 2
-
-  if [[ $mode == status ]]; then
-    flock --shared --nonblock "$image_sync_lock_fd" || return 1
-  else
-    flock --exclusive --nonblock "$image_sync_lock_fd" || return 1
-  fi
-
-  [[ -f $lock_file && ! -L $lock_file ]] || return 2
-  path_metadata=$(stat -c '%d|%i|%u|%g|%a|%h' -- "$lock_file") || return 2
-  [[ $path_metadata == "$fd_metadata" ]] || return 2
-}
 
 validate_receipt_file() {
   local receipt=$1 id=$2 metadata
@@ -295,12 +229,16 @@ if [[ $mode == sync ]]; then
 fi
 
 if [[ $mode == status ]]; then
-  validate_state_root || die 2 "OCI image sync state root is invalid: $state_root"
+  dotfiles_oci_validate_state_root "$state_root" "$expected_uid" "$expected_gid" || \
+    die 2 "OCI image sync state root is invalid: $state_root"
 else
-  prepare_state_root || die 2 "OCI image sync state root is invalid: $state_root"
-  ensure_lock_file || die 2 "failed to initialize OCI image sync lock"
+  dotfiles_oci_prepare_state_root "$state_root" "$expected_uid" "$expected_gid" || \
+    die 2 "OCI image sync state root is invalid: $state_root"
+  dotfiles_oci_ensure_lock_file "$state_root" || die 2 "failed to initialize OCI image sync lock"
 fi
-if acquire_image_lock; then
+lock_kind=exclusive
+[[ $mode != status ]] || lock_kind=shared
+if dotfiles_oci_acquire_image_lock "$state_root" "$expected_uid" "$expected_gid" "$lock_kind"; then
   :
 else
   lock_status=$?

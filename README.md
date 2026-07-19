@@ -94,8 +94,10 @@ enrollment command、`dotfiles-rebuild`、bootstrap は Git common dir の同じ
 2. recovery key を一時的に接続し、前節の `prepare` と `apply` を新規ホスト上で実行する。host key は command が root 領域へ生成するため、既存ホストから秘密鍵をコピーしない。
 3. `git diff --check` と `git diff -- secrets` で、変更が `secrets/.sops.yaml` と `secrets/secrets.yaml` だけであることを確認する。初回 bootstrap 前は Git identity がまだ配備されていないため、この時点では commit しない。必要なら暗号化済み差分を外部媒体へ退避する。
 4. recovery key をホストから外し、`sudo bash scripts/bootstrap.sh` を実行する。bootstrap は tracked file の変更を含む Git flake を build するため、enrollment の差分を消さない。
-5. 初回の boot generation を読むため WSL を一度停止・起動し、`dotfiles-doctor` を実行する。
-6. sops-nix が配備した Git identity を使い、二つの secrets file を同じ commit に記録する。その commit を利用する全ホストへ同期してから、別の新規ホストを enrollment する。
+5. 初回の boot generation を読むため WSL を一度停止・起動する。
+6. `dotfiles-sync-images` を通常ユーザーで実行し、upstream OCI image の取得結果を receipt に記録する。
+7. `dotfiles-doctor` を実行し、system generation、OCI image、稼働 container を含む実用状態の収束を確認する。
+8. sops-nix が配備した Git identity を使い、二つの secrets file を同じ commit に記録する。その commit を利用する全ホストへ同期してから、別の新規ホストを enrollment する。
 
 暗号化済み差分を退避する場合は、平文ではなく Git patch を保存する。
 
@@ -257,12 +259,12 @@ dotfiles-rebuild --rollback <transaction-id>
 generation を現在の状態に対して再分類し、同じ一段階または二段階の state machine で戻す。active receipt
 がある間は新しい build を開始しない。終了 status 4 は activation 失敗、5 は target doctor 失敗、
 2 は不正な引数、receipt、runtime state を表す。activation と doctor の失敗を同じ成功・失敗へ丸めない。
-schema v3 の target doctor は report v1 を JSON で返す。rebuild は report が単一の JSON document であること、manifest schema、
+schema v4 の target doctor は report v1 を JSON で返す。rebuild は report が単一の JSON document であること、manifest schema、
 check、summary、doctor の終了 status と outcome の対応を検証する。doctor が `fail` または `error` にした安定 ID は
 receipt の `verification.failedCheckIds` に保存する。旧 receipt ではこの field の欠落を受理するが、明示的な `null` や
-重複 ID は不正とする。schema v3 の generation から schema v2 の recovery target へ戻す場合に限り、rebuild は
-旧 doctor を引数なしで1回実行し、status 0 / 1 を `legacy.doctor` check を持つ report v1 へ変換する。この移行経路を
-forward verification や schema が不明な target には適用しない。
+重複 ID は不正とする。forward candidate は schema v4 だけを activation 前に受理する。rollback は schema v4 / v3 の
+JSON report と schema v2 の旧 doctor だけを受理する。schema v2 では旧 doctor を引数なしで1回実行し、status 0 / 1 を
+`legacy.doctor` check を持つ report v1 へ変換する。欠落、破損、複数 JSON document、未定義 schema の doctor は実行しない。
 完了または drift で中止した receipt は
 `$GIT_COMMON_DIR/dotfiles-rebuild/receipts/<transaction-id>.json` へ移し、transaction 用 GC root を削除する。
 
@@ -292,6 +294,10 @@ command は `/etc/dotfiles/oci-images.json` と同じ生成元の immutable mani
 `imageFile` を OCI service が load するため、registry から pull しない。同期 command は設定された通常ユーザーで実行し、
 `sudo` では起動しない。古い image の削除も行わない。
 
+Nix 生成 image は build 時に Docker archive の単一 `manifest.json`、`RepoTags`、`Config` を検証する。
+Config の内容 hash と filename が一致する場合だけ、期待する Docker image ID を immutable な store sidecar に出力する。
+doctor は mutable な tag だけを信用せず、この sidecar、tag の local image ID、稼働 container の image ID を照合する。
+
 | status | 意味 |
 |---:|---|
 | `0` | 全 upstream image が manifest の digest と一致する |
@@ -304,7 +310,7 @@ registry failure が別 image の receipt 更新を妨げない。最初の配�
 
 ## 検証
 
-`nix flake check` と `dotfiles-doctor` は検査対象が異なるため、どちらも必要になる。flake check は評価した source から system closure と設定を生成できることを apply 前に検査する。doctor は apply 後の current generation が宣言した期待値と、system profile、systemd、SOPS host key、home 配下の CLI、MCP gateway の実状態が一致することを検査する。
+`nix flake check` と `dotfiles-doctor` は検査対象が異なるため、どちらも必要になる。flake check は評価した source から system closure と設定を生成できることを apply 前に検査する。doctor は apply 後の current generation が宣言した期待値と、system profile、systemd、SOPS host key、OCI image と container、home 配下の CLI、MCP gateway の実状態が一致することを検査する。
 
 通常は人向け出力を使う。rebuild や診断ツールからは同じ result core を JSON で取得する。
 
@@ -326,7 +332,7 @@ JSON report v1 は `schemaVersion`、`manifestSchemaVersion`、`outcome`、statu
 `pass` / `warn` / `fail` / `error` / `blocked`、subject、expected、observed、message、`durationMs` を持つ。
 human 出力もこの result core だけから生成する。
 
-doctor の期待値は current generation の `/run/current-system/etc/dotfiles/doctor.json` に manifest v3 として収録する。
+doctor の期待値は current generation の `/run/current-system/etc/dotfiles/doctor.json` に manifest v4 として収録する。
 開始時に manifest を immutable な store path へ固定し、configured user と `HOME`、current generation、system profile、
 実行中 doctor、WSL cold-start state を foundation で検査する。foundation が失敗した場合は local、system、active phase を
 実行せず `blocked` とする。全 probe の後にも current、profile、manifest が同じ generation を指すことを再確認する。
@@ -335,6 +341,9 @@ mutable な checkout や `share/AGENTS.md` の表は inventory として読ま�
 - system profile と実行中の doctor が current generation を指す
 - WSL cold-start state が `switch` で、追加の停止・起動を必要としない
 - 必須 unit の `LoadState`、`ActiveState` と、宣言した場合の `SubState`、`Result` が一致する。各 unit は1回の `systemctl show` で検査する
+- OCI image sync の state tree と lock が所有条件を満たし、shared lock 内で upstream receipt と Docker cache が一致する
+- upstream image の `RepoDigests` が宣言した `repository@sha256:...` を含み、Nix 生成 image の local image ID が `imageFile` から build 時に導出した immutable な期待 ID と一致する
+- 健康な OCI container unit が稼働中で、container の image ID が同じ観測中に解決した desired image ID と一致する
 - `/var/lib/sops-nix` が root `0700`、host key が root `0400` になっている。host/recovery key の移行中は home 側の旧 age key を警告し、移行完了後に policy を `reject` へ切り替えて残存を失敗にする
 - health registry に登録した Claude、Codex、agentgateway、OpenCode の agentmemory capture plugin と、trusted project 用の `.codex/config.toml` が current generation の source と byte 単位で一致する
 - 各 AI CLI が `~/.local/bin` の宣言パスから実行され、rules file が source と一致し、期待する各 `SKILL.md` と各 agent file が存在する
@@ -459,7 +468,7 @@ dotfiles-rebuild
 
 ## CI
 
-`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix と MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL 宣言の一致)、`config-artifact-contract`(実配備 source と構文検査 projection の同一性、実値の反映)、`oci-image-contract`(typed inventory、pull policy、同期 transaction の failure matrix)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(各 module が実配備へ渡す JSON / TOML / YAML artifact の構文検査)。
+`.github/workflows/check.yml` が push / PR で `nix flake check` を実行する。checks は `nixos-toplevel`(system closure の build)、`doctor-runtime`(runtime failure matrix、OCI 収束、MCP lifecycle)、`doctor-manifest-contract`(実配備 manifest と Home Manager / Codex / SOPS / WSL / OCI 宣言の一致)、`config-artifact-contract`(実配備 source と構文検査 projection の同一性、実値の反映)、`oci-image-contract`(typed inventory、pull policy、同期 transaction の failure matrix)、`sops-policy`(鍵の自動生成禁止、owner / mode、recipient metadata、enrollment の通常系・拒否系・中断再開)、`sops-verifier-runtime`(NixOS VM 上の sops-nix activation、transient verifier、generation barrier、鍵昇格、installer 再実行)、`development-tool-ownership`(direnv / devenv の所有レイヤーと Cachix)、`actionlint`(GitHub Actions workflow の静的検査)、`deadnix`、`shellcheck`、`statix`、`nixfmt`(`treefmt --ci`)、`config-syntax`(各 module が実配備へ渡す JSON / TOML / YAML artifact の構文検査)。
 
 ## License
 

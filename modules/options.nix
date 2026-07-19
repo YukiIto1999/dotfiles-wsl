@@ -87,7 +87,7 @@ in
     doctor = {
       schemaVersion = lib.mkOption {
         type = lib.types.ints.positive;
-        default = 3;
+        default = 4;
         readOnly = true;
         internal = true;
         description = "dotfiles-doctor manifest の schema version。";

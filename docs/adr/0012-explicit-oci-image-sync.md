@@ -57,8 +57,8 @@ manifest を読み、mutable な Docker cache と receipt の照合で同期済�
 外部 registry へ問い合わせない。digest を更新するときは candidate の `dotfiles-sync-images` を実行してから
 system generation を適用する。
 
-この決定だけでは service 起動時の暗黙 pull は消えない。`pull = "never"` への移行と、rebuild、doctor が
-未同期 image を扱う contract は後続変更で確定する。
+この決定だけでは service 起動時の暗黙 pull は消えない。rebuild と doctor が未同期 image を扱う contract は
+ADR 0013 で確定する。`pull = "never"` への移行は後続変更とする。
 
 ## 一次資料
 

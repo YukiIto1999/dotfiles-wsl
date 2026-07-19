@@ -61,11 +61,47 @@ in
     };
 
     doctor = {
-      units = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [ ];
+      schemaVersion = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 3;
+        readOnly = true;
         internal = true;
-        description = "dotfiles-doctor が loaded/active を要求する systemd unit。";
+        description = "dotfiles-doctor manifest の schema version。";
+      };
+
+      units = lib.mkOption {
+        type = lib.types.attrsOf (
+          lib.types.submodule {
+            options.expected = lib.mkOption {
+              type = lib.types.submodule {
+                options = {
+                  LoadState = lib.mkOption {
+                    type = lib.types.str;
+                    description = "systemd LoadState の期待値。";
+                  };
+                  ActiveState = lib.mkOption {
+                    type = lib.types.str;
+                    description = "systemd ActiveState の期待値。";
+                  };
+                  SubState = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    description = "systemd SubState の期待値。null は検査しない。";
+                  };
+                  Result = lib.mkOption {
+                    type = lib.types.nullOr lib.types.str;
+                    default = null;
+                    description = "systemd Result の期待値。null は検査しない。";
+                  };
+                };
+              };
+              description = "systemctl show で検査する property と期待値。";
+            };
+          }
+        );
+        default = { };
+        internal = true;
+        description = "dotfiles-doctor が検査する systemd unit。attribute key が安定 id。";
       };
 
       managedFiles = lib.mkOption {

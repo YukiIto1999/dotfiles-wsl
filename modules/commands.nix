@@ -91,76 +91,100 @@ let
 
   sopsGeneration = import ./lib/sops-generation-contract.nix { inherit config pkgs; };
 
-  doctorManifest = (pkgs.formats.json { }).generate "doctor-manifest-v2.json" {
-    schemaVersion = 2;
-    user = {
-      name = cfg.username;
-      home = cfg.homeDir;
-    };
-    generation = {
-      current = "/run/current-system";
-      booted = "/run/booted-system";
-      profile = "/nix/var/nix/profiles/system";
-    };
-    sops = {
-      rootProbe = lib.getExe rootProbe;
-      homeKey = {
-        path = "${cfg.homeDir}/.config/sops/age/keys.txt";
-        policy = if cfg.sops.enrollmentState == "enrolled" then "reject" else "warn";
-      };
-    };
-    units = lib.unique cfg.doctor.units;
-    managedFiles = lib.mapAttrsToList (_: file: {
-      inherit (file) path source;
-    }) cfg.doctor.managedFiles;
-    clis = map (
-      name:
-      let
-        cli = clis.${name};
-      in
+  unitManifest = lib.mapAttrsToList (id: unit: {
+    inherit id;
+    expected = lib.filterAttrs (_: value: value != null) unit.expected;
+  }) cfg.doctor.units;
+
+  managedFileManifest = lib.mapAttrsToList (id: file: {
+    inherit id;
+    inherit (file) path source;
+  }) cfg.doctor.managedFiles;
+
+  managedFilePaths = map (file: file.path) (builtins.attrValues cfg.doctor.managedFiles);
+
+  doctorManifest =
+    (pkgs.formats.json { }).generate "doctor-manifest-v${toString cfg.doctor.schemaVersion}.json"
       {
-        inherit name;
-        binaryName = cli.binary;
-        binaryPath = "${cfg.homeDir}/.local/bin/${cli.binary}";
-        rules = {
-          path = "${cfg.homeDir}/${cli.rulesFile}";
-          source = homeConfig.home.file.${cli.rulesFile}.source;
+        schemaVersion = cfg.doctor.schemaVersion;
+        user = {
+          name = cfg.username;
+          home = cfg.homeDir;
         };
-        skills = {
-          directory = "${cfg.homeDir}/${cli.skillsDir}";
-          names = cfg.doctor.skillNames;
+        generation = {
+          current = "/run/current-system";
+          booted = "/run/booted-system";
+          profile = "/nix/var/nix/profiles/system";
         };
-        agents =
-          if cli.agentsDir == null then
-            null
-          else
-            {
-              directory = "${cfg.homeDir}/${cli.agentsDir}";
-              files = cfg.doctor.agentFiles.${name};
+        sops = {
+          rootProbe = lib.getExe rootProbe;
+          homeKey = {
+            path = "${cfg.homeDir}/.config/sops/age/keys.txt";
+            policy = if cfg.sops.enrollmentState == "enrolled" then "reject" else "warn";
+          };
+        };
+        units = unitManifest;
+        managedFiles = managedFileManifest;
+        clis = map (
+          name:
+          let
+            cli = clis.${name};
+          in
+          {
+            inherit name;
+            binaryName = cli.binary;
+            binaryPath = "${cfg.homeDir}/.local/bin/${cli.binary}";
+            rules = {
+              path = "${cfg.homeDir}/${cli.rulesFile}";
+              source = homeConfig.home.file.${cli.rulesFile}.source;
             };
-        gatewayFile =
-          if cli.gatewayFile == null then
-            null
-          else
-            {
-              path = "${cfg.homeDir}/${cli.gatewayFile}";
-              contains = cfg.gatewayUrl;
+            skills = {
+              directory = "${cfg.homeDir}/${cli.skillsDir}";
+              names = cfg.doctor.skillNames;
             };
-      }
-    ) names;
-    mcp = {
-      url = cfg.gatewayUrl;
-      targets = builtins.attrNames cfg.mcp.targets;
-      requestedProtocolVersion = "2025-06-18";
-      supportedProtocolVersions = [
-        "2024-11-05"
-        "2025-03-26"
-        "2025-06-18"
-      ];
-    };
-    wslInterop = cfg.doctor.wslInterop;
-    nixLdPath = "/lib64/ld-linux-x86-64.so.2";
-  };
+            agents =
+              if cli.agentsDir == null then
+                null
+              else
+                {
+                  directory = "${cfg.homeDir}/${cli.agentsDir}";
+                  files = cfg.doctor.agentFiles.${name};
+                };
+            gatewayFile =
+              if cli.gatewayFile == null then
+                null
+              else
+                {
+                  path = "${cfg.homeDir}/${cli.gatewayFile}";
+                  source = homeConfig.home.file.${cli.gatewayFile}.source;
+                };
+          }
+        ) names;
+        mcp = {
+          url = cfg.gatewayUrl;
+          targets = builtins.attrNames cfg.mcp.targets;
+          healthUnit = "agentgateway.service";
+          requestedProtocolVersion = "2025-11-25";
+          supportedProtocolVersions = [
+            "2024-11-05"
+            "2025-03-26"
+            "2025-06-18"
+            "2025-11-25"
+          ];
+        };
+        probePolicy = {
+          cliTimeoutSeconds = 5;
+          systemTimeoutSeconds = 5;
+          windowsTimeoutSeconds = 5;
+          mcpRequestTimeoutSeconds = 5;
+          mcpCleanupTimeoutSeconds = 5;
+          totalTimeoutSeconds = 30;
+          maxPages = 20;
+          maxResponseBytes = 1048576;
+        };
+        wslInterop = cfg.doctor.wslInterop;
+        nixLdPath = "/lib64/ld-linux-x86-64.so.2";
+      };
 
   substitute =
     vars: text:
@@ -179,6 +203,7 @@ let
     installTable = lib.concatStringsSep "\n" (map installRow names);
     cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
     hmBackupExt = config.home-manager.backupFileExtension;
+    doctorSchemaVersion = toString cfg.doctor.schemaVersion;
     doctorManifestPath = "/run/current-system/etc/dotfiles/doctor.json";
   };
 
@@ -369,9 +394,26 @@ in
   config.environment.etc."dotfiles/doctor.json".source = doctorManifest;
   config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;
 
-  config.my.doctor.units = [
-    "home-manager-${cfg.username}.service"
-    "dotfiles-cli-autoupdate.timer"
+  config.my.doctor.units = {
+    "home-manager-${cfg.username}.service".expected = {
+      LoadState = "loaded";
+      ActiveState = "active";
+      SubState = "exited";
+      Result = "success";
+    };
+    "dotfiles-cli-autoupdate.timer".expected = {
+      LoadState = "loaded";
+      ActiveState = "active";
+      SubState = "waiting";
+      Result = "success";
+    };
+  };
+
+  config.assertions = [
+    {
+      assertion = builtins.length managedFilePaths == builtins.length (lib.unique managedFilePaths);
+      message = "my.doctor.managedFiles contains duplicate runtime paths";
+    }
   ];
 
   config.security.sudo.extraRules = [

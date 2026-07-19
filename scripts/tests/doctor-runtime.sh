@@ -17,6 +17,8 @@ profile_generation=$test_root/generations/profile
 manifest=$test_root/current/etc/dotfiles/doctor.json
 fake_bin=$test_root/fake-bin
 rendered_doctor=$test_root/doctor
+empty_message_doctor=$test_root/doctor-empty-message
+doctor_executable=$rendered_doctor
 doctor_output=$test_root/doctor-output
 unit_state=$test_root/unit-state
 effect_state=$test_root/effect-state
@@ -29,6 +31,7 @@ managed_runtime=$test_root/runtime/managed.conf
 rules_source=$test_root/store/AGENTS.md
 rules_runtime=$home/.fixture/AGENTS.md
 gateway_runtime=$home/.fixture/gateway.json
+gateway_source=$test_root/store/gateway.json
 nix_ld_path=$test_root/lib64/ld-linux-x86-64.so.2
 cli_path=$home/.local/bin/fixture-cli
 skills_dir=$home/.fixture/skills
@@ -39,7 +42,13 @@ wslview_source=$test_root/store/wslview
 wslview_path=$current_generation/sw/bin/wslview
 windows_command=$test_root/mnt/c/Windows/System32/cmd.exe
 windows_command_state=$test_root/windows-command-state
+systemctl_call_log=$test_root/systemctl-call-log
+sudo_call_log=$test_root/sudo-call-log
+cli_call_log=$test_root/cli-call-log
+windows_call_log=$test_root/windows-call-log
 failed=0
+mcp_max_times=5
+mcp_max_filesize=1048576
 
 mkdir -p \
   "$home/.local/bin" \
@@ -57,6 +66,7 @@ printf '%s\n' '[user]' 'default=fixture' > "$current_generation/etc/wsl.conf"
 printf '%s\n' '1' > "$current_generation/init-interface-version"
 printf '%s\n' 'managed=true' > "$managed_source"
 printf '%s\n' '# fixture rules' > "$rules_source"
+printf '%s\n' '{"mcp":"http://127.0.0.1:1/mcp"}' > "$gateway_source"
 touch "$nix_ld_path"
 
 printf '#!%s\nexit 0\n' "$store_bash" > "$wslview_source"
@@ -64,6 +74,7 @@ printf '#!%s\n' "$store_bash" > "$windows_command"
 printf '%s\n' \
   '[[ $# -eq 4 ]] || exit 2' \
   '[[ $1 == /d && $2 == /c && $3 == exit && $4 == 0 ]] || exit 2' \
+  'printf "called\\n" >> "$DOCTOR_TEST_WINDOWS_CALL_LOG"' \
   'state=$(cat "$DOCTOR_TEST_WINDOWS_COMMAND_STATE")' \
   'if [[ $state == hang ]]; then sleep 30; exit 0; fi' \
   'exit "$state"' >> "$windows_command"
@@ -77,13 +88,13 @@ printf '#!%s\n' "$store_bash" > "$fake_bin/systemctl"
 printf '%s\n' \
   'case "${1-}" in' \
   '  show)' \
-  '    property=' \
-  '    for arg in "$@"; do [[ $arg == --property=* ]] && property=${arg#--property=}; done' \
-  '    unit=${*: -1}' \
+  '    unit=${2-}' \
+  '    printf "%s\\n" "$unit" >> "$DOCTOR_TEST_SYSTEMCTL_CALL_LOG"' \
   '    row=$(awk -F "|" -v unit="$unit" '\''$1 == unit { print; exit }'\'' "$DOCTOR_TEST_UNIT_STATE")' \
   '    [[ -n $row ]] || exit 1' \
-  '    IFS="|" read -r _ load active <<< "$row"' \
-  '    [[ $property == LoadState ]] && printf "%s\\n" "$load" || printf "%s\\n" "$active"' \
+  '    IFS="|" read -r _ load active sub result <<< "$row"' \
+  '    [[ $load != hang ]] || { sleep 30; exit 0; }' \
+  '    printf "LoadState=%s\\nActiveState=%s\\nSubState=%s\\nResult=%s\\n" "$load" "$active" "$sub" "$result"' \
   '    ;;' \
   '  is-active) exit 0 ;;' \
   '  is-failed) exit 1 ;;' \
@@ -104,12 +115,15 @@ printf '%s\n' \
   '[[ ${1-} == -n && ${2-} == -- ]] || exit 2' \
   'shift 2' \
   '[[ $# -eq 1 && $1 == "$DOCTOR_TEST_ROOT_PROBE" ]] || exit 2' \
+  'printf "called\\n" >> "$DOCTOR_TEST_SUDO_CALL_LOG"' \
   'exec "$1"' >> "$fake_bin/sudo"
 
 printf '#!%s\n' "$store_bash" > "$root_probe"
 printf '%s\n' \
   '[[ $# -eq 0 ]] || exit 2' \
-  'cat "$DOCTOR_TEST_ROOT_STATE"' >> "$root_probe"
+  'state=$(cat "$DOCTOR_TEST_ROOT_STATE")' \
+  '[[ $state != hang ]] || { sleep 30; exit 0; }' \
+  'printf "%s\\n" "$state"' >> "$root_probe"
 
 cat > "$fake_bin/curl" <<'EOF'
 #!@STORE_BASH@
@@ -120,6 +134,8 @@ headers_file=
 body_file=
 data=
 request_url=
+max_time=
+max_filesize=
 declare -a headers=()
 
 while [[ $# -gt 0 ]]; do
@@ -144,7 +160,15 @@ while [[ $# -gt 0 ]]; do
       headers+=("$2")
       shift 2
       ;;
-    --max-time|--write-out)
+    --max-time)
+      max_time=$2
+      shift 2
+      ;;
+    --max-filesize)
+      max_filesize=$2
+      shift 2
+      ;;
+    --write-out)
       shift 2
       ;;
     --silent|--show-error)
@@ -163,6 +187,17 @@ done
 
 [[ $request_url == "$DOCTOR_TEST_MCP_URL" ]] || {
   printf 'unexpected MCP URL: %s\n' "$request_url" >&2
+  exit 2
+}
+case ",$DOCTOR_TEST_MCP_MAX_TIMES," in
+  *",$max_time,"*) ;;
+  *)
+    printf 'unexpected MCP max time: %s\n' "$max_time" >&2
+    exit 2
+    ;;
+esac
+[[ $max_filesize == "$DOCTOR_TEST_MCP_MAX_FILESIZE" ]] || {
+  printf 'unexpected MCP max filesize: %s\n' "$max_filesize" >&2
   exit 2
 }
 
@@ -229,6 +264,13 @@ printf '%s|%s|%s|%s|%s\n' \
   "$method" "$rpc_method" "$session" "$version" "$cursor" >> "$DOCTOR_TEST_MCP_CALL_LOG"
 
 scenario=$(cat "$DOCTOR_TEST_MCP_SCENARIO")
+if [[ $scenario == initialize-curl-failure && $rpc_method == initialize ]]; then
+  exit 7
+fi
+if [[ $scenario == tools-timeout && $rpc_method == tools/list ]]; then
+  sleep "$max_time"
+  exit 28
+fi
 status=200
 content_type=application/json
 response_session=
@@ -284,6 +326,13 @@ case "$rpc_method" in
       repeated-empty-cursor:1:\<empty\>)
         body='{"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"searxng_search"}],"nextCursor":""}}'
         ;;
+      pagination-limit:0:*)
+        body='{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"memory_recall"}],"nextCursor":"page-2"}}'
+        ;;
+      response-too-large:*:*)
+        printf -v large_tool_name '%0512d' 0
+        body=$(jq -cn --arg name "memory_$large_tool_name" '{jsonrpc:"2.0",id:2,result:{tools:[{name:$name}]}}')
+        ;;
       success-json:*:*)
         body='{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"memory_recall"},{"name":"searxng_search"}]}}'
         ;;
@@ -313,6 +362,12 @@ esac
   [[ -z $response_session ]] || printf 'Mcp-Session-Id: %s\r\n' "$response_session"
   printf '\r\n'
 } > "$headers_file"
+
+if [[ $scenario == response-too-large && $rpc_method == tools/list && ${#body} -gt $max_filesize ]]; then
+  printf '%.*s' "$max_filesize" "$body" > "$body_file"
+  printf '%s' "$status"
+  exit 63
+fi
 
 if [[ $content_type == text/event-stream && -n $body ]]; then
   if [[ $rpc_method == initialize ]]; then
@@ -346,6 +401,7 @@ sed -i "s|@STORE_BASH@|$store_bash|" "$fake_bin/curl"
 printf '#!%s\n' "$store_bash" > "$cli_path"
 printf '%s\n' \
   '[[ ${1-} == --version ]] || exit 1' \
+  'printf "called\\n" >> "$DOCTOR_TEST_CLI_CALL_LOG"' \
   'case $(cat "$DOCTOR_TEST_CLI_VERSION_STATE") in' \
   '  ok)' \
   '    printf "%s\\n" "fixture-cli 1.0.0"' \
@@ -357,6 +413,10 @@ printf '%s\n' \
   '  partial-hang)' \
   '    printf "%s\\n" "fixture-cli partial"' \
   '    sleep 10' \
+  '    ;;' \
+  '  switch-generation)' \
+  '    ln -sfn "$DOCTOR_TEST_REPLACEMENT_GENERATION" "$DOCTOR_TEST_CURRENT_LINK"' \
+  '    printf "%s\\n" "fixture-cli 1.0.0"' \
   '    ;;' \
   '  *) exit 1 ;;' \
   'esac' >> "$cli_path"
@@ -371,12 +431,17 @@ chmod +x \
 
 sed \
   -e "s|@doctorManifestPath@|$manifest|g" \
+  -e 's|@doctorSchemaVersion@|3|g' \
   "$doctor_source" > "$rendered_doctor"
 chmod +x "$rendered_doctor"
+sed '/local id=\$1 phase=\$2 status=\$3 subject=\$4 expected=\$5 observed=\$6 message=\$7 duration=\$8/a\  message=' \
+  "$rendered_doctor" > "$empty_message_doctor"
+chmod +x "$empty_message_doctor"
 
 write_manifest() {
   jq -n \
     --arg home "$home" \
+    --arg user "$(id -un)" \
     --arg current "$test_root/current" \
     --arg booted "$test_root/booted" \
     --arg profile "$test_root/profile" \
@@ -394,18 +459,22 @@ write_manifest() {
     --arg wslview_source "$wslview_source" \
     --arg windows_command "$windows_command" \
     --arg gateway_path "$gateway_runtime" \
+    --arg gateway_source "$gateway_source" \
     --arg gateway_url 'http://127.0.0.1:1/mcp' \
     --arg nix_ld_path "$nix_ld_path" \
     '{
-      schemaVersion: 2,
-      user: {name: "fixture", home: $home},
+      schemaVersion: 3,
+      user: {name: $user, home: $home},
       generation: {current: $current, booted: $booted, profile: $profile},
       sops: {
         rootProbe: $root_probe,
         homeKey: {path: $home_key, policy: "warn"}
       },
-      units: [$unit],
-      managedFiles: [{path: $managed_path, source: $managed_source}],
+      units: [{
+        id: $unit,
+        expected: {LoadState: "loaded", ActiveState: "active", SubState: "running", Result: "success"}
+      }],
+      managedFiles: [{id: "managed-fixture", path: $managed_path, source: $managed_source}],
       clis: [{
         name: "fixture",
         binaryName: "fixture-cli",
@@ -413,13 +482,24 @@ write_manifest() {
         rules: {path: $rules_path, source: $rules_source},
         skills: {directory: $skills_dir, names: ["fixture-skill"]},
         agents: {directory: $agents_dir, files: ["fixture-agent.md"]},
-        gatewayFile: {path: $gateway_path, contains: $gateway_url}
+        gatewayFile: {path: $gateway_path, source: $gateway_source}
       }],
       mcp: {
         url: $gateway_url,
+        healthUnit: $unit,
         targets: ["memory", "searxng"],
-        requestedProtocolVersion: "2025-06-18",
-        supportedProtocolVersions: ["2024-11-05", "2025-03-26", "2025-06-18"]
+        requestedProtocolVersion: "2025-11-25",
+        supportedProtocolVersions: ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
+      },
+      probePolicy: {
+        cliTimeoutSeconds: 5,
+        systemTimeoutSeconds: 5,
+        windowsTimeoutSeconds: 5,
+        mcpRequestTimeoutSeconds: 5,
+        mcpCleanupTimeoutSeconds: 5,
+        totalTimeoutSeconds: 30,
+        maxPages: 20,
+        maxResponseBytes: 1048576
       },
       wslInterop: {
         launcherName: "wslview",
@@ -432,6 +512,9 @@ write_manifest() {
 }
 
 reset_fixture() {
+  doctor_executable=$rendered_doctor
+  ln -sfn "$current_generation" "$test_root/current"
+  ln -sfn "$current_generation" "$test_root/booted"
   ln -sfn "$current_generation" "$test_root/profile"
   ln -sfn "$rendered_doctor" "$current_generation/sw/bin/dotfiles-doctor"
   rm -f "$fake_bin/fixture-cli" "$fake_bin/wslview" "$home/.config/sops/age/keys.txt"
@@ -439,17 +522,23 @@ reset_fixture() {
   printf '%s\n' '# fixture skill' > "$skills_dir/fixture-skill/SKILL.md"
   printf '%s\n' '# fixture agent' > "$agent_file"
   ln -sfn "$wslview_source" "$wslview_path"
-  chmod +x "$wslview_source" "$windows_command"
+  chmod +x "$wslview_source" "$windows_command" "$root_probe"
   cp "$managed_source" "$managed_runtime"
   cp "$rules_source" "$rules_runtime"
-  printf '%s\n' '{"mcp":"http://127.0.0.1:1/mcp"}' > "$gateway_runtime"
-  printf '%s\n' 'fixture.service|loaded|active' > "$unit_state"
+  cp "$gateway_source" "$gateway_runtime"
+  printf '%s\n' 'fixture.service|loaded|active|running|success' > "$unit_state"
   printf '%s\n' 'switch' > "$effect_state"
   printf '%s\n' '{"directory":{"uid":0,"gid":0,"mode":"700"},"key":{"uid":0,"gid":0,"mode":"400"}}' > "$root_state"
   printf '%s\n' 'ok' > "$cli_version_state"
   printf '%s\n' '0' > "$windows_command_state"
   printf '%s\n' 'success-sse' > "$mcp_scenario"
+  mcp_max_times=5
+  mcp_max_filesize=1048576
   : > "$mcp_call_log"
+  : > "$systemctl_call_log"
+  : > "$sudo_call_log"
+  : > "$cli_call_log"
+  : > "$windows_call_log"
   touch "$nix_ld_path"
   doctor_path="$home/.local/bin:$current_generation/sw/bin:$fake_bin:$PATH"
   chmod +x "$cli_path"
@@ -468,12 +557,20 @@ run_doctor() {
     DOCTOR_TEST_ROOT_STATE=$root_state \
     DOCTOR_TEST_ROOT_PROBE=$root_probe \
     DOCTOR_TEST_CLI_VERSION_STATE=$cli_version_state \
+    DOCTOR_TEST_CURRENT_LINK=$test_root/current \
+    DOCTOR_TEST_REPLACEMENT_GENERATION=$profile_generation \
     DOCTOR_TEST_WINDOWS_COMMAND_STATE=$windows_command_state \
+    DOCTOR_TEST_SYSTEMCTL_CALL_LOG=$systemctl_call_log \
+    DOCTOR_TEST_SUDO_CALL_LOG=$sudo_call_log \
+    DOCTOR_TEST_CLI_CALL_LOG=$cli_call_log \
+    DOCTOR_TEST_WINDOWS_CALL_LOG=$windows_call_log \
     DOCTOR_TEST_MCP_SCENARIO=$mcp_scenario \
     DOCTOR_TEST_MCP_CALL_LOG=$mcp_call_log \
     DOCTOR_TEST_MCP_URL='http://127.0.0.1:1/mcp' \
-    DOCTOR_TEST_MCP_REQUESTED_PROTOCOL='2025-06-18' \
-    "$store_bash" "$rendered_doctor" "${doctor_args[@]}" > "$doctor_output" 2>&1
+    DOCTOR_TEST_MCP_REQUESTED_PROTOCOL='2025-11-25' \
+    DOCTOR_TEST_MCP_MAX_TIMES=$mcp_max_times \
+    DOCTOR_TEST_MCP_MAX_FILESIZE=$mcp_max_filesize \
+    "$store_bash" "$doctor_executable" "${doctor_args[@]}" > "$doctor_output" 2>&1
   doctor_status=$?
   set -e
 }
@@ -505,6 +602,41 @@ expect_warning() {
     failed=1
   elif ! grep -Fqx "$expected" "$doctor_output"; then
     echo "$label: missing diagnostic: $expected" >&2
+    sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  fi
+}
+
+expect_contract_error() {
+  local label=$1 expected=$2 mutation=$3
+  reset_fixture
+  "$mutation"
+  run_doctor
+  if [[ $doctor_status -ne 2 ]]; then
+    echo "$label: expected status 2, got $doctor_status" >&2
+    sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  elif ! grep -Fqx "$expected" "$doctor_output"; then
+    echo "$label: missing diagnostic: $expected" >&2
+    sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log || -s $mcp_call_log ]]; then
+    echo "$label: a probe ran after manifest contract failure" >&2
+    failed=1
+  fi
+}
+
+expect_usage_error() {
+  local label=$1
+  shift
+  reset_fixture
+  run_doctor "$@"
+  if [[ $doctor_status -ne 2 ]]; then
+    echo "$label: expected status 2, got $doctor_status" >&2
+    sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  elif ! grep -Fqx 'usage: dotfiles-doctor [--format human|json]' "$doctor_output"; then
+    echo "$label: missing usage diagnostic" >&2
     sed 's/^/  /' "$doctor_output" >&2
     failed=1
   fi
@@ -555,10 +687,14 @@ expect_mcp_success() {
 }
 
 expect_mcp_failure() {
-  local label=$1 scenario=$2 expected_diagnostic=$3 expected_calls=$4
+  local label=$1 scenario=$2 expected_diagnostic=$3 expected_calls=$4 mutation=${5-} max_seconds=${6-}
+  local started elapsed
   reset_fixture
+  [[ -z $mutation ]] || "$mutation"
   printf '%s\n' "$scenario" > "$mcp_scenario"
+  started=$SECONDS
   run_doctor
+  elapsed=$((SECONDS - started))
   if [[ $doctor_status -ne 1 ]]; then
     echo "$label: expected status 1, got $doctor_status" >&2
     sed 's/^/  /' "$doctor_output" >&2
@@ -566,6 +702,10 @@ expect_mcp_failure() {
   elif ! grep -Fqx "$expected_diagnostic" "$doctor_output"; then
     echo "$label: missing diagnostic: $expected_diagnostic" >&2
     sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  fi
+  if [[ -n $max_seconds && $elapsed -gt $max_seconds ]]; then
+    echo "$label: exceeded ${max_seconds}s deadline: ${elapsed}s" >&2
     failed=1
   fi
   assert_mcp_call_log "$label" "$expected_calls"
@@ -589,12 +729,21 @@ schema_version_mismatch() { jq '.schemaVersion = 1' "$manifest" > "$manifest.tmp
 user_home_missing() { jq 'del(.user.home)' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 self_mismatch() { printf '#!%s\nexit 0\n' "$store_bash" > "$test_root/other-doctor"; chmod +x "$test_root/other-doctor"; ln -sfn "$test_root/other-doctor" "$current_generation/sw/bin/dotfiles-doctor"; }
 effect_mismatch() { printf '%s\n' 'switch-restart' > "$effect_state"; }
-unit_unloaded() { printf '%s\n' 'fixture.service|not-found|inactive' > "$unit_state"; }
-unit_inactive() { printf '%s\n' 'fixture.service|loaded|failed' > "$unit_state"; }
+unit_unloaded() { printf '%s\n' 'fixture.service|not-found|inactive|dead|failure' > "$unit_state"; }
+unit_inactive() { printf '%s\n' 'fixture.service|loaded|failed|failed|exit-code' > "$unit_state"; }
+unit_probe_failed() { : > "$unit_state"; }
+unit_probe_timed_out() { printf '%s\n' 'fixture.service|hang|active|running|success' > "$unit_state"; }
 sops_mode_mismatch() { printf '%s\n' '{"directory":{"uid":0,"gid":0,"mode":"755"},"key":{"uid":0,"gid":0,"mode":"400"}}' > "$root_state"; }
+sops_probe_failed() { chmod -x "$root_probe"; }
+sops_probe_timed_out() { printf '%s\n' 'hang' > "$root_state"; }
 home_key_present() { mkdir -p "$(dirname "$home/.config/sops/age/keys.txt")"; touch "$home/.config/sops/age/keys.txt"; }
 home_key_rejected() { home_key_present; jq '.sops.homeKey.policy = "reject"' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 home_key_policy_invalid() { jq '.sops.homeKey.policy = "invalid"' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+requested_protocol_unsupported() { jq '.mcp.requestedProtocolVersion = "2099-01-01"' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+supported_protocol_duplicated() { jq '.mcp.supportedProtocolVersions += [.mcp.supportedProtocolVersions[-1]]' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+mcp_target_empty() { jq '.mcp.targets += [""]' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+cleanup_timeout_missing() { jq 'del(.probePolicy.mcpCleanupTimeoutSeconds)' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+cleanup_timeout_exhausts_budget() { jq '.probePolicy.mcpCleanupTimeoutSeconds = .probePolicy.totalTimeoutSeconds' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 managed_file_stale() { printf '%s\n' 'stale=true' > "$managed_runtime"; }
 cli_path_shadowed() { ln -s "$cli_path" "$fake_bin/fixture-cli"; doctor_path="$fake_bin:$home/.local/bin:$current_generation/sw/bin:$PATH"; }
 cli_not_executable() { chmod -x "$cli_path"; }
@@ -604,23 +753,45 @@ cli_version_timed_out() { printf '%s\n' 'partial-hang' > "$cli_version_state"; }
 rules_file_stale() { printf '%s\n' '# stale rules' > "$rules_runtime"; }
 skill_missing() { rm -f "$skills_dir/fixture-skill/SKILL.md"; }
 agent_missing() { rm -f "$agent_file"; }
-gateway_stale() { printf '%s\n' '{"mcp":"http://stale.invalid/mcp"}' > "$gateway_runtime"; }
+gateway_stale() { printf '%s\n' '{"mcp":"http://127.0.0.1:1/mcp","unexpected":true}' > "$gateway_runtime"; }
 wslview_missing() { rm -f "$wslview_path"; }
 wslview_shadowed() { ln -s "$wslview_source" "$fake_bin/wslview"; doctor_path="$fake_bin:$home/.local/bin:$current_generation/sw/bin:$PATH"; }
 windows_command_missing() { chmod -x "$windows_command"; }
 windows_command_failed() { printf '%s\n' '1' > "$windows_command_state"; }
 windows_command_timed_out() { printf '%s\n' 'hang' > "$windows_command_state"; }
 nix_ld_missing() { rm -f "$nix_ld_path"; }
+current_unresolved() { jq --arg path "$test_root/generations/missing" '.generation.current = $path' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+configured_user_mismatch() { jq '.user.name = "different-user"' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+generation_switch_during_active() { printf '%s\n' 'switch-generation' > "$cli_version_state"; }
+mcp_page_limit_one() { jq '.probePolicy.maxPages = 1' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+mcp_response_limit_small() { jq '.probePolicy.maxResponseBytes = 256' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; mcp_max_filesize=256; }
+mcp_total_budget_short() { jq '.probePolicy.totalTimeoutSeconds = 4 | .probePolicy.mcpCleanupTimeoutSeconds = 1' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; mcp_max_times=1,2,3,4; }
+
+reset_fixture
+run_doctor
+if [[ $doctor_status -ne 0 ]]; then
+  echo "human baseline: expected status 0, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! grep -Fqx 'OK: MCP session lifecycle completed' "$doctor_output"; then
+  echo 'human baseline: missing MCP lifecycle result' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ $(grep -Fxc 'fixture.service' "$systemctl_call_log") -ne 1 ]]; then
+  echo 'human baseline: systemctl show was not called exactly once for fixture.service' >&2
+  sed 's/^/  /' "$systemctl_call_log" >&2
+  failed=1
+fi
 
 reset_fixture
 run_doctor --format json
 if [[ $doctor_status -ne 0 ]]; then
-  echo "result schema v1 / manifest schema v2 baseline: expected status 0, got $doctor_status" >&2
+  echo "JSON baseline: expected status 0, got $doctor_status" >&2
   sed 's/^/  /' "$doctor_output" >&2
   failed=1
 elif ! jq -e '
   .schemaVersion == 1 and
-  .manifestSchemaVersion == 2 and
+  .manifestSchemaVersion == 3 and
   .outcome == "healthy" and
   (.summary | keys | sort) == ["blocked", "error", "fail", "pass", "total", "warn"] and
   (.checks | type) == "array" and
@@ -637,22 +808,147 @@ elif ! jq -e '
   ) and
   ([.checks[].id] | length) == ([.checks[].id] | unique | length)
 ' "$doctor_output" >/dev/null; then
-  echo 'result schema v1 / manifest schema v2 baseline: report contract mismatch' >&2
+  echo 'JSON baseline: report contract mismatch' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+reset_fixture
+doctor_executable=$empty_message_doctor
+ln -sfn "$doctor_executable" "$current_generation/sw/bin/dotfiles-doctor"
+run_doctor --format json
+if [[ $doctor_status -ne 2 ]]; then
+  echo "empty result message: expected status 2, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! jq -e '
+  .outcome == "invalid" and
+  any(.checks[];
+    .id == "internal.report" and .status == "error" and
+    (.message | type) == "string" and (.message | length) > 0
+  )
+' "$doctor_output" >/dev/null; then
+  echo 'empty result message: internal contract error was not reported' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+expect_usage_error 'unknown argument' --unknown
+expect_usage_error 'missing format value' --format
+expect_usage_error 'unknown format' --format yaml
+expect_usage_error 'extra positional argument' --format human extra
+
+reset_fixture
+schema_version_mismatch
+run_doctor --format json
+if [[ $doctor_status -ne 2 ]]; then
+  echo "JSON contract error: expected status 2, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! jq -e '
+  .schemaVersion == 1 and
+  .outcome == "invalid" and
+  any(.checks[]; .id == "foundation.manifest" and .status == "error")
+' "$doctor_output" >/dev/null; then
+  echo 'JSON contract error: invalid outcome/report mismatch' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+reset_fixture
+current_unresolved
+run_doctor
+if [[ $doctor_status -ne 1 ]]; then
+  echo "foundation gate: expected status 1, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif grep -Fq 'OK: system profile matches current generation' "$doctor_output"; then
+  echo 'foundation gate: profile must not report OK when current is unresolved' >&2
+  failed=1
+elif ! grep -Fq 'SKIP:' "$doctor_output"; then
+  echo 'foundation gate: blocked phases were not rendered' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log || -s $mcp_call_log ]]; then
+  echo 'foundation gate: an active probe ran after foundation failure' >&2
+  failed=1
+fi
+
+reset_fixture
+configured_user_mismatch
+run_doctor
+if [[ $doctor_status -ne 1 ]]; then
+  echo "configured identity gate: expected status 1, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! grep -Fqx 'FAIL: doctor process identity does not match the configured user and home' "$doctor_output"; then
+  echo 'configured identity gate: missing identity diagnostic' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log || -s $mcp_call_log ]]; then
+  echo 'configured identity gate: a probe ran with the wrong identity' >&2
+  failed=1
+fi
+
+expect_failure \
+  'generation changed during active probes' \
+  'FAIL: generation snapshot changed during doctor execution' \
+  generation_switch_during_active
+
+reset_fixture
+managed_file_stale
+run_doctor --format json
+if [[ $doctor_status -ne 1 ]]; then
+  echo "JSON drift: expected status 1, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! jq -e '
+  .outcome == "degraded" and
+  any(.checks[]; .id == "local.managed.managed-fixture" and .status == "fail") and
+  any(.checks[]; .id == "active.mcp.session" and .status == "pass")
+' "$doctor_output" >/dev/null; then
+  echo 'JSON drift: report did not complete after drift' >&2
   sed 's/^/  /' "$doctor_output" >&2
   failed=1
 fi
 
 expect_failure 'profile mismatch' 'FAIL: system profile does not match current generation' profile_mismatch
-expect_failure 'schema version mismatch' "FAIL: doctor manifest does not match schema version 2: $manifest" schema_version_mismatch
-expect_failure 'required user field missing' "FAIL: doctor manifest does not match schema version 2: $manifest" user_home_missing
+expect_contract_error 'schema version mismatch' "ERROR: doctor manifest does not match schema version 3: $manifest" schema_version_mismatch
+expect_contract_error 'required user field missing' "ERROR: doctor manifest does not match schema version 3: $manifest" user_home_missing
 expect_failure 'self mismatch' 'FAIL: running doctor does not match current generation' self_mismatch
 expect_failure 'cold-start mismatch' 'FAIL: WSL cold-start state requires switch-restart' effect_mismatch
-expect_failure 'unit not loaded' 'FAIL: fixture.service LoadState is not loaded: not-found' unit_unloaded
-expect_failure 'unit inactive' 'FAIL: fixture.service ActiveState is not active: failed' unit_inactive
+expect_failure 'unit not loaded' 'FAIL: fixture.service state does not match manifest' unit_unloaded
+expect_failure 'unit inactive' 'FAIL: fixture.service state does not match manifest' unit_inactive
+expect_failure 'systemctl show failed' 'FAIL: fixture.service state does not match manifest' unit_probe_failed
+expect_failure_with_deadline 'systemctl show timed out' 'FAIL: fixture.service state does not match manifest' unit_probe_timed_out 8
+
+reset_fixture
+unit_inactive
+run_doctor
+if [[ $doctor_status -ne 1 ]]; then
+  echo "MCP health gate: expected status 1, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ -s $mcp_call_log ]]; then
+  echo 'MCP health gate: session was created for an unhealthy unit' >&2
+  sed 's/^/  /' "$mcp_call_log" >&2
+  failed=1
+elif ! grep -Fqx 'SKIP: MCP session is blocked by its health unit' "$doctor_output"; then
+  echo 'MCP health gate: missing blocked MCP result' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
 expect_failure 'SOPS metadata mismatch' 'FAIL: SOPS host key metadata does not match root policy' sops_mode_mismatch
+expect_failure 'SOPS root probe failed' 'FAIL: SOPS host key metadata does not match root policy' sops_probe_failed
+expect_failure_with_deadline 'SOPS root probe timed out' 'FAIL: SOPS host key metadata does not match root policy' sops_probe_timed_out 8
 expect_warning 'home key migration warning' 'WARN: user SOPS age key still exists during migration' home_key_present
 expect_failure 'home key rejected' 'FAIL: user SOPS age key must not exist after migration' home_key_rejected
-expect_failure 'home key policy invalid' "FAIL: doctor manifest does not match schema version 2: $manifest" home_key_policy_invalid
+expect_contract_error 'home key policy invalid' "ERROR: doctor manifest does not match schema version 3: $manifest" home_key_policy_invalid
+expect_contract_error 'requested MCP protocol unsupported' "ERROR: doctor manifest does not match schema version 3: $manifest" requested_protocol_unsupported
+expect_contract_error 'supported MCP protocol duplicated' "ERROR: doctor manifest does not match schema version 3: $manifest" supported_protocol_duplicated
+expect_contract_error 'empty MCP target' "ERROR: doctor manifest does not match schema version 3: $manifest" mcp_target_empty
+expect_contract_error 'MCP cleanup timeout missing' "ERROR: doctor manifest does not match schema version 3: $manifest" cleanup_timeout_missing
+expect_contract_error 'MCP cleanup timeout exhausts total budget' "ERROR: doctor manifest does not match schema version 3: $manifest" cleanup_timeout_exhausts_budget
 expect_failure 'managed file stale' "FAIL: managed file is stale: $managed_runtime" managed_file_stale
 expect_failure 'CLI path shadowed' "FAIL: fixture-cli does not resolve to $cli_path" cli_path_shadowed
 expect_failure 'CLI not executable' "FAIL: CLI is not executable: $cli_path" cli_not_executable
@@ -662,7 +958,7 @@ expect_failure 'CLI version timed out' 'FAIL: fixture-cli version check failed' 
 expect_failure 'rules file stale' "FAIL: fixture rules file is stale: $rules_runtime" rules_file_stale
 expect_failure 'skill missing' "FAIL: fixture skill is missing: $skills_dir/fixture-skill/SKILL.md" skill_missing
 expect_failure 'agent missing' "FAIL: fixture agent is missing: $agent_file" agent_missing
-expect_failure 'gateway stale' "FAIL: fixture gateway file is missing or stale: $gateway_runtime" gateway_stale
+expect_failure 'gateway stale' "FAIL: fixture gateway file is stale: $gateway_runtime" gateway_stale
 expect_failure 'wslview missing' "FAIL: WSL launcher is missing or stale: $wslview_path" wslview_missing
 expect_failure 'wslview shadowed' "FAIL: wslview does not resolve to $wslview_path" wslview_shadowed
 expect_failure 'Windows command missing' "FAIL: Windows interop command is not executable: $windows_command" windows_command_missing
@@ -687,7 +983,7 @@ $delete_call"
 expect_mcp_success \
   'MCP JSON lifecycle' \
   success-json \
-  "$initialize_call
+"$initialize_call
 $initialized_call
 $tools_call
 $delete_call"
@@ -733,7 +1029,7 @@ expect_mcp_failure \
   initialize-text-plain \
   'FAIL: MCP initialize response has unsupported content type: text/plain' \
   "$initialize_call
-DELETE|delete|fixture-session|2025-06-18|<absent>"
+DELETE|delete|fixture-session|2025-11-25|<absent>"
 
 expect_mcp_failure \
   'MCP initialized notification failure' \
@@ -769,6 +1065,43 @@ expect_mcp_failure \
 $initialized_call
 $tools_call
 $delete_call"
+
+expect_mcp_failure \
+  'MCP initialize curl failure' \
+  initialize-curl-failure \
+  'FAIL: MCP initialize request failed' \
+  "$initialize_call"
+
+expect_mcp_failure \
+  'MCP page limit' \
+  pagination-limit \
+  'FAIL: MCP tools/list pagination exceeded 1 pages' \
+  "$initialize_call
+$initialized_call
+$tools_call
+$delete_call" \
+  mcp_page_limit_one
+
+expect_mcp_failure \
+  'MCP response size limit' \
+  response-too-large \
+  'FAIL: MCP tools/list request failed' \
+  "$initialize_call
+$initialized_call
+$tools_call
+$delete_call" \
+  mcp_response_limit_small
+
+expect_mcp_failure \
+  'MCP total budget with reserved cleanup' \
+  tools-timeout \
+  'FAIL: MCP tools/list request failed' \
+  "$initialize_call
+$initialized_call
+$tools_call
+$delete_call" \
+  mcp_total_budget_short \
+  10
 
 expect_mcp_failure \
   'MCP repeated empty cursor' \

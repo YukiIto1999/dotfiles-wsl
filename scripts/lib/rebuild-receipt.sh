@@ -45,11 +45,27 @@ dotfiles_rebuild_validate_receipt_file() {
     --argjson uid "$expected_uid" \
     --arg user "$expected_user" \
     --arg store "$nix_store_dir/" '
-      def pending_result: .status == "pending" and .exitCode == null;
-      def succeeded_result: .status == "succeeded" and .exitCode == 0;
+      def check_ids:
+        if has("failedCheckIds") then
+          (.failedCheckIds as $ids |
+            ($ids | type) == "array" and
+            all($ids[]; type == "string" and length > 0) and
+            ($ids | length) == ($ids | unique | length))
+        else
+          true
+        end;
+      def no_check_ids:
+        (has("failedCheckIds") | not) or (.failedCheckIds | length == 0);
+      def pending_result:
+        .status == "pending" and .exitCode == null and
+        check_ids and no_check_ids;
+      def succeeded_result:
+        .status == "succeeded" and .exitCode == 0 and
+        check_ids and no_check_ids;
       def failed_result:
         .status == "failed" and
-        (.exitCode | type == "number" and . >= 1 and . <= 255 and floor == .);
+        (.exitCode | type == "number" and . >= 1 and . <= 255 and floor == .) and
+        check_ids;
       def runtime_snapshot:
         type == "object" and
         ([.current, .booted, .profile] |
@@ -134,6 +150,7 @@ dotfiles_rebuild_validate_receipt_file() {
       (.verification.status | IN("pending", "succeeded", "failed")) and
       (.verification.exitCode == null or
         (.verification.exitCode | type == "number" and . >= 0 and . <= 255 and floor == .)) and
+      (.verification | check_ids) and
       (.failureStage == null or (.failureStage | type == "string" and length > 0)) and
       (.rollback == null or (
         (.rollback.target == .recoveryTarget) and

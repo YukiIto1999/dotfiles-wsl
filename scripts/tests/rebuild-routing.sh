@@ -21,6 +21,8 @@ source_path=$store_dir/test-dotfiles-source
 candidate=$test_root/nix/store/test-system
 previous=$store_dir/previous-system
 displaced_profile=$store_dir/displaced-profile
+v3_doctor_fixture=$test_root/doctor-v3
+v2_doctor_fixture=$test_root/doctor-v2
 rebuild=$test_root/dotfiles-rebuild
 boot_id_file=$test_root/boot-id
 current_state=$test_root/current-system
@@ -30,8 +32,8 @@ test_user=$(id -un)
 real_readlink=$(command -v readlink)
 
 mkdir -p \
-  "$repo/.git" "$fake_bin" "$candidate/sw/bin" "$source_path" \
-  "$previous/sw/bin" "$displaced_profile" "$nix_gc_auto_roots"
+  "$repo/.git" "$fake_bin" "$candidate/sw/bin" "$candidate/etc/dotfiles" "$source_path" \
+  "$previous/sw/bin" "$previous/etc/dotfiles" "$displaced_profile" "$nix_gc_auto_roots"
 sed "s|@dotfilesDir@|$repo|g" "$rebuild_source" \
   | sed "s|@nixStoreDir@|$store_dir|g" \
   | sed "s|@nixGcAutoRootDir@|$nix_gc_auto_roots|g" \
@@ -214,12 +216,70 @@ done
 cat > "$candidate/sw/bin/dotfiles-doctor" <<'DOCTOR'
 #!@bash@
 set -euo pipefail
-printf 'dotfiles-doctor\n' >> "$CALL_LOG"
-exit "${TEST_DOCTOR_STATUS:-0}"
+printf -v call 'dotfiles-doctor'
+for argument in "$@"; do
+  printf -v quoted ' %q' "$argument"
+  call+=$quoted
+done
+printf '%s\n' "$call" >> "$CALL_LOG"
+[[ $# -eq 2 && $1 == --format && $2 == json ]] || exit 2
+doctor_status=${TEST_DOCTOR_STATUS:-0}
+report_mode=${TEST_DOCTOR_REPORT:-valid}
+if [[ $report_mode == invalid ]]; then
+  printf '%s\n' 'not-json'
+  exit "$doctor_status"
+fi
+case $doctor_status in
+  0)
+    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"healthy","summary":{"total":1,"pass":1,"warn":0,"fail":0,"error":0,"blocked":0},"checks":[{"id":"fixture.health","phase":"system","status":"pass","subject":"fixture","expected":"healthy","observed":"healthy","message":"fixture is healthy","durationMs":1}]}'
+    ;;
+  1)
+    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"degraded","summary":{"total":2,"pass":0,"warn":0,"fail":1,"error":0,"blocked":1},"checks":[{"id":"systemd.fixture","phase":"system","status":"fail","subject":"fixture.service","expected":"active","observed":"failed","message":"fixture unit failed","durationMs":1},{"id":"mcp.fixture","phase":"active","status":"blocked","subject":"fixture-mcp","expected":"healthy unit","observed":"blocked","message":"fixture MCP probe was blocked","durationMs":0}]}'
+    ;;
+  2)
+    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"invalid","summary":{"total":1,"pass":0,"warn":0,"fail":0,"error":1,"blocked":0},"checks":[{"id":"doctor.contract","phase":"foundation","status":"error","subject":"fixture-manifest","expected":"schema v3","observed":"invalid","message":"fixture manifest is invalid","durationMs":0}]}'
+    ;;
+  *)
+    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"degraded","summary":{"total":1,"pass":0,"warn":0,"fail":1,"error":0,"blocked":0},"checks":[{"id":"systemd.fixture","phase":"system","status":"fail","subject":"fixture.service","expected":"active","observed":"failed","message":"fixture unit failed","durationMs":1}]}'
+    ;;
+esac
+case $report_mode in
+  valid) printf '%s\n' "$report" ;;
+  empty) printf '%s\n' '{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"healthy","summary":{"total":0,"pass":0,"warn":0,"fail":0,"error":0,"blocked":0},"checks":[]}' ;;
+  summary-mismatch) printf '%s\n' "${report/\"total\":2/\"total\":99}" ;;
+  field-missing) printf '%s\n' "${report/\"phase\":\"system\",/}" ;;
+  multiple) printf '%s\n%s\n' "$report" "$report" ;;
+  *) exit 2 ;;
+esac
+exit "$doctor_status"
 DOCTOR
 sed -i "1s|@bash@|$bash_path|" "$candidate/sw/bin/dotfiles-doctor"
 chmod +x "$candidate/sw/bin/dotfiles-doctor"
-cp -- "$candidate/sw/bin/dotfiles-doctor" "$previous/sw/bin/dotfiles-doctor"
+cp -- "$candidate/sw/bin/dotfiles-doctor" "$v3_doctor_fixture"
+cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+printf '%s\n' '{"schemaVersion":3}' > "$candidate/etc/dotfiles/doctor.json"
+printf '%s\n' '{"schemaVersion":3}' > "$previous/etc/dotfiles/doctor.json"
+
+cat > "$v2_doctor_fixture" <<'DOCTOR'
+#!@bash@
+set -euo pipefail
+printf -v call 'dotfiles-doctor'
+for argument in "$@"; do
+  printf -v quoted ' %q' "$argument"
+  call+=$quoted
+done
+printf '%s\n' "$call" >> "$CALL_LOG"
+[[ $# -eq 0 ]] || exit 2
+doctor_status=${TEST_DOCTOR_STATUS:-0}
+case $doctor_status in
+  0) printf '%s\n' 'OK: legacy doctor fixture is healthy' ;;
+  1) printf '%s\n' 'FAIL: legacy doctor fixture is degraded' >&2 ;;
+  *) printf '%s\n' "FAIL: legacy doctor fixture returned status $doctor_status" >&2 ;;
+esac
+exit "$doctor_status"
+DOCTOR
+sed -i "1s|@bash@|$bash_path|" "$v2_doctor_fixture"
+chmod +x "$v2_doctor_fixture"
 
 export CALL_LOG=$call_log
 export TEST_SOURCE_PATH=$source_path
@@ -810,6 +870,15 @@ require_call "sync --data $active_receipt"
 require_call "sync $receipt_root"
 require_call "sync $receipt_root/roots/$transaction_id"
 
+# 旧receiptのfield欠落は受理するが、明示的nullは壊れた新contractとして拒否する。
+rewrite_receipt "$active_receipt" '.verification.failedCheckIds = null'
+run_rebuild switch '' '' --status
+[[ $rebuild_status -eq 2 ]]
+grep -F 'active rebuild receipt is invalid' "$stderr_log" > /dev/null
+rewrite_receipt "$active_receipt" 'del(.verification.failedCheckIds)'
+run_rebuild switch '' '' --status
+[[ $rebuild_status -eq 0 ]]
+
 # effect/action と state/rollback の不整合は、不正 receipt として status 2 で拒否する。
 rewrite_receipt "$active_receipt" '.action = "boot"'
 run_rebuild switch '' '' --status
@@ -998,6 +1067,8 @@ rm -- "$active_receipt"
 printf '%s\n' "$previous" > "$current_state"
 printf '%s\n' "$displaced_profile" > "$profile_state"
 printf '%s\n' "$previous" > "$booted_state"
+cp -- "$v2_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+printf '%s\n' '{"schemaVersion":2}' > "$previous/etc/dotfiles/doctor.json"
 export TEST_BOOT_MONOTONIC=600
 run_rebuild switch '' activation
 [[ $rebuild_status -eq 4 ]]
@@ -1013,14 +1084,31 @@ jq -e --arg previous "$previous" --arg displacedProfile "$displaced_profile" '
 grep -F "$candidate/sw/bin/dotfiles-rebuild --rollback $transaction_id" "$stderr_log" > /dev/null
 [[ -L $receipt_root/roots/$transaction_id/candidate ]]
 
+export TEST_DOCTOR_STATUS=1
 run_rebuild switch '' '' --rollback "$transaction_id"
-[[ $rebuild_status -eq 0 ]]
+[[ $rebuild_status -eq 5 ]]
 assert_apply switch "$previous"
 reject_call "nixos-rebuild switch --sudo --no-reexec --store-path $displaced_profile"
-require_call 'dotfiles-doctor'
+require_exact_call 'dotfiles-doctor'
+grep -Fqx 'FAIL: legacy doctor fixture is degraded' "$stderr_log"
+jq -e '
+  .state == "rollback-verification-failed" and
+  .verification.exitCode == 1 and
+  .verification.failedCheckIds == ["legacy.doctor"] and
+  .failureStage == "doctor"
+' "$active_receipt" > /dev/null
+
+export TEST_DOCTOR_STATUS=0
+run_rebuild switch '' '' --rollback "$transaction_id"
+[[ $rebuild_status -eq 0 ]]
+reject_call 'nixos-rebuild'
+require_exact_call 'dotfiles-doctor'
+grep -Fqx 'OK: legacy doctor fixture is healthy' "$stdout_log"
 rolled_back_receipt=$receipt_root/receipts/$transaction_id.json
 jq -e '.state == "rolled-back"' "$rolled_back_receipt" > /dev/null
 [[ ! -e $receipt_root/roots/$transaction_id && ! -L $receipt_root/roots/$transaction_id ]]
+cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+printf '%s\n' '{"schemaVersion":3}' > "$previous/etc/dotfiles/doctor.json"
 
 cp -- "$rolled_back_receipt" "$active_receipt"
 chmod 0600 "$active_receipt"
@@ -1192,15 +1280,18 @@ jq -e --arg candidate "$candidate" --arg displaced "$displaced_profile" '
 printf '%s\n' "$previous" > "$current_state"
 printf '%s\n' "$previous" > "$profile_state"
 printf '%s\n' "$previous" > "$booted_state"
-export TEST_DOCTOR_STATUS=9
+export TEST_DOCTOR_STATUS=1
 run_rebuild switch '' ''
 [[ $rebuild_status -eq 5 ]]
+require_exact_call 'dotfiles-doctor --format json'
+grep -Fqx 'FAIL: fixture unit failed' "$stderr_log"
 active_receipt=$receipt_root/active.json
 transaction_id=$(jq -r '.transactionId' "$active_receipt")
 jq -e '
   .state == "verification-failed" and
   .activation.status == "succeeded" and
-  .verification.exitCode == 9 and
+  .verification.exitCode == 1 and
+  .verification.failedCheckIds == ["systemd.fixture"] and
   .failureStage == "doctor"
 ' "$active_receipt" > /dev/null
 run_rebuild switch '' '' --status
@@ -1212,7 +1303,95 @@ run_rebuild switch '' '' --resume "$transaction_id"
 [[ $rebuild_status -eq 0 ]]
 reject_call 'nixos-rebuild'
 require_call 'dotfiles-doctor'
-jq -e '.state == "complete"' "$receipt_root/receipts/$transaction_id.json" > /dev/null
+jq -e '
+  .state == "complete" and .verification.failedCheckIds == []
+' "$receipt_root/receipts/$transaction_id.json" > /dev/null
+
+# doctor 自身の contract error はruntime driftとは別の outcome/ID のまま保存する。
+export TEST_DOCTOR_STATUS=2
+run_rebuild switch '' ''
+[[ $rebuild_status -eq 5 ]]
+contract_report_receipt=$receipt_root/active.json
+contract_report_id=$(jq -r '.transactionId' "$contract_report_receipt")
+jq -e '
+  .state == "verification-failed" and
+  .verification.exitCode == 2 and
+  .verification.failedCheckIds == ["doctor.contract"] and
+  .failureStage == "doctor"
+' "$contract_report_receipt" > /dev/null
+export TEST_DOCTOR_STATUS=0
+run_rebuild switch '' '' --resume "$contract_report_id"
+[[ $rebuild_status -eq 0 ]]
+
+# 未定義の doctor status は report の診断を信用せず、raw status と contract failure を残す。
+export TEST_DOCTOR_STATUS=9
+run_rebuild switch '' ''
+[[ $rebuild_status -eq 5 ]]
+unknown_status_receipt=$receipt_root/active.json
+unknown_status_id=$(jq -r '.transactionId' "$unknown_status_receipt")
+jq -e '
+  .state == "verification-failed" and
+  .verification.exitCode == 9 and
+  .verification.failedCheckIds == ["doctor.report"] and
+  .failureStage == "doctor"
+' "$unknown_status_receipt" > /dev/null
+export TEST_DOCTOR_STATUS=0
+run_rebuild switch '' '' --resume "$unknown_status_id"
+[[ $rebuild_status -eq 0 ]]
+
+for report_mode in summary-mismatch field-missing multiple; do
+  export TEST_DOCTOR_STATUS=1
+  export TEST_DOCTOR_REPORT=$report_mode
+  run_rebuild switch '' ''
+  [[ $rebuild_status -eq 5 ]]
+  malformed_report_receipt=$receipt_root/active.json
+  malformed_report_id=$(jq -r '.transactionId' "$malformed_report_receipt")
+  jq -e '
+    .state == "verification-failed" and
+    .verification.exitCode == 1 and
+    .verification.failedCheckIds == ["doctor.report"] and
+    .failureStage == "doctor"
+  ' "$malformed_report_receipt" > /dev/null
+  export TEST_DOCTOR_STATUS=0
+  export TEST_DOCTOR_REPORT=valid
+  run_rebuild switch '' '' --resume "$malformed_report_id"
+  [[ $rebuild_status -eq 0 ]]
+done
+
+# 空のhealthy reportはdoctorが0でも収束証拠にならない。report errorをstatus 2へ正規化する。
+export TEST_DOCTOR_STATUS=0
+export TEST_DOCTOR_REPORT=empty
+run_rebuild switch '' ''
+[[ $rebuild_status -eq 5 ]]
+empty_report_receipt=$receipt_root/active.json
+empty_report_id=$(jq -r '.transactionId' "$empty_report_receipt")
+jq -e '
+  .state == "verification-failed" and
+  .verification.exitCode == 2 and
+  .verification.failedCheckIds == ["doctor.report"] and
+  .failureStage == "doctor"
+' "$empty_report_receipt" > /dev/null
+export TEST_DOCTOR_REPORT=valid
+run_rebuild switch '' '' --resume "$empty_report_id"
+[[ $rebuild_status -eq 0 ]]
+
+# doctor が非0でも report protocol を破った場合は、構造化不能を専用 check ID で残す。
+export TEST_DOCTOR_STATUS=1
+export TEST_DOCTOR_REPORT=invalid
+run_rebuild switch '' ''
+[[ $rebuild_status -eq 5 ]]
+invalid_report_receipt=$receipt_root/active.json
+invalid_report_id=$(jq -r '.transactionId' "$invalid_report_receipt")
+jq -e '
+  .state == "verification-failed" and
+  .verification.exitCode == 1 and
+  .verification.failedCheckIds == ["doctor.report"] and
+  .failureStage == "doctor"
+' "$invalid_report_receipt" > /dev/null
+export TEST_DOCTOR_STATUS=0
+export TEST_DOCTOR_REPORT=valid
+run_rebuild switch '' '' --resume "$invalid_report_id"
+[[ $rebuild_status -eq 0 ]]
 
 # archive rename 後の receipts directory sync 失敗は archive と roots を保持し、次回 apply で回収する。
 export TEST_SYNC_FAIL_EXACT=$receipt_root/receipts

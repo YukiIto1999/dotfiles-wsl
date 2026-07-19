@@ -394,7 +394,7 @@ finish_transaction() {
     --arg state "$final_state" \
     --arg timestamp "$timestamp" '
       .state = $state |
-      .verification = {status: "succeeded", exitCode: 0} |
+      .verification = {status: "succeeded", exitCode: 0, failedCheckIds: []} |
       .failureStage = null |
       .updatedAt = $timestamp |
       .finishedAt = $timestamp
@@ -408,7 +408,8 @@ finish_transaction() {
 }
 
 verification_failed() {
-  local direction=$1 stage=$2 exit_code=$3 message=$4 state timestamp
+  local direction=$1 stage=$2 exit_code=$3 message=$4
+  local failed_check_ids=${5:-'[]'} state timestamp
   timestamp=$(now)
   if [[ $direction == forward ]]; then
     state=verification-failed
@@ -419,9 +420,14 @@ verification_failed() {
     --arg state "$state" \
     --arg stage "$stage" \
     --arg timestamp "$timestamp" \
-    --argjson exitCode "$exit_code" '
+    --argjson exitCode "$exit_code" \
+    --argjson failedCheckIds "$failed_check_ids" '
       .state = $state |
-      .verification = {status: "failed", exitCode: $exitCode} |
+      .verification = {
+        status: "failed",
+        exitCode: $exitCode,
+        failedCheckIds: $failedCheckIds
+      } |
       .failureStage = $stage |
       .updatedAt = $timestamp
     '
@@ -518,7 +524,7 @@ restart_wait() {
     --arg state "$state" \
     --arg timestamp "$timestamp" '
       .state = $state |
-      .verification = {status: "pending", exitCode: null} |
+      .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
       .failureStage = null |
       .updatedAt = $timestamp
     '
@@ -530,6 +536,8 @@ restart_wait() {
 verify_target() {
   local direction=$1 target=$2 expected_user=$3 target_effect=$4 state timestamp receipt expected_distro
   local actual_current actual_profile actual_booted observed_effect doctor_status=0
+  local doctor_report doctor_report_json='' doctor_failed_check_ids='[]'
+  local doctor_manifest_schema=3 target_doctor_manifest="$target/etc/dotfiles/doctor.json"
   local before_boot first_boot current_boot
 
   receipt=$(receipt_read) || die 1 "failed to read verification receipt"
@@ -598,17 +606,120 @@ verify_target() {
     --arg state "$state" \
     --arg timestamp "$timestamp" '
       .state = $state |
-      .verification = {status: "pending", exitCode: null} |
+      .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
       .failureStage = null |
       .updatedAt = $timestamp
     '
 
+  doctor_report=$(mktemp)
   set +e
-  "$target/sw/bin/dotfiles-doctor"
-  doctor_status=$?
+  if [[ $direction == rollback ]] && jq -e '.schemaVersion == 2' "$target_doctor_manifest" >/dev/null 2>&1; then
+    doctor_manifest_schema=2
+    "$target/sw/bin/dotfiles-doctor" > "$doctor_report"
+    doctor_status=$?
+    cat -- "$doctor_report"
+    case $doctor_status in
+      0)
+        jq -cn --arg subject "$target/sw/bin/dotfiles-doctor" '{
+          schemaVersion: 1,
+          manifestSchemaVersion: 2,
+          outcome: "healthy",
+          summary: {total: 1, pass: 1, warn: 0, fail: 0, error: 0, blocked: 0},
+          checks: [{
+            id: "legacy.doctor", phase: "system", status: "pass", subject: $subject,
+            expected: "legacy doctor status 0", observed: "status 0",
+            message: "legacy dotfiles-doctor completed successfully", durationMs: 0
+          }]
+        }' > "$doctor_report"
+        ;;
+      1)
+        jq -cn --arg subject "$target/sw/bin/dotfiles-doctor" '{
+          schemaVersion: 1,
+          manifestSchemaVersion: 2,
+          outcome: "degraded",
+          summary: {total: 1, pass: 0, warn: 0, fail: 1, error: 0, blocked: 0},
+          checks: [{
+            id: "legacy.doctor", phase: "system", status: "fail", subject: $subject,
+            expected: "legacy doctor status 0", observed: "status 1",
+            message: "legacy dotfiles-doctor reported drift", durationMs: 0
+          }]
+        }' > "$doctor_report"
+        ;;
+    esac
+  else
+    "$target/sw/bin/dotfiles-doctor" --format json > "$doctor_report"
+    doctor_status=$?
+  fi
   set -e
+
+  if doctor_report_json=$(jq -sc '
+      if length == 1 then .[0] else error("doctor report must contain exactly one JSON document") end
+    ' "$doctor_report" 2>/dev/null) && jq -e \
+    --argjson exitCode "$doctor_status" \
+    --argjson expectedManifestSchema "$doctor_manifest_schema" '
+    def summary_for($checks): {
+      total: ($checks | length),
+      pass: ([$checks[] | select(.status == "pass")] | length),
+      warn: ([$checks[] | select(.status == "warn")] | length),
+      fail: ([$checks[] | select(.status == "fail")] | length),
+      error: ([$checks[] | select(.status == "error")] | length),
+      blocked: ([$checks[] | select(.status == "blocked")] | length)
+    };
+
+    .schemaVersion == 1 and
+    .manifestSchemaVersion == $expectedManifestSchema and
+    (.outcome | IN("healthy", "degraded", "invalid")) and
+    (.summary | type) == "object" and
+    (.summary | keys | sort) == ["blocked", "error", "fail", "pass", "total", "warn"] and
+    (.checks | type) == "array" and (.checks | length) > 0 and
+    ([.checks[].id] | length) == ([.checks[].id] | unique | length) and
+    all(.checks[];
+      (.id | type) == "string" and (.id | length) > 0 and
+      (.phase | IN("foundation", "local", "system", "active")) and
+      (.status | IN("pass", "warn", "fail", "error", "blocked")) and
+      (.subject | type) == "string" and
+      (.expected | type) == "string" and
+      (.observed | type) == "string" and
+      (.message | type) == "string" and (.message | length) > 0 and
+      (.durationMs | type) == "number" and .durationMs >= 0 and (.durationMs | floor) == .durationMs
+    ) and
+    .summary == summary_for(.checks) and
+    (if $exitCode == 0 then
+      .outcome == "healthy" and
+      all(.checks[]; .status == "pass" or .status == "warn")
+    elif $exitCode == 1 then
+      .outcome == "degraded" and
+      any(.checks[]; .status == "fail" or .status == "blocked") and
+      all(.checks[]; .status != "error")
+    elif $exitCode == 2 then
+      .outcome == "invalid" and
+      any(.checks[]; .status == "error")
+    else
+      false
+    end)
+  ' <<< "$doctor_report_json" >/dev/null 2>&1; then
+    while IFS=$'\t' read -r check_status check_message; do
+      case $check_status in
+        pass) printf 'OK: %s\n' "$check_message" ;;
+        warn) printf 'WARN: %s\n' "$check_message" >&2 ;;
+        fail) printf 'FAIL: %s\n' "$check_message" >&2 ;;
+        error) printf 'ERROR: %s\n' "$check_message" >&2 ;;
+        blocked) printf 'SKIP: %s\n' "$check_message" >&2 ;;
+      esac
+    done < <(jq -r '.checks[] | [.status, .message] | @tsv' <<< "$doctor_report_json")
+    doctor_failed_check_ids=$(jq -c '
+      [.checks[] | select(.status == "fail" or .status == "error") | .id] | unique
+    ' <<< "$doctor_report_json")
+  else
+    doctor_failed_check_ids='["doctor.report"]'
+    [[ $doctor_status -ne 0 ]] || doctor_status=2
+    echo "ERROR: dotfiles-doctor returned an invalid JSON report" >&2
+  fi
+  rm -f -- "$doctor_report"
   [[ $doctor_status -eq 0 ]] || \
-    verification_failed "$direction" doctor "$doctor_status" "dotfiles-doctor failed for $target"
+    verification_failed \
+      "$direction" doctor "$doctor_status" "dotfiles-doctor failed for $target" \
+      "$doctor_failed_check_ids"
 
   finish_transaction "$direction"
 }
@@ -698,7 +809,7 @@ activate_target() {
       --arg timestamp "$timestamp" '
         .state = $state |
         .activation = {status: "succeeded", exitCode: 0} |
-        .verification = {status: "pending", exitCode: null} |
+        .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
         .failureStage = null |
         .updatedAt = $timestamp
       '
@@ -708,7 +819,7 @@ activate_target() {
       --arg timestamp "$timestamp" '
         .state = $state |
         .rollback.activation = {status: "succeeded", exitCode: 0} |
-        .verification = {status: "pending", exitCode: null} |
+        .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
         .failureStage = null |
         .updatedAt = $timestamp
       '
@@ -757,7 +868,7 @@ resume_activation() {
         --arg timestamp "$timestamp" '
           .state = $state |
           .activation = {status: "succeeded", exitCode: 0} |
-          .verification = {status: "pending", exitCode: null} |
+          .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
           .failureStage = null |
           .updatedAt = $timestamp
         '
@@ -767,7 +878,7 @@ resume_activation() {
         --arg timestamp "$timestamp" '
           .state = $state |
           .rollback.activation = {status: "succeeded", exitCode: 0} |
-          .verification = {status: "pending", exitCode: null} |
+          .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
           .failureStage = null |
           .updatedAt = $timestamp
         '
@@ -960,7 +1071,7 @@ if [[ $mode == apply || $mode == plan ]]; then
         activationBaseline: $activationBaseline,
         state: "prepared",
         activation: {status: "pending", exitCode: null},
-        verification: {status: "pending", exitCode: null},
+        verification: {status: "pending", exitCode: null, failedCheckIds: []},
         abort: null,
         failureStage: null,
         rollback: null,
@@ -1060,7 +1171,7 @@ if [[ $mode == rollback && $state != aborted ]] && jq -e '.rollback == null' <<<
         activation: {status: "pending", exitCode: null}
       } |
       .state = "rollback-intent" |
-      .verification = {status: "pending", exitCode: null} |
+      .verification = {status: "pending", exitCode: null, failedCheckIds: []} |
       .failureStage = null |
       .finishedAt = null |
       .updatedAt = $timestamp

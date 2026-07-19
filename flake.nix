@@ -84,6 +84,11 @@
         in
         {
           inherit (pkgs) age sops;
+          sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
+            mkdir -p "$out"
+            cp -R --preserve=mode ${self}/. "$out/"
+            test -x "$out/scripts/bootstrap.sh"
+          '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
           dotfiles-install-clis = hostConfig.my.commands.installClis;
           dotfiles-rebuild = hostConfig.my.commands.rebuild;
@@ -161,6 +166,16 @@
               esac
             '';
           };
+          fakeBootstrapRebuild = pkgs.writeShellScriptBin "nixos-rebuild" ''
+            printf '%q ' "$@" >> "$BOOTSTRAP_CALL_LOG"
+            printf '\n' >> "$BOOTSTRAP_CALL_LOG"
+            if [[ -n ''${BOOTSTRAP_REBUILD_READY:-} ]]; then
+              : > "$BOOTSTRAP_REBUILD_READY"
+              while [[ ! -e $BOOTSTRAP_REBUILD_RELEASE ]]; do
+                sleep 0.01
+              done
+            fi
+          '';
           playwrightRuntimeTest = pkgs.callPackage ./pkgs/playwright-mcp {
             inherit mkMcpServer;
             chromium = fakeChromium;
@@ -375,7 +390,9 @@
                   "$production_verifier" > /dev/null
                 grep --fixed-strings 'SOPS_AGE_KEY_FILE="$identity"' \
                   "$production_verifier" > /dev/null
-                bash ${self}/scripts/tests/bootstrap-age-key.sh ${self}/scripts/bootstrap.sh
+                bash ${self}/scripts/tests/bootstrap-age-key.sh \
+                  ${self}/scripts/bootstrap.sh \
+                  ${fakeBootstrapRebuild}
                 bash ${self}/scripts/tests/sops-enroll.sh \
                   ${lib.getExe hostConfig.my.commands.sopsEnroll.testPackage} \
                   ${pkgs.age}/bin/age-keygen \
@@ -599,6 +616,14 @@
             }
 
             assert_plan switch candidate
+            test "$(${lib.getExe wslRestartRequired} --default-user \
+              --booted-system booted --current-system current candidate)" = ${lib.escapeShellArg hostConfig.my.username}
+            if ${lib.getExe wslRestartRequired} --plan --default-user candidate 2>/dev/null; then
+              echo "mutually exclusive output modes were accepted" >&2
+              exit 1
+            else
+              test "$?" -eq 2
+            fi
 
             printf '\n[interop]\nappendWindowsPath=true\n' >> candidate/etc/wsl.conf
             assert_plan switch-restart candidate
@@ -720,9 +745,36 @@
                   ${self}/modules/commands/rebuild \
                   ${pkgs.bash}/bin/bash \
                   ${lib.getExe pkgs.fakeroot} \
-                  ${self}/scripts/lib/operation-lock.sh
+                  ${self}/scripts/lib/operation-lock.sh \
+                  ${self}/scripts/lib/rebuild-receipt.sh
                 touch $out
               '';
+
+          rebuild-entrypoint =
+            let
+              systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
+              upstreamRebuild = lib.getExe hostConfig.system.build.nixos-rebuild;
+              publicRebuild = "${hostConfig.system.path}/bin/nixos-rebuild";
+            in
+            assert !hostConfig.system.tools.nixos-rebuild.enable;
+            assert !(lib.elem "nixos-rebuild-ng" systemPackageNames);
+            pkgs.runCommandLocal "check-rebuild-entrypoint" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+              set -euo pipefail
+              test -x ${publicRebuild}
+              test -x ${upstreamRebuild}
+              test "$(readlink -f ${publicRebuild})" != ${upstreamRebuild}
+              set +e
+              ${publicRebuild} >stdout 2>stderr
+              status=$?
+              set -e
+              test "$status" -eq 2
+              test ! -s stdout
+              grep -Fqx 'FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction' stderr
+              grep -Fqx \
+                'Use dotfiles-rebuild for normal changes; use scripts/bootstrap.sh only for initial provisioning.' \
+                stderr
+              touch $out
+            '';
 
           doctor-runtime =
             pkgs.runCommandLocal "check-doctor-runtime"
@@ -865,7 +917,8 @@
           '';
 
           nixfmt = pkgs.runCommandLocal "check-nixfmt" { nativeBuildInputs = [ pkgs.nixfmt-tree ]; } ''
-            treefmt --ci --tree-root ${self}
+            cp -r --no-preserve=mode ${self} source
+            treefmt --ci --tree-root "$PWD/source"
             touch $out
           '';
 

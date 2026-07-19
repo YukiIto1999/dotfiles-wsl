@@ -91,10 +91,14 @@ encrypted=$secrets_dir/secrets.yaml
 common_git_dir=$(git -C "$dotfiles" rev-parse --path-format=absolute --git-common-dir)
 transaction_root=$common_git_dir/dotfiles-sops-enroll
 active_marker=$transaction_root/active.json
+active_rebuild=$common_git_dir/dotfiles-rebuild/active.json
 
 umask 077
 dotfiles_acquire_operation_lock "$common_git_dir" "$EUID" "$(id -g)" || \
   die 'failed to acquire the dotfiles operation lock'
+if [[ $operation != status && ( -e $active_rebuild || -L $active_rebuild ) ]]; then
+  die 'an active rebuild transaction blocks SOPS enrollment changes; resume or recover it first'
+fi
 if [[ ! -e $transaction_root ]]; then
   mkdir -m 0700 -- "$transaction_root"
 fi

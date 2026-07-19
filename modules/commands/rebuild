@@ -2,12 +2,21 @@ set -euo pipefail
 
 @operationLockFunctions@
 
+@rebuildReceiptFunctions@
+
 usage() {
   cat <<'USAGE'
-usage: dotfiles-rebuild [--plan]
+usage:
+  dotfiles-rebuild
+  dotfiles-rebuild --plan
+  dotfiles-rebuild --resume TRANSACTION_ID
+  dotfiles-rebuild --first-boot TRANSACTION_ID
+  dotfiles-rebuild --rollback TRANSACTION_ID
+  dotfiles-rebuild --status
 
-Build and verify one immutable flake snapshot, show the system diff and activation effect,
-then apply the pre-built candidate. With --plan, stop before privileged activation.
+Build and verify one immutable flake snapshot, then apply the pre-built candidate. A persistent
+receipt records activation and verification separately. Restart-required transactions remain
+active until --resume verifies the candidate. --rollback restores the recorded previous system.
 USAGE
 }
 
@@ -18,44 +27,256 @@ die() {
   exit "$status"
 }
 
-plan_only=0
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --plan)
-      plan_only=1
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "unknown argument: $1" >&2
-      usage >&2
-      exit 2
-      ;;
-  esac
-  shift
-done
+mode=apply
+transaction_argument=
+if (( $# == 1 )) && [[ $1 == --plan ]]; then
+  mode=plan
+elif (( $# == 1 )) && [[ $1 == --status ]]; then
+  mode=status
+elif (( $# == 2 )) && [[ $1 == --resume ]]; then
+  mode=resume
+  transaction_argument=$2
+elif (( $# == 2 )) && [[ $1 == --first-boot ]]; then
+  mode=first-boot
+  transaction_argument=$2
+elif (( $# == 2 )) && [[ $1 == --rollback ]]; then
+  mode=rollback
+  transaction_argument=$2
+elif (( $# == 1 )) && [[ $1 == -h || $1 == --help ]]; then
+  usage
+  exit 0
+elif (( $# != 0 )); then
+  usage >&2
+  exit 2
+fi
 
 if [[ $EUID -eq 0 && ${DOTFILES_REBUILD_ALLOW_ROOT:-0} != 1 ]]; then
   die 2 "run dotfiles-rebuild as the regular user; only activation is elevated"
 fi
 
 dotfiles="@dotfilesDir@"
+nix_store_dir="@nixStoreDir@"
+nix_gc_auto_roots_dir="@nixGcAutoRootDir@"
+configured_user="@username@"
+boot_id_file="@bootIdFile@"
 flake="git+file://$dotfiles"
+transaction_user=$(id -un)
+[[ $transaction_user == "$configured_user" ]] || \
+  die 2 "run dotfiles-rebuild as configured user $configured_user"
 common_git_dir=$(git -C "$dotfiles" rev-parse --path-format=absolute --git-common-dir) || \
   die 2 "failed to resolve the Git common directory"
 dotfiles_acquire_operation_lock "$common_git_dir" "$EUID" "$(id -g)" || \
   die 1 "failed to acquire the dotfiles operation lock"
 
+state_root=$common_git_dir/dotfiles-rebuild
+active_receipt=$state_root/active.json
 active_enrollment=$common_git_dir/dotfiles-sops-enroll/active.json
-if [[ -e $active_enrollment || -L $active_enrollment ]]; then
-  [[ ! -L $active_enrollment && -f $active_enrollment ]] || \
-    die 1 "the SOPS enrollment marker must be a regular file"
-  [[ $(stat -c '%u|%a|%h' -- "$active_enrollment") == "$EUID|600|1" ]] || \
-    die 1 "the SOPS enrollment marker has invalid owner, mode, or link count"
-  marker=$(cat -- "$active_enrollment")
-  # shellcheck disable=SC2016 # worktree is a jq variable.
+state_root_exists=0
+if [[ -e $state_root || -L $state_root ]]; then
+  dotfiles_rebuild_validate_state_root "$state_root" "$EUID" "$(id -g)" || \
+    die 2 "rebuild receipt storage is invalid"
+  state_root_exists=1
+fi
+active_exists=0
+if [[ -e $active_receipt || -L $active_receipt ]]; then
+  active_exists=1
+fi
+
+if [[ $mode == status ]]; then
+  if [[ $active_exists -eq 0 ]]; then
+    echo '{"state":"idle"}'
+    exit 0
+  fi
+  dotfiles_rebuild_read_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" || \
+    die 2 "the active rebuild receipt is invalid"
+  exit 0
+fi
+
+case $mode in
+  apply | plan)
+    if [[ $active_exists -eq 1 ]]; then
+      active=$(dotfiles_rebuild_read_active_receipt \
+        "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
+        die 2 "the active rebuild receipt is invalid"
+      active_id=$(jq -r '.transactionId' <<< "$active")
+      active_state=$(jq -r '.state' <<< "$active")
+      die 1 "active rebuild transaction $active_id ($active_state) blocks a new build; run --resume or --rollback"
+    fi
+    ;;
+  resume | first-boot | rollback)
+    [[ $transaction_argument =~ ^[0-9a-f]{32}$ ]] || die 2 "transaction ID must contain 32 lowercase hexadecimal characters"
+    [[ $active_exists -eq 1 ]] || die 2 "there is no active rebuild transaction"
+    active=$(dotfiles_rebuild_read_active_receipt \
+      "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
+      die 2 "the active rebuild receipt is invalid"
+    [[ $(jq -r '.transactionId' <<< "$active") == "$transaction_argument" ]] || \
+      die 2 "the active rebuild transaction does not match $transaction_argument"
+    ;;
+esac
+
+if [[ $mode == apply && $state_root_exists -eq 1 ]]; then
+  dotfiles_rebuild_cleanup_orphan_gc_roots \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" || \
+    die 1 "failed to clean terminal or orphan rebuild GC roots"
+fi
+
+now() {
+  date --utc --iso-8601=seconds
+}
+
+boot_instance() {
+  local kernel_boot_id userspace_timestamp
+  kernel_boot_id=$(cat -- "$boot_id_file") || return 1
+  userspace_timestamp=$(systemctl --system show --property=UserspaceTimestampMonotonic --value) || return 1
+  [[ $kernel_boot_id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 1
+  [[ $userspace_timestamp =~ ^[1-9][0-9]*$ ]] || return 1
+  jq -cn \
+    --arg kernelBootId "$kernel_boot_id" \
+    --arg userspaceTimestampMonotonic "$userspace_timestamp" \
+    '{kernelBootId: $kernelBootId, userspaceTimestampMonotonic: $userspaceTimestampMonotonic}'
+}
+
+same_boot_instance() {
+  local left=$1 right=$2
+  [[ $(jq -r '.kernelBootId' <<< "$left") == $(jq -r '.kernelBootId' <<< "$right") &&
+    $(jq -r '.userspaceTimestampMonotonic' <<< "$left") == \
+      $(jq -r '.userspaceTimestampMonotonic' <<< "$right") ]]
+}
+
+powershell_quote() {
+  local value=$1
+  value=${value//\'/\'\'}
+  printf "'%s'" "$value"
+}
+
+receipt_read() {
+  dotfiles_rebuild_read_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user"
+}
+
+receipt_update() {
+  dotfiles_rebuild_update_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" "$@" || \
+    die 1 "failed to update the active rebuild receipt"
+}
+
+temporary_gc_roots=
+cleanup_temporary_gc_roots() {
+  if [[ -n $temporary_gc_roots && -d $temporary_gc_roots && ! -L $temporary_gc_roots ]]; then
+    rm -r -- "$temporary_gc_roots"
+  fi
+}
+
+runtime_snapshot() {
+  local current booted profile generation
+  current=$(readlink -f -- /run/current-system) || return 1
+  booted=$(readlink -f -- /run/booted-system) || return 1
+  profile=$(readlink -f -- /nix/var/nix/profiles/system) || return 1
+  for generation in "$current" "$booted" "$profile"; do
+    [[ $generation == "$nix_store_dir/"* && -d $generation ]] || return 1
+  done
+  jq -cn \
+    --arg current "$current" \
+    --arg booted "$booted" \
+    --arg profile "$profile" \
+    '{current: $current, booted: $booted, profile: $profile}'
+}
+
+same_runtime_snapshot() {
+  local expected=$1 observed=$2
+  [[ $(jq -cS . <<< "$expected") == "$(jq -cS . <<< "$observed")" ]]
+}
+
+abort_runtime_drift() {
+  local direction=$1 point=$2 expected=$3 observed=$4 timestamp transaction_id
+  timestamp=$(now)
+  receipt_update \
+    --arg direction "$direction" \
+    --arg point "$point" \
+    --argjson expected "$expected" \
+    --argjson observed "$observed" \
+    --arg timestamp "$timestamp" '
+      .state = "aborted" |
+      .abort = {
+        direction: $direction,
+        point: $point,
+        expected: $expected,
+        observed: $observed
+      } |
+      .failureStage = "runtime-drift" |
+      .updatedAt = $timestamp |
+      .finishedAt = $timestamp
+    '
+  transaction_id=$(jq -r '.transactionId' "$active_receipt")
+  dotfiles_rebuild_archive_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" "$transaction_id" || \
+    die 1 "failed to archive the aborted rebuild receipt"
+  dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
+    die 1 "failed to remove aborted rebuild GC roots"
+  case $point in
+    receipt-publication)
+      die 2 "runtime generation changed after publishing the rebuild receipt; no activation was attempted"
+      ;;
+    intent-publication)
+      die 2 "runtime generation changed before publishing activation intent; no activation was attempted"
+      ;;
+    activation-handoff)
+      die 2 "runtime generation changed at activation handoff; no activation was attempted"
+      ;;
+    *) die 2 "runtime generation changed at an unknown activation boundary" ;;
+  esac
+}
+
+assert_activation_baseline() {
+  local direction=$1 point=$2 expected=$3 observed
+  observed=$(runtime_snapshot) || die 2 "failed to resolve runtime generation at activation handoff"
+  same_runtime_snapshot "$expected" "$observed" || \
+    abort_runtime_drift "$direction" "$point" "$expected" "$observed"
+}
+
+activation_snapshot_is_owned() {
+  local action=$1 target=$2 persisted=$3 observed=$4
+  local persisted_current persisted_booted persisted_profile
+  local observed_current observed_booted observed_profile
+  persisted_current=$(jq -r '.current' <<< "$persisted")
+  persisted_booted=$(jq -r '.booted' <<< "$persisted")
+  persisted_profile=$(jq -r '.profile' <<< "$persisted")
+  observed_current=$(jq -r '.current' <<< "$observed")
+  observed_booted=$(jq -r '.booted' <<< "$observed")
+  observed_profile=$(jq -r '.profile' <<< "$observed")
+
+  case $action in
+    switch)
+      [[ $observed_booted == "$persisted_booted" &&
+        ( $observed_current == "$persisted_current" || $observed_current == "$target" ) &&
+        ( $observed_profile == "$persisted_profile" || $observed_profile == "$target" ) ]]
+      ;;
+    boot)
+      if [[ $observed_current == "$target" && $observed_booted == "$target" &&
+        $observed_profile == "$target" ]]; then
+        return 0
+      fi
+      [[ $observed_current == "$persisted_current" &&
+        $observed_booted == "$persisted_booted" &&
+        ( $observed_profile == "$persisted_profile" || $observed_profile == "$target" ) ]]
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+read_enrollment_marker() {
+  local marker
+  [[ -e $active_enrollment || -L $active_enrollment ]] || return 3
+  [[ ! -L $active_enrollment && -f $active_enrollment ]] || {
+    echo "the SOPS enrollment marker must be a regular file" >&2
+    return 1
+  }
+  [[ $(stat -c '%u|%a|%h' -- "$active_enrollment") == "$EUID|600|1" ]] || {
+    echo "the SOPS enrollment marker has invalid owner, mode, or link count" >&2
+    return 1
+  }
+  marker=$(cat -- "$active_enrollment") || return 1
   jq -e \
     --arg worktree "$dotfiles" '
       .version == 2 and
@@ -65,110 +286,837 @@ if [[ -e $active_enrollment || -L $active_enrollment ]]; then
       (.phase | IN("staging", "prepared", "generation-pending", "generation-checking")) and
       all(.oldConfigHash, .oldSecretsHash, .newConfigHash, .newSecretsHash;
         . == null or (type == "string" and test("^[0-9a-f]{64}$")))
-    ' <<< "$marker" >/dev/null || die 1 "the SOPS enrollment marker is invalid"
-  [[ $(jq -r '.phase' <<< "$marker") == generation-pending ]] || \
-    die 1 "an enrollment transaction blocks normal rebuild"
-  new_config_hash=$(jq -er '.newConfigHash | select(type == "string")' <<< "$marker")
-  new_secrets_hash=$(jq -er '.newSecretsHash | select(type == "string")' <<< "$marker")
-  [[ $(sha256sum "$dotfiles/secrets/.sops.yaml" | cut -d ' ' -f 1) == "$new_config_hash" &&
-    $(sha256sum "$dotfiles/secrets/secrets.yaml" | cut -d ' ' -f 1) == "$new_secrets_hash" ]] || \
-    die 1 "the prepared SOPS files do not match the enrollment marker"
-  mapfile -t enrollment_changes < <(git -C "$dotfiles" diff --name-only | sort)
-  [[ ${#enrollment_changes[@]} -eq 2 &&
-    ${enrollment_changes[0]} == secrets/.sops.yaml &&
-    ${enrollment_changes[1]} == secrets/secrets.yaml ]] || \
-    die 1 "only the prepared SOPS files may differ during enrollment rebuild"
-  git -C "$dotfiles" diff --cached --quiet HEAD || \
-    die 1 "staged changes block enrollment rebuild"
-  git -C "$dotfiles" diff --check -- secrets/.sops.yaml secrets/secrets.yaml || \
-    die 1 "the prepared SOPS patch is invalid"
-  echo "==> SOPS enrollment generation"
-fi
+    ' <<< "$marker" >/dev/null || return 1
+  printf '%s\n' "$marker"
+}
 
-# untracked file は Git flake snapshot から見えず、無言で配備から落ちる
-untracked=$(git -C "$dotfiles" ls-files --others --exclude-standard)
-if [[ -n $untracked ]]; then
-  printf '%s\n' "$untracked" >&2
-  die 1 "untracked files block the flake snapshot; run: git -C $dotfiles add -A"
-fi
+validate_enrollment_binding() {
+  local receipt expected marker_status marker actual phase
+  receipt=$(receipt_read) || return 1
+  expected=$(jq -r '.sopsEnrollmentTransactionId // ""' <<< "$receipt")
+  set +e
+  marker=$(read_enrollment_marker)
+  marker_status=$?
+  set -e
+  if [[ -z $expected ]]; then
+    [[ $marker_status -eq 3 ]] || {
+      echo "an unbound SOPS enrollment marker blocks rebuild recovery" >&2
+      return 1
+    }
+    return 0
+  fi
+  [[ $marker_status -eq 0 ]] || {
+    echo "the rebuild receipt requires its active SOPS enrollment marker" >&2
+    return 1
+  }
+  actual=$(jq -r '.transactionId' <<< "$marker")
+  phase=$(jq -r '.phase' <<< "$marker")
+  [[ $actual == "$expected" && $phase == generation-pending ]] || {
+    echo "the active SOPS enrollment marker does not match the rebuild receipt" >&2
+    return 1
+  }
+}
 
-echo "==> snapshot"
-source_path=$(
-  nix flake archive --json --no-write-lock-file "$flake" \
-    | jq --exit-status --raw-output '.path | select(type == "string" and startswith("/nix/store/"))'
-)
-[[ -n $source_path ]] || die 2 "flake archive did not return a store path"
-source_flake="path:$source_path"
+ensure_receipt_roots() {
+  local receipt transaction_id
+  receipt=$(receipt_read) || die 1 "failed to read the active rebuild receipt"
+  transaction_id=$(jq -r '.transactionId' <<< "$receipt")
+  dotfiles_rebuild_ensure_gc_roots \
+    "$state_root" "$transaction_id" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+    source "$(jq -r '.source' <<< "$receipt")" \
+    candidate "$(jq -r '.candidate' <<< "$receipt")" \
+    recovery-target "$(jq -r '.recoveryTarget' <<< "$receipt")" \
+    previous-booted "$(jq -r '.previous.booted' <<< "$receipt")" \
+    displaced-profile "$(jq -r '.previous.displacedProfile' <<< "$receipt")" || \
+    die 1 "failed to protect rebuild transaction store paths from garbage collection"
+}
 
-echo "==> check"
-nix flake check --no-write-lock-file --log-format internal-json -v "$source_flake" |& nom --json
-
-echo "==> build"
-candidate=$(
-  nix build --no-link --print-out-paths --no-write-lock-file \
-    "$source_flake#nixosConfigurations.nixos.config.system.build.toplevel"
-)
-[[ $candidate != *$'\n'* && -d $candidate ]] || die 2 "candidate build did not return one system path"
-
-echo "==> diff"
-nvd diff /run/current-system "$candidate"
-
-if ! effect=$(dotfiles-wsl-restart-required --plan "$candidate"); then
-  die 2 "failed to classify the candidate activation effect"
-fi
-
-case $effect in
-  switch | switch-restart)
-    action=switch
-    ;;
-  boot-restart | boot-two-stage)
-    action=boot
-    ;;
-  *)
-    die 2 "unknown activation effect: $effect"
-    ;;
-esac
-
-printf '\nCandidate: %s\nEffect:    %s\nAction:    %s\n' "$candidate" "$effect" "$action"
-
-if [[ $plan_only -eq 1 ]]; then
-  echo "Plan complete; no system profile or runtime state was changed."
-  exit 0
-fi
-
-echo "==> apply"
-nixos-rebuild "$action" --sudo --no-reexec --store-path "$candidate" -L
-
-case $effect in
-  switch)
-    "$candidate/sw/bin/dotfiles-doctor"
-    ;;
-  switch-restart | boot-restart)
-    cat <<'MSG'
-
-The candidate is installed. Apply its WSL cold-start state from PowerShell:
-
-  wsl -t NixOS
-  wsl -d NixOS
-
-Then run:
-
-  dotfiles-doctor
+print_recovery() {
+  local receipt transaction_id helper previous
+  receipt=$(receipt_read) || return 1
+  transaction_id=$(jq -r '.transactionId' <<< "$receipt")
+  helper=$(jq -r '.helperPath' <<< "$receipt")
+  previous=$(jq -r '.recoveryTarget' <<< "$receipt")
+  cat >&2 <<MSG
+Recovery target: $previous
+Retry the immutable candidate:
+  $helper --resume $transaction_id
+Restore the recorded previous system:
+  $helper --rollback $transaction_id
 MSG
+}
+
+print_restart_instructions() {
+  local direction=$1 effect=$2 receipt transaction_id distro helper expected_user
+  local quoted_distro quoted_helper quoted_transaction quoted_user
+  receipt=$(receipt_read) || die 1 "failed to read restart transaction"
+  transaction_id=$(jq -r '.transactionId' <<< "$receipt")
+  distro=$(jq -r '.distro' <<< "$receipt")
+  helper=$(jq -r '.helperPath' <<< "$receipt")
+  if [[ $direction == forward ]]; then
+    expected_user=$(jq -r '.candidateDefaultUser' <<< "$receipt")
+  else
+    expected_user=$(jq -r '.previousDefaultUser' <<< "$receipt")
+  fi
+  quoted_distro=$(powershell_quote "$distro")
+  quoted_helper=$(powershell_quote "$helper")
+  quoted_transaction=$(powershell_quote "$transaction_id")
+  quoted_user=$(powershell_quote "$expected_user")
+
+  if [[ $direction == forward ]]; then
+    echo "The candidate is installed and transaction $transaction_id is restart-pending."
+  else
+    echo "The previous system is installed and transaction $transaction_id is rollback-restart-pending."
+  fi
+  echo "Run the following from PowerShell; the final command resumes and verifies this exact receipt:"
+  echo
+  printf '  wsl.exe --terminate %s\n' "$quoted_distro"
+  if [[ $effect == boot-two-stage ]]; then
+    printf '  wsl.exe --distribution %s --user root --exec /bin/true\n' "$quoted_distro"
+    printf '  wsl.exe --distribution %s --user %s --exec %s --first-boot %s\n' \
+      "$quoted_distro" "$quoted_user" "$quoted_helper" "$quoted_transaction"
+    printf '  wsl.exe --terminate %s\n' "$quoted_distro"
+  fi
+  printf '  wsl.exe --distribution %s --exec %s --resume %s\n' \
+    "$quoted_distro" "$quoted_helper" "$quoted_transaction"
+}
+
+finish_transaction() {
+  local direction=$1 transaction_id final_state timestamp
+  transaction_id=$(jq -r '.transactionId' <<< "$(receipt_read)")
+  timestamp=$(now)
+  if [[ $direction == forward ]]; then
+    final_state=complete
+  else
+    final_state=rolled-back
+  fi
+  receipt_update \
+    --arg state "$final_state" \
+    --arg timestamp "$timestamp" '
+      .state = $state |
+      .verification = {status: "succeeded", exitCode: 0} |
+      .failureStage = null |
+      .updatedAt = $timestamp |
+      .finishedAt = $timestamp
+    '
+  dotfiles_rebuild_archive_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" "$transaction_id" || \
+    die 1 "failed to archive completed rebuild receipt"
+  dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
+    die 1 "failed to remove completed rebuild GC roots"
+  printf 'Rebuild transaction %s: %s\n' "$transaction_id" "$final_state"
+}
+
+verification_failed() {
+  local direction=$1 stage=$2 exit_code=$3 message=$4 state timestamp
+  timestamp=$(now)
+  if [[ $direction == forward ]]; then
+    state=verification-failed
+  else
+    state=rollback-verification-failed
+  fi
+  receipt_update \
+    --arg state "$state" \
+    --arg stage "$stage" \
+    --arg timestamp "$timestamp" \
+    --argjson exitCode "$exit_code" '
+      .state = $state |
+      .verification = {status: "failed", exitCode: $exitCode} |
+      .failureStage = $stage |
+      .updatedAt = $timestamp
+    '
+  echo "FATAL: $message" >&2
+  if [[ $stage == generation || $stage == cold-start || $stage == user ]]; then
+    receipt=$(receipt_read)
+    if [[ $direction == forward ]]; then
+      retry_effect=$(jq -r '.effect' <<< "$receipt")
+    else
+      retry_effect=$(jq -r '.rollback.effect' <<< "$receipt")
+    fi
+    print_restart_instructions "$direction" "$retry_effect" >&2
+  fi
+  print_recovery
+  if [[ $stage == doctor ]]; then
+    return 5
+  fi
+  return 2
+}
+
+observe_first_boot() {
+  local direction=$1 target=$2 expected_user=$3 receipt state effect
+  local before_boot current_boot current profile booted timestamp next_state
+  receipt=$(receipt_read) || die 1 "failed to read the active rebuild receipt"
+  state=$(jq -r '.state' <<< "$receipt")
+  if [[ $direction == forward ]]; then
+    effect=$(jq -r '.effect' <<< "$receipt")
+    before_boot=$(jq -c '.bootInstances.beforeApply' <<< "$receipt")
+    next_state=first-boot-observed
+    [[ $state == restart-pending ]] || die 2 "first boot cannot be recorded from state $state"
+  else
+    effect=$(jq -r '.rollback.effect' <<< "$receipt")
+    before_boot=$(jq -c '.rollback.bootInstances.beforeApply' <<< "$receipt")
+    next_state=rollback-first-boot-observed
+    [[ $state == rollback-restart-pending ]] || die 2 "rollback first boot cannot be recorded from state $state"
+  fi
+  [[ $effect == boot-two-stage ]] || die 2 "first boot is only valid for a two-stage WSL transition"
+  [[ ${WSL_DISTRO_NAME:-} == "$(jq -r '.distro' <<< "$receipt")" ]] || \
+    die 2 "first boot is running in the wrong WSL distribution"
+  [[ $(id -un) == "$expected_user" ]] || \
+    die 2 "first boot observer must run as $expected_user"
+
+  current=$(readlink -f -- /run/current-system 2>/dev/null || true)
+  profile=$(readlink -f -- /nix/var/nix/profiles/system 2>/dev/null || true)
+  booted=$(readlink -f -- /run/booted-system 2>/dev/null || true)
+  [[ $current == "$target" && $profile == "$target" && $booted == "$target" ]] || \
+    die 3 "the first boot has not converged current/profile/booted to $target"
+  current_boot=$(boot_instance) || die 2 "failed to identify the first systemd manager instance"
+  if same_boot_instance "$current_boot" "$before_boot"; then
+    die 3 "the first WSL restart has not created a new systemd manager instance"
+  fi
+
+  timestamp=$(now)
+  if [[ $direction == forward ]]; then
+    receipt_update \
+      --arg state "$next_state" \
+      --argjson boot "$current_boot" \
+      --arg timestamp "$timestamp" '
+        .state = $state |
+        .bootInstances.firstBoot = $boot |
+        .updatedAt = $timestamp
+      '
+  else
+    receipt_update \
+      --arg state "$next_state" \
+      --argjson boot "$current_boot" \
+      --arg timestamp "$timestamp" '
+        .state = $state |
+        .rollback.bootInstances.firstBoot = $boot |
+        .updatedAt = $timestamp
+      '
+  fi
+  echo "First boot instance recorded: $current_boot"
+  echo "Terminate this distribution once more, then run the receipt's --resume command."
+  return 3
+}
+
+restart_wait() {
+  local direction=$1 effect=$2 message=$3 receipt state timestamp
+  receipt=$(receipt_read) || die 1 "failed to read restart-pending receipt"
+  if [[ $direction == forward ]]; then
+    if [[ $effect == boot-two-stage ]] && jq -e '.bootInstances.firstBoot != null' <<< "$receipt" >/dev/null; then
+      state=first-boot-observed
+    else
+      state=restart-pending
+    fi
+  elif [[ $effect == boot-two-stage ]] && jq -e '.rollback.bootInstances.firstBoot != null' <<< "$receipt" >/dev/null; then
+    state=rollback-first-boot-observed
+  else
+    state=rollback-restart-pending
+  fi
+  timestamp=$(now)
+  receipt_update \
+    --arg state "$state" \
+    --arg timestamp "$timestamp" '
+      .state = $state |
+      .verification = {status: "pending", exitCode: null} |
+      .failureStage = null |
+      .updatedAt = $timestamp
+    '
+  echo "PENDING: $message" >&2
+  print_restart_instructions "$direction" "$effect" >&2
+  return 3
+}
+
+verify_target() {
+  local direction=$1 target=$2 expected_user=$3 target_effect=$4 state timestamp receipt expected_distro
+  local actual_current actual_profile actual_booted observed_effect doctor_status=0
+  local before_boot first_boot current_boot
+
+  receipt=$(receipt_read) || die 1 "failed to read verification receipt"
+  expected_distro=$(jq -r '.distro' <<< "$receipt")
+  [[ ${WSL_DISTRO_NAME:-} == "$expected_distro" ]] || \
+    verification_failed "$direction" distro 20 "resume is running in ${WSL_DISTRO_NAME:-<none>}, expected $expected_distro"
+
+  actual_current=$(readlink -f -- /run/current-system 2>/dev/null || true)
+  actual_profile=$(readlink -f -- /nix/var/nix/profiles/system 2>/dev/null || true)
+  actual_booted=$(readlink -f -- /run/booted-system 2>/dev/null || true)
+  if [[ $actual_current != "$target" || $actual_profile != "$target" ]]; then
+    if [[ $target_effect != switch ]]; then
+      restart_wait "$direction" "$target_effect" "current/profile generation has not converged to $target"
+    fi
+    verification_failed "$direction" generation 21 "current/profile generation has not converged to $target"
+  fi
+  if [[ $(id -un) != "$expected_user" ]]; then
+    if [[ $target_effect != switch ]]; then
+      restart_wait "$direction" "$target_effect" "WSL default user has not converged to $expected_user"
+    fi
+    verification_failed "$direction" user 22 "resume is running as $(id -un), expected $expected_user"
+  fi
+
+  if [[ $target_effect != switch ]]; then
+    [[ $actual_booted == "$target" ]] || \
+      restart_wait "$direction" "$target_effect" "booted generation has not converged to $target"
+    current_boot=$(boot_instance) || \
+      verification_failed "$direction" boot-instance 26 "failed to identify the resumed systemd manager instance"
+    if [[ $direction == forward ]]; then
+      before_boot=$(jq -c '.bootInstances.beforeApply' <<< "$receipt")
+      first_boot=$(jq -c '.bootInstances.firstBoot // empty' <<< "$receipt")
+    else
+      before_boot=$(jq -c '.rollback.bootInstances.beforeApply' <<< "$receipt")
+      first_boot=$(jq -c '.rollback.bootInstances.firstBoot // empty' <<< "$receipt")
+    fi
+    if same_boot_instance "$current_boot" "$before_boot"; then
+      restart_wait "$direction" "$target_effect" "WSL has not started a new systemd manager instance"
+    fi
+    if [[ $target_effect == boot-two-stage ]]; then
+      [[ -n $first_boot ]] || \
+        restart_wait "$direction" "$target_effect" "the first WSL boot has not been recorded"
+      if same_boot_instance "$current_boot" "$first_boot"; then
+        restart_wait "$direction" "$target_effect" "the second WSL boot has not been observed"
+      fi
+    fi
+  fi
+
+  if ! observed_effect=$(dotfiles-wsl-restart-required \
+    --plan --booted-system "$actual_booted" --current-system "$actual_current" "$target"); then
+    verification_failed "$direction" cold-start 23 "failed to classify the resumed generation"
+  fi
+  if [[ $observed_effect != switch ]]; then
+    if [[ $target_effect != switch ]]; then
+      restart_wait "$direction" "$target_effect" "WSL cold-start transition is incomplete: $observed_effect"
+    fi
+    verification_failed "$direction" cold-start 24 "WSL cold-start transition is incomplete: $observed_effect"
+  fi
+
+  if [[ $direction == forward ]]; then
+    state=verifying
+  else
+    state=rollback-verifying
+  fi
+  timestamp=$(now)
+  receipt_update \
+    --arg state "$state" \
+    --arg timestamp "$timestamp" '
+      .state = $state |
+      .verification = {status: "pending", exitCode: null} |
+      .failureStage = null |
+      .updatedAt = $timestamp
+    '
+
+  set +e
+  "$target/sw/bin/dotfiles-doctor"
+  doctor_status=$?
+  set -e
+  [[ $doctor_status -eq 0 ]] || \
+    verification_failed "$direction" doctor "$doctor_status" "dotfiles-doctor failed for $target"
+
+  finish_transaction "$direction"
+}
+
+activation_failed() {
+  local direction=$1 exit_code=$2 state timestamp
+  timestamp=$(now)
+  if [[ $direction == forward ]]; then
+    state=activation-failed
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --argjson exitCode "$exit_code" '
+        .state = $state |
+        .activation = {status: "failed", exitCode: $exitCode} |
+        .failureStage = "activation" |
+        .updatedAt = $timestamp
+      '
+  else
+    state=rollback-activation-failed
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --argjson exitCode "$exit_code" '
+        .state = $state |
+        .rollback.activation = {status: "failed", exitCode: $exitCode} |
+        .failureStage = "rollback-activation" |
+        .updatedAt = $timestamp
+      '
+  fi
+  echo "FATAL: nixos-rebuild activation failed with status $exit_code" >&2
+  print_recovery
+  return 4
+}
+
+activate_target() {
+  local direction=$1 target=$2 effect=$3 action=$4 expected_user=$5 baseline=$6
+  local state pending_state success_state timestamp activation_status=0
+  assert_activation_baseline "$direction" intent-publication "$baseline"
+  if [[ $direction == forward ]]; then
+    state=apply-intent
+    pending_state=restart-pending
+    success_state=verifying
+    timestamp=$(now)
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --argjson baseline "$baseline" '
+        .state = $state |
+        .activationBaseline = $baseline |
+        .activation = {status: "pending", exitCode: null} |
+        .failureStage = null |
+        .updatedAt = $timestamp
+      '
+  else
+    state=rollback-intent
+    pending_state=rollback-restart-pending
+    success_state=rollback-verifying
+    timestamp=$(now)
+    receipt_update \
+      --arg state "$state" \
+      --arg timestamp "$timestamp" \
+      --argjson baseline "$baseline" '
+        .state = $state |
+        .rollback.activationBaseline = $baseline |
+        .rollback.activation = {status: "pending", exitCode: null} |
+        .failureStage = null |
+        .updatedAt = $timestamp
+      '
+  fi
+
+  assert_activation_baseline "$direction" activation-handoff "$baseline"
+  echo "==> $direction activation"
+  set +e
+  @nixosRebuild@ "$action" --sudo --no-reexec --store-path "$target" -L
+  activation_status=$?
+  set -e
+  [[ $activation_status -eq 0 ]] || activation_failed "$direction" "$activation_status"
+
+  if [[ $effect != switch ]]; then
+    success_state=$pending_state
+  fi
+  timestamp=$(now)
+  if [[ $direction == forward ]]; then
+    receipt_update \
+      --arg state "$success_state" \
+      --arg timestamp "$timestamp" '
+        .state = $state |
+        .activation = {status: "succeeded", exitCode: 0} |
+        .verification = {status: "pending", exitCode: null} |
+        .failureStage = null |
+        .updatedAt = $timestamp
+      '
+  else
+    receipt_update \
+      --arg state "$success_state" \
+      --arg timestamp "$timestamp" '
+        .state = $state |
+        .rollback.activation = {status: "succeeded", exitCode: 0} |
+        .verification = {status: "pending", exitCode: null} |
+        .failureStage = null |
+        .updatedAt = $timestamp
+      '
+  fi
+
+  if [[ $effect == switch ]]; then
+    verify_target "$direction" "$target" "$expected_user" "$effect"
+  else
+    print_restart_instructions "$direction" "$effect"
+    return 3
+  fi
+}
+
+resume_activation() {
+  local direction=$1 target=$2 effect=$3 action=$4 expected_user=$5
+  local current profile state timestamp baseline persisted_baseline
+  baseline=$(runtime_snapshot) || die 2 "failed to resolve runtime generation before resuming activation"
+  current=$(jq -r '.current' <<< "$baseline")
+  profile=$(jq -r '.profile' <<< "$baseline")
+
+  if [[ $direction == forward ]]; then
+    persisted_baseline=$(jq -c '.activationBaseline' "$active_receipt")
+  else
+    persisted_baseline=$(jq -c '.rollback.activationBaseline' "$active_receipt")
+  fi
+  activation_snapshot_is_owned "$action" "$target" "$persisted_baseline" "$baseline" ||
+    abort_runtime_drift "$direction" activation-handoff "$persisted_baseline" "$baseline"
+
+  if [[ ( $action == switch && $current == "$target" && $profile == "$target" ) ||
+    ( $action == boot && $profile == "$target" ) ]]; then
+    if [[ $direction == forward ]]; then
+      if [[ $effect == switch ]]; then
+        state=verifying
+      else
+        state=restart-pending
+      fi
+    elif [[ $effect == switch ]]; then
+      state=rollback-verifying
+    else
+      state=rollback-restart-pending
+    fi
+    timestamp=$(now)
+    if [[ $direction == forward ]]; then
+      receipt_update \
+        --arg state "$state" \
+        --arg timestamp "$timestamp" '
+          .state = $state |
+          .activation = {status: "succeeded", exitCode: 0} |
+          .verification = {status: "pending", exitCode: null} |
+          .failureStage = null |
+          .updatedAt = $timestamp
+        '
+    else
+      receipt_update \
+        --arg state "$state" \
+        --arg timestamp "$timestamp" '
+          .state = $state |
+          .rollback.activation = {status: "succeeded", exitCode: 0} |
+          .verification = {status: "pending", exitCode: null} |
+          .failureStage = null |
+          .updatedAt = $timestamp
+        '
+    fi
+    verify_target "$direction" "$target" "$expected_user" "$effect"
+    return $?
+  fi
+
+  activate_target "$direction" "$target" "$effect" "$action" "$expected_user" "$baseline"
+}
+
+if [[ $mode == apply || $mode == plan ]]; then
+  sops_enrollment_transaction_id=
+  if [[ -e $active_enrollment || -L $active_enrollment ]]; then
+    marker=$(read_enrollment_marker) || die 1 "the SOPS enrollment marker is invalid"
+    [[ $(jq -r '.phase' <<< "$marker") == generation-pending ]] || \
+      die 1 "an enrollment transaction blocks normal rebuild"
+    sops_enrollment_transaction_id=$(jq -r '.transactionId' <<< "$marker")
+    new_config_hash=$(jq -er '.newConfigHash | select(type == "string")' <<< "$marker")
+    new_secrets_hash=$(jq -er '.newSecretsHash | select(type == "string")' <<< "$marker")
+    [[ $(sha256sum "$dotfiles/secrets/.sops.yaml" | cut -d ' ' -f 1) == "$new_config_hash" &&
+      $(sha256sum "$dotfiles/secrets/secrets.yaml" | cut -d ' ' -f 1) == "$new_secrets_hash" ]] || \
+      die 1 "the prepared SOPS files do not match the enrollment marker"
+    mapfile -t enrollment_changes < <(git -C "$dotfiles" diff --name-only | sort)
+    [[ ${#enrollment_changes[@]} -eq 2 &&
+      ${enrollment_changes[0]} == secrets/.sops.yaml &&
+      ${enrollment_changes[1]} == secrets/secrets.yaml ]] || \
+      die 1 "only the prepared SOPS files may differ during enrollment rebuild"
+    git -C "$dotfiles" diff --cached --quiet HEAD || \
+      die 1 "staged changes block enrollment rebuild"
+    git -C "$dotfiles" diff --check -- secrets/.sops.yaml secrets/secrets.yaml || \
+      die 1 "the prepared SOPS patch is invalid"
+    echo "==> SOPS enrollment generation"
+  fi
+
+  # untracked file は Git flake snapshot から見えず、無言で配備から落ちる
+  untracked=$(git -C "$dotfiles" ls-files --others --exclude-standard)
+  if [[ -n $untracked ]]; then
+    printf '%s\n' "$untracked" >&2
+    die 1 "untracked files block the flake snapshot; run: git -C $dotfiles add -A"
+  fi
+
+  temporary_gc_roots=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-rebuild-roots.XXXXXX")
+  chmod 0700 "$temporary_gc_roots"
+  trap cleanup_temporary_gc_roots EXIT
+
+  echo "==> snapshot"
+  source_path=$(
+    nix build --out-link "$temporary_gc_roots/source" \
+      --print-out-paths --no-write-lock-file "$flake#sourceSnapshot"
+  )
+  [[ $source_path != *$'\n'* && $source_path == "$nix_store_dir/"* && -d $source_path ]] || \
+    die 2 "source snapshot build did not return one store path"
+  [[ -L $temporary_gc_roots/source &&
+    $(readlink -f -- "$temporary_gc_roots/source") == "$source_path" ]] || \
+    die 1 "source snapshot build did not create its temporary GC root"
+  source_flake="path:$source_path"
+
+  echo "==> check"
+  nix flake check --no-write-lock-file --log-format internal-json -v "$source_flake" |& nom --json
+
+  echo "==> build"
+  candidate=$(
+    nix build --out-link "$temporary_gc_roots/candidate" \
+      --print-out-paths --no-write-lock-file \
+      "$source_flake#nixosConfigurations.nixos.config.system.build.toplevel"
+  )
+  [[ $candidate != *$'\n'* && $candidate == "$nix_store_dir/"* && -d $candidate ]] || \
+    die 2 "candidate build did not return one system path"
+  [[ -L $temporary_gc_roots/candidate &&
+    $(readlink -f -- "$temporary_gc_roots/candidate") == "$candidate" ]] || \
+    die 1 "candidate build did not create its temporary GC root"
+
+  previous_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system"
+  previous_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system"
+  previous_profile=$(readlink -f -- /nix/var/nix/profiles/system) || die 2 "failed to resolve system profile"
+  for generation in "$previous_current" "$previous_booted" "$previous_profile"; do
+    [[ $generation == "$nix_store_dir/"* && -d $generation ]] || \
+      die 2 "a previous generation is not a readable Nix store path: $generation"
+  done
+  previous_runtime=$(jq -cn \
+    --arg current "$previous_current" \
+    --arg booted "$previous_booted" \
+    --arg profile "$previous_profile" \
+    '{current: $current, booted: $booted, profile: $profile}')
+
+  echo "==> diff"
+  nvd diff "$previous_current" "$candidate"
+
+  if ! effect=$(dotfiles-wsl-restart-required \
+    --plan --booted-system "$previous_booted" --current-system "$previous_current" "$candidate"); then
+    die 2 "failed to classify the candidate activation effect"
+  fi
+  case $effect in
+    switch | switch-restart) action=switch ;;
+    boot-restart | boot-two-stage) action=boot ;;
+    *) die 2 "unknown activation effect: $effect" ;;
+  esac
+  printf '\nCandidate: %s\nEffect:    %s\nAction:    %s\n' "$candidate" "$effect" "$action"
+
+  candidate_user=$(dotfiles-wsl-restart-required --default-user "$candidate") || \
+    die 2 "failed to read candidate WSL default user"
+  previous_user=$(dotfiles-wsl-restart-required --default-user "$previous_current") || \
+    die 2 "failed to read previous WSL default user"
+  [[ $candidate_user == "$configured_user" ]] || \
+    die 2 "candidate WSL default user $candidate_user does not match configured user $configured_user"
+  [[ $previous_user == "$configured_user" ]] || \
+    die 2 "previous WSL default user $previous_user does not match configured user $configured_user"
+
+  if [[ $mode == plan ]]; then
+    cleanup_temporary_gc_roots
+    temporary_gc_roots=
+    trap - EXIT
+    echo "Plan complete; no system profile, runtime state, or rebuild receipt was changed."
+    exit 0
+  fi
+
+  [[ -n ${WSL_DISTRO_NAME:-} && $WSL_DISTRO_NAME != *$'\n'* ]] || \
+    die 2 "WSL_DISTRO_NAME must identify the running distribution"
+  observed_runtime=$(runtime_snapshot) || die 2 "failed to resolve runtime generation after planning"
+  same_runtime_snapshot "$previous_runtime" "$observed_runtime" || \
+    die 2 "runtime generation changed while planning the rebuild; retry from a stable state"
+
+  transaction_id=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
+  [[ $transaction_id =~ ^[0-9a-f]{32}$ ]] || die 2 "failed to create a rebuild transaction ID"
+  before_apply_boot=$(boot_instance) || die 2 "failed to identify the running systemd manager instance"
+  timestamp=$(now)
+  helper_path=$candidate/sw/bin/dotfiles-rebuild
+  [[ -x $helper_path ]] || die 2 "candidate does not contain its rebuild resume helper"
+
+  dotfiles_rebuild_prepare_state_root "$state_root" "$EUID" "$(id -g)" || \
+    die 1 "failed to prepare rebuild receipt storage"
+  dotfiles_rebuild_ensure_gc_roots \
+    "$state_root" "$transaction_id" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+    source "$source_path" \
+    candidate "$candidate" \
+    recovery-target "$previous_current" \
+    previous-booted "$previous_booted" \
+    displaced-profile "$previous_profile" || \
+    die 1 "failed to protect rebuild transaction store paths from garbage collection"
+  observed_runtime=$(runtime_snapshot) || die 2 "failed to resolve runtime generation before receipt publication"
+  if ! same_runtime_snapshot "$previous_runtime" "$observed_runtime"; then
+    dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
+      die 1 "failed to remove rebuild GC roots after runtime drift"
+    die 2 "runtime generation changed before publishing the rebuild receipt; retry from a stable state"
+  fi
+  receipt_json=$(jq -n \
+    --arg transactionId "$transaction_id" \
+    --arg worktree "$dotfiles" \
+    --arg source "$source_path" \
+    --arg candidate "$candidate" \
+    --arg helperPath "$helper_path" \
+    --arg previousCurrent "$previous_current" \
+    --arg previousBooted "$previous_booted" \
+    --arg previousProfile "$previous_profile" \
+    --arg effect "$effect" \
+    --arg action "$action" \
+    --arg distro "$WSL_DISTRO_NAME" \
+    --arg transactionUser "$transaction_user" \
+    --argjson transactionUid "$EUID" \
+    --arg candidateDefaultUser "$candidate_user" \
+    --arg previousDefaultUser "$previous_user" \
+    --arg sopsEnrollmentTransactionId "$sops_enrollment_transaction_id" \
+    --argjson beforeApplyBoot "$before_apply_boot" \
+    --argjson activationBaseline "$previous_runtime" \
+    --arg timestamp "$timestamp" '
+      {
+        schemaVersion: 2,
+        transactionId: $transactionId,
+        worktree: $worktree,
+        source: $source,
+        candidate: $candidate,
+        helperPath: $helperPath,
+        previous: {
+          running: $previousCurrent,
+          booted: $previousBooted,
+          displacedProfile: $previousProfile
+        },
+        recoveryTarget: $previousCurrent,
+        effect: $effect,
+        action: $action,
+        distro: $distro,
+        transactionUid: $transactionUid,
+        transactionUser: $transactionUser,
+        candidateDefaultUser: $candidateDefaultUser,
+        previousDefaultUser: $previousDefaultUser,
+        sopsEnrollmentTransactionId:
+          (if $sopsEnrollmentTransactionId == "" then null else $sopsEnrollmentTransactionId end),
+        bootInstances: {beforeApply: $beforeApplyBoot, firstBoot: null},
+        activationBaseline: $activationBaseline,
+        state: "prepared",
+        activation: {status: "pending", exitCode: null},
+        verification: {status: "pending", exitCode: null},
+        abort: null,
+        failureStage: null,
+        rollback: null,
+        startedAt: $timestamp,
+        updatedAt: $timestamp,
+        finishedAt: null
+      }
+    ')
+  if ! printf '%s\n' "$receipt_json" | dotfiles_rebuild_create_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user"; then
+    if [[ ! -e $active_receipt && ! -L $active_receipt ]]; then
+      dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
+        die 1 "failed to clean GC roots after receipt publication failure"
+    fi
+    die 1 "failed to create the active rebuild receipt"
+  fi
+  cleanup_temporary_gc_roots
+  temporary_gc_roots=
+  trap - EXIT
+  assert_activation_baseline forward receipt-publication "$previous_runtime"
+  activate_target forward "$candidate" "$effect" "$action" "$candidate_user" "$previous_runtime"
+  exit $?
+fi
+
+validate_enrollment_binding || die 2 "rebuild receipt and SOPS enrollment state do not match"
+ensure_receipt_roots
+active=$(receipt_read) || die 1 "failed to read the active rebuild receipt"
+state=$(jq -r '.state' <<< "$active")
+candidate=$(jq -r '.candidate' <<< "$active")
+candidate_user=$(jq -r '.candidateDefaultUser' <<< "$active")
+
+if [[ $mode == first-boot ]]; then
+  set +e
+  case $state in
+    restart-pending)
+      observe_first_boot forward "$candidate" "$candidate_user"
+      first_boot_status=$?
+      ;;
+    rollback-restart-pending)
+      previous=$(jq -r '.rollback.target' <<< "$active")
+      previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
+      observe_first_boot rollback "$previous" "$previous_user"
+      first_boot_status=$?
+      ;;
+    *)
+      echo "FATAL: first boot cannot be recorded from state $state" >&2
+      first_boot_status=2
+      ;;
+  esac
+  set -e
+  exit "$first_boot_status"
+fi
+
+if [[ $mode == rollback && $state != aborted ]] && jq -e '.rollback == null' <<< "$active" >/dev/null; then
+  previous=$(jq -r '.recoveryTarget' <<< "$active")
+  previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
+  rollback_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system for rollback"
+  rollback_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system for rollback"
+  rollback_profile=$(readlink -f -- /nix/var/nix/profiles/system) || \
+    die 2 "failed to resolve system profile for rollback"
+  for generation in "$rollback_current" "$rollback_booted" "$rollback_profile"; do
+    [[ $generation == "$nix_store_dir/"* && -d $generation ]] || \
+      die 2 "a rollback generation is not a readable Nix store path: $generation"
+  done
+  rollback_runtime=$(jq -cn \
+    --arg current "$rollback_current" \
+    --arg booted "$rollback_booted" \
+    --arg profile "$rollback_profile" \
+    '{current: $current, booted: $booted, profile: $profile}')
+  if ! rollback_effect=$(dotfiles-wsl-restart-required \
+    --plan --booted-system "$rollback_booted" --current-system "$rollback_current" "$previous"); then
+    die 2 "failed to classify the recorded previous system"
+  fi
+  case $rollback_effect in
+    switch | switch-restart) rollback_action=switch ;;
+    boot-restart | boot-two-stage) rollback_action=boot ;;
+    *) die 2 "unknown rollback activation effect: $rollback_effect" ;;
+  esac
+  rollback_before_boot=$(boot_instance) || die 2 "failed to identify the rollback systemd manager instance"
+  observed_runtime=$(runtime_snapshot) || die 2 "failed to resolve runtime generation after planning the rollback"
+  same_runtime_snapshot "$rollback_runtime" "$observed_runtime" || \
+    die 2 "runtime generation changed while planning the rollback; retry from a stable state"
+  timestamp=$(now)
+  receipt_update \
+    --arg target "$previous" \
+    --arg effect "$rollback_effect" \
+    --arg action "$rollback_action" \
+    --argjson beforeApplyBoot "$rollback_before_boot" \
+    --argjson activationBaseline "$rollback_runtime" \
+    --arg timestamp "$timestamp" '
+      .rollback = {
+        target: $target,
+        effect: $effect,
+        action: $action,
+        activationBaseline: $activationBaseline,
+        bootInstances: {beforeApply: $beforeApplyBoot, firstBoot: null},
+        activation: {status: "pending", exitCode: null}
+      } |
+      .state = "rollback-intent" |
+      .verification = {status: "pending", exitCode: null} |
+      .failureStage = null |
+      .finishedAt = null |
+      .updatedAt = $timestamp
+    '
+  activate_target rollback "$previous" "$rollback_effect" "$rollback_action" "$previous_user" "$rollback_runtime"
+  exit $?
+fi
+
+case $state in
+  prepared | apply-intent | activation-failed)
+    effect=$(jq -r '.effect' <<< "$active")
+    action=$(jq -r '.action' <<< "$active")
+    resume_activation forward "$candidate" "$effect" "$action" "$candidate_user"
     ;;
-  boot-two-stage)
-    cat <<'MSG'
-
-The candidate requires a two-stage WSL boot migration. Run from PowerShell:
-
-  wsl -t NixOS
-  wsl -d NixOS --user root exit
-  wsl -t NixOS
-  wsl -d NixOS
-
-Then run:
-
-  dotfiles-doctor
-MSG
+  restart-pending)
+    effect=$(jq -r '.effect' <<< "$active")
+    if [[ $effect == boot-two-stage ]]; then
+      print_restart_instructions forward "$effect"
+      exit 3
+    fi
+    verify_target forward "$candidate" "$candidate_user" "$effect"
     ;;
+  first-boot-observed | verifying | verification-failed)
+    effect=$(jq -r '.effect' <<< "$active")
+    verify_target forward "$candidate" "$candidate_user" "$effect"
+    ;;
+  rollback-intent | rollback-activation-failed)
+    previous=$(jq -r '.rollback.target' <<< "$active")
+    previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
+    rollback_effect=$(jq -r '.rollback.effect' <<< "$active")
+    rollback_action=$(jq -r '.rollback.action' <<< "$active")
+    resume_activation rollback "$previous" "$rollback_effect" "$rollback_action" "$previous_user"
+    ;;
+  rollback-restart-pending)
+    previous=$(jq -r '.rollback.target' <<< "$active")
+    previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
+    rollback_effect=$(jq -r '.rollback.effect' <<< "$active")
+    if [[ $rollback_effect == boot-two-stage ]]; then
+      print_restart_instructions rollback "$rollback_effect"
+      exit 3
+    fi
+    verify_target rollback "$previous" "$previous_user" "$rollback_effect"
+    ;;
+  rollback-first-boot-observed | rollback-verifying | rollback-verification-failed)
+    previous=$(jq -r '.rollback.target' <<< "$active")
+    previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
+    rollback_effect=$(jq -r '.rollback.effect' <<< "$active")
+    verify_target rollback "$previous" "$previous_user" "$rollback_effect"
+    ;;
+  complete | rolled-back | aborted)
+    transaction_id=$(jq -r '.transactionId' <<< "$active")
+    dotfiles_rebuild_archive_active_receipt \
+      "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" "$transaction_id" || \
+      die 1 "failed to archive terminal rebuild receipt"
+    dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
+      die 1 "failed to remove terminal rebuild GC roots"
+    ;;
+  *) die 2 "cannot resume rebuild transaction in state $state" ;;
 esac

@@ -80,6 +80,15 @@ let
     '';
   };
 
+  nixosRebuildGuard = pkgs.writeShellApplication {
+    name = "nixos-rebuild";
+    text = ''
+      echo "FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction" >&2
+      echo "Use dotfiles-rebuild for normal changes; use scripts/bootstrap.sh only for initial provisioning." >&2
+      exit 2
+    '';
+  };
+
   sopsGeneration = import ./lib/sops-generation-contract.nix { inherit config pkgs; };
 
   doctorManifest = (pkgs.formats.json { }).generate "doctor-manifest-v2.json" {
@@ -160,8 +169,13 @@ let
     )) (builtins.attrValues vars) text;
 
   commonVars = {
-    inherit (cfg) dotfilesDir;
+    inherit (cfg) dotfilesDir username;
+    bootIdFile = "/proc/sys/kernel/random/boot_id";
+    nixGcAutoRootDir = "/nix/var/nix/gcroots/auto";
+    nixStoreDir = builtins.storeDir;
+    nixosRebuild = lib.escapeShellArg (lib.getExe config.system.build.nixos-rebuild);
     operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
+    rebuildReceiptFunctions = builtins.readFile ../scripts/lib/rebuild-receipt.sh;
     installTable = lib.concatStringsSep "\n" (map installRow names);
     cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
     hmBackupExt = config.home-manager.backupFileExtension;
@@ -190,20 +204,26 @@ let
   ]) { };
   wslRestartRequired = mkCommand "dotfiles-wsl-restart-required" ./commands/wsl-restart-required (
     with pkgs; [ coreutils ]) { };
-  rebuild = mkCommand "dotfiles-rebuild" ./commands/rebuild (
-    (with pkgs; [
-      git
-      coreutils
-      jq
-      nix
-      nixos-rebuild-ng
-      nix-output-monitor
-      nvd
-      sudo
-      util-linux
-    ])
-    ++ [ wslRestartRequired ]
-  ) { };
+  rebuild =
+    mkCommand "dotfiles-rebuild" ./commands/rebuild
+      (
+        (with pkgs; [
+          git
+          coreutils
+          jq
+          nix
+          nix-output-monitor
+          nvd
+          sudo
+          systemd
+          util-linux
+        ])
+        ++ [ wslRestartRequired ]
+      )
+      {
+        # jq programs are single-quoted; their $names come from --arg/--argjson.
+        excludeShellChecks = [ "SC2016" ];
+      };
   installClis = mkCommand "dotfiles-install-clis" ./commands/install-clis (with pkgs; [
     bash
     curl
@@ -341,7 +361,10 @@ in
       ;
   };
 
-  config.environment.systemPackages = builtins.attrValues cfg.commands;
+  # system generation を書き換える通常経路は dotfiles-rebuild に限定する。
+  # 上流実体は config.system.build.nixos-rebuild に残し、transaction 内から store path で呼ぶ。
+  config.system.tools.nixos-rebuild.enable = false;
+  config.environment.systemPackages = builtins.attrValues cfg.commands ++ [ nixosRebuildGuard ];
 
   config.environment.etc."dotfiles/doctor.json".source = doctorManifest;
   config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;

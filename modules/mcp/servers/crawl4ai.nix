@@ -8,9 +8,12 @@
 
 let
   port = "11235";
+  repository = "unclecode/crawl4ai";
+  digest = "sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
+  image = "${repository}:latest@${digest}";
 
   backend = mkMcpBackend "crawl4ai" {
-    image = "unclecode/crawl4ai:latest@sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
+    inherit image;
     extraOptions = [
       "--memory=4g"
       "--shm-size=1g"
@@ -24,6 +27,12 @@ let
   };
 in
 {
+  my.ociImages.crawl4ai = {
+    kind = "upstream";
+    container = "crawl4ai";
+    inherit image repository digest;
+  };
+
   virtualisation.oci-containers.containers = backend.containers;
   systemd.services = backend.systemdServices;
 

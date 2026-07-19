@@ -96,6 +96,7 @@
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
           dotfiles-install-clis = hostConfig.my.commands.installClis;
           dotfiles-rebuild = hostConfig.my.commands.rebuild;
+          dotfiles-sync-images = hostConfig.my.commands.syncImages;
           dotfiles-sops-enroll = hostConfig.my.commands.sopsEnroll;
         };
 
@@ -312,6 +313,58 @@
             _: artifact: artifact.format
           ) artifactVariantConfig.my.configArtifacts;
           variantClaudeMcp = artifactVariantConfig.my.configArtifacts."clis/claude/managed-mcp".source;
+          expectedUpstreamOciImages = {
+            crawl4ai = {
+              container = "crawl4ai";
+              digest = "sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
+              image = "unclecode/crawl4ai:latest@sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
+              repository = "unclecode/crawl4ai";
+            };
+            searxng = {
+              container = "searxng";
+              digest = "sha256:25ff3c045548971d12726e54bea4564b8ec3bedb3d6951aecdefd01caf840974";
+              image = "searxng/searxng:2026.5.17-d7e8b7cd1@sha256:25ff3c045548971d12726e54bea4564b8ec3bedb3d6951aecdefd01caf840974";
+              repository = "searxng/searxng";
+            };
+            valkey = {
+              container = "valkey";
+              digest = "sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9";
+              image = "valkey/valkey:latest@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9";
+              repository = "valkey/valkey";
+            };
+          };
+          actualUpstreamOciImages = lib.mapAttrs (
+            _: image:
+            lib.filterAttrs (
+              name: _:
+              lib.elem name [
+                "container"
+                "digest"
+                "image"
+                "repository"
+              ]
+            ) image
+          ) (lib.filterAttrs (_: image: image.kind == "upstream") hostConfig.my.ociImages);
+          agentmemoryOciImage = hostConfig.my.ociImages.agentmemory;
+          actualOciPullModes = lib.mapAttrs (
+            _: container: container.pull
+          ) hostConfig.virtualisation.oci-containers.containers;
+          expectedOciImageManifest = {
+            schemaVersion = 1;
+            images = lib.mapAttrsToList (id: image: {
+              inherit id;
+              inherit (image)
+                kind
+                container
+                image
+                repository
+                digest
+                ;
+              imageFile = if image.imageFile == null then null else toString image.imageFile;
+            }) hostConfig.my.ociImages;
+          };
+          syncImages = hostConfig.my.commands.syncImages;
+          syncImagesTest = syncImages.testPackage;
           codexProjectRuntimePath = "${hostConfig.my.dotfilesDir}/.codex/config.toml";
           sopsKeyFile = "/var/lib/sops-nix/key.txt";
           sopsKeyDirectoryPolicy = hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix".d;
@@ -401,6 +454,49 @@
                   test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3112
                   test "$(yq -r '.server.port' ${artifactSource "mcp/searxng/settings-template"})" = 8080
                   test "$(yq -r '.valkey.url' ${artifactSource "mcp/searxng/settings-template"})" = valkey://valkey:6379/0
+                touch $out
+              '';
+
+          oci-image-contract =
+            assert hostConfig.virtualisation.oci-containers.backend == "docker";
+            assert hostConfig.virtualisation.docker.enable;
+            assert actualUpstreamOciImages == expectedUpstreamOciImages;
+            assert agentmemoryOciImage.kind == "nix";
+            assert agentmemoryOciImage.container == "agentmemory";
+            assert agentmemoryOciImage.image == "agentmemory:0.9.26";
+            assert agentmemoryOciImage.repository == null;
+            assert agentmemoryOciImage.digest == null;
+            assert agentmemoryOciImage.imageFile != null;
+            assert
+              actualOciPullModes == {
+                agentmemory = "missing";
+                crawl4ai = "missing";
+                searxng = "missing";
+                valkey = "missing";
+              };
+            assert
+              hostConfig.environment.etc."dotfiles/oci-images.json".source
+              == hostConfig.my.commands.syncImages.manifest;
+            pkgs.runCommandLocal "check-oci-image-contract"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.gnugrep
+                  pkgs.gnused
+                  pkgs.jq
+                ];
+              }
+              ''
+                jq --exit-status \
+                  --argjson expected ${lib.escapeShellArg (builtins.toJSON expectedOciImageManifest)} \
+                  '. == $expected' \
+                  ${syncImages.manifest} > /dev/null
+                if grep --recursive --quiet 'DOTFILES_IMAGE_SYNC_TEST_' ${syncImages}; then
+                  echo 'production dotfiles-sync-images contains test hooks' >&2
+                  exit 1
+                fi
+                bash ${self}/scripts/tests/sync-images-runtime.sh ${lib.getExe syncImagesTest}
                 touch $out
               '';
 

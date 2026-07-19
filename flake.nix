@@ -213,6 +213,40 @@
           codexSeedConfig = artifactSource "clis/codex/user-seed";
           codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
           doctorManifest = hostConfig.environment.etc."dotfiles/doctor.json".source;
+          nixImageIdentityFiles = hostConfig.my.commands.doctor.nixImageIdentityFiles;
+          fixtureNixImageFile = pkgs.writeText "fixture-agentmemory.tar.gz" "fixture";
+          fixtureNixImageIdentityData = {
+            schemaVersion = 1;
+            imageReference = "agentmemory:fixture";
+            imageFile = fixtureNixImageFile;
+            imageId = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+          };
+          fixtureNixImageIdentity = pkgs.writeText "fixture-nix-image-identity-v1.json" (
+            builtins.toJSON fixtureNixImageIdentityData
+          );
+          fixtureNixImageIdentityMalformed = pkgs.writeText "fixture-nix-image-identity-malformed.json" "{";
+          fixtureNixImageIdentitySchema = pkgs.writeText "fixture-nix-image-identity-schema.json" (
+            builtins.toJSON (fixtureNixImageIdentityData // { schemaVersion = 2; })
+          );
+          fixtureNixImageIdentityReference = pkgs.writeText "fixture-nix-image-identity-reference.json" (
+            builtins.toJSON (fixtureNixImageIdentityData // { imageReference = "other:fixture"; })
+          );
+          fixtureNixImageIdentityFile = pkgs.writeText "fixture-nix-image-identity-file.json" (
+            builtins.toJSON (fixtureNixImageIdentityData // { imageFile = "/nix/store/other.tar.gz"; })
+          );
+          fixtureNixImageIdentityId = pkgs.writeText "fixture-nix-image-identity-id.json" (
+            builtins.toJSON (fixtureNixImageIdentityData // { imageId = "not-an-image-id"; })
+          );
+          fixtureNixImageIdentityCases = pkgs.writeText "fixture-nix-image-identity-cases.json" (
+            builtins.toJSON {
+              valid = fixtureNixImageIdentity;
+              malformed = fixtureNixImageIdentityMalformed;
+              schema = fixtureNixImageIdentitySchema;
+              reference = fixtureNixImageIdentityReference;
+              imageFile = fixtureNixImageIdentityFile;
+              imageId = fixtureNixImageIdentityId;
+            }
+          );
           sopsGenerationContract = hostConfig.environment.etc."dotfiles/sops-generation.json".source;
           sopsGenerationContractData = builtins.fromJSON (
             builtins.unsafeDiscardStringContext (builtins.readFile sopsGenerationContract)
@@ -363,6 +397,21 @@
               imageFile = if image.imageFile == null then null else toString image.imageFile;
             }) hostConfig.my.ociImages;
           };
+          expectedDoctorOciImagesJson = (pkgs.formats.json { }).generate "doctor-oci-images.json" (
+            lib.mapAttrsToList (id: image: {
+              inherit id;
+              inherit (image)
+                kind
+                container
+                image
+                repository
+                digest
+                ;
+              unit = "docker-${image.container}.service";
+              imageFile = if image.imageFile == null then null else toString image.imageFile;
+              expectedImageIdFile = if image.kind == "nix" then toString nixImageIdentityFiles.${id} else null;
+            }) hostConfig.my.ociImages
+          );
           syncImages = hostConfig.my.commands.syncImages;
           syncImagesTest = syncImages.testPackage;
           codexProjectRuntimePath = "${hostConfig.my.dotfilesDir}/.codex/config.toml";
@@ -467,6 +516,7 @@
             assert agentmemoryOciImage.repository == null;
             assert agentmemoryOciImage.digest == null;
             assert agentmemoryOciImage.imageFile != null;
+            assert builtins.attrNames nixImageIdentityFiles == [ "agentmemory" ];
             assert
               actualOciPullModes == {
                 agentmemory = "missing";
@@ -485,6 +535,7 @@
                   pkgs.gnugrep
                   pkgs.gnused
                   pkgs.jq
+                  pkgs.util-linux
                 ];
               }
               ''
@@ -492,6 +543,14 @@
                   --argjson expected ${lib.escapeShellArg (builtins.toJSON expectedOciImageManifest)} \
                   '. == $expected' \
                   ${syncImages.manifest} > /dev/null
+                jq --exit-status \
+                  --arg reference ${lib.escapeShellArg agentmemoryOciImage.image} \
+                  --arg imageFile ${lib.escapeShellArg (toString agentmemoryOciImage.imageFile)} '
+                    .schemaVersion == 1 and
+                    .imageReference == $reference and
+                    .imageFile == $imageFile and
+                    (.imageId | type == "string" and test("^sha256:[0-9a-f]{64}$"))
+                  ' ${nixImageIdentityFiles.agentmemory} > /dev/null
                 if grep --recursive --quiet 'DOTFILES_IMAGE_SYNC_TEST_' ${syncImages}; then
                   echo 'production dotfiles-sync-images contains test hooks' >&2
                   exit 1
@@ -999,12 +1058,15 @@
                   pkgs.gnugrep
                   pkgs.gnused
                   pkgs.jq
+                  pkgs.util-linux
                 ];
               }
               ''
                 bash ${self}/scripts/tests/doctor-runtime.sh \
                   ${self}/modules/commands/doctor \
-                  ${pkgs.bash}/bin/bash
+                  ${self}/scripts/lib/oci-image-state.sh \
+                  ${pkgs.bash}/bin/bash \
+                  ${fixtureNixImageIdentityCases}
                 touch $out
               '';
 
@@ -1058,6 +1120,20 @@
                 jq --sort-keys '.' ${expectedProbePolicyJson} > expected-probe-policy.json
                 jq --sort-keys '.probePolicy' ${doctorManifest} > actual-probe-policy.json
                 diff --unified expected-probe-policy.json actual-probe-policy.json
+
+                jq --sort-keys 'sort_by(.id)' ${expectedDoctorOciImagesJson} > expected-oci-images.json
+                jq --sort-keys '.oci.images | sort_by(.id)' ${doctorManifest} > actual-oci-images.json
+                diff --unified expected-oci-images.json actual-oci-images.json
+
+                jq --exit-status \
+                  --arg stateRoot ${lib.escapeShellArg "${hostConfig.my.homeDir}/.local/state/dotfiles-wsl/image-sync"} \
+                  --arg dockerCommand ${lib.escapeShellArg (lib.getExe pkgs.docker)} \
+                  --arg syncStatusCommand ${lib.escapeShellArg (lib.getExe syncImages)} '
+                    .oci.healthUnit == "docker.service" and
+                    .oci.stateRoot == $stateRoot and
+                    .oci.dockerCommand == $dockerCommand and
+                    .oci.syncStatusCommand == $syncStatusCommand
+                  ' ${doctorManifest} > /dev/null
 
                 jq --sort-keys '
                   [.clis[] | {

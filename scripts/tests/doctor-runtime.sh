@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then
-  echo "usage: $0 DOCTOR_SOURCE STORE_BASH" >&2
+if [[ $# -ne 4 ]]; then
+  echo "usage: $0 DOCTOR_SOURCE OCI_IMAGE_STATE_SOURCE STORE_BASH NIX_IMAGE_IDENTITY_CASES" >&2
   exit 2
 fi
 
 doctor_source=$1
-store_bash=$2
+oci_image_state_source=$2
+store_bash=$3
+nix_image_identity_cases=$4
+nix_image_identity=$(jq -er '.valid' "$nix_image_identity_cases")
+nix_image_file=$(jq -er '.imageFile' "$nix_image_identity")
 test_root=$(mktemp -d)
 trap 'rm -rf -- "$test_root"' EXIT
 
@@ -47,6 +51,14 @@ systemctl_call_log=$test_root/systemctl-call-log
 sudo_call_log=$test_root/sudo-call-log
 cli_call_log=$test_root/cli-call-log
 windows_call_log=$test_root/windows-call-log
+docker_call_log=$test_root/docker-call-log
+docker_lock_probe_log=$test_root/docker-lock-probe-log
+sync_status_call_log=$test_root/sync-status-call-log
+docker_state=$test_root/docker-state.json
+sync_status_state=$test_root/sync-status-state
+oci_state_root=$home/.local/state/dotfiles-wsl/image-sync
+docker_command=$fake_bin/docker
+sync_status_command=$fake_bin/dotfiles-sync-images
 failed=0
 mcp_max_times=5
 mcp_max_filesize=1048576
@@ -125,6 +137,42 @@ printf '%s\n' \
   'state=$(cat "$DOCTOR_TEST_ROOT_STATE")' \
   '[[ $state != hang ]] || { sleep 30; exit 0; }' \
   'printf "%s\\n" "$state"' >> "$root_probe"
+
+cat > "$docker_command" <<'DOCKER'
+#!@STORE_BASH@
+set -euo pipefail
+
+[[ $# -eq 3 && ($1:$2 == image:inspect || $1:$2 == container:inspect) ]] || exit 64
+kind=$1
+subject=$3
+printf '%s %s\n' "$kind" "$subject" >> "$DOCTOR_TEST_DOCKER_CALL_LOG"
+if [[ "$kind:$subject" == "${DOCTOR_TEST_DOCKER_LOCK_PROBE:-}" ]]; then
+  exec {probe_lock_fd}> "$DOCTOR_TEST_OCI_STATE_ROOT/operation.lock"
+  if flock --exclusive --nonblock "$probe_lock_fd"; then
+    printf '%s\n' acquired >> "$DOCTOR_TEST_DOCKER_LOCK_PROBE_LOG"
+    flock --unlock "$probe_lock_fd"
+  else
+    printf '%s\n' blocked >> "$DOCTOR_TEST_DOCKER_LOCK_PROBE_LOG"
+  fi
+  exec {probe_lock_fd}>&-
+fi
+if jq -e --arg kind "$kind" --arg subject "$subject" '
+  any(.hang[$kind][]?; . == $subject)
+' "$DOCTOR_TEST_DOCKER_STATE" >/dev/null; then
+  sleep 30
+  exit 0
+fi
+jq -e --arg kind "$kind" --arg subject "$subject" '
+  if .[$kind] | has($subject) then [.[$kind][$subject]] else empty end
+' "$DOCTOR_TEST_DOCKER_STATE"
+DOCKER
+sed -i "1s|@STORE_BASH@|$store_bash|" "$docker_command"
+
+printf '#!%s\n' "$store_bash" > "$sync_status_command"
+printf '%s\n' \
+  '[[ $# -eq 1 && $1 == --status ]] || exit 64' \
+  'printf "status\\n" >> "$DOCTOR_TEST_SYNC_STATUS_CALL_LOG"' \
+  'exit "$(cat "$DOCTOR_TEST_SYNC_STATUS_STATE")"' >> "$sync_status_command"
 
 cat > "$fake_bin/curl" <<'EOF'
 #!@STORE_BASH@
@@ -428,13 +476,22 @@ chmod +x \
   "$fake_bin/dotfiles-wsl-restart-required" \
   "$fake_bin/sudo" \
   "$fake_bin/curl" \
+  "$docker_command" \
+  "$sync_status_command" \
   "$root_probe" \
   "$cli_path"
 
-sed \
+awk -v library="$oci_image_state_source" '
+  $0 == "@ociImageStateFunctions@" {
+    while ((getline line < library) > 0) print line
+    close(library)
+    next
+  }
+  { print }
+' "$doctor_source" | sed \
   -e "s|@doctorManifestPath@|$manifest|g" \
-  -e 's|@doctorSchemaVersion@|3|g' \
-  "$doctor_source" > "$rendered_doctor"
+  -e 's|@doctorSchemaVersion@|4|g' \
+  > "$rendered_doctor"
 chmod +x "$rendered_doctor"
 sed '/local id=\$1 phase=\$2 status=\$3 subject=\$4 expected=\$5 observed=\$6 message=\$7 duration=\$8/a\  message=' \
   "$rendered_doctor" > "$empty_message_doctor"
@@ -450,6 +507,9 @@ write_manifest() {
     --arg root_probe "$root_probe" \
     --arg home_key "$home/.config/sops/age/keys.txt" \
     --arg unit "fixture.service" \
+    --arg docker_unit "docker.service" \
+    --arg upstream_unit "docker-image-a.service" \
+    --arg nix_unit "docker-agentmemory.service" \
     --arg managed_path "$managed_runtime" \
     --arg managed_source "$managed_source" \
     --arg binary_path "$cli_path" \
@@ -464,18 +524,37 @@ write_manifest() {
     --arg gateway_source "$gateway_source" \
     --arg gateway_url 'http://127.0.0.1:1/mcp' \
     --arg nix_ld_path "$nix_ld_path" \
+    --arg docker_command "$docker_command" \
+    --arg sync_status_command "$sync_status_command" \
+    --arg oci_state_root "$oci_state_root" \
+    --arg nix_image_identity "$nix_image_identity" \
+    --arg nix_image_file "$nix_image_file" \
     '{
-      schemaVersion: 3,
+      schemaVersion: 4,
       user: {name: $user, home: $home},
       generation: {current: $current, booted: $booted, profile: $profile},
       sops: {
         rootProbe: $root_probe,
         homeKey: {path: $home_key, policy: "warn"}
       },
-      units: [{
-        id: $unit,
-        expected: {LoadState: "loaded", ActiveState: "active", SubState: "running", Result: "success"}
-      }],
+      units: [
+        {
+          id: $unit,
+          expected: {LoadState: "loaded", ActiveState: "active", SubState: "running", Result: "success"}
+        },
+        {
+          id: $docker_unit,
+          expected: {LoadState: "loaded", ActiveState: "active", SubState: "running", Result: "success"}
+        },
+        {
+          id: $upstream_unit,
+          expected: {LoadState: "loaded", ActiveState: "active", SubState: "running", Result: "success"}
+        },
+        {
+          id: $nix_unit,
+          expected: {LoadState: "loaded", ActiveState: "active", SubState: "running", Result: "success"}
+        }
+      ],
       managedFiles: [{id: "managed-fixture", path: $managed_path, source: $managed_source}],
       clis: [{
         name: "fixture",
@@ -492,6 +571,28 @@ write_manifest() {
         targets: ["memory", "searxng"],
         requestedProtocolVersion: "2025-11-25",
         supportedProtocolVersions: ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
+      },
+      oci: {
+        healthUnit: $docker_unit,
+        stateRoot: $oci_state_root,
+        dockerCommand: $docker_command,
+        syncStatusCommand: $sync_status_command,
+        images: [
+          {
+            id: "agentmemory", kind: "nix", container: "agentmemory", unit: $nix_unit,
+            image: "agentmemory:fixture", repository: null, digest: null,
+            imageFile: $nix_image_file,
+            expectedImageIdFile: $nix_image_identity
+          },
+          {
+            id: "image-a", kind: "upstream", container: "image-a", unit: $upstream_unit,
+            image: "example.test/a:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            repository: "example.test/a",
+            digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            imageFile: null,
+            expectedImageIdFile: null
+          }
+        ]
       },
       probePolicy: {
         cliTimeoutSeconds: 5,
@@ -528,7 +629,11 @@ reset_fixture() {
   cp "$managed_source" "$managed_runtime"
   cp "$rules_source" "$rules_runtime"
   cp "$gateway_source" "$gateway_runtime"
-  printf '%s\n' 'fixture.service|loaded|active|running|success' > "$unit_state"
+  printf '%s\n' \
+    'fixture.service|loaded|active|running|success' \
+    'docker.service|loaded|active|running|success' \
+    'docker-image-a.service|loaded|active|running|success' \
+    'docker-agentmemory.service|loaded|active|running|success' > "$unit_state"
   printf '%s\n' 'switch' > "$effect_state"
   printf '%s\n' '{"directory":{"uid":0,"gid":0,"mode":"700"},"key":{"uid":0,"gid":0,"mode":"400"}}' > "$root_state"
   printf '%s\n' 'ok' > "$cli_version_state"
@@ -542,6 +647,40 @@ reset_fixture() {
   : > "$sudo_call_log"
   : > "$cli_call_log"
   : > "$windows_call_log"
+  : > "$docker_call_log"
+  : > "$docker_lock_probe_log"
+  : > "$sync_status_call_log"
+  printf '%s\n' '0' > "$sync_status_state"
+  docker_lock_probe=''
+  rm -rf -- "$oci_state_root"
+  mkdir -p "${oci_state_root%/*}"
+  mkdir -m 0700 "$oci_state_root"
+  mkdir -m 0700 "$oci_state_root/receipts"
+  : > "$oci_state_root/operation.lock"
+  chmod 0600 "$oci_state_root/operation.lock"
+  jq -n '{
+    image: {
+      "agentmemory:fixture": {
+        Id: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        RepoDigests: []
+      },
+      "example.test/a:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": {
+        Id: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        RepoDigests: ["example.test/a@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+      }
+    },
+    container: {
+      agentmemory: {
+        Image: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        State: {Running: true}
+      },
+      "image-a": {
+        Image: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        State: {Running: true}
+      }
+    },
+    hang: {image: [], container: []}
+  }' > "$docker_state"
   touch "$nix_ld_path"
   doctor_path="$home/.local/bin:$current_generation/sw/bin:$fake_bin:$PATH"
   chmod +x "$cli_path"
@@ -574,6 +713,13 @@ run_doctor() {
     DOCTOR_TEST_MCP_REQUESTED_PROTOCOL='2025-11-25' \
     DOCTOR_TEST_MCP_MAX_TIMES=$mcp_max_times \
     DOCTOR_TEST_MCP_MAX_FILESIZE=$mcp_max_filesize \
+    DOCTOR_TEST_DOCKER_CALL_LOG=$docker_call_log \
+    DOCTOR_TEST_DOCKER_LOCK_PROBE=$docker_lock_probe \
+    DOCTOR_TEST_DOCKER_LOCK_PROBE_LOG=$docker_lock_probe_log \
+    DOCTOR_TEST_DOCKER_STATE=$docker_state \
+    DOCTOR_TEST_OCI_STATE_ROOT=$oci_state_root \
+    DOCTOR_TEST_SYNC_STATUS_CALL_LOG=$sync_status_call_log \
+    DOCTOR_TEST_SYNC_STATUS_STATE=$sync_status_state \
     "$store_bash" "$doctor_executable" "${doctor_args[@]}" > "$doctor_output" 2>&1
   doctor_status=$?
   set -e
@@ -591,6 +737,31 @@ expect_failure() {
   elif ! grep -Fqx "$expected" "$doctor_output"; then
     echo "$label: missing diagnostic: $expected" >&2
     sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  fi
+}
+
+expect_nix_identity_failure() {
+  local label=$1 mutation=$2
+  reset_fixture
+  "$mutation"
+  run_doctor --format json
+  if [[ $doctor_status -ne 1 ]]; then
+    echo "$label: expected status 1, got $doctor_status" >&2
+    sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  elif ! jq -e '
+    any(.checks[]; .id == "system.oci.image.agentmemory" and .status == "fail") and
+    any(.checks[]; .id == "active.oci.container.agentmemory" and .status == "blocked") and
+    any(.checks[]; .id == "system.oci.image.image-a" and .status == "pass") and
+    any(.checks[]; .id == "active.oci.container.image-a" and .status == "pass")
+  ' "$doctor_output" >/dev/null; then
+    echo "$label: invalid identity did not fail the image and block its container" >&2
+    sed 's/^/  /' "$doctor_output" >&2
+    failed=1
+  elif grep -Fqx 'container agentmemory' "$docker_call_log"; then
+    echo "$label: blocked Nix container was inspected" >&2
+    sed 's/^/  /' "$docker_call_log" >&2
     failed=1
   fi
 }
@@ -624,7 +795,8 @@ expect_contract_error() {
     echo "$label: missing diagnostic: $expected" >&2
     sed 's/^/  /' "$doctor_output" >&2
     failed=1
-  elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log || -s $mcp_call_log ]]; then
+  elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log \
+    || -s $mcp_call_log || -s $docker_call_log || -s $sync_status_call_log ]]; then
     echo "$label: a probe ran after manifest contract failure" >&2
     failed=1
   fi
@@ -785,6 +957,28 @@ generation_switch_during_active() { printf '%s\n' 'switch-generation' > "$cli_ve
 mcp_page_limit_one() { jq '.probePolicy.maxPages = 1' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 mcp_response_limit_small() { jq '.probePolicy.maxResponseBytes = 256' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; mcp_max_filesize=256; }
 mcp_total_budget_short() { jq '.probePolicy.totalTimeoutSeconds = 4 | .probePolicy.mcpCleanupTimeoutSeconds = 1' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; mcp_max_times=1,2; }
+oci_missing() { jq 'del(.oci)' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+oci_duplicate_container() { jq '.oci.images[1].container = .oci.images[0].container' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+oci_unit_mismatch() { jq '.oci.images[1].unit = "docker-agentmemory.service"' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+oci_nix_identity_missing() { jq 'del(.oci.images[0].expectedImageIdFile)' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+oci_nix_identity_noncanonical() { jq '.oci.images[0].expectedImageIdFile = "/nix/store/../tmp/identity.json"' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+oci_state_missing() { rm -rf -- "$oci_state_root"; }
+oci_sync_stale() { printf '%s\n' '1' > "$sync_status_state"; }
+docker_unit_inactive() { sed -i 's/docker.service|loaded|active|running|success/docker.service|loaded|failed|failed|exit-code/' "$unit_state"; }
+upstream_digest_missing() { jq '.image["example.test/a:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"].RepoDigests = []' "$docker_state" > "$docker_state.tmp"; mv "$docker_state.tmp" "$docker_state"; }
+nix_image_missing() { jq 'del(.image["agentmemory:fixture"])' "$docker_state" > "$docker_state.tmp"; mv "$docker_state.tmp" "$docker_state"; }
+nix_image_retagged() { jq '.image["agentmemory:fixture"].Id = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" | .container.agentmemory.Image = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"' "$docker_state" > "$docker_state.tmp"; mv "$docker_state.tmp" "$docker_state"; }
+nix_identity_case() { local path; path=$(jq -er --arg case "$1" '.[$case]' "$nix_image_identity_cases"); jq --arg path "$path" '.oci.images[0].expectedImageIdFile = $path' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+nix_identity_malformed() { nix_identity_case malformed; }
+nix_identity_schema_mismatch() { nix_identity_case schema; }
+nix_identity_reference_mismatch() { nix_identity_case reference; }
+nix_identity_image_file_mismatch() { nix_identity_case imageFile; }
+nix_identity_invalid_id() { nix_identity_case imageId; }
+upstream_container_mismatch() { jq '.container["image-a"].Image = "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"' "$docker_state" > "$docker_state.tmp"; mv "$docker_state.tmp" "$docker_state"; }
+upstream_container_stopped() { jq '.container["image-a"].State.Running = false' "$docker_state" > "$docker_state.tmp"; mv "$docker_state.tmp" "$docker_state"; }
+upstream_unit_inactive() { sed -i 's/docker-image-a.service|loaded|active|running|success/docker-image-a.service|loaded|failed|failed|exit-code/' "$unit_state"; }
+upstream_image_timed_out() { jq '.hang.image = ["example.test/a:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]' "$docker_state" > "$docker_state.tmp"; mv "$docker_state.tmp" "$docker_state"; }
+upstream_container_timed_out() { jq '.hang.container = ["image-a"]' "$docker_state" > "$docker_state.tmp"; mv "$docker_state.tmp" "$docker_state"; }
 
 reset_fixture
 run_doctor
@@ -810,7 +1004,7 @@ if [[ $doctor_status -ne 0 ]]; then
   failed=1
 elif ! jq -e '
   .schemaVersion == 1 and
-  .manifestSchemaVersion == 3 and
+  .manifestSchemaVersion == 4 and
   .outcome == "healthy" and
   (.summary | keys | sort) == ["blocked", "error", "fail", "pass", "total", "warn"] and
   (.checks | type) == "array" and
@@ -825,7 +1019,13 @@ elif ! jq -e '
     (.message | type) == "string" and (.message | length) > 0 and
     (.durationMs | type) == "number" and .durationMs >= 0
   ) and
-  ([.checks[].id] | length) == ([.checks[].id] | unique | length)
+  ([.checks[].id] | length) == ([.checks[].id] | unique | length) and
+  any(.checks[]; .id == "system.oci.lock" and .status == "pass") and
+  any(.checks[]; .id == "system.oci.sync" and .status == "pass") and
+  any(.checks[]; .id == "system.oci.image.agentmemory" and .status == "pass") and
+  any(.checks[]; .id == "system.oci.image.image-a" and .status == "pass") and
+  any(.checks[]; .id == "active.oci.container.agentmemory" and .status == "pass") and
+  any(.checks[]; .id == "active.oci.container.image-a" and .status == "pass")
 ' "$doctor_output" >/dev/null; then
   echo 'JSON baseline: report contract mismatch' >&2
   sed 's/^/  /' "$doctor_output" >&2
@@ -888,7 +1088,8 @@ elif ! grep -Fq 'SKIP:' "$doctor_output"; then
   echo 'foundation gate: blocked phases were not rendered' >&2
   sed 's/^/  /' "$doctor_output" >&2
   failed=1
-elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log || -s $mcp_call_log ]]; then
+elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log \
+  || -s $mcp_call_log || -s $docker_call_log || -s $sync_status_call_log ]]; then
   echo 'foundation gate: an active probe ran after foundation failure' >&2
   failed=1
 fi
@@ -904,9 +1105,32 @@ elif ! grep -Fqx 'FAIL: doctor process identity does not match the configured us
   echo 'configured identity gate: missing identity diagnostic' >&2
   sed 's/^/  /' "$doctor_output" >&2
   failed=1
-elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log || -s $mcp_call_log ]]; then
+elif [[ -s $systemctl_call_log || -s $sudo_call_log || -s $cli_call_log || -s $windows_call_log \
+  || -s $mcp_call_log || -s $docker_call_log || -s $sync_status_call_log ]]; then
   echo 'configured identity gate: a probe ran with the wrong identity' >&2
   failed=1
+fi
+
+reset_fixture
+docker_lock_probe=container:agentmemory
+run_doctor --format json
+if [[ $doctor_status -ne 0 ]]; then
+  echo "OCI shared lock lifetime: expected status 0, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ $(cat "$docker_lock_probe_log") != blocked ]]; then
+  echo 'OCI shared lock lifetime: exclusive lock was not blocked during container observation' >&2
+  sed 's/^/  /' "$docker_lock_probe_log" >&2
+  failed=1
+else
+  exec {post_doctor_lock_fd}> "$oci_state_root/operation.lock"
+  if ! flock --exclusive --nonblock "$post_doctor_lock_fd"; then
+    echo 'OCI shared lock lifetime: shared lock was not released after doctor completed' >&2
+    failed=1
+  else
+    flock --unlock "$post_doctor_lock_fd"
+  fi
+  exec {post_doctor_lock_fd}>&-
 fi
 
 expect_failure \
@@ -932,14 +1156,99 @@ elif ! jq -e '
 fi
 
 expect_failure 'profile mismatch' 'FAIL: system profile does not match current generation' profile_mismatch
-expect_contract_error 'schema version mismatch' "ERROR: doctor manifest does not match schema version 3: $manifest" schema_version_mismatch
-expect_contract_error 'required user field missing' "ERROR: doctor manifest does not match schema version 3: $manifest" user_home_missing
+expect_contract_error 'schema version mismatch' "ERROR: doctor manifest does not match schema version 4: $manifest" schema_version_mismatch
+expect_contract_error 'required user field missing' "ERROR: doctor manifest does not match schema version 4: $manifest" user_home_missing
+expect_contract_error 'OCI inventory missing' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_missing
+expect_contract_error 'OCI container duplicated' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_duplicate_container
+expect_contract_error 'OCI unit mismatched' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_unit_mismatch
+expect_contract_error 'Nix OCI identity missing' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_nix_identity_missing
+expect_contract_error 'Nix OCI identity path noncanonical' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_nix_identity_noncanonical
 expect_failure 'self mismatch' 'FAIL: running doctor does not match current generation' self_mismatch
 expect_failure 'cold-start mismatch' 'FAIL: WSL cold-start state requires switch-restart' effect_mismatch
 expect_failure 'unit not loaded' 'FAIL: fixture.service state does not match manifest' unit_unloaded
 expect_failure 'unit inactive' 'FAIL: fixture.service state does not match manifest' unit_inactive
 expect_failure 'systemctl show failed' 'FAIL: fixture.service state does not match manifest' unit_probe_failed
 expect_failure_with_deadline 'systemctl show timed out' 'FAIL: fixture.service state does not match manifest' unit_probe_timed_out 8
+
+expect_failure 'OCI state missing' 'FAIL: OCI image sync state and lock are invalid' oci_state_missing
+
+reset_fixture
+exec {busy_oci_lock_fd}> "$oci_state_root/operation.lock"
+flock --exclusive --nonblock "$busy_oci_lock_fd"
+run_doctor --format json
+flock --unlock "$busy_oci_lock_fd"
+exec {busy_oci_lock_fd}>&-
+if [[ $doctor_status -ne 1 ]]; then
+  echo "OCI image sync lock busy: expected status 1, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ -s $docker_call_log || -s $sync_status_call_log ]]; then
+  echo 'OCI image sync lock busy: a mutable OCI probe ran without the shared lock' >&2
+  failed=1
+elif ! jq -e '
+  any(.checks[]; .id == "system.oci.lock" and .status == "blocked") and
+  any(.checks[]; .id == "system.oci.sync" and .status == "blocked") and
+  ([.checks[] | select(.id | startswith("system.oci.image."))] | length) == 2 and
+  ([.checks[] | select(.id | startswith("active.oci.container."))] | length) == 2 and
+  all(.checks[] | select(.id | startswith("system.oci.image.")); .status == "blocked") and
+  all(.checks[] | select(.id | startswith("active.oci.container.")); .status == "blocked")
+' "$doctor_output" >/dev/null; then
+  echo 'OCI image sync lock busy: dependent OCI checks were not blocked' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+expect_failure 'OCI sync receipt stale' 'FAIL: upstream OCI image synchronization is stale' oci_sync_stale
+expect_failure 'upstream OCI digest missing' 'FAIL: OCI image does not match the desired digest: image-a' upstream_digest_missing
+expect_failure 'Nix OCI image missing' 'FAIL: OCI image does not match the immutable Nix image identity: agentmemory' nix_image_missing
+expect_failure 'Nix OCI tag retargeted with matching container' 'FAIL: OCI image does not match the immutable Nix image identity: agentmemory' nix_image_retagged
+expect_nix_identity_failure 'Nix OCI identity malformed' nix_identity_malformed
+expect_nix_identity_failure 'Nix OCI identity schema mismatch' nix_identity_schema_mismatch
+expect_nix_identity_failure 'Nix OCI identity reference mismatch' nix_identity_reference_mismatch
+expect_nix_identity_failure 'Nix OCI identity imageFile mismatch' nix_identity_image_file_mismatch
+expect_nix_identity_failure 'Nix OCI identity ID invalid' nix_identity_invalid_id
+expect_failure 'upstream OCI container image mismatch' 'FAIL: OCI container does not run the desired image: image-a' upstream_container_mismatch
+expect_failure 'upstream OCI container stopped' 'FAIL: OCI container does not run the desired image: image-a' upstream_container_stopped
+expect_failure_with_deadline 'upstream OCI image inspect timed out' 'FAIL: OCI image does not match the desired digest: image-a' upstream_image_timed_out 8
+expect_failure_with_deadline 'upstream OCI container inspect timed out' 'FAIL: OCI container does not run the desired image: image-a' upstream_container_timed_out 8
+
+reset_fixture
+docker_unit_inactive
+run_doctor --format json
+if [[ $doctor_status -ne 1 ]]; then
+  echo "OCI Docker health gate: expected status 1, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ -s $docker_call_log || -s $sync_status_call_log ]]; then
+  echo 'OCI Docker health gate: Docker or sync status was called for an unhealthy daemon' >&2
+  failed=1
+elif ! jq -e '
+  any(.checks[]; .id == "system.oci.image.image-a" and .status == "blocked") and
+  any(.checks[]; .id == "active.oci.container.image-a" and .status == "blocked")
+' "$doctor_output" >/dev/null; then
+  echo 'OCI Docker health gate: dependent checks were not blocked' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+reset_fixture
+upstream_unit_inactive
+run_doctor --format json
+if [[ $doctor_status -ne 1 ]]; then
+  echo "OCI container unit gate: expected status 1, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! grep -Fqx 'image example.test/a:latest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' "$docker_call_log"; then
+  echo 'OCI container unit gate: image cache was not inspected' >&2
+  failed=1
+elif grep -Fqx 'container image-a' "$docker_call_log"; then
+  echo 'OCI container unit gate: unhealthy container was inspected' >&2
+  failed=1
+elif ! jq -e 'any(.checks[]; .id == "active.oci.container.image-a" and .status == "blocked")' "$doctor_output" >/dev/null; then
+  echo 'OCI container unit gate: container check was not blocked' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
 
 reset_fixture
 unit_inactive
@@ -962,12 +1271,12 @@ expect_failure 'SOPS root probe failed' 'FAIL: SOPS host key metadata does not m
 expect_failure_with_deadline 'SOPS root probe timed out' 'FAIL: SOPS host key metadata does not match root policy' sops_probe_timed_out 8
 expect_warning 'home key migration warning' 'WARN: user SOPS age key still exists during migration' home_key_present
 expect_failure 'home key rejected' 'FAIL: user SOPS age key must not exist after migration' home_key_rejected
-expect_contract_error 'home key policy invalid' "ERROR: doctor manifest does not match schema version 3: $manifest" home_key_policy_invalid
-expect_contract_error 'requested MCP protocol unsupported' "ERROR: doctor manifest does not match schema version 3: $manifest" requested_protocol_unsupported
-expect_contract_error 'supported MCP protocol duplicated' "ERROR: doctor manifest does not match schema version 3: $manifest" supported_protocol_duplicated
-expect_contract_error 'empty MCP target' "ERROR: doctor manifest does not match schema version 3: $manifest" mcp_target_empty
-expect_contract_error 'MCP cleanup timeout missing' "ERROR: doctor manifest does not match schema version 3: $manifest" cleanup_timeout_missing
-expect_contract_error 'MCP cleanup timeout exhausts total budget' "ERROR: doctor manifest does not match schema version 3: $manifest" cleanup_timeout_exhausts_budget
+expect_contract_error 'home key policy invalid' "ERROR: doctor manifest does not match schema version 4: $manifest" home_key_policy_invalid
+expect_contract_error 'requested MCP protocol unsupported' "ERROR: doctor manifest does not match schema version 4: $manifest" requested_protocol_unsupported
+expect_contract_error 'supported MCP protocol duplicated' "ERROR: doctor manifest does not match schema version 4: $manifest" supported_protocol_duplicated
+expect_contract_error 'empty MCP target' "ERROR: doctor manifest does not match schema version 4: $manifest" mcp_target_empty
+expect_contract_error 'MCP cleanup timeout missing' "ERROR: doctor manifest does not match schema version 4: $manifest" cleanup_timeout_missing
+expect_contract_error 'MCP cleanup timeout exhausts total budget' "ERROR: doctor manifest does not match schema version 4: $manifest" cleanup_timeout_exhausts_budget
 expect_failure 'managed file stale' "FAIL: managed file is stale: $managed_runtime" managed_file_stale
 expect_failure 'CLI path shadowed' "FAIL: fixture-cli does not resolve to $cli_path" cli_path_shadowed
 expect_failure 'CLI not executable' "FAIL: CLI is not executable: $cli_path" cli_not_executable

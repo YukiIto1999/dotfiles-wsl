@@ -21,6 +21,7 @@ source_path=$store_dir/test-dotfiles-source
 candidate=$test_root/nix/store/test-system
 previous=$store_dir/previous-system
 displaced_profile=$store_dir/displaced-profile
+json_doctor_template=$test_root/doctor-json-template
 v3_doctor_fixture=$test_root/doctor-v3
 v2_doctor_fixture=$test_root/doctor-v2
 rebuild=$test_root/dotfiles-rebuild
@@ -213,7 +214,7 @@ for command in git nix nom nvd dotfiles-wsl-restart-required nixos-rebuild syste
   ln -s command-stub "$fake_bin/$command"
 done
 
-cat > "$candidate/sw/bin/dotfiles-doctor" <<'DOCTOR'
+cat > "$json_doctor_template" <<'DOCTOR'
 #!@bash@
 set -euo pipefail
 printf -v call 'dotfiles-doctor'
@@ -231,21 +232,22 @@ if [[ $report_mode == invalid ]]; then
 fi
 case $doctor_status in
   0)
-    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"healthy","summary":{"total":1,"pass":1,"warn":0,"fail":0,"error":0,"blocked":0},"checks":[{"id":"fixture.health","phase":"system","status":"pass","subject":"fixture","expected":"healthy","observed":"healthy","message":"fixture is healthy","durationMs":1}]}'
+    report='{"schemaVersion":1,"manifestSchemaVersion":@manifestSchema@,"outcome":"healthy","summary":{"total":1,"pass":1,"warn":0,"fail":0,"error":0,"blocked":0},"checks":[{"id":"fixture.health","phase":"system","status":"pass","subject":"fixture","expected":"healthy","observed":"healthy","message":"fixture is healthy","durationMs":1}]}'
     ;;
   1)
-    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"degraded","summary":{"total":2,"pass":0,"warn":0,"fail":1,"error":0,"blocked":1},"checks":[{"id":"systemd.fixture","phase":"system","status":"fail","subject":"fixture.service","expected":"active","observed":"failed","message":"fixture unit failed","durationMs":1},{"id":"mcp.fixture","phase":"active","status":"blocked","subject":"fixture-mcp","expected":"healthy unit","observed":"blocked","message":"fixture MCP probe was blocked","durationMs":0}]}'
+    report='{"schemaVersion":1,"manifestSchemaVersion":@manifestSchema@,"outcome":"degraded","summary":{"total":2,"pass":0,"warn":0,"fail":1,"error":0,"blocked":1},"checks":[{"id":"systemd.fixture","phase":"system","status":"fail","subject":"fixture.service","expected":"active","observed":"failed","message":"fixture unit failed","durationMs":1},{"id":"mcp.fixture","phase":"active","status":"blocked","subject":"fixture-mcp","expected":"healthy unit","observed":"blocked","message":"fixture MCP probe was blocked","durationMs":0}]}'
     ;;
   2)
-    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"invalid","summary":{"total":1,"pass":0,"warn":0,"fail":0,"error":1,"blocked":0},"checks":[{"id":"doctor.contract","phase":"foundation","status":"error","subject":"fixture-manifest","expected":"schema v3","observed":"invalid","message":"fixture manifest is invalid","durationMs":0}]}'
+    report='{"schemaVersion":1,"manifestSchemaVersion":@manifestSchema@,"outcome":"invalid","summary":{"total":1,"pass":0,"warn":0,"fail":0,"error":1,"blocked":0},"checks":[{"id":"doctor.contract","phase":"foundation","status":"error","subject":"fixture-manifest","expected":"schema v@manifestSchema@","observed":"invalid","message":"fixture manifest is invalid","durationMs":0}]}'
     ;;
   *)
-    report='{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"degraded","summary":{"total":1,"pass":0,"warn":0,"fail":1,"error":0,"blocked":0},"checks":[{"id":"systemd.fixture","phase":"system","status":"fail","subject":"fixture.service","expected":"active","observed":"failed","message":"fixture unit failed","durationMs":1}]}'
+    report='{"schemaVersion":1,"manifestSchemaVersion":@manifestSchema@,"outcome":"degraded","summary":{"total":1,"pass":0,"warn":0,"fail":1,"error":0,"blocked":0},"checks":[{"id":"systemd.fixture","phase":"system","status":"fail","subject":"fixture.service","expected":"active","observed":"failed","message":"fixture unit failed","durationMs":1}]}'
     ;;
 esac
 case $report_mode in
   valid) printf '%s\n' "$report" ;;
-  empty) printf '%s\n' '{"schemaVersion":1,"manifestSchemaVersion":3,"outcome":"healthy","summary":{"total":0,"pass":0,"warn":0,"fail":0,"error":0,"blocked":0},"checks":[]}' ;;
+  empty) printf '%s\n' '{"schemaVersion":1,"manifestSchemaVersion":@manifestSchema@,"outcome":"healthy","summary":{"total":0,"pass":0,"warn":0,"fail":0,"error":0,"blocked":0},"checks":[]}' ;;
+  manifest-mismatch) printf '%s\n' "${report/\"manifestSchemaVersion\":@manifestSchema@/\"manifestSchemaVersion\":99}" ;;
   summary-mismatch) printf '%s\n' "${report/\"total\":2/\"total\":99}" ;;
   field-missing) printf '%s\n' "${report/\"phase\":\"system\",/}" ;;
   multiple) printf '%s\n%s\n' "$report" "$report" ;;
@@ -253,12 +255,15 @@ case $report_mode in
 esac
 exit "$doctor_status"
 DOCTOR
-sed -i "1s|@bash@|$bash_path|" "$candidate/sw/bin/dotfiles-doctor"
+sed -e "1s|@bash@|$bash_path|" -e 's|@manifestSchema@|4|g' \
+  "$json_doctor_template" > "$candidate/sw/bin/dotfiles-doctor"
 chmod +x "$candidate/sw/bin/dotfiles-doctor"
-cp -- "$candidate/sw/bin/dotfiles-doctor" "$v3_doctor_fixture"
-cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
-printf '%s\n' '{"schemaVersion":3}' > "$candidate/etc/dotfiles/doctor.json"
-printf '%s\n' '{"schemaVersion":3}' > "$previous/etc/dotfiles/doctor.json"
+sed -e "1s|@bash@|$bash_path|" -e 's|@manifestSchema@|3|g' \
+  "$json_doctor_template" > "$v3_doctor_fixture"
+chmod +x "$v3_doctor_fixture"
+cp -- "$candidate/sw/bin/dotfiles-doctor" "$previous/sw/bin/dotfiles-doctor"
+printf '%s\n' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json"
+printf '%s\n' '{"schemaVersion":4}' > "$previous/etc/dotfiles/doctor.json"
 
 cat > "$v2_doctor_fixture" <<'DOCTOR'
 #!@bash@
@@ -557,6 +562,24 @@ grep -F 'an enrollment transaction blocks normal rebuild' "$stderr_log" > /dev/n
 reject_call '#sourceSnapshot'
 unset TEST_CHANGED_PATHS
 rm -r -- "$marker_dir"
+
+# forward candidate は schema v4 だけを activation 前に受け入れる。
+for invalid_candidate_manifest in schema-3 schema-5 malformed multiple missing; do
+  case $invalid_candidate_manifest in
+    schema-3) printf '%s\n' '{"schemaVersion":3}' > "$candidate/etc/dotfiles/doctor.json" ;;
+    schema-5) printf '%s\n' '{"schemaVersion":5}' > "$candidate/etc/dotfiles/doctor.json" ;;
+    malformed) printf '%s\n' 'not-json' > "$candidate/etc/dotfiles/doctor.json" ;;
+    multiple) printf '%s\n%s\n' '{"schemaVersion":4}' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json" ;;
+    missing) rm -- "$candidate/etc/dotfiles/doctor.json" ;;
+  esac
+  run_rebuild switch '' '' --plan
+  [[ $rebuild_status -eq 2 ]]
+  grep -F 'candidate does not contain a supported schema version 4 doctor manifest' "$stderr_log" > /dev/null
+  reject_call 'system-activator'
+  reject_call 'nixos-rebuild'
+  reject_call 'dotfiles-doctor'
+  printf '%s\n' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json"
+done
 
 # active receipt がなくても、recovery state tree の owner/mode/実体性を先に検証する。
 receipt_root=$repo/.git/dotfiles-rebuild
@@ -1067,8 +1090,8 @@ rm -- "$active_receipt"
 printf '%s\n' "$previous" > "$current_state"
 printf '%s\n' "$displaced_profile" > "$profile_state"
 printf '%s\n' "$previous" > "$booted_state"
-cp -- "$v2_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
-printf '%s\n' '{"schemaVersion":2}' > "$previous/etc/dotfiles/doctor.json"
+  cp -- "$v2_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+  printf '%s\n' '{"schemaVersion":5}' > "$previous/etc/dotfiles/doctor.json"
 export TEST_BOOT_MONOTONIC=600
 run_rebuild switch '' activation
 [[ $rebuild_status -eq 4 ]]
@@ -1081,8 +1104,18 @@ jq -e --arg previous "$previous" --arg displacedProfile "$displaced_profile" '
   .previous.running == $previous and
   .previous.displacedProfile == $displacedProfile
 ' "$active_receipt" > /dev/null
-grep -F "$candidate/sw/bin/dotfiles-rebuild --rollback $transaction_id" "$stderr_log" > /dev/null
-[[ -L $receipt_root/roots/$transaction_id/candidate ]]
+  grep -F "$candidate/sw/bin/dotfiles-rebuild --rollback $transaction_id" "$stderr_log" > /dev/null
+  [[ -L $receipt_root/roots/$transaction_id/candidate ]]
+
+  run_rebuild switch '' '' --rollback "$transaction_id"
+  [[ $rebuild_status -eq 2 ]]
+  grep -F 'recovery target does not contain a supported doctor manifest' "$stderr_log" > /dev/null
+  reject_call 'system-activator'
+  reject_call 'nixos-rebuild'
+  reject_call 'dotfiles-doctor'
+  jq -e '.state == "activation-failed" and .rollback == null' "$active_receipt" > /dev/null
+
+  printf '%s\n' '{"schemaVersion":2}' > "$previous/etc/dotfiles/doctor.json"
 
 export TEST_DOCTOR_STATUS=1
 run_rebuild switch '' '' --rollback "$transaction_id"
@@ -1106,9 +1139,9 @@ require_exact_call 'dotfiles-doctor'
 grep -Fqx 'OK: legacy doctor fixture is healthy' "$stdout_log"
 rolled_back_receipt=$receipt_root/receipts/$transaction_id.json
 jq -e '.state == "rolled-back"' "$rolled_back_receipt" > /dev/null
-[[ ! -e $receipt_root/roots/$transaction_id && ! -L $receipt_root/roots/$transaction_id ]]
-cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
-printf '%s\n' '{"schemaVersion":3}' > "$previous/etc/dotfiles/doctor.json"
+  [[ ! -e $receipt_root/roots/$transaction_id && ! -L $receipt_root/roots/$transaction_id ]]
+  cp -- "$v3_doctor_fixture" "$previous/sw/bin/dotfiles-doctor"
+  printf '%s\n' '{"schemaVersion":3}' > "$previous/etc/dotfiles/doctor.json"
 
 cp -- "$rolled_back_receipt" "$active_receipt"
 chmod 0600 "$active_receipt"
@@ -1306,6 +1339,22 @@ require_call 'dotfiles-doctor'
 jq -e '
   .state == "complete" and .verification.failedCheckIds == []
 ' "$receipt_root/receipts/$transaction_id.json" > /dev/null
+
+# report は target manifest と同じ schema version を宣言しなければならない。
+export TEST_DOCTOR_REPORT=manifest-mismatch
+run_rebuild switch '' ''
+[[ $rebuild_status -eq 5 ]]
+manifest_mismatch_receipt=$receipt_root/active.json
+manifest_mismatch_id=$(jq -r '.transactionId' "$manifest_mismatch_receipt")
+jq -e '
+  .state == "verification-failed" and
+  .verification.exitCode == 2 and
+  .verification.failedCheckIds == ["doctor.report"] and
+  .failureStage == "doctor"
+' "$manifest_mismatch_receipt" > /dev/null
+export TEST_DOCTOR_REPORT=valid
+run_rebuild switch '' '' --resume "$manifest_mismatch_id"
+[[ $rebuild_status -eq 0 ]]
 
 # doctor 自身の contract error はruntime driftとは別の outcome/ID のまま保存する。
 export TEST_DOCTOR_STATUS=2

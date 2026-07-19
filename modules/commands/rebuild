@@ -448,6 +448,38 @@ verification_failed() {
   return 2
 }
 
+read_doctor_manifest_schema() {
+  local target=$1 manifest canonical
+  manifest=$target/etc/dotfiles/doctor.json
+  canonical=$(readlink -e -- "$manifest" 2>/dev/null) || return 1
+  [[ $canonical == "$nix_store_dir/"* && -r $canonical ]] || return 1
+  jq -ers '
+    if length == 1 and (.[0] | type) == "object" and
+      (.[0].schemaVersion | type) == "number" and
+      .[0].schemaVersion > 0 and
+      (.[0].schemaVersion | floor) == .[0].schemaVersion
+    then .[0].schemaVersion
+    else error("invalid doctor manifest schema")
+    end
+  ' "$canonical" 2>/dev/null
+}
+
+doctor_manifest_route() {
+  local direction=$1 target=$2 schema
+  schema=$(read_doctor_manifest_schema "$target") || return 1
+  case "$direction:$schema" in
+    forward:4 | rollback:4 | rollback:3)
+      printf '%s|json\n' "$schema"
+      ;;
+    rollback:2)
+      printf '%s|legacy\n' "$schema"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 observe_first_boot() {
   local direction=$1 target=$2 expected_user=$3 receipt state effect
   local before_boot current_boot current profile booted timestamp next_state
@@ -537,7 +569,7 @@ verify_target() {
   local direction=$1 target=$2 expected_user=$3 target_effect=$4 state timestamp receipt expected_distro
   local actual_current actual_profile actual_booted observed_effect doctor_status=0
   local doctor_report doctor_report_json='' doctor_failed_check_ids='[]'
-  local doctor_manifest_schema=3 target_doctor_manifest="$target/etc/dotfiles/doctor.json"
+  local doctor_manifest_schema doctor_protocol doctor_route
   local before_boot first_boot current_boot
 
   receipt=$(receipt_read) || die 1 "failed to read verification receipt"
@@ -596,6 +628,13 @@ verify_target() {
     verification_failed "$direction" cold-start 24 "WSL cold-start transition is incomplete: $observed_effect"
   fi
 
+  if ! doctor_route=$(doctor_manifest_route "$direction" "$target"); then
+    verification_failed \
+      "$direction" doctor 2 "unsupported or invalid doctor manifest for $direction target $target" \
+      '["doctor.manifest"]'
+  fi
+  IFS='|' read -r doctor_manifest_schema doctor_protocol <<< "$doctor_route"
+
   if [[ $direction == forward ]]; then
     state=verifying
   else
@@ -613,8 +652,7 @@ verify_target() {
 
   doctor_report=$(mktemp)
   set +e
-  if [[ $direction == rollback ]] && jq -e '.schemaVersion == 2' "$target_doctor_manifest" >/dev/null 2>&1; then
-    doctor_manifest_schema=2
+  if [[ $doctor_protocol == legacy ]]; then
     "$target/sw/bin/dotfiles-doctor" > "$doctor_report"
     doctor_status=$?
     cat -- "$doctor_report"
@@ -951,6 +989,8 @@ if [[ $mode == apply || $mode == plan ]]; then
   [[ -L $temporary_gc_roots/candidate &&
     $(readlink -f -- "$temporary_gc_roots/candidate") == "$candidate" ]] || \
     die 1 "candidate build did not create its temporary GC root"
+  doctor_manifest_route forward "$candidate" >/dev/null || \
+    die 2 "candidate does not contain a supported schema version 4 doctor manifest"
 
   previous_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system"
   previous_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system"
@@ -1128,6 +1168,8 @@ fi
 if [[ $mode == rollback && $state != aborted ]] && jq -e '.rollback == null' <<< "$active" >/dev/null; then
   previous=$(jq -r '.recoveryTarget' <<< "$active")
   previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
+  doctor_manifest_route rollback "$previous" >/dev/null || \
+    die 2 "recovery target does not contain a supported doctor manifest"
   rollback_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system for rollback"
   rollback_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system for rollback"
   rollback_profile=$(readlink -f -- /nix/var/nix/profiles/system) || \

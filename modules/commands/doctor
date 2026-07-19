@@ -1,15 +1,159 @@
 set +e
 
-fail=0
+manifest=''
+manifest_schema_version=2
+report_schema_version=1
+format=human
+
+usage() {
+  printf '%s\n' 'usage: dotfiles-doctor [--format human|json]' >&2
+}
+
+if [[ $# -gt 0 ]]; then
+  if [[ $# -ne 2 || $1 != --format || ($2 != human && $2 != json) ]]; then
+    usage
+    exit 2
+  fi
+  format=$2
+fi
+
+report_tmp=$(mktemp -d)
+checks_file="$report_tmp/checks.jsonl"
+: > "$checks_file"
+
+mcp_tmp=''
+mcp_url=''
+mcp_session=''
+mcp_cleanup_protocol=''
+mcp_cleanup_done=0
+mcp_request_number=0
+mcp_phase_failed=0
+contract_error=0
+legacy_check_index=0
+
+add_check() {
+  local id=$1 phase=$2 status=$3 subject=$4 expected=$5 observed=$6 message=$7 duration=$8
+  jq -cn \
+    --arg id "$id" \
+    --arg phase "$phase" \
+    --arg status "$status" \
+    --arg subject "$subject" \
+    --arg expected "$expected" \
+    --arg observed "$observed" \
+    --arg message "$message" \
+    --argjson durationMs "$duration" \
+    '{id:$id,phase:$phase,status:$status,subject:$subject,expected:$expected,observed:$observed,message:$message,durationMs:$durationMs}' \
+    >> "$checks_file"
+}
+render_report() {
+  local forced_status=${1-} checks summary outcome exit_status internal_message
+  if ! checks=$(jq -s '.' "$checks_file") || ! jq -e '
+    type == "array" and length > 0 and
+    all(.[];
+      (.id | type) == "string" and (.id | length) > 0 and
+      (.phase == "foundation" or .phase == "local" or .phase == "system" or .phase == "active") and
+      (.status == "pass" or .status == "warn" or .status == "fail" or .status == "error" or .status == "blocked") and
+      (.subject | type) == "string" and
+      (.expected | type) == "string" and
+      (.observed | type) == "string" and
+      (.message | type) == "string" and (.message | length) > 0 and
+      (.durationMs | type) == "number" and .durationMs >= 0 and (.durationMs | floor) == .durationMs
+    ) and
+    ([.[].id] | length) == ([.[].id] | unique | length)
+  ' <<< "$checks" >/dev/null 2>&1; then
+    internal_message='doctor result core violates its internal contract'
+    contract_error=1
+    checks=$(jq -cn --arg message "$internal_message" '[{
+      id:"internal.report",phase:"foundation",status:"error",subject:"result-core",
+      expected:"valid unique checks",observed:"invalid",message:$message,durationMs:0
+    }]')
+  fi
+  summary=$(jq -cn --argjson checks "$checks" '{
+    total: ($checks | length),
+    pass: ([$checks[] | select(.status == "pass")] | length),
+    warn: ([$checks[] | select(.status == "warn")] | length),
+    fail: ([$checks[] | select(.status == "fail")] | length),
+    error: ([$checks[] | select(.status == "error")] | length),
+    blocked: ([$checks[] | select(.status == "blocked")] | length)
+  }')
+
+  if [[ $forced_status == 2 || $contract_error -eq 1 ]] || jq -e '.error > 0' <<< "$summary" >/dev/null; then
+    outcome=invalid
+    exit_status=2
+  elif jq -e '.fail > 0 or .blocked > 0' <<< "$summary" >/dev/null; then
+    outcome=degraded
+    exit_status=1
+  else
+    outcome=healthy
+    exit_status=0
+  fi
+
+  if [[ $format == json ]]; then
+    jq -cn \
+      --argjson schemaVersion "$report_schema_version" \
+      --argjson manifestSchemaVersion "$manifest_schema_version" \
+      --arg outcome "$outcome" \
+      --argjson summary "$summary" \
+      --argjson checks "$checks" \
+      '{schemaVersion:$schemaVersion,manifestSchemaVersion:$manifestSchemaVersion,outcome:$outcome,summary:$summary,checks:$checks}'
+  else
+    jq -r '.[] | (if .status == "pass" then "OK" elif .status == "warn" then "WARN" elif .status == "fail" then "FAIL" elif .status == "error" then "ERROR" else "SKIP" end) + ": " + .message' <<< "$checks"
+  fi
+  return "$exit_status"
+}
+
+mcp_remove_temp() {
+  if [[ -n $mcp_tmp ]]; then
+    rm -rf -- "$mcp_tmp"
+    mcp_tmp=''
+  fi
+}
+
+# EXIT trap から関数名で呼び出す。
+# shellcheck disable=SC2329
+cleanup_all() {
+  local status=$?
+  if declare -F mcp_cleanup_session >/dev/null; then
+    mcp_cleanup_session >/dev/null 2>&1
+  fi
+  mcp_remove_temp
+  rm -rf -- "$report_tmp"
+  return "$status"
+}
+
+# INT / TERM trap から関数名で呼び出す。
+# shellcheck disable=SC2329
+signal_exit() {
+  local status=$1
+  trap - INT TERM
+  if declare -F mcp_cleanup_session >/dev/null; then
+    mcp_cleanup_session >/dev/null 2>&1
+  fi
+  mcp_remove_temp
+  rm -rf -- "$report_tmp"
+  exit "$status"
+}
+
+trap cleanup_all EXIT
+trap 'signal_exit 130' INT
+trap 'signal_exit 143' TERM
+
 manifest="@doctorManifestPath@"
 
-ok()  { printf 'OK: %s\n' "$*"; }
-warn() { printf 'WARN: %s\n' "$*" >&2; }
-bad() { printf 'FAIL: %s\n' "$*" >&2; fail=1; }
+record_legacy_check() {
+  local status=$1 message=$2
+  legacy_check_index=$((legacy_check_index + 1))
+  add_check "legacy.$legacy_check_index" active "$status" legacy-probe legacy-result \
+    "$status" "$message" 0
+}
+
+ok() { record_legacy_check pass "$*"; }
+warn() { record_legacy_check warn "$*"; }
+bad() { record_legacy_check fail "$*"; }
 
 if [[ ! -r $manifest ]]; then
   bad "doctor manifest is not readable: $manifest"
-  exit "$fail"
+  render_report; exit $?
 fi
 
 if ! jq -e '
@@ -63,7 +207,7 @@ if ! jq -e '
   (.nixLdPath | type) == "string"
 ' "$manifest" >/dev/null 2>&1; then
   bad "doctor manifest does not match schema version 2: $manifest"
-  exit "$fail"
+  render_report; exit $?
 fi
 
 current=$(jq -r '.generation.current' "$manifest")
@@ -530,31 +674,6 @@ mcp_cleanup_session() {
   return 0
 }
 
-mcp_remove_temp() {
-  if [[ -n $mcp_tmp ]]; then
-    rm -rf -- "$mcp_tmp"
-    mcp_tmp=''
-  fi
-}
-
-# ShellCheck cannot infer function calls made by trap.
-# shellcheck disable=SC2329
-mcp_exit_trap() {
-  local status=$?
-  mcp_cleanup_session
-  mcp_remove_temp
-  return "$status"
-}
-
-# shellcheck disable=SC2329
-mcp_signal_trap() {
-  local status=$1
-  trap - INT TERM
-  mcp_cleanup_session
-  mcp_remove_temp
-  exit "$status"
-}
-
 mcp_parse_response() {
   local expected_id=$1 content_type_lower=${mcp_content_type,,}
   local line event_data=''
@@ -624,9 +743,6 @@ mcp_session=''
 mcp_protocol=''
 mcp_cleanup_protocol=''
 mcp_cleanup_done=0
-trap mcp_exit_trap EXIT
-trap 'mcp_signal_trap 130' INT
-trap 'mcp_signal_trap 143' TERM
 check_mcp
 mcp_remove_temp
 
@@ -637,4 +753,4 @@ else
   bad "nix-ld dynamic linker path is missing: $nix_ld_path"
 fi
 
-exit "$fail"
+  render_report; exit $?

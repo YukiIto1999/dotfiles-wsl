@@ -1,7 +1,8 @@
 set +e
 
+manifest_entry="@doctorManifestPath@"
 manifest=''
-manifest_schema_version=2
+manifest_schema_version="@doctorSchemaVersion@"
 report_schema_version=1
 format=human
 
@@ -29,7 +30,16 @@ mcp_cleanup_done=0
 mcp_request_number=0
 mcp_phase_failed=0
 contract_error=0
-legacy_check_index=0
+
+now_ms() {
+  date +%s%3N
+}
+
+duration_since() {
+  local started=$1 finished
+  finished=$(now_ms)
+  printf '%s\n' "$((finished - started))"
+}
 
 add_check() {
   local id=$1 phase=$2 status=$3 subject=$4 expected=$5 observed=$6 message=$7 duration=$8
@@ -45,6 +55,11 @@ add_check() {
     '{id:$id,phase:$phase,status:$status,subject:$subject,expected:$expected,observed:$observed,message:$message,durationMs:$durationMs}' \
     >> "$checks_file"
 }
+
+stable_component() {
+  jq -rn --arg component "$1" '$component | @uri'
+}
+
 render_report() {
   local forced_status=${1-} checks summary outcome exit_status internal_message
   if ! checks=$(jq -s '.' "$checks_file") || ! jq -e '
@@ -138,26 +153,23 @@ trap cleanup_all EXIT
 trap 'signal_exit 130' INT
 trap 'signal_exit 143' TERM
 
-manifest="@doctorManifestPath@"
-
-record_legacy_check() {
-  local status=$1 message=$2
-  legacy_check_index=$((legacy_check_index + 1))
-  add_check "legacy.$legacy_check_index" active "$status" legacy-probe legacy-result \
-    "$status" "$message" 0
-}
-
-ok() { record_legacy_check pass "$*"; }
-warn() { record_legacy_check warn "$*"; }
-bad() { record_legacy_check fail "$*"; }
-
-if [[ ! -r $manifest ]]; then
-  bad "doctor manifest is not readable: $manifest"
-  render_report; exit $?
+manifest_started=$(now_ms)
+manifest=$(readlink -e -- "$manifest_entry" 2>/dev/null)
+if [[ -z $manifest || ! -r $manifest ]]; then
+  add_check \
+    foundation.manifest foundation error "$manifest_entry" \
+    "readable schema version $manifest_schema_version manifest" unreadable \
+    "doctor manifest is not readable: $manifest_entry" \
+    "$(duration_since "$manifest_started")"
+  contract_error=1
+  render_report 2
+  exit $?
 fi
 
-if ! jq -e '
-  .schemaVersion == 2 and
+# $schema などは shell 変数ではなく、--arg で渡す jq 変数。
+# shellcheck disable=SC2016
+manifest_contract='
+  .schemaVersion == ($schema | tonumber) and
   (.user.name | type) == "string" and
   (.user.home | type) == "string" and
   (.generation.current | type) == "string" and
@@ -167,15 +179,25 @@ if ! jq -e '
   (.sops.homeKey.path | type) == "string" and
   (.sops.homeKey.policy == "warn" or .sops.homeKey.policy == "reject") and
   (.units | type) == "array" and
-  all(.units[]; type == "string") and
+  all(.units[];
+    (.id | type) == "string" and (.id | length) > 0 and
+    (.expected | type) == "object" and
+    (.expected.LoadState | type) == "string" and
+    (.expected.ActiveState | type) == "string" and
+    (.expected.SubState == null or (.expected.SubState | type) == "string") and
+    (.expected.Result == null or (.expected.Result | type) == "string")
+  ) and
+  ([.units[].id] | length) == ([.units[].id] | unique | length) and
   (.managedFiles | type) == "array" and
   all(.managedFiles[];
+    (.id | type) == "string" and (.id | length) > 0 and
     (.path | type) == "string" and
     (.source | type) == "string"
   ) and
+  ([.managedFiles[].id] | length) == ([.managedFiles[].id] | unique | length) and
   (.clis | type) == "array" and
   all(.clis[];
-    (.name | type) == "string" and
+    (.name | type) == "string" and (.name | length) > 0 and
     (.binaryName | type) == "string" and
     (.binaryPath | type) == "string" and
     (.rules.path | type) == "string" and
@@ -190,197 +212,290 @@ if ! jq -e '
     )) and
     (.gatewayFile == null or (
       (.gatewayFile.path | type) == "string" and
-      (.gatewayFile.contains | type) == "string"
+      (.gatewayFile.source | type) == "string"
     ))
   ) and
-  (.mcp | type) == "object" and
+  ([.clis[].name] | length) == ([.clis[].name] | unique | length) and
   (.mcp.url | type) == "string" and
+  (.mcp.healthUnit | type) == "string" and
+  (.mcp.healthUnit as $health | any(.units[]; .id == $health)) and
   (.mcp.targets | type) == "array" and
-  all(.mcp.targets[]; type == "string") and
-  (.mcp.requestedProtocolVersion | type) == "string" and
+  all(.mcp.targets[]; type == "string" and length > 0) and
+  ([.mcp.targets[]] | length) == ([.mcp.targets[]] | unique | length) and
+  (.mcp.requestedProtocolVersion | type) == "string" and (.mcp.requestedProtocolVersion | length) > 0 and
   (.mcp.supportedProtocolVersions | type) == "array" and
-  all(.mcp.supportedProtocolVersions[]; type == "string") and
+  (.mcp.supportedProtocolVersions | length) > 0 and
+  all(.mcp.supportedProtocolVersions[]; type == "string" and length > 0) and
+  ([.mcp.supportedProtocolVersions[]] | length) == ([.mcp.supportedProtocolVersions[]] | unique | length) and
+  (.mcp.requestedProtocolVersion as $requested | .mcp.supportedProtocolVersions | index($requested) != null) and
+  (.probePolicy | type) == "object" and
+  all([
+    .probePolicy.cliTimeoutSeconds,
+    .probePolicy.systemTimeoutSeconds,
+    .probePolicy.windowsTimeoutSeconds,
+    .probePolicy.mcpRequestTimeoutSeconds,
+    .probePolicy.mcpCleanupTimeoutSeconds,
+    .probePolicy.totalTimeoutSeconds,
+    .probePolicy.maxPages,
+    .probePolicy.maxResponseBytes
+  ][]; type == "number" and . > 0 and floor == .) and
+  .probePolicy.mcpCleanupTimeoutSeconds < .probePolicy.totalTimeoutSeconds and
   (.wslInterop.launcherName | type) == "string" and
   (.wslInterop.launcherPath | type) == "string" and
   (.wslInterop.launcherSource | type) == "string" and
   (.wslInterop.windowsCommand | type) == "string" and
   (.nixLdPath | type) == "string"
-' "$manifest" >/dev/null 2>&1; then
-  bad "doctor manifest does not match schema version 2: $manifest"
-  render_report; exit $?
+'
+
+if ! jq -e --arg schema "$manifest_schema_version" "$manifest_contract" "$manifest" >/dev/null 2>&1; then
+  add_check \
+    foundation.manifest foundation error "$manifest_entry" \
+    "schema version $manifest_schema_version" invalid \
+    "doctor manifest does not match schema version $manifest_schema_version: $manifest_entry" \
+    "$(duration_since "$manifest_started")"
+  contract_error=1
+  render_report 2
+  exit $?
 fi
+add_check \
+  foundation.manifest foundation pass "$manifest_entry" \
+  "schema version $manifest_schema_version" "schema version $manifest_schema_version" \
+  "doctor manifest matches schema version $manifest_schema_version" \
+  "$(duration_since "$manifest_started")"
 
 current=$(jq -r '.generation.current' "$manifest")
 booted=$(jq -r '.generation.booted' "$manifest")
 profile=$(jq -r '.generation.profile' "$manifest")
+foundation_failed=0
 
+started=$(now_ms)
+configured_user=$(jq -r '.user.name' "$manifest")
+configured_home=$(jq -r '.user.home' "$manifest")
+runtime_user=$(id -un 2>/dev/null)
+runtime_home=${HOME-}
+if [[ $runtime_user == "$configured_user" && $runtime_home == "$configured_home" ]]; then
+  add_check foundation.identity foundation pass "$runtime_user:$runtime_home" \
+    "$configured_user:$configured_home" "$runtime_user:$runtime_home" \
+    "doctor process identity matches the configured user and home" "$(duration_since "$started")"
+else
+  add_check foundation.identity foundation fail "$runtime_user:$runtime_home" \
+    "$configured_user:$configured_home" "$runtime_user:$runtime_home" \
+    "doctor process identity does not match the configured user and home" "$(duration_since "$started")"
+  foundation_failed=1
+fi
+
+started=$(now_ms)
 current_canonical=$(readlink -e -- "$current" 2>/dev/null)
 if [[ -z $current_canonical ]]; then
-  bad "current generation cannot be resolved: $current"
-fi
-
-profile_canonical=$(readlink -e -- "$profile" 2>/dev/null)
-if [[ -z $profile_canonical ]]; then
-  bad "system profile cannot be resolved: $profile"
-elif [[ -n $current_canonical && $profile_canonical != "$current_canonical" ]]; then
-  bad "system profile does not match current generation"
+  add_check foundation.current foundation fail "$current" resolvable unresolved \
+    "current generation cannot be resolved: $current" "$(duration_since "$started")"
+  foundation_failed=1
 else
-  ok "system profile matches current generation"
+  add_check foundation.current foundation pass "$current" resolvable "$current_canonical" \
+    "current generation is resolvable" "$(duration_since "$started")"
 fi
 
+started=$(now_ms)
+expected_manifest_canonical=''
+if [[ -n $current_canonical ]]; then
+  expected_manifest_canonical=$(readlink -e -- "$current_canonical/etc/dotfiles/doctor.json" 2>/dev/null)
+fi
+if [[ -z $current_canonical ]]; then
+  add_check foundation.snapshot foundation blocked "$manifest_entry" current-generation-manifest unknown \
+    "generation snapshot comparison is blocked because current generation is unresolved" \
+    "$(duration_since "$started")"
+elif [[ -z $expected_manifest_canonical || $manifest != "$expected_manifest_canonical" ]]; then
+  add_check foundation.snapshot foundation fail "$manifest_entry" "$expected_manifest_canonical" "$manifest" \
+    "doctor manifest does not belong to the resolved current generation" "$(duration_since "$started")"
+  foundation_failed=1
+else
+  add_check foundation.snapshot foundation pass "$manifest_entry" "$expected_manifest_canonical" "$manifest" \
+    "doctor manifest is pinned to the current generation" "$(duration_since "$started")"
+fi
+
+started=$(now_ms)
+if [[ -z $current_canonical ]]; then
+  add_check foundation.profile foundation blocked "$profile" "$current" unknown \
+    "system profile comparison is blocked because current generation is unresolved" \
+    "$(duration_since "$started")"
+else
+  profile_canonical=$(readlink -e -- "$profile" 2>/dev/null)
+  if [[ -z $profile_canonical ]]; then
+    add_check foundation.profile foundation fail "$profile" "$current_canonical" unresolved \
+      "system profile cannot be resolved: $profile" "$(duration_since "$started")"
+    foundation_failed=1
+  elif [[ $profile_canonical != "$current_canonical" ]]; then
+    add_check foundation.profile foundation fail "$profile" "$current_canonical" "$profile_canonical" \
+      "system profile does not match current generation" "$(duration_since "$started")"
+    foundation_failed=1
+  else
+    add_check foundation.profile foundation pass "$profile" "$current_canonical" "$profile_canonical" \
+      "system profile matches current generation" "$(duration_since "$started")"
+  fi
+fi
+
+started=$(now_ms)
 running_canonical=$(readlink -e -- "$0" 2>/dev/null)
 expected_doctor_canonical=''
 if [[ -n $current_canonical ]]; then
   expected_doctor_canonical=$(readlink -e -- "$current/sw/bin/dotfiles-doctor" 2>/dev/null)
 fi
-
-if [[ -z $running_canonical ]]; then
-  bad "running doctor cannot be resolved: $0"
+if [[ -z $current_canonical ]]; then
+  add_check foundation.self foundation blocked "$0" current-generation-doctor unknown \
+    "running doctor comparison is blocked because current generation is unresolved" \
+    "$(duration_since "$started")"
+elif [[ -z $running_canonical ]]; then
+  add_check foundation.self foundation fail "$0" "$expected_doctor_canonical" unresolved \
+    "running doctor cannot be resolved: $0" "$(duration_since "$started")"
+  foundation_failed=1
 elif [[ -z $expected_doctor_canonical ]]; then
-  bad "current generation doctor cannot be resolved: $current/sw/bin/dotfiles-doctor"
+  add_check foundation.self foundation fail "$0" "$current/sw/bin/dotfiles-doctor" unresolved \
+    "current generation doctor cannot be resolved: $current/sw/bin/dotfiles-doctor" \
+    "$(duration_since "$started")"
+  foundation_failed=1
 elif [[ $running_canonical != "$expected_doctor_canonical" ]]; then
-  bad "running doctor does not match current generation"
+  add_check foundation.self foundation fail "$0" "$expected_doctor_canonical" "$running_canonical" \
+    "running doctor does not match current generation" "$(duration_since "$started")"
+  foundation_failed=1
 else
-  ok "running doctor matches current generation"
+  add_check foundation.self foundation pass "$0" "$expected_doctor_canonical" "$running_canonical" \
+    "running doctor matches current generation" "$(duration_since "$started")"
 fi
 
-effect=$(dotfiles-wsl-restart-required \
-  --plan \
-  --booted-system "$booted" \
-  --current-system "$current" \
-  "$current" 2>/dev/null)
-effect_status=$?
-if [[ $effect_status -ne 0 || -z $effect ]]; then
-  bad "WSL cold-start state could not be classified"
-elif [[ $effect != switch ]]; then
-  bad "WSL cold-start state requires $effect"
+started=$(now_ms)
+if [[ -z $current_canonical ]]; then
+  add_check foundation.cold-start foundation blocked "$booted" switch unknown \
+    "WSL cold-start classification is blocked because current generation is unresolved" \
+    "$(duration_since "$started")"
 else
-  ok "WSL cold-start state is current"
-fi
-
-while IFS= read -r unit; do
-  load_state=$(systemctl show --property=LoadState --value "$unit" 2>/dev/null)
-  load_status=$?
-  if [[ $load_status -ne 0 || -z $load_state ]]; then
-    bad "$unit LoadState could not be queried"
-  elif [[ $load_state != loaded ]]; then
-    bad "$unit LoadState is not loaded: $load_state"
+  effect=$(dotfiles-wsl-restart-required \
+    --plan \
+    --booted-system "$booted" \
+    --current-system "$current" \
+    "$current" 2>/dev/null)
+  effect_status=$?
+  if [[ $effect_status -ne 0 || -z $effect ]]; then
+    add_check foundation.cold-start foundation fail "$booted" switch unclassified \
+      "WSL cold-start state could not be classified" "$(duration_since "$started")"
+    foundation_failed=1
+  elif [[ $effect != switch ]]; then
+    add_check foundation.cold-start foundation fail "$booted" switch "$effect" \
+      "WSL cold-start state requires $effect" "$(duration_since "$started")"
+    foundation_failed=1
   else
-    ok "$unit is loaded"
+    add_check foundation.cold-start foundation pass "$booted" switch "$effect" \
+      "WSL cold-start state is current" "$(duration_since "$started")"
   fi
-
-  active_state=$(systemctl show --property=ActiveState --value "$unit" 2>/dev/null)
-  active_status=$?
-  if [[ $active_status -ne 0 || -z $active_state ]]; then
-    bad "$unit ActiveState could not be queried"
-  elif [[ $active_state != active ]]; then
-    bad "$unit ActiveState is not active: $active_state"
-  else
-    ok "$unit is active"
-  fi
-done < <(jq -r '.units[]' "$manifest")
-
-root_probe=$(jq -r '.sops.rootProbe' "$manifest")
-root_metadata=$(sudo -n -- "$root_probe" 2>/dev/null)
-root_probe_status=$?
-if [[ $root_probe_status -eq 0 ]] && jq -e '
-  .directory.uid == 0 and
-  .directory.gid == 0 and
-  .directory.mode == "700" and
-  .key.uid == 0 and
-  .key.gid == 0 and
-  .key.mode == "400"
-' <<< "$root_metadata" >/dev/null 2>&1; then
-  ok "SOPS host key metadata matches root policy"
-else
-  bad "SOPS host key metadata does not match root policy"
 fi
 
-home_key=$(jq -r '.sops.homeKey.path' "$manifest")
-home_key_policy=$(jq -r '.sops.homeKey.policy' "$manifest")
-if [[ -e $home_key || -L $home_key ]]; then
-  if [[ $home_key_policy == reject ]]; then
-    bad "user SOPS age key must not exist after migration"
-  else
-    warn "user SOPS age key still exists during migration"
-  fi
-else
-  ok "user SOPS age key is absent"
+if [[ $foundation_failed -ne 0 ]]; then
+  add_check phase.local local blocked local foundation-pass blocked \
+    "local checks are blocked by foundation drift" 0
+  add_check phase.system system blocked system foundation-pass blocked \
+    "system checks are blocked by foundation drift" 0
+  add_check phase.active active blocked active foundation-pass blocked \
+    "active checks are blocked by foundation drift" 0
+  render_report
+  exit $?
 fi
 
+# Local checks are pure comparisons against the manifest and current process environment.
 while IFS= read -r managed_file; do
+  id=$(jq -r '.id' <<< "$managed_file")
   path=$(jq -r '.path' <<< "$managed_file")
   source=$(jq -r '.source' <<< "$managed_file")
+  component=$(stable_component "$id")
+  started=$(now_ms)
   if cmp --silent -- "$path" "$source" 2>/dev/null; then
-    ok "managed file is current: $path"
+    add_check "local.managed.$component" local pass "$path" "$source" identical \
+      "managed file is current: $path" "$(duration_since "$started")"
   else
-    bad "managed file is stale: $path"
+    add_check "local.managed.$component" local fail "$path" "$source" different \
+      "managed file is stale: $path" "$(duration_since "$started")"
   fi
 done < <(jq -c '.managedFiles[]' "$manifest")
 
+declare -A cli_executable=()
 while IFS= read -r cli; do
   name=$(jq -r '.name' <<< "$cli")
+  component=$(stable_component "$name")
   binary_name=$(jq -r '.binaryName' <<< "$cli")
   binary_path=$(jq -r '.binaryPath' <<< "$cli")
 
+  started=$(now_ms)
   if [[ -x $binary_path ]]; then
-    ok "$name CLI is executable"
+    cli_executable[$name]=1
+    add_check "local.cli.$component.executable" local pass "$binary_path" executable executable \
+      "$name CLI is executable" "$(duration_since "$started")"
   else
-    bad "CLI is not executable: $binary_path"
+    cli_executable[$name]=0
+    add_check "local.cli.$component.executable" local fail "$binary_path" executable unavailable \
+      "CLI is not executable: $binary_path" "$(duration_since "$started")"
   fi
 
+  started=$(now_ms)
   resolved_binary=$(type -P -- "$binary_name" 2>/dev/null)
-  if [[ $resolved_binary != "$binary_path" ]]; then
-    bad "$binary_name does not resolve to $binary_path"
+  if [[ $resolved_binary == "$binary_path" ]]; then
+    add_check "local.cli.$component.path" local pass "$binary_name" "$binary_path" "$resolved_binary" \
+      "$binary_name resolves to $binary_path" "$(duration_since "$started")"
   else
-    ok "$binary_name resolves to $binary_path"
-  fi
-
-  version=$(timeout 5s "$binary_path" --version 2>/dev/null)
-  version_status=$?
-  if [[ $version_status -eq 0 && -n $version ]]; then
-    ok "$binary_name version check passed"
-  else
-    bad "$binary_name version check failed"
+    add_check "local.cli.$component.path" local fail "$binary_name" "$binary_path" "${resolved_binary:-unresolved}" \
+      "$binary_name does not resolve to $binary_path" "$(duration_since "$started")"
   fi
 
   rules_path=$(jq -r '.rules.path' <<< "$cli")
   rules_source=$(jq -r '.rules.source' <<< "$cli")
+  started=$(now_ms)
   if cmp --silent -- "$rules_path" "$rules_source" 2>/dev/null; then
-    ok "$name rules file is current"
+    add_check "local.cli.$component.rules" local pass "$rules_path" "$rules_source" identical \
+      "$name rules file is current" "$(duration_since "$started")"
   else
-    bad "$name rules file is stale: $rules_path"
+    add_check "local.cli.$component.rules" local fail "$rules_path" "$rules_source" different \
+      "$name rules file is stale: $rules_path" "$(duration_since "$started")"
   fi
 
   skills_directory=$(jq -r '.skills.directory' <<< "$cli")
-  while IFS= read -r skill_name; do
-    skill_file="$skills_directory/$skill_name/SKILL.md"
-    if [[ -f $skill_file ]]; then
-      ok "$name skill is deployed: $skill_name"
-    else
-      bad "$name skill is missing: $skill_file"
-    fi
-  done < <(jq -r '.skills.names[]' <<< "$cli")
+  mapfile -t expected_skills < <(jq -r '.skills.names[]' <<< "$cli")
+  missing_skills=()
+  started=$(now_ms)
+  for skill_name in "${expected_skills[@]}"; do
+    [[ -f $skills_directory/$skill_name/SKILL.md ]] || missing_skills+=("$skills_directory/$skill_name/SKILL.md")
+  done
+  if [[ ${#missing_skills[@]} -eq 0 ]]; then
+    add_check "local.cli.$component.skills" local pass "$skills_directory" "${#expected_skills[@]} deployed skills" complete \
+      "$name skills are deployed" "$(duration_since "$started")"
+  else
+    add_check "local.cli.$component.skills" local fail "$skills_directory" "${#expected_skills[@]} deployed skills" "${missing_skills[*]}" \
+      "$name skill is missing: ${missing_skills[0]}" "$(duration_since "$started")"
+  fi
 
   agents_directory=$(jq -r '.agents.directory // empty' <<< "$cli")
   if [[ -n $agents_directory ]]; then
-    while IFS= read -r agent_file; do
-      agent_path="$agents_directory/$agent_file"
-      if [[ -f $agent_path ]]; then
-        ok "$name agent is deployed: $agent_file"
-      else
-        bad "$name agent is missing: $agent_path"
-      fi
-    done < <(jq -r '.agents.files[]' <<< "$cli")
+    mapfile -t expected_agents < <(jq -r '.agents.files[]' <<< "$cli")
+    missing_agents=()
+    started=$(now_ms)
+    for agent_name in "${expected_agents[@]}"; do
+      [[ -f $agents_directory/$agent_name ]] || missing_agents+=("$agents_directory/$agent_name")
+    done
+    if [[ ${#missing_agents[@]} -eq 0 ]]; then
+      add_check "local.cli.$component.agents" local pass "$agents_directory" "${#expected_agents[@]} deployed agents" complete \
+        "$name agents are deployed" "$(duration_since "$started")"
+    else
+      add_check "local.cli.$component.agents" local fail "$agents_directory" "${#expected_agents[@]} deployed agents" "${missing_agents[*]}" \
+        "$name agent is missing: ${missing_agents[0]}" "$(duration_since "$started")"
+    fi
   fi
 
   gateway_path=$(jq -r '.gatewayFile.path // empty' <<< "$cli")
-  gateway_contains=$(jq -r '.gatewayFile.contains // empty' <<< "$cli")
+  gateway_source=$(jq -r '.gatewayFile.source // empty' <<< "$cli")
   if [[ -n $gateway_path ]]; then
-    if [[ -n $gateway_contains ]] && grep -qF -- "$gateway_contains" "$gateway_path" 2>/dev/null; then
-      ok "$name gateway file is current"
+    started=$(now_ms)
+    if cmp --silent -- "$gateway_path" "$gateway_source" 2>/dev/null; then
+      add_check "local.cli.$component.gateway" local pass "$gateway_path" "$gateway_source" identical \
+        "$name gateway file is current" "$(duration_since "$started")"
     else
-      bad "$name gateway file is missing or stale: $gateway_path"
+      add_check "local.cli.$component.gateway" local fail "$gateway_path" "$gateway_source" different \
+        "$name gateway file is stale: $gateway_path" "$(duration_since "$started")"
     fi
   fi
 done < <(jq -c '.clis[]' "$manifest")
@@ -388,216 +503,195 @@ done < <(jq -c '.clis[]' "$manifest")
 wsl_launcher_name=$(jq -r '.wslInterop.launcherName' "$manifest")
 wsl_launcher_path=$(jq -r '.wslInterop.launcherPath' "$manifest")
 wsl_launcher_source=$(jq -r '.wslInterop.launcherSource' "$manifest")
+started=$(now_ms)
 wsl_launcher_canonical=$(readlink -e -- "$wsl_launcher_path" 2>/dev/null)
 wsl_launcher_source_canonical=$(readlink -e -- "$wsl_launcher_source" 2>/dev/null)
-if [[ -x $wsl_launcher_path \
-  && -n $wsl_launcher_canonical \
-  && $wsl_launcher_canonical == "$wsl_launcher_source_canonical" ]]; then
-  ok "WSL launcher is current: $wsl_launcher_path"
+if [[ -x $wsl_launcher_path && -n $wsl_launcher_canonical && $wsl_launcher_canonical == "$wsl_launcher_source_canonical" ]]; then
+  add_check local.wsl.launcher local pass "$wsl_launcher_path" "$wsl_launcher_source_canonical" "$wsl_launcher_canonical" \
+    "WSL launcher is current: $wsl_launcher_path" "$(duration_since "$started")"
 else
-  bad "WSL launcher is missing or stale: $wsl_launcher_path"
+  add_check local.wsl.launcher local fail "$wsl_launcher_path" "$wsl_launcher_source_canonical" "${wsl_launcher_canonical:-unresolved}" \
+    "WSL launcher is missing or stale: $wsl_launcher_path" "$(duration_since "$started")"
 fi
 
+started=$(now_ms)
 resolved_wsl_launcher=$(type -P -- "$wsl_launcher_name" 2>/dev/null)
 if [[ $resolved_wsl_launcher == "$wsl_launcher_path" ]]; then
-  ok "$wsl_launcher_name resolves to $wsl_launcher_path"
+  add_check local.wsl.path local pass "$wsl_launcher_name" "$wsl_launcher_path" "$resolved_wsl_launcher" \
+    "$wsl_launcher_name resolves to $wsl_launcher_path" "$(duration_since "$started")"
 else
-  bad "$wsl_launcher_name does not resolve to $wsl_launcher_path"
+  add_check local.wsl.path local fail "$wsl_launcher_name" "$wsl_launcher_path" "${resolved_wsl_launcher:-unresolved}" \
+    "$wsl_launcher_name does not resolve to $wsl_launcher_path" "$(duration_since "$started")"
 fi
+
+nix_ld_path=$(jq -r '.nixLdPath' "$manifest")
+started=$(now_ms)
+if [[ -e $nix_ld_path ]]; then
+  add_check local.nix-ld local pass "$nix_ld_path" exists exists \
+    "nix-ld dynamic linker path exists" "$(duration_since "$started")"
+else
+  add_check local.nix-ld local fail "$nix_ld_path" exists missing \
+    "nix-ld dynamic linker path is missing: $nix_ld_path" "$(duration_since "$started")"
+fi
+
+# System checks may require systemd or privilege, but are still bounded and deterministic.
+system_timeout=$(jq -r '.probePolicy.systemTimeoutSeconds' "$manifest")
+declare -A unit_check_status=()
+while IFS= read -r unit; do
+  unit_id=$(jq -r '.id' <<< "$unit")
+  component=$(stable_component "$unit_id")
+  expected_load=$(jq -r '.expected.LoadState' <<< "$unit")
+  expected_active=$(jq -r '.expected.ActiveState' <<< "$unit")
+  expected_sub=$(jq -r '.expected.SubState // empty' <<< "$unit")
+  expected_result=$(jq -r '.expected.Result // empty' <<< "$unit")
+  expected_state=$(jq -c '.expected' <<< "$unit")
+  started=$(now_ms)
+  unit_output=$(timeout "${system_timeout}s" systemctl show "$unit_id" \
+    --property=LoadState \
+    --property=ActiveState \
+    --property=SubState \
+    --property=Result \
+    --no-pager 2>/dev/null)
+  unit_status=$?
+  observed_load=''
+  observed_active=''
+  observed_sub=''
+  observed_result=''
+  while IFS= read -r property; do
+    property_name=${property%%=*}
+    property_value=${property#*=}
+    case $property_name in
+      LoadState) observed_load=$property_value ;;
+      ActiveState) observed_active=$property_value ;;
+      SubState) observed_sub=$property_value ;;
+      Result) observed_result=$property_value ;;
+    esac
+  done <<< "$unit_output"
+  observed_state=$(jq -cn \
+    --arg LoadState "$observed_load" \
+    --arg ActiveState "$observed_active" \
+    --arg SubState "$observed_sub" \
+    --arg Result "$observed_result" \
+    '{LoadState:$LoadState,ActiveState:$ActiveState,SubState:$SubState,Result:$Result}')
+  if [[ $unit_status -eq 0 && -n $observed_load && -n $observed_active \
+    && $observed_load == "$expected_load" && $observed_active == "$expected_active" \
+    && (-z $expected_sub || $observed_sub == "$expected_sub") \
+    && (-z $expected_result || $observed_result == "$expected_result") ]]; then
+    unit_check_status[$unit_id]=pass
+    add_check "system.unit.$component" system pass "$unit_id" "$expected_state" "$observed_state" \
+      "$unit_id state matches manifest" "$(duration_since "$started")"
+  else
+    unit_check_status[$unit_id]=fail
+    add_check "system.unit.$component" system fail "$unit_id" "$expected_state" "$observed_state" \
+      "$unit_id state does not match manifest" "$(duration_since "$started")"
+  fi
+done < <(jq -c '.units[]' "$manifest")
+
+root_probe=$(jq -r '.sops.rootProbe' "$manifest")
+started=$(now_ms)
+root_metadata=$(timeout "${system_timeout}s" sudo -n -- "$root_probe" 2>/dev/null)
+root_probe_status=$?
+if [[ $root_probe_status -eq 0 ]] && jq -e '
+  .directory.uid == 0 and .directory.gid == 0 and .directory.mode == "700" and
+  .key.uid == 0 and .key.gid == 0 and .key.mode == "400"
+' <<< "$root_metadata" >/dev/null 2>&1; then
+  add_check system.sops.root system pass "$root_probe" root-owned-0700-and-0400 "$root_metadata" \
+    "SOPS host key metadata matches root policy" "$(duration_since "$started")"
+else
+  add_check system.sops.root system fail "$root_probe" root-owned-0700-and-0400 "${root_metadata:-unavailable}" \
+    "SOPS host key metadata does not match root policy" "$(duration_since "$started")"
+fi
+
+home_key=$(jq -r '.sops.homeKey.path' "$manifest")
+home_key_policy=$(jq -r '.sops.homeKey.policy' "$manifest")
+started=$(now_ms)
+if [[ -e $home_key || -L $home_key ]]; then
+  if [[ $home_key_policy == reject ]]; then
+    add_check system.sops.home system fail "$home_key" absent present \
+      "user SOPS age key must not exist after migration" "$(duration_since "$started")"
+  else
+    add_check system.sops.home system warn "$home_key" absent present \
+      "user SOPS age key still exists during migration" "$(duration_since "$started")"
+  fi
+else
+  add_check system.sops.home system pass "$home_key" absent absent \
+    "user SOPS age key is absent" "$(duration_since "$started")"
+fi
+
+# Active probes are deliberately sequential because they may share HOME and external state.
+cli_timeout=$(jq -r '.probePolicy.cliTimeoutSeconds' "$manifest")
+while IFS= read -r cli; do
+  name=$(jq -r '.name' <<< "$cli")
+  component=$(stable_component "$name")
+  binary_name=$(jq -r '.binaryName' <<< "$cli")
+  binary_path=$(jq -r '.binaryPath' <<< "$cli")
+  started=$(now_ms)
+  if [[ ${cli_executable[$name]:-0} -ne 1 ]]; then
+    add_check "active.cli.$component.version" active blocked "$binary_path" nonempty-version unavailable \
+      "$binary_name version check is blocked because the CLI is not executable" \
+      "$(duration_since "$started")"
+    continue
+  fi
+  version=$(timeout "${cli_timeout}s" "$binary_path" --version 2>/dev/null)
+  version_status=$?
+  if [[ $version_status -eq 0 && -n $version ]]; then
+    add_check "active.cli.$component.version" active pass "$binary_path" nonempty-version "$version" \
+      "$binary_name version check passed" "$(duration_since "$started")"
+  else
+    add_check "active.cli.$component.version" active fail "$binary_path" nonempty-version "status=$version_status" \
+      "$binary_name version check failed" "$(duration_since "$started")"
+  fi
+done < <(jq -c '.clis[]' "$manifest")
 
 windows_command=$(jq -r '.wslInterop.windowsCommand' "$manifest")
+windows_timeout=$(jq -r '.probePolicy.windowsTimeoutSeconds' "$manifest")
+started=$(now_ms)
 if [[ ! -x $windows_command ]]; then
-  bad "Windows interop command is not executable: $windows_command"
+  add_check active.windows active fail "$windows_command" executable unavailable \
+    "Windows interop command is not executable: $windows_command" "$(duration_since "$started")"
 else
-  timeout 5s "$windows_command" /d /c exit 0 >/dev/null 2>&1
+  timeout "${windows_timeout}s" "$windows_command" /d /c exit 0 >/dev/null 2>&1
   windows_probe_status=$?
   if [[ $windows_probe_status -eq 0 ]]; then
-    ok "Windows interop probe passed"
+    add_check active.windows active pass "$windows_command" status-0 status-0 \
+      "Windows interop probe passed" "$(duration_since "$started")"
   else
-    bad "Windows interop probe failed: $windows_command"
+    add_check active.windows active fail "$windows_command" status-0 "status-$windows_probe_status" \
+      "Windows interop probe failed: $windows_command" "$(duration_since "$started")"
   fi
 fi
 
-check_mcp() {
-  local requested_protocol initialize_payload initialized_payload
-  local mcp_phase_failed=0 mcp_request_id=2 page_count=0
-  local has_next_cursor=0 next_cursor='' cursor_key
-  local all_tools='[]' target prefix
-  declare -A seen_cursors=()
-
-  mcp_url=$(jq -r '.mcp.url' "$manifest")
-  requested_protocol=$(jq -r '.mcp.requestedProtocolVersion' "$manifest")
-  mcp_cleanup_protocol=$requested_protocol
-  initialize_payload=$(jq -cn \
-    --arg protocol "$requested_protocol" \
-    '{
-      jsonrpc: "2.0",
-      id: 1,
-      method: "initialize",
-      params: {
-        protocolVersion: $protocol,
-        capabilities: {},
-        clientInfo: {name: "dotfiles-doctor", version: "1"}
-      }
-    }')
-
-  mcp_request POST "$mcp_url" "$initialize_payload" '' ''
-
-  if [[ $mcp_curl_status -ne 0 ]]; then
-    bad "MCP initialize request failed"
-    mcp_phase_failed=1
-  elif [[ $mcp_http_status != 200 ]]; then
-    bad "MCP initialize failed with HTTP $mcp_http_status"
-    mcp_phase_failed=1
-  elif ! mcp_parse_response 1; then
-    if [[ $mcp_parse_error == content-type ]]; then
-      bad "MCP initialize response has unsupported content type: $mcp_content_type"
-    else
-      bad "MCP initialize response has an invalid JSON-RPC envelope"
-    fi
-    mcp_phase_failed=1
-  else
-    mcp_protocol=$(jq -r '.result.protocolVersion // empty' <<< "$mcp_response_json" 2>/dev/null)
-    if [[ -n $mcp_protocol ]]; then
-      mcp_cleanup_protocol=$mcp_protocol
-    fi
-
-    if ! jq -e '
-      .jsonrpc == "2.0" and
-      .id == 1 and
-      (.result | type) == "object" and
-      (.result.protocolVersion | type) == "string" and
-      (.result.capabilities | type) == "object"
-    ' <<< "$mcp_response_json" >/dev/null 2>&1; then
-      bad "MCP initialize response has an invalid JSON-RPC envelope"
-      mcp_phase_failed=1
-    elif ! jq -e '(.result.capabilities.tools | type) == "object"' \
-      <<< "$mcp_response_json" >/dev/null 2>&1; then
-      bad "MCP initialize response does not advertise tools capability"
-      mcp_phase_failed=1
-    elif [[ -z $mcp_session ]]; then
-      bad "MCP initialize response is missing a session ID"
-      mcp_phase_failed=1
-    elif ! jq -e --arg protocol "$mcp_protocol" \
-      '.mcp.supportedProtocolVersions | index($protocol) != null' \
-      "$manifest" >/dev/null 2>&1; then
-      bad "MCP negotiated unsupported protocol version: $mcp_protocol"
-      mcp_phase_failed=1
-    fi
-  fi
-
-  if [[ $mcp_phase_failed -eq 0 ]]; then
-    initialized_payload='{"jsonrpc":"2.0","method":"notifications/initialized"}'
-    mcp_request POST "$mcp_url" "$initialized_payload" "$mcp_session" "$mcp_protocol"
-    if [[ $mcp_curl_status -ne 0 ]]; then
-      bad "MCP initialized notification request failed"
-      mcp_phase_failed=1
-    elif [[ $mcp_http_status != 202 ]]; then
-      bad "MCP initialized notification failed with HTTP $mcp_http_status"
-      mcp_phase_failed=1
-    fi
-  fi
-
-  while [[ $mcp_phase_failed -eq 0 ]]; do
-    local tools_payload tools_page
-    if [[ $page_count -ge 100 ]]; then
-      bad "MCP tools/list pagination exceeded 100 pages"
-      mcp_phase_failed=1
-      break
-    fi
-
-    if [[ $has_next_cursor -eq 0 ]]; then
-      tools_payload=$(jq -cn \
-        --argjson id "$mcp_request_id" \
-        '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{}}')
-    else
-      tools_payload=$(jq -cn \
-        --argjson id "$mcp_request_id" \
-        --arg cursor "$next_cursor" \
-        '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{cursor:$cursor}}')
-    fi
-
-    mcp_request POST "$mcp_url" "$tools_payload" "$mcp_session" "$mcp_protocol"
-    if [[ $mcp_curl_status -ne 0 ]]; then
-      bad "MCP tools/list request failed"
-      mcp_phase_failed=1
-      break
-    elif [[ $mcp_http_status != 200 ]]; then
-      bad "MCP tools/list failed with HTTP $mcp_http_status"
-      mcp_phase_failed=1
-      break
-    elif ! mcp_parse_response "$mcp_request_id"; then
-      bad "MCP tools/list response is invalid"
-      mcp_phase_failed=1
-      break
-    elif ! jq -e --argjson id "$mcp_request_id" '
-      .jsonrpc == "2.0" and
-      .id == $id and
-      (.result | type) == "object" and
-      (.result.tools | type) == "array" and
-      all(.result.tools[]; (.name | type) == "string") and
-      (.result.nextCursor == null or (.result.nextCursor | type) == "string")
-    ' <<< "$mcp_response_json" >/dev/null 2>&1; then
-      bad "MCP tools/list response is invalid"
-      mcp_phase_failed=1
-      break
-    fi
-
-    tools_page=$(jq -c '.result.tools' <<< "$mcp_response_json")
-    all_tools=$(jq -cn \
-      --argjson existing "$all_tools" \
-      --argjson page "$tools_page" \
-      '$existing + $page')
-    if jq -e '.result | has("nextCursor") and .nextCursor != null' \
-      <<< "$mcp_response_json" >/dev/null 2>&1; then
-      has_next_cursor=1
-      next_cursor=$(jq -r '.result.nextCursor' <<< "$mcp_response_json")
-    else
-      has_next_cursor=0
-      next_cursor=''
-    fi
-    page_count=$((page_count + 1))
-    mcp_request_id=$((mcp_request_id + 1))
-
-    if [[ $has_next_cursor -eq 0 ]]; then
-      break
-    fi
-
-    cursor_key="cursor:$next_cursor"
-    if [[ -n ${seen_cursors[$cursor_key]+x} ]]; then
-      bad "MCP tools/list pagination cursor repeated"
-      mcp_phase_failed=1
-      break
-    fi
-    seen_cursors[$cursor_key]=1
-  done
-
-  if [[ $mcp_phase_failed -eq 0 ]]; then
-    while IFS= read -r target; do
-      prefix="${target}_"
-      if jq -e --arg prefix "$prefix" \
-        'any(.[]; .name | startswith($prefix))' \
-        <<< "$all_tools" >/dev/null 2>&1; then
-        ok "MCP target exposes tools: $target"
-      else
-        bad "MCP target has no tools: $target"
-        mcp_phase_failed=1
-      fi
-    done < <(jq -r '.mcp.targets[]' "$manifest")
-  fi
-
-  if ! mcp_cleanup_session; then
-    mcp_phase_failed=1
-  fi
-
-  if [[ $mcp_phase_failed -eq 0 ]]; then
-    ok "MCP session lifecycle completed"
-  fi
+mcp_record_fail() {
+  local id=$1 message=$2 expected=${3-healthy} observed=${4-failed} duration
+  duration=$(duration_since "$mcp_check_started_ms")
+  add_check "$id" active fail "$mcp_url" "$expected" "$observed" "$message" "$duration"
+  mcp_phase_failed=1
 }
 
 mcp_request() {
   local method=$1 url=$2 payload=$3 session=$4 protocol=$5
   local -a curl_args
+  local request_timeout cleanup_timeout remaining elapsed now max_response
+
+  request_timeout=$(jq -r '.probePolicy.mcpRequestTimeoutSeconds' "$manifest")
+  cleanup_timeout=$(jq -r '.probePolicy.mcpCleanupTimeoutSeconds' "$manifest")
+  max_response=$(jq -r '.probePolicy.maxResponseBytes' "$manifest")
+  now=$(date +%s)
+  elapsed=$((now - mcp_started_epoch))
+  remaining=$((mcp_total_timeout - elapsed))
+  if [[ $mcp_cleanup_done -eq 1 ]]; then
+    request_timeout=$cleanup_timeout
+  elif [[ -n $mcp_session ]]; then
+    remaining=$((remaining - cleanup_timeout))
+  fi
+  if [[ $remaining -le 0 ]]; then
+    mcp_curl_status=124
+    mcp_http_status=''
+    return
+  fi
+  if [[ $remaining -lt $request_timeout ]]; then
+    request_timeout=$remaining
+  fi
 
   mcp_request_number=$((mcp_request_number + 1))
   mcp_headers_file="$mcp_tmp/headers-$mcp_request_number"
@@ -605,7 +699,8 @@ mcp_request() {
   curl_args=(
     --silent
     --show-error
-    --max-time 5
+    --max-time "$request_timeout"
+    --max-filesize "$max_response"
     --request "$method"
     --header 'Accept: application/json, text/event-stream'
     --dump-header "$mcp_headers_file"
@@ -613,10 +708,7 @@ mcp_request() {
     --write-out '%{http_code}'
   )
   if [[ -n $payload ]]; then
-    curl_args+=(
-      --header 'Content-Type: application/json'
-      --data "$payload"
-    )
+    curl_args+=(--header 'Content-Type: application/json' --data "$payload")
   fi
   if [[ -n $session ]]; then
     curl_args+=(--header "Mcp-Session-Id: $session")
@@ -636,18 +728,11 @@ mcp_request() {
     while IFS= read -r header_line; do
       header_line=${header_line%$'\r'}
       case ${header_line,,} in
-        mcp-session-id:*)
-          mcp_response_session=${header_line#*:}
-          mcp_response_session=${mcp_response_session# }
-          ;;
-        content-type:*)
-          mcp_content_type=${header_line#*:}
-          mcp_content_type=${mcp_content_type# }
-          ;;
+        mcp-session-id:*) mcp_response_session=${header_line#*:}; mcp_response_session=${mcp_response_session# } ;;
+        content-type:*) mcp_content_type=${header_line#*:}; mcp_content_type=${mcp_content_type# } ;;
       esac
     done < "$mcp_headers_file"
   fi
-
   if [[ $method == POST && -z $session && -n $mcp_response_session ]]; then
     mcp_session=$mcp_response_session
   fi
@@ -658,17 +743,15 @@ mcp_cleanup_session() {
     return 0
   fi
   mcp_cleanup_done=1
-
   if [[ -z $mcp_session ]]; then
     return 0
   fi
-
   mcp_request DELETE "$mcp_url" '' "$mcp_session" "$mcp_cleanup_protocol"
   if [[ $mcp_curl_status -ne 0 ]]; then
-    bad "MCP session cleanup request failed"
+    mcp_record_fail active.mcp.cleanup "MCP session cleanup request failed"
     return 1
   elif [[ ! $mcp_http_status =~ ^2[0-9][0-9]$ ]]; then
-    bad "MCP session cleanup failed with HTTP $mcp_http_status"
+    mcp_record_fail active.mcp.cleanup "MCP session cleanup failed with HTTP $mcp_http_status"
     return 1
   fi
   return 0
@@ -681,8 +764,7 @@ mcp_parse_response() {
   case $content_type_lower in
     application/json*)
       mcp_response_json=$(< "$mcp_body_file")
-      if [[ -n $mcp_response_json ]] && jq -e -s 'length == 1' \
-        <<< "$mcp_response_json" >/dev/null 2>&1; then
+      if [[ -n $mcp_response_json ]] && jq -e -s 'length == 1' <<< "$mcp_response_json" >/dev/null 2>&1; then
         return 0
       fi
       ;;
@@ -690,37 +772,25 @@ mcp_parse_response() {
       while IFS= read -r line; do
         line=${line%$'\r'}
         if [[ -z $line ]]; then
-          if mcp_select_sse_response "$expected_id" "$event_data"; then
-            return 0
-          fi
+          if mcp_select_sse_response "$expected_id" "$event_data"; then return 0; fi
           event_data=''
         elif [[ $line == data:* ]]; then
-          line=${line#data:}
-          line=${line# }
-          if [[ -n $event_data ]]; then
-            event_data+=$'\n'
-          fi
+          line=${line#data:}; line=${line# }
+          [[ -z $event_data ]] || event_data+=$'\n'
           event_data+=$line
         fi
       done < "$mcp_body_file"
-      if mcp_select_sse_response "$expected_id" "$event_data"; then
-        return 0
-      fi
+      if mcp_select_sse_response "$expected_id" "$event_data"; then return 0; fi
       ;;
-    *)
-      mcp_parse_error=content-type
-      return 1
-      ;;
+    *) mcp_parse_error=content-type; return 1 ;;
   esac
-
   return 1
 }
 
 mcp_select_sse_response() {
   local expected_id=$1 event_data=$2
   [[ -n $event_data ]] || return 1
-  if jq -e -s --argjson id "$expected_id" \
-    'length == 1 and .[0].jsonrpc == "2.0" and .[0].id == $id' \
+  if jq -e -s --argjson id "$expected_id" 'length == 1 and .[0].jsonrpc == "2.0" and .[0].id == $id' \
     <<< "$event_data" >/dev/null 2>&1; then
     mcp_response_json=$event_data
     return 0
@@ -728,29 +798,161 @@ mcp_select_sse_response() {
   return 1
 }
 
-mcp_tmp=$(mktemp -d)
-mcp_request_number=0
-mcp_http_status=''
-mcp_curl_status=0
-mcp_headers_file=''
-mcp_body_file=''
-mcp_response_session=''
-mcp_content_type=''
-mcp_response_json=''
-mcp_parse_error=''
-mcp_url=''
-mcp_session=''
-mcp_protocol=''
-mcp_cleanup_protocol=''
-mcp_cleanup_done=0
-check_mcp
-mcp_remove_temp
+check_mcp() {
+  local requested_protocol initialize_payload initialized_payload
+  local mcp_request_id=2 page_count=0 has_next_cursor=0 next_cursor='' cursor_key
+  local all_tools='[]' target prefix tools_payload tools_page max_pages
+  declare -A seen_cursors=()
 
-nix_ld_path=$(jq -r '.nixLdPath' "$manifest")
-if [[ -e $nix_ld_path ]]; then
-  ok "nix-ld dynamic linker path exists"
+  requested_protocol=$(jq -r '.mcp.requestedProtocolVersion' "$manifest")
+  mcp_cleanup_protocol=$requested_protocol
+  max_pages=$(jq -r '.probePolicy.maxPages' "$manifest")
+  initialize_payload=$(jq -cn --arg protocol "$requested_protocol" '{
+    jsonrpc:"2.0",id:1,method:"initialize",
+    params:{protocolVersion:$protocol,capabilities:{},clientInfo:{name:"dotfiles-doctor",version:"1"}}
+  }')
+  mcp_request POST "$mcp_url" "$initialize_payload" '' ''
+  if [[ $mcp_curl_status -ne 0 ]]; then
+    mcp_record_fail active.mcp.initialize "MCP initialize request failed"
+  elif [[ $mcp_http_status != 200 ]]; then
+    mcp_record_fail active.mcp.initialize "MCP initialize failed with HTTP $mcp_http_status"
+  elif ! mcp_parse_response 1; then
+    if [[ $mcp_parse_error == content-type ]]; then
+      mcp_record_fail active.mcp.initialize "MCP initialize response has unsupported content type: $mcp_content_type"
+    else
+      mcp_record_fail active.mcp.initialize "MCP initialize response has an invalid JSON-RPC envelope"
+    fi
+  else
+    mcp_protocol=$(jq -r '.result.protocolVersion // empty' <<< "$mcp_response_json" 2>/dev/null)
+    [[ -z $mcp_protocol ]] || mcp_cleanup_protocol=$mcp_protocol
+    if ! jq -e '.jsonrpc == "2.0" and .id == 1 and (.result | type) == "object" and (.result.protocolVersion | type) == "string" and (.result.capabilities | type) == "object"' <<< "$mcp_response_json" >/dev/null 2>&1; then
+      mcp_record_fail active.mcp.initialize "MCP initialize response has an invalid JSON-RPC envelope"
+    elif ! jq -e '(.result.capabilities.tools | type) == "object"' <<< "$mcp_response_json" >/dev/null 2>&1; then
+      mcp_record_fail active.mcp.initialize "MCP initialize response does not advertise tools capability"
+    elif [[ -z $mcp_session ]]; then
+      mcp_record_fail active.mcp.initialize "MCP initialize response is missing a session ID"
+    elif ! jq -e --arg protocol "$mcp_protocol" '.mcp.supportedProtocolVersions | index($protocol) != null' "$manifest" >/dev/null 2>&1; then
+      mcp_record_fail active.mcp.initialize "MCP negotiated unsupported protocol version: $mcp_protocol"
+    fi
+  fi
+
+  if [[ $mcp_phase_failed -eq 0 ]]; then
+    initialized_payload='{"jsonrpc":"2.0","method":"notifications/initialized"}'
+    mcp_request POST "$mcp_url" "$initialized_payload" "$mcp_session" "$mcp_protocol"
+    if [[ $mcp_curl_status -ne 0 ]]; then
+      mcp_record_fail active.mcp.initialized "MCP initialized notification request failed"
+    elif [[ $mcp_http_status != 202 ]]; then
+      mcp_record_fail active.mcp.initialized "MCP initialized notification failed with HTTP $mcp_http_status"
+    fi
+  fi
+
+  while [[ $mcp_phase_failed -eq 0 ]]; do
+    if [[ $page_count -ge $max_pages ]]; then
+      mcp_record_fail active.mcp.pagination "MCP tools/list pagination exceeded $max_pages pages"
+      break
+    fi
+    if [[ $has_next_cursor -eq 0 ]]; then
+      tools_payload=$(jq -cn --argjson id "$mcp_request_id" '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{}}')
+    else
+      tools_payload=$(jq -cn --argjson id "$mcp_request_id" --arg cursor "$next_cursor" '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{cursor:$cursor}}')
+    fi
+    mcp_request POST "$mcp_url" "$tools_payload" "$mcp_session" "$mcp_protocol"
+    if [[ $mcp_curl_status -ne 0 ]]; then
+      mcp_record_fail active.mcp.tools "MCP tools/list request failed"
+      break
+    elif [[ $mcp_http_status != 200 ]]; then
+      mcp_record_fail active.mcp.tools "MCP tools/list failed with HTTP $mcp_http_status"
+      break
+    elif ! mcp_parse_response "$mcp_request_id" || ! jq -e --argjson id "$mcp_request_id" '
+      .jsonrpc == "2.0" and .id == $id and (.result | type) == "object" and
+      (.result.tools | type) == "array" and all(.result.tools[]; (.name | type) == "string") and
+      (.result.nextCursor == null or (.result.nextCursor | type) == "string")
+    ' <<< "$mcp_response_json" >/dev/null 2>&1; then
+      mcp_record_fail active.mcp.tools "MCP tools/list response is invalid"
+      break
+    fi
+    tools_page=$(jq -c '.result.tools' <<< "$mcp_response_json")
+    all_tools=$(jq -cn --argjson existing "$all_tools" --argjson page "$tools_page" '$existing + $page')
+    if jq -e '.result | has("nextCursor") and .nextCursor != null' <<< "$mcp_response_json" >/dev/null 2>&1; then
+      has_next_cursor=1
+      next_cursor=$(jq -r '.result.nextCursor' <<< "$mcp_response_json")
+    else
+      has_next_cursor=0
+      next_cursor=''
+    fi
+    page_count=$((page_count + 1))
+    mcp_request_id=$((mcp_request_id + 1))
+    [[ $has_next_cursor -eq 1 ]] || break
+    cursor_key="cursor:$next_cursor"
+    if [[ -n ${seen_cursors[$cursor_key]+x} ]]; then
+      mcp_record_fail active.mcp.pagination "MCP tools/list pagination cursor repeated"
+      break
+    fi
+    seen_cursors[$cursor_key]=1
+  done
+
+  if [[ $mcp_phase_failed -eq 0 ]]; then
+    while IFS= read -r target; do
+      target_started=$(now_ms)
+      prefix="${target}_"
+      component=$(stable_component "$target")
+      if jq -e --arg prefix "$prefix" 'any(.[]; .name | startswith($prefix))' <<< "$all_tools" >/dev/null 2>&1; then
+        add_check "active.mcp.target.$component" active pass "$target" tools-exposed tools-exposed \
+          "MCP target exposes tools: $target" "$(duration_since "$target_started")"
+      else
+        mcp_record_fail "active.mcp.target.$component" "MCP target has no tools: $target"
+      fi
+    done < <(jq -r '.mcp.targets[]' "$manifest")
+  fi
+  mcp_cleanup_session
+  if [[ $mcp_phase_failed -eq 0 ]]; then
+    add_check active.mcp.session active pass "$mcp_url" complete complete \
+      "MCP session lifecycle completed" "$(duration_since "$mcp_check_started_ms")"
+  fi
+}
+
+mcp_health_unit=$(jq -r '.mcp.healthUnit' "$manifest")
+mcp_health_started=$(now_ms)
+if [[ ${unit_check_status[$mcp_health_unit]:-fail} != pass ]]; then
+  add_check active.mcp.health-unit active blocked "$mcp_health_unit" pass fail \
+    "MCP health unit is not healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
+  add_check active.mcp.session active blocked "$(jq -r '.mcp.url' "$manifest")" healthy-unit blocked \
+    "MCP session is blocked by its health unit" "$(duration_since "$mcp_health_started")"
 else
-  bad "nix-ld dynamic linker path is missing: $nix_ld_path"
+  add_check active.mcp.health-unit active pass "$mcp_health_unit" pass pass \
+    "MCP health unit is healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
+  mcp_url=$(jq -r '.mcp.url' "$manifest")
+  mcp_total_timeout=$(jq -r '.probePolicy.totalTimeoutSeconds' "$manifest")
+  mcp_started_epoch=$(date +%s)
+  mcp_tmp=$(mktemp -d)
+  mcp_check_started_ms=$(now_ms)
+  check_mcp
+  mcp_remove_temp
 fi
 
-  render_report; exit $?
+started=$(now_ms)
+final_current_canonical=$(readlink -e -- "$current" 2>/dev/null)
+final_profile_canonical=$(readlink -e -- "$profile" 2>/dev/null)
+final_manifest_canonical=$(readlink -e -- "$manifest_entry" 2>/dev/null)
+expected_snapshot=$(jq -cn \
+  --arg current "$current_canonical" \
+  --arg profile "$current_canonical" \
+  --arg manifest "$manifest" \
+  '{current:$current,profile:$profile,manifest:$manifest}')
+observed_snapshot=$(jq -cn \
+  --arg current "$final_current_canonical" \
+  --arg profile "$final_profile_canonical" \
+  --arg manifest "$final_manifest_canonical" \
+  '{current:$current,profile:$profile,manifest:$manifest}')
+if [[ $final_current_canonical == "$current_canonical" \
+  && $final_profile_canonical == "$current_canonical" \
+  && $final_manifest_canonical == "$manifest" ]]; then
+  add_check foundation.stability foundation pass "$current" "$expected_snapshot" "$observed_snapshot" \
+    "generation snapshot remained stable during doctor execution" "$(duration_since "$started")"
+else
+  add_check foundation.stability foundation fail "$current" "$expected_snapshot" "$observed_snapshot" \
+    "generation snapshot changed during doctor execution" "$(duration_since "$started")"
+fi
+
+render_report
+exit $?

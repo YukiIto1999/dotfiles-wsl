@@ -15,7 +15,8 @@ Accepted
 `modules/commands.nix` が `config.my` から `modules/commands/{rebuild,doctor,cleanup,install-clis}`
 の `@var@` を `builtins.replaceStrings` で埋め、`writeShellApplication` でビルドして
 `environment.systemPackages` に載せる。`scripts/bootstrap.sh` は手書きのまま残す。
-bootstrap は最初の `nixos-rebuild` 前に実行するため、config から生成されたコマンドをまだ参照できない。
+bootstrap は最初の system generation を登録する前に実行するため、config から生成されたコマンドをまだ参照できない。
+対象 flake の `config.system.build.nixos-rebuild` だけを store path へ build し、共通 operation lock の内側から呼ぶ。
 
 ## 検討した代替案
 

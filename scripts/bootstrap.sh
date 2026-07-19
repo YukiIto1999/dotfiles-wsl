@@ -66,6 +66,16 @@ reject_active_enrollment() {
   step "no active SOPS enrollment transaction"
 }
 
+reject_active_rebuild() {
+  local common_git_dir active_receipt
+  common_git_dir=$(as_user git -C "${DOTFILES}" rev-parse --path-format=absolute --git-common-dir) \
+    || die "cannot resolve Git common directory"
+  active_receipt=${common_git_dir}/dotfiles-rebuild/active.json
+  [[ ! -e ${active_receipt} && ! -L ${active_receipt} ]] \
+    || die "an active rebuild transaction blocks bootstrap"
+  step "no active rebuild transaction"
+}
+
 verify_tracked_flake_files() {
   # git+file の flake build では未追跡ファイルが見えない
   local untracked
@@ -90,7 +100,13 @@ install_ai_clis() {
 }
 
 install_boot_generation() {
-  nixos-rebuild boot --flake "${FLAKE_REF}#nixos" -L
+  local upstream_rebuild
+  upstream_rebuild=$(nix build --no-link --print-out-paths --no-write-lock-file \
+    "${FLAKE_REF}#nixosConfigurations.nixos.config.system.build.nixos-rebuild")
+  [[ ${upstream_rebuild} != *$'\n'* && ${upstream_rebuild} == /nix/store/* &&
+    -x ${upstream_rebuild}/bin/nixos-rebuild ]] \
+    || die "failed to resolve the pinned nixos-rebuild"
+  "${upstream_rebuild}/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#nixos" -L
   step "nixos-rebuild boot complete"
 }
 
@@ -116,6 +132,28 @@ link_nixos() {
   step "${target} -> ${DOTFILES}"
 }
 
+run_bootstrap_stages() {
+  local stage
+
+  ensure_root
+  for stage in "${BOOTSTRAP_STAGES[@]}"; do
+    "${stage}"
+  done
+}
+
+declare -ar BOOTSTRAP_STAGES=(
+  acquire_operation_lock
+  reject_active_enrollment
+  reject_active_rebuild
+  register_safe_directories
+  preflight
+  verify_tracked_flake_files
+  verify_secrets
+  install_ai_clis
+  install_boot_generation
+  link_nixos
+)
+
 main() {
   # config 生成前に実行するため my.username を参照できない、既定値と同じ "nixos" を使う
   local -r TARGET_USER="nixos"
@@ -124,26 +162,10 @@ main() {
   local -r SECRETS_FILE="${DOTFILES}/secrets/secrets.yaml"
   local -r AGE_KEY="/var/lib/sops-nix/key.txt"
   local -r FLAKE_REF="git+file://${DOTFILES}"
-  local -ra stages=(
-    acquire_operation_lock
-    reject_active_enrollment
-    register_safe_directories
-    preflight
-    verify_tracked_flake_files
-    verify_secrets
-    install_ai_clis
-    install_boot_generation
-    link_nixos
-  )
-  local -r TOTAL=${#stages[@]}
+  local -r TOTAL=${#BOOTSTRAP_STAGES[@]}
   local STEP=0
 
-  ensure_root
-
-  local stage
-  for stage in "${stages[@]}"; do
-    "${stage}"
-  done
+  run_bootstrap_stages
 
   cat <<MSG
 

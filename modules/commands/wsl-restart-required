@@ -1,9 +1,10 @@
 usage() {
   cat <<'USAGE'
-usage: dotfiles-wsl-restart-required [--plan] [--quiet] [--booted-system PATH] [--current-system PATH] CANDIDATE_SYSTEM
+usage: dotfiles-wsl-restart-required [--plan | --default-user] [--quiet] [--booted-system PATH] [--current-system PATH] CANDIDATE_SYSTEM
 
 Exit 0 when WSL must be restarted, 1 when it is not required, and 2 on an invalid input.
 With --plan, print switch, switch-restart, boot-restart, or boot-two-stage and exit 0.
+With --default-user, print the candidate system's validated WSL default user and exit 0.
 USAGE
 }
 
@@ -68,6 +69,7 @@ booted_system=/run/booted-system
 current_system=/run/current-system
 quiet=0
 plan=0
+default_user_only=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -87,6 +89,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --plan)
       plan=1
+      shift
+      ;;
+    --default-user)
+      default_user_only=1
       shift
       ;;
     -h|--help)
@@ -109,6 +115,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ $# -eq 1 ]] || { usage >&2; exit 2; }
+[[ $plan -eq 0 || $default_user_only -eq 0 ]] || { usage >&2; exit 2; }
 
 candidate_conf=$1/etc/wsl.conf
 candidate_interface=$1/init-interface-version
@@ -130,6 +137,11 @@ else
     echo "candidate system does not contain one valid [user] default entry: $candidate_conf" >&2
   fi
   exit 2
+fi
+
+if [[ $default_user_only -eq 1 ]]; then
+  printf '%s\n' "$candidate_default_user"
+  exit 0
 fi
 
 if [[ ! -f $current_interface || ! -r $current_interface ]]; then

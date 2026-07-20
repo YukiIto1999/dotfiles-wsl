@@ -33,6 +33,8 @@ mcp_cleanup_done=0
 mcp_request_number=0
 mcp_phase_failed=0
 contract_error=0
+add_check_failed=0
+check_sequence=0
 
 now_ms() {
   date +%s%3N
@@ -46,26 +48,74 @@ duration_since() {
 
 add_check() {
   local id=$1 phase=$2 status=$3 subject=$4 expected=$5 observed=$6 message=$7 duration=$8
-  jq -cn \
-    --arg id "$id" \
-    --arg phase "$phase" \
-    --arg status "$status" \
-    --arg subject "$subject" \
-    --arg expected "$expected" \
-    --arg observed "$observed" \
-    --arg message "$message" \
-    --argjson durationMs "$duration" \
-    '{id:$id,phase:$phase,status:$status,subject:$subject,expected:$expected,observed:$observed,message:$message,durationMs:$durationMs}' \
-    >> "$checks_file"
+  local check_tmp check_json
+  check_sequence=$((check_sequence + 1))
+  check_tmp="$report_tmp/check-$check_sequence"
+  check_json="$check_tmp/result.json"
+  if ! mkdir -m 0700 -- "$check_tmp" ||
+    ! printf '%s' "$id" > "$check_tmp/id" ||
+    ! printf '%s' "$phase" > "$check_tmp/phase" ||
+    ! printf '%s' "$status" > "$check_tmp/status" ||
+    ! printf '%s' "$subject" > "$check_tmp/subject" ||
+    ! printf '%s' "$expected" > "$check_tmp/expected" ||
+    ! printf '%s' "$observed" > "$check_tmp/observed" ||
+    ! printf '%s' "$message" > "$check_tmp/message" ||
+    ! printf '%s' "$duration" > "$check_tmp/duration" ||
+    ! jq -cn \
+      --rawfile id "$check_tmp/id" \
+      --rawfile phase "$check_tmp/phase" \
+      --rawfile status "$check_tmp/status" \
+      --rawfile subject "$check_tmp/subject" \
+      --rawfile expected "$check_tmp/expected" \
+      --rawfile observed "$check_tmp/observed" \
+      --rawfile message "$check_tmp/message" \
+      --rawfile durationMs "$check_tmp/duration" \
+      '{id:$id,phase:$phase,status:$status,subject:$subject,expected:$expected,observed:$observed,message:$message,durationMs:($durationMs | tonumber)}' \
+      > "$check_json" ||
+    ! cat -- "$check_json" >> "$checks_file"; then
+    add_check_failed=1
+    contract_error=1
+    return 1
+  fi
 }
 
 stable_component() {
   jq -rn --arg component "$1" '$component | @uri'
 }
 
+render_output() {
+  local outcome=$1 checks_json_file=$2 summary_json_file=$3 output_file=$4
+  if [[ $format == json ]]; then
+    jq -cn \
+      --argjson schemaVersion "$report_schema_version" \
+      --argjson manifestSchemaVersion "$manifest_schema_version" \
+      --arg outcome "$outcome" \
+      --slurpfile summary "$summary_json_file" \
+      --slurpfile checks "$checks_json_file" \
+      '{schemaVersion:$schemaVersion,manifestSchemaVersion:$manifestSchemaVersion,outcome:$outcome,summary:$summary[0],checks:$checks[0]}' \
+      > "$output_file"
+  else
+    jq -r '.[] | (if .status == "pass" then "OK" elif .status == "warn" then "WARN" elif .status == "fail" then "FAIL" elif .status == "error" then "ERROR" else "SKIP" end) + ": " + .message' \
+      "$checks_json_file" > "$output_file"
+  fi
+}
+
+render_failure_report() {
+  if [[ $format == json ]]; then
+    printf '{"schemaVersion":%s,"manifestSchemaVersion":%s,"outcome":"invalid","summary":{"total":1,"pass":0,"warn":0,"fail":0,"error":1,"blocked":0},"checks":[{"id":"internal.report","phase":"foundation","status":"error","subject":"result-renderer","expected":"rendered report","observed":"failed","message":"doctor result report could not be rendered","durationMs":0}]}\n' \
+      "$report_schema_version" "$manifest_schema_version"
+  else
+    printf '%s\n' 'ERROR: doctor result report could not be rendered'
+  fi
+}
+
 render_report() {
-  local forced_status=${1-} checks summary outcome exit_status internal_message
-  if ! checks=$(jq -s '.' "$checks_file") || ! jq -e '
+  local forced_status=${1-} outcome exit_status internal_message
+  local checks_json_file="$report_tmp/checks.json"
+  local summary_json_file="$report_tmp/summary.json"
+  local output_file="$report_tmp/report.out"
+  if [[ $add_check_failed -eq 1 ]] ||
+    ! jq -s '.' "$checks_file" > "$checks_json_file" || ! jq -e '
     type == "array" and length > 0 and
     all(.[];
       (.id | type) == "string" and (.id | length) > 0 and
@@ -78,27 +128,38 @@ render_report() {
       (.durationMs | type) == "number" and .durationMs >= 0 and (.durationMs | floor) == .durationMs
     ) and
     ([.[].id] | length) == ([.[].id] | unique | length)
-  ' <<< "$checks" >/dev/null 2>&1; then
+  ' "$checks_json_file" >/dev/null 2>&1; then
     internal_message='doctor result core violates its internal contract'
     contract_error=1
-    checks=$(jq -cn --arg message "$internal_message" '[{
+    jq -n --arg message "$internal_message" '[{
       id:"internal.report",phase:"foundation",status:"error",subject:"result-core",
       expected:"valid unique checks",observed:"invalid",message:$message,durationMs:0
-    }]')
+    }]' > "$checks_json_file"
   fi
-  summary=$(jq -cn --argjson checks "$checks" '{
-    total: ($checks | length),
-    pass: ([$checks[] | select(.status == "pass")] | length),
-    warn: ([$checks[] | select(.status == "warn")] | length),
-    fail: ([$checks[] | select(.status == "fail")] | length),
-    error: ([$checks[] | select(.status == "error")] | length),
-    blocked: ([$checks[] | select(.status == "blocked")] | length)
-  }')
+  if ! jq '{
+    total: length,
+    pass: ([.[] | select(.status == "pass")] | length),
+    warn: ([.[] | select(.status == "warn")] | length),
+    fail: ([.[] | select(.status == "fail")] | length),
+    error: ([.[] | select(.status == "error")] | length),
+    blocked: ([.[] | select(.status == "blocked")] | length)
+  }' "$checks_json_file" > "$summary_json_file"; then
+    internal_message='doctor result summary could not be generated'
+    contract_error=1
+    if ! jq -n --arg message "$internal_message" '[{
+      id:"internal.report",phase:"foundation",status:"error",subject:"result-core",
+      expected:"valid summary",observed:"invalid",message:$message,durationMs:0
+    }]' > "$checks_json_file" ||
+      ! printf '%s\n' '{"total":1,"pass":0,"warn":0,"fail":0,"error":1,"blocked":0}' > "$summary_json_file"; then
+      printf 'ERROR: %s\n' "$internal_message" >&2
+      return 2
+    fi
+  fi
 
-  if [[ $forced_status == 2 || $contract_error -eq 1 ]] || jq -e '.error > 0' <<< "$summary" >/dev/null; then
+  if [[ $forced_status == 2 || $contract_error -eq 1 ]] || jq -e '.error > 0' "$summary_json_file" >/dev/null; then
     outcome=invalid
     exit_status=2
-  elif jq -e '.fail > 0 or .blocked > 0' <<< "$summary" >/dev/null; then
+  elif jq -e '.fail > 0 or .blocked > 0' "$summary_json_file" >/dev/null; then
     outcome=degraded
     exit_status=1
   else
@@ -106,17 +167,11 @@ render_report() {
     exit_status=0
   fi
 
-  if [[ $format == json ]]; then
-    jq -cn \
-      --argjson schemaVersion "$report_schema_version" \
-      --argjson manifestSchemaVersion "$manifest_schema_version" \
-      --arg outcome "$outcome" \
-      --argjson summary "$summary" \
-      --argjson checks "$checks" \
-      '{schemaVersion:$schemaVersion,manifestSchemaVersion:$manifestSchemaVersion,outcome:$outcome,summary:$summary,checks:$checks}'
-  else
-    jq -r '.[] | (if .status == "pass" then "OK" elif .status == "warn" then "WARN" elif .status == "fail" then "FAIL" elif .status == "error" then "ERROR" else "SKIP" end) + ": " + .message' <<< "$checks"
+  if ! render_output "$outcome" "$checks_json_file" "$summary_json_file" "$output_file"; then
+    render_failure_report
+    return 2
   fi
+  cat -- "$output_file" || return 2
   return "$exit_status"
 }
 
@@ -175,6 +230,7 @@ fi
 # shellcheck disable=SC2016
 manifest_contract='
   . as $root |
+  ([.. | strings] | all(length <= 4096)) and
   .schemaVersion == ($schema | tonumber) and
   (.user.name | type) == "string" and
   (.user.home | type) == "string" and
@@ -898,7 +954,7 @@ mcp_record_fail() {
 mcp_request() {
   local method=$1 url=$2 payload=$3 session=$4 protocol=$5
   local -a curl_args
-  local request_timeout cleanup_timeout remaining elapsed max_response
+  local request_timeout cleanup_timeout remaining elapsed max_response payload_file
 
   request_timeout=$(jq -r '.probePolicy.mcpRequestTimeoutSeconds' "$manifest")
   cleanup_timeout=$(jq -r '.probePolicy.mcpCleanupTimeoutSeconds' "$manifest")
@@ -935,7 +991,13 @@ mcp_request() {
     --write-out '%{http_code}'
   )
   if [[ -n $payload ]]; then
-    curl_args+=(--header 'Content-Type: application/json' --data "$payload")
+    payload_file="$mcp_tmp/payload-$mcp_request_number"
+    if ! printf '%s' "$payload" > "$payload_file"; then
+      mcp_curl_status=74
+      mcp_http_status=''
+      return
+    fi
+    curl_args+=(--header 'Content-Type: application/json' --data-binary "@$payload_file")
   fi
   if [[ -n $session ]]; then
     curl_args+=(--header "Mcp-Session-Id: $session")
@@ -1027,9 +1089,16 @@ mcp_select_sse_response() {
 
 check_mcp() {
   local requested_protocol initialize_payload initialized_payload
-  local mcp_request_id=2 page_count=0 has_next_cursor=0 next_cursor='' cursor_key
-  local all_tools='[]' target prefix tools_payload tools_page max_pages
-  declare -A seen_cursors=()
+  local mcp_request_id=2 page_count=0 has_next_cursor=0 cursor_seen_status
+  local target prefix tools_payload max_pages
+  local tool_names_file="$mcp_tmp/tool-names.jsonl"
+  local next_cursor_file="$mcp_tmp/next-cursor.json"
+  local seen_cursors_file="$mcp_tmp/seen-cursors.jsonl"
+
+  if ! : > "$tool_names_file" || ! : > "$seen_cursors_file"; then
+    mcp_record_fail active.mcp.tools "MCP response projection could not be initialized"
+    return
+  fi
 
   requested_protocol=$(jq -r '.mcp.requestedProtocolVersion' "$manifest")
   mcp_cleanup_protocol=$requested_protocol
@@ -1081,7 +1150,10 @@ check_mcp() {
     if [[ $has_next_cursor -eq 0 ]]; then
       tools_payload=$(jq -cn --argjson id "$mcp_request_id" '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{}}')
     else
-      tools_payload=$(jq -cn --argjson id "$mcp_request_id" --arg cursor "$next_cursor" '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{cursor:$cursor}}')
+      tools_payload=$(jq -cn \
+        --argjson id "$mcp_request_id" \
+        --slurpfile cursor "$next_cursor_file" \
+        '{jsonrpc:"2.0",id:$id,method:"tools/list",params:{cursor:$cursor[0]}}')
     fi
     mcp_request POST "$mcp_url" "$tools_payload" "$mcp_session" "$mcp_protocol"
     if [[ $mcp_curl_status -ne 0 ]]; then
@@ -1098,24 +1170,41 @@ check_mcp() {
       mcp_record_fail active.mcp.tools "MCP tools/list response is invalid"
       break
     fi
-    tools_page=$(jq -c '.result.tools' <<< "$mcp_response_json")
-    all_tools=$(jq -cn --argjson existing "$all_tools" --argjson page "$tools_page" '$existing + $page')
+    if ! jq -c '.result.tools[].name' <<< "$mcp_response_json" >> "$tool_names_file"; then
+      mcp_record_fail active.mcp.tools "MCP tool name projection failed"
+      break
+    fi
     if jq -e '.result | has("nextCursor") and .nextCursor != null' <<< "$mcp_response_json" >/dev/null 2>&1; then
       has_next_cursor=1
-      next_cursor=$(jq -r '.result.nextCursor' <<< "$mcp_response_json")
+      if ! jq -c '.result.nextCursor' <<< "$mcp_response_json" > "$next_cursor_file"; then
+        mcp_record_fail active.mcp.pagination "MCP pagination cursor projection failed"
+        break
+      fi
     else
       has_next_cursor=0
-      next_cursor=''
     fi
     page_count=$((page_count + 1))
     mcp_request_id=$((mcp_request_id + 1))
     [[ $has_next_cursor -eq 1 ]] || break
-    cursor_key="cursor:$next_cursor"
-    if [[ -n ${seen_cursors[$cursor_key]+x} ]]; then
-      mcp_record_fail active.mcp.pagination "MCP tools/list pagination cursor repeated"
-      break
-    fi
-    seen_cursors[$cursor_key]=1
+    jq -se '.[-1] as $candidate | any(.[0:-1][]; . == $candidate)' \
+      "$seen_cursors_file" "$next_cursor_file" >/dev/null 2>&1
+    cursor_seen_status=$?
+    case $cursor_seen_status in
+      0)
+        mcp_record_fail active.mcp.pagination "MCP tools/list pagination cursor repeated"
+        break
+        ;;
+      1)
+        if ! cat -- "$next_cursor_file" >> "$seen_cursors_file"; then
+          mcp_record_fail active.mcp.pagination "MCP pagination cursor could not be recorded"
+          break
+        fi
+        ;;
+      *)
+        mcp_record_fail active.mcp.pagination "MCP pagination cursor state is invalid"
+        break
+        ;;
+    esac
   done
 
   if [[ $mcp_phase_failed -eq 0 ]]; then
@@ -1123,7 +1212,7 @@ check_mcp() {
       target_started=$(now_ms)
       prefix="${target}_"
       component=$(stable_component "$target")
-      if jq -e --arg prefix "$prefix" 'any(.[]; .name | startswith($prefix))' <<< "$all_tools" >/dev/null 2>&1; then
+      if jq -se --arg prefix "$prefix" 'any(.[]; startswith($prefix))' "$tool_names_file" >/dev/null 2>&1; then
         add_check "active.mcp.target.$component" active pass "$target" tools-exposed tools-exposed \
           "MCP target exposes tools: $target" "$(duration_since "$target_started")"
       else

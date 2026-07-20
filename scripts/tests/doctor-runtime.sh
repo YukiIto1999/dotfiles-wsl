@@ -22,6 +22,7 @@ manifest=$test_root/current/etc/dotfiles/doctor.json
 fake_bin=$test_root/fake-bin
 rendered_doctor=$test_root/doctor
 empty_message_doctor=$test_root/doctor-empty-message
+render_failure_doctor=$test_root/doctor-render-failure
 doctor_executable=$rendered_doctor
 doctor_output=$test_root/doctor-output
 unit_state=$test_root/unit-state
@@ -201,7 +202,7 @@ while [[ $# -gt 0 ]]; do
       body_file=$2
       shift 2
       ;;
-    --data|--data-raw)
+    --data|--data-raw|--data-binary)
       data=$2
       shift 2
       ;;
@@ -233,6 +234,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+case $data in
+  @-) data=$(cat) ;;
+  @*) data=$(cat -- "${data#@}") ;;
+esac
 
 [[ $request_url == "$DOCTOR_TEST_MCP_URL" ]] || {
   printf 'unexpected MCP URL: %s\n' "$request_url" >&2
@@ -289,6 +295,10 @@ if jq -e '(.params | type) == "object" and (.params | has("cursor"))' \
   cursor=$(jq -r '.params.cursor' <<< "$request_data")
   [[ -n $cursor ]] || cursor='<empty>'
 fi
+cursor_log=$cursor
+if (( ${#cursor_log} > 64 )); then
+  cursor_log="<${#cursor_log}-bytes>"
+fi
 
 case $rpc_method in
   initialize)
@@ -311,7 +321,7 @@ case $rpc_method in
     ;;
 esac
 printf '%s|%s|%s|%s|%s\n' \
-  "$method" "$rpc_method" "$session" "$version" "$cursor" >> "$DOCTOR_TEST_MCP_CALL_LOG"
+  "$method" "$rpc_method" "$session" "$version" "$cursor_log" >> "$DOCTOR_TEST_MCP_CALL_LOG"
 
 scenario=$(cat "$DOCTOR_TEST_MCP_SCENARIO")
 if [[ $scenario == initialize-curl-failure && $rpc_method == initialize ]]; then
@@ -382,6 +392,27 @@ case "$rpc_method" in
       response-too-large:*:*)
         printf -v large_tool_name '%0512d' 0
         body=$(jq -cn --arg name "memory_$large_tool_name" '{jsonrpc:"2.0",id:2,result:{tools:[{name:$name}]}}')
+        ;;
+      success-large-tool-schema:*:*)
+        content_type=text/event-stream
+        printf -v large_description '%*s' 1536 ''
+        large_description=${large_description// /x}
+        body='{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"memory_recall"},{"name":"searxng_search"}'
+        for tool_number in {1..198}; do
+          printf -v tool_name 'fixture_%03d' "$tool_number"
+          body+=",{\"name\":\"$tool_name\",\"description\":\"$large_description\"}"
+        done
+        body+=']}}'
+        (( ${#body} > 131072 && ${#body} <= max_filesize )) || exit 2
+        [[ $(jq -r '.result.tools | length' <<< "$body") -eq 200 ]] || exit 2
+        ;;
+      success-large-cursor:0:*)
+        printf -v large_cursor '%*s' 196608 ''
+        large_cursor=${large_cursor// /x}
+        body="{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"memory_recall\"}],\"nextCursor\":\"$large_cursor\"}}"
+        ;;
+      success-large-cursor:1:*)
+        body='{"jsonrpc":"2.0","id":3,"result":{"tools":[{"name":"searxng_search"}]}}'
         ;;
       success-json:*:*)
         body='{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"memory_recall"},{"name":"searxng_search"}]}}'
@@ -456,6 +487,9 @@ printf '%s\n' \
   '  ok)' \
   '    printf "%s\\n" "fixture-cli 1.0.0"' \
   '    ;;' \
+  '  large-output)' \
+  '    head -c 196608 /dev/zero | tr "\\0" x' \
+  '    ;;' \
   '  output-fail)' \
   '    printf "%s\\n" "fixture-cli failed"' \
   '    exit 1' \
@@ -497,6 +531,21 @@ chmod +x "$rendered_doctor"
 sed '/local id=\$1 phase=\$2 status=\$3 subject=\$4 expected=\$5 observed=\$6 message=\$7 duration=\$8/a\  message=' \
   "$rendered_doctor" > "$empty_message_doctor"
 chmod +x "$empty_message_doctor"
+awk '
+  $0 == "render_output() {" {
+    print
+    print "  return 1"
+    skip_renderer = 1
+    next
+  }
+  skip_renderer && $0 == "}" {
+    skip_renderer = 0
+    print
+    next
+  }
+  !skip_renderer { print }
+' "$rendered_doctor" > "$render_failure_doctor"
+chmod +x "$render_failure_doctor"
 
 write_manifest() {
   jq -n \
@@ -934,6 +983,7 @@ home_key_policy_invalid() { jq '.sops.homeKey.policy = "invalid"' "$manifest" > 
 requested_protocol_unsupported() { jq '.mcp.requestedProtocolVersion = "2099-01-01"' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 supported_protocol_duplicated() { jq '.mcp.supportedProtocolVersions += [.mcp.supportedProtocolVersions[-1]]' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 mcp_target_empty() { jq '.mcp.targets += [""]' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
+manifest_scalar_too_large() { jq '.managedFiles[0].id = ("x" * 4097)' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 cleanup_timeout_missing() { jq 'del(.probePolicy.mcpCleanupTimeoutSeconds)' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 cleanup_timeout_exhausts_budget() { jq '.probePolicy.mcpCleanupTimeoutSeconds = .probePolicy.totalTimeoutSeconds' "$manifest" > "$manifest.tmp"; mv "$manifest.tmp" "$manifest"; }
 managed_file_stale() { printf '%s\n' 'stale=true' > "$managed_runtime"; }
@@ -942,6 +992,7 @@ cli_not_executable() { chmod -x "$cli_path"; }
 cli_version_failed() { printf '%s\n' 'fail' > "$cli_version_state"; }
 cli_version_output_failed() { printf '%s\n' 'output-fail' > "$cli_version_state"; }
 cli_version_timed_out() { printf '%s\n' 'partial-hang' > "$cli_version_state"; }
+cli_version_large() { printf '%s\n' 'large-output' > "$cli_version_state"; }
 rules_file_stale() { printf '%s\n' '# stale rules' > "$rules_runtime"; }
 skill_missing() { rm -f "$skills_dir/fixture-skill/SKILL.md"; }
 agent_missing() { rm -f "$agent_file"; }
@@ -1034,6 +1085,52 @@ elif ! jq -e '
 fi
 
 reset_fixture
+jq '.managedFiles[0].id = ("x" * 4096)' "$manifest" > "$manifest.tmp"
+mv "$manifest.tmp" "$manifest"
+run_doctor --format json
+if [[ $doctor_status -ne 0 ]]; then
+  echo "manifest scalar boundary: expected status 0, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! jq -e '
+  any(.checks[];
+    (.id | startswith("local.managed.")) and
+    (.id | length) == ("local.managed." | length) + 4096
+  )
+' "$doctor_output" >/dev/null; then
+  echo 'manifest scalar boundary: 4,096-character value was not preserved' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+reset_fixture
+jq '
+  .managedFiles[0] as $managed |
+  .managedFiles = [
+    range(0; 180) as $index |
+    $managed + {id: ("managed-" + ($index | tostring) + "-" + ("x" * 1000))}
+  ]
+' "$manifest" > "$manifest.tmp"
+mv "$manifest.tmp" "$manifest"
+run_doctor --format json
+large_report_bytes=$(wc -c < "$doctor_output")
+if [[ $doctor_status -ne 0 ]]; then
+  echo "large JSON report: expected status 0, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif [[ $large_report_bytes -le 131072 ]]; then
+  echo "large JSON report: fixture did not exceed one argv element: $large_report_bytes bytes" >&2
+  failed=1
+elif ! jq -e '
+  .outcome == "healthy" and
+  .summary.total == (.checks | length) and
+  ([.checks[] | select(.id | startswith("local.managed.managed-"))] | length) == 180
+' "$doctor_output" >/dev/null; then
+  echo 'large JSON report: report contract mismatch' >&2
+  failed=1
+fi
+
+reset_fixture
 doctor_executable=$empty_message_doctor
 ln -sfn "$doctor_executable" "$current_generation/sw/bin/dotfiles-doctor"
 run_doctor --format json
@@ -1049,6 +1146,42 @@ elif ! jq -e '
   )
 ' "$doctor_output" >/dev/null; then
   echo 'empty result message: internal contract error was not reported' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+reset_fixture
+doctor_executable=$render_failure_doctor
+ln -sfn "$doctor_executable" "$current_generation/sw/bin/dotfiles-doctor"
+run_doctor --format json
+if [[ $doctor_status -ne 2 ]]; then
+  echo "report renderer failure: expected status 2, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! jq -e '
+  .outcome == "invalid" and
+  .summary == {total:1,pass:0,warn:0,fail:0,error:1,blocked:0} and
+  .checks == [{
+    id:"internal.report",phase:"foundation",status:"error",subject:"result-renderer",
+    expected:"rendered report",observed:"failed",
+    message:"doctor result report could not be rendered",durationMs:0
+  }]
+' "$doctor_output" >/dev/null; then
+  echo 'report renderer failure: fallback contract mismatch' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
+
+reset_fixture
+doctor_executable=$render_failure_doctor
+ln -sfn "$doctor_executable" "$current_generation/sw/bin/dotfiles-doctor"
+run_doctor
+if [[ $doctor_status -ne 2 ]]; then
+  echo "human report renderer failure: expected status 2, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! grep -Fqx 'ERROR: doctor result report could not be rendered' "$doctor_output"; then
+  echo 'human report renderer failure: fallback diagnostic mismatch' >&2
   sed 's/^/  /' "$doctor_output" >&2
   failed=1
 fi
@@ -1276,6 +1409,7 @@ expect_contract_error 'home key policy invalid' "ERROR: doctor manifest does not
 expect_contract_error 'requested MCP protocol unsupported' "ERROR: doctor manifest does not match schema version 4: $manifest" requested_protocol_unsupported
 expect_contract_error 'supported MCP protocol duplicated' "ERROR: doctor manifest does not match schema version 4: $manifest" supported_protocol_duplicated
 expect_contract_error 'empty MCP target' "ERROR: doctor manifest does not match schema version 4: $manifest" mcp_target_empty
+expect_contract_error 'oversized manifest scalar' "ERROR: doctor manifest does not match schema version 4: $manifest" manifest_scalar_too_large
 expect_contract_error 'MCP cleanup timeout missing' "ERROR: doctor manifest does not match schema version 4: $manifest" cleanup_timeout_missing
 expect_contract_error 'MCP cleanup timeout exhausts total budget' "ERROR: doctor manifest does not match schema version 4: $manifest" cleanup_timeout_exhausts_budget
 expect_failure 'managed file stale' "FAIL: managed file is stale: $managed_runtime" managed_file_stale
@@ -1284,6 +1418,24 @@ expect_failure 'CLI not executable' "FAIL: CLI is not executable: $cli_path" cli
 expect_failure 'CLI version failed' 'FAIL: fixture-cli version check failed' cli_version_failed
 expect_failure 'CLI version output then failed' 'FAIL: fixture-cli version check failed' cli_version_output_failed
 expect_failure 'CLI version timed out' 'FAIL: fixture-cli version check failed' cli_version_timed_out
+
+reset_fixture
+cli_version_large
+run_doctor --format json
+if [[ $doctor_status -ne 0 ]]; then
+  echo "large CLI version output: expected status 0, got $doctor_status" >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+elif ! jq -e '
+  any(.checks[];
+    .id == "active.cli.fixture.version" and .status == "pass" and
+    (.observed | length) == 196608
+  )
+' "$doctor_output" >/dev/null; then
+  echo 'large CLI version output: result check was dropped or altered' >&2
+  sed 's/^/  /' "$doctor_output" >&2
+  failed=1
+fi
 expect_failure 'rules file stale' "FAIL: fixture rules file is stale: $rules_runtime" rules_file_stale
 expect_failure 'skill missing' "FAIL: fixture skill is missing: $skills_dir/fixture-skill/SKILL.md" skill_missing
 expect_failure 'agent missing' "FAIL: fixture agent is missing: $agent_file" agent_missing
@@ -1315,6 +1467,23 @@ expect_mcp_success \
 "$initialize_call
 $initialized_call
 $tools_call
+$delete_call"
+
+expect_mcp_success \
+  'MCP large tool schema within response limit' \
+  success-large-tool-schema \
+"$initialize_call
+$initialized_call
+$tools_call
+$delete_call"
+
+expect_mcp_success \
+  'MCP large pagination cursor within response limit' \
+  success-large-cursor \
+  "$initialize_call
+$initialized_call
+$tools_call
+POST|tools/list|fixture-session|2024-11-05|<196608-bytes>
 $delete_call"
 
 expect_mcp_success \

@@ -1,5 +1,7 @@
 set -euo pipefail
 
+@atomicFileFunctions@
+
 @operationLockFunctions@
 
 @rebuildReceiptFunctions@
@@ -13,6 +15,8 @@ usage() {
 usage:
   dotfiles-rebuild
   dotfiles-rebuild --plan
+  dotfiles-rebuild --forward-recover TRANSACTION_ID
+  dotfiles-rebuild --cancel-forward-recover TRANSACTION_ID
   dotfiles-rebuild --resume TRANSACTION_ID
   dotfiles-rebuild --first-boot TRANSACTION_ID
   dotfiles-rebuild --rollback TRANSACTION_ID
@@ -22,6 +26,7 @@ usage:
 Build and verify one immutable flake snapshot, then apply the pre-built candidate. A persistent
 receipt records activation and verification separately. Restart-required transactions remain
 active until --resume verifies the candidate. --rollback restores a compatible previous system.
+--forward-recover creates a new transaction only for an applied candidate whose verifier failed.
 --abort closes a transaction only when the profile commit and activation did not occur.
 USAGE
 }
@@ -41,6 +46,12 @@ elif (( $# == 1 )) && [[ $1 == --status ]]; then
   mode=status
 elif (( $# == 2 )) && [[ $1 == --resume ]]; then
   mode=resume
+  transaction_argument=$2
+elif (( $# == 2 )) && [[ $1 == --forward-recover ]]; then
+  mode=forward-recover
+  transaction_argument=$2
+elif (( $# == 2 )) && [[ $1 == --cancel-forward-recover ]]; then
+  mode=cancel-forward-recover
   transaction_argument=$2
 elif (( $# == 2 )) && [[ $1 == --first-boot ]]; then
   mode=first-boot
@@ -79,7 +90,10 @@ transaction_user=$(id -un)
   die 2 "run dotfiles-rebuild as configured user $configured_user"
 common_git_dir=$(git -C "$dotfiles" rev-parse --path-format=absolute --git-common-dir) || \
   die 2 "failed to resolve the Git common directory"
-dotfiles_acquire_operation_lock "$common_git_dir" "$EUID" "$(id -g)" || \
+operation_lock_bootstrap_mode=create
+[[ $mode != status && $mode != plan ]] || operation_lock_bootstrap_mode=existing-only
+dotfiles_acquire_operation_lock \
+  "$common_git_dir" "$EUID" "$(id -g)" "$operation_lock_bootstrap_mode" || \
   die 1 "failed to acquire the dotfiles operation lock"
 
 state_root=$common_git_dir/dotfiles-rebuild
@@ -95,18 +109,161 @@ active_exists=0
 if [[ -e $active_receipt || -L $active_receipt ]]; then
   active_exists=1
 fi
+publication_active_id=
+if [[ $active_exists -eq 1 ]]; then
+  publication_active_id=$(dotfiles_rebuild_read_active_publication_id \
+    "$state_root" "$EUID" "$(id -g)" 2>/dev/null || true)
+fi
+
+verify_receipt_artifacts() {
+  local receipt=$1 helper
+  dotfiles_rebuild_verify_receipt_evidence \
+    "$state_root" "$receipt" "$EUID" "$(id -g)" "$dotfiles" \
+    "$nix_store_dir" "$configured_user" || return 1
+  if [[ $(jq -r '.schemaVersion == 4 and .lineage != null' <<< "$receipt") == true ]]; then
+    for helper in rebuild syncImages doctor; do
+      dotfiles_rebuild_validate_successor_helper \
+        "$(jq -c --arg helper "$helper" '.lineage.execution.helpers[$helper]' \
+          <<< "$receipt")" \
+        "$(jq -r '.candidate' <<< "$receipt")" "$helper" "$nix_store_dir" || return 1
+    done
+    dotfiles_rebuild_validate_successor_manifest \
+      "$(jq -c '.lineage.execution.manifest' <<< "$receipt")" \
+      "$(jq -r '.candidate' <<< "$receipt")" "$nix_store_dir" || return 1
+  fi
+}
+
+delegate_authorized_controller() {
+  local helper=$1 current_controller
+  current_controller=$(readlink -e -- "$0" 2>/dev/null) || \
+    die 2 "failed to resolve the running rebuild controller"
+  [[ $current_controller != "$helper" ]] || return 0
+  dotfiles_release_operation_lock
+  exec "$helper" "--$mode" "$transaction_argument"
+  die 1 "failed to execute the authorized immutable rebuild controller: $helper"
+}
+
+maybe_delegate_authorized_controller() {
+  local receipt=$1 schema lineage authorization_file authorization metadata candidate helper erasure_file
+  schema=$(jq -er '.schemaVersion' <<< "$receipt") || \
+    die 2 "active rebuild schema is invalid"
+  lineage=$(jq -r '.lineage != null' <<< "$receipt") || \
+    die 2 "active rebuild lineage is invalid"
+
+  if [[ $mode == forward-recover || $mode == cancel-forward-recover ]]; then
+    # Publishing erasure revokes the live authorization.  The write-once erasure
+    # record becomes the cleanup authority and is validated by this reviewed
+    # checkout before any mutation; it must not be exercised as live child auth.
+    for erasure_file in "$state_root/successor-erasures/$transaction_argument-"*.json; do
+      [[ -e $erasure_file || -L $erasure_file ]] || continue
+      return 0
+    done
+    authorization_file=$state_root/successors/$transaction_argument.json
+    [[ -e $authorization_file || -L $authorization_file ]] || return 0
+    authorization=$(dotfiles_rebuild_read_successor_authorization_v2 \
+      "$state_root" "$transaction_argument" "$active_receipt" pending "$EUID" "$(id -g)" \
+      "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user") || \
+      die 2 "pending forward recovery authorization is invalid"
+    candidate=$(jq -er '.child.candidate' <<< "$authorization") || \
+      die 2 "authorized successor candidate is invalid"
+    metadata=$(jq -c '.child.helpers.rebuild' <<< "$authorization") || \
+      die 2 "authorized successor rebuild controller metadata is invalid"
+    dotfiles_rebuild_validate_successor_helper \
+      "$metadata" "$candidate" rebuild "$nix_store_dir" || \
+      die 2 "authorized successor rebuild controller differs from its execution contract"
+    helper=$(jq -er '.canonicalPath' <<< "$metadata") || \
+      die 2 "authorized successor rebuild controller path is invalid"
+    delegate_authorized_controller "$helper"
+    return 0
+  fi
+
+  if [[ $mode =~ ^(resume|first-boot|rollback|abort)$ &&
+    $schema -eq 4 && $lineage == true ]]; then
+    candidate=$(jq -er '.candidate' <<< "$receipt") || \
+      die 2 "active successor candidate is invalid"
+    metadata=$(jq -c '.lineage.execution.helpers.rebuild' <<< "$receipt") || \
+      die 2 "active successor rebuild controller metadata is invalid"
+    dotfiles_rebuild_validate_successor_helper \
+      "$metadata" "$candidate" rebuild "$nix_store_dir" || \
+      die 2 "active successor rebuild controller differs from its execution contract"
+    helper=$(jq -er '.canonicalPath' <<< "$metadata") || \
+      die 2 "active successor rebuild controller path is invalid"
+    delegate_authorized_controller "$helper"
+  fi
+}
+
+validate_successor_protocol_state() {
+  local receipt_file=${1:-}
+  dotfiles_rebuild_validate_successor_protocol_state \
+    "$state_root" "$receipt_file" "$EUID" "$(id -g)" "$dotfiles" \
+    "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user"
+}
+
+require_complete_successor_publication() {
+  local receipt_data=${1:-} active_id='' active_schema='' active_direct_parent=''
+  local inspection_status
+  if [[ -n $receipt_data ]]; then
+    active_id=$(jq -er '.transactionId' <<< "$receipt_data") || \
+      die 2 "active rebuild transaction ID is invalid"
+    active_schema=$(jq -er '.schemaVersion' <<< "$receipt_data") || \
+      die 2 "active rebuild schema is invalid"
+    active_direct_parent=$(jq -r '.lineage.parentTransactionId // empty' \
+      <<< "$receipt_data") || die 2 "active rebuild direct parent is invalid"
+  fi
+  if dotfiles_rebuild_inspect_successor_publish_temps \
+    "$state_root" "$active_id" "$active_schema" "$active_direct_parent" \
+    "$EUID" "$(id -g)"; then
+    return 0
+  else
+    inspection_status=$?
+  fi
+  if [[ $inspection_status -eq 3 ]]; then
+    die 2 "forward recovery publication is incomplete; retry its active transaction recovery command"
+  fi
+  die 2 "forward recovery publication temp state is invalid"
+}
+
+require_complete_active_publication() {
+  local active_id=${1:-} inspection_status
+  if dotfiles_rebuild_inspect_active_publish_temps \
+    "$state_root" "$active_id" "$EUID" "$(id -g)"; then
+    return 0
+  else
+    inspection_status=$?
+  fi
+  if [[ $inspection_status -eq 3 ]]; then
+    die 2 "active receipt publication is incomplete; retry its owning mutating command"
+  fi
+  die 2 "active receipt publication temp state is invalid"
+}
+
+cleanup_active_publication() {
+  local active_id=${1:-}
+  dotfiles_rebuild_cleanup_active_publish_temps \
+    "$state_root" "$active_id" "$EUID" "$(id -g)" || \
+    die 2 "active receipt publication temp state is invalid"
+}
 
 if [[ $mode == status ]]; then
   if [[ $active_exists -eq 0 ]]; then
+    if [[ $state_root_exists -eq 1 ]]; then
+      require_complete_active_publication
+      require_complete_successor_publication
+      validate_successor_protocol_state || \
+        die 2 "forward recovery protocol state is invalid"
+    fi
     echo '{"state":"idle"}'
     exit 0
   fi
+  require_complete_active_publication "$publication_active_id"
   active=$(dotfiles_rebuild_read_active_receipt \
     "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
     die 2 "the active rebuild receipt is invalid"
-  dotfiles_rebuild_verify_receipt_artifacts \
-    "$state_root" "$active" "$EUID" "$(id -g)" || \
+  verify_receipt_artifacts "$active" || \
     die 2 "the active rebuild activation journal is invalid"
+  require_complete_successor_publication "$active"
+  validate_successor_protocol_state "$active_receipt" || \
+    die 2 "forward recovery protocol state is invalid"
   printf '%s\n' "$active"
   exit 0
 fi
@@ -114,30 +271,71 @@ fi
 case $mode in
   apply | plan)
     if [[ $active_exists -eq 1 ]]; then
+      require_complete_active_publication "$publication_active_id"
       active=$(dotfiles_rebuild_read_active_receipt \
         "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
         die 2 "the active rebuild receipt is invalid"
-      dotfiles_rebuild_verify_receipt_artifacts \
-        "$state_root" "$active" "$EUID" "$(id -g)" || \
+      verify_receipt_artifacts "$active" || \
         die 2 "the active rebuild activation journal is invalid"
+      require_complete_successor_publication "$active"
+      validate_successor_protocol_state "$active_receipt" || \
+        die 2 "forward recovery protocol state is invalid"
       active_id=$(jq -r '.transactionId' <<< "$active")
       active_state=$(jq -r '.state' <<< "$active")
       die 1 "active rebuild transaction $active_id ($active_state) blocks a new build; use its recovery instructions"
+    else
+      if [[ $state_root_exists -eq 1 ]]; then
+        if [[ $mode == plan ]]; then
+          require_complete_active_publication
+        else
+          cleanup_active_publication
+        fi
+        require_complete_successor_publication
+      fi
+      validate_successor_protocol_state || \
+        die 2 "forward recovery protocol state is invalid"
     fi
     ;;
-  resume | first-boot | rollback | abort)
+  resume | first-boot | rollback | abort | forward-recover | cancel-forward-recover)
     [[ $transaction_argument =~ ^[0-9a-f]{32}$ ]] || die 2 "transaction ID must contain 32 lowercase hexadecimal characters"
     [[ $active_exists -eq 1 ]] || die 2 "there is no active rebuild transaction"
+    [[ $publication_active_id == "$transaction_argument" ]] || \
+      die 2 "the active rebuild transaction does not match $transaction_argument"
+    cleanup_active_publication "$transaction_argument"
     active=$(dotfiles_rebuild_read_active_receipt \
       "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user") || \
       die 2 "the active rebuild receipt is invalid"
-    dotfiles_rebuild_verify_receipt_artifacts \
-      "$state_root" "$active" "$EUID" "$(id -g)" || \
+    verify_receipt_artifacts "$active" || \
       die 2 "the active rebuild activation journal is invalid"
     [[ $(jq -r '.transactionId' <<< "$active") == "$transaction_argument" ]] || \
       die 2 "the active rebuild transaction does not match $transaction_argument"
+    validate_successor_protocol_state "$active_receipt" || \
+      die 2 "forward recovery protocol state is invalid"
+    maybe_delegate_authorized_controller "$active"
+    if [[ $mode =~ ^(resume|first-boot|rollback|abort)$ &&
+      ( -e $state_root/successors/$transaction_argument.json ||
+        -L $state_root/successors/$transaction_argument.json ||
+        -n $(find "$state_root/successor-preparations" -maxdepth 1 \
+          -name "$transaction_argument-*.json" -print -quit 2>/dev/null) ||
+        -n $(find "$state_root/successor-erasures" -maxdepth 1 \
+          -name "$transaction_argument-*.json" -print -quit 2>/dev/null) ) ]]; then
+      die 2 "pending forward recovery blocks parent recovery operations; use --cancel-forward-recover $transaction_argument"
+    fi
     ;;
 esac
+
+if [[ $mode =~ ^(resume|first-boot|rollback|abort|forward-recover|cancel-forward-recover)$ ]]; then
+  active_id=$(jq -er '.transactionId' <<< "$active") || \
+    die 2 "active rebuild transaction ID is invalid"
+  active_schema=$(jq -er '.schemaVersion' <<< "$active") || \
+    die 2 "active rebuild schema is invalid"
+  active_direct_parent=$(jq -r '.lineage.parentTransactionId // empty' <<< "$active") || \
+    die 2 "active rebuild direct parent is invalid"
+  dotfiles_rebuild_cleanup_successor_publish_temps \
+    "$state_root" "$active_id" "$active_schema" "$active_direct_parent" \
+    "$EUID" "$(id -g)" || \
+    die 2 "forward recovery publication temp state is invalid"
+fi
 
 if [[ $mode == apply && $state_root_exists -eq 1 ]]; then
   dotfiles_rebuild_cleanup_orphan_gc_roots \
@@ -186,9 +384,28 @@ receipt_update() {
 }
 
 temporary_gc_roots=
+successor_pending_id=
+successor_parent_id=
+successor_preparation_published=0
 cleanup_temporary_gc_roots() {
+  local entry active_id=
   if [[ -n $temporary_gc_roots && -d $temporary_gc_roots && ! -L $temporary_gc_roots ]]; then
-    rm -r -- "$temporary_gc_roots"
+    for entry in "$temporary_gc_roots"/*; do
+      [[ -e $entry || -L $entry ]] || continue
+      case ${entry##*/} in source | candidate) rm -- "$entry" || true ;; *) return 1 ;; esac
+    done
+    rmdir -- "$temporary_gc_roots" || true
+  fi
+  if [[ -n $successor_pending_id && $successor_preparation_published -eq 1 ]]; then
+    if [[ -f $active_receipt && ! -L $active_receipt ]]; then
+      active_id=$(jq -r '.transactionId // empty' "$active_receipt" 2>/dev/null || true)
+    fi
+    if [[ $active_id != "$successor_pending_id" && -n $successor_parent_id ]]; then
+      dotfiles_rebuild_cleanup_successor_v2 \
+        "$state_root" "$successor_parent_id" "$successor_pending_id" discard-partial 0 run \
+        "$active_receipt" "$EUID" "$(id -g)" "$dotfiles" "$nix_store_dir" \
+        "$nix_gc_auto_roots_dir" "$configured_user" || true
+    fi
   fi
 }
 
@@ -396,11 +613,17 @@ ensure_receipt_roots() {
 }
 
 print_recovery() {
-  local receipt transaction_id helper previous
+  local receipt transaction_id helper previous state failure_stage
   receipt=$(receipt_read) || return 1
   transaction_id=$(jq -r '.transactionId' <<< "$receipt")
-  helper=$(jq -r '.helperPath' <<< "$receipt")
+  if [[ $(jq -r '.schemaVersion == 4 and .lineage != null' <<< "$receipt") == true ]]; then
+    helper=$(resolve_receipt_execution_helper "$receipt" rebuild) || return 1
+  else
+    helper=$(jq -r '.helperPath' <<< "$receipt")
+  fi
   previous=$(jq -r '.recoveryTarget' <<< "$receipt")
+  state=$(jq -r '.state' <<< "$receipt")
+  failure_stage=$(jq -r '.failureStage // empty' <<< "$receipt")
   cat >&2 <<MSG
 Recovery target: $previous
 Retry the immutable candidate:
@@ -413,6 +636,13 @@ Restore the recorded previous system:
 MSG
   else
     echo "Rollback unavailable: recovery target lacks the required doctor or OCI protocol." >&2
+  fi
+  if [[ $state == verification-failed && $failure_stage == doctor &&
+    $(jq -r '.sopsEnrollmentTransactionId == null' <<< "$receipt") == true ]]; then
+    cat >&2 <<MSG
+Build a new immutable successor after repairing the verifier:
+  nix run $dotfiles#dotfiles-rebuild -- --forward-recover $transaction_id
+MSG
   fi
   evaluate_cancellation "$receipt"
   if [[ -z $cancellation_blocker ]]; then
@@ -429,7 +659,12 @@ print_restart_instructions() {
   receipt=$(receipt_read) || die 1 "failed to read restart transaction"
   transaction_id=$(jq -r '.transactionId' <<< "$receipt")
   distro=$(jq -r '.distro' <<< "$receipt")
-  helper=$(jq -r '.helperPath' <<< "$receipt")
+  if [[ $(jq -r '.schemaVersion == 4 and .lineage != null' <<< "$receipt") == true ]]; then
+    helper=$(resolve_receipt_execution_helper "$receipt" rebuild) || \
+      die 1 "failed to resolve the restart transaction rebuild controller"
+  else
+    helper=$(jq -r '.helperPath' <<< "$receipt")
+  fi
   if [[ $direction == forward ]]; then
     expected_user=$(jq -r '.candidateDefaultUser' <<< "$receipt")
   else
@@ -514,7 +749,7 @@ evaluate_cancellation() {
   state=$(jq -r '.state' <<< "$receipt")
   if [[ $schema -eq 2 && $audited_schema2 -eq 1 ]]; then
     :
-  elif [[ $schema -ne 3 ]]; then
+  elif [[ $schema -ne 3 && $schema -ne 4 ]]; then
     cancellation_blocker="receipt schema $schema cannot be cancelled"
     return 0
   fi
@@ -782,8 +1017,7 @@ reconcile_interrupted_activation() {
         '
     fi
     receipt=$(receipt_read) || die 1 "failed to read restored activation outcome"
-    dotfiles_rebuild_verify_receipt_artifacts \
-      "$state_root" "$receipt" "$EUID" "$(id -g)" || \
+    verify_receipt_artifacts "$receipt" || \
       die 1 "restored activation journal is invalid"
     echo "Restored durable $direction activation outcome for attempt $number." >&2
     return 0
@@ -918,8 +1152,7 @@ reconcile_interrupted_activation() {
       '
   fi
   receipt=$(receipt_read) || die 1 "failed to read reconciled activation receipt"
-  dotfiles_rebuild_verify_receipt_artifacts \
-    "$state_root" "$receipt" "$EUID" "$(id -g)" || \
+  verify_receipt_artifacts "$receipt" || \
     die 1 "reconciled activation journal is invalid"
   echo "Reconciled interrupted $direction activation attempt $number as $boundary." >&2
 }
@@ -1184,13 +1417,39 @@ read_oci_image_manifest_schema() {
   ' "$canonical" 2>/dev/null
 }
 
-require_target_oci_readiness() {
-  local target=$1 role=$2 helper status
+resolve_store_executable() {
+  local executable=$1 canonical
+  canonical=$(readlink -e -- "$executable" 2>/dev/null) || return 1
+  [[ $canonical == "$nix_store_dir/"* && -f $canonical && ! -L $canonical &&
+    -x $canonical ]] || return 1
+  printf '%s\n' "$canonical"
+}
+
+resolve_receipt_execution_helper() {
+  local receipt=$1 role=$2 metadata candidate canonical
+  candidate=$(jq -er '.candidate' <<< "$receipt") || return 1
+  metadata=$(jq -c --arg role "$role" '.lineage.execution.helpers[$role]' \
+    <<< "$receipt") || return 1
+  dotfiles_rebuild_validate_successor_helper \
+    "$metadata" "$candidate" "$role" "$nix_store_dir" || return 1
+  canonical=$(jq -er '.canonicalPath' <<< "$metadata") || return 1
+  printf '%s\n' "$canonical"
+}
+
+require_target_oci_capability() {
+  local target=$1 role=$2 helper
   [[ $(read_oci_image_manifest_schema "$target" 2>/dev/null || true) == 2 ]] || \
     die 2 "$role target requires OCI image manifest schema version 2"
   helper=$target/sw/bin/dotfiles-sync-images
-  [[ -x $helper ]] || \
-    die 2 "target does not contain an executable OCI image sync helper: $helper"
+  helper=$(resolve_store_executable "$helper") || \
+    die 2 "$role target does not contain an executable OCI image sync helper: $helper"
+}
+
+require_target_oci_readiness() {
+  local target=$1 role=$2 helper status
+  require_target_oci_capability "$target" "$role"
+  helper=$(resolve_store_executable "$target/sw/bin/dotfiles-sync-images") || \
+    die 2 "$role target does not contain an executable OCI image sync helper"
 
   echo "==> OCI image readiness"
   set +e
@@ -1211,6 +1470,120 @@ require_target_oci_readiness() {
       return 2
       ;;
   esac
+}
+
+validate_forward_recovery_parent() {
+  local receipt=$1 observed_runtime observed_current observed_profile observed_booted
+  local parent_candidate observed_effect expected_distro
+
+  if [[ $(jq -r '.sopsEnrollmentTransactionId != null' <<< "$receipt") == true ]]; then
+    die 2 "SOPS enrollment-bound transaction cannot be forward-recovered"
+  fi
+  [[ ! -e $active_enrollment && ! -L $active_enrollment ]] || \
+    die 2 "an active SOPS enrollment transaction blocks forward recovery"
+  jq -e '
+    (.schemaVersion | IN(3, 4)) and
+    .state == "verification-failed" and
+    .activation.status == "succeeded" and
+    .activation.exitCode == 0 and
+    (.activation.attempts | length) > 0 and
+    .activation.attempts[-1].status == "succeeded" and
+    .activation.attempts[-1].boundary == "after-profile-commit" and
+    .verification.status == "failed" and
+    .failureStage == "doctor" and
+    .rollback == null and .abort == null and .cancellation == null
+  ' <<< "$receipt" >/dev/null || \
+    die 2 "only an applied schema 3 or 4 doctor verification failure can be forward-recovered"
+
+  expected_distro=$(jq -r '.distro' <<< "$receipt")
+  [[ -n ${WSL_DISTRO_NAME:-} && $WSL_DISTRO_NAME == "$expected_distro" ]] || \
+    die 2 "forward recovery must run in the parent transaction WSL distribution"
+  observed_runtime=$(runtime_snapshot) || \
+    die 2 "failed to resolve runtime generation for forward recovery"
+  parent_candidate=$(jq -r '.candidate' <<< "$receipt")
+  observed_current=$(jq -r '.current' <<< "$observed_runtime")
+  observed_profile=$(jq -r '.profile' <<< "$observed_runtime")
+  observed_booted=$(jq -r '.booted' <<< "$observed_runtime")
+  [[ $observed_current == "$parent_candidate" && $observed_profile == "$parent_candidate" ]] || \
+    die 2 "forward recovery requires the parent candidate as current and profile generation"
+  observed_effect=$(dotfiles-wsl-restart-required \
+    --plan --booted-system "$observed_booted" --current-system "$observed_current" \
+    "$parent_candidate") || \
+    die 2 "failed to verify parent candidate cold-start state"
+  [[ $observed_effect == switch ]] || \
+    die 2 "forward recovery requires a converged parent candidate cold-start state"
+}
+
+reconcile_lineage_handoff() {
+  local child child_id parent_id parent_metadata parent_file parent superseded timestamp
+  local authorization erasure_file parent_archive
+  child=$(receipt_read) || die 1 "failed to read successor rebuild receipt"
+  [[ $(jq -r '.lineage != null' <<< "$child") == true ]] || return 0
+  verify_receipt_artifacts "$child" || die 2 "successor rebuild lineage is invalid"
+  child_id=$(jq -r '.transactionId' <<< "$child")
+  parent_id=$(jq -r '.lineage.parentTransactionId' <<< "$child")
+  erasure_file=$state_root/successor-erasures/$parent_id-$child_id.json
+  parent_archive=$state_root/receipts/$parent_id.json
+  if [[ ! -e $parent_archive && ! -L $parent_archive ]]; then
+    if [[ ! -e $erasure_file && ! -L $erasure_file ]]; then
+      authorization=$(dotfiles_rebuild_read_successor_authorization_v2 \
+        "$state_root" "$parent_id" "$active_receipt" consumed "$EUID" "$(id -g)" \
+        "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user") || \
+        die 2 "consumed forward recovery authorization is invalid"
+      [[ $(jq -r '.child.transactionId' <<< "$authorization") == "$child_id" ]] || \
+        die 2 "consumed forward recovery authorization does not match active successor"
+    fi
+    dotfiles_rebuild_cleanup_successor_v2 \
+      "$state_root" "$parent_id" "$child_id" consumed-handoff 1 begin "$active_receipt" \
+      "$EUID" "$(id -g)" "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+      "$configured_user" || die 2 "consumed forward recovery erasure is invalid"
+  fi
+  sync --data "$active_receipt" || die 1 "failed to persist successor active receipt"
+  sync "$state_root" || die 1 "failed to persist successor receipt handoff"
+  parent_metadata=$(jq -c '.lineage.parentReceipt' <<< "$child")
+  parent_file=$state_root/$(jq -r '.path' <<< "$parent_metadata")
+  parent=$(cat -- "$parent_file") || die 1 "failed to read preserved parent rebuild receipt"
+  timestamp=$(jq -r '.lineage.createdAt' <<< "$child")
+  superseded=$(jq -c \
+    --arg successorTransactionId "$(jq -r '.transactionId' <<< "$child")" \
+    --arg successorSource "$(jq -r '.source' <<< "$child")" \
+    --arg successorCandidate "$(jq -r '.candidate' <<< "$child")" \
+    --argjson originalReceipt "$parent_metadata" \
+    --arg timestamp "$timestamp" '
+      .schemaVersion = 4 |
+      .state = "superseded" |
+      .supersession = {
+        kind: "verification-successor",
+        fromState: "verification-failed",
+        successorTransactionId: $successorTransactionId,
+        successorSource: $successorSource,
+        successorCandidate: $successorCandidate,
+        originalReceipt: $originalReceipt,
+        createdAt: $timestamp
+      } |
+      .updatedAt = $timestamp |
+      .finishedAt = $timestamp
+    ' <<< "$parent") || die 1 "failed to encode superseded parent rebuild receipt"
+  dotfiles_rebuild_verify_receipt_lineage \
+    "$state_root" "$superseded" "$EUID" "$(id -g)" "$dotfiles" \
+    "$nix_store_dir" "$configured_user" || \
+    die 2 "superseded parent rebuild receipt does not bind its actual successor"
+  printf '%s\n' "$superseded" | dotfiles_rebuild_publish_archived_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" \
+    "$parent_id" "$child_id" || \
+    die 1 "failed to publish superseded parent rebuild receipt"
+  dotfiles_rebuild_verify_receipt_lineage \
+    "$state_root" "$superseded" "$EUID" "$(id -g)" "$dotfiles" \
+    "$nix_store_dir" "$configured_user" || \
+    die 2 "superseded parent rebuild receipt does not match its preserved artifact"
+  if [[ -e $erasure_file || -L $erasure_file ]]; then
+    dotfiles_rebuild_cleanup_successor_v2 \
+      "$state_root" "$parent_id" "$child_id" consumed-handoff 1 finish "$active_receipt" \
+      "$EUID" "$(id -g)" "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+      "$configured_user" || die 1 "failed to finish consumed forward recovery erasure"
+  fi
+  dotfiles_rebuild_remove_gc_roots "$state_root" "$parent_id" || \
+    die 1 "failed to remove superseded parent rebuild GC roots"
 }
 
 observe_first_boot() {
@@ -1302,7 +1675,7 @@ verify_target() {
   local direction=$1 target=$2 expected_user=$3 target_effect=$4 state timestamp receipt expected_distro
   local actual_current actual_profile actual_booted observed_effect doctor_status=0
   local doctor_report doctor_report_json='' doctor_failed_check_ids='[]'
-  local doctor_manifest_schema doctor_protocol doctor_route
+  local doctor_manifest_schema doctor_protocol doctor_route doctor_helper
   local before_boot first_boot current_boot
 
   receipt=$(receipt_read) || die 1 "failed to read verification receipt"
@@ -1367,6 +1740,17 @@ verify_target() {
       '["doctor.manifest"]'
   fi
   IFS='|' read -r doctor_manifest_schema doctor_protocol <<< "$doctor_route"
+  if [[ $direction == forward && $(jq -r '.schemaVersion' <<< "$receipt") -eq 4 ]]; then
+    doctor_helper=$(resolve_receipt_execution_helper "$receipt" doctor) || \
+      verification_failed \
+        "$direction" doctor 2 "doctor helper differs from the successor execution contract" \
+        '["doctor.executable"]'
+  else
+    doctor_helper=$(resolve_store_executable "$target/sw/bin/dotfiles-doctor") || \
+      verification_failed \
+        "$direction" doctor 2 "doctor helper is not an immutable store executable: $target" \
+        '["doctor.executable"]'
+  fi
 
   if [[ $direction == forward ]]; then
     state=verifying
@@ -1386,7 +1770,7 @@ verify_target() {
   doctor_report=$(mktemp)
   set +e
   if [[ $doctor_protocol == legacy ]]; then
-    "$target/sw/bin/dotfiles-doctor" > "$doctor_report"
+    "$doctor_helper" > "$doctor_report"
     doctor_status=$?
     cat -- "$doctor_report"
     case $doctor_status in
@@ -1418,7 +1802,7 @@ verify_target() {
         ;;
     esac
   else
-    "$target/sw/bin/dotfiles-doctor" --format json > "$doctor_report"
+    "$doctor_helper" --format json > "$doctor_report"
     doctor_status=$?
   fi
   set -e
@@ -1977,9 +2361,193 @@ resume_activation() {
   activate_target "$direction" "$target" "$effect" "$action" "$expected_user" "$baseline"
 }
 
-if [[ $mode == apply || $mode == plan ]]; then
+successor_edge_for_parent() {
+  local directory=$1 parent_id=$2 entry found=
+  [[ -d $directory && ! -L $directory ]] || return 3
+  for entry in "$directory"/"$parent_id"-*.json; do
+    [[ -e $entry || -L $entry ]] || continue
+    [[ -z $found ]] || return 2
+    found=$entry
+  done
+  [[ -n $found ]] || return 3
+  printf '%s\n' "$found"
+}
+
+cancel_forward_recovery() {
+  local parent_id=$1 parent_sha edge child_id reason=cancel-requested
+  parent_sha=$(sha256sum "$active_receipt" | cut -d ' ' -f 1) || \
+    die 1 "failed to fingerprint forward recovery parent before cancellation"
+  edge=
+  if edge=$(successor_edge_for_parent "$state_root/successor-erasures" "$parent_id"); then
+    child_id=${edge##*/}
+    child_id=${child_id#"$parent_id-"}
+    child_id=${child_id%.json}
+    reason=$(jq -er '.reason' "$edge") || \
+      die 2 "forward recovery erasure reason is invalid"
+    [[ $reason == cancel-requested || $reason == discard-partial ]] || \
+      die 2 "active-child handoff erasure cannot be cancelled by the parent"
+  elif edge=$(successor_edge_for_parent "$state_root/successor-preparations" "$parent_id"); then
+    child_id=${edge##*/}
+    child_id=${child_id#"$parent_id-"}
+    child_id=${child_id%.json}
+  else
+    die 2 "there is no prepared forward recovery to cancel"
+  fi
+  dotfiles_rebuild_cleanup_successor_v2 \
+    "$state_root" "$parent_id" "$child_id" "$reason" 0 run "$active_receipt" \
+    "$EUID" "$(id -g)" "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+    "$configured_user" || die 2 "forward recovery erasure state is invalid"
+  dotfiles_rebuild_cleanup_successor_v2 \
+    "$state_root" "$parent_id" "$child_id" "$reason" 0 retire "$active_receipt" \
+    "$EUID" "$(id -g)" "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+    "$configured_user" || die 2 "cancelled forward recovery erasure is invalid"
+  [[ $(sha256sum "$active_receipt" | cut -d ' ' -f 1) == "$parent_sha" ]] || \
+    die 2 "parent rebuild receipt changed during forward recovery cancellation"
+  printf 'Forward recovery for transaction %s: cancelled\n' "$parent_id"
+}
+
+resume_authorized_forward_recovery() {
+  local parent_id=$1 authorization child_file child child_id candidate candidate_user effect action
+  local baseline parent_sha child_sha child_bytes readiness_status authorization_recheck
+  local rebuild_helper sync_helper
+  authorization=$(dotfiles_rebuild_read_successor_authorization_v2 \
+    "$state_root" "$parent_id" "$active_receipt" pending "$EUID" "$(id -g)" \
+    "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user") || \
+    die 2 "pending forward recovery authorization is invalid"
+  child_file=$state_root/$(jq -r '.child.preparation.path' <<< "$authorization")
+  child=$(cat -- "$child_file") || die 1 "failed to read prepared successor receipt"
+  child_id=$(jq -r '.transactionId' <<< "$child")
+  candidate=$(jq -r '.candidate' <<< "$child")
+  candidate_user=$(jq -r '.candidateDefaultUser' <<< "$child")
+  effect=$(jq -r '.effect' <<< "$child")
+  action=$(jq -r '.action' <<< "$child")
+  baseline=$(jq -c '.activationBaseline' <<< "$child")
+  parent_sha=$(jq -r '.parent.receipt.sha256' <<< "$authorization")
+  child_sha=$(jq -r '.child.preparation.sha256' <<< "$authorization")
+  child_bytes=$(jq -r '.child.preparation.bytes' <<< "$authorization")
+  rebuild_helper=$(jq -r '.child.helpers.rebuild.canonicalPath' <<< "$authorization")
+  sync_helper=$(jq -r '.child.helpers.syncImages.canonicalPath' <<< "$authorization")
+
+  echo "==> OCI image readiness"
+  set +e
+  "$sync_helper" --status
+  readiness_status=$?
+  set -e
+  if [[ $readiness_status -ne 0 ]]; then
+    if [[ $readiness_status -eq 1 ]]; then
+      cat >&2 <<MSG
+Synchronize the authorized immutable successor, then retry without rebuilding:
+  $sync_helper
+  $rebuild_helper --forward-recover $parent_id
+MSG
+    fi
+    return "$readiness_status"
+  fi
+
+  authorization_recheck=$(dotfiles_rebuild_read_successor_authorization_v2 \
+    "$state_root" "$parent_id" "$active_receipt" pending "$EUID" "$(id -g)" \
+    "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user") || \
+    die 2 "authorized successor evidence changed during readiness"
+  [[ $(jq -cS . <<< "$authorization_recheck") == "$(jq -cS . <<< "$authorization")" ]] || \
+    die 2 "authorized successor evidence changed during readiness"
+
+  active=$(receipt_read) || die 2 "failed to re-read forward recovery parent before handoff"
+  validate_forward_recovery_parent "$active"
+  [[ $(sha256sum "$active_receipt" | cut -d ' ' -f 1) == "$parent_sha" ]] || \
+    die 2 "forward recovery parent changed after successor authorization"
+  observed_runtime=$(runtime_snapshot) || die 2 "failed to observe runtime before successor handoff"
+  same_runtime_snapshot "$baseline" "$observed_runtime" || \
+    die 2 "runtime generation changed after successor authorization"
+  authorization_recheck=$(dotfiles_rebuild_read_successor_authorization_v2 \
+    "$state_root" "$parent_id" "$active_receipt" pending "$EUID" "$(id -g)" \
+    "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user") || \
+    die 2 "authorized successor evidence changed before handoff"
+  [[ $(jq -cS . <<< "$authorization_recheck") == "$(jq -cS . <<< "$authorization")" ]] || \
+    die 2 "authorized successor evidence changed before handoff"
+  if cat -- "$child_file" | dotfiles_rebuild_handoff_active_receipt \
+    "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" \
+    "$parent_id" "$parent_sha" "$child_sha" "$child_bytes" "$child_id"; then
+    :
+  else
+    handoff_status=$?
+    if [[ $handoff_status -eq 2 ]]; then
+      die 2 "authorized successor bytes changed before handoff"
+    fi
+    if dotfiles_rebuild_validate_receipt_file \
+      "$active_receipt" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user" &&
+      [[ $(jq -r '.transactionId' "$active_receipt") == "$child_id" &&
+        $(sha256sum "$active_receipt" | cut -d ' ' -f 1) == "$child_sha" ]]; then
+      reconcile_lineage_handoff
+    fi
+    die 1 "failed to hand off the active rebuild receipt to its authorized successor"
+  fi
+  reconcile_lineage_handoff
+  assert_activation_baseline forward receipt-publication "$baseline"
+  activate_target forward "$candidate" "$effect" "$action" "$candidate_user" "$baseline"
+}
+
+if [[ $mode == cancel-forward-recover ]]; then
+  cancel_forward_recovery "$transaction_argument"
+  exit $?
+fi
+
+if [[ $mode == apply || $mode == plan || $mode == forward-recover ]]; then
   sops_enrollment_transaction_id=
-  if [[ -e $active_enrollment || -L $active_enrollment ]]; then
+  forward_parent_id=
+  forward_parent_sha=
+  forward_parent_artifact_metadata=null
+  if [[ $mode == forward-recover ]]; then
+    active=$(receipt_read) || die 2 "failed to read forward recovery parent"
+    validate_forward_recovery_parent "$active"
+    forward_parent_id=$(jq -r '.transactionId' <<< "$active")
+    forward_parent_sha=$(sha256sum "$active_receipt" | cut -d ' ' -f 1) || \
+      die 1 "failed to fingerprint forward recovery parent"
+    if erasure_edge=$(successor_edge_for_parent \
+      "$state_root/successor-erasures" "$forward_parent_id"); then
+      erased_child_id=${erasure_edge##*/}
+      erased_child_id=${erased_child_id#"$forward_parent_id-"}
+      erased_child_id=${erased_child_id%.json}
+      [[ $(jq -r '.keepRoots' "$erasure_edge") == false ]] || \
+        die 2 "active parent has an invalid keep-roots erasure"
+      erasure_reason=$(jq -er '.reason' "$erasure_edge") || \
+        die 2 "forward recovery erasure reason is invalid"
+      case $erasure_reason in
+        discard-partial)
+          dotfiles_rebuild_cleanup_successor_v2 \
+            "$state_root" "$forward_parent_id" "$erased_child_id" "$erasure_reason" \
+            0 run "$active_receipt" "$EUID" "$(id -g)" "$dotfiles" \
+            "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user" || \
+            die 2 "discarded forward recovery erasure is invalid"
+          ;;
+        cancel-requested) ;;
+        *) die 2 "active parent has an invalid forward recovery erasure reason" ;;
+      esac
+      dotfiles_rebuild_cleanup_successor_v2 \
+        "$state_root" "$forward_parent_id" "$erased_child_id" "$erasure_reason" \
+        0 retire "$active_receipt" "$EUID" "$(id -g)" "$dotfiles" \
+        "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user" || \
+        die 2 "erasing forward recovery blocks a new successor; resume --cancel-forward-recover"
+    fi
+    if [[ -f $state_root/successors/$forward_parent_id.json &&
+      ! -L $state_root/successors/$forward_parent_id.json ]]; then
+      resume_authorized_forward_recovery "$forward_parent_id"
+      exit $?
+    fi
+    if preparation_edge=$(successor_edge_for_parent \
+      "$state_root/successor-preparations" "$forward_parent_id"); then
+      partial_child_id=${preparation_edge##*/}
+      partial_child_id=${partial_child_id#"$forward_parent_id-"}
+      partial_child_id=${partial_child_id%.json}
+      dotfiles_rebuild_cleanup_successor_v2 \
+        "$state_root" "$forward_parent_id" "$partial_child_id" discard-partial 0 run "$active_receipt" \
+        "$EUID" "$(id -g)" "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+        "$configured_user" || die 2 "partial forward recovery state is invalid"
+      dotfiles_rebuild_cleanup_successor_v2 \
+        "$state_root" "$forward_parent_id" "$partial_child_id" discard-partial 0 retire "$active_receipt" \
+        "$EUID" "$(id -g)" "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+        "$configured_user" || die 2 "completed forward recovery erasure is invalid"
+    fi
+  elif [[ -e $active_enrollment || -L $active_enrollment ]]; then
     marker=$(read_enrollment_marker) || die 1 "the SOPS enrollment marker is invalid"
     [[ $(jq -r '.phase' <<< "$marker") == generation-pending ]] || \
       die 1 "an enrollment transaction blocks normal rebuild"
@@ -2040,6 +2608,18 @@ if [[ $mode == apply || $mode == plan ]]; then
     die 1 "candidate build did not create its temporary GC root"
   doctor_manifest_route forward "$candidate" >/dev/null || \
     die 2 "candidate does not contain a supported schema version 4 doctor manifest"
+  candidate_rebuild_logical=$candidate/sw/bin/dotfiles-rebuild
+  candidate_sync_logical=$candidate/sw/bin/dotfiles-sync-images
+  candidate_doctor_logical=$candidate/sw/bin/dotfiles-doctor
+  resolve_store_executable "$candidate_rebuild_logical" >/dev/null || \
+    die 2 "candidate does not contain an immutable rebuild resume helper"
+  resolve_store_executable "$candidate_sync_logical" >/dev/null || \
+    die 2 "candidate target does not contain an executable OCI image sync helper"
+  resolve_store_executable "$candidate_doctor_logical" >/dev/null || \
+    die 2 "candidate does not contain an immutable doctor helper"
+  if [[ $mode == forward-recover && $candidate == $(jq -r '.candidate' "$active_receipt") ]]; then
+    die 2 "forward recovery candidate must differ from the failed parent candidate"
+  fi
 
   previous_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system"
   previous_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system"
@@ -2077,7 +2657,33 @@ if [[ $mode == apply || $mode == plan ]]; then
   [[ $previous_user == "$configured_user" ]] || \
     die 2 "previous WSL default user $previous_user does not match configured user $configured_user"
 
-  require_target_oci_readiness "$candidate" candidate || exit $?
+  if [[ $mode == forward-recover ]]; then
+    require_target_oci_capability "$candidate" candidate
+    successor_rebuild_metadata=$(dotfiles_rebuild_successor_helper_metadata \
+      "$candidate_rebuild_logical" "$nix_store_dir") || \
+      die 2 "successor rebuild helper is not immutable"
+    successor_sync_metadata=$(dotfiles_rebuild_successor_helper_metadata \
+      "$candidate_sync_logical" "$nix_store_dir") || \
+      die 2 "successor OCI sync helper is not immutable"
+    successor_doctor_metadata=$(dotfiles_rebuild_successor_helper_metadata \
+      "$candidate_doctor_logical" "$nix_store_dir") || \
+      die 2 "successor doctor helper is not immutable"
+    successor_manifest_metadata=$(dotfiles_rebuild_successor_manifest_metadata \
+      "$candidate/etc/dotfiles/oci-images.json" "$nix_store_dir") || \
+      die 2 "candidate OCI manifest is not immutable"
+    forward_execution=$(jq -cn \
+      --argjson rebuild "$successor_rebuild_metadata" \
+      --argjson syncImages "$successor_sync_metadata" \
+      --argjson doctor "$successor_doctor_metadata" \
+      --argjson manifest "$successor_manifest_metadata" '
+        {manifest: $manifest, helpers: {
+          rebuild: $rebuild, syncImages: $syncImages, doctor: $doctor
+        }}
+      ') || die 1 "failed to encode successor execution contract"
+  else
+    forward_execution=null
+    require_target_oci_readiness "$candidate" candidate || exit $?
+  fi
 
   if [[ $mode == plan ]]; then
     cleanup_temporary_gc_roots
@@ -2093,23 +2699,40 @@ if [[ $mode == apply || $mode == plan ]]; then
   same_runtime_snapshot "$previous_runtime" "$observed_runtime" || \
     die 2 "runtime generation changed while planning the rebuild; retry from a stable state"
 
+  if [[ $mode == forward-recover ]]; then
+    active=$(receipt_read) || die 2 "failed to re-read forward recovery parent"
+    verify_receipt_artifacts "$active" || die 2 "forward recovery parent artifacts changed during planning"
+    validate_forward_recovery_parent "$active"
+    [[ $(sha256sum "$active_receipt" | cut -d ' ' -f 1) == "$forward_parent_sha" ]] || \
+      die 2 "forward recovery parent changed while planning"
+    forward_parent_artifact_metadata=$(dotfiles_rebuild_expected_artifact_metadata \
+      "lineage/$forward_parent_id/verification-failed.json" "$active_receipt") || \
+      die 1 "failed to bind the future forward recovery parent artifact"
+  fi
+
   transaction_id=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
   [[ $transaction_id =~ ^[0-9a-f]{32}$ ]] || die 2 "failed to create a rebuild transaction ID"
   before_apply_boot=$(boot_instance) || die 2 "failed to identify the running systemd manager instance"
   timestamp=$(now)
-  helper_path=$candidate/sw/bin/dotfiles-rebuild
-  [[ -x $helper_path ]] || die 2 "candidate does not contain its rebuild resume helper"
+  helper_path=$candidate_rebuild_logical
+  receipt_schema_version=3
+  [[ $mode != forward-recover ]] || receipt_schema_version=4
 
   dotfiles_rebuild_prepare_state_root "$state_root" "$EUID" "$(id -g)" || \
     die 1 "failed to prepare rebuild receipt storage"
-  dotfiles_rebuild_ensure_gc_roots \
-    "$state_root" "$transaction_id" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
-    source "$source_path" \
-    candidate "$candidate" \
-    recovery-target "$previous_current" \
-    previous-booted "$previous_booted" \
-    displaced-profile "$previous_profile" || \
-    die 1 "failed to protect rebuild transaction store paths from garbage collection"
+  if [[ $mode == forward-recover ]]; then
+    successor_pending_id=$transaction_id
+    successor_parent_id=$forward_parent_id
+  else
+    dotfiles_rebuild_ensure_gc_roots \
+      "$state_root" "$transaction_id" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+      source "$source_path" \
+      candidate "$candidate" \
+      recovery-target "$previous_current" \
+      previous-booted "$previous_booted" \
+      displaced-profile "$previous_profile" || \
+      die 1 "failed to protect rebuild transaction store paths from garbage collection"
+  fi
   observed_runtime=$(runtime_snapshot) || die 2 "failed to resolve runtime generation before receipt publication"
   if ! same_runtime_snapshot "$previous_runtime" "$observed_runtime"; then
     dotfiles_rebuild_remove_gc_roots "$state_root" "$transaction_id" || \
@@ -2117,6 +2740,7 @@ if [[ $mode == apply || $mode == plan ]]; then
     die 2 "runtime generation changed before publishing the rebuild receipt; retry from a stable state"
   fi
   receipt_json=$(jq -n \
+    --argjson schemaVersion "$receipt_schema_version" \
     --arg transactionId "$transaction_id" \
     --arg worktree "$dotfiles" \
     --arg source "$source_path" \
@@ -2133,11 +2757,14 @@ if [[ $mode == apply || $mode == plan ]]; then
     --arg candidateDefaultUser "$candidate_user" \
     --arg previousDefaultUser "$previous_user" \
     --arg sopsEnrollmentTransactionId "$sops_enrollment_transaction_id" \
+    --arg forwardParentId "$forward_parent_id" \
+    --argjson forwardParentReceipt "$forward_parent_artifact_metadata" \
+    --argjson forwardExecution "$forward_execution" \
     --argjson beforeApplyBoot "$before_apply_boot" \
     --argjson activationBaseline "$previous_runtime" \
     --arg timestamp "$timestamp" '
       {
-        schemaVersion: 3,
+        schemaVersion: $schemaVersion,
         transactionId: $transactionId,
         worktree: $worktree,
         source: $source,
@@ -2170,6 +2797,17 @@ if [[ $mode == apply || $mode == plan ]]; then
         abort: null,
         cancellation: null,
         migration: null,
+        lineage: (
+          if $schemaVersion == 4 then {
+            kind: "verification-successor",
+            protocolVersion: 2,
+            parentTransactionId: $forwardParentId,
+            parentReceipt: $forwardParentReceipt,
+            execution: $forwardExecution,
+            createdAt: $timestamp
+          } else null end
+        ),
+        supersession: null,
         failureStage: null,
         rollback: null,
         startedAt: $timestamp,
@@ -2177,6 +2815,100 @@ if [[ $mode == apply || $mode == plan ]]; then
         finishedAt: null
       }
     ')
+  if [[ $mode == forward-recover ]]; then
+    successor_child_file=$(printf '%s\n' "$receipt_json" | \
+      dotfiles_rebuild_publish_successor_preparation \
+        "$state_root" "$forward_parent_id" "$transaction_id" "$EUID" "$(id -g)" \
+        "$dotfiles" "$nix_store_dir" "$configured_user") || \
+      die 1 "failed to publish the forward recovery preparation"
+    successor_preparation_published=1
+    forward_parent_artifact=$(dotfiles_rebuild_preserve_verification_parent \
+      "$state_root" "$EUID" "$(id -g)" "$forward_parent_id" "$active_receipt" \
+      "$nix_store_dir" "$transaction_id") || \
+      die 1 "failed to preserve forward recovery parent receipt"
+    actual_parent_metadata=$(dotfiles_rebuild_protocol_artifact_metadata \
+      "$state_root" "$forward_parent_artifact" "$EUID" "$(id -g)" 400) || \
+      die 1 "failed to bind forward recovery parent receipt"
+    [[ $(jq -cS . <<< "$actual_parent_metadata") == \
+      $(jq -cS . <<< "$forward_parent_artifact_metadata") ]] || \
+      die 2 "forward recovery parent artifact differs from its preparation binding"
+    verify_receipt_artifacts "$receipt_json" || \
+      die 2 "successor receipt or preserved parent artifact is invalid before authorization"
+    dotfiles_rebuild_ensure_gc_roots \
+      "$state_root" "$transaction_id" "$nix_store_dir" "$nix_gc_auto_roots_dir" \
+      source "$source_path" \
+      candidate "$candidate" \
+      recovery-target "$previous_current" \
+      previous-booted "$previous_booted" \
+      displaced-profile "$previous_profile" || \
+      die 1 "failed to protect forward recovery store paths from garbage collection"
+    successor_child_metadata=$(dotfiles_rebuild_protocol_artifact_metadata \
+      "$state_root" "$successor_child_file" "$EUID" "$(id -g)" 400) || \
+      die 1 "failed to bind the prepared forward recovery successor"
+    successor_desired_roots=$(dotfiles_rebuild_desired_successor_roots "$receipt_json") || \
+      die 1 "failed to encode successor roots"
+    successor_authorization=$(jq -n \
+      --argjson schemaVersion 2 \
+      --arg parentId "$forward_parent_id" \
+      --arg parentCandidate "$(jq -r '.candidate' "$active_receipt")" \
+      --argjson parentReceipt "$actual_parent_metadata" \
+      --arg childId "$transaction_id" \
+      --arg childSource "$source_path" \
+      --arg childCandidate "$candidate" \
+      --argjson preparation "$successor_child_metadata" \
+      --argjson rebuildHelper "$successor_rebuild_metadata" \
+      --argjson syncHelper "$successor_sync_metadata" \
+      --argjson doctorHelper "$successor_doctor_metadata" \
+      --argjson manifest "$successor_manifest_metadata" \
+      --argjson activationBaseline "$previous_runtime" \
+      --argjson roots "$successor_desired_roots" \
+      --arg timestamp "$timestamp" '
+        {
+          schemaVersion: $schemaVersion,
+          kind: "verification-successor-authorization",
+          parent: {
+            transactionId: $parentId,
+            candidate: $parentCandidate,
+            receipt: $parentReceipt
+          },
+          child: {
+            transactionId: $childId,
+            source: $childSource,
+            candidate: $childCandidate,
+            preparation: $preparation,
+            helpers: {
+              rebuild: $rebuildHelper,
+              syncImages: $syncHelper,
+              doctor: $doctorHelper
+            },
+            manifest: $manifest
+          },
+          lineage: {parentReceipt: $parentReceipt},
+          activationBaseline: $activationBaseline,
+          roots: $roots,
+          createdAt: $timestamp
+        }
+      ') || die 1 "failed to encode forward recovery authorization"
+    if printf '%s\n' "$successor_authorization" | \
+      dotfiles_rebuild_publish_successor_authorization_v2 \
+        "$state_root" "$forward_parent_id" "$active_receipt" "$EUID" "$(id -g)" \
+        "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" "$configured_user"; then
+      :
+    else
+      authorization_status=$?
+      if [[ $authorization_status -eq 2 ]]; then
+        die 2 "successor authorization inputs changed before publication"
+      fi
+      die 1 "failed to publish forward recovery authorization"
+    fi
+    successor_preparation_published=0
+    cleanup_temporary_gc_roots
+    temporary_gc_roots=
+    trap - EXIT
+    resume_authorized_forward_recovery "$forward_parent_id"
+    exit $?
+  fi
+
   if ! printf '%s\n' "$receipt_json" | dotfiles_rebuild_create_active_receipt \
     "$state_root" "$EUID" "$dotfiles" "$nix_store_dir" "$configured_user"; then
     if [[ ! -e $active_receipt && ! -L $active_receipt ]]; then
@@ -2193,6 +2925,12 @@ if [[ $mode == apply || $mode == plan ]]; then
   exit $?
 fi
 
+active=$(receipt_read) || die 1 "failed to read the active rebuild receipt"
+if [[ $(jq -r '.lineage != null' <<< "$active") == true ]]; then
+  resolve_receipt_execution_helper "$active" rebuild >/dev/null || \
+    die 2 "active successor rebuild helper differs from its execution contract"
+  reconcile_lineage_handoff
+fi
 validate_enrollment_binding || die 2 "rebuild receipt and SOPS enrollment state do not match"
 ensure_receipt_roots
 active=$(receipt_read) || die 1 "failed to read the active rebuild receipt"

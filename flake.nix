@@ -1025,6 +1025,7 @@
                   ${self}/modules/commands/rebuild \
                   ${pkgs.bash}/bin/bash \
                   ${lib.getExe pkgs.fakeroot} \
+                  ${self}/scripts/lib/atomic-file.sh \
                   ${self}/scripts/lib/operation-lock.sh \
                   ${self}/scripts/lib/rebuild-receipt.sh \
                   ${self}/scripts/lib/rebuild-attempt.sh
@@ -1043,6 +1044,86 @@
               ''
                 bash ${self}/scripts/tests/rebuild-attempt.sh \
                   ${self}/scripts/lib/rebuild-attempt.sh
+                touch $out
+              '';
+
+          atomic-publication =
+            pkgs.runCommandLocal "check-atomic-publication"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.findutils
+                  pkgs.gnused
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                bash ${self}/scripts/tests/atomic-publication.sh \
+                  ${self}/scripts/lib/atomic-file.sh \
+                  ${self}/scripts/lib/operation-lock.sh \
+                  ${self}/scripts/lib/oci-image-state.sh \
+                  full
+                bash ${self}/scripts/tests/atomic-publication.sh \
+                  ${self}/scripts/lib/atomic-file.sh \
+                  ${self}/scripts/lib/operation-lock.sh \
+                  ${self}/scripts/lib/oci-image-state.sh \
+                  interop \
+                  ${self}/scripts/tests/fixtures/legacy-operation-lock.sh \
+                  ${self}/scripts/tests/fixtures/legacy-oci-image-state.sh
+                touch $out
+              '';
+
+          active-publication =
+            pkgs.runCommandLocal "check-active-publication"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.findutils
+                  pkgs.gnused
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${self}/scripts/tests/active-publication.sh \
+                  ${self}/scripts/lib/atomic-file.sh \
+                  ${self}/scripts/lib/rebuild-receipt.sh \
+                  full
+                touch $out
+              '';
+
+          preparation-parent-evidence =
+            pkgs.runCommandLocal "check-preparation-parent-evidence"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${self}/scripts/tests/preparation-parent-evidence.sh \
+                  ${self}/scripts/lib/rebuild-receipt.sh \
+                  full
+                touch $out
+              '';
+
+          gc-root-observer =
+            pkgs.runCommandLocal "check-gc-root-observer"
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.findutils
+                  pkgs.gnused
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${self}/scripts/tests/gc-root-observer.sh \
+                  ${self}/scripts/lib/rebuild-receipt.sh \
+                  full
                 touch $out
               '';
 
@@ -1121,6 +1202,7 @@
               ''
                 bash ${self}/scripts/tests/doctor-runtime.sh \
                   ${self}/modules/commands/doctor \
+                  ${self}/scripts/lib/atomic-file.sh \
                   ${self}/scripts/lib/oci-image-state.sh \
                   ${pkgs.bash}/bin/bash \
                   ${fixtureNixImageIdentityCases}

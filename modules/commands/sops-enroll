@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+@atomicFileFunctions@
+
 @operationLockFunctions@
 
 keyctl=@sopsKeyctl@
@@ -94,18 +96,23 @@ active_marker=$transaction_root/active.json
 active_rebuild=$common_git_dir/dotfiles-rebuild/active.json
 
 umask 077
-dotfiles_acquire_operation_lock "$common_git_dir" "$EUID" "$(id -g)" || \
+operation_lock_bootstrap_mode=create
+[[ $operation != status ]] || operation_lock_bootstrap_mode=existing-only
+dotfiles_acquire_operation_lock \
+  "$common_git_dir" "$EUID" "$(id -g)" "$operation_lock_bootstrap_mode" || \
   die 'failed to acquire the dotfiles operation lock'
 if [[ $operation != status && ( -e $active_rebuild || -L $active_rebuild ) ]]; then
   die 'an active rebuild transaction blocks SOPS enrollment changes; resume or recover it first'
 fi
-if [[ ! -e $transaction_root ]]; then
+if [[ ! -e $transaction_root && ! -L $transaction_root && $operation != status ]]; then
   mkdir -m 0700 -- "$transaction_root"
 fi
-[[ ! -L $transaction_root && -d $transaction_root ]] || \
-  die 'transaction root must be a real directory'
-[[ $(stat -c '%u|%a' -- "$transaction_root") == "$EUID|700" ]] || \
-  die 'transaction root has invalid owner or mode'
+if [[ -e $transaction_root || -L $transaction_root ]]; then
+  [[ ! -L $transaction_root && -d $transaction_root ]] || \
+    die 'transaction root must be a real directory'
+  [[ $(stat -c '%u|%a' -- "$transaction_root") == "$EUID|700" ]] || \
+    die 'transaction root has invalid owner or mode'
+fi
 
 root_call() {
   "$sudo_command" -- "$keyctl" "$@"
@@ -238,9 +245,9 @@ open_recovery_identity() {
     die 'recovery key mode must be 0400 or 0600'
   [[ ${recovery_metadata##*|} == 1 ]] || die 'recovery key must have one hard link'
   exec {recovery_fd}< "$recovery_key"
-  fd_metadata=$(stat -Lc '%d|%i|%a|%h' -- "/proc/$$/fd/$recovery_fd")
+  fd_metadata=$(stat -Lc '%d|%i|%a|%h' -- "/proc/$BASHPID/fd/$recovery_fd")
   [[ $fd_metadata == "$recovery_metadata" ]] || die 'recovery key changed while it was opened'
-  recovery_identity=/proc/$$/fd/$recovery_fd
+  recovery_identity=/proc/$BASHPID/fd/$recovery_fd
   recovery_recipient=$(age-keygen -y "$recovery_identity") || die 'recovery key is not a valid age identity'
   [[ $recovery_recipient != *$'\n'* && $recovery_recipient =~ ^age1[0-9a-z]+$ ]] || \
     die 'recovery key must contain exactly one age identity'

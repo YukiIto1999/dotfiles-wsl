@@ -2,6 +2,8 @@
 set -Eeuo pipefail
 shopt -s inherit_errexit 2>/dev/null || true
 
+# shellcheck source=lib/atomic-file.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/lib/atomic-file.sh"
 # shellcheck source=lib/operation-lock.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/lib/operation-lock.sh"
 

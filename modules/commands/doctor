@@ -1,5 +1,7 @@
 set +e
 
+@atomicFileFunctions@
+
 @ociImageStateFunctions@
 
 manifest_entry="@doctorManifestPath@"
@@ -697,16 +699,16 @@ if dotfiles_oci_validate_state_root "$oci_state_root" "$EUID" "$(id -g)"; then
   oci_lock_status=$?
   if [[ $oci_lock_status -eq 0 ]]; then
     oci_lock_state=acquired
-    add_check system.oci.lock system pass "$oci_state_root/operation.lock" \
+    add_check system.oci.lock system pass "$oci_state_root" \
       shared-lock acquired "OCI image state is valid and shared lock was acquired" \
       "$(duration_since "$started")"
   elif [[ $oci_lock_status -eq 1 ]]; then
     oci_lock_state=busy
-    add_check system.oci.lock system blocked "$oci_state_root/operation.lock" \
+    add_check system.oci.lock system blocked "$oci_state_root" \
       shared-lock busy "OCI image checks are blocked by an active synchronization" \
       "$(duration_since "$started")"
   else
-    add_check system.oci.lock system fail "$oci_state_root/operation.lock" \
+    add_check system.oci.lock system fail "$oci_state_root" \
       valid-lock invalid "OCI image sync state and lock are invalid" \
       "$(duration_since "$started")"
   fi

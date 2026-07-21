@@ -16,7 +16,10 @@ doctor manifest を version 4 にする。`my.ociImages` から image ID、取�
 
 Nix 生成 image は system closure の build 時に Docker archive を検証する。archive は単一 image の `manifest.json`、期待する `RepoTags`、安全な `Config` member 名を持たなくてはならない。Config の raw bytes の SHA-256 が Config filename と一致した場合だけ、`sha256:<Config hash>` を期待 image ID とする JSON sidecar を Nix store に生成する。doctor manifest はこの sidecar を参照する。
 
-system phase は OCI image sync の state directory と lock の owner、mode、link count を検証し、shared lock を取得する。lock が不正または未初期化なら失敗、exclusive sync が実行中なら `blocked` とし、Docker と同期 status commandを実行しない。shared lock は image、container の観測が終わるまで保持する。
+system phase は OCI image sync の state directory と lock の owner、mode、link count を検証し、state directory と従来の
+regular lock の両方を shared lock する。lock が不正、未初期化、または publication の途中なら失敗、exclusive sync が実行中なら
+`blocked` とし、Docker と同期 status command を実行しない。doctor は lock state を作成、修復しない。shared lock は image、
+container の観測が終わるまで保持する。
 
 Docker health unit が成功した場合だけ、同じ generation の `dotfiles-sync-images --status` を期限付きで実行する。これは upstream receipt、manifest hash、local image ID、Docker cache の一致を検査する。その後、各 image を個別に観測する。
 

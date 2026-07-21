@@ -115,6 +115,11 @@ NixOS の `system.tools.nixos-rebuild.enable` を無効にし、同名の guard 
 共通 operation lock の内側で、対象 flake の `config.system.build.nixos-rebuild` を build して store path から呼ぶ。
 どちらも PATH 上の可変な `nixos-rebuild` は使わない。
 
+operation lock は Git common directory の inode と従来の `dotfiles-operation.lock` の inode をこの順で lock する。前者を新しい
+authority、後者を旧 generation との互換 bridge とし、移行中は両方を保持する。canonical lock file は temporary file の data sync、
+atomic no-replace、canonical file と親 directory の sync で初期化する。変更操作だけが未初期化 state と、旧 publisher が残した
+同一 inode の hardlink residue を修復できる。status と plan は既存 lock だけを取得し、state を作成または回収しない。
+
 この排他保証は対応する二つの入口に対するものである。root が system profile、古い generation の activator、
 `switch-to-configuration`、別 flake の `nixos-rebuild` を直接実行する操作は境界外であり、receipt の回復保証を持たない。
 上流実装は profile 更新と activation を別の処理として実行し、Nix の `nix-env --set` に expected-generation CAS はない。
@@ -164,6 +169,75 @@ zero-effect 検査を通り、旧 candidate を activation しない。schema v3
 activation 失敗は終了 status 4、doctor 失敗は 5 とし、どちらも active receipt と GC root を残す。成功時と
 runtime drift の中止時は receipt を `$GIT_COMMON_DIR/dotfiles-rebuild/receipts/<transaction-id>.json` へ移し、
 transaction の GC root を削除する。
+
+### verifier failure の successor
+
+activation 済み candidate の doctor 自体に欠陥がある場合、固定 candidate の `--resume` は同じ欠陥を再実行する。
+親 receipt の candidate を差し替えると、source、candidate、activation journal の対応が壊れる。親を先に archive して
+通常 rebuild を始めると、active receipt が存在しない区間と親子関係のない履歴が生じる。この二方式は採用しない。
+
+review 済み checkout package の `--forward-recover` は、schema v3 または v4 の doctor verification failure を親とする
+schema v4 successor transaction を作る。親は activation succeeded、末尾 attempt succeeded、`after-profile-commit`、
+verification failed、`failureStage = "doctor"` でなければならない。SOPS enrollment、rollback、abort、cancellation がなく、
+current と profile が親 candidate、cold-start state が `switch` であることも要求する。
+
+新 candidate の snapshot、check、build、diff、effect、user を評価し、OCI manifest schema と candidate closure 内の
+`dotfiles-rebuild`、`dotfiles-sync-images`、`dotfiles-doctor` を検査する。親 receipt の exact bytes は
+`lineage/<parent-id>/verification-failed.json` へ保存する。prepared child は
+`successor-preparations/<parent-id>-<child-id>.json`、write-once の live authorization は
+`successors/<parent-id>.json` へ保存し、lineage artifact と合わせて mode `0400` とする。authorization は親 receipt の
+SHA-256、子 receipt の path、byte 数、SHA-256、三つの helper、OCI manifest の store path と hash、activation baseline、
+5 本の GC root を固定する。prepared child の parent metadata は、active、lineage、garbage に存在する全 parent evidence の
+path、byte 数、SHA-256 と transaction state に一致させる。GC root は user-facing symlink と Nix auto-root registration を
+一対一で検証する。
+
+authorization は OCI の同期状態を持たない。active 親を維持したまま、固定した child manifest に対する既存
+`dotfiles-sync-images` transaction だけを許可する。readiness は candidate helper の `--status` から導出する。未同期なら
+authorization と子の persistent root を残して終了し、同期後の `--forward-recover` は checkout を再評価せず同じ child を
+再利用する。live authorization が有効な間の forward / cancel は candidate closure に固定した rebuild helper へ `exec` し、operation lock を
+取り直して authorization と runtime を再検証する。controller 選択より先に successor protocol 全体を読み取り専用で検証し、erasure が
+存在する場合は authorization より優先して失効済みと判定する。同期と再試行の案内もこの固定 helper の絶対 path を使う。
+authorization 公開中は親の resume、rollback、abort を拒否する。`--cancel-forward-recover` は親 receipt を変更せず、
+`successor-erasures/<parent-id>-<child-id>.json` に失効権限を先に固定する。cleanup は lineage と子の persistent root を
+`successor-garbage/<parent-id>-<child-id>/` へ移してから、列挙済みの file と directory だけを削除する。各 mutation の直前に
+erasure を再検証し、停止後も認証済み subset から再開する。通常ユーザーは Nix daemon 所有の indirect auto-root directory を
+変更しない。user-owned persistent root の削除で dangling になった registration は daemon と GC の管理へ戻す。
+erasure 公開時点で live authorization は失効する。以後は review 済み checkout が write-once erasure の列挙した対象だけを
+検証、削除する。cancel 完了時は erasure も retire し、親の recovery operation を再び許可する。
+
+Nix の indirect root publisher が残し得る direct root の `<root>.tmp-<pid>-<random>` と daemon auto-root の
+`<hash>.tmp-<pid>-<random>` も protocol state として扱う。一回の direct-root scan と一回の auto-root scan から、確定 direct、
+temporary direct、確定 auto、temporary auto の四集合を作り、write-once erasure schema v2 に固定する。live authorization は
+五組すべてが確定し temporary がない場合だけ公開する。取消しは認証済み user-owned root と temporary だけを削除し、daemon-owned
+entry は確定、temporary、dangling のいずれも変更しない。
+
+readiness が成立したら、親 receipt と runtime baseline を再検査し、prepared child を `active.json` へ atomic replace する。
+停止時の active receipt は親または子のどちらかであり、間に idle state を作らない。authorization の公開前に停止した
+partial state は次の effect command だけが回収し、`--status` と `--plan` は未完了と不正を区別して status 2 で停止し、修復しない。
+lineage、preparation、authorization、handoff、erasure、archive の一時ファイルは state root 直下の
+`.successor-<kind>-<parent-id>-<child-id>.<suffix>` に置く。active 親は自分が親である entry、active 子は自分と direct parent の
+組に属する erasure と archive entry だけを回収できる。未知の entry や identity の不一致を発見した場合は、削除せず
+protocol error として停止する。
+
+`active.json` の初回作成は transaction ID を含む temporary からの atomic no-replace、receipt 更新と handoff は atomic replace と
+する。旧 hardlink publisher の residue は canonical active と同一 inode であることを含む完全な identity が一致する場合だけ
+effect command が回収する。読み取り専用操作は active publication residue を変更しない。
+
+handoff 後は lineage artifact から親の `superseded` receipt を再構成する。親の activation と doctor failure は変更せず、
+successor ID、source、candidate、作成時刻、artifact metadata だけを追加する。この metadata は active または archive にある
+実 child と相互検証する。`superseded` は検証成功ではなく、回復責任を子へ移した終端 state である。子の recovery target、
+`previous.running`、`previous.displacedProfile` は親 candidate とし、
+`previous.booted` は handoff 時の実測値にする。親 archive の公開または root cleanup で停止しても、子の `--resume` が
+同じ lineage から冪等に完了する。
+
+schema v4 の子が doctor verification failure になった場合も、同じ protocol で次の successor を作る。中間世代の
+`superseded` receipt は既存 lineage と新しい supersession を両方保持する。validator は ancestor artifact を transaction ID、
+path、byte 数、SHA-256、candidate と recovery target の関係でたどる。scanner は preparation、authorization、erasure の
+全 edge に parent ごとの child 一意性、child ごとの parent 一意性、非循環性を要求する。履歴は分岐のない直線 chain になる。
+schema v4 の active child に対する resume、first-boot、rollback、abort は lineage が固定した child rebuild helper が実行する。
+未認可の successor 準備は protocol を修復できる review 済み checkout controller、live authorization が有効な間の forward/cancel は
+認可済み child helper が実行する。erasure 公開後の forward/cancel は、失効した authorization ではなく write-once erasure を
+authority として review 済み checkout が処理する。
 
 SOPS enrollment の `generation-pending` 中に作る receipt は enrollment transaction ID を記録する。
 resume と rollback は同じ marker が同じ phase にある場合だけ許可する。active rebuild がある間、SOPS の変更操作と

@@ -291,6 +291,7 @@ let
     legacySchema2CandidateHelperSha256 = "6a88d31acbc01b0da1c474757bcfd02dfd58a0fc95230a1fb1ef168af57a6ae5";
     legacySchema2NixpkgsRev = "bd0ff2d3eac24699c3664d5966b9ef36f388e2ca";
     legacySchema2NixosRebuildPath = "/nix/store/gi6qsdlby13jf9szb23blh8rmywvi81i-nixos-rebuild-ng-26.05/bin/nixos-rebuild";
+    atomicFileFunctions = builtins.readFile ../scripts/lib/atomic-file.sh;
     operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
     ociImageStateFunctions = builtins.readFile ../scripts/lib/oci-image-state.sh;
     rebuildAttemptFunctions = builtins.readFile ../scripts/lib/rebuild-attempt.sh;
@@ -386,6 +387,7 @@ let
                 docker_command=''${DOTFILES_IMAGE_SYNC_TEST_DOCKER:-$docker_command}
                 dotfiles=''${DOTFILES_IMAGE_SYNC_TEST_DOTFILES:-$dotfiles}
                 nix_store_dir=''${DOTFILES_IMAGE_SYNC_TEST_NIX_STORE_DIR:-$nix_store_dir}
+                nix_gc_auto_roots_dir=''${DOTFILES_IMAGE_SYNC_TEST_NIX_GC_AUTO_ROOTS_DIR:-$nix_gc_auto_roots_dir}
                 expected_user=''${DOTFILES_IMAGE_SYNC_TEST_EXPECTED_USER:-$expected_user}
               ''
             else
@@ -498,6 +500,7 @@ let
       ];
       text = substitute {
         inherit allowTestHooks;
+        atomicFileFunctions = builtins.readFile ../scripts/lib/atomic-file.sh;
         configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
         operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
         sopsKeyctl = lib.escapeShellArg (lib.getExe keyctl);

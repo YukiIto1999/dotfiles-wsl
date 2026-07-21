@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 4 ]]; then
-  echo "usage: $0 DOCTOR_SOURCE OCI_IMAGE_STATE_SOURCE STORE_BASH NIX_IMAGE_IDENTITY_CASES" >&2
+if [[ $# -ne 5 ]]; then
+  echo "usage: $0 DOCTOR_SOURCE ATOMIC_FILE_SOURCE OCI_IMAGE_STATE_SOURCE STORE_BASH NIX_IMAGE_IDENTITY_CASES" >&2
   exit 2
 fi
 
 doctor_source=$1
-oci_image_state_source=$2
-store_bash=$3
-nix_image_identity_cases=$4
+atomic_file_source=$2
+oci_image_state_source=$3
+store_bash=$4
+nix_image_identity_cases=$5
 nix_image_identity=$(jq -er '.valid' "$nix_image_identity_cases")
 nix_image_file=$(jq -er '.imageFile' "$nix_image_identity")
 test_root=$(mktemp -d)
@@ -515,10 +516,15 @@ chmod +x \
   "$root_probe" \
   "$cli_path"
 
-awk -v library="$oci_image_state_source" '
+awk -v atomic_library="$atomic_file_source" -v oci_library="$oci_image_state_source" '
+  $0 == "@atomicFileFunctions@" {
+    while ((getline line < atomic_library) > 0) print line
+    close(atomic_library)
+    next
+  }
   $0 == "@ociImageStateFunctions@" {
-    while ((getline line < library) > 0) print line
-    close(library)
+    while ((getline line < oci_library) > 0) print line
+    close(oci_library)
     next
   }
   { print }

@@ -31,13 +31,17 @@ Docker へ pull し、`docker image inspect` が返す `RepoDigests` に `reposi
 取得する。active SOPS enrollment は同期を拒否する。active rebuild 中は、receipt の candidate または recovery
 target と同じ manifest を埋め込んだ command に限り同期を許可する。その内側で image sync 専用 lock を
 取得し、image ごとの receipt に manifest hash、image reference、digest、local image ID、成否を記録する。
+image sync lock は state directory の inode と従来の `operation.lock` の inode をこの順で lock する。前者を新しい authority、
+後者を旧 generation との互換 bridge とし、新旧 command の相互排他を維持する。初期化は temporary file の data sync、atomic
+no-replace、canonical file と親 directory の sync で確定する。同期操作だけが lock を初期化し、旧 publisher が残した同一 inode の
+hardlink residue を検証して回収できる。
 receipt は同じ filesystem 上の temporary file を同期してから atomic rename し、親 directory も同期する。
 一つの image が失敗しても残りの同期を続け、最後に失敗を集約する。古い image の削除は同期 command の
 責任に含めない。
 
 `--status` は state root が存在する場合、receipt と Docker cache を image sync 専用の shared lock 内で
 照合する。state root が存在しない場合は未同期として status 1 を返し、directory や lock を作らない。
-部分的または不正な state tree は修復せず status 2 とする。
+lock が未初期化、publication が途中、または state tree が不正な場合は修復せず status 2 とする。
 
 移行時の最初の配備では OCI container の `pull = "missing"` を維持し、同期 command と検査側の schema を先に
 配備した。ADR 0014 で readiness precondition と active receipt に束縛した修復経路を追加し、全 container を

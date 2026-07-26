@@ -23,6 +23,7 @@ let
   };
   codexSystemConfig = pkgs.replaceVars ./config-system.toml {
     inherit (cfg) gatewayUrl;
+    inherit codexModel;
   };
   codexUserSeed = pkgs.replaceVars ./config.toml { inherit codexModel; };
 

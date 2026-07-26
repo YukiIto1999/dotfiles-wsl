@@ -4,7 +4,7 @@
     "pr": ""
   },
   "env": {
-    "CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING": "1",
+    "CLAUDE_CODE_NO_MODEL_FALLBACK": "1",
     "ENABLE_PROMPT_CACHING_1H": "1"
   },
   "permissions": {

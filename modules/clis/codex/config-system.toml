@@ -1,6 +1,15 @@
 personality = "pragmatic"
 commit_attribution = ""
 
+model_reasoning_effort = "xhigh"
+model_reasoning_summary = "auto"
+
+review_model = "@codexModel@"
+
+[agents]
+default_subagent_model = "@codexModel@"
+default_subagent_reasoning_effort = "xhigh"
+
 [mcp_servers.gateway]
 url = "@gatewayUrl@"
 

@@ -2,6 +2,7 @@
 name: implementer
 description: 計画に従ってコードを作成・変更する。既存パターンを踏襲し、テストと一緒に出す。
 tools: [Read, Edit, Write, Bash, Grep, Glob]
+effort: xhigh
 ---
 
 # Implementer

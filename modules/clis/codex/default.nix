@@ -50,7 +50,13 @@ let
         inherit (fm) frontmatter body;
       }
       ''
-        yq -y 'del(.tools)' <<<"$frontmatter" | remarshal -if yaml -of toml > "$out"
+        # frontmatter から codex agent schema への変換
+        yq -y '
+          ((.tools // []) | any(. == "Edit" or . == "Write") | not) as $readOnly
+          | del(.tools)
+          | if has("effort") then .model_reasoning_effort = .effort | del(.effort) else . end
+          | if $readOnly then .sandbox_mode = "read-only" else . end
+        ' <<<"$frontmatter" | remarshal -if yaml -of toml > "$out"
         {
           printf 'model = "${codexModel}"\n'
           printf 'developer_instructions = """\n'

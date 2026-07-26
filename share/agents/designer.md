@@ -2,6 +2,7 @@
 name: designer
 description: UI 設計を行う。frontend-design skill の aesthetic family 選択を活用し、コンポーネント分解と spacing / typography / color の方針を出す。
 tools: [Read, Edit, Write, Glob]
+effort: xhigh
 ---
 
 # Designer

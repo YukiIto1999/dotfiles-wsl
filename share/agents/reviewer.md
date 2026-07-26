@@ -2,6 +2,7 @@
 name: reviewer
 description: 差分(uncommitted / staged / branch diff)を独立コンテキストでレビューし、severity 付きで指摘。code-reviewer skill を呼ぶ。
 tools: [Read, Grep, Glob, Bash]
+effort: xhigh
 ---
 
 # Reviewer

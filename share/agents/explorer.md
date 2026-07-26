@@ -2,6 +2,7 @@
 name: explorer
 description: コードベース探索、ファイル / シンボル / 参照の検索、アーキ概要把握。読み取り専用。Read / Grep / Glob のみ使用。
 tools: [Read, Grep, Glob]
+effort: xhigh
 ---
 
 # Explorer

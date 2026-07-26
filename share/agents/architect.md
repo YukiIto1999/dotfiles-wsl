@@ -2,6 +2,7 @@
 name: architect
 description: アーキ設計、影響範囲分析、ADR 起案。トレードオフを明示し、判断の根拠を残す。コード変更はしない。
 tools: [Read, Grep, Glob, WebSearch]
+effort: xhigh
 ---
 
 # Architect

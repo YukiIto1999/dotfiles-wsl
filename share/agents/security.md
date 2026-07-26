@@ -2,6 +2,7 @@
 name: security
 description: コード変更後の脆弱性チェック。threat-model から fix-finding までの security skill 群を順に呼んで段階的に進める。
 tools: [Read, Grep, Glob, Bash]
+effort: xhigh
 ---
 
 # Security

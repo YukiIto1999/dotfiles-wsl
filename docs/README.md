@@ -19,6 +19,7 @@
 - [構成概要](architecture/overview.md)では、NixOS、Home Manager、生成 command の責務境界が分かる。
 - [AI tooling](architecture/ai-tooling.md)では、AI CLI、agentgateway、MCP server、Docker backend の接続関係が分かる。
 - [セキュリティ設計](architecture/security.md)では、credential、host key、通信経路の信頼境界が分かる。
+- [ツール構成](reference/tooling.md)では、導入済み CLI、agent、skill、MCP、service と正本が分かる。
 
 ## 変更
 
@@ -28,3 +29,7 @@
 ## 設計判断
 
 - [ADR](adr/README.md)では、現行構成を選んだ理由と変更時に見直す判断が分かる。
+
+## 監査
+
+- [2026-07-29 ツール構成監査](audits/2026-07-29-tooling.md)では、横断利用と稼働状態を基にした改善順序が分かる。

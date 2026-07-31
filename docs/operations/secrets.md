@@ -28,7 +28,7 @@ identity の値は `modules/secrets.nix` の SOPS template を介して配備す
 
 ## GitHub account
 
-`my.accounts` が GitHub account の roster を生成する。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `modules/accounts/default.nix`、MCP の token 読み込みは `modules/mcp/servers/github.nix` が所有する。配列の先頭が `gh` の active user と既定 token になる。
+`my.accounts` が GitHub account の roster を生成する。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `accounts/module.nix`、MCP の token 読み込みは `modules/mcp/servers/github.nix` が所有する。配列の先頭が `gh` の active user と既定 token になる。
 
 account の追加、削除、順序変更では `my.accounts` と対応する暗号化済み key を同時に変更する。`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
 

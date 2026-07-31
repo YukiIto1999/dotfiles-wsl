@@ -51,22 +51,6 @@ let
         (orElse (c.install.binaryInArchive or null) "")
       ];
 
-  # cleanup が hm-back を掃く root、.config/<x> は 2 段まで、それ以外は先頭 1 段
-  cliRootOf =
-    path:
-    let
-      segs = lib.splitString "/" path;
-    in
-    if builtins.head segs == ".config" then
-      lib.concatStringsSep "/" (lib.sublist 0 2 segs)
-    else
-      builtins.head segs;
-
-  cliRoots = lib.unique (map (name: cliRootOf clis.${name}.rulesFile) names) ++ [
-    ".config/git"
-    ".config/gh"
-  ];
-
   rootProbe = pkgs.writeShellApplication {
     name = "dotfiles-doctor-root-probe";
     runtimeInputs = [ pkgs.coreutils ];
@@ -95,7 +79,7 @@ let
     name = "nixos-rebuild";
     text = ''
       echo "FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction" >&2
-      echo "Use dotfiles-rebuild for normal changes; use scripts/bootstrap.sh only for initial provisioning." >&2
+      echo "Use dotfiles-rebuild for normal changes; use bootstrap/impl/bootstrap.sh only for initial provisioning." >&2
       exit 2
     '';
   };
@@ -315,8 +299,6 @@ let
     rebuildAttemptFunctions = builtins.readFile ../scripts/lib/rebuild-attempt.sh;
     rebuildReceiptFunctions = builtins.readFile ../scripts/lib/rebuild-receipt.sh;
     installTable = lib.concatStringsSep "\n" (map installRow names);
-    cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") cliRoots);
-    hmBackupExt = config.home-manager.backupFileExtension;
     doctorSchemaVersion = toString cfg.doctor.schemaVersion;
     doctorManifestPath = "/run/current-system/etc/dotfiles/doctor.json";
   };
@@ -434,8 +416,6 @@ let
       testPackage = syncImagesTest;
     };
   });
-  cleanup = mkCommand "dotfiles-cleanup" ./commands/cleanup (with pkgs; [ coreutils ]) { };
-
   sopsVerifier = pkgs.writeShellApplication {
     name = "dotfiles-sops-verifier";
     runtimeInputs = with pkgs; [
@@ -548,18 +528,11 @@ let
       });
 in
 {
-  options.my.commands = lib.mkOption {
-    type = lib.types.attrsOf lib.types.package;
-    internal = true;
-    description = "config から生成する運用コマンド。flake.nix の packages 出力が nixosConfiguration 経由でここを参照する。";
-  };
-
   config.my.commands = {
     inherit
       doctor
       rebuild
       wslRestartRequired
-      cleanup
       installClis
       syncImages
       sopsEnroll

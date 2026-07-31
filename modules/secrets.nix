@@ -6,7 +6,7 @@
 }:
 
 # searxng settings template の secret は modules/mcp/servers/searxng.nix
-# github account 関連は modules/accounts.nix
+# github account 関連は accounts/module.nix
 
 let
   cfg = config.my;
@@ -20,7 +20,7 @@ let
     group = "users";
   };
 
-  gitIdentity = vars: builtins.readFile (pkgs.replaceVars ./user/git/identity.conf vars);
+  gitIdentity = vars: builtins.readFile (pkgs.replaceVars ../git/assets/identity.conf vars);
 in
 {
   # host/recovery 両 identity の復号実測と home key 削除後に enrolled へ切り替える

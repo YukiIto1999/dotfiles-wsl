@@ -1,5 +1,7 @@
 # Secrets
 
+**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+
 暗号化済み secret の正本は `secrets/secrets.yaml`、復号に使う host key は `/var/lib/sops-nix/key.txt` である。secret 名の完全な一覧は、各 consumer に隣接する `sops.secrets` 宣言を正本とし、この文書には複製しない。
 
 ## 編集

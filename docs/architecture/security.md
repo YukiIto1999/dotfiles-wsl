@@ -1,5 +1,7 @@
 # セキュリティ境界
 
+**読み手:** 責務の境界と要素の関係を理解したい人。学習中に読む。
+
 この構成は、Git checkout、Nix store、Linux user、root 管理領域、Docker、Windows、外部 service を別の信頼境界として扱う。通常の secret 編集は [Secrets](../operations/secrets.md)、host key の登録は [SOPS enrollment](../operations/sops-enrollment.md)、適用は [Rebuild](../operations/rebuild.md)を参照する。
 
 ## SOPS の鍵と暗号文

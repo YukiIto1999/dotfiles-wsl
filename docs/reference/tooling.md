@@ -1,5 +1,7 @@
 # ツール構成
 
+**読み手:** 正本の場所と現在値の取り方を調べたい人。作業中に読む。
+
 この文書は、導入しているツールと service を区分ごとに示し、それぞれの正本を指す。roster、version、件数、行番号は転記しない。現在の値は各 command で評価結果から取る。
 
 ## CLI
@@ -41,18 +43,4 @@ plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md
 
 agentgateway は全 target を一つの HTTP endpoint へ公開し、各 AI CLI が同じ target 名を使う。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
-## 役割
-
-同じ領域に複数の構成を持つものについて、区別の理由を書く。ここは宣言から導けないため文書が正本になる。
-
-| 構成 | 役割 |
-|---|---|
-| devenv、direnv、nix-direnv | project-local な開発環境を構築し、checkout ごとの package と環境変数を有効化する |
-| SearXNG、Crawl4AI | SearXNG が URL を列挙し、Crawl4AI が本文を取得する |
-| Context7、Probe | Context7 が library の一次資料を引き、Probe がローカル repository の構造を探索する |
-| agentmemory | lifecycle hook と MCP を通じて長期記憶を扱う |
-| 複数 GitHub account | account ごとの credential と repository 権限を分離する |
-| curl、xh | curl を script の安定した HTTP client、xh を対話操作に使う |
-| jq、yq | JSON と YAML を対話操作し、運用 command には同じ tool を runtime closure として固定する |
-
-構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。
+領域の重なるツールを併存させる理由は [ADR 0018](../adr/0018-overlapping-tool-retention.md)にある。構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。

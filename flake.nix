@@ -1407,29 +1407,6 @@
               touch $out
             '';
 
-            # ADR の状態が既知の語彙である
-            docs-adr-state = pkgs.runCommandLocal "check-docs-adr-state" { } ''
-              set -euo pipefail
-              for adr in ${self}/docs/adr/0*.md; do
-                state=$(awk '/^## 状態$/{getline; getline; print; exit}' "$adr")
-                case "$state" in
-                  Accepted|Superseded\ by\ *) ;;
-                  *) echo "ADR has an unknown state: $adr ($state)" >&2; exit 1 ;;
-                esac
-              done
-              touch $out
-            '';
-
-            # ADR が決定と影響を持つ
-            docs-adr-sections = pkgs.runCommandLocal "check-docs-adr-sections" { } ''
-              set -euo pipefail
-              for adr in ${self}/docs/adr/0*.md; do
-                grep -qx '## 決定' "$adr" || { echo "ADR has no decision section: $adr" >&2; exit 1; }
-                grep -qx '## 影響' "$adr" || { echo "ADR has no consequence section: $adr" >&2; exit 1; }
-              done
-              touch $out
-            '';
-
             # 固定した制約の一覧が実際の check 集合と一致する
             docs-constraint-coverage =
               pkgs.runCommandLocal "check-docs-constraint-coverage"

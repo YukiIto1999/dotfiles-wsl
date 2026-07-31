@@ -10,7 +10,7 @@
 
 host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`secrets/.sops.yaml`](../../secrets/.sops.yaml) は公開 recipient、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) は暗号文を保持する。復号鍵は Git に置かない。
 
-現行 source は `my.sops.enrollmentState = "migration"` であり、host key 分離の完了を宣言していない。この状態では doctor が旧 home key の残存を警告に留める。host key と recovery key の復号を実測し、home key を削除した後にだけ `enrolled` へ切り替える。移行 transaction と generation barrier は [ADR 0007](../adr/0007-sops-key-enrollment.md)に記録している。
+現行 source は `my.sops.enrollmentState = "migration"` であり、host key 分離の完了を宣言していない。この状態では doctor が旧 home key の残存を警告に留める。host key と recovery key の復号を実測し、home key を削除した後にだけ `enrolled` へ切り替える。
 
 sops-nix は activation 時に暗号文を復号する。`sops.secrets` の secret file は `/run/secrets`、配備 path を指定しない template は `/run/secrets/rendered` に平文を生成する。agentmemory の環境ファイルは後者に属する。
 
@@ -36,7 +36,7 @@ agentgateway は設定ユーザーの systemd service として動き、stdio MC
 
 設定ユーザーは `docker` group に属する。Docker API を使える主体は container の起動、mount、inspect が可能であり、container 環境へ渡した secret も読める。Docker group、root、Docker daemon を backend secret と host filesystem の信頼境界に含める。
 
-agentmemory の API key は SOPS template から Docker の environment file を経て container 環境に入る。agentmemory の session 内容は host volume に保存され、LLM 処理の対象は外部 provider へ送られる。credential と data flow の詳細は [AI tooling](ai-tooling.md)と [ADR 0006](../adr/0006-agentmemory-llm-provider.md)を参照する。
+agentmemory の API key は SOPS template から Docker の environment file を経て container 環境に入る。agentmemory の session 内容は host volume に保存され、LLM 処理の対象は外部 provider へ送られる。
 
 upstream OCI image は digest を Nix 宣言へ固定し、registry 取得を `dotfiles-sync-images` に限定する。container 起動時の暗黙 pull は無効である。同期と更新は [OCI images](../operations/oci-images.md)に従う。
 

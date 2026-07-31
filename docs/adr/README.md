@@ -32,3 +32,7 @@ ADR は、構成を決めた時点の背景、選択肢、決定、影響を残�
 - [0012. upstream OCI image の取得を明示的な同期操作に分ける](0012-explicit-oci-image-sync.md) — registry 取得を activation から分離し、固定 digest への同期を明示操作にする。
 - [0013. doctor は OCI image と稼働 container の収束を同じ観測境界で検査する](0013-oci-runtime-convergence.md) — receipt、Docker cache、稼働 container を同じ generation の期待値と比較する。
 - [0014. OCI image の同期を activation の明示的な前提条件にする](0014-oci-activation-readiness.md) — candidate または回復対象の image が揃うまで activation を開始しない。
+
+## MCP session
+
+- [0015. downstream の GET body を MCP session の生存基準にする](0015-mcp-session-lifecycle.md) — 最後の request 時刻ではなく response body の生存で session を保持し、蓄積を止める。

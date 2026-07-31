@@ -30,6 +30,8 @@ in
   };
 
   # 各 unit が自分の command を組み立てるための契約。実体は所有する unit が持つ
+  config._module.args.substituteCommandVars = vars: text: substitute (baseVars // vars) text;
+
   config._module.args.mkCommand =
     {
       name,

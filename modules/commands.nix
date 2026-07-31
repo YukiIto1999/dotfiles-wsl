@@ -14,6 +14,17 @@ let
 
   orElse = v: default: if v == null then default else v;
 
+  # doctor が観測する gateway service の資源値、上限は systemd 宣言から導く
+  gatewayFileLimit = lib.splitString ":" config.systemd.services.agentgateway.serviceConfig.LimitNOFILE;
+  mcpResourceProperties = [
+    "MainPID"
+    "TasksCurrent"
+    "MemoryCurrent"
+    "MemorySwapCurrent"
+    "LimitNOFILE"
+    "LimitNOFILESoft"
+  ];
+
   installRow =
     name:
     let
@@ -250,6 +261,13 @@ let
           url = cfg.gatewayUrl;
           targets = builtins.attrNames cfg.mcp.targets;
           healthUnit = "agentgateway.service";
+          resources = {
+            properties = mcpResourceProperties;
+            expected = {
+              LimitNOFILE = builtins.elemAt gatewayFileLimit 1;
+              LimitNOFILESoft = builtins.elemAt gatewayFileLimit 0;
+            };
+          };
           requestedProtocolVersion = "2025-11-25";
           supportedProtocolVersions = [
             "2024-11-05"

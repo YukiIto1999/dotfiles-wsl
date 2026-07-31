@@ -1256,6 +1256,21 @@
                 jq --sort-keys '.mcp.targets' ${doctorManifest} > actual-mcp-targets.json
                 diff --unified expected-mcp-targets.json actual-mcp-targets.json
 
+                jq --exit-status \
+                  --arg expectedHardLimit ${lib.escapeShellArg (builtins.elemAt (lib.splitString ":" agentgatewayService.LimitNOFILE) 1)} \
+                  --arg expectedSoftLimit ${lib.escapeShellArg (builtins.elemAt (lib.splitString ":" agentgatewayService.LimitNOFILE) 0)} '
+                  .mcp.resources.properties == [
+                    "MainPID",
+                    "TasksCurrent",
+                    "MemoryCurrent",
+                    "MemorySwapCurrent",
+                    "LimitNOFILE",
+                    "LimitNOFILESoft"
+                  ] and
+                  .mcp.resources.expected.LimitNOFILE == $expectedHardLimit and
+                  .mcp.resources.expected.LimitNOFILESoft == $expectedSoftLimit
+                ' ${doctorManifest} > /dev/null
+
                 jq --exit-status '
                   .mcp.healthUnit == "agentgateway.service" and
                   .mcp.requestedProtocolVersion == "2025-11-25" and

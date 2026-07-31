@@ -292,6 +292,17 @@ manifest_contract='
   all(.mcp.supportedProtocolVersions[]; type == "string" and length > 0) and
   ([.mcp.supportedProtocolVersions[]] | length) == ([.mcp.supportedProtocolVersions[]] | unique | length) and
   (.mcp.requestedProtocolVersion as $requested | .mcp.supportedProtocolVersions | index($requested) != null) and
+  (.mcp.resources.properties | type) == "array" and
+  (.mcp.resources.properties | length) > 0 and
+  all(.mcp.resources.properties[]; type == "string" and test("^[A-Za-z]+$")) and
+  ([.mcp.resources.properties[]] | length) == ([.mcp.resources.properties[]] | unique | length) and
+  (.mcp.resources.properties | index("MainPID")) != null and
+  (.mcp.resources.expected | type) == "object" and
+  all(.mcp.resources.expected | to_entries[];
+    (.key | type) == "string" and (.value | type) == "string" and (.value | test("^[0-9]+$"))
+  ) and
+  (.mcp.resources as $resources |
+    all($resources.expected | keys[]; . as $key | $resources.properties | index($key) != null)) and
   .oci.healthUnit == "docker.service" and
   (.oci.healthUnit as $health | any(.units[]; .id == $health)) and
   .oci.stateRoot == (.user.home + "/.local/state/dotfiles-wsl/image-sync") and
@@ -635,6 +646,13 @@ fi
 
 # System checks may require systemd or privilege, but are still bounded and deterministic.
 system_timeout=$(jq -r '.probePolicy.systemTimeoutSeconds' "$manifest")
+mcp_resource_unit=$(jq -r '.mcp.healthUnit' "$manifest")
+mapfile -t mcp_resource_properties < <(jq -r '.mcp.resources.properties[]' "$manifest")
+mcp_resource_flags=()
+for property in "${mcp_resource_properties[@]}"; do
+  mcp_resource_flags+=("--property=$property")
+done
+declare -A mcp_resource_observed=()
 declare -A unit_check_status=()
 while IFS= read -r unit; do
   unit_id=$(jq -r '.id' <<< "$unit")
@@ -645,11 +663,12 @@ while IFS= read -r unit; do
   expected_result=$(jq -r '.expected.Result // empty' <<< "$unit")
   expected_state=$(jq -c '.expected' <<< "$unit")
   started=$(now_ms)
+  unit_show_flags=(--property=LoadState --property=ActiveState --property=SubState --property=Result)
+  if [[ $unit_id == "$mcp_resource_unit" ]]; then
+    unit_show_flags+=("${mcp_resource_flags[@]}")
+  fi
   unit_output=$(timeout "${system_timeout}s" systemctl show "$unit_id" \
-    --property=LoadState \
-    --property=ActiveState \
-    --property=SubState \
-    --property=Result \
+    "${unit_show_flags[@]}" \
     --no-pager 2>/dev/null)
   unit_status=$?
   observed_load=''
@@ -664,6 +683,12 @@ while IFS= read -r unit; do
       ActiveState) observed_active=$property_value ;;
       SubState) observed_sub=$property_value ;;
       Result) observed_result=$property_value ;;
+      '') ;;
+      *)
+        if [[ $unit_id == "$mcp_resource_unit" ]]; then
+          mcp_resource_observed[$property_name]=$property_value
+        fi
+        ;;
     esac
   done <<< "$unit_output"
   observed_state=$(jq -cn \
@@ -1229,16 +1254,70 @@ check_mcp() {
   fi
 }
 
+check_mcp_resources() {
+  local started=$1 expected observed missing='' non_numeric='' mismatched='' value proc_root fd_current=''
+  local -a pairs=()
+  expected=$(jq -c '.mcp.resources.expected' "$manifest")
+  for property in "${mcp_resource_properties[@]}"; do
+    value=${mcp_resource_observed[$property]:-}
+    if [[ -z $value ]]; then
+      missing+=" $property"
+      continue
+    fi
+    if [[ ! $value =~ ^[0-9]+$ ]]; then
+      non_numeric+=" $property"
+      continue
+    fi
+    pairs+=("--arg" "$property" "$value")
+  done
+
+  # FD は cgroup property にないので MainPID の proc entry を数える
+  proc_root=${DOCTOR_TEST_PROC_ROOT:-/proc}
+  if [[ -z $missing && -z $non_numeric ]]; then
+    fd_current=$(find "$proc_root/${mcp_resource_observed[MainPID]}/fd" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c)
+    pairs+=("--arg" "fdCurrent" "$fd_current")
+  fi
+  observed=$(jq -cn "${pairs[@]}" '$ARGS.named')
+
+  if [[ -n $missing ]]; then
+    add_check active.mcp.resources active fail "$mcp_health_unit" "$expected" "$observed" \
+      "MCP resource metrics are incomplete:$missing" "$(duration_since "$started")"
+    return
+  fi
+  if [[ -n $non_numeric ]]; then
+    add_check active.mcp.resources active fail "$mcp_health_unit" "$expected" "$observed" \
+      "MCP resource metrics are not numeric:$non_numeric" "$(duration_since "$started")"
+    return
+  fi
+  while IFS='=' read -r property expected_value; do
+    [[ -n $property ]] || continue
+    if [[ ${mcp_resource_observed[$property]:-} != "$expected_value" ]]; then
+      mismatched+=" $property=${mcp_resource_observed[$property]:-}"
+    fi
+  done < <(jq -r '.mcp.resources.expected | to_entries[] | "\(.key)=\(.value)"' "$manifest")
+  if [[ -n $mismatched ]]; then
+    add_check active.mcp.resources active fail "$mcp_health_unit" "$expected" "$observed" \
+      "MCP file descriptor limit does not match manifest:$mismatched" "$(duration_since "$started")"
+    return
+  fi
+  add_check active.mcp.resources active pass "$mcp_health_unit" "$expected" "$observed" \
+    "MCP resources: TasksCurrent=${mcp_resource_observed[TasksCurrent]} fdCurrent=$fd_current MemoryCurrent=${mcp_resource_observed[MemoryCurrent]} MemorySwapCurrent=${mcp_resource_observed[MemorySwapCurrent]} LimitNOFILE=${mcp_resource_observed[LimitNOFILE]} LimitNOFILESoft=${mcp_resource_observed[LimitNOFILESoft]}" \
+    "$(duration_since "$started")"
+}
+
 mcp_health_unit=$(jq -r '.mcp.healthUnit' "$manifest")
 mcp_health_started=$(now_ms)
 if [[ ${unit_check_status[$mcp_health_unit]:-fail} != pass ]]; then
   add_check active.mcp.health-unit active blocked "$mcp_health_unit" pass fail \
     "MCP health unit is not healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
+  add_check active.mcp.resources active blocked "$mcp_health_unit" healthy-unit blocked \
+    "MCP resource metrics are blocked by their health unit" "$(duration_since "$mcp_health_started")"
   add_check active.mcp.session active blocked "$(jq -r '.mcp.url' "$manifest")" healthy-unit blocked \
     "MCP session is blocked by its health unit" "$(duration_since "$mcp_health_started")"
 else
   add_check active.mcp.health-unit active pass "$mcp_health_unit" pass pass \
     "MCP health unit is healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
+  check_mcp_resources "$(now_ms)"
   mcp_url=$(jq -r '.mcp.url' "$manifest")
   mcp_total_timeout=$(jq -r '.probePolicy.totalTimeoutSeconds' "$manifest")
   mcp_started_seconds=$SECONDS

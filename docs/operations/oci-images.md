@@ -59,4 +59,4 @@ active rebuild 中に同期できるのは、その transaction の candidate、
 | `1` | 出力された未同期、取得失敗、競合、transaction の拒否理由を解消して同じ target の command を再実行する |
 | `2` | state や manifest を手作業で修復せず、実行した command、出力、rebuild の状態を保全して契約違反を調べる |
 
-registry 取得を分離した理由は [ADR 0012](../adr/0012-explicit-oci-image-sync.md)、Docker cache と稼働 container の検査は [ADR 0013](../adr/0013-oci-runtime-convergence.md)、activation 前の同期条件は [ADR 0014](../adr/0014-oci-activation-readiness.md)に記録している。入口は [README](../../README.md)、新規ホストの同期順序は[セットアップ](../getting-started.md)、container と MCP backend の関係は [AI tooling](../architecture/ai-tooling.md)を参照する。
+registry 取得を分離した理由は [ADR 0012](../adr/0012-explicit-oci-image-sync.md)、Docker cache と稼働 container の検査は [ADR 0013](../adr/0013-oci-runtime-convergence.md)、activation 前の同期条件は [ADR 0014](../adr/0014-oci-activation-readiness.md)に記録している。入口は [README](../../README.md)、新規ホストの同期順序は[セットアップ](getting-started.md)、container と MCP backend の関係は [AI tooling](../architecture/ai-tooling.md)を参照する。

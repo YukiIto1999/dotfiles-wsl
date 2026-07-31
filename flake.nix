@@ -1392,6 +1392,13 @@
               touch $out
             '';
 
+          # 文書の相互参照。移動と参照切れを build で落とす
+          docs-links = pkgs.testers.lycheeLinkCheck {
+            # 文書は宣言 file を参照するため、site は checkout 全体にする
+            site = self;
+            extraConfig.offline = true;
+          };
+
           actionlint = pkgs.runCommandLocal "check-actionlint" { nativeBuildInputs = [ pkgs.actionlint ]; } ''
             workflow_dir=${self}/.github/workflows
             test -n "$(find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"

@@ -1,47 +1,49 @@
 # ツール構成
 
-この文書は、導入しているツールと service を役割別に示す。version、依存、生成物の正本は Nix 宣言であり、この文書へ固定値を重ねて持たせない。2026 年 7 月の利用状況と改善案は[ツール構成監査](../audits/2026-07-29-tooling.md)に分離した。
+この文書は、導入しているツールと service を区分ごとに示し、それぞれの正本を指す。roster、version、件数、行番号は転記しない。現在の値は各 command で評価結果から取る。
 
 ## CLI
 
-| 区分 | ツール | 正本 |
+| 区分 | 正本 | 現在の値 |
 |---|---|---|
-| system package | wget、curl、Vim、SOPS、age、bubblewrap | `modules/user/default.nix:22-28`、`modules/clis/codex/default.nix:87-88` |
-| user package | Node.js、Python、uv、ripgrep、fd、jq、yq、xh、ShellCheck、shfmt、just、nixfmt、nixd、devenv、nvd | `modules/user/default.nix:40-56` |
-| Home Manager program | Bash、GitHub CLI、fzf、zoxide、bat、eza、direnv、nix-direnv | `modules/user/default.nix:61-79` |
-| 保守用 devShell | actionlint、deadnix、jq、nixfmt-tree、ShellCheck、statix、Taplo、yq | `flake.nix:103-116` |
+| system package | [`modules/user/default.nix`](../../modules/user/default.nix) と各 [`modules/clis/`](../../modules/clis) module の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
+| user package | [`modules/user/default.nix`](../../modules/user/default.nix) の `home.packages` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
+| Home Manager program | [`modules/user/default.nix`](../../modules/user/default.nix) の `programs` | 同上 module を参照する |
+| 保守用 devShell | [`flake.nix`](../../flake.nix) の `devShells` | `nix develop --command echo` の後に `$PATH` を確認する |
 
 `nixfmt` は editor と単一ファイル、`nixfmt-tree` は `nix fmt` と repository 全体の検査を担当する。[Nixfmt README](https://github.com/NixOS/nixfmt/blob/master/README.md)
 
 ## 運用 command
 
-利用者向けの入口は `dotfiles-rebuild`、`dotfiles-doctor`、`dotfiles-install-clis`、`dotfiles-sync-images`、`dotfiles-cleanup`、`dotfiles-wsl-restart-required`、`dotfiles-sops-enroll` である。
+利用者向けの入口は `dotfiles-` prefix を持つ生成 command である。定義は [`modules/commands.nix`](../../modules/commands.nix) と [`modules/secrets.nix`](../../modules/secrets.nix)、bootstrap から呼ぶ flake package の公開は [`flake.nix`](../../flake.nix) の `packages` にある。command は `writeShellApplication` で生成し、必要な CLI を runtime closure に含める。
 
-command は `writeShellApplication` で生成し、必要な CLI を runtime closure に含める。定義は `modules/commands.nix:306-419` と `modules/secrets.nix`、bootstrap から呼ぶ flake package の公開箇所は `flake.nix:90-101` にある。
+現在の一覧は `nix eval --json .#nixosConfigurations.nixos.config.my.commands --apply builtins.attrNames` で確認する。
 
 ## AI CLI と agent
 
-| 区分 | 構成 | 正本 |
+| 区分 | 正本 | 現在の値 |
 |---|---|---|
-| AI CLI | Claude Code、Codex、OpenCode、Antigravity | `modules/clis/default.nix:8-100` |
-| 静的 agent | architect、designer、explorer、implementer、planner、reviewer、security | `share/agents/` |
-| local skill | changelog-generator、code-reviewer、git-commit-writer、ja-writing、pr-description-writer、web-researcher | `share/skills/` |
-| plugin skill | superpowers、codex-security、frontend-design、skill-creator が配備する skill | `flake.nix`、`flake.lock` |
+| AI CLI | [`modules/clis/default.nix`](../../modules/clis/default.nix) の `my.clis` | `nix eval --json .#nixosConfigurations.nixos.config.my.clis --apply builtins.attrNames` |
+| 静的 agent | [`share/agents/`](../../share/agents) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.agentFiles` |
+| local skill | [`share/skills/`](../../share/skills) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.skillNames` |
+| plugin skill | [`flake.nix`](../../flake.nix) の plugin input と [`flake.lock`](../../flake.lock) | 同上。local skill と合わせて出る |
 
-local skill と plugin skill は合わせて 28 件ある。評価後の一覧は `config.my.doctor.skillNames` で確認する。plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md) の責務境界に従う。
+plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md) の責務境界に従う。
 
 ## MCP と service
 
-| 区分 | 構成 | 正本 |
+| 区分 | 正本 | 現在の値 |
 |---|---|---|
-| gateway | agentgateway、systemd service | `modules/mcp/gateway.nix`、`pkgs/agentgateway/` |
-| MCP target | codex、context7、crawl4ai、github-account-1、github-account-2、github-account-3、memory、playwright、probe、searxng | `modules/mcp/default.nix:41-52`、`modules/mcp/servers/` |
-| Docker backend | agentmemory、Crawl4AI、SearXNG、Valkey | `modules/mcp/docker.nix` と各 server module |
-| host process | Codex、Context7、GitHub MCP、Playwright、Probe と各 backend の stdio front | 各 server module |
+| gateway | [`modules/mcp/gateway.nix`](../../modules/mcp/gateway.nix)、[`pkgs/agentgateway/`](../../pkgs/agentgateway) | `systemctl show agentgateway.service` |
+| MCP target | 各 [`modules/mcp/servers/`](../../modules/mcp/servers) module の `my.mcp.targets.<name>` | `nix eval --json .#nixosConfigurations.nixos.config.my.mcp.targets --apply builtins.attrNames` |
+| Docker backend | [`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) の `my.ociImages` と各 server module | `nix eval --json .#nixosConfigurations.nixos.config.my.ociImages --apply builtins.attrNames` |
+| host process | 各 server module が宣言する stdio front | gateway の子 process を `systemd-cgls -u agentgateway.service` で見る |
 
-agentgateway は 10 target を一つの HTTP endpoint へ公開し、4 AI CLI が同じ target 名を使う。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
+agentgateway は全 target を一つの HTTP endpoint へ公開し、各 AI CLI が同じ target 名を使う。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
 ## 役割
+
+同じ領域に複数の構成を持つものについて、区別の理由を書く。ここは宣言から導けないため文書が正本になる。
 
 | 構成 | 役割 |
 |---|---|
@@ -49,7 +51,7 @@ agentgateway は 10 target を一つの HTTP endpoint へ公開し、4 AI CLI �
 | SearXNG、Crawl4AI | SearXNG が URL を列挙し、Crawl4AI が本文を取得する |
 | Context7、Probe | Context7 が library の一次資料を引き、Probe がローカル repository の構造を探索する |
 | agentmemory | lifecycle hook と MCP を通じて長期記憶を扱う |
-| 3 GitHub account | account ごとの credential と repository 権限を分離する |
+| 複数 GitHub account | account ごとの credential と repository 権限を分離する |
 | curl、xh | curl を script の安定した HTTP client、xh を対話操作に使う |
 | jq、yq | JSON と YAML を対話操作し、運用 command には同じ tool を runtime closure として固定する |
 

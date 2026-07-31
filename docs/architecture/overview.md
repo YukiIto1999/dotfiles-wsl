@@ -22,9 +22,9 @@ Nix store の candidate system
    └── current generation の doctor manifest
 ```
 
-通常の適用入口は `dotfiles-rebuild` だけである。[`modules/commands.nix`](../../modules/commands.nix) は PATH 上の直接の `nixos-rebuild` を拒否し、評価済み `config.system.build.nixos-rebuild` を transaction 内から使う。source snapshot、flake check、candidate build は通常ユーザーで実行し、system profile の更新と activation だけを昇格する。apply と回復境界は [ADR 0009](../adr/0009-rebuild-effect-routing.md)に記録している。
+通常の適用入口は `dotfiles-rebuild` だけである。[`modules/commands.nix`](../../modules/commands.nix) は PATH 上の直接の `nixos-rebuild` を拒否し、評価済み `config.system.build.nixos-rebuild` を transaction 内から使う。source snapshot、flake check、candidate build は通常ユーザーで実行し、system profile の更新と activation だけを昇格する。
 
-`/run/current-system` は実行中の generation、`/nix/var/nix/profiles/system` は system profile、`/run/booted-system` は WSL 起動時の generation を表す。`wsl.conf` と activation interface の差分に応じて、live switch と WSL cold start を振り分ける。判定方法は [ADR 0008](../adr/0008-wsl-cold-start-manifest.md)を参照する。
+`/run/current-system` は実行中の generation、`/nix/var/nix/profiles/system` は system profile、`/run/booted-system` は WSL 起動時の generation を表す。`wsl.conf` と activation interface の差分に応じて、live switch と WSL cold start を振り分ける。
 
 ## Module graph
 
@@ -43,13 +43,13 @@ Nix store の candidate system
 
 Home Manager は独立した設定適用系ではなく、NixOS module として同じ system evaluation に入る。[`modules/user/default.nix`](../../modules/user/default.nix) が user package、shell 環境、Home Manager の配備を宣言し、activation 後の `home-manager-<user>.service` を doctor の検査対象にする。system 全体のファイルと service は NixOS、home 配下の宣言的な file と user package は Home Manager が所有する。
 
-JSON、TOML、YAML の設定は、配備を担当する module が一度だけ生成する。同じ immutable source を `/etc`、Home Manager、SOPS template、OCI volume、doctor の必要な consumer へ渡す。`my.configArtifacts` は構文検査用の参照であり、別の設定 inventory ではない。この配置規則は [ADR 0001](../adr/0001-colocation-and-single-declaration.md)に記録している。
+JSON、TOML、YAML の設定は、配備を担当する module が一度だけ生成する。同じ immutable source を `/etc`、Home Manager、SOPS template、OCI volume、doctor の必要な consumer へ渡す。`my.configArtifacts` は構文検査用の参照であり、別の設定 inventory ではない。
 
 ## Runtime services
 
 systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は各所有 module が `my.doctor.units` へ隣接して宣言する。
 
-[`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) は Docker daemon と `mcp-backends` network を用意し、backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。同期の操作は [OCI images](../operations/oci-images.md)、責務を分けた理由は [ADR 0012](../adr/0012-explicit-oci-image-sync.md)と [ADR 0014](../adr/0014-oci-activation-readiness.md)を参照する。
+[`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) は Docker daemon と `mcp-backends` network を用意し、backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
 
 SOPS の暗号文は repository に置き、sops-nix が activation 時に host key で復号する。復号済み secret と template は runtime にだけ生成され、consumer の file、環境ファイルへ渡る。鍵と credential の境界は[セキュリティ設計](security.md)、通常の編集は [Secrets](../operations/secrets.md)に分けている。
 
@@ -59,7 +59,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 `dotfiles-doctor` は開始時に `/run/current-system/etc/dotfiles/doctor.json` を解決し、その immutable な store path だけを期待値として使う。実行中の doctor、manifest、system profile が同じ current generation に属することも検査する。doctor は service の再起動、image pull、file 修復を行わず、観測結果だけを返す。
 
-`nix flake check` は source から artifact を生成できるかを検査し、doctor は activation 後の runtime が current generation に収束したかを検査する。両者の境界は [ADR 0010](../adr/0010-current-generation-doctor.md)、結果 contract は [ADR 0011](../adr/0011-doctor-result-report.md)を参照する。実行と診断は [Doctor](../operations/doctor.md)に記載している。
+`nix flake check` は source から artifact を生成できるかを検査し、doctor は activation 後の runtime が current generation に収束したかを検査する。実行と診断は [Doctor](../operations/doctor.md)に記載している。
 
 ## 生成 command
 
@@ -73,7 +73,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 | 保守 | `dotfiles-cleanup` が候補表示と明示削除、`dotfiles-wsl-restart-required` が cold-start 判定を担当する |
 | 鍵の enrollment | `dotfiles-sops-enroll` が repository の recipient と host key の移行を通常 rebuild から分離する |
 
-最初の system generation が存在しない段階では生成 command を参照できないため、`scripts/bootstrap.sh` だけは手書きの入口として残る。生成 command の根拠は [ADR 0002](../adr/0002-generated-ops-commands.md)を参照する。
+最初の system generation が存在しない段階では生成 command を参照できないため、`scripts/bootstrap.sh` だけは手書きの入口として残る。
 
 ## データと適用の境界
 

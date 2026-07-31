@@ -38,8 +38,6 @@
 |---|---|
 | 文書間と source への参照が切れていない | `docs-links` |
 | 手順、参照、説明の各文書が読み手を明示している | `docs-reader` |
-| ADR の状態が `Accepted` か `Superseded by` である | `docs-adr-state` |
-| ADR が決定と影響を持つ | `docs-adr-sections` |
 | この一覧が実際の check 集合と一致する | `docs-constraint-coverage` |
 
 ## 形式

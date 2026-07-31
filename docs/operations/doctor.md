@@ -80,4 +80,4 @@ doctor は checkout の clean 状態、secret の値、AI CLI の配布元、内
 
 検査 inventory をこの文書へ手書きしない。期待値の正本は current generation の doctor manifest であり、各 module の宣言から生成される。
 
-current generation を正本にする理由は [ADR 0010](../adr/0010-current-generation-doctor.md)、phase、status、outcome の契約は [ADR 0011](../adr/0011-doctor-result-report.md)に記録している。入口は [README](../../README.md)、初回検証の順序は[セットアップ](getting-started.md)、検査対象の構成は[構成概要](../architecture/overview.md)と [AI tooling](../architecture/ai-tooling.md)を参照する。
+入口は [README](../../README.md)、初回検証の順序は[セットアップ](getting-started.md)、検査対象の構成は[構成概要](../architecture/overview.md)と [AI tooling](../architecture/ai-tooling.md)を参照する。

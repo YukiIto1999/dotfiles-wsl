@@ -55,9 +55,22 @@ unit の失敗は doctor が表示した unit を `systemctl status UNIT` で調
 
 ## Active
 
-`active` は稼働 container が期待する image を使っていること、AI CLI の version probe、Windows interop、MCP gateway の session lifecycle と各 target の tool 公開を検査する。
+`active` は稼働 container が期待する image を使っていること、AI CLI の version probe、Windows interop、MCP gateway の session lifecycle と各 target の tool 公開、gateway service の資源値を検査する。
 
-container の検査が `blocked` なら、同じ image と unit の `system` 結果を先に直す。MCP の検査が `blocked` なら gateway の health unit、失敗なら initialize、pagination、session cleanup、該当 target の順に出力を読む。Windows interop の失敗では current generation の launcher と `cmd.exe` の起動経路を確認する。依存元を直した後に doctor を最初から再実行する。
+`active.mcp.resources` は unit 検査と同じ `systemctl show` の結果から六つの値を読み、`MainPID` の `/proc/<pid>/fd` を数えて `fdCurrent` を出す。
+
+| 値 | 意味 |
+|---|---|
+| `TasksCurrent` | gateway cgroup の task 数、session ごとに spawn される stdio front を含む |
+| `fdCurrent` | MainPID が開いている file descriptor 数 |
+| `MemoryCurrent` | cgroup 合計。process の RSS ではない |
+| `MemorySwapCurrent` | cgroup の swap 使用量 |
+| `LimitNOFILE` | systemd が課す hard 上限 |
+| `LimitNOFILESoft` | soft 上限。`Too many open files` はこちらで起きる |
+
+`LimitNOFILE` と `LimitNOFILESoft` だけが期待値を持ち、実値が manifest と違えば fail になる。tasks、FD、memory、swap には上限を置かず、値を取得できないことだけを fail にする。
+
+container の検査が `blocked` なら、同じ image と unit の `system` 結果を先に直す。MCP の検査が `blocked` なら gateway の health unit、失敗なら initialize、pagination、session cleanup、該当 target の順に出力を読む。`active.mcp.resources` の失敗は property の欠落、非数値、FD 上限の不一致のいずれかで、message がどれかを示す。Windows interop の失敗では current generation の launcher と `cmd.exe` の起動経路を確認する。依存元を直した後に doctor を最初から再実行する。
 
 ## 制約
 

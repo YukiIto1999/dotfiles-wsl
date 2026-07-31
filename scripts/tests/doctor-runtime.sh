@@ -49,6 +49,8 @@ wslview_source=$test_root/store/wslview
 wslview_path=$current_generation/sw/bin/wslview
 windows_command=$test_root/mnt/c/Windows/System32/cmd.exe
 windows_command_state=$test_root/windows-command-state
+unit_resources=$test_root/unit-resources
+proc_root=$test_root/proc
 systemctl_call_log=$test_root/systemctl-call-log
 sudo_call_log=$test_root/sudo-call-log
 cli_call_log=$test_root/cli-call-log
@@ -110,6 +112,15 @@ printf '%s\n' \
   '    IFS="|" read -r _ load active sub result <<< "$row"' \
   '    [[ $load != hang ]] || { sleep 30; exit 0; }' \
   '    printf "LoadState=%s\\nActiveState=%s\\nSubState=%s\\nResult=%s\\n" "$load" "$active" "$sub" "$result"' \
+  '    resources=$(awk -F "|" -v unit="$unit" '\''$1 == unit { print; exit }'\'' "$DOCTOR_TEST_UNIT_RESOURCES")' \
+  '    [[ -n $resources ]] || exit 0' \
+  '    IFS="|" read -r _ main_pid tasks memory swap limit limit_soft <<< "$resources"' \
+  '    [[ -z $main_pid ]] || printf "MainPID=%s\\n" "$main_pid"' \
+  '    [[ -z $tasks ]] || printf "TasksCurrent=%s\\n" "$tasks"' \
+  '    [[ -z $memory ]] || printf "MemoryCurrent=%s\\n" "$memory"' \
+  '    [[ -z $swap ]] || printf "MemorySwapCurrent=%s\\n" "$swap"' \
+  '    [[ -z $limit ]] || printf "LimitNOFILE=%s\\n" "$limit"' \
+  '    [[ -z $limit_soft ]] || printf "LimitNOFILESoft=%s\\n" "$limit_soft"' \
   '    ;;' \
   '  is-active) exit 0 ;;' \
   '  is-failed) exit 1 ;;' \
@@ -530,7 +541,7 @@ awk -v atomic_library="$atomic_file_source" -v oci_library="$oci_image_state_sou
   { print }
 ' "$doctor_source" | sed \
   -e "s|@doctorManifestPath@|$manifest|g" \
-  -e 's|@doctorSchemaVersion@|4|g' \
+  -e 's|@doctorSchemaVersion@|5|g' \
   -e "s|@sudoCommand@|$fake_bin/sudo|g" \
   > "$rendered_doctor"
 chmod +x "$rendered_doctor"
@@ -586,7 +597,7 @@ write_manifest() {
     --arg nix_image_identity "$nix_image_identity" \
     --arg nix_image_file "$nix_image_file" \
     '{
-      schemaVersion: 4,
+      schemaVersion: 5,
       user: {name: $user, home: $home},
       generation: {current: $current, booted: $booted, profile: $profile},
       sops: {
@@ -626,7 +637,11 @@ write_manifest() {
         healthUnit: $unit,
         targets: ["memory", "searxng"],
         requestedProtocolVersion: "2025-11-25",
-        supportedProtocolVersions: ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"]
+        supportedProtocolVersions: ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"],
+        resources: {
+          properties: ["MainPID", "TasksCurrent", "MemoryCurrent", "MemorySwapCurrent", "LimitNOFILE", "LimitNOFILESoft"],
+          expected: {LimitNOFILE: "4096", LimitNOFILESoft: "4096"}
+        }
       },
       oci: {
         healthUnit: $docker_unit,
@@ -690,6 +705,12 @@ reset_fixture() {
     'docker.service|loaded|active|running|success' \
     'docker-image-a.service|loaded|active|running|success' \
     'docker-agentmemory.service|loaded|active|running|success' > "$unit_state"
+  printf '%s\n' 'fixture.service|4242|128|536870912|0|4096|4096' > "$unit_resources"
+  rm -rf -- "$proc_root"
+  mkdir -p "$proc_root/4242/fd"
+  for descriptor in $(seq 0 63); do
+    : > "$proc_root/4242/fd/$descriptor"
+  done
   printf '%s\n' 'switch' > "$effect_state"
   printf '%s\n' '{"directory":{"uid":0,"gid":0,"mode":"700"},"key":{"uid":0,"gid":0,"mode":"400"}}' > "$root_state"
   printf '%s\n' 'ok' > "$cli_version_state"
@@ -749,6 +770,8 @@ run_doctor() {
   HOME=$home \
     PATH="$doctor_path" \
     DOCTOR_TEST_UNIT_STATE=$unit_state \
+    DOCTOR_TEST_UNIT_RESOURCES=$unit_resources \
+    DOCTOR_TEST_PROC_ROOT=$proc_root \
     DOCTOR_TEST_EFFECT_STATE=$effect_state \
     DOCTOR_TEST_BOOTED_SYSTEM=$test_root/booted \
     DOCTOR_TEST_CURRENT_SYSTEM=$test_root/current \
@@ -980,6 +1003,10 @@ unit_unloaded() { printf '%s\n' 'fixture.service|not-found|inactive|dead|failure
 unit_inactive() { printf '%s\n' 'fixture.service|loaded|failed|failed|exit-code' > "$unit_state"; }
 unit_probe_failed() { : > "$unit_state"; }
 unit_probe_timed_out() { printf '%s\n' 'fixture.service|hang|active|running|success' > "$unit_state"; }
+mcp_resource_property_missing() { printf '%s\n' 'fixture.service|4242|128|536870912|0|4096|' > "$unit_resources"; }
+mcp_resource_property_non_numeric() { printf '%s\n' 'fixture.service|4242|many|536870912|0|4096|4096' > "$unit_resources"; }
+mcp_resource_probe_failed() { : > "$unit_resources"; }
+mcp_resource_limit_mismatch() { printf '%s\n' 'fixture.service|4242|128|536870912|0|4096|1024' > "$unit_resources"; }
 sops_mode_mismatch() { printf '%s\n' '{"directory":{"uid":0,"gid":0,"mode":"755"},"key":{"uid":0,"gid":0,"mode":"400"}}' > "$root_state"; }
 sops_probe_failed() { chmod -x "$root_probe"; }
 sops_probe_timed_out() { printf '%s\n' 'hang' > "$root_state"; }
@@ -1062,7 +1089,7 @@ if [[ $doctor_status -ne 0 ]]; then
   failed=1
 elif ! jq -e '
   .schemaVersion == 1 and
-  .manifestSchemaVersion == 4 and
+  .manifestSchemaVersion == 5 and
   .outcome == "healthy" and
   (.summary | keys | sort) == ["blocked", "error", "fail", "pass", "total", "warn"] and
   (.checks | type) == "array" and
@@ -1083,7 +1110,18 @@ elif ! jq -e '
   any(.checks[]; .id == "system.oci.image.agentmemory" and .status == "pass") and
   any(.checks[]; .id == "system.oci.image.image-a" and .status == "pass") and
   any(.checks[]; .id == "active.oci.container.agentmemory" and .status == "pass") and
-  any(.checks[]; .id == "active.oci.container.image-a" and .status == "pass")
+  any(.checks[]; .id == "active.oci.container.image-a" and .status == "pass") and
+  (.checks[] | select(.id == "active.mcp.resources") |
+    .status == "pass" and
+    (.observed | fromjson) == {
+      MainPID: "4242",
+      TasksCurrent: "128",
+      MemoryCurrent: "536870912",
+      MemorySwapCurrent: "0",
+      LimitNOFILE: "4096",
+      LimitNOFILESoft: "4096",
+      fdCurrent: "64"
+    })
 ' "$doctor_output" >/dev/null; then
   echo 'JSON baseline: report contract mismatch' >&2
   sed 's/^/  /' "$doctor_output" >&2
@@ -1296,13 +1334,17 @@ elif ! jq -e '
 fi
 
 expect_failure 'profile mismatch' 'FAIL: system profile does not match current generation' profile_mismatch
-expect_contract_error 'schema version mismatch' "ERROR: doctor manifest does not match schema version 4: $manifest" schema_version_mismatch
-expect_contract_error 'required user field missing' "ERROR: doctor manifest does not match schema version 4: $manifest" user_home_missing
-expect_contract_error 'OCI inventory missing' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_missing
-expect_contract_error 'OCI container duplicated' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_duplicate_container
-expect_contract_error 'OCI unit mismatched' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_unit_mismatch
-expect_contract_error 'Nix OCI identity missing' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_nix_identity_missing
-expect_contract_error 'Nix OCI identity path noncanonical' "ERROR: doctor manifest does not match schema version 4: $manifest" oci_nix_identity_noncanonical
+expect_contract_error 'schema version mismatch' "ERROR: doctor manifest does not match schema version 5: $manifest" schema_version_mismatch
+expect_contract_error 'required user field missing' "ERROR: doctor manifest does not match schema version 5: $manifest" user_home_missing
+expect_contract_error 'OCI inventory missing' "ERROR: doctor manifest does not match schema version 5: $manifest" oci_missing
+expect_contract_error 'OCI container duplicated' "ERROR: doctor manifest does not match schema version 5: $manifest" oci_duplicate_container
+expect_contract_error 'OCI unit mismatched' "ERROR: doctor manifest does not match schema version 5: $manifest" oci_unit_mismatch
+expect_contract_error 'Nix OCI identity missing' "ERROR: doctor manifest does not match schema version 5: $manifest" oci_nix_identity_missing
+expect_contract_error 'Nix OCI identity path noncanonical' "ERROR: doctor manifest does not match schema version 5: $manifest" oci_nix_identity_noncanonical
+expect_failure 'MCP resource property missing' 'FAIL: MCP resource metrics are incomplete: LimitNOFILESoft' mcp_resource_property_missing
+expect_failure 'MCP resource property non-numeric' 'FAIL: MCP resource metrics are not numeric: TasksCurrent' mcp_resource_property_non_numeric
+expect_failure 'MCP resource probe failed' 'FAIL: MCP resource metrics are incomplete: MainPID TasksCurrent MemoryCurrent MemorySwapCurrent LimitNOFILE LimitNOFILESoft' mcp_resource_probe_failed
+expect_failure 'MCP resource limit mismatch' 'FAIL: MCP file descriptor limit does not match manifest: LimitNOFILESoft=1024' mcp_resource_limit_mismatch
 expect_failure 'self mismatch' 'FAIL: running doctor does not match current generation' self_mismatch
 expect_failure 'cold-start mismatch' 'FAIL: WSL cold-start state requires switch-restart' effect_mismatch
 expect_failure 'unit not loaded' 'FAIL: fixture.service state does not match manifest' unit_unloaded
@@ -1411,13 +1453,13 @@ expect_failure 'SOPS root probe failed' 'FAIL: SOPS host key metadata does not m
 expect_failure_with_deadline 'SOPS root probe timed out' 'FAIL: SOPS host key metadata does not match root policy' sops_probe_timed_out 8
 expect_warning 'home key migration warning' 'WARN: user SOPS age key still exists during migration' home_key_present
 expect_failure 'home key rejected' 'FAIL: user SOPS age key must not exist after migration' home_key_rejected
-expect_contract_error 'home key policy invalid' "ERROR: doctor manifest does not match schema version 4: $manifest" home_key_policy_invalid
-expect_contract_error 'requested MCP protocol unsupported' "ERROR: doctor manifest does not match schema version 4: $manifest" requested_protocol_unsupported
-expect_contract_error 'supported MCP protocol duplicated' "ERROR: doctor manifest does not match schema version 4: $manifest" supported_protocol_duplicated
-expect_contract_error 'empty MCP target' "ERROR: doctor manifest does not match schema version 4: $manifest" mcp_target_empty
-expect_contract_error 'oversized manifest scalar' "ERROR: doctor manifest does not match schema version 4: $manifest" manifest_scalar_too_large
-expect_contract_error 'MCP cleanup timeout missing' "ERROR: doctor manifest does not match schema version 4: $manifest" cleanup_timeout_missing
-expect_contract_error 'MCP cleanup timeout exhausts total budget' "ERROR: doctor manifest does not match schema version 4: $manifest" cleanup_timeout_exhausts_budget
+expect_contract_error 'home key policy invalid' "ERROR: doctor manifest does not match schema version 5: $manifest" home_key_policy_invalid
+expect_contract_error 'requested MCP protocol unsupported' "ERROR: doctor manifest does not match schema version 5: $manifest" requested_protocol_unsupported
+expect_contract_error 'supported MCP protocol duplicated' "ERROR: doctor manifest does not match schema version 5: $manifest" supported_protocol_duplicated
+expect_contract_error 'empty MCP target' "ERROR: doctor manifest does not match schema version 5: $manifest" mcp_target_empty
+expect_contract_error 'oversized manifest scalar' "ERROR: doctor manifest does not match schema version 5: $manifest" manifest_scalar_too_large
+expect_contract_error 'MCP cleanup timeout missing' "ERROR: doctor manifest does not match schema version 5: $manifest" cleanup_timeout_missing
+expect_contract_error 'MCP cleanup timeout exhausts total budget' "ERROR: doctor manifest does not match schema version 5: $manifest" cleanup_timeout_exhausts_budget
 expect_failure 'managed file stale' "FAIL: managed file is stale: $managed_runtime" managed_file_stale
 expect_failure 'CLI path shadowed' "FAIL: fixture-cli does not resolve to $cli_path" cli_path_shadowed
 expect_failure 'CLI not executable' "FAIL: CLI is not executable: $cli_path" cli_not_executable

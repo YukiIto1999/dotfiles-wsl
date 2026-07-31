@@ -1,6 +1,6 @@
 # ドキュメント
 
-ルートの [README](../README.md) から着手した作業を、種別別の文書へ引き継ぐ。ディレクトリと文書の種別は一対一である。種別と読み手は [ADR 0017](adr/0017-documentation-kinds.md)に定めている。
+ルートの [README](../README.md) から着手した作業を、種別別の文書へ引き継ぐ。ディレクトリと文書の種別は一対一で、各文書は冒頭に読み手を書く。
 
 ## 手順 — `operations/`
 
@@ -29,9 +29,3 @@
 - [ツール構成](reference/tooling.md)では、導入済み CLI、agent、skill、MCP、service の正本が分かる。
 - [変更箇所](reference/change-map.md)では、変更目的ごとの正本と適用方法が分かる。
 - [機械検証に固定した制約](reference/verified-constraints.md)では、どの制約が build で守られ、どれが守られていないかが分かる。
-
-## 決定の記録 — `adr/`
-
-四種別とは別の軸である。なぜその構成を選び、何を却下したかを書く。決定した時点で凍結し、後の判断は新しい ADR が置換する。
-
-- [ADR](adr/README.md)では、現行構成を選んだ理由と変更時に見直す判断が分かる。

@@ -22,7 +22,8 @@ Thumbs.db
 /.codex/
 /.opencode/
 
-# 環境の観測と実装計画。リポジトリの内容ではなく、時点に固定されるため追跡しない
+# 環境の観測、実装計画、決定の記録。Why は commit log、Why not は code comment が持つ
+/docs/adr/
 /docs/audits/
 /docs/superpowers/
 

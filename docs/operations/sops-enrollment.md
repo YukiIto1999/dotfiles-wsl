@@ -107,4 +107,4 @@ dotfiles-doctor
 
 新規ホストではこれらの command がまだ current generation にないため、[セットアップ](getting-started.md)の bootstrap、初回同期、検証へ進む。この時点で recovery key をホストから取り外す。Git identity を利用できる環境で二つのファイルを同じ commit に記録し、その repository を使う全ホストへ同期する。別ホストの enrollment は同期が済んでから始める。
 
-鍵分離と中断復旧の根拠は [ADR 0007](../adr/0007-sops-key-enrollment.md)に記録している。入口は [README](../../README.md)、新規ホスト全体の順序は[セットアップ](getting-started.md)、鍵と credential の境界は[セキュリティ設計](../architecture/security.md)を参照する。通常の秘密値編集は [Secrets](secrets.md)で扱う。
+入口は [README](../../README.md)、新規ホスト全体の順序は[セットアップ](getting-started.md)、鍵と credential の境界は[セキュリティ設計](../architecture/security.md)を参照する。通常の秘密値編集は [Secrets](secrets.md)で扱う。

@@ -27,7 +27,7 @@ AI CLI ── HTTP /mcp ──► agentgateway ── spawn ──► stdio MCP 
 
 静的 agent の正本は [`share/agents/`](../../share/agents) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OpenCode は frontmatter 付き Markdown へ build 時に変換する。Antigravity は `agentsDir = null` であり、静的 agent を配備しない。CLI ごとの変換は [`modules/clis/default.nix`](../../modules/clis/default.nix) と各 CLI module が所有する。
 
-local skill は [`share/skills/`](../../share/skills) から自動検出し、checkout への out-of-store symlink として各 CLI へ配る。既存 skill の本文変更は rebuild なしで見えるが、追加、削除、名前変更は Nix 評価と rebuild が必要になる。plugin 由来 skill は [`flake.nix`](../../flake.nix) の固定 input から検出し、Nix store path を配備する。local と plugin の同名 skill は評価時に拒否する。この境界は [ADR 0003](../adr/0003-local-skills-live-symlink.md)に記録している。
+local skill は [`share/skills/`](../../share/skills) から自動検出し、checkout への out-of-store symlink として各 CLI へ配る。既存 skill の本文変更は rebuild なしで見えるが、追加、削除、名前変更は Nix 評価と rebuild が必要になる。plugin 由来 skill は [`flake.nix`](../../flake.nix) の固定 input から検出し、Nix store path を配備する。local と plugin の同名 skill は評価時に拒否する。
 
 ## CLI ごとの差
 
@@ -42,13 +42,13 @@ Claude Code の user settings と Codex の user config は CLI が更新し得�
 
 ## agentgateway と MCP target
 
-[`modules/mcp/default.nix`](../../modules/mcp/default.nix) は target module を import し、各 module が `my.mcp.targets.<name>.command` を一度だけ宣言する。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。命名規則は [ADR 0004](../adr/0004-mcp-target-naming.md)を参照する。
+[`modules/mcp/default.nix`](../../modules/mcp/default.nix) は target module を import し、各 module が `my.mcp.targets.<name>.command` を一度だけ宣言する。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
 
 [`modules/mcp/gateway.nix`](../../modules/mcp/gateway.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。gateway は request の target prefix に応じて Nix store 上の stdio front を子 process として起動する。
 
 MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。完全な target 一覧は [`modules/mcp/default.nix`](../../modules/mcp/default.nix) の imports と各 [`modules/mcp/servers/`](../../modules/mcp/servers) の `my.mcp.targets` を参照する。
 
-session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle の 30 分は body の終了時刻から数え、明示 DELETE は即座に session を削除する。判断は [ADR 0015](../adr/0015-mcp-session-lifecycle.md)、実装は [`pkgs/agentgateway/mcp-downstream-lifecycle.patch`](../../pkgs/agentgateway/mcp-downstream-lifecycle.patch) にある。
+session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle の 30 分は body の終了時刻から数え、明示 DELETE は即座に session を削除する。
 
 ## Docker backend
 
@@ -72,7 +72,7 @@ session event ─► 観測、要約、reflect、consolidation
 
 Claude Code と Codex は `/run/current-system/sw/bin/agentmemory-hook-*` を呼ぶ。OpenCode は Home Manager が配備した capture plugin を自動ロードする。Antigravity は gateway 経由の memory target を使えるが、自動 capture の設定はない。現在の差異は個別 CLI module と managed config が正本である。
 
-agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API key は SOPS template が runtime の環境ファイルへ展開し、Docker が container 環境へ渡す。session の prompt や code が外部 provider へ送られる境界を持つ。hook 配備は [ADR 0005](../adr/0005-agentmemory-lifecycle-hooks.md)、provider と secret の経路は [ADR 0006](../adr/0006-agentmemory-llm-provider.md)を参照する。
+agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API key は SOPS template が runtime の環境ファイルへ展開し、Docker が container 環境へ渡す。session の prompt や code が外部 provider へ送られる境界を持つ。
 
 ## 正本
 

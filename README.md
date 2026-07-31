@@ -131,7 +131,7 @@ OCI image の変更は[OCI image runbook](docs/operations/oci-images.md)、docto
 
 ## ドキュメント
 
-目的別の入口は[ドキュメント索引](docs/README.md)、設計判断の履歴は [ADR](docs/adr/README.md)から辿る。主要な操作と構成文書には、該当する節から直接リンクしている。
+主要な操作と構成文書には、該当する節から直接リンクしている。
 
 ## License
 

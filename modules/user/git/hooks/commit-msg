@@ -7,7 +7,7 @@ scan_ai_attribution() {
   printf '%s\n' "$@" | grep -inE 'Co-authored-by:.*(claude|codex|copilot|cursor|chatgpt|gemini|antigravity|opencode|google-labs|noreply@(anthropic|openai|google))|Generated with.*(claude|codex|copilot|cursor|chatgpt|gemini|antigravity|opencode|google-labs)' || true
 }
 
-# コメント行(#)と末尾空行を除いた実効行数が 1 を超えたら reject、subject 1 行のみ・body なしの規約 enforcement
+# コメント行と末尾空行を除いた実効行。間の空行は body の区切りとして残す
 effective_lines() {
   local -a body=()
   local line
@@ -40,10 +40,16 @@ main() {
 
   local -a body
   mapfile -t body < <(effective_lines "${raw[@]}")
-  if (( ${#body[@]} > 1 )); then
-    echo "commit message: subject 1 行のみ・body なし" >&2
+
+  if (( ${#body[@]} == 0 )) || [[ "${body[0]}" =~ ^[[:space:]]*$ ]]; then
+    echo "commit message: subject が空" >&2
+    exit 1
+  fi
+
+  # 行数は制限しない。Why の分量は変更の粒度が決める
+  if (( ${#body[@]} > 1 )) && [[ ! "${body[1]}" =~ ^[[:space:]]*$ ]]; then
+    echo "commit message: subject と body の間に空行が要る" >&2
     printf '  %s\n' "${body[@]}" >&2
-    echo "fix: 2 行目以降(body / trailer)を削除する" >&2
     exit 1
   fi
 

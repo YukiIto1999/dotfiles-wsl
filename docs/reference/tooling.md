@@ -43,4 +43,4 @@ plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md
 
 agentgateway は全 target を一つの HTTP endpoint へ公開し、各 AI CLI が同じ target 名を使う。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
-領域の重なるツールを併存させる理由は [ADR 0018](../adr/0018-overlapping-tool-retention.md)にある。構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。
+構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。

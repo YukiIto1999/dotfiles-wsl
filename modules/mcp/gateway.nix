@@ -18,8 +18,8 @@ let
   deniedTools = [ "grep" ];
 
   gatewayConfig = (pkgs.formats.yaml { }).generate "agentgateway-config.yaml" {
-    # idle session の reap 猶予
-    config.mcp.sessionTtl = "4h";
+    # body 終了から数える idle session の reap 猶予、active stream は patch の guard が pin する
+    config.mcp.sessionTtl = "30m";
     binds = [
       {
         port = cfg.gatewayPort;
@@ -59,6 +59,8 @@ in
       ];
       RuntimeDirectory = "agentgateway";
       RuntimeDirectoryMode = "0700";
+      # soft 既定 1024 の暫定封じ込め、session 解放の代替にはしない
+      LimitNOFILE = "4096:4096";
       ExecStart = "${agentgateway}/bin/agentgateway -f ${gatewayConfig}";
       Restart = "always";
       RestartSec = "5s";

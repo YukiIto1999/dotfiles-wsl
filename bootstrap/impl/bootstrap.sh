@@ -2,10 +2,10 @@
 set -Eeuo pipefail
 shopt -s inherit_errexit 2>/dev/null || true
 
-# shellcheck source=lib/atomic-file.sh
-source "$(dirname -- "${BASH_SOURCE[0]}")/lib/atomic-file.sh"
-# shellcheck source=lib/operation-lock.sh
-source "$(dirname -- "${BASH_SOURCE[0]}")/lib/operation-lock.sh"
+# shellcheck source=../../scripts/lib/atomic-file.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../scripts/lib/atomic-file.sh"
+# shellcheck source=../../scripts/lib/operation-lock.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../scripts/lib/operation-lock.sh"
 
 die()     { trap - ERR; echo "FATAL: $*" >&2; exit 1; }
 as_user() { sudo -u "${SUDO_USER}" "$@"; }
@@ -14,7 +14,7 @@ step()    { printf '[%d/%d] %s\n' "$((++STEP))" "${TOTAL}" "$*"; }
 trap 'die "line ${LINENO}: ${BASH_COMMAND}"' ERR
 
 ensure_root() {
-  [[ ${EUID} -eq 0 ]]     || die "run as root (sudo bash scripts/bootstrap.sh)"
+  [[ ${EUID} -eq 0 ]]     || die "run as root (sudo bash bootstrap/impl/bootstrap.sh)"
   [[ -n ${SUDO_USER:-} ]] || die "SUDO_USER must be set (invoke via sudo from nixos)"
   [[ ${SUDO_USER} == "${TARGET_USER}" ]] || die "run via sudo from ${TARGET_USER}; current SUDO_USER=${SUDO_USER}"
 }

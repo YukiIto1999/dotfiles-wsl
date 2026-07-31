@@ -73,7 +73,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 | 保守 | `dotfiles-cleanup` が候補表示と明示削除、`dotfiles-wsl-restart-required` が cold-start 判定を担当する |
 | 鍵の enrollment | `dotfiles-sops-enroll` が repository の recipient と host key の移行を通常 rebuild から分離する |
 
-最初の system generation が存在しない段階では生成 command を参照できないため、`scripts/bootstrap.sh` だけは手書きの入口として残る。
+最初の system generation が存在しない段階では生成 command を参照できないため、`bootstrap/impl/bootstrap.sh` だけは手書きの入口として残る。
 
 ## データと適用の境界
 

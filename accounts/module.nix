@@ -20,12 +20,12 @@ let
   buildGhUser =
     name:
     builtins.readFile (
-      pkgs.replaceVars ./user.yml {
+      pkgs.replaceVars ./assets/user.yml {
         accountUsername = placeholder."accounts/${name}/username";
         accountToken = placeholder."accounts/${name}/token";
       }
     );
-  ghHostsTemplate = pkgs.replaceVars ./hosts.yml {
+  ghHostsTemplate = pkgs.replaceVars ./assets/hosts.yml {
     accountUsers = lib.concatMapStrings buildGhUser cfg.accounts;
     primaryUsername = placeholder."accounts/${builtins.head cfg.accounts}/username";
     primaryToken = placeholder."accounts/${builtins.head cfg.accounts}/token";

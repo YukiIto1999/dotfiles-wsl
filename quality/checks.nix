@@ -129,7 +129,7 @@ in
     shellcheck --severity=warning \
       ${self}/scripts/*.sh \
       ${self}/scripts/tests/*.sh \
-      ${self}/modules/user/git/hooks/*
+      ${self}/git/assets/hooks/*
     touch $out
   '';
 

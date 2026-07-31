@@ -7,7 +7,6 @@
     ./nix.nix
     ./fonts.nix
     ./secrets.nix
-    ./accounts
     ./mcp
     ./clis
     ./user

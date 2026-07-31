@@ -6,7 +6,7 @@
 
 ## SOPS の鍵と暗号文
 
-[`modules/secrets.nix`](../../modules/secrets.nix) は sops-nix の age key を `/var/lib/sops-nix/key.txt` に固定し、自動生成を無効にする。directory は root `0700`、key は root `0400` であり、通常ユーザーは鍵本文を読まない。doctor の root probe も owner、group、mode だけを返す。
+[`sops/module.nix`](../../sops/module.nix) は sops-nix の age key を `/var/lib/sops-nix/key.txt` に固定し、自動生成を無効にする。directory は root `0700`、key は root `0400` であり、通常ユーザーは鍵本文を読まない。doctor の root probe も owner、group、mode だけを返す。
 
 host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`secrets/.sops.yaml`](../../secrets/.sops.yaml) は公開 recipient、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) は暗号文を保持する。復号鍵は Git に置かない。
 

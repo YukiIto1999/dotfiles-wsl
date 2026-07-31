@@ -39,15 +39,6 @@ let
         (orElse (c.install.binaryInArchive or null) "")
       ];
 
-  nixosRebuildGuard = pkgs.writeShellApplication {
-    name = "nixos-rebuild";
-    text = ''
-      echo "FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction" >&2
-      echo "Use dotfiles-rebuild for normal changes; use bootstrap/impl/bootstrap.sh only for initial provisioning." >&2
-      exit 2
-    '';
-  };
-
   substitute =
     vars: text:
     builtins.replaceStrings (map (k: "@${k}@") (
@@ -89,28 +80,6 @@ let
       // extra
     );
 
-  wslRestartRequired = mkCommand "dotfiles-wsl-restart-required" ./commands/wsl-restart-required (
-    with pkgs; [ coreutils ]) { };
-  rebuild =
-    mkCommand "dotfiles-rebuild" ./commands/rebuild
-      (
-        (with pkgs; [
-          git
-          gawk
-          coreutils
-          jq
-          nix
-          nix-output-monitor
-          nvd
-          systemd
-          util-linux
-        ])
-        ++ [ wslRestartRequired ]
-      )
-      {
-        # jq programs are single-quoted; their $names come from --arg/--argjson.
-        excludeShellChecks = [ "SC2016" ];
-      };
   installClis = mkCommand "dotfiles-install-clis" ./commands/install-clis (with pkgs; [
     bash
     curl
@@ -123,16 +92,11 @@ in
 {
   config.my.commands = {
     inherit
-      rebuild
-      wslRestartRequired
       installClis
       ;
   };
 
-  # system generation を書き換える通常経路は dotfiles-rebuild に限定する。
-  # 上流実体は config.system.build.nixos-rebuild に残し、transaction 内から store path で呼ぶ。
-  config.system.tools.nixos-rebuild.enable = false;
-  config.environment.systemPackages = builtins.attrValues cfg.commands ++ [ nixosRebuildGuard ];
+  config.environment.systemPackages = builtins.attrValues cfg.commands;
 
   config.my.doctor.units = {
     "home-manager-${cfg.username}.service".expected = {

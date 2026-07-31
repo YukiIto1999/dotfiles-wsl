@@ -22,6 +22,10 @@ Thumbs.db
 /.codex/
 /.opencode/
 
+# 環境の観測と実装計画。リポジトリの内容ではなく、時点に固定されるため追跡しない
+/docs/audits/
+/docs/superpowers/
+
 # Secret
 *.plain
 *.unencrypted

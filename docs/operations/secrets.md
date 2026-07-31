@@ -42,4 +42,4 @@ SearXNG の server secret は `modules/mcp/servers/searxng.nix` が設定 templa
 
 検索設定や OCI image digest は secret ではないため、暗号化済みファイルへ移さない。設定は SearXNG module、image の取得は [OCI images](oci-images.md)で扱う。
 
-入口は [README](../../README.md)、初回の host key 登録は[セットアップ](../getting-started.md)、credential の信頼境界は[セキュリティ設計](../architecture/security.md)を参照する。
+入口は [README](../../README.md)、初回の host key 登録は[セットアップ](getting-started.md)、credential の信頼境界は[セキュリティ設計](../architecture/security.md)を参照する。

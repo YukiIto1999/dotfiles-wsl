@@ -103,4 +103,4 @@ dotfiles-rebuild --status
 
 `idle` なら active transaction はない。active な場合は transaction ID と状態を確認し、[再開](#再開)に従って表示済みの immutable recovery command を使う。失敗時に案内されていれば rollback または abort も選べる。status 2 は保存状態か runtime の契約が壊れているため、自分で state directory を編集せず、出力と `git status --short` を保全して原因を調べる。
 
-WSL 再起動の判定は [ADR 0008](../adr/0008-wsl-cold-start-manifest.md)、apply と回復経路は [ADR 0009](../adr/0009-rebuild-effect-routing.md)、doctor の成功判定は [ADR 0011](../adr/0011-doctor-result-report.md)に記録している。入口は [README](../../README.md)、新規ホストの順序は[セットアップ](../getting-started.md)、構成上の責務は[構成概要](../architecture/overview.md)を参照する。
+WSL 再起動の判定は [ADR 0008](../adr/0008-wsl-cold-start-manifest.md)、apply と回復経路は [ADR 0009](../adr/0009-rebuild-effect-routing.md)、doctor の成功判定は [ADR 0011](../adr/0011-doctor-result-report.md)に記録している。入口は [README](../../README.md)、新規ホストの順序は[セットアップ](getting-started.md)、構成上の責務は[構成概要](../architecture/overview.md)を参照する。

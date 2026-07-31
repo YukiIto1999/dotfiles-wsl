@@ -126,7 +126,7 @@
           sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
             mkdir -p "$out"
             cp -R --preserve=mode ${self}/. "$out/"
-            test -x "$out/scripts/bootstrap.sh"
+            test -x "$out/bootstrap/impl/bootstrap.sh"
           '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
           dotfiles-install-clis = hostConfig.my.commands.installClis;
@@ -724,8 +724,8 @@
                     "$production_verifier" > /dev/null
                   grep --fixed-strings 'SOPS_AGE_KEY_FILE="$identity"' \
                     "$production_verifier" > /dev/null
-                  bash ${self}/scripts/tests/bootstrap-age-key.sh \
-                    ${self}/scripts/bootstrap.sh \
+                  bash ${self}/bootstrap/fixtures/age-key-test.sh \
+                    ${self}/bootstrap/impl/bootstrap.sh \
                     ${fakeBootstrapRebuild}
                   bash ${self}/scripts/tests/sops-enroll.sh \
                     ${lib.getExe hostConfig.my.commands.sopsEnroll.testPackage} \
@@ -1202,7 +1202,7 @@
                 test ! -s stdout
                 grep -Fqx 'FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction' stderr
                 grep -Fqx \
-                  'Use dotfiles-rebuild for normal changes; use scripts/bootstrap.sh only for initial provisioning.' \
+                  'Use dotfiles-rebuild for normal changes; use bootstrap/impl/bootstrap.sh only for initial provisioning.' \
                   stderr
                 touch $out
               '';

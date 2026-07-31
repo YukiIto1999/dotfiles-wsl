@@ -4,7 +4,7 @@ let
   cfg = config.my;
 
   mkGitHook = name: {
-    source = ./hooks + "/${name}";
+    source = ./assets/hooks + "/${name}";
     executable = true;
   };
 in
@@ -49,7 +49,7 @@ in
 
       home.file = {
         ".config/git/ignore".source =
-          config.lib.file.mkOutOfStoreSymlink "${my.dotfilesDir}/modules/user/git/ignore";
+          config.lib.file.mkOutOfStoreSymlink "${my.dotfilesDir}/git/assets/ignore";
         ".config/git/hooks/pre-commit" = mkGitHook "pre-commit";
         ".config/git/hooks/commit-msg" = mkGitHook "commit-msg";
       };

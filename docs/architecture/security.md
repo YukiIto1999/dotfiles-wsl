@@ -18,7 +18,7 @@ Git identity の template は設定ユーザーの `~/.config/git/identity.conf`
 
 ## GitHub credential
 
-[`modules/accounts/default.nix`](../../modules/accounts/default.nix) は account ごとの username と PAT を SOPS secret として宣言する。sops-nix template は `hosts.yml` を mode `0600` で user home に配備し、GitHub MCP wrapper は runtime の secret file から PAT を読んで子 process の環境へ渡す。secret value と実 account username は Nix source、doctor manifest、文書へ転記しない。
+[`accounts/module.nix`](../../accounts/module.nix) は account ごとの username と PAT を SOPS secret として宣言する。sops-nix template は `hosts.yml` を mode `0600` で user home に配備し、GitHub MCP wrapper は runtime の secret file から PAT を読んで子 process の環境へ渡す。secret value と実 account username は Nix source、doctor manifest、文書へ転記しない。
 
 PAT の権限は用途に必要な repository と operation に限定する。設定ユーザー、root、PAT を読む MCP process は credential の信頼境界に含まれる。`gh auth login` や `gh auth switch` で別の credential store を作らず、SOPS の宣言経路へ集約する。
 

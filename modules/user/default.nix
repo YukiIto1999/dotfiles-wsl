@@ -10,7 +10,6 @@ let
   cfg = config.my;
 in
 {
-  imports = [ ./git ];
 
   # docker group は modules/mcp/backends.nix が追加
   users.users.${cfg.username} = {

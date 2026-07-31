@@ -472,6 +472,8 @@
             assert
               hostConfig.environment.etc."agentgateway/config.yaml".source
               == artifactSource "mcp/agentgateway/config";
+            # soft 上限の暫定封じ込め、session 解放の代替にはしない
+            assert agentgatewayService.LimitNOFILE == "4096:4096";
             assert lib.elem "${artifactSource "mcp/agentmemory/config"}:/app/config.yaml:ro"
               hostConfig.virtualisation.oci-containers.containers.agentmemory.volumes;
             assert
@@ -511,6 +513,7 @@
                     ${lib.escapeShellArg hostConfig.my.gatewayUrl}
                   test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/user-seed"} model | jq -r .)" = \
                     gpt-5.6-sol
+                  test "$(yq -r '.config.mcp.sessionTtl' ${artifactSource "mcp/agentgateway/config"})" = 30m
                   test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3111
                   test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3112
                   test "$(yq -r '.server.port' ${artifactSource "mcp/searxng/settings-template"})" = 8080

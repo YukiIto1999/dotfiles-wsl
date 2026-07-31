@@ -1,5 +1,7 @@
 # SOPS enrollment
 
+**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+
 新規ホストと既存ホストの鍵分離には `dotfiles-sops-enroll` を使う。host key を別ホストからコピーせず、通常の rebuild や手作業で `/var/lib/sops-nix/key.txt` を生成、交換しない。
 
 ## 前提

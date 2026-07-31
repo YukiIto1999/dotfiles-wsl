@@ -2,7 +2,7 @@
 
 ## 状態
 
-Accepted
+Superseded by [ADR 0017](0017-documentation-kinds.md)
 
 ## 背景
 

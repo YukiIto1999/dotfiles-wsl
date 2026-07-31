@@ -1,5 +1,7 @@
 # Doctor
 
+**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+
 `dotfiles-doctor` は current generation が宣言する期待値と実状態の収束を検査する。build 前の source 検査は `nix flake check`、apply 後の runtime 検査は doctor が担当する。
 
 ## 実行

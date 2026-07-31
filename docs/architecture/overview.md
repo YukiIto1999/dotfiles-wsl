@@ -1,5 +1,7 @@
 # 構成概要
 
+**読み手:** 責務の境界と要素の関係を理解したい人。学習中に読む。
+
 このリポジトリは、NixOS-WSL の system generation を中心に、Home Manager、systemd、Docker、SOPS と運用 command を一つの flake から組み立てる。設定の正本は checkout 内の Nix 宣言と共有ファイルであり、生成後の `/etc`、Home Manager の配備先、Nix store は編集対象ではない。変更箇所は[変更箇所](../reference/change-map.md)、適用手順は [Rebuild](../operations/rebuild.md)を参照する。
 
 ## System generation

@@ -1,5 +1,7 @@
 # Rebuild
 
+**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+
 通常の設定変更は `dotfiles-rebuild` で適用する。source の評価と build は通常ユーザーで行い、system profile の更新と activation だけを昇格する。`nixos-rebuild`、`switch-to-configuration`、system profile を直接操作すると transaction の回復経路から外れるため使わない。
 
 ## 計画

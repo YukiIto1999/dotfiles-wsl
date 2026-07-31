@@ -1,5 +1,7 @@
 # AI tooling
 
+**読み手:** 責務の境界と要素の関係を理解したい人。学習中に読む。
+
 AI CLI の binary、共通資材、MCP 接続は別の経路で配備する。binary は upstream から `~/.local/bin` へ更新する可変物であり、rules、skills、agents、managed config と MCP service は NixOS generation が宣言する。対象の追加や変更箇所は[変更箇所](../reference/change-map.md)を参照する。
 
 ## 配備の流れ

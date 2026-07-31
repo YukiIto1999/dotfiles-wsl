@@ -46,6 +46,8 @@ Claude Code の user settings と Codex の user config は CLI が更新し得�
 
 MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。完全な target 一覧は [`modules/mcp/default.nix`](../../modules/mcp/default.nix) の imports と各 [`modules/mcp/servers/`](../../modules/mcp/servers) の `my.mcp.targets` を参照する。
 
+session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle の 30 分は body の終了時刻から数え、明示 DELETE は即座に session を削除する。判断は [ADR 0015](../adr/0015-mcp-session-lifecycle.md)、実装は [`pkgs/agentgateway/mcp-downstream-lifecycle.patch`](../../pkgs/agentgateway/mcp-downstream-lifecycle.patch) にある。
+
 ## Docker backend
 
 [`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) の `mkMcpBackend` は、container、systemd 依存、`mcp-backends` network、host port の publish と doctor 宣言をまとめる。backend 同士は Docker network で接続し、host 側へ必要な port だけを `127.0.0.1` に publish する。stdio front は host loopback の backend endpoint に接続する。

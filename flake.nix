@@ -441,6 +441,14 @@
         {
           nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
 
+          # 配備する package そのものを build し、同梱の downstream lifecycle test を実行する
+          agentgateway-session-lifecycle =
+            let
+              agentgateway = pkgs.callPackage ./pkgs/agentgateway { };
+            in
+            assert lib.hasPrefix "${agentgateway}/bin/agentgateway " agentgatewayService.ExecStart;
+            agentgateway;
+
           config-artifact-contract =
             assert actualConfigArtifactFormats == expectedConfigArtifactFormats;
             assert

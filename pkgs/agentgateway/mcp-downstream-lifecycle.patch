@@ -1,0 +1,316 @@
+diff --git a/crates/agentgateway/src/mcp/handler.rs b/crates/agentgateway/src/mcp/handler.rs
+index 80ed380..2a475fa 100644
+--- a/crates/agentgateway/src/mcp/handler.rs
++++ b/crates/agentgateway/src/mcp/handler.rs
+@@ -845,6 +845,10 @@ pub(crate) struct GuardrailsCtx {
+ 	pub req_ctx: Arc<IncomingRequestContext>,
+ }
+ 
++/// Interval between SSE comment frames on a downstream stream. Clients close a silent GET well
++/// before the session idle TTL, so a pending stream has to produce traffic on its own.
++const DOWNSTREAM_SSE_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(15);
++
+ fn messages_to_response(
+ 	id: RequestId,
+ 	stream: impl Stream<Item = Result<ServerJsonRpcMessage, ClientError>> + Send + 'static,
+@@ -852,7 +856,7 @@ fn messages_to_response(
+ ) -> Result<Response, UpstreamError> {
+ 	Ok(mcp::session::sse_stream_response(
+ 		into_sse_stream(id, stream, mcp_log),
+-		None,
++		Some(DOWNSTREAM_SSE_KEEPALIVE),
+ 	))
+ }
+ 
+@@ -975,11 +979,32 @@ fn accepted_response() -> Response {
+ #[cfg(test)]
+ mod tests {
+ 	use futures_util::stream;
++	use http_body_util::BodyExt;
+ 	use rmcp::model::{CallToolResult, ListToolsResult};
+ 	use serde_json::json;
+ 
+ 	use super::*;
+ 
++	#[tokio::test(start_paused = true)]
++	async fn downstream_lifecycle_pending_sse_emits_keepalive() {
++		let response = messages_to_response(RequestId::Number(0), Messages::pending(), None).unwrap();
++
++		let frame = tokio::time::timeout(
++			std::time::Duration::from_secs(60),
++			response.into_body().frame(),
++		)
++		.await
++		.expect("a pending SSE stream must emit a keepalive before the client read timeout")
++		.expect("a pending SSE stream must not end")
++		.expect("the keepalive frame must not be an error");
++
++		assert_eq!(
++			frame.into_data().expect("keepalive is a data frame").as_ref(),
++			b":\n\n",
++			"the keepalive must be an SSE comment, not a JSON-RPC message"
++		);
++	}
++
+ 	#[tokio::test]
+ 	async fn messages_to_response_captures_first_matching_tool_result() {
+ 		let log = AsyncLog::default();
+diff --git a/crates/agentgateway/src/mcp/session.rs b/crates/agentgateway/src/mcp/session.rs
+index 79fb4d0..1e99d17 100644
+--- a/crates/agentgateway/src/mcp/session.rs
++++ b/crates/agentgateway/src/mcp/session.rs
+@@ -41,6 +41,9 @@ struct SessionEntry {
+ 	session: Session,
+ 	last_access: Instant,
+ 	idle_ttl: Duration,
++	/// Number of downstream GET streams currently holding this session open. An entry with a live
++	/// stream is never idle, regardless of `last_access`.
++	active_streams: usize,
+ }
+ 
+ const SESSION_REAP_INTERVAL: Duration = Duration::from_secs(30);
+@@ -662,6 +665,29 @@ impl SessionManager {
+ 		Some(entry.session.clone().with_inputs(builder))
+ 	}
+ 
++	/// get_session_for_stream returns a session together with a guard that keeps the session pinned
++	/// for as long as the downstream GET body lives. The lookup, the access timestamp and the stream
++	/// count are updated under one lock so the reaper cannot observe a half-registered stream.
++	pub fn get_session_for_stream(
++		&self,
++		id: &str,
++		builder: RelayInputs,
++	) -> Option<(Session, SessionStreamGuard)> {
++		let mut sessions = self.sessions.write().ok()?;
++		let entry = sessions.get_mut(id)?;
++		entry.last_access = Instant::now();
++		entry.active_streams += 1;
++		let session = entry.session.clone().with_inputs(builder);
++		drop(sessions);
++		Some((
++			session,
++			SessionStreamGuard {
++				sessions: self.sessions.clone(),
++				id: id.to_string(),
++			},
++		))
++	}
++
+ 	pub fn get_or_resume_session(
+ 		&self,
+ 		id: &str,
+@@ -696,6 +722,7 @@ impl SessionManager {
+ 				session: sess.clone(),
+ 				last_access: Instant::now(),
+ 				idle_ttl,
++				active_streams: 0,
+ 			},
+ 		);
+ 		Ok(Some(sess))
+@@ -722,6 +749,7 @@ impl SessionManager {
+ 				session: sess,
+ 				last_access: Instant::now(),
+ 				idle_ttl,
++				active_streams: 0,
+ 			},
+ 		);
+ 	}
+@@ -762,6 +790,7 @@ impl SessionManager {
+ 				session: sess.clone(),
+ 				last_access: Instant::now(),
+ 				idle_ttl,
++				active_streams: 0,
+ 			},
+ 		);
+ 		(sess, rx)
+@@ -785,6 +814,29 @@ impl Drop for SessionManager {
+ 	}
+ }
+ 
++/// SessionStreamGuard keeps a session out of the idle reaper while a downstream GET body is alive.
++/// Dropping it releases the stream and restarts the idle clock from that moment. A session removed
++/// by an explicit DELETE is not resurrected.
++#[derive(Debug)]
++pub struct SessionStreamGuard {
++	sessions: Arc<RwLock<HashMap<String, SessionEntry>>>,
++	id: String,
++}
++
++impl Drop for SessionStreamGuard {
++	fn drop(&mut self) {
++		let Ok(mut sessions) = self.sessions.write() else {
++			return;
++		};
++		// A session removed by an explicit DELETE stays removed; the guard never re-inserts it.
++		let Some(entry) = sessions.get_mut(&self.id) else {
++			return;
++		};
++		entry.active_streams = entry.active_streams.saturating_sub(1);
++		entry.last_access = Instant::now();
++	}
++}
++
+ async fn run_idle_reaper(sessions: Arc<RwLock<HashMap<String, SessionEntry>>>) {
+ 	let mut ticker = tokio::time::interval(SESSION_REAP_INTERVAL);
+ 	ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+@@ -798,7 +850,9 @@ fn reap_expired_entries(sessions: &Arc<RwLock<HashMap<String, SessionEntry>>>) {
+ 	let now = Instant::now();
+ 	let mut guard = sessions.write().expect("write lock");
+ 	let pre = guard.len();
+-	guard.retain(|_, entry| now.duration_since(entry.last_access) < entry.idle_ttl);
++	guard.retain(|_, entry| {
++		entry.active_streams > 0 || now.duration_since(entry.last_access) < entry.idle_ttl
++	});
+ 	let post = guard.len();
+ 	if post < pre {
+ 		tracing::debug!("reaped {} sessions", pre - post);
+@@ -894,3 +948,122 @@ fn get_client_info() -> ClientInfo {
+ 		Implementation::new("agentgateway", BuildInfo::new().version.to_string());
+ 	client_info
+ }
++
++
++#[cfg(test)]
++mod tests {
++	use crate::mcp::router::McpBackendGroup;
++	use crate::mcp::{FailureMode, McpAuthorizationSet};
++	use crate::proxy::httpproxy::PolicyClient;
++	use crate::test_helpers::proxymock::setup_proxy_test;
++
++	use super::*;
++
++	const LONG_TTL: Duration = Duration::from_secs(60);
++
++	fn relay_inputs() -> RelayInputs {
++		RelayInputs {
++			backend: McpBackendGroup {
++				targets: vec![],
++				failure_mode: FailureMode::FailOpen,
++				..Default::default()
++			},
++			policies: McpAuthorizationSet::new(crate::http::authorization::RuleSets::from(Vec::new())),
++			mcp_guardrails: None,
++			client: PolicyClient::new(setup_proxy_test("{}").expect("proxy test inputs").pi),
++		}
++	}
++
++	fn registered_session(manager: &SessionManager) -> String {
++		let relay = relay_inputs()
++			.build_new_connections()
++			.expect("relay with zero targets");
++		let session = manager.create_session(relay);
++		let id = session.id.to_string();
++		manager.insert_session(session, LONG_TTL);
++		id
++	}
++
++	fn mutate_entry(manager: &SessionManager, id: &str, f: impl FnOnce(&mut SessionEntry)) {
++		let mut sessions = manager.sessions.write().expect("write lock");
++		f(sessions.get_mut(id).expect("registered session"));
++	}
++
++	fn read_entry<T>(manager: &SessionManager, id: &str, f: impl FnOnce(&SessionEntry) -> T) -> T {
++		let sessions = manager.sessions.read().expect("read lock");
++		f(sessions.get(id).expect("registered session"))
++	}
++
++	/// A zero idle TTL makes an entry expired for any `last_access`, so reaping is decided by the
++	/// active stream count alone without depending on wall clock progress inside the test.
++	fn expire_idle_ttl(manager: &SessionManager, id: &str) {
++		mutate_entry(manager, id, |entry| entry.idle_ttl = Duration::ZERO);
++	}
++
++	fn is_registered(manager: &SessionManager, id: &str) -> bool {
++		manager.sessions.read().expect("read lock").contains_key(id)
++	}
++
++	#[tokio::test]
++	async fn downstream_lifecycle_active_get_survives_idle_ttl() {
++		let manager = SessionManager::new(http::sessionpersistence::Encoder::base64());
++		let pinned = registered_session(&manager);
++		let idle = registered_session(&manager);
++
++		expire_idle_ttl(&manager, &pinned);
++		expire_idle_ttl(&manager, &idle);
++		mutate_entry(&manager, &pinned, |entry| entry.active_streams = 1);
++
++		reap_expired_entries(&manager.sessions);
++
++		assert!(
++			is_registered(&manager, &pinned),
++			"a session with a live GET stream must survive its idle TTL"
++		);
++		assert!(
++			!is_registered(&manager, &idle),
++			"a session with no live GET stream must be reaped once its idle TTL elapses"
++		);
++	}
++
++	#[tokio::test]
++	async fn downstream_lifecycle_idle_ttl_starts_when_get_body_drops() {
++		let manager = SessionManager::new(http::sessionpersistence::Encoder::base64());
++		let id = registered_session(&manager);
++
++		let (_session, guard) = manager
++			.get_session_for_stream(&id, relay_inputs())
++			.expect("registered session");
++		assert_eq!(
++			read_entry(&manager, &id, |entry| entry.active_streams),
++			1,
++			"an established GET stream must be counted"
++		);
++
++		let ended_at = Instant::now();
++		drop(guard);
++
++		assert_eq!(
++			read_entry(&manager, &id, |entry| entry.active_streams),
++			0,
++			"dropping the response body must release the stream"
++		);
++		assert!(
++			read_entry(&manager, &id, |entry| entry.last_access) >= ended_at,
++			"the idle clock must restart from the moment the body ended, not from the last request"
++		);
++
++		reap_expired_entries(&manager.sessions);
++		assert!(
++			is_registered(&manager, &id),
++			"a session must not be reaped in the reaper tick right after its stream ended"
++		);
++
++		expire_idle_ttl(&manager, &id);
++		reap_expired_entries(&manager.sessions);
++		assert!(
++			!is_registered(&manager, &id),
++			"a session must be reaped once the idle TTL elapses after its stream ended"
++		);
++	}
++}
+diff --git a/crates/agentgateway/src/mcp/streamablehttp.rs b/crates/agentgateway/src/mcp/streamablehttp.rs
+index fcf4f2d..f9d2ad6 100644
+--- a/crates/agentgateway/src/mcp/streamablehttp.rs
++++ b/crates/agentgateway/src/mcp/streamablehttp.rs
+@@ -199,12 +199,20 @@ impl StreamableHttpService {
+ 			return mcp::Error::SessionIdRequired.into();
+ 		};
+ 
+-		let Some(session) = self.session_manager.get_session(session_id, inputs) else {
++		let Some((session, guard)) = self
++			.session_manager
++			.get_session_for_stream(session_id, inputs)
++		else {
+ 			return mcp::Error::UnknownSession.into();
+ 		};
+ 
+ 		let (parts, _) = request.into_parts();
+-		session.get_stream(parts).await
++		// The guard has the lifetime of the SSE body, so the session stays pinned while the client
++		// holds the stream and its idle clock restarts when the body ends.
++		session
++			.get_stream(parts)
++			.await
++			.map(|response| response.map(|body| DropBody::new(body, guard)))
+ 	}
+ 
+ 	pub async fn handle_delete(&self, request: Request) -> Result<Response, ProxyError> {

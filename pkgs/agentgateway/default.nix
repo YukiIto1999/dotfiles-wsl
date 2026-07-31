@@ -18,8 +18,11 @@ rustPlatform.buildRustPackage rec {
 
   cargoHash = "sha256-AtdPXCxSf/PHHnCDOzLojQyRRbXraObpim6RNF2gybw=";
 
-  # idle reap 後 session の 404 化と backend error の 200 化
-  patches = [ ./mcp-session-recovery.patch ];
+  # idle reap 後 session の 404 化と backend error の 200 化、downstream SSE の keepalive と active-stream guard
+  patches = [
+    ./mcp-session-recovery.patch
+    ./mcp-downstream-lifecycle.patch
+  ];
 
   # aws-lc-sys / jemalloc-sys の C ビルド
   nativeBuildInputs = [
@@ -39,7 +42,15 @@ rustPlatform.buildRustPackage rec {
     AGENTGATEWAY_BUILD_buildGitRevision = "v${version}";
   };
 
-  doCheck = false;
+  doCheck = true;
+
+  # patch が固定する downstream session lifecycle の回帰だけを実行する
+  cargoTestFlags = [
+    "-p"
+    "agentgateway"
+    "--lib"
+  ];
+  checkFlags = [ "downstream_lifecycle_" ];
 
   meta.mainProgram = "agentgateway";
 }

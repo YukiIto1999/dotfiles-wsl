@@ -293,11 +293,11 @@ let
     legacySchema2CandidateHelperSha256 = "6a88d31acbc01b0da1c474757bcfd02dfd58a0fc95230a1fb1ef168af57a6ae5";
     legacySchema2NixpkgsRev = "bd0ff2d3eac24699c3664d5966b9ef36f388e2ca";
     legacySchema2NixosRebuildPath = "/nix/store/gi6qsdlby13jf9szb23blh8rmywvi81i-nixos-rebuild-ng-26.05/bin/nixos-rebuild";
-    atomicFileFunctions = builtins.readFile ../scripts/lib/atomic-file.sh;
-    operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
-    ociImageStateFunctions = builtins.readFile ../scripts/lib/oci-image-state.sh;
-    rebuildAttemptFunctions = builtins.readFile ../scripts/lib/rebuild-attempt.sh;
-    rebuildReceiptFunctions = builtins.readFile ../scripts/lib/rebuild-receipt.sh;
+    atomicFileFunctions = builtins.readFile ../rebuild/impl/lib/atomic-file.sh;
+    operationLockFunctions = builtins.readFile ../rebuild/impl/lib/operation-lock.sh;
+    ociImageStateFunctions = builtins.readFile ../images/impl/lib/image-state.sh;
+    rebuildAttemptFunctions = builtins.readFile ../rebuild/impl/lib/rebuild-attempt.sh;
+    rebuildReceiptFunctions = builtins.readFile ../rebuild/impl/lib/rebuild-receipt.sh;
     installTable = lib.concatStringsSep "\n" (map installRow names);
     doctorSchemaVersion = toString cfg.doctor.schemaVersion;
     doctorManifestPath = "/run/current-system/etc/dotfiles/doctor.json";
@@ -498,9 +498,9 @@ let
       ];
       text = substitute {
         inherit allowTestHooks;
-        atomicFileFunctions = builtins.readFile ../scripts/lib/atomic-file.sh;
+        atomicFileFunctions = builtins.readFile ../rebuild/impl/lib/atomic-file.sh;
         configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
-        operationLockFunctions = builtins.readFile ../scripts/lib/operation-lock.sh;
+        operationLockFunctions = builtins.readFile ../rebuild/impl/lib/operation-lock.sh;
         sopsKeyctl = lib.escapeShellArg (lib.getExe keyctl);
         sopsRuntimePath = lib.escapeShellArg (
           lib.makeBinPath [

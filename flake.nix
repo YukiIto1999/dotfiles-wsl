@@ -616,7 +616,7 @@
                   for start_script in ${lib.escapeShellArgs ociContainerStartScripts}; do
                     grep --fixed-strings -- '--pull never' "$start_script" > /dev/null
                   done
-                  bash ${self}/scripts/tests/sync-images-runtime.sh ${lib.getExe syncImagesTest}
+                  bash ${self}/images/tests/sync-images-runtime.sh ${lib.getExe syncImagesTest}
                   touch $out
                 '';
 
@@ -727,7 +727,7 @@
                   bash ${self}/bootstrap/fixtures/age-key-test.sh \
                     ${self}/bootstrap/impl/bootstrap.sh \
                     ${fakeBootstrapRebuild}
-                  bash ${self}/scripts/tests/sops-enroll.sh \
+                  bash ${self}/secrets/tests/sops-enroll.sh \
                     ${lib.getExe hostConfig.my.commands.sopsEnroll.testPackage} \
                     ${pkgs.age}/bin/age-keygen \
                     ${lib.getExe pkgs.sops} \
@@ -1147,14 +1147,14 @@
                   ];
                 }
                 ''
-                  bash ${self}/scripts/tests/rebuild-routing.sh \
+                  bash ${self}/rebuild/tests/rebuild-routing.sh \
                     ${self}/modules/commands/rebuild \
                     ${pkgs.bash}/bin/bash \
                     ${lib.getExe pkgs.fakeroot} \
-                    ${self}/scripts/lib/atomic-file.sh \
-                    ${self}/scripts/lib/operation-lock.sh \
-                    ${self}/scripts/lib/rebuild-receipt.sh \
-                    ${self}/scripts/lib/rebuild-attempt.sh
+                    ${self}/rebuild/impl/lib/atomic-file.sh \
+                    ${self}/rebuild/impl/lib/operation-lock.sh \
+                    ${self}/rebuild/impl/lib/rebuild-receipt.sh \
+                    ${self}/rebuild/impl/lib/rebuild-attempt.sh
                   touch $out
                 '';
 
@@ -1168,8 +1168,8 @@
                   ];
                 }
                 ''
-                  bash ${self}/scripts/tests/rebuild-attempt.sh \
-                    ${self}/scripts/lib/rebuild-attempt.sh
+                  bash ${self}/rebuild/tests/rebuild-attempt.sh \
+                    ${self}/rebuild/impl/lib/rebuild-attempt.sh
                   touch $out
                 '';
 
@@ -1185,18 +1185,18 @@
                   ];
                 }
                 ''
-                  bash ${self}/scripts/tests/atomic-publication.sh \
-                    ${self}/scripts/lib/atomic-file.sh \
-                    ${self}/scripts/lib/operation-lock.sh \
-                    ${self}/scripts/lib/oci-image-state.sh \
+                  bash ${self}/rebuild/tests/atomic-publication.sh \
+                    ${self}/rebuild/impl/lib/atomic-file.sh \
+                    ${self}/rebuild/impl/lib/operation-lock.sh \
+                    ${self}/images/impl/lib/image-state.sh \
                     full
-                  bash ${self}/scripts/tests/atomic-publication.sh \
-                    ${self}/scripts/lib/atomic-file.sh \
-                    ${self}/scripts/lib/operation-lock.sh \
-                    ${self}/scripts/lib/oci-image-state.sh \
+                  bash ${self}/rebuild/tests/atomic-publication.sh \
+                    ${self}/rebuild/impl/lib/atomic-file.sh \
+                    ${self}/rebuild/impl/lib/operation-lock.sh \
+                    ${self}/images/impl/lib/image-state.sh \
                     interop \
-                    ${self}/scripts/tests/fixtures/legacy-operation-lock.sh \
-                    ${self}/scripts/tests/fixtures/legacy-oci-image-state.sh
+                    ${self}/rebuild/fixtures/legacy-operation-lock.sh \
+                    ${self}/images/fixtures/legacy-image-state.sh
                   touch $out
                 '';
 
@@ -1212,9 +1212,9 @@
                   ];
                 }
                 ''
-                  bash ${self}/scripts/tests/active-publication.sh \
-                    ${self}/scripts/lib/atomic-file.sh \
-                    ${self}/scripts/lib/rebuild-receipt.sh \
+                  bash ${self}/rebuild/tests/active-publication.sh \
+                    ${self}/rebuild/impl/lib/atomic-file.sh \
+                    ${self}/rebuild/impl/lib/rebuild-receipt.sh \
                     full
                   touch $out
                 '';
@@ -1229,8 +1229,8 @@
                   ];
                 }
                 ''
-                  bash ${self}/scripts/tests/preparation-parent-evidence.sh \
-                    ${self}/scripts/lib/rebuild-receipt.sh \
+                  bash ${self}/rebuild/tests/preparation-parent-evidence.sh \
+                    ${self}/rebuild/impl/lib/rebuild-receipt.sh \
                     full
                   touch $out
                 '';
@@ -1247,8 +1247,8 @@
                   ];
                 }
                 ''
-                  bash ${self}/scripts/tests/gc-root-observer.sh \
-                    ${self}/scripts/lib/rebuild-receipt.sh \
+                  bash ${self}/rebuild/tests/gc-root-observer.sh \
+                    ${self}/rebuild/impl/lib/rebuild-receipt.sh \
                     full
                   touch $out
                 '';
@@ -1326,10 +1326,10 @@
                   ];
                 }
                 ''
-                  bash ${self}/scripts/tests/doctor-runtime.sh \
+                  bash ${self}/doctor/tests/doctor-runtime.sh \
                     ${self}/modules/commands/doctor \
-                    ${self}/scripts/lib/atomic-file.sh \
-                    ${self}/scripts/lib/oci-image-state.sh \
+                    ${self}/rebuild/impl/lib/atomic-file.sh \
+                    ${self}/images/impl/lib/image-state.sh \
                     ${pkgs.bash}/bin/bash \
                     ${fixtureNixImageIdentityCases}
                   touch $out

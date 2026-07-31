@@ -22,6 +22,7 @@ in
           "impl"
           "assets"
           "package"
+          "tests"
           "fixtures"
         ];
       }
@@ -128,7 +129,7 @@ in
   shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
     shellcheck --severity=warning \
       ${self}/scripts/*.sh \
-      ${self}/scripts/tests/*.sh \
+      ${self}/*/tests/*.sh \
       ${self}/git/assets/hooks/*
     touch $out
   '';

@@ -1,6 +1,6 @@
 # ADR
 
-ADR は、構成を決めた時点の背景、選択肢、決定、影響を残す。現在の操作は[手順](../README.md#手順--operations)、現在の責務と境界は[構造](../README.md#構造--architecture)を参照する。
+ADR は、構成を決めた時点の背景、選択肢、決定、影響を残す。現在の操作は[手順](../README.md#手順--operations)、現在の責務と境界は[説明](../README.md#説明--architecture)を参照する。
 
 状態が `Accepted` の ADR を変更するときは本文を過去にさかのぼって書き換えず、新しい ADR で置き換える。新しい ADR には置き換える文書へのリンクを記載し、旧 ADR の状態を `Superseded` に変更する。
 
@@ -21,3 +21,6 @@ ADR は、構成を決めた時点の背景、選択肢、決定、影響を残�
 - [0013. doctor は OCI image と稼働 container の収束を同じ観測境界で検査する](0013-oci-runtime-convergence.md) — receipt、Docker cache、稼働 container を同じ generation の期待値と比較する。
 - [0014. OCI image の同期を activation の明示的な前提条件にする](0014-oci-activation-readiness.md) — candidate または回復対象の image が揃うまで activation を開始しない。
 - [0015. downstream の GET body を MCP session の生存基準にする](0015-mcp-session-lifecycle.md) — 最後の request 時刻ではなく response body の生存で session を保持し、蓄積を止める。
+- [0016. 文書は主張と寿命で分類し、時点に固定される文書は追跡しない](0016-documentation-model.md) `Superseded` — ADR 0017 が置換した。
+- [0017. 文書を学習・手順・参照・説明に分け、読み手を定める](0017-documentation-kinds.md) — 読み手のニーズで種別を分け、決定の記録を別の軸として扱う。
+- [0018. 責務が異なる限り、領域の重なるツールを併存させる](0018-overlapping-tool-retention.md) — 削減は責務の重複を示してから行い、利用回数だけを根拠にしない。

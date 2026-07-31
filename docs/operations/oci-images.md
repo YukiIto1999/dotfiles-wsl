@@ -1,5 +1,7 @@
 # OCI images
 
+**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+
 `dotfiles-sync-images` は current generation または指定された immutable target が宣言する upstream image だけを Docker cache へ同期する。Nix が生成して `imageFile` から load する image は pull 対象に含めない。
 
 ## 状態確認

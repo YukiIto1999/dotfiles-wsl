@@ -1,5 +1,7 @@
 # 開発
 
+**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+
 このリポジトリ固有の保守環境と検査は [flake.nix](../../flake.nix) が定義する。Home Manager が日常利用向けに配備する command とは用途が異なる。
 
 ## Dev shell
@@ -39,7 +41,11 @@ flake が宣言する build、静的検査、生成設定の構文検査をロ�
 nix flake check -L
 ```
 
-`nix flake check` は検査結果を返し、`nix fmt` のように source を整形しない。検査項目の正本は `flake.nix` の `checks` であり、check 名の一覧はここに複製しない。
+`nix flake check` は検査結果を返し、`nix fmt` のように source を整形しない。検査項目の正本は `flake.nix` の `checks` であり、check 名の一覧はここに複製しない。どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
+
+check を足したら、緑を見る前に赤を見る。検査対象を意図的に壊し、期待した message で落ちることを確かめてから戻す。落ちなければその検査は無効である。一つの検査は一つの結果だけを確かめる。複数を束ねると、最初の失敗が残りを隠す。
+
+新しい check は[機械検証に固定した制約](../reference/verified-constraints.md)へ載せる。載せ忘れも、実在しない check 名の記載も `docs-constraint-coverage` が落とす。文書を足したときの読み手の行は `docs-reader` が落とす。
 
 Markdown を含む作業ツリーの空白エラーは Git でも確認する。
 

@@ -1,5 +1,7 @@
 # セットアップ
 
+**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+
 新規の NixOS-WSL ホストを `~/dotfiles-wsl` から構築する。中断のない通常系は、host key の enrollment、bootstrap、WSL 再起動、OCI image の同期、rebuild、doctor の順に進める。
 
 ## 前提

@@ -43,11 +43,11 @@
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| default Git identity を変える | [`modules/secrets.nix`](../../modules/secrets.nix) の consumer 宣言と [`secrets/secrets.yaml`](../../secrets/secrets.yaml) の暗号化済み値 | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
-| work identity の対象と値を変える | [`flake.nix`](../../flake.nix) の `my.workIdentity`、[`modules/secrets.nix`](../../modules/secrets.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
+| default Git identity を変える | [`sops/module.nix`](../../sops/module.nix) の consumer 宣言と [`secrets/secrets.yaml`](../../secrets/secrets.yaml) の暗号化済み値 | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
+| work identity の対象と値を変える | [`flake.nix`](../../flake.nix) の `my.workIdentity`、[`sops/module.nix`](../../sops/module.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | GitHub account を増減する | [`flake.nix`](../../flake.nix) の `my.accounts`、[`accounts/module.nix`](../../accounts/module.nix)、[`modules/mcp/servers/github.nix`](../../modules/mcp/servers/github.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | account roster と暗号化済み値を同じ変更に含め、`dotfiles-rebuild` |
 | backend が使う secret を追加または変更する | 消費する [`modules/`](../../modules) 内の `sops.secrets` と template、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
-| host recipient を追加する | [`secrets/.sops.yaml`](../../secrets/.sops.yaml)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml)、[`modules/commands/sops-enroll`](../../modules/commands/sops-enroll) の transaction contract | [SOPS enrollment](../operations/sops-enrollment.md)に従い、tracked file を手作業で `sops updatekeys` しない |
+| host recipient を追加する | [`secrets/.sops.yaml`](../../secrets/.sops.yaml)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml)、[`sops/impl/sops-enroll.sh`](../../sops/impl/sops-enroll.sh) の transaction contract | [SOPS enrollment](../operations/sops-enrollment.md)に従い、tracked file を手作業で `sops updatekeys` しない |
 
 通常の secret 編集 command は次の形に統一する。
 

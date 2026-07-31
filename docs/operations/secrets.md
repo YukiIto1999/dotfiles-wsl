@@ -24,7 +24,7 @@ secret を追加するときは、先に値を消費する module に `sops.secr
 
 default Git identity は常に宣言し、生成された Git 設定から読み込む。work identity は `my.workIdentity` が設定されている場合だけ宣言され、指定した Git directory にだけ切り替わる。
 
-identity の値は `modules/secrets.nix` の SOPS template を介して配備する。生成後の Git 設定を直接編集せず、暗号化済み secret を編集して rebuild する。
+identity の値は `sops/module.nix` の SOPS template を介して配備する。生成後の Git 設定を直接編集せず、暗号化済み secret を編集して rebuild する。
 
 ## GitHub account
 

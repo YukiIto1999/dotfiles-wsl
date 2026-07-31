@@ -6,7 +6,6 @@
     ./wsl.nix
     ./nix.nix
     ./fonts.nix
-    ./secrets.nix
     ./mcp
     ./clis
     ./user

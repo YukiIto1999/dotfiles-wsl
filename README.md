@@ -18,7 +18,7 @@ WSL2 上の NixOS を日常運用し、同じ構成を別ホストへ再現す�
 - agentgateway、MCP server、必要な Docker backend
 - Git identity、GitHub PAT、backend credential などの暗号化済み secrets
 
-新しいホストを作る場合は、[新規構築](docs/getting-started.md)から始める。
+新しいホストを作る場合は、[新規構築](docs/operations/getting-started.md)から始める。
 
 ## 運用
 
@@ -115,7 +115,7 @@ Docker backend の container は同一の Docker network `mcp-backends` に属�
 
 通常の変更後は `dotfiles-rebuild --plan` で候補を確認し、`dotfiles-rebuild` で適用する。
 この経路が build、activation、検証を一つの transaction として扱う。
-開発時の検査とファイルごとの規約は[開発](docs/development.md)を参照する。
+開発時の検査とファイルごとの規約は[開発](docs/operations/development.md)を参照する。
 
 OCI image の変更は[OCI image runbook](docs/operations/oci-images.md)、doctor の診断は[doctor runbook](docs/operations/doctor.md)に従う。
 

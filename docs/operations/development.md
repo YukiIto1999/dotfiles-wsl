@@ -1,6 +1,6 @@
 # 開発
 
-このリポジトリ固有の保守環境と検査は [flake.nix](../flake.nix) が定義する。Home Manager が日常利用向けに配備する command とは用途が異なる。
+このリポジトリ固有の保守環境と検査は [flake.nix](../../flake.nix) が定義する。Home Manager が日常利用向けに配備する command とは用途が異なる。
 
 ## Dev shell
 
@@ -11,7 +11,7 @@ cd ~/dotfiles-wsl
 direnv allow
 ```
 
-[`.envrc`](../.envrc) は nix-direnv の fallback を無効にしている。flake の評価に失敗した場合は、以前の devShell を再利用せず、その場で失敗する。
+[`.envrc`](../../.envrc) は nix-direnv の fallback を無効にしている。flake の評価に失敗した場合は、以前の devShell を再利用せず、その場で失敗する。
 
 direnv を使わない場合は同じ devShell へ明示的に入る。
 
@@ -49,4 +49,4 @@ git diff --check
 
 ## CI
 
-[`.github/workflows/check.yml`](../.github/workflows/check.yml) は `main` への push と pull request、手動実行で `nix flake check "git+file://${GITHUB_WORKSPACE}" -L` を実行する。CI は checkout 済みの Git tree を入力にし、検査内容は `flake.nix` の `checks` から取得する。
+[`.github/workflows/check.yml`](../../.github/workflows/check.yml) は `main` への push と pull request、手動実行で `nix flake check "git+file://${GITHUB_WORKSPACE}" -L` を実行する。CI は checkout 済みの Git tree を入力にし、検査内容は `flake.nix` の `checks` から取得する。

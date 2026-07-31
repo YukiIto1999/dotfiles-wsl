@@ -17,7 +17,7 @@
 
 ## 運用 command
 
-利用者向けの入口は `dotfiles-` prefix を持つ生成 command である。定義は [`modules/commands.nix`](../../modules/commands.nix) と [`modules/secrets.nix`](../../modules/secrets.nix)、bootstrap から呼ぶ flake package の公開は [`flake.nix`](../../flake.nix) の `packages` にある。command は `writeShellApplication` で生成し、必要な CLI を runtime closure に含める。
+利用者向けの入口は `dotfiles-` prefix を持つ生成 command である。定義は [`modules/commands.nix`](../../modules/commands.nix) と [`sops/module.nix`](../../sops/module.nix)、bootstrap から呼ぶ flake package の公開は [`flake.nix`](../../flake.nix) の `packages` にある。command は `writeShellApplication` で生成し、必要な CLI を runtime closure に含める。
 
 現在の一覧は `nix eval --json .#nixosConfigurations.nixos.config.my.commands --apply builtins.attrNames` で確認する。
 

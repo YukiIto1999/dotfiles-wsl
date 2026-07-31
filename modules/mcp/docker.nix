@@ -11,48 +11,6 @@ let
   configuredContainers = config.virtualisation.oci-containers.containers;
 in
 {
-  options.my.ociImages = lib.mkOption {
-    type = lib.types.attrsOf (
-      lib.types.submodule {
-        options = {
-          kind = lib.mkOption {
-            type = lib.types.enum [
-              "nix"
-              "upstream"
-            ];
-            description = "image の取得責任。nix は imageFile、upstream は明示 sync が所有する。";
-          };
-          container = lib.mkOption {
-            type = lib.types.str;
-            description = "virtualisation.oci-containers.containers の attribute 名。";
-          };
-          image = lib.mkOption {
-            type = lib.types.str;
-            description = "docker run が使う canonical image reference。";
-          };
-          repository = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = "upstream RepoDigest の repository。";
-          };
-          digest = lib.mkOption {
-            type = lib.types.nullOr lib.types.str;
-            default = null;
-            description = "upstream image の sha256 digest。";
-          };
-          imageFile = lib.mkOption {
-            type = lib.types.nullOr lib.types.path;
-            default = null;
-            description = "Nix が生成し、OCI module が load する image archive。";
-          };
-        };
-      }
-    );
-    default = { };
-    internal = true;
-    description = "OCI runtime と明示 sync が共有する image inventory。";
-  };
-
   config = {
     # backend container を network 接続・loopback publish・依存整形・unit 命名込みで宣言する helper、servers/*.nix へ _module.args 経由で配る
     _module.args.mkMcpBackend =

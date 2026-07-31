@@ -40,6 +40,12 @@
 | 手順、参照、説明の各文書が読み手を明示している | `docs-reader` |
 | この一覧が実際の check 集合と一致する | `docs-constraint-coverage` |
 
+## 構造
+
+| 制約 | 検証 |
+|---|---|
+| unit の直下が層の file 名か子 unit だけである | `structure-layer-names` |
+
 ## 形式
 
 | 制約 | 検証 |

@@ -50,12 +50,47 @@
         claude-plugins-official = claudePlugins;
       };
 
+      # unit の収集。module.nix / package.nix / checks.nix / impl のいずれかを持つ directory が unit
+      collectUnits =
+        root:
+        let
+          inherit (nixpkgs) lib;
+          isUnit =
+            path:
+            let
+              inner = builtins.readDir path;
+            in
+            (inner ? "module.nix")
+            || (inner ? "package.nix")
+            || (inner ? "checks.nix")
+            || ((inner."impl" or null) == "directory");
+          walk =
+            prefix: path:
+            let
+              inner = lib.filterAttrs (_: kind: kind == "directory") (builtins.readDir path);
+              children = lib.concatMap (name: walk "${prefix}${name}/" (path + "/${name}")) (
+                builtins.attrNames inner
+              );
+            in
+            (lib.optional (isUnit path) {
+              id = lib.removeSuffix "/" prefix;
+              inherit path;
+            })
+            ++ children;
+          dirs = lib.filterAttrs (_: kind: kind == "directory") (builtins.readDir root);
+        in
+        lib.concatMap (name: walk "${name}/" (root + "/${name}")) (builtins.attrNames dirs);
+
+      units = collectUnits ./.;
+
+      unitModules = builtins.filter builtins.pathExists (map (unit: unit.path + "/module.nix") units);
+
       mkNixosSystem =
         machineModule:
         nixpkgs.lib.nixosSystem {
           inherit system;
           specialArgs = { inherit pluginSources; };
-          modules = [
+          modules = unitModules ++ [
             ./modules
 
             nixos-wsl.nixosModules.default
@@ -101,22 +136,31 @@
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {
-        packages = with maintenancePkgs; [
-          actionlint
-          deadnix
-          jq
-          nixfmt-tree
-          shellcheck
-          statix
-          taplo
-          yq
-        ];
+        packages = self.nixosConfigurations.${hostName}.config.my.devShellPackages;
       };
 
       formatter.${system} = maintenancePkgs.nixfmt-tree;
 
       checks.${system} =
         let
+          # unit の収集。module.nix / package.nix / impl のいずれかを持つ directory が unit
+          # 各 unit の checks.nix を集め、id の重複を拒否する
+          mergeChecks =
+            args: units:
+            let
+              files = builtins.filter builtins.pathExists (map (unit: unit.path + "/checks.nix") units);
+              # 名前は attrset の spine だけで決まるので、値が allCheckNames を参照しても循環しない
+              perUnit = map (file: import file (args // { inherit allCheckNames; })) files;
+              names = lib.concatMap builtins.attrNames perUnit;
+              allCheckNames = builtins.attrNames checkSet ++ names;
+            in
+            if names == lib.unique names then
+              lib.foldl' (acc: set: acc // set) { } perUnit
+            else
+              throw "duplicate check id across units: ${
+                lib.concatStringsSep " " (lib.unique (lib.filter (n: lib.count (m: m == n) names > 1) names))
+              }";
+
           hostConfig = self.nixosConfigurations.${hostName}.config;
           inherit (self.nixosConfigurations.${hostName}) pkgs;
           inherit (pkgs) lib;
@@ -1358,128 +1402,6 @@
                 touch $out
               '';
 
-            development-tool-ownership =
-              let
-                systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
-                homePackageNames = map lib.getName homeConfig.home.packages;
-                nixDirenvSource = "${homeConfig.programs.direnv.nix-direnv.package}/share/nix-direnv/direnvrc";
-                binaryCaches = import ./modules/nix-caches.nix;
-                devenvCache = lib.findFirst (
-                  cache: cache.name == "devenv"
-                ) (throw "devenv cache is missing") binaryCaches;
-                substituters = map (lib.removeSuffix "/") hostConfig.nix.settings.substituters;
-                trustedPublicKeys = hostConfig.nix.settings.trusted-public-keys;
-              in
-              assert !hostConfig.programs.direnv.enable;
-              assert homeConfig.programs.direnv.enable;
-              assert homeConfig.programs.direnv.enableBashIntegration;
-              assert homeConfig.programs.direnv.nix-direnv.enable;
-              assert
-                lib.intersectLists [
-                  "devenv"
-                  "direnv"
-                  "nix-direnv"
-                ] systemPackageNames == [ ];
-              assert lib.elem "devenv" homePackageNames;
-              assert lib.elem "direnv" homePackageNames;
-              assert toString homeConfig.xdg.configFile."direnv/lib/hm-nix-direnv.sh".source == nixDirenvSource;
-              assert lib.count (substituter: substituter == devenvCache.substituter) substituters == 1;
-              assert lib.count (key: key == devenvCache.publicKey) trustedPublicKeys == 1;
-              assert lib.count (substituter: substituter == "https://cache.nixos.org") substituters == 1;
-              assert lib.count (lib.hasPrefix "cache.nixos.org-1:") trustedPublicKeys == 1;
-              pkgs.runCommandLocal "check-development-tool-ownership" { } ''
-                touch $out
-              '';
-
-            # 文書の種別ごとに読み手が明示されている
-            docs-reader = pkgs.runCommandLocal "check-docs-reader" { } ''
-              set -euo pipefail
-              missing=""
-              for kind in operations reference architecture; do
-                for doc in ${self}/docs/$kind/*.md; do
-                  grep -q '^\*\*読み手:\*\*' "$doc" || missing="$missing $doc"
-                done
-              done
-              if [ -n "$missing" ]; then
-                echo "docs missing a reader statement:$missing" >&2
-                exit 1
-              fi
-              touch $out
-            '';
-
-            # 固定した制約の一覧が実際の check 集合と一致する
-            docs-constraint-coverage =
-              pkgs.runCommandLocal "check-docs-constraint-coverage"
-                {
-                  checkNames = builtins.attrNames checkSet;
-                }
-                ''
-                  set -euo pipefail
-                  list=${self}/docs/reference/verified-constraints.md
-
-                  undocumented=""
-                  for name in $checkNames; do
-                    grep -qF "\`$name\`" "$list" || undocumented="$undocumented $name"
-                  done
-                  if [ -n "$undocumented" ]; then
-                    echo "checks missing from the verified constraint list:$undocumented" >&2
-                    exit 1
-                  fi
-
-                  stale=""
-                  for name in $(awk -F '|' '/^\|/ { print $(NF - 1) }' "$list" \
-                    | grep -o '`[a-z][a-z0-9-]*`' | tr -d '`' | sort -u); do
-                    case " $checkNames " in
-                      *" $name "*) ;;
-                      *) stale="$stale $name" ;;
-                    esac
-                  done
-                  if [ -n "$stale" ]; then
-                    echo "verified constraint list names a check that does not exist:$stale" >&2
-                    exit 1
-                  fi
-
-                  touch $out
-                '';
-
-            # 文書の相互参照。移動と参照切れを build で落とす
-            docs-links = pkgs.testers.lycheeLinkCheck {
-              # 文書は宣言 file を参照するため、site は checkout 全体にする
-              site = self;
-              extraConfig.offline = true;
-            };
-
-            actionlint = pkgs.runCommandLocal "check-actionlint" { nativeBuildInputs = [ pkgs.actionlint ]; } ''
-              workflow_dir=${self}/.github/workflows
-              test -n "$(find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
-              find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -exec actionlint {} +
-              touch $out
-            '';
-
-            deadnix = pkgs.runCommandLocal "check-deadnix" { nativeBuildInputs = [ pkgs.deadnix ]; } ''
-              deadnix --fail ${self}
-              touch $out
-            '';
-
-            shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-              shellcheck --severity=warning \
-                ${self}/scripts/*.sh \
-                ${self}/scripts/tests/*.sh \
-                ${self}/modules/user/git/hooks/*
-              touch $out
-            '';
-
-            statix = pkgs.runCommandLocal "check-statix" { nativeBuildInputs = [ pkgs.statix ]; } ''
-              statix check --config ${self} ${self}
-              touch $out
-            '';
-
-            nixfmt = pkgs.runCommandLocal "check-nixfmt" { nativeBuildInputs = [ pkgs.nixfmt-tree ]; } ''
-              cp -r --no-preserve=mode ${self} source
-              treefmt --ci --tree-root "$PWD/source"
-              touch $out
-            '';
-
             # 各 producer が実配備へ渡す immutable source を形式別に検査する。
             config-syntax =
               pkgs.runCommandLocal "check-config-syntax"
@@ -1515,6 +1437,14 @@
                 '';
           };
         in
-        checkSet;
+        checkSet
+        // mergeChecks {
+          inherit
+            pkgs
+            lib
+            self
+            hostConfig
+            ;
+        } units;
     };
 }

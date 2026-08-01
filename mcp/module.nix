@@ -21,9 +21,28 @@ in
     targets = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
-          options.command = lib.mkOption {
-            type = lib.types.str;
-            description = "gateway が spawn する stdio front の起動コマンド絶対パス。";
+          options.transport = lib.mkOption {
+            type = lib.types.attrTag {
+              stdio = lib.mkOption {
+                type = lib.types.submodule {
+                  options.command = lib.mkOption {
+                    type = lib.types.str;
+                    description = "gateway が起動する子 process の絶対パス。";
+                  };
+                };
+                description = "downstream session ごとに子 process が複製される経路。";
+              };
+              http = lib.mkOption {
+                type = lib.types.submodule {
+                  options.url = lib.mkOption {
+                    type = lib.types.str;
+                    description = "常駐 front の Streamable HTTP endpoint。";
+                  };
+                };
+                description = "常駐 front を共有し、session ごとの複製が起きない経路。";
+              };
+            };
+            description = "gateway が target へ接続する経路。stdio と http のどちらか一方だけを持つ。";
           };
         }
       );

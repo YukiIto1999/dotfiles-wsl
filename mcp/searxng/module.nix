@@ -83,6 +83,6 @@ in
   systemd.services = valkey.systemdServices // searxng.systemdServices;
 
   my.mcp.gatewayWaitUnits = [ "docker-searxng.service" ];
-  my.mcp.targets.searxng.command = lib.getExe front;
+  my.mcp.targets.searxng.transport.stdio.command = lib.getExe front;
   my.doctor.units = valkey.doctorUnits // searxng.doctorUnits;
 }

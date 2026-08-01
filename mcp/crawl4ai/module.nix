@@ -37,6 +37,6 @@ in
   systemd.services = backend.systemdServices;
 
   my.mcp.gatewayWaitUnits = [ "docker-crawl4ai.service" ];
-  my.mcp.targets.crawl4ai.command = lib.getExe front;
+  my.mcp.targets.crawl4ai.transport.stdio.command = lib.getExe front;
   my.doctor.units = backend.doctorUnits;
 }

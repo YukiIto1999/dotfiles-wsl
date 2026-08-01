@@ -148,7 +148,7 @@ in
       systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
       homePackageNames = map lib.getName homeConfig.home.packages;
       nixDirenvSource = "${homeConfig.programs.direnv.nix-direnv.package}/share/nix-direnv/direnvrc";
-      binaryCaches = import (self + "/modules/nix-caches.nix");
+      binaryCaches = import (self + "/system/assets/nix-caches.nix");
       devenvCache = lib.findFirst (
         cache: cache.name == "devenv"
       ) (throw "devenv cache is missing") binaryCaches;

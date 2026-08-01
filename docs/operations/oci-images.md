@@ -29,7 +29,13 @@ active SOPS enrollment による拒否では enrollment を完了または abort
 
 ## Digest の更新
 
-upstream image を宣言する `mcp/<name>.nix` で repository、digest、digest を含む image reference を同時に変更する。candidate の command を checkout から実行し、新しい manifest に対する状態を確認して同期する。
+固定する digest は `dotfiles-image-digest` で registry から取る。linux/amd64 の manifest だけを返す。
+
+```bash
+dotfiles-image-digest valkey/valkey:latest
+```
+
+upstream image を宣言する `mcp/<name>/module.nix` で repository、digest、digest を含む image reference を同時に変更する。candidate の command を checkout から実行し、新しい manifest に対する状態を確認して同期する。
 
 ```bash
 cd ~/dotfiles-wsl

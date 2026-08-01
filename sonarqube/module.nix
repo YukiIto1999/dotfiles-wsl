@@ -30,7 +30,6 @@ let
       "sonarqube-extensions:/opt/sonarqube/extensions"
       "sonarqube-logs:/opt/sonarqube/logs"
     ];
-    # Elasticsearch が要求する mmap 数を確保できない環境向けの既定回避
     extraOptions = [ "--memory=4g" ];
     ports = [ serverPort ];
     deps = [ "docker-sonarqube-db.service" ];
@@ -65,6 +64,7 @@ in
     restartUnits = [ "docker-sonarqube-db.service" ];
   };
 
+  # WSL は Elasticsearch が要求する vm.max_map_count を満たさないので bootstrap check を外す
   config.sops.templates."sonarqube.env" = {
     content = ''
       SONAR_JDBC_URL=jdbc:postgresql://sonarqube-db:5432/sonarqube

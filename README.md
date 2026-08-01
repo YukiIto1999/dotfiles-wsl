@@ -76,7 +76,7 @@ CLI の global config が指すのは `default` だけで、他の endpoint へ�
 ```text
 AI coding CLI
        |
-       | configured URL: http://localhost:8765/mcp
+       | configured URL: default endpoint の URL
        v
 agentgateway-default (systemd)      agentgateway-playwright      agentgateway-codex
        |                                   |                            |
@@ -91,7 +91,7 @@ Docker backends
 
 endpoint の一覧と port は `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.endpoints` で引く。
 
-Docker backend の container は同一の Docker network `mcp-backends` に属する。container 間の network と host 側の loopback publish は別の境界になる。
+Docker backend の container は同一の Docker network `dotfiles-backends` に属する。container 間の network と host 側の loopback publish は別の境界になる。
 
 リポジトリの主要部分は次の構成。
 
@@ -105,6 +105,9 @@ Docker backend の container は同一の Docker network `mcp-backends` に属�
 ├── rebuild/               rebuild transaction
 ├── images/                OCI image inventory と同期
 ├── sops/                  secret の登録と検証
+├── toolchain/             PATH 上の汎用ツールと language server
+├── telemetry/             使用量の観測
+├── sonarqube/             品質 gate
 ├── accounts/ git/ cleanup/ commands/ quality/ system/
 ├── bootstrap/             初回構築
 ├── secrets/               SOPS で暗号化した secrets

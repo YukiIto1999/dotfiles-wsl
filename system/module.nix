@@ -132,7 +132,7 @@ in
     };
   };
 
-  # docker group は mcp/module.nix が追加
+  # docker group は images/module.nix が追加
   config.users.users.${cfg.username} = {
     isNormalUser = true;
     home = cfg.homeDir;

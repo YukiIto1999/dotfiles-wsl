@@ -10,6 +10,17 @@
   "permissions": {
     "defaultMode": "auto"
   },
+  "extraKnownMarketplaces": {
+    "dotfiles": {
+      "source": {
+        "source": "directory",
+        "path": "@lspMarketplacePath@"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "lsp@dotfiles": true
+  },
   "hooks": {
     "SessionStart": [
       {

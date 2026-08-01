@@ -9,7 +9,7 @@ let
   };
 in
 {
-  options.my.workIdentity = lib.mkOption {
+  options.my.git.workIdentity = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     default = null;
     example = "~/projects/business/";
@@ -37,9 +37,9 @@ in
           merge.conflictstyle = "diff3";
           include.path = "${my.homeDir}/.config/git/identity.conf";
         };
-        includes = lib.optionals (my.workIdentity != null) [
+        includes = lib.optionals (my.git.workIdentity != null) [
           {
-            condition = "gitdir:${my.workIdentity}";
+            condition = "gitdir:${my.git.workIdentity}";
             path = "${my.homeDir}/.config/git/work-identity.conf";
           }
         ];

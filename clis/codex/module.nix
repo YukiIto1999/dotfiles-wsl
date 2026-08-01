@@ -87,7 +87,7 @@ in
   # codex の workspace-write sandbox が PATH 上に要求する bubblewrap
   environment.systemPackages = [ pkgs.bubblewrap ];
 
-  my.configArtifacts = {
+  my.artifacts = {
     "clis/codex/system" = {
       format = "toml";
       source = codexSystemConfig;

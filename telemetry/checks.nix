@@ -7,7 +7,7 @@
 
 let
   contract = hostConfig.my.contract.telemetry;
-  collectorConfig = hostConfig.my.configArtifacts."telemetry/collector".source;
+  collectorConfig = hostConfig.my.artifacts."telemetry/collector".source;
   service = hostConfig.systemd.services.${contract.service}.serviceConfig;
 in
 {

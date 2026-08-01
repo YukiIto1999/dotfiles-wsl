@@ -36,14 +36,14 @@ let
   };
 in
 {
-  my.ociImages.agentmemory = {
+  my.images.agentmemory = {
     kind = "nix";
     container = "agentmemory";
     image = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
     imageFile = agentmemory.image;
   };
 
-  my.configArtifacts."mcp/agentmemory/config" = {
+  my.artifacts."mcp/agentmemory/config" = {
     format = "yaml";
     source = agentmemoryConfig;
   };

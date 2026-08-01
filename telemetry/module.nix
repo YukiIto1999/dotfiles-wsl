@@ -45,7 +45,7 @@ let
   };
 in
 {
-  config.my.configArtifacts."telemetry/collector" = {
+  config.my.artifacts."telemetry/collector" = {
     format = "yaml";
     source = collectorConfig;
   };

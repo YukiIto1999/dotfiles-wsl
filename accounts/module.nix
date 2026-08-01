@@ -58,7 +58,7 @@ in
     ]) cfg.accounts
   );
 
-  config.my.configArtifacts = lib.optionalAttrs (cfg.accounts != [ ]) {
+  config.my.artifacts = lib.optionalAttrs (cfg.accounts != [ ]) {
     "accounts/gh-hosts" = {
       format = "yaml";
       source = ghHostsTemplate;

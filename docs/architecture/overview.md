@@ -43,7 +43,7 @@ Nix store の candidate system
 
 Home Manager は独立した設定適用系ではなく、NixOS module として同じ system evaluation に入る。[`system/module.nix`](../../system/module.nix) が user package、shell 環境、Home Manager の配備を宣言し、activation 後の `home-manager-<user>.service` を doctor の検査対象にする。system 全体のファイルと service は NixOS、home 配下の宣言的な file と user package は Home Manager が所有する。
 
-JSON、TOML、YAML の設定は、配備を担当する module が一度だけ生成する。同じ immutable source を `/etc`、Home Manager、SOPS template、OCI volume、doctor の必要な consumer へ渡す。`my.configArtifacts` は構文検査用の参照であり、別の設定 inventory ではない。
+JSON、TOML、YAML の設定は、配備を担当する module が一度だけ生成する。同じ immutable source を `/etc`、Home Manager、SOPS template、OCI volume、doctor の必要な consumer へ渡す。`my.artifacts` は構文検査用の参照であり、別の設定 inventory ではない。
 
 ## Runtime services
 

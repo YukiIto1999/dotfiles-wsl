@@ -7,13 +7,13 @@
 
 let
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
-  declared = builtins.attrValues hostConfig.my.toolchain;
+  declared = builtins.attrValues hostConfig.my.toolchain.packages;
   # この repo が宣言する package だけを見る。NixOS と Home Manager の既定は所有の外
   owned = lib.unique (
     declared ++ builtins.attrValues hostConfig.my.commands ++ homeConfig.home.packages
   );
-  lspServers = builtins.attrValues hostConfig.my.lsp;
-  toolchain = hostConfig.my.toolchain;
+  lspServers = builtins.attrValues hostConfig.my.toolchain.lsp;
+  toolchain = hostConfig.my.toolchain.packages;
 in
 {
   # 上流 release の binary は同梱 library を欠くと build は通って実行時に落ちる

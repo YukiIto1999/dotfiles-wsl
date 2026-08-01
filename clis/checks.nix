@@ -6,9 +6,9 @@
 }:
 
 let
-  artifactSource = id: hostConfig.my.configArtifacts.${id}.source;
+  artifactSource = id: hostConfig.my.artifacts.${id}.source;
   managedSettings = hostConfig.environment.etc."claude-code/managed-settings.json".source;
-  roster = hostConfig.my.lsp;
+  roster = hostConfig.my.toolchain.lsp;
 in
 {
   # roster と各 CLI の登録が食い違うと、片方の CLI だけ server を持つ状態になる

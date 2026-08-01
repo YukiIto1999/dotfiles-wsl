@@ -27,7 +27,7 @@ let
   };
 in
 {
-  my.ociImages.crawl4ai = {
+  my.images.crawl4ai = {
     kind = "upstream";
     container = "crawl4ai";
     inherit image repository digest;

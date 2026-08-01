@@ -22,7 +22,7 @@ let
       lsp = lib.mapAttrs (_: server: {
         command = [ server.command ] ++ server.args;
         extensions = builtins.attrNames server.extensions;
-      }) cfg.lsp;
+      }) cfg.toolchain.lsp;
     }
   );
 
@@ -75,7 +75,7 @@ in
     };
   };
 
-  my.configArtifacts."clis/opencode/config" = {
+  my.artifacts."clis/opencode/config" = {
     format = "json";
     source = opencodeConfig;
   };

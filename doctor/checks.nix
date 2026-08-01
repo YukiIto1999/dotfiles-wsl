@@ -141,7 +141,7 @@ let
       unit = "docker-${image.container}.service";
       imageFile = if image.imageFile == null then null else toString image.imageFile;
       expectedImageIdFile = if image.kind == "nix" then toString nixImageIdentityFiles.${id} else null;
-    }) hostConfig.my.ociImages
+    }) hostConfig.my.images
   );
   codexProjectRuntimePath = "${hostConfig.my.dotfilesDir}/.codex/config.toml";
 in

@@ -37,7 +37,7 @@ let
   };
 in
 {
-  config.my.ociImages = {
+  config.my.images = {
     sonarqube = {
       kind = "upstream";
       container = "sonarqube";

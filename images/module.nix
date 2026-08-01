@@ -9,7 +9,7 @@
 
 let
   cfg = config.my;
-  imageDefinitions = builtins.attrValues cfg.ociImages;
+  imageDefinitions = builtins.attrValues cfg.images;
   configuredContainers = config.virtualisation.oci-containers.containers;
 
   ociImageManifestEntries = lib.mapAttrsToList (id: image: {
@@ -22,7 +22,7 @@ let
       digest
       ;
     imageFile = if image.imageFile == null then null else toString image.imageFile;
-  }) cfg.ociImages;
+  }) cfg.images;
 
   ociImageManifest = (pkgs.formats.json { }).generate "dotfiles-oci-images-v2.json" {
     schemaVersion = 2;
@@ -85,7 +85,7 @@ let
       '';
 
   nixImageIdentityFiles = lib.mapAttrs mkNixImageIdentity (
-    lib.filterAttrs (_: image: image.kind == "nix") cfg.ociImages
+    lib.filterAttrs (_: image: image.kind == "nix") cfg.images
   );
 
   doctorOciImageManifestEntries = map (
@@ -227,7 +227,7 @@ in
       ) backendSystemdServices;
     };
 
-  options.my.ociImages = lib.mkOption {
+  options.my.images = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         options = {
@@ -324,7 +324,7 @@ in
       assertion =
         builtins.length (map (image: image.container) imageDefinitions)
         == builtins.length (lib.unique (map (image: image.container) imageDefinitions));
-      message = "my.ociImages must map one image id to one unique container";
+      message = "my.images must map one image id to one unique container";
     }
     {
       assertion = lib.all (
@@ -334,13 +334,13 @@ in
         && (configuredContainers.${image.container}.imageFile or null) == image.imageFile
         && configuredContainers.${image.container}.pull == "never"
       ) imageDefinitions;
-      message = "my.ociImages must match an OCI container with the declared image, imageFile, and pull=never";
+      message = "my.images must match an OCI container with the declared image, imageFile, and pull=never";
     }
     {
       assertion =
         lib.sort builtins.lessThan (map (image: image.container) imageDefinitions)
         == lib.sort builtins.lessThan (builtins.attrNames configuredContainers);
-      message = "my.ociImages must cover every deployed OCI container exactly once";
+      message = "my.images must cover every deployed OCI container exactly once";
     }
     {
       assertion = lib.all (
@@ -372,7 +372,7 @@ in
         else
           image.repository == null && image.digest == null && image.imageFile != null
       ) imageDefinitions;
-      message = "my.ociImages must use digest-locked upstream images or Nix imageFile sources";
+      message = "my.images must use digest-locked upstream images or Nix imageFile sources";
     }
   ];
 }

@@ -51,8 +51,8 @@ let
         "repository"
       ]
     ) image
-  ) (lib.filterAttrs (_: image: image.kind == "upstream") hostConfig.my.ociImages);
-  agentmemoryOciImage = hostConfig.my.ociImages.agentmemory;
+  ) (lib.filterAttrs (_: image: image.kind == "upstream") hostConfig.my.images);
+  agentmemoryOciImage = hostConfig.my.images.agentmemory;
   actualOciPullModes = lib.mapAttrs (
     _: container: container.pull
   ) hostConfig.virtualisation.oci-containers.containers;
@@ -72,7 +72,7 @@ let
         digest
         ;
       imageFile = if image.imageFile == null then null else toString image.imageFile;
-    }) hostConfig.my.ociImages;
+    }) hostConfig.my.images;
   };
   syncImages = hostConfig.my.commands.syncImages;
   syncImagesTest = syncImages.testPackage;

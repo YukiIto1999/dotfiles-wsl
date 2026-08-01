@@ -46,7 +46,7 @@ let
   };
 in
 {
-  my.ociImages = {
+  my.images = {
     valkey = {
       kind = "upstream";
       container = "valkey";
@@ -63,7 +63,7 @@ in
     };
   };
 
-  my.configArtifacts."mcp/searxng/settings-template" = {
+  my.artifacts."mcp/searxng/settings-template" = {
     format = "yaml";
     source = settingsTemplate;
   };

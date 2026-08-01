@@ -154,7 +154,7 @@ in
             pkgs.sops
           ];
           sops = {
-            defaultSopsFile = ./fixtures/secrets.yaml;
+            defaultSopsFile = ./fixtures/vm-secrets.yaml;
             age = {
               keyFile = "/var/lib/sops-nix/key.txt";
               generateKey = false;
@@ -236,14 +236,14 @@ in
         """)
         machine.succeed(
           "dotfiles-sops-keyctl verify-next 0123456789abcdef0123456789abcdef"
-          " < ${./fixtures/secrets.yaml}"
+          " < ${./fixtures/vm-secrets.yaml}"
         )
         machine.succeed(
           "dotfiles-sops-keyctl verify-previous 0123456789abcdef0123456789abcdef"
-          " < ${./fixtures/secrets.yaml}"
+          " < ${./fixtures/vm-secrets.yaml}"
         )
         machine.succeed(r"""
-          new_hash=$(sha256sum ${./fixtures/secrets.yaml} | cut -d ' ' -f 1)
+          new_hash=$(sha256sum ${./fixtures/vm-secrets.yaml} | cut -d ' ' -f 1)
           jq -n --arg newSecretsHash "$new_hash" '{
             hostId: "vm-nixos",
             oldConfigHash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -280,7 +280,7 @@ in
         )
         machine.succeed(
           "dotfiles-sops-keyctl verify-current 0123456789abcdef0123456789abcdef"
-          " < ${./fixtures/secrets.yaml}"
+          " < ${./fixtures/vm-secrets.yaml}"
         )
         machine.succeed("rm /run/secrets/fixture")
         machine.succeed(
@@ -302,7 +302,7 @@ in
         )
         machine.succeed(
           "dotfiles-sops-keyctl verify-installed"
-          " < ${./fixtures/secrets.yaml}"
+          " < ${./fixtures/vm-secrets.yaml}"
         )
       '';
     };

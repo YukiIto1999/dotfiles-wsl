@@ -22,7 +22,7 @@
 | doctor manifest が各 unit の宣言と一致する | `doctor-manifest-contract` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
 | MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`mcp/module.nix` の assertion) |
-| image id が container を一意に指す | `nixos-toplevel` (`mcp/module.nix` の assertion) |
+| image id が container を一意に指す | `nixos-toplevel` (`images/module.nix` の assertion) |
 | 全 module から system closure を評価できる | `nixos-toplevel` |
 
 ## runtime の振る舞い
@@ -60,7 +60,7 @@
 | Nix の整形 | `nixfmt` |
 | Nix の未使用束縛 | `deadnix` |
 | Nix の慣用 | `statix` |
-| shell の静的検査 | `shellcheck` |
+| shell の静的検査 | `shellcheck` (shebang を持つ file が対象、fragment は `writeShellApplication` が build 時に見る) |
 | GitHub Actions workflow の妥当性 | `actionlint` |
 | 開発ツールの所有が system と home で重複しない | `development-tool-ownership` |
 
@@ -71,3 +71,6 @@
 - 文書の種別が混ざっていないこと。読み手の明示は検査するが、内容が手順と説明を混ぜていないことは検査していない。
 - 参照文書が宣言の値を転記していないこと。roster や件数の転記は検査していない。
 - 一つの責務の宣言、実装、test が同じ場所にあること。配置の規約を検査していない。
+- 検査が期待値を宣言から導いていること。`images/checks.nix` の upstream image と `flake.nix` の artifact 形式は宣言の転記であり、照合しているのは二つの転記の一致でしかない。digest や roster が宣言側とだけずれた場合は検出できるが、両方を同時に書き換えた誤りは通る。
+- unit の依存が設計の依存表に載っている組だけであること。依存の向きを検査していない。
+- `checks.nix` を持つ unit が flake から収集されていること。収集漏れは check が消えるだけで、赤にならない。

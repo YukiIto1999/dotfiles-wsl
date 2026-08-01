@@ -60,7 +60,6 @@ in
           exit 1
         fi
 
-        # directory source の marketplace は git を持たないので、更新の判定は version だけが担う
         jq --exit-status '
           .extraKnownMarketplaces.dotfiles.source.source == "directory" and
           .enabledPlugins["lsp@dotfiles"] == true

@@ -10,6 +10,8 @@
 
 | 制約 | 検証 |
 |---|---|
+| PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
+| 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 生成 config artifact が配備先の source と一致する | `config-artifact-contract`、`mcp-artifact-contract` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | doctor manifest が各 module の宣言と一致する | `doctor-manifest-contract` |

@@ -163,6 +163,12 @@ in
     };
   };
 
+  # 利用者が secret を編集するための実行ファイル
+  config.environment.systemPackages = with pkgs; [
+    sops
+    age
+  ];
+
   config.sops.secrets = {
     "identity/default/name" = { };
     "identity/default/email" = { };

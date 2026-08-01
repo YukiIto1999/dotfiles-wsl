@@ -2,7 +2,7 @@
   lib,
   pkgs,
   mkMcpServer,
-  mkMcpBackend,
+  mkContainerBackend,
   ...
 }:
 
@@ -12,7 +12,7 @@ let
   digest = "sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
   image = "${repository}:latest@${digest}";
 
-  backend = mkMcpBackend "crawl4ai" {
+  backend = mkContainerBackend "crawl4ai" {
     inherit image;
     extraOptions = [
       "--memory=4g"

@@ -3,7 +3,7 @@
   lib,
   pkgs,
   mkMcpServer,
-  mkMcpBackend,
+  mkContainerBackend,
   ...
 }:
 
@@ -23,7 +23,7 @@ let
     inherit httpPort streamPort;
   };
 
-  backend = mkMcpBackend "agentmemory" {
+  backend = mkContainerBackend "agentmemory" {
     image = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
     imageFile = agentmemory.image;
     volumes = [

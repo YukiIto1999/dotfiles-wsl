@@ -171,6 +171,62 @@ let
   });
 in
 {
+  # container を network 接続・loopback publish・依存整形・unit 命名込みで宣言する helper
+  config._module.args.mkContainerBackend =
+    name:
+    {
+      image,
+      imageFile ? null,
+      volumes ? [ ],
+      environmentFiles ? [ ],
+      extraOptions ? [ ],
+      ports ? [ ],
+      deps ? [ ],
+    }:
+    let
+      backendSystemdServices = {
+        "docker-${name}" = {
+          after = [ "docker-dotfiles-backends-network.service" ] ++ deps;
+          requires = [ "docker-dotfiles-backends-network.service" ] ++ deps;
+          serviceConfig = {
+            Restart = lib.mkForce "always";
+            RestartSec = "5s";
+          };
+        };
+      };
+    in
+    {
+      containers."${name}" = {
+        inherit image;
+        pull = "never";
+      }
+      // lib.optionalAttrs (imageFile != null) { inherit imageFile; }
+      // lib.optionalAttrs (volumes != [ ]) { inherit volumes; }
+      // lib.optionalAttrs (environmentFiles != [ ]) { inherit environmentFiles; }
+      // {
+        extraOptions = [
+          "--network=dotfiles-backends"
+        ]
+        ++ extraOptions
+        ++ lib.concatMap (port: [
+          "-p"
+          "127.0.0.1:${port}:${port}"
+        ]) ports;
+      };
+      systemdServices = backendSystemdServices;
+      doctorUnits = lib.mapAttrs' (
+        unitName: _:
+        lib.nameValuePair "${unitName}.service" {
+          expected = {
+            LoadState = "loaded";
+            ActiveState = "active";
+            SubState = "running";
+            Result = "success";
+          };
+        }
+      ) backendSystemdServices;
+    };
+
   options.my.ociImages = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
@@ -224,6 +280,43 @@ in
   };
 
   config.environment.etc."dotfiles/oci-images.json".source = ociImageManifest;
+
+  config.users.users.${cfg.username}.extraGroups = [ "docker" ];
+
+  config.virtualisation = {
+    docker.enable = true;
+    oci-containers.backend = "docker";
+  };
+
+  config.systemd.services.docker-dotfiles-backends-network = {
+    description = "Docker network for backing services";
+    after = [ "docker.service" ];
+    requires = [ "docker.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      ${pkgs.docker}/bin/docker network inspect dotfiles-backends >/dev/null 2>&1 \
+        || ${pkgs.docker}/bin/docker network create dotfiles-backends
+    '';
+  };
+
+  config.my.doctor.units = {
+    "docker.service".expected = {
+      LoadState = "loaded";
+      ActiveState = "active";
+      SubState = "running";
+      Result = "success";
+    };
+    "docker-dotfiles-backends-network.service".expected = {
+      LoadState = "loaded";
+      ActiveState = "active";
+      SubState = "exited";
+      Result = "success";
+    };
+  };
 
   # inventory と実際に配備される container の対応を型では表せないので assertion で閉じる
   config.assertions = [

@@ -4,7 +4,7 @@
   pkgs,
   mkMcpServer,
   mkNpmMcp,
-  mkMcpBackend,
+  mkContainerBackend,
   ...
 }:
 
@@ -27,12 +27,12 @@ let
     inherit valkeyPort;
   };
 
-  valkey = mkMcpBackend "valkey" {
+  valkey = mkContainerBackend "valkey" {
     image = valkeyImage;
     extraOptions = [ "--memory=128m" ];
   };
 
-  searxng = mkMcpBackend "searxng" {
+  searxng = mkContainerBackend "searxng" {
     image = searxngImage;
     volumes = [ "/etc/searxng/settings.yml:/etc/searxng/settings.yml:ro" ];
     extraOptions = [ "--memory=512m" ];

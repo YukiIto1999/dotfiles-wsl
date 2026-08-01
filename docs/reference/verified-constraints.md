@@ -19,7 +19,7 @@
 | SonarQube の server と DB が同じ credential を見て DB port を公開しない | `sonarqube-topology` |
 | 生成 config artifact が配備先の source と一致する | `artifact-contract`、`mcp-artifact-contract` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
-| doctor manifest が各 module の宣言と一致する | `doctor-manifest-contract` |
+| doctor manifest が各 unit の宣言と一致する | `doctor-manifest-contract` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
 | MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`mcp/module.nix` の assertion) |
 | image id が container を一意に指す | `nixos-toplevel` (`mcp/module.nix` の assertion) |

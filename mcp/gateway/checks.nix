@@ -30,6 +30,8 @@ in
     );
     pkgs.runCommandLocal "check-gateway-front-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } (
       lib.concatMapStrings (endpoint: ''
+        test "$(yq -r '.binds[0].listeners[0].routes[0].backends[0].mcp.targets | length' ${endpoint.source})" \
+          = ${toString (builtins.length (builtins.attrNames hostConfig.my.contract.mcp.fronts))}
         test "$(yq -r '.binds[0].listeners[0].routes[0].backends[0].mcp.targets[] | select(.stdio) | length' ${endpoint.source} | wc -l)" = 0
       '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
       + "touch $out"

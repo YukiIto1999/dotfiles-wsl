@@ -114,7 +114,11 @@ in
             "SONARQUBE_ADMIN_PASSWORD_FILE=${config.sops.secrets."sonarqube/admin_password".path}"
           ];
           ExecStart = lib.getExe provisionAdmin;
+          # cold start が 300s を超えると failed のまま二度と走らず admin/admin が残る
+          Restart = "on-failure";
+          RestartSec = "60s";
         };
+        startLimitIntervalSec = 0;
       };
     };
   config.my.doctor.units =

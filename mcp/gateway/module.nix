@@ -113,6 +113,8 @@ in
         RuntimeDirectoryMode = "0700";
         # downstream session ごとに upstream 接続を張るので、soft 既定 1024 では足りない
         LimitNOFILE = "4096:4096";
+        # session を 30 分保持するので、front と同じく上限を置く
+        MemoryMax = "2G";
         ExecStart = "${agentgateway}/bin/agentgateway -f ${endpoint.source}";
         Restart = "always";
         RestartSec = "5s";

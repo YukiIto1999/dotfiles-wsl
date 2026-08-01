@@ -32,7 +32,7 @@ agentgateway は設定ユーザーの systemd service として動き、stdio MC
 
 ## Docker
 
-[`mcp/module.nix`](../../mcp/module.nix) は backend の host port を `127.0.0.1:<port>:<port>` で publish する。これは agentgateway の listener とは異なる境界であり、backend port は host の非 loopback address へ直接 publish しない。container 間通信は専用の `mcp-backends` network を使う。
+[`images/module.nix`](../../images/module.nix) は backend の host port を `127.0.0.1:<port>:<port>` で publish する。これは agentgateway の listener とは異なる境界であり、backend port は host の非 loopback address へ直接 publish しない。container 間通信は専用の `dotfiles-backends` network を使う。
 
 設定ユーザーは `docker` group に属する。Docker API を使える主体は container の起動、mount、inspect が可能であり、container 環境へ渡した secret も読める。Docker group、root、Docker daemon を backend secret と host filesystem の信頼境界に含める。
 

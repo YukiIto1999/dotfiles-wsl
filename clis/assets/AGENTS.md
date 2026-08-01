@@ -62,7 +62,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 
 ## skills
 
-繰り返し作業は手で再現せず、対応する skill を読む。`dotfiles-doctor` は `share/skills/` と plugin skills の配備を検査する。subagents 表の自動検査は無い。
+繰り返し作業は手で再現せず、対応する skill を読む。`dotfiles-doctor` は `clis/assets/skills/` と plugin skills の配備を検査する。subagents 表の自動検査は無い。
 
 | 目的 | skill |
 |---|---|

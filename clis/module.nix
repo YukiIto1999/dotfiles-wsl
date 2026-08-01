@@ -20,7 +20,7 @@ let
         "installer-script"
         "github-release"
       ];
-      description = "goal 05 の installer 生成が分岐に使う種別。";
+      description = "installer 生成が分岐に使う入手方法の種別。";
     };
   };
 

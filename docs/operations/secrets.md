@@ -28,19 +28,19 @@ identity の値は `sops/module.nix` の SOPS template を介して配備する�
 
 ## GitHub account
 
-`my.accounts` が GitHub account の roster を生成する。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `accounts/module.nix`、MCP の token 読み込みは `modules/mcp/servers/github.nix` が所有する。配列の先頭が `gh` の active user と既定 token になる。
+`my.accounts` が GitHub account の roster を生成する。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `accounts/module.nix`、MCP の token 読み込みは `mcp/github/module.nix` が所有する。配列の先頭が `gh` の active user と既定 token になる。
 
 account の追加、削除、順序変更では `my.accounts` と対応する暗号化済み key を同時に変更する。`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
 
 ## Agentmemory
 
-Agentmemory の LLM provider 用 credential は `modules/mcp/servers/memory.nix` が宣言する SOPS template から environment file へ配備する。template の更新は agentmemory container の unit を再起動する。
+Agentmemory の LLM provider 用 credential は `mcp/memory/module.nix` が宣言する SOPS template から environment file へ配備する。template の更新は agentmemory container の unit を再起動する。
 
 endpoint、model、保存領域は secret inventory ではない。credential の値だけを SOPS で編集し、設定変更は consumer module で行う。
 
 ## SearXNG
 
-SearXNG の server secret は `modules/mcp/servers/searxng.nix` が設定 template に差し込み、root 所有の設定ファイルへ配備する。template の更新は SearXNG container の unit を再起動する。
+SearXNG の server secret は `mcp/searxng/module.nix` が設定 template に差し込み、root 所有の設定ファイルへ配備する。template の更新は SearXNG container の unit を再起動する。
 
 検索設定や OCI image digest は secret ではないため、暗号化済みファイルへ移さない。設定は SearXNG module、image の取得は [OCI images](oci-images.md)で扱う。
 

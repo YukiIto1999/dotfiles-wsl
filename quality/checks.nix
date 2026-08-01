@@ -127,10 +127,8 @@ in
   '';
 
   shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-    shellcheck --severity=warning \
-      ${self}/scripts/*.sh \
-      ${self}/*/tests/*.sh \
-      ${self}/git/assets/hooks/*
+    find ${self} -path '*/tests/*.sh' -o -path '*/git/assets/hooks/*' -type f \
+      | xargs shellcheck --severity=warning
     touch $out
   '';
 

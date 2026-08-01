@@ -29,7 +29,7 @@ active SOPS enrollment による拒否では enrollment を完了または abort
 
 ## Digest の更新
 
-upstream image を宣言する `modules/mcp/servers/<name>.nix` で repository、digest、digest を含む image reference を同時に変更する。candidate の command を checkout から実行し、新しい manifest に対する状態を確認して同期する。
+upstream image を宣言する `mcp/<name>.nix` で repository、digest、digest を含む image reference を同時に変更する。candidate の command を checkout から実行し、新しい manifest に対する状態を確認して同期する。
 
 ```bash
 cd ~/dotfiles-wsl

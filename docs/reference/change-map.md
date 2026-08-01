@@ -34,10 +34,10 @@
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| MCP target を追加または削除する | 必要な [`pkgs/NAME/`](../../pkgs) の build 定義、[`modules/mcp/servers/NAME.nix`](../../modules/mcp/servers)、[`modules/mcp/default.nix`](../../modules/mcp/default.nix) の `imports` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| gateway の listener または target 集約を変える | [`modules/mcp/gateway.nix`](../../modules/mcp/gateway.nix) と各 server module の `my.mcp.targets` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| Docker backend の構成を変える | 対応する [`modules/mcp/servers/NAME.nix`](../../modules/mcp/servers) と [`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) の contract | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
-| upstream OCI image を更新する | 対応する [`modules/mcp/servers/NAME.nix`](../../modules/mcp/servers) の repository、digest、canonical image reference | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
+| MCP target を追加または削除する | [`mcp/NAME/`](../../mcp) に `module.nix` と必要なら `package.nix` を置く。収集は flake が行う | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| gateway の listener または target 集約を変える | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) と各 server module の `my.mcp.targets` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| Docker backend の構成を変える | 対応する [`mcp/NAME/module.nix`](../../mcp) と [`mcp/module.nix`](../../mcp/module.nix) の `mkMcpBackend` | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
+| upstream OCI image を更新する | 対応する [`mcp/NAME/module.nix`](../../mcp) の repository、digest、canonical image reference | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
 
 ## Secret と identity
 
@@ -45,7 +45,7 @@
 |---|---|---|
 | default Git identity を変える | [`sops/module.nix`](../../sops/module.nix) の consumer 宣言と [`secrets/secrets.yaml`](../../secrets/secrets.yaml) の暗号化済み値 | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | work identity の対象と値を変える | [`flake.nix`](../../flake.nix) の `my.workIdentity`、[`sops/module.nix`](../../sops/module.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
-| GitHub account を増減する | [`flake.nix`](../../flake.nix) の `my.accounts`、[`accounts/module.nix`](../../accounts/module.nix)、[`modules/mcp/servers/github.nix`](../../modules/mcp/servers/github.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | account roster と暗号化済み値を同じ変更に含め、`dotfiles-rebuild` |
+| GitHub account を増減する | [`flake.nix`](../../flake.nix) の `my.accounts`、[`accounts/module.nix`](../../accounts/module.nix)、[`mcp/github/module.nix`](../../mcp/github/module.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | account roster と暗号化済み値を同じ変更に含め、`dotfiles-rebuild` |
 | backend が使う secret を追加または変更する | 消費する [`modules/`](../../modules) 内の `sops.secrets` と template、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | host recipient を追加する | [`secrets/.sops.yaml`](../../secrets/.sops.yaml)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml)、[`sops/impl/sops-enroll.sh`](../../sops/impl/sops-enroll.sh) の transaction contract | [SOPS enrollment](../operations/sops-enrollment.md)に従い、tracked file を手作業で `sops updatekeys` しない |
 

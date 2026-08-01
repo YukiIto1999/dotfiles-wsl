@@ -53,6 +53,14 @@ Markdown を含む作業ツリーの空白エラーは Git でも確認する。
 git diff --check
 ```
 
+## unit の中で path を書く
+
+自 unit の資材は `./` 起点で書く。他 unit と repo root を指すときは `${self}` 起点で書く。`module.nix` は `self` を受け取れないので、他 unit を指すときだけ `../<unit>/` を使う。
+
+`${self}` と `./` は様式の違いではない。`./x` は `x` だけを含む独立した store path になり、`${self}/x` は checkout 全体の store path の中を指す。実行時に隣のファイルを解決する script は後者でなければ壊れる。単体で完結する fixture と data は前者でよい。
+
+repo root から見た path を unit の中の file にそのまま書かない。`secrets/fixtures/x` を `secrets/` unit の中に書くと `secrets/secrets/fixtures/x` に解決する。
+
 ## CI
 
 [`.github/workflows/check.yml`](../../.github/workflows/check.yml) は `main` への push と pull request、手動実行で `nix flake check "git+file://${GITHUB_WORKSPACE}" -L` を実行する。CI は checkout 済みの Git tree を入力にし、検査内容はローカルと同じ経路で各 unit の `checks.nix` から集める。

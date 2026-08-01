@@ -37,4 +37,12 @@ let
 in
 {
   my.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
+
+  # front は起動時に一度だけ token を読む。rotation を拾うには再起動が要る
+  sops.secrets = lib.listToAttrs (
+    map (account: {
+      name = "accounts/${account}/token";
+      value.restartUnits = [ "mcp-front-github-${account}.service" ];
+    }) cfg.accounts
+  );
 }

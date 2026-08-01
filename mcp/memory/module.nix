@@ -32,7 +32,10 @@ let
       "/var/lib/agentmemory/data:/data"
     ];
     environmentFiles = [ config.sops.templates."agentmemory.env".path ];
-    extraOptions = [ "--user=${uid}:${uid}" ];
+    extraOptions = [
+      "--user=${uid}:${uid}"
+      "--memory=4g"
+    ];
     ports = [ httpPort ];
   };
 in

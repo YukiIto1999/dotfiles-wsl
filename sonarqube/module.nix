@@ -20,6 +20,7 @@ let
 
   database = mkContainerBackend "sonarqube-db" {
     image = databaseImage;
+    extraOptions = [ "--memory=1g" ];
     environmentFiles = [ config.sops.templates."sonarqube-db.env".path ];
     volumes = [ "sonarqube-db:/var/lib/postgresql/data" ];
   };

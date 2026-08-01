@@ -194,6 +194,7 @@
             "clis/codex/user-seed" = "toml";
             "clis/opencode/config" = "json";
             "mcp/agentmemory/config" = "yaml";
+            "telemetry/collector" = "yaml";
             "mcp/searxng/settings-template" = "yaml";
           }
           # endpoint ごとの artifact id は gateway が導く。ここで二つ目の roster を作らない

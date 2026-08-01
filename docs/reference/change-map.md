@@ -39,7 +39,7 @@
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
 | MCP target を追加または削除する | [`mcp/NAME/`](../../mcp) に `module.nix` と必要なら `package.nix` を置く。収集は flake が行う | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| gateway の endpoint または target の割り当てを変える | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `my.mcp.endpoints` と各 [`mcp/NAME/module.nix`](../../mcp) の `endpoint` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| MCP front の port または起動方法を変える | 対応する [`mcp/NAME/module.nix`](../../mcp) の `port` と `serve` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | Docker backend の構成を変える | 対応する unit の `module.nix` と [`images/module.nix`](../../images/module.nix) の `mkContainerBackend` | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
 | upstream OCI image を更新する | 対応する [`mcp/NAME/module.nix`](../../mcp) の repository、digest、canonical image reference。digest は `dotfiles-image-digest <image>` で取る | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
 | 固定した package の hash を更新する | 対応する [`mcp/NAME/package.nix`](../../mcp) の hash。値は `nix store prefetch-file --hash-type sha256 --json <url>` で取る | `dotfiles-rebuild` |

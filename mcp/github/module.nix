@@ -3,6 +3,7 @@
   lib,
   pkgs,
   mkMcpServer,
+  serveOverProxy,
   ...
 }:
 
@@ -20,16 +21,20 @@ let
   ];
 
   mkTarget =
-    account:
+    index: account:
     lib.nameValuePair "github-${account}" {
-      transport.stdio.command = lib.getExe (
-        pkgs.callPackage ./package.nix {
-          inherit mkMcpServer toolsets;
-          tokenFile = config.sops.secrets."accounts/${account}/token".path;
-        }
+      # http mode は request ごとの OAuth を要求し、PAT を環境変数で持つ形と噛み合わない
+      port = 18110 + index;
+      serve = serveOverProxy (
+        lib.getExe (
+          pkgs.callPackage ./package.nix {
+            inherit mkMcpServer toolsets;
+            tokenFile = config.sops.secrets."accounts/${account}/token".path;
+          }
+        )
       );
     };
 in
 {
-  my.mcp.targets = lib.listToAttrs (map mkTarget cfg.accounts);
+  my.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
 }

@@ -66,30 +66,30 @@ direnv allow
 ## 構成
 
 AI CLI は個別の MCP server へ直接接続しない。
-agentgateway が入口となり、各 stdio MCP server を子プロセスとして起動する。
+agentgateway が入口となり、常駐する各 MCP front へ loopback の HTTP で接続する。
 常駐 process が必要な target だけ、loopback に publish した host port 経由で Docker backend を使う。
 
-stdio target は downstream の session ごとに子プロセスへ複製される。
-そのため endpoint を分け、常用する target だけを `default` に置く。
-CLI の global config が指すのは `default` だけで、他の endpoint へ繋ぐかは接続側が決める。
+MCP front は target ごとの systemd service として常駐する。
+gateway は loopback の HTTP へ接続するだけで、子プロセスを起動しない。
+downstream の session が増えても process は増えない。
 
 ```text
 AI coding CLI
        |
-       | configured URL: default endpoint の URL
+       | configured URL: gateway の URL
        v
-agentgateway-default (systemd)      agentgateway-playwright      agentgateway-codex
-       |                                   |                            |
-       | spawn: stdio MCP                  | spawn                      | spawn
-       v                                   v                            v
-MCP servers                          playwright                   codex
+agentgateway (systemd)
+       |
+       | HTTP: loopback
+       v
+常駐 MCP front (target ごとの systemd service)
        |
        | loopback host publish
        v
 Docker backends
 ```
 
-endpoint の一覧と port は `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.endpoints` で引く。
+front の一覧と port は `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.fronts` で引く。
 
 Docker backend の container は同一の Docker network `dotfiles-backends` に属する。container 間の network と host 側の loopback publish は別の境界になる。
 
@@ -137,7 +137,7 @@ OCI image の変更は[OCI image runbook](docs/operations/oci-images.md)、docto
 - host key は `/var/lib/sops-nix/key.txt` に置き、root 所有の `0400` とする。別ホストへコピーせず、通常の rebuild で生成し直さない。
 - offline recovery key は読み取り専用の外部媒体で保管する。enrollment と復旧の間だけ接続し、通常運用するホストへ常置しない。
 - GitHub PAT は `secrets/secrets.yaml` へ SOPS で暗号化し、fine-grained PAT の権限を用途に必要な範囲へ絞る。`gh auth login` や `gh auth switch` で別経路の credential を作らない。
-- agentgateway は認証なしで endpoint ごとの port を listen する。到達できる process を信頼境界の内側として扱う。Docker backend の host publish は `127.0.0.1` に限定する。
+- agentgateway と各 front は認証なしで loopback の port を listen する。到達できる process を信頼境界の内側として扱う。Docker backend の host publish は `127.0.0.1` に限定する。
 - system generation の更新に `nixos-rebuild` を直接使わない。通常変更は `dotfiles-rebuild`、初回構築だけは `bootstrap/impl/bootstrap.sh` を使う。
 
 鍵、credential、通信境界の設計根拠は[セキュリティ設計](docs/architecture/security.md)に記載する。

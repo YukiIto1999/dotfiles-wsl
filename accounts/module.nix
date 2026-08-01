@@ -48,7 +48,7 @@ in
         name = "accounts/${a}/username";
         value = { };
       }
-      # gateway の github wrapper が runtime に cfg.username で読む token file
+      # github front が起動時に cfg.username で読む token file
       {
         name = "accounts/${a}/token";
         value = {

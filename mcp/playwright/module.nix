@@ -1,20 +1,19 @@
 {
+  config,
   lib,
   pkgs,
-  mkMcpServer,
   ...
 }:
 
 let
-  front = pkgs.callPackage ./package.nix { inherit mkMcpServer; };
+  front = pkgs.callPackage ./package.nix { };
 in
 {
+  # 常駐するので出力先は front 自身の runtime directory に閉じる
   my.mcp.targets.playwright = {
-    endpoint = "playwright";
-    # front は session ごとの出力先をここから作る。場所は endpoint が決める
-    environment = endpoint: {
-      PLAYWRIGHT_MCP_RUNTIME_DIR = "/run/${endpoint.runtimeDirectory}";
-    };
-    transport.stdio.command = lib.getExe front;
+    port = 18106;
+    serve =
+      port:
+      "${lib.getExe front} --host 127.0.0.1 --port ${toString port} --allowed-hosts '*' --output-dir ${config.my.contract.mcp.fronts.playwright.runtimeDirectoryPath}";
   };
 }

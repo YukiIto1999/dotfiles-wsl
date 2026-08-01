@@ -186,17 +186,136 @@ let
       });
 in
 {
-  my.commands.doctor = doctor;
+  options.my.doctor = {
+    schemaVersion = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 6;
+      readOnly = true;
+      internal = true;
+      description = "dotfiles-doctor manifest の schema version。";
+    };
 
-  environment.etc."dotfiles/doctor.json".source = doctorManifest;
+    units = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options.expected = lib.mkOption {
+            type = lib.types.submodule {
+              options = {
+                LoadState = lib.mkOption {
+                  type = lib.types.str;
+                  description = "systemd LoadState の期待値。";
+                };
+                ActiveState = lib.mkOption {
+                  type = lib.types.str;
+                  description = "systemd ActiveState の期待値。";
+                };
+                SubState = lib.mkOption {
+                  type = lib.types.nullOr lib.types.str;
+                  default = null;
+                  description = "systemd SubState の期待値。null は検査しない。";
+                };
+                Result = lib.mkOption {
+                  type = lib.types.nullOr lib.types.str;
+                  default = null;
+                  description = "systemd Result の期待値。null は検査しない。";
+                };
+              };
+            };
+            description = "systemctl show で検査する property と期待値。";
+          };
+        }
+      );
+      default = { };
+      internal = true;
+      description = "dotfiles-doctor が検査する systemd unit。attribute key が安定 id。";
+    };
+
+    managedFiles = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            path = lib.mkOption {
+              type = lib.types.str;
+              description = "current generation が管理する runtime file の絶対パス。";
+            };
+            source = lib.mkOption {
+              type = lib.types.path;
+              description = "runtime file と比較する immutable source。";
+            };
+          };
+        }
+      );
+      default = { };
+      internal = true;
+      description = "dotfiles-doctor が current generation の source と比較する file。";
+    };
+
+    probePolicy = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          cliTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+          systemTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+          windowsTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+          mcpRequestTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+          mcpCleanupTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+          totalTimeoutSeconds = lib.mkOption { type = lib.types.ints.positive; };
+          maxPages = lib.mkOption { type = lib.types.ints.positive; };
+          maxResponseBytes = lib.mkOption { type = lib.types.ints.positive; };
+        };
+      };
+      default = {
+        cliTimeoutSeconds = 5;
+        systemTimeoutSeconds = 5;
+        windowsTimeoutSeconds = 5;
+        mcpRequestTimeoutSeconds = 5;
+        mcpCleanupTimeoutSeconds = 5;
+        totalTimeoutSeconds = 30;
+        maxPages = 20;
+        maxResponseBytes = 1048576;
+      };
+      internal = true;
+      description = "doctor の bounded probe が共有する制限値。";
+    };
+
+    skillNames = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      internal = true;
+      description = "各 CLI に配備されることを要求する skill 名。";
+    };
+
+    agentFiles = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      internal = true;
+      description = "CLI ごとに配備を要求する agent file 名。";
+    };
+
+    wslInterop = lib.mkOption {
+      type = lib.types.submodule {
+        options = {
+          launcherName = lib.mkOption { type = lib.types.str; };
+          launcherPath = lib.mkOption { type = lib.types.str; };
+          launcherSource = lib.mkOption { type = lib.types.path; };
+          windowsCommand = lib.mkOption { type = lib.types.str; };
+        };
+      };
+      internal = true;
+      description = "WSL から Windows を起動する launcher と固定 command の検査契約。";
+    };
+  };
+
+  config.my.commands.doctor = doctor;
+
+  config.environment.etc."dotfiles/doctor.json".source = doctorManifest;
 
   # rebuild が読む契約。manifest の場所と schema を doctor が所有する
-  my.contract.doctor = {
+  config.my.contract.doctor = {
     manifest = doctorManifest;
     schemaVersion = cfg.doctor.schemaVersion;
   };
 
-  assertions = [
+  config.assertions = [
     {
       assertion = builtins.length managedFilePaths == builtins.length (lib.unique managedFilePaths);
       message = "my.doctor.managedFiles contains duplicate runtime paths";
@@ -208,7 +327,7 @@ in
     }
   ];
 
-  security.sudo.extraRules = [
+  config.security.sudo.extraRules = [
     {
       users = [ cfg.username ];
       runAs = "root";

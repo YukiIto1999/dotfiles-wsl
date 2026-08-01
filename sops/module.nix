@@ -135,14 +135,22 @@ let
   sopsGeneration = import ./impl/generation-contract.nix { inherit config pkgs; };
 in
 {
+  options.my.sops.enrollmentState = lib.mkOption {
+    type = lib.types.enum [
+      "migration"
+      "enrolled"
+    ];
+    description = "SOPS host identity の移行状態。doctor はここから legacy home key の扱いを導く。";
+  };
+
   # host/recovery 両 identity の復号実測と home key 削除後に enrolled へ切り替える
-  my.sops.enrollmentState = "migration";
+  config.my.sops.enrollmentState = "migration";
 
-  sops.defaultSopsFile = ../secrets/secrets.yaml;
-  sops.age.keyFile = "/var/lib/sops-nix/key.txt";
-  sops.age.generateKey = false;
+  config.sops.defaultSopsFile = ../secrets/secrets.yaml;
+  config.sops.age.keyFile = "/var/lib/sops-nix/key.txt";
+  config.sops.age.generateKey = false;
 
-  systemd.tmpfiles.settings."sops-key" = {
+  config.systemd.tmpfiles.settings."sops-key" = {
     "/var/lib/sops-nix".d = {
       user = "root";
       group = "root";
@@ -155,7 +163,7 @@ in
     };
   };
 
-  sops.secrets = {
+  config.sops.secrets = {
     "identity/default/name" = { };
     "identity/default/email" = { };
   }
@@ -164,7 +172,7 @@ in
     "identity/work/email" = { };
   };
 
-  sops.templates = {
+  config.sops.templates = {
     "git-identity" = userTpl "${userHome}/.config/git/identity.conf" (gitIdentity {
       userName = placeholder."identity/default/name";
       userEmail = placeholder."identity/default/email";
@@ -177,10 +185,10 @@ in
     });
   };
 
-  my.commands.sopsEnroll = sopsEnroll;
-  environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;
+  config.my.commands.sopsEnroll = sopsEnroll;
+  config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;
 
-  my.contract.secrets = {
+  config.my.contract.secrets = {
     generation = sopsGeneration.contract;
     inherit (sopsGeneration) reinstallSecrets;
   };

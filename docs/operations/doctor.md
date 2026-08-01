@@ -42,7 +42,7 @@ dotfiles-doctor --format json
 
 `local` は current generation が管理するファイル、AI CLI の固定 path、rules、skills、agent file、gateway 設定、WSL launcher、Nix の動的 loader を検査する。
 
-失敗した path を home 配下で直接編集しない。対応する `modules/` または `share/` の source と current generation を確認し、必要な変更を rebuild する。AI CLI の実行ファイルがない場合は、通常ユーザーから配備し直す。
+失敗した path を home 配下で直接編集しない。対応する unit の source と current generation を確認し、必要な変更を rebuild する。AI CLI の実行ファイルがない場合は、通常ユーザーから配備し直す。
 
 ```bash
 dotfiles-install-clis

@@ -91,8 +91,6 @@
           inherit system;
           specialArgs = { inherit pluginSources; };
           modules = unitModules ++ [
-            ./modules
-
             nixos-wsl.nixosModules.default
             sops-nix.nixosModules.sops
             home-manager.nixosModules.home-manager
@@ -105,7 +103,7 @@
     in
     {
       nixosConfigurations.${hostName} = mkNixosSystem {
-        # マシン固有の値のみ、他は modules/options.nix の default
+        # マシン固有の値のみ、他は各 unit の option の default
         my = {
           accounts = [
             "account-1"

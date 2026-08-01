@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  mkCommand,
   substituteCommandVars,
   ...
 }:
@@ -151,6 +152,16 @@ let
             '';
       } (builtins.readFile ./impl/sync-images.sh);
     };
+  # 宣言へ固定する digest を registry から取る。sync は宣言済み digest しか見ない
+  imageDigest = mkCommand {
+    name = "dotfiles-image-digest";
+    src = ./impl/image-digest.sh;
+    runtimeInputs = with pkgs; [
+      docker
+      jq
+    ];
+  };
+
   syncImagesTest = mkSyncImages "dotfiles-sync-images-test" true;
   syncImages = (mkSyncImages "dotfiles-sync-images" false).overrideAttrs (old: {
     passthru = (old.passthru or { }) // {
@@ -202,14 +213,7 @@ in
     description = "OCI runtime と明示 sync が共有する image inventory。";
   };
 
-  options.my.contract = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.attrsOf lib.types.unspecified);
-    default = { };
-    internal = true;
-    description = "unit が他 unit へ公開する契約。所有する unit が定義し、消費する unit が読む。";
-  };
-
-  config.my.commands.syncImages = syncImages;
+  config.my.commands = { inherit syncImages imageDigest; };
 
   # doctor が読む契約。images が所有する派生物を一箇所で公開する
   config.my.contract.images = {

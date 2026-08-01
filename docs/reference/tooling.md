@@ -8,9 +8,9 @@
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
-| system package | [`modules/user/default.nix`](../../modules/user/default.nix) と各 [`clis/`](../../clis) module の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
-| user package | [`modules/user/default.nix`](../../modules/user/default.nix) の `home.packages` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
-| Home Manager program | [`modules/user/default.nix`](../../modules/user/default.nix) の `programs` | 同上 module を参照する |
+| system package | [`system/module.nix`](../../system/module.nix) と各 unit の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
+| user package | [`system/module.nix`](../../system/module.nix) の `home.packages` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
+| Home Manager program | [`system/module.nix`](../../system/module.nix) の `programs` | 同上 module を参照する |
 | 保守用 devShell | [`flake.nix`](../../flake.nix) の `devShells` | `nix develop --command echo` の後に `$PATH` を確認する |
 
 `nixfmt` は editor と単一ファイル、`nixfmt-tree` は `nix fmt` と repository 全体の検査を担当する。[Nixfmt README](https://github.com/NixOS/nixfmt/blob/master/README.md)

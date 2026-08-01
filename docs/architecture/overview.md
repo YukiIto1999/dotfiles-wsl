@@ -6,7 +6,7 @@
 
 ## System generation
 
-[`flake.nix`](../../flake.nix) は NixOS-WSL、sops-nix、Home Manager を [`modules/default.nix`](../../modules/default.nix) と同じ NixOS 評価へ渡す。評価結果は Nix store 上の immutable な system closure になる。
+[`flake.nix`](../../flake.nix) は NixOS-WSL、sops-nix、Home Manager を、収集した unit の `module.nix` と同じ NixOS 評価へ渡す。評価結果は Nix store 上の immutable な system closure になる。
 
 ```text
 checkout
@@ -28,7 +28,7 @@ Nix store の candidate system
 
 ## Module graph
 
-[`modules/default.nix`](../../modules/default.nix) の `imports` がローカル module の入口である。
+[`flake.nix`](../../flake.nix) の `collectUnits` がローカル module の入口である。`module.nix` を持つ directory を走査して集めるため、module を足すときに入口を編集しない。
 
 | Module | 所有する責務 |
 |---|---|
@@ -41,7 +41,7 @@ Nix store の candidate system
 | `user/` | login user、Home Manager、Git と user package |
 | `commands.nix` | generation 固有の `dotfiles-*` command と manifest |
 
-Home Manager は独立した設定適用系ではなく、NixOS module として同じ system evaluation に入る。[`modules/user/default.nix`](../../modules/user/default.nix) が user package、shell 環境、Home Manager の配備を宣言し、activation 後の `home-manager-<user>.service` を doctor の検査対象にする。system 全体のファイルと service は NixOS、home 配下の宣言的な file と user package は Home Manager が所有する。
+Home Manager は独立した設定適用系ではなく、NixOS module として同じ system evaluation に入る。[`system/module.nix`](../../system/module.nix) が user package、shell 環境、Home Manager の配備を宣言し、activation 後の `home-manager-<user>.service` を doctor の検査対象にする。system 全体のファイルと service は NixOS、home 配下の宣言的な file と user package は Home Manager が所有する。
 
 JSON、TOML、YAML の設定は、配備を担当する module が一度だけ生成する。同じ immutable source を `/etc`、Home Manager、SOPS template、OCI volume、doctor の必要な consumer へ渡す。`my.configArtifacts` は構文検査用の参照であり、別の設定 inventory ではない。
 

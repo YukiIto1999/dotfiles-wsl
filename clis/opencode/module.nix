@@ -7,9 +7,24 @@
 
 let
   cfg = config.my;
-  opencodeConfig = pkgs.replaceVars ./assets/opencode.json {
-    gatewayUrl = cfg.contract.mcp.endpoints.default.url;
-  };
+  # template は valid JSON のまま保ち、動的な lsp block だけ module が足す
+  opencodeBase = builtins.fromJSON (
+    builtins.readFile (
+      pkgs.replaceVars ./assets/opencode.json {
+        gatewayUrl = cfg.contract.mcp.endpoints.default.url;
+      }
+    )
+  );
+
+  opencodeConfig = (pkgs.formats.json { }).generate "opencode.json" (
+    opencodeBase
+    // {
+      lsp = lib.mapAttrs (_: server: {
+        command = [ server.command ] ++ server.args;
+        extensions = builtins.attrNames server.extensions;
+      }) cfg.lsp;
+    }
+  );
 
   splitFrontmatter =
     src:

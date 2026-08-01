@@ -7,7 +7,7 @@
 
 let
   cfg = config.my;
-  opencodeConfig = pkgs.replaceVars ./opencode.json {
+  opencodeConfig = pkgs.replaceVars ./assets/opencode.json {
     inherit (cfg) gatewayUrl;
   };
 

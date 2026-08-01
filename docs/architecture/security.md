@@ -42,9 +42,9 @@ upstream OCI image は digest を Nix 宣言へ固定し、registry 取得を `d
 
 ## Codex sandbox
 
-[`modules/clis/codex/config.toml`](../../modules/clis/codex/config.toml) は既定を `workspace-write`、network access を有効、approval policy を `never` とする。Codex の local command は sandbox 内で対話承認なしに実行される。
+[`clis/codex/assets/config.toml`](../../clis/codex/assets/config.toml) は既定を `workspace-write`、network access を有効、approval policy を `never` とする。Codex の local command は sandbox 内で対話承認なしに実行される。
 
-[`modules/clis/codex/default.nix`](../../modules/clis/codex/default.nix) は dotfiles checkout の project config に `.git` を追加の writable root として設定する。これにより repository 操作は可能になるが、workspace 外の任意 path を書き込み可能にはしない。project config は trusted project の範囲にだけ置く。
+[`clis/codex/module.nix`](../../clis/codex/module.nix) は dotfiles checkout の project config に `.git` を追加の writable root として設定する。これにより repository 操作は可能になるが、workspace 外の任意 path を書き込み可能にはしない。project config は trusted project の範囲にだけ置く。
 
 sandbox は gateway の client 認証、Docker daemon の権限、Windows interop の境界を代替しない。network access が有効なので、sandbox 内 process は到達可能な endpoint へ接続できる。MCP tool は gateway と各 server の user 権限、secret、backend 境界も合わせて評価する。
 

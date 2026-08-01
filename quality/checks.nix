@@ -54,12 +54,17 @@ in
           name: container:
           let
             options = container.extraOptions or [ ];
-            published = builtins.filter (option: builtins.match "[0-9.]+:[0-9]+:[0-9]+" option != null) options;
+            published = publishValues options;
           in
           map (option: {
             # container 名は宣言 unit の名前を含む。所有の比較は unit 単位で行う
             owner = name;
-            port = lib.toInt (builtins.elemAt (lib.splitString ":" option) 1);
+            # 127.0.0.1:H:C も H:C も、host 側 port は末尾から二つ目
+            port =
+              let
+                parts = lib.splitString ":" option;
+              in
+              lib.toInt (builtins.elemAt parts (builtins.length parts - 2));
           }) published
         ) hostConfig.virtualisation.oci-containers.containers
       );
@@ -88,19 +93,29 @@ in
       numbers = lib.unique (map (listener: listener.port) listeners);
       duplicates = lib.filter (port: builtins.length (ownersOf port) > 1) numbers;
 
-      # loopback 以外へ publish する container は、重複以前に拒む
+      # -p の直後の値だけが publish の指定。mkContainerBackend は必ず
+      # 127.0.0.1:H:C を置くので、それ以外の形は loopback の外へ開く
+      publishValues =
+        options:
+        lib.concatLists (
+          lib.imap0 (
+            index: option:
+            lib.optional (option == "-p" || option == "--publish") (builtins.elemAt options (index + 1))
+          ) options
+        );
+
       exposed = lib.concatLists (
         lib.mapAttrsToList (
           name: container:
-          map (option: "${name}:${option}") (
-            builtins.filter (
-              option:
-              builtins.match "[0-9.]+:[0-9]+:[0-9]+" option != null
-              && builtins.match "127\\.0\\.0\\.1:.*" option == null
-            ) container.extraOptions
+          map (value: "${name}:${value}") (
+            builtins.filter (value: builtins.match "127\\.0\\.0\\.1:[0-9]+:[0-9]+" value == null) (
+              publishValues container.extraOptions
+            )
           )
+          ++ map (port: "${name}:ports=${port}") container.ports
         ) hostConfig.virtualisation.oci-containers.containers
       );
+
     in
     assert listeners != [ ];
     assert lib.assertMsg (exposed == [ ]) (
@@ -170,25 +185,33 @@ in
         in
         builtins.head (lib.splitString "/" relative);
 
-      # 宣言が自 unit と一致しない option を集める。子 unit は path の最初の段で
-      # 判定するので、mcp/gateway が my.mcp を宣言するのは違反にならない
+      # 宣言が自 unit と一致しない option を集める。sub-option を持つ名前空間は
+      # declarations を持たないので、配下を辿って宣言位置を集める
+      declarationsOf =
+        option:
+        option.declarations or (lib.concatMap declarationsOf (
+          builtins.attrValues (lib.filterAttrs (name: _: !(lib.hasPrefix "_" name)) option)
+        ));
+
       violationsIn =
         prefix: options:
         lib.concatLists (
           lib.mapAttrsToList (
             name: option:
             let
-              declaredIn = map unitOf (option.declarations or [ ]);
-              matches = lib.any (unit: unit == name) declaredIn;
+              declaredIn = lib.unique (map unitOf (declarationsOf option));
+              # 一つでも別 unit が宣言していれば違反。名前空間を他 unit が
+              # 借りて option を足す形を通さない
+              matches = lib.all (unit: unit == name) declaredIn;
             in
             if lib.elem name rootVocabulary then
               [ ]
-            else if !(option ? declarations) then
+            else if declaredIn == [ ] then
               [ ]
             else if matches then
               [ ]
             else
-              [ "${prefix}${name} <- ${lib.concatStringsSep "," (lib.unique declaredIn)}" ]
+              [ "${prefix}${name} <- ${lib.concatStringsSep "," declaredIn}" ]
           ) options
         );
 

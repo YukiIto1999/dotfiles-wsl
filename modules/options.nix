@@ -23,18 +23,6 @@ in
       description = "Absolute path to the dotfiles checkout that out-of-store symlinks and scripts reference.";
     };
 
-    gatewayPort = lib.mkOption {
-      type = lib.types.port;
-      default = 8765;
-      description = "Loopback port the agentgateway MCP listener binds.";
-    };
-
-    gatewayUrl = lib.mkOption {
-      type = lib.types.str;
-      readOnly = true;
-      description = "MCP gateway URL every AI CLI points at. Derived from gatewayPort.";
-    };
-
     accounts = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -87,7 +75,7 @@ in
     doctor = {
       schemaVersion = lib.mkOption {
         type = lib.types.ints.positive;
-        default = 5;
+        default = 6;
         readOnly = true;
         internal = true;
         description = "dotfiles-doctor manifest の schema version。";
@@ -206,6 +194,5 @@ in
 
   config.my = {
     homeDir = "/home/${cfg.username}";
-    gatewayUrl = "http://localhost:${toString cfg.gatewayPort}/mcp";
   };
 }

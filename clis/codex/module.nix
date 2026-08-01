@@ -22,7 +22,7 @@ let
     sandbox_workspace_write.writable_roots = [ "${cfg.dotfilesDir}/.git" ];
   };
   codexSystemConfig = pkgs.replaceVars ./assets/config-system.toml {
-    inherit (cfg) gatewayUrl;
+    gatewayUrl = cfg.contract.mcp.endpoints.default.url;
     inherit codexModel;
   };
   codexUserSeed = pkgs.replaceVars ./assets/config.toml { inherit codexModel; };

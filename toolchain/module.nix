@@ -121,6 +121,8 @@ in
   config.my.toolchain = {
     # GitHub Actions のローカル実行。nix 統合を持つ
     actrun = pkgs.callPackage ./actrun/package.nix { };
+    # project scope の agent context 管理。user scope の配備は clis が持つ
+    apm = pkgs.callPackage ./apm/package.nix { };
 
     inherit (pkgs)
       # 言語 runtime

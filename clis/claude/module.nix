@@ -21,6 +21,9 @@ let
       extensionToLanguage = server.extensions;
     }
     // lib.optionalAttrs (server.args != [ ]) { inherit (server) args; }
+    // lib.optionalAttrs (server.initializationOptions != { }) {
+      inherit (server) initializationOptions;
+    }
   ) cfg.toolchain.lsp;
 
   lspJson = (pkgs.formats.json { }).generate "claude-lsp.json" lspServers;

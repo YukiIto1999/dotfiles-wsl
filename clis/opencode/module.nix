@@ -19,10 +19,16 @@ let
   opencodeConfig = (pkgs.formats.json { }).generate "opencode.json" (
     opencodeBase
     // {
-      lsp = lib.mapAttrs (_: server: {
-        command = [ server.command ] ++ server.args;
-        extensions = builtins.attrNames server.extensions;
-      }) cfg.toolchain.lsp;
+      lsp = lib.mapAttrs (
+        _: server:
+        {
+          command = [ server.command ] ++ server.args;
+          extensions = builtins.attrNames server.extensions;
+        }
+        // lib.optionalAttrs (server.initializationOptions != { }) {
+          initialization = server.initializationOptions;
+        }
+      ) cfg.toolchain.lsp;
     }
   );
 

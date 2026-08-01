@@ -38,6 +38,12 @@ in
             type = lib.types.attrsOf lib.types.str;
             description = "拡張子から language id への対応。拡張子は . から始める。";
           };
+
+          initializationOptions = lib.mkOption {
+            type = lib.types.attrsOf lib.types.anything;
+            default = { };
+            description = "initialize 時に渡す option。server が定める形で、設定 section の接頭辞は付けない。";
+          };
         };
       }
     );
@@ -99,6 +105,13 @@ in
       package = pkgs.rust-analyzer;
       command = "rust-analyzer";
       extensions.".rs" = "rust";
+      # 既定では workspace の build script と proc macro を実行する。
+      # 信頼しない checkout を開いた時点でコード実行になるため止める。
+      # initializationOptions は rust-analyzer. の接頭辞を取らない
+      initializationOptions = {
+        cargo.buildScripts.enable = false;
+        procMacro.enable = false;
+      };
     };
 
     nix = {

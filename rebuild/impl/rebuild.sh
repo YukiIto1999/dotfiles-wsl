@@ -78,6 +78,8 @@ dotfiles="@dotfilesDir@"
 nix_store_dir="@nixStoreDir@"
 nix_gc_auto_roots_dir="@nixGcAutoRootDir@"
 system_profile_path="@systemProfilePath@"
+doctor_schema_version="@doctorSchemaVersion@"
+legacy_doctor_schema_version="@legacyDoctorSchemaVersion@"
 legacy_schema2_rebuild_source_sha256="@legacySchema2RebuildSourceSha256@"
 legacy_schema2_candidate_helper_sha256="@legacySchema2CandidateHelperSha256@"
 legacy_schema2_nixpkgs_rev="@legacySchema2NixpkgsRev@"
@@ -732,7 +734,7 @@ target_has_profile_generation() {
 
 recovery_target_supports_rollback_protocol() {
   local target=$1
-  [[ $(read_doctor_manifest_schema "$target" 2>/dev/null || true) == 4 &&
+  [[ $(read_doctor_manifest_schema "$target" 2>/dev/null || true) == "$doctor_schema_version" &&
     $(read_oci_image_manifest_schema "$target" 2>/dev/null || true) == 2 &&
     -x $target/sw/bin/dotfiles-sync-images ]]
 }
@@ -1385,20 +1387,25 @@ read_doctor_manifest_schema() {
   ' "$canonical" 2>/dev/null
 }
 
+# forward は宣言中の schema だけを受ける。rollback は過去 generation の
+# manifest を読むので、legacy の 2 と、json 化した 3 以降を受ける
 doctor_manifest_route() {
   local direction=$1 target=$2 schema
   schema=$(read_doctor_manifest_schema "$target") || return 1
-  case "$direction:$schema" in
-    forward:4 | rollback:4 | rollback:3)
-      printf '%s|json\n' "$schema"
-      ;;
-    rollback:2)
-      printf '%s|legacy\n' "$schema"
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  if [[ $direction == forward ]]; then
+    [[ $schema -eq $doctor_schema_version ]] || return 1
+    printf '%s|json\n' "$schema"
+    return 0
+  fi
+  if [[ $schema -eq $legacy_doctor_schema_version ]]; then
+    printf '%s|legacy\n' "$schema"
+    return 0
+  fi
+  if [[ $schema -gt $legacy_doctor_schema_version && $schema -le $doctor_schema_version ]]; then
+    printf '%s|json\n' "$schema"
+    return 0
+  fi
+  return 1
 }
 
 read_oci_image_manifest_schema() {
@@ -2607,7 +2614,7 @@ if [[ $mode == apply || $mode == plan || $mode == forward-recover ]]; then
     $(readlink -f -- "$temporary_gc_roots/candidate") == "$candidate" ]] || \
     die 1 "candidate build did not create its temporary GC root"
   doctor_manifest_route forward "$candidate" >/dev/null || \
-    die 2 "candidate does not contain a supported schema version 4 doctor manifest"
+    die 2 "candidate does not contain a supported schema version $doctor_schema_version doctor manifest"
   candidate_rebuild_logical=$candidate/sw/bin/dotfiles-rebuild
   candidate_sync_logical=$candidate/sw/bin/dotfiles-sync-images
   candidate_doctor_logical=$candidate/sw/bin/dotfiles-doctor
@@ -2975,8 +2982,8 @@ fi
 if [[ $mode == rollback && $state != aborted ]] && jq -e '.rollback == null' <<< "$active" >/dev/null; then
   previous=$(jq -r '.recoveryTarget' <<< "$active")
   previous_user=$(jq -r '.previousDefaultUser' <<< "$active")
-  [[ $(read_doctor_manifest_schema "$previous" 2>/dev/null || true) == 4 ]] || \
-    die 2 "recovery target requires doctor manifest schema version 4"
+  [[ $(read_doctor_manifest_schema "$previous" 2>/dev/null || true) == "$doctor_schema_version" ]] || \
+    die 2 "recovery target requires doctor manifest schema version $doctor_schema_version"
   require_target_oci_readiness "$previous" recovery || exit $?
   rollback_current=$(readlink -f -- /run/current-system) || die 2 "failed to resolve current system for rollback"
   rollback_booted=$(readlink -f -- /run/booted-system) || die 2 "failed to resolve booted system for rollback"

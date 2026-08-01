@@ -181,7 +181,8 @@ in
           ${self}/rebuild/impl/lib/atomic-file.sh \
           ${self}/rebuild/impl/lib/operation-lock.sh \
           ${self}/rebuild/impl/lib/rebuild-receipt.sh \
-          ${self}/rebuild/impl/lib/rebuild-attempt.sh
+          ${self}/rebuild/impl/lib/rebuild-attempt.sh \
+          ${toString hostConfig.my.contract.doctor.schemaVersion}
         touch $out
       '';
 

@@ -18,7 +18,8 @@ atomic_file_source=${4:?atomic file source path is required}
 operation_lock_source=${5:?operation lock source path is required}
 receipt_source=${6:?rebuild receipt source path is required}
 attempt_source=${7:?rebuild attempt source path is required}
-probe_mode=${8:-full}
+doctor_schema_version=${8:?doctor manifest schema version is required}
+probe_mode=${9:-full}
 gc_probe=0
 [[ $probe_mode == gc-erasure-integration || $probe_mode == gc-erasure-mutant ]] && gc_probe=1
 controller_probe=0
@@ -86,6 +87,8 @@ sed "s|@dotfilesDir@|$repo|g" "$rebuild_source" \
   | sed "s|@sudoCommand@|$sudo_wrapper|g" \
   | sed "s|@awk@|$(command -v awk)|g" \
   | sed "s|@activationLogLimitBytes@|1024|g" \
+  | sed "s|@doctorSchemaVersion@|$doctor_schema_version|g" \
+  | sed "s|@legacyDoctorSchemaVersion@|2|g" \
   | sed "s|@legacySchema2RebuildSourceSha256@|$legacy_source_hash|g" \
   | sed "s|@legacySchema2CandidateHelperSha256@|$legacy_helper_hash|g" \
   | sed "s|@legacySchema2NixpkgsRev@|$legacy_nixpkgs_rev|g" \
@@ -435,15 +438,15 @@ case $report_mode in
 esac
 exit "$doctor_status"
 DOCTOR
-sed -e "1s|@bash@|$bash_path|" -e 's|@manifestSchema@|4|g' \
+sed -e "1s|@bash@|$bash_path|" -e "s|@manifestSchema@|$doctor_schema_version|g" \
   "$json_doctor_template" > "$candidate/sw/bin/dotfiles-doctor"
 chmod +x "$candidate/sw/bin/dotfiles-doctor"
 sed -e "1s|@bash@|$bash_path|" -e 's|@manifestSchema@|3|g' \
   "$json_doctor_template" > "$v3_doctor_fixture"
 chmod +x "$v3_doctor_fixture"
 cp -- "$candidate/sw/bin/dotfiles-doctor" "$previous/sw/bin/dotfiles-doctor"
-printf '%s\n' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json"
-printf '%s\n' '{"schemaVersion":4}' > "$previous/etc/dotfiles/doctor.json"
+printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$candidate/etc/dotfiles/doctor.json"
+printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$previous/etc/dotfiles/doctor.json"
 printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$candidate/etc/dotfiles/oci-images.json"
 printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$previous/etc/dotfiles/oci-images.json"
 
@@ -978,22 +981,22 @@ reject_call '#sourceSnapshot'
 unset TEST_CHANGED_PATHS
 rm -r -- "$marker_dir"
 
-# forward candidate は schema v4 だけを activation 前に受け入れる。
-for invalid_candidate_manifest in schema-3 schema-5 malformed multiple missing; do
+# forward candidate は宣言中の schema だけを activation 前に受け入れる。
+for invalid_candidate_manifest in older newer malformed multiple missing; do
   case $invalid_candidate_manifest in
-    schema-3) printf '%s\n' '{"schemaVersion":3}' > "$candidate/etc/dotfiles/doctor.json" ;;
-    schema-5) printf '%s\n' '{"schemaVersion":5}' > "$candidate/etc/dotfiles/doctor.json" ;;
+    older) printf '{"schemaVersion":%s}\n' "$((doctor_schema_version - 1))" > "$candidate/etc/dotfiles/doctor.json" ;;
+    newer) printf '{"schemaVersion":%s}\n' "$((doctor_schema_version + 1))" > "$candidate/etc/dotfiles/doctor.json" ;;
     malformed) printf '%s\n' 'not-json' > "$candidate/etc/dotfiles/doctor.json" ;;
-    multiple) printf '%s\n%s\n' '{"schemaVersion":4}' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json" ;;
+    multiple) printf '{"schemaVersion":%s}\n{"schemaVersion":%s}\n' "$doctor_schema_version" "$doctor_schema_version" > "$candidate/etc/dotfiles/doctor.json" ;;
     missing) rm -- "$candidate/etc/dotfiles/doctor.json" ;;
   esac
   run_rebuild switch '' '' --plan
   [[ $rebuild_status -eq 2 ]]
-  grep -F 'candidate does not contain a supported schema version 4 doctor manifest' "$stderr_log" > /dev/null
+  grep -F "candidate does not contain a supported schema version $doctor_schema_version doctor manifest" "$stderr_log" > /dev/null
   reject_call 'system-activator'
   reject_call 'nixos-rebuild'
   reject_call 'dotfiles-doctor'
-  printf '%s\n' '{"schemaVersion":4}' > "$candidate/etc/dotfiles/doctor.json"
+  printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$candidate/etc/dotfiles/doctor.json"
 done
 
 # candidate の OCI readiness は plan と apply のどちらでも receipt 公開前に検査する。
@@ -1901,7 +1904,7 @@ run_rebuild switch '' '' --resume "$transaction_id"
 require_exact_call 'dotfiles-sync-images:candidate --status'
 assert_apply switch
 
-# rollback は schema v4 readiness contract のない legacy generation を通常経路で拒否する。
+# rollback は宣言中の schema の readiness contract を持たない legacy generation を通常経路で拒否する。
 printf '%s\n' "$previous" > "$current_state"
 printf '%s\n' "$displaced_profile" > "$profile_state"
 printf '%s\n' "$previous" > "$booted_state"
@@ -1919,7 +1922,7 @@ for legacy_schema in 2 3; do
   printf '{"schemaVersion":%s}\n' "$legacy_schema" > "$previous/etc/dotfiles/doctor.json"
   run_rebuild switch '' '' --rollback "$transaction_id"
   [[ $rebuild_status -eq 2 ]]
-  grep -F 'recovery target requires doctor manifest schema version 4' "$stderr_log" > /dev/null
+  grep -F "recovery target requires doctor manifest schema version $doctor_schema_version" "$stderr_log" > /dev/null
   reject_call 'dotfiles-sync-images:previous --status'
   reject_call 'system-activator'
   reject_call 'dotfiles-doctor'
@@ -1990,9 +1993,9 @@ printf '%s\n' "$displaced_profile" > "$profile_state"
 printf '%s\n' "$previous" > "$booted_state"
 
 cp -- "$candidate/sw/bin/dotfiles-doctor" "$previous/sw/bin/dotfiles-doctor"
-printf '%s\n' '{"schemaVersion":4}' > "$previous/etc/dotfiles/doctor.json"
+printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$previous/etc/dotfiles/doctor.json"
 
-# doctor schema v4 だけでは phase 4 の pull=never / active repair capability を証明しない。
+# doctor manifest schema だけでは phase 4 の pull=never / active repair capability を証明しない。
 printf '%s\n' '{"schemaVersion":1,"images":[]}' > "$previous/etc/dotfiles/oci-images.json"
 run_rebuild switch '' '' --rollback "$transaction_id"
 [[ $rebuild_status -eq 2 ]]
@@ -2754,7 +2757,7 @@ if [[ $gc_probe -eq 1 ]]; then
   cp -- "$candidate/sw/bin/dotfiles-sync-images" "$successor/sw/bin/dotfiles-sync-images"
   chmod +x "$successor/sw/bin/dotfiles-rebuild" \
     "$successor/sw/bin/dotfiles-doctor" "$successor/sw/bin/dotfiles-sync-images"
-  printf '%s\n' '{"schemaVersion":4}' > "$successor/etc/dotfiles/doctor.json"
+  printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$successor/etc/dotfiles/doctor.json"
   printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$successor/etc/dotfiles/oci-images.json"
   export TEST_CANDIDATE=$successor
 elif [[ $controller_probe -eq 1 ]]; then
@@ -2768,7 +2771,7 @@ elif [[ $controller_probe -eq 1 ]]; then
     "$successor/sw/bin/dotfiles-rebuild"
   chmod +x "$successor/sw/bin/dotfiles-rebuild" \
     "$successor/sw/bin/dotfiles-doctor" "$successor/sw/bin/dotfiles-sync-images"
-  printf '%s\n' '{"schemaVersion":4}' > "$successor/etc/dotfiles/doctor.json"
+  printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$successor/etc/dotfiles/doctor.json"
   printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$successor/etc/dotfiles/oci-images.json"
   export TEST_CANDIDATE=$successor
 else
@@ -2823,7 +2826,7 @@ sed -i '2i\
   "$successor/sw/bin/dotfiles-rebuild"
 chmod +x "$successor/sw/bin/dotfiles-rebuild" \
   "$successor/sw/bin/dotfiles-doctor" "$successor/sw/bin/dotfiles-sync-images"
-printf '%s\n' '{"schemaVersion":4}' > "$successor/etc/dotfiles/doctor.json"
+printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$successor/etc/dotfiles/doctor.json"
 printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$successor/etc/dotfiles/oci-images.json"
 export TEST_CANDIDATE=$successor
 
@@ -4093,7 +4096,7 @@ cp -- "$successor/sw/bin/dotfiles-doctor" "$grandchild/sw/bin/dotfiles-doctor"
 cp -- "$successor/sw/bin/dotfiles-sync-images" "$grandchild/sw/bin/dotfiles-sync-images"
 chmod +x "$grandchild/sw/bin/dotfiles-rebuild" \
   "$grandchild/sw/bin/dotfiles-doctor" "$grandchild/sw/bin/dotfiles-sync-images"
-printf '%s\n' '{"schemaVersion":4}' > "$grandchild/etc/dotfiles/doctor.json"
+printf '{"schemaVersion":%s}\n' "$doctor_schema_version" > "$grandchild/etc/dotfiles/doctor.json"
 printf '%s\n' '{"schemaVersion":2,"images":[]}' > "$grandchild/etc/dotfiles/oci-images.json"
 export TEST_CANDIDATE=$grandchild
 export TEST_DOCTOR_STATUS=1

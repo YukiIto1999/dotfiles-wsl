@@ -14,6 +14,9 @@ let
 
   # rebuild の shell が展開する値。command 固有なのでこの unit が所有する
   rebuildVars = nixosRebuildGuardVars // {
+    # doctor が所有する schema を読む。rebuild 側に数値を転記しない
+    doctorSchemaVersion = toString config.my.contract.doctor.schemaVersion;
+    legacyDoctorSchemaVersion = "2";
     bootIdFile = "/proc/sys/kernel/random/boot_id";
     nixGcAutoRootDir = "/nix/var/nix/gcroots/auto";
     awk = lib.escapeShellArg (lib.getExe pkgs.gawk);

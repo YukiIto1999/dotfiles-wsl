@@ -34,9 +34,13 @@ async def listTools():
     ]
 
 
-# crawl4ai の tool 名は REST path と 1:1 対応
+# crawl4ai の tool 名は REST path と 1:1 対応。
+# SDK は schema に無い名前も handler へ渡すので、path へ載せる前に照合する
 @server.call_tool()
 async def callTool(name, arguments):
+    known = {tool.get("name") for tool in await loadTools()}
+    if name not in known:
+        raise ValueError(f"unknown crawl4ai tool: {name}")
     async with httpx.AsyncClient(timeout=None) as client:
         res = await client.post(f"{crawl4aiBase}/{name}", json=arguments or {})
         res.raise_for_status()

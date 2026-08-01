@@ -2,6 +2,7 @@
   lib,
   pkgs,
   mkMcpServer,
+  serveOverProxy,
   mkContainerBackend,
   ...
 }:
@@ -36,7 +37,10 @@ in
   virtualisation.oci-containers.containers = backend.containers;
   systemd.services = backend.systemdServices;
 
-  my.mcp.gatewayWaitUnits = [ "docker-crawl4ai.service" ];
-  my.mcp.targets.crawl4ai.transport.stdio.command = lib.getExe front;
+  my.mcp.targets.crawl4ai = {
+    port = 18103;
+    serve = serveOverProxy (lib.getExe front);
+    waitUnits = [ "docker-crawl4ai.service" ];
+  };
   my.doctor.units = backend.doctorUnits;
 }

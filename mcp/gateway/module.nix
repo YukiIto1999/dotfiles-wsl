@@ -10,17 +10,10 @@ let
   agentgateway = pkgs.callPackage ./package.nix { };
 
   # upstream schema の key を知るのはここだけ。option 名と service 名へ upstream 名を漏らさない
-  upstream =
-    transport:
-    if transport ? stdio then
-      { stdio.cmd = transport.stdio.command; }
-    else
-      { mcp.host = transport.http.url; };
+  upstream = front: { mcp.host = front.url; };
 
   # probe の grep は npm package と native binary の subcommand が食い違い、呼ぶと常に失敗する
   deniedTools = [ "grep" ];
-
-  targetsOf = id: lib.filterAttrs (_: target: target.endpoint == id) cfg.mcp.targets;
 
   configOf =
     id:
@@ -36,9 +29,12 @@ let
                 {
                   backends = [
                     {
-                      mcp.targets = lib.mapAttrsToList (name: target: { inherit name; } // upstream target.transport) (
-                        targetsOf id
-                      );
+                      # 既定の failClosed は front 1 つの停止で session 全体を落とす。
+                      # 壊れた target だけを外し、検知は doctor の tool 一覧に任せる
+                      mcp.failureMode = "failOpen";
+                      mcp.targets = lib.mapAttrsToList (
+                        name: front: { inherit name; } // upstream front
+                      ) cfg.contract.mcp.fronts;
                     }
                   ];
                   policies.mcpAuthorization.rules = map (name: {
@@ -62,21 +58,11 @@ let
     runtimeDirectory = "agentgateway-${id}";
     artifact = "mcp/gateway/${id}/config";
     source = configOf id;
-    targets = builtins.attrNames (targetsOf id);
+    targets = builtins.attrNames cfg.contract.mcp.fronts;
   }) cfg.mcp.endpoints;
-
-  # target は endpoint の名前を知らずに、受け取った契約から値を組み立てる
-  environmentOf =
-    endpoint:
-    lib.foldl' (acc: target: acc // target.environment endpoint) { } (
-      builtins.attrValues (targetsOf endpoint.id)
-    );
 
   eachEndpoint = f: lib.listToAttrs (map f (builtins.attrValues endpoints));
 
-  orphanTargets = lib.filterAttrs (
-    _: target: !(cfg.mcp.endpoints ? ${target.endpoint})
-  ) cfg.mcp.targets;
   ports = map (endpoint: endpoint.port) (builtins.attrValues endpoints);
 in
 {
@@ -92,20 +78,10 @@ in
     description = "downstream が接続する gateway endpoint。target の集合を分けて session ごとの spawn 範囲を絞る。";
   };
 
-  # downstream session ごとに stdio target が複製されるので、常用しない重い target を default から外す
-  config.my.mcp.endpoints = {
-    default.port = lib.mkDefault 8765;
-    playwright.port = lib.mkDefault 8766;
-    codex.port = lib.mkDefault 8767;
-  };
+  # front が常駐し gateway は spawn しないので、endpoint を分ける理由が無い
+  config.my.mcp.endpoints.default.port = lib.mkDefault 8765;
 
   config.assertions = [
-    {
-      assertion = orphanTargets == { };
-      message =
-        "my.mcp.targets reference endpoints that do not exist: "
-        + lib.concatStringsSep ", " (builtins.attrNames orphanTargets);
-    }
     {
       assertion = ports == lib.unique ports;
       message = "my.mcp.endpoints must bind one port each";
@@ -128,18 +104,14 @@ in
     name = endpoint.service;
     value = {
       description = "agentgateway MCP aggregator (${endpoint.id})";
-      after = [ "network.target" ] ++ cfg.mcp.gatewayWaitUnits;
-      wants = cfg.mcp.gatewayWaitUnits;
+      after = [ "network.target" ];
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         User = cfg.username;
-        Environment = [
-          "HOME=${cfg.homeDir}"
-        ]
-        ++ lib.mapAttrsToList (name: value: "${name}=${value}") (environmentOf endpoint);
+        Environment = [ "HOME=${cfg.homeDir}" ];
         RuntimeDirectory = endpoint.runtimeDirectory;
         RuntimeDirectoryMode = "0700";
-        # soft 既定 1024 の暫定封じ込め、session 解放の代替にはしない
+        # downstream session ごとに upstream 接続を張るので、soft 既定 1024 では足りない
         LimitNOFILE = "4096:4096";
         ExecStart = "${agentgateway}/bin/agentgateway -f ${endpoint.source}";
         Restart = "always";

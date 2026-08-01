@@ -12,8 +12,8 @@ clis/assets/agents/*.md ── CLI変換 ─┤
 clis/assets/skills/* ── live link ──┼─ Home Manager ──► 各 CLI の設定領域
 flake input の plugin skills ─┘
 
-AI CLI ── HTTP /mcp ──► agentgateway ── spawn ──► stdio MCP front
-      │                 (endpoint ごと)              │
+AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► 常駐 MCP front (target ごと)
+      │                                              │
       │                                              └─► host process または Docker backend
       ├── LSP ──► language server (PATH 上の binary)
       └── OTLP ──► telemetry collector
@@ -44,9 +44,9 @@ Claude Code の user settings と Codex の user config は CLI が更新し得�
 
 ## agentgateway と MCP target
 
-各 [`mcp/NAME/module.nix`](../../mcp) が `my.mcp.targets.<name>` を一度だけ宣言し、収集は flake が行う。target は接続経路を `transport.stdio` と `transport.http` のどちらか一方で持つ。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
+各 [`mcp/NAME/module.nix`](../../mcp) が `my.mcp.targets.<name>` を一度だけ宣言し、収集は flake が行う。target は front の port と、その port で Streamable HTTP を話す起動 command を宣言する。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
 
-[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。gateway は request の target prefix に応じて Nix store 上の stdio front を子 process として起動する。
+[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。front は target ごとの systemd service として常駐し、gateway は loopback の HTTP へ接続するだけである。downstream の session が増えても process は増えない。stdio しか話さない front は `mcp-proxy` が HTTP へ載せる。
 
 MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。完全な target 一覧は各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets` を参照する。
 
@@ -54,7 +54,7 @@ session の生存は downstream が response body を保持しているかで決
 
 ## Docker backend
 
-[`images/module.nix`](../../images/module.nix) の `mkContainerBackend` は、container、systemd 依存、`dotfiles-backends` network、host port の publish と doctor 宣言をまとめる。backend 同士は Docker network で接続し、host 側へ必要な port だけを `127.0.0.1` に publish する。stdio front は host loopback の backend endpoint に接続する。
+[`images/module.nix`](../../images/module.nix) の `mkContainerBackend` は、container、systemd 依存、`dotfiles-backends` network、host port の publish と doctor 宣言をまとめる。backend 同士は Docker network で接続し、host 側へ必要な port だけを `127.0.0.1` に publish する。front は host loopback の backend port に接続する。
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の manifest と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。Docker cache、同期 receipt、稼働 container の収束は current generation の doctor が別々に観測する。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 

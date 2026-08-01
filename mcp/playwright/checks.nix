@@ -6,40 +6,18 @@
 }:
 
 let
-  endpoint = hostConfig.my.contract.mcp.endpoints.${hostConfig.my.mcp.targets.playwright.endpoint};
-  agentgatewayService = hostConfig.systemd.services."${endpoint.service}".serviceConfig;
-
-  # front を上流 binary から切り離し、runtime directory の受け渡しだけを観測する
-  fakeChromium = pkgs.writeShellScriptBin "chromium" (builtins.readFile ./fixtures/chromium.sh);
-  fakePlaywright = pkgs.writeShellApplication {
-    name = "playwright-mcp";
-    runtimeInputs = [ pkgs.coreutils ];
-    text = builtins.readFile ./fixtures/playwright-mcp.sh;
-  };
-  front = pkgs.callPackage ./package.nix {
-    mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
-    chromium = fakeChromium;
-    playwrightMcp = fakePlaywright;
-  };
+  front = hostConfig.my.contract.mcp.fronts.playwright;
+  service = hostConfig.systemd.services.${front.service}.serviceConfig;
 in
 {
-  playwright-runtime =
-    assert (agentgatewayService.RuntimeDirectory or null) == endpoint.runtimeDirectory;
-    assert (agentgatewayService.RuntimeDirectoryMode or null) == "0700";
-    assert lib.elem "PLAYWRIGHT_MCP_RUNTIME_DIR=/run/${endpoint.runtimeDirectory}"
-      agentgatewayService.Environment;
-    pkgs.runCommandLocal "check-playwright-runtime"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.gnugrep
-        ];
-      }
-      ''
-        bash ${./tests/playwright-runtime.sh} \
-          ${lib.getExe front} \
-          ${hostConfig.my.mcp.targets.playwright.transport.stdio.command}
-        touch $out
-      '';
+  playwright-front =
+    assert lib.hasInfix "--host 127.0.0.1" service.ExecStart;
+    # socket が loopback に閉じているので host check は二重防御にならない。
+    # 完全一致比較なので port 付きの Host が来ると全 request を 403 にする
+    assert lib.hasInfix "--allowed-hosts '*'" service.ExecStart;
+    assert lib.hasInfix "--port ${toString front.port}" service.ExecStart;
+    assert front.url == "http://127.0.0.1:${toString front.port}/mcp";
+    assert lib.hasInfix "--output-dir ${front.runtimeDirectoryPath}" service.ExecStart;
+    assert service.RuntimeDirectory == front.runtimeDirectory;
+    pkgs.runCommandLocal "check-playwright-front" { } "touch $out";
 }

@@ -37,13 +37,13 @@ plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
-| gateway endpoint | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `my.mcp.endpoints` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.endpoints` |
+| gateway | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `my.mcp.endpoints` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.endpoints` |
 | MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets.<name>` | `nix eval --json .#nixosConfigurations.nixos.config.my.mcp.targets --apply builtins.attrNames` |
 | Docker backend | [`images/module.nix`](../../images/module.nix) の `my.images` と各 unit の `mkContainerBackend` | `nix eval --json .#nixosConfigurations.nixos.config.my.images --apply builtins.attrNames` |
-| host process | 各 target module が宣言する stdio front | gateway の子 process を `systemd-cgls -u agentgateway-<endpoint>.service` で見る |
+| MCP front | 各 [`mcp/NAME/module.nix`](../../mcp) の `port` と `serve` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.fronts`。稼働は `systemctl status mcp-front-<name>` |
 | telemetry | [`telemetry/module.nix`](../../telemetry/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.telemetry` |
 | 品質 gate | [`sonarqube/module.nix`](../../sonarqube/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.sonarqube` |
 
-agentgateway は target を endpoint ごとに分けて公開する。CLI の global config が指すのは default だけで、他の endpoint へ繋ぐかは接続側が決める。target 名は endpoint をまたいで一意である。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
+agentgateway は全 target を一つの URL へ公開し、各 front へは loopback の HTTP で接続する。front は常駐するので downstream の session が増えても process は増えない。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
 構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。

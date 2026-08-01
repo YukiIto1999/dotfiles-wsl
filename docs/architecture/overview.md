@@ -33,7 +33,7 @@ Nix store の candidate system
 | Unit | 所有する責務 |
 |---|---|
 | `system/` | host 共通の語彙、NixOS-WSL、Windows interop、Nix daemon と cache、font、login user、Home Manager |
-| `mcp/` | agentgateway の endpoint、MCP target、その build |
+| `mcp/` | agentgateway、常駐 MCP front、その build |
 | `clis/` | AI CLI roster、設定、rules、skills、agents |
 | `toolchain/` | PATH 上の汎用ツールと language server |
 | `images/` | OCI image inventory、同期、container backend の宣言 |

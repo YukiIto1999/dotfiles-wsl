@@ -57,12 +57,20 @@ let
     inherit id;
     inherit (endpoint) port;
     url = "http://localhost:${toString endpoint.port}/mcp";
+
     service = "agentgateway-${id}";
     runtimeDirectory = "agentgateway-${id}";
     artifact = "mcp/agentgateway/${id}/config";
     source = configOf id;
     targets = builtins.attrNames (targetsOf id);
   }) cfg.mcp.endpoints;
+
+  # target は endpoint の名前を知らずに、受け取った契約から値を組み立てる
+  environmentOf =
+    endpoint:
+    lib.foldl' (acc: target: acc // target.environment endpoint) { } (
+      builtins.attrValues (targetsOf endpoint.id)
+    );
 
   eachEndpoint = f: lib.listToAttrs (map f (builtins.attrValues endpoints));
 
@@ -127,8 +135,8 @@ in
         User = cfg.username;
         Environment = [
           "HOME=${cfg.homeDir}"
-          "PLAYWRIGHT_MCP_RUNTIME_DIR=/run/${endpoint.runtimeDirectory}"
-        ];
+        ]
+        ++ lib.mapAttrsToList (name: value: "${name}=${value}") (environmentOf endpoint);
         RuntimeDirectory = endpoint.runtimeDirectory;
         RuntimeDirectoryMode = "0700";
         # soft 既定 1024 の暫定封じ込め、session 解放の代替にはしない

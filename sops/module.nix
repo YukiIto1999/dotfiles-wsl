@@ -6,7 +6,7 @@
   ...
 }:
 
-# searxng settings template の secret は modules/mcp/servers/searxng.nix
+# searxng settings template の secret は mcp/searxng/module.nix
 # github account 関連は accounts/module.nix
 
 let
@@ -194,7 +194,7 @@ in
   config.my.commands.sopsEnroll = sopsEnroll;
   config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;
 
-  config.my.contract.secrets = {
+  config.my.contract.sops = {
     generation = sopsGeneration.contract;
     inherit (sopsGeneration) reinstallSecrets;
   };

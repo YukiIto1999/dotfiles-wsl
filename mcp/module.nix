@@ -20,6 +20,12 @@ in
     targets = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
+          options.environment = lib.mkOption {
+            type = lib.types.functionTo (lib.types.attrsOf lib.types.str);
+            default = _: { };
+            description = "この target が gateway process に要求する環境変数。endpoint の契約を受け取る。";
+          };
+
           options.endpoint = lib.mkOption {
             type = lib.types.str;
             default = "default";

@@ -20,6 +20,21 @@ let
   );
 in
 {
+  # gateway は front へ接続するだけで子 process を作らない
+  gateway-front-contract =
+    assert lib.all (front: front.url == "http://127.0.0.1:${toString front.port}/mcp") (
+      builtins.attrValues hostConfig.my.contract.mcp.fronts
+    );
+    assert lib.all (front: hostConfig.systemd.services ? "${front.service}") (
+      builtins.attrValues hostConfig.my.contract.mcp.fronts
+    );
+    pkgs.runCommandLocal "check-gateway-front-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } (
+      lib.concatMapStrings (endpoint: ''
+        test "$(yq -r '.binds[0].listeners[0].routes[0].backends[0].mcp.targets[] | select(.stdio) | length' ${endpoint.source} | wc -l)" = 0
+      '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
+      + "touch $out"
+    );
+
   # 生成した artifact が gateway と backend の実配備先へそのまま渡ることを検査する
   gateway-artifact-contract =
     assert lib.all (
@@ -32,7 +47,11 @@ in
       endpoint: hostConfig.systemd.services."${endpoint.service}".serviceConfig.LimitNOFILE == "4096:4096"
     ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
     pkgs.runCommandLocal "check-gateway-artifact-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } (
+      # schema の妥当性は読みではなく agentgateway 自身に判定させる
       lib.concatMapStrings (endpoint: ''
+        ${agentgateway}/bin/agentgateway --validate-only -f ${endpoint.source}
+      '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
+      + lib.concatMapStrings (endpoint: ''
         test "$(yq -r '.config.mcp.sessionTtl' ${endpoint.source})" = 30m
         test "$(yq -r '.binds[0].port' ${endpoint.source})" = ${toString endpoint.port}
       '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)

@@ -2,6 +2,7 @@
   config,
   lib,
   mkMcpServer,
+  serveOverProxy,
   ...
 }:
 
@@ -15,7 +16,7 @@ let
 in
 {
   my.mcp.targets.codex = {
-    endpoint = "codex";
-    transport.stdio.command = lib.getExe front;
+    port = 18107;
+    serve = serveOverProxy (lib.getExe front);
   };
 }

@@ -6,7 +6,19 @@
 }:
 
 let
-  targetNames = builtins.attrNames config.my.mcp.targets;
+  cfg = config.my;
+  targetNames = builtins.attrNames cfg.mcp.targets;
+
+  # front の名前と URL と書き込み領域は target 名と port から導く。二つ目の roster を作らない
+  fronts = lib.mapAttrs (name: target: {
+    inherit name;
+    inherit (target) port;
+    service = "mcp-front-${name}";
+    runtimeDirectory = "mcp-front-${name}";
+    runtimeDirectoryPath = "/run/mcp-front-${name}";
+    url = "http://127.0.0.1:${toString target.port}/mcp";
+  }) cfg.mcp.targets;
+
   targetPrefixConflicts = lib.concatMap (
     name:
     map (other: "${name} -> ${other}") (
@@ -20,40 +32,21 @@ in
     targets = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
-          options.environment = lib.mkOption {
-            type = lib.types.functionTo (lib.types.attrsOf lib.types.str);
-            default = _: { };
-            description = "この target が gateway process に要求する環境変数。endpoint の契約を受け取る。";
+          options.port = lib.mkOption {
+            type = lib.types.port;
+            description = "この target の front が loopback へ bind する port。";
           };
 
-          options.endpoint = lib.mkOption {
-            type = lib.types.str;
-            default = "default";
-            description = "この target を畳み込む gateway endpoint の id。";
+          # front は常駐する。gateway は接続するだけで子 process を作らない
+          options.serve = lib.mkOption {
+            type = lib.types.functionTo lib.types.str;
+            description = "port を受け取り、Streamable HTTP を話す front の起動 command を返す。";
           };
 
-          options.transport = lib.mkOption {
-            type = lib.types.attrTag {
-              stdio = lib.mkOption {
-                type = lib.types.submodule {
-                  options.command = lib.mkOption {
-                    type = lib.types.str;
-                    description = "gateway が起動する子 process の絶対パス。";
-                  };
-                };
-                description = "downstream session ごとに子 process が複製される経路。";
-              };
-              http = lib.mkOption {
-                type = lib.types.submodule {
-                  options.url = lib.mkOption {
-                    type = lib.types.str;
-                    description = "常駐 front の Streamable HTTP endpoint。";
-                  };
-                };
-                description = "常駐 front を共有し、session ごとの複製が起きない経路。";
-              };
-            };
-            description = "gateway が target へ接続する経路。stdio と http のどちらか一方だけを持つ。";
+          options.waitUnits = lib.mkOption {
+            type = lib.types.listOf lib.types.str;
+            default = [ ];
+            description = "front が起動前に待つ systemd unit。";
           };
         }
       );
@@ -61,13 +54,46 @@ in
       description = "agentgateway が畳み込む MCP target の集合。";
     };
 
-    gatewayWaitUnits = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      internal = true;
-      description = "agentgateway が起動前に待つ backend systemd unit。";
-    };
   };
+
+  # front と gateway の対応は名前から導ける。契約として公開する
+  config.my.contract.mcp.fronts = fronts;
+
+  # front は常駐し、downstream session ごとの複製を作らない
+  config.systemd.services = lib.mapAttrs' (
+    name: front:
+    lib.nameValuePair front.service {
+      description = "MCP front (${name})";
+      after = [ "network.target" ] ++ cfg.mcp.targets.${name}.waitUnits;
+      wants = cfg.mcp.targets.${name}.waitUnits;
+      wantedBy = [ "multi-user.target" ];
+      serviceConfig = {
+        User = cfg.username;
+        # front が生成物を置ける唯一の場所。service の停止で消える
+        RuntimeDirectory = front.runtimeDirectory;
+        RuntimeDirectoryMode = "0700";
+        Environment = [ "HOME=${cfg.homeDir}" ];
+        ExecStart = cfg.mcp.targets.${name}.serve front.port;
+        # backend だけ上限を持ち front が持たないのは非対称。chromium を抱える
+        # playwright が最も大きいので、そこに合わせて一律に置く
+        MemoryMax = "2G";
+        Restart = "always";
+        RestartSec = "5s";
+      };
+    }
+  ) fronts;
+
+  config.my.doctor.units = lib.mapAttrs' (
+    _: front:
+    lib.nameValuePair "${front.service}.service" {
+      expected = {
+        LoadState = "loaded";
+        ActiveState = "active";
+        SubState = "running";
+        Result = "success";
+      };
+    }
+  ) fronts;
 
   config.assertions = [
     {
@@ -79,6 +105,11 @@ in
   ];
 
   config._module.args = {
+    # stdio しか話さない front を Streamable HTTP へ載せる共通の機構
+    serveOverProxy =
+      command: port:
+      "${lib.getExe pkgs.mcp-proxy} --host 127.0.0.1 --port ${toString port} --stateless ${command}";
+
     mkMcpServer = pkgs.callPackage ./package/mk-server.nix { };
     mkNpmMcp = pkgs.callPackage ./package/mk-npm.nix { };
 

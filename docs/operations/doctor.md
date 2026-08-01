@@ -63,7 +63,7 @@ unit の失敗は doctor が表示した unit を `systemctl status UNIT` で調
 
 | 値 | 意味 |
 |---|---|
-| `TasksCurrent` | gateway cgroup の task 数、session ごとに spawn される stdio front を含む |
+| `TasksCurrent` | gateway cgroup の task 数。front は別 service なので含まない |
 | `fdCurrent` | MainPID が開いている file descriptor 数 |
 | `MemoryCurrent` | cgroup 合計。process の RSS ではない |
 | `MemorySwapCurrent` | cgroup の swap 使用量 |

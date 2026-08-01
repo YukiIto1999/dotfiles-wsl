@@ -10,6 +10,7 @@
 
 # self-hosted SearXNG、valkey は cache 実装詳細としてここに同居
 let
+  frontPort = 18105;
   inherit (config.sops) placeholder;
 
   port = "8080";
@@ -82,7 +83,13 @@ in
   virtualisation.oci-containers.containers = valkey.containers // searxng.containers;
   systemd.services = valkey.systemdServices // searxng.systemdServices;
 
-  my.mcp.gatewayWaitUnits = [ "docker-searxng.service" ];
-  my.mcp.targets.searxng.transport.stdio.command = lib.getExe front;
+  # listen 先を環境変数でしか受けないので、env 経由でも ExecStart に現れる形で渡す
+  my.mcp.targets.searxng = {
+    port = frontPort;
+    serve =
+      listenPort:
+      "${pkgs.coreutils}/bin/env MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_PORT=${toString listenPort} ${lib.getExe front}";
+    waitUnits = [ "docker-searxng.service" ];
+  };
   my.doctor.units = valkey.doctorUnits // searxng.doctorUnits;
 }

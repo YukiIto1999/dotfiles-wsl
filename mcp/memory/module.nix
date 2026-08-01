@@ -3,6 +3,7 @@
   lib,
   pkgs,
   mkMcpServer,
+  serveOverProxy,
   mkContainerBackend,
   ...
 }:
@@ -65,7 +66,7 @@ in
     "/var/lib/agentmemory/data".d = {
       user = uid;
       group = uid;
-      mode = "0755";
+      mode = "0750";
     };
   };
 
@@ -80,8 +81,11 @@ in
     home.file.".config/opencode/plugins/agentmemory-capture.ts".source = agentmemory.opencodePlugin;
   };
 
-  my.mcp.gatewayWaitUnits = [ "docker-agentmemory.service" ];
-  my.mcp.targets.memory.transport.stdio.command = lib.getExe agentmemory.front;
+  my.mcp.targets.memory = {
+    port = 18104;
+    serve = serveOverProxy (lib.getExe agentmemory.front);
+    waitUnits = [ "docker-agentmemory.service" ];
+  };
   my.doctor = {
     units = backend.doctorUnits;
     managedFiles.agentmemory-opencode-capture = {

@@ -2,15 +2,54 @@
   pkgs,
   lib,
   hostConfig,
+  variantConfig,
   ...
 }:
 
 let
   artifactSource = id: hostConfig.my.artifacts.${id}.source;
+  homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
+  gatewayUrl = hostConfig.my.contract.mcp.endpoints.default.url;
+  codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
   managedSettings = hostConfig.environment.etc."claude-code/managed-settings.json".source;
   roster = hostConfig.my.toolchain.lsp;
 in
 {
+  # 生成した artifact がそのまま実配備先へ渡り、どの CLI も同じ gateway を指す
+  cli-artifact-contract =
+    assert
+      hostConfig.environment.etc."claude-code/managed-settings.json".source
+      == artifactSource "clis/claude/managed-settings";
+    assert
+      hostConfig.environment.etc."claude-code/managed-mcp.json".source
+      == artifactSource "clis/claude/managed-mcp";
+    assert hostConfig.environment.etc."codex/config.toml".source == artifactSource "clis/codex/system";
+    assert homeConfig.home.file.${codexProjectHomePath}.source == artifactSource "clis/codex/project";
+    assert
+      homeConfig.home.file.".config/opencode/opencode.json".source
+      == artifactSource "clis/opencode/config";
+    assert
+      homeConfig.home.file.".gemini/antigravity-cli/mcp_config.json".source
+      == artifactSource "clis/antigravity/mcp";
+    pkgs.runCommandLocal "check-cli-artifact-contract"
+      {
+        nativeBuildInputs = [
+          pkgs.jq
+          pkgs.taplo
+        ];
+      }
+      ''
+        jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl}           '.mcpServers.gateway.url == $expected'           ${artifactSource "clis/claude/managed-mcp"} > /dev/null
+        jq --exit-status --arg expected 'http://localhost:9876/mcp'           '.mcpServers.gateway.url == $expected'           ${
+          variantConfig.my.artifacts."clis/claude/managed-mcp".source
+        } > /dev/null
+        jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl}           '.mcpServers.gateway.serverUrl == $expected'           ${artifactSource "clis/antigravity/mcp"} > /dev/null
+        jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl}           '.mcp.gateway.url == $expected'           ${artifactSource "clis/opencode/config"} > /dev/null
+        test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/system"} mcp_servers.gateway.url | jq -r .)" = ${lib.escapeShellArg gatewayUrl}
+        test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/user-seed"} model | jq -r .)" = gpt-5.6-sol
+        touch $out
+      '';
+
   # roster と各 CLI の登録が食い違うと、片方の CLI だけ server を持つ状態になる
   lsp-registration =
     pkgs.runCommandLocal "check-lsp-registration"

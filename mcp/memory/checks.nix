@@ -6,11 +6,22 @@
 }:
 
 let
+  config = hostConfig.my.artifacts."mcp/memory/config".source;
   template = hostConfig.sops.templates."agentmemory.env";
   templateFile = pkgs.writeText "agentmemory.env" template.content;
   apiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";
 in
 {
+  # engine の待ち受け port は front の接続先と同じ宣言から出る
+  agentmemory-config =
+    assert lib.elem "${config}:/app/config.yaml:ro"
+      hostConfig.virtualisation.oci-containers.containers.agentmemory.volumes;
+    pkgs.runCommandLocal "check-agentmemory-config" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+      test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${config})" = 3111
+      test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${config})" = 3112
+      touch $out
+    '';
+
   # engine の LLM 設定は secret template 経由でしか実機に現れないので、生成結果を直接検査する
   agentmemory-env =
     assert

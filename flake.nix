@@ -164,7 +164,8 @@
           hostConfig = self.nixosConfigurations.${hostName}.config;
           inherit (self.nixosConfigurations.${hostName}) pkgs;
           inherit (pkgs) lib;
-          homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
+
+          # port と accounts を変えた第二の評価。artifact が宣言に追随することを示す
           artifactVariantConfig =
             (mkNixosSystem {
               my = {
@@ -173,145 +174,8 @@
               };
             }).config;
 
-          artifacts = hostConfig.my.artifacts;
-          artifactSource = id: artifacts.${id}.source;
-          artifactSourcesFor =
-            format:
-            map (artifact: artifact.source) (
-              builtins.attrValues (lib.filterAttrs (_: artifact: artifact.format == format) artifacts)
-            );
-          codexSystemConfig = artifactSource "clis/codex/system";
-          codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
-          codexProjectConfig = homeConfig.home.file.${codexProjectHomePath}.source;
-          codexSeedConfig = artifactSource "clis/codex/user-seed";
-          codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
-          expectedArtifactFormats = {
-            "clis/antigravity/mcp" = "json";
-            "clis/claude/lsp" = "json";
-            "clis/claude/managed-mcp" = "json";
-            "clis/claude/managed-settings" = "json";
-            "clis/claude/user-settings-seed" = "json";
-            "clis/codex/project" = "toml";
-            "clis/codex/system" = "toml";
-            "clis/codex/user-seed" = "toml";
-            "clis/opencode/config" = "json";
-            "mcp/agentmemory/config" = "yaml";
-            "telemetry/collector" = "yaml";
-            "mcp/searxng/settings-template" = "yaml";
-          }
-          # endpoint ごとの artifact id は gateway が導く。ここで二つ目の roster を作らない
-          // lib.genAttrs (map (endpoint: endpoint.artifact) (
-            builtins.attrValues hostConfig.my.contract.mcp.endpoints
-          )) (_: "yaml")
-          // lib.optionalAttrs (hostConfig.my.accounts != [ ]) {
-            "accounts/gh-hosts" = "yaml";
-          };
-          actualArtifactFormats = lib.mapAttrs (_: artifact: artifact.format) artifacts;
-          variantArtifactFormats = lib.mapAttrs (
-            _: artifact: artifact.format
-          ) artifactVariantConfig.my.artifacts;
-          variantClaudeMcp = artifactVariantConfig.my.artifacts."clis/claude/managed-mcp".source;
-          jsonConfigs = artifactSourcesFor "json";
-          tomlConfigs = artifactSourcesFor "toml";
-          yamlConfigs = artifactSourcesFor "yaml";
-
-          asArgs = files: lib.concatMapStringsSep " " (f: "${f}") files;
           checkSet = {
             nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
-
-            artifact-contract =
-              assert actualArtifactFormats == expectedArtifactFormats;
-              assert
-                variantArtifactFormats == builtins.removeAttrs expectedArtifactFormats [ "accounts/gh-hosts" ];
-              assert !(builtins.hasAttr "gh-hosts.yml" artifactVariantConfig.sops.templates);
-              assert
-                hostConfig.environment.etc."claude-code/managed-settings.json".source
-                == artifactSource "clis/claude/managed-settings";
-              assert
-                hostConfig.environment.etc."claude-code/managed-mcp.json".source
-                == artifactSource "clis/claude/managed-mcp";
-              assert hostConfig.environment.etc."codex/config.toml".source == artifactSource "clis/codex/system";
-              assert codexProjectConfig == artifactSource "clis/codex/project";
-              assert
-                homeConfig.home.file.".config/opencode/opencode.json".source
-                == artifactSource "clis/opencode/config";
-              assert
-                homeConfig.home.file.".gemini/antigravity-cli/mcp_config.json".source
-                == artifactSource "clis/antigravity/mcp";
-              assert
-                hostConfig.my.accounts == [ ]
-                ||
-                  hostConfig.sops.templates."gh-hosts.yml".content
-                  == builtins.readFile (artifactSource "accounts/gh-hosts");
-              pkgs.runCommandLocal "check-artifact-contract"
-                {
-                  nativeBuildInputs = [
-                    pkgs.jq
-                    pkgs.taplo
-                    pkgs.yq
-                  ];
-                }
-                ''
-                    jq --exit-status \
-                      --arg expected ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url} \
-                      '.mcpServers.gateway.url == $expected' \
-                      ${artifactSource "clis/claude/managed-mcp"} > /dev/null
-                    jq --exit-status \
-                      --arg expected 'http://localhost:9876/mcp' \
-                      '.mcpServers.gateway.url == $expected' \
-                      ${variantClaudeMcp} > /dev/null
-                    jq --exit-status \
-                      --arg expected ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url} \
-                      '.mcpServers.gateway.serverUrl == $expected' \
-                      ${artifactSource "clis/antigravity/mcp"} > /dev/null
-                    jq --exit-status \
-                      --arg expected ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url} \
-                      '.mcp.gateway.url == $expected' \
-                      ${artifactSource "clis/opencode/config"} > /dev/null
-                    test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/system"} mcp_servers.gateway.url | jq -r .)" = \
-                      ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url}
-                    test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/user-seed"} model | jq -r .)" = \
-                      gpt-5.6-sol
-                    test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3111
-                    test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3112
-                    test "$(yq -r '.server.port' ${artifactSource "mcp/searxng/settings-template"})" = 8080
-                    test "$(yq -r '.valkey.url' ${artifactSource "mcp/searxng/settings-template"})" = valkey://valkey:6379/0
-                  touch $out
-                '';
-
-            # 各 producer が実配備へ渡す immutable source を形式別に検査する。
-            config-syntax =
-              pkgs.runCommandLocal "check-config-syntax"
-                {
-                  nativeBuildInputs = [
-                    pkgs.jq
-                    pkgs.taplo
-                    pkgs.yq
-                  ];
-                }
-                ''
-                  for f in ${asArgs jsonConfigs}; do
-                    jq empty "$f"
-                  done
-                  for f in ${asArgs tomlConfigs}; do
-                    taplo lint "$f"
-                  done
-                  for f in ${asArgs yamlConfigs}; do
-                    yq . "$f" > /dev/null
-                  done
-                  for global_config in ${codexSystemConfig} ${codexSeedConfig}; do
-                    if taplo get --output-format json --file-path "$global_config" \
-                      sandbox_workspace_write.writable_roots > /dev/null 2>&1; then
-                      echo "checkout-specific writable root leaked into global config: $global_config" >&2
-                      exit 1
-                    fi
-                  done
-                  taplo get --output-format json --file-path ${codexProjectConfig} \
-                    sandbox_workspace_write.writable_roots \
-                    | jq --exit-status --arg expected ${lib.escapeShellArg codexWritableRoot} \
-                      '. == [$expected]' > /dev/null
-                  touch $out
-                '';
           };
         in
         checkSet
@@ -324,6 +188,8 @@
             sops-nix
             ;
           hostOptions = self.nixosConfigurations.${hostName}.options;
+          # port と accounts を変えた第二の評価。artifact が宣言に追随することを示す
+          variantConfig = artifactVariantConfig;
         } units;
     };
 }

@@ -71,6 +71,7 @@ in
       StateDirectory = stateDir;
       StateDirectoryMode = "0700";
       ExecStart = "${collector}/bin/otelcol-contrib --config ${collectorConfig}";
+      MemoryMax = "512M";
       Restart = "always";
       RestartSec = "5s";
     };

@@ -13,8 +13,10 @@ clis/assets/skills/* ── live link ──┼─ Home Manager ──► 各 CL
 flake input の plugin skills ─┘
 
 AI CLI ── HTTP /mcp ──► agentgateway ── spawn ──► stdio MCP front
-                                                   │
-                                                   └─► host process または Docker backend
+      │                 (endpoint ごと)              │
+      │                                              └─► host process または Docker backend
+      ├── LSP ──► language server (PATH 上の binary)
+      └── OTLP ──► telemetry collector
 ```
 
 [`clis/module.nix`](../../clis/module.nix) の `my.clis` が、binary 名、rules、skills、agents、gateway file、入手方法の roster contract を定義する。個別 module の一覧が正本であり、この文書には version、skill 名、agent 名を転記しない。
@@ -42,7 +44,7 @@ Claude Code の user settings と Codex の user config は CLI が更新し得�
 
 ## agentgateway と MCP target
 
-[`mcp/module.nix`](../../mcp/module.nix) は target module を import し、各 module が `my.mcp.targets.<name>.command` を一度だけ宣言する。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
+各 [`mcp/NAME/module.nix`](../../mcp) が `my.mcp.targets.<name>` を一度だけ宣言し、収集は flake が行う。target は接続経路を `transport.stdio` と `transport.http` のどちらか一方で持つ。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
 
 [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。gateway は request の target prefix に応じて Nix store 上の stdio front を子 process として起動する。
 
@@ -82,8 +84,19 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | 共通 rules | [`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) |
 | local agent と skill | [`clis/assets/agents/`](../../clis/assets/agents)、[`clis/assets/skills/`](../../clis/assets/skills) |
 | plugin skill source | [`flake.nix`](../../flake.nix) と `flake.lock` |
-| MCP target | [`mcp/module.nix`](../../mcp/module.nix) と各 server module |
-| gateway と Docker backend | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix)、[`mcp/module.nix`](../../mcp/module.nix) |
+| MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) |
+| gateway と Docker backend | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix)、[`images/module.nix`](../../images/module.nix) |
+| language server の roster | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp` |
+| CLI ごとの LSP 登録形式 | 各 CLI の module |
+| 使用量の観測 | [`telemetry/module.nix`](../../telemetry/module.nix) |
 | agentmemory | [`mcp/memory/module.nix`](../../mcp/memory/module.nix) と [`mcp/memory/`](../../mcp/memory) |
+
+## LSP と観測
+
+language server の binary は `toolchain` が PATH へ置き、roster も同じ unit が持つ。CLI ごとに登録形式が違うため、変換は各 CLI の module が持つ。Claude Code は `settings.json` に LSP の設定 key を持たないので、plugin と marketplace を Nix store に生成して managed settings から指す。OpenCode は設定ファイルの `lsp` block へ直接書く。LSP を持たない CLI には配らない。
+
+同じ拡張子を二つの server が宣言すると、先に登録された片方だけが動き、もう片方は黙って起動しない。roster と各 CLI の登録の一致、拡張子の衝突は `lsp-registration` が検査する。
+
+telemetry collector は OTLP を loopback で受け、生の record を残す。集計しないのは、どの操作で token を使ったかを後から追うためである。CLI は endpoint を `my.contract.telemetry` から取るので、port を変えても CLI 側の宣言は変わらない。
 
 配備後の調査は [Doctor](../operations/doctor.md)、構成変更の適用は [Rebuild](../operations/rebuild.md)に従う。

@@ -9,10 +9,17 @@ let
   cfg = config.my;
   agentgateway = pkgs.callPackage ./package.nix { };
 
-  targets = lib.mapAttrsToList (name: target: {
-    inherit name;
-    stdio.cmd = target.command;
-  }) cfg.mcp.targets;
+  # upstream schema の key を知るのはここだけ。option 名と service 名へ upstream 名を漏らさない
+  upstream =
+    transport:
+    if transport ? stdio then
+      { stdio.cmd = transport.stdio.command; }
+    else
+      { mcp.host = transport.http.url; };
+
+  targets = lib.mapAttrsToList (
+    name: target: { inherit name; } // upstream target.transport
+  ) cfg.mcp.targets;
 
   # probe の grep は npm package と native binary の subcommand が食い違い、呼ぶと常に失敗する
   deniedTools = [ "grep" ];

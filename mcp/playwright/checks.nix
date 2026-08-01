@@ -37,7 +37,7 @@ in
       ''
         bash ${./tests/playwright-runtime.sh} \
           ${lib.getExe front} \
-          ${hostConfig.my.mcp.targets.playwright.command}
+          ${hostConfig.my.mcp.targets.playwright.transport.stdio.command}
         touch $out
       '';
 }

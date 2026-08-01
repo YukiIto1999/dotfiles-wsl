@@ -185,6 +185,7 @@
           codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
           expectedConfigArtifactFormats = {
             "clis/antigravity/mcp" = "json";
+            "clis/claude/lsp" = "json";
             "clis/claude/managed-mcp" = "json";
             "clis/claude/managed-settings" = "json";
             "clis/claude/user-settings-seed" = "json";

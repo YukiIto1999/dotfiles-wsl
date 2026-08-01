@@ -11,7 +11,10 @@ let
   doctorManifest = hostConfig.environment.etc."dotfiles/doctor.json".source;
   codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
   codexProjectConfig = homeConfig.home.file.${codexProjectHomePath}.source;
-  agentgatewayService = hostConfig.systemd.services.agentgateway.serviceConfig;
+  gatewayFileLimit =
+    lib.splitString ":"
+      hostConfig.systemd.services."${hostConfig.my.contract.mcp.endpoints.default.service
+      }".serviceConfig.LimitNOFILE;
   nixImageIdentityFiles = hostConfig.my.contract.images.identityFiles;
   fixtureNixImageFile = pkgs.writeText "fixture-agentmemory.tar.gz" "fixture";
   fixtureNixImageIdentityData = {
@@ -115,8 +118,12 @@ let
     }
   ) (builtins.attrNames hostConfig.my.clis);
   expectedCliContractsJson = (pkgs.formats.json { }).generate "doctor-clis.json" expectedCliContracts;
-  expectedMcpTargetsJson = (pkgs.formats.json { }).generate "doctor-mcp-targets.json" (
-    builtins.attrNames hostConfig.my.mcp.targets
+  # endpoint ごとの id と URL と health unit と target を、gateway の契約からそのまま期待値にする
+  expectedMcpEndpointsJson = (pkgs.formats.json { }).generate "doctor-mcp-endpoints.json" (
+    lib.mapAttrsToList (_: endpoint: {
+      inherit (endpoint) id url targets;
+      healthUnit = "${endpoint.service}.service";
+    }) hostConfig.my.contract.mcp.endpoints
   );
   expectedProbePolicyJson =
     (pkgs.formats.json { }).generate "doctor-probe-policy.json"
@@ -143,7 +150,9 @@ in
     assert lib.all (id: builtins.hasAttr id hostConfig.systemd.units) (
       builtins.attrNames hostConfig.my.doctor.units
     );
-    assert builtins.hasAttr "agentgateway.service" hostConfig.my.doctor.units;
+    assert lib.all (
+      endpoint: builtins.hasAttr "${endpoint.service}.service" hostConfig.my.doctor.units
+    ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
     pkgs.runCommandLocal "check-doctor-manifest-contract"
       {
         nativeBuildInputs = [ pkgs.jq ];
@@ -171,27 +180,28 @@ in
         jq --sort-keys '.clis | sort_by(.name)' ${doctorManifest} > actual-clis.json
         diff --unified expected-clis.json actual-clis.json
 
-        jq --sort-keys '.' ${expectedMcpTargetsJson} > expected-mcp-targets.json
-        jq --sort-keys '.mcp.targets' ${doctorManifest} > actual-mcp-targets.json
-        diff --unified expected-mcp-targets.json actual-mcp-targets.json
+        jq --sort-keys 'sort_by(.id)' ${expectedMcpEndpointsJson} > expected-mcp-endpoints.json
+        jq --sort-keys '[.mcp.endpoints[] | {id, url, targets, healthUnit}] | sort_by(.id)' ${doctorManifest} > actual-mcp-endpoints.json
+        diff --unified expected-mcp-endpoints.json actual-mcp-endpoints.json
 
         jq --exit-status \
-          --arg expectedHardLimit ${lib.escapeShellArg (builtins.elemAt (lib.splitString ":" agentgatewayService.LimitNOFILE) 1)} \
-          --arg expectedSoftLimit ${lib.escapeShellArg (builtins.elemAt (lib.splitString ":" agentgatewayService.LimitNOFILE) 0)} '
-          .mcp.resources.properties == [
-            "MainPID",
-            "TasksCurrent",
-            "MemoryCurrent",
-            "MemorySwapCurrent",
-            "LimitNOFILE",
-            "LimitNOFILESoft"
-          ] and
-          .mcp.resources.expected.LimitNOFILE == $expectedHardLimit and
-          .mcp.resources.expected.LimitNOFILESoft == $expectedSoftLimit
+          --arg expectedHardLimit ${lib.escapeShellArg (builtins.elemAt gatewayFileLimit 1)} \
+          --arg expectedSoftLimit ${lib.escapeShellArg (builtins.elemAt gatewayFileLimit 0)} '
+          all(.mcp.endpoints[];
+            .resources.properties == [
+              "MainPID",
+              "TasksCurrent",
+              "MemoryCurrent",
+              "MemorySwapCurrent",
+              "LimitNOFILE",
+              "LimitNOFILESoft"
+            ] and
+            .resources.expected.LimitNOFILE == $expectedHardLimit and
+            .resources.expected.LimitNOFILESoft == $expectedSoftLimit
+          )
         ' ${doctorManifest} > /dev/null
 
         jq --exit-status '
-          .mcp.healthUnit == "agentgateway.service" and
           .mcp.requestedProtocolVersion == "2025-11-25" and
           .mcp.supportedProtocolVersions == [
             "2024-11-05",
@@ -275,7 +285,8 @@ in
           ${self}/rebuild/impl/lib/atomic-file.sh \
           ${self}/images/impl/lib/image-state.sh \
           ${pkgs.bash}/bin/bash \
-          ${fixtureNixImageIdentityCases}
+          ${fixtureNixImageIdentityCases} \
+          ${toString hostConfig.my.doctor.schemaVersion}
         touch $out
       '';
 }

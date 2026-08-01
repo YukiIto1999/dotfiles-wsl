@@ -6,7 +6,8 @@
 }:
 
 let
-  agentgatewayService = hostConfig.systemd.services.agentgateway.serviceConfig;
+  endpoint = hostConfig.my.contract.mcp.endpoints.${hostConfig.my.mcp.targets.playwright.endpoint};
+  agentgatewayService = hostConfig.systemd.services."${endpoint.service}".serviceConfig;
 
   # front を上流 binary から切り離し、runtime directory の受け渡しだけを観測する
   fakeChromium = pkgs.writeShellScriptBin "chromium" (builtins.readFile ./fixtures/chromium.sh);
@@ -23,9 +24,10 @@ let
 in
 {
   playwright-runtime =
-    assert (agentgatewayService.RuntimeDirectory or null) == "agentgateway";
+    assert (agentgatewayService.RuntimeDirectory or null) == endpoint.runtimeDirectory;
     assert (agentgatewayService.RuntimeDirectoryMode or null) == "0700";
-    assert lib.elem "PLAYWRIGHT_MCP_RUNTIME_DIR=/run/agentgateway" agentgatewayService.Environment;
+    assert lib.elem "PLAYWRIGHT_MCP_RUNTIME_DIR=/run/${endpoint.runtimeDirectory}"
+      agentgatewayService.Environment;
     pkgs.runCommandLocal "check-playwright-runtime"
       {
         nativeBuildInputs = [

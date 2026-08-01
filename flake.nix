@@ -169,7 +169,7 @@
             (mkNixosSystem {
               my = {
                 accounts = [ ];
-                gatewayPort = 9876;
+                mcp.endpoints.default.port = 9876;
               };
             }).config;
 
@@ -194,10 +194,13 @@
             "clis/codex/system" = "toml";
             "clis/codex/user-seed" = "toml";
             "clis/opencode/config" = "json";
-            "mcp/agentgateway/config" = "yaml";
             "mcp/agentmemory/config" = "yaml";
             "mcp/searxng/settings-template" = "yaml";
           }
+          # endpoint ごとの artifact id は gateway が導く。ここで二つ目の roster を作らない
+          // lib.genAttrs (map (endpoint: endpoint.artifact) (
+            builtins.attrValues hostConfig.my.contract.mcp.endpoints
+          )) (_: "yaml")
           // lib.optionalAttrs (hostConfig.my.accounts != [ ]) {
             "accounts/gh-hosts" = "yaml";
           };
@@ -249,7 +252,7 @@
                 }
                 ''
                     jq --exit-status \
-                      --arg expected ${lib.escapeShellArg hostConfig.my.gatewayUrl} \
+                      --arg expected ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url} \
                       '.mcpServers.gateway.url == $expected' \
                       ${artifactSource "clis/claude/managed-mcp"} > /dev/null
                     jq --exit-status \
@@ -257,18 +260,17 @@
                       '.mcpServers.gateway.url == $expected' \
                       ${variantClaudeMcp} > /dev/null
                     jq --exit-status \
-                      --arg expected ${lib.escapeShellArg hostConfig.my.gatewayUrl} \
+                      --arg expected ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url} \
                       '.mcpServers.gateway.serverUrl == $expected' \
                       ${artifactSource "clis/antigravity/mcp"} > /dev/null
                     jq --exit-status \
-                      --arg expected ${lib.escapeShellArg hostConfig.my.gatewayUrl} \
+                      --arg expected ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url} \
                       '.mcp.gateway.url == $expected' \
                       ${artifactSource "clis/opencode/config"} > /dev/null
                     test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/system"} mcp_servers.gateway.url | jq -r .)" = \
-                      ${lib.escapeShellArg hostConfig.my.gatewayUrl}
+                      ${lib.escapeShellArg hostConfig.my.contract.mcp.endpoints.default.url}
                     test "$(taplo get --output-format json --file-path ${artifactSource "clis/codex/user-seed"} model | jq -r .)" = \
                       gpt-5.6-sol
-                    test "$(yq -r '.config.mcp.sessionTtl' ${artifactSource "mcp/agentgateway/config"})" = 30m
                     test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3111
                     test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${artifactSource "mcp/agentmemory/config"})" = 3112
                     test "$(yq -r '.server.port' ${artifactSource "mcp/searxng/settings-template"})" = 8080

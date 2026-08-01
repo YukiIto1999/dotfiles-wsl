@@ -14,5 +14,8 @@ let
   };
 in
 {
-  my.mcp.targets.codex.transport.stdio.command = lib.getExe front;
+  my.mcp.targets.codex = {
+    endpoint = "codex";
+    transport.stdio.command = lib.getExe front;
+  };
 }

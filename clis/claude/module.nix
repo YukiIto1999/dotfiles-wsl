@@ -8,7 +8,7 @@
 let
   cfg = config.my;
   managedMcp = pkgs.replaceVars ./assets/managed-mcp.json {
-    inherit (cfg) gatewayUrl;
+    gatewayUrl = cfg.contract.mcp.endpoints.default.url;
   };
   userSettingsSeed = ./assets/settings.json;
 in

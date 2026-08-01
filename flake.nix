@@ -110,7 +110,7 @@
             "account-2"
             "account-3"
           ];
-          workIdentity = "~/projects/business/";
+          git.workIdentity = "~/projects/business/";
         };
       };
 
@@ -134,7 +134,7 @@
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {
-        packages = self.nixosConfigurations.${hostName}.config.my.devShellPackages;
+        packages = self.nixosConfigurations.${hostName}.config.my.quality.devShellPackages;
       };
 
       formatter.${system} = maintenancePkgs.nixfmt-tree;
@@ -171,19 +171,19 @@
               };
             }).config;
 
-          configArtifacts = hostConfig.my.configArtifacts;
-          artifactSource = id: configArtifacts.${id}.source;
+          artifacts = hostConfig.my.artifacts;
+          artifactSource = id: artifacts.${id}.source;
           artifactSourcesFor =
             format:
             map (artifact: artifact.source) (
-              builtins.attrValues (lib.filterAttrs (_: artifact: artifact.format == format) configArtifacts)
+              builtins.attrValues (lib.filterAttrs (_: artifact: artifact.format == format) artifacts)
             );
           codexSystemConfig = artifactSource "clis/codex/system";
           codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
           codexProjectConfig = homeConfig.home.file.${codexProjectHomePath}.source;
           codexSeedConfig = artifactSource "clis/codex/user-seed";
           codexWritableRoot = "${hostConfig.my.dotfilesDir}/.git";
-          expectedConfigArtifactFormats = {
+          expectedArtifactFormats = {
             "clis/antigravity/mcp" = "json";
             "clis/claude/lsp" = "json";
             "clis/claude/managed-mcp" = "json";
@@ -204,11 +204,11 @@
           // lib.optionalAttrs (hostConfig.my.accounts != [ ]) {
             "accounts/gh-hosts" = "yaml";
           };
-          actualConfigArtifactFormats = lib.mapAttrs (_: artifact: artifact.format) configArtifacts;
-          variantConfigArtifactFormats = lib.mapAttrs (
+          actualArtifactFormats = lib.mapAttrs (_: artifact: artifact.format) artifacts;
+          variantArtifactFormats = lib.mapAttrs (
             _: artifact: artifact.format
-          ) artifactVariantConfig.my.configArtifacts;
-          variantClaudeMcp = artifactVariantConfig.my.configArtifacts."clis/claude/managed-mcp".source;
+          ) artifactVariantConfig.my.artifacts;
+          variantClaudeMcp = artifactVariantConfig.my.artifacts."clis/claude/managed-mcp".source;
           jsonConfigs = artifactSourcesFor "json";
           tomlConfigs = artifactSourcesFor "toml";
           yamlConfigs = artifactSourcesFor "yaml";
@@ -217,11 +217,10 @@
           checkSet = {
             nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
 
-            config-artifact-contract =
-              assert actualConfigArtifactFormats == expectedConfigArtifactFormats;
+            artifact-contract =
+              assert actualArtifactFormats == expectedArtifactFormats;
               assert
-                variantConfigArtifactFormats
-                == builtins.removeAttrs expectedConfigArtifactFormats [ "accounts/gh-hosts" ];
+                variantArtifactFormats == builtins.removeAttrs expectedArtifactFormats [ "accounts/gh-hosts" ];
               assert !(builtins.hasAttr "gh-hosts.yml" artifactVariantConfig.sops.templates);
               assert
                 hostConfig.environment.etc."claude-code/managed-settings.json".source
@@ -242,7 +241,7 @@
                 ||
                   hostConfig.sops.templates."gh-hosts.yml".content
                   == builtins.readFile (artifactSource "accounts/gh-hosts");
-              pkgs.runCommandLocal "check-config-artifact-contract"
+              pkgs.runCommandLocal "check-artifact-contract"
                 {
                   nativeBuildInputs = [
                     pkgs.jq

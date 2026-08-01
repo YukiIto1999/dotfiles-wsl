@@ -2,7 +2,7 @@
 
 {
   # 生成した設定を検査側が形式ごとに見つけるための登録簿
-  options.my.configArtifacts = lib.mkOption {
+  options.my.artifacts = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         options = {
@@ -26,13 +26,13 @@
     description = "実配備 producer が一度だけ生成する不変設定 artifact。配備方法は各 module が所有する。";
   };
 
-  options.my.devShellPackages = lib.mkOption {
+  options.my.quality.devShellPackages = lib.mkOption {
     type = lib.types.listOf lib.types.package;
     internal = true;
     description = "保守作業の devShell が公開する package。flake が devShell 出力へ写像する。";
   };
 
-  config.my.devShellPackages = with pkgs; [
+  config.my.quality.devShellPackages = with pkgs; [
     actionlint
     deadnix
     jq

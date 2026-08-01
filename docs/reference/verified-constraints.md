@@ -10,13 +10,14 @@
 
 | 制約 | 検証 |
 |---|---|
+| option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
 | LSP roster と各 CLI の登録が一致し、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | SonarQube の server と DB が同じ credential を見て DB port を公開しない | `sonarqube-topology` |
-| 生成 config artifact が配備先の source と一致する | `config-artifact-contract`、`mcp-artifact-contract` |
+| 生成 config artifact が配備先の source と一致する | `artifact-contract`、`mcp-artifact-contract` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | doctor manifest が各 module の宣言と一致する | `doctor-manifest-contract` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |

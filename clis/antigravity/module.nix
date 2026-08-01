@@ -20,7 +20,7 @@ in
     };
   };
 
-  my.configArtifacts."clis/antigravity/mcp" = {
+  my.artifacts."clis/antigravity/mcp" = {
     format = "json";
     source = mcpConfig;
   };

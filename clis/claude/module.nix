@@ -21,7 +21,7 @@ let
       extensionToLanguage = server.extensions;
     }
     // lib.optionalAttrs (server.args != [ ]) { inherit (server) args; }
-  ) cfg.lsp;
+  ) cfg.toolchain.lsp;
 
   lspJson = (pkgs.formats.json { }).generate "claude-lsp.json" lspServers;
 
@@ -75,7 +75,7 @@ in
     };
   };
 
-  my.configArtifacts = {
+  my.artifacts = {
     "clis/claude/managed-settings" = {
       format = "json";
       source = managedSettings;

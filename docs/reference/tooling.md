@@ -38,7 +38,7 @@ plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md
 |---|---|---|
 | gateway endpoint | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `my.mcp.endpoints` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.endpoints` |
 | MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets.<name>` | `nix eval --json .#nixosConfigurations.nixos.config.my.mcp.targets --apply builtins.attrNames` |
-| Docker backend | [`mcp/module.nix`](../../mcp/module.nix) の `my.ociImages` と各 server module | `nix eval --json .#nixosConfigurations.nixos.config.my.ociImages --apply builtins.attrNames` |
+| Docker backend | [`images/module.nix`](../../images/module.nix) の `my.images` と各 unit の `mkContainerBackend` | `nix eval --json .#nixosConfigurations.nixos.config.my.images --apply builtins.attrNames` |
 | host process | 各 target module が宣言する stdio front | gateway の子 process を `systemd-cgls -u agentgateway-<endpoint>.service` で見る |
 
 agentgateway は全 target を一つの HTTP endpoint へ公開し、各 AI CLI が同じ target 名を使う。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。

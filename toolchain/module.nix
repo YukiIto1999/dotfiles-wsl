@@ -10,14 +10,14 @@ let
 in
 {
   # 責務を持つ unit が所有しない、全 project 横断で使う実行ファイル
-  options.my.toolchain = lib.mkOption {
+  options.my.toolchain.packages = lib.mkOption {
     type = lib.types.attrsOf lib.types.package;
     default = { };
     description = "利用者と agent が PATH 上で使う汎用ツール。project 固有の依存は devenv が持つ。";
   };
 
   # language server の binary。登録形式は各 CLI が持ち、PATH への配置はここが持つ
-  options.my.lsp = lib.mkOption {
+  options.my.toolchain.lsp = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         options = {
@@ -46,7 +46,7 @@ in
   };
 
   # 使用量と、解決すべき symbol と型を持つかで選ぶ。file 数が多くても HTML と CSS は採らない
-  config.my.lsp = {
+  config.my.toolchain.lsp = {
     csharp = {
       package = pkgs.roslyn-ls;
       command = "Microsoft.CodeAnalysis.LanguageServer";
@@ -118,7 +118,7 @@ in
     };
   };
 
-  config.my.toolchain = {
+  config.my.toolchain.packages = {
     # GitHub Actions のローカル実行。nix 統合を持つ
     actrun = pkgs.callPackage ./actrun/package.nix { };
     # project scope の agent context 管理。user scope の配備は clis が持つ
@@ -156,6 +156,7 @@ in
 
   config.home-manager.users.${cfg.username} = _: {
     home.packages =
-      builtins.attrValues cfg.toolchain ++ map (server: server.package) (builtins.attrValues cfg.lsp);
+      builtins.attrValues cfg.toolchain.packages
+      ++ map (server: server.package) (builtins.attrValues cfg.toolchain.lsp);
   };
 }

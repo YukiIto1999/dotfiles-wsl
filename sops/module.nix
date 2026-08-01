@@ -173,7 +173,7 @@ in
     "identity/default/name" = { };
     "identity/default/email" = { };
   }
-  // lib.optionalAttrs (cfg.workIdentity != null) {
+  // lib.optionalAttrs (cfg.git.workIdentity != null) {
     "identity/work/name" = { };
     "identity/work/email" = { };
   };
@@ -184,7 +184,7 @@ in
       userEmail = placeholder."identity/default/email";
     });
   }
-  // lib.optionalAttrs (cfg.workIdentity != null) {
+  // lib.optionalAttrs (cfg.git.workIdentity != null) {
     "git-work-identity" = userTpl "${userHome}/.config/git/work-identity.conf" (gitIdentity {
       userName = placeholder."identity/work/name";
       userEmail = placeholder."identity/work/email";

@@ -12,6 +12,43 @@ let
 in
 {
   # unit の層の file 名。ここが唯一の定義で、検査はここを読む
+  # option の接頭辞は宣言した unit の名前で決まる。層をまたぐ my.artifacts と
+  # my.contract、host 共通の語彙だけが例外なく除外される
+  option-namespace =
+    pkgs.runCommandLocal "check-option-namespace"
+      {
+        rootVocabulary = [
+          "artifacts"
+          "contract"
+          "dotfilesDir"
+          "homeDir"
+          "username"
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        violations=""
+        while IFS= read -r line; do
+          file=''${line%%:*}
+          namespace=''${line##*options.my.}
+          namespace=''${namespace%%[!a-zA-Z0-9]*}
+          unit=''${file#${self}/}
+          unit=''${unit%%/*}
+          case " $rootVocabulary " in
+            *" $namespace "*) continue ;;
+          esac
+          [ "$namespace" = "$unit" ] || violations="$violations $unit:my.$namespace"
+        done < <(${pkgs.ripgrep}/bin/rg --no-heading --with-filename --only-matching \
+          'options\.my\.[a-zA-Z]+' --glob '*.nix' ${self})
+
+        if [ -n "$violations" ]; then
+          echo "option namespace does not match the declaring unit:$violations" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
   structure-layer-names =
     pkgs.runCommandLocal "check-structure-layer-names"
       {

@@ -6,7 +6,7 @@
 }:
 
 let
-  artifactSource = id: hostConfig.my.configArtifacts.${id}.source;
+  artifactSource = id: hostConfig.my.artifacts.${id}.source;
   containers = hostConfig.virtualisation.oci-containers.containers;
 in
 {

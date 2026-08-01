@@ -104,7 +104,7 @@ in
     }
   ];
 
-  config.my.configArtifacts = eachEndpoint (endpoint: {
+  config.my.artifacts = eachEndpoint (endpoint: {
     name = endpoint.artifact;
     value = {
       format = "yaml";

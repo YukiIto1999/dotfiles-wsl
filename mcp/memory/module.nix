@@ -81,7 +81,7 @@ in
   };
 
   my.mcp.gatewayWaitUnits = [ "docker-agentmemory.service" ];
-  my.mcp.targets.memory.command = lib.getExe agentmemory.front;
+  my.mcp.targets.memory.transport.stdio.command = lib.getExe agentmemory.front;
   my.doctor = {
     units = backend.doctorUnits;
     managedFiles.agentmemory-opencode-capture = {

@@ -22,7 +22,7 @@ let
   mkTarget =
     account:
     lib.nameValuePair "github-${account}" {
-      command = lib.getExe (
+      transport.stdio.command = lib.getExe (
         pkgs.callPackage ./package.nix {
           inherit mkMcpServer toolsets;
           tokenFile = config.sops.secrets."accounts/${account}/token".path;

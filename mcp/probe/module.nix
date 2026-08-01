@@ -10,5 +10,5 @@ let
   front = pkgs.callPackage ./package.nix { inherit mkMcpServer mkNpmMcp; };
 in
 {
-  my.mcp.targets.probe.command = lib.getExe front;
+  my.mcp.targets.probe.transport.stdio.command = lib.getExe front;
 }

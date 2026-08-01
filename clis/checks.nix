@@ -73,10 +73,12 @@ in
           jq --exit-status \
             --arg command ${lib.escapeShellArg roster.${name}.command} \
             --argjson args ${lib.escapeShellArg (builtins.toJSON roster.${name}.args)} \
-            --argjson extensions ${lib.escapeShellArg (builtins.toJSON roster.${name}.extensions)} '
+            --argjson extensions ${lib.escapeShellArg (builtins.toJSON roster.${name}.extensions)} \
+            --argjson options ${lib.escapeShellArg (builtins.toJSON roster.${name}.initializationOptions)} '
             .["${name}"].command == $command and
             (.["${name}"].args // []) == $args and
-            .["${name}"].extensionToLanguage == $extensions
+            .["${name}"].extensionToLanguage == $extensions and
+            (.["${name}"].initializationOptions // {}) == $options
           ' ${artifactSource "clis/claude/lsp"} > /dev/null
 
           jq --exit-status \

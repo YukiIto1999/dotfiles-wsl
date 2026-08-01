@@ -1,6 +1,8 @@
 {
   config,
   lib,
+  pkgs,
+  mkCommand,
   mkContainerBackend,
   ...
 }:
@@ -20,6 +22,16 @@ let
     image = databaseImage;
     environmentFiles = [ config.sops.templates."sonarqube-db.env".path ];
     volumes = [ "sonarqube-db:/var/lib/postgresql/data" ];
+  };
+
+  provisionAdmin = mkCommand {
+    name = "dotfiles-sonarqube-provision";
+    src = ./impl/provision-admin.sh;
+    runtimeInputs = with pkgs; [
+      curl
+      jq
+      coreutils
+    ];
   };
 
   server = mkContainerBackend "sonarqube" {
@@ -53,7 +65,10 @@ in
     };
   };
 
-  config.sops.secrets."sonarqube/db_password" = { };
+  config.sops.secrets = {
+    "sonarqube/db_password" = { };
+    "sonarqube/admin_password".owner = config.my.username;
+  };
 
   config.sops.templates."sonarqube-db.env" = {
     content = ''
@@ -75,13 +90,42 @@ in
     restartUnits = [ "docker-sonarqube.service" ];
   };
 
-  # 解析対象は project ごとなので、環境が持つのは server の所在だけ
-  config.my.contract.sonarqube = {
-    url = "http://127.0.0.1:${serverPort}";
-    ports.server = lib.toInt serverPort;
-  };
+  # 解析対象は project ごとなので、環境が持つのは server の所在だけ。
+  # port の正本は container の publish 宣言で、ここはそこから導く
+  config.my.contract.sonarqube.url = "http://127.0.0.1:${serverPort}";
 
   config.virtualisation.oci-containers.containers = database.containers // server.containers;
-  config.systemd.services = database.systemdServices // server.systemdServices;
-  config.my.doctor.units = database.doctorUnits // server.doctorUnits;
+  config.systemd.services =
+    database.systemdServices
+    // server.systemdServices
+    // {
+      # 既定の admin 資格情報のまま公開しない。宣言した値へ一度だけ変える
+      sonarqube-provision = {
+        description = "SonarQube admin credential provisioning";
+        after = [ "docker-sonarqube.service" ];
+        requires = [ "docker-sonarqube.service" ];
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          User = config.my.username;
+          Environment = [
+            "SONARQUBE_URL=${config.my.contract.sonarqube.url}"
+            "SONARQUBE_ADMIN_PASSWORD_FILE=${config.sops.secrets."sonarqube/admin_password".path}"
+          ];
+          ExecStart = lib.getExe provisionAdmin;
+        };
+      };
+    };
+  config.my.doctor.units =
+    database.doctorUnits
+    // server.doctorUnits
+    // {
+      "sonarqube-provision.service".expected = {
+        LoadState = "loaded";
+        ActiveState = "active";
+        SubState = "exited";
+        Result = "success";
+      };
+    };
 }

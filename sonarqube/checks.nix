@@ -8,6 +8,15 @@
 let
   contract = hostConfig.my.contract.sonarqube;
   containers = hostConfig.virtualisation.oci-containers.containers;
+
+  # port の正本は publish 宣言。契約の URL がそこから外れていないかを見る
+  publishedPort = builtins.elemAt (lib.splitString ":" (
+    builtins.head (
+      builtins.filter (
+        option: builtins.match "127\\.0\\.0\\.1:[0-9]+:[0-9]+" option != null
+      ) containers.sonarqube.extraOptions
+    )
+  )) 1;
   serverEnv = hostConfig.sops.templates."sonarqube.env";
 in
 {
@@ -18,11 +27,14 @@ in
       containers.sonarqube-db.environmentFiles == [ hostConfig.sops.templates."sonarqube-db.env".path ];
     assert lib.elem "--network=dotfiles-backends" containers.sonarqube.extraOptions;
     assert lib.elem "--network=dotfiles-backends" containers.sonarqube-db.extraOptions;
-    assert lib.elem "127.0.0.1:${toString contract.ports.server}:${toString contract.ports.server}"
-      containers.sonarqube.extraOptions;
-    assert contract.url == "http://127.0.0.1:${toString contract.ports.server}";
+    assert contract.url == "http://127.0.0.1:${publishedPort}";
     assert !(lib.elem "-p" containers.sonarqube-db.extraOptions);
     assert lib.elem "docker-sonarqube-db.service" hostConfig.systemd.services.docker-sonarqube.requires;
+    # 既定の admin 資格情報のまま公開しない
+    assert lib.elem "docker-sonarqube.service" hostConfig.systemd.services.sonarqube-provision.requires;
+    assert lib.elem "SONARQUBE_ADMIN_PASSWORD_FILE=${
+      hostConfig.sops.secrets."sonarqube/admin_password".path
+    }" hostConfig.systemd.services.sonarqube-provision.serviceConfig.Environment;
     pkgs.runCommandLocal "check-sonarqube-topology" { } ''
       set -eu
 

@@ -60,7 +60,7 @@ let
 
     service = "agentgateway-${id}";
     runtimeDirectory = "agentgateway-${id}";
-    artifact = "mcp/agentgateway/${id}/config";
+    artifact = "mcp/gateway/${id}/config";
     source = configOf id;
     targets = builtins.attrNames (targetsOf id);
   }) cfg.mcp.endpoints;

@@ -43,7 +43,7 @@ in
     imageFile = agentmemory.image;
   };
 
-  my.artifacts."mcp/agentmemory/config" = {
+  my.artifacts."mcp/memory/config" = {
     format = "yaml";
     source = agentmemoryConfig;
   };

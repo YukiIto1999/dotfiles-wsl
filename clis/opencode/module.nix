@@ -8,7 +8,7 @@
 let
   cfg = config.my;
   opencodeConfig = pkgs.replaceVars ./assets/opencode.json {
-    inherit (cfg) gatewayUrl;
+    gatewayUrl = cfg.contract.mcp.endpoints.default.url;
   };
 
   splitFrontmatter =

@@ -21,6 +21,12 @@ in
     targets = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
+          options.endpoint = lib.mkOption {
+            type = lib.types.str;
+            default = "default";
+            description = "この target を畳み込む gateway endpoint の id。";
+          };
+
           options.transport = lib.mkOption {
             type = lib.types.attrTag {
               stdio = lib.mkOption {

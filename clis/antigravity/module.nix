@@ -3,7 +3,7 @@
 let
   cfg = config.my;
   mcpConfig = pkgs.replaceVars ./assets/mcp_config.json {
-    inherit (cfg) gatewayUrl;
+    gatewayUrl = cfg.contract.mcp.endpoints.default.url;
   };
 in
 {

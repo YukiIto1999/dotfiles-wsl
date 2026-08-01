@@ -29,6 +29,8 @@ checks_file="$report_tmp/checks.jsonl"
 
 mcp_tmp=''
 mcp_url=''
+mcp_check_prefix=''
+mcp_endpoint_json=''
 mcp_session=''
 mcp_cleanup_protocol=''
 mcp_cleanup_done=0
@@ -280,29 +282,37 @@ manifest_contract='
     ))
   ) and
   ([.clis[].name] | length) == ([.clis[].name] | unique | length) and
-  (.mcp.url | type) == "string" and
-  (.mcp.healthUnit | type) == "string" and
-  (.mcp.healthUnit as $health | any(.units[]; .id == $health)) and
-  (.mcp.targets | type) == "array" and
-  all(.mcp.targets[]; type == "string" and length > 0) and
-  ([.mcp.targets[]] | length) == ([.mcp.targets[]] | unique | length) and
+  (.mcp.endpoints | type) == "array" and
+  (.mcp.endpoints | length) > 0 and
+  all(.mcp.endpoints[];
+    (.id | type) == "string" and (.id | test("^[a-z0-9-]+$")) and
+    (.url | type) == "string" and
+    (.healthUnit | type) == "string" and
+    (.targets | type) == "array" and
+    all(.targets[]; type == "string" and length > 0) and
+    ([.targets[]] | length) == ([.targets[]] | unique | length) and
+    (.resources.properties | type) == "array" and
+    (.resources.properties | length) > 0 and
+    all(.resources.properties[]; type == "string" and test("^[A-Za-z]+$")) and
+    ([.resources.properties[]] | length) == ([.resources.properties[]] | unique | length) and
+    (.resources.properties | index("MainPID")) != null and
+    (.resources.expected | type) == "object" and
+    all(.resources.expected | to_entries[];
+      (.key | type) == "string" and (.value | type) == "string" and (.value | test("^[0-9]+$"))
+    ) and
+    (.resources as $resources |
+      all($resources.expected | keys[]; . as $key | $resources.properties | index($key) != null))
+  ) and
+  ([.mcp.endpoints[].id] | length) == ([.mcp.endpoints[].id] | unique | length) and
+  ([.mcp.endpoints[].url] | length) == ([.mcp.endpoints[].url] | unique | length) and
+  ([.mcp.endpoints[].targets[]] | length) == ([.mcp.endpoints[].targets[]] | unique | length) and
+  (. as $manifest | all($manifest.mcp.endpoints[].healthUnit; . as $health | any($manifest.units[]; .id == $health))) and
   (.mcp.requestedProtocolVersion | type) == "string" and (.mcp.requestedProtocolVersion | length) > 0 and
   (.mcp.supportedProtocolVersions | type) == "array" and
   (.mcp.supportedProtocolVersions | length) > 0 and
   all(.mcp.supportedProtocolVersions[]; type == "string" and length > 0) and
   ([.mcp.supportedProtocolVersions[]] | length) == ([.mcp.supportedProtocolVersions[]] | unique | length) and
   (.mcp.requestedProtocolVersion as $requested | .mcp.supportedProtocolVersions | index($requested) != null) and
-  (.mcp.resources.properties | type) == "array" and
-  (.mcp.resources.properties | length) > 0 and
-  all(.mcp.resources.properties[]; type == "string" and test("^[A-Za-z]+$")) and
-  ([.mcp.resources.properties[]] | length) == ([.mcp.resources.properties[]] | unique | length) and
-  (.mcp.resources.properties | index("MainPID")) != null and
-  (.mcp.resources.expected | type) == "object" and
-  all(.mcp.resources.expected | to_entries[];
-    (.key | type) == "string" and (.value | type) == "string" and (.value | test("^[0-9]+$"))
-  ) and
-  (.mcp.resources as $resources |
-    all($resources.expected | keys[]; . as $key | $resources.properties | index($key) != null)) and
   .oci.healthUnit == "docker.service" and
   (.oci.healthUnit as $health | any(.units[]; .id == $health)) and
   .oci.stateRoot == (.user.home + "/.local/state/dotfiles-wsl/image-sync") and
@@ -646,12 +656,15 @@ fi
 
 # System checks may require systemd or privilege, but are still bounded and deterministic.
 system_timeout=$(jq -r '.probePolicy.systemTimeoutSeconds' "$manifest")
-mcp_resource_unit=$(jq -r '.mcp.healthUnit' "$manifest")
-mapfile -t mcp_resource_properties < <(jq -r '.mcp.resources.properties[]' "$manifest")
-mcp_resource_flags=()
-for property in "${mcp_resource_properties[@]}"; do
-  mcp_resource_flags+=("--property=$property")
-done
+declare -A mcp_resource_flags=()
+while IFS= read -r endpoint; do
+  unit_id=$(jq -r '.healthUnit' <<< "$endpoint")
+  flags=''
+  while IFS= read -r property; do
+    flags+=" --property=$property"
+  done < <(jq -r '.resources.properties[]' <<< "$endpoint")
+  mcp_resource_flags[$unit_id]=$flags
+done < <(jq -c '.mcp.endpoints[]' "$manifest")
 declare -A mcp_resource_observed=()
 declare -A unit_check_status=()
 while IFS= read -r unit; do
@@ -664,8 +677,9 @@ while IFS= read -r unit; do
   expected_state=$(jq -c '.expected' <<< "$unit")
   started=$(now_ms)
   unit_show_flags=(--property=LoadState --property=ActiveState --property=SubState --property=Result)
-  if [[ $unit_id == "$mcp_resource_unit" ]]; then
-    unit_show_flags+=("${mcp_resource_flags[@]}")
+  if [[ -n ${mcp_resource_flags[$unit_id]:-} ]]; then
+    read -r -a endpoint_resource_flags <<< "${mcp_resource_flags[$unit_id]}"
+    unit_show_flags+=("${endpoint_resource_flags[@]}")
   fi
   unit_output=$(timeout "${system_timeout}s" systemctl show "$unit_id" \
     "${unit_show_flags[@]}" \
@@ -685,8 +699,8 @@ while IFS= read -r unit; do
       Result) observed_result=$property_value ;;
       '') ;;
       *)
-        if [[ $unit_id == "$mcp_resource_unit" ]]; then
-          mcp_resource_observed[$property_name]=$property_value
+        if [[ -n ${mcp_resource_flags[$unit_id]:-} ]]; then
+          mcp_resource_observed[$unit_id|$property_name]=$property_value
         fi
         ;;
     esac
@@ -1064,10 +1078,10 @@ mcp_cleanup_session() {
   fi
   mcp_request DELETE "$mcp_url" '' "$mcp_session" "$mcp_cleanup_protocol"
   if [[ $mcp_curl_status -ne 0 ]]; then
-    mcp_record_fail active.mcp.cleanup "MCP session cleanup request failed"
+    mcp_record_fail "$mcp_check_prefix.cleanup" "MCP session cleanup request failed"
     return 1
   elif [[ ! $mcp_http_status =~ ^2[0-9][0-9]$ ]]; then
-    mcp_record_fail active.mcp.cleanup "MCP session cleanup failed with HTTP $mcp_http_status"
+    mcp_record_fail "$mcp_check_prefix.cleanup" "MCP session cleanup failed with HTTP $mcp_http_status"
     return 1
   fi
   return 0
@@ -1123,7 +1137,7 @@ check_mcp() {
   local seen_cursors_file="$mcp_tmp/seen-cursors.jsonl"
 
   if ! : > "$tool_names_file" || ! : > "$seen_cursors_file"; then
-    mcp_record_fail active.mcp.tools "MCP response projection could not be initialized"
+    mcp_record_fail "$mcp_check_prefix.tools" "MCP response projection could not be initialized"
     return
   fi
 
@@ -1136,26 +1150,26 @@ check_mcp() {
   }')
   mcp_request POST "$mcp_url" "$initialize_payload" '' ''
   if [[ $mcp_curl_status -ne 0 ]]; then
-    mcp_record_fail active.mcp.initialize "MCP initialize request failed"
+    mcp_record_fail "$mcp_check_prefix.initialize" "MCP initialize request failed"
   elif [[ $mcp_http_status != 200 ]]; then
-    mcp_record_fail active.mcp.initialize "MCP initialize failed with HTTP $mcp_http_status"
+    mcp_record_fail "$mcp_check_prefix.initialize" "MCP initialize failed with HTTP $mcp_http_status"
   elif ! mcp_parse_response 1; then
     if [[ $mcp_parse_error == content-type ]]; then
-      mcp_record_fail active.mcp.initialize "MCP initialize response has unsupported content type: $mcp_content_type"
+      mcp_record_fail "$mcp_check_prefix.initialize" "MCP initialize response has unsupported content type: $mcp_content_type"
     else
-      mcp_record_fail active.mcp.initialize "MCP initialize response has an invalid JSON-RPC envelope"
+      mcp_record_fail "$mcp_check_prefix.initialize" "MCP initialize response has an invalid JSON-RPC envelope"
     fi
   else
     mcp_protocol=$(jq -r '.result.protocolVersion // empty' <<< "$mcp_response_json" 2>/dev/null)
     [[ -z $mcp_protocol ]] || mcp_cleanup_protocol=$mcp_protocol
     if ! jq -e '.jsonrpc == "2.0" and .id == 1 and (.result | type) == "object" and (.result.protocolVersion | type) == "string" and (.result.capabilities | type) == "object"' <<< "$mcp_response_json" >/dev/null 2>&1; then
-      mcp_record_fail active.mcp.initialize "MCP initialize response has an invalid JSON-RPC envelope"
+      mcp_record_fail "$mcp_check_prefix.initialize" "MCP initialize response has an invalid JSON-RPC envelope"
     elif ! jq -e '(.result.capabilities.tools | type) == "object"' <<< "$mcp_response_json" >/dev/null 2>&1; then
-      mcp_record_fail active.mcp.initialize "MCP initialize response does not advertise tools capability"
+      mcp_record_fail "$mcp_check_prefix.initialize" "MCP initialize response does not advertise tools capability"
     elif [[ -z $mcp_session ]]; then
-      mcp_record_fail active.mcp.initialize "MCP initialize response is missing a session ID"
+      mcp_record_fail "$mcp_check_prefix.initialize" "MCP initialize response is missing a session ID"
     elif ! jq -e --arg protocol "$mcp_protocol" '.mcp.supportedProtocolVersions | index($protocol) != null' "$manifest" >/dev/null 2>&1; then
-      mcp_record_fail active.mcp.initialize "MCP negotiated unsupported protocol version: $mcp_protocol"
+      mcp_record_fail "$mcp_check_prefix.initialize" "MCP negotiated unsupported protocol version: $mcp_protocol"
     fi
   fi
 
@@ -1163,15 +1177,15 @@ check_mcp() {
     initialized_payload='{"jsonrpc":"2.0","method":"notifications/initialized"}'
     mcp_request POST "$mcp_url" "$initialized_payload" "$mcp_session" "$mcp_protocol"
     if [[ $mcp_curl_status -ne 0 ]]; then
-      mcp_record_fail active.mcp.initialized "MCP initialized notification request failed"
+      mcp_record_fail "$mcp_check_prefix.initialized" "MCP initialized notification request failed"
     elif [[ $mcp_http_status != 202 ]]; then
-      mcp_record_fail active.mcp.initialized "MCP initialized notification failed with HTTP $mcp_http_status"
+      mcp_record_fail "$mcp_check_prefix.initialized" "MCP initialized notification failed with HTTP $mcp_http_status"
     fi
   fi
 
   while [[ $mcp_phase_failed -eq 0 ]]; do
     if [[ $page_count -ge $max_pages ]]; then
-      mcp_record_fail active.mcp.pagination "MCP tools/list pagination exceeded $max_pages pages"
+      mcp_record_fail "$mcp_check_prefix.pagination" "MCP tools/list pagination exceeded $max_pages pages"
       break
     fi
     if [[ $has_next_cursor -eq 0 ]]; then
@@ -1184,27 +1198,27 @@ check_mcp() {
     fi
     mcp_request POST "$mcp_url" "$tools_payload" "$mcp_session" "$mcp_protocol"
     if [[ $mcp_curl_status -ne 0 ]]; then
-      mcp_record_fail active.mcp.tools "MCP tools/list request failed"
+      mcp_record_fail "$mcp_check_prefix.tools" "MCP tools/list request failed"
       break
     elif [[ $mcp_http_status != 200 ]]; then
-      mcp_record_fail active.mcp.tools "MCP tools/list failed with HTTP $mcp_http_status"
+      mcp_record_fail "$mcp_check_prefix.tools" "MCP tools/list failed with HTTP $mcp_http_status"
       break
     elif ! mcp_parse_response "$mcp_request_id" || ! jq -e --argjson id "$mcp_request_id" '
       .jsonrpc == "2.0" and .id == $id and (.result | type) == "object" and
       (.result.tools | type) == "array" and all(.result.tools[]; (.name | type) == "string") and
       (.result.nextCursor == null or (.result.nextCursor | type) == "string")
     ' <<< "$mcp_response_json" >/dev/null 2>&1; then
-      mcp_record_fail active.mcp.tools "MCP tools/list response is invalid"
+      mcp_record_fail "$mcp_check_prefix.tools" "MCP tools/list response is invalid"
       break
     fi
     if ! jq -c '.result.tools[].name' <<< "$mcp_response_json" >> "$tool_names_file"; then
-      mcp_record_fail active.mcp.tools "MCP tool name projection failed"
+      mcp_record_fail "$mcp_check_prefix.tools" "MCP tool name projection failed"
       break
     fi
     if jq -e '.result | has("nextCursor") and .nextCursor != null' <<< "$mcp_response_json" >/dev/null 2>&1; then
       has_next_cursor=1
       if ! jq -c '.result.nextCursor' <<< "$mcp_response_json" > "$next_cursor_file"; then
-        mcp_record_fail active.mcp.pagination "MCP pagination cursor projection failed"
+        mcp_record_fail "$mcp_check_prefix.pagination" "MCP pagination cursor projection failed"
         break
       fi
     else
@@ -1218,17 +1232,17 @@ check_mcp() {
     cursor_seen_status=$?
     case $cursor_seen_status in
       0)
-        mcp_record_fail active.mcp.pagination "MCP tools/list pagination cursor repeated"
+        mcp_record_fail "$mcp_check_prefix.pagination" "MCP tools/list pagination cursor repeated"
         break
         ;;
       1)
         if ! cat -- "$next_cursor_file" >> "$seen_cursors_file"; then
-          mcp_record_fail active.mcp.pagination "MCP pagination cursor could not be recorded"
+          mcp_record_fail "$mcp_check_prefix.pagination" "MCP pagination cursor could not be recorded"
           break
         fi
         ;;
       *)
-        mcp_record_fail active.mcp.pagination "MCP pagination cursor state is invalid"
+        mcp_record_fail "$mcp_check_prefix.pagination" "MCP pagination cursor state is invalid"
         break
         ;;
     esac
@@ -1240,26 +1254,29 @@ check_mcp() {
       prefix="${target}_"
       component=$(stable_component "$target")
       if jq -se --arg prefix "$prefix" 'any(.[]; startswith($prefix))' "$tool_names_file" >/dev/null 2>&1; then
-        add_check "active.mcp.target.$component" active pass "$target" tools-exposed tools-exposed \
+        add_check "$mcp_check_prefix.target.$component" active pass "$target" tools-exposed tools-exposed \
           "MCP target exposes tools: $target" "$(duration_since "$target_started")"
       else
-        mcp_record_fail "active.mcp.target.$component" "MCP target has no tools: $target"
+        mcp_record_fail "$mcp_check_prefix.target.$component" "MCP target has no tools: $target"
       fi
-    done < <(jq -r '.mcp.targets[]' "$manifest")
+    done < <(jq -r '.targets[]' <<< "$mcp_endpoint_json")
   fi
   mcp_cleanup_session
   if [[ $mcp_phase_failed -eq 0 ]]; then
-    add_check active.mcp.session active pass "$mcp_url" complete complete \
+    add_check "$mcp_check_prefix.session" active pass "$mcp_url" complete complete \
       "MCP session lifecycle completed" "$(duration_since "$mcp_check_started_ms")"
   fi
 }
 
 check_mcp_resources() {
-  local started=$1 expected observed missing='' non_numeric='' mismatched='' value proc_root fd_current=''
+  local started=$1 endpoint=$2 check_id=$3
+  local expected observed missing='' non_numeric='' mismatched='' value proc_root fd_current=''
+  local unit main_pid
   local -a pairs=()
-  expected=$(jq -c '.mcp.resources.expected' "$manifest")
-  for property in "${mcp_resource_properties[@]}"; do
-    value=${mcp_resource_observed[$property]:-}
+  unit=$(jq -r '.healthUnit' <<< "$endpoint")
+  expected=$(jq -c '.resources.expected' <<< "$endpoint")
+  while IFS= read -r property; do
+    value=${mcp_resource_observed[$unit|$property]:-}
     if [[ -z $value ]]; then
       missing+=" $property"
       continue
@@ -1269,63 +1286,76 @@ check_mcp_resources() {
       continue
     fi
     pairs+=("--arg" "$property" "$value")
-  done
+  done < <(jq -r '.resources.properties[]' <<< "$endpoint")
 
   # FD は cgroup property にないので MainPID の proc entry を数える
   proc_root=${DOCTOR_TEST_PROC_ROOT:-/proc}
   if [[ -z $missing && -z $non_numeric ]]; then
-    fd_current=$(find "$proc_root/${mcp_resource_observed[MainPID]}/fd" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c)
+    main_pid=${mcp_resource_observed[$unit|MainPID]}
+    fd_current=$(find "$proc_root/$main_pid/fd" -mindepth 1 -maxdepth 1 -printf '.' 2>/dev/null | wc -c)
     pairs+=("--arg" "fdCurrent" "$fd_current")
   fi
   observed=$(jq -cn "${pairs[@]}" '$ARGS.named')
 
   if [[ -n $missing ]]; then
-    add_check active.mcp.resources active fail "$mcp_health_unit" "$expected" "$observed" \
+    add_check "$check_id" active fail "$unit" "$expected" "$observed" \
       "MCP resource metrics are incomplete:$missing" "$(duration_since "$started")"
     return
   fi
   if [[ -n $non_numeric ]]; then
-    add_check active.mcp.resources active fail "$mcp_health_unit" "$expected" "$observed" \
+    add_check "$check_id" active fail "$unit" "$expected" "$observed" \
       "MCP resource metrics are not numeric:$non_numeric" "$(duration_since "$started")"
     return
   fi
   while IFS='=' read -r property expected_value; do
     [[ -n $property ]] || continue
-    if [[ ${mcp_resource_observed[$property]:-} != "$expected_value" ]]; then
-      mismatched+=" $property=${mcp_resource_observed[$property]:-}"
+    if [[ ${mcp_resource_observed[$unit|$property]:-} != "$expected_value" ]]; then
+      mismatched+=" $property=${mcp_resource_observed[$unit|$property]:-}"
     fi
-  done < <(jq -r '.mcp.resources.expected | to_entries[] | "\(.key)=\(.value)"' "$manifest")
+  done < <(jq -r '.resources.expected | to_entries[] | "\(.key)=\(.value)"' <<< "$endpoint")
   if [[ -n $mismatched ]]; then
-    add_check active.mcp.resources active fail "$mcp_health_unit" "$expected" "$observed" \
+    add_check "$check_id" active fail "$unit" "$expected" "$observed" \
       "MCP file descriptor limit does not match manifest:$mismatched" "$(duration_since "$started")"
     return
   fi
-  add_check active.mcp.resources active pass "$mcp_health_unit" "$expected" "$observed" \
-    "MCP resources: TasksCurrent=${mcp_resource_observed[TasksCurrent]} fdCurrent=$fd_current MemoryCurrent=${mcp_resource_observed[MemoryCurrent]} MemorySwapCurrent=${mcp_resource_observed[MemorySwapCurrent]} LimitNOFILE=${mcp_resource_observed[LimitNOFILE]} LimitNOFILESoft=${mcp_resource_observed[LimitNOFILESoft]}" \
+  add_check "$check_id" active pass "$unit" "$expected" "$observed" \
+    "MCP resources: TasksCurrent=${mcp_resource_observed[$unit|TasksCurrent]} fdCurrent=$fd_current MemoryCurrent=${mcp_resource_observed[$unit|MemoryCurrent]} MemorySwapCurrent=${mcp_resource_observed[$unit|MemorySwapCurrent]} LimitNOFILE=${mcp_resource_observed[$unit|LimitNOFILE]} LimitNOFILESoft=${mcp_resource_observed[$unit|LimitNOFILESoft]}" \
     "$(duration_since "$started")"
 }
 
-mcp_health_unit=$(jq -r '.mcp.healthUnit' "$manifest")
-mcp_health_started=$(now_ms)
-if [[ ${unit_check_status[$mcp_health_unit]:-fail} != pass ]]; then
-  add_check active.mcp.health-unit active blocked "$mcp_health_unit" pass fail \
-    "MCP health unit is not healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
-  add_check active.mcp.resources active blocked "$mcp_health_unit" healthy-unit blocked \
-    "MCP resource metrics are blocked by their health unit" "$(duration_since "$mcp_health_started")"
-  add_check active.mcp.session active blocked "$(jq -r '.mcp.url' "$manifest")" healthy-unit blocked \
-    "MCP session is blocked by its health unit" "$(duration_since "$mcp_health_started")"
-else
-  add_check active.mcp.health-unit active pass "$mcp_health_unit" pass pass \
+# endpoint ごとに health unit と session を独立に見る。default にも例外を作らない
+mcp_total_timeout=$(jq -r '.probePolicy.totalTimeoutSeconds' "$manifest")
+# totalTimeoutSeconds は MCP phase 全体の上限。endpoint ごとに起点を取り直すと上限が endpoint 数だけ伸びる
+mcp_started_seconds=$SECONDS
+while IFS= read -r mcp_endpoint; do
+  mcp_endpoint_id=$(jq -r '.id' <<< "$mcp_endpoint")
+  mcp_health_unit=$(jq -r '.healthUnit' <<< "$mcp_endpoint")
+  mcp_component=$(stable_component "$mcp_endpoint_id")
+  mcp_health_started=$(now_ms)
+  if [[ ${unit_check_status[$mcp_health_unit]:-fail} != pass ]]; then
+    add_check "active.mcp.$mcp_component.health-unit" active blocked "$mcp_health_unit" pass fail \
+      "MCP health unit is not healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
+    add_check "active.mcp.$mcp_component.resources" active blocked "$mcp_health_unit" healthy-unit blocked \
+      "MCP resource metrics are blocked by their health unit" "$(duration_since "$mcp_health_started")"
+    add_check "active.mcp.$mcp_component.session" active blocked "$(jq -r '.url' <<< "$mcp_endpoint")" healthy-unit blocked \
+      "MCP session is blocked by its health unit" "$(duration_since "$mcp_health_started")"
+    continue
+  fi
+  add_check "active.mcp.$mcp_component.health-unit" active pass "$mcp_health_unit" pass pass \
     "MCP health unit is healthy: $mcp_health_unit" "$(duration_since "$mcp_health_started")"
-  check_mcp_resources "$(now_ms)"
-  mcp_url=$(jq -r '.mcp.url' "$manifest")
-  mcp_total_timeout=$(jq -r '.probePolicy.totalTimeoutSeconds' "$manifest")
-  mcp_started_seconds=$SECONDS
+  check_mcp_resources "$(now_ms)" "$mcp_endpoint" "active.mcp.$mcp_component.resources"
+  mcp_url=$(jq -r '.url' <<< "$mcp_endpoint")
+  mcp_session=''
+  mcp_cleanup_done=0
+  mcp_request_number=0
+  mcp_phase_failed=0
   mcp_tmp=$(mktemp -d)
   mcp_check_started_ms=$(now_ms)
+  mcp_check_prefix="active.mcp.$mcp_component"
+  mcp_endpoint_json=$mcp_endpoint
   check_mcp
   mcp_remove_temp
-fi
+done < <(jq -c '.mcp.endpoints[]' "$manifest")
 
 started=$(now_ms)
 final_current_canonical=$(readlink -e -- "$current" 2>/dev/null)

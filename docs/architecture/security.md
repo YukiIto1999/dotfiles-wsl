@@ -24,15 +24,15 @@ PAT の権限は用途に必要な repository と operation に限定する。�
 
 ## agentgateway
 
-[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の listener は port だけを指定し、client authentication と listen address の制限を設定していない。現行 runtime は認証なしで `*:8765` を listen する。各 AI CLI の接続 URL が `localhost` でも、listener 自体を loopback 限定と扱ってはならない。
+[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の listener は port だけを指定し、client authentication と listen address の制限を設定していない。現行 runtime は認証なしで endpoint ごとの port を listen する。各 AI CLI の接続 URL が `localhost` でも、listener 自体を loopback 限定と扱ってはならない。
 
-8765/TCP へ到達できる process と network peer は、gateway が公開する MCP tool を呼べる信頼境界に入る。実際に Windows 側や外部 network から到達できるかは WSL の network mode、Windows Firewall、host 側の転送設定に依存する。gateway の deny rule は個別 tool の公開制御であり、client 認証の代わりにはならない。
+endpoint の port へ到達できる process と network peer は、その endpoint が公開する MCP tool を呼べる信頼境界に入る。endpoint を分けても認証の代わりにはならない。実際に Windows 側や外部 network から到達できるかは WSL の network mode、Windows Firewall、host 側の転送設定に依存する。gateway の deny rule は個別 tool の公開制御であり、client 認証の代わりにはならない。
 
 agentgateway は設定ユーザーの systemd service として動き、stdio MCP front を同じ user 権限で起動する。front が読める checkout、home、runtime secret と、実行できる command が tool call の権限上限になる。gateway の bind または認証を変える場合は [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) を正本として見直す。
 
 ## Docker
 
-[`mcp/module.nix`](../../mcp/module.nix) は backend の host port を `127.0.0.1:<port>:<port>` で publish する。これは agentgateway の `*:8765` とは異なる境界であり、backend port は host の非 loopback address へ直接 publish しない。container 間通信は専用の `mcp-backends` network を使う。
+[`mcp/module.nix`](../../mcp/module.nix) は backend の host port を `127.0.0.1:<port>:<port>` で publish する。これは agentgateway の listener とは異なる境界であり、backend port は host の非 loopback address へ直接 publish しない。container 間通信は専用の `mcp-backends` network を使う。
 
 設定ユーザーは `docker` group に属する。Docker API を使える主体は container の起動、mount、inspect が可能であり、container 環境へ渡した secret も読める。Docker group、root、Docker daemon を backend secret と host filesystem の信頼境界に含める。
 
@@ -61,7 +61,7 @@ sandbox は gateway の client 認証、Docker daemon の権限、Windows intero
 | Git と Nix store | checkout を変更できる user、Nix build | Nix source、暗号文、生成 artifact |
 | root の SOPS 領域 | root、sops-nix activation | host identity、復号済み secret |
 | user credential | 設定ユーザーと credential consumer | Git identity、PAT、CLI 設定 |
-| agentgateway | 8765/TCP へ到達する client、gateway user | prompt、tool argument、tool result |
+| agentgateway | endpoint の port へ到達する client、gateway user | prompt、tool argument、tool result |
 | Docker | root、docker group、daemon、container | backend request、volume data、環境 secret |
 | 外部 provider | provider と通信経路 | agentmemory の処理対象 session |
 | Windows interop | Linux 呼び出し元、Windows process | command argument、Windows filesystem data |

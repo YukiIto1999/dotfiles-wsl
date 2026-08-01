@@ -13,7 +13,16 @@ let
   names = builtins.attrNames clis;
 
   # doctor が観測する gateway service の資源値、上限は systemd 宣言から導く
-  gatewayFileLimit = lib.splitString ":" config.systemd.services.agentgateway.serviceConfig.LimitNOFILE;
+  mcpFileLimits = lib.mapAttrs' (
+    _: endpoint:
+    let
+      limit = lib.splitString ":" config.systemd.services."${endpoint.service}".serviceConfig.LimitNOFILE;
+    in
+    lib.nameValuePair endpoint.service {
+      LimitNOFILE = builtins.elemAt limit 1;
+      LimitNOFILESoft = builtins.elemAt limit 0;
+    }
+  ) cfg.contract.mcp.endpoints;
   mcpResourceProperties = [
     "MainPID"
     "TasksCurrent"
@@ -93,16 +102,15 @@ let
           }
         ) names;
         mcp = {
-          url = cfg.gatewayUrl;
-          targets = builtins.attrNames cfg.mcp.targets;
-          healthUnit = "agentgateway.service";
-          resources = {
-            properties = mcpResourceProperties;
-            expected = {
-              LimitNOFILE = builtins.elemAt gatewayFileLimit 1;
-              LimitNOFILESoft = builtins.elemAt gatewayFileLimit 0;
+          endpoints = lib.mapAttrsToList (_: endpoint: {
+            inherit (endpoint) id url;
+            healthUnit = "${endpoint.service}.service";
+            inherit (endpoint) targets;
+            resources = {
+              properties = mcpResourceProperties;
+              expected = mcpFileLimits."${endpoint.service}";
             };
-          };
+          }) cfg.contract.mcp.endpoints;
           requestedProtocolVersion = "2025-11-25";
           supportedProtocolVersions = [
             "2024-11-05"

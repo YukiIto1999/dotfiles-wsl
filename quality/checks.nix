@@ -3,6 +3,7 @@
   lib,
   self,
   hostConfig,
+  hostOptions,
   allCheckNames,
   ...
 }:
@@ -12,42 +13,65 @@ let
 in
 {
   # unit の層の file 名。ここが唯一の定義で、検査はここを読む
-  # option の接頭辞は宣言した unit の名前で決まる。層をまたぐ my.artifacts と
-  # my.contract、host 共通の語彙だけが例外なく除外される
+  # option の接頭辞は宣言した unit の名前で決まる。regex ではなく module 系が
+  # 持つ宣言位置から判定するので、nested な options.my = { ... } も子 unit も
+  # my.contract.<unit> も同じ規則で見る
   option-namespace =
-    pkgs.runCommandLocal "check-option-namespace"
-      {
-        rootVocabulary = [
-          "artifacts"
-          "contract"
-          "dotfilesDir"
-          "homeDir"
-          "username"
-        ];
-      }
-      ''
-        set -euo pipefail
+    let
+      rootVocabulary = [
+        "artifacts"
+        "dotfilesDir"
+        "homeDir"
+        "username"
+      ];
 
-        violations=""
-        while IFS= read -r line; do
-          file=''${line%%:*}
-          namespace=''${line##*options.my.}
-          namespace=''${namespace%%[!a-zA-Z0-9]*}
-          unit=''${file#${self}/}
-          unit=''${unit%%/*}
-          case " $rootVocabulary " in
-            *" $namespace "*) continue ;;
-          esac
-          [ "$namespace" = "$unit" ] || violations="$violations $unit:my.$namespace"
-        done < <(${pkgs.ripgrep}/bin/rg --no-heading --with-filename --only-matching \
-          'options\.my\.[a-zA-Z]+' --glob '*.nix' ${self})
+      unitOf =
+        declaration:
+        let
+          relative = lib.removePrefix "${self}/" (toString declaration);
+        in
+        builtins.head (lib.splitString "/" relative);
 
-        if [ -n "$violations" ]; then
-          echo "option namespace does not match the declaring unit:$violations" >&2
-          exit 1
-        fi
-        touch $out
-      '';
+      # 宣言が自 unit と一致しない option を集める。子 unit は path の最初の段で
+      # 判定するので、mcp/gateway が my.mcp を宣言するのは違反にならない
+      violationsIn =
+        prefix: options:
+        lib.concatLists (
+          lib.mapAttrsToList (
+            name: option:
+            let
+              declaredIn = map unitOf (option.declarations or [ ]);
+              matches = lib.any (unit: unit == name) declaredIn;
+            in
+            if lib.elem name rootVocabulary then
+              [ ]
+            else if !(option ? declarations) then
+              [ ]
+            else if matches then
+              [ ]
+            else
+              [ "${prefix}${name} <- ${lib.concatStringsSep "," (lib.unique declaredIn)}" ]
+          ) options
+        );
+
+      myOptions = lib.filterAttrs (name: _: !(lib.hasPrefix "_" name)) hostOptions.my;
+      # my.contract は freeform なので sub-option を持たない。どの unit がどの key を
+      # 定義したかは定義位置から引く
+      contractViolations = lib.concatMap (
+        definition:
+        let
+          unit = unitOf definition.file;
+        in
+        map (name: "my.contract.${name} <- ${unit}") (
+          builtins.filter (name: name != unit) (builtins.attrNames definition.value)
+        )
+      ) hostOptions.my.contract.definitionsWithLocations;
+
+      violations =
+        violationsIn "my." (builtins.removeAttrs myOptions [ "contract" ]) ++ contractViolations;
+    in
+    assert violations == [ ];
+    pkgs.runCommandLocal "check-option-namespace" { } "touch $out";
 
   structure-layer-names =
     pkgs.runCommandLocal "check-structure-layer-names"
@@ -164,7 +188,10 @@ in
   '';
 
   shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-    find ${self} -path '*/tests/*.sh' -o -path '*/git/assets/hooks/*' -type f \
+    # shebang を持つ file は誰かが直接叩く。持たない fragment は
+    # writeShellApplication へ埋め込まれ build 時に検査される
+    find ${self} -type f -not -path '*/.git/*' -exec \
+      sh -c 'head -c 2 "$1" | grep -q "^#!"' _ {} \; -print \
       | xargs shellcheck --severity=warning
     touch $out
   '';

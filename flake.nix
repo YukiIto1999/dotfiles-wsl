@@ -152,11 +152,13 @@
               names = lib.concatMap builtins.attrNames perUnit;
               allCheckNames = builtins.attrNames checkSet ++ names;
             in
-            if names == lib.unique names then
+            if allCheckNames == lib.unique allCheckNames then
               lib.foldl' (acc: set: acc // set) { } perUnit
             else
-              throw "duplicate check id across units: ${
-                lib.concatStringsSep " " (lib.unique (lib.filter (n: lib.count (m: m == n) names > 1) names))
+              throw "duplicate check id: ${
+                lib.concatStringsSep " " (
+                  lib.unique (lib.filter (n: lib.count (m: m == n) allCheckNames > 1) allCheckNames)
+                )
               }";
 
           hostConfig = self.nixosConfigurations.${hostName}.config;
@@ -321,6 +323,7 @@
             hostConfig
             sops-nix
             ;
+          hostOptions = self.nixosConfigurations.${hostName}.options;
         } units;
     };
 }

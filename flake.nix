@@ -173,67 +173,6 @@
               };
             }).config;
 
-          mkMcpServer = pkgs.callPackage ./pkgs/mk-mcp-server.nix { };
-          fakeChromium = pkgs.writeShellScriptBin "chromium" "exit 0";
-          fakePlaywright = pkgs.writeShellApplication {
-            name = "playwright-mcp";
-            runtimeInputs = [ pkgs.coreutils ];
-            text = ''
-              output_dir=
-              while (( $# > 0 )); do
-                case $1 in
-                  --output-dir)
-                    output_dir=$2
-                    shift 2
-                    ;;
-                  *)
-                    shift
-                    ;;
-                esac
-              done
-
-              test -n "$output_dir"
-              printf '%s\n' "$output_dir" >> "$PLAYWRIGHT_MCP_TEST_LOG"
-              printf 'session-scoped\n' > "$output_dir/result.txt"
-              printf '%s\n' "$$" > "$output_dir/child.pid"
-              if [[ -n ''${PLAYWRIGHT_MCP_TEST_CHILD_LOG:-} ]]; then
-                printf '%s\n' "$$" > "$PLAYWRIGHT_MCP_TEST_CHILD_LOG"
-              fi
-
-              case ''${PLAYWRIGHT_MCP_TEST_MODE:-pass} in
-                wait)
-                  while [[ ! -e $PLAYWRIGHT_MCP_TEST_RELEASE ]]; do
-                    sleep 0.05
-                  done
-                  ;;
-                fail)
-                  exit 23
-                  ;;
-                stdio)
-                  IFS= read -r request
-                  printf '%s\n' "$request" > "$PLAYWRIGHT_MCP_TEST_STDIN_LOG"
-                  ;;
-                interrupt)
-                  kill -INT "$PPID"
-                  while true; do
-                    sleep 0.05
-                  done
-                  ;;
-              esac
-            '';
-          };
-          playwrightRuntimeTest = pkgs.callPackage ./pkgs/playwright-mcp {
-            inherit mkMcpServer;
-            chromium = fakeChromium;
-            playwrightMcp = fakePlaywright;
-          };
-          agentgatewayService = hostConfig.systemd.services.agentgateway.serviceConfig;
-
-          agentmemoryTemplate = hostConfig.sops.templates."agentmemory.env";
-          agentmemoryEnvironmentFiles =
-            hostConfig.virtualisation.oci-containers.containers.agentmemory.environmentFiles;
-          agentmemoryApiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";
-          agentmemoryTemplateFile = pkgs.writeText "agentmemory.env" agentmemoryTemplate.content;
           configArtifacts = hostConfig.my.configArtifacts;
           artifactSource = id: configArtifacts.${id}.source;
           artifactSourcesFor =
@@ -275,14 +214,6 @@
           checkSet = {
             nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
 
-            # 配備する package そのものを build し、同梱の downstream lifecycle test を実行する
-            agentgateway-session-lifecycle =
-              let
-                agentgateway = pkgs.callPackage ./pkgs/agentgateway { };
-              in
-              assert lib.hasPrefix "${agentgateway}/bin/agentgateway " agentgatewayService.ExecStart;
-              agentgateway;
-
             config-artifact-contract =
               assert actualConfigArtifactFormats == expectedConfigArtifactFormats;
               assert
@@ -303,16 +234,6 @@
               assert
                 homeConfig.home.file.".gemini/antigravity-cli/mcp_config.json".source
                 == artifactSource "clis/antigravity/mcp";
-              assert
-                hostConfig.environment.etc."agentgateway/config.yaml".source
-                == artifactSource "mcp/agentgateway/config";
-              # soft 上限の暫定封じ込め、session 解放の代替にはしない
-              assert agentgatewayService.LimitNOFILE == "4096:4096";
-              assert lib.elem "${artifactSource "mcp/agentmemory/config"}:/app/config.yaml:ro"
-                hostConfig.virtualisation.oci-containers.containers.agentmemory.volumes;
-              assert
-                hostConfig.sops.templates."searxng-settings.yml".content
-                == builtins.readFile (artifactSource "mcp/searxng/settings-template");
               assert
                 hostConfig.my.accounts == [ ]
                 ||
@@ -354,46 +275,6 @@
                     test "$(yq -r '.valkey.url' ${artifactSource "mcp/searxng/settings-template"})" = valkey://valkey:6379/0
                   touch $out
                 '';
-
-            playwright-runtime =
-              assert (agentgatewayService.RuntimeDirectory or null) == "agentgateway";
-              assert (agentgatewayService.RuntimeDirectoryMode or null) == "0700";
-              assert lib.elem "PLAYWRIGHT_MCP_RUNTIME_DIR=/run/agentgateway" agentgatewayService.Environment;
-              pkgs.runCommandLocal "check-playwright-runtime"
-                {
-                  nativeBuildInputs = [
-                    pkgs.bash
-                    pkgs.coreutils
-                    pkgs.gnugrep
-                  ];
-                }
-                ''
-                  bash ${self}/scripts/tests/playwright-runtime.sh \
-                    ${lib.getExe playwrightRuntimeTest} \
-                    ${hostConfig.my.mcp.targets.playwright.command}
-                  touch $out
-                '';
-
-            agentmemory-env =
-              assert agentmemoryEnvironmentFiles == [ agentmemoryTemplate.path ];
-              pkgs.runCommandLocal "check-agentmemory-env" { } ''
-                set -eu
-
-                printf '%s\n' \
-                  EMBEDDING_PROVIDER \
-                  OPENAI_API_KEY \
-                  OPENAI_BASE_URL \
-                  OPENAI_MODEL \
-                  | sort > expected-keys
-                cut -d= -f1 ${agentmemoryTemplateFile} | sort > actual-keys
-                diff -u expected-keys actual-keys
-
-                grep -Fqx 'OPENAI_BASE_URL=https://opencode.ai/zen/go/v1' ${agentmemoryTemplateFile}
-                grep -Fqx 'OPENAI_MODEL=minimax-m2.7' ${agentmemoryTemplateFile}
-                grep -Fqx 'EMBEDDING_PROVIDER=none' ${agentmemoryTemplateFile}
-                grep -Fqx ${lib.escapeShellArg agentmemoryApiKeyLine} ${agentmemoryTemplateFile}
-                touch $out
-              '';
 
             # 各 producer が実配備へ渡す immutable source を形式別に検査する。
             config-syntax =

@@ -87,9 +87,11 @@ in
             } \
             --argjson extensions ${
               lib.escapeShellArg (builtins.toJSON (builtins.attrNames roster.${name}.extensions))
-            } '
+            } \
+            --argjson options ${lib.escapeShellArg (builtins.toJSON roster.${name}.initializationOptions)} '
             .lsp["${name}"].command == $command and
-            (.lsp["${name}"].extensions | sort) == ($extensions | sort)
+            (.lsp["${name}"].extensions | sort) == ($extensions | sort) and
+            (.lsp["${name}"].initialization // {}) == $options
           ' ${artifactSource "clis/opencode/config"} > /dev/null
         '') (builtins.attrNames roster)}
 

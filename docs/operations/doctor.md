@@ -78,6 +78,6 @@ container の検査が `blocked` なら、同じ image と unit の `system` 結
 
 doctor は checkout の clean 状態、secret の値、AI CLI の配布元、内容、期待 version、login session、skill 本文、agent file の内容、agentmemory の保存内容を検査しない。source から system closure と設定を生成できるかは `nix flake check -L` で確認する。secret の復号は enrollment と bootstrap の担当である。
 
-検査 inventory をこの文書へ手書きしない。期待値の正本は current generation の doctor manifest であり、各 module の宣言から生成される。
+検査 inventory をこの文書へ手書きしない。期待値の正本は current generation の doctor manifest であり、各 unit の宣言から生成される。
 
 入口は [README](../../README.md)、初回検証の順序は[セットアップ](getting-started.md)、検査対象の構成は[構成概要](../architecture/overview.md)と [AI tooling](../architecture/ai-tooling.md)を参照する。

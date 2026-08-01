@@ -22,7 +22,7 @@ Nix store の candidate system
    └── current generation の doctor manifest
 ```
 
-通常の適用入口は `dotfiles-rebuild` だけである。[`commands/module.nix`](../../commands/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否し、評価済み `config.system.build.nixos-rebuild` を transaction 内から使う。source snapshot、flake check、candidate build は通常ユーザーで実行し、system profile の更新と activation だけを昇格する。
+通常の適用入口は `dotfiles-rebuild` だけである。[`rebuild/module.nix`](../../rebuild/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否し、評価済み `config.system.build.nixos-rebuild` を transaction 内から使う。source snapshot、flake check、candidate build は通常ユーザーで実行し、system profile の更新と activation だけを昇格する。
 
 `/run/current-system` は実行中の generation、`/nix/var/nix/profiles/system` は system profile、`/run/booted-system` は WSL 起動時の generation を表す。`wsl.conf` と activation interface の差分に応じて、live switch と WSL cold start を振り分ける。
 
@@ -30,16 +30,21 @@ Nix store の candidate system
 
 [`flake.nix`](../../flake.nix) の `collectUnits` がローカル module の入口である。`module.nix` を持つ directory を走査して集めるため、module を足すときに入口を編集しない。
 
-| Module | 所有する責務 |
+| Unit | 所有する責務 |
 |---|---|
-| `options.nix` | ホスト共通の `my.*` contract と導出値 |
-| `wsl.nix` | NixOS-WSL、systemd boot、Windows interop、`wslview` |
-| `nix.nix`、`fonts.nix` | Nix daemon、cache、GC と system font |
-| `secrets.nix`、`accounts/` | SOPS consumer、Git identity、account credential の配備 |
-| `mcp/` | agentgateway、MCP target、Docker backend |
+| `system/` | host 共通の語彙、NixOS-WSL、Windows interop、Nix daemon と cache、font、login user、Home Manager |
+| `mcp/` | agentgateway の endpoint、MCP target、その build |
 | `clis/` | AI CLI roster、設定、rules、skills、agents |
-| `user/` | login user、Home Manager、Git と user package |
-| `commands.nix` | generation 固有の `dotfiles-*` command と manifest |
+| `toolchain/` | PATH 上の汎用ツールと language server |
+| `images/` | OCI image inventory、同期、container backend の宣言 |
+| `telemetry/` | OpenTelemetry collector と endpoint 契約 |
+| `sonarqube/` | 品質 gate の server と DB |
+| `sops/`、`accounts/`、`git/` | secret の登録と検証、account credential、Git identity |
+| `rebuild/`、`doctor/`、`cleanup/`、`bootstrap/` | 適用 transaction、診断、整理、初回構築 |
+| `commands/` | `dotfiles-*` の組み立てと登録の契約。command の実体は責務を持つ unit が置く |
+| `quality/` | devShell、生成設定の登録簿、規約と構文の検査 |
+
+unit は責務で分かれ、層はどの unit でも同じ名前のファイルで表す。`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `tests/` `fixtures/` `package/` が素材である。
 
 Home Manager は独立した設定適用系ではなく、NixOS module として同じ system evaluation に入る。[`system/module.nix`](../../system/module.nix) が user package、shell 環境、Home Manager の配備を宣言し、activation 後の `home-manager-<user>.service` を doctor の検査対象にする。system 全体のファイルと service は NixOS、home 配下の宣言的な file と user package は Home Manager が所有する。
 
@@ -47,15 +52,15 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 ## Runtime services
 
-systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は各所有 module が `my.doctor.units` へ隣接して宣言する。
+systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は各所有 unit が `my.doctor.units` へ隣接して宣言する。
 
-[`mcp/module.nix`](../../mcp/module.nix) は Docker daemon と `mcp-backends` network を用意し、backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
+[`images/module.nix`](../../images/module.nix) は Docker daemon と `dotfiles-backends` network を用意し、`mkContainerBackend` が backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
 
 SOPS の暗号文は repository に置き、sops-nix が activation 時に host key で復号する。復号済み secret と template は runtime にだけ生成され、consumer の file、環境ファイルへ渡る。鍵と credential の境界は[セキュリティ設計](security.md)、通常の編集は [Secrets](../operations/secrets.md)に分けている。
 
 ## Current generation の doctor manifest
 
-[`commands/module.nix`](../../commands/module.nix) は評価済み設定から versioned JSON を生成し、system closure の `etc/dotfiles/doctor.json` に収録する。manifest は generation の論理 path、user、systemd unit、managed file、CLI の配備 contract、MCP、OCI、SOPS metadata、WSL interop と probe 上限を、各 module の宣言から導出する。検査専用の一覧を手書きしない。
+[`doctor/module.nix`](../../doctor/module.nix) は評価済み設定から versioned JSON を生成し、system closure の `etc/dotfiles/doctor.json` に収録する。manifest は generation の論理 path、user、systemd unit、managed file、CLI の配備 contract、MCP、OCI、SOPS metadata、WSL interop と probe 上限を、各 unit の宣言から導出する。検査専用の一覧を手書きしない。
 
 `dotfiles-doctor` は開始時に `/run/current-system/etc/dotfiles/doctor.json` を解決し、その immutable な store path だけを期待値として使う。実行中の doctor、manifest、system profile が同じ current generation に属することも検査する。doctor は service の再起動、image pull、file 修復を行わず、観測結果だけを返す。
 
@@ -63,7 +68,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 ## 生成 command
 
-[`commands/module.nix`](../../commands/module.nix) は `config.my` と shell source を `writeShellApplication` へ渡し、generation 固有の command を作る。command は system closure に入るため、current generation の command はその generation の設定と manifest に束縛される。一部は flake package としても公開され、current generation より新しい checkout の command を初回配備や更新前に実行できる。
+[`commands/module.nix`](../../commands/module.nix) は `mkCommand` の契約だけを持ち、`config.my` と shell source を `writeShellApplication` へ渡して generation 固有の command を作る。command の実体は責務を持つ unit が宣言する。command は system closure に入るため、current generation の command はその generation の設定と manifest に束縛される。一部は flake package としても公開され、current generation より新しい checkout の command を初回配備や更新前に実行できる。
 
 | 境界 | Command の責務 |
 |---|---|

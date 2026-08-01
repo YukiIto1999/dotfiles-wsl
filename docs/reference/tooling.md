@@ -9,8 +9,9 @@
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
 | system package | [`system/module.nix`](../../system/module.nix) と各 unit の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
-| user package | [`system/module.nix`](../../system/module.nix) の `home.packages` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
-| Home Manager program | [`system/module.nix`](../../system/module.nix) の `programs` | 同上 module を参照する |
+| 汎用ツール | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.packages` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
+| Home Manager program | [`system/module.nix`](../../system/module.nix) の `programs` | 同じ unit を参照する |
+| language server | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp` | `nix eval --json .#nixosConfigurations.nixos.config.my.toolchain.lsp --apply builtins.attrNames` |
 | 保守用 devShell | [`flake.nix`](../../flake.nix) の `devShells` | `nix develop --command echo` の後に `$PATH` を確認する |
 
 `nixfmt` は editor と単一ファイル、`nixfmt-tree` は `nix fmt` と repository 全体の検査を担当する。[Nixfmt README](https://github.com/NixOS/nixfmt/blob/master/README.md)
@@ -40,7 +41,9 @@ plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md
 | MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets.<name>` | `nix eval --json .#nixosConfigurations.nixos.config.my.mcp.targets --apply builtins.attrNames` |
 | Docker backend | [`images/module.nix`](../../images/module.nix) の `my.images` と各 unit の `mkContainerBackend` | `nix eval --json .#nixosConfigurations.nixos.config.my.images --apply builtins.attrNames` |
 | host process | 各 target module が宣言する stdio front | gateway の子 process を `systemd-cgls -u agentgateway-<endpoint>.service` で見る |
+| telemetry | [`telemetry/module.nix`](../../telemetry/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.telemetry` |
+| 品質 gate | [`sonarqube/module.nix`](../../sonarqube/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.sonarqube` |
 
-agentgateway は全 target を一つの HTTP endpoint へ公開し、各 AI CLI が同じ target 名を使う。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
+agentgateway は target を endpoint ごとに分けて公開する。CLI の global config が指すのは default だけで、他の endpoint へ繋ぐかは接続側が決める。target 名は endpoint をまたいで一意である。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
 構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。

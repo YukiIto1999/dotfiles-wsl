@@ -41,7 +41,7 @@ flake が宣言する build、静的検査、生成設定の構文検査をロ�
 nix flake check -L
 ```
 
-`nix flake check` は検査結果を返し、`nix fmt` のように source を整形しない。検査項目の正本は `flake.nix` の `checks` であり、check 名の一覧はここに複製しない。どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
+`nix flake check` は検査結果を返し、`nix fmt` のように source を整形しない。検査項目の正本は各 unit の `checks.nix` であり、`flake.nix` の `mergeChecks` がそれらを集めて id の重複を拒否する。check 名の一覧はここに複製しない。どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
 
 check を足したら、緑を見る前に赤を見る。検査対象を意図的に壊し、期待した message で落ちることを確かめてから戻す。落ちなければその検査は無効である。一つの検査は一つの結果だけを確かめる。複数を束ねると、最初の失敗が残りを隠す。
 
@@ -55,4 +55,4 @@ git diff --check
 
 ## CI
 
-[`.github/workflows/check.yml`](../../.github/workflows/check.yml) は `main` への push と pull request、手動実行で `nix flake check "git+file://${GITHUB_WORKSPACE}" -L` を実行する。CI は checkout 済みの Git tree を入力にし、検査内容は `flake.nix` の `checks` から取得する。
+[`.github/workflows/check.yml`](../../.github/workflows/check.yml) は `main` への push と pull request、手動実行で `nix flake check "git+file://${GITHUB_WORKSPACE}" -L` を実行する。CI は checkout 済みの Git tree を入力にし、検査内容はローカルと同じ経路で各 unit の `checks.nix` から集める。

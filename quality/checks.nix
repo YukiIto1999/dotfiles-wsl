@@ -78,6 +78,15 @@ in
           owner = "agentgateway-${id}";
           inherit (endpoint) port;
         }) contract.mcp.endpoints
+        ++ lib.concatLists (
+          lib.mapAttrsToList (
+            id: endpoint:
+            lib.mapAttrsToList (_: port: {
+              owner = "agentgateway-${id}";
+              inherit port;
+            }) endpoint.managementPorts
+          ) contract.mcp.endpoints
+        )
         ++ lib.mapAttrsToList (_: port: {
           owner = contract.telemetry.service;
           inherit port;
@@ -95,12 +104,16 @@ in
 
       # -p の直後の値だけが publish の指定。mkContainerBackend は必ず
       # 127.0.0.1:H:C を置くので、それ以外の形は loopback の外へ開く
+      # -p VALUE と --publish=VALUE の両形を拾う。片方だけだと素通りする
       publishValues =
         options:
         lib.concatLists (
           lib.imap0 (
             index: option:
             lib.optional (option == "-p" || option == "--publish") (builtins.elemAt options (index + 1))
+            ++ lib.optional (builtins.match "--?publish=.*" option != null) (
+              builtins.elemAt (lib.splitString "=" option) 1
+            )
           ) options
         );
 

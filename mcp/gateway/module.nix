@@ -15,11 +15,21 @@ let
   # probe の grep は npm package と native binary の subcommand が食い違い、呼ぶと常に失敗する
   deniedTools = [ "grep" ];
 
+  # upstream の既定は admin=localhost:15000、stats と readiness は wildcard:15020/15021
+  adminPort = 15000;
+  statsPort = 15020;
+  readinessPort = 15021;
+
   configOf =
     id:
     (pkgs.formats.yaml { }).generate "agentgateway-${id}-config.yaml" {
       # body 終了から数える idle session の reap 猶予、active stream は patch の guard が pin する
       config.mcp.sessionTtl = "30m";
+      # 既定は stats と readiness が全 interface。admin は無認証で quitquitquit と
+      # config_dump を持つので、三つとも loopback へ閉じる
+      config.adminAddr = "127.0.0.1:${toString adminPort}";
+      config.statsAddr = "127.0.0.1:${toString statsPort}";
+      config.readinessAddr = "127.0.0.1:${toString readinessPort}";
       binds = [
         {
           inherit (cfg.mcp.endpoints.${id}) port;
@@ -57,6 +67,11 @@ let
     service = "agentgateway-${id}";
     runtimeDirectory = "agentgateway-${id}";
     artifact = "mcp/gateway/${id}/config";
+    managementPorts = {
+      admin = adminPort;
+      stats = statsPort;
+      readiness = readinessPort;
+    };
     source = configOf id;
     targets = builtins.attrNames cfg.contract.mcp.fronts;
   }) cfg.mcp.endpoints;

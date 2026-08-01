@@ -57,6 +57,8 @@ let
 
   managedSettings = pkgs.replaceVars ./assets/managed-settings.json {
     lspMarketplacePath = "${lspMarketplace}";
+    telemetryEndpoint = cfg.contract.telemetry.endpoint;
+    telemetryProtocol = cfg.contract.telemetry.protocol;
   };
 in
 {

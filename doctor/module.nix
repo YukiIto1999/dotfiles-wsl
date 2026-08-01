@@ -310,10 +310,7 @@ in
   config.environment.etc."dotfiles/doctor.json".source = doctorManifest;
 
   # rebuild が読む契約。manifest の場所と schema を doctor が所有する
-  config.my.contract.doctor = {
-    manifest = doctorManifest;
-    schemaVersion = cfg.doctor.schemaVersion;
-  };
+  config.my.contract.doctor.schemaVersion = cfg.doctor.schemaVersion;
 
   config.assertions = [
     {

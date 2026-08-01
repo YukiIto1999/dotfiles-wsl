@@ -273,7 +273,6 @@ in
 
   # doctor が読む契約。images が所有する派生物を一箇所で公開する
   config.my.contract.images = {
-    manifest = ociImageManifest;
     entries = doctorOciImageManifestEntries;
     identityFiles = nixImageIdentityFiles;
     syncStatusCommand = lib.getExe syncImages;

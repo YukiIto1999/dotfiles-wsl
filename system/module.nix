@@ -139,16 +139,7 @@ in
     extraGroups = [ "wheel" ];
   };
 
-  config.environment.systemPackages = [
-    wslview
-  ]
-  ++ (with pkgs; [
-    wget
-    curl
-    vim
-    sops
-    age
-  ]);
+  config.environment.systemPackages = [ wslview ];
 
   config.home-manager.useGlobalPkgs = true;
   config.home-manager.useUserPackages = true;
@@ -159,24 +150,6 @@ in
     home.username = cfg.username;
     home.homeDirectory = cfg.homeDir;
     home.stateVersion = "25.11";
-
-    home.packages = with pkgs; [
-      nodejs_24
-      python3
-      uv
-      ripgrep
-      fd
-      jq
-      yq
-      xh
-      shellcheck
-      shfmt
-      just
-      nixfmt
-      nixd
-      devenv
-      nvd
-    ];
 
     home.sessionVariables.BROWSER = "wslview";
     home.sessionPath = [ "$HOME/.local/bin" ];

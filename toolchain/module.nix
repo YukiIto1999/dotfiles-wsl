@@ -119,6 +119,9 @@ in
   };
 
   config.my.toolchain = {
+    # GitHub Actions のローカル実行。nix 統合を持つ
+    actrun = pkgs.callPackage ./actrun/package.nix { };
+
     inherit (pkgs)
       # 言語 runtime
       nodejs_24

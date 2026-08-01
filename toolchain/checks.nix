@@ -13,8 +13,21 @@ let
     declared ++ builtins.attrValues hostConfig.my.commands ++ homeConfig.home.packages
   );
   lspServers = builtins.attrValues hostConfig.my.lsp;
+  toolchain = hostConfig.my.toolchain;
 in
 {
+  # 上流 release の binary は同梱 library を欠くと build は通って実行時に落ちる
+  toolchain-binary-runs =
+    pkgs.runCommandLocal "check-toolchain-binary-runs" { nativeBuildInputs = [ pkgs.coreutils ]; }
+      ''
+        set -euo pipefail
+
+
+        ${lib.getExe toolchain.actrun} --help > actrun-help
+        grep -q . actrun-help
+        touch $out
+      '';
+
   # 宣言した command が package に無いと、CLI 側は起動時まで気付かない
   lsp-command-present =
     assert lib.all (server: lib.elem server.package homeConfig.home.packages) lspServers;

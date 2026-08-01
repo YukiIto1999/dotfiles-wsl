@@ -19,12 +19,8 @@ let
     url = "http://127.0.0.1:${toString target.port}/mcp";
   }) cfg.mcp.targets;
 
-  targetPrefixConflicts = lib.concatMap (
-    name:
-    map (other: "${name} -> ${other}") (
-      builtins.filter (other: other != name && lib.hasPrefix "${name}_" other) targetNames
-    )
-  ) targetNames;
+  # gateway は最初の _ で target と tool を切る。名前に _ が入ると解決できない
+  targetsWithDelimiter = builtins.filter (name: builtins.match ".*_.*" name != null) targetNames;
 in
 {
   options.my.mcp = {
@@ -97,10 +93,9 @@ in
 
   config.assertions = [
     {
-      assertion = targetPrefixConflicts == [ ];
+      assertion = targetsWithDelimiter == [ ];
       message =
-        "MCP target names must not prefix another target name with '<name>_': "
-        + lib.concatStringsSep ", " targetPrefixConflicts;
+        "MCP target names must not contain '_': " + lib.concatStringsSep ", " targetsWithDelimiter;
     }
   ];
 

@@ -22,6 +22,14 @@ in
       ''
         set -euo pipefail
 
+        version=$(${lib.getExe toolchain.apm} --version)
+        case $version in
+          "Agent Package Manager (APM) CLI version ${toolchain.apm.version}"*) ;;
+          *)
+            echo "unexpected apm version banner: $version" >&2
+            exit 1
+            ;;
+        esac
 
         ${lib.getExe toolchain.actrun} --help > actrun-help
         grep -q . actrun-help

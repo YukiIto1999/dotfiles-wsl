@@ -7,9 +7,9 @@ AI CLI の binary、共通資材、MCP 接続は別の経路で配備する。bi
 ## 配備の流れ
 
 ```text
-share/AGENTS.md ───────────────┐
-share/agents/*.md ── CLI変換 ─┤
-share/skills/* ── live link ──┼─ Home Manager ──► 各 CLI の設定領域
+clis/assets/AGENTS.md ───────────────┐
+clis/assets/agents/*.md ── CLI変換 ─┤
+clis/assets/skills/* ── live link ──┼─ Home Manager ──► 各 CLI の設定領域
 flake input の plugin skills ─┘
 
 AI CLI ── HTTP /mcp ──► agentgateway ── spawn ──► stdio MCP front
@@ -17,17 +17,17 @@ AI CLI ── HTTP /mcp ──► agentgateway ── spawn ──► stdio MCP 
                                                    └─► host process または Docker backend
 ```
 
-[`modules/clis/default.nix`](../../modules/clis/default.nix) の `my.clis` が、binary 名、rules、skills、agents、gateway file、入手方法の roster contract を定義する。個別 module の一覧が正本であり、この文書には version、skill 名、agent 名を転記しない。
+[`clis/module.nix`](../../clis/module.nix) の `my.clis` が、binary 名、rules、skills、agents、gateway file、入手方法の roster contract を定義する。個別 module の一覧が正本であり、この文書には version、skill 名、agent 名を転記しない。
 
 `dotfiles-install-clis` は roster から installer を生成し、通常ユーザーの `~/.local/bin` を更新する。systemd timer も同じ command を日次実行する。Nix は入手方法と固定配置先を宣言するが、CLI binary の内容や version を system closure に固定しない。
 
 ## 共通 rules、agent、skill
 
-[`share/AGENTS.md`](../../share/AGENTS.md) は全 CLI へ配る共通 rules の正本である。Home Manager が CLI ごとの規定 path に同じ source を配備する。
+[`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) は全 CLI へ配る共通 rules の正本である。Home Manager が CLI ごとの規定 path に同じ source を配備する。
 
-静的 agent の正本は [`share/agents/`](../../share/agents) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OpenCode は frontmatter 付き Markdown へ build 時に変換する。Antigravity は `agentsDir = null` であり、静的 agent を配備しない。CLI ごとの変換は [`modules/clis/default.nix`](../../modules/clis/default.nix) と各 CLI module が所有する。
+静的 agent の正本は [`clis/assets/agents/`](../../clis/assets/agents) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OpenCode は frontmatter 付き Markdown へ build 時に変換する。Antigravity は `agentsDir = null` であり、静的 agent を配備しない。CLI ごとの変換は [`clis/module.nix`](../../clis/module.nix) と各 CLI module が所有する。
 
-local skill は [`share/skills/`](../../share/skills) から自動検出し、checkout への out-of-store symlink として各 CLI へ配る。既存 skill の本文変更は rebuild なしで見えるが、追加、削除、名前変更は Nix 評価と rebuild が必要になる。plugin 由来 skill は [`flake.nix`](../../flake.nix) の固定 input から検出し、Nix store path を配備する。local と plugin の同名 skill は評価時に拒否する。
+local skill は [`clis/assets/skills/`](../../clis/assets/skills) から自動検出し、checkout への out-of-store symlink として各 CLI へ配る。既存 skill の本文変更は rebuild なしで見えるが、追加、削除、名前変更は Nix 評価と rebuild が必要になる。plugin 由来 skill は [`flake.nix`](../../flake.nix) の固定 input から検出し、Nix store path を配備する。local と plugin の同名 skill は評価時に拒否する。
 
 ## CLI ごとの差
 
@@ -78,9 +78,9 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 
 | 変更対象 | 正本 |
 |---|---|
-| CLI roster と配備差 | [`modules/clis/default.nix`](../../modules/clis/default.nix) と各 CLI module |
-| 共通 rules | [`share/AGENTS.md`](../../share/AGENTS.md) |
-| local agent と skill | [`share/agents/`](../../share/agents)、[`share/skills/`](../../share/skills) |
+| CLI roster と配備差 | [`clis/module.nix`](../../clis/module.nix) と各 CLI module |
+| 共通 rules | [`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) |
+| local agent と skill | [`clis/assets/agents/`](../../clis/assets/agents)、[`clis/assets/skills/`](../../clis/assets/skills) |
 | plugin skill source | [`flake.nix`](../../flake.nix) と `flake.lock` |
 | MCP target | [`modules/mcp/default.nix`](../../modules/mcp/default.nix) と各 server module |
 | gateway と Docker backend | [`modules/mcp/gateway.nix`](../../modules/mcp/gateway.nix)、[`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) |

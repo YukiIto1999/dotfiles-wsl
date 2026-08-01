@@ -47,4 +47,6 @@ in
       }
       // extra
     );
+
+  config.environment.systemPackages = builtins.attrValues cfg.commands;
 }

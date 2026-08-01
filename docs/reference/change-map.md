@@ -16,18 +16,18 @@
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| AI CLI を追加する | [`modules/clis/NAME/`](../../modules/clis) の module と [`modules/clis/default.nix`](../../modules/clis/default.nix) の `imports`、`my.clis` roster | 新規ファイルを `git add` し、checkout から `nix run .#dotfiles-install-clis`、`dotfiles-rebuild` の順に実行する |
-| AI CLI を管理対象から外す | 対応する [`modules/clis/NAME/`](../../modules/clis) の module と [`modules/clis/default.nix`](../../modules/clis/default.nix) の `imports` | `dotfiles-rebuild`。`dotfiles-install-clis` は残存 binary を削除しないため、upstream が配置したファイルは別途削除する |
-| CLI 固有の managed config を変える | 対応する [`modules/clis/NAME/`](../../modules/clis) の template と module | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| CLI の upstream 入手方法を変える | 対応する [`modules/clis/NAME/default.nix`](../../modules/clis) の `my.clis.NAME.install` | `dotfiles-rebuild`、`dotfiles-install-clis` |
+| AI CLI を追加する | [`clis/NAME/module.nix`](../../clis) を作り `my.clis.NAME` を宣言する。収集は flake が行うため roster への転記は要らない | 新規ファイルを `git add` し、checkout から `nix run .#dotfiles-install-clis`、`dotfiles-rebuild` の順に実行する |
+| AI CLI を管理対象から外す | 対応する [`clis/NAME/`](../../clis) を削除する | `dotfiles-rebuild`。`dotfiles-install-clis` は残存 binary を削除しないため、upstream が配置したファイルは別途削除する |
+| CLI 固有の managed config を変える | 対応する [`clis/NAME/assets/`](../../clis) の template と `module.nix` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| CLI の upstream 入手方法を変える | 対応する [`clis/NAME/module.nix`](../../clis) の `my.clis.NAME.install` | `dotfiles-rebuild`、`dotfiles-install-clis` |
 
 ## Agent と skill
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| 共通ルールを変える | [`share/AGENTS.md`](../../share/AGENTS.md) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| local skill を追加または変更する | [`share/skills/NAME/SKILL.md`](../../share/skills) と [`modules/clis/default.nix`](../../modules/clis/default.nix) の自動検出、配備規則 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
-| subagent を追加または変更する | [`share/agents/NAME.md`](../../share/agents) と [`modules/clis/default.nix`](../../modules/clis/default.nix) の自動検出、CLI 別変換 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
+| 共通ルールを変える | [`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| local skill を追加または変更する | [`clis/assets/skills/NAME/SKILL.md`](../../clis/assets/skills) と [`clis/module.nix`](../../clis/module.nix) の自動検出、配備規則 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
+| subagent を追加または変更する | [`clis/assets/agents/NAME.md`](../../clis/assets/agents) と [`clis/module.nix`](../../clis/module.nix) の自動検出、CLI 別変換 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
 | plugin 由来の skill を更新する | [`flake.nix`](../../flake.nix) の plugin inputs と [`flake.lock`](../../flake.lock) | input を更新し、`dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 
 ## MCP

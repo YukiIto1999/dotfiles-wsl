@@ -7,10 +7,10 @@
 
 let
   cfg = config.my;
-  managedMcp = pkgs.replaceVars ./managed-mcp.json {
+  managedMcp = pkgs.replaceVars ./assets/managed-mcp.json {
     inherit (cfg) gatewayUrl;
   };
-  userSettingsSeed = ./settings.json;
+  userSettingsSeed = ./assets/settings.json;
 in
 {
   my.clis.claude = {
@@ -29,7 +29,7 @@ in
   my.configArtifacts = {
     "clis/claude/managed-settings" = {
       format = "json";
-      source = ./managed-settings.json;
+      source = ./assets/managed-settings.json;
     };
     "clis/claude/managed-mcp" = {
       format = "json";
@@ -41,7 +41,7 @@ in
     };
   };
 
-  environment.etc."claude-code/managed-settings.json".source = ./managed-settings.json;
+  environment.etc."claude-code/managed-settings.json".source = ./assets/managed-settings.json;
 
   # nix 所有 config パターンで gateway 登録を宣言的化
   environment.etc."claude-code/managed-mcp.json".source = managedMcp;

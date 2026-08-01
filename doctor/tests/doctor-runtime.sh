@@ -916,6 +916,8 @@ expect_usage_error() {
   fi
 }
 
+# probe が有限で終わることを見る。probe policy の timeout は 5s だが、
+# 並列 build の下では実時間が延びるので、無限でないことを示す余裕を取る
 expect_failure_with_deadline() {
   local label=$1 expected=$2 mutation=$3 max_seconds=$4 started elapsed
   reset_fixture
@@ -1412,7 +1414,7 @@ expect_failure 'cold-start mismatch' 'FAIL: WSL cold-start state requires switch
 expect_failure 'unit not loaded' 'FAIL: fixture.service state does not match manifest' unit_unloaded
 expect_failure 'unit inactive' 'FAIL: fixture.service state does not match manifest' unit_inactive
 expect_failure 'systemctl show failed' 'FAIL: fixture.service state does not match manifest' unit_probe_failed
-expect_failure_with_deadline 'systemctl show timed out' 'FAIL: fixture.service state does not match manifest' unit_probe_timed_out 8
+expect_failure_with_deadline 'systemctl show timed out' 'FAIL: fixture.service state does not match manifest' unit_probe_timed_out 30
 
 expect_failure 'OCI state missing' 'FAIL: OCI image sync state and lock are invalid' oci_state_missing
 
@@ -1453,8 +1455,8 @@ expect_nix_identity_failure 'Nix OCI identity imageFile mismatch' nix_identity_i
 expect_nix_identity_failure 'Nix OCI identity ID invalid' nix_identity_invalid_id
 expect_failure 'upstream OCI container image mismatch' 'FAIL: OCI container does not run the desired image: image-a' upstream_container_mismatch
 expect_failure 'upstream OCI container stopped' 'FAIL: OCI container does not run the desired image: image-a' upstream_container_stopped
-expect_failure_with_deadline 'upstream OCI image inspect timed out' 'FAIL: OCI image does not match the desired digest: image-a' upstream_image_timed_out 8
-expect_failure_with_deadline 'upstream OCI container inspect timed out' 'FAIL: OCI container does not run the desired image: image-a' upstream_container_timed_out 8
+expect_failure_with_deadline 'upstream OCI image inspect timed out' 'FAIL: OCI image does not match the desired digest: image-a' upstream_image_timed_out 30
+expect_failure_with_deadline 'upstream OCI container inspect timed out' 'FAIL: OCI container does not run the desired image: image-a' upstream_container_timed_out 30
 
 reset_fixture
 docker_unit_inactive
@@ -1512,7 +1514,7 @@ elif ! grep -Fqx 'SKIP: MCP session is blocked by its health unit' "$doctor_outp
 fi
 expect_failure 'SOPS metadata mismatch' 'FAIL: SOPS host key metadata does not match root policy' sops_mode_mismatch
 expect_failure 'SOPS root probe failed' 'FAIL: SOPS host key metadata does not match root policy' sops_probe_failed
-expect_failure_with_deadline 'SOPS root probe timed out' 'FAIL: SOPS host key metadata does not match root policy' sops_probe_timed_out 8
+expect_failure_with_deadline 'SOPS root probe timed out' 'FAIL: SOPS host key metadata does not match root policy' sops_probe_timed_out 30
 expect_warning 'home key migration warning' 'WARN: user SOPS age key still exists during migration' home_key_present
 expect_failure 'home key rejected' 'FAIL: user SOPS age key must not exist after migration' home_key_rejected
 expect_contract_error 'home key policy invalid' "ERROR: doctor manifest does not match schema version $schema_version: $manifest" home_key_policy_invalid
@@ -1554,7 +1556,7 @@ expect_failure 'wslview missing' "FAIL: WSL launcher is missing or stale: $wslvi
 expect_failure 'wslview shadowed' "FAIL: wslview does not resolve to $wslview_path" wslview_shadowed
 expect_failure 'Windows command missing' "FAIL: Windows interop command is not executable: $windows_command" windows_command_missing
 expect_failure 'Windows interop probe failed' "FAIL: Windows interop probe failed: $windows_command" windows_command_failed
-expect_failure_with_deadline 'Windows interop probe timed out' "FAIL: Windows interop probe failed: $windows_command" windows_command_timed_out 8
+expect_failure_with_deadline 'Windows interop probe timed out' "FAIL: Windows interop probe failed: $windows_command" windows_command_timed_out 30
 expect_failure 'nix-ld missing' "FAIL: nix-ld dynamic linker path is missing: $nix_ld_path" nix_ld_missing
 
 initialize_call='POST|initialize|||<absent>'

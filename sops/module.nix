@@ -193,9 +193,4 @@ in
 
   config.my.commands.sopsEnroll = sopsEnroll;
   config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;
-
-  config.my.contract.sops = {
-    generation = sopsGeneration.contract;
-    inherit (sopsGeneration) reinstallSecrets;
-  };
 }

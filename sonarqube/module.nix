@@ -90,10 +90,6 @@ in
     restartUnits = [ "docker-sonarqube.service" ];
   };
 
-  # 解析対象は project ごとなので、環境が持つのは server の所在だけ。
-  # port の正本は container の publish 宣言で、ここはそこから導く
-  config.my.contract.sonarqube.url = "http://127.0.0.1:${serverPort}";
-
   config.virtualisation.oci-containers.containers = database.containers // server.containers;
   config.systemd.services =
     database.systemdServices
@@ -110,7 +106,7 @@ in
           RemainAfterExit = true;
           User = config.my.username;
           Environment = [
-            "SONARQUBE_URL=${config.my.contract.sonarqube.url}"
+            "SONARQUBE_URL=http://127.0.0.1:${serverPort}"
             "SONARQUBE_ADMIN_PASSWORD_FILE=${config.sops.secrets."sonarqube/admin_password".path}"
           ];
           ExecStart = lib.getExe provisionAdmin;

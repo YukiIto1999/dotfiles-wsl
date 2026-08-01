@@ -6,7 +6,6 @@
 }:
 
 let
-  contract = hostConfig.my.contract.sonarqube;
   containers = hostConfig.virtualisation.oci-containers.containers;
 
   # port の正本は publish 宣言。契約の URL がそこから外れていないかを見る
@@ -27,7 +26,8 @@ in
       containers.sonarqube-db.environmentFiles == [ hostConfig.sops.templates."sonarqube-db.env".path ];
     assert lib.elem "--network=dotfiles-backends" containers.sonarqube.extraOptions;
     assert lib.elem "--network=dotfiles-backends" containers.sonarqube-db.extraOptions;
-    assert contract.url == "http://127.0.0.1:${publishedPort}";
+    assert lib.elem "SONARQUBE_URL=http://127.0.0.1:${publishedPort}"
+      hostConfig.systemd.services.sonarqube-provision.serviceConfig.Environment;
     assert !(lib.elem "-p" containers.sonarqube-db.extraOptions);
     assert lib.elem "docker-sonarqube-db.service" hostConfig.systemd.services.docker-sonarqube.requires;
     # 既定の admin 資格情報のまま公開しない

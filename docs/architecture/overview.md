@@ -49,7 +49,7 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は各所有 module が `my.doctor.units` へ隣接して宣言する。
 
-[`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) は Docker daemon と `mcp-backends` network を用意し、backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
+[`mcp/module.nix`](../../mcp/module.nix) は Docker daemon と `mcp-backends` network を用意し、backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
 
 SOPS の暗号文は repository に置き、sops-nix が activation 時に host key で復号する。復号済み secret と template は runtime にだけ生成され、consumer の file、環境ファイルへ渡る。鍵と credential の境界は[セキュリティ設計](security.md)、通常の編集は [Secrets](../operations/secrets.md)に分けている。
 

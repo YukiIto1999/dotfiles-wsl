@@ -91,27 +91,31 @@ Docker backend の container は同一の Docker network `mcp-backends` に属�
 
 ```text
 .
-├── flake.nix              NixOS system、package、check の入口
+├── flake.nix              unit の収集、NixOS system、package、check の入口
 ├── flake.lock             input の固定
-├── modules/
-│   ├── clis/              AI CLI ごとの配備設定
-│   ├── commands/          dotfiles-* command の実装
-│   ├── mcp/               gateway、MCP target、Docker backend
-│   ├── user/              Home Manager と Git 設定
-│   └── secrets.nix        SOPS の消費側
-├── pkgs/                  MCP server と image の build 定義
-├── scripts/               初回構築と保守用 script
+├── clis/                  AI CLI の共通資産と CLI ごとの配備
+├── mcp/                   gateway、MCP target、Docker backend
+├── doctor/                実用状態の診断
+├── rebuild/               rebuild transaction
+├── images/                OCI image inventory と同期
+├── sops/                  secret の登録と検証
+├── accounts/ git/ cleanup/ commands/ quality/ system/
+├── bootstrap/             初回構築
 ├── secrets/               SOPS で暗号化した secrets
-├── share/                 共通ルール、agents、skills
-└── docs/                  runbook、architecture、reference、ADR
+└── docs/                  runbook、architecture、reference
 ```
+
+責務は repo 直下に置き、層はどの責務でも同じ名前のファイルで表す。
+`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `tests/` `fixtures/` `package/` が素材である。
+`flake.nix` はこの名前だけを頼りに unit を集めるため、責務を足すとき flake を編集しない。
+
 
 設計全体は[構成概要](docs/architecture/overview.md)、AI CLI と MCP の境界は[AI tooling](docs/architecture/ai-tooling.md)に記載する。
 
 ## 変更
 
 変更対象は[変更箇所一覧](docs/reference/change-map.md)から選ぶ。
-生成先を直接直さず、対応する Nix module、template、`share/`、または暗号化済み secrets を変更する。
+生成先を直接直さず、対応する unit の `module.nix`、`assets/`、または暗号化済み secrets を変更する。
 
 通常の変更後は `dotfiles-rebuild --plan` で候補を確認し、`dotfiles-rebuild` で適用する。
 この経路が build、activation、検証を一つの transaction として扱う。

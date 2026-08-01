@@ -42,23 +42,23 @@ Claude Code の user settings と Codex の user config は CLI が更新し得�
 
 ## agentgateway と MCP target
 
-[`modules/mcp/default.nix`](../../modules/mcp/default.nix) は target module を import し、各 module が `my.mcp.targets.<name>.command` を一度だけ宣言する。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
+[`mcp/module.nix`](../../mcp/module.nix) は target module を import し、各 module が `my.mcp.targets.<name>.command` を一度だけ宣言する。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
 
-[`modules/mcp/gateway.nix`](../../modules/mcp/gateway.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。gateway は request の target prefix に応じて Nix store 上の stdio front を子 process として起動する。
+[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。gateway は request の target prefix に応じて Nix store 上の stdio front を子 process として起動する。
 
-MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。完全な target 一覧は [`modules/mcp/default.nix`](../../modules/mcp/default.nix) の imports と各 [`modules/mcp/servers/`](../../modules/mcp/servers) の `my.mcp.targets` を参照する。
+MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。完全な target 一覧は各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets` を参照する。
 
 session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle の 30 分は body の終了時刻から数え、明示 DELETE は即座に session を削除する。
 
 ## Docker backend
 
-[`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) の `mkMcpBackend` は、container、systemd 依存、`mcp-backends` network、host port の publish と doctor 宣言をまとめる。backend 同士は Docker network で接続し、host 側へ必要な port だけを `127.0.0.1` に publish する。stdio front は host loopback の backend endpoint に接続する。
+[`mcp/module.nix`](../../mcp/module.nix) の `mkMcpBackend` は、container、systemd 依存、`mcp-backends` network、host port の publish と doctor 宣言をまとめる。backend 同士は Docker network で接続し、host 側へ必要な port だけを `127.0.0.1` に publish する。stdio front は host loopback の backend endpoint に接続する。
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の manifest と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。Docker cache、同期 receipt、稼働 container の収束は current generation の doctor が別々に観測する。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 
 ## agentmemory
 
-[`modules/mcp/servers/memory.nix`](../../modules/mcp/servers/memory.nix) は agentmemory engine を Docker container、MCP front を host process、lifecycle hook を system command として配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。
+[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は agentmemory engine を Docker container、MCP front を host process、lifecycle hook を system command として配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。
 
 ```text
 Claude Code / Codex hooks ─┐
@@ -82,8 +82,8 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | 共通 rules | [`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) |
 | local agent と skill | [`clis/assets/agents/`](../../clis/assets/agents)、[`clis/assets/skills/`](../../clis/assets/skills) |
 | plugin skill source | [`flake.nix`](../../flake.nix) と `flake.lock` |
-| MCP target | [`modules/mcp/default.nix`](../../modules/mcp/default.nix) と各 server module |
-| gateway と Docker backend | [`modules/mcp/gateway.nix`](../../modules/mcp/gateway.nix)、[`modules/mcp/docker.nix`](../../modules/mcp/docker.nix) |
-| agentmemory | [`modules/mcp/servers/memory.nix`](../../modules/mcp/servers/memory.nix) と [`pkgs/agentmemory/`](../../pkgs/agentmemory) |
+| MCP target | [`mcp/module.nix`](../../mcp/module.nix) と各 server module |
+| gateway と Docker backend | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix)、[`mcp/module.nix`](../../mcp/module.nix) |
+| agentmemory | [`mcp/memory/module.nix`](../../mcp/memory/module.nix) と [`mcp/memory/`](../../mcp/memory) |
 
 配備後の調査は [Doctor](../operations/doctor.md)、構成変更の適用は [Rebuild](../operations/rebuild.md)に従う。

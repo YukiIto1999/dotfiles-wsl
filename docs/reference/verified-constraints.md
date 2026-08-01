@@ -10,12 +10,12 @@
 
 | 制約 | 検証 |
 |---|---|
-| 生成 config artifact が配備先の source と一致する | `config-artifact-contract` |
+| 生成 config artifact が配備先の source と一致する | `config-artifact-contract`、`mcp-artifact-contract` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | doctor manifest が各 module の宣言と一致する | `doctor-manifest-contract` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
-| MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`modules/mcp/default.nix` の assertion) |
-| image id が container を一意に指す | `nixos-toplevel` (`modules/mcp/docker.nix` の assertion) |
+| MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`mcp/module.nix` の assertion) |
+| image id が container を一意に指す | `nixos-toplevel` (`mcp/module.nix` の assertion) |
 | 全 module から system closure を評価できる | `nixos-toplevel` |
 
 ## runtime の振る舞い

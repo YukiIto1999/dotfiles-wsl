@@ -2,7 +2,7 @@
 
 let
   cfg = config.my;
-  mcpConfig = pkgs.replaceVars ./mcp_config.json {
+  mcpConfig = pkgs.replaceVars ./assets/mcp_config.json {
     inherit (cfg) gatewayUrl;
   };
 in

@@ -21,11 +21,11 @@ let
   codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
     sandbox_workspace_write.writable_roots = [ "${cfg.dotfilesDir}/.git" ];
   };
-  codexSystemConfig = pkgs.replaceVars ./config-system.toml {
+  codexSystemConfig = pkgs.replaceVars ./assets/config-system.toml {
     inherit (cfg) gatewayUrl;
     inherit codexModel;
   };
-  codexUserSeed = pkgs.replaceVars ./config.toml { inherit codexModel; };
+  codexUserSeed = pkgs.replaceVars ./assets/config.toml { inherit codexModel; };
 
   splitFrontmatter =
     src:

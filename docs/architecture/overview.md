@@ -22,7 +22,7 @@ Nix store の candidate system
    └── current generation の doctor manifest
 ```
 
-通常の適用入口は `dotfiles-rebuild` だけである。[`modules/commands.nix`](../../modules/commands.nix) は PATH 上の直接の `nixos-rebuild` を拒否し、評価済み `config.system.build.nixos-rebuild` を transaction 内から使う。source snapshot、flake check、candidate build は通常ユーザーで実行し、system profile の更新と activation だけを昇格する。
+通常の適用入口は `dotfiles-rebuild` だけである。[`commands/module.nix`](../../commands/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否し、評価済み `config.system.build.nixos-rebuild` を transaction 内から使う。source snapshot、flake check、candidate build は通常ユーザーで実行し、system profile の更新と activation だけを昇格する。
 
 `/run/current-system` は実行中の generation、`/nix/var/nix/profiles/system` は system profile、`/run/booted-system` は WSL 起動時の generation を表す。`wsl.conf` と activation interface の差分に応じて、live switch と WSL cold start を振り分ける。
 
@@ -55,7 +55,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 ## Current generation の doctor manifest
 
-[`modules/commands.nix`](../../modules/commands.nix) は評価済み設定から versioned JSON を生成し、system closure の `etc/dotfiles/doctor.json` に収録する。manifest は generation の論理 path、user、systemd unit、managed file、CLI の配備 contract、MCP、OCI、SOPS metadata、WSL interop と probe 上限を、各 module の宣言から導出する。検査専用の一覧を手書きしない。
+[`commands/module.nix`](../../commands/module.nix) は評価済み設定から versioned JSON を生成し、system closure の `etc/dotfiles/doctor.json` に収録する。manifest は generation の論理 path、user、systemd unit、managed file、CLI の配備 contract、MCP、OCI、SOPS metadata、WSL interop と probe 上限を、各 module の宣言から導出する。検査専用の一覧を手書きしない。
 
 `dotfiles-doctor` は開始時に `/run/current-system/etc/dotfiles/doctor.json` を解決し、その immutable な store path だけを期待値として使う。実行中の doctor、manifest、system profile が同じ current generation に属することも検査する。doctor は service の再起動、image pull、file 修復を行わず、観測結果だけを返す。
 
@@ -63,7 +63,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 ## 生成 command
 
-[`modules/commands.nix`](../../modules/commands.nix) は `config.my` と shell source を `writeShellApplication` へ渡し、generation 固有の command を作る。command は system closure に入るため、current generation の command はその generation の設定と manifest に束縛される。一部は flake package としても公開され、current generation より新しい checkout の command を初回配備や更新前に実行できる。
+[`commands/module.nix`](../../commands/module.nix) は `config.my` と shell source を `writeShellApplication` へ渡し、generation 固有の command を作る。command は system closure に入るため、current generation の command はその generation の設定と manifest に束縛される。一部は flake package としても公開され、current generation より新しい checkout の command を初回配備や更新前に実行できる。
 
 | 境界 | Command の責務 |
 |---|---|

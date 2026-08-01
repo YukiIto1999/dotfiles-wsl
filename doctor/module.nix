@@ -193,6 +193,11 @@ in
       assertion = builtins.length managedFilePaths == builtins.length (lib.unique managedFilePaths);
       message = "my.doctor.managedFiles contains duplicate runtime paths";
     }
+    {
+      assertion =
+        cfg.doctor.probePolicy.mcpCleanupTimeoutSeconds < cfg.doctor.probePolicy.totalTimeoutSeconds;
+      message = "my.doctor.probePolicy must reserve time for active MCP requests";
+    }
   ];
 
   security.sudo.extraRules = [
@@ -207,4 +212,5 @@ in
       ];
     }
   ];
+
 }

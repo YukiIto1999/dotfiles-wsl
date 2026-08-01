@@ -8,7 +8,7 @@
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
-| system package | [`modules/user/default.nix`](../../modules/user/default.nix) と各 [`modules/clis/`](../../modules/clis) module の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
+| system package | [`modules/user/default.nix`](../../modules/user/default.nix) と各 [`clis/`](../../clis) module の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
 | user package | [`modules/user/default.nix`](../../modules/user/default.nix) の `home.packages` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
 | Home Manager program | [`modules/user/default.nix`](../../modules/user/default.nix) の `programs` | 同上 module を参照する |
 | 保守用 devShell | [`flake.nix`](../../flake.nix) の `devShells` | `nix develop --command echo` の後に `$PATH` を確認する |
@@ -17,7 +17,7 @@
 
 ## 運用 command
 
-利用者向けの入口は `dotfiles-` prefix を持つ生成 command である。定義は [`modules/commands.nix`](../../modules/commands.nix) と [`sops/module.nix`](../../sops/module.nix)、bootstrap から呼ぶ flake package の公開は [`flake.nix`](../../flake.nix) の `packages` にある。command は `writeShellApplication` で生成し、必要な CLI を runtime closure に含める。
+利用者向けの入口は `dotfiles-` prefix を持つ生成 command である。定義は [`commands/module.nix`](../../commands/module.nix) と [`sops/module.nix`](../../sops/module.nix)、bootstrap から呼ぶ flake package の公開は [`flake.nix`](../../flake.nix) の `packages` にある。command は `writeShellApplication` で生成し、必要な CLI を runtime closure に含める。
 
 現在の一覧は `nix eval --json .#nixosConfigurations.nixos.config.my.commands --apply builtins.attrNames` で確認する。
 
@@ -25,9 +25,9 @@
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
-| AI CLI | [`modules/clis/default.nix`](../../modules/clis/default.nix) の `my.clis` | `nix eval --json .#nixosConfigurations.nixos.config.my.clis --apply builtins.attrNames` |
-| 静的 agent | [`share/agents/`](../../share/agents) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.agentFiles` |
-| local skill | [`share/skills/`](../../share/skills) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.skillNames` |
+| AI CLI | [`clis/module.nix`](../../clis/module.nix) の `my.clis` | `nix eval --json .#nixosConfigurations.nixos.config.my.clis --apply builtins.attrNames` |
+| 静的 agent | [`clis/assets/agents/`](../../clis/assets/agents) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.agentFiles` |
+| local skill | [`clis/assets/skills/`](../../clis/assets/skills) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.skillNames` |
 | plugin skill | [`flake.nix`](../../flake.nix) の plugin input と [`flake.lock`](../../flake.lock) | 同上。local skill と合わせて出る |
 
 plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md) の責務境界に従う。

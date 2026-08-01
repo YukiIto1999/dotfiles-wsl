@@ -1,11 +1,14 @@
 {
   config,
   lib,
+  pkgs,
   pluginSources,
+  mkCommand,
   ...
 }:
 
 let
+  orElse = v: default: if v == null then default else v;
   cfg = config.my;
   inherit (cfg) clis;
   names = builtins.attrNames clis;
@@ -29,7 +32,7 @@ let
       };
       rulesFile = lib.mkOption {
         type = lib.types.str;
-        description = "share/AGENTS.md の配備先。home 相対パス。";
+        description = "clis/assets/AGENTS.md の配備先。home 相対パス。";
       };
       skillsDir = lib.mkOption {
         type = lib.types.str;
@@ -43,7 +46,7 @@ let
       buildAgent = lib.mkOption {
         type = lib.types.nullOr lib.types.raw;
         default = null;
-        description = "share/agents の md を CLI 固有形式へ変換する name: srcPath: drv 関数。";
+        description = "clis/assets/agents の md を CLI 固有形式へ変換する name: srcPath: drv 関数。";
       };
       gatewayFile = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
@@ -84,9 +87,9 @@ let
     in
     builtins.attrNames (lib.filterAttrs (_: c: c > 1) counts);
 
-  localSkillsRoot = ../../share/skills;
+  localSkillsRoot = ./assets/skills;
   localSkills =
-    lib.mapAttrs' (name: _: lib.nameValuePair name "${cfg.dotfilesDir}/share/skills/${name}")
+    lib.mapAttrs' (name: _: lib.nameValuePair name "${cfg.dotfilesDir}/clis/assets/skills/${name}")
       (
         lib.filterAttrs (
           n: t: t == "directory" && builtins.pathExists (localSkillsRoot + "/${n}/SKILL.md")
@@ -99,17 +102,14 @@ let
 
   allSkills = pluginSkills // localSkills;
 
-  # share/agents/*.md の素材一覧
+  # clis/assets/agents/*.md の素材一覧
   agentSrcs =
     lib.mapAttrs'
       (
-        filename: _:
-        lib.nameValuePair (lib.removeSuffix ".md" filename) (../../share/agents + "/${filename}")
+        filename: _: lib.nameValuePair (lib.removeSuffix ".md" filename) (./assets/agents + "/${filename}")
       )
       (
-        lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".md" n) (
-          builtins.readDir ../../share/agents
-        )
+        lib.filterAttrs (n: t: t == "regular" && lib.hasSuffix ".md" n) (builtins.readDir ./assets/agents)
       );
 
   agentClis = lib.filter (name: clis.${name}.agentsDir != null) names;
@@ -120,20 +120,52 @@ let
     assertion = dupes == [ ];
     message = "Duplicate skill names ${label}: " + lib.concatStringsSep ", " dupes;
   };
+  installRow =
+    name:
+    let
+      c = clis.${name};
+    in
+    if c.install.kind == "installer-script" then
+      lib.concatStringsSep "|" [
+        name
+        c.install.kind
+        c.binary
+        c.install.scriptUrl
+        ""
+        ""
+        ""
+      ]
+    else
+      lib.concatStringsSep "|" [
+        name
+        c.install.kind
+        c.binary
+        c.install.repo
+        c.install.assetByArch.x86_64
+        c.install.assetByArch.aarch64
+        (orElse (c.install.binaryInArchive or null) "")
+      ];
+
+  installClis = mkCommand {
+    name = "dotfiles-install-clis";
+    src = ./impl/install-clis.sh;
+    vars.installTable = lib.concatStringsSep "\n" (map installRow names);
+    runtimeInputs = with pkgs; [
+      bash
+      curl
+      jq
+      gnutar
+      gzip
+      coreutils
+    ];
+  };
 in
 {
-  # CLI を 1 つ足すとは、ここへ 1 行足すこと
-  imports = [
-    ./claude
-    ./codex
-    ./opencode
-    ./antigravity
-  ];
-
+  # CLI を 1 つ足すとは、clis/<name>/module.nix を作ること。収集は flake が行う
   options.my.clis = lib.mkOption {
     type = lib.types.attrsOf cliType;
     default = { };
-    description = "AI CLI ごとの roster 宣言。1 CLI を足す単位は modules/clis/<name>/。";
+    description = "AI CLI ごとの roster 宣言。1 CLI を足す単位は clis/<name>/。";
   };
 
   # per-CLI module が使う write-once seed installer、CLI が runtime 所有する設定を欠落 / stale symlink 時のみ書き込む
@@ -164,7 +196,7 @@ in
 
       home.file =
         (lib.listToAttrs (
-          map (name: lib.nameValuePair clis.${name}.rulesFile { source = ../../share/AGENTS.md; }) names
+          map (name: lib.nameValuePair clis.${name}.rulesFile { source = ./assets/AGENTS.md; }) names
         ))
         // (lib.listToAttrs (
           lib.concatMap (
@@ -197,4 +229,36 @@ in
           ) agentClis
         ));
     };
+
+  config.my.commands.installClis = installClis;
+
+  config.my.doctor.units."dotfiles-cli-autoupdate.timer".expected = {
+    LoadState = "loaded";
+    ActiveState = "active";
+    SubState = "waiting";
+    Result = "success";
+  };
+
+  config.systemd.services.dotfiles-cli-autoupdate = {
+    description = "AI CLI を latest へ更新";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = cfg.username;
+      Environment = [
+        "HOME=${cfg.homeDir}"
+        "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
+      ];
+      ExecStart = lib.getExe installClis;
+    };
+  };
+
+  config.systemd.timers.dotfiles-cli-autoupdate = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "daily";
+      Persistent = true;
+    };
+  };
 }

@@ -44,6 +44,76 @@ let
 in
 {
   # unit の層の file 名。ここが唯一の定義で、検査はここを読む
+  # loopback port の占有は host 全体の資源で、単一 unit の不変条件ではない。
+  # 宣言を増やさず、既存の contract と container 宣言から全 listener を集める
+  loopback-port-single-owner =
+    let
+      contract = hostConfig.my.contract;
+      publishedPorts = lib.concatLists (
+        lib.mapAttrsToList (
+          name: container:
+          let
+            options = container.extraOptions or [ ];
+            published = builtins.filter (option: builtins.match "[0-9.]+:[0-9]+:[0-9]+" option != null) options;
+          in
+          map (option: {
+            # container 名は宣言 unit の名前を含む。所有の比較は unit 単位で行う
+            owner = name;
+            port = lib.toInt (builtins.elemAt (lib.splitString ":" option) 1);
+          }) published
+        ) hostConfig.virtualisation.oci-containers.containers
+      );
+
+      listeners =
+        lib.mapAttrsToList (name: front: {
+          owner = "mcp-front-${name}";
+          inherit (front) port;
+        }) contract.mcp.fronts
+        ++ lib.mapAttrsToList (id: endpoint: {
+          owner = "agentgateway-${id}";
+          inherit (endpoint) port;
+        }) contract.mcp.endpoints
+        ++ lib.mapAttrsToList (_: port: {
+          owner = contract.telemetry.service;
+          inherit port;
+        }) contract.telemetry.ports
+        ++ publishedPorts;
+
+      # 同じ port を同じ責務が二つの経路で宣言するのは衝突ではない
+      ownersOf =
+        port:
+        lib.unique (
+          map (listener: listener.owner) (lib.filter (listener: listener.port == port) listeners)
+        );
+      numbers = lib.unique (map (listener: listener.port) listeners);
+      duplicates = lib.filter (port: builtins.length (ownersOf port) > 1) numbers;
+
+      # loopback 以外へ publish する container は、重複以前に拒む
+      exposed = lib.concatLists (
+        lib.mapAttrsToList (
+          name: container:
+          map (option: "${name}:${option}") (
+            builtins.filter (
+              option:
+              builtins.match "[0-9.]+:[0-9]+:[0-9]+" option != null
+              && builtins.match "127\\.0\\.0\\.1:.*" option == null
+            ) container.extraOptions
+          )
+        ) hostConfig.virtualisation.oci-containers.containers
+      );
+    in
+    assert listeners != [ ];
+    assert lib.assertMsg (exposed == [ ]) (
+      "container publishes a port outside loopback: " + lib.concatStringsSep " " exposed
+    );
+    assert lib.assertMsg (duplicates == [ ]) (
+      "loopback port is bound by more than one owner: "
+      + lib.concatMapStringsSep ", " (
+        port: "${toString port} <- " + lib.concatStringsSep " " (ownersOf port)
+      ) duplicates
+    );
+    pkgs.runCommandLocal "check-loopback-port-single-owner" { } "touch $out";
+
   # option の接頭辞は宣言した unit の名前で決まる。regex ではなく module 系が
   # 持つ宣言位置から判定するので、nested な options.my = { ... } も子 unit も
   # my.contract.<unit> も同じ規則で見る

@@ -11,6 +11,7 @@
 | 制約 | 検証 |
 |---|---|
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
+| loopback port を二人以上が bind しない | `loopback-port-single-owner` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
@@ -20,6 +21,7 @@
 | 生成 config artifact が登録簿に載り、宣言の変更に追随する | `artifact-registry` |
 | 生成 config artifact が配備先の source と一致する | `cli-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し子 process を作らない | `gateway-front-contract` |
+| front が宣言した port で loopback に listen し書き込み領域を持つ | `mcp-front-contract` |
 | backend の待ち受け port が front の接続先と同じ宣言から出る | `agentmemory-config`、`searxng-settings` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | doctor manifest が各 unit の宣言と一致する | `doctor-manifest-contract` |
@@ -40,7 +42,7 @@
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | SOPS の鍵配置と権限境界が保たれる | `sops-policy`、`sops-verifier-runtime`、`privilege-boundary` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-env` |
-| Playwright の front が loopback へ閉じ他 origin を拒む | `playwright-front` |
+| Playwright の front が loopback へ閉じ session ごとの出力先を持つ | `playwright-front` |
 
 ## 文書
 

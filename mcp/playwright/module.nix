@@ -14,6 +14,6 @@ in
     port = 18106;
     serve =
       port:
-      "${lib.getExe front} --host 127.0.0.1 --port ${toString port} --allowed-hosts '*' --output-dir ${config.my.contract.mcp.fronts.playwright.runtimeDirectoryPath}";
+      "${lib.getExe front} --host 127.0.0.1 --port ${toString port} --allowed-hosts 127.0.0.1:${toString port} --output-dir ${config.my.contract.mcp.fronts.playwright.runtimeDirectoryPath}";
   };
 }

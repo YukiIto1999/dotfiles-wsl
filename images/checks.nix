@@ -21,6 +21,18 @@ let
       image = "searxng/searxng:2026.5.17-d7e8b7cd1@sha256:25ff3c045548971d12726e54bea4564b8ec3bedb3d6951aecdefd01caf840974";
       repository = "searxng/searxng";
     };
+    sonarqube = {
+      container = "sonarqube";
+      digest = "sha256:5a40959752dcc1e1408ff18d8ce35be30711323ed5612d3a49d65e093dc34454";
+      image = "sonarqube:community@sha256:5a40959752dcc1e1408ff18d8ce35be30711323ed5612d3a49d65e093dc34454";
+      repository = "sonarqube";
+    };
+    sonarqube-db = {
+      container = "sonarqube-db";
+      digest = "sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a";
+      image = "postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a";
+      repository = "postgres";
+    };
     valkey = {
       container = "valkey";
       digest = "sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9";
@@ -82,6 +94,8 @@ in
         agentmemory = "never";
         crawl4ai = "never";
         searxng = "never";
+        sonarqube = "never";
+        sonarqube-db = "never";
         valkey = "never";
       };
     assert

@@ -1,4 +1,4 @@
-{ config, ... }:
+{ config, lib, ... }:
 
 let
   cfg = config.my;
@@ -9,7 +9,14 @@ let
   };
 in
 {
-  home-manager.users.${cfg.username} =
+  options.my.workIdentity = lib.mkOption {
+    type = lib.types.nullOr lib.types.str;
+    default = null;
+    example = "~/projects/business/";
+    description = "work 用 git identity を選ぶ gitdir glob。null で無効。";
+  };
+
+  config.home-manager.users.${cfg.username} =
     {
       config,
       lib,

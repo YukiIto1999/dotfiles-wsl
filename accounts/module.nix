@@ -32,7 +32,17 @@ let
   };
 in
 {
-  sops.secrets = lib.listToAttrs (
+  options.my.accounts = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    default = [ ];
+    example = [
+      "account-1"
+      "account-2"
+    ];
+    description = "GitHub account id。sops secret 対、gh host user、github MCP target に対応する。先頭が primary で、gh の active user と hosts.yml の既定 token になる。";
+  };
+
+  config.sops.secrets = lib.listToAttrs (
     lib.concatMap (a: [
       {
         name = "accounts/${a}/username";
@@ -48,14 +58,14 @@ in
     ]) cfg.accounts
   );
 
-  my.configArtifacts = lib.optionalAttrs (cfg.accounts != [ ]) {
+  config.my.configArtifacts = lib.optionalAttrs (cfg.accounts != [ ]) {
     "accounts/gh-hosts" = {
       format = "yaml";
       source = ghHostsTemplate;
     };
   };
 
-  sops.templates = lib.optionalAttrs (cfg.accounts != [ ]) {
+  config.sops.templates = lib.optionalAttrs (cfg.accounts != [ ]) {
     "gh-hosts.yml" = userTpl "${userHome}/.config/gh/hosts.yml" (builtins.readFile ghHostsTemplate);
   };
 }

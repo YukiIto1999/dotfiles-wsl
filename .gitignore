@@ -23,6 +23,7 @@ Thumbs.db
 /.opencode/
 
 # 環境の観測、実装計画、決定の記録。Why は commit log、Why not は code comment が持つ
+/HANDOFF.md
 /docs/adr/
 /docs/audits/
 /docs/superpowers/

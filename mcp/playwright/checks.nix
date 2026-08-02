@@ -1,13 +1,12 @@
 {
+  helpers,
   pkgs,
-  lib,
-  self,
   hostConfig,
   ...
 }:
 
 let
-  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; }) tokensOf onlyValue;
+  inherit (helpers.execTokens) tokensOf onlyValue;
   front = hostConfig.my.contract.mcp.fronts.playwright;
   service = hostConfig.systemd.services.${front.service}.serviceConfig;
   tokens = tokensOf service.ExecStart;

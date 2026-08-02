@@ -21,7 +21,8 @@ let
     group = "users";
   };
 
-  gitIdentity = vars: builtins.readFile (pkgs.replaceVars ../git/assets/identity.conf vars);
+  gitIdentity =
+    vars: builtins.readFile (pkgs.replaceVars config.my.contract.git.identityTemplate vars);
   sopsVerifier = pkgs.writeShellApplication {
     name = "dotfiles-sops-verifier";
     runtimeInputs = with pkgs; [
@@ -104,9 +105,9 @@ let
       ];
       text = substituteCommandVars {
         inherit allowTestHooks;
-        atomicFileFunctions = builtins.readFile ../rebuild/impl/lib/atomic-file.sh;
+        atomicFileFunctions = builtins.readFile config.my.contract.rebuild.libraries.atomicFile;
         configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
-        operationLockFunctions = builtins.readFile ../rebuild/impl/lib/operation-lock.sh;
+        operationLockFunctions = builtins.readFile config.my.contract.rebuild.libraries.operationLock;
         sopsKeyctl = lib.escapeShellArg (lib.getExe keyctl);
         sopsRuntimePath = lib.escapeShellArg (
           lib.makeBinPath [

@@ -74,6 +74,14 @@ in
     inherit rebuild wslRestartRequired;
   };
 
+  # 他 unit の script が取り込む shell library。impl を path で直読みさせない
+  my.contract.rebuild.libraries = {
+    atomicFile = ./impl/lib/atomic-file.sh;
+    operationLock = ./impl/lib/operation-lock.sh;
+    rebuildAttempt = ./impl/lib/rebuild-attempt.sh;
+    rebuildReceipt = ./impl/lib/rebuild-receipt.sh;
+  };
+
   system.tools.nixos-rebuild.enable = false;
   environment.systemPackages = [ nixosRebuildGuard ];
 }

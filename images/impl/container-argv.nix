@@ -1,14 +1,11 @@
 {
   lib,
   hostConfig,
-  self,
+  execTokens,
 }:
 
 let
-  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; })
-    valuesOf
-    argvOfScript
-    ;
+  inherit (execTokens) valuesOf argvOfScript;
 
   # 生成された start script が docker へ渡す argv。宣言のどの経路から来ても
   # ここに現れるので、extraOptions だけを見ると networks や user を取り逃す

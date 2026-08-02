@@ -9,6 +9,7 @@
 
 let
   cfg = config.my;
+  rebuildLibraries = cfg.contract.rebuild.libraries;
   imageDefinitions = builtins.attrValues cfg.images;
   configuredContainers = config.virtualisation.oci-containers.containers;
 
@@ -112,11 +113,11 @@ let
       ];
       text = substituteCommandVars {
         nixGcAutoRootDir = "/nix/var/nix/gcroots/auto";
-        atomicFileFunctions = builtins.readFile ../rebuild/impl/lib/atomic-file.sh;
-        operationLockFunctions = builtins.readFile ../rebuild/impl/lib/operation-lock.sh;
+        atomicFileFunctions = builtins.readFile rebuildLibraries.atomicFile;
+        operationLockFunctions = builtins.readFile rebuildLibraries.operationLock;
         ociImageStateFunctions = builtins.readFile ./impl/lib/image-state.sh;
-        rebuildAttemptFunctions = builtins.readFile ../rebuild/impl/lib/rebuild-attempt.sh;
-        rebuildReceiptFunctions = builtins.readFile ../rebuild/impl/lib/rebuild-receipt.sh;
+        rebuildAttemptFunctions = builtins.readFile rebuildLibraries.rebuildAttempt;
+        rebuildReceiptFunctions = builtins.readFile rebuildLibraries.rebuildReceipt;
 
         configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
         dockerCommand = lib.escapeShellArg (lib.getExe pkgs.docker);
@@ -273,6 +274,11 @@ in
 
   # doctor が読む契約。images が所有する派生物を一箇所で公開する
   config.my.contract.images = {
+    libraries = {
+      imageState = ./impl/lib/image-state.sh;
+      # 互換を保つと約束した旧版。rebuild の interop test が読む
+      legacyImageState = ./fixtures/legacy-image-state.sh;
+    };
     entries = doctorOciImageManifestEntries;
     identityFiles = nixImageIdentityFiles;
     syncStatusCommand = lib.getExe syncImages;

@@ -12,7 +12,9 @@ let
 in
 {
   my.mcp.targets.context7 = {
-    port = 18101;
+    port = 8771;
+    # cloud の library docs API へ出る
+    needsNetwork = true;
     serve = serveOverProxy (lib.getExe front);
   };
 }

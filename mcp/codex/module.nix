@@ -16,7 +16,9 @@ let
 in
 {
   my.mcp.targets.codex = {
-    port = 18107;
+    port = 8777;
+    # agent が外部の LLM API へ出る
+    needsNetwork = true;
     serve = serveOverProxy (lib.getExe front);
   };
 }

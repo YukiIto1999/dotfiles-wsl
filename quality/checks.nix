@@ -49,23 +49,45 @@ in
   loopback-port-single-owner =
     let
       contract = hostConfig.my.contract;
+
+      # 形を数え上げると必ず取りこぼす。mkContainerBackend が組み立てる語彙だけを
+      # 許し、それ以外の token を違反にする
+      allowedOption =
+        option:
+        # network は mkContainerBackend が自分で組む。値まで固定しないと
+        # --network=host や --user=0:0 が語彙として通ってしまう
+        option == "--network=dotfiles-backends"
+        || builtins.match "--(memory|shm-size)=[0-9]+[kmg]" option != null
+        || builtins.match "--user=[1-9][0-9]*:[1-9][0-9]*" option != null
+        || option == "-p"
+        || builtins.match "127\\.0\\.0\\.1:[0-9]+:[0-9]+" option != null;
+
+      publishValues =
+        options:
+        lib.concatLists (
+          lib.imap0 (
+            index: option: lib.optional (option == "-p") (builtins.elemAt options (index + 1))
+          ) options
+        );
+
       publishedPorts = lib.concatLists (
         lib.mapAttrsToList (
           name: container:
-          let
-            options = container.extraOptions or [ ];
-            published = publishValues options;
-          in
           map (option: {
             # container 名は宣言 unit の名前を含む。所有の比較は unit 単位で行う
             owner = name;
-            # 127.0.0.1:H:C も H:C も、host 側 port は末尾から二つ目
-            port =
-              let
-                parts = lib.splitString ":" option;
-              in
-              lib.toInt (builtins.elemAt parts (builtins.length parts - 2));
-          }) published
+            port = lib.toInt (builtins.elemAt (lib.splitString ":" option) 1);
+          }) (publishValues container.extraOptions)
+        ) hostConfig.virtualisation.oci-containers.containers
+      );
+
+      exposed = lib.concatLists (
+        lib.mapAttrsToList (
+          name: container:
+          map (option: "${name}:${option}") (
+            builtins.filter (option: !(allowedOption option)) container.extraOptions
+          )
+          ++ map (port: "${name}:ports=${port}") container.ports
         ) hostConfig.virtualisation.oci-containers.containers
       );
 
@@ -101,34 +123,6 @@ in
         );
       numbers = lib.unique (map (listener: listener.port) listeners);
       duplicates = lib.filter (port: builtins.length (ownersOf port) > 1) numbers;
-
-      # -p の直後の値だけが publish の指定。mkContainerBackend は必ず
-      # 127.0.0.1:H:C を置くので、それ以外の形は loopback の外へ開く
-      # -p VALUE と --publish=VALUE の両形を拾う。片方だけだと素通りする
-      publishValues =
-        options:
-        lib.concatLists (
-          lib.imap0 (
-            index: option:
-            lib.optional (option == "-p" || option == "--publish") (builtins.elemAt options (index + 1))
-            ++ lib.optional (builtins.match "--?publish=.*" option != null) (
-              builtins.elemAt (lib.splitString "=" option) 1
-            )
-          ) options
-        );
-
-      exposed = lib.concatLists (
-        lib.mapAttrsToList (
-          name: container:
-          map (value: "${name}:${value}") (
-            builtins.filter (value: builtins.match "127\\.0\\.0\\.1:[0-9]+:[0-9]+" value == null) (
-              publishValues container.extraOptions
-            )
-          )
-          ++ map (port: "${name}:ports=${port}") container.ports
-        ) hostConfig.virtualisation.oci-containers.containers
-      );
-
     in
     assert listeners != [ ];
     assert lib.assertMsg (exposed == [ ]) (

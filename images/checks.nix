@@ -38,12 +38,6 @@ let
       image = "postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a";
       repository = "postgres";
     };
-    valkey = {
-      container = "valkey";
-      digest = "sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9";
-      image = "valkey/valkey:latest@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9";
-      repository = "valkey/valkey";
-    };
   };
   actualUpstreamOciImages = lib.mapAttrs (
     _: image:
@@ -105,7 +99,6 @@ in
         searxng = "never";
         sonarqube = "never";
         sonarqube-db = "never";
-        valkey = "never";
       };
     assert
       hostConfig.environment.etc."dotfiles/oci-images.json".source
@@ -186,7 +179,12 @@ in
       fi
     done
     test "$inspected" -eq ${toString (builtins.length helpers.containerArgv.execScripts)}
-    test "$inspected" -eq 18
+    # 生成された Exec* は container ごとに ExecStart 以外が三つ。転記せず数から導く
+    test "$inspected" -eq ${
+      toString (
+        3 * builtins.length (builtins.attrNames hostConfig.virtualisation.oci-containers.containers)
+      )
+    }
     touch $out
   '';
 }

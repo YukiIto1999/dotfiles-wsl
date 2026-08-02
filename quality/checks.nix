@@ -261,8 +261,8 @@ in
             target=''${target%%/*}
             [ "$target" = "$owner" ] || violations="$violations ''${file#${self}/}->$target"
           done < <(
-            grep -ohE '\$\{self\}/[a-z0-9-]+/(impl|assets|package|fixtures)|\.\./[a-z0-9-]+/(impl|assets|package|fixtures)' "$file" \
-              | sed -E 's|^\$\{self\}/||; s|^\.\./||' || true
+            grep -ohE 'self \+ "/[a-z0-9-]+/(impl|assets|package|fixtures)|\$\{self\}/[a-z0-9-]+/(impl|assets|package|fixtures)|\.\./[a-z0-9-]+/(impl|assets|package|fixtures)' "$file" \
+              | sed -E 's|^self \+ "/||; s|^\$\{self\}/||; s|^\.\./||' || true
           )
         done < <(find ${self} -name '*.nix' -not -path '*/.git/*')
 
@@ -414,7 +414,7 @@ in
       systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
       homePackageNames = map lib.getName homeConfig.home.packages;
       nixDirenvSource = "${homeConfig.programs.direnv.nix-direnv.package}/share/nix-direnv/direnvrc";
-      binaryCaches = import (self + "/system/assets/nix-caches.nix");
+      binaryCaches = hostConfig.my.contract.system.binaryCaches;
       devenvCache = lib.findFirst (
         cache: cache.name == "devenv"
       ) (throw "devenv cache is missing") binaryCaches;

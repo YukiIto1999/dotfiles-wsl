@@ -12,8 +12,7 @@ let
   # upstream schema の key を知るのはここだけ。option 名と service 名へ upstream 名を漏らさない
   upstream = front: { mcp.host = front.url; };
 
-  # probe の grep は npm package と native binary の subcommand が食い違い、呼ぶと常に失敗する
-  deniedTools = [ "grep" ];
+  deniedTools = [ ];
 
   # upstream の既定は admin=localhost:15000、stats と readiness は wildcard:15020/15021
   adminPort = 15000;

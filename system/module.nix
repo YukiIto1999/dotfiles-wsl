@@ -44,6 +44,9 @@ in
     };
   };
 
+  # 検査側が devenv の cache を引く。impl を path で直読みさせない
+  config.my.contract.system.binaryCaches = binaryCaches;
+
   config.my.homeDir = "/home/${cfg.username}";
 
   config.system.stateVersion = "25.11";

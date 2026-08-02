@@ -29,7 +29,7 @@ Think in English. Respond in Japanese.
 ## 行動
 
 - 既存コンテキストは `AGENTS.md` / `CLAUDE.md` / README / docs を確認する。
-- ローカルコードの検索は Read / Grep / Glob を、広域探索や構造把握が必要なら `probe` を使う。
+- ローカルコードの検索は Read / Grep / Glob を、広域探索や構造把握が必要なら `rg` と `ast-grep` を使う。
 - ライブラリ、フレームワークの仕様は `context7` を先に使う。
 - Web 調査は `web-researcher` を使う。独力の WebSearch で済ませない。
 - GitHub 操作は対象アカウントの `github-<account>` を使う。`gh` の active user は `accounts` 先頭固定。

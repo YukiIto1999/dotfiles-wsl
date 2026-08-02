@@ -28,15 +28,24 @@ in
     targets = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
+          # gateway の 8765 に隣接させる。この環境の MCP は 87xx 帯という見分けが
+          # 付き、他 project が使う 18xxx 帯と ephemeral の 32768 以降を避けられる
           options.port = lib.mkOption {
-            type = lib.types.port;
-            description = "この target の front が loopback へ bind する port。";
+            type = lib.types.ints.between 8770 8789;
+            description = "この target の front が loopback へ bind する port。8770-8789 から取る。";
           };
 
           # front は常駐する。gateway は接続するだけで子 process を作らない
           options.serve = lib.mkOption {
             type = lib.types.functionTo lib.types.str;
             description = "port を受け取り、Streamable HTTP を話す front の起動 command を返す。";
+          };
+
+          # 外部へ出る front だけが network を必要とする。既定は loopback に閉じる
+          options.needsNetwork = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "front が loopback の外へ接続するか。true にすると通信制限を外す。";
           };
 
           options.waitUnits = lib.mkOption {
@@ -73,6 +82,13 @@ in
         # backend だけ上限を持ち front が持たないのは非対称。chromium を抱える
         # playwright が最も大きいので、そこに合わせて一律に置く
         MemoryMax = "2G";
+      }
+      // lib.optionalAttrs (!cfg.mcp.targets.${name}.needsNetwork) {
+        # loopback の外へ出ない front は、通信をそこへ限る
+        IPAddressDeny = "any";
+        IPAddressAllow = "localhost";
+      }
+      // {
         Restart = "always";
         RestartSec = "5s";
       };

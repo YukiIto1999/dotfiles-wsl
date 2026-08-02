@@ -10,7 +10,7 @@
 
 # self-hosted SearXNG、valkey は cache 実装詳細としてここに同居
 let
-  frontPort = 18105;
+  frontPort = 8775;
   inherit (config.sops) placeholder;
 
   port = "8080";
@@ -86,6 +86,8 @@ in
   # listen 先を環境変数でしか受けないので、env 経由でも ExecStart に現れる形で渡す
   my.mcp.targets.searxng = {
     port = frontPort;
+    # web_url_read は SEARXNG_URL を経由せず引数の URL へ直接出る
+    needsNetwork = true;
     serve =
       listenPort:
       "${pkgs.coreutils}/bin/env MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_PORT=${toString listenPort} ${lib.getExe front}";

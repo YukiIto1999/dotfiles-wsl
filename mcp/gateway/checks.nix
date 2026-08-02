@@ -59,6 +59,12 @@ in
     assert lib.all (
       endpoint: hostConfig.systemd.services."${endpoint.service}".serviceConfig.LimitNOFILE == "4096:4096"
     ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
+    # upstream は wildcard へ bind するので、通信の側で loopback へ限る
+    assert lib.all (
+      endpoint:
+      hostConfig.systemd.services."${endpoint.service}".serviceConfig.IPAddressDeny == "any"
+      && hostConfig.systemd.services."${endpoint.service}".serviceConfig.IPAddressAllow == "localhost"
+    ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
     pkgs.runCommandLocal "check-gateway-artifact-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } (
       # schema の妥当性は読みではなく agentgateway 自身に判定させる
       lib.concatMapStrings (endpoint: ''
@@ -66,6 +72,9 @@ in
       '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
       + lib.concatMapStrings (endpoint: ''
         test "$(yq -r '.config.mcp.sessionTtl' ${endpoint.source})" = 30m
+        test "$(yq -r '.config.adminAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.admin}
+        test "$(yq -r '.config.statsAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.stats}
+        test "$(yq -r '.config.readinessAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.readiness}
         test "$(yq -r '.binds[0].port' ${endpoint.source})" = ${toString endpoint.port}
       '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
       + "touch $out"

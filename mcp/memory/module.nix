@@ -85,7 +85,7 @@ in
   };
 
   my.mcp.targets.memory = {
-    port = 18104;
+    port = 8774;
     serve = serveOverProxy (lib.getExe agentmemory.front);
     waitUnits = [ "docker-agentmemory.service" ];
   };

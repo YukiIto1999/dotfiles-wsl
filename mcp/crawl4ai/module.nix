@@ -38,7 +38,7 @@ in
   systemd.services = backend.systemdServices;
 
   my.mcp.targets.crawl4ai = {
-    port = 18103;
+    port = 8773;
     serve = serveOverProxy (lib.getExe front);
     waitUnits = [ "docker-crawl4ai.service" ];
   };

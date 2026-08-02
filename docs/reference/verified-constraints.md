@@ -78,7 +78,10 @@
 - 一つの責務の宣言、実装、test が同じ場所にあること。配置の規約を検査していない。
 - 検査が期待値を宣言から導いていること。`images/checks.nix` の upstream image と `quality/checks.nix` の artifact 形式は宣言の転記であり、照合しているのは二つの転記の一致でしかない。digest や roster が宣言側とだけずれた場合は検出できるが、両方を同時に書き換えた誤りは通る。
 - 契約に読み手がいること。`my.contract.<unit>` を宣言しても、誰も読まない状態を検査していない。実際に `sops` と `sonarqube` が宣言だけの状態になっていた。
-- front が実際に loopback へ bind すること。起動 command に bind 先が現れることは検査するが、process が本当にその address で listen するかは実機でしか分からない。
+- front が実際に loopback へ bind すること。起動 command に bind 先が現れることは検査するが、process が本当にその address で listen するかは実機でしか分からない。agentgateway が config に書かない管理 listener を三つ開いていた実例がある。
+- front が loopback の外へ出るかどうかの宣言が実体と一致すること。`needsNetwork` の集合は検査で固定するが、宣言が実装の挙動と合っているかは上流を読むしかない。searxng の `web_url_read` が `SEARXNG_URL` を経由せず引数の URL へ出る実例がある。
+- 通信制限による失敗が観測できること。`IPAddressDeny` の遮断は timeout として現れ、unit は active のままなので doctor の unit 検査は緑を保つ。tool を呼ぶまで表面化しない。
+- 宣言した port が実機で空いていること。検査は宣言どうしの衝突しか見ない。他 project の process が先に取っていると front は起動できず、`Restart=always` で再試行を続ける。
 - MCP front が stateless であること。`mcp-proxy` 経由の 9 front は `--stateless` を持つが、native HTTP の searxng は session を保持する。上流に stateless option が無い。
 - unit の依存が設計の依存表に載っている組だけであること。依存の向きを検査していない。
 - `checks.nix` を持つ unit が flake から収集されていること。収集漏れは check が消えるだけで、赤にならない。

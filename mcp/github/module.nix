@@ -24,7 +24,9 @@ let
     index: account:
     lib.nameValuePair "github-${account}" {
       # http mode は request ごとの OAuth を要求し、PAT を環境変数で持つ形と噛み合わない
-      port = 18110 + index;
+      port = 8780 + index;
+      # api.github.com へ出る
+      needsNetwork = true;
       serve = serveOverProxy (
         lib.getExe (
           pkgs.callPackage ./package.nix {

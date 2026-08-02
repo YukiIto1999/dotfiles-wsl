@@ -22,19 +22,61 @@ let
   # front が loopback を外れると、firewall の無い WSL では外部から到達しうる。
   # bind 先を宣言から読めるのは proxy 経由の形だけなので、それ以外は
   # 自分で loopback を指定していることを起動 command に要求する
+  # 部分一致も存在確認も追記で破れる。argparse も env も後勝ちなので、
+  # 出現回数を数え、--flag value と --flag=value の両形を見る
+  valuesOf =
+    tokens: flag:
+    lib.concatLists (
+      lib.imap0 (
+        index: token:
+        lib.optional (token == flag && index + 1 < builtins.length tokens) (
+          builtins.elemAt tokens (index + 1)
+        )
+        ++ lib.optional (lib.hasPrefix "${flag}=" token) (lib.removePrefix "${flag}=" token)
+      ) tokens
+    );
+
+  onlyValue =
+    tokens: flag: expected:
+    valuesOf tokens flag == [ expected ];
+
   boundElsewhere = builtins.filter (
     front:
     let
-      exec = (configOf front).ExecStart;
+      tokens = builtins.filter (token: token != "") (lib.splitString " " (configOf front).ExecStart);
       port = toString front.port;
-      # 起動 command に bind 先が現れることを要求する。option でしか受けない
-      # front も、module が env として command に載せる
-      viaOption = lib.hasInfix "--host 127.0.0.1" exec && lib.hasInfix "--port ${port}" exec;
+      viaOption = onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port;
       viaEnvironment =
-        lib.hasInfix "MCP_HTTP_HOST=127.0.0.1" exec && lib.hasInfix "MCP_HTTP_PORT=${port}" exec;
+        onlyValue tokens "MCP_HTTP_HOST" "127.0.0.1" && onlyValue tokens "MCP_HTTP_PORT" port;
     in
     !(viaOption || viaEnvironment)
   ) fronts;
+
+  # 外へ出る front を増やす変更は必ず diff に現れる。宣言だけで制限は外せない
+  expectedNetworkFronts = [
+    "codex"
+    "context7"
+    "github-account-1"
+    "github-account-2"
+    "github-account-3"
+    "playwright"
+    "searxng"
+  ];
+
+  actualNetworkFronts = lib.sort builtins.lessThan (
+    builtins.attrNames (lib.filterAttrs (_: target: target.needsNetwork) targets)
+  );
+
+  # needsNetwork を宣言しない front は、通信が loopback へ限られていること
+  unrestricted = builtins.filter (
+    front:
+    !targets.${front.name}.needsNetwork
+    && (
+      (configOf front).IPAddressDeny or null != "any"
+      || (configOf front).IPAddressAllow or null != "localhost"
+    )
+  ) fronts;
+
 in
 {
   # front は宣言した port で loopback に listen し、書き込み領域を持つ
@@ -45,5 +87,7 @@ in
     assert lib.all (front: (configOf front).User == hostConfig.my.username) fronts;
     assert missingWaits == [ ];
     assert boundElsewhere == [ ];
+    assert unrestricted == [ ];
+    assert actualNetworkFronts == expectedNetworkFronts;
     pkgs.runCommandLocal "check-mcp-front-contract" { } "touch $out";
 }

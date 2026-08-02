@@ -8,6 +8,10 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 crawl4aiBase = os.environ["CRAWL4AI_URL"]
+# 0.9 以降は AuthGate が全 path を gate する。token は file から読む
+authHeaders = {
+    "Authorization": "Bearer " + open(os.environ["CRAWL4AI_TOKEN_FILE"]).read().strip()
+}
 
 server = Server("crawl4ai")
 toolCache = []
@@ -15,7 +19,7 @@ toolCache = []
 
 async def loadTools():
     if not toolCache:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=10, headers=authHeaders) as client:
             res = await client.get(f"{crawl4aiBase}/mcp/schema")
             res.raise_for_status()
             toolCache.extend(res.json().get("tools", []))
@@ -41,7 +45,7 @@ async def callTool(name, arguments):
     known = {tool.get("name") for tool in await loadTools()}
     if name not in known:
         raise ValueError(f"unknown crawl4ai tool: {name}")
-    async with httpx.AsyncClient(timeout=None) as client:
+    async with httpx.AsyncClient(timeout=None, headers=authHeaders) as client:
         res = await client.post(f"{crawl4aiBase}/{name}", json=arguments or {})
         res.raise_for_status()
         return [mcp_types.TextContent(type="text", text=json.dumps(res.json(), default=str))]

@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pkgs,
   mkMcpServer,
@@ -10,11 +11,14 @@
 let
   port = "11235";
   repository = "unclecode/crawl4ai";
-  digest = "sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
+  digest = "sha256:bd36741e7bdd35ddc1a05d9183e1d6d8cefb61dd640d944a25d026b76e917690";
   image = "${repository}:latest@${digest}";
+
+  tokenFile = config.sops.secrets."crawl4ai/api_token".path;
 
   backend = mkContainerBackend "crawl4ai" {
     inherit image;
+    environmentFiles = [ config.sops.templates."crawl4ai.env".path ];
     extraOptions = [
       "--memory=4g"
       "--shm-size=1g"
@@ -23,11 +27,19 @@ let
   };
 
   front = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer;
+    inherit mkMcpServer tokenFile;
     crawl4aiUrl = "http://127.0.0.1:${port}";
   };
 in
 {
+  sops.secrets."crawl4ai/api_token" = { };
+
+  # token を渡すと entrypoint が [::] へ bind する。未設定だと loopback bind に
+  # 落ちて -p が届かない。config.yml の host は触らない
+  sops.templates."crawl4ai.env".content = ''
+    CRAWL4AI_API_TOKEN=${config.sops.placeholder."crawl4ai/api_token"}
+  '';
+
   my.images.crawl4ai = {
     kind = "upstream";
     container = "crawl4ai";

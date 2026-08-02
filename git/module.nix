@@ -16,6 +16,9 @@ in
     description = "work 用 git identity を選ぶ gitdir glob。null で無効。";
   };
 
+  # secret を差し込んで identity を組む sops が読む template
+  config.my.contract.git.identityTemplate = ./assets/identity.conf;
+
   config.home-manager.users.${cfg.username} =
     {
       config,

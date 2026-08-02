@@ -14,6 +14,8 @@
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
+| unit が他 unit を契約経由でだけ参照する | `unit-boundary-name-only` |
+| generation が無い状態から age 鍵を配って rebuild へ渡す | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |

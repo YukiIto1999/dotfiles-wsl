@@ -1,7 +1,7 @@
 {
+  helpers,
   pkgs,
   lib,
-  self,
   hostConfig,
   ...
 }:
@@ -9,8 +9,8 @@
 let
   containers = hostConfig.virtualisation.oci-containers.containers;
 
-  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; }) valuesOf;
-  inherit (import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; })
+  inherit (helpers.execTokens) valuesOf;
+  inherit (helpers.containerArgv)
     containerArgv
     ;
   argvOf = name: containerArgv.${name};

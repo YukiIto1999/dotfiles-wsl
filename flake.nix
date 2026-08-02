@@ -188,6 +188,14 @@
             sops-nix
             ;
           hostOptions = self.nixosConfigurations.${hostName}.options;
+          # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
+          helpers = {
+            execTokens = import ./quality/impl/exec-tokens.nix { inherit lib; };
+            containerArgv = import ./images/impl/container-argv.nix {
+              inherit lib hostConfig;
+              execTokens = import ./quality/impl/exec-tokens.nix { inherit lib; };
+            };
+          };
           # port と accounts を変えた第二の評価。artifact が宣言に追随することを示す
           variantConfig = artifactVariantConfig;
         } units;

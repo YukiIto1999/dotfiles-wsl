@@ -282,8 +282,8 @@ in
       ''
         bash ${self}/doctor/tests/doctor-runtime.sh \
           ${self}/doctor/impl/doctor.sh \
-          ${self}/rebuild/impl/lib/atomic-file.sh \
-          ${self}/images/impl/lib/image-state.sh \
+          ${hostConfig.my.contract.rebuild.libraries.atomicFile} \
+          ${hostConfig.my.contract.images.libraries.imageState} \
           ${pkgs.bash}/bin/bash \
           ${fixtureNixImageIdentityCases} \
           ${toString hostConfig.my.doctor.schemaVersion}

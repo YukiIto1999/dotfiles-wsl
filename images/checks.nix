@@ -1,4 +1,5 @@
 {
+  helpers,
   pkgs,
   lib,
   self,
@@ -7,8 +8,8 @@
 }:
 
 let
-  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; }) valuesOf;
-  inherit (import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; })
+  inherit (helpers.execTokens) valuesOf;
+  inherit (helpers.containerArgv)
     containerArgv
     ;
   nixImageIdentityFiles = hostConfig.my.contract.images.identityFiles;
@@ -147,49 +148,45 @@ in
   # docker が受け取る argv の contract。宣言のどの経路から来ても argv に現れるので、
   # extraOptions だけを見ると networks や user を取り逃す
   container-argv-contract =
-    let
-      argv = import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; };
-    in
-    assert lib.assertMsg (argv.staleSecretReaders == [ ]) (
+    assert lib.assertMsg (helpers.containerArgv.staleSecretReaders == [ ]) (
       "secret reader table names a template that does not exist: "
-      + lib.concatStringsSep " " argv.staleSecretReaders
+      + lib.concatStringsSep " " helpers.containerArgv.staleSecretReaders
     );
-    assert lib.assertMsg (argv.unexpectedTokens == [ ]) (
+    assert lib.assertMsg (helpers.containerArgv.unexpectedTokens == [ ]) (
       "container run has tokens outside the allowed vocabulary: "
-      + lib.concatStringsSep " " argv.unexpectedTokens
+      + lib.concatStringsSep " " helpers.containerArgv.unexpectedTokens
     );
-    assert lib.assertMsg (argv.wrongValues == [ ]) (
-      "container run passes a value outside its contract: " + lib.concatStringsSep " " argv.wrongValues
+    assert lib.assertMsg (helpers.containerArgv.wrongValues == [ ]) (
+      "container run passes a value outside its contract: "
+      + lib.concatStringsSep " " helpers.containerArgv.wrongValues
     );
-    assert lib.assertMsg (argv.missingFlags == [ ]) (
+    assert lib.assertMsg (helpers.containerArgv.missingFlags == [ ]) (
       "container run omits a flag whose value must be checked: "
-      + lib.concatStringsSep " " argv.missingFlags
+      + lib.concatStringsSep " " helpers.containerArgv.missingFlags
     );
-    assert lib.assertMsg (argv.strayExec == [ ]) (
-      "container unit has Exec* outside the generated set: " + lib.concatStringsSep " " argv.strayExec
+    assert lib.assertMsg (helpers.containerArgv.strayExec == [ ]) (
+      "container unit has Exec* outside the generated set: "
+      + lib.concatStringsSep " " helpers.containerArgv.strayExec
     );
-    assert lib.assertMsg (argv.sharedVolumes == [ ]) (
-      "named volume is mounted by more than one container: " + lib.concatStringsSep " " argv.sharedVolumes
+    assert lib.assertMsg (helpers.containerArgv.sharedVolumes == [ ]) (
+      "named volume is mounted by more than one container: "
+      + lib.concatStringsSep " " helpers.containerArgv.sharedVolumes
     );
     pkgs.runCommandLocal "check-container-argv-contract" { } "touch $out";
 
   # Exec* の key 集合だけでは、生成された script の中身までは見えない
-  container-exec-content =
-    let
-      argv = import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; };
-    in
-    pkgs.runCommandLocal "check-container-exec-content" { } ''
-      inspected=0
-      for script in ${lib.escapeShellArgs argv.execScripts}; do
-        inspected=$((inspected + 1))
-        [ "$(head -c 2 "$script")" = '#!' ] || { echo "not a script: $script"; exit 1; }
-        if grep -nE '(docker|podman)[^ ]* run ' "$script"; then
-          echo "container is started outside ExecStart: $script"
-          exit 1
-        fi
-      done
-      test "$inspected" -eq ${toString (builtins.length argv.execScripts)}
-      test "$inspected" -eq 18
-      touch $out
-    '';
+  container-exec-content = pkgs.runCommandLocal "check-container-exec-content" { } ''
+    inspected=0
+    for script in ${lib.escapeShellArgs helpers.containerArgv.execScripts}; do
+      inspected=$((inspected + 1))
+      [ "$(head -c 2 "$script")" = '#!' ] || { echo "not a script: $script"; exit 1; }
+      if grep -nE '(docker|podman)[^ ]* run ' "$script"; then
+        echo "container is started outside ExecStart: $script"
+        exit 1
+      fi
+    done
+    test "$inspected" -eq ${toString (builtins.length helpers.containerArgv.execScripts)}
+    test "$inspected" -eq 18
+    touch $out
+  '';
 }

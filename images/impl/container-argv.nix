@@ -82,6 +82,7 @@ let
   # sops.templates 全体から引くと、無関係な container が GitHub PAT を読める
   secretReaders = {
     "agentmemory.env" = [ "agentmemory" ];
+    "crawl4ai.env" = [ "crawl4ai" ];
     "searxng-settings.yml" = [ "searxng" ];
     "sonarqube.env" = [ "sonarqube" ];
     "sonarqube-db.env" = [ "sonarqube-db" ];

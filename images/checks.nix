@@ -16,8 +16,8 @@ let
   expectedUpstreamOciImages = {
     crawl4ai = {
       container = "crawl4ai";
-      digest = "sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
-      image = "unclecode/crawl4ai:latest@sha256:a45fd08f8f15f67026c1bff0a151f0479244caf6751a0c6943b3870efafcd025";
+      digest = "sha256:bd36741e7bdd35ddc1a05d9183e1d6d8cefb61dd640d944a25d026b76e917690";
+      image = "unclecode/crawl4ai:latest@sha256:bd36741e7bdd35ddc1a05d9183e1d6d8cefb61dd640d944a25d026b76e917690";
       repository = "unclecode/crawl4ai";
     };
     searxng = {

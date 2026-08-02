@@ -7,6 +7,10 @@
 }:
 
 let
+  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; }) valuesOf;
+  inherit (import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; })
+    containerArgv
+    ;
   nixImageIdentityFiles = hostConfig.my.contract.images.identityFiles;
   expectedUpstreamOciImages = {
     crawl4ai = {
@@ -89,6 +93,10 @@ in
     assert agentmemoryOciImage.digest == null;
     assert agentmemoryOciImage.imageFile != null;
     assert builtins.attrNames nixImageIdentityFiles == [ "agentmemory" ];
+    # extraOptions の後勝ちで --pull=always が効く。宣言ではなく argv を見る
+    assert lib.all (name: valuesOf containerArgv.${name} "--pull" == [ "never" ]) (
+      builtins.attrNames hostConfig.virtualisation.oci-containers.containers
+    );
     assert
       actualOciPullModes == {
         agentmemory = "never";
@@ -135,4 +143,53 @@ in
         bash ${self}/images/tests/sync-images-runtime.sh ${lib.getExe syncImagesTest}
         touch $out
       '';
+
+  # docker が受け取る argv の contract。宣言のどの経路から来ても argv に現れるので、
+  # extraOptions だけを見ると networks や user を取り逃す
+  container-argv-contract =
+    let
+      argv = import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; };
+    in
+    assert lib.assertMsg (argv.staleSecretReaders == [ ]) (
+      "secret reader table names a template that does not exist: "
+      + lib.concatStringsSep " " argv.staleSecretReaders
+    );
+    assert lib.assertMsg (argv.unexpectedTokens == [ ]) (
+      "container run has tokens outside the allowed vocabulary: "
+      + lib.concatStringsSep " " argv.unexpectedTokens
+    );
+    assert lib.assertMsg (argv.wrongValues == [ ]) (
+      "container run passes a value outside its contract: " + lib.concatStringsSep " " argv.wrongValues
+    );
+    assert lib.assertMsg (argv.missingFlags == [ ]) (
+      "container run omits a flag whose value must be checked: "
+      + lib.concatStringsSep " " argv.missingFlags
+    );
+    assert lib.assertMsg (argv.strayExec == [ ]) (
+      "container unit has Exec* outside the generated set: " + lib.concatStringsSep " " argv.strayExec
+    );
+    assert lib.assertMsg (argv.sharedVolumes == [ ]) (
+      "named volume is mounted by more than one container: " + lib.concatStringsSep " " argv.sharedVolumes
+    );
+    pkgs.runCommandLocal "check-container-argv-contract" { } "touch $out";
+
+  # Exec* の key 集合だけでは、生成された script の中身までは見えない
+  container-exec-content =
+    let
+      argv = import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; };
+    in
+    pkgs.runCommandLocal "check-container-exec-content" { } ''
+      inspected=0
+      for script in ${lib.escapeShellArgs argv.execScripts}; do
+        inspected=$((inspected + 1))
+        [ "$(head -c 2 "$script")" = '#!' ] || { echo "not a script: $script"; exit 1; }
+        if grep -nE '(docker|podman)[^ ]* run ' "$script"; then
+          echo "container is started outside ExecStart: $script"
+          exit 1
+        fi
+      done
+      test "$inspected" -eq ${toString (builtins.length argv.execScripts)}
+      test "$inspected" -eq 18
+      touch $out
+    '';
 }

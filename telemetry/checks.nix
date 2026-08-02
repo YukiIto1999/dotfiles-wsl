@@ -1,11 +1,13 @@
 {
   pkgs,
   lib,
+  self,
   hostConfig,
   ...
 }:
 
 let
+  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; }) tokensOf onlyValue valuesOf;
   contract = hostConfig.my.contract.telemetry;
   collectorConfig = hostConfig.my.artifacts."telemetry/collector".source;
   service = hostConfig.systemd.services.${contract.service}.serviceConfig;
@@ -13,7 +15,9 @@ in
 {
   # config の妥当性は schema の読みではなく collector 自身に判定させる
   telemetry-collector-config =
-    assert lib.hasSuffix "--config ${collectorConfig}" service.ExecStart;
+    assert onlyValue (tokensOf service.ExecStart) "--config" (toString collectorConfig);
+    # --set は config を後から上書きする
+    assert valuesOf (tokensOf service.ExecStart) "--set" == [ ];
     assert contract.endpoint == "http://127.0.0.1:${toString contract.ports.grpc}";
     pkgs.runCommandLocal "check-telemetry-collector-config"
       {

@@ -12,6 +12,10 @@
 |---|---|
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
+| container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
+| container を起こすのは ExecStart だけ | `container-exec-content` |
+| 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
+| front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
@@ -81,6 +85,7 @@
 - front が実際に loopback へ bind すること。起動 command に bind 先が現れることは検査するが、process が本当にその address で listen するかは実機でしか分からない。agentgateway が config に書かない管理 listener を三つ開いていた実例がある。
 - front が loopback の外へ出るかどうかの宣言が実体と一致すること。`needsNetwork` の集合は検査で固定するが、宣言が実装の挙動と合っているかは上流を読むしかない。searxng の `web_url_read` が `SEARXNG_URL` を経由せず引数の URL へ出る実例がある。
 - 通信制限による失敗が観測できること。`IPAddressDeny` の遮断は timeout として現れ、unit は active のままなので doctor の unit 検査は緑を保つ。tool を呼ぶまで表面化しない。
+- container が image 由来で expose する port を把握していること。宣言は publish する port しか持たない。crawl4ai の image は内部 valkey の 6379 を expose しており、`dotfiles-backends` network 上の他 container から到達する。
 - 宣言した port が実機で空いていること。検査は宣言どうしの衝突しか見ない。他 project の process が先に取っていると front は起動できず、`Restart=always` で再試行を続ける。
 - MCP front が stateless であること。`mcp-proxy` 経由の 9 front は `--stateless` を持つが、native HTTP の searxng は session を保持する。上流に stateless option が無い。
 - unit の依存が設計の依存表に載っている組だけであること。依存の向きを検査していない。

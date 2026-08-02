@@ -1,6 +1,7 @@
 {
   pkgs,
   lib,
+  self,
   hostConfig,
   ...
 }:
@@ -22,28 +23,15 @@ let
   # front が loopback を外れると、firewall の無い WSL では外部から到達しうる。
   # bind 先を宣言から読めるのは proxy 経由の形だけなので、それ以外は
   # 自分で loopback を指定していることを起動 command に要求する
-  # 部分一致も存在確認も追記で破れる。argparse も env も後勝ちなので、
-  # 出現回数を数え、--flag value と --flag=value の両形を見る
-  valuesOf =
-    tokens: flag:
-    lib.concatLists (
-      lib.imap0 (
-        index: token:
-        lib.optional (token == flag && index + 1 < builtins.length tokens) (
-          builtins.elemAt tokens (index + 1)
-        )
-        ++ lib.optional (lib.hasPrefix "${flag}=" token) (lib.removePrefix "${flag}=" token)
-      ) tokens
-    );
-
-  onlyValue =
-    tokens: flag: expected:
-    valuesOf tokens flag == [ expected ];
+  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; })
+    tokensOf
+    onlyValue
+    ;
 
   boundElsewhere = builtins.filter (
     front:
     let
-      tokens = builtins.filter (token: token != "") (lib.splitString " " (configOf front).ExecStart);
+      tokens = tokensOf (configOf front).ExecStart;
       port = toString front.port;
       viaOption = onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port;
       viaEnvironment =
@@ -90,4 +78,41 @@ in
     assert unrestricted == [ ];
     assert actualNetworkFronts == expectedNetworkFronts;
     pkgs.runCommandLocal "check-mcp-front-contract" { } "touch $out";
+
+  # unit の ExecStart しか見ないと、wrapper が後から bind を上書きできる。
+  # binary は Nix から読めないので、shebang の判定は derivation の中で行う
+  mcp-front-wrapper-bind =
+    let
+      execs = map (front: services.${front.service}.serviceConfig.ExecStart) fronts;
+    in
+    pkgs.runCommandLocal "check-mcp-front-wrapper-bind" { } ''
+      inspected=0
+
+      # 引用を外してから見る。--ho"st" は shell では --host に戻る
+      inspect() {
+        [ "$(head -c 2 "$1")" = '#!' ] || return 0
+        inspected=$((inspected + 1))
+        norm=$(tr -d '"'"'"'"\\' < "$1")
+        if printf '%s' "$norm" | grep -qE -- '--host|--port|--allowed-hosts|--output-dir|MCP_HTTP_HOST|MCP_HTTP_PORT'; then
+          echo "front wrapper decides its own bind: $1"
+          exit 1
+        fi
+        # exec で辿り着く先も wrapper。一段の間接で消えないようにする
+        for next in $(printf '%s' "$norm" | sed -n 's/^ *exec \([^ ]*\).*/\1/p'); do
+          case "$next" in /nix/store/*) [ -f "$next" ] && inspect "$next" ;; esac
+        done
+      }
+
+      # 総数を固定すると上流の packaging で壊れる。front ごとに一つ以上見る
+      for exec in ${lib.escapeShellArgs execs}; do
+        inspected=0
+        for token in $exec; do
+          case "$token" in /nix/store/*) ;; *) continue ;; esac
+          [ -f "$token" ] || continue
+          inspect "$token"
+        done
+        test "$inspected" -ge 1 || { echo "no wrapper inspected for: $exec"; exit 1; }
+      done
+      touch $out
+    '';
 }

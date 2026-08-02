@@ -130,6 +130,11 @@ in
         LimitNOFILE = "4096:4096";
         # session を 30 分保持するので、front と同じく上限を置く
         MemoryMax = "2G";
+        # upstream は listen address を config で受けず wildcard へ bind する。
+        # NixOS-WSL は firewall を masked にするので Windows 側から到達しうる。
+        # target は全て loopback なので、通信を loopback へ限る
+        IPAddressDeny = "any";
+        IPAddressAllow = "localhost";
         ExecStart = "${agentgateway}/bin/agentgateway -f ${endpoint.source}";
         Restart = "always";
         RestartSec = "5s";

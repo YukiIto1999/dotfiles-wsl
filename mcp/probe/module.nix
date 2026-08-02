@@ -12,7 +12,7 @@ let
 in
 {
   my.mcp.targets.probe = {
-    port = 18102;
+    port = 8772;
     serve = serveOverProxy (lib.getExe front);
   };
 }

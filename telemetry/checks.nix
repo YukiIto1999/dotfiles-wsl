@@ -44,6 +44,8 @@ in
         test "$(yq -r '.receivers.otlp.protocols.http.endpoint' ${collectorConfig})" \
           = "127.0.0.1:${toString contract.ports.http}"
         test "$(yq -r '.exporters.file.path' ${collectorConfig})" = ${lib.escapeShellArg contract.archive}
+        # collector 自身の metrics を出すと、目録に無い listener が 8888 に増える
+        test "$(yq -r '.service.telemetry.metrics.level' ${collectorConfig})" = none
         touch $out
       '';
 }

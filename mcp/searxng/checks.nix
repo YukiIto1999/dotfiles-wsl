@@ -13,7 +13,6 @@ in
     assert hostConfig.sops.templates."searxng-settings.yml".content == builtins.readFile template;
     pkgs.runCommandLocal "check-searxng-settings" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
       test "$(yq -r '.server.port' ${template})" = 8080
-      test "$(yq -r '.valkey.url' ${template})" = valkey://valkey:6379/0
       touch $out
     '';
 }

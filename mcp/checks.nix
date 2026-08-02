@@ -1,7 +1,7 @@
 {
+  helpers,
   pkgs,
   lib,
-  self,
   hostConfig,
   ...
 }:
@@ -23,7 +23,7 @@ let
   # front が loopback を外れると、firewall の無い WSL では外部から到達しうる。
   # bind 先を宣言から読めるのは proxy 経由の形だけなので、それ以外は
   # 自分で loopback を指定していることを起動 command に要求する
-  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; })
+  inherit (helpers.execTokens)
     tokensOf
     onlyValue
     ;

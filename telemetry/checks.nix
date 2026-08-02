@@ -1,13 +1,13 @@
 {
+  helpers,
   pkgs,
   lib,
-  self,
   hostConfig,
   ...
 }:
 
 let
-  inherit (import "${self}/mcp/impl/exec-tokens.nix" { inherit lib; }) tokensOf onlyValue valuesOf;
+  inherit (helpers.execTokens) tokensOf onlyValue valuesOf;
   contract = hostConfig.my.contract.telemetry;
   collectorConfig = hostConfig.my.artifacts."telemetry/collector".source;
   service = hostConfig.systemd.services.${contract.service}.serviceConfig;

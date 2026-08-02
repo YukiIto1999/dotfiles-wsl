@@ -216,15 +216,15 @@ in
         bash ${self}/rebuild/tests/atomic-publication.sh \
           ${self}/rebuild/impl/lib/atomic-file.sh \
           ${self}/rebuild/impl/lib/operation-lock.sh \
-          ${self}/images/impl/lib/image-state.sh \
+          ${hostConfig.my.contract.images.libraries.imageState} \
           full
         bash ${self}/rebuild/tests/atomic-publication.sh \
           ${self}/rebuild/impl/lib/atomic-file.sh \
           ${self}/rebuild/impl/lib/operation-lock.sh \
-          ${self}/images/impl/lib/image-state.sh \
+          ${hostConfig.my.contract.images.libraries.imageState} \
           interop \
           ${self}/rebuild/fixtures/legacy-operation-lock.sh \
-          ${self}/images/fixtures/legacy-image-state.sh
+          ${hostConfig.my.contract.images.libraries.legacyImageState}
         touch $out
       '';
 

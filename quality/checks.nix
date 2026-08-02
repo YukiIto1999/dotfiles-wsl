@@ -1,4 +1,5 @@
 {
+  helpers,
   pkgs,
   lib,
   self,
@@ -92,7 +93,7 @@ in
   loopback-port-single-owner =
     let
       contract = hostConfig.my.contract;
-      inherit (import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; })
+      inherit (helpers.containerArgv)
         publishedPorts
         ;
 
@@ -245,6 +246,33 @@ in
     assert violations == [ ];
     pkgs.runCommandLocal "check-option-namespace" { } "touch $out";
 
+  # unit をまたぐ依存は my.contract か、module / checks への注入だけを通す。
+  # 他 unit の impl や assets を path で読むと、宣言していない結合になる
+  unit-boundary-name-only =
+    pkgs.runCommandLocal "check-unit-boundary-name-only" { nativeBuildInputs = [ pkgs.gnugrep ]; }
+      ''
+        set -euo pipefail
+
+        violations=""
+        while IFS= read -r file; do
+          owner=''${file#${self}/}
+          owner=''${owner%%/*}
+          while IFS= read -r target; do
+            target=''${target%%/*}
+            [ "$target" = "$owner" ] || violations="$violations ''${file#${self}/}->$target"
+          done < <(
+            grep -ohE '\$\{self\}/[a-z0-9-]+/(impl|assets|package|fixtures)|\.\./[a-z0-9-]+/(impl|assets|package|fixtures)' "$file" \
+              | sed -E 's|^\$\{self\}/||; s|^\.\./||' || true
+          )
+        done < <(find ${self} -name '*.nix' -not -path '*/.git/*')
+
+        if [ -n "$violations" ]; then
+          echo "unit reads another unit through a path instead of a contract:$violations" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
   structure-layer-names =
     pkgs.runCommandLocal "check-structure-layer-names"
       {
@@ -262,8 +290,10 @@ in
       ''
         set -euo pipefail
 
+        # 判定は flake の collectUnits と同じでなければ、片方だけが歩く unit が出る
         is_unit() {
-          [ -f "$1/module.nix" ] || [ -f "$1/package.nix" ] || [ -d "$1/impl" ]
+          [ -f "$1/module.nix" ] || [ -f "$1/package.nix" ] || [ -f "$1/checks.nix" ] ||
+            [ -d "$1/impl" ]
         }
 
         violations=""

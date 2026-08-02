@@ -15,16 +15,6 @@ let
   sopsGenerationContractData = builtins.fromJSON (
     builtins.unsafeDiscardStringContext (builtins.readFile sopsGenerationContract)
   );
-  fakeBootstrapRebuild = pkgs.writeShellScriptBin "nixos-rebuild" ''
-    printf '%q ' "$@" >> "$BOOTSTRAP_CALL_LOG"
-    printf '\n' >> "$BOOTSTRAP_CALL_LOG"
-    if [[ -n ''${BOOTSTRAP_REBUILD_READY:-} ]]; then
-      : > "$BOOTSTRAP_REBUILD_READY"
-      while [[ ! -e $BOOTSTRAP_REBUILD_RELEASE ]]; do
-        sleep 0.01
-      done
-    fi
-  '';
 in
 {
   sops-policy =
@@ -112,9 +102,6 @@ in
           "$production_verifier" > /dev/null
         grep --fixed-strings 'SOPS_AGE_KEY_FILE="$identity"' \
           "$production_verifier" > /dev/null
-        bash ${self}/bootstrap/fixtures/age-key-test.sh \
-          ${self}/bootstrap/impl/bootstrap.sh \
-          ${fakeBootstrapRebuild}
         bash ${self}/sops/tests/sops-enroll.sh \
           ${lib.getExe hostConfig.my.commands.sopsEnroll.testPackage} \
           ${pkgs.age}/bin/age-keygen \

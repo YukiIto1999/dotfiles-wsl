@@ -46,50 +46,55 @@ in
   # unit の層の file 名。ここが唯一の定義で、検査はここを読む
   # loopback port の占有は host 全体の資源で、単一 unit の不変条件ではない。
   # 宣言を増やさず、既存の contract と container 宣言から全 listener を集める
-  loopback-port-single-owner =
+  # port を宣言しない生 unit は 46 check のどれにも届かない。socat 一本で
+  # gateway と同じ port を 0.0.0.0 で取れる。unit を登録制にする
+  service-listener-registry =
     let
       contract = hostConfig.my.contract;
 
-      # 形を数え上げると必ず取りこぼす。mkContainerBackend が組み立てる語彙だけを
-      # 許し、それ以外の token を違反にする
-      allowedOption =
-        option:
-        # network は mkContainerBackend が自分で組む。値まで固定しないと
-        # --network=host や --user=0:0 が語彙として通ってしまう
-        option == "--network=dotfiles-backends"
-        || builtins.match "--(memory|shm-size)=[0-9]+[kmg]" option != null
-        || builtins.match "--user=[1-9][0-9]*:[1-9][0-9]*" option != null
-        || option == "-p"
-        || builtins.match "127\\.0\\.0\\.1:[0-9]+:[0-9]+" option != null;
-
-      publishValues =
-        options:
-        lib.concatLists (
-          lib.imap0 (
-            index: option: lib.optional (option == "-p") (builtins.elemAt options (index + 1))
-          ) options
-        );
-
-      publishedPorts = lib.concatLists (
-        lib.mapAttrsToList (
-          name: container:
-          map (option: {
-            # container 名は宣言 unit の名前を含む。所有の比較は unit 単位で行う
-            owner = name;
-            port = lib.toInt (builtins.elemAt (lib.splitString ":" option) 1);
-          }) (publishValues container.extraOptions)
-        ) hostConfig.virtualisation.oci-containers.containers
-      );
-
-      exposed = lib.concatLists (
-        lib.mapAttrsToList (
-          name: container:
-          map (option: "${name}:${option}") (
-            builtins.filter (option: !(allowedOption option)) container.extraOptions
+      declaredHere = lib.unique (
+        lib.concatMap (
+          definition:
+          lib.optionals (lib.hasPrefix (toString self) (toString definition.file)) (
+            builtins.attrNames definition.value
           )
-          ++ map (port: "${name}:ports=${port}") container.ports
-        ) hostConfig.virtualisation.oci-containers.containers
+        ) hostOptions.systemd.services.definitionsWithLocations
       );
+
+      # port を持たないと宣言した unit。増えるときは必ずこの表に現れる
+      withoutListener = [
+        "dotfiles-cli-autoupdate"
+        "docker-dotfiles-backends-network"
+        "nix-daemon"
+        "sonarqube-provision"
+      ];
+
+      registered = lib.sort builtins.lessThan (
+        lib.unique (
+          map (front: front.service) (builtins.attrValues contract.mcp.fronts)
+          ++ map (endpoint: endpoint.service) (builtins.attrValues contract.mcp.endpoints)
+          ++ [ contract.telemetry.service ]
+          ++ map (name: "docker-${name}") (
+            builtins.attrNames hostConfig.virtualisation.oci-containers.containers
+          )
+          ++ withoutListener
+        )
+      );
+    in
+    assert lib.assertMsg (lib.sort builtins.lessThan declaredHere == registered) (
+      "systemd service is not registered as a listener or as portless: "
+      + lib.concatStringsSep " " (
+        lib.subtractLists registered declaredHere ++ lib.subtractLists declaredHere registered
+      )
+    );
+    pkgs.runCommandLocal "check-service-listener-registry" { } "touch $out";
+
+  loopback-port-single-owner =
+    let
+      contract = hostConfig.my.contract;
+      inherit (import "${self}/images/impl/container-argv.nix" { inherit lib hostConfig self; })
+        publishedPorts
+        ;
 
       listeners =
         lib.mapAttrsToList (name: front: {
@@ -113,9 +118,11 @@ in
           owner = contract.telemetry.service;
           inherit port;
         }) contract.telemetry.ports
-        ++ publishedPorts;
+        ++ map (entry: {
+          inherit (entry) owner;
+          port = lib.toInt (builtins.elemAt (lib.splitString ":" entry.value) 1);
+        }) publishedPorts;
 
-      # 同じ port を同じ責務が二つの経路で宣言するのは衝突ではない
       ownersOf =
         port:
         lib.unique (
@@ -125,9 +132,6 @@ in
       duplicates = lib.filter (port: builtins.length (ownersOf port) > 1) numbers;
     in
     assert listeners != [ ];
-    assert lib.assertMsg (exposed == [ ]) (
-      "container publishes a port outside loopback: " + lib.concatStringsSep " " exposed
-    );
     assert lib.assertMsg (duplicates == [ ]) (
       "loopback port is bound by more than one owner: "
       + lib.concatMapStringsSep ", " (

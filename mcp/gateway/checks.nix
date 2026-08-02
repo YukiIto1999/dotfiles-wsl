@@ -43,7 +43,7 @@ in
         } > expected-targets
         printf '\n' >> expected-targets
         diff --unified expected-targets actual-targets
-        test "$(yq -r '.binds[0].listeners[0].routes[0].backends[0].mcp.targets[] | select(.stdio) | length' ${endpoint.source} | wc -l)" = 0
+        test "$(yq -r '.binds[].listeners[].routes[].backends[].mcp.targets[] | select(.stdio) | length' ${endpoint.source} | wc -l)" = 0
       '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
       + "touch $out"
     );
@@ -75,7 +75,9 @@ in
         test "$(yq -r '.config.adminAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.admin}
         test "$(yq -r '.config.statsAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.stats}
         test "$(yq -r '.config.readinessAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.readiness}
-        test "$(yq -r '.binds[0].port' ${endpoint.source})" = ${toString endpoint.port}
+        yq -r '.binds[].port' ${endpoint.source} | sort > actual-binds
+        printf '%s\n' ${toString endpoint.port} | sort > expected-binds
+        diff -u expected-binds actual-binds
       '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
       + "touch $out"
     );

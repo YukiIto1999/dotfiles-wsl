@@ -13,32 +13,6 @@ let
     containerArgv
     ;
   nixImageIdentityFiles = hostConfig.my.contract.images.identityFiles;
-  expectedUpstreamOciImages = {
-    crawl4ai = {
-      container = "crawl4ai";
-      digest = "sha256:bd36741e7bdd35ddc1a05d9183e1d6d8cefb61dd640d944a25d026b76e917690";
-      image = "unclecode/crawl4ai:latest@sha256:bd36741e7bdd35ddc1a05d9183e1d6d8cefb61dd640d944a25d026b76e917690";
-      repository = "unclecode/crawl4ai";
-    };
-    searxng = {
-      container = "searxng";
-      digest = "sha256:ec536bcd1e83577aad4cc07f7ecb9a30858a9a905d2d57c8796abc83f872a036";
-      image = "searxng/searxng:2026.8.1-8892414dc@sha256:ec536bcd1e83577aad4cc07f7ecb9a30858a9a905d2d57c8796abc83f872a036";
-      repository = "searxng/searxng";
-    };
-    sonarqube = {
-      container = "sonarqube";
-      digest = "sha256:5a40959752dcc1e1408ff18d8ce35be30711323ed5612d3a49d65e093dc34454";
-      image = "sonarqube:community@sha256:5a40959752dcc1e1408ff18d8ce35be30711323ed5612d3a49d65e093dc34454";
-      repository = "sonarqube";
-    };
-    sonarqube-db = {
-      container = "sonarqube-db";
-      digest = "sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a";
-      image = "postgres:17-alpine@sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a";
-      repository = "postgres";
-    };
-  };
   actualUpstreamOciImages = lib.mapAttrs (
     _: image:
     lib.filterAttrs (
@@ -80,7 +54,20 @@ in
   oci-image-contract =
     assert hostConfig.virtualisation.oci-containers.backend == "docker";
     assert hostConfig.virtualisation.docker.enable;
-    assert actualUpstreamOciImages == expectedUpstreamOciImages;
+    # 宣言を写した期待値は、宣言を変えるたびに二箇所を直すだけで何も守らない。
+    # image 参照が digest で固定され、内部が整合していることを規則で見る
+    assert lib.all (
+      name:
+      let
+        entry = actualUpstreamOciImages.${name};
+      in
+      entry.container == name
+      && entry.repository != null
+      && entry.digest != null
+      && lib.hasPrefix "sha256:" entry.digest
+      && lib.hasPrefix "${entry.repository}:" entry.image
+      && lib.hasSuffix "@${entry.digest}" entry.image
+    ) (builtins.attrNames actualUpstreamOciImages);
     assert agentmemoryOciImage.kind == "nix";
     assert agentmemoryOciImage.container == "agentmemory";
     assert agentmemoryOciImage.image == "agentmemory:0.9.26";

@@ -302,7 +302,7 @@ in
       test ! -s stdout
       grep -Fqx 'FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction' stderr
       grep -Fqx \
-        'Use dotfiles-rebuild for normal changes; use bootstrap/impl/bootstrap.sh only for initial provisioning.' \
+        'Use dotfiles-rebuild for normal changes; use rebuild/bootstrap/impl/bootstrap.sh only for initial provisioning.' \
         stderr
       touch $out
     '';

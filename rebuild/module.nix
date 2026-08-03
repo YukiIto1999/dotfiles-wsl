@@ -64,7 +64,7 @@ let
     name = "nixos-rebuild";
     text = ''
       echo "FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction" >&2
-      echo "Use dotfiles-rebuild for normal changes; use bootstrap/impl/bootstrap.sh only for initial provisioning." >&2
+      echo "Use dotfiles-rebuild for normal changes; use rebuild/bootstrap/impl/bootstrap.sh only for initial provisioning." >&2
       exit 2
     '';
   };

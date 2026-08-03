@@ -47,6 +47,11 @@ in
     imageFile = agentmemory.image;
   };
 
+  my.artifacts."mcp/memory/opencode-capture" = {
+    deployedAt = "${config.my.homeDir}/.config/opencode/plugins/agentmemory-capture.ts";
+    source = agentmemory.opencodePlugin;
+  };
+
   my.artifacts."mcp/memory/config" = {
     format = "yaml";
     source = agentmemoryConfig;
@@ -91,9 +96,5 @@ in
   };
   my.doctor = {
     units = backend.doctorUnits;
-    managedFiles.agentmemory-opencode-capture = {
-      path = "${config.my.homeDir}/.config/opencode/plugins/agentmemory-capture.ts";
-      source = agentmemory.opencodePlugin;
-    };
   };
 }

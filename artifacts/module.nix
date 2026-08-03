@@ -6,12 +6,20 @@
       lib.types.submodule {
         options = {
           format = lib.mkOption {
-            type = lib.types.enum [
-              "json"
-              "toml"
-              "yaml"
-            ];
-            description = "構文検査に使う serialization format。";
+            type = lib.types.nullOr (
+              lib.types.enum [
+                "json"
+                "toml"
+                "yaml"
+              ]
+            );
+            default = null;
+            description = "構文検査に使う serialization format。null なら構文検査の対象外。";
+          };
+          deployedAt = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = "配備先の絶対パス。非 null なら doctor が乖離を検査する。";
           };
           source = lib.mkOption {
             type = lib.types.path;

@@ -81,6 +81,7 @@ in
   my.artifacts = {
     "clis/claude/managed-settings" = {
       format = "json";
+      deployedAt = "/etc/claude-code/managed-settings.json";
       source = managedSettings;
     };
     "clis/claude/lsp" = {
@@ -89,6 +90,7 @@ in
     };
     "clis/claude/managed-mcp" = {
       format = "json";
+      deployedAt = "/etc/claude-code/managed-mcp.json";
       source = managedMcp;
     };
     "clis/claude/user-settings-seed" = {
@@ -101,17 +103,6 @@ in
 
   # nix 所有 config パターンで gateway 登録を宣言的化
   environment.etc."claude-code/managed-mcp.json".source = managedMcp;
-
-  my.doctor.managedFiles = {
-    claude-settings = {
-      path = "/etc/claude-code/managed-settings.json";
-      source = config.environment.etc."claude-code/managed-settings.json".source;
-    };
-    claude-mcp = {
-      path = "/etc/claude-code/managed-mcp.json";
-      source = config.environment.etc."claude-code/managed-mcp.json".source;
-    };
-  };
 
   home-manager.users.${cfg.username} =
     { lib, ... }:

@@ -134,6 +134,15 @@ in
   };
 
   # host/recovery 両 identity の復号実測と home key 削除後に enrolled へ切り替える
+  # user 所有の secret file を作る方針は一箇所が持つ。accounts が同じ六行を
+  # 持っていた
+  config._module.args.mkUserSecretFile = path: content: {
+    inherit path content;
+    mode = "0600";
+    owner = config.my.username;
+    group = "users";
+  };
+
   config.my.sops.enrollmentState = "migration";
 
   config.sops.defaultSopsFile = ../secrets/secrets.yaml;

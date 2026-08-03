@@ -50,7 +50,7 @@ sandbox は gateway の client 認証、Docker daemon の権限、Windows intero
 
 ## Windows interop
 
-[`system/module.nix`](../../system/module.nix) は WSLInterop を有効にし、Windows 側の固定 command を呼ぶ `wslview` を system closure に入れる。Linux process から Windows process を起動する時点で WSL の境界を越える。渡した URL、path、引数は Windows 側の process が処理する。
+[`host/module.nix`](../../host/module.nix) は WSLInterop を有効にし、Windows 側の固定 command を呼ぶ `wslview` を system closure に入れる。Linux process から Windows process を起動する時点で WSL の境界を越える。渡した URL、path、引数は Windows 側の process が処理する。
 
 `appendWindowsPath = false` のため、Windows の executable directory を Linux の PATH へ自動追加しない。ただし固定 path を使う明示的な Windows command と `/mnt/c` の file access を無効にはしない。doctor は launcher の store source と Windows command の起動経路を検査するが、Windows application や Windows 側の file 権限までは保証しない。
 

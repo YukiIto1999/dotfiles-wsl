@@ -22,7 +22,7 @@ let
       LimitNOFILE = builtins.elemAt limit 1;
       LimitNOFILESoft = builtins.elemAt limit 0;
     }
-  ) cfg.contract.mcp.endpoints;
+  ) cfg.contract.gateway.endpoints;
   mcpResourceProperties = [
     "MainPID"
     "TasksCurrent"
@@ -110,7 +110,7 @@ let
               properties = mcpResourceProperties;
               expected = mcpFileLimits."${endpoint.service}";
             };
-          }) cfg.contract.mcp.endpoints;
+          }) cfg.contract.gateway.endpoints;
           requestedProtocolVersion = "2025-11-25";
           supportedProtocolVersions = [
             "2024-11-05"

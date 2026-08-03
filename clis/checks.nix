@@ -9,7 +9,7 @@
 let
   artifactSource = id: hostConfig.my.artifacts.${id}.source;
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
-  gatewayUrl = hostConfig.my.contract.mcp.endpoints.default.url;
+  gatewayUrl = hostConfig.my.contract.gateway.endpoints.default.url;
   codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
   managedSettings = hostConfig.environment.etc."claude-code/managed-settings.json".source;
   roster = hostConfig.my.toolchain.lsp;

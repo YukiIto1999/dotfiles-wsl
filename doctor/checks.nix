@@ -13,7 +13,7 @@ let
   codexProjectConfig = homeConfig.home.file.${codexProjectHomePath}.source;
   gatewayFileLimit =
     lib.splitString ":"
-      hostConfig.systemd.services."${hostConfig.my.contract.mcp.endpoints.default.service
+      hostConfig.systemd.services."${hostConfig.my.contract.gateway.endpoints.default.service
       }".serviceConfig.LimitNOFILE;
   nixImageIdentityFiles = hostConfig.my.contract.images.identityFiles;
   fixtureNixImageFile = pkgs.writeText "fixture-agentmemory.tar.gz" "fixture";
@@ -123,7 +123,7 @@ let
     lib.mapAttrsToList (_: endpoint: {
       inherit (endpoint) id url targets;
       healthUnit = "${endpoint.service}.service";
-    }) hostConfig.my.contract.mcp.endpoints
+    }) hostConfig.my.contract.gateway.endpoints
   );
   expectedProbePolicyJson =
     (pkgs.formats.json { }).generate "doctor-probe-policy.json"
@@ -152,7 +152,7 @@ in
     );
     assert lib.all (
       endpoint: builtins.hasAttr "${endpoint.service}.service" hostConfig.my.doctor.units
-    ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
+    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
     pkgs.runCommandLocal "check-doctor-manifest-contract"
       {
         nativeBuildInputs = [ pkgs.jq ];

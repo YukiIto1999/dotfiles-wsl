@@ -14,7 +14,7 @@
 | PATH 上の汎用ツールを増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.packages`。nixpkgs に無いものは `toolchain/NAME/package.nix` を作る | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | language server を増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp`。登録は各 CLI の module が変換する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix)。CLI は `my.contract.telemetry` を読む | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| 品質 gate の構成を変える | [`sonarqube/module.nix`](../../sonarqube/module.nix)。credential は [`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
+| 品質 gate の構成を変える | [`toolchain/sonarqube/module.nix`](../../toolchain/sonarqube/module.nix)。credential は [`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 
 ## CLI
 

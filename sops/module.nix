@@ -11,18 +11,7 @@
 
 let
   cfg = config.my;
-  userHome = cfg.homeDir;
-  inherit (config.sops) placeholder;
 
-  userTpl = path: content: {
-    inherit path content;
-    mode = "0600";
-    owner = cfg.username;
-    group = "users";
-  };
-
-  gitIdentity =
-    vars: builtins.readFile (pkgs.replaceVars config.my.contract.git.identityTemplate vars);
   sopsVerifier = pkgs.writeShellApplication {
     name = "dotfiles-sops-verifier";
     runtimeInputs = with pkgs; [
@@ -169,28 +158,6 @@ in
     sops
     age
   ];
-
-  config.sops.secrets = {
-    "identity/default/name" = { };
-    "identity/default/email" = { };
-  }
-  // lib.optionalAttrs (cfg.git.workIdentity != null) {
-    "identity/work/name" = { };
-    "identity/work/email" = { };
-  };
-
-  config.sops.templates = {
-    "git-identity" = userTpl "${userHome}/.config/git/identity.conf" (gitIdentity {
-      userName = placeholder."identity/default/name";
-      userEmail = placeholder."identity/default/email";
-    });
-  }
-  // lib.optionalAttrs (cfg.git.workIdentity != null) {
-    "git-work-identity" = userTpl "${userHome}/.config/git/work-identity.conf" (gitIdentity {
-      userName = placeholder."identity/work/name";
-      userEmail = placeholder."identity/work/email";
-    });
-  };
 
   config.my.commands.sopsEnroll = sopsEnroll;
   config.environment.etc."dotfiles/sops-generation.json".source = sopsGeneration.contract;

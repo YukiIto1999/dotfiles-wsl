@@ -35,7 +35,7 @@ let
     "telemetry/collector" = "yaml";
   }
   // lib.genAttrs (map (endpoint: endpoint.artifact) (
-    builtins.attrValues hostConfig.my.contract.mcp.endpoints
+    builtins.attrValues hostConfig.my.contract.gateway.endpoints
   )) (_: "yaml")
   // lib.optionalAttrs (hostConfig.my.accounts != [ ]) {
     "accounts/gh-hosts" = "yaml";
@@ -73,7 +73,7 @@ in
       registered = lib.sort builtins.lessThan (
         lib.unique (
           map (front: front.service) (builtins.attrValues contract.mcp.fronts)
-          ++ map (endpoint: endpoint.service) (builtins.attrValues contract.mcp.endpoints)
+          ++ map (endpoint: endpoint.service) (builtins.attrValues contract.gateway.endpoints)
           ++ [ contract.telemetry.service ]
           ++ map (name: "docker-${name}") (
             builtins.attrNames hostConfig.virtualisation.oci-containers.containers
@@ -105,7 +105,7 @@ in
         ++ lib.mapAttrsToList (id: endpoint: {
           owner = "agentgateway-${id}";
           inherit (endpoint) port;
-        }) contract.mcp.endpoints
+        }) contract.gateway.endpoints
         ++ lib.concatLists (
           lib.mapAttrsToList (
             id: endpoint:
@@ -113,7 +113,7 @@ in
               owner = "agentgateway-${id}";
               inherit port;
             }) endpoint.managementPorts
-          ) contract.mcp.endpoints
+          ) contract.gateway.endpoints
         )
         ++ lib.mapAttrsToList (_: port: {
           owner = contract.telemetry.service;
@@ -190,12 +190,15 @@ in
         "username"
       ];
 
+      # unit 名は path の末端で決まる。先頭 segment で決めると、unit を別の
+      # 階層へ移した瞬間に option 名の側が壊れる
       unitOf =
         declaration:
         let
-          relative = lib.removePrefix "${self}/" (toString declaration);
+          segments = lib.splitString "/" (lib.removePrefix "${self}/" (toString declaration));
+          dirs = lib.take (builtins.length segments - 1) segments;
         in
-        builtins.head (lib.splitString "/" relative);
+        if dirs == [ ] then "" else lib.last dirs;
 
       # 宣言が自 unit と一致しない option を集める。sub-option を持つ名前空間は
       # declarations を持たないので、配下を辿って宣言位置を集める
@@ -243,7 +246,9 @@ in
       violations =
         violationsIn "my." (builtins.removeAttrs myOptions [ "contract" ]) ++ contractViolations;
     in
-    assert violations == [ ];
+    assert lib.assertMsg (violations == [ ]) (
+      "option namespace: " + lib.concatStringsSep " " violations
+    );
     pkgs.runCommandLocal "check-option-namespace" { } "touch $out";
 
   # unit をまたぐ依存は my.contract か、module / checks への注入だけを通す。

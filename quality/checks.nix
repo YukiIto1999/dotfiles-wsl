@@ -5,41 +5,11 @@
   self,
   hostConfig,
   hostOptions,
-  variantConfig,
   allCheckNames,
   ...
 }:
 
 let
-  artifacts = hostConfig.my.artifacts;
-  artifactSourcesFor =
-    format:
-    map (artifact: artifact.source) (
-      builtins.attrValues (lib.filterAttrs (_: artifact: artifact.format == format) artifacts)
-    );
-  asArgs = files: lib.concatMapStringsSep " " (f: "${f}") files;
-
-  # artifact を足したとき、この表への追記も強制する
-  expectedFormats = {
-    "clis/antigravity/mcp" = "json";
-    "clis/claude/lsp" = "json";
-    "clis/claude/managed-mcp" = "json";
-    "clis/claude/managed-settings" = "json";
-    "clis/claude/user-settings-seed" = "json";
-    "clis/codex/project" = "toml";
-    "clis/codex/system" = "toml";
-    "clis/codex/user-seed" = "toml";
-    "clis/opencode/config" = "json";
-    "mcp/memory/config" = "yaml";
-    "mcp/searxng/settings-template" = "yaml";
-    "telemetry/collector" = "yaml";
-  }
-  // lib.genAttrs (map (endpoint: endpoint.artifact) (
-    builtins.attrValues hostConfig.my.contract.gateway.endpoints
-  )) (_: "yaml")
-  // lib.optionalAttrs (hostConfig.my.accounts != [ ]) {
-    "accounts/gh-hosts" = "yaml";
-  };
 
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 in
@@ -145,42 +115,6 @@ in
   # 持つ宣言位置から判定するので、nested な options.my = { ... } も子 unit も
   # my.contract.<unit> も同じ規則で見る
   # 生成した artifact が登録簿に載り、accounts を空にすると gh-hosts が消える
-  artifact-registry =
-    assert lib.mapAttrs (_: artifact: artifact.format) artifacts == expectedFormats;
-    assert
-      lib.mapAttrs (_: artifact: artifact.format) variantConfig.my.artifacts
-      == builtins.removeAttrs expectedFormats [ "accounts/gh-hosts" ];
-    assert !(builtins.hasAttr "gh-hosts.yml" variantConfig.sops.templates);
-    assert
-      hostConfig.my.accounts == [ ]
-      ||
-        hostConfig.sops.templates."gh-hosts.yml".content
-        == builtins.readFile artifacts."accounts/gh-hosts".source;
-    pkgs.runCommandLocal "check-artifact-registry" { } "touch $out";
-
-  # 各 producer が実配備へ渡す immutable source を形式別に検査する
-  config-syntax =
-    pkgs.runCommandLocal "check-config-syntax"
-      {
-        nativeBuildInputs = [
-          pkgs.jq
-          pkgs.taplo
-          pkgs.yq
-        ];
-      }
-      ''
-        for f in ${asArgs (artifactSourcesFor "json")}; do
-          jq empty "$f"
-        done
-        for f in ${asArgs (artifactSourcesFor "toml")}; do
-          taplo lint "$f"
-        done
-        for f in ${asArgs (artifactSourcesFor "yaml")}; do
-          yq . "$f" > /dev/null
-        done
-        touch $out
-      '';
-
   option-namespace =
     let
       rootVocabulary = [

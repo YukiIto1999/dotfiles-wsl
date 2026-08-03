@@ -419,7 +419,7 @@ in
       systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
       homePackageNames = map lib.getName homeConfig.home.packages;
       nixDirenvSource = "${homeConfig.programs.direnv.nix-direnv.package}/share/nix-direnv/direnvrc";
-      binaryCaches = hostConfig.my.contract.system.binaryCaches;
+      binaryCaches = hostConfig.my.contract.host.binaryCaches;
       devenvCache = lib.findFirst (
         cache: cache.name == "devenv"
       ) (throw "devenv cache is missing") binaryCaches;

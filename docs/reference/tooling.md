@@ -8,9 +8,9 @@
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
-| system package | [`system/module.nix`](../../system/module.nix) と各 unit の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
+| system package | [`host/module.nix`](../../host/module.nix) と各 unit の `environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
 | 汎用ツール | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.packages` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
-| Home Manager program | [`system/module.nix`](../../system/module.nix) の `programs` | 同じ unit を参照する |
+| Home Manager program | [`host/module.nix`](../../host/module.nix) の `programs` | 同じ unit を参照する |
 | language server | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp` | `nix eval --json .#nixosConfigurations.nixos.config.my.toolchain.lsp --apply builtins.attrNames` |
 | 保守用 devShell | [`flake.nix`](../../flake.nix) の `devShells` | `nix develop --command echo` の後に `$PATH` を確認する |
 

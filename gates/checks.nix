@@ -5,6 +5,7 @@
   self,
   hostConfig,
   hostOptions,
+  units,
   allCheckNames,
   ...
 }:
@@ -125,7 +126,8 @@ in
       ];
 
       # unit 名は path の末端で決まる。先頭 segment で決めると、unit を別の
-      # 階層へ移した瞬間に option 名の側が壊れる
+      # 階層へ移した瞬間に option 名の側が壊れる。末端は全 unit で一意でなければ
+      # 別の unit が同じ名前空間を名乗れるので、下で一意性を検査する
       unitOf =
         declaration:
         let
@@ -177,8 +179,27 @@ in
         )
       ) hostOptions.my.contract.definitionsWithLocations;
 
+      # unit 名が一意でないと、別の unit が同じ my.<name> を名乗れる。
+      # clis/codex と mcp/codex のように末端名が衝突する組が既にある
+      # 危険なのは名前空間を宣言する unit 同士の衝突だけ。何も宣言しない unit が
+      # 末端名を共有しても、名乗る名前空間が無いので害が無い
+      declaringUnits = lib.unique (
+        map unitOf (
+          map (d: d.file) hostOptions.my.contract.definitionsWithLocations
+          ++ lib.concatMap declarationsOf (builtins.attrValues myOptions)
+        )
+      );
+
+      duplicateUnitNames = lib.unique (
+        builtins.filter (
+          name: lib.count (unit: builtins.baseNameOf unit.path == name) units > 1
+        ) declaringUnits
+      );
+
       violations =
-        violationsIn "my." (builtins.removeAttrs myOptions [ "contract" ]) ++ contractViolations;
+        violationsIn "my." (builtins.removeAttrs myOptions [ "contract" ])
+        ++ contractViolations
+        ++ map (name: "duplicate unit name: ${name}") duplicateUnitNames;
     in
     assert lib.assertMsg (violations == [ ]) (
       "option namespace: " + lib.concatStringsSep " " violations

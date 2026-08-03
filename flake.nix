@@ -188,6 +188,7 @@
             sops-nix
             ;
           hostOptions = self.nixosConfigurations.${hostName}.options;
+          inherit units;
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
             execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };

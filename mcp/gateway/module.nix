@@ -109,6 +109,7 @@ in
     name = endpoint.artifact;
     value = {
       format = "yaml";
+      deployedAt = "/etc/${endpoint.runtimeDirectory}/config.yaml";
       inherit (endpoint) source;
     };
   });
@@ -159,11 +160,4 @@ in
     };
   });
 
-  config.my.doctor.managedFiles = eachEndpoint (endpoint: {
-    name = endpoint.service;
-    value = {
-      path = "/etc/${endpoint.runtimeDirectory}/config.yaml";
-      inherit (endpoint) source;
-    };
-  });
 }

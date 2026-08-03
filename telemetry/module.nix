@@ -47,6 +47,7 @@ in
 {
   config.my.artifacts."telemetry/collector" = {
     format = "yaml";
+    deployedAt = "/etc/${stateDir}/collector.yaml";
     source = collectorConfig;
   };
 
@@ -85,10 +86,6 @@ in
       ActiveState = "active";
       SubState = "running";
       Result = "success";
-    };
-    managedFiles.telemetry = {
-      path = "/etc/${stateDir}/collector.yaml";
-      source = collectorConfig;
     };
   };
 }

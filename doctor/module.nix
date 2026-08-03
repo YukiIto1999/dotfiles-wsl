@@ -37,12 +37,16 @@ let
     expected = lib.filterAttrs (_: value: value != null) unit.expected;
   }) cfg.doctor.units;
 
-  managedFileManifest = lib.mapAttrsToList (id: file: {
-    inherit id;
-    inherit (file) path source;
-  }) cfg.doctor.managedFiles;
+  # 生成物は artifacts が一度だけ宣言する。配備先を持つものが乖離検査の対象
+  deployedArtifacts = lib.filterAttrs (_: a: a.deployedAt != null) cfg.artifacts;
 
-  managedFilePaths = map (file: file.path) (builtins.attrValues cfg.doctor.managedFiles);
+  managedFileManifest = lib.mapAttrsToList (id: a: {
+    inherit id;
+    path = a.deployedAt;
+    inherit (a) source;
+  }) deployedArtifacts;
+
+  managedFilePaths = map (a: a.deployedAt) (builtins.attrValues deployedArtifacts);
 
   doctorManifest =
     (pkgs.formats.json { }).generate "doctor-manifest-v${toString cfg.doctor.schemaVersion}.json"
@@ -230,26 +234,6 @@ in
       description = "dotfiles-doctor が検査する systemd unit。attribute key が安定 id。";
     };
 
-    managedFiles = lib.mkOption {
-      type = lib.types.attrsOf (
-        lib.types.submodule {
-          options = {
-            path = lib.mkOption {
-              type = lib.types.str;
-              description = "current generation が管理する runtime file の絶対パス。";
-            };
-            source = lib.mkOption {
-              type = lib.types.path;
-              description = "runtime file と比較する immutable source。";
-            };
-          };
-        }
-      );
-      default = { };
-      internal = true;
-      description = "dotfiles-doctor が current generation の source と比較する file。";
-    };
-
     probePolicy = lib.mkOption {
       type = lib.types.submodule {
         options = {
@@ -315,7 +299,7 @@ in
   config.assertions = [
     {
       assertion = builtins.length managedFilePaths == builtins.length (lib.unique managedFilePaths);
-      message = "my.doctor.managedFiles contains duplicate runtime paths";
+      message = "artifact deployedAt contains duplicate runtime paths";
     }
     {
       assertion =

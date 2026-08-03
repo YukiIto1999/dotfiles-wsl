@@ -12,7 +12,10 @@ let
   # upstream schema の key を知るのはここだけ。option 名と service 名へ upstream 名を漏らさない
   upstream = front: { mcp.host = front.url; };
 
-  deniedTools = [ ];
+  # mcp-searxng は tool を絞る手段を持たない。web_url_read は SearXNG を経由せず
+  # 引数の URL へ直接出るので、本文取得は crawl4ai の責務という skill の規範と
+  # 食い違い、searxng front が network を必要とする唯一の理由にもなっている
+  deniedTools = [ "web_url_read" ];
 
   # upstream の既定は admin=localhost:15000、stats と readiness は wildcard:15020/15021
   adminPort = 15000;

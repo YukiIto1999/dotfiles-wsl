@@ -40,9 +40,9 @@ Nix store の candidate system
 | `telemetry/` | OpenTelemetry collector と endpoint 契約 |
 | `sonarqube/` | 品質 gate の server と DB |
 | `sops/`、`accounts/`、`git/` | secret の登録と検証、account credential、Git identity |
-| `rebuild/`、`doctor/`、`cleanup/`、`rebuild/bootstrap/` | 適用 transaction、診断、整理、初回構築 |
+| `rebuild/`、`doctor/`、`artifacts/cleanup/`、`rebuild/bootstrap/` | 適用 transaction、診断、整理、初回構築 |
 | `commands/` | `dotfiles-*` の組み立てと登録の契約。command の実体は責務を持つ unit が置く |
-| `quality/` | devShell、生成設定の登録簿、規約と構文の検査 |
+| `gates/` | devShell、生成設定の登録簿、規約と構文の検査 |
 
 unit は責務で分かれ、層はどの unit でも同じ名前のファイルで表す。`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `tests/` `fixtures/` `package/` が素材である。
 

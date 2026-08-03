@@ -15,8 +15,8 @@ let
 
   port = "8080";
   searxngRepository = "searxng/searxng";
-  searxngDigest = "sha256:25ff3c045548971d12726e54bea4564b8ec3bedb3d6951aecdefd01caf840974";
-  searxngImage = "${searxngRepository}:2026.5.17-d7e8b7cd1@${searxngDigest}";
+  searxngDigest = "sha256:ec536bcd1e83577aad4cc07f7ecb9a30858a9a905d2d57c8796abc83f872a036";
+  searxngImage = "${searxngRepository}:2026.8.1-8892414dc@${searxngDigest}";
 
   settingsTemplate = pkgs.replaceVars ./assets/settings.yml {
     searxngSecret = placeholder."searxng/secret_key";
@@ -68,8 +68,6 @@ in
   # listen 先を環境変数でしか受けないので、env 経由でも ExecStart に現れる形で渡す
   my.mcp.targets.searxng = {
     port = frontPort;
-    # web_url_read は SEARXNG_URL を経由せず引数の URL へ直接出る
-    needsNetwork = true;
     serve =
       listenPort:
       "${pkgs.coreutils}/bin/env MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_PORT=${toString listenPort} ${lib.getExe front}";

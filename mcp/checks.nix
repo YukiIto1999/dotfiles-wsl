@@ -48,7 +48,6 @@ let
     "github-account-2"
     "github-account-3"
     "playwright"
-    "searxng"
   ];
 
   actualNetworkFronts = lib.sort builtins.lessThan (

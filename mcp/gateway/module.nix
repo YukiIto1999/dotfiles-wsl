@@ -34,7 +34,7 @@ let
       config.readinessAddr = "127.0.0.1:${toString readinessPort}";
       binds = [
         {
-          inherit (cfg.mcp.endpoints.${id}) port;
+          inherit (cfg.gateway.endpoints.${id}) port;
           listeners = [
             {
               routes = [
@@ -76,14 +76,14 @@ let
     };
     source = configOf id;
     targets = builtins.attrNames cfg.contract.mcp.fronts;
-  }) cfg.mcp.endpoints;
+  }) cfg.gateway.endpoints;
 
   eachEndpoint = f: lib.listToAttrs (map f (builtins.attrValues endpoints));
 
   ports = map (endpoint: endpoint.port) (builtins.attrValues endpoints);
 in
 {
-  options.my.mcp.endpoints = lib.mkOption {
+  options.my.gateway.endpoints = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         options.port = lib.mkOption {
@@ -96,12 +96,12 @@ in
   };
 
   # front が常駐し gateway は spawn しないので、endpoint を分ける理由が無い
-  config.my.mcp.endpoints.default.port = lib.mkDefault 8765;
+  config.my.gateway.endpoints.default.port = lib.mkDefault 8765;
 
   config.assertions = [
     {
       assertion = ports == lib.unique ports;
-      message = "my.mcp.endpoints must bind one port each";
+      message = "my.gateway.endpoints must bind one port each";
     }
   ];
 
@@ -114,7 +114,7 @@ in
   });
 
   # CLI と doctor が読む契約。endpoint の名前と URL を導く規則をここだけが持つ
-  config.my.contract.mcp.endpoints = endpoints;
+  config.my.contract.gateway.endpoints = endpoints;
 
   # probe 等の user コード読み取りに必要な user 権限
   config.systemd.services = eachEndpoint (endpoint: {

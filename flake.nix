@@ -170,7 +170,7 @@
             (mkNixosSystem {
               my = {
                 accounts = [ ];
-                mcp.endpoints.default.port = 9876;
+                gateway.endpoints.default.port = 9876;
               };
             }).config;
 

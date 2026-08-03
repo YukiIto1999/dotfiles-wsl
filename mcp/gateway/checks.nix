@@ -44,7 +44,7 @@ in
         printf '\n' >> expected-targets
         diff --unified expected-targets actual-targets
         test "$(yq -r '.binds[].listeners[].routes[].backends[].mcp.targets[] | select(.stdio) | length' ${endpoint.source} | wc -l)" = 0
-      '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
+      '') (builtins.attrValues hostConfig.my.contract.gateway.endpoints)
       + "touch $out"
     );
 
@@ -54,22 +54,22 @@ in
       endpoint:
       hostConfig.environment.etc."${endpoint.runtimeDirectory}/config.yaml".source
       == artifactSource endpoint.artifact
-    ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
+    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
     # soft 上限の暫定封じ込め、session 解放の代替にはしない
     assert lib.all (
       endpoint: hostConfig.systemd.services."${endpoint.service}".serviceConfig.LimitNOFILE == "4096:4096"
-    ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
+    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
     # upstream は wildcard へ bind するので、通信の側で loopback へ限る
     assert lib.all (
       endpoint:
       hostConfig.systemd.services."${endpoint.service}".serviceConfig.IPAddressDeny == "any"
       && hostConfig.systemd.services."${endpoint.service}".serviceConfig.IPAddressAllow == "localhost"
-    ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
+    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
     pkgs.runCommandLocal "check-gateway-artifact-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } (
       # schema の妥当性は読みではなく agentgateway 自身に判定させる
       lib.concatMapStrings (endpoint: ''
         ${agentgateway}/bin/agentgateway --validate-only -f ${endpoint.source}
-      '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
+      '') (builtins.attrValues hostConfig.my.contract.gateway.endpoints)
       + lib.concatMapStrings (endpoint: ''
         test "$(yq -r '.config.mcp.sessionTtl' ${endpoint.source})" = 30m
         test "$(yq -r '.config.adminAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.admin}
@@ -78,7 +78,7 @@ in
         yq -r '.binds[].port' ${endpoint.source} | sort > actual-binds
         printf '%s\n' ${toString endpoint.port} | sort > expected-binds
         diff -u expected-binds actual-binds
-      '') (builtins.attrValues hostConfig.my.contract.mcp.endpoints)
+      '') (builtins.attrValues hostConfig.my.contract.gateway.endpoints)
       + "touch $out"
     );
 
@@ -89,6 +89,6 @@ in
       endpoint:
       hostConfig.systemd.services."${endpoint.service}".serviceConfig.ExecStart
       == "${agentgateway}/bin/agentgateway -f ${endpoint.source}"
-    ) (builtins.attrValues hostConfig.my.contract.mcp.endpoints);
+    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
     agentgateway;
 }

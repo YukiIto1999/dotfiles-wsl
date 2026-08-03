@@ -11,7 +11,7 @@ let
   opencodeBase = builtins.fromJSON (
     builtins.readFile (
       pkgs.replaceVars ./assets/opencode.json {
-        gatewayUrl = cfg.contract.mcp.endpoints.default.url;
+        gatewayUrl = cfg.contract.gateway.endpoints.default.url;
       }
     )
   );

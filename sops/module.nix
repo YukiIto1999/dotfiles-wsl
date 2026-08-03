@@ -94,9 +94,9 @@ let
       ];
       text = substituteCommandVars {
         inherit allowTestHooks;
-        atomicFileFunctions = builtins.readFile config.my.contract.rebuild.libraries.atomicFile;
+        atomicFileFunctions = builtins.readFile config.my.contract.primitives.libraries.atomicFile;
         configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
-        operationLockFunctions = builtins.readFile config.my.contract.rebuild.libraries.operationLock;
+        operationLockFunctions = builtins.readFile config.my.contract.primitives.libraries.operationLock;
         sopsKeyctl = lib.escapeShellArg (lib.getExe keyctl);
         sopsRuntimePath = lib.escapeShellArg (
           lib.makeBinPath [

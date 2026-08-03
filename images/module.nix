@@ -10,6 +10,7 @@
 let
   cfg = config.my;
   rebuildLibraries = cfg.contract.rebuild.libraries;
+  primitives = cfg.contract.primitives.libraries;
   imageDefinitions = builtins.attrValues cfg.images;
   configuredContainers = config.virtualisation.oci-containers.containers;
 
@@ -113,8 +114,8 @@ let
       ];
       text = substituteCommandVars {
         nixGcAutoRootDir = "/nix/var/nix/gcroots/auto";
-        atomicFileFunctions = builtins.readFile rebuildLibraries.atomicFile;
-        operationLockFunctions = builtins.readFile rebuildLibraries.operationLock;
+        atomicFileFunctions = builtins.readFile primitives.atomicFile;
+        operationLockFunctions = builtins.readFile primitives.operationLock;
         ociImageStateFunctions = builtins.readFile ./impl/lib/image-state.sh;
         rebuildAttemptFunctions = builtins.readFile rebuildLibraries.rebuildAttempt;
         rebuildReceiptFunctions = builtins.readFile rebuildLibraries.rebuildReceipt;

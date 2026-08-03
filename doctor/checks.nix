@@ -282,7 +282,7 @@ in
       ''
         bash ${self}/doctor/tests/doctor-runtime.sh \
           ${self}/doctor/impl/doctor.sh \
-          ${hostConfig.my.contract.rebuild.libraries.atomicFile} \
+          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
           ${hostConfig.my.contract.images.libraries.imageState} \
           ${pkgs.bash}/bin/bash \
           ${fixtureNixImageIdentityCases} \

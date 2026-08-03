@@ -178,8 +178,8 @@ in
           ${self}/rebuild/impl/rebuild.sh \
           ${pkgs.bash}/bin/bash \
           ${lib.getExe pkgs.fakeroot} \
-          ${self}/rebuild/impl/lib/atomic-file.sh \
-          ${self}/rebuild/impl/lib/operation-lock.sh \
+          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
+          ${hostConfig.my.contract.primitives.libraries.operationLock} \
           ${self}/rebuild/impl/lib/rebuild-receipt.sh \
           ${self}/rebuild/impl/lib/rebuild-attempt.sh \
           ${toString hostConfig.my.contract.doctor.schemaVersion}
@@ -214,13 +214,13 @@ in
       }
       ''
         bash ${self}/rebuild/tests/atomic-publication.sh \
-          ${self}/rebuild/impl/lib/atomic-file.sh \
-          ${self}/rebuild/impl/lib/operation-lock.sh \
+          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
+          ${hostConfig.my.contract.primitives.libraries.operationLock} \
           ${hostConfig.my.contract.images.libraries.imageState} \
           full
         bash ${self}/rebuild/tests/atomic-publication.sh \
-          ${self}/rebuild/impl/lib/atomic-file.sh \
-          ${self}/rebuild/impl/lib/operation-lock.sh \
+          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
+          ${hostConfig.my.contract.primitives.libraries.operationLock} \
           ${hostConfig.my.contract.images.libraries.imageState} \
           interop \
           ${self}/rebuild/fixtures/legacy-operation-lock.sh \
@@ -241,7 +241,7 @@ in
       }
       ''
         bash ${self}/rebuild/tests/active-publication.sh \
-          ${self}/rebuild/impl/lib/atomic-file.sh \
+          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
           ${self}/rebuild/impl/lib/rebuild-receipt.sh \
           full
         touch $out

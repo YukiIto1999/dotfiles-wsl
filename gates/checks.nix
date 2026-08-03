@@ -95,19 +95,19 @@ in
           port = lib.toInt (builtins.elemAt (lib.splitString ":" entry.value) 1);
         }) publishedPorts;
 
-      ownersOf =
-        port:
-        lib.unique (
-          map (listener: listener.owner) (lib.filter (listener: listener.port == port) listeners)
-        );
+      # owner を unique にしてから数えると、同じ owner が同じ port を二度
+      # bind する形を見逃す。listener の数で判定する
+      listenersOn = port: lib.filter (listener: listener.port == port) listeners;
       numbers = lib.unique (map (listener: listener.port) listeners);
-      duplicates = lib.filter (port: builtins.length (ownersOf port) > 1) numbers;
+      duplicates = lib.filter (port: builtins.length (listenersOn port) > 1) numbers;
     in
     assert listeners != [ ];
     assert lib.assertMsg (duplicates == [ ]) (
       "loopback port is bound by more than one owner: "
       + lib.concatMapStringsSep ", " (
-        port: "${toString port} <- " + lib.concatStringsSep " " (ownersOf port)
+        port:
+        "${toString port} <- "
+        + lib.concatStringsSep " " (map (listener: listener.owner) (listenersOn port))
       ) duplicates
     );
     pkgs.runCommandLocal "check-loopback-port-single-owner" { } "touch $out";
@@ -305,9 +305,14 @@ in
         set -euo pipefail
         list=${self}/docs/reference/verified-constraints.md
 
+        # 文書のどこかに名前があれば通る形だと、制約行と対応していなくても
+        # 緑になる。表の最終列だけを対応表として読む
+        awk -F '|' '/^\|/ { print $(NF - 1) }' "$list" \
+          | grep -o '`[a-z][a-z0-9-]*`' | tr -d '`' | sort -u > documented
+
         undocumented=""
         for name in $checkNames; do
-          grep -qF "\`$name\`" "$list" || undocumented="$undocumented $name"
+          grep -qFx "$name" documented || undocumented="$undocumented $name"
         done
         if [ -n "$undocumented" ]; then
           echo "checks missing from the verified constraint list:$undocumented" >&2

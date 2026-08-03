@@ -11,11 +11,11 @@ let
   # 変更のたびに走る semgrep とは別に、project 全体の品質 gate を持つ
   serverPort = "9000";
   serverRepository = "sonarqube";
-  serverDigest = "sha256:5a40959752dcc1e1408ff18d8ce35be30711323ed5612d3a49d65e093dc34454";
+  serverDigest = "sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
   serverImage = "${serverRepository}:community@${serverDigest}";
 
   databaseRepository = "postgres";
-  databaseDigest = "sha256:af194ccf3e2d7fe367012c7b88ce8b816c5c889b18a5b316799a1f0d7eac746a";
+  databaseDigest = "sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
   databaseImage = "${databaseRepository}:17-alpine@${databaseDigest}";
 
   database = mkContainerBackend "sonarqube-db" {

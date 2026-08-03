@@ -90,10 +90,12 @@ in
   my.artifacts = {
     "clis/codex/system" = {
       format = "toml";
+      deployedAt = "/etc/codex/config.toml";
       source = codexSystemConfig;
     };
     "clis/codex/project" = {
       format = "toml";
+      deployedAt = "${cfg.dotfilesDir}/.codex/config.toml";
       source = codexProjectConfig;
     };
     "clis/codex/user-seed" = {
@@ -112,17 +114,6 @@ in
   # codex は user seed の ~/.codex/config.toml をこの上に merge
   # gateway と hooks は全 project 共通、checkout の Git 権限は trusted project config に限定
   environment.etc."codex/config.toml".source = codexSystemConfig;
-
-  my.doctor.managedFiles = {
-    codex-system = {
-      path = "/etc/codex/config.toml";
-      source = config.environment.etc."codex/config.toml".source;
-    };
-    codex-project = {
-      path = "${cfg.dotfilesDir}/.codex/config.toml";
-      source = codexProjectConfig;
-    };
-  };
 
   home-manager.users.${cfg.username} =
     { lib, ... }:

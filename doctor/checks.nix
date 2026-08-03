@@ -82,10 +82,11 @@ let
     expected = lib.filterAttrs (_: value: value != null) unit.expected;
   }) hostConfig.my.doctor.units;
   expectedDoctorUnitsJson = (pkgs.formats.json { }).generate "doctor-units.json" expectedDoctorUnits;
-  expectedManagedFiles = lib.mapAttrsToList (id: file: {
+  expectedManagedFiles = lib.mapAttrsToList (id: a: {
     inherit id;
-    inherit (file) path source;
-  }) hostConfig.my.doctor.managedFiles;
+    path = a.deployedAt;
+    inherit (a) source;
+  }) (lib.filterAttrs (_: a: a.deployedAt != null) hostConfig.my.artifacts);
   expectedManagedFilesJson =
     (pkgs.formats.json { }).generate "doctor-managed-files.json"
       expectedManagedFiles;
@@ -251,14 +252,16 @@ in
         jq --exit-status \
           --arg path ${lib.escapeShellArg codexProjectRuntimePath} \
           --arg source ${lib.escapeShellArg (toString codexProjectConfig)} \
-          'any(.managedFiles[]; .id == "codex-project" and .path == $path and .source == $source)' \
+          'any(.managedFiles[]; .id == "clis/codex/project" and .path == $path and .source == $source)' \
           ${doctorManifest} > /dev/null
 
         jq --exit-status \
           --arg path ${lib.escapeShellArg "${hostConfig.my.homeDir}/.config/opencode/plugins/agentmemory-capture.ts"} \
-          --arg source ${lib.escapeShellArg (toString hostConfig.my.doctor.managedFiles.agentmemory-opencode-capture.source)} \
+          --arg source ${
+            lib.escapeShellArg (toString hostConfig.my.artifacts."mcp/memory/opencode-capture".source)
+          } \
           'any(.managedFiles[];
-            .id == "agentmemory-opencode-capture" and
+            .id == "mcp/memory/opencode-capture" and
             .path == $path and
             .source == $source
           )' \

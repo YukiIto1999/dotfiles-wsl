@@ -2,6 +2,7 @@
   config,
   pkgs,
   lib,
+  mkUserSecretFile,
   ...
 }:
 
@@ -9,13 +10,6 @@ let
   cfg = config.my;
   userHome = cfg.homeDir;
   inherit (config.sops) placeholder;
-
-  userTpl = path: content: {
-    inherit path content;
-    mode = "0600";
-    owner = cfg.username;
-    group = "users";
-  };
 
   # git の author identity も、この利用者が誰かという同じ事実。所有を一つにする
   gitIdentity =
@@ -80,16 +74,18 @@ in
 
   config.sops.templates =
     lib.optionalAttrs (cfg.accounts != [ ]) {
-      "gh-hosts.yml" = userTpl "${userHome}/.config/gh/hosts.yml" (builtins.readFile ghHostsTemplate);
+      "gh-hosts.yml" = mkUserSecretFile "${userHome}/.config/gh/hosts.yml" (
+        builtins.readFile ghHostsTemplate
+      );
     }
     // {
-      "git-identity" = userTpl "${userHome}/.config/git/identity.conf" (gitIdentity {
+      "git-identity" = mkUserSecretFile "${userHome}/.config/git/identity.conf" (gitIdentity {
         userName = placeholder."identity/default/name";
         userEmail = placeholder."identity/default/email";
       });
     }
     // lib.optionalAttrs (cfg.git.workIdentity != null) {
-      "git-work-identity" = userTpl "${userHome}/.config/git/work-identity.conf" (gitIdentity {
+      "git-work-identity" = mkUserSecretFile "${userHome}/.config/git/work-identity.conf" (gitIdentity {
         userName = placeholder."identity/work/name";
         userEmail = placeholder."identity/work/email";
       });

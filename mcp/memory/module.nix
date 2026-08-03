@@ -40,6 +40,11 @@ let
   };
 in
 {
+  # 検査は port を転記せずここを読む
+  my.contract.memory.ports = {
+    http = httpPort;
+    stream = streamPort;
+  };
   my.images.agentmemory = {
     kind = "nix";
     container = "agentmemory";

@@ -17,8 +17,8 @@ in
     assert lib.elem "${config}:/app/config.yaml:ro"
       hostConfig.virtualisation.oci-containers.containers.agentmemory.volumes;
     pkgs.runCommandLocal "check-agentmemory-config" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
-      test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${config})" = 3111
-      test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${config})" = 3112
+      test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${config})" = ${hostConfig.my.contract.memory.ports.http}
+      test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${config})" = ${hostConfig.my.contract.memory.ports.stream}
       touch $out
     '';
 

@@ -4,11 +4,11 @@
 let
   pkg = mkNpmMcp {
     pname = "context7-mcp";
-    version = "2.2.5";
+    version = "3.2.5";
     registryPath = "@upstash/context7-mcp";
-    hash = "sha256-+3h/SAIYmPQ140XPrt9+fEjdgVUVBe8V4Y0i4YnGs3U=";
+    hash = "sha256-64AdyLbymzFUgfEx+/UlipkpL78zJbDvLKKlrFJMk8s=";
     lockFile = ./package/package-lock.json;
-    npmDepsHash = "sha256-4rWvzzzVNU5U5WG2iKHdNSZqLqDwHQl7w+61yhEJASw=";
+    npmDepsHash = "sha256-d+fP6Oxkbv+99pMY0tmFRWQwDFlVcAudV2lM6WUbe3I=";
   };
 in
 mkMcpServer {

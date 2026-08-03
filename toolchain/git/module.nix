@@ -59,7 +59,7 @@ in
 
       home.file = {
         ".config/git/ignore".source =
-          config.lib.file.mkOutOfStoreSymlink "${my.dotfilesDir}/git/assets/ignore";
+          config.lib.file.mkOutOfStoreSymlink "${my.dotfilesDir}/toolchain/git/assets/ignore";
         ".config/git/hooks/pre-commit" = mkGitHook "pre-commit";
         ".config/git/hooks/commit-msg" = mkGitHook "commit-msg";
       };

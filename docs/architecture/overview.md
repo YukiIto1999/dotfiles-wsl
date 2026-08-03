@@ -35,14 +35,15 @@ Nix store の candidate system
 | `host/` | host 共通の語彙、NixOS-WSL、Windows interop、Nix daemon と cache、font、login user、Home Manager |
 | `mcp/` | agentgateway、常駐 MCP front、その build |
 | `clis/` | AI CLI roster、設定、rules、skills、agents |
-| `toolchain/` | PATH 上の汎用ツールと language server |
+| `toolchain/` | PATH 上の汎用ツールと language server、git 設定、project の静的解析 |
 | `images/` | OCI image inventory、同期、container backend の宣言 |
 | `telemetry/` | OpenTelemetry collector と endpoint 契約 |
-| `sonarqube/` | 品質 gate の server と DB |
-| `sops/`、`accounts/`、`git/` | secret の登録と検証、account credential、Git identity |
+| `sops/`、`accounts/` | secret file の作り方と検証、account credential、利用者の identity |
 | `rebuild/`、`doctor/`、`artifacts/cleanup/`、`rebuild/bootstrap/` | 適用 transaction、診断、整理、初回構築 |
 | `commands/` | `dotfiles-*` の組み立てと登録の契約。command の実体は責務を持つ unit が置く |
-| `gates/` | devShell、生成設定の登録簿、規約と構文の検査 |
+| `artifacts/` | 生成設定の登録簿と構文検査 |
+| `primitives/` | 複数 unit が取り込む shell library |
+| `gates/` | devShell、規約と構造の検査 |
 
 unit は責務で分かれ、層はどの unit でも同じ名前のファイルで表す。`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `tests/` `fixtures/` `package/` が素材である。
 

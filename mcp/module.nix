@@ -21,6 +21,10 @@ let
 
   # gateway は最初の _ で target と tool を切る。名前に _ が入ると解決できない
   targetsWithDelimiter = builtins.filter (name: builtins.match ".*_.*" name != null) targetNames;
+
+  prefixCollisions = builtins.filter (
+    name: builtins.any (other: other != name && lib.hasPrefix name other) targetNames
+  ) targetNames;
 in
 {
   options.my.mcp = {
@@ -108,6 +112,12 @@ in
   ) fronts;
 
   config.assertions = [
+    {
+      # gateway は最初の _ で target と tool を切る。tool 名に _ が入るので、
+      # ある target 名が別の target 名の prefix だと解決先が定まらない
+      assertion = prefixCollisions == [ ];
+      message = "MCP target name is a prefix of another: " + lib.concatStringsSep ", " prefixCollisions;
+    }
     {
       assertion = targetsWithDelimiter == [ ];
       message =

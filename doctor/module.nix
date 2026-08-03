@@ -175,7 +175,7 @@ let
       vars = {
         doctorSchemaVersion = toString cfg.doctor.schemaVersion;
         doctorManifestPath = "/run/current-system/etc/dotfiles/doctor.json";
-        atomicFileFunctions = builtins.readFile cfg.contract.rebuild.libraries.atomicFile;
+        atomicFileFunctions = builtins.readFile cfg.contract.primitives.libraries.atomicFile;
         ociImageStateFunctions = builtins.readFile cfg.contract.images.libraries.imageState;
       };
     }).overrideAttrs

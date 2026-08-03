@@ -2,10 +2,10 @@
 set -Eeuo pipefail
 shopt -s inherit_errexit 2>/dev/null || true
 
-# shellcheck source=../../impl/lib/atomic-file.sh
-source "$(dirname -- "${BASH_SOURCE[0]}")/../../impl/lib/atomic-file.sh"
-# shellcheck source=../../impl/lib/operation-lock.sh
-source "$(dirname -- "${BASH_SOURCE[0]}")/../../impl/lib/operation-lock.sh"
+# shellcheck source=../../../primitives/impl/lib/atomic-file.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../primitives/impl/lib/atomic-file.sh"
+# shellcheck source=../../../primitives/impl/lib/operation-lock.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/../../../primitives/impl/lib/operation-lock.sh"
 
 die()     { trap - ERR; echo "FATAL: $*" >&2; exit 1; }
 as_user() { sudo -u "${SUDO_USER}" "$@"; }

@@ -25,8 +25,8 @@ let
     legacySchema2CandidateHelperSha256 = "6a88d31acbc01b0da1c474757bcfd02dfd58a0fc95230a1fb1ef168af57a6ae5";
     legacySchema2NixpkgsRev = "bd0ff2d3eac24699c3664d5966b9ef36f388e2ca";
     legacySchema2NixosRebuildPath = "/nix/store/gi6qsdlby13jf9szb23blh8rmywvi81i-nixos-rebuild-ng-26.05/bin/nixos-rebuild";
-    atomicFileFunctions = builtins.readFile ./impl/lib/atomic-file.sh;
-    operationLockFunctions = builtins.readFile ./impl/lib/operation-lock.sh;
+    atomicFileFunctions = builtins.readFile config.my.contract.primitives.libraries.atomicFile;
+    operationLockFunctions = builtins.readFile config.my.contract.primitives.libraries.operationLock;
     rebuildAttemptFunctions = builtins.readFile ./impl/lib/rebuild-attempt.sh;
     rebuildReceiptFunctions = builtins.readFile ./impl/lib/rebuild-receipt.sh;
   };
@@ -76,8 +76,6 @@ in
 
   # 他 unit の script が取り込む shell library。impl を path で直読みさせない
   my.contract.rebuild.libraries = {
-    atomicFile = ./impl/lib/atomic-file.sh;
-    operationLock = ./impl/lib/operation-lock.sh;
     rebuildAttempt = ./impl/lib/rebuild-attempt.sh;
     rebuildReceipt = ./impl/lib/rebuild-receipt.sh;
   };

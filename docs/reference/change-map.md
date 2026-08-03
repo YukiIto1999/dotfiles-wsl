@@ -9,7 +9,7 @@
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
 | ホスト固有の `my.*` 値を変える | [`flake.nix`](../../flake.nix) の `nixosConfigurations` と、その option を宣言する unit の `module.nix` | 通常の値は `dotfiles-rebuild --plan` で確認してから `dotfiles-rebuild`。`my.username` と `my.dotfilesDir` は host identity migration なので通常 rebuild では変更しない |
-| Nix の binary cache を増減する | [`system/assets/nix-caches.nix`](../../system/assets/nix-caches.nix) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| Nix の binary cache を増減する | [`host/assets/nix-caches.nix`](../../host/assets/nix-caches.nix) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 責務を追加または削除する | repo 直下に unit directory を作り `module.nix` を置く。収集は flake が行う。層は `module.nix` `package.nix` `checks.nix` `impl/` `assets/` `package/` `tests/` `fixtures/` の名前だけで表し、option の接頭辞は unit 名に合わせる | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | PATH 上の汎用ツールを増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.packages`。nixpkgs に無いものは `toolchain/NAME/package.nix` を作る | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | language server を増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp`。登録は各 CLI の module が変換する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |

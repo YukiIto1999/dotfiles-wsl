@@ -134,7 +134,7 @@
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {
-        packages = self.nixosConfigurations.${hostName}.config.my.quality.devShellPackages;
+        packages = self.nixosConfigurations.${hostName}.config.my.gates.devShellPackages;
       };
 
       formatter.${system} = maintenancePkgs.nixfmt-tree;
@@ -190,10 +190,10 @@
           hostOptions = self.nixosConfigurations.${hostName}.options;
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
-            execTokens = import ./quality/impl/exec-tokens.nix { inherit lib; };
+            execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
             containerArgv = import ./images/impl/container-argv.nix {
               inherit lib hostConfig;
-              execTokens = import ./quality/impl/exec-tokens.nix { inherit lib; };
+              execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
             };
           };
           # port と accounts を変えた第二の評価。artifact が宣言に追随することを示す

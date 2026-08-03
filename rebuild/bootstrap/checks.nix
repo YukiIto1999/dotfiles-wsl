@@ -34,8 +34,8 @@ in
         ];
       }
       ''
-        bash ${self}/bootstrap/fixtures/age-key-test.sh \
-          ${self}/bootstrap/impl/bootstrap.sh \
+        bash ${self}/rebuild/bootstrap/fixtures/age-key-test.sh \
+          ${self}/rebuild/bootstrap/impl/bootstrap.sh \
           ${fakeRebuild}
         touch $out
       '';

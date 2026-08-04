@@ -69,6 +69,8 @@ in
   # front は宣言した port で loopback に listen し、書き込み領域を持つ
   mcp-front-contract =
     assert fronts != [ ];
+    # 片方だけ増減すると、宣言した target が front を持たないまま緑になる
+    assert map (front: front.name) fronts == builtins.attrNames targets;
     assert lib.all (front: (configOf front).RuntimeDirectory == front.runtimeDirectory) fronts;
     assert lib.all (front: (configOf front).RuntimeDirectoryMode == "0700") fronts;
     assert lib.all (front: (configOf front).User == hostConfig.my.username) fronts;

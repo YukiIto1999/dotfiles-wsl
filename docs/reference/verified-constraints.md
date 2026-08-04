@@ -13,6 +13,7 @@
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | 検証対象を別の登録簿から取らず宣言した unit から導く | `doctor-coverage` |
+| 登録簿が空にならない | `registries-non-empty` |
 | 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |

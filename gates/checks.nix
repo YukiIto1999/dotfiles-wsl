@@ -236,6 +236,7 @@ in
   structure-layer-names =
     pkgs.runCommandLocal "check-structure-layer-names"
       {
+        unitPaths = map (unit: toString unit.path) units;
         layerNames = [
           "module.nix"
           "package.nix"
@@ -250,27 +251,21 @@ in
       ''
         set -euo pipefail
 
-        # 判定は flake の collectUnits と同じでなければ、片方だけが歩く unit が出る
-        is_unit() {
-          [ -f "$1/module.nix" ] || [ -f "$1/package.nix" ] || [ -f "$1/checks.nix" ] ||
-            [ -d "$1/impl" ]
-        }
-
+        # unit の一覧は flake の collectUnits が唯一の定義。ここで判定を書き直すと
+        # 片方だけが歩く unit が出る
         violations=""
-        while IFS= read -r unit; do
+        for unit in $unitPaths; do
           for entry in "$unit"/*; do
             name=$(basename "$entry")
             case " $layerNames " in
               *" $name "*) continue ;;
             esac
-            if [ -d "$entry" ] && is_unit "$entry"; then
-              continue
-            fi
+            case " $unitPaths " in
+              *" $entry "*) continue ;;
+            esac
             violations="$violations ''${unit#${self}/}/$name"
           done
-        done < <(find ${self} -type d -not -path '*/.git/*' | while IFS= read -r dir; do
-          if is_unit "$dir"; then printf '%s\n' "$dir"; fi
-        done)
+        done
 
         if [ -n "$violations" ]; then
           echo "unit contains an entry outside the layer name set:$violations" >&2

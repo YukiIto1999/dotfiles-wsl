@@ -5,13 +5,24 @@
 {
   name,
   env ? { },
+  # 起動前に満たすべき条件。空なら検査しない。command と混ぜると exec の位置が
+  # 壊れるので、guard は独立した行として置く
+  requireNonEmpty ? [ ],
   command,
 }:
 
 let
   exports = lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: ''export ${k}="${v}"'') env);
+
+  guards = lib.concatMapStringsSep "\n" (path: ''
+    if [ ! -s ${path} ]; then
+      echo "${name}: required file is empty: ${path}" >&2
+      exit 1
+    fi
+  '') requireNonEmpty;
 in
 writeShellScriptBin name ''
   ${exports}
+  ${guards}
   exec ${command} "$@"
 ''

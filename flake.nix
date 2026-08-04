@@ -124,7 +124,7 @@
           sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
             mkdir -p "$out"
             cp -R --preserve=mode ${self}/. "$out/"
-            test -x "$out/rebuild/bootstrap/impl/bootstrap.sh"
+            test -x "$out/commands/rebuild/bootstrap/impl/bootstrap.sh"
           '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
           dotfiles-install-clis = hostConfig.my.commands.installClis;

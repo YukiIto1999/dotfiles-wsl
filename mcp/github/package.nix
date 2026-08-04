@@ -25,8 +25,9 @@ in
 # 起動失敗ではなく tool 実行時のエラーへ後退するので、front 側で落とす
 mkMcpServer {
   name = "github-mcp";
+  # 1.8.0 は空 token で fail-fast せず対話 OAuth login へ落ちる。sops の復号
+  # 失敗が起動失敗ではなく tool 実行時のエラーへ後退する
+  requireNonEmpty = [ tokenFile ];
   env.GITHUB_PERSONAL_ACCESS_TOKEN = "$(<${tokenFile})";
-  command = ''
-    ${pkgs.coreutils}/bin/test -s ${tokenFile} \
-      && exec ${bin}/bin/github-mcp-server stdio --toolsets ${lib.concatStringsSep "," toolsets}'';
+  command = "${bin}/bin/github-mcp-server stdio --toolsets ${lib.concatStringsSep "," toolsets}";
 }

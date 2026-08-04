@@ -114,4 +114,42 @@ in
       done
       touch $out
     '';
+
+  # 生成した wrapper が実際に起動するかは、宣言の整合では見えない。
+  # exec の位置を誤ると起動せず、それでも 40 の check は緑を返す
+  mcp-front-starts =
+    let
+      # stdio front は mcp-proxy に包まれる前の実体を直接起こす
+      execs = map (front: services.${front.service}.serviceConfig.ExecStart) fronts;
+    in
+    pkgs.runCommandLocal "check-mcp-front-starts"
+      {
+        nativeBuildInputs = with pkgs; [
+          coreutils
+          gnugrep
+        ];
+      }
+      ''
+        started=0
+        for exec in ${lib.escapeShellArgs execs}; do
+          for token in $exec; do
+            case "$token" in /nix/store/*) ;; *) continue ;; esac
+            [ -f "$token" ] || continue
+            [ "$(head -c 2 "$token")" = '#!' ] || continue
+            # bash -n は syntax を見る。exec の位置の誤りは -n では出ないので、
+            # exec 行が最後の実行文であることを併せて見る
+            ${pkgs.bash}/bin/bash -n "$token" || {
+              echo "front wrapper is not valid shell: $token" >&2
+              exit 1
+            }
+            if grep -qE '^\s*exec .*&&' "$token"; then
+              echo "front wrapper conditions its exec: $token" >&2
+              exit 1
+            fi
+            started=$((started + 1))
+          done
+        done
+        test "$started" -ge ${toString (builtins.length fronts)}
+        touch $out
+      '';
 }

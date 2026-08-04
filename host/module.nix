@@ -52,12 +52,6 @@ in
   config.system.stateVersion = "25.11";
 
   # Home Manager の activation は複数 unit の資材を配備する横断の入口
-  config.my.doctor.units."home-manager-${cfg.username}.service".expected = {
-    LoadState = "loaded";
-    ActiveState = "active";
-    SubState = "exited";
-    Result = "success";
-  };
 
   config.wsl = {
     enable = true;
@@ -75,12 +69,6 @@ in
 
   config.environment.localBinInPath = true;
   config.programs.nix-ld.enable = true;
-
-  config.my.doctor.wslInterop = {
-    inherit launcherName windowsCommand;
-    launcherPath = "/run/current-system/sw/bin/${launcherName}";
-    launcherSource = "${wslview}/bin/${launcherName}";
-  };
 
   config.nix.settings = {
     experimental-features = [

@@ -99,18 +99,6 @@ in
     }
   ) fronts;
 
-  config.my.doctor.units = lib.mapAttrs' (
-    _: front:
-    lib.nameValuePair "${front.service}.service" {
-      expected = {
-        LoadState = "loaded";
-        ActiveState = "active";
-        SubState = "running";
-        Result = "success";
-      };
-    }
-  ) fronts;
-
   config.assertions = [
     {
       # gateway は最初の _ で target と tool を切る。tool 名に _ が入るので、

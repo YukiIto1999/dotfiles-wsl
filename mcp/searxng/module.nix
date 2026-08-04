@@ -75,5 +75,4 @@ in
       "${pkgs.coreutils}/bin/env MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_PORT=${toString listenPort} ${lib.getExe front}";
     waitUnits = [ "docker-searxng.service" ];
   };
-  my.doctor.units = searxng.doctorUnits;
 }

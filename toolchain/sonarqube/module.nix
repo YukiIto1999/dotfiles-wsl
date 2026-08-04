@@ -118,15 +118,4 @@ in
         startLimitIntervalSec = 0;
       };
     };
-  config.my.doctor.units =
-    database.doctorUnits
-    // server.doctorUnits
-    // {
-      "sonarqube-provision.service".expected = {
-        LoadState = "loaded";
-        ActiveState = "active";
-        SubState = "exited";
-        Result = "success";
-      };
-    };
 }

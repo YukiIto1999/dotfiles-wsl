@@ -186,17 +186,6 @@ in
         ]) ports;
       };
       systemdServices = backendSystemdServices;
-      doctorUnits = lib.mapAttrs' (
-        unitName: _:
-        lib.nameValuePair "${unitName}.service" {
-          expected = {
-            LoadState = "loaded";
-            ActiveState = "active";
-            SubState = "running";
-            Result = "success";
-          };
-        }
-      ) backendSystemdServices;
     };
 
   options.my.images = lib.mkOption {
@@ -277,21 +266,6 @@ in
       ${pkgs.docker}/bin/docker network inspect dotfiles-backends >/dev/null 2>&1 \
         || ${pkgs.docker}/bin/docker network create dotfiles-backends
     '';
-  };
-
-  config.my.doctor.units = {
-    "docker.service".expected = {
-      LoadState = "loaded";
-      ActiveState = "active";
-      SubState = "running";
-      Result = "success";
-    };
-    "docker-dotfiles-backends-network.service".expected = {
-      LoadState = "loaded";
-      ActiveState = "active";
-      SubState = "exited";
-      Result = "success";
-    };
   };
 
   # inventory と実際に配備される container の対応を型では表せないので assertion で閉じる

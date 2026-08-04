@@ -150,14 +150,4 @@ in
     value.source = endpoint.source;
   });
 
-  config.my.doctor.units = eachEndpoint (endpoint: {
-    name = "${endpoint.service}.service";
-    value.expected = {
-      LoadState = "loaded";
-      ActiveState = "active";
-      SubState = "running";
-      Result = "success";
-    };
-  });
-
 }

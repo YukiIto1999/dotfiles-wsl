@@ -54,5 +54,4 @@ in
     serve = serveOverProxy (lib.getExe front);
     waitUnits = [ "docker-crawl4ai.service" ];
   };
-  my.doctor.units = backend.doctorUnits;
 }

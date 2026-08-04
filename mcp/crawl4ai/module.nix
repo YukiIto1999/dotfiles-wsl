@@ -32,7 +32,8 @@ let
   };
 in
 {
-  sops.secrets."crawl4ai/api_token" = { };
+  # front が user として読む。container は env-file 経由なので owner を要さない
+  sops.secrets."crawl4ai/api_token".owner = config.my.username;
 
   # token を渡すと entrypoint が [::] へ bind する。未設定だと loopback bind に
   # 落ちて -p が届かない。config.yml の host は触らない

@@ -1,5 +1,6 @@
 {
   config,
+  options,
   lib,
   pkgs,
   mkCommand,
@@ -10,9 +11,24 @@ let
   cfg = config.my;
 
   # 検証対象は宣言から導く。別の roster を持つと宣言と乖離する
-  declaredUnits = builtins.attrNames (
-    lib.filterAttrs (_: unit: unit.wantedBy or [ ] != [ ]) config.systemd.services
+  # 常駐しない oneshot は完了後に inactive になる。この repo が宣言し、かつ
+  # 常駐する service だけを active であるべき対象にする
+  declaredHere = lib.unique (
+    lib.concatMap (
+      definition:
+      lib.optionals (lib.hasPrefix (toString ../.) (toString definition.file)) (
+        builtins.attrNames definition.value
+      )
+    ) options.systemd.services.definitionsWithLocations
   );
+
+  declaredUnits = builtins.filter (
+    name:
+    let
+      unit = config.systemd.services.${name};
+    in
+    unit.wantedBy or [ ] != [ ] && (unit.serviceConfig.Type or "simple") != "oneshot"
+  ) declaredHere;
 
   doctor = mkCommand {
     name = "dotfiles-doctor";

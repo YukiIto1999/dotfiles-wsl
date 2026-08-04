@@ -7,64 +7,44 @@
 }:
 
 let
-  nixosRebuildGuardVars = {
+  rebuildVars = {
+    configuredDotfiles = lib.escapeShellArg config.my.dotfilesDir;
+    hostName = config.networking.hostName;
+    distroName = config.wsl.wslConf.user.default or "NixOS";
     nixosRebuild = lib.escapeShellArg (lib.getExe config.system.build.nixos-rebuild);
-    nixosRebuildPath = lib.getExe config.system.build.nixos-rebuild;
-  };
-
-  # rebuild の shell が展開する値。command 固有なのでこの unit が所有する
-  rebuildVars = nixosRebuildGuardVars // {
-    # doctor が所有する schema を読む。rebuild 側に数値を転記しない
-    doctorSchemaVersion = toString config.my.contract.doctor.schemaVersion;
-    legacyDoctorSchemaVersion = "2";
-    bootIdFile = "/proc/sys/kernel/random/boot_id";
-    nixGcAutoRootDir = "/nix/var/nix/gcroots/auto";
-    awk = lib.escapeShellArg (lib.getExe pkgs.gawk);
-    activationLogLimitBytes = toString (8 * 1024 * 1024);
-    legacySchema2RebuildSourceSha256 = "6981dc736aa6c38070e448b8568aa96ea67802611675129cea60ef5bfbe0c710";
-    legacySchema2CandidateHelperSha256 = "6a88d31acbc01b0da1c474757bcfd02dfd58a0fc95230a1fb1ef168af57a6ae5";
-    legacySchema2NixpkgsRev = "bd0ff2d3eac24699c3664d5966b9ef36f388e2ca";
-    legacySchema2NixosRebuildPath = "/nix/store/gi6qsdlby13jf9szb23blh8rmywvi81i-nixos-rebuild-ng-26.05/bin/nixos-rebuild";
-    atomicFileFunctions = builtins.readFile config.my.contract.primitives.libraries.atomicFile;
-    operationLockFunctions = builtins.readFile config.my.contract.primitives.libraries.operationLock;
-    rebuildAttemptFunctions = builtins.readFile ./impl/lib/rebuild-attempt.sh;
-    rebuildReceiptFunctions = builtins.readFile ./impl/lib/rebuild-receipt.sh;
+    sudoCommand = lib.escapeShellArg "${config.security.wrapperDir}/sudo";
+    nvd = lib.escapeShellArg (lib.getExe pkgs.nvd);
+    wslRestartRequired = lib.escapeShellArg (lib.getExe wslRestartRequired);
   };
 
   wslRestartRequired = mkCommand {
     name = "dotfiles-wsl-restart-required";
     src = ./impl/wsl-restart-required.sh;
     runtimeInputs = with pkgs; [ coreutils ];
-    vars = rebuildVars;
+    vars = {
+      bootIdFile = "/proc/sys/kernel/random/boot_id";
+      awk = lib.escapeShellArg (lib.getExe pkgs.gawk);
+    };
   };
 
   rebuild = mkCommand {
     name = "dotfiles-rebuild";
     src = ./impl/rebuild.sh;
-    runtimeInputs =
-      (with pkgs; [
-        git
-        gawk
-        coreutils
-        jq
-        nix
-        nix-output-monitor
-        nvd
-        systemd
-        util-linux
-      ])
-      ++ [ wslRestartRequired ];
+    runtimeInputs = with pkgs; [
+      git
+      coreutils
+      nix
+      nvd
+    ];
     vars = rebuildVars;
-    # jq programs are single-quoted; their $names come from --arg/--argjson.
-    extra.excludeShellChecks = [ "SC2016" ];
   };
 
-  # PATH 上の直接呼び出しを拒否する。上流実体は transaction 内から store path で呼ぶ
+  # PATH 上の直接呼び出しは、汚れた working tree の混入と WSL 再起動判定の欠落を招く
   nixosRebuildGuard = pkgs.writeShellApplication {
     name = "nixos-rebuild";
     text = ''
-      echo "FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction" >&2
-      echo "Use dotfiles-rebuild for normal changes; use rebuild/bootstrap/impl/bootstrap.sh only for initial provisioning." >&2
+      echo "FATAL: use dotfiles-rebuild; it checks the working tree and the WSL restart plan" >&2
+      echo "Initial provisioning is rebuild/bootstrap/impl/bootstrap.sh" >&2
       exit 2
     '';
   };
@@ -72,12 +52,6 @@ in
 {
   my.commands = {
     inherit rebuild wslRestartRequired;
-  };
-
-  # 他 unit の script が取り込む shell library。impl を path で直読みさせない
-  my.contract.rebuild.libraries = {
-    rebuildAttempt = ./impl/lib/rebuild-attempt.sh;
-    rebuildReceipt = ./impl/lib/rebuild-receipt.sh;
   };
 
   system.tools.nixos-rebuild.enable = false;

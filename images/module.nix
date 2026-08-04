@@ -11,65 +11,6 @@ let
   imageDefinitions = builtins.attrValues cfg.images;
   configuredContainers = config.virtualisation.oci-containers.containers;
 
-  mkNixImageIdentity =
-    id: image:
-    pkgs.runCommandLocal "dotfiles-oci-${id}-image-identity-v1.json"
-      {
-        nativeBuildInputs = with pkgs; [
-          coreutils
-          gnutar
-          gzip
-          jq
-        ];
-        inherit (image) imageFile;
-        imageReference = image.image;
-      }
-      ''
-        set -euo pipefail
-
-        work_dir=$(mktemp -d)
-        trap 'rm -rf -- "$work_dir"' EXIT
-        manifest_json=$work_dir/manifest.json
-        config_json=$work_dir/config.json
-
-        tar --extract --to-stdout --file "$imageFile" manifest.json > "$manifest_json"
-        jq --exit-status --slurp --arg reference "$imageReference" '
-          length == 1 and
-          (.[0] | type) == "array" and (.[0] | length) == 1 and
-          (.[0][0].Config | type == "string" and test("^[0-9a-f]{64}\\.json$")) and
-          .[0][0].RepoTags == [$reference] and
-          (.[0][0].Layers | type) == "array" and (.[0][0].Layers | length) > 0 and
-          all(.[0][0].Layers[];
-            type == "string" and
-            test("^([0-9a-f]{64}\\.tar|[0-9a-f]{64}/layer\\.tar)$")
-          )
-        ' "$manifest_json" > /dev/null
-
-        config_member=$(jq --raw-output '.[0].Config' "$manifest_json")
-        tar --extract --to-stdout --file "$imageFile" -- "$config_member" > "$config_json"
-        jq --exit-status --slurp 'length == 1 and (.[0] | type) == "object"' \
-          "$config_json" > /dev/null
-
-        expected_hash=$(jq --raw-output '.[0].Config | rtrimstr(".json")' "$manifest_json")
-        actual_hash=$(sha256sum -- "$config_json" | cut -d ' ' -f 1)
-        test "$actual_hash" = "$expected_hash"
-
-        jq --null-input \
-          --arg imageReference "$imageReference" \
-          --arg imageFile "$imageFile" \
-          --arg imageId "sha256:$expected_hash" \
-          '{
-            schemaVersion: 1,
-            imageReference: $imageReference,
-            imageFile: $imageFile,
-            imageId: $imageId
-          }' > "$out"
-      '';
-
-  nixImageIdentityFiles = lib.mapAttrs mkNixImageIdentity (
-    lib.filterAttrs (_: image: image.kind == "nix") cfg.images
-  );
-
   upstreamImages = map (image: image.image) (
     builtins.attrValues (lib.filterAttrs (_: image: image.kind == "upstream") cfg.images)
   );
@@ -184,17 +125,6 @@ in
   };
 
   config.my.commands = { inherit syncImages imageDigest; };
-
-  # doctor が読む契約。images が所有する派生物を一箇所で公開する
-  config.my.contract.images = {
-    libraries = {
-      imageState = ./impl/lib/image-state.sh;
-      # 互換を保つと約束した旧版。rebuild の interop test が読む
-      legacyImageState = ./fixtures/legacy-image-state.sh;
-    };
-    identityFiles = nixImageIdentityFiles;
-    syncStatusCommand = lib.getExe syncImages;
-  };
 
   config.users.users.${cfg.username}.extraGroups = [ "docker" ];
 

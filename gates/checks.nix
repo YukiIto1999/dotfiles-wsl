@@ -19,6 +19,36 @@ let
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 in
 {
+  # 誰も読まない契約は、宣言だけが残って中身が腐る。実際に images の契約が
+  # 存在しない path を指したまま残っていた
+  contract-has-reader =
+    let
+      ownerOf = lib.listToAttrs (
+        lib.concatMap (
+          definition:
+          let
+            unit = lib.head (lib.splitString "/" (lib.removePrefix "${self}/" (toString definition.file)));
+          in
+          map (name: lib.nameValuePair name unit) (builtins.attrNames definition.value)
+        ) hostOptions.my.contract.definitionsWithLocations
+      );
+    in
+    pkgs.runCommandLocal "check-contract-has-reader" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+      set -euo pipefail
+
+      unread=""
+      ${lib.concatMapStrings (name: ''
+        readers=$(grep -rlF 'contract.${name}' ${self} --include='*.nix'           | grep -v '^${self}/${ownerOf.${name}}/' || true)
+        [ -n "$readers" ] || unread="$unread ${name}"
+      '') (builtins.attrNames ownerOf)}
+
+      if [ -n "$unread" ]; then
+        echo "contract has no reader outside its unit:$unread" >&2
+        exit 1
+      fi
+      touch $out
+    '';
+
   # 登録簿が空になると、それを走査する検査は全て緑のまま何も見なくなる。
   # 個々の検査に非空の assert を書き足すのではなく、登録簿の側で禁じる
   registries-non-empty =

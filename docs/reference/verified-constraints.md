@@ -22,6 +22,7 @@
 | generation が無い状態から age 鍵を配って rebuild へ渡す | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
+| front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |

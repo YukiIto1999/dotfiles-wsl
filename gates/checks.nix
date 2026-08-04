@@ -15,10 +15,39 @@ let
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 in
 {
+  # 登録簿が空になると、それを走査する検査は全て緑のまま何も見なくなる。
+  # 個々の検査に非空の assert を書き足すのではなく、登録簿の側で禁じる
+  registries-non-empty =
+    let
+      walk =
+        path: opts:
+        lib.concatLists (
+          lib.mapAttrsToList (
+            name: value:
+            let
+              here = path ++ [ name ];
+            in
+            if !(lib.isAttrs value) then
+              [ ]
+            else if value ? _type && value._type == "option" then
+              lib.optional (
+                lib.hasPrefix "attribute set of" (value.type.description or "")
+                && lib.attrByPath here { } hostConfig == { }
+              ) (lib.concatStringsSep "." here)
+            else
+              walk here value
+          ) opts
+        );
+
+      empty = walk [ "my" ] hostOptions.my;
+    in
+    assert empty == [ ];
+    pkgs.runCommandLocal "check-registries-non-empty" { } "touch $out";
+
   # unit の層の file 名。ここが唯一の定義で、検査はここを読む
   # loopback port の占有は host 全体の資源で、単一 unit の不変条件ではない。
   # 宣言を増やさず、既存の contract と container 宣言から全 listener を集める
-  # port を宣言しない生 unit は 46 check のどれにも届かない。socat 一本で
+  # port を宣言しない生 unit は他のどの check にも届かない。socat 一本で
   # gateway と同じ port を 0.0.0.0 で取れる。unit を登録制にする
   service-listener-registry =
     let

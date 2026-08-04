@@ -1,282 +1,42 @@
-set -euo pipefail
-
-@atomicFileFunctions@
-
-@ociImageStateFunctions@
-
+# pull = "never" なので、宣言した digest の image が事前に無いと container が
+# 起動しない。docker 自身が image の有無を答えるので、同期の状態は記録しない
 usage() {
   cat <<'USAGE'
 usage:
-  dotfiles-sync-images
-  dotfiles-sync-images --status
+  dotfiles-sync-images [--status]
 
-Synchronize digest-locked upstream OCI images from the immutable candidate manifest.
-Nix-generated imageFile entries are verified by the system activation path and are not pulled.
+Pull the upstream images this configuration declares, by digest. With --status,
+report which are missing and exit 1 when any is.
 USAGE
 }
 
-die() {
-  local status=$1
-  shift
-  echo "FATAL: $*" >&2
-  exit "$status"
-}
+status_only=0
+case "${1-}" in
+  --status) status_only=1 ;;
+  --help | -h) usage; exit 0 ;;
+  "") ;;
+  *) usage >&2; exit 2 ;;
+esac
 
-mode=sync
-if (( $# == 1 )) && [[ $1 == --status ]]; then
-  mode=status
-elif (( $# == 1 )) && [[ $1 == -h || $1 == --help ]]; then
-  usage
-  exit 0
-elif (( $# != 0 )); then
-  usage >&2
-  exit 2
-fi
+images=@upstreamImages@
+missing=0
 
-expected_user=@ociImageSyncUser@
-manifest=@ociImageManifest@
-state_root=@ociImageStateRoot@
-docker_command=@dockerCommand@
-# shellcheck disable=SC2034 # production setup fragment resolves the configured Git worktree.
-# shellcheck disable=SC2034 # production setup fragment enforces the configured user.
-nix_store_dir=@nixStoreDir@
-@imageSyncEnvironmentSetup@
-receipts_dir=$state_root/receipts
-expected_uid=$EUID
-expected_gid=$(id -g)
-umask 077
-
-[[ $manifest == /* && -f $manifest && ! -L $manifest ]] || die 2 "OCI image manifest is not a regular file: $manifest"
-manifest_data=$(cat -- "$manifest") || die 2 "failed to read OCI image manifest"
-jq -e '
-  .schemaVersion == 2 and
-  (.images | type) == "array" and (.images | length) > 0 and
-  ([.images[].id] | length) == ([.images[].id] | unique | length) and
-  ([.images[].container] | length) == ([.images[].container] | unique | length) and
-  all(.images[];
-    (.id | type == "string" and test("^[a-z0-9][a-z0-9-]{0,62}$")) and
-    (.container | type == "string" and test("^[a-z0-9][a-z0-9_.-]{0,62}$")) and
-    (.image | type == "string" and length > 0 and (contains("\n") | not)) and
-    if .kind == "upstream" then
-      (.repository | type == "string" and length > 0 and (contains("\n") | not)) and
-      (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
-      (.repository as $repository | .digest as $digest | .image |
-        split("@") as $parts |
-        ($parts | length) == 2 and $parts[1] == $digest and
-        ($parts[0] == $repository or
-          (($parts[0] | startswith($repository + ":")) and
-            ($parts[0] | ltrimstr($repository + ":") |
-              test("^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$"))))) and
-      .imageFile == null
-    elif .kind == "nix" then
-      .repository == null and .digest == null and
-      (.imageFile | type == "string" and startswith("/nix/store/"))
-    else false end
-  )
-' <<< "$manifest_data" >/dev/null || die 2 "OCI image manifest does not match schema version 2"
-manifest_hash=$(sha256sum -- "$manifest" | cut -d ' ' -f 1)
-
-validate_receipt_file() {
-  local receipt=$1 id=$2 metadata
-  [[ -f $receipt && ! -L $receipt ]] || return 1
-  metadata=$(stat -c '%u|%g|%a|%h' -- "$receipt") || return 1
-  [[ $metadata == "$expected_uid|$expected_gid|600|1" ]] || return 1
-  jq -e \
-    --arg id "$id" '
-      .schemaVersion == 1 and .id == $id and
-      (.status == "succeeded" or .status == "failed") and
-      (.image | type == "string" and length > 0) and
-      (.repository | type == "string" and length > 0) and
-      (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$")) and
-      (.manifestHash | type == "string" and test("^[0-9a-f]{64}$")) and
-      (.localImageId == null or
-        (.localImageId | type == "string" and test("^sha256:[0-9a-f]{64}$"))) and
-      (.message | type == "string" and length > 0 and (contains("\n") | not)) and
-      (.updatedAt | type == "string" and length > 0)
-    ' "$receipt" >/dev/null
-}
-
-invalid_receipt=
-validate_existing_receipts() {
-  local row id receipt
-  invalid_receipt=
-  while IFS= read -r row; do
-    id=$(jq -r '.id' <<< "$row")
-    receipt=$receipts_dir/$id.json
-    if [[ ( -e $receipt || -L $receipt ) ]] && ! validate_receipt_file "$receipt" "$id"; then
-      invalid_receipt=$receipt
-      return 1
-    fi
-  done < <(jq -c '.images[] | select(.kind == "upstream")' <<< "$manifest_data")
-}
-
-write_receipt() {
-  local id=$1 status=$2 image=$3 repository=$4 digest=$5 local_image_id=$6 message=$7
-  local receipt=$receipts_dir/$id.json temporary timestamp
-  timestamp=$(date --utc --iso-8601=seconds) || return 1
-  temporary=$(mktemp "$receipts_dir/.${id}.XXXXXX") || return 1
-  if ! chmod 0600 "$temporary"; then
-    rm -f -- "$temporary"
-    return 1
+for image in $images; do
+  if @dockerCommand@ image inspect "$image" > /dev/null 2>&1; then
+    printf 'OK: %s\n' "$image"
+    continue
   fi
-  if ! jq -n \
-    --arg id "$id" \
-    --arg status "$status" \
-    --arg image "$image" \
-    --arg repository "$repository" \
-    --arg digest "$digest" \
-    --arg manifestHash "$manifest_hash" \
-    --arg localImageId "$local_image_id" \
-    --arg message "$message" \
-    --arg updatedAt "$timestamp" '
-      {
-        schemaVersion: 1,
-        id: $id,
-        status: $status,
-        image: $image,
-        repository: $repository,
-        digest: $digest,
-        manifestHash: $manifestHash,
-        localImageId: (if $localImageId == "" then null else $localImageId end),
-        message: $message,
-        updatedAt: $updatedAt
-      }
-    ' > "$temporary"; then
-    rm -f -- "$temporary"
-    return 1
+  missing=1
+  if ((status_only)); then
+    printf 'MISSING: %s\n' "$image"
+    continue
   fi
-  sync "$temporary" || { rm -f -- "$temporary"; return 1; }
-  if ! mv -T -- "$temporary" "$receipt"; then
-    rm -f -- "$temporary"
-    return 1
-  fi
-  sync "$receipts_dir" || return 1
-  validate_receipt_file "$receipt" "$id"
-}
+  printf 'pulling %s\n' "$image"
+  @dockerCommand@ pull --quiet "$image" > /dev/null || {
+    printf 'FATAL: could not pull %s\n' "$image" >&2
+    exit 1
+  }
+done
 
-inspect_exact_image() {
-  local image=$1 repository=$2 digest=$3 inspect_json expected_repo_digest
-  inspect_json=$("$docker_command" image inspect "$image" 2>/dev/null) || return 1
-  expected_repo_digest="${repository}@${digest}"
-  local_image_id=$(jq -er '
-    if type == "array" and length == 1 then .[0].Id else error("expected one image") end |
-    select(type == "string" and test("^sha256:[0-9a-f]{64}$"))
-  ' <<< "$inspect_json") || return 1
-  jq -e --arg expected "$expected_repo_digest" '
-    type == "array" and length == 1 and
-    (.[] | .RepoDigests as $repoDigests |
-      ($repoDigests | type) == "array" and ($repoDigests | index($expected)) != null)
-  ' <<< "$inspect_json" >/dev/null
-}
-
-status_failed=0
-show_status() {
-  local row id image repository digest receipt receipt_status receipt_image_id
-  while IFS= read -r row; do
-    id=$(jq -r '.id' <<< "$row")
-    image=$(jq -r '.image' <<< "$row")
-    repository=$(jq -r '.repository' <<< "$row")
-    digest=$(jq -r '.digest' <<< "$row")
-    receipt=$receipts_dir/$id.json
-    if [[ ! -e $receipt && ! -L $receipt ]]; then
-      echo "MISSING: $id has no sync receipt"
-      status_failed=1
-      continue
-    fi
-    validate_receipt_file "$receipt" "$id" || die 2 "invalid OCI image receipt: $receipt"
-    receipt_status=$(jq -r '.status' "$receipt")
-    if [[ $receipt_status != succeeded ]] || ! jq -e \
-      --arg image "$image" --arg repository "$repository" --arg digest "$digest" \
-      --arg manifestHash "$manifest_hash" '
-        .image == $image and .repository == $repository and .digest == $digest and
-        .manifestHash == $manifestHash
-      ' "$receipt" >/dev/null; then
-      echo "STALE: $id receipt does not match the desired image"
-      status_failed=1
-      continue
-    fi
-    if ! inspect_exact_image "$image" "$repository" "$digest"; then
-      echo "MISSING: $id exact digest is not local"
-      status_failed=1
-      continue
-    fi
-    receipt_image_id=$(jq -r '.localImageId' "$receipt")
-    if [[ $receipt_image_id != "$local_image_id" ]]; then
-      echo "STALE: $id receipt image ID does not match Docker"
-      status_failed=1
-      continue
-    fi
-    echo "OK: $id is synchronized as $local_image_id"
-  done < <(jq -c '.images[] | select(.kind == "upstream")' <<< "$manifest_data")
-}
-
-if [[ $mode == status && ! -e $state_root && ! -L $state_root ]]; then
-  jq -r '.images[] | select(.kind == "upstream") | "MISSING: \(.id) has no sync receipt"' \
-    <<< "$manifest_data"
-  exit 1
-fi
-
-if [[ $mode == status ]]; then
-  dotfiles_oci_validate_state_root "$state_root" "$expected_uid" "$expected_gid" || \
-    die 2 "OCI image sync state root is invalid: $state_root"
-else
-  dotfiles_oci_prepare_state_root "$state_root" "$expected_uid" "$expected_gid" || \
-    die 2 "OCI image sync state root is invalid: $state_root"
-fi
-lock_kind=exclusive
-[[ $mode != status ]] || lock_kind=shared
-oci_lock_bootstrap_mode=create
-[[ $mode != status ]] || oci_lock_bootstrap_mode=existing-only
-if dotfiles_oci_acquire_image_lock \
-  "$state_root" "$expected_uid" "$expected_gid" "$lock_kind" "$oci_lock_bootstrap_mode"; then
-  :
-else
-  lock_status=$?
-  if (( lock_status == 1 )); then
-    die 1 "another OCI image sync is running"
-  fi
-  die 2 "OCI image sync state lock is invalid: $state_root"
-fi
-if ! validate_existing_receipts; then
-  die 2 "invalid OCI image receipt: $invalid_receipt"
-fi
-
-if [[ $mode == status ]]; then
-  show_status
-  exit "$status_failed"
-fi
-
-sync_failed=0
-while IFS= read -r row; do
-  id=$(jq -r '.id' <<< "$row")
-  image=$(jq -r '.image' <<< "$row")
-  repository=$(jq -r '.repository' <<< "$row")
-  digest=$(jq -r '.digest' <<< "$row")
-  local_image_id=
-  if inspect_exact_image "$image" "$repository" "$digest"; then
-    message="exact digest was already present"
-  else
-    if ! "$docker_command" pull "$image" >/dev/null; then
-      message="docker pull failed"
-      write_receipt "$id" failed "$image" "$repository" "$digest" "" "$message" || \
-        die 2 "failed to persist OCI image failure receipt: $id"
-      echo "FAIL: $id $message" >&2
-      sync_failed=1
-      continue
-    fi
-    if ! inspect_exact_image "$image" "$repository" "$digest"; then
-      message="pulled image does not expose the locked RepoDigest"
-      write_receipt "$id" failed "$image" "$repository" "$digest" "" "$message" || \
-        die 2 "failed to persist OCI image failure receipt: $id"
-      echo "FAIL: $id $message" >&2
-      sync_failed=1
-      continue
-    fi
-    message="exact digest synchronized"
-  fi
-  write_receipt "$id" succeeded "$image" "$repository" "$digest" "$local_image_id" "$message" || \
-    die 2 "failed to persist OCI image success receipt: $id"
-  echo "OK: $id $message ($local_image_id)"
-done < <(jq -c '.images[] | select(.kind == "upstream")' <<< "$manifest_data")
-
-exit "$sync_failed"
+((status_only)) && exit "$missing"
+exit 0

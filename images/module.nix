@@ -3,32 +3,13 @@
   lib,
   pkgs,
   mkCommand,
-  substituteCommandVars,
   ...
 }:
 
 let
   cfg = config.my;
-  primitives = cfg.contract.primitives.libraries;
   imageDefinitions = builtins.attrValues cfg.images;
   configuredContainers = config.virtualisation.oci-containers.containers;
-
-  ociImageManifestEntries = lib.mapAttrsToList (id: image: {
-    inherit id;
-    inherit (image)
-      kind
-      container
-      image
-      repository
-      digest
-      ;
-    imageFile = if image.imageFile == null then null else toString image.imageFile;
-  }) cfg.images;
-
-  ociImageManifest = (pkgs.formats.json { }).generate "dotfiles-oci-images-v2.json" {
-    schemaVersion = 2;
-    images = ociImageManifestEntries;
-  };
 
   mkNixImageIdentity =
     id: image:
@@ -89,43 +70,20 @@ let
     lib.filterAttrs (_: image: image.kind == "nix") cfg.images
   );
 
-  doctorOciImageManifestEntries = map (
-    image:
-    image
-    // {
-      unit = "docker-${image.container}.service";
-      expectedImageIdFile =
-        if image.kind == "nix" then toString nixImageIdentityFiles.${image.id} else null;
-    }
-  ) ociImageManifestEntries;
+  upstreamImages = map (image: image.image) (
+    builtins.attrValues (lib.filterAttrs (_: image: image.kind == "upstream") cfg.images)
+  );
 
-  mkSyncImages =
-    name:
-    pkgs.writeShellApplication {
-      inherit name;
-      # active rebuild の判定に同じ full receipt validator を埋め込む。validator library 内の更新関数は呼ばない。
-      excludeShellChecks = [ "SC2329" ];
-      runtimeInputs = with pkgs; [
-        coreutils
-        git
-        jq
-        util-linux
-      ];
-      text = substituteCommandVars {
-        atomicFileFunctions = builtins.readFile primitives.atomicFile;
-        ociImageStateFunctions = builtins.readFile ./impl/lib/image-state.sh;
-
-        dockerCommand = lib.escapeShellArg (lib.getExe pkgs.docker);
-        ociImageSyncUser = cfg.username;
-        ociImageManifest = lib.escapeShellArg ociImageManifest;
-        ociImageStateRoot = lib.escapeShellArg "${cfg.homeDir}/.local/state/dotfiles-wsl/image-sync";
-        imageSyncEnvironmentSetup = ''
-          if [[ $(id -un) != "$expected_user" ]]; then
-            die 2 "dotfiles-sync-images must run as $expected_user"
-          fi
-        '';
-      } (builtins.readFile ./impl/sync-images.sh);
+  syncImages = mkCommand {
+    name = "dotfiles-sync-images";
+    src = ./impl/sync-images.sh;
+    runtimeInputs = with pkgs; [ coreutils ];
+    vars = {
+      dockerCommand = lib.escapeShellArg (lib.getExe pkgs.docker);
+      upstreamImages = lib.escapeShellArg (lib.concatStringsSep " " upstreamImages);
     };
+  };
+
   # 宣言へ固定する digest を registry から取る。sync は宣言済み digest しか見ない
   imageDigest = mkCommand {
     name = "dotfiles-image-digest";
@@ -136,11 +94,6 @@ let
     ];
   };
 
-  syncImages = (mkSyncImages "dotfiles-sync-images").overrideAttrs (old: {
-    passthru = (old.passthru or { }) // {
-      manifest = ociImageManifest;
-    };
-  });
 in
 {
   # container を network 接続・loopback publish・依存整形・unit 命名込みで宣言する helper
@@ -239,12 +192,9 @@ in
       # 互換を保つと約束した旧版。rebuild の interop test が読む
       legacyImageState = ./fixtures/legacy-image-state.sh;
     };
-    entries = doctorOciImageManifestEntries;
     identityFiles = nixImageIdentityFiles;
     syncStatusCommand = lib.getExe syncImages;
   };
-
-  config.environment.etc."dotfiles/oci-images.json".source = ociImageManifest;
 
   config.users.users.${cfg.username}.extraGroups = [ "docker" ];
 

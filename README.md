@@ -99,17 +99,19 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 .
 ├── flake.nix              unit の収集、NixOS system、package、check の入口
 ├── flake.lock             input の固定
+├── host/                  この機械の語彙、WSL 統合、Nix 設定
+├── accounts/              account と identity
 ├── clis/                  AI CLI の共通資産と CLI ごとの配備
-├── mcp/                   gateway、MCP target、Docker backend
-├── doctor/                実用状態の診断
-├── rebuild/               rebuild transaction
-├── images/                OCI image inventory と同期
-├── sops/                  secret の登録と検証
-├── toolchain/             PATH 上の汎用ツールと language server
+├── mcp/                   gateway、MCP target、backend container
+├── toolchain/             PATH 上の汎用ツール、language server、git、静的解析
 ├── telemetry/             使用量の観測
-├── sonarqube/             品質 gate
-├── accounts/ git/ cleanup/ commands/ quality/ system/
-├── bootstrap/             初回構築
+├── rebuild/               適用と初回構築
+├── doctor/                unit と MCP の疎通確認
+├── images/                OCI image の宣言と同期
+├── artifacts/             生成設定の登録簿と整理
+├── commands/              運用 command の生成
+├── sops/                  secret の配線
+├── gates/                 repo 自身の検査
 ├── secrets/               SOPS で暗号化した secrets
 └── docs/                  runbook、architecture、reference
 ```
@@ -127,7 +129,7 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 生成先を直接直さず、対応する unit の `module.nix`、`assets/`、または暗号化済み secrets を変更する。
 
 通常の変更後は `dotfiles-rebuild --plan` で候補を確認し、`dotfiles-rebuild` で適用する。
-この経路が build、activation、検証を一つの transaction として扱う。
+未 commit の変更で適用しないことと、WSL の再起動要否の判定を、この経路が行う。世代と rollback は NixOS が持つ。
 開発時の検査とファイルごとの規約は[開発](docs/operations/development.md)を参照する。
 
 OCI image の変更は[OCI image runbook](docs/operations/oci-images.md)、doctor の診断は[doctor runbook](docs/operations/doctor.md)に従う。

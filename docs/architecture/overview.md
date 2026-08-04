@@ -22,7 +22,7 @@ Nix store の candidate system
    └── current generation の doctor manifest
 ```
 
-通常の適用入口は `dotfiles-rebuild` だけである。[`rebuild/module.nix`](../../commands/rebuild/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否する。飛ばされると困るのは、未 commit の変更で古い内容を配備しないことと、WSL の再起動要否の判定である。世代と rollback は NixOS が持つので、その上に層を作らない。
+通常の適用入口は `dotfiles-rebuild` だけである。[`commands/rebuild/module.nix`](../../commands/rebuild/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否する。飛ばされると困るのは、未 commit の変更で古い内容を配備しないことと、WSL の再起動要否の判定である。世代と rollback は NixOS が持つので、その上に層を作らない。
 
 `/run/current-system` は実行中の generation、`/nix/var/nix/profiles/system` は system profile、`/run/booted-system` は WSL 起動時の generation を表す。`wsl.conf` と activation interface の差分に応じて、live switch と WSL cold start を振り分ける。
 

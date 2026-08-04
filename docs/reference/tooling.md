@@ -27,8 +27,8 @@
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
 | AI CLI | [`clis/module.nix`](../../clis/module.nix) の `my.clis` | `nix eval --json .#nixosConfigurations.nixos.config.my.clis --apply builtins.attrNames` |
-| 静的 agent | [`clis/assets/agents/`](../../clis/assets/agents) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.agentFiles` |
-| local skill | [`clis/assets/skills/`](../../clis/assets/skills) | `nix eval --json .#nixosConfigurations.nixos.config.my.doctor.skillNames` |
+| 静的 agent | [`clis/assets/agents/`](../../clis/assets/agents) | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |
+| local skill | [`clis/assets/skills/`](../../clis/assets/skills) | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/skills/.*" n != null) (builtins.attrNames f)'` |
 | plugin skill | [`flake.nix`](../../flake.nix) の plugin input と [`flake.lock`](../../flake.lock) | 同上。local skill と合わせて出る |
 
 plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md) の責務境界に従う。

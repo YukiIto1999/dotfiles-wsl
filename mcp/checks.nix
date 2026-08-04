@@ -129,25 +129,49 @@ in
         nativeBuildInputs = with pkgs; [
           coreutils
           gnugrep
+          gnused
         ];
       }
       ''
+        set -euo pipefail
+
+        # 継続行を畳んでから見る。危険な書き方を数え上げても必ず漏れるので、
+        # 「exec は唯一で、単純コマンドで、最後の実行文」という安全な形を要求する
+        inspect() {
+          script=$1
+          ${pkgs.bash}/bin/bash -n "$script" || {
+            echo "front wrapper is not valid shell: $script" >&2
+            exit 1
+          }
+
+          logical=$(sed -e ':a' -e '/\\$/{N;s/\\\n//;ba' -e '}' "$script" \
+            | grep -vE '^[[:space:]]*(#|$)')
+
+          count=$(printf '%s\n' "$logical" | grep -cE '^[[:space:]]*exec[[:space:]]' || true)
+          if [ "$count" != 1 ]; then
+            echo "front wrapper must exec exactly once, found $count: $script" >&2
+            exit 1
+          fi
+
+          if ! printf '%s\n' "$logical" | tail -1 | grep -qE '^[[:space:]]*exec[[:space:]]'; then
+            echo "front wrapper runs a command after exec: $script" >&2
+            exit 1
+          fi
+
+          # 制御演算子を含めば単純コマンドではない。exec が条件に従属しうる
+          if printf '%s\n' "$logical" | tail -1 | grep -qE '(&&|\|\||;|\||&)'; then
+            echo "front wrapper conditions its exec: $script" >&2
+            exit 1
+          fi
+        }
+
         started=0
         for exec in ${lib.escapeShellArgs execs}; do
           for token in $exec; do
             case "$token" in /nix/store/*) ;; *) continue ;; esac
             [ -f "$token" ] || continue
             [ "$(head -c 2 "$token")" = '#!' ] || continue
-            # bash -n は syntax を見る。exec の位置の誤りは -n では出ないので、
-            # exec 行が最後の実行文であることを併せて見る
-            ${pkgs.bash}/bin/bash -n "$token" || {
-              echo "front wrapper is not valid shell: $token" >&2
-              exit 1
-            }
-            if grep -qE '^\s*exec .*&&' "$token"; then
-              echo "front wrapper conditions its exec: $token" >&2
-              exit 1
-            fi
+            inspect "$token"
             started=$((started + 1))
           done
         done

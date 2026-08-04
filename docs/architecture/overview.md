@@ -53,7 +53,7 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 ## Runtime services
 
-systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は各所有 unit が `my.doctor.units` へ隣接して宣言する。
+systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は別の登録簿を持たず、この repo が宣言した常駐 service を `dotfiles-doctor` が導出する。
 
 [`images/module.nix`](../../images/module.nix) は Docker daemon と `dotfiles-backends` network を用意し、`mkContainerBackend` が backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
 

@@ -18,6 +18,7 @@ case "${1-}" in
 esac
 
 units=@declaredUnits@
+targets=@mcpTargets@
 gateway=@gatewayUrl@
 
 failed=()
@@ -35,6 +36,26 @@ if ! curl -sS -m 10 -o /dev/null \
   "$gateway"; then
   gateway_state=unreachable
   failed+=("gateway=$gateway_state")
+fi
+
+# gateway が答えても、target が fanout で落ちていれば tool は使えない。
+# 宣言した target 名が tools/list に現れることまで見る
+session=$(curl -sS -m 10 -D- -o /dev/null \
+  -H 'content-type: application/json' \
+  -H 'accept: application/json, text/event-stream' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"dotfiles-doctor","version":"1"}}}' \
+  "$gateway" 2>/dev/null | grep -i '^mcp-session-id:' | cut -d' ' -f2 | tr -d '\r')
+
+if [ -n "$session" ]; then
+  tools=$(curl -sS -m 30 \
+    -H 'content-type: application/json' \
+    -H 'accept: application/json, text/event-stream' \
+    -H "mcp-session-id: $session" \
+    -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+    "$gateway" 2>/dev/null | grep -oE '"name":"[a-z0-9_-]+' | sed 's/"name":"//')
+  for target in $targets; do
+    printf '%s\n' "$tools" | grep -q "^${target}_" || failed+=("target=$target")
+  done
 fi
 
 if ((json)); then

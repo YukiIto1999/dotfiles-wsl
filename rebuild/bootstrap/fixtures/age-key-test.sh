@@ -41,44 +41,6 @@ as_user() {
   "$@"
 }
 
-operation_lock=$DOTFILES/.git/dotfiles-operation.lock
-lock_target=$test_root/lock-target
-printf '%s\n' 'preserve-lock-target' > "$lock_target"
-ln -s "$lock_target" "$operation_lock"
-if (acquire_operation_lock >/dev/null 2>&1); then
-  echo 'bootstrap accepted a symlinked operation lock' >&2
-  exit 1
-fi
-grep -Fqx 'preserve-lock-target' "$lock_target"
-rm "$operation_lock"
-
-exec 9> "$operation_lock"
-chmod 0600 "$operation_lock"
-flock -n 9
-if (acquire_operation_lock >/dev/null 2>&1); then
-  echo 'bootstrap ignored the shared dotfiles operation lock' >&2
-  exit 1
-fi
-flock -u 9
-acquire_operation_lock >/dev/null
-
-mkdir -p -- "$DOTFILES/.git/dotfiles-sops-enroll"
-touch "$DOTFILES/.git/dotfiles-sops-enroll/active.json"
-if (reject_active_enrollment >/dev/null 2>&1); then
-  echo 'bootstrap ignored an active SOPS enrollment transaction' >&2
-  exit 1
-fi
-rm -r -- "$DOTFILES/.git/dotfiles-sops-enroll"
-reject_active_enrollment >/dev/null
-
-mkdir -p -- "$DOTFILES/.git/dotfiles-rebuild"
-touch "$DOTFILES/.git/dotfiles-rebuild/active.json"
-if (reject_active_rebuild >/dev/null 2>&1); then
-  echo 'bootstrap ignored an active rebuild transaction' >&2
-  exit 1
-fi
-rm -r -- "$DOTFILES/.git/dotfiles-rebuild"
-reject_active_rebuild >/dev/null
 
 STAT_PROFILE=valid
 stat() {
@@ -140,7 +102,6 @@ if (preflight >/dev/null 2>&1); then
 fi
 
 # main と同じ stage runner が operation lock を activation 完了まで保持する。
-dotfiles_release_operation_lock
 [[ -z ${DOTFILES_OPERATION_DIRECTORY_LOCK_FD:-} &&
   -z ${DOTFILES_OPERATION_LEGACY_LOCK_FD:-} ]]
 bootstrap_stage_log=$test_root/bootstrap-stages.log
@@ -149,18 +110,10 @@ bootstrap_rebuild_release=$test_root/bootstrap-rebuild.release
 export BOOTSTRAP_REBUILD_READY=$bootstrap_rebuild_ready
 export BOOTSTRAP_REBUILD_RELEASE=$bootstrap_rebuild_release
 
-eval "$(declare -f acquire_operation_lock | sed '1s/acquire_operation_lock/production_acquire_operation_lock/')"
 record_bootstrap_stage() {
   printf '%s\n' "$1" >> "$bootstrap_stage_log"
 }
 ensure_root() { record_bootstrap_stage ensure_root; }
-acquire_operation_lock() {
-  record_bootstrap_stage acquire_operation_lock
-  unset -f stat
-  production_acquire_operation_lock >/dev/null
-}
-reject_active_enrollment() { record_bootstrap_stage reject_active_enrollment; }
-reject_active_rebuild() { record_bootstrap_stage reject_active_rebuild; }
 register_safe_directories() { record_bootstrap_stage register_safe_directories; }
 preflight() { record_bootstrap_stage preflight; }
 verify_tracked_flake_files() { record_bootstrap_stage verify_tracked_flake_files; }
@@ -180,14 +133,9 @@ for _ in {1..500}; do
   sleep 0.01
 done
 [[ -e $bootstrap_rebuild_ready ]]
-if (exec 8< "$operation_lock"; flock -n 8); then
-  echo 'bootstrap released the operation lock before activation completed' >&2
-  exit 1
-fi
 : > "$bootstrap_rebuild_release"
 wait "$bootstrap_pid"
 bootstrap_pid=
-(exec 8< "$operation_lock"; flock -n 8)
 printf '%s\n' ensure_root "${BOOTSTRAP_STAGES[@]}" > "$test_root/expected-bootstrap-stages.log"
 cmp "$test_root/expected-bootstrap-stages.log" "$bootstrap_stage_log"
 

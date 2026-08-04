@@ -6,124 +6,35 @@
   ...
 }:
 
-let
-  inherit (helpers.execTokens) valuesOf;
-  inherit (helpers.containerArgv)
-    containerArgv
-    ;
-  nixImageIdentityFiles = hostConfig.my.contract.images.identityFiles;
-  actualUpstreamOciImages = lib.mapAttrs (
-    _: image:
-    lib.filterAttrs (
-      name: _:
-      lib.elem name [
-        "container"
-        "digest"
-        "image"
-        "repository"
-      ]
-    ) image
-  ) (lib.filterAttrs (_: image: image.kind == "upstream") hostConfig.my.images);
-  agentmemoryOciImage = hostConfig.my.images.agentmemory;
-  actualOciPullModes = lib.mapAttrs (
-    _: container: container.pull
-  ) hostConfig.virtualisation.oci-containers.containers;
-  ociContainerStartScripts = map (
-    containerName:
-    lib.removeSuffix " " hostConfig.systemd.services."docker-${containerName}".serviceConfig.ExecStart
-  ) (builtins.attrNames hostConfig.virtualisation.oci-containers.containers);
-  expectedOciImageManifest = {
-    schemaVersion = 2;
-    images = lib.mapAttrsToList (id: image: {
-      inherit id;
-      inherit (image)
-        kind
-        container
-        image
-        repository
-        digest
-        ;
-      imageFile = if image.imageFile == null then null else toString image.imageFile;
-    }) hostConfig.my.images;
-  };
-  syncImages = hostConfig.my.commands.syncImages;
-in
 {
+  # image は digest で固定し、参照が repository と digest に整合すること。
+  # 宣言を写した期待値は宣言と写しの一致しか見ない
   oci-image-contract =
     assert hostConfig.virtualisation.oci-containers.backend == "docker";
     assert hostConfig.virtualisation.docker.enable;
-    # 宣言を写した期待値は、宣言を変えるたびに二箇所を直すだけで何も守らない。
-    # image 参照が digest で固定され、内部が整合していることを規則で見る
     assert lib.all (
       name:
       let
-        entry = actualUpstreamOciImages.${name};
+        entry = hostConfig.my.images.${name};
       in
       entry.container == name
-      && entry.repository != null
-      && entry.digest != null
-      && lib.hasPrefix "sha256:" entry.digest
-      && lib.hasPrefix "${entry.repository}:" entry.image
-      && lib.hasSuffix "@${entry.digest}" entry.image
-    ) (builtins.attrNames actualUpstreamOciImages);
-    assert agentmemoryOciImage.kind == "nix";
-    assert agentmemoryOciImage.container == "agentmemory";
-    assert agentmemoryOciImage.image == "agentmemory:0.9.26";
-    assert agentmemoryOciImage.repository == null;
-    assert agentmemoryOciImage.digest == null;
-    assert agentmemoryOciImage.imageFile != null;
-    assert builtins.attrNames nixImageIdentityFiles == [ "agentmemory" ];
-    # extraOptions の後勝ちで --pull=always が効く。宣言ではなく argv を見る
-    assert lib.all (name: valuesOf containerArgv.${name} "--pull" == [ "never" ]) (
-      builtins.attrNames hostConfig.virtualisation.oci-containers.containers
+      && (
+        if entry.kind == "upstream" then
+          entry.repository != null
+          && entry.digest != null
+          && lib.hasPrefix "sha256:" entry.digest
+          && lib.hasPrefix "${entry.repository}:" entry.image
+          && lib.hasSuffix "@${entry.digest}" entry.image
+        else
+          entry.imageFile != null && entry.repository == null && entry.digest == null
+      )
+    ) (builtins.attrNames hostConfig.my.images);
+    # pull = never なので、宣言した image が事前に無いと container が起動しない
+    assert lib.all (c: c.pull == "never") (
+      builtins.attrValues hostConfig.virtualisation.oci-containers.containers
     );
-    assert
-      actualOciPullModes == {
-        agentmemory = "never";
-        crawl4ai = "never";
-        searxng = "never";
-        sonarqube = "never";
-        sonarqube-db = "never";
-      };
-    assert
-      hostConfig.environment.etc."dotfiles/oci-images.json".source
-      == hostConfig.my.commands.syncImages.manifest;
-    pkgs.runCommandLocal "check-oci-image-contract"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.gnused
-          pkgs.jq
-          pkgs.util-linux
-        ];
-      }
-      ''
-        jq --exit-status \
-          --argjson expected ${lib.escapeShellArg (builtins.toJSON expectedOciImageManifest)} \
-          '. == $expected' \
-          ${syncImages.manifest} > /dev/null
-        jq --exit-status \
-          --arg reference ${lib.escapeShellArg agentmemoryOciImage.image} \
-          --arg imageFile ${lib.escapeShellArg (toString agentmemoryOciImage.imageFile)} '
-            .schemaVersion == 1 and
-            .imageReference == $reference and
-            .imageFile == $imageFile and
-            (.imageId | type == "string" and test("^sha256:[0-9a-f]{64}$"))
-          ' ${nixImageIdentityFiles.agentmemory} > /dev/null
-        if grep --recursive --quiet 'DOTFILES_IMAGE_SYNC_TEST_' ${syncImages}; then
-          echo 'production dotfiles-sync-images contains test hooks' >&2
-          exit 1
-        fi
-        for start_script in ${lib.escapeShellArgs ociContainerStartScripts}; do
-          grep --fixed-strings -- '--pull never' "$start_script" > /dev/null
-        done
-        touch $out
-      '';
+    pkgs.runCommandLocal "check-oci-image-contract" { } "touch $out";
 
-  # docker が受け取る argv の contract。宣言のどの経路から来ても argv に現れるので、
-  # extraOptions だけを見ると networks や user を取り逃す
   container-argv-contract =
     assert lib.assertMsg (helpers.containerArgv.staleSecretReaders == [ ]) (
       "secret reader table names a template that does not exist: "

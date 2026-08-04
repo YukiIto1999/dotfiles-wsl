@@ -1,6 +1,5 @@
 {
   pkgs,
-  self,
   ...
 }:
 
@@ -34,8 +33,8 @@ in
         ];
       }
       ''
-        bash ${self}/commands/rebuild/bootstrap/fixtures/age-key-test.sh \
-          ${self}/commands/rebuild/bootstrap/impl/bootstrap.sh \
+        bash ${./fixtures/age-key-test.sh} \
+          ${./impl/bootstrap.sh} \
           ${fakeRebuild}
         touch $out
       '';

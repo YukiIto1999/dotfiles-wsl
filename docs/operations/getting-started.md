@@ -7,34 +7,31 @@
 ## 前提
 
 - NixOS-WSL を用意し、`nixos` ユーザーでログインする。[bootstrap script](../../rebuild/bootstrap/impl/bootstrap.sh) はこのユーザーと `/home/nixos/dotfiles-wsl` を初回構築の固定値として検査する。
-- リポジトリを `~/dotfiles-wsl` へ clone し、作業ツリーを変更のない状態にする。`dotfiles-sops-enroll prepare` は差分と未追跡ファイルがあると開始しない。
-- recovery key を読み取り専用の外部媒体から一時的に参照できるようにする。host key は enrollment command が `/var/lib/sops-nix/key.txt` へ生成するため、別ホストの鍵をコピーしない。
+- リポジトリを `~/dotfiles-wsl` へ clone し、作業ツリーを変更のない状態にする。
+- recovery key を読み取り専用の外部媒体から一時的に参照できるようにする。host key はこの host で生成し、別ホストの鍵をコピーしない。
 - 他のホストと重複しない host ID を決める。ID は63文字以内の小文字の英数字またはハイフンで構成し、英数字で始める。
 
 再現対象は tracked source と `flake.lock` から生成する system と Home Manager の設定である。AI CLI の login session、agentmemory のデータ、host key はホスト固有であり、別ホストから複製しない。AI CLI 本体は bootstrap 時点の upstream 版を取得するため、`flake.lock` の再現対象には含まれない。
 
 ## Host key
 
-configured worktree から recovery key と host ID を渡し、候補を作る。
+この host で鍵を生成し、root だけが読める場所へ置く。
 
 ```bash
 cd ~/dotfiles-wsl
-nix run .#dotfiles-sops-enroll -- prepare \
-  --recovery-key /media/offline/recovery-key.txt \
-  --host-id desktop-nixos
-nix run .#dotfiles-sops-enroll -- status
+age-keygen -o /tmp/host.key
+sudo install -m 0400 -o root -g root /tmp/host.key /var/lib/sops-nix/key.txt
 ```
 
-`prepare` の出力にある `PREPARED` の host ID と追加 recipient を確認してから適用する。
+生成した公開鍵を `secrets/.sops.yaml` の `hosts` と `creation_rules` へ足し、recovery key で再暗号化する。
 
 ```bash
-nix run .#dotfiles-sops-enroll -- apply \
-  --recovery-key /media/offline/recovery-key.txt \
-  --yes
-nix run .#dotfiles-sops-enroll -- status
+SOPS_AGE_KEY_FILE=/media/offline/recovery-key.txt \
+  sops --config secrets/.sops.yaml updatekeys secrets/secrets.yaml
+SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops decrypt secrets/secrets.yaml > /dev/null
 ```
 
-新規ホストでは、`apply` が暗号化済みファイルを交換し、host key を昇格して `APPLIED` を表示する。最後の `status` で state が `idle` になったことを確認する。中断した場合や `PENDING` が表示された場合は、自己判断で鍵や候補を消さず、[SOPS enrollment](sops-enrollment.md)の復旧手順へ移る。
+最後の復号が成功してから先へ進む。**確かめる前に旧 recipient を外すと全 secret を失う。**手順の詳細は [SOPS の鍵](sops-enrollment.md)にある。
 
 変更対象を確認する。
 
@@ -44,7 +41,7 @@ git diff -- secrets
 git status --short
 ```
 
-`git status --short` に表示される変更は `secrets/.sops.yaml` と `secrets/secrets.yaml` の二つだけにする。bootstrap 前は Git identity が未配備なので、この時点では commit しない。enrollment が完了したら recovery key をホストから取り外す。
+`git status --short` に表示される変更は `secrets/.sops.yaml` と `secrets/secrets.yaml` の二つだけにする。bootstrap 前は Git identity が未配備なので、この時点では commit しない。鍵の交換が済んだら recovery key をホストから取り外す。
 
 ## Bootstrap
 

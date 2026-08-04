@@ -8,7 +8,7 @@
 
 - [セットアップ](operations/getting-started.md)では、新規ホストの enrollment から初回検証までの順序が分かる。
 - [rebuild](operations/rebuild.md)では、通常適用の効果判定と中断後の再開方法が分かる。
-- [SOPS enrollment](operations/sops-enrollment.md)では、host key の登録、世代移行、中断復旧の手順が分かる。
+- [SOPS の鍵](operations/sops-enrollment.md)では、鍵の置き場、secret の編集、新しい host の登録が分かる。
 - [secrets](operations/secrets.md)では、暗号化済み secret の編集方法と鍵の扱いが分かる。
 - [OCI image](operations/oci-images.md)では、upstream image の確認、同期、更新手順が分かる。
 - [doctor](operations/doctor.md)では、実用状態の検査項目と失敗時の調査先が分かる。

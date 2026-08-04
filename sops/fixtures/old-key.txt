@@ -1,3 +1,0 @@
-# Public test fixture. This identity protects no real data.
-# public key: age1fwprkvvd3503h3f83apqxwcdfhsh066raxsrwffnnmve7epfwflq7knn9d
-AGE-SECRET-KEY-1AGF7E6XJDHS6X233REFH88CJ7046836TNFCGLHLQW5J2ZL2HWZSSHYWN4X

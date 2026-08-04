@@ -89,7 +89,7 @@
         machineModule:
         nixpkgs.lib.nixosSystem {
           inherit system;
-          specialArgs = { inherit pluginSources; };
+          specialArgs = { inherit pluginSources self; };
           modules = unitModules ++ [
             nixos-wsl.nixosModules.default
             sops-nix.nixosModules.sops

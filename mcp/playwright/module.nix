@@ -6,7 +6,10 @@
 }:
 
 let
-  gatewayPort = config.my.contract.gateway.endpoints.default.port;
+  # gateway は downstream client の Host を upstream へそのまま渡す。実測で
+  # localhost:8765 で繋ぐと playwright だけ 403 になり tool が消えた
+  authorityOf = url: lib.head (lib.splitString "/" (lib.removePrefix "http://" url));
+  gatewayAuthority = authorityOf config.my.contract.gateway.endpoints.default.url;
   front = pkgs.callPackage ./package.nix { };
 in
 {
@@ -17,6 +20,6 @@ in
     needsNetwork = true;
     serve =
       port:
-      "${lib.getExe front} --host 127.0.0.1 --port ${toString port} --allowed-hosts 127.0.0.1:${toString port},127.0.0.1:${toString gatewayPort},127.0.0.1,localhost --output-dir ${config.my.contract.mcp.fronts.playwright.runtimeDirectoryPath}";
+      "${lib.getExe front} --host 127.0.0.1 --port ${toString port} --allowed-hosts 127.0.0.1:${toString port},${gatewayAuthority} --output-dir ${config.my.contract.mcp.fronts.playwright.runtimeDirectoryPath}";
   };
 }

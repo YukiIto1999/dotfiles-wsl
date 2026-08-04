@@ -3,6 +3,7 @@
   options,
   lib,
   pkgs,
+  self,
   mkCommand,
   ...
 }:
@@ -16,7 +17,7 @@ let
   declaredHere = lib.unique (
     lib.concatMap (
       definition:
-      lib.optionals (lib.hasPrefix (toString ../.) (toString definition.file)) (
+      lib.optionals (lib.hasPrefix (toString self) (toString definition.file)) (
         builtins.attrNames definition.value
       )
     ) options.systemd.services.definitionsWithLocations
@@ -41,6 +42,7 @@ let
     vars = {
       declaredUnits = lib.escapeShellArg (lib.concatStringsSep " " declaredUnits);
       gatewayUrl = lib.escapeShellArg cfg.contract.gateway.endpoints.default.url;
+      mcpTargets = lib.escapeShellArg (lib.concatStringsSep " " (builtins.attrNames cfg.mcp.targets));
     };
   };
 in

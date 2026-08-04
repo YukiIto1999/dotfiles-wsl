@@ -64,7 +64,7 @@ let
   endpoints = lib.mapAttrs (id: endpoint: {
     inherit id;
     inherit (endpoint) port;
-    url = "http://localhost:${toString endpoint.port}/mcp";
+    url = "http://127.0.0.1:${toString endpoint.port}/mcp";
 
     service = "agentgateway-${id}";
     runtimeDirectory = "agentgateway-${id}";

@@ -14,6 +14,7 @@
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | 検証対象を別の登録簿から取らず宣言した unit から導く | `doctor-coverage` |
 | 登録簿が空にならない | `registries-non-empty` |
+| 契約に unit 外の読み手がいる | `contract-has-reader` |
 | 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
@@ -36,7 +37,7 @@
 | front が宣言した port で loopback に listen し書き込み領域を持つ | `mcp-front-contract` |
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
-| backend の待ち受け port が front の接続先と同じ宣言から出る | `agentmemory-config`、`searxng-settings` |
+| backend の待ち受け port が配備される argv の publish と一致する | `agentmemory-config`、`searxng-settings` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
 | MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`mcp/module.nix` の assertion) |
@@ -84,7 +85,6 @@
 - 参照文書が宣言の値を転記していないこと。roster や件数の転記は検査していない。
 - 一つの責務の宣言、実装、test が同じ場所にあること。配置の規約を検査していない。
 - 転記した期待値が宣言と同時に書き換わらないこと。`mcp/checks.nix` の `expectedNetworkFronts` は意図した二重鍵で、`needsNetwork` を足すだけでは通らず diff に必ず現れる。ただし両方を同時に書き換えた場合は通る。
-- 契約に読み手がいること。`my.contract.<unit>` を宣言しても、誰も読まない状態を検査していない。実際に `sops` と `sonarqube` が宣言だけの状態になっていた。
 - front が実際に loopback へ bind すること。起動 command に bind 先が現れることは検査するが、process が本当にその address で listen するかは実機でしか分からない。agentgateway が config に書かない管理 listener を三つ開いていた実例がある。
 - front が loopback の外へ出るかどうかの宣言が実体と一致すること。`needsNetwork` の集合は検査で固定するが、宣言が実装の挙動と合っているかは上流を読むしかない。searxng の `web_url_read` が `SEARXNG_URL` を経由せず引数の URL へ出る実例がある。
 - 通信制限による失敗が観測できること。`IPAddressDeny` の遮断は timeout として現れ、unit は active のままなので doctor の unit 検査は緑を保つ。tool を呼ぶまで表面化しない。

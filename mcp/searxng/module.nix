@@ -38,7 +38,6 @@ let
 in
 {
   # 検査は port を転記せずここを読む
-  my.contract.searxng.port = port;
   my.images = {
     searxng = {
       kind = "upstream";

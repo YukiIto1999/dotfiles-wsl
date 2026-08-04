@@ -117,7 +117,7 @@ in
     # stdio しか話さない front を Streamable HTTP へ載せる共通の機構
     serveOverProxy =
       command: port:
-      "${lib.getExe pkgs.mcp-proxy} --host 127.0.0.1 --port ${toString port} --stateless ${command}";
+      "${lib.getExe pkgs.mcp-proxy} --host 127.0.0.1 --port ${toString port} --stateless -- ${command}";
 
     mkMcpServer = pkgs.callPackage ./package/mk-server.nix { };
     mkNpmMcp = pkgs.callPackage ./package/mk-npm.nix { };

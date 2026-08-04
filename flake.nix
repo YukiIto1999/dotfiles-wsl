@@ -130,7 +130,6 @@
           dotfiles-install-clis = hostConfig.my.commands.installClis;
           dotfiles-rebuild = hostConfig.my.commands.rebuild;
           dotfiles-sync-images = hostConfig.my.commands.syncImages;
-          dotfiles-sops-enroll = hostConfig.my.commands.sopsEnroll;
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {

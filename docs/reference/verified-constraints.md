@@ -20,7 +20,7 @@
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
 | unit が他 unit を契約経由でだけ参照する | `unit-boundary-name-only` |
-| generation が無い状態から age 鍵を配って rebuild へ渡す | `bootstrap-age-key` |
+| generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
 | front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
@@ -74,7 +74,7 @@
 | Nix の慣用 | `statix` |
 | shell の静的検査 | `shellcheck` (shebang を持つ file が対象、fragment は `writeShellApplication` が build 時に見る) |
 | GitHub Actions workflow の妥当性 | `actionlint` |
-| 開発ツールの所有が system と home で重複しない | `development-tool-ownership` |
+| devenv と direnv を home だけが所有し、binary cache が一度だけ登録される | `development-tool-ownership` |
 
 ## 固定できていない制約
 

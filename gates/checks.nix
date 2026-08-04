@@ -11,6 +11,10 @@
 }:
 
 let
+  # 根 unit の名前。data 用の directory は unit ではないので対象にしない
+  rootUnitNames = lib.unique (
+    builtins.filter (name: name != "") (map (unit: lib.head (lib.splitString "/" unit.id)) units)
+  );
 
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 in
@@ -242,15 +246,23 @@ in
       ''
         set -euo pipefail
 
+        # 層の名前を数え上げると module.nix や checks.nix への直接参照が漏れる。
+        # 根 unit の名前を宣言集合として持ち、そこへ入る path を全部拒む
+        roots=${lib.escapeShellArg (lib.concatStringsSep " " rootUnitNames)}
+
         violations=""
         while IFS= read -r file; do
           owner=''${file#${self}/}
           owner=''${owner%%/*}
           while IFS= read -r target; do
             target=''${target%%/*}
-            [ "$target" = "$owner" ] || violations="$violations ''${file#${self}/}->$target"
+            [ "$target" = "$owner" ] && continue
+            for root in $roots; do
+              [ "$target" = "$root" ] || continue
+              violations="$violations ''${file#${self}/}->$target"
+            done
           done < <(
-            grep -ohE 'self \+ "/[a-z0-9-]+/(impl|assets|package|fixtures)|\$\{self\}/[a-z0-9-]+/(impl|assets|package|fixtures)|\.\./[a-z0-9-]+/(impl|assets|package|fixtures)' "$file" \
+            grep -ohE 'self \+ "/[a-z0-9-]+/|\$\{self\}/[a-z0-9-]+/|\.\./[a-z0-9-]+/' "$file" \
               | sed -E 's|^self \+ "/||; s|^\$\{self\}/||; s|^\.\./||' || true
           )
         done < <(find ${self} -name '*.nix' -not -path '*/.git/*')

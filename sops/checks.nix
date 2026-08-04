@@ -19,7 +19,8 @@ in
       set -euo pipefail
 
       # 宣言した recipient と、暗号文が実際に持つ recipient が一致すること
-      yq -r '.creation_rules[0].key_groups[0].age[]' ${self}/secrets/.sops.yaml \
+      # anchor は explode しないと alias 名のまま出る
+      yq -r 'explode(.) | .creation_rules[0].key_groups[0].age[]' ${self}/secrets/.sops.yaml \
         | sort > declared
       yq -r '.sops.age[].recipient' ${sopsFile} | sort > actual
       diff -u declared actual

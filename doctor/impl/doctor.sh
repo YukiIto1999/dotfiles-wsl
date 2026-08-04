@@ -42,14 +42,14 @@ if ((json)); then
   printf '"%s"' "${failed[0]-}"
   for f in "${failed[@]:1}"; do printf ',"%s"' "$f"; done
   printf ']}\n'
+elif ((${#failed[@]} == 0)); then
+  printf 'gateway: %s\nunits: all active\n' "$gateway_state"
 else
-  printf 'gateway: %s\n' "$gateway_state"
-  if ((${#failed[@]} == 0)); then
-    printf 'units: all active\n'
-  else
-    printf 'units not active:\n'
-    printf '  %s\n' "${failed[@]}"
-  fi
+  printf 'gateway: %s\nunits not active:\n' "$gateway_state"
+  printf '  %s\n' "${failed[@]}"
 fi
 
-((${#failed[@]} == 0))
+if ((${#failed[@]} > 0)); then
+  exit 1
+fi
+exit 0

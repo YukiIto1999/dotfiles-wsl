@@ -115,7 +115,7 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 ```
 
 責務は repo 直下に置き、層はどの責務でも同じ名前のファイルで表す。
-`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `tests/` `fixtures/` `package/` が素材である。
+`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `package/` `fixtures/` が素材である。振る舞いの検証も `checks.nix` に置き、`fixtures/` はその入力を持つ。
 `flake.nix` はこの名前だけを頼りに unit を集めるため、責務を足すとき flake を編集しない。
 
 

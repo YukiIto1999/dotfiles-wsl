@@ -315,7 +315,6 @@ in
           "impl"
           "assets"
           "package"
-          "tests"
           "fixtures"
         ];
       }

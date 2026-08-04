@@ -16,7 +16,7 @@ git diff --check -- secrets/secrets.yaml
 git diff -- secrets/secrets.yaml
 ```
 
-平文を別ファイル、shell history、Git patch、ログへ書かない。通常の値変更で `sops updatekeys` を実行せず、recipient と host key の変更には [SOPS enrollment](sops-enrollment.md)を使う。
+平文を別ファイル、shell history、Git patch、ログへ書かない。通常の値変更で `sops updatekeys` は要らない。recipient と host key を変える手順は [SOPS の鍵](sops-enrollment.md)にある。
 
 secret を追加するときは、先に値を消費する module に `sops.secrets` と必要な template または file owner を宣言し、同じ key path を SOPS で追加する。consumer の宣言を確認してから `dotfiles-rebuild --plan` と `dotfiles-rebuild` を実行する。
 

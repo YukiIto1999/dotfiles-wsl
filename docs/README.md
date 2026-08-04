@@ -6,7 +6,7 @@
 
 目的の作業をやり遂げたい運用者が、作業中に読む。
 
-- [セットアップ](operations/getting-started.md)では、新規ホストの enrollment から初回検証までの順序が分かる。
+- [セットアップ](operations/getting-started.md)では、新規ホストの鍵の用意から初回検証までの順序が分かる。
 - [rebuild](operations/rebuild.md)では、通常適用の効果判定と中断後の再開方法が分かる。
 - [SOPS の鍵](operations/sops-enrollment.md)では、鍵の置き場、secret の編集、新しい host の登録が分かる。
 - [secrets](operations/secrets.md)では、暗号化済み secret の編集方法と鍵の扱いが分かる。

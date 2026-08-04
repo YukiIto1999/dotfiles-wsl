@@ -57,6 +57,7 @@
 | 制約 | 検証 |
 |---|---|
 | 文書間と source への参照が切れていない | `docs-links` |
+| 文書が名乗る path が実在する | `docs-path-labels` |
 | 手順、参照、説明の各文書が読み手を明示している | `docs-reader` |
 | この一覧が実際の check 集合と一致する | `docs-constraint-coverage` |
 

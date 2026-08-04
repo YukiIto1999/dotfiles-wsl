@@ -408,6 +408,39 @@ in
     extraConfig.offline = true;
   };
 
+  # link 先が解決しても、表示名が別の path を名乗っていれば読み手は迷う。
+  # 実際に rebuild/module.nix という表示が commands/ 配下へ移った後も残っていた
+  docs-path-labels =
+    pkgs.runCommandLocal "check-docs-path-labels"
+      {
+        nativeBuildInputs = with pkgs; [
+          coreutils
+          gnugrep
+          gnused
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        missing=""
+        while IFS= read -r doc; do
+          # 大文字を含む token は NAME のような雛形なので対象にしない
+          while IFS= read -r label; do
+            [ -e "${self}/$label" ] || missing="$missing ''${doc#${self}/}:$label"
+          done < <(
+            grep -ohE '`[a-z0-9_.-]+/[a-z0-9_./-]+\.(nix|sh|md|yaml|yml|json|py|ts)`' "$doc" \
+              | tr -d '`' | sort -u || true
+          )
+          # skill や agent の資産は例示の path を含む。対象はこの repository の文書
+        done < <(find ${self}/README.md ${self}/docs -name '*.md' -not -path '*/superpowers/*')
+
+        if [ -n "$missing" ]; then
+          echo "documentation names a path that does not exist:$missing" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
   actionlint = pkgs.runCommandLocal "check-actionlint" { nativeBuildInputs = [ pkgs.actionlint ]; } ''
     workflow_dir=${self}/.github/workflows
     test -n "$(find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"

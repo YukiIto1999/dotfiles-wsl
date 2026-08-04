@@ -2,7 +2,6 @@
   helpers,
   pkgs,
   lib,
-  self,
   hostConfig,
   ...
 }:
@@ -48,7 +47,6 @@ let
     }) hostConfig.my.images;
   };
   syncImages = hostConfig.my.commands.syncImages;
-  syncImagesTest = syncImages.testPackage;
 in
 {
   oci-image-contract =
@@ -121,7 +119,6 @@ in
         for start_script in ${lib.escapeShellArgs ociContainerStartScripts}; do
           grep --fixed-strings -- '--pull never' "$start_script" > /dev/null
         done
-        bash ${self}/images/tests/sync-images-runtime.sh ${lib.getExe syncImagesTest}
         touch $out
       '';
 

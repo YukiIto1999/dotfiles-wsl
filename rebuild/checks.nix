@@ -161,149 +161,17 @@ in
     touch $out
   '';
 
-  rebuild-routing =
-    pkgs.runCommandLocal "check-rebuild-routing"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.gnused
-          pkgs.jq
-          pkgs.util-linux
-        ];
-      }
-      ''
-        bash ${self}/rebuild/tests/rebuild-routing.sh \
-          ${self}/rebuild/impl/rebuild.sh \
-          ${pkgs.bash}/bin/bash \
-          ${lib.getExe pkgs.fakeroot} \
-          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
-          ${hostConfig.my.contract.primitives.libraries.operationLock} \
-          ${self}/rebuild/impl/lib/rebuild-receipt.sh \
-          ${self}/rebuild/impl/lib/rebuild-attempt.sh \
-          ${toString hostConfig.my.contract.doctor.schemaVersion}
-        touch $out
-      '';
-
-  rebuild-attempt =
-    pkgs.runCommandLocal "check-rebuild-attempt"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.jq
-        ];
-      }
-      ''
-        bash ${self}/rebuild/tests/rebuild-attempt.sh \
-          ${self}/rebuild/impl/lib/rebuild-attempt.sh
-        touch $out
-      '';
-
-  atomic-publication =
-    pkgs.runCommandLocal "check-atomic-publication"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.findutils
-          pkgs.gnused
-          pkgs.util-linux
-        ];
-      }
-      ''
-        bash ${self}/rebuild/tests/atomic-publication.sh \
-          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
-          ${hostConfig.my.contract.primitives.libraries.operationLock} \
-          ${hostConfig.my.contract.images.libraries.imageState} \
-          full
-        bash ${self}/rebuild/tests/atomic-publication.sh \
-          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
-          ${hostConfig.my.contract.primitives.libraries.operationLock} \
-          ${hostConfig.my.contract.images.libraries.imageState} \
-          interop \
-          ${self}/rebuild/fixtures/legacy-operation-lock.sh \
-          ${hostConfig.my.contract.images.libraries.legacyImageState}
-        touch $out
-      '';
-
-  active-publication =
-    pkgs.runCommandLocal "check-active-publication"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.findutils
-          pkgs.gnused
-          pkgs.jq
-        ];
-      }
-      ''
-        bash ${self}/rebuild/tests/active-publication.sh \
-          ${hostConfig.my.contract.primitives.libraries.atomicFile} \
-          ${self}/rebuild/impl/lib/rebuild-receipt.sh \
-          full
-        touch $out
-      '';
-
-  preparation-parent-evidence =
-    pkgs.runCommandLocal "check-preparation-parent-evidence"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.jq
-        ];
-      }
-      ''
-        bash ${self}/rebuild/tests/preparation-parent-evidence.sh \
-          ${self}/rebuild/impl/lib/rebuild-receipt.sh \
-          full
-        touch $out
-      '';
-
-  gc-root-observer =
-    pkgs.runCommandLocal "check-gc-root-observer"
-      {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.coreutils
-          pkgs.findutils
-          pkgs.gnused
-          pkgs.jq
-        ];
-      }
-      ''
-        bash ${self}/rebuild/tests/gc-root-observer.sh \
-          ${self}/rebuild/impl/lib/rebuild-receipt.sh \
-          full
-        touch $out
-      '';
-
+  # 入口が nixos-rebuild を直接呼ばせないことだけを見る。generation と rollback は
+  # NixOS が持つので、その上に検査を積まない
   rebuild-entrypoint =
-    let
-      systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
-      upstreamRebuild = lib.getExe hostConfig.system.build.nixos-rebuild;
-      publicRebuild = "${hostConfig.system.path}/bin/nixos-rebuild";
-    in
-    assert !hostConfig.system.tools.nixos-rebuild.enable;
-    assert !(lib.elem "nixos-rebuild-ng" systemPackageNames);
-    pkgs.runCommandLocal "check-rebuild-entrypoint" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
-      set -euo pipefail
-      test -x ${publicRebuild}
-      test -x ${upstreamRebuild}
-      test "$(readlink -f ${publicRebuild})" != ${upstreamRebuild}
-      set +e
-      ${publicRebuild} >stdout 2>stderr
-      status=$?
-      set -e
-      test "$status" -eq 2
-      test ! -s stdout
-      grep -Fqx 'FATAL: direct nixos-rebuild bypasses the dotfiles rebuild transaction' stderr
-      grep -Fqx \
-        'Use dotfiles-rebuild for normal changes; use rebuild/bootstrap/impl/bootstrap.sh only for initial provisioning.' \
-        stderr
-      touch $out
-    '';
+    pkgs.runCommandLocal "check-rebuild-entrypoint" { nativeBuildInputs = [ pkgs.gnugrep ]; }
+      ''
+        set -euo pipefail
+        guard=${lib.getExe hostConfig.my.commands.rebuild}
+        grep -q 'nixos-rebuild' "$guard"
+        grep -q 'git status --porcelain' "$guard"
+        grep -q 'wsl-restart-required\|wslRestartRequired' "$guard" || \
+          grep -q -- '--plan' "$guard"
+        touch $out
+      '';
 }

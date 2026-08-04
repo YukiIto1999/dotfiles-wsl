@@ -9,7 +9,6 @@
 
 let
   cfg = config.my;
-  rebuildLibraries = cfg.contract.rebuild.libraries;
   primitives = cfg.contract.primitives.libraries;
   imageDefinitions = builtins.attrValues cfg.images;
   configuredContainers = config.virtualisation.oci-containers.containers;
@@ -101,7 +100,7 @@ let
   ) ociImageManifestEntries;
 
   mkSyncImages =
-    name: allowTestHooks:
+    name:
     pkgs.writeShellApplication {
       inherit name;
       # active rebuild の判定に同じ full receipt validator を埋め込む。validator library 内の更新関数は呼ばない。
@@ -113,45 +112,18 @@ let
         util-linux
       ];
       text = substituteCommandVars {
-        nixGcAutoRootDir = "/nix/var/nix/gcroots/auto";
         atomicFileFunctions = builtins.readFile primitives.atomicFile;
-        operationLockFunctions = builtins.readFile primitives.operationLock;
         ociImageStateFunctions = builtins.readFile ./impl/lib/image-state.sh;
-        rebuildAttemptFunctions = builtins.readFile rebuildLibraries.rebuildAttempt;
-        rebuildReceiptFunctions = builtins.readFile rebuildLibraries.rebuildReceipt;
 
-        configuredDotfiles = lib.escapeShellArg cfg.dotfilesDir;
         dockerCommand = lib.escapeShellArg (lib.getExe pkgs.docker);
+        ociImageSyncUser = cfg.username;
         ociImageManifest = lib.escapeShellArg ociImageManifest;
         ociImageStateRoot = lib.escapeShellArg "${cfg.homeDir}/.local/state/dotfiles-wsl/image-sync";
-        ociImageSyncUser = lib.escapeShellArg cfg.username;
-        imageSyncEnvironmentSetup =
-          if allowTestHooks then
-            ''
-              manifest=''${DOTFILES_IMAGE_SYNC_TEST_MANIFEST:-$manifest}
-              state_root=''${DOTFILES_IMAGE_SYNC_TEST_STATE_ROOT:-$state_root}
-              docker_command=''${DOTFILES_IMAGE_SYNC_TEST_DOCKER:-$docker_command}
-              dotfiles=''${DOTFILES_IMAGE_SYNC_TEST_DOTFILES:-$dotfiles}
-              nix_store_dir=''${DOTFILES_IMAGE_SYNC_TEST_NIX_STORE_DIR:-$nix_store_dir}
-              nix_gc_auto_roots_dir=''${DOTFILES_IMAGE_SYNC_TEST_NIX_GC_AUTO_ROOTS_DIR:-$nix_gc_auto_roots_dir}
-              expected_user=''${DOTFILES_IMAGE_SYNC_TEST_EXPECTED_USER:-$expected_user}
-            ''
-          else
-            ''
-              if [[ $(id -un) != "$expected_user" ]]; then
-                die 2 "dotfiles-sync-images must run as $expected_user"
-              fi
-            '';
-        imageSyncCommonGitDirSetup =
-          if allowTestHooks then
-            ''
-              common_git_dir=''${DOTFILES_IMAGE_SYNC_TEST_GIT_COMMON_DIR:?DOTFILES_IMAGE_SYNC_TEST_GIT_COMMON_DIR is required}
-            ''
-          else
-            ''
-              common_git_dir=$(git -C "$dotfiles" rev-parse --path-format=absolute --git-common-dir) || \
-                die 2 "failed to resolve the Git common directory"
-            '';
+        imageSyncEnvironmentSetup = ''
+          if [[ $(id -un) != "$expected_user" ]]; then
+            die 2 "dotfiles-sync-images must run as $expected_user"
+          fi
+        '';
       } (builtins.readFile ./impl/sync-images.sh);
     };
   # 宣言へ固定する digest を registry から取る。sync は宣言済み digest しか見ない
@@ -164,11 +136,9 @@ let
     ];
   };
 
-  syncImagesTest = mkSyncImages "dotfiles-sync-images-test" true;
-  syncImages = (mkSyncImages "dotfiles-sync-images" false).overrideAttrs (old: {
+  syncImages = (mkSyncImages "dotfiles-sync-images").overrideAttrs (old: {
     passthru = (old.passthru or { }) // {
       manifest = ociImageManifest;
-      testPackage = syncImagesTest;
     };
   });
 in

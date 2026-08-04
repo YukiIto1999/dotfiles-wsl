@@ -2,10 +2,7 @@ set -euo pipefail
 
 @atomicFileFunctions@
 
-@operationLockFunctions@
 @ociImageStateFunctions@
-@rebuildReceiptFunctions@
-@rebuildAttemptFunctions@
 
 usage() {
   cat <<'USAGE'
@@ -36,15 +33,13 @@ elif (( $# != 0 )); then
   exit 2
 fi
 
+expected_user=@ociImageSyncUser@
 manifest=@ociImageManifest@
 state_root=@ociImageStateRoot@
 docker_command=@dockerCommand@
 # shellcheck disable=SC2034 # production setup fragment resolves the configured Git worktree.
-dotfiles=@configuredDotfiles@
 # shellcheck disable=SC2034 # production setup fragment enforces the configured user.
-expected_user=@ociImageSyncUser@
 nix_store_dir=@nixStoreDir@
-nix_gc_auto_roots_dir=@nixGcAutoRootDir@
 @imageSyncEnvironmentSetup@
 receipts_dir=$state_root/receipts
 expected_uid=$EUID
@@ -219,95 +214,6 @@ if [[ $mode == status && ! -e $state_root && ! -L $state_root ]]; then
   jq -r '.images[] | select(.kind == "upstream") | "MISSING: \(.id) has no sync receipt"' \
     <<< "$manifest_data"
   exit 1
-fi
-
-if [[ $mode == sync ]]; then
-  common_git_dir=
-  @imageSyncCommonGitDirSetup@
-  dotfiles_acquire_operation_lock "$common_git_dir" "$expected_uid" "$expected_gid" || \
-    die 1 "failed to acquire the dotfiles operation lock"
-  active_rebuild=$common_git_dir/dotfiles-rebuild/active.json
-  active_enrollment=$common_git_dir/dotfiles-sops-enroll/active.json
-  [[ ! -e $active_enrollment && ! -L $active_enrollment ]] || \
-    die 1 "an active SOPS enrollment transaction blocks OCI image synchronization"
-  if [[ -e $active_rebuild || -L $active_rebuild ]]; then
-    rebuild_state_root=${active_rebuild%/*}
-    dotfiles_rebuild_validate_state_root "$rebuild_state_root" "$expected_uid" "$expected_gid" || \
-      die 2 "the active rebuild receipt storage is invalid"
-    active_rebuild_data=$(dotfiles_rebuild_read_active_receipt \
-      "$rebuild_state_root" "$expected_uid" "$dotfiles" "$nix_store_dir" "$expected_user") || \
-      die 2 "the active rebuild receipt is invalid"
-    dotfiles_rebuild_verify_receipt_evidence \
-      "$rebuild_state_root" "$active_rebuild_data" "$expected_uid" "$expected_gid" \
-      "$dotfiles" "$nix_store_dir" "$expected_user" || \
-      die 2 "the active rebuild activation journal is invalid"
-    dotfiles_rebuild_validate_successor_protocol_state \
-      "$rebuild_state_root" "$active_rebuild" "$expected_uid" "$expected_gid" \
-      "$dotfiles" "$nix_store_dir" "$nix_gc_auto_roots_dir" "$expected_user" || \
-      die 2 "forward recovery protocol state is invalid"
-    active_rebuild_state=$(jq -r '.state' <<< "$active_rebuild_data")
-    active_rebuild_id=$(jq -r '.transactionId' <<< "$active_rebuild_data")
-    active_rebuild_parent=$(jq -r '.lineage.parentTransactionId // empty' <<< "$active_rebuild_data")
-    if [[ $(jq -r '.schemaVersion == 4 and .lineage != null' \
-      <<< "$active_rebuild_data") == true ]]; then
-      dotfiles_rebuild_validate_successor_helper \
-        "$(jq -c '.lineage.execution.helpers.syncImages' <<< "$active_rebuild_data")" \
-        "$(jq -r '.candidate' <<< "$active_rebuild_data")" syncImages "$nix_store_dir" || \
-        die 2 "active successor OCI sync helper differs from its execution contract"
-      dotfiles_rebuild_validate_successor_manifest \
-        "$(jq -c '.lineage.execution.manifest' <<< "$active_rebuild_data")" \
-        "$(jq -r '.candidate' <<< "$active_rebuild_data")" "$nix_store_dir" || \
-        die 2 "active successor OCI manifest differs from its execution contract"
-    fi
-    erasure_match=$(find "$rebuild_state_root/successor-erasures" -maxdepth 1 \
-      -name "$active_rebuild_id-*.json" -type f -print -quit 2>/dev/null || true)
-    if [[ -z $erasure_match && -n $active_rebuild_parent ]]; then
-      erasure_match=$(find "$rebuild_state_root/successor-erasures" -maxdepth 1 \
-        -name "$active_rebuild_parent-*.json" -type f -print -quit 2>/dev/null || true)
-    fi
-    if [[ -n $erasure_match ]]; then
-      die 1 "an erasing forward recovery blocks OCI image synchronization"
-    fi
-    [[ $(jq -r '.sopsEnrollmentTransactionId' <<< "$active_rebuild_data") == null ]] || \
-      die 1 "SOPS enrollment-bound rebuild blocks OCI image synchronization"
-    case $active_rebuild_state in
-      rolled-back | aborted | cancelled | superseded)
-        die 1 "a terminal rebuild receipt blocks OCI image synchronization until it is archived"
-        ;;
-    esac
-
-    manifest_canonical=$(readlink -e -- "$manifest") || \
-      die 2 "failed to resolve the OCI image manifest: $manifest"
-    candidate_manifest=$(jq -r '.candidate + "/etc/dotfiles/oci-images.json"' <<< "$active_rebuild_data")
-    recovery_manifest=$(jq -r '.recoveryTarget + "/etc/dotfiles/oci-images.json"' <<< "$active_rebuild_data")
-    candidate_manifest_canonical=$(readlink -e -- "$candidate_manifest" 2>/dev/null || true)
-    recovery_manifest_canonical=$(readlink -e -- "$recovery_manifest" 2>/dev/null || true)
-    if [[ $active_rebuild_state == complete ]]; then
-      [[ $manifest_canonical == "$recovery_manifest_canonical" ]] || \
-        die 1 "a complete rebuild receipt only permits recovery target OCI image synchronization"
-    elif [[ $manifest_canonical != "$candidate_manifest_canonical" && \
-      $manifest_canonical != "$recovery_manifest_canonical" ]]; then
-      successor_authorization=
-      if [[ $active_rebuild_state == verification-failed &&
-        $(jq -r '.failureStage' <<< "$active_rebuild_data") == doctor ]]; then
-        successor_authorization_path="$rebuild_state_root/successors/$active_rebuild_id.json"
-        if [[ -e $successor_authorization_path || -L $successor_authorization_path ]]; then
-          successor_authorization=$(dotfiles_rebuild_read_successor_authorization_v2 \
-            "$rebuild_state_root" "$active_rebuild_id" "$active_rebuild" pending \
-            "$expected_uid" "$expected_gid" "$dotfiles" "$nix_store_dir" \
-            "$nix_gc_auto_roots_dir" "$expected_user") || \
-            die 2 "pending forward recovery authorization is invalid"
-        fi
-      fi
-      [[ -n $successor_authorization &&
-        $manifest_canonical == \
-          "$(jq -r '.child.manifest.canonicalPath' <<< "$successor_authorization")" ]] || \
-        die 1 "active rebuild target does not match this OCI image manifest"
-      [[ $(readlink -e -- "$0" 2>/dev/null) == \
-        "$(jq -r '.child.helpers.syncImages.canonicalPath' <<< "$successor_authorization")" ]] || \
-        die 2 "running OCI sync helper does not match successor authorization"
-    fi
-  fi
 fi
 
 if [[ $mode == status ]]; then

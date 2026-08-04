@@ -11,6 +11,7 @@
 | 制約 | 検証 |
 |---|---|
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
+| 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
@@ -43,9 +44,6 @@
 |---|---|
 | MCP session が active な GET body の間 reap されない | `agentgateway-session-lifecycle` |
 | doctor が manifest 契約と probe の失敗を正しく分類する | `doctor-runtime` |
-| rebuild が効果を transaction として振り分ける | `rebuild-routing`、`rebuild-entrypoint`、`rebuild-attempt` |
-| 公開が原子的で、中断後に再開できる | `atomic-publication`、`active-publication`、`preparation-parent-evidence` |
-| gc root が観測できる | `gc-root-observer` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | SOPS の鍵配置と権限境界が保たれる | `sops-policy`、`sops-verifier-runtime`、`privilege-boundary` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-env` |

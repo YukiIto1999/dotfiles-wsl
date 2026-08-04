@@ -44,4 +44,4 @@ wsl.exe --terminate NixOS
 
 ## 直接 nixos-rebuild を呼ばない
 
-PATH の `nixos-rebuild` は拒否する wrapper に置き換えてある。working tree の検査と WSL 再起動の判定を飛ばすためである。初回構築だけは `rebuild/bootstrap/impl/bootstrap.sh` を使う。
+PATH の `nixos-rebuild` は拒否する wrapper に置き換えてある。working tree の検査と WSL 再起動の判定を飛ばすためである。初回構築だけは `commands/rebuild/bootstrap/impl/bootstrap.sh` を使う。

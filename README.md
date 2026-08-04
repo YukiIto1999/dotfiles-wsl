@@ -105,11 +105,9 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 ├── mcp/                   gateway、MCP target、backend container
 ├── toolchain/             PATH 上の汎用ツール、language server、git、静的解析
 ├── telemetry/             使用量の観測
-├── rebuild/               適用と初回構築
-├── doctor/                unit と MCP の疎通確認
 ├── images/                OCI image の宣言と同期
-├── artifacts/             生成設定の登録簿と整理
-├── commands/              運用 command の生成
+├── artifacts/             生成設定の登録簿
+├── commands/              運用 command の生成と実体
 ├── sops/                  secret の配線
 ├── gates/                 repo 自身の検査
 ├── secrets/               SOPS で暗号化した secrets
@@ -140,7 +138,7 @@ OCI image の変更は[OCI image runbook](docs/operations/oci-images.md)、docto
 - offline recovery key は読み取り専用の外部媒体で保管する。enrollment と復旧の間だけ接続し、通常運用するホストへ常置しない。
 - GitHub PAT は `secrets/secrets.yaml` へ SOPS で暗号化し、fine-grained PAT の権限を用途に必要な範囲へ絞る。`gh auth login` や `gh auth switch` で別経路の credential を作らない。
 - agentgateway と各 front は認証なしで loopback の port を listen する。到達できる process を信頼境界の内側として扱う。Docker backend の host publish は `127.0.0.1` に限定する。
-- system generation の更新に `nixos-rebuild` を直接使わない。通常変更は `dotfiles-rebuild`、初回構築だけは `rebuild/bootstrap/impl/bootstrap.sh` を使う。
+- system generation の更新に `nixos-rebuild` を直接使わない。通常変更は `dotfiles-rebuild`、初回構築だけは `commands/rebuild/bootstrap/impl/bootstrap.sh` を使う。
 
 鍵、credential、通信境界の設計根拠は[セキュリティ設計](docs/architecture/security.md)に記載する。
 

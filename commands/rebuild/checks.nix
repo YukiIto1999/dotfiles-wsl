@@ -109,7 +109,7 @@ in
 
     ln -s ${failingCmp} fake-bin/cmp
     if PATH="$PWD/fake-bin:$PATH" ${pkgs.bash}/bin/bash \
-      ${self}/rebuild/impl/wsl-restart-required.sh \
+      ${self}/commands/rebuild/impl/wsl-restart-required.sh \
       --quiet --booted-system booted --current-system current candidate 2>/dev/null; then
       echo "cmp I/O error was accepted" >&2
       exit 1
@@ -119,7 +119,7 @@ in
 
     ln -sf ${failingManifestCmp} fake-bin/cmp
     if PATH="$PWD/fake-bin:$PATH" ${pkgs.bash}/bin/bash \
-      ${self}/rebuild/impl/wsl-restart-required.sh \
+      ${self}/commands/rebuild/impl/wsl-restart-required.sh \
       --quiet --booted-system booted --current-system current candidate 2>/dev/null; then
       echo "manifest cmp I/O error was accepted" >&2
       exit 1

@@ -22,7 +22,7 @@ Nix store の candidate system
    └── current generation の doctor manifest
 ```
 
-通常の適用入口は `dotfiles-rebuild` だけである。[`rebuild/module.nix`](../../rebuild/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否する。飛ばされると困るのは、未 commit の変更で古い内容を配備しないことと、WSL の再起動要否の判定である。世代と rollback は NixOS が持つので、その上に層を作らない。
+通常の適用入口は `dotfiles-rebuild` だけである。[`rebuild/module.nix`](../../commands/rebuild/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否する。飛ばされると困るのは、未 commit の変更で古い内容を配備しないことと、WSL の再起動要否の判定である。世代と rollback は NixOS が持つので、その上に層を作らない。
 
 `/run/current-system` は実行中の generation、`/nix/var/nix/profiles/system` は system profile、`/run/booted-system` は WSL 起動時の generation を表す。`wsl.conf` と activation interface の差分に応じて、live switch と WSL cold start を振り分ける。
 
@@ -39,8 +39,8 @@ Nix store の candidate system
 | `images/` | OCI image inventory、同期、container backend の宣言 |
 | `telemetry/` | OpenTelemetry collector と endpoint 契約 |
 | `sops/`、`accounts/` | secret file の作り方と検証、account credential、利用者の identity |
-| `rebuild/`、`doctor/`、`artifacts/cleanup/`、`rebuild/bootstrap/` | 適用、診断、整理、初回構築 |
-| `commands/` | `dotfiles-*` の組み立てと登録の契約。command の実体は責務を持つ unit が置く |
+| `commands/rebuild/`、`commands/doctor/`、`commands/cleanup/`、`commands/rebuild/bootstrap/` | 適用、診断、整理、初回構築 |
+
 | `artifacts/` | 生成設定の登録簿と構文検査 |
 | `primitives/` | 複数 unit が取り込む shell library |
 | `gates/` | devShell、規約と構造の検査 |
@@ -61,7 +61,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 ## Current generation の doctor manifest
 
-[`doctor/module.nix`](../../doctor/module.nix) は評価済み設定から versioned JSON を生成し、system closure の `etc/dotfiles/doctor.json` に収録する。manifest は generation の論理 path、user、systemd unit、managed file、CLI の配備 contract、MCP、OCI、SOPS metadata、WSL interop と probe 上限を、各 unit の宣言から導出する。検査専用の一覧を手書きしない。
+[`doctor/module.nix`](../../commands/doctor/module.nix) は評価済み設定から versioned JSON を生成し、system closure の `etc/dotfiles/doctor.json` に収録する。manifest は generation の論理 path、user、systemd unit、managed file、CLI の配備 contract、MCP、OCI、SOPS metadata、WSL interop と probe 上限を、各 unit の宣言から導出する。検査専用の一覧を手書きしない。
 
 `dotfiles-doctor` は開始時に `/run/current-system/etc/dotfiles/doctor.json` を解決し、その immutable な store path だけを期待値として使う。実行中の doctor、manifest、system profile が同じ current generation に属することも検査する。doctor は service の再起動、image pull、file 修復を行わず、観測結果だけを返す。
 
@@ -79,7 +79,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 | 保守 | `dotfiles-cleanup` が候補表示と明示削除、`dotfiles-wsl-restart-required` が cold-start 判定を担当する |
 | 鍵の enrollment | `dotfiles-sops-enroll` が repository の recipient と host key の移行を通常 rebuild から分離する |
 
-最初の system generation が存在しない段階では生成 command を参照できないため、`rebuild/bootstrap/impl/bootstrap.sh` だけは手書きの入口として残る。
+最初の system generation が存在しない段階では生成 command を参照できないため、`commands/rebuild/bootstrap/impl/bootstrap.sh` だけは手書きの入口として残る。
 
 ## データと適用の境界
 

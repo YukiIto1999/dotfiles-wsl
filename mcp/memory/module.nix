@@ -99,7 +99,4 @@ in
     serve = serveOverProxy (lib.getExe agentmemory.front);
     waitUnits = [ "docker-agentmemory.service" ];
   };
-  my.doctor = {
-    units = backend.doctorUnits;
-  };
 }

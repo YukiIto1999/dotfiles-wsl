@@ -12,6 +12,7 @@
 |---|---|
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
+| 検証対象を別の登録簿から取らず宣言した unit から導く | `doctor-entrypoint` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
@@ -32,7 +33,6 @@
 | Playwright の front が gateway 以外の Host を拒み書き込み領域を持つ | `playwright-front` |
 | backend の待ち受け port が front の接続先と同じ宣言から出る | `agentmemory-config`、`searxng-settings` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
-| doctor manifest が各 unit の宣言と一致する | `doctor-manifest-contract` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
 | MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`mcp/module.nix` の assertion) |
 | image id が container を一意に指す | `nixos-toplevel` (`images/module.nix` の assertion) |
@@ -43,7 +43,6 @@
 | 制約 | 検証 |
 |---|---|
 | MCP session が active な GET body の間 reap されない | `agentgateway-session-lifecycle` |
-| doctor が manifest 契約と probe の失敗を正しく分類する | `doctor-runtime` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | SOPS の鍵配置と権限境界が保たれる | `sops-policy`、`sops-verifier-runtime`、`privilege-boundary` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-env` |

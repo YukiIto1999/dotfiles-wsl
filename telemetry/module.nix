@@ -80,12 +80,4 @@ in
 
   config.environment.etc."${stateDir}/collector.yaml".source = collectorConfig;
 
-  config.my.doctor = {
-    units."otel-collector.service".expected = {
-      LoadState = "loaded";
-      ActiveState = "active";
-      SubState = "running";
-      Result = "success";
-    };
-  };
 }

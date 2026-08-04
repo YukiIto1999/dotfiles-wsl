@@ -2,7 +2,7 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-`dotfiles-doctor` は 2 つを見る。この repo が宣言する常駐 service が active か、gateway が MCP の initialize を返すか。前者は systemd が答え、後者は unit が active でも session が張れない場合があるので別に確かめる。
+`dotfiles-doctor` は 3 つを見る。この repository が宣言する常駐 service が active か、gateway が MCP の initialize を返すか、宣言した target すべての tool が `tools/list` に現れるか。unit が active でも session が張れないこと、session が張れても upstream が fanout で落ちて tool が消えることがあるので、三段に分けて確かめる。
 
 ```sh
 dotfiles-doctor          # 人が読む形

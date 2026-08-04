@@ -34,7 +34,8 @@
 | 生成 config artifact が配備先の source と一致する | `cli-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し子 process を作らない | `gateway-front-contract` |
 | front が宣言した port で loopback に listen し書き込み領域を持つ | `mcp-front-contract` |
-| Playwright の front が gateway 以外の Host を拒み書き込み領域を持つ | `playwright-front` |
+| Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
+| gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
 | backend の待ち受け port が front の接続先と同じ宣言から出る | `agentmemory-config`、`searxng-settings` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
@@ -89,6 +90,5 @@
 - 通信制限による失敗が観測できること。`IPAddressDeny` の遮断は timeout として現れ、unit は active のままなので doctor の unit 検査は緑を保つ。tool を呼ぶまで表面化しない。
 - container が image 由来で expose する port を把握していること。宣言は publish する port しか持たない。crawl4ai の image は内部 valkey の 6379 を expose しており、`dotfiles-backends` network 上の他 container から到達する。
 - 宣言した port が実機で空いていること。検査は宣言どうしの衝突しか見ない。他 project の process が先に取っていると front は起動できず、`Restart=always` で再試行を続ける。
-- MCP front が stateless であること。`mcp-proxy` 経由の 9 front は `--stateless` を持つが、native HTTP の searxng は session を保持する。上流に stateless option が無い。
 - unit の依存が設計の依存表に載っている組だけであること。依存の向きを検査していない。
 - `checks.nix` を持つ unit が flake から収集されていること。収集漏れは check が消えるだけで、赤にならない。

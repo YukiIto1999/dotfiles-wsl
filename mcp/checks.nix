@@ -21,8 +21,7 @@ let
   ) fronts;
 
   # front が loopback を外れると、firewall の無い WSL では外部から到達しうる。
-  # bind 先を宣言から読めるのは proxy 経由の形だけなので、それ以外は
-  # 自分で loopback を指定していることを起動 command に要求する
+  # 全 front が mcp-proxy の前段を通るので、bind 先は起動 command に現れる
   inherit (helpers.execTokens)
     tokensOf
     onlyValue
@@ -33,11 +32,8 @@ let
     let
       tokens = tokensOf (configOf front).ExecStart;
       port = toString front.port;
-      viaOption = onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port;
-      viaEnvironment =
-        onlyValue tokens "MCP_HTTP_HOST" "127.0.0.1" && onlyValue tokens "MCP_HTTP_PORT" port;
     in
-    !(viaOption || viaEnvironment)
+    !(onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port)
   ) fronts;
 
   # 外へ出る front を増やす変更は必ず diff に現れる。宣言だけで制限は外せない

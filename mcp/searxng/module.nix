@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  serveOverProxy,
   mkMcpServer,
   mkNpmMcp,
   mkContainerBackend,
@@ -67,12 +68,9 @@ in
   virtualisation.oci-containers.containers = searxng.containers;
   systemd.services = searxng.systemdServices;
 
-  # listen 先を環境変数でしか受けないので、env 経由でも ExecStart に現れる形で渡す
   my.mcp.targets.searxng = {
     port = frontPort;
-    serve =
-      listenPort:
-      "${pkgs.coreutils}/bin/env MCP_HTTP_HOST=127.0.0.1 MCP_HTTP_PORT=${toString listenPort} ${lib.getExe front}";
+    serve = serveOverProxy (lib.getExe front);
     waitUnits = [ "docker-searxng.service" ];
   };
 }

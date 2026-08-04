@@ -53,19 +53,19 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 ## Runtime services
 
-systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は別の登録簿を持たず、この repo が宣言した常駐 service を `dotfiles-doctor` が導出する。
+systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は別の登録簿を持たず、この repository が宣言した常駐 service を `dotfiles-doctor` が導出する。
 
 [`images/module.nix`](../../images/module.nix) は Docker daemon と `dotfiles-backends` network を用意し、`mkContainerBackend` が backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
 
 SOPS の暗号文は repository に置き、sops-nix が activation 時に host key で復号する。復号済み secret と template は runtime にだけ生成され、consumer の file、環境ファイルへ渡る。鍵と credential の境界は[セキュリティ設計](security.md)、通常の編集は [Secrets](../operations/secrets.md)に分けている。
 
-## Current generation の doctor manifest
+## 実状態の検証
 
-[`doctor/module.nix`](../../commands/doctor/module.nix) は評価済み設定から versioned JSON を生成し、system closure の `etc/dotfiles/doctor.json` に収録する。manifest は generation の論理 path、user、systemd unit、managed file、CLI の配備 contract、MCP、OCI、SOPS metadata、WSL interop と probe 上限を、各 unit の宣言から導出する。検査専用の一覧を手書きしない。
+[`commands/doctor/module.nix`](../../commands/doctor/module.nix) は、この repository が宣言した常駐 service を評価済み設定から導き、`dotfiles-doctor` に埋め込む。別の roster を持たないので、unit を足せば検証対象になる。
 
-`dotfiles-doctor` は開始時に `/run/current-system/etc/dotfiles/doctor.json` を解決し、その immutable な store path だけを期待値として使う。実行中の doctor、manifest、system profile が同じ current generation に属することも検査する。doctor は service の再起動、image pull、file 修復を行わず、観測結果だけを返す。
+`dotfiles-doctor` は各 unit の `ActiveState` を見た後、gateway に MCP session を張り、宣言した target すべての tool が `tools/list` に現れることを確かめる。unit が active でも upstream が落ちていれば agent は道具を失うので、そこまで見る。doctor は再起動も修復も行わず、観測結果だけを返す。
 
-`nix flake check` は source から artifact を生成できるかを検査し、doctor は activation 後の runtime が current generation に収束したかを検査する。実行と診断は [Doctor](../operations/doctor.md)に記載している。
+`nix flake check` は source から artifact を生成できるかを検査し、doctor は activation 後の runtime が宣言に収束したかを検査する。実行と診断は [Doctor](../operations/doctor.md)に記載している。
 
 ## 生成 command
 

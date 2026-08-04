@@ -1,4 +1,5 @@
 {
+  helpers,
   pkgs,
   lib,
   hostConfig,
@@ -6,6 +7,9 @@
 }:
 
 let
+  # 契約の写しではなく、実際に配備される argv から container 側の port を取る
+  published = helpers.execTokens.valuesOf helpers.containerArgv.containerArgv.agentmemory "-p";
+  httpPort = lib.last (lib.splitString ":" (builtins.head published));
   config = hostConfig.my.artifacts."mcp/memory/config".source;
   template = hostConfig.sops.templates."agentmemory.env";
   templateFile = pkgs.writeText "agentmemory.env" template.content;
@@ -14,11 +18,16 @@ in
 {
   # engine の待ち受け port は front の接続先と同じ宣言から出る
   agentmemory-config =
+    assert builtins.length published == 1;
     assert lib.elem "${config}:/app/config.yaml:ro"
       hostConfig.virtualisation.oci-containers.containers.agentmemory.volumes;
     pkgs.runCommandLocal "check-agentmemory-config" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
-      test "$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${config})" = ${hostConfig.my.contract.memory.ports.http}
-      test "$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${config})" = ${hostConfig.my.contract.memory.ports.stream}
+      http=$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${config})
+      stream=$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${config})
+      test "$http" = ${httpPort}
+      # stream は engine 内部専用。publish すると外から engine を直接叩ける
+      test "$stream" != "$http"
+      test "$stream" != ${httpPort}
       touch $out
     '';
 

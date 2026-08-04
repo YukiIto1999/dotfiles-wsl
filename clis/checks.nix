@@ -10,6 +10,7 @@ let
   artifactSource = id: hostConfig.my.artifacts.${id}.source;
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
   gatewayUrl = hostConfig.my.contract.gateway.endpoints.default.url;
+  gatewayPort = hostConfig.my.contract.gateway.endpoints.default.port;
   codexProjectHomePath = "${lib.removePrefix "${hostConfig.my.homeDir}/" hostConfig.my.dotfilesDir}/.codex/config.toml";
   managedSettings = hostConfig.environment.etc."claude-code/managed-settings.json".source;
   roster = hostConfig.my.toolchain.lsp;
@@ -17,6 +18,9 @@ in
 {
   # 生成した artifact がそのまま実配備先へ渡り、どの CLI も同じ gateway を指す
   cli-artifact-contract =
+    # 変異版は port を変えた構成。両辺を同じ契約から導いても、port が artifact へ
+    # 流れていなければ既定値のままになって落ちる
+    assert variantConfig.my.contract.gateway.endpoints.default.port != gatewayPort;
     assert
       hostConfig.environment.etc."claude-code/managed-settings.json".source
       == artifactSource "clis/claude/managed-settings";
@@ -40,7 +44,7 @@ in
       }
       ''
         jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl}           '.mcpServers.gateway.url == $expected'           ${artifactSource "clis/claude/managed-mcp"} > /dev/null
-        jq --exit-status --arg expected 'http://localhost:9876/mcp'           '.mcpServers.gateway.url == $expected'           ${
+        jq --exit-status --arg expected ${lib.escapeShellArg variantConfig.my.contract.gateway.endpoints.default.url}           '.mcpServers.gateway.url == $expected'           ${
           variantConfig.my.artifacts."clis/claude/managed-mcp".source
         } > /dev/null
         jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl}           '.mcpServers.gateway.serverUrl == $expected'           ${artifactSource "clis/antigravity/mcp"} > /dev/null

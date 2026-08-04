@@ -56,7 +56,7 @@ session の生存は downstream が response body を保持しているかで決
 
 [`images/module.nix`](../../images/module.nix) の `mkContainerBackend` は、container、systemd 依存、`dotfiles-backends` network、host port の publish と doctor 宣言をまとめる。backend 同士は Docker network で接続し、host 側へ必要な port だけを `127.0.0.1` に publish する。front は host loopback の backend port に接続する。
 
-全 container は暗黙 pull を無効にしている。upstream image は digest 固定の manifest と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。Docker cache、同期 receipt、稼働 container の収束は current generation の doctor が別々に観測する。操作手順は [OCI images](../operations/oci-images.md)を参照する。
+全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 
 ## agentmemory
 

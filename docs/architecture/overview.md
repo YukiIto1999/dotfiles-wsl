@@ -22,7 +22,7 @@ Nix store の candidate system
    └── current generation の doctor manifest
 ```
 
-通常の適用入口は `dotfiles-rebuild` だけである。[`rebuild/module.nix`](../../rebuild/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否し、評価済み `config.system.build.nixos-rebuild` を transaction 内から使う。source snapshot、flake check、candidate build は通常ユーザーで実行し、system profile の更新と activation だけを昇格する。
+通常の適用入口は `dotfiles-rebuild` だけである。[`rebuild/module.nix`](../../rebuild/module.nix) は PATH 上の直接の `nixos-rebuild` を拒否する。飛ばされると困るのは、未 commit の変更で古い内容を配備しないことと、WSL の再起動要否の判定である。世代と rollback は NixOS が持つので、その上に層を作らない。
 
 `/run/current-system` は実行中の generation、`/nix/var/nix/profiles/system` は system profile、`/run/booted-system` は WSL 起動時の generation を表す。`wsl.conf` と activation interface の差分に応じて、live switch と WSL cold start を振り分ける。
 
@@ -39,7 +39,7 @@ Nix store の candidate system
 | `images/` | OCI image inventory、同期、container backend の宣言 |
 | `telemetry/` | OpenTelemetry collector と endpoint 契約 |
 | `sops/`、`accounts/` | secret file の作り方と検証、account credential、利用者の identity |
-| `rebuild/`、`doctor/`、`artifacts/cleanup/`、`rebuild/bootstrap/` | 適用 transaction、診断、整理、初回構築 |
+| `rebuild/`、`doctor/`、`artifacts/cleanup/`、`rebuild/bootstrap/` | 適用、診断、整理、初回構築 |
 | `commands/` | `dotfiles-*` の組み立てと登録の契約。command の実体は責務を持つ unit が置く |
 | `artifacts/` | 生成設定の登録簿と構文検査 |
 | `primitives/` | 複数 unit が取り込む shell library |
@@ -73,9 +73,9 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 | 境界 | Command の責務 |
 |---|---|
-| system generation | `dotfiles-rebuild` が snapshot、build、apply、doctor と中断後の回復を transaction 化する |
+| system generation | `dotfiles-rebuild` が build と apply を行う。世代と rollback は NixOS が持つ |
 | runtime 観測 | `dotfiles-doctor` が current generation と実状態を比較する |
-| 外部の可変 state | `dotfiles-install-clis` が user binary、`dotfiles-sync-images` が Docker cache と同期 receipt を更新する |
+| 外部の可変 state | `dotfiles-install-clis` が user binary、`dotfiles-sync-images` が Docker cache を更新する |
 | 保守 | `dotfiles-cleanup` が候補表示と明示削除、`dotfiles-wsl-restart-required` が cold-start 判定を担当する |
 | 鍵の enrollment | `dotfiles-sops-enroll` が repository の recipient と host key の移行を通常 rebuild から分離する |
 
@@ -89,7 +89,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 | system closure、生成設定、生成 command | Nix store | build 後は immutable |
 | `/run/current-system`、system profile、systemd | NixOS activation | `dotfiles-rebuild` |
 | Home Manager の宣言的な home file | system generation 内の Home Manager 設定 | NixOS activation に続く user 配備 |
-| AI CLI binary、Docker cache、container data、運用 receipt | 各専用 command と runtime service | rebuild とは別の明示操作、または service 実行 |
+| AI CLI binary、Docker cache、container data | 各専用 command と runtime service | rebuild とは別の明示操作、または service 実行 |
 | Claude Code と Codex の user-owned seed config | seed 作成後は各 CLI | Home Manager activation は file がない場合か symlink の場合だけ通常 file を作り、既存の通常 file は保持する |
 | 暗号文、host key、復号済み secret | Git、root 管理領域、sops-nix runtime | enrollment、SOPS 編集、activation |
 

@@ -76,7 +76,7 @@ wsl -t NixOS
 wsl -d NixOS
 ```
 
-再ログイン後は通常ユーザーで upstream OCI image を同期し、同じ checkout を通常の rebuild transaction で適用する。
+再ログイン後は通常ユーザーで upstream OCI image を同期し、同じ checkout を `dotfiles-rebuild` で適用する。
 
 ```bash
 cd ~/dotfiles-wsl

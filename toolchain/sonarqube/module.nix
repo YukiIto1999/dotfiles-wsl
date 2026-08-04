@@ -100,8 +100,11 @@ in
       sonarqube-provision = {
         description = "SonarQube admin credential provisioning";
         after = [ "docker-sonarqube.service" ];
-        requires = [ "docker-sonarqube.service" ];
-        wantedBy = [ "multi-user.target" ];
+        wants = [ "docker-sonarqube.service" ];
+        # activation がこの unit の成否を待つと、SonarQube が受け付けるかどうかで
+        # system の適用全体が止まる。boot と timer から起こし、activation には
+        # 載せない
+        wantedBy = [ ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
@@ -118,4 +121,13 @@ in
         startLimitIntervalSec = 0;
       };
     };
+
+  config.systemd.timers.sonarqube-provision = {
+    description = "SonarQube admin credential provisioning";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2min";
+      OnUnitActiveSec = "1h";
+    };
+  };
 }

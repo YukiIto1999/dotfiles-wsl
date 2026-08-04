@@ -33,8 +33,11 @@ in
     assert builtins.length serverPublish == 1;
     assert valuesOf (argvOf "sonarqube-db") "-p" == [ ];
     assert lib.elem "docker-sonarqube-db.service" hostConfig.systemd.services.docker-sonarqube.requires;
-    # 既定の admin 資格情報のまま公開しない
-    assert lib.elem "docker-sonarqube.service" hostConfig.systemd.services.sonarqube-provision.requires;
+    # 既定の admin 資格情報のまま公開しない。ただし provision は activation の
+    # 経路に載せない。外部 service の受理条件で system の適用が止まる
+    assert lib.elem "docker-sonarqube.service" hostConfig.systemd.services.sonarqube-provision.wants;
+    assert hostConfig.systemd.services.sonarqube-provision.wantedBy == [ ];
+    assert lib.elem "timers.target" hostConfig.systemd.timers.sonarqube-provision.wantedBy;
     assert lib.elem "SONARQUBE_ADMIN_PASSWORD_FILE=${
       hostConfig.sops.secrets."sonarqube/admin_password".path
     }" hostConfig.systemd.services.sonarqube-provision.serviceConfig.Environment;

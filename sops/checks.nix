@@ -312,7 +312,6 @@ in
 
       for command in \
         ${lib.escapeShellArg (lib.getExe hostConfig.my.commands.rebuild)} \
-        ${lib.escapeShellArg (lib.getExe hostConfig.my.commands.doctor)} \
         ${lib.escapeShellArg (lib.getExe hostConfig.my.commands.sopsEnroll)}
       do
         if ! grep -F -- ${lib.escapeShellArg sudoWrapper} "$command" > /dev/null; then

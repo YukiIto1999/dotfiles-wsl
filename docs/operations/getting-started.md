@@ -6,7 +6,7 @@
 
 ## 前提
 
-- NixOS-WSL を用意し、`nixos` ユーザーでログインする。[bootstrap script](../../commands/rebuild/bootstrap/impl/bootstrap.sh) はこのユーザーと `/home/nixos/dotfiles-wsl` を初回構築の固定値として検査する。
+- NixOS-WSL を用意し、`nixos` ユーザーでログインする。[bootstrap script](../../commands/rebuild/impl/bootstrap.sh) はこのユーザーと `/home/nixos/dotfiles-wsl` を初回構築の固定値として検査する。
 - リポジトリを `~/dotfiles-wsl` へ clone し、作業ツリーを変更のない状態にする。
 - recovery key を読み取り専用の外部媒体から一時的に参照できるようにする。host key はこの host で生成し、別ホストの鍵をコピーしない。
 - 他のホストと重複しない host ID を決める。ID は63文字以内の小文字の英数字またはハイフンで構成し、英数字で始める。
@@ -49,10 +49,10 @@ git status --short
 
 ```bash
 cd ~/dotfiles-wsl
-sudo bash commands/rebuild/bootstrap/impl/bootstrap.sh
+sudo bash commands/rebuild/impl/bootstrap.sh
 ```
 
-[bootstrap script](../../commands/rebuild/bootstrap/impl/bootstrap.sh) は次の順序で初回 generation を用意する。
+[bootstrap script](../../commands/rebuild/impl/bootstrap.sh) は次の順序で初回 generation を用意する。
 
 | 順序 | 処理 |
 |---|---|

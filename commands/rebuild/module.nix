@@ -44,7 +44,7 @@ let
     name = "nixos-rebuild";
     text = ''
       echo "FATAL: use dotfiles-rebuild; it checks the working tree and the WSL restart plan" >&2
-      echo "Initial provisioning is rebuild/bootstrap/impl/bootstrap.sh" >&2
+      echo "Initial provisioning is rebuild/impl/bootstrap.sh" >&2
       exit 2
     '';
   };

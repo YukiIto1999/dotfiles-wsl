@@ -67,6 +67,7 @@
 
 | 制約 | 検証 |
 |---|---|
+| 固定した virtual tree の再帰走査で通常ファイルの `module.nix` だけを unit marker とし、flake の unit ID が source 内の該当 directory と一致する | `unit-module-marker` |
 | unit の直下が層の file 名か子 unit だけである | `structure-layer-names` |
 
 ## 形式

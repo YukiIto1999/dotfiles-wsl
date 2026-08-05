@@ -42,13 +42,5 @@
     "sonarqube/admin_password",
     "sonarqube/db_password"
   ],
-  "timers": [
-    "dotfiles-agent-autoupdate",
-    "fstrim",
-    "logrotate",
-    "nix-gc",
-    "nix-optimise",
-    "sonarqube-provision"
-  ],
   "agentmemoryPersistentMount": "/var/lib/agentmemory/data:/data"
 }

@@ -39,7 +39,7 @@ plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md
 |---|---|---|
 | gateway | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `my.mcp.endpoints` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.endpoints` |
 | MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets.<name>` | `nix eval --json .#nixosConfigurations.nixos.config.my.mcp.targets --apply builtins.attrNames` |
-| Docker backend | [`images/module.nix`](../../images/module.nix) の `my.images` と各 unit の `mkContainerBackend` | `nix eval --json .#nixosConfigurations.nixos.config.my.images --apply builtins.attrNames` |
+| Docker backend | [`containers/module.nix`](../../containers/module.nix) の `dotfiles.containers` contract、[`container-backend.nix`](../../containers/impl/container-backend.nix)、暫定 owner の各 application module | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.containers.services --apply builtins.attrNames` |
 | MCP front | 各 [`mcp/NAME/module.nix`](../../mcp) の `port` と `serve` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.fronts`。稼働は `systemctl status mcp-front-<name>` |
 | telemetry | [`telemetry/module.nix`](../../telemetry/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.telemetry` |
 | 品質 gate | [`toolchain/sonarqube/module.nix`](../../toolchain/sonarqube/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.virtualisation.oci-containers.containers.sonarqube` |

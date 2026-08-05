@@ -40,8 +40,8 @@
 |---|---|---|
 | MCP target を追加または削除する | [`mcp/NAME/`](../../mcp) に `module.nix` と必要なら `package.nix` を置く。収集は flake が行う | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | MCP front の port または起動方法を変える | 対応する [`mcp/NAME/module.nix`](../../mcp) の `port` と `serve`。port は gateway に隣接する 8770-8789 から取る | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| Docker backend の構成を変える | 対応する unit の `module.nix` と [`images/module.nix`](../../images/module.nix) の `mkContainerBackend` | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
-| upstream OCI image を更新する | 対応する [`mcp/NAME/module.nix`](../../mcp) の repository、digest、canonical image reference。digest は `dotfiles-image-digest <image>` で取る | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
+| Docker backend の構成を変える | 対応する application module と [`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix)。application の追加と削除では [`flake.nix`](../../flake.nix) の enabled roster と [`containers/checks.nix`](../../containers/checks.nix) の固定 roster も同時に変える。共通 schema と image 同期は [`containers/module.nix`](../../containers/module.nix) | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
+| upstream OCI image を更新する | 対応する application module の `dotfiles.containers.services.<name>.images` にある repository、digest、canonical image reference。digest は `dotfiles-image-digest <image>` で取る | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
 | 固定した package の hash を更新する | 対応する [`mcp/NAME/package.nix`](../../mcp) の hash。値は `nix store prefetch-file --hash-type sha256 --json <url>` で取る | `dotfiles-rebuild` |
 
 ## Secret と identity

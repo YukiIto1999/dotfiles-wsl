@@ -5,12 +5,12 @@
   serveOverProxy,
   mkMcpServer,
   mkNpmMcp,
-  mkContainerBackend,
   ...
 }:
 
 # self-hosted SearXNG。cache は SQLite で、limiter を使わないので valkey は要らない
 let
+  mkContainerBackend = import ../../containers/impl/container-backend.nix { inherit lib; };
   frontPort = 8775;
   inherit (config.sops) placeholder;
 
@@ -37,14 +37,26 @@ let
   };
 in
 {
-  # 検査は port を転記せずここを読む
-  my.images = {
-    searxng = {
+  dotfiles.containers.services.searxng = {
+    endpoints.http = {
+      protocol = "http";
+      address = "127.0.0.1";
+      port = 8080;
+      url = "http://127.0.0.1:8080";
+    };
+    units = [ "docker-searxng.service" ];
+    images.searxng = {
       kind = "upstream";
       container = "searxng";
       image = searxngImage;
       repository = searxngRepository;
       digest = searxngDigest;
+    };
+    health = {
+      endpoint = "http";
+      method = "GET";
+      path = "/healthz";
+      timeout = 5;
     };
   };
 

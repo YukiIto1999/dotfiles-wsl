@@ -20,7 +20,8 @@
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
-| unit が他 unit を契約経由でだけ参照する | `unit-boundary-name-only` |
+| container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
+| 共通 container helper は 4 source の exact import 各 1 回だけを許し、AST で検出した別 source、readFile、別構文、追加 reader を拒否する | `unit-boundary-name-only` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
@@ -42,10 +43,13 @@
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
 | backend の待ち受け port が配備される argv の publish と一致する | `agentmemory-config`、`searxng-settings` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
+| host が有効化した container application と service contract の key が一致する | `container-application-roster` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
+| container application の endpoint URL と port が OCI publish、unit が systemd service に完全一致し、health が宣言済み HTTP endpoint を参照する | `nixos-toplevel` (`containers/module.nix` の assertion) |
 | MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`mcp/module.nix` の assertion) |
-| image id が container を一意に指す | `nixos-toplevel` (`images/module.nix` の assertion) |
+| image id が container を一意に指す | `nixos-toplevel` (`containers/module.nix` の assertion) |
 | 全 module から system closure を評価できる | `nixos-toplevel` |
+| accounts と gateway port を変えた第二の評価からも system closure を評価できる | `nixos-variant-toplevel` |
 
 ## runtime の振る舞い
 

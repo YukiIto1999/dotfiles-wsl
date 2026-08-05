@@ -4,11 +4,11 @@
   pkgs,
   mkMcpServer,
   serveOverProxy,
-  mkContainerBackend,
   ...
 }:
 
 let
+  mkContainerBackend = import ../../containers/impl/container-backend.nix { inherit lib; };
   uid = "65532";
 
   httpPort = "3111";
@@ -40,11 +40,26 @@ let
   };
 in
 {
-  my.images.agentmemory = {
-    kind = "nix";
-    container = "agentmemory";
-    image = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
-    imageFile = agentmemory.image;
+  dotfiles.containers.services.agentmemory = {
+    endpoints.http = {
+      protocol = "http";
+      address = "127.0.0.1";
+      port = 3111;
+      url = "http://127.0.0.1:3111";
+    };
+    units = [ "docker-agentmemory.service" ];
+    images.agentmemory = {
+      kind = "nix";
+      container = "agentmemory";
+      image = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
+      imageFile = agentmemory.image;
+    };
+    health = {
+      endpoint = "http";
+      method = "GET";
+      path = "/agentmemory/livez";
+      timeout = 5;
+    };
   };
 
   my.artifacts."mcp/memory/opencode-capture" = {

@@ -34,7 +34,7 @@ account の追加、削除、順序変更では `my.accounts` と対応する暗
 
 ## Agentmemory
 
-Agentmemory の LLM provider 用 credential は `mcp/memory/module.nix` が宣言する SOPS template から environment file へ配備する。template の更新は agentmemory container の unit を再起動する。
+Agentmemory の LLM provider 用 credential は `containers/agentmemory/module.nix` が宣言する SOPS template から environment file へ配備する。template の更新は agentmemory container の unit を再起動する。`mcp/memory/module.nix` は backend の型付き endpoint と client version を読み、credential は所有しない。
 
 endpoint、model、保存領域は secret inventory ではない。credential の値だけを SOPS で編集し、設定変更は consumer module で行う。
 

@@ -105,7 +105,7 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 ├── mcp/                   gateway、MCP target、その application module
 ├── toolchain/             PATH 上の汎用ツール、language server、git、静的解析
 ├── telemetry/             使用量の観測
-├── containers/            container 配備の共通 schema、helper、OCI image 同期
+├── containers/            application 固有の container backend と共通 schema、helper、OCI image 同期
 ├── artifacts/             生成設定の登録簿
 ├── commands/              運用 command の生成と実体
 ├── sops/                  secret の配線
@@ -114,7 +114,7 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 └── docs/                  runbook、architecture、reference
 ```
 
-`containers/` は container 配備の共通層を所有する。application 固有の宣言は分離途中であり、現在は `mcp/memory/`、`mcp/crawl4ai/`、`mcp/searxng/`、`toolchain/sonarqube/` が暫定的に持つ。
+`containers/` は container 配備の共通層を所有する。Agentmemory の backend は `containers/agentmemory/`、MCP front は `mcp/memory/` が所有する。ほかの application 固有の宣言は分離途中であり、現在は `mcp/crawl4ai/`、`mcp/searxng/`、`toolchain/sonarqube/` が暫定的に持つ。
 
 責務は repo 直下に置き、層はどの責務でも同じ名前のファイルで表す。
 `module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `package/` `fixtures/` が素材である。振る舞いの検証も `checks.nix` に置き、`fixtures/` はその入力を持つ。

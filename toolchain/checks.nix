@@ -9,6 +9,26 @@ let
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
   declared = builtins.attrValues hostConfig.dotfiles.toolchain.packages;
   lspServers = builtins.attrValues hostConfig.dotfiles.toolchain.lsp;
+  expectedLspNames = [
+    "bash"
+    "csharp"
+    "java"
+    "nix"
+    "python"
+    "rust"
+    "typescript"
+  ];
+  lspRosterIsValid =
+    servers:
+    servers != { } && lib.sort builtins.lessThan (builtins.attrNames servers) == expectedLspNames;
+  normalLspEvaluation = builtins.tryEval (
+    assert lspRosterIsValid hostConfig.dotfiles.toolchain.lsp;
+    true
+  );
+  emptyLspEvaluation = builtins.tryEval (
+    assert lspRosterIsValid { };
+    true
+  );
   toolchain = hostConfig.dotfiles.toolchain.packages;
 
   # この repo の unit が宣言する package。衝突はこれが片側に居るときだけ見る
@@ -25,6 +45,9 @@ in
 {
   # 宣言した command が package に無いと、CLI 側は起動時まで気付かない
   lsp-command-present =
+    assert normalLspEvaluation.success;
+    assert !emptyLspEvaluation.success;
+    assert lspServers != [ ];
     assert lib.all (server: lib.elem server.package homeConfig.home.packages) lspServers;
     assert lib.all (
       server: lib.all (extension: lib.hasPrefix "." extension) (builtins.attrNames server.extensions)

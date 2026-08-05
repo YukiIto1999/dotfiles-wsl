@@ -8,6 +8,24 @@
 
 let
   sopsFile = "${self}/secrets/secrets.yaml";
+  templates = hostConfig.sops.templates;
+  inHome = template: lib.hasPrefix hostConfig.dotfiles.host.homeDir template.path;
+  wrongTemplatesFor =
+    candidateTemplates:
+    builtins.filter (
+      template:
+      inHome template && (template.mode != "0600" || template.owner != hostConfig.dotfiles.host.username)
+    ) (builtins.attrValues candidateTemplates);
+  templatePolicyIsValid =
+    candidateTemplates: candidateTemplates != { } && wrongTemplatesFor candidateTemplates == [ ];
+  normalTemplateEvaluation = builtins.tryEval (
+    assert templatePolicyIsValid templates;
+    true
+  );
+  emptyTemplateEvaluation = builtins.tryEval (
+    assert templatePolicyIsValid { };
+    true
+  );
 in
 {
   # 鍵は root だけが読み、recipient は宣言と暗号文の両方で一致する
@@ -40,13 +58,11 @@ in
   # secret file は user 所有で 0600。各 unit が mode を決めない
   sops-secret-file-mode =
     let
-      # home に置く secret だけが user 所有。container が読む env と /etc の設定は
-      # root 所有でよく、user 所有にすると読める範囲が広がる
-      inHome = t: lib.hasPrefix hostConfig.dotfiles.host.homeDir t.path;
-      wrong = builtins.filter (
-        t: inHome t && (t.mode != "0600" || t.owner != hostConfig.dotfiles.host.username)
-      ) (builtins.attrValues hostConfig.sops.templates);
+      wrong = wrongTemplatesFor templates;
     in
+    assert normalTemplateEvaluation.success;
+    assert !emptyTemplateEvaluation.success;
+    assert templates != { };
     assert lib.assertMsg (wrong == [ ]) (
       "sops template does not use the shared user secret file policy: "
       + lib.concatStringsSep " " (map (t: t.path) wrong)

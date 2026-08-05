@@ -19,6 +19,20 @@ let
     builtins.filter (name: name != "") (map (unit: lib.head (lib.splitString "/" unit.id)) units)
   );
 
+  expectedRootOptionOwners = [
+    "accounts"
+    "agents"
+    "artifacts"
+    "commands"
+    "containers"
+    "gates"
+    "host"
+    "mcp"
+    "telemetry"
+    "toolchain"
+  ];
+  expectedRootUnitNames = expectedRootOptionOwners ++ [ "sops" ];
+
   # 全 consumer の移行後は例外を持たない。空集合も下の AST scan が実入力を
   # 検出したことを確かめるため、gate 自体は vacuous にならない。
   allowedPureHelperImports = { };
@@ -67,6 +81,19 @@ let
   };
 
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
+
+  wslviewPackage =
+    lib.findSingle (package: lib.getName package == "wslview") (throw "wslview package is missing")
+      (throw "multiple wslview packages are installed")
+      hostConfig.environment.systemPackages;
+  generatedShellActual = {
+    agentmemoryHooks = toString hostConfig.dotfiles.containers.agentmemory.clients.hooks;
+    commands = lib.mapAttrs (_: package: lib.getExe package) hostConfig.dotfiles.commands;
+    mcpFronts = lib.mapAttrs (
+      _: front: hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart
+    ) hostConfig.dotfiles.mcp.fronts;
+    host.wslview = lib.getExe wslviewPackage;
+  };
 in
 {
   structure-responsibility-roots =
@@ -137,21 +164,22 @@ in
         )
       );
 
-      persistentPaths = lib.unique (
-        lib.sort builtins.lessThan (
-          lib.concatMap (
-            container:
-            builtins.filter (lib.hasPrefix "/var/lib/") (
-              map (volume: lib.head (lib.splitString ":" volume)) container.volumes
-            )
-          ) containerValues
-        )
-      );
+      agentmemoryPersistentMounts = builtins.filter (
+        volume:
+        let
+          segments = lib.splitString ":" volume;
+        in
+        builtins.length segments >= 2
+        && lib.hasPrefix "/var/lib/" (lib.head segments)
+        && builtins.elemAt segments 1 == "/data"
+      ) containers.agentmemory.volumes;
 
       actual =
         assert lib.assertMsg (
           builtins.length containerNetworks == 1
         ) "runtime identity requires one container network: actual=${builtins.toJSON containerNetworks}";
+        assert lib.assertMsg (builtins.length agentmemoryPersistentMounts == 1)
+          "runtime identity requires one agentmemory persistent mount: actual=${builtins.toJSON agentmemoryPersistentMounts}";
         {
           mcpTargets = lib.mapAttrs (_: target: target.port) hostConfig.dotfiles.mcp.targets;
           gateway = {
@@ -160,17 +188,34 @@ in
           containers = lib.sort builtins.lessThan (builtins.attrNames containers);
           containerNetwork = lib.head containerNetworks;
           secrets = lib.sort builtins.lessThan (builtins.attrNames hostConfig.sops.secrets);
-          inherit persistentPaths;
+          agentmemoryPersistentMount = lib.head agentmemoryPersistentMounts;
         };
+      identityMatches = candidate: candidate == expected;
+      missingTargetMutation = actual // {
+        mcpTargets = builtins.removeAttrs actual.mcpTargets [ "memory" ];
+      };
+      commandNames = builtins.attrNames hostConfig.dotfiles.commands;
+      serviceNames = builtins.attrNames hostConfig.systemd.services;
+      installerExecutable = builtins.baseNameOf (lib.getExe hostConfig.dotfiles.commands.installAgents);
+      legacyInstallerKey = "install" + "Clis";
+      legacyUpdaterService = "dotfiles-" + "cli-autoupdate";
     in
-    assert lib.assertMsg (actual == expected) (
+    assert lib.assertMsg (identityMatches actual) (
       "runtime identity mismatch: expected=${builtins.toJSON expected} "
       + "actual=${builtins.toJSON actual}"
     );
+    assert lib.assertMsg (
+      !identityMatches missingTargetMutation
+    ) "runtime identity fixture accepted a deleted MCP target";
+    assert installerExecutable == "dotfiles-install-agents";
+    assert builtins.elem "installAgents" commandNames;
+    assert builtins.elem "dotfiles-agent-autoupdate" serviceNames;
+    assert !builtins.elem legacyInstallerKey commandNames;
+    assert !builtins.elem legacyUpdaterService serviceNames;
     pkgs.runCommandLocal "check-runtime-identity" { } "touch $out";
 
-  # 登録簿が空になると、それを走査する検査は全て緑のまま何も見なくなる。
-  # 個々の検査に非空の assert を書き足すのではなく、登録簿の側で禁じる
+  # 全登録簿に共通する保険。各 owner の check も、自分が検査する集合の非空を
+  # 独立して要求する
   registries-non-empty =
     let
       walk =
@@ -319,10 +364,11 @@ in
 
       # module system の全 option leaf を辿る。dotfiles 配下だけを起点にすると、
       # repository が別 root を追加した場合に検査対象から外れてしまう。
-      optionLeaves =
+      optionLeavesFor =
+        options:
         let
           walk =
-            path: options:
+            path: current:
             lib.concatLists (
               lib.mapAttrsToList (
                 name: option:
@@ -340,30 +386,83 @@ in
                   ]
                 else
                   walk here option
-              ) options
+              ) current
             );
         in
-        walk [ ] hostOptions;
+        walk [ ] options;
 
-      repositoryOptions = builtins.filter (entry: entry.declarations != [ ]) optionLeaves;
-      outsideDotfiles = builtins.filter (
-        entry: entry.here == [ ] || lib.head entry.here != "dotfiles"
-      ) repositoryOptions;
-      wrongOwner = builtins.filter (
-        entry:
-        entry.here != [ ]
-        && lib.head entry.here == "dotfiles"
-        && (
-          builtins.length entry.here < 2
-          || !lib.all (declaration: rootOf declaration == builtins.elemAt entry.here 1) entry.declarations
-        )
-      ) repositoryOptions;
+      repositoryOptionsFor =
+        options: builtins.filter (entry: entry.declarations != [ ]) (optionLeavesFor options);
+
+      violationsFor =
+        options:
+        let
+          repositoryOptions = repositoryOptionsFor options;
+          outsideDotfiles = builtins.filter (
+            entry: entry.here == [ ] || lib.head entry.here != "dotfiles"
+          ) repositoryOptions;
+          wrongOwner = builtins.filter (
+            entry:
+            entry.here != [ ]
+            && lib.head entry.here == "dotfiles"
+            && (
+              builtins.length entry.here < 2
+              || !lib.all (declaration: rootOf declaration == builtins.elemAt entry.here 1) entry.declarations
+            )
+          ) repositoryOptions;
+        in
+        outsideDotfiles ++ wrongOwner;
 
       describe =
         entry:
         "${lib.concatStringsSep "." entry.here} <- ${lib.concatStringsSep "," (map rootOf entry.declarations)}";
-      violations = map describe (outsideDotfiles ++ wrongOwner);
+      repositoryOptions = repositoryOptionsFor hostOptions;
+      actualRootOptionOwners = lib.sort builtins.lessThan (
+        lib.unique (lib.concatMap (entry: map rootOf entry.declarations) repositoryOptions)
+      );
+      missingRootModuleDeclarations = builtins.filter (
+        owner:
+        !lib.any (
+          entry:
+          builtins.length entry.here >= 2
+          && builtins.elemAt entry.here 0 == "dotfiles"
+          && builtins.elemAt entry.here 1 == owner
+          && builtins.elem "${self}/${owner}/module.nix" (map toString entry.declarations)
+        ) repositoryOptions
+      ) expectedRootOptionOwners;
+
+      fixtureOptions =
+        file: optionPath:
+        (lib.evalModules {
+          modules = [
+            {
+              _file = "${self}/${file}";
+              options = lib.setAttrByPath optionPath (lib.mkOption { type = lib.types.str; });
+            }
+          ];
+        }).options;
+      correctFixture = fixtureOptions "agents/module.nix" [
+        "dotfiles"
+        "agents"
+        "fixture"
+      ];
+      wrongOwnerFixture = fixtureOptions "agents/module.nix" [
+        "dotfiles"
+        "containers"
+        "fixture"
+      ];
+      rogueRootFixture = fixtureOptions "agents/module.nix" [
+        "rogue"
+        "fixture"
+      ];
+      violations = map describe (violationsFor hostOptions);
     in
+    assert lib.sort builtins.lessThan rootUnitNames == lib.sort builtins.lessThan expectedRootUnitNames;
+    assert actualRootOptionOwners == expectedRootOptionOwners;
+    assert missingRootModuleDeclarations == [ ];
+    assert violationsFor correctFixture == [ ];
+    assert violationsFor wrongOwnerFixture != [ ];
+    assert violationsFor rogueRootFixture != [ ];
     assert lib.assertMsg (violations == [ ]) (
       "option namespace: " + lib.concatStringsSep " " violations
     );
@@ -900,56 +999,43 @@ in
       '';
 
   structure-layer-names =
-    pkgs.runCommandLocal "check-structure-layer-names"
-      {
-        unitPaths = map (unit: toString unit.path) units;
-        inherit forbiddenOwnership;
-        layerNames = [
-          "module.nix"
-          "package.nix"
-          "checks.nix"
-          "impl"
-          "assets"
-          "package"
-          "fixtures"
-        ];
-      }
-      ''
-        set -euo pipefail
-
-        # unit の一覧は flake の collectUnits が唯一の定義。ここで判定を書き直すと
-        # 片方だけが歩く unit が出る
-        violations=""
-        for path in $forbiddenOwnership; do
-          [ ! -e "${self}/$path" ] || violations="$violations $path"
-        done
-        for unit in $unitPaths; do
-          relativeUnit=''${unit#${self}/}
-          allowedRootLayers=""
-          case "$relativeUnit" in
-            agents) allowedRootLayers=shared ;;
-          esac
-          for entry in "$unit"/*; do
-            name=$(basename "$entry")
-            case " $layerNames " in
-              *" $name "*) continue ;;
-            esac
-            case " $allowedRootLayers " in
-              *" $name "*) continue ;;
-            esac
-            case " $unitPaths " in
-              *" $entry "*) continue ;;
-            esac
-            violations="$violations ''${unit#${self}/}/$name"
-          done
-        done
-
-        if [ -n "$violations" ]; then
-          echo "unit contains an entry outside its layer or ownership set:$violations" >&2
-          exit 1
-        fi
-        touch $out
-      '';
+    let
+      materialNames = [
+        "module.nix"
+        "package.nix"
+        "checks.nix"
+        "impl"
+        "assets"
+        "fixtures"
+        "package"
+        "shared"
+      ];
+      entryIsValid =
+        name: kind: hasChildModule:
+        builtins.elem name materialNames || (kind == "directory" && hasChildModule);
+      fixture = import ./fixtures/structure-layer-names.nix;
+      fixtureIsValid = entry: entryIsValid entry.name entry.kind entry.hasChildModule;
+      invalidEntriesFor =
+        unit:
+        lib.mapAttrsToList (name: _: "${unit.id}/${name}") (
+          lib.filterAttrs (
+            name: kind: !entryIsValid name kind (builtins.pathExists (unit.path + "/${name}/module.nix"))
+          ) (builtins.readDir unit.path)
+        );
+      violations = lib.concatMap invalidEntriesFor units;
+      forbiddenPresent = builtins.filter (
+        path: builtins.pathExists (self + "/${path}")
+      ) forbiddenOwnership;
+    in
+    assert lib.all fixtureIsValid fixture.valid;
+    assert lib.all (entry: !fixtureIsValid entry) fixture.invalid;
+    assert lib.assertMsg (forbiddenPresent == [ ]) (
+      "forbidden ownership paths exist: " + lib.concatStringsSep " " forbiddenPresent
+    );
+    assert lib.assertMsg (violations == [ ]) (
+      "unit contains an entry outside its layer or ownership set: " + lib.concatStringsSep " " violations
+    );
+    pkgs.runCommandLocal "check-structure-layer-names" { } "touch $out";
 
   # 文書の種別ごとに読み手が明示されている
   docs-reader = pkgs.runCommandLocal "check-docs-reader" { } ''
@@ -1059,14 +1145,105 @@ in
     touch $out
   '';
 
-  shellcheck = pkgs.runCommandLocal "check-shellcheck" { nativeBuildInputs = [ pkgs.shellcheck ]; } ''
-    # shebang を持つ file は誰かが直接叩く。持たない fragment は
-    # writeShellApplication へ埋め込まれ build 時に検査される
-    find ${self} -type f -not -path '*/.git/*' -exec \
-      sh -c 'head -c 2 "$1" | grep -q "^#!"' _ {} \; -print \
-      | xargs shellcheck --severity=warning
-    touch $out
-  '';
+  shellcheck =
+    let
+      generatedShellActualFile = pkgs.writeText "generated-shell-roster.json" (
+        builtins.toJSON generatedShellActual
+      );
+    in
+    pkgs.runCommandLocal "check-shellcheck"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.diffutils
+          pkgs.findutils
+          pkgs.jq
+          pkgs.shellcheck
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        expected=${./fixtures/generated-shell-roster.json}
+        actual=${generatedShellActualFile}
+
+        jq -e '
+          (.agentmemoryHooks | length) > 0 and
+          (.commands | length) > 0 and
+          (.mcpFronts | length) > 0 and
+          (.host | length) > 0
+        ' "$expected" >/dev/null
+
+        checkoutCount=0
+        while IFS= read -r -d "" source; do
+          shellcheck --severity=warning "$source"
+          checkoutCount=$((checkoutCount + 1))
+        done < <(
+          find ${self} -type f -not -path '*/.git/*' -exec \
+            sh -c 'head -c 2 "$1" | grep -q "^#!"' _ {} \; -print0
+        )
+        test "$checkoutCount" -gt 0
+
+        isGeneratedShell() {
+          local source=$1 shebang
+          test -f "$source"
+          shebang=$(head -n 1 "$source")
+          case "$shebang" in
+            *'/bash' | *'/sh') return 0 ;;
+            *) return 1 ;;
+          esac
+        }
+
+        lintGenerated() {
+          local source=$1
+          isGeneratedShell "$source"
+          shellcheck --severity=warning "$source"
+        }
+
+        jq -r '.agentmemoryHooks[]' "$expected" | sort > expected-hooks
+        find "$(jq -r '.agentmemoryHooks' "$actual")/bin" \
+          -maxdepth 1 -type f -o -type l \
+          | while IFS= read -r hook; do basename "$hook"; done \
+          | sort > actual-hooks
+        diff -u expected-hooks actual-hooks
+        while IFS= read -r hook; do
+          lintGenerated "$(jq -r '.agentmemoryHooks' "$actual")/bin/$hook"
+        done < expected-hooks
+
+        jq -S '.commands' "$expected" > expected-commands.json
+        jq -S '.commands | with_entries(.value |= split("/")[-1])' "$actual" \
+          > actual-commands.json
+        diff -u expected-commands.json actual-commands.json
+        while IFS=$'\t' read -r id command; do
+          lintGenerated "$command"
+          timeout 10 "$command" --help > "$id-help"
+          test -s "$id-help"
+        done < <(jq -r '.commands | to_entries[] | [.key, .value] | @tsv' "$actual")
+
+        jq -S '.host' "$expected" > expected-host.json
+        jq -S '.host | with_entries(.value |= split("/")[-1])' "$actual" > actual-host.json
+        diff -u expected-host.json actual-host.json
+        lintGenerated "$(jq -r '.host.wslview' "$actual")"
+
+        jq -S '.mcpFronts' "$expected" > expected-fronts.json
+        jq -S '.mcpFronts | keys' "$actual" > actual-fronts.json
+        diff -u expected-fronts.json actual-fronts.json
+        while IFS=$'\t' read -r id command; do
+          inspected=0
+          for token in $command; do
+            test -f "$token" || continue
+            isGeneratedShell "$token" || continue
+            inspected=$((inspected + 1))
+            lintGenerated "$token"
+          done
+          if [ "$inspected" -lt 1 ]; then
+            echo "no generated shell wrapper found for MCP front: $id" >&2
+            exit 1
+          fi
+        done < <(jq -r '.mcpFronts | to_entries[] | [.key, .value] | @tsv' "$actual")
+
+        touch $out
+      '';
 
   statix = pkgs.runCommandLocal "check-statix" { nativeBuildInputs = [ pkgs.statix ]; } ''
     statix check --config ${self} ${self}

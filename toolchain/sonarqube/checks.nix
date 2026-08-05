@@ -19,6 +19,17 @@ let
   serverPublish = valuesOf (argvOf "sonarqube") "-p";
   publishedPort = builtins.elemAt (lib.splitString ":" (builtins.head serverPublish)) 1;
   serverEnv = hostConfig.sops.templates."sonarqube.env";
+
+  front = hostConfig.my.contract.mcp.fronts.sonarqube;
+  frontService = hostConfig.systemd.services.${front.service}.serviceConfig;
+  passwordFile = hostConfig.sops.secrets."sonarqube/admin_password".path;
+
+  # 資格情報の扱いは wrapper の中にしか現れない
+  wrapper = builtins.head (
+    builtins.filter (token: lib.hasSuffix "sonarqube-mcp" token) (
+      helpers.execTokens.tokensOf frontService.ExecStart
+    )
+  );
 in
 {
   # server と DB が同じ password を見て、DB port は host へ出さない
@@ -61,6 +72,21 @@ in
         = "$(grep '^POSTGRES_PASSWORD=' "$database" | cut -d= -f2-)"
       test "$(grep '^SONAR_JDBC_USERNAME=' "$server" | cut -d= -f2-)" \
         = "$(grep '^POSTGRES_USER=' "$database" | cut -d= -f2-)"
+      touch $out
+    '';
+
+  # agent が読む front。人が browser で開く endpoint と同じ場所を指す
+  sonarqube-front =
+    assert lib.elem "docker-sonarqube.service" hostConfig.my.mcp.targets.sonarqube.waitUnits;
+    pkgs.runCommandLocal "check-sonarqube-front" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+      set -euo pipefail
+
+      # password は store へ焼かず、起動時に sops file から読む
+      grep -Fq 'SONARQUBE_PASSWORD="$(<${passwordFile})"' ${wrapper}
+      grep -Fq 'SONARQUBE_URL="http://127.0.0.1:${publishedPort}"' ${wrapper}
+
+      # 空の secret で起動すると、認証なしのまま常駐する
+      grep -q 'required file is empty' ${wrapper}
       touch $out
     '';
 }

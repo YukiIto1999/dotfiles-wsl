@@ -31,7 +31,10 @@ in
 
       # browserUrl と browserWSEndpoint は CDP を持つ既存 browser へ繋ぐ。
       # host へ CDP を露出する経路を作らない
-      ! grep -qE -- '--browser(Url|WSEndpoint|-url)' ${wrapper}
+      if grep -qE -- '--browser(Url|WSEndpoint|-url)' ${wrapper}; then
+        echo "chrome-devtools front attaches to an existing browser" >&2
+        exit 1
+      fi
       touch $out
     '';
 }

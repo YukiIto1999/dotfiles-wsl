@@ -1,0 +1,9 @@
+{
+  "docker": {
+    "containers": {
+      "sonarqube": {
+        "imageId": "sha256:actual"
+      }
+    }
+  }
+}

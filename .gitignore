@@ -12,6 +12,9 @@ Thumbs.db
 /.direnv/
 /.devenv/
 
+# Git
+/.worktrees/
+
 # Editor
 /.vscode/
 /.idea/

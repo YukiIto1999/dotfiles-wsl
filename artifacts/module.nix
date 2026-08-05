@@ -6,15 +6,15 @@
       lib.types.submodule {
         options = {
           format = lib.mkOption {
-            type = lib.types.nullOr (
-              lib.types.enum [
-                "json"
-                "toml"
-                "yaml"
-              ]
-            );
-            default = null;
-            description = "構文検査に使う serialization format。null なら構文検査の対象外。";
+            type = lib.types.enum [
+              "json"
+              "toml"
+              "yaml"
+              "markdown"
+              "text"
+              "directory"
+            ];
+            description = "source の形式。構文検査と配備照合の方法を決める。";
           };
           deployedAt = lib.mkOption {
             type = lib.types.nullOr lib.types.str;

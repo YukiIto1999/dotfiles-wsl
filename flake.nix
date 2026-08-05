@@ -135,6 +135,7 @@
           '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
           dotfiles-install-agents = hostConfig.dotfiles.commands.installAgents;
+          dotfiles-doctor = hostConfig.dotfiles.commands.doctor;
           dotfiles-rebuild = hostConfig.dotfiles.commands.rebuild;
           dotfiles-sync-images = hostConfig.dotfiles.commands.syncImages;
         };

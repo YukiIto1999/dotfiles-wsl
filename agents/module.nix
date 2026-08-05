@@ -70,26 +70,56 @@ let
     else
       "${name}.md";
 
-  sharedHomeEntries = lib.concatMap (
+  normalizeSource =
+    source:
+    if builtins.typeOf source == "path" then
+      builtins.path {
+        path = source;
+        name = builtins.baseNameOf (toString source);
+      }
+    else
+      source;
+
+  sharedDeploymentRows = lib.concatMap (
     clientName:
     let
       client = agents.clients.${clientName};
-      definitionEntries = lib.optionals (client.definitionMode != "unsupported") (
-        lib.mapAttrsToList (
-          name: source:
-          lib.nameValuePair "${client.definitionsDestination}/${definitionFileName client name}" {
+      definitionRows = lib.optionals (client.definitionMode != "unsupported") (
+        lib.mapAttrsToList (name: source: {
+          inherit clientName;
+          id = "definitions/${name}";
+          file = {
             inherit source;
-          }
-        ) client.definitions
+            format = if client.definitionFormat == "toml" then "toml" else "markdown";
+            deployment = "home";
+            destination = "${client.definitionsDestination}/${definitionFileName client name}";
+          };
+        }) client.definitions
       );
     in
     [
-      (lib.nameValuePair client.rulesDestination { source = agents.shared.rules; })
+      {
+        inherit clientName;
+        id = "rules";
+        file = {
+          source = agents.shared.rules;
+          format = "markdown";
+          deployment = "home";
+          destination = client.rulesDestination;
+        };
+      }
     ]
-    ++ lib.mapAttrsToList (
-      name: source: lib.nameValuePair "${client.skillsDestination}/${name}" { inherit source; }
-    ) agents.shared.skills
-    ++ definitionEntries
+    ++ lib.mapAttrsToList (name: source: {
+      inherit clientName;
+      id = "skills/${name}";
+      file = {
+        inherit source;
+        format = "directory";
+        deployment = "home";
+        destination = "${client.skillsDestination}/${name}";
+      };
+    }) agents.shared.skills
+    ++ definitionRows
   ) clientNames;
 
   managedFileRows = lib.concatMap (
@@ -99,15 +129,25 @@ let
     }) agents.clients.${clientName}.managedFiles
   ) clientNames;
 
+  deploymentRows = map (
+    row:
+    row
+    // {
+      file = row.file // {
+        source = normalizeSource row.file.source;
+      };
+    }
+  ) (sharedDeploymentRows ++ managedFileRows);
+
   homeManagedEntries = map (
     row: lib.nameValuePair row.file.destination { source = row.file.source; }
-  ) (builtins.filter (row: row.file.deployment == "home") managedFileRows);
+  ) (builtins.filter (row: row.file.deployment == "home") deploymentRows);
 
   systemManagedEntries = map (
     row: lib.nameValuePair row.file.destination { source = row.file.source; }
-  ) (builtins.filter (row: row.file.deployment == "system") managedFileRows);
+  ) (builtins.filter (row: row.file.deployment == "system") deploymentRows);
 
-  seedRows = builtins.filter (row: row.file.deployment == "seed") managedFileRows;
+  seedRows = builtins.filter (row: row.file.deployment == "seed") deploymentRows;
 
   seedScript = lib.concatMapStrings (
     row:
@@ -122,24 +162,12 @@ let
     ''
   ) seedRows;
 
-  artifactFormat =
-    format:
-    if
-      builtins.elem format [
-        "json"
-        "toml"
-        "yaml"
-      ]
-    then
-      format
-    else
-      null;
   managedArtifacts = lib.listToAttrs (
     map (
       row:
       lib.nameValuePair "agents/${row.clientName}/${row.id}" (
         {
-          format = artifactFormat row.file.format;
+          inherit (row.file) format;
           source = row.file.source;
         }
         // lib.optionalAttrs (row.file.deployment == "system") {
@@ -149,7 +177,7 @@ let
           deployedAt = "${cfg.host.homeDir}/${row.file.destination}";
         }
       )
-    ) managedFileRows
+    ) deploymentRows
   );
 
   installRecord =
@@ -182,7 +210,7 @@ let
     ];
   };
 
-  allHomeEntries = sharedHomeEntries ++ homeManagedEntries;
+  allHomeEntries = homeManagedEntries;
   homeDestinations = map (entry: entry.name) allHomeEntries;
   seedDestinations = map (row: row.file.destination) seedRows;
   systemDestinations = map (entry: entry.name) systemManagedEntries;

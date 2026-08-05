@@ -87,7 +87,7 @@ in
 
   config.dotfiles.artifacts."mcp/gateway/default/config" = {
     format = "yaml";
-    deployedAt = "/etc/agentgateway-default/config.yaml";
+    deployedAt = "/etc/${gateway.runtimeDirectory}/config.yaml";
     inherit (gateway) source;
   };
 

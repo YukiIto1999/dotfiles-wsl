@@ -1,0 +1,12 @@
+{
+  "mcp": {
+    "calls": {
+      "sonarqube": {
+        "result": {
+          "content": [],
+          "isError": true
+        }
+      }
+    }
+  }
+}

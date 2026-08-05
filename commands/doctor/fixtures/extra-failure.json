@@ -1,0 +1,19 @@
+{
+  "docker": {
+    "containers": {
+      "sonarqube": {
+        "imageId": "sha256:actual"
+      }
+    }
+  },
+  "mcp": {
+    "calls": {
+      "sonarqube": {
+        "error": {
+          "code": -32000,
+          "message": "fixture error"
+        }
+      }
+    }
+  }
+}

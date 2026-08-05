@@ -48,6 +48,8 @@ Claude Code の user settings と Codex の user config は CLI が更新し得�
 
 [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。front は target ごとの systemd service として常駐し、gateway は loopback の HTTP へ接続するだけである。downstream の session が増えても process は増えない。stdio しか話さない front は `mcp-proxy` が HTTP へ載せる。
 
+target を持つかどうかは、agent が消費するかで決まる。agent が読み書きするものは target、人が browser で開くだけのものは endpoint に留める。SonarQube のように両方あるものは両方持つ。target は所有 unit が宣言し、[`mcp`](../../mcp) 配下に置くのは MCP を publish することだけが存在理由の unit に限る。SonarQube は人が開く service が主なので [`toolchain/sonarqube`](../../toolchain/sonarqube) が target を持つ。
+
 browser を使う target は二つある。[`playwright`](../../mcp/playwright) は通常の操作、snapshot、screenshot、console、network の観測に使う。[`chrome-devtools`](../../mcp/chrome-devtools) はperformance trace、heap、Lighthouseなどの詳細観測に使う。両targetはisolated browser contextで動くため、sessionを共有すると仮定しない。chromium は `my.contract.mcp.chromium` で共有し、二つの closure を持たない。
 
 MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。完全な target 一覧は各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets` を参照する。

@@ -36,7 +36,7 @@ Nix store の candidate system
 | `mcp/` | agentgateway、常駐 MCP front、その build |
 | `clis/` | AI CLI roster、設定、rules、skills、agents |
 | `toolchain/` | PATH 上の汎用ツールと language server、git 設定、project の静的解析 |
-| `images/` | OCI image inventory、同期、container backend の宣言 |
+| `containers/` | container service contract、OCI image inventory と同期、backend 配備の共通 helper |
 | `telemetry/` | OpenTelemetry collector と endpoint 契約 |
 | `sops/`、`accounts/` | secret file の作り方と検証、account credential、利用者の identity |
 | `commands/rebuild/`、`commands/doctor/`、`commands/cleanup/` | 適用と初回構築、診断、整理 |
@@ -55,7 +55,7 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は別の登録簿を持たず、この repository が宣言した常駐 service を `dotfiles-doctor` が導出する。
 
-[`images/module.nix`](../../images/module.nix) は Docker daemon と `dotfiles-backends` network を用意し、`mkContainerBackend` が backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。
+[`containers/module.nix`](../../containers/module.nix) は Docker daemon、`dotfiles-backends` network、型付き service contract、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。application 固有の宣言は分離途中であり、現在は `mcp/` と `toolchain/sonarqube/` に残る。
 
 SOPS の暗号文は repository に置き、sops-nix が activation 時に host key で復号する。復号済み secret と template は runtime にだけ生成され、consumer の file、環境ファイルへ渡る。鍵と credential の境界は[セキュリティ設計](security.md)、通常の編集は [Secrets](../operations/secrets.md)に分けている。
 

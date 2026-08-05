@@ -16,6 +16,32 @@ let
     builtins.filter (name: name != "") (map (unit: lib.head (lib.splitString "/" unit.id)) units)
   );
 
+  # container application が共通配備 helper を明示 import する唯一の例外。
+  # source と target の組を固定し、構文の書き換えや別用途の path 読み取りは許可しない
+  containerBackendImport = "../../" + "containers/impl/container-backend.nix";
+  allowedPureHelperImports = {
+    "mcp/crawl4ai/module.nix" = containerBackendImport;
+    "mcp/memory/module.nix" = containerBackendImport;
+    "mcp/searxng/module.nix" = containerBackendImport;
+    "toolchain/sonarqube/module.nix" = containerBackendImport;
+  };
+
+  # path を式で組み立てる file reader は境界を文字列検索から隠せる。
+  # 現在必要な動的 operand の source と件数を固定し、追加は明示的な変更にする
+  allowedDynamicImports = {
+    "flake.nix" = 1;
+  };
+  allowedDynamicFileReads = {
+    "accounts/module.nix" = 3;
+    "artifacts/checks.nix" = 1;
+    "clis/codex/module.nix" = 1;
+    "clis/opencode/module.nix" = 2;
+    "commands/module.nix" = 1;
+    "gates/impl/exec-tokens.nix" = 1;
+    "mcp/searxng/checks.nix" = 1;
+    "mcp/searxng/module.nix" = 1;
+  };
+
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 in
 {
@@ -352,21 +378,184 @@ in
     );
     pkgs.runCommandLocal "check-option-namespace" { } "touch $out";
 
-  # unit をまたぐ依存は my.contract か、module / checks への注入だけを通す。
-  # 他 unit の impl や assets を path で読むと、宣言していない結合になる
+  # unit をまたぐ依存は my.contract、module / checks への注入、allowlist に固定した
+  # pure helper の exact import だけを通す。他 unit の impl や assets を広く読むと、
+  # 宣言していない結合になる
   unit-boundary-name-only =
-    pkgs.runCommandLocal "check-unit-boundary-name-only" { nativeBuildInputs = [ pkgs.gnugrep ]; }
+    pkgs.runCommandLocal "check-unit-boundary-name-only"
+      {
+        nativeBuildInputs = [
+          pkgs.ast-grep
+          pkgs.gnugrep
+          pkgs.jq
+        ];
+      }
       ''
         set -euo pipefail
 
         # 層の名前を数え上げると module.nix や checks.nix への直接参照が漏れる。
         # 根 unit の名前を宣言集合として持ち、そこへ入る path を全部拒む
         roots=${lib.escapeShellArg (lib.concatStringsSep " " rootUnitNames)}
+        backendSuffix=containers/impl/container-backend.nix
+        workDir=$PWD
+
+        # comment や string の断片ではなく、reader と operand を Nix AST から取る。
+        # operand が path literal でなければ、source ごとの許可件数と照合する
+        (
+          cd ${self}
+          ast-grep run --lang nix --json=compact -p '$F $P' . --globs '*.nix' > "$workDir/applications.json"
+          ast-grep run --lang nix --json=compact -p 'let $A = $V; in {}' \
+            --selector binding . --globs '*.nix' > "$workDir/bindings.json"
+        )
+        jq '[
+          .[]
+          | select((.metaVariables.single.F.text | gsub("[[:space:]()]"; "")) == "import")
+        ]' "$workDir/applications.json" > "$workDir/imports.json"
+        jq '[
+          .[]
+          | select((.metaVariables.single.F.text | gsub("[[:space:]()]"; "")) == "builtins.readFile")
+        ]' "$workDir/applications.json" > "$workDir/read-files.json"
+        jq --slurpfile bindings "$workDir/bindings.json" --arg suffix "$backendSuffix" '
+          def compact: gsub("[[:space:]()+\\\"]"; "");
+          def identifier: test("^[A-Za-z_][A-Za-z0-9_\\u0027-]*$");
+          def resolves_target($file; $expression; $seen):
+            ($expression | compact) as $value
+            | if ($value | contains($suffix)) then true
+              elif (($expression | identifier) and (($seen | index($expression)) == null)) then
+                any($bindings[0][];
+                  .file == $file
+                  and .metaVariables.single.A.text == $expression
+                  and resolves_target(
+                    $file;
+                    .metaVariables.single.V.text;
+                    $seen + [ $expression ]
+                  ))
+              else false
+              end;
+          [
+            .[]
+            | select(resolves_target(.file; .metaVariables.single.P.text; []))
+          ]
+        ' "$workDir/imports.json" > "$workDir/target-imports.json"
+        jq --slurpfile bindings "$workDir/bindings.json" --arg suffix "$backendSuffix" '
+          def compact: gsub("[[:space:]()+\\\"]"; "");
+          def identifier: test("^[A-Za-z_][A-Za-z0-9_\\u0027-]*$");
+          def resolves_target($file; $expression; $seen):
+            ($expression | compact) as $value
+            | if ($value | contains($suffix)) then true
+              elif (($expression | identifier) and (($seen | index($expression)) == null)) then
+                any($bindings[0][];
+                  .file == $file
+                  and .metaVariables.single.A.text == $expression
+                  and resolves_target(
+                    $file;
+                    .metaVariables.single.V.text;
+                    $seen + [ $expression ]
+                  ))
+              else false
+              end;
+          [
+            .[]
+            | select(resolves_target(.file; .metaVariables.single.P.text; []))
+          ]
+        ' "$workDir/read-files.json" > "$workDir/target-read-files.json"
+
+        readerAliasCount=$(jq '[
+          .[]
+          | .metaVariables.single.V.text
+          | gsub("[[:space:]()]"; "")
+          | select(. == "import" or . == "builtins.readFile")
+        ] | length' "$workDir/bindings.json")
 
         violations=""
+        if [ "$readerAliasCount" -ne 0 ]; then
+          violations="$violations reader-alias-binding=$readerAliasCount"
+        fi
+        for allowed in ${lib.escapeShellArgs (builtins.attrNames allowedPureHelperImports)}; do
+          [ -f "${self}/$allowed" ] || violations="$violations missing-allowlisted-source:$allowed"
+        done
+
         while IFS= read -r file; do
-          owner=''${file#${self}/}
-          owner=''${owner%%/*}
+          relative=''${file#${self}/}
+          owner=''${relative%%/*}
+          allowedTarget=""
+          expectedImport=""
+          expectedDynamicImports=0
+          expectedDynamicFileReads=0
+          case "$relative" in
+            ${lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (source: target: ''
+                ${lib.escapeShellArg source})
+                  allowedTarget=${lib.escapeShellArg target}
+                  expectedImport=${lib.escapeShellArg "  mkContainerBackend = import ${target} { inherit lib; };"}
+                  ;;
+              '') allowedPureHelperImports
+            )}
+          esac
+
+          case "$relative" in
+            ${lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (source: count: ''
+                ${lib.escapeShellArg source}) expectedDynamicImports=${toString count} ;;
+              '') allowedDynamicImports
+            )}
+          esac
+          case "$relative" in
+            ${lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (source: count: ''
+                ${lib.escapeShellArg source}) expectedDynamicFileReads=${toString count} ;;
+              '') allowedDynamicFileReads
+            )}
+          esac
+
+          source=$(cat "$file")
+          dynamicImportCount=$(jq --arg file "$relative" '[
+            .[]
+            | select(.file == $file)
+            | select(.metaVariables.single.P.text | test("^\\.{1,2}/") | not)
+          ] | length' "$workDir/imports.json")
+          dynamicFileReadCount=$(jq --arg file "$relative" '[
+            .[]
+            | select(.file == $file)
+            | select(.metaVariables.single.P.text | test("^\\.{1,2}/") | not)
+          ] | length' "$workDir/read-files.json")
+          targetImportCount=$(jq --arg file "$relative" '[
+            .[] | select(.file == $file)
+          ] | length' "$workDir/target-imports.json")
+          targetFileReadCount=$(jq --arg file "$relative" '[
+            .[] | select(.file == $file)
+          ] | length' "$workDir/target-read-files.json")
+          targetApplicationCount=$(jq --arg file "$relative" --arg suffix "$backendSuffix" '[
+            .[]
+            # この check の script 自体が target suffix を検査値として持つ
+            | select(.file == $file and .file != "gates/checks.nix")
+            | .metaVariables.single.P.text
+            | gsub("[[:space:]()+\\\"]"; "")
+            | select(contains($suffix))
+          ] | length' "$workDir/applications.json")
+
+          if [ "$dynamicImportCount" -ne "$expectedDynamicImports" ] \
+            || [ "$dynamicFileReadCount" -ne "$expectedDynamicFileReads" ]; then
+            violations="$violations $relative:dynamic-import=$dynamicImportCount/$expectedDynamicImports,dynamic-read-file=$dynamicFileReadCount/$expectedDynamicFileReads"
+          fi
+
+          if [ -n "$allowedTarget" ]; then
+            importCount=$(printf '%s\n' "$source" | grep -Fxc -- "$expectedImport" || true)
+            targetCount=$(printf '%s\n' "$source" | grep -Fo -- "$allowedTarget" | wc -l || true)
+            if [ "$importCount" -ne 1 ] || [ "$targetCount" -ne 1 ] \
+              || [ "$targetImportCount" -ne 1 ] || [ "$targetFileReadCount" -ne 0 ] \
+              || [ "$targetApplicationCount" -ne 1 ]; then
+              violations="$violations $relative:exact-helper-import=$importCount,target-reference=$targetCount,target-import-node=$targetImportCount,target-read-file-node=$targetFileReadCount,target-application-node=$targetApplicationCount"
+            else
+              # 件数を先に一つへ固定しているため、許可した target だけを一度除ける
+              source=''${source/"$allowedTarget"/}
+            fi
+          elif [ "$owner" != "containers" ] \
+            && { [ "$targetImportCount" -ne 0 ] || [ "$targetFileReadCount" -ne 0 ] \
+              || [ "$targetApplicationCount" -ne 0 ]; }; then
+            violations="$violations $relative:target-import-node=$targetImportCount,target-read-file-node=$targetFileReadCount,target-application-node=$targetApplicationCount"
+          fi
+
           while IFS= read -r target; do
             target=''${target%%/*}
             [ "$target" = "$owner" ] && continue
@@ -375,7 +564,8 @@ in
               violations="$violations ''${file#${self}/}->$target"
             done
           done < <(
-            grep -ohE 'self \+ "/[a-z0-9-]+/|\$\{self\}/[a-z0-9-]+/|\.\./[a-z0-9-]+/' "$file" \
+            printf '%s\n' "$source" \
+              | grep -ohE 'self \+ "/[a-z0-9-]+/|\$\{self\}/[a-z0-9-]+/|\.\./[a-z0-9-]+/' \
               | sed -E 's|^self \+ "/||; s|^\$\{self\}/||; s|^\.\./||' || true
           )
         done < <(find ${self} -name '*.nix' -not -path '*/.git/*')

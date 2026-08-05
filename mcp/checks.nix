@@ -274,6 +274,8 @@ in
       variantProvided = lib.unique (map (target: target.provider) (builtins.attrValues variantTargets));
     in
     assert expectedProviders != [ ];
+    assert enabledProviders != [ ];
+    assert provided != [ ];
     assert lib.sort builtins.lessThan enabledProviders == expectedProviders;
     assert lib.sort builtins.lessThan provided == expectedProviders;
     assert variantConfig.dotfiles.mcp.enabledProviders == expectedProviders;
@@ -282,8 +284,11 @@ in
 
   mcp-target-contract =
     assert expectedContract.targets != { };
+    assert targets != { };
+    assert variantTargets != { };
     assert targetContractMatches targets;
     assert targetContractMatches variantTargets;
+    assert !(targetContractMatches { });
     assert optionSchemaMatches optionMetadata;
     assert !(optionSchemaMatches (lib.recursiveUpdate optionMetadata { fronts.readOnly = false; }));
     assert !(optionSchemaMatches (lib.recursiveUpdate optionMetadata { chromium.readOnly = false; }));
@@ -492,6 +497,8 @@ in
 
   # front は宣言した port で loopback に listen し、書き込み領域を持つ
   mcp-front-contract =
+    assert expectedFronts != { };
+    assert frontsByName != { };
     assert fronts != [ ];
     assert builtins.attrNames targets == builtins.attrNames expectedContract.targets;
     assert frontsByName == expectedFronts;

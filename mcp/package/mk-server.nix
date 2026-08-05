@@ -12,7 +12,18 @@
 }:
 
 let
-  exports = lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: ''export ${k}="${v}"'') env);
+  exports = lib.concatStringsSep "\n" (
+    lib.mapAttrsToList (
+      k: v:
+      if lib.hasInfix "$(" v then
+        ''
+          ${k}="${v}"
+          export ${k}
+        ''
+      else
+        ''export ${k}="${v}"''
+    ) env
+  );
 
   guards = lib.concatMapStringsSep "\n" (path: ''
     if [ ! -s ${path} ]; then

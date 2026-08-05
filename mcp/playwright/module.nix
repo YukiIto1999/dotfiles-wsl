@@ -7,7 +7,7 @@
 }:
 
 let
-  front = pkgs.callPackage ./package.nix { };
+  front = pkgs.callPackage ./package.nix { inherit (config.my.contract.mcp) chromium; };
 in
 {
   # native の HTTP transport は browser を開いた session を 120 秒の idle で

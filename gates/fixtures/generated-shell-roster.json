@@ -22,6 +22,12 @@
     "syncImages": "dotfiles-sync-images",
     "wslRestartRequired": "dotfiles-wsl-restart-required"
   },
+  "commandSmoke": {
+    "timeoutArgs": [
+      "--kill-after=2s",
+      "10s"
+    ]
+  },
   "mcpFronts": [
     "chrome-devtools",
     "codex",

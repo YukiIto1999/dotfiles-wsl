@@ -48,4 +48,25 @@ SearXNG の server secret は `containers/searxng/module.nix` が設定 template
 
 検索設定や OCI image digest は secret ではないため、暗号化済みファイルへ移さない。設定は SearXNG module、image の取得は [OCI images](oci-images.md)で扱う。
 
+## SonarQube database password
+
+SonarQube の database password は `containers/sonarqube/module.nix` が root 所有の server 用、PostgreSQL 用 environment file へ展開する。template の更新は対応する container unit を再起動する。
+
+## SonarQube admin password の初回登録
+
+admin password は `containers/sonarqube/module.nix` が宣言し、user 所有の runtime file path を型付き contract で公開する。初回登録では、provision service が SonarQube の初期値 `admin` を SOPS の宣言値へ変更する。server が未起動で失敗すると 60 秒後に再試行する。成功後は inactive へ戻り、timer が 1 時間ごとに再実行する。
+
+この自動処理は初回登録専用である。稼働済み server の password rotation には使わない。
+
+## SonarQube admin password rotation
+
+稼働済み server の password は secret file の差し替えでは変わらない。SonarQube 側と MCP front が異なる password を使う時間を短くするため、次の順で変更する。
+
+1. SonarQube に admin でログインし、server 側の admin password を新しい値へ変更する。
+2. host key を指定して SOPS を開き、`sonarqube/admin_password` を同じ値へ更新する。
+3. `dotfiles-rebuild` を実行し、runtime secret file を更新する。
+4. `sudo systemctl restart mcp-front-sonarqube.service` を実行し、front に新しい値を読み込ませる。
+
+admin secret の更新で front を自動再起動しない。SonarQube 側の変更前に front だけが新しい値を読むと認証できなくなるためである。provision service と MCP front は型付き contract を読み、MCP unit は SOPS を直接参照しない。
+
 入口は [README](../../README.md)、初回の host key 登録は[セットアップ](getting-started.md)、credential の信頼境界は[セキュリティ設計](../architecture/security.md)を参照する。

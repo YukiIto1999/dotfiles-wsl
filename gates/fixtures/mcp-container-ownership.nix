@@ -18,6 +18,14 @@ let
       id = "containers/crawl4ai";
       path = "/fixture/containers/crawl4ai";
     }
+    {
+      id = "mcp/sonarqube";
+      path = "/fixture/mcp/sonarqube";
+    }
+    {
+      id = "containers/sonarqube";
+      path = "/fixture/containers/sonarqube";
+    }
   ];
 in
 {
@@ -41,6 +49,10 @@ in
     {
       file = "mcp/module.nix";
       expected = "mcp";
+    }
+    {
+      file = "mcp/sonarqube/module.nix";
+      expected = "mcp/sonarqube";
     }
     {
       file = "README.md";
@@ -93,9 +105,9 @@ in
   expectedScan = {
     coverage = {
       definitionCount = 7;
-      mcpUnitCount = 2;
+      mcpUnitCount = 3;
       resolvedDefinitionCount = 7;
-      unitCount = 3;
+      unitCount = 5;
     };
     diagnostics = [
       "MCP unit owns container backend declarations: mcp/crawl4ai/module.nix:virtualisation.oci-containers mcp/crawl4ai/impl/review-template.nix:sops.templates mcp/crawl4ai/impl/review-backend.nix:dotfiles.containers.services.crawl4ai mcp/crawl4ai/impl/review-secret.nix:sops.secrets.crawl4ai"

@@ -21,7 +21,8 @@
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
-| 共通 container helper は 3 source の exact import 各 1 回だけを許し、AST で検出した別 source、readFile、別構文、追加 reader を拒否する | `unit-boundary-name-only` |
+| 共通 container helper の unit 外 import は SonarQube の exact import 1 回だけを許し、AST で検出した別 source、readFile、別構文、追加 reader を拒否する | `unit-boundary-name-only` |
+| MCP unit が OCI、secret template、同名 backend の secret と service contract を所有しない | `mcp-no-container-ownership` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
@@ -43,7 +44,10 @@
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
 | agentmemory backend の image、設定、mount、環境 file、health、client package が固定値と一致する | `agentmemory-container` |
 | agentmemory MCP front の package、port、backend unit が一致し、initialize に応答する | `agentmemory-front` |
-| backend の待ち受け port が配備される argv の publish と一致する | `agentmemory-container`、`searxng-settings` |
+| Crawl4AI backend の image、publish、credential option の型、read-only 属性、値、environment file、health contract が固定値と一致する | `crawl4ai-container` |
+| Crawl4AI MCP front の artifact と target の観測可能な projection が、SOPS の poison stub、canary A、canary B を用いた各隔離評価で、固定した型付き credential / service contract と一致して initialize に応答する | `crawl4ai-front` |
+| SearXNG backend の image、publish、secret、設定 template、health contract が固定値と一致する | `searxng-container` |
+| SearXNG MCP front の package、port、backend unit が一致し、initialize に応答する | `searxng-front` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | host が有効化した container application と service contract の key が一致する | `container-application-roster` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
@@ -60,6 +64,8 @@
 | MCP session が active な GET body の間 reap されない | `agentgateway-session-lifecycle` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-container` |
+| Crawl4AI の API token が user 用 file contract と root 所有の環境ファイルへ分かれる | `crawl4ai-container` |
+| SearXNG の server secret が root 所有の設定 template にだけ展開される | `searxng-container` |
 
 ## 文書
 
@@ -75,7 +81,7 @@
 | 制約 | 検証 |
 |---|---|
 | 固定した virtual tree の再帰走査で通常ファイルの `module.nix` だけを unit marker とし、flake の unit ID が source 内の該当 directory と一致する | `unit-module-marker` |
-| unit の直下が層の file 名か子 unit だけであり、旧 path「mcp/memory/package/engine」と「mcp/memory/assets/engine-config.yaml」が再作成されない | `structure-layer-names` |
+| unit の直下が層の file 名か子 unit だけであり、移動済みの Agentmemory と SearXNG の資産が旧 path に再作成されない | `structure-layer-names` |
 
 ## 形式
 

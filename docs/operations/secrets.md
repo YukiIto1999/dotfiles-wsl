@@ -38,9 +38,13 @@ Agentmemory の LLM provider 用 credential は `containers/agentmemory/module.n
 
 endpoint、model、保存領域は secret inventory ではない。credential の値だけを SOPS で編集し、設定変更は consumer module で行う。
 
+## Crawl4AI
+
+Crawl4AI の API token は `containers/crawl4ai/module.nix` が宣言し、root 所有の environment file から container へ渡す。同じ unit が user 所有の token file path を型付き contract で公開し、`mcp/crawl4ai/module.nix` の front が読む。MCP unit は SOPS の宣言を直接参照しない。
+
 ## SearXNG
 
-SearXNG の server secret は `mcp/searxng/module.nix` が設定 template に差し込み、root 所有の設定ファイルへ配備する。template の更新は SearXNG container の unit を再起動する。
+SearXNG の server secret は `containers/searxng/module.nix` が設定 template に差し込み、root 所有の設定ファイルへ配備する。template の更新は SearXNG container の unit を再起動する。`mcp/searxng/module.nix` は backend の型付き endpoint だけを読む。
 
 検索設定や OCI image digest は secret ではないため、暗号化済みファイルへ移さない。設定は SearXNG module、image の取得は [OCI images](oci-images.md)で扱う。
 

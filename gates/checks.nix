@@ -188,17 +188,23 @@ in
           containers = lib.sort builtins.lessThan (builtins.attrNames containers);
           containerNetwork = lib.head containerNetworks;
           secrets = lib.sort builtins.lessThan (builtins.attrNames hostConfig.sops.secrets);
+          timers = lib.sort builtins.lessThan (builtins.attrNames hostConfig.systemd.timers);
           agentmemoryPersistentMount = lib.head agentmemoryPersistentMounts;
         };
       identityMatches = candidate: candidate == expected;
       missingTargetMutation = actual // {
         mcpTargets = builtins.removeAttrs actual.mcpTargets [ "memory" ];
       };
+      updaterName = "dotfiles-agent-autoupdate";
+      missingUpdaterTimerMutation = actual // {
+        timers = builtins.filter (timer: timer != updaterName) actual.timers;
+      };
       commandNames = builtins.attrNames hostConfig.dotfiles.commands;
       serviceNames = builtins.attrNames hostConfig.systemd.services;
+      timerNames = builtins.attrNames hostConfig.systemd.timers;
       installerExecutable = builtins.baseNameOf (lib.getExe hostConfig.dotfiles.commands.installAgents);
       legacyInstallerKey = "install" + "Clis";
-      legacyUpdaterService = "dotfiles-" + "cli-autoupdate";
+      legacyUpdaterName = "dotfiles-" + "cli-autoupdate";
     in
     assert lib.assertMsg (identityMatches actual) (
       "runtime identity mismatch: expected=${builtins.toJSON expected} "
@@ -207,11 +213,16 @@ in
     assert lib.assertMsg (
       !identityMatches missingTargetMutation
     ) "runtime identity fixture accepted a deleted MCP target";
+    assert lib.assertMsg (
+      !identityMatches missingUpdaterTimerMutation
+    ) "runtime identity fixture accepted a deleted updater timer";
     assert installerExecutable == "dotfiles-install-agents";
     assert builtins.elem "installAgents" commandNames;
-    assert builtins.elem "dotfiles-agent-autoupdate" serviceNames;
+    assert builtins.elem updaterName serviceNames;
+    assert builtins.elem updaterName timerNames;
     assert !builtins.elem legacyInstallerKey commandNames;
-    assert !builtins.elem legacyUpdaterService serviceNames;
+    assert !builtins.elem legacyUpdaterName serviceNames;
+    assert !builtins.elem legacyUpdaterName timerNames;
     pkgs.runCommandLocal "check-runtime-identity" { } "touch $out";
 
   # 全登録簿に共通する保険。各 owner の check も、自分が検査する集合の非空を
@@ -362,6 +373,23 @@ in
         declarations:
         builtins.filter (declaration: lib.hasPrefix "${self}/" (toString declaration)) declarations;
 
+      repositoryDefinitions =
+        definitions:
+        builtins.filter (definition: lib.hasPrefix "${self}/" (toString definition.file)) definitions;
+
+      sharedRegistryPaths = [
+        # artifacts unit が型付き extension point を所有し、consumer unit が entry を登録する。
+        [
+          "dotfiles"
+          "artifacts"
+        ]
+        # commands unit が型付き extension point を所有し、consumer unit が entry を登録する。
+        [
+          "dotfiles"
+          "commands"
+        ]
+      ];
+
       # module system の全 option leaf を辿る。dotfiles 配下だけを起点にすると、
       # repository が別 root を追加した場合に検査対象から外れてしまう。
       optionLeavesFor =
@@ -394,7 +422,7 @@ in
       repositoryOptionsFor =
         options: builtins.filter (entry: entry.declarations != [ ]) (optionLeavesFor options);
 
-      violationsFor =
+      declarationViolationsFor =
         options:
         let
           repositoryOptions = repositoryOptionsFor options;
@@ -413,9 +441,49 @@ in
         in
         outsideDotfiles ++ wrongOwner;
 
+      definitionLeavesFor =
+        options:
+        let
+          walk =
+            path: current:
+            lib.concatLists (
+              lib.mapAttrsToList (
+                name: option:
+                let
+                  here = path ++ [ name ];
+                in
+                if !(lib.isAttrs option) || name == "_module" then
+                  [ ]
+                else if option ? _type && option._type == "option" then
+                  [
+                    {
+                      inherit here;
+                      definitions = repositoryDefinitions (option.definitionsWithLocations or [ ]);
+                    }
+                  ]
+                else
+                  walk here option
+              ) current
+            );
+        in
+        walk [ "dotfiles" ] options.dotfiles;
+
+      definitionViolationsFor =
+        options:
+        builtins.filter (
+          entry:
+          builtins.length entry.definitions > 0
+          && !builtins.elem entry.here sharedRegistryPaths
+          && (!lib.all (definition: rootOf definition.file == builtins.elemAt entry.here 1) entry.definitions)
+        ) (definitionLeavesFor options);
+
       describe =
         entry:
         "${lib.concatStringsSep "." entry.here} <- ${lib.concatStringsSep "," (map rootOf entry.declarations)}";
+      describeDefinition =
+        entry:
+        "${lib.concatStringsSep "." entry.here} <- "
+        + lib.concatStringsSep "," (map (definition: rootOf definition.file) entry.definitions);
       repositoryOptions = repositoryOptionsFor hostOptions;
       actualRootOptionOwners = lib.sort builtins.lessThan (
         lib.unique (lib.concatMap (entry: map rootOf entry.declarations) repositoryOptions)
@@ -455,16 +523,48 @@ in
         "rogue"
         "fixture"
       ];
-      violations = map describe (violationsFor hostOptions);
+      definitionFixture =
+        args:
+        import ./fixtures/option-namespace-definition-ownership.nix (
+          {
+            inherit lib self;
+          }
+          // args
+        );
+      correctDefinitionFixture = definitionFixture {
+        definitionFile = "agents/codex/module.nix";
+      };
+      wrongDefinitionFixture = definitionFixture {
+        definitionFile = "mcp/context7/module.nix";
+      };
+      wrongRegistryDefinitionFixture = definitionFixture {
+        declarationFile = "mcp/module.nix";
+        definitionFile = "agents/module.nix";
+        optionPath = [
+          "dotfiles"
+          "mcp"
+          "targets"
+        ];
+        optionType = lib.types.attrsOf lib.types.str;
+        definitionValue.fixture = "fixture";
+      };
+      declarationViolations = map describe (declarationViolationsFor hostOptions);
+      definitionViolations = map describeDefinition (definitionViolationsFor hostOptions);
     in
     assert lib.sort builtins.lessThan rootUnitNames == lib.sort builtins.lessThan expectedRootUnitNames;
     assert actualRootOptionOwners == expectedRootOptionOwners;
     assert missingRootModuleDeclarations == [ ];
-    assert violationsFor correctFixture == [ ];
-    assert violationsFor wrongOwnerFixture != [ ];
-    assert violationsFor rogueRootFixture != [ ];
-    assert lib.assertMsg (violations == [ ]) (
-      "option namespace: " + lib.concatStringsSep " " violations
+    assert declarationViolationsFor correctFixture == [ ];
+    assert declarationViolationsFor wrongOwnerFixture != [ ];
+    assert declarationViolationsFor rogueRootFixture != [ ];
+    assert definitionViolationsFor correctDefinitionFixture == [ ];
+    assert definitionViolationsFor wrongDefinitionFixture != [ ];
+    assert definitionViolationsFor wrongRegistryDefinitionFixture != [ ];
+    assert lib.assertMsg (declarationViolations == [ ]) (
+      "option declaration namespace: " + lib.concatStringsSep " " declarationViolations
+    );
+    assert lib.assertMsg (definitionViolations == [ ]) (
+      "option definition namespace: " + lib.concatStringsSep " " definitionViolations
     );
     pkgs.runCommandLocal "check-option-namespace" { } "touch $out";
 

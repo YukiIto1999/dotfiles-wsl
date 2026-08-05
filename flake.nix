@@ -43,34 +43,6 @@
     let
       system = "x86_64-linux";
       hostName = "nixos";
-      containerApplications = [
-        "agentmemory"
-        "crawl4ai"
-        "searxng"
-        "sonarqube"
-      ];
-      mcpEnabledProviders = [
-        "chrome-devtools"
-        "codex"
-        "context7"
-        "crawl4ai"
-        "github"
-        "memory"
-        "playwright"
-        "searxng"
-        "sonarqube"
-      ];
-      hostAccounts = [
-        "account-1"
-        "account-2"
-        "account-3"
-      ];
-      agentClients = [
-        "antigravity"
-        "claude"
-        "codex"
-        "opencode"
-      ];
 
       pluginSources = {
         inherit superpowers;
@@ -84,34 +56,70 @@
       unitModules = builtins.filter builtins.pathExists (map (unit: unit.path + "/module.nix") units);
 
       mkNixosSystem =
-        machineModule:
+        machineModules:
         nixpkgs.lib.nixosSystem {
           inherit system;
           specialArgs = { inherit pluginSources self; };
-          modules = unitModules ++ [
-            nixos-wsl.nixosModules.default
-            sops-nix.nixosModules.sops
-            home-manager.nixosModules.home-manager
+          modules =
+            unitModules
+            ++ [
+              nixos-wsl.nixosModules.default
+              sops-nix.nixosModules.sops
+              home-manager.nixosModules.home-manager
+            ]
+            ++ nixpkgs.lib.toList machineModules;
+        };
 
-            machineModule
+      normalMachineModule = {
+        dotfiles = {
+          accounts = [
+            "account-1"
+            "account-2"
+            "account-3"
+          ];
+          host = { };
+          toolchain = {
+            enabledLsp = [
+              "bash"
+              "csharp"
+              "java"
+              "nix"
+              "python"
+              "rust"
+              "typescript"
+            ];
+            git.workIdentity = "~/projects/business/";
+          };
+          agents.enabled = [
+            "antigravity"
+            "claude"
+            "codex"
+            "opencode"
+          ];
+          containers.enabled = [
+            "agentmemory"
+            "crawl4ai"
+            "searxng"
+            "sonarqube"
+          ];
+          mcp.enabledProviders = [
+            "chrome-devtools"
+            "codex"
+            "context7"
+            "crawl4ai"
+            "github"
+            "memory"
+            "playwright"
+            "searxng"
+            "sonarqube"
           ];
         };
+      };
 
       maintenancePkgs = nixpkgs.legacyPackages.${system};
     in
     {
-      nixosConfigurations.${hostName} = mkNixosSystem {
-        # マシン固有の値のみ、他は各 unit の option の default
-        dotfiles = {
-          containers.enabled = containerApplications;
-          mcp.enabledProviders = mcpEnabledProviders;
-        };
-        my = {
-          accounts = hostAccounts;
-          agents.enabled = agentClients;
-          git.workIdentity = "~/projects/business/";
-        };
-      };
+      nixosConfigurations.${hostName} = mkNixosSystem normalMachineModule;
 
       packages.${system} =
         let
@@ -126,13 +134,13 @@
             test -x "$out/commands/rebuild/impl/bootstrap.sh"
           '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
-          dotfiles-install-agents = hostConfig.my.commands.installAgents;
-          dotfiles-rebuild = hostConfig.my.commands.rebuild;
-          dotfiles-sync-images = hostConfig.my.commands.syncImages;
+          dotfiles-install-agents = hostConfig.dotfiles.commands.installAgents;
+          dotfiles-rebuild = hostConfig.dotfiles.commands.rebuild;
+          dotfiles-sync-images = hostConfig.dotfiles.commands.syncImages;
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {
-        packages = self.nixosConfigurations.${hostName}.config.my.gates.devShellPackages;
+        packages = self.nixosConfigurations.${hostName}.config.dotfiles.gates.devShellPackages;
       };
 
       formatter.${system} = maintenancePkgs.nixfmt-tree;
@@ -165,15 +173,47 @@
           # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
           artifactVariantSystem = mkNixosSystem {
             dotfiles = {
-              containers.enabled = containerApplications;
+              accounts = [
+                "account-1"
+                "account-2"
+                "account-3"
+              ];
+              host = { };
+              toolchain.enabledLsp = [
+                "bash"
+                "csharp"
+                "java"
+                "nix"
+                "python"
+                "rust"
+                "typescript"
+              ];
+              agents.enabled = [
+                "antigravity"
+                "claude"
+                "codex"
+                "opencode"
+              ];
+              containers.enabled = [
+                "agentmemory"
+                "crawl4ai"
+                "searxng"
+                "sonarqube"
+              ];
               mcp = {
-                enabledProviders = mcpEnabledProviders;
+                enabledProviders = [
+                  "chrome-devtools"
+                  "codex"
+                  "context7"
+                  "crawl4ai"
+                  "github"
+                  "memory"
+                  "playwright"
+                  "searxng"
+                  "sonarqube"
+                ];
                 gateway.port = 9876;
               };
-            };
-            my = {
-              accounts = hostAccounts;
-              agents.enabled = agentClients;
             };
           };
           artifactVariantConfig = artifactVariantSystem.config;
@@ -190,8 +230,10 @@
             lib
             self
             hostConfig
+            mkNixosSystem
             sops-nix
             ;
+          inherit normalMachineModule;
           hostOptions = self.nixosConfigurations.${hostName}.options;
           inherit units;
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない

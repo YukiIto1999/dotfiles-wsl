@@ -1,5 +1,8 @@
-_:
+{ lib, ... }:
 
 {
-  config._module.args.serveOverProxy = "imported-injection";
+  config = lib.setAttrByPath [
+    "_module"
+    "args"
+  ] { serveOverProxy = "imported-injection"; };
 }

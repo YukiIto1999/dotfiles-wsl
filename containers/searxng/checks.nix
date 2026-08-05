@@ -39,7 +39,7 @@ let
   container = hostConfig.virtualisation.oci-containers.containers.searxng;
   secret = hostConfig.sops.secrets."searxng/secret_key";
   settingsTemplate = hostConfig.sops.templates."searxng-settings.yml";
-  settingsArtifact = hostConfig.my.artifacts."containers/searxng/settings-template";
+  settingsArtifact = hostConfig.dotfiles.artifacts."containers/searxng/settings-template";
   renderedSettings = pkgs.writeText "searxng-settings.yml" settingsTemplate.content;
 in
 {
@@ -65,7 +65,7 @@ in
     assert settingsTemplate.group == "root";
     assert settingsTemplate.restartUnits == [ expectedUnit ];
     assert settingsArtifact.format == "yaml";
-    assert !(builtins.hasAttr "mcp/searxng/settings-template" hostConfig.my.artifacts);
+    assert !(builtins.hasAttr "mcp/searxng/settings-template" hostConfig.dotfiles.artifacts);
     pkgs.runCommandLocal "check-searxng-container" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
       set -euo pipefail
 

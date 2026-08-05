@@ -2,13 +2,13 @@
   config,
   lib,
   pkgs,
-  mkCommand,
   ...
 }:
 
 let
-  myCfg = config.my;
+  myCfg = config.dotfiles;
   cfg = config.dotfiles.containers;
+  mkCommand = import ../commands/impl/mk-command.nix { inherit config lib pkgs; };
   configuredContainers = config.virtualisation.oci-containers.containers;
 
   endpointType = lib.types.submodule {
@@ -233,9 +233,9 @@ in
   };
 
   config = {
-    my.commands = { inherit syncImages imageDigest; };
+    dotfiles.commands = { inherit syncImages imageDigest; };
 
-    users.users.${myCfg.username}.extraGroups = [ "docker" ];
+    users.users.${myCfg.host.username}.extraGroups = [ "docker" ];
 
     virtualisation = {
       docker.enable = true;

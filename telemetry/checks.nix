@@ -8,8 +8,8 @@
 
 let
   inherit (helpers.execTokens) tokensOf onlyValue valuesOf;
-  contract = hostConfig.my.contract.telemetry;
-  collectorConfig = hostConfig.my.artifacts."telemetry/collector".source;
+  contract = hostConfig.dotfiles.telemetry;
+  collectorConfig = hostConfig.dotfiles.artifacts."telemetry/collector".source;
   service = hostConfig.systemd.services.${contract.service}.serviceConfig;
 in
 {

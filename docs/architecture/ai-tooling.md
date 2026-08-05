@@ -19,7 +19,9 @@ AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► 常駐 MCP 
       └── OTLP ──► telemetry collector
 ```
 
-[`agents/module.nix`](../../agents/module.nix) の `my.agents` が、host の必要 client、共有 source、各 client の capability、配備先、gateway fragment、最終 managed file、入手方法を型付き contract として定義する。host は必要な四 client を固定値で宣言し、各 [`agents/NAME/module.nix`](../../agents) が提供する集合と照合する。
+[`agents/module.nix`](../../agents/module.nix) の `dotfiles.agents` が、host の必要 client、共有 source、各 client の capability、配備先、gateway fragment、最終 managed file、入手方法を型付き contract として定義する。host は必要な四 client を固定値で宣言し、各 [`agents/NAME/module.nix`](../../agents) が提供する集合と照合する。
+
+host の required roster は [`flake.nix`](../../flake.nix) が account、agent client、container application、MCP provider、language server の五種類を固定値で宣言する。各 roster は default を持たず、通常構成と gateway port variant の両方で提供集合との完全一致を評価する。空集合、未知の ID、欠落、余分な ID は system closure の評価を失敗させる。
 
 `dotfiles-install-agents` は client contract から installer を生成し、通常ユーザーの `~/.local/bin` を更新する。`dotfiles-agent-autoupdate.timer` も同じ command を日次実行する。Nix は入手方法と固定配置先を宣言するが、client binary の内容や version を system closure に固定しない。
 
@@ -98,7 +100,7 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | MCP front | [`mcp/module.nix`](../../mcp/module.nix) の `dotfiles.mcp.fronts` と front service |
 | 単一 gateway | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` |
 | Docker backend の共通層 | [`containers/module.nix`](../../containers/module.nix)、[`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix) |
-| language server の roster | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp` |
+| language server の roster | [`toolchain/module.nix`](../../toolchain/module.nix) の `dotfiles.toolchain.lsp` |
 | client ごとの LSP 登録形式 | 各 client の module |
 | 使用量の観測 | [`telemetry/module.nix`](../../telemetry/module.nix) |
 | agentmemory backend と client package source | [`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) と [`containers/agentmemory/`](../../containers/agentmemory) |
@@ -116,6 +118,6 @@ language server の binary は `toolchain` が PATH へ置き、roster も同じ
 
 同じ拡張子を二つの server が宣言すると、先に登録された片方だけが動き、もう片方は黙って起動しない。roster と各 CLI の登録の一致、拡張子の衝突は `lsp-registration` が検査する。
 
-telemetry collector は OTLP を loopback で受け、生の record を残す。集計しないのは、どの操作で token を使ったかを後から追うためである。CLI は endpoint を `my.contract.telemetry` から取るので、port を変えても CLI 側の宣言は変わらない。
+telemetry collector は OTLP を loopback で受け、生の record を残す。集計しないのは、どの操作で token を使ったかを後から追うためである。CLI は endpoint を `dotfiles.telemetry` から取るので、port を変えても CLI 側の宣言は変わらない。
 
 配備後の調査は [Doctor](../operations/doctor.md)、構成変更の適用は [Rebuild](../operations/rebuild.md)に従う。

@@ -7,7 +7,7 @@
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles.host;
   launcherName = "wslview";
   windowsCommand = "/mnt/c/Windows/System32/cmd.exe";
   wslview = pkgs.writeShellScriptBin launcherName ''
@@ -16,8 +16,7 @@ let
   binaryCaches = import ./assets/nix-caches.nix;
 in
 {
-  # 単一 unit が所有しない host 共通の語彙
-  options.my = {
+  options.dotfiles.host = {
     username = lib.mkOption {
       type = lib.types.str;
       default = "nixos";
@@ -36,18 +35,26 @@ in
       description = "out-of-store symlink と script が参照する checkout の絶対パス。";
     };
 
-    contract = lib.mkOption {
-      type = lib.types.attrsOf (lib.types.attrsOf lib.types.unspecified);
-      default = { };
+    binaryCaches = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            name = lib.mkOption { type = lib.types.str; };
+            substituter = lib.mkOption { type = lib.types.str; };
+            publicKey = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      readOnly = true;
       internal = true;
-      description = "unit が他 unit へ公開する契約。所有する unit が定義し、消費する unit が読む。";
+      description = "Nix が利用する binary cache の型付き contract。";
     };
   };
 
-  # 検査側が devenv の cache を引く。impl を path で直読みさせない
-  config.my.contract.host.binaryCaches = binaryCaches;
-
-  config.my.homeDir = "/home/${cfg.username}";
+  config.dotfiles.host = {
+    inherit binaryCaches;
+    homeDir = "/home/${cfg.username}";
+  };
 
   config.system.stateVersion = "25.11";
 
@@ -55,7 +62,7 @@ in
 
   config.wsl = {
     enable = true;
-    defaultUser = config.my.username;
+    defaultUser = cfg.username;
     useWindowsDriver = true;
 
     # 再起動で失われる binfmt WSLInterop の再登録
@@ -79,7 +86,7 @@ in
     trusted-public-keys = map (cache: cache.publicKey) binaryCaches;
     trusted-users = [
       "root"
-      config.my.username
+      cfg.username
     ];
   };
 

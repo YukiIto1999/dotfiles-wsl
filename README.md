@@ -122,6 +122,10 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 `module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `package/` `fixtures/` が素材である。振る舞いの検証も `checks.nix` に置き、`fixtures/` はその入力を持つ。
 `flake.nix` はこの名前だけを頼りに unit を集めるため、責務を足すとき flake を編集しない。
 
+repository 固有 option は `dotfiles.<owner>` に置き、`owner` を root unit 名と一致させる。host は account、agent client、container application、MCP provider、language server の必要集合を [`flake.nix`](flake.nix) に明示する。これらの option は default を持たず、各 unit の提供集合との過不足を評価時に拒否する。
+
+共有 helper は global module argument に注入しない。command builder は [`commands/impl/mk-command.nix`](commands/impl/mk-command.nix)、user secret file builder は [`sops/impl/user-secret-file.nix`](sops/impl/user-secret-file.nix) が所有し、consumer が明示的に import する。
+
 
 設計全体は[構成概要](docs/architecture/overview.md)、AI CLI と MCP の境界は[AI tooling](docs/architecture/ai-tooling.md)に記載する。
 

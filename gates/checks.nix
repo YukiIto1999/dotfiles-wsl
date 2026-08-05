@@ -5,8 +5,11 @@
   self,
   hostConfig,
   hostOptions,
+  mkNixosSystem,
+  normalMachineModule,
   units,
   allCheckNames,
+  variantConfig,
   ...
 }:
 
@@ -19,6 +22,28 @@ let
   # 全 consumer の移行後は例外を持たない。空集合も下の AST scan が実入力を
   # 検出したことを確かめるため、gate 自体は vacuous にならない。
   allowedPureHelperImports = { };
+
+  commandHelper = ".." + "/commands/impl/mk-command.nix";
+  nestedCommandHelper = ".." + "/.." + "/commands/impl/mk-command.nix";
+  userSecretHelper = ".." + "/sops/impl/user-secret-file.nix";
+  approvedExplicitHelperImports = {
+    "accounts/module.nix" = {
+      target = userSecretHelper;
+      line = "  mkUserSecretFile = import ${userSecretHelper} { inherit username; };";
+    };
+    "agents/module.nix" = {
+      target = commandHelper;
+      line = "  mkCommand = import ${commandHelper} { inherit config lib pkgs; };";
+    };
+    "containers/module.nix" = {
+      target = commandHelper;
+      line = "  mkCommand = import ${commandHelper} { inherit config lib pkgs; };";
+    };
+    "containers/sonarqube/module.nix" = {
+      target = nestedCommandHelper;
+      line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";
+    };
+  };
 
   forbiddenOwnership = [
     "mcp/memory/package/engine"
@@ -36,12 +61,12 @@ let
     "artifacts/checks.nix" = 1;
     "agents/codex/module.nix" = 1;
     "agents/opencode/module.nix" = 1;
-    "commands/module.nix" = 1;
+    "commands/impl/mk-command.nix" = 1;
     "containers/searxng/module.nix" = 1;
     "gates/impl/exec-tokens.nix" = 1;
   };
 
-  homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
+  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
 in
 {
   structure-responsibility-roots =
@@ -144,36 +169,6 @@ in
     );
     pkgs.runCommandLocal "check-runtime-identity" { } "touch $out";
 
-  # 誰も読まない契約は、宣言だけが残って中身が腐る。実際に images の契約が
-  # 存在しない path を指したまま残っていた
-  contract-has-reader =
-    let
-      ownerOf = lib.listToAttrs (
-        lib.concatMap (
-          definition:
-          let
-            unit = lib.head (lib.splitString "/" (lib.removePrefix "${self}/" (toString definition.file)));
-          in
-          map (name: lib.nameValuePair name unit) (builtins.attrNames definition.value)
-        ) hostOptions.my.contract.definitionsWithLocations
-      );
-    in
-    pkgs.runCommandLocal "check-contract-has-reader" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
-      set -euo pipefail
-
-      unread=""
-      ${lib.concatMapStrings (name: ''
-        readers=$(grep -rlF 'contract.${name}' ${self} --include='*.nix'           | grep -v '^${self}/${ownerOf.${name}}/' || true)
-        [ -n "$readers" ] || unread="$unread ${name}"
-      '') (builtins.attrNames ownerOf)}
-
-      if [ -n "$unread" ]; then
-        echo "contract has no reader outside its unit:$unread" >&2
-        exit 1
-      fi
-      touch $out
-    '';
-
   # 登録簿が空になると、それを走査する検査は全て緑のまま何も見なくなる。
   # 個々の検査に非空の assert を書き足すのではなく、登録簿の側で禁じる
   registries-non-empty =
@@ -198,7 +193,7 @@ in
           ) opts
         );
 
-      empty = walk [ "my" ] hostOptions.my;
+      empty = walk [ "dotfiles" ] hostOptions.dotfiles;
     in
     assert empty == [ ];
     pkgs.runCommandLocal "check-registries-non-empty" { } "touch $out";
@@ -210,8 +205,8 @@ in
   # gateway と同じ port を 0.0.0.0 で取れる。unit を登録制にする
   service-listener-registry =
     let
-      contract = hostConfig.my.contract;
       mcp = hostConfig.dotfiles.mcp;
+      telemetry = hostConfig.dotfiles.telemetry;
 
       declaredHere = lib.unique (
         lib.concatMap (
@@ -234,7 +229,7 @@ in
         lib.unique (
           map (front: front.service) (builtins.attrValues mcp.fronts)
           ++ [ mcp.gateway.service ]
-          ++ [ contract.telemetry.service ]
+          ++ [ telemetry.service ]
           ++ map (name: "docker-${name}") (
             builtins.attrNames hostConfig.virtualisation.oci-containers.containers
           )
@@ -252,8 +247,8 @@ in
 
   loopback-port-single-owner =
     let
-      contract = hostConfig.my.contract;
       mcp = hostConfig.dotfiles.mcp;
+      telemetry = hostConfig.dotfiles.telemetry;
       inherit (helpers.containerArgv)
         publishedPorts
         ;
@@ -282,9 +277,9 @@ in
           }
         ]
         ++ lib.mapAttrsToList (_: port: {
-          owner = contract.telemetry.service;
+          owner = telemetry.service;
           inherit port;
-        }) contract.telemetry.ports
+        }) telemetry.ports
         ++ map (entry: {
           inherit (entry) owner;
           port = lib.toInt (builtins.elemAt (lib.splitString ":" entry.value) 1);
@@ -307,29 +302,16 @@ in
     );
     pkgs.runCommandLocal "check-loopback-port-single-owner" { } "touch $out";
 
-  # option の接頭辞は宣言した unit の名前で決まる。regex ではなく module 系が
-  # 持つ宣言位置から判定するので、nested な options.my = { ... } も子 unit も
-  # my.contract.<unit> も同じ規則で見る
-  # 生成した artifact が登録簿に載り、accounts を空にすると gh-hosts が消える
+  # option の root は宣言した repository root unit と一致させる。
+  # 正規表現ではなく module system が持つ宣言位置から判定する。
   option-namespace =
     let
-      rootVocabulary = [
-        "artifacts"
-        "dotfilesDir"
-        "homeDir"
-        "username"
-      ];
-
-      # unit 名は path の末端で決まる。先頭 segment で決めると、unit を別の
-      # 階層へ移した瞬間に option 名の側が壊れる。末端は全 unit で一意でなければ
-      # 別の unit が同じ名前空間を名乗れるので、下で一意性を検査する
-      unitOf =
+      rootOf =
         declaration:
         let
           segments = lib.splitString "/" (lib.removePrefix "${self}/" (toString declaration));
-          dirs = lib.take (builtins.length segments - 1) segments;
         in
-        if dirs == [ ] then "" else lib.last dirs;
+        if segments == [ ] then "" else lib.head segments;
 
       # 宣言が自 unit と一致しない option を集める。sub-option を持つ名前空間は
       # declarations を持たないので、配下を辿って宣言位置を集める
@@ -339,70 +321,178 @@ in
           builtins.attrValues (lib.filterAttrs (name: _: !(lib.hasPrefix "_" name)) option)
         ));
 
-      violationsIn =
-        prefix: options:
-        lib.concatLists (
-          lib.mapAttrsToList (
-            name: option:
-            let
-              declaredIn = lib.unique (map unitOf (declarationsOf option));
-              # 一つでも別 unit が宣言していれば違反。名前空間を他 unit が
-              # 借りて option を足す形を通さない
-              matches = lib.all (unit: unit == name) declaredIn;
-            in
-            if lib.elem name rootVocabulary then
-              [ ]
-            else if declaredIn == [ ] then
-              [ ]
-            else if matches then
-              [ ]
-            else
-              [ "${prefix}${name} <- ${lib.concatStringsSep "," declaredIn}" ]
-          ) options
-        );
-
-      myOptions = lib.filterAttrs (name: _: !(lib.hasPrefix "_" name)) hostOptions.my;
-      # my.contract は freeform なので sub-option を持たない。どの unit がどの key を
-      # 定義したかは定義位置から引く
-      contractViolations = lib.concatMap (
-        definition:
-        let
-          unit = unitOf definition.file;
-        in
-        map (name: "my.contract.${name} <- ${unit}") (
-          builtins.filter (name: name != unit) (builtins.attrNames definition.value)
-        )
-      ) hostOptions.my.contract.definitionsWithLocations;
-
-      # unit 名が一意でないと、別の unit が同じ my.<name> を名乗れる。
-      # agents/codex と mcp/codex のように末端名が衝突する組が既にある
-      # 危険なのは名前空間を宣言する unit 同士の衝突だけ。何も宣言しない unit が
-      # 末端名を共有しても、名乗る名前空間が無いので害が無い
-      declaringUnits = lib.unique (
-        map unitOf (
-          map (d: d.file) hostOptions.my.contract.definitionsWithLocations
-          ++ lib.concatMap declarationsOf (builtins.attrValues myOptions)
-        )
+      dotfilesOptions = lib.filterAttrs (name: _: !(lib.hasPrefix "_" name)) hostOptions.dotfiles;
+      violations = lib.concatLists (
+        lib.mapAttrsToList (
+          name: option:
+          let
+            declaredIn = lib.unique (map rootOf (declarationsOf option));
+          in
+          lib.optional (
+            declaredIn != [ ] && !lib.all (root: root == name) declaredIn
+          ) "dotfiles.${name} <- ${lib.concatStringsSep "," declaredIn}"
+        ) dotfilesOptions
       );
-
-      duplicateUnitNames = lib.unique (
-        builtins.filter (
-          name: lib.count (unit: builtins.baseNameOf unit.path == name) units > 1
-        ) declaringUnits
-      );
-
-      violations =
-        violationsIn "my." (builtins.removeAttrs myOptions [ "contract" ])
-        ++ contractViolations
-        ++ map (name: "duplicate unit name: ${name}") duplicateUnitNames;
     in
     assert lib.assertMsg (violations == [ ]) (
       "option namespace: " + lib.concatStringsSep " " violations
     );
     pkgs.runCommandLocal "check-option-namespace" { } "touch $out";
 
-  # unit をまたぐ依存は my.contract、module / checks への注入、allowlist に固定した
-  # pure helper の exact import だけを通す。他 unit の impl や assets を広く読むと、
+  dotfiles-option-namespace =
+    pkgs.runCommandLocal "check-dotfiles-option-namespace"
+      {
+        nativeBuildInputs = [ pkgs.ripgrep ];
+      }
+      ''
+        set -euo pipefail
+
+        legacyOptionPrefix='m'
+        legacyOptionPrefix+='y\.'
+        globalArgumentPath='config\._module'
+        globalArgumentPath+='\.args'
+        injectedHelperArguments='\b(mkCommand|mkContainerBackend|mkMcpServer|serveOverProxy|seedConfig|mkUserSecretFile),'
+        violations=$(rg -n --glob '*.nix' \
+          "(^|[^A-Za-z0-9_])$legacyOptionPrefix|$globalArgumentPath|$injectedHelperArguments" \
+          ${self} || true)
+        if [ -n "$violations" ]; then
+          printf '%s\n' "$violations" >&2
+          exit 1
+        fi
+
+        touch $out
+      '';
+
+  required-roster-negative-eval =
+    let
+      fixtures = [
+        ./fixtures/invalid/missing-rosters.nix
+        ./fixtures/invalid/unknown-account.nix
+        ./fixtures/invalid/unknown-agent.nix
+        ./fixtures/invalid/unknown-container.nix
+        ./fixtures/invalid/unknown-lsp.nix
+        ./fixtures/invalid/unknown-provider.nix
+      ];
+      fixtureCases = map (fixture: {
+        name = toString fixture;
+        module = fixture;
+      }) fixtures;
+      isolatedRosterCases = [
+        {
+          name = "empty-account-roster";
+          module = { lib, ... }: {
+            dotfiles.accounts = lib.mkForce [ ];
+          };
+        }
+        {
+          name = "missing-account";
+          module = { lib, ... }: {
+            dotfiles.accounts = lib.mkForce [
+              "account-1"
+              "account-2"
+            ];
+          };
+        }
+        {
+          name = "empty-agent-roster";
+          module = { lib, ... }: {
+            dotfiles.agents.enabled = lib.mkForce [ ];
+          };
+        }
+        {
+          name = "missing-agent";
+          module = { lib, ... }: {
+            dotfiles.agents.enabled = lib.mkForce [
+              "antigravity"
+              "claude"
+              "codex"
+            ];
+          };
+        }
+        {
+          name = "empty-container-roster";
+          module = { lib, ... }: {
+            dotfiles.containers.enabled = lib.mkForce [ ];
+          };
+        }
+        {
+          name = "missing-container";
+          module = { lib, ... }: {
+            dotfiles.containers.enabled = lib.mkForce [
+              "agentmemory"
+              "crawl4ai"
+              "searxng"
+            ];
+          };
+        }
+        {
+          name = "empty-provider-roster";
+          module = { lib, ... }: {
+            dotfiles.mcp.enabledProviders = lib.mkForce [ ];
+          };
+        }
+        {
+          name = "missing-provider";
+          module = { lib, ... }: {
+            dotfiles.mcp.enabledProviders = lib.mkForce [
+              "chrome-devtools"
+              "codex"
+              "context7"
+              "crawl4ai"
+              "github"
+              "memory"
+              "playwright"
+              "searxng"
+            ];
+          };
+        }
+        {
+          name = "empty-lsp-roster";
+          module = { lib, ... }: {
+            dotfiles.toolchain.enabledLsp = lib.mkForce [ ];
+          };
+        }
+        {
+          name = "missing-lsp";
+          module = { lib, ... }: {
+            dotfiles.toolchain.enabledLsp = lib.mkForce [
+              "bash"
+              "csharp"
+              "java"
+              "nix"
+              "python"
+              "rust"
+            ];
+          };
+        }
+      ];
+      invalidCases = fixtureCases ++ isolatedRosterCases;
+      forceToplevel = systemConfig: builtins.deepSeq systemConfig.system.build.toplevel.drvPath true;
+      negativeResults = map (invalidCase: {
+        inherit (invalidCase) name;
+        result = builtins.tryEval (
+          forceToplevel
+            (mkNixosSystem [
+              normalMachineModule
+              invalidCase.module
+            ]).config
+        );
+      }) invalidCases;
+      unexpectedSuccesses = map (entry: entry.name) (
+        builtins.filter (entry: entry.result.success) negativeResults
+      );
+      normalResult = builtins.tryEval (forceToplevel hostConfig);
+      variantResult = builtins.tryEval (forceToplevel variantConfig);
+    in
+    assert lib.assertMsg normalResult.success "normal required roster evaluation must succeed";
+    assert lib.assertMsg variantResult.success "variant required roster evaluation must succeed";
+    assert lib.assertMsg (unexpectedSuccesses == [ ]) (
+      "invalid required roster evaluation succeeded: " + lib.concatStringsSep " " unexpectedSuccesses
+    );
+    pkgs.runCommandLocal "check-required-roster-negative-eval" { } "touch $out";
+
+  # unit をまたぐ依存は型付き option と allowlist に固定した pure helper の
+  # exact import だけを通す。他 unit の impl や assets を広く読むと、
   # 宣言していない結合になる
   unit-boundary-name-only =
     assert lib.assertMsg (
@@ -506,12 +596,17 @@ in
         for allowed in ${lib.escapeShellArgs (builtins.attrNames allowedPureHelperImports)}; do
           [ -f "${self}/$allowed" ] || violations="$violations missing-allowlisted-source:$allowed"
         done
+        for approved in ${lib.escapeShellArgs (builtins.attrNames approvedExplicitHelperImports)}; do
+          [ -f "${self}/$approved" ] || violations="$violations missing-approved-helper-consumer:$approved"
+        done
 
         while IFS= read -r file; do
           relative=''${file#${self}/}
           owner=''${relative%%/*}
           allowedTarget=""
           expectedImport=""
+          approvedTarget=""
+          approvedImport=""
           expectedDynamicImports=0
           expectedDynamicFileReads=0
           case "$relative" in
@@ -522,6 +617,17 @@ in
                   expectedImport=${lib.escapeShellArg "  mkContainerBackend = import ${target} { inherit lib; };"}
                   ;;
               '') allowedPureHelperImports
+            )}
+          esac
+
+          case "$relative" in
+            ${lib.concatStringsSep "\n" (
+              lib.mapAttrsToList (source: spec: ''
+                ${lib.escapeShellArg source})
+                  approvedTarget=${lib.escapeShellArg spec.target}
+                  approvedImport=${lib.escapeShellArg spec.line}
+                  ;;
+              '') approvedExplicitHelperImports
             )}
           esac
 
@@ -565,6 +671,26 @@ in
             | gsub("[[:space:]()+\\\"]"; "")
             | select(contains($suffix))
           ] | length' "$workDir/applications.json")
+
+          if [ -n "$approvedTarget" ]; then
+            approvedImportCount=$(printf '%s\n' "$source" | grep -Fxc -- "$approvedImport" || true)
+            approvedTargetCount=$(printf '%s\n' "$source" | grep -Fo -- "$approvedTarget" | wc -l || true)
+            approvedImportNodeCount=$(jq \
+              --arg file "$relative" \
+              --arg target "$approvedTarget" \
+              '[
+                .[]
+                | select(.file == $file)
+                | select((.metaVariables.single.P.text | gsub("[[:space:]()]"; "")) == $target)
+              ] | length' "$workDir/imports.json")
+            if [ "$approvedImportCount" -ne 1 ] \
+              || [ "$approvedTargetCount" -ne 1 ] \
+              || [ "$approvedImportNodeCount" -ne 1 ]; then
+              violations="$violations $relative:approved-helper-import=$approvedImportCount,target-reference=$approvedTargetCount,import-node=$approvedImportNodeCount"
+            else
+              source=''${source/"$approvedTarget"/}
+            fi
+          fi
 
           if [ "$dynamicImportCount" -ne "$expectedDynamicImports" ] \
             || [ "$dynamicFileReadCount" -ne "$expectedDynamicFileReads" ]; then
@@ -895,7 +1021,7 @@ in
       systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
       homePackageNames = map lib.getName homeConfig.home.packages;
       nixDirenvSource = "${homeConfig.programs.direnv.nix-direnv.package}/share/nix-direnv/direnvrc";
-      binaryCaches = hostConfig.my.contract.host.binaryCaches;
+      binaryCaches = hostConfig.dotfiles.host.binaryCaches;
       devenvCache = lib.findFirst (
         cache: cache.name == "devenv"
       ) (throw "devenv cache is missing") binaryCaches;

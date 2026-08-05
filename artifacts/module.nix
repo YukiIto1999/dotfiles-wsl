@@ -1,7 +1,7 @@
 { lib, ... }:
 
 {
-  options.my.artifacts = lib.mkOption {
+  options.dotfiles.artifacts = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         options = {

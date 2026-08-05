@@ -47,9 +47,11 @@ Nix store の candidate system
 
 unit は責務で分かれ、層はどの unit でも同じ名前のファイルで表す。`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `tests/` `fixtures/` `package/` が素材である。
 
+repository 固有 option は `dotfiles.<root>` に置き、宣言した root unit と namespace を一致させる。unit 間で共有する値は型付き option を通す。host は account、agent client、container application、MCP provider、language server の必要集合を [`flake.nix`](../../flake.nix) に default なしで宣言し、module の提供集合との過不足を評価時に拒否する。通常構成と gateway port variant は、それぞれ同じ必要集合を固定値で持つ。
+
 Home Manager は独立した設定適用系ではなく、NixOS module として同じ system evaluation に入る。[`host/module.nix`](../../host/module.nix) が user package、shell 環境、Home Manager の配備を宣言し、activation 後の `home-manager-<user>.service` を doctor の検査対象にする。system 全体のファイルと service は NixOS、home 配下の宣言的な file と user package は Home Manager が所有する。
 
-JSON、TOML、YAML の設定は、配備を担当する module が一度だけ生成する。同じ immutable source を `/etc`、Home Manager、SOPS template、OCI volume、doctor の必要な consumer へ渡す。`my.artifacts` は構文検査用の参照であり、別の設定 inventory ではない。
+JSON、TOML、YAML の設定は、配備を担当する module が一度だけ生成する。同じ immutable source を `/etc`、Home Manager、SOPS template、OCI volume、doctor の必要な consumer へ渡す。`dotfiles.artifacts` は構文検査用の参照であり、別の設定 inventory ではない。
 
 ## Runtime services
 
@@ -71,7 +73,9 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 ## 生成 command
 
-[`commands/module.nix`](../../commands/module.nix) は `mkCommand` の契約だけを持ち、`config.my` と shell source を `writeShellApplication` へ渡して generation 固有の command を作る。command の実体は責務を持つ unit が宣言する。command は system closure に入るため、current generation の command はその generation の設定と manifest に束縛される。一部は flake package としても公開され、current generation より新しい checkout の command を初回配備や更新前に実行できる。
+[`commands/module.nix`](../../commands/module.nix) は `dotfiles.commands` option と `environment.systemPackages` への登録だけを持つ。[`commands/impl/mk-command.nix`](../../commands/impl/mk-command.nix) が generation 固有の値と shell source を `writeShellApplication` へ渡し、command を所有する unit が明示的に import する。command は system closure に入るため、current generation の command はその generation の設定と manifest に束縛される。一部は flake package としても公開され、current generation より新しい checkout の command を初回配備や更新前に実行できる。
+
+user home に置く secret template の metadata は [`sops/impl/user-secret-file.nix`](../../sops/impl/user-secret-file.nix) が所有する。[`accounts/module.nix`](../../accounts/module.nix) が username を渡して明示的に import し、SOPS module は builder を global module argument に注入しない。
 
 | 境界 | Command の責務 |
 |---|---|

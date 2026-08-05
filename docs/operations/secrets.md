@@ -22,15 +22,15 @@ secret を追加するときは、先に値を消費する module に `sops.secr
 
 ## Identity
 
-default Git identity は常に宣言し、生成された Git 設定から読み込む。work identity は `my.git.workIdentity` が設定されている場合だけ宣言され、指定した Git directory にだけ切り替わる。
+default Git identity は常に宣言し、生成された Git 設定から読み込む。work identity は `dotfiles.toolchain.git.workIdentity` が設定されている場合だけ宣言され、指定した Git directory にだけ切り替わる。
 
-identity の値は `sops/module.nix` の SOPS template を介して配備する。生成後の Git 設定を直接編集せず、暗号化済み secret を編集して rebuild する。
+identity の値は `accounts/module.nix` の SOPS template を介して配備する。同 module は `sops/impl/user-secret-file.nix` を明示的に import し、user 所有と mode `0600` を一つの helper から設定する。生成後の Git 設定を直接編集せず、暗号化済み secret を編集して rebuild する。
 
 ## GitHub account
 
-`my.accounts` が GitHub account の roster を生成する。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `accounts/module.nix`、MCP の token 読み込みは `mcp/github/module.nix` が所有する。配列の先頭が `gh` の active user と既定 token になる。
+`dotfiles.accounts` が GitHub account の roster を生成する。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `accounts/module.nix`、MCP の token 読み込みは `mcp/github/module.nix` が所有する。配列の先頭が `gh` の active user と既定 token になる。
 
-account の追加、削除、順序変更では `my.accounts` と対応する暗号化済み key を同時に変更する。`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
+account の追加、削除、順序変更では `dotfiles.accounts` と対応する暗号化済み key を同時に変更する。`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
 
 ## Agentmemory
 

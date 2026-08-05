@@ -56,7 +56,7 @@ in
     # front が user として読む。container は root の env-file 経由で読む
     sops.secrets."crawl4ai/api_token" = {
       mode = "0400";
-      owner = config.my.username;
+      owner = config.dotfiles.host.username;
       group = "users";
       restartUnits = [ "mcp-front-crawl4ai.service" ];
     };

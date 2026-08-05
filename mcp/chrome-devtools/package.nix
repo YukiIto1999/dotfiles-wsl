@@ -1,7 +1,7 @@
 {
-  mkMcpServer,
   mkNpmMcp,
   chromium,
+  serverBuilder,
 }:
 
 # Playwright は操作、DevTools は観測と原因究明を担う。browser は host の
@@ -15,7 +15,7 @@ let
     npmDepsHash = "sha256-el2Ljp5g9L+3lewaMrfsvX1Oo/b05gUgzkdqtce37Eg=";
   };
 in
-mkMcpServer {
+serverBuilder {
   name = "chrome-devtools-mcp";
   command = "${pkg}/bin/chrome-devtools-mcp --headless --isolated --executablePath ${chromium}/bin/chromium";
 }

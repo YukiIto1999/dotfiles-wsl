@@ -1,8 +1,8 @@
 {
   pkgs,
-  mkMcpServer,
   crawl4aiUrl,
   tokenFile,
+  serverBuilder,
 }:
 
 # crawl4ai HTTP engine への stdio front、実体は server.py。
@@ -15,7 +15,7 @@ let
     ps.httpx
   ]);
 in
-mkMcpServer {
+serverBuilder {
   name = "crawl4ai-mcp";
   env.CRAWL4AI_URL = crawl4aiUrl;
   env.CRAWL4AI_TOKEN_FILE = tokenFile;

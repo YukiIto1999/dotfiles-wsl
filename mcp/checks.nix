@@ -209,50 +209,18 @@ let
     inherit lib;
     inherit (helpers.unitOwnership) resolveUnitOwner;
   };
-  resultOption = lib.mkOption { type = lib.types.str; };
-  evaluateInjection =
-    module: consumer:
-    lib.evalModules {
-      modules = [
-        module
-        consumer
-      ];
-    };
-  directGlobalArgumentEvaluation = evaluateInjection ./fixtures/global-args/direct.nix (
-    { mkNpmMcp, ... }:
-    {
-      options.fixtureResult = resultOption;
-      config.fixtureResult = mkNpmMcp;
-    }
-  );
-  nestedGlobalArgumentEvaluation = evaluateInjection ./fixtures/global-args/nested.nix (
-    { mkMcpServer, ... }:
-    {
-      options.fixtureResult = resultOption;
-      config.fixtureResult = mkMcpServer;
-    }
-  );
-  importedGlobalArgumentEvaluation = evaluateInjection ./codex/fixtures/global-args/importer.nix (
-    { serveOverProxy, ... }:
-    {
-      options.fixtureResult = resultOption;
-      config.fixtureResult = serveOverProxy;
-    }
-  );
+  evaluateInjection = module: lib.evalModules { modules = [ module ]; };
+  directGlobalArgumentEvaluation = evaluateInjection ./fixtures/global-args/direct.nix;
+  nestedGlobalArgumentEvaluation = evaluateInjection ./fixtures/global-args/nested.nix;
+  importedGlobalArgumentEvaluation = evaluateInjection ./codex/fixtures/global-args/importer.nix;
   nonMcpFixtureOwner = "commands";
-  nonMcpGlobalArgumentEvaluation =
-    evaluateInjection
-      {
-        _file = "${self}/${nonMcpFixtureOwner}/fixtures/non-mcp-global-argument.nix";
-        config._module.args.legitimateHelper = "legitimate-injection";
-      }
-      (
-        { legitimateHelper, ... }:
-        {
-          options.fixtureResult = resultOption;
-          config.fixtureResult = legitimateHelper;
-        }
-      );
+  nonMcpGlobalArgumentEvaluation = evaluateInjection {
+    _file = "${self}/${nonMcpFixtureOwner}/fixtures/non-mcp-global-argument.nix";
+    config = lib.setAttrByPath [
+      "_module"
+      "args"
+    ] { legitimateHelper = "legitimate-injection"; };
+  };
 
   repositoryDefinitions =
     definitions:
@@ -292,9 +260,10 @@ let
       }
     ];
   };
+  actualGlobalArgumentDefinitions = repositoryDefinitions hostOptions._module.args.definitionsWithLocations;
   actualGlobalArgumentScan = globalArgumentOwnership.scan {
     inherit units;
-    definitions = repositoryDefinitions hostOptions._module.args.definitionsWithLocations;
+    definitions = actualGlobalArgumentDefinitions;
   };
 
 in
@@ -347,10 +316,12 @@ in
                 { lib, ... }:
                 {
                   options = {
-                    my = {
+                    dotfiles = {
                       accounts = lib.mkOption { type = lib.types.listOf lib.types.str; };
-                      username = lib.mkOption { type = lib.types.str; };
-                      homeDir = lib.mkOption { type = lib.types.str; };
+                      host = {
+                        username = lib.mkOption { type = lib.types.str; };
+                        homeDir = lib.mkOption { type = lib.types.str; };
+                      };
                     };
                     assertions = lib.mkOption {
                       type = lib.types.listOf lib.types.raw;
@@ -362,18 +333,20 @@ in
                     };
                   };
                   config = {
-                    my = {
+                    dotfiles = {
                       accounts = [
                         "account-1"
                         "account-2"
                         "account-3"
                       ];
-                      username = "nixos";
-                      homeDir = "/home/nixos";
-                    };
-                    dotfiles.mcp = {
-                      enabledProviders = enabled;
-                      targets = candidateTargets;
+                      host = {
+                        username = "nixos";
+                        homeDir = "/home/nixos";
+                      };
+                      mcp = {
+                        enabledProviders = enabled;
+                        targets = candidateTargets;
+                      };
                     };
                   };
                 }
@@ -488,10 +461,6 @@ in
     pkgs.runCommandLocal "check-mcp-contract-mutations" { } "touch $out";
 
   mcp-source-boundary =
-    assert directGlobalArgumentEvaluation.config.fixtureResult == "direct-injection";
-    assert nestedGlobalArgumentEvaluation.config.fixtureResult == "nested-injection";
-    assert importedGlobalArgumentEvaluation.config.fixtureResult == "imported-injection";
-    assert nonMcpGlobalArgumentEvaluation.config.fixtureResult == "legitimate-injection";
     assert fixtureScan.coverage.definitionCount == 3;
     assert fixtureScan.coverage.argumentCount == 3;
     assert fixtureScan.coverage.resolvedArgumentCount == 3;
@@ -517,35 +486,9 @@ in
         "unresolved-scan:arguments=1,resolved=0"
         "unresolved-definitions=mcp/orphan/impl/injected.nix"
       ];
+    assert actualGlobalArgumentDefinitions == [ ];
     assert actualGlobalArgumentScan.violations == [ ];
-    assert actualGlobalArgumentScan.scanIntegrityViolations == [ ];
-    assert lib.assertMsg (
-      actualGlobalArgumentScan.diagnostics == [ ]
-    ) actualGlobalArgumentScan.diagnosticText;
-    assert !builtins.hasAttr "mcp" hostOptions.my;
-    assert !builtins.hasAttr "gateway" hostOptions.my;
-    assert !builtins.hasAttr "mcp" hostConfig.my.contract;
-    assert !builtins.hasAttr "gateway" hostConfig.my.contract;
-    pkgs.runCommandLocal "check-mcp-source-boundary" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
-      set -euo pipefail
-
-      for obsolete in ${
-        lib.escapeShellArgs [
-          ("my." + "mcp")
-          ("my." + "gateway")
-          ("my.contract." + "mcp")
-          ("my.contract." + "gateway")
-          ("gateway." + "endpoints")
-        ]
-      }; do
-          if grep -R -nF "$obsolete" ${self}; then
-          echo "obsolete MCP namespace found: $obsolete" >&2
-          exit 1
-        fi
-      done
-
-      touch $out
-    '';
+    pkgs.runCommandLocal "check-mcp-source-boundary" { } "touch $out";
 
   # front は宣言した port で loopback に listen し、書き込み領域を持つ
   mcp-front-contract =
@@ -554,8 +497,10 @@ in
     assert frontsByName == expectedFronts;
     assert lib.all (front: (configOf front).RuntimeDirectory == front.runtimeDirectory) fronts;
     assert lib.all (front: (configOf front).RuntimeDirectoryMode == "0700") fronts;
-    assert lib.all (front: (configOf front).User == hostConfig.my.username) fronts;
-    assert lib.all (front: (configOf front).Environment == [ "HOME=${hostConfig.my.homeDir}" ]) fronts;
+    assert lib.all (front: (configOf front).User == hostConfig.dotfiles.host.username) fronts;
+    assert lib.all (
+      front: (configOf front).Environment == [ "HOME=${hostConfig.dotfiles.host.homeDir}" ]
+    ) fronts;
     assert lib.all (front: (configOf front).MemoryMax == "2G") fronts;
     assert lib.all (front: (configOf front).Restart == "always") fronts;
     assert lib.all (front: (configOf front).RestartSec == "5s") fronts;

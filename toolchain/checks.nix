@@ -6,14 +6,16 @@
 }:
 
 let
-  homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
-  declared = builtins.attrValues hostConfig.my.toolchain.packages;
-  lspServers = builtins.attrValues hostConfig.my.toolchain.lsp;
-  toolchain = hostConfig.my.toolchain.packages;
+  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
+  declared = builtins.attrValues hostConfig.dotfiles.toolchain.packages;
+  lspServers = builtins.attrValues hostConfig.dotfiles.toolchain.lsp;
+  toolchain = hostConfig.dotfiles.toolchain.packages;
 
   # この repo の unit が宣言する package。衝突はこれが片側に居るときだけ見る
   owned = lib.unique (
-    declared ++ map (server: server.package) lspServers ++ builtins.attrValues hostConfig.my.commands
+    declared
+    ++ map (server: server.package) lspServers
+    ++ builtins.attrValues hostConfig.dotfiles.commands
   );
 
   # PATH 上に載る全て。NixOS と Home Manager の既定同士の衝突は上流が profile の

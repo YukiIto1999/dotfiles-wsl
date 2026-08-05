@@ -14,7 +14,8 @@ let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   mkNpmMcp = pkgs.callPackage ../package/mk-npm.nix { };
   frontPackage = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer mkNpmMcp;
+    inherit mkNpmMcp;
+    serverBuilder = mkMcpServer;
     searxngUrl = expectedUrl;
   };
   front = hostConfig.dotfiles.mcp.fronts.searxng;

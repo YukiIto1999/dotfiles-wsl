@@ -4,12 +4,17 @@
   pkgs,
   mkCommand,
   mkContainerBackend,
+  mkMcpServer,
+  mkNpmMcp,
+  serveOverProxy,
   ...
 }:
 
 let
   # 変更のたびに走る semgrep とは別に、project 全体の品質 gate を持つ
   serverPort = "9000";
+  serverUrl = "http://127.0.0.1:${serverPort}";
+  adminUser = "admin";
   serverRepository = "sonarqube";
   serverDigest = "sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
   serverImage = "${serverRepository}:community@${serverDigest}";
@@ -33,6 +38,15 @@ let
       jq
       coreutils
     ];
+  };
+
+  # 静的解析の指摘は agent が読むもの。人が browser で開く経路しか無いと、
+  # 品質 gate の結果が agent の loop へ入らない
+  front = pkgs.callPackage ./package.nix {
+    inherit mkMcpServer mkNpmMcp;
+    sonarqubeUrl = serverUrl;
+    username = adminUser;
+    passwordFile = config.sops.secrets."sonarqube/admin_password".path;
   };
 
   server = mkContainerBackend "sonarqube" {
@@ -64,6 +78,12 @@ in
       repository = databaseRepository;
       digest = databaseDigest;
     };
+  };
+
+  config.my.mcp.targets.sonarqube = {
+    port = 8778;
+    serve = serveOverProxy (lib.getExe front);
+    waitUnits = [ "docker-sonarqube.service" ];
   };
 
   config.sops.secrets = {

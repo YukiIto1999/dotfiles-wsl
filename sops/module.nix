@@ -1,21 +1,9 @@
 {
-  config,
   pkgs,
   ...
 }:
 
-let
-  cfg = config.my;
-in
 {
-  # secret file の作り方は一箇所が決める。mode と owner を各 unit が持たない
-  config._module.args.mkUserSecretFile = path: content: {
-    inherit path content;
-    mode = "0600";
-    owner = cfg.username;
-    group = "users";
-  };
-
   config.sops.defaultSopsFile = ../secrets/secrets.yaml;
   config.sops.age.keyFile = "/var/lib/sops-nix/key.txt";
   config.sops.age.generateKey = false;

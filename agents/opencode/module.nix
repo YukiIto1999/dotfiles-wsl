@@ -6,7 +6,7 @@
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
   opencodeBase = builtins.fromJSON (builtins.readFile ./assets/opencode.json);
 
   opencodeBaseWithLsp = (pkgs.formats.json { }).generate "opencode-base-with-lsp.json" (
@@ -65,7 +65,7 @@ let
       '';
 in
 {
-  my.agents.clients.opencode = {
+  dotfiles.agents.clients.opencode = {
     binary = "opencode";
     rulesDestination = ".config/opencode/AGENTS.md";
     skillsDestination = ".config/opencode/skills";

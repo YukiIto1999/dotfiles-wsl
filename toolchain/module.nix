@@ -6,18 +6,23 @@
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
 in
 {
   # 責務を持つ unit が所有しない、全 project 横断で使う実行ファイル
-  options.my.toolchain.packages = lib.mkOption {
+  options.dotfiles.toolchain.packages = lib.mkOption {
     type = lib.types.attrsOf lib.types.package;
     default = { };
     description = "利用者と agent が PATH 上で使う汎用ツール。project 固有の依存は devenv が持つ。";
   };
 
+  options.dotfiles.toolchain.enabledLsp = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    description = "この host が必要とする language server ID。";
+  };
+
   # language server の binary。登録形式は各 CLI が持ち、PATH への配置はここが持つ
-  options.my.toolchain.lsp = lib.mkOption {
+  options.dotfiles.toolchain.lsp = lib.mkOption {
     type = lib.types.attrsOf (
       lib.types.submodule {
         options = {
@@ -48,11 +53,12 @@ in
       }
     );
     default = { };
+    internal = true;
     description = "AI CLI が接続する language server。対象言語は checkout の実測で決める。";
   };
 
   # 使用量と、解決すべき symbol と型を持つかで選ぶ。file 数が多くても HTML と CSS は採らない
-  config.my.toolchain.lsp = {
+  config.dotfiles.toolchain.lsp = {
     csharp = {
       package = pkgs.roslyn-ls;
       command = "Microsoft.CodeAnalysis.LanguageServer";
@@ -131,7 +137,7 @@ in
     };
   };
 
-  config.my.toolchain.packages = {
+  config.dotfiles.toolchain.packages = {
     # GitHub Actions のローカル実行。nix 統合を持つ
     actrun = pkgs.callPackage ./package/actrun.nix { };
     # project scope の agent context 管理。user scope の配備は agents が持つ
@@ -167,9 +173,21 @@ in
       ;
   };
 
-  config.home-manager.users.${cfg.username} = _: {
+  config.home-manager.users.${cfg.host.username} = _: {
     home.packages =
       builtins.attrValues cfg.toolchain.packages
       ++ map (server: server.package) (builtins.attrValues cfg.toolchain.lsp);
   };
+
+  config.assertions = [
+    {
+      assertion =
+        cfg.toolchain.enabledLsp != [ ]
+        && cfg.toolchain.enabledLsp == lib.unique cfg.toolchain.enabledLsp
+        &&
+          lib.sort builtins.lessThan cfg.toolchain.enabledLsp
+          == lib.sort builtins.lessThan (builtins.attrNames cfg.toolchain.lsp);
+      message = "dotfiles.toolchain.enabledLsp must exactly match the declared LSP keys";
+    }
+  ];
 }

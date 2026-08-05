@@ -9,7 +9,7 @@ let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer;
+    serverBuilder = mkMcpServer;
     agentmemoryUrl = config.dotfiles.containers.services.agentmemory.endpoints.http.url;
     version = config.dotfiles.containers.agentmemory.version;
   };

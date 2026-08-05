@@ -14,7 +14,7 @@ let
 
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   frontPackage = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer;
+    serverBuilder = mkMcpServer;
     agentmemoryUrl = expectedUrl;
     version = expectedVersion;
   };

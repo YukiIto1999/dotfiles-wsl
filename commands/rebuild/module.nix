@@ -2,13 +2,13 @@
   config,
   lib,
   pkgs,
-  mkCommand,
   ...
 }:
 
 let
+  mkCommand = import ../impl/mk-command.nix { inherit config lib pkgs; };
   rebuildVars = {
-    configuredDotfiles = lib.escapeShellArg config.my.dotfilesDir;
+    configuredDotfiles = lib.escapeShellArg config.dotfiles.host.dotfilesDir;
     hostName = config.networking.hostName;
     distroName = config.wsl.wslConf.user.default or "NixOS";
     nixosRebuild = lib.escapeShellArg (lib.getExe config.system.build.nixos-rebuild);
@@ -50,7 +50,7 @@ let
   };
 in
 {
-  my.commands = {
+  dotfiles.commands = {
     inherit rebuild wslRestartRequired;
   };
 

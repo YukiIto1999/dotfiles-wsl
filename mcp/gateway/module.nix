@@ -6,7 +6,7 @@
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
   mcp = config.dotfiles.mcp;
   inherit (mcp) gateway;
   agentgateway = pkgs.callPackage ./package.nix { };
@@ -85,7 +85,7 @@ in
     targets = builtins.attrNames mcp.targets;
   };
 
-  config.my.artifacts."mcp/gateway/default/config" = {
+  config.dotfiles.artifacts."mcp/gateway/default/config" = {
     format = "yaml";
     deployedAt = "/etc/agentgateway-default/config.yaml";
     inherit (gateway) source;
@@ -96,8 +96,8 @@ in
     after = [ "network.target" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
-      User = cfg.username;
-      Environment = [ "HOME=${cfg.homeDir}" ];
+      User = cfg.host.username;
+      Environment = [ "HOME=${cfg.host.homeDir}" ];
       RuntimeDirectory = gateway.runtimeDirectory;
       RuntimeDirectoryMode = "0700";
       LimitNOFILE = "4096:4096";

@@ -83,7 +83,7 @@ in
       };
     };
 
-    my.artifacts."containers/agentmemory/config" = {
+    dotfiles.artifacts."containers/agentmemory/config" = {
       format = "yaml";
       source = agentmemoryConfig;
     };

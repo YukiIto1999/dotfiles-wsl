@@ -11,7 +11,8 @@ let
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   backend = config.dotfiles.containers.services.sonarqube;
   front = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer mkNpmMcp;
+    inherit mkNpmMcp;
+    serverBuilder = mkMcpServer;
     sonarqubeUrl = backend.endpoints.http.url;
     username = "admin";
     passwordFile = config.dotfiles.containers.sonarqube.credentials.adminPasswordFile;

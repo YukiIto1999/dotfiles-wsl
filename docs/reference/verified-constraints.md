@@ -11,10 +11,11 @@
 | 制約 | 検証 |
 |---|---|
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
+| repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | 検証対象を別の登録簿から取らず宣言した unit から導く | `doctor-coverage` |
 | 登録簿が空にならない | `registries-non-empty` |
-| 契約に unit 外の読み手がいる | `contract-has-reader` |
+| required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
 | 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
@@ -26,7 +27,7 @@
 | host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |
 | target の provider、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
-| MCP の廃止 namespace が残らず、MCP unit が global module argument を定義しない。argument の定義元は評価結果から unit の最長 path prefix で解決する | `mcp-source-boundary` |
+| repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |

@@ -1,9 +1,9 @@
 {
   pkgs,
   lib,
-  mkMcpServer,
   tokenFile,
   toolsets,
+  serverBuilder,
 }:
 
 # account ごとに 1 instance、PAT は spawn 時に sops file から読む
@@ -23,7 +23,7 @@ let
 in
 # 1.8.0 は空 token で fail-fast せず対話 OAuth login へ落ちる。sops の復号失敗が
 # 起動失敗ではなく tool 実行時のエラーへ後退するので、front 側で落とす
-mkMcpServer {
+serverBuilder {
   name = "github-mcp";
   # 1.8.0 は空 token で fail-fast せず対話 OAuth login へ落ちる。sops の復号
   # 失敗が起動失敗ではなく tool 実行時のエラーへ後退する

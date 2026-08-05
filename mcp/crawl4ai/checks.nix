@@ -14,12 +14,12 @@ let
 
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   frontPackage = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer;
+    serverBuilder = mkMcpServer;
     crawl4aiUrl = expectedUrl;
     tokenFile = expectedTokenFile;
   };
   probePackage = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer;
+    serverBuilder = mkMcpServer;
     crawl4aiUrl = expectedUrl;
     tokenFile = pkgs.writeText "crawl4ai-probe-token" "probe-token";
   };
@@ -39,7 +39,7 @@ let
       '';
   expectedIsolationSpec = import ./package.nix {
     inherit pkgs;
-    mkMcpServer = spec: spec;
+    serverBuilder = spec: spec;
     crawl4aiUrl = expectedUrl;
     tokenFile = expectedTokenFile;
   };

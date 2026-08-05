@@ -1,5 +1,8 @@
-_:
+{ lib, ... }:
 
 {
-  config._module.args.mkNpmMcp = "direct-injection";
+  config = lib.setAttrByPath [
+    "_module"
+    "args"
+  ] { mkNpmMcp = "direct-injection"; };
 }

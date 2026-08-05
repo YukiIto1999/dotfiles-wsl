@@ -6,19 +6,19 @@
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
 
   codexModel = "gpt-5.6-sol";
-  dotfilesHomeRelative = lib.removePrefix "${cfg.homeDir}/" cfg.dotfilesDir;
+  dotfilesHomeRelative = lib.removePrefix "${cfg.host.homeDir}/" cfg.host.dotfilesDir;
   dotfilesPathComponents = lib.splitString "/" dotfilesHomeRelative;
   dotfilesDirIsBelowHome =
-    lib.hasPrefix "${cfg.homeDir}/" cfg.dotfilesDir
+    lib.hasPrefix "${cfg.host.homeDir}/" cfg.host.dotfilesDir
     && lib.all (
       component: component != "" && component != "." && component != ".."
     ) dotfilesPathComponents;
   codexProjectHomePath = "${dotfilesHomeRelative}/.codex/config.toml";
   codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
-    sandbox_workspace_write.writable_roots = [ "${cfg.dotfilesDir}/.git" ];
+    sandbox_workspace_write.writable_roots = [ "${cfg.host.dotfilesDir}/.git" ];
   };
   codexGatewayConfig = (pkgs.formats.toml { }).generate "codex-gateway.toml" {
     mcp_servers.gateway.url = config.dotfiles.mcp.gateway.url;
@@ -69,7 +69,7 @@ let
       '';
 in
 {
-  my.agents.clients.codex = {
+  dotfiles.agents.clients.codex = {
     binary = "codex";
     rulesDestination = ".codex/AGENTS.md";
     skillsDestination = ".codex/skills";
@@ -122,7 +122,7 @@ in
   assertions = [
     {
       assertion = dotfilesDirIsBelowHome;
-      message = "my.dotfilesDir must be a normalized path below my.homeDir for Codex project config deployment";
+      message = "dotfiles.host.dotfilesDir must be a normalized path below dotfiles.host.homeDir for Codex project config deployment";
     }
   ];
 }

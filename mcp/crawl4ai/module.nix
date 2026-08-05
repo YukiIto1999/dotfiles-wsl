@@ -9,7 +9,7 @@ let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer;
+    serverBuilder = mkMcpServer;
     crawl4aiUrl = config.dotfiles.containers.services.crawl4ai.endpoints.http.url;
     tokenFile = config.dotfiles.containers.crawl4ai.credentials.apiTokenFile;
   };

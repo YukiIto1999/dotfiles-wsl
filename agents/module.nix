@@ -3,12 +3,12 @@
   lib,
   pkgs,
   pluginSources,
-  mkCommand,
   ...
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
+  mkCommand = import ../commands/impl/mk-command.nix { inherit config lib pkgs; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   clientNames = builtins.attrNames agents.clients;
@@ -112,7 +112,7 @@ let
   seedScript = lib.concatMapStrings (
     row:
     let
-      target = "${cfg.homeDir}/${row.file.destination}";
+      target = "${cfg.host.homeDir}/${row.file.destination}";
     in
     ''
       target=${lib.escapeShellArg target}
@@ -146,7 +146,7 @@ let
           deployedAt = "/etc/${row.file.destination}";
         }
         // lib.optionalAttrs (row.file.deployment == "home") {
-          deployedAt = "${cfg.homeDir}/${row.file.destination}";
+          deployedAt = "${cfg.host.homeDir}/${row.file.destination}";
         }
       )
     ) managedFileRows
@@ -188,17 +188,17 @@ let
   systemDestinations = map (entry: entry.name) systemManagedEntries;
 in
 {
-  options.my.agents = agentContract.options;
+  options.dotfiles.agents = agentContract.options;
 
   config = {
-    my.agents.shared = {
+    dotfiles.agents.shared = {
       rules = ./shared/AGENTS.md;
       skills = allSkills;
       definitions = sharedDefinitions;
     };
 
-    my.artifacts = managedArtifacts;
-    my.commands.installAgents = installAgents;
+    dotfiles.artifacts = managedArtifacts;
+    dotfiles.commands.installAgents = installAgents;
 
     assertions = agentContract.assertionsFor agents ++ [
       {
@@ -230,7 +230,7 @@ in
     environment.etc = lib.listToAttrs systemManagedEntries;
     environment.systemPackages = [ config.dotfiles.containers.agentmemory.clients.hooks ];
 
-    home-manager.users.${cfg.username} =
+    home-manager.users.${cfg.host.username} =
       { lib, ... }:
       {
         home.file = lib.listToAttrs allHomeEntries;
@@ -243,9 +243,9 @@ in
       wants = [ "network-online.target" ];
       serviceConfig = {
         Type = "oneshot";
-        User = cfg.username;
+        User = cfg.host.username;
         Environment = [
-          "HOME=${cfg.homeDir}"
+          "HOME=${cfg.host.homeDir}"
           "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
         ];
         ExecStart = lib.getExe installAgents;

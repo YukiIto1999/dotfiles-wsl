@@ -6,7 +6,7 @@
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
   collector = pkgs.opentelemetry-collector-contrib;
 
   # container を持たない。nixpkgs に binary があるので image 同期も docker 依存も要らない
@@ -45,14 +45,42 @@ let
   };
 in
 {
-  config.my.artifacts."telemetry/collector" = {
+  options.dotfiles.telemetry = {
+    endpoint = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      internal = true;
+    };
+    protocol = lib.mkOption {
+      type = lib.types.enum [ "grpc" ];
+      readOnly = true;
+      internal = true;
+    };
+    service = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      internal = true;
+    };
+    archive = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      internal = true;
+    };
+    ports = lib.mkOption {
+      type = lib.types.attrsOf lib.types.port;
+      readOnly = true;
+      internal = true;
+    };
+  };
+
+  config.dotfiles.artifacts."telemetry/collector" = {
     format = "yaml";
     deployedAt = "/etc/${stateDir}/collector.yaml";
     source = collectorConfig;
   };
 
   # CLI が読む契約。endpoint の決め方をここだけが持つ
-  config.my.contract.telemetry = {
+  config.dotfiles.telemetry = {
     endpoint = "http://127.0.0.1:${toString grpcPort}";
     protocol = "grpc";
     service = "otel-collector";
@@ -68,7 +96,7 @@ in
     after = [ "network.target" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
-      User = cfg.username;
+      User = cfg.host.username;
       StateDirectory = stateDir;
       StateDirectoryMode = "0700";
       ExecStart = "${collector}/bin/otelcol-contrib --config ${collectorConfig}";

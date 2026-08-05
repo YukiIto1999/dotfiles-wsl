@@ -6,7 +6,7 @@
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
   managedMcp = pkgs.replaceVars ./assets/managed-mcp.json {
     gatewayUrl = config.dotfiles.mcp.gateway.url;
   };
@@ -36,7 +36,7 @@ let
     cp ${
       (pkgs.formats.json { }).generate "marketplace.json" {
         name = "dotfiles";
-        owner.name = cfg.username;
+        owner.name = cfg.host.username;
         plugins = [
           {
             name = "lsp";
@@ -59,12 +59,12 @@ let
 
   managedSettings = pkgs.replaceVars ./assets/managed-settings.json {
     lspMarketplacePath = "${lspMarketplace}";
-    telemetryEndpoint = cfg.contract.telemetry.endpoint;
-    telemetryProtocol = cfg.contract.telemetry.protocol;
+    telemetryEndpoint = cfg.telemetry.endpoint;
+    telemetryProtocol = cfg.telemetry.protocol;
   };
 in
 {
-  my.agents.clients.claude = {
+  dotfiles.agents.clients.claude = {
     binary = "claude";
     rulesDestination = ".claude/CLAUDE.md";
     skillsDestination = ".claude/skills";
@@ -111,7 +111,7 @@ in
     };
   };
 
-  my.artifacts = {
+  dotfiles.artifacts = {
     "agents/claude/lsp" = {
       format = "json";
       source = lspJson;

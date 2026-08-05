@@ -110,11 +110,4 @@ in
       scriptUrl = "https://claude.ai/install.sh";
     };
   };
-
-  dotfiles.artifacts = {
-    "agents/claude/lsp" = {
-      format = "json";
-      source = lspJson;
-    };
-  };
 }

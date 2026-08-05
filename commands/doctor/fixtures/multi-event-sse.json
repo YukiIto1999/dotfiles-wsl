@@ -1,0 +1,19 @@
+{
+  "mcp": {
+    "sseEvents": [
+      {
+        "jsonrpc": "2.0",
+        "method": "notifications/message",
+        "params": {
+          "level": "info"
+        }
+      },
+      {
+        "jsonrpc": "2.0",
+        "id": "server-request",
+        "method": "ping",
+        "params": {}
+      }
+    ]
+  }
+}

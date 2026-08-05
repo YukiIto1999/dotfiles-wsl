@@ -386,19 +386,29 @@ let
       inherit clientName id file;
     }) clients.${clientName}.managedFiles
   ) (builtins.attrNames clients);
+  normalizeSource =
+    source:
+    if builtins.typeOf source == "path" then
+      builtins.path {
+        path = source;
+        name = builtins.baseNameOf (toString source);
+      }
+    else
+      source;
   managedDeploymentMatches =
     row:
     let
       artifact = artifacts."agents/${row.clientName}/${row.id}";
       target = row.file.destination;
+      deployedSource = normalizeSource row.file.source;
     in
-    artifact.source == row.file.source
+    artifact.source == deployedSource
     && (
       if row.file.deployment == "system" then
-        hostConfig.environment.etc.${target}.source == row.file.source
+        hostConfig.environment.etc.${target}.source == deployedSource
         && artifact.deployedAt == "/etc/${target}"
       else if row.file.deployment == "home" then
-        homeConfig.home.file.${target}.source == row.file.source
+        homeConfig.home.file.${target}.source == deployedSource
         && artifact.deployedAt == "${hostConfig.dotfiles.host.homeDir}/${target}"
       else
         artifact.deployedAt == null
@@ -408,29 +418,59 @@ let
     clientName:
     let
       client = clients.${clientName};
+      homePrefix = hostConfig.dotfiles.host.homeDir;
+      rulesArtifact = artifacts."agents/${clientName}/rules";
+      rulesMatch =
+        rulesArtifact.source == normalizeSource hostConfig.dotfiles.agents.shared.rules
+        && rulesArtifact.format == "markdown"
+        && rulesArtifact.deployedAt == "${homePrefix}/${client.rulesDestination}";
+      skillsMatch = lib.all (
+        name:
+        let
+          artifact = artifacts."agents/${clientName}/skills/${name}";
+        in
+        artifact.source == normalizeSource hostConfig.dotfiles.agents.shared.skills.${name}
+        && artifact.format == "directory"
+        && artifact.deployedAt == "${homePrefix}/${client.skillsDestination}/${name}"
+      ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills);
       definitionsMatch = lib.all (
         name:
         let
           suffix = if client.definitionFormat == "toml" then "toml" else "md";
+          artifact = artifacts."agents/${clientName}/definitions/${name}";
+          expectedFormat = if client.definitionFormat == "toml" then "toml" else "markdown";
         in
         homeConfig.home.file."${client.definitionsDestination}/${name}.${suffix}".source
-        == client.definitions.${name}
+        == normalizeSource client.definitions.${name}
+        && artifact.source == normalizeSource client.definitions.${name}
+        && artifact.format == expectedFormat
+        && artifact.deployedAt == "${homePrefix}/${client.definitionsDestination}/${name}.${suffix}"
       ) (builtins.attrNames client.definitions);
     in
-    homeConfig.home.file.${client.rulesDestination}.source == hostConfig.dotfiles.agents.shared.rules
+    homeConfig.home.file.${client.rulesDestination}.source
+    == normalizeSource hostConfig.dotfiles.agents.shared.rules
     && lib.all (
       name:
       homeConfig.home.file."${client.skillsDestination}/${name}".source
-      == hostConfig.dotfiles.agents.shared.skills.${name}
+      == normalizeSource hostConfig.dotfiles.agents.shared.skills.${name}
     ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills)
+    && rulesMatch
+    && skillsMatch
     && definitionsMatch
   ) (builtins.attrNames clients);
 
   expectedArtifactIds = lib.sort builtins.lessThan (
-    [ "agents/claude/lsp" ]
-    ++ lib.concatMap (
+    lib.concatMap (
       clientName:
-      map (id: "agents/${clientName}/${id}") (
+      let
+        client = clients.${clientName};
+      in
+      [ "agents/${clientName}/rules" ]
+      ++ map (name: "agents/${clientName}/skills/${name}") (
+        builtins.attrNames hostConfig.dotfiles.agents.shared.skills
+      )
+      ++ map (name: "agents/${clientName}/definitions/${name}") (builtins.attrNames client.definitions)
+      ++ map (id: "agents/${clientName}/${id}") (
         builtins.attrNames expected.clients.${clientName}.managedFiles
       )
     ) expected.required
@@ -969,7 +1009,11 @@ in
       ''
         set -euo pipefail
 
-        jq --sort-keys 'keys' ${artifactSource "agents/claude/lsp"} > claude-names.json
+        managedSettings=${artifactSource "agents/claude/managed-settings"}
+        marketplace=$(jq -r '.extraKnownMarketplaces.dotfiles.source.path' "$managedSettings")
+        claudeLsp="$marketplace/lsp/.lsp.json"
+
+        jq --sort-keys 'keys' "$claudeLsp" > claude-names.json
         jq --sort-keys '.lsp | keys' ${artifactSource "agents/opencode/config"} > opencode-names.json
         printf '%s' ${lib.escapeShellArg (builtins.toJSON (builtins.attrNames roster))} \
           | jq --sort-keys '.' > expected-names.json
@@ -986,7 +1030,7 @@ in
             (.["${name}"].args // []) == $args and
             .["${name}"].extensionToLanguage == $extensions and
             (.["${name}"].initializationOptions // {}) == $options
-          ' ${artifactSource "agents/claude/lsp"} > /dev/null
+          ' "$claudeLsp" > /dev/null
 
           jq --exit-status \
             --argjson command ${
@@ -1002,15 +1046,13 @@ in
           ' ${artifactSource "agents/opencode/config"} > /dev/null
         '') (builtins.attrNames roster)}
 
-        jq -r '.[].extensionToLanguage | keys[]' ${artifactSource "agents/claude/lsp"} | sort > extensions
+        jq -r '.[].extensionToLanguage | keys[]' "$claudeLsp" | sort > extensions
         test "$(sort -u extensions | wc -l)" = "$(wc -l < extensions)"
 
-        managedSettings=${artifactSource "agents/claude/managed-settings"}
         jq --exit-status '
           .extraKnownMarketplaces.dotfiles.source.source == "directory" and
           .enabledPlugins["lsp@dotfiles"] == true
         ' "$managedSettings" > /dev/null
-        marketplace=$(jq -r '.extraKnownMarketplaces.dotfiles.source.path' "$managedSettings")
         jq --exit-status '
           .name == "dotfiles" and
           (.plugins | length) == 1 and
@@ -1018,8 +1060,6 @@ in
           .plugins[0].source == "./lsp" and
           (.plugins[0].version | length) > 0
         ' "$marketplace/.claude-plugin/marketplace.json" > /dev/null
-        diff --unified ${artifactSource "agents/claude/lsp"} "$marketplace/lsp/.lsp.json"
-
         touch $out
       '';
 }

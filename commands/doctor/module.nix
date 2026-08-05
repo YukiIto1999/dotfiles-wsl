@@ -1,50 +1,87 @@
 {
   config,
-  options,
   lib,
   pkgs,
-  self,
   ...
 }:
 
 let
-  mkCommand = import ../impl/mk-command.nix { inherit config lib pkgs; };
-  # 検証対象は宣言から導く。別の roster を持つと宣言と乖離する
-  # 常駐しない oneshot は完了後に inactive になる。この repo が宣言し、かつ
-  # 常駐する service だけを active であるべき対象にする
-  declaredHere = lib.unique (
-    lib.concatMap (
-      definition:
-      lib.optionals (lib.hasPrefix (toString self) (toString definition.file)) (
-        builtins.attrNames definition.value
-      )
-    ) options.systemd.services.definitionsWithLocations
+  cfg = config.dotfiles;
+
+  agentTable = lib.mapAttrsToList (id: client: {
+    inherit id;
+    inherit (client) binary versionArgs;
+  }) cfg.agents.clients;
+
+  artifactTable = lib.mapAttrsToList (id: artifact: {
+    inherit id;
+    source = toString artifact.source;
+    destination = artifact.deployedAt;
+  }) (lib.filterAttrs (_: artifact: artifact.deployedAt != null) cfg.artifacts);
+
+  secretTable = lib.mapAttrsToList (id: secret: {
+    inherit id;
+    inherit (secret) path mode;
+    owner = if secret.owner == null then "root" else secret.owner;
+    group = if secret.group == null then "root" else secret.group;
+  }) config.sops.secrets;
+
+  homeManagerUnit = "home-manager-${cfg.host.username}.service";
+
+  serviceNames = lib.unique (
+    [
+      homeManagerUnit
+      cfg.telemetry.service
+      cfg.mcp.gateway.service
+    ]
+    ++ lib.concatMap (service: service.units) (builtins.attrValues cfg.containers.services)
+    ++ map (front: front.service) (builtins.attrValues cfg.mcp.fronts)
   );
 
-  declaredUnits = builtins.filter (
-    name:
+  serviceTable = map (unit: {
+    inherit unit;
+    role = if unit == homeManagerUnit then "home-manager" else "service";
+  }) serviceNames;
+
+  containerTable = lib.concatMap (
+    application:
+    map (image: {
+      inherit application;
+      inherit (image) container image;
+    }) (builtins.attrValues cfg.containers.services.${application}.images)
+  ) cfg.containers.enabled;
+
+  healthTable = map (
+    application:
     let
-      unit = config.systemd.services.${name};
+      service = cfg.containers.services.${application};
+      probe = service.health;
     in
-    unit.wantedBy or [ ] != [ ] && (unit.serviceConfig.Type or "simple") != "oneshot"
-  ) declaredHere;
+    {
+      inherit application;
+      url = "${service.endpoints.${probe.endpoint}.url}${probe.path}";
+      inherit (probe) method timeout;
+    }
+  ) cfg.containers.enabled;
 
-  mcpProbes = lib.mapAttrsToList (
-    target: contract: "${target}_${contract.probe.tool}"
-  ) config.dotfiles.mcp.targets;
+  mcpTable = lib.mapAttrsToList (id: target: {
+    inherit id;
+    inherit (target) probe;
+  }) cfg.mcp.targets;
 
-  doctor = mkCommand {
-    name = "dotfiles-doctor";
-    src = ./impl/doctor.sh;
-    runtimeInputs = with pkgs; [
-      coreutils
-      curl
-      systemd
-    ];
-    vars = {
-      declaredUnits = lib.escapeShellArg (lib.concatStringsSep " " declaredUnits);
-      gatewayUrl = lib.escapeShellArg config.dotfiles.mcp.gateway.url;
-      mcpProbes = lib.escapeShellArg (lib.concatStringsSep " " mcpProbes);
+  doctor = import ./package.nix {
+    inherit pkgs lib;
+    tables = {
+      inherit
+        agentTable
+        artifactTable
+        secretTable
+        serviceTable
+        containerTable
+        healthTable
+        mcpTable
+        ;
+      gatewayUrl = cfg.mcp.gateway.url;
     };
   };
 in

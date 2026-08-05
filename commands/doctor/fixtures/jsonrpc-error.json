@@ -1,0 +1,12 @@
+{
+  "mcp": {
+    "calls": {
+      "sonarqube": {
+        "error": {
+          "code": -32000,
+          "message": "fixture error"
+        }
+      }
+    }
+  }
+}

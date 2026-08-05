@@ -24,6 +24,8 @@ let
   variantArtifact = variantConfig.dotfiles.artifacts."mcp/gateway/default/config";
   variantDeployedConfig =
     variantConfig.environment.etc."${variantGateway.runtimeDirectory}/config.yaml";
+  deployedPath = "/etc/${gateway.runtimeDirectory}/config.yaml";
+  variantDeployedPath = "/etc/${variantGateway.runtimeDirectory}/config.yaml";
   expectedVariant = expected // {
     port = 9876;
     url = "http://127.0.0.1:9876/mcp";
@@ -125,13 +127,19 @@ in
           ;
       } == expectedVariant;
     assert artifact.format == "yaml";
-    assert artifact.deployedAt == "/etc/agentgateway-default/config.yaml";
+    assert artifact.deployedAt == deployedPath;
     assert artifact.source == gateway.source;
+    assert lib.any (
+      row:
+      row.id == "mcp/gateway/default/config"
+      && row.source == toString gateway.source
+      && row.destination == deployedPath
+    ) hostConfig.dotfiles.commands.doctor.tables.artifactTable;
     assert deployedConfig.source == gateway.source;
     assert builtins.length sourceArtifacts == 1;
     assert variantGateway.source != gateway.source;
     assert variantArtifact.source == variantGateway.source;
-    assert variantArtifact.deployedAt == "/etc/agentgateway-default/config.yaml";
+    assert variantArtifact.deployedAt == variantDeployedPath;
     assert variantDeployedConfig.source == variantGateway.source;
     assert service.after == [ "network.target" ];
     assert service.requires == [ ];

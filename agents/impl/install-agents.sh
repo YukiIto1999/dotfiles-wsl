@@ -12,7 +12,7 @@ if [[ ${1:-} == "-h" || ${1:-} == "--help" ]]; then
   cat <<'USAGE'
 usage: dotfiles-install-agents
 
-Installs the agent client binaries declared in my.agents (upstream installer
+Installs the agent client binaries declared in dotfiles.agents (upstream installer
 script or GitHub release archive, depending on each client's install.kind) into
 ~/.local/bin. Run as the target user, not root.
 USAGE

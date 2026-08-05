@@ -313,26 +313,56 @@ in
         in
         if segments == [ ] then "" else lib.head segments;
 
-      # 宣言が自 unit と一致しない option を集める。sub-option を持つ名前空間は
-      # declarations を持たないので、配下を辿って宣言位置を集める
-      declarationsOf =
-        option:
-        option.declarations or (lib.concatMap declarationsOf (
-          builtins.attrValues (lib.filterAttrs (name: _: !(lib.hasPrefix "_" name)) option)
-        ));
+      repositoryDeclarations =
+        declarations:
+        builtins.filter (declaration: lib.hasPrefix "${self}/" (toString declaration)) declarations;
 
-      dotfilesOptions = lib.filterAttrs (name: _: !(lib.hasPrefix "_" name)) hostOptions.dotfiles;
-      violations = lib.concatLists (
-        lib.mapAttrsToList (
-          name: option:
-          let
-            declaredIn = lib.unique (map rootOf (declarationsOf option));
-          in
-          lib.optional (
-            declaredIn != [ ] && !lib.all (root: root == name) declaredIn
-          ) "dotfiles.${name} <- ${lib.concatStringsSep "," declaredIn}"
-        ) dotfilesOptions
-      );
+      # module system の全 option leaf を辿る。dotfiles 配下だけを起点にすると、
+      # repository が別 root を追加した場合に検査対象から外れてしまう。
+      optionLeaves =
+        let
+          walk =
+            path: options:
+            lib.concatLists (
+              lib.mapAttrsToList (
+                name: option:
+                let
+                  here = path ++ [ name ];
+                in
+                if !(lib.isAttrs option) || name == "_module" then
+                  [ ]
+                else if option ? _type && option._type == "option" then
+                  [
+                    {
+                      inherit here;
+                      declarations = repositoryDeclarations (option.declarations or [ ]);
+                    }
+                  ]
+                else
+                  walk here option
+              ) options
+            );
+        in
+        walk [ ] hostOptions;
+
+      repositoryOptions = builtins.filter (entry: entry.declarations != [ ]) optionLeaves;
+      outsideDotfiles = builtins.filter (
+        entry: entry.here == [ ] || lib.head entry.here != "dotfiles"
+      ) repositoryOptions;
+      wrongOwner = builtins.filter (
+        entry:
+        entry.here != [ ]
+        && lib.head entry.here == "dotfiles"
+        && (
+          builtins.length entry.here < 2
+          || !lib.all (declaration: rootOf declaration == builtins.elemAt entry.here 1) entry.declarations
+        )
+      ) repositoryOptions;
+
+      describe =
+        entry:
+        "${lib.concatStringsSep "." entry.here} <- ${lib.concatStringsSep "," (map rootOf entry.declarations)}";
+      violations = map describe (outsideDotfiles ++ wrongOwner);
     in
     assert lib.assertMsg (violations == [ ]) (
       "option namespace: " + lib.concatStringsSep " " violations
@@ -365,6 +395,35 @@ in
 
   required-roster-negative-eval =
     let
+      requiredRosterOptionPaths = [
+        [
+          "dotfiles"
+          "accounts"
+        ]
+        [
+          "dotfiles"
+          "agents"
+          "enabled"
+        ]
+        [
+          "dotfiles"
+          "containers"
+          "enabled"
+        ]
+        [
+          "dotfiles"
+          "mcp"
+          "enabledProviders"
+        ]
+        [
+          "dotfiles"
+          "toolchain"
+          "enabledLsp"
+        ]
+      ];
+      rosterOptionsWithDefaults = builtins.filter (
+        path: (lib.attrByPath path { } hostOptions) ? default
+      ) requiredRosterOptionPaths;
       fixtures = [
         ./fixtures/invalid/missing-rosters.nix
         ./fixtures/invalid/unknown-account.nix
@@ -484,6 +543,10 @@ in
       normalResult = builtins.tryEval (forceToplevel hostConfig);
       variantResult = builtins.tryEval (forceToplevel variantConfig);
     in
+    assert lib.assertMsg (rosterOptionsWithDefaults == [ ]) (
+      "required roster options must not define defaults: "
+      + lib.concatStringsSep " " (map (lib.concatStringsSep ".") rosterOptionsWithDefaults)
+    );
     assert lib.assertMsg normalResult.success "normal required roster evaluation must succeed";
     assert lib.assertMsg variantResult.success "variant required roster evaluation must succeed";
     assert lib.assertMsg (unexpectedSuccesses == [ ]) (

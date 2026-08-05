@@ -227,7 +227,8 @@ in
 
       grep -Fqx 'export SONARQUBE_URL="${expectedUrl}"' ${lib.getExe frontPackage}
       grep -Fqx 'export SONARQUBE_USERNAME="admin"' ${lib.getExe frontPackage}
-      grep -Fqx 'export SONARQUBE_PASSWORD="$(<${expectedPasswordFile})"' ${lib.getExe frontPackage}
+      grep -Fqx 'SONARQUBE_PASSWORD="$(<${expectedPasswordFile})"' ${lib.getExe frontPackage}
+      grep -Fqx 'export SONARQUBE_PASSWORD' ${lib.getExe frontPackage}
       grep -q 'required file is empty' ${lib.getExe frontPackage}
       touch $out
     '';

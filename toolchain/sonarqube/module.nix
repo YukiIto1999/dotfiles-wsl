@@ -3,7 +3,6 @@
   lib,
   pkgs,
   mkCommand,
-  mkContainerBackend,
   mkMcpServer,
   mkNpmMcp,
   serveOverProxy,
@@ -11,6 +10,7 @@
 }:
 
 let
+  mkContainerBackend = import ../../containers/impl/container-backend.nix { inherit lib; };
   # 変更のたびに走る semgrep とは別に、project 全体の品質 gate を持つ
   serverPort = "9000";
   serverUrl = "http://127.0.0.1:${serverPort}";
@@ -63,20 +63,38 @@ let
   };
 in
 {
-  config.my.images = {
-    sonarqube = {
-      kind = "upstream";
-      container = "sonarqube";
-      image = serverImage;
-      repository = serverRepository;
-      digest = serverDigest;
+  config.dotfiles.containers.services.sonarqube = {
+    endpoints.http = {
+      protocol = "http";
+      address = "127.0.0.1";
+      port = 9000;
+      url = "http://127.0.0.1:9000";
     };
-    sonarqube-db = {
-      kind = "upstream";
-      container = "sonarqube-db";
-      image = databaseImage;
-      repository = databaseRepository;
-      digest = databaseDigest;
+    units = [
+      "docker-sonarqube.service"
+      "docker-sonarqube-db.service"
+    ];
+    images = {
+      sonarqube = {
+        kind = "upstream";
+        container = "sonarqube";
+        image = serverImage;
+        repository = serverRepository;
+        digest = serverDigest;
+      };
+      sonarqube-db = {
+        kind = "upstream";
+        container = "sonarqube-db";
+        image = databaseImage;
+        repository = databaseRepository;
+        digest = databaseDigest;
+      };
+    };
+    health = {
+      endpoint = "http";
+      method = "GET";
+      path = "/api/system/status";
+      timeout = 10;
     };
   };
 

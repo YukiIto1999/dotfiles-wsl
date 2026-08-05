@@ -6,29 +6,64 @@
   ...
 }:
 
+let
+  imageDefinitions = lib.concatMap (
+    service:
+    lib.mapAttrsToList (name: image: {
+      inherit name image;
+    }) service.images
+  ) (builtins.attrValues hostConfig.dotfiles.containers.services);
+in
 {
+  container-backend-contract =
+    let
+      fixtures = [
+        (import ./fixtures/container-backend.nix { inherit lib; })
+        (import ./fixtures/container-backend-minimal.nix { inherit lib; })
+      ];
+      mkContainerBackend = import ./impl/container-backend.nix { inherit lib; };
+      actual = map (fixture: mkContainerBackend fixture.name fixture.args) fixtures;
+      expected = map (fixture: fixture.expected) fixtures;
+    in
+    assert lib.assertMsg (actual == expected) "container backend helper output changed";
+    pkgs.runCommandLocal "check-container-backend-contract" { } "touch $out";
+
+  container-application-roster =
+    let
+      required = [
+        "agentmemory"
+        "crawl4ai"
+        "searxng"
+        "sonarqube"
+      ];
+      provided = lib.sort builtins.lessThan (builtins.attrNames hostConfig.dotfiles.containers.services);
+    in
+    assert hostConfig.dotfiles.containers.enabled == required;
+    assert provided == required;
+    pkgs.runCommandLocal "check-container-application-roster" { } "touch $out";
+
   # image は digest で固定し、参照が repository と digest に整合すること。
   # 宣言を写した期待値は宣言と写しの一致しか見ない
   oci-image-contract =
     assert hostConfig.virtualisation.oci-containers.backend == "docker";
     assert hostConfig.virtualisation.docker.enable;
     assert lib.all (
-      name:
+      entry:
       let
-        entry = hostConfig.my.images.${name};
+        inherit (entry) image;
       in
-      entry.container == name
+      image.container == entry.name
       && (
-        if entry.kind == "upstream" then
-          entry.repository != null
-          && entry.digest != null
-          && lib.hasPrefix "sha256:" entry.digest
-          && lib.hasPrefix "${entry.repository}:" entry.image
-          && lib.hasSuffix "@${entry.digest}" entry.image
+        if image.kind == "upstream" then
+          image.repository != null
+          && image.digest != null
+          && lib.hasPrefix "sha256:" image.digest
+          && lib.hasPrefix "${image.repository}:" image.image
+          && lib.hasSuffix "@${image.digest}" image.image
         else
-          entry.imageFile != null && entry.repository == null && entry.digest == null
+          image.imageFile != null && image.repository == null && image.digest == null
       )
-    ) (builtins.attrNames hostConfig.my.images);
+    ) imageDefinitions;
     # pull = never なので、宣言した image が事前に無いと container が起動しない
     assert lib.all (c: c.pull == "never") (
       builtins.attrValues hostConfig.virtualisation.oci-containers.containers

@@ -43,6 +43,12 @@
     let
       system = "x86_64-linux";
       hostName = "nixos";
+      containerApplications = [
+        "agentmemory"
+        "crawl4ai"
+        "searxng"
+        "sonarqube"
+      ];
 
       pluginSources = {
         inherit superpowers;
@@ -74,6 +80,7 @@
     {
       nixosConfigurations.${hostName} = mkNixosSystem {
         # マシン固有の値のみ、他は各 unit の option の default
+        dotfiles.containers.enabled = containerApplications;
         my = {
           accounts = [
             "account-1"
@@ -134,16 +141,18 @@
           inherit (pkgs) lib;
 
           # port と accounts を変えた第二の評価。artifact が宣言に追随することを示す
-          artifactVariantConfig =
-            (mkNixosSystem {
-              my = {
-                accounts = [ ];
-                gateway.endpoints.default.port = 9876;
-              };
-            }).config;
+          artifactVariantSystem = mkNixosSystem {
+            dotfiles.containers.enabled = containerApplications;
+            my = {
+              accounts = [ ];
+              gateway.endpoints.default.port = 9876;
+            };
+          };
+          artifactVariantConfig = artifactVariantSystem.config;
 
           checkSet = {
             nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
+            nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel;
           };
         in
         checkSet
@@ -160,7 +169,7 @@
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
             execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
-            containerArgv = import ./images/impl/container-argv.nix {
+            containerArgv = import ./containers/impl/container-argv.nix {
               inherit lib hostConfig;
               execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
             };

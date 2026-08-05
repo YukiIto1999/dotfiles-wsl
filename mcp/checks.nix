@@ -38,6 +38,7 @@ let
 
   # 外へ出る front を増やす変更は必ず diff に現れる。宣言だけで制限は外せない
   expectedNetworkFronts = [
+    "chrome-devtools"
     "codex"
     "context7"
     "github-account-1"

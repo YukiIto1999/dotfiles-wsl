@@ -9,7 +9,7 @@
 let
   cfg = config.my;
   managedMcp = pkgs.replaceVars ./assets/managed-mcp.json {
-    gatewayUrl = cfg.contract.gateway.endpoints.default.url;
+    gatewayUrl = config.dotfiles.mcp.gateway.url;
   };
   userSettingsSeed = ./assets/settings.json;
 

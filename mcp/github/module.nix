@@ -2,14 +2,14 @@
   config,
   lib,
   pkgs,
-  mkMcpServer,
-  serveOverProxy,
   ...
 }:
 
 # account ごとに 1 instance、PAT は spawn 時に sops file から読む
 let
   cfg = config.my;
+  mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
+  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
 
   # upstream default から copilot を除いた採用 toolset
   toolsets = [
@@ -23,6 +23,7 @@ let
   mkTarget =
     index: account:
     lib.nameValuePair "github-${account}" {
+      provider = "github";
       # http mode は request ごとの OAuth を要求し、PAT を環境変数で持つ形と噛み合わない
       port = 8780 + index;
       # api.github.com へ出る
@@ -35,10 +36,15 @@ let
           }
         )
       );
+      probe = {
+        tool = "get_me";
+        args = { };
+        timeout = 30;
+      };
     };
 in
 {
-  my.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
+  dotfiles.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
 
   # front は起動時に一度だけ token を読む。rotation を拾うには再起動が要る
   sops.secrets = lib.listToAttrs (

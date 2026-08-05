@@ -23,8 +23,8 @@ let
     username = "admin";
     passwordFile = expectedPasswordFile;
   };
-  front = hostConfig.my.contract.mcp.fronts.sonarqube;
-  target = hostConfig.my.mcp.targets.sonarqube;
+  front = hostConfig.dotfiles.mcp.fronts.sonarqube;
+  target = hostConfig.dotfiles.mcp.targets.sonarqube;
   execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
   execTokens = helpers.execTokens.tokensOf execStart;
 
@@ -75,19 +75,24 @@ let
         requireNonEmpty = [ passwordFile ];
         command = "${isolationBackendPackage}/bin/sonarqube-mcp-server";
       };
-      evaluation = lib.evalModules {
-        specialArgs = {
-          inherit pkgs;
-          mkNpmMcp =
+      isolationPkgs = pkgs // {
+        callPackage =
+          path: args:
+          if path == ../package/mk-npm.nix then
             spec:
             assert builtins.toJSON spec == builtins.toJSON expectedNpmSpec;
-            isolationBackendPackage;
-          mkMcpServer =
+            isolationBackendPackage
+          else if path == ../package/mk-server.nix then
             spec:
             assert builtins.toJSON spec == builtins.toJSON expectedMcpSpec;
-            isolationFrontPackageFor spec;
-          serveOverProxy = executable: "proxy:${executable}";
-        };
+            isolationFrontPackageFor spec
+          else if path == ../package/serve-over-proxy.nix then
+            executable: "proxy:${executable}"
+          else
+            pkgs.callPackage path args;
+      };
+      evaluation = lib.evalModules {
+        specialArgs.pkgs = isolationPkgs;
         modules = [
           ./module.nix
           (
@@ -115,14 +120,20 @@ let
                     readOnly = true;
                   };
                 };
-                my.mcp.targets = lib.mkOption {
+                dotfiles.mcp.targets = lib.mkOption {
                   default = { };
                   type = lib.types.attrsOf (
                     lib.types.submodule {
                       options = {
+                        provider = lib.mkOption { type = lib.types.str; };
                         port = lib.mkOption { type = lib.types.port; };
                         serve = lib.mkOption { type = lib.types.str; };
+                        needsNetwork = lib.mkOption {
+                          type = lib.types.bool;
+                          default = false;
+                        };
                         waitUnits = lib.mkOption { type = lib.types.listOf lib.types.str; };
+                        probe = lib.mkOption { type = lib.types.raw; };
                       };
                     }
                   );
@@ -147,16 +158,30 @@ let
           )
         ];
       };
-      isolatedTarget = evaluation.config.my.mcp.targets.sonarqube;
+      isolatedTarget = evaluation.config.dotfiles.mcp.targets.sonarqube;
       expectedTarget = {
+        provider = "sonarqube";
         port = expectedPort;
         serve = "proxy:${lib.getExe (isolationFrontPackageFor expectedMcpSpec)}";
+        needsNetwork = false;
         waitUnits = expectedWaitUnits;
+        probe = {
+          tool = "system_status";
+          args = { };
+          timeout = 30;
+        };
       };
     in
     {
       actual = builtins.toJSON {
-        inherit (isolatedTarget) port serve waitUnits;
+        inherit (isolatedTarget)
+          needsNetwork
+          port
+          probe
+          provider
+          serve
+          waitUnits
+          ;
       };
       expected = builtins.toJSON expectedTarget;
     };

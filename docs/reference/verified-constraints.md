@@ -23,6 +23,10 @@
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
 | 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
 | MCP unit が OCI、secret template、同名 backend の secret と service contract を所有しない | `mcp-no-container-ownership` |
+| host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |
+| target の provider、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
+| provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
+| MCP の廃止 namespace が残らず、MCP unit が global module argument を定義しない。argument の定義元は評価結果から unit の最長 path prefix で解決する | `mcp-source-boundary` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
@@ -37,8 +41,8 @@
 | SonarQube MCP front は SOPS の poison stub と canary A / B、型付き credential の canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact が runtime password file を読む | `sonarqube-front` |
 | 生成 config artifact が登録簿に載り、宣言の変更に追随する | `artifact-registry` |
 | 生成 config artifact が配備先の source と一致する | `cli-artifact-contract`、`gateway-artifact-contract` |
-| gateway が全 target へ HTTP で接続し子 process を作らない | `gateway-front-contract` |
-| front が宣言した port で loopback に listen し書き込み領域を持つ | `mcp-front-contract` |
+| gateway が全 target へ HTTP で接続し、front の起動依存と子 process を持たない | `gateway-front-contract` |
+| front が宣言した port で loopback に listen し、書き込み領域、backend dependency、通信方針を持つ | `mcp-front-contract` |
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
 | Chrome DevTools の front が host の chromium を使い CDP を露出しない | `chrome-devtools-front` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
@@ -52,10 +56,10 @@
 | host が有効化した container application と service contract の key が一致する | `container-application-roster` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
 | container application の endpoint URL と port が OCI publish、unit が systemd service に完全一致し、health が宣言済み HTTP endpoint を参照する | `nixos-toplevel` (`containers/module.nix` の assertion) |
-| MCP target 名が互いに prefix 衝突しない | `nixos-toplevel` (`mcp/module.nix` の assertion) |
+| MCP provider roster、target ID、port、GitHub account、front 集合が型付き assertion を満たす | `nixos-toplevel` (`mcp/module.nix` の assertion) |
 | image id が container を一意に指す | `nixos-toplevel` (`containers/module.nix` の assertion) |
 | 全 module から system closure を評価できる | `nixos-toplevel` |
-| accounts と gateway port を変えた第二の評価からも system closure を評価できる | `nixos-variant-toplevel` |
+| gateway port を変え、同じ固定 provider roster を使う第二の評価からも system closure を評価できる | `nixos-variant-toplevel` |
 
 ## runtime の振る舞い
 
@@ -102,7 +106,7 @@
 - 文書の種別が混ざっていないこと。読み手の明示は検査するが、内容が手順と説明を混ぜていないことは検査していない。
 - 参照文書が宣言の値を転記していないこと。roster や件数の転記は検査していない。
 - 一つの責務の宣言、実装、test が同じ場所にあること。配置の規約を検査していない。
-- 転記した期待値が宣言と同時に書き換わらないこと。`mcp/checks.nix` の `expectedNetworkFronts` は意図した二重鍵で、`needsNetwork` を足すだけでは通らず diff に必ず現れる。ただし両方を同時に書き換えた場合は通る。
+- 固定 fixture と実装を同じ変更で誤って書き換えないこと。`mcp-target-contract` と `doctor-coverage` は独立 fixture を使うが、意図のレビューは必要になる。
 - front が実際に loopback へ bind すること。起動 command に bind 先が現れることは検査するが、process が本当にその address で listen するかは実機でしか分からない。agentgateway が config に書かない管理 listener を三つ開いていた実例がある。
 - front が loopback の外へ出るかどうかの宣言が実体と一致すること。`needsNetwork` の集合は検査で固定するが、宣言が実装の挙動と合っているかは上流を読むしかない。searxng の `web_url_read` が `SEARXNG_URL` を経由せず引数の URL へ出る実例がある。
 - 通信制限による失敗が観測できること。`IPAddressDeny` の遮断は timeout として現れ、unit は active のままなので doctor の unit 検査は緑を保つ。tool を呼ぶまで表面化しない。

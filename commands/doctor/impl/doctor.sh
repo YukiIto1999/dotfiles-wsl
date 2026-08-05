@@ -18,7 +18,7 @@ case "${1-}" in
 esac
 
 units=@declaredUnits@
-targets=@mcpTargets@
+probes=@mcpProbes@
 gateway=@gatewayUrl@
 
 failed=()
@@ -39,7 +39,7 @@ if ! curl -sS -m 10 -o /dev/null \
 fi
 
 # gateway が答えても、target が fanout で落ちていれば tool は使えない。
-# 宣言した target 名が tools/list に現れることまで見る
+# target の probe tool が tools/list に現れることまで見る。実際の tools/call は Task 9 で扱う
 session=$(curl -sS -m 10 -D- -o /dev/null \
   -H 'content-type: application/json' \
   -H 'accept: application/json, text/event-stream' \
@@ -53,8 +53,8 @@ if [ -n "$session" ]; then
     -H "mcp-session-id: $session" \
     -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
     "$gateway" 2>/dev/null | grep -oE '"name":"[a-z0-9_-]+' | sed 's/"name":"//')
-  for target in $targets; do
-    printf '%s\n' "$tools" | grep -q "^${target}_" || failed+=("target=$target")
+  for probe in $probes; do
+    printf '%s\n' "$tools" | grep -qx "$probe" || failed+=("probe=$probe")
   done
 fi
 

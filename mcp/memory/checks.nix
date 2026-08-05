@@ -18,8 +18,8 @@ let
     agentmemoryUrl = expectedUrl;
     version = expectedVersion;
   };
-  front = hostConfig.my.contract.mcp.fronts.memory;
-  target = hostConfig.my.mcp.targets.memory;
+  front = hostConfig.dotfiles.mcp.fronts.memory;
+  target = hostConfig.dotfiles.mcp.targets.memory;
   execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
   execTokens = helpers.execTokens.tokensOf execStart;
 in

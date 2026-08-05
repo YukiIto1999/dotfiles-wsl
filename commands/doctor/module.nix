@@ -9,8 +9,6 @@
 }:
 
 let
-  cfg = config.my;
-
   # 検証対象は宣言から導く。別の roster を持つと宣言と乖離する
   # 常駐しない oneshot は完了後に inactive になる。この repo が宣言し、かつ
   # 常駐する service だけを active であるべき対象にする
@@ -31,6 +29,10 @@ let
     unit.wantedBy or [ ] != [ ] && (unit.serviceConfig.Type or "simple") != "oneshot"
   ) declaredHere;
 
+  mcpProbes = lib.mapAttrsToList (
+    target: contract: "${target}_${contract.probe.tool}"
+  ) config.dotfiles.mcp.targets;
+
   doctor = mkCommand {
     name = "dotfiles-doctor";
     src = ./impl/doctor.sh;
@@ -41,8 +43,8 @@ let
     ];
     vars = {
       declaredUnits = lib.escapeShellArg (lib.concatStringsSep " " declaredUnits);
-      gatewayUrl = lib.escapeShellArg cfg.contract.gateway.endpoints.default.url;
-      mcpTargets = lib.escapeShellArg (lib.concatStringsSep " " (builtins.attrNames cfg.mcp.targets));
+      gatewayUrl = lib.escapeShellArg config.dotfiles.mcp.gateway.url;
+      mcpProbes = lib.escapeShellArg (lib.concatStringsSep " " mcpProbes);
     };
   };
 in

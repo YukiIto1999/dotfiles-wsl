@@ -3,7 +3,7 @@
 let
   cfg = config.my;
   mcpConfig = pkgs.replaceVars ./assets/mcp_config.json {
-    gatewayUrl = cfg.contract.gateway.endpoints.default.url;
+    gatewayUrl = config.dotfiles.mcp.gateway.url;
   };
 in
 {

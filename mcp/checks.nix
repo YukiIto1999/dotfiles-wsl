@@ -3,13 +3,23 @@
   pkgs,
   lib,
   hostConfig,
+  hostOptions,
+  self,
+  units,
+  variantConfig,
   ...
 }:
 
 let
-  fronts = builtins.attrValues hostConfig.my.contract.mcp.fronts;
+  expectedContract = builtins.fromJSON (builtins.readFile ./fixtures/target-contract.json);
+  expectedProviders = expectedContract.enabledProviders;
+  mcpOptions = hostOptions.dotfiles.mcp;
+  enabledProviders = hostConfig.dotfiles.mcp.enabledProviders;
+  frontsByName = hostConfig.dotfiles.mcp.fronts;
+  fronts = builtins.attrValues frontsByName;
   services = hostConfig.systemd.services;
-  targets = hostConfig.my.mcp.targets;
+  targets = hostConfig.dotfiles.mcp.targets;
+  variantTargets = variantConfig.dotfiles.mcp.targets;
   configOf = front: services.${front.service}.serviceConfig;
 
   # typo した wait 先は systemd が黙って無視するので、宣言時に実在を確かめる
@@ -36,16 +46,9 @@ let
     !(onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port)
   ) fronts;
 
-  # 外へ出る front を増やす変更は必ず diff に現れる。宣言だけで制限は外せない
-  expectedNetworkFronts = [
-    "chrome-devtools"
-    "codex"
-    "context7"
-    "github-account-1"
-    "github-account-2"
-    "github-account-3"
-    "playwright"
-  ];
+  expectedNetworkFronts = builtins.attrNames (
+    lib.filterAttrs (_: target: target.needsNetwork) expectedContract.targets
+  );
 
   actualNetworkFronts = lib.sort builtins.lessThan (
     builtins.attrNames (lib.filterAttrs (_: target: target.needsNetwork) targets)
@@ -61,19 +64,507 @@ let
     )
   ) fronts;
 
+  overrestricted = builtins.filter (
+    front:
+    targets.${front.name}.needsNetwork
+    && (
+      (configOf front).IPAddressDeny or null != null || (configOf front).IPAddressAllow or null != null
+    )
+  ) fronts;
+
+  dependencyDrift = builtins.filter (
+    front:
+    let
+      target = targets.${front.name};
+      service = services.${front.service};
+    in
+    service.after != [ "network.target" ] ++ target.waitUnits || service.requires != target.waitUnits
+  ) fronts;
+
+  expectedFronts = lib.mapAttrs (name: target: {
+    inherit name;
+    inherit (target) port;
+    service = "mcp-front-${name}";
+    runtimeDirectory = "mcp-front-${name}";
+    runtimeDirectoryPath = "/run/mcp-front-${name}";
+    url = "http://127.0.0.1:${toString target.port}/mcp";
+  }) expectedContract.targets;
+
+  projectTargets = lib.mapAttrs (
+    _: target: {
+      inherit (target)
+        needsNetwork
+        port
+        probe
+        provider
+        waitUnits
+        ;
+    }
+  );
+  targetContractMatches =
+    candidateTargets: projectTargets candidateTargets == expectedContract.targets;
+
+  subOptions =
+    option: builtins.removeAttrs (option.type.nestedTypes.elemType.getSubOptions [ ]) [ "_module" ];
+  targetOptions = subOptions mcpOptions.targets;
+  probeOptions = builtins.removeAttrs (targetOptions.probe.type.getSubOptions [ ]) [ "_module" ];
+  frontOptions = subOptions mcpOptions.fronts;
+  optionMetadata = {
+    enabledProviders = {
+      type = mcpOptions.enabledProviders.type.name;
+      elementType = mcpOptions.enabledProviders.type.nestedTypes.elemType.name;
+      internal = mcpOptions.enabledProviders.internal or false;
+      readOnly = mcpOptions.enabledProviders.readOnly or false;
+      hasDefault = mcpOptions.enabledProviders ? default;
+    };
+    targets = {
+      type = mcpOptions.targets.type.name;
+      elementType = mcpOptions.targets.type.nestedTypes.elemType.name;
+      internal = mcpOptions.targets.internal or false;
+      readOnly = mcpOptions.targets.readOnly or false;
+      hasDefault = mcpOptions.targets ? default;
+      inherit (mcpOptions.targets) default;
+      fields = builtins.mapAttrs (_: option: option.type.name) targetOptions;
+      serveResultType = targetOptions.serve.type.nestedTypes.elemType.name;
+      waitUnitsElementType = targetOptions.waitUnits.type.nestedTypes.elemType.name;
+      probeReadOnly = targetOptions.probe.readOnly or false;
+      probeFields = builtins.mapAttrs (_: option: option.type.name) probeOptions;
+      needsNetworkDefault = targetOptions.needsNetwork.default;
+      waitUnitsDefault = targetOptions.waitUnits.default;
+    };
+    fronts = {
+      type = mcpOptions.fronts.type.name;
+      elementType = mcpOptions.fronts.type.nestedTypes.elemType.name;
+      internal = mcpOptions.fronts.internal or false;
+      readOnly = mcpOptions.fronts.readOnly or false;
+      hasDefault = mcpOptions.fronts ? default;
+      fields = builtins.mapAttrs (_: option: option.type.name) frontOptions;
+    };
+    chromium = {
+      type = mcpOptions.chromium.type.name;
+      internal = mcpOptions.chromium.internal or false;
+      readOnly = mcpOptions.chromium.readOnly or false;
+      hasDefault = mcpOptions.chromium ? default;
+    };
+  };
+  expectedOptionMetadata = {
+    enabledProviders = {
+      type = "listOf";
+      elementType = "str";
+      internal = false;
+      readOnly = false;
+      hasDefault = false;
+    };
+    targets = {
+      type = "attrsOf";
+      elementType = "submodule";
+      internal = true;
+      readOnly = false;
+      hasDefault = true;
+      default = { };
+      fields = {
+        provider = "str";
+        port = "intBetween";
+        serve = "functionTo";
+        needsNetwork = "bool";
+        waitUnits = "listOf";
+        probe = "submodule";
+      };
+      serveResultType = "str";
+      waitUnitsElementType = "str";
+      probeReadOnly = true;
+      probeFields = {
+        tool = "str";
+        args = "attrsOf";
+        timeout = "positiveInt";
+      };
+      needsNetworkDefault = false;
+      waitUnitsDefault = [ ];
+    };
+    fronts = {
+      type = "attrsOf";
+      elementType = "submodule";
+      internal = true;
+      readOnly = true;
+      hasDefault = false;
+      fields = {
+        name = "str";
+        port = "unsignedInt16";
+        url = "str";
+        service = "str";
+        runtimeDirectory = "str";
+        runtimeDirectoryPath = "str";
+      };
+    };
+    chromium = {
+      type = "package";
+      internal = true;
+      readOnly = true;
+      hasDefault = false;
+    };
+  };
+  optionSchemaMatches = candidate: candidate == expectedOptionMetadata;
+
+  globalArgumentOwnership = import ./impl/global-argument-ownership.nix {
+    inherit lib;
+    inherit (helpers.unitOwnership) resolveUnitOwner;
+  };
+  resultOption = lib.mkOption { type = lib.types.str; };
+  evaluateInjection =
+    module: consumer:
+    lib.evalModules {
+      modules = [
+        module
+        consumer
+      ];
+    };
+  directGlobalArgumentEvaluation = evaluateInjection ./fixtures/global-args/direct.nix (
+    { mkNpmMcp, ... }:
+    {
+      options.fixtureResult = resultOption;
+      config.fixtureResult = mkNpmMcp;
+    }
+  );
+  nestedGlobalArgumentEvaluation = evaluateInjection ./fixtures/global-args/nested.nix (
+    { mkMcpServer, ... }:
+    {
+      options.fixtureResult = resultOption;
+      config.fixtureResult = mkMcpServer;
+    }
+  );
+  importedGlobalArgumentEvaluation = evaluateInjection ./codex/fixtures/global-args/importer.nix (
+    { serveOverProxy, ... }:
+    {
+      options.fixtureResult = resultOption;
+      config.fixtureResult = serveOverProxy;
+    }
+  );
+  nonMcpFixtureOwner = "commands";
+  nonMcpGlobalArgumentEvaluation =
+    evaluateInjection
+      {
+        _file = "${self}/${nonMcpFixtureOwner}/fixtures/non-mcp-global-argument.nix";
+        config._module.args.legitimateHelper = "legitimate-injection";
+      }
+      (
+        { legitimateHelper, ... }:
+        {
+          options.fixtureResult = resultOption;
+          config.fixtureResult = legitimateHelper;
+        }
+      );
+
+  repositoryDefinitions =
+    definitions:
+    map (definition: {
+      file = lib.removePrefix "${self}/" (toString definition.file);
+      inherit (definition) value;
+    }) (builtins.filter (definition: lib.hasPrefix "${self}/" (toString definition.file)) definitions);
+  definitionsOf =
+    evaluation: repositoryDefinitions evaluation.options._module.args.definitionsWithLocations;
+  fixtureScan = globalArgumentOwnership.scan {
+    inherit units;
+    definitions = lib.concatMap definitionsOf [
+      directGlobalArgumentEvaluation
+      nestedGlobalArgumentEvaluation
+      importedGlobalArgumentEvaluation
+    ];
+  };
+  nonMcpFixtureScan = globalArgumentOwnership.scan {
+    inherit units;
+    definitions = definitionsOf nonMcpGlobalArgumentEvaluation;
+  };
+  emptyGlobalArgumentScan = globalArgumentOwnership.scan {
+    units = [ ];
+    definitions = [ ];
+  };
+  unresolvedGlobalArgumentScan = globalArgumentOwnership.scan {
+    units = [
+      {
+        id = "mcp/codex";
+        path = "/fixture/mcp/codex";
+      }
+    ];
+    definitions = [
+      {
+        file = "mcp/orphan/impl/injected.nix";
+        value.serveOverProxy = "unresolved-injection";
+      }
+    ];
+  };
+  actualGlobalArgumentScan = globalArgumentOwnership.scan {
+    inherit units;
+    definitions = repositoryDefinitions hostOptions._module.args.definitionsWithLocations;
+  };
+
 in
 {
+  mcp-provider-roster =
+    let
+      provided = lib.unique (map (target: target.provider) (builtins.attrValues targets));
+      variantProvided = lib.unique (map (target: target.provider) (builtins.attrValues variantTargets));
+    in
+    assert expectedProviders != [ ];
+    assert lib.sort builtins.lessThan enabledProviders == expectedProviders;
+    assert lib.sort builtins.lessThan provided == expectedProviders;
+    assert variantConfig.dotfiles.mcp.enabledProviders == expectedProviders;
+    assert lib.sort builtins.lessThan variantProvided == expectedProviders;
+    pkgs.runCommandLocal "check-mcp-provider-roster" { } "touch $out";
+
+  mcp-target-contract =
+    assert expectedContract.targets != { };
+    assert targetContractMatches targets;
+    assert targetContractMatches variantTargets;
+    assert optionSchemaMatches optionMetadata;
+    assert !(optionSchemaMatches (lib.recursiveUpdate optionMetadata { fronts.readOnly = false; }));
+    assert !(optionSchemaMatches (lib.recursiveUpdate optionMetadata { chromium.readOnly = false; }));
+    assert !(optionSchemaMatches (lib.recursiveUpdate optionMetadata { targets.type = "attrs"; }));
+    assert targetOptions.port.type.check 8770;
+    assert targetOptions.port.type.check 8789;
+    assert !(targetOptions.port.type.check 8769);
+    assert !(targetOptions.port.type.check 8790);
+    assert probeOptions.args.type.nestedTypes.elemType.name == "anything";
+    pkgs.runCommandLocal "check-mcp-target-contract" { } "touch $out";
+
+  mcp-contract-mutations =
+    let
+      expectedTargets = lib.mapAttrs (
+        name: target:
+        target
+        // {
+          serve = port: "${name}:${toString port}";
+        }
+      ) expectedContract.targets;
+
+      assertionsPass =
+        enabled: candidateTargets:
+        let
+          evaluation = lib.evalModules {
+            specialArgs = { inherit pkgs; };
+            modules = [
+              ./module.nix
+              (
+                { lib, ... }:
+                {
+                  options = {
+                    my = {
+                      accounts = lib.mkOption { type = lib.types.listOf lib.types.str; };
+                      username = lib.mkOption { type = lib.types.str; };
+                      homeDir = lib.mkOption { type = lib.types.str; };
+                    };
+                    assertions = lib.mkOption {
+                      type = lib.types.listOf lib.types.raw;
+                      default = [ ];
+                    };
+                    systemd.services = lib.mkOption {
+                      type = lib.types.attrsOf lib.types.raw;
+                      default = { };
+                    };
+                  };
+                  config = {
+                    my = {
+                      accounts = [
+                        "account-1"
+                        "account-2"
+                        "account-3"
+                      ];
+                      username = "nixos";
+                      homeDir = "/home/nixos";
+                    };
+                    dotfiles.mcp = {
+                      enabledProviders = enabled;
+                      targets = candidateTargets;
+                    };
+                  };
+                }
+              )
+            ];
+          };
+          result = builtins.tryEval (
+            builtins.deepSeq evaluation.config.assertions (
+              lib.all (entry: entry.assertion) evaluation.config.assertions
+            )
+          );
+        in
+        result.success && result.value;
+
+      renameTarget =
+        from: to: candidateTargets:
+        builtins.removeAttrs candidateTargets [ from ] // { "${to}" = candidateTargets.${from}; };
+      updateTarget =
+        name: update: candidateTargets:
+        candidateTargets // { "${name}" = update candidateTargets.${name}; };
+
+      missingProvider = updateTarget "memory" (
+        target: builtins.removeAttrs target [ "provider" ]
+      ) expectedTargets;
+      extraProvider = updateTarget "memory" (target: target // { provider = "extra"; }) expectedTargets;
+      underscoreId = renameTarget "memory" "memory_bad" expectedTargets;
+      prefixId = expectedTargets // {
+        "codex-child" = expectedTargets.codex // {
+          port = 8783;
+        };
+      };
+      duplicatePort = updateTarget "memory" (
+        target: target // { port = expectedTargets.codex.port; }
+      ) expectedTargets;
+      wrongGithubId = renameTarget "github-account-1" "github-wrong" expectedTargets;
+
+      probeDrift = updateTarget "memory" (
+        target:
+        target
+        // {
+          probe = target.probe // {
+            tool = "memory_save";
+          };
+        }
+      ) expectedTargets;
+      networkDrift = updateTarget "searxng" (target: target // { needsNetwork = true; }) expectedTargets;
+
+      dependenciesValid =
+        candidateServices:
+        lib.all (
+          front:
+          let
+            target = targets.${front.name};
+            service = candidateServices.${front.service};
+          in
+          service.after == [ "network.target" ] ++ target.waitUnits && service.requires == target.waitUnits
+        ) fronts;
+      crawl4aiService = frontsByName.crawl4ai.service;
+      missingAfter = services // {
+        "${crawl4aiService}" = services.${crawl4aiService} // {
+          after = [ "network.target" ];
+        };
+      };
+      missingRequires = services // {
+        "${crawl4aiService}" = services.${crawl4aiService} // {
+          requires = [ ];
+        };
+      };
+
+      networkPolicyValid =
+        candidateServices:
+        lib.all (
+          front:
+          let
+            target = targets.${front.name};
+            serviceConfig = candidateServices.${front.service}.serviceConfig;
+          in
+          if target.needsNetwork then
+            (serviceConfig.IPAddressDeny or null) == null && (serviceConfig.IPAddressAllow or null) == null
+          else
+            (serviceConfig.IPAddressDeny or null) == "any"
+            && (serviceConfig.IPAddressAllow or null) == "localhost"
+        ) fronts;
+      searxngService = frontsByName.searxng.service;
+      missingSandbox = services // {
+        "${searxngService}" = services.${searxngService} // {
+          serviceConfig = builtins.removeAttrs services.${searxngService}.serviceConfig [
+            "IPAddressDeny"
+          ];
+        };
+      };
+    in
+    assert assertionsPass expectedProviders expectedTargets;
+    assert !(assertionsPass [ ] expectedTargets);
+    assert !(assertionsPass (expectedProviders ++ [ "memory" ]) expectedTargets);
+    assert !(assertionsPass (lib.remove "memory" expectedProviders) expectedTargets);
+    assert !(assertionsPass (expectedProviders ++ [ "extra" ]) expectedTargets);
+    assert !(assertionsPass expectedProviders missingProvider);
+    assert !(assertionsPass expectedProviders extraProvider);
+    assert !(assertionsPass expectedProviders underscoreId);
+    assert !(assertionsPass expectedProviders prefixId);
+    assert !(assertionsPass expectedProviders duplicatePort);
+    assert !(assertionsPass expectedProviders wrongGithubId);
+    assert targetContractMatches expectedTargets;
+    assert !(targetContractMatches probeDrift);
+    assert !(targetContractMatches networkDrift);
+    assert dependenciesValid services;
+    assert !(dependenciesValid missingAfter);
+    assert !(dependenciesValid missingRequires);
+    assert networkPolicyValid services;
+    assert !(networkPolicyValid missingSandbox);
+    pkgs.runCommandLocal "check-mcp-contract-mutations" { } "touch $out";
+
+  mcp-source-boundary =
+    assert directGlobalArgumentEvaluation.config.fixtureResult == "direct-injection";
+    assert nestedGlobalArgumentEvaluation.config.fixtureResult == "nested-injection";
+    assert importedGlobalArgumentEvaluation.config.fixtureResult == "imported-injection";
+    assert nonMcpGlobalArgumentEvaluation.config.fixtureResult == "legitimate-injection";
+    assert fixtureScan.coverage.definitionCount == 3;
+    assert fixtureScan.coverage.argumentCount == 3;
+    assert fixtureScan.coverage.resolvedArgumentCount == 3;
+    assert
+      fixtureScan.violations == [
+        "mcp/fixtures/global-args/direct.nix:_module.args.mkNpmMcp"
+        "mcp/fixtures/global-args/nested.nix:_module.args.mkMcpServer"
+        "mcp/codex/fixtures/global-args/impl/injected.nix:_module.args.serveOverProxy"
+      ];
+    assert nonMcpFixtureScan.diagnostics == [ ];
+    assert nonMcpFixtureScan.violations == [ ];
+    assert
+      emptyGlobalArgumentScan.scanIntegrityViolations == [
+        "empty-scan:units=0,definitions=0,arguments=0"
+        "no-mcp-units"
+      ];
+    assert
+      unresolvedGlobalArgumentScan.unresolvedDefinitionFiles == [
+        "mcp/orphan/impl/injected.nix"
+      ];
+    assert
+      unresolvedGlobalArgumentScan.scanIntegrityViolations == [
+        "unresolved-scan:arguments=1,resolved=0"
+        "unresolved-definitions=mcp/orphan/impl/injected.nix"
+      ];
+    assert actualGlobalArgumentScan.violations == [ ];
+    assert actualGlobalArgumentScan.scanIntegrityViolations == [ ];
+    assert lib.assertMsg (
+      actualGlobalArgumentScan.diagnostics == [ ]
+    ) actualGlobalArgumentScan.diagnosticText;
+    assert !builtins.hasAttr "mcp" hostOptions.my;
+    assert !builtins.hasAttr "gateway" hostOptions.my;
+    assert !builtins.hasAttr "mcp" hostConfig.my.contract;
+    assert !builtins.hasAttr "gateway" hostConfig.my.contract;
+    pkgs.runCommandLocal "check-mcp-source-boundary" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
+      set -euo pipefail
+
+      for obsolete in ${
+        lib.escapeShellArgs [
+          ("my." + "mcp")
+          ("my." + "gateway")
+          ("my.contract." + "mcp")
+          ("my.contract." + "gateway")
+          ("gateway." + "endpoints")
+        ]
+      }; do
+          if grep -R -nF "$obsolete" ${self}; then
+          echo "obsolete MCP namespace found: $obsolete" >&2
+          exit 1
+        fi
+      done
+
+      touch $out
+    '';
+
   # front は宣言した port で loopback に listen し、書き込み領域を持つ
   mcp-front-contract =
     assert fronts != [ ];
-    # 片方だけ増減すると、宣言した target が front を持たないまま緑になる
-    assert map (front: front.name) fronts == builtins.attrNames targets;
+    assert builtins.attrNames targets == builtins.attrNames expectedContract.targets;
+    assert frontsByName == expectedFronts;
     assert lib.all (front: (configOf front).RuntimeDirectory == front.runtimeDirectory) fronts;
     assert lib.all (front: (configOf front).RuntimeDirectoryMode == "0700") fronts;
     assert lib.all (front: (configOf front).User == hostConfig.my.username) fronts;
+    assert lib.all (front: (configOf front).Environment == [ "HOME=${hostConfig.my.homeDir}" ]) fronts;
+    assert lib.all (front: (configOf front).MemoryMax == "2G") fronts;
+    assert lib.all (front: (configOf front).Restart == "always") fronts;
+    assert lib.all (front: (configOf front).RestartSec == "5s") fronts;
+    assert lib.all (front: services.${front.service}.wantedBy == [ "multi-user.target" ]) fronts;
     assert missingWaits == [ ];
     assert boundElsewhere == [ ];
     assert unrestricted == [ ];
+    assert overrestricted == [ ];
+    assert dependencyDrift == [ ];
     assert actualNetworkFronts == expectedNetworkFronts;
     pkgs.runCommandLocal "check-mcp-front-contract" { } "touch $out";
 

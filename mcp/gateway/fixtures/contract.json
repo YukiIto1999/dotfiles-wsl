@@ -1,0 +1,20 @@
+{
+  "id": "default",
+  "port": 8765,
+  "runtimeDirectory": "agentgateway-default",
+  "service": "agentgateway-default",
+  "targets": [
+    "chrome-devtools",
+    "codex",
+    "context7",
+    "crawl4ai",
+    "github-account-1",
+    "github-account-2",
+    "github-account-3",
+    "memory",
+    "playwright",
+    "searxng",
+    "sonarqube"
+  ],
+  "url": "http://127.0.0.1:8765/mcp"
+}

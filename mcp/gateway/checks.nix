@@ -2,15 +2,47 @@
   pkgs,
   lib,
   hostConfig,
+  hostOptions,
+  variantConfig,
   ...
 }:
 
 let
   agentgateway = pkgs.callPackage ./package.nix { };
-  artifactSource = id: hostConfig.my.artifacts.${id}.source;
+  artifact = hostConfig.my.artifacts."mcp/gateway/default/config";
+  expected = builtins.fromJSON (builtins.readFile ./fixtures/contract.json);
+  gateway = hostConfig.dotfiles.mcp.gateway;
+  fronts = hostConfig.dotfiles.mcp.fronts;
+  service = hostConfig.systemd.services.${gateway.service};
+  inherit (service) serviceConfig;
+  frontServices = map (front: front.service) (builtins.attrValues fronts);
+  deployedConfig = hostConfig.environment.etc."${gateway.runtimeDirectory}/config.yaml";
+  sourceArtifacts = builtins.filter (entry: entry.source == gateway.source) (
+    builtins.attrValues hostConfig.my.artifacts
+  );
+  variantGateway = variantConfig.dotfiles.mcp.gateway;
+  variantArtifact = variantConfig.my.artifacts."mcp/gateway/default/config";
+  variantDeployedConfig =
+    variantConfig.environment.etc."${variantGateway.runtimeDirectory}/config.yaml";
+  expectedVariant = expected // {
+    port = 9876;
+    url = "http://127.0.0.1:9876/mcp";
+  };
 
-  # cargo test は filter が 0 件でも成功する。patch 側で test 名が変わると
-  # package の build は緑のまま「何も実行しない check」になる
+  dependencyFree =
+    candidate:
+    lib.all (dependencies: lib.intersectLists frontServices dependencies == [ ]) [
+      candidate.after
+      candidate.requires
+      candidate.wants
+    ];
+  firstFrontService = builtins.head frontServices;
+  dependencyMutations = [
+    (service // { after = service.after ++ [ firstFrontService ]; })
+    (service // { requires = [ firstFrontService ]; })
+    (service // { wants = [ firstFrontService ]; })
+  ];
+
   lifecyclePatch = builtins.readFile ./package/mcp-downstream-lifecycle.patch;
   filter = builtins.head agentgateway.checkFlags;
   definedTests = builtins.filter (match: match != null) (
@@ -20,75 +52,122 @@ let
   );
 in
 {
-  # gateway は front へ接続するだけで子 process を作らない
   gateway-front-contract =
+    assert fronts != { };
+    assert gateway.targets == expected.targets;
+    assert gateway.targets == builtins.attrNames fronts;
     assert lib.all (front: front.url == "http://127.0.0.1:${toString front.port}/mcp") (
-      builtins.attrValues hostConfig.my.contract.mcp.fronts
+      builtins.attrValues fronts
     );
-    assert lib.all (front: hostConfig.systemd.services ? "${front.service}") (
-      builtins.attrValues hostConfig.my.contract.mcp.fronts
-    );
-    pkgs.runCommandLocal "check-gateway-front-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } (
-      lib.concatMapStrings (endpoint: ''
-        yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | .name + " " + .mcp.host] | sort | .[]' \
-          ${endpoint.source} > actual-targets
-        printf '%s' ${
-          lib.escapeShellArg (
-            lib.concatStringsSep "\n" (
-              lib.sort builtins.lessThan (
-                lib.mapAttrsToList (name: front: "${name} ${front.url}") hostConfig.my.contract.mcp.fronts
-              )
-            )
+    assert lib.all (front: hostConfig.systemd.services ? ${front.service}) (builtins.attrValues fronts);
+    assert dependencyFree service;
+    assert lib.all (candidate: !(dependencyFree candidate)) dependencyMutations;
+    pkgs.runCommandLocal "check-gateway-front-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+      set -euo pipefail
+
+      yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | .name + " " + .mcp.host] | sort | .[]' \
+        ${gateway.source} > actual-targets
+      printf '%s' ${
+        lib.escapeShellArg (
+          lib.concatStringsSep "\n" (
+            lib.sort builtins.lessThan (lib.mapAttrsToList (name: front: "${name} ${front.url}") fronts)
           )
-        } > expected-targets
-        printf '\n' >> expected-targets
-        diff --unified expected-targets actual-targets
-        test "$(yq -r '.binds[].listeners[].routes[].backends[].mcp.targets[] | select(.stdio) | length' ${endpoint.source} | wc -l)" = 0
-      '') (builtins.attrValues hostConfig.my.contract.gateway.endpoints)
-      + "touch $out"
-    );
+        )
+      } > expected-targets
+      printf '\n' >> expected-targets
+      diff --unified expected-targets actual-targets
+      test "$(yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | select(.stdio)] | length' ${gateway.source})" = 0
+      touch $out
+    '';
 
-  # 生成した artifact が gateway と backend の実配備先へそのまま渡ることを検査する
   gateway-artifact-contract =
-    assert lib.all (
-      endpoint:
-      hostConfig.environment.etc."${endpoint.runtimeDirectory}/config.yaml".source
-      == artifactSource endpoint.artifact
-    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
-    # soft 上限の暫定封じ込め、session 解放の代替にはしない
-    assert lib.all (
-      endpoint: hostConfig.systemd.services."${endpoint.service}".serviceConfig.LimitNOFILE == "4096:4096"
-    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
-    # upstream は wildcard へ bind するので、通信の側で loopback へ限る
-    assert lib.all (
-      endpoint:
-      hostConfig.systemd.services."${endpoint.service}".serviceConfig.IPAddressDeny == "any"
-      && hostConfig.systemd.services."${endpoint.service}".serviceConfig.IPAddressAllow == "localhost"
-    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
-    pkgs.runCommandLocal "check-gateway-artifact-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } (
-      # schema の妥当性は読みではなく agentgateway 自身に判定させる
-      lib.concatMapStrings (endpoint: ''
-        ${agentgateway}/bin/agentgateway --validate-only -f ${endpoint.source}
-      '') (builtins.attrValues hostConfig.my.contract.gateway.endpoints)
-      + lib.concatMapStrings (endpoint: ''
-        test "$(yq -r '.config.mcp.sessionTtl' ${endpoint.source})" = 30m
-        test "$(yq -r '.config.adminAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.admin}
-        test "$(yq -r '.config.statsAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.stats}
-        test "$(yq -r '.config.readinessAddr' ${endpoint.source})" = 127.0.0.1:${toString endpoint.managementPorts.readiness}
-        yq -r '.binds[].port' ${endpoint.source} | sort > actual-binds
-        printf '%s\n' ${toString endpoint.port} | sort > expected-binds
-        diff -u expected-binds actual-binds
-      '') (builtins.attrValues hostConfig.my.contract.gateway.endpoints)
-      + "touch $out"
-    );
+    let
+      projection = {
+        inherit (gateway)
+          id
+          port
+          runtimeDirectory
+          service
+          targets
+          url
+          ;
+      };
+    in
+    assert expected.targets != [ ];
+    assert
+      builtins.attrNames gateway == [
+        "id"
+        "port"
+        "runtimeDirectory"
+        "service"
+        "source"
+        "targets"
+        "url"
+      ];
+    assert hostOptions.dotfiles.mcp.gateway.id.readOnly;
+    assert !(hostOptions.dotfiles.mcp.gateway.port.readOnly or false);
+    assert hostOptions.dotfiles.mcp.gateway.url.readOnly;
+    assert hostOptions.dotfiles.mcp.gateway.service.readOnly;
+    assert hostOptions.dotfiles.mcp.gateway.runtimeDirectory.readOnly;
+    assert hostOptions.dotfiles.mcp.gateway.source.readOnly;
+    assert hostOptions.dotfiles.mcp.gateway.source.type.name == "path";
+    assert hostOptions.dotfiles.mcp.gateway.targets.readOnly;
+    assert projection == expected;
+    assert
+      {
+        inherit (variantGateway)
+          id
+          port
+          runtimeDirectory
+          service
+          targets
+          url
+          ;
+      } == expectedVariant;
+    assert artifact.format == "yaml";
+    assert artifact.deployedAt == "/etc/agentgateway-default/config.yaml";
+    assert artifact.source == gateway.source;
+    assert deployedConfig.source == gateway.source;
+    assert builtins.length sourceArtifacts == 1;
+    assert variantGateway.source != gateway.source;
+    assert variantArtifact.source == variantGateway.source;
+    assert variantArtifact.deployedAt == "/etc/agentgateway-default/config.yaml";
+    assert variantDeployedConfig.source == variantGateway.source;
+    assert service.after == [ "network.target" ];
+    assert service.requires == [ ];
+    assert service.wants == [ ];
+    assert serviceConfig.User == hostConfig.my.username;
+    assert serviceConfig.Environment == [ "HOME=${hostConfig.my.homeDir}" ];
+    assert serviceConfig.RuntimeDirectory == gateway.runtimeDirectory;
+    assert serviceConfig.RuntimeDirectoryMode == "0700";
+    assert serviceConfig.LimitNOFILE == "4096:4096";
+    assert serviceConfig.MemoryMax == "2G";
+    assert serviceConfig.IPAddressDeny == "any";
+    assert serviceConfig.IPAddressAllow == "localhost";
+    assert serviceConfig.Restart == "always";
+    assert serviceConfig.RestartSec == "5s";
+    pkgs.runCommandLocal "check-gateway-artifact-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+      set -euo pipefail
 
-  # 配備する package そのものを build し、同梱の downstream lifecycle test を実行する
+        ${agentgateway}/bin/agentgateway --validate-only -f ${gateway.source}
+        ${agentgateway}/bin/agentgateway --validate-only -f ${variantGateway.source}
+      test "$(yq -r '.config.mcp.sessionTtl' ${gateway.source})" = 30m
+      test "$(yq -r '.config.adminAddr' ${gateway.source})" = 127.0.0.1:15000
+      test "$(yq -r '.config.statsAddr' ${gateway.source})" = 127.0.0.1:15020
+      test "$(yq -r '.config.readinessAddr' ${gateway.source})" = 127.0.0.1:15021
+        test "$(yq -r '.binds | length' ${gateway.source})" = 1
+        test "$(yq -r '.binds[0].port' ${gateway.source})" = ${toString gateway.port}
+        test "$(yq -r '.binds[0].port' ${variantGateway.source})" = ${toString variantGateway.port}
+      test "$(yq -r '.binds[0].listeners | length' ${gateway.source})" = 1
+      test "$(yq -r '.binds[0].listeners[0].routes[0].backends | length' ${gateway.source})" = 1
+      test "$(yq -r '.binds[0].listeners[0].routes[0].backends[0].mcp.failureMode' ${gateway.source})" = failOpen
+      test "$(yq -r '.binds[0].listeners[0].routes[0].policies.mcpAuthorization.rules | length' ${gateway.source})" = 1
+      test "$(yq -r '.binds[0].listeners[0].routes[0].policies.mcpAuthorization.rules[0].deny' ${gateway.source})" = 'mcp.tool.name == "web_url_read"'
+      touch $out
+    '';
+
   agentgateway-session-lifecycle =
     assert builtins.length definedTests == 3;
-    assert lib.all (
-      endpoint:
-      hostConfig.systemd.services."${endpoint.service}".serviceConfig.ExecStart
-      == "${agentgateway}/bin/agentgateway -f ${endpoint.source}"
-    ) (builtins.attrValues hostConfig.my.contract.gateway.endpoints);
+    assert serviceConfig.ExecStart == "${agentgateway}/bin/agentgateway -f ${gateway.source}";
     agentgateway;
 }

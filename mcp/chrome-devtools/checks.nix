@@ -8,7 +8,7 @@
 
 let
   inherit (helpers.execTokens) tokensOf;
-  front = hostConfig.my.contract.mcp.fronts.chrome-devtools;
+  front = hostConfig.dotfiles.mcp.fronts.chrome-devtools;
   service = hostConfig.systemd.services.${front.service}.serviceConfig;
 
   # 起動 flag は wrapper の中にある。ExecStart には mcp-proxy と wrapper しか出ない
@@ -18,12 +18,12 @@ let
 in
 {
   chrome-devtools-front =
-    assert hostConfig.my.mcp.targets.chrome-devtools.needsNetwork;
+    assert hostConfig.dotfiles.mcp.targets.chrome-devtools.needsNetwork;
     pkgs.runCommandLocal "check-chrome-devtools-front" { nativeBuildInputs = [ pkgs.gnugrep ]; } ''
       set -euo pipefail
 
       # host の chromium を使う。指定しないと npm 側が store 外から取る
-      grep -Fq -- '--executablePath ${hostConfig.my.contract.mcp.chromium}/bin/chromium' ${wrapper}
+      grep -Fq -- '--executablePath ${hostConfig.dotfiles.mcp.chromium}/bin/chromium' ${wrapper}
 
       # WSL に表示先は無い。profile も残さない
       grep -Fq -- '--headless' ${wrapper}

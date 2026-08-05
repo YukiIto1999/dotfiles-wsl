@@ -23,8 +23,8 @@ let
     crawl4aiUrl = expectedUrl;
     tokenFile = pkgs.writeText "crawl4ai-probe-token" "probe-token";
   };
-  front = hostConfig.my.contract.mcp.fronts.crawl4ai;
-  target = hostConfig.my.mcp.targets.crawl4ai;
+  front = hostConfig.dotfiles.mcp.fronts.crawl4ai;
+  target = hostConfig.dotfiles.mcp.targets.crawl4ai;
   execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
   execTokens = helpers.execTokens.tokensOf execStart;
 
@@ -45,24 +45,39 @@ let
   };
   expectedIsolationSpecJSON = builtins.toJSON expectedIsolationSpec;
   expectedIsolationTarget = {
+    provider = "crawl4ai";
     port = expectedPort;
     serve = "proxy:${lib.getExe isolationPackage}";
+    needsNetwork = false;
     waitUnits = expectedWaitUnits;
+    probe = {
+      tool = "md";
+      args = {
+        url = "http://127.0.0.1:11235/health";
+        f = "raw";
+      };
+      timeout = 60;
+    };
   };
   expectedIsolationTargetJSON = builtins.toJSON expectedIsolationTarget;
 
   mkIsolationProjection =
     sopsStub:
     let
-      evaluation = lib.evalModules {
-        specialArgs = {
-          inherit pkgs;
-          mkMcpServer =
+      isolationPkgs = pkgs // {
+        callPackage =
+          path: args:
+          if path == ../package/mk-server.nix then
             spec:
             assert builtins.toJSON spec == expectedIsolationSpecJSON;
-            isolationPackage;
-          serveOverProxy = executable: "proxy:${executable}";
-        };
+            isolationPackage
+          else if path == ../package/serve-over-proxy.nix then
+            executable: "proxy:${executable}"
+          else
+            pkgs.callPackage path args;
+      };
+      evaluation = lib.evalModules {
+        specialArgs.pkgs = isolationPkgs;
         modules = [
           ./module.nix
           (
@@ -90,14 +105,20 @@ let
                     readOnly = true;
                   };
                 };
-                my.mcp.targets = lib.mkOption {
+                dotfiles.mcp.targets = lib.mkOption {
                   default = { };
                   type = lib.types.attrsOf (
                     lib.types.submodule {
                       options = {
+                        provider = lib.mkOption { type = lib.types.str; };
                         port = lib.mkOption { type = lib.types.port; };
                         serve = lib.mkOption { type = lib.types.str; };
+                        needsNetwork = lib.mkOption {
+                          type = lib.types.bool;
+                          default = false;
+                        };
                         waitUnits = lib.mkOption { type = lib.types.listOf lib.types.str; };
+                        probe = lib.mkOption { type = lib.types.raw; };
                       };
                     }
                   );
@@ -119,10 +140,17 @@ let
           )
         ];
       };
-      isolatedTarget = evaluation.config.my.mcp.targets.crawl4ai;
+      isolatedTarget = evaluation.config.dotfiles.mcp.targets.crawl4ai;
     in
     builtins.toJSON {
-      inherit (isolatedTarget) port serve waitUnits;
+      inherit (isolatedTarget)
+        needsNetwork
+        port
+        probe
+        provider
+        serve
+        waitUnits
+        ;
     };
 
   poisonIsolationProjection = mkIsolationProjection (throw "Crawl4AI front must not depend on SOPS");

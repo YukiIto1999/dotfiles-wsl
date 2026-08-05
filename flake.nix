@@ -49,6 +49,22 @@
         "searxng"
         "sonarqube"
       ];
+      mcpEnabledProviders = [
+        "chrome-devtools"
+        "codex"
+        "context7"
+        "crawl4ai"
+        "github"
+        "memory"
+        "playwright"
+        "searxng"
+        "sonarqube"
+      ];
+      hostAccounts = [
+        "account-1"
+        "account-2"
+        "account-3"
+      ];
 
       pluginSources = {
         inherit superpowers;
@@ -80,13 +96,12 @@
     {
       nixosConfigurations.${hostName} = mkNixosSystem {
         # マシン固有の値のみ、他は各 unit の option の default
-        dotfiles.containers.enabled = containerApplications;
+        dotfiles = {
+          containers.enabled = containerApplications;
+          mcp.enabledProviders = mcpEnabledProviders;
+        };
         my = {
-          accounts = [
-            "account-1"
-            "account-2"
-            "account-3"
-          ];
+          accounts = hostAccounts;
           git.workIdentity = "~/projects/business/";
         };
       };
@@ -140,13 +155,16 @@
           inherit (self.nixosConfigurations.${hostName}) pkgs;
           inherit (pkgs) lib;
 
-          # port と accounts を変えた第二の評価。artifact が宣言に追随することを示す
+          # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
           artifactVariantSystem = mkNixosSystem {
-            dotfiles.containers.enabled = containerApplications;
-            my = {
-              accounts = [ ];
-              gateway.endpoints.default.port = 9876;
+            dotfiles = {
+              containers.enabled = containerApplications;
+              mcp = {
+                enabledProviders = mcpEnabledProviders;
+                gateway.port = 9876;
+              };
             };
+            my.accounts = hostAccounts;
           };
           artifactVariantConfig = artifactVariantSystem.config;
 
@@ -169,12 +187,13 @@
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
             execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
+            unitOwnership = import ./gates/impl/unit-ownership.nix { inherit lib; };
             containerArgv = import ./containers/impl/container-argv.nix {
               inherit lib hostConfig;
               execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
             };
           };
-          # port と accounts を変えた第二の評価。artifact が宣言に追随することを示す
+          # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
           variantConfig = artifactVariantConfig;
         } units;
     };

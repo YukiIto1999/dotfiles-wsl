@@ -49,8 +49,8 @@
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| default Git identity を変える | [`sops/module.nix`](../../sops/module.nix) の consumer 宣言と [`secrets/secrets.yaml`](../../secrets/secrets.yaml) の暗号化済み値 | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
-| work identity の対象と値を変える | [`flake.nix`](../../flake.nix) の `dotfiles.toolchain.git.workIdentity`、[`sops/module.nix`](../../sops/module.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
+| default Git identity を変える | [`accounts/module.nix`](../../accounts/module.nix) の secret と template、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) の暗号化済み値 | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
+| work identity の対象と値を変える | [`flake.nix`](../../flake.nix) の `dotfiles.toolchain.git.workIdentity`、[`toolchain/git/module.nix`](../../toolchain/git/module.nix) の option と consumer、[`accounts/module.nix`](../../accounts/module.nix) の secret と template、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | GitHub account を増減する | [`flake.nix`](../../flake.nix) の `dotfiles.accounts`、[`accounts/module.nix`](../../accounts/module.nix)、[`mcp/github/module.nix`](../../mcp/github/module.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | account roster と暗号化済み値を同じ変更に含め、`dotfiles-rebuild` |
 | backend が使う secret を追加または変更する | 対応する [`containers/NAME/module.nix`](../../containers) の `sops.secrets` と template、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | host recipient を追加する | [`secrets/.sops.yaml`](../../secrets/.sops.yaml) の `hosts` と `creation_rules` | [SOPS の鍵](../operations/sops-enrollment.md)に従って `sops updatekeys` し、新しい鍵で復号できることを確かめてから旧 recipient を外す |

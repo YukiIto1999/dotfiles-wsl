@@ -1,5 +1,10 @@
 { lib, ... }:
 
 {
-  dotfiles.accounts = lib.mkForce [ "missing-account" ];
+  dotfiles.accounts = lib.mkForce [
+    "account-1"
+    "account-2"
+    "account-3"
+    "missing-account"
+  ];
 }

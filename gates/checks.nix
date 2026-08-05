@@ -86,9 +86,14 @@ let
     lib.findSingle (package: lib.getName package == "wslview") (throw "wslview package is missing")
       (throw "multiple wslview packages are installed")
       hostConfig.environment.systemPackages;
+  commandSmokeTimeoutArgs = [
+    "--kill-after=2s"
+    "10s"
+  ];
   generatedShellActual = {
     agentmemoryHooks = toString hostConfig.dotfiles.containers.agentmemory.clients.hooks;
     commands = lib.mapAttrs (_: package: lib.getExe package) hostConfig.dotfiles.commands;
+    commandSmoke.timeoutArgs = commandSmokeTimeoutArgs;
     mcpFronts = lib.mapAttrs (
       _: front: hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart
     ) hostConfig.dotfiles.mcp.fronts;
@@ -1312,9 +1317,13 @@ in
         jq -S '.commands | with_entries(.value |= split("/")[-1])' "$actual" \
           > actual-commands.json
         diff -u expected-commands.json actual-commands.json
+        jq -S '.commandSmoke.timeoutArgs' "$expected" > expected-command-smoke-timeout.json
+        jq -S '.commandSmoke.timeoutArgs' "$actual" > actual-command-smoke-timeout.json
+        diff -u expected-command-smoke-timeout.json actual-command-smoke-timeout.json
+        mapfile -t commandSmokeTimeoutArgs < <(jq -r '.commandSmoke.timeoutArgs[]' "$actual")
         while IFS=$'\t' read -r id command; do
           lintGenerated "$command"
-          timeout 10 "$command" --help > "$id-help"
+          timeout "''${commandSmokeTimeoutArgs[@]}" "$command" --help > "$id-help"
           test -s "$id-help"
         done < <(jq -r '.commands | to_entries[] | [.key, .value] | @tsv' "$actual")
 

@@ -45,8 +45,8 @@
 | agentmemory backend の image、設定、mount、環境 file、health、client package が固定値と一致する | `agentmemory-container` |
 | agentmemory MCP front の package、port、backend unit が一致し、initialize に応答する | `agentmemory-front` |
 | Crawl4AI backend の image、publish、credential option の型、read-only 属性、値、environment file、health contract が固定値と一致する | `crawl4ai-container` |
-| Crawl4AI MCP front の artifact と target の観測可能な projection が、SOPS の poison stub、canary A、canary B を用いた各隔離評価で、固定した型付き credential / service contract と一致して initialize に応答する | `crawl4ai-front` |
-| SearXNG backend の image、publish、secret、設定 template、health contract が固定値と一致する | `searxng-container` |
+| Crawl4AI MCP front は SOPS の poison stub と canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact の環境変数と initialize probe の応答を検査する | `crawl4ai-front` |
+| SearXNG backend の image、publish、standalone secret、settings template、health contract が固定値と一致する | `searxng-container` |
 | SearXNG MCP front の package、port、backend unit が一致し、initialize に応答する | `searxng-front` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | host が有効化した container application と service contract の key が一致する | `container-application-roster` |
@@ -65,7 +65,7 @@
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-container` |
 | Crawl4AI の API token が user 用 file contract と root 所有の環境ファイルへ分かれる | `crawl4ai-container` |
-| SearXNG の server secret が root 所有の設定 template にだけ展開される | `searxng-container` |
+| SearXNG の standalone secret と settings template がそれぞれ root:root 0400 で配備される | `searxng-container` |
 
 ## 文書
 

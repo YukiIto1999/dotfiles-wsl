@@ -583,73 +583,69 @@ in
   # backend の secret と service contract を持つと ownership が再び混ざる
   mcp-no-container-ownership =
     let
+      ownershipFixture = import ./fixtures/mcp-container-ownership.nix;
+      mcpContainerOwnership = import ./impl/mcp-container-ownership.nix { inherit lib; };
+      fixtureOwners = map (
+        case:
+        let
+          owner = mcpContainerOwnership.resolveUnitOwner ownershipFixture.scan.units case.file;
+        in
+        if owner == null then null else owner.id
+      ) ownershipFixture.ownerCases;
+      expectedFixtureOwners = map (case: case.expected) ownershipFixture.ownerCases;
+      fixtureScan = mcpContainerOwnership.scan ownershipFixture.scan;
+      emptyFixtureScan = mcpContainerOwnership.scan ownershipFixture.emptyScan;
+      unresolvedFixtureScan = mcpContainerOwnership.scan ownershipFixture.unresolvedScan;
+      combinedFixtureScan = mcpContainerOwnership.scan ownershipFixture.combinedScan;
+
       relativeFile = file: lib.removePrefix "${self}/" (toString file);
-      isMcpModule = file: lib.hasPrefix "mcp/" file && lib.hasSuffix "/module.nix" file;
-      targetOf =
-        file:
-        let
-          segments = lib.splitString "/" file;
-        in
-        builtins.elemAt segments (builtins.length segments - 2);
-
-      violationsFor =
-        label: definitions:
-        lib.concatMap (
-          definition:
-          let
-            file = relativeFile definition.file;
-          in
-          lib.optional (isMcpModule file) "${file}:${label}"
-        ) definitions;
-
-      serviceViolations = lib.concatMap (
-        definition:
-        let
+      relativeDefinitions =
+        definitions:
+        map (definition: {
           file = relativeFile definition.file;
-          target = targetOf file;
-        in
-        lib.optional (
-          isMcpModule file && builtins.hasAttr target definition.value
-        ) "${file}:dotfiles.containers.services.${target}"
-      ) hostOptions.dotfiles.containers.services.definitionsWithLocations;
+          inherit (definition) value;
+        }) definitions;
+      actualScan = mcpContainerOwnership.scan {
+        inherit units;
+        definitions = {
+          ociContainers = relativeDefinitions hostOptions.virtualisation.oci-containers.containers.definitionsWithLocations;
+          templates = relativeDefinitions hostOptions.sops.templates.definitionsWithLocations;
+          services = relativeDefinitions hostOptions.dotfiles.containers.services.definitionsWithLocations;
+          secrets = relativeDefinitions hostOptions.sops.secrets.definitionsWithLocations;
+        };
+      };
 
-      secretViolations = lib.concatMap (
-        definition:
-        let
-          file = relativeFile definition.file;
-          target = targetOf file;
-          ownsTargetSecret = builtins.any (name: name == target || lib.hasPrefix "${target}/" name) (
-            builtins.attrNames definition.value
-          );
-        in
-        lib.optional (isMcpModule file && ownsTargetSecret) "${file}:sops.secrets.${target}"
-      ) hostOptions.sops.secrets.definitionsWithLocations;
-
-      violations =
-        violationsFor "virtualisation.oci-containers" hostOptions.virtualisation.oci-containers.containers.definitionsWithLocations
-        ++ violationsFor "sops.templates" hostOptions.sops.templates.definitionsWithLocations
-        ++ serviceViolations
-        ++ secretViolations;
-
-      mcpModuleCount = builtins.length (
-        builtins.filter (
-          unit: lib.hasPrefix "mcp/" unit.id && builtins.pathExists (unit.path + "/module.nix")
-        ) units
-      );
     in
+    assert lib.assertMsg (fixtureOwners == expectedFixtureOwners) (
+      "MCP ownership resolver fixture mismatch: actual=${builtins.toJSON fixtureOwners} "
+      + "expected=${builtins.toJSON expectedFixtureOwners}"
+    );
+    assert lib.assertMsg (fixtureScan == ownershipFixture.expectedScan) (
+      "MCP ownership detector fixture mismatch: actual=${builtins.toJSON fixtureScan} "
+      + "expected=${builtins.toJSON ownershipFixture.expectedScan}"
+    );
+    assert lib.assertMsg (emptyFixtureScan == ownershipFixture.expectedEmptyScan) (
+      "empty MCP ownership scan fixture mismatch: actual=${builtins.toJSON emptyFixtureScan} "
+      + "expected=${builtins.toJSON ownershipFixture.expectedEmptyScan}"
+    );
+    assert lib.assertMsg (unresolvedFixtureScan == ownershipFixture.expectedUnresolvedScan) (
+      "unresolved MCP ownership scan fixture mismatch: "
+      + "actual=${builtins.toJSON unresolvedFixtureScan} "
+      + "expected=${builtins.toJSON ownershipFixture.expectedUnresolvedScan}"
+    );
+    assert lib.assertMsg (combinedFixtureScan == ownershipFixture.expectedCombinedScan) (
+      "combined MCP ownership scan fixture mismatch: actual=${builtins.toJSON combinedFixtureScan} "
+      + "expected=${builtins.toJSON ownershipFixture.expectedCombinedScan}"
+    );
     pkgs.runCommandLocal "check-mcp-no-container-ownership"
       {
-        inherit mcpModuleCount;
-        violationText = lib.concatStringsSep " " violations;
+        inherit (actualScan) diagnosticText;
       }
       ''
         set -euo pipefail
 
-        if [ "$mcpModuleCount" -eq 0 ]; then
-          violationText="$violationText no-mcp-modules"
-        fi
-        if [ -n "$violationText" ]; then
-          echo "MCP unit owns container backend declarations: $violationText" >&2
+        if [ -n "$diagnosticText" ]; then
+          printf '%s\n' "$diagnosticText" >&2
           exit 1
         fi
         touch $out

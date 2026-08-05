@@ -100,7 +100,7 @@ in
       expected = builtins.fromJSON (builtins.readFile ./fixtures/runtime-identities.json);
       containers = hostConfig.virtualisation.oci-containers.containers;
       containerValues = builtins.attrValues containers;
-      gatewayEndpoint = hostConfig.my.contract.gateway.endpoints.default;
+      gatewayEndpoint = hostConfig.dotfiles.mcp.gateway;
 
       containerNetworks = lib.unique (
         lib.sort builtins.lessThan (
@@ -128,7 +128,7 @@ in
           builtins.length containerNetworks == 1
         ) "runtime identity requires one container network: actual=${builtins.toJSON containerNetworks}";
         {
-          mcpTargets = lib.mapAttrs (_: target: target.port) hostConfig.my.mcp.targets;
+          mcpTargets = lib.mapAttrs (_: target: target.port) hostConfig.dotfiles.mcp.targets;
           gateway = {
             inherit (gatewayEndpoint) id port service;
           };
@@ -211,6 +211,7 @@ in
   service-listener-registry =
     let
       contract = hostConfig.my.contract;
+      mcp = hostConfig.dotfiles.mcp;
 
       declaredHere = lib.unique (
         lib.concatMap (
@@ -231,8 +232,8 @@ in
 
       registered = lib.sort builtins.lessThan (
         lib.unique (
-          map (front: front.service) (builtins.attrValues contract.mcp.fronts)
-          ++ map (endpoint: endpoint.service) (builtins.attrValues contract.gateway.endpoints)
+          map (front: front.service) (builtins.attrValues mcp.fronts)
+          ++ [ mcp.gateway.service ]
           ++ [ contract.telemetry.service ]
           ++ map (name: "docker-${name}") (
             builtins.attrNames hostConfig.virtualisation.oci-containers.containers
@@ -252,6 +253,7 @@ in
   loopback-port-single-owner =
     let
       contract = hostConfig.my.contract;
+      mcp = hostConfig.dotfiles.mcp;
       inherit (helpers.containerArgv)
         publishedPorts
         ;
@@ -260,20 +262,25 @@ in
         lib.mapAttrsToList (name: front: {
           owner = "mcp-front-${name}";
           inherit (front) port;
-        }) contract.mcp.fronts
-        ++ lib.mapAttrsToList (id: endpoint: {
-          owner = "agentgateway-${id}";
-          inherit (endpoint) port;
-        }) contract.gateway.endpoints
-        ++ lib.concatLists (
-          lib.mapAttrsToList (
-            id: endpoint:
-            lib.mapAttrsToList (_: port: {
-              owner = "agentgateway-${id}";
-              inherit port;
-            }) endpoint.managementPorts
-          ) contract.gateway.endpoints
-        )
+        }) mcp.fronts
+        ++ [
+          {
+            owner = mcp.gateway.service;
+            inherit (mcp.gateway) port;
+          }
+          {
+            owner = mcp.gateway.service;
+            port = 15000;
+          }
+          {
+            owner = mcp.gateway.service;
+            port = 15020;
+          }
+          {
+            owner = mcp.gateway.service;
+            port = 15021;
+          }
+        ]
         ++ lib.mapAttrsToList (_: port: {
           owner = contract.telemetry.service;
           inherit port;

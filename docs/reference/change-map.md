@@ -38,8 +38,9 @@
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| MCP target を追加または削除する | [`mcp/NAME/`](../../mcp) に `module.nix` と必要なら `package.nix` を置く。収集は flake が行う | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| MCP front の port または起動方法を変える | 対応する [`mcp/NAME/module.nix`](../../mcp) の `port` と `serve`。port は gateway に隣接する 8770-8789 から取る | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| MCP provider または target を追加、削除する | [`flake.nix`](../../flake.nix) の `dotfiles.mcp.enabledProviders` と各 [`mcp/NAME/module.nix`](../../mcp) の `dotfiles.mcp.targets`。target の固定契約は [`mcp/fixtures/target-contract.json`](../../mcp/fixtures/target-contract.json) | provider roster、target、probe、doctor probe fixture を同じ変更に含め、`dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| MCP front の port、起動方法、backend 依存を変える | 対応する [`mcp/NAME/module.nix`](../../mcp) の target。port は 8770-8789 から取り、backend unit は `waitUnits` に置く。front は [`mcp/module.nix`](../../mcp/module.nix) が導く | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| gateway の port または YAML を変える | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` と YAML 生成。gateway は単一 endpoint のまま保つ | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | Docker backend の構成を変える | 対応する [`containers/NAME/module.nix`](../../containers) と [`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix)。application の追加と削除では [`flake.nix`](../../flake.nix) の enabled roster と [`containers/checks.nix`](../../containers/checks.nix) の固定 roster も同時に変える。共通 schema と image 同期は [`containers/module.nix`](../../containers/module.nix) | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
 | upstream OCI image を更新する | 対応する [`containers/NAME/module.nix`](../../containers) の `dotfiles.containers.services.<name>.images` にある repository、digest、canonical image reference。digest は `dotfiles-image-digest <image>` で取る | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
 | 固定した package の hash を更新する | 対応する [`mcp/NAME/package.nix`](../../mcp) の hash。値は `nix store prefetch-file --hash-type sha256 --json <url>` で取る | `dotfiles-rebuild` |

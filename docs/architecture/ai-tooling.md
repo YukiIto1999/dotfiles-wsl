@@ -42,17 +42,19 @@ local skill は [`clis/assets/skills/`](../../clis/assets/skills) から自動�
 
 Claude Code の user settings と Codex の user config は CLI が更新し得るため、Home Manager activation は file がない場合か symlink の場合だけ seed を書く。managed settings と checkout 固有 config は Nix が所有し、doctor が immutable source と比較する。OpenCode と Antigravity の gateway config は Home Manager が所有する。
 
-## agentgateway と MCP target
+## MCP target、front、gateway
 
-各 [`mcp/NAME/module.nix`](../../mcp) が `my.mcp.targets.<name>` を一度だけ宣言し、収集は flake が行う。target は front の port と、その port で Streamable HTTP を話す起動 command を宣言する。target 名は gateway が公開する tool prefix の安定 contract であり、package 名とは別である。
+[`flake.nix`](../../flake.nix) の `dotfiles.mcp.enabledProviders` は、この host が必要とする provider unit を固定する。各 [`mcp/NAME/module.nix`](../../mcp) は `dotfiles.mcp.targets` に provider ID、port、起動関数、外部通信の要否、backend unit、読み取り用 probe を宣言する。provider roster と target が公開する provider 集合は完全一致し、provider が target を持たない状態も未承認 provider の target も評価時に拒否する。target 名は gateway が tool 名へ付ける prefix であり、package 名とは別である。
 
-[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。front は target ごとの systemd service として常駐し、gateway は loopback の HTTP へ接続するだけである。downstream の session が増えても process は増えない。stdio しか話さない front は `mcp-proxy` が HTTP へ載せる。
+[`mcp/module.nix`](../../mcp/module.nix) は `dotfiles.mcp.targets` から `dotfiles.mcp.fronts` を一度だけ導く。front は target ごとの systemd service として常駐し、stdio server は `mcp-proxy` が Streamable HTTP へ載せる。backend を持つ target では `waitUnits` を front の `requires` と `after` の両方へ設定する。外部通信が不要な front は systemd の通信制限で loopback に閉じる。
+
+[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` は単一 endpoint の ID、port、URL、service、runtime directory、YAML source、target 名を公開する。gateway は全 front へ loopback HTTP で接続し、front service を起動依存に持たず、子 process も作らない。各 AI CLI が知る接続先はこの URL だけである。downstream の session が増えても front process は増えない。
 
 target を持つかどうかは、agent が消費するかで決まる。agent が読み書きするものは target、人が browser で開くだけのものは endpoint に留める。SonarQube のように両方あるものは両方持つ。container application の endpoint は [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)、agent が使う target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix) が宣言する。
 
-browser を使う target は二つある。[`playwright`](../../mcp/playwright) は通常の操作、snapshot、screenshot、console、network の観測に使う。[`chrome-devtools`](../../mcp/chrome-devtools) はperformance trace、heap、Lighthouseなどの詳細観測に使う。両targetはisolated browser contextで動くため、sessionを共有すると仮定しない。chromium は `my.contract.mcp.chromium` で共有し、二つの closure を持たない。
+browser を使う target は二つある。[`playwright`](../../mcp/playwright) は通常の操作、snapshot、screenshot、console、network の観測に使う。[`chrome-devtools`](../../mcp/chrome-devtools) はperformance trace、heap、Lighthouseなどの詳細観測に使う。両targetはisolated browser contextで動くため、sessionを共有すると仮定しない。chromium は `dotfiles.mcp.chromium` で共有し、二つの closure を持たない。
 
-MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。完全な target 一覧は各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets` を参照する。
+MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。現在の target は `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.targets --apply builtins.attrNames` で取得する。
 
 session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle の 30 分は body の終了時刻から数え、明示 DELETE は即座に session を削除する。
 
@@ -90,8 +92,10 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | 共通 rules | [`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) |
 | local agent と skill | [`clis/assets/agents/`](../../clis/assets/agents)、[`clis/assets/skills/`](../../clis/assets/skills) |
 | plugin skill source | [`flake.nix`](../../flake.nix) と `flake.lock` |
-| MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) |
-| gateway と Docker backend の共通層 | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix)、[`containers/module.nix`](../../containers/module.nix)、[`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix) |
+| MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `dotfiles.mcp.targets` |
+| MCP front | [`mcp/module.nix`](../../mcp/module.nix) の `dotfiles.mcp.fronts` と front service |
+| 単一 gateway | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` |
+| Docker backend の共通層 | [`containers/module.nix`](../../containers/module.nix)、[`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix) |
 | language server の roster | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp` |
 | CLI ごとの LSP 登録形式 | 各 CLI の module |
 | 使用量の観測 | [`telemetry/module.nix`](../../telemetry/module.nix) |

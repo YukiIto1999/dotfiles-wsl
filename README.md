@@ -89,7 +89,7 @@ agentgateway (systemd)
 Docker backends
 ```
 
-front の一覧と port は `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.fronts` で引く。
+target、front、gateway は `dotfiles.mcp.targets`、`dotfiles.mcp.fronts`、`dotfiles.mcp.gateway` の型付き契約に分かれる。target が provider、起動方法、probe、backend 依存を持ち、front は target から一度だけ導く。gateway は全 front を束ねる単一 endpoint である。front の一覧と port は `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.fronts` で引く。
 
 Docker backend の container は同一の Docker network `dotfiles-backends` に属する。container 間の network と host 側の loopback publish は別の境界になる。
 

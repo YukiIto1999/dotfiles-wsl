@@ -17,8 +17,8 @@ let
     inherit mkMcpServer mkNpmMcp;
     searxngUrl = expectedUrl;
   };
-  front = hostConfig.my.contract.mcp.fronts.searxng;
-  target = hostConfig.my.mcp.targets.searxng;
+  front = hostConfig.dotfiles.mcp.fronts.searxng;
+  target = hostConfig.dotfiles.mcp.targets.searxng;
   execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
   execTokens = helpers.execTokens.tokensOf execStart;
 in

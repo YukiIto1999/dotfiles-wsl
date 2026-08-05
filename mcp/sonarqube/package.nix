@@ -1,9 +1,9 @@
 {
-  mkMcpServer,
   mkNpmMcp,
   sonarqubeUrl,
   username,
   passwordFile,
+  serverBuilder,
 }:
 
 # 自己 host の SonarQube への stdio front。資格情報は起動時に sops file から読む
@@ -16,7 +16,7 @@ let
     npmDepsHash = "sha256-sBW2ckDRuwXTiDsG6vhT3DjWtekhzmtupJ/m8niSlb4=";
   };
 in
-mkMcpServer {
+serverBuilder {
   name = "sonarqube-mcp";
   env.SONARQUBE_URL = sonarqubeUrl;
   env.SONARQUBE_USERNAME = username;

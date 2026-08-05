@@ -9,7 +9,7 @@
 }:
 
 let
-  artifacts = hostConfig.my.artifacts;
+  artifacts = hostConfig.dotfiles.artifacts;
   artifactSourcesFor =
     format:
     map (artifact: artifact.source) (
@@ -35,20 +35,20 @@ let
     builtins.filter (id: !(builtins.elem unit (lib.splitString "/" id))) (
       builtins.attrNames definition.value
     )
-  ) hostOptions.my.artifacts.definitionsWithLocations;
+  ) hostOptions.dotfiles.artifacts.definitionsWithLocations;
 in
 {
   artifact-registry =
     assert lib.assertMsg (misowned == [ ]) (
       "artifact id does not name its declaring unit: " + lib.concatStringsSep " " misowned
     );
-    assert builtins.attrNames variantConfig.my.artifacts == builtins.attrNames artifacts;
-    assert variantConfig.my.accounts == hostConfig.my.accounts;
+    assert builtins.attrNames variantConfig.dotfiles.artifacts == builtins.attrNames artifacts;
+    assert variantConfig.dotfiles.accounts == hostConfig.dotfiles.accounts;
     assert
       variantConfig.sops.templates."gh-hosts.yml".content
       == hostConfig.sops.templates."gh-hosts.yml".content;
     assert
-      hostConfig.my.accounts == [ ]
+      hostConfig.dotfiles.accounts == [ ]
       ||
         hostConfig.sops.templates."gh-hosts.yml".content
         == builtins.readFile artifacts."accounts/gh-hosts".source;

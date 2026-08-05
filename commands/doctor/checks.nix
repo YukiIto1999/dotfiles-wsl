@@ -6,7 +6,7 @@
 }:
 
 let
-  doctor = lib.getExe hostConfig.my.commands.doctor;
+  doctor = lib.getExe hostConfig.dotfiles.commands.doctor;
 
   # doctor が最低限触れねばならない常駐 service。front と container と gateway は
   # どれが落ちても agent が道具を失うので、被覆から漏れてはならない

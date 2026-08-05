@@ -1,4 +1,4 @@
-{ mkMcpServer, mkNpmMcp }:
+{ mkNpmMcp, serverBuilder }:
 
 # context7 cloud に接続する library docs front、backend なし
 let
@@ -11,7 +11,7 @@ let
     npmDepsHash = "sha256-d+fP6Oxkbv+99pMY0tmFRWQwDFlVcAudV2lM6WUbe3I=";
   };
 in
-mkMcpServer {
+serverBuilder {
   name = "context7-mcp";
   command = "${pkg}/bin/context7-mcp";
 }

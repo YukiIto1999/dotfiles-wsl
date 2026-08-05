@@ -10,7 +10,8 @@ let
   mkNpmMcp = pkgs.callPackage ../package/mk-npm.nix { };
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
-    inherit mkMcpServer mkNpmMcp;
+    inherit mkNpmMcp;
+    serverBuilder = mkMcpServer;
     inherit (config.dotfiles.mcp) chromium;
   };
 in

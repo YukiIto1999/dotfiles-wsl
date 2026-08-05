@@ -6,7 +6,7 @@ let
   };
 in
 {
-  my.agents.clients.antigravity = {
+  dotfiles.agents.clients.antigravity = {
     binary = "agy";
     rulesDestination = ".gemini/AGENTS.md";
     skillsDestination = ".gemini/antigravity-cli/skills";

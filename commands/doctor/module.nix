@@ -4,11 +4,11 @@
   lib,
   pkgs,
   self,
-  mkCommand,
   ...
 }:
 
 let
+  mkCommand = import ../impl/mk-command.nix { inherit config lib pkgs; };
   # 検証対象は宣言から導く。別の roster を持つと宣言と乖離する
   # 常駐しない oneshot は完了後に inactive になる。この repo が宣言し、かつ
   # 常駐する service だけを active であるべき対象にする
@@ -49,5 +49,5 @@ let
   };
 in
 {
-  config.my.commands = { inherit doctor; };
+  config.dotfiles.commands = { inherit doctor; };
 }

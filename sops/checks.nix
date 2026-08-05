@@ -42,10 +42,10 @@ in
     let
       # home に置く secret だけが user 所有。container が読む env と /etc の設定は
       # root 所有でよく、user 所有にすると読める範囲が広がる
-      inHome = t: lib.hasPrefix hostConfig.my.homeDir t.path;
-      wrong = builtins.filter (t: inHome t && (t.mode != "0600" || t.owner != hostConfig.my.username)) (
-        builtins.attrValues hostConfig.sops.templates
-      );
+      inHome = t: lib.hasPrefix hostConfig.dotfiles.host.homeDir t.path;
+      wrong = builtins.filter (
+        t: inHome t && (t.mode != "0600" || t.owner != hostConfig.dotfiles.host.username)
+      ) (builtins.attrValues hostConfig.sops.templates);
     in
     assert lib.assertMsg (wrong == [ ]) (
       "sops template does not use the shared user secret file policy: "

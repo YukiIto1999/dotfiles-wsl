@@ -10,11 +10,9 @@
 
 host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`secrets/.sops.yaml`](../../secrets/.sops.yaml) は公開 recipient、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) は暗号文を保持する。復号鍵は Git に置かない。
 
-現行 source は `my.sops.enrollmentState = "migration"` であり、host key 分離の完了を宣言していない。この状態では doctor が旧 home key の残存を警告に留める。host key と recovery key の復号を実測し、home key を削除した後にだけ `enrolled` へ切り替える。
-
 sops-nix は activation 時に暗号文を復号する。`sops.secrets` の secret file は `/run/secrets`、配備 path を指定しない template は `/run/secrets/rendered` に平文を生成する。agentmemory の環境ファイルは後者に属する。
 
-Git identity の template は設定ユーザーの `~/.config/git/identity.conf` と、work identity を使う場合の `~/.config/git/work-identity.conf` を明示する。GitHub CLI の template も設定ユーザーの `~/.config/gh/hosts.yml` を明示する。sops-nix は mode `0600`、設定ユーザー所有の平文 target を runtime に生成し、これらの user-home path から参照させる。Nix 宣言には secret value ではなく placeholder を置くため、平文を Nix store の設定 artifact に含めない。各 secret file と template の owner、mode、その path を読める consumer process が secret ごとの信頼境界になる。
+Git identity の template は設定ユーザーの `~/.config/git/identity.conf` と、work identity を使う場合の `~/.config/git/work-identity.conf` を明示する。GitHub CLI の template も設定ユーザーの `~/.config/gh/hosts.yml` を明示する。[`sops/impl/user-secret-file.nix`](../../sops/impl/user-secret-file.nix) が user 所有と mode `0600` を固定し、[`accounts/module.nix`](../../accounts/module.nix) が username を渡して明示的に import する。sops-nix は平文 target を runtime に生成する。Nix 宣言には secret value ではなく placeholder を置くため、平文を Nix store の設定 artifact に含めない。各 secret file と template の owner、mode、その path を読める consumer process が secret ごとの信頼境界になる。
 
 ## GitHub credential
 

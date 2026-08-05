@@ -9,7 +9,7 @@
 
 let
   agentgateway = pkgs.callPackage ./package.nix { };
-  artifact = hostConfig.my.artifacts."mcp/gateway/default/config";
+  artifact = hostConfig.dotfiles.artifacts."mcp/gateway/default/config";
   expected = builtins.fromJSON (builtins.readFile ./fixtures/contract.json);
   gateway = hostConfig.dotfiles.mcp.gateway;
   fronts = hostConfig.dotfiles.mcp.fronts;
@@ -18,10 +18,10 @@ let
   frontServices = map (front: front.service) (builtins.attrValues fronts);
   deployedConfig = hostConfig.environment.etc."${gateway.runtimeDirectory}/config.yaml";
   sourceArtifacts = builtins.filter (entry: entry.source == gateway.source) (
-    builtins.attrValues hostConfig.my.artifacts
+    builtins.attrValues hostConfig.dotfiles.artifacts
   );
   variantGateway = variantConfig.dotfiles.mcp.gateway;
-  variantArtifact = variantConfig.my.artifacts."mcp/gateway/default/config";
+  variantArtifact = variantConfig.dotfiles.artifacts."mcp/gateway/default/config";
   variantDeployedConfig =
     variantConfig.environment.etc."${variantGateway.runtimeDirectory}/config.yaml";
   expectedVariant = expected // {
@@ -136,8 +136,8 @@ in
     assert service.after == [ "network.target" ];
     assert service.requires == [ ];
     assert service.wants == [ ];
-    assert serviceConfig.User == hostConfig.my.username;
-    assert serviceConfig.Environment == [ "HOME=${hostConfig.my.homeDir}" ];
+    assert serviceConfig.User == hostConfig.dotfiles.host.username;
+    assert serviceConfig.Environment == [ "HOME=${hostConfig.dotfiles.host.homeDir}" ];
     assert serviceConfig.RuntimeDirectory == gateway.runtimeDirectory;
     assert serviceConfig.RuntimeDirectoryMode == "0700";
     assert serviceConfig.LimitNOFILE == "4096:4096";

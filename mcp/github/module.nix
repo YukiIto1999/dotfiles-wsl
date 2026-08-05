@@ -7,7 +7,7 @@
 
 # account ごとに 1 instance、PAT は spawn 時に sops file から読む
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
 
@@ -31,7 +31,8 @@ let
       serve = serveOverProxy (
         lib.getExe (
           pkgs.callPackage ./package.nix {
-            inherit mkMcpServer toolsets;
+            inherit toolsets;
+            serverBuilder = mkMcpServer;
             tokenFile = config.sops.secrets."accounts/${account}/token".path;
           }
         )

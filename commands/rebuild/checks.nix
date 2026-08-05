@@ -6,7 +6,7 @@
 }:
 
 let
-  wslRestartRequired = hostConfig.my.commands.wslRestartRequired;
+  wslRestartRequired = hostConfig.dotfiles.commands.wslRestartRequired;
   wslConfig = hostConfig.environment.etc."wsl.conf".source;
   failingCmp = pkgs.writeShellScript "cmp-always-fails" "exit 2";
   failingManifestCmp = pkgs.writeShellScript "cmp-manifest-fails" ''
@@ -60,7 +60,7 @@ in
 
     assert_plan switch candidate
     test "$(${lib.getExe wslRestartRequired} --default-user \
-      --booted-system booted --current-system current candidate)" = ${lib.escapeShellArg hostConfig.my.username}
+      --booted-system booted --current-system current candidate)" = ${lib.escapeShellArg hostConfig.dotfiles.host.username}
     if ${lib.getExe wslRestartRequired} --plan --default-user candidate 2>/dev/null; then
       echo "mutually exclusive output modes were accepted" >&2
       exit 1
@@ -177,7 +177,7 @@ in
     pkgs.runCommandLocal "check-rebuild-entrypoint" { nativeBuildInputs = [ pkgs.gnugrep ]; }
       ''
         set -euo pipefail
-        guard=${lib.getExe hostConfig.my.commands.rebuild}
+        guard=${lib.getExe hostConfig.dotfiles.commands.rebuild}
         grep -q 'nixos-rebuild' "$guard"
         grep -q 'git status --porcelain' "$guard"
         grep -q 'wsl-restart-required\|wslRestartRequired' "$guard" || \

@@ -50,7 +50,7 @@ in
       };
     };
 
-    my.artifacts."containers/searxng/settings-template" = {
+    dotfiles.artifacts."containers/searxng/settings-template" = {
       format = "yaml";
       source = settingsTemplate;
     };

@@ -29,7 +29,7 @@ let
     lib.filterAttrs (_: target: target.provider == "github") cfg.targets
   );
   expectedGithubTargets = lib.sort builtins.lessThan (
-    map (account: "github-${account}") config.my.accounts
+    map (account: "github-${account}") config.dotfiles.accounts
   );
 in
 {
@@ -124,10 +124,10 @@ in
       requires = target.waitUnits;
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
-        User = config.my.username;
+        User = config.dotfiles.host.username;
         RuntimeDirectory = front.runtimeDirectory;
         RuntimeDirectoryMode = "0700";
-        Environment = [ "HOME=${config.my.homeDir}" ];
+        Environment = [ "HOME=${config.dotfiles.host.homeDir}" ];
         ExecStart = target.serve front.port;
         MemoryMax = "2G";
       }

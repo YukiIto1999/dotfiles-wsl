@@ -10,16 +10,16 @@
 
 let
   expected = builtins.fromJSON (builtins.readFile ./fixtures/client-contract.json);
-  clients = hostConfig.my.agents.clients;
-  variantClients = variantConfig.my.agents.clients;
-  homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
-  artifacts = hostConfig.my.artifacts;
+  clients = hostConfig.dotfiles.agents.clients;
+  variantClients = variantConfig.dotfiles.agents.clients;
+  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
+  artifacts = hostConfig.dotfiles.artifacts;
   artifactSource = id: artifacts.${id}.source;
   gatewayUrl = hostConfig.dotfiles.mcp.gateway.url;
   gatewayPort = hostConfig.dotfiles.mcp.gateway.port;
   variantGatewayUrl = variantConfig.dotfiles.mcp.gateway.url;
-  roster = hostConfig.my.toolchain.lsp;
-  installAgents = hostConfig.my.commands.installAgents;
+  roster = hostConfig.dotfiles.toolchain.lsp;
+  installAgents = hostConfig.dotfiles.commands.installAgents;
   installAgentsExe = lib.getExe installAgents;
 
   withoutNulls = lib.filterAttrs (_: value: value != null);
@@ -51,7 +51,7 @@ let
   actualContract = lib.mapAttrs (_: projectClient) clients;
 
   clientOptions = builtins.removeAttrs (
-    hostOptions.my.agents.clients.type.nestedTypes.elemType.getSubOptions
+    hostOptions.dotfiles.agents.clients.type.nestedTypes.elemType.getSubOptions
     [ ]
   ) [ "_module" ];
   managedFileOptions = builtins.removeAttrs (
@@ -64,20 +64,20 @@ let
   ) [ "_module" ];
   optionMetadata = {
     enabled = {
-      type = hostOptions.my.agents.enabled.type.name;
-      elementType = hostOptions.my.agents.enabled.type.nestedTypes.elemType.name;
-      hasDefault = hostOptions.my.agents.enabled ? default;
+      type = hostOptions.dotfiles.agents.enabled.type.name;
+      elementType = hostOptions.dotfiles.agents.enabled.type.nestedTypes.elemType.name;
+      hasDefault = hostOptions.dotfiles.agents.enabled ? default;
     };
     shared = lib.mapAttrs (_: option: {
       type = option.type.name;
       internal = option.internal or false;
       readOnly = option.readOnly or false;
-    }) hostOptions.my.agents.shared;
+    }) hostOptions.dotfiles.agents.shared;
     clients = {
-      type = hostOptions.my.agents.clients.type.name;
-      elementType = hostOptions.my.agents.clients.type.nestedTypes.elemType.name;
-      internal = hostOptions.my.agents.clients.internal or false;
-      hasDefault = hostOptions.my.agents.clients ? default;
+      type = hostOptions.dotfiles.agents.clients.type.name;
+      elementType = hostOptions.dotfiles.agents.clients.type.nestedTypes.elemType.name;
+      internal = hostOptions.dotfiles.agents.clients.internal or false;
+      hasDefault = hostOptions.dotfiles.agents.clients ? default;
     };
     client = lib.mapAttrs (_: option: option.type.name) clientOptions;
     managedFile = lib.mapAttrs (_: option: option.type.name) managedFileOptions;
@@ -181,7 +181,7 @@ let
     lib.evalModules {
       modules = [
         ({ config, ... }: {
-          options.my.agents = agentContract.options;
+          options.dotfiles.agents = agentContract.options;
           options.assertions = lib.mkOption {
             type = lib.types.listOf (
               lib.types.submodule {
@@ -193,8 +193,8 @@ let
             );
             default = [ ];
           };
-          config.my.agents = candidate;
-          config.assertions = agentContract.assertionsFor config.my.agents;
+          config.dotfiles.agents = candidate;
+          config.assertions = agentContract.assertionsFor config.dotfiles.agents;
         })
       ];
     };
@@ -205,7 +205,7 @@ let
         let
           evaluated = evalContract candidate;
         in
-        builtins.deepSeq evaluated.config.my.agents (
+        builtins.deepSeq evaluated.config.dotfiles.agents (
           builtins.all (assertion: assertion.assertion) evaluated.config.assertions
         )
       );
@@ -217,7 +217,7 @@ let
       builtins.filter (entry: !entry.assertion) (evalContract candidate).config.assertions
     );
   requiredStringChecksFor =
-    candidate: agentContract.requiredStringChecksFor (evalContract candidate).config.my.agents;
+    candidate: agentContract.requiredStringChecksFor (evalContract candidate).config.dotfiles.agents;
   mutateClient =
     name: update:
     baseCandidate
@@ -399,7 +399,7 @@ let
         && artifact.deployedAt == "/etc/${target}"
       else if row.file.deployment == "home" then
         homeConfig.home.file.${target}.source == row.file.source
-        && artifact.deployedAt == "${hostConfig.my.homeDir}/${target}"
+        && artifact.deployedAt == "${hostConfig.dotfiles.host.homeDir}/${target}"
       else
         artifact.deployedAt == null
     );
@@ -417,12 +417,12 @@ let
         == client.definitions.${name}
       ) (builtins.attrNames client.definitions);
     in
-    homeConfig.home.file.${client.rulesDestination}.source == hostConfig.my.agents.shared.rules
+    homeConfig.home.file.${client.rulesDestination}.source == hostConfig.dotfiles.agents.shared.rules
     && lib.all (
       name:
       homeConfig.home.file."${client.skillsDestination}/${name}".source
-      == hostConfig.my.agents.shared.skills.${name}
-    ) (builtins.attrNames hostConfig.my.agents.shared.skills)
+      == hostConfig.dotfiles.agents.shared.skills.${name}
+    ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills)
     && definitionsMatch
   ) (builtins.attrNames clients);
 
@@ -441,19 +441,19 @@ let
 
   seedActivation = homeConfig.home.activation.seedAgentConfigs.data;
   fixtureSeedActivation =
-    builtins.replaceStrings [ hostConfig.my.homeDir ] [ "$fixture/home" ]
+    builtins.replaceStrings [ hostConfig.dotfiles.host.homeDir ] [ "$fixture/home" ]
       seedActivation;
 
-  sharedDefinitionSources = builtins.attrValues hostConfig.my.agents.shared.definitions;
+  sharedDefinitionSources = builtins.attrValues hostConfig.dotfiles.agents.shared.definitions;
   claudeDefinitionSources = builtins.attrValues clients.claude.definitions;
   codexDefinitionSources = builtins.attrValues clients.codex.definitions;
   opencodeDefinitionSources = builtins.attrValues clients.opencode.definitions;
 in
 {
   agent-client-roster =
-    assert lib.sort builtins.lessThan hostConfig.my.agents.enabled == expected.required;
+    assert lib.sort builtins.lessThan hostConfig.dotfiles.agents.enabled == expected.required;
     assert lib.sort builtins.lessThan (builtins.attrNames clients) == expected.required;
-    assert variantConfig.my.agents.enabled == expected.required;
+    assert variantConfig.dotfiles.agents.enabled == expected.required;
     assert lib.sort builtins.lessThan (builtins.attrNames variantClients) == expected.required;
     assert actualContract == expected.clients;
     assert optionMetadata == expectedOptionMetadata;
@@ -710,7 +710,7 @@ in
       definition:
       lib.hasInfix "/agents/" (toString definition.file)
       && !lib.hasInfix "/containers/" (toString definition.file)
-    ) hostOptions.my.agents.clients.definitionsWithLocations;
+    ) hostOptions.dotfiles.agents.clients.definitionsWithLocations;
     pkgs.runCommandLocal "check-agent-artifact-contract"
       {
         nativeBuildInputs = [
@@ -789,8 +789,8 @@ in
           clients.claude.managedFiles.${clients.claude.capabilityManagedFiles.telemetry}.source
         }
         jq --exit-status \
-          --arg endpoint ${lib.escapeShellArg hostConfig.my.contract.telemetry.endpoint} \
-          --arg protocol ${lib.escapeShellArg hostConfig.my.contract.telemetry.protocol} \
+          --arg endpoint ${lib.escapeShellArg hostConfig.dotfiles.telemetry.endpoint} \
+          --arg protocol ${lib.escapeShellArg hostConfig.dotfiles.telemetry.protocol} \
           --argjson hooks ${lib.escapeShellArg (builtins.toJSON expectedClaudeHooks)} '
           .env.CLAUDE_CODE_ENABLE_TELEMETRY == "1" and
           .env.OTEL_METRICS_EXPORTER == "otlp" and
@@ -879,12 +879,14 @@ in
         test ! -e ${self}/clis
         legacy_root=clis
         legacy_role=cli
-        legacy_pattern="my\\.''${legacy_root}|dotfiles-install-''${legacy_root}|dotfiles-''${legacy_role}-autoupdate|''${legacy_root}/assets|''${legacy_root}/(antigravity|claude|codex|opencode)"
+        legacy_option=m
+        legacy_option+='y\.'
+        legacy_pattern="$legacy_option''${legacy_root}|dotfiles-install-''${legacy_root}|dotfiles-''${legacy_role}-autoupdate|''${legacy_root}/assets|''${legacy_root}/(antigravity|claude|codex|opencode)"
         if rg -n "$legacy_pattern" ${self}; then
           echo "legacy clis path or runtime identity remains" >&2
           exit 1
         fi
-        if rg -n 'my\.agents|agents/(antigravity|claude|codex|opencode)' ${self}/containers; then
+        if rg -n "$legacy_option"'agents|agents/(antigravity|claude|codex|opencode)' ${self}/containers; then
           echo "container backend declares or depends on agent configuration" >&2
           exit 1
         fi
@@ -893,13 +895,13 @@ in
       '';
 
   agent-definition-rendering =
-    assert clients.claude.definitions == hostConfig.my.agents.shared.definitions;
+    assert clients.claude.definitions == hostConfig.dotfiles.agents.shared.definitions;
     assert clients.antigravity.definitions == { };
     assert sharedDefinitionSources != [ ];
     assert codexDefinitionSources != [ ];
     assert opencodeDefinitionSources != [ ];
     assert lib.all (source: lib.hasPrefix builtins.storeDir (toString source)) (
-      builtins.attrValues hostConfig.my.agents.shared.skills
+      builtins.attrValues hostConfig.dotfiles.agents.shared.skills
     );
     pkgs.runCommandLocal "check-agent-definition-rendering"
       {
@@ -911,7 +913,7 @@ in
           pkgs.remarshal
           pkgs.yq
         ];
-        rulesSource = hostConfig.my.agents.shared.rules;
+        rulesSource = hostConfig.dotfiles.agents.shared.rules;
         sharedSources = sharedDefinitionSources;
         claudeSources = claudeDefinitionSources;
         codexSources = codexDefinitionSources;

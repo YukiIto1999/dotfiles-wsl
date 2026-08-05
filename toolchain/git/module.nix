@@ -1,7 +1,7 @@
 { config, lib, ... }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
 
   mkGitHook = name: {
     source = ./assets/hooks + "/${name}";
@@ -9,17 +9,25 @@ let
   };
 in
 {
-  options.my.git.workIdentity = lib.mkOption {
-    type = lib.types.nullOr lib.types.str;
-    default = null;
-    example = "~/projects/business/";
-    description = "work 用 git identity を選ぶ gitdir glob。null で無効。";
+  options.dotfiles.toolchain.git = {
+    workIdentity = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "~/projects/business/";
+      description = "work 用 git identity を選ぶ gitdir glob。null で無効。";
+    };
+    identityTemplate = lib.mkOption {
+      type = lib.types.path;
+      readOnly = true;
+      internal = true;
+      description = "sops template が利用する Git identity source。";
+    };
   };
 
   # secret を差し込んで identity を組む sops が読む template
-  config.my.contract.git.identityTemplate = ./assets/identity.conf;
+  config.dotfiles.toolchain.git.identityTemplate = ./assets/identity.conf;
 
-  config.home-manager.users.${cfg.username} =
+  config.home-manager.users.${cfg.host.username} =
     {
       config,
       lib,
@@ -27,7 +35,7 @@ in
       ...
     }:
     let
-      inherit (osConfig) my;
+      inherit (osConfig) dotfiles;
     in
     {
       programs.git = {
@@ -38,12 +46,12 @@ in
           core.excludesFile = "~/.config/git/ignore";
           core.hooksPath = "~/.config/git/hooks";
           merge.conflictstyle = "diff3";
-          include.path = "${my.homeDir}/.config/git/identity.conf";
+          include.path = "${dotfiles.host.homeDir}/.config/git/identity.conf";
         };
-        includes = lib.optionals (my.git.workIdentity != null) [
+        includes = lib.optionals (dotfiles.toolchain.git.workIdentity != null) [
           {
-            condition = "gitdir:${my.git.workIdentity}";
-            path = "${my.homeDir}/.config/git/work-identity.conf";
+            condition = "gitdir:${dotfiles.toolchain.git.workIdentity}";
+            path = "${dotfiles.host.homeDir}/.config/git/work-identity.conf";
           }
         ];
       };
@@ -59,7 +67,7 @@ in
 
       home.file = {
         ".config/git/ignore".source =
-          config.lib.file.mkOutOfStoreSymlink "${my.dotfilesDir}/toolchain/git/assets/ignore";
+          config.lib.file.mkOutOfStoreSymlink "${dotfiles.host.dotfilesDir}/toolchain/git/assets/ignore";
         ".config/git/hooks/pre-commit" = mkGitHook "pre-commit";
         ".config/git/hooks/commit-msg" = mkGitHook "commit-msg";
       };

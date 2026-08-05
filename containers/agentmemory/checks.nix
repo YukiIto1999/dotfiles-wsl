@@ -30,7 +30,7 @@ let
   image = service.images.agentmemory;
   container = hostConfig.virtualisation.oci-containers.containers.agentmemory;
   clients = hostConfig.dotfiles.containers.agentmemory.clients;
-  engineConfig = hostConfig.my.artifacts."containers/agentmemory/config".source;
+  engineConfig = hostConfig.dotfiles.artifacts."containers/agentmemory/config".source;
   environmentTemplate = hostConfig.sops.templates."agentmemory.env";
   environmentFile = pkgs.writeText "agentmemory.env" environmentTemplate.content;
   expectedApiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";

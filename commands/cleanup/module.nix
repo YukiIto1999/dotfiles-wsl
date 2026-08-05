@@ -2,12 +2,12 @@
   config,
   lib,
   pkgs,
-  mkCommand,
   ...
 }:
 
 let
-  cfg = config.my;
+  cfg = config.dotfiles;
+  mkCommand = import ../impl/mk-command.nix { inherit config lib pkgs; };
   names = builtins.attrNames cfg.agents.clients;
 
   # hm-back を掃く root。.config/<x> は 2 段まで、それ以外は先頭 1 段
@@ -27,7 +27,7 @@ let
   ];
 in
 {
-  my.commands.cleanup = mkCommand {
+  dotfiles.commands.cleanup = mkCommand {
     name = "dotfiles-cleanup";
     src = ./impl/cleanup.sh;
     runtimeInputs = [ pkgs.coreutils ];

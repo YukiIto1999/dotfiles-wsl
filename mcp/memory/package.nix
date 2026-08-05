@@ -1,8 +1,8 @@
 {
   pkgs,
-  mkMcpServer,
   agentmemoryUrl,
   version,
+  serverBuilder,
 }:
 let
   mcpPkg = pkgs.buildNpmPackage {
@@ -17,7 +17,7 @@ let
     ];
   };
 in
-mkMcpServer {
+serverBuilder {
   name = "agentmemory-mcp";
   env.AGENTMEMORY_URL = agentmemoryUrl;
   command = "${pkgs.nodejs_24}/bin/node ${mcpPkg}/lib/node_modules/agentmemory-mcp-deploy/node_modules/@agentmemory/mcp/bin.mjs";

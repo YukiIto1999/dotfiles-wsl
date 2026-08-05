@@ -2,12 +2,12 @@
   config,
   lib,
   pkgs,
-  mkCommand,
   ...
 }:
 
 let
   mkContainerBackend = import ../impl/container-backend.nix { inherit lib; };
+  mkCommand = import ../../commands/impl/mk-command.nix { inherit config lib pkgs; };
   serverPort = "9000";
   serverRepository = "sonarqube";
   serverDigest = "sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
@@ -96,7 +96,7 @@ in
     sops.secrets = {
       "sonarqube/admin_password" = {
         mode = "0400";
-        owner = config.my.username;
+        owner = config.dotfiles.host.username;
         group = "users";
         # server 側の password は secret file の差し替えだけでは rotate できない。
         # front を新値で先に再起動しないよう、自動 restart は行わない。
@@ -152,7 +152,7 @@ in
             Type = "oneshot";
             # 反復 timer が毎回 unit を起動できるよう、成功後は inactive に戻す。
             RemainAfterExit = false;
-            User = config.my.username;
+            User = config.dotfiles.host.username;
             Environment = [
               "SONARQUBE_URL=http://127.0.0.1:${serverPort}"
               "SONARQUBE_ADMIN_PASSWORD_FILE=${config.dotfiles.containers.sonarqube.credentials.adminPasswordFile}"

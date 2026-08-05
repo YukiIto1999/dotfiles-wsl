@@ -12,7 +12,7 @@ let
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = mkMcpServer {
     name = "codex-mcp";
-    command = "${config.my.homeDir}/.local/bin/codex mcp-server";
+    command = "${config.dotfiles.host.homeDir}/.local/bin/codex mcp-server";
   };
 in
 {

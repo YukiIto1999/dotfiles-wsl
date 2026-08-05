@@ -374,19 +374,19 @@ in
     [
       {
         assertion = cfg.enabled != [ ] && cfg.enabled == lib.unique cfg.enabled;
-        message = "my.agents.enabled must not be empty and must contain unique IDs";
+        message = "dotfiles.agents.enabled must not be empty and must contain unique IDs";
       }
       {
         assertion = lib.sort builtins.lessThan cfg.enabled == lib.sort builtins.lessThan clientNames;
-        message = "my.agents.enabled must exactly match the declared client keys";
+        message = "dotfiles.agents.enabled must exactly match the declared client keys";
       }
       {
         assertion = cfg.shared.skills != { };
-        message = "my.agents.shared.skills must not be empty";
+        message = "dotfiles.agents.shared.skills must not be empty";
       }
       {
         assertion = cfg.shared.definitions != { };
-        message = "my.agents.shared.definitions must not be empty";
+        message = "dotfiles.agents.shared.definitions must not be empty";
       }
       {
         assertion = requiredStringFailures == { };

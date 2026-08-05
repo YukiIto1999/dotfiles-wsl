@@ -1,7 +1,7 @@
 {
-  mkMcpServer,
   mkNpmMcp,
   searxngUrl,
+  serverBuilder,
 }:
 
 # self-hosted SearXNG への front。listen 先は module が env で渡す
@@ -14,7 +14,7 @@ let
     npmDepsHash = "sha256-Lh1UoM8zSMFji/TkqDAOiRtFRrQ/jqn5TbONySj9ckg=";
   };
 in
-mkMcpServer {
+serverBuilder {
   name = "searxng-mcp";
   env.SEARXNG_URL = searxngUrl;
   env.FETCH_TIMEOUT_MS = "30000";

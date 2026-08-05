@@ -7,7 +7,7 @@
 
 let
   inherit (helpers.execTokens) tokensOf onlyValue;
-  front = hostConfig.my.contract.mcp.fronts.playwright;
+  front = hostConfig.dotfiles.mcp.fronts.playwright;
   service = hostConfig.systemd.services.${front.service}.serviceConfig;
   tokens = tokensOf service.ExecStart;
 in

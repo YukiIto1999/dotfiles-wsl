@@ -2,13 +2,13 @@
   config,
   lib,
   pkgs,
-  mkMcpServer,
-  mkNpmMcp,
-  serveOverProxy,
   ...
 }:
 
 let
+  mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
+  mkNpmMcp = pkgs.callPackage ../package/mk-npm.nix { };
+  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   backend = config.dotfiles.containers.services.sonarqube;
   front = pkgs.callPackage ./package.nix {
     inherit mkMcpServer mkNpmMcp;
@@ -18,9 +18,15 @@ let
   };
 in
 {
-  my.mcp.targets.sonarqube = {
+  dotfiles.mcp.targets.sonarqube = {
+    provider = "sonarqube";
     port = 8778;
     serve = serveOverProxy (lib.getExe front);
     waitUnits = backend.units;
+    probe = {
+      tool = "system_status";
+      args = { };
+      timeout = 30;
+    };
   };
 }

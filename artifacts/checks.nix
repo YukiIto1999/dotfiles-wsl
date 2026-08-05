@@ -42,10 +42,11 @@ in
     assert lib.assertMsg (misowned == [ ]) (
       "artifact id does not name its declaring unit: " + lib.concatStringsSep " " misowned
     );
+    assert builtins.attrNames variantConfig.my.artifacts == builtins.attrNames artifacts;
+    assert variantConfig.my.accounts == hostConfig.my.accounts;
     assert
-      builtins.attrNames variantConfig.my.artifacts
-      == builtins.filter (id: id != "accounts/gh-hosts") (builtins.attrNames artifacts);
-    assert !(builtins.hasAttr "gh-hosts.yml" variantConfig.sops.templates);
+      variantConfig.sops.templates."gh-hosts.yml".content
+      == hostConfig.sops.templates."gh-hosts.yml".content;
     assert
       hostConfig.my.accounts == [ ]
       ||

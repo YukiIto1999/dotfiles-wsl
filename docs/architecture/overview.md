@@ -33,7 +33,7 @@ Nix store の candidate system
 | Unit | 所有する責務 |
 |---|---|
 | `host/` | host 共通の語彙、NixOS-WSL、Windows interop、Nix daemon と cache、font、login user、Home Manager |
-| `mcp/` | agentgateway、常駐 MCP front、その build |
+| `mcp/` | 型付き MCP target、target から導く常駐 front、単一 agentgateway、その build |
 | `clis/` | AI CLI roster、設定、rules、skills、agents |
 | `toolchain/` | PATH 上の汎用ツールと language server、git 設定、project の静的解析 |
 | `containers/` | container service contract、OCI image inventory と同期、backend 配備の共通 helper |
@@ -57,13 +57,15 @@ systemd は generation を runtime へ展開する。長時間動く agentgatewa
 
 [`containers/module.nix`](../../containers/module.nix) は Docker daemon、`dotfiles-backends` network、型付き service contract、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。Agentmemory、Crawl4AI、SearXNG、SonarQube の application 固有宣言は各 `containers/` unit、対応する MCP front は各 `mcp/` unit が所有する。
 
+MCP は `dotfiles.mcp.targets`、`dotfiles.mcp.fronts`、`dotfiles.mcp.gateway` の三つに分ける。target は provider と実行契約を所有し、front は target から導いた常駐 transport と backend 依存を所有する。gateway は全 front を束ねる単一 endpoint であり、front の起動依存を持たない。host が必要とする provider は [`flake.nix`](../../flake.nix) の固定 roster が決める。
+
 SOPS の暗号文は repository に置き、sops-nix が activation 時に host key で復号する。復号済み secret と template は runtime にだけ生成され、consumer の file、環境ファイルへ渡る。鍵と credential の境界は[セキュリティ設計](security.md)、通常の編集は [Secrets](../operations/secrets.md)に分けている。
 
 ## 実状態の検証
 
 [`commands/doctor/module.nix`](../../commands/doctor/module.nix) は、この repository が宣言した常駐 service を評価済み設定から導き、`dotfiles-doctor` に埋め込む。別の roster を持たないので、unit を足せば検証対象になる。
 
-`dotfiles-doctor` は各 unit の `ActiveState` を見た後、gateway に MCP session を張り、宣言した target すべての tool が `tools/list` に現れることを確かめる。unit が active でも upstream が落ちていれば agent は道具を失うので、そこまで見る。doctor は再起動も修復も行わず、観測結果だけを返す。
+`dotfiles-doctor` は各 unit の `ActiveState` を見た後、gateway に MCP session を張り、各 target の probe が指定する `<target>_<tool>` が `tools/list` に現れることを確かめる。unit が active でも upstream が落ちていれば agent は道具を失うので、そこまで見る。doctor は再起動も修復も行わず、観測結果だけを返す。
 
 `nix flake check` は source から artifact を生成できるかを検査し、doctor は activation 後の runtime が宣言に収束したかを検査する。実行と診断は [Doctor](../operations/doctor.md)に記載している。
 

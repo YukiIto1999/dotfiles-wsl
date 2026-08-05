@@ -37,13 +37,13 @@ plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
-| gateway | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `my.mcp.endpoints` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.endpoints` |
-| MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `my.mcp.targets.<name>` | `nix eval --json .#nixosConfigurations.nixos.config.my.mcp.targets --apply builtins.attrNames` |
+| gateway | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.gateway --apply 'g: builtins.removeAttrs g [ "source" ]'` |
+| MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `dotfiles.mcp.targets` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.targets --apply builtins.attrNames` |
 | Docker backend | [`containers/module.nix`](../../containers/module.nix) の `dotfiles.containers` contract、[`container-backend.nix`](../../containers/impl/container-backend.nix)、各 [`containers/NAME/module.nix`](../../containers) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.containers.services --apply builtins.attrNames` |
-| MCP front | 各 [`mcp/NAME/module.nix`](../../mcp) の `port` と `serve` | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.mcp.fronts`。稼働は `systemctl status mcp-front-<name>` |
+| MCP front | [`mcp/module.nix`](../../mcp/module.nix) が target から導く `dotfiles.mcp.fronts` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.fronts`。稼働は `systemctl status mcp-front-<name>` |
 | telemetry | [`telemetry/module.nix`](../../telemetry/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.my.contract.telemetry` |
 | 品質 gate | server、database、provisioning は [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)、MCP package と target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.virtualisation.oci-containers.containers.sonarqube` |
 
-agentgateway は全 target を一つの URL へ公開し、各 front へは loopback の HTTP で接続する。front は常駐するので downstream の session が増えても process は増えない。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
+target は provider、port、起動関数、backend unit、probe を持つ。front は target から一度だけ導かれ、backend unit を `requires` と `after` に持つ。agentgateway は全 front を一つの URL へ公開するが、front service の依存は持たない。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
 構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。

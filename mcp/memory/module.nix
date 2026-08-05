@@ -2,12 +2,12 @@
   config,
   lib,
   pkgs,
-  mkMcpServer,
-  serveOverProxy,
   ...
 }:
 
 let
+  mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
+  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
     inherit mkMcpServer;
     agentmemoryUrl = config.dotfiles.containers.services.agentmemory.endpoints.http.url;
@@ -15,9 +15,19 @@ let
   };
 in
 {
-  my.mcp.targets.memory = {
+  dotfiles.mcp.targets.memory = {
+    provider = "memory";
     port = 8774;
     serve = serveOverProxy (lib.getExe front);
     waitUnits = config.dotfiles.containers.services.agentmemory.units;
+    probe = {
+      tool = "memory_recall";
+      args = {
+        query = "dotfiles-doctor-probe-no-match";
+        limit = 1;
+        format = "compact";
+      };
+      timeout = 30;
+    };
   };
 }

@@ -6,10 +6,10 @@
 }:
 
 let
-  cfg = config.my;
-  targetNames = builtins.attrNames cfg.mcp.targets;
+  cfg = config.dotfiles.mcp;
+  targetNames = builtins.attrNames cfg.targets;
 
-  # front の名前と URL と書き込み領域は target 名と port から導く。二つ目の roster を作らない
+  # target が front の名前、URL、書き込み領域を一度だけ決める。
   fronts = lib.mapAttrs (name: target: {
     inherit name;
     inherit (target) port;
@@ -17,82 +17,121 @@ let
     runtimeDirectory = "mcp-front-${name}";
     runtimeDirectoryPath = "/run/mcp-front-${name}";
     url = "http://127.0.0.1:${toString target.port}/mcp";
-  }) cfg.mcp.targets;
+  }) cfg.targets;
 
-  # gateway は最初の _ で target と tool を切る。名前に _ が入ると解決できない
   targetsWithDelimiter = builtins.filter (name: builtins.match ".*_.*" name != null) targetNames;
-
   prefixCollisions = builtins.filter (
     name: builtins.any (other: other != name && lib.hasPrefix name other) targetNames
   ) targetNames;
+  ports = map (target: target.port) (builtins.attrValues cfg.targets);
+  providedProviders = lib.unique (map (target: target.provider) (builtins.attrValues cfg.targets));
+  githubTargets = builtins.attrNames (
+    lib.filterAttrs (_: target: target.provider == "github") cfg.targets
+  );
+  expectedGithubTargets = lib.sort builtins.lessThan (
+    map (account: "github-${account}") config.my.accounts
+  );
 in
 {
-  options.my.mcp = {
-    # target は skills が参照する安定した公開契約、key が target 名
+  options.dotfiles.mcp = {
+    enabledProviders = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      description = "この host が必要とする mcp/<provider> unit ID。";
+    };
+
     targets = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
-          # gateway の 8765 に隣接させる。この環境の MCP は 87xx 帯という見分けが
-          # 付き、他 project が使う 18xxx 帯と ephemeral の 32768 以降を避けられる
-          options.port = lib.mkOption {
-            type = lib.types.ints.between 8770 8789;
-            description = "この target の front が loopback へ bind する port。8770-8789 から取る。";
-          };
-
-          # front は常駐する。gateway は接続するだけで子 process を作らない
-          options.serve = lib.mkOption {
-            type = lib.types.functionTo lib.types.str;
-            description = "port を受け取り、Streamable HTTP を話す front の起動 command を返す。";
-          };
-
-          # 外部へ出る front だけが network を必要とする。既定は loopback に閉じる
-          options.needsNetwork = lib.mkOption {
-            type = lib.types.bool;
-            default = false;
-            description = "front が loopback の外へ接続するか。true にすると通信制限を外す。";
-          };
-
-          options.waitUnits = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            default = [ ];
-            description = "front が起動前に待つ systemd unit。";
+          options = {
+            provider = lib.mkOption {
+              type = lib.types.str;
+              description = "target を所有する mcp/<provider> unit ID。";
+            };
+            port = lib.mkOption {
+              type = lib.types.ints.between 8770 8789;
+              description = "front が loopback へ bind する port。";
+            };
+            serve = lib.mkOption {
+              type = lib.types.functionTo lib.types.str;
+              description = "port を受け取り、Streamable HTTP front の起動 command を返す関数。";
+            };
+            needsNetwork = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "front が loopback の外へ接続するか。";
+            };
+            waitUnits = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+              description = "front が起動前に必要とする backend unit。";
+            };
+            probe = lib.mkOption {
+              readOnly = true;
+              type = lib.types.submodule {
+                options = {
+                  tool = lib.mkOption { type = lib.types.str; };
+                  args = lib.mkOption { type = lib.types.attrsOf lib.types.anything; };
+                  timeout = lib.mkOption { type = lib.types.ints.positive; };
+                };
+              };
+              description = "doctor が target の tool 名を照合するための読み取り専用 probe。";
+            };
           };
         }
       );
       default = { };
-      description = "agentgateway が畳み込む MCP target の集合。";
+      internal = true;
+      description = "agentgateway が公開する MCP target。";
     };
 
+    fronts = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options = {
+            name = lib.mkOption { type = lib.types.str; };
+            port = lib.mkOption { type = lib.types.port; };
+            url = lib.mkOption { type = lib.types.str; };
+            service = lib.mkOption { type = lib.types.str; };
+            runtimeDirectory = lib.mkOption { type = lib.types.str; };
+            runtimeDirectoryPath = lib.mkOption { type = lib.types.str; };
+          };
+        }
+      );
+      readOnly = true;
+      internal = true;
+      description = "target から導いた常駐 Streamable HTTP front。";
+    };
+
+    chromium = lib.mkOption {
+      type = lib.types.package;
+      readOnly = true;
+      internal = true;
+      description = "browser target が共有する Chromium package。";
+    };
   };
 
-  # front と gateway の対応は名前から導ける。契約として公開する
-  config.my.contract.mcp.fronts = fronts;
+  config.dotfiles.mcp.fronts = fronts;
+  config.dotfiles.mcp.chromium = pkgs.chromium;
 
-  # browser を使う target は playwright と chrome-devtools の二つ。
-  # 別々に選ぶと二つの chromium が closure に入る
-  config.my.contract.mcp.chromium = pkgs.chromium;
-
-  # front は常駐し、downstream session ごとの複製を作らない
   config.systemd.services = lib.mapAttrs' (
     name: front:
+    let
+      target = cfg.targets.${name};
+    in
     lib.nameValuePair front.service {
       description = "MCP front (${name})";
-      after = [ "network.target" ] ++ cfg.mcp.targets.${name}.waitUnits;
-      wants = cfg.mcp.targets.${name}.waitUnits;
+      after = [ "network.target" ] ++ target.waitUnits;
+      requires = target.waitUnits;
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
-        User = cfg.username;
-        # front が生成物を置ける唯一の場所。service の停止で消える
+        User = config.my.username;
         RuntimeDirectory = front.runtimeDirectory;
         RuntimeDirectoryMode = "0700";
-        Environment = [ "HOME=${cfg.homeDir}" ];
-        ExecStart = cfg.mcp.targets.${name}.serve front.port;
-        # backend だけ上限を持ち front が持たないのは非対称。chromium を抱える
-        # playwright が最も大きいので、そこに合わせて一律に置く
+        Environment = [ "HOME=${config.my.homeDir}" ];
+        ExecStart = target.serve front.port;
         MemoryMax = "2G";
       }
-      // lib.optionalAttrs (!cfg.mcp.targets.${name}.needsNetwork) {
-        # loopback の外へ出ない front は、通信をそこへ限る
+      // lib.optionalAttrs (!target.needsNetwork) {
         IPAddressDeny = "any";
         IPAddressAllow = "localhost";
       }
@@ -105,27 +144,30 @@ in
 
   config.assertions = [
     {
-      # gateway は最初の _ で target と tool を切る。tool 名に _ が入るので、
-      # ある target 名が別の target 名の prefix だと解決先が定まらない
-      assertion = prefixCollisions == [ ];
-      message = "MCP target name is a prefix of another: " + lib.concatStringsSep ", " prefixCollisions;
+      assertion = cfg.enabledProviders != [ ] && cfg.enabledProviders == lib.unique cfg.enabledProviders;
+      message = "dotfiles.mcp.enabledProviders must be non-empty and unique";
+    }
+    {
+      assertion =
+        lib.sort builtins.lessThan cfg.enabledProviders == lib.sort builtins.lessThan providedProviders;
+      message = "dotfiles.mcp.enabledProviders and target providers must match exactly";
     }
     {
       assertion = targetsWithDelimiter == [ ];
       message =
         "MCP target names must not contain '_': " + lib.concatStringsSep ", " targetsWithDelimiter;
     }
+    {
+      assertion = prefixCollisions == [ ];
+      message = "MCP target name is a prefix of another: " + lib.concatStringsSep ", " prefixCollisions;
+    }
+    {
+      assertion = ports == lib.unique ports;
+      message = "MCP target ports must be unique";
+    }
+    {
+      assertion = githubTargets == expectedGithubTargets;
+      message = "GitHub target IDs must match github-<account> exactly";
+    }
   ];
-
-  config._module.args = {
-    # stdio しか話さない front を Streamable HTTP へ載せる共通の機構
-    serveOverProxy =
-      command: port:
-      "${lib.getExe pkgs.mcp-proxy} --host 127.0.0.1 --port ${toString port} --stateless -- ${command}";
-
-    mkMcpServer = pkgs.callPackage ./package/mk-server.nix { };
-    mkNpmMcp = pkgs.callPackage ./package/mk-npm.nix { };
-
-  };
-
 }

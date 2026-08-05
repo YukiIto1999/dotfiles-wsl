@@ -39,7 +39,7 @@ Nix store の candidate system
 | `images/` | OCI image inventory、同期、container backend の宣言 |
 | `telemetry/` | OpenTelemetry collector と endpoint 契約 |
 | `sops/`、`accounts/` | secret file の作り方と検証、account credential、利用者の identity |
-| `commands/rebuild/`、`commands/doctor/`、`commands/cleanup/`、`commands/rebuild/bootstrap/` | 適用、診断、整理、初回構築 |
+| `commands/rebuild/`、`commands/doctor/`、`commands/cleanup/` | 適用と初回構築、診断、整理 |
 
 | `artifacts/` | 生成設定の登録簿と構文検査 |
 | `primitives/` | 複数 unit が取り込む shell library |
@@ -79,7 +79,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 | 保守 | `dotfiles-cleanup` が候補表示と明示削除、`dotfiles-wsl-restart-required` が cold-start 判定を担当する |
 | 鍵の enrollment | `dotfiles-sops-enroll` が repository の recipient と host key の移行を通常 rebuild から分離する |
 
-最初の system generation が存在しない段階では生成 command を参照できないため、`commands/rebuild/bootstrap/impl/bootstrap.sh` だけは手書きの入口として残る。
+最初の system generation が存在しない段階では生成 command を参照できないため、`commands/rebuild/impl/bootstrap.sh` だけは手書きの入口として残る。
 
 ## データと適用の境界
 

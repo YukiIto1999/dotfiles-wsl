@@ -19,6 +19,40 @@ let
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 in
 {
+  unit-module-marker =
+    let
+      unitTree = import ./fixtures/unit-tree.nix;
+      fixtureCollectUnits = import ./impl/collect-units.nix {
+        inherit lib;
+        inherit (unitTree) readDir;
+      };
+      fixtureActual = map (unit: unit.id) (fixtureCollectUnits unitTree.root);
+    in
+    assert lib.assertMsg (fixtureActual == unitTree.expectedIds) (
+      "unit collector fixture mismatch: actual=${builtins.toJSON fixtureActual} "
+      + "expected=${builtins.toJSON unitTree.expectedIds}"
+    );
+    pkgs.runCommandLocal "check-unit-module-marker"
+      {
+        nativeBuildInputs = [
+          pkgs.diffutils
+          pkgs.findutils
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        printf '%s\n' ${lib.escapeShellArgs (map (unit: unit.id) units)} | sort > actual
+        find ${self} -type f -name module.nix -printf '%h\n' \
+          | while IFS= read -r directory; do
+            printf '%s\n' "''${directory#${self}/}"
+          done \
+          | sort > expected
+
+        diff -u expected actual
+        touch $out
+      '';
+
   # 誰も読まない契約は、宣言だけが残って中身が腐る。実際に images の契約が
   # 存在しない path を指したまま残っていた
   contract-has-reader =

@@ -28,8 +28,12 @@ in
       # host 鍵と recovery 鍵の二つ。片方だけだと復旧手段が無い
       test "$(wc -l < declared)" -eq 2
 
-      # 平文が残っていないこと
-      ! grep -qE '^[a-z_]+: [^E]' ${sopsFile}
+      # 平文が残っていないこと。! 付きの command は set -e の対象外なので
+      # 否定を条件式で書く
+      if grep -qE '^[a-z_]+: [^E]' ${sopsFile}; then
+        echo "secrets.yaml holds a plaintext value" >&2
+        exit 1
+      fi
       touch $out
     '';
 

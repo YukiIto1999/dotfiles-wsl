@@ -491,6 +491,8 @@ let
 in
 {
   agent-client-roster =
+    assert expected.required != [ ];
+    assert clients != { };
     assert lib.sort builtins.lessThan hostConfig.dotfiles.agents.enabled == expected.required;
     assert lib.sort builtins.lessThan (builtins.attrNames clients) == expected.required;
     assert variantConfig.dotfiles.agents.enabled == expected.required;
@@ -498,6 +500,7 @@ in
     assert actualContract == expected.clients;
     assert optionMetadata == expectedOptionMetadata;
     assert contractIsValid baseCandidate;
+    assert !contractIsValid (baseCandidate // { clients = { }; });
     assert builtins.all (valid: valid) (builtins.attrValues (requiredStringChecksFor baseCandidate));
     assert !contractIsValid (baseCandidate // { enabled = [ "claude" ]; });
     assert !contractIsValid (mutateClient "claude" { definitionFormat = "toml"; });

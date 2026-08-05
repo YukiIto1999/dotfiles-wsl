@@ -29,6 +29,23 @@ let
     "yaml"
     "markdown"
   ];
+  coversRequiredFormats =
+    candidateArtifacts:
+    lib.all (
+      format: lib.any (artifact: artifact.format == format) (builtins.attrValues candidateArtifacts)
+    ) requiredFormats;
+  removeFormat = format: lib.filterAttrs (_: artifact: artifact.format != format);
+  normalFormatEvaluation = builtins.tryEval (
+    assert coversRequiredFormats artifacts;
+    true
+  );
+  missingFormatEvaluations = map (
+    format:
+    builtins.tryEval (
+      assert coversRequiredFormats (removeFormat format artifacts);
+      true
+    )
+  ) requiredFormats;
 
   ownerOf =
     declaration:
@@ -55,9 +72,8 @@ in
     assert lib.assertMsg (
       doctorArtifactTable == expectedDoctorArtifactTable
     ) "doctor artifact table does not exactly match deployed artifacts";
-    assert lib.assertMsg (lib.all (
-      format: artifactSourcesFor format != [ ]
-    ) requiredFormats) "artifact registry must cover JSON, TOML, YAML, and Markdown";
+    assert lib.assertMsg (coversRequiredFormats artifacts)
+      "artifact registry must cover JSON, TOML, YAML, and Markdown";
     assert builtins.attrNames variantConfig.dotfiles.artifacts == builtins.attrNames artifacts;
     assert variantConfig.dotfiles.accounts == hostConfig.dotfiles.accounts;
     assert
@@ -71,6 +87,8 @@ in
     pkgs.runCommandLocal "check-artifact-registry" { } "touch $out";
 
   config-syntax =
+    assert normalFormatEvaluation.success;
+    assert lib.all (result: !result.success) missingFormatEvaluations;
     assert lib.all (format: artifactSourcesFor format != [ ]) requiredFormats;
     pkgs.runCommandLocal "check-config-syntax"
       {

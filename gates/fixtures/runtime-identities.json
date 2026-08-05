@@ -42,7 +42,5 @@
     "sonarqube/admin_password",
     "sonarqube/db_password"
   ],
-  "persistentPaths": [
-    "/var/lib/agentmemory/data"
-  ]
+  "agentmemoryPersistentMount": "/var/lib/agentmemory/data:/data"
 }

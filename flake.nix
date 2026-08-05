@@ -50,37 +50,7 @@
         claude-plugins-official = claudePlugins;
       };
 
-      # unit の収集。module.nix / package.nix / checks.nix / impl のいずれかを持つ directory が unit
-      collectUnits =
-        root:
-        let
-          inherit (nixpkgs) lib;
-          isUnit =
-            path:
-            let
-              inner = builtins.readDir path;
-            in
-            (inner ? "module.nix")
-            || (inner ? "package.nix")
-            || (inner ? "checks.nix")
-            || ((inner."impl" or null) == "directory");
-          walk =
-            prefix: path:
-            let
-              inner = lib.filterAttrs (_: kind: kind == "directory") (builtins.readDir path);
-              children = lib.concatMap (name: walk "${prefix}${name}/" (path + "/${name}")) (
-                builtins.attrNames inner
-              );
-            in
-            (lib.optional (isUnit path) {
-              id = lib.removeSuffix "/" prefix;
-              inherit path;
-            })
-            ++ children;
-          dirs = lib.filterAttrs (_: kind: kind == "directory") (builtins.readDir root);
-        in
-        lib.concatMap (name: walk "${name}/" (root + "/${name}")) (builtins.attrNames dirs);
-
+      collectUnits = import ./gates/impl/collect-units.nix { inherit (nixpkgs) lib; };
       units = collectUnits ./.;
 
       unitModules = builtins.filter builtins.pathExists (map (unit: unit.path + "/module.nix") units);
@@ -124,7 +94,7 @@
           sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
             mkdir -p "$out"
             cp -R --preserve=mode ${self}/. "$out/"
-            test -x "$out/commands/rebuild/bootstrap/impl/bootstrap.sh"
+            test -x "$out/commands/rebuild/impl/bootstrap.sh"
           '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
           dotfiles-install-clis = hostConfig.my.commands.installClis;
@@ -140,7 +110,6 @@
 
       checks.${system} =
         let
-          # unit の収集。module.nix / package.nix / impl のいずれかを持つ directory が unit
           # 各 unit の checks.nix を集め、id の重複を拒否する
           mergeChecks =
             args: units:

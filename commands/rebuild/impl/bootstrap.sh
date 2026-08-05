@@ -119,7 +119,7 @@ declare -ar BOOTSTRAP_STAGES=(
 )
 
 main() {
-  # config 生成前に実行するため my.username を参照できない、既定値と同じ "nixos" を使う
+  # config 生成前に実行するため dotfiles.host.username を参照できない。既定値と同じ "nixos" を使う
   local -r TARGET_USER="nixos"
   local -r USER_HOME="/home/${TARGET_USER}"
   local -r DOTFILES="${USER_HOME}/dotfiles-wsl"

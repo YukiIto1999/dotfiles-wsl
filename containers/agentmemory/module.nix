@@ -83,11 +83,6 @@ in
       };
     };
 
-    my.artifacts."containers/agentmemory/opencode-capture" = {
-      deployedAt = "${config.my.homeDir}/.config/opencode/plugins/agentmemory-capture.ts";
-      source = agentmemory.opencodePlugin;
-    };
-
     my.artifacts."containers/agentmemory/config" = {
       format = "yaml";
       source = agentmemoryConfig;
@@ -120,12 +115,5 @@ in
     virtualisation.oci-containers.containers = backend.containers;
     systemd.services = backend.systemdServices;
 
-    # lifecycle hooks は各 CLI 設定から /run/current-system/sw/bin の stable 名で参照する
-    environment.systemPackages = [ agentmemory.hooks ];
-
-    # OpenCode は plugins directory を自動ロードするため、設定 entry は要らない
-    home-manager.users.${config.my.username} = _: {
-      home.file.".config/opencode/plugins/agentmemory-capture.ts".source = agentmemory.opencodePlugin;
-    };
   };
 }

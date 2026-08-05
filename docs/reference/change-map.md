@@ -16,22 +16,22 @@
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix)。CLI は `my.contract.telemetry` を読む | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 品質 gate の server、database、provisioning を変える | [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)。MCP package と target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix)、credential の値は [`secrets/secrets.yaml`](../../secrets/secrets.yaml) | 宣言変更後に `dotfiles-rebuild`。admin credential の変更は [SonarQube admin password rotation](../operations/secrets.md#sonarqube-admin-password-rotation) に従う |
 
-## CLI
+## Agent client
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| AI CLI を追加する | [`clis/NAME/module.nix`](../../clis) を作り `my.clis.NAME` を宣言する。収集は flake が行うため roster への転記は要らない | 新規ファイルを `git add` し、checkout から `nix run .#dotfiles-install-clis`、`dotfiles-rebuild` の順に実行する |
-| AI CLI を管理対象から外す | 対応する [`clis/NAME/`](../../clis) を削除する | `dotfiles-rebuild`。`dotfiles-install-clis` は残存 binary を削除しないため、upstream が配置したファイルは別途削除する |
-| CLI 固有の managed config を変える | 対応する [`clis/NAME/assets/`](../../clis) の template と `module.nix` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| CLI の upstream 入手方法を変える | 対応する [`clis/NAME/module.nix`](../../clis) の `my.clis.NAME.install` | `dotfiles-rebuild`、`dotfiles-install-clis` |
+| Agent client を追加する | [`agents/NAME/module.nix`](../../agents) を作り `my.agents.clients.NAME` を宣言する。host の `my.agents.enabled` と固定 contract fixture も同じ変更で更新する | 新規ファイルを `git add` し、checkout から `nix run .#dotfiles-install-agents`、`dotfiles-rebuild` の順に実行する |
+| Agent client を管理対象から外す | 対応する [`agents/NAME/`](../../agents) を削除し、host の必要集合と fixture を更新する | `dotfiles-rebuild`。`dotfiles-install-agents` は残存 binary を削除しないため、upstream が配置したファイルは別途削除する |
+| client 固有の managed config を変える | 対応する [`agents/NAME/assets/`](../../agents) の template と `module.nix` の最終 `managedFiles` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| client の upstream 入手方法を変える | 対応する [`agents/NAME/module.nix`](../../agents) の `my.agents.clients.NAME.install` | `dotfiles-rebuild`、`dotfiles-install-agents` |
 
 ## Agent と skill
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| 共通ルールを変える | [`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| local skill を追加または変更する | [`clis/assets/skills/NAME/SKILL.md`](../../clis/assets/skills) と [`clis/module.nix`](../../clis/module.nix) の自動検出、配備規則 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
-| subagent を追加または変更する | [`clis/assets/agents/NAME.md`](../../clis/assets/agents) と [`clis/module.nix`](../../clis/module.nix) の自動検出、CLI 別変換 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
+| 共通ルールを変える | [`agents/shared/AGENTS.md`](../../agents/shared/AGENTS.md) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| local skill を追加または変更する | [`agents/shared/skills/NAME/SKILL.md`](../../agents/shared/skills) と [`agents/module.nix`](../../agents/module.nix) の自動検出、immutable source 配備 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
+| subagent を追加または変更する | [`agents/shared/definitions/NAME.md`](../../agents/shared/definitions) と各 client module の変換 | 新規ファイルは `git add` で flake source に含めてから `dotfiles-rebuild` |
 | plugin 由来の skill を更新する | [`flake.nix`](../../flake.nix) の plugin inputs と [`flake.lock`](../../flake.lock) | input を更新し、`dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 
 ## MCP

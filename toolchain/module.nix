@@ -134,7 +134,7 @@ in
   config.my.toolchain.packages = {
     # GitHub Actions のローカル実行。nix 統合を持つ
     actrun = pkgs.callPackage ./package/actrun.nix { };
-    # project scope の agent context 管理。user scope の配備は clis が持つ
+    # project scope の agent context 管理。user scope の配備は agents が持つ
     apm = pkgs.callPackage ./package/apm.nix { };
 
     inherit (pkgs)

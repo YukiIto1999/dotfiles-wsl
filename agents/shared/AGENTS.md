@@ -62,7 +62,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 
 ## skills
 
-繰り返し作業は手で再現せず、対応する skill を読む。`dotfiles-doctor` は `clis/assets/skills/` と plugin skills の配備を検査する。subagents 表の自動検査は無い。
+繰り返し作業は手で再現せず、対応する skill を読む。`nix flake check` は `agents/shared/skills/` と plugin skills の配備配線を検査する。`dotfiles-doctor` が観測するのは常駐 unit と MCP gateway であり、skill の runtime drift は検査しない。subagents 表の自動検査は無い。
 
 | 目的 | skill |
 |---|---|

@@ -1,0 +1,216 @@
+{
+  "required": [
+    "antigravity",
+    "claude",
+    "codex",
+    "opencode"
+  ],
+  "clients": {
+    "antigravity": {
+      "binary": "agy",
+      "versionArgs": ["--version"],
+      "rulesDestination": ".gemini/AGENTS.md",
+      "skillsDestination": ".gemini/antigravity-cli/skills",
+      "definitions": {
+        "mode": "unsupported",
+        "destination": null,
+        "format": null,
+        "names": []
+      },
+    "capabilities": {
+      "lsp": "unsupported",
+      "telemetry": "unsupported",
+      "agentmemory": "unsupported"
+    },
+    "capabilityManagedFiles": {
+      "lsp": null,
+      "telemetry": null,
+      "agentmemory": null
+    },
+      "gateway": {
+        "format": "json",
+        "managedFile": "mcp"
+      },
+      "managedFiles": {
+        "mcp": {
+          "format": "json",
+          "deployment": "home",
+          "destination": ".gemini/antigravity-cli/mcp_config.json"
+        }
+      },
+      "install": {
+        "kind": "installer-script",
+        "scriptUrl": "https://antigravity.google/cli/install.sh"
+      }
+    },
+    "claude": {
+      "binary": "claude",
+      "versionArgs": ["--version"],
+      "rulesDestination": ".claude/CLAUDE.md",
+      "skillsDestination": ".claude/skills",
+      "definitions": {
+        "mode": "native",
+        "destination": ".claude/agents",
+        "format": null,
+        "names": [
+          "architect",
+          "designer",
+          "explorer",
+          "implementer",
+          "planner",
+          "reviewer",
+          "security"
+        ]
+      },
+    "capabilities": {
+      "lsp": "supported",
+      "telemetry": "supported",
+      "agentmemory": "hooks"
+    },
+    "capabilityManagedFiles": {
+      "lsp": "managed-settings",
+      "telemetry": "managed-settings",
+      "agentmemory": "managed-settings"
+    },
+      "gateway": {
+        "format": "json",
+        "managedFile": "managed-mcp"
+      },
+      "managedFiles": {
+        "managed-mcp": {
+          "format": "json",
+          "deployment": "system",
+          "destination": "claude-code/managed-mcp.json"
+        },
+        "managed-settings": {
+          "format": "json",
+          "deployment": "system",
+          "destination": "claude-code/managed-settings.json"
+        },
+        "user-settings": {
+          "format": "json",
+          "deployment": "seed",
+          "destination": ".claude/settings.json"
+        }
+      },
+      "install": {
+        "kind": "installer-script",
+        "scriptUrl": "https://claude.ai/install.sh"
+      }
+    },
+    "codex": {
+      "binary": "codex",
+      "versionArgs": ["--version"],
+      "rulesDestination": ".codex/AGENTS.md",
+      "skillsDestination": ".codex/skills",
+      "definitions": {
+        "mode": "rendered",
+        "destination": ".codex/agents",
+        "format": "toml",
+        "names": [
+          "architect",
+          "designer",
+          "explorer",
+          "implementer",
+          "planner",
+          "reviewer",
+          "security"
+        ]
+      },
+    "capabilities": {
+      "lsp": "unsupported",
+      "telemetry": "unsupported",
+      "agentmemory": "hooks"
+    },
+    "capabilityManagedFiles": {
+      "lsp": null,
+      "telemetry": null,
+      "agentmemory": "system"
+    },
+      "gateway": {
+        "format": "toml",
+        "managedFile": "system"
+      },
+      "managedFiles": {
+        "project": {
+          "format": "toml",
+          "deployment": "home",
+          "destination": "dotfiles-wsl/.codex/config.toml"
+        },
+        "system": {
+          "format": "toml",
+          "deployment": "system",
+          "destination": "codex/config.toml"
+        },
+        "user": {
+          "format": "toml",
+          "deployment": "seed",
+          "destination": ".codex/config.toml"
+        }
+      },
+      "install": {
+        "kind": "github-release",
+        "repo": "openai/codex",
+        "assetByArch": {
+          "x86_64": "codex-x86_64-unknown-linux-musl.tar.gz",
+          "aarch64": "codex-aarch64-unknown-linux-musl.tar.gz"
+        }
+      }
+    },
+    "opencode": {
+      "binary": "opencode",
+      "versionArgs": ["--version"],
+      "rulesDestination": ".config/opencode/AGENTS.md",
+      "skillsDestination": ".config/opencode/skills",
+      "definitions": {
+        "mode": "rendered",
+        "destination": ".config/opencode/agents",
+        "format": "frontmatter-markdown",
+        "names": [
+          "architect",
+          "designer",
+          "explorer",
+          "implementer",
+          "planner",
+          "reviewer",
+          "security"
+        ]
+      },
+    "capabilities": {
+      "lsp": "supported",
+      "telemetry": "unsupported",
+      "agentmemory": "plugin"
+    },
+    "capabilityManagedFiles": {
+      "lsp": "config",
+      "telemetry": null,
+      "agentmemory": "agentmemory-plugin"
+    },
+      "gateway": {
+        "format": "json",
+        "managedFile": "config"
+      },
+      "managedFiles": {
+        "agentmemory-plugin": {
+          "format": "text",
+          "deployment": "home",
+          "destination": ".config/opencode/plugins/agentmemory-capture.ts"
+        },
+        "config": {
+          "format": "json",
+          "deployment": "home",
+          "destination": ".config/opencode/opencode.json"
+        }
+      },
+      "install": {
+        "kind": "github-release",
+        "repo": "anomalyco/opencode",
+        "assetByArch": {
+          "x86_64": "opencode-linux-x64.tar.gz",
+          "aarch64": "opencode-linux-arm64.tar.gz"
+        },
+        "binaryInArchive": "opencode"
+      }
+    }
+  }
+}

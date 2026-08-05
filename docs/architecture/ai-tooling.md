@@ -7,10 +7,10 @@ AI CLI の binary、共通資材、MCP 接続は別の経路で配備する。bi
 ## 配備の流れ
 
 ```text
-clis/assets/AGENTS.md ───────────────┐
-clis/assets/agents/*.md ── CLI変換 ─┤
-clis/assets/skills/* ── live link ──┼─ Home Manager ──► 各 CLI の設定領域
-flake input の plugin skills ─┘
+agents/shared/AGENTS.md ─────────────────┐
+agents/shared/definitions/*.md ─ client変換 ─┤
+agents/shared/skills/* ──────────────────┼─ Nix store ──► 各 client の設定領域
+flake input の plugin skills ────────────┘
 
 AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► 常駐 MCP front (target ごと)
       │                                              │
@@ -19,28 +19,30 @@ AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► 常駐 MCP 
       └── OTLP ──► telemetry collector
 ```
 
-[`clis/module.nix`](../../clis/module.nix) の `my.clis` が、binary 名、rules、skills、agents、gateway file、入手方法の roster contract を定義する。個別 module の一覧が正本であり、この文書には version、skill 名、agent 名を転記しない。
+[`agents/module.nix`](../../agents/module.nix) の `my.agents` が、host の必要 client、共有 source、各 client の capability、配備先、gateway fragment、最終 managed file、入手方法を型付き contract として定義する。host は必要な四 client を固定値で宣言し、各 [`agents/NAME/module.nix`](../../agents) が提供する集合と照合する。
 
-`dotfiles-install-clis` は roster から installer を生成し、通常ユーザーの `~/.local/bin` を更新する。systemd timer も同じ command を日次実行する。Nix は入手方法と固定配置先を宣言するが、CLI binary の内容や version を system closure に固定しない。
+`dotfiles-install-agents` は client contract から installer を生成し、通常ユーザーの `~/.local/bin` を更新する。`dotfiles-agent-autoupdate.timer` も同じ command を日次実行する。Nix は入手方法と固定配置先を宣言するが、client binary の内容や version を system closure に固定しない。
+
+この root は agent client 専用である。agent ではない CLI に共通の契約と配備が必要になった時点で、別の root `clis/` を作る。現在は該当する CLI がないため、空の分類は置かない。
 
 ## 共通 rules、agent、skill
 
-[`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) は全 CLI へ配る共通 rules の正本である。Home Manager が CLI ごとの規定 path に同じ source を配備する。
+[`agents/shared/AGENTS.md`](../../agents/shared/AGENTS.md) は全 client へ配る共通 rules の正本である。Home Manager が client ごとの規定 path に同じ immutable source を配備する。
 
-静的 agent の正本は [`clis/assets/agents/`](../../clis/assets/agents) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OpenCode は frontmatter 付き Markdown へ build 時に変換する。Antigravity は `agentsDir = null` であり、静的 agent を配備しない。CLI ごとの変換は [`clis/module.nix`](../../clis/module.nix) と各 CLI module が所有する。
+静的 agent の正本は [`agents/shared/definitions/`](../../agents/shared/definitions) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OpenCode は frontmatter 付き Markdown へ build 時に変換する。Antigravity は `definitionMode = "unsupported"` と宣言し、設定漏れと未対応を区別する。変換は各 client module が所有する。
 
-local skill は [`clis/assets/skills/`](../../clis/assets/skills) から自動検出し、checkout への out-of-store symlink として各 CLI へ配る。既存 skill の本文変更は rebuild なしで見えるが、追加、削除、名前変更は Nix 評価と rebuild が必要になる。plugin 由来 skill は [`flake.nix`](../../flake.nix) の固定 input から検出し、Nix store path を配備する。local と plugin の同名 skill は評価時に拒否する。
+local skill は [`agents/shared/skills/`](../../agents/shared/skills) から自動検出する。local skill と [`flake.nix`](../../flake.nix) に固定した plugin skill は、どちらも Nix store source として全 client へ配備する。本文の変更にも rebuild が必要である。local と plugin、plugin 同士の同名 skill は評価時に拒否する。
 
 ## CLI ごとの差
 
-| CLI | Nix が管理する設定 | 静的 agent | agentmemory の自動 capture |
-|---|---|---:|---:|
-| Claude Code | `/etc/claude-code` の managed settings と MCP、初回だけ作る user settings | あり | managed lifecycle hooks |
-| Codex | `/etc/codex/config.toml`、checkout 固有 config、初回だけ作る user config | あり | system config の lifecycle hooks |
-| OpenCode | Home Manager 配備の config | あり | 自動ロードされる capture plugin |
-| Antigravity | Home Manager 配備の MCP config | なし | 宣言なし |
+| Client | Agent definitions | LSP | Telemetry | Agentmemory |
+|---|---|---|---|---|
+| Claude Code | native Markdown | plugin | managed settings | lifecycle hooks |
+| Codex | rendered TOML | unsupported | unsupported | lifecycle hooks |
+| OpenCode | rendered frontmatter Markdown | config | unsupported | capture plugin |
+| Antigravity | unsupported | unsupported | unsupported | unsupported |
 
-Claude Code の user settings と Codex の user config は CLI が更新し得るため、Home Manager activation は file がない場合か symlink の場合だけ seed を書く。managed settings と checkout 固有 config は Nix が所有し、doctor が immutable source と比較する。OpenCode と Antigravity の gateway config は Home Manager が所有する。
+全 client が共通 rules、skills、単一 gateway の設定を持つ。Claude Code の user settings と Codex の user config は client が更新し得るため、Home Manager activation は配備先に通常 file、symlink、directory などの既存物がない場合だけ seed を書く。managed settings と checkout 固有 config は Nix が所有し、source から配備までの配線は `nix flake check` が検査する。`dotfiles-doctor` は managed file の runtime drift は検査しない。OpenCode と Antigravity の gateway config は Home Manager が所有する。
 
 ## MCP target、front、gateway
 
@@ -68,7 +70,7 @@ application 固有の contract と container 宣言は各 application の [`cont
 
 ## agentmemory
 
-[`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は agentmemory engine の Docker container、lifecycle hook、OpenCode capture plugin を配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
+[`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は agentmemory engine の Docker container を配備し、lifecycle hook package と OpenCode capture plugin の source を型付き contract で公開する。[`agents/module.nix`](../../agents/module.nix) と OpenCode adapter がその contract を読み、client 側へ配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
 
 ```text
 Claude Code / Codex hooks ─┐
@@ -88,18 +90,18 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 
 | 変更対象 | 正本 |
 |---|---|
-| CLI roster と配備差 | [`clis/module.nix`](../../clis/module.nix) と各 CLI module |
-| 共通 rules | [`clis/assets/AGENTS.md`](../../clis/assets/AGENTS.md) |
-| local agent と skill | [`clis/assets/agents/`](../../clis/assets/agents)、[`clis/assets/skills/`](../../clis/assets/skills) |
+| Agent client contract と配備差 | [`agents/module.nix`](../../agents/module.nix) と各 client module |
+| 共通 rules | [`agents/shared/AGENTS.md`](../../agents/shared/AGENTS.md) |
+| local agent と skill | [`agents/shared/definitions/`](../../agents/shared/definitions)、[`agents/shared/skills/`](../../agents/shared/skills) |
 | plugin skill source | [`flake.nix`](../../flake.nix) と `flake.lock` |
 | MCP target | 各 [`mcp/NAME/module.nix`](../../mcp) の `dotfiles.mcp.targets` |
 | MCP front | [`mcp/module.nix`](../../mcp/module.nix) の `dotfiles.mcp.fronts` と front service |
 | 単一 gateway | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` |
 | Docker backend の共通層 | [`containers/module.nix`](../../containers/module.nix)、[`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix) |
 | language server の roster | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp` |
-| CLI ごとの LSP 登録形式 | 各 CLI の module |
+| client ごとの LSP 登録形式 | 各 client の module |
 | 使用量の観測 | [`telemetry/module.nix`](../../telemetry/module.nix) |
-| agentmemory backend、hook、OpenCode plugin | [`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) と [`containers/agentmemory/`](../../containers/agentmemory) |
+| agentmemory backend と client package source | [`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) と [`containers/agentmemory/`](../../containers/agentmemory) |
 | memory MCP front と target | [`mcp/memory/module.nix`](../../mcp/memory/module.nix) と [`mcp/memory/`](../../mcp/memory) |
 | Crawl4AI backend と API token | [`containers/crawl4ai/module.nix`](../../containers/crawl4ai/module.nix) |
 | Crawl4AI MCP front と target | [`mcp/crawl4ai/module.nix`](../../mcp/crawl4ai/module.nix) |

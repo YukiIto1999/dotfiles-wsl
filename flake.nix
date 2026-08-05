@@ -65,6 +65,12 @@
         "account-2"
         "account-3"
       ];
+      agentClients = [
+        "antigravity"
+        "claude"
+        "codex"
+        "opencode"
+      ];
 
       pluginSources = {
         inherit superpowers;
@@ -102,6 +108,7 @@
         };
         my = {
           accounts = hostAccounts;
+          agents.enabled = agentClients;
           git.workIdentity = "~/projects/business/";
         };
       };
@@ -119,7 +126,7 @@
             test -x "$out/commands/rebuild/impl/bootstrap.sh"
           '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
-          dotfiles-install-clis = hostConfig.my.commands.installClis;
+          dotfiles-install-agents = hostConfig.my.commands.installAgents;
           dotfiles-rebuild = hostConfig.my.commands.rebuild;
           dotfiles-sync-images = hostConfig.my.commands.syncImages;
         };
@@ -164,7 +171,10 @@
                 gateway.port = 9876;
               };
             };
-            my.accounts = hostAccounts;
+            my = {
+              accounts = hostAccounts;
+              agents.enabled = agentClients;
+            };
           };
           artifactVariantConfig = artifactVariantSystem.config;
 

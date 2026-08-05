@@ -60,13 +60,13 @@ session の生存は downstream が response body を保持しているかで決
 
 [`containers/module.nix`](../../containers/module.nix) は `dotfiles.containers` の型付き service contract、Docker daemon、`dotfiles-backends` network、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は container 宣言と systemd 依存を組み立て、必要な host port だけを `127.0.0.1` に publish する。front は host loopback の backend port に接続する。
 
-application 固有の contract と container 宣言は分離途中である。現在は [`mcp/memory`](../../mcp/memory)、[`mcp/crawl4ai`](../../mcp/crawl4ai)、[`mcp/searxng`](../../mcp/searxng)、[`toolchain/sonarqube`](../../toolchain/sonarqube) が暫定的に所有する。
+application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。agentmemory は [`containers/agentmemory`](../../containers/agentmemory) へ分離済みである。Crawl4AI、SearXNG、SonarQube は移行途中のため、現在は [`mcp/crawl4ai`](../../mcp/crawl4ai)、[`mcp/searxng`](../../mcp/searxng)、[`toolchain/sonarqube`](../../toolchain/sonarqube) が暫定的に所有する。
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 
 ## agentmemory
 
-[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は agentmemory engine を Docker container、MCP front を host process、lifecycle hook を system command として配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。
+[`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は agentmemory engine の Docker container、lifecycle hook、OpenCode capture plugin を配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
 
 ```text
 Claude Code / Codex hooks ─┐
@@ -95,7 +95,8 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | language server の roster | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp` |
 | CLI ごとの LSP 登録形式 | 各 CLI の module |
 | 使用量の観測 | [`telemetry/module.nix`](../../telemetry/module.nix) |
-| agentmemory | [`mcp/memory/module.nix`](../../mcp/memory/module.nix) と [`mcp/memory/`](../../mcp/memory) |
+| agentmemory backend、hook、OpenCode plugin | [`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) と [`containers/agentmemory/`](../../containers/agentmemory) |
+| memory MCP front と target | [`mcp/memory/module.nix`](../../mcp/memory/module.nix) と [`mcp/memory/`](../../mcp/memory) |
 
 ## LSP と観測
 

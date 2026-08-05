@@ -118,7 +118,7 @@ register_safe_directories() { record_bootstrap_stage register_safe_directories; 
 preflight() { record_bootstrap_stage preflight; }
 verify_tracked_flake_files() { record_bootstrap_stage verify_tracked_flake_files; }
 verify_secrets() { record_bootstrap_stage verify_secrets; }
-install_ai_clis() { record_bootstrap_stage install_ai_clis; }
+install_agent_clients() { record_bootstrap_stage install_agent_clients; }
 install_boot_generation() {
   record_bootstrap_stage install_boot_generation
   "$test_upstream_rebuild/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#nixos" -L

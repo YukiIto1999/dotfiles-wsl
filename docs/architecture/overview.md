@@ -34,7 +34,7 @@ Nix store の candidate system
 |---|---|
 | `host/` | host 共通の語彙、NixOS-WSL、Windows interop、Nix daemon と cache、font、login user、Home Manager |
 | `mcp/` | 型付き MCP target、target から導く常駐 front、単一 agentgateway、その build |
-| `clis/` | AI CLI roster、設定、rules、skills、agents |
+| `agents/` | Agent client roster、型付き capability、設定、共通 rules、skills、definitions |
 | `toolchain/` | PATH 上の汎用ツールと language server、git 設定、project の静的解析 |
 | `containers/` | container service contract、OCI image inventory と同期、backend 配備の共通 helper |
 | `telemetry/` | OpenTelemetry collector と endpoint 契約 |
@@ -53,7 +53,7 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 ## Runtime services
 
-systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する AI CLI updater を unit として管理する。unit の期待状態は別の登録簿を持たず、この repository が宣言した常駐 service を `dotfiles-doctor` が導出する。
+systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する agent client updater を unit として管理する。unit の期待状態は別の登録簿を持たず、この repository が宣言した常駐 service を `dotfiles-doctor` が導出する。
 
 [`containers/module.nix`](../../containers/module.nix) は Docker daemon、`dotfiles-backends` network、型付き service contract、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。Agentmemory、Crawl4AI、SearXNG、SonarQube の application 固有宣言は各 `containers/` unit、対応する MCP front は各 `mcp/` unit が所有する。
 
@@ -77,7 +77,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 |---|---|
 | system generation | `dotfiles-rebuild` が build と apply を行う。世代と rollback は NixOS が持つ |
 | runtime 観測 | `dotfiles-doctor` が current generation と実状態を比較する |
-| 外部の可変 state | `dotfiles-install-clis` が user binary、`dotfiles-sync-images` が Docker cache を更新する |
+| 外部の可変 state | `dotfiles-install-agents` が user binary、`dotfiles-sync-images` が Docker cache を更新する |
 | 保守 | `dotfiles-cleanup` が候補表示と明示削除、`dotfiles-wsl-restart-required` が cold-start 判定を担当する |
 | 鍵の enrollment | `dotfiles-sops-enroll` が repository の recipient と host key の移行を通常 rebuild から分離する |
 
@@ -92,7 +92,9 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 | `/run/current-system`、system profile、systemd | NixOS activation | `dotfiles-rebuild` |
 | Home Manager の宣言的な home file | system generation 内の Home Manager 設定 | NixOS activation に続く user 配備 |
 | AI CLI binary、Docker cache、container data | 各専用 command と runtime service | rebuild とは別の明示操作、または service 実行 |
-| Claude Code と Codex の user-owned seed config | seed 作成後は各 CLI | Home Manager activation は file がない場合か symlink の場合だけ通常 file を作り、既存の通常 file は保持する |
+| Claude Code と Codex の user-owned seed config | seed 作成後は各 client | Home Manager activation は配備先に通常 file、symlink、directory などの既存物がない場合だけ通常 file を作る |
 | 暗号文、host key、復号済み secret | Git、root 管理領域、sops-nix runtime | enrollment、SOPS 編集、activation |
 
 mutable な runtime state を Nix 宣言へ逆輸入しない。NixOS または Home Manager が所有する生成先を直接編集しても正本は変わらず、次の activation で上書きまたは drift として検出される。Claude Code と Codex の user-owned seed config は例外であり、通常 file になった後は seed source を変更しても上書きされない。
+
+agent client は root の `agents/` に置く。agent ではない CLI に共通配備が必要になった場合だけ、独立した責務として root `clis/` を追加する。

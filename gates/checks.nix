@@ -34,8 +34,8 @@ let
   allowedDynamicFileReads = {
     "accounts/module.nix" = 3;
     "artifacts/checks.nix" = 1;
-    "clis/codex/module.nix" = 1;
-    "clis/opencode/module.nix" = 2;
+    "agents/codex/module.nix" = 1;
+    "agents/opencode/module.nix" = 1;
     "commands/module.nix" = 1;
     "containers/searxng/module.nix" = 1;
     "gates/impl/exec-tokens.nix" = 1;
@@ -224,7 +224,7 @@ in
 
       # port を持たないと宣言した unit。増えるときは必ずこの表に現れる
       withoutListener = [
-        "dotfiles-cli-autoupdate"
+        "dotfiles-agent-autoupdate"
         "docker-dotfiles-backends-network"
         "nix-daemon"
         "sonarqube-provision"
@@ -375,7 +375,7 @@ in
       ) hostOptions.my.contract.definitionsWithLocations;
 
       # unit 名が一意でないと、別の unit が同じ my.<name> を名乗れる。
-      # clis/codex と mcp/codex のように末端名が衝突する組が既にある
+      # agents/codex と mcp/codex のように末端名が衝突する組が既にある
       # 危険なのは名前空間を宣言する unit 同士の衝突だけ。何も宣言しない unit が
       # 末端名を共有しても、名乗る名前空間が無いので害が無い
       declaringUnits = lib.unique (
@@ -735,9 +735,17 @@ in
           [ ! -e "${self}/$path" ] || violations="$violations $path"
         done
         for unit in $unitPaths; do
+          relativeUnit=''${unit#${self}/}
+          allowedRootLayers=""
+          case "$relativeUnit" in
+            agents) allowedRootLayers=shared ;;
+          esac
           for entry in "$unit"/*; do
             name=$(basename "$entry")
             case " $layerNames " in
+              *" $name "*) continue ;;
+            esac
+            case " $allowedRootLayers " in
               *" $name "*) continue ;;
             esac
             case " $unitPaths " in

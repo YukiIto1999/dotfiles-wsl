@@ -10,9 +10,6 @@ review_model = "@codexModel@"
 default_subagent_model = "@codexModel@"
 default_subagent_reasoning_effort = "xhigh"
 
-[mcp_servers.gateway]
-url = "@gatewayUrl@"
-
 # agentmemory lifecycle hooks、upstream hooks.codex.json と同じ 6 event
 [[hooks.SessionStart]]
 [[hooks.SessionStart.hooks]]

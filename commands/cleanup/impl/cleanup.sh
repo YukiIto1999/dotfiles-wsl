@@ -37,8 +37,8 @@ remove_path() {
 
 shopt -s nullglob globstar
 
-# my.clis の各ディレクトリ宣言 + git/gh 設定 root 下の Home Manager backup 拡張子
-roots=(@cliRootsBashArray@)
+# my.agents の各配備先 + git/gh 設定 root 下の Home Manager backup 拡張子
+roots=(@agentRootsBashArray@)
 for root in "${roots[@]}"; do
   for path in "$HOME/$root"/**/*.@hmBackupExt@; do
     remove_path "$path"

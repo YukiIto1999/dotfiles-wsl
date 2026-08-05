@@ -101,7 +101,7 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 ├── flake.lock             input の固定
 ├── host/                  この機械の語彙、WSL 統合、Nix 設定
 ├── accounts/              account と identity
-├── clis/                  AI CLI の共通資産と CLI ごとの配備
+├── agents/                agent client の契約、共通資産、client ごとの配備
 ├── mcp/                   gateway、MCP target、その application module
 ├── toolchain/             PATH 上の汎用ツール、language server、git、静的解析
 ├── telemetry/             使用量の観測
@@ -115,6 +115,8 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 ```
 
 `containers/` は container 配備の共通層と application 固有の backend を所有する。Agentmemory、Crawl4AI、SearXNG、SonarQube の backend は各 `containers/` unit、MCP front は対応する `mcp/` unit が所有する。
+
+`agents/` は Claude Code、Codex、OpenCode、Antigravity の共通 rules、skills、agent definitions、MCP gateway 設定と client ごとの差を所有する。agent ではない CLI に共通の配備要件が生じた場合に限り、別責務として root に `clis/` を作る。
 
 責務は repo 直下に置き、層はどの責務でも同じ名前のファイルで表す。
 `module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `package/` `fixtures/` が素材である。振る舞いの検証も `checks.nix` に置き、`fixtures/` はその入力を持つ。

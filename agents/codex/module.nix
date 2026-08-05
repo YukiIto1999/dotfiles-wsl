@@ -2,7 +2,6 @@
   config,
   pkgs,
   lib,
-  seedConfig,
   ...
 }:
 
@@ -21,10 +20,13 @@ let
   codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
     sandbox_workspace_write.writable_roots = [ "${cfg.dotfilesDir}/.git" ];
   };
-  codexSystemConfig = pkgs.replaceVars ./assets/config-system.toml {
-    gatewayUrl = config.dotfiles.mcp.gateway.url;
-    inherit codexModel;
+  codexGatewayConfig = (pkgs.formats.toml { }).generate "codex-gateway.toml" {
+    mcp_servers.gateway.url = config.dotfiles.mcp.gateway.url;
   };
+  codexSystemBase = pkgs.replaceVars ./assets/config-system.toml { inherit codexModel; };
+  codexSystemConfig = pkgs.runCommandLocal "codex-system-config.toml" { } ''
+    cat ${codexSystemBase} ${codexGatewayConfig} > "$out"
+  '';
   codexUserSeed = pkgs.replaceVars ./assets/config.toml { inherit codexModel; };
 
   splitFrontmatter =
@@ -67,13 +69,43 @@ let
       '';
 in
 {
-  my.clis.codex = {
+  my.agents.clients.codex = {
     binary = "codex";
-    rulesFile = ".codex/AGENTS.md";
-    skillsDir = ".codex/skills";
-    agentsDir = ".codex/agents";
-    inherit buildAgent;
-    gatewayFile = null;
+    rulesDestination = ".codex/AGENTS.md";
+    skillsDestination = ".codex/skills";
+    definitionMode = "rendered";
+    definitionsDestination = ".codex/agents";
+    definitionFormat = "toml";
+    definitions = lib.mapAttrs buildAgent cfg.agents.shared.definitions;
+    gatewayConfig = {
+      source = codexGatewayConfig;
+      format = "toml";
+      managedFile = "system";
+    };
+    managedFiles = {
+      system = {
+        source = codexSystemConfig;
+        format = "toml";
+        deployment = "system";
+        destination = "codex/config.toml";
+      };
+      project = {
+        source = codexProjectConfig;
+        format = "toml";
+        deployment = "home";
+        destination = codexProjectHomePath;
+      };
+      user = {
+        source = codexUserSeed;
+        format = "toml";
+        deployment = "seed";
+        destination = ".codex/config.toml";
+      };
+    };
+    capabilityManagedFiles.agentmemory = "system";
+    lspMode = "unsupported";
+    telemetryMode = "unsupported";
+    agentmemoryMode = "hooks";
     install = {
       kind = "github-release";
       repo = "openai/codex";
@@ -87,40 +119,10 @@ in
   # codex の workspace-write sandbox が PATH 上に要求する bubblewrap
   environment.systemPackages = [ pkgs.bubblewrap ];
 
-  my.artifacts = {
-    "clis/codex/system" = {
-      format = "toml";
-      deployedAt = "/etc/codex/config.toml";
-      source = codexSystemConfig;
-    };
-    "clis/codex/project" = {
-      format = "toml";
-      deployedAt = "${cfg.dotfilesDir}/.codex/config.toml";
-      source = codexProjectConfig;
-    };
-    "clis/codex/user-seed" = {
-      format = "toml";
-      source = codexUserSeed;
-    };
-  };
-
   assertions = [
     {
       assertion = dotfilesDirIsBelowHome;
       message = "my.dotfilesDir must be a normalized path below my.homeDir for Codex project config deployment";
     }
   ];
-
-  # codex は user seed の ~/.codex/config.toml をこの上に merge
-  # gateway と hooks は全 project 共通、checkout の Git 権限は trusted project config に限定
-  environment.etc."codex/config.toml".source = codexSystemConfig;
-
-  home-manager.users.${cfg.username} =
-    { lib, ... }:
-    {
-      home.file.${codexProjectHomePath}.source = codexProjectConfig;
-      home.activation.seedCodexConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] (
-        seedConfig ".codex/config.toml" codexUserSeed
-      );
-    };
 }

@@ -2,7 +2,6 @@
   config,
   lib,
   pkgs,
-  seedConfig,
   ...
 }:
 
@@ -65,13 +64,47 @@ let
   };
 in
 {
-  my.clis.claude = {
+  my.agents.clients.claude = {
     binary = "claude";
-    rulesFile = ".claude/CLAUDE.md";
-    skillsDir = ".claude/skills";
-    agentsDir = ".claude/agents";
-    buildAgent = _: srcPath: srcPath;
-    gatewayFile = null;
+    rulesDestination = ".claude/CLAUDE.md";
+    skillsDestination = ".claude/skills";
+    definitionMode = "native";
+    definitionsDestination = ".claude/agents";
+    definitionFormat = null;
+    definitions = cfg.agents.shared.definitions;
+    gatewayConfig = {
+      source = managedMcp;
+      format = "json";
+      managedFile = "managed-mcp";
+    };
+    managedFiles = {
+      managed-settings = {
+        source = managedSettings;
+        format = "json";
+        deployment = "system";
+        destination = "claude-code/managed-settings.json";
+      };
+      managed-mcp = {
+        source = managedMcp;
+        format = "json";
+        deployment = "system";
+        destination = "claude-code/managed-mcp.json";
+      };
+      user-settings = {
+        source = userSettingsSeed;
+        format = "json";
+        deployment = "seed";
+        destination = ".claude/settings.json";
+      };
+    };
+    capabilityManagedFiles = {
+      lsp = "managed-settings";
+      telemetry = "managed-settings";
+      agentmemory = "managed-settings";
+    };
+    lspMode = "supported";
+    telemetryMode = "supported";
+    agentmemoryMode = "hooks";
     install = {
       kind = "installer-script";
       scriptUrl = "https://claude.ai/install.sh";
@@ -79,36 +112,9 @@ in
   };
 
   my.artifacts = {
-    "clis/claude/managed-settings" = {
-      format = "json";
-      deployedAt = "/etc/claude-code/managed-settings.json";
-      source = managedSettings;
-    };
-    "clis/claude/lsp" = {
+    "agents/claude/lsp" = {
       format = "json";
       source = lspJson;
     };
-    "clis/claude/managed-mcp" = {
-      format = "json";
-      deployedAt = "/etc/claude-code/managed-mcp.json";
-      source = managedMcp;
-    };
-    "clis/claude/user-settings-seed" = {
-      format = "json";
-      source = userSettingsSeed;
-    };
   };
-
-  environment.etc."claude-code/managed-settings.json".source = managedSettings;
-
-  # nix 所有 config パターンで gateway 登録を宣言的化
-  environment.etc."claude-code/managed-mcp.json".source = managedMcp;
-
-  home-manager.users.${cfg.username} =
-    { lib, ... }:
-    {
-      home.activation.seedClaudeConfig = lib.hm.dag.entryAfter [ "writeBoundary" ] (
-        seedConfig ".claude/settings.json" userSettingsSeed
-      );
-    };
 }

@@ -61,9 +61,9 @@ verify_secrets() {
   step "secrets decryption verified"
 }
 
-install_ai_clis() {
-  as_user nix run "${FLAKE_REF}#dotfiles-install-clis"
-  step "AI CLIs installed from upstream"
+install_agent_clients() {
+  as_user nix run "${FLAKE_REF}#dotfiles-install-agents"
+  step "agent clients installed from upstream"
 }
 
 install_boot_generation() {
@@ -113,7 +113,7 @@ declare -ar BOOTSTRAP_STAGES=(
   preflight
   verify_tracked_flake_files
   verify_secrets
-  install_ai_clis
+  install_agent_clients
   install_boot_generation
   link_nixos
 )

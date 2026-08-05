@@ -8,7 +8,7 @@
 
 let
   cfg = config.my;
-  names = builtins.attrNames cfg.clis;
+  names = builtins.attrNames cfg.agents.clients;
 
   # hm-back を掃く root。.config/<x> は 2 段まで、それ以外は先頭 1 段
   rootOf =
@@ -21,7 +21,7 @@ let
     else
       builtins.head segs;
 
-  roots = lib.unique (map (name: rootOf cfg.clis.${name}.rulesFile) names) ++ [
+  roots = lib.unique (map (name: rootOf cfg.agents.clients.${name}.rulesDestination) names) ++ [
     ".config/git"
     ".config/gh"
   ];
@@ -32,7 +32,7 @@ in
     src = ./impl/cleanup.sh;
     runtimeInputs = [ pkgs.coreutils ];
     vars = {
-      cliRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") roots);
+      agentRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") roots);
       hmBackupExt = config.home-manager.backupFileExtension;
     };
   };

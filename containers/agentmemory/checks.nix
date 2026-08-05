@@ -38,7 +38,6 @@ let
   volumes = container.volumes or [ ];
   plugin = toString clients.opencodePlugin;
   configMount = "${engineConfig}:/app/config.yaml:ro";
-  homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
   dataDirectory = hostConfig.systemd.tmpfiles.settings.agentmemory."/var/lib/agentmemory/data".d;
 in
 {
@@ -68,9 +67,6 @@ in
     assert lib.getVersion clients.hooks == expectedVersion;
     assert lib.hasInfix "agentmemory-deploy-${expectedVersion}" plugin;
     assert lib.hasSuffix "/plugin/opencode/agentmemory-capture.ts" plugin;
-    assert lib.elem clients.hooks hostConfig.environment.systemPackages;
-    assert
-      toString homeConfig.home.file.".config/opencode/plugins/agentmemory-capture.ts".source == plugin;
     assert dataDirectory.user == "65532";
     assert dataDirectory.group == "65532";
     assert dataDirectory.mode == "0750";

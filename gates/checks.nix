@@ -16,12 +16,9 @@ let
     builtins.filter (name: name != "") (map (unit: lib.head (lib.splitString "/" unit.id)) units)
   );
 
-  # container application が共通配備 helper を明示 import する唯一の例外。
-  # source と target の組を固定し、構文の書き換えや別用途の path 読み取りは許可しない
-  containerBackendImport = "../../" + "containers/impl/container-backend.nix";
-  allowedPureHelperImports = {
-    "toolchain/sonarqube/module.nix" = containerBackendImport;
-  };
+  # 全 consumer の移行後は例外を持たない。空集合も下の AST scan が実入力を
+  # 検出したことを確かめるため、gate 自体は vacuous にならない。
+  allowedPureHelperImports = { };
 
   forbiddenOwnership = [
     "mcp/memory/package/engine"
@@ -47,6 +44,23 @@ let
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
 in
 {
+  structure-responsibility-roots =
+    let
+      expectedSonarqubeUnits = [
+        "containers/sonarqube"
+        "mcp/sonarqube"
+      ];
+      actualSonarqubeUnits = lib.sort builtins.lessThan (
+        map (unit: unit.id) (builtins.filter (unit: builtins.baseNameOf unit.path == "sonarqube") units)
+      );
+      legacyPath = "toolchain/" + "sonarqube";
+      legacyPathExists = builtins.pathExists (self + "/${legacyPath}");
+    in
+    assert lib.assertMsg (
+      actualSonarqubeUnits == expectedSonarqubeUnits && !legacyPathExists
+    ) "${legacyPath} must be split into containers/sonarqube and mcp/sonarqube";
+    pkgs.runCommandLocal "check-structure-responsibility-roots" { } "touch $out";
+
   unit-module-marker =
     let
       unitTree = import ./fixtures/unit-tree.nix;
@@ -384,6 +398,9 @@ in
   # pure helper の exact import だけを通す。他 unit の impl や assets を広く読むと、
   # 宣言していない結合になる
   unit-boundary-name-only =
+    assert lib.assertMsg (
+      allowedPureHelperImports == { }
+    ) "container backend helper allowlist must remain empty";
     pkgs.runCommandLocal "check-unit-boundary-name-only"
       {
         nativeBuildInputs = [
@@ -398,7 +415,9 @@ in
         # 層の名前を数え上げると module.nix や checks.nix への直接参照が漏れる。
         # 根 unit の名前を宣言集合として持ち、そこへ入る path を全部拒む
         roots=${lib.escapeShellArg (lib.concatStringsSep " " rootUnitNames)}
-        backendSuffix=containers/impl/container-backend.nix
+        # container owner は ../impl で local helper を読む。root 外からの旧 path
+        # だけを target にすると、allowlist が空になった後の scan が vacuous になる。
+        backendSuffix=impl/container-backend.nix
         workDir=$PWD
 
         # comment や string の断片ではなく、reader と operand を Nix AST から取る。
@@ -468,8 +487,12 @@ in
           | gsub("[[:space:]()]"; "")
           | select(. == "import" or . == "builtins.readFile")
         ] | length' "$workDir/bindings.json")
+        targetImportTotal=$(jq 'length' "$workDir/target-imports.json")
 
         violations=""
+        if [ "$targetImportTotal" -eq 0 ]; then
+          violations="$violations container-backend-import-scan-is-empty"
+        fi
         if [ "$readerAliasCount" -ne 0 ]; then
           violations="$violations reader-alias-binding=$readerAliasCount"
         fi

@@ -14,7 +14,7 @@
 | PATH 上の汎用ツールを増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.packages`。nixpkgs に無いものは `toolchain/package/NAME.nix` を作り、`my.toolchain.packages` が callPackage する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | language server を増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `my.toolchain.lsp`。登録は各 CLI の module が変換する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix)。CLI は `my.contract.telemetry` を読む | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| 品質 gate の構成を変える | [`toolchain/sonarqube/module.nix`](../../toolchain/sonarqube/module.nix)。credential は [`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
+| 品質 gate の server、database、provisioning を変える | [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)。MCP package と target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix)、credential の値は [`secrets/secrets.yaml`](../../secrets/secrets.yaml) | 宣言変更後に `dotfiles-rebuild`。admin credential の変更は [SonarQube admin password rotation](../operations/secrets.md#sonarqube-admin-password-rotation) に従う |
 
 ## CLI
 
@@ -40,8 +40,8 @@
 |---|---|---|
 | MCP target を追加または削除する | [`mcp/NAME/`](../../mcp) に `module.nix` と必要なら `package.nix` を置く。収集は flake が行う | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | MCP front の port または起動方法を変える | 対応する [`mcp/NAME/module.nix`](../../mcp) の `port` と `serve`。port は gateway に隣接する 8770-8789 から取る | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| Docker backend の構成を変える | 対応する [`containers/NAME/module.nix`](../../containers) と [`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix)。移行途中の SonarQube は [`toolchain/sonarqube/module.nix`](../../toolchain/sonarqube/module.nix) が所有する。application の追加と削除では [`flake.nix`](../../flake.nix) の enabled roster と [`containers/checks.nix`](../../containers/checks.nix) の固定 roster も同時に変える。共通 schema と image 同期は [`containers/module.nix`](../../containers/module.nix) | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
-| upstream OCI image を更新する | 対応する [`containers/NAME/module.nix`](../../containers) の `dotfiles.containers.services.<name>.images` にある repository、digest、canonical image reference。移行途中の SonarQube は [`toolchain/sonarqube/module.nix`](../../toolchain/sonarqube/module.nix) を変更する。digest は `dotfiles-image-digest <image>` で取る | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
+| Docker backend の構成を変える | 対応する [`containers/NAME/module.nix`](../../containers) と [`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix)。application の追加と削除では [`flake.nix`](../../flake.nix) の enabled roster と [`containers/checks.nix`](../../containers/checks.nix) の固定 roster も同時に変える。共通 schema と image 同期は [`containers/module.nix`](../../containers/module.nix) | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
+| upstream OCI image を更新する | 対応する [`containers/NAME/module.nix`](../../containers) の `dotfiles.containers.services.<name>.images` にある repository、digest、canonical image reference。digest は `dotfiles-image-digest <image>` で取る | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
 | 固定した package の hash を更新する | 対応する [`mcp/NAME/package.nix`](../../mcp) の hash。値は `nix store prefetch-file --hash-type sha256 --json <url>` で取る | `dotfiles-rebuild` |
 
 ## Secret と identity
@@ -51,7 +51,7 @@
 | default Git identity を変える | [`sops/module.nix`](../../sops/module.nix) の consumer 宣言と [`secrets/secrets.yaml`](../../secrets/secrets.yaml) の暗号化済み値 | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | work identity の対象と値を変える | [`flake.nix`](../../flake.nix) の `my.git.workIdentity`、[`sops/module.nix`](../../sops/module.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | GitHub account を増減する | [`flake.nix`](../../flake.nix) の `my.accounts`、[`accounts/module.nix`](../../accounts/module.nix)、[`mcp/github/module.nix`](../../mcp/github/module.nix)、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | account roster と暗号化済み値を同じ変更に含め、`dotfiles-rebuild` |
-| backend が使う secret を追加または変更する | 対応する [`containers/NAME/module.nix`](../../containers) の `sops.secrets` と template、[`secrets/secrets.yaml`](../../secrets/secrets.yaml)。移行途中の SonarQube は [`toolchain/sonarqube/module.nix`](../../toolchain/sonarqube/module.nix) が宣言する | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
+| backend が使う secret を追加または変更する | 対応する [`containers/NAME/module.nix`](../../containers) の `sops.secrets` と template、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) | host key を指定して `sops` で編集し、`dotfiles-rebuild` |
 | host recipient を追加する | [`secrets/.sops.yaml`](../../secrets/.sops.yaml) の `hosts` と `creation_rules` | [SOPS の鍵](../operations/sops-enrollment.md)に従って `sops updatekeys` し、新しい鍵で復号できることを確かめてから旧 recipient を外す |
 
 通常の secret 編集 command は次の形に統一する。

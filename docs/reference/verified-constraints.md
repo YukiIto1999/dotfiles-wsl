@@ -21,7 +21,7 @@
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
-| 共通 container helper の unit 外 import は SonarQube の exact import 1 回だけを許し、AST で検出した別 source、readFile、別構文、追加 reader を拒否する | `unit-boundary-name-only` |
+| 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
 | MCP unit が OCI、secret template、同名 backend の secret と service contract を所有しない | `mcp-no-container-ownership` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
@@ -33,8 +33,8 @@
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
 | LSP roster と各 CLI の登録が一致し、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
-| SonarQube の server と DB が同じ credential を見て DB port を公開しない | `sonarqube-topology` |
-| SonarQube の front が資格情報を store へ焼かず空 secret で起動しない | `sonarqube-front` |
+| SonarQube の service contract、server と DB の topology、image、volume、環境 file、再起動、secret metadata、provision service と timer が固定値に一致する | `sonarqube-container` |
+| SonarQube MCP front は SOPS の poison stub と canary A / B、型付き credential の canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact が runtime password file を読む | `sonarqube-front` |
 | 生成 config artifact が登録簿に載り、宣言の変更に追随する | `artifact-registry` |
 | 生成 config artifact が配備先の source と一致する | `cli-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し子 process を作らない | `gateway-front-contract` |
@@ -81,6 +81,7 @@
 | 制約 | 検証 |
 |---|---|
 | 固定した virtual tree の再帰走査で通常ファイルの `module.nix` だけを unit marker とし、flake の unit ID が source 内の該当 directory と一致する | `unit-module-marker` |
+| SonarQube の unit が `containers/sonarqube` と `mcp/sonarqube` にだけ存在し、旧責務 path が実在しない | `structure-responsibility-roots` |
 | unit の直下が層の file 名か子 unit だけであり、移動済みの Agentmemory と SearXNG の資産が旧 path に再作成されない | `structure-layer-names` |
 
 ## 形式

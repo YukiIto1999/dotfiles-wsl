@@ -48,7 +48,7 @@ Claude Code の user settings と Codex の user config は CLI が更新し得�
 
 [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) は target 宣言を agentgateway の YAML へ畳み込み、systemd service を設定ユーザーで起動する。各 AI CLI は一つの gateway URL だけを持ち、個別 MCP server の command や backend port を知らない。front は target ごとの systemd service として常駐し、gateway は loopback の HTTP へ接続するだけである。downstream の session が増えても process は増えない。stdio しか話さない front は `mcp-proxy` が HTTP へ載せる。
 
-target を持つかどうかは、agent が消費するかで決まる。agent が読み書きするものは target、人が browser で開くだけのものは endpoint に留める。SonarQube のように両方あるものは両方持つ。target は所有 unit が宣言し、[`mcp`](../../mcp) 配下に置くのは MCP を publish することだけが存在理由の unit に限る。SonarQube は人が開く service が主なので [`toolchain/sonarqube`](../../toolchain/sonarqube) が target を持つ。
+target を持つかどうかは、agent が消費するかで決まる。agent が読み書きするものは target、人が browser で開くだけのものは endpoint に留める。SonarQube のように両方あるものは両方持つ。container application の endpoint は [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)、agent が使う target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix) が宣言する。
 
 browser を使う target は二つある。[`playwright`](../../mcp/playwright) は通常の操作、snapshot、screenshot、console、network の観測に使う。[`chrome-devtools`](../../mcp/chrome-devtools) はperformance trace、heap、Lighthouseなどの詳細観測に使う。両targetはisolated browser contextで動くため、sessionを共有すると仮定しない。chromium は `my.contract.mcp.chromium` で共有し、二つの closure を持たない。
 
@@ -60,7 +60,7 @@ session の生存は downstream が response body を保持しているかで決
 
 [`containers/module.nix`](../../containers/module.nix) は `dotfiles.containers` の型付き service contract、Docker daemon、`dotfiles-backends` network、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は container 宣言と systemd 依存を組み立て、必要な host port だけを `127.0.0.1` に publish する。front は host loopback の backend port に接続する。
 
-application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。agentmemory、Crawl4AI、SearXNG は分離済みであり、対応する [`mcp`](../../mcp) unit には front package と target だけを置く。移行途中の宣言は [`toolchain/sonarqube`](../../toolchain/sonarqube) に残る。
+application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。対応する [`mcp`](../../mcp) unit には front package と target だけを置き、SOPS、OCI container、provisioning は宣言しない。SonarQube の front は container owner が公開する endpoint、admin password file、backend unit を型付き contract から読む。
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 
@@ -101,6 +101,8 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | Crawl4AI MCP front と target | [`mcp/crawl4ai/module.nix`](../../mcp/crawl4ai/module.nix) |
 | SearXNG backend、設定、server secret | [`containers/searxng/module.nix`](../../containers/searxng/module.nix) |
 | SearXNG MCP front と target | [`mcp/searxng/module.nix`](../../mcp/searxng/module.nix) |
+| SonarQube server、database、provisioning、secret | [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix) |
+| SonarQube MCP package、front、target | [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix) と [`mcp/sonarqube/`](../../mcp/sonarqube) |
 
 ## LSP と観測
 

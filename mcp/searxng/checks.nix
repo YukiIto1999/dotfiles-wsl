@@ -7,20 +7,55 @@
 }:
 
 let
-  template = hostConfig.my.artifacts."mcp/searxng/settings-template".source;
+  expectedUrl = "http://127.0.0.1:8080";
+  expectedPort = 8775;
+  expectedWaitUnits = [ "docker-searxng.service" ];
 
-  # 契約の写しと突き合わせても、同じ宣言の二つの写しが一致するだけ。
-  # 実際に配備される argv から container 側の port を取る
-  published = helpers.execTokens.valuesOf helpers.containerArgv.containerArgv.searxng "-p";
-  containerPort = lib.last (lib.splitString ":" (builtins.head published));
+  mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
+  mkNpmMcp = pkgs.callPackage ../package/mk-npm.nix { };
+  frontPackage = pkgs.callPackage ./package.nix {
+    inherit mkMcpServer mkNpmMcp;
+    searxngUrl = expectedUrl;
+  };
+  front = hostConfig.my.contract.mcp.fronts.searxng;
+  target = hostConfig.my.mcp.targets.searxng;
+  execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
+  execTokens = helpers.execTokens.tokensOf execStart;
 in
 {
-  # settings は secret template として実配備へ渡る。値の一致は生成側で見る
-  searxng-settings =
-    assert hostConfig.sops.templates."searxng-settings.yml".content == builtins.readFile template;
-    assert builtins.length published == 1;
-    pkgs.runCommandLocal "check-searxng-settings" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
-      test "$(yq -r '.server.port' ${template})" = ${containerPort}
-      touch $out
-    '';
+  searxng-front =
+    assert target.port == expectedPort;
+    assert target.waitUnits == expectedWaitUnits;
+    assert lib.elem (lib.getExe frontPackage) execTokens;
+    pkgs.runCommandLocal "check-searxng-front"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        grep -Fqx 'export SEARXNG_URL="${expectedUrl}"' ${lib.getExe frontPackage}
+        printf '%s\n' '${
+          builtins.toJSON {
+            jsonrpc = "2.0";
+            id = 1;
+            method = "initialize";
+            params = {
+              protocolVersion = "2025-06-18";
+              capabilities = { };
+              clientInfo = {
+                name = "nix-check";
+                version = "1";
+              };
+            };
+          }
+        }' \
+          | timeout 10 ${lib.getExe frontPackage} > response.json 2> front.log
+
+        jq -e '.result.serverInfo.name == "ihor-sokoliuk/mcp-searxng"' response.json >/dev/null
+        touch $out
+      '';
 }

@@ -20,14 +20,13 @@ let
   # source と target の組を固定し、構文の書き換えや別用途の path 読み取りは許可しない
   containerBackendImport = "../../" + "containers/impl/container-backend.nix";
   allowedPureHelperImports = {
-    "mcp/crawl4ai/module.nix" = containerBackendImport;
-    "mcp/searxng/module.nix" = containerBackendImport;
     "toolchain/sonarqube/module.nix" = containerBackendImport;
   };
 
   forbiddenOwnership = [
     "mcp/memory/package/engine"
     "mcp/memory/assets/engine-config.yaml"
+    "mcp/searxng/assets/settings.yml"
   ];
 
   # path を式で組み立てる file reader は境界を文字列検索から隠せる。
@@ -41,9 +40,8 @@ let
     "clis/codex/module.nix" = 1;
     "clis/opencode/module.nix" = 2;
     "commands/module.nix" = 1;
+    "containers/searxng/module.nix" = 1;
     "gates/impl/exec-tokens.nix" = 1;
-    "mcp/searxng/checks.nix" = 1;
-    "mcp/searxng/module.nix" = 1;
   };
 
   homeConfig = hostConfig.home-manager.users.${hostConfig.my.username};
@@ -576,6 +574,82 @@ in
 
         if [ -n "$violations" ]; then
           echo "unit reads another unit through a path instead of a contract:$violations" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
+  # MCP unit は backend contract の consumer。OCI 配備、secret template、同名
+  # backend の secret と service contract を持つと ownership が再び混ざる
+  mcp-no-container-ownership =
+    let
+      relativeFile = file: lib.removePrefix "${self}/" (toString file);
+      isMcpModule = file: lib.hasPrefix "mcp/" file && lib.hasSuffix "/module.nix" file;
+      targetOf =
+        file:
+        let
+          segments = lib.splitString "/" file;
+        in
+        builtins.elemAt segments (builtins.length segments - 2);
+
+      violationsFor =
+        label: definitions:
+        lib.concatMap (
+          definition:
+          let
+            file = relativeFile definition.file;
+          in
+          lib.optional (isMcpModule file) "${file}:${label}"
+        ) definitions;
+
+      serviceViolations = lib.concatMap (
+        definition:
+        let
+          file = relativeFile definition.file;
+          target = targetOf file;
+        in
+        lib.optional (
+          isMcpModule file && builtins.hasAttr target definition.value
+        ) "${file}:dotfiles.containers.services.${target}"
+      ) hostOptions.dotfiles.containers.services.definitionsWithLocations;
+
+      secretViolations = lib.concatMap (
+        definition:
+        let
+          file = relativeFile definition.file;
+          target = targetOf file;
+          ownsTargetSecret = builtins.any (name: name == target || lib.hasPrefix "${target}/" name) (
+            builtins.attrNames definition.value
+          );
+        in
+        lib.optional (isMcpModule file && ownsTargetSecret) "${file}:sops.secrets.${target}"
+      ) hostOptions.sops.secrets.definitionsWithLocations;
+
+      violations =
+        violationsFor "virtualisation.oci-containers" hostOptions.virtualisation.oci-containers.containers.definitionsWithLocations
+        ++ violationsFor "sops.templates" hostOptions.sops.templates.definitionsWithLocations
+        ++ serviceViolations
+        ++ secretViolations;
+
+      mcpModuleCount = builtins.length (
+        builtins.filter (
+          unit: lib.hasPrefix "mcp/" unit.id && builtins.pathExists (unit.path + "/module.nix")
+        ) units
+      );
+    in
+    pkgs.runCommandLocal "check-mcp-no-container-ownership"
+      {
+        inherit mcpModuleCount;
+        violationText = lib.concatStringsSep " " violations;
+      }
+      ''
+        set -euo pipefail
+
+        if [ "$mcpModuleCount" -eq 0 ]; then
+          violationText="$violationText no-mcp-modules"
+        fi
+        if [ -n "$violationText" ]; then
+          echo "MCP unit owns container backend declarations: $violationText" >&2
           exit 1
         fi
         touch $out

@@ -114,7 +114,7 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 └── docs/                  runbook、architecture、reference
 ```
 
-`containers/` は container 配備の共通層を所有する。Agentmemory の backend は `containers/agentmemory/`、MCP front は `mcp/memory/` が所有する。ほかの application 固有の宣言は分離途中であり、現在は `mcp/crawl4ai/`、`mcp/searxng/`、`toolchain/sonarqube/` が暫定的に持つ。
+`containers/` は container 配備の共通層と application 固有の backend を所有する。Agentmemory、Crawl4AI、SearXNG の backend は各 `containers/` unit、MCP front は対応する `mcp/` unit が所有する。分離途中の application 固有宣言は `toolchain/sonarqube/` だけに残る。
 
 責務は repo 直下に置き、層はどの責務でも同じ名前のファイルで表す。
 `module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `package/` `fixtures/` が素材である。振る舞いの検証も `checks.nix` に置き、`fixtures/` はその入力を持つ。

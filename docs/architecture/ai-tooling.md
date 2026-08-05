@@ -60,7 +60,7 @@ session の生存は downstream が response body を保持しているかで決
 
 [`containers/module.nix`](../../containers/module.nix) は `dotfiles.containers` の型付き service contract、Docker daemon、`dotfiles-backends` network、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は container 宣言と systemd 依存を組み立て、必要な host port だけを `127.0.0.1` に publish する。front は host loopback の backend port に接続する。
 
-application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。agentmemory は [`containers/agentmemory`](../../containers/agentmemory) へ分離済みである。Crawl4AI、SearXNG、SonarQube は移行途中のため、現在は [`mcp/crawl4ai`](../../mcp/crawl4ai)、[`mcp/searxng`](../../mcp/searxng)、[`toolchain/sonarqube`](../../toolchain/sonarqube) が暫定的に所有する。
+application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。agentmemory、Crawl4AI、SearXNG は分離済みであり、対応する [`mcp`](../../mcp) unit には front package と target だけを置く。移行途中の宣言は [`toolchain/sonarqube`](../../toolchain/sonarqube) に残る。
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 
@@ -97,6 +97,10 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | 使用量の観測 | [`telemetry/module.nix`](../../telemetry/module.nix) |
 | agentmemory backend、hook、OpenCode plugin | [`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) と [`containers/agentmemory/`](../../containers/agentmemory) |
 | memory MCP front と target | [`mcp/memory/module.nix`](../../mcp/memory/module.nix) と [`mcp/memory/`](../../mcp/memory) |
+| Crawl4AI backend と API token | [`containers/crawl4ai/module.nix`](../../containers/crawl4ai/module.nix) |
+| Crawl4AI MCP front と target | [`mcp/crawl4ai/module.nix`](../../mcp/crawl4ai/module.nix) |
+| SearXNG backend、設定、server secret | [`containers/searxng/module.nix`](../../containers/searxng/module.nix) |
+| SearXNG MCP front と target | [`mcp/searxng/module.nix`](../../mcp/searxng/module.nix) |
 
 ## LSP と観測
 

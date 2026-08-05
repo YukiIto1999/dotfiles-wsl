@@ -53,6 +53,55 @@ in
         touch $out
       '';
 
+  runtime-identity =
+    let
+      expected = builtins.fromJSON (builtins.readFile ./fixtures/runtime-identities.json);
+      containers = hostConfig.virtualisation.oci-containers.containers;
+      containerValues = builtins.attrValues containers;
+      gatewayEndpoint = hostConfig.my.contract.gateway.endpoints.default;
+
+      containerNetworks = lib.unique (
+        lib.sort builtins.lessThan (
+          map (lib.removePrefix "--network=") (
+            lib.concatMap (
+              container: builtins.filter (lib.hasPrefix "--network=") container.extraOptions
+            ) containerValues
+          )
+        )
+      );
+
+      persistentPaths = lib.unique (
+        lib.sort builtins.lessThan (
+          lib.concatMap (
+            container:
+            builtins.filter (lib.hasPrefix "/var/lib/") (
+              map (volume: lib.head (lib.splitString ":" volume)) container.volumes
+            )
+          ) containerValues
+        )
+      );
+
+      actual =
+        assert lib.assertMsg (
+          builtins.length containerNetworks == 1
+        ) "runtime identity requires one container network: actual=${builtins.toJSON containerNetworks}";
+        {
+          mcpTargets = lib.mapAttrs (_: target: target.port) hostConfig.my.mcp.targets;
+          gateway = {
+            inherit (gatewayEndpoint) id port service;
+          };
+          containers = lib.sort builtins.lessThan (builtins.attrNames containers);
+          containerNetwork = lib.head containerNetworks;
+          secrets = lib.sort builtins.lessThan (builtins.attrNames hostConfig.sops.secrets);
+          inherit persistentPaths;
+        };
+    in
+    assert lib.assertMsg (actual == expected) (
+      "runtime identity mismatch: expected=${builtins.toJSON expected} "
+      + "actual=${builtins.toJSON actual}"
+    );
+    pkgs.runCommandLocal "check-runtime-identity" { } "touch $out";
+
   # 誰も読まない契約は、宣言だけが残って中身が腐る。実際に images の契約が
   # 存在しない path を指したまま残っていた
   contract-has-reader =

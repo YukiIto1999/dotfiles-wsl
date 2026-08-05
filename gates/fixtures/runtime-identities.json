@@ -1,0 +1,48 @@
+{
+  "mcpTargets": {
+    "chrome-devtools": 8779,
+    "codex": 8777,
+    "context7": 8771,
+    "crawl4ai": 8773,
+    "github-account-1": 8780,
+    "github-account-2": 8781,
+    "github-account-3": 8782,
+    "memory": 8774,
+    "playwright": 8776,
+    "searxng": 8775,
+    "sonarqube": 8778
+  },
+  "gateway": {
+    "id": "default",
+    "port": 8765,
+    "service": "agentgateway-default"
+  },
+  "containers": [
+    "agentmemory",
+    "crawl4ai",
+    "searxng",
+    "sonarqube",
+    "sonarqube-db"
+  ],
+  "containerNetwork": "dotfiles-backends",
+  "secrets": [
+    "accounts/account-1/token",
+    "accounts/account-1/username",
+    "accounts/account-2/token",
+    "accounts/account-2/username",
+    "accounts/account-3/token",
+    "accounts/account-3/username",
+    "crawl4ai/api_token",
+    "identity/default/email",
+    "identity/default/name",
+    "identity/work/email",
+    "identity/work/name",
+    "opencode/go_api_key",
+    "searxng/secret_key",
+    "sonarqube/admin_password",
+    "sonarqube/db_password"
+  ],
+  "persistentPaths": [
+    "/var/lib/agentmemory/data"
+  ]
+}

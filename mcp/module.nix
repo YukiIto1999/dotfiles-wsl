@@ -68,6 +68,10 @@ in
   # front と gateway の対応は名前から導ける。契約として公開する
   config.my.contract.mcp.fronts = fronts;
 
+  # browser を使う target は playwright と chrome-devtools の二つ。
+  # 別々に選ぶと二つの chromium が closure に入る
+  config.my.contract.mcp.chromium = pkgs.chromium;
+
   # front は常駐し、downstream session ごとの複製を作らない
   config.systemd.services = lib.mapAttrs' (
     name: front:

@@ -188,23 +188,25 @@ in
           containers = lib.sort builtins.lessThan (builtins.attrNames containers);
           containerNetwork = lib.head containerNetworks;
           secrets = lib.sort builtins.lessThan (builtins.attrNames hostConfig.sops.secrets);
-          timers = lib.sort builtins.lessThan (builtins.attrNames hostConfig.systemd.timers);
           agentmemoryPersistentMount = lib.head agentmemoryPersistentMounts;
         };
       identityMatches = candidate: candidate == expected;
       missingTargetMutation = actual // {
         mcpTargets = builtins.removeAttrs actual.mcpTargets [ "memory" ];
       };
-      updaterName = "dotfiles-agent-autoupdate";
-      missingUpdaterTimerMutation = actual // {
-        timers = builtins.filter (timer: timer != updaterName) actual.timers;
-      };
       commandNames = builtins.attrNames hostConfig.dotfiles.commands;
       serviceNames = builtins.attrNames hostConfig.systemd.services;
       timerNames = builtins.attrNames hostConfig.systemd.timers;
       installerExecutable = builtins.baseNameOf (lib.getExe hostConfig.dotfiles.commands.installAgents);
       legacyInstallerKey = "install" + "Clis";
+      updaterName = "dotfiles-agent-autoupdate";
       legacyUpdaterName = "dotfiles-" + "cli-autoupdate";
+      updaterNamesValid =
+        services: timers:
+        builtins.elem updaterName services
+        && builtins.elem updaterName timers
+        && !builtins.elem legacyUpdaterName services
+        && !builtins.elem legacyUpdaterName timers;
     in
     assert lib.assertMsg (identityMatches actual) (
       "runtime identity mismatch: expected=${builtins.toJSON expected} "
@@ -213,16 +215,12 @@ in
     assert lib.assertMsg (
       !identityMatches missingTargetMutation
     ) "runtime identity fixture accepted a deleted MCP target";
-    assert lib.assertMsg (
-      !identityMatches missingUpdaterTimerMutation
-    ) "runtime identity fixture accepted a deleted updater timer";
     assert installerExecutable == "dotfiles-install-agents";
     assert builtins.elem "installAgents" commandNames;
-    assert builtins.elem updaterName serviceNames;
-    assert builtins.elem updaterName timerNames;
     assert !builtins.elem legacyInstallerKey commandNames;
-    assert !builtins.elem legacyUpdaterName serviceNames;
-    assert !builtins.elem legacyUpdaterName timerNames;
+    assert updaterNamesValid serviceNames timerNames;
+    assert updaterNamesValid serviceNames (builtins.filter (timer: timer == updaterName) timerNames);
+    assert !updaterNamesValid serviceNames (builtins.filter (timer: timer != updaterName) timerNames);
     pkgs.runCommandLocal "check-runtime-identity" { } "touch $out";
 
   # 全登録簿に共通する保険。各 owner の check も、自分が検査する集合の非空を

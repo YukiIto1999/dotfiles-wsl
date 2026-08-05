@@ -615,13 +615,30 @@ in
     let
       ownershipFixture = import ./fixtures/mcp-container-ownership.nix;
       mcpContainerOwnership = import ./impl/mcp-container-ownership.nix { inherit lib; };
-      fixtureOwners = map (
-        case:
-        let
-          owner = mcpContainerOwnership.resolveUnitOwner ownershipFixture.scan.units case.file;
-        in
-        if owner == null then null else owner.id
-      ) ownershipFixture.ownerCases;
+      ownersWith =
+        resolveUnitOwner: fixtureUnits:
+        map (
+          case:
+          let
+            owner = resolveUnitOwner fixtureUnits case.file;
+          in
+          if owner == null then null else owner.id
+        ) ownershipFixture.ownerCases;
+      # 列挙順に依存する誤実装を逆順 fixture で落とすための mutation。
+      lastMatchUnitOwner =
+        fixtureUnits: relativeFile:
+        lib.foldl' (
+          owner: unit:
+          if relativeFile == unit.id || lib.hasPrefix "${unit.id}/" relativeFile then unit else owner
+        ) null fixtureUnits;
+      fixtureOwners = ownersWith mcpContainerOwnership.resolveUnitOwner ownershipFixture.scan.units;
+      lastMatchFixtureOwners = ownersWith lastMatchUnitOwner ownershipFixture.scan.units;
+      reverseFixtureOwners = ownersWith mcpContainerOwnership.resolveUnitOwner (
+        lib.reverseList ownershipFixture.scan.units
+      );
+      lastMatchReverseOwners = ownersWith lastMatchUnitOwner (
+        lib.reverseList ownershipFixture.scan.units
+      );
       expectedFixtureOwners = map (case: case.expected) ownershipFixture.ownerCases;
       fixtureScan = mcpContainerOwnership.scan ownershipFixture.scan;
       emptyFixtureScan = mcpContainerOwnership.scan ownershipFixture.emptyScan;
@@ -650,6 +667,18 @@ in
       "MCP ownership resolver fixture mismatch: actual=${builtins.toJSON fixtureOwners} "
       + "expected=${builtins.toJSON expectedFixtureOwners}"
     );
+    assert lib.assertMsg (reverseFixtureOwners == expectedFixtureOwners) (
+      "MCP ownership resolver reverse fixture mismatch: actual=${builtins.toJSON reverseFixtureOwners} "
+      + "expected=${builtins.toJSON expectedFixtureOwners}"
+    );
+    assert lib.assertMsg (lastMatchFixtureOwners == expectedFixtureOwners) (
+      "last-match mutation no longer reproduces the previous passing fixture: "
+      + "actual=${builtins.toJSON lastMatchFixtureOwners} "
+      + "expected=${builtins.toJSON expectedFixtureOwners}"
+    );
+    assert lib.assertMsg (
+      lastMatchReverseOwners != expectedFixtureOwners
+    ) "MCP ownership resolver fixture does not reject a last-match mutation";
     assert lib.assertMsg (fixtureScan == ownershipFixture.expectedScan) (
       "MCP ownership detector fixture mismatch: actual=${builtins.toJSON fixtureScan} "
       + "expected=${builtins.toJSON ownershipFixture.expectedScan}"

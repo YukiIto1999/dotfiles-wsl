@@ -7,51 +7,60 @@
 }:
 
 let
-  # 契約の写しではなく、実際に配備される argv から container 側の port を取る
-  published = helpers.execTokens.valuesOf helpers.containerArgv.containerArgv.agentmemory "-p";
-  httpPort = lib.last (lib.splitString ":" (builtins.head published));
-  config = hostConfig.my.artifacts."mcp/memory/config".source;
-  template = hostConfig.sops.templates."agentmemory.env";
-  templateFile = pkgs.writeText "agentmemory.env" template.content;
-  apiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";
+  expectedVersion = "0.9.26";
+  expectedUrl = "http://127.0.0.1:3111";
+  expectedPort = 8774;
+  expectedWaitUnits = [ "docker-agentmemory.service" ];
+
+  mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
+  frontPackage = pkgs.callPackage ./package.nix {
+    inherit mkMcpServer;
+    agentmemoryUrl = expectedUrl;
+    version = expectedVersion;
+  };
+  front = hostConfig.my.contract.mcp.fronts.memory;
+  target = hostConfig.my.mcp.targets.memory;
+  execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
+  execTokens = helpers.execTokens.tokensOf execStart;
 in
 {
-  # engine の待ち受け port は front の接続先と同じ宣言から出る
-  agentmemory-config =
-    assert builtins.length published == 1;
-    assert lib.elem "${config}:/app/config.yaml:ro"
-      hostConfig.virtualisation.oci-containers.containers.agentmemory.volumes;
-    pkgs.runCommandLocal "check-agentmemory-config" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
-      http=$(yq -r '.workers[] | select(.name == "iii-http") | .config.port' ${config})
-      stream=$(yq -r '.workers[] | select(.name == "iii-stream") | .config.port' ${config})
-      test "$http" = ${httpPort}
-      # stream は engine 内部専用。publish すると外から engine を直接叩ける
-      test "$stream" != "$http"
-      test "$stream" != ${httpPort}
-      touch $out
-    '';
+  agentmemory-front =
+    assert target.port == expectedPort;
+    assert target.waitUnits == expectedWaitUnits;
+    assert lib.elem (lib.getExe frontPackage) execTokens;
+    pkgs.runCommandLocal "check-agentmemory-front"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
 
-  # engine の LLM 設定は secret template 経由でしか実機に現れないので、生成結果を直接検査する
-  agentmemory-env =
-    assert
-      hostConfig.virtualisation.oci-containers.containers.agentmemory.environmentFiles
-      == [ template.path ];
-    pkgs.runCommandLocal "check-agentmemory-env" { } ''
-      set -eu
+        grep -Fqx 'export AGENTMEMORY_URL="${expectedUrl}"' ${lib.getExe frontPackage}
+        printf '%s\n' '${
+          builtins.toJSON {
+            jsonrpc = "2.0";
+            id = 1;
+            method = "initialize";
+            params = {
+              protocolVersion = "2025-06-18";
+              capabilities = { };
+              clientInfo = {
+                name = "nix-check";
+                version = "1";
+              };
+            };
+          }
+        }' \
+          | timeout 10 ${lib.getExe frontPackage} > response.json 2> front.log
 
-      printf '%s\n' \
-        EMBEDDING_PROVIDER \
-        OPENAI_API_KEY \
-        OPENAI_BASE_URL \
-        OPENAI_MODEL \
-        | sort > expected-keys
-      cut -d= -f1 ${templateFile} | sort > actual-keys
-      diff -u expected-keys actual-keys
-
-      grep -Fqx 'OPENAI_BASE_URL=https://opencode.ai/zen/go/v1' ${templateFile}
-      grep -Fqx 'OPENAI_MODEL=minimax-m2.7' ${templateFile}
-      grep -Fqx 'EMBEDDING_PROVIDER=none' ${templateFile}
-      grep -Fqx ${lib.escapeShellArg apiKeyLine} ${templateFile}
-      touch $out
-    '';
+        jq -e \
+          --arg version '${expectedVersion}' \
+          '.result.serverInfo == { name: "agentmemory", version: $version }' \
+          response.json >/dev/null
+        grep -Fq 'Standalone MCP server v${expectedVersion} starting' front.log
+        touch $out
+      '';
 }

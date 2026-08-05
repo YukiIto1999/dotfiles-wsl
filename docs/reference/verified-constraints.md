@@ -21,7 +21,7 @@
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
-| 共通 container helper は 4 source の exact import 各 1 回だけを許し、AST で検出した別 source、readFile、別構文、追加 reader を拒否する | `unit-boundary-name-only` |
+| 共通 container helper は 3 source の exact import 各 1 回だけを許し、AST で検出した別 source、readFile、別構文、追加 reader を拒否する | `unit-boundary-name-only` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
@@ -41,7 +41,9 @@
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
 | Chrome DevTools の front が host の chromium を使い CDP を露出しない | `chrome-devtools-front` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
-| backend の待ち受け port が配備される argv の publish と一致する | `agentmemory-config`、`searxng-settings` |
+| agentmemory backend の image、設定、mount、環境 file、health、client package が固定値と一致する | `agentmemory-container` |
+| agentmemory MCP front の package、port、backend unit が一致し、initialize に応答する | `agentmemory-front` |
+| backend の待ち受け port が配備される argv の publish と一致する | `agentmemory-container`、`searxng-settings` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | host が有効化した container application と service contract の key が一致する | `container-application-roster` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
@@ -57,7 +59,7 @@
 |---|---|
 | MCP session が active な GET body の間 reap されない | `agentgateway-session-lifecycle` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
-| agentmemory の credential が環境ファイル経由で渡る | `agentmemory-env` |
+| agentmemory の credential が環境ファイル経由で渡る | `agentmemory-container` |
 
 ## 文書
 
@@ -73,7 +75,7 @@
 | 制約 | 検証 |
 |---|---|
 | 固定した virtual tree の再帰走査で通常ファイルの `module.nix` だけを unit marker とし、flake の unit ID が source 内の該当 directory と一致する | `unit-module-marker` |
-| unit の直下が層の file 名か子 unit だけである | `structure-layer-names` |
+| unit の直下が層の file 名か子 unit だけであり、旧 path「mcp/memory/package/engine」と「mcp/memory/assets/engine-config.yaml」が再作成されない | `structure-layer-names` |
 
 ## 形式
 

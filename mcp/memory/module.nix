@@ -8,105 +8,16 @@
 }:
 
 let
-  mkContainerBackend = import ../../containers/impl/container-backend.nix { inherit lib; };
-  uid = "65532";
-
-  httpPort = "3111";
-  # stream port は publish しない、engine config 内部専用で consumer なし
-  streamPort = "3112";
-
-  agentmemory = pkgs.callPackage ./package.nix {
+  front = pkgs.callPackage ./package.nix {
     inherit mkMcpServer;
-    agentmemoryUrl = "http://127.0.0.1:${httpPort}";
-  };
-
-  agentmemoryConfig = pkgs.replaceVars ./assets/engine-config.yaml {
-    inherit httpPort streamPort;
-  };
-
-  backend = mkContainerBackend "agentmemory" {
-    image = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
-    imageFile = agentmemory.image;
-    volumes = [
-      "${agentmemoryConfig}:/app/config.yaml:ro"
-      "/var/lib/agentmemory/data:/data"
-    ];
-    environmentFiles = [ config.sops.templates."agentmemory.env".path ];
-    extraOptions = [
-      "--user=${uid}:${uid}"
-      "--memory=4g"
-    ];
-    ports = [ httpPort ];
+    agentmemoryUrl = config.dotfiles.containers.services.agentmemory.endpoints.http.url;
+    version = config.dotfiles.containers.agentmemory.version;
   };
 in
 {
-  dotfiles.containers.services.agentmemory = {
-    endpoints.http = {
-      protocol = "http";
-      address = "127.0.0.1";
-      port = 3111;
-      url = "http://127.0.0.1:3111";
-    };
-    units = [ "docker-agentmemory.service" ];
-    images.agentmemory = {
-      kind = "nix";
-      container = "agentmemory";
-      image = "${agentmemory.image.imageName}:${agentmemory.image.imageTag}";
-      imageFile = agentmemory.image;
-    };
-    health = {
-      endpoint = "http";
-      method = "GET";
-      path = "/agentmemory/livez";
-      timeout = 5;
-    };
-  };
-
-  my.artifacts."mcp/memory/opencode-capture" = {
-    deployedAt = "${config.my.homeDir}/.config/opencode/plugins/agentmemory-capture.ts";
-    source = agentmemory.opencodePlugin;
-  };
-
-  my.artifacts."mcp/memory/config" = {
-    format = "yaml";
-    source = agentmemoryConfig;
-  };
-
-  sops.secrets."opencode/go_api_key" = { };
-
-  # LLM は OpenCode Go の OpenAI 互換 endpoint
-  sops.templates."agentmemory.env" = {
-    mode = "0400";
-    restartUnits = [ "docker-agentmemory.service" ];
-    content = ''
-      OPENAI_API_KEY=${config.sops.placeholder."opencode/go_api_key"}
-      OPENAI_BASE_URL=https://opencode.ai/zen/go/v1
-      OPENAI_MODEL=minimax-m2.7
-      EMBEDDING_PROVIDER=none
-    '';
-  };
-  systemd.tmpfiles.settings."agentmemory" = {
-    "/var/lib/agentmemory/data".d = {
-      user = uid;
-      group = uid;
-      mode = "0750";
-    };
-  };
-
-  virtualisation.oci-containers.containers = backend.containers;
-  systemd.services = backend.systemdServices;
-
-  # lifecycle hooks は各 CLI 設定から /run/current-system/sw/bin の stable 名で参照
-  environment.systemPackages = [ agentmemory.hooks ];
-
-  # opencode は plugins dir の自動ロードのみ、設定エントリ不要
-  home-manager.users.${config.my.username} = _: {
-    home.file.".config/opencode/plugins/agentmemory-capture.ts".source = agentmemory.opencodePlugin;
-  };
-
   my.mcp.targets.memory = {
     port = 8774;
-    serve = serveOverProxy (lib.getExe agentmemory.front);
-    waitUnits = [ "docker-agentmemory.service" ];
+    serve = serveOverProxy (lib.getExe front);
+    waitUnits = config.dotfiles.containers.services.agentmemory.units;
   };
 }

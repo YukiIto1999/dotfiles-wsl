@@ -21,10 +21,14 @@ let
   containerBackendImport = "../../" + "containers/impl/container-backend.nix";
   allowedPureHelperImports = {
     "mcp/crawl4ai/module.nix" = containerBackendImport;
-    "mcp/memory/module.nix" = containerBackendImport;
     "mcp/searxng/module.nix" = containerBackendImport;
     "toolchain/sonarqube/module.nix" = containerBackendImport;
   };
+
+  forbiddenOwnership = [
+    "mcp/memory/package/engine"
+    "mcp/memory/assets/engine-config.yaml"
+  ];
 
   # path を式で組み立てる file reader は境界を文字列検索から隠せる。
   # 現在必要な動的 operand の source と件数を固定し、追加は明示的な変更にする
@@ -581,6 +585,7 @@ in
     pkgs.runCommandLocal "check-structure-layer-names"
       {
         unitPaths = map (unit: toString unit.path) units;
+        inherit forbiddenOwnership;
         layerNames = [
           "module.nix"
           "package.nix"
@@ -597,6 +602,9 @@ in
         # unit の一覧は flake の collectUnits が唯一の定義。ここで判定を書き直すと
         # 片方だけが歩く unit が出る
         violations=""
+        for path in $forbiddenOwnership; do
+          [ ! -e "${self}/$path" ] || violations="$violations $path"
+        done
         for unit in $unitPaths; do
           for entry in "$unit"/*; do
             name=$(basename "$entry")
@@ -611,7 +619,7 @@ in
         done
 
         if [ -n "$violations" ]; then
-          echo "unit contains an entry outside the layer name set:$violations" >&2
+          echo "unit contains an entry outside its layer or ownership set:$violations" >&2
           exit 1
         fi
         touch $out

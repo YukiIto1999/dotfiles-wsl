@@ -39,6 +39,7 @@ let
 
   commandHelper = ".." + "/commands/impl/mk-command.nix";
   nestedCommandHelper = ".." + "/.." + "/commands/impl/mk-command.nix";
+  nestedCommandSubstituteHelper = ".." + "/.." + "/commands/impl/substitute-command-vars.nix";
   userSecretHelper = ".." + "/sops/impl/user-secret-file.nix";
   approvedExplicitHelperImports = {
     "accounts/module.nix" = {
@@ -54,6 +55,16 @@ let
       line = "  mkCommand = import ${commandHelper} { inherit config lib pkgs; };";
     };
     "containers/sonarqube/module.nix" = {
+      target = nestedCommandHelper;
+      line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";
+    };
+    # production script と同じ置換を使う race/audit test variant だけが、
+    # commands unit の substitution helper を直接読む。
+    "toolchain/git/checks.nix" = {
+      target = nestedCommandSubstituteHelper;
+      line = "  substituteCommandVars = import ${nestedCommandSubstituteHelper};";
+    };
+    "toolchain/git/module.nix" = {
       target = nestedCommandHelper;
       line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";
     };

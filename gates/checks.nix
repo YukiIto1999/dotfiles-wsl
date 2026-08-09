@@ -1115,6 +1115,7 @@ in
         "assets"
         "fixtures"
         "package"
+        "runtime"
         "shared"
       ];
       entryIsValid =

@@ -14,6 +14,8 @@
     "agentmemory-hook-task-completed"
   ],
   "commands": {
+    "agentResource": "dotfiles-agent-resource",
+    "agentWorktree": "dotfiles-agent-worktree",
     "cleanup": "dotfiles-cleanup",
     "doctor": "dotfiles-doctor",
     "imageDigest": "dotfiles-image-digest",

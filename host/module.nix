@@ -99,6 +99,42 @@ in
   };
   config.nix.optimise.automatic = true;
 
+  # disk swap に退避する前に圧縮 memory を使い、host SSD への書き込みを増やさない
+  config.zramSwap = {
+    enable = true;
+    swapDevices = 1;
+    memoryPercent = 25;
+    priority = 100;
+    algorithm = "lzo-rle";
+    writebackDevice = null;
+  };
+
+  # 障害履歴を残しつつ、長期稼働時の journal に明示的な上限を設ける
+  config.services.journald = {
+    storage = "persistent";
+    extraConfig = ''
+      SystemMaxUse=4G
+      MaxRetentionSec=30day
+    '';
+  };
+
+  # util-linux の unit 本体、ExecStart、schedule は再利用し、WSL で失敗する
+  # vendor condition だけを drop-in で置き換える
+  config.systemd.services.fstrim = {
+    overrideStrategy = "asDropin";
+    unitConfig.ConditionVirtualization = [
+      ""
+      "wsl"
+    ];
+  };
+  config.systemd.timers.fstrim = {
+    overrideStrategy = "asDropin";
+    unitConfig.ConditionVirtualization = [
+      ""
+      "wsl"
+    ];
+  };
+
   # crates.io が curl 既定 UA を 403 拒否するため指定する許可 UA
   config.systemd.services.nix-daemon.environment.NIX_CURL_FLAGS = "--user-agent=Nixpkgs";
 

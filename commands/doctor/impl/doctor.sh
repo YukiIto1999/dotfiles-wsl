@@ -3,7 +3,7 @@ usage() {
 usage: dotfiles-doctor [--json]
 
 Reconcile the declared dotfiles deployment with the running system. Exit 0
-when every check passes, 1 when any check fails.
+when checks only pass or warn, 1 when any check fails.
 USAGE
 }
 
@@ -19,6 +19,8 @@ agent_table=@agentTable@
 artifact_table=@artifactTable@
 secret_table=@secretTable@
 service_table=@serviceTable@
+maintenance_table=@maintenanceTable@
+managed_root_table=@managedRootTable@
 container_table=@containerTable@
 health_table=@healthTable@
 mcp_table=@mcpTable@
@@ -31,9 +33,32 @@ cmp_command=@cmpCommand@
 readlink_command=@readlinkCommand@
 stat_command=@statCommand@
 systemctl_command=@systemctlCommand@
+timeout_command=@timeoutCommand@
+swapon_command=@swaponCommand@
+zramctl_command=@zramctlCommand@
+df_command=@dfCommand@
+powershell_command=@powershellCommand@
+journalctl_command=@journalctlCommand@
+du_command=@duCommand@
 
 checks=()
+warnings=()
 failures=()
+resources=()
+
+probe_timeout_seconds=10
+minimum_swap_bytes=8589934592
+root_warning_percent=85
+root_failure_percent=95
+windows_warning_percent=15
+windows_failure_percent=10
+maximum_journal_bytes=4294967296
+restart_warning_count=5
+restart_failure_count=20
+
+run_bounded() {
+  "$timeout_command" --signal=TERM --kill-after=2s "${probe_timeout_seconds}s" "$@"
+}
 
 record_pass() {
   local id=$1
@@ -52,14 +77,33 @@ record_failure() {
   failures+=("$failure")
 }
 
+record_warning() {
+  local id=$1
+  local message=$2
+  local check warning
+  check=$("$jq_command" -cn --arg id "$id" '{id:$id,status:"warn"}')
+  warning=$("$jq_command" -cn --arg id "$id" --arg message "$message" '{id:$id,message:$message}')
+  checks+=("$check")
+  warnings+=("$warning")
+}
+
+record_resource() {
+  local key=$1
+  local value=$2
+  local resource
+  resource=$("$jq_command" -cn --arg key "$key" --argjson value "$value" \
+    '{key:$key,value:$value}')
+  resources+=("$resource")
+}
+
 probe_unit() {
   local id=$1
   local unit=$2
   local load_state active_state result
 
-  if load_state=$("$systemctl_command" show "$unit" --property=LoadState --value 2>&1) \
-    && active_state=$("$systemctl_command" show "$unit" --property=ActiveState --value 2>&1) \
-    && result=$("$systemctl_command" show "$unit" --property=Result --value 2>&1); then
+  if load_state=$(run_bounded "$systemctl_command" show "$unit" --property=LoadState --value 2>&1) \
+    && active_state=$(run_bounded "$systemctl_command" show "$unit" --property=ActiveState --value 2>&1) \
+    && result=$(run_bounded "$systemctl_command" show "$unit" --property=Result --value 2>&1); then
     if [[ $load_state == loaded && $active_state == active && $result == success ]]; then
       record_pass "$id"
     else
@@ -162,21 +206,33 @@ decode_response() {
 
 emit_json() {
   local checks_file=$doctor_tmp/checks.jsonl
+  local warnings_file=$doctor_tmp/warnings.jsonl
   local failures_file=$doctor_tmp/failures.jsonl
+  local resources_file=$doctor_tmp/resources.jsonl
 
   : >"$checks_file"
+  : >"$warnings_file"
   : >"$failures_file"
+  : >"$resources_file"
   if ((${#checks[@]} > 0)); then
     printf '%s\n' "${checks[@]}" >"$checks_file"
   fi
   if ((${#failures[@]} > 0)); then
     printf '%s\n' "${failures[@]}" >"$failures_file"
   fi
+  if ((${#warnings[@]} > 0)); then
+    printf '%s\n' "${warnings[@]}" >"$warnings_file"
+  fi
+  if ((${#resources[@]} > 0)); then
+    printf '%s\n' "${resources[@]}" >"$resources_file"
+  fi
 
   "$jq_command" -cn \
     --slurpfile checks "$checks_file" \
+    --slurpfile warnings "$warnings_file" \
     --slurpfile failures "$failures_file" \
-    '{checks:$checks,failures:$failures}'
+    --slurpfile resources "$resources_file" \
+    '{checks:$checks,warnings:$warnings,failures:$failures,resources:($resources | from_entries)}'
 }
 
 doctor_tmp=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-doctor.XXXXXX")
@@ -194,7 +250,248 @@ else
   record_failure system-generation "could not resolve the current system generation"
 fi
 
-# 2. Home Manager activation is operationally distinct from the general roster.
+# 2. Active swap must retain the declared WSL pressure hierarchy.
+swap_valid=1
+zram_output=
+swap_output=
+declare -A zram_algorithms=()
+if zram_output=$(run_bounded "$zramctl_command" --noheadings --raw --output NAME,ALGORITHM 2>/dev/null); then
+  while read -r zram_name zram_algorithm extra; do
+    [[ -n $zram_name ]] || continue
+    if [[ -n ${extra-} || $zram_name != /dev/zram* || -z $zram_algorithm ]]; then
+      swap_valid=0
+      break
+    fi
+    zram_algorithms[$zram_name]=$zram_algorithm
+  done <<<"$zram_output"
+else
+  swap_valid=0
+fi
+
+total_swap_bytes=0
+zram_devices=0
+disk_devices=0
+min_zram_priority=0
+max_disk_priority=0
+zram_algorithm_valid=1
+swap_algorithms=()
+if swap_output=$(run_bounded "$swapon_command" --show=NAME,TYPE,SIZE,PRIO --bytes --noheadings --raw 2>/dev/null); then
+  while read -r swap_name swap_type swap_size swap_priority extra; do
+    [[ -n $swap_name ]] || continue
+    if [[ -n ${extra-} || -z $swap_type || ! $swap_size =~ ^[0-9]+$ \
+      || ! $swap_priority =~ ^-?[0-9]+$ ]]; then
+      swap_valid=0
+      break
+    fi
+
+    total_swap_bytes=$((total_swap_bytes + swap_size))
+    if [[ $swap_name == /dev/zram* ]]; then
+      zram_devices=$((zram_devices + 1))
+      if ((zram_devices == 1 || swap_priority < min_zram_priority)); then
+        min_zram_priority=$swap_priority
+      fi
+      algorithm=${zram_algorithms[$swap_name]-}
+      if [[ $algorithm != lzo-rle ]]; then
+        zram_algorithm_valid=0
+      fi
+      [[ -z $algorithm ]] || swap_algorithms+=("$algorithm")
+    else
+      disk_devices=$((disk_devices + 1))
+      if ((disk_devices == 1 || swap_priority > max_disk_priority)); then
+        max_disk_priority=$swap_priority
+      fi
+    fi
+  done <<<"$swap_output"
+else
+  swap_valid=0
+fi
+
+if ((swap_valid == 1)); then
+  algorithms_json=$(printf '%s\n' "${swap_algorithms[@]}" \
+    | "$jq_command" -Rsc 'split("\n") | map(select(length > 0)) | unique')
+  swap_resource=$("$jq_command" -cn \
+    --argjson totalBytes "$total_swap_bytes" \
+    --argjson zramDevices "$zram_devices" \
+    --argjson diskDevices "$disk_devices" \
+    --argjson minZramPriority "$min_zram_priority" \
+    --argjson maxDiskPriority "$max_disk_priority" \
+    --argjson algorithms "$algorithms_json" \
+    '{totalBytes:$totalBytes,zramDevices:$zramDevices,diskDevices:$diskDevices,
+      minZramPriority:$minZramPriority,maxDiskPriority:$maxDiskPriority,algorithms:$algorithms}')
+  record_resource swap "$swap_resource"
+fi
+
+if ((swap_valid == 1 \
+  && zram_devices > 0 \
+  && zram_algorithm_valid == 1 \
+  && (disk_devices == 0 || min_zram_priority > max_disk_priority) \
+  && total_swap_bytes >= minimum_swap_bytes)); then
+  record_pass resource/swap
+else
+  record_failure resource/swap \
+    "swap must include lzo-rle zram above any disk swap with at least 8 GiB total"
+fi
+
+# 3. Root filesystem utilization has warning and failure thresholds.
+if root_output=$(run_bounded "$df_command" --output=pcent / 2>/dev/null); then
+  root_used=${root_output##*$'\n'}
+  root_used=${root_used//[[:space:]]/}
+  root_used=${root_used%%%}
+else
+  root_used=
+fi
+if [[ $root_used =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((root_used <= 100)); then
+  root_resource=$("$jq_command" -cn --argjson usedPercent "$root_used" \
+    '{usedPercent:$usedPercent}')
+  record_resource rootFilesystem "$root_resource"
+  if ((root_used >= root_failure_percent)); then
+    record_failure resource/root-filesystem "root filesystem utilization is at least 95%"
+  elif ((root_used >= root_warning_percent)); then
+    record_warning resource/root-filesystem "root filesystem utilization is at least 85%"
+  else
+    record_pass resource/root-filesystem
+  fi
+else
+  record_failure resource/root-filesystem "could not observe root filesystem utilization"
+fi
+
+# 4. Windows D: capacity is queried through a fixed, non-interactive PowerShell command.
+powershell_probe="\$drive = Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='D:'\"; if (\$null -eq \$drive -or \$drive.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor((\$drive.FreeSpace * 100) / \$drive.Size))"
+if windows_output=$(
+  run_bounded "$powershell_command" \
+    -NoLogo -NoProfile -NonInteractive -Command "$powershell_probe" 2>/dev/null
+  windows_status=$?
+  printf '\x1f'
+  exit "$windows_status"
+); then
+  windows_output=${windows_output%$'\x1f'}
+  if [[ $windows_output == *$'\r\n' ]]; then
+    windows_free=${windows_output%$'\r\n'}
+  elif [[ $windows_output == *$'\n' ]]; then
+    windows_free=${windows_output%$'\n'}
+  elif [[ $windows_output == *$'\r' ]]; then
+    windows_free=${windows_output%$'\r'}
+  else
+    windows_free=$windows_output
+  fi
+else
+  windows_free=
+fi
+if [[ $windows_free =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((windows_free <= 100)); then
+  windows_resource=$("$jq_command" -cn --argjson freePercent "$windows_free" \
+    '{freePercent:$freePercent}')
+  record_resource windowsDDrive "$windows_resource"
+  if ((windows_free < windows_failure_percent)); then
+    record_failure resource/windows-d-drive "Windows D drive free space is below 10%"
+  elif ((windows_free < windows_warning_percent)); then
+    record_warning resource/windows-d-drive "Windows D drive free space is below 15%"
+  else
+    record_pass resource/windows-d-drive
+  fi
+else
+  record_failure resource/windows-d-drive "could not observe Windows D drive free space"
+fi
+
+# 5. journalctl is authoritative for the current journal footprint.
+if journal_output=$(LC_ALL=C run_bounded "$journalctl_command" --disk-usage 2>/dev/null) \
+  && [[ $journal_output =~ take[[:space:]]+up[[:space:]]+([0-9]+([.][0-9]+)?)[[:space:]]*([KMGTPE]?)(i?B)?[[:space:]]+in ]]; then
+  journal_amount=${BASH_REMATCH[1]}
+  journal_unit=${BASH_REMATCH[3]}
+  journal_bytes=$("$jq_command" -nr --arg amount "$journal_amount" --arg unit "$journal_unit" '
+    {"":1,K:1024,M:1048576,G:1073741824,T:1099511627776,
+      P:1125899906842624,E:1152921504606846976} as $powers
+    | (($amount | tonumber) * $powers[$unit] | floor)
+  ')
+else
+  journal_bytes=
+fi
+if [[ $journal_bytes =~ ^[0-9]+$ ]]; then
+  journal_resource=$("$jq_command" -cn --argjson bytes "$journal_bytes" '{bytes:$bytes}')
+  record_resource journald "$journal_resource"
+  if ((journal_bytes > maximum_journal_bytes)); then
+    record_failure resource/journald "journald disk usage exceeds 4 GiB"
+  else
+    record_pass resource/journald
+  fi
+else
+  record_failure resource/journald "could not observe journald disk usage"
+fi
+
+# 6. Only the three managed roots are summarized, with a timeout per root.
+mapfile -t managed_roots < <("$jq_command" -r '.[]' <<<"$managed_root_table")
+managed_root_resources=()
+managed_roots_valid=1
+for managed_root in "${managed_roots[@]}"; do
+  if managed_root_kind=$(run_bounded "$stat_command" --format=%F "$managed_root" 2>/dev/null); then
+    if [[ $managed_root_kind != directory ]]; then
+      managed_roots_valid=0
+      continue
+    fi
+  elif [[ ! -e $managed_root && ! -L $managed_root ]]; then
+    managed_root_resource=$("$jq_command" -cn --arg path "$managed_root" \
+      '{path:$path,bytes:0}')
+    managed_root_resources+=("$managed_root_resource")
+    continue
+  else
+    managed_roots_valid=0
+    continue
+  fi
+
+  if managed_root_output=$(run_bounded "$du_command" \
+    --summarize --bytes --one-file-system -- "$managed_root" 2>/dev/null); then
+    read -r managed_root_bytes observed_root extra <<<"$managed_root_output"
+    if [[ $managed_root_bytes =~ ^[0-9]+$ && $observed_root == "$managed_root" && -z ${extra-} ]]; then
+      managed_root_resource=$("$jq_command" -cn \
+        --arg path "$managed_root" --argjson bytes "$managed_root_bytes" \
+        '{path:$path,bytes:$bytes}')
+      managed_root_resources+=("$managed_root_resource")
+      continue
+    fi
+  fi
+  managed_roots_valid=0
+done
+managed_roots_resource=$(printf '%s\n' "${managed_root_resources[@]}" | "$jq_command" -sc '.')
+record_resource managedRoots "$managed_roots_resource"
+if ((managed_roots_valid == 1)); then
+  record_pass resource/managed-roots
+else
+  record_failure resource/managed-roots "could not summarize every managed resource root"
+fi
+
+# 7. Evaluated maintenance timers must remain loaded, enabled or active, and successful.
+mapfile -t maintenance_rows < <("$jq_command" -c '.[]' <<<"$maintenance_table")
+for row in "${maintenance_rows[@]}"; do
+  timer_unit=$("$jq_command" -r '.timer' <<<"$row")
+  timer_service=$("$jq_command" -r '.service' <<<"$row")
+  check_id="maintenance/$timer_unit"
+  if timer_load=$(run_bounded "$systemctl_command" show "$timer_unit" \
+    --property=LoadState --value 2>/dev/null) \
+    && timer_enabled=$(run_bounded "$systemctl_command" show "$timer_unit" \
+      --property=UnitFileState --value 2>/dev/null) \
+    && timer_active=$(run_bounded "$systemctl_command" show "$timer_unit" \
+      --property=ActiveState --value 2>/dev/null) \
+    && service_load=$(run_bounded "$systemctl_command" show "$timer_service" \
+      --property=LoadState --value 2>/dev/null) \
+    && service_result=$(run_bounded "$systemctl_command" show "$timer_service" \
+      --property=Result --value 2>/dev/null); then
+    case "$timer_enabled" in
+      enabled | enabled-runtime) timer_is_enabled=1 ;;
+      *) timer_is_enabled=0 ;;
+    esac
+    if [[ $timer_load == loaded \
+      && ( $timer_active == active || $timer_is_enabled == 1 ) \
+      && $service_load == loaded \
+      && $service_result == success ]]; then
+      record_pass "$check_id"
+    else
+      record_failure "$check_id" "$timer_unit or its service is not operational"
+    fi
+  else
+    record_failure "$check_id" "could not read maintenance state for $timer_unit"
+  fi
+done
+
+# 8. Home Manager activation is operationally distinct from the general roster.
 mapfile -t service_rows < <("$jq_command" -c '.[]' <<<"$service_table")
 mapfile -t home_manager_rows < <("$jq_command" -c '.[] | select(.role == "home-manager")' <<<"$service_table")
 if ((${#home_manager_rows[@]} == 1)); then
@@ -204,7 +501,7 @@ else
   record_failure home-manager "service roster must contain exactly one Home Manager unit"
 fi
 
-# 3. Agent executables and version commands.
+# 9. Agent executables and version commands.
 mapfile -t agent_rows < <("$jq_command" -c '.[]' <<<"$agent_table")
 if ((${#agent_rows[@]} == 0)); then
   record_failure agent-roster "agent roster is empty"
@@ -216,7 +513,7 @@ else
 
     if binary_path=$(command -v -- "$binary") \
       && [[ -x $binary_path ]] \
-      && "$binary_path" "${version_args[@]}" >/dev/null 2>&1; then
+      && run_bounded "$binary_path" "${version_args[@]}" >/dev/null 2>&1; then
       record_pass "agent/$agent_id"
     else
       record_failure "agent/$agent_id" "$binary is unavailable or its version command failed"
@@ -224,7 +521,7 @@ else
   done
 fi
 
-# 4. Immutable sources must still match their deployed destinations.
+# 10. Immutable sources must still match their deployed destinations.
 mapfile -t artifact_rows < <("$jq_command" -c '.[]' <<<"$artifact_table")
 for row in "${artifact_rows[@]}"; do
   artifact_id=$("$jq_command" -r '.id' <<<"$row")
@@ -250,7 +547,7 @@ for row in "${artifact_rows[@]}"; do
   fi
 done
 
-# 5. Secret contents are never read; only ownership and mode are compared.
+# 11. Secret contents are never read; only ownership and mode are compared.
 mapfile -t secret_rows < <("$jq_command" -c '.[]' <<<"$secret_table")
 for row in "${secret_rows[@]}"; do
   secret_id=$("$jq_command" -r '.id' <<<"$row")
@@ -268,7 +565,7 @@ for row in "${secret_rows[@]}"; do
   fi
 done
 
-# 6. Typed service roster.
+# 12. Typed service roster.
 if ((${#service_rows[@]} == 0)); then
   record_failure service-roster "service roster is empty"
 else
@@ -280,7 +577,32 @@ else
   done
 fi
 
-# 7. Running containers must use the image IDs declared by their image references.
+# 13. Service restart counters are observed without changing unit state.
+service_restart_resources=()
+for row in "${service_rows[@]}"; do
+  unit=$("$jq_command" -r '.unit' <<<"$row")
+  check_id="restart/service/$unit"
+  if restart_count=$(run_bounded "$systemctl_command" show "$unit" \
+    --property=NRestarts --value 2>/dev/null) \
+    && [[ $restart_count =~ ^(0|[1-9][0-9]*)$ ]]; then
+    restart_resource=$("$jq_command" -cn --arg unit "$unit" --argjson count "$restart_count" \
+      '{unit:$unit,count:$count}')
+    service_restart_resources+=("$restart_resource")
+    if ((restart_count >= restart_failure_count)); then
+      record_failure "$check_id" "$unit has restarted at least 20 times"
+    elif ((restart_count >= restart_warning_count)); then
+      record_warning "$check_id" "$unit has restarted at least 5 times"
+    else
+      record_pass "$check_id"
+    fi
+  else
+    record_failure "$check_id" "could not observe restart count for $unit"
+  fi
+done
+service_restarts_resource=$(printf '%s\n' "${service_restart_resources[@]}" | "$jq_command" -sc '.')
+record_resource serviceRestarts "$service_restarts_resource"
+
+# 14. Running containers must use the image IDs declared by their image references.
 mapfile -t container_rows < <("$jq_command" -c '.[]' <<<"$container_table")
 if ((${#container_rows[@]} == 0)); then
   record_failure container-roster "container roster is empty"
@@ -288,8 +610,10 @@ else
   for row in "${container_rows[@]}"; do
     container=$("$jq_command" -r '.container' <<<"$row")
     image=$("$jq_command" -r '.image' <<<"$row")
-    if declared_image_id=$("$docker_command" image inspect "$image" --format '{{.Id}}' 2>&1) \
-      && running_image_id=$("$docker_command" inspect "$container" --format '{{.Image}}' 2>&1) \
+    if declared_image_id=$(run_bounded "$docker_command" image inspect "$image" \
+      --format '{{.Id}}' 2>&1) \
+      && running_image_id=$(run_bounded "$docker_command" inspect "$container" \
+        --format '{{.Image}}' 2>&1) \
       && [[ $declared_image_id == "$running_image_id" ]]; then
       record_pass "container-image/$container"
     else
@@ -298,7 +622,33 @@ else
   done
 fi
 
-# 8. Application health endpoints.
+# 15. Container restart counters use Docker's monotonic restart count.
+container_restart_resources=()
+for row in "${container_rows[@]}"; do
+  container=$("$jq_command" -r '.container' <<<"$row")
+  check_id="restart/container/$container"
+  if restart_count=$(run_bounded "$docker_command" inspect "$container" \
+    --format '{{.RestartCount}}' 2>/dev/null) \
+    && [[ $restart_count =~ ^(0|[1-9][0-9]*)$ ]]; then
+    restart_resource=$("$jq_command" -cn --arg container "$container" \
+      --argjson count "$restart_count" '{container:$container,count:$count}')
+    container_restart_resources+=("$restart_resource")
+    if ((restart_count >= restart_failure_count)); then
+      record_failure "$check_id" "$container has restarted at least 20 times"
+    elif ((restart_count >= restart_warning_count)); then
+      record_warning "$check_id" "$container has restarted at least 5 times"
+    else
+      record_pass "$check_id"
+    fi
+  else
+    record_failure "$check_id" "could not observe restart count for $container"
+  fi
+done
+container_restarts_resource=$(printf '%s\n' "${container_restart_resources[@]}" \
+  | "$jq_command" -sc '.')
+record_resource containerRestarts "$container_restarts_resource"
+
+# 16. Application health endpoints.
 mapfile -t health_rows < <("$jq_command" -c '.[]' <<<"$health_table")
 for row in "${health_rows[@]}"; do
   application=$("$jq_command" -r '.application' <<<"$row")
@@ -523,6 +873,9 @@ if ((json == 1)); then
   printf '%s\n' "$report"
 else
   "$jq_command" -r '.checks[] | "\(.status): \(.id)"' <<<"$report"
+  if ((${#warnings[@]} > 0)); then
+    "$jq_command" -r '.warnings[] | "  \(.id): \(.message)"' <<<"$report" >&2
+  fi
   if ((${#failures[@]} > 0)); then
     "$jq_command" -r '.failures[] | "  \(.id): \(.message)"' <<<"$report" >&2
   fi

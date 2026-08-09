@@ -1,0 +1,12 @@
+{
+  "resources": {
+    "swap": {
+      "zram": [
+        {
+          "name": "/dev/zram0",
+          "algorithm": "zstd"
+        }
+      ]
+    }
+  }
+}

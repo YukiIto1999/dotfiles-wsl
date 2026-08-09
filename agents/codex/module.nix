@@ -16,16 +16,25 @@ let
     && lib.all (
       component: component != "" && component != "." && component != ".."
     ) dotfilesPathComponents;
+  agentRuntimeWritableRoots = [
+    "${cfg.host.homeDir}/.cache/dotfiles-wsl"
+    "${cfg.host.homeDir}/.local/state/dotfiles-wsl"
+  ];
   codexProjectHomePath = "${dotfilesHomeRelative}/.codex/config.toml";
   codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
-    sandbox_workspace_write.writable_roots = [ "${cfg.host.dotfilesDir}/.git" ];
+    sandbox_workspace_write.writable_roots = agentRuntimeWritableRoots ++ [
+      "${cfg.host.dotfilesDir}/.git"
+    ];
+  };
+  codexRuntimeConfig = (pkgs.formats.toml { }).generate "codex-runtime.toml" {
+    sandbox_workspace_write.writable_roots = agentRuntimeWritableRoots;
   };
   codexGatewayConfig = (pkgs.formats.toml { }).generate "codex-gateway.toml" {
     mcp_servers.gateway.url = config.dotfiles.mcp.gateway.url;
   };
   codexSystemBase = pkgs.replaceVars ./assets/config-system.toml { inherit codexModel; };
   codexSystemConfig = pkgs.runCommandLocal "codex-system-config.toml" { } ''
-    cat ${codexSystemBase} ${codexGatewayConfig} > "$out"
+    cat ${codexSystemBase} ${codexRuntimeConfig} ${codexGatewayConfig} > "$out"
   '';
   codexUserSeed = pkgs.replaceVars ./assets/config.toml { inherit codexModel; };
 

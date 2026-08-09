@@ -8,6 +8,8 @@
 }:
 
 let
+  inherit (helpers.execTokens) tokensOf;
+
   imageDefinitions = lib.concatMap (
     service:
     lib.mapAttrsToList (name: image: {
@@ -41,8 +43,115 @@ let
     scripts != [ ]
     && containerNames != [ ]
     && builtins.length scripts == 3 * builtins.length containerNames;
+
+  systemUnits = hostConfig.environment.etc."systemd/system".source;
 in
 {
+  docker-buildkit-gc-contract =
+    let
+      daemonSettings = hostConfig.virtualisation.docker.daemon.settings;
+      gcService = hostConfig.systemd.services.docker-buildkit-gc or null;
+      gcTimer = hostConfig.systemd.timers.docker-buildkit-gc or null;
+      execTokens = if gcService == null then [ ] else tokensOf gcService.serviceConfig.ExecStart;
+      dependencyFields = [
+        "after"
+        "before"
+        "bindsTo"
+        "conflicts"
+        "joinsNamespaceOf"
+        "onFailure"
+        "onSuccess"
+        "partOf"
+        "propagatesReloadTo"
+        "reloadPropagatedFrom"
+        "requires"
+        "requisite"
+        "upholds"
+        "wants"
+      ];
+      gcDependents = lib.concatLists (
+        lib.mapAttrsToList (
+          name: service:
+          map (field: "${name}.${field}") (
+            builtins.filter (
+              field: lib.elem "docker-buildkit-gc.service" (service.${field} or [ ])
+            ) dependencyFields
+          )
+        ) hostConfig.systemd.services
+      );
+    in
+    assert lib.assertMsg (
+      lib.attrByPath [ "builder" "gc" "enabled" ] null daemonSettings == true
+    ) "Docker BuildKit GC must be enabled";
+    assert lib.assertMsg (
+      lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null daemonSettings == "60GB"
+    ) "Docker BuildKit GC must retain 60GB by default";
+    assert lib.assertMsg (gcService != null) "Docker BuildKit GC service is missing";
+    assert lib.assertMsg (gcService.after == [ "docker.service" ]) (
+      "Docker BuildKit GC service must start after Docker: actual=${builtins.toJSON gcService.after}"
+    );
+    assert lib.assertMsg (gcService.wants == [ "docker.service" ]) (
+      "Docker BuildKit GC service must use a soft Docker dependency: actual=${builtins.toJSON gcService.wants}"
+    );
+    assert lib.assertMsg (gcService.requires == [ ] && gcService.requiredBy == [ ]) (
+      "Docker BuildKit GC failure must not propagate to Docker"
+    );
+    assert lib.assertMsg (gcDependents == [ ]) (
+      "system services must not depend on Docker BuildKit GC: actual=${builtins.toJSON gcDependents}"
+    );
+    assert lib.assertMsg (gcService.serviceConfig.Type == "oneshot") (
+      "Docker BuildKit GC service must be oneshot"
+    );
+    assert lib.assertMsg (
+      gcService.unitConfig.ConditionPathExists == "/var/run/docker.sock"
+    ) "Docker BuildKit GC service must require the Docker socket";
+    assert lib.assertMsg (
+      execTokens == [
+        (lib.getExe pkgs.docker)
+        "buildx"
+        "prune"
+        "--force"
+        "--max-used-space"
+        "60GB"
+        "--reserved-space"
+        "20GB"
+      ]
+    ) "Docker BuildKit GC command changed: actual=${builtins.toJSON execTokens}";
+    assert lib.assertMsg (gcTimer != null) "Docker BuildKit GC timer is missing";
+    assert lib.assertMsg (gcTimer.wantedBy == [ "timers.target" ]) (
+      "Docker BuildKit GC timer must be enabled: actual=${builtins.toJSON gcTimer.wantedBy}"
+    );
+    assert lib.assertMsg (
+      gcTimer.timerConfig == {
+        OnCalendar = "*-*-* 00/6:00:00";
+        Persistent = true;
+        Unit = "docker-buildkit-gc.service";
+      }
+    ) "Docker BuildKit GC timer must run persistently every six hours";
+    pkgs.runCommandLocal "check-docker-buildkit-gc-contract"
+      {
+        nativeBuildInputs = [
+          pkgs.findutils
+          pkgs.gnugrep
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        if grep -HnE '^(After|Before|BindsTo|Conflicts|JoinsNamespaceOf|OnFailure|OnSuccess|PartOf|PropagatesReloadTo|ReloadPropagatedFrom|Requires|Requisite|Upholds|Wants)=(.*[[:space:]])?docker-buildkit-gc\.service([[:space:]]|$)' ${systemUnits}/*.service > service-dependencies; then
+          cat service-dependencies >&2
+          exit 1
+        fi
+
+        find ${systemUnits} -mindepth 2 -type l -lname '*docker-buildkit-gc.service' -print > dependency-links
+        if [ -s dependency-links ]; then
+          cat dependency-links >&2
+          exit 1
+        fi
+
+        touch $out
+      '';
+
   container-backend-contract =
     let
       fixtures = [

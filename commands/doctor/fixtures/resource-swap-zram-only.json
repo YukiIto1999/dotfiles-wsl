@@ -1,0 +1,14 @@
+{
+  "resources": {
+    "swap": {
+      "entries": [
+        {
+          "name": "/dev/zram0",
+          "type": "partition",
+          "size": 8589934592,
+          "priority": 100
+        }
+      ]
+    }
+  }
+}

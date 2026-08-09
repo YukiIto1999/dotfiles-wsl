@@ -47,6 +47,24 @@ let
         unit = "home-manager-alice.service";
       }
     ];
+    maintenanceTable =
+      map
+        (name: {
+          timer = "${name}.timer";
+          service = "${name}.service";
+        })
+        [
+          "nix-gc"
+          "fstrim"
+          "docker-buildkit-gc"
+          "dotfiles-agent-project-cache-gc"
+          "dotfiles-agent-resource-reaper"
+        ];
+    managedRootTable = [
+      "/home/alice/.cache/dotfiles-wsl/builds"
+      "/home/alice/.cache/dotfiles-wsl/sessions"
+      "/home/alice/.local/state/dotfiles-wsl/agent-resources"
+    ];
     containerTable = [
       {
         application = "sonarqube";
@@ -79,7 +97,7 @@ let
     mkdir -p "$out/bin" "$out/libexec"
     cp ${./fixtures/fake-tool.sh} "$out/libexec/fake-tool"
     patchShebangs "$out/libexec/fake-tool"
-    for name in curl docker readlink stat systemctl cmp claude unknown-agent; do
+    for name in curl docker readlink stat systemctl cmp swapon zramctl df powershell.exe journalctl du claude unknown-agent; do
       ln -s ../libexec/fake-tool "$out/bin/$name"
     done
   '';
@@ -92,6 +110,13 @@ let
     readlink = "${fakeTools}/bin/readlink";
     stat = "${fakeTools}/bin/stat";
     systemctl = "${fakeTools}/bin/systemctl";
+    timeout = "${pkgs.coreutils}/bin/timeout";
+    swapon = "${fakeTools}/bin/swapon";
+    zramctl = "${fakeTools}/bin/zramctl";
+    df = "${fakeTools}/bin/df";
+    powershell = "${fakeTools}/bin/powershell.exe";
+    journalctl = "${fakeTools}/bin/journalctl";
+    du = "${fakeTools}/bin/du";
   };
 
   fixtureDoctor = mkDoctor {
@@ -114,11 +139,32 @@ let
         current = "/nix/store/system";
         profile = "/nix/store/system";
       };
-      systemd."home-manager-alice.service" = {
-        LoadState = "loaded";
-        ActiveState = "active";
-        Result = "success";
-      };
+      systemd =
+        builtins.listToAttrs (
+          map (row: {
+            name = row.timer;
+            value = {
+              LoadState = "loaded";
+              UnitFileState = "enabled";
+              ActiveState = "active";
+            };
+          }) tables.maintenanceTable
+          ++ map (row: {
+            name = row.service;
+            value = {
+              LoadState = "loaded";
+              Result = "success";
+            };
+          }) tables.maintenanceTable
+        )
+        // {
+          "home-manager-alice.service" = {
+            LoadState = "loaded";
+            ActiveState = "active";
+            Result = "success";
+            NRestarts = 0;
+          };
+        };
       binaries.claude = {
         stdout = "fixture 1.0";
         exit = 0;
@@ -130,7 +176,60 @@ let
       secrets."/run/secrets/fixture".metadata = "root:root:400";
       docker = {
         images."sonarqube:fixture".imageId = "sha256:declared";
-        containers.sonarqube.imageId = "sha256:declared";
+        containers.sonarqube = {
+          imageId = "sha256:declared";
+          restartCount = 0;
+        };
+      };
+      resources = {
+        swap = {
+          entries = [
+            {
+              name = "/dev/zram0";
+              type = "partition";
+              size = 4294967296;
+              priority = 100;
+            }
+            {
+              name = "/dev/sdd";
+              type = "partition";
+              size = 4294967296;
+              priority = -2;
+            }
+          ];
+          zram = [
+            {
+              name = "/dev/zram0";
+              algorithm = "lzo-rle";
+            }
+          ];
+        };
+        rootFilesystem.usedPercent = 84;
+        windowsDDrive = {
+          freePercent = 20;
+          exit = 0;
+        };
+        journald = {
+          output = "Archived and active journals take up 1.0G in the file system.";
+          exit = 0;
+        };
+        managedRoots = {
+          "/home/alice/.cache/dotfiles-wsl/builds" = {
+            bytes = 1048576;
+            exit = 0;
+            kind = "directory";
+          };
+          "/home/alice/.cache/dotfiles-wsl/sessions" = {
+            bytes = 2048;
+            exit = 0;
+            kind = "directory";
+          };
+          "/home/alice/.local/state/dotfiles-wsl/agent-resources" = {
+            bytes = 4096;
+            exit = 0;
+            kind = "directory";
+          };
+        };
       };
       health."http://127.0.0.1:9000/api/system/status" = {
         status = 200;
@@ -181,6 +280,8 @@ in
         "containerTable"
         "gatewayUrl"
         "healthTable"
+        "maintenanceTable"
+        "managedRootTable"
         "mcpTable"
         "secretTable"
         "serviceTable"
@@ -190,6 +291,17 @@ in
       row: row.owner != null && row.group != null && row.mode != ""
     ) productionTables.secretTable;
     assert map (row: row.unit) productionTables.serviceTable == expectedServiceUnits;
+    assert lib.all (
+      row:
+      builtins.hasAttr (lib.removeSuffix ".timer" row.timer) hostConfig.systemd.timers
+      && builtins.hasAttr (lib.removeSuffix ".service" row.service) hostConfig.systemd.services
+    ) productionTables.maintenanceTable;
+    assert
+      productionTables.managedRootTable == [
+        "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl/builds"
+        "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl/sessions"
+        "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl/agent-resources"
+      ];
     assert
       builtins.length (builtins.filter (row: row.role == "home-manager") productionTables.serviceTable)
       == 1;
@@ -209,7 +321,10 @@ in
   doctor-runtime =
     pkgs.runCommandLocal "check-doctor-runtime"
       {
-        nativeBuildInputs = [ pkgs.jq ];
+        nativeBuildInputs = [
+          pkgs.gnugrep
+          pkgs.jq
+        ];
       }
       ''
         set -euo pipefail
@@ -227,6 +342,7 @@ in
           local expected_status=$2
           local expected_failures=$3
           local doctor=$4
+          local expected_warnings=''${5:-'[]'}
           local output status
 
           merge_fixture "$name"
@@ -247,6 +363,13 @@ in
           if ! jq -e --argjson expected "$expected_failures" \
             '(.failures | map(.id)) == $expected' >/dev/null <<<"$output"; then
             printf '%s did not report exact failures %s\n%s\n' "$name" "$expected_failures" "$output" >&2
+            return 1
+          fi
+          if ! jq -e --argjson expected "$expected_warnings" \
+            '((.warnings // []) | map(.id)) == $expected
+             and ([.checks[] | select(.status == "warn") | .id] == $expected)' \
+            >/dev/null <<<"$output"; then
+            printf '%s did not report exact warnings %s\n%s\n' "$name" "$expected_warnings" "$output" >&2
             return 1
           fi
           if ! jq -e '
@@ -271,6 +394,112 @@ in
         run_case delete-405 0 '[]' ${lib.getExe fixtureDoctor} || test_failures=1
         run_case healthy 0 '[]' ${lib.getExe fixtureDoctor} || test_failures=1
         run_case healthy 1 '["mcp-roster"]' ${lib.getExe emptyRosterDoctor} || test_failures=1
+        run_case resource-warning 0 '[]' ${lib.getExe fixtureDoctor} \
+          '["resource/root-filesystem","resource/windows-d-drive","restart/service/home-manager-alice.service","restart/container/sonarqube"]' \
+          || test_failures=1
+        run_case resource-swap-failure 1 '["resource/swap"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-swap-missing 1 '["resource/swap"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-swap-priority 1 '["resource/swap"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-swap-total 1 '["resource/swap"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-swap-zram-only 0 '[]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-root-failure 1 '["resource/root-filesystem"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-windows-failure 1 '["resource/windows-d-drive"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-windows-unobservable 1 '["resource/windows-d-drive"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-windows-untrusted 1 '["resource/windows-d-drive"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-windows-multiline 1 '["resource/windows-d-drive"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-journald-failure 1 '["resource/journald"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-maintenance-failure 1 '["maintenance/fstrim.timer"]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-maintenance-result-failure 1 '["maintenance/fstrim.timer"]' \
+          ${lib.getExe fixtureDoctor} || test_failures=1
+        run_case resource-maintenance-active 0 '[]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+        run_case resource-restart-failure 1 \
+          '["restart/service/home-manager-alice.service","restart/container/sonarqube"]' \
+          ${lib.getExe fixtureDoctor} || test_failures=1
+        run_case resource-managed-roots-failure 1 '["resource/managed-roots"]' \
+          ${lib.getExe fixtureDoctor} || test_failures=1
+        run_case resource-managed-roots-missing 0 '[]' ${lib.getExe fixtureDoctor} \
+          || test_failures=1
+
+        merge_fixture healthy
+        healthy_output=$(DOTFILES_DOCTOR_FIXTURE="$TMPDIR/healthy.json" \
+          ${lib.getExe fixtureDoctor} --json)
+        if ! jq -e '
+          .resources.swap == {
+            totalBytes:8589934592,
+            zramDevices:1,
+            diskDevices:1,
+            minZramPriority:100,
+            maxDiskPriority:-2,
+            algorithms:["lzo-rle"]
+          }
+          and .resources.rootFilesystem == {usedPercent:84}
+          and .resources.windowsDDrive == {freePercent:20}
+          and .resources.journald == {bytes:1073741824}
+          and .resources.serviceRestarts == [
+            {unit:"home-manager-alice.service",count:0}
+          ]
+          and .resources.containerRestarts == [
+            {container:"sonarqube",count:0}
+          ]
+          and .resources.managedRoots == [
+            {path:"/home/alice/.cache/dotfiles-wsl/builds",bytes:1048576},
+            {path:"/home/alice/.cache/dotfiles-wsl/sessions",bytes:2048},
+            {path:"/home/alice/.local/state/dotfiles-wsl/agent-resources",bytes:4096}
+          ]
+        ' >/dev/null <<<"$healthy_output"; then
+          printf 'healthy did not report the expected bounded resource summary\n%s\n' \
+            "$healthy_output" >&2
+          test_failures=1
+        fi
+
+        merge_fixture resource-windows-untrusted
+        set +e
+        untrusted_output=$(DOTFILES_DOCTOR_FIXTURE="$TMPDIR/resource-windows-untrusted.json" \
+          ${lib.getExe fixtureDoctor} --json)
+        untrusted_status=$?
+        set -e
+        if [[ $untrusted_status -ne 1 || $untrusted_output == *DO_NOT_ECHO* ]]; then
+          printf 'Windows D drive output was trusted or reflected\n' >&2
+          test_failures=1
+        fi
+
+        merge_fixture resource-warning
+        set +e
+        warning_output=$(DOTFILES_DOCTOR_FIXTURE="$TMPDIR/resource-warning.json" \
+          ${lib.getExe fixtureDoctor} 2>&1)
+        warning_status=$?
+        set -e
+        if [[ $warning_status -ne 0 ]] \
+          || ! grep -Fxq 'warn: resource/root-filesystem' <<<"$warning_output" \
+          || ! grep -Fxq 'warn: resource/windows-d-drive' <<<"$warning_output"; then
+          printf 'warning-only human output was incomplete or non-zero\n%s\n' "$warning_output" >&2
+          test_failures=1
+        fi
+
+        merge_fixture resource-managed-roots-missing
+        missing_root_output=$(DOTFILES_DOCTOR_FIXTURE="$TMPDIR/resource-managed-roots-missing.json" \
+          ${lib.getExe fixtureDoctor} --json)
+        if ! jq -e '
+          .resources.managedRoots
+          | any(.path == "/home/alice/.local/state/dotfiles-wsl/agent-resources" and .bytes == 0)
+        ' >/dev/null <<<"$missing_root_output"; then
+          printf 'missing managed root was not reported with zero bytes\n%s\n' \
+            "$missing_root_output" >&2
+          test_failures=1
+        fi
 
         if run_case extra-failure 1 '["mcp-target/sonarqube"]' ${lib.getExe fixtureDoctor} \
           >/dev/null 2>&1; then

@@ -1,0 +1,22 @@
+{
+  "systemd": {
+    "home-manager-alice.service": {
+      "NRestarts": 5
+    }
+  },
+  "docker": {
+    "containers": {
+      "sonarqube": {
+        "restartCount": 19
+      }
+    }
+  },
+  "resources": {
+    "rootFilesystem": {
+      "usedPercent": 85
+    },
+    "windowsDDrive": {
+      "freePercent": 14
+    }
+  }
+}

@@ -43,6 +43,40 @@ let
     role = if unit == homeManagerUnit then "home-manager" else "service";
   }) serviceNames;
 
+  maintenanceTimerNames = builtins.filter (
+    name:
+    let
+      timer = config.systemd.timers.${name};
+      serviceUnit = timer.timerConfig.Unit or "${name}.service";
+      serviceName = lib.removeSuffix ".service" serviceUnit;
+      serviceDescription = config.systemd.services.${serviceName}.description or "";
+    in
+    builtins.elem name [
+      "nix-gc"
+      "fstrim"
+      "docker-buildkit-gc"
+    ]
+    || (lib.hasPrefix "dotfiles-agent-" name && lib.hasSuffix "-gc" name)
+    || (lib.hasSuffix "reaper" name && lib.hasInfix "worktree" (lib.toLower serviceDescription))
+  ) (builtins.attrNames config.systemd.timers);
+
+  maintenanceTable = map (
+    name:
+    let
+      timer = config.systemd.timers.${name};
+    in
+    {
+      timer = "${name}.timer";
+      service = timer.timerConfig.Unit or "${name}.service";
+    }
+  ) maintenanceTimerNames;
+
+  managedRootTable = [
+    "${cfg.host.homeDir}/.cache/dotfiles-wsl/builds"
+    "${cfg.host.homeDir}/.cache/dotfiles-wsl/sessions"
+    "${cfg.host.homeDir}/.local/state/dotfiles-wsl/agent-resources"
+  ];
+
   containerTable = lib.concatMap (
     application:
     map (image: {
@@ -77,6 +111,8 @@ let
         artifactTable
         secretTable
         serviceTable
+        maintenanceTable
+        managedRootTable
         containerTable
         healthTable
         mcpTable

@@ -9,6 +9,13 @@
     readlink = "${pkgs.coreutils}/bin/readlink";
     stat = "${pkgs.coreutils}/bin/stat";
     systemctl = "${pkgs.systemd}/bin/systemctl";
+    timeout = "${pkgs.coreutils}/bin/timeout";
+    swapon = "${pkgs.util-linux}/bin/swapon";
+    zramctl = "${pkgs.util-linux}/bin/zramctl";
+    df = "${pkgs.coreutils}/bin/df";
+    powershell = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+    journalctl = "${pkgs.systemd}/bin/journalctl";
+    du = "${pkgs.coreutils}/bin/du";
   },
   tables,
 }:
@@ -19,6 +26,8 @@ let
     "@artifactTable@" = lib.escapeShellArg (builtins.toJSON tables.artifactTable);
     "@secretTable@" = lib.escapeShellArg (builtins.toJSON tables.secretTable);
     "@serviceTable@" = lib.escapeShellArg (builtins.toJSON tables.serviceTable);
+    "@maintenanceTable@" = lib.escapeShellArg (builtins.toJSON tables.maintenanceTable);
+    "@managedRootTable@" = lib.escapeShellArg (builtins.toJSON tables.managedRootTable);
     "@containerTable@" = lib.escapeShellArg (builtins.toJSON tables.containerTable);
     "@healthTable@" = lib.escapeShellArg (builtins.toJSON tables.healthTable);
     "@mcpTable@" = lib.escapeShellArg (builtins.toJSON tables.mcpTable);
@@ -30,6 +39,13 @@ let
     "@readlinkCommand@" = lib.escapeShellArg tools.readlink;
     "@statCommand@" = lib.escapeShellArg tools.stat;
     "@systemctlCommand@" = lib.escapeShellArg tools.systemctl;
+    "@timeoutCommand@" = lib.escapeShellArg tools.timeout;
+    "@swaponCommand@" = lib.escapeShellArg tools.swapon;
+    "@zramctlCommand@" = lib.escapeShellArg tools.zramctl;
+    "@dfCommand@" = lib.escapeShellArg tools.df;
+    "@powershellCommand@" = lib.escapeShellArg tools.powershell;
+    "@journalctlCommand@" = lib.escapeShellArg tools.journalctl;
+    "@duCommand@" = lib.escapeShellArg tools.du;
   };
 in
 (pkgs.writeShellApplication {

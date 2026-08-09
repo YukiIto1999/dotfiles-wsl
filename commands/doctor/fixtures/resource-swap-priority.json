@@ -1,0 +1,20 @@
+{
+  "resources": {
+    "swap": {
+      "entries": [
+        {
+          "name": "/dev/zram0",
+          "type": "partition",
+          "size": 4294967296,
+          "priority": -3
+        },
+        {
+          "name": "/dev/sdd",
+          "type": "partition",
+          "size": 4294967296,
+          "priority": -2
+        }
+      ]
+    }
+  }
+}

@@ -12,6 +12,31 @@ let
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   clientNames = builtins.attrNames agents.clients;
+  runtime = import ./runtime/package.nix {
+    inherit lib pkgs;
+    agentWorktreeCommand = lib.getExe config.dotfiles.commands.agentWorktree;
+  };
+  runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
+  runtimeClientNames = builtins.filter (
+    name: name != "antigravity" && agents.clients.${name}.binary != ""
+  ) clientNames;
+  runtimeWrappers = lib.listToAttrs (
+    map (
+      name:
+      let
+        client = agents.clients.${name};
+        wrapper = runtime.mkWrapper {
+          client = name;
+          inherit (client) binary;
+          homeDir = cfg.host.homeDir;
+        };
+      in
+      lib.nameValuePair "${runtimeWrapperDirectory}/${client.binary}" {
+        source = lib.getExe wrapper;
+        executable = true;
+      }
+    ) runtimeClientNames
+  );
 
   pluginPaths = [
     pluginSources.superpowers
@@ -256,12 +281,20 @@ in
     ];
 
     environment.etc = lib.listToAttrs systemManagedEntries;
-    environment.systemPackages = [ config.dotfiles.containers.agentmemory.clients.hooks ];
+    environment.systemPackages = [
+      config.dotfiles.containers.agentmemory.clients.hooks
+      runtime.gc
+      runtime.verify
+    ];
 
     home-manager.users.${cfg.host.username} =
       { lib, ... }:
       {
-        home.file = lib.listToAttrs allHomeEntries;
+        home.file = lib.mkMerge [
+          (lib.listToAttrs allHomeEntries)
+          runtimeWrappers
+        ];
+        home.sessionPath = lib.mkBefore [ "$HOME/${runtimeWrapperDirectory}" ];
         home.activation.seedAgentConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] seedScript;
       };
 
@@ -281,6 +314,24 @@ in
     };
 
     systemd.timers.dotfiles-agent-autoupdate = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "daily";
+        Persistent = true;
+      };
+    };
+
+    systemd.services.dotfiles-agent-project-cache-gc = {
+      description = "Agent project cache を回収";
+      serviceConfig = {
+        Type = "oneshot";
+        User = cfg.host.username;
+        Environment = "HOME=${cfg.host.homeDir}";
+        ExecStart = lib.getExe runtime.gc;
+      };
+    };
+
+    systemd.timers.dotfiles-agent-project-cache-gc = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnCalendar = "daily";

@@ -2,6 +2,7 @@ set -euo pipefail
 shopt -s nullglob
 
 program=dotfiles-agent-resource
+usage_text="usage: $program begin-session SESSION | validate-session SESSION | cleanup-session SESSION | register-worktree SESSION COMMON-DIR PATH INITIAL-HEAD | reap"
 git_command=@gitCommand@
 
 die() {
@@ -625,9 +626,16 @@ reap_sessions() {
 }
 
 usage() {
-  printf 'usage: %s begin-session SESSION | validate-session SESSION | cleanup-session SESSION | register-worktree SESSION COMMON-DIR PATH INITIAL-HEAD | reap\n' "$program" >&2
+  printf '%s\n' "$usage_text" >&2
   exit 64
 }
+
+case "${1-}" in
+--help | -h)
+  printf '%s\n' "$usage_text"
+  exit 0
+  ;;
+esac
 
 [ -n "${HOME-}" ] || die 'HOME is unset'
 validate_absolute_path HOME "$HOME"

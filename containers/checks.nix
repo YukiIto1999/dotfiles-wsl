@@ -87,21 +87,20 @@ in
       lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null daemonSettings == "60GB"
     ) "Docker BuildKit GC must retain 60GB by default";
     assert lib.assertMsg (gcService != null) "Docker BuildKit GC service is missing";
-    assert lib.assertMsg (gcService.after == [ "docker.service" ]) (
-      "Docker BuildKit GC service must start after Docker: actual=${builtins.toJSON gcService.after}"
-    );
-    assert lib.assertMsg (gcService.wants == [ "docker.service" ]) (
-      "Docker BuildKit GC service must use a soft Docker dependency: actual=${builtins.toJSON gcService.wants}"
-    );
-    assert lib.assertMsg (gcService.requires == [ ] && gcService.requiredBy == [ ]) (
-      "Docker BuildKit GC failure must not propagate to Docker"
-    );
-    assert lib.assertMsg (gcDependents == [ ]) (
-      "system services must not depend on Docker BuildKit GC: actual=${builtins.toJSON gcDependents}"
-    );
-    assert lib.assertMsg (gcService.serviceConfig.Type == "oneshot") (
-      "Docker BuildKit GC service must be oneshot"
-    );
+    assert lib.assertMsg (
+      gcService.after == [ "docker.service" ]
+    ) "Docker BuildKit GC service must start after Docker: actual=${builtins.toJSON gcService.after}";
+    assert lib.assertMsg (gcService.wants == [ "docker.service" ])
+      "Docker BuildKit GC service must use a soft Docker dependency: actual=${builtins.toJSON gcService.wants}";
+    assert lib.assertMsg (
+      gcService.requires == [ ] && gcService.requiredBy == [ ]
+    ) "Docker BuildKit GC failure must not propagate to Docker";
+    assert lib.assertMsg (
+      gcDependents == [ ]
+    ) "system services must not depend on Docker BuildKit GC: actual=${builtins.toJSON gcDependents}";
+    assert lib.assertMsg (
+      gcService.serviceConfig.Type == "oneshot"
+    ) "Docker BuildKit GC service must be oneshot";
     assert lib.assertMsg (
       gcService.unitConfig.ConditionPathExists == "/var/run/docker.sock"
     ) "Docker BuildKit GC service must require the Docker socket";
@@ -118,9 +117,9 @@ in
       ]
     ) "Docker BuildKit GC command changed: actual=${builtins.toJSON execTokens}";
     assert lib.assertMsg (gcTimer != null) "Docker BuildKit GC timer is missing";
-    assert lib.assertMsg (gcTimer.wantedBy == [ "timers.target" ]) (
-      "Docker BuildKit GC timer must be enabled: actual=${builtins.toJSON gcTimer.wantedBy}"
-    );
+    assert lib.assertMsg (
+      gcTimer.wantedBy == [ "timers.target" ]
+    ) "Docker BuildKit GC timer must be enabled: actual=${builtins.toJSON gcTimer.wantedBy}";
     assert lib.assertMsg (
       gcTimer.timerConfig == {
         OnCalendar = "*-*-* 00/6:00:00";

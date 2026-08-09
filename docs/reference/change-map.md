@@ -14,6 +14,7 @@
 | PATH 上の汎用ツールを増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `dotfiles.toolchain.packages`。nixpkgs に無いものは `toolchain/package/NAME.nix` を作り、`dotfiles.toolchain.packages` が callPackage する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | language server を増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `dotfiles.toolchain.lsp`。登録は各 CLI の module が変換する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix)。CLI は `dotfiles.telemetry` を読む | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| zram、journal 保持、fstrim を変える | [`host/module.nix`](../../host/module.nix) の host 安定化設定 | `dotfiles-rebuild --plan`、`dotfiles-rebuild`。zram、swap priority、標準 timer は `dotfiles-doctor` で確認する |
 | 品質 gate の server、database、provisioning を変える | [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)。MCP package と target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix)、credential の値は [`secrets/secrets.yaml`](../../secrets/secrets.yaml) | 宣言変更後に `dotfiles-rebuild`。admin credential の変更は [SonarQube admin password rotation](../operations/secrets.md#sonarqube-admin-password-rotation) に従う |
 
 ## Agent client
@@ -24,6 +25,8 @@
 | Agent client を管理対象から外す | 対応する [`agents/NAME/`](../../agents) を削除し、host の必要集合と fixture を更新する | `dotfiles-rebuild`。`dotfiles-install-agents` は残存 binary を削除しないため、upstream が配置したファイルは別途削除する |
 | client 固有の managed config を変える | 対応する [`agents/NAME/assets/`](../../agents) の template と `module.nix` の最終 `managedFiles` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | client の upstream 入手方法を変える | 対応する [`agents/NAME/module.nix`](../../agents) の `dotfiles.agents.clients.NAME.install` | `dotfiles-rebuild`、`dotfiles-install-agents` |
+| agent の session、build cache、検証再利用を変える | [`agents/runtime/`](../../agents/runtime) と [`agents/module.nix`](../../agents/module.nix) | 対応する focused check、`dotfiles-rebuild` |
+| agent が作る linked worktree の登録と回収を変える | [`toolchain/git/`](../../toolchain/git) の agent resource command と timer | `agent-resource-contract`、`agent-resource-behavior`、`dotfiles-rebuild` |
 
 ## Agent と skill
 
@@ -42,6 +45,7 @@
 | MCP front の port、起動方法、backend 依存を変える | 対応する [`mcp/NAME/module.nix`](../../mcp) の target。port は 8770-8789 から取り、backend unit は `waitUnits` に置く。front は [`mcp/module.nix`](../../mcp/module.nix) が導く | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | gateway の port または YAML を変える | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` と YAML 生成。gateway は単一 endpoint のまま保つ | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | Docker backend の構成を変える | 対応する [`containers/NAME/module.nix`](../../containers) と [`containers/impl/container-backend.nix`](../../containers/impl/container-backend.nix)。application の追加と削除では [`flake.nix`](../../flake.nix) の enabled roster と [`containers/checks.nix`](../../containers/checks.nix) の固定 roster も同時に変える。共通 schema と image 同期は [`containers/module.nix`](../../containers/module.nix) | Nix で build する image は `dotfiles-rebuild`。upstream image の宣言変更は checkout から同期してから `dotfiles-rebuild` |
+| Docker BuildKit cache の保持量と GC 間隔を変える | [`containers/module.nix`](../../containers/module.nix) の daemon 設定と `docker-buildkit-gc` timer | `docker-buildkit-gc-contract`、`dotfiles-rebuild` |
 | upstream OCI image を更新する | 対応する [`containers/NAME/module.nix`](../../containers) の `dotfiles.containers.services.<name>.images` にある repository、digest、canonical image reference。digest は `dotfiles-image-digest <image>` で取る | 宣言変更後に `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
 | 固定した package の hash を更新する | 対応する [`mcp/NAME/package.nix`](../../mcp) の hash。値は `nix store prefetch-file --hash-type sha256 --json <url>` で取る | `dotfiles-rebuild` |
 

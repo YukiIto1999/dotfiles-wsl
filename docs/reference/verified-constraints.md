@@ -14,7 +14,8 @@
 | repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | 検証対象を別の登録簿から取らず宣言した unit から導く | `doctor-coverage` |
-| session 欠落、JSON-RPC error、image 不一致、artifact 乖離、空の MCP roster を失敗 ID と終了 status に反映する | `doctor-runtime` |
+| session 欠落、JSON-RPC error、image 不一致、artifact 乖離、空の MCP roster、WSL 資源の warning と failure を終了 status に反映する | `doctor-runtime` |
+| zram、journald、WSL 上の標準 fstrim と service 非依存が宣言どおりである | `host-stability-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
 | required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
 | 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |
@@ -23,6 +24,7 @@
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
+| BuildKit GC の保持量、timer、prune 引数が固定され、Docker と backend が GC に依存しない | `docker-buildkit-gc-contract` |
 | 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
 | MCP unit が OCI、secret template、同名 backend の secret と service contract を所有しない | `mcp-no-container-ownership` |
 | host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |
@@ -71,6 +73,12 @@
 | 制約 | 検証 |
 |---|---|
 | MCP session が active な GET body の間 reap されない | `agentgateway-session-lifecycle` |
+| agent wrapper が upstream binary、session metadata、共通 project cache、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
+| agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
+| project cache が active session と未所有 path を保護し、30 日と 64/48 GiB の保持規則に従う | `agent-project-cache-gc` |
+| source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない | `agent-verification-cache` |
+| agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |
+| agent が作った worktree だけを登録し、clean、HEAD 不変、未使用の場合だけ隔離と再検査後に回収する | `agent-resource-behavior` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-container` |
 | Crawl4AI の API token が user 用 file contract と root 所有の環境ファイルへ分かれる | `crawl4ai-container` |

@@ -41,6 +41,14 @@ flake が宣言する build、静的検査、生成設定の構文検査をロ�
 nix flake check -L
 ```
 
+編集中は変更した unit の check だけを `nix build --no-link .#checks.x86_64-linux.<check>` で実行する。最終の全件確認は、最後の source 変更後に一度だけ次の入口から実行する。
+
+```bash
+dotfiles-agent-verify -- nix flake check -L
+```
+
+同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、runtime が割り当てる project cache を使う。
+
 `nix flake check` は検査結果を返し、`nix fmt` のように source を整形しない。検査項目の正本は各 unit の `checks.nix` であり、`flake.nix` の `mergeChecks` がそれらを集めて id の重複を拒否する。check 名の一覧はここに複製しない。どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
 
 check を足したら、緑を見る前に赤を見る。検査対象を意図的に壊し、期待した message で落ちることを確かめてから戻す。落ちなければその検査は無効である。一つの検査は一つの結果だけを確かめる。複数を束ねると、最初の失敗が残りを隠す。

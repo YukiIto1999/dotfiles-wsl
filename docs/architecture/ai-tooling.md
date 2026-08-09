@@ -25,6 +25,14 @@ host の required roster は [`flake.nix`](../../flake.nix) が account、agent 
 
 `dotfiles-install-agents` は client contract から installer を生成し、通常ユーザーの `~/.local/bin` を更新する。`dotfiles-agent-autoupdate.timer` も同じ command を日次実行する。Nix は入手方法と固定配置先を宣言するが、client binary の内容や version を system closure に固定しない。
 
+Claude Code、Codex、OpenCode は、Home Manager が `~/.local/bin` より前へ置く共通 runtime wrapper から起動する。wrapper は upstream binary を移動せず、`~/.local/bin` の実体を絶対 path で実行する。Antigravity は同じ CLI 起動境界を持たないため対象外である。
+
+runtime は session ID、owner process、boot ID、管理下 `TMPDIR` を記録する。Git repository では git common directory から project ID を作り、linked worktree 間で `~/.cache/dotfiles-wsl/builds/<project-id>/cargo-target` を共有する。明示された `CARGO_TARGET_DIR` と project 固有の Cargo `target-dir` は上書きしない。project cache は 30 日未使用を削除し、総量 64GiB を超えた場合だけ 48GiB まで LRU で回収する。active session、symlink、所有を確認できない path は回収対象にしない。
+
+`dotfiles-agent-verify` は HEAD、tracked diff、non-ignored untracked content、command、環境全体から fingerprint を作る。同一 fingerprint の成功だけを再利用し、raw 環境値は保存しない。agent 内の Nix shim は明示 out-link がない `nix build` と `nix-build` へ no-link option を加え、Nix store を pin する `result*` symlink の増殖を防ぐ。
+
+agent 内の `git worktree add` は `dotfiles-agent-worktree` へ接続し、新規 linked worktree を session 台帳へ登録する。終了時と hourly reaper は、台帳所有、clean、HEAD 不変、利用中 process なしを再確認した worktree だけを削除する。既存、dirty、commit 済み、所有者不明の worktree は自動削除しない。
+
 この root は agent client 専用である。agent ではない CLI に共通の契約と配備が必要になった時点で、別の root `clis/` を作る。現在は該当する CLI がないため、空の分類は置かない。
 
 ## 共通 rules、agent、skill
@@ -70,6 +78,8 @@ application 固有の contract と container 宣言は各 application の [`cont
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 
+Docker daemon の native BuildKit GC は cache を 60GB に保つ。6 時間ごとの persistent timer も `docker buildx prune` を実行するが、20GB を予約し、image、container、volume は削除しない。GC service は Docker を soft dependency として参照し、Docker や各 backend から GC への起動依存は持たない。
+
 ## agentmemory
 
 [`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は agentmemory engine の Docker container を配備し、lifecycle hook package と OpenCode capture plugin の source を型付き contract で公開する。[`agents/module.nix`](../../agents/module.nix) と OpenCode adapter がその contract を読み、client 側へ配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
@@ -93,6 +103,8 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 | 変更対象 | 正本 |
 |---|---|
 | Agent client contract と配備差 | [`agents/module.nix`](../../agents/module.nix) と各 client module |
+| Agent runtime、build cache、検証結果 | [`agents/runtime/`](../../agents/runtime) と [`agents/module.nix`](../../agents/module.nix) |
+| Agent worktree の所有台帳 | [`toolchain/git/`](../../toolchain/git) |
 | 共通 rules | [`agents/shared/AGENTS.md`](../../agents/shared/AGENTS.md) |
 | local agent と skill | [`agents/shared/definitions/`](../../agents/shared/definitions)、[`agents/shared/skills/`](../../agents/shared/skills) |
 | plugin skill source | [`flake.nix`](../../flake.nix) と `flake.lock` |

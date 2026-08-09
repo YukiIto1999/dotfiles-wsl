@@ -55,7 +55,7 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 ## Runtime services
 
-systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する agent client updater を unit として管理する。unit の期待状態は別の登録簿を持たず、この repository が宣言した常駐 service を `dotfiles-doctor` が導出する。
+systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する agent client updater、BuildKit GC、agent cache GC、worktree reaper を unit として管理する。unit の期待状態は別の登録簿を持たず、この repository が宣言した常駐 service と maintenance timer を `dotfiles-doctor` が導出する。
 
 [`containers/module.nix`](../../containers/module.nix) は Docker daemon、`dotfiles-backends` network、型付き service contract、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。Agentmemory、Crawl4AI、SearXNG、SonarQube の application 固有宣言は各 `containers/` unit、対応する MCP front は各 `mcp/` unit が所有する。
 
@@ -67,7 +67,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 [`commands/doctor/module.nix`](../../commands/doctor/module.nix) は、この repository が宣言した常駐 service を評価済み設定から導き、`dotfiles-doctor` に埋め込む。別の roster を持たないので、unit を足せば検証対象になる。
 
-`dotfiles-doctor` は各 unit の `ActiveState` を見た後、gateway に MCP session を張り、各 target の probe が指定する `<target>_<tool>` が `tools/list` に現れることを確かめる。unit が active でも upstream が落ちていれば agent は道具を失うので、そこまで見る。doctor は再起動も修復も行わず、観測結果だけを返す。
+`dotfiles-doctor` は各 unit の `ActiveState` を見た後、gateway に MCP session を張り、各 target の probe が指定する `<target>_<tool>` が `tools/list` に現れることを確かめる。加えて、zram と swap、filesystem、journal、maintenance timer、service 再起動回数、agent 管理領域を有界な command で観測する。unit が active でも upstream が落ちていれば agent は道具を失うので、そこまで見る。doctor は再起動、GC、trim、修復を行わず、観測結果だけを返す。
 
 `nix flake check` は source から artifact を生成できるかを検査し、doctor は activation 後の runtime が宣言に収束したかを検査する。実行と診断は [Doctor](../operations/doctor.md)に記載している。
 

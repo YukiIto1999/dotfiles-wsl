@@ -48,6 +48,19 @@ dotfiles-sync-images
 dotfiles-doctor
 ```
 
+### WSL の資源管理
+
+この構成は、単一の NixOS WSL で WSLg、GPU、MCP、Docker backend、開発作業を同時に使う。全 service に一つのメモリ上限をかけず、書き込み元ごとに保持量を制御する。
+
+- zram は RAM の 25% を `lzo-rle`、priority 100 で使う。ディスクへの書き戻しは行わず、Windows 側の swap は低優先度の退避先として扱う。zram や swap の異常を理由に SonarQube などの起動を止めない。
+- journald は 4GiB、30 日を上限にする。Nix GC は週次、14 日保持を維持する。標準の `fstrim.timer` は WSL でも週次実行し、独自の trim unit は作らない。
+- Docker BuildKit cache は 60GB を基準にし、6 時間ごとの GC でも 20GB を予約する。image、container、volume は自動 prune しない。
+- Claude Code、Codex、OpenCode は repository 単位の build cache を共有する。30 日未使用の cache を削除し、合計が 64GiB を超えた場合だけ 48GiB まで LRU で回収する。active session と所有を確認できない path は削除しない。
+- agent が作成した linked worktree は session 台帳へ登録する。自動削除は clean、HEAD 不変、利用中 process なしの場合に限る。dirty、commit 済み、所有者不明、既存の worktree は残す。
+- agent の一時領域は管理下 session directory へ置き、通常終了時と orphan 回収時に削除する。一般の `/tmp` は既存の 10 日保持を維持する。
+
+`dotfiles-doctor` は zram と swap、root と Windows D ドライブの空き、journal 使用量、maintenance timer、service 再起動回数、管理下 cache を読み取り専用で検査する。warning だけなら exit 0、観測不能または critical な状態なら exit 1 になる。doctor は GC、再起動、trim を実行しない。
+
 通常の secret 編集はホスト固有の age key を明示して行い、編集後に `dotfiles-rebuild` を実行する。
 鍵の enrollment や復旧は別手順なので、[secrets runbook](docs/operations/secrets.md)と[SOPS enrollment](docs/operations/sops-enrollment.md)を参照する。
 

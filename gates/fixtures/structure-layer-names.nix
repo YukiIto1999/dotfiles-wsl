@@ -11,6 +11,11 @@
       hasChildModule = false;
     }
     {
+      name = "runtime";
+      kind = "directory";
+      hasChildModule = false;
+    }
+    {
       name = "child";
       kind = "directory";
       hasChildModule = true;

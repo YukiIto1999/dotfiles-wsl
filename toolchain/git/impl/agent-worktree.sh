@@ -1,6 +1,7 @@
 set -euo pipefail
 
 program=dotfiles-agent-worktree
+usage_text="usage: $program add [ADD-OPTION...] PATH [COMMIT-ISH]"
 git_command=@gitCommand@
 resource_command=@resourceCommand@
 
@@ -12,6 +13,13 @@ die() {
 validate_id() {
   [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || die "invalid session id: $1"
 }
+
+case "${1-}" in
+--help | -h)
+  printf '%s\n' "$usage_text"
+  exit 0
+  ;;
+esac
 
 ensure_directory() {
   local path=$1 managed=$2
@@ -110,7 +118,7 @@ parse_add_target() {
   die 'worktree add target is missing'
 }
 
-[ "$#" -gt 0 ] || die 'usage: dotfiles-agent-worktree add [ADD-OPTION...] PATH [COMMIT-ISH]'
+[ "$#" -gt 0 ] || die "$usage_text"
 [ -n "${HOME-}" ] || die 'HOME is unset'
 [[ $HOME == /* ]] || die 'HOME is not absolute'
 [ -d "$HOME" ] && [ ! -L "$HOME" ] || die 'HOME is ambiguous'

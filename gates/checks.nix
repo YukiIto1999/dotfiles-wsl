@@ -279,7 +279,11 @@ in
       # port を持たないと宣言した unit。増えるときは必ずこの表に現れる
       withoutListener = [
         "dotfiles-agent-autoupdate"
+        "dotfiles-agent-project-cache-gc"
+        "dotfiles-agent-resource-reaper"
+        "docker-buildkit-gc"
         "docker-dotfiles-backends-network"
+        "fstrim"
         "nix-daemon"
         "sonarqube-provision"
       ];

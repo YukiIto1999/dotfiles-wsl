@@ -21,6 +21,41 @@ let
   roster = hostConfig.dotfiles.toolchain.lsp;
   installAgents = hostConfig.dotfiles.commands.installAgents;
   installAgentsExe = lib.getExe installAgents;
+  runtime = import ./runtime/package.nix {
+    inherit lib pkgs;
+    agentWorktreeCommand = lib.getExe hostConfig.dotfiles.commands.agentWorktree;
+  };
+  fakeNix = pkgs.writeShellScript "fake-nix-command" ''
+    printf '%s\0' "$@" > "$ARG_CAPTURE"
+  '';
+  fakeGit = pkgs.writeShellScript "fake-git-command" ''
+    printf '%s\0' "$@" > "$ARG_CAPTURE"
+    pwd -P > "$PWD_CAPTURE"
+    for argument in "$@"; do
+      if [ "$argument" = dotfiles-agent-managed-worktree ]; then
+        exec ${lib.getExe pkgs.git} "$@"
+      fi
+    done
+  '';
+  fakeAgentWorktree = pkgs.writeShellScript "fake-agent-worktree-command" ''
+    printf '%s\0' "$@" > "$ARG_CAPTURE"
+    pwd -P > "$PWD_CAPTURE"
+    ${lib.getExe pkgs.git} config --get advice.detachedHead > "$CONFIG_CAPTURE" || true
+  '';
+  fixtureNixBuildShims = runtime.mkNixBuildShims {
+    nixCommand = fakeNix;
+    nixBuildCommand = fakeNix;
+  };
+  fixtureAgentShims = runtime.mkAgentShims {
+    nixCommand = fakeNix;
+    nixBuildCommand = fakeNix;
+    gitCommand = fakeGit;
+    worktreeCommand = fakeAgentWorktree;
+  };
+  wrapperDirectory = ".local/share/dotfiles-agent/bin";
+  runtimeClientNames = builtins.filter (name: name != "antigravity" && clients.${name}.binary != "") (
+    builtins.attrNames clients
+  );
 
   withoutNulls = lib.filterAttrs (_: value: value != null);
   projectClient = client: {
@@ -878,6 +913,18 @@ in
         }
         remarshal -if toml -of json ${artifactSource "agents/codex/system"} > codex-system.json
         codex_mcp_matches ${lib.escapeShellArg gatewayUrl} < codex-system.json > /dev/null
+        jq --exit-status \
+          --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
+          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} '
+          .sandbox_workspace_write.writable_roots == [$cacheRoot, $stateRoot]
+        ' codex-system.json > /dev/null
+        remarshal -if toml -of json ${artifactSource "agents/codex/project"} > codex-project.json
+        jq --exit-status \
+          --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
+          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} \
+          --arg gitRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.dotfilesDir}/.git"} '
+          .sandbox_workspace_write.writable_roots == [$cacheRoot, $stateRoot, $gitRoot]
+        ' codex-project.json > /dev/null
         jq '.mcp_servers.extra = {url: "https://unexpected.invalid/mcp"}' \
           codex-system.json > codex-system-extra-server.json
         if codex_mcp_matches ${lib.escapeShellArg gatewayUrl} \
@@ -1063,6 +1110,109 @@ in
           .plugins[0].source == "./lsp" and
           (.plugins[0].version | length) > 0
         ' "$marketplace/.claude-plugin/marketplace.json" > /dev/null
+        touch $out
+      '';
+
+  agent-runtime-contract =
+    assert builtins.head homeConfig.home.sessionPath == "$HOME/${wrapperDirectory}";
+    assert lib.elem "$HOME/.local/bin" homeConfig.home.sessionPath;
+    assert
+      runtimeClientNames == [
+        "claude"
+        "codex"
+        "opencode"
+      ];
+    assert builtins.all (
+      name:
+      let
+        target = "${wrapperDirectory}/${clients.${name}.binary}";
+      in
+      builtins.hasAttr target homeConfig.home.file && homeConfig.home.file.${target}.executable
+    ) runtimeClientNames;
+    assert !(builtins.hasAttr "${wrapperDirectory}/${clients.antigravity.binary}" homeConfig.home.file);
+    pkgs.runCommandLocal "check-agent-runtime-contract" { } ''
+      set -euo pipefail
+      ${lib.concatMapStrings (name: ''
+        wrapper=${homeConfig.home.file."${wrapperDirectory}/${clients.${name}.binary}".source}
+        grep -Fq ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/bin/${clients.${name}.binary}"} "$wrapper"
+        grep -Fq ${lib.escapeShellArg (lib.getExe runtime.launcher)} "$wrapper"
+      '') runtimeClientNames}
+      touch $out
+    '';
+
+  agent-runtime-behavior =
+    pkgs.runCommandLocal "check-agent-runtime-behavior"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.git
+          pkgs.gnused
+          pkgs.jq
+        ];
+        LAUNCHER = lib.getExe runtime.launcher;
+        AGENT_SHIM_DIR = runtime.agentShims;
+        GIT_SHIM_DIR = fixtureAgentShims;
+      }
+      ''
+        bash ${./runtime/tests/launcher.sh}
+        bash ${./runtime/tests/git-shim.sh}
+        touch $out
+      '';
+
+  agent-nix-build-shims =
+    pkgs.runCommandLocal "check-agent-nix-build-shims"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+        ];
+        SHIM_DIR = fixtureNixBuildShims;
+      }
+      ''
+        bash ${./runtime/tests/nix-build-shims.sh}
+        touch $out
+      '';
+
+  agent-project-cache-gc =
+    assert lib.count (package: package == runtime.gc) hostConfig.environment.systemPackages == 1;
+    assert
+      hostConfig.systemd.services.dotfiles-agent-project-cache-gc.serviceConfig.ExecStart
+      == lib.getExe runtime.gc;
+    assert
+      hostConfig.systemd.services.dotfiles-agent-project-cache-gc.serviceConfig.User
+      == hostConfig.dotfiles.host.username;
+    assert hostConfig.systemd.services.dotfiles-agent-project-cache-gc.serviceConfig.Type == "oneshot";
+    assert hostConfig.systemd.timers.dotfiles-agent-project-cache-gc.timerConfig.OnCalendar == "daily";
+    assert hostConfig.systemd.timers.dotfiles-agent-project-cache-gc.timerConfig.Persistent;
+    pkgs.runCommandLocal "check-agent-project-cache-gc"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.jq
+        ];
+        GC = lib.getExe runtime.gc;
+      }
+      ''
+        bash ${./runtime/tests/project-cache-gc.sh}
+        touch $out
+      '';
+
+  agent-verification-cache =
+    assert lib.count (package: package == runtime.verify) hostConfig.environment.systemPackages == 1;
+    pkgs.runCommandLocal "check-agent-verification-cache"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.findutils
+          pkgs.git
+          pkgs.gnused
+        ];
+        VERIFY = lib.getExe runtime.verify;
+      }
+      ''
+        bash ${./runtime/tests/verify.sh}
         touch $out
       '';
 }

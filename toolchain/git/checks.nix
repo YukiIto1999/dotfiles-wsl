@@ -112,10 +112,10 @@ in
     in
     assert lib.assertMsg (
       gitConfig.stateRoot or null == "~/.local/state/dotfiles-wsl/agent-resources"
-    ) ("agent resource state root changed");
-    assert lib.assertMsg (gitConfig ? agentResource && gitConfig ? agentWorktree) (
-      "agent resource commands are missing"
-    );
+    ) "agent resource state root changed";
+    assert lib.assertMsg (
+      gitConfig ? agentResource && gitConfig ? agentWorktree
+    ) "agent resource commands are missing";
     assert lib.assertMsg (
       lib.elem agentResource hostConfig.environment.systemPackages
       && lib.elem agentWorktree hostConfig.environment.systemPackages
@@ -124,9 +124,9 @@ in
     assert lib.assertMsg (
       reaper.serviceConfig.Type == "oneshot"
     ) "agent resource reaper must be oneshot";
-    assert lib.assertMsg (reaper.serviceConfig.User == hostConfig.dotfiles.host.username) (
-      "agent resource reaper must run as the desktop user"
-    );
+    assert lib.assertMsg (
+      reaper.serviceConfig.User == hostConfig.dotfiles.host.username
+    ) "agent resource reaper must run as the desktop user";
     assert lib.assertMsg (
       reaper.serviceConfig.ExecStart == "${lib.getExe agentResource} reap"
     ) "agent resource reaper command changed";

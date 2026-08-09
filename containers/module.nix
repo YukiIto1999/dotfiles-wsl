@@ -238,8 +238,35 @@ in
     users.users.${myCfg.host.username}.extraGroups = [ "docker" ];
 
     virtualisation = {
-      docker.enable = true;
+      docker = {
+        enable = true;
+        daemon.settings.builder.gc = {
+          enabled = true;
+          defaultKeepStorage = "60GB";
+        };
+      };
       oci-containers.backend = "docker";
+    };
+
+    systemd.services.docker-buildkit-gc = {
+      description = "Prune Docker BuildKit cache above the storage budget";
+      after = [ "docker.service" ];
+      wants = [ "docker.service" ];
+      unitConfig.ConditionPathExists = "/var/run/docker.sock";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 60GB --reserved-space 20GB";
+      };
+    };
+
+    systemd.timers.docker-buildkit-gc = {
+      description = "Periodic Docker BuildKit cache pruning";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "*-*-* 00/6:00:00";
+        Persistent = true;
+        Unit = "docker-buildkit-gc.service";
+      };
     };
 
     systemd.services.docker-dotfiles-backends-network = {

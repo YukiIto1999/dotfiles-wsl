@@ -1,0 +1,9 @@
+{
+  "resources": {
+    "managedRoots": {
+      "/home/alice/.cache/dotfiles-wsl/sessions": {
+        "exit": 1
+      }
+    }
+  }
+}

@@ -22,9 +22,13 @@ run_systemctl() {
   [[ $# == 4 && $1 == show && $3 == --property=* && $4 == --value ]] || missing "$*"
   local unit=$2
   local property=${3#--property=}
-  jq -e --arg unit "$unit" 'any(.serviceTable[]; .unit == $unit)' <<<"$tables" >/dev/null \
+  jq -e --arg unit "$unit" '
+    any(.serviceTable[]; .unit == $unit)
+    or any(.maintenanceTable[]; .timer == $unit or .service == $unit)
+  ' <<<"$tables" >/dev/null \
     || missing "$*"
-  [[ $property == LoadState || $property == ActiveState || $property == Result ]] \
+  [[ $property == LoadState || $property == ActiveState || $property == Result \
+    || $property == UnitFileState || $property == NRestarts ]] \
     || missing "$*"
   fixture_value '.systemd[$unit][$property]' --arg unit "$unit" --arg property "$property"
 }
@@ -42,14 +46,25 @@ run_stat() {
   local path
   if [[ $# == 3 && $1 == --format && $2 == %U:%G:%a ]]; then
     path=$3
+    jq -e --arg path "$path" 'any(.secretTable[]; .path == $path)' <<<"$tables" >/dev/null \
+      || missing "$*"
+    fixture_value '.secrets[$path].metadata' --arg path "$path"
   elif [[ $# == 2 && $1 == --format=%U:%G:%a ]]; then
     path=$2
+    jq -e --arg path "$path" 'any(.secretTable[]; .path == $path)' <<<"$tables" >/dev/null \
+      || missing "$*"
+    fixture_value '.secrets[$path].metadata' --arg path "$path"
+  elif [[ $# == 2 && $1 == --format=%F ]]; then
+    path=$2
+    jq -e --arg path "$path" 'any(.managedRootTable[]; . == $path)' <<<"$tables" >/dev/null \
+      || missing "$*"
+    local kind
+    kind=$(fixture_value '.resources.managedRoots[$path].kind' --arg path "$path")
+    [[ $kind != missing ]] || exit 1
+    printf '%s\n' "$kind"
   else
     missing "$*"
   fi
-  jq -e --arg path "$path" 'any(.secretTable[]; .path == $path)' <<<"$tables" >/dev/null \
-    || missing "$*"
-  fixture_value '.secrets[$path].metadata' --arg path "$path"
 }
 
 run_cmp() {
@@ -76,9 +91,62 @@ run_docker() {
       <<<"$tables" >/dev/null \
       || missing "$*"
     fixture_value '.docker.containers[$container].imageId' --arg container "$2"
+  elif [[ $# == 4 && $1 == inspect && $3 == --format && $4 == '{{.RestartCount}}' ]]; then
+    jq -e --arg container "$2" 'any(.containerTable[]; .container == $container)' \
+      <<<"$tables" >/dev/null \
+      || missing "$*"
+    fixture_value '.docker.containers[$container].restartCount' --arg container "$2"
   else
     missing "$*"
   fi
+}
+
+run_swapon() {
+  [[ $# == 4 && $1 == --show=NAME,TYPE,SIZE,PRIO && $2 == --bytes \
+    && $3 == --noheadings && $4 == --raw ]] || missing "$*"
+  jq -r '.resources.swap.entries[] | [.name, .type, .size, .priority] | @tsv' "$fixture"
+}
+
+run_zramctl() {
+  [[ $# == 4 && $1 == --noheadings && $2 == --raw && $3 == --output \
+    && $4 == NAME,ALGORITHM ]] || missing "$*"
+  jq -r '.resources.swap.zram[] | [.name, .algorithm] | @tsv' "$fixture"
+}
+
+run_df() {
+  [[ $# == 2 && $1 == --output=pcent && $2 == / ]] || missing "$*"
+  printf 'Use%%\n%s%%\n' "$(fixture_value '.resources.rootFilesystem.usedPercent')"
+}
+
+run_powershell() {
+  [[ $# == 5 && $1 == -NoLogo && $2 == -NoProfile && $3 == -NonInteractive \
+    && $4 == -Command ]] || missing "$*"
+  local expected status
+  expected="\$drive = Get-CimInstance Win32_LogicalDisk -Filter \"DeviceID='D:'\"; if (\$null -eq \$drive -or \$drive.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor((\$drive.FreeSpace * 100) / \$drive.Size))"
+  [[ $5 == "$expected" ]] || missing "$*"
+  status=$(fixture_value '.resources.windowsDDrive.exit')
+  ((status == 0)) || exit "$status"
+  fixture_value '.resources.windowsDDrive.freePercent'
+}
+
+run_journalctl() {
+  [[ $# == 1 && $1 == --disk-usage ]] || missing "$*"
+  local status
+  status=$(fixture_value '.resources.journald.exit')
+  ((status == 0)) || exit "$status"
+  fixture_value '.resources.journald.output'
+}
+
+run_du() {
+  [[ $# == 5 && $1 == --summarize && $2 == --bytes && $3 == --one-file-system \
+    && $4 == -- ]] || missing "$*"
+  local root=$5 status
+  jq -e --arg root "$root" 'any(.managedRootTable[]; . == $root)' <<<"$tables" >/dev/null \
+    || missing "$*"
+  status=$(fixture_value '.resources.managedRoots[$root].exit' --arg root "$root")
+  ((status == 0)) || exit "$status"
+  printf '%s\t%s\n' \
+    "$(fixture_value '.resources.managedRoots[$root].bytes' --arg root "$root")" "$root"
 }
 
 write_response() {
@@ -382,6 +450,12 @@ case "$command_name" in
   stat) run_stat "$@" ;;
   cmp) run_cmp "$@" ;;
   docker) run_docker "$@" ;;
+  swapon) run_swapon "$@" ;;
+  zramctl) run_zramctl "$@" ;;
+  df) run_df "$@" ;;
+  powershell.exe) run_powershell "$@" ;;
+  journalctl) run_journalctl "$@" ;;
+  du) run_du "$@" ;;
   curl) run_curl "$@" ;;
   *)
     actual_args=$(jq -cn --args '$ARGS.positional' -- "$@")

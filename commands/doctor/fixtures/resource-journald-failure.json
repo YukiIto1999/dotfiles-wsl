@@ -1,0 +1,7 @@
+{
+  "resources": {
+    "journald": {
+      "output": "Archived and active journals take up 4.1G in the file system."
+    }
+  }
+}

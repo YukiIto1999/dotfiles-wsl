@@ -1,0 +1,14 @@
+{
+  "systemd": {
+    "home-manager-alice.service": {
+      "NRestarts": 20
+    }
+  },
+  "docker": {
+    "containers": {
+      "sonarqube": {
+        "restartCount": 20
+      }
+    }
+  }
+}

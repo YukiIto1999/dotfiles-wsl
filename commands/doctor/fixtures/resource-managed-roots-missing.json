@@ -1,0 +1,9 @@
+{
+  "resources": {
+    "managedRoots": {
+      "/home/alice/.local/state/dotfiles-wsl/agent-resources": {
+        "kind": "missing"
+      }
+    }
+  }
+}

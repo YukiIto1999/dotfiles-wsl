@@ -32,24 +32,22 @@ in
       }
     ) "zram-generator output does not match the swap contract";
     assert lib.assertMsg (journald.storage == "persistent") "journald storage is not persistent";
-    assert lib.assertMsg (lib.hasInfix "SystemMaxUse=4G" journald.extraConfig) (
-      "journald SystemMaxUse is not bounded at 4G"
-    );
-    assert lib.assertMsg (lib.hasInfix "MaxRetentionSec=30day" journald.extraConfig) (
-      "journald retention is not bounded at 30 days"
-    );
-    assert lib.assertMsg (fstrimService.overrideStrategy or null == "asDropin") (
-      "fstrim.service must be overridden with a drop-in"
-    );
+    assert lib.assertMsg (lib.hasInfix "SystemMaxUse=4G" journald.extraConfig)
+      "journald SystemMaxUse is not bounded at 4G";
+    assert lib.assertMsg (lib.hasInfix "MaxRetentionSec=30day" journald.extraConfig)
+      "journald retention is not bounded at 30 days";
+    assert lib.assertMsg (
+      fstrimService.overrideStrategy or null == "asDropin"
+    ) "fstrim.service must be overridden with a drop-in";
     assert lib.assertMsg (
       fstrimService.unitConfig.ConditionVirtualization or [ ] == [
         ""
         "wsl"
       ]
     ) "fstrim.service virtualization condition is not reset for WSL";
-    assert lib.assertMsg (fstrimTimer.overrideStrategy or null == "asDropin") (
-      "fstrim.timer must be overridden with a drop-in"
-    );
+    assert lib.assertMsg (
+      fstrimTimer.overrideStrategy or null == "asDropin"
+    ) "fstrim.timer must be overridden with a drop-in";
     assert lib.assertMsg (
       fstrimTimer.unitConfig.ConditionVirtualization or [ ] == [
         ""

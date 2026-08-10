@@ -99,7 +99,8 @@ assert_proc_failure_preserved() {
     sleep 30
   ) &
   holder_pid=$!
-  trap 'kill "$holder_pid" 2>/dev/null || true' EXIT
+  fixture_trap_pid=$holder_pid
+  trap 'kill "$fixture_trap_pid" 2>/dev/null || true' EXIT
   wait_for_file "$ready"
   reference="/proc/$holder_pid/fd/7"
   DOTFILES_AGENT_TEST_PROC_MODE="$mode" \
@@ -110,6 +111,60 @@ assert_proc_failure_preserved() {
   kill "$holder_pid"
   wait "$holder_pid" 2>/dev/null || true
   trap - EXIT
+  unset fixture_trap_pid
+}
+
+assert_foreign_proc_failure_ignored() {
+  local repo path ready holder_pid reference
+  new_case proc-foreign-permission-denied
+  repo="$HOME/repo"
+  path="$HOME/managed"
+  ready="$HOME/holder-ready"
+  create_repo "$repo"
+  begin_session proc-foreign-session
+  add_managed_worktree "$repo" "$path"
+  (
+    exec 7</dev/null
+    : >"$ready"
+    sleep 30
+  ) &
+  holder_pid=$!
+  fixture_trap_pid=$holder_pid
+  trap 'kill "$fixture_trap_pid" 2>/dev/null || true' EXIT
+  wait_for_file "$ready"
+  reference="/proc/$holder_pid/fd/7"
+  DOTFILES_AGENT_TEST_PROC_MODE=denied \
+    DOTFILES_AGENT_TEST_PROC_REFERENCE="$reference" \
+    DOTFILES_AGENT_TEST_PROC_OWNER_MODE=foreign \
+    DOTFILES_AGENT_TEST_PROC_OWNER_PID="$holder_pid" \
+    "$CONTROLLED_PROC_RESOURCE" cleanup-session proc-foreign-session
+  test ! -e "$path"
+  kill "$holder_pid"
+  wait "$holder_pid" 2>/dev/null || true
+  trap - EXIT
+  unset fixture_trap_pid
+}
+
+assert_proc_owner_failure_preserved() {
+  local repo path holder_pid
+  new_case proc-owner-permission-denied
+  repo="$HOME/repo"
+  path="$HOME/managed"
+  create_repo "$repo"
+  begin_session proc-owner-permission-denied-session
+  add_managed_worktree "$repo" "$path"
+  sleep 30 &
+  holder_pid=$!
+  fixture_trap_pid=$holder_pid
+  trap 'kill "$fixture_trap_pid" 2>/dev/null || true' EXIT
+  DOTFILES_AGENT_TEST_PROC_OWNER_MODE=denied \
+    DOTFILES_AGENT_TEST_PROC_OWNER_PID="$holder_pid" \
+    "$CONTROLLED_PROC_RESOURCE" cleanup-session proc-owner-permission-denied-session
+  assert_preserved "$path" ambiguous-process-reference
+  kill "$holder_pid"
+  wait "$holder_pid" 2>/dev/null || true
+  trap - EXIT
+  unset fixture_trap_pid
 }
 
 # Clean, unchanged, inactive linked worktrees are removed. The main and an
@@ -170,6 +225,40 @@ test -f "$mutation_path/late-untracked"
 test -z "$(find "$HOME" -maxdepth 1 -name '.dotfiles-agent-quarantine.*' -print -quit)"
 grep -Fq 'preserve dirty' "$HOME/cleanup.log"
 
+# A same-repository, same-HEAD worktree swapped into the quarantine path after
+# move is not restored or terminalized as the registered worktree.
+new_case quarantine-identity-after-move
+post_identity_repo="$HOME/repo"
+post_identity_path="$HOME/managed"
+post_identity_safe_path="$HOME/registered-safe"
+post_identity_marker="$HOME/replaced"
+create_repo "$post_identity_repo"
+begin_session post-identity-session
+add_managed_worktree "$post_identity_repo" "$post_identity_path"
+post_identity_record=$(record_for_path "$post_identity_path")
+DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_SAFE="$post_identity_safe_path" \
+  DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_MARKER="$post_identity_marker" \
+  "$AUDIT_RESOURCE" cleanup-session post-identity-session
+test -e "$post_identity_marker"
+if [ "$(jq -r '.status' "$post_identity_record")" != quarantining ]; then
+  echo 'post-move identity replacement terminalized the transaction' >&2
+  exit 1
+fi
+test ! -e "$post_identity_path"
+post_identity_quarantine=$(jq -r '.quarantine_path' "$post_identity_record")
+test -d "$post_identity_quarantine"
+test -d "$post_identity_safe_path"
+"$REAL_GIT" --git-dir="$post_identity_repo/.git" worktree remove -- \
+  "$post_identity_quarantine"
+"$REAL_GIT" --git-dir="$post_identity_repo/.git" worktree move -- \
+  "$post_identity_safe_path" "$post_identity_quarantine"
+"$RESOURCE" reap
+test -d "$post_identity_path"
+test "$(jq -r '.status' "$post_identity_record")" = owned
+"$RESOURCE" reap
+test ! -e "$post_identity_path"
+test "$(jq -r '.status' "$post_identity_record")" = removed
+
 # A process can acquire a reference only after the worktree has moved. The
 # post-quarantine scan must restore the worktree instead of removing it.
 new_case quarantine-in-use
@@ -208,6 +297,150 @@ assert_preserved "$race_use_path" active-fd
 kill "$race_use_holder_pid"
 wait "$race_use_holder_pid" 2>/dev/null || true
 trap - EXIT
+
+# The transaction intent precedes the move, so an untrappable SIGKILL leaves a
+# recoverable ledger that the next reap restores without deleting the worktree.
+new_case quarantine-sigkill
+sigkill_repo="$HOME/repo"
+sigkill_path="$HOME/managed"
+sigkill_marker="$HOME/moved"
+create_repo "$sigkill_repo"
+begin_session sigkill-session
+add_managed_worktree "$sigkill_repo" "$sigkill_path"
+sigkill_record=$(record_for_path "$sigkill_path")
+set +e
+DOTFILES_AGENT_TEST_KILL_AFTER_MOVE="$sigkill_marker" \
+  "$AUDIT_RESOURCE" cleanup-session sigkill-session
+sigkill_status=$?
+set -e
+test "$sigkill_status" -eq 137
+sigkill_quarantine=$(<"$sigkill_marker")
+if [ "$(jq -r '.status' "$sigkill_record")" != quarantining ]; then
+  echo 'worktree move was not preceded by a quarantining ledger intent' >&2
+  exit 1
+fi
+test "$(jq -r '.quarantine_path' "$sigkill_record")" = "$sigkill_quarantine"
+test ! -e "$sigkill_path"
+test -d "$sigkill_quarantine"
+mkdir "$sigkill_path"
+"$RESOURCE" reap
+test -d "$sigkill_path"
+test -d "$sigkill_quarantine"
+test "$(jq -r '.status' "$sigkill_record")" = quarantining
+test "$(jq -r '.last_reason' "$sigkill_record")" = quarantine-both-paths
+test "$(jq -r '.path' "$sigkill_record")" = "$sigkill_path"
+test "$(jq -r '.quarantine_path' "$sigkill_record")" = "$sigkill_quarantine"
+rmdir "$sigkill_path"
+"$RESOURCE" reap
+test -d "$sigkill_path"
+test ! -e "$sigkill_quarantine"
+test "$(jq -r '.status' "$sigkill_record")" = owned
+if jq --exit-status 'has("quarantine_path")' "$sigkill_record" >/dev/null; then
+  echo 'recovered worktree ledger retained stale quarantine intent' >&2
+  exit 1
+fi
+"$RESOURCE" reap
+test ! -e "$sigkill_path"
+test "$(jq -r '.status' "$sigkill_record")" = removed
+
+# Recovery binds to the originally registered linked-worktree git-dir. Another
+# worktree from the same repository and HEAD cannot inherit the ledger merely
+# by occupying the quarantine path after SIGKILL.
+new_case quarantine-identity
+identity_repo="$HOME/repo"
+identity_path="$HOME/managed"
+identity_safe_path="$HOME/registered-safe"
+identity_marker="$HOME/moved"
+create_repo "$identity_repo"
+begin_session identity-session
+add_managed_worktree "$identity_repo" "$identity_path"
+identity_git_dir=$("$REAL_GIT" -C "$identity_path" rev-parse \
+  --path-format=absolute --git-dir)
+identity_record=$(record_for_path "$identity_path")
+set +e
+DOTFILES_AGENT_TEST_KILL_AFTER_MOVE="$identity_marker" \
+  "$AUDIT_RESOURCE" cleanup-session identity-session
+identity_status=$?
+set -e
+test "$identity_status" -eq 137
+identity_quarantine=$(<"$identity_marker")
+if [ "$(jq -r '.git_dir // empty' "$identity_record")" != "$identity_git_dir" ]; then
+  echo 'quarantining ledger omitted the linked-worktree git-dir identity' >&2
+  exit 1
+fi
+"$REAL_GIT" --git-dir="$identity_repo/.git" worktree move -- \
+  "$identity_quarantine" "$identity_safe_path"
+"$REAL_GIT" -C "$identity_repo" worktree add -q --detach \
+  "$identity_quarantine" HEAD
+"$RESOURCE" reap
+test ! -e "$identity_path"
+test -d "$identity_quarantine"
+test -d "$identity_safe_path"
+test "$(jq -r '.status' "$identity_record")" = quarantining
+test "$(jq -r '.last_reason' "$identity_record")" = quarantine-path-ambiguous
+"$REAL_GIT" --git-dir="$identity_repo/.git" worktree remove -- "$identity_quarantine"
+"$REAL_GIT" --git-dir="$identity_repo/.git" worktree move -- \
+  "$identity_safe_path" "$identity_quarantine"
+"$RESOURCE" reap
+test -d "$identity_path"
+test "$(jq -r '.status' "$identity_record")" = owned
+"$RESOURCE" reap
+test ! -e "$identity_path"
+test "$(jq -r '.status' "$identity_record")" = removed
+
+# TERM is trappable and restores the moved worktree before the command exits;
+# the recovered owned ledger remains retryable by reap.
+new_case quarantine-term
+term_repo="$HOME/repo"
+term_path="$HOME/managed"
+term_marker="$HOME/moved"
+create_repo "$term_repo"
+begin_session term-session
+add_managed_worktree "$term_repo" "$term_path"
+term_record=$(record_for_path "$term_path")
+set +e
+DOTFILES_AGENT_TEST_TERM_AFTER_MOVE="$term_marker" \
+  "$AUDIT_RESOURCE" cleanup-session term-session
+term_status=$?
+set -e
+test "$term_status" -eq 143
+term_quarantine=$(<"$term_marker")
+test -d "$term_path"
+test ! -e "$term_quarantine"
+test "$(jq -r '.status' "$term_record")" = owned
+"$RESOURCE" reap
+test ! -e "$term_path"
+test "$(jq -r '.status' "$term_record")" = removed
+
+# A successful worktree removal can still be interrupted before its empty
+# quarantine root is removed. The terminal phase proof remains retryable.
+new_case quarantine-remove-root-retry
+remove_root_repo="$HOME/repo"
+remove_root_path="$HOME/managed"
+remove_root_marker="$HOME/root-blocked"
+create_repo "$remove_root_repo"
+begin_session remove-root-session
+add_managed_worktree "$remove_root_repo" "$remove_root_path"
+remove_root_record=$(record_for_path "$remove_root_path")
+DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER="$remove_root_marker" \
+  "$AUDIT_RESOURCE" cleanup-session remove-root-session
+test -f "$remove_root_marker"
+remove_root_blocker=$(<"$remove_root_marker")
+remove_root_quarantine=$(jq -r '.quarantine_path' "$remove_root_record")
+remove_root_quarantine_root=${remove_root_quarantine%/worktree}
+test -f "$remove_root_blocker"
+test ! -e "$remove_root_path"
+test ! -e "$remove_root_quarantine"
+test "$(jq -r '.status' "$remove_root_record")" = quarantining
+if [ "$(jq -r '.last_reason' "$remove_root_record")" != quarantine-remove-root-unresolved ]; then
+  echo 'EXIT recovery discarded the completed-removal transaction phase' >&2
+  exit 1
+fi
+rm -- "$remove_root_blocker"
+"$RESOURCE" reap
+test ! -e "$remove_root_quarantine_root"
+test "$(jq -r '.status' "$remove_root_record")" = removed
+test "$(jq -r '.last_reason' "$remove_root_record")" = clean-unchanged-inactive
 
 # Tracked changes and nonignored untracked files are distinct preservation cases.
 new_case dirty
@@ -635,11 +868,87 @@ if [ ! -f "$overflow_session" ]; then
   exit 1
 fi
 
+# Seven-day retention expires records at seven complete 24-hour periods. One
+# second before the boundary remains; the exact boundary and one second beyond
+# it are removable.
+new_case seven-day-retention
+begin_session seven-day-fresh-session
+fresh_session="$(state_root)/sessions/seven-day-fresh-session.json"
+"$RESOURCE" cleanup-session seven-day-fresh-session
+begin_session seven-day-exact-session
+exact_session="$(state_root)/sessions/seven-day-exact-session.json"
+"$RESOURCE" cleanup-session seven-day-exact-session
+begin_session seven-day-older-session
+older_session="$(state_root)/sessions/seven-day-older-session.json"
+"$RESOURCE" cleanup-session seven-day-older-session
+fixed_retention_now=$(command date +%s)
+jq --argjson timestamp "$((fixed_retention_now - 7 * 24 * 60 * 60 + 1))" \
+  '.updated_at = $timestamp' "$fresh_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$fresh_session"
+jq --argjson timestamp "$((fixed_retention_now - 7 * 24 * 60 * 60))" \
+  '.updated_at = $timestamp' "$exact_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$exact_session"
+jq --argjson timestamp "$((fixed_retention_now - 7 * 24 * 60 * 60 - 1))" \
+  '.updated_at = $timestamp' "$older_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$older_session"
+# shellcheck disable=SC2329 # Exported for the packaged resource subprocess.
+date() {
+  printf '%s\n' "$DOTFILES_AGENT_TEST_FIXED_NOW"
+}
+export -f date
+DOTFILES_AGENT_TEST_FIXED_NOW=$fixed_retention_now \
+  "$SEVEN_DAY_RESOURCE" reap
+unset -f date
+if [ ! -e "$fresh_session" ]; then
+  echo 'seven-day retention expired a ledger before seven complete days' >&2
+  exit 1
+fi
+if [ -e "$exact_session" ]; then
+  echo 'seven-day retention kept a ledger at the exact expiry boundary' >&2
+  exit 1
+fi
+if [ -e "$older_session" ]; then
+  echo 'seven-day retention kept a ledger beyond the expiry boundary' >&2
+  exit 1
+fi
+
+# Quarantining is a recoverable transaction state, not a terminal retention
+# state, even when its timestamp is older than the configured boundary.
+new_case quarantining-retention
+begin_session quarantining-retention-session
+quarantining_common="$HOME/repo/.git"
+quarantining_path="$HOME/managed"
+quarantining_path_intent="$HOME/.dotfiles-agent-quarantine.fixture/worktree"
+quarantining_git_dir="$HOME/repo/.git/worktrees/managed"
+quarantining_record_id=$(printf '%s\0%s' "$quarantining_common" \
+  "$quarantining_path" | sha256sum | cut -d ' ' -f 1)
+quarantining_record="$(state_root)/worktrees/$quarantining_record_id.json"
+jq -cn \
+  --arg common_dir "$quarantining_common" \
+  --arg git_dir "$quarantining_git_dir" \
+  --arg path "$quarantining_path" \
+  --arg quarantine_path "$quarantining_path_intent" \
+  '{version: 1, session_id: "quarantining-retention-session",
+    common_dir: $common_dir, git_dir: $git_dir, path: $path,
+    quarantine_path: $quarantine_path,
+    initial_head: "0000000000000000000000000000000000000000",
+    status: "quarantining", last_reason: "quarantining", updated_at: 0}' \
+  >"$quarantining_record"
+chmod 600 "$quarantining_record"
+"$SEVEN_DAY_RESOURCE" reap
+test -f "$quarantining_record"
+test "$(jq -r '.status' "$quarantining_record")" = quarantining
+
 # Permission denial, a disappearing magic link, and a stable broken link all
 # make process-reference inspection inconclusive and therefore preserve.
 assert_proc_failure_preserved proc-permission-denied denied
 assert_proc_failure_preserved proc-reference-disappearing disappearing
 assert_proc_failure_preserved proc-reference-broken broken
+assert_proc_owner_failure_preserved
+assert_foreign_proc_failure_ignored
 
 # Terminal ledgers use their recorded update time for bounded retention. Ledger
 # expiry never authorizes deleting a worktree.

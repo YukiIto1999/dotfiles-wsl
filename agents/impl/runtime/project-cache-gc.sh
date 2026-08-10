@@ -327,14 +327,41 @@ declare -A active_projects=()
 active_session_count=0
 declare -a orphan_sessions=() orphan_session_ids=() orphan_project_ids=()
 cache_gc_suppressed=false
+gc_owner_uid=$(id -u)
 
 : > "$scan_file"
 find "$sessions_root" -mindepth 1 -maxdepth 1 \
   -name '.gc-quarantine.*' -print0 > "$scan_file" \
   || die 'cannot enumerate quarantined agent sessions'
 while IFS= read -r -d '' quarantine_root; do
-  cache_gc_suppressed=true
-  printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session: %s\n' \
+  if [ -L "$quarantine_root" ] || [ ! -d "$quarantine_root" ] ||
+    [ "$(stat -c %u -- "$quarantine_root" 2>/dev/null)" != "$gc_owner_uid" ] ||
+    [ "$(stat -c %a -- "$quarantine_root" 2>/dev/null)" != 700 ]; then
+    cache_gc_suppressed=true
+    printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session root: %s\n' \
+      "$quarantine_root" >&2
+    continue
+  fi
+  quarantine_contents=$(find "$quarantine_root" -mindepth 1 -maxdepth 1 \
+    -print -quit 2>/dev/null) || {
+    cache_gc_suppressed=true
+    printf 'dotfiles-agent-project-cache-gc: skip cache GC: cannot inspect quarantined session root: %s\n' \
+      "$quarantine_root" >&2
+    continue
+  }
+  if [ -n "$quarantine_contents" ]; then
+    cache_gc_suppressed=true
+    printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session: %s\n' \
+      "$quarantine_root" >&2
+    continue
+  fi
+  if ! rmdir -- "$quarantine_root" 2>/dev/null; then
+    cache_gc_suppressed=true
+    printf 'dotfiles-agent-project-cache-gc: skip cache GC: quarantined session root changed during resolution: %s\n' \
+      "$quarantine_root" >&2
+    continue
+  fi
+  printf 'dotfiles-agent-project-cache-gc: resolved empty quarantined session root: %s\n' \
     "$quarantine_root" >&2
 done < "$scan_file"
 

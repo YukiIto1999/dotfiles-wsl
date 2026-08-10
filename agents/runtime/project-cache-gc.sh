@@ -41,6 +41,53 @@ validate_project_cache() {
     '. == {version: 1, project_id: $project_id}' "$marker" >/dev/null 2>&1
 }
 
+create_shared_cache() {
+  local cache_root=$1 shared_root marker marker_tmp created=false
+  shared_root="$cache_root/shared"
+  marker="$shared_root/.dotfiles-agent-cache.json"
+
+  if mkdir -m 700 "$shared_root" 2>/dev/null; then
+    created=true
+  else
+    validate_managed_directory "$shared_root"
+  fi
+  if [ "$created" = true ]; then
+    marker_tmp=$(mktemp "$shared_root/.owner.XXXXXXXX")
+    jq -cn '{version: 1, kind: "shared-cache"}' > "$marker_tmp"
+    chmod 600 "$marker_tmp"
+    mv -T "$marker_tmp" "$marker"
+  fi
+
+  validate_managed_file "$marker" 'shared cache marker'
+  jq --exit-status '. == {version: 1, kind: "shared-cache"}' "$marker" >/dev/null 2>&1 \
+    || die "shared cache marker is invalid: $marker"
+  for path in "$shared_root/cargo-home" "$shared_root/xdg-cache"; do
+    if ! mkdir -m 700 "$path" 2>/dev/null; then
+      validate_managed_directory "$path"
+    fi
+  done
+
+  printf '%s\n' "$shared_root"
+}
+
+validate_shared_cache() {
+  local shared_root=$1 marker="$1/.dotfiles-agent-cache.json"
+  validate_managed_directory "$shared_root"
+  validate_managed_file "$marker" 'shared cache marker'
+  jq --exit-status '. == {version: 1, kind: "shared-cache"}' "$marker" >/dev/null 2>&1 \
+    || die "shared cache marker is invalid: $marker"
+  validate_managed_directory "$shared_root/cargo-home"
+  validate_managed_directory "$shared_root/xdg-cache"
+}
+
+allocated_bytes() {
+  local path=$1 bytes
+  bytes=$(du -s -B1 -- "$path" | cut -f 1) \
+    || die "cannot measure allocated cache bytes: $path"
+  [[ "$bytes" =~ ^[0-9]+$ ]] || die "allocated cache size is invalid: $path"
+  printf '%s\n' "$bytes"
+}
+
 high_bytes=${DOTFILES_AGENT_GC_HIGH_BYTES:-68719476736}
 low_bytes=${DOTFILES_AGENT_GC_LOW_BYTES:-51539607552}
 case "$high_bytes:$low_bytes" in
@@ -66,6 +113,8 @@ validate_managed_file "$lock_file" 'GC lock'
 exec {lock_fd}<>"$lock_file"
 flock -x "$lock_fd"
 
+shared_root=$(create_shared_cache "$cache_root")
+
 scan_file=$(mktemp "$cache_root/.gc-scan.XXXXXXXX")
 # shellcheck disable=SC2329 # EXIT trap invokes this function indirectly.
 cleanup_scan() {
@@ -80,6 +129,7 @@ trap cleanup_scan EXIT
 
 current_boot_id=$(cat /proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
 declare -A active_projects=()
+active_session_count=0
 
 find "$sessions_root" -mindepth 1 -maxdepth 1 -print0 > "$scan_file" \
   || die 'cannot enumerate agent sessions'
@@ -113,21 +163,25 @@ while IFS= read -r -d '' session; do
   current_start_time=$(awk '{print $20}' <<<"${owner_stat##*) }")
   test "$current_start_time" = "$owner_start_time" || continue
   active_projects[$project_id]=1
+  active_session_count=$((active_session_count + 1))
 done < "$scan_file"
 
+# No cache is removed until every managed root and entry has passed validation.
+validate_shared_cache "$shared_root"
+shared_size=$(allocated_bytes "$shared_root")
+
 declare -a cache_ids=() cache_paths=() cache_sizes=() cache_mtimes=()
-total_bytes=0
+total_bytes=$shared_size
 : > "$scan_file"
 find "$builds_root" -mindepth 1 -maxdepth 1 -print0 > "$scan_file" \
   || die 'cannot enumerate project caches'
 while IFS= read -r -d '' cache; do
   project_id=${cache##*/}
   if [[ ! "$project_id" =~ ^[0-9a-f]{64}$ ]] || ! validate_project_cache "$cache" "$project_id"; then
-    printf 'dotfiles-agent-project-cache-gc: preserving unowned cache path: %s\n' "$cache" >&2
-    continue
+    die "project cache is not managed: $cache"
   fi
 
-  size=$(du -sb -- "$cache" | cut -f 1) || die "cannot measure project cache: $cache"
+  size=$(allocated_bytes "$cache")
   mtime=$(stat -c %Y "$cache/.dotfiles-agent-cache.json") \
     || die "cannot read project cache age: $cache"
   cache_ids+=("$project_id")
@@ -146,7 +200,8 @@ remove_cache() {
   project_id=${cache_ids[$index]}
   cache=${cache_paths[$index]}
   test -z "${active_projects[$project_id]+x}" || return 0
-  validate_project_cache "$cache" "$project_id" || return 0
+  validate_project_cache "$cache" "$project_id" \
+    || die "project cache changed during GC: $cache"
   rm -rf --one-file-system -- "$cache"
   removed[$index]=1
   total_bytes=$((total_bytes - cache_sizes[index]))
@@ -168,4 +223,21 @@ if [ "$total_bytes" -gt "$high_bytes" ]; then
       printf '%s %s %s\n' "${cache_mtimes[$index]}" "${cache_ids[$index]}" "$index"
     done | sort -n -k1,1 -k2,2
   )
+fi
+
+if [ "$total_bytes" -gt "$high_bytes" ] && [ "$active_session_count" -eq 0 ]; then
+  validate_shared_cache "$shared_root"
+  rm -rf --one-file-system -- "$shared_root/cargo-home" "$shared_root/xdg-cache"
+  mkdir -m 700 "$shared_root/cargo-home" "$shared_root/xdg-cache"
+  validate_shared_cache "$shared_root"
+  total_bytes=$(allocated_bytes "$shared_root")
+  for index in "${!cache_ids[@]}"; do
+    test -n "${removed[$index]+x}" && continue
+    validate_project_cache "${cache_paths[$index]}" "${cache_ids[$index]}" \
+      || die "project cache changed during final measurement: ${cache_paths[$index]}"
+    size=$(allocated_bytes "${cache_paths[$index]}")
+    total_bytes=$((total_bytes + size))
+  done
+  test "$total_bytes" -le "$high_bytes" \
+    || die "allocated cache bytes remain above the high watermark after shared purge"
 fi

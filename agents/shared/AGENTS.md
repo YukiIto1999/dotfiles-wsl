@@ -38,7 +38,7 @@ Think in English. Respond in Japanese.
 
 ## 資源と検証
 
-- agent runtime が `TMPDIR` と project 単位の build cache を割り当てる。session ごとの `CARGO_HOME`、`XDG_CACHE_HOME`、`CARGO_TARGET_DIR` を `/tmp` に作らない。project が明示する `target-dir` と利用者が明示した `CARGO_TARGET_DIR` は変更しない。
+- agent runtime が `TMPDIR`、全 project 共通の `CARGO_HOME` と `XDG_CACHE_HOME`、project 単位の build cache を割り当てる。利用者が明示した値は空文字列も含めて変更せず、project が明示する Cargo `target-dir` も上書きしない。session ごとの cache を `/tmp` に作らない。
 - `nix build` は明示した out-link が必要な場合を除き `--no-link`、`nix-build` は `--no-out-link` を使う。agent runtime の shim を絶対 path で迂回しない。
 - 編集中は変更箇所に対応する focused check を使う。高コストな最終確認は `dotfiles-agent-verify -- COMMAND [ARG...]` から一度だけ実行する。同じ source、command、環境で成功済みの確認を繰り返さない。
 - agent session 内で linked worktree を作るときは `git worktree add` または `dotfiles-agent-worktree add` を使い、runtime の管理入口を迂回しない。終了時に自動削除できるのは、台帳所有、clean、HEAD 不変、利用中 process なしをすべて満たす worktree だけである。

@@ -138,7 +138,7 @@ run_journalctl() {
 }
 
 run_du() {
-  [[ $# == 5 && $1 == --summarize && $2 == --bytes && $3 == --one-file-system \
+  [[ $# == 5 && $1 == --summarize && $2 == --block-size=1 && $3 == --one-file-system \
     && $4 == -- ]] || missing "$*"
   local root=$5 status
   jq -e --arg root "$root" 'any(.managedRootTable[]; . == $root)' <<<"$tables" >/dev/null \

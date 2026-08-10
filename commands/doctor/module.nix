@@ -73,6 +73,7 @@ let
 
   managedRootTable = [
     "${cfg.host.homeDir}/.cache/dotfiles-wsl/builds"
+    "${cfg.host.homeDir}/.cache/dotfiles-wsl/shared"
     "${cfg.host.homeDir}/.cache/dotfiles-wsl/sessions"
     "${cfg.host.homeDir}/.local/state/dotfiles-wsl/agent-resources"
   ];

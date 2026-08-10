@@ -290,6 +290,11 @@ in
       internal = true;
       description = "linked worktree を生成して ownership ledger へ登録する command package。";
     };
+    runtime.ledgerRetentionDays = lib.mkOption {
+      type = types.ints.positive;
+      default = 30;
+      description = "終了済み agent resource ledger の保持日数。";
+    };
     shared = {
       rules = lib.mkOption {
         type = types.path;

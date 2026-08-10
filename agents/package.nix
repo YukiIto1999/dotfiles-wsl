@@ -1,6 +1,7 @@
 {
   pkgs,
   lib,
+  ledgerRetentionDays ? 30,
 }:
 
 let
@@ -80,6 +81,7 @@ let
   mkAgentResource =
     {
       gitCommand,
+      retentionDays ? ledgerRetentionDays,
       name ? "dotfiles-agent-resource",
     }:
     pkgs.writeShellApplication {
@@ -91,9 +93,17 @@ let
         jq
         util-linux
       ];
-      text = builtins.replaceStrings [ "@gitCommand@" ] [ (lib.escapeShellArg (toString gitCommand)) ] (
-        builtins.readFile ./impl/resource/agent-resource.sh
-      );
+      text =
+        builtins.replaceStrings
+          [
+            "@gitCommand@"
+            "@ledgerRetentionDays@"
+          ]
+          [
+            (lib.escapeShellArg (toString gitCommand))
+            (toString retentionDays)
+          ]
+          (builtins.readFile ./impl/resource/agent-resource.sh);
     };
   mkAgentWorktree =
     {

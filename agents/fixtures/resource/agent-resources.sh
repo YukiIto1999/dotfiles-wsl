@@ -1396,6 +1396,558 @@ fi
 kill "$mutation_hook_pid"
 trap - EXIT
 
+# Without an explicit commit-ish or branch mode, Git selects an existing local
+# branch whose name matches the target basename instead of repository HEAD.
+new_case add-implicit-existing-branch
+implicit_repo="$HOME/repo"
+implicit_path="$HOME/named-target"
+create_repo "$implicit_repo"
+implicit_head_a=$("$REAL_GIT" -C "$implicit_repo" rev-parse HEAD)
+printf 'branch-b\n' >"$implicit_repo/tracked"
+"$REAL_GIT" -C "$implicit_repo" commit -qam branch-b
+implicit_head_b=$("$REAL_GIT" -C "$implicit_repo" rev-parse HEAD)
+"$REAL_GIT" -C "$implicit_repo" branch named-target "$implicit_head_b"
+"$REAL_GIT" -C "$implicit_repo" reset --hard -q "$implicit_head_a"
+begin_session implicit-branch-session
+set +e
+(
+  cd "$implicit_repo"
+  "$WORKTREE" add "$implicit_path" >/dev/null
+)
+implicit_add_status=$?
+set -e
+test "$implicit_add_status" -eq 0
+implicit_record=$(record_for_path "$implicit_path")
+test "$(jq -r '.status' "$implicit_record")" = owned
+test "$(jq -r '.initial_head' "$implicit_record")" = "$implicit_head_b"
+test "$("$REAL_GIT" -C "$implicit_path" rev-parse HEAD)" = "$implicit_head_b"
+
+# Without a matching local branch, Git creates the basename branch from HEAD.
+implicit_new_path="$HOME/new-target"
+(
+  cd "$implicit_repo"
+  "$WORKTREE" add "$implicit_new_path" >/dev/null
+)
+implicit_new_record=$(record_for_path "$implicit_new_path")
+test "$(jq -r '.status' "$implicit_new_record")" = owned
+test "$(jq -r '.initial_head' "$implicit_new_record")" = "$implicit_head_a"
+test "$("$REAL_GIT" -C "$implicit_repo" rev-parse refs/heads/new-target)" = "$implicit_head_a"
+
+# An explicit commit-ish wins even when the target basename names another
+# existing local branch.
+implicit_explicit_path="$HOME/explicit-target"
+"$REAL_GIT" -C "$implicit_repo" branch explicit-target "$implicit_head_b"
+(
+  cd "$implicit_repo"
+  "$WORKTREE" add "$implicit_explicit_path" "$implicit_head_a" >/dev/null
+)
+implicit_explicit_record=$(record_for_path "$implicit_explicit_path")
+test "$(jq -r '.status' "$implicit_explicit_record")" = owned
+test "$(jq -r '.initial_head' "$implicit_explicit_record")" = "$implicit_head_a"
+test "$("$REAL_GIT" -C "$implicit_explicit_path" rev-parse HEAD)" = "$implicit_head_a"
+
+# worktree.guessRemote=true makes Git use a unique matching remote-tracking
+# branch; false keeps the normal HEAD/new-branch fallback.
+implicit_remote="$HOME/remote.git"
+implicit_remote_path="$HOME/remote-target"
+implicit_remote_disabled_path="$HOME/remote-disabled"
+implicit_explicit_remote_path="$HOME/explicit-remote-path"
+implicit_default_remote_path="$HOME/ambiguous-target"
+"$REAL_GIT" init --bare -q "$implicit_remote"
+"$REAL_GIT" -C "$implicit_repo" remote add origin "$implicit_remote"
+"$REAL_GIT" -C "$implicit_repo" push -q origin \
+  "$implicit_head_b:refs/heads/remote-target" \
+  "$implicit_head_b:refs/heads/remote-disabled" \
+  "$implicit_head_b:refs/heads/explicit-remote" \
+  "$implicit_head_b:refs/heads/ambiguous-target"
+"$REAL_GIT" -C "$implicit_repo" fetch -q origin
+"$REAL_GIT" -C "$implicit_repo" config worktree.guessRemote true
+(
+  cd "$implicit_repo"
+  "$WORKTREE" add "$implicit_remote_path" >/dev/null
+)
+implicit_remote_record=$(record_for_path "$implicit_remote_path")
+test "$(jq -r '.status' "$implicit_remote_record")" = owned
+test "$(jq -r '.initial_head' "$implicit_remote_record")" = "$implicit_head_b"
+test "$("$REAL_GIT" -C "$implicit_remote_path" rev-parse HEAD)" = "$implicit_head_b"
+"$REAL_GIT" -C "$implicit_repo" config worktree.guessRemote false
+(
+  cd "$implicit_repo"
+  "$WORKTREE" add "$implicit_remote_disabled_path" >/dev/null
+)
+implicit_remote_disabled_record=$(record_for_path "$implicit_remote_disabled_path")
+test "$(jq -r '.status' "$implicit_remote_disabled_record")" = owned
+test "$(jq -r '.initial_head' "$implicit_remote_disabled_record")" = "$implicit_head_a"
+test "$("$REAL_GIT" -C "$implicit_remote_disabled_path" rev-parse HEAD)" = "$implicit_head_a"
+
+# An explicit missing local branch still uses Git's unique remote fallback,
+# regardless of worktree.guessRemote.
+(
+  cd "$implicit_repo"
+  "$WORKTREE" add "$implicit_explicit_remote_path" explicit-remote >/dev/null
+)
+implicit_explicit_remote_record=$(record_for_path "$implicit_explicit_remote_path")
+test "$(jq -r '.status' "$implicit_explicit_remote_record")" = owned
+test "$(jq -r '.initial_head' "$implicit_explicit_remote_record")" = "$implicit_head_b"
+test "$("$REAL_GIT" -C "$implicit_explicit_remote_path" rev-parse HEAD)" = "$implicit_head_b"
+
+# checkout.defaultRemote selects one matching branch when multiple remotes have
+# the same branch name.
+implicit_other_remote="$HOME/other.git"
+"$REAL_GIT" init --bare -q "$implicit_other_remote"
+"$REAL_GIT" -C "$implicit_repo" remote add other "$implicit_other_remote"
+"$REAL_GIT" -C "$implicit_repo" push -q other \
+  "$implicit_head_a:refs/heads/ambiguous-target"
+"$REAL_GIT" -C "$implicit_repo" fetch -q other
+"$REAL_GIT" -C "$implicit_repo" config worktree.guessRemote true
+"$REAL_GIT" -C "$implicit_repo" config checkout.defaultRemote origin
+(
+  cd "$implicit_repo"
+  "$WORKTREE" add "$implicit_default_remote_path" >/dev/null
+)
+implicit_default_remote_record=$(record_for_path "$implicit_default_remote_path")
+test "$(jq -r '.status' "$implicit_default_remote_record")" = owned
+test "$(jq -r '.initial_head' "$implicit_default_remote_record")" = "$implicit_head_b"
+test "$("$REAL_GIT" -C "$implicit_default_remote_path" rev-parse HEAD)" = "$implicit_head_b"
+"$RESOURCE" cleanup-session implicit-branch-session
+test ! -e "$implicit_path"
+test ! -e "$implicit_new_path"
+test ! -e "$implicit_explicit_path"
+test ! -e "$implicit_remote_path"
+test ! -e "$implicit_remote_disabled_path"
+test ! -e "$implicit_explicit_remote_path"
+test ! -e "$implicit_default_remote_path"
+
+# Git interprets a literal `-` commit-ish as the previous checkout. The managed
+# wrapper predicts the same commit while forwarding the original argument.
+new_case add-checkout-alias
+alias_repo="$HOME/repo"
+alias_path="$HOME/alias-target"
+alias_explicit_path="$HOME/explicit-alias-target"
+alias_git_log="$HOME/git.log"
+create_repo "$alias_repo"
+alias_initial_branch=$("$REAL_GIT" -C "$alias_repo" symbolic-ref --short HEAD)
+alias_head_a=$("$REAL_GIT" -C "$alias_repo" rev-parse HEAD)
+"$REAL_GIT" -C "$alias_repo" checkout -qb alias-previous
+printf 'previous-checkout\n' >"$alias_repo/tracked"
+"$REAL_GIT" -C "$alias_repo" commit -qam previous-checkout
+alias_head_b=$("$REAL_GIT" -C "$alias_repo" rev-parse HEAD)
+"$REAL_GIT" -C "$alias_repo" checkout -q "$alias_initial_branch"
+test "$("$REAL_GIT" -C "$alias_repo" rev-parse '@{-1}^{commit}')" = "$alias_head_b"
+test "$alias_head_a" != "$alias_head_b"
+begin_session add-checkout-alias-session
+(
+  cd "$alias_repo"
+  DOTFILES_AGENT_TEST_GIT_LOG="$alias_git_log" \
+    "$AUDIT_WORKTREE" add "$alias_path" - >/dev/null
+  "$WORKTREE" add --detach "$alias_explicit_path" '@{-1}' >/dev/null
+)
+grep -Fqx $'git\tworktree\tadd\t'"$alias_path"$'\t-' "$alias_git_log"
+alias_record=$(record_for_path "$alias_path")
+alias_explicit_record=$(record_for_path "$alias_explicit_path")
+test "$(jq -r '.status' "$alias_record")" = owned
+test "$(jq -r '.initial_head' "$alias_record")" = "$alias_head_b"
+test "$("$REAL_GIT" -C "$alias_path" rev-parse HEAD)" = "$alias_head_b"
+test "$(jq -r '.status' "$alias_explicit_record")" = owned
+test "$(jq -r '.initial_head' "$alias_explicit_record")" = "$alias_head_b"
+test "$("$REAL_GIT" -C "$alias_explicit_path" rev-parse HEAD)" = "$alias_head_b"
+"$RESOURCE" cleanup-session add-checkout-alias-session
+test ! -e "$alias_path"
+test ! -e "$alias_explicit_path"
+
+# With no previous checkout, both Git and the wrapper fail before creating a
+# path. The wrapper must not publish even a nonterminal ledger record.
+new_case add-checkout-alias-missing
+alias_missing_repo="$HOME/repo"
+alias_missing_direct_path="$HOME/direct-alias-target"
+alias_missing_wrapper_path="$HOME/wrapper-alias-target"
+create_repo "$alias_missing_repo"
+begin_session add-checkout-alias-missing-session
+set +e
+"$REAL_GIT" -C "$alias_missing_repo" worktree add \
+  "$alias_missing_direct_path" - >/dev/null 2>"$HOME/direct-alias.log"
+alias_missing_direct_status=$?
+(
+  cd "$alias_missing_repo"
+  "$WORKTREE" add "$alias_missing_wrapper_path" - \
+    >/dev/null 2>"$HOME/wrapper-alias.log"
+)
+alias_missing_wrapper_status=$?
+set -e
+test "$alias_missing_direct_status" -ne 0
+test "$alias_missing_wrapper_status" -ne 0
+test ! -e "$alias_missing_direct_path"
+test ! -e "$alias_missing_wrapper_path"
+if record_for_path "$alias_missing_wrapper_path" >/dev/null 2>&1; then
+  echo 'failed checkout alias published a worktree ledger record' >&2
+  exit 1
+fi
+
+# Git creates a linked worktree from an unborn HEAD when no commit-ish is
+# supplied. The roster represents that HEAD with the object-format zero OID.
+new_case add-unborn
+unborn_direct_repo="$HOME/direct-repo"
+unborn_direct_path="$HOME/direct-unborn"
+unborn_repo="$HOME/repo"
+unborn_path="$HOME/managed-unborn"
+unborn_git_log="$HOME/git.log"
+mkdir -p "$unborn_direct_repo" "$unborn_repo"
+"$REAL_GIT" -C "$unborn_direct_repo" init -q
+"$REAL_GIT" -C "$unborn_repo" init -q
+unborn_probe_oid=$("$REAL_GIT" -C "$unborn_repo" hash-object --stdin </dev/null)
+unborn_zero_oid=$(printf '%0*d' "${#unborn_probe_oid}" 0)
+test "${#unborn_zero_oid}" -eq 40 || test "${#unborn_zero_oid}" -eq 64
+"$REAL_GIT" -C "$unborn_direct_repo" worktree add "$unborn_direct_path" >/dev/null
+test -d "$unborn_direct_path"
+set +e
+"$REAL_GIT" -C "$unborn_direct_path" rev-parse --verify HEAD >/dev/null 2>&1
+unborn_direct_head_status=$?
+set -e
+test "$unborn_direct_head_status" -ne 0
+"$REAL_GIT" -C "$unborn_direct_repo" worktree remove -- "$unborn_direct_path"
+test ! -e "$unborn_direct_path"
+
+begin_session add-unborn-session
+(
+  cd "$unborn_repo"
+  DOTFILES_AGENT_TEST_GIT_LOG="$unborn_git_log" \
+    "$AUDIT_WORKTREE" add "$unborn_path" >/dev/null
+)
+grep -Fqx $'git\tworktree\tadd\t'"$unborn_path" "$unborn_git_log"
+unborn_record=$(record_for_path "$unborn_path")
+test "$(jq -r '.status' "$unborn_record")" = owned
+test "$(jq -r '.initial_head' "$unborn_record")" = "$unborn_zero_oid"
+unborn_head_ref=$("$REAL_GIT" -C "$unborn_path" symbolic-ref -q HEAD)
+test "$unborn_head_ref" = refs/heads/managed-unborn
+set +e
+"$REAL_GIT" -C "$unborn_path" rev-parse --verify HEAD >/dev/null 2>&1
+unborn_head_status=$?
+"$REAL_GIT" -C "$unborn_path" show-ref --exists "$unborn_head_ref"
+unborn_ref_status=$?
+set -e
+test "$unborn_head_status" -ne 0
+test "$unborn_ref_status" -eq 2
+"$RESOURCE" cleanup-session add-unborn-session
+test ! -e "$unborn_path"
+test "$(jq -r '.status' "$unborn_record")" = removed
+test "$(jq -r '.last_reason' "$unborn_record")" = clean-unchanged-inactive
+
+# If the add guardian is killed after stable identity capture, recovery proves
+# the exact unborn target from its zero OID before publishing ownership.
+new_case add-unborn-guardian-recovery
+unborn_recovery_repo="$HOME/repo"
+unborn_recovery_path="$HOME/managed-unborn"
+unborn_recovery_ready="$HOME/identity-ready"
+unborn_recovery_release="$HOME/identity-release"
+mkdir -p "$unborn_recovery_repo"
+"$REAL_GIT" -C "$unborn_recovery_repo" init -q
+unborn_recovery_probe=$("$REAL_GIT" -C "$unborn_recovery_repo" hash-object --stdin </dev/null)
+unborn_recovery_zero=$(printf '%0*d' "${#unborn_recovery_probe}" 0)
+begin_session add-unborn-recovery-session
+(
+  cd "$unborn_recovery_repo"
+  exec env DOTFILES_AGENT_TEST_ADD_IDENTITY_READY="$unborn_recovery_ready" \
+    DOTFILES_AGENT_TEST_ADD_IDENTITY_RELEASE="$unborn_recovery_release" \
+    "$ADDING_PAUSE_WORKTREE" add "$unborn_recovery_path"
+) >/dev/null &
+unborn_recovery_parent_pid=$!
+trap ': >"$unborn_recovery_release"; kill "$unborn_recovery_parent_pid" 2>/dev/null || true' EXIT
+wait_for_file "$unborn_recovery_ready"
+unborn_recovery_guardian_pid=$(<"$unborn_recovery_ready")
+kill -KILL "$unborn_recovery_guardian_pid"
+: >"$unborn_recovery_release"
+set +e
+wait "$unborn_recovery_parent_pid"
+unborn_recovery_status=$?
+set -e
+trap - EXIT
+test "$unborn_recovery_status" -eq 137
+unborn_recovery_record=$(record_for_path "$unborn_recovery_path")
+test "$(jq -r '.status' "$unborn_recovery_record")" = adding
+test "$(jq -r '.last_reason' "$unborn_recovery_record")" = adding-validated
+test "$(jq -r '.initial_head' "$unborn_recovery_record")" = "$unborn_recovery_zero"
+"$RESOURCE" cleanup-session add-unborn-recovery-session
+test -d "$unborn_recovery_path"
+test "$(jq -r '.status' "$unborn_recovery_record")" = owned
+test "$(jq -r '.last_reason' "$unborn_recovery_record")" = adding-recovered
+"$RESOURCE" cleanup-session add-unborn-recovery-session
+test ! -e "$unborn_recovery_path"
+test "$(jq -r '.status' "$unborn_recovery_record")" = removed
+
+# Object-format detection produces the matching 64-character zero OID for an
+# unborn SHA-256 repository and carries it through removal.
+new_case add-unborn-sha256
+unborn_sha256_repo="$HOME/repo"
+unborn_sha256_path="$HOME/managed-unborn"
+mkdir -p "$unborn_sha256_repo"
+"$REAL_GIT" -C "$unborn_sha256_repo" init -q --object-format=sha256
+unborn_sha256_probe=$("$REAL_GIT" -C "$unborn_sha256_repo" hash-object --stdin </dev/null)
+unborn_sha256_zero=$(printf '%0*d' "${#unborn_sha256_probe}" 0)
+test "${#unborn_sha256_zero}" -eq 64
+begin_session add-unborn-sha256-session
+(
+  cd "$unborn_sha256_repo"
+  "$WORKTREE" add "$unborn_sha256_path" >/dev/null
+)
+unborn_sha256_record=$(record_for_path "$unborn_sha256_path")
+test "$(jq -r '.status' "$unborn_sha256_record")" = owned
+test "$(jq -r '.initial_head' "$unborn_sha256_record")" = "$unborn_sha256_zero"
+"$RESOURCE" cleanup-session add-unborn-sha256-session
+test ! -e "$unborn_sha256_path"
+test "$(jq -r '.status' "$unborn_sha256_record")" = removed
+
+# Reaping a dead owner uses the same exact zero-OID identity proof before
+# removing an unchanged unborn worktree.
+new_case add-unborn-reap
+unborn_reap_repo="$HOME/repo"
+unborn_reap_path="$HOME/managed-unborn"
+mkdir -p "$unborn_reap_repo"
+"$REAL_GIT" -C "$unborn_reap_repo" init -q
+sleep infinity &
+unborn_reap_owner_pid=$!
+trap 'kill "$unborn_reap_owner_pid" 2>/dev/null || true' EXIT
+begin_session add-unborn-reap-session "$unborn_reap_owner_pid"
+(
+  cd "$unborn_reap_repo"
+  "$WORKTREE" add "$unborn_reap_path" >/dev/null
+)
+unborn_reap_record=$(record_for_path "$unborn_reap_path")
+kill "$unborn_reap_owner_pid"
+wait "$unborn_reap_owner_pid" 2>/dev/null || true
+trap - EXIT
+"$RESOURCE" reap
+test ! -e "$unborn_reap_path"
+test "$(jq -r '.status' "$unborn_reap_record")" = removed
+
+# Creating the first commit changes the semantic HEAD away from the owned zero
+# OID, so cleanup preserves the worktree even when its status is clean.
+new_case add-unborn-first-commit
+unborn_commit_repo="$HOME/repo"
+unborn_commit_path="$HOME/managed-unborn"
+mkdir -p "$unborn_commit_repo"
+"$REAL_GIT" -C "$unborn_commit_repo" init -q
+"$REAL_GIT" -C "$unborn_commit_repo" config user.name fixture
+"$REAL_GIT" -C "$unborn_commit_repo" config user.email fixture@example.invalid
+begin_session add-unborn-first-commit-session
+(
+  cd "$unborn_commit_repo"
+  "$WORKTREE" add "$unborn_commit_path" >/dev/null
+)
+unborn_commit_record=$(record_for_path "$unborn_commit_path")
+"$REAL_GIT" -C "$unborn_commit_path" commit --allow-empty -qm first
+test -n "$("$REAL_GIT" -C "$unborn_commit_path" rev-parse --verify 'HEAD^{commit}')"
+"$RESOURCE" cleanup-session add-unborn-first-commit-session
+test -d "$unborn_commit_path"
+test "$(jq -r '.status' "$unborn_commit_record")" = preserved
+test "$(jq -r '.last_reason' "$unborn_commit_record")" = head-changed
+
+# Explicit -b/-B branch creation also infers an orphan when commit-ish is
+# omitted and no local branches exist.
+new_case add-unborn-explicit-branch
+unborn_branch_repo="$HOME/repo"
+unborn_branch_b_path="$HOME/branch-b"
+unborn_branch_B_path="$HOME/branch-B"
+mkdir -p "$unborn_branch_repo"
+"$REAL_GIT" -C "$unborn_branch_repo" init -q
+unborn_branch_probe=$("$REAL_GIT" -C "$unborn_branch_repo" hash-object --stdin </dev/null)
+unborn_branch_zero=$(printf '%0*d' "${#unborn_branch_probe}" 0)
+begin_session add-unborn-explicit-branch-session
+(
+  cd "$unborn_branch_repo"
+  "$WORKTREE" add -b unborn-branch-b "$unborn_branch_b_path" >/dev/null
+  "$WORKTREE" add -B unborn-branch-B "$unborn_branch_B_path" >/dev/null
+)
+unborn_branch_b_record=$(record_for_path "$unborn_branch_b_path")
+unborn_branch_B_record=$(record_for_path "$unborn_branch_B_path")
+test "$(jq -r '.status' "$unborn_branch_b_record")" = owned
+test "$(jq -r '.initial_head' "$unborn_branch_b_record")" = "$unborn_branch_zero"
+test "$(jq -r '.status' "$unborn_branch_B_record")" = owned
+test "$(jq -r '.initial_head' "$unborn_branch_B_record")" = "$unborn_branch_zero"
+"$RESOURCE" cleanup-session add-unborn-explicit-branch-session
+test ! -e "$unborn_branch_b_path"
+test ! -e "$unborn_branch_B_path"
+
+# Inferred orphan cannot be combined with --no-checkout. The wrapper fails
+# before publishing an intent, matching Git's path-preserving failure.
+new_case add-unborn-no-checkout
+unborn_no_checkout_repo="$HOME/repo"
+unborn_no_checkout_direct="$HOME/direct"
+unborn_no_checkout_wrapper="$HOME/managed"
+mkdir -p "$unborn_no_checkout_repo"
+"$REAL_GIT" -C "$unborn_no_checkout_repo" init -q
+begin_session add-unborn-no-checkout-session
+set +e
+"$REAL_GIT" -C "$unborn_no_checkout_repo" worktree add --no-checkout \
+  "$unborn_no_checkout_direct" >/dev/null 2>&1
+unborn_no_checkout_direct_status=$?
+(
+  cd "$unborn_no_checkout_repo"
+  "$WORKTREE" add --no-checkout "$unborn_no_checkout_wrapper" >/dev/null 2>&1
+)
+unborn_no_checkout_wrapper_status=$?
+set -e
+test "$unborn_no_checkout_direct_status" -ne 0
+test "$unborn_no_checkout_wrapper_status" -ne 0
+test ! -e "$unborn_no_checkout_direct"
+test ! -e "$unborn_no_checkout_wrapper"
+if record_for_path "$unborn_no_checkout_wrapper" >/dev/null 2>&1; then
+  echo 'invalid unborn --no-checkout add published a ledger record' >&2
+  exit 1
+fi
+
+# A malformed guessRemote boolean is a Git error, not an implicit false value.
+# It must fail before an unborn adding intent is persisted.
+new_case add-unborn-invalid-guess-remote
+unborn_invalid_config_repo="$HOME/repo"
+unborn_invalid_config_direct="$HOME/direct"
+unborn_invalid_config_wrapper="$HOME/managed"
+unborn_invalid_config_log="$HOME/git.log"
+mkdir -p "$unborn_invalid_config_repo"
+"$REAL_GIT" -C "$unborn_invalid_config_repo" init -q
+"$REAL_GIT" -C "$unborn_invalid_config_repo" config worktree.guessRemote bogus
+begin_session add-unborn-invalid-guess-remote-session
+set +e
+"$REAL_GIT" -C "$unborn_invalid_config_repo" worktree add \
+  "$unborn_invalid_config_direct" >/dev/null 2>&1
+unborn_invalid_config_direct_status=$?
+"$REAL_GIT" -C "$unborn_invalid_config_repo" config --unset worktree.guessRemote
+(
+  cd "$unborn_invalid_config_repo"
+  DOTFILES_AGENT_TEST_GIT_LOG="$unborn_invalid_config_log" \
+    DOTFILES_AGENT_TEST_FAIL_GUESS_REMOTE_CONFIG=1 \
+    "$AUDIT_WORKTREE" add "$unborn_invalid_config_wrapper" >/dev/null 2>&1
+)
+unborn_invalid_config_wrapper_status=$?
+set -e
+test "$unborn_invalid_config_direct_status" -ne 0
+test "$unborn_invalid_config_wrapper_status" -ne 0
+test ! -e "$unborn_invalid_config_direct"
+test ! -e "$unborn_invalid_config_wrapper"
+unborn_invalid_config_call=$'git\tconfig\t--type=bool\t--get\tworktree.guessRemote'
+test "$(grep -Fxc "$unborn_invalid_config_call" "$unborn_invalid_config_log")" -eq 1
+test "$(tail -n 1 "$unborn_invalid_config_log")" = "$unborn_invalid_config_call"
+if grep -Fq $'git\tworktree\tadd\t'"$unborn_invalid_config_wrapper" \
+  "$unborn_invalid_config_log"; then
+  echo 'invalid guessRemote config reached git worktree add' >&2
+  exit 1
+fi
+if record_for_path "$unborn_invalid_config_wrapper" >/dev/null 2>&1; then
+  echo 'invalid guessRemote config published an unborn ledger record' >&2
+  exit 1
+fi
+
+# A remote-ref scan error is not equivalent to finding no matching remote.
+# It must stop prediction before an add intent or target can be created.
+new_case add-remote-scan-error
+remote_error_repo="$HOME/repo"
+remote_error_path="$HOME/managed"
+remote_error_log="$HOME/git.log"
+create_repo "$remote_error_repo"
+"$REAL_GIT" -C "$remote_error_repo" config worktree.guessRemote true
+begin_session add-remote-scan-error-session
+set +e
+(
+  cd "$remote_error_repo"
+  DOTFILES_AGENT_TEST_GIT_LOG="$remote_error_log" \
+    DOTFILES_AGENT_TEST_FAIL_REMOTE_REF_SCAN_STATUS=1 \
+    "$AUDIT_WORKTREE" add "$remote_error_path" >/dev/null 2>&1
+)
+remote_error_status=$?
+set -e
+test "$remote_error_status" -ne 0
+test ! -e "$remote_error_path"
+remote_error_call=$'git\tfor-each-ref\t--format=%(refname)\trefs/remotes/*/managed'
+test "$(tail -n 1 "$remote_error_log")" = "$remote_error_call"
+if grep -Fq $'git\tworktree\tadd\t' "$remote_error_log"; then
+  echo 'failed remote ref scan reached git worktree add' >&2
+  exit 1
+fi
+if record_for_path "$remote_error_path" >/dev/null 2>&1; then
+  echo 'failed remote ref scan published an add ledger record' >&2
+  exit 1
+fi
+
+# An unborn current HEAD does not trigger inference when another local branch
+# exists. A failed real Git add must leave neither a path nor an intent.
+new_case add-unborn-existing-local
+unborn_local_repo="$HOME/repo"
+unborn_local_direct="$HOME/direct"
+unborn_local_wrapper="$HOME/managed"
+create_repo "$unborn_local_repo"
+"$REAL_GIT" -C "$unborn_local_repo" symbolic-ref HEAD refs/heads/unborn-current
+begin_session add-unborn-existing-local-session
+set +e
+"$REAL_GIT" -C "$unborn_local_repo" worktree add \
+  "$unborn_local_direct" >/dev/null 2>&1
+unborn_local_direct_status=$?
+(
+  cd "$unborn_local_repo"
+  "$WORKTREE" add "$unborn_local_wrapper" >/dev/null 2>&1
+)
+unborn_local_wrapper_status=$?
+set -e
+test "$unborn_local_direct_status" -ne 0
+test "$unborn_local_wrapper_status" -ne 0
+test ! -e "$unborn_local_direct"
+test ! -e "$unborn_local_wrapper"
+if record_for_path "$unborn_local_wrapper" >/dev/null 2>&1; then
+  echo 'failed add with an existing local branch published a ledger record' >&2
+  exit 1
+fi
+
+# The source linked worktree owns its own HEAD. A committed main-worktree HEAD
+# must not override an unborn invoking worktree during pre-intent validation.
+new_case add-unborn-linked-source
+unborn_linked_repo="$HOME/repo"
+unborn_linked_source="$HOME/source-unborn"
+unborn_linked_target="$HOME/managed-unborn"
+create_repo "$unborn_linked_repo"
+unborn_linked_commit=$("$REAL_GIT" -C "$unborn_linked_repo" rev-parse HEAD)
+"$REAL_GIT" -C "$unborn_linked_repo" worktree add --orphan -b source-unborn \
+  "$unborn_linked_source" >/dev/null
+"$REAL_GIT" -C "$unborn_linked_repo" checkout --detach -q "$unborn_linked_commit"
+unborn_linked_initial_branch=$("$REAL_GIT" -C "$unborn_linked_repo" \
+  for-each-ref --format='%(refname:short)' --count=1 refs/heads)
+"$REAL_GIT" -C "$unborn_linked_repo" branch -D "$unborn_linked_initial_branch" >/dev/null
+test -z "$("$REAL_GIT" -C "$unborn_linked_repo" for-each-ref \
+  --format='%(refname)' refs/heads)"
+unborn_linked_probe=$("$REAL_GIT" -C "$unborn_linked_repo" hash-object --stdin </dev/null)
+unborn_linked_zero=$(printf '%0*d' "${#unborn_linked_probe}" 0)
+begin_session add-unborn-linked-source-session
+(
+  cd "$unborn_linked_source"
+  "$WORKTREE" add "$unborn_linked_target" >/dev/null
+)
+unborn_linked_record=$(record_for_path "$unborn_linked_target")
+test "$(jq -r '.status' "$unborn_linked_record")" = owned
+test "$(jq -r '.initial_head' "$unborn_linked_record")" = "$unborn_linked_zero"
+"$RESOURCE" cleanup-session add-unborn-linked-source-session
+test ! -e "$unborn_linked_target"
+
+# A zero-OID ledger cannot turn an arbitrary rev-parse failure on a committed
+# branch into an unborn identity proof.
+new_case add-unborn-head-error
+unborn_error_repo="$HOME/repo"
+unborn_error_path="$HOME/managed"
+create_repo "$unborn_error_repo"
+unborn_error_probe=$("$REAL_GIT" -C "$unborn_error_repo" hash-object --stdin </dev/null)
+unborn_error_zero=$(printf '%0*d' "${#unborn_error_probe}" 0)
+begin_session add-unborn-head-error-session
+(
+  cd "$unborn_error_repo"
+  "$WORKTREE" add "$unborn_error_path" >/dev/null
+)
+unborn_error_record=$(record_for_path "$unborn_error_path")
+jq --arg initial_head "$unborn_error_zero" '.initial_head = $initial_head' \
+  "$unborn_error_record" >"$HOME/tampered-record.json"
+mv -T -- "$HOME/tampered-record.json" "$unborn_error_record"
+chmod 600 "$unborn_error_record"
+DOTFILES_AGENT_TEST_FAIL_HEAD_PATH="$unborn_error_path" \
+  "$AUDIT_RESOURCE" cleanup-session add-unborn-head-error-session
+test -d "$unborn_error_path"
+test "$(jq -r '.status' "$unborn_error_record")" = preserved
+test "$(jq -r '.last_reason' "$unborn_error_record")" = head-missing
+
 # The add-only parser identifies the target while preserving the supported
 # Git add option forms.
 new_case add-options

@@ -23,6 +23,148 @@ let
     crawl4aiUrl = expectedUrl;
     tokenFile = pkgs.writeText "crawl4ai-probe-token" "probe-token";
   };
+  behaviorPackage = pkgs.callPackage ./package.nix {
+    serverBuilder = mkMcpServer;
+    crawl4aiUrl = "http://127.0.0.1:18080";
+    tokenFile = pkgs.writeText "crawl4ai-behavior-token" "behavior-token";
+  };
+  behaviorBackend = pkgs.writeText "crawl4ai-behavior-backend.py" ''
+    import json
+    import sys
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from urllib.parse import parse_qs, urlparse
+
+    observed_path = sys.argv[1]
+
+
+    class Handler(BaseHTTPRequestHandler):
+        def send_json(self, status, body):
+            payload = json.dumps(body).encode()
+            self.send_response(status)
+            self.send_header("content-type", "application/json")
+            self.send_header("content-length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/mcp/schema":
+                self.send_json(
+                    200,
+                    {
+                        "tools": [
+                            {
+                                "name": "ask",
+                                "description": "fixture",
+                                "inputSchema": {"type": "object"},
+                            }
+                        ]
+                    },
+                )
+                return
+
+            if parsed.path == "/ask":
+                query = parse_qs(parsed.query)
+                if query != {
+                    "context_type": ["doc"],
+                    "query": ["health"],
+                    "max_results": ["1"],
+                }:
+                    self.send_json(400, {"detail": "unexpected query"})
+                    return
+                with open(observed_path, "w") as observed:
+                    json.dump({"method": "GET", "query": query}, observed)
+                self.send_json(200, {"doc_results": [{"text": "health", "score": 1}]})
+                return
+
+            self.send_json(404, {"detail": "not found"})
+
+        def do_POST(self):
+            self.send_json(405, {"detail": "Method Not Allowed"})
+
+        def log_message(self, format, *args):
+            pass
+
+
+    HTTPServer(("127.0.0.1", 18080), Handler).serve_forever()
+  '';
+  behaviorDriver = pkgs.writeText "crawl4ai-behavior-driver.py" ''
+    import json
+    import os
+    import subprocess
+    import sys
+
+
+    environment = os.environ.copy()
+    environment.pop("SSL_CERT_FILE", None)
+    process = subprocess.Popen(
+        [sys.argv[1]],
+        env=environment,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+
+    def request(payload):
+        process.stdin.write(json.dumps(payload) + "\n")
+        process.stdin.flush()
+        return json.loads(process.stdout.readline())
+
+
+    initialize = request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "clientInfo": {"name": "behavior-check", "version": "1"},
+            },
+        }
+    )
+    assert initialize["result"]["serverInfo"]["name"] == "crawl4ai", initialize
+
+    process.stdin.write(
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {},
+            }
+        )
+        + "\n"
+    )
+    process.stdin.flush()
+
+    tools = request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+    assert "result" in tools, tools
+    assert [tool["name"] for tool in tools["result"]["tools"]] == ["ask"], tools
+
+    call = request(
+        {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {
+                "name": "ask",
+                "arguments": {
+                    "context_type": "doc",
+                    "query": "health",
+                    "max_results": 1,
+                },
+            },
+        }
+    )
+    assert call["result"].get("isError", False) is False, call
+    result = json.loads(call["result"]["content"][0]["text"])
+    assert result == {"doc_results": [{"text": "health", "score": 1}]}, result
+
+    process.stdin.close()
+    assert process.wait(timeout=10) == 0, process.stderr.read()
+  '';
   front = hostConfig.dotfiles.mcp.fronts.crawl4ai;
   target = hostConfig.dotfiles.mcp.targets.crawl4ai;
   execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
@@ -51,10 +193,11 @@ let
     needsNetwork = false;
     waitUnits = expectedWaitUnits;
     probe = {
-      tool = "md";
+      tool = "ask";
       args = {
-        url = "http://127.0.0.1:11235/health";
-        f = "raw";
+        context_type = "doc";
+        query = "health";
+        max_results = 1;
       };
       timeout = 60;
     };
@@ -173,7 +316,9 @@ in
       {
         nativeBuildInputs = [
           pkgs.coreutils
+          pkgs.curl
           pkgs.jq
+          pkgs.python3
         ];
       }
       ''
@@ -199,6 +344,24 @@ in
           | timeout 10 ${lib.getExe probePackage} > response.json 2> front.log
 
         jq -e '.result.serverInfo.name == "crawl4ai"' response.json >/dev/null
+
+        ${pkgs.python3}/bin/python ${behaviorBackend} "$PWD/observed.json" &
+        backend_pid=$!
+        trap 'kill "$backend_pid" 2>/dev/null || true' EXIT
+        curl --silent --show-error --fail --retry 20 --retry-all-errors --retry-delay 0 \
+          http://127.0.0.1:18080/mcp/schema >/dev/null
+        timeout 20 ${pkgs.python3}/bin/python ${behaviorDriver} ${lib.getExe behaviorPackage}
+        jq -e \
+          '. == {
+            method: "GET",
+            query: {
+              context_type: ["doc"],
+              query: ["health"],
+              max_results: ["1"]
+            }
+          }' \
+          observed.json >/dev/null
+
         touch $out
       '';
 }

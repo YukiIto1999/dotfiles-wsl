@@ -52,7 +52,7 @@ dotfiles-doctor
 
 この構成は、単一の NixOS WSL で WSLg、GPU、MCP、Docker backend、開発作業を同時に使う。全 service に一つのメモリ上限をかけず、書き込み元ごとに保持量を制御する。
 
-- zram は RAM の 25% を `lzo-rle`、priority 100 で使う。ディスクへの書き戻しは行わず、Windows 側の swap は低優先度の退避先として扱う。zram や swap の異常を理由に SonarQube などの起動を止めない。
+- zram は RAM の 25% を `lzo-rle`、priority 100 で使う。upstream generator は WSL を container と判定して unit 生成を省略するため、専用 service が upstream の device setup と reset を呼ぶ。ディスクへの書き戻しは行わず、Windows 側の swap は低優先度の退避先として扱う。zram や swap の異常を理由に SonarQube などの起動を止めない。
 - journald は 4GiB、30 日を上限にする。Nix GC は週次、14 日保持を維持する。標準の `fstrim.timer` は WSL でも週次実行し、独自の trim unit は作らない。
 - Docker BuildKit cache は 60GB を基準にし、6 時間ごとの GC でも 20GB を予約する。image、container、volume は自動 prune しない。
 - Claude Code、Codex、OpenCode は repository 単位の build cache を共有する。30 日未使用の cache を削除し、合計が 64GiB を超えた場合だけ 48GiB まで LRU で回収する。active session と所有を確認できない path は削除しない。

@@ -14,6 +14,25 @@ let
     exec ${windowsCommand} /c start "" "$1" 2>/dev/null
   '';
   binaryCaches = import ./assets/nix-caches.nix;
+  zramGenerator = "${pkgs.zram-generator}/lib/systemd/system-generators/zram-generator";
+  zramSetup = pkgs.writeShellScript "dotfiles-zram-setup" ''
+    set -euo pipefail
+
+    ${lib.getExe' pkgs.kmod "modprobe"} zram num_devices=1
+    test -b /dev/zram0
+    ${zramGenerator} --setup-device zram0
+    ${lib.getExe' pkgs.util-linux "swapon"} --priority 100 /dev/zram0
+  '';
+  zramTeardown = pkgs.writeShellScript "dotfiles-zram-teardown" ''
+    set -euo pipefail
+
+    if ${lib.getExe pkgs.gnugrep} -q '^/dev/zram0[[:space:]]' /proc/swaps; then
+      ${lib.getExe' pkgs.util-linux "swapoff"} /dev/zram0
+    fi
+    if test -e /sys/block/zram0/reset; then
+      ${zramGenerator} --reset-device zram0
+    fi
+  '';
 in
 {
   options.dotfiles.host = {
@@ -99,14 +118,33 @@ in
   };
   config.nix.optimise.automatic = true;
 
-  # disk swap に退避する前に圧縮 memory を使い、host SSD への書き込みを増やさない
-  config.zramSwap = {
+  # zram-generator は WSL を container と判定して unit 生成を省略するため、
+  # 設定と device setup は再利用し、lifecycle だけを専用 service で接続する
+  config.zramSwap.enable = false;
+  config.services.zram-generator = {
     enable = true;
-    swapDevices = 1;
-    memoryPercent = 25;
-    priority = 100;
-    algorithm = "lzo-rle";
-    writebackDevice = null;
+    settings.zram0 = {
+      compression-algorithm = "lzo-rle";
+      swap-priority = 100;
+      zram-size = "25 / 100 * ram";
+    };
+  };
+  config.systemd.services.dotfiles-zram-swap = {
+    description = "Create compressed swap on /dev/zram0 under WSL";
+    wantedBy = [ "swap.target" ];
+    before = [
+      "swap.target"
+      "shutdown.target"
+    ];
+    conflicts = [ "shutdown.target" ];
+    unitConfig.DefaultDependencies = false;
+    path = [ pkgs.util-linux ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = zramSetup;
+      ExecStopPost = zramTeardown;
+    };
   };
 
   # 障害履歴を残しつつ、長期稼働時の journal に明示的な上限を設ける

@@ -292,6 +292,7 @@ in
         "dotfiles-agent-autoupdate"
         "dotfiles-agent-project-cache-gc"
         "dotfiles-agent-resource-reaper"
+        "dotfiles-zram-swap"
         "docker-buildkit-gc"
         "docker-dotfiles-backends-network"
         "fstrim"

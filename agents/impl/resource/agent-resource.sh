@@ -11,6 +11,10 @@ die() {
   exit 70
 }
 
+run_git() {
+  "$git_command" "$@" 7>&- 8>&- 9>&-
+}
+
 validate_id() {
   local label=$1 value=$2
   [[ $value =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || die "invalid $label: $value"
@@ -55,6 +59,25 @@ ensure_lock_file() {
     ) 2>/dev/null || true
   fi
   validate_regular_file "$path" || die "lock file is ambiguous: $path"
+}
+
+acquire_mutation_lock() {
+  local inherited_target
+  if [ "${DOTFILES_AGENT_CREATION_LOCK_FD-}" = 8 ] &&
+    [ "${DOTFILES_AGENT_MUTATION_LOCK_FD-}" != 7 ]; then
+    die 'inherited creation lock requires the managed mutation lock'
+  fi
+  ensure_lock_file "$mutation_lock_file"
+
+  if [ "${DOTFILES_AGENT_MUTATION_LOCK_FD-}" = 7 ]; then
+    inherited_target=$(readlink -e -- /proc/self/fd/7 2>/dev/null) ||
+      die 'inherited mutation lock descriptor is ambiguous'
+    [ "$inherited_target" = "$mutation_lock_file" ] ||
+      die 'inherited mutation lock does not match the managed lock'
+  else
+    exec 7<>"$mutation_lock_file"
+  fi
+  flock -x 7
 }
 
 acquire_creation_lock() {
@@ -474,10 +497,10 @@ worktree_link_identity_is_valid() {
   [ "$canonical_path" = "$path" ] || return 1
   canonical_common=$(realpath -e -- "$common_dir" 2>/dev/null) || return 1
   [ "$canonical_common" = "$common_dir" ] || return 1
-  git_dir=$("$git_command" -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null) || return 1
+  git_dir=$(run_git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null) || return 1
   git_dir=$(realpath -e -- "$git_dir" 2>/dev/null) || return 1
   [ "$git_dir" = "$expected_git_dir" ] || return 1
-  current_common=$("$git_command" -C "$path" rev-parse \
+  current_common=$(run_git -C "$path" rev-parse \
     --path-format=absolute --git-common-dir 2>/dev/null) || return 1
   current_common=$(realpath -e -- "$current_common" 2>/dev/null) || return 1
   [ "$current_common" = "$common_dir" ] || return 1
@@ -488,7 +511,7 @@ worktree_identity_is_valid() {
   local current_head
   worktree_link_identity_is_valid "$path" "$common_dir" "$expected_git_dir" \
     "$expected_device" "$expected_inode" || return 1
-  current_head=$("$git_command" -C "$path" rev-parse --verify HEAD 2>/dev/null) || return 1
+  current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null) || return 1
   [ "$current_head" = "$initial_head" ]
 }
 
@@ -592,7 +615,7 @@ recover_quarantining_worktree() {
       "$program" "$original_path" "$quarantine_path" >&2
     return 1
   fi
-  if ! "$git_command" --git-dir="$common_dir" worktree move -- \
+  if ! run_git --git-dir="$common_dir" worktree move -- \
     "$quarantine_path" "$original_path"; then
     mark_quarantining_reason "$record" quarantine-restore-failed
     printf '%s: preserve quarantine-restore-failed: %s (quarantine: %s)\n' \
@@ -631,6 +654,11 @@ handle_transaction_term() {
   exit 143
 }
 
+finish_quarantine_transaction() {
+  trap - EXIT TERM
+  quarantine_transaction_record=
+}
+
 restore_quarantined_worktree() {
   local record=$1 common_dir=$2 original_path=$3 quarantine_path=$4 quarantine_root=$5 reason=$6
   local expected_git_dir expected_device expected_inode
@@ -657,7 +685,7 @@ restore_quarantined_worktree() {
     return
   fi
   if [ ! -e "$original_path" ] && [ ! -L "$original_path" ] &&
-    "$git_command" --git-dir="$common_dir" worktree move -- \
+    run_git --git-dir="$common_dir" worktree move -- \
       "$quarantine_path" "$original_path"; then
     if ! worktree_link_identity_is_valid "$original_path" "$common_dir" "$expected_git_dir" \
       "$expected_device" "$expected_inode"; then
@@ -761,7 +789,7 @@ cleanup_worktree_record() {
     preserve_worktree "$record" cross-filesystem-path
     return
   fi
-  git_dir=$("$git_command" -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
+  git_dir=$(run_git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
     {
       preserve_worktree "$record" not-a-worktree
       return
@@ -776,11 +804,11 @@ cleanup_worktree_record() {
     return
   fi
   initial_git_dir=$git_dir
-  if [ "$("$git_command" -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" != "$common_dir" ]; then
+  if [ "$(run_git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" != "$common_dir" ]; then
     preserve_worktree "$record" common-dir-changed
     return
   fi
-  status_output=$("$git_command" -C "$path" status --porcelain=v1 --untracked-files=all 2>/dev/null) ||
+  status_output=$(run_git -C "$path" status --porcelain=v1 --untracked-files=all 2>/dev/null) ||
     {
       preserve_worktree "$record" status-failed
       return
@@ -789,7 +817,7 @@ cleanup_worktree_record() {
     preserve_worktree "$record" dirty
     return
   fi
-  current_head=$("$git_command" -C "$path" rev-parse --verify HEAD 2>/dev/null) ||
+  current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null) ||
     {
       preserve_worktree "$record" head-missing
       return
@@ -833,7 +861,7 @@ cleanup_worktree_record() {
   quarantine_transaction_record=$record
   trap 'recover_quarantine_on_exit $?' EXIT
   trap handle_transaction_term TERM
-  if ! "$git_command" --git-dir="$common_dir" worktree move -- "$path" "$quarantine_path"; then
+  if ! run_git --git-dir="$common_dir" worktree move -- "$path" "$quarantine_path"; then
     if rmdir -- "$quarantine_root" 2>/dev/null; then
       preserve_worktree "$record" quarantine-move-failed
     else
@@ -841,6 +869,7 @@ cleanup_worktree_record() {
       printf '%s: preserve quarantine-move-failed-root-unresolved: %s (quarantine: %s)\n' \
         "$program" "$path" "$quarantine_path" >&2
     fi
+    finish_quarantine_transaction
     return
   fi
 
@@ -850,59 +879,70 @@ cleanup_worktree_record() {
     ! worktree_directory_identity_is_valid "$quarantine_path" "$path_device" "$path_inode"; then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" ambiguous-quarantine-path
+    finish_quarantine_transaction
     return
   fi
   canonical_common=$(realpath -e -- "$common_dir" 2>/dev/null) || {
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" missing-common-dir
+    finish_quarantine_transaction
     return
   }
   if [ "$canonical_common" != "$common_dir" ]; then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" common-dir-changed
+    finish_quarantine_transaction
     return
   fi
-  git_dir=$("$git_command" -C "$quarantine_path" rev-parse --path-format=absolute --git-dir 2>/dev/null) || {
+  git_dir=$(run_git -C "$quarantine_path" rev-parse --path-format=absolute --git-dir 2>/dev/null) || {
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" not-a-worktree
+    finish_quarantine_transaction
     return
   }
   git_dir=$(realpath -e -- "$git_dir" 2>/dev/null) || {
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" ambiguous-git-dir
+    finish_quarantine_transaction
     return
   }
   if [ "$git_dir" != "$initial_git_dir" ] ||
-    [ "$("$git_command" -C "$quarantine_path" rev-parse \
+    [ "$(run_git -C "$quarantine_path" rev-parse \
       --path-format=absolute --git-common-dir 2>/dev/null)" != "$common_dir" ]; then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" common-dir-changed
+    finish_quarantine_transaction
     return
   fi
-  status_output=$("$git_command" -C "$quarantine_path" status \
+  status_output=$(run_git -C "$quarantine_path" status \
     --porcelain=v1 --untracked-files=all 2>/dev/null) || {
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" status-failed
+    finish_quarantine_transaction
     return
   }
   if [ -n "$status_output" ]; then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" dirty
+    finish_quarantine_transaction
     return
   fi
-  current_head=$("$git_command" -C "$quarantine_path" rev-parse --verify HEAD 2>/dev/null) || {
+  current_head=$(run_git -C "$quarantine_path" rev-parse --verify HEAD 2>/dev/null) || {
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" head-missing
+    finish_quarantine_transaction
     return
   }
   if [ "$current_head" != "$initial_head" ]; then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" head-changed
+    finish_quarantine_transaction
     return
   fi
   if process_reason=$(process_reference_reason "$quarantine_path"); then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" "$process_reason"
+    finish_quarantine_transaction
     return
   fi
   if ! worktree_identity_is_valid "$quarantine_path" "$common_dir" "$initial_head" \
@@ -910,21 +950,25 @@ cleanup_worktree_record() {
     mark_quarantining_reason "$record" quarantine-identity-changed-before-remove
     printf '%s: preserve quarantine-identity-changed-before-remove: %s (quarantine: %s)\n' \
       "$program" "$path" "$quarantine_path" >&2
+    finish_quarantine_transaction
     return
   fi
-  if ! "$git_command" --git-dir="$common_dir" worktree remove -- "$quarantine_path"; then
+  if ! run_git --git-dir="$common_dir" worktree remove -- "$quarantine_path"; then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" remove-failed
+    finish_quarantine_transaction
     return
   fi
   if ! rmdir -- "$quarantine_root" 2>/dev/null; then
     mark_quarantining_reason "$record" quarantine-remove-root-unresolved
     printf '%s: preserve quarantine-remove-root-unresolved: %s (quarantine: %s)\n' \
       "$program" "$path" "$quarantine_path" >&2
+    finish_quarantine_transaction
     return
   fi
   mark_worktree "$record" removed clean-unchanged-inactive
   printf '%s: removed managed worktree: %s\n' "$program" "$path"
+  finish_quarantine_transaction
 }
 
 cleanup_session_records() {
@@ -1011,15 +1055,15 @@ register_worktree() {
   [ "$path" != "$common_dir" ] || die 'worktree path equals common git dir'
   [[ $common_dir != "$path/"* ]] || die 'common git dir is inside worktree path'
 
-  git_dir=$("$git_command" -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
+  git_dir=$(run_git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
     die "path is not a git worktree: $path"
   git_dir=$(realpath -e -- "$git_dir") || die 'cannot canonicalize git dir'
   [ "$git_dir" != "$common_dir" ] || die 'refusing to register the main worktree'
-  current_common=$("$git_command" -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+  current_common=$(run_git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
     die 'cannot resolve worktree common dir'
   current_common=$(realpath -e -- "$current_common") || die 'cannot canonicalize current common dir'
   [ "$current_common" = "$common_dir" ] || die 'worktree common dir changed'
-  if current_head=$("$git_command" -C "$path" rev-parse --verify HEAD 2>/dev/null); then
+  if current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null); then
     [ "$current_head" = "$initial_head" ] || die 'worktree HEAD changed before registration'
   else
     [[ $initial_head =~ ^0{40}$|^0{64}$ ]] || die 'worktree HEAD is missing'
@@ -1189,6 +1233,7 @@ ensure_directory "$sessions_root" true
 ensure_directory "$worktrees_root" true
 ensure_directory "$locks_root" true
 
+mutation_lock_file="$locks_root/.worktree-mutation.lock"
 lock_file="$state_root/ledger.lock"
 current_boot_id=$(</proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
 [[ $current_boot_id =~ ^[A-Fa-f0-9-]+$ ]] || die 'invalid current boot id'
@@ -1206,24 +1251,31 @@ begin-session)
   ;;
 validate-session)
   [ "$#" -eq 2 ] || usage
+  if [ "${DOTFILES_AGENT_MUTATION_LOCK_FD-}" = 7 ]; then
+    acquire_mutation_lock
+  fi
   acquire_creation_lock "$2"
   acquire_ledger_lock
   require_live_session "$2"
   ;;
 cleanup-session)
   [ "$#" -eq 2 ] || usage
+  # Mutating commands keep the global -> session -> ledger order.
+  acquire_mutation_lock
   acquire_creation_lock "$2"
   acquire_ledger_lock
   cleanup_session "$2"
   ;;
 register-worktree)
   [ "$#" -eq 5 ] || usage
+  acquire_mutation_lock
   acquire_creation_lock "$2"
   acquire_ledger_lock
   register_worktree "$2" "$3" "$4" "$5"
   ;;
 reap)
   [ "$#" -eq 1 ] || usage
+  acquire_mutation_lock
   reap_sessions
   ;;
 *) usage ;;

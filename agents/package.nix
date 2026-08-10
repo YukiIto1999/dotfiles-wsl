@@ -1,7 +1,6 @@
 {
   pkgs,
   lib,
-  agentWorktreeCommand,
 }:
 
 let
@@ -16,13 +15,13 @@ let
         (pkgs.writeShellApplication {
           name = "nix";
           text = builtins.replaceStrings [ "@nixCommand@" ] [ (toString nixCommand) ] (
-            builtins.readFile ./nix.sh
+            builtins.readFile ./impl/runtime/nix.sh
           );
         })
         (pkgs.writeShellApplication {
           name = "nix-build";
           text = builtins.replaceStrings [ "@nixBuildCommand@" ] [ (toString nixBuildCommand) ] (
-            builtins.readFile ./nix-build.sh
+            builtins.readFile ./impl/runtime/nix-build.sh
           );
         })
       ];
@@ -54,7 +53,7 @@ let
               (lib.escapeShellArg (toString gitCommand))
               (lib.escapeShellArg "!${lib.getExe worktreeDispatcher}")
             ]
-            (builtins.readFile ./git.sh);
+            (builtins.readFile ./impl/runtime/git.sh);
       };
     in
     pkgs.symlinkJoin {
@@ -78,6 +77,55 @@ let
         (mkGitShim { inherit gitCommand worktreeCommand; })
       ];
     };
+  mkAgentResource =
+    {
+      gitCommand,
+      name ? "dotfiles-agent-resource",
+    }:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = with pkgs; [
+        coreutils
+        gawk
+        git
+        jq
+        util-linux
+      ];
+      text = builtins.replaceStrings [ "@gitCommand@" ] [ (lib.escapeShellArg (toString gitCommand)) ] (
+        builtins.readFile ./impl/resource/agent-resource.sh
+      );
+    };
+  mkAgentWorktree =
+    {
+      gitCommand,
+      resourceCommand,
+      name ? "dotfiles-agent-worktree",
+    }:
+    pkgs.writeShellApplication {
+      inherit name;
+      runtimeInputs = with pkgs; [
+        coreutils
+        git
+        gnugrep
+        util-linux
+      ];
+      text =
+        builtins.replaceStrings
+          [
+            "@gitCommand@"
+            "@resourceCommand@"
+          ]
+          [
+            (lib.escapeShellArg (toString gitCommand))
+            (lib.escapeShellArg (toString resourceCommand))
+          ]
+          (builtins.readFile ./impl/resource/agent-worktree.sh);
+    };
+  agentResource = mkAgentResource { gitCommand = lib.getExe pkgs.git; };
+  agentWorktree = mkAgentWorktree {
+    gitCommand = lib.getExe pkgs.git;
+    resourceCommand = lib.getExe agentResource;
+  };
   nixBuildShims = mkNixBuildShims {
     nixCommand = lib.getExe pkgs.nix;
     nixBuildCommand = "${pkgs.nix}/bin/nix-build";
@@ -86,7 +134,7 @@ let
     nixCommand = lib.getExe pkgs.nix;
     nixBuildCommand = "${pkgs.nix}/bin/nix-build";
     gitCommand = lib.getExe pkgs.git;
-    worktreeCommand = agentWorktreeCommand;
+    worktreeCommand = lib.getExe agentWorktree;
   };
   launcher = pkgs.writeShellApplication {
     name = "dotfiles-agent-runtime";
@@ -99,7 +147,7 @@ let
       util-linux
     ];
     text = builtins.replaceStrings [ "@agentShimDirectory@" ] [ "${agentShims}/bin" ] (
-      builtins.readFile ./launcher.sh
+      builtins.readFile ./impl/runtime/launcher.sh
     );
   };
   gc = pkgs.writeShellApplication {
@@ -111,7 +159,7 @@ let
       jq
       util-linux
     ];
-    text = builtins.readFile ./project-cache-gc.sh;
+    text = builtins.readFile ./impl/runtime/project-cache-gc.sh;
   };
   verify = pkgs.writeShellApplication {
     name = "dotfiles-agent-verify";
@@ -119,7 +167,7 @@ let
       coreutils
       git
     ];
-    text = builtins.readFile ./verify.sh;
+    text = builtins.readFile ./impl/runtime/verify.sh;
   };
   mkWrapper =
     {
@@ -136,10 +184,14 @@ let
 in
 {
   inherit
+    agentResource
     agentShims
+    agentWorktree
     launcher
     gc
     mkAgentShims
+    mkAgentResource
+    mkAgentWorktree
     mkGitShim
     mkNixBuildShims
     mkWrapper

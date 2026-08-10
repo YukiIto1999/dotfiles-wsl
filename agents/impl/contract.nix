@@ -272,6 +272,24 @@ in
       type = types.listOf types.str;
       description = "この host が必要とする agent client ID。";
     };
+    stateRoot = lib.mkOption {
+      type = types.str;
+      readOnly = true;
+      internal = true;
+      description = "agent が所有する session と linked worktree ledger の state root。";
+    };
+    agentResource = lib.mkOption {
+      type = types.package;
+      readOnly = true;
+      internal = true;
+      description = "agent session resource ledger と reaper の command package。";
+    };
+    agentWorktree = lib.mkOption {
+      type = types.package;
+      readOnly = true;
+      internal = true;
+      description = "linked worktree を生成して ownership ledger へ登録する command package。";
+    };
     shared = {
       rules = lib.mkOption {
         type = types.path;

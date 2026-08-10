@@ -101,6 +101,39 @@ create_project_cache() {
   printf '%s/cargo-target\n' "$project_root"
 }
 
+create_shared_cache() {
+  local cache_root=$1 shared_root marker marker_tmp created=false
+  shared_root="$cache_root/shared"
+  marker="$shared_root/.dotfiles-agent-cache.json"
+
+  if mkdir -m 700 "$shared_root" 2>/dev/null; then
+    created=true
+  else
+    test ! -L "$shared_root" || die "shared cache is a symlink: $shared_root"
+    test -d "$shared_root" || die "shared cache is not a directory: $shared_root"
+    test "$(stat -c %u "$shared_root")" = "$(id -u)" \
+      || die "shared cache has another owner: $shared_root"
+  fi
+  chmod 700 "$shared_root" || die "cannot secure shared cache: $shared_root"
+  test "$(stat -c %a "$shared_root")" = 700 \
+    || die "shared cache mode is not 0700: $shared_root"
+
+  if [ "$created" = true ]; then
+    marker_tmp=$(mktemp "$shared_root/.owner.XXXXXXXX")
+    jq -cn '{version: 1, kind: "shared-cache"}' > "$marker_tmp"
+    chmod 600 "$marker_tmp"
+    mv -T "$marker_tmp" "$marker"
+  fi
+
+  secure_managed_file "$marker" 'shared cache marker'
+  jq --exit-status '. == {version: 1, kind: "shared-cache"}' "$marker" >/dev/null \
+    || die "shared cache marker is invalid: $marker"
+  ensure_managed_directory "$shared_root/cargo-home"
+  ensure_managed_directory "$shared_root/xdg-cache"
+
+  printf '%s\n' "$shared_root"
+}
+
 if [ "$#" -lt 2 ]; then
   die 'usage: dotfiles-agent-runtime CLIENT ABSOLUTE-UPSTREAM [ARG...]'
 fi
@@ -132,6 +165,18 @@ fi
 secure_managed_file "$lock_file" 'GC lock'
 exec {lock_fd}<>"$lock_file"
 flock -x "$lock_fd"
+
+if [ "${CARGO_HOME+x}" != x ] || [ "${XDG_CACHE_HOME+x}" != x ]; then
+  shared_root=$(create_shared_cache "$cache_root")
+  if [ "${CARGO_HOME+x}" != x ]; then
+    CARGO_HOME="$shared_root/cargo-home"
+    export CARGO_HOME
+  fi
+  if [ "${XDG_CACHE_HOME+x}" != x ]; then
+    XDG_CACHE_HOME="$shared_root/xdg-cache"
+    export XDG_CACHE_HOME
+  fi
+fi
 
 canonical_project=$(project_identity) || die 'cannot derive project identity'
 project_id=$(printf '%s' "$canonical_project" | sha256sum | cut -d ' ' -f 1)

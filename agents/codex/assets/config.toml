@@ -1,9 +1,19 @@
 model = "@codexModel@"
 approval_policy = "never"
-sandbox_mode = "workspace-write"
+default_permissions = "dev"
 
-[sandbox_workspace_write]
-network_access = true
+[permissions.dev]
+description = "workspace general profile"
+extends = ":workspace"
+
+[permissions.dev.filesystem]
+":workspace_roots"."." = "write"
+":workspace_roots".".git" = "write"
+"@homeDir@/workspace" = "write"
+"@homeDir@/projects" = "write"
+
+[permissions.dev.network]
+enabled = true
 
 [tui.model_availability_nux]
 "@codexModel@" = 4

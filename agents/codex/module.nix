@@ -16,18 +16,22 @@ let
     && lib.all (
       component: component != "" && component != "." && component != ".."
     ) dotfilesPathComponents;
-  agentRuntimeWritableRoots = [
-    "${cfg.host.homeDir}/.cache/dotfiles-wsl"
-    "${cfg.host.homeDir}/.local/state/dotfiles-wsl"
-  ];
   codexProjectHomePath = "${dotfilesHomeRelative}/.codex/config.toml";
   codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
-    sandbox_workspace_write.writable_roots = agentRuntimeWritableRoots ++ [
-      "${cfg.host.dotfilesDir}/.git"
-    ];
+    permissions.dev.filesystem."${cfg.host.dotfilesDir}/.git" = "write";
+  };
+  agentRuntimeWritableFilesystem = {
+    "${cfg.host.homeDir}/.cache/dotfiles-wsl" = "write";
+    "${cfg.host.homeDir}/.local/state/dotfiles-wsl" = "write";
   };
   codexRuntimeConfig = (pkgs.formats.toml { }).generate "codex-runtime.toml" {
-    sandbox_workspace_write.writable_roots = agentRuntimeWritableRoots;
+    permissions = {
+      dev.filesystem = agentRuntimeWritableFilesystem;
+      agent-read-only = {
+        extends = ":read-only";
+        filesystem = agentRuntimeWritableFilesystem;
+      };
+    };
   };
   codexGatewayConfig = (pkgs.formats.toml { }).generate "codex-gateway.toml" {
     mcp_servers.gateway.url = config.dotfiles.mcp.gateway.url;
@@ -36,7 +40,10 @@ let
   codexSystemConfig = pkgs.runCommandLocal "codex-system-config.toml" { } ''
     cat ${codexSystemBase} ${codexRuntimeConfig} ${codexGatewayConfig} > "$out"
   '';
-  codexUserSeed = pkgs.replaceVars ./assets/config.toml { inherit codexModel; };
+  codexUserSeed = pkgs.replaceVars ./assets/config.toml {
+    inherit codexModel;
+    homeDir = cfg.host.homeDir;
+  };
 
   splitFrontmatter =
     src:
@@ -67,7 +74,7 @@ let
           ((.tools // []) | any(. == "Edit" or . == "Write") | not) as $readOnly
           | del(.tools)
           | if has("effort") then .model_reasoning_effort = .effort | del(.effort) else . end
-          | if $readOnly then .sandbox_mode = "read-only" else . end
+          | if $readOnly then .default_permissions = "agent-read-only" else . end
         ' <<<"$frontmatter" | remarshal -if yaml -of toml > "$out"
         {
           printf 'model = "${codexModel}"\n'

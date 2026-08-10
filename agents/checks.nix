@@ -356,6 +356,31 @@ let
   };
   losslessInstallAgentsExe = lib.getExe losslessInstallAgents;
 
+  fixtureMigrateCodexConfig = pkgs.writeShellScript "fixture-migrate-codex-config" (
+    builtins.replaceStrings
+      [
+        "@chmodCommand@"
+        "@idCommand@"
+        "@jqCommand@"
+        "@mktempCommand@"
+        "@mvCommand@"
+        "@remarshalCommand@"
+        "@rmCommand@"
+        "@statCommand@"
+      ]
+      [
+        "${pkgs.coreutils}/bin/chmod"
+        "${pkgs.coreutils}/bin/id"
+        (lib.getExe pkgs.jq)
+        ''"$FIXTURE_MKTEMP"''
+        "${pkgs.coreutils}/bin/mv"
+        ''"$FIXTURE_REMARSHAL"''
+        "${pkgs.coreutils}/bin/rm"
+        ''"$FIXTURE_STAT"''
+      ]
+      (builtins.readFile ./impl/migrate-codex-config.sh)
+  );
+
   expectedInstallManifest = map (name: {
     inherit name;
     inherit (expected.clients.${name}) binary versionArgs install;
@@ -518,6 +543,7 @@ let
   fixtureSeedActivation =
     builtins.replaceStrings [ hostConfig.dotfiles.host.homeDir ] [ "$fixture/home" ]
       seedActivation;
+  fixtureSeedActivationScript = pkgs.writeShellScript "fixture-seed-agent-configs" fixtureSeedActivation;
 
   sharedDefinitionSources = builtins.attrValues hostConfig.dotfiles.agents.shared.definitions;
   claudeDefinitionSources = builtins.attrValues clients.claude.definitions;
@@ -798,6 +824,7 @@ in
           pkgs.ripgrep
           pkgs.taplo
         ];
+        codexDefinitionSources = lib.concatStringsSep " " (map toString codexDefinitionSources);
       }
       ''
         set -euo pipefail
@@ -916,15 +943,60 @@ in
         jq --exit-status \
           --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
           --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} '
-          .sandbox_workspace_write.writable_roots == [$cacheRoot, $stateRoot]
+          .permissions.dev.filesystem == {($cacheRoot): "write", ($stateRoot): "write"} and
+          .permissions["agent-read-only"] == {
+            extends: ":read-only",
+            filesystem: {($cacheRoot): "write", ($stateRoot): "write"}
+          } and
+          (has("sandbox_mode") | not) and
+          (has("sandbox_workspace_write") | not)
         ' codex-system.json > /dev/null
         remarshal -if toml -of json ${artifactSource "agents/codex/project"} > codex-project.json
         jq --exit-status \
           --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
           --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} \
           --arg gitRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.dotfilesDir}/.git"} '
-          .sandbox_workspace_write.writable_roots == [$cacheRoot, $stateRoot, $gitRoot]
+          .permissions.dev.filesystem == {($gitRoot): "write"} and
+          (has("sandbox_mode") | not) and
+          (has("sandbox_workspace_write") | not)
         ' codex-project.json > /dev/null
+        remarshal -if toml -of json \
+          ${clients.codex.managedFiles.user.source} > codex-user-seed.json
+        grep -Fq '"@homeDir@/workspace"' ${self}/agents/codex/assets/config.toml
+        grep -Fq '"@homeDir@/projects"' ${self}/agents/codex/assets/config.toml
+        if rg -n '/home/nixos/(workspace|projects)' ${self}/agents/codex/assets/config.toml; then
+          echo "Codex seed hard-codes the host home directory" >&2
+          exit 1
+        fi
+        jq --exit-status \
+          --arg homeDir ${lib.escapeShellArg hostConfig.dotfiles.host.homeDir} '
+          .default_permissions == "dev" and
+          .permissions.dev.description == "workspace general profile" and
+          .permissions.dev.extends == ":workspace" and
+          .permissions.dev.filesystem == {
+            ":workspace_roots": {".": "write", ".git": "write"},
+            ($homeDir + "/workspace"): "write",
+            ($homeDir + "/projects"): "write"
+          } and
+          .permissions.dev.network == {enabled: true} and
+          (has("sandbox_mode") | not) and
+          (has("sandbox_workspace_write") | not)
+        ' codex-user-seed.json > /dev/null
+        for definition in $codexDefinitionSources; do
+          remarshal -if toml -of json "$definition" > codex-definition.json
+          jq --exit-status '
+            (has("sandbox_mode") | not) and
+            (has("sandbox_workspace_write") | not) and
+            if (.name | IN("architect", "explorer", "planner", "reviewer", "security"))
+            then
+              .default_permissions == "agent-read-only" and
+              (has("permissions") | not)
+            else
+              (has("default_permissions") | not) and
+              (has("permissions") | not)
+            end
+          ' codex-definition.json > /dev/null
+        done
         jq '.mcp_servers.extra = {url: "https://unexpected.invalid/mcp"}' \
           codex-system.json > codex-system-extra-server.json
         if codex_mcp_matches ${lib.escapeShellArg gatewayUrl} \
@@ -947,16 +1019,222 @@ in
         codex_mcp_matches ${lib.escapeShellArg variantGatewayUrl} \
           < codex-system-variant.json > /dev/null
 
-        fixture=$PWD/seed-fixture
+        fixture=$PWD/seed-symlink-fixture
         mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
         printf '%s\n' keep-regular > "$fixture/home/.claude/settings.json"
         ln -s nowhere "$fixture/home/.codex/config.toml"
-        ${fixtureSeedActivation}
+        if (${fixtureSeedActivation}); then
+          echo "Codex seed activation accepted a symlink" >&2
+          exit 1
+        fi
         grep -Fxq keep-regular "$fixture/home/.claude/settings.json"
         test -L "$fixture/home/.codex/config.toml"
-        test "$(readlink "$fixture/home/.codex/config.toml")" = nowhere
 
-        rm "$fixture/home/.claude/settings.json" "$fixture/home/.codex/config.toml"
+        fixture=$PWD/seed-symlink-parent-fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/actual-codex"
+        printf '%s\n' keep-regular > "$fixture/home/.claude/settings.json"
+        cat > "$fixture/home/actual-codex/config.toml" <<'TOML'
+        sandbox_mode = "workspace-write"
+        TOML
+        ln -s actual-codex "$fixture/home/.codex"
+        if (${fixtureSeedActivation}); then
+          echo "Codex seed activation accepted a symlink parent" >&2
+          exit 1
+        fi
+        grep -Fq 'sandbox_mode = "workspace-write"' \
+          "$fixture/home/actual-codex/config.toml"
+
+        cat > fake-stat <<'SCRIPT'
+        #!${pkgs.runtimeShell}
+        set -euo pipefail
+        result=$(${pkgs.coreutils}/bin/stat "$@")
+        path=''${!#}
+        if [ "''${FIXTURE_STAT_WRONG_OWNER_PATH:-}" = "$path" ] \
+          && [ "$1" = -c ] && [ "$2" = '%u:%d:%i' ]; then
+          owner=''${result%%:*}
+          printf '%s:%s\n' "$((owner + 1))" "''${result#*:}"
+        else
+          printf '%s\n' "$result"
+        fi
+        SCRIPT
+        chmod +x fake-stat
+        export FIXTURE_STAT=$PWD/fake-stat
+
+        mapfile -t migration_exes < <(
+          rg --only-matching \
+            '/nix/store/[a-z0-9]+-dotfiles-migrate-codex-config/bin/dotfiles-migrate-codex-config' \
+            ${fixtureSeedActivationScript} | sort -u
+        )
+        test "''${#migration_exes[@]}" -eq 1
+        sed "s|''${migration_exes[0]}|${fixtureMigrateCodexConfig}|g" \
+          ${fixtureSeedActivationScript} > fixture-owner-seed-activation
+        chmod +x fixture-owner-seed-activation
+
+        fixture=$PWD/seed-parent-owner-fixture
+        export fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
+        printf '%s\n' 'sandbox_mode = "workspace-write"' \
+          > "$fixture/home/.codex/config.toml"
+        before=$(sha256sum "$fixture/home/.codex/config.toml")
+        export FIXTURE_STAT_WRONG_OWNER_PATH=$fixture/home/.codex
+        if ./fixture-owner-seed-activation; then
+          echo "Codex seed activation accepted another owner for the target directory" >&2
+          exit 1
+        fi
+        test "$(sha256sum "$fixture/home/.codex/config.toml")" = "$before"
+
+        fixture=$PWD/seed-target-owner-fixture
+        export fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
+        printf '%s\n' 'sandbox_mode = "workspace-write"' \
+          > "$fixture/home/.codex/config.toml"
+        before=$(sha256sum "$fixture/home/.codex/config.toml")
+        export FIXTURE_STAT_WRONG_OWNER_PATH=$fixture/home/.codex/config.toml
+        if ./fixture-owner-seed-activation; then
+          echo "Codex seed activation accepted another owner for the target" >&2
+          exit 1
+        fi
+        test "$(sha256sum "$fixture/home/.codex/config.toml")" = "$before"
+        unset FIXTURE_STAT_WRONG_OWNER_PATH
+
+        cat > fake-mktemp <<'SCRIPT'
+        #!${pkgs.runtimeShell}
+        set -euo pipefail
+        count=0
+        if [ -f "$FIXTURE_MKTEMP_COUNT" ]; then
+          count=$(<"$FIXTURE_MKTEMP_COUNT")
+        fi
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$FIXTURE_MKTEMP_COUNT"
+        if [ "''${FIXTURE_MKTEMP_FAIL_SECOND:-0}" = 1 ] && [ "$count" -eq 2 ]; then
+          exit 1
+        fi
+        path=$(${pkgs.coreutils}/bin/mktemp "$@")
+        if [ "$count" -eq 1 ]; then
+          printf '%s\n' "$path" > "$FIXTURE_FIRST_TEMP"
+        fi
+        printf '%s\n' "$path"
+        SCRIPT
+        chmod +x fake-mktemp
+
+        cat > fake-remarshal <<'SCRIPT'
+        #!${pkgs.runtimeShell}
+        set -euo pipefail
+        count=0
+        if [ -f "$FIXTURE_REMARSHAL_COUNT" ]; then
+          count=$(<"$FIXTURE_REMARSHAL_COUNT")
+        fi
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$FIXTURE_REMARSHAL_COUNT"
+        ${lib.getExe pkgs.remarshal} "$@"
+        if [ "''${FIXTURE_REPLACE_TARGET_ON_THIRD:-0}" = 1 ] && [ "$count" -eq 3 ]; then
+          ${pkgs.coreutils}/bin/mv -T \
+            "$FIXTURE_REPLACEMENT_SOURCE" "$FIXTURE_REPLACE_TARGET"
+        fi
+        SCRIPT
+        chmod +x fake-remarshal
+
+        fixture=$PWD/migration-cleanup-fixture
+        mkdir -p "$fixture/home/.codex"
+        printf '%s\n' 'sandbox_mode = "workspace-write"' \
+          > "$fixture/home/.codex/config.toml"
+        export FIXTURE_MKTEMP=$PWD/fake-mktemp
+        export FIXTURE_REMARSHAL=$PWD/fake-remarshal
+        export FIXTURE_MKTEMP_COUNT=$fixture/mktemp-count
+        export FIXTURE_FIRST_TEMP=$fixture/first-temp
+        export FIXTURE_REMARSHAL_COUNT=$fixture/remarshal-count
+        export FIXTURE_MKTEMP_FAIL_SECOND=1
+        if ${fixtureMigrateCodexConfig} \
+          "$fixture/home/.codex/config.toml" "$fixture/home"; then
+          echo "Codex migration accepted a failed second mktemp" >&2
+          exit 1
+        fi
+        first_temp=$(<"$FIXTURE_FIRST_TEMP")
+        test ! -e "$first_temp"
+
+        fixture=$PWD/migration-race-fixture
+        mkdir -p "$fixture/home/.codex"
+        printf '%s\n' 'sandbox_mode = "workspace-write"' \
+          > "$fixture/home/.codex/config.toml"
+        printf '%s\n' 'replacement = true' > "$fixture/replacement.toml"
+        : > "$fixture/mktemp-count"
+        : > "$fixture/remarshal-count"
+        printf '0\n' > "$fixture/mktemp-count"
+        printf '0\n' > "$fixture/remarshal-count"
+        export FIXTURE_MKTEMP_COUNT=$fixture/mktemp-count
+        export FIXTURE_FIRST_TEMP=$fixture/first-temp
+        export FIXTURE_REMARSHAL_COUNT=$fixture/remarshal-count
+        export FIXTURE_MKTEMP_FAIL_SECOND=0
+        export FIXTURE_REPLACE_TARGET_ON_THIRD=1
+        export FIXTURE_REPLACE_TARGET=$fixture/home/.codex/config.toml
+        export FIXTURE_REPLACEMENT_SOURCE=$fixture/replacement.toml
+        if ${fixtureMigrateCodexConfig} \
+          "$fixture/home/.codex/config.toml" "$fixture/home"; then
+          echo "Codex migration published over a replaced target" >&2
+          exit 1
+        fi
+        grep -Fxq 'replacement = true' "$fixture/home/.codex/config.toml"
+        unset FIXTURE_REPLACE_TARGET_ON_THIRD FIXTURE_REPLACE_TARGET \
+          FIXTURE_REPLACEMENT_SOURCE
+
+        fixture=$PWD/seed-legacy-fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
+        printf '%s\n' keep-regular > "$fixture/home/.claude/settings.json"
+        cat > "$fixture/home/.codex/config.toml" <<'TOML'
+        model = "fixture-model"
+        sandbox_mode = "workspace-write"
+        custom_unknown = "preserved"
+
+        [sandbox_workspace_write]
+        network_access = true
+
+        [custom_table]
+        answer = 42
+        TOML
+        ${fixtureSeedActivation}
+        remarshal -if toml -of json "$fixture/home/.codex/config.toml" > migrated.json
+        jq --exit-status \
+          --arg homeDir "$fixture/home" '
+          .model == "fixture-model" and
+          .custom_unknown == "preserved" and
+          .custom_table == {answer: 42} and
+          .default_permissions == "dev" and
+          .permissions.dev.extends == ":workspace" and
+          .permissions.dev.filesystem == {
+            ":workspace_roots": {".": "write", ".git": "write"},
+            ($homeDir + "/workspace"): "write",
+            ($homeDir + "/projects"): "write"
+          } and
+          .permissions.dev.network == {enabled: true} and
+          (has("sandbox_mode") | not) and
+          (has("sandbox_workspace_write") | not)
+        ' migrated.json > /dev/null
+        test "$(stat -c %a "$fixture/home/.codex/config.toml")" = 600
+
+        fixture=$PWD/seed-current-fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
+        cp ${clients.codex.managedFiles.user.source} "$fixture/home/.codex/config.toml"
+        before=$(sha256sum "$fixture/home/.codex/config.toml")
+        ${fixtureSeedActivation}
+        test "$(sha256sum "$fixture/home/.codex/config.toml")" = "$before"
+
+        fixture=$PWD/seed-invalid-fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
+        printf 'not = [valid\n' > "$fixture/home/.codex/config.toml"
+        if (${fixtureSeedActivation}); then
+          echo "Codex seed activation accepted invalid TOML" >&2
+          exit 1
+        fi
+
+        fixture=$PWD/seed-nonregular-fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex/config.toml"
+        if (${fixtureSeedActivation}); then
+          echo "Codex seed activation accepted a non-regular file" >&2
+          exit 1
+        fi
+
+        fixture=$PWD/seed-missing-fixture
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
         mkdir "$fixture/home/.claude/settings.json"
         ${fixtureSeedActivation}
         test -d "$fixture/home/.claude/settings.json"

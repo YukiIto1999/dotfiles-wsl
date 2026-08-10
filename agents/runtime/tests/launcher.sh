@@ -40,8 +40,8 @@ cat > "$fixture_home/.local/bin/fake-agent" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
 test -d "$TMPDIR"
-test "${CARGO_HOME+x}" != x
-test "${XDG_CACHE_HOME+x}" != x
+test "${CARGO_HOME+x}" = x
+test "${XDG_CACHE_HOME+x}" = x
 printf '%s\n' "$DOTFILES_AGENT_SESSION_ID" > "$CAPTURE/session-id"
 printf '%s\n' "$DOTFILES_AGENT_CLIENT" > "$CAPTURE/client"
 printf '%s\n' "$DOTFILES_AGENT_PROJECT_ID" > "$CAPTURE/project-id"
@@ -49,7 +49,17 @@ printf '%s\n' "$DOTFILES_AGENT_OWNER_PID" > "$CAPTURE/owner-pid"
 printf '%s\n' "$DOTFILES_AGENT_OWNER_START_TIME" > "$CAPTURE/owner-start-time"
 printf '%s\n' "$DOTFILES_AGENT_BOOT_ID" > "$CAPTURE/boot-id"
 printf '%s\n' "$TMPDIR" > "$CAPTURE/tmpdir"
+printf '%s\n' "$CARGO_HOME" > "$CAPTURE/cargo-home"
+printf '%s\n' "$XDG_CACHE_HOME" > "$CAPTURE/xdg-cache-home"
 printf '%s\n' "${CARGO_TARGET_DIR-unset}" > "$CAPTURE/cargo-target"
+if [ "${PROBE_CACHE_WRITES:-0}" = 1 ]; then
+  test -n "$CARGO_HOME"
+  test -n "$XDG_CACHE_HOME"
+  mkdir -p "$CARGO_HOME/fixture-write"
+  printf 'cargo\n' > "$CARGO_HOME/fixture-write/probe"
+  mkdir -p "$XDG_CACHE_HOME/fixture-write"
+  printf 'xdg\n' > "$XDG_CACHE_HOME/fixture-write/probe"
+fi
 command -v nix > "$CAPTURE/nix-command"
 command -v git > "$CAPTURE/git-command"
 printf '%s\0' "$@" > "$CAPTURE/argv"
@@ -85,7 +95,8 @@ chmod 0777 "$HOME/.cache/dotfiles-wsl" \
 set +e
 (
   cd "$repo"
-  FAKE_STATUS=23 "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent" \
+  PROBE_CACHE_WRITES=1 FAKE_STATUS=23 \
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent" \
     'space arg' 'line
 arg'
 )
@@ -106,6 +117,16 @@ test "$(cat "$capture/git-command")" = "$AGENT_SHIM_DIR/bin/git"
 test "$(stat -c %a "$HOME/.cache/dotfiles-wsl")" = 700
 test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/sessions")" = 700
 test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/builds")" = 700
+test "$(cat "$capture/cargo-home")" = "$HOME/.cache/dotfiles-wsl/shared/cargo-home"
+test "$(cat "$capture/xdg-cache-home")" = "$HOME/.cache/dotfiles-wsl/shared/xdg-cache"
+test "$(cat "$HOME/.cache/dotfiles-wsl/shared/cargo-home/fixture-write/probe")" = cargo
+test "$(cat "$HOME/.cache/dotfiles-wsl/shared/xdg-cache/fixture-write/probe")" = xdg
+test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/shared")" = 700
+test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/shared/cargo-home")" = 700
+test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/shared/xdg-cache")" = 700
+test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/shared/.dotfiles-agent-cache.json")" = 600
+jq --exit-status '. == {version: 1, kind: "shared-cache"}' \
+  "$HOME/.cache/dotfiles-wsl/shared/.dotfiles-agent-cache.json" > /dev/null
 test "$(cat "$capture/tmp-mode")" = 700
 test "$(cat "$capture/session-mode")" = 700
 test "$(cat "$capture/metadata-mode")" = 600
@@ -139,6 +160,52 @@ jq --exit-status \
 test "$(stat -c %a "$fixture_home/.cache/dotfiles-wsl/builds/$project_id")" = 700
 test "$(stat -c %a "$fixture_home/.cache/dotfiles-wsl/builds/$project_id/.dotfiles-agent-cache.json")" = 600
 
+expect_shared_cache_failure() {
+  local bad_home=$1 status
+  set +e
+  HOME=$bad_home CAPTURE=$capture HOOK_LOG=$capture/hooks \
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+  status=$?
+  set -e
+  test "$status" -eq 70
+}
+
+symlink_home=$fixture/symlink-home
+mkdir -p "$symlink_home/.cache/dotfiles-wsl/sessions" \
+  "$symlink_home/.cache/dotfiles-wsl/builds"
+ln -s "$repo" "$symlink_home/.cache/dotfiles-wsl/shared"
+expect_shared_cache_failure "$symlink_home"
+
+wrong_type_home=$fixture/wrong-type-home
+mkdir -p "$wrong_type_home/.cache/dotfiles-wsl/sessions" \
+  "$wrong_type_home/.cache/dotfiles-wsl/builds"
+printf 'not a directory\n' > "$wrong_type_home/.cache/dotfiles-wsl/shared"
+expect_shared_cache_failure "$wrong_type_home"
+
+malformed_home=$fixture/malformed-home
+mkdir -p "$malformed_home/.cache/dotfiles-wsl/sessions" \
+  "$malformed_home/.cache/dotfiles-wsl/builds" \
+  "$malformed_home/.cache/dotfiles-wsl/shared/cargo-home" \
+  "$malformed_home/.cache/dotfiles-wsl/shared/xdg-cache"
+printf '{}\n' > "$malformed_home/.cache/dotfiles-wsl/shared/.dotfiles-agent-cache.json"
+expect_shared_cache_failure "$malformed_home"
+
+(
+  cd "$repo"
+  CARGO_HOME=/explicit-cargo XDG_CACHE_HOME=/explicit-xdg \
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+test "$(cat "$capture/cargo-home")" = /explicit-cargo
+test "$(cat "$capture/xdg-cache-home")" = /explicit-xdg
+
+(
+  cd "$repo"
+  CARGO_HOME='' XDG_CACHE_HOME='' \
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+test -z "$(cat "$capture/cargo-home")"
+test -z "$(cat "$capture/xdg-cache-home")"
+
 (
   cd "$repo"
   CARGO_TARGET_DIR=/explicit "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
@@ -161,11 +228,15 @@ git -C "$repo" worktree add -qb linked "$fixture/linked"
   "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
 )
 main_project_id=$(cat "$capture/project-id")
+main_cargo_home=$(cat "$capture/cargo-home")
+main_xdg_cache_home=$(cat "$capture/xdg-cache-home")
 (
   cd "$fixture/linked"
   "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
 )
 test "$(cat "$capture/project-id")" = "$main_project_id"
+test "$(cat "$capture/cargo-home")" = "$main_cargo_home"
+test "$(cat "$capture/xdg-cache-home")" = "$main_xdg_cache_home"
 
 mkdir -p "$fixture/outside"
 (
@@ -175,3 +246,5 @@ mkdir -p "$fixture/outside"
 outside_project_id=$(cat "$capture/project-id")
 test "$outside_project_id" != "$main_project_id"
 test "${#outside_project_id}" -eq 64
+test "$(cat "$capture/cargo-home")" = "$main_cargo_home"
+test "$(cat "$capture/xdg-cache-home")" = "$main_xdg_cache_home"

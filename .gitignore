@@ -13,7 +13,6 @@ Thumbs.db
 /.devenv/
 
 # Git
-/.worktrees/
 
 # Editor
 /.vscode/

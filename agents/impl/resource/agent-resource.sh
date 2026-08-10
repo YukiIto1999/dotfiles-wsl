@@ -101,7 +101,10 @@ session_schema_is_valid() {
   local path=$1
   jq --exit-status '
     type == "object"
-    and keys == ["boot_id", "client", "owner_pid", "owner_start_time", "reason", "session_id", "status", "version"]
+    and (
+      keys == ["boot_id", "client", "owner_pid", "owner_start_time", "reason", "session_id", "status", "version"]
+      or keys == ["boot_id", "client", "owner_pid", "owner_start_time", "reason", "session_id", "status", "updated_at", "version"]
+    )
     and .version == 1
     and (.session_id | type == "string")
     and (.client | type == "string")
@@ -110,6 +113,7 @@ session_schema_is_valid() {
     and (.owner_start_time | type == "string" and test("^[0-9]+$"))
     and (.status == "active" or .status == "ended")
     and (.reason | type == "string" and length > 0)
+    and ((has("updated_at") | not) or (.updated_at | type == "number" and . >= 0 and floor == .))
   ' "$path" >/dev/null
 }
 
@@ -117,7 +121,10 @@ worktree_schema_is_valid() {
   local path=$1
   jq --exit-status '
     type == "object"
-    and keys == ["common_dir", "initial_head", "last_reason", "path", "session_id", "status", "version"]
+    and (
+      keys == ["common_dir", "initial_head", "last_reason", "path", "session_id", "status", "version"]
+      or keys == ["common_dir", "initial_head", "last_reason", "path", "session_id", "status", "updated_at", "version"]
+    )
     and .version == 1
     and (.session_id | type == "string")
     and (.common_dir | type == "string" and startswith("/"))
@@ -125,6 +132,7 @@ worktree_schema_is_valid() {
     and (.initial_head | type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$"))
     and (.status == "owned" or .status == "preserved" or .status == "removed")
     and (.last_reason | type == "string" and length > 0)
+    and ((has("updated_at") | not) or (.updated_at | type == "number" and . >= 0 and floor == .))
   ' "$path" >/dev/null
 }
 
@@ -220,15 +228,18 @@ orphan_reason() {
 }
 
 mark_session() {
-  local session_file=$1 reason=$2 updated
-  updated=$(jq -c --arg reason "$reason" '.status = "ended" | .reason = $reason' "$session_file")
+  local session_file=$1 reason=$2 updated now
+  now=$(date +%s)
+  updated=$(jq -c --arg reason "$reason" --argjson now "$now" \
+    '.status = "ended" | .reason = $reason | .updated_at = $now' "$session_file")
   atomic_write "$session_file" "$updated"
 }
 
 mark_worktree() {
-  local record=$1 status=$2 reason=$3 updated
-  updated=$(jq -c --arg status "$status" --arg reason "$reason" \
-    '.status = $status | .last_reason = $reason' "$record")
+  local record=$1 status=$2 reason=$3 updated now
+  now=$(date +%s)
+  updated=$(jq -c --arg status "$status" --arg reason "$reason" --argjson now "$now" \
+    '.status = $status | .last_reason = $reason | .updated_at = $now' "$record")
   atomic_write "$record" "$updated"
 }
 
@@ -239,11 +250,113 @@ preserve_worktree() {
   printf '%s: preserve %s: %s\n' "$program" "$reason" "$path" >&2
 }
 
-cwd_is_inside() {
-  local path=$1 process_cwd cwd
-  for process_cwd in /proc/[0-9]*/cwd; do
-    cwd=$(readlink -e -- "$process_cwd" 2>/dev/null) || continue
-    if [ "$cwd" = "$path" ] || [[ $cwd == "$path/"* ]]; then
+proc_reference_reason() {
+  local reference=$1 path=$2 reason=$3 raw final_raw canonical=
+  raw=$(readlink -- "$reference" 2>/dev/null) || {
+    printf '%s: cannot inspect process reference: %s\n' "$program" "$reference" >&2
+    return 2
+  }
+  if [ "$raw" = "$path" ] || [[ $raw == "$path/"* ]]; then
+    printf '%s\n' "$reason"
+    return 0
+  fi
+  canonical=$(readlink -e -- "$reference" 2>/dev/null) || true
+  final_raw=$(readlink -- "$reference" 2>/dev/null) || {
+    printf '%s: process reference changed during inspection: %s\n' \
+      "$program" "$reference" >&2
+    return 2
+  }
+  if [ "$final_raw" != "$raw" ]; then
+    printf '%s: process reference changed during inspection: %s\n' \
+      "$program" "$reference" >&2
+    return 2
+  fi
+  case "$raw" in
+  pipe:* | socket:* | anon_inode:* | /memfd:* | /dev/*) return 1 ;;
+  esac
+  if [ -z "$canonical" ]; then
+    printf '%s: cannot canonicalize process reference: %s -> %s\n' \
+      "$program" "$reference" "$raw" >&2
+    return 2
+  fi
+  if [ "$canonical" = "$path" ] || [[ $canonical == "$path/"* ]]; then
+    printf '%s\n' "$reason"
+    return 0
+  fi
+  return 1
+}
+
+process_reference_reason() {
+  local path=$1 process_dir process_stat process_fields process_state process_start final_start
+  local reference reason reference_status
+  local -a process_dirs fd_references
+  process_dirs=(/proc/[0-9]*)
+
+  for process_dir in "${process_dirs[@]}"; do
+    if [ ! -d "$process_dir" ] || [ ! -r "$process_dir/stat" ]; then
+      printf '%s: cannot inspect process: %s\n' "$program" "$process_dir" >&2
+      printf 'ambiguous-process-reference\n'
+      return 0
+    fi
+    process_stat=$(<"$process_dir/stat") || {
+      printf '%s: process changed during inspection: %s\n' "$program" "$process_dir" >&2
+      printf 'ambiguous-process-reference\n'
+      return 0
+    }
+    process_fields=${process_stat##*) }
+    process_state=$(awk '{print $1}' <<<"$process_fields") || {
+      printf '%s: process state is ambiguous: %s\n' "$program" "$process_dir" >&2
+      printf 'ambiguous-process-reference\n'
+      return 0
+    }
+    process_start=$(awk '{print $20}' <<<"$process_fields") || {
+      printf '%s: process identity is ambiguous: %s\n' "$program" "$process_dir" >&2
+      printf 'ambiguous-process-reference\n'
+      return 0
+    }
+    if [ "$process_state" != Z ]; then
+      for reference in "$process_dir/cwd:active-cwd" "$process_dir/exe:active-exe"; do
+        reason=${reference##*:}
+        reference=${reference%:*}
+        if reason=$(proc_reference_reason "$reference" "$path" "$reason"); then
+          printf '%s\n' "$reason"
+          return 0
+        else
+          reference_status=$?
+          if [ "$reference_status" -eq 2 ]; then
+            printf 'ambiguous-process-reference\n'
+            return 0
+          fi
+        fi
+      done
+      if [ ! -d "$process_dir/fd" ] || [ ! -r "$process_dir/fd" ] ||
+        [ ! -x "$process_dir/fd" ]; then
+        printf '%s: cannot enumerate process descriptors: %s\n' "$program" "$process_dir" >&2
+        printf 'ambiguous-process-reference\n'
+        return 0
+      fi
+      fd_references=("$process_dir"/fd/*)
+      for reference in "${fd_references[@]}"; do
+        if reason=$(proc_reference_reason "$reference" "$path" active-fd); then
+          printf '%s\n' "$reason"
+          return 0
+        else
+          reference_status=$?
+          if [ "$reference_status" -eq 2 ]; then
+            printf 'ambiguous-process-reference\n'
+            return 0
+          fi
+        fi
+      done
+    fi
+    final_start=$(process_start_time "${process_dir##*/}") || {
+      printf '%s: process changed during inspection: %s\n' "$program" "$process_dir" >&2
+      printf 'ambiguous-process-reference\n'
+      return 0
+    }
+    if [ "$final_start" != "$process_start" ]; then
+      printf '%s: process identity changed during inspection: %s\n' "$program" "$process_dir" >&2
+      printf 'ambiguous-process-reference\n'
       return 0
     fi
   done
@@ -268,7 +381,7 @@ restore_quarantined_worktree() {
 
 cleanup_worktree_record() {
   local record=$1 path common_dir initial_head canonical_path canonical_common git_dir current_head status_output
-  local parent_path canonical_parent path_device parent_device quarantine_root quarantine_path
+  local parent_path canonical_parent path_device parent_device quarantine_root quarantine_path process_reason
   path=$(jq -r '.path' "$record")
   common_dir=$(jq -r '.common_dir' "$record")
   initial_head=$(jq -r '.initial_head' "$record")
@@ -364,8 +477,8 @@ cleanup_worktree_record() {
     preserve_worktree "$record" head-changed
     return
   fi
-  if cwd_is_inside "$path"; then
-    preserve_worktree "$record" active-cwd
+  if process_reason=$(process_reference_reason "$path"); then
+    preserve_worktree "$record" "$process_reason"
     return
   fi
 
@@ -444,9 +557,9 @@ cleanup_worktree_record() {
       "$quarantine_path" "$quarantine_root" head-changed
     return
   fi
-  if cwd_is_inside "$quarantine_path"; then
+  if process_reason=$(process_reference_reason "$quarantine_path"); then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
-      "$quarantine_path" "$quarantine_root" active-cwd
+      "$quarantine_path" "$quarantine_root" "$process_reason"
     return
   fi
   if ! "$git_command" --git-dir="$common_dir" worktree remove -- "$quarantine_path"; then
@@ -464,13 +577,13 @@ cleanup_session_records() {
   local session_id=$1 record
   for record in "$worktrees_root"/*.json; do
     [ "$(jq -r '.session_id' "$record")" = "$session_id" ] || continue
-    [ "$(jq -r '.status' "$record")" != removed ] || continue
+    [ "$(jq -r '.status' "$record")" = owned ] || continue
     cleanup_worktree_record "$record"
   done
 }
 
 begin_session() {
-  local session_id=$1 client owner_pid owner_start boot_id session_file json actual_start
+  local session_id=$1 client owner_pid owner_start boot_id session_file json actual_start now
   validate_id session "$session_id"
   [ "${DOTFILES_AGENT_SESSION_ID-}" = "$session_id" ] || die 'session argument does not match environment'
   client=${DOTFILES_AGENT_CLIENT-}
@@ -484,6 +597,7 @@ begin_session() {
   [ "$boot_id" = "$current_boot_id" ] || die 'owner boot id does not match current boot'
   actual_start=$(process_start_time "$owner_pid") || die 'owner process is not live'
   [ "$actual_start" = "$owner_start" ] || die 'owner process start time does not match'
+  now=$(date +%s)
 
   session_file="$sessions_root/$session_id.json"
   json=$(jq -cn \
@@ -492,12 +606,15 @@ begin_session() {
     --arg boot_id "$boot_id" \
     --argjson owner_pid "$owner_pid" \
     --arg owner_start_time "$owner_start" \
+    --argjson now "$now" \
     '{version: 1, session_id: $session_id, client: $client, boot_id: $boot_id,
-      owner_pid: $owner_pid, owner_start_time: $owner_start_time, status: "active", reason: "active"}')
+      owner_pid: $owner_pid, owner_start_time: $owner_start_time, status: "active", reason: "active",
+      updated_at: $now}')
   if [ -e "$session_file" ] || [ -L "$session_file" ]; then
     validate_regular_file "$session_file" || die "session ledger is ambiguous: $session_file"
     session_schema_is_valid "$session_file" || die "session ledger is malformed: $session_file"
-    jq --exit-status --argjson expected "$json" '. == $expected' "$session_file" >/dev/null ||
+    jq --exit-status --argjson expected "$json" \
+      'del(.updated_at) == ($expected | del(.updated_at))' "$session_file" >/dev/null ||
       die "session id is already owned: $session_id"
     return
   fi
@@ -521,7 +638,7 @@ require_live_session() {
 
 register_worktree() {
   local session_id=$1 common_dir=$2 path=$3 initial_head=$4 canonical_common canonical_path
-  local git_dir current_common current_head record_id record_file json existing_status
+  local git_dir current_common current_head record_id record_file json existing_status now
   validate_id session "$session_id"
   validate_absolute_path common-dir "$common_dir"
   validate_absolute_path worktree-path "$path"
@@ -553,19 +670,22 @@ register_worktree() {
 
   record_id=$(printf '%s\0%s' "$common_dir" "$path" | sha256sum | cut -d ' ' -f 1)
   record_file="$worktrees_root/$record_id.json"
+  now=$(date +%s)
   json=$(jq -cn \
     --arg session_id "$session_id" \
     --arg common_dir "$common_dir" \
     --arg path "$path" \
     --arg initial_head "$initial_head" \
+    --argjson now "$now" \
     '{version: 1, session_id: $session_id, common_dir: $common_dir, path: $path,
-      initial_head: $initial_head, status: "owned", last_reason: "registered"}')
+      initial_head: $initial_head, status: "owned", last_reason: "registered", updated_at: $now}')
   if [ -e "$record_file" ] || [ -L "$record_file" ]; then
     validate_regular_file "$record_file" || die "worktree ledger is ambiguous: $record_file"
     worktree_schema_is_valid "$record_file" || die "worktree ledger is malformed: $record_file"
     existing_status=$(jq -r '.status' "$record_file")
     if [ "$existing_status" != removed ]; then
-      jq --exit-status --argjson expected "$json" '. == $expected' "$record_file" >/dev/null ||
+      jq --exit-status --argjson expected "$json" \
+        'del(.updated_at) == ($expected | del(.updated_at))' "$record_file" >/dev/null ||
         die "worktree is already owned: $path"
       return
     fi
@@ -602,6 +722,60 @@ reap_one_session() {
   cleanup_session_records "$session_id"
 }
 
+ledger_timestamp() {
+  local ledger=$1 timestamp
+  if jq --exit-status 'has("updated_at")' "$ledger" >/dev/null; then
+    timestamp=$(jq -r '.updated_at' "$ledger") || return 1
+  else
+    timestamp=$(stat -c %Y -- "$ledger") || return 1
+  fi
+  [[ $timestamp =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "$timestamp"
+}
+
+ledger_is_expired() {
+  local ledger=$1 timestamp elapsed_days elapsed_remainder timestamp_length now_length
+  timestamp=$(ledger_timestamp "$ledger") || return 1
+  timestamp_length=${#timestamp}
+  now_length=${#ledger_retention_now}
+  if [ "$timestamp_length" -gt "$now_length" ] ||
+    { [ "$timestamp_length" -eq "$now_length" ] && [[ $timestamp > "$ledger_retention_now" ]]; }; then
+    return 1
+  fi
+  elapsed_days=$(((ledger_retention_now - timestamp) / 86400))
+  elapsed_remainder=$(((ledger_retention_now - timestamp) % 86400))
+  [ "$elapsed_days" -gt "$ledger_retention_days" ] ||
+    { [ "$elapsed_days" -eq "$ledger_retention_days" ] &&
+      [ "$elapsed_remainder" -gt 0 ]; }
+}
+
+session_has_worktree_record() {
+  local session_id=$1 record
+  for record in "$worktrees_root"/*.json; do
+    [ "$(jq -r '.session_id' "$record")" != "$session_id" ] || return 0
+  done
+  return 1
+}
+
+prune_terminal_ledgers() {
+  local record session_file session_id
+  for record in "$worktrees_root"/*.json; do
+    case "$(jq -r '.status' "$record")" in
+    preserved | removed)
+      ledger_is_expired "$record" || continue
+      rm -f -- "$record"
+      ;;
+    esac
+  done
+  for session_file in "$sessions_root"/*.json; do
+    [ "$(jq -r '.status' "$session_file")" = ended ] || continue
+    ledger_is_expired "$session_file" || continue
+    session_id=$(jq -r '.session_id' "$session_file")
+    session_has_worktree_record "$session_id" && continue
+    rm -f -- "$session_file"
+  done
+}
+
 reap_sessions() {
   local entry name session_id
   local -a session_ids=()
@@ -623,6 +797,11 @@ reap_sessions() {
     reap_one_session "$session_id"
     release_locks
   done
+
+  acquire_ledger_lock
+  preflight_ledgers || die 'ledger preflight failed'
+  prune_terminal_ledgers
+  release_locks
 }
 
 usage() {
@@ -657,6 +836,10 @@ ensure_directory "$locks_root" true
 lock_file="$state_root/ledger.lock"
 current_boot_id=$(</proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
 [[ $current_boot_id =~ ^[A-Fa-f0-9-]+$ ]] || die 'invalid current boot id'
+ledger_retention_days=@ledgerRetentionDays@
+[[ $ledger_retention_days =~ ^[1-9][0-9]*$ ]] || die 'invalid ledger retention days'
+ledger_retention_now=$(date +%s)
+[[ $ledger_retention_now =~ ^[0-9]+$ ]] || die 'invalid ledger retention reference time'
 
 case "${1-}" in
 begin-session)

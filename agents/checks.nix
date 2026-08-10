@@ -22,7 +22,142 @@ let
   roster = hostConfig.dotfiles.toolchain.lsp;
   installAgents = hostConfig.dotfiles.commands.installAgents;
   installAgentsExe = lib.getExe installAgents;
-  runtime = import ./package.nix { inherit lib pkgs; };
+  runtime = import ./package.nix {
+    inherit lib pkgs;
+    ledgerRetentionDays = agentConfig.runtime.ledgerRetentionDays;
+  };
+  sevenDayRuntime = import ./package.nix {
+    inherit lib pkgs;
+    ledgerRetentionDays = 7;
+  };
+  wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
+    if [[ $# -eq 3 && $1 == -c && $2 == %u \
+      && $3 == "/proc/''${DOTFILES_AGENT_TEST_WRONG_OWNER_PID-}" ]]; then
+      printf '%s\n' "$(( $(${pkgs.coreutils}/bin/id -u) + 1 ))"
+      exit 0
+    fi
+    exec ${pkgs.coreutils}/bin/stat "$@"
+  '';
+  wrongOwnerGc = pkgs.writeShellApplication {
+    name = "dotfiles-agent-project-cache-gc-wrong-owner-fixture";
+    runtimeInputs = with pkgs; [
+      coreutils
+      findutils
+      gawk
+      jq
+      util-linux
+    ];
+    text = ''
+      export PATH=${wrongOwnerStat}/bin:$PATH
+      ${lib.getExe pkgs.bash} ${./impl/runtime/project-cache-gc.sh}
+    '';
+  };
+  gcMutationMv = pkgs.writeShellScriptBin "mv" ''
+    real_mv=${pkgs.coreutils}/bin/mv
+    if [[ $# -eq 4 && $1 == -T && $2 == -- \
+      && $4 == */.gc-quarantine.*/session \
+      && -n ''${DOTFILES_AGENT_TEST_GC_MUTATION_MODE-} ]]; then
+      set +e
+      "$real_mv" "$@"
+      status=$?
+      set -e
+      if ((status == 0)); then
+        case $DOTFILES_AGENT_TEST_GC_MUTATION_MODE in
+        live-owner)
+          ${lib.getExe pkgs.jq} \
+            --argjson owner_pid "$DOTFILES_AGENT_TEST_GC_LIVE_PID" \
+            --arg owner_start_time "$DOTFILES_AGENT_TEST_GC_LIVE_START_TIME" \
+            '.owner_pid = $owner_pid | .owner_start_time = $owner_start_time' \
+            "$4/metadata.json" >"$4/metadata.tmp"
+          ;;
+        *)
+          ${lib.getExe pkgs.jq} --arg project_id "$DOTFILES_AGENT_TEST_GC_MUTATION_PROJECT_ID" \
+            '.project_id = $project_id' "$4/metadata.json" >"$4/metadata.tmp"
+          ;;
+        esac
+        ${pkgs.coreutils}/bin/chmod 600 "$4/metadata.tmp"
+        "$real_mv" -T -- "$4/metadata.tmp" "$4/metadata.json"
+        if [[ $DOTFILES_AGENT_TEST_GC_MUTATION_MODE == block-restore ]]; then
+          ${pkgs.coreutils}/bin/mkdir -m 700 -- "$3"
+        fi
+        : >"$DOTFILES_AGENT_TEST_GC_MUTATION_MARKER"
+      fi
+      exit "$status"
+    fi
+    exec "$real_mv" "$@"
+  '';
+  mutationGc = pkgs.writeShellApplication {
+    name = "dotfiles-agent-project-cache-gc-mutation-fixture";
+    runtimeInputs = with pkgs; [
+      coreutils
+      findutils
+      gawk
+      jq
+      util-linux
+    ];
+    text = ''
+      export PATH=${gcMutationMv}/bin:$PATH
+      ${lib.getExe pkgs.bash} ${./impl/runtime/project-cache-gc.sh}
+    '';
+  };
+  controlledReadlink = pkgs.writeShellScriptBin "readlink" ''
+    real_readlink=${pkgs.coreutils}/bin/readlink
+    reference=''${!#}
+    if [[ -n ''${DOTFILES_AGENT_TEST_PROC_REFERENCE-} \
+      && $reference == "$DOTFILES_AGENT_TEST_PROC_REFERENCE" ]]; then
+      case ''${DOTFILES_AGENT_TEST_PROC_MODE-} in
+      denied) exit 13 ;;
+      broken)
+        if [[ ''${1-} == -e ]]; then
+          exit 1
+        fi
+        printf '%s\n' /fixture-missing-process-reference
+        exit 0
+        ;;
+      disappearing)
+        if [[ ''${1-} != -e ]]; then
+          count=0
+          if [[ -f ''${DOTFILES_AGENT_TEST_PROC_COUNTER-} ]]; then
+            read -r count <"$DOTFILES_AGENT_TEST_PROC_COUNTER"
+          fi
+          count=$((count + 1))
+          printf '%s\n' "$count" >"$DOTFILES_AGENT_TEST_PROC_COUNTER"
+          if ((count > 1)); then
+            exit 1
+          fi
+        fi
+        ;;
+      esac
+    fi
+    exec "$real_readlink" "$@"
+  '';
+  controlledProcResource = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource-proc-fixture";
+    runtimeInputs = with pkgs; [
+      controlledReadlink
+      coreutils
+      gawk
+      git
+      jq
+      util-linux
+    ];
+    text =
+      builtins.replaceStrings
+        [
+          "@gitCommand@"
+          "@ledgerRetentionDays@"
+        ]
+        [
+          (lib.escapeShellArg (lib.getExe pkgs.git))
+          "30"
+        ]
+        (builtins.readFile ./impl/resource/agent-resource.sh);
+  };
+  overflowResource = runtime.mkAgentResource {
+    name = "dotfiles-agent-resource-overflow-fixture";
+    gitCommand = lib.getExe pkgs.git;
+    retentionDays = 9223372036854775807;
+  };
   raceGit = pkgs.writeShellApplication {
     name = "dotfiles-agent-resource-race-git";
     runtimeInputs = [ pkgs.coreutils ];
@@ -64,16 +199,26 @@ let
           printf '\n'
         } >>"$DOTFILES_AGENT_TEST_GIT_LOG"
       fi
-      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == move \
-        && -n ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE-} \
-        && ! -e ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE} ]]; then
+      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == move ]] \
+        && { [[ -n ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE-} \
+          && ! -e ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE} ]] \
+          || [[ -n ''${DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_READY-} \
+            && -n ''${DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_RELEASE-} ]]; }; then
         set +e
         ${lib.escapeShellArg (lib.getExe pkgs.git)} "$@"
         status=$?
         set -e
         if ((status == 0)); then
-          : >"$DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE"
-          printf 'late mutation\n' >"''${6}/late-untracked"
+          if [[ -n ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE-} ]]; then
+            : >"$DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE"
+            printf 'late mutation\n' >"''${6}/late-untracked"
+          fi
+          if [[ -n ''${DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_READY-} ]]; then
+            printf '%s\n' "''${6}" >"$DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_READY"
+            while [[ ! -e $DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_RELEASE ]]; do
+              sleep 0.01
+            done
+          fi
         fi
         exit "$status"
       fi
@@ -162,6 +307,10 @@ let
       elementType = hostOptions.dotfiles.agents.enabled.type.nestedTypes.elemType.name;
       hasDefault = hostOptions.dotfiles.agents.enabled ? default;
     };
+    runtime.ledgerRetentionDays = {
+      type = hostOptions.dotfiles.agents.runtime.ledgerRetentionDays.type.name;
+      default = hostOptions.dotfiles.agents.runtime.ledgerRetentionDays.default;
+    };
     shared = lib.mapAttrs (_: option: {
       type = option.type.name;
       internal = option.internal or false;
@@ -182,6 +331,10 @@ let
       type = "listOf";
       elementType = "str";
       hasDefault = false;
+    };
+    runtime.ledgerRetentionDays = {
+      type = "positiveInt";
+      default = 30;
     };
     shared = {
       rules = {
@@ -262,6 +415,7 @@ let
   }) expected.clients;
   baseCandidate = {
     enabled = expected.required;
+    inherit (agentConfig) runtime;
     shared = {
       rules = fixtureSource;
       skills.fixture = fixtureSource;
@@ -298,8 +452,13 @@ let
       attempted = builtins.tryEval (
         let
           evaluated = evalContract candidate;
+          evaluatedContract = builtins.removeAttrs evaluated.config.dotfiles.agents [
+            "agentResource"
+            "agentWorktree"
+            "stateRoot"
+          ];
         in
-        builtins.deepSeq evaluated.config.dotfiles.agents (
+        builtins.deepSeq evaluatedContract (
           builtins.all (assertion: assertion.assertion) evaluated.config.assertions
         )
       );
@@ -1529,6 +1688,8 @@ in
           pkgs.jq
         ];
         GC = lib.getExe runtime.gc;
+        MUTATION_GC = lib.getExe mutationGc;
+        WRONG_OWNER_GC = lib.getExe wrongOwnerGc;
       }
       ''
         bash ${./fixtures/runtime/project-cache-gc.sh}
@@ -1637,6 +1798,10 @@ in
       agentConfig.stateRoot == "~/.local/state/dotfiles-wsl/agent-resources"
     ) "agent resource state root changed";
     assert lib.assertMsg (
+      agentConfig.runtime.ledgerRetentionDays == 30
+      && sevenDayRuntime.agentResource != runtime.agentResource
+    ) "agent resource ledger retention policy is not typed or package-wired";
+    assert lib.assertMsg (
       agentResource == runtime.agentResource
       && agentWorktree == runtime.agentWorktree
       && hostConfig.dotfiles.commands.agentResource == runtime.agentResource
@@ -1739,6 +1904,8 @@ in
         export RACE_RESOURCE=${lib.getExe raceAgentResource}
         export RACE_WORKTREE=${lib.getExe raceAgentWorktree}
         export AUDIT_RESOURCE=${lib.getExe auditAgentResource}
+        export CONTROLLED_PROC_RESOURCE=${lib.getExe controlledProcResource}
+        export OVERFLOW_RESOURCE=${lib.getExe overflowResource}
         export TEST_BASH=${lib.getExe pkgs.bash}
         ${lib.getExe pkgs.bash} ${./fixtures/resource/agent-resources.sh}
         touch $out

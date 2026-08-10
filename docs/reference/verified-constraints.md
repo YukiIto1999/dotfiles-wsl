@@ -15,7 +15,7 @@
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | 検証対象を別の登録簿から取らず宣言した unit から導く | `doctor-coverage` |
 | session 欠落、JSON-RPC error、image 不一致、artifact 乖離、空の MCP roster、WSL 資源の warning と failure を終了 status に反映する | `doctor-runtime` |
-| zram、journald、WSL 上の標準 fstrim と service 非依存が宣言どおりである | `host-stability-contract` |
+| WSL 専用 zram lifecycle、journald、標準 fstrim と service 非依存が宣言どおりである | `host-stability-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
 | required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
 | 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |

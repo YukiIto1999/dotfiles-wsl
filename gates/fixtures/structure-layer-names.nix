@@ -11,11 +11,6 @@
       hasChildModule = false;
     }
     {
-      name = "runtime";
-      kind = "directory";
-      hasChildModule = false;
-    }
-    {
       name = "child";
       kind = "directory";
       hasChildModule = true;
@@ -28,6 +23,11 @@
   ];
 
   invalid = [
+    {
+      name = "runtime";
+      kind = "directory";
+      hasChildModule = false;
+    }
     {
       name = ".hidden";
       kind = "regular";

@@ -10,6 +10,10 @@ die() {
   exit 70
 }
 
+run_git() {
+  "$git_command" "$@" 7>&- 8>&- 9>&-
+}
+
 validate_id() {
   [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || die "invalid session id: $1"
 }
@@ -62,7 +66,7 @@ validate_snapshot_path() {
 
 snapshot_worktrees() {
   local output=$1 raw=$2 field path='' head=''
-  "$git_command" worktree list --porcelain -z >"$raw"
+  run_git worktree list --porcelain -z >"$raw"
   : >"$output"
   while IFS= read -r -d '' field; do
     if [ -z "$field" ]; then
@@ -139,12 +143,18 @@ ensure_directory "$HOME/.local/state/dotfiles-wsl" true
 ensure_directory "$state_root" true
 locks_root="$state_root/locks"
 ensure_directory "$locks_root" true
+# Every managed mutation takes the global lock before the session lock.
+mutation_lock="$locks_root/.worktree-mutation.lock"
+ensure_lock_file "$mutation_lock"
+exec 7<>"$mutation_lock"
+flock -x 7
 creation_lock="$locks_root/$session_id.lock"
 ensure_lock_file "$creation_lock"
 exec 8<>"$creation_lock"
 flock -x 8
 
-DOTFILES_AGENT_CREATION_LOCK_FD=8 "$resource_command" validate-session "$session_id"
+DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+  "$resource_command" validate-session "$session_id"
 
 scratch=$(mktemp -d)
 before="$scratch/before"
@@ -166,10 +176,10 @@ snapshot_worktrees "$before" "$before_raw"
 if cut -f 1 "$before" | grep -Fxq -- "$target_candidate"; then
   die 'worktree add target already exists in the linked-worktree roster'
 fi
-common_dir=$("$git_command" rev-parse --path-format=absolute --git-common-dir)
+common_dir=$(run_git rev-parse --path-format=absolute --git-common-dir)
 common_dir=$(realpath -e -- "$common_dir") || die 'cannot canonicalize git common dir'
 
-"$git_command" worktree "$@"
+run_git worktree "$@"
 snapshot_worktrees "$after" "$after_raw" || die 'cannot snapshot worktrees after git worktree add'
 target_path=$(realpath -e -- "$target_argument") ||
   die 'git reported success but the add target is ambiguous'
@@ -185,6 +195,6 @@ while IFS=$'\t' read -r path initial_head; do
 done <"$after"
 [ "$target_rows" -eq 1 ] || die 'git add target is missing or ambiguous in the linked-worktree roster'
 
-DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
   "$resource_command" register-worktree "$session_id" "$common_dir" "$target_path" "$target_head" ||
   die 'git created the requested worktree but ownership registration failed'

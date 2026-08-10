@@ -125,7 +125,11 @@ worktree_schema_is_valid() {
     and (
       (
         .status == "quarantining"
-        and keys == ["common_dir", "git_dir", "initial_head", "last_reason", "path", "quarantine_path", "session_id", "status", "updated_at", "version"]
+        and keys == ["common_dir", "git_dir", "initial_head", "last_reason", "path", "quarantine_path", "session_id", "status", "updated_at", "version", "worktree_device", "worktree_inode"]
+      )
+      or (
+        .status == "owned"
+        and keys == ["common_dir", "git_dir", "initial_head", "last_reason", "path", "session_id", "status", "updated_at", "version", "worktree_device", "worktree_inode"]
       )
       or (
         .status != "quarantining"
@@ -140,7 +144,9 @@ worktree_schema_is_valid() {
     and (.common_dir | type == "string" and startswith("/"))
     and (.path | type == "string" and startswith("/"))
     and ((.status != "quarantining") or (.quarantine_path | type == "string" and startswith("/")))
-    and ((.status != "quarantining") or (.git_dir | type == "string" and startswith("/")))
+    and ((has("git_dir") | not) or (.git_dir | type == "string" and startswith("/")))
+    and ((has("worktree_device") | not) or (.worktree_device | type == "string" and test("^[0-9]+$")))
+    and ((has("worktree_inode") | not) or (.worktree_inode | type == "string" and test("^[0-9]+$")))
     and (.initial_head | type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$"))
     and (.status == "owned" or .status == "quarantining" or .status == "preserved" or .status == "removed")
     and (.last_reason | type == "string" and length > 0)
@@ -251,19 +257,32 @@ mark_worktree() {
   local record=$1 status=$2 reason=$3 updated now
   now=$(date +%s)
   updated=$(jq -c --arg status "$status" --arg reason "$reason" --argjson now "$now" \
-    'del(.git_dir, .quarantine_path) |
+    'del(.git_dir, .quarantine_path, .worktree_device, .worktree_inode) |
       .status = $status | .last_reason = $reason | .updated_at = $now' \
     "$record")
   atomic_write "$record" "$updated"
 }
 
 mark_worktree_quarantining() {
-  local record=$1 quarantine_path=$2 git_dir=$3 updated now
+  local record=$1 quarantine_path=$2 git_dir=$3 worktree_device=$4 worktree_inode=$5
+  local updated now
   now=$(date +%s)
   updated=$(jq -c --arg quarantine_path "$quarantine_path" --arg git_dir "$git_dir" \
+    --arg worktree_device "$worktree_device" --arg worktree_inode "$worktree_inode" \
     --argjson now "$now" \
     '.status = "quarantining" | .quarantine_path = $quarantine_path | .git_dir = $git_dir |
+      .worktree_device = $worktree_device | .worktree_inode = $worktree_inode |
       .last_reason = "quarantining" | .updated_at = $now' "$record")
+  atomic_write "$record" "$updated"
+}
+
+mark_worktree_recovered_owned() {
+  local record=$1 reason=$2 updated now
+  now=$(date +%s)
+  updated=$(jq -c --arg reason "$reason" --argjson now "$now" \
+    'del(.quarantine_path) |
+      .status = "owned" | .last_reason = $reason | .updated_at = $now' \
+    "$record")
   atomic_write "$record" "$updated"
 }
 
@@ -438,11 +457,18 @@ quarantine_root_is_valid() {
     "$(stat -c %d -- "$parent_path" 2>/dev/null)" ]
 }
 
-worktree_link_identity_is_valid() {
-  local path=$1 common_dir=$2 expected_git_dir=$3
-  local canonical_path canonical_common git_dir current_common
+worktree_directory_identity_is_valid() {
+  local path=$1 expected_device=$2 expected_inode=$3 actual_identity
   [ ! -L "$path" ] || return 1
   [ -d "$path" ] || return 1
+  actual_identity=$(stat -c '%d:%i' -- "$path" 2>/dev/null) || return 1
+  [ "$actual_identity" = "$expected_device:$expected_inode" ]
+}
+
+worktree_link_identity_is_valid() {
+  local path=$1 common_dir=$2 expected_git_dir=$3 expected_device=$4 expected_inode=$5
+  local canonical_path canonical_common git_dir current_common
+  worktree_directory_identity_is_valid "$path" "$expected_device" "$expected_inode" || return 1
   [ "$(stat -c %u -- "$path" 2>/dev/null)" = "$resource_owner_uid" ] || return 1
   canonical_path=$(realpath -e -- "$path" 2>/dev/null) || return 1
   [ "$canonical_path" = "$path" ] || return 1
@@ -458,8 +484,10 @@ worktree_link_identity_is_valid() {
 }
 
 worktree_identity_is_valid() {
-  local path=$1 common_dir=$2 initial_head=$3 expected_git_dir=$4 current_head
-  worktree_link_identity_is_valid "$path" "$common_dir" "$expected_git_dir" || return 1
+  local path=$1 common_dir=$2 initial_head=$3 expected_git_dir=$4 expected_device=$5 expected_inode=$6
+  local current_head
+  worktree_link_identity_is_valid "$path" "$common_dir" "$expected_git_dir" \
+    "$expected_device" "$expected_inode" || return 1
   current_head=$("$git_command" -C "$path" rev-parse --verify HEAD 2>/dev/null) || return 1
   [ "$current_head" = "$initial_head" ]
 }
@@ -475,7 +503,8 @@ remove_empty_transaction_root() {
 }
 
 recover_quarantining_worktree() {
-  local record=$1 original_path quarantine_path common_dir initial_head git_dir last_reason quarantine_root
+  local record=$1 original_path quarantine_path common_dir initial_head git_dir
+  local worktree_device worktree_inode last_reason quarantine_root
   local original_present=false quarantine_present=false
   original_path=$(jq -r '.path' "$record") || {
     printf '%s: preserve unreadable-quarantine-ledger: %s\n' "$program" "$record" >&2
@@ -497,6 +526,14 @@ recover_quarantining_worktree() {
     printf '%s: preserve unreadable-quarantine-ledger: %s\n' "$program" "$record" >&2
     return 1
   }
+  worktree_device=$(jq -r '.worktree_device' "$record") || {
+    printf '%s: preserve unreadable-quarantine-ledger: %s\n' "$program" "$record" >&2
+    return 1
+  }
+  worktree_inode=$(jq -r '.worktree_inode' "$record") || {
+    printf '%s: preserve unreadable-quarantine-ledger: %s\n' "$program" "$record" >&2
+    return 1
+  }
   last_reason=$(jq -r '.last_reason' "$record") || {
     printf '%s: preserve unreadable-quarantine-ledger: %s\n' "$program" "$record" >&2
     return 1
@@ -508,6 +545,19 @@ recover_quarantining_worktree() {
     quarantine_present=true
   fi
 
+  if [ "$last_reason" = quarantine-remove-root-unresolved ]; then
+    if [ "$quarantine_present" = false ] &&
+      remove_empty_transaction_root "$original_path" "$quarantine_path"; then
+      mark_worktree "$record" removed clean-unchanged-inactive
+      printf '%s: completed quarantined worktree removal: %s\n' \
+        "$program" "$original_path" >&2
+      return 0
+    fi
+    mark_quarantining_reason "$record" quarantine-remove-root-unresolved
+    printf '%s: preserve quarantine-remove-root-unresolved: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
   if [ "$original_present" = true ] && [ "$quarantine_present" = true ]; then
     mark_quarantining_reason "$record" quarantine-both-paths
     printf '%s: preserve quarantine-both-paths: %s (quarantine: %s)\n' \
@@ -515,38 +565,28 @@ recover_quarantining_worktree() {
     return 1
   fi
   if [ "$original_present" = true ]; then
-    if ! worktree_identity_is_valid "$original_path" "$common_dir" "$initial_head" "$git_dir" ||
+    if ! worktree_identity_is_valid "$original_path" "$common_dir" "$initial_head" "$git_dir" \
+      "$worktree_device" "$worktree_inode" ||
       ! remove_empty_transaction_root "$original_path" "$quarantine_path"; then
       mark_quarantining_reason "$record" quarantine-original-ambiguous
       printf '%s: preserve quarantine-original-ambiguous: %s (quarantine: %s)\n' \
         "$program" "$original_path" "$quarantine_path" >&2
       return 1
     fi
-    mark_worktree "$record" owned quarantine-recovered-original
+    mark_worktree_recovered_owned "$record" quarantine-recovered-original
     printf '%s: recovered quarantined worktree at original path: %s\n' \
       "$program" "$original_path" >&2
     return 0
   fi
   if [ "$quarantine_present" = false ]; then
-    if [ "$last_reason" = quarantine-remove-root-unresolved ]; then
-      if remove_empty_transaction_root "$original_path" "$quarantine_path"; then
-        mark_worktree "$record" removed clean-unchanged-inactive
-        printf '%s: completed quarantined worktree removal: %s\n' \
-          "$program" "$original_path" >&2
-        return 0
-      fi
-      mark_quarantining_reason "$record" quarantine-remove-root-unresolved
-      printf '%s: preserve quarantine-remove-root-unresolved: %s (quarantine: %s)\n' \
-        "$program" "$original_path" "$quarantine_path" >&2
-      return 1
-    fi
     mark_quarantining_reason "$record" quarantine-both-missing
     printf '%s: preserve quarantine-both-missing: %s (quarantine: %s)\n' \
       "$program" "$original_path" "$quarantine_path" >&2
     return 1
   fi
   if ! quarantine_root_is_valid "$original_path" "$quarantine_path" ||
-    ! worktree_identity_is_valid "$quarantine_path" "$common_dir" "$initial_head" "$git_dir"; then
+    ! worktree_identity_is_valid "$quarantine_path" "$common_dir" "$initial_head" "$git_dir" \
+      "$worktree_device" "$worktree_inode"; then
     mark_quarantining_reason "$record" quarantine-path-ambiguous
     printf '%s: preserve quarantine-path-ambiguous: %s (quarantine: %s)\n' \
       "$program" "$original_path" "$quarantine_path" >&2
@@ -559,7 +599,8 @@ recover_quarantining_worktree() {
       "$program" "$original_path" "$quarantine_path" >&2
     return 1
   fi
-  if ! worktree_identity_is_valid "$original_path" "$common_dir" "$initial_head" "$git_dir"; then
+  if ! worktree_identity_is_valid "$original_path" "$common_dir" "$initial_head" "$git_dir" \
+    "$worktree_device" "$worktree_inode"; then
     mark_quarantining_reason "$record" quarantine-restored-ambiguous
     printf '%s: preserve quarantine-restored-ambiguous: %s (quarantine: %s)\n' \
       "$program" "$original_path" "$quarantine_path" >&2
@@ -572,7 +613,7 @@ recover_quarantining_worktree() {
       "$program" "$original_path" "$quarantine_path" >&2
     return 1
   fi
-  mark_worktree "$record" owned quarantine-recovered-move
+  mark_worktree_recovered_owned "$record" quarantine-recovered-move
   printf '%s: restored quarantined worktree: %s\n' "$program" "$original_path" >&2
 }
 
@@ -592,13 +633,24 @@ handle_transaction_term() {
 
 restore_quarantined_worktree() {
   local record=$1 common_dir=$2 original_path=$3 quarantine_path=$4 quarantine_root=$5 reason=$6
-  local expected_git_dir
+  local expected_git_dir expected_device expected_inode
   expected_git_dir=$(jq -r '.git_dir' "$record") || {
     printf '%s: preserve %s-unreadable-ledger: %s (quarantine: %s)\n' \
       "$program" "$reason" "$original_path" "$quarantine_path" >&2
     return
   }
-  if ! worktree_link_identity_is_valid "$quarantine_path" "$common_dir" "$expected_git_dir"; then
+  expected_device=$(jq -r '.worktree_device' "$record") || {
+    printf '%s: preserve %s-unreadable-ledger: %s (quarantine: %s)\n' \
+      "$program" "$reason" "$original_path" "$quarantine_path" >&2
+    return
+  }
+  expected_inode=$(jq -r '.worktree_inode' "$record") || {
+    printf '%s: preserve %s-unreadable-ledger: %s (quarantine: %s)\n' \
+      "$program" "$reason" "$original_path" "$quarantine_path" >&2
+    return
+  }
+  if ! worktree_link_identity_is_valid "$quarantine_path" "$common_dir" "$expected_git_dir" \
+    "$expected_device" "$expected_inode"; then
     mark_quarantining_reason "$record" "$reason-identity-ambiguous"
     printf '%s: preserve %s-identity-ambiguous: %s (quarantine: %s)\n' \
       "$program" "$reason" "$original_path" "$quarantine_path" >&2
@@ -607,7 +659,8 @@ restore_quarantined_worktree() {
   if [ ! -e "$original_path" ] && [ ! -L "$original_path" ] &&
     "$git_command" --git-dir="$common_dir" worktree move -- \
       "$quarantine_path" "$original_path"; then
-    if ! worktree_link_identity_is_valid "$original_path" "$common_dir" "$expected_git_dir"; then
+    if ! worktree_link_identity_is_valid "$original_path" "$common_dir" "$expected_git_dir" \
+      "$expected_device" "$expected_inode"; then
       mark_quarantining_reason "$record" "$reason-restored-identity-ambiguous"
       printf '%s: preserve %s-restored-identity-ambiguous: %s (quarantine: %s)\n' \
         "$program" "$reason" "$original_path" "$quarantine_path" >&2
@@ -630,11 +683,26 @@ restore_quarantined_worktree() {
 
 cleanup_worktree_record() {
   local record=$1 path common_dir initial_head canonical_path canonical_common git_dir initial_git_dir
+  local expected_git_dir expected_device expected_inode
   local current_head status_output
-  local parent_path canonical_parent path_device parent_device quarantine_root quarantine_path process_reason
+  local parent_path canonical_parent path_identity path_device path_inode parent_device
+  local quarantine_root quarantine_path
+  local process_reason recovered_identity=false
   path=$(jq -r '.path' "$record")
   common_dir=$(jq -r '.common_dir' "$record")
   initial_head=$(jq -r '.initial_head' "$record")
+
+  if jq --exit-status 'has("worktree_device")' "$record" >/dev/null; then
+    recovered_identity=true
+    expected_git_dir=$(jq -r '.git_dir' "$record")
+    expected_device=$(jq -r '.worktree_device' "$record")
+    expected_inode=$(jq -r '.worktree_inode' "$record")
+    if ! worktree_link_identity_is_valid "$path" "$common_dir" "$expected_git_dir" \
+      "$expected_device" "$expected_inode"; then
+      preserve_worktree "$record" recovered-identity-changed
+      return
+    fi
+  fi
 
   if [ ! -e "$path" ] && [ ! -L "$path" ]; then
     preserve_worktree "$record" missing
@@ -679,10 +747,12 @@ cleanup_worktree_record() {
     preserve_worktree "$record" ambiguous-parent
     return
   fi
-  path_device=$(stat -c %d -- "$path") || {
+  path_identity=$(stat -c '%d:%i' -- "$path") || {
     preserve_worktree "$record" ambiguous-path
     return
   }
+  path_device=${path_identity%%:*}
+  path_inode=${path_identity#*:}
   parent_device=$(stat -c %d -- "$parent_path") || {
     preserve_worktree "$record" ambiguous-parent
     return
@@ -733,6 +803,17 @@ cleanup_worktree_record() {
     return
   fi
 
+  if [ "$recovered_identity" = true ]; then
+    if ! worktree_link_identity_is_valid "$path" "$common_dir" "$expected_git_dir" \
+      "$expected_device" "$expected_inode"; then
+      preserve_worktree "$record" recovered-identity-changed
+      return
+    fi
+    initial_git_dir=$expected_git_dir
+    path_device=$expected_device
+    path_inode=$expected_inode
+  fi
+
   quarantine_root=$(mktemp -d "$parent_path/.dotfiles-agent-quarantine.XXXXXXXX") || {
     preserve_worktree "$record" quarantine-create-failed
     return
@@ -747,7 +828,8 @@ cleanup_worktree_record() {
     preserve_worktree "$record" ambiguous-quarantine
     return
   fi
-  mark_worktree_quarantining "$record" "$quarantine_path" "$initial_git_dir"
+  mark_worktree_quarantining "$record" "$quarantine_path" "$initial_git_dir" \
+    "$path_device" "$path_inode"
   quarantine_transaction_record=$record
   trap 'recover_quarantine_on_exit $?' EXIT
   trap handle_transaction_term TERM
@@ -764,7 +846,8 @@ cleanup_worktree_record() {
 
   if [ -L "$quarantine_path" ] || [ ! -d "$quarantine_path" ] ||
     [ "$(stat -c %u -- "$quarantine_path")" != "$(id -u)" ] ||
-    [ "$(realpath -e -- "$quarantine_path" 2>/dev/null)" != "$quarantine_path" ]; then
+    [ "$(realpath -e -- "$quarantine_path" 2>/dev/null)" != "$quarantine_path" ] ||
+    ! worktree_directory_identity_is_valid "$quarantine_path" "$path_device" "$path_inode"; then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" ambiguous-quarantine-path
     return
@@ -820,6 +903,13 @@ cleanup_worktree_record() {
   if process_reason=$(process_reference_reason "$quarantine_path"); then
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" "$process_reason"
+    return
+  fi
+  if ! worktree_identity_is_valid "$quarantine_path" "$common_dir" "$initial_head" \
+    "$initial_git_dir" "$path_device" "$path_inode"; then
+    mark_quarantining_reason "$record" quarantine-identity-changed-before-remove
+    printf '%s: preserve quarantine-identity-changed-before-remove: %s (quarantine: %s)\n' \
+      "$program" "$path" "$quarantine_path" >&2
     return
   fi
   if ! "$git_command" --git-dir="$common_dir" worktree remove -- "$quarantine_path"; then

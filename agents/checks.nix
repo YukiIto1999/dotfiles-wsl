@@ -237,6 +237,49 @@ let
           printf '\n'
         } >>"$DOTFILES_AGENT_TEST_GIT_LOG"
       fi
+      if [[ ''${1-} == -C \
+        && ''${2-} == "''${DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_PATH-}" \
+        && ''${3-} == rev-parse && ''${5-} == --git-common-dir \
+        && -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_SAFE-} \
+        && -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_MARKER-} \
+        && ! -e ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_MARKER} ]]; then
+        set +e
+        common_dir=$(${lib.escapeShellArg (lib.getExe pkgs.git)} "$@")
+        status=$?
+        set -e
+        if ((status == 0)); then
+          ${lib.escapeShellArg (lib.getExe pkgs.git)} --git-dir="$common_dir" \
+            worktree remove -- "$DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_PATH"
+          ${lib.escapeShellArg (lib.getExe pkgs.git)} --git-dir="$common_dir" \
+            worktree move -- "$DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_SAFE" \
+            "$DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_PATH"
+          : >"$DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_MARKER"
+          printf '%s\n' "$common_dir"
+        fi
+        exit "$status"
+      fi
+      if [[ ''${1-} == -C \
+        && ''${2-} == */.dotfiles-agent-quarantine.*/worktree \
+        && ''${3-} == rev-parse && ''${4-} == --verify && ''${5-} == HEAD \
+        && -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_SAFE-} \
+        && -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_MARKER-} \
+        && ! -e ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_MARKER} ]]; then
+        set +e
+        head=$(${lib.escapeShellArg (lib.getExe pkgs.git)} "$@")
+        status=$?
+        set -e
+        if ((status == 0)); then
+          common_dir=$(${lib.escapeShellArg (lib.getExe pkgs.git)} -C "''${2}" \
+            rev-parse --path-format=absolute --git-common-dir)
+          ${lib.escapeShellArg (lib.getExe pkgs.git)} --git-dir="$common_dir" \
+            worktree move -- "''${2}" "$DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_SAFE"
+          ${lib.escapeShellArg (lib.getExe pkgs.git)} --git-dir="$common_dir" \
+            worktree add --detach "''${2}" HEAD >/dev/null
+          : >"$DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_MARKER"
+          printf '%s\n' "$head"
+        fi
+        exit "$status"
+      fi
       if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == move ]] \
         && { [[ -n ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE-} \
           && ! -e ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE} ]] \

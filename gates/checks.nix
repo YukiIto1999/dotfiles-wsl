@@ -1337,7 +1337,19 @@ in
         jq -S '.commandSmoke.timeoutArgs' "$expected" > expected-command-smoke-timeout.json
         jq -S '.commandSmoke.timeoutArgs' "$actual" > actual-command-smoke-timeout.json
         diff -u expected-command-smoke-timeout.json actual-command-smoke-timeout.json
+        jq -e 'any(.commandSmoke.timeoutArgs[]; startswith("--kill-after="))' "$actual" >/dev/null
         mapfile -t commandSmokeTimeoutArgs < <(jq -r '.commandSmoke.timeoutArgs[]' "$actual")
+        # elapsed の閾値ではなく、GNU timeout が KILL した status を固定する。
+        set +e
+        {
+          timeout --kill-after=0.10s 0.05s env --ignore-signal=TERM sleep 1
+          hardTimeoutStatus=$?
+        } 2>/dev/null
+        set -e
+        if [ "$hardTimeoutStatus" -ne 137 ]; then
+          echo "hard timeout canary was not killed: status=$hardTimeoutStatus" >&2
+          exit 1
+        fi
         while IFS=$'\t' read -r id command; do
           lintGenerated "$command"
           timeout "''${commandSmokeTimeoutArgs[@]}" "$command" --help > "$id-help"

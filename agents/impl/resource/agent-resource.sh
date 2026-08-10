@@ -21,6 +21,66 @@ run_git() {
   )
 }
 
+zero_oid_for_git_context() {
+  local context_type=$1 context=$2 object_format
+  local -a git_context
+  case "$context_type" in
+  worktree) git_context=(-C "$context") ;;
+  git-dir) git_context=(--git-dir="$context") ;;
+  *) return 1 ;;
+  esac
+  object_format=$(run_git "${git_context[@]}" rev-parse --show-object-format=storage 2>/dev/null) ||
+    return 1
+  case "$object_format" in
+  sha1) printf '%040d\n' 0 ;;
+  sha256) printf '%064d\n' 0 ;;
+  *) return 1 ;;
+  esac
+}
+
+unborn_zero_oid_for_git_context() {
+  local context_type=$1 context=$2 head_ref ref_status zero_oid
+  local -a git_context
+  case "$context_type" in
+  worktree) git_context=(-C "$context") ;;
+  git-dir) git_context=(--git-dir="$context") ;;
+  *) return 1 ;;
+  esac
+  if run_git "${git_context[@]}" rev-parse --verify 'HEAD^{commit}' >/dev/null 2>&1; then
+    return 1
+  fi
+  head_ref=$(run_git "${git_context[@]}" symbolic-ref -q HEAD 2>/dev/null) || return 1
+  case "$head_ref" in
+  refs/heads/*) ;;
+  *) return 1 ;;
+  esac
+  run_git "${git_context[@]}" check-ref-format "$head_ref" >/dev/null 2>&1 || return 1
+  if run_git "${git_context[@]}" show-ref --exists "$head_ref" >/dev/null 2>&1; then
+    return 1
+  else
+    ref_status=$?
+  fi
+  [ "$ref_status" -eq 2 ] || return 1
+  zero_oid=$(zero_oid_for_git_context "$context_type" "$context") || return 1
+  printf '%s\n' "$zero_oid"
+}
+
+resolve_git_context_head_identity() {
+  local context_type=$1 context=$2 current_head
+  local -a git_context
+  case "$context_type" in
+  worktree) git_context=(-C "$context") ;;
+  git-dir) git_context=(--git-dir="$context") ;;
+  *) return 1 ;;
+  esac
+  if current_head=$(run_git "${git_context[@]}" rev-parse --verify 'HEAD^{commit}' 2>/dev/null); then
+    [[ $current_head =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || return 1
+    printf '%s\n' "$current_head"
+    return
+  fi
+  unborn_zero_oid_for_git_context "$context_type" "$context"
+}
+
 validate_id() {
   local label=$1 value=$2
   [[ $value =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]] || die "invalid $label: $value"
@@ -563,7 +623,7 @@ worktree_identity_is_valid() {
   local current_head
   worktree_link_identity_is_valid "$path" "$common_dir" "$expected_git_dir" \
     "$expected_device" "$expected_inode" || return 1
-  current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null) || return 1
+  current_head=$(resolve_git_context_head_identity worktree "$path") || return 1
   [ "$current_head" = "$initial_head" ]
 }
 
@@ -1023,7 +1083,7 @@ cleanup_worktree_record() {
     preserve_worktree "$record" dirty
     return
   fi
-  current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null) ||
+  current_head=$(resolve_git_context_head_identity worktree "$path") ||
     {
       preserve_worktree "$record" head-missing
       return
@@ -1133,7 +1193,7 @@ cleanup_worktree_record() {
     finish_quarantine_transaction
     return
   fi
-  current_head=$(run_git -C "$quarantine_path" rev-parse --verify HEAD 2>/dev/null) || {
+  current_head=$(resolve_git_context_head_identity worktree "$quarantine_path") || {
     restore_quarantined_worktree "$record" "$common_dir" "$path" \
       "$quarantine_path" "$quarantine_root" head-missing
     finish_quarantine_transaction
@@ -1268,7 +1328,7 @@ validate_added_worktree_identity() {
     return 1
   current_common=$(realpath -e -- "$current_common" 2>/dev/null) || return 1
   [ "$current_common" = "$common_dir" ] || return 1
-  current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null) || return 1
+  current_head=$(resolve_git_context_head_identity worktree "$path") || return 1
   [ "$current_head" = "$initial_head" ] || return 1
   validated_worktree_device=$(stat -c %d -- "$path" 2>/dev/null) || return 1
   validated_worktree_inode=$(stat -c %i -- "$path" 2>/dev/null) || return 1
@@ -1291,6 +1351,10 @@ begin_worktree_add() {
 
   canonical_common=$(realpath -e -- "$common_dir" 2>/dev/null) || die 'cannot canonicalize common dir'
   [ "$canonical_common" = "$common_dir" ] || die 'common dir is not canonical'
+  if [[ $initial_head =~ ^(0{40}|0{64})$ ]]; then
+    [ "$(zero_oid_for_git_context git-dir "$common_dir")" = "$initial_head" ] ||
+      die 'zero initial HEAD does not match the repository object format'
+  fi
   [ ! -e "$path" ] && [ ! -L "$path" ] || die 'worktree add target already exists'
   parent_path=$(dirname -- "$path")
   [ -d "$parent_path" ] && [ ! -L "$parent_path" ] || die 'worktree parent is ambiguous'
@@ -1404,11 +1468,9 @@ register_worktree() {
     die 'cannot resolve worktree common dir'
   current_common=$(realpath -e -- "$current_common") || die 'cannot canonicalize current common dir'
   [ "$current_common" = "$common_dir" ] || die 'worktree common dir changed'
-  if current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null); then
-    [ "$current_head" = "$initial_head" ] || die 'worktree HEAD changed before registration'
-  else
-    [[ $initial_head =~ ^0{40}$|^0{64}$ ]] || die 'worktree HEAD is missing'
-  fi
+  current_head=$(resolve_git_context_head_identity worktree "$path") ||
+    die 'worktree HEAD is missing or ambiguous'
+  [ "$current_head" = "$initial_head" ] || die 'worktree HEAD changed before registration'
 
   record_id=$(printf '%s\0%s' "$common_dir" "$path" | sha256sum | cut -d ' ' -f 1)
   record_file="$worktrees_root/$record_id.json"

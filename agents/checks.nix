@@ -279,6 +279,22 @@ let
           printf '\n'
         } >>"$DOTFILES_AGENT_TEST_GIT_LOG"
       fi
+      if [[ ''${DOTFILES_AGENT_TEST_FAIL_GUESS_REMOTE_CONFIG-} == 1 \
+        && ''${1-} == config && ''${2-} == --type=bool \
+        && ''${3-} == --get && ''${4-} == worktree.guessRemote ]]; then
+        exit 74
+      fi
+      if [[ -n ''${DOTFILES_AGENT_TEST_FAIL_REMOTE_REF_SCAN_STATUS-} \
+        && ''${1-} == for-each-ref && ''${2-} == '--format=%(refname)' \
+        && ''${3-} == refs/remotes/*/* ]]; then
+        exit "$DOTFILES_AGENT_TEST_FAIL_REMOTE_REF_SCAN_STATUS"
+      fi
+      if [[ ''${1-} == -C \
+        && ''${2-} == "''${DOTFILES_AGENT_TEST_FAIL_HEAD_PATH-}" \
+        && ''${3-} == rev-parse && ''${4-} == --verify \
+        && ''${5-} == 'HEAD^{commit}' ]]; then
+        exit 74
+      fi
       if [[ ''${1-} == -C \
         && ''${2-} == "''${DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_PATH-}" \
         && ''${3-} == rev-parse && ''${5-} == --git-common-dir \
@@ -302,7 +318,8 @@ let
       fi
       if [[ ''${1-} == -C \
         && ''${2-} == */.dotfiles-agent-quarantine.*/worktree \
-        && ''${3-} == rev-parse && ''${4-} == --verify && ''${5-} == HEAD \
+        && ''${3-} == rev-parse && ''${4-} == --verify \
+        && ''${5-} == 'HEAD^{commit}' \
         && -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_SAFE-} \
         && -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_MARKER-} \
         && ! -e ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_MARKER} ]]; then
@@ -423,6 +440,11 @@ let
   auditAgentResource = runtime.mkAgentResource {
     name = "dotfiles-agent-resource-audit";
     gitCommand = lib.getExe auditGit;
+  };
+  auditAgentWorktree = runtime.mkAgentWorktree {
+    name = "dotfiles-agent-worktree-audit";
+    gitCommand = lib.getExe auditGit;
+    resourceCommand = lib.getExe runtime.agentResource;
   };
   fakeNix = pkgs.writeShellScript "fake-nix-command" ''
     printf '%s\0' "$@" > "$ARG_CAPTURE"
@@ -2120,6 +2142,7 @@ in
         export RACE_WORKTREE=${lib.getExe raceAgentWorktree}
         export ADDING_PAUSE_WORKTREE=${lib.getExe addingPauseWorktree}
         export AUDIT_RESOURCE=${lib.getExe auditAgentResource}
+        export AUDIT_WORKTREE=${lib.getExe auditAgentWorktree}
         export CONTROLLED_PROC_RESOURCE=${lib.getExe controlledProcResource}
         export OVERFLOW_RESOURCE=${lib.getExe overflowResource}
         export SEVEN_DAY_RESOURCE=${lib.getExe sevenDayRuntime.agentResource}

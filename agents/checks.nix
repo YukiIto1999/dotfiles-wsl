@@ -208,7 +208,7 @@ let
         set -e
         if ((status == 0)) && [[ -n ''${DOTFILES_AGENT_TEST_ADD_READY-} \
           && -n ''${DOTFILES_AGENT_TEST_ADD_RELEASE-} ]]; then
-          : >"$DOTFILES_AGENT_TEST_ADD_READY"
+          printf '%s\n' "$BASHPID" >"$DOTFILES_AGENT_TEST_ADD_READY"
           while [[ ! -e $DOTFILES_AGENT_TEST_ADD_RELEASE ]]; do
             sleep 0.01
           done
@@ -309,11 +309,11 @@ let
           fi
           if [[ -n ''${DOTFILES_AGENT_TEST_KILL_AFTER_MOVE-} ]]; then
             printf '%s\n' "''${6}" >"$DOTFILES_AGENT_TEST_KILL_AFTER_MOVE"
-            kill -KILL "$PPID"
+            kill -KILL "''${DOTFILES_AGENT_TEST_TRANSACTION_PARENT_PID:-$PPID}"
           fi
           if [[ -n ''${DOTFILES_AGENT_TEST_TERM_AFTER_MOVE-} ]]; then
             printf '%s\n' "''${6}" >"$DOTFILES_AGENT_TEST_TERM_AFTER_MOVE"
-            kill -TERM "$PPID"
+            kill -TERM "''${DOTFILES_AGENT_TEST_TRANSACTION_PARENT_PID:-$PPID}"
           fi
           if [[ -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_SAFE-} ]]; then
             ${lib.escapeShellArg (lib.getExe pkgs.git)} "$1" worktree move -- \
@@ -332,6 +332,33 @@ let
         while [[ ! -e $DOTFILES_AGENT_TEST_BEFORE_REMOVE_RELEASE ]]; do
           sleep 0.01
         done
+      fi
+      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == remove \
+        && -n ''${DOTFILES_AGENT_TEST_BLOCK_REMOVE_READY-} \
+        && -n ''${DOTFILES_AGENT_TEST_BLOCK_REMOVE_RELEASE-} ]]; then
+        printf '%s\n' "$BASHPID" >"$DOTFILES_AGENT_TEST_BLOCK_REMOVE_READY"
+        while [[ ! -e $DOTFILES_AGENT_TEST_BLOCK_REMOVE_RELEASE ]]; do
+          sleep 0.01
+        done
+      fi
+      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == remove \
+        && -n ''${DOTFILES_AGENT_TEST_KILL_AFTER_REMOVE_MARKER-} \
+        && -n ''${DOTFILES_AGENT_TEST_KILL_AFTER_REMOVE_PARENT_PID-} ]]; then
+        set +e
+        ${lib.escapeShellArg (lib.getExe pkgs.git)} "$@"
+        status=$?
+        set -e
+        if ((status == 0)); then
+          printf '%s\n' "''${5}" >"$DOTFILES_AGENT_TEST_KILL_AFTER_REMOVE_MARKER"
+          kill -KILL "$DOTFILES_AGENT_TEST_KILL_AFTER_REMOVE_PARENT_PID"
+        fi
+        exit "$status"
+      fi
+      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == remove \
+        && -n ''${DOTFILES_AGENT_TEST_FAIL_REMOVE_ONCE-} \
+        && ! -e $DOTFILES_AGENT_TEST_FAIL_REMOVE_ONCE ]]; then
+        : >"$DOTFILES_AGENT_TEST_FAIL_REMOVE_ONCE"
+        exit 1
       fi
       if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == remove \
         && -n ''${DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER-} \
@@ -1942,7 +1969,13 @@ in
       && lib.hasInfix "DOTFILES_AGENT_MUTATION_LOCK_FD=7" worktreeSource
       && lib.hasInfix "flock -x 7" resourceSource
       && lib.hasInfix "flock -x 7" worktreeSource
+      && lib.hasInfix "exec 8>&- 9>&-" resourceSource
+      && lib.hasInfix "exec 8>&- 9>&-" worktreeSource
+      && lib.hasInfix "git_status=$?" resourceSource
+      && lib.hasInfix "git_status=$?" worktreeSource
     ) "agent resource commands do not share the managed worktree mutation lock";
+    assert lib.assertMsg (lib.hasInfix ".status == \"removing\"" resourceSource)
+      "agent resource removal transaction phase is missing";
     assert lib.assertMsg (ownershipMatchesExpectedPackage agentResource resourceOwnership) (
       "agent resource command must be owned exactly once by the expected package: "
       + commandOwnershipDiagnostic agentResource resourceOwnership

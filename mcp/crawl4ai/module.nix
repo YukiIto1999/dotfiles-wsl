@@ -21,10 +21,11 @@ in
     serve = serveOverProxy (lib.getExe front);
     waitUnits = config.dotfiles.containers.services.crawl4ai.units;
     probe = {
-      tool = "md";
+      tool = "ask";
       args = {
-        url = "http://127.0.0.1:11235/health";
-        f = "raw";
+        context_type = "doc";
+        query = "health";
+        max_results = 1;
       };
       timeout = 60;
     };

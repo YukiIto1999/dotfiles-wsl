@@ -15,6 +15,7 @@ authHeaders = {
 
 server = Server("crawl4ai")
 toolCache = []
+getTools = {"ask"}
 
 
 async def loadTools():
@@ -46,7 +47,10 @@ async def callTool(name, arguments):
     if name not in known:
         raise ValueError(f"unknown crawl4ai tool: {name}")
     async with httpx.AsyncClient(timeout=None, headers=authHeaders) as client:
-        res = await client.post(f"{crawl4aiBase}/{name}", json=arguments or {})
+        if name in getTools:
+            res = await client.get(f"{crawl4aiBase}/{name}", params=arguments or {})
+        else:
+            res = await client.post(f"{crawl4aiBase}/{name}", json=arguments or {})
         res.raise_for_status()
         return [mcp_types.TextContent(type="text", text=json.dumps(res.json(), default=str))]
 

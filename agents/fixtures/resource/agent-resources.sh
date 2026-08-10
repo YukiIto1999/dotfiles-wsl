@@ -302,7 +302,7 @@ DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_READY="$race_use_ready" \
 race_use_cleanup_pid=$!
 trap 'kill "$race_use_cleanup_pid" 2>/dev/null || true' EXIT
 race_use_deadline=$((SECONDS + 10))
-while [ ! -e "$race_use_ready" ]; do
+while [ ! -s "$race_use_ready" ]; do
   if ((SECONDS >= race_use_deadline)); then
     echo "timed out waiting for fixture marker: $race_use_ready" >&2
     exit 1
@@ -335,8 +335,11 @@ begin_session sigkill-session
 add_managed_worktree "$sigkill_repo" "$sigkill_path"
 sigkill_record=$(record_for_path "$sigkill_path")
 set +e
-DOTFILES_AGENT_TEST_KILL_AFTER_MOVE="$sigkill_marker" \
-  "$AUDIT_RESOURCE" cleanup-session sigkill-session
+(
+  exec env DOTFILES_AGENT_TEST_KILL_AFTER_MOVE="$sigkill_marker" \
+    DOTFILES_AGENT_TEST_TRANSACTION_PARENT_PID="$BASHPID" \
+    "$AUDIT_RESOURCE" cleanup-session sigkill-session
+)
 sigkill_status=$?
 set -e
 test "$sigkill_status" -eq 137
@@ -402,8 +405,11 @@ identity_git_dir=$("$REAL_GIT" -C "$identity_path" rev-parse \
   --path-format=absolute --git-dir)
 identity_record=$(record_for_path "$identity_path")
 set +e
-DOTFILES_AGENT_TEST_KILL_AFTER_MOVE="$identity_marker" \
-  "$AUDIT_RESOURCE" cleanup-session identity-session
+(
+  exec env DOTFILES_AGENT_TEST_KILL_AFTER_MOVE="$identity_marker" \
+    DOTFILES_AGENT_TEST_TRANSACTION_PARENT_PID="$BASHPID" \
+    "$AUDIT_RESOURCE" cleanup-session identity-session
+)
 identity_status=$?
 set -e
 test "$identity_status" -eq 137
@@ -443,8 +449,11 @@ begin_session term-session
 add_managed_worktree "$term_repo" "$term_path"
 term_record=$(record_for_path "$term_path")
 set +e
-DOTFILES_AGENT_TEST_TERM_AFTER_MOVE="$term_marker" \
-  "$AUDIT_RESOURCE" cleanup-session term-session
+(
+  exec env DOTFILES_AGENT_TEST_TERM_AFTER_MOVE="$term_marker" \
+    DOTFILES_AGENT_TEST_TRANSACTION_PARENT_PID="$BASHPID" \
+    "$AUDIT_RESOURCE" cleanup-session term-session
+)
 term_status=$?
 set -e
 test "$term_status" -eq 143
@@ -482,6 +491,88 @@ fi
 test -d "$legacy_identity_path"
 grep -Fq 'malformed-ledger' "$HOME/cleanup.log"
 
+# Removal intent is durable across SIGKILL after Git removes both the worktree
+# and its exact administrative entry but before terminal ledger publication.
+new_case removing-sigkill
+removing_repo="$HOME/repo"
+removing_path="$HOME/managed"
+removing_marker="$HOME/removed"
+create_repo "$removing_repo"
+begin_session removing-session
+add_managed_worktree "$removing_repo" "$removing_path"
+removing_record=$(record_for_path "$removing_path")
+set +e
+(
+  export DOTFILES_AGENT_TEST_KILL_AFTER_REMOVE_MARKER=$removing_marker
+  export DOTFILES_AGENT_TEST_KILL_AFTER_REMOVE_PARENT_PID=$BASHPID
+  exec "$AUDIT_RESOURCE" cleanup-session removing-session
+)
+removing_status=$?
+set -e
+test "$removing_status" -eq 137
+test -f "$removing_marker"
+removing_quarantine=$(<"$removing_marker")
+removing_git_dir=$(jq -r '.git_dir' "$removing_record")
+test "$(jq -r '.status' "$removing_record")" = removing
+test "$(jq -r '.last_reason' "$removing_record")" = removing
+test "$(jq -r '.quarantine_path' "$removing_record")" = "$removing_quarantine"
+test ! -e "$removing_path"
+test ! -e "$removing_quarantine"
+test ! -e "$removing_git_dir"
+mkdir -p "$removing_git_dir"
+"$RESOURCE" reap
+test "$(jq -r '.status' "$removing_record")" = removing
+test "$(jq -r '.last_reason' "$removing_record")" = removing-admin-present
+test -d "$removing_git_dir"
+rmdir "$removing_git_dir"
+if [ -d "${removing_git_dir%/*}" ]; then
+  rmdir "${removing_git_dir%/*}" 2>/dev/null || true
+fi
+"$RESOURCE" reap
+test "$(jq -r '.status' "$removing_record")" = removed
+test ! -e "${removing_quarantine%/worktree}"
+
+# A persisted removing record whose exact quarantine still exists revalidates
+# the worktree and safely resumes the non-forced Git removal.
+new_case removing-resume
+removing_resume_repo="$HOME/repo"
+removing_resume_path="$HOME/managed"
+removing_resume_marker="$HOME/remove-failed"
+create_repo "$removing_resume_repo"
+begin_session removing-resume-session
+add_managed_worktree "$removing_resume_repo" "$removing_resume_path"
+removing_resume_record=$(record_for_path "$removing_resume_path")
+DOTFILES_AGENT_TEST_FAIL_REMOVE_ONCE="$removing_resume_marker" \
+  "$AUDIT_RESOURCE" cleanup-session removing-resume-session
+test -f "$removing_resume_marker"
+removing_resume_quarantine=$(jq -r '.quarantine_path' "$removing_resume_record")
+test "$(jq -r '.status' "$removing_resume_record")" = removing
+test -d "$removing_resume_quarantine"
+printf 'late mutation\n' >"$removing_resume_quarantine/late-untracked"
+"$RESOURCE" reap
+test "$(jq -r '.status' "$removing_resume_record")" = removing
+test "$(jq -r '.last_reason' "$removing_resume_record")" = removing-dirty
+test -d "$removing_resume_quarantine"
+rm -- "$removing_resume_quarantine/late-untracked"
+removing_resume_safe="$HOME/original-safe"
+removing_resume_identity_marker="$HOME/replaced-after-head"
+DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_SAFE="$removing_resume_safe" \
+  DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_MARKER="$removing_resume_identity_marker" \
+  "$AUDIT_RESOURCE" reap
+test -e "$removing_resume_identity_marker"
+test "$(jq -r '.status' "$removing_resume_record")" = removing
+test "$(jq -r '.last_reason' "$removing_resume_record")" = \
+  removing-quarantine-ambiguous
+test -d "$removing_resume_safe"
+test -d "$removing_resume_quarantine"
+"$REAL_GIT" --git-dir="$removing_resume_repo/.git" worktree remove -- \
+  "$removing_resume_quarantine"
+"$REAL_GIT" --git-dir="$removing_resume_repo/.git" worktree move -- \
+  "$removing_resume_safe" "$removing_resume_quarantine"
+"$RESOURCE" reap
+test "$(jq -r '.status' "$removing_resume_record")" = removed
+test ! -e "$removing_resume_quarantine"
+
 # A successful worktree removal can still be interrupted before its empty
 # quarantine root is removed. The terminal phase proof remains retryable.
 new_case quarantine-remove-root-retry
@@ -503,10 +594,10 @@ remove_root_quarantine_root=${remove_root_quarantine%/worktree}
 test -f "$remove_root_blocker"
 test ! -e "$remove_root_path"
 test ! -e "$remove_root_quarantine"
-test "$(jq -r '.status' "$remove_root_record")" = quarantining
+test "$(jq -r '.status' "$remove_root_record")" = removing
 test "$(jq -r '.worktree_device' "$remove_root_record")" = "$remove_root_device"
 test "$(jq -r '.worktree_inode' "$remove_root_record")" = "$remove_root_inode"
-if [ "$(jq -r '.last_reason' "$remove_root_record")" != quarantine-remove-root-unresolved ]; then
+if [ "$(jq -r '.last_reason' "$remove_root_record")" != removing-root-unresolved ]; then
   echo 'EXIT recovery discarded the completed-removal transaction phase' >&2
   exit 1
 fi
@@ -523,14 +614,24 @@ test "$("$REAL_GIT" -C "$remove_root_path" rev-parse HEAD)" = \
   "$("$REAL_GIT" -C "$remove_root_repo" rev-parse HEAD)"
 rm -- "$remove_root_blocker"
 "$RESOURCE" reap
-test ! -e "$remove_root_quarantine_root"
-if [ "$(jq -r '.status' "$remove_root_record")" != removed ]; then
-  echo 'recovery adopted an ABA replacement at the original path' >&2
-  exit 1
-fi
-test "$(jq -r '.last_reason' "$remove_root_record")" = clean-unchanged-inactive
-"$RESOURCE" reap
+test -d "$remove_root_quarantine_root"
 test -d "$remove_root_path"
+test "$(jq -r '.status' "$remove_root_record")" = removing
+test "$(jq -r '.last_reason' "$remove_root_record")" = removing-original-present
+"$REAL_GIT" --git-dir="$remove_root_repo/.git" worktree remove -- "$remove_root_path"
+mkdir -p "$remove_root_git_dir"
+"$RESOURCE" reap
+test -d "$remove_root_quarantine_root"
+test -d "$remove_root_git_dir"
+test "$(jq -r '.status' "$remove_root_record")" = removing
+test "$(jq -r '.last_reason' "$remove_root_record")" = removing-admin-present
+rmdir "$remove_root_git_dir"
+if [ -d "${remove_root_git_dir%/*}" ]; then
+  rmdir "${remove_root_git_dir%/*}" 2>/dev/null || true
+fi
+"$RESOURCE" reap
+test ! -e "$remove_root_quarantine_root"
+test "$(jq -r '.status' "$remove_root_record")" = removed
 
 # Tracked changes and nonignored untracked files are distinct preservation cases.
 new_case dirty
@@ -908,6 +1009,118 @@ mutation_lock_record=$(record_for_path "$mutation_lock_path")
 test "$(jq -r '.session_id' "$mutation_lock_record")" = worktree-mutation
 test "$(jq -r '.status' "$mutation_lock_record")" = owned
 
+# A Git guardian keeps the global lock alive when the resource shell is killed
+# while its direct Git mutation is still running.
+new_case mutation-lock-resource-guardian
+resource_guard_repo="$HOME/repo"
+resource_guard_path="$HOME/managed"
+resource_guard_contender="$HOME/contender"
+resource_guard_ready="$HOME/remove-blocked"
+resource_guard_release="$HOME/remove-release"
+create_repo "$resource_guard_repo"
+begin_session resource-guardian-owner
+add_managed_worktree "$resource_guard_repo" "$resource_guard_path"
+begin_session resource-guardian-contender
+DOTFILES_AGENT_SESSION_ID=resource-guardian-owner \
+  DOTFILES_AGENT_TEST_BLOCK_REMOVE_READY="$resource_guard_ready" \
+  DOTFILES_AGENT_TEST_BLOCK_REMOVE_RELEASE="$resource_guard_release" \
+  "$AUDIT_RESOURCE" cleanup-session resource-guardian-owner &
+resource_guard_parent_pid=$!
+trap ': >"$resource_guard_release"; kill "$resource_guard_parent_pid" 2>/dev/null || true' EXIT
+resource_guard_deadline=$((SECONDS + 5))
+while [ ! -s "$resource_guard_ready" ]; do
+  if ((SECONDS >= resource_guard_deadline)); then
+    echo 'timed out waiting for blocked resource Git child' >&2
+    exit 1
+  fi
+done
+resource_guard_git_pid=$(<"$resource_guard_ready")
+kill -0 "$resource_guard_git_pid"
+kill -KILL "$resource_guard_parent_pid"
+set +e
+wait "$resource_guard_parent_pid"
+resource_guard_parent_status=$?
+set -e
+test "$resource_guard_parent_status" -eq 137
+kill -0 "$resource_guard_git_pid"
+(
+  cd "$resource_guard_repo"
+  exec env DOTFILES_AGENT_SESSION_ID=resource-guardian-contender \
+    "$WORKTREE" add --detach "$resource_guard_contender" HEAD
+) >/dev/null &
+resource_guard_contender_pid=$!
+trap ': >"$resource_guard_release"; kill "$resource_guard_contender_pid" 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do
+  kill -0 "$resource_guard_contender_pid"
+  test ! -e "$resource_guard_contender"
+  sleep 0.01
+done
+: >"$resource_guard_release"
+wait "$resource_guard_contender_pid"
+trap - EXIT
+test -d "$resource_guard_contender"
+resource_guard_record=$(record_for_path "$resource_guard_path")
+test "$(jq -r '.status' "$resource_guard_record")" = removing
+"$RESOURCE" reap
+test "$(jq -r '.status' "$resource_guard_record")" = removed
+
+# The add wrapper uses the same guardian, so killing it cannot release the
+# global lock while its direct Git add process is still running.
+new_case mutation-lock-worktree-guardian
+worktree_guard_repo="$HOME/repo"
+worktree_guard_path="$HOME/in-flight"
+worktree_guard_contender="$HOME/contender"
+worktree_guard_ready="$HOME/add-blocked"
+worktree_guard_release="$HOME/add-release"
+create_repo "$worktree_guard_repo"
+begin_session worktree-guardian-owner
+begin_session worktree-guardian-contender
+(
+  cd "$worktree_guard_repo"
+  exec env DOTFILES_AGENT_SESSION_ID=worktree-guardian-owner \
+    DOTFILES_AGENT_TEST_ADD_READY="$worktree_guard_ready" \
+    DOTFILES_AGENT_TEST_ADD_RELEASE="$worktree_guard_release" \
+    "$RACE_WORKTREE" add --detach "$worktree_guard_path" HEAD
+) >/dev/null &
+worktree_guard_parent_pid=$!
+trap ': >"$worktree_guard_release"; kill "$worktree_guard_parent_pid" 2>/dev/null || true' EXIT
+worktree_guard_deadline=$((SECONDS + 5))
+while [ ! -s "$worktree_guard_ready" ]; do
+  if ((SECONDS >= worktree_guard_deadline)); then
+    echo 'timed out waiting for blocked worktree Git child' >&2
+    exit 1
+  fi
+done
+worktree_guard_git_pid=$(<"$worktree_guard_ready")
+kill -0 "$worktree_guard_git_pid"
+kill -KILL "$worktree_guard_parent_pid"
+set +e
+wait "$worktree_guard_parent_pid"
+worktree_guard_parent_status=$?
+set -e
+test "$worktree_guard_parent_status" -eq 137
+kill -0 "$worktree_guard_git_pid"
+(
+  cd "$worktree_guard_repo"
+  exec env DOTFILES_AGENT_SESSION_ID=worktree-guardian-contender \
+    "$WORKTREE" add --detach "$worktree_guard_contender" HEAD
+) >/dev/null &
+worktree_guard_contender_pid=$!
+trap ': >"$worktree_guard_release"; kill "$worktree_guard_contender_pid" 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do
+  kill -0 "$worktree_guard_contender_pid"
+  test ! -e "$worktree_guard_contender"
+  sleep 0.01
+done
+: >"$worktree_guard_release"
+wait "$worktree_guard_contender_pid"
+trap - EXIT
+test -d "$worktree_guard_path"
+test -d "$worktree_guard_contender"
+worktree_guard_record=$(record_for_path "$worktree_guard_contender")
+test "$(jq -r '.session_id' "$worktree_guard_record")" = worktree-guardian-contender
+test "$(jq -r '.status' "$worktree_guard_record")" = owned
+
 # The shared lock path itself must be an owned, mode-0600 regular file.
 new_case global-mutation-lock-ambiguous
 mutation_ambiguous_repo="$HOME/repo"
@@ -1194,6 +1407,34 @@ chmod 600 "$quarantining_record"
 "$SEVEN_DAY_RESOURCE" reap
 test -f "$quarantining_record"
 test "$(jq -r '.status' "$quarantining_record")" = quarantining
+
+# Removing is also a recoverable transaction phase and is never retention
+# eligible, even when its timestamp is older than the configured boundary.
+new_case removing-retention
+begin_session removing-retention-session
+removing_retention_common="$HOME/repo/.git"
+removing_retention_path="$HOME/managed"
+removing_retention_quarantine="$HOME/.dotfiles-agent-quarantine.fixture/worktree"
+removing_retention_git_dir="$HOME/repo/.git/worktrees/managed"
+removing_retention_record_id=$(printf '%s\0%s' "$removing_retention_common" \
+  "$removing_retention_path" | sha256sum | cut -d ' ' -f 1)
+removing_retention_record="$(state_root)/worktrees/$removing_retention_record_id.json"
+jq -cn \
+  --arg common_dir "$removing_retention_common" \
+  --arg git_dir "$removing_retention_git_dir" \
+  --arg path "$removing_retention_path" \
+  --arg quarantine_path "$removing_retention_quarantine" \
+  '{version: 1, session_id: "removing-retention-session",
+    common_dir: $common_dir, git_dir: $git_dir, path: $path,
+    quarantine_path: $quarantine_path,
+    initial_head: "0000000000000000000000000000000000000000",
+    status: "removing", last_reason: "removing", updated_at: 0,
+    worktree_device: "0", worktree_inode: "0"}' \
+  >"$removing_retention_record"
+chmod 600 "$removing_retention_record"
+"$SEVEN_DAY_RESOURCE" reap
+test -f "$removing_retention_record"
+test "$(jq -r '.status' "$removing_retention_record")" = removing
 
 # Permission denial, a disappearing magic link, and a stable broken link all
 # make process-reference inspection inconclusive and therefore preserve.

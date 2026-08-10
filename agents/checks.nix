@@ -202,6 +202,16 @@ let
     text = ''
       real_git=${lib.escapeShellArg (lib.getExe pkgs.git)}
       if [[ ''${1-} == worktree && ''${2-} == add ]]; then
+        if [[ ''${DOTFILES_AGENT_TEST_FAIL_WORKTREE_ADD-} == 1 ]]; then
+          exit 73
+        fi
+        if [[ -n ''${DOTFILES_AGENT_TEST_ADD_BEFORE_READY-} \
+          && -n ''${DOTFILES_AGENT_TEST_ADD_BEFORE_RELEASE-} ]]; then
+          printf '%s\n' "$BASHPID" >"$DOTFILES_AGENT_TEST_ADD_BEFORE_READY"
+          while [[ ! -e $DOTFILES_AGENT_TEST_ADD_BEFORE_RELEASE ]]; do
+            sleep 0.01
+          done
+        fi
         set +e
         "$real_git" "$@"
         status=$?
@@ -226,6 +236,38 @@ let
     name = "dotfiles-agent-worktree-race";
     gitCommand = lib.getExe raceGit;
     resourceCommand = lib.getExe raceAgentResource;
+  };
+  addingPauseResource = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource-adding-pause";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      real_resource=${lib.escapeShellArg (lib.getExe runtime.agentResource)}
+      if [[ ''${1-} == record-worktree-add-identity \
+        && ''${DOTFILES_AGENT_TEST_FAIL_ADD_IDENTITY-} == 1 ]]; then
+        exit 71
+      fi
+      if [[ ''${1-} == record-worktree-add-identity \
+        && -n ''${DOTFILES_AGENT_TEST_ADD_IDENTITY_READY-} \
+        && -n ''${DOTFILES_AGENT_TEST_ADD_IDENTITY_RELEASE-} ]]; then
+        set +e
+        "$real_resource" "$@"
+        status=$?
+        set -e
+        if ((status == 0)); then
+          printf '%s\n' "$PPID" >"$DOTFILES_AGENT_TEST_ADD_IDENTITY_READY"
+          while [[ ! -e $DOTFILES_AGENT_TEST_ADD_IDENTITY_RELEASE ]]; do
+            sleep 0.01
+          done
+        fi
+        exit "$status"
+      fi
+      exec "$real_resource" "$@"
+    '';
+  };
+  addingPauseWorktree = runtime.mkAgentWorktree {
+    name = "dotfiles-agent-worktree-adding-pause";
+    gitCommand = lib.getExe pkgs.git;
+    resourceCommand = lib.getExe addingPauseResource;
   };
   auditGit = pkgs.writeShellApplication {
     name = "dotfiles-agent-resource-audit-git";
@@ -1974,6 +2016,10 @@ in
       && lib.hasInfix "git_status=$?" resourceSource
       && lib.hasInfix "git_status=$?" worktreeSource
     ) "agent resource commands do not share the managed worktree mutation lock";
+    assert lib.assertMsg (
+      lib.hasInfix ".status == \"adding\"" resourceSource
+      && lib.hasInfix "\"$resource_command\" begin-worktree-add" worktreeSource
+    ) "agent worktree creation transaction phase is missing";
     assert lib.assertMsg (lib.hasInfix ".status == \"removing\"" resourceSource)
       "agent resource removal transaction phase is missing";
     assert lib.assertMsg (ownershipMatchesExpectedPackage agentResource resourceOwnership) (
@@ -2072,6 +2118,7 @@ in
         export REAL_GIT=${lib.getExe pkgs.git}
         export RACE_RESOURCE=${lib.getExe raceAgentResource}
         export RACE_WORKTREE=${lib.getExe raceAgentWorktree}
+        export ADDING_PAUSE_WORKTREE=${lib.getExe addingPauseWorktree}
         export AUDIT_RESOURCE=${lib.getExe auditAgentResource}
         export CONTROLLED_PROC_RESOURCE=${lib.getExe controlledProcResource}
         export OVERFLOW_RESOURCE=${lib.getExe overflowResource}

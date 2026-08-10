@@ -11,6 +11,12 @@ proc_start_time() {
   awk '{print $20}' <<<"${process_stat##*) }"
 }
 
+proc_parent_pid() {
+  local process_stat
+  process_stat=$(<"/proc/$1/stat")
+  awk '{print $2}' <<<"${process_stat##*) }"
+}
+
 new_case() {
   HOME="$fixture/$1/home"
   export HOME
@@ -478,7 +484,8 @@ legacy_identity_git_dir=$("$REAL_GIT" -C "$legacy_identity_path" rev-parse \
   --path-format=absolute --git-dir)
 jq --arg git_dir "$legacy_identity_git_dir" \
   --arg quarantine_path "$HOME/.dotfiles-agent-quarantine.fixture/worktree" \
-  '.status = "quarantining" | .git_dir = $git_dir |
+  'del(.worktree_device, .worktree_inode) |
+    .status = "quarantining" | .git_dir = $git_dir |
     .quarantine_path = $quarantine_path |
     .last_reason = "quarantining" | .updated_at = 0' \
   "$legacy_identity_record" >"$HOME/record.tmp"
@@ -1117,9 +1124,189 @@ wait "$worktree_guard_contender_pid"
 trap - EXIT
 test -d "$worktree_guard_path"
 test -d "$worktree_guard_contender"
+worktree_guard_owner_record=$(record_for_path "$worktree_guard_path")
+test "$(jq -r '.session_id' "$worktree_guard_owner_record")" = worktree-guardian-owner
+test "$(jq -r '.status' "$worktree_guard_owner_record")" = owned
 worktree_guard_record=$(record_for_path "$worktree_guard_contender")
 test "$(jq -r '.session_id' "$worktree_guard_record")" = worktree-guardian-contender
 test "$(jq -r '.status' "$worktree_guard_record")" = owned
+
+# If the outer transaction guardian is killed before Git starts, the inner Git
+# guardian keeps the global lock until Git exits. Cleanup then sees the created
+# but unvalidated target and preserves the adding intent.
+new_case adding-guardian-before-git
+adding_before_repo="$HOME/repo"
+adding_before_path="$HOME/managed"
+adding_before_ready="$HOME/git-before-ready"
+adding_before_release="$HOME/git-before-release"
+create_repo "$adding_before_repo"
+begin_session adding-before-session
+(
+  cd "$adding_before_repo"
+  exec env DOTFILES_AGENT_TEST_ADD_BEFORE_READY="$adding_before_ready" \
+    DOTFILES_AGENT_TEST_ADD_BEFORE_RELEASE="$adding_before_release" \
+    "$RACE_WORKTREE" add --detach "$adding_before_path" HEAD
+) >/dev/null &
+adding_before_parent_pid=$!
+trap ': >"$adding_before_release"; kill "$adding_before_parent_pid" 2>/dev/null || true' EXIT
+wait_for_file "$adding_before_ready"
+adding_before_git_pid=$(<"$adding_before_ready")
+adding_before_git_guardian_pid=$(proc_parent_pid "$adding_before_git_pid")
+adding_before_transaction_guardian_pid=$(proc_parent_pid "$adding_before_git_guardian_pid")
+test "$adding_before_transaction_guardian_pid" -ne "$adding_before_parent_pid"
+kill -KILL "$adding_before_transaction_guardian_pid"
+set +e
+wait "$adding_before_parent_pid"
+adding_before_parent_status=$?
+set -e
+test "$adding_before_parent_status" -eq 137
+"$RESOURCE" cleanup-session adding-before-session >/dev/null &
+adding_before_cleanup_pid=$!
+trap ': >"$adding_before_release"; kill "$adding_before_cleanup_pid" 2>/dev/null || true' EXIT
+for _ in $(seq 1 50); do
+  kill -0 "$adding_before_cleanup_pid"
+  test ! -e "$adding_before_path"
+  sleep 0.01
+done
+: >"$adding_before_release"
+wait "$adding_before_cleanup_pid"
+trap - EXIT
+test -d "$adding_before_path"
+adding_before_record=$(record_for_path "$adding_before_path")
+test "$(jq -r '.status' "$adding_before_record")" = adding
+test "$(jq -r '.last_reason' "$adding_before_record")" = adding-target-unproven
+
+# Killing the transaction guardian after stable identity capture leaves an
+# adding intent that cleanup can publish without deleting the worktree.
+new_case adding-guardian-recovery
+adding_recovery_repo="$HOME/repo"
+adding_recovery_path="$HOME/managed"
+adding_recovery_ready="$HOME/identity-ready"
+adding_recovery_release="$HOME/identity-release"
+create_repo "$adding_recovery_repo"
+begin_session adding-recovery-session
+(
+  cd "$adding_recovery_repo"
+  exec env DOTFILES_AGENT_TEST_ADD_IDENTITY_READY="$adding_recovery_ready" \
+    DOTFILES_AGENT_TEST_ADD_IDENTITY_RELEASE="$adding_recovery_release" \
+    "$ADDING_PAUSE_WORKTREE" add --detach "$adding_recovery_path" HEAD
+) >/dev/null &
+adding_recovery_parent_pid=$!
+trap ': >"$adding_recovery_release"; kill "$adding_recovery_parent_pid" 2>/dev/null || true' EXIT
+wait_for_file "$adding_recovery_ready"
+adding_recovery_guardian_pid=$(<"$adding_recovery_ready")
+kill -KILL "$adding_recovery_guardian_pid"
+: >"$adding_recovery_release"
+set +e
+wait "$adding_recovery_parent_pid"
+adding_recovery_status=$?
+set -e
+trap - EXIT
+test "$adding_recovery_status" -eq 137
+adding_recovery_record=$(record_for_path "$adding_recovery_path")
+test "$(jq -r '.status' "$adding_recovery_record")" = adding
+test "$(jq -r '.last_reason' "$adding_recovery_record")" = adding-validated
+"$RESOURCE" cleanup-session adding-recovery-session
+test -d "$adding_recovery_path"
+test "$(jq -r '.status' "$adding_recovery_record")" = owned
+test "$(jq -r '.last_reason' "$adding_recovery_record")" = adding-recovered
+
+# An unmanaged replacement at the intended path cannot inherit a validated
+# adding transaction, even when repository and HEAD still match.
+new_case adding-guardian-replacement
+adding_replacement_repo="$HOME/repo"
+adding_replacement_path="$HOME/managed"
+adding_replacement_safe="$HOME/original-added-worktree"
+adding_replacement_ready="$HOME/identity-ready"
+adding_replacement_release="$HOME/identity-release"
+create_repo "$adding_replacement_repo"
+begin_session adding-replacement-session
+(
+  cd "$adding_replacement_repo"
+  exec env DOTFILES_AGENT_TEST_ADD_IDENTITY_READY="$adding_replacement_ready" \
+    DOTFILES_AGENT_TEST_ADD_IDENTITY_RELEASE="$adding_replacement_release" \
+    "$ADDING_PAUSE_WORKTREE" add --detach "$adding_replacement_path" HEAD
+) >/dev/null &
+adding_replacement_parent_pid=$!
+trap ': >"$adding_replacement_release"; kill "$adding_replacement_parent_pid" 2>/dev/null || true' EXIT
+wait_for_file "$adding_replacement_ready"
+adding_replacement_guardian_pid=$(<"$adding_replacement_ready")
+kill -KILL "$adding_replacement_guardian_pid"
+: >"$adding_replacement_release"
+set +e
+wait "$adding_replacement_parent_pid"
+adding_replacement_status=$?
+set -e
+trap - EXIT
+test "$adding_replacement_status" -eq 137
+adding_replacement_record=$(record_for_path "$adding_replacement_path")
+"$REAL_GIT" --git-dir="$adding_replacement_repo/.git" worktree move -- \
+  "$adding_replacement_path" "$adding_replacement_safe"
+"$REAL_GIT" -C "$adding_replacement_repo" worktree add --detach \
+  "$adding_replacement_path" HEAD
+"$RESOURCE" cleanup-session adding-replacement-session
+test -d "$adding_replacement_path"
+test -d "$adding_replacement_safe"
+test "$(jq -r '.status' "$adding_replacement_record")" = adding
+test "$(jq -r '.last_reason' "$adding_replacement_record")" = adding-target-ambiguous
+
+# A registration failure retains an unproven adding intent. Cleanup never
+# rolls back by deleting either the added worktree or a later replacement.
+new_case adding-registration-failure
+adding_failure_repo="$HOME/repo"
+adding_failure_path="$HOME/managed"
+adding_failure_safe="$HOME/created-before-registration-failure"
+create_repo "$adding_failure_repo"
+begin_session adding-failure-session
+set +e
+(
+  cd "$adding_failure_repo"
+  DOTFILES_AGENT_TEST_FAIL_ADD_IDENTITY=1 \
+    "$ADDING_PAUSE_WORKTREE" add --detach "$adding_failure_path" HEAD
+) >/dev/null 2>&1
+adding_failure_status=$?
+set -e
+test "$adding_failure_status" -ne 0
+adding_failure_record=$(record_for_path "$adding_failure_path")
+test "$(jq -r '.status' "$adding_failure_record")" = adding
+test "$(jq -r 'has("git_dir")' "$adding_failure_record")" = false
+"$REAL_GIT" --git-dir="$adding_failure_repo/.git" worktree move -- \
+  "$adding_failure_path" "$adding_failure_safe"
+"$RESOURCE" cleanup-session adding-failure-session
+test ! -e "$adding_failure_path"
+test -d "$adding_failure_safe"
+test "$(jq -r '.status' "$adding_failure_record")" = adding
+test "$(jq -r '.last_reason' "$adding_failure_record")" = adding-absent-roster-changed
+"$REAL_GIT" -C "$adding_failure_repo" worktree add --detach \
+  "$adding_failure_path" HEAD
+"$RESOURCE" cleanup-session adding-failure-session
+test -d "$adding_failure_path"
+test -d "$adding_failure_safe"
+test "$(jq -r '.status' "$adding_failure_record")" = adding
+test "$(jq -r '.last_reason' "$adding_failure_record")" = adding-target-unproven
+
+# A failed Git add leaves no path, so cleanup can discard only its adding
+# intent without removing any filesystem or Git worktree state.
+new_case adding-absent-recovery
+adding_absent_repo="$HOME/repo"
+adding_absent_path="$HOME/not-created"
+create_repo "$adding_absent_repo"
+begin_session adding-absent-session
+set +e
+(
+  cd "$adding_absent_repo"
+  DOTFILES_AGENT_TEST_FAIL_WORKTREE_ADD=1 \
+    "$RACE_WORKTREE" add --detach "$adding_absent_path" HEAD
+) >/dev/null 2>&1
+adding_absent_status=$?
+set -e
+test "$adding_absent_status" -eq 73
+adding_absent_record=$(record_for_path "$adding_absent_path")
+test "$(jq -r '.status' "$adding_absent_record")" = adding
+test ! -e "$adding_absent_path"
+"$RESOURCE" cleanup-session adding-absent-session
+test ! -e "$adding_absent_record"
+test ! -e "$adding_absent_path"
 
 # The shared lock path itself must be an owned, mode-0600 regular file.
 new_case global-mutation-lock-ambiguous
@@ -1375,6 +1562,29 @@ if [ -e "$older_session" ]; then
   echo 'seven-day retention kept a ledger beyond the expiry boundary' >&2
   exit 1
 fi
+
+# Adding is a recoverable creation phase and is never retention eligible.
+new_case adding-retention
+begin_session adding-retention-session
+adding_retention_common="$HOME/repo/.git"
+adding_retention_path="$HOME/managed"
+adding_retention_record_id=$(printf '%s\0%s' "$adding_retention_common" \
+  "$adding_retention_path" | sha256sum | cut -d ' ' -f 1)
+adding_retention_record="$(state_root)/worktrees/$adding_retention_record_id.json"
+jq -cn \
+  --arg common_dir "$adding_retention_common" \
+  --arg path "$adding_retention_path" \
+  --arg roster_fingerprint "$(printf '%064d' 0)" \
+  '{version: 1, session_id: "adding-retention-session",
+    common_dir: $common_dir, path: $path, requested_head: "HEAD",
+    roster_fingerprint: $roster_fingerprint, parent_device: "0", parent_inode: "0",
+    initial_head: "0000000000000000000000000000000000000000",
+    status: "adding", last_reason: "adding", updated_at: 0}' \
+  >"$adding_retention_record"
+chmod 600 "$adding_retention_record"
+"$SEVEN_DAY_RESOURCE" reap
+test -f "$adding_retention_record"
+test "$(jq -r '.status' "$adding_retention_record")" = adding
 
 # Quarantining is a recoverable transaction state, not a terminal retention
 # state, even when its timestamp is older than the configured boundary.

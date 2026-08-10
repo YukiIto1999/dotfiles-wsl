@@ -92,8 +92,10 @@ snapshot_worktrees() {
   done <"$raw"
 }
 
-parse_add_target() {
+parse_add_arguments() {
   local option
+  target_argument=
+  requested_head_argument=HEAD
   [ "${1-}" = add ] || die 'only worktree add is supported'
   shift
 
@@ -114,13 +116,19 @@ parse_add_target() {
     --)
       shift
       [ "$#" -ge 1 ] && [ "$#" -le 2 ] || die 'ambiguous worktree add target'
-      printf '%s\n' "$1"
+      target_argument=$1
+      if [ "$#" -eq 2 ]; then
+        requested_head_argument=$2
+      fi
       return
       ;;
     -*) die "unsupported or ambiguous worktree add option: $option" ;;
     *)
       [ "$#" -le 2 ] || die 'ambiguous worktree add target'
-      printf '%s\n' "$1"
+      target_argument=$1
+      if [ "$#" -eq 2 ]; then
+        requested_head_argument=$2
+      fi
       return
       ;;
     esac
@@ -134,7 +142,10 @@ parse_add_target() {
 [ -d "$HOME" ] && [ ! -L "$HOME" ] || die 'HOME is ambiguous'
 session_id=${DOTFILES_AGENT_SESSION_ID-}
 validate_id "$session_id"
-target_argument=$(parse_add_target "$@")
+parse_add_arguments "$@"
+[ -n "$requested_head_argument" ] || die 'requested worktree HEAD is empty'
+[[ $requested_head_argument != *[$'\001'-$'\037'$'\177']* ]] ||
+  die 'requested worktree HEAD contains control characters'
 case "$target_argument" in
 /*) target_candidate=$target_argument ;;
 *) target_candidate=$PWD/$target_argument ;;
@@ -159,15 +170,6 @@ ensure_lock_file "$creation_lock"
 exec 8<>"$creation_lock"
 flock -x 8
 
-DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
-  "$resource_command" validate-session "$session_id"
-
-scratch=$(mktemp -d)
-before="$scratch/before"
-before_raw="$scratch/before.raw"
-after="$scratch/after"
-after_raw="$scratch/after.raw"
-
 # shellcheck disable=SC2329 # EXIT trap invokes this function indirectly.
 cleanup_scratch() {
   local status=$?
@@ -176,31 +178,87 @@ cleanup_scratch() {
   rmdir -- "$scratch" 2>/dev/null || true
   exit "$status"
 }
-trap cleanup_scratch EXIT
 
-snapshot_worktrees "$before" "$before_raw"
-if cut -f 1 "$before" | grep -Fxq -- "$target_candidate"; then
-  die 'worktree add target already exists in the linked-worktree roster'
-fi
-common_dir=$(run_git rev-parse --path-format=absolute --git-common-dir)
-common_dir=$(realpath -e -- "$common_dir") || die 'cannot canonicalize git common dir'
+add_transaction() {
+  local common_dir resolved_initial_head roster_fingerprint
+  local parent_path parent_identity parent_device parent_inode
+  local target_path target_rows target_head path initial_head transaction_status
+  scratch=$(mktemp -d)
+  before="$scratch/before"
+  before_raw="$scratch/before.raw"
+  after="$scratch/after"
+  after_raw="$scratch/after.raw"
+  trap cleanup_scratch EXIT
 
-run_git worktree "$@"
-snapshot_worktrees "$after" "$after_raw" || die 'cannot snapshot worktrees after git worktree add'
-target_path=$(realpath -e -- "$target_argument") ||
-  die 'git reported success but the add target is ambiguous'
-[ "$target_path" = "$target_candidate" ] ||
-  die 'git created a worktree at an unexpected canonical path'
+  DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+    "$resource_command" validate-session "$session_id"
+  snapshot_worktrees "$before" "$before_raw"
+  if cut -f 1 "$before" | grep -Fxq -- "$target_candidate"; then
+    die 'worktree add target already exists in the linked-worktree roster'
+  fi
+  [ ! -e "$target_candidate" ] && [ ! -L "$target_candidate" ] ||
+    die 'worktree add target already exists'
+  common_dir=$(run_git rev-parse --path-format=absolute --git-common-dir)
+  common_dir=$(realpath -e -- "$common_dir") || die 'cannot canonicalize git common dir'
+  if resolved_initial_head=$(run_git rev-parse --verify "${requested_head_argument}^{commit}"); then
+    :
+  else
+    transaction_status=$?
+    return "$transaction_status"
+  fi
+  [[ $resolved_initial_head =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] ||
+    die 'git resolved an invalid worktree HEAD'
+  roster_fingerprint=$(sha256sum "$before_raw" | cut -d ' ' -f 1)
+  parent_path=$(dirname -- "$target_candidate")
+  [ -d "$parent_path" ] && [ ! -L "$parent_path" ] || die 'worktree parent is ambiguous'
+  [ "$(realpath -e -- "$parent_path")" = "$parent_path" ] ||
+    die 'worktree parent is not canonical'
+  parent_identity=$(stat -c '%d:%i' -- "$parent_path") || die 'cannot inspect worktree parent'
+  parent_device=${parent_identity%%:*}
+  parent_inode=${parent_identity#*:}
 
-target_rows=0
-target_head=
-while IFS=$'\t' read -r path initial_head; do
-  [ "$path" = "$target_path" ] || continue
-  target_rows=$((target_rows + 1))
-  target_head=$initial_head
-done <"$after"
-[ "$target_rows" -eq 1 ] || die 'git add target is missing or ambiguous in the linked-worktree roster'
+  DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+    "$resource_command" begin-worktree-add "$session_id" "$common_dir" "$target_candidate" \
+    "$resolved_initial_head" "$requested_head_argument" "$roster_fingerprint" \
+    "$parent_device" "$parent_inode"
 
-DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
-  "$resource_command" register-worktree "$session_id" "$common_dir" "$target_path" "$target_head" ||
-  die 'git created the requested worktree but ownership registration failed'
+  run_git worktree "$@"
+  snapshot_worktrees "$after" "$after_raw" || die 'cannot snapshot worktrees after git worktree add'
+  target_path=$(realpath -e -- "$target_argument") ||
+    die 'git reported success but the add target is ambiguous'
+  [ "$target_path" = "$target_candidate" ] ||
+    die 'git created a worktree at an unexpected canonical path'
+
+  target_rows=0
+  target_head=
+  while IFS=$'\t' read -r path initial_head; do
+    [ "$path" = "$target_path" ] || continue
+    target_rows=$((target_rows + 1))
+    target_head=$initial_head
+  done <"$after"
+  [ "$target_rows" -eq 1 ] || die 'git add target is missing or ambiguous in the linked-worktree roster'
+  [ "$target_head" = "$resolved_initial_head" ] || die 'git add target HEAD differs from requested commit'
+
+  DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+    "$resource_command" record-worktree-add-identity "$session_id" "$common_dir" \
+    "$target_path" "$target_head" ||
+    die 'git created the requested worktree but stable identity registration failed'
+  DOTFILES_AGENT_MUTATION_LOCK_FD=7 DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+    "$resource_command" complete-worktree-add "$session_id" "$common_dir" \
+    "$target_path" "$target_head" ||
+    die 'git created the requested worktree but ownership publication failed'
+
+  transaction_status=0
+  return "$transaction_status"
+}
+
+set +e
+(
+  set -e
+  add_transaction "$@"
+  guardian_status=$?
+  exit "$guardian_status"
+)
+guardian_status=$?
+set -e
+exit "$guardian_status"

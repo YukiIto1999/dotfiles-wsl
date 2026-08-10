@@ -326,6 +326,14 @@ let
         exit "$status"
       fi
       if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == remove \
+        && -n ''${DOTFILES_AGENT_TEST_BEFORE_REMOVE_READY-} \
+        && -n ''${DOTFILES_AGENT_TEST_BEFORE_REMOVE_RELEASE-} ]]; then
+        printf '%s\n' "''${5}" >"$DOTFILES_AGENT_TEST_BEFORE_REMOVE_READY"
+        while [[ ! -e $DOTFILES_AGENT_TEST_BEFORE_REMOVE_RELEASE ]]; do
+          sleep 0.01
+        done
+      fi
+      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == remove \
         && -n ''${DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER-} \
         && ! -e ''${DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER} ]]; then
         set +e
@@ -1837,6 +1845,8 @@ in
     let
       agentResource = agentConfig.agentResource;
       agentWorktree = agentConfig.agentWorktree;
+      resourceSource = builtins.readFile ./impl/resource/agent-resource.sh;
+      worktreeSource = builtins.readFile ./impl/resource/agent-worktree.sh;
       commandName =
         package:
         let
@@ -1926,6 +1936,13 @@ in
       && hostConfig.dotfiles.commands.agentResource == runtime.agentResource
       && hostConfig.dotfiles.commands.agentWorktree == runtime.agentWorktree
     ) "agent resource commands are missing";
+    assert lib.assertMsg (
+      lib.hasInfix "mutation_lock_file=\"$locks_root/.worktree-mutation.lock\"" resourceSource
+      && lib.hasInfix "mutation_lock=\"$locks_root/.worktree-mutation.lock\"" worktreeSource
+      && lib.hasInfix "DOTFILES_AGENT_MUTATION_LOCK_FD=7" worktreeSource
+      && lib.hasInfix "flock -x 7" resourceSource
+      && lib.hasInfix "flock -x 7" worktreeSource
+    ) "agent resource commands do not share the managed worktree mutation lock";
     assert lib.assertMsg (ownershipMatchesExpectedPackage agentResource resourceOwnership) (
       "agent resource command must be owned exactly once by the expected package: "
       + commandOwnershipDiagnostic agentResource resourceOwnership

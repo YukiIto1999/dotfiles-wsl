@@ -259,8 +259,8 @@ test "$(jq -r '.status' "$post_identity_record")" = owned
 test ! -e "$post_identity_path"
 test "$(jq -r '.status' "$post_identity_record")" = removed
 
-# Replacement after the quarantined HEAD check must not be removed under the
-# registered worktree's transaction identity.
+# An unmanaged direct-Git replacement after the quarantined HEAD check remains
+# outside the cooperative lock and must fail the final identity revalidation.
 new_case quarantine-identity-before-remove
 late_identity_repo="$HOME/repo"
 late_identity_path="$HOME/managed"
@@ -279,6 +279,8 @@ if [ "$(jq -r '.status' "$late_identity_record")" != quarantining ]; then
   echo 'late quarantine replacement terminalized the registered transaction' >&2
   exit 1
 fi
+test "$(jq -r '.last_reason' "$late_identity_record")" = \
+  quarantine-identity-changed-before-remove
 test -d "$late_identity_safe_path"
 test -d "$late_identity_quarantine"
 test ! -e "$late_identity_path"
@@ -835,6 +837,164 @@ test "$race_cleanup_status" -eq 0
 test ! -e "$race_path"
 race_record=$(record_for_path "$race_path")
 test "$(jq -r '.status' "$race_record")" = removed
+
+# Managed worktree mutations share one global lock before any session lock.
+# An add from another session cannot enter the final remove window.
+new_case global-mutation-lock
+mutation_lock_repo="$HOME/repo"
+mutation_lock_path="$HOME/managed"
+mutation_lock_ready="$HOME/remove-ready"
+mutation_lock_release="$HOME/remove-release"
+create_repo "$mutation_lock_repo"
+begin_session mutation-lock-owner-session
+add_managed_worktree "$mutation_lock_repo" "$mutation_lock_path"
+begin_session worktree-mutation
+DOTFILES_AGENT_SESSION_ID=mutation-lock-owner-session \
+  DOTFILES_AGENT_TEST_BEFORE_REMOVE_READY="$mutation_lock_ready" \
+  DOTFILES_AGENT_TEST_BEFORE_REMOVE_RELEASE="$mutation_lock_release" \
+  "$AUDIT_RESOURCE" cleanup-session mutation-lock-owner-session &
+mutation_cleanup_pid=$!
+fixture_trap_pid=$mutation_cleanup_pid
+trap ': >"$mutation_lock_release"; kill "$fixture_trap_pid" 2>/dev/null || true' EXIT
+mutation_ready_deadline=$((SECONDS + 5))
+while [ ! -e "$mutation_lock_ready" ]; do
+  if ((SECONDS >= mutation_ready_deadline)); then
+    echo "timed out waiting for fixture marker: $mutation_lock_ready" >&2
+    exit 1
+  fi
+done
+test ! -e "$mutation_lock_path"
+mutation_lock_file="$(state_root)/locks/.worktree-mutation.lock"
+test "$(readlink -e "/proc/$mutation_cleanup_pid/fd/7")" = "$mutation_lock_file"
+if flock -n "$mutation_lock_file" true; then
+  echo 'cleanup did not hold the global mutation lock' >&2
+  exit 1
+fi
+(
+  cd "$mutation_lock_repo"
+  exec env DOTFILES_AGENT_SESSION_ID=worktree-mutation \
+    "$WORKTREE" add --detach "$mutation_lock_path" HEAD
+) >/dev/null &
+mutation_add_pid=$!
+trap ': >"$mutation_lock_release"; kill "$mutation_cleanup_pid" "$mutation_add_pid" 2>/dev/null || true' EXIT
+mutation_lock_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$mutation_add_pid/fd/7" 2>/dev/null || true)" != \
+  "$mutation_lock_file" ]; do
+  if ((SECONDS >= mutation_lock_deadline)); then
+    echo 'managed add did not block on the global mutation lock' >&2
+    exit 1
+  fi
+done
+test "$(stat -c %a -- "$mutation_lock_file")" = 600
+test "$(stat -c %u -- "$mutation_lock_file")" = "$(id -u)"
+for _ in $(seq 1 50); do
+  kill -0 "$mutation_add_pid"
+  test ! -e "$mutation_lock_path"
+  sleep 0.01
+done
+: >"$mutation_lock_release"
+set +e
+wait "$mutation_cleanup_pid"
+mutation_cleanup_status=$?
+wait "$mutation_add_pid"
+mutation_add_status=$?
+set -e
+trap - EXIT
+unset fixture_trap_pid
+test "$mutation_cleanup_status" -eq 0
+test "$mutation_add_status" -eq 0
+test -d "$mutation_lock_path"
+mutation_lock_record=$(record_for_path "$mutation_lock_path")
+test "$(jq -r '.session_id' "$mutation_lock_record")" = worktree-mutation
+test "$(jq -r '.status' "$mutation_lock_record")" = owned
+
+# The shared lock path itself must be an owned, mode-0600 regular file.
+new_case global-mutation-lock-ambiguous
+mutation_ambiguous_repo="$HOME/repo"
+mutation_ambiguous_path="$HOME/managed"
+create_repo "$mutation_ambiguous_repo"
+begin_session mutation-lock-ambiguous-session
+mkdir "$(state_root)/locks/.worktree-mutation.lock"
+set +e
+(
+  cd "$mutation_ambiguous_repo"
+  "$WORKTREE" add --detach "$mutation_ambiguous_path" HEAD
+) >/dev/null 2>&1
+mutation_ambiguous_status=$?
+set -e
+test "$mutation_ambiguous_status" -eq 70
+test ! -e "$mutation_ambiguous_path"
+
+# Inherited descriptors are accepted only when they prove the same global lock
+# and preserve the global-before-session ordering.
+new_case mutation-lock-inherited-invalid
+mutation_inherited_repo="$HOME/repo"
+mutation_inherited_path="$HOME/managed"
+create_repo "$mutation_inherited_repo"
+begin_session mutation-lock-inherited-session
+mutation_inherited_session="$(state_root)/sessions/mutation-lock-inherited-session.json"
+mutation_inherited_before=$(<"$mutation_inherited_session")
+set +e
+DOTFILES_AGENT_MUTATION_LOCK_FD=7 \
+  "$RESOURCE" validate-session mutation-lock-inherited-session >/dev/null 2>&1
+mutation_missing_fd_status=$?
+set -e
+test "$mutation_missing_fd_status" -eq 70
+test "$(<"$mutation_inherited_session")" = "$mutation_inherited_before"
+mutation_other_lock="$HOME/other.lock"
+: >"$mutation_other_lock"
+chmod 600 "$mutation_other_lock"
+exec 7<>"$mutation_other_lock"
+set +e
+DOTFILES_AGENT_MUTATION_LOCK_FD=7 \
+  "$RESOURCE" validate-session mutation-lock-inherited-session >/dev/null 2>&1
+mutation_wrong_fd_status=$?
+set -e
+exec 7>&-
+test "$mutation_wrong_fd_status" -eq 70
+test "$(<"$mutation_inherited_session")" = "$mutation_inherited_before"
+add_managed_worktree "$mutation_inherited_repo" "$mutation_inherited_path"
+mutation_inherited_record=$(record_for_path "$mutation_inherited_path")
+mutation_inherited_before=$(<"$mutation_inherited_record")
+exec 8<>"$(state_root)/locks/mutation-lock-inherited-session.lock"
+flock -x 8
+set +e
+DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+  "$RESOURCE" cleanup-session mutation-lock-inherited-session >/dev/null 2>&1
+mutation_reverse_order_status=$?
+set -e
+exec 8>&-
+test "$mutation_reverse_order_status" -eq 70
+test -d "$mutation_inherited_path"
+test "$(<"$mutation_inherited_record")" = "$mutation_inherited_before"
+
+# Git hooks may leave background processes, but those processes must not retain
+# either managed lock descriptor after the add transaction exits.
+new_case mutation-lock-hook-fd
+mutation_hook_repo="$HOME/repo"
+mutation_hook_path="$HOME/managed"
+mutation_hook_pid_file="$HOME/hook-pid"
+create_repo "$mutation_hook_repo"
+begin_session mutation-lock-hook-session
+{
+  printf '#!%s\n' "$TEST_BASH"
+  # shellcheck disable=SC2016 # The generated hook expands these variables.
+  printf '%s\n' 'sleep 30 &' 'printf '\''%s\n'\'' "$!" >"$DOTFILES_AGENT_TEST_HOOK_PID_FILE"'
+} >"$mutation_hook_repo/.git/hooks/post-checkout"
+chmod 700 "$mutation_hook_repo/.git/hooks/post-checkout"
+export DOTFILES_AGENT_TEST_HOOK_PID_FILE=$mutation_hook_pid_file
+add_managed_worktree "$mutation_hook_repo" "$mutation_hook_path"
+unset DOTFILES_AGENT_TEST_HOOK_PID_FILE
+mutation_hook_pid=$(<"$mutation_hook_pid_file")
+[[ $mutation_hook_pid =~ ^[0-9]+$ ]]
+trap 'kill "$mutation_hook_pid" 2>/dev/null || true' EXIT
+kill -0 "$mutation_hook_pid"
+if [ -e "/proc/$mutation_hook_pid/fd/7" ] || [ -e "/proc/$mutation_hook_pid/fd/8" ]; then
+  echo 'background Git hook retained a managed lock descriptor' >&2
+  exit 1
+fi
+kill "$mutation_hook_pid"
+trap - EXIT
 
 # The add-only parser identifies the target while preserving the supported
 # Git add option forms.

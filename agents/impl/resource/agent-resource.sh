@@ -2,7 +2,7 @@ set -euo pipefail
 shopt -s nullglob
 
 program=dotfiles-agent-resource
-usage_text="usage: $program begin-session SESSION | validate-session SESSION | cleanup-session SESSION | register-worktree SESSION COMMON-DIR PATH INITIAL-HEAD | reap"
+usage_text="usage: $program begin-session SESSION | validate-session SESSION | cleanup-session SESSION | begin-worktree-add SESSION COMMON-DIR PATH INITIAL-HEAD REQUESTED-HEAD ROSTER-FINGERPRINT PARENT-DEVICE PARENT-INODE | record-worktree-add-identity SESSION COMMON-DIR PATH INITIAL-HEAD | complete-worktree-add SESSION COMMON-DIR PATH INITIAL-HEAD | register-worktree SESSION COMMON-DIR PATH INITIAL-HEAD | reap"
 git_command=@gitCommand@
 quarantine_transaction_record=
 
@@ -153,6 +153,13 @@ worktree_schema_is_valid() {
     type == "object"
     and (
       (
+        .status == "adding"
+        and (
+          keys == ["common_dir", "initial_head", "last_reason", "parent_device", "parent_inode", "path", "requested_head", "roster_fingerprint", "session_id", "status", "updated_at", "version"]
+          or keys == ["common_dir", "git_dir", "initial_head", "last_reason", "parent_device", "parent_inode", "path", "requested_head", "roster_fingerprint", "session_id", "status", "updated_at", "version", "worktree_device", "worktree_inode"]
+        )
+      )
+      or (
         (.status == "quarantining" or .status == "removing")
         and keys == ["common_dir", "git_dir", "initial_head", "last_reason", "path", "quarantine_path", "session_id", "status", "updated_at", "version", "worktree_device", "worktree_inode"]
       )
@@ -172,12 +179,18 @@ worktree_schema_is_valid() {
     and (.session_id | type == "string")
     and (.common_dir | type == "string" and startswith("/"))
     and (.path | type == "string" and startswith("/"))
+    and ((.status != "adding") or (
+      (.requested_head | type == "string" and length > 0 and (test("[\u0000-\u001f\u007f]") | not))
+      and (.roster_fingerprint | type == "string" and test("^[0-9a-f]{64}$"))
+      and (.parent_device | type == "string" and test("^[0-9]+$"))
+      and (.parent_inode | type == "string" and test("^[0-9]+$"))
+    ))
     and (((.status != "quarantining") and (.status != "removing")) or (.quarantine_path | type == "string" and startswith("/")))
     and ((has("git_dir") | not) or (.git_dir | type == "string" and startswith("/")))
     and ((has("worktree_device") | not) or (.worktree_device | type == "string" and test("^[0-9]+$")))
     and ((has("worktree_inode") | not) or (.worktree_inode | type == "string" and test("^[0-9]+$")))
     and (.initial_head | type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$"))
-    and (.status == "owned" or .status == "quarantining" or .status == "removing" or .status == "preserved" or .status == "removed")
+    and (.status == "adding" or .status == "owned" or .status == "quarantining" or .status == "removing" or .status == "preserved" or .status == "removed")
     and (.last_reason | type == "string" and length > 0)
     and ((has("updated_at") | not) or (.updated_at | type == "number" and . >= 0 and floor == .))
   ' "$path" >/dev/null
@@ -312,6 +325,23 @@ mark_worktree_recovered_owned() {
     'del(.quarantine_path) |
       .status = "owned" | .last_reason = $reason | .updated_at = $now' \
     "$record")
+  atomic_write "$record" "$updated"
+}
+
+mark_adding_reason() {
+  local record=$1 reason=$2 updated now
+  now=$(date +%s)
+  updated=$(jq -c --arg reason "$reason" --argjson now "$now" \
+    '.status = "adding" | .last_reason = $reason | .updated_at = $now' "$record")
+  atomic_write "$record" "$updated"
+}
+
+mark_adding_owned() {
+  local record=$1 reason=$2 updated now
+  now=$(date +%s)
+  updated=$(jq -c --arg reason "$reason" --argjson now "$now" \
+    'del(.requested_head, .roster_fingerprint, .parent_device, .parent_inode) |
+      .status = "owned" | .last_reason = $reason | .updated_at = $now' "$record")
   atomic_write "$record" "$updated"
 }
 
@@ -589,6 +619,50 @@ complete_removing_transaction() {
   printf '%s: completed managed worktree removal: %s\n' "$program" "$original_path" >&2
 }
 
+current_worktree_roster_fingerprint() {
+  local common_dir=$1
+  run_git --git-dir="$common_dir" worktree list --porcelain -z |
+    sha256sum | cut -d ' ' -f 1
+}
+
+recover_adding_worktree() {
+  local record=$1 path common_dir initial_head expected_roster current_roster
+  local expected_git_dir expected_device expected_inode
+  path=$(jq -r '.path' "$record") || return 1
+  common_dir=$(jq -r '.common_dir' "$record") || return 1
+  initial_head=$(jq -r '.initial_head' "$record") || return 1
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    expected_roster=$(jq -r '.roster_fingerprint' "$record") || return 1
+    if current_roster=$(current_worktree_roster_fingerprint "$common_dir") &&
+      [ "$current_roster" = "$expected_roster" ]; then
+      rm -f -- "$record"
+      printf '%s: aborted incomplete worktree add: %s\n' "$program" "$path" >&2
+      return 0
+    fi
+    mark_adding_reason "$record" adding-absent-roster-changed
+    printf '%s: preserve adding-absent-roster-changed: %s\n' "$program" "$path" >&2
+    return 1
+  fi
+  if ! jq --exit-status \
+    'has("git_dir") and has("worktree_device") and has("worktree_inode")' \
+    "$record" >/dev/null; then
+    mark_adding_reason "$record" adding-target-unproven
+    printf '%s: preserve adding-target-unproven: %s\n' "$program" "$path" >&2
+    return 1
+  fi
+  expected_git_dir=$(jq -r '.git_dir' "$record") || return 1
+  expected_device=$(jq -r '.worktree_device' "$record") || return 1
+  expected_inode=$(jq -r '.worktree_inode' "$record") || return 1
+  if ! worktree_identity_is_valid "$path" "$common_dir" "$initial_head" \
+    "$expected_git_dir" "$expected_device" "$expected_inode"; then
+    mark_adding_reason "$record" adding-target-ambiguous
+    printf '%s: preserve adding-target-ambiguous: %s\n' "$program" "$path" >&2
+    return 1
+  fi
+  mark_adding_owned "$record" adding-recovered
+  printf '%s: recovered managed worktree add: %s\n' "$program" "$path" >&2
+}
+
 recover_removing_worktree() {
   local record=$1 original_path quarantine_path common_dir initial_head git_dir
   local worktree_device worktree_inode status_output process_reason
@@ -852,6 +926,10 @@ cleanup_worktree_record() {
   common_dir=$(jq -r '.common_dir' "$record")
   initial_head=$(jq -r '.initial_head' "$record")
 
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    preserve_worktree "$record" missing
+    return
+  fi
   if jq --exit-status 'has("worktree_device")' "$record" >/dev/null; then
     recovered_identity=true
     expected_git_dir=$(jq -r '.git_dir' "$record")
@@ -864,10 +942,6 @@ cleanup_worktree_record() {
     fi
   fi
 
-  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
-    preserve_worktree "$record" missing
-    return
-  fi
   if [ -L "$path" ] || [ ! -d "$path" ]; then
     preserve_worktree "$record" ambiguous-path
     return
@@ -1106,6 +1180,7 @@ cleanup_session_records() {
     [ "$(jq -r '.session_id' "$record")" = "$session_id" ] || continue
     status=$(jq -r '.status' "$record")
     case "$status" in
+    adding) recover_adding_worktree "$record" || true ;;
     owned) cleanup_worktree_record "$record" ;;
     quarantining) recover_quarantining_worktree "$record" || true ;;
     removing) recover_removing_worktree "$record" || true ;;
@@ -1165,6 +1240,142 @@ require_live_session() {
   if orphan_reason "$session_file" >/dev/null; then
     die "session owner is not live: $session_id"
   fi
+}
+
+worktree_record_path() {
+  local common_dir=$1 path=$2 record_id
+  record_id=$(printf '%s\0%s' "$common_dir" "$path" | sha256sum | cut -d ' ' -f 1)
+  printf '%s/%s.json\n' "$worktrees_root" "$record_id"
+}
+
+validate_added_worktree_identity() {
+  local common_dir=$1 path=$2 initial_head=$3 canonical_common canonical_path current_common current_head
+  [ -d "$path" ] && [ ! -L "$path" ] || return 1
+  [ "$(stat -c %u -- "$path" 2>/dev/null)" = "$resource_owner_uid" ] || return 1
+  canonical_path=$(realpath -e -- "$path" 2>/dev/null) || return 1
+  canonical_common=$(realpath -e -- "$common_dir" 2>/dev/null) || return 1
+  [ "$canonical_path" = "$path" ] || return 1
+  [ "$canonical_common" = "$common_dir" ] || return 1
+  [ "$path" != / ] || return 1
+  [ "$path" != "$common_dir" ] || return 1
+  [[ $common_dir != "$path/"* ]] || return 1
+
+  validated_git_dir=$(run_git -C "$path" rev-parse --path-format=absolute --git-dir 2>/dev/null) ||
+    return 1
+  validated_git_dir=$(realpath -e -- "$validated_git_dir" 2>/dev/null) || return 1
+  [ "$validated_git_dir" != "$common_dir" ] || return 1
+  current_common=$(run_git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) ||
+    return 1
+  current_common=$(realpath -e -- "$current_common" 2>/dev/null) || return 1
+  [ "$current_common" = "$common_dir" ] || return 1
+  current_head=$(run_git -C "$path" rev-parse --verify HEAD 2>/dev/null) || return 1
+  [ "$current_head" = "$initial_head" ] || return 1
+  validated_worktree_device=$(stat -c %d -- "$path" 2>/dev/null) || return 1
+  validated_worktree_inode=$(stat -c %i -- "$path" 2>/dev/null) || return 1
+}
+
+begin_worktree_add() {
+  local session_id=$1 common_dir=$2 path=$3 initial_head=$4 requested_head=$5
+  local roster_fingerprint=$6 parent_device=$7 parent_inode=$8
+  local canonical_common canonical_parent parent_path record_file json now existing_status
+  validate_id session "$session_id"
+  validate_absolute_path common-dir "$common_dir"
+  validate_absolute_path worktree-path "$path"
+  [[ $initial_head =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || die 'invalid initial HEAD'
+  [ -n "$requested_head" ] &&
+    [[ $requested_head != *[$'\001'-$'\037'$'\177']* ]] || die 'invalid requested HEAD'
+  [[ $roster_fingerprint =~ ^[0-9a-f]{64}$ ]] || die 'invalid roster fingerprint'
+  [[ $parent_device =~ ^[0-9]+$ ]] || die 'invalid parent device'
+  [[ $parent_inode =~ ^[0-9]+$ ]] || die 'invalid parent inode'
+  require_live_session "$session_id"
+
+  canonical_common=$(realpath -e -- "$common_dir" 2>/dev/null) || die 'cannot canonicalize common dir'
+  [ "$canonical_common" = "$common_dir" ] || die 'common dir is not canonical'
+  [ ! -e "$path" ] && [ ! -L "$path" ] || die 'worktree add target already exists'
+  parent_path=$(dirname -- "$path")
+  [ -d "$parent_path" ] && [ ! -L "$parent_path" ] || die 'worktree parent is ambiguous'
+  canonical_parent=$(realpath -e -- "$parent_path" 2>/dev/null) || die 'cannot canonicalize worktree parent'
+  [ "$canonical_parent" = "$parent_path" ] || die 'worktree parent is not canonical'
+  [ "$(stat -c %u -- "$parent_path" 2>/dev/null)" = "$resource_owner_uid" ] ||
+    die 'worktree parent has another owner'
+  [ "$(stat -c %d -- "$parent_path" 2>/dev/null)" = "$parent_device" ] ||
+    die 'worktree parent device changed'
+  [ "$(stat -c %i -- "$parent_path" 2>/dev/null)" = "$parent_inode" ] ||
+    die 'worktree parent inode changed'
+
+  record_file=$(worktree_record_path "$common_dir" "$path")
+  now=$(date +%s)
+  json=$(jq -cn \
+    --arg session_id "$session_id" --arg common_dir "$common_dir" --arg path "$path" \
+    --arg initial_head "$initial_head" --arg requested_head "$requested_head" \
+    --arg roster_fingerprint "$roster_fingerprint" --arg parent_device "$parent_device" \
+    --arg parent_inode "$parent_inode" --argjson now "$now" \
+    '{version: 1, session_id: $session_id, common_dir: $common_dir, path: $path,
+      initial_head: $initial_head, requested_head: $requested_head,
+      roster_fingerprint: $roster_fingerprint, parent_device: $parent_device,
+      parent_inode: $parent_inode, status: "adding", last_reason: "adding",
+      updated_at: $now}')
+  if [ -e "$record_file" ] || [ -L "$record_file" ]; then
+    validate_regular_file "$record_file" || die "worktree ledger is ambiguous: $record_file"
+    worktree_schema_is_valid "$record_file" || die "worktree ledger is malformed: $record_file"
+    existing_status=$(jq -r '.status' "$record_file")
+    [ "$existing_status" = removed ] || die "worktree is already owned: $path"
+  fi
+  atomic_write "$record_file" "$json"
+}
+
+record_worktree_add_identity() {
+  local session_id=$1 common_dir=$2 path=$3 initial_head=$4 record_file updated now
+  validate_id session "$session_id"
+  validate_absolute_path common-dir "$common_dir"
+  validate_absolute_path worktree-path "$path"
+  [[ $initial_head =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || die 'invalid initial HEAD'
+  preflight_ledgers || die 'ledger preflight failed'
+  record_file=$(worktree_record_path "$common_dir" "$path")
+  [ -f "$record_file" ] && [ ! -L "$record_file" ] || die 'adding intent is missing'
+  jq --exit-status --arg session_id "$session_id" --arg common_dir "$common_dir" \
+    --arg path "$path" --arg initial_head "$initial_head" \
+    '.status == "adding" and .session_id == $session_id and .common_dir == $common_dir
+      and .path == $path and .initial_head == $initial_head' "$record_file" >/dev/null ||
+    die 'adding intent identity changed'
+  validate_added_worktree_identity "$common_dir" "$path" "$initial_head" ||
+    die 'added worktree identity is ambiguous'
+  now=$(date +%s)
+  updated=$(jq -c --arg git_dir "$validated_git_dir" \
+    --arg worktree_device "$validated_worktree_device" \
+    --arg worktree_inode "$validated_worktree_inode" --argjson now "$now" \
+    '.git_dir = $git_dir | .worktree_device = $worktree_device |
+      .worktree_inode = $worktree_inode | .last_reason = "adding-validated" |
+      .updated_at = $now' "$record_file")
+  atomic_write "$record_file" "$updated"
+}
+
+complete_worktree_add() {
+  local session_id=$1 common_dir=$2 path=$3 initial_head=$4 record_file
+  local expected_git_dir expected_device expected_inode updated now
+  validate_id session "$session_id"
+  validate_absolute_path common-dir "$common_dir"
+  validate_absolute_path worktree-path "$path"
+  [[ $initial_head =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || die 'invalid initial HEAD'
+  preflight_ledgers || die 'ledger preflight failed'
+  record_file=$(worktree_record_path "$common_dir" "$path")
+  [ -f "$record_file" ] && [ ! -L "$record_file" ] || die 'adding intent is missing'
+  jq --exit-status --arg session_id "$session_id" --arg common_dir "$common_dir" \
+    --arg path "$path" --arg initial_head "$initial_head" \
+    '.status == "adding" and .session_id == $session_id and .common_dir == $common_dir
+      and .path == $path and .initial_head == $initial_head
+      and has("git_dir") and has("worktree_device") and has("worktree_inode")' \
+    "$record_file" >/dev/null || die 'validated adding intent is missing'
+  expected_git_dir=$(jq -r '.git_dir' "$record_file") || die 'cannot read adding git dir'
+  expected_device=$(jq -r '.worktree_device' "$record_file") || die 'cannot read adding device'
+  expected_inode=$(jq -r '.worktree_inode' "$record_file") || die 'cannot read adding inode'
+  worktree_identity_is_valid "$path" "$common_dir" "$initial_head" "$expected_git_dir" \
+    "$expected_device" "$expected_inode" || die 'added worktree identity changed before ownership'
+  now=$(date +%s)
+  updated=$(jq -c --argjson now "$now" \
+    'del(.requested_head, .roster_fingerprint, .parent_device, .parent_inode) |
+      .status = "owned" | .last_reason = "registered" | .updated_at = $now' "$record_file")
+  atomic_write "$record_file" "$updated"
 }
 
 register_worktree() {
@@ -1395,6 +1606,27 @@ cleanup-session)
   acquire_creation_lock "$2"
   acquire_ledger_lock
   cleanup_session "$2"
+  ;;
+begin-worktree-add)
+  [ "$#" -eq 9 ] || usage
+  acquire_mutation_lock
+  acquire_creation_lock "$2"
+  acquire_ledger_lock
+  begin_worktree_add "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
+  ;;
+record-worktree-add-identity)
+  [ "$#" -eq 5 ] || usage
+  acquire_mutation_lock
+  acquire_creation_lock "$2"
+  acquire_ledger_lock
+  record_worktree_add_identity "$2" "$3" "$4" "$5"
+  ;;
+complete-worktree-add)
+  [ "$#" -eq 5 ] || usage
+  acquire_mutation_lock
+  acquire_creation_lock "$2"
+  acquire_ledger_lock
+  complete_worktree_add "$2" "$3" "$4" "$5"
   ;;
 register-worktree)
   [ "$#" -eq 5 ] || usage

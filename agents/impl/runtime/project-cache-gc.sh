@@ -41,6 +41,201 @@ validate_project_cache() {
     '. == {version: 1, project_id: $project_id}' "$marker" >/dev/null 2>&1
 }
 
+validate_session_metadata() {
+  local metadata=$1 session_id=$2
+  jq --exit-status --arg session_id "$session_id" '
+    keys == ["boot_id", "client", "owner_pid", "owner_start_time", "project_id", "session_id", "version"] and
+    .version == 1 and
+    .session_id == $session_id and
+    (.client | type == "string" and test("^[A-Za-z0-9._-]+$")) and
+    (.project_id | type == "string" and test("^[0-9a-f]{64}$")) and
+    (.boot_id | type == "string" and test("^[A-Fa-f0-9-]+$")) and
+    (.owner_pid | type == "number" and . > 0 and floor == .) and
+    (.owner_start_time | type == "string" and test("^[0-9]+$"))
+  ' "$metadata" >/dev/null 2>&1
+}
+
+session_owner_state() {
+  local metadata=$1 metadata_boot_id owner_pid owner_start_time owner_uid owner_stat current_start_time
+  metadata_boot_id=$(jq -r '.boot_id' "$metadata") || {
+    printf 'unknown\n'
+    return
+  }
+  if [ "$metadata_boot_id" != "$current_boot_id" ]; then
+    printf 'orphan\n'
+    return
+  fi
+  owner_pid=$(jq -r '.owner_pid' "$metadata") || {
+    printf 'unknown\n'
+    return
+  }
+  owner_start_time=$(jq -r '.owner_start_time' "$metadata") || {
+    printf 'unknown\n'
+    return
+  }
+  if [ ! -e "/proc/$owner_pid" ]; then
+    printf 'orphan\n'
+    return
+  fi
+  owner_uid=$(stat -c %u "/proc/$owner_pid" 2>/dev/null) || {
+    printf 'unknown\n'
+    return
+  }
+  if [ "$owner_uid" != "$(id -u)" ]; then
+    printf 'unknown\n'
+    return
+  fi
+  owner_stat=$(<"/proc/$owner_pid/stat") || {
+    printf 'unknown\n'
+    return
+  }
+  current_start_time=$(awk '{print $20}' <<<"${owner_stat##*) }") || {
+    printf 'unknown\n'
+    return
+  }
+  if [ "$current_start_time" != "$owner_start_time" ]; then
+    printf 'orphan\n'
+    return
+  fi
+  printf 'live\n'
+}
+
+restore_quarantined_session() {
+  local original=$1 quarantine=$2 quarantine_root=$3 reason=$4
+  if [ ! -e "$original" ] && [ ! -L "$original" ] &&
+    mv -T -- "$quarantine" "$original"; then
+    printf 'dotfiles-agent-project-cache-gc: preserve %s: %s\n' "$reason" "$original" >&2
+    if rmdir -- "$quarantine_root" 2>/dev/null; then
+      return 0
+    fi
+    printf 'dotfiles-agent-project-cache-gc: unresolved quarantined session root: %s\n' \
+      "$quarantine_root" >&2
+    return 1
+  fi
+  printf 'dotfiles-agent-project-cache-gc: cannot restore quarantined session after %s: %s (quarantine: %s)\n' \
+    "$reason" "$original" "$quarantine" >&2
+  return 1
+}
+
+quarantined_session_root_is_valid() {
+  local path=$1
+  [ ! -L "$path" ] || return 1
+  [ -d "$path" ] || return 1
+  [ "$(stat -c %u -- "$path" 2>/dev/null)" = "$(id -u)" ] || return 1
+  chmod 700 -- "$path" 2>/dev/null || return 1
+  [ "$(stat -c %a -- "$path" 2>/dev/null)" = 700 ]
+}
+
+quarantined_session_root_can_restore() {
+  local path=$1
+  [ ! -L "$path" ] || return 1
+  [ -d "$path" ] || return 1
+  [ "$(stat -c %u -- "$path" 2>/dev/null)" = "$(id -u)" ]
+}
+
+retained_after_quarantine_cleanup() {
+  local quarantine_root=$1
+  if rmdir -- "$quarantine_root" 2>/dev/null; then
+    printf 'retained\n'
+    return
+  fi
+  printf 'dotfiles-agent-project-cache-gc: unresolved quarantined session root: %s\n' \
+    "$quarantine_root" >&2
+  printf 'retained-hidden\n'
+}
+
+remove_orphan_session() {
+  local session=$1 session_id=$2 project_id=$3 metadata path_device quarantine_root quarantine_path state reason
+  metadata="$session/metadata.json"
+  path_device=$(stat -c %d -- "$session") || die "cannot inspect session device: $session"
+  quarantine_root=$(mktemp -d "$sessions_root/.gc-quarantine.XXXXXXXX") || {
+    printf 'dotfiles-agent-project-cache-gc: cannot create session quarantine: %s\n' \
+      "$sessions_root" >&2
+    printf 'retained\n'
+    return
+  }
+  chmod 700 -- "$quarantine_root" || {
+    printf 'dotfiles-agent-project-cache-gc: cannot secure session quarantine: %s\n' \
+      "$quarantine_root" >&2
+    retained_after_quarantine_cleanup "$quarantine_root"
+    return
+  }
+  if [ -L "$quarantine_root" ] || [ ! -d "$quarantine_root" ] ||
+    [ "$(stat -c %u -- "$quarantine_root")" != "$(id -u)" ] ||
+    [ "$(stat -c %a -- "$quarantine_root")" != 700 ] ||
+    [ "$(stat -c %d -- "$quarantine_root")" != "$path_device" ]; then
+    printf 'dotfiles-agent-project-cache-gc: session quarantine is ambiguous: %s\n' \
+      "$quarantine_root" >&2
+    retained_after_quarantine_cleanup "$quarantine_root"
+    return
+  fi
+  quarantine_path="$quarantine_root/session"
+  if ! mv -T -- "$session" "$quarantine_path"; then
+    printf 'dotfiles-agent-project-cache-gc: cannot quarantine session: %s\n' "$session" >&2
+    retained_after_quarantine_cleanup "$quarantine_root"
+    return
+  fi
+
+  if ! quarantined_session_root_is_valid "$quarantine_path"; then
+    if quarantined_session_root_can_restore "$quarantine_path"; then
+      if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" \
+        ambiguous-quarantine-path; then
+        printf 'retained\n'
+      else
+        printf 'retained-hidden\n'
+      fi
+    else
+      printf 'dotfiles-agent-project-cache-gc: cannot restore ambiguous quarantined session: %s (quarantine: %s)\n' \
+        "$session" "$quarantine_path" >&2
+      printf 'retained-hidden\n'
+    fi
+    return
+  fi
+  metadata="$quarantine_path/metadata.json"
+  reason=
+  if [ -L "$metadata" ] || [ ! -f "$metadata" ] ||
+    [ "$(stat -c %u -- "$metadata" 2>/dev/null)" != "$(id -u)" ] ||
+    ! chmod 600 -- "$metadata" 2>/dev/null ||
+    [ "$(stat -c %a -- "$metadata" 2>/dev/null)" != 600 ] ||
+    ! validate_session_metadata "$metadata" "$session_id"; then
+    reason=invalid-quarantined-metadata
+  elif [ "$(jq -r '.project_id' "$metadata" 2>/dev/null)" != "$project_id" ]; then
+    reason=quarantined-project-changed
+  fi
+  if [ -n "$reason" ]; then
+    if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" "$reason"; then
+      printf 'retained\n'
+    else
+      printf 'retained-hidden\n'
+    fi
+    return
+  fi
+  state=$(session_owner_state "$metadata")
+  if [ "$state" != orphan ]; then
+    if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" \
+      "quarantined-owner-$state"; then
+      printf 'retained\n'
+    else
+      printf 'retained-hidden\n'
+    fi
+    return
+  fi
+
+  if ! rm -rf --one-file-system -- "$quarantine_path"; then
+    printf 'dotfiles-agent-project-cache-gc: cannot remove quarantined orphan: %s\n' \
+      "$quarantine_path" >&2
+    printf 'retained-hidden\n'
+    return
+  fi
+  if ! rmdir -- "$quarantine_root" 2>/dev/null; then
+    printf 'dotfiles-agent-project-cache-gc: preserve quarantine root: %s\n' \
+      "$quarantine_root" >&2
+    printf 'deleted-hidden\n'
+    return
+  fi
+  printf 'deleted\n'
+}
+
 create_shared_cache() {
   local cache_root=$1 shared_root marker marker_tmp created=false
   shared_root="$cache_root/shared"
@@ -130,41 +325,62 @@ trap cleanup_scan EXIT
 current_boot_id=$(cat /proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
 declare -A active_projects=()
 active_session_count=0
+declare -a orphan_sessions=() orphan_session_ids=() orphan_project_ids=()
+cache_gc_suppressed=false
 
-find "$sessions_root" -mindepth 1 -maxdepth 1 -print0 > "$scan_file" \
+: > "$scan_file"
+find "$sessions_root" -mindepth 1 -maxdepth 1 \
+  -name '.gc-quarantine.*' -print0 > "$scan_file" \
+  || die 'cannot enumerate quarantined agent sessions'
+while IFS= read -r -d '' quarantine_root; do
+  cache_gc_suppressed=true
+  printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session: %s\n' \
+    "$quarantine_root" >&2
+done < "$scan_file"
+
+find "$sessions_root" -mindepth 1 -maxdepth 1 \
+  ! -name '.gc-quarantine.*' -print0 > "$scan_file" \
   || die 'cannot enumerate agent sessions'
 while IFS= read -r -d '' session; do
   session_id=${session##*/}
   metadata="$session/metadata.json"
   validate_managed_directory "$session"
   validate_managed_file "$metadata" 'session metadata'
-  jq --exit-status --arg session_id "$session_id" '
-    keys == ["boot_id", "client", "owner_pid", "owner_start_time", "project_id", "session_id", "version"] and
-    .version == 1 and
-    .session_id == $session_id and
-    (.client | type == "string" and test("^[A-Za-z0-9._-]+$")) and
-    (.project_id | type == "string" and test("^[0-9a-f]{64}$")) and
-    (.boot_id | type == "string" and test("^[A-Fa-f0-9-]+$")) and
-    (.owner_pid | type == "number" and . > 0 and floor == .) and
-    (.owner_start_time | type == "string" and test("^[0-9]+$"))
-  ' "$metadata" >/dev/null 2>&1 || die "session metadata is invalid: $metadata"
-
-  metadata_boot_id=$(jq -r '.boot_id' "$metadata")
-  test "$metadata_boot_id" = "$current_boot_id" || continue
-  owner_pid=$(jq -r '.owner_pid' "$metadata")
-  owner_start_time=$(jq -r '.owner_start_time' "$metadata")
+  validate_session_metadata "$metadata" "$session_id" || die "session metadata is invalid: $metadata"
   project_id=$(jq -r '.project_id' "$metadata")
-  if ! kill -0 "$owner_pid" 2>/dev/null; then
-    continue
+  session_state=$(session_owner_state "$metadata")
+  if [ "$session_state" = orphan ]; then
+    orphan_sessions+=("$session")
+    orphan_session_ids+=("$session_id")
+    orphan_project_ids+=("$project_id")
+  else
+    active_projects[$project_id]=1
+    active_session_count=$((active_session_count + 1))
   fi
-  test -r "/proc/$owner_pid/stat" || die "live session process cannot be inspected: $session_id"
-  test "$(stat -c %u "/proc/$owner_pid")" = "$(id -u)" || continue
-  owner_stat=$(<"/proc/$owner_pid/stat")
-  current_start_time=$(awk '{print $20}' <<<"${owner_stat##*) }")
-  test "$current_start_time" = "$owner_start_time" || continue
-  active_projects[$project_id]=1
-  active_session_count=$((active_session_count + 1))
 done < "$scan_file"
+
+for index in "${!orphan_sessions[@]}"; do
+  removal_result=$(remove_orphan_session "${orphan_sessions[$index]}" \
+    "${orphan_session_ids[$index]}" "${orphan_project_ids[$index]}")
+  case "$removal_result" in
+  deleted) ;;
+  deleted-hidden)
+    cache_gc_suppressed=true
+    printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session created while handling: %s\n' \
+      "${orphan_sessions[$index]}" >&2
+    ;;
+  retained | retained-hidden)
+    active_projects[${orphan_project_ids[$index]}]=1
+    active_session_count=$((active_session_count + 1))
+    if [ "$removal_result" = retained-hidden ]; then
+      cache_gc_suppressed=true
+      printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session created while handling: %s\n' \
+        "${orphan_sessions[$index]}" >&2
+    fi
+    ;;
+  *) die "invalid orphan removal result: $removal_result" ;;
+  esac
+done
 
 # No cache is removed until every managed root and entry has passed validation.
 validate_shared_cache "$shared_root"
@@ -197,6 +413,7 @@ declare -A removed=()
 
 remove_cache() {
   local index=$1 project_id cache
+  [ "$cache_gc_suppressed" = false ] || return 0
   project_id=${cache_ids[$index]}
   cache=${cache_paths[$index]}
   test -z "${active_projects[$project_id]+x}" || return 0
@@ -225,7 +442,8 @@ if [ "$total_bytes" -gt "$high_bytes" ]; then
   )
 fi
 
-if [ "$total_bytes" -gt "$high_bytes" ] && [ "$active_session_count" -eq 0 ]; then
+if [ "$cache_gc_suppressed" = false ] && [ "$total_bytes" -gt "$high_bytes" ] &&
+  [ "$active_session_count" -eq 0 ]; then
   validate_shared_cache "$shared_root"
   rm -rf --one-file-system -- "$shared_root/cargo-home" "$shared_root/xdg-cache"
   mkdir -m 700 "$shared_root/cargo-home" "$shared_root/xdg-cache"

@@ -12,7 +12,10 @@ let
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   clientNames = builtins.attrNames agents.clients;
-  runtime = import ./package.nix { inherit lib pkgs; };
+  runtime = import ./package.nix {
+    inherit lib pkgs;
+    ledgerRetentionDays = agents.runtime.ledgerRetentionDays;
+  };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (
     name: name != "antigravity" && agents.clients.${name}.binary != ""

@@ -65,10 +65,51 @@ record_for_path() {
 
 assert_preserved() {
   local path=$1 reason=$2 record
-  test -d "$path"
+  if [ ! -d "$path" ]; then
+    echo "worktree was removed instead of preserved ($reason): $path" >&2
+    exit 1
+  fi
   record=$(record_for_path "$path")
   test "$(jq -r '.status' "$record")" = preserved
   test "$(jq -r '.last_reason' "$record")" = "$reason"
+}
+
+wait_for_file() {
+  local path=$1
+  for _ in $(seq 1 500); do
+    [ ! -e "$path" ] || return 0
+    sleep 0.01
+  done
+  echo "timed out waiting for fixture marker: $path" >&2
+  exit 1
+}
+
+assert_proc_failure_preserved() {
+  local case_name=$1 mode=$2 repo path ready holder_pid reference
+  new_case "$case_name"
+  repo="$HOME/repo"
+  path="$HOME/managed"
+  ready="$HOME/holder-ready"
+  create_repo "$repo"
+  begin_session "$case_name-session"
+  add_managed_worktree "$repo" "$path"
+  (
+    exec 7</dev/null
+    : >"$ready"
+    sleep 30
+  ) &
+  holder_pid=$!
+  trap 'kill "$holder_pid" 2>/dev/null || true' EXIT
+  wait_for_file "$ready"
+  reference="/proc/$holder_pid/fd/7"
+  DOTFILES_AGENT_TEST_PROC_MODE="$mode" \
+    DOTFILES_AGENT_TEST_PROC_REFERENCE="$reference" \
+    DOTFILES_AGENT_TEST_PROC_COUNTER="$HOME/readlink-count" \
+    "$CONTROLLED_PROC_RESOURCE" cleanup-session "$case_name-session"
+  assert_preserved "$path" ambiguous-process-reference
+  kill "$holder_pid"
+  wait "$holder_pid" 2>/dev/null || true
+  trap - EXIT
 }
 
 # Clean, unchanged, inactive linked worktrees are removed. The main and an
@@ -129,6 +170,45 @@ test -f "$mutation_path/late-untracked"
 test -z "$(find "$HOME" -maxdepth 1 -name '.dotfiles-agent-quarantine.*' -print -quit)"
 grep -Fq 'preserve dirty' "$HOME/cleanup.log"
 
+# A process can acquire a reference only after the worktree has moved. The
+# post-quarantine scan must restore the worktree instead of removing it.
+new_case quarantine-in-use
+race_use_repo="$HOME/repo"
+race_use_path="$HOME/managed"
+race_use_ready="$HOME/move-ready"
+race_use_release="$HOME/move-release"
+race_use_holder_ready="$HOME/holder-ready"
+create_repo "$race_use_repo"
+begin_session race-use-session
+add_managed_worktree "$race_use_repo" "$race_use_path"
+DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_READY="$race_use_ready" \
+  DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_RELEASE="$race_use_release" \
+  "$AUDIT_RESOURCE" cleanup-session race-use-session &
+race_use_cleanup_pid=$!
+trap 'kill "$race_use_cleanup_pid" 2>/dev/null || true' EXIT
+race_use_deadline=$((SECONDS + 10))
+while [ ! -e "$race_use_ready" ]; do
+  if ((SECONDS >= race_use_deadline)); then
+    echo "timed out waiting for fixture marker: $race_use_ready" >&2
+    exit 1
+  fi
+done
+race_use_quarantine=$(<"$race_use_ready")
+(
+  exec 7<"$race_use_quarantine/tracked"
+  : >"$race_use_holder_ready"
+  sleep 30
+) &
+race_use_holder_pid=$!
+trap 'kill "$race_use_cleanup_pid" "$race_use_holder_pid" 2>/dev/null || true' EXIT
+wait_for_file "$race_use_holder_ready"
+: >"$race_use_release"
+wait "$race_use_cleanup_pid"
+assert_preserved "$race_use_path" active-fd
+kill "$race_use_holder_pid"
+wait "$race_use_holder_pid" 2>/dev/null || true
+trap - EXIT
+
 # Tracked changes and nonignored untracked files are distinct preservation cases.
 new_case dirty
 dirty_repo="$HOME/repo"
@@ -175,6 +255,60 @@ trap 'kill "$active_pid" 2>/dev/null || true' EXIT
 assert_preserved "$active_path" active-cwd
 kill "$active_pid"
 wait "$active_pid" 2>/dev/null || true
+trap - EXIT
+
+# An open descriptor blocks cleanup even when every process cwd is outside.
+new_case active-fd
+fd_repo="$HOME/repo"
+fd_path="$HOME/active-fd"
+fd_ready="$HOME/fd-ready"
+create_repo "$fd_repo"
+begin_session fd-session
+add_managed_worktree "$fd_repo" "$fd_path"
+(
+  exec 7<"$fd_path/tracked"
+  : >"$fd_ready"
+  sleep 30
+) &
+fd_pid=$!
+trap 'kill "$fd_pid" 2>/dev/null || true' EXIT
+wait_for_file "$fd_ready"
+test "$(readlink -e "/proc/$fd_pid/cwd")" != "$fd_path"
+"$RESOURCE" cleanup-session fd-session
+assert_preserved "$fd_path" active-fd
+kill "$fd_pid"
+wait "$fd_pid" 2>/dev/null || true
+trap - EXIT
+
+# Reaping also preserves a clean worktree while a process executes a binary
+# from it with its cwd outside the worktree.
+new_case active-exe
+exe_repo="$HOME/repo"
+exe_path="$HOME/active-exe"
+create_repo "$exe_repo"
+cp "$TEST_BASH" "$exe_repo/fixture-bash"
+chmod +x "$exe_repo/fixture-bash"
+"$REAL_GIT" -C "$exe_repo" add fixture-bash
+"$REAL_GIT" -C "$exe_repo" commit -qm executable
+begin_session exe-session
+add_managed_worktree "$exe_repo" "$exe_path"
+setsid "$exe_path/fixture-bash" -c 'sleep 30; :' &
+exe_pid=$!
+trap 'kill -- "-$exe_pid" 2>/dev/null || true' EXIT
+for _ in $(seq 1 500); do
+  [ "$(readlink -e "/proc/$exe_pid/exe" 2>/dev/null || true)" != "$exe_path/fixture-bash" ] || break
+  sleep 0.01
+done
+test "$(readlink -e "/proc/$exe_pid/exe")" = "$exe_path/fixture-bash"
+test "$(readlink -e "/proc/$exe_pid/cwd")" != "$exe_path"
+exe_session="$(state_root)/sessions/exe-session.json"
+jq '.owner_start_time = "0"' "$exe_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$exe_session"
+"$RESOURCE" reap
+assert_preserved "$exe_path" active-exe
+kill -- "-$exe_pid" 2>/dev/null || true
+wait "$exe_pid" 2>/dev/null || true
 trap - EXIT
 
 # Missing worktrees keep their ledger record and are reported rather than pruned.
@@ -475,3 +609,126 @@ mv -T "$HOME/session.tmp" "$boot_session"
 "$RESOURCE" reap
 test ! -e "$boot_path"
 test "$(jq -r '.reason' "$boot_session")" = orphan-boot-mismatch
+
+# A future terminal timestamp is never interpreted as expired, even at the
+# largest accepted retention setting.
+new_case future-retention
+begin_session future-retention-session
+future_session="$(state_root)/sessions/future-retention-session.json"
+"$RESOURCE" cleanup-session future-retention-session
+future_timestamp=$(($(date +%s) + 365 * 24 * 60 * 60))
+jq --argjson timestamp "$future_timestamp" '.updated_at = $timestamp' \
+  "$future_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$future_session"
+"$OVERFLOW_RESOURCE" reap
+test -f "$future_session"
+
+# Retention arithmetic must not overflow and expire a fresh terminal ledger.
+new_case overflow-retention
+begin_session overflow-retention-session
+overflow_session="$(state_root)/sessions/overflow-retention-session.json"
+"$RESOURCE" cleanup-session overflow-retention-session
+"$OVERFLOW_RESOURCE" reap
+if [ ! -f "$overflow_session" ]; then
+  echo 'maximum ledger retention expired a fresh terminal ledger' >&2
+  exit 1
+fi
+
+# Permission denial, a disappearing magic link, and a stable broken link all
+# make process-reference inspection inconclusive and therefore preserve.
+assert_proc_failure_preserved proc-permission-denied denied
+assert_proc_failure_preserved proc-reference-disappearing disappearing
+assert_proc_failure_preserved proc-reference-broken broken
+
+# Terminal ledgers use their recorded update time for bounded retention. Ledger
+# expiry never authorizes deleting a worktree.
+new_case terminal-retention
+retention_repo="$HOME/repo"
+retention_path="$HOME/removed"
+create_repo "$retention_repo"
+begin_session retention-session
+add_managed_worktree "$retention_repo" "$retention_path"
+retention_record=$(record_for_path "$retention_path")
+retention_session="$(state_root)/sessions/retention-session.json"
+"$RESOURCE" cleanup-session retention-session
+test ! -e "$retention_path"
+for ledger in "$retention_record" "$retention_session"; do
+  jq '.updated_at = 0' "$ledger" >"$HOME/ledger.tmp"
+  chmod 600 "$HOME/ledger.tmp"
+  mv -T "$HOME/ledger.tmp" "$ledger"
+done
+"$RESOURCE" reap
+test ! -e "$retention_record"
+test ! -e "$retention_session"
+
+# Legacy terminal records without updated_at fall back to their own mtime.
+# Pruning the expired ownership record leaves the preserved dirty worktree.
+new_case legacy-retention
+legacy_repo="$HOME/repo"
+legacy_path="$HOME/preserved"
+create_repo "$legacy_repo"
+begin_session legacy-session
+add_managed_worktree "$legacy_repo" "$legacy_path"
+printf 'dirty\n' >"$legacy_path/untracked"
+legacy_record=$(record_for_path "$legacy_path")
+legacy_session="$(state_root)/sessions/legacy-session.json"
+"$RESOURCE" cleanup-session legacy-session
+assert_preserved "$legacy_path" dirty
+for ledger in "$legacy_record" "$legacy_session"; do
+  jq 'del(.updated_at)' "$ledger" >"$HOME/ledger.tmp"
+  chmod 600 "$HOME/ledger.tmp"
+  mv -T "$HOME/ledger.tmp" "$ledger"
+  touch -d '31 days ago' "$ledger"
+done
+"$RESOURCE" reap
+test -d "$legacy_path"
+test -f "$legacy_path/untracked"
+test ! -e "$legacy_record"
+test ! -e "$legacy_session"
+
+# Age never expires a live session or its owned worktree ledger.
+new_case active-retention
+active_retention_repo="$HOME/repo"
+active_retention_path="$HOME/active"
+create_repo "$active_retention_repo"
+begin_session active-retention-session
+add_managed_worktree "$active_retention_repo" "$active_retention_path"
+active_retention_record=$(record_for_path "$active_retention_path")
+active_retention_session="$(state_root)/sessions/active-retention-session.json"
+for ledger in "$active_retention_record" "$active_retention_session"; do
+  jq '.updated_at = 0' "$ledger" >"$HOME/ledger.tmp"
+  chmod 600 "$HOME/ledger.tmp"
+  mv -T "$HOME/ledger.tmp" "$ledger"
+done
+"$RESOURCE" reap
+test -d "$active_retention_path"
+test -f "$active_retention_record"
+test -f "$active_retention_session"
+
+# An unknown status is not a terminal deletion authorization.
+new_case unknown-retention
+begin_session unknown-retention-session
+unknown_session="$(state_root)/sessions/unknown-retention-session.json"
+jq '.status = "unknown" | .updated_at = 0' "$unknown_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$unknown_session"
+if "$RESOURCE" reap 2>"$HOME/reap.log"; then
+  echo 'retention accepted an unknown session status' >&2
+  exit 1
+fi
+test -f "$unknown_session"
+grep -Fq 'malformed-ledger' "$HOME/reap.log"
+
+# An old malformed ledger still fails closed and remains untouched.
+new_case malformed-retention
+mkdir -p "$(state_root)/sessions"
+printf '{\n' >"$(state_root)/sessions/malformed.json"
+chmod 600 "$(state_root)/sessions/malformed.json"
+touch -d '31 days ago' "$(state_root)/sessions/malformed.json"
+if "$RESOURCE" reap 2>"$HOME/reap.log"; then
+  echo 'retention accepted malformed ledger' >&2
+  exit 1
+fi
+test -f "$(state_root)/sessions/malformed.json"
+grep -Fq 'malformed-ledger' "$HOME/reap.log"

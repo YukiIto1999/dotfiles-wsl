@@ -11,7 +11,13 @@ die() {
 }
 
 run_git() {
-  "$git_command" "$@" 7>&- 8>&- 9>&-
+  (
+    exec 8>&- 9>&-
+    set +e
+    "$git_command" "$@" 7>&- 8>&- 9>&-
+    git_status=$?
+    exit "$git_status"
+  )
 }
 
 validate_id() {

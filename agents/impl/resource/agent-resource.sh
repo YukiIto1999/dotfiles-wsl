@@ -12,7 +12,13 @@ die() {
 }
 
 run_git() {
-  "$git_command" "$@" 7>&- 8>&- 9>&-
+  (
+    exec 8>&- 9>&-
+    set +e
+    "$git_command" "$@" 7>&- 8>&- 9>&-
+    git_status=$?
+    exit "$git_status"
+  )
 }
 
 validate_id() {
@@ -147,7 +153,7 @@ worktree_schema_is_valid() {
     type == "object"
     and (
       (
-        .status == "quarantining"
+        (.status == "quarantining" or .status == "removing")
         and keys == ["common_dir", "git_dir", "initial_head", "last_reason", "path", "quarantine_path", "session_id", "status", "updated_at", "version", "worktree_device", "worktree_inode"]
       )
       or (
@@ -155,7 +161,7 @@ worktree_schema_is_valid() {
         and keys == ["common_dir", "git_dir", "initial_head", "last_reason", "path", "session_id", "status", "updated_at", "version", "worktree_device", "worktree_inode"]
       )
       or (
-        .status != "quarantining"
+        (.status != "quarantining" and .status != "removing")
         and (
           keys == ["common_dir", "initial_head", "last_reason", "path", "session_id", "status", "version"]
           or keys == ["common_dir", "initial_head", "last_reason", "path", "session_id", "status", "updated_at", "version"]
@@ -166,12 +172,12 @@ worktree_schema_is_valid() {
     and (.session_id | type == "string")
     and (.common_dir | type == "string" and startswith("/"))
     and (.path | type == "string" and startswith("/"))
-    and ((.status != "quarantining") or (.quarantine_path | type == "string" and startswith("/")))
+    and (((.status != "quarantining") and (.status != "removing")) or (.quarantine_path | type == "string" and startswith("/")))
     and ((has("git_dir") | not) or (.git_dir | type == "string" and startswith("/")))
     and ((has("worktree_device") | not) or (.worktree_device | type == "string" and test("^[0-9]+$")))
     and ((has("worktree_inode") | not) or (.worktree_inode | type == "string" and test("^[0-9]+$")))
     and (.initial_head | type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$"))
-    and (.status == "owned" or .status == "quarantining" or .status == "preserved" or .status == "removed")
+    and (.status == "owned" or .status == "quarantining" or .status == "removing" or .status == "preserved" or .status == "removed")
     and (.last_reason | type == "string" and length > 0)
     and ((has("updated_at") | not) or (.updated_at | type == "number" and . >= 0 and floor == .))
   ' "$path" >/dev/null
@@ -314,6 +320,22 @@ mark_quarantining_reason() {
   now=$(date +%s)
   updated=$(jq -c --arg reason "$reason" --argjson now "$now" \
     '.status = "quarantining" | .last_reason = $reason | .updated_at = $now' "$record")
+  atomic_write "$record" "$updated"
+}
+
+mark_worktree_removing() {
+  local record=$1 updated now
+  now=$(date +%s)
+  updated=$(jq -c --argjson now "$now" \
+    '.status = "removing" | .last_reason = "removing" | .updated_at = $now' "$record")
+  atomic_write "$record" "$updated"
+}
+
+mark_removing_reason() {
+  local record=$1 reason=$2 updated now
+  now=$(date +%s)
+  updated=$(jq -c --arg reason "$reason" --argjson now "$now" \
+    '.status = "removing" | .last_reason = $reason | .updated_at = $now' "$record")
   atomic_write "$record" "$updated"
 }
 
@@ -525,6 +547,114 @@ remove_empty_transaction_root() {
   rmdir -- "$quarantine_root" 2>/dev/null
 }
 
+git_admin_entry_is_absent() {
+  local common_dir=$1 git_dir=$2 canonical_common admin_root entry_name
+  [ ! -L "$common_dir" ] || return 1
+  [ -d "$common_dir" ] || return 1
+  [ "$(stat -c %u -- "$common_dir" 2>/dev/null)" = "$resource_owner_uid" ] || return 1
+  canonical_common=$(realpath -e -- "$common_dir" 2>/dev/null) || return 1
+  [ "$canonical_common" = "$common_dir" ] || return 1
+  admin_root="$common_dir/worktrees"
+  case "$git_dir" in
+  "$admin_root"/*) ;;
+  *) return 1 ;;
+  esac
+  entry_name=${git_dir#"$admin_root/"}
+  [ -n "$entry_name" ] && [[ $entry_name != */* ]] || return 1
+  [[ $entry_name != *[$'\001'-$'\037'$'\177']* ]] || return 1
+  [ ! -e "$git_dir" ] && [ ! -L "$git_dir" ] || return 1
+  if [ -e "$admin_root" ] || [ -L "$admin_root" ]; then
+    [ ! -L "$admin_root" ] || return 1
+    [ -d "$admin_root" ] || return 1
+    [ "$(stat -c %u -- "$admin_root" 2>/dev/null)" = "$resource_owner_uid" ] || return 1
+    [ "$(realpath -e -- "$admin_root" 2>/dev/null)" = "$admin_root" ] || return 1
+  fi
+}
+
+complete_removing_transaction() {
+  local record=$1 original_path=$2 quarantine_path=$3 common_dir=$4 git_dir=$5
+  if ! git_admin_entry_is_absent "$common_dir" "$git_dir"; then
+    mark_removing_reason "$record" removing-admin-present
+    printf '%s: preserve removing-admin-present: %s (admin: %s)\n' \
+      "$program" "$original_path" "$git_dir" >&2
+    return 1
+  fi
+  if ! remove_empty_transaction_root "$original_path" "$quarantine_path"; then
+    mark_removing_reason "$record" removing-root-unresolved
+    printf '%s: preserve removing-root-unresolved: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
+  mark_worktree "$record" removed clean-unchanged-inactive
+  printf '%s: completed managed worktree removal: %s\n' "$program" "$original_path" >&2
+}
+
+recover_removing_worktree() {
+  local record=$1 original_path quarantine_path common_dir initial_head git_dir
+  local worktree_device worktree_inode status_output process_reason
+  original_path=$(jq -r '.path' "$record") || return 1
+  quarantine_path=$(jq -r '.quarantine_path' "$record") || return 1
+  common_dir=$(jq -r '.common_dir' "$record") || return 1
+  initial_head=$(jq -r '.initial_head' "$record") || return 1
+  git_dir=$(jq -r '.git_dir' "$record") || return 1
+  worktree_device=$(jq -r '.worktree_device' "$record") || return 1
+  worktree_inode=$(jq -r '.worktree_inode' "$record") || return 1
+  if [ -e "$original_path" ] || [ -L "$original_path" ]; then
+    mark_removing_reason "$record" removing-original-present
+    printf '%s: preserve removing-original-present: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
+  if [ ! -e "$quarantine_path" ] && [ ! -L "$quarantine_path" ]; then
+    complete_removing_transaction "$record" "$original_path" "$quarantine_path" \
+      "$common_dir" "$git_dir"
+    return
+  fi
+  if ! quarantine_root_is_valid "$original_path" "$quarantine_path" ||
+    ! worktree_identity_is_valid "$quarantine_path" "$common_dir" "$initial_head" \
+      "$git_dir" "$worktree_device" "$worktree_inode"; then
+    mark_removing_reason "$record" removing-quarantine-ambiguous
+    printf '%s: preserve removing-quarantine-ambiguous: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
+  status_output=$(run_git -C "$quarantine_path" status \
+    --porcelain=v1 --untracked-files=all 2>/dev/null) || {
+    mark_removing_reason "$record" removing-status-failed
+    printf '%s: preserve removing-status-failed: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  }
+  if [ -n "$status_output" ]; then
+    mark_removing_reason "$record" removing-dirty
+    printf '%s: preserve removing-dirty: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
+  if process_reason=$(process_reference_reason "$quarantine_path"); then
+    mark_removing_reason "$record" "removing-$process_reason"
+    printf '%s: preserve removing-%s: %s (quarantine: %s)\n' \
+      "$program" "$process_reason" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
+  if ! worktree_identity_is_valid "$quarantine_path" "$common_dir" "$initial_head" \
+    "$git_dir" "$worktree_device" "$worktree_inode"; then
+    mark_removing_reason "$record" removing-quarantine-ambiguous
+    printf '%s: preserve removing-quarantine-ambiguous: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
+  mark_worktree_removing "$record"
+  if ! run_git --git-dir="$common_dir" worktree remove -- "$quarantine_path"; then
+    mark_removing_reason "$record" removing-remove-failed
+    printf '%s: preserve removing-remove-failed: %s (quarantine: %s)\n' \
+      "$program" "$original_path" "$quarantine_path" >&2
+    return 1
+  fi
+  complete_removing_transaction "$record" "$original_path" "$quarantine_path" \
+    "$common_dir" "$git_dir"
+}
+
 recover_quarantining_worktree() {
   local record=$1 original_path quarantine_path common_dir initial_head git_dir
   local worktree_device worktree_inode last_reason quarantine_root
@@ -641,11 +771,13 @@ recover_quarantining_worktree() {
 }
 
 recover_quarantine_on_exit() {
-  local exit_status=$1 record=${quarantine_transaction_record-}
+  local exit_status=$1 record=${quarantine_transaction_record-} status
   trap - EXIT TERM
-  if [ -n "$record" ] && [ -f "$record" ] && [ ! -L "$record" ] &&
-    [ "$(jq -r '.status' "$record" 2>/dev/null)" = quarantining ]; then
-    recover_quarantining_worktree "$record" || true
+  if [ -n "$record" ] && [ -f "$record" ] && [ ! -L "$record" ]; then
+    status=$(jq -r '.status' "$record" 2>/dev/null) || status=
+    case "$status" in
+    quarantining) recover_quarantining_worktree "$record" || true ;;
+    esac
   fi
   exit "$exit_status"
 }
@@ -953,20 +1085,17 @@ cleanup_worktree_record() {
     finish_quarantine_transaction
     return
   fi
+  mark_worktree_removing "$record"
   if ! run_git --git-dir="$common_dir" worktree remove -- "$quarantine_path"; then
-    restore_quarantined_worktree "$record" "$common_dir" "$path" \
-      "$quarantine_path" "$quarantine_root" remove-failed
+    mark_removing_reason "$record" removing-remove-failed
     finish_quarantine_transaction
     return
   fi
-  if ! rmdir -- "$quarantine_root" 2>/dev/null; then
-    mark_quarantining_reason "$record" quarantine-remove-root-unresolved
-    printf '%s: preserve quarantine-remove-root-unresolved: %s (quarantine: %s)\n' \
-      "$program" "$path" "$quarantine_path" >&2
+  if ! complete_removing_transaction "$record" "$path" "$quarantine_path" \
+    "$common_dir" "$initial_git_dir"; then
     finish_quarantine_transaction
     return
   fi
-  mark_worktree "$record" removed clean-unchanged-inactive
   printf '%s: removed managed worktree: %s\n' "$program" "$path"
   finish_quarantine_transaction
 }
@@ -979,6 +1108,7 @@ cleanup_session_records() {
     case "$status" in
     owned) cleanup_worktree_record "$record" ;;
     quarantining) recover_quarantining_worktree "$record" || true ;;
+    removing) recover_removing_worktree "$record" || true ;;
     esac
   done
 }

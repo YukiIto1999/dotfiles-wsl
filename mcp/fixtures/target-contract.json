@@ -57,11 +57,12 @@
       "port": 8773,
       "probe": {
         "args": {
-          "f": "raw",
-          "url": "http://127.0.0.1:11235/health"
+          "context_type": "doc",
+          "max_results": 1,
+          "query": "health"
         },
         "timeout": 60,
-        "tool": "md"
+        "tool": "ask"
       },
       "provider": "crawl4ai",
       "waitUnits": [

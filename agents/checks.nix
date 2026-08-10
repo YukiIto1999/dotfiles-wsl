@@ -10,7 +10,8 @@
 
 let
   expected = builtins.fromJSON (builtins.readFile ./fixtures/client-contract.json);
-  clients = hostConfig.dotfiles.agents.clients;
+  agentConfig = hostConfig.dotfiles.agents;
+  clients = agentConfig.clients;
   variantClients = variantConfig.dotfiles.agents.clients;
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
   artifacts = hostConfig.dotfiles.artifacts;
@@ -21,9 +22,67 @@ let
   roster = hostConfig.dotfiles.toolchain.lsp;
   installAgents = hostConfig.dotfiles.commands.installAgents;
   installAgentsExe = lib.getExe installAgents;
-  runtime = import ./runtime/package.nix {
-    inherit lib pkgs;
-    agentWorktreeCommand = lib.getExe hostConfig.dotfiles.commands.agentWorktree;
+  runtime = import ./package.nix { inherit lib pkgs; };
+  raceGit = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource-race-git";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      real_git=${lib.escapeShellArg (lib.getExe pkgs.git)}
+      if [[ ''${1-} == worktree && ''${2-} == add ]]; then
+        set +e
+        "$real_git" "$@"
+        status=$?
+        set -e
+        if ((status == 0)) && [[ -n ''${DOTFILES_AGENT_TEST_ADD_READY-} \
+          && -n ''${DOTFILES_AGENT_TEST_ADD_RELEASE-} ]]; then
+          : >"$DOTFILES_AGENT_TEST_ADD_READY"
+          while [[ ! -e $DOTFILES_AGENT_TEST_ADD_RELEASE ]]; do
+            sleep 0.01
+          done
+        fi
+        exit "$status"
+      fi
+      exec "$real_git" "$@"
+    '';
+  };
+  raceAgentResource = runtime.mkAgentResource {
+    name = "dotfiles-agent-resource-race";
+    gitCommand = lib.getExe raceGit;
+  };
+  raceAgentWorktree = runtime.mkAgentWorktree {
+    name = "dotfiles-agent-worktree-race";
+    gitCommand = lib.getExe raceGit;
+    resourceCommand = lib.getExe raceAgentResource;
+  };
+  auditGit = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource-audit-git";
+    text = ''
+      if [[ -n ''${DOTFILES_AGENT_TEST_GIT_LOG-} ]]; then
+        {
+          printf 'git'
+          printf '\t%s' "$@"
+          printf '\n'
+        } >>"$DOTFILES_AGENT_TEST_GIT_LOG"
+      fi
+      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == move \
+        && -n ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE-} \
+        && ! -e ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE} ]]; then
+        set +e
+        ${lib.escapeShellArg (lib.getExe pkgs.git)} "$@"
+        status=$?
+        set -e
+        if ((status == 0)); then
+          : >"$DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE"
+          printf 'late mutation\n' >"''${6}/late-untracked"
+        fi
+        exit "$status"
+      fi
+      exec ${lib.escapeShellArg (lib.getExe pkgs.git)} "$@"
+    '';
+  };
+  auditAgentResource = runtime.mkAgentResource {
+    name = "dotfiles-agent-resource-audit";
+    gitCommand = lib.getExe auditGit;
   };
   fakeNix = pkgs.writeShellScript "fake-nix-command" ''
     printf '%s\0' "$@" > "$ARG_CAPTURE"
@@ -1433,8 +1492,8 @@ in
         GIT_SHIM_DIR = fixtureAgentShims;
       }
       ''
-        bash ${./runtime/tests/launcher.sh}
-        bash ${./runtime/tests/git-shim.sh}
+        bash ${./fixtures/runtime/launcher.sh}
+        bash ${./fixtures/runtime/git-shim.sh}
         touch $out
       '';
 
@@ -1448,7 +1507,7 @@ in
         SHIM_DIR = fixtureNixBuildShims;
       }
       ''
-        bash ${./runtime/tests/nix-build-shims.sh}
+        bash ${./fixtures/runtime/nix-build-shims.sh}
         touch $out
       '';
 
@@ -1472,7 +1531,7 @@ in
         GC = lib.getExe runtime.gc;
       }
       ''
-        bash ${./runtime/tests/project-cache-gc.sh}
+        bash ${./fixtures/runtime/project-cache-gc.sh}
         touch $out
       '';
 
@@ -1490,7 +1549,198 @@ in
         VERIFY = lib.getExe runtime.verify;
       }
       ''
-        bash ${./runtime/tests/verify.sh}
+        bash ${./fixtures/runtime/verify.sh}
+        touch $out
+      '';
+
+  agent-resource-contract =
+    let
+      agentResource = agentConfig.agentResource;
+      agentWorktree = agentConfig.agentWorktree;
+      commandName =
+        package:
+        let
+          mainProgram = package.meta.mainProgram or null;
+        in
+        if mainProgram == null then lib.getName package else mainProgram;
+      commandOwnership =
+        command: packages:
+        let
+          name = commandName command;
+          owners = builtins.filter (package: commandName package == name) packages;
+        in
+        {
+          inherit name;
+          count = builtins.length owners;
+          paths = map toString owners;
+        };
+      commandOwnershipDiagnostic =
+        expected: ownership:
+        "expected=${toString expected} command=${ownership.name} "
+        + "count=${toString ownership.count} paths=${builtins.toJSON ownership.paths}";
+      ownershipMatchesExpectedPackage =
+        expected: ownership: ownership.count == 1 && ownership.paths == [ (toString expected) ];
+      replacePackage =
+        expected: replacement:
+        map (package: if package == expected then replacement else package) (
+          hostConfig.environment.systemPackages
+        );
+      duplicateAgentResource = pkgs.writeShellApplication {
+        name = "dotfiles-agent-resource";
+        text = "exit 0";
+      };
+      replacementAgentWorktree = pkgs.writeShellApplication {
+        name = "dotfiles-agent-worktree";
+        text = "exit 0";
+      };
+      duplicateResourcePackages = hostConfig.environment.systemPackages ++ [ duplicateAgentResource ];
+      replacementResourcePackages = replacePackage agentResource duplicateAgentResource;
+      replacementWorktreePackages = replacePackage agentWorktree replacementAgentWorktree;
+      resourceOwnership = commandOwnership agentResource hostConfig.environment.systemPackages;
+      worktreeOwnership = commandOwnership agentWorktree hostConfig.environment.systemPackages;
+      duplicateResourceOwnership = commandOwnership agentResource duplicateResourcePackages;
+      replacementResourceOwnership = commandOwnership agentResource replacementResourcePackages;
+      replacementWorktreeOwnership = commandOwnership agentWorktree replacementWorktreePackages;
+      expectedDuplicateResourceOwnerPaths = map toString [
+        agentResource
+        duplicateAgentResource
+      ];
+      expectedDuplicateResourceDiagnostic =
+        "expected=${toString agentResource} command=dotfiles-agent-resource count=2 "
+        + "paths=${builtins.toJSON expectedDuplicateResourceOwnerPaths}";
+      expectedReplacementResourceDiagnostic =
+        "expected=${toString agentResource} command=dotfiles-agent-resource count=1 "
+        + "paths=${builtins.toJSON [ (toString duplicateAgentResource) ]}";
+      expectedReplacementWorktreeDiagnostic =
+        "expected=${toString agentWorktree} command=dotfiles-agent-worktree count=1 "
+        + "paths=${builtins.toJSON [ (toString replacementAgentWorktree) ]}";
+      reaper = hostConfig.systemd.services.dotfiles-agent-resource-reaper or null;
+      expectedReaperEnvironment = "HOME=${hostConfig.dotfiles.host.homeDir}";
+      reaperServiceConfigValid =
+        serviceConfig:
+        serviceConfig.Type == "oneshot"
+        && serviceConfig.User == hostConfig.dotfiles.host.username
+        && (serviceConfig.Environment or null) == expectedReaperEnvironment
+        && (serviceConfig.UMask or null) == "0077"
+        && serviceConfig.ExecStart == "${lib.getExe runtime.agentResource} reap";
+      reaperEnvironmentMutations = [
+        (builtins.removeAttrs reaper.serviceConfig [ "Environment" ])
+        (reaper.serviceConfig // { Environment = "HOME=/tmp"; })
+      ];
+      reaperUMaskMutations = [
+        (builtins.removeAttrs reaper.serviceConfig [ "UMask" ])
+        (reaper.serviceConfig // { UMask = "0022"; })
+      ];
+      timer = hostConfig.systemd.timers.dotfiles-agent-resource-reaper or null;
+    in
+    assert lib.assertMsg (
+      agentConfig.stateRoot == "~/.local/state/dotfiles-wsl/agent-resources"
+    ) "agent resource state root changed";
+    assert lib.assertMsg (
+      agentResource == runtime.agentResource
+      && agentWorktree == runtime.agentWorktree
+      && hostConfig.dotfiles.commands.agentResource == runtime.agentResource
+      && hostConfig.dotfiles.commands.agentWorktree == runtime.agentWorktree
+    ) "agent resource commands are missing";
+    assert lib.assertMsg (ownershipMatchesExpectedPackage agentResource resourceOwnership) (
+      "agent resource command must be owned exactly once by the expected package: "
+      + commandOwnershipDiagnostic agentResource resourceOwnership
+    );
+    assert lib.assertMsg (ownershipMatchesExpectedPackage agentWorktree worktreeOwnership) (
+      "agent worktree command must be owned exactly once by the expected package: "
+      + commandOwnershipDiagnostic agentWorktree worktreeOwnership
+    );
+    assert lib.assertMsg (
+      duplicateResourceOwnership.count != 1
+    ) "agent resource ownership contract accepted a duplicate executable basename";
+    assert lib.assertMsg (
+      duplicateResourceOwnership == {
+        name = "dotfiles-agent-resource";
+        count = 2;
+        paths = expectedDuplicateResourceOwnerPaths;
+      }
+    ) "agent resource duplicate fixture owner paths changed";
+    assert lib.assertMsg (
+      commandOwnershipDiagnostic agentResource duplicateResourceOwnership
+      == expectedDuplicateResourceDiagnostic
+    ) "agent resource duplicate fixture diagnostic changed";
+    assert lib.assertMsg (
+      replacementResourceOwnership == {
+        name = "dotfiles-agent-resource";
+        count = 1;
+        paths = [ (toString duplicateAgentResource) ];
+      }
+      &&
+        replacementWorktreeOwnership == {
+          name = "dotfiles-agent-worktree";
+          count = 1;
+          paths = [ (toString replacementAgentWorktree) ];
+        }
+    ) "agent command replacement fixtures no longer reproduce count-only ownership";
+    assert lib.assertMsg (
+      !ownershipMatchesExpectedPackage agentResource replacementResourceOwnership
+      && !ownershipMatchesExpectedPackage agentWorktree replacementWorktreeOwnership
+    ) "agent command ownership contract accepted a different package with the same basename";
+    assert lib.assertMsg (
+      commandOwnershipDiagnostic agentResource replacementResourceOwnership
+      == expectedReplacementResourceDiagnostic
+      &&
+        commandOwnershipDiagnostic agentWorktree replacementWorktreeOwnership
+        == expectedReplacementWorktreeDiagnostic
+    ) "agent command replacement fixture diagnostic changed";
+    assert lib.assertMsg (reaper != null && timer != null) "agent resource reaper units are missing";
+    assert lib.assertMsg (
+      reaper.serviceConfig.Type == "oneshot"
+    ) "agent resource reaper must be oneshot";
+    assert lib.assertMsg (
+      reaper.serviceConfig.User == hostConfig.dotfiles.host.username
+    ) "agent resource reaper must run as the desktop user";
+    assert lib.assertMsg (
+      (reaper.serviceConfig.Environment or null) == expectedReaperEnvironment
+    ) "agent resource reaper HOME changed";
+    assert lib.assertMsg (
+      (reaper.serviceConfig.UMask or null) == "0077"
+    ) "agent resource reaper UMask changed";
+    assert lib.assertMsg (
+      reaper.serviceConfig.ExecStart == "${lib.getExe runtime.agentResource} reap"
+    ) "agent resource reaper command changed";
+    assert lib.assertMsg (builtins.all (
+      serviceConfig: !reaperServiceConfigValid serviceConfig
+    ) reaperEnvironmentMutations) "agent resource reaper contract accepted a missing or changed HOME";
+    assert lib.assertMsg (builtins.all (
+      serviceConfig: !reaperServiceConfigValid serviceConfig
+    ) reaperUMaskMutations) "agent resource reaper contract accepted a missing or changed UMask";
+    assert lib.assertMsg (timer.wantedBy == [ "timers.target" ]) "agent resource timer is disabled";
+    assert lib.assertMsg (
+      timer.timerConfig == {
+        OnCalendar = "hourly";
+        Persistent = true;
+        Unit = "dotfiles-agent-resource-reaper.service";
+      }
+    ) "agent resource timer must run hourly and persist missed runs";
+    pkgs.runCommandLocal "check-agent-resource-contract" { } "touch $out";
+
+  agent-resource-behavior =
+    pkgs.runCommandLocal "check-agent-resource-behavior"
+      {
+        nativeBuildInputs = with pkgs; [
+          bash
+          coreutils
+          git
+          gnugrep
+          jq
+          util-linux
+        ];
+      }
+      ''
+        export RESOURCE=${lib.getExe runtime.agentResource}
+        export WORKTREE=${lib.getExe runtime.agentWorktree}
+        export REAL_GIT=${lib.getExe pkgs.git}
+        export RACE_RESOURCE=${lib.getExe raceAgentResource}
+        export RACE_WORKTREE=${lib.getExe raceAgentWorktree}
+        export AUDIT_RESOURCE=${lib.getExe auditAgentResource}
+        export TEST_BASH=${lib.getExe pkgs.bash}
+        ${lib.getExe pkgs.bash} ${./fixtures/resource/agent-resources.sh}
         touch $out
       '';
 }

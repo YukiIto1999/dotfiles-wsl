@@ -12,10 +12,7 @@ let
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   clientNames = builtins.attrNames agents.clients;
-  runtime = import ./runtime/package.nix {
-    inherit lib pkgs;
-    agentWorktreeCommand = lib.getExe config.dotfiles.commands.agentWorktree;
-  };
+  runtime = import ./package.nix { inherit lib pkgs; };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (
     name: name != "antigravity" && agents.clients.${name}.binary != ""
@@ -274,14 +271,21 @@ in
   options.dotfiles.agents = agentContract.options;
 
   config = {
-    dotfiles.agents.shared = {
-      rules = ./shared/AGENTS.md;
-      skills = allSkills;
-      definitions = sharedDefinitions;
+    dotfiles.agents = {
+      stateRoot = "~/.local/state/dotfiles-wsl/agent-resources";
+      inherit (runtime) agentResource agentWorktree;
+      shared = {
+        rules = ./shared/AGENTS.md;
+        skills = allSkills;
+        definitions = sharedDefinitions;
+      };
     };
 
     dotfiles.artifacts = managedArtifacts;
-    dotfiles.commands.installAgents = installAgents;
+    dotfiles.commands = {
+      inherit installAgents;
+      inherit (runtime) agentResource agentWorktree;
+    };
 
     assertions = agentContract.assertionsFor agents ++ [
       {
@@ -366,6 +370,27 @@ in
       timerConfig = {
         OnCalendar = "daily";
         Persistent = true;
+      };
+    };
+
+    systemd.services.dotfiles-agent-resource-reaper = {
+      description = "Reap inactive agent-owned linked worktrees";
+      serviceConfig = {
+        Type = "oneshot";
+        User = cfg.host.username;
+        Environment = "HOME=${cfg.host.homeDir}";
+        UMask = "0077";
+        ExecStart = "${lib.getExe runtime.agentResource} reap";
+      };
+    };
+
+    systemd.timers.dotfiles-agent-resource-reaper = {
+      description = "Hourly agent resource ownership reaper";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        OnCalendar = "hourly";
+        Persistent = true;
+        Unit = "dotfiles-agent-resource-reaper.service";
       };
     };
   };

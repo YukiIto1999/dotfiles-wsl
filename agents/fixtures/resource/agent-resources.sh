@@ -259,6 +259,30 @@ test "$(jq -r '.status' "$post_identity_record")" = owned
 test ! -e "$post_identity_path"
 test "$(jq -r '.status' "$post_identity_record")" = removed
 
+# Replacement after the quarantined HEAD check must not be removed under the
+# registered worktree's transaction identity.
+new_case quarantine-identity-before-remove
+late_identity_repo="$HOME/repo"
+late_identity_path="$HOME/managed"
+late_identity_safe_path="$HOME/registered-safe"
+late_identity_marker="$HOME/replaced-after-head"
+create_repo "$late_identity_repo"
+begin_session late-identity-session
+add_managed_worktree "$late_identity_repo" "$late_identity_path"
+late_identity_record=$(record_for_path "$late_identity_path")
+DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_SAFE="$late_identity_safe_path" \
+  DOTFILES_AGENT_TEST_REPLACE_AFTER_HEAD_MARKER="$late_identity_marker" \
+  "$AUDIT_RESOURCE" cleanup-session late-identity-session
+test -e "$late_identity_marker"
+late_identity_quarantine=$(jq -r '.quarantine_path' "$late_identity_record")
+if [ "$(jq -r '.status' "$late_identity_record")" != quarantining ]; then
+  echo 'late quarantine replacement terminalized the registered transaction' >&2
+  exit 1
+fi
+test -d "$late_identity_safe_path"
+test -d "$late_identity_quarantine"
+test ! -e "$late_identity_path"
+
 # A process can acquire a reference only after the worktree has moved. The
 # post-quarantine scan must restore the worktree instead of removing it.
 new_case quarantine-in-use
@@ -320,6 +344,9 @@ if [ "$(jq -r '.status' "$sigkill_record")" != quarantining ]; then
   exit 1
 fi
 test "$(jq -r '.quarantine_path' "$sigkill_record")" = "$sigkill_quarantine"
+sigkill_git_dir=$(jq -r '.git_dir' "$sigkill_record")
+sigkill_device=$(jq -r '.worktree_device' "$sigkill_record")
+sigkill_inode=$(jq -r '.worktree_inode' "$sigkill_record")
 test ! -e "$sigkill_path"
 test -d "$sigkill_quarantine"
 mkdir "$sigkill_path"
@@ -335,13 +362,28 @@ rmdir "$sigkill_path"
 test -d "$sigkill_path"
 test ! -e "$sigkill_quarantine"
 test "$(jq -r '.status' "$sigkill_record")" = owned
+test "$(jq -r '.git_dir' "$sigkill_record")" = "$sigkill_git_dir"
+test "$(jq -r '.worktree_device' "$sigkill_record")" = "$sigkill_device"
+test "$(jq -r '.worktree_inode' "$sigkill_record")" = "$sigkill_inode"
 if jq --exit-status 'has("quarantine_path")' "$sigkill_record" >/dev/null; then
   echo 'recovered worktree ledger retained stale quarantine intent' >&2
   exit 1
 fi
-"$RESOURCE" reap
-test ! -e "$sigkill_path"
-test "$(jq -r '.status' "$sigkill_record")" = removed
+sigkill_replacement_safe="$HOME/replacement-safe"
+"$REAL_GIT" -C "$sigkill_repo" worktree add -q --detach \
+  "$sigkill_replacement_safe" HEAD
+sigkill_replacement_marker="$HOME/replaced-after-identity"
+DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_PATH="$sigkill_path" \
+  DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_SAFE="$sigkill_replacement_safe" \
+  DOTFILES_AGENT_TEST_REPLACE_AFTER_IDENTITY_MARKER="$sigkill_replacement_marker" \
+  "$AUDIT_RESOURCE" reap
+test -e "$sigkill_replacement_marker"
+if [ ! -d "$sigkill_path" ]; then
+  echo 'reap deleted an ABA replacement introduced after identity validation' >&2
+  exit 1
+fi
+test "$(jq -r '.status' "$sigkill_record")" = preserved
+test "$(jq -r '.last_reason' "$sigkill_record")" = recovered-identity-changed
 
 # Recovery binds to the originally registered linked-worktree git-dir. Another
 # worktree from the same repository and HEAD cannot inherit the ledger merely
@@ -412,6 +454,32 @@ test "$(jq -r '.status' "$term_record")" = owned
 test ! -e "$term_path"
 test "$(jq -r '.status' "$term_record")" = removed
 
+# A quarantining ledger without the stable directory identity predates safe
+# recovery and must fail closed instead of adopting its path.
+new_case quarantine-legacy-identity
+legacy_identity_repo="$HOME/repo"
+legacy_identity_path="$HOME/managed"
+create_repo "$legacy_identity_repo"
+begin_session legacy-identity-session
+add_managed_worktree "$legacy_identity_repo" "$legacy_identity_path"
+legacy_identity_record=$(record_for_path "$legacy_identity_path")
+legacy_identity_git_dir=$("$REAL_GIT" -C "$legacy_identity_path" rev-parse \
+  --path-format=absolute --git-dir)
+jq --arg git_dir "$legacy_identity_git_dir" \
+  --arg quarantine_path "$HOME/.dotfiles-agent-quarantine.fixture/worktree" \
+  '.status = "quarantining" | .git_dir = $git_dir |
+    .quarantine_path = $quarantine_path |
+    .last_reason = "quarantining" | .updated_at = 0' \
+  "$legacy_identity_record" >"$HOME/record.tmp"
+chmod 600 "$HOME/record.tmp"
+mv -T "$HOME/record.tmp" "$legacy_identity_record"
+if "$RESOURCE" cleanup-session legacy-identity-session 2>"$HOME/cleanup.log"; then
+  echo 'legacy quarantining ledger without directory identity was accepted' >&2
+  exit 1
+fi
+test -d "$legacy_identity_path"
+grep -Fq 'malformed-ledger' "$HOME/cleanup.log"
+
 # A successful worktree removal can still be interrupted before its empty
 # quarantine root is removed. The terminal phase proof remains retryable.
 new_case quarantine-remove-root-retry
@@ -421,6 +489,8 @@ remove_root_marker="$HOME/root-blocked"
 create_repo "$remove_root_repo"
 begin_session remove-root-session
 add_managed_worktree "$remove_root_repo" "$remove_root_path"
+remove_root_device=$(stat -c %d -- "$remove_root_path")
+remove_root_inode=$(stat -c %i -- "$remove_root_path")
 remove_root_record=$(record_for_path "$remove_root_path")
 DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER="$remove_root_marker" \
   "$AUDIT_RESOURCE" cleanup-session remove-root-session
@@ -432,15 +502,33 @@ test -f "$remove_root_blocker"
 test ! -e "$remove_root_path"
 test ! -e "$remove_root_quarantine"
 test "$(jq -r '.status' "$remove_root_record")" = quarantining
+test "$(jq -r '.worktree_device' "$remove_root_record")" = "$remove_root_device"
+test "$(jq -r '.worktree_inode' "$remove_root_record")" = "$remove_root_inode"
 if [ "$(jq -r '.last_reason' "$remove_root_record")" != quarantine-remove-root-unresolved ]; then
   echo 'EXIT recovery discarded the completed-removal transaction phase' >&2
   exit 1
 fi
+remove_root_git_dir=$(jq -r '.git_dir' "$remove_root_record")
+"$REAL_GIT" -C "$remove_root_repo" worktree add -q --detach \
+  "$remove_root_path" HEAD
+replacement_git_dir=$("$REAL_GIT" -C "$remove_root_path" rev-parse \
+  --path-format=absolute --git-dir)
+if [ "$replacement_git_dir" != "$remove_root_git_dir" ]; then
+  echo 'fixture did not reproduce linked-worktree git-dir path reuse' >&2
+  exit 1
+fi
+test "$("$REAL_GIT" -C "$remove_root_path" rev-parse HEAD)" = \
+  "$("$REAL_GIT" -C "$remove_root_repo" rev-parse HEAD)"
 rm -- "$remove_root_blocker"
 "$RESOURCE" reap
 test ! -e "$remove_root_quarantine_root"
-test "$(jq -r '.status' "$remove_root_record")" = removed
+if [ "$(jq -r '.status' "$remove_root_record")" != removed ]; then
+  echo 'recovery adopted an ABA replacement at the original path' >&2
+  exit 1
+fi
 test "$(jq -r '.last_reason' "$remove_root_record")" = clean-unchanged-inactive
+"$RESOURCE" reap
+test -d "$remove_root_path"
 
 # Tracked changes and nonignored untracked files are distinct preservation cases.
 new_case dirty
@@ -923,6 +1011,8 @@ quarantining_common="$HOME/repo/.git"
 quarantining_path="$HOME/managed"
 quarantining_path_intent="$HOME/.dotfiles-agent-quarantine.fixture/worktree"
 quarantining_git_dir="$HOME/repo/.git/worktrees/managed"
+quarantining_device=0
+quarantining_inode=0
 quarantining_record_id=$(printf '%s\0%s' "$quarantining_common" \
   "$quarantining_path" | sha256sum | cut -d ' ' -f 1)
 quarantining_record="$(state_root)/worktrees/$quarantining_record_id.json"
@@ -931,11 +1021,14 @@ jq -cn \
   --arg git_dir "$quarantining_git_dir" \
   --arg path "$quarantining_path" \
   --arg quarantine_path "$quarantining_path_intent" \
+  --arg worktree_device "$quarantining_device" \
+  --arg worktree_inode "$quarantining_inode" \
   '{version: 1, session_id: "quarantining-retention-session",
     common_dir: $common_dir, git_dir: $git_dir, path: $path,
     quarantine_path: $quarantine_path,
     initial_head: "0000000000000000000000000000000000000000",
-    status: "quarantining", last_reason: "quarantining", updated_at: 0}' \
+    status: "quarantining", last_reason: "quarantining", updated_at: 0,
+    worktree_device: $worktree_device, worktree_inode: $worktree_inode}' \
   >"$quarantining_record"
 chmod 600 "$quarantining_record"
 "$SEVEN_DAY_RESOURCE" reap

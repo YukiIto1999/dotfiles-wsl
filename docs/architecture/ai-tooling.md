@@ -27,7 +27,9 @@ host の required roster は [`flake.nix`](../../flake.nix) が account、agent 
 
 Claude Code、Codex、OpenCode は、Home Manager が `~/.local/bin` より前へ置く共通 runtime wrapper から起動する。wrapper は upstream binary を移動せず、`~/.local/bin` の実体を絶対 path で実行する。Antigravity は同じ CLI 起動境界を持たないため対象外である。
 
-runtime は session ID、owner process、boot ID、管理下 `TMPDIR` を記録する。Git repository では git common directory から project ID を作り、linked worktree 間で `~/.cache/dotfiles-wsl/builds/<project-id>/cargo-target` を共有する。明示された `CARGO_TARGET_DIR` と project 固有の Cargo `target-dir` は上書きしない。project cache は 30 日未使用を削除し、総量 64GiB を超えた場合だけ 48GiB まで LRU で回収する。active session、symlink、所有を確認できない path は回収対象にしない。
+runtime は session ID、owner process、boot ID、管理下 `TMPDIR` を記録する。`CARGO_HOME` と `XDG_CACHE_HOME` が未設定なら、それぞれ `~/.cache/dotfiles-wsl/shared/cargo-home` と `~/.cache/dotfiles-wsl/shared/xdg-cache` を全 project、全 client で共有する。明示値は空文字列も含めて変更しない。
+
+Git repository では git common directory から project ID を作り、linked worktree 間で `~/.cache/dotfiles-wsl/builds/<project-id>/cargo-target` を共有する。明示された `CARGO_TARGET_DIR` と project 固有の Cargo `target-dir` は上書きしない。GC は project cache と共有 cache の allocated bytes 合計が 64GiB を超えた場合に動き、30 日未使用の project cache、LRU 順の inactive project cache を先に削除する。それでも上限を超え、active agent session が一件もない場合だけ共有 cache を空にし、再計測後も上限を超えれば失敗する。active project cache で超過が残る場合は回収と失敗の対象にしない。symlink、所有者、型、marker を確認できない managed cache があれば、どの cache も削除せず失敗する。
 
 `dotfiles-agent-verify` は HEAD、tracked diff、non-ignored untracked content、command、環境全体から fingerprint を作る。同一 fingerprint の成功だけを再利用し、raw 環境値は保存しない。agent 内の Nix shim は明示 out-link がない `nix build` と `nix-build` へ no-link option を加え、Nix store を pin する `result*` symlink の増殖を防ぐ。
 

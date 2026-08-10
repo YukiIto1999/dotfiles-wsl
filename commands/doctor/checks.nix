@@ -62,6 +62,7 @@ let
         ];
     managedRootTable = [
       "/home/alice/.cache/dotfiles-wsl/builds"
+      "/home/alice/.cache/dotfiles-wsl/shared"
       "/home/alice/.cache/dotfiles-wsl/sessions"
       "/home/alice/.local/state/dotfiles-wsl/agent-resources"
     ];
@@ -219,6 +220,11 @@ let
             exit = 0;
             kind = "directory";
           };
+          "/home/alice/.cache/dotfiles-wsl/shared" = {
+            bytes = 524288;
+            exit = 0;
+            kind = "directory";
+          };
           "/home/alice/.cache/dotfiles-wsl/sessions" = {
             bytes = 2048;
             exit = 0;
@@ -299,6 +305,7 @@ in
     assert
       productionTables.managedRootTable == [
         "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl/builds"
+        "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl/shared"
         "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl/sessions"
         "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl/agent-resources"
       ];
@@ -456,6 +463,7 @@ in
           ]
           and .resources.managedRoots == [
             {path:"/home/alice/.cache/dotfiles-wsl/builds",bytes:1048576},
+            {path:"/home/alice/.cache/dotfiles-wsl/shared",bytes:524288},
             {path:"/home/alice/.cache/dotfiles-wsl/sessions",bytes:2048},
             {path:"/home/alice/.local/state/dotfiles-wsl/agent-resources",bytes:4096}
           ]

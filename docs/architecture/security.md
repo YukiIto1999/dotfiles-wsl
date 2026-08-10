@@ -40,9 +40,13 @@ upstream OCI image は digest を Nix 宣言へ固定し、registry 取得を `d
 
 ## Codex sandbox
 
-[`agents/codex/assets/config.toml`](../../agents/codex/assets/config.toml) は既定を `workspace-write`、network access を有効、approval policy を `never` とする。Codex の local command は sandbox 内で対話承認なしに実行される。
+[`agents/codex/assets/config.toml`](../../agents/codex/assets/config.toml) は既定の permission profile を `dev` とし、`:workspace` を継承して workspace roots、`~/projects`、`~/workspace` への書込と network access を許可する。approval policy は `never` なので、Codex の local command は profile の範囲内で対話承認なしに実行される。
 
-[`agents/codex/module.nix`](../../agents/codex/module.nix) は dotfiles checkout の project config に `.git` を追加の writable root として設定する。これにより repository 操作は可能になるが、workspace 外の任意 path を書き込み可能にはしない。project config は trusted project の範囲にだけ置く。
+[`agents/codex/module.nix`](../../agents/codex/module.nix) は同名の `dev` profile を system config と project config で拡張する。system config は agent runtime の cache と state、dotfiles checkout の project config はその `.git` だけを書込対象に加える。permission profile と旧 `sandbox_mode`、`sandbox_workspace_write` は混在させない。
+`agent-read-only` profile は `:read-only` を継承して agent runtime の cache と state だけを書込可能にし、read-only な agent definition が `default_permissions` で選択する。
+既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
+
+agent runtime の共有 cache は user 所有の directory `0700` と marker file `0600` で識別する。launcher と GC は同じ `gc.lock` を取り、共有 cache の型、所有者、symlink、mode、marker を検証する。GC が allocated bytes 基準で共有 cache を空にするのは、inactive project cache を先に回収しても容量上限を超え、active agent session が一件もない場合に限る。
 
 sandbox は gateway の client 認証、Docker daemon の権限、Windows interop の境界を代替しない。network access が有効なので、sandbox 内 process は到達可能な endpoint へ接続できる。MCP tool は gateway と各 server の user 権限、secret、backend 境界も合わせて評価する。
 

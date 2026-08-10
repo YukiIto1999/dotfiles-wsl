@@ -417,7 +417,7 @@ else
   record_failure resource/journald "could not observe journald disk usage"
 fi
 
-# 6. Only the three managed roots are summarized, with a timeout per root.
+# 6. Managed roots report allocated bytes, with a timeout per root.
 mapfile -t managed_roots < <("$jq_command" -r '.[]' <<<"$managed_root_table")
 managed_root_resources=()
 managed_roots_valid=1
@@ -438,7 +438,7 @@ for managed_root in "${managed_roots[@]}"; do
   fi
 
   if managed_root_output=$(run_bounded "$du_command" \
-    --summarize --bytes --one-file-system -- "$managed_root" 2>/dev/null); then
+    --summarize --block-size=1 --one-file-system -- "$managed_root" 2>/dev/null); then
     read -r managed_root_bytes observed_root extra <<<"$managed_root_output"
     if [[ $managed_root_bytes =~ ^[0-9]+$ && $observed_root == "$managed_root" && -z ${extra-} ]]; then
       managed_root_resource=$("$jq_command" -cn \

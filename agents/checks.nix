@@ -100,6 +100,30 @@ let
       ${lib.getExe pkgs.bash} ${./impl/runtime/project-cache-gc.sh}
     '';
   };
+  gcRaceRmdir = pkgs.writeShellScriptBin "rmdir" ''
+    target=''${!#}
+    if [[ $target == */.gc-quarantine.* \
+      && -n ''${DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER-} \
+      && ! -e ''${DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER} ]]; then
+      : >"$target/fixture-blocker"
+      : >"$DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER"
+    fi
+    exec ${pkgs.coreutils}/bin/rmdir "$@"
+  '';
+  rmdirRaceGc = pkgs.writeShellApplication {
+    name = "dotfiles-agent-project-cache-gc-rmdir-race-fixture";
+    runtimeInputs = with pkgs; [
+      coreutils
+      findutils
+      gawk
+      jq
+      util-linux
+    ];
+    text = ''
+      export PATH=${gcRaceRmdir}/bin:$PATH
+      ${lib.getExe pkgs.bash} ${./impl/runtime/project-cache-gc.sh}
+    '';
+  };
   controlledReadlink = pkgs.writeShellScriptBin "readlink" ''
     real_readlink=${pkgs.coreutils}/bin/readlink
     reference=''${!#}
@@ -131,10 +155,24 @@ let
     fi
     exec "$real_readlink" "$@"
   '';
+  controlledProcStat = pkgs.writeShellScriptBin "stat" ''
+    if [[ $# -eq 4 && $1 == -c && $2 == %u && $3 == -- \
+      && $4 == "/proc/''${DOTFILES_AGENT_TEST_PROC_OWNER_PID-}" ]]; then
+      case ''${DOTFILES_AGENT_TEST_PROC_OWNER_MODE-} in
+      denied) exit 13 ;;
+      foreign)
+        printf '%s\n' "$(( $(${pkgs.coreutils}/bin/id -u) + 1 ))"
+        exit 0
+        ;;
+      esac
+    fi
+    exec ${pkgs.coreutils}/bin/stat "$@"
+  '';
   controlledProcResource = pkgs.writeShellApplication {
     name = "dotfiles-agent-resource-proc-fixture";
     runtimeInputs = with pkgs; [
       controlledReadlink
+      controlledProcStat
       coreutils
       gawk
       git
@@ -203,7 +241,14 @@ let
         && { [[ -n ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE-} \
           && ! -e ''${DOTFILES_AGENT_TEST_MUTATE_AFTER_MOVE} ]] \
           || [[ -n ''${DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_READY-} \
-            && -n ''${DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_RELEASE-} ]]; }; then
+            && -n ''${DOTFILES_AGENT_TEST_IN_USE_AFTER_MOVE_RELEASE-} ]] \
+          || [[ -n ''${DOTFILES_AGENT_TEST_KILL_AFTER_MOVE-} \
+            && ! -e ''${DOTFILES_AGENT_TEST_KILL_AFTER_MOVE} ]] \
+          || [[ -n ''${DOTFILES_AGENT_TEST_TERM_AFTER_MOVE-} \
+            && ! -e ''${DOTFILES_AGENT_TEST_TERM_AFTER_MOVE} ]] \
+          || [[ -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_SAFE-} \
+            && -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_MARKER-} \
+            && ! -e ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_MARKER} ]]; }; then
         set +e
         ${lib.escapeShellArg (lib.getExe pkgs.git)} "$@"
         status=$?
@@ -219,6 +264,36 @@ let
               sleep 0.01
             done
           fi
+          if [[ -n ''${DOTFILES_AGENT_TEST_KILL_AFTER_MOVE-} ]]; then
+            printf '%s\n' "''${6}" >"$DOTFILES_AGENT_TEST_KILL_AFTER_MOVE"
+            kill -KILL "$PPID"
+          fi
+          if [[ -n ''${DOTFILES_AGENT_TEST_TERM_AFTER_MOVE-} ]]; then
+            printf '%s\n' "''${6}" >"$DOTFILES_AGENT_TEST_TERM_AFTER_MOVE"
+            kill -TERM "$PPID"
+          fi
+          if [[ -n ''${DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_SAFE-} ]]; then
+            ${lib.escapeShellArg (lib.getExe pkgs.git)} "$1" worktree move -- \
+              "''${6}" "$DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_SAFE"
+            ${lib.escapeShellArg (lib.getExe pkgs.git)} "$1" worktree add --detach \
+              "''${6}" HEAD
+            : >"$DOTFILES_AGENT_TEST_REPLACE_AFTER_MOVE_MARKER"
+          fi
+        fi
+        exit "$status"
+      fi
+      if [[ ''${1-} == --git-dir=* && ''${2-} == worktree && ''${3-} == remove \
+        && -n ''${DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER-} \
+        && ! -e ''${DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER} ]]; then
+        set +e
+        ${lib.escapeShellArg (lib.getExe pkgs.git)} "$@"
+        status=$?
+        set -e
+        if ((status == 0)); then
+          quarantine_root=$(${pkgs.coreutils}/bin/dirname -- "''${5}")
+          blocker="$quarantine_root/fixture-blocker"
+          : >"$blocker"
+          printf '%s\n' "$blocker" >"$DOTFILES_AGENT_TEST_BLOCK_ROOT_AFTER_REMOVE_MARKER"
         fi
         exit "$status"
       fi
@@ -1689,6 +1764,7 @@ in
         ];
         GC = lib.getExe runtime.gc;
         MUTATION_GC = lib.getExe mutationGc;
+        RMDIR_RACE_GC = lib.getExe rmdirRaceGc;
         WRONG_OWNER_GC = lib.getExe wrongOwnerGc;
       }
       ''
@@ -1906,6 +1982,7 @@ in
         export AUDIT_RESOURCE=${lib.getExe auditAgentResource}
         export CONTROLLED_PROC_RESOURCE=${lib.getExe controlledProcResource}
         export OVERFLOW_RESOURCE=${lib.getExe overflowResource}
+        export SEVEN_DAY_RESOURCE=${lib.getExe sevenDayRuntime.agentResource}
         export TEST_BASH=${lib.getExe pkgs.bash}
         ${lib.getExe pkgs.bash} ${./fixtures/resource/agent-resources.sh}
         touch $out

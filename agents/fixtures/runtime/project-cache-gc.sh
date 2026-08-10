@@ -253,6 +253,65 @@ if [ ! -e "$blocked_restore_home/.cache/dotfiles-wsl/shared/cargo-home/payload/f
 fi
 grep -Fq 'unresolved quarantined session' "$blocked_restore_home/second-gc.log"
 
+# An empty, owned quarantine root is a resolved interrupted transaction and
+# does not suppress cache collection.
+empty_quarantine_home=$fixture/empty-quarantine-home
+mkdir -p "$empty_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted" \
+  "$empty_quarantine_home/.cache/dotfiles-wsl/builds"
+chmod 700 \
+  "$empty_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
+make_cache "$empty_quarantine_home" "$pressure_old_id" 1 32
+make_shared_cache "$empty_quarantine_home" 32
+empty_quarantine_high=$(($(allocated_bytes \
+  "$empty_quarantine_home/.cache/dotfiles-wsl/shared") - 1))
+HOME=$empty_quarantine_home DOTFILES_AGENT_GC_HIGH_BYTES=$empty_quarantine_high \
+  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
+test ! -e \
+  "$empty_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
+test ! -e "$empty_quarantine_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
+test ! -e "$empty_quarantine_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
+
+# An empty quarantine root with unexpected permissions is ambiguous. It is
+# retained and suppresses all cache deletion for the run.
+invalid_quarantine_home=$fixture/invalid-quarantine-home
+mkdir -p "$invalid_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted" \
+  "$invalid_quarantine_home/.cache/dotfiles-wsl/builds"
+chmod 755 \
+  "$invalid_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
+make_cache "$invalid_quarantine_home" "$pressure_old_id" 1 32
+make_shared_cache "$invalid_quarantine_home" 32
+invalid_quarantine_high=$(($(allocated_bytes \
+  "$invalid_quarantine_home/.cache/dotfiles-wsl/shared") - 1))
+HOME=$invalid_quarantine_home DOTFILES_AGENT_GC_HIGH_BYTES=$invalid_quarantine_high \
+  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC" 2>"$invalid_quarantine_home/gc.log"
+test -d \
+  "$invalid_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
+test -e "$invalid_quarantine_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
+test -e \
+  "$invalid_quarantine_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
+grep -Fq 'unresolved quarantined session root' "$invalid_quarantine_home/gc.log"
+
+# If a validated empty root changes immediately before rmdir, the run retains
+# the root and suppresses cache deletion instead of treating it as resolved.
+rmdir_race_home=$fixture/rmdir-race-home
+mkdir -p "$rmdir_race_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted" \
+  "$rmdir_race_home/.cache/dotfiles-wsl/builds"
+chmod 700 "$rmdir_race_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
+make_cache "$rmdir_race_home" "$pressure_old_id" 1 32
+make_shared_cache "$rmdir_race_home" 32
+rmdir_race_high=$(($(allocated_bytes \
+  "$rmdir_race_home/.cache/dotfiles-wsl/shared") - 1))
+rmdir_race_marker=$rmdir_race_home/raced
+HOME=$rmdir_race_home DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER=$rmdir_race_marker \
+  DOTFILES_AGENT_GC_HIGH_BYTES=$rmdir_race_high DOTFILES_AGENT_GC_LOW_BYTES=0 \
+  "$RMDIR_RACE_GC" 2>"$rmdir_race_home/gc.log"
+test -e "$rmdir_race_marker"
+test -e \
+  "$rmdir_race_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted/fixture-blocker"
+test -e "$rmdir_race_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
+test -e "$rmdir_race_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
+grep -Fq 'quarantined session root changed during resolution' "$rmdir_race_home/gc.log"
+
 wrong_owner_home=$fixture/wrong-owner-home
 mkdir -p "$wrong_owner_home/.cache/dotfiles-wsl/sessions" \
   "$wrong_owner_home/.cache/dotfiles-wsl/builds"

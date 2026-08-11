@@ -2,6 +2,9 @@
   pkgs,
   lib,
   hostConfig,
+  hostOptions,
+  mkNixosSystem,
+  normalMachineModule,
   ...
 }:
 
@@ -15,9 +18,280 @@ let
   systemUnits = hostConfig.environment.etc."systemd/system".source;
   journaldConfig = hostConfig.environment.etc."systemd/journald.conf".source;
   zramConfig = hostConfig.environment.etc."systemd/zram-generator.conf".source;
+  hostObservationKeys = [
+    "host/fstrim"
+    "host/home-manager"
+    "host/journald"
+    "host/nix-gc"
+    "host/root-filesystem"
+    "host/swap"
+    "host/system-generation"
+    "host/windows-d-drive"
+  ];
+  hostObservations = lib.filterAttrs (
+    name: _: lib.hasPrefix "host/" name
+  ) hostConfig.dotfiles.observations;
+  selectStabilityObservations =
+    observations: builtins.intersectAttrs (lib.genAttrs hostObservationKeys (_: null)) observations;
+  stabilityObservations = selectStabilityObservations hostObservations;
+  observationProjection = lib.mapAttrs (
+    _: observation:
+    builtins.removeAttrs observation [
+      "command"
+      "failureMessage"
+    ]
+  ) stabilityObservations;
+  expectedObservationProjection = {
+    "host/fstrim" = {
+      activeStates = [ "active" ];
+      checkId = "maintenance/fstrim.timer";
+      kind = "systemd-timer";
+      resourceKey = null;
+      service = "fstrim.service";
+      serviceResults = [ "success" ];
+      timeoutSeconds = 10;
+      timer = "fstrim.timer";
+      unitFileStates = [
+        "enabled"
+        "enabled-runtime"
+      ];
+    };
+    "host/home-manager" = {
+      activeStates = [ "active" ];
+      checkId = "home-manager";
+      kind = "systemd-service";
+      loadStates = [ "loaded" ];
+      resourceKey = null;
+      results = [ "success" ];
+      timeoutSeconds = 10;
+      unit = "home-manager-${hostConfig.dotfiles.host.username}.service";
+    };
+    "host/journald" = {
+      checkId = "resource/journald";
+      kind = "journal-size";
+      maximumBytes = 4294967296;
+      resourceKey = "journald";
+      timeoutSeconds = 10;
+    };
+    "host/nix-gc" = {
+      activeStates = [ "active" ];
+      checkId = "maintenance/nix-gc.timer";
+      kind = "systemd-timer";
+      resourceKey = null;
+      service = "nix-gc.service";
+      serviceResults = [ "success" ];
+      timeoutSeconds = 10;
+      timer = "nix-gc.timer";
+      unitFileStates = [
+        "enabled"
+        "enabled-runtime"
+      ];
+    };
+    "host/root-filesystem" = {
+      checkId = "resource/root-filesystem";
+      failure = 95;
+      kind = "filesystem-threshold";
+      metric = "used-percent";
+      path = "/";
+      resourceKey = "rootFilesystem";
+      timeoutSeconds = 10;
+      warning = 85;
+    };
+    "host/swap" = {
+      checkId = "resource/swap";
+      kind = "swap-policy";
+      minimumTotalBytes = 8589934592;
+      requiredZramAlgorithm = "lzo-rle";
+      requireZram = true;
+      resourceKey = "swap";
+      timeoutSeconds = 10;
+      zramAboveDisk = true;
+    };
+    "host/system-generation" = {
+      checkId = "system-generation";
+      currentPath = "/run/current-system";
+      kind = "path-match";
+      requiredPath = "/nix/var/nix/profiles/system";
+      resolution = "canonical";
+      resourceKey = null;
+      timeoutSeconds = 10;
+    };
+    "host/windows-d-drive" = {
+      checkId = "resource/windows-d-drive";
+      failure = 10;
+      kind = "numeric-command-threshold";
+      metric = "free-percent";
+      resourceKey = "windowsDDrive";
+      timeoutSeconds = 10;
+      warning = 15;
+    };
+  };
+  hostObservationDefinitions = builtins.filter (
+    definition: lib.hasSuffix "/host/module.nix" (toString definition.file)
+  ) hostOptions.dotfiles.observations.definitionsWithLocations;
+  hostDefinitionKeys = lib.unique (
+    lib.concatMap (definition: builtins.attrNames definition.value) hostObservationDefinitions
+  );
+  stabilityConfiguration = {
+    inherit journald;
+    fstrimInterval = hostConfig.services.fstrim.interval;
+    homeManagerUnit = "home-manager-${hostConfig.dotfiles.host.username}.service";
+    nixGc = hostConfig.nix.gc;
+    timers = hostConfig.systemd.timers;
+    zram = zramGenerator.settings.zram0;
+  };
+  stabilityContractMatches =
+    candidateConfiguration: candidateObservations:
+    let
+      candidateStabilityObservations = selectStabilityObservations candidateObservations;
+      candidateProjection = lib.mapAttrs (
+        _: observation:
+        builtins.removeAttrs observation [
+          "command"
+          "failureMessage"
+        ]
+      ) candidateStabilityObservations;
+      swapObservation = candidateStabilityObservations."host/swap" or { };
+      journalObservation = candidateStabilityObservations."host/journald" or { };
+      homeManagerObservation = candidateStabilityObservations."host/home-manager" or { };
+      nixGcObservation = candidateStabilityObservations."host/nix-gc" or { };
+      fstrimObservation = candidateStabilityObservations."host/fstrim" or { };
+    in
+    builtins.attrNames candidateStabilityObservations == hostObservationKeys
+    && candidateProjection == expectedObservationProjection
+    &&
+      (candidateConfiguration.zram.compression-algorithm or null)
+      == (swapObservation.requiredZramAlgorithm or null)
+    && lib.hasInfix "SystemMaxUse=${toString (builtins.div (journalObservation.maximumBytes or 0) 1073741824)}G" candidateConfiguration.journald.extraConfig
+    && candidateConfiguration.nixGc.automatic
+    && candidateConfiguration.nixGc.persistent
+    && (nixGcObservation.timer or null) == "nix-gc.timer"
+    && builtins.hasAttr "nix-gc" candidateConfiguration.timers
+    && (fstrimObservation.timer or null) == "fstrim.timer"
+    && builtins.hasAttr "fstrim" candidateConfiguration.timers
+    && candidateConfiguration.fstrimInterval == "weekly"
+    && (homeManagerObservation.unit or null) == candidateConfiguration.homeManagerUnit;
+  thresholdMutation = hostObservations // {
+    "host/root-filesystem" = hostObservations."host/root-filesystem" or { } // {
+      warning = 86;
+    };
+  };
+  timerRemovalMutation = builtins.removeAttrs hostObservations [ "host/fstrim" ];
+  additionalObservationVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.observations."host/independent-observation" = {
+          kind = "roster";
+          members = [ "fixture" ];
+          minimumCount = 1;
+          failureOnly = false;
+          checkId = null;
+          resourceKey = null;
+          timeoutSeconds = 10;
+          failureMessage = "independent host observation failed";
+        };
+      }
+    ]).config;
+  additionalObservationVariant = lib.filterAttrs (
+    name: _: lib.hasPrefix "host/" name
+  ) additionalObservationVariantConfig.dotfiles.observations;
+  zramAlgorithmMutation = stabilityConfiguration // {
+    zram = stabilityConfiguration.zram // {
+      compression-algorithm = "zstd";
+    };
+  };
+  descriptionVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { config, lib, ... }:
+        {
+          systemd.services."home-manager-${config.dotfiles.host.username}".description =
+            lib.mkForce "A description must not select the Home Manager observation";
+        }
+      )
+    ]).config;
+  descriptionVariantStabilityObservations = selectStabilityObservations (
+    lib.filterAttrs (name: _: lib.hasPrefix "host/" name) descriptionVariantConfig.dotfiles.observations
+  );
+  powershellProbe = ''$drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'"; if ($null -eq $drive -or $drive.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($drive.FreeSpace * 100) / $drive.Size))'';
+  mkWindowsDriveObservation = import ./package.nix;
+  mkFakePowerShell =
+    name: body:
+    pkgs.writeShellScript name ''
+      set -euo pipefail
+
+      test "$#" -eq 5
+      test "$1" = -NoLogo
+      test "$2" = -NoProfile
+      test "$3" = -NonInteractive
+      test "$4" = -Command
+      test "$5" = ${lib.escapeShellArg powershellProbe}
+      ${body}
+    '';
+  successfulPowerShell = mkFakePowerShell "windows-drive-success" "printf '20\\r\\n'";
+  noisyPowerShell = mkFakePowerShell "windows-drive-noisy" ''
+    printf '20\r\nnoise\n'
+    printf 'WINDOWS_DRIVE_NOISY_STDERR_POISON\n' >&2
+  '';
+  invalidPowerShell = mkFakePowerShell "windows-drive-invalid" "printf '101\\r\\n'";
+  statusPowerShell = mkFakePowerShell "windows-drive-status" "printf '20\\r\\n'; exit 7";
+  timeoutPowerShell = mkFakePowerShell "windows-drive-timeout" "sleep 3; printf '20\\r\\n'";
+  mkProbe =
+    powershellCommand:
+    mkWindowsDriveObservation {
+      inherit pkgs lib powershellCommand;
+      drive = "D:";
+      timeoutSeconds = 0.1;
+    };
+  successfulProbe = mkProbe successfulPowerShell;
+  noisyProbe = mkProbe noisyPowerShell;
+  invalidProbe = mkProbe invalidPowerShell;
+  statusProbe = mkProbe statusPowerShell;
+  timeoutProbe = mkProbe timeoutPowerShell;
 in
 {
   host-stability-contract =
+    assert lib.assertMsg (
+      builtins.attrNames stabilityObservations == hostObservationKeys
+    ) "host runtime observation registry is incomplete";
+    assert lib.assertMsg (
+      observationProjection == expectedObservationProjection
+    ) "host runtime observation shape or canonical value drifted";
+    assert lib.assertMsg (builtins.all (observation: observation.failureMessage != "") (
+      builtins.attrValues stabilityObservations
+    )) "host runtime observation failure messages must be non-empty";
+    assert lib.assertMsg (
+      hostObservations."host/windows-d-drive".command.dotfilesObservationCommandKind
+      == "numeric-command-threshold"
+      &&
+        hostObservations."host/windows-d-drive".command.meta.mainProgram == "dotfiles-observe-windows-drive"
+      &&
+        lib.getExe hostObservations."host/windows-d-drive".command == "${
+          lib.getBin hostObservations."host/windows-d-drive".command
+        }/bin/dotfiles-observe-windows-drive"
+    ) "Windows drive observation command is not a dedicated numeric threshold package";
+    assert lib.assertMsg (
+      hostDefinitionKeys == hostObservationKeys
+      && builtins.all (name: lib.hasPrefix "host/" name) hostDefinitionKeys
+    ) "host observation definitions must use the host owner prefix";
+    assert lib.assertMsg (stabilityContractMatches stabilityConfiguration hostObservations)
+      "host settings and runtime observations do not share the stability contract";
+    assert lib.assertMsg (
+      !(stabilityContractMatches stabilityConfiguration thresholdMutation)
+    ) "root filesystem threshold mutation escaped the stability contract";
+    assert lib.assertMsg (
+      !(stabilityContractMatches stabilityConfiguration timerRemovalMutation)
+    ) "maintenance timer removal escaped the stability contract";
+    assert lib.assertMsg (stabilityContractMatches stabilityConfiguration additionalObservationVariant)
+      "an independent host-owned observation changed the stability contract";
+    assert lib.assertMsg (
+      !(stabilityContractMatches zramAlgorithmMutation hostObservations)
+    ) "zram algorithm mutation escaped the stability contract";
+    assert lib.assertMsg (
+      descriptionVariantStabilityObservations == stabilityObservations
+    ) "service descriptions must not select host runtime observations";
     assert lib.assertMsg (!zram.enable) "zramSwap must stay disabled on WSL";
     assert lib.assertMsg zramGenerator.enable "zram-generator is disabled";
     assert lib.assertMsg (
@@ -89,6 +363,39 @@ in
       }
       ''
         set -euo pipefail
+
+        test "$(${lib.getExe successfulProbe})" = 20
+
+        assert_failed_probe() {
+          local name=$1
+          local command=$2
+          local stdout="$TMPDIR/windows-drive-$name.stdout"
+          local stderr="$TMPDIR/windows-drive-$name.stderr"
+          local status
+
+          if "$command" >"$stdout" 2>"$stderr"; then
+            status=0
+          else
+            status=$?
+          fi
+          if ((status != 1)); then
+            echo "Windows drive $name probe returned status $status instead of 1" >&2
+            return 1
+          fi
+          if [[ -s $stdout ]]; then
+            echo "Windows drive $name probe leaked stdout" >&2
+            return 1
+          fi
+          if [[ -s $stderr ]]; then
+            echo "Windows drive $name probe leaked stderr" >&2
+            return 1
+          fi
+        }
+
+        assert_failed_probe noisy ${lib.getExe noisyProbe}
+        assert_failed_probe invalid ${lib.getExe invalidProbe}
+        assert_failed_probe status ${lib.getExe statusProbe}
+        assert_failed_probe timeout ${lib.getExe timeoutProbe}
 
         service=${systemUnits}/fstrim.service
         service_drop_in=${systemUnits}/fstrim.service.d/overrides.conf

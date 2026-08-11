@@ -14,6 +14,167 @@ let
     exec ${windowsCommand} /c start "" "$1" 2>/dev/null
   '';
   binaryCaches = import ./assets/nix-caches.nix;
+  stabilityContract =
+    let
+      gibibyte = 1073741824;
+      observationTimeoutSeconds = 10;
+      zramAlgorithm = "lzo-rle";
+      zramMemoryPercent = 25;
+      zramPriority = 100;
+      minimumSwapGiB = 8;
+      maximumJournalGiB = 4;
+      windowsDrive = "D:";
+      homeManagerServiceName = "home-manager-${cfg.username}";
+    in
+    rec {
+      timeoutSeconds = observationTimeoutSeconds;
+      systemGeneration = {
+        currentPath = "/run/current-system";
+        requiredPath = "/nix/var/nix/profiles/system";
+        resolution = "canonical";
+      };
+      swap = {
+        minimumTotalBytes = minimumSwapGiB * gibibyte;
+        requireZram = true;
+        zramAboveDisk = true;
+        zram = {
+          algorithm = zramAlgorithm;
+          priority = zramPriority;
+          size = "${toString zramMemoryPercent} / 100 * ram";
+        };
+      };
+      rootFilesystem = {
+        path = "/";
+        metric = "used-percent";
+        warning = 85;
+        failure = 95;
+      };
+      windows = {
+        drive = windowsDrive;
+        powershellCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+        metric = "free-percent";
+        warning = 15;
+        failure = 10;
+      };
+      journal = {
+        storage = "persistent";
+        maximumBytes = maximumJournalGiB * gibibyte;
+        systemMaxUse = "${toString maximumJournalGiB}G";
+        maximumRetention = "30day";
+      };
+      nixGc = {
+        timerName = "nix-gc";
+        serviceName = "nix-gc";
+        settings = {
+          automatic = true;
+          dates = "weekly";
+          persistent = true;
+          options = "--delete-older-than 14d";
+        };
+      };
+      fstrim = {
+        timerName = "fstrim";
+        serviceName = "fstrim";
+        interval = "weekly";
+        virtualizationCondition = [
+          ""
+          "wsl"
+        ];
+      };
+      homeManager = {
+        serviceName = homeManagerServiceName;
+        unit = "${homeManagerServiceName}.service";
+      };
+      observations =
+        let
+          common = checkId: resourceKey: failureMessage: {
+            inherit checkId resourceKey failureMessage;
+            inherit timeoutSeconds;
+          };
+        in
+        {
+          "host/system-generation" =
+            common "system-generation" null "could not resolve the current system generation"
+            // {
+              kind = "path-match";
+              inherit (systemGeneration) currentPath requiredPath resolution;
+            };
+          "host/swap" =
+            common "resource/swap" "swap"
+              "swap must include ${swap.zram.algorithm} zram above any disk swap with at least ${toString minimumSwapGiB} GiB total"
+            // {
+              kind = "swap-policy";
+              inherit (swap) minimumTotalBytes requireZram zramAboveDisk;
+              requiredZramAlgorithm = swap.zram.algorithm;
+            };
+          "host/root-filesystem" =
+            common "resource/root-filesystem" "rootFilesystem" "could not observe root filesystem utilization"
+            // {
+              kind = "filesystem-threshold";
+              inherit (rootFilesystem)
+                path
+                metric
+                warning
+                failure
+                ;
+            };
+          "host/windows-d-drive" =
+            common "resource/windows-d-drive" "windowsDDrive" "could not observe Windows D drive free space"
+            // {
+              kind = "numeric-command-threshold";
+              command = windowsDriveObservation;
+              inherit (windows)
+                metric
+                warning
+                failure
+                ;
+            };
+          "host/journald" = common "resource/journald" "journald" "could not observe journald disk usage" // {
+            kind = "journal-size";
+            inherit (journal) maximumBytes;
+          };
+          "host/nix-gc" =
+            common "maintenance/${nixGc.timerName}.timer" null
+              "${nixGc.timerName}.timer or its service is not operational"
+            // {
+              kind = "systemd-timer";
+              timer = "${nixGc.timerName}.timer";
+              service = "${nixGc.serviceName}.service";
+              unitFileStates = [
+                "enabled"
+                "enabled-runtime"
+              ];
+              activeStates = [ "active" ];
+              serviceResults = [ "success" ];
+            };
+          "host/fstrim" =
+            common "maintenance/${fstrim.timerName}.timer" null
+              "${fstrim.timerName}.timer or its service is not operational"
+            // {
+              kind = "systemd-timer";
+              timer = "${fstrim.timerName}.timer";
+              service = "${fstrim.serviceName}.service";
+              unitFileStates = [
+                "enabled"
+                "enabled-runtime"
+              ];
+              activeStates = [ "active" ];
+              serviceResults = [ "success" ];
+            };
+          "host/home-manager" = common "home-manager" null "${homeManager.unit} is not operational" // {
+            kind = "systemd-service";
+            inherit (homeManager) unit;
+            loadStates = [ "loaded" ];
+            activeStates = [ "active" ];
+            results = [ "success" ];
+          };
+        };
+    };
+  windowsDriveObservation = import ./package.nix {
+    inherit pkgs lib;
+    inherit (stabilityContract.windows) drive powershellCommand;
+    inherit (stabilityContract) timeoutSeconds;
+  };
   zramGenerator = "${pkgs.zram-generator}/lib/systemd/system-generators/zram-generator";
   zramSetup = pkgs.writeShellScript "dotfiles-zram-setup" ''
     set -euo pipefail
@@ -21,7 +182,7 @@ let
     ${lib.getExe' pkgs.kmod "modprobe"} zram num_devices=1
     test -b /dev/zram0
     ${zramGenerator} --setup-device zram0
-    ${lib.getExe' pkgs.util-linux "swapon"} --priority 100 /dev/zram0
+    ${lib.getExe' pkgs.util-linux "swapon"} --priority ${toString stabilityContract.swap.zram.priority} /dev/zram0
   '';
   zramTeardown = pkgs.writeShellScript "dotfiles-zram-teardown" ''
     set -euo pipefail
@@ -74,6 +235,7 @@ in
     inherit binaryCaches;
     homeDir = "/home/${cfg.username}";
   };
+  config.dotfiles.observations = stabilityContract.observations;
 
   config.system.stateVersion = "25.11";
 
@@ -110,12 +272,7 @@ in
   };
 
   # 常時起動でない WSL で取りこぼした GC を次回起動で補完
-  config.nix.gc = {
-    automatic = true;
-    dates = "weekly";
-    persistent = true;
-    options = "--delete-older-than 14d";
-  };
+  config.nix.gc = stabilityContract.nixGc.settings;
   config.nix.optimise.automatic = true;
 
   # zram-generator は WSL を container と判定して unit 生成を省略するため、
@@ -124,9 +281,9 @@ in
   config.services.zram-generator = {
     enable = true;
     settings.zram0 = {
-      compression-algorithm = "lzo-rle";
-      swap-priority = 100;
-      zram-size = "25 / 100 * ram";
+      compression-algorithm = stabilityContract.swap.zram.algorithm;
+      swap-priority = stabilityContract.swap.zram.priority;
+      zram-size = stabilityContract.swap.zram.size;
     };
   };
   config.systemd.services.dotfiles-zram-swap = {
@@ -149,28 +306,23 @@ in
 
   # 障害履歴を残しつつ、長期稼働時の journal に明示的な上限を設ける
   config.services.journald = {
-    storage = "persistent";
+    storage = stabilityContract.journal.storage;
     extraConfig = ''
-      SystemMaxUse=4G
-      MaxRetentionSec=30day
+      SystemMaxUse=${stabilityContract.journal.systemMaxUse}
+      MaxRetentionSec=${stabilityContract.journal.maximumRetention}
     '';
   };
 
   # util-linux の unit 本体、ExecStart、schedule は再利用し、WSL で失敗する
   # vendor condition だけを drop-in で置き換える
-  config.systemd.services.fstrim = {
+  config.services.fstrim.interval = stabilityContract.fstrim.interval;
+  config.systemd.services.${stabilityContract.fstrim.serviceName} = {
     overrideStrategy = "asDropin";
-    unitConfig.ConditionVirtualization = [
-      ""
-      "wsl"
-    ];
+    unitConfig.ConditionVirtualization = stabilityContract.fstrim.virtualizationCondition;
   };
-  config.systemd.timers.fstrim = {
+  config.systemd.timers.${stabilityContract.fstrim.timerName} = {
     overrideStrategy = "asDropin";
-    unitConfig.ConditionVirtualization = [
-      ""
-      "wsl"
-    ];
+    unitConfig.ConditionVirtualization = stabilityContract.fstrim.virtualizationCondition;
   };
 
   # crates.io が curl 既定 UA を 403 拒否するため指定する許可 UA

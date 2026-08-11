@@ -27,11 +27,24 @@
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
 | Agent client | [`agents/module.nix`](../../agents/module.nix) の `dotfiles.agents` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply builtins.attrNames` |
+| Client installer | 各 [`agents/NAME/module.nix`](../../agents) の `install` と [`agents/impl/install-agents.sh`](../../agents/impl/install-agents.sh) | `nix run .#dotfiles-install-agents -- --print-manifest` |
+| Agent runtime と worktree 台帳 | [`agents/module.nix`](../../agents/module.nix)、[`agents/impl/runtime/`](../../agents/impl/runtime)、[`agents/impl/resource/`](../../agents/impl/resource) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.runtime` |
 | 静的 agent | [`agents/shared/definitions/`](../../agents/shared/definitions) | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |
 | local skill | [`agents/shared/skills/`](../../agents/shared/skills) | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/skills/.*" n != null) (builtins.attrNames f)'` |
 | plugin skill | [`flake.nix`](../../flake.nix) の plugin input と [`flake.lock`](../../flake.lock) | 同上。local skill と合わせて出る |
 
 plugin の追加、更新、削除は [AI tooling](../architecture/ai-tooling.md) の責務境界に従う。
+
+## Runtime observation
+
+| 区分 | 正本 | 現在の値 |
+|---|---|---|
+| observation の型 | [`observations/module.nix`](../../observations/module.nix) の 17 種類の observation kind | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.observations --apply 'xs: builtins.mapAttrs (_: x: x.kind) xs'` |
+| 検査対象と値 | `agents`、`artifacts`、`containers`、`host`、`mcp`、`sops`、`telemetry` の各 owner module | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.observations --apply builtins.attrNames` |
+| 汎用 runner | [`commands/doctor/module.nix`](../../commands/doctor/module.nix)、[`commands/doctor/impl/doctor.sh`](../../commands/doctor/impl/doctor.sh)、[`commands/doctor/impl/probe.sh`](../../commands/doctor/impl/probe.sh) | `dotfiles-doctor --json` |
+| MCP protocol | [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix)、[`mcp/gateway/impl/observer.sh`](../../mcp/gateway/impl/observer.sh) | registry の `mcp/protocol/<gateway-id>` |
+
+owner module は意味と観測値を持ち、`observations` は型、`commands/doctor` は実行と集約だけを持つ。対象を増減するときに doctor 独自の inventory は更新しない。
 
 ## MCP と service
 

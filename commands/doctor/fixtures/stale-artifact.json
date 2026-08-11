@@ -1,7 +1,0 @@
-{
-  "artifacts": {
-    "agents/claude/rules": {
-      "equal": false
-    }
-  }
-}

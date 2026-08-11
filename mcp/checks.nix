@@ -417,13 +417,14 @@ let
       }
     ]).config;
   timeout121Evaluation = builtins.tryEval (
-    builtins.deepSeq ((mkNixosSystem [
-      normalMachineModule
-      {
-        dotfiles.mcp.targets.codex.probe.timeout = lib.mkForce 121;
-      }
-    ]).config.dotfiles.mcp.targets
-    ) true
+    builtins.deepSeq
+      (mkNixosSystem [
+        normalMachineModule
+        {
+          dotfiles.mcp.targets.codex.probe.timeout = lib.mkForce 121;
+        }
+      ]).config.dotfiles.mcp.targets
+      true
   );
   mcpObservationDefinitions = builtins.filter (
     definition: lib.hasPrefix "${self}/mcp/" (toString definition.file)

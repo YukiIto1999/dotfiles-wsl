@@ -100,9 +100,7 @@ let
         }
       )
     ]).config;
-  descriptionVariantObservations = selectTelemetryObservations (
-    descriptionVariantConfig.dotfiles.observations
-  );
+  descriptionVariantObservations = selectTelemetryObservations descriptionVariantConfig.dotfiles.observations;
 in
 {
   # config の妥当性は schema の読みではなく collector 自身に判定させる

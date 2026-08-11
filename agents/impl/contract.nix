@@ -6,6 +6,12 @@ let
   validClientName =
     value:
     nonEmpty value && value != "." && value != ".." && builtins.match "[A-Za-z0-9._+-]+" value != null;
+  # Installer temp basenames add at most 26 bytes for the leading dot and
+  # ".next.<32-bit pid>.<RANDOM>.<attempt <= 32>".
+  # 128 + 26 remains below Linux NAME_MAX (255).
+  clientBinaryMaxLength = 128;
+  validClientBinaryName =
+    value: validClientName value && builtins.stringLength value <= clientBinaryMaxLength;
   pathSegments = path: lib.splitString "/" path;
   validRelativeDestination =
     path:
@@ -24,6 +30,7 @@ let
     );
   absolutePathType = types.addCheck types.str validAbsolutePath;
   nonEmptyStringType = types.addCheck types.str nonEmpty;
+  safeBasenameType = types.addCheck types.str validClientBinaryName;
   systemdUnitBasenameType = types.addCheck nonEmptyStringType (
     value:
     builtins.stringLength value <= 247 && builtins.match "[A-Za-z0-9][A-Za-z0-9_.-]*" value != null
@@ -139,7 +146,7 @@ let
 
   clientType = types.submodule {
     options = {
-      binary = lib.mkOption { type = types.str; };
+      binary = lib.mkOption { type = safeBasenameType; };
       versionArgs = lib.mkOption {
         type = types.listOf types.str;
         default = [ "--version" ];
@@ -513,6 +520,7 @@ in
       clientsWithoutVersionArgs = builtins.filter (
         name: cfg.clients.${name}.versionArgs == [ ]
       ) clientNames;
+      clientBinaries = map (name: cfg.clients.${name}.binary) clientNames;
     in
     [
       {
@@ -588,6 +596,10 @@ in
         assertion = clientsWithoutVersionArgs == [ ];
         message =
           "agent versionArgs must not be empty: " + lib.concatStringsSep ", " clientsWithoutVersionArgs;
+      }
+      {
+        assertion = clientBinaries == lib.unique clientBinaries;
+        message = "agent client binaries must be unique";
       }
       {
         assertion = userManagedDestinations == lib.unique userManagedDestinations;

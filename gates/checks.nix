@@ -82,6 +82,15 @@ let
   };
 
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
+  pathOwnerPackages = lib.unique (
+    builtins.attrValues hostConfig.dotfiles.toolchain.packages
+    ++ builtins.attrValues hostConfig.dotfiles.agents.packages
+    ++ map (server: server.package) (builtins.attrValues hostConfig.dotfiles.toolchain.lsp)
+    ++ builtins.attrValues hostConfig.dotfiles.commands
+  );
+  pathPackages = lib.unique (
+    pathOwnerPackages ++ homeConfig.home.packages ++ hostConfig.environment.systemPackages
+  );
 
   wslviewPackage =
     lib.findSingle (package: lib.getName package == "wslview") (throw "wslview package is missing")
@@ -92,7 +101,7 @@ let
     "10s"
   ];
   generatedShellActual = {
-    agentmemoryHooks = toString hostConfig.dotfiles.containers.agentmemory.clients.hooks;
+    agentmemoryHooks = toString hostConfig.dotfiles.agents.agentmemory.hooks;
     commands = lib.mapAttrs (_: package: lib.getExe package) hostConfig.dotfiles.commands;
     commandSmoke.timeoutArgs = commandSmokeTimeoutArgs;
     mcpFronts = lib.mapAttrs (
@@ -113,11 +122,131 @@ in
       );
       legacyPath = "toolchain/" + "sonarqube";
       legacyPathExists = builtins.pathExists (self + "/${legacyPath}");
+      expectedRootEntries = [
+        ".editorconfig"
+        ".envrc"
+        ".github"
+        ".gitignore"
+        "LICENSE"
+        "README.md"
+        "accounts"
+        "agents"
+        "artifacts"
+        "commands"
+        "containers"
+        "docs"
+        "flake.lock"
+        "flake.nix"
+        "gates"
+        "host"
+        "mcp"
+        "observations"
+        "sops"
+        "statix.toml"
+        "telemetry"
+        "toolchain"
+      ];
+      rootEntriesMatch = entries: builtins.attrNames entries == expectedRootEntries;
+      rootEntries = builtins.readDir self;
+      responsibilityViolations =
+        lib.optional (builtins.pathExists (self + "/secrets")) "root-secrets"
+        ++ lib.optional (lib.hasAttrByPath [
+          "dotfiles"
+          "containers"
+          "agentmemory"
+          "clients"
+        ] hostConfig) "containers-agentmemory-clients"
+        ++ lib.optional (hostConfig.dotfiles.toolchain.packages ? apm) "toolchain-apm"
+        ++ lib.optional (
+          !lib.hasAttrByPath [
+            "dotfiles"
+            "agents"
+            "agentmemory"
+            "hooks"
+          ] hostConfig
+        ) "missing-agents-agentmemory"
+        ++ lib.optional (
+          !lib.hasAttrByPath [
+            "dotfiles"
+            "agents"
+            "packages"
+            "apm"
+          ] hostConfig
+        ) "missing-agents-apm";
+      legacyAgentMemoryOptions = lib.hasAttrByPath [
+        "dotfiles"
+        "containers"
+        "agentmemory"
+        "clients"
+      ] hostOptions;
     in
     assert lib.assertMsg (
       actualSonarqubeUnits == expectedSonarqubeUnits && !legacyPathExists
     ) "${legacyPath} must be split into containers/sonarqube and mcp/sonarqube";
-    pkgs.runCommandLocal "check-structure-responsibility-roots" { } "touch $out";
+    assert lib.assertMsg (rootEntriesMatch rootEntries) (
+      "flake source root entries differ from the responsibility roster: actual="
+      + builtins.toJSON (builtins.attrNames rootEntries)
+    );
+    assert !(rootEntriesMatch (rootEntries // { unexpected = "directory"; }));
+    assert !legacyAgentMemoryOptions;
+    assert lib.assertMsg (responsibilityViolations == [ ]) (
+      "responsibility roots are not separated by role: "
+      + lib.concatStringsSep " " responsibilityViolations
+    );
+    pkgs.runCommandLocal "check-structure-responsibility-roots"
+      { nativeBuildInputs = [ pkgs.ripgrep ]; }
+      ''
+        set -euo pipefail
+
+        reverse_dependency_pattern='dotfiles\.agents|(\.\./)+agents(/|"|$)|\$\{self\}/agents|self[[:space:]]*\+[[:space:]]*"/agents'
+        if rg -n --glob '*.nix' "$reverse_dependency_pattern" ${self}/containers; then
+          echo "container backend depends on the agent integration owner" >&2
+          exit 1
+        fi
+        while IFS= read -r mutation; do
+          printf '%s\n' "$mutation" | rg -q "$reverse_dependency_pattern"
+        done < ${./fixtures/container-agent-reverse-dependencies.txt}
+        touch $out
+      '';
+
+  # 同じ実行ファイル名を二人が持つと、どちらが効くかは PATH の順序で決まる
+  toolchain-single-owner =
+    assert lib.all (
+      package:
+      lib.elem package homeConfig.home.packages || lib.elem package hostConfig.environment.systemPackages
+    ) pathOwnerPackages;
+    pkgs.runCommandLocal "check-toolchain-single-owner"
+      {
+        nativeBuildInputs = [ pkgs.coreutils ];
+        roots = pathPackages;
+        ownedRoots = pathOwnerPackages;
+      }
+      ''
+        set -euo pipefail
+
+        for root in $roots; do
+          [ -d "$root/bin" ] || continue
+          for entry in "$root"/bin/*; do
+            printf '%s\t%s\n' "$(basename "$entry")" "$root"
+          done
+        done | sort -u > owners
+
+        for root in $ownedRoots; do
+          [ -d "$root/bin" ] || continue
+          for entry in "$root"/bin/*; do
+            basename "$entry"
+          done
+        done | sort -u > owned-names
+
+        cut -f1 owners | uniq -d | sort -u > duplicates
+        comm -12 duplicates owned-names > conflicts
+        if [ -s conflicts ]; then
+          echo "an executable this repository declares is also provided by another package:" >&2
+          grep -F -f conflicts owners >&2
+          exit 1
+        fi
+        touch $out
+      '';
 
   unit-module-marker =
     let

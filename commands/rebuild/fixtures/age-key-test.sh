@@ -26,16 +26,17 @@ source "$bootstrap"
 trap - ERR
 
 DOTFILES="$test_root/dotfiles-wsl"
-SECRETS_FILE="$DOTFILES/secrets/secrets.yaml"
+SOPS_CONFIG="$DOTFILES/sops/assets/.sops.yaml"
+SECRETS_FILE="$DOTFILES/sops/assets/secrets.yaml"
 AGE_KEY="$test_root/var/lib/sops-nix/key.txt"
 export SUDO_USER
 SUDO_USER=$(id -un)
 export TOTAL=2
 export STEP=0
 
-mkdir -p "$DOTFILES/secrets" "$(dirname -- "$AGE_KEY")"
+mkdir -p "$DOTFILES/sops/assets" "$(dirname -- "$AGE_KEY")"
 git -C "$DOTFILES" init -q
-touch "$DOTFILES/flake.nix" "$DOTFILES/flake.lock" "$SECRETS_FILE" "$AGE_KEY"
+touch "$DOTFILES/flake.nix" "$DOTFILES/flake.lock" "$SOPS_CONFIG" "$SECRETS_FILE" "$AGE_KEY"
 
 as_user() {
   "$@"
@@ -65,6 +66,13 @@ stat() {
 
 preflight >/dev/null
 
+mv "$SOPS_CONFIG" "$SOPS_CONFIG.missing"
+if (preflight >/dev/null 2>&1); then
+  printf 'preflight accepted a missing SOPS config\n' >&2
+  exit 1
+fi
+mv "$SOPS_CONFIG.missing" "$SOPS_CONFIG"
+
 for profile in bad-dir-owner bad-dir-mode bad-key-owner bad-key-mode; do
   if (STAT_PROFILE=$profile; preflight >/dev/null 2>&1); then
     printf 'preflight accepted invalid profile: %s\n' "$profile" >&2
@@ -76,9 +84,17 @@ bootstrap_call_log=$test_root/bootstrap-calls.log
 export BOOTSTRAP_CALL_LOG=$bootstrap_call_log
 FLAKE_REF="git+file://$DOTFILES"
 nix() {
-  [[ $* == "build --no-link --print-out-paths --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.nixos.config.system.build.nixos-rebuild" ]]
-  printf '%s\n' "$test_upstream_rebuild"
+  if [[ $1 == shell ]]; then
+    [[ ${SOPS_AGE_KEY_FILE:-} == "$AGE_KEY" ]]
+    [[ $* == "shell ${FLAKE_REF}#sops -c sops --config ${SOPS_CONFIG} -d ${SECRETS_FILE}" ]]
+    : > "$test_root/sops-verify-called"
+  else
+    [[ $* == "build --no-link --print-out-paths --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.nixos.config.system.build.nixos-rebuild" ]]
+    printf '%s\n' "$test_upstream_rebuild"
+  fi
 }
+verify_secrets
+[[ -e $test_root/sops-verify-called ]]
 install_boot_generation >/dev/null
 grep -Fqx "boot --no-reexec --flake ${FLAKE_REF}#nixos -L " "$bootstrap_call_log"
 

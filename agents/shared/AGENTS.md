@@ -89,15 +89,17 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 
 - 通常 rebuild: `dotfiles-rebuild`
 - 実用状態検証: `dotfiles-doctor`
-- 不要物整理: `dotfiles-cleanup --delete` (`--system --vscode-server` で対象を拡大)
-- secrets enrollment: `nix run .#dotfiles-sops-enroll -- prepare --recovery-key <absolute-path> --host-id <unique-id>` の後、`apply --recovery-key <absolute-path> --yes`
-- secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops ~/dotfiles-wsl/secrets/secrets.yaml`
+- Home Manager backup 整理: `dotfiles-cleanup --delete`
+- system backup 整理: `sudo dotfiles-cleanup --delete --system`
+- VS Code Server 整理: `dotfiles-cleanup --delete --vscode-server`
+- secrets enrollment: `docs/operations/sops-enrollment.md` に従い、host key の公開鍵を `sops/assets/.sops.yaml` へ追加して `sops updatekeys` を実行する。
+- secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops --config ~/dotfiles-wsl/sops/assets/.sops.yaml ~/dotfiles-wsl/sops/assets/secrets.yaml`
 - 詳細手順、構成、変更箇所は `~/dotfiles-wsl/README.md` に集約する。
 
 ## 禁則
 
 - dotfiles で管理している設定ファイルは直接編集しない。変更は dotfiles に入れる。
 - パッケージマネージャでグローバルインストールしない。パッケージは nix / devenv で導入する。
-- `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops ~/dotfiles-wsl/secrets/secrets.yaml` 編集後の rebuild で行う。
-- 資格情報を平文に書かない。GitHub PAT は SOPS + age の `~/dotfiles-wsl/secrets/secrets.yaml` に集約する。
+- `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops --config ~/dotfiles-wsl/sops/assets/.sops.yaml ~/dotfiles-wsl/sops/assets/secrets.yaml` 編集後の rebuild で行う。
+- 資格情報を平文に書かない。GitHub PAT は SOPS + age の `~/dotfiles-wsl/sops/assets/secrets.yaml` に集約する。
 - commit message に AI attribution を入れない。commit-msg hook が block する。

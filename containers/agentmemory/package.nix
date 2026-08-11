@@ -1,7 +1,5 @@
 {
-  lib,
   pkgs,
-  agentmemoryUrl,
 }:
 
 # app と iii engine を同梱する upstream image がないため、backend image を Nix で組み立てる
@@ -16,7 +14,7 @@ let
     hash = "sha256-AfxRkLYb8Q6UtRQ6FIYaY5KxQOoaon6De5OAG1fleq4=";
   };
 
-  enginePkg = pkgs.buildNpmPackage {
+  deploymentPackage = pkgs.buildNpmPackage {
     pname = "agentmemory-deploy";
     inherit version;
     src = ./package/engine;
@@ -27,11 +25,12 @@ let
       "--omit=optional"
     ];
   };
-  engineModule = "${enginePkg}/lib/node_modules/agentmemory-deploy";
+  deploymentRoot = "${deploymentPackage}/lib/node_modules/agentmemory-deploy";
+  upstreamRoot = "${deploymentRoot}/node_modules/@agentmemory/agentmemory";
 
   appRoot = pkgs.runCommand "agentmemory-app-root" { } ''
     mkdir -p $out/opt
-    ln -s ${engineModule} $out/opt/agentmemory
+    ln -s ${deploymentRoot} $out/opt/agentmemory
   '';
 
   # iii-exec の sh -c 向けに shell を同梱し /bin のみ link、base image の /lib loader を温存
@@ -75,47 +74,7 @@ let
     };
   };
 
-  agentmemoryPkg = "${engineModule}/node_modules/@agentmemory/agentmemory";
-
-  mkHook =
-    name: extraEnv:
-    pkgs.writeShellScriptBin "agentmemory-hook-${name}" ''
-      export AGENTMEMORY_URL=${agentmemoryUrl}
-      ${extraEnv}exec ${agentmemoryPkg}/dist/hooks/${name}.mjs "$@"
-    '';
-
-  hookNames = [
-    "session-start"
-    "session-end"
-    "stop"
-    "prompt-submit"
-    "pre-tool-use"
-    "post-tool-use"
-    "post-tool-failure"
-    "pre-compact"
-    "notification"
-    "subagent-start"
-    "subagent-stop"
-    "task-completed"
-  ];
-
-  hooks = pkgs.symlinkJoin {
-    name = "agentmemory-hooks-${version}";
-    paths = lib.map (
-      name:
-      mkHook name (
-        lib.optionalString (name == "session-start") "export AGENTMEMORY_INJECT_CONTEXT=true\n"
-      )
-    ) hookNames;
-  };
-
-  opencodePlugin = "${agentmemoryPkg}/plugin/opencode/agentmemory-capture.ts";
 in
 {
-  inherit
-    image
-    hooks
-    opencodePlugin
-    version
-    ;
+  inherit image upstreamRoot version;
 }

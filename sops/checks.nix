@@ -9,7 +9,8 @@
 }:
 
 let
-  sopsFile = "${self}/secrets/secrets.yaml";
+  sopsFile = "${self}/sops/assets/secrets.yaml";
+  sopsConfigFile = "${self}/sops/assets/.sops.yaml";
   templates = hostConfig.sops.templates;
   inHome = template: lib.hasPrefix hostConfig.dotfiles.host.homeDir template.path;
   wrongTemplatesFor =
@@ -179,6 +180,7 @@ in
 {
   # 鍵は root だけが読み、recipient は宣言と暗号文の両方で一致する
   sops-policy =
+    assert toString hostConfig.sops.defaultSopsFile == sopsFile;
     assert hostConfig.sops.age.keyFile == "/var/lib/sops-nix/key.txt";
     assert !hostConfig.sops.age.generateKey;
     assert hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z.mode == "0400";
@@ -187,7 +189,7 @@ in
 
       # 宣言した recipient と、暗号文が実際に持つ recipient が一致すること
       # anchor は explode しないと alias 名のまま出る
-      yq -r 'explode(.) | .creation_rules[0].key_groups[0].age[]' ${self}/secrets/.sops.yaml \
+      yq -r 'explode(.) | .creation_rules[0].key_groups[0].age[]' ${sopsConfigFile} \
         | sort > declared
       yq -r '.sops.age[].recipient' ${sopsFile} | sort > actual
       diff -u declared actual

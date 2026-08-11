@@ -25,7 +25,11 @@ let
   absolutePathType = types.addCheck types.str validAbsolutePath;
   nonEmptyStringType = types.addCheck types.str nonEmpty;
   systemdUnitBasenameType = types.addCheck nonEmptyStringType (
-    value: builtins.match "[A-Za-z0-9][A-Za-z0-9_.-]*" value != null
+    value:
+    builtins.stringLength value <= 247 && builtins.match "[A-Za-z0-9][A-Za-z0-9_.-]*" value != null
+  );
+  systemdCalendarType = types.addCheck nonEmptyStringType (
+    value: builtins.match "[^[:cntrl:]]*" value != null && builtins.match "[[:space:]]*" value == null
   );
 
   managedFileType = types.submodule {
@@ -128,7 +132,7 @@ let
   runtimeTimerType = types.submodule {
     options = {
       name = lib.mkOption { type = systemdUnitBasenameType; };
-      onCalendar = lib.mkOption { type = nonEmptyStringType; };
+      onCalendar = lib.mkOption { type = systemdCalendarType; };
       persistent = lib.mkOption { type = types.bool; };
     };
   };

@@ -17,6 +17,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+extern char **environ;
+
 enum exit_code {
     EXIT_USAGE = 2,
     EXIT_DIRECTORY = 3,
@@ -1377,21 +1379,53 @@ static int set_close_on_exec(const char *descriptor_text) {
     return 0;
 }
 
+static int set_probe_environment(void) {
+    static const struct {
+        const char *name;
+        const char *value;
+    } variables[] = {
+        {"HOME", "/proc/self/cwd/../home"},
+        {"CODEX_HOME", "/proc/self/cwd/../codex-home"},
+        {"XDG_CACHE_HOME", "/proc/self/cwd/../cache"},
+        {"XDG_CONFIG_HOME", "/proc/self/cwd/../config"},
+        {"XDG_DATA_HOME", "/proc/self/cwd/../data"},
+        {"XDG_STATE_HOME", "/proc/self/cwd/../state"},
+        {"TMPDIR", "/proc/self/cwd/../tmp"},
+        {"PATH", "/proc/self/cwd/../../payload/bin:/proc/self/cwd/../../payload/codex-path"},
+        {"PWD", "/proc/self/cwd"},
+        {"LC_ALL", "C"},
+        {"TERM", "dumb"},
+    };
+
+    if (clearenv() != 0) {
+        return EXIT_SYSCALL;
+    }
+    for (size_t index = 0; index < sizeof(variables) / sizeof(variables[0]); index++) {
+        if (setenv(variables[index].name, variables[index].value, 1) != 0) {
+            return EXIT_SYSCALL;
+        }
+    }
+    return 0;
+}
+
 static int command_probe_exec(int argc, char **argv) {
     struct open_how directory_how = {
         .flags = O_RDONLY | O_DIRECTORY | O_CLOEXEC,
         .resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS,
     };
     struct open_how executable_how = {
-        .flags = O_PATH | O_CLOEXEC,
+        /* A non-CLOEXEC O_PATH descriptor supports both ELF and shebang execveat. */
+        .flags = O_PATH,
         .resolve = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS,
     };
     struct stat executable_status;
     char **child_argv = NULL;
+    char *entrypoint_argv0 = NULL;
     int stage = -1;
     int work = -1;
     int executable = -1;
     int separator = -1;
+    int hook_status;
     int result;
 
     if (argc < 11 || !valid_relative_path(argv[4]) || !valid_relative_path(argv[5]) ||
@@ -1433,23 +1467,32 @@ static int command_probe_exec(int argc, char **argv) {
         result = EXIT_SYSCALL;
         goto done;
     }
+    hook_status = run_test_hook("before-probe-exec", argv[6], argv[5], argv[4], argv[5]);
+    if (hook_status != 0) {
+        result = EXIT_SYSCALL;
+        goto done;
+    }
+    result = set_probe_environment();
+    if (result != 0) {
+        goto done;
+    }
     child_argv = calloc((size_t)(argc - separator + 1), sizeof(*child_argv));
     if (child_argv == NULL) {
         result = EXIT_SYSCALL;
         goto done;
     }
-    child_argv[0] = argv[6];
+    if (asprintf(&entrypoint_argv0, "/proc/self/cwd/../../%s", argv[5]) < 0) {
+        result = EXIT_SYSCALL;
+        goto done;
+    }
+    child_argv[0] = entrypoint_argv0;
     for (int index = separator + 1; index < argc; index++) {
         child_argv[index - separator] = argv[index];
     }
-    /*
-     * The stage has a private random name and is only writable by the current uid.  The
-     * same-uid pathname race is outside the stated boundary; using the public absolute path
-     * keeps script interpreters working after the stage descriptor closes on exec.
-     */
-    execv(argv[6], child_argv);
+    syscall(SYS_execveat, executable, "", child_argv, environ, AT_EMPTY_PATH);
     result = EXIT_SYSCALL;
 done:
+    free(entrypoint_argv0);
     free(child_argv);
     if (executable >= 0) {
         close(executable);

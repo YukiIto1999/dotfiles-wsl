@@ -9,24 +9,25 @@ archive, scenario, shell = sys.argv[1:4]
 def entrypoint_body(probe: str) -> bytes:
     checks = f"""#!{shell}
 [[ ${{1-}} == --version ]] || exit 91
-[[ $0 == /*/.stage.*/payload/* ]] || exit 102
+[[ $0 == /dev/fd/* || $0 == /proc/self/fd/* ]] || exit 102
 for descriptor in /proc/self/fd/*; do
   [[ ! -d $descriptor ]] || exit 105
 done
 {shell} -c 'for descriptor in /proc/self/fd/*; do [[ ! -d $descriptor ]] || exit 1; done' \
   || exit 106
 printf '%s\n' probe > ./probe-relative-write
-[[ $PWD == /*/.stage.*/probe/work ]] || exit 104
-[[ $HOME == */.stage.*/probe/home ]] || exit 92
-[[ $CODEX_HOME == */.stage.*/probe/codex-home ]] || exit 93
-[[ $XDG_CACHE_HOME == */.stage.*/probe/cache ]] || exit 94
-[[ $XDG_CONFIG_HOME == */.stage.*/probe/config ]] || exit 95
-[[ $XDG_DATA_HOME == */.stage.*/probe/data ]] || exit 96
-[[ $XDG_STATE_HOME == */.stage.*/probe/state ]] || exit 97
-[[ $TMPDIR == */.stage.*/probe/tmp ]] || exit 98
-[[ $PATH == */payload/bin:*/payload/codex-path ]] || exit 99
+[[ $PWD == /proc/self/cwd ]] || exit 104
+[[ $HOME == /proc/self/cwd/../home ]] || exit 92
+[[ $CODEX_HOME == /proc/self/cwd/../codex-home ]] || exit 93
+[[ $XDG_CACHE_HOME == /proc/self/cwd/../cache ]] || exit 94
+[[ $XDG_CONFIG_HOME == /proc/self/cwd/../config ]] || exit 95
+[[ $XDG_DATA_HOME == /proc/self/cwd/../data ]] || exit 96
+[[ $XDG_STATE_HOME == /proc/self/cwd/../state ]] || exit 97
+[[ $TMPDIR == /proc/self/cwd/../tmp ]] || exit 98
+[[ $PATH == /proc/self/cwd/../../payload/bin:/proc/self/cwd/../../payload/codex-path ]] || exit 99
 [[ $LC_ALL == C && $TERM == dumb ]] || exit 100
 [[ -z ${{FIXTURE_INHERITED_SECRET+x}} ]] || exit 101
+[[ -z ${{FIXTURE_ATOMIC_HOOK_EVENT+x}} ]] || exit 107
 if IFS= read -r fixture_stdin; then exit 103; fi
 """
     if probe == "nonzero":

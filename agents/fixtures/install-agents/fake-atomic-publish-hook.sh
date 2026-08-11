@@ -41,6 +41,22 @@ case $FIXTURE_ATOMIC_HOOK_ACTION in
     mv -T -- "$source_directory" "$FIXTURE_ATOMIC_HOOK_SAVED"
     mkdir -m 0700 -- "$source_directory"
     ;;
+  replace-probe-stage)
+    [[ -n ${FIXTURE_ATOMIC_HOOK_ROOT:-} ]] || exit 64
+    [[ -n ${FIXTURE_ATOMIC_HOOK_SAVED:-} ]] || exit 64
+    [[ -n ${FIXTURE_ATOMIC_HOOK_FAKE_EXECUTABLE:-} ]] || exit 64
+    [[ $source_directory == "$FIXTURE_ATOMIC_HOOK_ROOT/"* ]] || exit 65
+    relative=${source_directory#"$FIXTURE_ATOMIC_HOOK_ROOT"/}
+    stage_name=${relative%%/*}
+    [[ $stage_name =~ ^\.stage\.[A-Za-z0-9]+$ ]] || exit 65
+    mv -T -- "$FIXTURE_ATOMIC_HOOK_ROOT" "$FIXTURE_ATOMIC_HOOK_SAVED"
+    mkdir -m 0700 -- "$FIXTURE_ATOMIC_HOOK_ROOT"
+    mkdir -m 0700 -- "$FIXTURE_ATOMIC_HOOK_ROOT/releases"
+    mkdir -m 0700 -- "$FIXTURE_ATOMIC_HOOK_ROOT/$stage_name"
+    mkdir -p -- "$(dirname -- "$FIXTURE_ATOMIC_HOOK_ROOT/$relative")"
+    install -m 0755 "$FIXTURE_ATOMIC_HOOK_FAKE_EXECUTABLE" \
+      "$FIXTURE_ATOMIC_HOOK_ROOT/$relative"
+    ;;
   replace-object)
     [[ -n ${FIXTURE_ATOMIC_HOOK_SAVED:-} ]] || exit 64
     [[ -n ${FIXTURE_ATOMIC_HOOK_TARGET:-} ]] || exit 64

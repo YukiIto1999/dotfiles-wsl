@@ -933,12 +933,14 @@ let
         [
           "@atomicPublishCommand@"
           "@installManifest@"
+          "@probeEnvironment@"
           "@transactionHookCommand@"
           "@versionArgsDecoder@"
         ]
         [
           (lib.escapeShellArg atomicPublishExe)
           losslessInstallManifest
+          ""
           (lib.escapeShellArg "${pkgs.coreutils}/bin/true")
           (builtins.readFile ./impl/version-args.sh)
         ]
@@ -1084,6 +1086,16 @@ let
       -o "$out/bin/dotfiles-agent-atomic-publish"
   '';
   atomicPublishFixtureExe = lib.getExe' atomicPublishFixture "dotfiles-agent-atomic-publish";
+  fixtureProbeEnvironment = ''
+    FIXTURE_ATOMIC_HOOK_EVENT="''${FIXTURE_ATOMIC_HOOK_EVENT-}" \
+    FIXTURE_ATOMIC_HOOK_ACTION="''${FIXTURE_ATOMIC_HOOK_ACTION-}" \
+    FIXTURE_ATOMIC_HOOK_SOURCE="''${FIXTURE_ATOMIC_HOOK_SOURCE-}" \
+    FIXTURE_ATOMIC_HOOK_MARKER="''${FIXTURE_ATOMIC_HOOK_MARKER-}" \
+    FIXTURE_ATOMIC_HOOK_SAVED="''${FIXTURE_ATOMIC_HOOK_SAVED-}" \
+    FIXTURE_ATOMIC_HOOK_TARGET="''${FIXTURE_ATOMIC_HOOK_TARGET-}" \
+    FIXTURE_ATOMIC_HOOK_ROOT="''${FIXTURE_ATOMIC_HOOK_ROOT-}" \
+    FIXTURE_ATOMIC_HOOK_FAKE_EXECUTABLE="''${FIXTURE_ATOMIC_HOOK_FAKE_EXECUTABLE-}" \
+  '';
   mkInstallerBehaviorFixture =
     name: manifest:
     pkgs.writeShellApplication {
@@ -1110,12 +1122,14 @@ let
           [
             "@atomicPublishCommand@"
             "@installManifest@"
+            "@probeEnvironment@"
             "@transactionHookCommand@"
             "@versionArgsDecoder@"
           ]
           [
             (lib.escapeShellArg atomicPublishFixtureExe)
             manifest
+            fixtureProbeEnvironment
             (lib.escapeShellArg (lib.getExe packageTreeTransactionHook))
             (builtins.readFile ./impl/version-args.sh)
           ]
@@ -1792,6 +1806,10 @@ in
         fi
         grep -Fq '${atomicPublishExe}' ${installAgentsExe}
         grep -Fq '${pkgs.diffutils}/bin' ${installAgentsExe}
+        if rg -a -n 'FIXTURE_ATOMIC_HOOK_|@probeEnvironment@' ${installAgentsExe}; then
+          echo "production installer contains the fixture probe hook interface" >&2
+          exit 1
+        fi
         test -x ${atomicPublishExe}
         if grep -aFq '${lib.getExe atomicPublishTestHook}' ${atomicPublishExe}; then
           echo "production atomic helper contains the fixture hook" >&2
@@ -2238,6 +2256,10 @@ in
         export ATOMIC_PUBLISH_PRODUCTION=${atomicPublishExe}
         export FIXTURE_SOURCES=${./fixtures/install-agents}
         export FIXTURE_RUNTIME_SHELL=${pkgs.runtimeShell}
+        export PROBE_ELF=${lib.getExe pkgs.hello}
+        for variable in EVENT ACTION SOURCE MARKER SAVED TARGET ROOT FAKE_EXECUTABLE; do
+          grep -Fq "FIXTURE_ATOMIC_HOOK_$variable=" "$INSTALL_AGENTS"
+        done
         grep -Fq 'O_CLOEXEC' ${./impl/atomic-publish.c}
         grep -Fq 'FD_CLOEXEC' ${./impl/atomic-publish.c}
         grep -Fq 'EXIT_USAGE = 2' ${./impl/atomic-publish.c}

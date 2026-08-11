@@ -104,7 +104,7 @@ AI CLI は単一の agentgateway へ接続し、gateway が target ごとの常�
 
 `containers/` は container 配備の共通層と application 固有の backend を所有する。Agentmemory、Crawl4AI、SearXNG、SonarQube の backend は各 `containers/` unit、agent が使う interface は対応する `mcp/` unit が所有する。
 
-`agents/` は Claude Code、Codex、OpenCode、Antigravity の共通 rules、skills、agent definitions、MCP gateway 設定、binary 配備と client ごとの差を所有する。agent ではない CLI に共通の配備要件が生じた場合に限り、別責務として root に `clis/` を作る。
+`agents/` は Claude Code、Codex、OpenCode、Antigravity の共通 rules、skills、agent definitions、MCP gateway への接続 fragment、binary 配備と client ごとの差を所有する。agent ではない CLI に共通の配備要件が生じた場合に限り、別責務として root に `clis/` を作る。
 
 runtime の検査対象は各 owner が `dotfiles.observations` へ登録する。`observations/` は閉じた型だけを所有し、検査対象の意味や一覧は持たない。`dotfiles-doctor` はこの registry を汎用 probe へ投影する。
 

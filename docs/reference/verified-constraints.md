@@ -65,6 +65,7 @@
 | SearXNG backend の image、publish、standalone secret、settings template、health contract が固定値と一致する | `searxng-container` |
 | SearXNG MCP front の package、port、backend unit が一致し、initialize に応答する | `searxng-front` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
+| SOPS secret 宣言から path、owner、group、mode の observation だけを導き、内容と source path を含めない | `sops-runtime-observation-contract` |
 | host が有効化した container application と service contract の key が一致する | `container-application-roster` |
 | OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
 | container application の endpoint URL と port が OCI publish、unit が systemd service に完全一致し、health が宣言済み HTTP endpoint を参照する | `nixos-toplevel` (`containers/module.nix` の assertion) |

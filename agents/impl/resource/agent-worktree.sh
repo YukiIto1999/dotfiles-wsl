@@ -247,10 +247,10 @@ esac
 target_candidate=$(realpath -m -- "$target_candidate") || die 'cannot resolve worktree add target'
 validate_snapshot_path "$target_candidate"
 
-state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"
+state_root="$HOME/@resourceStateRootRelative@"
 ensure_directory "$HOME/.local" false
 ensure_directory "$HOME/.local/state" false
-ensure_directory "$HOME/.local/state/dotfiles-wsl" true
+ensure_directory "$HOME/@stateRootRelative@" true
 ensure_directory "$state_root" true
 locks_root="$state_root/locks"
 ensure_directory "$locks_root" true

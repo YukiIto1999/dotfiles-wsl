@@ -3,6 +3,8 @@
   lib,
   hostConfig,
   hostOptions,
+  mkNixosSystem,
+  normalMachineModule,
   variantConfig,
   self,
   ...
@@ -26,11 +28,13 @@ let
   atomicPublishExe = lib.getExe' atomicPublish "dotfiles-agent-atomic-publish";
   runtime = import ./package.nix {
     inherit lib pkgs;
-    ledgerRetentionDays = agentConfig.runtime.ledgerRetentionDays;
+    runtimeContract = runtimePackageContract;
   };
   sevenDayRuntime = import ./package.nix {
     inherit lib pkgs;
-    ledgerRetentionDays = 7;
+    runtimeContract = runtimePackageContract // {
+      ledgerRetentionDays = 7;
+    };
   };
   wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
     if [[ $# -eq 3 && $1 == -c && $2 == %u \
@@ -51,7 +55,7 @@ let
     ];
     text = ''
       export PATH=${wrongOwnerStat}/bin:$PATH
-      ${lib.getExe pkgs.bash} ${./impl/runtime/project-cache-gc.sh}
+      ${runtime.projectCacheGcSource}
     '';
   };
   gcMutationMv = pkgs.writeShellScriptBin "mv" ''
@@ -99,7 +103,7 @@ let
     ];
     text = ''
       export PATH=${gcMutationMv}/bin:$PATH
-      ${lib.getExe pkgs.bash} ${./impl/runtime/project-cache-gc.sh}
+      ${runtime.projectCacheGcSource}
     '';
   };
   gcRaceRmdir = pkgs.writeShellScriptBin "rmdir" ''
@@ -123,7 +127,7 @@ let
     ];
     text = ''
       export PATH=${gcRaceRmdir}/bin:$PATH
-      ${lib.getExe pkgs.bash} ${./impl/runtime/project-cache-gc.sh}
+      ${runtime.projectCacheGcSource}
     '';
   };
   controlledReadlink = pkgs.writeShellScriptBin "readlink" ''
@@ -186,10 +190,14 @@ let
         [
           "@gitCommand@"
           "@ledgerRetentionDays@"
+          "@stateRootRelative@"
+          "@resourceStateRootRelative@"
         ]
         [
           (lib.escapeShellArg (lib.getExe pkgs.git))
           "30"
+          runtimePackageContract.state.relativeStateRoot
+          runtimePackageContract.state.relativeResourcesRoot
         ]
         (builtins.readFile ./impl/resource/agent-resource.sh);
   };
@@ -479,6 +487,273 @@ let
   runtimeClientNames = builtins.filter (name: name != "antigravity" && clients.${name}.binary != "") (
     builtins.attrNames clients
   );
+
+  observationTimeoutSeconds = 10;
+  homeDir = hostConfig.dotfiles.host.homeDir;
+  expectedAgentRuntime = {
+    ledgerRetentionDays = 30;
+    cache = {
+      root = "${homeDir}/.cache/dotfiles-wsl";
+      buildsRoot = "${homeDir}/.cache/dotfiles-wsl/builds";
+      sharedRoot = "${homeDir}/.cache/dotfiles-wsl/shared";
+      sessionsRoot = "${homeDir}/.cache/dotfiles-wsl/sessions";
+      verificationRoot = "${homeDir}/.cache/dotfiles-wsl/verification";
+      highBytes = 68719476736;
+      lowBytes = 51539607552;
+      inactiveDays = 30;
+    };
+    state = {
+      root = "${homeDir}/.local/state/dotfiles-wsl";
+      resourcesRoot = "${homeDir}/.local/state/dotfiles-wsl/agent-resources";
+    };
+    timers = {
+      autoupdate = {
+        name = "dotfiles-agent-autoupdate";
+        onCalendar = "daily";
+        persistent = true;
+      };
+      projectCacheGc = {
+        name = "dotfiles-agent-project-cache-gc";
+        onCalendar = "daily";
+        persistent = true;
+      };
+      resourceReaper = {
+        name = "dotfiles-agent-resource-reaper";
+        onCalendar = "hourly";
+        persistent = true;
+      };
+    };
+  };
+  runtimePackageContract = expectedAgentRuntime // {
+    cache = expectedAgentRuntime.cache // {
+      relativeCacheRoot = ".cache/dotfiles-wsl";
+    };
+    state = expectedAgentRuntime.state // {
+      relativeStateRoot = ".local/state/dotfiles-wsl";
+      relativeResourcesRoot = ".local/state/dotfiles-wsl/agent-resources";
+    };
+  };
+  selectAgentObservations = lib.filterAttrs (name: _: lib.hasPrefix "agents/" name);
+  agentObservations = selectAgentObservations hostConfig.dotfiles.observations;
+  commonAgentObservation = checkId: resourceKey: failureMessage: {
+    inherit checkId resourceKey failureMessage;
+    timeoutSeconds = observationTimeoutSeconds;
+  };
+  releaseFor =
+    client:
+    if pkgs.stdenv.hostPlatform.isAarch64 then
+      client.install.releaseByArch.aarch64
+    else
+      client.install.releaseByArch.x86_64;
+  expectedClientObservation =
+    name: client:
+    let
+      visiblePath = "${homeDir}/.local/bin/${client.binary}";
+      releaseRoot = "${homeDir}/.local/share/dotfiles/agents/${name}";
+      release = if client.install.kind == "github-release" then releaseFor client else null;
+    in
+    commonAgentObservation "agent/${name}" null
+      "${client.binary} is unavailable or its version command failed"
+    // (
+      if release == null then
+        {
+          kind = "command-version";
+          path = visiblePath;
+          expectedSource = visiblePath;
+          inherit (client) versionArgs;
+        }
+      else
+        {
+          kind = "release-tree";
+          inherit visiblePath;
+          visibleTarget = "../share/dotfiles/agents/${name}/current/${release.entrypoint}";
+          currentLink = "${releaseRoot}/current";
+          releasesRoot = "${releaseRoot}/releases";
+          inherit (release) entrypoint;
+          inherit (client.install) requiredPaths;
+          inherit (client) versionArgs;
+        }
+    );
+  timerObservation = name: {
+    kind = "systemd-timer";
+    checkId = "maintenance/${name}.timer";
+    resourceKey = null;
+    timeoutSeconds = observationTimeoutSeconds;
+    failureMessage = "${name}.timer or its service is not operational";
+    timer = "${name}.timer";
+    service = "${name}.service";
+    unitFileStates = [
+      "enabled"
+      "enabled-runtime"
+    ];
+    activeStates = [ "active" ];
+    serviceResults = [ "success" ];
+  };
+  expectedAgentObservations = {
+    "agents/roster" = commonAgentObservation "agent-roster" null "agent roster is empty" // {
+      kind = "roster";
+      members = agentConfig.enabled;
+      minimumCount = 1;
+      failureOnly = true;
+    };
+    "agents/managed-roots" =
+      commonAgentObservation "resource/managed-roots" "managedRoots"
+        "could not summarize every managed resource root"
+      // {
+        kind = "managed-roots";
+        paths = with expectedAgentRuntime; [
+          cache.buildsRoot
+          cache.sharedRoot
+          cache.sessionsRoot
+          state.resourcesRoot
+        ];
+        missingAsZero = true;
+        oneFileSystem = true;
+        cachePolicy = "allocated-bytes";
+      };
+    "agents/maintenance/project-cache-gc" =
+      timerObservation expectedAgentRuntime.timers.projectCacheGc.name;
+    "agents/maintenance/resource-reaper" =
+      timerObservation expectedAgentRuntime.timers.resourceReaper.name;
+  }
+  // lib.mapAttrs' (
+    name: client: lib.nameValuePair "agents/client/${name}" (expectedClientObservation name client)
+  ) clients;
+  agentObservationDefinitions = builtins.filter (
+    definition: lib.hasSuffix "/agents/module.nix" (toString definition.file)
+  ) hostOptions.dotfiles.observations.definitionsWithLocations;
+  agentDefinitionKeys = lib.unique (
+    lib.concatMap (definition: builtins.attrNames definition.value) agentObservationDefinitions
+  );
+  runtimeConfiguration = configuration: {
+    runtime = configuration.dotfiles.agents.runtime;
+    services = lib.genAttrs [
+      expectedAgentRuntime.timers.autoupdate.name
+      expectedAgentRuntime.timers.projectCacheGc.name
+      expectedAgentRuntime.timers.resourceReaper.name
+    ] (name: configuration.systemd.services.${name} or null);
+    timers = lib.genAttrs [
+      expectedAgentRuntime.timers.autoupdate.name
+      expectedAgentRuntime.timers.projectCacheGc.name
+      expectedAgentRuntime.timers.resourceReaper.name
+    ] (name: configuration.systemd.timers.${name} or null);
+  };
+  expectedRuntimeConfiguration = runtimeConfiguration hostConfig;
+  timerWiringMatches =
+    candidate:
+    let
+      timerMatches =
+        id: timerContract:
+        let
+          service = candidate.services.${timerContract.name} or null;
+          timer = candidate.timers.${timerContract.name} or null;
+          expectedTimerConfig = {
+            OnCalendar = timerContract.onCalendar;
+            Persistent = timerContract.persistent;
+          }
+          // lib.optionalAttrs (id == "resourceReaper") {
+            Unit = "${timerContract.name}.service";
+          };
+        in
+        service != null
+        && timer != null
+        && service.serviceConfig.Type == "oneshot"
+        && service.serviceConfig.User == hostConfig.dotfiles.host.username
+        && timer.wantedBy == [ "timers.target" ]
+        && timer.timerConfig == expectedTimerConfig
+        && (
+          if id == "autoupdate" then
+            service.serviceConfig.ExecStart == lib.getExe installAgents
+          else if id == "projectCacheGc" then
+            service.serviceConfig.ExecStart == lib.getExe runtime.gc
+          else
+            service.serviceConfig.ExecStart == "${lib.getExe runtime.agentResource} reap"
+        );
+    in
+    candidate.runtime == expectedAgentRuntime
+    && lib.all (id: timerMatches id expectedAgentRuntime.timers.${id}) (
+      builtins.attrNames expectedAgentRuntime.timers
+    );
+  agentRuntimeContractMatches =
+    candidateRuntime: candidateObservations:
+    timerWiringMatches candidateRuntime
+    && selectAgentObservations candidateObservations == expectedAgentObservations;
+  removeManagedRootMutation = agentObservations // {
+    "agents/managed-roots" = agentObservations."agents/managed-roots" or { } // {
+      paths = builtins.tail (agentObservations."agents/managed-roots".paths or [ ]);
+    };
+  };
+  highBytesMutation = expectedRuntimeConfiguration // {
+    runtime = expectedRuntimeConfiguration.runtime // {
+      cache = expectedRuntimeConfiguration.runtime.cache // {
+        highBytes = 1;
+      };
+    };
+  };
+  lowBytesMutation = expectedRuntimeConfiguration // {
+    runtime = expectedRuntimeConfiguration.runtime // {
+      cache = expectedRuntimeConfiguration.runtime.cache // {
+        lowBytes = 1;
+      };
+    };
+  };
+  inactiveDaysMutation = expectedRuntimeConfiguration // {
+    runtime = expectedRuntimeConfiguration.runtime // {
+      cache = expectedRuntimeConfiguration.runtime.cache // {
+        inactiveDays = 1;
+      };
+    };
+  };
+  runtimeWithCacheMutation =
+    cacheMutation:
+    import ./package.nix {
+      inherit lib pkgs;
+      runtimeContract = runtimePackageContract // {
+        cache = runtimePackageContract.cache // cacheMutation;
+      };
+    };
+  highBytesMutationRuntime = runtimeWithCacheMutation { highBytes = 1; };
+  lowBytesMutationRuntime = runtimeWithCacheMutation { lowBytes = 1; };
+  inactiveDaysMutationRuntime = runtimeWithCacheMutation { inactiveDays = 1; };
+  packageTreeRequiredPathMutation = agentObservations // {
+    "agents/client/codex" = agentObservations."agents/client/codex" or { } // {
+      requiredPaths =
+        builtins.removeAttrs (agentObservations."agents/client/codex".requiredPaths or { })
+          [
+            "bin/codex-code-mode-host"
+          ];
+    };
+  };
+  removeTimerMutation =
+    name:
+    expectedRuntimeConfiguration
+    // {
+      timers = builtins.removeAttrs expectedRuntimeConfiguration.timers [ name ];
+    };
+  changeTimerMutation =
+    name:
+    expectedRuntimeConfiguration
+    // {
+      timers = expectedRuntimeConfiguration.timers // {
+        ${name} = expectedRuntimeConfiguration.timers.${name} // {
+          timerConfig = expectedRuntimeConfiguration.timers.${name}.timerConfig // {
+            OnCalendar = "weekly";
+          };
+        };
+      };
+    };
+  staleAgentObservationMutation = agentObservations // {
+    "agents/stale" = expectedAgentObservations."agents/roster";
+  };
+  descriptionVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        systemd.services.dotfiles-agent-autoupdate.description = lib.mkForce "description mutation";
+        systemd.services.dotfiles-agent-project-cache-gc.description = lib.mkForce "description mutation";
+        systemd.services.dotfiles-agent-resource-reaper.description = lib.mkForce "description mutation";
+      }
+    ]).config;
 
   projectManagedFile =
     file:
@@ -2520,15 +2795,65 @@ in
       builtins.hasAttr target homeConfig.home.file && homeConfig.home.file.${target}.executable
     ) runtimeClientNames;
     assert !(builtins.hasAttr "${wrapperDirectory}/${clients.antigravity.binary}" homeConfig.home.file);
-    pkgs.runCommandLocal "check-agent-runtime-contract" { } ''
-      set -euo pipefail
-      ${lib.concatMapStrings (name: ''
-        wrapper=${homeConfig.home.file."${wrapperDirectory}/${clients.${name}.binary}".source}
-        grep -Fq ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/bin/${clients.${name}.binary}"} "$wrapper"
-        grep -Fq ${lib.escapeShellArg (lib.getExe runtime.launcher)} "$wrapper"
-      '') runtimeClientNames}
-      touch $out
-    '';
+    assert lib.assertMsg (
+      builtins.attrNames agentObservations == builtins.attrNames expectedAgentObservations
+      && agentObservations == expectedAgentObservations
+    ) "agent runtime observation registry is incomplete";
+    assert lib.assertMsg (
+      agentDefinitionKeys == builtins.attrNames expectedAgentObservations
+    ) "agent observations must be defined by the agents owner";
+    assert lib.assertMsg
+      (agentRuntimeContractMatches expectedRuntimeConfiguration hostConfig.dotfiles.observations)
+      "agent runtime contract is not wired to observations, packages, services, or timers";
+    assert lib.assertMsg (
+      !agentRuntimeContractMatches expectedRuntimeConfiguration removeManagedRootMutation
+    ) "agent runtime contract accepted a missing managed root";
+    assert lib.assertMsg (
+      !agentRuntimeContractMatches highBytesMutation hostConfig.dotfiles.observations
+      && !agentRuntimeContractMatches lowBytesMutation hostConfig.dotfiles.observations
+      && !agentRuntimeContractMatches inactiveDaysMutation hostConfig.dotfiles.observations
+      && runtime.gc != highBytesMutationRuntime.gc
+      && runtime.gc != lowBytesMutationRuntime.gc
+      && runtime.gc != inactiveDaysMutationRuntime.gc
+    ) "agent runtime contract accepted a changed cache policy";
+    assert lib.assertMsg (
+      !agentRuntimeContractMatches expectedRuntimeConfiguration packageTreeRequiredPathMutation
+    ) "agent runtime contract accepted a missing package-tree required path";
+    assert lib.assertMsg (lib.all
+      (
+        timer:
+        !agentRuntimeContractMatches (removeTimerMutation timer.name) hostConfig.dotfiles.observations
+        && !agentRuntimeContractMatches (changeTimerMutation timer.name) hostConfig.dotfiles.observations
+      )
+      (builtins.attrValues expectedAgentRuntime.timers)
+    ) "agent runtime contract accepted a missing or changed timer";
+    assert lib.assertMsg (
+      selectAgentObservations descriptionVariantConfig.dotfiles.observations == expectedAgentObservations
+    ) "agent observation keys depend on service descriptions";
+    assert lib.assertMsg (
+      !agentRuntimeContractMatches expectedRuntimeConfiguration staleAgentObservationMutation
+    ) "agent runtime contract accepted a stale agent observation";
+    pkgs.runCommandLocal "check-agent-runtime-contract"
+      {
+        nativeBuildInputs = [ pkgs.gnugrep ];
+      }
+      ''
+        set -euo pipefail
+        ${lib.concatMapStrings (name: ''
+          wrapper=${homeConfig.home.file."${wrapperDirectory}/${clients.${name}.binary}".source}
+          grep -Fq ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/bin/${clients.${name}.binary}"} "$wrapper"
+          grep -Fq ${lib.escapeShellArg (lib.getExe runtime.launcher)} "$wrapper"
+        '') runtimeClientNames}
+        grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.launcher}
+        grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.gc}
+        grep -Fq '68719476736' ${lib.getExe runtime.gc}
+        grep -Fq '51539607552' ${lib.getExe runtime.gc}
+        grep -Fq 'inactive_before=$((now - 30 * 24 * 60 * 60))' ${lib.getExe runtime.gc}
+        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe runtime.agentResource}
+        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe runtime.agentWorktree}
+        grep -Fq 'verification_root="$HOME/.cache/dotfiles-wsl/verification"' ${lib.getExe runtime.verify}
+        touch $out
+      '';
 
   agent-runtime-behavior =
     pkgs.runCommandLocal "check-agent-runtime-behavior"

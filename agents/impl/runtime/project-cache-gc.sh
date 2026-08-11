@@ -283,14 +283,14 @@ allocated_bytes() {
   printf '%s\n' "$bytes"
 }
 
-high_bytes=${DOTFILES_AGENT_GC_HIGH_BYTES:-68719476736}
-low_bytes=${DOTFILES_AGENT_GC_LOW_BYTES:-51539607552}
+high_bytes=${DOTFILES_AGENT_GC_HIGH_BYTES:-@gcHighBytes@}
+low_bytes=${DOTFILES_AGENT_GC_LOW_BYTES:-@gcLowBytes@}
 case "$high_bytes:$low_bytes" in
   *[!0-9:]*|:*|*:) die 'GC byte thresholds must be non-negative integers' ;;
 esac
 test "$low_bytes" -le "$high_bytes" || die 'GC low watermark exceeds high watermark'
 
-cache_root="$HOME/.cache/dotfiles-wsl"
+cache_root="$HOME/@cacheRootRelative@"
 sessions_root="$cache_root/sessions"
 builds_root="$cache_root/builds"
 mkdir -p "$HOME/.cache"
@@ -435,7 +435,7 @@ while IFS= read -r -d '' cache; do
 done < "$scan_file"
 
 now=$(date +%s)
-inactive_before=$((now - 30 * 24 * 60 * 60))
+inactive_before=$((now - @gcInactiveDays@ * 24 * 60 * 60))
 declare -A removed=()
 
 remove_cache() {

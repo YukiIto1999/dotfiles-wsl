@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+export LC_ALL=C.UTF-8
 
 # $1 は <(...) 等 seek 不能な fd の場合があるため、以降は引数で受けた in-memory 行配列だけを見る
-# claude/codex/copilot/cursor/chatgpt に加え、この repo が配備する opencode / antigravity(gemini)も検出対象
+# AI client、provider、既知の attribution identity を検出する
 scan_ai_attribution() {
-  printf '%s\n' "$@" | grep -inE 'Co-authored-by:.*(claude|codex|copilot|cursor|chatgpt|gemini|antigravity|opencode|google-labs|noreply@(anthropic|openai|google))|Generated with.*(claude|codex|copilot|cursor|chatgpt|gemini|antigravity|opencode|google-labs)' || true
+  local -r ai_names='claude|codex|copilot|cursor|chatgpt|gemini|antigravity|opencode|google-labs|openai|ai|noreply@(anthropic|openai|google)'
+  local -r ai_identity="(?<![A-Za-z0-9_])(?:$ai_names)(?![A-Za-z0-9_])"
+  printf '%s\n' "$@" | grep -inP "(?i)Co-authored-by:.*${ai_identity}|(Generated|Written|Created)[-[:space:]]+(by|with).*${ai_identity}|${ai_identity}[[:space:]]*(により|によって)[[:space:]]*(生成|作成|執筆)" || true
 }
 
-# コメント行と末尾空行を除いた実効行。間の空行は body の区切りとして残す
+# コメント行と末尾空行を除いた実効行
 effective_lines() {
   local -a body=()
   local line
@@ -34,22 +37,33 @@ main() {
   mapfile -t hits < <(scan_ai_attribution "${raw[@]}")
   if (( ${#hits[@]} > 0 )); then
     printf 'AI attribution: %s\n' "${hits[@]}" >&2
-    echo "remove Co-authored-by / Generated-with lines" >&2
+    echo "commit message から AI attribution を削除する" >&2
     exit 1
   fi
 
   local -a body
   mapfile -t body < <(effective_lines "${raw[@]}")
 
-  if (( ${#body[@]} == 0 )) || [[ "${body[0]}" =~ ^[[:space:]]*$ ]]; then
-    echo "commit message: subject が空" >&2
+  if (( ${#body[@]} != 1 )) || [[ "${body[0]}" =~ ^[[:space:]]*$ ]]; then
+    echo "commit message: subject 1 行だけを書く" >&2
     exit 1
   fi
 
-  # 行数は制限しない。Why の分量は変更の粒度が決める
-  if (( ${#body[@]} > 1 )) && [[ ! "${body[1]}" =~ ^[[:space:]]*$ ]]; then
-    echo "commit message: subject と body の間に空行が要る" >&2
-    printf '  %s\n' "${body[@]}" >&2
+  local -r subject="${body[0]}"
+  if (( ${#subject} > 50 )); then
+    echo "commit message: 50 文字以内にする" >&2
+    exit 1
+  fi
+
+  local -r subject_pattern='^(feat|fix|refactor|docs|test|build|ci|chore|style|perf|revert): [^[:space:]].*$'
+  if [[ ! "$subject" =~ $subject_pattern ]] \
+    || [[ "$subject" =~ [[:space:]]$ ]]; then
+    echo "commit message: scope なしの '<type>: <日本語の要約>' にする" >&2
+    exit 1
+  fi
+
+  if ! printf '%s\n' "$subject" | grep -qP '[\p{Hiragana}\p{Katakana}\p{Han}]'; then
+    echo "commit message: 要約を日本語で書く" >&2
     exit 1
   fi
 

@@ -335,22 +335,6 @@ let
           }
         )
       ) imageEntries;
-      containerRestartObservations = map (
-        entry:
-        let
-          inherit (entry.image) container;
-        in
-        mkEntry "containers/container-restart/${container}" (
-          common "restart/container/${container}" "could not observe restart count for ${container}"
-          // {
-            kind = "restart-counter";
-            sourceKind = "container";
-            target = container;
-            warningAt = restartWarningCount;
-            failureAt = restartFailureCount;
-          }
-        )
-      ) imageEntries;
       healthObservations = map (
         entry:
         let
@@ -385,7 +369,6 @@ let
       ++ serviceObservations
       ++ serviceRestartObservations
       ++ imageObservations
-      ++ containerRestartObservations
       ++ healthObservations
     );
 in

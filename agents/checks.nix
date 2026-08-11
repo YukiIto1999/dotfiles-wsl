@@ -13,7 +13,7 @@
 let
   expected = builtins.fromJSON (builtins.readFile ./fixtures/client-contract.json);
   agentConfig = hostConfig.dotfiles.agents;
-  clients = agentConfig.clients;
+  inherit (agentConfig) clients;
   variantClients = variantConfig.dotfiles.agents.clients;
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
   artifacts = hostConfig.dotfiles.artifacts;
@@ -900,7 +900,7 @@ let
       inherit (client.gatewayConfig) format managedFile;
     };
     managedFiles = lib.mapAttrs (_: projectManagedFile) client.managedFiles;
-    install = client.install;
+    inherit (client) install;
   };
   actualContract = lib.mapAttrs (_: projectClient) clients;
 
@@ -1200,9 +1200,9 @@ let
   };
   packageTreeInstall = baseCandidate.clients.codex.install // {
     layout = "package-tree";
-    releaseByArch = lib.mapAttrs (_: release: release // { entrypoint = "bin/codex"; }) (
-      baseCandidate.clients.codex.install.releaseByArch
-    );
+    releaseByArch = lib.mapAttrs (
+      _: release: release // { entrypoint = "bin/codex"; }
+    ) baseCandidate.clients.codex.install.releaseByArch;
     requiredPaths = {
       bin = {
         kind = "directory";
@@ -1271,7 +1271,7 @@ let
     required-path-empty-segment = invalidRequiredPathCandidate "bin//share";
   };
   unexpectedlyValidInstallNegativeEvalCases = builtins.attrNames (
-    lib.filterAttrs (_: candidate: contractIsValid candidate) installNegativeEvalCases
+    lib.filterAttrs (_: contractIsValid) installNegativeEvalCases
   );
   invalidInstallEntrypointCandidates = map invalidInstallEntrypointCandidate [
     ""
@@ -3124,8 +3124,8 @@ in
 
   agent-resource-contract =
     let
-      agentResource = agentConfig.agentResource;
-      agentWorktree = agentConfig.agentWorktree;
+      inherit (agentConfig) agentResource;
+      inherit (agentConfig) agentWorktree;
       resourceSource = builtins.readFile ./impl/resource/agent-resource.sh;
       worktreeSource = builtins.readFile ./impl/resource/agent-worktree.sh;
       commandName =
@@ -3153,9 +3153,9 @@ in
         expected: ownership: ownership.count == 1 && ownership.paths == [ (toString expected) ];
       replacePackage =
         expected: replacement:
-        map (package: if package == expected then replacement else package) (
-          hostConfig.environment.systemPackages
-        );
+        map (
+          package: if package == expected then replacement else package
+        ) hostConfig.environment.systemPackages;
       duplicateAgentResource = pkgs.writeShellApplication {
         name = "dotfiles-agent-resource";
         text = "exit 0";

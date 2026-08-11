@@ -834,7 +834,7 @@ let
         _:
         validFragment
         // {
-          resources = normalizedPassEnvelope.resources;
+          inherit (normalizedPassEnvelope) resources;
         };
     };
     normalized-missing-required-resource = {
@@ -867,7 +867,7 @@ let
               status = "pass";
             }
           ];
-          resources = normalizedPassEnvelope.resources;
+          inherit (normalizedPassEnvelope) resources;
         };
     };
     nonrestart-restart-injection.fragment =
@@ -937,7 +937,7 @@ let
         sourceKind = "systemd-service";
         target = "service-ok.service";
       };
-      fragment = id: passFragment id;
+      fragment = passFragment;
     };
     restart-warn-without-payload = {
       observation = {
@@ -1022,7 +1022,7 @@ let
     );
   };
   malformedArrayValues = {
-    null = null;
+    inherit null;
     object = { };
     scalar = 1;
   };
@@ -1452,7 +1452,7 @@ in
         )}
 
         ${lib.concatStringsSep "\n" (
-          lib.mapAttrsToList (name: fixture: ''
+          lib.mapAttrsToList (_: fixture: ''
             set +e
             semantic_output=$(${lib.getExe fixture.doctor} --json)
             semantic_status=$?

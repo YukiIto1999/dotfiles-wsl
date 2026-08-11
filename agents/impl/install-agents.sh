@@ -81,9 +81,11 @@ transaction_visible_old_identity=
 transaction_visible_new_identity=
 transaction_visible_binary=
 transaction_gc_state=none
-transaction_gc_original_name=
-transaction_gc_private_name=
-transaction_gc_release_identity=
+transaction_gc_count=0
+declare -a transaction_gc_original_names=()
+declare -a transaction_gc_private_names=()
+declare -a transaction_gc_release_identities=()
+declare -a transaction_gc_manifests=()
 retained_releases=
 
 atomic_identity() {
@@ -761,14 +763,35 @@ rollback_release_transaction() {
 }
 
 rollback_gc_transaction() {
+  local index
+
   [[ $transaction_gc_state == quarantined ]] || return 0
-  atomic_operation move-noreplace-fd "$releases_root_fd" "$releases_root_identity" \
-    "$transaction_gc_private_name" "$releases_root_fd" "$releases_root_identity" \
-    "$transaction_gc_original_name" "$transaction_gc_release_identity" || return
+  for ((index = transaction_gc_count - 1; index >= 0; index--)); do
+    atomic_operation move-noreplace-fd "$releases_root_fd" "$releases_root_identity" \
+      "${transaction_gc_private_names[$index]}" "$releases_root_fd" \
+      "$releases_root_identity" "${transaction_gc_original_names[$index]}" \
+      "${transaction_gc_release_identities[$index]}" || return
+    unset 'transaction_gc_original_names[index]'
+    unset 'transaction_gc_private_names[index]'
+    unset 'transaction_gc_release_identities[index]'
+    unset 'transaction_gc_manifests[index]'
+    transaction_gc_count=$index
+  done
   transaction_gc_state=none
-  transaction_gc_original_name=
-  transaction_gc_private_name=
-  transaction_gc_release_identity=
+}
+
+forget_latest_gc_transaction() {
+  local index=$((transaction_gc_count - 1))
+
+  ((index >= 0)) || return 1
+  unset 'transaction_gc_original_names[index]'
+  unset 'transaction_gc_private_names[index]'
+  unset 'transaction_gc_release_identities[index]'
+  unset 'transaction_gc_manifests[index]'
+  transaction_gc_count=$index
+  if ((transaction_gc_count == 0)); then
+    transaction_gc_state=none
+  fi
 }
 
 rollback_publish_transaction() {
@@ -794,7 +817,6 @@ discard_transaction_backup() {
 commit_publish_transaction() {
   local cleanup_status=0
 
-  [[ $transaction_gc_state == none ]] || return 1
   # The switched state is committed before old objects are destroyed.  A failed cleanup is
   # reported and retains its exact identity so the EXIT trap can retry without guessing.
   transaction_active=0
@@ -825,6 +847,7 @@ commit_publish_transaction() {
   transaction_release_state=none
   transaction_current_state=none
   transaction_visible_state=none
+  cleanup_quarantined_releases || cleanup_status=1
   return "$cleanup_status"
 }
 
@@ -837,40 +860,98 @@ managed_release_is_valid() {
   ) >"$log" 2>&1
 }
 
-remove_managed_release() {
+quarantine_managed_release() {
   local record=$1 release_name=$2 scratch=$3 before_manifest=$4
-  local release_identity private_name private_path after_manifest gc_tree_fd gc_tree_identity
+  local release_identity private_name private_path after_manifest gc_tree_fd index status
+  local original_after private_after
 
   release_identity=$(atomic_identity_fd "$releases_root_fd" "$releases_root_identity" \
     "$release_name") || fail "cannot capture release GC identity: $release_name"
   run_transaction_hook before-release-gc "$releases_root/$release_name"
-  private_name=$("$atomic_publish_command" quarantine-tree-fd "$releases_root_fd" \
-    "$releases_root_identity" "$release_name" "$release_identity") \
-    || fail "cannot quarantine managed release: $release_name"
+  private_name=$("$atomic_publish_command" release-gc-name) \
+    || fail "cannot allocate release GC private name: $release_name"
   [[ $private_name =~ ^\.release-gc\.[0-9a-f]{32}$ ]] \
     || fail "release GC returned an invalid private name: $private_name"
-  transaction_gc_original_name=$release_name
-  transaction_gc_private_name=$private_name
-  transaction_gc_release_identity=$release_identity
+  index=$transaction_gc_count
+  transaction_gc_original_names[index]=$release_name
+  transaction_gc_private_names[index]=$private_name
+  transaction_gc_release_identities[index]=$release_identity
+  transaction_gc_manifests[index]=$before_manifest
+  transaction_gc_count=$((transaction_gc_count + 1))
   transaction_gc_state=quarantined
+  if "$atomic_publish_command" quarantine-tree-fd "$releases_root_fd" \
+    "$releases_root_identity" "$release_name" "$private_name" "$release_identity"; then
+    :
+  else
+    status=$?
+    original_after=$(atomic_identity_fd "$releases_root_fd" "$releases_root_identity" \
+      "$release_name") || original_after=
+    private_after=$(atomic_identity_fd "$releases_root_fd" "$releases_root_identity" \
+      "$private_name") || private_after=
+    if [[ $original_after == "$release_identity" && $private_after == missing ]]; then
+      forget_latest_gc_transaction \
+        || fail "cannot clear unmutated release GC transaction: $release_name"
+    elif [[ $original_after != missing || $private_after != "$release_identity" ]]; then
+      transaction_rollback_ambiguous=1
+      fail "release GC outcome is ambiguous; preserving $release_name and $private_name"
+    fi
+    fail "cannot quarantine managed release (status $status): $release_name"
+  fi
   private_path=$releases_root_view/$private_name
   exec {gc_tree_fd}<"$private_path" || fail "cannot open quarantined release: $release_name"
-  gc_tree_identity=$(atomic_directory_identity_fd "$gc_tree_fd") \
-    || fail "cannot capture quarantined release identity: $release_name"
   after_manifest=$scratch/gc-after-$release_name.manifest
   if ! managed_release_is_valid "$record" "$release_name" "$private_path" "$scratch" \
     "$after_manifest" "$scratch/gc-after-$release_name.log" \
     || ! cmp -- "$before_manifest" "$after_manifest"; then
+    exec {gc_tree_fd}>&-
     fail "managed release changed during GC: $release_name"
   fi
-  atomic_operation remove-tree-fd "$releases_root_fd" "$releases_root_identity" \
-    "$private_name" "$gc_tree_fd" "$gc_tree_identity" \
-    || fail "cannot remove quarantined managed release: $release_name"
   exec {gc_tree_fd}>&-
-  transaction_gc_state=none
-  transaction_gc_original_name=
-  transaction_gc_private_name=
-  transaction_gc_release_identity=
+}
+
+cleanup_quarantined_releases() {
+  local index release_name private_name private_path before_manifest after_manifest
+  local gc_tree_fd gc_tree_identity cleanup_status=0
+
+  for ((index = 0; index < transaction_gc_count; index++)); do
+    release_name=${transaction_gc_original_names[$index]}
+    private_name=${transaction_gc_private_names[$index]}
+    private_path=$releases_root_view/$private_name
+    before_manifest=${transaction_gc_manifests[$index]}
+    after_manifest=$transaction_release_scratch/gc-commit-$release_name.manifest
+    if ! exec {gc_tree_fd}<"$private_path"; then
+      echo "FATAL: cannot open committed release GC quarantine: $release_name" >&2
+      cleanup_status=1
+      continue
+    fi
+    if ! gc_tree_identity=$(atomic_directory_identity_fd "$gc_tree_fd") \
+      || ! managed_release_is_valid "$transaction_release_record" "$release_name" \
+        "$private_path" "$transaction_release_scratch" "$after_manifest" \
+        "$transaction_release_scratch/gc-commit-$release_name.log" \
+      || ! cmp -- "$before_manifest" "$after_manifest"; then
+      echo "FATAL: committed release GC quarantine changed; preserving: $release_name" >&2
+      exec {gc_tree_fd}>&-
+      cleanup_status=1
+      continue
+    fi
+    if ! "$atomic_publish_command" remove-tree-fd "$releases_root_fd" \
+      "$releases_root_identity" "$private_name" "$gc_tree_fd" "$gc_tree_identity"; then
+      echo "FATAL: cannot remove committed release GC quarantine: $release_name" >&2
+      exec {gc_tree_fd}>&-
+      cleanup_status=1
+      continue
+    fi
+    exec {gc_tree_fd}>&-
+    unset 'transaction_gc_original_names[index]'
+    unset 'transaction_gc_private_names[index]'
+    unset 'transaction_gc_release_identities[index]'
+    unset 'transaction_gc_manifests[index]'
+  done
+  if ((cleanup_status == 0)); then
+    transaction_gc_count=0
+    transaction_gc_state=none
+  fi
+  return "$cleanup_status"
 }
 
 garbage_collect_managed_releases() {
@@ -917,7 +998,7 @@ garbage_collect_managed_releases() {
   ((${#candidates[@]} >= delete_count)) \
     || fail "release retention cannot preserve current and new release"
   for entry in "${candidates[@]:0:delete_count}"; do
-    remove_managed_release "$record" "$entry" "$scratch" \
+    quarantine_managed_release "$record" "$entry" "$scratch" \
       "$scratch/gc-before-$entry.manifest"
     managed_count=$((managed_count - 1))
   done
@@ -951,6 +1032,8 @@ publish_validated_payload() {
   transaction_current_method=none
   transaction_visible_method=none
   transaction_visible_binary=$binary
+  transaction_release_record=$record
+  transaction_release_scratch=$scratch
 
   if [[ -e $release_path || -L $release_path ]]; then
     owned_real_directory "$release_path" "existing release"
@@ -964,9 +1047,7 @@ publish_validated_payload() {
       || fail "cannot capture staged payload identity: $release_name"
     transaction_release_name=$release_name
     transaction_release_identity=$payload_identity
-    transaction_release_record=$record
     transaction_release_manifest=$manifest
-    transaction_release_scratch=$scratch
     transaction_release_payload=$payload
     atomic_operation move-noreplace-fd "$active_stage_fd" "$active_stage_identity" \
       "$payload_name" "$releases_root_fd" "$releases_root_identity" "$release_name" \

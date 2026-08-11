@@ -2,6 +2,7 @@
   pkgs,
   lib,
   hostConfig,
+  helpers,
   ...
 }:
 
@@ -1098,7 +1099,7 @@ let
     lib.evalModules {
       specialArgs = { inherit pkgs; };
       modules = [
-        ../../observations/module.nix
+        helpers.observationRegistryModule
         ../module.nix
         ./module.nix
         {

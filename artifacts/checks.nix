@@ -5,6 +5,7 @@
   hostConfig,
   hostOptions,
   variantConfig,
+  helpers,
   ...
 }:
 
@@ -72,7 +73,7 @@ let
     candidateArtifacts:
     (lib.evalModules {
       modules = [
-        ../observations/module.nix
+        helpers.observationRegistryModule
         ./module.nix
         { dotfiles.artifacts = candidateArtifacts; }
       ];

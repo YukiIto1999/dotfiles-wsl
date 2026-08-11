@@ -8,6 +8,9 @@
 let
   cfg = config.dotfiles.mcp;
   targetNames = builtins.attrNames cfg.targets;
+  observationTimeoutSeconds = 10;
+  restartWarningCount = 5;
+  restartFailureCount = 20;
 
   # target が front の名前、URL、書き込み領域を一度だけ決める。
   fronts = lib.mapAttrs (name: target: {
@@ -30,6 +33,51 @@ let
   );
   expectedGithubTargets = lib.sort builtins.lessThan (
     map (account: "github-${account}") config.dotfiles.accounts
+  );
+  observedServices = [
+    cfg.gateway.service
+  ]
+  ++ map (front: front.service) (builtins.attrValues fronts);
+  commonObservation = checkId: failureMessage: {
+    inherit checkId failureMessage;
+    resourceKey = null;
+    timeoutSeconds = observationTimeoutSeconds;
+  };
+  serviceObservations = builtins.listToAttrs (
+    map (
+      service:
+      let
+        unit = "${service}.service";
+      in
+      lib.nameValuePair "mcp/service/${service}" (
+        commonObservation "service/${service}" "${unit} is not operational"
+        // {
+          kind = "systemd-service";
+          inherit unit;
+          loadStates = [ "loaded" ];
+          activeStates = [ "active" ];
+          results = [ "success" ];
+        }
+      )
+    ) observedServices
+  );
+  serviceRestartObservations = builtins.listToAttrs (
+    map (
+      service:
+      let
+        unit = "${service}.service";
+      in
+      lib.nameValuePair "mcp/service-restart/${service}" (
+        commonObservation "restart/service/${service}" "could not observe restart count for ${unit}"
+        // {
+          kind = "restart-counter";
+          sourceKind = "systemd-service";
+          target = unit;
+          warningAt = restartWarningCount;
+          failureAt = restartFailureCount;
+        }
+      )
+    ) observedServices
   );
 in
 {
@@ -71,7 +119,7 @@ in
                 options = {
                   tool = lib.mkOption { type = lib.types.str; };
                   args = lib.mkOption { type = lib.types.attrsOf lib.types.anything; };
-                  timeout = lib.mkOption { type = lib.types.ints.positive; };
+                  timeout = lib.mkOption { type = lib.types.ints.between 1 120; };
                 };
               };
               description = "doctor が target の tool 名を照合するための読み取り専用 probe。";
@@ -112,6 +160,17 @@ in
 
   config.dotfiles.mcp.fronts = fronts;
   config.dotfiles.mcp.chromium = pkgs.chromium;
+  config.dotfiles.observations =
+    serviceObservations
+    // serviceRestartObservations
+    // {
+      "mcp/roster" = commonObservation "mcp-roster" "MCP target roster is empty" // {
+        kind = "roster";
+        members = targetNames;
+        minimumCount = 1;
+        failureOnly = true;
+      };
+    };
 
   config.systemd.services = lib.mapAttrs' (
     name: front:

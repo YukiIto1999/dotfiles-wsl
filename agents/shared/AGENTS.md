@@ -94,7 +94,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 - VS Code Server 整理: `dotfiles-cleanup --delete --vscode-server`
 - secrets enrollment: `docs/operations/sops-enrollment.md` に従い、host key の公開鍵を `sops/assets/.sops.yaml` へ追加して `sops updatekeys` を実行する。
 - secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops --config ~/dotfiles-wsl/sops/assets/.sops.yaml ~/dotfiles-wsl/sops/assets/secrets.yaml`
-- 詳細手順、構成、変更箇所は `~/dotfiles-wsl/README.md` に集約する。
+- 公開入口は `~/dotfiles-wsl/README.md`、詳細手順、構成、変更箇所は `~/dotfiles-wsl/docs/README.md` から辿る。
 
 ## 禁則
 

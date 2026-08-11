@@ -3,6 +3,8 @@ set -euo pipefail
 
 : "${ATOMIC_PUBLISH:?}"
 : "${ATOMIC_PUBLISH_PRODUCTION:?}"
+: "${FIXTURE_RUNTIME_SHELL:?}"
+: "${PROBE_ELF:?}"
 
 fixture=$PWD/atomic-publish-security
 mkdir -m 0700 "$fixture"
@@ -70,7 +72,70 @@ if run_case production-fd-api; then
   test ! -e "$directory/destination"
   test ! -L "$directory/destination"
   test -z "$(find "$directory" -maxdepth 1 -name '.atomic-quarantine.*' -print -quit)"
+
+  link_token=$($ATOMIC_PUBLISH_PRODUCTION symlink-noreplace-fd \
+    "$directory_fd" "$directory_token" stable-link ../stable-target)
+  test "$(readlink -- "$directory/stable-link")" = ../stable-target
+  test "$($ATOMIC_PUBLISH_PRODUCTION identity-fd "$directory_fd" \
+    "$directory_token" stable-link)" = "$link_token"
+
+  mkdir -m 0700 "$directory/tree"
+  mkdir -m 0700 "$directory/tree/child"
+  printf '%s\n' removable >"$directory/tree/child/file"
+  exec {tree_fd}<"$directory/tree"
+  tree_token=$($ATOMIC_PUBLISH_PRODUCTION directory-identity-fd "$tree_fd")
+  expect_command_status 0 "$ATOMIC_PUBLISH_PRODUCTION" remove-tree-fd \
+    "$directory_fd" "$directory_token" tree "$tree_fd" "$tree_token"
+  test ! -e "$directory/tree"
+  exec {tree_fd}>&-
   exec {directory_fd}>&-
+
+  probe_stage=$fixture/production-probe-stage
+  mkdir -m 0700 "$probe_stage" "$probe_stage/probe" "$probe_stage/probe/work"
+  mkdir -m 0700 "$probe_stage/probe/home" "$probe_stage/probe/codex-home"
+  mkdir -m 0700 "$probe_stage/probe/cache" "$probe_stage/probe/config"
+  mkdir -m 0700 "$probe_stage/probe/data" "$probe_stage/probe/state" "$probe_stage/probe/tmp"
+  mkdir -m 0700 "$probe_stage/payload" "$probe_stage/payload/bin" \
+    "$probe_stage/payload/codex-path"
+  probe_script=$probe_stage/payload/bin/probe-script
+  sed "s|@SHELL@|$FIXTURE_RUNTIME_SHELL|" >"$probe_script" <<'PROBE_SCRIPT'
+#!@SHELL@
+set -euo pipefail
+test "$1" = --version
+test "$PWD" = /proc/self/cwd
+test "$HOME" = /proc/self/cwd/../home
+test "$CODEX_HOME" = /proc/self/cwd/../codex-home
+test "$XDG_CACHE_HOME" = /proc/self/cwd/../cache
+test "$XDG_CONFIG_HOME" = /proc/self/cwd/../config
+test "$XDG_DATA_HOME" = /proc/self/cwd/../data
+test "$XDG_STATE_HOME" = /proc/self/cwd/../state
+test "$TMPDIR" = /proc/self/cwd/../tmp
+test "$PATH" = /proc/self/cwd/../../payload/bin:/proc/self/cwd/../../payload/codex-path
+test -z "${FIXTURE_INHERITED_SECRET+x}"
+for descriptor in /proc/self/fd/*; do
+  test ! -d "$descriptor"
+done
+: >/proc/self/cwd/script-probe-ran
+PROBE_SCRIPT
+  chmod 0755 "$probe_script"
+  cp -- "$PROBE_ELF" "$probe_stage/payload/bin/probe-elf"
+  chmod 0755 "$probe_stage/payload/bin/probe-elf"
+  exec {probe_stage_fd}<"$probe_stage"
+  probe_stage_token=$($ATOMIC_PUBLISH_PRODUCTION directory-identity-fd "$probe_stage_fd")
+  export FIXTURE_INHERITED_SECRET=production-secret
+  (
+    "$ATOMIC_PUBLISH_PRODUCTION" probe-exec "$probe_stage_fd" "$probe_stage_token" \
+      probe/work payload/bin/probe-script "$probe_script" "$probe_stage_fd" \
+      "$probe_stage_fd" "$probe_stage_fd" -- --version
+  )
+  test -e "$probe_stage/probe/work/script-probe-ran"
+  (
+    "$ATOMIC_PUBLISH_PRODUCTION" probe-exec "$probe_stage_fd" "$probe_stage_token" \
+      probe/work payload/bin/probe-elf "$probe_stage/payload/bin/probe-elf" \
+      "$probe_stage_fd" "$probe_stage_fd" "$probe_stage_fd" -- --version
+  )
+  unset FIXTURE_INHERITED_SECRET
+  exec {probe_stage_fd}>&-
 fi
 
 # A forced open failure removes the exact empty quarantine created before the failure.

@@ -230,6 +230,7 @@ let
       atomicPublishCommand = lib.escapeShellArg (
         lib.getExe' atomicPublish "dotfiles-agent-atomic-publish"
       );
+      probeEnvironment = "";
       transactionHookCommand = lib.escapeShellArg "${pkgs.coreutils}/bin/true";
       versionArgsDecoder = builtins.readFile ./impl/version-args.sh;
     };

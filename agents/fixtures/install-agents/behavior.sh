@@ -358,12 +358,22 @@ preextract_scenarios=(
   absolute parent embedded-parent empty-segment current-segment backslash control
   duplicate-file duplicate-directory
   file-directory-collision symlink-internal symlink-external hardlink-internal
-  hardlink-external fifo many-members reserved-marker
+  hardlink-external fifo many-members reserved-marker large-member large-total
 )
 for scenario in "${preextract_scenarios[@]}"; do
   label="archive-$scenario"
   make_archive "$label" "$scenario"
   archive=$archive_path
+  case $scenario in
+    large-member)
+      test "$(tar -tvzf "$archive" --numeric-owner | awk '{ print $3 }')" \
+        -eq 2147483649
+      ;;
+    large-total)
+      test "$(tar -tvzf "$archive" --numeric-owner | awk '{ total += $3 } END { print total }')" \
+        -eq 2147483650
+      ;;
+  esac
   home=$fixture/$label-home
   api=$fixture/$label-api.json
   seed_stable_home "$home"

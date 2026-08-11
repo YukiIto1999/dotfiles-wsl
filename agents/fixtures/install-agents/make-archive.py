@@ -1,9 +1,49 @@
 import io
+import os
+import subprocess
 import sys
 import tarfile
+import tempfile
 
 
 archive, scenario, shell = sys.argv[1:4]
+LOGICAL_SIZE_LIMIT = 2_147_483_648
+
+
+def make_sparse_archive(member_sizes: dict[str, int]) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        for name, size in member_sizes.items():
+            path = os.path.join(directory, name)
+            with open(path, "wb") as sparse_file:
+                sparse_file.truncate(size)
+            os.chmod(path, 0o644)
+        subprocess.run(
+            [
+                "tar",
+                "--create",
+                "--gzip",
+                "--sparse",
+                "--format=gnu",
+                "--owner=0",
+                "--group=0",
+                "--mtime=@1",
+                "--file",
+                archive,
+                "--directory",
+                directory,
+                *member_sizes.keys(),
+            ],
+            check=True,
+        )
+
+
+if scenario == "large-member":
+    make_sparse_archive({"larger-than-limit": LOGICAL_SIZE_LIMIT + 1})
+    sys.exit(0)
+if scenario == "large-total":
+    half_plus_one = LOGICAL_SIZE_LIMIT // 2 + 1
+    make_sparse_archive({"large-a": half_plus_one, "large-b": half_plus_one})
+    sys.exit(0)
 
 
 def entrypoint_body(probe: str) -> bytes:

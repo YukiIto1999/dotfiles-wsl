@@ -18,6 +18,7 @@
 | session 欠落、JSON-RPC error、image 不一致、artifact 乖離、空の MCP roster、WSL 資源の warning と failure を終了 status に反映する | `doctor-runtime` |
 | WSL 専用 zram lifecycle、journald、標準 fstrim と service 非依存が宣言どおりである | `host-stability-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
+| runtime observation registry が17種の closed union、必須 field、path と ID、閾値、専用 command package、定義元 owner を型で制限する | `observation-contract` |
 | required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
 | 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |

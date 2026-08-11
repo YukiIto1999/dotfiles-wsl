@@ -4,6 +4,8 @@
   lib,
   hostConfig,
   hostOptions,
+  mkNixosSystem,
+  normalMachineModule,
   self,
   units,
   variantConfig,
@@ -176,7 +178,7 @@ let
       probeFields = {
         tool = "str";
         args = "attrsOf";
-        timeout = "positiveInt";
+        timeout = "intBetween";
       };
       needsNetworkDefault = false;
       waitUnitsDefault = [ ];
@@ -266,8 +268,207 @@ let
     definitions = actualGlobalArgumentDefinitions;
   };
 
+  observationTimeoutSeconds = 10;
+  restartWarningCount = 5;
+  restartFailureCount = 20;
+  targetNames = builtins.attrNames targets;
+  selectMcpObservations = lib.filterAttrs (name: _: lib.hasPrefix "mcp/" name);
+  mcpObservations = selectMcpObservations hostConfig.dotfiles.observations;
+  protocolObservation = mcpObservations."mcp/protocol/default" or null;
+  commonObservation = checkId: failureMessage: {
+    inherit checkId failureMessage;
+    resourceKey = null;
+    timeoutSeconds = observationTimeoutSeconds;
+  };
+  expectedMcpObservationsFor =
+    configuration:
+    let
+      candidateTargets = configuration.dotfiles.mcp.targets;
+      candidateTargetNames = builtins.attrNames candidateTargets;
+      candidateFronts = builtins.attrValues configuration.dotfiles.mcp.fronts;
+      candidateServiceNames = [
+        configuration.dotfiles.mcp.gateway.service
+      ]
+      ++ map (front: front.service) candidateFronts;
+      candidateObservations = selectMcpObservations configuration.dotfiles.observations;
+      candidateProtocol = candidateObservations."mcp/protocol/default" or null;
+      gatewayTimeout = lib.foldl' lib.max 0 (
+        map (name: candidateTargets.${name}.probe.timeout) candidateTargetNames
+      );
+      serviceObservations = builtins.listToAttrs (
+        map (
+          service:
+          let
+            unit = "${service}.service";
+          in
+          lib.nameValuePair "mcp/service/${service}" (
+            commonObservation "service/${service}" "${unit} is not operational"
+            // {
+              kind = "systemd-service";
+              inherit unit;
+              loadStates = [ "loaded" ];
+              activeStates = [ "active" ];
+              results = [ "success" ];
+            }
+          )
+        ) candidateServiceNames
+      );
+      restartObservations = builtins.listToAttrs (
+        map (
+          service:
+          let
+            unit = "${service}.service";
+          in
+          lib.nameValuePair "mcp/service-restart/${service}" (
+            commonObservation "restart/service/${service}" "could not observe restart count for ${unit}"
+            // {
+              kind = "restart-counter";
+              sourceKind = "systemd-service";
+              target = unit;
+              warningAt = restartWarningCount;
+              failureAt = restartFailureCount;
+            }
+          )
+        ) candidateServiceNames
+      );
+    in
+    serviceObservations
+    // restartObservations
+    // {
+      "mcp/roster" = commonObservation "mcp-roster" "MCP target roster is empty" // {
+        kind = "roster";
+        members = candidateTargetNames;
+        minimumCount = 1;
+        failureOnly = true;
+      };
+      "mcp/protocol/default" = {
+        kind = "normalized-protocol";
+        checkId = "mcp-session";
+        resourceKey = null;
+        timeoutSeconds = 5 * gatewayTimeout;
+        failureMessage = "MCP gateway protocol is not operational";
+        command = if candidateProtocol == null then null else candidateProtocol.command;
+        allowedOutcomeIds = [
+          "mcp-session"
+          "mcp-tools"
+        ]
+        ++ map (name: "mcp-target/${name}") candidateTargetNames;
+        requiredResourceKeys = [ ];
+        envelopeVersion = 1;
+      };
+    };
+  expectedMcpObservations = expectedMcpObservationsFor hostConfig;
+  observationContractMatches =
+    configuration:
+    (
+      selectMcpObservations configuration.dotfiles.observations
+      == expectedMcpObservationsFor configuration
+    );
+  removedObservationMutation = builtins.removeAttrs mcpObservations [
+    "mcp/service/agentgateway-default"
+  ];
+  changedObservationMutation = mcpObservations // {
+    "mcp/service-restart/agentgateway-default" =
+      mcpObservations."mcp/service-restart/agentgateway-default"
+      // {
+        failureAt = restartFailureCount + 1;
+      };
+  };
+  staleObservationMutation = mcpObservations // {
+    "mcp/service/stale" = mcpObservations."mcp/service/agentgateway-default";
+  };
+  firstFrontService = (builtins.head fronts).service;
+  descriptionVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        systemd.services.${hostConfig.dotfiles.mcp.gateway.service}.description =
+          lib.mkForce "Changed gateway description";
+        systemd.services.${firstFrontService}.description = lib.mkForce "Changed front description";
+      }
+    ]).config;
+  extraTargetVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.mcp.targets.fixture = {
+          provider = "memory";
+          port = 8783;
+          serve = port: "${pkgs.coreutils}/bin/true --host 127.0.0.1 --port ${toString port}";
+          needsNetwork = false;
+          waitUnits = [ ];
+          probe = {
+            tool = "fixture";
+            args = { };
+            timeout = 1;
+          };
+        };
+      }
+    ]).config;
+  removedTargetVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.mcp = {
+          enabledProviders = lib.mkForce (lib.remove "playwright" enabledProviders);
+          targets = lib.mkForce (builtins.removeAttrs targets [ "playwright" ]);
+        };
+      }
+    ]).config;
+  timeout121Evaluation = builtins.tryEval (
+    builtins.deepSeq ((mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.mcp.targets.codex.probe.timeout = lib.mkForce 121;
+      }
+    ]).config.dotfiles.mcp.targets
+    ) true
+  );
+  mcpObservationDefinitions = builtins.filter (
+    definition: lib.hasPrefix "${self}/mcp/" (toString definition.file)
+  ) hostOptions.dotfiles.observations.definitionsWithLocations;
+  mcpDefinitionKeys = lib.unique (
+    lib.concatMap (definition: builtins.attrNames definition.value) mcpObservationDefinitions
+  );
+
 in
 {
+  mcp-runtime-observation-contract =
+    assert builtins.length targetNames > 0;
+    assert builtins.length (builtins.attrNames mcpObservations) == 2 * builtins.length targetNames + 4;
+    assert protocolObservation != null;
+    assert mcpObservations == expectedMcpObservations;
+    assert protocolObservation.command.meta.mainProgram == "dotfiles-mcp-gateway-observer";
+    assert protocolObservation.command.dotfilesObservationCommandKind == "normalized-protocol";
+    assert
+      protocolObservation.command.dotfilesObservationContract == {
+        envelopeVersion = 1;
+        inherit (protocolObservation) allowedOutcomeIds requiredResourceKeys;
+        gatewayTimeout = 120;
+        outerTimeout = 600;
+      };
+    assert
+      lib.getExe protocolObservation.command
+      == "${lib.getBin protocolObservation.command}/bin/dotfiles-mcp-gateway-observer";
+    assert removedObservationMutation != expectedMcpObservations;
+    assert changedObservationMutation != expectedMcpObservations;
+    assert staleObservationMutation != expectedMcpObservations;
+    assert observationContractMatches descriptionVariantConfig;
+    assert observationContractMatches extraTargetVariantConfig;
+    assert observationContractMatches removedTargetVariantConfig;
+    assert
+      builtins.length (
+        builtins.attrNames (selectMcpObservations extraTargetVariantConfig.dotfiles.observations)
+      ) == 2 * (builtins.length targetNames + 1) + 4;
+    assert
+      builtins.length (
+        builtins.attrNames (selectMcpObservations removedTargetVariantConfig.dotfiles.observations)
+      ) == 2 * (builtins.length targetNames - 1) + 4;
+    assert !timeout121Evaluation.success;
+    assert mcpDefinitionKeys == builtins.attrNames expectedMcpObservations;
+    assert lib.all (observation: observation.resourceKey == null) (builtins.attrValues mcpObservations);
+    pkgs.runCommandLocal "check-mcp-runtime-observation-contract" { } "touch $out";
+
   mcp-provider-roster =
     let
       provided = lib.unique (map (target: target.provider) (builtins.attrValues targets));
@@ -298,6 +499,10 @@ in
     assert !(targetOptions.port.type.check 8769);
     assert !(targetOptions.port.type.check 8790);
     assert probeOptions.args.type.nestedTypes.elemType.name == "anything";
+    assert probeOptions.timeout.type.check 1;
+    assert probeOptions.timeout.type.check 120;
+    assert !(probeOptions.timeout.type.check 0);
+    assert !(probeOptions.timeout.type.check 121);
     pkgs.runCommandLocal "check-mcp-target-contract" { } "touch $out";
 
   mcp-contract-mutations =
@@ -323,10 +528,15 @@ in
                   options = {
                     dotfiles = {
                       accounts = lib.mkOption { type = lib.types.listOf lib.types.str; };
+                      observations = lib.mkOption {
+                        type = lib.types.attrsOf lib.types.raw;
+                        default = { };
+                      };
                       host = {
                         username = lib.mkOption { type = lib.types.str; };
                         homeDir = lib.mkOption { type = lib.types.str; };
                       };
+                      mcp.gateway.service = lib.mkOption { type = lib.types.str; };
                     };
                     assertions = lib.mkOption {
                       type = lib.types.listOf lib.types.raw;
@@ -350,6 +560,7 @@ in
                       };
                       mcp = {
                         enabledProviders = enabled;
+                        gateway.service = "agentgateway-default";
                         targets = candidateTargets;
                       };
                     };

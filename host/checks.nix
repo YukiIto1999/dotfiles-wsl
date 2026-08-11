@@ -21,6 +21,7 @@ let
   hostObservationKeys = [
     "host/fstrim"
     "host/home-manager"
+    "host/home-manager-restart"
     "host/journald"
     "host/nix-gc"
     "host/root-filesystem"
@@ -65,6 +66,16 @@ let
       results = [ "success" ];
       timeoutSeconds = 10;
       unit = "home-manager-${hostConfig.dotfiles.host.username}.service";
+    };
+    "host/home-manager-restart" = {
+      checkId = "restart/service/home-manager-${hostConfig.dotfiles.host.username}.service";
+      failureAt = 20;
+      kind = "restart-counter";
+      resourceKey = null;
+      sourceKind = "systemd-service";
+      target = "home-manager-${hostConfig.dotfiles.host.username}.service";
+      timeoutSeconds = 10;
+      warningAt = 5;
     };
     "host/journald" = {
       checkId = "resource/journald";
@@ -154,6 +165,7 @@ let
       swapObservation = candidateStabilityObservations."host/swap" or { };
       journalObservation = candidateStabilityObservations."host/journald" or { };
       homeManagerObservation = candidateStabilityObservations."host/home-manager" or { };
+      homeManagerRestartObservation = candidateStabilityObservations."host/home-manager-restart" or { };
       nixGcObservation = candidateStabilityObservations."host/nix-gc" or { };
       fstrimObservation = candidateStabilityObservations."host/fstrim" or { };
     in
@@ -170,13 +182,24 @@ let
     && (fstrimObservation.timer or null) == "fstrim.timer"
     && builtins.hasAttr "fstrim" candidateConfiguration.timers
     && candidateConfiguration.fstrimInterval == "weekly"
-    && (homeManagerObservation.unit or null) == candidateConfiguration.homeManagerUnit;
+    && (homeManagerObservation.unit or null) == candidateConfiguration.homeManagerUnit
+    && (homeManagerRestartObservation.target or null) == candidateConfiguration.homeManagerUnit
+    && (homeManagerRestartObservation.warningAt or null) == 5
+    && (homeManagerRestartObservation.failureAt or null) == 20;
   thresholdMutation = hostObservations // {
     "host/root-filesystem" = hostObservations."host/root-filesystem" or { } // {
       warning = 86;
     };
   };
   timerRemovalMutation = builtins.removeAttrs hostObservations [ "host/fstrim" ];
+  homeManagerRestartRemovalMutation = builtins.removeAttrs hostObservations [
+    "host/home-manager-restart"
+  ];
+  homeManagerRestartThresholdMutation = hostObservations // {
+    "host/home-manager-restart" = hostObservations."host/home-manager-restart" or { } // {
+      warningAt = 6;
+    };
+  };
   additionalObservationVariantConfig =
     (mkNixosSystem [
       normalMachineModule
@@ -284,6 +307,12 @@ in
     assert lib.assertMsg (
       !(stabilityContractMatches stabilityConfiguration timerRemovalMutation)
     ) "maintenance timer removal escaped the stability contract";
+    assert lib.assertMsg (
+      !(stabilityContractMatches stabilityConfiguration homeManagerRestartRemovalMutation)
+    ) "Home Manager restart observation removal escaped the stability contract";
+    assert lib.assertMsg (
+      !(stabilityContractMatches stabilityConfiguration homeManagerRestartThresholdMutation)
+    ) "Home Manager restart threshold mutation escaped the stability contract";
     assert lib.assertMsg (stabilityContractMatches stabilityConfiguration additionalObservationVariant)
       "an independent host-owned observation changed the stability contract";
     assert lib.assertMsg (

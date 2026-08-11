@@ -93,9 +93,10 @@ if run_case production-fd-api; then
   printf '%s\n' removable >"$directory/gc-tree/file"
   gc_tree_token=$($ATOMIC_PUBLISH_PRODUCTION identity-fd "$directory_fd" \
     "$directory_token" gc-tree)
-  gc_private_name=$($ATOMIC_PUBLISH_PRODUCTION quarantine-tree-fd "$directory_fd" \
-    "$directory_token" gc-tree "$gc_tree_token")
+  gc_private_name=$($ATOMIC_PUBLISH_PRODUCTION release-gc-name)
   [[ $gc_private_name =~ ^\.release-gc\.[0-9a-f]{32}$ ]]
+  expect_command_status 0 "$ATOMIC_PUBLISH_PRODUCTION" quarantine-tree-fd "$directory_fd" \
+    "$directory_token" gc-tree "$gc_private_name" "$gc_tree_token"
   test ! -e "$directory/gc-tree"
   test -d "$directory/$gc_private_name"
   test "$($ATOMIC_PUBLISH_PRODUCTION identity-fd "$directory_fd" \

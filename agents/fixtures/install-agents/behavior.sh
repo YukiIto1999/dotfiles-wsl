@@ -852,6 +852,39 @@ test "$(readlink -- "$retention_home/.local/share/dotfiles/agents/codex/current"
 test -z "$(find "$retention_home/.local/share/dotfiles/agents/codex/releases" \
   -maxdepth 1 -name '.release-gc.*' -print -quit)"
 
+# Retention remains rollbackable until current is published.  With A and B
+# installed and B current, a failed C update must restore both retained releases.
+label=transaction-retention-before-current
+retention_rollback_home=$fixture/$label-home
+prepare_home "$retention_rollback_home"
+for retention_version in one two; do
+  configure_run "$retention_rollback_home" "${retention_archives[$retention_version]}" \
+    "$fixture/retention-$retention_version-api.json"
+  "$INSTALL_AGENTS"
+done
+configure_transaction_hook before-current-switch fail "$label"
+expect_failure "$label" "$INSTALL_AGENTS" "$retention_rollback_home" \
+  "${retention_archives[three]}" "$fixture/retention-three-api.json"
+test -e "$FIXTURE_TRANSACTION_HOOK_MARKER"
+clear_transaction_hook
+
+# The helper may report an ambiguous result after the GC rename.  The installer
+# must still know the exact private name and restore the pre-update release set.
+label=transaction-retention-post-rename-ambiguous
+retention_ambiguous_home=$fixture/$label-home
+prepare_home "$retention_ambiguous_home"
+for retention_version in one two; do
+  configure_run "$retention_ambiguous_home" "${retention_archives[$retention_version]}" \
+    "$fixture/retention-$retention_version-api.json"
+  "$INSTALL_AGENTS"
+done
+configure_atomic_hook inject-move-post-rename-validation force-mismatch \
+  "$retention_ambiguous_home/.local/share/dotfiles/agents/codex/releases" "$label"
+expect_failure "$label" "$INSTALL_AGENTS" "$retention_ambiguous_home" \
+  "${retention_archives[three]}" "$fixture/retention-three-api.json"
+test -e "$FIXTURE_ATOMIC_HOOK_MARKER"
+clear_atomic_hook
+
 # Unmarked legacy, foreign, and invalid marked entries are diagnosed and preserved outside the
 # managed retention count.
 retention_releases=$retention_home/.local/share/dotfiles/agents/codex/releases

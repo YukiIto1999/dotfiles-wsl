@@ -78,33 +78,7 @@ direnv allow
 
 ## 構成
 
-AI CLI は個別の MCP server へ直接接続しない。
-agentgateway が入口となり、常駐する各 MCP front へ loopback の HTTP で接続する。
-常駐 process が必要な target だけ、loopback に publish した host port 経由で Docker backend を使う。
-
-MCP front は target ごとの systemd service として常駐する。
-gateway は loopback の HTTP へ接続するだけで、子プロセスを起動しない。
-downstream の session が増えても process は増えない。
-
-```text
-AI coding CLI
-       |
-       | configured URL: gateway の URL
-       v
-agentgateway (systemd)
-       |
-       | HTTP: loopback
-       v
-常駐 MCP front (target ごとの systemd service)
-       |
-       | loopback host publish
-       v
-Docker backends
-```
-
-target、front、gateway は `dotfiles.mcp.targets`、`dotfiles.mcp.fronts`、`dotfiles.mcp.gateway` の型付き契約に分かれる。target が provider、起動方法、probe、backend 依存を持ち、front は target から一度だけ導く。gateway は全 front を束ねる単一 endpoint である。front の一覧と port は `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.fronts` で引く。
-
-Docker backend の container は同一の Docker network `dotfiles-backends` に属する。container 間の network と host 側の loopback publish は別の境界になる。
+AI CLI は単一の agentgateway へ接続し、gateway が target ごとの常駐 MCP front を束ねる。container application の backend は `containers/`、agent が使う MCP interface は `mcp/` が所有する。接続、process、network の境界は [AI tooling](docs/architecture/ai-tooling.md#mcp-targetfrontgateway)を参照する。
 
 リポジトリの主要部分は次の構成。
 
@@ -116,6 +90,7 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 ├── accounts/              account と identity
 ├── agents/                agent client の契約、共通資産、client ごとの配備
 ├── mcp/                   gateway、MCP target、その application module
+├── observations/          owner が登録し doctor が消費する runtime observation の型
 ├── toolchain/             PATH 上の汎用ツール、language server、git、静的解析
 ├── telemetry/             使用量の観測
 ├── containers/            application 固有の container backend と共通 schema、helper、OCI image 同期
@@ -127,12 +102,14 @@ Docker backend の container は同一の Docker network `dotfiles-backends` に
 └── docs/                  runbook、architecture、reference
 ```
 
-`containers/` は container 配備の共通層と application 固有の backend を所有する。Agentmemory、Crawl4AI、SearXNG、SonarQube の backend は各 `containers/` unit、MCP front は対応する `mcp/` unit が所有する。
+`containers/` は container 配備の共通層と application 固有の backend を所有する。Agentmemory、Crawl4AI、SearXNG、SonarQube の backend は各 `containers/` unit、agent が使う interface は対応する `mcp/` unit が所有する。
 
-`agents/` は Claude Code、Codex、OpenCode、Antigravity の共通 rules、skills、agent definitions、MCP gateway 設定と client ごとの差を所有する。agent ではない CLI に共通の配備要件が生じた場合に限り、別責務として root に `clis/` を作る。
+`agents/` は Claude Code、Codex、OpenCode、Antigravity の共通 rules、skills、agent definitions、MCP gateway 設定、binary 配備と client ごとの差を所有する。agent ではない CLI に共通の配備要件が生じた場合に限り、別責務として root に `clis/` を作る。
+
+runtime の検査対象は各 owner が `dotfiles.observations` へ登録する。`observations/` は閉じた型だけを所有し、検査対象の意味や一覧は持たない。`dotfiles-doctor` はこの registry を汎用 probe へ投影する。
 
 責務は repo 直下に置き、層はどの責務でも同じ名前のファイルで表す。
-`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `package/` `fixtures/` が素材である。振る舞いの検証も `checks.nix` に置き、`fixtures/` はその入力を持つ。
+`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証、`impl/` `assets/` `fixtures/` `package/` `shared/` が必要な素材を持つ。振る舞いの検証も `checks.nix` に置き、`fixtures/` はその入力を持つ。
 `flake.nix` はこの名前だけを頼りに unit を集めるため、責務を足すとき flake を編集しない。
 
 repository 固有 option は `dotfiles.<owner>` に置き、`owner` を root unit 名と一致させる。host は account、agent client、container application、MCP provider、language server の必要集合を [`flake.nix`](flake.nix) に明示する。これらの option は default を持たず、各 unit の提供集合との過不足を評価時に拒否する。

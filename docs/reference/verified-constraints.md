@@ -14,11 +14,11 @@
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
-| 検証対象を別の登録簿から取らず宣言した unit から導く | `doctor-coverage` |
-| session 欠落、JSON-RPC error、image 不一致、artifact 乖離、空の MCP roster、WSL 資源の warning と failure を終了 status に反映する | `doctor-runtime` |
+| doctor が owner の observation registry を欠落なく key 順に投影し、17 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
+| 17 種類の observation kind の pass、warn、fail、resource、restart 集約と、protocol の不正、過大出力、非ゼロ終了、timeout を固定 message と終了 status に反映する | `doctor-runtime` |
 | WSL 専用 zram lifecycle、journald、標準 fstrim と service 非依存が宣言どおりである | `host-stability-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
-| runtime observation registry が17種の closed union、必須 field、path と ID、閾値、専用 command package、定義元 owner を型で制限する | `observation-contract` |
+| runtime observation registry が 17 種類の observation kind、必須 field、path と ID、閾値、専用 command package を型で制限し、定義位置を owner と照合する | `observation-contract` |
 | required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
 | 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
@@ -34,6 +34,8 @@
 | target の provider、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
 | repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |
+| MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |
+| MCP target、front、gateway から service、restart、roster、protocol observation を漏れなく導き、追加、削除、変更、stale entry に追随する | `mcp-runtime-observation-contract` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
@@ -80,9 +82,9 @@
 | 制約 | 検証 |
 |---|---|
 | MCP session が active な GET body の間 reap されない | `agentgateway-session-lifecycle` |
-| agent wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、共通 project build cache、明示済み環境値、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
+| agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、共通 project build cache、明示済み環境値、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
-| GitHub release installer は archive metadata を展開前に検査し、隔離環境で probe した payload を原子的に公開する。失敗時の rollback、並行更新、別 filesystem にある visible path も fixture で検査する | `agent-installer-behavior` |
+| GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
 | agent cache GC が allocated bytes を正本にし、不正な managed path を検出すると削除前に失敗し、inactive project cache を先に回収して active session がない場合だけ共有 cache を空にし、再計測する | `agent-project-cache-gc` |
 | source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない | `agent-verification-cache` |
 | agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |

@@ -93,6 +93,7 @@ let
         ];
       };
       repo = lib.mkOption { type = types.str; };
+      retainedReleases = lib.mkOption { type = types.ints.between 2 10; };
       releaseByArch = lib.mkOption { type = releaseByArchType; };
       requiredPaths = lib.mkOption {
         type = types.attrsOf requiredPathType;

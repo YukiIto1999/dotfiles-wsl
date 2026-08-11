@@ -956,6 +956,7 @@ let
       updateOwner = "dotfiles";
       layout = "package-tree";
       repo = "openai/codex";
+      retainedReleases = 2;
       releaseByArch = {
         x86_64 = {
           asset = "codex-package-x86_64-unknown-linux-musl.tar.gz";
@@ -1029,6 +1030,26 @@ let
       }
     )
   ];
+  retentionOneFixtureManifest = builtins.toJSON [
+    (
+      packageTreeFixtureRecord
+      // {
+        install = packageTreeFixtureRecord.install // {
+          retainedReleases = 1;
+        };
+      }
+    )
+  ];
+  retentionElevenFixtureManifest = builtins.toJSON [
+    (
+      packageTreeFixtureRecord
+      // {
+        install = packageTreeFixtureRecord.install // {
+          retainedReleases = 11;
+        };
+      }
+    )
+  ];
   singleBinaryFixtureManifest = builtins.toJSON [
     {
       name = "opencode";
@@ -1039,6 +1060,7 @@ let
         updateOwner = "dotfiles";
         layout = "single-binary";
         repo = "anomalyco/opencode";
+        retainedReleases = 2;
         releaseByArch = {
           x86_64 = {
             asset = "opencode-linux-x64.tar.gz";
@@ -1139,6 +1161,8 @@ let
   missingArchFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-missing-arch-agent" missingArchFixtureManifest;
   emptyAssetFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-empty-asset-agent" emptyAssetFixtureManifest;
   emptyEntrypointFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-empty-entrypoint-agent" emptyEntrypointFixtureManifest;
+  retentionOneFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-retention-one-agent" retentionOneFixtureManifest;
+  retentionElevenFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-retention-eleven-agent" retentionElevenFixtureManifest;
   singleBinaryFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-single-binary-agent" singleBinaryFixtureManifest;
 
   fixtureMigrateCodexConfig = pkgs.writeShellScript "fixture-migrate-codex-config" (
@@ -1563,6 +1587,24 @@ in
     );
     assert builtins.all (candidate: !contractIsValid candidate) invalidInstallEntrypointCandidates;
     assert builtins.all (candidate: !contractIsValid candidate) invalidRequiredPathCandidates;
+    assert baseCandidate.clients.codex.install.retainedReleases == 2;
+    assert baseCandidate.clients.opencode.install.retainedReleases == 2;
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = baseCandidate.clients.codex.install // {
+            retainedReleases = 1;
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = baseCandidate.clients.codex.install // {
+            retainedReleases = 11;
+          };
+        }
+      );
     assert
       !contractIsValid (
         mutateClient "claude" {
@@ -2241,6 +2283,7 @@ in
           coreutils
           gnutar
           gzip
+          jq
           python3
           util-linux
         ];
@@ -2251,6 +2294,8 @@ in
         export INSTALL_AGENTS_MISSING_ARCH=${lib.getExe missingArchFixtureInstaller}
         export INSTALL_AGENTS_EMPTY_ASSET=${lib.getExe emptyAssetFixtureInstaller}
         export INSTALL_AGENTS_EMPTY_ENTRYPOINT=${lib.getExe emptyEntrypointFixtureInstaller}
+        export INSTALL_AGENTS_RETENTION_ONE=${lib.getExe retentionOneFixtureInstaller}
+        export INSTALL_AGENTS_RETENTION_ELEVEN=${lib.getExe retentionElevenFixtureInstaller}
         export INSTALL_AGENTS_SINGLE_BINARY=${lib.getExe singleBinaryFixtureInstaller}
         export ATOMIC_PUBLISH=${atomicPublishFixtureExe}
         export ATOMIC_PUBLISH_PRODUCTION=${atomicPublishExe}

@@ -856,14 +856,14 @@ static int command_exchange_fd(const char *source_descriptor,
     return result;
 }
 
-static int quarantine_name(char *buffer, size_t size) {
+static int random_private_name(char *buffer, size_t size, const char *prefix) {
     unsigned char random_bytes[16];
     size_t offset;
 
     if (getrandom(random_bytes, sizeof(random_bytes), 0) != (ssize_t)sizeof(random_bytes)) {
         return -1;
     }
-    offset = (size_t)snprintf(buffer, size, ".atomic-quarantine.");
+    offset = (size_t)snprintf(buffer, size, "%s", prefix);
     if (offset >= size) {
         return -1;
     }
@@ -875,6 +875,14 @@ static int quarantine_name(char *buffer, size_t size) {
         offset += 2;
     }
     return 0;
+}
+
+static int quarantine_name(char *buffer, size_t size) {
+    return random_private_name(buffer, size, ".atomic-quarantine.");
+}
+
+static int release_gc_name(char *buffer, size_t size) {
+    return random_private_name(buffer, size, ".release-gc.");
 }
 
 static bool remove_exact_empty_quarantine(int parent, const char *name,
@@ -1226,6 +1234,27 @@ done:
     return result;
 }
 
+static int command_quarantine_tree_fd(const char *descriptor_text,
+                                      const char *directory_expected, const char *name,
+                                      const char *expected) {
+    char private_name[80];
+    int result;
+
+    if (!valid_basename(name)) {
+        return EXIT_USAGE;
+    }
+    if (release_gc_name(private_name, sizeof(private_name)) != 0) {
+        return EXIT_SYSCALL;
+    }
+    result = command_move_noreplace_fd(descriptor_text, directory_expected, name,
+                                       descriptor_text, directory_expected, private_name,
+                                       expected);
+    if (result == 0) {
+        puts(private_name);
+    }
+    return result;
+}
+
 static bool same_directory_identity(const struct stat *left, const struct stat *right) {
     return S_ISDIR(left->st_mode) && S_ISDIR(right->st_mode) &&
            left->st_dev == right->st_dev && left->st_ino == right->st_ino &&
@@ -1519,6 +1548,7 @@ static void usage(void) {
             "       dotfiles-agent-atomic-publish unlink-if DIR EXPECTED_DIR NAME EXPECTED\n"
             "       dotfiles-agent-atomic-publish unlink-if-fd FD EXPECTED_DIR NAME EXPECTED\n"
             "       dotfiles-agent-atomic-publish symlink-noreplace-fd FD EXPECTED_DIR NAME TARGET\n"
+            "       dotfiles-agent-atomic-publish quarantine-tree-fd FD EXPECTED_DIR NAME EXPECTED\n"
             "       dotfiles-agent-atomic-publish remove-tree-fd PARENT_FD EXPECTED_PARENT NAME TREE_FD EXPECTED_TREE\n"
             "       dotfiles-agent-atomic-publish probe-exec STAGE_FD EXPECTED_STAGE WORK EXEC DISPLAY CLOSE_FD CLOSE_FD CLOSE_FD -- ARG...\n");
 }
@@ -1560,6 +1590,9 @@ int main(int argc, char **argv) {
     }
     if (argc == 6 && strcmp(argv[1], "symlink-noreplace-fd") == 0) {
         return command_symlink_noreplace_fd(argv[2], argv[3], argv[4], argv[5]);
+    }
+    if (argc == 6 && strcmp(argv[1], "quarantine-tree-fd") == 0) {
+        return command_quarantine_tree_fd(argv[2], argv[3], argv[4], argv[5]);
     }
     if (argc == 7 && strcmp(argv[1], "remove-tree-fd") == 0) {
         return command_remove_tree_fd(argv[2], argv[3], argv[4], argv[5], argv[6]);

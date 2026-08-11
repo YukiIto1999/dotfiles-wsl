@@ -21,6 +21,10 @@ case ${FIXTURE_TRANSACTION_HOOK_ACTION:-} in
     printf '%s\n' changed-during-rollback >>"$public_path/codex-package.json"
     exit 70
     ;;
+  mutate-release)
+    [[ -d $public_path && ! -L $public_path ]] || exit 64
+    printf '%s\n' changed-during-gc >>"$public_path/codex-package.json"
+    ;;
   replace-client-root-fail)
     [[ -n ${FIXTURE_TRANSACTION_HOOK_ROOT:-} ]] || exit 64
     [[ -n ${FIXTURE_TRANSACTION_HOOK_SAVED:-} ]] || exit 64

@@ -10,11 +10,47 @@ mktemp_command=@mktempCommand@
 probes_json=@probesJson@
 rm_command=@rmCommand@
 
+umask 077
 scratch_root=$("$mktemp_command" -d "${TMPDIR:-/tmp}/mcp-gateway-observer.XXXXXXXX")
+session_id=
+session_header_file=$scratch_root/session.headers
+session_cleanup_required=0
+write_session_headers() {
+  printf 'mcp-session-id: %s\nMCP-Protocol-Version: 2025-06-18\n' "$session_id" \
+    >"$session_header_file"
+}
+delete_session() {
+  local delete_status
+  delete_status=$("$curl_command" \
+    --silent \
+    --show-error \
+    --max-time "$gateway_timeout" \
+    --request DELETE \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    --header "@$session_header_file" \
+    "$gateway_url" 2>/dev/null) \
+    && [[ $delete_status =~ ^[0-9]{3}$ ]] \
+    && { ((delete_status >= 200 && delete_status < 300)) || ((delete_status == 405)); }
+}
 cleanup() {
+  local status=$?
+  trap - EXIT TERM INT
+  if ((session_cleanup_required == 1)); then
+    if [[ ! -s $session_header_file ]]; then
+      write_session_headers || true
+    fi
+    delete_session || true
+  fi
   "$rm_command" -rf -- "$scratch_root"
+  exit "$status"
+}
+terminate() {
+  exit "$1"
 }
 trap cleanup EXIT
+trap 'terminate 130' INT
+trap 'terminate 143' TERM
 
 declare -A outcome_status=()
 declare -A outcome_message=()
@@ -115,6 +151,27 @@ decode_response() {
   ((response_count == 1))
 }
 
+is_empty_accepted_response() {
+  local headers=$1
+  local body=$2
+  local status=$3
+  local line header_name
+  local content_type_count=0
+
+  [[ $status == 202 ]] || return 1
+  [[ ! -s $body ]] || return 1
+
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%$'\r'}
+    header_name=${line%%:*}
+    if [[ ${header_name,,} == content-type ]]; then
+      ((content_type_count += 1))
+    fi
+  done <"$headers"
+
+  ((content_type_count == 0))
+}
+
 emit_envelope() {
   local outcomes_file=$scratch_root/outcomes.jsonl
   local id
@@ -147,6 +204,8 @@ initialize_body=$scratch_root/initialize.body
 initialize_json=$scratch_root/initialize.json
 initialize_request=$scratch_root/initialize-request.json
 notification_request=$scratch_root/notification-request.json
+notification_headers=$scratch_root/notification.headers
+notification_body=$scratch_root/notification.body
 
 "$jq_command" -cn '
   {
@@ -195,23 +254,8 @@ if ((${#session_headers[@]} != 1)) || [[ -z ${session_headers[0]} ]]; then
   emit_envelope
   exit 0
 fi
-session_id=${session_headers[0]}
-
-delete_session() {
-  local delete_status
-  delete_status=$("$curl_command" \
-    --silent \
-    --show-error \
-    --max-time "$gateway_timeout" \
-    --request DELETE \
-    --output /dev/null \
-    --write-out '%{http_code}' \
-    --header "mcp-session-id: $session_id" \
-    --header 'MCP-Protocol-Version: 2025-06-18' \
-    "$gateway_url" 2>/dev/null) \
-    && [[ $delete_status =~ ^[0-9]{3}$ ]] \
-    && { ((delete_status >= 200 && delete_status < 300)) || ((delete_status == 405)); }
-}
+session_id=${session_headers[0]} session_cleanup_required=1
+write_session_headers
 
 if ! decode_response "$initialize_headers" "$initialize_body" 1 "$initialize_json" \
   || ! "$jq_command" -e '
@@ -227,7 +271,6 @@ if ! decode_response "$initialize_headers" "$initialize_body" 1 "$initialize_jso
     and (.result.serverInfo.version | type == "string")
     and (.result.serverInfo.version | length > 0)
   ' "$initialize_json" >/dev/null 2>&1; then
-  delete_session || true
   set_outcome mcp-session fail "MCP initialize response is invalid"
   emit_envelope
   exit 0
@@ -236,20 +279,22 @@ fi
 "$jq_command" -cn \
   '{jsonrpc:"2.0",method:"notifications/initialized",params:{}}' \
   >"$notification_request"
-if ! "$curl_command" \
+notification_status=
+if ! notification_status=$("$curl_command" \
   --silent \
   --show-error \
   --fail-with-body \
   --max-time "$gateway_timeout" \
   --request POST \
-  --output /dev/null \
+  --dump-header "$notification_headers" \
+  --output "$notification_body" \
+  --write-out '%{http_code}' \
   --header 'content-type: application/json' \
   --header 'accept: application/json, text/event-stream' \
-  --header "mcp-session-id: $session_id" \
-  --header 'MCP-Protocol-Version: 2025-06-18' \
+  --header "@$session_header_file" \
   --data-binary "@$notification_request" \
-  "$gateway_url" 2>/dev/null; then
-  delete_session || true
+  "$gateway_url" 2>/dev/null) \
+  || ! is_empty_accepted_response "$notification_headers" "$notification_body" "$notification_status"; then
   set_outcome mcp-session fail "MCP initialized notification failed"
   emit_envelope
   exit 0
@@ -271,8 +316,7 @@ if "$curl_command" \
   --output "$tools_body" \
   --header 'content-type: application/json' \
   --header 'accept: application/json, text/event-stream' \
-  --header "mcp-session-id: $session_id" \
-  --header 'MCP-Protocol-Version: 2025-06-18' \
+  --header "@$session_header_file" \
   --data-binary "@$tools_request" \
   "$gateway_url" 2>/dev/null \
   && decode_response "$tools_headers" "$tools_body" 2 "$tools_json" \
@@ -331,18 +375,43 @@ run_target() {
     --output "$call_body" \
     --header 'content-type: application/json' \
     --header 'accept: application/json, text/event-stream' \
-    --header "mcp-session-id: $session_id" \
-    --header 'MCP-Protocol-Version: 2025-06-18' \
+    --header "@$session_header_file" \
     --data-binary "@$call_request" \
     "$gateway_url" 2>/dev/null \
     && decode_response "$call_headers" "$call_body" "$rpc_id" "$call_json" \
     && "$jq_command" -e --argjson rpc_id "$rpc_id" '
+      def string_field($name):
+        has($name) and (.[$name] | type == "string");
+      def valid_resource_contents:
+        type == "object"
+        and string_field("uri")
+        and (
+          (string_field("text") and (has("blob") | not))
+          or (string_field("blob") and (has("text") | not))
+        );
+      def valid_content_block:
+        type == "object"
+        and string_field("type")
+        and (
+          if .type == "text" then
+            string_field("text")
+          elif .type == "image" or .type == "audio" then
+            string_field("data") and string_field("mimeType")
+          elif .type == "resource_link" then
+            string_field("name") and string_field("uri")
+          elif .type == "resource" then
+            has("resource") and (.resource | valid_resource_contents)
+          else
+            false
+          end
+        );
       .jsonrpc == "2.0"
       and .id == $rpc_id
       and has("result")
       and (has("error") | not)
       and (.result | type == "object")
       and (.result.content | type == "array")
+      and all(.result.content[]; valid_content_block)
       and ((.result | has("isError") | not) or (.result.isError | type == "boolean"))
       and ((.result.isError // false) == false)
     ' "$call_json" >/dev/null 2>&1; then
@@ -376,5 +445,6 @@ if delete_session; then
 else
   set_outcome mcp-session fail "MCP session DELETE failed"
 fi
+session_cleanup_required=0
 
 emit_envelope

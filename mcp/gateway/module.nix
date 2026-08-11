@@ -10,6 +10,11 @@ let
   mcp = config.dotfiles.mcp;
   inherit (mcp) gateway;
   agentgateway = pkgs.callPackage ./package.nix { };
+  protocolObserver = pkgs.callPackage ./impl/observer-package.nix {
+    gatewayUrl = gateway.url;
+    probes = lib.mapAttrs (_: target: target.probe) mcp.targets;
+  };
+  protocolContract = protocolObserver.dotfilesObservationContract;
 
   upstream = front: { mcp.host = front.url; };
   deniedTools = [ "web_url_read" ];
@@ -89,6 +94,20 @@ in
     format = "yaml";
     deployedAt = "/etc/${gateway.runtimeDirectory}/config.yaml";
     inherit (gateway) source;
+  };
+
+  config.dotfiles.observations."mcp/protocol/${gateway.id}" = {
+    kind = "normalized-protocol";
+    checkId = "mcp-session";
+    resourceKey = null;
+    timeoutSeconds = protocolContract.outerTimeout;
+    failureMessage = "MCP gateway protocol is not operational";
+    command = protocolObserver;
+    inherit (protocolContract)
+      allowedOutcomeIds
+      requiredResourceKeys
+      envelopeVersion
+      ;
   };
 
   config.systemd.services.${gateway.service} = {

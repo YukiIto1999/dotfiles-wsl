@@ -9,6 +9,59 @@
 
 let
   agentgateway = pkgs.callPackage ./package.nix { };
+  fixtureProbes = {
+    alpha = {
+      tool = "ping";
+      args = {
+        value = "alpha";
+      };
+      timeout = 2;
+    };
+    zeta = {
+      tool = "status";
+      args = { };
+      timeout = 1;
+    };
+  };
+  fakeCurl = pkgs.writeShellApplication {
+    name = "curl";
+    excludeShellChecks = [ "SC2016" ];
+    text =
+      builtins.replaceStrings
+        [
+          "@jqCommand@"
+          "@sleepCommand@"
+          "@touchCommand@"
+        ]
+        [
+          (lib.escapeShellArg (lib.getExe pkgs.jq))
+          (lib.escapeShellArg "${pkgs.coreutils}/bin/sleep")
+          (lib.escapeShellArg "${pkgs.coreutils}/bin/touch")
+        ]
+        (builtins.readFile ./fixtures/observer/fake-curl.sh);
+  };
+  fixtureObserver = pkgs.callPackage ./impl/observer-package.nix {
+    name = "fixture-mcp-gateway-observer";
+    gatewayUrl = "http://127.0.0.1:18765/mcp";
+    probes = fixtureProbes;
+    tools = {
+      curl = lib.getExe fakeCurl;
+      jq = lib.getExe pkgs.jq;
+      mktemp = "${pkgs.coreutils}/bin/mktemp";
+      rm = "${pkgs.coreutils}/bin/rm";
+    };
+  };
+  crashObserver = pkgs.callPackage ./impl/observer-package.nix {
+    name = "fixture-crash-mcp-gateway-observer";
+    gatewayUrl = "http://127.0.0.1:18765/mcp";
+    probes = fixtureProbes;
+    tools = {
+      curl = lib.getExe fakeCurl;
+      jq = "${pkgs.coreutils}/bin/false";
+      mktemp = "${pkgs.coreutils}/bin/mktemp";
+      rm = "${pkgs.coreutils}/bin/rm";
+    };
+  };
   artifact = hostConfig.dotfiles.artifacts."mcp/gateway/default/config";
   expected = builtins.fromJSON (builtins.readFile ./fixtures/contract.json);
   gateway = hostConfig.dotfiles.mcp.gateway;
@@ -54,6 +107,216 @@ let
   );
 in
 {
+  mcp-gateway-observer =
+    assert fixtureObserver.meta.mainProgram == "fixture-mcp-gateway-observer";
+    assert fixtureObserver.dotfilesObservationCommandKind == "normalized-protocol";
+    assert
+      fixtureObserver.dotfilesObservationContract == {
+        envelopeVersion = 1;
+        allowedOutcomeIds = [
+          "mcp-session"
+          "mcp-tools"
+          "mcp-target/alpha"
+          "mcp-target/zeta"
+        ];
+        requiredResourceKeys = [ ];
+        gatewayTimeout = 2;
+        outerTimeout = 10;
+      };
+    pkgs.runCommandLocal "check-mcp-gateway-observer-contract"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+            set -euo pipefail
+
+            test -x ${lib.getExe fixtureObserver}
+
+            run_case() {
+              local name=$1
+              local expected=$2
+              local output status
+              set +e
+              output=$(MCP_OBSERVER_CASE="$name" ${lib.getExe fixtureObserver} 2>"$TMPDIR/$name.stderr")
+              status=$?
+              set -e
+              if [[ $status -ne 0 ]]; then
+                printf '%s unexpectedly exited %s\n' "$name" "$status" >&2
+                return 1
+              fi
+              jq -e --argjson expected "$expected" '
+                .schemaVersion == 1
+                and .resources == []
+                and .outcomes == $expected
+                and (keys | sort) == ["outcomes", "resources", "schemaVersion"]
+              ' >/dev/null <<<"$output" || {
+                printf '%s emitted an unexpected envelope:\n%s\n' "$name" "$output" >&2
+                return 1
+              }
+              test ! -s "$TMPDIR/$name.stderr"
+            }
+
+            all_pass='[
+              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+              {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case healthy-json "$all_pass"
+            run_case healthy-sse "$all_pass"
+            run_case args-timeout "$all_pass"
+            run_case delete-405 "$all_pass"
+            run_case network-error '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize request failed"}
+            ]'
+            run_case missing-session '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize did not return exactly one session ID"}
+            ]'
+            run_case duplicate-session '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize did not return exactly one session ID"}
+            ]'
+            run_case empty-session '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize did not return exactly one session ID"}
+            ]'
+            run_case init-error '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize response is invalid"}
+            ]'
+            run_case invalid-protocol '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize response is invalid"}
+            ]'
+            run_case init-missing-capabilities '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize response is invalid"}
+            ]'
+            run_case init-missing-server-info '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize response is invalid"}
+            ]'
+            run_case init-missing-server-name '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize response is invalid"}
+            ]'
+            run_case init-missing-server-version '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize response is invalid"}
+            ]'
+            run_case invalid-content-type '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialize response is invalid"}
+            ]'
+          run_case notification-error '[
+            {"id":"mcp-session","status":"fail","message":"MCP initialized notification failed"}
+          ]'
+          notification_delete_marker="$TMPDIR/notification-delete"
+          notification_output=$(MCP_OBSERVER_CASE=notification-error \
+            MCP_OBSERVER_DELETE_MARKER="$notification_delete_marker" \
+            ${lib.getExe fixtureObserver})
+          test -e "$notification_delete_marker"
+          jq -e '.outcomes == [{id:"mcp-session",status:"fail",message:"MCP initialized notification failed"}]' \
+            >/dev/null <<<"$notification_output"
+          for initialize_case in \
+            init-error \
+            invalid-protocol \
+            init-missing-capabilities \
+            init-missing-server-info \
+            init-missing-server-name \
+            init-missing-server-version; do
+            initialize_delete_marker="$TMPDIR/$initialize_case-delete"
+            initialize_output=$(MCP_OBSERVER_CASE="$initialize_case" \
+              MCP_OBSERVER_DELETE_MARKER="$initialize_delete_marker" \
+              ${lib.getExe fixtureObserver})
+            test -e "$initialize_delete_marker"
+            jq -e '.outcomes == [{id:"mcp-session",status:"fail",message:"MCP initialize response is invalid"}]' \
+              >/dev/null <<<"$initialize_output"
+          done
+            run_case tools-missing '[
+              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+              {"id":"mcp-tools","status":"fail","message":"MCP tools/list response does not cover every target probe"},
+              {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case tools-wrong-exact '[
+              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+              {"id":"mcp-tools","status":"fail","message":"MCP tools/list response does not cover every target probe"},
+              {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case target-error '[
+              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case target-is-error '[
+              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case target-missing-content '[
+              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case target-invalid-is-error '[
+              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case delete-failure '[
+              {"id":"mcp-session","status":"fail","message":"MCP session DELETE failed"},
+              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+              {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+
+            secret='fixture-super-secret-value'
+            secret_output=$(MCP_OBSERVER_CASE=secret-network MCP_OBSERVER_SECRET="$secret" \
+              ${lib.getExe fixtureObserver} 2>"$TMPDIR/secret.stderr")
+            ! grep -F -- "$secret" <<<"$secret_output"
+            ! grep -F -- "$secret" "$TMPDIR/secret.stderr"
+            jq -e '.outcomes == [{id:"mcp-session",status:"fail",message:"MCP initialize request failed"}]' \
+              >/dev/null <<<"$secret_output"
+
+            secret_body_output=$(MCP_OBSERVER_CASE=secret-body MCP_OBSERVER_SECRET="$secret" \
+              ${lib.getExe fixtureObserver} 2>"$TMPDIR/secret-body.stderr")
+            ! grep -F -- "$secret" <<<"$secret_body_output"
+            ! grep -F -- "$secret" "$TMPDIR/secret-body.stderr"
+        jq -e '.outcomes == [{id:"mcp-session",status:"fail",message:"MCP initialize response is invalid"}]' \
+          >/dev/null <<<"$secret_body_output"
+
+        secret_session_output=$(MCP_OBSERVER_CASE=secret-session MCP_OBSERVER_SECRET="$secret" \
+          ${lib.getExe fixtureObserver} 2>"$TMPDIR/secret-session.stderr")
+        ! grep -F -- "$secret" <<<"$secret_session_output"
+        ! grep -F -- "$secret" "$TMPDIR/secret-session.stderr"
+        jq -e '.outcomes == [{id:"mcp-session",status:"fail",message:"MCP initialized notification failed"}]' \
+          >/dev/null <<<"$secret_session_output"
+
+            set +e
+            crash_output=$(${lib.getExe crashObserver} 2>"$TMPDIR/crash.stderr")
+            crash_status=$?
+            set -e
+            test "$crash_status" -ne 0
+            ! jq -e . >/dev/null 2>&1 <<<"$crash_output"
+
+            set +e
+            timeout_output=$(MCP_OBSERVER_CASE=observer-timeout \
+              timeout --signal=TERM --kill-after=1 1 ${lib.getExe fixtureObserver} \
+              2>"$TMPDIR/timeout.stderr")
+            timeout_status=$?
+            set -e
+            test "$timeout_status" -eq 124
+            ! jq -e . >/dev/null 2>&1 <<<"$timeout_output"
+
+        parallel_root="$TMPDIR/parallel"
+        mkdir "$parallel_root"
+        parallel_output=$(MCP_OBSERVER_CASE=parallel MCP_OBSERVER_PARALLEL_ROOT="$parallel_root" \
+          ${lib.getExe fixtureObserver})
+            jq -e --argjson expected "$all_pass" '.outcomes == $expected' >/dev/null <<<"$parallel_output"
+
+            touch "$out"
+      '';
+
   gateway-front-contract =
     assert fronts != { };
     assert gateway.targets == expected.targets;

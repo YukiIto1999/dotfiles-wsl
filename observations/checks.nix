@@ -201,6 +201,14 @@ let
       };
     }
   );
+  emptyNormalizedProtocolOutcomesEvaluation = evalRegistry (
+    fixture.valid
+    // {
+      "host/normalized-protocol" = fixture.valid."host/normalized-protocol" // {
+        requiredOutcomeIds = [ ];
+      };
+    }
+  );
   spacedPathsEvaluation = evalRegistry (
     fixture.valid
     // {
@@ -259,11 +267,12 @@ in
     assert evaluationSucceeds validEvaluation;
     assert evaluationSucceeds (evalRegistry { });
     assert evaluationSucceeds optionalCommonEvaluation;
+    assert evaluationSucceeds emptyNormalizedProtocolOutcomesEvaluation;
     assert evaluationSucceeds emptyNormalizedProtocolResourcesEvaluation;
     assert evaluationSucceeds spacedPathsEvaluation;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".checkId == null;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".resourceKey == null;
-    assert builtins.length missingRequiredCases == 112;
+    assert builtins.length missingRequiredCases == 113;
     assert builtins.length kindReplacementCases == 272;
     assert builtins.length invalidCommandCases == 18;
     assert lib.all (

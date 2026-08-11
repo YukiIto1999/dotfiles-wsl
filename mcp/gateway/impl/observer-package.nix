@@ -22,6 +22,7 @@ let
       "mcp-tools"
     ]
     ++ map (id: "mcp-target/${id}") targetIds;
+    requiredOutcomeIds = [ "mcp-session" ];
     requiredResourceKeys = [ ];
     inherit gatewayTimeout;
     outerTimeout = 5 * gatewayTimeout;

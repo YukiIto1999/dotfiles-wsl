@@ -105,6 +105,7 @@ in
     command = protocolObserver;
     inherit (protocolContract)
       allowedOutcomeIds
+      requiredOutcomeIds
       requiredResourceKeys
       envelopeVersion
       ;

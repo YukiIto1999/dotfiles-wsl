@@ -55,6 +55,9 @@ let
 
   selectContainerObservations = lib.filterAttrs (name: _: lib.hasPrefix "containers/" name);
   containerObservations = selectContainerObservations hostConfig.dotfiles.observations;
+  containerRestartObservationKeys = builtins.filter (
+    name: lib.hasPrefix "containers/container-restart/" name
+  ) (builtins.attrNames containerObservations);
 
   expectedContainerObservationsFor =
     services:
@@ -116,22 +119,6 @@ let
           }
         )
       ) imageEntries;
-      containerRestartObservations = map (
-        entry:
-        let
-          inherit (entry.image) container;
-        in
-        mkEntry "containers/container-restart/${container}" (
-          common "restart/container/${container}" "could not observe restart count for ${container}"
-          // {
-            kind = "restart-counter";
-            sourceKind = "container";
-            target = container;
-            warningAt = restartWarningCount;
-            failureAt = restartFailureCount;
-          }
-        )
-      ) imageEntries;
       healthObservations = map (
         entry:
         let
@@ -179,7 +166,6 @@ let
       ++ serviceObservations
       ++ serviceRestartObservations
       ++ imageObservations
-      ++ containerRestartObservations
       ++ healthObservations
     );
 
@@ -243,7 +229,6 @@ let
   serviceRemovalMutation = removeObservation "containers/service/docker-agentmemory";
   serviceRestartRemovalMutation = removeObservation "containers/service-restart/docker-agentmemory";
   imageRemovalMutation = removeObservation "containers/image/agentmemory";
-  containerRestartRemovalMutation = removeObservation "containers/container-restart/agentmemory";
   healthRemovalMutation = removeObservation "containers/health/agentmemory";
   timerRemovalMutation = removeObservation "containers/buildkit-gc";
   rosterRemovalMutation = removeObservation "containers/roster";
@@ -256,7 +241,7 @@ let
   staleObservationMutations = [
     (addStaleObservation "containers/service/docker-agentmemory" "containers/service/stale")
     (addStaleObservation "containers/service-restart/docker-agentmemory" "containers/service-restart/stale")
-    (addStaleObservation "containers/container-restart/agentmemory" "containers/container-restart/stale")
+    (addStaleObservation "containers/service-restart/docker-agentmemory" "containers/container-restart/agentmemory")
     (addStaleObservation "containers/image/agentmemory" "containers/image/stale")
     (addStaleObservation "containers/health/agentmemory" "containers/health/stale")
     (addStaleObservation "containers/roster" "containers/stale-roster")
@@ -395,7 +380,6 @@ let
   removedAgentmemoryObservationKeys = [
     "containers/service/docker-agentmemory"
     "containers/service-restart/docker-agentmemory"
-    "containers/container-restart/agentmemory"
     "containers/image/agentmemory"
     "containers/health/agentmemory"
   ];
@@ -520,6 +504,9 @@ in
 
   container-runtime-observation-contract =
     assert lib.assertMsg (
+      containerRestartObservationKeys == [ ]
+    ) "Docker RestartCount observations must not duplicate systemd service restart observations";
+    assert lib.assertMsg (
       containerObservations == expectedContainerObservations
     ) "container runtime observation registry is incomplete";
     assert lib.assertMsg (containerDefinitionKeysMatch containerDefinitionKeys)
@@ -544,11 +531,6 @@ in
     assert lib.assertMsg (
       !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services imageRemovalMutation)
     ) "container image observation removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services
-        containerRestartRemovalMutation
-      )
-    ) "container restart observation removal escaped the owner contract";
     assert lib.assertMsg (
       !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services healthRemovalMutation)
     ) "container health observation removal escaped the owner contract";

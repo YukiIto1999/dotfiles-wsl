@@ -123,6 +123,7 @@
 | Nix の整形 | `nixfmt` |
 | Nix の未使用束縛 | `deadnix` |
 | Nix の慣用 | `statix` |
+| commit 件名が scope なし、50 文字以内の日本語一行である | `git-commit-message-contract` |
 | shell の静的検査 | `shellcheck` (shebang を持つ file が対象、fragment は `writeShellApplication` が build 時に見る) |
 | GitHub Actions workflow の妥当性 | `actionlint` |
 | devenv と direnv を home だけが所有し、binary cache が一度だけ登録される | `development-tool-ownership` |

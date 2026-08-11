@@ -1,61 +1,52 @@
 ---
 name: git-commit-writer
-description: Use when writing a Conventional Commits message for staged changes(`git diff --staged` で取得)。type / scope / breaking change を自動判定、複数論理変更が混ざっていれば `git reset` 経由の分割を提案。Trigger on `git add` 完了後 / `git status` で staged changes あり / commit 直前 even if user does not say "commit".
+description: Use when writing a one-line, unscoped Conventional Commit message for staged changes (`git diff --staged`). Select the type, keep one purpose per commit, and reject body, trailer, scope, and AI attribution. Trigger after `git add`, when staged changes exist, or immediately before commit.
 ---
 
 # Git Commit Writer
 
 ## When to invoke
 
-- ユーザーが「コミット」「commit」「commit message を書いて」と依頼したとき
-- 実装完了後、`git add` 済みの状態
+- ユーザーが commit または commit message の作成を依頼したとき
+- 実装と検証が終わり、変更を stage したとき
 
 ## Process
 
-1. **対象確認**:`git diff --staged` で staged 変更を取得。staged が空なら `git status` を見て確認
-2. **分割判定**:1 commit に **無関係な** 複数の論理変更(例: 機能追加 + 別所の rename)が混ざっていれば、`git reset` + 分割提案。一方、**機能と一体の付随変更**(新機能 + その usage を docs に追記、新機能 + 対応 test)は 1 commit で OK
-3. **type 判定**:変更内容から以下を選択:
-   - `feat`: 新機能
-   - `fix`: バグ修正
-   - `refactor`: 振る舞いを変えない内部改善
-   - `docs`: ドキュメントのみ
-   - `test`: テストのみ
-   - `chore`: ビルド/依存/設定
-   - `style`: フォーマットのみ
-   - `perf`: パフォーマンス改善
-   - `revert`: revert
-4. **scope 判定**:以下の優先順位で判定:
-   1. 変更ファイルの **basename**(拡張子除く)を **kebab-case** 化(例: `lib/csv_parser.go` → `csv-parser`)
-   2. 複数ファイルで同一モジュール配下なら **モジュール名** を kebab-case 化(例: `src/server/middleware/auth.py` + `src/server/middleware/utils.py` → `middleware` or `auth`)
-   3. `lib/` / `src/` / `pkg/` 等の generic dir 名は **scope として採用しない**
-5. **breaking change 検出**:以下の場合に `!` + `BREAKING CHANGE:` フッターを付与:
-   - public API の signature 変更 / 削除 / 互換性破壊
-   - 環境変数 / config schema の **必須化**(optional → required)
-   - **公開 struct / record / class への field 追加** は **ambiguous case**: callsite を `git grep` で確認し、struct literal が positional(`MyStruct{a, b, c}`)で書かれていれば BREAKING、named-field 限定(`MyStruct{A: a, B: b}`)なら non-breaking。確認できない場合は **非 breaking として保守的に扱い**、PR レビューに判断を委ねる
-6. **本文構成**:subject(50 chars 以内)+ 必要なら本文(72 chars 折返し、why を中心に)
+1. `git diff --staged` で対象を確認する。staged が空なら `git status --short` を確認し、件名を作らない。
+2. 無関係な目的が混ざっている場合は、対象 path を明示した `git restore --staged -- <paths>` で分ける。実装、その検査、対応文書は一つの目的として扱う。
+3. 次の type から一つを選ぶ。
+   - `feat`: 機能追加
+   - `fix`: 不具合修正
+   - `refactor`: 振る舞いを変えない構造変更
+   - `docs`: 文書だけの変更
+   - `test`: 検査だけの変更
+   - `build`: build または依存関係の変更
+   - `ci`: CI の変更
+   - `chore`: ほかに分類できない保守
+   - `style`: 意味を変えない形式変更
+   - `perf`: 性能改善
+   - `revert`: 既存 commit の取り消し
+4. 差分の結果を表す日本語の要約を付ける。件名全体を 50 文字以内にする。
+5. repository root の `CONTRIBUTING.md` と同じ形式であることを確認する。
 
 ## Output format
 
-```
-<type>(<scope>)!?: <subject>
-
-<body>
-
-<footer>
+```text
+<type>: <日本語の要約>
 ```
 
 例:
-```
-feat(auth): add OAuth2 PKCE flow for mobile clients
 
-Mobile apps cannot safely store client secrets, so PKCE is required.
-The web flow remains unchanged.
-
-Refs: #1234
+```text
+feat: TypeScript の language server を追加する
+fix: resource reaper の競合を防ぐ
+docs: セットアップ手順を更新する
 ```
 
 ## Don'ts
 
-- 「とりあえず動く」のような曖昧な subject は出さない
-- 50 chars 制限を超えない(subject)
-- WIP commit は別途 `wip:` プレフィックスで明示(rebase 前提)
+- `fix(agents): ...` のような scope を付けない。
+- body、footer、trailer、AI attribution を付けない。
+- `wip:` や独自 type を作らない。
+- 「調整する」「更新する」だけで対象と結果が分からない件名にしない。
+- 50 文字を超えない。

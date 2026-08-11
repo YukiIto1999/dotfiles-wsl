@@ -241,6 +241,13 @@
           helpers = {
             execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
             unitOwnership = import ./gates/impl/unit-ownership.nix { inherit lib; };
+            observationRegistryModule = {
+              options.dotfiles.observations = lib.mkOption {
+                type = self.nixosConfigurations.${hostName}.options.dotfiles.observations.type;
+                default = { };
+                internal = true;
+              };
+            };
             containerArgv = import ./containers/impl/container-argv.nix {
               inherit lib hostConfig;
               execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };

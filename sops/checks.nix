@@ -4,6 +4,7 @@
   self,
   hostConfig,
   hostOptions,
+  helpers,
   ...
 }:
 
@@ -143,7 +144,7 @@ let
     candidateSecrets:
     (lib.evalModules {
       modules = [
-        ../observations/module.nix
+        helpers.observationRegistryModule
         sopsFixtureOptions
         ./module.nix
         { sops.secrets = candidateSecrets; }

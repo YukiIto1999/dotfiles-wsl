@@ -36,16 +36,13 @@ let
     observations: builtins.intersectAttrs (lib.genAttrs hostObservationKeys (_: null)) observations;
   stabilityObservations = selectStabilityObservations hostObservations;
   observationProjection = lib.mapAttrs (
-    _: observation:
-    builtins.removeAttrs observation [
-      "command"
-      "failureMessage"
-    ]
+    _: observation: builtins.removeAttrs observation [ "command" ]
   ) stabilityObservations;
   expectedObservationProjection = {
     "host/fstrim" = {
       activeStates = [ "active" ];
       checkId = "maintenance/fstrim.timer";
+      failureMessage = "fstrim.timer or its service is not operational";
       kind = "systemd-timer";
       resourceKey = null;
       service = "fstrim.service";
@@ -60,6 +57,7 @@ let
     "host/home-manager" = {
       activeStates = [ "active" ];
       checkId = "home-manager";
+      failureMessage = "home-manager-${hostConfig.dotfiles.host.username}.service is not operational";
       kind = "systemd-service";
       loadStates = [ "loaded" ];
       resourceKey = null;
@@ -70,6 +68,7 @@ let
     "host/home-manager-restart" = {
       checkId = "restart/service/home-manager-${hostConfig.dotfiles.host.username}.service";
       failureAt = 20;
+      failureMessage = "could not observe restart count for home-manager-${hostConfig.dotfiles.host.username}.service";
       kind = "restart-counter";
       resourceKey = null;
       sourceKind = "systemd-service";
@@ -79,6 +78,7 @@ let
     };
     "host/journald" = {
       checkId = "resource/journald";
+      failureMessage = "could not observe journald disk usage";
       kind = "journal-size";
       maximumBytes = 4294967296;
       resourceKey = "journald";
@@ -87,6 +87,7 @@ let
     "host/nix-gc" = {
       activeStates = [ "active" ];
       checkId = "maintenance/nix-gc.timer";
+      failureMessage = "nix-gc.timer or its service is not operational";
       kind = "systemd-timer";
       resourceKey = null;
       service = "nix-gc.service";
@@ -101,6 +102,7 @@ let
     "host/root-filesystem" = {
       checkId = "resource/root-filesystem";
       failure = 95;
+      failureMessage = "could not observe root filesystem utilization";
       kind = "filesystem-threshold";
       metric = "used-percent";
       path = "/";
@@ -110,6 +112,7 @@ let
     };
     "host/swap" = {
       checkId = "resource/swap";
+      failureMessage = "swap must include lzo-rle zram above any disk swap with at least 8 GiB total";
       kind = "swap-policy";
       minimumTotalBytes = 8589934592;
       requiredZramAlgorithm = "lzo-rle";
@@ -121,6 +124,7 @@ let
     "host/system-generation" = {
       checkId = "system-generation";
       currentPath = "/run/current-system";
+      failureMessage = "could not resolve the current system generation";
       kind = "path-match";
       requiredPath = "/nix/var/nix/profiles/system";
       resolution = "canonical";
@@ -130,6 +134,7 @@ let
     "host/windows-d-drive" = {
       checkId = "resource/windows-d-drive";
       failure = 10;
+      failureMessage = "could not observe Windows D drive free space";
       kind = "numeric-command-threshold";
       metric = "free-percent";
       resourceKey = "windowsDDrive";
@@ -156,11 +161,7 @@ let
     let
       candidateStabilityObservations = selectStabilityObservations candidateObservations;
       candidateProjection = lib.mapAttrs (
-        _: observation:
-        builtins.removeAttrs observation [
-          "command"
-          "failureMessage"
-        ]
+        _: observation: builtins.removeAttrs observation [ "command" ]
       ) candidateStabilityObservations;
       swapObservation = candidateStabilityObservations."host/swap" or { };
       journalObservation = candidateStabilityObservations."host/journald" or { };
@@ -189,6 +190,11 @@ let
   thresholdMutation = hostObservations // {
     "host/root-filesystem" = hostObservations."host/root-filesystem" or { } // {
       warning = 86;
+    };
+  };
+  failureMessageMutation = hostObservations // {
+    "host/root-filesystem" = hostObservations."host/root-filesystem" or { } // {
+      failureMessage = "wrong but non-empty failure message";
     };
   };
   timerRemovalMutation = builtins.removeAttrs hostObservations [ "host/fstrim" ];
@@ -282,9 +288,6 @@ in
     assert lib.assertMsg (
       observationProjection == expectedObservationProjection
     ) "host runtime observation shape or canonical value drifted";
-    assert lib.assertMsg (builtins.all (observation: observation.failureMessage != "") (
-      builtins.attrValues stabilityObservations
-    )) "host runtime observation failure messages must be non-empty";
     assert lib.assertMsg (
       hostObservations."host/windows-d-drive".command.dotfilesObservationCommandKind
       == "numeric-command-threshold"
@@ -304,6 +307,9 @@ in
     assert lib.assertMsg (
       !(stabilityContractMatches stabilityConfiguration thresholdMutation)
     ) "root filesystem threshold mutation escaped the stability contract";
+    assert lib.assertMsg (
+      !(stabilityContractMatches stabilityConfiguration failureMessageMutation)
+    ) "wrong non-empty failure message escaped the stability contract";
     assert lib.assertMsg (
       !(stabilityContractMatches stabilityConfiguration timerRemovalMutation)
     ) "maintenance timer removal escaped the stability contract";

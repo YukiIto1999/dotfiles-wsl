@@ -104,6 +104,7 @@ in
       updateOwner = "dotfiles";
       layout = "single-binary";
       repo = "anomalyco/opencode";
+      retainedReleases = 2;
       releaseByArch = {
         x86_64 = {
           asset = "opencode-linux-x64.tar.gz";

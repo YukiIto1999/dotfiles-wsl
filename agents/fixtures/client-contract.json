@@ -158,6 +158,7 @@
         "updateOwner": "dotfiles",
         "layout": "package-tree",
         "repo": "openai/codex",
+        "retainedReleases": 2,
         "releaseByArch": {
           "x86_64": {
             "asset": "codex-package-x86_64-unknown-linux-musl.tar.gz",
@@ -242,6 +243,7 @@
         "updateOwner": "dotfiles",
         "layout": "single-binary",
         "repo": "anomalyco/opencode",
+        "retainedReleases": 2,
         "releaseByArch": {
           "x86_64": {
             "asset": "opencode-linux-x64.tar.gz",

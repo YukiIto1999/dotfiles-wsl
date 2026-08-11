@@ -154,6 +154,7 @@ in
       updateOwner = "dotfiles";
       layout = "package-tree";
       repo = "openai/codex";
+      retainedReleases = 2;
       releaseByArch = {
         x86_64 = {
           asset = "codex-package-x86_64-unknown-linux-musl.tar.gz";

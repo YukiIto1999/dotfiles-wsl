@@ -5,6 +5,8 @@ set -euo pipefail
 : "${INSTALL_AGENTS_MISSING_ARCH:?}"
 : "${INSTALL_AGENTS_EMPTY_ASSET:?}"
 : "${INSTALL_AGENTS_EMPTY_ENTRYPOINT:?}"
+: "${INSTALL_AGENTS_RETENTION_ONE:?}"
+: "${INSTALL_AGENTS_RETENTION_ELEVEN:?}"
 : "${INSTALL_AGENTS_SINGLE_BINARY:?}"
 : "${ATOMIC_PUBLISH:?}"
 : "${FIXTURE_SOURCES:?}"
@@ -179,6 +181,9 @@ assert_no_temps() {
     test -z "$(find "$root" -maxdepth 1 \
       \( -name '.stage.*' -o -name '.current.next.*' -o -name '.atomic-quarantine.*' \) \
       -print -quit)"
+    if [[ -d $root/releases ]]; then
+      test -z "$(find "$root/releases" -maxdepth 1 -name '.release-gc.*' -print -quit)"
+    fi
   fi
   if [[ -d $home/.local/bin ]]; then
     test -z "$(find "$home/.local/bin" -maxdepth 1 \
@@ -260,8 +265,10 @@ expect_failure() {
 }
 
 assert_codex_publish() {
-  local home=$1 archive=$2 digest
+  local home=$1 archive=$2 digest marker release
   digest=$(digest_of "$archive")
+  release=$home/.local/share/dotfiles/agents/codex/releases/sha256-$digest
+  marker=$release/.dotfiles-agent-release.json
 
   test "$(readlink "$home/.local/share/dotfiles/agents/codex/current")" \
     = "releases/sha256-$digest"
@@ -273,6 +280,15 @@ assert_codex_publish() {
   test -x "$home/.local/share/dotfiles/agents/codex/current/codex-path/rg"
   test -x "$home/.local/share/dotfiles/agents/codex/current/codex-resources/bwrap"
   test -f "$home/.local/share/dotfiles/agents/codex/current/extra/allowed.txt"
+  test -f "$marker"
+  test ! -L "$marker"
+  test "$(stat -c %u -- "$marker")" = "$(id -u)"
+  test "$(stat -c %a -- "$marker")" = 600
+  test "$(stat -c %h -- "$marker")" = 1
+  jq -e --arg client codex --arg digest "$digest" --arg layout package-tree '
+    keys == ["client", "digest", "layout", "schema"] and
+    .schema == 1 and .client == $client and .digest == $digest and .layout == $layout
+  ' "$marker" >/dev/null
   assert_no_temps "$home" codex codex
 }
 
@@ -315,7 +331,7 @@ preextract_scenarios=(
   absolute parent embedded-parent empty-segment current-segment backslash control
   duplicate-file duplicate-directory
   file-directory-collision symlink-internal symlink-external hardlink-internal
-  hardlink-external fifo many-members
+  hardlink-external fifo many-members reserved-marker
 )
 for scenario in "${preextract_scenarios[@]}"; do
   label="archive-$scenario"
@@ -369,11 +385,13 @@ done
 
 # Typed contract omissions still fail before the first API request at runtime.
 write_api "$fixture/fail-fast-api.json" "$asset_x86" "$api_archive"
-for invalid_case in missing-arch empty-asset empty-entrypoint; do
+for invalid_case in missing-arch empty-asset empty-entrypoint retention-one retention-eleven; do
   case $invalid_case in
     missing-arch) invalid_installer=$INSTALL_AGENTS_MISSING_ARCH ;;
     empty-asset) invalid_installer=$INSTALL_AGENTS_EMPTY_ASSET ;;
     empty-entrypoint) invalid_installer=$INSTALL_AGENTS_EMPTY_ENTRYPOINT ;;
+    retention-one) invalid_installer=$INSTALL_AGENTS_RETENTION_ONE ;;
+    retention-eleven) invalid_installer=$INSTALL_AGENTS_RETENTION_ELEVEN ;;
   esac
   home=$fixture/fail-fast-$invalid_case-home
   seed_stable_home "$home"
@@ -747,6 +765,118 @@ state_snapshot "$idempotent_home" codex codex bin/codex "$fixture/idempotent-aft
 diff --unified "$fixture/idempotent-before" "$fixture/idempotent-after"
 assert_no_temps "$idempotent_home" codex codex
 
+# Three sequential managed releases retain only current and previous.
+retention_home=$fixture/retention-home
+prepare_home "$retention_home"
+declare -A retention_archives=() retention_pids=()
+for retention_version in one two three; do
+  make_archive "retention-$retention_version" "version:$retention_version"
+  retention_archives[$retention_version]=$archive_path
+  write_api "$fixture/retention-$retention_version-api.json" "$asset_x86" "$archive_path"
+  configure_run "$retention_home" "$archive_path" \
+    "$fixture/retention-$retention_version-api.json"
+  "$INSTALL_AGENTS"
+done
+retention_two_digest=$(digest_of "${retention_archives[two]}")
+retention_three_digest=$(digest_of "${retention_archives[three]}")
+mapfile -t retained_release_names < <(
+  find "$retention_home/.local/share/dotfiles/agents/codex/releases" \
+    -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort
+)
+test "${#retained_release_names[@]}" -eq 2
+printf '%s\n' "${retained_release_names[@]}" | grep -Fx "sha256-$retention_two_digest"
+printf '%s\n' "${retained_release_names[@]}" | grep -Fx "sha256-$retention_three_digest"
+test "$(readlink -- "$retention_home/.local/share/dotfiles/agents/codex/current")" \
+  = "releases/sha256-$retention_three_digest"
+test -z "$(find "$retention_home/.local/share/dotfiles/agents/codex/releases" \
+  -maxdepth 1 -name '.release-gc.*' -print -quit)"
+
+# Unmarked legacy, foreign, and invalid marked entries are diagnosed and preserved outside the
+# managed retention count.
+retention_releases=$retention_home/.local/share/dotfiles/agents/codex/releases
+legacy_release=sha256-0000000000000000000000000000000000000000000000000000000000000000
+invalid_release=sha256-1111111111111111111111111111111111111111111111111111111111111111
+mkdir -m 0700 "$retention_releases/$legacy_release" "$retention_releases/foreign"
+cp -a "$seed_payload/." "$retention_releases/$legacy_release/"
+cp -a "$seed_payload/." "$retention_releases/$invalid_release"
+printf '%s\n' '{"client":"codex","digest":"wrong","layout":"package-tree","schema":1}' \
+  >"$retention_releases/$invalid_release/.dotfiles-agent-release.json"
+chmod 0600 "$retention_releases/$invalid_release/.dotfiles-agent-release.json"
+configure_run "$retention_home" "${retention_archives[three]}" \
+  "$fixture/retention-three-api.json"
+"$INSTALL_AGENTS" >"$fixture/retention-preserve.stdout" \
+  2>"$fixture/retention-preserve.stderr"
+test -d "$retention_releases/$legacy_release"
+test -d "$retention_releases/foreign"
+test -d "$retention_releases/$invalid_release"
+grep -Fq "preserving invalid or unmarked release: $legacy_release" \
+  "$fixture/retention-preserve.stderr"
+grep -Fq 'preserving foreign release entry: foreign' "$fixture/retention-preserve.stderr"
+grep -Fq "preserving invalid or unmarked release: $invalid_release" \
+  "$fixture/retention-preserve.stderr"
+test -f "$retention_releases/sha256-$retention_two_digest/.dotfiles-agent-release.json"
+test -f "$retention_releases/sha256-$retention_three_digest/.dotfiles-agent-release.json"
+assert_codex_publish "$retention_home" "${retention_archives[three]}"
+
+# Concurrent updates serialize under the client lock and keep the managed set bounded.
+retention_concurrent_home=$fixture/retention-concurrent-home
+prepare_home "$retention_concurrent_home"
+configure_run "$retention_concurrent_home" "${retention_archives[one]}" \
+  "$fixture/retention-one-api.json"
+"$INSTALL_AGENTS"
+for retention_version in two three; do
+  archive=${retention_archives[$retention_version]}
+  HOME=$retention_concurrent_home \
+    FIXTURE_ARCHIVE=$archive \
+    FIXTURE_API_JSON=$fixture/retention-$retention_version-api.json \
+    FIXTURE_ARCH=x86_64 \
+    FIXTURE_CURL_LOG=$fixture/retention-concurrent-$retention_version.curl.log \
+    FIXTURE_TAR_LOG=$fixture/retention-concurrent-$retention_version.tar.log \
+    FIXTURE_CURL_DELAY=0.1 \
+    "$INSTALL_AGENTS" >"$fixture/retention-concurrent-$retention_version.stdout" \
+    2>"$fixture/retention-concurrent-$retention_version.stderr" &
+  retention_pids[$retention_version]=$!
+done
+wait "${retention_pids[two]}"
+wait "${retention_pids[three]}"
+mapfile -t concurrent_managed_releases < <(
+  find "$retention_concurrent_home/.local/share/dotfiles/agents/codex/releases" \
+    -mindepth 1 -maxdepth 1 -type d -name 'sha256-*' -printf '%f\n' | sort
+)
+test "${#concurrent_managed_releases[@]}" -eq 2
+for release_name in "${concurrent_managed_releases[@]}"; do
+  test -f "$retention_concurrent_home/.local/share/dotfiles/agents/codex/releases/$release_name/.dotfiles-agent-release.json"
+done
+assert_no_temps "$retention_concurrent_home" codex codex
+
+# A candidate mutated after validation is restored, while current and the new release roll back.
+gc_mutation_home=$fixture/gc-mutation-home
+prepare_home "$gc_mutation_home"
+for retention_version in one two; do
+  archive=${retention_archives[$retention_version]}
+  configure_run "$gc_mutation_home" "$archive" \
+    "$fixture/retention-$retention_version-api.json"
+  "$INSTALL_AGENTS"
+done
+gc_old_release=$gc_mutation_home/.local/share/dotfiles/agents/codex/releases/sha256-$(
+  digest_of "${retention_archives[one]}"
+)
+configure_run "$gc_mutation_home" "${retention_archives[three]}" \
+  "$fixture/retention-three-api.json"
+configure_transaction_hook before-release-gc mutate-release gc-mutation
+if "$INSTALL_AGENTS" >"$fixture/gc-mutation.stdout" 2>"$fixture/gc-mutation.stderr"; then
+  echo 'release GC mutation unexpectedly succeeded' >&2
+  exit 1
+fi
+test -e "$FIXTURE_TRANSACTION_HOOK_MARKER"
+grep -Fxq changed-during-gc "$gc_old_release/codex-package.json"
+test "$(readlink -- "$gc_mutation_home/.local/share/dotfiles/agents/codex/current")" \
+  = "releases/sha256-$retention_two_digest"
+test ! -e "$gc_mutation_home/.local/share/dotfiles/agents/codex/releases/sha256-$retention_three_digest"
+test -z "$(find "$gc_mutation_home/.local/share/dotfiles/agents/codex/releases" \
+  -maxdepth 1 -name '.release-gc.*' -print -quit)"
+clear_transaction_hook
+
 # Extraction modes are deterministic even when the invoking user's umask changes.
 umask_home=$fixture/umask-home
 prepare_home "$umask_home"
@@ -813,5 +943,11 @@ test "$(readlink "$opencode_home/.local/share/dotfiles/agents/opencode/current")
   = "releases/sha256-$opencode_digest"
 test "$(readlink "$opencode_home/.local/bin/opencode")" \
   = '../share/dotfiles/agents/opencode/current/opencode'
+opencode_marker=$opencode_home/.local/share/dotfiles/agents/opencode/releases/sha256-$opencode_digest/.dotfiles-agent-release.json
+jq -e --arg digest "$opencode_digest" '
+  keys == ["client", "digest", "layout", "schema"] and
+  .schema == 1 and .client == "opencode" and .digest == $digest and
+  .layout == "single-binary"
+' "$opencode_marker" >/dev/null
 "$opencode_home/.local/bin/opencode" --version | grep -Fx 'codex fixture 1.0.0'
 assert_no_temps "$opencode_home" opencode opencode

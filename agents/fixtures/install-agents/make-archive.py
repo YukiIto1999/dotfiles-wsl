@@ -104,6 +104,15 @@ single_binary = scenario == "single-binary"
 if single_binary:
     scenario = "valid"
 
+version = None
+if scenario.startswith("version:"):
+    version = scenario.removeprefix("version:")
+    scenario = "valid"
+    required_files["codex-package.json"] = (
+        f'{{"version":"{version}"}}\n'.encode(),
+        0o644,
+    )
+
 with tarfile.open(archive, "w:gz", format=tarfile.GNU_FORMAT) as tar:
     if single_binary:
         add_file(tar, "opencode", single_binary_body(), 0o755)
@@ -145,6 +154,8 @@ with tarfile.open(archive, "w:gz", format=tarfile.GNU_FORMAT) as tar:
         add_link(tar, "external-hardlink", "../../outside", True)
     elif scenario == "fifo":
         add_fifo(tar, "fixture-fifo")
+    elif scenario == "reserved-marker":
+        add_file(tar, ".dotfiles-agent-release.json", b'{"foreign":true}\n', 0o600)
 
     if not single_binary:
         directories = ["bin/", "codex-path/", "codex-resources/", "extra/"]

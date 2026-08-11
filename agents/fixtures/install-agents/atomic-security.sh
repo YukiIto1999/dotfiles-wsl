@@ -88,6 +88,25 @@ if run_case production-fd-api; then
     "$directory_fd" "$directory_token" tree "$tree_fd" "$tree_token"
   test ! -e "$directory/tree"
   exec {tree_fd}>&-
+
+  mkdir -m 0700 "$directory/gc-tree"
+  printf '%s\n' removable >"$directory/gc-tree/file"
+  gc_tree_token=$($ATOMIC_PUBLISH_PRODUCTION identity-fd "$directory_fd" \
+    "$directory_token" gc-tree)
+  gc_private_name=$($ATOMIC_PUBLISH_PRODUCTION quarantine-tree-fd "$directory_fd" \
+    "$directory_token" gc-tree "$gc_tree_token")
+  [[ $gc_private_name =~ ^\.release-gc\.[0-9a-f]{32}$ ]]
+  test ! -e "$directory/gc-tree"
+  test -d "$directory/$gc_private_name"
+  test "$($ATOMIC_PUBLISH_PRODUCTION identity-fd "$directory_fd" \
+    "$directory_token" "$gc_private_name")" = "$gc_tree_token"
+  exec {gc_tree_fd}<"$directory/$gc_private_name"
+  gc_tree_directory_token=$($ATOMIC_PUBLISH_PRODUCTION directory-identity-fd "$gc_tree_fd")
+  expect_command_status 0 "$ATOMIC_PUBLISH_PRODUCTION" remove-tree-fd \
+    "$directory_fd" "$directory_token" "$gc_private_name" "$gc_tree_fd" \
+    "$gc_tree_directory_token"
+  test ! -e "$directory/$gc_private_name"
+  exec {gc_tree_fd}>&-
   exec {directory_fd}>&-
 
   probe_stage=$fixture/production-probe-stage

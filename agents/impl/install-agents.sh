@@ -37,6 +37,7 @@ curl_max_redirects=5
 probe_timeout_seconds=10
 probe_kill_grace_seconds=2
 temp_symlink_attempt_limit=32
+release_owner_marker=.dotfiles-agent-release.json
 active_stage=
 active_stage_public=
 active_current_next=
@@ -75,6 +76,11 @@ transaction_visible_method=
 transaction_visible_old_identity=
 transaction_visible_new_identity=
 transaction_visible_binary=
+transaction_gc_state=none
+transaction_gc_original_name=
+transaction_gc_private_name=
+transaction_gc_release_identity=
+retained_releases=
 
 atomic_identity() {
   "$atomic_publish_command" identity "$1" "$2" "$3"
@@ -344,6 +350,8 @@ validate_archive() {
     [[ $listed_name == "$name" ]] || fail "archive listings disagree for member: $name"
     canonical=$(canonical_member_name "$name") \
       || fail "archive contains an unsafe member name"
+    [[ $canonical != "$release_owner_marker" && $canonical != "$release_owner_marker/"* ]] \
+      || fail "archive contains the reserved release marker: $canonical"
     [[ ! -v 'seen[$canonical]' ]] || fail "archive contains a duplicate member: $canonical"
     for existing in "${!member_types[@]}"; do
       if [[ $canonical == "$existing/"* && ${member_types[$existing]} != d ]]; then
@@ -464,6 +472,51 @@ validate_payload() {
   tree_manifest "$payload" "$manifest" "$scratch"
 }
 
+write_release_marker() {
+  local record=$1 payload=$2 digest=$3 name layout marker
+
+  name=$(jq -e -r '.name | select(type == "string" and length > 0)' <<<"$record") \
+    || fail "release marker client is missing"
+  layout=$(jq -e -r '.install.layout | select(. == "single-binary" or . == "package-tree")' \
+    <<<"$record") || fail "release marker layout is missing for $name"
+  [[ $digest =~ ^[0-9a-f]{64}$ ]] || fail "release marker digest is invalid for $name"
+  marker=$payload/$release_owner_marker
+  (umask 077; jq -cS -n --arg client "$name" --arg digest "$digest" --arg layout "$layout" \
+    '{schema: 1, client: $client, digest: $digest, layout: $layout}' >"$marker") \
+    || fail "cannot write release marker for $name"
+  chmod 0600 -- "$marker" || fail "cannot protect release marker for $name"
+}
+
+validate_release_marker() {
+  local record=$1 root=$2 digest=$3 name layout marker owner mode links
+
+  name=$(jq -e -r '.name | select(type == "string" and length > 0)' <<<"$record") \
+    || fail "release marker client is missing"
+  layout=$(jq -e -r '.install.layout | select(. == "single-binary" or . == "package-tree")' \
+    <<<"$record") || fail "release marker layout is missing for $name"
+  marker=$root/$release_owner_marker
+  [[ -f $marker && ! -L $marker ]] || fail "managed release marker is missing for $name"
+  owner=$(stat -c %u -- "$marker") || fail "cannot read release marker owner for $name"
+  mode=$(stat -c %a -- "$marker") || fail "cannot read release marker mode for $name"
+  links=$(stat -c %h -- "$marker") || fail "cannot read release marker links for $name"
+  [[ $owner == "$current_uid" && $mode == 600 && $links == 1 ]] \
+    || fail "managed release marker has unsafe metadata for $name"
+  jq -e --arg client "$name" --arg digest "$digest" --arg layout "$layout" '
+    keys == ["client", "digest", "layout", "schema"] and
+    .schema == 1 and .client == $client and .digest == $digest and .layout == $layout
+  ' "$marker" >/dev/null || fail "managed release marker is invalid for $name"
+}
+
+validate_managed_release() {
+  local record=$1 release_name=$2 root=$3 scratch=$4 manifest=$5 digest
+
+  [[ $release_name =~ ^sha256-[0-9a-f]{64}$ ]] \
+    || fail "managed release name is invalid: $release_name"
+  digest=${release_name#sha256-}
+  validate_release_marker "$record" "$root" "$digest"
+  validate_payload "$record" "$root" "$scratch" "$manifest"
+}
+
 probe_payload_entrypoint() {
   local record=$1 payload=$2 scratch=$3 entrypoint=$4 before_manifest=$5 after_manifest=$6
   local version_args_json status timeout_command
@@ -503,7 +556,8 @@ probe_payload_entrypoint() {
 inspect_publish_destinations() {
   local record=$1 name=$2 binary=$3 entrypoint=$4 scratch=$5
   local current=$client_root_view/current visible=$visible_parent_view/$binary
-  local current_manifest=$scratch/current-release.manifest target release entry owner links
+  local current_manifest=$scratch/current-release.manifest target release release_name digest
+  local entry owner links
   local current_identity_before current_identity_after visible_identity_before visible_identity_after
 
   current_identity_before=$(atomic_identity_fd "$client_root_fd" "$client_root_identity" current) \
@@ -518,8 +572,15 @@ inspect_publish_destinations() {
     [[ $target =~ ^releases/sha256-[0-9a-f]{64}$ ]] \
       || fail "current symlink has an external or invalid target for $name: $target"
     release="$client_root_view/$target"
+    release_name=${target#releases/}
+    digest=${release_name#sha256-}
     owned_real_directory "$release" "current release"
     validate_payload "$record" "$release" "$scratch" "$current_manifest"
+    if [[ -e $release/$release_owner_marker || -L $release/$release_owner_marker ]]; then
+      validate_release_marker "$record" "$release" "$digest"
+    else
+      printf 'WARNING: preserving unmarked legacy current release: %s\n' "$release_name" >&2
+    fi
     entry="$release/$entrypoint"
     [[ -f $entry && ! -L $entry ]] || fail "current entrypoint is missing for $name"
     owner=$(stat -c %u -- "$entry") || fail "cannot read current entrypoint owner for $name"
@@ -680,7 +741,7 @@ rollback_release_transaction() {
   rollback_manifest=$transaction_release_scratch/rollback-release.manifest
   if ! (
     trap - EXIT
-    validate_payload "$transaction_release_record" \
+    validate_managed_release "$transaction_release_record" "$transaction_release_name" \
       "$releases_root_view/$transaction_release_name" "$transaction_release_scratch" \
       "$rollback_manifest"
     cmp -- "$transaction_release_manifest" "$rollback_manifest"
@@ -695,9 +756,21 @@ rollback_release_transaction() {
   transaction_release_state=none
 }
 
+rollback_gc_transaction() {
+  [[ $transaction_gc_state == quarantined ]] || return 0
+  atomic_operation move-noreplace-fd "$releases_root_fd" "$releases_root_identity" \
+    "$transaction_gc_private_name" "$releases_root_fd" "$releases_root_identity" \
+    "$transaction_gc_original_name" "$transaction_gc_release_identity" || return
+  transaction_gc_state=none
+  transaction_gc_original_name=
+  transaction_gc_private_name=
+  transaction_gc_release_identity=
+}
+
 rollback_publish_transaction() {
   rollback_visible_transaction || return
   rollback_current_transaction || return
+  rollback_gc_transaction || return
   rollback_release_transaction || return
   transaction_active=0
 }
@@ -717,6 +790,7 @@ discard_transaction_backup() {
 commit_publish_transaction() {
   local cleanup_status=0
 
+  [[ $transaction_gc_state == none ]] || return 1
   # The switched state is committed before old objects are destroyed.  A failed cleanup is
   # reported and retains its exact identity so the EXIT trap can retry without guessing.
   transaction_active=0
@@ -750,6 +824,102 @@ commit_publish_transaction() {
   return "$cleanup_status"
 }
 
+managed_release_is_valid() {
+  local record=$1 release_name=$2 release_path=$3 scratch=$4 manifest=$5 log=$6
+
+  (
+    trap - EXIT
+    validate_managed_release "$record" "$release_name" "$release_path" "$scratch" "$manifest"
+  ) >"$log" 2>&1
+}
+
+remove_managed_release() {
+  local record=$1 release_name=$2 scratch=$3 before_manifest=$4
+  local release_identity private_name private_path after_manifest gc_tree_fd gc_tree_identity
+
+  release_identity=$(atomic_identity_fd "$releases_root_fd" "$releases_root_identity" \
+    "$release_name") || fail "cannot capture release GC identity: $release_name"
+  run_transaction_hook before-release-gc "$releases_root/$release_name"
+  private_name=$("$atomic_publish_command" quarantine-tree-fd "$releases_root_fd" \
+    "$releases_root_identity" "$release_name" "$release_identity") \
+    || fail "cannot quarantine managed release: $release_name"
+  [[ $private_name =~ ^\.release-gc\.[0-9a-f]{32}$ ]] \
+    || fail "release GC returned an invalid private name: $private_name"
+  transaction_gc_original_name=$release_name
+  transaction_gc_private_name=$private_name
+  transaction_gc_release_identity=$release_identity
+  transaction_gc_state=quarantined
+  private_path=$releases_root_view/$private_name
+  exec {gc_tree_fd}<"$private_path" || fail "cannot open quarantined release: $release_name"
+  gc_tree_identity=$(atomic_directory_identity_fd "$gc_tree_fd") \
+    || fail "cannot capture quarantined release identity: $release_name"
+  after_manifest=$scratch/gc-after-$release_name.manifest
+  if ! managed_release_is_valid "$record" "$release_name" "$private_path" "$scratch" \
+    "$after_manifest" "$scratch/gc-after-$release_name.log" \
+    || ! cmp -- "$before_manifest" "$after_manifest"; then
+    fail "managed release changed during GC: $release_name"
+  fi
+  atomic_operation remove-tree-fd "$releases_root_fd" "$releases_root_identity" \
+    "$private_name" "$gc_tree_fd" "$gc_tree_identity" \
+    || fail "cannot remove quarantined managed release: $release_name"
+  exec {gc_tree_fd}>&-
+  transaction_gc_state=none
+  transaction_gc_original_name=
+  transaction_gc_private_name=
+  transaction_gc_release_identity=
+}
+
+garbage_collect_managed_releases() {
+  local record=$1 new_release_name=$2 retained=$3 scratch=$4
+  local current_release_name="" entry release_path manifest validation_log managed_count=1
+  local delete_count LC_ALL=C nullglob_was_set=0 dotglob_was_set=0
+  local -a candidates=() release_paths=()
+
+  if [[ $current_state == stable ]]; then
+    current_release_name=${current_target#releases/}
+  fi
+  # The pinned descriptor is close-on-exec, so enumeration must remain in this shell.  Pathname
+  # expansion resolves /proc/self/fd here and preserves arbitrary entry names as array elements.
+  shopt -q nullglob && nullglob_was_set=1
+  shopt -q dotglob && dotglob_was_set=1
+  shopt -s nullglob dotglob
+  release_paths=("$releases_root_view"/*)
+  ((nullglob_was_set == 1)) || shopt -u nullglob
+  ((dotglob_was_set == 1)) || shopt -u dotglob
+  for release_path in "${release_paths[@]}"; do
+    entry=${release_path##*/}
+    [[ $entry != "$new_release_name" ]] || continue
+    if [[ ! $entry =~ ^sha256-[0-9a-f]{64}$ || ! -d $release_path || -L $release_path ]]; then
+      printf 'WARNING: preserving foreign release entry: %s\n' "$entry" >&2
+      continue
+    fi
+    if [[ $entry == "$current_release_name" && ! -e $release_path/$release_owner_marker ]]; then
+      printf 'WARNING: preserving unmarked legacy release: %s\n' "$entry" >&2
+      continue
+    fi
+    manifest=$scratch/gc-before-$entry.manifest
+    validation_log=$scratch/gc-before-$entry.log
+    if ! managed_release_is_valid "$record" "$entry" "$release_path" "$scratch" \
+      "$manifest" "$validation_log"; then
+      printf 'WARNING: preserving invalid or unmarked release: %s\n' "$entry" >&2
+      continue
+    fi
+    managed_count=$((managed_count + 1))
+    [[ $entry == "$current_release_name" ]] || candidates+=("$entry")
+  done
+
+  delete_count=$((managed_count - retained))
+  ((delete_count > 0)) || return 0
+  ((${#candidates[@]} >= delete_count)) \
+    || fail "release retention cannot preserve current and new release"
+  for entry in "${candidates[@]:0:delete_count}"; do
+    remove_managed_release "$record" "$entry" "$scratch" \
+      "$scratch/gc-before-$entry.manifest"
+    managed_count=$((managed_count - 1))
+  done
+  ((managed_count <= retained)) || fail "managed release retention remains above limit"
+}
+
 publish_validated_payload() {
   local record=$1 name=$2 binary=$3 entrypoint=$4 payload=$5 scratch=$6 manifest=$7 digest=$8
   local payload_name=${payload##*/} scratch_name=${scratch##*/} manifest_name=${manifest##*/}
@@ -773,13 +943,15 @@ publish_validated_payload() {
   transaction_release_state=none
   transaction_current_state=none
   transaction_visible_state=none
+  transaction_gc_state=none
   transaction_current_method=none
   transaction_visible_method=none
   transaction_visible_binary=$binary
 
   if [[ -e $release_path || -L $release_path ]]; then
     owned_real_directory "$release_path" "existing release"
-    validate_payload "$record" "$release_path" "$scratch" "$existing_manifest"
+    validate_managed_release "$record" "$release_name" "$release_path" "$scratch" \
+      "$existing_manifest"
     cmp -- "$manifest" "$existing_manifest" \
       || fail "existing release differs from the validated archive: $release_name"
   else
@@ -805,7 +977,8 @@ publish_validated_payload() {
     "$release_name") \
     || fail "cannot capture published release identity: $release_name"
   owned_real_directory "$release_path" "published release"
-  validate_payload "$record" "$release_path" "$scratch" "$published_manifest"
+  validate_managed_release "$record" "$release_name" "$release_path" "$scratch" \
+    "$published_manifest"
   cmp -- "$manifest" "$published_manifest" \
     || fail "published release differs from the validated archive: $release_name"
   release_identity_after=$(atomic_identity_fd "$releases_root_fd" "$releases_root_identity" \
@@ -818,6 +991,8 @@ publish_validated_payload() {
       || fail "published release identity differs from staged payload: $release_name"
   fi
   inspect_publish_destinations "$record" "$name" "$binary" "$entrypoint" "$scratch"
+  garbage_collect_managed_releases "$record" "$release_name" "$retained_releases" "$scratch"
+  verify_public_directory_bindings "$name"
 
   if [[ $current_state != stable || $current_target != "$target" ]]; then
     create_temp_symlink "$client_root_fd" "$client_root_identity" "$client_root_view" current \
@@ -895,6 +1070,7 @@ prepare_and_validate_archive() {
     tar --extract --gzip --file "$active_stage/archive.tar.gz" --directory "$payload" \
       --no-same-owner --no-same-permissions --no-overwrite-dir
   ) || fail "archive extraction failed: $resolved_asset"
+  write_release_marker "$record" "$payload" "$resolved_digest"
   validate_tree_safety "$payload" "$scratch"
   validate_required_paths "$record" "$payload" "$scratch"
 }
@@ -940,6 +1116,9 @@ install_github_release() {
   [[ $binary =~ ^[A-Za-z0-9._+-]+$ ]] || fail "unsafe binary name for $name: $binary"
   layout=$(jq -e -r '.install.layout | select(. == "single-binary" or . == "package-tree")' \
     <<<"$record") || fail "unsupported GitHub release layout for $name"
+  retained_releases=$(jq -e -r \
+    '.install.retainedReleases | select(type == "number" and floor == . and . >= 2 and . <= 10)' \
+    <<<"$record") || fail "invalid retainedReleases for $name"
   resolved_repo=$(jq -e -r '.install.repo | select(type == "string" and test("^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"))' \
     <<<"$record") || fail "invalid GitHub repository for $name"
   jq -e '.versionArgs | type == "array" and length > 0' <<<"$record" >/dev/null \

@@ -8,32 +8,41 @@
 let
   cfg = config.dotfiles;
   mkCommand = import ../impl/mk-command.nix { inherit config lib pkgs; };
-  names = builtins.attrNames cfg.agents.clients;
-
-  # hm-back を掃く root。.config/<x> は 2 段まで、それ以外は先頭 1 段
-  rootOf =
-    path:
-    let
-      segs = lib.splitString "/" path;
-    in
-    if builtins.head segs == ".config" then
-      lib.concatStringsSep "/" (lib.sublist 0 2 segs)
-    else
-      builtins.head segs;
-
-  roots = lib.unique (map (name: rootOf cfg.agents.clients.${name}.rulesDestination) names) ++ [
-    ".config/git"
-    ".config/gh"
-  ];
+  homeDir = cfg.host.homeDir;
+  backupExtension = config.home-manager.backupFileExtension;
+  backupCommand = config.home-manager.backupCommand;
+  usesBackupExtension = backupCommand == null && backupExtension != null;
+  homeConfig = config.home-manager.users.${cfg.host.username};
+  currentHomeFiles = "${homeConfig.home.activationPackage}/home-files";
 in
 {
   dotfiles.commands.cleanup = mkCommand {
     name = "dotfiles-cleanup";
     src = ./impl/cleanup.sh;
-    runtimeInputs = [ pkgs.coreutils ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.gnused
+    ];
     vars = {
-      agentRootsBashArray = lib.concatStringsSep " " (map (r: "'${r}'") roots);
-      hmBackupExt = config.home-manager.backupFileExtension;
+      currentBackupExtension = lib.escapeShellArg (if usesBackupExtension then backupExtension else "");
+      currentHomeFiles = lib.escapeShellArg currentHomeFiles;
+      currentUsesBackupExtension = if usesBackupExtension then "1" else "0";
+      homeDir = lib.escapeShellArg homeDir;
+      systemRoot = "/etc";
+    };
+    extra.passthru = {
+      cleanupHomeDir = homeDir;
+      cleanupCurrentHomeFiles = currentHomeFiles;
+      cleanupCurrentUsesBackupExtension = usesBackupExtension;
     };
   };
+
+  assertions = [
+    {
+      assertion =
+        !usesBackupExtension || builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" backupExtension != null;
+      message = "Home Manager backupFileExtension must be a filename suffix when cleanup uses it.";
+    }
+  ];
 }

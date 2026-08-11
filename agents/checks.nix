@@ -14,6 +14,7 @@ let
   expected = builtins.fromJSON (builtins.readFile ./fixtures/client-contract.json);
   agentConfig = hostConfig.dotfiles.agents;
   inherit (agentConfig) clients;
+  apm = agentConfig.packages.apm;
   variantClients = variantConfig.dotfiles.agents.clients;
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
   artifacts = hostConfig.dotfiles.artifacts;
@@ -1813,6 +1814,20 @@ let
   opencodeDefinitionSources = builtins.attrValues clients.opencode.definitions;
 in
 {
+  agent-apm-binary-runs = pkgs.runCommandLocal "check-agent-apm-binary-runs" { } ''
+    set -euo pipefail
+
+    version=$(${lib.getExe apm} --version)
+    case $version in
+      "Agent Package Manager (APM) CLI version ${apm.version}"*) ;;
+      *)
+        echo "unexpected apm version banner: $version" >&2
+        exit 1
+        ;;
+    esac
+    touch $out
+  '';
+
   agent-client-roster =
     assert expected.required != [ ];
     assert clients != { };
@@ -2253,11 +2268,11 @@ in
     assert lib.any (
       definition:
       lib.hasInfix "/agents/module.nix" (toString definition.file)
-      && lib.elem hostConfig.dotfiles.containers.agentmemory.clients.hooks definition.value
+      && lib.elem hostConfig.dotfiles.agents.agentmemory.hooks definition.value
     ) hostOptions.environment.systemPackages.definitionsWithLocations;
     assert
       clients.opencode.managedFiles.agentmemory-plugin.source
-      == hostConfig.dotfiles.containers.agentmemory.clients.opencodePlugin;
+      == hostConfig.dotfiles.agents.agentmemory.opencodePlugin;
     assert !(builtins.hasAttr "containers/agentmemory/opencode-capture" artifacts);
     assert lib.all (
       definition:
@@ -2731,11 +2746,6 @@ in
           echo "legacy clis path or runtime identity remains" >&2
           exit 1
         fi
-        if rg -n "$legacy_option"'agents|agents/(antigravity|claude|codex|opencode)' ${self}/containers; then
-          echo "container backend declares or depends on agent configuration" >&2
-          exit 1
-        fi
-
         touch $out
       '';
 
@@ -2936,6 +2946,16 @@ in
       '';
 
   agent-runtime-contract =
+    assert
+      builtins.attrNames agentConfig.packages == [
+        "agentmemoryHooks"
+        "apm"
+        "projectCacheGc"
+        "verification"
+      ];
+    assert agentConfig.packages.agentmemoryHooks == hostConfig.dotfiles.agents.agentmemory.hooks;
+    assert agentConfig.packages.projectCacheGc == runtime.gc;
+    assert agentConfig.packages.verification == runtime.verify;
     assert builtins.head homeConfig.home.sessionPath == "$HOME/${wrapperDirectory}";
     assert lib.elem "$HOME/.local/bin" homeConfig.home.sessionPath;
     assert

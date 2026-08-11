@@ -27,6 +27,7 @@
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
 | Agent client | [`agents/module.nix`](../../agents/module.nix) の `dotfiles.agents` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply builtins.attrNames` |
+| Agent 補助 package | [`agents/module.nix`](../../agents/module.nix) の `dotfiles.agents.packages` と [`agents/package/`](../../agents/package) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.packages --apply 'builtins.mapAttrs (_: p: p.name)'` |
 | Client installer | 各 [`agents/NAME/module.nix`](../../agents) の `install` と [`agents/impl/install-agents.sh`](../../agents/impl/install-agents.sh) | `nix run .#dotfiles-install-agents -- --print-manifest` |
 | Agent runtime と worktree 台帳 | [`agents/module.nix`](../../agents/module.nix)、[`agents/impl/runtime/`](../../agents/impl/runtime)、[`agents/impl/resource/`](../../agents/impl/resource) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.runtime` |
 | 静的 agent | [`agents/shared/definitions/`](../../agents/shared/definitions) | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |

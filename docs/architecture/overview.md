@@ -82,7 +82,7 @@ user home に置く secret template の metadata は [`sops/impl/user-secret-fil
 | runtime 観測 | `dotfiles-doctor` が current generation と実状態を比較する |
 | 外部の可変 state | `dotfiles-install-agents` が user binary、`dotfiles-sync-images` が Docker cache を更新する |
 | 保守 | `dotfiles-cleanup` が候補表示と明示削除、`dotfiles-wsl-restart-required` が cold-start 判定を担当する |
-| 鍵の enrollment | `dotfiles-sops-enroll` が repository の recipient と host key の移行を通常 rebuild から分離する |
+| 鍵の enrollment | `sops/assets/.sops.yaml` の recipient 更新と `sops updatekeys` を通常 rebuild から分離する |
 
 最初の system generation が存在しない段階では生成 command を参照できないため、`commands/rebuild/impl/bootstrap.sh` だけは手書きの入口として残る。
 

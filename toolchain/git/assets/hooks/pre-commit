@@ -23,7 +23,7 @@ main() {
   (( ${#leaks[@]} == 0 )) && exit 0
 
   printf 'PAT leak in %s\n' "${leaks[@]}" >&2
-  echo "move secrets to secrets/secrets.yaml (SOPS + age)" >&2
+  echo "move secrets to sops/assets/secrets.yaml (SOPS + age)" >&2
   exit 1
 }
 

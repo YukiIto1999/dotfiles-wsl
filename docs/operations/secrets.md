@@ -2,7 +2,7 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-暗号化済み secret の正本は `secrets/secrets.yaml`、復号に使う host key は `/var/lib/sops-nix/key.txt` である。secret 名の完全な一覧は、各 consumer に隣接する `sops.secrets` 宣言を正本とし、この文書には複製しない。
+暗号化済み secret の正本は `sops/assets/secrets.yaml`、復号に使う host key は `/var/lib/sops-nix/key.txt` である。secret 名の完全な一覧は、各 consumer に隣接する `sops.secrets` 宣言を正本とし、この文書には複製しない。
 
 ## 編集
 
@@ -11,9 +11,9 @@
 ```bash
 cd ~/dotfiles-wsl
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops secrets/secrets.yaml
-git diff --check -- secrets/secrets.yaml
-git diff -- secrets/secrets.yaml
+  sops --config sops/assets/.sops.yaml sops/assets/secrets.yaml
+git diff --check -- sops/assets/secrets.yaml
+git diff -- sops/assets/secrets.yaml
 ```
 
 平文を別ファイル、shell history、Git patch、ログへ書かない。通常の値変更で `sops updatekeys` は要らない。recipient と host key を変える手順は [SOPS の鍵](sops-enrollment.md)にある。

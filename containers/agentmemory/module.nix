@@ -12,9 +12,7 @@ let
   # stream port は publish しない。engine config 内部専用で consumer はない
   streamPort = "3112";
 
-  agentmemory = pkgs.callPackage ./package.nix {
-    agentmemoryUrl = config.dotfiles.containers.services.agentmemory.endpoints.http.url;
-  };
+  agentmemory = pkgs.callPackage ./package.nix { };
 
   agentmemoryConfig = pkgs.replaceVars ./assets/engine-config.yaml {
     inherit httpPort streamPort;
@@ -36,28 +34,24 @@ let
   };
 in
 {
-  options.dotfiles.containers.agentmemory = {
+  options.dotfiles.containers.agentmemory.upstream = {
     version = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
+      internal = true;
     };
-    clients.hooks = lib.mkOption {
-      type = lib.types.package;
-      readOnly = true;
-    };
-    clients.opencodePlugin = lib.mkOption {
+    root = lib.mkOption {
       type = lib.types.path;
       readOnly = true;
+      internal = true;
     };
   };
 
   config = {
     dotfiles.containers = {
-      agentmemory = {
+      agentmemory.upstream = {
         inherit (agentmemory) version;
-        clients = {
-          inherit (agentmemory) hooks opencodePlugin;
-        };
+        root = agentmemory.upstreamRoot;
       };
 
       services.agentmemory = {

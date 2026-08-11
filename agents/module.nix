@@ -245,6 +245,7 @@ let
       util-linux
     ];
   };
+  apm = pkgs.callPackage ./package/apm.nix { };
 
   allHomeEntries = homeManagedEntries;
   homeDestinations = map (entry: entry.name) allHomeEntries;
@@ -399,6 +400,12 @@ in
 
   config = {
     dotfiles.agents = {
+      packages = {
+        inherit apm;
+        agentmemoryHooks = config.dotfiles.agents.agentmemory.hooks;
+        projectCacheGc = runtimeContract.packages.gc;
+        verification = runtimeContract.packages.verify;
+      };
       stateRoot = "~/${runtimeContract.state.relativeResourcesRoot}";
       inherit (runtimeContract.packages) agentResource agentWorktree;
       runtime = {
@@ -461,14 +468,15 @@ in
 
     environment.etc = lib.listToAttrs systemManagedEntries;
     environment.systemPackages = [
-      config.dotfiles.containers.agentmemory.clients.hooks
-      runtimeContract.packages.gc
-      runtimeContract.packages.verify
+      config.dotfiles.agents.packages.agentmemoryHooks
+      config.dotfiles.agents.packages.projectCacheGc
+      config.dotfiles.agents.packages.verification
     ];
 
     home-manager.users.${cfg.host.username} =
       { lib, ... }:
       {
+        home.packages = [ apm ];
         home.file = lib.mkMerge [
           (lib.listToAttrs allHomeEntries)
           runtimeWrappers

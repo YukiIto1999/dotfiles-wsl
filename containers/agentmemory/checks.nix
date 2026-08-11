@@ -11,38 +11,24 @@ let
   expectedPersistentMount = "/var/lib/agentmemory/data:/data";
   expectedEnvironmentFile = "/run/secrets/rendered/agentmemory.env";
   expectedHealthPath = "/agentmemory/livez";
-  expectedHookNames = [
-    "notification"
-    "post-tool-failure"
-    "post-tool-use"
-    "pre-compact"
-    "pre-tool-use"
-    "prompt-submit"
-    "session-end"
-    "session-start"
-    "stop"
-    "subagent-start"
-    "subagent-stop"
-    "task-completed"
-  ];
 
   service = hostConfig.dotfiles.containers.services.agentmemory;
   image = service.images.agentmemory;
   container = hostConfig.virtualisation.oci-containers.containers.agentmemory;
-  clients = hostConfig.dotfiles.containers.agentmemory.clients;
   engineConfig = hostConfig.dotfiles.artifacts."containers/agentmemory/config".source;
   environmentTemplate = hostConfig.sops.templates."agentmemory.env";
   environmentFile = pkgs.writeText "agentmemory.env" environmentTemplate.content;
   expectedApiKeyLine = "OPENAI_API_KEY=${hostConfig.sops.placeholder."opencode/go_api_key"}";
   environmentFiles = container.environmentFiles or [ ];
   volumes = container.volumes or [ ];
-  plugin = toString clients.opencodePlugin;
+  upstreamRoot = toString hostConfig.dotfiles.containers.agentmemory.upstream.root;
   configMount = "${engineConfig}:/app/config.yaml:ro";
   dataDirectory = hostConfig.systemd.tmpfiles.settings.agentmemory."/var/lib/agentmemory/data".d;
 in
 {
   agentmemory-container =
-    assert hostConfig.dotfiles.containers.agentmemory.version == expectedVersion;
+    assert hostConfig.dotfiles.containers.agentmemory.upstream.version == expectedVersion;
+    assert lib.hasSuffix "/node_modules/@agentmemory/agentmemory" upstreamRoot;
     assert image.image == expectedImage;
     assert image.imageFile.imageTag == expectedVersion;
     assert container.image == expectedImage;
@@ -64,9 +50,6 @@ in
         path = expectedHealthPath;
         timeout = 5;
       };
-    assert lib.getVersion clients.hooks == expectedVersion;
-    assert lib.hasInfix "agentmemory-deploy-${expectedVersion}" plugin;
-    assert lib.hasSuffix "/plugin/opencode/agentmemory-capture.ts" plugin;
     assert dataDirectory.user == "65532";
     assert dataDirectory.group == "65532";
     assert dataDirectory.mode == "0750";
@@ -95,27 +78,9 @@ in
         grep -Fqx 'OPENAI_MODEL=minimax-m2.7' ${environmentFile}
         grep -Fqx 'EMBEDDING_PROVIDER=none' ${environmentFile}
         grep -Fqx ${lib.escapeShellArg expectedApiKeyLine} ${environmentFile}
+        jq -e --arg version '${expectedVersion}' '.version == $version' \
+          ${lib.escapeShellArg upstreamRoot}/package.json >/dev/null
 
-        printf '%s\n' ${lib.escapeShellArgs (map (name: "agentmemory-hook-${name}") expectedHookNames)} \
-          | sort > expected-hooks
-        : > actual-hooks
-        for hook in ${clients.hooks}/bin/agentmemory-hook-*; do
-          basename "$hook" >> actual-hooks
-          grep -Fq 'agentmemory-deploy-${expectedVersion}' "$hook"
-          grep -Fq 'export AGENTMEMORY_URL=http://127.0.0.1:3111' "$hook"
-        done
-        sort -o actual-hooks actual-hooks
-        diff -u expected-hooks actual-hooks
-        grep -Fq 'export AGENTMEMORY_INJECT_CONTEXT=true' \
-          ${clients.hooks}/bin/agentmemory-hook-session-start
-
-        plugin=${lib.escapeShellArg plugin}
-        pluginRoot=$(dirname "$(dirname "$(dirname "$plugin")")")
-        test -f "$plugin"
-        jq -e \
-          --arg version '${expectedVersion}' \
-          '.version == $version' \
-          "$pluginRoot/package.json" >/dev/null
         touch $out
       '';
 }

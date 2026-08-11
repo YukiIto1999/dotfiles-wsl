@@ -151,7 +151,7 @@ case "$upstream" in
 esac
 test -x "$upstream" || die "upstream binary is not executable: $upstream"
 
-cache_root="$HOME/.cache/dotfiles-wsl"
+cache_root="$HOME/@cacheRootRelative@"
 sessions_root="$cache_root/sessions"
 builds_root="$cache_root/builds"
 mkdir -p "$HOME/.cache"

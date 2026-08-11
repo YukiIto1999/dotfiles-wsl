@@ -12,10 +12,7 @@ let
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   clientNames = builtins.attrNames agents.clients;
-  runtime = import ./package.nix {
-    inherit lib pkgs;
-    ledgerRetentionDays = agents.runtime.ledgerRetentionDays;
-  };
+  runtime = import ./package.nix { inherit lib pkgs runtimeContract; };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (
     name: name != "antigravity" && agents.clients.${name}.binary != ""
@@ -253,14 +250,165 @@ let
   homeDestinations = map (entry: entry.name) allHomeEntries;
   seedDestinations = map (row: row.file.destination) seedRows;
   systemDestinations = map (entry: entry.name) systemManagedEntries;
+
+  runtimeContract =
+    let
+      observationTimeoutSeconds = 10;
+      relativeCacheRoot = ".cache/dotfiles-wsl";
+      relativeStateRoot = ".local/state/dotfiles-wsl";
+      releaseFor =
+        client:
+        if pkgs.stdenv.hostPlatform.isAarch64 then
+          client.install.releaseByArch.aarch64
+        else
+          client.install.releaseByArch.x86_64;
+      commonObservation = checkId: resourceKey: failureMessage: {
+        inherit checkId resourceKey failureMessage;
+        timeoutSeconds = observationTimeoutSeconds;
+      };
+      timerObservation = timer: {
+        kind = "systemd-timer";
+        checkId = "maintenance/${timer.name}.timer";
+        resourceKey = null;
+        timeoutSeconds = observationTimeoutSeconds;
+        failureMessage = "${timer.name}.timer or its service is not operational";
+        timer = "${timer.name}.timer";
+        service = "${timer.name}.service";
+        unitFileStates = [
+          "enabled"
+          "enabled-runtime"
+        ];
+        activeStates = [ "active" ];
+        serviceResults = [ "success" ];
+      };
+      clientObservation =
+        name: client:
+        let
+          visiblePath = "${cfg.host.homeDir}/.local/bin/${client.binary}";
+          releaseRoot = "${cfg.host.homeDir}/.local/share/dotfiles/agents/${name}";
+        in
+        commonObservation "agent/${name}" null
+          "${client.binary} is unavailable or its version command failed"
+        // (
+          if client.install.kind == "github-release" then
+            let
+              release = releaseFor client;
+            in
+            {
+              kind = "release-tree";
+              inherit visiblePath;
+              visibleTarget = "../share/dotfiles/agents/${name}/current/${release.entrypoint}";
+              currentLink = "${releaseRoot}/current";
+              releasesRoot = "${releaseRoot}/releases";
+              inherit (release) entrypoint;
+              inherit (client.install) requiredPaths;
+              inherit (client) versionArgs;
+            }
+          else
+            {
+              kind = "command-version";
+              path = visiblePath;
+              expectedSource = visiblePath;
+              inherit (client) versionArgs;
+            }
+        );
+    in
+    rec {
+      ledgerRetentionDays = agents.runtime.ledgerRetentionDays;
+      cache = rec {
+        inherit relativeCacheRoot;
+        root = "${cfg.host.homeDir}/${relativeCacheRoot}";
+        buildsRoot = "${root}/builds";
+        sharedRoot = "${root}/shared";
+        sessionsRoot = "${root}/sessions";
+        verificationRoot = "${root}/verification";
+        highBytes = 68719476736;
+        lowBytes = 51539607552;
+        inactiveDays = 30;
+      };
+      state = rec {
+        inherit relativeStateRoot;
+        root = "${cfg.host.homeDir}/${relativeStateRoot}";
+        relativeResourcesRoot = "${relativeStateRoot}/agent-resources";
+        resourcesRoot = "${cfg.host.homeDir}/${relativeResourcesRoot}";
+      };
+      timers = {
+        autoupdate = {
+          name = "dotfiles-agent-autoupdate";
+          onCalendar = "daily";
+          persistent = true;
+        };
+        projectCacheGc = {
+          name = "dotfiles-agent-project-cache-gc";
+          onCalendar = "daily";
+          persistent = true;
+        };
+        resourceReaper = {
+          name = "dotfiles-agent-resource-reaper";
+          onCalendar = "hourly";
+          persistent = true;
+        };
+      };
+      packages = {
+        inherit installAgents;
+        inherit (runtime)
+          agentResource
+          agentWorktree
+          gc
+          launcher
+          verify
+          ;
+      };
+      commands = {
+        autoupdate = lib.getExe packages.installAgents;
+        projectCacheGc = lib.getExe packages.gc;
+        resourceReaper = "${lib.getExe packages.agentResource} reap";
+      };
+      observations = {
+        "agents/roster" = commonObservation "agent-roster" null "agent roster is empty" // {
+          kind = "roster";
+          members = agents.enabled;
+          minimumCount = 1;
+          failureOnly = true;
+        };
+        "agents/managed-roots" =
+          commonObservation "resource/managed-roots" "managedRoots"
+            "could not summarize every managed resource root"
+          // {
+            kind = "managed-roots";
+            paths = [
+              cache.buildsRoot
+              cache.sharedRoot
+              cache.sessionsRoot
+              state.resourcesRoot
+            ];
+            missingAsZero = true;
+            oneFileSystem = true;
+            cachePolicy = "allocated-bytes";
+          };
+        "agents/maintenance/project-cache-gc" = timerObservation timers.projectCacheGc;
+        "agents/maintenance/resource-reaper" = timerObservation timers.resourceReaper;
+      }
+      // lib.mapAttrs' (
+        name: client: lib.nameValuePair "agents/client/${name}" (clientObservation name client)
+      ) (lib.filterAttrs (_: client: client.binary != "") agents.clients);
+    };
 in
 {
   options.dotfiles.agents = agentContract.options;
 
   config = {
     dotfiles.agents = {
-      stateRoot = "~/.local/state/dotfiles-wsl/agent-resources";
-      inherit (runtime) agentResource agentWorktree;
+      stateRoot = "~/${runtimeContract.state.relativeResourcesRoot}";
+      inherit (runtimeContract.packages) agentResource agentWorktree;
+      runtime = {
+        inherit (runtimeContract) timers;
+        cache = builtins.removeAttrs runtimeContract.cache [ "relativeCacheRoot" ];
+        state = builtins.removeAttrs runtimeContract.state [
+          "relativeStateRoot"
+          "relativeResourcesRoot"
+        ];
+      };
       shared = {
         rules = ./shared/AGENTS.md;
         skills = allSkills;
@@ -269,9 +417,9 @@ in
     };
 
     dotfiles.artifacts = managedArtifacts;
+    dotfiles.observations = runtimeContract.observations;
     dotfiles.commands = {
-      inherit installAgents;
-      inherit (runtime) agentResource agentWorktree;
+      inherit (runtimeContract.packages) installAgents agentResource agentWorktree;
     };
 
     assertions = agentContract.assertionsFor agents ++ [
@@ -299,13 +447,23 @@ in
         assertion = lib.intersectLists seedDestinations homeDestinations == [ ];
         message = "Agent seed and Home Manager destinations must not overlap";
       }
+      {
+        assertion = runtimeContract.cache.lowBytes < runtimeContract.cache.highBytes;
+        message = "Agent cache low watermark must be below the high watermark";
+      }
+      {
+        assertion =
+          map (timer: timer.name) (builtins.attrValues runtimeContract.timers)
+          == lib.unique (map (timer: timer.name) (builtins.attrValues runtimeContract.timers));
+        message = "Agent runtime timer names must be unique";
+      }
     ];
 
     environment.etc = lib.listToAttrs systemManagedEntries;
     environment.systemPackages = [
       config.dotfiles.containers.agentmemory.clients.hooks
-      runtime.gc
-      runtime.verify
+      runtimeContract.packages.gc
+      runtimeContract.packages.verify
     ];
 
     home-manager.users.${cfg.host.username} =
@@ -319,7 +477,7 @@ in
         home.activation.seedAgentConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] seedScript;
       };
 
-    systemd.services.dotfiles-agent-autoupdate = {
+    systemd.services.${runtimeContract.timers.autoupdate.name} = {
       description = "Agent client を latest へ更新";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
@@ -330,54 +488,54 @@ in
           "HOME=${cfg.host.homeDir}"
           "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
         ];
-        ExecStart = lib.getExe installAgents;
+        ExecStart = runtimeContract.commands.autoupdate;
       };
     };
 
-    systemd.timers.dotfiles-agent-autoupdate = {
+    systemd.timers.${runtimeContract.timers.autoupdate.name} = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "daily";
-        Persistent = true;
+        OnCalendar = runtimeContract.timers.autoupdate.onCalendar;
+        Persistent = runtimeContract.timers.autoupdate.persistent;
       };
     };
 
-    systemd.services.dotfiles-agent-project-cache-gc = {
+    systemd.services.${runtimeContract.timers.projectCacheGc.name} = {
       description = "Agent cache を容量制御";
       serviceConfig = {
         Type = "oneshot";
         User = cfg.host.username;
         Environment = "HOME=${cfg.host.homeDir}";
-        ExecStart = lib.getExe runtime.gc;
+        ExecStart = runtimeContract.commands.projectCacheGc;
       };
     };
 
-    systemd.timers.dotfiles-agent-project-cache-gc = {
+    systemd.timers.${runtimeContract.timers.projectCacheGc.name} = {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "daily";
-        Persistent = true;
+        OnCalendar = runtimeContract.timers.projectCacheGc.onCalendar;
+        Persistent = runtimeContract.timers.projectCacheGc.persistent;
       };
     };
 
-    systemd.services.dotfiles-agent-resource-reaper = {
+    systemd.services.${runtimeContract.timers.resourceReaper.name} = {
       description = "Reap inactive agent-owned linked worktrees";
       serviceConfig = {
         Type = "oneshot";
         User = cfg.host.username;
         Environment = "HOME=${cfg.host.homeDir}";
         UMask = "0077";
-        ExecStart = "${lib.getExe runtime.agentResource} reap";
+        ExecStart = runtimeContract.commands.resourceReaper;
       };
     };
 
-    systemd.timers.dotfiles-agent-resource-reaper = {
+    systemd.timers.${runtimeContract.timers.resourceReaper.name} = {
       description = "Hourly agent resource ownership reaper";
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "hourly";
-        Persistent = true;
-        Unit = "dotfiles-agent-resource-reaper.service";
+        OnCalendar = runtimeContract.timers.resourceReaper.onCalendar;
+        Persistent = runtimeContract.timers.resourceReaper.persistent;
+        Unit = "${runtimeContract.timers.resourceReaper.name}.service";
       };
     };
   };

@@ -1,10 +1,14 @@
 {
   pkgs,
   lib,
-  ledgerRetentionDays ? 30,
+  runtimeContract,
 }:
 
 let
+  inherit (runtimeContract) ledgerRetentionDays;
+  cacheRootRelative = runtimeContract.cache.relativeCacheRoot;
+  stateRootRelative = runtimeContract.state.relativeStateRoot;
+  resourceStateRootRelative = runtimeContract.state.relativeResourcesRoot;
   mkNixBuildShims =
     {
       nixCommand,
@@ -98,10 +102,14 @@ let
           [
             "@gitCommand@"
             "@ledgerRetentionDays@"
+            "@stateRootRelative@"
+            "@resourceStateRootRelative@"
           ]
           [
             (lib.escapeShellArg (toString gitCommand))
             (toString retentionDays)
+            stateRootRelative
+            resourceStateRootRelative
           ]
           (builtins.readFile ./impl/resource/agent-resource.sh);
     };
@@ -124,10 +132,14 @@ let
           [
             "@gitCommand@"
             "@resourceCommand@"
+            "@stateRootRelative@"
+            "@resourceStateRootRelative@"
           ]
           [
             (lib.escapeShellArg (toString gitCommand))
             (lib.escapeShellArg (toString resourceCommand))
+            stateRootRelative
+            resourceStateRootRelative
           ]
           (builtins.readFile ./impl/resource/agent-worktree.sh);
     };
@@ -156,10 +168,33 @@ let
       taplo
       util-linux
     ];
-    text = builtins.replaceStrings [ "@agentShimDirectory@" ] [ "${agentShims}/bin" ] (
-      builtins.readFile ./impl/runtime/launcher.sh
-    );
+    text =
+      builtins.replaceStrings
+        [
+          "@agentShimDirectory@"
+          "@cacheRootRelative@"
+        ]
+        [
+          "${agentShims}/bin"
+          cacheRootRelative
+        ]
+        (builtins.readFile ./impl/runtime/launcher.sh);
   };
+  projectCacheGcSource =
+    builtins.replaceStrings
+      [
+        "@cacheRootRelative@"
+        "@gcHighBytes@"
+        "@gcLowBytes@"
+        "@gcInactiveDays@"
+      ]
+      [
+        cacheRootRelative
+        (toString runtimeContract.cache.highBytes)
+        (toString runtimeContract.cache.lowBytes)
+        (toString runtimeContract.cache.inactiveDays)
+      ]
+      (builtins.readFile ./impl/runtime/project-cache-gc.sh);
   gc = pkgs.writeShellApplication {
     name = "dotfiles-agent-project-cache-gc";
     runtimeInputs = with pkgs; [
@@ -169,7 +204,7 @@ let
       jq
       util-linux
     ];
-    text = builtins.readFile ./impl/runtime/project-cache-gc.sh;
+    text = projectCacheGcSource;
   };
   verify = pkgs.writeShellApplication {
     name = "dotfiles-agent-verify";
@@ -177,7 +212,9 @@ let
       coreutils
       git
     ];
-    text = builtins.readFile ./impl/runtime/verify.sh;
+    text = builtins.replaceStrings [ "@cacheRootRelative@" ] [ cacheRootRelative ] (
+      builtins.readFile ./impl/runtime/verify.sh
+    );
   };
   mkWrapper =
     {
@@ -206,6 +243,7 @@ in
     mkNixBuildShims
     mkWrapper
     nixBuildShims
+    projectCacheGcSource
     verify
     ;
 }

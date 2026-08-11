@@ -1624,13 +1624,13 @@ resource_owner_uid=$(id -u) || die 'cannot determine resource owner'
 [[ $resource_owner_uid =~ ^[0-9]+$ ]] || die 'invalid resource owner'
 [ "$(stat -c %u "$HOME")" = "$resource_owner_uid" ] || die 'HOME has another owner'
 
-state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"
+state_root="$HOME/@resourceStateRootRelative@"
 sessions_root="$state_root/sessions"
 worktrees_root="$state_root/worktrees"
 locks_root="$state_root/locks"
 ensure_directory "$HOME/.local" false
 ensure_directory "$HOME/.local/state" false
-ensure_directory "$HOME/.local/state/dotfiles-wsl" true
+ensure_directory "$HOME/@stateRootRelative@" true
 ensure_directory "$state_root" true
 ensure_directory "$sessions_root" true
 ensure_directory "$worktrees_root" true

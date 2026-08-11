@@ -12,6 +12,17 @@ let
     nonEmpty path
     && !lib.hasPrefix "/" path
     && builtins.all (segment: segment != "" && segment != "." && segment != "..") (pathSegments path);
+  validAbsolutePath =
+    path:
+    path == "/"
+    || (
+      lib.hasPrefix "/" path
+      && !lib.hasSuffix "/" path
+      && builtins.all (segment: segment != "" && segment != "." && segment != "..") (
+        lib.tail (pathSegments path)
+      )
+    );
+  absolutePathType = types.addCheck types.str validAbsolutePath;
 
   managedFileType = types.submodule {
     options = {
@@ -109,6 +120,14 @@ let
     installerScriptInstallType
     githubReleaseInstallType
   ];
+
+  runtimeTimerType = types.submodule {
+    options = {
+      name = lib.mkOption { type = types.str; };
+      onCalendar = lib.mkOption { type = types.str; };
+      persistent = lib.mkOption { type = types.bool; };
+    };
+  };
 
   clientType = types.submodule {
     options = {
@@ -339,10 +358,49 @@ in
       internal = true;
       description = "linked worktree を生成して ownership ledger へ登録する command package。";
     };
-    runtime.ledgerRetentionDays = lib.mkOption {
-      type = types.ints.positive;
-      default = 30;
-      description = "終了済み agent resource ledger の保持日数。";
+    runtime = {
+      ledgerRetentionDays = lib.mkOption {
+        type = types.ints.positive;
+        default = 30;
+        description = "終了済み agent resource ledger の保持日数。";
+      };
+      cache = lib.mkOption {
+        type = types.submodule {
+          options = {
+            root = lib.mkOption { type = absolutePathType; };
+            buildsRoot = lib.mkOption { type = absolutePathType; };
+            sharedRoot = lib.mkOption { type = absolutePathType; };
+            sessionsRoot = lib.mkOption { type = absolutePathType; };
+            verificationRoot = lib.mkOption { type = absolutePathType; };
+            highBytes = lib.mkOption { type = types.ints.positive; };
+            lowBytes = lib.mkOption { type = types.ints.positive; };
+            inactiveDays = lib.mkOption { type = types.ints.positive; };
+          };
+        };
+        readOnly = true;
+        internal = true;
+      };
+      state = lib.mkOption {
+        type = types.submodule {
+          options = {
+            root = lib.mkOption { type = absolutePathType; };
+            resourcesRoot = lib.mkOption { type = absolutePathType; };
+          };
+        };
+        readOnly = true;
+        internal = true;
+      };
+      timers = lib.mkOption {
+        type = types.submodule {
+          options = {
+            autoupdate = lib.mkOption { type = runtimeTimerType; };
+            projectCacheGc = lib.mkOption { type = runtimeTimerType; };
+            resourceReaper = lib.mkOption { type = runtimeTimerType; };
+          };
+        };
+        readOnly = true;
+        internal = true;
+      };
     };
     shared = {
       rules = lib.mkOption {

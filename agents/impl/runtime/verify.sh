@@ -18,7 +18,7 @@ if ! repo_top=$(git rev-parse --show-toplevel 2>/dev/null) \
 fi
 
 project_id=$(printf '%s' "$common_dir" | sha256sum | cut -d ' ' -f 1)
-verification_root="$HOME/.cache/dotfiles-wsl/verification"
+verification_root="$HOME/@cacheRootRelative@/verification"
 project_state="$verification_root/$project_id"
 mkdir -p "$HOME/.cache"
 
@@ -46,7 +46,7 @@ prepare_success_file() {
   test "$(stat -c %a "$path")" = 600
 }
 
-if ! ensure_state_directory "$HOME/.cache/dotfiles-wsl" \
+if ! ensure_state_directory "$HOME/@cacheRootRelative@" \
   || ! ensure_state_directory "$verification_root" \
   || ! ensure_state_directory "$project_state"; then
   exec "$@"

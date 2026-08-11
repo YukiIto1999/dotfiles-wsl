@@ -3,6 +3,9 @@
 let
   inherit (lib) types;
   nonEmpty = value: value != "";
+  validClientName =
+    value:
+    nonEmpty value && value != "." && value != ".." && builtins.match "[A-Za-z0-9._+-]+" value != null;
   pathSegments = path: lib.splitString "/" path;
   validRelativeDestination =
     path:
@@ -372,6 +375,7 @@ in
       invalidDefinitionClients = builtins.filter (
         name: !definitionContractValid cfg.clients.${name}
       ) clientNames;
+      invalidClientNames = builtins.filter (name: !validClientName name) clientNames;
       invalidInstallClients = builtins.filter (
         name: !installContractValid cfg.clients.${name}.install
       ) clientNames;
@@ -448,6 +452,11 @@ in
       {
         assertion = cfg.enabled != [ ] && cfg.enabled == lib.unique cfg.enabled;
         message = "dotfiles.agents.enabled must not be empty and must contain unique IDs";
+      }
+      {
+        assertion = invalidClientNames == [ ];
+        message =
+          "agent client IDs must be safe basenames: " + lib.concatStringsSep ", " invalidClientNames;
       }
       {
         assertion = lib.sort builtins.lessThan cfg.enabled == lib.sort builtins.lessThan clientNames;

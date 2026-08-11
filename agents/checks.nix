@@ -728,6 +728,15 @@ let
         ${name} = baseCandidate.clients.${name} // update;
       };
     };
+  renameClient =
+    oldName: newName:
+    baseCandidate
+    // {
+      enabled = map (name: if name == oldName then newName else name) baseCandidate.enabled;
+      clients = builtins.removeAttrs baseCandidate.clients [ oldName ] // {
+        ${newName} = baseCandidate.clients.${oldName};
+      };
+    };
   mutateManagedDestination =
     clientName: fileId: destination:
     mutateClient clientName {
@@ -1050,6 +1059,18 @@ let
       }
     )
   ];
+  invalidClientDotFixtureManifest = builtins.toJSON [
+    (packageTreeFixtureRecord // { name = "."; })
+  ];
+  invalidClientDotDotFixtureManifest = builtins.toJSON [
+    (packageTreeFixtureRecord // { name = ".."; })
+  ];
+  invalidClientSlashFixtureManifest = builtins.toJSON [
+    (packageTreeFixtureRecord // { name = "bad/name"; })
+  ];
+  invalidClientCharacterFixtureManifest = builtins.toJSON [
+    (packageTreeFixtureRecord // { name = "bad name"; })
+  ];
   singleBinaryFixtureManifest = builtins.toJSON [
     {
       name = "opencode";
@@ -1163,6 +1184,10 @@ let
   emptyEntrypointFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-empty-entrypoint-agent" emptyEntrypointFixtureManifest;
   retentionOneFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-retention-one-agent" retentionOneFixtureManifest;
   retentionElevenFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-retention-eleven-agent" retentionElevenFixtureManifest;
+  invalidClientDotFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-dot-agent" invalidClientDotFixtureManifest;
+  invalidClientDotDotFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-dot-dot-agent" invalidClientDotDotFixtureManifest;
+  invalidClientSlashFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-slash-agent" invalidClientSlashFixtureManifest;
+  invalidClientCharacterFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-character-agent" invalidClientCharacterFixtureManifest;
   singleBinaryFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-single-binary-agent" singleBinaryFixtureManifest;
 
   fixtureMigrateCodexConfig = pkgs.writeShellScript "fixture-migrate-codex-config" (
@@ -1385,6 +1410,13 @@ in
     assert optionMetadata == expectedOptionMetadata;
     assert contractIsValid baseCandidate;
     assert !contractIsValid (baseCandidate // { clients = { }; });
+    assert !contractIsValid (renameClient "codex" ".");
+    assert !contractIsValid (renameClient "codex" "..");
+    assert !contractIsValid (renameClient "codex" "bad/name");
+    assert !contractIsValid (renameClient "codex" "bad name");
+    assert builtins.elem "agent client IDs must be safe basenames: ." (
+      failedContractMessages (renameClient "codex" ".")
+    );
     assert builtins.all (valid: valid) (builtins.attrValues (requiredStringChecksFor baseCandidate));
     assert !contractIsValid (baseCandidate // { enabled = [ "claude" ]; });
     assert !contractIsValid (mutateClient "claude" { definitionFormat = "toml"; });
@@ -2296,6 +2328,10 @@ in
         export INSTALL_AGENTS_EMPTY_ENTRYPOINT=${lib.getExe emptyEntrypointFixtureInstaller}
         export INSTALL_AGENTS_RETENTION_ONE=${lib.getExe retentionOneFixtureInstaller}
         export INSTALL_AGENTS_RETENTION_ELEVEN=${lib.getExe retentionElevenFixtureInstaller}
+        export INSTALL_AGENTS_CLIENT_DOT=${lib.getExe invalidClientDotFixtureInstaller}
+        export INSTALL_AGENTS_CLIENT_DOT_DOT=${lib.getExe invalidClientDotDotFixtureInstaller}
+        export INSTALL_AGENTS_CLIENT_SLASH=${lib.getExe invalidClientSlashFixtureInstaller}
+        export INSTALL_AGENTS_CLIENT_CHARACTER=${lib.getExe invalidClientCharacterFixtureInstaller}
         export INSTALL_AGENTS_SINGLE_BINARY=${lib.getExe singleBinaryFixtureInstaller}
         export ATOMIC_PUBLISH=${atomicPublishFixtureExe}
         export ATOMIC_PUBLISH_PRODUCTION=${atomicPublishExe}

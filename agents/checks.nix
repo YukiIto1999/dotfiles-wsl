@@ -1147,6 +1147,20 @@ let
       };
     };
   emptyBinaryCandidate = mutateClient "claude" { binary = ""; };
+  invalidBinaryCandidates = map (binary: mutateClient "claude" { inherit binary; }) [
+    "."
+    ".."
+    "bin/claude"
+    "bad name"
+  ];
+  duplicateBinaryCandidate = mutateClient "codex" {
+    binary = baseCandidate.clients.claude.binary;
+  };
+  binaryCandidateOfLength =
+    length:
+    mutateClient "claude" {
+      binary = lib.concatStrings (lib.replicate length "a");
+    };
   emptyInstallScriptUrlCandidate = mutateClient "claude" {
     install = baseCandidate.clients.claude.install // {
       scriptUrl = "";
@@ -1912,9 +1926,14 @@ in
         }
       );
     assert !contractIsValid emptyBinaryCandidate;
-    assert builtins.elem "agent required semantic strings must be non-empty: binaries (claude)" (
-      failedContractMessages emptyBinaryCandidate
+    assert builtins.all (candidate: !contractIsValid candidate) invalidBinaryCandidates;
+    assert !contractIsValid duplicateBinaryCandidate;
+    assert builtins.elem "agent client binaries must be unique" (
+      failedContractMessages duplicateBinaryCandidate
     );
+    assert contractIsValid (binaryCandidateOfLength 127);
+    assert contractIsValid (binaryCandidateOfLength 128);
+    assert !contractIsValid (binaryCandidateOfLength 129);
     assert !contractIsValid (mutateClient "codex" { versionArgs = [ ]; });
     assert !contractIsValid (mutateClient "codex" { versionArgs = [ "" ]; });
     assert !contractIsValid (mutateClient "claude" { rulesDestination = ""; });

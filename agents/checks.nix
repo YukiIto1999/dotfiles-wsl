@@ -715,6 +715,27 @@ let
   highBytesMutationRuntime = runtimeWithCacheMutation { highBytes = 1; };
   lowBytesMutationRuntime = runtimeWithCacheMutation { lowBytes = 1; };
   inactiveDaysMutationRuntime = runtimeWithCacheMutation { inactiveDays = 1; };
+  runtimeWithRelativeRootMutation =
+    update:
+    import ./package.nix {
+      inherit lib pkgs;
+      runtimeContract = runtimePackageContract // update;
+    };
+  relativeCacheRootMutationRuntime = runtimeWithRelativeRootMutation {
+    cache = runtimePackageContract.cache // {
+      relativeCacheRoot = ".cache/dotfiles-wsl-mutated";
+    };
+  };
+  relativeStateRootMutationRuntime = runtimeWithRelativeRootMutation {
+    state = runtimePackageContract.state // {
+      relativeStateRoot = ".local/state/dotfiles-wsl-mutated";
+    };
+  };
+  relativeResourcesRootMutationRuntime = runtimeWithRelativeRootMutation {
+    state = runtimePackageContract.state // {
+      relativeResourcesRoot = ".local/state/dotfiles-wsl/agent-resources-mutated";
+    };
+  };
   packageTreeRequiredPathMutation = agentObservations // {
     "agents/client/codex" = agentObservations."agents/client/codex" or { } // {
       requiredPaths =
@@ -936,6 +957,16 @@ let
     };
     clients = candidateClients;
   };
+  mutateRuntimeTimer =
+    timerName: update:
+    baseCandidate
+    // {
+      runtime = baseCandidate.runtime // {
+        timers = baseCandidate.runtime.timers // {
+          ${timerName} = baseCandidate.runtime.timers.${timerName} // update;
+        };
+      };
+    };
 
   evalContract =
     candidate:
@@ -1684,6 +1715,11 @@ in
     assert actualContract == expected.clients;
     assert optionMetadata == expectedOptionMetadata;
     assert contractIsValid baseCandidate;
+    assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = ""; });
+    assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad/name"; });
+    assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = "bad name"; });
+    assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = ".hidden"; });
+    assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = ""; });
     assert !contractIsValid (baseCandidate // { clients = { }; });
     assert !contractIsValid (renameClient "codex" ".");
     assert !contractIsValid (renameClient "codex" "..");
@@ -2833,6 +2869,19 @@ in
     assert lib.assertMsg (
       !agentRuntimeContractMatches expectedRuntimeConfiguration staleAgentObservationMutation
     ) "agent runtime contract accepted a stale agent observation";
+    assert lib.assertMsg (
+      runtime.launcher != relativeCacheRootMutationRuntime.launcher
+      && runtime.gc != relativeCacheRootMutationRuntime.gc
+      && runtime.verify != relativeCacheRootMutationRuntime.verify
+    ) "agent runtime packages ignored a relative cache root mutation";
+    assert lib.assertMsg (
+      runtime.agentResource != relativeStateRootMutationRuntime.agentResource
+      && runtime.agentWorktree != relativeStateRootMutationRuntime.agentWorktree
+    ) "agent resource packages ignored a relative state root mutation";
+    assert lib.assertMsg (
+      runtime.agentResource != relativeResourcesRootMutationRuntime.agentResource
+      && runtime.agentWorktree != relativeResourcesRootMutationRuntime.agentWorktree
+    ) "agent resource packages ignored a relative resources root mutation";
     pkgs.runCommandLocal "check-agent-runtime-contract"
       {
         nativeBuildInputs = [ pkgs.gnugrep ];
@@ -2852,6 +2901,23 @@ in
         grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe runtime.agentResource}
         grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe runtime.agentWorktree}
         grep -Fq 'verification_root="$HOME/.cache/dotfiles-wsl/verification"' ${lib.getExe runtime.verify}
+
+        grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
+        grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
+        grep -Fq 'verification_root="$HOME/.cache/dotfiles-wsl-mutated/verification"' ${lib.getExe relativeCacheRootMutationRuntime.verify}
+        ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
+        ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
+        ! grep -Fxq 'verification_root="$HOME/.cache/dotfiles-wsl/verification"' ${lib.getExe relativeCacheRootMutationRuntime.verify}
+
+        grep -Fq 'ensure_directory "$HOME/.local/state/dotfiles-wsl-mutated" true' ${lib.getExe relativeStateRootMutationRuntime.agentResource}
+        grep -Fq 'ensure_directory "$HOME/.local/state/dotfiles-wsl-mutated" true' ${lib.getExe relativeStateRootMutationRuntime.agentWorktree}
+        ! grep -Fxq 'ensure_directory "$HOME/.local/state/dotfiles-wsl" true' ${lib.getExe relativeStateRootMutationRuntime.agentResource}
+        ! grep -Fxq 'ensure_directory "$HOME/.local/state/dotfiles-wsl" true' ${lib.getExe relativeStateRootMutationRuntime.agentWorktree}
+
+        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources-mutated"' ${lib.getExe relativeResourcesRootMutationRuntime.agentResource}
+        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources-mutated"' ${lib.getExe relativeResourcesRootMutationRuntime.agentWorktree}
+        ! grep -Fxq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe relativeResourcesRootMutationRuntime.agentResource}
+        ! grep -Fxq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe relativeResourcesRootMutationRuntime.agentWorktree}
         touch $out
       '';
 

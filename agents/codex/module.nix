@@ -152,19 +152,40 @@ in
     install = {
       kind = "github-release";
       updateOwner = "dotfiles";
-      layout = "single-binary";
+      layout = "package-tree";
       repo = "openai/codex";
       releaseByArch = {
         x86_64 = {
-          asset = "codex-x86_64-unknown-linux-musl.tar.gz";
-          entrypoint = "codex-x86_64-unknown-linux-musl";
+          asset = "codex-package-x86_64-unknown-linux-musl.tar.gz";
+          entrypoint = "bin/codex";
         };
         aarch64 = {
-          asset = "codex-aarch64-unknown-linux-musl.tar.gz";
-          entrypoint = "codex-aarch64-unknown-linux-musl";
+          asset = "codex-package-aarch64-unknown-linux-musl.tar.gz";
+          entrypoint = "bin/codex";
         };
       };
-      requiredPaths = { };
+      requiredPaths = {
+        "bin/codex" = {
+          kind = "file";
+          executable = true;
+        };
+        "codex-package.json" = {
+          kind = "file";
+          executable = false;
+        };
+        "bin/codex-code-mode-host" = {
+          kind = "file";
+          executable = true;
+        };
+        "codex-path/rg" = {
+          kind = "file";
+          executable = true;
+        };
+        "codex-resources/bwrap" = {
+          kind = "file";
+          executable = true;
+        };
+      };
     };
   };
 

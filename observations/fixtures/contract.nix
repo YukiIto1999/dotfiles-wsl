@@ -262,9 +262,9 @@ in
 
   invalidCommands = {
     string = "/run/current-system/sw/bin/bash";
-    bash = pkgs.bash;
-    busybox = pkgs.busybox;
-    ksh = pkgs.ksh;
+    inherit (pkgs) bash;
+    inherit (pkgs) busybox;
+    inherit (pkgs) ksh;
     cmd = cmdExecutable;
     renamed = renamedExecutable;
     text-missing-main-program = markedTextMissingMainProgram;

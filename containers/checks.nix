@@ -126,7 +126,7 @@ let
           inherit (service) health;
           url = "${service.endpoints.${health.endpoint}.url}${health.path}";
         in
-        mkEntry "containers/health/${application}" ({
+        mkEntry "containers/health/${application}" {
           checkId = "container-health/${application}";
           resourceKey = null;
           timeoutSeconds = health.timeout;
@@ -134,7 +134,7 @@ let
           kind = "http-health";
           inherit (health) method;
           inherit url;
-        })
+        }
       ) serviceEntries;
     in
     builtins.listToAttrs (

@@ -137,6 +137,30 @@ let
   };
   ownerCorrectEvaluation = evalRegistryModules [ (nestedDefinitionModule "host/module.nix") ];
   ownerForeignEvaluation = evalRegistryModules [ (nestedDefinitionModule "mcp/module.nix") ];
+  dynamicOwnerKeyEvaluation = evalRegistryModules [
+    (definitionModule "sops/module.nix" {
+      "sops/crawl4ai/api_token" = fixture.valid."host/roster";
+      "sops/crawl4ai/api-token" = fixture.valid."host/roster";
+      "sops/crawl4ai/api.token" = fixture.valid."host/roster";
+    })
+  ];
+  invalidDynamicOwnerKeyEvaluations =
+    map
+      (
+        id:
+        evalRegistryModules [
+          (definitionModule "sops/module.nix" { ${id} = fixture.valid."host/roster"; })
+        ]
+      )
+      [
+        "sops/"
+        "sops/."
+        "sops/.."
+        "sops/_private"
+        "sops/Uppercase"
+        "sops/invalid@segment"
+        "sops/empty//segment"
+      ];
 in
 {
   observation-contract =
@@ -160,6 +184,9 @@ in
     );
     assert misownedDefinitions ownerCorrectEvaluation.options == [ ];
     assert misownedDefinitions ownerForeignEvaluation.options == [ "host/sample" ];
+    assert evaluationSucceeds dynamicOwnerKeyEvaluation;
+    assert lib.all (evaluation: !evaluationSucceeds evaluation) invalidDynamicOwnerKeyEvaluations;
+    assert misownedDefinitions dynamicOwnerKeyEvaluation.options == [ ];
     assert lib.assertMsg (
       misownedDefinitions hostOptions == [ ]
     ) "observation registry key first segment must match its defining owner root";

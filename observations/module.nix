@@ -19,6 +19,7 @@ let
     ) (lib.splitString "/" value)
   );
   ownerSegment = value: builtins.match "[a-z][a-z0-9]*(-[a-z0-9]+)*" value != null;
+  dynamicSegment = value: builtins.match "[a-z0-9][a-z0-9._-]*" value != null;
   registryKey =
     value:
     let
@@ -26,7 +27,7 @@ let
     in
     builtins.length segments >= 2
     && ownerSegment (lib.head segments)
-    && builtins.all ownerSegment (lib.tail segments);
+    && builtins.all dynamicSegment (lib.tail segments);
 
   pathSegments = value: lib.tail (lib.splitString "/" value);
   normalizedAbsolutePath =

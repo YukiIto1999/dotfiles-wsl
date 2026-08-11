@@ -38,13 +38,13 @@ formatter の正本は `flake.nix` の `formatter` であり、CI の整形検�
 flake が宣言する build、静的検査、生成設定の構文検査をローカルで実行する。
 
 ```bash
-nix flake check -L
+nix flake check -L --no-write-lock-file
 ```
 
 編集中は変更した unit の check だけを `nix build --no-link .#checks.x86_64-linux.<check>` で実行する。最終の全件確認は、最後の source 変更後に一度だけ次の入口から実行する。
 
 ```bash
-dotfiles-agent-verify -- nix flake check -L
+dotfiles-agent-verify -- nix flake check -L --no-write-lock-file
 ```
 
 同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、runtime が割り当てる project cache を使う。
@@ -72,3 +72,5 @@ repo root から見た path を unit の中の file にそのまま書かない�
 ## CI
 
 [`.github/workflows/check.yml`](../../.github/workflows/check.yml) は `main` への push と pull request、手動実行で `nix flake check "git+file://${GITHUB_WORKSPACE}" -L` を実行する。CI は checkout 済みの Git tree を入力にし、検査内容はローカルと同じ経路で各 unit の `checks.nix` から集める。
+
+commit の粒度と件名は [Contributing](../../CONTRIBUTING.md) に従う。

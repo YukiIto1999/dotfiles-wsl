@@ -26,7 +26,7 @@ effort: xhigh
 3. **追加観点**:レビュー前の自動チェックも実施:
    - 直前で lint / type check が通っているか
    - テスト追加があるか
-   - commit メッセージが Conventional Commits 形式か
+   - commit メッセージが許可 type を使った `<type>: <日本語の要約>` で、scope なし、50 文字以内の一行か
 4. **報告**:severity 別に出力(Critical / Major / Minor / Praise)
 
 ## Working with parent

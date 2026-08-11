@@ -102,4 +102,4 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 - パッケージマネージャでグローバルインストールしない。パッケージは nix / devenv で導入する。
 - `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops --config ~/dotfiles-wsl/sops/assets/.sops.yaml ~/dotfiles-wsl/sops/assets/secrets.yaml` 編集後の rebuild で行う。
 - 資格情報を平文に書かない。GitHub PAT は SOPS + age の `~/dotfiles-wsl/sops/assets/secrets.yaml` に集約する。
-- commit message に AI attribution を入れない。commit-msg hook が block する。
+- commit message は scope なし、50 文字以内の `<type>: <日本語の要約>` 一行だけにする。AI attribution も commit-msg hook が block する。

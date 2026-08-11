@@ -1,8 +1,0 @@
-{
-  "systemd": {
-    "fstrim.timer": {
-      "ActiveState": "inactive",
-      "UnitFileState": "disabled"
-    }
-  }
-}

@@ -393,12 +393,20 @@ in
     assert artifact.format == "yaml";
     assert artifact.deployedAt == deployedPath;
     assert artifact.source == gateway.source;
-    assert lib.any (
-      row:
-      row.id == "mcp/gateway/default/config"
-      && row.source == toString gateway.source
-      && row.destination == deployedPath
-    ) hostConfig.dotfiles.commands.doctor.tables.artifactTable;
+    assert
+      hostConfig.dotfiles.observations."artifacts/mcp/gateway/default/config" == {
+        kind = "deployed-path";
+        checkId = "artifact/mcp/gateway/default/config";
+        resourceKey = null;
+        timeoutSeconds = 10;
+        failureMessage = "${deployedPath} does not match ${toString gateway.source}";
+        source = toString gateway.source;
+        destination = deployedPath;
+        acceptedDestinationKinds = [
+          "regular-file"
+          "symlink"
+        ];
+      };
     assert deployedConfig.source == gateway.source;
     assert builtins.length sourceArtifacts == 1;
     assert variantGateway.source != gateway.source;

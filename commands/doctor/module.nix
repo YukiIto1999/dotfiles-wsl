@@ -6,122 +6,77 @@
 }:
 
 let
-  cfg = config.dotfiles;
-
-  agentTable = lib.mapAttrsToList (id: client: {
-    inherit id;
-    inherit (client) binary versionArgs;
-  }) cfg.agents.clients;
-
-  artifactTable = lib.mapAttrsToList (id: artifact: {
-    inherit id;
-    source = toString artifact.source;
-    destination = artifact.deployedAt;
-  }) (lib.filterAttrs (_: artifact: artifact.deployedAt != null) cfg.artifacts);
-
-  secretTable = lib.mapAttrsToList (id: secret: {
-    inherit id;
-    inherit (secret) path mode;
-    owner = if secret.owner == null then "root" else secret.owner;
-    group = if secret.group == null then "root" else secret.group;
-  }) config.sops.secrets;
-
-  homeManagerUnit = "home-manager-${cfg.host.username}.service";
-
-  serviceNames = lib.unique (
-    [
-      homeManagerUnit
-      cfg.telemetry.service
-      cfg.mcp.gateway.service
-    ]
-    ++ lib.concatMap (service: service.units) (builtins.attrValues cfg.containers.services)
-    ++ map (front: front.service) (builtins.attrValues cfg.mcp.fronts)
+  registry = config.dotfiles.observations;
+  projectObservation = key: observation: {
+    inherit key;
+    value = lib.mapAttrs (
+      name: value: if name == "command" then lib.getExe value else value
+    ) observation;
+  };
+  observations = lib.sort (left: right: left.key < right.key) (
+    lib.mapAttrsToList projectObservation registry
   );
 
-  serviceTable = map (unit: {
-    inherit unit;
-    role = if unit == homeManagerUnit then "home-manager" else "service";
-  }) serviceNames;
-
-  maintenanceTimerNames = builtins.filter (
-    name:
+  normalizedRows = builtins.filter (row: row.value.kind == "normalized-protocol") observations;
+  directRows = builtins.filter (row: row.value.kind != "normalized-protocol") observations;
+  checkIds = map (row: row.value.checkId) observations;
+  directCheckIds = map (row: row.value.checkId) directRows;
+  fallbackCheckIds = map (row: row.value.checkId) normalizedRows;
+  allowedIdsFor = row: row.value.allowedOutcomeIds;
+  normalizedIdsDoNotCollide = lib.all (
+    row:
     let
-      timer = config.systemd.timers.${name};
-      serviceUnit = timer.timerConfig.Unit or "${name}.service";
-      serviceName = lib.removeSuffix ".service" serviceUnit;
-      serviceDescription = config.systemd.services.${serviceName}.description or "";
+      otherFallbackIds = builtins.filter (id: id != row.value.checkId) fallbackCheckIds;
+      otherAllowedIds = lib.concatMap allowedIdsFor (
+        builtins.filter (other: other.key != row.key) normalizedRows
+      );
+      forbidden = directCheckIds ++ otherFallbackIds ++ otherAllowedIds;
     in
-    builtins.elem name [
-      "nix-gc"
-      "fstrim"
-      "docker-buildkit-gc"
-    ]
-    || (lib.hasPrefix "dotfiles-agent-" name && lib.hasSuffix "-gc" name)
-    || (lib.hasSuffix "reaper" name && lib.hasInfix "worktree" (lib.toLower serviceDescription))
-  ) (builtins.attrNames config.systemd.timers);
+    lib.all (id: !builtins.elem id forbidden) row.value.allowedOutcomeIds
+  ) normalizedRows;
 
-  maintenanceTable = map (
-    name:
-    let
-      timer = config.systemd.timers.${name};
-    in
-    {
-      timer = "${name}.timer";
-      service = timer.timerConfig.Unit or "${name}.service";
-    }
-  ) maintenanceTimerNames;
-
-  managedRootTable = [
-    "${cfg.host.homeDir}/.cache/dotfiles-wsl/builds"
-    "${cfg.host.homeDir}/.cache/dotfiles-wsl/shared"
-    "${cfg.host.homeDir}/.cache/dotfiles-wsl/sessions"
-    "${cfg.host.homeDir}/.local/state/dotfiles-wsl/agent-resources"
+  directResourceKeys = builtins.filter (key: key != null) (
+    map (row: row.value.resourceKey) directRows
+  );
+  normalizedResourceKeys = lib.concatMap (row: row.value.requiredResourceKeys) normalizedRows;
+  aggregateResourceKeys = [
+    "containerRestarts"
+    "serviceRestarts"
   ];
-
-  containerTable = lib.concatMap (
-    application:
-    map (image: {
-      inherit application;
-      inherit (image) container image;
-    }) (builtins.attrValues cfg.containers.services.${application}.images)
-  ) cfg.containers.enabled;
-
-  healthTable = map (
-    application:
-    let
-      service = cfg.containers.services.${application};
-      probe = service.health;
-    in
-    {
-      inherit application;
-      url = "${service.endpoints.${probe.endpoint}.url}${probe.path}";
-      inherit (probe) method timeout;
-    }
-  ) cfg.containers.enabled;
-
-  mcpTable = lib.mapAttrsToList (id: target: {
-    inherit id;
-    inherit (target) probe;
-  }) cfg.mcp.targets;
+  resourceKeys = directResourceKeys ++ normalizedResourceKeys ++ aggregateResourceKeys;
+  normalizedFallbackResourcesMatch = lib.all (
+    row:
+    row.value.resourceKey == null || builtins.elem row.value.resourceKey row.value.requiredResourceKeys
+  ) normalizedRows;
 
   doctor = import ./package.nix {
-    inherit pkgs lib;
-    tables = {
-      inherit
-        agentTable
-        artifactTable
-        secretTable
-        serviceTable
-        maintenanceTable
-        managedRootTable
-        containerTable
-        healthTable
-        mcpTable
-        ;
-      gatewayUrl = cfg.mcp.gateway.url;
-    };
+    inherit pkgs lib observations;
   };
 in
 {
-  config.dotfiles.commands = { inherit doctor; };
+  config = {
+    assertions = [
+      {
+        assertion = lib.all (id: id != null) checkIds;
+        message = "every production observation must declare a checkId";
+      }
+      {
+        assertion = checkIds == lib.unique checkIds;
+        message = "production observation fallback check IDs must be unique";
+      }
+      {
+        assertion = normalizedIdsDoNotCollide;
+        message = "normalized protocol outcome IDs must not collide with another observation contract";
+      }
+      {
+        assertion = normalizedFallbackResourcesMatch;
+        message = "normalized protocol fallback resourceKey must belong to its required resource set";
+      }
+      {
+        assertion = resourceKeys == lib.unique resourceKeys;
+        message = "runtime observation resource producers must be unique";
+      }
+    ];
+    dotfiles.commands = { inherit doctor; };
+  };
 }

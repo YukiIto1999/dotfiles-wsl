@@ -1,7 +1,0 @@
-{
-  "artifacts": {
-    "mcp/gateway/default/config": {
-      "equal": false
-    }
-  }
-}

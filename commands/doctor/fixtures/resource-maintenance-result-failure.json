@@ -1,7 +1,0 @@
-{
-  "systemd": {
-    "fstrim.service": {
-      "Result": "exit-code"
-    }
-  }
-}

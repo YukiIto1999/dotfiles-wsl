@@ -166,8 +166,8 @@ probe_release_tree() {
     valid=0
   fi
 
-  entrypoint_path=$current_resolved/$entrypoint
   if ((valid == 1)); then
+    entrypoint_path=$current_resolved/$entrypoint
     while IFS=$'\t' read -r relative_path required_kind required_executable; do
       resolved_path=$($readlink_command -f -- "$current_resolved/$relative_path" 2>/dev/null) || {
         valid=0
@@ -261,7 +261,7 @@ probe_managed_roots() {
       continue
     fi
     if output=$($du_command "${du_args[@]}" -- "$path" 2>/dev/null); then
-      read -r bytes observed extra <<<"$output"
+      IFS=$'\t' read -r bytes observed extra <<<"$output"
       if [[ $bytes =~ ^(0|[1-9][0-9]*)$ && $observed == "$path" && -z ${extra-} ]]; then
         row=$($jq_command -cn --arg path "$path" --argjson bytes "$bytes" '{path:$path,bytes:$bytes}')
         rows+=("$row")

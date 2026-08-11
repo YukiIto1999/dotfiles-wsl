@@ -417,6 +417,12 @@ let
   passDoctor = mkFixtureDoctor passValues;
   failureDoctor = mkFixtureDoctor failureValues;
   warningDoctor = mkFixtureDoctor warningValues;
+  restartThresholdFailureDoctor = mkFixtureDoctor {
+    "fixture/restart-threshold-failure" = passValues."fixture/10-restart-service" // {
+      checkId = "fixture/restart-threshold-failure";
+      target = "service-fail.service";
+    };
+  };
   duplicateDoctor = mkFixtureDoctor {
     "fixture/normalized-duplicate" = (normalizedValue normalizedDuplicateCommand) // {
       checkId = "fixture/duplicate-fallback";
@@ -504,6 +510,29 @@ let
       currentLink = "${releaseNonExecutableFixture}/current";
       releasesRoot = "${releaseNonExecutableFixture}/releases";
       requiredPaths = { };
+    };
+  };
+  releaseMissingLinkObservations = {
+    current = passValues."fixture/04-release-tree" // {
+      checkId = "fixture/release-missing-current";
+      currentLink = "${releaseFixture}/missing-current";
+    };
+    visible = passValues."fixture/04-release-tree" // {
+      checkId = "fixture/release-missing-visible";
+      visiblePath = "${releaseFixture}/bin/missing-visible";
+    };
+  };
+  releaseMissingLinkFixtures = lib.mapAttrs (name: observation: {
+    inherit observation;
+    doctor = mkFixtureDoctor {
+      "fixture/release-missing-${name}" = observation;
+    };
+  }) releaseMissingLinkObservations;
+  managedSpaceDoctor = mkFixtureDoctor {
+    "fixture/managed-space" = passValues."fixture/07-managed-roots" // {
+      checkId = "fixture/managed-space";
+      paths = [ "/fixture/root with space" ];
+      resourceKey = "managedSpace";
     };
   };
 
@@ -618,6 +647,379 @@ let
     failures = [ ];
     resources = [ ];
     restart = null;
+  };
+  passFragment =
+    id:
+    validFragment
+    // {
+      checks = [
+        {
+          inherit id;
+          status = "pass";
+        }
+      ];
+    };
+  semanticFragmentCases = {
+    direct-missing-required-check.fragment = _: validFragment;
+    duplicate-check-id.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "pass";
+          }
+          {
+            inherit id;
+            status = "pass";
+          }
+        ];
+      };
+    duplicate-warning-id.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "warn";
+          }
+        ];
+        warnings = [
+          {
+            inherit id;
+            message = "first warning";
+          }
+          {
+            inherit id;
+            message = "second warning";
+          }
+        ];
+      };
+    duplicate-failure-id.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "fail";
+          }
+        ];
+        failures = [
+          {
+            inherit id;
+            message = "first failure";
+          }
+          {
+            inherit id;
+            message = "second failure";
+          }
+        ];
+      };
+    warn-without-warning.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "warn";
+          }
+        ];
+      };
+    warning-without-warn.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "pass";
+          }
+        ];
+        warnings = [
+          {
+            inherit id;
+            message = "unexpected warning";
+          }
+        ];
+      };
+    fail-without-failure.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "fail";
+          }
+        ];
+      };
+    failure-without-fail.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "pass";
+          }
+        ];
+        failures = [
+          {
+            inherit id;
+            message = "unexpected failure";
+          }
+        ];
+      };
+    duplicate-resource-key = {
+      observation = {
+        resourceKey = "declaredResource";
+      };
+      fragment =
+        id:
+        validFragment
+        // {
+          checks = [
+            {
+              inherit id;
+              status = "pass";
+            }
+          ];
+          resources = [
+            {
+              key = "declaredResource";
+              value = 1;
+            }
+            {
+              key = "declaredResource";
+              value = 2;
+            }
+          ];
+        };
+    };
+    undeclared-check-id.fragment =
+      _:
+      validFragment
+      // {
+        checks = [
+          {
+            id = "fixture/undeclared";
+            status = "pass";
+          }
+        ];
+      };
+    undeclared-resource-key.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "pass";
+          }
+        ];
+        resources = [
+          {
+            key = "undeclaredResource";
+            value = null;
+          }
+        ];
+      };
+    normalized-missing-required-check = {
+      normalized = true;
+      fragment =
+        _:
+        validFragment
+        // {
+          resources = normalizedPassEnvelope.resources;
+        };
+    };
+    normalized-missing-required-resource = {
+      normalized = true;
+      fragment =
+        _:
+        validFragment
+        // {
+          checks = [
+            {
+              id = "fixture/protocol";
+              status = "pass";
+            }
+          ];
+        };
+    };
+    normalized-undeclared-check = {
+      normalized = true;
+      fragment =
+        _:
+        validFragment
+        // {
+          checks = [
+            {
+              id = "fixture/undeclared";
+              status = "pass";
+            }
+            {
+              id = "fixture/protocol";
+              status = "pass";
+            }
+          ];
+          resources = normalizedPassEnvelope.resources;
+        };
+    };
+    nonrestart-restart-injection.fragment =
+      id:
+      passFragment id
+      // {
+        restart = {
+          kind = "service";
+          target = "service-ok.service";
+          count = 0;
+        };
+      };
+    restart-target-mismatch = {
+      observation = {
+        kind = "restart-counter";
+        sourceKind = "systemd-service";
+        target = "service-ok.service";
+      };
+      fragment =
+        id:
+        passFragment id
+        // {
+          restart = {
+            kind = "service";
+            target = "service-wrong.service";
+            count = 0;
+          };
+        };
+    };
+    restart-service-kind-mismatch = {
+      observation = {
+        kind = "restart-counter";
+        sourceKind = "systemd-service";
+        target = "service-ok.service";
+      };
+      fragment =
+        id:
+        passFragment id
+        // {
+          restart = {
+            kind = "container";
+            target = "service-ok.service";
+            count = 0;
+          };
+        };
+    };
+    restart-container-kind-mismatch = {
+      observation = {
+        kind = "restart-counter";
+        sourceKind = "container";
+        target = "container-ok";
+      };
+      fragment =
+        id:
+        passFragment id
+        // {
+          restart = {
+            kind = "service";
+            target = "container-ok";
+            count = 0;
+          };
+        };
+    };
+    restart-pass-without-payload = {
+      observation = {
+        kind = "restart-counter";
+        sourceKind = "systemd-service";
+        target = "service-ok.service";
+      };
+      fragment = id: passFragment id;
+    };
+    restart-warn-without-payload = {
+      observation = {
+        kind = "restart-counter";
+        sourceKind = "systemd-service";
+        target = "service-ok.service";
+      };
+      fragment =
+        id:
+        validFragment
+        // {
+          checks = [
+            {
+              inherit id;
+              status = "warn";
+            }
+          ];
+          warnings = [
+            {
+              inherit id;
+              message = "restart warning without payload";
+            }
+          ];
+        };
+    };
+  };
+  semanticFragmentFixtures = lib.mapAttrs (
+    name: fixture:
+    let
+      baseObservation =
+        if fixture.normalized or false then
+          normalizedValue normalizedPassCommand
+        else
+          passValues."fixture/01-roster";
+      observation =
+        baseObservation
+        // (fixture.observation or { })
+        // {
+          checkId = "fixture/semantic-${name}";
+          failureMessage = "fixture semantic ${name} failed";
+        };
+      fragment = fixture.fragment observation.checkId;
+    in
+    {
+      inherit observation;
+      doctor = mkDoctor {
+        inherit pkgs lib tools;
+        observations = rowsFor {
+          "fixture/semantic-${name}" = observation;
+        };
+        probeOverride = mkOutputCommand "fixture-semantic-${name}" (builtins.toJSON fragment);
+      };
+    }
+  ) semanticFragmentCases;
+  restartFailureWithoutPayloadObservation = passValues."fixture/10-restart-service" // {
+    checkId = "fixture/restart-failure-without-payload";
+    failureMessage = "fixture restart-failure-without-payload fallback";
+  };
+  restartFailureWithoutPayloadDoctor = mkDoctor {
+    inherit pkgs lib tools;
+    observations = rowsFor {
+      "fixture/restart-failure-without-payload" = restartFailureWithoutPayloadObservation;
+    };
+    probeOverride = mkOutputCommand "fixture-restart-failure-without-payload" (
+      builtins.toJSON (
+        validFragment
+        // {
+          checks = [
+            {
+              id = restartFailureWithoutPayloadObservation.checkId;
+              status = "fail";
+            }
+          ];
+          failures = [
+            {
+              id = restartFailureWithoutPayloadObservation.checkId;
+              message = "restart failure without payload";
+            }
+          ];
+        }
+      )
+    );
   };
   malformedArrayValues = {
     null = null;
@@ -957,6 +1359,24 @@ in
         ' <<<"$warning_output" >/dev/null
 
         set +e
+        restart_threshold_failure_output=$(${lib.getExe restartThresholdFailureDoctor} --json)
+        restart_threshold_failure_status=$?
+        set -e
+        test "$restart_threshold_failure_status" -eq 1
+        jq -e '
+          .checks == [{id:"fixture/restart-threshold-failure",status:"fail"}]
+          and .warnings == []
+          and .failures == [{
+            id:"fixture/restart-threshold-failure",
+            message:"service-fail.service reached the restart failure threshold"
+          }]
+          and .resources == {
+            serviceRestarts:[{unit:"service-fail.service",count:20}],
+            containerRestarts:[]
+          }
+        ' <<<"$restart_threshold_failure_output" >/dev/null
+
+        set +e
         human_output=$(${lib.getExe warningDoctor} 2>&1)
         human_status=$?
         set -e
@@ -1031,6 +1451,40 @@ in
           '') malformedFragmentDoctors
         )}
 
+        ${lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (name: fixture: ''
+            set +e
+            semantic_output=$(${lib.getExe fixture.doctor} --json)
+            semantic_status=$?
+            set -e
+            test "$semantic_status" -eq 1
+            jq -e '
+              .checks == [{id:${builtins.toJSON fixture.observation.checkId},status:"fail"}]
+              and .warnings == []
+              and .failures == [{
+                id:${builtins.toJSON fixture.observation.checkId},
+                message:${builtins.toJSON fixture.observation.failureMessage}
+              }]
+              and .resources == {serviceRestarts:[],containerRestarts:[]}
+            ' <<<"$semantic_output" >/dev/null
+          '') semanticFragmentFixtures
+        )}
+
+        set +e
+        restart_failure_without_payload_output=$(${lib.getExe restartFailureWithoutPayloadDoctor} --json)
+        restart_failure_without_payload_status=$?
+        set -e
+        test "$restart_failure_without_payload_status" -eq 1
+        jq -e '
+          .checks == [{id:"fixture/restart-failure-without-payload",status:"fail"}]
+          and .warnings == []
+          and .failures == [{
+            id:"fixture/restart-failure-without-payload",
+            message:"restart failure without payload"
+          }]
+          and .resources == {serviceRestarts:[],containerRestarts:[]}
+        ' <<<"$restart_failure_without_payload_output" >/dev/null
+
         set +e
         numeric_oversize_output=$(${lib.getExe numericOversizeDoctor} --json)
         numeric_oversize_status=$?
@@ -1058,6 +1512,14 @@ in
           and .failures == []
           and .resources.fixtureFilesystemFree == {freePercent:90}
         ' <<<"$filesystem_free_output" >/dev/null
+
+        managed_space_output=$(${lib.getExe managedSpaceDoctor} --json)
+        jq -e '
+          .checks == [{id:"fixture/managed-space",status:"pass"}]
+          and .warnings == []
+          and .failures == []
+          and .resources.managedSpace == [{path:"/fixture/root with space",bytes:42}]
+        ' <<<"$managed_space_output" >/dev/null
 
         roster_omit_output=$(${lib.getExe rosterOmitDoctor} --json)
         jq -e '
@@ -1102,6 +1564,31 @@ in
             and (.failures | length) == 1
           ' <<<"$release_invalid_output" >/dev/null
         done
+
+        ${lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (name: fixture: ''
+            release_observation=release-missing-${name}.json
+            release_scratch=release-missing-${name}-scratch
+            mkdir "$release_scratch"
+            printf '%s\n' ${lib.escapeShellArg (builtins.toJSON (mkRow "fixture/release-missing-${name}" fixture.observation))} >"$release_observation"
+            set +e
+            ${lib.getExe fixture.doctor.probe} \
+              "$release_observation" "$release_scratch" >release-missing-${name}.out
+            release_missing_status=$?
+            set -e
+            test "$release_missing_status" -eq 0
+            jq -e '
+              .checks == [{id:${builtins.toJSON fixture.observation.checkId},status:"fail"}]
+              and .warnings == []
+              and .failures == [{
+                id:${builtins.toJSON fixture.observation.checkId},
+                message:${builtins.toJSON fixture.observation.failureMessage}
+              }]
+              and .resources == []
+              and .restart == null
+            ' release-missing-${name}.out >/dev/null
+          '') releaseMissingLinkFixtures
+        )}
 
         set +e
         timeout_output=$(${lib.getExe timeoutDoctor} --json)

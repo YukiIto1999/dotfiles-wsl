@@ -152,6 +152,23 @@ in
         touch $out
       '';
 
+  structure-unit-directory-names =
+    let
+      fixture = import ./fixtures/structure-unit-directory-names.nix;
+      segmentIsValid = segment: builtins.match "[a-z][a-z0-9]*(-[a-z0-9]+)*" segment != null;
+      unitIdIsValid = id: lib.all segmentIsValid (lib.splitString "/" id);
+      invalidUnitIds = map (unit: unit.id) (builtins.filter (unit: !unitIdIsValid unit.id) units);
+    in
+    assert lib.all segmentIsValid fixture.valid;
+    assert lib.all (segment: !segmentIsValid segment) fixture.invalid;
+    assert lib.all (segment: !unitIdIsValid "root/${segment}") fixture.invalid;
+    assert lib.all (segment: !unitIdIsValid "${segment}/leaf") fixture.invalid;
+    assert lib.all (segment: !unitIdIsValid "root/${segment}/leaf") fixture.invalid;
+    assert lib.assertMsg (invalidUnitIds == [ ]) (
+      "unit directory names must use lowercase kebab-case: " + lib.concatStringsSep " " invalidUnitIds
+    );
+    pkgs.runCommandLocal "check-structure-unit-directory-names" { } "touch $out";
+
   runtime-identity =
     let
       expected = builtins.fromJSON (builtins.readFile ./fixtures/runtime-identities.json);

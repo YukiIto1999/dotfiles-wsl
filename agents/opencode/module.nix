@@ -101,12 +101,20 @@ in
     agentmemoryMode = "plugin";
     install = {
       kind = "github-release";
+      updateOwner = "dotfiles";
+      layout = "single-binary";
       repo = "anomalyco/opencode";
-      assetByArch = {
-        x86_64 = "opencode-linux-x64.tar.gz";
-        aarch64 = "opencode-linux-arm64.tar.gz";
+      releaseByArch = {
+        x86_64 = {
+          asset = "opencode-linux-x64.tar.gz";
+          entrypoint = "opencode";
+        };
+        aarch64 = {
+          asset = "opencode-linux-arm64.tar.gz";
+          entrypoint = "opencode";
+        };
       };
-      binaryInArchive = "opencode";
+      requiredPaths = { };
     };
   };
 }

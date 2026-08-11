@@ -31,6 +31,8 @@ in
     agentmemoryMode = "unsupported";
     install = {
       kind = "installer-script";
+      updateOwner = "upstream-installer";
+      layout = "upstream-managed";
       scriptUrl = "https://antigravity.google/cli/install.sh";
     };
   };

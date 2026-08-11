@@ -30,42 +30,81 @@ let
         ];
       };
       destination = lib.mkOption { type = types.str; };
+      seedMigrationCommand = lib.mkOption {
+        type = types.nullOr types.package;
+        default = null;
+      };
     };
   };
 
-  installType = types.submodule {
+  releaseType = types.submodule {
+    options = {
+      asset = lib.mkOption { type = types.str; };
+      entrypoint = lib.mkOption { type = types.str; };
+    };
+  };
+
+  releaseByArchType = types.submodule {
+    options = {
+      x86_64 = lib.mkOption { type = releaseType; };
+      aarch64 = lib.mkOption { type = releaseType; };
+    };
+  };
+
+  requiredPathType = types.submodule {
     options = {
       kind = lib.mkOption {
         type = types.enum [
-          "installer-script"
-          "github-release"
+          "file"
+          "directory"
         ];
       };
-      scriptUrl = lib.mkOption {
-        type = types.nullOr types.str;
-        default = null;
-      };
-      repo = lib.mkOption {
-        type = types.nullOr types.str;
-        default = null;
-      };
-      assetByArch = lib.mkOption {
-        type = types.nullOr (
-          types.submodule {
-            options = {
-              x86_64 = lib.mkOption { type = types.str; };
-              aarch64 = lib.mkOption { type = types.str; };
-            };
-          }
-        );
-        default = null;
-      };
-      binaryInArchive = lib.mkOption {
-        type = types.nullOr types.str;
-        default = null;
-      };
+      executable = lib.mkOption { type = types.bool; };
     };
   };
+
+  installerScriptInstallType = types.addCheck (types.submodule {
+    options = {
+      kind = lib.mkOption {
+        type = types.enum [ "installer-script" ];
+      };
+      updateOwner = lib.mkOption {
+        type = types.enum [ "upstream-installer" ];
+      };
+      layout = lib.mkOption {
+        type = types.enum [ "upstream-managed" ];
+      };
+      scriptUrl = lib.mkOption { type = types.str; };
+    };
+  }) (install: (install.kind or null) == "installer-script");
+
+  githubReleaseInstallType = types.addCheck (types.submodule {
+    options = {
+      kind = lib.mkOption {
+        type = types.enum [ "github-release" ];
+      };
+      updateOwner = lib.mkOption {
+        type = types.enum [ "dotfiles" ];
+      };
+      layout = lib.mkOption {
+        type = types.enum [
+          "single-binary"
+          "package-tree"
+        ];
+      };
+      repo = lib.mkOption { type = types.str; };
+      releaseByArch = lib.mkOption { type = releaseByArchType; };
+      requiredPaths = lib.mkOption {
+        type = types.attrsOf requiredPathType;
+        default = { };
+      };
+    };
+  }) (install: (install.kind or null) == "github-release");
+
+  installType = types.oneOf [
+    installerScriptInstallType
+    githubReleaseInstallType
+  ];
 
   clientType = types.submodule {
     options = {
@@ -177,16 +216,27 @@ let
 
   installContractValid =
     install:
-    let
-      present = value: value != null;
-    in
     if install.kind == "installer-script" then
-      present install.scriptUrl
-      && install.repo == null
-      && install.assetByArch == null
-      && install.binaryInArchive == null
+      true
     else
-      install.scriptUrl == null && present install.repo && present install.assetByArch;
+      let
+        requiredPathIds = builtins.attrNames install.requiredPaths;
+        entrypoints = map (release: release.entrypoint) (builtins.attrValues install.releaseByArch);
+        entrypointRequiredPathValid =
+          entrypoint:
+          let
+            requiredPath = install.requiredPaths.${entrypoint} or null;
+          in
+          requiredPath != null && requiredPath.kind == "file" && requiredPath.executable;
+      in
+      builtins.all validRelativeDestination entrypoints
+      && builtins.all validRelativeDestination requiredPathIds
+      && (
+        if install.layout == "single-binary" then
+          install.requiredPaths == { }
+        else
+          install.requiredPaths != { } && builtins.all entrypointRequiredPathValid entrypoints
+      );
 
   capabilityContractValid =
     client:
@@ -200,7 +250,7 @@ let
     && builtins.all (file: builtins.hasAttr file client.managedFiles) referencedFiles;
 
   # これらは command 名、argv、配備 path、生成 file 名、参照 key である。
-  # 不在は null で表すため、意味を持たない空文字は受理しない。
+  # optional option の不在は null、tagged branch の不在は型で表し、空文字は受理しない。
   requiredStringFailuresFor =
     cfg:
     let
@@ -231,27 +281,22 @@ let
         client: builtins.filter (value: value != null) (builtins.attrValues client.capabilityManagedFiles)
       );
       installScriptUrls = installClientsWhere (
-        install:
-        install.kind == "installer-script" && (install.scriptUrl == null || !nonEmpty install.scriptUrl)
+        install: install.kind == "installer-script" && !nonEmpty install.scriptUrl
       );
       installRepositories = installClientsWhere (
-        install: install.kind == "github-release" && (install.repo == null || !nonEmpty install.repo)
+        install: install.kind == "github-release" && !nonEmpty install.repo
       );
       installAssetsX86_64 = installClientsWhere (
-        install:
-        install.kind == "github-release"
-        && (install.assetByArch == null || !nonEmpty install.assetByArch.x86_64)
+        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.x86_64.asset
       );
       installAssetsAarch64 = installClientsWhere (
-        install:
-        install.kind == "github-release"
-        && (install.assetByArch == null || !nonEmpty install.assetByArch.aarch64)
+        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.aarch64.asset
       );
-      installArchiveBinaries = installClientsWhere (
-        install:
-        install.kind == "github-release"
-        && install.binaryInArchive != null
-        && !nonEmpty install.binaryInArchive
+      installEntrypointsX86_64 = installClientsWhere (
+        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.x86_64.entrypoint
+      );
+      installEntrypointsAarch64 = installClientsWhere (
+        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.aarch64.entrypoint
       );
       sharedSkillIds = map displayEmpty (
         builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.shared.skills)
@@ -383,6 +428,10 @@ in
       invalidManagedDestinationLabels = map (
         row: "${row.clientName}/${row.id} (${row.file.deployment}: ${row.file.destination})"
       ) invalidManagedDestinationRows;
+      invalidSeedMigrationRows = builtins.filter (
+        row: row.file.seedMigrationCommand != null && row.file.deployment != "seed"
+      ) managedRows;
+      invalidSeedMigrationLabels = map (row: "${row.clientName}/${row.id}") invalidSeedMigrationRows;
       # validator を通った destination 自体が canonical relative path である。
       userManagedDestinations = map (row: row.file.destination) (
         builtins.filter (row: row.file.deployment != "system") managedRows
@@ -426,7 +475,7 @@ in
       {
         assertion = invalidInstallClients == [ ];
         message =
-          "agent install kind conflicts with branch fields: "
+          "agent install lifecycle conflicts with layout or paths: "
           + lib.concatStringsSep ", " invalidInstallClients;
       }
       {
@@ -440,6 +489,12 @@ in
         message =
           "agent managed destinations must be canonical deployment-relative paths: "
           + lib.concatStringsSep ", " invalidManagedDestinationLabels;
+      }
+      {
+        assertion = invalidSeedMigrationRows == [ ];
+        message =
+          "agent seedMigrationCommand is only valid for seed deployment: "
+          + lib.concatStringsSep ", " invalidSeedMigrationLabels;
       }
       {
         assertion = missingGatewayManagedFiles == [ ];

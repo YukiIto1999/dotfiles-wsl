@@ -174,33 +174,6 @@ let
 
   seedRows = builtins.filter (row: row.file.deployment == "seed") deploymentRows;
 
-  migrateCodexConfig = pkgs.writeShellApplication {
-    name = "dotfiles-migrate-codex-config";
-    text =
-      builtins.replaceStrings
-        [
-          "@chmodCommand@"
-          "@idCommand@"
-          "@jqCommand@"
-          "@mktempCommand@"
-          "@mvCommand@"
-          "@remarshalCommand@"
-          "@rmCommand@"
-          "@statCommand@"
-        ]
-        [
-          "${pkgs.coreutils}/bin/chmod"
-          "${pkgs.coreutils}/bin/id"
-          (lib.getExe pkgs.jq)
-          "${pkgs.coreutils}/bin/mktemp"
-          "${pkgs.coreutils}/bin/mv"
-          (lib.getExe pkgs.remarshal)
-          "${pkgs.coreutils}/bin/rm"
-          "${pkgs.coreutils}/bin/stat"
-        ]
-        (builtins.readFile ./impl/migrate-codex-config.sh);
-  };
-
   seedScript = lib.concatMapStrings (
     row:
     let
@@ -211,8 +184,8 @@ let
       if [ ! -e "$target" ] && [ ! -L "$target" ]; then
         install -Dm600 ${lib.escapeShellArg (toString row.file.source)} "$target"
       fi
-      ${lib.optionalString (row.clientName == "codex") ''
-        ${lib.getExe migrateCodexConfig} "$target" ${lib.escapeShellArg cfg.host.homeDir} || exit $?
+      ${lib.optionalString (row.file.seedMigrationCommand != null) ''
+        ${lib.getExe row.file.seedMigrationCommand} "$target" ${lib.escapeShellArg cfg.host.homeDir} || exit $?
       ''}
     ''
   ) seedRows;
@@ -243,7 +216,7 @@ let
     {
       inherit name;
       inherit (client) binary versionArgs;
-      install = lib.filterAttrs (_: value: value != null) client.install;
+      inherit (client) install;
     };
 
   installManifest = builtins.toJSON (map installRecord clientNames);

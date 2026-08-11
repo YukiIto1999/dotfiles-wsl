@@ -478,7 +478,15 @@ let
     builtins.attrNames clients
   );
 
-  withoutNulls = lib.filterAttrs (_: value: value != null);
+  projectManagedFile =
+    file:
+    builtins.removeAttrs file [
+      "seedMigrationCommand"
+      "source"
+    ]
+    // lib.optionalAttrs (file.seedMigrationCommand != null) {
+      seedMigrationCommand = lib.getName file.seedMigrationCommand;
+    };
   projectClient = client: {
     inherit (client)
       binary
@@ -501,8 +509,8 @@ let
     gateway = {
       inherit (client.gatewayConfig) format managedFile;
     };
-    managedFiles = lib.mapAttrs (_: file: builtins.removeAttrs file [ "source" ]) client.managedFiles;
-    install = withoutNulls client.install;
+    managedFiles = lib.mapAttrs (_: projectManagedFile) client.managedFiles;
+    install = client.install;
   };
   actualContract = lib.mapAttrs (_: projectClient) clients;
 
@@ -585,7 +593,7 @@ let
       definitions = "attrsOf";
       definitionsDestination = "nullOr";
       gatewayConfig = "submodule";
-      install = "submodule";
+      install = "either";
       lspMode = "enum";
       managedFiles = "attrsOf";
       rulesDestination = "str";
@@ -597,6 +605,7 @@ let
       deployment = "enum";
       destination = "str";
       format = "enum";
+      seedMigrationCommand = "nullOr";
       source = "path";
     };
     capabilityManagedFile = {
@@ -607,6 +616,7 @@ let
   };
 
   fixtureSource = ./shared/AGENTS.md;
+  fixtureSeedMigrationCommand = pkgs.writeShellScriptBin "dotfiles-migrate-codex-config" "exit 0";
   agentContract = import ./impl/contract.nix { inherit lib; };
   fixtureDefinitions = lib.genAttrs expected.clients.claude.definitions.names (_: fixtureSource);
   candidateClients = lib.mapAttrs (_: client: {
@@ -625,7 +635,16 @@ let
     gatewayConfig = client.gateway // {
       source = fixtureSource;
     };
-    managedFiles = lib.mapAttrs (_: file: file // { source = fixtureSource; }) client.managedFiles;
+    managedFiles = lib.mapAttrs (
+      _: file:
+      builtins.removeAttrs file [ "seedMigrationCommand" ]
+      // {
+        source = fixtureSource;
+      }
+      // lib.optionalAttrs (file ? seedMigrationCommand) {
+        seedMigrationCommand = fixtureSeedMigrationCommand;
+      }
+    ) client.managedFiles;
     lspMode = client.capabilities.lsp;
     telemetryMode = client.capabilities.telemetry;
     agentmemoryMode = client.capabilities.agentmemory;
@@ -674,8 +693,19 @@ let
             "agentWorktree"
             "stateRoot"
           ];
+          contractWithoutPackages = evaluatedContract // {
+            clients = lib.mapAttrs (
+              _: client:
+              client
+              // {
+                managedFiles = lib.mapAttrs (
+                  _: file: builtins.removeAttrs file [ "seedMigrationCommand" ]
+                ) client.managedFiles;
+              }
+            ) evaluatedContract.clients;
+          };
         in
-        builtins.deepSeq evaluatedContract (
+        builtins.deepSeq contractWithoutPackages (
           builtins.all (assertion: assertion.assertion) evaluated.config.assertions
         )
       );
@@ -718,21 +748,127 @@ let
   };
   emptyInstallAarch64AssetCandidate = mutateClient "codex" {
     install = baseCandidate.clients.codex.install // {
-      assetByArch = baseCandidate.clients.codex.install.assetByArch // {
-        aarch64 = "";
+      releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
+        aarch64 = baseCandidate.clients.codex.install.releaseByArch.aarch64 // {
+          asset = "";
+        };
       };
     };
   };
   emptyInstallX86AssetCandidate = mutateClient "codex" {
     install = baseCandidate.clients.codex.install // {
-      assetByArch = baseCandidate.clients.codex.install.assetByArch // {
-        x86_64 = "";
+      releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
+        x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
+          asset = "";
+        };
       };
     };
   };
-  emptyInstallArchiveBinaryCandidate = mutateClient "codex" {
+  emptyInstallEntrypointCandidate = mutateClient "codex" {
     install = baseCandidate.clients.codex.install // {
-      binaryInArchive = "";
+      releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
+        x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
+          entrypoint = "";
+        };
+      };
+    };
+  };
+  packageTreeInstall = baseCandidate.clients.codex.install // {
+    layout = "package-tree";
+    releaseByArch = lib.mapAttrs (_: release: release // { entrypoint = "bin/codex"; }) (
+      baseCandidate.clients.codex.install.releaseByArch
+    );
+    requiredPaths = {
+      bin = {
+        kind = "directory";
+        executable = false;
+      };
+      "bin/codex" = {
+        kind = "file";
+        executable = true;
+      };
+    };
+  };
+  invalidInstallEntrypointCandidate =
+    entrypoint:
+    mutateClient "codex" {
+      install = baseCandidate.clients.codex.install // {
+        releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
+          x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
+            inherit entrypoint;
+          };
+        };
+      };
+    };
+  invalidRequiredPathCandidate =
+    path:
+    mutateClient "codex" {
+      install = packageTreeInstall // {
+        requiredPaths = packageTreeInstall.requiredPaths // {
+          ${path} = {
+            kind = "file";
+            executable = false;
+          };
+        };
+      };
+    };
+  requiredInstallNegativeEvalCaseNames = [
+    "entrypoint-current-segment"
+    "entrypoint-empty-segment"
+    "invalid-kind"
+    "legacy-asset-by-arch"
+    "legacy-binary-in-archive"
+    "required-path-current-segment"
+    "required-path-empty-segment"
+  ];
+  installNegativeEvalCases = {
+    entrypoint-current-segment = invalidInstallEntrypointCandidate "bin/./codex";
+    entrypoint-empty-segment = invalidInstallEntrypointCandidate "bin//codex";
+    invalid-kind = mutateClient "claude" {
+      install = baseCandidate.clients.claude.install // {
+        kind = "invalid-kind";
+      };
+    };
+    legacy-asset-by-arch = mutateClient "codex" {
+      install = baseCandidate.clients.codex.install // {
+        assetByArch = {
+          x86_64 = "legacy-x86_64.tar.gz";
+          aarch64 = "legacy-aarch64.tar.gz";
+        };
+      };
+    };
+    legacy-binary-in-archive = mutateClient "codex" {
+      install = baseCandidate.clients.codex.install // {
+        binaryInArchive = "codex";
+      };
+    };
+    required-path-current-segment = invalidRequiredPathCandidate "bin/./share";
+    required-path-empty-segment = invalidRequiredPathCandidate "bin//share";
+  };
+  unexpectedlyValidInstallNegativeEvalCases = builtins.attrNames (
+    lib.filterAttrs (_: candidate: contractIsValid candidate) installNegativeEvalCases
+  );
+  invalidInstallEntrypointCandidates = map invalidInstallEntrypointCandidate [
+    ""
+    "/codex"
+    "../codex"
+    "bin/../codex"
+    "bin//codex"
+    "bin/./codex"
+  ];
+  invalidRequiredPathCandidates = map invalidRequiredPathCandidate [
+    ""
+    "/share/codex"
+    "../share/codex"
+    "share/../codex"
+    "bin//share"
+    "bin/./share"
+  ];
+  nonSeedMigrationCandidate = mutateClient "opencode" {
+    managedFiles = baseCandidate.clients.opencode.managedFiles // {
+      config = baseCandidate.clients.opencode.managedFiles.config // {
+        seedMigrationCommand = fixtureSeedMigrationCommand;
+      };
     };
   };
   invalidRulesDestinationCandidate = mutateClient "claude" {
@@ -763,6 +899,8 @@ let
       versionArgs = losslessVersionArgs;
       install = {
         kind = "installer-script";
+        updateOwner = "upstream-installer";
+        layout = "upstream-managed";
         scriptUrl = "https://example.invalid/install.sh";
       };
     }
@@ -813,7 +951,7 @@ let
         "${pkgs.coreutils}/bin/rm"
         ''"$FIXTURE_STAT"''
       ]
-      (builtins.readFile ./impl/migrate-codex-config.sh)
+      (builtins.readFile ./codex/impl/migrate-config.sh)
   );
 
   expectedInstallManifest = map (name: {
@@ -979,6 +1117,20 @@ let
     builtins.replaceStrings [ hostConfig.dotfiles.host.homeDir ] [ "$fixture/home" ]
       seedActivation;
   fixtureSeedActivationScript = pkgs.writeShellScript "fixture-seed-agent-configs" fixtureSeedActivation;
+  fixtureGenericSeedMigration = pkgs.writeShellScriptBin "fixture-generic-seed-migration" ''
+    printf '%s\0' "$@" > "$MIGRATION_CAPTURE"
+  '';
+  codexSeedMigrationExe = lib.getExe clients.codex.managedFiles.user.seedMigrationCommand;
+  fixtureGenericSeedActivation =
+    builtins.replaceStrings
+      [ codexSeedMigrationExe ]
+      [
+        (lib.getExe fixtureGenericSeedMigration)
+      ]
+      fixtureSeedActivation;
+  managedRowsWithSeedMigration = builtins.filter (
+    row: row.file.seedMigrationCommand != null
+  ) managedRows;
 
   sharedDefinitionSources = builtins.attrValues hostConfig.dotfiles.agents.shared.definitions;
   claudeDefinitionSources = builtins.attrValues clients.claude.definitions;
@@ -1186,10 +1338,118 @@ in
     assert lib.any (lib.hasInfix "installAssetsX86_64 (codex)") (
       failedContractMessages emptyInstallX86AssetCandidate
     );
-    assert !contractIsValid emptyInstallArchiveBinaryCandidate;
-    assert lib.any (lib.hasInfix "installArchiveBinaries (codex)") (
-      failedContractMessages emptyInstallArchiveBinaryCandidate
+    assert !contractIsValid emptyInstallEntrypointCandidate;
+    assert lib.any (lib.hasInfix "installEntrypointsX86_64 (codex)") (
+      failedContractMessages emptyInstallEntrypointCandidate
     );
+    assert lib.assertMsg (
+      builtins.attrNames installNegativeEvalCases == requiredInstallNegativeEvalCaseNames
+    ) "agent install negative eval regression cases must be explicit and complete";
+    assert lib.assertMsg (unexpectedlyValidInstallNegativeEvalCases == [ ]) (
+      "invalid agent install evaluation succeeded: "
+      + lib.concatStringsSep ", " unexpectedlyValidInstallNegativeEvalCases
+    );
+    assert builtins.all (candidate: !contractIsValid candidate) invalidInstallEntrypointCandidates;
+    assert builtins.all (candidate: !contractIsValid candidate) invalidRequiredPathCandidates;
+    assert
+      !contractIsValid (
+        mutateClient "claude" {
+          install = baseCandidate.clients.claude.install // {
+            updateOwner = "dotfiles";
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = baseCandidate.clients.codex.install // {
+            releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
+              x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
+                unexpected = "untyped";
+              };
+            };
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = packageTreeInstall // {
+            requiredPaths."bin/codex" = packageTreeInstall.requiredPaths."bin/codex" // {
+              unexpected = "untyped";
+            };
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "claude" {
+          install = baseCandidate.clients.claude.install // {
+            layout = "single-binary";
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = baseCandidate.clients.codex.install // {
+            updateOwner = "upstream-installer";
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = baseCandidate.clients.codex.install // {
+            layout = "upstream-managed";
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = baseCandidate.clients.codex.install // {
+            layout = "package-tree";
+            requiredPaths = { };
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = packageTreeInstall // {
+            requiredPaths = {
+              "bin/other" = {
+                kind = "file";
+                executable = true;
+              };
+            };
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = packageTreeInstall // {
+            requiredPaths."bin/codex" = {
+              kind = "directory";
+              executable = false;
+            };
+          };
+        }
+      );
+    assert
+      !contractIsValid (
+        mutateClient "codex" {
+          install = baseCandidate.clients.codex.install // {
+            requiredPaths.codex = {
+              kind = "file";
+              executable = true;
+            };
+          };
+        }
+      );
+    assert !contractIsValid nonSeedMigrationCandidate;
     assert
       !contractIsValid (
         mutateClient "claude" {
@@ -1212,7 +1472,12 @@ in
           install = {
             kind = "github-release";
             repo = "openai/codex";
-            assetByArch.x86_64 = "only-one-architecture.tar.gz";
+            updateOwner = "dotfiles";
+            layout = "single-binary";
+            releaseByArch.x86_64 = {
+              asset = "only-one-architecture.tar.gz";
+              entrypoint = "codex";
+            };
           };
         }
       );
@@ -1225,6 +1490,40 @@ in
         }
       );
     pkgs.runCommandLocal "check-agent-client-roster" { } "touch $out";
+
+  agent-config-migration =
+    assert map (row: "${row.clientName}/${row.id}") managedRowsWithSeedMigration == [ "codex/user" ];
+    assert fixtureGenericSeedActivation != fixtureSeedActivation;
+    pkgs.runCommandLocal "check-agent-config-migration"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.ripgrep
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        if rg -n 'clientName[[:space:]]*==[[:space:]]*"codex"|clients\.codex|migrateCodexConfig' \
+          ${self}/agents/module.nix; then
+          echo "root agent module contains a Codex-specific branch" >&2
+          exit 1
+        fi
+
+        fixture=$PWD/generic-seed-migration
+        mkdir -p "$fixture/home/.claude" "$fixture/home/.codex"
+        printf '%s\n' 'sandbox_mode = "workspace-write"' \
+          > "$fixture/home/.codex/config.toml"
+        export MIGRATION_CAPTURE=$fixture/migration-argv
+        ${fixtureGenericSeedActivation}
+
+        mapfile -d $'\0' -t migrationArgs < "$MIGRATION_CAPTURE"
+        test "''${#migrationArgs[@]}" -eq 2
+        test "''${migrationArgs[0]}" = "$fixture/home/.codex/config.toml"
+        test "''${migrationArgs[1]}" = "$fixture/home"
+
+        touch $out
+      '';
 
   agent-artifact-contract =
     assert variantConfig.dotfiles.mcp.gateway.port != gatewayPort;

@@ -44,6 +44,32 @@ let
     inherit codexModel;
     homeDir = cfg.host.homeDir;
   };
+  migrateCodexConfig = pkgs.writeShellApplication {
+    name = "dotfiles-migrate-codex-config";
+    text =
+      builtins.replaceStrings
+        [
+          "@chmodCommand@"
+          "@idCommand@"
+          "@jqCommand@"
+          "@mktempCommand@"
+          "@mvCommand@"
+          "@remarshalCommand@"
+          "@rmCommand@"
+          "@statCommand@"
+        ]
+        [
+          "${pkgs.coreutils}/bin/chmod"
+          "${pkgs.coreutils}/bin/id"
+          (lib.getExe pkgs.jq)
+          "${pkgs.coreutils}/bin/mktemp"
+          "${pkgs.coreutils}/bin/mv"
+          (lib.getExe pkgs.remarshal)
+          "${pkgs.coreutils}/bin/rm"
+          "${pkgs.coreutils}/bin/stat"
+        ]
+        (builtins.readFile ./impl/migrate-config.sh);
+  };
 
   splitFrontmatter =
     src:
@@ -116,6 +142,7 @@ in
         format = "toml";
         deployment = "seed";
         destination = ".codex/config.toml";
+        seedMigrationCommand = migrateCodexConfig;
       };
     };
     capabilityManagedFiles.agentmemory = "system";
@@ -124,11 +151,20 @@ in
     agentmemoryMode = "hooks";
     install = {
       kind = "github-release";
+      updateOwner = "dotfiles";
+      layout = "single-binary";
       repo = "openai/codex";
-      assetByArch = {
-        x86_64 = "codex-x86_64-unknown-linux-musl.tar.gz";
-        aarch64 = "codex-aarch64-unknown-linux-musl.tar.gz";
+      releaseByArch = {
+        x86_64 = {
+          asset = "codex-x86_64-unknown-linux-musl.tar.gz";
+          entrypoint = "codex-x86_64-unknown-linux-musl";
+        };
+        aarch64 = {
+          asset = "codex-aarch64-unknown-linux-musl.tar.gz";
+          entrypoint = "codex-aarch64-unknown-linux-musl";
+        };
       };
+      requiredPaths = { };
     };
   };
 

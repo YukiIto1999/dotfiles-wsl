@@ -14,6 +14,36 @@ let
   httpPort = 4318;
   stateDir = "dotfiles-telemetry";
   archive = "/var/lib/${stateDir}/otel.jsonl";
+  serviceName = "otel-collector";
+  serviceUnit = "${serviceName}.service";
+  observationTimeoutSeconds = 10;
+  restartWarningCount = 5;
+  restartFailureCount = 20;
+
+  telemetryObservations = {
+    "telemetry/service/${serviceName}" = {
+      kind = "systemd-service";
+      checkId = "service/${serviceName}";
+      resourceKey = null;
+      timeoutSeconds = observationTimeoutSeconds;
+      failureMessage = "${serviceName} is not operational";
+      unit = serviceUnit;
+      loadStates = [ "loaded" ];
+      activeStates = [ "active" ];
+      results = [ "success" ];
+    };
+    "telemetry/service-restart/${serviceName}" = {
+      kind = "restart-counter";
+      checkId = "restart/service/${serviceName}";
+      resourceKey = null;
+      timeoutSeconds = observationTimeoutSeconds;
+      failureMessage = "could not observe restart count for ${serviceName}";
+      sourceKind = "systemd-service";
+      target = serviceName;
+      warningAt = restartWarningCount;
+      failureAt = restartFailureCount;
+    };
+  };
 
   collectorConfig = (pkgs.formats.yaml { }).generate "otelcol-config.yaml" {
     receivers.otlp.protocols = {
@@ -83,7 +113,7 @@ in
   config.dotfiles.telemetry = {
     endpoint = "http://127.0.0.1:${toString grpcPort}";
     protocol = "grpc";
-    service = "otel-collector";
+    service = serviceName;
     inherit archive;
     ports = {
       grpc = grpcPort;
@@ -91,7 +121,9 @@ in
     };
   };
 
-  config.systemd.services.otel-collector = {
+  config.dotfiles.observations = telemetryObservations;
+
+  config.systemd.services.${serviceName} = {
     description = "OpenTelemetry collector for AI CLI usage";
     after = [ "network.target" ];
     wantedBy = [ "multi-user.target" ];

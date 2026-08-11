@@ -44,6 +44,7 @@
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
 | LSP roster と対応 client の登録が一致し、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
+| telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |
 | SonarQube の service contract、server と DB の topology、image、volume、環境 file、再起動、secret metadata、provision service と timer が固定値に一致する | `sonarqube-container` |
 | SonarQube MCP front は SOPS の poison stub と canary A / B、型付き credential の canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact が runtime password file を読む | `sonarqube-front` |
 | 生成 config artifact が登録簿に載り、宣言の変更に追随する | `artifact-registry` |

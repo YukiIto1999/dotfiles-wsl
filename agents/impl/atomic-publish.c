@@ -602,6 +602,7 @@ static int move_noreplace_opened(struct directory_pair *directories,
     struct identity destination_stable = {0};
     struct identity source_restored = {0};
     struct identity destination_restored = {0};
+    int hook_status;
     int result;
 
     result = capture_expected(directories->source, source_name, expected_source, &source_before);
@@ -620,6 +621,12 @@ static int move_noreplace_opened(struct directory_pair *directories,
     if (rename_with_flags(directories->source, source_name, directories->destination,
                           destination_name, RENAME_NOREPLACE) != 0) {
         result = errno == EEXIST || errno == ENOENT ? EXIT_CONFLICT : EXIT_SYSCALL;
+        goto done;
+    }
+    hook_status = run_test_hook("inject-move-post-rename-validation", boundary->source_path,
+                                source_name, boundary->destination_path, destination_name);
+    if (hook_status != 0) {
+        result = EXIT_AMBIGUOUS;
         goto done;
     }
     if (capture_identity(directories->source, source_name, &source_after) != 0 ||
@@ -883,6 +890,15 @@ static int quarantine_name(char *buffer, size_t size) {
 
 static int release_gc_name(char *buffer, size_t size) {
     return random_private_name(buffer, size, ".release-gc.");
+}
+
+static bool valid_release_gc_name(const char *name) {
+    static const char prefix[] = ".release-gc.";
+    size_t prefix_length = sizeof(prefix) - 1;
+
+    return strncmp(name, prefix, prefix_length) == 0 &&
+           strlen(name) == prefix_length + 32 &&
+           strspn(name + prefix_length, "0123456789abcdef") == 32;
 }
 
 static bool remove_exact_empty_quarantine(int parent, const char *name,
@@ -1234,25 +1250,26 @@ done:
     return result;
 }
 
-static int command_quarantine_tree_fd(const char *descriptor_text,
-                                      const char *directory_expected, const char *name,
-                                      const char *expected) {
+static int command_release_gc_name(void) {
     char private_name[80];
-    int result;
 
-    if (!valid_basename(name)) {
-        return EXIT_USAGE;
-    }
     if (release_gc_name(private_name, sizeof(private_name)) != 0) {
         return EXIT_SYSCALL;
     }
-    result = command_move_noreplace_fd(descriptor_text, directory_expected, name,
-                                       descriptor_text, directory_expected, private_name,
-                                       expected);
-    if (result == 0) {
-        puts(private_name);
+    puts(private_name);
+    return 0;
+}
+
+static int command_quarantine_tree_fd(const char *descriptor_text,
+                                      const char *directory_expected, const char *name,
+                                      const char *private_name, const char *expected) {
+    if (!valid_basename(name) || !valid_release_gc_name(private_name) ||
+        strcmp(name, private_name) == 0) {
+        return EXIT_USAGE;
     }
-    return result;
+    return command_move_noreplace_fd(descriptor_text, directory_expected, name,
+                                     descriptor_text, directory_expected, private_name,
+                                     expected);
 }
 
 static bool same_directory_identity(const struct stat *left, const struct stat *right) {
@@ -1548,7 +1565,8 @@ static void usage(void) {
             "       dotfiles-agent-atomic-publish unlink-if DIR EXPECTED_DIR NAME EXPECTED\n"
             "       dotfiles-agent-atomic-publish unlink-if-fd FD EXPECTED_DIR NAME EXPECTED\n"
             "       dotfiles-agent-atomic-publish symlink-noreplace-fd FD EXPECTED_DIR NAME TARGET\n"
-            "       dotfiles-agent-atomic-publish quarantine-tree-fd FD EXPECTED_DIR NAME EXPECTED\n"
+            "       dotfiles-agent-atomic-publish release-gc-name\n"
+            "       dotfiles-agent-atomic-publish quarantine-tree-fd FD EXPECTED_DIR NAME PRIVATE_NAME EXPECTED\n"
             "       dotfiles-agent-atomic-publish remove-tree-fd PARENT_FD EXPECTED_PARENT NAME TREE_FD EXPECTED_TREE\n"
             "       dotfiles-agent-atomic-publish probe-exec STAGE_FD EXPECTED_STAGE WORK EXEC DISPLAY CLOSE_FD CLOSE_FD CLOSE_FD -- ARG...\n");
 }
@@ -1591,8 +1609,11 @@ int main(int argc, char **argv) {
     if (argc == 6 && strcmp(argv[1], "symlink-noreplace-fd") == 0) {
         return command_symlink_noreplace_fd(argv[2], argv[3], argv[4], argv[5]);
     }
-    if (argc == 6 && strcmp(argv[1], "quarantine-tree-fd") == 0) {
-        return command_quarantine_tree_fd(argv[2], argv[3], argv[4], argv[5]);
+    if (argc == 2 && strcmp(argv[1], "release-gc-name") == 0) {
+        return command_release_gc_name();
+    }
+    if (argc == 7 && strcmp(argv[1], "quarantine-tree-fd") == 0) {
+        return command_quarantine_tree_fd(argv[2], argv[3], argv[4], argv[5], argv[6]);
     }
     if (argc == 7 && strcmp(argv[1], "remove-tree-fd") == 0) {
         return command_remove_tree_fd(argv[2], argv[3], argv[4], argv[5], argv[6]);

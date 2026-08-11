@@ -72,39 +72,96 @@ append_fragment() {
 }
 
 fragment_is_valid() {
-  local fragment_file=$1
-  $jq_command -e -s '
+  local fragment_file=$1 observation_file=$2
+  $jq_command -e -s --slurpfile observation "$observation_file" '
     length == 1
-    and (.[0] | type) == "object"
-    and (.[0] | keys | sort) == ["checks","failures","resources","restart","warnings"]
-    and (.[0].checks | type) == "array"
-    and (.[0].warnings | type) == "array"
-    and (.[0].failures | type) == "array"
-    and (.[0].resources | type) == "array"
-    and all(.[0].checks[];
-      type == "object"
-      and (keys | sort) == ["id","status"]
-      and (.id | type) == "string" and (.id | length) > 0
-      and (.status == "pass" or .status == "warn" or .status == "fail"))
-    and all(.[0].warnings[], .[0].failures[];
-      type == "object"
-      and (keys | sort) == ["id","message"]
-      and (.id | type) == "string" and (.id | length) > 0
-      and (.message | type) == "string" and (.message | length) > 0)
-    and all(.[0].resources[];
-      type == "object"
-      and (keys | sort) == ["key","value"]
-      and (.key | type) == "string" and (.key | length) > 0)
+    and ($observation | length) == 1
     and (
-      .[0].restart == null
-      or (
-        (.[0].restart | type) == "object"
-        and (.[0].restart | keys | sort) == ["count","kind","target"]
-        and (.[0].restart.kind == "service" or .[0].restart.kind == "container")
-        and (.[0].restart.target | type) == "string" and (.[0].restart.target | length) > 0
-        and (.[0].restart.count | type) == "number"
-        and .[0].restart.count >= 0
-        and (.[0].restart.count | floor) == .[0].restart.count
+      .[0] as $fragment
+      | $observation[0].value as $contract
+      | (
+          if $contract.kind == "normalized-protocol"
+          then $contract.allowedOutcomeIds
+          else [$contract.checkId]
+          end
+        ) as $allowed_check_ids
+      | (
+          if $contract.kind == "normalized-protocol"
+          then $contract.requiredOutcomeIds
+          elif $contract.kind == "roster" and $contract.failureOnly
+          then []
+          else [$contract.checkId]
+          end
+        ) as $required_check_ids
+      | (
+          if $contract.kind == "normalized-protocol"
+          then $contract.requiredResourceKeys
+          elif $contract.resourceKey == null
+          then []
+          else [$contract.resourceKey]
+          end
+        ) as $allowed_resource_keys
+      | ($fragment.checks | map(.id)) as $check_ids
+      | ($fragment.warnings | map(.id)) as $warning_ids
+      | ($fragment.failures | map(.id)) as $failure_ids
+      | ($fragment.resources | map(.key)) as $resource_keys
+      | ($fragment.checks | map(select(.status == "warn") | .id)) as $warn_check_ids
+      | ($fragment.checks | map(select(.status == "fail") | .id)) as $fail_check_ids
+      | ($fragment | type) == "object"
+      and ($fragment | keys | sort) == ["checks","failures","resources","restart","warnings"]
+      and ($fragment.checks | type) == "array"
+      and ($fragment.warnings | type) == "array"
+      and ($fragment.failures | type) == "array"
+      and ($fragment.resources | type) == "array"
+      and all($fragment.checks[];
+        type == "object"
+        and (keys | sort) == ["id","status"]
+        and (.id | type) == "string" and (.id | length) > 0
+        and (.status == "pass" or .status == "warn" or .status == "fail"))
+      and all($fragment.warnings[], $fragment.failures[];
+        type == "object"
+        and (keys | sort) == ["id","message"]
+        and (.id | type) == "string" and (.id | length) > 0
+        and (.message | type) == "string" and (.message | length) > 0)
+      and all($fragment.resources[];
+        type == "object"
+        and (keys | sort) == ["key","value"]
+        and (.key | type) == "string" and (.key | length) > 0)
+      and ($check_ids | length) == ($check_ids | unique | length)
+      and all($check_ids[]; . as $id | ($allowed_check_ids | index($id)) != null)
+      and all($required_check_ids[]; . as $id | ($check_ids | index($id)) != null)
+      and ($warning_ids | sort) == ($warn_check_ids | sort)
+      and ($failure_ids | sort) == ($fail_check_ids | sort)
+      and ($resource_keys | length) == ($resource_keys | unique | length)
+      and all($resource_keys[]; . as $key | ($allowed_resource_keys | index($key)) != null)
+      and (
+        $contract.kind != "normalized-protocol"
+        or ($resource_keys | sort) == ($contract.requiredResourceKeys | sort)
+      )
+      and (
+        if $contract.kind != "restart-counter"
+        then $fragment.restart == null
+        elif $fragment.restart == null
+        then any($fragment.checks[];
+          .id == $contract.checkId and .status == "fail")
+        else
+          ($fragment.restart | type) == "object"
+          and ($fragment.restart | keys | sort) == ["count","kind","target"]
+          and ($fragment.restart.target | type) == "string"
+          and ($fragment.restart.target | length) > 0
+          and $fragment.restart.target == $contract.target
+          and (
+            if $contract.sourceKind == "systemd-service"
+            then $fragment.restart.kind == "service"
+            elif $contract.sourceKind == "container"
+            then $fragment.restart.kind == "container"
+            else false
+            end
+          )
+          and ($fragment.restart.count | type) == "number"
+          and $fragment.restart.count >= 0
+          and ($fragment.restart.count | floor) == $fragment.restart.count
+        end
       )
     )
   ' "$fragment_file" >/dev/null 2>&1
@@ -147,7 +204,7 @@ for index in "${!observation_rows[@]}"; do
   if [[ $fragment_size =~ ^[0-9]+$ ]] \
     && ((fragment_size <= 131072)) \
     && ((pipeline_status[0] == 0 && pipeline_status[1] == 0)) \
-    && fragment_is_valid "$fragment_file"; then
+    && fragment_is_valid "$fragment_file" "$observation_file"; then
     append_fragment "$fragment_file"
   else
     record_fallback_failure "$observation"

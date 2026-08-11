@@ -9,6 +9,7 @@ let
   myCfg = config.dotfiles;
   cfg = config.dotfiles.containers;
   mkCommand = import ../commands/impl/mk-command.nix { inherit config lib pkgs; };
+  portBindings = import ./impl/port-bindings.nix { inherit lib; };
   configuredContainers = config.virtualisation.oci-containers.containers;
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
@@ -187,28 +188,9 @@ let
     ];
   };
 
-  extraOptionPortBindings =
-    container:
-    let
-      options = container.extraOptions;
-    in
-    lib.concatLists (
-      lib.imap0 (
-        index: option:
-        if option == "-p" || option == "--publish" then
-          [ (if index + 1 < builtins.length options then builtins.elemAt options (index + 1) else "") ]
-        else if lib.hasPrefix "-p=" option then
-          [ (lib.removePrefix "-p=" option) ]
-        else if lib.hasPrefix "--publish=" option then
-          [ (lib.removePrefix "--publish=" option) ]
-        else
-          [ ]
-      ) options
-    );
-
-  publishedPortBindings = lib.concatMap (
-    container: container.ports ++ extraOptionPortBindings container
-  ) (builtins.attrValues configuredContainers);
+  publishedPortBindings = lib.concatMap portBindings.publishedPortBindings (
+    builtins.attrValues configuredContainers
+  );
 
   failedServices =
     predicate: map (entry: entry.application) (builtins.filter predicate serviceEntries);
@@ -221,7 +203,7 @@ let
         let
           container = configuredContainers.${image.container};
         in
-        container.ports ++ extraOptionPortBindings container
+        portBindings.publishedPortBindings container
       else
         [ ]
     ) (builtins.attrValues service.images);
@@ -519,13 +501,6 @@ in
           binding: builtins.match "^127\\.0\\.0\\.1:[0-9]+:[0-9]+$" binding != null
         ) publishedPortBindings;
         message = "OCI container host ports must be published on loopback";
-      }
-      {
-        assertion =
-          builtins.hasAttr "sonarqube-db" configuredContainers
-          && configuredContainers.sonarqube-db.ports == [ ]
-          && extraOptionPortBindings configuredContainers.sonarqube-db == [ ];
-        message = "the internal SonarQube database must not publish a host port";
       }
     ];
   };

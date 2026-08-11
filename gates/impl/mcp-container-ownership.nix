@@ -45,20 +45,40 @@ let
 
   violationsFor =
     inspected:
+    let
+      matchingSecretNames =
+        target: definition:
+        builtins.filter (name: name == target || lib.hasPrefix "${target}/" name) (
+          builtins.attrNames definition.value
+        );
+      hasExistingSecretOwner =
+        secretName:
+        lib.any (
+          definition:
+          definition.label == "sops.secrets"
+          && definition.owner != null
+          && !isMcpUnit definition.owner
+          && builtins.hasAttr secretName definition.value
+        ) inspected;
+      restartContributionIsAllowed =
+        definition: secretName:
+        builtins.attrNames definition.value.${secretName} == [ "restartUnits" ]
+        && hasExistingSecretOwner secretName;
+    in
     lib.concatMap (
       definition:
       let
         inherit (definition) owner;
         target = if owner == null then null else targetOf owner;
+        secretNames =
+          if definition.mode == "same-target-prefix" then matchingSecretNames target definition else [ ];
         ownsTarget =
           if definition.mode == "all" then
             true
           else if definition.mode == "same-target" then
             builtins.hasAttr target definition.value
           else
-            builtins.any (name: name == target || lib.hasPrefix "${target}/" name) (
-              builtins.attrNames definition.value
-            );
+            secretNames != [ ] && !lib.all (restartContributionIsAllowed definition) secretNames;
       in
       lib.optional (isMcpUnit owner && ownsTarget)
         "${definition.file}:${definition.label}${

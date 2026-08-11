@@ -12,7 +12,6 @@ let
   expectedEnvironmentFile = "/run/secrets/rendered/crawl4ai.env";
   expectedTokenFile = "/run/secrets/crawl4ai/api_token";
   expectedUnit = "docker-crawl4ai.service";
-  expectedFrontUnit = "mcp-front-crawl4ai.service";
   expectedService = {
     endpoints.http = {
       protocol = "http";
@@ -61,7 +60,6 @@ in
     assert token.mode == "0400";
     assert token.owner == "nixos";
     assert token.group == "users";
-    assert token.restartUnits == [ expectedFrontUnit ];
     assert credentialOption.type.name == "str";
     assert credentialOption.readOnly or false;
     assert hostConfig.dotfiles.containers.crawl4ai.credentials.apiTokenFile == expectedTokenFile;

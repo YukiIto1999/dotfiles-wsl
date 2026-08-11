@@ -30,4 +30,8 @@ in
       timeout = 60;
     };
   };
+
+  sops.secrets."crawl4ai/api_token".restartUnits = [
+    "${config.dotfiles.mcp.fronts.crawl4ai.service}.service"
+  ];
 }

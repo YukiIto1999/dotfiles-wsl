@@ -58,7 +58,6 @@ in
       mode = "0400";
       owner = config.dotfiles.host.username;
       group = "users";
-      restartUnits = [ "mcp-front-crawl4ai.service" ];
     };
 
     # token を渡すと entrypoint が [::] へ bind する。未設定では container 内の

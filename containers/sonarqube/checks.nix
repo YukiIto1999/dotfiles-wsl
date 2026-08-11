@@ -7,6 +7,7 @@
 }:
 
 let
+  inherit (import ../impl/port-bindings.nix { inherit lib; }) publishedPortBindings;
   serverImage = "sonarqube:community@sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
   databaseImage = "postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
   serverUnit = "docker-sonarqube.service";
@@ -71,6 +72,51 @@ let
     "credentials"
     "adminPasswordFile"
   ] null hostOptions;
+  publishedDatabaseBinding = "127.0.0.1:5432:5432";
+  databasePortBindingMutations = [
+    (database // { ports = [ publishedDatabaseBinding ]; })
+    (
+      database
+      // {
+        extraOptions = database.extraOptions ++ [
+          "-p"
+          publishedDatabaseBinding
+        ];
+      }
+    )
+    (
+      database
+      // {
+        extraOptions = database.extraOptions ++ [
+          "--publish"
+          publishedDatabaseBinding
+        ];
+      }
+    )
+    (database // { extraOptions = database.extraOptions ++ [ "-p=${publishedDatabaseBinding}" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "-p${publishedDatabaseBinding}" ]; })
+    (
+      database // { extraOptions = database.extraOptions ++ [ "--publish=${publishedDatabaseBinding}" ]; }
+    )
+    (database // { extraOptions = database.extraOptions ++ [ "-P" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "--publish-all" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "-P=true" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "--publish-all=true" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "--publish-all=invalid" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "-iP" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "-itp${publishedDatabaseBinding}" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "-p" ]; })
+  ];
+  disabledPublishAllMutations = [
+    (database // { extraOptions = database.extraOptions ++ [ "-P=false" ]; })
+    (database // { extraOptions = database.extraOptions ++ [ "--publish-all=0" ]; })
+  ];
+  ownerAssertionDefinitions = builtins.filter (
+    definition: lib.hasSuffix "/containers/sonarqube/module.nix" (toString definition.file)
+  ) hostOptions.assertions.definitionsWithLocations;
+  databasePortAssertions = builtins.filter (
+    entry: entry.message == "the internal SonarQube database must not publish a host port"
+  ) (lib.concatMap (definition: definition.value) ownerAssertionDefinitions);
 in
 {
   sonarqube-container =
@@ -106,6 +152,31 @@ in
         "--memory=1g"
       ];
     assert database.ports == [ ];
+    assert builtins.length databasePortAssertions == 1;
+    assert (builtins.head databasePortAssertions).assertion;
+    assert publishedPortBindings database == [ ];
+    assert
+      map publishedPortBindings databasePortBindingMutations == [
+        [ publishedDatabaseBinding ]
+        [ publishedDatabaseBinding ]
+        [ publishedDatabaseBinding ]
+        [ publishedDatabaseBinding ]
+        [ publishedDatabaseBinding ]
+        [ publishedDatabaseBinding ]
+        [ "<publish-all>" ]
+        [ "<publish-all>" ]
+        [ "<publish-all>" ]
+        [ "<publish-all>" ]
+        [ "<publish-all>" ]
+        [ "<publish-option-cluster>" ]
+        [ "<publish-option-cluster>" ]
+        [ "" ]
+      ];
+    assert
+      map publishedPortBindings disabledPublishAllMutations == [
+        [ ]
+        [ ]
+      ];
     assert
       serverSystemd.requires == [
         "docker-dotfiles-backends-network.service"

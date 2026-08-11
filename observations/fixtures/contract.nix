@@ -182,6 +182,7 @@ let
   replace = name: value: valid // { ${name} = value; };
   restartCounter = valid."host/restart-counter";
   numericThreshold = valid."host/numeric-command-threshold";
+  normalizedProtocol = valid."host/normalized-protocol";
 in
 {
   inherit valid;
@@ -228,6 +229,15 @@ in
     );
     normalizedCommandWrongPurpose = replace "host/normalized-protocol" (
       valid."host/normalized-protocol" // { command = numericCommand; }
+    );
+    duplicateRequiredResourceKeys = replace "host/normalized-protocol" (
+      normalizedProtocol
+      // {
+        requiredResourceKeys = [
+          "state"
+          "state"
+        ];
+      }
     );
     foreignRegistryKey = valid // {
       "foreign" = valid."host/roster";

@@ -131,6 +131,14 @@ let
       ];
     }
   );
+  emptyNormalizedProtocolResourcesEvaluation = evalRegistry (
+    fixture.valid
+    // {
+      "host/normalized-protocol" = fixture.valid."host/normalized-protocol" // {
+        requiredResourceKeys = [ ];
+      };
+    }
+  );
   nestedDefinitionModule = file: {
     _file = "${self}/${file}";
     dotfiles.observations."host/sample".failureMessage = "nested fixture failure";
@@ -168,6 +176,7 @@ in
     assert evaluationSucceeds validEvaluation;
     assert evaluationSucceeds (evalRegistry { });
     assert evaluationSucceeds optionalCommonEvaluation;
+    assert evaluationSucceeds emptyNormalizedProtocolResourcesEvaluation;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".checkId == null;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".resourceKey == null;
     assert builtins.length missingRequiredCases == 112;

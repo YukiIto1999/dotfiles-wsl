@@ -220,21 +220,31 @@ let
     };
 
   installManifest = builtins.toJSON (map installRecord clientNames);
+  atomicPublish = import ./impl/atomic-publish.nix { inherit pkgs; };
 
   installAgents = mkCommand {
     name = "dotfiles-install-agents";
     src = ./impl/install-agents.sh;
     vars = {
       inherit installManifest;
+      atomicPublishCommand = lib.escapeShellArg (
+        lib.getExe' atomicPublish "dotfiles-agent-atomic-publish"
+      );
+      transactionHookCommand = lib.escapeShellArg "${pkgs.coreutils}/bin/true";
       versionArgsDecoder = builtins.readFile ./impl/version-args.sh;
     };
     runtimeInputs = with pkgs; [
+      atomicPublish
       bash
       curl
+      diffutils
+      findutils
+      gawk
       jq
       gnutar
       gzip
       coreutils
+      util-linux
     ];
   };
 

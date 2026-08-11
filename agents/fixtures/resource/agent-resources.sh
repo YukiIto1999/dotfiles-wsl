@@ -2206,8 +2206,151 @@ assert_proc_failure_preserved proc-reference-broken broken
 assert_proc_owner_failure_preserved
 assert_foreign_proc_failure_ignored
 
+new_case reap-linear-jq
+linear_session_count=8
+linear_state_root=$(state_root)
+linear_owner_start_time=$(proc_start_time $$)
+linear_boot_id=$(</proc/sys/kernel/random/boot_id)
+linear_updated_at=$(date +%s)
+mkdir -p "$linear_state_root/sessions" "$linear_state_root/worktrees" \
+  "$linear_state_root/locks"
+chmod 700 "$linear_state_root" "$linear_state_root/sessions" \
+  "$linear_state_root/worktrees" "$linear_state_root/locks"
+for index in $(seq 1 "$linear_session_count"); do
+  linear_session_id="linear-session-$index"
+  jq -cn \
+    --arg session_id "$linear_session_id" \
+    --arg boot_id "$linear_boot_id" \
+    --arg owner_start_time "$linear_owner_start_time" \
+    --argjson owner_pid "$$" \
+    --argjson updated_at "$linear_updated_at" \
+    '{version: 1, session_id: $session_id, client: "fixture-client",
+      owner_pid: $owner_pid, owner_start_time: $owner_start_time,
+      boot_id: $boot_id, status: "ended", reason: "cleanup",
+      updated_at: $updated_at}' \
+    >"$linear_state_root/sessions/$linear_session_id.json"
+  chmod 600 "$linear_state_root/sessions/$linear_session_id.json"
+  : >"$linear_state_root/locks/$linear_session_id.lock"
+  : >"$linear_state_root/locks/linear-orphan-$index.lock"
+  chmod 600 "$linear_state_root/locks/$linear_session_id.lock" \
+    "$linear_state_root/locks/linear-orphan-$index.lock"
+done
+linear_jq_counter="$HOME/jq-count"
+printf '0\n' >"$linear_jq_counter"
+DOTFILES_AGENT_TEST_JQ_COUNTER="$linear_jq_counter" "$COUNTING_RESOURCE" reap
+linear_jq_calls=$(<"$linear_jq_counter")
+linear_jq_bound=$((linear_session_count * 12))
+if ((linear_jq_calls == 0)); then
+  echo 'reap did not use the counting jq wrapper' >&2
+  exit 1
+fi
+if ((linear_jq_calls > linear_jq_bound)); then
+  echo "reap exceeded linear jq bound: calls=$linear_jq_calls bound=$linear_jq_bound" >&2
+  exit 1
+fi
+
 # Terminal ledgers use their recorded update time for bounded retention. Ledger
 # expiry never authorizes deleting a worktree.
+new_case terminal-retention-crash
+begin_session crash-retention-session
+crash_retention_session="$(state_root)/sessions/crash-retention-session.json"
+crash_retention_lock="$(state_root)/locks/crash-retention-session.lock"
+"$RESOURCE" cleanup-session crash-retention-session
+jq '.updated_at = 0' "$crash_retention_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$crash_retention_session"
+set +e
+DOTFILES_AGENT_TEST_PRUNE_SESSION=crash-retention-session \
+  DOTFILES_AGENT_TEST_PRUNE_MODE=crash-after \
+  DOTFILES_AGENT_TEST_PRUNE_MARKER="$HOME/prune-crashed" \
+  "$CONTROLLED_PRUNE_RESOURCE" reap
+crash_retention_status=$?
+set -e
+test "$crash_retention_status" -eq 137
+test -e "$HOME/prune-crashed"
+if [ -e "$crash_retention_lock" ] || [ -L "$crash_retention_lock" ]; then
+  echo 'terminal prune crash left an orphan session lock' >&2
+  exit 1
+fi
+
+new_case terminal-retention-failure
+begin_session failure-retention-session
+failure_retention_session="$(state_root)/sessions/failure-retention-session.json"
+failure_retention_lock="$(state_root)/locks/failure-retention-session.lock"
+"$RESOURCE" cleanup-session failure-retention-session
+jq '.updated_at = 0' "$failure_retention_session" >"$HOME/session.tmp"
+chmod 600 "$HOME/session.tmp"
+mv -T "$HOME/session.tmp" "$failure_retention_session"
+if DOTFILES_AGENT_TEST_PRUNE_SESSION=failure-retention-session \
+  DOTFILES_AGENT_TEST_PRUNE_MODE=fail-once \
+  DOTFILES_AGENT_TEST_PRUNE_MARKER="$HOME/prune-failed" \
+  "$CONTROLLED_PRUNE_RESOURCE" reap; then
+  echo 'terminal ledger deletion failure unexpectedly succeeded' >&2
+  exit 1
+fi
+test -f "$failure_retention_session"
+if [ -e "$failure_retention_lock" ] || [ -L "$failure_retention_lock" ]; then
+  echo 'terminal ledger deletion failure kept the old session lock' >&2
+  exit 1
+fi
+"$RESOURCE" reap
+test ! -e "$failure_retention_session"
+test ! -e "$failure_retention_lock"
+
+new_case terminal-retention-orphan-lock
+orphan_retention_lock="$(state_root)/locks/orphan-retention-session.lock"
+mkdir -p "$(state_root)/locks"
+: >"$orphan_retention_lock"
+chmod 600 "$orphan_retention_lock"
+exec 8<>"$orphan_retention_lock"
+flock -x 8
+"$RESOURCE" reap &
+orphan_reap_pid=$!
+set +e
+timeout 0.5 tail --pid="$orphan_reap_pid" -f /dev/null
+orphan_wait_status=$?
+set -e
+test "$orphan_wait_status" -eq 124
+test -f "$orphan_retention_lock"
+flock -u 8
+exec 8>&-
+wait "$orphan_reap_pid"
+if [ -e "$orphan_retention_lock" ] || [ -L "$orphan_retention_lock" ]; then
+  echo 'orphan session lock survived migration pruning' >&2
+  exit 1
+fi
+
+new_case terminal-retention-orphan-begin-race
+orphan_begin_session=orphan-begin-session
+orphan_begin_lock="$(state_root)/locks/$orphan_begin_session.lock"
+orphan_begin_ledger="$(state_root)/sessions/$orphan_begin_session.json"
+orphan_begin_ready=$HOME/orphan-begin-ready
+orphan_begin_release=$HOME/orphan-begin-release
+mkdir -p "$(state_root)/locks"
+: >"$orphan_begin_lock"
+chmod 600 "$orphan_begin_lock"
+DOTFILES_AGENT_TEST_PRUNE_LOCK="$orphan_begin_lock" \
+  DOTFILES_AGENT_TEST_PRUNE_MODE=pause-lock-before \
+  DOTFILES_AGENT_TEST_PRUNE_MARKER="$orphan_begin_ready" \
+  DOTFILES_AGENT_TEST_PRUNE_RELEASE="$orphan_begin_release" \
+  "$CONTROLLED_PRUNE_RESOURCE" reap &
+orphan_begin_reap_pid=$!
+wait_for_file "$orphan_begin_ready"
+test -f "$orphan_begin_lock"
+(begin_session "$orphan_begin_session") &
+orphan_begin_pid=$!
+set +e
+timeout 0.5 tail --pid="$orphan_begin_pid" -f /dev/null
+orphan_begin_wait_status=$?
+set -e
+test "$orphan_begin_wait_status" -eq 124
+test ! -e "$orphan_begin_ledger"
+: >"$orphan_begin_release"
+wait "$orphan_begin_reap_pid"
+wait "$orphan_begin_pid"
+test -f "$orphan_begin_lock"
+test "$(jq -r '.status' "$orphan_begin_ledger")" = active
+
 new_case terminal-retention
 retention_repo="$HOME/repo"
 retention_path="$HOME/removed"
@@ -2216,16 +2359,36 @@ begin_session retention-session
 add_managed_worktree "$retention_repo" "$retention_path"
 retention_record=$(record_for_path "$retention_path")
 retention_session="$(state_root)/sessions/retention-session.json"
+retention_lock="$(state_root)/locks/retention-session.lock"
 "$RESOURCE" cleanup-session retention-session
 test ! -e "$retention_path"
+test -f "$retention_lock"
 for ledger in "$retention_record" "$retention_session"; do
   jq '.updated_at = 0' "$ledger" >"$HOME/ledger.tmp"
   chmod 600 "$HOME/ledger.tmp"
   mv -T "$HOME/ledger.tmp" "$ledger"
 done
-"$RESOURCE" reap
+exec 8<>"$retention_lock"
+flock -x 8
+"$RESOURCE" reap &
+retention_reap_pid=$!
+set +e
+timeout 0.5 tail --pid="$retention_reap_pid" -f /dev/null
+retention_wait_status=$?
+set -e
+test "$retention_wait_status" -eq 124
+test -f "$retention_record"
+test -f "$retention_session"
+test -f "$retention_lock"
+flock -u 8
+exec 8>&-
+wait "$retention_reap_pid"
 test ! -e "$retention_record"
 test ! -e "$retention_session"
+if [ -e "$retention_lock" ] || [ -L "$retention_lock" ]; then
+  echo 'terminal session lock survived ledger retention pruning' >&2
+  exit 1
+fi
 
 # Legacy terminal records without updated_at fall back to their own mtime.
 # Pruning the expired ownership record leaves the preserved dirty worktree.

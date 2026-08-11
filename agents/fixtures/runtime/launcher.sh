@@ -68,6 +68,14 @@ stat -c %a "$TMPDIR" > "$CAPTURE/tmp-mode"
 stat -c %a "${TMPDIR%/tmp}" > "$CAPTURE/session-mode"
 stat -c %a "${TMPDIR%/tmp}/metadata.json" > "$CAPTURE/metadata-mode"
 stat -c %a "$HOME/.cache/dotfiles-wsl/gc.lock" > "$CAPTURE/lock-mode"
+if [ -n "${RACE_READY-}" ] && [ -n "${RACE_RELEASE-}" ] \
+  && [ -n "${RACE_SESSION-}" ]; then
+  printf '%s\n' "${TMPDIR%/tmp}" > "$RACE_SESSION"
+  : > "$RACE_READY"
+  while [ ! -e "$RACE_RELEASE" ]; do
+    sleep 0.01
+  done
+fi
 exit "${FAKE_STATUS:-0}"
 SCRIPT
 chmod +x "$fixture_home/.local/bin/fake-agent"
@@ -140,6 +148,43 @@ mapfile -d '' -t argv < "$capture/argv"
 test "${#argv[@]}" -eq 2
 test "${argv[0]}" = 'space arg'
 test "${argv[1]}" = $'line\narg'
+
+# A GC scan holding gc.lock must see the session directory until it releases
+# the lock.  Launcher cleanup then removes the session before returning.
+race_ready=$fixture/race-ready
+race_release=$fixture/race-release
+race_session_file=$fixture/race-session
+(
+  cd "$repo"
+  RACE_READY=$race_ready RACE_RELEASE=$race_release RACE_SESSION=$race_session_file \
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+) &
+race_launcher_pid=$!
+for _ in {1..100}; do
+  [ -e "$race_ready" ] && break
+  sleep 0.01
+done
+test -e "$race_ready"
+race_session=$(<"$race_session_file")
+exec 9<>"$HOME/.cache/dotfiles-wsl/gc.lock"
+flock -x 9
+: > "$race_release"
+set +e
+timeout 0.5 tail --pid="$race_launcher_pid" -f /dev/null
+race_wait_status=$?
+set -e
+if [ "$race_wait_status" -ne 124 ]; then
+  echo "launcher exited while GC held gc.lock: status $race_wait_status" >&2
+  exit 1
+fi
+if [ ! -d "$race_session" ]; then
+  echo 'launcher removed session while GC held gc.lock' >&2
+  exit 1
+fi
+flock -u 9
+exec 9>&-
+wait "$race_launcher_pid"
+test ! -e "$race_session"
 
 set +e
 (

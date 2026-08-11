@@ -8,7 +8,7 @@
 
 [`sops/module.nix`](../../sops/module.nix) は sops-nix の age key を `/var/lib/sops-nix/key.txt` に固定し、自動生成を無効にする。directory は root `0700`、key は root `0400` であり、通常ユーザーは鍵本文を読まない。
 
-host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`secrets/.sops.yaml`](../../secrets/.sops.yaml) は公開 recipient、[`secrets/secrets.yaml`](../../secrets/secrets.yaml) は暗号文を保持する。復号鍵は Git に置かない。
+host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`sops/assets/.sops.yaml`](../../sops/assets/.sops.yaml) は公開 recipient、[`sops/assets/secrets.yaml`](../../sops/assets/secrets.yaml) は暗号文を保持する。復号鍵は Git に置かない。
 
 sops-nix は activation 時に暗号文を復号する。`sops.secrets` の secret file は `/run/secrets`、配備 path を指定しない template は `/run/secrets/rendered` に平文を生成する。agentmemory の環境ファイルは後者に属する。
 

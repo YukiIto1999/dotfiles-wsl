@@ -21,7 +21,7 @@ let
   ) config.sops.secrets;
 in
 {
-  config.sops.defaultSopsFile = ../secrets/secrets.yaml;
+  config.sops.defaultSopsFile = ./assets/secrets.yaml;
   config.sops.age.keyFile = "/var/lib/sops-nix/key.txt";
   config.sops.age.generateKey = false;
 

@@ -67,7 +67,7 @@ git diff --check
 
 `${self}` と `./` は様式の違いではない。`./x` は `x` だけを含む独立した store path になり、`${self}/x` は checkout 全体の store path の中を指す。実行時に隣のファイルを解決する script は後者でなければ壊れる。単体で完結する fixture と data は前者でよい。
 
-repo root から見た path を unit の中の file にそのまま書かない。`secrets/fixtures/x` を `secrets/` unit の中に書くと `secrets/secrets/fixtures/x` に解決する。
+repo root から見た path を unit の中の file にそのまま書かない。`sops/fixtures/x` を `sops/` unit の中に書くと `sops/sops/fixtures/x` に解決する。
 
 ## CI
 

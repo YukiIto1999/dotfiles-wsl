@@ -90,7 +90,7 @@ Docker daemon の native BuildKit GC は cache を 60GB に保つ。6 時間ご�
 
 ## agentmemory
 
-[`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は agentmemory engine の Docker container を配備し、lifecycle hook package と OpenCode capture plugin の source を型付き contract で公開する。[`agents/module.nix`](../../agents/module.nix) と OpenCode adapter がその contract を読み、client 側へ配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
+[`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は upstream package root、version、endpoint と agentmemory engine の Docker container を所有する。[`agents/agentmemory/module.nix`](../../agents/agentmemory/module.nix) はその型付き upstream contract から lifecycle hook package と OpenCode capture plugin を導き、agent 側へ配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
 
 ```text
 Claude Code / Codex hooks ─┐

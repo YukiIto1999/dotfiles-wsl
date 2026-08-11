@@ -44,6 +44,7 @@
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
+| Agent Package Manager が宣言した version で起動する | `agent-apm-binary-runs` |
 | LSP roster と対応 client の登録が一致し、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |
@@ -53,7 +54,7 @@
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
 | host の固定 client roster、提供集合、型metadata、capability、installer、managed file が固定 fixture に一致し、不正な branch field、必須 field 欠落、freeform field、mode 矛盾を変異入力で拒否する | `agent-client-roster` |
 | 共通 rules が UTF-8、非空、見出しを持ち、shared と OpenCode の definition frontmatter、Codex TOML、Claude の byte equality が実配備 source で成立する | `agent-definition-rendering` |
-| agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、container から agent への逆依存禁止、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
+| agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
 | seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し、front の起動依存と子 process を持たない | `gateway-front-contract` |
@@ -61,7 +62,8 @@
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
 | Chrome DevTools の front が host の chromium を使い CDP を露出しない | `chrome-devtools-front` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
-| agentmemory backend の image、設定、mount、環境 file、health、client package が固定値と一致する | `agentmemory-container` |
+| agentmemory backend の image、設定、mount、環境 file、health、upstream package が固定値と一致する | `agentmemory-container` |
+| AgentMemory の lifecycle hook roster、endpoint、OpenCode plugin と upstream version が一致する | `agentmemory-client-integration` |
 | agentmemory MCP front の package、port、backend unit が一致し、initialize に応答する | `agentmemory-front` |
 | Crawl4AI backend の image、publish、credential option の型、read-only 属性、値、environment file、health contract が固定値と一致する | `crawl4ai-container` |
 | Crawl4AI MCP front は SOPS の poison stub と canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact の環境変数と initialize probe の応答を検査する | `crawl4ai-front` |
@@ -108,7 +110,7 @@
 | 制約 | 検証 |
 |---|---|
 | 固定した virtual tree の再帰走査で通常ファイルの `module.nix` だけを unit marker とし、flake の unit ID が source 内の該当 directory と一致する | `unit-module-marker` |
-| SonarQube の unit が `containers/sonarqube` と `mcp/sonarqube` にだけ存在し、旧責務 path が実在しない | `structure-responsibility-roots` |
+| tracked flake source の root が固定した責務 roster と基盤 file だけを持ち、SonarQube、AgentMemory、agent 補助 package、SOPS 資産が各 owner に分かれ、container から agents への逆依存と旧責務 path が存在しない | `structure-responsibility-roots` |
 | unit の直下が層の file 名か子 unit だけであり、移動済みの Agentmemory と SearXNG の資産が旧 path に再作成されない | `structure-layer-names` |
 
 ## 形式

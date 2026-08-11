@@ -355,6 +355,12 @@ in
       type = types.listOf types.str;
       description = "この host が必要とする agent client ID。";
     };
+    packages = lib.mkOption {
+      type = types.attrsOf types.package;
+      readOnly = true;
+      internal = true;
+      description = "agent 固有の PATH package。";
+    };
     stateRoot = lib.mkOption {
       type = types.str;
       readOnly = true;

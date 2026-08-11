@@ -23,12 +23,13 @@ age-keygen -o /tmp/host.key
 sudo install -m 0400 -o root -g root /tmp/host.key /var/lib/sops-nix/key.txt
 ```
 
-生成した公開鍵を `secrets/.sops.yaml` の `hosts` と `creation_rules` へ足し、recovery key で再暗号化する。
+生成した公開鍵を `sops/assets/.sops.yaml` の `keys` に host anchor として追加し、`creation_rules` から参照する。続けて recovery key で再暗号化する。
 
 ```bash
 SOPS_AGE_KEY_FILE=/media/offline/recovery-key.txt \
-  sops --config secrets/.sops.yaml updatekeys secrets/secrets.yaml
-SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops decrypt secrets/secrets.yaml > /dev/null
+  sops --config sops/assets/.sops.yaml updatekeys sops/assets/secrets.yaml
+SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
+  sops --config sops/assets/.sops.yaml decrypt sops/assets/secrets.yaml > /dev/null
 ```
 
 最後の復号が成功してから先へ進む。**確かめる前に旧 recipient を外すと全 secret を失う。**手順の詳細は [SOPS の鍵](sops-enrollment.md)にある。
@@ -37,11 +38,11 @@ SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops decrypt secrets/secrets.yaml > 
 
 ```bash
 git diff --check
-git diff -- secrets
+git diff -- sops/assets
 git status --short
 ```
 
-`git status --short` に表示される変更は `secrets/.sops.yaml` と `secrets/secrets.yaml` の二つだけにする。bootstrap 前は Git identity が未配備なので、この時点では commit しない。鍵の交換が済んだら recovery key をホストから取り外す。
+`git status --short` に表示される変更は `sops/assets/.sops.yaml` と `sops/assets/secrets.yaml` の二つだけにする。bootstrap 前は Git identity が未配備なので、この時点では commit しない。鍵の交換が済んだら recovery key をホストから取り外す。
 
 ## Bootstrap
 
@@ -62,7 +63,7 @@ sudo bash commands/rebuild/impl/bootstrap.sh
 | 4 | root の Git `safe.directory` に checkout を登録する |
 | 5 | flake、lock、暗号化済み secrets、host key の存在と host key の owner、mode を検査する |
 | 6 | flake build から見えない未追跡ファイルがないことを確認する |
-| 7 | host key で `secrets/secrets.yaml` を復号できることを確認する |
+| 7 | host key で `sops/assets/secrets.yaml` を復号できることを確認する |
 | 8 | AI CLI を upstream から `~/.local/bin` へ配置する |
 | 9 | flake が固定した `nixos-rebuild` で boot generation を作る |
 | 10 | `/etc/nixos` を `~/dotfiles-wsl` への symlink にする |
@@ -93,11 +94,11 @@ system generation、service、managed file、OCI image、AI CLI、MCP の実状�
 ```bash
 dotfiles-doctor
 git diff --check
-git diff -- secrets
+git diff -- sops/assets
 git status --short
 ```
 
-doctor が成功し、`git status --short` に暗号化済みファイル二つ以外の変更がないことを確認する。sops-nix が配備した Git identity を使い、`secrets/.sops.yaml` と `secrets/secrets.yaml` を同じ commit に記録する。
+doctor が成功し、`git status --short` に暗号化済みファイル二つ以外の変更がないことを確認する。sops-nix が配備した Git identity を使い、`sops/assets/.sops.yaml` と `sops/assets/secrets.yaml` を同じ commit に記録する。
 
 ## 別 host への再現
 
@@ -106,6 +107,6 @@ doctor が成功し、`git status --short` に暗号化済みファイル二つ�
 新しい enrollment を始める前に、直前のホストで生じた暗号化済み差分を commit し、その repository を利用する全ホストへ同期する。bootstrap 前に差分を退避する必要がある場合は、平文を保存せず、外部媒体へ Git patch を作る。
 
 ```bash
-git diff --binary -- secrets \
+git diff --binary -- sops/assets \
   > /media/offline/desktop-nixos-enrollment.patch
 ```

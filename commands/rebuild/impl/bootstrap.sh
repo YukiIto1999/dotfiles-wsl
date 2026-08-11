@@ -17,7 +17,12 @@ ensure_root() {
 
 preflight() {
   local f key_dir
-  for f in "${DOTFILES}/flake.nix" "${DOTFILES}/flake.lock" "${SECRETS_FILE}" "${AGE_KEY}"; do
+  for f in \
+    "${DOTFILES}/flake.nix" \
+    "${DOTFILES}/flake.lock" \
+    "${SOPS_CONFIG}" \
+    "${SECRETS_FILE}" \
+    "${AGE_KEY}"; do
     [[ -f ${f} ]] || die "${f} not found"
   done
   [[ -d ${DOTFILES}/.git ]] || die "${DOTFILES} is not a git repository"
@@ -56,7 +61,7 @@ verify_tracked_flake_files() {
 
 verify_secrets() {
   SOPS_AGE_KEY_FILE="${AGE_KEY}" \
-    nix shell "${FLAKE_REF}#sops" -c sops -d "${SECRETS_FILE}" >/dev/null \
+    nix shell "${FLAKE_REF}#sops" -c sops --config "${SOPS_CONFIG}" -d "${SECRETS_FILE}" >/dev/null \
     || die "${AGE_KEY} cannot decrypt ${SECRETS_FILE}"
   step "secrets decryption verified"
 }
@@ -123,7 +128,8 @@ main() {
   local -r TARGET_USER="nixos"
   local -r USER_HOME="/home/${TARGET_USER}"
   local -r DOTFILES="${USER_HOME}/dotfiles-wsl"
-  local -r SECRETS_FILE="${DOTFILES}/secrets/secrets.yaml"
+  local -r SOPS_CONFIG="${DOTFILES}/sops/assets/.sops.yaml"
+  local -r SECRETS_FILE="${DOTFILES}/sops/assets/secrets.yaml"
   local -r AGE_KEY="/var/lib/sops-nix/key.txt"
   local -r FLAKE_REF="git+file://${DOTFILES}"
   local -r TOTAL=${#BOOTSTRAP_STAGES[@]}

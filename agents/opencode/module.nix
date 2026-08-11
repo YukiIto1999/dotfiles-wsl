@@ -86,7 +86,7 @@ in
         destination = ".config/opencode/opencode.json";
       };
       agentmemory-plugin = {
-        source = config.dotfiles.containers.agentmemory.clients.opencodePlugin;
+        source = config.dotfiles.agents.agentmemory.opencodePlugin;
         format = "text";
         deployment = "home";
         destination = ".config/opencode/plugins/agentmemory-capture.ts";

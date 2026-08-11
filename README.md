@@ -66,7 +66,8 @@ dotfiles-doctor
 
 ```bash
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops ~/dotfiles-wsl/secrets/secrets.yaml
+  sops --config ~/dotfiles-wsl/sops/assets/.sops.yaml \
+  ~/dotfiles-wsl/sops/assets/secrets.yaml
 ```
 
 保守用 devShell を使う checkout では、`.envrc` を一度だけ許可する。以後は checkout へ入ると `flake.lock` に固定した toolchain が有効になる。
@@ -96,9 +97,8 @@ AI CLI は単一の agentgateway へ接続し、gateway が target ごとの常�
 ├── containers/            application 固有の container backend と共通 schema、helper、OCI image 同期
 ├── artifacts/             生成設定の登録簿
 ├── commands/              運用 command の生成と実体
-├── sops/                  secret の配線
+├── sops/                  secret の配線、recipient policy、暗号文
 ├── gates/                 repo 自身の検査
-├── secrets/               SOPS で暗号化した secrets
 └── docs/                  runbook、architecture、reference
 ```
 
@@ -134,7 +134,7 @@ OCI image の変更は[OCI image runbook](docs/operations/oci-images.md)、docto
 
 - host key は `/var/lib/sops-nix/key.txt` に置き、root 所有の `0400` とする。別ホストへコピーせず、通常の rebuild で生成し直さない。
 - offline recovery key は読み取り専用の外部媒体で保管する。enrollment と復旧の間だけ接続し、通常運用するホストへ常置しない。
-- GitHub PAT は `secrets/secrets.yaml` へ SOPS で暗号化し、fine-grained PAT の権限を用途に必要な範囲へ絞る。`gh auth login` や `gh auth switch` で別経路の credential を作らない。
+- GitHub PAT は `sops/assets/secrets.yaml` へ SOPS で暗号化し、fine-grained PAT の権限を用途に必要な範囲へ絞る。`gh auth login` や `gh auth switch` で別経路の credential を作らない。
 - agentgateway と各 front は認証なしで loopback の port を listen する。到達できる process を信頼境界の内側として扱う。Docker backend の host publish は `127.0.0.1` に限定する。
 - system generation の更新に `nixos-rebuild` を直接使わない。通常変更は `dotfiles-rebuild`、初回構築だけは `commands/rebuild/impl/bootstrap.sh` を使う。
 

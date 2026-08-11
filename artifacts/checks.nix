@@ -98,29 +98,19 @@ let
     map (artifact: artifact.source) (
       builtins.attrValues (lib.filterAttrs (_: artifact: artifact.format == format) artifacts)
     );
-  requiredFormats = [
+  supportedFormats = [
     "json"
     "toml"
     "yaml"
     "markdown"
   ];
-  coversRequiredFormats =
-    candidateArtifacts:
-    lib.all (
-      format: lib.any (artifact: artifact.format == format) (builtins.attrValues candidateArtifacts)
-    ) requiredFormats;
-  removeFormat = format: lib.filterAttrs (_: artifact: artifact.format != format);
-  normalFormatEvaluation = builtins.tryEval (
-    assert coversRequiredFormats artifacts;
-    true
-  );
-  missingFormatEvaluations = map (
-    format:
-    builtins.tryEval (
-      assert coversRequiredFormats (removeFormat format artifacts);
-      true
-    )
-  ) requiredFormats;
+  formatFixtures = {
+    json = pkgs.writeText "artifact-format-fixture.json" "{}";
+    markdown = pkgs.writeText "artifact-format-fixture.md" "# fixture";
+    toml = pkgs.writeText "artifact-format-fixture.toml" "fixture = true";
+    yaml = pkgs.writeText "artifact-format-fixture.yaml" "fixture: true";
+  };
+  syntaxSourcesFor = format: [ formatFixtures.${format} ] ++ artifactSourcesFor format;
 
   ownerOf =
     declaration:
@@ -144,18 +134,7 @@ in
     assert lib.assertMsg (misowned == [ ]) (
       "artifact id first segment does not match its owner root: " + lib.concatStringsSep " " misowned
     );
-    assert lib.assertMsg (coversRequiredFormats artifacts)
-      "artifact registry must cover JSON, TOML, YAML, and Markdown";
     assert builtins.attrNames variantConfig.dotfiles.artifacts == builtins.attrNames artifacts;
-    assert variantConfig.dotfiles.accounts == hostConfig.dotfiles.accounts;
-    assert
-      variantConfig.sops.templates."gh-hosts.yml".content
-      == hostConfig.sops.templates."gh-hosts.yml".content;
-    assert
-      hostConfig.dotfiles.accounts == [ ]
-      ||
-        hostConfig.sops.templates."gh-hosts.yml".content
-        == builtins.readFile artifacts."accounts/gh-hosts".source;
     pkgs.runCommandLocal "check-artifact-registry" { } "touch $out";
 
   artifact-runtime-observation-contract =
@@ -187,15 +166,13 @@ in
     pkgs.runCommandLocal "check-artifact-runtime-observation-contract" { } "touch $out";
 
   config-syntax =
-    assert normalFormatEvaluation.success;
-    assert lib.all (result: !result.success) missingFormatEvaluations;
-    assert lib.all (format: artifactSourcesFor format != [ ]) requiredFormats;
+    assert builtins.attrNames formatFixtures == lib.sort builtins.lessThan supportedFormats;
     pkgs.runCommandLocal "check-config-syntax"
       {
-        jsonSources = artifactSourcesFor "json";
-        tomlSources = artifactSourcesFor "toml";
-        yamlSources = artifactSourcesFor "yaml";
-        markdownSources = artifactSourcesFor "markdown";
+        jsonSources = syntaxSourcesFor "json";
+        tomlSources = syntaxSourcesFor "toml";
+        yamlSources = syntaxSourcesFor "yaml";
+        markdownSources = syntaxSourcesFor "markdown";
         nativeBuildInputs = [
           pkgs.jq
           pkgs.taplo

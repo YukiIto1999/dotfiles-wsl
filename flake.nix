@@ -172,51 +172,10 @@
           inherit (pkgs) lib;
 
           # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
-          artifactVariantSystem = mkNixosSystem {
-            dotfiles = {
-              accounts = [
-                "account-1"
-                "account-2"
-                "account-3"
-              ];
-              host = { };
-              toolchain.enabledLsp = [
-                "bash"
-                "csharp"
-                "java"
-                "nix"
-                "python"
-                "rust"
-                "typescript"
-              ];
-              agents.enabled = [
-                "antigravity"
-                "claude"
-                "codex"
-                "opencode"
-              ];
-              containers.enabled = [
-                "agentmemory"
-                "crawl4ai"
-                "searxng"
-                "sonarqube"
-              ];
-              mcp = {
-                enabledProviders = [
-                  "chrome-devtools"
-                  "codex"
-                  "context7"
-                  "crawl4ai"
-                  "github"
-                  "memory"
-                  "playwright"
-                  "searxng"
-                  "sonarqube"
-                ];
-                gateway.port = 9876;
-              };
-            };
-          };
+          artifactVariantSystem = mkNixosSystem [
+            normalMachineModule
+            { dotfiles.mcp.gateway.port = 9876; }
+          ];
           artifactVariantConfig = artifactVariantSystem.config;
 
           checkSet = {

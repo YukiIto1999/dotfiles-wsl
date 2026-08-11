@@ -6,6 +6,16 @@
 
 let
   cfg = config.dotfiles;
+  homeRelativePath = lib.types.addCheck lib.types.str (
+    value:
+    value != ""
+    && builtins.match "[^[:cntrl:]]*" value != null
+    && !lib.hasPrefix "/" value
+    && !lib.hasSuffix "/" value
+    && builtins.all (segment: segment != "" && segment != "." && segment != "..") (
+      lib.splitString "/" value
+    )
+  );
 
   mkGitHook = name: {
     source = ./assets/hooks + "/${name}";
@@ -20,16 +30,38 @@ in
       example = "~/projects/business/";
       description = "work 用 git identity を選ぶ gitdir glob。null で無効。";
     };
-    identityTemplate = lib.mkOption {
-      type = lib.types.path;
-      readOnly = true;
-      internal = true;
-      description = "sops template が利用する Git identity source。";
+    identity = {
+      template = lib.mkOption {
+        type = lib.types.path;
+        readOnly = true;
+        internal = true;
+        description = "sops template が利用する Git identity source。";
+      };
+      destinations = {
+        default = lib.mkOption {
+          type = homeRelativePath;
+          readOnly = true;
+          internal = true;
+          description = "default Git identity の home-relative path。";
+        };
+        work = lib.mkOption {
+          type = homeRelativePath;
+          readOnly = true;
+          internal = true;
+          description = "work Git identity の home-relative path。";
+        };
+      };
     };
   };
 
-  # secret を差し込んで identity を組む sops が読む template
-  config.dotfiles.toolchain.git.identityTemplate = ./assets/identity.conf;
+  # Git 構文と生成先は consumer である toolchain/git が一度だけ決める。
+  config.dotfiles.toolchain.git.identity = {
+    template = ./assets/identity.conf;
+    destinations = {
+      default = ".config/git/identity.conf";
+      work = ".config/git/work-identity.conf";
+    };
+  };
 
   config.home-manager.users.${cfg.host.username} =
     {
@@ -50,12 +82,12 @@ in
           core.excludesFile = "~/.config/git/ignore";
           core.hooksPath = "~/.config/git/hooks";
           merge.conflictstyle = "diff3";
-          include.path = "${dotfiles.host.homeDir}/.config/git/identity.conf";
+          include.path = "${dotfiles.host.homeDir}/${dotfiles.toolchain.git.identity.destinations.default}";
         };
         includes = lib.optionals (dotfiles.toolchain.git.workIdentity != null) [
           {
             condition = "gitdir:${dotfiles.toolchain.git.workIdentity}";
-            path = "${dotfiles.host.homeDir}/.config/git/work-identity.conf";
+            path = "${dotfiles.host.homeDir}/${dotfiles.toolchain.git.identity.destinations.work}";
           }
         ];
       };

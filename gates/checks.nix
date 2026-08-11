@@ -33,6 +33,21 @@ let
     "toolchain"
   ];
   expectedRootUnitNames = expectedRootOptionOwners ++ [ "sops" ];
+  rootUnit =
+    name:
+    lib.findSingle (
+      unit: unit.id == name
+    ) (throw "missing unit: ${name}") (throw "duplicate unit: ${name}") units;
+  containersUnit = rootUnit "containers";
+  mcpUnit = rootUnit "mcp";
+  machineInputProjection = cfg: {
+    inherit (cfg.dotfiles) accounts;
+    agents = cfg.dotfiles.agents.enabled;
+    containers = cfg.dotfiles.containers.enabled;
+    enabledLsp = cfg.dotfiles.toolchain.enabledLsp;
+    enabledProviders = cfg.dotfiles.mcp.enabledProviders;
+    workIdentity = cfg.dotfiles.toolchain.git.workIdentity;
+  };
 
   # 全 consumer の移行後は例外を持たない。空集合も下の AST scan が実入力を
   # 検出したことを確かめるため、gate 自体は vacuous にならない。
@@ -72,8 +87,8 @@ let
     "flake.nix" = 1;
   };
   allowedDynamicFileReads = {
+    "accounts/checks.nix" = 1;
     "accounts/module.nix" = 3;
-    "artifacts/checks.nix" = 1;
     "agents/codex/module.nix" = 1;
     "agents/opencode/module.nix" = 1;
     "commands/impl/mk-command.nix" = 1;
@@ -189,6 +204,9 @@ in
     );
     assert !(rootEntriesMatch (rootEntries // { unexpected = "directory"; }));
     assert !legacyAgentMemoryOptions;
+    assert lib.assertMsg (
+      machineInputProjection variantConfig == machineInputProjection hostConfig
+    ) "the gateway variant must preserve the normal machine inputs outside the gateway port";
     assert lib.assertMsg (responsibilityViolations == [ ]) (
       "responsibility roots are not separated by role: "
       + lib.concatStringsSep " " responsibilityViolations
@@ -199,8 +217,24 @@ in
         set -euo pipefail
 
         reverse_dependency_pattern='dotfiles\.agents|(\.\./)+agents(/|"|$)|\$\{self\}/agents|self[[:space:]]*\+[[:space:]]*"/agents'
-        if rg -n --glob '*.nix' "$reverse_dependency_pattern" ${self}/containers; then
+        if rg -n --glob '*.nix' "$reverse_dependency_pattern" ${containersUnit.path}; then
           echo "container backend depends on the agent integration owner" >&2
+          exit 1
+        fi
+        for application in ${lib.escapeShellArgs hostConfig.dotfiles.containers.enabled}; do
+          if rg -n -F "$application" ${containersUnit.path}/module.nix; then
+            echo "generic container module knows an application id: $application" >&2
+            exit 1
+          fi
+        done
+        for provider in ${lib.escapeShellArgs hostConfig.dotfiles.mcp.enabledProviders}; do
+          if rg -n -F "$provider" ${mcpUnit.path}/module.nix; then
+            echo "generic MCP module knows a provider id: $provider" >&2
+            exit 1
+          fi
+        done
+        if rg -n -F 'mcp-front-' ${containersUnit.path} --glob 'module.nix' --glob 'checks.nix'; then
+          echo "container owner knows an MCP front unit" >&2
           exit 1
         fi
         while IFS= read -r mutation; do

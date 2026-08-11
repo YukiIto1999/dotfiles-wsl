@@ -167,6 +167,8 @@ let
   '';
   front = hostConfig.dotfiles.mcp.fronts.crawl4ai;
   target = hostConfig.dotfiles.mcp.targets.crawl4ai;
+  token = hostConfig.sops.secrets."crawl4ai/api_token";
+  expectedRestartUnit = "${front.service}.service";
   execStart = hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart;
   execTokens = helpers.execTokens.tokensOf execStart;
 
@@ -308,6 +310,7 @@ in
   crawl4ai-front =
     assert target.port == expectedPort;
     assert target.waitUnits == expectedWaitUnits;
+    assert token.restartUnits == [ expectedRestartUnit ];
     assert lib.elem (lib.getExe frontPackage) execTokens;
     assert poisonIsolationProjection == expectedIsolationTargetJSON;
     assert canaryAIsolationProjection == expectedIsolationTargetJSON;

@@ -55,6 +55,18 @@ let
 
   selectContainerObservations = lib.filterAttrs (name: _: lib.hasPrefix "containers/" name);
   containerObservations = selectContainerObservations hostConfig.dotfiles.observations;
+  sampleApplication = builtins.head (builtins.attrNames hostConfig.dotfiles.containers.services);
+  sampleService = hostConfig.dotfiles.containers.services.${sampleApplication};
+  sampleUnit = builtins.head sampleService.units;
+  sampleSystemdService = lib.removeSuffix ".service" sampleUnit;
+  sampleContainerNames = map (image: image.container) (builtins.attrValues sampleService.images);
+  sampleContainer = builtins.head sampleContainerNames;
+  sampleObservationKeys = {
+    service = "containers/service/${sampleSystemdService}";
+    serviceRestart = "containers/service-restart/${sampleSystemdService}";
+    image = "containers/image/${sampleContainer}";
+    health = "containers/health/${sampleApplication}";
+  };
   containerRestartObservationKeys = builtins.filter (
     name: lib.hasPrefix "containers/container-restart/" name
   ) (builtins.attrNames containerObservations);
@@ -226,10 +238,10 @@ let
     builtins.length values == builtins.length (lib.unique values);
 
   removeObservation = name: builtins.removeAttrs containerObservations [ name ];
-  serviceRemovalMutation = removeObservation "containers/service/docker-agentmemory";
-  serviceRestartRemovalMutation = removeObservation "containers/service-restart/docker-agentmemory";
-  imageRemovalMutation = removeObservation "containers/image/agentmemory";
-  healthRemovalMutation = removeObservation "containers/health/agentmemory";
+  serviceRemovalMutation = removeObservation sampleObservationKeys.service;
+  serviceRestartRemovalMutation = removeObservation sampleObservationKeys.serviceRestart;
+  imageRemovalMutation = removeObservation sampleObservationKeys.image;
+  healthRemovalMutation = removeObservation sampleObservationKeys.health;
   timerRemovalMutation = removeObservation "containers/buildkit-gc";
   rosterRemovalMutation = removeObservation "containers/roster";
   addStaleObservation =
@@ -239,11 +251,11 @@ let
       ${name} = containerObservations.${source};
     };
   staleObservationMutations = [
-    (addStaleObservation "containers/service/docker-agentmemory" "containers/service/stale")
-    (addStaleObservation "containers/service-restart/docker-agentmemory" "containers/service-restart/stale")
-    (addStaleObservation "containers/service-restart/docker-agentmemory" "containers/container-restart/agentmemory")
-    (addStaleObservation "containers/image/agentmemory" "containers/image/stale")
-    (addStaleObservation "containers/health/agentmemory" "containers/health/stale")
+    (addStaleObservation sampleObservationKeys.service "containers/service/stale")
+    (addStaleObservation sampleObservationKeys.serviceRestart "containers/service-restart/stale")
+    (addStaleObservation sampleObservationKeys.serviceRestart "containers/container-restart/stale")
+    (addStaleObservation sampleObservationKeys.image "containers/image/stale")
+    (addStaleObservation sampleObservationKeys.health "containers/health/stale")
     (addStaleObservation "containers/roster" "containers/stale-roster")
     (addStaleObservation "containers/buildkit-gc" "containers/stale-buildkit-gc")
   ];
@@ -303,7 +315,8 @@ let
       (
         { lib, ... }:
         {
-          systemd.services.docker-agentmemory.description = lib.mkForce "Descriptions must not select container observations";
+          systemd.services.${sampleSystemdService}.description =
+            lib.mkForce "Descriptions must not select container observations";
           systemd.services.docker-buildkit-gc.description = lib.mkForce "Descriptions must not select the BuildKit GC observation";
         }
       )
@@ -357,11 +370,9 @@ let
   extraContainerObservations = selectContainerObservations extraContainerVariantConfig.dotfiles.observations;
 
   removedContainerServices = builtins.removeAttrs hostConfig.dotfiles.containers.services [
-    "agentmemory"
+    sampleApplication
   ];
-  removedOciContainers = builtins.removeAttrs hostConfig.virtualisation.oci-containers.containers [
-    "agentmemory"
-  ];
+  removedOciContainers = builtins.removeAttrs hostConfig.virtualisation.oci-containers.containers sampleContainerNames;
   removedContainerVariantConfig =
     (mkNixosSystem [
       normalMachineModule
@@ -377,12 +388,11 @@ let
       )
     ]).config;
   removedContainerObservations = selectContainerObservations removedContainerVariantConfig.dotfiles.observations;
-  removedAgentmemoryObservationKeys = [
-    "containers/service/docker-agentmemory"
-    "containers/service-restart/docker-agentmemory"
-    "containers/image/agentmemory"
-    "containers/health/agentmemory"
-  ];
+  removedSampleObservationKeys =
+    map (unit: "containers/service/${lib.removeSuffix ".service" unit}") sampleService.units
+    ++ map (unit: "containers/service-restart/${lib.removeSuffix ".service" unit}") sampleService.units
+    ++ map (container: "containers/image/${container}") sampleContainerNames
+    ++ [ "containers/health/${sampleApplication}" ];
 in
 {
   docker-buildkit-gc-contract =
@@ -571,8 +581,10 @@ in
         == expectedContainerObservationsFor removedContainerVariantConfig.dotfiles.containers.services
       && builtins.all (
         name: !builtins.hasAttr name removedContainerObservations
-      ) removedAgentmemoryObservationKeys
-      && !lib.elem "agentmemory" removedContainerObservations."containers/roster".members
+      ) removedSampleObservationKeys
+      && lib.all (
+        container: !lib.elem container removedContainerObservations."containers/roster".members
+      ) sampleContainerNames
     ) "a removed container service remained in runtime observations";
     pkgs.runCommandLocal "check-container-runtime-observation-contract" { } "touch $out";
 

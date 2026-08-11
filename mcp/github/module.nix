@@ -8,6 +8,12 @@
 # account ごとに 1 instance、PAT は spawn 時に sops file から読む
 let
   cfg = config.dotfiles;
+  githubTargets = builtins.attrNames (
+    lib.filterAttrs (_: target: target.provider == "github") cfg.mcp.targets
+  );
+  expectedGithubTargets = lib.sort builtins.lessThan (
+    map (account: "github-${account}") cfg.accounts
+  );
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
 
@@ -54,4 +60,11 @@ in
       value.restartUnits = [ "mcp-front-github-${account}.service" ];
     }) cfg.accounts
   );
+
+  assertions = [
+    {
+      assertion = githubTargets == expectedGithubTargets;
+      message = "GitHub target IDs must match github-<account> exactly";
+    }
+  ];
 }

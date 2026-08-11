@@ -71,22 +71,21 @@ install_installer_script() {
 }
 
 install_github_release() {
-  local record=$1 name binary repo asset_x86_64 asset_aarch64 archive_path version_args_json
-  local asset arch api url tmp member
+  local record=$1 name binary layout repo entrypoint version_args_json
+  local release asset arch api url tmp
 
   name=$(jq -r '.name' <<< "$record")
   binary=$(jq -r '.binary' <<< "$record")
+  layout=$(jq -r '.install.layout' <<< "$record")
   repo=$(jq -r '.install.repo' <<< "$record")
-  asset_x86_64=$(jq -r '.install.assetByArch.x86_64' <<< "$record")
-  asset_aarch64=$(jq -r '.install.assetByArch.aarch64' <<< "$record")
-  archive_path=$(jq -r '.install.binaryInArchive // ""' <<< "$record")
   version_args_json=$(jq -c '.versionArgs' <<< "$record")
 
+  [[ $layout == "single-binary" ]] || fail "unsupported GitHub release layout for $name: $layout"
+
   arch="$(arch_key)"
-  case "$arch" in
-    x86_64)  asset=$asset_x86_64 ;;
-    aarch64) asset=$asset_aarch64 ;;
-  esac
+  release=$(jq -c --arg arch "$arch" '.install.releaseByArch[$arch]' <<< "$record")
+  asset=$(jq -r '.asset' <<< "$release")
+  entrypoint=$(jq -r '.entrypoint' <<< "$release")
 
   log "$name"
   api="https://api.github.com/repos/${repo}/releases/latest"
@@ -98,17 +97,12 @@ install_github_release() {
 
   curl -fL "$url" -o "$tmp/$asset"
 
-  if [[ -n $archive_path ]]; then
-    member=$archive_path
-  else
-    member="$(tar -tzf "$tmp/$asset" | head -n1)"
-  fi
-  [[ -n $member ]] || fail "empty archive: ${asset}"
+  [[ -n $entrypoint ]] || fail "empty archive: ${asset}"
 
   tar -xzf "$tmp/$asset" -C "$tmp"
-  [[ -f "$tmp/$member" ]] || fail "binary not found in archive: ${member}"
+  [[ -f "$tmp/$entrypoint" ]] || fail "binary not found in archive: ${entrypoint}"
 
-  install -m 0755 "$tmp/$member" "$HOME/.local/bin/$binary"
+  install -m 0755 "$tmp/$entrypoint" "$HOME/.local/bin/$binary"
   check_version "$HOME/.local/bin/$binary" "$version_args_json"
 }
 

@@ -40,6 +40,8 @@
       },
       "install": {
         "kind": "installer-script",
+        "updateOwner": "upstream-installer",
+        "layout": "upstream-managed",
         "scriptUrl": "https://antigravity.google/cli/install.sh"
       }
     },
@@ -95,6 +97,8 @@
       },
       "install": {
         "kind": "installer-script",
+        "updateOwner": "upstream-installer",
+        "layout": "upstream-managed",
         "scriptUrl": "https://claude.ai/install.sh"
       }
     },
@@ -145,16 +149,26 @@
         "user": {
           "format": "toml",
           "deployment": "seed",
-          "destination": ".codex/config.toml"
+          "destination": ".codex/config.toml",
+          "seedMigrationCommand": "dotfiles-migrate-codex-config"
         }
       },
       "install": {
         "kind": "github-release",
+        "updateOwner": "dotfiles",
+        "layout": "single-binary",
         "repo": "openai/codex",
-        "assetByArch": {
-          "x86_64": "codex-x86_64-unknown-linux-musl.tar.gz",
-          "aarch64": "codex-aarch64-unknown-linux-musl.tar.gz"
-        }
+        "releaseByArch": {
+          "x86_64": {
+            "asset": "codex-x86_64-unknown-linux-musl.tar.gz",
+            "entrypoint": "codex-x86_64-unknown-linux-musl"
+          },
+          "aarch64": {
+            "asset": "codex-aarch64-unknown-linux-musl.tar.gz",
+            "entrypoint": "codex-aarch64-unknown-linux-musl"
+          }
+        },
+        "requiredPaths": {}
       }
     },
     "opencode": {
@@ -204,12 +218,20 @@
       },
       "install": {
         "kind": "github-release",
+        "updateOwner": "dotfiles",
+        "layout": "single-binary",
         "repo": "anomalyco/opencode",
-        "assetByArch": {
-          "x86_64": "opencode-linux-x64.tar.gz",
-          "aarch64": "opencode-linux-arm64.tar.gz"
+        "releaseByArch": {
+          "x86_64": {
+            "asset": "opencode-linux-x64.tar.gz",
+            "entrypoint": "opencode"
+          },
+          "aarch64": {
+            "asset": "opencode-linux-arm64.tar.gz",
+            "entrypoint": "opencode"
+          }
         },
-        "binaryInArchive": "opencode"
+        "requiredPaths": {}
       }
     }
   }

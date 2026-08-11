@@ -107,6 +107,8 @@ in
     agentmemoryMode = "hooks";
     install = {
       kind = "installer-script";
+      updateOwner = "upstream-installer";
+      layout = "upstream-managed";
       scriptUrl = "https://claude.ai/install.sh";
     };
   };

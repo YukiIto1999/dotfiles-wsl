@@ -47,6 +47,7 @@
 | host の固定 client roster、提供集合、型metadata、capability、installer、managed file が固定 fixture に一致し、不正な branch field、必須 field 欠落、freeform field、mode 矛盾を変異入力で拒否する | `agent-client-roster` |
 | 共通 rules が UTF-8、非空、見出しを持ち、shared と OpenCode の definition frontmatter、Codex TOML、Claude の byte equality が実配備 source で成立する | `agent-definition-rendering` |
 | agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、container から agent への逆依存禁止、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
+| seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し、front の起動依存と子 process を持たない | `gateway-front-contract` |
 | front が宣言した port で loopback に listen し、書き込み領域、backend dependency、通信方針を持つ | `mcp-front-contract` |

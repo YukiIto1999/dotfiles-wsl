@@ -26,6 +26,7 @@
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
+| container service contract から service、restart、image、health、roster、BuildKit GC の observation を漏れなく導き、追加と削除に追随する | `container-runtime-observation-contract` |
 | BuildKit GC の保持量、timer、prune 引数が固定され、Docker と backend が GC に依存しない | `docker-buildkit-gc-contract` |
 | 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
 | MCP unit が OCI、secret template、同名 backend の secret と service contract を所有しない | `mcp-no-container-ownership` |

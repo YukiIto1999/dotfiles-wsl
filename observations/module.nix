@@ -30,13 +30,17 @@ let
     && builtins.all dynamicSegment (lib.tail segments);
 
   pathSegments = value: lib.tail (lib.splitString "/" value);
+  hasNoControlCharacters = value: builtins.match "[^[:cntrl:]]*" value != null;
   normalizedAbsolutePath =
     value:
-    value == "/"
-    || (
-      lib.hasPrefix "/" value
-      && !lib.hasSuffix "/" value
-      && builtins.all (segment: segment != "" && segment != "." && segment != "..") (pathSegments value)
+    hasNoControlCharacters value
+    && (
+      value == "/"
+      || (
+        lib.hasPrefix "/" value
+        && !lib.hasSuffix "/" value
+        && builtins.all (segment: segment != "" && segment != "." && segment != "..") (pathSegments value)
+      )
     );
   absolutePath = types.addCheck nonEmptyString normalizedAbsolutePath;
   purposeCommandPackage =
@@ -55,6 +59,7 @@ let
   safeRelativePath =
     value:
     value != ""
+    && hasNoControlCharacters value
     && !lib.hasPrefix "/" value
     && !lib.hasSuffix "/" value
     && builtins.all (segment: segment != "" && segment != "." && segment != "..") (

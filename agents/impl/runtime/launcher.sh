@@ -228,19 +228,22 @@ export DOTFILES_AGENT_BOOT_ID=$boot_id
 export TMPDIR="$session_dir/tmp"
 export PATH="@agentShimDirectory@:$PATH"
 flock -u "$lock_fd"
-exec {lock_fd}>&-
 
 # shellcheck disable=SC2329 # EXIT trap invokes this function indirectly.
 cleanup() {
   local status=$?
   trap - EXIT HUP INT TERM
 
-  if [ -n "${session_dir-}" ] \
-    && [[ "$session_dir" == "$sessions_root/"* ]] \
-    && [ ! -L "$session_dir" ] \
-    && [ -d "$session_dir" ]; then
-    rm -rf --one-file-system -- "$session_dir" || true
+  if flock -x "$lock_fd"; then
+    if [ -n "${session_dir-}" ] \
+      && [[ "$session_dir" == "$sessions_root/"* ]] \
+      && [ ! -L "$session_dir" ] \
+      && [ -d "$session_dir" ]; then
+      rm -rf --one-file-system -- "$session_dir" || true
+    fi
+    flock -u "$lock_fd" || true
   fi
+  exec {lock_fd}>&- || true
   if resource_command=$(command -v dotfiles-agent-resource 2>/dev/null); then
     "$resource_command" cleanup-session "$DOTFILES_AGENT_SESSION_ID" || true
   fi

@@ -147,20 +147,41 @@ acquire_mutation_lock() {
 }
 
 acquire_creation_lock() {
-  local session_id=$1 expected_lock inherited_target
+  local session_id=$1 expected_lock inherited_target path_identity descriptor_identity
   validate_id session "$session_id"
   expected_lock="$locks_root/$session_id.lock"
-  ensure_lock_file "$expected_lock"
 
   if [ "${DOTFILES_AGENT_CREATION_LOCK_FD-}" = 8 ]; then
+    ensure_lock_file "$expected_lock"
     inherited_target=$(readlink -e -- /proc/self/fd/8 2>/dev/null) ||
       die 'inherited creation lock descriptor is ambiguous'
     [ "$inherited_target" = "$expected_lock" ] ||
       die 'inherited creation lock does not match the session'
-  else
-    exec 8<>"$expected_lock"
+    flock -x 8
+    validate_regular_file "$expected_lock" ||
+      die 'inherited creation lock path changed while waiting'
+    path_identity=$(stat -c '%d:%i' -- "$expected_lock") ||
+      die 'cannot inspect inherited creation lock path'
+    descriptor_identity=$(stat -Lc '%d:%i' -- /proc/self/fd/8) ||
+      die 'cannot inspect inherited creation lock descriptor'
+    [ "$descriptor_identity" = "$path_identity" ] ||
+      die 'inherited creation lock path changed while waiting'
+    return
   fi
-  flock -x 8
+
+  while :; do
+    ensure_lock_file "$expected_lock"
+    exec 8<>"$expected_lock"
+    flock -x 8
+    if validate_regular_file "$expected_lock"; then
+      path_identity=$(stat -c '%d:%i' -- "$expected_lock") || path_identity=
+      descriptor_identity=$(stat -Lc '%d:%i' -- /proc/self/fd/8) || descriptor_identity=
+      if [ -n "$path_identity" ] && [ "$descriptor_identity" = "$path_identity" ]; then
+        return
+      fi
+    fi
+    exec 8>&-
+  done
 }
 
 acquire_ledger_lock() {
@@ -1512,7 +1533,6 @@ cleanup_session() {
 
 reap_one_session() {
   local session_id=$1 session_file reason status
-  preflight_ledgers || die 'ledger preflight failed'
   session_file="$sessions_root/$session_id.json"
   [ -f "$session_file" ] && [ ! -L "$session_file" ] || return
   status=$(jq -r '.status' "$session_file")
@@ -1558,9 +1578,23 @@ session_has_worktree_record() {
   return 1
 }
 
-prune_terminal_ledgers() {
-  local record session_file session_id
+remove_current_creation_lock() {
+  local session_id=$1 expected_lock path_identity descriptor_identity
+  expected_lock="$locks_root/$session_id.lock"
+  validate_regular_file "$expected_lock" || die "creation lock changed before pruning: $session_id"
+  path_identity=$(stat -c '%d:%i' -- "$expected_lock") ||
+    die "cannot inspect creation lock before pruning: $session_id"
+  descriptor_identity=$(stat -Lc '%d:%i' -- /proc/self/fd/8) ||
+    die "cannot inspect held creation lock before pruning: $session_id"
+  [ "$descriptor_identity" = "$path_identity" ] ||
+    die "creation lock identity changed before pruning: $session_id"
+  rm -f -- "$expected_lock"
+}
+
+prune_terminal_ledgers_for_session() {
+  local session_id=$1 record session_file
   for record in "$worktrees_root"/*.json; do
+    [ "$(jq -r '.session_id' "$record")" = "$session_id" ] || continue
     case "$(jq -r '.status' "$record")" in
     preserved | removed)
       ledger_is_expired "$record" || continue
@@ -1568,12 +1602,44 @@ prune_terminal_ledgers() {
       ;;
     esac
   done
-  for session_file in "$sessions_root"/*.json; do
-    [ "$(jq -r '.status' "$session_file")" = ended ] || continue
-    ledger_is_expired "$session_file" || continue
-    session_id=$(jq -r '.session_id' "$session_file")
-    session_has_worktree_record "$session_id" && continue
-    rm -f -- "$session_file"
+  session_file="$sessions_root/$session_id.json"
+  [ -f "$session_file" ] && [ ! -L "$session_file" ] || return 0
+  [ "$(jq -r '.status' "$session_file")" = ended ] || return 0
+  ledger_is_expired "$session_file" || return 0
+  session_has_worktree_record "$session_id" && return 0
+  # Cooperating processes retry on a replaced lock inode.  Removing the lock
+  # first leaves the terminal ledger as a restartable commit marker.
+  remove_current_creation_lock "$session_id"
+  rm -f -- "$session_file"
+}
+
+prune_orphan_creation_locks() {
+  local entry name session_id session_file
+  local -a session_ids=()
+
+  acquire_creation_lock reaper-scan
+  acquire_ledger_lock
+  preflight_ledgers || die 'ledger preflight failed'
+  for entry in "$locks_root"/*.lock; do
+    name=${entry##*/}
+    [ "$name" != reaper-scan.lock ] || continue
+    session_id=${name%.lock}
+    validate_id session "$session_id"
+    session_file="$sessions_root/$session_id.json"
+    [ ! -e "$session_file" ] && [ ! -L "$session_file" ] || continue
+    session_ids+=("$session_id")
+  done
+  release_locks
+
+  for session_id in "${session_ids[@]}"; do
+    acquire_creation_lock "$session_id"
+    acquire_ledger_lock
+    session_file="$sessions_root/$session_id.json"
+    if [ ! -e "$session_file" ] && [ ! -L "$session_file" ] \
+      && ! session_has_worktree_record "$session_id"; then
+      remove_current_creation_lock "$session_id"
+    fi
+    release_locks
   done
 }
 
@@ -1596,13 +1662,10 @@ reap_sessions() {
     acquire_creation_lock "$session_id"
     acquire_ledger_lock
     reap_one_session "$session_id"
+    prune_terminal_ledgers_for_session "$session_id"
     release_locks
   done
-
-  acquire_ledger_lock
-  preflight_ledgers || die 'ledger preflight failed'
-  prune_terminal_ledgers
-  release_locks
+  prune_orphan_creation_locks
 }
 
 usage() {

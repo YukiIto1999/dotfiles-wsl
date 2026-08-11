@@ -36,6 +36,41 @@ let
       ledgerRetentionDays = 7;
     };
   };
+  countingJq = pkgs.writeShellScriptBin "jq" ''
+    counter=''${DOTFILES_AGENT_TEST_JQ_COUNTER:?}
+    count=0
+    if [[ -f $counter ]]; then
+      IFS= read -r count <"$counter"
+    fi
+    [[ $count =~ ^[0-9]+$ ]] || exit 64
+    printf '%s\n' "$((count + 1))" >"$counter"
+    exec ${lib.getExe pkgs.jq} "$@"
+  '';
+  countingAgentResource = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource-counting-jq";
+    runtimeInputs = with pkgs; [
+      countingJq
+      coreutils
+      gawk
+      git
+      util-linux
+    ];
+    text =
+      builtins.replaceStrings
+        [
+          "@gitCommand@"
+          "@ledgerRetentionDays@"
+          "@stateRootRelative@"
+          "@resourceStateRootRelative@"
+        ]
+        [
+          (lib.escapeShellArg (lib.getExe pkgs.git))
+          "30"
+          runtimePackageContract.state.relativeStateRoot
+          runtimePackageContract.state.relativeResourcesRoot
+        ]
+        (builtins.readFile ./impl/resource/agent-resource.sh);
+  };
   wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
     if [[ $# -eq 3 && $1 == -c && $2 == %u \
       && $3 == "/proc/''${DOTFILES_AGENT_TEST_WRONG_OWNER_PID-}" ]]; then
@@ -179,6 +214,63 @@ let
     runtimeInputs = with pkgs; [
       controlledReadlink
       controlledProcStat
+      coreutils
+      gawk
+      git
+      jq
+      util-linux
+    ];
+    text =
+      builtins.replaceStrings
+        [
+          "@gitCommand@"
+          "@ledgerRetentionDays@"
+          "@stateRootRelative@"
+          "@resourceStateRootRelative@"
+        ]
+        [
+          (lib.escapeShellArg (lib.getExe pkgs.git))
+          "30"
+          runtimePackageContract.state.relativeStateRoot
+          runtimePackageContract.state.relativeResourcesRoot
+        ]
+        (builtins.readFile ./impl/resource/agent-resource.sh);
+  };
+  controlledPruneRm = pkgs.writeShellScriptBin "rm" ''
+    real_rm=${pkgs.coreutils}/bin/rm
+    target=''${!#}
+    expected="$HOME/${runtimePackageContract.state.relativeResourcesRoot}/sessions/''${DOTFILES_AGENT_TEST_PRUNE_SESSION-}.json"
+    if [[ -n ''${DOTFILES_AGENT_TEST_PRUNE_LOCK-} \
+      && $target == "$DOTFILES_AGENT_TEST_PRUNE_LOCK" \
+      && ''${DOTFILES_AGENT_TEST_PRUNE_MODE-} == pause-lock-before ]]; then
+      : >"$DOTFILES_AGENT_TEST_PRUNE_MARKER"
+      while [[ ! -e $DOTFILES_AGENT_TEST_PRUNE_RELEASE ]]; do
+        sleep 0.01
+      done
+      exec "$real_rm" "$@"
+    fi
+    if [[ -n ''${DOTFILES_AGENT_TEST_PRUNE_SESSION-} && $target == "$expected" ]]; then
+      case ''${DOTFILES_AGENT_TEST_PRUNE_MODE-} in
+      crash-after)
+        "$real_rm" "$@"
+        : >"$DOTFILES_AGENT_TEST_PRUNE_MARKER"
+        kill -KILL "$PPID"
+        exit 137
+        ;;
+      fail-once)
+        if [[ ! -e $DOTFILES_AGENT_TEST_PRUNE_MARKER ]]; then
+          : >"$DOTFILES_AGENT_TEST_PRUNE_MARKER"
+          exit 75
+        fi
+        ;;
+      esac
+    fi
+    exec "$real_rm" "$@"
+  '';
+  controlledPruneResource = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource-prune-fixture";
+    runtimeInputs = with pkgs; [
+      controlledPruneRm
       coreutils
       gawk
       git
@@ -2937,6 +3029,7 @@ in
           pkgs.git
           pkgs.gnused
           pkgs.jq
+          pkgs.util-linux
         ];
         LAUNCHER = lib.getExe runtime.launcher;
         AGENT_SHIM_DIR = runtime.agentShims;
@@ -3219,6 +3312,8 @@ in
         export AUDIT_RESOURCE=${lib.getExe auditAgentResource}
         export AUDIT_WORKTREE=${lib.getExe auditAgentWorktree}
         export CONTROLLED_PROC_RESOURCE=${lib.getExe controlledProcResource}
+        export CONTROLLED_PRUNE_RESOURCE=${lib.getExe controlledPruneResource}
+        export COUNTING_RESOURCE=${lib.getExe countingAgentResource}
         export OVERFLOW_RESOURCE=${lib.getExe overflowResource}
         export SEVEN_DAY_RESOURCE=${lib.getExe sevenDayRuntime.agentResource}
         export TEST_BASH=${lib.getExe pkgs.bash}

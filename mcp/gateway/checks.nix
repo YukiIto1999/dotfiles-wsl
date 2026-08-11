@@ -40,6 +40,18 @@ let
         ]
         (builtins.readFile ./fixtures/observer/fake-curl.sh);
   };
+  fakeJq = pkgs.writeShellApplication {
+    name = "jq";
+    text = ''
+      set -euo pipefail
+
+      if [[ -n ''${MCP_OBSERVER_JQ_FAIL_MARKER-} && -e $MCP_OBSERVER_JQ_FAIL_MARKER ]]; then
+        exit 70
+      fi
+
+      exec ${lib.escapeShellArg (lib.getExe pkgs.jq)} "$@"
+    '';
+  };
   fixtureObserver = pkgs.callPackage ./impl/observer-package.nix {
     name = "fixture-mcp-gateway-observer";
     gatewayUrl = "http://127.0.0.1:18765/mcp";
@@ -58,6 +70,17 @@ let
     tools = {
       curl = lib.getExe fakeCurl;
       jq = "${pkgs.coreutils}/bin/false";
+      mktemp = "${pkgs.coreutils}/bin/mktemp";
+      rm = "${pkgs.coreutils}/bin/rm";
+    };
+  };
+  postSessionCrashObserver = pkgs.callPackage ./impl/observer-package.nix {
+    name = "fixture-post-session-crash-mcp-gateway-observer";
+    gatewayUrl = "http://127.0.0.1:18765/mcp";
+    probes = fixtureProbes;
+    tools = {
+      curl = lib.getExe fakeCurl;
+      jq = lib.getExe fakeJq;
       mktemp = "${pkgs.coreutils}/bin/mktemp";
       rm = "${pkgs.coreutils}/bin/rm";
     };
@@ -206,6 +229,15 @@ in
           run_case notification-error '[
             {"id":"mcp-session","status":"fail","message":"MCP initialized notification failed"}
           ]'
+          for notification_case in \
+            notification-json-error \
+            notification-body \
+            notification-content-type \
+            notification-redirect; do
+            run_case "$notification_case" '[
+              {"id":"mcp-session","status":"fail","message":"MCP initialized notification failed"}
+            ]'
+          done
           notification_delete_marker="$TMPDIR/notification-delete"
           notification_output=$(MCP_OBSERVER_CASE=notification-error \
             MCP_OBSERVER_DELETE_MARKER="$notification_delete_marker" \
@@ -264,6 +296,27 @@ in
               {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
               {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
             ]'
+            for content_case in \
+              target-non-object-content \
+              target-unsupported-content \
+              target-missing-content-type \
+              target-text-missing-field \
+              target-image-missing-field \
+              target-image-missing-data \
+              target-audio-missing-field \
+              target-audio-missing-mime-type \
+              target-resource-link-missing-field \
+              target-resource-link-missing-uri \
+              target-resource-missing-field \
+              target-resource-missing-object \
+              target-resource-missing-uri; do
+              run_case "$content_case" '[
+                {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+                {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+                {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+                {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+              ]'
+            done
             run_case delete-failure '[
               {"id":"mcp-session","status":"fail","message":"MCP session DELETE failed"},
               {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
@@ -293,6 +346,34 @@ in
         jq -e '.outcomes == [{id:"mcp-session",status:"fail",message:"MCP initialized notification failed"}]' \
           >/dev/null <<<"$secret_session_output"
 
+        argv_secret='fixture-argv-secret-value'
+        argv_pid_file="$TMPDIR/argv-secret.pid"
+        argv_release_file="$TMPDIR/argv-secret.release"
+        MCP_OBSERVER_CASE=argv-secret \
+          MCP_OBSERVER_SECRET="$argv_secret" \
+          MCP_OBSERVER_CURL_PID_FILE="$argv_pid_file" \
+          MCP_OBSERVER_CURL_RELEASE_FILE="$argv_release_file" \
+          ${lib.getExe fixtureObserver} >"$TMPDIR/argv-secret.output" &
+        argv_observer_pid=$!
+        for _ in {1..500}; do
+          [[ -s $argv_pid_file ]] && break
+          sleep 0.02
+        done
+        test -s "$argv_pid_file"
+        argv_curl_pid=$(<"$argv_pid_file")
+        mapfile -d $'\0' -t argv_parts <"/proc/$argv_curl_pid/cmdline"
+        ! printf '%s\n' "''${argv_parts[@]}" | grep -F -- "$argv_secret"
+        session_header_path=
+        for argv_part in "''${argv_parts[@]}"; do
+          [[ $argv_part == @*/session.headers ]] && session_header_path=''${argv_part#@}
+        done
+        test -n "$session_header_path"
+        test "$(stat -c '%a' "$session_header_path")" = 600
+        touch "$argv_release_file"
+        wait "$argv_observer_pid"
+        jq -e --argjson expected "$all_pass" '.outcomes == $expected' \
+          "$TMPDIR/argv-secret.output" >/dev/null
+
             set +e
             crash_output=$(${lib.getExe crashObserver} 2>"$TMPDIR/crash.stderr")
             crash_status=$?
@@ -308,6 +389,82 @@ in
             set -e
             test "$timeout_status" -eq 124
             ! jq -e . >/dev/null 2>&1 <<<"$timeout_output"
+
+            post_session_timeout_marker="$TMPDIR/post-session-timeout"
+            timeout_delete_marker="$TMPDIR/post-session-timeout-delete"
+            set +e
+            MCP_OBSERVER_CASE=post-session-timeout \
+              MCP_OBSERVER_POST_SESSION_MARKER="$post_session_timeout_marker" \
+              MCP_OBSERVER_DELETE_MARKER="$timeout_delete_marker" \
+              timeout --signal=TERM --kill-after=5 1 ${lib.getExe fixtureObserver} \
+              >"$TMPDIR/post-session-timeout.output" 2>"$TMPDIR/post-session-timeout.stderr"
+            post_session_timeout_status=$?
+            set -e
+            [[ $post_session_timeout_status -eq 124 ]] || {
+              printf 'post-session timeout exited %s, expected 124\n' "$post_session_timeout_status" >&2
+              exit 1
+            }
+            [[ -e $post_session_timeout_marker ]] || {
+              printf 'post-session timeout did not reach the initialized notification\n' >&2
+              exit 1
+            }
+            [[ -e $timeout_delete_marker ]] || {
+              printf 'post-session timeout did not DELETE the acquired session\n' >&2
+              exit 1
+            }
+
+            post_session_term_marker="$TMPDIR/post-session-term"
+            term_delete_marker="$TMPDIR/post-session-term-delete"
+            MCP_OBSERVER_CASE=post-session-term \
+              MCP_OBSERVER_POST_SESSION_MARKER="$post_session_term_marker" \
+              MCP_OBSERVER_DELETE_MARKER="$term_delete_marker" \
+              ${lib.getExe fixtureObserver} >"$TMPDIR/post-session-term.output" \
+              2>"$TMPDIR/post-session-term.stderr" &
+            term_observer_pid=$!
+            for _ in {1..100}; do
+              [[ -e $post_session_term_marker ]] && break
+              sleep 0.02
+            done
+            [[ -e $post_session_term_marker ]] || {
+              printf 'TERM case did not reach the initialized notification\n' >&2
+              exit 1
+            }
+            kill -TERM "$term_observer_pid"
+            set +e
+            wait "$term_observer_pid"
+            term_status=$?
+            set -e
+            [[ $term_status -eq 143 ]] || {
+              printf 'TERM case exited %s, expected 143\n' "$term_status" >&2
+              exit 1
+            }
+            [[ -e $term_delete_marker ]] || {
+              printf 'TERM case did not DELETE the acquired session\n' >&2
+              exit 1
+            }
+
+            jq_fail_marker="$TMPDIR/post-session-jq-fail"
+            jq_delete_marker="$TMPDIR/post-session-jq-delete"
+            set +e
+            MCP_OBSERVER_CASE=post-session-jq-error \
+              MCP_OBSERVER_JQ_FAIL_MARKER="$jq_fail_marker" \
+              MCP_OBSERVER_DELETE_MARKER="$jq_delete_marker" \
+              ${lib.getExe postSessionCrashObserver} >"$TMPDIR/post-session-jq.output" \
+              2>"$TMPDIR/post-session-jq.stderr"
+            jq_status=$?
+            set -e
+            [[ $jq_status -ne 0 ]] || {
+              printf 'post-session jq failure unexpectedly exited zero\n' >&2
+              exit 1
+            }
+            [[ -e $jq_fail_marker ]] || {
+              printf 'post-session jq case did not arm the failure marker\n' >&2
+              exit 1
+            }
+            [[ -e $jq_delete_marker ]] || {
+              printf 'post-session jq failure did not DELETE the acquired session\n' >&2
+              exit 1
+            }
 
         parallel_root="$TMPDIR/parallel"
         mkdir "$parallel_root"

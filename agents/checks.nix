@@ -2388,7 +2388,9 @@ in
             .hooks == $hooks
           ' > /dev/null
 
-        grep -Fq 'skill の runtime drift は検査しない' ${self}/agents/shared/AGENTS.md
+        grep -Fq 'dotfiles-doctor` は `dotfiles.observations` の全登録を観測し' ${self}/agents/shared/AGENTS.md
+        grep -Fq 'skill を含む managed artifact と current source の不一致も検査する' ${self}/agents/shared/AGENTS.md
+        grep -Fq 'skill の動作や意味、subagents 表と実際の agent 機能との整合は observation に登録しておらず、自動検査しない' ${self}/agents/shared/AGENTS.md
         grep -Fq 'seed は runtime drift の対象にしない' ${self}/docs/architecture/ai-tooling.md
         grep -Fq 'managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する' ${self}/docs/architecture/ai-tooling.md
 

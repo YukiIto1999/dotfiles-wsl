@@ -210,6 +210,7 @@ let
     name = "dotfiles-agent-verify";
     runtimeInputs = with pkgs; [
       coreutils
+      diffutils
       git
     ];
     text = builtins.replaceStrings [ "@cacheRootRelative@" ] [ cacheRootRelative ] (

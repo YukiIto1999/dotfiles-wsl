@@ -10,6 +10,7 @@
 
 | 制約 | 検証 |
 |---|---|
+| unit directory の各 segment が小文字 kebab-case である | `structure-unit-directory-names` |
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |

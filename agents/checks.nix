@@ -967,6 +967,8 @@ let
         };
       };
     };
+  maximumTimerName = lib.concatStrings (lib.replicate 247 "a");
+  oversizedTimerName = lib.concatStrings (lib.replicate 248 "a");
 
   evalContract =
     candidate:
@@ -1719,7 +1721,12 @@ in
     assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad/name"; });
     assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = "bad name"; });
     assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = ".hidden"; });
+    assert contractIsValid (mutateRuntimeTimer "autoupdate" { name = maximumTimerName; });
+    assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = oversizedTimerName; });
     assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = ""; });
+    assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = "   "; });
+    assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = "daily\n"; });
+    assert contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = "*-*-* 00/6:00:00"; });
     assert !contractIsValid (baseCandidate // { clients = { }; });
     assert !contractIsValid (renameClient "codex" ".");
     assert !contractIsValid (renameClient "codex" "..");

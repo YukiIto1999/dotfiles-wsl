@@ -353,6 +353,7 @@ let
           "mcp-tools"
         ]
         ++ map (name: "mcp-target/${name}") candidateTargetNames;
+        requiredOutcomeIds = [ "mcp-session" ];
         requiredResourceKeys = [ ];
         envelopeVersion = 1;
       };
@@ -443,7 +444,11 @@ in
     assert
       protocolObservation.command.dotfilesObservationContract == {
         envelopeVersion = 1;
-        inherit (protocolObservation) allowedOutcomeIds requiredResourceKeys;
+        inherit (protocolObservation)
+          allowedOutcomeIds
+          requiredOutcomeIds
+          requiredResourceKeys
+          ;
         gatewayTimeout = 120;
         outerTimeout = 600;
       };

@@ -119,6 +119,7 @@ in
           "mcp-target/alpha"
           "mcp-target/zeta"
         ];
+        requiredOutcomeIds = [ "mcp-session" ];
         requiredResourceKeys = [ ];
         gatewayTimeout = 2;
         outerTimeout = 10;

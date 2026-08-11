@@ -356,12 +356,21 @@ let
     url = lib.mkOption { type = httpUrl; };
   } (_: true);
 
-  normalizedProtocolType = mkObservationType "normalized-protocol" {
-    command = lib.mkOption { type = purposeCommandPackage "normalized-protocol"; };
-    allowedOutcomeIds = lib.mkOption { type = uniqueNonEmptyListOf safeId; };
-    requiredResourceKeys = lib.mkOption { type = uniqueListOf safeToken; };
-    envelopeVersion = lib.mkOption { type = types.ints.positive; };
-  } (_: true);
+  normalizedProtocolType =
+    mkObservationType "normalized-protocol"
+      {
+        command = lib.mkOption { type = purposeCommandPackage "normalized-protocol"; };
+        allowedOutcomeIds = lib.mkOption { type = uniqueNonEmptyListOf safeId; };
+        requiredOutcomeIds = lib.mkOption { type = uniqueListOf safeId; };
+        requiredResourceKeys = lib.mkOption { type = uniqueListOf safeToken; };
+        envelopeVersion = lib.mkOption { type = types.ints.positive; };
+      }
+      (
+        observation:
+        builtins.isList (observation.allowedOutcomeIds or null)
+        && builtins.isList (observation.requiredOutcomeIds or null)
+        && builtins.all (id: builtins.elem id observation.allowedOutcomeIds) observation.requiredOutcomeIds
+      );
 
   observationType = types.oneOf [
     rosterType

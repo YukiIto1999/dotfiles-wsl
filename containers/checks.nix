@@ -3,6 +3,9 @@
   pkgs,
   lib,
   hostConfig,
+  hostOptions,
+  mkNixosSystem,
+  normalMachineModule,
   variantConfig,
   ...
 }:
@@ -45,6 +48,357 @@ let
     && builtins.length scripts == 3 * builtins.length containerNames;
 
   systemUnits = hostConfig.environment.etc."systemd/system".source;
+
+  observationTimeoutSeconds = 10;
+  restartWarningCount = 5;
+  restartFailureCount = 20;
+
+  selectContainerObservations = lib.filterAttrs (name: _: lib.hasPrefix "containers/" name);
+  containerObservations = selectContainerObservations hostConfig.dotfiles.observations;
+
+  expectedContainerObservationsFor =
+    services:
+    let
+      serviceEntries = lib.mapAttrsToList (application: service: {
+        inherit application service;
+      }) services;
+      imageEntries = lib.concatMap (
+        entry: lib.mapAttrsToList (_: image: { inherit image; }) entry.service.images
+      ) serviceEntries;
+      common = checkId: failureMessage: {
+        inherit checkId failureMessage;
+        resourceKey = null;
+        timeoutSeconds = observationTimeoutSeconds;
+      };
+      mkEntry = name: value: { inherit name value; };
+      serviceObservations = lib.concatMap (
+        entry:
+        map (
+          unit:
+          mkEntry "containers/service/${lib.removeSuffix ".service" unit}" (
+            common "service/${unit}" "${unit} is not operational"
+            // {
+              kind = "systemd-service";
+              inherit unit;
+              loadStates = [ "loaded" ];
+              activeStates = [ "active" ];
+              results = [ "success" ];
+            }
+          )
+        ) entry.service.units
+      ) serviceEntries;
+      serviceRestartObservations = lib.concatMap (
+        entry:
+        map (
+          unit:
+          mkEntry "containers/service-restart/${lib.removeSuffix ".service" unit}" (
+            common "restart/service/${unit}" "could not observe restart count for ${unit}"
+            // {
+              kind = "restart-counter";
+              sourceKind = "systemd-service";
+              target = unit;
+              warningAt = restartWarningCount;
+              failureAt = restartFailureCount;
+            }
+          )
+        ) entry.service.units
+      ) serviceEntries;
+      imageObservations = map (
+        entry:
+        let
+          inherit (entry.image) container image;
+        in
+        mkEntry "containers/image/${container}" (
+          common "container-image/${container}" "${container} is not running the declared image ${image}"
+          // {
+            kind = "container-image";
+            inherit container image;
+          }
+        )
+      ) imageEntries;
+      containerRestartObservations = map (
+        entry:
+        let
+          inherit (entry.image) container;
+        in
+        mkEntry "containers/container-restart/${container}" (
+          common "restart/container/${container}" "could not observe restart count for ${container}"
+          // {
+            kind = "restart-counter";
+            sourceKind = "container";
+            target = container;
+            warningAt = restartWarningCount;
+            failureAt = restartFailureCount;
+          }
+        )
+      ) imageEntries;
+      healthObservations = map (
+        entry:
+        let
+          inherit (entry) application service;
+          inherit (service) health;
+          url = "${service.endpoints.${health.endpoint}.url}${health.path}";
+        in
+        mkEntry "containers/health/${application}" ({
+          checkId = "container-health/${application}";
+          resourceKey = null;
+          timeoutSeconds = health.timeout;
+          failureMessage = "${health.method} ${url} failed";
+          kind = "http-health";
+          inherit (health) method;
+          inherit url;
+        })
+      ) serviceEntries;
+    in
+    builtins.listToAttrs (
+      [
+        (mkEntry "containers/roster" (
+          common "container-roster" "container roster is empty"
+          // {
+            kind = "roster";
+            members = map (entry: entry.image.container) imageEntries;
+            minimumCount = 1;
+            failureOnly = true;
+          }
+        ))
+        (mkEntry "containers/buildkit-gc" (
+          common "maintenance/docker-buildkit-gc.timer" "docker-buildkit-gc.timer or its service is not operational"
+          // {
+            kind = "systemd-timer";
+            timer = "docker-buildkit-gc.timer";
+            service = "docker-buildkit-gc.service";
+            unitFileStates = [
+              "enabled"
+              "enabled-runtime"
+            ];
+            activeStates = [ "active" ];
+            serviceResults = [ "success" ];
+          }
+        ))
+      ]
+      ++ serviceObservations
+      ++ serviceRestartObservations
+      ++ imageObservations
+      ++ containerRestartObservations
+      ++ healthObservations
+    );
+
+  buildkitConfiguration = configuration: {
+    daemonSettings = configuration.virtualisation.docker.daemon.settings;
+    service = configuration.systemd.services.docker-buildkit-gc or null;
+    timer = configuration.systemd.timers.docker-buildkit-gc or null;
+  };
+
+  containerContractMatches =
+    configuration: services: observations:
+    let
+      expected = expectedContainerObservationsFor services;
+      actual = selectContainerObservations observations;
+      buildkit = buildkitConfiguration configuration;
+      execTokens =
+        if buildkit.service == null then [ ] else tokensOf buildkit.service.serviceConfig.ExecStart;
+    in
+    actual == expected
+    && lib.attrByPath [ "builder" "gc" "enabled" ] null buildkit.daemonSettings == true
+    && lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null buildkit.daemonSettings == "60GB"
+    && buildkit.service != null
+    &&
+      execTokens == [
+        (lib.getExe pkgs.docker)
+        "buildx"
+        "prune"
+        "--force"
+        "--max-used-space"
+        "60GB"
+        "--reserved-space"
+        "20GB"
+      ]
+    && buildkit.timer != null
+    &&
+      buildkit.timer.timerConfig == {
+        OnCalendar = "*-*-* 00/6:00:00";
+        Persistent = true;
+        Unit = "docker-buildkit-gc.service";
+      };
+
+  expectedContainerObservations = expectedContainerObservationsFor hostConfig.dotfiles.containers.services;
+  containerObservationKeys = builtins.attrNames expectedContainerObservations;
+  containerObservationDefinitions = builtins.filter (
+    definition: lib.hasSuffix "/containers/module.nix" (toString definition.file)
+  ) hostOptions.dotfiles.observations.definitionsWithLocations;
+  containerDefinitionKeys = lib.unique (
+    lib.concatMap (definition: builtins.attrNames definition.value) containerObservationDefinitions
+  );
+  containerDefinitionKeysMatch = keys: keys == containerObservationKeys;
+  uniqueNonNull =
+    field: observations:
+    let
+      values = builtins.filter (value: value != null) (
+        map (observation: observation.${field}) (builtins.attrValues observations)
+      );
+    in
+    builtins.length values == builtins.length (lib.unique values);
+
+  removeObservation = name: builtins.removeAttrs containerObservations [ name ];
+  serviceRemovalMutation = removeObservation "containers/service/docker-agentmemory";
+  serviceRestartRemovalMutation = removeObservation "containers/service-restart/docker-agentmemory";
+  imageRemovalMutation = removeObservation "containers/image/agentmemory";
+  containerRestartRemovalMutation = removeObservation "containers/container-restart/agentmemory";
+  healthRemovalMutation = removeObservation "containers/health/agentmemory";
+  timerRemovalMutation = removeObservation "containers/buildkit-gc";
+  rosterRemovalMutation = removeObservation "containers/roster";
+  addStaleObservation =
+    source: name:
+    containerObservations
+    // {
+      ${name} = containerObservations.${source};
+    };
+  staleObservationMutations = [
+    (addStaleObservation "containers/service/docker-agentmemory" "containers/service/stale")
+    (addStaleObservation "containers/service-restart/docker-agentmemory" "containers/service-restart/stale")
+    (addStaleObservation "containers/container-restart/agentmemory" "containers/container-restart/stale")
+    (addStaleObservation "containers/image/agentmemory" "containers/image/stale")
+    (addStaleObservation "containers/health/agentmemory" "containers/health/stale")
+    (addStaleObservation "containers/roster" "containers/stale-roster")
+    (addStaleObservation "containers/buildkit-gc" "containers/stale-buildkit-gc")
+  ];
+  maxStorageMutation = hostConfig // {
+    virtualisation = hostConfig.virtualisation // {
+      docker = hostConfig.virtualisation.docker // {
+        daemon = hostConfig.virtualisation.docker.daemon // {
+          settings = lib.recursiveUpdate hostConfig.virtualisation.docker.daemon.settings {
+            builder.gc.defaultKeepStorage = "61GB";
+          };
+        };
+      };
+    };
+    systemd = hostConfig.systemd // {
+      services = hostConfig.systemd.services // {
+        docker-buildkit-gc = hostConfig.systemd.services.docker-buildkit-gc // {
+          serviceConfig = hostConfig.systemd.services.docker-buildkit-gc.serviceConfig // {
+            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 61GB --reserved-space 20GB";
+          };
+        };
+      };
+    };
+  };
+  reservedStorageMutation = hostConfig // {
+    systemd = hostConfig.systemd // {
+      services = hostConfig.systemd.services // {
+        docker-buildkit-gc = hostConfig.systemd.services.docker-buildkit-gc // {
+          serviceConfig = hostConfig.systemd.services.docker-buildkit-gc.serviceConfig // {
+            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 60GB --reserved-space 21GB";
+          };
+        };
+      };
+    };
+  };
+
+  additionalObservationVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.observations."host/independent-container-observation" = {
+          kind = "roster";
+          members = [ "fixture" ];
+          minimumCount = 1;
+          failureOnly = false;
+          checkId = null;
+          resourceKey = null;
+          timeoutSeconds = observationTimeoutSeconds;
+          failureMessage = "independent foreign observation failed";
+        };
+      }
+    ]).config;
+  additionalContainerObservations = selectContainerObservations additionalObservationVariantConfig.dotfiles.observations;
+
+  descriptionVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          systemd.services.docker-agentmemory.description = lib.mkForce "Descriptions must not select container observations";
+          systemd.services.docker-buildkit-gc.description = lib.mkForce "Descriptions must not select the BuildKit GC observation";
+        }
+      )
+    ]).config;
+  descriptionVariantContainerObservations = selectContainerObservations descriptionVariantConfig.dotfiles.observations;
+
+  fixtureRepository = "example.invalid/dotfiles-fixture";
+  fixtureDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+  fixtureImage = "${fixtureRepository}:latest@${fixtureDigest}";
+  extraContainerVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.containers = {
+            enabled = lib.mkForce (
+              lib.sort builtins.lessThan (hostConfig.dotfiles.containers.enabled ++ [ "fixture" ])
+            );
+            services.fixture = {
+              endpoints.http = {
+                protocol = "http";
+                address = "127.0.0.1";
+                port = 45678;
+                url = "http://127.0.0.1:45678";
+              };
+              units = [ "docker-fixture.service" ];
+              images.fixture = {
+                kind = "upstream";
+                container = "fixture";
+                image = fixtureImage;
+                repository = fixtureRepository;
+                digest = fixtureDigest;
+              };
+              health = {
+                endpoint = "http";
+                method = "GET";
+                path = "/health";
+                timeout = 5;
+              };
+            };
+          };
+          virtualisation.oci-containers.containers.fixture = {
+            image = fixtureImage;
+            pull = "never";
+            ports = [ "127.0.0.1:45678:45678" ];
+          };
+        }
+      )
+    ]).config;
+  extraContainerObservations = selectContainerObservations extraContainerVariantConfig.dotfiles.observations;
+
+  removedContainerServices = builtins.removeAttrs hostConfig.dotfiles.containers.services [
+    "agentmemory"
+  ];
+  removedOciContainers = builtins.removeAttrs hostConfig.virtualisation.oci-containers.containers [
+    "agentmemory"
+  ];
+  removedContainerVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.containers = {
+            enabled = lib.mkForce (builtins.attrNames removedContainerServices);
+            services = lib.mkForce removedContainerServices;
+          };
+          virtualisation.oci-containers.containers = lib.mkForce removedOciContainers;
+        }
+      )
+    ]).config;
+  removedContainerObservations = selectContainerObservations removedContainerVariantConfig.dotfiles.observations;
+  removedAgentmemoryObservationKeys = [
+    "containers/service/docker-agentmemory"
+    "containers/service-restart/docker-agentmemory"
+    "containers/container-restart/agentmemory"
+    "containers/image/agentmemory"
+    "containers/health/agentmemory"
+  ];
 in
 {
   docker-buildkit-gc-contract =
@@ -127,6 +481,19 @@ in
         Unit = "docker-buildkit-gc.service";
       }
     ) "Docker BuildKit GC timer must run persistently every six hours";
+    assert lib.assertMsg (containerContractMatches hostConfig hostConfig.dotfiles.containers.services
+      hostConfig.dotfiles.observations
+    ) "Docker BuildKit GC settings and runtime observation must share one contract";
+    assert lib.assertMsg (
+      !(containerContractMatches maxStorageMutation hostConfig.dotfiles.containers.services
+        containerObservations
+      )
+    ) "Docker BuildKit GC max storage mutation escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches reservedStorageMutation hostConfig.dotfiles.containers.services
+        containerObservations
+      )
+    ) "Docker BuildKit GC reserved storage mutation escaped the owner contract";
     pkgs.runCommandLocal "check-docker-buildkit-gc-contract"
       {
         nativeBuildInputs = [
@@ -150,6 +517,82 @@ in
 
         touch $out
       '';
+
+  container-runtime-observation-contract =
+    assert lib.assertMsg (
+      containerObservations == expectedContainerObservations
+    ) "container runtime observation registry is incomplete";
+    assert lib.assertMsg (containerDefinitionKeysMatch containerDefinitionKeys)
+      "container observation definition keys must match the owner contract";
+    assert lib.assertMsg (
+      !(containerDefinitionKeysMatch (containerDefinitionKeys ++ [ "containers/stale-definition" ]))
+    ) "a stale container observation definition escaped the owner contract";
+    assert lib.assertMsg (uniqueNonNull "checkId" containerObservations)
+      "container runtime observation check IDs must be unique";
+    assert lib.assertMsg (uniqueNonNull "resourceKey" containerObservations)
+      "container runtime observation resource keys must be unique";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services
+        serviceRemovalMutation
+      )
+    ) "container service observation removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services
+        serviceRestartRemovalMutation
+      )
+    ) "container service restart observation removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services imageRemovalMutation)
+    ) "container image observation removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services
+        containerRestartRemovalMutation
+      )
+    ) "container restart observation removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services healthRemovalMutation)
+    ) "container health observation removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services timerRemovalMutation)
+    ) "BuildKit GC timer observation removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services rosterRemovalMutation)
+    ) "container roster observation removal escaped the owner contract";
+    assert lib.assertMsg (lib.all (
+      observations:
+      !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services observations)
+    ) staleObservationMutations) "stale container runtime observations escaped the owner contract";
+    assert lib.assertMsg (
+      containerContractMatches additionalObservationVariantConfig
+        additionalObservationVariantConfig.dotfiles.containers.services
+        additionalObservationVariantConfig.dotfiles.observations
+      && additionalContainerObservations == expectedContainerObservations
+      && builtins.hasAttr "host/independent-container-observation" additionalObservationVariantConfig.dotfiles.observations
+    ) "a foreign observation changed the containers runtime contract";
+    assert lib.assertMsg (
+      descriptionVariantContainerObservations == containerObservations
+    ) "service descriptions must not select container runtime observations";
+    assert lib.assertMsg (
+      containerContractMatches extraContainerVariantConfig
+        extraContainerVariantConfig.dotfiles.containers.services
+        extraContainerVariantConfig.dotfiles.observations
+      && builtins.hasAttr "containers/image/fixture" extraContainerObservations
+      && builtins.hasAttr "containers/health/fixture" extraContainerObservations
+      && lib.elem "fixture" extraContainerObservations."containers/roster".members
+    ) "a new container service was not projected into runtime observations";
+    assert lib.assertMsg (
+      containerContractMatches removedContainerVariantConfig
+        removedContainerVariantConfig.dotfiles.containers.services
+        removedContainerVariantConfig.dotfiles.observations
+      &&
+        removedContainerObservations
+        == expectedContainerObservationsFor removedContainerVariantConfig.dotfiles.containers.services
+      && builtins.all (
+        name: !builtins.hasAttr name removedContainerObservations
+      ) removedAgentmemoryObservationKeys
+      && !lib.elem "agentmemory" removedContainerObservations."containers/roster".members
+    ) "a removed container service remained in runtime observations";
+    pkgs.runCommandLocal "check-container-runtime-observation-contract" { } "touch $out";
 
   container-backend-contract =
     let

@@ -111,11 +111,73 @@ let
       }
     ]
   ) (builtins.attrNames fixture.invalidCommands);
+  pathControlCharacters = [
+    {
+      name = "tab";
+      value = "\t";
+    }
+    {
+      name = "newline";
+      value = "\n";
+    }
+    {
+      name = "carriage-return";
+      value = "\r";
+    }
+    {
+      name = "escape";
+      value = builtins.fromJSON ''"\u001b"'';
+    }
+  ];
+  pathControlCases = lib.concatMap (control: [
+    {
+      name = "absolute-managed-root:${control.name}";
+      registry = replaceObservation "host/managed-roots" (
+        fixture.valid."host/managed-roots" // { paths = [ "/fixture/root${control.value}split" ]; }
+      );
+    }
+    {
+      name = "relative-entrypoint:${control.name}";
+      registry = replaceObservation "host/release-tree" (
+        fixture.valid."host/release-tree"
+        // {
+          entrypoint = "bin/tool${control.value}split";
+        }
+      );
+    }
+    {
+      name = "relative-required-path:${control.name}";
+      registry = replaceObservation "host/release-tree" (
+        fixture.valid."host/release-tree"
+        // {
+          requiredPaths = {
+            "bin/tool${control.value}split" = {
+              kind = "file";
+              executable = true;
+            };
+          };
+        }
+      );
+    }
+    {
+      name = "relative-symlink-target:${control.name}";
+      registry = replaceObservation "host/release-tree" (
+        fixture.valid."host/release-tree"
+        // {
+          visibleTarget = "../current/bin/tool${control.value}split";
+        }
+      );
+    }
+  ]) pathControlCharacters;
   explicitInvalidCases = lib.mapAttrsToList (name: registry: {
     inherit name registry;
   }) fixture.invalid;
   invalidCases =
-    explicitInvalidCases ++ missingRequiredCases ++ kindReplacementCases ++ invalidCommandCases;
+    explicitInvalidCases
+    ++ missingRequiredCases
+    ++ kindReplacementCases
+    ++ invalidCommandCases
+    ++ pathControlCases;
   invalidResults = map (
     invalidCase: invalidCase // { succeeds = evaluationSucceeds (evalRegistry invalidCase.registry); }
   ) invalidCases;
@@ -136,6 +198,27 @@ let
     // {
       "host/normalized-protocol" = fixture.valid."host/normalized-protocol" // {
         requiredResourceKeys = [ ];
+      };
+    }
+  );
+  spacedPathsEvaluation = evalRegistry (
+    fixture.valid
+    // {
+      "host/managed-roots" = fixture.valid."host/managed-roots" // {
+        paths = [ "/fixture/root with space" ];
+      };
+      "host/release-tree" = fixture.valid."host/release-tree" // {
+        visiblePath = "/fixture/visible path";
+        visibleTarget = "../current/bin/tool name";
+        currentLink = "/fixture/current link";
+        releasesRoot = "/fixture/releases root";
+        entrypoint = "bin/tool name";
+        requiredPaths = {
+          "share directory" = {
+            kind = "directory";
+            executable = false;
+          };
+        };
       };
     }
   );
@@ -177,6 +260,7 @@ in
     assert evaluationSucceeds (evalRegistry { });
     assert evaluationSucceeds optionalCommonEvaluation;
     assert evaluationSucceeds emptyNormalizedProtocolResourcesEvaluation;
+    assert evaluationSucceeds spacedPathsEvaluation;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".checkId == null;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".resourceKey == null;
     assert builtins.length missingRequiredCases == 112;

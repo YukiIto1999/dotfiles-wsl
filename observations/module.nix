@@ -71,6 +71,11 @@ let
   uniqueNonEmptyListOf =
     elementType:
     types.addCheck (types.nonEmptyListOf elementType) (values: values == lib.unique values);
+  uniqueListOf =
+    elementType:
+    types.addCheck ((types.listOf elementType) // { emptyValue = { }; }) (
+      values: values == lib.unique values
+    );
   timeoutSeconds = types.ints.between 1 600;
   percent = types.ints.between 0 100;
   versionArgsType = types.enum [ [ "--version" ] ];
@@ -349,7 +354,7 @@ let
   normalizedProtocolType = mkObservationType "normalized-protocol" {
     command = lib.mkOption { type = purposeCommandPackage "normalized-protocol"; };
     allowedOutcomeIds = lib.mkOption { type = uniqueNonEmptyListOf safeId; };
-    requiredResourceKeys = lib.mkOption { type = uniqueNonEmptyListOf safeToken; };
+    requiredResourceKeys = lib.mkOption { type = uniqueListOf safeToken; };
     envelopeVersion = lib.mkOption { type = types.ints.positive; };
   } (_: true);
 

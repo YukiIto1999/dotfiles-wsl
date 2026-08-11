@@ -7,6 +7,10 @@ set -euo pipefail
 : "${INSTALL_AGENTS_EMPTY_ENTRYPOINT:?}"
 : "${INSTALL_AGENTS_RETENTION_ONE:?}"
 : "${INSTALL_AGENTS_RETENTION_ELEVEN:?}"
+: "${INSTALL_AGENTS_CLIENT_DOT:?}"
+: "${INSTALL_AGENTS_CLIENT_DOT_DOT:?}"
+: "${INSTALL_AGENTS_CLIENT_SLASH:?}"
+: "${INSTALL_AGENTS_CLIENT_CHARACTER:?}"
 : "${INSTALL_AGENTS_SINGLE_BINARY:?}"
 : "${ATOMIC_PUBLISH:?}"
 : "${FIXTURE_SOURCES:?}"
@@ -237,6 +241,29 @@ state_snapshot() {
   } >"$output"
 }
 
+home_snapshot() {
+  local home=$1 output=$2 path relative kind mode digest target
+
+  : >"$output"
+  while IFS= read -r -d '' relative; do
+    path=$home/$relative
+    mode=$(stat -c %a -- "$path")
+    if [[ -L $path ]]; then
+      kind=l
+      target=$(readlink -- "$path")
+      printf '%s\t%s\t%s\t%s\n' "$kind" "$mode" "$target" "$relative" >>"$output"
+    elif [[ -f $path ]]; then
+      kind=f
+      digest=$(digest_of "$path")
+      printf '%s\t%s\t%s\t%s\n' "$kind" "$mode" "$digest" "$relative" >>"$output"
+    elif [[ -d $path ]]; then
+      printf 'd\t%s\t-\t%s\n' "$mode" "$relative" >>"$output"
+    else
+      printf 'special\t%s\t-\t%s\n' "$mode" "$relative" >>"$output"
+    fi
+  done < <(find -P "$home" -mindepth 1 -printf '%P\0' | sort -z)
+}
+
 seed_stable_home() {
   local home=$1 release=sha256-0000000000000000000000000000000000000000000000000000000000000000
   local root=$home/.local/share/dotfiles/agents/codex
@@ -398,6 +425,30 @@ for invalid_case in missing-arch empty-asset empty-entrypoint retention-one rete
   expect_failure "fail-fast-$invalid_case" "$invalid_installer" "$home" "$api_archive" \
     "$fixture/fail-fast-api.json"
   test ! -s "$FIXTURE_CURL_LOG"
+done
+
+# Client identifiers are safe basenames before any managed path or network access is touched.
+for invalid_case in dot dot-dot slash character; do
+  case $invalid_case in
+    dot) invalid_installer=$INSTALL_AGENTS_CLIENT_DOT ;;
+    dot-dot) invalid_installer=$INSTALL_AGENTS_CLIENT_DOT_DOT ;;
+    slash) invalid_installer=$INSTALL_AGENTS_CLIENT_SLASH ;;
+    character) invalid_installer=$INSTALL_AGENTS_CLIENT_CHARACTER ;;
+  esac
+  home=$fixture/client-name-$invalid_case-home
+  prepare_home "$home"
+  configure_run "$home" "$api_archive" "$fixture/fail-fast-api.json"
+  home_snapshot "$home" "$fixture/client-name-$invalid_case-before"
+  if "$invalid_installer" >"$fixture/client-name-$invalid_case.stdout" \
+    2>"$fixture/client-name-$invalid_case.stderr"; then
+    echo "client-name-$invalid_case unexpectedly succeeded" >&2
+    exit 1
+  fi
+  home_snapshot "$home" "$fixture/client-name-$invalid_case-after"
+  diff --unified "$fixture/client-name-$invalid_case-before" \
+    "$fixture/client-name-$invalid_case-after"
+  test ! -s "$FIXTURE_CURL_LOG"
+  test ! -s "$FIXTURE_TAR_LOG"
 done
 
 # Invalid pre-existing public shapes fail without mutating current, visible, or old releases.

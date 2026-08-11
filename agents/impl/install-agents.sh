@@ -22,6 +22,10 @@ fi
 fail() { echo "FATAL: $*" >&2; exit 1; }
 log()  { printf '== %s\n' "$*"; }
 
+valid_client_name() {
+  [[ $1 != . && $1 != .. && $1 =~ ^[A-Za-z0-9._+-]+$ ]]
+}
+
 atomic_publish_command=@atomicPublishCommand@
 transaction_hook_command=@transactionHookCommand@
 
@@ -206,7 +210,7 @@ prepare_visible_parent() {
 prepare_client_root() {
   local name=$1
 
-  [[ $name =~ ^[A-Za-z0-9._+-]+$ ]] || fail "unsafe client name: $name"
+  valid_client_name "$name" || fail "unsafe client name: $name"
   prepare_visible_parent
   ensure_owned_directory "$HOME/.local/share" 0755 "managed directory"
   ensure_owned_directory "$HOME/.local/share/dotfiles" 0755 "managed directory"
@@ -1216,6 +1220,7 @@ while IFS= read -r record; do
     || fail "install kind is missing"
   name=$(jq -e -r '.name | select(type == "string" and length > 0)' <<<"$record") \
     || fail "client name is missing"
+  valid_client_name "$name" || fail "unsafe client name: $name"
 
   case $kind in
     installer-script) install_installer_script "$record" ;;

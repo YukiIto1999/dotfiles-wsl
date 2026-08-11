@@ -15,10 +15,10 @@ let
   inherit (cfg.host) homeDir username;
   inherit (config.sops) placeholder;
   mkUserSecretFile = import ../sops/impl/user-secret-file.nix { inherit username; };
+  gitIdentityContract = config.dotfiles.toolchain.git.identity;
 
   # git の author identity も、この利用者が誰かという同じ事実。所有を一つにする
-  gitIdentity =
-    vars: builtins.readFile (pkgs.replaceVars config.dotfiles.toolchain.git.identityTemplate vars);
+  gitIdentity = vars: builtins.readFile (pkgs.replaceVars gitIdentityContract.template vars);
 
   buildGhUser =
     name:
@@ -83,16 +83,20 @@ in
       );
     }
     // {
-      "git-identity" = mkUserSecretFile "${homeDir}/.config/git/identity.conf" (gitIdentity {
-        userName = placeholder."identity/default/name";
-        userEmail = placeholder."identity/default/email";
-      });
+      "git-identity" =
+        mkUserSecretFile "${homeDir}/${gitIdentityContract.destinations.default}"
+          (gitIdentity {
+            userName = placeholder."identity/default/name";
+            userEmail = placeholder."identity/default/email";
+          });
     }
     // lib.optionalAttrs (cfg.toolchain.git.workIdentity != null) {
-      "git-work-identity" = mkUserSecretFile "${homeDir}/.config/git/work-identity.conf" (gitIdentity {
-        userName = placeholder."identity/work/name";
-        userEmail = placeholder."identity/work/email";
-      });
+      "git-work-identity" =
+        mkUserSecretFile "${homeDir}/${gitIdentityContract.destinations.work}"
+          (gitIdentity {
+            userName = placeholder."identity/work/name";
+            userEmail = placeholder."identity/work/email";
+          });
     };
 
   config.assertions = [

@@ -28,12 +28,6 @@ let
   ) targetNames;
   ports = map (target: target.port) (builtins.attrValues cfg.targets);
   providedProviders = lib.unique (map (target: target.provider) (builtins.attrValues cfg.targets));
-  githubTargets = builtins.attrNames (
-    lib.filterAttrs (_: target: target.provider == "github") cfg.targets
-  );
-  expectedGithubTargets = lib.sort builtins.lessThan (
-    map (account: "github-${account}") config.dotfiles.accounts
-  );
   observedServices = [
     cfg.gateway.service
   ]
@@ -223,10 +217,6 @@ in
     {
       assertion = ports == lib.unique ports;
       message = "MCP target ports must be unique";
-    }
-    {
-      assertion = githubTargets == expectedGithubTargets;
-      message = "GitHub target IDs must match github-<account> exactly";
     }
   ];
 }

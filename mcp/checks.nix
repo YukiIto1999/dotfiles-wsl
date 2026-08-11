@@ -533,7 +533,6 @@ in
                 {
                   options = {
                     dotfiles = {
-                      accounts = lib.mkOption { type = lib.types.listOf lib.types.str; };
                       observations = lib.mkOption {
                         type = lib.types.attrsOf lib.types.raw;
                         default = { };
@@ -555,11 +554,6 @@ in
                   };
                   config = {
                     dotfiles = {
-                      accounts = [
-                        "account-1"
-                        "account-2"
-                        "account-3"
-                      ];
                       host = {
                         username = "nixos";
                         homeDir = "/home/nixos";
@@ -603,8 +597,6 @@ in
       duplicatePort = updateTarget "memory" (
         target: target // { port = expectedTargets.codex.port; }
       ) expectedTargets;
-      wrongGithubId = renameTarget "github-account-1" "github-wrong" expectedTargets;
-
       probeDrift = updateTarget "memory" (
         target:
         target
@@ -671,7 +663,6 @@ in
     assert !(assertionsPass expectedProviders underscoreId);
     assert !(assertionsPass expectedProviders prefixId);
     assert !(assertionsPass expectedProviders duplicatePort);
-    assert !(assertionsPass expectedProviders wrongGithubId);
     assert targetContractMatches expectedTargets;
     assert !(targetContractMatches probeDrift);
     assert !(targetContractMatches networkDrift);

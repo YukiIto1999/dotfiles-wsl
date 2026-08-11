@@ -7,6 +7,7 @@
 
 let
   mkContainerBackend = import ../impl/container-backend.nix { inherit lib; };
+  inherit (import ../impl/port-bindings.nix { inherit lib; }) publishedPortBindings;
   mkCommand = import ../../commands/impl/mk-command.nix { inherit config lib pkgs; };
   serverPort = "9000";
   serverRepository = "sonarqube";
@@ -137,6 +138,13 @@ in
     };
 
     virtualisation.oci-containers.containers = database.containers // server.containers;
+    assertions = [
+      {
+        assertion =
+          publishedPortBindings config.virtualisation.oci-containers.containers.sonarqube-db == [ ];
+        message = "the internal SonarQube database must not publish a host port";
+      }
+    ];
     systemd.services =
       database.systemdServices
       // server.systemdServices

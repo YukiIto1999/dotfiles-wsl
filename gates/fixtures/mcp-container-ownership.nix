@@ -92,11 +92,28 @@ in
       secrets = [
         {
           file = "mcp/crawl4ai/impl/review-secret.nix";
-          value."crawl4ai/api_token" = { };
+          value."crawl4ai/api_token" = {
+            mode = "0400";
+            owner = "nixos";
+            group = "users";
+            restartUnits = [ "mcp-front-crawl4ai.service" ];
+          };
+        }
+        {
+          file = "mcp/crawl4ai/impl/restart-secret.nix";
+          value."crawl4ai/api_token".restartUnits = [ "mcp-front-crawl4ai.service" ];
+        }
+        {
+          file = "mcp/crawl4ai/impl/orphan-restart-secret.nix";
+          value."crawl4ai/orphan".restartUnits = [ "mcp-front-crawl4ai.service" ];
         }
         {
           file = "mcp/crawl4ai/impl/other-secret.nix";
           value."searxng/secret_key" = { };
+        }
+        {
+          file = "containers/crawl4ai/module.nix";
+          value."crawl4ai/api_token" = { };
         }
       ];
     };
@@ -104,15 +121,15 @@ in
 
   expectedScan = {
     coverage = {
-      definitionCount = 7;
+      definitionCount = 10;
       mcpUnitCount = 3;
-      resolvedDefinitionCount = 7;
+      resolvedDefinitionCount = 10;
       unitCount = 5;
     };
     diagnostics = [
-      "MCP unit owns container backend declarations: mcp/crawl4ai/module.nix:virtualisation.oci-containers mcp/crawl4ai/impl/review-template.nix:sops.templates mcp/crawl4ai/impl/review-backend.nix:dotfiles.containers.services.crawl4ai mcp/crawl4ai/impl/review-secret.nix:sops.secrets.crawl4ai"
+      "MCP unit owns container backend declarations: mcp/crawl4ai/module.nix:virtualisation.oci-containers mcp/crawl4ai/impl/review-template.nix:sops.templates mcp/crawl4ai/impl/review-backend.nix:dotfiles.containers.services.crawl4ai mcp/crawl4ai/impl/review-secret.nix:sops.secrets.crawl4ai mcp/crawl4ai/impl/orphan-restart-secret.nix:sops.secrets.crawl4ai"
     ];
-    diagnosticText = "MCP unit owns container backend declarations: mcp/crawl4ai/module.nix:virtualisation.oci-containers mcp/crawl4ai/impl/review-template.nix:sops.templates mcp/crawl4ai/impl/review-backend.nix:dotfiles.containers.services.crawl4ai mcp/crawl4ai/impl/review-secret.nix:sops.secrets.crawl4ai";
+    diagnosticText = "MCP unit owns container backend declarations: mcp/crawl4ai/module.nix:virtualisation.oci-containers mcp/crawl4ai/impl/review-template.nix:sops.templates mcp/crawl4ai/impl/review-backend.nix:dotfiles.containers.services.crawl4ai mcp/crawl4ai/impl/review-secret.nix:sops.secrets.crawl4ai mcp/crawl4ai/impl/orphan-restart-secret.nix:sops.secrets.crawl4ai";
     scanIntegrityViolations = [ ];
     unresolvedMcpDefinitionFiles = [ ];
     violations = [
@@ -120,6 +137,7 @@ in
       "mcp/crawl4ai/impl/review-template.nix:sops.templates"
       "mcp/crawl4ai/impl/review-backend.nix:dotfiles.containers.services.crawl4ai"
       "mcp/crawl4ai/impl/review-secret.nix:sops.secrets.crawl4ai"
+      "mcp/crawl4ai/impl/orphan-restart-secret.nix:sops.secrets.crawl4ai"
     ];
   };
 

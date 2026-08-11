@@ -20,6 +20,8 @@ git diff -- sops/assets/secrets.yaml
 
 secret を追加するときは、先に値を消費する module に `sops.secrets` と必要な template または file owner を宣言し、同じ key path を SOPS で追加する。consumer の宣言を確認してから `dotfiles-rebuild --plan` と `dotfiles-rebuild` を実行する。
 
+MCP front が既存の secret file を起動時に読む場合は、その secret の `restartUnits` に front service を加える。所有境界は [AI tooling](../architecture/ai-tooling.md#docker-backend) に従う。
+
 ## Identity
 
 default Git identity は常に宣言し、生成された Git 設定から読み込む。work identity は `dotfiles.toolchain.git.workIdentity` が設定されている場合だけ宣言され、指定した Git directory にだけ切り替わる。

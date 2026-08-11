@@ -82,7 +82,7 @@ session の生存は downstream が response body を保持しているかで決
 
 [`containers/module.nix`](../../containers/module.nix) は `dotfiles.containers` の型付き service contract、Docker daemon、`dotfiles-backends` network、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は container 宣言と systemd 依存を組み立て、必要な host port だけを `127.0.0.1` に publish する。front は host loopback の backend port に接続する。
 
-application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。対応する [`mcp`](../../mcp) unit には front package と target だけを置き、SOPS、OCI container、provisioning は宣言しない。SonarQube の front は container owner が公開する endpoint、admin password file、backend unit を型付き contract から読む。
+application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。対応する [`mcp`](../../mcp) unit には front package と target だけを置き、secret の値、path、owner、mode、template、OCI container、provisioning は宣言しない。front が owner の既存 secret file を直接読む場合に限り、MCP unit はその secret の `restartUnits` に front service を加える。SonarQube の front は container owner が公開する endpoint、admin password file、backend unit を型付き contract から読む。
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 

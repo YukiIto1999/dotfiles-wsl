@@ -28,6 +28,7 @@ let
     "gates"
     "host"
     "mcp"
+    "observations"
     "telemetry"
     "toolchain"
   ];
@@ -270,8 +271,9 @@ in
         );
 
       empty = walk [ "dotfiles" ] hostOptions.dotfiles;
+      unexpectedEmpty = builtins.filter (path: path != "dotfiles.observations") empty;
     in
-    assert empty == [ ];
+    assert unexpectedEmpty == [ ];
     pkgs.runCommandLocal "check-registries-non-empty" { } "touch $out";
 
   # unit の層の file 名。ここが唯一の定義で、検査はここを読む
@@ -412,6 +414,11 @@ in
         [
           "dotfiles"
           "commands"
+        ]
+        # observations unit が型付き extension point を所有し、各 owner unit が entry を登録する。
+        [
+          "dotfiles"
+          "observations"
         ]
       ];
 

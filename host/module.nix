@@ -84,6 +84,10 @@ let
       homeManager = {
         serviceName = homeManagerServiceName;
         unit = "${homeManagerServiceName}.service";
+        restart = {
+          warningAt = 5;
+          failureAt = 20;
+        };
       };
       observations =
         let
@@ -168,6 +172,15 @@ let
             activeStates = [ "active" ];
             results = [ "success" ];
           };
+          "host/home-manager-restart" =
+            common "restart/service/${homeManager.unit}" null
+              "could not observe restart count for ${homeManager.unit}"
+            // {
+              kind = "restart-counter";
+              sourceKind = "systemd-service";
+              target = homeManager.unit;
+              inherit (homeManager.restart) warningAt failureAt;
+            };
         };
     };
   windowsDriveObservation = import ./package.nix {

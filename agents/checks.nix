@@ -2389,7 +2389,8 @@ in
           ' > /dev/null
 
         grep -Fq 'skill の runtime drift は検査しない' ${self}/agents/shared/AGENTS.md
-        grep -Fq 'managed file の runtime drift は検査しない' ${self}/docs/architecture/ai-tooling.md
+        grep -Fq 'seed は runtime drift の対象にしない' ${self}/docs/architecture/ai-tooling.md
+        grep -Fq 'managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する' ${self}/docs/architecture/ai-tooling.md
 
         jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
           '. == {mcpServers: {gateway: {type: "http", url: $expected}}}' \

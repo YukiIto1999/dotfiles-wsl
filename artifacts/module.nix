@@ -1,5 +1,29 @@
-{ lib, ... }:
+{
+  config,
+  lib,
+  ...
+}:
 
+let
+  cfg = config.dotfiles;
+  deployedArtifacts = lib.filterAttrs (_: artifact: artifact.deployedAt != null) cfg.artifacts;
+  artifactObservations = lib.mapAttrs' (
+    id: artifact:
+    lib.nameValuePair "artifacts/${id}" {
+      kind = "deployed-path";
+      checkId = "artifact/${id}";
+      resourceKey = null;
+      timeoutSeconds = 10;
+      failureMessage = "${artifact.deployedAt} does not match ${toString artifact.source}";
+      source = toString artifact.source;
+      destination = artifact.deployedAt;
+      acceptedDestinationKinds = [
+        "regular-file"
+        "symlink"
+      ];
+    }
+  ) deployedArtifacts;
+in
 {
   options.dotfiles.artifacts = lib.mkOption {
     type = lib.types.attrsOf (
@@ -33,4 +57,5 @@
     description = "実配備 producer が一度だけ生成する不変設定 artifact。配備方法は各 module が所有する。";
   };
 
+  config.dotfiles.observations = artifactObservations;
 }

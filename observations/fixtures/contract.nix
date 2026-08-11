@@ -171,6 +171,7 @@ let
         "ready"
         "unavailable"
       ];
+      requiredOutcomeIds = [ "ready" ];
       requiredResourceKeys = [
         "summary"
         "version"
@@ -234,9 +235,24 @@ in
       normalizedProtocol
       // {
         requiredResourceKeys = [
-          "state"
-          "state"
+          "summary"
+          "summary"
         ];
+      }
+    );
+    duplicateRequiredOutcomeIds = replace "host/normalized-protocol" (
+      normalizedProtocol
+      // {
+        requiredOutcomeIds = [
+          "ready"
+          "ready"
+        ];
+      }
+    );
+    requiredOutcomeOutsideAllowed = replace "host/normalized-protocol" (
+      normalizedProtocol
+      // {
+        requiredOutcomeIds = [ "unknown" ];
       }
     );
     foreignRegistryKey = valid // {

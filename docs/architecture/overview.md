@@ -66,7 +66,7 @@ SOPS の暗号文は repository に置き、sops-nix が activation 時に host 
 
 [`observations/module.nix`](../../observations/module.nix) は 17 種類の observation kind を閉じた union として定義する。検査対象の意味と値は `agents`、`artifacts`、`containers`、`host`、`mcp`、`sops`、`telemetry` の各 owner が宣言し、registry key の先頭 segment も owner と一致させる。
 
-[`commands/doctor/module.nix`](../../commands/doctor/module.nix) は registry 全体を key 順に一つの JSON へ投影する。`dotfiles-doctor` は kind ごとの汎用 probe を timeout と空の環境で実行し、MCP の protocol も owner が登録した `normalized-protocol` command として扱う。doctor 側には owner 名、service roster、MCP の状態機械を置かない。再起動、GC、trim、修復も行わず、観測結果だけを返す。
+[`commands/doctor/module.nix`](../../commands/doctor/module.nix) は registry 全体を key 順に一つの JSON へ投影する。`dotfiles-doctor` は kind ごとの汎用 probe を timeout と許可した環境変数だけの環境で実行し、MCP の protocol も owner が登録した `normalized-protocol` command として扱う。doctor 側には owner 名、service roster、MCP の状態機械を置かない。再起動、GC、trim、修復も行わず、観測結果だけを返す。
 
 `nix flake check` は source から artifact を生成できるかを検査し、doctor は activation 後の runtime が宣言に収束したかを検査する。実行と診断は [Doctor](../operations/doctor.md)に記載している。
 

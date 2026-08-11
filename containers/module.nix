@@ -10,6 +10,67 @@ let
   cfg = config.dotfiles.containers;
   mkCommand = import ../commands/impl/mk-command.nix { inherit config lib pkgs; };
   configuredContainers = config.virtualisation.oci-containers.containers;
+  observationTimeoutSeconds = 10;
+  restartWarningCount = 5;
+  restartFailureCount = 20;
+
+  buildkitGcContract =
+    let
+      name = "docker-buildkit-gc";
+      dockerService = "docker.service";
+      maxUsedSpace = "60GB";
+      reservedSpace = "20GB";
+    in
+    rec {
+      inherit name;
+      serviceUnit = "${name}.service";
+      timerUnit = "${name}.timer";
+      daemonGc = {
+        enabled = true;
+        defaultKeepStorage = maxUsedSpace;
+      };
+      service = {
+        after = [ dockerService ];
+        wants = [ dockerService ];
+        conditionPathExists = "/var/run/docker.sock";
+        type = "oneshot";
+        execStart = lib.escapeShellArgs (
+          [ (lib.getExe pkgs.docker) ]
+          ++ [
+            "buildx"
+            "prune"
+            "--force"
+            "--max-used-space"
+            maxUsedSpace
+            "--reserved-space"
+            reservedSpace
+          ]
+        );
+      };
+      timer = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = "*-*-* 00/6:00:00";
+          Persistent = true;
+          Unit = serviceUnit;
+        };
+      };
+      observation = {
+        kind = "systemd-timer";
+        checkId = "maintenance/${timerUnit}";
+        resourceKey = null;
+        timeoutSeconds = observationTimeoutSeconds;
+        failureMessage = "${timerUnit} or its service is not operational";
+        timer = timerUnit;
+        service = serviceUnit;
+        unitFileStates = [
+          "enabled"
+          "enabled-runtime"
+        ];
+        activeStates = [ "active" ];
+        serviceResults = [ "success" ];
+      };
+    };
 
   endpointType = lib.types.submodule {
     options = {
@@ -92,9 +153,15 @@ let
     };
   };
 
-  imageDefinitions = lib.concatMap (service: builtins.attrValues service.images) (
-    builtins.attrValues cfg.services
-  );
+  serviceEntries = lib.mapAttrsToList (application: service: {
+    inherit application service;
+  }) cfg.services;
+
+  imageEntries = lib.concatMap (
+    entry: lib.mapAttrsToList (_: image: { inherit image; }) entry.service.images
+  ) serviceEntries;
+
+  imageDefinitions = map (entry: entry.image) imageEntries;
 
   upstreamImages = map (image: image.image) (
     builtins.filter (image: image.kind == "upstream") imageDefinitions
@@ -143,11 +210,8 @@ let
     container: container.ports ++ extraOptionPortBindings container
   ) (builtins.attrValues configuredContainers);
 
-  serviceEntries = lib.mapAttrsToList (name: service: {
-    inherit name service;
-  }) cfg.services;
-
-  failedServices = predicate: map (entry: entry.name) (builtins.filter predicate serviceEntries);
+  failedServices =
+    predicate: map (entry: entry.application) (builtins.filter predicate serviceEntries);
 
   servicePortBindings =
     service:
@@ -217,6 +281,113 @@ let
     || health.path == ""
     || !lib.hasPrefix "/" health.path
   );
+
+  containerObservations =
+    let
+      common = checkId: failureMessage: {
+        inherit checkId failureMessage;
+        resourceKey = null;
+        timeoutSeconds = observationTimeoutSeconds;
+      };
+      mkEntry = name: value: { inherit name value; };
+      serviceObservations = lib.concatMap (
+        entry:
+        map (
+          unit:
+          mkEntry "containers/service/${lib.removeSuffix ".service" unit}" (
+            common "service/${unit}" "${unit} is not operational"
+            // {
+              kind = "systemd-service";
+              inherit unit;
+              loadStates = [ "loaded" ];
+              activeStates = [ "active" ];
+              results = [ "success" ];
+            }
+          )
+        ) entry.service.units
+      ) serviceEntries;
+      serviceRestartObservations = lib.concatMap (
+        entry:
+        map (
+          unit:
+          mkEntry "containers/service-restart/${lib.removeSuffix ".service" unit}" (
+            common "restart/service/${unit}" "could not observe restart count for ${unit}"
+            // {
+              kind = "restart-counter";
+              sourceKind = "systemd-service";
+              target = unit;
+              warningAt = restartWarningCount;
+              failureAt = restartFailureCount;
+            }
+          )
+        ) entry.service.units
+      ) serviceEntries;
+      imageObservations = map (
+        entry:
+        let
+          inherit (entry.image) container image;
+        in
+        mkEntry "containers/image/${container}" (
+          common "container-image/${container}" "${container} is not running the declared image ${image}"
+          // {
+            kind = "container-image";
+            inherit container image;
+          }
+        )
+      ) imageEntries;
+      containerRestartObservations = map (
+        entry:
+        let
+          inherit (entry.image) container;
+        in
+        mkEntry "containers/container-restart/${container}" (
+          common "restart/container/${container}" "could not observe restart count for ${container}"
+          // {
+            kind = "restart-counter";
+            sourceKind = "container";
+            target = container;
+            warningAt = restartWarningCount;
+            failureAt = restartFailureCount;
+          }
+        )
+      ) imageEntries;
+      healthObservations = map (
+        entry:
+        let
+          inherit (entry) application service;
+          inherit (service) health;
+          url = "${service.endpoints.${health.endpoint}.url}${health.path}";
+        in
+        mkEntry "containers/health/${application}" {
+          checkId = "container-health/${application}";
+          resourceKey = null;
+          timeoutSeconds = health.timeout;
+          failureMessage = "${health.method} ${url} failed";
+          kind = "http-health";
+          inherit (health) method;
+          inherit url;
+        }
+      ) serviceEntries;
+    in
+    builtins.listToAttrs (
+      [
+        (mkEntry "containers/roster" (
+          common "container-roster" "container roster is empty"
+          // {
+            kind = "roster";
+            members = map (entry: entry.image.container) imageEntries;
+            minimumCount = 1;
+            failureOnly = true;
+          }
+        ))
+        (mkEntry "containers/buildkit-gc" buildkitGcContract.observation)
+      ]
+      ++ serviceObservations
+      ++ serviceRestartObservations
+      ++ imageObservations
+      ++ containerRestartObservations
+      ++ healthObservations
+    );
 in
 {
   options.dotfiles.containers = {
@@ -234,39 +405,31 @@ in
 
   config = {
     dotfiles.commands = { inherit syncImages imageDigest; };
+    dotfiles.observations = containerObservations;
 
     users.users.${myCfg.host.username}.extraGroups = [ "docker" ];
 
     virtualisation = {
       docker = {
         enable = true;
-        daemon.settings.builder.gc = {
-          enabled = true;
-          defaultKeepStorage = "60GB";
-        };
+        daemon.settings.builder.gc = buildkitGcContract.daemonGc;
       };
       oci-containers.backend = "docker";
     };
 
-    systemd.services.docker-buildkit-gc = {
+    systemd.services.${buildkitGcContract.name} = {
       description = "Prune Docker BuildKit cache above the storage budget";
-      after = [ "docker.service" ];
-      wants = [ "docker.service" ];
-      unitConfig.ConditionPathExists = "/var/run/docker.sock";
+      inherit (buildkitGcContract.service) after wants;
+      unitConfig.ConditionPathExists = buildkitGcContract.service.conditionPathExists;
       serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 60GB --reserved-space 20GB";
+        Type = buildkitGcContract.service.type;
+        ExecStart = buildkitGcContract.service.execStart;
       };
     };
 
-    systemd.timers.docker-buildkit-gc = {
+    systemd.timers.${buildkitGcContract.name} = {
       description = "Periodic Docker BuildKit cache pruning";
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "*-*-* 00/6:00:00";
-        Persistent = true;
-        Unit = "docker-buildkit-gc.service";
-      };
+      inherit (buildkitGcContract.timer) wantedBy timerConfig;
     };
 
     systemd.services.docker-dotfiles-backends-network = {

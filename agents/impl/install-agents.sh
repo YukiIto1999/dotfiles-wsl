@@ -466,34 +466,24 @@ validate_payload() {
 
 probe_payload_entrypoint() {
   local record=$1 payload=$2 scratch=$3 entrypoint=$4 before_manifest=$5 after_manifest=$6
-  local version_args_json status timeout_command public_payload public_scratch
+  local version_args_json status timeout_command
   local -a version_args
 
   version_args_json=$(jq -e -c '.versionArgs | select(type == "array" and length > 0)' <<<"$record") \
     || fail "version arguments are missing"
   mapfile -d '' -t version_args < <(decode_version_args "$version_args_json")
   timeout_command=$(command -v timeout)
-  public_payload=$active_stage_public/payload
-  public_scratch=$active_stage_public/probe
 
   mkdir -m 0700 -- "$scratch/home" "$scratch/codex-home" "$scratch/cache" \
     "$scratch/config" "$scratch/data" "$scratch/state" "$scratch/tmp" "$scratch/work"
   set +e
   env -i \
-    HOME="$public_scratch/home" \
-    CODEX_HOME="$public_scratch/codex-home" \
-    XDG_CACHE_HOME="$public_scratch/cache" \
-    XDG_CONFIG_HOME="$public_scratch/config" \
-    XDG_DATA_HOME="$public_scratch/data" \
-    XDG_STATE_HOME="$public_scratch/state" \
-    TMPDIR="$public_scratch/tmp" \
-    PATH="$public_payload/bin:$public_payload/codex-path" \
     LC_ALL=C \
     TERM=dumb \
-    "$timeout_command" --kill-after="${probe_kill_grace_seconds}s" \
+@probeEnvironment@    "$timeout_command" --kill-after="${probe_kill_grace_seconds}s" \
     "${probe_timeout_seconds}s" "$atomic_publish_command" probe-exec \
     "$active_stage_fd" "$active_stage_identity" probe/work "payload/$entrypoint" \
-    "$public_payload/$entrypoint" "$client_root_fd" "$releases_root_fd" \
+    "$active_stage_public/payload/$entrypoint" "$client_root_fd" "$releases_root_fd" \
     "$visible_parent_fd" -- "${version_args[@]}" \
     </dev/null >"$scratch/version.stdout" 2>"$scratch/version.stderr"
   status=$?

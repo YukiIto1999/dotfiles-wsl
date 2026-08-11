@@ -164,6 +164,7 @@ configure_atomic_hook() {
 clear_atomic_hook() {
   unset FIXTURE_ATOMIC_HOOK_EVENT FIXTURE_ATOMIC_HOOK_ACTION FIXTURE_ATOMIC_HOOK_SOURCE
   unset FIXTURE_ATOMIC_HOOK_MARKER FIXTURE_ATOMIC_HOOK_SAVED FIXTURE_ATOMIC_HOOK_TARGET
+  unset FIXTURE_ATOMIC_HOOK_ROOT FIXTURE_ATOMIC_HOOK_FAKE_EXECUTABLE
 }
 
 lstat_identity() {
@@ -602,6 +603,50 @@ test ! -L "$home/.local/bin/codex"
 test -d "$FIXTURE_ATOMIC_HOOK_SAVED"
 test ! -e "$FIXTURE_ATOMIC_HOOK_SAVED/current"
 test ! -L "$FIXTURE_ATOMIC_HOOK_SAVED/current"
+clear_atomic_hook
+
+# Probe execution uses the validated staged object even if the public root is replaced afterward.
+label=probe-client-root-race
+home=$fixture/$label-home
+prepare_home "$home"
+configure_run "$home" "$destination_archive" "$fixture/destination-api.json"
+client_root=$home/.local/share/dotfiles/agents/codex
+fake_probe_marker=$fixture/$label.fake-executed
+fake_probe=$fixture/$label.fake-entrypoint
+cat >"$fake_probe" <<EOF
+#!$FIXTURE_RUNTIME_SHELL
+: >'$fake_probe_marker'
+printf '%s\n' 'fake probe executed'
+EOF
+chmod 0755 "$fake_probe"
+configure_atomic_hook before-probe-exec replace-probe-stage "" "$label"
+export FIXTURE_ATOMIC_HOOK_ROOT=$client_root
+export FIXTURE_ATOMIC_HOOK_FAKE_EXECUTABLE=$fake_probe
+if "$INSTALL_AGENTS" >"$fixture/$label.stdout" 2>"$fixture/$label.stderr"; then
+  echo "$label unexpectedly succeeded" >&2
+  exit 1
+fi
+test -e "$FIXTURE_ATOMIC_HOOK_MARKER"
+if [[ -e $fake_probe_marker ]]; then
+  echo 'probe race executed the unvalidated replacement entrypoint' >&2
+  exit 1
+fi
+grep -Fq 'public client root changed during publish for codex' "$fixture/$label.stderr"
+test ! -e "$home/.local/bin/codex"
+test ! -L "$home/.local/bin/codex"
+test -d "$FIXTURE_ATOMIC_HOOK_SAVED"
+test ! -e "$FIXTURE_ATOMIC_HOOK_SAVED/current"
+test -z "$(find "$FIXTURE_ATOMIC_HOOK_SAVED/releases" -mindepth 1 -print -quit)"
+test -z "$(find "$FIXTURE_ATOMIC_HOOK_SAVED" -maxdepth 1 \
+  \( -name '.stage.*' -o -name '.current.next.*' -o -name '.atomic-quarantine.*' \) \
+  -print -quit)"
+mapfile -t fake_stages < <(find "$client_root" -mindepth 1 -maxdepth 1 -type d \
+  -name '.stage.*' -print)
+test "${#fake_stages[@]}" -eq 1
+cmp -- "$fake_probe" "${fake_stages[0]}/payload/bin/codex"
+test -z "$(find "$client_root/releases" -mindepth 1 -print -quit)"
+test -z "$(find "$client_root" -maxdepth 1 \
+  \( -name '.current.next.*' -o -name '.atomic-quarantine.*' \) -print -quit)"
 clear_atomic_hook
 
 # HOME and every managed component below it must be owned real directories.

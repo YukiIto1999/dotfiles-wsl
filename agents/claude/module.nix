@@ -66,6 +66,7 @@ in
 {
   dotfiles.agents.clients.claude = {
     binary = "claude";
+    runtimeWrapperMode = "managed";
     rulesDestination = ".claude/CLAUDE.md";
     skillsDestination = ".claude/skills";
     definitionMode = "native";

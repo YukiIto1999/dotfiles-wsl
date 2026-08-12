@@ -221,12 +221,12 @@ let
     {
       client,
       binary,
-      homeDir,
+      targetExecutable,
     }:
     pkgs.writeShellApplication {
       name = binary;
       text = ''
-        exec ${lib.getExe launcher} ${lib.escapeShellArg client} ${lib.escapeShellArg "${homeDir}/.local/bin/${binary}"} "$@"
+        exec ${lib.getExe launcher} ${lib.escapeShellArg client} ${lib.escapeShellArg targetExecutable} "$@"
       '';
     };
 in

@@ -32,6 +32,7 @@
 | MCP unit が OCI、secret template、同名 backend の service contract を所有せず、同名 backend の secret には MCP 外の owner が宣言済みの場合だけ `restartUnits` を寄与する | `mcp-no-container-ownership` |
 | host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |
 | target の provider、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
+| Codex MCP front が agent owner の実行 path を引用して使い、home path や binary 名を組み立てない | `mcp-codex-client-executable-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
 | GitHub account と `github-<account>` target が完全一致し、欠落、追加、改名を拒否する | `github-account-target-contract` |
 | repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |

@@ -8,6 +8,7 @@ in
 {
   dotfiles.agents.clients.antigravity = {
     binary = "agy";
+    runtimeWrapperMode = "unsupported";
     rulesDestination = ".gemini/AGENTS.md";
     skillsDestination = ".gemini/antigravity-cli/skills";
     definitionMode = "unsupported";

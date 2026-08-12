@@ -12,10 +12,13 @@ let
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   clientNames = builtins.attrNames agents.clients;
+  clientExecutables = lib.mapAttrs (
+    _: client: "${cfg.host.homeDir}/.local/bin/${client.binary}"
+  ) agents.clients;
   runtime = import ./package.nix { inherit lib pkgs runtimeContract; };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (
-    name: name != "antigravity" && agents.clients.${name}.binary != ""
+    name: agents.clients.${name}.runtimeWrapperMode == "managed"
   ) clientNames;
   runtimeWrappers = lib.listToAttrs (
     map (
@@ -25,7 +28,7 @@ let
         wrapper = runtime.mkWrapper {
           client = name;
           inherit (client) binary;
-          homeDir = cfg.host.homeDir;
+          targetExecutable = clientExecutables.${name};
         };
       in
       lib.nameValuePair "${runtimeWrapperDirectory}/${client.binary}" {
@@ -285,7 +288,7 @@ let
       clientObservation =
         name: client:
         let
-          visiblePath = "${cfg.host.homeDir}/.local/bin/${client.binary}";
+          visiblePath = clientExecutables.${name};
           releaseRoot = "${cfg.host.homeDir}/.local/share/dotfiles/agents/${name}";
         in
         commonObservation "agent/${name}" null
@@ -400,6 +403,7 @@ in
 
   config = {
     dotfiles.agents = {
+      inherit clientExecutables;
       packages = {
         inherit apm;
         agentmemoryHooks = config.dotfiles.agents.agentmemory.hooks;

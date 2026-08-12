@@ -11,6 +11,11 @@
       hasChildModule = false;
     }
     {
+      name = "checks";
+      kind = "directory";
+      hasChildModule = false;
+    }
+    {
       name = "child";
       kind = "directory";
       hasChildModule = true;
@@ -23,6 +28,11 @@
   ];
 
   invalid = [
+    {
+      name = "checks";
+      kind = "regular";
+      hasChildModule = false;
+    }
     {
       name = "runtime";
       kind = "directory";

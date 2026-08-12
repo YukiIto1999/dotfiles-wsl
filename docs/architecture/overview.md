@@ -56,6 +56,8 @@ JSON、TOML、YAML の設定は、配備を担当する module が一度だけ�
 
 systemd は generation を runtime へ展開する。長時間動く agentgateway、Docker daemon、OCI container、MCP backend network と、定期実行する agent client updater、BuildKit GC、agent cache GC、worktree reaper を unit として管理する。各 owner は service、timer、配備 path、資源閾値などの実状態を `dotfiles.observations` へ登録する。
 
+WSL のメモリ安定性は [`host/module.nix`](../../host/module.nix) が所有する。32 GiB の guest では `vm.min_free_kbytes=262144`、`vm.watermark_scale_factor=100`、`vm.compaction_proactiveness=40`、`vm.defrag_mode=1` とし、VMBus が使う高次 page の余地を圧迫前に確保する。process、agent session、tool の使用量には上限を設けず、通常の実行経路も変えない。watermark の引き上げで reclaim を早め、proactive compaction と defrag mode で断片化を抑える。
+
 [`containers/module.nix`](../../containers/module.nix) は Docker daemon、`dotfiles-backends` network、型付き service contract、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。Agentmemory、Crawl4AI、SearXNG、SonarQube の application 固有宣言は各 `containers/` unit、対応する MCP front は各 `mcp/` unit が所有する。
 
 MCP は `dotfiles.mcp.targets`、`dotfiles.mcp.fronts`、`dotfiles.mcp.gateway` の三つに分ける。target は provider と実行契約を所有し、front は target から導いた常駐 transport と backend 依存を所有する。gateway は全 front を束ねる単一 endpoint であり、front の起動依存を持たない。host が必要とする provider は [`flake.nix`](../../flake.nix) の固定 roster が決める。

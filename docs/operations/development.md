@@ -63,7 +63,7 @@ git diff --check
 
 ## unit の中で path を書く
 
-自 unit の資材は `./` 起点で書く。他 unit と repo root を指すときは `${self}` 起点で書く。`module.nix` は `self` を受け取れないので、他 unit を指すときだけ `../<unit>/` を使う。
+同じ root unit 配下の Nix 資材は、参照元からの `./` または `../` で指す。root unit をまたぐ実装参照は作らず、型付き option を介す。境界検査に登録した共通 helper だけは相対 path で import できる。`${self}` は repository 全体の走査や、checkout 全体を必要とする実行時 path に使う。
 
 `${self}` と `./` は様式の違いではない。`./x` は `x` だけを含む独立した store path になり、`${self}/x` は checkout 全体の store path の中を指す。実行時に隣のファイルを解決する script は後者でなければ壊れる。単体で完結する fixture と data は前者でよい。
 

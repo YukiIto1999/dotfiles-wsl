@@ -199,6 +199,7 @@
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
             execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
+            mergeCheckParts = import ./gates/impl/merge-check-parts.nix { inherit lib; };
             unitOwnership = import ./gates/impl/unit-ownership.nix { inherit lib; };
             observationRegistryModule = {
               options.dotfiles.observations = lib.mkOption {

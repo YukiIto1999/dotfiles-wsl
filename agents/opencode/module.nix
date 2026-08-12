@@ -67,6 +67,7 @@ in
 {
   dotfiles.agents.clients.opencode = {
     binary = "opencode";
+    runtimeWrapperMode = "managed";
     rulesDestination = ".config/opencode/AGENTS.md";
     skillsDestination = ".config/opencode/skills";
     definitionMode = "rendered";

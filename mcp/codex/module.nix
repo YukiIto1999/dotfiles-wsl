@@ -5,14 +5,15 @@
   ...
 }:
 
-# 本体は ~/.local/bin の upstream 配布 codex、Nix は起動 wrapper のみ持つ
-# binary 未 install の間は spawn が失敗するだけで他 target に影響しない
+# 本体は agent client contract が公開する upstream 配布 Codex を使う。
+# binary 未 install の間は spawn が失敗するだけで他 target に影響しない。
 let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
+  clientExecutable = config.dotfiles.agents.clientExecutables.codex;
   front = mkMcpServer {
     name = "codex-mcp";
-    command = "${config.dotfiles.host.homeDir}/.local/bin/codex mcp-server";
+    command = "${lib.escapeShellArg clientExecutable} mcp-server";
   };
 in
 {

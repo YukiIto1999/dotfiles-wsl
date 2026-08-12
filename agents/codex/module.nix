@@ -113,6 +113,7 @@ in
 {
   dotfiles.agents.clients.codex = {
     binary = "codex";
+    runtimeWrapperMode = "managed";
     rulesDestination = ".codex/AGENTS.md";
     skillsDestination = ".codex/skills";
     definitionMode = "rendered";

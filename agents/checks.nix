@@ -577,7 +577,7 @@ let
     worktreeCommand = fakeAgentWorktree;
   };
   wrapperDirectory = ".local/share/dotfiles-agent/bin";
-  runtimeClientNames = builtins.filter (name: name != "antigravity" && clients.${name}.binary != "") (
+  runtimeClientNames = builtins.filter (name: clients.${name}.runtimeWrapperMode == "managed") (
     builtins.attrNames clients
   );
 
@@ -641,7 +641,7 @@ let
   expectedClientObservation =
     name: client:
     let
-      visiblePath = "${homeDir}/.local/bin/${client.binary}";
+      visiblePath = agentConfig.clientExecutables.${name};
       releaseRoot = "${homeDir}/.local/share/dotfiles/agents/${name}";
       release = if client.install.kind == "github-release" then releaseFor client else null;
     in
@@ -868,6 +868,16 @@ let
         systemd.services.dotfiles-agent-resource-reaper.description = lib.mkForce "description mutation";
       }
     ]).config;
+  runtimeWrapperModeVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.agents.clients.antigravity.runtimeWrapperMode = lib.mkForce "managed";
+        dotfiles.agents.clients.codex.runtimeWrapperMode = lib.mkForce "unsupported";
+      }
+    ]).config;
+  runtimeWrapperModeVariantHome =
+    runtimeWrapperModeVariantConfig.home-manager.users.${hostConfig.dotfiles.host.username};
 
   projectManagedFile =
     file:
@@ -938,9 +948,27 @@ let
       internal = hostOptions.dotfiles.agents.clients.internal or false;
       hasDefault = hostOptions.dotfiles.agents.clients ? default;
     };
+    clientExecutables = {
+      type = hostOptions.dotfiles.agents.clientExecutables.type.name;
+      elementType = hostOptions.dotfiles.agents.clientExecutables.type.nestedTypes.elemType.name;
+      internal = hostOptions.dotfiles.agents.clientExecutables.internal or false;
+      readOnly = hostOptions.dotfiles.agents.clientExecutables.readOnly or false;
+    };
     client = lib.mapAttrs (_: option: option.type.name) clientOptions;
     managedFile = lib.mapAttrs (_: option: option.type.name) managedFileOptions;
     capabilityManagedFile = lib.mapAttrs (_: option: option.type.name) capabilityManagedFileOptions;
+  };
+  runtimeWrapperModeMetadata =
+    if clientOptions ? runtimeWrapperMode then
+      {
+        type = clientOptions.runtimeWrapperMode.type.name;
+        hasDefault = clientOptions.runtimeWrapperMode ? default;
+      }
+    else
+      null;
+  expectedRuntimeWrapperModeMetadata = {
+    type = "enum";
+    hasDefault = false;
   };
   expectedOptionMetadata = {
     enabled = {
@@ -975,6 +1003,12 @@ let
       internal = true;
       hasDefault = true;
     };
+    clientExecutables = {
+      type = "attrsOf";
+      elementType = "str";
+      internal = true;
+      readOnly = true;
+    };
     client = {
       agentmemoryMode = "enum";
       binary = "str";
@@ -988,6 +1022,7 @@ let
       lspMode = "enum";
       managedFiles = "attrsOf";
       rulesDestination = "str";
+      runtimeWrapperMode = "enum";
       skillsDestination = "str";
       telemetryMode = "enum";
       versionArgs = "listOf";
@@ -1010,7 +1045,13 @@ let
   fixtureSeedMigrationCommand = pkgs.writeShellScriptBin "dotfiles-migrate-codex-config" "exit 0";
   agentContract = import ./impl/contract.nix { inherit lib; };
   fixtureDefinitions = lib.genAttrs expected.clients.claude.definitions.names (_: fixtureSource);
-  candidateClients = lib.mapAttrs (_: client: {
+  expectedRuntimeWrapperModes = {
+    antigravity = "unsupported";
+    claude = "managed";
+    codex = "managed";
+    opencode = "managed";
+  };
+  candidateClients = lib.mapAttrs (name: client: {
     inherit (client)
       binary
       capabilityManagedFiles
@@ -1019,6 +1060,7 @@ let
       versionArgs
       install
       ;
+    runtimeWrapperMode = expectedRuntimeWrapperModes.${name};
     definitionMode = client.definitions.mode;
     definitionsDestination = client.definitions.destination;
     definitionFormat = client.definitions.format;
@@ -1050,6 +1092,14 @@ let
     };
     clients = candidateClients;
   };
+  missingRuntimeWrapperModeCandidate = baseCandidate // {
+    clients = baseCandidate.clients // {
+      claude = builtins.removeAttrs baseCandidate.clients.claude [ "runtimeWrapperMode" ];
+    };
+  };
+  expectedClientExecutables = lib.mapAttrs (
+    _: client: "${hostConfig.dotfiles.host.homeDir}/.local/bin/${client.binary}"
+  ) clients;
   mutateRuntimeTimer =
     timerName: update:
     baseCandidate
@@ -1837,6 +1887,15 @@ in
     assert lib.sort builtins.lessThan (builtins.attrNames variantClients) == expected.required;
     assert actualContract == expected.clients;
     assert optionMetadata == expectedOptionMetadata;
+    assert runtimeWrapperModeMetadata == expectedRuntimeWrapperModeMetadata;
+    assert lib.mapAttrs (_: client: client.runtimeWrapperMode) clients == expectedRuntimeWrapperModes;
+    assert !contractIsValid missingRuntimeWrapperModeCandidate;
+    assert !contractIsValid (mutateClient "claude" { runtimeWrapperMode = "invalid"; });
+    assert builtins.attrNames agentConfig.clientExecutables == builtins.attrNames clients;
+    assert agentConfig.clientExecutables == expectedClientExecutables;
+    assert
+      runtimeWrapperModeVariantHome.home.file."${wrapperDirectory}/${clients.antigravity.binary}".executable;
+    assert !(runtimeWrapperModeVariantHome.home.file ? "${wrapperDirectory}/${clients.codex.binary}");
     assert contractIsValid baseCandidate;
     assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = ""; });
     assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad/name"; });
@@ -3031,7 +3090,7 @@ in
         set -euo pipefail
         ${lib.concatMapStrings (name: ''
           wrapper=${homeConfig.home.file."${wrapperDirectory}/${clients.${name}.binary}".source}
-          grep -Fq ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/bin/${clients.${name}.binary}"} "$wrapper"
+          grep -Fq ${lib.escapeShellArg agentConfig.clientExecutables.${name}} "$wrapper"
           grep -Fq ${lib.escapeShellArg (lib.getExe runtime.launcher)} "$wrapper"
         '') runtimeClientNames}
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.launcher}

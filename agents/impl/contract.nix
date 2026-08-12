@@ -147,6 +147,13 @@ let
   clientType = types.submodule {
     options = {
       binary = lib.mkOption { type = safeBasenameType; };
+      runtimeWrapperMode = lib.mkOption {
+        type = types.enum [
+          "managed"
+          "unsupported"
+        ];
+        description = "agent runtime launcher wrapper の配備可否。";
+      };
       versionArgs = lib.mkOption {
         type = types.listOf types.str;
         default = [ "--version" ];
@@ -360,6 +367,12 @@ in
       readOnly = true;
       internal = true;
       description = "agent 固有の PATH package。";
+    };
+    clientExecutables = lib.mkOption {
+      type = types.attrsOf absolutePathType;
+      readOnly = true;
+      internal = true;
+      description = "agent client ID ごとの実行 path。";
     };
     stateRoot = lib.mkOption {
       type = types.str;

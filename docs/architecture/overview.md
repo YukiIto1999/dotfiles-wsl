@@ -44,7 +44,7 @@ Nix store の candidate system
 | `artifacts/` | 生成設定の登録簿と構文検査 |
 | `gates/` | devShell、規約と構造の検査 |
 
-unit は責務で分かれ、層は定めた名前だけで表す。`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証を持つ。必要な unit だけが `impl/`、`assets/`、`fixtures/`、`package/`、`shared/` を使う。
+unit は責務で分かれ、層は定めた名前だけで表す。`module.nix` が宣言、`package.nix` が build、`checks.nix` が検証を持つ。必要な unit だけが `impl/`、`assets/`、`fixtures/`、`package/`、`checks/`、`shared/` を使う。
 
 repository 固有 option は `dotfiles.<root>` に置き、宣言した root unit と namespace を一致させる。unit 間で共有する値は型付き option を通す。host は account、agent client、container application、MCP provider、language server の必要集合を [`flake.nix`](../../flake.nix) に default なしで宣言し、module の提供集合との過不足を評価時に拒否する。通常構成と gateway port variant は、それぞれ同じ必要集合を固定値で持つ。
 

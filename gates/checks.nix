@@ -1303,12 +1303,14 @@ in
         "impl"
         "assets"
         "fixtures"
+        "checks"
         "package"
         "shared"
       ];
       entryIsValid =
         name: kind: hasChildModule:
-        builtins.elem name materialNames || (kind == "directory" && hasChildModule);
+        (builtins.elem name materialNames && (name != "checks" || kind == "directory"))
+        || (kind == "directory" && hasChildModule);
       fixture = import ./fixtures/structure-layer-names.nix;
       fixtureIsValid = entry: entryIsValid entry.name entry.kind entry.hasChildModule;
       invalidEntriesFor =
@@ -1322,9 +1324,36 @@ in
       forbiddenPresent = builtins.filter (
         path: builtins.pathExists (self + "/${path}")
       ) forbiddenOwnership;
+      uniqueCheckParts = helpers.mergeCheckParts [
+        { alpha = "first"; }
+        { beta = "second"; }
+      ];
+      emptyCheckParts = helpers.mergeCheckParts [ ];
+      duplicateCheckPartResult = builtins.tryEval (
+        builtins.deepSeq (helpers.mergeCheckParts [
+          { duplicated = "first"; }
+          { duplicated = "second"; }
+        ]) true
+      );
+      invalidValidFixtures = builtins.filter (entry: !fixtureIsValid entry) fixture.valid;
+      unexpectedValidFixtures = builtins.filter fixtureIsValid fixture.invalid;
     in
-    assert lib.all fixtureIsValid fixture.valid;
-    assert lib.all (entry: !fixtureIsValid entry) fixture.invalid;
+    assert lib.assertMsg (
+      uniqueCheckParts == {
+        alpha = "first";
+        beta = "second";
+      }
+    ) "check part merge changed a unique ID";
+    assert lib.assertMsg (emptyCheckParts == { }) "empty check parts did not produce an empty set";
+    assert lib.assertMsg (
+      !duplicateCheckPartResult.success
+    ) "duplicate check part ID was silently overwritten";
+    assert lib.assertMsg (invalidValidFixtures == [ ]) (
+      "valid structure layer fixtures were rejected: ${builtins.toJSON invalidValidFixtures}"
+    );
+    assert lib.assertMsg (unexpectedValidFixtures == [ ]) (
+      "invalid structure layer fixtures were accepted: ${builtins.toJSON unexpectedValidFixtures}"
+    );
     assert lib.assertMsg (forbiddenPresent == [ ]) (
       "forbidden ownership paths exist: " + lib.concatStringsSep " " forbiddenPresent
     );

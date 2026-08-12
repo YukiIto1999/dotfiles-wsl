@@ -18,6 +18,13 @@ let
   systemUnits = hostConfig.environment.etc."systemd/system".source;
   journaldConfig = hostConfig.environment.etc."systemd/journald.conf".source;
   zramConfig = hostConfig.environment.etc."systemd/zram-generator.conf".source;
+  expectedVirtualMemorySysctl = {
+    "vm.min_free_kbytes" = 262144;
+    "vm.watermark_scale_factor" = 100;
+    "vm.compaction_proactiveness" = 40;
+    "vm.defrag_mode" = 1;
+  };
+  virtualMemorySysctl = builtins.intersectAttrs expectedVirtualMemorySysctl hostConfig.boot.kernel.sysctl;
   hostObservationKeys = [
     "host/fstrim"
     "host/home-manager"
@@ -154,6 +161,7 @@ let
     homeManagerUnit = "home-manager-${hostConfig.dotfiles.host.username}.service";
     nixGc = hostConfig.nix.gc;
     timers = hostConfig.systemd.timers;
+    inherit virtualMemorySysctl;
     zram = zramGenerator.settings.zram0;
   };
   stabilityContractMatches =
@@ -186,7 +194,8 @@ let
     && (homeManagerObservation.unit or null) == candidateConfiguration.homeManagerUnit
     && (homeManagerRestartObservation.target or null) == candidateConfiguration.homeManagerUnit
     && (homeManagerRestartObservation.warningAt or null) == 5
-    && (homeManagerRestartObservation.failureAt or null) == 20;
+    && (homeManagerRestartObservation.failureAt or null) == 20
+    && candidateConfiguration.virtualMemorySysctl == expectedVirtualMemorySysctl;
   thresholdMutation = hostObservations // {
     "host/root-filesystem" = hostObservations."host/root-filesystem" or { } // {
       warning = 86;

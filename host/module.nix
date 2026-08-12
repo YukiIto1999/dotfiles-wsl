@@ -28,6 +28,12 @@ let
     in
     rec {
       timeoutSeconds = observationTimeoutSeconds;
+      virtualMemory.sysctl = {
+        "vm.min_free_kbytes" = 262144;
+        "vm.watermark_scale_factor" = 100;
+        "vm.compaction_proactiveness" = 40;
+        "vm.defrag_mode" = 1;
+      };
       systemGeneration = {
         currentPath = "/run/current-system";
         requiredPath = "/nix/var/nix/profiles/system";
@@ -251,6 +257,7 @@ in
   config.dotfiles.observations = stabilityContract.observations;
 
   config.system.stateVersion = "25.11";
+  config.boot.kernel.sysctl = stabilityContract.virtualMemory.sysctl;
 
   # Home Manager の activation は複数 unit の資材を配備する横断の入口
 

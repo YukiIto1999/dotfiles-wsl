@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-13 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`ja-writing`、`web-researcher`
+- local: `code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`ja-writing`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -134,6 +134,17 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 | 顧客向けの丁寧なincident報告を書く | 旧`ja-writing`は語尾の均一化を避ける規則が、明示された敬体と競合した | 読者、媒体、明示された語調を優先し、事実と不確実性だけを保った |
 
 評価中に実行したのは、Skill出力の比較、全local Skillへの`quick_validate.py`、`git diff --check`、配備contractのfocused checkだけである。評価のためのSkillや恒久workflowは追加していない。
+
+### web-researchで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Matt Pocock research](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/research/SKILL.md) | MIT | claimを一次資料まで辿り、sourceが直接支える範囲で結論を書く | 常にbackground agentを使うこと、調査のたびにfileを作ること |
+| Context7、SearXNG、Crawl4AIの配備時tool schema | 該当なし。Context7とSearXNGは [`package.nix`](../../mcp/context7/package.nix) と [`package.nix`](../../mcp/searxng/package.nix)、Crawl4AIは [`module.nix`](../../containers/crawl4ai/module.nix) の固定revisionから配備する | URL探索、本文取得、library docs、agent判断の分離と、実在する引数 | 配備されていないtool、SDK専用引数、固定件数のsource取得 |
+
+旧`web-researcher`は、正規仕様一件で決まる問いにも複数sourceを要求し、指定URLの要約でも検索を始めた。`time_range`を最新判定に使い、解消可能な矛盾も両論併記した。さらに、言語指定、JavaScript実行、PDF、本文filterの説明が現行MCP schemaと一致していなかった。
+
+`web-research`は問いに応じて、指定URLの直接取得、既知の一次資料、Context7、探索型調査を選ぶ。source数は固定せず、規範的な値を一つの現行仕様が所有する場合は一件で止める。近接scenarioと期待する経路は [`agents/fixtures/web-research-skill.json`](../../agents/fixtures/web-research-skill.json) に置く。実環境ではSearXNGへ`site:agentskills.io specification`を渡しても公式domainが結果に出なかった。一方、Crawl4AIは既知の正規URL `https://agentskills.io/specification` から本文、title、主要節、取得成功状態を返した。この差も、検索と本文取得を別の能力として扱う理由である。
 
 ## Skill 化の条件
 

@@ -91,8 +91,7 @@
             grep -ohE '`[a-z0-9_.-]+/[a-z0-9_./-]+\.(nix|sh|md|yaml|yml|json|py|ts)`' "$doc" \
               | tr -d '`' | sort -u || true
           )
-          # skill や agent の資産は例示の path を含む。対象はこの repository の文書
-        done < <(find ${self}/README.md ${self}/CONTRIBUTING.md ${self}/docs -name '*.md' -not -path '*/superpowers/*')
+        done < <(find ${self}/README.md ${self}/CONTRIBUTING.md ${self}/docs -name '*.md')
 
         if [ -n "$missing" ]; then
           echo "documentation names a path that does not exist:$missing" >&2

@@ -14,10 +14,6 @@
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     # vendored な agent/skill source、flake = false で plain tree 扱い
-    superpowers = {
-      url = "github:obra/superpowers/v5.1.0";
-      flake = false;
-    };
     openaiPlugins = {
       url = "github:openai/plugins/ed8ce2eacc07964f0f556519e0737a420da14e00";
       flake = false;
@@ -35,7 +31,6 @@
       nixos-wsl,
       home-manager,
       sops-nix,
-      superpowers,
       openaiPlugins,
       claudePlugins,
       ...
@@ -45,7 +40,6 @@
       hostName = "nixos";
 
       pluginSources = {
-        inherit superpowers;
         openai-plugins = openaiPlugins;
         claude-plugins-official = claudePlugins;
       };

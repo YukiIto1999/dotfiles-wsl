@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-13 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `changelog-generator`、`code-reviewer`、`git-commit-writer`、`ja-writing`、`pr-description-writer`、`web-researcher`
+- local: `code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`ja-writing`、`web-researcher`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -52,7 +52,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 ## 責務境界
 
-`commit-writing` は一つのcommitが解決する問題と目的を履歴へ残す。`change-writing` は既に存在する差分を、PR、changelog、release note、handoffの読み手へ説明する。`description-writing` はREADME、ADR、仕様、報告、技術解説を、読者の問いと文書の目的から構成する。差分固有の説明を一般文書へ混ぜない。
+`commit-writing` は一つのcommitが解決する問題と目的を履歴へ残す。`change-writing` は既に存在する差分を、PR、changelog、release noteの読み手へ説明する。`description-writing` はREADME、ADR、仕様、報告、技術解説を、読者の問いと文書の目的から構成する。差分固有の説明を一般文書へ混ぜない。
 
 `documentation-writing` は宣言の契約を書く。目的と、該当する事前条件、事後条件、不変条件、副作用、失敗条件を扱う。`comment-writing` は実装コメントを書く前に、構造、命名、コード本体で表せないかを調べる。残すのは、自然に見える実装を採らなかった理由と、現在も有効な制約だけである。変更履歴、古いコード、処理の言い換えは扱わない。
 
@@ -109,6 +109,31 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 - [AIらしさ、設計判断、一貫性](https://chatgpt.com/share/6a7d14a7-5ed0-83ee-9f50-a7c178a9e282)
 - [Skill候補の横断調査](https://chatgpt.com/share/6a7d14b9-b444-83ee-9dbe-d6eb7458758d)
 - [Matt、Addy、Web品質、WondelAI](https://chatgpt.com/share/6a7d1c95-beb8-83e8-ac31-24016faef00d)
+
+### writing系で採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [architecture-standard](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | commitの直接目的、宣言の契約、実装commentのWhy not、文書種別と読者 | 本文の複製。local Skillの短い手順へ再構成した |
+| [japanese-tech-writing](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d/c7189cdc9c2520be50418209834145bdf3a46e97) | Gist本文に表示なし | 論証、段落、認知負荷、不確実性 | 書籍原稿向けの整形規則と本文の複製 |
+| [stop-ai-slop-jp](https://github.com/iKora128/stop-ai-slop-jp/tree/e09d32796f253a62693885757cea484c275d06f2)、[slop-nuki](https://github.com/chezou/slop-nuki/tree/1bdf627b5991f4f806069619c9bde407960feac7) | MIT | 空句と定型構成の発見、読者と媒体に応じた語調 | AI著者判定、score、毒や揺らぎの強制、禁止語の機械適用 |
+| [Anthropic doc-coauthoring](https://github.com/anthropics/skills/blob/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/doc-coauthoring/SKILL.md) | 該当directoryに個別表示なし | 読者、目的、既存template、重要文書のfresh-reader確認 | 全文書での質問数、brainstorm数、節ごとの固定workflow |
+| [Keep a Changelog](https://github.com/olivierlacan/keep-a-changelog/tree/bb8a60462d3f0c760ee56df312fcfdc60cf6e2f2) | MIT | 利用者が観測する変更の分類と破壊的変更の移行情報 | commit typeだけによる自動分類と固定template |
+
+### writing系の代表scenario
+
+2026-08-13に、旧Skillと基礎モデルを次の近接scenarioで比較した。自動scoreは使わず、出力と発火境界を確認した。再評価する入力と期待結果は [`agents/fixtures/writing-skills.json`](../../agents/fixtures/writing-skills.json) に置く。
+
+| Scenario | 変更前の不足 | 変更後の結果 |
+|---|---|---|
+| staged diffからcommit messageを書く | 複数目的ならwriterがindexを変更する指示だった | 一つの目的とrevert理由を確認し、indexを変更しない |
+| 明示したdiffからPR本文を書く | branch全体を固定で読み、空の`Related: none`と未実行checkを要求した | 明示範囲だけを読み、目的、主要変更、実行済み検証、実在する影響だけを書いた |
+| 宣言commentと実装commentを書く | 専用Skillがなく、契約と実装説明を分けてrouteできなかった | 宣言は前提、冪等性、副作用、既知の失敗を記述し、実装commentは採らない指数backoffと`Retry-After`制約の一文だけにした |
+| 曖昧な変数名を直す | コメント系Skillとの境界が未定義だった | `documentation-writing`、`comment-writing`、`ja-writing`はいずれも発火しなかった |
+| READMEとrelease changelogをrouteする | PRとchangelogが別の固定templateだった | READMEは`description-writing`、release changelogは`change-writing`へ分けた |
+| 顧客向けの丁寧なincident報告を書く | 旧`ja-writing`は語尾の均一化を避ける規則が、明示された敬体と競合した | 読者、媒体、明示された語調を優先し、事実と不確実性だけを保った |
+
+評価中に実行したのは、Skill出力の比較、全local Skillへの`quick_validate.py`、`git diff --check`、配備contractのfocused checkだけである。評価のためのSkillや恒久workflowは追加していない。
 
 ## Skill 化の条件
 

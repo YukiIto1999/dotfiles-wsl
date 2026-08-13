@@ -13,7 +13,7 @@ effort: xhigh
 
 - planner が出した計画に従ってコード変更
 - 単純な修正・追加(独自に計画立てるほどでもないもの)
-- バグ修正(原因が systematic-debugging skill で特定済み)
+- 原因が特定済みのバグ修正
 
 ## Process
 

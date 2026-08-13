@@ -17,11 +17,12 @@
 
 ## 説明 — `architecture/`
 
-責務の境界と要素間の関係を理解したい人が、学習中に読む。手順と判断理由は持たない。
+責務の境界と要素間の関係を理解したい人が、学習中に読む。操作手順は持たず、構造とそれを決めた設計判断を扱う。
 
 - [構成概要](architecture/overview.md)では、NixOS、Home Manager、生成 command の責務境界が分かる。
 - [責務と履歴の凝集](architecture/cohesion.md)では、unit、file、commit を分ける基準が分かる。
 - [AI tooling](architecture/ai-tooling.md)では、AI CLI、agentgateway、MCP server、Docker backend の接続関係が分かる。
+- [Skill portfolio](architecture/skills.md)では、配備済み Skill、候補の責務境界、donor の扱いが分かる。
 - [セキュリティ設計](architecture/security.md)では、credential、host key、通信経路の信頼境界が分かる。
 
 ## 参照 — `reference/`

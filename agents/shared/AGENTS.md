@@ -30,8 +30,8 @@ Think in English. Respond in Japanese.
 
 - 既存コンテキストは `AGENTS.md` / `CLAUDE.md` / README / docs を確認する。
 - ローカルコードの検索は Read / Grep / Glob を、広域探索や構造把握が必要なら `rg` と `ast-grep` を使う。
-- ライブラリ、フレームワークの仕様は `context7` を先に使う。
-- Web 調査は `web-researcher` を使う。独力の WebSearch で済ませない。
+- ライブラリ、フレームワークの仕様は `web-research` の手順で `context7` を先に使う。
+- Web 調査は `web-research` を使う。SearXNG と Crawl4AI はこの Skill を通し、独力の WebSearch で済ませない。
 - GitHub 操作は対象アカウントの `github-<account>` を使う。`gh` の active user は `accounts` 先頭固定。
 - 検索は `rg`、列挙は `fd`、表示は `bat`、一覧は `eza`、diff は `delta` が使える。
 - JSON / YAML / HTTP は `jq` / `yq` / `xh` が使える。
@@ -75,7 +75,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 目的 | skill |
 |---|---|
 | 日本語文書の作成、推敲 | `ja-writing` |
-| 外部 Web の深い調査 | `web-researcher` |
+| 外部 Web の調査 | `web-research` |
 | commit / PR 前の diff review | `code-reviewer` |
 | staged diff から commit message 作成 | `commit-writing` |
 | PR、changelog、release noteの作成 | `change-writing` |

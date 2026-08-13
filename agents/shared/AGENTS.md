@@ -77,9 +77,11 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 日本語文書の作成、推敲 | `ja-writing` |
 | 外部 Web の深い調査 | `web-researcher` |
 | commit / PR 前の diff review | `code-reviewer` |
-| staged diff から commit message 作成 | `git-commit-writer` |
-| branch diff から PR description 作成 | `pr-description-writer` |
-| Conventional Commits から changelog 作成 | `changelog-generator` |
+| staged diff から commit message 作成 | `commit-writing` |
+| PR、changelog、release noteの作成 | `change-writing` |
+| README、ADR、仕様、報告、技術解説の作成 | `description-writing` |
+| 宣言のdocumentation comment作成 | `documentation-writing` |
+| 実装commentの要否判断と作成 | `comment-writing` |
 | セキュリティ分析の起点 | `security-scan` |
 | セキュリティ分析の個別 phase | `threat-model` / `finding-discovery` / `validation` / `attack-path-analysis` / `fix-finding` |
 | UI / frontend 方針 | `frontend-design` |

@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-13",
+  "cases": [
+    {
+      "id": "commit-purpose",
+      "prompt": "Write one commit message for a staged diff that replaces an index-mutating commit writer with a read-only commit-writing skill and updates its routing documentation.",
+      "input": {
+        "type": "staged-diff",
+        "changes": [
+          {
+            "path": "agents/shared/skills/git-commit-writer/SKILL.md",
+            "before": "name: git-commit-writer",
+            "after": "file removed; responsibility moves to commit-writing"
+          },
+          {
+            "path": "agents/shared/skills/commit-writing/SKILL.md",
+            "before": "file absent",
+            "after": "writes one purpose from staged diff and never changes the index"
+          },
+          {
+            "path": "agents/shared/AGENTS.md",
+            "before": "routes commit messages to git-commit-writer",
+            "after": "routes commit messages to commit-writing"
+          }
+        ]
+      },
+      "expectedSkills": ["commit-writing", "ja-writing"],
+      "expected": {
+        "onePurpose": true,
+        "recordsPurpose": true,
+        "changesIndex": false,
+        "example": "fix: commit message作成でindexを変更しない"
+      }
+    },
+    {
+      "id": "commit-mixed-purpose",
+      "prompt": "Write one commit message for this staged diff.",
+      "input": {
+        "type": "staged-diff",
+        "changes": [
+          {
+            "path": "agents/shared/skills/comment-writing/SKILL.md",
+            "before": "file absent",
+            "after": "adds implementation-comment decision guidance"
+          },
+          {
+            "path": "host/module.nix",
+            "before": "vm.swappiness = 60",
+            "after": "vm.swappiness = 100"
+          }
+        ]
+      },
+      "expectedSkills": ["commit-writing", "ja-writing"],
+      "expected": {
+        "writesMessage": false,
+        "reportsSeparatePurposes": true,
+        "changesIndex": false
+      }
+    },
+    {
+      "id": "change-description",
+      "prompt": "Write a PR body for an explicitly supplied staged diff. Verified facts are quick_validate.py for all local skills, git diff --check, agent-artifact-contract, agent-definition-rendering, and docs-links, all with exit status 0.",
+      "input": {
+        "type": "staged-diff",
+        "changes": [
+          {
+            "path": "agents/shared/skills/commit-writing/SKILL.md",
+            "before": "git-commit-writer may change the index",
+            "after": "commit-writing reports mixed purposes without changing the index"
+          },
+          {
+            "path": "agents/shared/skills/change-writing/SKILL.md",
+            "before": "separate PR and changelog templates",
+            "after": "one change-description method with artifact-specific reference"
+          },
+          {
+            "path": "agents/shared/skills/comment-writing/SKILL.md",
+            "before": "file absent",
+            "after": "implementation comments preserve only a rejected alternative and its current constraint"
+          }
+        ]
+      },
+      "expectedSkills": ["change-writing", "ja-writing"],
+      "expected": {
+        "usesExplicitRangeOnly": true,
+        "containsOnlyVerifiedChecks": true,
+        "emptySections": false,
+        "placeholderNone": false
+      }
+    },
+    {
+      "id": "declaration-and-implementation-comments",
+      "prompts": {
+        "documentation": "Document public processPayment(input). The amount is already validated, requests are idempotent by key, it writes the ledger, and it may return conflict. The exact conflict condition is unknown.",
+        "implementation": "Decide whether to comment a retry loop that deliberately does not add exponential backoff because the upstream Retry-After value is authoritative."
+      },
+      "expectedSkills": {
+        "documentation": ["documentation-writing"],
+        "implementation": ["comment-writing"]
+      },
+      "expected": {
+        "documentationIncludes": ["precondition", "idempotency", "side effect", "known failure"],
+        "documentationInventsConflictCondition": false,
+        "implementationIncludes": ["rejected exponential backoff", "authoritative Retry-After constraint"],
+        "implementationNarratesLoop": false
+      }
+    },
+    {
+      "id": "description-routing",
+      "prompt": "Write a README for trace-map. It reads local trace JSON and prints service-to-service edges. The reader is an engineer deciding whether to install it. The start command is nix run .#trace-map -- sample.json. It never uploads data. Architecture details are in docs/architecture.md.",
+      "expectedSkills": ["description-writing", "ja-writing"],
+      "nearMiss": {
+        "prompt": "Write a PR body for the change.",
+        "expectedSkills": ["change-writing", "ja-writing"]
+      },
+      "expected": {
+        "includes": ["job", "local-only data boundary", "start command", "architecture link"],
+        "inventedSections": false,
+        "duplicatesArchitecture": false
+      }
+    },
+    {
+      "id": "japanese-register",
+      "prompt": "顧客向けincident報告を、全体を丁寧なですます調で2文にしてください。事実: 10:00にservice停止、10:07に復旧、data lossなし。",
+      "expectedSkills": ["ja-writing"],
+      "expected": {
+        "preservesRequestedRegister": true,
+        "addsUnverifiedCause": false,
+        "forcesStyleVariation": false
+      }
+    },
+    {
+      "id": "comment-near-miss",
+      "prompt": "Rename vague variables in code.",
+      "expectedSkills": [],
+      "mustNotTrigger": ["comment-writing", "documentation-writing", "ja-writing"]
+    }
+  ]
+}

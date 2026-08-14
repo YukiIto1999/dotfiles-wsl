@@ -67,8 +67,9 @@
     {
       "id": "standalone-refactor",
       "prompt": "behaviorを変えずに、このmoduleの責務と依存を整理してください。characterization testは既に通っています。",
-      "expectedSkills": [],
-      "futureOwner": "refactoring",
+      "expectedSkills": [
+        "refactoring"
+      ],
       "mustNotTrigger": ["tdd"]
     },
     {

@@ -76,6 +76,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `refactoring` は保存するobservableと構造上の痛みを先に固定し、既存の安全網か必要最小限のcharacterizationを使って、一つの可逆な内部変更ずつ検証する。新しいbehavior、public contract、architecture、migrationは所有しない。TDD中の局所REFACTORは`tdd`に残す。
 
+`prototype`候補は、設計や実装を止める一つの経験的な問いを、隔離した使い捨ての実行可能物で判定する。基礎モデルとの差を確認できなかったため配備しない。
+
 ここに境界を書いていない候補は、名前だけを仮置きした調査対象である。Job、trigger、判断所有権、根拠、完了条件、非責務を定めるまで実装しない。
 
 ## Donor の扱い
@@ -237,6 +239,19 @@ baselineでは、agent resource reaperの公開optionと内部contract fieldを�
 隔離fixtureのforward evalでは、public outputと例外を固定する既存2 testを変更前に実行し、exit 0を確認した。testを増やさず、重複したtrimと空名検証だけを一つの内部helperへ抽出し、同じcommandが2 test通過のexit 0を維持した。表示名とslugの異なる変換は統合せず、追加refactoringを行わなかった。fixtureは評価後に削除した。
 
 baselineと同型の別fixtureでは、productionの二つの関数とcontract testが同じpath正規化を持つ共有依頼へ適用した。変更前にfixture内で`python -m unittest -v`を実行し、1 test通過のexit 0を確認した。production内だけを`_normalize_destinations`へ抽出し、testの独立計算はoracleとして残した。同じcommandが1 test通過のexit 0を維持し、test fileは変更しなかった。fixtureは評価後に削除した。
+
+### prototypeをSkill化しない判断
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Matt Pocock prototype](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/prototype) | MIT | 一つの質問、最小の実行可能物、observableの可視化、反証例、本番永続化の回避、判断の記録 | 単一HTML、URL parameter式UI、UI variationを3案既定・5案上限とすること、prototype codeを条件付きで本番へ昇格すること |
+| [Addy Osmani doubt-driven-development、source-driven-development](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | 明示した主張、最小artifact、反証、判定分類、停止条件、版依存の外部仕様を先に確認すること | 全判断での別model review、三cycle固定、すべてのframework判断への引用要求 |
+| [architecture-standard design process、evolution](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 観測事実と解釈の分離、完了条件とrollback条件、可逆な小段階、不可逆判断の延期 | 本番変更用の手順や構造をprototypeへ持ち込むこと |
+| [WondelAI pragmatic-programmer](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/pragmatic-programmer) | MIT | 残す本番品質のtracer bulletと、知識を得て捨てるprototypeの区別 | correctness、test、edge caseを一律に無視すること |
+
+候補の責務は、文書や既存codeから確定できない一つの経験的な不確実性を、隔離した使い捨ての実行可能物で判定することとした。成果はcodeではなく、環境、版、raw observation、`支持 / 反証 / 判定不能`、判断への含意である。本番codeへ残す縦slice、性能bottleneckの診断、障害原因の分析、migration rehearsalは所有しない。
+
+最初のforward evalは、transient user serviceの終了statusを調べたが、user busが存在せず判定不能で終わった。別のfresh-session比較では、`flock`中のfileを`mv`で置換した後もpathnameの排他が保たれるかを実測した。baselineと候補ありの両方が、支持条件と反証条件を先に定め、旧inodeと新inode、二番目のlock取得statusを一回の隔離実験で観測し、pathnameの置換後は排他を維持できないと同じ結論へ到達した。両方とも一時資源を回収し、別のlock実験へ範囲を広げなかった。独立Skillによる改善がないため、donorは判断材料として残し、runtime Skillは追加しない。
 
 ### domain-modelingで採用したdonor
 

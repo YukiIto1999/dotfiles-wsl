@@ -92,7 +92,7 @@
       "id": "ui-visual-design",
       "prompt": "このcomponentの情報階層、layout、spacing、color、motionを設計してください。component責務とstate ownerは確定済みです。",
       "expectedSkills": [
-        "frontend-design"
+        "ui-design"
       ],
       "mustNotTrigger": [
         "code-design"

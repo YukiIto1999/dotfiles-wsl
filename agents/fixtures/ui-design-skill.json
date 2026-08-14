@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "existing-system-operations-flow",
+      "prompt": "既存design systemと実データの範囲を確認し、運用担当者が異常を見つけて対象を絞り、対処結果を確認する画面のUI briefを作ってください。production codeとcomponent treeは不要です。",
+      "expectedSkills": [
+        "ui-design"
+      ],
+      "expected": {
+        "inspectsExistingSystemAndContent": true,
+        "derivesHierarchyFromPrimaryTask": true,
+        "definesVisibleStatesFeedbackAndRecovery": true,
+        "definesResponsiveAndAccessibilityBehavior": true,
+        "extendsOnlyConfirmedGaps": true,
+        "doesNotWriteCodeOrComponentTree": true
+      }
+    },
+    {
+      "id": "approval-interaction",
+      "prompt": "権限申請を確認し、差分を理解して承認または差戻しするUIを設計してください。誤操作の予防、処理中、成功、競合、失敗からの回復を利用者にどう見せるかまで決めてください。",
+      "expectedSkills": [
+        "ui-design"
+      ],
+      "expected": {
+        "mapsDecisionOrderToInformationHierarchy": true,
+        "definesAffordanceAndConsequences": true,
+        "coversStressAndFailureStates": true,
+        "recommendsOneCoherentDirection": true
+      }
+    },
+    {
+      "id": "responsive-dense-data",
+      "prompt": "長い識別子、0件、数千件、欠損値を含む監査一覧について、desktopとmobileの情報階層、絞り込み、選択、feedback、keyboard操作を実装前に設計してください。",
+      "expectedSkills": [
+        "ui-design"
+      ],
+      "expected": {
+        "usesRealContentRanges": true,
+        "definesResponsiveAdaptationNotJustBreakpoints": true,
+        "coversKeyboardFocusAndStatus": true,
+        "doesNotDefaultToCards": true
+      }
+    },
+    {
+      "id": "ui-and-private-component-structure",
+      "prompt": "既存design systemを使い、請求差異を調査する画面のUI briefを作った上で、page固有component tree、state owner、propsを設計してください。production codeは書かないでください。",
+      "expectedSkills": [
+        "ui-design",
+        "code-design"
+      ],
+      "expected": {
+        "keepsUiDecisionsSeparateFromComponentStructure": true,
+        "doesNotLetEitherSkillOwnBothDecisions": true
+      }
+    },
+    {
+      "id": "private-component-tree-only",
+      "prompt": "情報階層、interaction、visual、responsive方針は確定済みです。page固有component tree、state owner、props、eventを設計してください。",
+      "expectedSkills": [
+        "code-design"
+      ],
+      "mustNotTrigger": [
+        "ui-design"
+      ]
+    },
+    {
+      "id": "frontend-implementation",
+      "prompt": "承認済みのUI briefとcomponent設計に従い、このReact画面をproduction品質で実装してください。",
+      "expectedSkills": [],
+      "mustNotTrigger": [
+        "ui-design"
+      ]
+    },
+    {
+      "id": "rendered-ui-audit",
+      "prompt": "起動中の画面をbrowserで操作し、情報階層、操作性、responsive、accessibility、feedback、recoveryの問題を証拠付きで監査してください。再設計はまだしません。",
+      "expectedSkills": [],
+      "mustNotTrigger": [
+        "ui-design"
+      ]
+    },
+    {
+      "id": "shared-component-owner",
+      "prompt": "複数featureが使うUI primitiveのownerとdependency directionを決めてください。見た目とinteraction方針は確定済みです。",
+      "expectedSkills": [
+        "module-design"
+      ],
+      "mustNotTrigger": [
+        "ui-design"
+      ]
+    },
+    {
+      "id": "public-component-contract",
+      "prompt": "共有componentを外部featureへ公開するprops、event、互換性をexact contractとして設計してください。内部treeと見た目は扱いません。",
+      "expectedSkills": [
+        "interface-design"
+      ],
+      "mustNotTrigger": [
+        "ui-design"
+      ]
+    },
+    {
+      "id": "browser-performance-cause",
+      "prompt": "この画面の入力遅延をbrowser traceで測定し、critical path上のbottleneckを特定してください。UIの見た目は変更しません。",
+      "expectedSkills": [
+        "performance-analysis"
+      ],
+      "mustNotTrigger": [
+        "ui-design"
+      ]
+    }
+  ]
+}

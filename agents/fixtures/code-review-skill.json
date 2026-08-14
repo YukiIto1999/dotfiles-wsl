@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "broken-security-check",
+      "prompt": "Commit 3e94a0258c05973ef4321ea5879d90fa5335f014 を親commitとの差分でreviewしてください。",
+      "expectedSkills": ["code-review"],
+      "input": {
+        "base": "bea5113fea086ade4dd1e71e6998cf04a1fd4ae4",
+        "head": "3e94a0258c05973ef4321ea5879d90fa5335f014",
+        "path": "mcp/chrome-devtools/checks.nix"
+      },
+      "baseline": {
+        "finding": "set -e下の! grepが禁止flag検出を失敗として伝播しない",
+        "severity": "Critical"
+      },
+      "candidate": {
+        "finding": "set -e下の! grepが禁止flag検出を失敗として伝播しない",
+        "severity": "Major",
+        "doesNotClaimCurrentCompromise": true
+      },
+      "oracle": {
+        "fixCommit": "1d33da1b6d975b701ec0daed966d08cc20ad85b5",
+        "usesExplicitConditionalFailure": true
+      }
+    },
+    {
+      "id": "representative-control-characters",
+      "prompt": "Commit cf1fb79a3a422afb89f5ea158b186c7368ff3625 を親commitとの差分でreviewしてください。",
+      "expectedSkills": ["code-review"],
+      "input": {
+        "base": "b7850248e1270bdbe4f9d907178b130be6d5875e",
+        "head": "cf1fb79a3a422afb89f5ea158b186c7368ff3625",
+        "paths": ["observations/module.nix", "observations/checks.nix"]
+      },
+      "baseline": {
+        "finding": "NULとDELもfixtureへ列挙する",
+        "severity": "Minor",
+        "supportedByOracle": false
+      },
+      "candidate": {
+        "findingCount": 0,
+        "reason": "追加値は同じPOSIX文字classと実装分岐を通り、別の失敗経路を検証しない"
+      },
+      "oracle": {
+        "predicateAndFixtureRemainInCurrentTree": true,
+        "laterRelevantFix": null
+      }
+    },
+    {
+      "id": "sonarqube-matching-revision",
+      "prompt": "同じcommitを解析済みのSonarQube projectがあるbranch diffをreviewしてください。",
+      "expectedSkills": [
+        "code-review"
+      ],
+      "input": {
+        "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+        "sonarProject": "fixture-project",
+        "sonarBranch": "feature/contract",
+        "sonarRevision": "0123456789abcdef0123456789abcdef01234567"
+      },
+      "expected": {
+        "usesSonarQubeResultsAsCandidates": true,
+        "verifiesCandidatesAgainstSourceAndDiff": true,
+        "doesNotTreatSonarQubeAsFindingOracle": true,
+        "doesNotMutateSonarQube": true
+      }
+    },
+    {
+      "id": "sonarqube-stale-revision",
+      "prompt": "同名branchのSonarQube解析はありますが、解析commitがreview対象より古い状態でdiffをreviewしてください。",
+      "expectedSkills": [
+        "code-review"
+      ],
+      "input": {
+        "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+        "sonarProject": "fixture-project",
+        "sonarBranch": "feature/contract",
+        "sonarRevision": "fedcba9876543210fedcba9876543210fedcba98"
+      },
+      "expected": {
+        "skipsStaleSonarQubeResults": true,
+        "continuesReviewWithoutSonarQube": true
+      }
+    },
+    {
+      "id": "sonarqube-project-unregistered",
+      "prompt": "review対象repositoryがSonarQubeへ登録されていない状態でbranch diffをreviewしてください。",
+      "expectedSkills": [
+        "code-review"
+      ],
+      "input": {
+        "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
+        "sonarProject": null
+      },
+      "expected": {
+        "doesNotGuessProjectMapping": true,
+        "continuesReviewWithoutSonarQube": true
+      }
+    },
+    {
+      "id": "diagnose-runtime-failure",
+      "prompt": "本番で起きたtimeoutの原因をlogから特定してください。diffのreviewではありません。",
+      "expectedSkills": ["bug-analysis"],
+      "mustNotTrigger": ["code-review"]
+    },
+    {
+      "id": "implement-refactoring",
+      "prompt": "behaviorを保ったままこの重複実装を統合してください。reviewだけではありません。",
+      "expectedSkills": ["refactoring"],
+      "mustNotTrigger": ["code-review"]
+    },
+    {
+      "id": "full-security-scan",
+      "prompt": "repository全体を脅威モデルからsecurity scanしてください。",
+      "expectedSkills": ["security-scan"],
+      "mustNotTrigger": ["code-review"]
+    },
+    {
+      "id": "architecture-audit",
+      "prompt": "現行system全体のservice境界、ownership、deployment topologyを監査してください。diffはありません。",
+      "expectedSkills": [],
+      "futureOwner": "architecture-review",
+      "mustNotTrigger": ["code-review"]
+    },
+    {
+      "id": "existing-interface-audit",
+      "prompt": "現在の公開API contract全体を監査してください。変更diffはありません。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["code-review", "interface-design"]
+    },
+    {
+      "id": "test-suite-audit",
+      "prompt": "既存test suite全体のoracle、fidelity、mock依存を監査してください。",
+      "expectedSkills": [],
+      "futureOwner": "test-review",
+      "mustNotTrigger": ["code-review"]
+    },
+    {
+      "id": "performance-diagnosis",
+      "prompt": "計測済みlatency regressionのbottleneckを特定してください。diff reviewではありません。",
+      "expectedSkills": ["performance-analysis"],
+      "mustNotTrigger": ["code-review"]
+    }
+  ]
+}

@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "nix-module-contract",
+      "prompt": "責務境界は確定済みです。containerが持つupstream packageからagent integrationへ必要なhook sourceを渡すNix optionを、既存runtime contractを重複させずに設計してください。",
+      "expectedSkills": ["interface-design"],
+      "expected": {
+        "reusesExistingSourceOfTruth": true,
+        "doesNotExposeProviderRootLayout": true,
+        "definesExactTypesAndOptionality": true,
+        "doesNotInventReleaseAsApiVersion": true
+      }
+    },
+    {
+      "id": "http-command-contract",
+      "prompt": "確定済みのCancelOrder capabilityについてHTTP contractを設計してください。未存在、既に取消済み、競合、retryをcallerが区別できる必要があります。",
+      "expectedSkills": ["interface-design"],
+      "expected": {
+        "startsFromRepresentativeUsage": true,
+        "distinguishesExpectedFailures": true,
+        "definesIdempotency": true,
+        "separatesSemanticsFromHttpBinding": true
+      }
+    },
+    {
+      "id": "event-schema",
+      "prompt": "別processへ公開するPaymentSettled eventのschema、ordering、重複、consumer互換性を具体化してください。eventの所有moduleは決定済みです。",
+      "expectedSkills": ["interface-design"],
+      "expected": {
+        "definesSemanticEventBeforeBinding": true,
+        "definesOrderingAndDuplicateSemantics": true,
+        "evaluatesReaderWriterCompatibility": true
+      }
+    },
+    {
+      "id": "public-library-result",
+      "prompt": "library境界のlookup APIで、対象なし、permission denied、cancel、provider defectをcallerが扱えるexact type contractを設計してください。内部algorithmは対象外です。",
+      "expectedSkills": ["interface-design"],
+      "expected": {
+        "separatesAbsenceExpectedFailureCancellationAndDefect": true,
+        "doesNotLeakVendorErrors": true,
+        "definesConsumerVisibleVariants": true
+      }
+    },
+    {
+      "id": "bounded-collection",
+      "prompt": "大量のaudit recordsを返すprocess間APIについて、順序、上限、continuation、終端、途中失敗を含むcontractを設計してください。",
+      "expectedSkills": ["interface-design"],
+      "expected": {
+        "definesStableOrder": true,
+        "definesContinuationAndTermination": true,
+        "doesNotChoosePaginationStyleByDefault": true
+      }
+    },
+    {
+      "id": "compatibility-change",
+      "prompt": "既存responseへ新しいstatus variantとfieldを追加します。確認済みの旧readerは未知fieldを無視しますが未知variantを拒否し、新readerは旧新variantを扱えます。旧writerは旧variantだけ、新writerは両variantを書きます。この特性から両方向のwire互換性を判定し、必要ならversionを設計してください。",
+      "expectedSkills": ["interface-design"],
+      "expected": {
+        "evaluatesCompatibilityByDirection": true,
+        "evaluatesOldWriterNewReaderAndNewWriterOldReader": true,
+        "doesNotAssumeAdditiveMeansCompatible": true,
+        "versionsOnlyWhenCoexistenceRequiresIt": true
+      }
+    },
+    {
+      "id": "nix-option-compatibility",
+      "prompt": "consumer inventoryは確認済みです。readOnly internal Nix optionの必須attrを追加し、既存moduleを同じgenerationで更新します。precompiled consumerはありません。source、Nix evaluation、observable behaviorの互換性を分けてcontractを設計してください。",
+      "expectedSkills": ["interface-design"],
+      "expected": {
+        "separatesSourceEvaluationAndBehaviorCompatibility": true,
+        "doesNotApplyWireRulesToNixBinding": true,
+        "statesRequiredDeploymentPairing": true
+      }
+    },
+    {
+      "id": "module-boundary-choice",
+      "prompt": "この責務をaccountsとtoolchainのどちらに置き、依存をどちらへ向けるか設計してください。exact APIは後で決めます。",
+      "expectedSkills": ["module-design"],
+      "mustNotTrigger": ["interface-design"]
+    },
+    {
+      "id": "consumer-impact-only",
+      "prompt": "この公開API fieldを削除した場合に影響を受けるconsumerとobservableだけを列挙してください。replacement contractは設計しません。",
+      "expectedSkills": ["impact-analysis"],
+      "mustNotTrigger": ["interface-design"]
+    },
+    {
+      "id": "existing-interface-review",
+      "prompt": "現在のAPI contractを監査し、互換性と誤用のfindingをseverity付きで報告してください。再設計は依頼しません。",
+      "expectedSkills": [],
+      "futureOwner": "interface-review",
+      "mustNotTrigger": ["interface-design"]
+    },
+    {
+      "id": "internal-helper",
+      "prompt": "module内部だけで使うparser helperの関数型とalgorithmを設計してください。boundaryは越えません。",
+      "expectedSkills": [],
+      "futureOwner": "code-design",
+      "mustNotTrigger": ["interface-design"]
+    },
+    {
+      "id": "database-physical-schema",
+      "prompt": "確定済みdomain modelからPostgreSQL table、constraint、index、transactionを設計してください。",
+      "expectedSkills": [],
+      "futureOwner": "db-design",
+      "mustNotTrigger": ["interface-design"]
+    },
+    {
+      "id": "component-props",
+      "prompt": "既存React componentのprops、state ownership、composition、reuseだけを設計してください。moduleやprocess境界のcontractは扱いません。",
+      "expectedSkills": [],
+      "futureOwner": "component-design",
+      "mustNotTrigger": ["interface-design"]
+    },
+    {
+      "id": "internal-error-flow",
+      "prompt": "公開error contractは確定済みです。system内部だけでerrorをどこに置き、どのlayerで翻訳し、どう伝播させるか設計してください。",
+      "expectedSkills": [],
+      "futureOwner": "error-design",
+      "mustNotTrigger": ["interface-design"]
+    },
+    {
+      "id": "contract-migration",
+      "prompt": "既に確定したv2 contractへ段階移行し、旧consumerと共存してからv1を除去してください。contract shapeは変更しません。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["interface-design"]
+    }
+  ]
+}

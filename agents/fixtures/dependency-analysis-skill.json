@@ -82,8 +82,7 @@
     {
       "id": "redesign-boundaries",
       "prompt": "このmodule群をどう分割し、依存方向をどう設計すべきか決めてください。",
-      "expectedSkills": [],
-      "futureOwner": "module-design",
+      "expectedSkills": ["module-design"],
       "mustNotTrigger": [
         "dependency-analysis"
       ]

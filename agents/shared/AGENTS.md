@@ -83,6 +83,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 確定済みbehaviorをRED、最小GREEN、REFACTORで実装 | `tdd` |
 | observableを保った内部構造の段階的な改善 | `refactoring` |
 | domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
+| moduleの責務、state、artifact、粗いcontract、依存方向の設計 | `module-design` |
 | planやdecisionを依存順の質問で詰める | `grilling` |
 | domain設計を質問で詰めて既存文書へ残す | `grill-with-docs` |
 | commit / PR 前の diff review | `code-reviewer` |

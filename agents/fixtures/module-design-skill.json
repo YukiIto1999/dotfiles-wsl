@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "agentmemory-owner-direction",
+      "prompt": "AgentMemoryのbackend packageをagentsへ移し、containerから参照する案があります。現行はcontainerがbackend sourceとruntime stateを所有し、agentsとMCPがtyped contractを消費します。この制約からmodule責務を比較して一案を選んでください。",
+      "expectedSkills": ["module-design"],
+      "expected": {
+        "separatesSourceDependencyFromRuntimeInteraction": true,
+        "comparesMateriallyDifferentAllocations": true,
+        "includesNoNewModuleCandidate": true,
+        "doesNotCreateVendorRootForSharedVersionAlone": true,
+        "selectsOneRecommendation": true
+      }
+    },
+    {
+      "id": "generated-artifact-owner",
+      "prompt": "account値を埋め込むGit設定templateをaccountsとtoolchain/gitのどちらが所有すべきか、変更理由、生成物のlifecycle、公開contractからmodule境界を設計してください。",
+      "expectedSkills": ["module-design"],
+      "expected": {
+        "identifiesDecisionAndArtifactOwner": true,
+        "distinguishesValueFromSyntaxOwnership": true,
+        "definesCoarseContract": true,
+        "testsRepresentativeChanges": true
+      }
+    },
+    {
+      "id": "split-shared-state",
+      "prompt": "一つのmoduleが二つのactorのworkflowと共有mutable stateを持っています。整合性を壊さずにsplitする案と維持する案を比較してください。",
+      "expectedSkills": ["module-design"],
+      "expected": {
+        "separatesFactsConstraintsAndAssumptions": true,
+        "keepsAtomicResponsibilitiesTogether": true,
+        "comparesStateOwnership": true,
+        "usesHardConstraintsBeforeTradeoffs": true
+      }
+    },
+    {
+      "id": "merge-forwarding-modules",
+      "prompt": "常に同時に変更され、独自stateも判断も持たない二つのforwarding moduleを統合するか、現状維持かを設計してください。",
+      "expectedSkills": ["module-design"],
+      "expected": {
+        "testsWhetherBoundaryHidesKnowledge": true,
+        "comparesMergeAndRetention": true,
+        "doesNotPreserveSymmetryAlone": true
+      }
+    },
+    {
+      "id": "dependency-direction",
+      "prompt": "policy moduleと外部mechanism adapterのどちらがcontractを所有し、source dependencyをどちらへ向けるべきか、runtime callと分けて設計してください。",
+      "expectedSkills": ["module-design"],
+      "expected": {
+        "identifiesPolicyAndMechanismOwner": true,
+        "separatesSourceDependencyFromRuntimeInteraction": true,
+        "rejectsAutomaticDependencyInversion": true
+      }
+    },
+    {
+      "id": "dependency-facts-only",
+      "prompt": "このmodule群のimport、runtime call、data dependencyを型別に列挙してください。責務配置や依存方向は変更しません。",
+      "expectedSkills": ["dependency-analysis"],
+      "mustNotTrigger": ["module-design"]
+    },
+    {
+      "id": "module-internal-algorithm",
+      "prompt": "このmodule内のvalidation関数を純粋関数とeffectful shellへどう分けるか設計してください。module境界は変えません。",
+      "expectedSkills": [],
+      "futureOwner": "code-design",
+      "mustNotTrigger": ["module-design"]
+    },
+    {
+      "id": "exact-interface-contract",
+      "prompt": "module間APIのrequest型、error型、versioningと互換性規則を設計してください。責務境界は確定済みです。",
+      "expectedSkills": [],
+      "futureOwner": "interface-design",
+      "mustNotTrigger": ["module-design"]
+    },
+    {
+      "id": "system-topology",
+      "prompt": "monolithと二つのservice、queueを比較し、deployment topologyとSLOを決めてください。",
+      "expectedSkills": [],
+      "futureOwner": "architecture-design",
+      "mustNotTrigger": ["module-design"]
+    },
+    {
+      "id": "domain-vocabulary",
+      "prompt": "OrderとSubscriptionのbounded context、語彙、不変条件を整理してください。実装moduleはまだ決めません。",
+      "expectedSkills": ["domain-modeling"],
+      "mustNotTrigger": ["module-design"]
+    },
+    {
+      "id": "architecture-audit",
+      "prompt": "現在のmodule構造を監査し、責務逸脱をseverity付きfindingとして報告してください。新しい設計は依頼しません。",
+      "expectedSkills": [],
+      "futureOwner": "architecture-review",
+      "mustNotTrigger": ["module-design"]
+    },
+    {
+      "id": "behavior-preserving-move",
+      "prompt": "既に決まったmodule境界へfileを移し、behaviorを保ったまま参照を更新してください。",
+      "expectedSkills": ["refactoring"],
+      "mustNotTrigger": ["module-design"]
+    },
+    {
+      "id": "team-reorganization",
+      "prompt": "組織をstream-aligned teamとplatform teamへ再編し、担当者を割り当ててください。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["module-design"]
+    }
+  ]
+}

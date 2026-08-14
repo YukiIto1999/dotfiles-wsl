@@ -75,6 +75,60 @@
       }
     },
     {
+      "id": "ui-component-tree",
+      "prompt": "画面のfeature、observable state、module境界、既存design systemは確定済みです。page固有のcomponent tree、state owner、props、event、slot、shared primitiveの利用を設計してください。見た目とproduction codeは扱いません。",
+      "expectedSkills": [
+        "code-design"
+      ],
+      "expected": {
+        "inspectsExistingComponentsFirst": true,
+        "placesStateAtLowestStableOwner": true,
+        "startsWithFeatureLocalTree": true,
+        "extractsOnlyWhenKnowledgeOrInvariantIsHidden": true,
+        "doesNotChooseVisualStyle": true
+      }
+    },
+    {
+      "id": "ui-visual-design",
+      "prompt": "このcomponentの情報階層、layout、spacing、color、motionを設計してください。component責務とstate ownerは確定済みです。",
+      "expectedSkills": [
+        "frontend-design"
+      ],
+      "mustNotTrigger": [
+        "code-design"
+      ]
+    },
+    {
+      "id": "promote-shared-component",
+      "prompt": "このfeature-local componentを複数featureが依存するshared moduleへ移し、ownerとdependency directionを決めてください。propsは後で設計します。",
+      "expectedSkills": [
+        "module-design"
+      ],
+      "mustNotTrigger": [
+        "code-design"
+      ]
+    },
+    {
+      "id": "exported-component-api",
+      "prompt": "ownerとshared module境界は確定済みです。外部featureへ公開するcomponent APIのpropsとevent contractを設計してください。内部treeは扱いません。",
+      "expectedSkills": [
+        "interface-design"
+      ],
+      "mustNotTrigger": [
+        "code-design"
+      ]
+    },
+    {
+      "id": "existing-component-refactor",
+      "prompt": "既存component treeのbehaviorを保ち、state重複を除くようにcodeを移動、統合してください。",
+      "expectedSkills": [
+        "refactoring"
+      ],
+      "mustNotTrigger": [
+        "code-design"
+      ]
+    },
+    {
       "id": "module-boundary",
       "prompt": "この責務を二つのmoduleへsplitし、ownerとdependency directionを決めてください。内部関数は後で設計します。",
       "expectedSkills": ["module-design"],

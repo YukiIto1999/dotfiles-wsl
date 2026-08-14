@@ -109,8 +109,7 @@
     {
       "id": "component-props",
       "prompt": "既存React componentのprops、state ownership、composition、reuseだけを設計してください。moduleやprocess境界のcontractは扱いません。",
-      "expectedSkills": [],
-      "futureOwner": "component-design",
+      "expectedSkills": ["code-design"],
       "mustNotTrigger": ["interface-design"]
     },
     {

@@ -72,8 +72,7 @@
     {
       "id": "exact-interface-contract",
       "prompt": "module間APIのrequest型、error型、versioningと互換性規則を設計してください。責務境界は確定済みです。",
-      "expectedSkills": [],
-      "futureOwner": "interface-design",
+      "expectedSkills": ["interface-design"],
       "mustNotTrigger": ["module-design"]
     },
     {

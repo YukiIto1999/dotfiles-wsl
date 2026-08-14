@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -68,7 +68,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 セキュリティreviewはpluginの`security-scan`が所有するため、別の`security-review`は作らない。read-onlyのsecurity agentはthreat model、finding discovery、validation、attack path、最終reportまでを所有する。検証済みまたは技術的に妥当なfindingの修正を明示された場合だけ、実装agentが別phaseで`fix-finding`を使う。
 
-`code-design` は module 内部の型、関数、変換、純粋核と effect、抽象、局所性を決める。`module-design` は actor、change driver、責務、所有、境界、依存方向を決める。`interface-design` は境界を越える契約、`architecture-design` は system 全体の topology、quality attribute、deployment、integration を決める。
+`code-design` は module 内部の型、関数、変換、純粋核と effect、抽象、局所性を決める。`module-design` は actor、change driver、責務、所有、境界、依存方向を決める。`interface-design` は確定済みの境界に、exact type、failure、side effect、ordering、互換性を持つconsumer-visible contractを与える。`architecture-design` は system 全体の topology、quality attribute、deployment、integration を決める。
 
 `module-design`は、確定済みのactor、domain ownership、state、artifact lifecycle、system topologyを制約として消費する。module内部の実装、exact interface、serviceやrepositoryのtopology、domain語彙、既存構造のseverity付きreviewは所有しない。
 
@@ -106,7 +106,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | [japanese-tech-writing](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d)、[stop-ai-slop-jp](https://github.com/iKora128/stop-ai-slop-jp)、[slop-nuki](https://github.com/chezou/slop-nuki) | `ja-writing` |
 | [code-humanizer](https://github.com/LeonardNJU/code-humanizer)、[deai-code](https://github.com/golovatskygroup/deai-code) | 品質判断だけを `code-review` に使い、著者推定を除く |
 | [differential-review](https://github.com/trailofbits/skills/tree/main/plugins/differential-review) | security plugin |
-| writing-openapi-specs | raw OpenAPIを扱う場合の `interface-design`、`interface-review` reference。採用前にsourceを固定する |
+| [Speakeasy writing-openapi-specs](https://github.com/speakeasy-api/skills/tree/d2eab5991ef881b39a26ab47432cf273c2c1abb5/skills/writing-openapi-specs) | raw OpenAPIを扱う場合の `interface-design`、`interface-review` reference |
 
 Ponytailは、削除、標準機能、既存機構、既存依存、新しい所有物の順に解決手段を問い直す。全coding taskへ強制するSkillとしては採らず、追加によって問題を解いたように見せる傾向を補正するlensとして各候補へ配る。
 
@@ -315,6 +315,23 @@ baselineでは、agent bundleのatomic publish transactionについて、consume
 代表scenarioは [`agents/fixtures/module-design-skill.json`](../../agents/fixtures/module-design-skill.json) に置く。baselineでは、AgentMemory backendのnpm sourceとpackageをagent integrationへ移す案を正しく逆依存として棄却できた。一方、共通versionとupstream releaseを理由に、新しいvendor名のrepository rootへbackend、hook、plugin、MCP entrypointを集約する案を推奨した。現行のcontainer ownerがbackend sourceとruntime stateを持ち、agent integrationとMCPが型付きcontractを消費する境界で足りるかを対照にせず、root ownershipとrelease contractを増やした。新しいSkillは、新moduleなしを候補に含め、独立したchange driver、state、artifact lifecycle、accountable ownerを封じ込めない境界を棄却する。
 
 forward evalでは、Git identity templateと生成先のownerを実装から比較した。`accounts`所有、`toolchain/git`所有、新しい`identity` module、`sops`所有を同じ制約で比べ、Git構文とinclude pathを`toolchain/git`、identity値とsecret配備を`accounts`に残す現行案を選んだ。新moduleは独立consumer、state、artifact lifecycleを持たずcontractを一段増やすとして棄却した。依頼されていないADR形式まで生成したため、成果に必要な判断だけを返し、文書形式を発明しない停止条件を追加した。
+
+### interface-designで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Addy Osmani api-and-interface-design](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/api-and-interface-design/SKILL.md) | MIT | contract-first、observable behavior、structured failure、inputとoutput、variantの明示 | REST path、field casing、pagination、TypeScript型、optional追加、DB trustの固定規則 |
+| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | signatureを越えるinterface、seamと内容の分離、caller usageとburdenによる比較 | deep moduleの一律優先、adapter数、旧test削除、固定数の案とsubagent |
+| [architecture-standard contracts、effect](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | semantic sourceとbindingの分離、absence、variant、failure、readerとwriter別のcompatibility | 固定directory、常設DSL、pagination、REST、OpenAPI、problem+json、version配置の一律適用 |
+| [dotnet-webapi](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-aspnetcore/skills/dotnet-webapi) | MIT | 既存API style、requestとresponse、failureとcancellation、schemaと実requestの照合 | C#の型、結果型、middleware、folder、`.http` file、warning規則 |
+| [Speakeasy writing-openapi-specs](https://github.com/speakeasy-api/skills/tree/d2eab5991ef881b39a26ab47432cf273c2c1abb5/skills/writing-openapi-specs) | Apache-2.0 | OpenAPIを正本にする場合のoperation、required、variant、response、content type、schema-valid example | SDK生成、命名、schema再利用、OpenAPIを汎用contract形式にすること |
+| [effect-fp-skill](https://github.com/mikezupper/effect-fp-skill/tree/e3ee107dc4e8a301fbddea43e85d4d1404fa15fc) | CC BY 4.0 | expected failureとdefect、handlerが必要なfield、外部errorの翻訳 | Effect型、TaggedError、TypeScript、null禁止、全dependencyのservice化 |
+
+`interface-design`は、固定済みのownerとseamに対し、consumerの代表usageからsemantic contractを決め、repositoryの既存bindingへexactに写す。existing source of truthを別名で複製せず、provider layoutやvendor errorを公開しない。互換性はreaderとwriterの向きごとに判定し、同時運用が必要な非互換contractだけをversion化する。
+
+代表scenarioは [`agents/fixtures/interface-design-skill.json`](../../agents/fixtures/interface-design-skill.json) に置く。baselineでは、AgentMemoryの`upstream.root`を狭めるため、hook entrypointとplugin pathを型付きfieldへ変換できた。一方、既存のservice contractが既に持つURLとunitを新しい`runtime` optionへ複製し、一致assertionで正本を二つにした。上流が定義していないHTTP API contractをpackage versionから作り、backendとMCPのlockstep更新も要求した。新しいSkillは、既存正本の再利用、semantic contractとreleaseの分離、consumer usageから必要なsurfaceだけを導く手順を補う。
+
+forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一致assertionを置く提案を検討した。既存の`dotfiles.agents.clientExecutables.codex`がabsolute path、read-only、internal、defaultなしのexact contractを既に持ち、MCPはそこへ引数だけ加えると確認した。mirrorはsource dependencyを消さず、同じ意味のreaderと将来の削除コストを増やすため、新しいinterfaceを作らない案を選んだ。依頼なしにADR形式で回答したため、結果を推薦、contract、compatibility、verification obligationへ限定する出力規則を追加した。
 
 ### domain-modelingで採用したdonor
 

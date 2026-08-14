@@ -84,6 +84,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | observableを保った内部構造の段階的な改善 | `refactoring` |
 | domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
 | moduleの責務、state、artifact、粗いcontract、依存方向の設計 | `module-design` |
+| moduleやprocess境界のexact contract、failure、互換性の設計 | `interface-design` |
 | planやdecisionを依存順の質問で詰める | `grilling` |
 | domain設計を質問で詰めて既存文書へ残す | `grill-with-docs` |
 | commit / PR 前の diff review | `code-reviewer` |

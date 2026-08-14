@@ -24,8 +24,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`skill-creator`、`tdd`、`web-research`
-- plugin: `frontend-design`
+- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`skill-creator`、`tdd`、`ui-design`、`web-research`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
 Superpowers は構成上の配備対象から除外した。以下は目標とする責務の候補群であり、既存Skillの継続、改修、rename、統合と、未実装の候補を含む。表の名前だけでは実装済みと判断しない。
@@ -66,6 +65,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `performance-analysis` は代表workloadと比較条件を固定し、分布、critical path、resource saturation、controlled probeからbottleneckを特定する。最適化の実装、一般的なcode監査、機能障害の原因分析は所有しない。
 
+`ui-design`は、利用者の仕事、実際のcontent、既存design systemを入力に、情報階層、interaction、利用者に見えるstateとfeedback、visual、responsive、accessibilityを決め、実装前のbriefで止める。module-privateなcomponent treeとstate ownerは`code-design`が所有する。確定済みUIの実装には独立Skillを置かず、briefと既存design systemを制約とする通常の実装作業へ渡す。
+
 `ui-review` は利用者の仕事を実画面で遂行し、情報階層、interaction、visual、responsive、accessibility、content、feedback、recovery を監査する。`browser-review` は console、network、storage、DOM、event、performance、memory、browser security、resource lifecycle を監査する。原因の特定は `bug-analysis` が所有する。
 
 セキュリティreviewはpluginの`security-scan`が所有するため、別の`security-review`は作らない。read-onlyのsecurity agentはthreat model、finding discovery、validation、attack path、最終reportまでを所有する。検証済みまたは技術的に妥当なfindingの修正を明示された場合だけ、実装agentが別phaseで`fix-finding`を使う。
@@ -96,7 +97,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 |---|---|
 | [Matt Pocock skills](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | `bug-analysis`、`dependency-analysis`、`domain-modeling`、`code-design`、`module-design`、`code-review`、`tdd`、`prototype`、`web-research` |
 | [Addy Osmani agent-skills](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c) | `impact-analysis`、`interface-design`、`code-review`、`tdd`、`bug-analysis`、`ui-design`、`performance-analysis`、security plugin |
-| [WondelAI skills](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | `impact-analysis`、`refactoring`、`module-design`、`architecture-design`、`architecture-review`、`db-design`、`ui-review` |
+| [WondelAI skills](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | `impact-analysis`、`refactoring`、`module-design`、`architecture-design`、`architecture-review`、`db-design`、`ui-design`、`ui-review` |
 | [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `skill-creator`、`test-design`、`test-review`、`tdd` |
 | [Vercel agent skills](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc) | `component-design`、`performance-analysis`、`ui-review` |
 | [Anthropic skills](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434) | `skill-creator`、`ui-design`、`browser-review`、`description-writing` |
@@ -106,7 +107,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | `code-design`、`module-design`、`refactoring`、`code-review`、`skill-creator` |
 | [decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect)、Clairvoyance | `dependency-analysis`、`module-design`、`architecture-design`、`architecture-review`。Clairvoyanceは採用前にsourceを固定する |
 | [effect-fp-skill](https://github.com/mikezupper/effect-fp-skill) | `code-design`、`data-modeling`、`error-design`。Effect固有APIは汎用規則にしない |
-| [Hallmark](https://github.com/Nutlope/Hallmark)、[Impeccable](https://github.com/pbakaus/impeccable) | `ui-design`、`ui-review` |
+| [Hallmark](https://github.com/Nutlope/Hallmark/tree/13ac0ec7e148655948100b6396439e481361d690)、[Impeccable](https://github.com/pbakaus/impeccable/tree/c8f476b330395031bc8f7a7aee8d848bc85c81e4) | `ui-design`、`ui-review` |
 | [japanese-tech-writing](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d)、[stop-ai-slop-jp](https://github.com/iKora128/stop-ai-slop-jp)、[slop-nuki](https://github.com/chezou/slop-nuki) | `ja-writing` |
 | [code-humanizer](https://github.com/LeonardNJU/code-humanizer)、[deai-code](https://github.com/golovatskygroup/deai-code) | 品質判断だけを `code-review` に使い、著者推定を除く |
 | [differential-review](https://github.com/trailofbits/skills/tree/main/plugins/differential-review) | security plugin |
@@ -474,6 +475,28 @@ baselineでは、`3e94a025`のChrome DevTools追加をreviewし、`set -e`下の
 代表scenarioは [`agents/fixtures/code-design-skill.json`](../../agents/fixtures/code-design-skill.json) に置く。baselineでは、doctorの重複ID、安定順序、summaryを一つのjq finalizerへ置く判断はできた。一方、既存の五配列を使えば足りる内部処理へ、observation envelope、JSONL file、record関数、source用main guardを追加し、数値scoreで案を選んだ。新しいSkillは、既存表現と直接実装を対照にし、pure/effect分離やprivate abstractionを具体的な変更costで正当化する手順を補う。
 
 forward evalでは、AgentMemoryの全hookに共通URL、二つのhookにだけ固有の定数環境を渡す内部構造を設計した。既存`hookNames`を正本に保ち、完全なspec一覧や汎用wrapper builderを棄却し、疎な例外mapを選べた。一方、閉じた定数をshell行へ変換する専用rendererを追加したため、escaping責任だけを増やすhelperを棄却し、既存literalかnative builderを優先する規則を追加した。
+
+### ui-designで採用したdonor
+
+`ui-design`は、利用者の仕事、実際のcontentと範囲、既存screenとdesign systemを先に読み、情報階層、interaction、visible state、feedback、recovery、responsive、accessibilityを一つのbriefへ閉じる。Impeccableのshape procedure、Hallmarkの既存system確認、Addy Osmaniのcontentとstate、WondelAIのaffordanceとmicrointeractionを組み合わせる。theme catalog、固定score、万能な禁止則、実装workflowは採らない。
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Impeccable shape](https://github.com/pbakaus/impeccable/blob/c8f476b330395031bc8f7a7aee8d848bc85c81e4/.agents/skills/impeccable/reference/shape.md) | Apache-2.0 | purpose、実content、範囲、stateから階層とinteractionを決め、briefで止める手順 | 固定質問round、theme catalog、script、全体orchestrator |
+| [Hallmark](https://github.com/Nutlope/Hallmark/blob/13ac0ec7e148655948100b6396439e481361d690/skills/hallmark/SKILL.md) | MIT | 既存tokenとcomponentの確認、taskに対応する構造、架空metricの禁止 | 固定gate、theme catalog、rotation、cache、buildとauditの所有 |
+| [Anthropic frontend-design](https://github.com/anthropics/claude-plugins-official/blob/ae21a9367949f92df4e31231d7efe43eaa08207c/plugins/frontend-design/skills/frontend-design/SKILL.md) | Apache-2.0 | purpose、audience、制約から一貫した方向を導くこと | 極端なaesthetic、特徴的font、motion、unexpected layout、code実装、毎回異なる外観の強制 |
+| [Addy Osmani frontend-ui-engineering](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/frontend-ui-engineering/SKILL.md) | MIT | design system、content-first layout、semantic token、意味のある状態 | React構造、固定breakpoint、行数threshold、実装workflow |
+| [WondelAI design-everyday-things](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/design-everyday-things/SKILL.md)、[microinteractions](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/microinteractions/SKILL.md) | MIT | affordance、signifier、mapping、constraint、feedbackと、trigger、rule、feedback、recovery | score、固定時間、signature moment、review severity |
+
+baselineは、既存design systemがある画面にも新しいcardとfilter componentを根拠なく足し、mobileをcard化した。新しいSkillは既存worldを継承し、必要なgapだけを拡張する。component tree、props、state ownerは`code-design`へ渡す。代表scenarioは[`agents/fixtures/ui-design-skill.json`](../../agents/fixtures/ui-design-skill.json)に置く。
+
+pluginの`frontend-design`は、実装前にextreme aesthetic、特徴的なfont、motion、unexpected layoutを選び直すため、承認済みbriefと既存design systemを正本にできない。frontend実装に独立Skillが必要な不足も観測していないため、donorとしてだけ使い、配備しない。
+
+forward evalでは、手袋とtabletを使う倉庫の出荷例外処理を対象にし、一覧から原因確認、処理、競合、通信断、結果確認までを一つのflowへ閉じた。既存primitiveを再利用し、card一覧を棄却できた。一方、根拠のない60対40の分割比率と56pxの新tokenを確定したため、数値は既存system、実content、platform要件、測定からだけ導き、gapは新しい部品名でなく不足能力として渡す規則を追加した。
+
+修正後のcomposition evalでは、請求差異の解決画面について`ui-design`でbriefを閉じてから`code-design`でpage-privateな構造へ写した。SkillなしではDrawer幅、表の最小幅、表示行数を根拠なく固定し、20個前後のcomponentと5個のhookへ分けた。Skillありでは正確な数値を既存規約か実測へ戻し、既存primitiveを保った8境界と3つの純粋判断へ縮めた。UI方針とcomponent責務の二重所有は生じなかった。
+
+同じ監査一覧のpromptでaccessibility referenceだけを外すablationも行った。本体だけでもkeyboard、focus、status、Drawerからの復帰は設計できたが、referenceありの場合だけcontrast 4.5:1と3:1、24×24 CSS pxまたは間隔例外、tableとlistのsemantic条件まで具体化した。この差が実装前のconstraintを閉じるため、referenceを残す。
 
 ### component-designを独立Skillにしない判断
 

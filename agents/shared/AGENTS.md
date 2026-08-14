@@ -66,7 +66,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 計画に沿った実装、テスト、検証 | `implementer` |
 | diff review、severity 付き指摘 | `reviewer` |
 | 脅威モデリング、攻撃経路整理 | `security` |
-| UI 方針、コンポーネント分解 | `designer` |
+| 実装前のUI brief | `designer` |
 
 ## skills
 
@@ -97,7 +97,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 実装commentの要否判断と作成 | `comment-writing` |
 | セキュリティ分析の起点 | `security-scan` |
 | セキュリティ分析の個別 phase | `threat-model` / `finding-discovery` / `validation` / `attack-path-analysis` / `fix-finding` |
-| UI / frontend 方針 | `frontend-design` |
+| 実装前のUI方針 | `ui-design` |
 | skill 作成 | `skill-creator` |
 
 ## dotfiles

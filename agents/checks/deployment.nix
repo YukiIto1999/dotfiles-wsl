@@ -560,7 +560,7 @@ in
           jq --exit-status '
             (has("sandbox_mode") | not) and
             (has("sandbox_workspace_write") | not) and
-            if (.name | IN("architect", "explorer", "planner", "reviewer", "security"))
+            if (.name | IN("architect", "designer", "explorer", "planner", "reviewer", "security"))
             then
               .default_permissions == "agent-read-only" and
               (has("permissions") | not)

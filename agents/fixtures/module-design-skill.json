@@ -90,7 +90,6 @@
       "id": "architecture-audit",
       "prompt": "現在のmodule構造を監査し、責務逸脱をseverity付きfindingとして報告してください。新しい設計は依頼しません。",
       "expectedSkills": [],
-      "futureOwner": "architecture-review",
       "mustNotTrigger": ["module-design"]
     },
     {

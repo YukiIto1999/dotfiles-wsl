@@ -74,7 +74,6 @@
       "id": "architecture-quality-review",
       "prompt": "現在のdependency directionがrepository規約に適合し、保守しやすい設計かreviewしてください。",
       "expectedSkills": [],
-      "futureOwner": "architecture-review",
       "mustNotTrigger": [
         "dependency-analysis"
       ]

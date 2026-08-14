@@ -347,6 +347,20 @@ baselineではPostgreSQLのaudit ledgerを監査し、親rowの更新と削除�
 
 baselineでは、self-hosted Web調査基盤を対象にし、実装を見ずに`agent client → gateway → SearXNG/Crawl4AI別front → 別backend container → 外部Web`を設計した。direct接続案と統合service案を棄却し、capability別のfailureとdeployment、loopback、credential境界、固定image、runtime probe、段階rolloutとgeneration rollbackまで既存構造と一致した。欠けた`web_url_read`拒否とdownstreamの`failOpen`は、選択済みgatewayへ与えるauthorizationとfailure contractのexact bindingである。system-level constraintを後続の`interface-design`とsecurityへ渡せばarchitecture判断は保存されるため、このscenarioから独立Skillの改善を確認できない。
 
+### architecture-reviewをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 固定規則にしない内容 |
+|---|---|---|---|
+| [architecture-standard review、separation、dependency](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 機械検証、actorとchange reason、sourceとruntime、未変更consumer、段階的な収縮 | 固定layer、inward dependency、port、DIの普遍化 |
+| [Shane Vitarana decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect) | MIT | couplingのstrength、distance、volatility、ownership、shared state、temporal contract | functional core、purity、immutability、confidence thresholdの強制 |
+| [Matt Pocock improve-codebase-architecture、codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | scope、change amplification、caller burden、locality、deletion test | deep module、HTML report、grilling、target designの生成 |
+| [WondelAI DDIA、software-design-philosophy、team-topologies](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | consistency、failure、deployment、ownership、handoff、cognitive loadのtrade-off | score、store、team taxonomy、serviceとの一対一対応 |
+| [Ponytail audit](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/.openclaw/skills/ponytail-audit/SKILL.md) | MIT | componentなし、既存mechanism、削除可能性を反証に使うこと | LOC、dependency数、service数の最小化 |
+
+候補の責務は、固定したsystemについて、宣言済みのarchitecture claimを、source、runtime、data、control、build、deployment、ownership、failureの別々の証拠へ照合し、実際の変更、検証、配備、運用costを持つsystemic findingだけを返すこととした。graphの事実は`dependency-analysis`、具体的変更の伝播は`impact-analysis`、新しい責務配置は`module-design`が所有する。
+
+baselineでは、`790d3a10`のrepository option統一を対象にした。gateway portだけを変えるvariantが通常machineのmodule rosterを再記述し、`toolchain.git.workIdentity`を欠落させたため、検証構成が実配備と異なるtopologyになることをMajorとして検出した。後続の`d1e6003e`はvariantを`normalMachineModule`とport overrideの合成へ直し、`11e04b95`は通常構成とのprojection一致を機械検証へ固定した。architectureの方法論を与えない独立reviewerも、同じ欠落、consumerへの影響、修正へ到達した。固定diffでは`code-review`と基礎モデルで足り、現行system全体の監査に固有の改善は未観測であるため、runtime Skillは追加しない。
+
 ### module-designで採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |

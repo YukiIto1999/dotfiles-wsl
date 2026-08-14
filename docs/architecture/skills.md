@@ -47,7 +47,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | writing | `ja-writing`、`commit-writing`、`change-writing`、`description-writing`、`documentation-writing`、`comment-writing` |
 | research | `web-research` |
 | analysis | `bug-analysis`、`dependency-analysis`、`impact-analysis`、`performance-analysis` |
-| review | `code-review`、`architecture-review`、`test-review`、`interface-review`、`naming-review`、`ui-review`、`browser-review` |
+| review | `code-review`、`architecture-review`、`test-review`、`interface-review`、`naming-review`、`ui-review` |
 | design | `ui-design`、`code-design`、`module-design`、`interface-design`、`architecture-design`、`db-design`、`component-design`、`test-design`、`error-design` |
 | modeling | `domain-modeling`、`data-modeling` |
 
@@ -67,7 +67,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `ui-design`は、利用者の仕事、実際のcontent、既存design systemを入力に、情報階層、interaction、利用者に見えるstateとfeedback、visual、responsive、accessibilityを決め、実装前のbriefで止める。module-privateなcomponent treeとstate ownerは`code-design`が所有する。確定済みUIの実装には独立Skillを置かず、briefと既存design systemを制約とする通常の実装作業へ渡す。
 
-`ui-review` は利用者の仕事を実画面で遂行し、情報階層、interaction、visual、responsive、accessibility、content、feedback、recovery を監査する。`browser-review` は console、network、storage、DOM、event、performance、memory、browser security、resource lifecycle を監査する。原因の特定は `bug-analysis` が所有する。
+`ui-review`候補は、利用者の仕事を実browserで遂行し、情報階層、interaction、visual、responsive、accessibility、content、feedback、recoveryを監査する。browserは証拠を得る手段であり、console、network、DOM、memory、securityを横断する`browser-review`は作らない。機能障害の原因は`bug-analysis`、性能は`performance-analysis`、セキュリティは`security-scan`へ送る。forward evalが成立していないため、まだ配備しない。
 
 セキュリティreviewはpluginの`security-scan`が所有するため、別の`security-review`は作らない。read-onlyのsecurity agentはthreat model、finding discovery、validation、attack path、最終reportまでを所有する。検証済みまたは技術的に妥当なfindingの修正を明示された場合だけ、実装agentが別phaseで`fix-finding`を使う。
 
@@ -100,7 +100,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | [WondelAI skills](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | `impact-analysis`、`refactoring`、`module-design`、`architecture-design`、`architecture-review`、`db-design`、`ui-design`、`ui-review` |
 | [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `skill-creator`、`test-design`、`test-review`、`tdd` |
 | [Vercel agent skills](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc) | `component-design`、`performance-analysis`、`ui-review` |
-| [Anthropic skills](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434) | `skill-creator`、`ui-design`、`browser-review`、`description-writing` |
+| [Anthropic skills](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434) | `skill-creator`、`ui-design`、`ui-review`、`description-writing` |
 | [OpenAI Skills guidance](https://openai.com/academy/skills/) | `skill-creator`、routing評価、MCPを含むworkflow packaging |
 | [PlanetScale database skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488) | `db-design`、database監査、`migration` |
 | [Supabase agent skills](https://github.com/supabase/agent-skills/tree/v0.1.8) | `db-design`、database監査、security plugin、`migration` |
@@ -497,6 +497,22 @@ forward evalでは、手袋とtabletを使う倉庫の出荷例外処理を対�
 修正後のcomposition evalでは、請求差異の解決画面について`ui-design`でbriefを閉じてから`code-design`でpage-privateな構造へ写した。SkillなしではDrawer幅、表の最小幅、表示行数を根拠なく固定し、20個前後のcomponentと5個のhookへ分けた。Skillありでは正確な数値を既存規約か実測へ戻し、既存primitiveを保った8境界と3つの純粋判断へ縮めた。UI方針とcomponent責務の二重所有は生じなかった。
 
 同じ監査一覧のpromptでaccessibility referenceだけを外すablationも行った。本体だけでもkeyboard、focus、status、Drawerからの復帰は設計できたが、referenceありの場合だけcontrast 4.5:1と3:1、24×24 CSS pxまたは間隔例外、tableとlistのsemantic条件まで具体化した。この差が実装前のconstraintを閉じるため、referenceを残す。
+
+### ui-review候補のdonorとbrowser-reviewを作らない判断
+
+候補の`ui-review`はPlaywrightで代表task、keyboard操作、desktopとmobile、materialなstateを確認し、必要な箇所だけChrome DevToolsで詳細観測する。findingは利用者への影響、再現手順、visualまたはruntime evidence、severityを持つ。WondelAIのusability lens、ImpeccableとHallmarkの既存artifact監査、Anthropicのbrowser reconnaissance、WCAG 2.2を組み合わせる。
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [WondelAI ux-heuristics](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/ux-heuristics/SKILL.md) | MIT | system status、現実の語彙、control、consistency、error prevention、recognition、recoveryを反証観点にすること | 10点score、固定click数、選択肢数、tap target、全画面への一律heuristic |
+| [Impeccable critique](https://github.com/pbakaus/impeccable/blob/c8f476b330395031bc8f7a7aee8d848bc85c81e4/.agents/skills/impeccable/reference/critique.md) | Apache-2.0 | live artifactを見て、visual判断とbrowser evidenceを分け、product固有性と利用者影響を照合すること | 二agent強制、score、persona、detector、snapshot永続化、質問workflow |
+| [Hallmark audit](https://github.com/Nutlope/Hallmark/blob/13ac0ec7e148655948100b6396439e481361d690/skills/hallmark/references/verbs/audit.md) | MIT | 既存artifactとproduct contextを先に確認し、架空のcontentやmetricをfinding根拠にしないこと | anti-slop gate、theme分類、build、redesign、studyとの一体化 |
+| [Anthropic webapp-testing](https://github.com/anthropics/skills/blob/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/webapp-testing/SKILL.md) | Apache-2.0 | 動的画面のreconnaissance後にselectorと操作を決め、server lifecycleとbrowser logを管理すること | Python script、headless固定、`networkidle`の一律要求、独自browser起動 |
+| [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | W3C仕様。本文は非転載 | 該当する達成基準をaccessibility findingの規範根拠にすること | 全基準のchecklist化、未試験画面の準拠宣言、要件と無関係なscore |
+
+console、network、storage、DOM、event、performance、memory、securityを一つのSkillへまとめると、証拠取得と原因、性能、セキュリティの判断を同時に所有する。browserはtoolであり、この横断分類はSkillのJobにならない。既知の障害は`bug-analysis`、性能症状は`performance-analysis`、攻撃可能性は`security-scan`へ送り、利用者が観測するUI品質だけを候補の責務に残す。
+
+2026-08-14のforward evalでは、一時的な問い合わせ振り分け画面をlocalhostで起動し、Playwrightへviewport、navigation、snapshotを要求した。258秒間応答せず、HTTP requestも画面へ到達しなかったため中断した。実画面の証拠とSkill出力は得られず、改善は未測定である。起動したserverと一時画面は中断後に回収した。このため、候補本文とfixtureはruntimeへ入れない。
 
 ### component-designを独立Skillにしない判断
 

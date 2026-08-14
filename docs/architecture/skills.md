@@ -334,6 +334,19 @@ baselineでは、`tec-lane-buyer-cart`のcart ledgerを対象にし、既存migr
 
 baselineではPostgreSQLのaudit ledgerを監査し、親rowの更新と削除だけを拒否しても、任意の子rowを後から追加でき、`TRUNCATE`がrow triggerを通らないためimmutabilityが閉じない問題を特定できた。既存のreview能力とengine一次資料で実害のあるfindingまで到達しており、Skill固有の改善を観測していない。反復してisolation anomaly、workload、restoreの欠落を見逃す証拠が得られるまで追加しない。
 
+### architecture-designをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [architecture-standard design、separation、evolution](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 事実、要件、境界、戦術の順序、actorとchange reason、可逆性、ADR | project固有技術、固定layer、全依存のinward化 |
+| [Matt Pocock codebase-design、Design It Twice](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | materially differentな案、同じconstraintでの比較、seam、locality、deletion test | 固定数の案、personaとsubagent、interfaceだけへの限定 |
+| [WondelAI DDIA、Release It!](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | consistency、availability、latency、failure、integration、deployment、capacity、recoveryのtrade-off | score、特定store、saga、breaker、bulkhead、負荷倍率の一律採用 |
+| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | MIT | 現状維持、新componentなし、既存mechanismを比較対象にすること | shortest diff、fewest files、常時発火 |
+
+候補の責務は、確定済みの問題、domain ownership、外部contract、quality attribute、運用制約から、process、service、worker、store、queue、external systemのtopology、dataとcontrol flow、runtime、deployment、failure、trustの境界を比較することとした。moduleの責務は`module-design`、exact contractは`interface-design`、未確認のruntime特性は隔離実験や各analysis、既存構造のfindingは`architecture-review`が所有する。
+
+baselineでは、self-hosted Web調査基盤を対象にし、実装を見ずに`agent client → gateway → SearXNG/Crawl4AI別front → 別backend container → 外部Web`を設計した。direct接続案と統合service案を棄却し、capability別のfailureとdeployment、loopback、credential境界、固定image、runtime probe、段階rolloutとgeneration rollbackまで既存構造と一致した。欠けた`web_url_read`拒否とdownstreamの`failOpen`は、選択済みgatewayへ与えるauthorizationとfailure contractのexact bindingである。system-level constraintを後続の`interface-design`とsecurityへ渡せばarchitecture判断は保存されるため、このscenarioから独立Skillの改善を確認できない。
+
 ### module-designで採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |

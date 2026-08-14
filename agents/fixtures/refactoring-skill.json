@@ -70,7 +70,6 @@
       "id": "architecture-redesign",
       "prompt": "service境界とpublic contractを見直し、新しいmodule構成を設計してください。",
       "expectedSkills": [],
-      "futureOwner": "architecture-design",
       "mustNotTrigger": ["refactoring"]
     },
     {

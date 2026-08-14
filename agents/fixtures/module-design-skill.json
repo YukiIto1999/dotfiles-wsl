@@ -78,7 +78,6 @@
       "id": "system-topology",
       "prompt": "monolithと二つのservice、queueを比較し、deployment topologyとSLOを決めてください。",
       "expectedSkills": [],
-      "futureOwner": "architecture-design",
       "mustNotTrigger": ["module-design"]
     },
     {

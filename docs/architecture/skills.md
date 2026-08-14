@@ -16,14 +16,16 @@ Skill は原則として作らない。基礎モデル、repository policy、必
 
 local Skill の正本は [`agents/shared/skills/`](../../agents/shared/skills) である。plugin source の revision は [`flake.nix`](../../flake.nix)、採用する plugin の選択は [`agents/module.nix`](../../agents/module.nix) が所有する。構成上の配備対象は次の command で取得する。
 
+Codexに同梱される同名のsystem `skill-creator`は、[`skills.config`](https://developers.openai.com/codex/config-reference#skillsconfig)で無効化し、local版だけをrouting対象にする。ClaudeとOpenCodeでもplugin版を配備せず、同じlocal正本を使う。
+
 ```sh
 nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills --apply builtins.attrNames
 ```
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
-- plugin: `frontend-design`、`skill-creator`
+- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`skill-creator`、`tdd`、`web-research`
+- plugin: `frontend-design`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
 Superpowers は構成上の配備対象から除外した。以下は目標とする責務の候補群であり、既存Skillの継続、改修、rename、統合と、未実装の候補を含む。表の名前だけでは実装済みと判断しない。
@@ -90,7 +92,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 独自Skillは、モデルが一から作った規則を正本にしない。donorの一次本文から、具体的なprocedure、failure mode、trade-off、counterexampleを抽出し、[`architecture-standard`](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) とこのrepositoryの制約に合わせて再構成する。donor不在か改善未確認の規則は、原則としてruntime Skillへ入れない。
 
-| Donor | 主に補強する候補 |
+| Donor | 主に補強する責務 |
 |---|---|
 | [Matt Pocock skills](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | `bug-analysis`、`dependency-analysis`、`domain-modeling`、`code-design`、`module-design`、`code-review`、`tdd`、`prototype`、`web-research` |
 | [Addy Osmani agent-skills](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c) | `impact-analysis`、`interface-design`、`code-review`、`tdd`、`bug-analysis`、`ui-design`、`performance-analysis`、security plugin |
@@ -258,6 +260,14 @@ baselineと同型の別fixtureでは、productionの二つの関数とcontract t
 候補の責務は、文書や既存codeから確定できない一つの経験的な不確実性を、隔離した使い捨ての実行可能物で判定することとした。成果はcodeではなく、環境、版、raw observation、`支持 / 反証 / 判定不能`、判断への含意である。本番codeへ残す縦slice、性能bottleneckの診断、障害原因の分析、migration rehearsalは所有しない。
 
 最初のforward evalは、transient user serviceの終了statusを調べたが、user busが存在せず判定不能で終わった。別のfresh-session比較では、`flock`中のfileを`mv`で置換した後もpathnameの排他が保たれるかを実測した。baselineと候補ありの両方が、支持条件と反証条件を先に定め、旧inodeと新inode、二番目のlock取得statusを一回の隔離実験で観測し、pathnameの置換後は排他を維持できないと同じ結論へ到達した。両方とも一時資源を回収し、別のlock実験へ範囲を広げなかった。独立Skillによる改善がないため、donorは判断材料として残し、runtime Skillは追加しない。
+
+### skill-creatorで採用したdonor
+
+pluginの`skill-creator`はSkill作成を既定経路にし、基礎モデル、policy、reference、script、tool、既存Skillで足りるかを判定しない。このrepositoryではlocal版へ置き換え、具体的なbaseline不足、mechanism、責務境界、routing、composition、restraint、ablationからSkillの要否を決める。
+
+runtime本文は[admissionと評価](../../agents/shared/skills/skill-creator/references/admission-and-evaluation.md)だけを必要時に読み、外部sourceの採否は[provenance](../../agents/shared/skills/skill-creator/references/provenance.md)へ分ける。代表scenarioは[`agents/fixtures/skill-creator-skill.json`](../../agents/fixtures/skill-creator-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
+
+決定的なYAML契約を再利用するscenarioでは、Codex同梱版とlocal版のどちらもSkillを作らず、共有schemaと必須CIを選んだ。このcaseでは改善はなかった。API変更の互換性とrolloutの見落としを扱うscenarioでは、同梱版は判断を`code-review`へ追加した。local版は既存`impact-analysis`がconsumer、共存、rollback条件を所有すると確認し、影響の証拠だけを受け取ってfindingとseverityを`code-review`へ残した。同じ判断の複製を避け、既存Skillとのcompositionを選べたため、local版を配備する。
 
 ### migrationをSkill化しない判断
 

@@ -36,7 +36,10 @@ let
   codexGatewayConfig = (pkgs.formats.toml { }).generate "codex-gateway.toml" {
     mcp_servers.gateway.url = config.dotfiles.mcp.gateway.url;
   };
-  codexSystemBase = pkgs.replaceVars ./assets/config-system.toml { inherit codexModel; };
+  codexSystemBase = pkgs.replaceVars ./assets/config-system.toml {
+    inherit codexModel;
+    homeDir = cfg.host.homeDir;
+  };
   codexSystemConfig = pkgs.runCommandLocal "codex-system-config.toml" { } ''
     cat ${codexSystemBase} ${codexRuntimeConfig} ${codexGatewayConfig} > "$out"
   '';

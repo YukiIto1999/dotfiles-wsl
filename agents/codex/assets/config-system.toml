@@ -10,6 +10,10 @@ review_model = "@codexModel@"
 default_subagent_model = "@codexModel@"
 default_subagent_reasoning_effort = "xhigh"
 
+[[skills.config]]
+path = "@homeDir@/.codex/skills/.system/skill-creator"
+enabled = false
+
 # agentmemory lifecycle hooks、upstream hooks.codex.json と同じ 6 event
 [[hooks.SessionStart]]
 [[hooks.SessionStart.hooks]]

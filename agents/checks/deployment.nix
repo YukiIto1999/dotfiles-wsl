@@ -513,12 +513,14 @@ in
         codex_mcp_matches ${lib.escapeShellArg gatewayUrl} < codex-system.json > /dev/null
         jq --exit-status \
           --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
-          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} '
+          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} \
+          --arg systemSkillCreator ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.codex/skills/.system/skill-creator"} '
           .permissions.dev.filesystem == {($cacheRoot): "write", ($stateRoot): "write"} and
           .permissions["agent-read-only"] == {
             extends: ":read-only",
             filesystem: {($cacheRoot): "write", ($stateRoot): "write"}
           } and
+          .skills.config == [{path: $systemSkillCreator, enabled: false}] and
           (has("sandbox_mode") | not) and
           (has("sandbox_workspace_write") | not)
         ' codex-system.json > /dev/null

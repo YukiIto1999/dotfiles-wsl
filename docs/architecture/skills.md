@@ -74,7 +74,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `module-design`は、確定済みのactor、domain ownership、state、artifact lifecycle、system topologyを制約として消費する。module内部の実装、exact interface、serviceやrepositoryのtopology、domain語彙、既存構造のseverity付きreviewは所有しない。
 
-`data-modeling` はデータの意味、形、所有、正準形、valid state、lifecycle、serialization を決める。`db-design` は access pattern、物理schema、constraint、index、transaction、migration、rollout を決める。
+`data-modeling`候補は、確定済みのdomainの意味を、正準形、valid state、lifecycle、serializationへ写す。`db-design` は access pattern、物理schema、constraint、index、transaction、migration、rollout を決める。
 
 `test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd` は確定済みのbehaviorを一つのobservableな縦のsliceにし、意味のあるRED、最小GREEN、触れた範囲のREFACTORを反復する。原因未確定の障害、test suiteの監査、独立した構造変更は所有しない。
 
@@ -301,6 +301,19 @@ baselineでは、Account、Member、Membership、Invoice、minor unit、UTC inst
 候補の責務は、確定済みbehaviorとriskを、observable、独立oracle、seamとtest level、必要なfidelity、data、fault、concurrency、決定性、residual riskへ変換することに限定した。test実装は`tdd`、既存suiteのfindingは`test-review`が所有する。browser実行は証拠取得の手段であり、独立した判断責務にはしない。
 
 baselineでは、agent bundleのatomic publish transactionについて、consumerが完全な旧releaseか新releaseだけを見る契約を入力にした。Skillなしでも、本番validatorと独立したtree manifest oracleを選び、実process、Linux filesystem、`flock`、本番rename helperを使うbehavior testへ絞れた。crash前後、並行installer、同一release再実行の四caseを同期markerで制御し、unlinkとsymlinkの二段切替、未完成releaseの公開、lock除去、manifest比較除去のmutationがどのcaseで検出されるかまで対応付けた。kernel crash、電源断、consumer側の複数回path解決などのresidual riskも分離できたため、独立Skillによる改善を確認できない。
+
+### data-modelingをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [architecture-standard data、type、separation](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 正準形、valid state、正本と互換表現の分離、事実と現在値の区別 | 全dataのevent化、固定layer、DSL |
+| [Matt Pocock domain-modeling](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/domain-modeling) | MIT | 具体scenarioと反例、確定済みと未決定の分離 | 文書配置、domainの意味とdata表現の二重所有 |
+| [effect-fp-skill domain-types](https://github.com/mikezupper/effect-fp-skill/blob/e3ee107dc4e8a301fbddea43e85d4d1404fa15fc/references/domain-types.md) | CC BY 4.0 | parse後の正準形、状態固有data、wire表現との変換 | Effect、TypeScript、Schema、brand、Optionの強制 |
+| [WondelAI DDIA、DDD、Pragmatic Programmer](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | identityとvalue、導出可能なdata、event sourcingの適用条件 | score、固定taxonomy、UUIDやevent sourcingの一律採用 |
+
+候補の責務は、domainの意味、owner、不変条件、lifecycleが確定した後に、identity、正準形、状態固有data、absence、時刻、導出値、serializationとreader、writer互換性を決めることに限定した。公開contractは`interface-design`、private typeとfunctionは`code-design`、物理schemaは`db-design`が所有する。
+
+baselineでは、agent resourceのsessionとworktree ledgerを対象にした。Skillなしでも、session ownerを`(boot_id, owner_pid, owner_start_time)`、worktree identityを正準化済み`(common_dir, path)`、filename hashとdevice、inodeを別の導出値と実体証明に分けられた。既存fieldだけで状態別の必須data、正準遷移、terminal state、`updated_at`とmtimeの互換、v1 exact-key reader、未知dataのfail-closedまで設計し、event log、generic envelope、新versionを棄却した。さらに、診断値である`last_reason`が`quarantine-remove-root-unresolved`だけ回復分岐を兼ね、`status`だけではvalid stateが定まらない混在も特定できた。独立methodologyによる改善余地を観測できないため、現時点では基礎モデルと既存設計Skillの境界で足りる。
 
 ### module-designで採用したdonor
 

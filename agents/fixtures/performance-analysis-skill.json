@@ -114,7 +114,6 @@
       "id": "performance-requirement-design",
       "prompt": "新しい決済systemのlatency SLOとcapacity方針をarchitectureとして決めてください。まだ実装も測定値もありません。",
       "expectedSkills": [],
-      "futureOwner": "architecture-design",
       "mustNotTrigger": [
         "performance-analysis"
       ]

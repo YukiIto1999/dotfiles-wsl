@@ -41,7 +41,6 @@ let
   pluginPaths = [
     (pluginSources.openai-plugins + "/plugins/codex-security")
     (pluginSources.claude-plugins-official + "/plugins/frontend-design")
-    (pluginSources.claude-plugins-official + "/plugins/skill-creator")
   ];
 
   findSkillsIn =

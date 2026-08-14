@@ -1,0 +1,153 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "recurring-contract-drift",
+      "prompt": "複数repositoryでAPI変更のたびにconsumer、互換性、rolloutの確認漏れを繰り返しています。再利用できるSkillにすべきか判断し、必要なら作ってください。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "observesConcreteBaseline": true,
+        "definesCandidateContract": true,
+        "comparesMechanisms": true,
+        "usesForwardAndNearMissScenarios": true
+      }
+    },
+    {
+      "id": "repair-overbroad-routing",
+      "prompt": "既存Skillが設計依頼だけでなく実装とdiff reviewにも発火し、隣接Skillの判断まで奪います。責務とdescriptionを直し、変更前後を評価してください。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "usesExistingSkillAsBaseline": true,
+        "definesDecisionOwnership": true,
+        "testsTypicalAndNearMissRouting": true,
+        "checksComposition": true
+      }
+    },
+    {
+      "id": "no-observed-deficit",
+      "prompt": "毎月一度だけ使う単純なfd commandをSkillにしたいです。modelは既に正しいcommandを返せており、誤りや手順差も観測していません。必要性を判断してください。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "selectsNothing": true,
+        "doesNotCreateSkill": true,
+        "statesMissingDeficit": true
+      }
+    },
+    {
+      "id": "repository-policy",
+      "prompt": "このrepositoryでは全taskで秘密情報を平文保存しない規則を必ず適用します。この規則だけのSkillを作るべきか判断してください。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "selectsPolicy": true,
+        "doesNotCreateSkill": true
+      }
+    },
+    {
+      "id": "deterministic-validator",
+      "prompt": "全Skillのfrontmatterにnameとdescriptionがあり、directory名とnameが一致するか毎回確認するSkillを作ってください。判定規則は完全に決定的です。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "selectsScriptOrValidator": true,
+        "doesNotEncodeDeterministicCheckAsReasoning": true
+      }
+    },
+    {
+      "id": "existing-skill-owns-job",
+      "prompt": "日本語READMEの空虚な導入と重複を除くSkillを新設してください。既にja-writingが同じtriggerと判断を所有しています。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "selectsExistingSkill": true,
+        "doesNotCreateDuplicate": true,
+        "mayStrengthenExistingSkillOnlyIfDeficitObserved": true
+      }
+    },
+    {
+      "id": "reference-only-knowledge",
+      "prompt": "稀に参照する社内protocol field一覧を覚えさせるSkillを作ってください。判断手順はなく、既存作業から必要時に一覧を引ければ足ります。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "selectsReference": true,
+        "doesNotCreateKnowledgeDumpSkill": true
+      }
+    },
+    {
+      "id": "signature-procedure-audit",
+      "prompt": "上流の質問procedureを、分解すると依存順の対話という固有価値が失われるため、そのまま採用したいです。license、hidden behavior、compositionを監査してください。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "considersSignatureProcedure": true,
+        "recordsProvenance": true,
+        "doesNotImportSourceTaxonomy": true
+      }
+    },
+    {
+      "id": "reject-god-skill",
+      "prompt": "調査、要件定義、設計、実装、test、review、releaseを一つのengineering Skillにまとめて、全開発taskで発火させてください。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "rejectsGodSkill": true,
+        "doesNotBuildTaxonomyToFill": true,
+        "requiresIndependentDeficitsBeforeAnySplit": true
+      }
+    },
+    {
+      "id": "reject-micro-skill",
+      "prompt": "SRPだけを必ず思い出させるsrp Skillと、DIPだけのdip Skillを別々に作ってください。",
+      "expectedSkills": [
+        "skill-creator"
+      ],
+      "expected": {
+        "rejectsMicroscopicSkills": true,
+        "classifiesPrinciplesAsLensOrPolicy": true
+      }
+    },
+    {
+      "id": "install-upstream-skill",
+      "prompt": "この公開GitHub URLにある既存Skillを内容変更せず、一時的にインストールしてください。作成や品質改善は依頼していません。",
+      "expectedSkills": [],
+      "mustNotTrigger": [
+        "skill-creator"
+      ]
+    },
+    {
+      "id": "write-readme",
+      "prompt": "既存の構成と事実に合わせて、このrepositoryの日本語READMEを書き直してください。Skill自体の作成や変更は不要です。",
+      "expectedSkills": [
+        "description-writing",
+        "ja-writing"
+      ],
+      "mustNotTrigger": [
+        "skill-creator"
+      ]
+    },
+    {
+      "id": "use-existing-web-research",
+      "prompt": "指定した三つの一次資料を比較し、現行仕様の差を引用付きで報告してください。Skillの作成は不要です。",
+      "expectedSkills": [
+        "web-research"
+      ],
+      "mustNotTrigger": [
+        "skill-creator"
+      ]
+    }
+  ]
+}

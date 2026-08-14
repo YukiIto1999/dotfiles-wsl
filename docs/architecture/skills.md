@@ -78,6 +78,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `prototype`候補は、設計や実装を止める一つの経験的な問いを、隔離した使い捨ての実行可能物で判定する。基礎モデルとの差を確認できなかったため配備しない。
 
+`migration`候補は、承認済みのsourceからtargetへ、共存条件、各段の正本、変換、進行と撤退のgate、不可逆点後のrecovery、旧経路の除去を扱う。現時点では基礎モデルと既存Skillで不足を確認できていないため実装しない。
+
 ここに境界を書いていない候補は、名前だけを仮置きした調査対象である。Job、trigger、判断所有権、根拠、完了条件、非責務を定めるまで実装しない。
 
 ## Donor の扱い
@@ -252,6 +254,22 @@ baselineと同型の別fixtureでは、productionの二つの関数とcontract t
 候補の責務は、文書や既存codeから確定できない一つの経験的な不確実性を、隔離した使い捨ての実行可能物で判定することとした。成果はcodeではなく、環境、版、raw observation、`支持 / 反証 / 判定不能`、判断への含意である。本番codeへ残す縦slice、性能bottleneckの診断、障害原因の分析、migration rehearsalは所有しない。
 
 最初のforward evalは、transient user serviceの終了statusを調べたが、user busが存在せず判定不能で終わった。別のfresh-session比較では、`flock`中のfileを`mv`で置換した後もpathnameの排他が保たれるかを実測した。baselineと候補ありの両方が、支持条件と反証条件を先に定め、旧inodeと新inode、二番目のlock取得statusを一回の隔離実験で観測し、pathnameの置換後は排他を維持できないと同じ結論へ到達した。両方とも一時資源を回収し、別のlock実験へ範囲を広げなかった。独立Skillによる改善がないため、donorは判断材料として残し、runtime Skillは追加しない。
+
+### migrationをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [Addy Osmani deprecation-and-migration](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/deprecation-and-migration/SKILL.md) | MIT | consumer別のtouchpoint、additiveな準備、backfill、read切替、旧usage確認後の削除 | 全migrationへのdown path強制、固定の責任分担、観測不能なconsumerも含む厳密なusage zero |
+| [WondelAI release-it](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/release-it) | MIT | deployとreleaseの分離、新旧版の互換確認、段階gateごとの観測 | canaryやblue-greenの選択、traffic率、観測時間、rollback時間の固定値 |
+| [PlanetScale database-skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488/skills) | MIT | engineと版ごとのlock、algorithm、replica lag、throttle、cutover延期、cancelとretryの確認 | `LOCK=NONE`、Vitess strategy、PlanetScale deploy request、特定toolの優先 |
+| [Supabase agent-skills v0.1.8](https://github.com/supabase/agent-skills/tree/8331f910845103c08d51f6ca1d86ebb7d1f745e3) | MIT | 既存projectのschema管理方式を先に確認し、試行中はmigration historyを汚さず、確定後にreview可能なartifactを作ること | Supabase CLI、MCP、advisor、固定batch件数とtimeout |
+| [architecture-standard migration](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/process/migration.md) | repository rootに表示なし | mutable stateの並行移送におけるsnapshot、watermark、record version、final drain、write fence、正本切替 | 全migrationのforward-only化、outbox、checksum、三段階の一律要求 |
+
+外部資料には共通する有用な知見があるが、固有のprocedureはdata store、並行更新、停止許容、consumer更新方法によって変わる。Addyのdown migration必須とarchitecture-standardのforward-onlyは両立せず、共通化できるのは不可逆点の前後で実行可能なrecoveryを選ぶことまでである。rollback、roll-forward、restore、replay、compensationのどれを使うかは対象から決める。
+
+baselineでは、session ledger v1の`owner_start_time`をv2の`owner_process_start`へ改名し、rebuild前後のagentが共存するscenarioを使った。詳細を列挙した依頼と、目的だけを示した自然な依頼の双方で、現行のexact-key validatorと全ledger preflightから、v1/v2 dual-readerとv1 writerを先に配備し、旧reader排除後にv2 writerと再実行可能な変換へ進む計画を導けた。別schemaであるruntime cache metadataを除外し、bridge generationをrollback先にし、`updated_at`を持たないledgerのmtimeをretention基準として保存する点までrepository evidenceから特定できた。
+
+Skillなしでもsource、target、consumer、正本、共存、cutover、recovery、cleanupを具体化でき、誘導を減らした同一scenarioでも不足を観測できなかった。現状は`impact-analysis`がconsumerと共存条件を渡し、対象固有の設計と`tdd`がcompatibility codeとtransformerを実装すれば足りる。反復する失敗が観測されるまで、donorは調査記録に留め、runtime Skillとrouting costを増やさない。
 
 ### domain-modelingで採用したdonor
 

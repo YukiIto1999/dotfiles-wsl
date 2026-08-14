@@ -65,7 +65,6 @@
       "expectedSkills": [
         "impact-analysis"
       ],
-      "futureOwner": "migration",
       "expected": {
         "impactAnalysisStopsAtConstraints": true,
         "migrationOwnsSequenceAndExecution": true
@@ -75,7 +74,6 @@
       "id": "migration-execution",
       "prompt": "schema移行をexpand、backfill、contractの順に実装して実行してください。",
       "expectedSkills": [],
-      "futureOwner": "migration",
       "mustNotTrigger": [
         "impact-analysis"
       ]

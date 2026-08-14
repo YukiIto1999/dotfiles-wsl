@@ -76,7 +76,6 @@
       "id": "throwaway-prototype",
       "prompt": "libraryの適合性だけを見る捨てるprototypeを作ってください。production behaviorはまだ決めません。",
       "expectedSkills": [],
-      "futureOwner": "prototype",
       "mustNotTrigger": ["tdd"]
     },
     {

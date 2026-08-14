@@ -77,7 +77,6 @@
       "id": "data-migration",
       "prompt": "既存schemaから新schemaへbackfillと切替を行ってください。old/new versionは同時稼働します。",
       "expectedSkills": [],
-      "futureOwner": "migration",
       "mustNotTrigger": ["refactoring"]
     },
     {

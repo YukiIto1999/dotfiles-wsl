@@ -17,7 +17,7 @@ description: Restructures existing code without changing a fixed set of observab
 - 呼び出し元、参照、owner、既存ADRと規約
 - 変更中に使うfocused command
 
-現在のbehaviorに誤りがあり期待結果も変えるなら、別のbehavior changeとして`bug-analysis`と`tdd`へ渡す。module境界、public contract、architectureを新しく決めるなら設計、dataやprotocolのold/newを切り替えるなら`migration`の仕事である。latency、throughput、memory、resource useの改善が目的なら、`performance-analysis`でbottleneckを確定し、最適化の実装へ渡す。
+現在のbehaviorに誤りがあり期待結果も変えるなら、別のbehavior changeとして`bug-analysis`と`tdd`へ渡す。module境界、public contract、architectureを新しく決めるなら設計、dataやprotocolのold/newを切り替えるなら別のmigration計画として扱う。latency、throughput、memory、resource useの改善が目的なら、`performance-analysis`でbottleneckを確定し、最適化の実装へ渡す。
 
 ## Safety netを成立させる
 

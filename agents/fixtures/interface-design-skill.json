@@ -91,7 +91,6 @@
       "id": "existing-interface-review",
       "prompt": "現在のAPI contractを監査し、互換性と誤用のfindingをseverity付きで報告してください。再設計は依頼しません。",
       "expectedSkills": [],
-      "futureOwner": "interface-review",
       "mustNotTrigger": ["interface-design"]
     },
     {

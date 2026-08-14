@@ -380,6 +380,19 @@ forward evalでは、Git identity templateと生成先のownerを実装から比
 
 forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一致assertionを置く提案を検討した。既存の`dotfiles.agents.clientExecutables.codex`がabsolute path、read-only、internal、defaultなしのexact contractを既に持ち、MCPはそこへ引数だけ加えると確認した。mirrorはsource dependencyを消さず、同じ意味のreaderと将来の削除コストを増やすため、新しいinterfaceを作らない案を選んだ。依頼なしにADR形式で回答したため、結果を推薦、contract、compatibility、verification obligationへ限定する出力規則を追加した。
 
+### interface-reviewをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 固定規則にしない内容 |
+|---|---|---|---|
+| [Addy Osmani api-and-interface-design、code-review-and-quality](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | observable contract、consumer影響、根拠付きfinding | REST規則、数値threshold、万能review、multi-modelの強制 |
+| [Matt Pocock code-review、codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | repository規約と要求の分離、callerが知るinvariant、error、ordering | diff限定、issue tracker、固定smell、deep moduleへの再設計 |
+| [architecture-standard review、contracts](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 正本、binding、生成物、provider、未変更consumerの照合と機械検証の優先 | 固定directory、pagination、HTTP binding、version配置の一律適用 |
+| [OpenAPI 3.2.0](https://github.com/OAI/OpenAPI-Specification/tree/99710bcb26cbe4be646565eebeb04348f02374b5)、[TypeSpec 1.15.0](https://github.com/microsoft/typespec/tree/f30cd352f93997e04c75d48c7ace6947a1d5d07a) | Apache-2.0、MIT | schema、compiler、linter、emitterを決定的な証拠に使うこと | 規格適合だけでprovider behaviorとconsumer assumptionを証明すること |
+
+候補の責務は、既存のconsumer-visible contractを、semantic source、binding、生成物、provider behavior、consumer assumptionの順に追い、readerとwriterの方向別に互換性を監査することとした。新contractは`interface-design`、consumer列挙は`impact-analysis`、一般的な差分は`code-reviewer`が所有する。
+
+baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査観点を与えた実行は、推定owner root内の無関係な`*.hm-back`も削除できることをMajorとして検出したが、入力が方法論を漏らしていたためadmission根拠から外した。方法論を与えない独立reviewerも同じ問題を検出し、さらにruntimeの`HOME`で対象userが変わることと、`--system`がhome削除後にsystem削除へ進む権限境界をMajorとして検出した。固有methodologyによる改善を観測できないため、既存contract単体の監査は基礎モデル、interface変更を含む差分は`code-reviewer`で扱い、runtime Skillは追加しない。
+
 ### code-designで採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |

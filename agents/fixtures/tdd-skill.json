@@ -60,7 +60,6 @@
       "id": "existing-test-review",
       "prompt": "既存test suiteの不足、脆いassertion、mockへの過剰依存をreviewしてください。",
       "expectedSkills": [],
-      "futureOwner": "test-review",
       "mustNotTrigger": ["tdd"]
     },
     {

@@ -54,7 +54,6 @@
       "id": "test-strategy",
       "prompt": "決済systemのrisk、oracle、test level、実DBを使う範囲を設計してください。実装はしません。",
       "expectedSkills": [],
-      "futureOwner": "test-design",
       "mustNotTrigger": ["tdd"]
     },
     {

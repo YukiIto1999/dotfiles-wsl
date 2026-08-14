@@ -63,8 +63,9 @@
     {
       "id": "specific-change-impact",
       "prompt": "この共通schemaのfieldを削除すると、どのcode、data、runtime、deployへ影響しますか。",
-      "expectedSkills": [],
-      "futureOwner": "impact-analysis",
+      "expectedSkills": [
+        "impact-analysis"
+      ],
       "mustNotTrigger": [
         "dependency-analysis"
       ]

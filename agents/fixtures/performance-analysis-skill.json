@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "api-tail-latency-regression",
+      "prompt": "同じ負荷試験でrelease後にcheckout APIのp95が186msから442msへ悪化しました。trace、profile、query planからbottleneckを特定してください。最適化はしないでください。",
+      "expectedSkills": [
+        "performance-analysis"
+      ],
+      "expected": {
+        "fixesWorkloadAndEnvironment": true,
+        "comparesDistributionAndVariance": true,
+        "decomposesCriticalPath": true,
+        "testsCausalHypotheses": true,
+        "separatesBottleneckFromRootCause": true
+      }
+    },
+    {
+      "id": "throughput-saturation",
+      "prompt": "worker数を増やしてもthroughputが伸びずp99だけ悪化します。CPU、queue、lock、I/Oを測って飽和点を分析してください。",
+      "expectedSkills": [
+        "performance-analysis"
+      ],
+      "expected": {
+        "distinguishesUtilizationFromSaturation": true,
+        "comparesLoadCurves": true,
+        "doesNotAssumeHighCpuIsTheCause": true
+      }
+    },
+    {
+      "id": "memory-growth",
+      "prompt": "長時間運転でRSSが増えます。live set、allocation rate、GC、cacheを分け、どこがmemoryを保持しているか分析してください。",
+      "expectedSkills": [
+        "performance-analysis"
+      ],
+      "expected": {
+        "distinguishesLiveMemoryFromAllocation": true,
+        "usesHeapOrAllocationEvidence": true,
+        "preservesRuntimeConditions": true
+      }
+    },
+    {
+      "id": "web-field-lab-difference",
+      "prompt": "Lighthouseは速いのに実利用者のINPだけ悪化しています。fieldとlabの条件を揃え、browser traceから原因を分析してください。",
+      "expectedSkills": [
+        "performance-analysis"
+      ],
+      "expected": {
+        "separatesFieldAndLabEvidence": true,
+        "usesCurrentProjectThresholds": true,
+        "doesNotApplyUniversalResourceBudgets": true
+      }
+    },
+    {
+      "id": "build-cache-regression",
+      "prompt": "同じsourceのbuildが遅くなりました。coldとwarm cache、input size、parallelism、I/O、成果物を揃えてbottleneckを分析してください。",
+      "expectedSkills": [
+        "performance-analysis"
+      ],
+      "expected": {
+        "separatesColdAndWarmCache": true,
+        "fixesInputAndParallelism": true,
+        "checksArtifactEquivalence": true,
+        "distinguishesCpuIoAndQueueing": true
+      }
+    },
+    {
+      "id": "functional-failure",
+      "prompt": "checkoutが500を返します。原因を特定してください。性能劣化はありません。",
+      "expectedSkills": [
+        "bug-analysis"
+      ],
+      "mustNotTrigger": [
+        "performance-analysis"
+      ]
+    },
+    {
+      "id": "known-bottleneck-implementation",
+      "prompt": "profileで証明済みのhot loopをこのpatchで最適化してください。原因分析は不要です。",
+      "expectedSkills": [],
+      "mustNotTrigger": [
+        "performance-analysis"
+      ]
+    },
+    {
+      "id": "browser-audit",
+      "prompt": "このWeb画面を操作し、console、network、storage、DOM、memory、securityを横断監査してください。特定の性能症状はありません。",
+      "expectedSkills": [],
+      "futureOwner": "browser-review",
+      "mustNotTrigger": [
+        "performance-analysis"
+      ]
+    },
+    {
+      "id": "generic-performance-code-audit",
+      "prompt": "測定値や性能症状はありません。repository全体から一般的なperformance anti-patternを探してください。",
+      "expectedSkills": [],
+      "futureOwner": "code-review",
+      "mustNotTrigger": [
+        "performance-analysis"
+      ]
+    },
+    {
+      "id": "ui-usability-review",
+      "prompt": "購入画面の情報階層、操作、feedback、accessibilityを利用者視点で監査してください。",
+      "expectedSkills": [],
+      "futureOwner": "ui-review",
+      "mustNotTrigger": [
+        "performance-analysis"
+      ]
+    },
+    {
+      "id": "performance-requirement-design",
+      "prompt": "新しい決済systemのlatency SLOとcapacity方針をarchitectureとして決めてください。まだ実装も測定値もありません。",
+      "expectedSkills": [],
+      "futureOwner": "architecture-design",
+      "mustNotTrigger": [
+        "performance-analysis"
+      ]
+    }
+  ]
+}

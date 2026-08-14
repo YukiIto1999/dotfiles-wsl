@@ -97,8 +97,7 @@
     {
       "id": "internal-helper",
       "prompt": "module内部だけで使うparser helperの関数型とalgorithmを設計してください。boundaryは越えません。",
-      "expectedSkills": [],
-      "futureOwner": "code-design",
+      "expectedSkills": ["code-design"],
       "mustNotTrigger": ["interface-design"]
     },
     {

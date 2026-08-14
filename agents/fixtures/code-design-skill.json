@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "doctor-finalizer",
+      "prompt": "doctor moduleと公開schemaは固定です。既存のchecks、warnings、failures、resources配列から、重複ID拒否、安定順序、status集計を行う内部構造を設計してください。",
+      "expectedSkills": ["code-design"],
+      "expected": {
+        "reusesExistingRepresentations": true,
+        "keepsOneFinalizationPath": true,
+        "doesNotAddIntermediateEffectsWithoutNeed": true,
+        "doesNotAddIntermediateJsonlWithoutNeed": true,
+        "comparesWithoutNumericScores": true
+      }
+    },
+    {
+      "id": "parse-decide-write",
+      "prompt": "固定済みの設定contractを読み、policyを判定し、fileへatomicに書くmodule内部の関数とpure/effect境界を設計してください。public interfaceは変えません。",
+      "expectedSkills": ["code-design"],
+      "expected": {
+        "parsesOnceAtOwnedTrustBoundary": true,
+        "separatesPolicyFromIoWhenUseful": true,
+        "preservesAtomicWriteContract": true
+      }
+    },
+    {
+      "id": "private-state-machine",
+      "prompt": "公開eventとstate transitionは確定済みです。illegalな組み合わせを作れないmodule内部のstate表現とtransition関数を設計してください。",
+      "expectedSkills": ["code-design"],
+      "expected": {
+        "usesCanonicalPrivateState": true,
+        "makesIllegalStateUnrepresentableWhereSupported": true,
+        "doesNotRedefineDomainMeaning": true
+      }
+    },
+    {
+      "id": "algorithm-choice",
+      "prompt": "固定interfaceの内部で、入力上限とmemory制約を満たす二つのalgorithm候補をdata flowと変更costから比較し、一つ選んでください。",
+      "expectedSkills": ["code-design"],
+      "expected": {
+        "rejectsConstraintViolationsFirst": true,
+        "comparesConcreteMechanismCosts": true,
+        "selectsOneDesign": true
+      }
+    },
+    {
+      "id": "resource-lifecycle",
+      "prompt": "streamを読みcancel時にも必ずhandleを閉じる内部control flowを設計してください。cancelはfailureと別扱いで、公開failureとresource lifetimeも確定済みです。",
+      "expectedSkills": ["code-design"],
+      "expected": {
+        "mapsResourceLifetimeToControlFlow": true,
+        "keepsCancellationDistinctFromFailure": true,
+        "usesNativeLifecycleMechanismFirst": true
+      }
+    },
+    {
+      "id": "private-validation",
+      "prompt": "payload contractとcanonical dataの意味と形は確定済みです。module入口の未検証payloadを一度だけcanonical formへ変換し、内部でvalidationを重複しない関数構造を設計してください。",
+      "expectedSkills": ["code-design"],
+      "expected": {
+        "identifiesOwnedTrustBoundary": true,
+        "normalizesOnce": true,
+        "doesNotAddValidationToVerifiedValues": true
+      }
+    },
+    {
+      "id": "closed-shell-constants",
+      "prompt": "既存wrapper builder内で、固定済み二つのhookだけに異なる定数export行を足します。外部入力はなく、hook rosterとshell形式は固定です。内部表現を設計してください。",
+      "expectedSkills": ["code-design"],
+      "expected": {
+        "usesSparseLiteralMapping": true,
+        "doesNotCreateGenericStringRenderer": true,
+        "preservesExistingWrapperBuilder": true
+      }
+    },
+    {
+      "id": "module-boundary",
+      "prompt": "この責務を二つのmoduleへsplitし、ownerとdependency directionを決めてください。内部関数は後で設計します。",
+      "expectedSkills": ["module-design"],
+      "mustNotTrigger": ["code-design"]
+    },
+    {
+      "id": "public-interface",
+      "prompt": "module間のrequest、response、failure、versioningをexact contractとして設計してください。内部実装は対象外です。",
+      "expectedSkills": ["interface-design"],
+      "mustNotTrigger": ["code-design"]
+    },
+    {
+      "id": "domain-semantics",
+      "prompt": "CancellationとRefundの意味、語彙、不変条件をdomain modelとして決めてください。",
+      "expectedSkills": ["domain-modeling"],
+      "mustNotTrigger": ["code-design"]
+    },
+    {
+      "id": "internal-error-placement",
+      "prompt": "公開failure contractは確定済みです。内部errorをどこに置き、どう伝播、翻訳、集約するか設計してください。",
+      "expectedSkills": [],
+      "futureOwner": "error-design",
+      "mustNotTrigger": ["code-design"]
+    },
+    {
+      "id": "behavior-preserving-refactor",
+      "prompt": "既存codeの重複をbehaviorを変えずに解消し、focused checkと一緒に編集してください。",
+      "expectedSkills": ["refactoring"],
+      "mustNotTrigger": ["code-design"]
+    },
+    {
+      "id": "implement-known-behavior",
+      "prompt": "内部設計と期待behaviorは確定済みです。REDからproduction codeを実装してください。",
+      "expectedSkills": ["tdd"],
+      "mustNotTrigger": ["code-design"]
+    },
+    {
+      "id": "existing-code-review",
+      "prompt": "このdiffの内部code構造をreviewし、severity付きfindingを出してください。設計変更は依頼しません。",
+      "expectedSkills": ["code-reviewer"],
+      "mustNotTrigger": ["code-design"]
+    },
+    {
+      "id": "test-strategy",
+      "prompt": "このbehaviorのrisk、oracle、test level、fidelityを決めてください。内部codeは設計しません。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["code-design"]
+    }
+  ]
+}

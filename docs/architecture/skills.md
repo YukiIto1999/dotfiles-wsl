@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`performance-analysis`、`tdd`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -73,6 +73,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 `data-modeling` はデータの意味、形、所有、正準形、valid state、lifecycle、serialization を決める。`db-design` は access pattern、物理schema、constraint、index、transaction、migration、rollout を決める。
 
 `test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd` は確定済みのbehaviorを一つのobservableな縦のsliceにし、意味のあるRED、最小GREEN、触れた範囲のREFACTORを反復する。原因未確定の障害、test suiteの監査、独立した構造変更は所有しない。
+
+`refactoring` は保存するobservableと構造上の痛みを先に固定し、既存の安全網か必要最小限のcharacterizationを使って、一つの可逆な内部変更ずつ検証する。新しいbehavior、public contract、architecture、migrationは所有しない。TDD中の局所REFACTORは`tdd`に残す。
 
 ここに境界を書いていない候補は、名前だけを仮置きした調査対象である。Job、trigger、判断所有権、根拠、完了条件、非責務を定めるまで実装しない。
 
@@ -217,6 +219,24 @@ baselineでは、agent resource reaperの公開optionと内部contract fieldを�
 未見のdoctor JSON変更へSkillを適用すると、依頼上は新規に見えた`--json`が既に存在し、`status`の値域は未確定だと確認した。最初のsliceを`schemaVersion: 1`の公開だけに絞り、既存runtime checkの欠落をRED、report literalへの一項目追加を最小GREENとし、text出力、終了status、check順序は後続へ残した。全featureを先にtest設計せず、推測を加えずに一つのpublic observableへ収束したため、baselineで不足したslice分離とrestraintは改善した。forward evalでは編集とbuildを行っていない。
 
 続けて隔離したCLI fixtureへ適用した。JSON全体を比較するtestを先に作り、`bash .tdd-eval/test-json.sh`は`schemaVersion`欠落を理由にexit 1となった。JSON literalへ`schemaVersion: 1`だけを追加すると、同じcommandがexit 0になった。整理すべき重複はなく、REFACTORと追加検証を増やさなかった。fixtureは評価後に削除した。
+
+### refactoringで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [WondelAI working-with-legacy-code](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/working-with-legacy-code) | MIT | change pointとtest pointの分離、現在behaviorのcharacterization、安全網の後で構造変更とbehavior変更を分けること | Sprout、Wrap、dependency breakingを通常のrefactoringへ常用すること、書籍由来の固定workflow |
+| [Addy Osmani code-simplification](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/code-simplification/SKILL.md) | MIT | outputだけでなくerror、side effect、orderingも保存すること、既存規約を読むこと、一変更ごとの検証、触れた範囲への限定 | 行数、nesting、function sizeの固定閾値、無条件のfull suite、PR分割の固定 |
+| [architecture-standard refactoring](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/process/refactoring.md) | repository rootに表示なし | safety netが足りない場合のcharacterization、境界ごとのcheckpoint、testと参照追跡、契機になった痛みが消えた時点で止めること | 各段で全testを実行すること、一括rewriteとしての内部書き直し |
+| [dotnet testability-obstacle](https://github.com/dotnet/skills/blob/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-test/skills/testability-obstacle/SKILL.md) | MIT | 既存seamの再利用、必要memberだけの最小抽象、public signatureとdefault wiringの保存、seam自体とbehaviorの別検証 | C#固有の`TimeProvider`、`AsyncLocal`、process-global mutable seam |
+| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | MIT | 新しい所有物の前に、削除、標準機能、既存mechanism、既存dependencyで足りるかを問う変換選択のlens | 全coding taskへの強制、最短diffと最少fileの最適化、一実装interfaceの一律削除、reviewとauditのworkflow |
+
+`refactoring`は、保存対象を選び、現在のbehaviorを観測できる安全網を成立させた後、一つの内部構造変更ずつ同じ証拠で検証する。line countの削減や新しい抽象は成果ではない。Matt Pocockの`improve-codebase-architecture`は新しいmodule構成を選ぶため、`architecture-design`側のdonorとして残し、このSkillへは統合しない。
+
+代表scenarioは [`agents/fixtures/refactoring-skill.json`](../../agents/fixtures/refactoring-skill.json) に置く。baselineでは、cleanupのproductionとcontract checkに重複した計算を共有する依頼に対し、自己参照oracleの危険を認識し、固定fixtureを追加する案まで出せた。一方、既存の小さい`home-backup-root.nix`も置換する広いhelperを最初から設計し、変更前のfocused checkと一段ごとのcheckpointを置かず、最後にrepository全体のcheckを予定した。新しいSkillは、意図的な独立計算かを先に問い、共有する場合もoracleの独立性を保ち、既存mechanismを残せる最小の一段から進める。
+
+隔離fixtureのforward evalでは、public outputと例外を固定する既存2 testを変更前に実行し、exit 0を確認した。testを増やさず、重複したtrimと空名検証だけを一つの内部helperへ抽出し、同じcommandが2 test通過のexit 0を維持した。表示名とslugの異なる変換は統合せず、追加refactoringを行わなかった。fixtureは評価後に削除した。
+
+baselineと同型の別fixtureでは、productionの二つの関数とcontract testが同じpath正規化を持つ共有依頼へ適用した。変更前にfixture内で`python -m unittest -v`を実行し、1 test通過のexit 0を確認した。production内だけを`_normalize_destinations`へ抽出し、testの独立計算はoracleとして残した。同じcommandが1 test通過のexit 0を維持し、test fileは変更しなかった。fixtureは評価後に削除した。
 
 ### domain-modelingで採用したdonor
 

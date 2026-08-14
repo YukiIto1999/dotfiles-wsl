@@ -1,0 +1,18 @@
+{
+  "window": "2026-08-14T10:00:00Z/2026-08-14T10:05:00Z",
+  "expected": "A failed job releases its worker slot before the next job is admitted.",
+  "events": [
+    { "at": "10:00:00.000Z", "job": "ok", "event": "slot-acquired", "slotsInUse": 1, "slotLimit": 2 },
+    { "at": "10:00:00.500Z", "job": "ok", "event": "slot-released", "slotsInUse": 0, "slotLimit": 2 },
+    { "at": "10:00:01.000Z", "job": "a", "event": "slot-acquired", "slotsInUse": 1, "slotLimit": 2 },
+    { "at": "10:00:02.000Z", "job": "a", "event": "handler-failed", "slotsInUse": 1, "slotLimit": 2 },
+    { "at": "10:01:00.000Z", "job": "b", "event": "slot-acquired", "slotsInUse": 2, "slotLimit": 2 },
+    { "at": "10:01:01.000Z", "job": "b", "event": "handler-failed", "slotsInUse": 2, "slotLimit": 2 },
+    { "at": "10:02:00.000Z", "job": "c", "event": "slot-waiting", "slotsInUse": 2, "slotLimit": 2 },
+    { "at": "10:02:30.000Z", "job": "c", "event": "wait-timeout", "slotsInUse": 2, "slotLimit": 2 }
+  ],
+  "comparison": {
+    "successfulJobs": "Every successful job has a slot-released event.",
+    "failedJobs": "No failed job has a slot-released event."
+  }
+}

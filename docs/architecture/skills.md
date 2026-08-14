@@ -20,9 +20,9 @@ local Skill の正本は [`agents/shared/skills/`](../../agents/shared/skills) �
 nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills --apply builtins.attrNames
 ```
 
-2026-08-13 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
+2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`ja-writing`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`ja-writing`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -145,6 +145,18 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 旧`web-researcher`は、正規仕様一件で決まる問いにも複数sourceを要求し、指定URLの要約でも検索を始めた。`time_range`を最新判定に使い、解消可能な矛盾も両論併記した。さらに、言語指定、JavaScript実行、PDF、本文filterの説明が現行MCP schemaと一致していなかった。
 
 `web-research`は問いに応じて、指定URLの直接取得、既知の一次資料、Context7、探索型調査を選ぶ。source数は固定せず、規範的な値を一つの現行仕様が所有する場合は一件で止める。近接scenarioと期待する経路は [`agents/fixtures/web-research-skill.json`](../../agents/fixtures/web-research-skill.json) に置く。実環境ではSearXNGへ`site:agentskills.io specification`を渡しても公式domainが結果に出なかった。一方、Crawl4AIは既知の正規URL `https://agentskills.io/specification` から本文、title、主要節、取得成功状態を返した。この差も、検索と本文取得を別の能力として扱う理由である。
+
+### bug-analysisで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Matt Pocock diagnosing-bugs](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/diagnosing-bugs/SKILL.md) | MIT | 報告された症状を判別するfeedback signal、最小再現、予測を伴う仮説、正しいtest seam | clean reproがなければ仮説を禁じること、仮説を3から5件へ固定すること、修正工程の所有 |
+| [Addy Osmani debugging-and-error-recovery](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/debugging-and-error-recovery/SKILL.md) | MIT | 証拠保全、recent change、boundary、working/broken比較、外部errorを未信頼dataとして扱うこと | 全failureへの固定手順、一般的なfallback実装、言語固有例、常時full suite実行 |
+| [Superpowers systematic-debugging](https://github.com/obra/superpowers/blob/f2cbfbefebbfef77321e4c9abc9e949826bea9d7/skills/systematic-debugging/SKILL.md) | MIT | bad valueを生成元へ遡ること、一変数のprobe、正常例との差分 | 全technical issueへの強制、3回失敗でarchitecture問題とする閾値、根拠のない効果測定値、修正とTDDの所有 |
+
+`bug-analysis`は分析結果を所有し、修正を所有しない。test、CLI、request、trace、差分、runtime観測のうち、症状を判別できる最小のsignalを選ぶ。再現不能なincidentでも観測済み証拠を捨てず、事実、仮説、不明点を分ける。原因はfailure siteではなく、最初に誤ったstateか契約違反として示す。近接scenarioは [`agents/fixtures/bug-analysis-skill.json`](../../agents/fixtures/bug-analysis-skill.json) に置く。
+
+旧Superpowersとdonor本文を同じscenarioへ適用すると、診断依頼でも修正とTDDまで所有し、performanceだけの問題や原因確定後の実装でも発火した。clean reproがないincidentでは、既存logを分析する前に仮説を禁じる。新しいSkillは、診断と修正、機能障害とperformance分析を分け、再現できない場合も観測済み証拠から確定事項と不足を返す。
 
 ## Skill 化の条件
 

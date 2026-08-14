@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`ja-writing`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -81,8 +81,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | Donor | 主に補強する候補 |
 |---|---|
 | [Matt Pocock skills](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | `bug-analysis`、`dependency-analysis`、`domain-modeling`、`code-design`、`module-design`、`code-review`、`tdd`、`prototype`、`web-research` |
-| [Addy Osmani agent-skills](https://github.com/addyosmani/agent-skills) | `interface-design`、`code-review`、`tdd`、`bug-analysis`、`ui-design`、`performance-analysis`、security plugin |
-| [WondelAI skills](https://github.com/wondelai/skills) | `refactoring`、`architecture-design`、`architecture-review`、`db-design`、`ui-review` |
+| [Addy Osmani agent-skills](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c) | `impact-analysis`、`interface-design`、`code-review`、`tdd`、`bug-analysis`、`ui-design`、`performance-analysis`、security plugin |
+| [WondelAI skills](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | `impact-analysis`、`refactoring`、`architecture-design`、`architecture-review`、`db-design`、`ui-review` |
 | [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `skill-creator`、`test-design`、`test-review`、`tdd` |
 | [Vercel agent skills](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc) | `component-design`、`performance-analysis`、`ui-review` |
 | [Anthropic skills](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434) | `skill-creator`、`ui-design`、`browser-review`、`description-writing` |
@@ -171,6 +171,20 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 代表scenarioは [`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json) に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先し、`rg`や`ast-grep`の一致は候補としてsourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
 
 baselineでは、agent resource reaperの保持日数と実行間隔がNix option、package、systemd unit、observation、checkへどう伝播するかを調べた。最初の検索結果はsource参照、生成、runtime起動、文書、検査を混在させ、node、edge、方向、granularityを調査後に後付けした。型付きedgeへ分けると、保持日数はpackageへ埋め込まれる一方、実行間隔はtimer unitだけへ投影され、observationはtimer名しか参照しないと区別できた。文字列探索だけではNix evaluationによるconsumerの網羅性を証明できず、activation時の挙動も未確認として残った。
+
+### impact-analysisで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [WondelAI working-with-legacy-code](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/working-with-legacy-code) | MIT | change pointからobservableへ外向きに辿るeffect sketch、影響が収束するpinch point、compilerをimpact evidenceとして使うこと | legacy codeの変更手順、characterization test、dependency breaking、refactoring実装 |
+| [Addy Osmani deprecation-and-migration](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/deprecation-and-migration/SKILL.md) | MIT | active consumerとtouchpointの確認、old/new共存、利用状況の観測、additive準備とdestructive除去の境界 | migration方式の選択、deadline、実行手順、無条件のdown migrationや固定pattern |
+| [`dependency-analysis`](../../agents/shared/skills/dependency-analysis/SKILL.md) | local | 型付きdependency graphを具体的変更のeffect pathの証拠として使うこと | repository全体のgraph作成を毎回やり直すこと |
+
+`impact-analysis`は一つの変更前後を固定し、consumerが観測する契約差からcode、data、runtime、deployment、operation、test、docs、ownerへ外向きに影響を追う。確実な影響、条件付きの影響、未観測の外部consumerやdynamic edgeを分ける。変更fileの列挙、一般的なdependency map、migration実装、新しい設計は所有しない。
+
+代表scenarioは [`agents/fixtures/impact-analysis-skill.json`](../../agents/fixtures/impact-analysis-skill.json) に置く。dependency upgradeでは`web-research`がversion固有の外部契約を調べ、`impact-analysis`がrepository内の利用と照合する。sourceのchangelogだけでlocal impactが確定したとはみなさない。
+
+baselineでは、agent resource reaperの公開optionと内部contract fieldを、意味と値を保ったまま改名する影響を調べた。option宣言、contract組立、package入力、check fixtureは確実に追随する一方、Shell変数、ledger schema、削除時期は変更不要と区別できた。repository外のoption consumer、derivation hash、switch時のunit再起動は、静的検索だけでは確定できなかった。dependency path上にあることと、observableが実際に変わることを分け、改名、削除、意味変更を別のchange contractとして扱う必要があった。
 
 ### domain-modelingで採用したdonor
 

@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`performance-analysis`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -61,6 +61,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 `domain-modeling` は概念と語彙を定義する。`naming-review` は定義済みの意味を入力に、code、schema、DB、UI、文書の語彙、役割、単位、粒度を監査する。
 
 `dependency-analysis` は node、edge、方向、granularity を定義して依存の事実を作る。`impact-analysis` は具体的な変更を起点に、code、data、runtime、deployment、契約、所有へ伝播する影響を導く。
+
+`performance-analysis` は代表workloadと比較条件を固定し、分布、critical path、resource saturation、controlled probeからbottleneckを特定する。最適化の実装、一般的なcode監査、機能障害の原因分析は所有しない。
 
 `ui-review` は利用者の仕事を実画面で遂行し、情報階層、interaction、visual、responsive、accessibility、content、feedback、recovery を監査する。`browser-review` は console、network、storage、DOM、event、performance、memory、browser security、resource lifecycle を監査する。原因の特定は `bug-analysis` が所有する。
 
@@ -185,6 +187,20 @@ baselineでは、agent resource reaperの保持日数と実行間隔がNix optio
 代表scenarioは [`agents/fixtures/impact-analysis-skill.json`](../../agents/fixtures/impact-analysis-skill.json) に置く。dependency upgradeでは`web-research`がversion固有の外部契約を調べ、`impact-analysis`がrepository内の利用と照合する。sourceのchangelogだけでlocal impactが確定したとはみなさない。
 
 baselineでは、agent resource reaperの公開optionと内部contract fieldを、意味と値を保ったまま改名する影響を調べた。option宣言、contract組立、package入力、check fixtureは確実に追随する一方、Shell変数、ledger schema、削除時期は変更不要と区別できた。repository外のoption consumer、derivation hash、switch時のunit再起動は、静的検索だけでは確定できなかった。dependency path上にあることと、observableが実際に変わることを分け、改名、削除、意味変更を別のchange contractとして扱う必要があった。
+
+### performance-analysisで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [architecture-standard performance](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/concerns/performance.md) | repository rootに表示なし | 尺度、percentile、代表負荷、同等な環境を先に定め、同じ条件の前後を比べること | 性能目的の並列化にADRを要求すること、最適化実装を分析に含めること |
+| [Matt Pocock diagnosing-bugs](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/diagnosing-bugs/SKILL.md) | MIT | performance regressionではlogでなくbaseline、profiler、query plan、bisect、differentialを使うこと | 機能障害の再現、修正、回帰testを性能分析が所有すること |
+| [Addy Osmani performance-optimization](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/performance-optimization/SKILL.md) | MIT | 同じ条件で再測定し、run間varianceを越える差だけを採用すること、correctnessをmetricより先に守ること | frontend/backendの既知anti-pattern集、固定budget、最適化実装、常時monitoring追加 |
+| [Vercel Optimize](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc/skills/vercel-optimize) | 該当directoryとrepository rootにlicense表示なし | observability signalから調査範囲を絞り、数値、file、因果のclaimを元の証拠で検証すること | Vercel CLI、SKU、threshold gate、framework別allowlist、固定report workflow |
+| [Addy Osmani web performance](https://github.com/addyosmani/web-quality-skills/blob/95d6e255afe1596b557d7a8498517884438f5b3a/skills/performance/SKILL.md) | MIT | browserのnetwork waterfall、main thread、runtime、fieldとlabの観測経路 | 固定resource budget、一般的なquick fix、Core Web Vitalsを全systemの基準にすること |
+
+`performance-analysis`は、latency、throughput、CPU、memory、allocation、GC、I/O、database、network、build、browser性能に共通する測定と因果確認を所有する。尺度、workload、environment、revision、sampleを固定し、平均だけでなく分布とvarianceを見る。resource利用率とsaturation、wall timeとon-CPU time、live memoryとallocation、service timeとqueueingを分ける。
+
+代表scenarioは [`agents/fixtures/performance-analysis-skill.json`](../../agents/fixtures/performance-analysis-skill.json) に置く。baselineでは、同じ負荷のrelease A/Bでcheckout APIのp95が186msから442msへ悪化したartifactから、`reserve_inventory`のsequential scanをbottleneckとして特定できた。一方、closed workloadからproductionへの外挿、run間variance、observer effectを判断手順として固定していなかった。新しいSkillは比較可能性と測定誤差を先に扱い、critical path上の時間差とcontrolled probeが同じ指標を動かした場合だけbottleneckと判定する。plan選択理由のような未確定のroot causeは、箇所の特定と分けて残す。
 
 ### domain-modelingで採用したdonor
 

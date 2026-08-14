@@ -68,7 +68,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 セキュリティreviewはpluginの`security-scan`が所有するため、別の`security-review`は作らない。read-onlyのsecurity agentはthreat model、finding discovery、validation、attack path、最終reportまでを所有する。検証済みまたは技術的に妥当なfindingの修正を明示された場合だけ、実装agentが別phaseで`fix-finding`を使う。
 
-`code-design` は module 内部の型、関数、変換、純粋核と effect、抽象、局所性を決める。`module-design` は actor、change driver、責務、所有、境界、依存方向を決める。`interface-design` は確定済みの境界に、exact type、failure、side effect、ordering、互換性を持つconsumer-visible contractを与える。`architecture-design` は system 全体の topology、quality attribute、deployment、integration を決める。
+`code-design` は module 内部の型、関数、変換、純粋核と effect、抽象、局所性を決める。UI module内のmodule-privateなcomponent tree、props、state owner、composition、既存primitiveのreuseも同じ責務に含める。`module-design` は actor、change driver、責務、所有、境界、依存方向を決める。`interface-design` は確定済みの境界に、exact type、failure、side effect、ordering、互換性を持つconsumer-visible contractを与える。`architecture-design` は system 全体の topology、quality attribute、deployment、integration を決める。
 
 `error-design`は、固定済みのmodule境界、責務owner、公開failure contractを入力に、owner内部のfailure表現、翻訳点、伝播、回復、集約、観測を決める。公開error shape、module間の責務配置、障害原因、reliability target、実装は所有しない。
 
@@ -384,6 +384,19 @@ forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一�
 代表scenarioは [`agents/fixtures/code-design-skill.json`](../../agents/fixtures/code-design-skill.json) に置く。baselineでは、doctorの重複ID、安定順序、summaryを一つのjq finalizerへ置く判断はできた。一方、既存の五配列を使えば足りる内部処理へ、observation envelope、JSONL file、record関数、source用main guardを追加し、数値scoreで案を選んだ。新しいSkillは、既存表現と直接実装を対照にし、pure/effect分離やprivate abstractionを具体的な変更costで正当化する手順を補う。
 
 forward evalでは、AgentMemoryの全hookに共通URL、二つのhookにだけ固有の定数環境を渡す内部構造を設計した。既存`hookNames`を正本に保ち、完全なspec一覧や汎用wrapper builderを棄却し、疎な例外mapを選べた。一方、閉じた定数をshell行へ変換する専用rendererを追加したため、escaping責任だけを増やすhelperを棄却し、既存literalかnative builderを優先する規則を追加した。
+
+### component-designを独立Skillにしない判断
+
+| Donor | License | 利用できる知見 | 固定規則にしない内容 |
+|---|---|---|---|
+| [Vercel composition patterns](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc/skills/composition-patterns) | 対象SkillはMIT。repository rootに表示なし | behaviorを選ぶflagの組合せを明示variantやcompositionにすること、協調partsだけがstate contractを共有すること | compound component、provider、context、React APIの一律採用 |
+| [Addy Osmani frontend-ui-engineering](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/frontend-ui-engineering/SKILL.md) | MIT | design systemと隣接patternの確認、state scopeに応じたlocal、lifted、contextの選択 | 200行threshold、固定file tree、container/presenter、prop階層の数値基準 |
+| [Feature-Sliced Design](https://github.com/feature-sliced/documentation/tree/1d371daf8abf722779b0fd30a4bcf3b6b292e752) | MIT | use-caseによる局所化、page固有UIを無理に抽出しないこと、shared primitiveから業務policyを除くこと | 固定layer、segment名、barrel、same-layer規則の輸入 |
+| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | deletion test、change locality、callerへ漏れる知識による抽出判断 | component固有taxonomy、固定数の案とsubagent |
+
+候補の責務は、確定済みのfeature、画面state、module境界、design systemから、module-privateなcomponent tree、state owner、props、event、slotを決めることとした。これはmodule内部の構造を決める`code-design`と同じtrigger、入力、判断所有権を持つ。別Skillにすると同じ設計を二重所有するため、既存componentの確認とfeature-localな直接案を`code-design`へ統合した。shared ownerへの昇格は`module-design`、外部公開するcomponent APIは`interface-design`が所有する。
+
+baselineでは、`tec-lane-buyer-cart`のbuyer cart画面を、既存component実装を見ずに設計した。Skillなしでも、pageをremote stateとmutationのownerにし、widgetをport非依存に保ち、業務判定をentity modelへ残し、local stateの複製を避けられた。一方、既存の`Split`、`Facts`、`Table`、`Row`、`Cell`、`Badge`を設計前に確認せず、独立stateも再利用理由もない局所componentを分けた。この不足は`code-design`が既に持つ隣接実装と既存mechanismの確認で防げる。component固有の独立methodologyによる改善ではないため、新しいSkillを追加しない。
 
 ### error-designで採用したdonor
 

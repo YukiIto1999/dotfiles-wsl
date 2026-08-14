@@ -65,8 +65,7 @@
     {
       "id": "module-internal-algorithm",
       "prompt": "このmodule内のvalidation関数を純粋関数とeffectful shellへどう分けるか設計してください。module境界は変えません。",
-      "expectedSkills": [],
-      "futureOwner": "code-design",
+      "expectedSkills": ["code-design"],
       "mustNotTrigger": ["module-design"]
     },
     {

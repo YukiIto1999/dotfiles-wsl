@@ -95,8 +95,7 @@
     {
       "id": "internal-error-placement",
       "prompt": "公開failure contractは確定済みです。内部errorをどこに置き、どう伝播、翻訳、集約するか設計してください。",
-      "expectedSkills": [],
-      "futureOwner": "error-design",
+      "expectedSkills": ["error-design"],
       "mustNotTrigger": ["code-design"]
     },
     {

@@ -284,6 +284,20 @@ Skillなしでもsource、target、consumer、正本、共存、cutover、recove
 
 baselineでは、Account、Member、Membership、Invoice、minor unit、UTC instant、boolean predicateを定義し、API、DB、type、function、fieldの命名だけを監査した。Skillなしでも、MembershipをUserやAccountとして表す役割不一致、AccountとOrganizationの語彙分裂、金額の単位とowner、Dateとinstant、Statusとpredicate、Atとdurationの矛盾を、語彙を新規決定せず六つの根本findingへまとめられた。独立methodologyによる改善を観測できないため、現時点ではrepository規約と基礎モデルで足りる。
 
+### test-designをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [architecture-standard tests](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de/structure/tests) | repository rootに表示なし | propertyからobservable、oracle、最内側の十分な手段を選び、同じpropertyを重複検査しないこと | 固定pyramid、directory、runner、coverage、mutation、MC/DCの一律threshold |
+| [dotnet test skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-test/skills) | MIT | fault modelからtest obligationを導き、ambient operationとtestability obstacleを特定すること | C#固有seam、A–F grade、test行数、sourceとtest fileの静的pairing |
+| [Matt Pocock tdd](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/tdd) | MIT | callerが観測するbehavior、SUTと独立したliteralやspecのoracle、内部interactionよりstateとoutcomeを優先すること | public APIだけへの限定、seamごとの確認停止、mockやtest DBの固定判断 |
+| [Addy Osmani test-driven-development](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/test-driven-development/SKILL.md) | MIT | repositoryのtest規約、resourceによるfidelity、time、order、shared stateの制御 | 80/15/5 pyramid、realを常に優先する順位、全behavior変更への自動発火 |
+| [Anthropic webapp-testing](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/webapp-testing) | Apache-2.0 | static HTMLとrender後stateの区別、action前のreadiness predicate | Python Playwright、headless Chromium、`networkidle`、固定timeout、実行workflow |
+
+候補の責務は、確定済みbehaviorとriskを、observable、独立oracle、seamとtest level、必要なfidelity、data、fault、concurrency、決定性、residual riskへ変換することに限定した。test実装は`tdd`、既存suiteのfindingは`test-review`が所有する。browser実行は証拠取得の手段であり、独立した判断責務にはしない。
+
+baselineでは、agent bundleのatomic publish transactionについて、consumerが完全な旧releaseか新releaseだけを見る契約を入力にした。Skillなしでも、本番validatorと独立したtree manifest oracleを選び、実process、Linux filesystem、`flock`、本番rename helperを使うbehavior testへ絞れた。crash前後、並行installer、同一release再実行の四caseを同期markerで制御し、unlinkとsymlinkの二段切替、未完成releaseの公開、lock除去、manifest比較除去のmutationがどのcaseで検出されるかまで対応付けた。kernel crash、電源断、consumer側の複数回path解決などのresidual riskも分離できたため、独立Skillによる改善を確認できない。
+
 ### domain-modelingで採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |

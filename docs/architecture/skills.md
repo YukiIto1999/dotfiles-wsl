@@ -393,6 +393,22 @@ forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一�
 
 baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査観点を与えた実行は、推定owner root内の無関係な`*.hm-back`も削除できることをMajorとして検出したが、入力が方法論を漏らしていたためadmission根拠から外した。方法論を与えない独立reviewerも同じ問題を検出し、さらにruntimeの`HOME`で対象userが変わることと、`--system`がhome削除後にsystem削除へ進む権限境界をMajorとして検出した。固有methodologyによる改善を観測できないため、既存contract単体の監査は基礎モデル、interface変更を含む差分は`code-review`で扱い、runtime Skillは追加しない。
 
+### code-reviewで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Matt Pocock code-review](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/code-review/SKILL.md) | MIT | requirementとrepository standardの分離、scope固定、機械検証済みstyleの除外 | issue tracker、parallel agent、固定smell、diffだけを読むこと |
+| [Addy Osmani code-review、doubt、simplification](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | artifactとclaimの分離、反証、observable behavior、local convention | 万能review、数値threshold、固定cycle、multi-model、refactoring実行 |
+| [Ponytail review](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/.openclaw/skills/ponytail-review/SKILL.md) | MIT | 削除、直接実装、既存helper、標準機能を新しい所有物の対照にすること | LOCとdependency数の最小化、single implementation abstractionの一律否定 |
+| [code-humanizer](https://github.com/LeonardNJU/code-humanizer/tree/8ffe07b2f1301f4285c9ccaed387bd203ff6ef4c)、[deai-code](https://github.com/golovatskygroup/deai-code/tree/35d9f87f25221577fdaa1b7f2ebb212d921dea5d) | MIT | 重複helper、broad exception、fallback、説明comment、投機的抽象を現在の変更costから疑うこと | AI著者推定、score、出自別severity、人間らしく見せる目的 |
+| [architecture-standard review、audit](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de/process) | repository rootに表示なし | 機械検証の優先、未変更consumer、生成物、設定、今回導入した問題の因果 | project固有standardの本文、全severity見出し、finding数の強制 |
+
+旧`code-reviewer`は、CriticalとMajorがなくてもMinorを作る規則を持ち、requirement、未変更consumer、生成物を標準入力にしていなかった。Skill IDを`code-review`へ揃え、変更の目的とrepository constraintを別に照合し、今回の差分が導入または悪化させた実害だけをfindingにする。security、architecture、test suiteの専門監査は所有しない。
+
+baselineでは、`3e94a025`のChrome DevTools追加をreviewし、`set -e`下の`! grep`が禁止flagを検出してもcheckを失敗させない問題をmerge blockerとして検出した。7分後の`1d33da1b`は同じ箇所を明示的な条件分岐へ直しており、findingと一致した。一方、問題のない`cf1fb79a`のpath制御文字拒否では、旧Skillの規則に従って同じ文字classを通る追加fixtureをMinorとして要求したが、現行まで修正されず述語とtestは維持されている。新しいSkillはゼロfindingを正しい結果とし、機械検証と重複する列挙を棄却する。固定したbase、head、baseline、候補出力、oracleは [`agents/fixtures/code-review-skill.json`](../../agents/fixtures/code-review-skill.json) に置く。
+
+同じrevisionの解析結果があるrepositoryでは、SonarQubeのissue、security hotspot、quality gateをchanged fileの候補発見に使う。解析結果だけでfindingを確定せず、該当source、diff、consumer、失敗経路で反証する。review中にissueの状態やcommentは変更しない。
+
 ### code-designで採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |

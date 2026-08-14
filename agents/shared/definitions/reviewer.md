@@ -23,11 +23,7 @@ effort: xhigh
      2. それ以外で `git diff` が空でなければ unstaged
      3. それ以外で branch なら `git diff <base>...HEAD`
 2. **code-review skill を呼出**:観点とフォーマットはそちらに従う
-3. **追加観点**:レビュー前の自動チェックも実施:
-   - 直前で lint / type check が通っているか
-   - テスト追加があるか
-   - commit メッセージが許可 type を使った `<type>: <日本語の要約>` で、scope なし、50 文字以内の一行か
-4. **報告**:severity 別に出力(Critical / Major / Minor / Praise)
+3. **報告**:Skillが残したfindingだけをseverity順に返す
 
 ## Working with parent
 
@@ -36,6 +32,5 @@ effort: xhigh
 
 ## Don'ts
 
-- 全肯定しない。Critical/Major が無くても Minor を 1〜2 件は拾う
-- 既存コードに同様の問題があれば、「既存パターン踏襲か、機会改善か」を判断
-- 「もっと良くできる」のような抽象指摘はしない。file:line と具体的な修正案を
+- finding数を埋めない
+- `code-review`と同じ観点や出力規則を重複して持たない

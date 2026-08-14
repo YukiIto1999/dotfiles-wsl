@@ -83,7 +83,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 確定済みbehaviorをRED、最小GREEN、REFACTORで実装 | `tdd` |
 | observableを保った内部構造の段階的な改善 | `refactoring` |
 | domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
-| 固定済みmoduleとcontract内の型、関数、data flow、effect設計 | `code-design` |
+| module境界、公開contract、visualが固定済みの内部codeとcomponent構造の設計 | `code-design` |
 | moduleの責務、state、artifact、粗いcontract、依存方向の設計 | `module-design` |
 | moduleやprocess境界のexact contract、failure、互換性の設計 | `interface-design` |
 | 固定済みmodule、責務owner、公開contract内のfailure表現、翻訳、伝播、回復、観測の設計 | `error-design` |

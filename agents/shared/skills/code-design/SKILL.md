@@ -1,6 +1,6 @@
 ---
 name: code-design
-description: Designs private implementation structure inside a fixed module and exact interface. Use when deciding module-internal types, functions, transformations, algorithms, control or data flow, pure decisions versus effects, resource handling, or a private abstraction before implementation. Keeps public behavior and ownership fixed, compares materially different internal structures, and selects the smallest sufficient mechanism. Does not choose module boundaries or public contracts, define domain or persistent-data meaning, decide internal error placement or propagation, review or edit existing code, perform a behavior-preserving refactor, choose a test strategy, or implement the design.
+description: Designs private implementation structure inside a fixed module and module-level public contract. Use when deciding module-internal types, functions, transformations, algorithms, control or data flow, pure decisions versus effects, resource handling, private abstractions, or a UI module's private component tree and props before implementation. Keeps public behavior and ownership fixed, compares materially different internal structures, and selects the smallest sufficient mechanism. Does not choose module or shared-component ownership, public contracts, domain or persistent-data meaning, internal error placement or propagation, visual appearance, review or edit existing code, perform a behavior-preserving refactor, choose a test strategy, or implement the design.
 ---
 
 # Module内部の実装構造を決める
@@ -9,9 +9,9 @@ description: Designs private implementation structure inside a fixed module and 
 
 ## 外側の制約を固定する
 
-対象module、owner、exact interface、consumer-visible behavior、failure、side effect、ordering、resource lifetimeを確認する。未確定なら内部設計で補わず、該当する`module-design`、`interface-design`、`domain-modeling`、`error-design`へ戻す。dataの意味と正準形が未確定なら、それも内部functionより先に決める。
+対象module、owner、module-level public contract、consumer-visible behavior、failure、side effect、ordering、resource lifetimeを確認する。未確定なら内部設計で補わず、該当する`module-design`、`interface-design`、`domain-modeling`、`error-design`へ戻す。dataの意味と正準形が未確定なら、それも内部functionより先に決める。module-privateなcomponent間のpropsは内部構造として設計してよい。
 
-対象code、interface、直接caller、test、dependency、隣接する同種実装、repository規約、必要な履歴を読む。観測事実、確定済みの制約、未確認の仮定を分ける。新しいbehaviorやpublic contractを設計へ混ぜない。
+対象code、interface、直接caller、test、dependency、隣接する同種実装、repository規約、必要な履歴を読む。UI moduleでは既存のdesign system、shared primitive、feature-local componentも確認する。観測事実、確定済みの制約、未確認の仮定を分ける。新しいbehaviorやpublic contractを設計へ混ぜない。
 
 ## Contractから内部flowを逆算する
 
@@ -37,6 +37,12 @@ description: Designs private implementation structure inside a fixed module and 
 policyとI/Oの両方があり、分離によって理解、再現、変更の局所性が改善する場合は、read、decide、writeに分ける。純粋な判断は明示した入力だけを受け、effectの実行方法やambient stateを読まない。
 
 小さいadapter、直線的なCRUD、言語やframeworkが既にresource lifecycleを閉じる処理へ、pure core、port、DI、wrapperを強制しない。effect分離自体を成果にしない。
+
+## UI moduleでは既存componentから始める
+
+確定済みのfeatureとobservable stateについて、実際のrender tree、design system、shared primitive、隣接するfeature-local componentを先に確認する。まず一つのfeature-local treeを直接案にし、同じ理由で変わるrender、interaction、state、effectを、file sizeや技術種別だけで分割しない。
+
+既存primitiveは今回の意味とinteractionに適合する場合だけ再利用する。薄いpass-through、見た目の類似、将来のreuseを理由に新しいcomponentを抽出しない。feature-local componentをshared ownerへ移す判断は`module-design`、外部公開するcomponent contractは`interface-design`へ渡す。visual、layout、motionはUI設計へ渡す。
 
 ## 最小の十分なmechanismを選ぶ
 
@@ -65,6 +71,7 @@ exact interfaceとhard constraintに反する案を先に落とす。残る案�
 一案を推薦し、次だけを必要に応じて返す。
 
 - privateなtype、function、data flowの関係
+- 該当する場合はcomponent責務、state owner、props、event、slotの関係
 - 判断とeffectの境界、resource lifecycle
 - 保持するinvariantとfixed interfaceへの写像
 - 採らなかった案と具体的な費用

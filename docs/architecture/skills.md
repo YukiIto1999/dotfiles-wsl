@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
+- local: `bug-analysis`、`code-design`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -332,6 +332,24 @@ forward evalでは、Git identity templateと生成先のownerを実装から比
 代表scenarioは [`agents/fixtures/interface-design-skill.json`](../../agents/fixtures/interface-design-skill.json) に置く。baselineでは、AgentMemoryの`upstream.root`を狭めるため、hook entrypointとplugin pathを型付きfieldへ変換できた。一方、既存のservice contractが既に持つURLとunitを新しい`runtime` optionへ複製し、一致assertionで正本を二つにした。上流が定義していないHTTP API contractをpackage versionから作り、backendとMCPのlockstep更新も要求した。新しいSkillは、既存正本の再利用、semantic contractとreleaseの分離、consumer usageから必要なsurfaceだけを導く手順を補う。
 
 forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一致assertionを置く提案を検討した。既存の`dotfiles.agents.clientExecutables.codex`がabsolute path、read-only、internal、defaultなしのexact contractを既に持ち、MCPはそこへ引数だけ加えると確認した。mirrorはsource dependencyを消さず、同じ意味のreaderと将来の削除コストを増やすため、新しいinterfaceを作らない案を選んだ。依頼なしにADR形式で回答したため、結果を推薦、contract、compatibility、verification obligationへ限定する出力規則を追加した。
+
+### code-designで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | callerが知るcontractを入力制約にすること、private seam、abstractionのdeletion test、leverageとlocality | moduleのdeepening、interface再設計、固定数の案とsubagent、既存test削除 |
+| [architecture-standard implementation、type、effect](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | canonical form、valid state、read-decide-write、resourceとcancel、事実と制約の分離 | module、public contract、domain、data、errorの再設計、effect system、event sourcing、実装workflowの強制 |
+| [Shane Vitarana decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect) | MIT | semantics、具体的な変更とtest cost、比例したpure/effect分離、直接実装を残す対照 | diff review、severity、confidence、finding形式 |
+| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | MIT | 既存物、native mechanism、導入済みdependency、新規所有物の順で問うこと | 常時発火、mode、行数、diff、標準libraryを最上位にすること |
+| [Addy Osmani code-simplification](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/code-simplification/SKILL.md) | MIT | exact behavior、error、effect、ordering、project convention、clarity over compactness | simplification trigger、行数threshold、言語別recipe、commit workflow |
+| [WondelAI software-design-philosophy、pragmatic-programmer](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | change amplification、cognitive load、unknown dependency、knowledge duplication、invariant | score、比率、public interface一般化、tracer bullet、見積りと組織規則 |
+| [effect-fp-skill](https://github.com/mikezupper/effect-fp-skill/tree/e3ee107dc4e8a301fbddea43e85d4d1404fa15fc) | CC BY 4.0 | illegal state、parse once、edge処理、variant、resource lifecycle | Effect、TypeScript、Schema、Layer、全面immutable、全dependencyのservice化 |
+
+`code-design`は、固定済みmoduleとexact interfaceを入力に、内部表現、function、data flow、algorithm、判断とeffectの配置を決める。既存mechanismか直接実装を対照にし、新しいprivate abstractionは実在する知識、変化、変更か検証costを局所化する場合だけ残す。実装、refactoring、TDD、reviewは所有しない。
+
+代表scenarioは [`agents/fixtures/code-design-skill.json`](../../agents/fixtures/code-design-skill.json) に置く。baselineでは、doctorの重複ID、安定順序、summaryを一つのjq finalizerへ置く判断はできた。一方、既存の五配列を使えば足りる内部処理へ、observation envelope、JSONL file、record関数、source用main guardを追加し、数値scoreで案を選んだ。新しいSkillは、既存表現と直接実装を対照にし、pure/effect分離やprivate abstractionを具体的な変更costで正当化する手順を補う。
+
+forward evalでは、AgentMemoryの全hookに共通URL、二つのhookにだけ固有の定数環境を渡す内部構造を設計した。既存`hookNames`を正本に保ち、完全なspec一覧や汎用wrapper builderを棄却し、疎な例外mapを選べた。一方、閉じた定数をshell行へ変換する専用rendererを追加したため、escaping責任だけを増やすhelperを棄却し、既存literalかnative builderを優先する規則を追加した。
 
 ### domain-modelingで採用したdonor
 

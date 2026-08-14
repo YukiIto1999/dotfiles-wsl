@@ -9,7 +9,7 @@ description: Designs private implementation structure inside a fixed module and 
 
 ## 外側の制約を固定する
 
-対象module、owner、exact interface、consumer-visible behavior、failure、side effect、ordering、resource lifetimeを確認する。未確定なら内部設計で補わず、該当する`module-design`、`interface-design`、`data-modeling`、`error-design`へ戻す。
+対象module、owner、exact interface、consumer-visible behavior、failure、side effect、ordering、resource lifetimeを確認する。未確定なら内部設計で補わず、該当する`module-design`、`interface-design`、`domain-modeling`、`error-design`へ戻す。dataの意味と正準形が未確定なら、それも内部functionより先に決める。
 
 対象code、interface、直接caller、test、dependency、隣接する同種実装、repository規約、必要な履歴を読む。観測事実、確定済みの制約、未確認の仮定を分ける。新しいbehaviorやpublic contractを設計へ混ぜない。
 

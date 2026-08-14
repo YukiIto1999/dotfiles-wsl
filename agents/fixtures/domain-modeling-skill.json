@@ -46,7 +46,6 @@
       "id": "identifier-rename",
       "prompt": "この変数名とclass名が既存語彙に合っているかreviewしてください。domainの意味は確定済みです。",
       "expectedSkills": [],
-      "futureOwner": "naming-review",
       "mustNotTrigger": ["domain-modeling"]
     },
     {

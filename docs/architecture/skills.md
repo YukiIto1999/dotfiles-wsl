@@ -46,7 +46,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | writing | `ja-writing`、`commit-writing`、`change-writing`、`description-writing`、`documentation-writing`、`comment-writing` |
 | research | `web-research` |
 | analysis | `bug-analysis`、`dependency-analysis`、`impact-analysis`、`performance-analysis` |
-| review | `code-review`、`architecture-review`、`test-review`、`interface-review`、`database-review`、`naming-review`、`ui-review`、`browser-review` |
+| review | `code-review`、`architecture-review`、`test-review`、`interface-review`、`naming-review`、`ui-review`、`browser-review` |
 | design | `ui-design`、`code-design`、`module-design`、`interface-design`、`architecture-design`、`db-design`、`component-design`、`test-design`、`error-design` |
 | modeling | `domain-modeling`、`data-modeling` |
 
@@ -74,7 +74,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `module-design`は、確定済みのactor、domain ownership、state、artifact lifecycle、system topologyを制約として消費する。module内部の実装、exact interface、serviceやrepositoryのtopology、domain語彙、既存構造のseverity付きreviewは所有しない。
 
-`data-modeling`候補は、確定済みのdomainの意味を、正準形、valid state、lifecycle、serializationへ写す。`db-design` は access pattern、物理schema、constraint、index、transaction、migration、rollout を決める。
+`data-modeling`候補は、確定済みのdomainの意味を、正準形、valid state、lifecycle、serializationへ写す。`db-design`候補は、代表workloadから物理schema、constraint、access path、transaction、保存と復旧の受入条件を決める。既存databaseの監査は独立Skillにせず、対象engineの一次資料と既存review手段を使う。sourceからtargetへの移行手順は`migration`へ渡す。
 
 `test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd` は確定済みのbehaviorを一つのobservableな縦のsliceにし、意味のあるRED、最小GREEN、触れた範囲のREFACTORを反復する。原因未確定の障害、test suiteの監査、独立した構造変更は所有しない。
 
@@ -99,8 +99,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | [Vercel agent skills](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc) | `component-design`、`performance-analysis`、`ui-review` |
 | [Anthropic skills](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434) | `skill-creator`、`ui-design`、`browser-review`、`description-writing` |
 | [OpenAI Skills guidance](https://openai.com/academy/skills/) | `skill-creator`、routing評価、MCPを含むworkflow packaging |
-| [PlanetScale database skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488) | `db-design`、`database-review`、`migration` |
-| [Supabase agent skills](https://github.com/supabase/agent-skills/tree/v0.1.8) | `db-design`、`database-review`、security plugin、`migration` |
+| [PlanetScale database skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488) | `db-design`、database監査、`migration` |
+| [Supabase agent skills](https://github.com/supabase/agent-skills/tree/v0.1.8) | `db-design`、database監査、security plugin、`migration` |
 | [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | `code-design`、`module-design`、`refactoring`、`code-review`、`skill-creator` |
 | [decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect)、Clairvoyance | `dependency-analysis`、`module-design`、`architecture-design`、`architecture-review`。Clairvoyanceは採用前にsourceを固定する |
 | [effect-fp-skill](https://github.com/mikezupper/effect-fp-skill) | `code-design`、`data-modeling`、`error-design`。Effect固有APIは汎用規則にしない |
@@ -314,6 +314,25 @@ baselineでは、agent bundleのatomic publish transactionについて、consume
 候補の責務は、domainの意味、owner、不変条件、lifecycleが確定した後に、identity、正準形、状態固有data、absence、時刻、導出値、serializationとreader、writer互換性を決めることに限定した。公開contractは`interface-design`、private typeとfunctionは`code-design`、物理schemaは`db-design`が所有する。
 
 baselineでは、agent resourceのsessionとworktree ledgerを対象にした。Skillなしでも、session ownerを`(boot_id, owner_pid, owner_start_time)`、worktree identityを正準化済み`(common_dir, path)`、filename hashとdevice、inodeを別の導出値と実体証明に分けられた。既存fieldだけで状態別の必須data、正準遷移、terminal state、`updated_at`とmtimeの互換、v1 exact-key reader、未知dataのfail-closedまで設計し、event log、generic envelope、新versionを棄却した。さらに、診断値である`last_reason`が`quarantine-remove-root-unresolved`だけ回復分岐を兼ね、`status`だけではvalid stateが定まらない混在も特定できた。独立methodologyによる改善余地を観測できないため、現時点では基礎モデルと既存設計Skillの境界で足りる。
+
+### db-designをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [PlanetScale database-skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488) | MIT | exact queryからのindex設計、read、write、storage cost、実planと代表負荷による確認、engine別のDDL lockとrestore | 固定型、`LOCK=NONE`、Vitess固有workflow、固定retention |
+| [Supabase agent-skills v0.1.8](https://github.com/supabase/agent-skills/tree/8331f910845103c08d51f6ca1d86ebb7d1f745e3) | MIT | keyの範囲、局所性、分散生成のtrade-off、predicateとprojectionに対応するindex、短いtransactionと一定のlock順序 | PostgreSQL固有の既定、RLS、CLI、固定batch値 |
+| [WondelAI DDIA、DDD](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | access pattern、skew、consistencyからのstorage設計、阻止するanomalyからのisolation選択、代表dataと並行性による計測 | score、固定taxonomy、UUID、B-tree、polyglot persistenceの一律採用 |
+| [architecture-standard data、storage、migration](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | logicalとphysicalの分離、constraintとwrite path、再生成可能な派生copy、同条件での計測、不可逆点に応じたrecovery | 全relationへのFK、永久保存、単一store、outbox、forward-onlyの一律要求 |
+
+候補の責務は、確定済みの論理data model、owner、不変条件、lifecycle、engineと代表workloadから、物理schema、型、key、constraint、access path、index、transaction、isolation、retention、capacity、backupとrestoreを選ぶことに限定した。公開queryは`interface-design`、発生中のbottleneckは`performance-analysis`、backfillとcutoverの順序は`migration`が所有する。既存schemaのfindingは対象engineの一次資料を使う監査で扱い、独立Skillにはしない。
+
+baselineでは、`tec-lane-buyer-cart`のcart ledgerを対象にし、既存migrationを見ずにADR、port、store、integration specificationから設計した。Skillなしでも、買い手単位のsettlement、settled lines、再構築可能なcurrent projectionという三relation、複合key、同一台帳内FK、最小index、一確定一transaction、履歴保持、projection再構築とPITRを導けた。これは同repositoryの`deploy/database/up/0039_cart_selections.sql`にある主要構造と一致した。さらに、`ordinal`と`line_id`の一意性、空白型番、append-only、`max(version) + 1`の並行更新という既存設計の未強制条件も分離できた。独立methodologyによる改善を観測できないため、donorは判断材料として残し、runtime Skillは追加しない。
+
+### database-reviewをSkill化しない判断
+
+既存databaseの監査では、domain invariant、DDL、全write path、transaction、test、engine仕様を対応付ける。PlanetScaleとSupabaseの資料はengine固有のconstraint、index、lock、RLS、rolloutを補うが、独立したreview procedureを与えない。
+
+baselineではPostgreSQLのaudit ledgerを監査し、親rowの更新と削除だけを拒否しても、任意の子rowを後から追加でき、`TRUNCATE`がrow triggerを通らないためimmutabilityが閉じない問題を特定できた。既存のreview能力とengine一次資料で実害のあるfindingまで到達しており、Skill固有の改善を観測していない。反復してisolation anomaly、workload、restoreの欠落を見逃す証拠が得られるまで追加しない。
 
 ### module-designで採用したdonor
 

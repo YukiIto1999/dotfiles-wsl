@@ -58,8 +58,7 @@
     {
       "id": "module-boundary-design",
       "prompt": "確定済みdomain modelを基にmoduleの責務、所有、依存方向を決めてください。",
-      "expectedSkills": [],
-      "futureOwner": "module-design",
+      "expectedSkills": ["module-design"],
       "mustNotTrigger": ["domain-modeling"]
     }
   ]

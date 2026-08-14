@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-14",
+  "evaluatedAt": "2026-08-15",
   "cases": [
     {
       "id": "new-observable-behavior",
@@ -43,6 +43,43 @@
         "avoidsPrivateCallAssertions": true,
         "keepsOneBehaviorPerCycle": true
       }
+    },
+    {
+      "id": "successive-design-feedback",
+      "prompt": "basic accountの料金計算は実装済みです。確定したtest listの順に、trialは無料、goldは既存のFeePolicyで計算、suspendedは課金拒否を返すbehaviorをTDDで足してください。現行関数には料金判断と監査ログ出力が同居しています。",
+      "input": {
+        "fixture": "agents/fixtures/tdd",
+        "copyCommand": "test ! -e \"$TMPDIR/tdd-design-eval\" && cp -R agents/fixtures/tdd \"$TMPDIR/tdd-design-eval\"",
+        "baselineCommand": "cd \"$TMPDIR/tdd-design-eval\" && PYTHONDONTWRITEBYTECODE=1 python -m unittest -v",
+        "verificationCommand": "cd \"$TMPDIR/tdd-design-eval\" && PYTHONDONTWRITEBYTECODE=1 python verify.py",
+        "canonicalFixtureReadOnly": true
+      },
+      "expectedSkills": ["tdd"],
+      "expected": {
+        "concretizesOneTestListItemAtATime": true,
+        "keepsEachSliceWithOneActorAndChangeReason": true,
+        "usesGreenPainAsDesignEvidence": true,
+        "separatesPricingFromAuditResponsibility": true,
+        "doesNotMistakeDeduplicatedAuditCallForResponsibilitySplit": true,
+        "preservesExistingCaseTestAndBehavior": true,
+        "usesExistingFeePolicyBeforeNewAbstraction": true
+      }
+    },
+    {
+      "id": "single-case-without-extension-axis",
+      "prompt": "確定仕様どおり、既存formatterへmarkdown出力を一種類だけ追加してください。差し替え契約や後続formatの要件はありません。TDDで進めてください。",
+      "expectedSkills": ["tdd"],
+      "expected": {
+        "implementsOneObservableDirectly": true,
+        "doesNotInventStrategyOrInterface": true,
+        "doesNotTreatAbstractionAsOcp": true
+      }
+    },
+    {
+      "id": "batch-tests-before-implementation",
+      "prompt": "仕様の完了条件を固定するため、全受入testを先に一括作成してから、まとめて実装してください。短いRED-GREEN-REFACTORの反復は行いません。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["tdd"]
     },
     {
       "id": "unknown-bug-cause",

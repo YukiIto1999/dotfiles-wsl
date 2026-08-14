@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "focused-test-failure",
+      "prompt": "このtestだけexit 1になります。修正せず、原因を診断してください。",
+      "input": {
+        "fixture": "agents/fixtures/bug-analysis/contract-boundary.sh",
+        "command": "bash agents/fixtures/bug-analysis/contract-boundary.sh"
+      },
+      "expectedSkills": ["bug-analysis"],
+      "expected": {
+        "rootCause": "Threshold到達の判定が>=でなく>になっている。",
+        "runsExactSignal": true,
+        "separatesFailureSiteFromCause": true,
+        "doesNotImplementFix": true
+      }
+    },
+    {
+      "id": "intermittent-runtime-incident",
+      "prompt": "一日に数回だけworkerが停止します。時刻付きlogとmetricから原因を分析してください。",
+      "input": {
+        "fixture": "agents/fixtures/bug-analysis/worker-incident.json",
+        "reproducibleOnDemand": false
+      },
+      "expectedSkills": ["bug-analysis"],
+      "expected": {
+        "rootCause": "failure pathがslotをreleaseせず、二つのfailed jobでpoolを枯渇させる。",
+        "preservesObservedEvidence": true,
+        "doesNotRequireCleanReproduction": true,
+        "statesUnknowns": true
+      }
+    },
+    {
+      "id": "external-dependency-failure",
+      "prompt": "外部API更新後からrequestが失敗します。local側を変更せず原因を特定してください。",
+      "input": {
+        "evidence": ["before/after response", "local request", "provider changelog"]
+      },
+      "expectedSkills": ["bug-analysis"],
+      "expected": {
+        "checksBoundaryContract": true,
+        "tracesPropagation": true,
+        "treatsExternalOutputAsUntrusted": true
+      }
+    },
+    {
+      "id": "user-report-only",
+      "prompt": "利用者から『保存できないことがある』とだけ報告されました。現時点で分かることを分析してください。",
+      "expectedSkills": ["bug-analysis"],
+      "expected": {
+        "doesNotInventRootCause": true,
+        "requestsSpecificEvidence": true,
+        "keepsFactsAndHypothesesSeparate": true
+      }
+    },
+    {
+      "id": "performance-only",
+      "prompt": "APIのp95 latencyが120msから480msへ悪化しました。bottleneckを分析してください。",
+      "expectedSkills": [],
+      "futureOwner": "performance-analysis",
+      "mustNotTrigger": ["bug-analysis"]
+    },
+    {
+      "id": "security-finding",
+      "prompt": "このendpointに認可bypassがないか攻撃経路をreviewしてください。",
+      "expectedSkills": ["security-scan"],
+      "mustNotTrigger": ["bug-analysis"]
+    },
+    {
+      "id": "proven-fix-request",
+      "prompt": "原因はnullを許すschema変更だと回帰testで証明済みです。修正してください。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["bug-analysis"]
+    },
+    {
+      "id": "diagnose-and-fix",
+      "prompt": "この回帰を診断して、原因を直してください。",
+      "expectedSkills": ["bug-analysis"],
+      "expected": {
+        "provesCauseBeforeEditing": true,
+        "continuesToImplementationAfterDiagnosis": true,
+        "keepsFixOutsideAnalysisOwnership": true
+      }
+    }
+  ]
+}

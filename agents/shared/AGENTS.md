@@ -76,6 +76,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 |---|---|
 | 日本語文書の作成、推敲 | `ja-writing` |
 | 外部 Web の調査 | `web-research` |
+| bug、test失敗、incidentの原因分析 | `bug-analysis` |
 | commit / PR 前の diff review | `code-reviewer` |
 | staged diff から commit message 作成 | `commit-writing` |
 | PR、changelog、release noteの作成 | `change-writing` |

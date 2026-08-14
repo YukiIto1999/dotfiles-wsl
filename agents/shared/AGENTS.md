@@ -89,7 +89,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 固定済みmodule、責務owner、公開contract内のfailure表現、翻訳、伝播、回復、観測の設計 | `error-design` |
 | planやdecisionを依存順の質問で詰める | `grilling` |
 | domain設計を質問で詰めて既存文書へ残す | `grill-with-docs` |
-| commit / PR 前の diff review | `code-reviewer` |
+| commit / PR 前の diff review | `code-review` |
 | staged diff から commit message 作成 | `commit-writing` |
 | PR、changelog、release noteの作成 | `change-writing` |
 | README、ADR、仕様、報告、技術解説の作成 | `description-writing` |

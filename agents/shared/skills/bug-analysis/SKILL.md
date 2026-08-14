@@ -71,4 +71,4 @@ signalを作るためのcode readingは行ってよい。修正を思いつく�
 
 原因を確定できなければ「不明」とし、最有力仮説を原因として書かない。このSkillの責務は原因確定で終わる。現在の依頼に修正も含まれる場合は、確定後にSkill外の実装工程へ続ける。作成した一時harnessとinstrumentationは把握し、証拠保全に必要なものを除いて終了時に回収する。
 
-performanceだけの劣化はこのSkillの責務外である。脆弱性や攻撃可能性は`security-scan`、既存diffの品質判定は`code-reviewer`の責務である。
+performanceだけの劣化はこのSkillの責務外である。脆弱性や攻撃可能性は`security-scan`、既存diffの品質判定は`code-review`の責務である。

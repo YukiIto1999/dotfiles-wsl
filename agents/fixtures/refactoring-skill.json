@@ -81,7 +81,7 @@
     {
       "id": "read-only-review",
       "prompt": "このdiffに不要な抽象や複雑性がないかreviewしてください。編集はしません。",
-      "expectedSkills": ["code-reviewer"],
+      "expectedSkills": ["code-review"],
       "mustNotTrigger": ["refactoring"]
     },
     {

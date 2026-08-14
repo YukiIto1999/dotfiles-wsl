@@ -52,7 +52,6 @@
       "id": "database-schema-design",
       "prompt": "確定済みdomain modelからPostgreSQLのtable、constraint、indexを設計してください。",
       "expectedSkills": [],
-      "futureOwner": "db-design",
       "mustNotTrigger": ["domain-modeling"]
     },
     {

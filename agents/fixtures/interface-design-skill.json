@@ -104,7 +104,6 @@
       "id": "database-physical-schema",
       "prompt": "確定済みdomain modelからPostgreSQL table、constraint、index、transactionを設計してください。",
       "expectedSkills": [],
-      "futureOwner": "db-design",
       "mustNotTrigger": ["interface-design"]
     },
     {

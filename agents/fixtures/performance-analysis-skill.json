@@ -87,10 +87,13 @@
       "id": "browser-audit",
       "prompt": "このWeb画面を操作し、console、network、storage、DOM、memory、securityを横断監査してください。特定の性能症状はありません。",
       "expectedSkills": [],
-      "futureOwner": "browser-review",
       "mustNotTrigger": [
         "performance-analysis"
-      ]
+      ],
+      "expected": {
+        "decomposesRequestByQuestion": true,
+        "doesNotCreateBrowserReviewWorkflow": true
+      }
     },
     {
       "id": "generic-performance-code-audit",
@@ -104,7 +107,6 @@
       "id": "ui-usability-review",
       "prompt": "購入画面の情報階層、操作、feedback、accessibilityを利用者視点で監査してください。",
       "expectedSkills": [],
-      "futureOwner": "ui-review",
       "mustNotTrigger": [
         "performance-analysis"
       ]

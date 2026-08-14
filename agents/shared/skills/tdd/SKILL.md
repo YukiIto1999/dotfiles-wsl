@@ -22,7 +22,7 @@ repositoryのtest command、既存test、命名、fixture、実装規約を先�
 
 ## REDを証明する
 
-現在のsliceのproduction codeを変える前に、observableを判定するtest、contract check、type check、static checkのいずれかを追加する。性質を判定できる最も内側の決定的なverifierを選ぶ。test levelやfidelityの全体方針は`test-design`に渡す。
+現在のsliceのproduction codeを変える前に、observableを判定するtest、contract check、type check、static checkのいずれかを追加する。性質を判定できる最も内側の決定的なverifierを選ぶ。test levelやfidelityの全体方針が未決定なら、TDDを始める前に別の設計判断として確定する。
 
 focused commandを実行し、次を確認する。
 

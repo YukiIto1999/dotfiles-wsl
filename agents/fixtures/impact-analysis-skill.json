@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "contract-field-removal",
+      "prompt": "共有schemaからretentionDaysを削除すると、code、persisted state、runtime、deployment、tests、docsのどこへ影響しますか。rolloutとrollbackの制約も分析してください。",
+      "expectedSkills": [
+        "impact-analysis"
+      ],
+      "expected": {
+        "definesBeforeAfterContract": true,
+        "tracesDirectAndTransitiveConsumers": true,
+        "checksDataAndBehaviorCompatibility": true,
+        "checksOldNewCoexistence": true,
+        "separatesGuaranteedConditionalAndUnknown": true
+      }
+    },
+    {
+      "id": "dependency-upgrade-impact",
+      "prompt": "このlibraryをv3からv4へ上げる場合のAPI、behavior、build、runtime、operatorへの影響を調べてください。",
+      "expectedSkills": [
+        "impact-analysis",
+        "web-research"
+      ],
+      "expected": {
+        "usesVersionSpecificPrimarySources": true,
+        "comparesObservedUsageWithChangedContract": true,
+        "doesNotTreatChangelogAsLocalImpactProof": true
+      }
+    },
+    {
+      "id": "runtime-cutover-impact",
+      "prompt": "このserviceのlistenerを別processへ移すと、起動順、health check、secret更新、observation、rollbackへ何が波及しますか。",
+      "expectedSkills": [
+        "impact-analysis"
+      ],
+      "expected": {
+        "tracesRuntimeAndOperationalEffects": true,
+        "identifiesAtomicAndCoexistenceBoundaries": true,
+        "doesNotInventMigrationSequence": true
+      }
+    },
+    {
+      "id": "general-dependency-map",
+      "prompt": "repository全体のmodule dependencyとcycleを可視化してください。具体的な変更はありません。",
+      "expectedSkills": [
+        "dependency-analysis"
+      ],
+      "mustNotTrigger": [
+        "impact-analysis"
+      ]
+    },
+    {
+      "id": "simple-reference-search",
+      "prompt": "retentionDaysを参照するfileを探してください。影響判断は不要です。",
+      "expectedSkills": [],
+      "mustNotTrigger": [
+        "impact-analysis"
+      ]
+    },
+    {
+      "id": "analyze-then-migrate",
+      "prompt": "このschema変更の影響と共存条件を分析し、その結果に基づいてmigrationを計画、実行してください。",
+      "expectedSkills": [
+        "impact-analysis"
+      ],
+      "futureOwner": "migration",
+      "expected": {
+        "impactAnalysisStopsAtConstraints": true,
+        "migrationOwnsSequenceAndExecution": true
+      }
+    },
+    {
+      "id": "migration-execution",
+      "prompt": "schema移行をexpand、backfill、contractの順に実装して実行してください。",
+      "expectedSkills": [],
+      "futureOwner": "migration",
+      "mustNotTrigger": [
+        "impact-analysis"
+      ]
+    },
+    {
+      "id": "choose-new-architecture",
+      "prompt": "この変更を避けるため、新しいmodule境界とinterfaceを設計してください。",
+      "expectedSkills": [],
+      "futureOwner": "module-design",
+      "mustNotTrigger": [
+        "impact-analysis"
+      ]
+    },
+    {
+      "id": "diagnose-existing-failure",
+      "prompt": "deploy後にold workerだけschema errorになりました。原因を診断してください。",
+      "expectedSkills": [
+        "bug-analysis"
+      ],
+      "mustNotTrigger": [
+        "impact-analysis"
+      ]
+    }
+  ]
+}

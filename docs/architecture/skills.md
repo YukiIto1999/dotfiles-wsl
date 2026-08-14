@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-design`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
+- local: `bug-analysis`、`code-design`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -69,6 +69,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 セキュリティreviewはpluginの`security-scan`が所有するため、別の`security-review`は作らない。read-onlyのsecurity agentはthreat model、finding discovery、validation、attack path、最終reportまでを所有する。検証済みまたは技術的に妥当なfindingの修正を明示された場合だけ、実装agentが別phaseで`fix-finding`を使う。
 
 `code-design` は module 内部の型、関数、変換、純粋核と effect、抽象、局所性を決める。`module-design` は actor、change driver、責務、所有、境界、依存方向を決める。`interface-design` は確定済みの境界に、exact type、failure、side effect、ordering、互換性を持つconsumer-visible contractを与える。`architecture-design` は system 全体の topology、quality attribute、deployment、integration を決める。
+
+`error-design`は、固定済みのmodule境界、責務owner、公開failure contractを入力に、owner内部のfailure表現、翻訳点、伝播、回復、集約、観測を決める。公開error shape、module間の責務配置、障害原因、reliability target、実装は所有しない。
 
 `module-design`は、確定済みのactor、domain ownership、state、artifact lifecycle、system topologyを制約として消費する。module内部の実装、exact interface、serviceやrepositoryのtopology、domain語彙、既存構造のseverity付きreviewは所有しない。
 
@@ -350,6 +352,23 @@ forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一�
 代表scenarioは [`agents/fixtures/code-design-skill.json`](../../agents/fixtures/code-design-skill.json) に置く。baselineでは、doctorの重複ID、安定順序、summaryを一つのjq finalizerへ置く判断はできた。一方、既存の五配列を使えば足りる内部処理へ、observation envelope、JSONL file、record関数、source用main guardを追加し、数値scoreで案を選んだ。新しいSkillは、既存表現と直接実装を対照にし、pure/effect分離やprivate abstractionを具体的な変更costで正当化する手順を補う。
 
 forward evalでは、AgentMemoryの全hookに共通URL、二つのhookにだけ固有の定数環境を渡す内部構造を設計した。既存`hookNames`を正本に保ち、完全なspec一覧や汎用wrapper builderを棄却し、疎な例外mapを選べた。一方、閉じた定数をshell行へ変換する専用rendererを追加したため、escaping責任だけを増やすhelperを棄却し、既存literalかnative builderを優先する規則を追加した。
+
+### error-designで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [architecture-standard effect、resilience、observability、contract](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | expected failure、defect、cancellationの分離、境界mapping、retry owner、failure isolation、effect境界の構造化観測 | effect system、固定構造、公開contractとreliability targetの再設計 |
+| [effect-fp-skill](https://github.com/mikezupper/effect-fp-skill/tree/e3ee107dc4e8a301fbddea43e85d4d1404fa15fc) | CC BY 4.0 | failureごとのvariant、handlerに必要なcontext、外部errorの境界翻訳、validationとbatchの集約 | Effect、TypeScript、TaggedError、全dependencyのservice化、全I/Oのspan化 |
+| [Addy Osmani API design、debugging and recovery](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c) | MIT | structured failure、外部errorを未信頼dataとして扱うこと、境界の観測context | HTTP規則、diagnosis workflow、blanket catch、safe defaultと一般fallback |
+| [Matt Pocock codebase-design、diagnosing-bugs](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | MIT | interfaceにerror modeが含まれること、callerとtestが同じseamを使うこと | deep module、新しいseam、diagnosisと修正workflow |
+| [WondelAI DDIA、Release It!、Pragmatic Programmer](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | faultとsystem failure、safety優先、policyが作るfailure、assertionとexpected errorの境界 | score、固定threshold、全integrationへの同じpattern、常設fallback、chaos実行 |
+| [dotnet-webapi](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-aspnetcore/skills/dotnet-webapi) | MIT | terminal handlerの観測責任、最終mapping、cancellationの伝播 | Problem Details、middleware、C#型、folder、OpenTelemetry設定 |
+
+`error-design`は、扱いの異なるfailureだけを列挙し、意味を知るownerへ置き、provider errorを最初の既存boundaryで一度だけ翻訳する。処理できる場所まで意味を保ち、固定済みのretry、観測owner内で処理点を一つにする。後者は、donorのboundary処理とterminal handler責任を、このrepositoryの二重処理防止へ統合した判断である。共通Error型、Result、exception hierarchy、error registryを成果にせず、既存表現で足りる案を必ず対照にする。
+
+代表scenarioは [`agents/fixtures/error-design-skill.json`](../../agents/fixtures/error-design-skill.json) に置く。baselineでは、agent resourceのvalidation、filesystem、lock、proc identity、race、cleanupを分類し、global trust failureとrecord単位のpreserveを分けられた。一方、Bashの既存status、ledger reason、stderrで必要な意味を表せるかを確認せず、全経路へ汎用Resultとboundary translatorを導入した。新しいSkillは、callerの扱い、回復、公開mappingが異なるfailureだけを区別し、既存表現を保つ案から比較する手順を補う。
+
+forward evalでは、doctorの公開JSON、exit status、observation境界を固定し、missing tool、非zero、malformed output、semantic mismatch、caller cancellation、cleanupを設計した。既存statusと固定failure recordを保ち、独立observationは集約し、runner invariantの破壊とcaller cancellationだけを停止条件にできた。原因別enum、Result、retry、追加logは棄却した。一方、caller cancellationとobservation deadline、代替成功と保守的failure mappingを混同し、raw causeを無条件に保持できる記述が露出したため、contractとconsumerの有無から扱いを決めるよう本文を限定した。
 
 ### domain-modelingで採用したdonor
 

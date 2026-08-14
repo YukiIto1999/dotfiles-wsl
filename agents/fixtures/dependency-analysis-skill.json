@@ -1,0 +1,101 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "typed-cross-boundary-graph",
+      "prompt": "このrepositoryでagents、mcp、containersの依存関係を調べてください。Nix import、option参照、runtime service呼出し、deploymentを区別してください。",
+      "expectedSkills": [
+        "dependency-analysis"
+      ],
+      "expected": {
+        "definesNodeIdentityAndGranularity": true,
+        "definesEdgeDirection": true,
+        "separatesStaticRuntimeAndDeploymentEdges": true,
+        "distinguishesDirectAndTransitiveRelations": true,
+        "separatesFactsFromInterpretation": true
+      }
+    },
+    {
+      "id": "cycle-and-metrics",
+      "prompt": "package間のimport cycleとfan-in、fan-outを測り、どの依存が変更を広げ得るか分析してください。",
+      "expectedSkills": [
+        "dependency-analysis"
+      ],
+      "expected": {
+        "definesGraphBeforeMetrics": true,
+        "findsCyclesWithinOneEdgeType": true,
+        "doesNotTreatHighCountsAsDefects": true,
+        "statesExtractionCoverage": true
+      }
+    },
+    {
+      "id": "hidden-runtime-dependency",
+      "prompt": "明示importにはない環境変数、共有state、起動順序への依存を追跡してください。",
+      "expectedSkills": [
+        "dependency-analysis"
+      ],
+      "expected": {
+        "examinesAmbientAndTemporalDependencies": true,
+        "doesNotInferRuntimeEdgesFromImportsAlone": true,
+        "leavesUnresolvedDynamicEdgesUnknown": true
+      }
+    },
+    {
+      "id": "ownership-dependency",
+      "prompt": "moduleのownerとchange driverを調べ、source dependencyとは分けて依存方向を示してください。",
+      "expectedSkills": [
+        "dependency-analysis"
+      ],
+      "expected": {
+        "usesOwnershipAndHistoryAsSeparateEvidence": true,
+        "doesNotConflateCochangeWithSourceDependency": true
+      }
+    },
+    {
+      "id": "known-symbol-retrieval",
+      "prompt": "runtimeContractをimportしているfileを探してください。関係の分析は不要です。",
+      "expectedSkills": [],
+      "mustNotTrigger": [
+        "dependency-analysis"
+      ]
+    },
+    {
+      "id": "specific-change-impact",
+      "prompt": "この共通schemaのfieldを削除すると、どのcode、data、runtime、deployへ影響しますか。",
+      "expectedSkills": [],
+      "futureOwner": "impact-analysis",
+      "mustNotTrigger": [
+        "dependency-analysis"
+      ]
+    },
+    {
+      "id": "architecture-quality-review",
+      "prompt": "現在のdependency directionがrepository規約に適合し、保守しやすい設計かreviewしてください。",
+      "expectedSkills": [],
+      "futureOwner": "architecture-review",
+      "mustNotTrigger": [
+        "dependency-analysis"
+      ]
+    },
+    {
+      "id": "redesign-boundaries",
+      "prompt": "このmodule群をどう分割し、依存方向をどう設計すべきか決めてください。",
+      "expectedSkills": [],
+      "futureOwner": "module-design",
+      "mustNotTrigger": [
+        "dependency-analysis"
+      ]
+    },
+    {
+      "id": "failure-root-cause",
+      "prompt": "service起動時に循環参照errorが出ます。故障原因を特定してください。",
+      "expectedSkills": [
+        "bug-analysis"
+      ],
+      "mustNotTrigger": [
+        "dependency-analysis"
+      ]
+    }
+  ]
+}

@@ -77,6 +77,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 日本語文書の作成、推敲 | `ja-writing` |
 | 外部 Web の調査 | `web-research` |
 | bug、test失敗、incidentの原因分析 | `bug-analysis` |
+| import、call、data、runtime、build、deploymentの依存分析 | `dependency-analysis` |
 | domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
 | planやdecisionを依存順の質問で詰める | `grilling` |
 | domain設計を質問で詰めて既存文書へ残す | `grill-with-docs` |

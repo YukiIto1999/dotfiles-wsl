@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`ja-writing`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`ja-writing`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -80,7 +80,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 | Donor | 主に補強する候補 |
 |---|---|
-| [Matt Pocock skills](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | `bug-analysis`、`domain-modeling`、`code-design`、`module-design`、`code-review`、`tdd`、`prototype`、`web-research` |
+| [Matt Pocock skills](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | `bug-analysis`、`dependency-analysis`、`domain-modeling`、`code-design`、`module-design`、`code-review`、`tdd`、`prototype`、`web-research` |
 | [Addy Osmani agent-skills](https://github.com/addyosmani/agent-skills) | `interface-design`、`code-review`、`tdd`、`bug-analysis`、`ui-design`、`performance-analysis`、security plugin |
 | [WondelAI skills](https://github.com/wondelai/skills) | `refactoring`、`architecture-design`、`architecture-review`、`db-design`、`ui-review` |
 | [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `skill-creator`、`test-design`、`test-review`、`tdd` |
@@ -90,7 +90,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 | [PlanetScale database skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488) | `db-design`、`database-review`、`migration` |
 | [Supabase agent skills](https://github.com/supabase/agent-skills/tree/v0.1.8) | `db-design`、`database-review`、security plugin、`migration` |
 | [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | `code-design`、`module-design`、`refactoring`、`code-review`、`skill-creator` |
-| [decomplect](https://github.com/shanev/skills/tree/main/decomplect)、Clairvoyance | `module-design`、`architecture-design`、`architecture-review`。Clairvoyanceは採用前にsourceを固定する |
+| [decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect)、Clairvoyance | `dependency-analysis`、`module-design`、`architecture-design`、`architecture-review`。Clairvoyanceは採用前にsourceを固定する |
 | [effect-fp-skill](https://github.com/mikezupper/effect-fp-skill) | `code-design`、`data-modeling`、`error-design`。Effect固有APIは汎用規則にしない |
 | [Hallmark](https://github.com/Nutlope/Hallmark)、[Impeccable](https://github.com/pbakaus/impeccable) | `ui-design`、`ui-review` |
 | [japanese-tech-writing](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d)、[stop-ai-slop-jp](https://github.com/iKora128/stop-ai-slop-jp)、[slop-nuki](https://github.com/chezou/slop-nuki) | `ja-writing` |
@@ -157,6 +157,20 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 `bug-analysis`は分析結果を所有し、修正を所有しない。test、CLI、request、trace、差分、runtime観測のうち、症状を判別できる最小のsignalを選ぶ。再現不能なincidentでも観測済み証拠を捨てず、事実、仮説、不明点を分ける。原因はfailure siteではなく、最初に誤ったstateか契約違反として示す。近接scenarioは [`agents/fixtures/bug-analysis-skill.json`](../../agents/fixtures/bug-analysis-skill.json) に置く。
 
 旧Superpowersとdonor本文を同じscenarioへ適用すると、診断依頼でも修正とTDDまで所有し、performanceだけの問題や原因確定後の実装でも発火した。clean reproがないincidentでは、既存logを分析する前に仮説を禁じる。新しいSkillは、診断と修正、機能障害とperformance分析を分け、再現できない場合も観測済み証拠から確定事項と不足を返す。
+
+### dependency-analysisで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [architecture-standard dependency](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/concerns/dependency.md) | repository rootに表示なし | source dependencyとruntime callの方向を分けること、policyとdetailの所有から期待する方向を説明すること | すべての分析対象へ内向き依存、constructor injection、portを規範として適用すること |
+| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | dependencyの性質によってseam、substitution、testの意味が変わること | deep module化、adapter分類、HTML report、grillingを依存分析の成果にすること |
+| [decomplect coupling](https://github.com/shanev/skills/blob/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect/references/coupling.md) | MIT | explicitで安定した依存は必要であり得ること、cycleや結合を具体的な変更、build、test、deploy costで確かめること | architecture finding、confidence閾値、修正案を依存分析が所有すること |
+
+`dependency-analysis`は、node、edge、方向、granularityを先に定義し、source、call、data、runtime、build、deployment、ownershipの依存を型なしの一graphへ潰さない。fan-in、fan-out、cycle、transitive reachabilityは構造の事実であり、数値だけで欠陥とは判定しない。具体的な変更から影響を追う仕事は`impact-analysis`、構造の良否は`architecture-review`、新しい依存方向の決定は設計Skillへ渡す。
+
+代表scenarioは [`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json) に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先し、`rg`や`ast-grep`の一致は候補としてsourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
+
+baselineでは、agent resource reaperの保持日数と実行間隔がNix option、package、systemd unit、observation、checkへどう伝播するかを調べた。最初の検索結果はsource参照、生成、runtime起動、文書、検査を混在させ、node、edge、方向、granularityを調査後に後付けした。型付きedgeへ分けると、保持日数はpackageへ埋め込まれる一方、実行間隔はtimer unitだけへ投影され、observationはtimer名しか参照しないと区別できた。文字列探索だけではNix evaluationによるconsumerの網羅性を証明できず、activation時の挙動も未確認として残った。
 
 ### domain-modelingで採用したdonor
 

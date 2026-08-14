@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "new-observable-behavior",
+      "prompt": "確定済み仕様に従い、CLIの--dry-runが削除候補を表示して状態を変えないbehaviorをTDDで実装してください。既存のcontract checkとShell fixtureを使えます。",
+      "expectedSkills": ["tdd"],
+      "expected": {
+        "choosesOneVerticalSlice": true,
+        "provesRedForIntendedBehavior": true,
+        "implementsMinimalGreen": true,
+        "refactorsOnlyTouchedScope": true,
+        "recordsRedAndGreenEvidence": true
+      }
+    },
+    {
+      "id": "confirmed-bug-fix",
+      "prompt": "原因はempty inputでoffsetを1増やす分岐だと再現済みです。公開APIの結果を先にREDにし、最小修正をTDDで入れてください。",
+      "expectedSkills": ["tdd"],
+      "expected": {
+        "usesConfirmedCause": true,
+        "testsObservableOutcome": true,
+        "doesNotRepeatDiagnosis": true
+      }
+    },
+    {
+      "id": "connected-type-change",
+      "prompt": "確定済みのResult型をconsumerの公開signatureへ接続し、既存callerのtype errorとfailure behaviorのtestを順にREDにして実装してください。",
+      "expectedSkills": ["tdd"],
+      "expected": {
+        "requiresConnectedTypeRed": true,
+        "alsoProvesBehaviorRed": true,
+        "doesNotCountUndefinedTypeAsRed": true
+      }
+    },
+    {
+      "id": "observable-boundary-interaction",
+      "prompt": "adapterが一つのidempotency key付きcommandを送る契約は確定済みです。fake portで外部から観測できるcommandをREDにして実装してください。",
+      "expectedSkills": ["tdd"],
+      "expected": {
+        "usesObservableInteractionContract": true,
+        "avoidsPrivateCallAssertions": true,
+        "keepsOneBehaviorPerCycle": true
+      }
+    },
+    {
+      "id": "unknown-bug-cause",
+      "prompt": "checkoutが時々500を返します。原因はまだ不明です。まず原因を特定してください。",
+      "expectedSkills": ["bug-analysis"],
+      "mustNotTrigger": ["tdd"]
+    },
+    {
+      "id": "test-strategy",
+      "prompt": "決済systemのrisk、oracle、test level、実DBを使う範囲を設計してください。実装はしません。",
+      "expectedSkills": [],
+      "futureOwner": "test-design",
+      "mustNotTrigger": ["tdd"]
+    },
+    {
+      "id": "existing-test-review",
+      "prompt": "既存test suiteの不足、脆いassertion、mockへの過剰依存をreviewしてください。",
+      "expectedSkills": [],
+      "futureOwner": "test-review",
+      "mustNotTrigger": ["tdd"]
+    },
+    {
+      "id": "standalone-refactor",
+      "prompt": "behaviorを変えずに、このmoduleの責務と依存を整理してください。characterization testは既に通っています。",
+      "expectedSkills": [],
+      "futureOwner": "refactoring",
+      "mustNotTrigger": ["tdd"]
+    },
+    {
+      "id": "throwaway-prototype",
+      "prompt": "libraryの適合性だけを見る捨てるprototypeを作ってください。production behaviorはまだ決めません。",
+      "expectedSkills": [],
+      "futureOwner": "prototype",
+      "mustNotTrigger": ["tdd"]
+    },
+    {
+      "id": "retroactive-tests",
+      "prompt": "実装済みのpatchへ後から不足testを追加してください。REDを先に実測するためproduction codeを戻さないでください。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["tdd"]
+    },
+    {
+      "id": "no-automated-observable",
+      "prompt": "behaviorは確定していますが、現状は実機の物理LEDを人が見る以外に結果を観測できません。test専用hookを足してTDDで実装してください。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["tdd"]
+    },
+    {
+      "id": "docs-only-change",
+      "prompt": "READMEの誤字を直してください。実行behaviorは変わりません。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["tdd"]
+    }
+  ]
+}

@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`performance-analysis`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`performance-analysis`、`tdd`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -72,7 +72,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `data-modeling` はデータの意味、形、所有、正準形、valid state、lifecycle、serialization を決める。`db-design` は access pattern、物理schema、constraint、index、transaction、migration、rollout を決める。
 
-`test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd` は外から見た契約を先に置き、意味のある失敗、最小実装、refactoring を反復する進め方を所有する。
+`test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd` は確定済みのbehaviorを一つのobservableな縦のsliceにし、意味のあるRED、最小GREEN、触れた範囲のREFACTORを反復する。原因未確定の障害、test suiteの監査、独立した構造変更は所有しない。
 
 ここに境界を書いていない候補は、名前だけを仮置きした調査対象である。Job、trigger、判断所有権、根拠、完了条件、非責務を定めるまで実装しない。
 
@@ -201,6 +201,22 @@ baselineでは、agent resource reaperの公開optionと内部contract fieldを�
 `performance-analysis`は、latency、throughput、CPU、memory、allocation、GC、I/O、database、network、build、browser性能に共通する測定と因果確認を所有する。尺度、workload、environment、revision、sampleを固定し、平均だけでなく分布とvarianceを見る。resource利用率とsaturation、wall timeとon-CPU time、live memoryとallocation、service timeとqueueingを分ける。
 
 代表scenarioは [`agents/fixtures/performance-analysis-skill.json`](../../agents/fixtures/performance-analysis-skill.json) に置く。baselineでは、同じ負荷のrelease A/Bでcheckout APIのp95が186msから442msへ悪化したartifactから、`reserve_inventory`のsequential scanをbottleneckとして特定できた。一方、closed workloadからproductionへの外挿、run間variance、observer effectを判断手順として固定していなかった。新しいSkillは比較可能性と測定誤差を先に扱い、critical path上の時間差とcontrolled probeが同じ指標を動かした場合だけbottleneckと判定する。plan選択理由のような未確定のroot causeは、箇所の特定と分けて残す。
+
+### tddで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [architecture-standard implementation process](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/process/implementation.md)、[test methods](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/structure/tests/methods.md) | repository rootに表示なし | actorとuse caseからwork unitを定めること、test listを一つの縦のsliceずつ進めること、接続済みの型だけをREDに数えること、性質に合う最も内側の決定的なverifier、GREEN中の局所refactoring | test technique全般、test strategy、commitの分割をTDDが所有すること |
+| [Matt Pocock tdd](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/tdd/SKILL.md) | MIT | public interfaceからbehaviorを検査すること、実装へ結合したtestとproduction計算を複製するoracleを避けること、REDを実測して一つの縦のsliceを実装すること | seamごとに利用者確認を必須にすること、refactoringをTDDのloopからすべて外すこと |
+| [Addy Osmani test-driven-development](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/test-driven-development/SKILL.md) | MIT | repositoryのtest toolと規約を先に読むこと、REDの理由を確認すること、最小GREEN、GREEN中のREFACTOR、同じ成功済みcheckを無変更で繰り返さないこと | 固定のtest pyramid、全変更への一律発火、無条件のfull suite、test設計とbrowser検証の所有 |
+
+`tdd`は、既に意味と期待結果が決まったbehaviorを実装する規律だけを所有する。testを大量に先行作成せず、consumerが観測する一つのsliceについて、production変更前のRED、最小GREEN、触れた範囲のREFACTORを完結させる。testの種類を選ぶ一般論、既存suiteの評価、原因分析、独立したrefactoringは別の仕事である。
+
+代表scenarioは [`agents/fixtures/tdd-skill.json`](../../agents/fixtures/tdd-skill.json) に置く。baselineでは、agent resource reaperの`dryRun`について、削除対象の意味、公開option、package、Shell fixtureまで広く調べられた。一方、contract projectionの複数checkをまとめてREDにした後、全ledger、lock、worktreeのbehavior fixtureを一括で作る順序だった。
+
+未見のdoctor JSON変更へSkillを適用すると、依頼上は新規に見えた`--json`が既に存在し、`status`の値域は未確定だと確認した。最初のsliceを`schemaVersion: 1`の公開だけに絞り、既存runtime checkの欠落をRED、report literalへの一項目追加を最小GREENとし、text出力、終了status、check順序は後続へ残した。全featureを先にtest設計せず、推測を加えずに一つのpublic observableへ収束したため、baselineで不足したslice分離とrestraintは改善した。forward evalでは編集とbuildを行っていない。
+
+続けて隔離したCLI fixtureへ適用した。JSON全体を比較するtestを先に作り、`bash .tdd-eval/test-json.sh`は`schemaVersion`欠落を理由にexit 1となった。JSON literalへ`schemaVersion: 1`だけを追加すると、同じcommandがexit 0になった。整理すべき重複はなく、REFACTORと追加検証を増やさなかった。fixtureは評価後に削除した。
 
 ### domain-modelingで採用したdonor
 

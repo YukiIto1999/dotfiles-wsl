@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "overloaded-order-language",
+      "prompt": "注文systemでcustomer account、user、organizationが混在し、cancelが注文全体と明細単位の二つを指します。概念、境界、語彙、不変条件を整理してください。",
+      "expectedSkills": ["domain-modeling"],
+      "expected": {
+        "startsFromConcreteScenarios": true,
+        "doesNotConflatePersonAndOrganization": true,
+        "distinguishesOrderAndLineCancellation": true,
+        "doesNotConflateCancellationWithRefund": true,
+        "surfacesUserOwnedDecisions": true,
+        "doesNotDeclareCandidateTermsCanonical": true,
+        "doesNotPromoteRecommendationsToInvariants": true
+      }
+    },
+    {
+      "id": "bounded-context-relationship",
+      "prompt": "受注、出荷、請求が同じCustomerとOrderを別の意味で使っています。bounded contextとcontext間の関係をmodelingしてください。",
+      "expectedSkills": ["domain-modeling"],
+      "expected": {
+        "doesNotMapDirectoriesDirectlyToContexts": true,
+        "definesContextSpecificMeaning": true,
+        "identifiesBoundaryMappings": true
+      }
+    },
+    {
+      "id": "cross-artifact-drift",
+      "prompt": "仕様ではsubscriptionをsuspendでき、APIではpause、DBではdisabled、UIでは解約と表示しています。意味のずれを整理してmodelを直してください。",
+      "expectedSkills": ["domain-modeling"],
+      "expected": {
+        "tracesMeaningAcrossArtifacts": true,
+        "doesNotAssumeExistingCodeIsCorrect": true,
+        "usesScenariosToResolveDifferences": true
+      }
+    },
+    {
+      "id": "read-existing-vocabulary",
+      "prompt": "実装前に既存の用語集を読み、そこにある語を使ってください。modelは変更しません。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["domain-modeling"]
+    },
+    {
+      "id": "identifier-rename",
+      "prompt": "この変数名とclass名が既存語彙に合っているかreviewしてください。domainの意味は確定済みです。",
+      "expectedSkills": [],
+      "futureOwner": "naming-review",
+      "mustNotTrigger": ["domain-modeling"]
+    },
+    {
+      "id": "database-schema-design",
+      "prompt": "確定済みdomain modelからPostgreSQLのtable、constraint、indexを設計してください。",
+      "expectedSkills": [],
+      "futureOwner": "db-design",
+      "mustNotTrigger": ["domain-modeling"]
+    },
+    {
+      "id": "module-boundary-design",
+      "prompt": "確定済みdomain modelを基にmoduleの責務、所有、依存方向を決めてください。",
+      "expectedSkills": [],
+      "futureOwner": "module-design",
+      "mustNotTrigger": ["domain-modeling"]
+    }
+  ]
+}

@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`ja-writing`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`description-writing`、`documentation-writing`、`domain-modeling`、`ja-writing`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -157,6 +157,17 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 `bug-analysis`は分析結果を所有し、修正を所有しない。test、CLI、request、trace、差分、runtime観測のうち、症状を判別できる最小のsignalを選ぶ。再現不能なincidentでも観測済み証拠を捨てず、事実、仮説、不明点を分ける。原因はfailure siteではなく、最初に誤ったstateか契約違反として示す。近接scenarioは [`agents/fixtures/bug-analysis-skill.json`](../../agents/fixtures/bug-analysis-skill.json) に置く。
 
 旧Superpowersとdonor本文を同じscenarioへ適用すると、診断依頼でも修正とTDDまで所有し、performanceだけの問題や原因確定後の実装でも発火した。clean reproがないincidentでは、既存logを分析する前に仮説を禁じる。新しいSkillは、診断と修正、機能障害とperformance分析を分け、再現できない場合も観測済み証拠から確定事項と不足を返す。
+
+### domain-modelingで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Matt Pocock domain-modeling](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/domain-modeling) | MIT | 曖昧語への質問、具体的なedge case、codeとの矛盾確認、決定済み語彙の即時記録、ADRを残す三条件 | `CONTEXT.md`、`CONTEXT-MAP.md`、`docs/adr/`の固定配置と、一つの用語集形式 |
+| [architecture-standard](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 不変条件から整合性境界を考えること、事実と現在状態、識別子、時刻を区別すること、意味と単位を型へ伝える観点 | aggregate、型、純粋性、eventをすべてのdomain modelへ先に要求すること |
+
+MattのSkillは、modelを変える仕事と既存語彙を読むだけの仕事を分ける点で有効だった。一方、文書配置をSkillが決めるため、このrepositoryの既存構成と衝突する。新しい`domain-modeling`は具体的なscenarioから概念、context、語彙、不変条件を決め、code、schema、API、UI、testの意味を照合する。実装上の型、module、table、endpointは後続の設計へ渡す。
+
+代表scenarioは [`agents/fixtures/domain-modeling-skill.json`](../../agents/fixtures/domain-modeling-skill.json) に置く。近接する語彙の監査、DB schema設計、module境界設計、既存用語集の参照では発火しない。baselineは個人、組織、取消、返金を分離できたが、`Customer Organization`と`Representation`を利用者が意味を確定する前に正規語として採用し、観測事実だけでは決まらない不変条件を並べた。このSkillは、具体的なscenarioで反証し、観測と利用者判断を分けてからmodelを確定する手順を補う。
 
 ## Skill 化の条件
 

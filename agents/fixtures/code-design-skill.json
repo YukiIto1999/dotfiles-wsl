@@ -167,7 +167,7 @@
     {
       "id": "existing-code-review",
       "prompt": "このdiffの内部code構造をreviewし、severity付きfindingを出してください。設計変更は依頼しません。",
-      "expectedSkills": ["code-reviewer"],
+      "expectedSkills": ["code-review"],
       "mustNotTrigger": ["code-design"]
     },
     {

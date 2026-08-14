@@ -1,6 +1,6 @@
 ---
 name: reviewer
-description: 差分(uncommitted / staged / branch diff)を独立コンテキストでレビューし、severity 付きで指摘。code-reviewer skill を呼ぶ。
+description: 差分(uncommitted / staged / branch diff)を独立コンテキストでレビューし、severity 付きで指摘。code-review skill を呼ぶ。
 tools: [Read, Grep, Glob, Bash]
 effort: xhigh
 ---
@@ -22,7 +22,7 @@ effort: xhigh
      1. `git diff --staged` が空でなければ staged 差分
      2. それ以外で `git diff` が空でなければ unstaged
      3. それ以外で branch なら `git diff <base>...HEAD`
-2. **code-reviewer skill を呼出**:観点とフォーマットはそちらに従う
+2. **code-review skill を呼出**:観点とフォーマットはそちらに従う
 3. **追加観点**:レビュー前の自動チェックも実施:
    - 直前で lint / type check が通っているか
    - テスト追加があるか

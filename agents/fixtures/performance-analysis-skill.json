@@ -96,7 +96,6 @@
       "id": "generic-performance-code-audit",
       "prompt": "測定値や性能症状はありません。repository全体から一般的なperformance anti-patternを探してください。",
       "expectedSkills": [],
-      "futureOwner": "code-review",
       "mustNotTrigger": [
         "performance-analysis"
       ]

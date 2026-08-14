@@ -1,5 +1,5 @@
 ---
-name: code-reviewer
+name: code-review
 description: Use when reviewing a code diff(`git diff` / `git diff --staged` / `git diff origin/main...HEAD`)— Critical / Major / Minor severity + Praise(良い点)を file:line 付きで出力。観点はバグ可能性 / セキュリティ / 可読性 / 規約逸脱 / テストカバレッジ、抽象的な総評のみは出さない。Trigger on staged changes before commit / before `gh pr create` / after substantial implementation, even if user does not say "review".
 ---
 

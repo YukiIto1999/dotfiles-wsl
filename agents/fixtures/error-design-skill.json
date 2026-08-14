@@ -119,7 +119,7 @@
     {
       "id": "review-error-handling",
       "prompt": "このdiffのerror handlingを監査し、severity付きfindingを出してください。再設計は依頼しません。",
-      "expectedSkills": ["code-reviewer"],
+      "expectedSkills": ["code-review"],
       "mustNotTrigger": ["error-design"]
     },
     {

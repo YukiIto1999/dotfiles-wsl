@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-design`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
+- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -284,7 +284,7 @@ Skillなしでもsource、target、consumer、正本、共存、cutover、recove
 | [Addy Osmani code-review-and-quality、api-and-interface-design](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | 公開名をobservable contractとして扱い、misleading nameを表面的な統一より優先すること | REST URL、field casing、boolean prefix、enum形式の固定 |
 | [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | MIT | 外部規約より既存projectのnaming familyを先に確認し、成果物の役割を同種peerと比べること | DTO suffix、interface prefix、folder、class shape、casingの固定 |
 
-候補の責務は、確定済みの意味、役割、単位、粒度、scope、context内の語彙に対し、既存名の不一致を根拠付きfindingへまとめることに限定した。正式語が未確定なら`domain-modeling`、rename実装は`refactoring`、diff全体の判定は`code-reviewer`が所有する。
+候補の責務は、確定済みの意味、役割、単位、粒度、scope、context内の語彙に対し、既存名の不一致を根拠付きfindingへまとめることに限定した。正式語が未確定なら`domain-modeling`、rename実装は`refactoring`、diff全体の判定は`code-review`が所有する。
 
 baselineでは、Account、Member、Membership、Invoice、minor unit、UTC instant、boolean predicateを定義し、API、DB、type、function、fieldの命名だけを監査した。Skillなしでも、MembershipをUserやAccountとして表す役割不一致、AccountとOrganizationの語彙分裂、金額の単位とowner、Dateとinstant、Statusとpredicate、Atとdurationの矛盾を、語彙を新規決定せず六つの根本findingへまとめられた。独立methodologyによる改善を観測できないため、現時点ではrepository規約と基礎モデルで足りる。
 
@@ -389,9 +389,9 @@ forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一�
 | [architecture-standard review、contracts](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 正本、binding、生成物、provider、未変更consumerの照合と機械検証の優先 | 固定directory、pagination、HTTP binding、version配置の一律適用 |
 | [OpenAPI 3.2.0](https://github.com/OAI/OpenAPI-Specification/tree/99710bcb26cbe4be646565eebeb04348f02374b5)、[TypeSpec 1.15.0](https://github.com/microsoft/typespec/tree/f30cd352f93997e04c75d48c7ace6947a1d5d07a) | Apache-2.0、MIT | schema、compiler、linter、emitterを決定的な証拠に使うこと | 規格適合だけでprovider behaviorとconsumer assumptionを証明すること |
 
-候補の責務は、既存のconsumer-visible contractを、semantic source、binding、生成物、provider behavior、consumer assumptionの順に追い、readerとwriterの方向別に互換性を監査することとした。新contractは`interface-design`、consumer列挙は`impact-analysis`、一般的な差分は`code-reviewer`が所有する。
+候補の責務は、既存のconsumer-visible contractを、semantic source、binding、生成物、provider behavior、consumer assumptionの順に追い、readerとwriterの方向別に互換性を監査することとした。新contractは`interface-design`、consumer列挙は`impact-analysis`、一般的な差分は`code-review`が所有する。
 
-baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査観点を与えた実行は、推定owner root内の無関係な`*.hm-back`も削除できることをMajorとして検出したが、入力が方法論を漏らしていたためadmission根拠から外した。方法論を与えない独立reviewerも同じ問題を検出し、さらにruntimeの`HOME`で対象userが変わることと、`--system`がhome削除後にsystem削除へ進む権限境界をMajorとして検出した。固有methodologyによる改善を観測できないため、既存contract単体の監査は基礎モデル、interface変更を含む差分は`code-reviewer`で扱い、runtime Skillは追加しない。
+baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査観点を与えた実行は、推定owner root内の無関係な`*.hm-back`も削除できることをMajorとして検出したが、入力が方法論を漏らしていたためadmission根拠から外した。方法論を与えない独立reviewerも同じ問題を検出し、さらにruntimeの`HOME`で対象userが変わることと、`--system`がhome削除後にsystem削除へ進む権限境界をMajorとして検出した。固有methodologyによる改善を観測できないため、既存contract単体の監査は基礎モデル、interface変更を含む差分は`code-review`で扱い、runtime Skillは追加しない。
 
 ### code-designで採用したdonor
 

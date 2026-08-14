@@ -68,4 +68,4 @@ bottleneckと呼べるのは、対象条件で目標指標のmaterialな部分�
 - 反証した候補と重要な非bottleneck
 - 未確定のroot cause、fieldへの外挿、不足している証拠
 
-最適化候補を求められても、まずこの分析を終える。実装は確認したbottleneckを入力に別工程で行い、同じworkloadと測定方法で前後を比較する。機能上のerrorや誤出力は`bug-analysis`、browser全体の技術監査は`browser-review`、UIの使いやすさは`ui-review`が所有する。
+最適化候補を求められても、まずこの分析を終える。実装は確認したbottleneckを入力に別工程で行い、同じworkloadと測定方法で前後を比較する。機能上のerrorや誤出力と、実画面での利用者taskや使いやすさの監査は対象外とする。

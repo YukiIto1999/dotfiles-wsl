@@ -121,7 +121,6 @@
       "id": "architecture-audit",
       "prompt": "現行system全体のservice境界、ownership、deployment topologyを監査してください。diffはありません。",
       "expectedSkills": [],
-      "futureOwner": "architecture-review",
       "mustNotTrigger": ["code-review"]
     },
     {

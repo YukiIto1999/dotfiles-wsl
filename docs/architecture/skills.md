@@ -302,6 +302,19 @@ baselineでは、Account、Member、Membership、Invoice、minor unit、UTC inst
 
 baselineでは、agent bundleのatomic publish transactionについて、consumerが完全な旧releaseか新releaseだけを見る契約を入力にした。Skillなしでも、本番validatorと独立したtree manifest oracleを選び、実process、Linux filesystem、`flock`、本番rename helperを使うbehavior testへ絞れた。crash前後、並行installer、同一release再実行の四caseを同期markerで制御し、unlinkとsymlinkの二段切替、未完成releaseの公開、lock除去、manifest比較除去のmutationがどのcaseで検出されるかまで対応付けた。kernel crash、電源断、consumer側の複数回path解決などのresidual riskも分離できたため、独立Skillによる改善を確認できない。
 
+### test-reviewをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 固定規則にしない内容 |
+|---|---|---|---|
+| [dotnet test-gap-analysis、testability](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-test/skills) | MIT | fault modelからのobligation、pseudo-mutation、ambient dependency、観測不能なseam | grade、行数、C# wrapper、sourceとtestの静的対応 |
+| [Matt Pocock tdd、code-review](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | consumer observable、独立oracle、意味のあるRED、機械検査との重複回避 | TDD workflow、issue tracker、parallel agent |
+| [Addy Osmani test-driven-development](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/test-driven-development/SKILL.md) | MIT | 時刻、順序、共有状態、resource fidelity | 80/15/5、real優先の固定順位、全変更への発火 |
+| [architecture-standard verification、tests](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | oracle、RED証跡、mutation、coverageを未検証箇所の探索に使うこと | coverage、mutation threshold、test構成の一律適用 |
+
+候補の責務は、既存suiteを固定済みのcontractとriskへ照合し、`fault → observable → oracle → test evidence`を追って、obligation欠落、自己参照oracle、誤ったpass条件、fidelity不足、contractを保存しないdouble、非決定性をfindingにすることとした。test実装は`tdd`、固定diffが導入したtest問題は`code-review`、現在のfailure原因は`bug-analysis`が所有する。
+
+baselineでは、`cleanup-home-backups` checkを監査した。root外の無関係な`*.hm-back`を保存するfixtureはある一方、選択された`dotfiles-wsl` root内ではprovenanceに関係なく同suffixを削除する実装と期待値になっていた。通常能力だけでこの未検証data loss経路をMajorとして特定し、隔離した一時`HOME`への非破壊previewで、root内の無関係なbackupだけが削除候補になることを再現できた。固有methodologyによる改善を観測できないためruntime Skillは追加しない。oracleの実装複製、実contractを保存しないfake、flaky、問題のないsuiteを含む比較で反復不足が出た場合だけ再検討する。
+
 ### data-modelingをSkill化しない判断
 
 | Donor | License | 利用できる知見 | 汎用化しない内容 |

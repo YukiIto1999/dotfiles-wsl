@@ -58,8 +58,9 @@
     {
       "id": "performance-only",
       "prompt": "APIのp95 latencyが120msから480msへ悪化しました。bottleneckを分析してください。",
-      "expectedSkills": [],
-      "futureOwner": "performance-analysis",
+      "expectedSkills": [
+        "performance-analysis"
+      ],
       "mustNotTrigger": ["bug-analysis"]
     },
     {

@@ -80,6 +80,7 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | import、call、data、runtime、build、deploymentの依存分析 | `dependency-analysis` |
 | 具体的な変更のconsumer、互換性、rollout、rollback影響分析 | `impact-analysis` |
 | latency、throughput、CPU、memory、I/O、DB、browser性能のbottleneck分析 | `performance-analysis` |
+| 確定済みbehaviorをRED、最小GREEN、REFACTORで実装 | `tdd` |
 | domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
 | planやdecisionを依存順の質問で詰める | `grilling` |
 | domain設計を質問で詰めて既存文書へ残す | `grill-with-docs` |

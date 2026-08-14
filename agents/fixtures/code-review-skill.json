@@ -133,7 +133,6 @@
       "id": "test-suite-audit",
       "prompt": "既存test suite全体のoracle、fidelity、mock依存を監査してください。",
       "expectedSkills": [],
-      "futureOwner": "test-review",
       "mustNotTrigger": ["code-review"]
     },
     {

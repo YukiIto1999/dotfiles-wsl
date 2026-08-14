@@ -442,7 +442,7 @@ forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一�
 
 baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査観点を与えた実行は、推定owner root内の無関係な`*.hm-back`も削除できることをMajorとして検出したが、入力が方法論を漏らしていたためadmission根拠から外した。方法論を与えない独立reviewerも同じ問題を検出し、さらにruntimeの`HOME`で対象userが変わることと、`--system`がhome削除後にsystem削除へ進む権限境界をMajorとして検出した。固有methodologyによる改善を観測できないため、既存contract単体の監査は基礎モデル、interface変更を含む差分は`code-review`で扱い、runtime Skillは追加しない。
 
-### code-reviewで採用したdonor
+### code-reviewで調査したsourceと採否
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
@@ -451,10 +451,13 @@ baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査
 | [Ponytail review](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/.openclaw/skills/ponytail-review/SKILL.md) | MIT | 削除、直接実装、既存helper、標準機能を新しい所有物の対照にすること | LOCとdependency数の最小化、single implementation abstractionの一律否定 |
 | [code-humanizer](https://github.com/LeonardNJU/code-humanizer/tree/8ffe07b2f1301f4285c9ccaed387bd203ff6ef4c)、[deai-code](https://github.com/golovatskygroup/deai-code/tree/35d9f87f25221577fdaa1b7f2ebb212d921dea5d) | MIT | 重複helper、broad exception、fallback、説明comment、投機的抽象を現在の変更costから疑うこと | AI著者推定、score、出自別severity、人間らしく見せる目的 |
 | [architecture-standard review、audit](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de/process) | repository rootに表示なし | 機械検証の優先、未変更consumer、生成物、設定、今回導入した問題の因果 | project固有standardの本文、全severity見出し、finding数の強制 |
+| [Zenn「そのAI生成コード、全部レビューしますか？全部信じますか？」](https://zenn.dev/r_kaga/articles/66c190413d3ab9)、[Martin Fowler「To Vibe or Not to Vibe」](https://martinfowler.com/articles/exploring-gen-ai/to-vibe-or-not-vibe.html) | 記事本文に再利用license表示なし | なし | 影響と検出可能性によるreview深度は既存Skillとbaselineが同じ判断を行い、追加指示によるupliftがなかった。機械的なrisk scoreとAI固有の誤り確率も採らない |
 
 旧`code-reviewer`は、CriticalとMajorがなくてもMinorを作る規則を持ち、requirement、未変更consumer、生成物を標準入力にしていなかった。Skill IDを`code-review`へ揃え、変更の目的とrepository constraintを別に照合し、今回の差分が導入または悪化させた実害だけをfindingにする。security、architecture、test suiteの専門監査は所有しない。
 
 baselineでは、`3e94a025`のChrome DevTools追加をreviewし、`set -e`下の`! grep`が禁止flagを検出してもcheckを失敗させない問題をmerge blockerとして検出した。7分後の`1d33da1b`は同じ箇所を明示的な条件分岐へ直しており、findingと一致した。一方、問題のない`cf1fb79a`のpath制御文字拒否では、旧Skillの規則に従って同じ文字classを通る追加fixtureをMinorとして要求したが、現行まで修正されず述語とtestは維持されている。新しいSkillはゼロfindingを正しい結果とし、機械検証と重複する列挙を棄却する。固定したbase、head、baseline、候補出力、oracleは [`agents/fixtures/code-review-skill.json`](../../agents/fixtures/code-review-skill.json) に置く。
+
+AI生成と人手という表示だけを変えた認可diffと、決定的なsnapshot検査済みの低影響diffでも比較した。Skillありとbaselineはどちらも、認可diffを同じCritical、低影響diffをfindingなしと判定した。既存能力で足りるため、影響と検出可能性のrisk modelはruntime Skillへ追加しない。
 
 同じrevisionの解析結果があるrepositoryでは、SonarQubeのissue、security hotspot、quality gateをchanged fileの候補発見に使う。解析結果だけでfindingを確定せず、該当source、diff、consumer、失敗経路で反証する。review中にissueの状態やcommentは変更しない。
 
@@ -563,6 +566,18 @@ MattのSkillは、modelを変える仕事と既存語彙を読むだけの仕事
 | [Matt Pocock grilling](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/productivity/grilling/SKILL.md) | MIT。配備package内に原文のnoticeを含める | decision tree、依存が解けたfrontier単位の質問、各問への推奨、事実はagentが調べdecisionは利用者が決めること、共有理解まで実装しないこと | 事実確認のたびにsubagentを必須にせず、repositoryのsubagent規律に合わせた。質問の装飾だけを簡素化した |
 
 `grilling`は明示的な依頼を受け、未決定事項を依存順に質問するprocedureを所有する。domainの意味は決めず、設計文書も書かない。`grill-with-docs`は独自の判断を持たず、二つを合成するsignature procedureとして置く。通常の設計、直接実装、候補を広げるだけのbrainstormでは発火しない。代表scenarioは [`agents/fixtures/grilling-skill.json`](../../agents/fixtures/grilling-skill.json) に置く。baselineは一問ごとに回答を待ち、同じ前提から今決められる他の論点と、後続の依存関係を示さなかった。このSkillは同じfrontierを一巡にまとめ、回答に依存する質問だけを後へ送る。
+
+## 評価状況
+
+配備対象のlocal Skill 23個は`quick_validate.py`を通過している。形式検証は成果改善を示さないため、これだけで完成とは判定しない。`prototype`はbaselineとの差がなく、`ui-review`はforward evalが成立しなかったため、どちらも配備対象から外した。
+
+[WAXA 0.3.1](https://github.com/mizchi/skills/tree/7a0d72866a0bb3e9ac3e2768c328b09ba2bc40c4/tools/waxa)を一時利用し、23個すべてを監査した。静的auditのraw findingは47件、errorは0件だった。23件はfrontmatterの`Does not`を読まない非対象検査、21件はrepository rootのlicenseを読まない検査、3件は`Use for`をtriggerと認識しない正規表現によるもので、Skillの実不備は0件だった。
+
+外部toolを必要としない19個は、Skillありとbaselineを各1回、near-missは23個すべてを実行した。出力を確認した最終判定はtypical 19件中19件、near-miss 23件中23件がpassだった。WAXAのraw判定ではtypical 2件、near-miss 16件がfailだったが、前者はrubricが責務境界を誤読し、後者は`OTHER`に理由を添えた出力を完全一致検査が拒否していた。baselineは19件中10件がpassした。1 trialのscore差だけでは安定したupliftを示さない。
+
+WAXAでは実行できない4個も別に評価した。`grill-with-docs`は未決定事項の依存順を守り、baselineが先取りした質問と未提示の概念を増やさなかった。`web-research`はContext7のquota超過後も設定済みGitHub MCPから同じ版の一次資料を取得し、baselineの独力Web検索を避けた。旧`TDD` Skillを単純なbehavior追加へ適用した比較では、Skillありとbaselineが同じ実装に到達し、双方が同一GREENを一度重ねた。設計feedbackを必要とする料金scenarioでは、baselineが責務混在を残したのに対し、改訂後のSkillは料金判断と監査送信を別ownerへ分け、既存caseを保ってextensionを追加した。`code-review`は別modelのtool利用が4回ともpermission拒否またはtimeoutとなり、repositoryを使う比較は成立しなかった。artifactだけを与えたAI生成と人手の対比較では、Skillありとbaselineが同じ認可findingとfindingなし判定を返した。
+
+以上はSkill本文の欠陥を示さなかったが、23個すべてのmaterial upliftを証明したものでもない。旧`tdd`の重複実行は過去のprocess restraint findingとして残し、設計feedbackの改善とは分けて扱う。`code-review`のtool統合比較は評価基盤を直すまで未測定とし、artifact対比較でupliftのなかったrisk指示は追加しない。`database-review`と`browser-review`は追加せず、security reviewはsecurity pluginへ集約した。`ui-review`はPlaywright経路が安定した後に、forward evalと`bug-analysis`、`performance-analysis`とのcompositionを確認してから再検討する。
 
 ## Skill 化の条件
 

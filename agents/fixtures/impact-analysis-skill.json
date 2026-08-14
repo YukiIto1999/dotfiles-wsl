@@ -81,8 +81,8 @@
     {
       "id": "choose-new-architecture",
       "prompt": "この変更を避けるため、新しいmodule境界とinterfaceを設計してください。",
-      "expectedSkills": [],
-      "futureOwner": "module-design",
+      "expectedSkills": ["module-design"],
+      "futureOwner": "interface-design",
       "mustNotTrigger": [
         "impact-analysis"
       ]

@@ -22,7 +22,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
+- local: `bug-analysis`、`code-reviewer`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`grill-with-docs`、`grilling`、`impact-analysis`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`tdd`、`web-research`
 - plugin: `frontend-design`、`skill-creator`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
@@ -70,6 +70,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `code-design` は module 内部の型、関数、変換、純粋核と effect、抽象、局所性を決める。`module-design` は actor、change driver、責務、所有、境界、依存方向を決める。`interface-design` は境界を越える契約、`architecture-design` は system 全体の topology、quality attribute、deployment、integration を決める。
 
+`module-design`は、確定済みのactor、domain ownership、state、artifact lifecycle、system topologyを制約として消費する。module内部の実装、exact interface、serviceやrepositoryのtopology、domain語彙、既存構造のseverity付きreviewは所有しない。
+
 `data-modeling` はデータの意味、形、所有、正準形、valid state、lifecycle、serialization を決める。`db-design` は access pattern、物理schema、constraint、index、transaction、migration、rollout を決める。
 
 `test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd` は確定済みのbehaviorを一つのobservableな縦のsliceにし、意味のあるRED、最小GREEN、触れた範囲のREFACTORを反復する。原因未確定の障害、test suiteの監査、独立した構造変更は所有しない。
@@ -90,7 +92,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 |---|---|
 | [Matt Pocock skills](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | `bug-analysis`、`dependency-analysis`、`domain-modeling`、`code-design`、`module-design`、`code-review`、`tdd`、`prototype`、`web-research` |
 | [Addy Osmani agent-skills](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c) | `impact-analysis`、`interface-design`、`code-review`、`tdd`、`bug-analysis`、`ui-design`、`performance-analysis`、security plugin |
-| [WondelAI skills](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | `impact-analysis`、`refactoring`、`architecture-design`、`architecture-review`、`db-design`、`ui-review` |
+| [WondelAI skills](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | `impact-analysis`、`refactoring`、`module-design`、`architecture-design`、`architecture-review`、`db-design`、`ui-review` |
 | [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `skill-creator`、`test-design`、`test-review`、`tdd` |
 | [Vercel agent skills](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc) | `component-design`、`performance-analysis`、`ui-review` |
 | [Anthropic skills](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434) | `skill-creator`、`ui-design`、`browser-review`、`description-writing` |
@@ -297,6 +299,22 @@ baselineでは、Account、Member、Membership、Invoice、minor unit、UTC inst
 候補の責務は、確定済みbehaviorとriskを、observable、独立oracle、seamとtest level、必要なfidelity、data、fault、concurrency、決定性、residual riskへ変換することに限定した。test実装は`tdd`、既存suiteのfindingは`test-review`が所有する。browser実行は証拠取得の手段であり、独立した判断責務にはしない。
 
 baselineでは、agent bundleのatomic publish transactionについて、consumerが完全な旧releaseか新releaseだけを見る契約を入力にした。Skillなしでも、本番validatorと独立したtree manifest oracleを選び、実process、Linux filesystem、`flock`、本番rename helperを使うbehavior testへ絞れた。crash前後、並行installer、同一release再実行の四caseを同期markerで制御し、unlinkとsymlinkの二段切替、未完成releaseの公開、lock除去、manifest比較除去のmutationがどのcaseで検出されるかまで対応付けた。kernel crash、電源断、consumer側の複数回path解決などのresidual riskも分離できたため、独立Skillによる改善を確認できない。
+
+### module-designで採用したdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | 責務配置の異なる案、seamの位置とinterface内容の分離、同じ形式での比較、代表usageからのcaller burden確認 | 三案と複数subagentの固定、deep moduleの一律優先、既存testの削除 |
+| [architecture-standard design、separation、dependency](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | actorとchange reason、隠す判断、state owner、source dependencyとruntime callの分離 | 固定layerとdirectory、全依存のinward化、port、DI、composition root、one-file-one-conceptの強制 |
+| [Shane Vitarana decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect) | MIT | couplingのstrength、distance、volatility、ownership、shared stateとtemporal contractの実費 | functional coreの標準化、全依存のinversion、review finding形式 |
+| [WondelAI software-design-philosophy、team-topologies](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | information hiding、change amplification、caller load、data、runtime、artifact ownership | deep moduleの一律優先、固定scoreとteam taxonomy、moduleとteamの一対一対応 |
+| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | MIT | 新moduleなしと既存ownerを対照に置き、新境界がdistinct change driver、state、artifact lifecycle、ownershipを封じ込めるか問うこと | file数、diff、行数、標準libraryを常時優先すること、single implementation interfaceの一律否定 |
+
+`module-design`は、actor、change driver、stateとartifact lifecycleを固定し、責務配置の異なる案をhard constraint、変更伝播、caller burden、runtime crossing、build、deploy、可逆性で比較する。moduleを増やすことも減らすことも目的にせず、同じ制約下で他案を支配する案か、優先するriskに対するtrade-offを選ぶ。
+
+代表scenarioは [`agents/fixtures/module-design-skill.json`](../../agents/fixtures/module-design-skill.json) に置く。baselineでは、AgentMemory backendのnpm sourceとpackageをagent integrationへ移す案を正しく逆依存として棄却できた。一方、共通versionとupstream releaseを理由に、新しいvendor名のrepository rootへbackend、hook、plugin、MCP entrypointを集約する案を推奨した。現行のcontainer ownerがbackend sourceとruntime stateを持ち、agent integrationとMCPが型付きcontractを消費する境界で足りるかを対照にせず、root ownershipとrelease contractを増やした。新しいSkillは、新moduleなしを候補に含め、独立したchange driver、state、artifact lifecycle、accountable ownerを封じ込めない境界を棄却する。
+
+forward evalでは、Git identity templateと生成先のownerを実装から比較した。`accounts`所有、`toolchain/git`所有、新しい`identity` module、`sops`所有を同じ制約で比べ、Git構文とinclude pathを`toolchain/git`、identity値とsecret配備を`accounts`に残す現行案を選んだ。新moduleは独立consumer、state、artifact lifecycleを持たずcontractを一段増やすとして棄却した。依頼されていないADR形式まで生成したため、成果に必要な判断だけを返し、文書形式を発明しない停止条件を追加した。
 
 ### domain-modelingで採用したdonor
 

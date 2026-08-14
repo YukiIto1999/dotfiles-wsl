@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "stress-test-plan",
+      "prompt": "同期HTTPをevent駆動へ変える案をgrillしてください。まだ実装しません。",
+      "expectedSkills": ["grilling"],
+      "expected": {
+        "buildsDecisionTree": true,
+        "asksOnlyCurrentFrontier": true,
+        "recommendsOneAnswerPerQuestion": true,
+        "waitsForUserDecisions": true
+      }
+    },
+    {
+      "id": "dependent-decisions",
+      "prompt": "新しい認可modelを質問で詰めたいです。tenantの定義が決まるまでrole設計は決められません。",
+      "expectedSkills": ["grilling"],
+      "expected": {
+        "asksTenantDecisionFirst": true,
+        "defersDependentRoleQuestions": true,
+        "recomputesFrontierAfterAnswer": true
+      }
+    },
+    {
+      "id": "fact-lookup-before-question",
+      "prompt": "現在のrepositoryがoutboxを実装済みかも含めて調べ、私が決めるべきことだけ質問してください。",
+      "expectedSkills": ["grilling"],
+      "expected": {
+        "looksUpRepositoryFacts": true,
+        "doesNotAskUserDiscoverableFacts": true,
+        "keepsUnrelatedQuestionsMoving": true
+      }
+    },
+    {
+      "id": "domain-model-with-docs",
+      "prompt": "注文と返金のdomain modelをgrill with docsで詰め、既存のdomain文書へ決定を残してください。",
+      "expectedSkills": ["grill-with-docs", "grilling", "domain-modeling"],
+      "expected": {
+        "usesDomainScenarios": true,
+        "recordsOnlyResolvedDecisions": true,
+        "followsExistingDocumentStructure": true
+      }
+    },
+    {
+      "id": "direct-implementation",
+      "prompt": "仕様は確定済みです。このfeatureを実装してください。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["grilling", "grill-with-docs"]
+    },
+    {
+      "id": "open-ended-brainstorm",
+      "prompt": "このproductの可能性を自由にbrainstormしてください。まだ候補を絞りません。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["grilling", "grill-with-docs"]
+    }
+  ]
+}

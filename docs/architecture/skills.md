@@ -271,6 +271,19 @@ baselineでは、session ledger v1の`owner_start_time`をv2の`owner_process_st
 
 Skillなしでもsource、target、consumer、正本、共存、cutover、recovery、cleanupを具体化でき、誘導を減らした同一scenarioでも不足を観測できなかった。現状は`impact-analysis`がconsumerと共存条件を渡し、対象固有の設計と`tdd`がcompatibility codeとtransformerを実装すれば足りる。反復する失敗が観測されるまで、donorは調査記録に留め、runtime Skillとrouting costを増やさない。
 
+### naming-reviewをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [architecture-standard naming](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/principles/naming.md) | repository rootに表示なし | 同じ概念と別概念の語彙、型と単位、参照範囲、code、schema、DB、UI、文書の横断確認 | 英語、boolean prefix、collection複数形、略語禁止の一律適用 |
+| [Matt Pocock domain-modeling、codebase-design、code-review](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | glossary参照と語彙決定の分離、repository規約の優先、規約違反と意味矛盾の根拠を分けること | glossary更新、ADR、module taxonomy、diff全体のreview |
+| [Addy Osmani code-review-and-quality、api-and-interface-design](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | 公開名をobservable contractとして扱い、misleading nameを表面的な統一より優先すること | REST URL、field casing、boolean prefix、enum形式の固定 |
+| [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | MIT | 外部規約より既存projectのnaming familyを先に確認し、成果物の役割を同種peerと比べること | DTO suffix、interface prefix、folder、class shape、casingの固定 |
+
+候補の責務は、確定済みの意味、役割、単位、粒度、scope、context内の語彙に対し、既存名の不一致を根拠付きfindingへまとめることに限定した。正式語が未確定なら`domain-modeling`、rename実装は`refactoring`、diff全体の判定は`code-reviewer`が所有する。
+
+baselineでは、Account、Member、Membership、Invoice、minor unit、UTC instant、boolean predicateを定義し、API、DB、type、function、fieldの命名だけを監査した。Skillなしでも、MembershipをUserやAccountとして表す役割不一致、AccountとOrganizationの語彙分裂、金額の単位とowner、Dateとinstant、Statusとpredicate、Atとdurationの矛盾を、語彙を新規決定せず六つの根本findingへまとめられた。独立methodologyによる改善を観測できないため、現時点ではrepository規約と基礎モデルで足りる。
+
 ### domain-modelingで採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |

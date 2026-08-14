@@ -78,6 +78,8 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | 外部 Web の調査 | `web-research` |
 | bug、test失敗、incidentの原因分析 | `bug-analysis` |
 | domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
+| planやdecisionを依存順の質問で詰める | `grilling` |
+| domain設計を質問で詰めて既存文書へ残す | `grill-with-docs` |
 | commit / PR 前の diff review | `code-reviewer` |
 | staged diff から commit message 作成 | `commit-writing` |
 | PR、changelog、release noteの作成 | `change-writing` |

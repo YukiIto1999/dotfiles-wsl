@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-08-14",
+  "cases": [
+    {
+      "id": "agent-resource-reaper",
+      "prompt": "agent resourceの公開CLI、ledger schema、stderr、exit status、module境界は固定です。malformed ledger、proc参照race、dirty worktree、remove失敗を、内部でどこに保持、翻訳、伝播、集約するか設計してください。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "reusesExistingStatusAndReason": true,
+        "separatesGlobalTrustFailureFromRecordPreservation": true,
+        "aggregatesIndependentRecords": true,
+        "doesNotIntroduceGenericResult": true,
+        "preservesPublicContract": true
+      }
+    },
+    {
+      "id": "provider-translation",
+      "prompt": "公開failure variantとadapter境界は確定済みです。providerのnot-found、auth、rate-limit、malformed response、未知errorを内部variantへ翻訳し、上位へ伝播する設計をしてください。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "treatsProviderErrorAsUntrusted": true,
+        "translatesOnceAtOwnedBoundary": true,
+        "doesNotLeakVendorVocabulary": true,
+        "doesNotCoerceUnknownErrorToExpectedFailure": true
+      }
+    },
+    {
+      "id": "expected-defect-cancel",
+      "prompt": "公開contractとmoduleは固定です。対象なし、在庫競合、破損した内部state、caller cancelを内部でどう区別し、どこまで伝えるか設計してください。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "distinguishesAbsenceExpectedFailureDefectAndCancellation": true,
+        "placesVariantsWithSemanticOwner": true,
+        "preservesCancellation": true
+      }
+    },
+    {
+      "id": "single-retry-owner",
+      "prompt": "外部書込みのtimeout failureと公開結果は確定済みです。operationはidempotency keyを持ち、service moduleがretryの実行ownerと決定済みです。transient判定と伝播を設計し、adapterとjob runnerでretryを重複させないでください。回数と時間は別のreliability設定が所有します。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "requiresTransientMeaningAndIdempotency": true,
+        "respectsFixedRetryOwner": true,
+        "doesNotInventRetryBudget": true
+      }
+    },
+    {
+      "id": "fallback-correctness",
+      "prompt": "固定済みcontractの範囲でcache miss、provider failure、署名が壊れたcache entryのfallbackを検討してください。fallbackは通常時にも正しい結果として使える場合だけ許可され、破損stateへdefaultを返してはいけません。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "distinguishesAbsenceFromProviderFailure": true,
+        "requiresCorrectTestedObservableFallback": true,
+        "rejectsDefaultForInvalidState": true
+      }
+    },
+    {
+      "id": "validation-aggregation",
+      "prompt": "公開validation responseは固定です。独立したfield validationは利用者が一度に直せるよう集約し、canonicalized fieldsに依存する署名検証は前提失敗時に実行しません。内部failureの集約、順序、field identityを設計してください。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "aggregatesIndependentFailures": true,
+        "preservesStableIdentityAndOrder": true,
+        "doesNotAggregateDependentSteps": true
+      }
+    },
+    {
+      "id": "transaction-fail-fast",
+      "prompt": "transactionの公開failureと手順は固定です。lock証明、precondition、write、commitが依存する逐次flowで、内部failureの伝播とcleanupを設計してください。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "failsFastOnUnsafeDependentStep": true,
+        "preservesOriginalFailureDuringCleanup": true,
+        "doesNotAddBatchAggregation": true
+      }
+    },
+    {
+      "id": "single-observation-owner",
+      "prompt": "公開errorとtelemetry backendは固定され、entrypoint moduleがterminal observationのowner、adapterはlogしないと決定済みです。secretを含み得るprovider causeがadapterからentrypointまで伝わり、telemetry書込みも失敗し得ます。既存entrypoint handlerで一度だけlogし、recoveryとterminal failureを区別して観測する設計をしてください。",
+      "expectedSkills": ["error-design"],
+      "expected": {
+        "usesFixedObservationOwner": true,
+        "preservesCorrelationWithoutRepeatedLogging": true,
+        "keepsSensitiveCausePrivate": true,
+        "doesNotLetTelemetryChangeOutcome": true
+      }
+    },
+    {
+      "id": "public-error-contract",
+      "prompt": "HTTP APIの公開error variant、status、payload、互換性を設計してください。内部伝播は対象外です。",
+      "expectedSkills": ["interface-design"],
+      "mustNotTrigger": ["error-design"]
+    },
+    {
+      "id": "error-owner-boundary",
+      "prompt": "failureの判断責務を二つのmoduleのどちらへ置き、依存方向と粗いcontractを決めてください。内部variantは後で設計します。",
+      "expectedSkills": ["module-design"],
+      "mustNotTrigger": ["error-design"]
+    },
+    {
+      "id": "diagnose-failure",
+      "prompt": "本番で発生したtimeoutのroot causeをlog、trace、metricから特定してください。設計変更は依頼しません。",
+      "expectedSkills": ["bug-analysis"],
+      "mustNotTrigger": ["error-design"]
+    },
+    {
+      "id": "nonfailure-control-flow",
+      "prompt": "failure policyは固定済みです。module内部のparse、decide、write関数とpure/effect境界を設計してください。",
+      "expectedSkills": ["code-design"],
+      "mustNotTrigger": ["error-design"]
+    },
+    {
+      "id": "implement-handlers",
+      "prompt": "内部failure設計と期待behaviorは確定済みです。REDからhandlerとproduction codeを実装してください。",
+      "expectedSkills": ["tdd"],
+      "mustNotTrigger": ["error-design"]
+    },
+    {
+      "id": "review-error-handling",
+      "prompt": "このdiffのerror handlingを監査し、severity付きfindingを出してください。再設計は依頼しません。",
+      "expectedSkills": ["code-reviewer"],
+      "mustNotTrigger": ["error-design"]
+    },
+    {
+      "id": "reliability-targets",
+      "prompt": "このserviceのtimeout値、retry回数、SLO、circuit breaker thresholdをproduction metricから決めてください。内部failure modelは固定です。",
+      "expectedSkills": [],
+      "mustNotTrigger": ["error-design"]
+    }
+  ]
+}

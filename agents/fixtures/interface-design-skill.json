@@ -117,8 +117,7 @@
     {
       "id": "internal-error-flow",
       "prompt": "公開error contractは確定済みです。system内部だけでerrorをどこに置き、どのlayerで翻訳し、どう伝播させるか設計してください。",
-      "expectedSkills": [],
-      "futureOwner": "error-design",
+      "expectedSkills": ["error-design"],
       "mustNotTrigger": ["interface-design"]
     },
     {

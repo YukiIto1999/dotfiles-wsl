@@ -214,17 +214,28 @@ baselineでは、agent resource reaperの公開optionと内部contract fieldを�
 
 代表scenarioは [`agents/fixtures/performance-analysis-skill.json`](../../agents/fixtures/performance-analysis-skill.json) に置く。baselineでは、同じ負荷のrelease A/Bでcheckout APIのp95が186msから442msへ悪化したartifactから、`reserve_inventory`のsequential scanをbottleneckとして特定できた。一方、closed workloadからproductionへの外挿、run間variance、observer effectを判断手順として固定していなかった。新しいSkillは比較可能性と測定誤差を先に扱い、critical path上の時間差とcontrolled probeが同じ指標を動かした場合だけbottleneckと判定する。plan選択理由のような未確定のroot causeは、箇所の特定と分けて残す。
 
-### tddで採用したdonor
+### tddで調査したsourceと採否
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
-| [architecture-standard implementation process](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/process/implementation.md)、[test methods](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/structure/tests/methods.md) | repository rootに表示なし | actorとuse caseからwork unitを定めること、test listを一つの縦のsliceずつ進めること、接続済みの型だけをREDに数えること、性質に合う最も内側の決定的なverifier、GREEN中の局所refactoring | test technique全般、test strategy、commitの分割をTDDが所有すること |
+| [architecture-standard implementation process](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/process/implementation.md)、[separation](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/principles/separation.md)、[construction](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/principles/construction.md)、[test methods](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/structure/tests/methods.md) | repository rootに表示なし | actor、use case、変更理由からwork unitを定めること、test listを一つの縦のsliceずつ進めること、接続済みの型だけをREDに数えること、GREENの痛みから責務配置を見直すこと、新しいcaseで既存caseの本文を保つこと | test technique全般、test strategy、commitの分割をTDDが所有すること、単一caseから抽象を作ること |
 | [Matt Pocock tdd](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/tdd/SKILL.md) | MIT | public interfaceからbehaviorを検査すること、実装へ結合したtestとproduction計算を複製するoracleを避けること、REDを実測して一つの縦のsliceを実装すること | seamごとに利用者確認を必須にすること、refactoringをTDDのloopからすべて外すこと |
 | [Addy Osmani test-driven-development](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/test-driven-development/SKILL.md) | MIT | repositoryのtest toolと規約を先に読むこと、REDの理由を確認すること、最小GREEN、GREEN中のREFACTOR、同じ成功済みcheckを無変更で繰り返さないこと | 固定のtest pyramid、全変更への一律発火、無条件のfull suite、test設計とbrowser検証の所有 |
+| [Kent Beck Canon TDD](https://tidyfirst.substack.com/p/canon-tdd) | 記事本文に再利用license表示なし | Test Listから一項目だけをconcrete testにし、各GREENが明らかにした設計を次のtest選択へ戻すこと、test作成時は主にinterfaceを決めること | 全項目のtestを先に具体化すること、実装設計をTest Listへ混ぜること、必要以上のrefactoring |
+| [Loglass「AIに先にテストを全部書かせる」はTDDじゃない](https://zenn.dev/loglass/articles/16745471ef55ff) | 記事本文に再利用license表示なし | AIによるtest一括作成と、短いcycleで設計を育てるTDDを別の方法として扱うこと | test一括作成をTDDと呼ぶこと、数分という固定cycle、SDDの構成をTDDへ持ち込むこと |
+| [Qiita「AI駆動開発の品質問題をTDD×9つの品質ゲートで解決する」](https://qiita.com/TMiyamoto/items/e18bf9fb61f33d643fe1) | 記事本文に再利用license表示なし | なし | 9段階の固定workflow、80%の合格点、300行の上限、12 agent reviewを成果比較なしで一般化すること |
 
-`tdd`は、既に意味と期待結果が決まったbehaviorを実装する規律だけを所有する。testを大量に先行作成せず、consumerが観測する一つのsliceについて、production変更前のRED、最小GREEN、触れた範囲のREFACTORを完結させる。testの種類を選ぶ一般論、既存suiteの評価、原因分析、独立したrefactoringは別の仕事である。
+`tdd`は、既に意味と期待結果が決まったbehaviorを実装し、その具体的なcycleから触れた範囲の設計を改善する規律を所有する。testを大量に先行作成せず、consumerが観測する一つのsliceについて、production変更前のRED、最小GREEN、触れた範囲のREFACTORを完結させる。testの種類を選ぶ一般論、既存suiteの評価、原因分析、独立したrefactoringは別の仕事である。
+
+SRPはclassの大きさでなく、actorと変更理由をsliceとownerへ対応させる判断として使う。OCPはinterfaceを増やす指示ではない。新しいcaseで既存caseのtestと本文を保ち、既存の直和や方針契約へ追加する。明示されたextension contractがない場合、一つのcaseから抽象を予測せず、複数の具体例から安定部分と変動部分を反証可能な形で確認してから最小のseamを置く。三つ目の同種要求は、その判断を行う目安であって絶対条件ではない。
 
 代表scenarioは [`agents/fixtures/tdd-skill.json`](../../agents/fixtures/tdd-skill.json) に置く。baselineでは、agent resource reaperの`dryRun`について、削除対象の意味、公開option、package、Shell fixtureまで広く調べられた。一方、contract projectionの複数checkをまとめてREDにした後、全ledger、lock、worktreeのbehavior fixtureを一括で作る順序だった。
+
+現行Skillへ料金caseを順次追加するscenarioを与えると、各caseのREDとGREENは分けたが、料金判断と監査ログの責務混在を分析せず、既存caseを保ったextensionの判断条件もなかった。条件分岐を同じ関数へ足し続けてもSkill違反にならず、短いcycleから得た具体的な設計圧をSRPとOCPへ変換できなかった。
+
+最初のforward evalは三つのcaseを別cycleで通し、既存`FeePolicy`を再利用し、既存caseのtestと本文を保った。一方、監査呼び出しを一箇所へ集めただけで、料金判断と監査を同じ関数に残した。重複除去を責務分離と誤認したため、別の変更理由に属する判断を対応するownerへ移す条件をSkillへ追加した。
+
+修正後のforward evalでは、固定fixtureの`trial`、`gold`、`suspended`を一つずつREDからGREENへ進め、料金と可否の判断を専用ownerへ移し、公開関数には監査送信を残した。既存`FeePolicy`を再利用し、新しいinterfaceやstrategyを追加していない。4件のtestに加え、責務境界、既存basic testの不変性、classと関数の構成を判定する [`verify.py`](../../agents/fixtures/tdd/verify.py) も成功した。
 
 未見のdoctor JSON変更へSkillを適用すると、依頼上は新規に見えた`--json`が既に存在し、`status`の値域は未確定だと確認した。最初のsliceを`schemaVersion: 1`の公開だけに絞り、既存runtime checkの欠落をRED、report literalへの一項目追加を最小GREENとし、text出力、終了status、check順序は後続へ残した。全featureを先にtest設計せず、推測を加えずに一つのpublic observableへ収束したため、baselineで不足したslice分離とrestraintは改善した。forward evalでは編集とbuildを行っていない。
 

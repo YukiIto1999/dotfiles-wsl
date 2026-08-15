@@ -278,6 +278,12 @@ let
       activeStates = [ "active" ];
       results = [ "success" ];
     };
+    "fixture/08b-systemd-socket" = common "systemd-socket" "systemd-socket" // {
+      unit = "socket-ok.socket";
+      loadStates = [ "loaded" ];
+      activeStates = [ "active" ];
+      results = [ "success" ];
+    };
     "fixture/09-systemd-timer" = common "systemd-timer" "systemd-timer" // {
       timer = "timer-ok.timer";
       service = "timer-ok.service";
@@ -360,6 +366,9 @@ let
     };
     "fixture/08-systemd-service" = passValues."fixture/08-systemd-service" // {
       unit = "service-fail.service";
+    };
+    "fixture/08b-systemd-socket" = passValues."fixture/08b-systemd-socket" // {
+      unit = "socket-fail.socket";
     };
     "fixture/09-systemd-timer" = passValues."fixture/09-systemd-timer" // {
       timer = "timer-fail.timer";

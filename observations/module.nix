@@ -158,6 +158,7 @@ let
     "bad"
   ];
   serviceUnit = types.addCheck safeToken (lib.hasSuffix ".service");
+  socketUnit = types.addCheck safeToken (lib.hasSuffix ".socket");
   timerUnit = types.addCheck safeToken (lib.hasSuffix ".timer");
 
   thresholdOrderIsValid =
@@ -261,6 +262,13 @@ let
 
   systemdServiceType = mkObservationType "systemd-service" {
     unit = lib.mkOption { type = serviceUnit; };
+    loadStates = lib.mkOption { type = uniqueNonEmptyListOf loadState; };
+    activeStates = lib.mkOption { type = uniqueNonEmptyListOf activeState; };
+    results = lib.mkOption { type = uniqueNonEmptyListOf serviceResult; };
+  } (_: true);
+
+  systemdSocketType = mkObservationType "systemd-socket" {
+    unit = lib.mkOption { type = socketUnit; };
     loadStates = lib.mkOption { type = uniqueNonEmptyListOf loadState; };
     activeStates = lib.mkOption { type = uniqueNonEmptyListOf activeState; };
     results = lib.mkOption { type = uniqueNonEmptyListOf serviceResult; };
@@ -381,6 +389,7 @@ let
     pathMetadataType
     managedRootsType
     systemdServiceType
+    systemdSocketType
     systemdTimerType
     restartCounterType
     filesystemThresholdType

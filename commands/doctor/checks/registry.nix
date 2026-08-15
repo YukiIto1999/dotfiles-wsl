@@ -172,6 +172,7 @@ let
     "roster"
     "swap-policy"
     "systemd-service"
+    "systemd-socket"
     "systemd-timer"
   ];
   productionProjectionMatches = lib.all (

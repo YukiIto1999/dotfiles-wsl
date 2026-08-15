@@ -143,6 +143,13 @@ let
             kind = "journal-size";
             inherit (journal) maximumBytes;
           };
+          "host/nix-daemon" = common "nix-daemon" null "nix-daemon.socket is not operational" // {
+            kind = "systemd-socket";
+            unit = "nix-daemon.socket";
+            loadStates = [ "loaded" ];
+            activeStates = [ "active" ];
+            results = [ "success" ];
+          };
           "host/nix-gc" =
             common "maintenance/${nixGc.timerName}.timer" null
               "${nixGc.timerName}.timer or its service is not operational"

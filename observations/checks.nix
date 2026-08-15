@@ -263,7 +263,7 @@ let
 in
 {
   observation-contract =
-    assert builtins.length (builtins.attrNames fixture.valid) == 17;
+    assert builtins.length (builtins.attrNames fixture.valid) == 18;
     assert evaluationSucceeds validEvaluation;
     assert evaluationSucceeds (evalRegistry { });
     assert evaluationSucceeds optionalCommonEvaluation;
@@ -272,8 +272,8 @@ in
     assert evaluationSucceeds spacedPathsEvaluation;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".checkId == null;
     assert optionalCommonEvaluation.config.dotfiles.observations."host/roster".resourceKey == null;
-    assert builtins.length missingRequiredCases == 113;
-    assert builtins.length kindReplacementCases == 272;
+    assert builtins.length missingRequiredCases == 120;
+    assert builtins.length kindReplacementCases == 306;
     assert builtins.length invalidCommandCases == 18;
     assert lib.all (
       projection:

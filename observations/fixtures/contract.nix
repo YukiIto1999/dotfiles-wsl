@@ -111,6 +111,13 @@ let
       activeStates = [ "active" ];
       results = [ "success" ];
     };
+    "host/systemd-socket" = common "systemd-socket" // {
+      kind = "systemd-socket";
+      unit = "fixture.socket";
+      loadStates = [ "loaded" ];
+      activeStates = [ "active" ];
+      results = [ "success" ];
+    };
     "host/systemd-timer" = common "systemd-timer" // {
       kind = "systemd-timer";
       timer = "fixture.timer";
@@ -224,6 +231,9 @@ in
     );
     commandVersionCodeArgs = replace "host/command-version" (
       valid."host/command-version" // { versionArgs = [ "-c" ]; }
+    );
+    systemdSocketServiceUnit = replace "host/systemd-socket" (
+      valid."host/systemd-socket" // { unit = "fixture.service"; }
     );
     numericCommandWrongPurpose = replace "host/numeric-command-threshold" (
       numericThreshold // { command = normalizedProtocolCommand; }

@@ -30,6 +30,7 @@ let
     "host/home-manager"
     "host/home-manager-restart"
     "host/journald"
+    "host/nix-daemon"
     "host/nix-gc"
     "host/root-filesystem"
     "host/swap"
@@ -90,6 +91,17 @@ let
       maximumBytes = 4294967296;
       resourceKey = "journald";
       timeoutSeconds = 10;
+    };
+    "host/nix-daemon" = {
+      activeStates = [ "active" ];
+      checkId = "nix-daemon";
+      failureMessage = "nix-daemon.socket is not operational";
+      kind = "systemd-socket";
+      loadStates = [ "loaded" ];
+      resourceKey = null;
+      results = [ "success" ];
+      timeoutSeconds = 10;
+      unit = "nix-daemon.socket";
     };
     "host/nix-gc" = {
       activeStates = [ "active" ];

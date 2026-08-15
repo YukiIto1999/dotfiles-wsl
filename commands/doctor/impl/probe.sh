@@ -275,7 +275,7 @@ probe_managed_roots() {
   if ((valid == 1)); then emit_pass "$resources"; else emit_failure "$resources"; fi
 }
 
-probe_systemd_service() {
+probe_systemd_unit() {
   local unit load active result
   unit=$($jq_command -r '.unit' <<<"$observation")
   if load=$($systemctl_command show "$unit" --property=LoadState --value 2>/dev/null) \
@@ -587,7 +587,8 @@ case "$kind" in
   deployed-path) probe_deployed_path ;;
   path-metadata) probe_path_metadata ;;
   managed-roots) probe_managed_roots ;;
-  systemd-service) probe_systemd_service ;;
+  systemd-service) probe_systemd_unit ;;
+  systemd-socket) probe_systemd_unit ;;
   systemd-timer) probe_systemd_timer ;;
   restart-counter) probe_restart_counter ;;
   filesystem-threshold) probe_filesystem_threshold ;;

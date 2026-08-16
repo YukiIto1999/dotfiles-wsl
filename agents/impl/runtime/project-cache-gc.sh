@@ -224,7 +224,12 @@ remove_orphan_session() {
   if ! rm -rf --one-file-system -- "$quarantine_path"; then
     printf 'dotfiles-agent-project-cache-gc: cannot remove quarantined orphan: %s\n' \
       "$quarantine_path" >&2
-    printf 'retained-hidden\n'
+    if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" \
+      unremovable-orphan; then
+      printf 'retained\n'
+    else
+      printf 'retained-hidden\n'
+    fi
     return
   fi
   if ! rmdir -- "$quarantine_root" 2>/dev/null; then

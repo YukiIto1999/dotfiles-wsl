@@ -310,6 +310,31 @@ test -e "$incomplete_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/fi
 test -e "$incomplete_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
 grep -Fq 'incomplete session' "$incomplete_home/gc.log"
 
+# An orphan the run cannot delete returns to its own path instead of being
+# stranded in a quarantine root, so unrelated caches are still collected.
+unremovable_home=$fixture/unremovable-session-home
+mkdir -p "$unremovable_home/.cache/dotfiles-wsl/sessions" \
+  "$unremovable_home/.cache/dotfiles-wsl/builds"
+make_session_metadata "$unremovable_home" "$pressure_old_id" unremovable-session \
+  "$missing_pid" "$current_boot_id" 0
+unremovable_session=$unremovable_home/.cache/dotfiles-wsl/sessions/unremovable-session
+mkdir -p "$unremovable_session/tmp/locked"
+: > "$unremovable_session/tmp/locked/pinned"
+chmod 0500 "$unremovable_session/tmp/locked"
+make_cache "$unremovable_home" "$pressure_old_id" 1 32
+make_cache "$unremovable_home" "$stale_id" 40 2
+make_shared_cache "$unremovable_home" 32
+HOME=$unremovable_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC" 2>"$unremovable_home/gc.log"
+test -d "$unremovable_session"
+test -z "$(find "$unremovable_home/.cache/dotfiles-wsl/sessions" \
+  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
+test -e "$unremovable_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
+test ! -e "$unremovable_home/.cache/dotfiles-wsl/builds/$stale_id"
+grep -Fq 'cannot remove quarantined orphan' "$unremovable_home/gc.log"
+grep -Fq 'preserve unremovable-orphan' "$unremovable_home/gc.log"
+chmod 0700 "$unremovable_session/tmp/locked"
+
 # If a validated empty root changes immediately before rmdir, the run retains
 # the root and suppresses cache deletion instead of treating it as resolved.
 rmdir_race_home=$fixture/rmdir-race-home

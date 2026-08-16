@@ -533,8 +533,9 @@ probe_payload_entrypoint() {
   mapfile -d '' -t version_args < <(decode_version_args "$version_args_json")
   timeout_command=$(command -v timeout)
 
-  mkdir -m 0700 -- "$scratch/home" "$scratch/codex-home" "$scratch/cache" \
-    "$scratch/config" "$scratch/data" "$scratch/state" "$scratch/tmp" "$scratch/work"
+  mkdir -m 0700 -- "$scratch/work" "$scratch/work/home" "$scratch/work/codex-home" \
+    "$scratch/work/cache" "$scratch/work/config" "$scratch/work/data" \
+    "$scratch/work/state" "$scratch/work/tmp"
   set +e
   env -i \
     LC_ALL=C \

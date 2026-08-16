@@ -57,13 +57,13 @@ done
   || exit 106
 printf '%s\n' probe > ./probe-relative-write
 [[ $PWD == /proc/self/cwd ]] || exit 104
-[[ $HOME == /proc/self/cwd/../home ]] || exit 92
-[[ $CODEX_HOME == /proc/self/cwd/../codex-home ]] || exit 93
-[[ $XDG_CACHE_HOME == /proc/self/cwd/../cache ]] || exit 94
-[[ $XDG_CONFIG_HOME == /proc/self/cwd/../config ]] || exit 95
-[[ $XDG_DATA_HOME == /proc/self/cwd/../data ]] || exit 96
-[[ $XDG_STATE_HOME == /proc/self/cwd/../state ]] || exit 97
-[[ $TMPDIR == /proc/self/cwd/../tmp ]] || exit 98
+[[ $HOME == /proc/self/cwd/home ]] || exit 92
+[[ $CODEX_HOME == /proc/self/cwd/codex-home ]] || exit 93
+[[ $XDG_CACHE_HOME == /proc/self/cwd/cache ]] || exit 94
+[[ $XDG_CONFIG_HOME == /proc/self/cwd/config ]] || exit 95
+[[ $XDG_DATA_HOME == /proc/self/cwd/data ]] || exit 96
+[[ $XDG_STATE_HOME == /proc/self/cwd/state ]] || exit 97
+[[ $TMPDIR == /proc/self/cwd/tmp ]] || exit 98
 [[ $PATH == /proc/self/cwd/../../payload/bin:/proc/self/cwd/../../payload/codex-path ]] || exit 99
 [[ $LC_ALL == C && $TERM == dumb ]] || exit 100
 [[ -z ${{FIXTURE_INHERITED_SECRET+x}} ]] || exit 101

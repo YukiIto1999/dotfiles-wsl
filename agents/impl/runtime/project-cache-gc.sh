@@ -372,6 +372,12 @@ while IFS= read -r -d '' session; do
   session_id=${session##*/}
   metadata="$session/metadata.json"
   validate_managed_directory "$session"
+  if [ ! -e "$metadata" ] && [ ! -L "$metadata" ]; then
+    cache_gc_suppressed=true
+    printf 'dotfiles-agent-project-cache-gc: skip cache GC: incomplete session: %s\n' \
+      "$session" >&2
+    continue
+  fi
   validate_managed_file "$metadata" 'session metadata'
   validate_session_metadata "$metadata" "$session_id" || die "session metadata is invalid: $metadata"
   project_id=$(jq -r '.project_id' "$metadata")

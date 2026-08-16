@@ -291,6 +291,25 @@ test -e \
   "$invalid_quarantine_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
 grep -Fq 'unresolved quarantined session root' "$invalid_quarantine_home/gc.log"
 
+# A session that carries no metadata has not claimed anything yet. It is retained
+# and suppresses cache deletion, and every other session is still collected.
+incomplete_home=$fixture/incomplete-session-home
+mkdir -p "$incomplete_home/.cache/dotfiles-wsl/sessions/incomplete" \
+  "$incomplete_home/.cache/dotfiles-wsl/builds"
+make_session_metadata "$incomplete_home" "$pressure_old_id" orphan-session \
+  "$missing_pid" "$current_boot_id" 0
+make_cache "$incomplete_home" "$pressure_old_id" 1 32
+make_shared_cache "$incomplete_home" 32
+incomplete_high=$(($(allocated_bytes \
+  "$incomplete_home/.cache/dotfiles-wsl/shared") - 1))
+HOME=$incomplete_home DOTFILES_AGENT_GC_HIGH_BYTES=$incomplete_high \
+  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC" 2>"$incomplete_home/gc.log"
+test -d "$incomplete_home/.cache/dotfiles-wsl/sessions/incomplete"
+test ! -e "$incomplete_home/.cache/dotfiles-wsl/sessions/orphan-session"
+test -e "$incomplete_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
+test -e "$incomplete_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
+grep -Fq 'incomplete session' "$incomplete_home/gc.log"
+
 # If a validated empty root changes immediately before rmdir, the run retains
 # the root and suppresses cache deletion instead of treating it as resolved.
 rmdir_race_home=$fixture/rmdir-race-home

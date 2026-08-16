@@ -1430,13 +1430,13 @@ static int set_probe_environment(void) {
         const char *name;
         const char *value;
     } variables[] = {
-        {"HOME", "/proc/self/cwd/../home"},
-        {"CODEX_HOME", "/proc/self/cwd/../codex-home"},
-        {"XDG_CACHE_HOME", "/proc/self/cwd/../cache"},
-        {"XDG_CONFIG_HOME", "/proc/self/cwd/../config"},
-        {"XDG_DATA_HOME", "/proc/self/cwd/../data"},
-        {"XDG_STATE_HOME", "/proc/self/cwd/../state"},
-        {"TMPDIR", "/proc/self/cwd/../tmp"},
+        {"HOME", "/proc/self/cwd/home"},
+        {"CODEX_HOME", "/proc/self/cwd/codex-home"},
+        {"XDG_CACHE_HOME", "/proc/self/cwd/cache"},
+        {"XDG_CONFIG_HOME", "/proc/self/cwd/config"},
+        {"XDG_DATA_HOME", "/proc/self/cwd/data"},
+        {"XDG_STATE_HOME", "/proc/self/cwd/state"},
+        {"TMPDIR", "/proc/self/cwd/tmp"},
         {"PATH", "/proc/self/cwd/../../payload/bin:/proc/self/cwd/../../payload/codex-path"},
         {"PWD", "/proc/self/cwd"},
         {"LC_ALL", "C"},

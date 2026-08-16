@@ -112,9 +112,10 @@ if run_case production-fd-api; then
 
   probe_stage=$fixture/production-probe-stage
   mkdir -m 0700 "$probe_stage" "$probe_stage/probe" "$probe_stage/probe/work"
-  mkdir -m 0700 "$probe_stage/probe/home" "$probe_stage/probe/codex-home"
-  mkdir -m 0700 "$probe_stage/probe/cache" "$probe_stage/probe/config"
-  mkdir -m 0700 "$probe_stage/probe/data" "$probe_stage/probe/state" "$probe_stage/probe/tmp"
+  mkdir -m 0700 "$probe_stage/probe/work/home" "$probe_stage/probe/work/codex-home"
+  mkdir -m 0700 "$probe_stage/probe/work/cache" "$probe_stage/probe/work/config"
+  mkdir -m 0700 "$probe_stage/probe/work/data" "$probe_stage/probe/work/state" \
+    "$probe_stage/probe/work/tmp"
   mkdir -m 0700 "$probe_stage/payload" "$probe_stage/payload/bin" \
     "$probe_stage/payload/codex-path"
   probe_script=$probe_stage/payload/bin/probe-script
@@ -123,13 +124,13 @@ if run_case production-fd-api; then
 set -euo pipefail
 test "$1" = --version
 test "$PWD" = /proc/self/cwd
-test "$HOME" = /proc/self/cwd/../home
-test "$CODEX_HOME" = /proc/self/cwd/../codex-home
-test "$XDG_CACHE_HOME" = /proc/self/cwd/../cache
-test "$XDG_CONFIG_HOME" = /proc/self/cwd/../config
-test "$XDG_DATA_HOME" = /proc/self/cwd/../data
-test "$XDG_STATE_HOME" = /proc/self/cwd/../state
-test "$TMPDIR" = /proc/self/cwd/../tmp
+test "$HOME" = /proc/self/cwd/home
+test "$CODEX_HOME" = /proc/self/cwd/codex-home
+test "$XDG_CACHE_HOME" = /proc/self/cwd/cache
+test "$XDG_CONFIG_HOME" = /proc/self/cwd/config
+test "$XDG_DATA_HOME" = /proc/self/cwd/data
+test "$XDG_STATE_HOME" = /proc/self/cwd/state
+test "$TMPDIR" = /proc/self/cwd/tmp
 test "$PATH" = /proc/self/cwd/../../payload/bin:/proc/self/cwd/../../payload/codex-path
 test -z "${FIXTURE_INHERITED_SECRET+x}"
 for descriptor in /proc/self/fd/*; do

@@ -363,6 +363,9 @@ in
     assert lib.assertMsg (
       (zramService.unitConfig.DefaultDependencies or true) == false
     ) "dotfiles-zram-swap must disable default dependencies";
+    assert lib.assertMsg (
+      (zramService.restartIfChanged or true) == false
+    ) "dotfiles-zram-swap must not restart on a configuration switch";
     assert lib.assertMsg (lib.elem "shutdown.target" (
       zramService.conflicts or [ ]
     )) "dotfiles-zram-swap must conflict with shutdown.target";

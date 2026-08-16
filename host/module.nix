@@ -321,6 +321,7 @@ in
       "shutdown.target"
     ];
     conflicts = [ "shutdown.target" ];
+    restartIfChanged = false;
     unitConfig.DefaultDependencies = false;
     path = [ pkgs.util-linux ];
     serviceConfig = {

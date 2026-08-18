@@ -187,6 +187,13 @@ let
     timer = configuration.systemd.timers.docker-buildkit-gc or null;
   };
 
+  buildkitGcPolicyBounds =
+    policy:
+    builtins.isList policy
+    && policy != [ ]
+    && builtins.all (entry: (entry.maxUsedSpace or null) != null) policy
+    && builtins.any (entry: (entry.all or false) && (entry.maxUsedSpace or null) == "100GB") policy;
+
   containerContractMatches =
     configuration: services: observations:
     let
@@ -198,7 +205,8 @@ let
     in
     actual == expected
     && lib.attrByPath [ "builder" "gc" "enabled" ] null buildkit.daemonSettings == true
-    && lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null buildkit.daemonSettings == "60GB"
+    && lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null buildkit.daemonSettings == null
+    && buildkitGcPolicyBounds (lib.attrByPath [ "builder" "gc" "policy" ] null buildkit.daemonSettings)
     && buildkit.service != null
     &&
       execTokens == [
@@ -207,9 +215,9 @@ let
         "prune"
         "--force"
         "--max-used-space"
-        "60GB"
+        "100GB"
         "--reserved-space"
-        "20GB"
+        "10GB"
       ]
     && buildkit.timer != null
     &&
@@ -264,7 +272,13 @@ let
       docker = hostConfig.virtualisation.docker // {
         daemon = hostConfig.virtualisation.docker.daemon // {
           settings = lib.recursiveUpdate hostConfig.virtualisation.docker.daemon.settings {
-            builder.gc.defaultKeepStorage = "61GB";
+            builder.gc.policy = [
+              {
+                all = true;
+                reservedSpace = "10GB";
+                maxUsedSpace = "101GB";
+              }
+            ];
           };
         };
       };
@@ -273,7 +287,7 @@ let
       services = hostConfig.systemd.services // {
         docker-buildkit-gc = hostConfig.systemd.services.docker-buildkit-gc // {
           serviceConfig = hostConfig.systemd.services.docker-buildkit-gc.serviceConfig // {
-            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 61GB --reserved-space 20GB";
+            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 101GB --reserved-space 10GB";
           };
         };
       };
@@ -284,7 +298,7 @@ let
       services = hostConfig.systemd.services // {
         docker-buildkit-gc = hostConfig.systemd.services.docker-buildkit-gc // {
           serviceConfig = hostConfig.systemd.services.docker-buildkit-gc.serviceConfig // {
-            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 60GB --reserved-space 21GB";
+            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 100GB --reserved-space 11GB";
           };
         };
       };
@@ -432,8 +446,11 @@ in
       lib.attrByPath [ "builder" "gc" "enabled" ] null daemonSettings == true
     ) "Docker BuildKit GC must be enabled";
     assert lib.assertMsg (
-      lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null daemonSettings == "60GB"
-    ) "Docker BuildKit GC must retain 60GB by default";
+      lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null daemonSettings == null
+    ) "Docker BuildKit GC must not use defaultKeepStorage, which sets a floor instead of a cap";
+    assert lib.assertMsg (buildkitGcPolicyBounds (
+      lib.attrByPath [ "builder" "gc" "policy" ] null daemonSettings
+    )) "Docker BuildKit GC policy must bound every rule with maxUsedSpace";
     assert lib.assertMsg (gcService != null) "Docker BuildKit GC service is missing";
     assert lib.assertMsg (
       gcService.after == [ "docker.service" ]
@@ -459,9 +476,9 @@ in
         "prune"
         "--force"
         "--max-used-space"
-        "60GB"
+        "100GB"
         "--reserved-space"
-        "20GB"
+        "10GB"
       ]
     ) "Docker BuildKit GC command changed: actual=${builtins.toJSON execTokens}";
     assert lib.assertMsg (gcTimer != null) "Docker BuildKit GC timer is missing";

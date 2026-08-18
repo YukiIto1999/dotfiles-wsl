@@ -19,8 +19,12 @@ let
     let
       name = "docker-buildkit-gc";
       dockerService = "docker.service";
-      maxUsedSpace = "60GB";
-      reservedSpace = "20GB";
+      reservedSpace = "10GB";
+      unsharedMaxUsedSpace = "30GB";
+      maxUsedSpace = "100GB";
+      ephemeralMaxUsedSpace = "2GB";
+      ephemeralKeepDuration = "48h";
+      staleKeepDuration = "1440h";
     in
     rec {
       inherit name;
@@ -28,7 +32,30 @@ let
       timerUnit = "${name}.timer";
       daemonGc = {
         enabled = true;
-        defaultKeepStorage = maxUsedSpace;
+        policy = [
+          {
+            keepDuration = ephemeralKeepDuration;
+            maxUsedSpace = ephemeralMaxUsedSpace;
+            filter = [
+              "type=source.local"
+              "type=exec.cachemount"
+              "type=source.git.checkout"
+            ];
+          }
+          {
+            keepDuration = staleKeepDuration;
+            inherit reservedSpace;
+            maxUsedSpace = unsharedMaxUsedSpace;
+          }
+          {
+            inherit reservedSpace;
+            maxUsedSpace = unsharedMaxUsedSpace;
+          }
+          {
+            all = true;
+            inherit reservedSpace maxUsedSpace;
+          }
+        ];
       };
       service = {
         after = [ dockerService ];

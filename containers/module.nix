@@ -22,8 +22,6 @@ let
       reservedSpace = "10GB";
       unsharedMaxUsedSpace = "30GB";
       maxUsedSpace = "100GB";
-      ephemeralMaxUsedSpace = "2GB";
-      ephemeralKeepDuration = "48h";
       staleKeepDuration = "1440h";
     in
     rec {
@@ -33,15 +31,6 @@ let
       daemonGc = {
         enabled = true;
         policy = [
-          {
-            keepDuration = ephemeralKeepDuration;
-            maxUsedSpace = ephemeralMaxUsedSpace;
-            filter = [
-              "type=source.local"
-              "type=exec.cachemount"
-              "type=source.git.checkout"
-            ];
-          }
           {
             keepDuration = staleKeepDuration;
             inherit reservedSpace;

@@ -30,8 +30,8 @@ Think in English. Respond in Japanese.
 
 - 既存コンテキストは `AGENTS.md` / `CLAUDE.md` / README / docs を確認する。
 - session が提示する Skill、subagent、MCP tool、LSP を利用可否の正本とし、対応する入口がある作業はその入口を使う。
-- ローカルコードの検索は Read / Grep / Glob を、広域探索や構造把握が必要なら `rg` と `ast-grep` を使う。
-- 検索は `rg`、列挙は `fd`、表示は `bat`、一覧は `eza`、diff は `delta` が使える。
+- ローカルの exact text、identifier、path、regex、全件列挙は Read / Grep / Glob / LSP または `rg` を使う。表現や所在が不明な概念、関係、複数 file の横断探索は、既存 index があり session に提示された場合だけ Zvec-Grep MCP search を使う。関連結果がない探索型 probe は一度で止める。
+- shell では exact search に `rg`、indexed semantic search に `zg query` を使う。index の作成、再構築、削除は agent が暗黙に実行しない。構文 pattern の検索と一括書き換えは `ast-grep`、列挙は `fd`、表示は `bat`、一覧は `eza`、diff は `delta` を使う。
 - JSON / YAML / HTTP は `jq` / `yq` / `xh` が使える。
 
 ## 資源と検証

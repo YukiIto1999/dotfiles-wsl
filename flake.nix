@@ -107,6 +107,7 @@
             "playwright"
             "searxng"
             "sonarqube"
+            "zvec-grep"
           ];
         };
       };

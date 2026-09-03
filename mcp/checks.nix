@@ -28,11 +28,20 @@ let
     "playwright"
   ];
   lifecycleOf = target: target.serverLifecycle or null;
+  transportOf = target: target.serverTransport or null;
   sessionTargetNames = builtins.attrNames (
     lib.filterAttrs (_: target: lifecycleOf target == "session") targets
   );
   serviceTargetNames = builtins.attrNames (
     lib.filterAttrs (_: target: lifecycleOf target == "service") targets
+  );
+  stdioServiceTargetNames = builtins.attrNames (
+    lib.filterAttrs (
+      _: target: lifecycleOf target == "service" && transportOf target == "stdio"
+    ) targets
+  );
+  streamableHttpTargetNames = builtins.attrNames (
+    lib.filterAttrs (_: target: transportOf target == "streamable-http") targets
   );
   sessionPolicy = hostConfig.dotfiles.mcp.sessionPolicy or { };
   sessionFixtureServer = pkgs.writeShellApplication {
@@ -101,7 +110,8 @@ let
       tokens = tokensOf (configOf front).ExecStart;
       port = toString front.port;
     in
-    target.serverLifecycle == "service"
+    target.serverTransport == "stdio"
+    && target.serverLifecycle == "service"
     && !(onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port)
   ) fronts;
 
@@ -149,7 +159,8 @@ let
   }) expectedContract.targets;
 
   projectTargets = lib.mapAttrs (
-    _: target: {
+    _: target:
+    {
       inherit (target)
         needsNetwork
         port
@@ -158,6 +169,9 @@ let
         serverLifecycle
         waitUnits
         ;
+    }
+    // lib.optionalAttrs ((target.serverTransport or "stdio") != "stdio") {
+      inherit (target) serverTransport;
     }
   );
   targetContractMatches =
@@ -192,6 +206,7 @@ let
       probeFields = builtins.mapAttrs (_: option: option.type.name) probeOptions;
       needsNetworkDefault = targetOptions.needsNetwork.default;
       waitUnitsDefault = targetOptions.waitUnits.default;
+      serverTransportDefault = targetOptions.serverTransport.default;
     };
     fronts = {
       type = mcpOptions.fronts.type.name;
@@ -233,6 +248,7 @@ let
       fields = {
         executable = "str";
         serverLifecycle = "enum";
+        serverTransport = "enum";
         provider = "str";
         port = "intBetween";
         needsNetwork = "bool";
@@ -247,6 +263,7 @@ let
         timeout = "intBetween";
       };
       needsNetworkDefault = false;
+      serverTransportDefault = "stdio";
       waitUnitsDefault = [ ];
     };
     fronts = {
@@ -581,6 +598,10 @@ in
     assert targetOptions.port.type.check 8789;
     assert !(targetOptions.port.type.check 8769);
     assert !(targetOptions.port.type.check 8790);
+    assert targetOptions.serverTransport.default == "stdio";
+    assert targetOptions.serverTransport.type.check "stdio";
+    assert targetOptions.serverTransport.type.check "streamable-http";
+    assert !(targetOptions.serverTransport.type.check "sse");
     assert probeOptions.args.type.nestedTypes.elemType.name == "anything";
     assert probeOptions.timeout.type.check 1;
     assert probeOptions.timeout.type.check 120;
@@ -677,6 +698,9 @@ in
       executableWithArguments = updateTarget "memory" (
         target: target // { executable = "/bin/true --verbose"; }
       ) expectedTargets;
+      streamableSession = updateTarget "zvec-grep" (
+        target: target // { serverLifecycle = "session"; }
+      ) expectedTargets;
       probeDrift = updateTarget "memory" (
         target:
         target
@@ -748,6 +772,7 @@ in
     assert !(targetContractMatches probeDrift);
     assert !(targetContractMatches networkDrift);
     assert dependenciesValid services;
+    assert !(assertionsPass expectedProviders streamableSession);
     assert !(dependenciesValid missingAfter);
     assert !(dependenciesValid missingRequires);
     assert networkPolicyValid services;
@@ -792,6 +817,10 @@ in
       };
     assert sessionTargetNames == browserTargetNames;
     assert serviceTargetNames == lib.subtractLists browserTargetNames (builtins.attrNames targets);
+    assert streamableHttpTargetNames == [ "zvec-grep" ];
+    assert
+      stdioServiceTargetNames
+      == lib.subtractLists (browserTargetNames ++ streamableHttpTargetNames) (builtins.attrNames targets);
     assert !invalidLifecycleResult.success;
     assert lib.all (target: target ? executable && lib.hasPrefix "/" target.executable) (
       builtins.attrValues targets
@@ -806,7 +835,10 @@ in
     assert lib.all (
       name:
       builtins.elem "--stateless" (helpers.execTokens.tokensOf (configOf frontsByName.${name}).ExecStart)
-    ) serviceTargetNames;
+    ) stdioServiceTargetNames;
+    assert lib.all (
+      name: (configOf frontsByName.${name}).ExecStart == targets.${name}.executable
+    ) streamableHttpTargetNames;
     pkgs.runCommandLocal "check-mcp-front-session-lifecycle" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
       set -euo pipefail
 
@@ -872,7 +904,7 @@ in
     let
       execs = map (
         name: services.${frontsByName.${name}.service}.serviceConfig.ExecStart
-      ) serviceTargetNames;
+      ) stdioServiceTargetNames;
     in
     pkgs.runCommandLocal "check-mcp-front-wrapper-bind" { } ''
       inspected=0

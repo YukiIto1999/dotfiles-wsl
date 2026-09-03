@@ -8,7 +8,8 @@
     "memory",
     "playwright",
     "searxng",
-    "sonarqube"
+    "sonarqube",
+    "zvec-grep"
   ],
   "targets": {
     "chrome-devtools": {
@@ -157,6 +158,26 @@
       "waitUnits": [
         "docker-searxng.service"
       ]
+    },
+    "zvec-grep": {
+      "needsNetwork": false,
+      "port": 8784,
+      "probe": {
+        "args": {
+          "autoUpdate": false,
+          "limit": 1,
+          "fts": [
+            "dotfiles.mcp.targets"
+          ],
+          "root": "/home/nixos/dotfiles-wsl"
+        },
+        "timeout": 30,
+        "tool": "zvec_grep_search"
+      },
+      "provider": "zvec-grep",
+      "serverLifecycle": "service",
+      "serverTransport": "streamable-http",
+      "waitUnits": []
     },
     "sonarqube": {
       "needsNetwork": false,

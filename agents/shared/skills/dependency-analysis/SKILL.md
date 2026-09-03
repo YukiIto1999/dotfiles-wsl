@@ -31,7 +31,7 @@ description: Analyzes dependency structures by defining node, edge, direction, a
 
 - package manifest、compiler、module resolver、schema、service定義、deployment manifest
 - AST、symbol reference、call hierarchy、query plan、runtime trace
-- `rg`や`ast-grep`による候補探索と、定義元での確認
+- 表現や所在が不明な候補は Zvec-Grep、exact text や構文 pattern の候補は `rg` や `ast-grep` で探索し、定義元で確認
 - ownership fileとGit historyによるowner、change-driver、co-changeの確認
 
 文字列一致をsemantic dependencyとみなさない。alias、re-export、生成物、feature flag、dynamic loading、reflection、configuration、ambient stateを確認する。静的証拠からruntime edgeを断定せず、解決できないedgeは推測で補わない。

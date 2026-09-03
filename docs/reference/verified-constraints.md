@@ -31,7 +31,7 @@
 | 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
 | MCP unit が OCI、secret template、同名 backend の service contract を所有せず、同名 backend の secret には MCP 外の owner が宣言済みの場合だけ `restartUnits` を寄与する | `mcp-no-container-ownership` |
 | host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |
-| target の provider、server lifecycle、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
+| target の provider、server transport、server lifecycle、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
 | Codex MCP front が agent owner の実行 path を引用して使い、home path や binary 名を組み立てない | `mcp-codex-client-executable-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
 | GitHub account と `github-<account>` target が完全一致し、欠落、追加、改名を拒否する | `github-account-target-contract` |
@@ -41,8 +41,9 @@
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
-| service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
-| service lifecycle front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
+| stdio service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
+| service lifecycle front と native Streamable HTTP front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
+| Zvec-Grep front が native Streamable HTTP endpoint を直接公開し、agent toolset が意味検索だけを公開する | `zvec-grep-front` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |

@@ -13,6 +13,11 @@ let
   invalidExecutables = builtins.filter (
     name: !isExecutable cfg.targets.${name}.executable
   ) targetNames;
+  invalidStreamableLifecycles = builtins.filter (
+    name:
+    cfg.targets.${name}.serverTransport == "streamable-http"
+    && cfg.targets.${name}.serverLifecycle != "service"
+  ) targetNames;
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
   restartFailureCount = 20;
@@ -95,14 +100,22 @@ in
             };
             executable = lib.mkOption {
               type = lib.types.addCheck lib.types.str isExecutable;
-              description = "front が引数なしで起動する純粋な stdio MCP server の絶対 path";
+              description = "front が引数なしで起動する MCP server の絶対 path";
+            };
+            serverTransport = lib.mkOption {
+              type = lib.types.enum [
+                "stdio"
+                "streamable-http"
+              ];
+              default = "stdio";
+              description = "front が executable を公開する前に変換する transport";
             };
             serverLifecycle = lib.mkOption {
               type = lib.types.enum [
                 "service"
                 "session"
               ];
-              description = "stdio server の存続期間を所有する front service または downstream session";
+              description = "server process を front service または downstream session のどちらが所有するか";
             };
             port = lib.mkOption {
               type = lib.types.ints.between 8770 8789;
@@ -242,11 +255,15 @@ in
         RuntimeDirectory = front.runtimeDirectory;
         RuntimeDirectoryMode = "0700";
         Environment = [ "HOME=${config.dotfiles.host.homeDir}" ];
-        ExecStart = frontCommand {
-          inherit (target) executable serverLifecycle;
-          inherit (front) port;
-          inherit (cfg) sessionPolicy;
-        };
+        ExecStart =
+          if target.serverTransport == "streamable-http" then
+            target.executable
+          else
+            frontCommand {
+              inherit (target) executable serverLifecycle;
+              inherit (front) port;
+              inherit (cfg) sessionPolicy;
+            };
         MemoryMax = "2G";
       }
       // lib.optionalAttrs (!target.needsNetwork) {
@@ -286,6 +303,10 @@ in
     {
       assertion = invalidExecutables == [ ];
       message = "MCP target executables must be absolute paths without arguments";
+    }
+    {
+      assertion = invalidStreamableLifecycles == [ ];
+      message = "Native Streamable HTTP MCP targets must use service lifecycle";
     }
   ];
 }

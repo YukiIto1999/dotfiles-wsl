@@ -7,25 +7,16 @@
 
 let
   cfg = config.dotfiles;
+  lspProjection = import ../impl/lsp.nix { inherit lib; };
   managedMcp = pkgs.replaceVars ./assets/managed-mcp.json {
     gatewayUrl = config.dotfiles.mcp.gateway.url;
   };
   userSettingsSeed = ./assets/settings.json;
 
   # settings.json に lspServers は無く、登録経路は plugin だけである
-  lspServers = lib.mapAttrs (
-    _: server:
-    {
-      inherit (server) command;
-      extensionToLanguage = server.extensions;
-    }
-    // lib.optionalAttrs (server.args != [ ]) { inherit (server) args; }
-    // lib.optionalAttrs (server.initializationOptions != { }) {
-      inherit (server) initializationOptions;
-    }
-  ) cfg.toolchain.lsp;
-
-  lspJson = (pkgs.formats.json { }).generate "claude-lsp.json" lspServers;
+  lspJson = (pkgs.formats.json { }).generate "claude-lsp.json" (
+    lspProjection.claude cfg.toolchain.lsp
+  );
 
   # directory source の marketplace は git を持たないので version を明示する。
   # 内容が変われば store hash が変わり、Claude が更新として扱う

@@ -115,11 +115,13 @@ agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API ke
 
 ## LSP と観測
 
-language server の binary は `toolchain` が PATH へ置き、roster も同じ unit が持つ。CLI ごとに登録形式が違うため、変換は各 CLI の module が持つ。Claude Code は `settings.json` に LSP の設定 key を持たないので、plugin と marketplace を Nix store に生成して managed settings から指す。OMP は native server ID へ、OpenCode は設定ファイルの `lsp` block へ変換する。LSP を持たない CLI には配らない。
+language server の binary は `toolchain` が PATH へ置き、roster も同じ unit が持つ。roster から各 client の登録形式への写像は [`agents/impl/lsp.nix`](../../agents/impl/lsp.nix) が単独で持ち、各 client の module は生成した attrset を自分の配備形式へ包むだけにする。Claude Code は `settings.json` に LSP の設定 key を持たないので、plugin と marketplace を Nix store に生成して managed settings から指す。OMP は `lsp.json`、OpenCode は設定ファイルの `lsp` block へ配る。LSP を持たない CLI には配らない。
 
-同じ拡張子を二つの server が宣言すると、先に登録された片方だけが動き、もう片方は黙って起動しない。roster と各 CLI の登録の一致、拡張子の衝突は `lsp-registration` が検査する。
+roster が宣言するのは、checkout の内容ではなく環境が提供する集合である。したがって「宣言した server は client と checkout に関係なく、対応する拡張子を開いた時点で有効になる」を不変条件とする。ところが登録の既定は client ごとに違う。Claude Code は有効条件の field を持たず拡張子だけで解決する。OMP は宣言した名前で上流 `defaults.json` の同名 server へ shallow merge するので、`rootMarkers` を宣言しないと Cargo.toml や package.json の有無で有効集合が変わる。OpenCode は同 id の built-in から `root` 解決を引き継ぐので、workspace root の位置が上流の marker 表で決まり、marker が見つからないときに諦める実装では起動もしない。
 
-roster は checkout の内容ではなく環境が提供する集合を宣言する。OMP だけは宣言した server 名で上流 `defaults.json` を上書きするため、`rootMarkers` を明示しないと Cargo.toml や package.json の有無で有効集合が変わる。拡張子だけで解決する Claude Code と OpenCode とは同じ roster から違う集合が見えるので、OMP への変換は `rootMarkers` を cwd 自体に固定する。この固定も `lsp-registration` が検査する。
+そこで写像は継承を制御する。OMP へは `rootMarkers` に cwd 自体を渡して有効条件を自分で決め、名前は実装が同一の server だけ上流に合わせる。csharp の roslyn-ls と typescript の tsgo は上流の同名 server とは別実装なので自前の名前を与え、OmniSharp と tsserver 向けの設定を受け取らない。OpenCode は config に `root` を書けないため、id に所有者を前置して built-in から切り離す。前置しないと同じ roster の中で由来が分かれる。`bash`、`csharp`、`rust`、`typescript` は上流 built-in と同名で root を借り、`java`、`nix`、`python` は同名の built-in が無いので project directory を使っていた。
+
+同じ拡張子を二つの server が宣言すると、先に登録された片方だけが動き、もう片方は黙って起動しない。roster と各 client の登録の一致、client ごとの id 規則、OMP の有効条件、拡張子の衝突は `lsp-registration` が検査する。
 
 telemetry collector は OTLP を loopback で受け、生の record を残す。集計しないのは、どの操作で token を使ったかを後から追うためである。CLI は endpoint を `dotfiles.telemetry` から取るので、port を変えても CLI 側の宣言は変わらない。
 

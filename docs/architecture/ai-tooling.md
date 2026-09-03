@@ -53,6 +53,8 @@ agent 内の `git worktree add` は [`agents/impl/resource/`](../../agents/impl/
 
 local skill は [`agents/shared/skills/`](../../agents/shared/skills) から自動検出する。local skill と [`flake.nix`](../../flake.nix) に固定した plugin skill は、どちらも Nix store source として全 client へ配備する。本文の変更にも rebuild が必要である。local と plugin、plugin 同士の同名 skill は評価時に拒否する。
 
+複数の owner repository から Skill と runtime package を取り込む target 構成は、[Repository 所有 Skill の composition](repository-skills.md)に記録する。これは未実装であり、現行の `dotfiles.agents.shared.skills` と plugin 自動検出の説明を置き換えていない。
+
 配備済み Skill と評価前の候補を分け、候補の責務境界と donor は [Skill portfolio](skills.md) に記録する。
 
 ## CLI ごとの差

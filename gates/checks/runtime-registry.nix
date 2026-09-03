@@ -140,7 +140,7 @@
         "dotfiles-agent-project-cache-gc"
         "dotfiles-agent-resource-reaper"
         "dotfiles-zram-swap"
-        "docker-buildkit-gc"
+        "docker-build-artifact-gc"
         "docker-dotfiles-backends-network"
         "fstrim"
         "nix-daemon"

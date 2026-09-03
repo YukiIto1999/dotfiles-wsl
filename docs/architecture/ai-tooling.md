@@ -92,7 +92,7 @@ application 固有の contract と container 宣言は各 application の [`cont
 
 全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
 
-Docker daemon の native BuildKit GC は、規則ごとに `maxUsedSpace` を持つ policy で cache を上限付きに保つ。image と共有しない cache は 30GB、全体は 100GB を超えた分から回収し、10GB は常に残す。local context、cache mount、Git checkout は 48 時間かつ 2GB で切る。`defaultKeepStorage` は回収しない下限であって上限ではないため使わない。6 時間ごとの persistent timer も `docker buildx prune` を実行し、image、container、volume は削除しない。GC service は Docker を soft dependency として参照し、Docker や各 backend から GC への起動依存は持たない。
+Docker build artifact GC は、dangling image と BuildKit cache だけを所有する。daemon の native policy は、image と共有しない cache のうち 60 日未使用のものを先に回収し、残りを含めて 30GB に保つ。全 cache は 100GB に保ち、各規則で 10GB を残す。`defaultKeepStorage` は回収しない下限であって上限ではないため使わない。6 時間ごとの persistent timer は dangling image を回収してから、internal image と frontend image を含む BuildKit cache を 100GB まで回収する。tagged image、container、volume は削除しない。GC service は Docker を soft dependency として参照し、Docker や各 backend から GC への起動依存は持たない。
 
 ## agentmemory
 

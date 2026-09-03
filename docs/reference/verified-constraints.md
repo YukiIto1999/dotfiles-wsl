@@ -26,8 +26,8 @@
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
-| container service contract から service、restart、image、health、roster、BuildKit GC の observation を漏れなく導き、追加と削除に追随する | `container-runtime-observation-contract` |
-| BuildKit GC の保持量、timer、prune 引数が固定され、Docker と backend が GC に依存しない | `docker-buildkit-gc-contract` |
+| container service contract から service、restart、image、health、roster、Docker build artifact GC の observation を漏れなく導き、追加と削除に追随する | `container-runtime-observation-contract` |
+| dangling image と BuildKit cache の回収順序、daemon policy、timer が固定され、Docker と backend が GC に依存しない | `docker-build-artifact-gc-contract` |
 | 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
 | MCP unit が OCI、secret template、同名 backend の service contract を所有せず、同名 backend の secret には MCP 外の owner が宣言済みの場合だけ `restartUnits` を寄与する | `mcp-no-container-ownership` |
 | host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |

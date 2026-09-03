@@ -6,10 +6,6 @@ model_reasoning_summary = "auto"
 
 review_model = "@codexModel@"
 
-[agents]
-default_subagent_model = "@codexModel@"
-default_subagent_reasoning_effort = "xhigh"
-
 [[skills.config]]
 path = "@homeDir@/.codex/skills/.system/skill-creator"
 enabled = false

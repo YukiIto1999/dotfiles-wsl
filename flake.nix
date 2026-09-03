@@ -13,6 +13,9 @@
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
+    # OMP は Bun/Rust native addon を含むため、upstream の Nix package をそのまま使う。
+    omp.url = "github:can1357/oh-my-pi";
+
     # vendored な agent/skill source、flake = false で plain tree 扱い
     openaiPlugins = {
       url = "github:openai/plugins/ed8ce2eacc07964f0f556519e0737a420da14e00";
@@ -27,6 +30,7 @@
       nixos-wsl,
       home-manager,
       sops-nix,
+      omp,
       openaiPlugins,
       ...
     }:
@@ -47,7 +51,9 @@
         machineModules:
         nixpkgs.lib.nixosSystem {
           inherit system;
-          specialArgs = { inherit pluginSources self; };
+          specialArgs = {
+            inherit omp pluginSources self;
+          };
           modules =
             unitModules
             ++ [
@@ -82,6 +88,7 @@
             "antigravity"
             "claude"
             "codex"
+            "omp"
             "opencode"
           ];
           containers.enabled = [

@@ -115,10 +115,13 @@ let
       (builtins.readFile ../codex/impl/migrate-config.sh)
   );
 
-  expectedInstallManifest = map (name: {
-    inherit name;
-    inherit (expected.clients.${name}) binary versionArgs install;
-  }) expected.required;
+  expectedInstallManifest =
+    map
+      (name: {
+        inherit name;
+        inherit (expected.clients.${name}) binary versionArgs install;
+      })
+      (builtins.filter (name: expected.clients.${name}.install.kind != "nix-package") expected.required);
   agentmemoryHookCommand = name: "/run/current-system/sw/bin/agentmemory-hook-${name}";
   expectedHook =
     {
@@ -308,7 +311,17 @@ let
   securityDefinitionSource = hostConfig.dotfiles.agents.shared.definitions.security;
   claudeDefinitionSources = builtins.attrValues clients.claude.definitions;
   codexDefinitionSources = builtins.attrValues clients.codex.definitions;
+  ompDefinitionSources = builtins.attrValues clients.omp.definitions;
   opencodeDefinitionSources = builtins.attrValues clients.opencode.definitions;
+  ompLspNames = {
+    bash = "bashls";
+    csharp = "omnisharp";
+    java = "jdtls";
+    nix = "nixd";
+    python = "ty";
+    rust = "rust-analyzer";
+    typescript = "typescript-language-server";
+  };
 in
 {
   agent-config-migration =
@@ -354,7 +367,16 @@ in
     assert clients.claude.gatewayConfig.source == clients.claude.managedFiles.managed-mcp.source;
     assert clients.antigravity.gatewayConfig.source == clients.antigravity.managedFiles.mcp.source;
     assert clients.codex.gatewayConfig.source != clients.codex.managedFiles.system.source;
+    assert clients.omp.gatewayConfig.source == clients.omp.managedFiles.mcp.source;
     assert clients.opencode.gatewayConfig.source != clients.opencode.managedFiles.config.source;
+    assert lib.count (package: package == clients.omp.package) homeConfig.home.packages == 1;
+    assert lib.all (
+      row:
+      !lib.elem row.file.destination [
+        ".omp/agent/agent.db"
+        ".omp/agent/config.yml"
+      ]
+    ) managedRows;
     assert lib.any (
       definition:
       lib.hasInfix "/agents/module.nix" (toString definition.file)
@@ -493,6 +515,17 @@ in
             .hooks == $hooks
           ' > /dev/null
 
+        ompHook=${clients.omp.managedFiles.agentmemory-hook.source}
+        for event in session_start before_agent_start tool_call tool_result \
+          session_before_compact session_stop session_shutdown; do
+          grep -Fq "pi.on(\"$event\"" "$ompHook"
+        done
+        for hook in session-start prompt-submit pre-tool-use post-tool-use \
+          post-tool-failure pre-compact stop session-end; do
+          grep -Fq "\"$hook\"" "$ompHook"
+        done
+        grep -Fq 'tool_call hooks must fail open' "$ompHook"
+
         grep -Fq 'dotfiles-doctor` は `dotfiles.observations` の全登録を観測し' ${self}/agents/shared/AGENTS.md
         grep -Fq 'Skill を含む managed artifact と current source の不一致も検査する' ${self}/agents/shared/AGENTS.md
         grep -Fq 'Skill の動作や意味と実際の agent 機能との整合は自動検査しない' ${self}/agents/shared/AGENTS.md
@@ -508,6 +541,9 @@ in
         jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
           '. == {mcp: {gateway: {type: "remote", url: $expected}}}' \
           ${clients.opencode.gatewayConfig.source} > /dev/null
+        jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
+          '. == {mcpServers: {gateway: {type: "http", url: $expected}}}' \
+          ${clients.omp.gatewayConfig.source} > /dev/null
         remarshal -if toml -of json ${clients.codex.gatewayConfig.source} \
           | jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
             '. == {mcp_servers: {gateway: {url: $expected}}}' > /dev/null
@@ -588,6 +624,9 @@ in
         jq --exit-status --arg expected ${lib.escapeShellArg variantGatewayUrl} \
           '.mcp.gateway.url == $expected and (.mcp | keys) == ["gateway"]' \
           ${variantClients.opencode.managedFiles.config.source} > /dev/null
+        jq --exit-status --arg expected ${lib.escapeShellArg variantGatewayUrl} \
+          '.mcpServers.gateway == {type: "http", url: $expected} and (.mcpServers | keys) == ["gateway"]' \
+          ${variantClients.omp.managedFiles.mcp.source} > /dev/null
         remarshal -if toml -of json ${variantClients.codex.managedFiles.system.source} \
           > codex-system-variant.json
         codex_mcp_matches ${lib.escapeShellArg variantGatewayUrl} \
@@ -823,7 +862,7 @@ in
         legacy_role=cli
         legacy_option=m
         legacy_option+='y\.'
-        legacy_pattern="$legacy_option''${legacy_root}|dotfiles-install-''${legacy_root}|dotfiles-''${legacy_role}-autoupdate|''${legacy_root}/assets|''${legacy_root}/(antigravity|claude|codex|opencode)"
+        legacy_pattern="$legacy_option''${legacy_root}|dotfiles-install-''${legacy_root}|dotfiles-''${legacy_role}-autoupdate|''${legacy_root}/assets|''${legacy_root}/(antigravity|claude|codex|omp|opencode)"
         if rg -n "$legacy_pattern" ${self}; then
           echo "legacy clis path or runtime identity remains" >&2
           exit 1
@@ -836,6 +875,7 @@ in
     assert clients.antigravity.definitions == { };
     assert sharedDefinitionSources != [ ];
     assert codexDefinitionSources != [ ];
+    assert ompDefinitionSources != [ ];
     assert opencodeDefinitionSources != [ ];
     assert lib.all (source: lib.hasPrefix builtins.storeDir (toString source)) (
       builtins.attrValues hostConfig.dotfiles.agents.shared.skills
@@ -861,6 +901,7 @@ in
         sharedSources = sharedDefinitionSources;
         claudeSources = claudeDefinitionSources;
         codexSources = codexDefinitionSources;
+        ompSources = ompDefinitionSources;
         opencodeSources = opencodeDefinitionSources;
       }
       ''
@@ -896,8 +937,8 @@ in
           fi
         done
 
-        grep -Fq 'LSP は Claude Code と OpenCode で利用でき' "$rulesSource"
-        grep -Fq '自動連携は Claude Code と Codex が lifecycle hooks' "$rulesSource"
+        grep -Fq 'LSP は Claude Code、OMP、OpenCode で利用でき' "$rulesSource"
+        grep -Fq '自動連携は Claude Code、Codex、OMP が lifecycle hooks' "$rulesSource"
         for obsolete in memory_lesson_recall memory_lesson_save '~/.claude/projects/<X>/memory/'; do
           if grep -Fq "$obsolete" "$rulesSource"; then
             echo "obsolete memory route remains in AGENTS.md: $obsolete" >&2
@@ -921,6 +962,17 @@ in
         done
         for source in $opencodeSources; do
           check_frontmatter "$source"
+        done
+        for source in $ompSources; do
+          check_frontmatter "$source"
+          yq --exit-status '
+            (.name | length) > 0 and
+            (.description | length) > 0 and
+            .["thinking-level"] == "xhigh" and
+            (has("effort") | not) and
+            (.tools | all(. == "read" or . == "grep" or . == "glob" or
+              . == "web_search" or . == "edit" or . == "write" or . == "bash"))
+          ' frontmatter.yaml > /dev/null
         done
         for source in $codexSources; do
           remarshal -if toml -of json "$source" > definition.json
@@ -970,6 +1022,17 @@ in
               cmp "$shared" "$claude"
             done
 
+        paste \
+          <(printf '%s\n' $sharedSources) \
+          <(printf '%s\n' $ompSources) \
+          | while IFS=$'\t' read -r shared omp; do
+              shared_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$shared")
+              omp_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$omp")
+              diff --unified \
+                <(tail -n "+$((shared_end + 1))" "$shared") \
+                <(tail -n "+$((omp_end + 1))" "$omp")
+            done
+
         touch $out
       '';
 
@@ -989,11 +1052,15 @@ in
         claudeLsp="$marketplace/lsp/.lsp.json"
 
         jq --sort-keys 'keys' "$claudeLsp" > claude-names.json
+        jq --sort-keys 'keys' ${artifactSource "agents/omp/lsp"} > omp-names.json
         jq --sort-keys '.lsp | keys' ${artifactSource "agents/opencode/config"} > opencode-names.json
         printf '%s' ${lib.escapeShellArg (builtins.toJSON (builtins.attrNames roster))} \
           | jq --sort-keys '.' > expected-names.json
         diff --unified expected-names.json claude-names.json
         diff --unified expected-names.json opencode-names.json
+        printf '%s' ${lib.escapeShellArg (builtins.toJSON (lib.sort builtins.lessThan (builtins.attrValues ompLspNames)))} \
+          | jq --sort-keys '.' > expected-omp-names.json
+        diff --unified expected-omp-names.json omp-names.json
 
         ${lib.concatMapStrings (name: ''
           jq --exit-status \
@@ -1019,6 +1086,20 @@ in
             (.lsp["${name}"].extensions | sort) == ($extensions | sort) and
             (.lsp["${name}"].initialization // {}) == $options
           ' ${artifactSource "agents/opencode/config"} > /dev/null
+
+          jq --exit-status \
+            --arg command ${lib.escapeShellArg roster.${name}.command} \
+            --argjson args ${lib.escapeShellArg (builtins.toJSON roster.${name}.args)} \
+            --argjson fileTypes ${
+              lib.escapeShellArg (builtins.toJSON (builtins.attrNames roster.${name}.extensions))
+            } \
+            --argjson options ${lib.escapeShellArg (builtins.toJSON roster.${name}.initializationOptions)} '
+            .["${ompLspNames.${name}}"].command == $command and
+            .["${ompLspNames.${name}}"].args == $args and
+            (.["${ompLspNames.${name}}"].fileTypes | sort) == ($fileTypes | sort) and
+            (.["${ompLspNames.${name}}"].initOptions // {}) == $options and
+            .["${ompLspNames.${name}}"].rootMarkers == ["."]
+          ' ${artifactSource "agents/omp/lsp"} > /dev/null
         '') (builtins.attrNames roster)}
 
         jq -r '.[].extensionToLanguage | keys[]' "$claudeLsp" | sort > extensions

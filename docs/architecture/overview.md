@@ -96,8 +96,9 @@ user home に置く secret template の metadata は [`sops/impl/user-secret-fil
 | system closure、生成設定、生成 command | Nix store | build 後は immutable |
 | `/run/current-system`、system profile、systemd | NixOS activation | `dotfiles-rebuild` |
 | Home Manager の宣言的な home file | system generation 内の Home Manager 設定 | NixOS activation に続く user 配備 |
-| AI CLI binary、Docker cache、container data | 各専用 command と runtime service | rebuild とは別の明示操作、または service 実行 |
+| AI CLI binary、Docker cache、container data | Nix packageまたは各専用 command と runtime service | OMPはrebuild、その他の可変binaryとruntime dataは別の明示操作またはservice実行 |
 | Claude Code と Codex の user-owned seed config | seed 作成後は各 client | Home Manager activation は配備先に通常 file、symlink、directory などの既存物がない場合だけ通常 file を作る |
+| OMPの`config.yml`と`agent.db` | OMP | 対話設定とsubscription loginで更新し、Home Managerは触らない |
 | 暗号文、host key、復号済み secret | Git、root 管理領域、sops-nix runtime | enrollment、SOPS 編集、activation |
 
-mutable な runtime state を Nix 宣言へ逆輸入しない。NixOS または Home Manager が所有する生成先を直接編集しても正本は変わらず、次の activation で上書きされる。配備先を持つ managed artifact は source との不一致を doctor が報告する。Claude Code と Codex の user-owned seed config は artifact の配備観測から除外し、通常 file になった後は seed source を変更しても上書きしない。
+mutable な runtime state を Nix 宣言へ逆輸入しない。NixOS または Home Manager が所有する生成先を直接編集しても正本は変わらず、次の activation で上書きされる。配備先を持つ managed artifact は source との不一致を doctor が報告する。Claude Code と Codex の user-owned seed config とOMPの`config.yml`、`agent.db`はartifactの配備観測から除外する。

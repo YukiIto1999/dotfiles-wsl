@@ -103,7 +103,7 @@ in
     };
   };
 
-  config.dotfiles.artifacts."telemetry/collector" = {
+  config.dotfiles.managedArtifacts."telemetry/collector" = {
     format = "yaml";
     deployedAt = "/etc/${stateDir}/collector.yaml";
     source = collectorConfig;
@@ -121,14 +121,14 @@ in
     };
   };
 
-  config.dotfiles.observations = telemetryObservations;
+  config.dotfiles.health.observations = telemetryObservations;
 
   config.systemd.services.${serviceName} = {
     description = "OpenTelemetry collector for AI CLI usage";
     after = [ "network.target" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
-      User = cfg.host.username;
+      User = cfg.workstation.username;
       StateDirectory = stateDir;
       StateDirectoryMode = "0700";
       ExecStart = "${collector}/bin/otelcol-contrib --config ${collectorConfig}";

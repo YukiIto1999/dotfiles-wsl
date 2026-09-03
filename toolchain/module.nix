@@ -172,7 +172,7 @@ in
       ;
   };
 
-  config.home-manager.users.${cfg.host.username} = _: {
+  config.home-manager.users.${cfg.workstation.username} = _: {
     home.packages =
       builtins.attrValues cfg.toolchain.packages
       ++ map (server: server.package) (builtins.attrValues cfg.toolchain.lsp);

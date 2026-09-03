@@ -1,0 +1,11 @@
+{
+  "id": "default",
+  "port": 8765,
+  "runtimeDirectory": "agentgateway-default",
+  "service": "agentgateway-default",
+  "targets": [
+    "alpha",
+    "zeta"
+  ],
+  "url": "http://127.0.0.1:8765/mcp"
+}

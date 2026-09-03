@@ -32,12 +32,12 @@ upstream OCI image の確認と同期には `dotfiles-sync-images --status` と 
 
 | root | 責務 |
 |---|---|
-| `host/`、`accounts/`、`sops/` | machine、identity、secret |
-| `agents/`、`mcp/`、`containers/` | AI client、MCP interface、application backend |
-| `toolchain/`、`artifacts/`、`observations/`、`telemetry/` | 開発ツール、配備物、runtime observation、使用量観測 |
-| `commands/`、`gates/`、`docs/` | 運用 command、repository の制約検査、文書 |
+| `profiles/`、`workstation/`、`identity/`、`secrets/` | machine profile、WSL/Nix/Home Manager、identity、secret |
+| `agents/`、`skills/`、`capabilities/` | AI clientとrole、手順、consumer非依存の機能contractと実装 |
+| `platform/`、`managed-artifacts/`、`health/`、`telemetry/` | MCP/container/CLI基盤、配備物、runtime observation、使用量観測 |
+| `toolchain/`、`maintenance/`、`checks/`、`docs/` | 開発ツール、明示的な整理、repository横断制約、文書 |
 
-Nix unit は `module.nix` を marker にし、build がある場合は `package.nix`、検査がある場合は `checks.nix` を持つ。`impl/`、`assets/`、`fixtures/` は必要な unit だけが使う。境界と依存方向は[構成概要](docs/architecture/overview.md)に記載する。
+Nix unit は `module.nix` を marker にし、build がある場合は `package.nix`、検査がある場合は `checks.nix` を持つ。`impl/`、`assets/`、`fixtures/`、`skill/` は必要な unit だけが使う。境界と依存方向は[構成概要](docs/architecture/overview.md)に記載する。
 
 ## ドキュメント
 

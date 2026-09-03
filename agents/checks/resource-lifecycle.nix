@@ -435,7 +435,7 @@ let
     gitCommand = lib.getExe auditGit;
     resourceCommand = lib.getExe runtime.agentResource;
   };
-  homeDir = hostConfig.dotfiles.host.homeDir;
+  homeDir = hostConfig.dotfiles.workstation.homeDir;
   runtimeContractSupport = import ./support/runtime-contract.nix {
     inherit homeDir;
   };
@@ -506,11 +506,11 @@ in
         "expected=${toString agentWorktree} command=dotfiles-agent-worktree count=1 "
         + "paths=${builtins.toJSON [ (toString replacementAgentWorktree) ]}";
       reaper = hostConfig.systemd.services.dotfiles-agent-resource-reaper or null;
-      expectedReaperEnvironment = "HOME=${hostConfig.dotfiles.host.homeDir}";
+      expectedReaperEnvironment = "HOME=${hostConfig.dotfiles.workstation.homeDir}";
       reaperServiceConfigValid =
         serviceConfig:
         serviceConfig.Type == "oneshot"
-        && serviceConfig.User == hostConfig.dotfiles.host.username
+        && serviceConfig.User == hostConfig.dotfiles.workstation.username
         && (serviceConfig.Environment or null) == expectedReaperEnvironment
         && (serviceConfig.UMask or null) == "0077"
         && serviceConfig.ExecStart == "${lib.getExe runtime.agentResource} reap";
@@ -534,8 +534,8 @@ in
     assert lib.assertMsg (
       agentResource == runtime.agentResource
       && agentWorktree == runtime.agentWorktree
-      && hostConfig.dotfiles.commands.agentResource == runtime.agentResource
-      && hostConfig.dotfiles.commands.agentWorktree == runtime.agentWorktree
+      && hostConfig.dotfiles.platform.cli.commands.agentResource == runtime.agentResource
+      && hostConfig.dotfiles.platform.cli.commands.agentWorktree == runtime.agentWorktree
     ) "agent resource commands are missing";
     assert lib.assertMsg (
       lib.hasInfix "mutation_lock_file=\"$locks_root/.worktree-mutation.lock\"" resourceSource
@@ -605,7 +605,7 @@ in
       reaper.serviceConfig.Type == "oneshot"
     ) "agent resource reaper must be oneshot";
     assert lib.assertMsg (
-      reaper.serviceConfig.User == hostConfig.dotfiles.host.username
+      reaper.serviceConfig.User == hostConfig.dotfiles.workstation.username
     ) "agent resource reaper must run as the desktop user";
     assert lib.assertMsg (
       (reaper.serviceConfig.Environment or null) == expectedReaperEnvironment

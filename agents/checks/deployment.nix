@@ -13,14 +13,14 @@ let
   agentConfig = hostConfig.dotfiles.agents;
   inherit (agentConfig) clients;
   variantClients = variantConfig.dotfiles.agents.clients;
-  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
-  artifacts = hostConfig.dotfiles.artifacts;
+  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
+  artifacts = hostConfig.dotfiles.managedArtifacts;
   artifactSource = id: artifacts.${id}.source;
-  gatewayUrl = hostConfig.dotfiles.mcp.gateway.url;
-  gatewayPort = hostConfig.dotfiles.mcp.gateway.port;
-  variantGatewayUrl = variantConfig.dotfiles.mcp.gateway.url;
+  gatewayUrl = hostConfig.dotfiles.platform.mcp.gateway.url;
+  gatewayPort = hostConfig.dotfiles.platform.mcp.gateway.port;
+  variantGatewayUrl = variantConfig.dotfiles.platform.mcp.gateway.url;
   roster = hostConfig.dotfiles.toolchain.lsp;
-  installAgents = hostConfig.dotfiles.commands.installAgents;
+  installAgents = hostConfig.dotfiles.platform.cli.commands.installAgents;
   installAgentsExe = lib.getExe installAgents;
   atomicPublish = import ../impl/atomic-publish.nix { inherit pkgs; };
   atomicPublishExe = lib.getExe' atomicPublish "dotfiles-agent-atomic-publish";
@@ -112,7 +112,7 @@ let
         "${pkgs.coreutils}/bin/rm"
         ''"$FIXTURE_STAT"''
       ]
-      (builtins.readFile ../codex/impl/migrate-config.sh)
+      (builtins.readFile ../clients/codex/impl/migrate-config.sh)
   );
 
   expectedInstallManifest =
@@ -206,7 +206,7 @@ let
         && artifact.deployedAt == "/etc/${target}"
       else if row.file.deployment == "home" then
         homeConfig.home.file.${target}.source == deployedSource
-        && artifact.deployedAt == "${hostConfig.dotfiles.host.homeDir}/${target}"
+        && artifact.deployedAt == "${hostConfig.dotfiles.workstation.homeDir}/${target}"
       else
         artifact.deployedAt == null
     );
@@ -215,7 +215,7 @@ let
     clientName:
     let
       client = clients.${clientName};
-      homePrefix = hostConfig.dotfiles.host.homeDir;
+      homePrefix = hostConfig.dotfiles.workstation.homeDir;
       rulesArtifact = artifacts."agents/${clientName}/rules";
       rulesMatch =
         rulesArtifact.source == normalizeSource hostConfig.dotfiles.agents.shared.rules
@@ -283,7 +283,7 @@ let
 
   seedActivation = homeConfig.home.activation.seedAgentConfigs.data;
   fixtureSeedActivation =
-    builtins.replaceStrings [ hostConfig.dotfiles.host.homeDir ] [ "$fixture/home" ]
+    builtins.replaceStrings [ hostConfig.dotfiles.workstation.homeDir ] [ "$fixture/home" ]
       seedActivation;
   fixtureSeedActivationScript = pkgs.writeShellScript "fixture-seed-agent-configs" fixtureSeedActivation;
   fixtureGenericSeedMigration = pkgs.writeShellScriptBin "fixture-generic-seed-migration" ''
@@ -304,15 +304,38 @@ let
   sharedDefinitionSources = builtins.attrValues hostConfig.dotfiles.agents.shared.definitions;
   sharedDefinitionNames = builtins.attrNames hostConfig.dotfiles.agents.shared.definitions;
   sharedSkillNames = builtins.attrNames hostConfig.dotfiles.agents.shared.skills;
-  sharedSkillSources = builtins.attrValues hostConfig.dotfiles.agents.shared.skills;
-  mcpProviderNames = lib.unique (
-    map (target: target.provider) (builtins.attrValues hostConfig.dotfiles.mcp.targets)
+  registrySkillSourcesMatch = lib.all (
+    name:
+    builtins.hasAttr name hostConfig.dotfiles.skills.registry
+    &&
+      toString hostConfig.dotfiles.agents.shared.skills.${name}
+      == toString hostConfig.dotfiles.skills.registry.${name}.source
+  ) sharedSkillNames;
+  routingContract = hostConfig.dotfiles.agents.shared.routing;
+  routedSkillNames = lib.unique (map (route: route.skill) routingContract.agentSkills);
+  routedAgentNames = lib.unique (map (route: route.agent) routingContract.agentSkills);
+  agentSkillRouteKeys = map (route: "${route.agent}/${route.skill}") routingContract.agentSkills;
+  agentHandoffKeys = map (
+    route: "${route.from}/${route.to}/${route.artifact}"
+  ) routingContract.agentHandoffs;
+  requiredSkillsByAgent = lib.genAttrs sharedDefinitionNames (
+    name:
+    map (route: route.skill) (
+      builtins.filter (
+        route: route.agent == name && route.activation == "required"
+      ) routingContract.agentSkills
+    )
   );
   securityDefinitionSource = hostConfig.dotfiles.agents.shared.definitions.security;
   claudeDefinitionSources = builtins.attrValues clients.claude.definitions;
   codexDefinitionSources = builtins.attrValues clients.codex.definitions;
   ompDefinitionSources = builtins.attrValues clients.omp.definitions;
   opencodeDefinitionSources = builtins.attrValues clients.opencode.definitions;
+  sharedDefinitionFarm = pkgs.linkFarm "shared-agent-definitions" (
+    lib.mapAttrsToList (name: path: {
+      inherit name path;
+    }) hostConfig.dotfiles.agents.shared.definitions
+  );
   # 生成側とは独立に期待値を持つ。OMP は実装が同一の server だけ上流名を使い、OpenCode は
   # built-in id との衝突を避けるため所有者を前置する
   ompLspNames = {
@@ -362,7 +385,7 @@ in
       '';
 
   agent-artifact-contract =
-    assert variantConfig.dotfiles.mcp.gateway.port != gatewayPort;
+    assert variantConfig.dotfiles.platform.mcp.gateway.port != gatewayPort;
     assert lib.count (package: package == installAgents) hostConfig.environment.systemPackages == 1;
     assert builtins.all managedDeploymentMatches managedRows;
     assert sharedDeploymentMatches;
@@ -383,11 +406,11 @@ in
     assert lib.any (
       definition:
       lib.hasInfix "/agents/module.nix" (toString definition.file)
-      && lib.elem hostConfig.dotfiles.agents.agentmemory.hooks definition.value
+      && lib.elem hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks definition.value
     ) hostOptions.environment.systemPackages.definitionsWithLocations;
     assert
       clients.opencode.managedFiles.agentmemory-plugin.source
-      == hostConfig.dotfiles.agents.agentmemory.opencodePlugin;
+      == hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.opencodePlugin;
     assert !(builtins.hasAttr "containers/agentmemory/opencode-capture" artifacts);
     assert lib.all (
       definition:
@@ -529,9 +552,9 @@ in
         done
         grep -Fq 'tool_call hooks must fail open' "$ompHook"
 
-        grep -Fq 'dotfiles-doctor` は `dotfiles.observations` の全登録を観測し' ${self}/agents/shared/AGENTS.md
-        grep -Fq 'Skill を含む managed artifact と current source の不一致も検査する' ${self}/agents/shared/AGENTS.md
-        grep -Fq 'Skill の動作や意味と実際の agent 機能との整合は自動検査しない' ${self}/agents/shared/AGENTS.md
+        grep -Fq 'dotfiles-doctor` は `dotfiles.health.observations` の全登録を観測し' ${self}/agents/policy/AGENTS.md
+        grep -Fq 'Skill を含む managed artifact と current source の不一致も検査する' ${self}/agents/policy/AGENTS.md
+        grep -Fq 'Skill の動作や意味と実際の agent 機能との整合は自動検査しない' ${self}/agents/policy/AGENTS.md
         grep -Fq 'seed は runtime drift の対象にしない' ${self}/docs/architecture/ai-tooling.md
         grep -Fq 'managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する' ${self}/docs/architecture/ai-tooling.md
 
@@ -562,9 +585,9 @@ in
         remarshal -if toml -of json ${artifactSource "agents/codex/system"} > codex-system.json
         codex_mcp_matches ${lib.escapeShellArg gatewayUrl} < codex-system.json > /dev/null
         jq --exit-status \
-          --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
-          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} \
-          --arg systemSkillCreator ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.codex/skills/.system/skill-creator"} '
+          --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.homeDir}/.cache/dotfiles-wsl"} \
+          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.homeDir}/.local/state/dotfiles-wsl"} \
+          --arg systemSkillCreator ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.homeDir}/.codex/skills/.system/skill-creator"} '
           .permissions == {dev: {filesystem: {($cacheRoot): "write", ($stateRoot): "write"}}} and
           .skills.config == [{path: $systemSkillCreator, enabled: false}] and
           (has("sandbox_mode") | not) and
@@ -572,23 +595,23 @@ in
         ' codex-system.json > /dev/null
         remarshal -if toml -of json ${artifactSource "agents/codex/project"} > codex-project.json
         jq --exit-status \
-          --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
-          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} \
-          --arg gitRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.dotfilesDir}/.git"} '
+          --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.homeDir}/.cache/dotfiles-wsl"} \
+          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.homeDir}/.local/state/dotfiles-wsl"} \
+          --arg gitRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.dotfilesDir}/.git"} '
           .permissions.dev.filesystem == {($gitRoot): "write"} and
           (has("sandbox_mode") | not) and
           (has("sandbox_workspace_write") | not)
         ' codex-project.json > /dev/null
         remarshal -if toml -of json \
           ${clients.codex.managedFiles.user.source} > codex-user-seed.json
-        grep -Fq '"@homeDir@/workspace"' ${self}/agents/codex/assets/config.toml
-        grep -Fq '"@homeDir@/projects"' ${self}/agents/codex/assets/config.toml
-        if rg -n '/home/nixos/(workspace|projects)' ${self}/agents/codex/assets/config.toml; then
+        grep -Fq '"@homeDir@/workspace"' ${self}/agents/clients/codex/assets/config.toml
+        grep -Fq '"@homeDir@/projects"' ${self}/agents/clients/codex/assets/config.toml
+        if rg -n '/home/nixos/(workspace|projects)' ${self}/agents/clients/codex/assets/config.toml; then
           echo "Codex seed hard-codes the host home directory" >&2
           exit 1
         fi
         jq --exit-status \
-          --arg homeDir ${lib.escapeShellArg hostConfig.dotfiles.host.homeDir} '
+          --arg homeDir ${lib.escapeShellArg hostConfig.dotfiles.workstation.homeDir} '
           .default_permissions == "dev" and
           .permissions.dev.description == "workspace general profile" and
           .permissions.dev.extends == ":workspace" and
@@ -870,19 +893,41 @@ in
           echo "legacy clis path or runtime identity remains" >&2
           exit 1
         fi
+        test ! -e ${self}/agents/shared
+        test -f ${self}/agents/policy/AGENTS.md
+        test -f ${self}/agents/roles/routing.nix
+        for client in antigravity claude codex omp opencode; do
+          test -f "${self}/agents/clients/$client/module.nix"
+        done
         touch $out
       '';
 
   agent-definition-rendering =
-    assert clients.claude.definitions == hostConfig.dotfiles.agents.shared.definitions;
+    assert clients.claude.definitions != hostConfig.dotfiles.agents.shared.definitions;
+    assert builtins.attrNames clients.claude.definitions == sharedDefinitionNames;
     assert clients.antigravity.definitions == { };
+    assert lib.all (name: builtins.elem name sharedSkillNames) routedSkillNames;
+    assert lib.sort builtins.lessThan routedAgentNames == sharedDefinitionNames;
+    assert builtins.length agentSkillRouteKeys == builtins.length (lib.unique agentSkillRouteKeys);
+    assert builtins.length agentHandoffKeys == builtins.length (lib.unique agentHandoffKeys);
+    assert lib.all (
+      route:
+      builtins.elem route.from sharedDefinitionNames && builtins.elem route.to sharedDefinitionNames
+    ) routingContract.agentHandoffs;
+    assert clients.claude.skillProjectionMode == "preload";
+    assert clients.omp.skillProjectionMode == "preload";
+    assert clients.codex.skillProjectionMode == "dynamic";
+    assert clients.opencode.skillProjectionMode == "dynamic";
+    assert clients.antigravity.skillProjectionMode == "unsupported";
     assert sharedDefinitionSources != [ ];
+    assert claudeDefinitionSources != [ ];
     assert codexDefinitionSources != [ ];
     assert ompDefinitionSources != [ ];
     assert opencodeDefinitionSources != [ ];
     assert lib.all (source: lib.hasPrefix builtins.storeDir (toString source)) (
       builtins.attrValues hostConfig.dotfiles.agents.shared.skills
     );
+    assert registrySkillSourcesMatch;
     pkgs.runCommandLocal "check-agent-definition-rendering"
       {
         nativeBuildInputs = [
@@ -895,11 +940,12 @@ in
         ];
         rulesSource = hostConfig.dotfiles.agents.shared.rules;
         routedDefinitionNames = lib.concatStringsSep " " sharedDefinitionNames;
-        routedMcpProviderNames = lib.concatStringsSep " " mcpProviderNames;
         routedSkillNames = lib.concatStringsSep " " sharedSkillNames;
-        routedSkillSources = lib.concatStringsSep " " (
-          map (source: "${source}/SKILL.md") sharedSkillSources
-        );
+        requiredSkillsJson = builtins.toJSON requiredSkillsByAgent;
+        routingJson = builtins.toJSON routingContract;
+        inherit sharedDefinitionFarm;
+        claudeDefinitionsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.claude.definitions);
+        ompDefinitionsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.omp.definitions);
         inherit securityDefinitionSource;
         sharedSources = sharedDefinitionSources;
         claudeSources = claudeDefinitionSources;
@@ -913,6 +959,20 @@ in
         test -s "$rulesSource"
         iconv -f UTF-8 -t UTF-8 "$rulesSource" > /dev/null
         grep -Eq '^#{1,6}[[:space:]]+[^[:space:]]' "$rulesSource"
+        while IFS=$'\t' read -r agent skill; do
+          source="$sharedDefinitionFarm/$agent"
+          if ! grep -Fq "\`$skill\`" "$source"; then
+            echo "agent Skill route is absent from definition: $agent/$skill" >&2
+            exit 1
+          fi
+        done < <(jq -r '.agentSkills[] | [.agent, .skill] | @tsv' <<<"$routingJson")
+        while IFS=$'\t' read -r from to artifact; do
+          source="$sharedDefinitionFarm/$from"
+          if ! grep -Fq "\`$artifact\`" "$source" || ! grep -Fq "$to" "$source"; then
+            echo "agent handoff route is absent from definition: $from/$to/$artifact" >&2
+            exit 1
+          fi
+        done < <(jq -r '.agentHandoffs[] | [.from, .to, .artifact] | @tsv' <<<"$routingJson")
 
         for name in $routedSkillNames; do
           if ! grep -Fq "\`$name\`" "$rulesSource"; then
@@ -926,22 +986,10 @@ in
             exit 1
           fi
         done
-        for provider in $routedMcpProviderNames; do
-          found=false
-          for source in "$rulesSource" $routedSkillSources; do
-            if grep -Fiq "$provider" "$source"; then
-              found=true
-              break
-            fi
-          done
-          if [ "$found" != true ]; then
-            echo "MCP provider has no AGENTS.md or Skill route: $provider" >&2
-            exit 1
-          fi
-        done
+
 
         grep -Fq 'LSP は Claude Code、OMP、OpenCode で利用でき' "$rulesSource"
-        grep -Fq '自動連携は Claude Code、Codex、OMP が lifecycle hooks' "$rulesSource"
+        grep -Fq '自動連携はClaude Code、Codex、OMPがlifecycle hooks' "$rulesSource"
         for obsolete in memory_lesson_recall memory_lesson_save '~/.claude/projects/<X>/memory/'; do
           if grep -Fq "$obsolete" "$rulesSource"; then
             echo "obsolete memory route remains in AGENTS.md: $obsolete" >&2
@@ -962,21 +1010,46 @@ in
 
         for source in $sharedSources; do
           check_frontmatter "$source"
+          yq --exit-status '
+            (.tools | all(. == "Read" or . == "Grep" or . == "Glob" or
+              . == "Edit" or . == "Write" or . == "Bash"))
+          ' frontmatter.yaml > /dev/null
         done
+        while IFS=$'\t' read -r name source; do
+          check_frontmatter "$source"
+          expected=$(jq -c --arg name "$name" '.[$name]' <<<"$requiredSkillsJson")
+          actual=$(yq -c '.skills // []' frontmatter.yaml)
+          test "$actual" = "$expected"
+          yq --exit-status '
+            (.tools | index("Skill")) != null and
+            (.tools | index("mcp__gateway")) != null and
+            (.tools | all(. == "Read" or . == "Grep" or . == "Glob" or
+              . == "Edit" or . == "Write" or . == "Bash" or
+              . == "Skill" or . == "mcp__gateway"))
+          ' frontmatter.yaml > /dev/null
+        done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$claudeDefinitionsJson")
         for source in $opencodeSources; do
           check_frontmatter "$source"
+          yq --exit-status '
+            .tools.skill == true and
+            (.tools | keys | all(. == "read" or . == "grep" or . == "glob" or
+              . == "edit" or . == "write" or . == "bash" or . == "skill"))
+          ' frontmatter.yaml > /dev/null
         done
-        for source in $ompSources; do
+        while IFS=$'\t' read -r name source; do
           check_frontmatter "$source"
+          expected=$(jq -c --arg name "$name" '.[$name]' <<<"$requiredSkillsJson")
+          actual=$(yq -c '.autoloadSkills // []' frontmatter.yaml)
+          test "$actual" = "$expected"
           yq --exit-status '
             (.name | length) > 0 and
             (.description | length) > 0 and
             .["thinking-level"] == "xhigh" and
             (has("effort") | not) and
             (.tools | all(. == "read" or . == "grep" or . == "glob" or
-              . == "web_search" or . == "edit" or . == "write" or . == "bash"))
+              . == "edit" or . == "write" or . == "bash"))
           ' frontmatter.yaml > /dev/null
-        done
+        done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$ompDefinitionsJson")
         for source in $codexSources; do
           remarshal -if toml -of json "$source" > definition.json
           jq --exit-status '.developer_instructions | length > 0' definition.json > /dev/null
@@ -1003,7 +1076,7 @@ in
         extract_definition_section '## Finding fix handoff' "$securityDefinitionSource" \
           > security-fix-handoff-section.md
         grep -Fq 'fix-finding' security-fix-handoff-section.md
-        grep -Fq '実装agent' security-fix-handoff-section.md
+        grep -Fq 'validated-finding-attack-path' security-fix-handoff-section.md
         grep -Fq '修正を実装しない' security-fix-handoff-section.md
         grep -Fq '$HOME/.local/state/dotfiles-wsl/security-scans/<repo_name>' \
           "$securityDefinitionSource"
@@ -1018,22 +1091,25 @@ in
         yq --exit-status '.tools == ["Read", "Bash", "Grep", "Glob"]' \
           security-frontmatter.yaml > /dev/null
 
+        compare_definition_bodies() {
+          local shared=$1 rendered=$2 shared_end rendered_end
+          shared_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$shared")
+          rendered_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$rendered")
+          diff --unified \
+            <(tail -n "+$((shared_end + 1))" "$shared") \
+            <(tail -n "+$((rendered_end + 1))" "$rendered")
+        }
         paste \
           <(printf '%s\n' $sharedSources) \
           <(printf '%s\n' $claudeSources) \
           | while IFS=$'\t' read -r shared claude; do
-              cmp "$shared" "$claude"
+              compare_definition_bodies "$shared" "$claude"
             done
-
         paste \
           <(printf '%s\n' $sharedSources) \
           <(printf '%s\n' $ompSources) \
           | while IFS=$'\t' read -r shared omp; do
-              shared_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$shared")
-              omp_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$omp")
-              diff --unified \
-                <(tail -n "+$((shared_end + 1))" "$shared") \
-                <(tail -n "+$((omp_end + 1))" "$omp")
+              compare_definition_bodies "$shared" "$omp"
             done
 
         touch $out

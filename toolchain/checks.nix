@@ -7,7 +7,7 @@
 }:
 
 let
-  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
+  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
   lspServers = builtins.attrValues hostConfig.dotfiles.toolchain.lsp;
   expectedLspNames = [
     "bash"

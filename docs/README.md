@@ -19,17 +19,17 @@
 
 責務の境界と要素間の関係を理解したい人が、学習中に読む。操作手順は持たず、構造とそれを決めた設計判断を扱う。
 
-- [構成概要](architecture/overview.md)では、NixOS、Home Manager、生成 command の責務境界が分かる。
-- [責務と履歴の凝集](architecture/cohesion.md)では、unit、file、commit を分ける基準が分かる。
-- [AI tooling](architecture/ai-tooling.md)では、AI CLI、agentgateway、MCP server、Docker backend の接続関係が分かる。
-- [Repository 所有 Skill の composition](architecture/repository-skills.md)では、外部 repository の Skill を固定、選択、client 配備する将来設計が分かる。
-- [Skill portfolio](architecture/skills.md)では、配備済み Skill、候補の責務境界、donor の扱いが分かる。
+- [構成概要](architecture/overview.md)では、Profile、Workstation、Agent、Skill、Capability、Platform、運用基盤の責務境界が分かる。
+- [責務と履歴の凝集](architecture/cohesion.md)では、unit、file、commitを分ける基準が分かる。
+- [AI tooling](architecture/ai-tooling.md)では、AgentからSkill、Capability、MCP/container Platformへ至る依存関係が分かる。
+- [Repository所有Skillのcomposition](architecture/repository-skills.md)では、外部repositoryのSkillを固定、登録、client配備する将来設計が分かる。
+- [Skill portfolio](architecture/skills.md)では、Skill registry、候補の責務境界、donorの扱いが分かる。
 - [セキュリティ設計](architecture/security.md)では、credential、host key、通信経路の信頼境界が分かる。
 
 ## 参照 — `reference/`
 
 正本の場所と現在値の取り方を調べたい人が、作業中に読む。宣言の値そのものは持たず、宣言の場所を指す。
 
-- [ツール構成](reference/tooling.md)では、導入済み CLI、agent、skill、MCP、service の正本が分かる。
+- [ツール構成](reference/tooling.md)では、導入済みCLI、Agent、Skill、Capability、MCP、serviceの正本が分かる。
 - [変更箇所](reference/change-map.md)では、変更目的ごとの正本と適用方法が分かる。
 - [機械検証に固定した制約](reference/verified-constraints.md)では、どの制約が build で守られ、どれが守られていないかが分かる。

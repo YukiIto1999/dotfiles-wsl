@@ -1,0 +1,50 @@
+{
+  "agentmemoryHooks": [
+    "agentmemory-hook-notification",
+    "agentmemory-hook-post-tool-failure",
+    "agentmemory-hook-post-tool-use",
+    "agentmemory-hook-pre-compact",
+    "agentmemory-hook-pre-tool-use",
+    "agentmemory-hook-prompt-submit",
+    "agentmemory-hook-session-end",
+    "agentmemory-hook-session-start",
+    "agentmemory-hook-stop",
+    "agentmemory-hook-subagent-start",
+    "agentmemory-hook-subagent-stop",
+    "agentmemory-hook-task-completed"
+  ],
+  "commands": {
+    "agentResource": "dotfiles-agent-resource",
+    "agentWorktree": "dotfiles-agent-worktree",
+    "cleanup": "dotfiles-cleanup",
+    "doctor": "dotfiles-doctor",
+    "imageDigest": "dotfiles-image-digest",
+    "installAgents": "dotfiles-install-agents",
+    "rebuild": "dotfiles-rebuild",
+    "syncImages": "dotfiles-sync-images",
+    "wslRestartRequired": "dotfiles-wsl-restart-required"
+  },
+  "commandSmoke": {
+    "timeoutArgs": [
+      "--kill-after=2s",
+      "10s"
+    ]
+  },
+  "mcpExecutables": [
+    "chrome-devtools",
+    "codex",
+    "context7",
+    "crawl4ai",
+    "github-account-1",
+    "github-account-2",
+    "github-account-3",
+    "memory",
+    "playwright",
+    "searxng",
+    "sonarqube",
+    "zvec-grep"
+  ],
+  "workstation": {
+    "wslview": "wslview"
+  }
+}

@@ -24,7 +24,7 @@ let
       }
     ]).config;
   runtimeWrapperModeVariantHome =
-    runtimeWrapperModeVariantConfig.home-manager.users.${hostConfig.dotfiles.host.username};
+    runtimeWrapperModeVariantConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
 
   projectManagedFile =
     file:
@@ -55,6 +55,7 @@ let
         lsp = client.lspMode;
         telemetry = client.telemetryMode;
         agentmemory = client.agentmemoryMode;
+        skills = client.skillProjectionMode;
       };
       gateway = {
         inherit (client.gatewayConfig) format managedFile;
@@ -146,6 +147,11 @@ let
         internal = true;
         readOnly = true;
       };
+      routing = {
+        type = "submodule";
+        internal = true;
+        readOnly = true;
+      };
     };
     clients = {
       type = "attrsOf";
@@ -175,6 +181,7 @@ let
       rulesDestination = "str";
       runtimeWrapperMode = "enum";
       skillsDestination = "str";
+      skillProjectionMode = "enum";
       telemetryMode = "enum";
       versionArgs = "listOf";
     };
@@ -192,7 +199,7 @@ let
     };
   };
 
-  fixtureSource = ../shared/AGENTS.md;
+  fixtureSource = ../policy/AGENTS.md;
   fixtureSeedMigrationCommand = pkgs.writeShellScriptBin "dotfiles-migrate-codex-config" "exit 0";
   agentContract = import ../impl/contract.nix { inherit lib; };
   fixtureDefinitions = lib.genAttrs expected.clients.claude.definitions.names (_: fixtureSource);
@@ -234,6 +241,7 @@ let
     lspMode = client.capabilities.lsp;
     telemetryMode = client.capabilities.telemetry;
     agentmemoryMode = client.capabilities.agentmemory;
+    skillProjectionMode = client.capabilities.skills;
   }) expected.clients;
   baseCandidate = {
     enabled = expected.required;
@@ -242,6 +250,10 @@ let
       rules = fixtureSource;
       skills.fixture = fixtureSource;
       definitions = fixtureDefinitions;
+      routing = {
+        agentSkills = [ ];
+        agentHandoffs = [ ];
+      };
     };
     clients = candidateClients;
   };
@@ -255,7 +267,7 @@ let
     if client.package != null then
       lib.getExe client.package
     else
-      "${hostConfig.dotfiles.host.homeDir}/.local/bin/${client.binary}"
+      "${hostConfig.dotfiles.workstation.homeDir}/.local/bin/${client.binary}"
   ) clients;
   mutateRuntimeTimer =
     timerName: update:

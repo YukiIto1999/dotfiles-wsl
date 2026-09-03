@@ -6,31 +6,31 @@
 
 ## SOPS の鍵と暗号文
 
-[`sops/module.nix`](../../sops/module.nix) は sops-nix の age key を `/var/lib/sops-nix/key.txt` に固定し、自動生成を無効にする。directory は root `0700`、key は root `0400` であり、通常ユーザーは鍵本文を読まない。
+[`secrets/sops/module.nix`](../../secrets/sops/module.nix) は sops-nix の age key を `/var/lib/sops-nix/key.txt` に固定し、自動生成を無効にする。directory は root `0700`、key は root `0400` であり、通常ユーザーは鍵本文を読まない。
 
-host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`sops/assets/.sops.yaml`](../../sops/assets/.sops.yaml) は公開 recipient、[`sops/assets/secrets.yaml`](../../sops/assets/secrets.yaml) は暗号文を保持する。復号鍵は Git に置かない。
+host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`secrets/sops/assets/.sops.yaml`](../../secrets/sops/assets/.sops.yaml) は公開 recipient、[`secrets/sops/assets/secrets.yaml`](../../secrets/sops/assets/secrets.yaml) は暗号文を保持する。復号鍵は Git に置かない。
 
 sops-nix は activation 時に暗号文を復号する。`sops.secrets` の secret file は `/run/secrets`、配備 path を指定しない template は `/run/secrets/rendered` に平文を生成する。agentmemory の環境ファイルは後者に属する。
 
-Git identity の template は設定ユーザーの `~/.config/git/identity.conf` と、work identity を使う場合の `~/.config/git/work-identity.conf` を明示する。GitHub CLI の template も設定ユーザーの `~/.config/gh/hosts.yml` を明示する。[`sops/impl/user-secret-file.nix`](../../sops/impl/user-secret-file.nix) が user 所有と mode `0600` を固定し、[`accounts/module.nix`](../../accounts/module.nix) が username を渡して明示的に import する。sops-nix は平文 target を runtime に生成する。Nix 宣言には secret value ではなく placeholder を置くため、平文を Nix store の設定 artifact に含めない。各 secret file と template の owner、mode、その path を読める consumer process が secret ごとの信頼境界になる。
+Git identity の template は設定ユーザーの `~/.config/git/identity.conf` と、work identity を使う場合の `~/.config/git/work-identity.conf` を明示する。GitHub CLI の template も設定ユーザーの `~/.config/gh/hosts.yml` を明示する。[`secrets/sops/impl/user-secret-file.nix`](../../secrets/sops/impl/user-secret-file.nix) が user 所有と mode `0600` を固定し、[`identity/module.nix`](../../identity/module.nix) が username を渡して明示的に import する。sops-nix は平文 target を runtime に生成する。Nix 宣言には secret value ではなく placeholder を置くため、平文を Nix store の設定 artifact に含めない。各 secret file と template の owner、mode、その path を読める consumer process が secret ごとの信頼境界になる。
 
 ## GitHub credential
 
-[`accounts/module.nix`](../../accounts/module.nix) は account ごとの username と PAT を SOPS secret として宣言する。sops-nix template は `hosts.yml` を mode `0600` で user home に配備し、GitHub MCP wrapper は runtime の secret file から PAT を読んで子 process の環境へ渡す。secret value と実 account username は Nix source、doctor 出力、文書へ転記しない。
+[`identity/module.nix`](../../identity/module.nix) は account ごとの username と PAT を SOPS secret として宣言する。sops-nix template は `hosts.yml` を mode `0600` で user home に配備し、GitHub MCP wrapper は runtime の secret file から PAT を読んで子 process の環境へ渡す。secret value と実 account username は Nix source、doctor 出力、文書へ転記しない。
 
 PAT の権限は用途に必要な repository と operation に限定する。設定ユーザー、root、PAT を読む MCP process は credential の信頼境界に含まれる。`gh auth login` や `gh auth switch` で別の credential store を作らず、SOPS の宣言経路へ集約する。
 
 ## agentgateway
 
-[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の listener は port だけを指定し、client authentication と listen address の制限を設定していない。現行 runtime は認証なしで gateway の port を listen する。各 AI CLI の接続 URL が `localhost` でも、listener 自体を loopback 限定と扱ってはならない。
+[`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix) の listener は port だけを指定し、client authentication と listen address の制限を設定していない。現行 runtime は認証なしで gateway の port を listen する。各 AI CLI の接続 URL が `localhost` でも、listener 自体を loopback 限定と扱ってはならない。
 
 gateway の port へ到達できる process と network peer は、gateway が公開する MCP tool を呼べる信頼境界に入る。front の port も loopback で listen するので、同じ境界に入る。実際に Windows 側や外部 network から到達できるかは WSL の network mode、Windows Firewall、host 側の転送設定に依存する。gateway の deny rule は個別 tool の公開制御であり、client 認証の代わりにはならない。
 
-agentgateway と各 front は設定ユーザーの systemd service として動く。front が読める checkout、home、runtime secret と、実行できる command が tool call の権限上限になる。gateway の bind または認証を変える場合は [`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) を正本として見直す。
+agentgateway と各 front は設定ユーザーの systemd service として動く。front が読める checkout、home、runtime secret と、実行できる command が tool call の権限上限になる。gateway の bind または認証を変える場合は [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix) を正本として見直す。
 
 ## Docker
 
-[`containers/module.nix`](../../containers/module.nix) と [`container-backend.nix`](../../containers/impl/container-backend.nix) は、backend の host port を `127.0.0.1:<port>:<port>` で publish し、宣言された publish が loopback に閉じることを検査する。これは agentgateway の listener とは異なる境界であり、backend port は host の非 loopback address へ直接 publish しない。container 間通信は専用の `dotfiles-backends` network を使う。
+[`platform/containers/module.nix`](../../platform/containers/module.nix) と [`container-backend.nix`](../../platform/containers/impl/container-backend.nix) は、backend の host port を `127.0.0.1:<port>:<port>` で publish し、宣言された publish が loopback に閉じることを検査する。これは agentgateway の listener とは異なる境界であり、backend port は host の非 loopback address へ直接 publish しない。container 間通信は専用の `dotfiles-backends` network を使う。
 
 設定ユーザーは `docker` group に属する。Docker API を使える主体は container の起動、mount、inspect が可能であり、container 環境へ渡した secret も読める。Docker group、root、Docker daemon を backend secret と host filesystem の信頼境界に含める。
 
@@ -50,9 +50,9 @@ Codex と OpenCode は GitHub release を dotfiles が管理する。GitHub API 
 
 ## Codex sandbox
 
-[`agents/codex/assets/config.toml`](../../agents/codex/assets/config.toml) は既定の permission profile を `dev` とし、`:workspace` を継承して workspace roots、`~/projects`、`~/workspace` への書込と network access を許可する。approval policy は `never` なので、Codex の local command は profile の範囲内で対話承認なしに実行される。
+[`agents/clients/codex/assets/config.toml`](../../agents/clients/codex/assets/config.toml) は既定の permission profile を `dev` とし、`:workspace` を継承して workspace roots、`~/projects`、`~/workspace` への書込と network access を許可する。approval policy は `never` なので、Codex の local command は profile の範囲内で対話承認なしに実行される。
 
-[`agents/codex/module.nix`](../../agents/codex/module.nix) は同名の `dev` profile を system config と project config で拡張する。system config は agent runtime の cache と state、dotfiles checkout の project config はその `.git` だけを書込対象に加える。permission profile と旧 `sandbox_mode`、`sandbox_workspace_write` は混在させない。
+[`agents/clients/codex/module.nix`](../../agents/clients/codex/module.nix) は同名の `dev` profile を system config と project config で拡張する。system config は agent runtime の cache と state、dotfiles checkout の project config はその `.git` だけを書込対象に加える。permission profile と旧 `sandbox_mode`、`sandbox_workspace_write` は混在させない。
 subagent は親 session の permission profile を継ぐ。Codex の agent role override が運ぶのは model、reasoning、instructions、personality、service tier、feature 無効化、skill 選択だけであり、role file の `default_permissions` は読み捨てられる。read-only の agent definition にも独自の sandbox 境界はない。
 既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
 
@@ -62,7 +62,7 @@ sandbox は gateway の client 認証、Docker daemon の権限、Windows intero
 
 ## Windows interop
 
-[`host/module.nix`](../../host/module.nix) は WSLInterop を有効にし、Windows 側の固定 command を呼ぶ `wslview` を system closure に入れる。Linux process から Windows process を起動する時点で WSL の境界を越える。渡した URL、path、引数は Windows 側の process が処理する。
+[`workstation/wsl/module.nix`](../../workstation/wsl/module.nix) は WSLInterop を有効にし、Windows 側の固定 command を呼ぶ `wslview` を system closure に入れる。Linux process から Windows process を起動する時点で WSL の境界を越える。渡した URL、path、引数は Windows 側の process が処理する。
 
 `appendWindowsPath = false` のため、Windows の executable directory を Linux の PATH へ自動追加しない。ただし固定 path を使う明示的な Windows command と `/mnt/c` の file access を無効にはしない。doctor は launcher の store source と Windows command の起動経路を検査するが、Windows application や Windows 側の file 権限までは保証しない。
 

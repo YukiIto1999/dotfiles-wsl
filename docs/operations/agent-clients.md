@@ -47,7 +47,7 @@ GitHub release の取得、digest 照合、archive 検査、required path 検査
 
 `SIGKILL`、電源断、WSL の強制停止では自動 rollback を保証しない。中断後は installer を再実行し、同じ checkout の contract を使う `nix run .#dotfiles-doctor` で検査する。再実行が失敗するか `agent/<client>` check が `fail` になった場合は、残った object を手で削除しない。check ID から client を特定し、上記の client directory、`current`、visible binary を調査する。
 
-client contract や timer を変えた後の system generation への反映は通常の [Rebuild](rebuild.md)に従う。配備方式と信頼境界は [AI tooling](../architecture/ai-tooling.md#client-binary-の更新)と[セキュリティ境界](../architecture/security.md#agent-client-の供給経路)を参照する。
+client contract や timer を変えた後の system generation への反映は通常の [Rebuild](rebuild.md)に従う。配備方式と信頼境界は [AI tooling](../architecture/ai-tooling.md#client-binary)と[セキュリティ境界](../architecture/security.md#agent-client-の供給経路)を参照する。
 
 ## OMP の subscription login
 

@@ -235,6 +235,11 @@
         "managedFile": "mcp"
       },
       "managedFiles": {
+        "config": {
+          "format": "yaml",
+          "deployment": "seed",
+          "destination": ".omp/agent/config.yml"
+        },
         "agentmemory-hook": {
           "format": "text",
           "deployment": "home",

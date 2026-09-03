@@ -15,10 +15,11 @@ let
   restartWarningCount = 5;
   restartFailureCount = 20;
 
-  buildkitGcContract =
+  buildArtifactGcContract =
     let
-      name = "docker-buildkit-gc";
+      name = "docker-build-artifact-gc";
       dockerService = "docker.service";
+      docker = lib.getExe pkgs.docker;
       reservedSpace = "10GB";
       unsharedMaxUsedSpace = "30GB";
       maxUsedSpace = "100GB";
@@ -51,18 +52,25 @@ let
         wants = [ dockerService ];
         conditionPathExists = "/var/run/docker.sock";
         type = "oneshot";
-        execStart = lib.escapeShellArgs (
-          [ (lib.getExe pkgs.docker) ]
-          ++ [
+        execStart = map lib.escapeShellArgs [
+          [
+            docker
+            "image"
+            "prune"
+            "--force"
+          ]
+          [
+            docker
             "buildx"
             "prune"
             "--force"
+            "--all"
             "--max-used-space"
             maxUsedSpace
             "--reserved-space"
             reservedSpace
           ]
-        );
+        ];
       };
       timer = {
         wantedBy = [ "timers.target" ];
@@ -362,7 +370,7 @@ let
             failureOnly = true;
           }
         ))
-        (mkEntry "containers/buildkit-gc" buildkitGcContract.observation)
+        (mkEntry "containers/build-artifact-gc" buildArtifactGcContract.observation)
       ]
       ++ serviceObservations
       ++ serviceRestartObservations
@@ -393,24 +401,24 @@ in
     virtualisation = {
       docker = {
         enable = true;
-        daemon.settings.builder.gc = buildkitGcContract.daemonGc;
+        daemon.settings.builder.gc = buildArtifactGcContract.daemonGc;
       };
       oci-containers.backend = "docker";
     };
 
-    systemd.services.${buildkitGcContract.name} = {
-      description = "Prune Docker BuildKit cache above the storage budget";
-      inherit (buildkitGcContract.service) after wants;
-      unitConfig.ConditionPathExists = buildkitGcContract.service.conditionPathExists;
+    systemd.services.${buildArtifactGcContract.name} = {
+      description = "Prune dangling Docker images and bounded BuildKit cache";
+      inherit (buildArtifactGcContract.service) after wants;
+      unitConfig.ConditionPathExists = buildArtifactGcContract.service.conditionPathExists;
       serviceConfig = {
-        Type = buildkitGcContract.service.type;
-        ExecStart = buildkitGcContract.service.execStart;
+        Type = buildArtifactGcContract.service.type;
+        ExecStart = buildArtifactGcContract.service.execStart;
       };
     };
 
-    systemd.timers.${buildkitGcContract.name} = {
-      description = "Periodic Docker BuildKit cache pruning";
-      inherit (buildkitGcContract.timer) wantedBy timerConfig;
+    systemd.timers.${buildArtifactGcContract.name} = {
+      description = "Periodic Docker build artifact pruning";
+      inherit (buildArtifactGcContract.timer) wantedBy timerConfig;
     };
 
     systemd.services.docker-dotfiles-backends-network = {

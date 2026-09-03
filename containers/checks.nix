@@ -53,6 +53,74 @@ let
   restartWarningCount = 5;
   restartFailureCount = 20;
 
+  expectedBuildArtifactGc =
+    let
+      name = "docker-build-artifact-gc";
+      serviceUnit = "${name}.service";
+      timerUnit = "${name}.timer";
+    in
+    {
+      inherit name serviceUnit timerUnit;
+      daemonGc = {
+        enabled = true;
+        policy = [
+          {
+            keepDuration = "1440h";
+            maxUsedSpace = "30GB";
+            reservedSpace = "10GB";
+          }
+          {
+            maxUsedSpace = "30GB";
+            reservedSpace = "10GB";
+          }
+          {
+            all = true;
+            maxUsedSpace = "100GB";
+            reservedSpace = "10GB";
+          }
+        ];
+      };
+      execStartTokens = [
+        [
+          (lib.getExe pkgs.docker)
+          "image"
+          "prune"
+          "--force"
+        ]
+        [
+          (lib.getExe pkgs.docker)
+          "buildx"
+          "prune"
+          "--force"
+          "--all"
+          "--max-used-space"
+          "100GB"
+          "--reserved-space"
+          "10GB"
+        ]
+      ];
+      timerConfig = {
+        OnCalendar = "*-*-* 00/6:00:00";
+        Persistent = true;
+        Unit = serviceUnit;
+      };
+      observation = {
+        kind = "systemd-timer";
+        checkId = "maintenance/${timerUnit}";
+        resourceKey = null;
+        timeoutSeconds = observationTimeoutSeconds;
+        failureMessage = "${timerUnit} or its service is not operational";
+        timer = timerUnit;
+        service = serviceUnit;
+        unitFileStates = [
+          "enabled"
+          "enabled-runtime"
+        ];
+        activeStates = [ "active" ];
+        serviceResults = [ "success" ];
+      };
+    };
+
   selectContainerObservations = lib.filterAttrs (name: _: lib.hasPrefix "containers/" name);
   containerObservations = selectContainerObservations hostConfig.dotfiles.observations;
   sampleApplication = builtins.head (builtins.attrNames hostConfig.dotfiles.containers.services);
@@ -160,20 +228,7 @@ let
             failureOnly = true;
           }
         ))
-        (mkEntry "containers/buildkit-gc" (
-          common "maintenance/docker-buildkit-gc.timer" "docker-buildkit-gc.timer or its service is not operational"
-          // {
-            kind = "systemd-timer";
-            timer = "docker-buildkit-gc.timer";
-            service = "docker-buildkit-gc.service";
-            unitFileStates = [
-              "enabled"
-              "enabled-runtime"
-            ];
-            activeStates = [ "active" ];
-            serviceResults = [ "success" ];
-          }
-        ))
+        (mkEntry "containers/build-artifact-gc" expectedBuildArtifactGc.observation)
       ]
       ++ serviceObservations
       ++ serviceRestartObservations
@@ -181,51 +236,44 @@ let
       ++ healthObservations
     );
 
-  buildkitConfiguration = configuration: {
+  buildArtifactGcConfiguration = configuration: {
     daemonSettings = configuration.virtualisation.docker.daemon.settings;
-    service = configuration.systemd.services.docker-buildkit-gc or null;
-    timer = configuration.systemd.timers.docker-buildkit-gc or null;
+    service = configuration.systemd.services.${expectedBuildArtifactGc.name} or null;
+    timer = configuration.systemd.timers.${expectedBuildArtifactGc.name} or null;
   };
 
-  buildkitGcPolicyBounds =
-    policy:
-    builtins.isList policy
-    && policy != [ ]
-    && builtins.all (entry: (entry.maxUsedSpace or null) != null) policy
-    && builtins.any (entry: (entry.all or false) && (entry.maxUsedSpace or null) == "100GB") policy;
+  withBuildArtifactGcExecStart =
+    configuration: execStart:
+    configuration
+    // {
+      systemd = configuration.systemd // {
+        services = configuration.systemd.services // {
+          ${expectedBuildArtifactGc.name} =
+            configuration.systemd.services.${expectedBuildArtifactGc.name}
+            // {
+              serviceConfig = configuration.systemd.services.${expectedBuildArtifactGc.name}.serviceConfig // {
+                ExecStart = execStart;
+              };
+            };
+        };
+      };
+    };
 
   containerContractMatches =
     configuration: services: observations:
     let
       expected = expectedContainerObservationsFor services;
       actual = selectContainerObservations observations;
-      buildkit = buildkitConfiguration configuration;
-      execTokens =
-        if buildkit.service == null then [ ] else tokensOf buildkit.service.serviceConfig.ExecStart;
+      gc = buildArtifactGcConfiguration configuration;
+      execStartTokens =
+        if gc.service == null then [ ] else map tokensOf gc.service.serviceConfig.ExecStart;
     in
     actual == expected
-    && lib.attrByPath [ "builder" "gc" "enabled" ] null buildkit.daemonSettings == true
-    && lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null buildkit.daemonSettings == null
-    && buildkitGcPolicyBounds (lib.attrByPath [ "builder" "gc" "policy" ] null buildkit.daemonSettings)
-    && buildkit.service != null
-    &&
-      execTokens == [
-        (lib.getExe pkgs.docker)
-        "buildx"
-        "prune"
-        "--force"
-        "--max-used-space"
-        "100GB"
-        "--reserved-space"
-        "10GB"
-      ]
-    && buildkit.timer != null
-    &&
-      buildkit.timer.timerConfig == {
-        OnCalendar = "*-*-* 00/6:00:00";
-        Persistent = true;
-        Unit = "docker-buildkit-gc.service";
-      };
+    && lib.attrByPath [ "builder" "gc" ] null gc.daemonSettings == expectedBuildArtifactGc.daemonGc
+    && gc.service != null
+    && execStartTokens == expectedBuildArtifactGc.execStartTokens
+    && gc.timer != null
+    && gc.timer.timerConfig == expectedBuildArtifactGc.timerConfig;
 
   expectedContainerObservations = expectedContainerObservationsFor hostConfig.dotfiles.containers.services;
   containerObservationKeys = builtins.attrNames expectedContainerObservations;
@@ -250,7 +298,7 @@ let
   serviceRestartRemovalMutation = removeObservation sampleObservationKeys.serviceRestart;
   imageRemovalMutation = removeObservation sampleObservationKeys.image;
   healthRemovalMutation = removeObservation sampleObservationKeys.health;
-  timerRemovalMutation = removeObservation "containers/buildkit-gc";
+  timerRemovalMutation = removeObservation "containers/build-artifact-gc";
   rosterRemovalMutation = removeObservation "containers/roster";
   addStaleObservation =
     source: name:
@@ -265,45 +313,41 @@ let
     (addStaleObservation sampleObservationKeys.image "containers/image/stale")
     (addStaleObservation sampleObservationKeys.health "containers/health/stale")
     (addStaleObservation "containers/roster" "containers/stale-roster")
-    (addStaleObservation "containers/buildkit-gc" "containers/stale-buildkit-gc")
+    (addStaleObservation "containers/build-artifact-gc" "containers/stale-build-artifact-gc")
   ];
-  maxStorageMutation = hostConfig // {
+  daemonPolicyMutation = hostConfig // {
     virtualisation = hostConfig.virtualisation // {
       docker = hostConfig.virtualisation.docker // {
         daemon = hostConfig.virtualisation.docker.daemon // {
           settings = lib.recursiveUpdate hostConfig.virtualisation.docker.daemon.settings {
             builder.gc.policy = [
               {
-                all = true;
+                keepDuration = "1439h";
+                maxUsedSpace = "30GB";
                 reservedSpace = "10GB";
-                maxUsedSpace = "101GB";
+              }
+              {
+                maxUsedSpace = "30GB";
+                reservedSpace = "10GB";
+              }
+              {
+                all = true;
+                maxUsedSpace = "100GB";
+                reservedSpace = "10GB";
               }
             ];
           };
         };
       };
     };
-    systemd = hostConfig.systemd // {
-      services = hostConfig.systemd.services // {
-        docker-buildkit-gc = hostConfig.systemd.services.docker-buildkit-gc // {
-          serviceConfig = hostConfig.systemd.services.docker-buildkit-gc.serviceConfig // {
-            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 101GB --reserved-space 10GB";
-          };
-        };
-      };
-    };
   };
-  reservedStorageMutation = hostConfig // {
-    systemd = hostConfig.systemd // {
-      services = hostConfig.systemd.services // {
-        docker-buildkit-gc = hostConfig.systemd.services.docker-buildkit-gc // {
-          serviceConfig = hostConfig.systemd.services.docker-buildkit-gc.serviceConfig // {
-            ExecStart = "${lib.getExe pkgs.docker} buildx prune --force --max-used-space 100GB --reserved-space 11GB";
-          };
-        };
-      };
-    };
-  };
+  imagePruneMutation = withBuildArtifactGcExecStart hostConfig [
+    (lib.escapeShellArgs (builtins.elemAt expectedBuildArtifactGc.execStartTokens 1))
+  ];
+  cacheBudgetMutation = withBuildArtifactGcExecStart hostConfig [
+    (lib.escapeShellArgs (builtins.head expectedBuildArtifactGc.execStartTokens))
+    "${lib.getExe pkgs.docker} buildx prune --force --all --max-used-space 101GB --reserved-space 10GB"
+  ];
 
   additionalObservationVariantConfig =
     (mkNixosSystem [
@@ -331,7 +375,8 @@ let
         {
           systemd.services.${sampleSystemdService}.description =
             lib.mkForce "Descriptions must not select container observations";
-          systemd.services.docker-buildkit-gc.description = lib.mkForce "Descriptions must not select the BuildKit GC observation";
+          systemd.services.${expectedBuildArtifactGc.name}.description =
+            lib.mkForce "Descriptions must not select the Docker build artifact GC observation";
         }
       )
     ]).config;
@@ -409,12 +454,12 @@ let
     ++ [ "containers/health/${sampleApplication}" ];
 in
 {
-  docker-buildkit-gc-contract =
+  docker-build-artifact-gc-contract =
     let
-      daemonSettings = hostConfig.virtualisation.docker.daemon.settings;
-      gcService = hostConfig.systemd.services.docker-buildkit-gc or null;
-      gcTimer = hostConfig.systemd.timers.docker-buildkit-gc or null;
-      execTokens = if gcService == null then [ ] else tokensOf gcService.serviceConfig.ExecStart;
+      gc = buildArtifactGcConfiguration hostConfig;
+      actualDaemonGc = lib.attrByPath [ "builder" "gc" ] null gc.daemonSettings;
+      execStartTokens =
+        if gc.service == null then [ ] else map tokensOf gc.service.serviceConfig.ExecStart;
       dependencyFields = [
         "after"
         "before"
@@ -436,76 +481,60 @@ in
           name: service:
           map (field: "${name}.${field}") (
             builtins.filter (
-              field: lib.elem "docker-buildkit-gc.service" (service.${field} or [ ])
+              field: lib.elem expectedBuildArtifactGc.serviceUnit (service.${field} or [ ])
             ) dependencyFields
           )
         ) hostConfig.systemd.services
       );
     in
     assert lib.assertMsg (
-      lib.attrByPath [ "builder" "gc" "enabled" ] null daemonSettings == true
-    ) "Docker BuildKit GC must be enabled";
+      actualDaemonGc == expectedBuildArtifactGc.daemonGc
+    ) "Docker BuildKit GC policy changed: actual=${builtins.toJSON actualDaemonGc}";
+    assert lib.assertMsg (gc.service != null) "Docker build artifact GC service is missing";
+    assert lib.assertMsg (gc.service.after == [ "docker.service" ])
+      "Docker build artifact GC service must start after Docker: actual=${builtins.toJSON gc.service.after}";
+    assert lib.assertMsg (gc.service.wants == [ "docker.service" ])
+      "Docker build artifact GC service must use a soft Docker dependency: actual=${builtins.toJSON gc.service.wants}";
     assert lib.assertMsg (
-      lib.attrByPath [ "builder" "gc" "defaultKeepStorage" ] null daemonSettings == null
-    ) "Docker BuildKit GC must not use defaultKeepStorage, which sets a floor instead of a cap";
-    assert lib.assertMsg (buildkitGcPolicyBounds (
-      lib.attrByPath [ "builder" "gc" "policy" ] null daemonSettings
-    )) "Docker BuildKit GC policy must bound every rule with maxUsedSpace";
-    assert lib.assertMsg (gcService != null) "Docker BuildKit GC service is missing";
+      gc.service.requires == [ ] && gc.service.requiredBy == [ ]
+    ) "Docker build artifact GC failure must not propagate to Docker";
+    assert lib.assertMsg (gcDependents == [ ])
+      "system services must not depend on Docker build artifact GC: actual=${builtins.toJSON gcDependents}";
     assert lib.assertMsg (
-      gcService.after == [ "docker.service" ]
-    ) "Docker BuildKit GC service must start after Docker: actual=${builtins.toJSON gcService.after}";
-    assert lib.assertMsg (gcService.wants == [ "docker.service" ])
-      "Docker BuildKit GC service must use a soft Docker dependency: actual=${builtins.toJSON gcService.wants}";
+      gc.service.serviceConfig.Type == "oneshot"
+    ) "Docker build artifact GC service must be oneshot";
     assert lib.assertMsg (
-      gcService.requires == [ ] && gcService.requiredBy == [ ]
-    ) "Docker BuildKit GC failure must not propagate to Docker";
+      gc.service.unitConfig.ConditionPathExists == "/var/run/docker.sock"
+    ) "Docker build artifact GC service must require the Docker socket";
     assert lib.assertMsg (
-      gcDependents == [ ]
-    ) "system services must not depend on Docker BuildKit GC: actual=${builtins.toJSON gcDependents}";
+      execStartTokens == expectedBuildArtifactGc.execStartTokens
+    ) "Docker build artifact GC commands changed: actual=${builtins.toJSON execStartTokens}";
+    assert lib.assertMsg (gc.timer != null) "Docker build artifact GC timer is missing";
     assert lib.assertMsg (
-      gcService.serviceConfig.Type == "oneshot"
-    ) "Docker BuildKit GC service must be oneshot";
+      gc.timer.wantedBy == [ "timers.target" ]
+    ) "Docker build artifact GC timer must be enabled: actual=${builtins.toJSON gc.timer.wantedBy}";
     assert lib.assertMsg (
-      gcService.unitConfig.ConditionPathExists == "/var/run/docker.sock"
-    ) "Docker BuildKit GC service must require the Docker socket";
-    assert lib.assertMsg (
-      execTokens == [
-        (lib.getExe pkgs.docker)
-        "buildx"
-        "prune"
-        "--force"
-        "--max-used-space"
-        "100GB"
-        "--reserved-space"
-        "10GB"
-      ]
-    ) "Docker BuildKit GC command changed: actual=${builtins.toJSON execTokens}";
-    assert lib.assertMsg (gcTimer != null) "Docker BuildKit GC timer is missing";
-    assert lib.assertMsg (
-      gcTimer.wantedBy == [ "timers.target" ]
-    ) "Docker BuildKit GC timer must be enabled: actual=${builtins.toJSON gcTimer.wantedBy}";
-    assert lib.assertMsg (
-      gcTimer.timerConfig == {
-        OnCalendar = "*-*-* 00/6:00:00";
-        Persistent = true;
-        Unit = "docker-buildkit-gc.service";
-      }
-    ) "Docker BuildKit GC timer must run persistently every six hours";
+      gc.timer.timerConfig == expectedBuildArtifactGc.timerConfig
+    ) "Docker build artifact GC timer must run persistently every six hours";
     assert lib.assertMsg (containerContractMatches hostConfig hostConfig.dotfiles.containers.services
       hostConfig.dotfiles.observations
-    ) "Docker BuildKit GC settings and runtime observation must share one contract";
+    ) "Docker build artifact GC settings and runtime observation must share one contract";
     assert lib.assertMsg (
-      !(containerContractMatches maxStorageMutation hostConfig.dotfiles.containers.services
+      !(containerContractMatches daemonPolicyMutation hostConfig.dotfiles.containers.services
         containerObservations
       )
-    ) "Docker BuildKit GC max storage mutation escaped the owner contract";
+    ) "Docker BuildKit GC policy mutation escaped the owner contract";
     assert lib.assertMsg (
-      !(containerContractMatches reservedStorageMutation hostConfig.dotfiles.containers.services
+      !(containerContractMatches imagePruneMutation hostConfig.dotfiles.containers.services
         containerObservations
       )
-    ) "Docker BuildKit GC reserved storage mutation escaped the owner contract";
-    pkgs.runCommandLocal "check-docker-buildkit-gc-contract"
+    ) "Docker dangling image prune mutation escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches cacheBudgetMutation hostConfig.dotfiles.containers.services
+        containerObservations
+      )
+    ) "Docker BuildKit cache budget mutation escaped the owner contract";
+    pkgs.runCommandLocal "check-docker-build-artifact-gc-contract"
       {
         nativeBuildInputs = [
           pkgs.findutils
@@ -515,12 +544,12 @@ in
       ''
         set -euo pipefail
 
-        if grep -HnE '^(After|Before|BindsTo|Conflicts|JoinsNamespaceOf|OnFailure|OnSuccess|PartOf|PropagatesReloadTo|ReloadPropagatedFrom|Requires|Requisite|Upholds|Wants)=(.*[[:space:]])?docker-buildkit-gc\.service([[:space:]]|$)' ${systemUnits}/*.service > service-dependencies; then
+        if grep -HnE '^(After|Before|BindsTo|Conflicts|JoinsNamespaceOf|OnFailure|OnSuccess|PartOf|PropagatesReloadTo|ReloadPropagatedFrom|Requires|Requisite|Upholds|Wants)=(.*[[:space:]])?docker-build-artifact-gc\.service([[:space:]]|$)' ${systemUnits}/*.service > service-dependencies; then
           cat service-dependencies >&2
           exit 1
         fi
 
-        find ${systemUnits} -mindepth 2 -type l -lname '*docker-buildkit-gc.service' -print > dependency-links
+        find ${systemUnits} -mindepth 2 -type l -lname '*docker-build-artifact-gc.service' -print > dependency-links
         if [ -s dependency-links ]; then
           cat dependency-links >&2
           exit 1
@@ -563,7 +592,7 @@ in
     ) "container health observation removal escaped the owner contract";
     assert lib.assertMsg (
       !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services timerRemovalMutation)
-    ) "BuildKit GC timer observation removal escaped the owner contract";
+    ) "Docker build artifact GC timer observation removal escaped the owner contract";
     assert lib.assertMsg (
       !(containerContractMatches hostConfig hostConfig.dotfiles.containers.services rosterRemovalMutation)
     ) "container roster observation removal escaped the owner contract";

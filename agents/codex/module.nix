@@ -25,13 +25,7 @@ let
     "${cfg.host.homeDir}/.local/state/dotfiles-wsl" = "write";
   };
   codexRuntimeConfig = (pkgs.formats.toml { }).generate "codex-runtime.toml" {
-    permissions = {
-      dev.filesystem = agentRuntimeWritableFilesystem;
-      agent-read-only = {
-        extends = ":read-only";
-        filesystem = agentRuntimeWritableFilesystem;
-      };
-    };
+    permissions.dev.filesystem = agentRuntimeWritableFilesystem;
   };
   codexGatewayConfig = (pkgs.formats.toml { }).generate "codex-gateway.toml" {
     mcp_servers.gateway.url = config.dotfiles.mcp.gateway.url;
@@ -40,8 +34,16 @@ let
     inherit codexModel;
     homeDir = cfg.host.homeDir;
   };
+  # role file は symlink だと O_NOFOLLOW で開けないため、store の実体を直接指す
+  codexAgentsConfig = (pkgs.formats.toml { }).generate "codex-agents.toml" {
+    agents = {
+      default_subagent_model = codexModel;
+      default_subagent_reasoning_effort = "xhigh";
+    }
+    // lib.mapAttrs (_: source: { config_file = toString source; }) codexAgentDefinitions;
+  };
   codexSystemConfig = pkgs.runCommandLocal "codex-system-config.toml" { } ''
-    cat ${codexSystemBase} ${codexRuntimeConfig} ${codexGatewayConfig} > "$out"
+    cat ${codexSystemBase} ${codexAgentsConfig} ${codexRuntimeConfig} ${codexGatewayConfig} > "$out"
   '';
   codexUserSeed = pkgs.replaceVars ./assets/config.toml {
     inherit codexModel;
@@ -100,10 +102,8 @@ let
       ''
         # frontmatter から codex agent schema への変換
         yq -y '
-          ((.tools // []) | any(. == "Edit" or . == "Write") | not) as $readOnly
-          | del(.tools)
+          del(.tools)
           | if has("effort") then .model_reasoning_effort = .effort | del(.effort) else . end
-          | if $readOnly then .default_permissions = "agent-read-only" else . end
         ' <<<"$frontmatter" | remarshal -if yaml -of toml > "$out"
         {
           printf 'model = "${codexModel}"\n'
@@ -112,6 +112,7 @@ let
           printf '"""\n'
         } >> "$out"
       '';
+  codexAgentDefinitions = lib.mapAttrs buildAgent cfg.agents.shared.definitions;
 in
 {
   dotfiles.agents.clients.codex = {
@@ -119,10 +120,9 @@ in
     runtimeWrapperMode = "managed";
     rulesDestination = ".codex/AGENTS.md";
     skillsDestination = ".codex/skills";
-    definitionMode = "rendered";
-    definitionsDestination = ".codex/agents";
+    definitionMode = "declared";
     definitionFormat = "toml";
-    definitions = lib.mapAttrs buildAgent cfg.agents.shared.definitions;
+    definitions = codexAgentDefinitions;
     gatewayConfig = {
       source = codexGatewayConfig;
       format = "toml";

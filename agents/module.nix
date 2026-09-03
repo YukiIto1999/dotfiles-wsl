@@ -86,11 +86,7 @@ let
       );
 
   definitionFileName =
-    client: name:
-    if client.definitionMode == "rendered" && client.definitionFormat == "toml" then
-      "${name}.toml"
-    else
-      "${name}.md";
+    client: name: if client.definitionFormat == "toml" then "${name}.toml" else "${name}.md";
 
   normalizeSource =
     source:
@@ -106,7 +102,7 @@ let
     clientName:
     let
       client = agents.clients.${clientName};
-      definitionRows = lib.optionals (client.definitionMode != "unsupported") (
+      definitionRows = lib.optionals (client.definitionsDestination != null) (
         lib.mapAttrsToList (name: source: {
           inherit clientName;
           id = "definitions/${name}";

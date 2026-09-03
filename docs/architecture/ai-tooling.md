@@ -49,6 +49,8 @@ agent 内の `git worktree add` は [`agents/impl/resource/`](../../agents/impl/
 
 静的 agent の正本は [`agents/shared/definitions/`](../../agents/shared/definitions) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OpenCode は frontmatter 付き Markdown へ build 時に変換する。Antigravity は `definitionMode = "unsupported"` と宣言し、設定漏れと未対応を区別する。変換は各 client module が所有する。
 
+配備の形は `definitionMode` が決める。`native` と `rendered` は home 配下の規定 path へ symlink する。Codex は `declared` を使い、home へは配らず、`config.toml` の `[agents.<role>]` から Nix store の実体を `config_file` で指す。Codex が role file を `O_NOFOLLOW` で開き、symlink を拒否するためである。
+
 local skill は [`agents/shared/skills/`](../../agents/shared/skills) から自動検出する。local skill と [`flake.nix`](../../flake.nix) に固定した plugin skill は、どちらも Nix store source として全 client へ配備する。本文の変更にも rebuild が必要である。local と plugin、plugin 同士の同名 skill は評価時に拒否する。
 
 配備済み Skill と評価前の候補を分け、候補の責務境界と donor は [Skill portfolio](skills.md) に記録する。

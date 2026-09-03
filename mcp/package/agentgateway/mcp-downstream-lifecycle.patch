@@ -2,18 +2,17 @@ diff --git a/crates/agentgateway/src/mcp/handler.rs b/crates/agentgateway/src/mc
 index 80ed380..2a475fa 100644
 --- a/crates/agentgateway/src/mcp/handler.rs
 +++ b/crates/agentgateway/src/mcp/handler.rs
-@@ -845,6 +845,10 @@ pub(crate) struct GuardrailsCtx {
+@@ -845,6 +845,9 @@ pub(crate) struct GuardrailsCtx {
  	pub req_ctx: Arc<IncomingRequestContext>,
  }
  
-+/// Interval between SSE comment frames on a downstream stream. Clients close a silent GET well
-+/// before the session idle TTL, so a pending stream has to produce traffic on its own.
++// 下流 client の 60 秒 read timeout を下回る SSE keepalive 間隔
 +const DOWNSTREAM_SSE_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(15);
 +
  fn messages_to_response(
  	id: RequestId,
  	stream: impl Stream<Item = Result<ServerJsonRpcMessage, ClientError>> + Send + 'static,
-@@ -852,7 +856,7 @@ fn messages_to_response(
+@@ -852,7 +855,7 @@ fn messages_to_response(
  ) -> Result<Response, UpstreamError> {
  	Ok(mcp::session::sse_stream_response(
  		into_sse_stream(id, stream, mcp_log),
@@ -22,7 +21,7 @@ index 80ed380..2a475fa 100644
  	))
  }
  
-@@ -975,11 +979,32 @@ fn accepted_response() -> Response {
+@@ -975,11 +978,32 @@ fn accepted_response() -> Response {
  #[cfg(test)]
  mod tests {
  	use futures_util::stream;
@@ -59,23 +58,23 @@ diff --git a/crates/agentgateway/src/mcp/session.rs b/crates/agentgateway/src/mc
 index 79fb4d0..1e99d17 100644
 --- a/crates/agentgateway/src/mcp/session.rs
 +++ b/crates/agentgateway/src/mcp/session.rs
-@@ -41,6 +41,9 @@ struct SessionEntry {
+@@ -41,6 +41,7 @@ struct SessionEntry {
  	session: Session,
  	last_access: Instant,
  	idle_ttl: Duration,
-+	/// Number of downstream GET streams currently holding this session open. An entry with a live
-+	/// stream is never idle, regardless of `last_access`.
 +	active_streams: usize,
  }
  
  const SESSION_REAP_INTERVAL: Duration = Duration::from_secs(30);
-@@ -662,6 +665,29 @@ impl SessionManager {
+@@ -662,6 +663,31 @@ impl SessionManager {
  		Some(entry.session.clone().with_inputs(builder))
  	}
  
-+	/// get_session_for_stream returns a session together with a guard that keeps the session pinned
-+	/// for as long as the downstream GET body lives. The lookup, the access timestamp and the stream
-+	/// count are updated under one lock so the reaper cannot observe a half-registered stream.
++	/// 下流 GET 応答本文の寿命までセッションを保持するガード付き取得
++	///
++	/// 登録済み ID の取得時に限る最終アクセス時刻更新と生存ストリーム数加算
++	/// 応答本文の解放までセッションを保持するガードの返却
++	/// 未登録 ID またはセッション表のロック失敗時の None
 +	pub fn get_session_for_stream(
 +		&self,
 +		id: &str,
@@ -127,9 +126,10 @@ index 79fb4d0..1e99d17 100644
  	}
  }
  
-+/// SessionStreamGuard keeps a session out of the idle reaper while a downstream GET body is alive.
-+/// Dropping it releases the stream and restarts the idle clock from that moment. A session removed
-+/// by an explicit DELETE is not resurrected.
++/// 下流 GET 応答本文とセッションの idle 判定を対応付ける保持ガード
++///
++/// セッション表のロック成功時に限る生存ストリーム数減算と最終アクセス時刻更新
++/// 明示 DELETE 済みセッションの非再登録
 +#[derive(Debug)]
 +pub struct SessionStreamGuard {
 +	sessions: Arc<RwLock<HashMap<String, SessionEntry>>>,
@@ -141,7 +141,6 @@ index 79fb4d0..1e99d17 100644
 +		let Ok(mut sessions) = self.sessions.write() else {
 +			return;
 +		};
-+		// A session removed by an explicit DELETE stays removed; the guard never re-inserts it.
 +		let Some(entry) = sessions.get_mut(&self.id) else {
 +			return;
 +		};
@@ -164,7 +163,7 @@ index 79fb4d0..1e99d17 100644
  	let post = guard.len();
  	if post < pre {
  		tracing::debug!("reaped {} sessions", pre - post);
-@@ -894,3 +948,122 @@ fn get_client_info() -> ClientInfo {
+@@ -894,3 +948,120 @@ fn get_client_info() -> ClientInfo {
  		Implementation::new("agentgateway", BuildInfo::new().version.to_string());
  	client_info
  }
@@ -214,8 +213,6 @@ index 79fb4d0..1e99d17 100644
 +		f(sessions.get(id).expect("registered session"))
 +	}
 +
-+	/// A zero idle TTL makes an entry expired for any `last_access`, so reaping is decided by the
-+	/// active stream count alone without depending on wall clock progress inside the test.
 +	fn expire_idle_ttl(manager: &SessionManager, id: &str) {
 +		mutate_entry(manager, id, |entry| entry.idle_ttl = Duration::ZERO);
 +	}
@@ -291,7 +288,7 @@ diff --git a/crates/agentgateway/src/mcp/streamablehttp.rs b/crates/agentgateway
 index fcf4f2d..f9d2ad6 100644
 --- a/crates/agentgateway/src/mcp/streamablehttp.rs
 +++ b/crates/agentgateway/src/mcp/streamablehttp.rs
-@@ -199,12 +199,20 @@ impl StreamableHttpService {
+@@ -199,12 +199,18 @@ impl StreamableHttpService {
  			return mcp::Error::SessionIdRequired.into();
  		};
  
@@ -305,8 +302,6 @@ index fcf4f2d..f9d2ad6 100644
  
  		let (parts, _) = request.into_parts();
 -		session.get_stream(parts).await
-+		// The guard has the lifetime of the SSE body, so the session stays pinned while the client
-+		// holds the stream and its idle clock restarts when the body ends.
 +		session
 +			.get_stream(parts)
 +			.await

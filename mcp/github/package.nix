@@ -6,7 +6,6 @@
   serverBuilder,
 }:
 
-# account ごとに 1 instance、PAT は spawn 時に sops file から読む
 let
   version = "1.8.0";
   bin = pkgs.stdenv.mkDerivation {
@@ -21,12 +20,9 @@ let
     installPhase = "install -Dm755 github-mcp-server $out/bin/github-mcp-server";
   };
 in
-# 1.8.0 は空 token で fail-fast せず対話 OAuth login へ落ちる。sops の復号失敗が
-# 起動失敗ではなく tool 実行時のエラーへ後退するので、front 側で落とす
 serverBuilder {
   name = "github-mcp";
-  # 1.8.0 は空 token で fail-fast せず対話 OAuth login へ落ちる。sops の復号
-  # 失敗が起動失敗ではなく tool 実行時のエラーへ後退する
+  # 空トークンを対話 OAuth と解釈する github-mcp-server 1.8.0 の仕様
   requireNonEmpty = [ tokenFile ];
   env.GITHUB_PERSONAL_ACCESS_TOKEN = "$(<${tokenFile})";
   command = "${bin}/bin/github-mcp-server stdio --toolsets ${lib.concatStringsSep "," toolsets}";

@@ -28,8 +28,6 @@ let
             command = expectedCommand;
           };
         fixtureFront
-      else if path == ../package/serve-over-proxy.nix then
-        executable: port: "proxy:${executable}:${toString port}"
       else
         pkgs.callPackage path args;
   };
@@ -51,8 +49,9 @@ let
                 lib.types.submodule {
                   options = {
                     provider = lib.mkOption { type = lib.types.str; };
+                    executable = lib.mkOption { type = lib.types.str; };
+                    serverLifecycle = lib.mkOption { type = lib.types.str; };
                     port = lib.mkOption { type = lib.types.port; };
-                    serve = lib.mkOption { type = lib.types.functionTo lib.types.str; };
                     needsNetwork = lib.mkOption { type = lib.types.bool; };
                     probe = lib.mkOption { type = lib.types.raw; };
                   };
@@ -73,7 +72,8 @@ let
 in
 {
   mcp-codex-client-executable-contract =
-    assert target.serve 9876 == "proxy:${lib.getExe fixtureFront}:9876";
+    assert target.executable == lib.getExe fixtureFront;
+    assert target.serverLifecycle == "service";
     pkgs.runCommandLocal "check-mcp-codex-client-executable-contract"
       {
         nativeBuildInputs = [ pkgs.ripgrep ];

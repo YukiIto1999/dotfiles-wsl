@@ -23,8 +23,65 @@ let
   targets = hostConfig.dotfiles.mcp.targets;
   variantTargets = variantConfig.dotfiles.mcp.targets;
   configOf = front: services.${front.service}.serviceConfig;
+  browserTargetNames = [
+    "chrome-devtools"
+    "playwright"
+  ];
+  lifecycleOf = target: target.serverLifecycle or null;
+  sessionTargetNames = builtins.attrNames (
+    lib.filterAttrs (_: target: lifecycleOf target == "session") targets
+  );
+  serviceTargetNames = builtins.attrNames (
+    lib.filterAttrs (_: target: lifecycleOf target == "service") targets
+  );
+  sessionPolicy = hostConfig.dotfiles.mcp.sessionPolicy or { };
+  sessionFixtureServer = pkgs.writeShellApplication {
+    name = "mcp-session-state-fixture";
+    text = ''
+      exec ${lib.getExe pkgs.python3} ${./fixtures/session-state-server.py}
+    '';
+  };
+  sessionFixtureExecStart = (pkgs.callPackage ./package/front-command.nix { }) {
+    executable = lib.getExe sessionFixtureServer;
+    serverLifecycle = "session";
+    port = 18779;
+    sessionPolicy = {
+      idleSeconds = 1;
+      frontGraceSeconds = 1;
+    };
+  };
+  invalidLifecycleResult = builtins.tryEval (
+    (pkgs.callPackage ./package/front-command.nix { }) {
+      executable = lib.getExe sessionFixtureServer;
+      serverLifecycle = "invalid";
+      port = 18779;
+      sessionPolicy = {
+        idleSeconds = 1;
+        frontGraceSeconds = 1;
+      };
+    }
+  );
+  sessionConfigOfExecStart =
+    execStart: builtins.head (helpers.execTokens.valuesOf (helpers.execTokens.tokensOf execStart) "-f");
+  sessionFrontConfigOf = name: sessionConfigOfExecStart (configOf frontsByName.${name}).ExecStart;
+  sessionFixtureTokens = helpers.execTokens.tokensOf sessionFixtureExecStart;
+  sessionFixtureFrontExecutable = builtins.head sessionFixtureTokens;
+  sessionFixtureFrontConfig = sessionConfigOfExecStart sessionFixtureExecStart;
+  sessionFrontBehavior = pkgs.writeShellApplication {
+    name = "mcp-session-front-behavior";
+    runtimeInputs = with pkgs; [
+      coreutils
+      curl
+      findutils
+      gawk
+      gnugrep
+      gnused
+      iproute2
+      jq
+    ];
+    text = builtins.readFile ./fixtures/session-front-behavior.sh;
+  };
 
-  # typo した wait 先は systemd が黙って無視するので、宣言時に実在を確かめる
   missingWaits = lib.concatMap (
     front:
     builtins.filter (
@@ -32,8 +89,6 @@ let
     ) targets.${front.name}.waitUnits
   ) fronts;
 
-  # front が loopback を外れると、firewall の無い WSL では外部から到達しうる。
-  # 全 front が mcp-proxy の前段を通るので、bind 先は起動 command に現れる
   inherit (helpers.execTokens)
     tokensOf
     onlyValue
@@ -42,10 +97,12 @@ let
   boundElsewhere = builtins.filter (
     front:
     let
+      target = targets.${front.name};
       tokens = tokensOf (configOf front).ExecStart;
       port = toString front.port;
     in
-    !(onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port)
+    target.serverLifecycle == "service"
+    && !(onlyValue tokens "--host" "127.0.0.1" && onlyValue tokens "--port" port)
   ) fronts;
 
   expectedNetworkFronts = builtins.attrNames (
@@ -56,7 +113,6 @@ let
     builtins.attrNames (lib.filterAttrs (_: target: target.needsNetwork) targets)
   );
 
-  # needsNetwork を宣言しない front は、通信が loopback へ限られていること
   unrestricted = builtins.filter (
     front:
     !targets.${front.name}.needsNetwork
@@ -99,6 +155,7 @@ let
         port
         probe
         provider
+        serverLifecycle
         waitUnits
         ;
     }
@@ -111,6 +168,9 @@ let
   targetOptions = subOptions mcpOptions.targets;
   probeOptions = builtins.removeAttrs (targetOptions.probe.type.getSubOptions [ ]) [ "_module" ];
   frontOptions = subOptions mcpOptions.fronts;
+  sessionPolicyOptions = builtins.removeAttrs (mcpOptions.sessionPolicy.type.getSubOptions [ ]) [
+    "_module"
+  ];
   optionMetadata = {
     enabledProviders = {
       type = mcpOptions.enabledProviders.type.name;
@@ -127,7 +187,6 @@ let
       hasDefault = mcpOptions.targets ? default;
       inherit (mcpOptions.targets) default;
       fields = builtins.mapAttrs (_: option: option.type.name) targetOptions;
-      serveResultType = targetOptions.serve.type.nestedTypes.elemType.name;
       waitUnitsElementType = targetOptions.waitUnits.type.nestedTypes.elemType.name;
       probeReadOnly = targetOptions.probe.readOnly or false;
       probeFields = builtins.mapAttrs (_: option: option.type.name) probeOptions;
@@ -141,6 +200,13 @@ let
       readOnly = mcpOptions.fronts.readOnly or false;
       hasDefault = mcpOptions.fronts ? default;
       fields = builtins.mapAttrs (_: option: option.type.name) frontOptions;
+    };
+    sessionPolicy = {
+      type = mcpOptions.sessionPolicy.type.name;
+      internal = mcpOptions.sessionPolicy.internal or false;
+      readOnly = mcpOptions.sessionPolicy.readOnly or false;
+      hasDefault = mcpOptions.sessionPolicy ? default;
+      fields = builtins.mapAttrs (_: option: option.type.name) sessionPolicyOptions;
     };
     chromium = {
       type = mcpOptions.chromium.type.name;
@@ -165,14 +231,14 @@ let
       hasDefault = true;
       default = { };
       fields = {
+        executable = "str";
+        serverLifecycle = "enum";
         provider = "str";
         port = "intBetween";
-        serve = "functionTo";
         needsNetwork = "bool";
         waitUnits = "listOf";
         probe = "submodule";
       };
-      serveResultType = "str";
       waitUnitsElementType = "str";
       probeReadOnly = true;
       probeFields = {
@@ -196,6 +262,16 @@ let
         service = "str";
         runtimeDirectory = "str";
         runtimeDirectoryPath = "str";
+      };
+    };
+    sessionPolicy = {
+      type = "submodule";
+      internal = true;
+      readOnly = true;
+      hasDefault = false;
+      fields = {
+        idleSeconds = "positiveInt";
+        frontGraceSeconds = "positiveInt";
       };
     };
     chromium = {
@@ -258,7 +334,7 @@ let
     definitions = [
       {
         file = "mcp/orphan/impl/injected.nix";
-        value.serveOverProxy = "unresolved-injection";
+        value.frontBuilder = "unresolved-injection";
       }
     ];
   };
@@ -394,8 +470,9 @@ let
       {
         dotfiles.mcp.targets.fixture = {
           provider = "memory";
+          executable = "${pkgs.coreutils}/bin/true";
+          serverLifecycle = "service";
           port = 8783;
-          serve = port: "${pkgs.coreutils}/bin/true --host 127.0.0.1 --port ${toString port}";
           needsNetwork = false;
           waitUnits = [ ];
           probe = {
@@ -517,7 +594,7 @@ in
         name: target:
         target
         // {
-          serve = port: "${name}:${toString port}";
+          executable = "${pkgs.coreutils}/bin/true-${name}";
         }
       ) expectedContract.targets;
 
@@ -597,6 +674,9 @@ in
       duplicatePort = updateTarget "memory" (
         target: target // { port = expectedTargets.codex.port; }
       ) expectedTargets;
+      executableWithArguments = updateTarget "memory" (
+        target: target // { executable = "/bin/true --verbose"; }
+      ) expectedTargets;
       probeDrift = updateTarget "memory" (
         target:
         target
@@ -663,6 +743,7 @@ in
     assert !(assertionsPass expectedProviders underscoreId);
     assert !(assertionsPass expectedProviders prefixId);
     assert !(assertionsPass expectedProviders duplicatePort);
+    assert !(assertionsPass expectedProviders executableWithArguments);
     assert targetContractMatches expectedTargets;
     assert !(targetContractMatches probeDrift);
     assert !(targetContractMatches networkDrift);
@@ -681,7 +762,7 @@ in
       fixtureScan.violations == [
         "mcp/fixtures/global-args/direct.nix:_module.args.mkNpmMcp"
         "mcp/fixtures/global-args/nested.nix:_module.args.mkMcpServer"
-        "mcp/codex/fixtures/global-args/impl/injected.nix:_module.args.serveOverProxy"
+        "mcp/codex/fixtures/global-args/impl/injected.nix:_module.args.frontBuilder"
       ];
     assert nonMcpFixtureScan.diagnostics == [ ];
     assert nonMcpFixtureScan.violations == [ ];
@@ -703,7 +784,65 @@ in
     assert actualGlobalArgumentScan.violations == [ ];
     pkgs.runCommandLocal "check-mcp-source-boundary" { } "touch $out";
 
-  # front は宣言した port で loopback に listen し、書き込み領域を持つ
+  mcp-front-session-lifecycle =
+    assert
+      sessionPolicy == {
+        idleSeconds = 1800;
+        frontGraceSeconds = 60;
+      };
+    assert sessionTargetNames == browserTargetNames;
+    assert serviceTargetNames == lib.subtractLists browserTargetNames (builtins.attrNames targets);
+    assert !invalidLifecycleResult.success;
+    assert lib.all (target: target ? executable && lib.hasPrefix "/" target.executable) (
+      builtins.attrValues targets
+    );
+    assert lib.all (target: !(target ? serve)) (builtins.attrValues targets);
+    assert lib.all (
+      name:
+      helpers.execTokens.valuesOf (helpers.execTokens.tokensOf
+        (configOf frontsByName.${name}).ExecStart
+      ) "-f" != [ ]
+    ) browserTargetNames;
+    assert lib.all (
+      name:
+      builtins.elem "--stateless" (helpers.execTokens.tokensOf (configOf frontsByName.${name}).ExecStart)
+    ) serviceTargetNames;
+    pkgs.runCommandLocal "check-mcp-front-session-lifecycle" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+      set -euo pipefail
+
+      ${lib.concatMapStringsSep "\n" (
+        name:
+        let
+          target = targets.${name};
+          sessionConfig = sessionFrontConfigOf name;
+        in
+        ''
+          EXPECTED_EXECUTABLE=${lib.escapeShellArg target.executable} yq -e '
+            .config.mcp.sessionTtl == "1860s"
+            and .config.adminAddr == "off"
+            and .config.statsAddr == "off"
+            and .config.readinessAddr == "off"
+            and (.binds | length) == 1
+            and .binds[0].address == "127.0.0.1"
+            and (.binds[0].listeners[0].routes[0].backends[0].mcp.targets | length) == 1
+            and .binds[0].listeners[0].routes[0].backends[0].mcp.targets[0].stdio.cmd == strenv(EXPECTED_EXECUTABLE)
+          ' ${sessionConfig} >/dev/null
+        ''
+      ) browserTargetNames}
+      touch $out
+    '';
+
+  mcp-session-front-behavior =
+    pkgs.runCommandLocal "check-mcp-session-front-behavior"
+      {
+        MCP_SESSION_FRONT_EXECUTABLE = sessionFixtureFrontExecutable;
+        MCP_SESSION_FRONT_CONFIG = sessionFixtureFrontConfig;
+      }
+      ''
+        ${lib.getExe sessionFrontBehavior}
+        touch $out
+      '';
+
   mcp-front-contract =
     assert expectedFronts != { };
     assert frontsByName != { };
@@ -728,16 +867,16 @@ in
     assert actualNetworkFronts == expectedNetworkFronts;
     pkgs.runCommandLocal "check-mcp-front-contract" { } "touch $out";
 
-  # unit の ExecStart しか見ないと、wrapper が後から bind を上書きできる。
-  # binary は Nix から読めないので、shebang の判定は derivation の中で行う
+  # ExecStart の検査だけでは見逃す後段ラッパーの待ち受け先上書き
   mcp-front-wrapper-bind =
     let
-      execs = map (front: services.${front.service}.serviceConfig.ExecStart) fronts;
+      execs = map (
+        name: services.${frontsByName.${name}.service}.serviceConfig.ExecStart
+      ) serviceTargetNames;
     in
     pkgs.runCommandLocal "check-mcp-front-wrapper-bind" { } ''
       inspected=0
 
-      # 引用を外してから見る。--ho"st" は shell では --host に戻る
       inspect() {
         [ "$(head -c 2 "$1")" = '#!' ] || return 0
         inspected=$((inspected + 1))
@@ -746,13 +885,11 @@ in
           echo "front wrapper decides its own bind: $1"
           exit 1
         fi
-        # exec で辿り着く先も wrapper。一段の間接で消えないようにする
         for next in $(printf '%s' "$norm" | sed -n 's/^ *exec \([^ ]*\).*/\1/p'); do
           case "$next" in /nix/store/*) [ -f "$next" ] && inspect "$next" ;; esac
         done
       }
 
-      # 総数を固定すると上流の packaging で壊れる。front ごとに一つ以上見る
       for exec in ${lib.escapeShellArgs execs}; do
         inspected=0
         for token in $exec; do
@@ -765,12 +902,11 @@ in
       touch $out
     '';
 
-  # 生成した wrapper が実際に起動するかは、宣言の整合では見えない。
-  # exec の位置を誤ると起動せず、それでも 40 の check は緑を返す
   mcp-front-starts =
     let
-      # stdio front は mcp-proxy に包まれる前の実体を直接起こす
-      execs = map (front: services.${front.service}.serviceConfig.ExecStart) fronts;
+      execs = map (
+        name: services.${frontsByName.${name}.service}.serviceConfig.ExecStart
+      ) serviceTargetNames;
     in
     pkgs.runCommandLocal "check-mcp-front-starts"
       {
@@ -783,8 +919,6 @@ in
       ''
         set -euo pipefail
 
-        # 継続行を畳んでから見る。危険な書き方を数え上げても必ず漏れるので、
-        # 「exec は唯一で、単純コマンドで、最後の実行文」という安全な形を要求する
         inspect() {
           script=$1
           ${pkgs.bash}/bin/bash -n "$script" || {
@@ -806,7 +940,6 @@ in
             exit 1
           fi
 
-          # 制御演算子を含めば単純コマンドではない。exec が条件に従属しうる
           if printf '%s\n' "$logical" | tail -1 | grep -qE '(&&|\|\||;|\||&)'; then
             echo "front wrapper conditions its exec: $script" >&2
             exit 1
@@ -823,7 +956,7 @@ in
             started=$((started + 1))
           done
         done
-        test "$started" -ge ${toString (builtins.length fronts)}
+        test "$started" -ge ${toString (builtins.length serviceTargetNames)}
         touch $out
       '';
 }

@@ -4,8 +4,6 @@
   buildNpmPackage,
 }:
 
-# 複数 MCP server が使う npm 取得の共通 boilerplate
-# registryPath はスコープ込みの npm 名、tarball 名は末尾セグメントのみ使う
 {
   pname,
   version,

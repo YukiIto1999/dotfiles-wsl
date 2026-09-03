@@ -13,7 +13,11 @@ let
   agentContract = import ./impl/contract.nix { inherit lib; };
   clientNames = builtins.attrNames agents.clients;
   clientExecutables = lib.mapAttrs (
-    _: client: "${cfg.host.homeDir}/.local/bin/${client.binary}"
+    _: client:
+    if client.package != null then
+      lib.getExe client.package
+    else
+      "${cfg.host.homeDir}/.local/bin/${client.binary}"
   ) agents.clients;
   runtime = import ./package.nix { inherit lib pkgs runtimeContract; };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
@@ -212,7 +216,10 @@ let
       inherit (client) install;
     };
 
-  installManifest = builtins.toJSON (map installRecord clientNames);
+  installerClientNames = builtins.filter (
+    name: agents.clients.${name}.install.kind != "nix-package"
+  ) clientNames;
+  installManifest = builtins.toJSON (map installRecord installerClientNames);
   atomicPublish = import ./impl/atomic-publish.nix { inherit pkgs; };
 
   installAgents = mkCommand {
@@ -473,7 +480,12 @@ in
     home-manager.users.${cfg.host.username} =
       { lib, ... }:
       {
-        home.packages = [ apm ];
+        home.packages = [
+          apm
+        ]
+        ++ builtins.filter (package: package != null) (
+          map (client: client.package) (builtins.attrValues agents.clients)
+        );
         home.file = lib.mkMerge [
           (lib.listToAttrs allHomeEntries)
           runtimeWrappers

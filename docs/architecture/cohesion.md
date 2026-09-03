@@ -14,7 +14,7 @@
 - agent runtime wrapper の対象か、非対応か
 - client package が提供する実行ファイル名
 
-wrapper 対象は client 名で判定せず、default を持たない列挙値で宣言する。Claude Code、Codex、OpenCode は wrapper 対象、Antigravity は非対応とする。
+wrapper 対象は client 名で判定せず、default を持たない列挙値で宣言する。Claude Code、Codex、OMP、OpenCode は wrapper 対象、Antigravity は非対応とする。
 
 `mcp/codex` は `agents` が公開する Codex の実行 path を読み、`mcp-server` 引数だけを加える。home directory、`.local/bin`、binary 名を MCP 側で組み立てない。wrapper、runtime observation、MCP target は同じ実行 path を参照する。
 

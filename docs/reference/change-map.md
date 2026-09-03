@@ -29,10 +29,10 @@
 
 | 変更目的 | 正本 | 適用方法 |
 |---|---|---|
-| Agent client を追加する | [`agents/NAME/module.nix`](../../agents) を作り `dotfiles.agents.clients.NAME` を宣言する。通常構成と variant の `dotfiles.agents.enabled`、固定 contract fixture も同じ変更で更新する | 新規ファイルを `git add` し、checkout から `nix run .#dotfiles-install-agents`、`dotfiles-rebuild` の順に実行する |
+| Agent client を追加する | [`agents/NAME/module.nix`](../../agents) を作り `dotfiles.agents.clients.NAME` を宣言する。通常構成と variant の `dotfiles.agents.enabled`、固定 contract fixture も同じ変更で更新する | 新規ファイルを `git add` する。`installer-script` / `github-release` はcheckoutから`nix run .#dotfiles-install-agents`を実行し、`nix-package`はflake inputを固定してから`dotfiles-rebuild` |
 | Agent client を管理対象から外す | 対応する [`agents/NAME/`](../../agents) を削除し、host の必要集合と fixture を更新する | `dotfiles-rebuild`。`dotfiles-install-agents` は残存 binary を削除しないため、upstream が配置したファイルは別途削除する |
 | client 固有の managed config を変える | 対応する [`agents/NAME/assets/`](../../agents) の template と `module.nix` の最終 `managedFiles` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| client の upstream 入手方法を変える | 対応する [`agents/NAME/module.nix`](../../agents) の `dotfiles.agents.clients.NAME.install`。GitHub release では layout、architecture ごとの asset と entrypoint、`requiredPaths`、`retainedReleases` を同じ contract で更新する | `dotfiles-rebuild`、checkout から `nix run .#dotfiles-install-agents` |
+| client の upstream 入手方法を変える | 対応する [`agents/NAME/module.nix`](../../agents) の `dotfiles.agents.clients.NAME.install`。GitHub release では layout、architecture ごとの asset と entrypoint、`requiredPaths`、`retainedReleases` を同じ contract で更新する。Nix packageは対応flake inputとlockをownerにする | `installer-script` / `github-release`はcheckoutから`nix run .#dotfiles-install-agents`、`nix-package`はinput更新後に`dotfiles-rebuild` |
 | agent 専用の補助 package を増減する | [`agents/module.nix`](../../agents/module.nix) の `dotfiles.agents.packages`。nixpkgs に無い package は [`agents/package/`](../../agents/package) に置く | 対応する agent check、`dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | AgentMemory の lifecycle hook または OpenCode plugin を変える | [`agents/agentmemory/`](../../agents/agentmemory)。upstream package と backend は [`containers/agentmemory/`](../../containers/agentmemory) が所有する | `agentmemory-client-integration`、`agentmemory-container`、`dotfiles-rebuild` |
 | agent の session、build cache、検証再利用を変える | [`agents/impl/runtime/`](../../agents/impl/runtime) と [`agents/module.nix`](../../agents/module.nix) | 対応する focused check、`dotfiles-rebuild` |

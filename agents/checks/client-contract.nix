@@ -35,31 +35,34 @@ let
     // lib.optionalAttrs (file.seedMigrationCommand != null) {
       seedMigrationCommand = lib.getName file.seedMigrationCommand;
     };
-  projectClient = client: {
-    inherit (client)
-      binary
-      capabilityManagedFiles
-      rulesDestination
-      skillsDestination
-      versionArgs
-      ;
-    definitions = {
-      mode = client.definitionMode;
-      destination = client.definitionsDestination;
-      format = client.definitionFormat;
-      names = builtins.attrNames client.definitions;
-    };
-    capabilities = {
-      lsp = client.lspMode;
-      telemetry = client.telemetryMode;
-      agentmemory = client.agentmemoryMode;
-    };
-    gateway = {
-      inherit (client.gatewayConfig) format managedFile;
-    };
-    managedFiles = lib.mapAttrs (_: projectManagedFile) client.managedFiles;
-    inherit (client) install;
-  };
+  projectClient =
+    client:
+    {
+      inherit (client)
+        binary
+        capabilityManagedFiles
+        rulesDestination
+        skillsDestination
+        versionArgs
+        ;
+      definitions = {
+        mode = client.definitionMode;
+        destination = client.definitionsDestination;
+        format = client.definitionFormat;
+        names = builtins.attrNames client.definitions;
+      };
+      capabilities = {
+        lsp = client.lspMode;
+        telemetry = client.telemetryMode;
+        agentmemory = client.agentmemoryMode;
+      };
+      gateway = {
+        inherit (client.gatewayConfig) format managedFile;
+      };
+      managedFiles = lib.mapAttrs (_: projectManagedFile) client.managedFiles;
+      inherit (client) install;
+    }
+    // lib.optionalAttrs (client.package != null) { package = lib.getName client.package; };
   actualContract = lib.mapAttrs (_: projectClient) clients;
 
   clientOptions = builtins.removeAttrs (
@@ -168,6 +171,7 @@ let
       install = "either";
       lspMode = "enum";
       managedFiles = "attrsOf";
+      package = "nullOr";
       rulesDestination = "str";
       runtimeWrapperMode = "enum";
       skillsDestination = "str";
@@ -196,6 +200,7 @@ let
     antigravity = "unsupported";
     claude = "managed";
     codex = "managed";
+    omp = "managed";
     opencode = "managed";
   };
   candidateClients = lib.mapAttrs (name: client: {
@@ -208,6 +213,7 @@ let
       install
       ;
     runtimeWrapperMode = expectedRuntimeWrapperModes.${name};
+    package = if client ? package then pkgs.writeShellScriptBin client.binary "exit 0" else null;
     definitionMode = client.definitions.mode;
     definitionsDestination = client.definitions.destination;
     definitionFormat = client.definitions.format;
@@ -245,7 +251,11 @@ let
     };
   };
   expectedClientExecutables = lib.mapAttrs (
-    _: client: "${hostConfig.dotfiles.host.homeDir}/.local/bin/${client.binary}"
+    _: client:
+    if client.package != null then
+      lib.getExe client.package
+    else
+      "${hostConfig.dotfiles.host.homeDir}/.local/bin/${client.binary}"
   ) clients;
   mutateRuntimeTimer =
     timerName: update:
@@ -296,7 +306,7 @@ let
           contractWithoutPackages = evaluatedContract // {
             clients = lib.mapAttrs (
               _: client:
-              client
+              builtins.removeAttrs client [ "package" ]
               // {
                 managedFiles = lib.mapAttrs (
                   _: file: builtins.removeAttrs file [ "seedMigrationCommand" ]
@@ -528,6 +538,9 @@ in
       runtimeWrapperModeVariantHome.home.file."${wrapperDirectory}/${clients.antigravity.binary}".executable;
     assert !(runtimeWrapperModeVariantHome.home.file ? "${wrapperDirectory}/${clients.codex.binary}");
     assert contractIsValid baseCandidate;
+    assert !contractIsValid (mutateClient "omp" { package = null; });
+    assert
+      !contractIsValid (mutateClient "claude" { package = pkgs.writeShellScriptBin "claude" "exit 0"; });
     assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = ""; });
     assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad/name"; });
     assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = "bad name"; });

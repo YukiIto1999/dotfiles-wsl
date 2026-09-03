@@ -3,6 +3,7 @@
     "antigravity",
     "claude",
     "codex",
+    "omp",
     "opencode"
   ],
   "clients": {
@@ -191,6 +192,65 @@
             "executable": true
           }
         }
+      }
+    },
+    "omp": {
+      "binary": "omp",
+      "package": "omp",
+      "versionArgs": [
+        "--version"
+      ],
+      "rulesDestination": ".omp/agent/AGENTS.md",
+      "skillsDestination": ".omp/agent/skills",
+      "definitions": {
+        "mode": "rendered",
+        "destination": ".omp/agent/agents",
+        "format": "frontmatter-markdown",
+        "names": [
+          "architect",
+          "designer",
+          "explorer",
+          "implementer",
+          "planner",
+          "reviewer",
+          "security"
+        ]
+      },
+      "capabilities": {
+        "lsp": "supported",
+        "telemetry": "unsupported",
+        "agentmemory": "hooks"
+      },
+      "capabilityManagedFiles": {
+        "lsp": "lsp",
+        "telemetry": null,
+        "agentmemory": "agentmemory-hook"
+      },
+      "gateway": {
+        "format": "json",
+        "managedFile": "mcp"
+      },
+      "managedFiles": {
+        "agentmemory-hook": {
+          "format": "text",
+          "deployment": "home",
+          "destination": ".omp/agent/hooks/pre/agentmemory.ts"
+        },
+        "lsp": {
+          "format": "json",
+          "deployment": "home",
+          "destination": ".omp/agent/lsp.json"
+        },
+        "mcp": {
+          "format": "json",
+          "deployment": "home",
+          "destination": ".omp/agent/mcp.json"
+        }
+      },
+      "install": {
+        "kind": "nix-package",
+        "updateOwner": "flake-lock",
+        "layout": "nix-store"
       }
     },
     "opencode": {

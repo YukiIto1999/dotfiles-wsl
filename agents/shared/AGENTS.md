@@ -44,7 +44,7 @@ Think in English. Respond in Japanese.
 
 ## subagents
 
-複雑な作業、独立した視点が必要な作業、レビューやセキュリティ確認では subagent を使う。agent は Claude / Codex / OpenCode に配備する。Antigravity は静的な agent 機能を持たないため対象外。
+複雑な作業、独立した視点が必要な作業、レビューやセキュリティ確認では subagent を使う。agent は Claude / Codex / OMP / OpenCode に配備する。Antigravity は静的な agent 機能を持たないため対象外。
 
 subagent は文脈の再構築と報告の読み直しの分だけ高くつく。独立して並列化できる作業にだけ使う。数回の tool 呼び出しで終わる調査、単一ファイルの編集、自分の作業の検証は自分で行う。委譲したら結果を再導出せず、その報告を使って先に進む。
 
@@ -110,11 +110,11 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 
 ### LSP
 
-LSP は Claude Code と OpenCode で利用でき、Codex と Antigravity では未対応である。対応 client では、symbol の定義、参照、diagnostic を意味的に調べるときに LSP を使う。未対応または現在の session に提供されていない場合はローカル検索へ戻り、agent が language server を追加、再設定、直接起動しない。
+LSP は Claude Code、OMP、OpenCode で利用でき、Codex と Antigravity では未対応である。対応 client では、symbol の定義、参照、diagnostic を意味的に調べるときに LSP を使う。未対応または現在の session に提供されていない場合はローカル検索へ戻り、agent が language server を追加、再設定、直接起動しない。
 
 ### agentmemory
 
-明示的な検索と保存は、全 client から gateway の `memory` target を使う。自動連携は Claude Code と Codex が lifecycle hooks、OpenCode が capture plugin を使い、Antigravity にはない。自動連携は明示的な検索と保存を代替しない。
+明示的な検索と保存は、全 client から gateway の `memory` target を使う。自動連携は Claude Code、Codex、OMP が lifecycle hooks、OpenCode が capture plugin を使い、Antigravity にはない。自動連携は明示的な検索と保存を代替しない。
 
 - 過去の決定、経緯、教訓は作業前に `memory_recall` または `memory_smart_search` で引く。
 - 訂正、確定した方針、再利用する決定やパターンは `memory_save` で保存する。project は git toplevel の basename とする。
@@ -124,7 +124,7 @@ LSP は Claude Code と OpenCode で利用でき、Codex と Antigravity では�
 
 - 通常 rebuild: `dotfiles-rebuild`
 - 実用状態検証: `dotfiles-doctor`
-- Agent client binary の更新: checkout から `nix run .#dotfiles-install-agents`
+- Agent client binary の更新: upstream / release 管理 client は checkout から `nix run .#dotfiles-install-agents`。OMP は flake input 更新後に rebuild
 - Home Manager backup 整理: `dotfiles-cleanup --delete`
 - system backup 整理: `sudo dotfiles-cleanup --delete --system`
 - VS Code Server 整理: `dotfiles-cleanup --delete --vscode-server`

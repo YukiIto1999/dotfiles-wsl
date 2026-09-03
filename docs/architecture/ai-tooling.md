@@ -2,7 +2,7 @@
 
 **読み手:** 責務の境界と要素の関係を理解したい人。学習中に読む。
 
-AI CLI の binary、共通資材、MCP 接続は別の経路で配備する。binary は upstream から `~/.local/bin` へ更新する可変物であり、rules、skills、agents、managed config と MCP service は NixOS generation が宣言する。対象の追加や変更箇所は[変更箇所](../reference/change-map.md)を参照する。
+AI CLI の binary、共通資材、MCP 接続は別の経路で配備する。upstream installer と release で入れる binary は `~/.local/bin` の可変物、OMP は flake lock に固定した Nix package である。rules、skills、agents、managed config と MCP service は NixOS generation が宣言する。対象の追加や変更箇所は[変更箇所](../reference/change-map.md)を参照する。
 
 ## 配備の流れ
 
@@ -23,7 +23,7 @@ AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► MCP front (
 
 ### Client binary の更新
 
-`dotfiles-install-agents` は同じ client contract から二種類の更新経路を生成する。Claude Code と Antigravity は upstream installer に配備を委ねる。Codex と OpenCode は GitHub release asset を dotfiles が取得し、前者を `package-tree`、後者を `single-binary` として管理する。asset、architecture ごとの entrypoint、`requiredPaths`、`retainedReleases` は各 client module の一つの `install` contract に置く。
+client contract は三種類の供給経路を持つ。`dotfiles-install-agents` は Claude Code と Antigravity の upstream installer、Codex と OpenCode の GitHub release を更新する。OMP は Bun/Rust native addon を含む upstream の Nix package を `flake.lock` に固定し、system rebuild で更新するため installer manifest と日次更新から除外する。GitHub release の asset、architecture ごとの entrypoint、`requiredPaths`、`retainedReleases` は各 client module の一つの `install` contract に置く。
 
 GitHub release 経路は GitHub API の SHA-256 digest と取得した archive を照合し、member 名、type、件数、論理 size、重複、path 衝突を展開前に検査する。展開後は owner、mode、link、entrypoint と required path を調べ、隔離した環境で version probe を通した tree だけを公開する。
 
@@ -31,7 +31,7 @@ GitHub release 経路は GitHub API の SHA-256 digest と取得した archive �
 
 公開処理は lock と固定した directory descriptor の下で release、`current`、visible symlink の identity を照合する。通常の失敗では切替前の状態へ戻し、変更または所有を確認できない object は削除しない。操作と確認方法は [Agent client の更新](../operations/agent-clients.md)に分ける。
 
-Claude Code、Codex、OpenCode は、Home Manager が `~/.local/bin` より前へ置く共通 runtime wrapper から起動する。wrapper は upstream binary を移動せず、`~/.local/bin` の実体を絶対 path で実行する。Antigravity は同じ CLI 起動境界を持たないため対象外である。
+Claude Code、Codex、OMP、OpenCode は、Home Manager が `~/.local/bin` より前へ置く共通 runtime wrapper から起動する。wrapper は実体を移動せず、upstream binary または OMP の Nix store executable を絶対 path で実行する。Antigravity は同じ CLI 起動境界を持たないため対象外である。
 
 runtime は session ID、owner process、boot ID、管理下 `TMPDIR` を記録する。`CARGO_HOME` と `XDG_CACHE_HOME` が未設定なら、それぞれ `~/.cache/dotfiles-wsl/shared/cargo-home` と `~/.cache/dotfiles-wsl/shared/xdg-cache` を全 project、全 client で共有する。明示値は空文字列も含めて変更しない。
 
@@ -47,7 +47,7 @@ agent 内の `git worktree add` は [`agents/impl/resource/`](../../agents/impl/
 
 [`agents/shared/AGENTS.md`](../../agents/shared/AGENTS.md) は全 client へ配る共通 rules の正本である。Home Manager が client ごとの規定 path に同じ immutable source を配備する。
 
-静的 agent の正本は [`agents/shared/definitions/`](../../agents/shared/definitions) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OpenCode は frontmatter 付き Markdown へ build 時に変換する。Antigravity は `definitionMode = "unsupported"` と宣言し、設定漏れと未対応を区別する。変換は各 client module が所有する。
+静的 agent の正本は [`agents/shared/definitions/`](../../agents/shared/definitions) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OMP と OpenCode は各自の tool 名を持つ frontmatter Markdown へ build 時に変換する。Antigravity は `definitionMode = "unsupported"` と宣言し、設定漏れと未対応を区別する。変換は各 client module が所有する。
 
 配備の形は `definitionMode` が決める。`native` と `rendered` は home 配下の規定 path へ symlink する。Codex は `declared` を使い、home へは配らず、`config.toml` の `[agents.<role>]` から Nix store の実体を `config_file` で指す。Codex が role file を `O_NOFOLLOW` で開き、symlink を拒否するためである。
 
@@ -63,10 +63,11 @@ local skill は [`agents/shared/skills/`](../../agents/shared/skills) から自�
 |---|---|---|---|---|
 | Claude Code | native Markdown | plugin | managed settings | lifecycle hooks |
 | Codex | rendered TOML | unsupported | unsupported | lifecycle hooks |
+| OMP | rendered frontmatter Markdown | native config | unsupported | native hooks |
 | OpenCode | rendered frontmatter Markdown | config | unsupported | capture plugin |
 | Antigravity | unsupported | unsupported | unsupported | unsupported |
 
-全 client が共通 rules、skills、単一 gateway の設定を持つ。Claude Code の user settings と Codex の user config は client が更新し得るため、Home Manager activation は配備先に通常 file、symlink、directory などの既存物がない場合だけ seed を書く。seed は runtime drift の対象にしない。system または Home Manager が配備する managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。OpenCode と Antigravity の gateway config は Home Manager が所有する。
+全 client が共通 rules、skills、単一 gateway の設定を持つ。Claude Code の user settings と Codex の user config は client が更新し得るため、Home Manager activation は配備先に通常 file、symlink、directory などの既存物がない場合だけ seed を書く。seed は runtime drift の対象にしない。OMP では共有対象の `AGENTS.md`、skills、agents、`mcp.json`、`lsp.json`、hooks だけを Home Manager が所有し、OMP が書き換える `config.yml` と認証 DB `agent.db` は client 所有の可変 file として残す。system または Home Manager が配備する managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。OpenCode と Antigravity の gateway config は Home Manager が所有する。
 
 ## MCP target、front、gateway
 
@@ -99,24 +100,26 @@ Docker build artifact GC は、dangling image と BuildKit cache だけを所有
 [`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は upstream package root、version、endpoint と agentmemory engine の Docker container を所有する。[`agents/agentmemory/module.nix`](../../agents/agentmemory/module.nix) はその型付き upstream contract から lifecycle hook package と OpenCode capture plugin を導き、agent 側へ配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
 
 ```text
-Claude Code / Codex hooks ─┐
-OpenCode capture plugin ───┼─► 127.0.0.1 の engine API ─► /var/lib/agentmemory/data
-                           │
+Claude Code / Codex / OMP hooks ─┐
+OpenCode capture plugin ─────────┼─► 127.0.0.1 の engine API ─► /var/lib/agentmemory/data
+                                 │
 AI CLI ─► gateway ─► memory MCP front ──────────────────┘
 
 session start ─► recall と context 注入
 session event ─► 観測、要約、reflect、consolidation
 ```
 
-Claude Code と Codex は `/run/current-system/sw/bin/agentmemory-hook-*` を呼ぶ。OpenCode は Home Manager が配備した capture plugin を自動ロードする。Antigravity は gateway 経由の memory target を使えるが、自動 capture の設定はない。現在の差異は個別 CLI module と managed config が正本である。
+Claude Code と Codex は設定から、OMP は native TypeScript hook adapter から `/run/current-system/sw/bin/agentmemory-hook-*` を呼ぶ。OpenCode は Home Manager が配備した capture plugin を自動ロードする。Antigravity は gateway 経由の memory target を使えるが、自動 capture の設定はない。現在の差異は個別 CLI module と managed config が正本である。
 
 agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API key は SOPS template が runtime の環境ファイルへ展開し、Docker が container 環境へ渡す。session の prompt や code が外部 provider へ送られる境界を持つ。
 
 ## LSP と観測
 
-language server の binary は `toolchain` が PATH へ置き、roster も同じ unit が持つ。CLI ごとに登録形式が違うため、変換は各 CLI の module が持つ。Claude Code は `settings.json` に LSP の設定 key を持たないので、plugin と marketplace を Nix store に生成して managed settings から指す。OpenCode は設定ファイルの `lsp` block へ直接書く。LSP を持たない CLI には配らない。
+language server の binary は `toolchain` が PATH へ置き、roster も同じ unit が持つ。CLI ごとに登録形式が違うため、変換は各 CLI の module が持つ。Claude Code は `settings.json` に LSP の設定 key を持たないので、plugin と marketplace を Nix store に生成して managed settings から指す。OMP は native server ID へ、OpenCode は設定ファイルの `lsp` block へ変換する。LSP を持たない CLI には配らない。
 
 同じ拡張子を二つの server が宣言すると、先に登録された片方だけが動き、もう片方は黙って起動しない。roster と各 CLI の登録の一致、拡張子の衝突は `lsp-registration` が検査する。
+
+roster は checkout の内容ではなく環境が提供する集合を宣言する。OMP だけは宣言した server 名で上流 `defaults.json` を上書きするため、`rootMarkers` を明示しないと Cargo.toml や package.json の有無で有効集合が変わる。拡張子だけで解決する Claude Code と OpenCode とは同じ roster から違う集合が見えるので、OMP への変換は `rootMarkers` を cwd 自体に固定する。この固定も `lsp-registration` が検査する。
 
 telemetry collector は OTLP を loopback で受け、生の record を残す。集計しないのは、どの操作で token を使ったかを後から追うためである。CLI は endpoint を `dotfiles.telemetry` から取るので、port を変えても CLI 側の宣言は変わらない。
 

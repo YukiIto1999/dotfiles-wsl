@@ -40,12 +40,14 @@ let
   # path を式で組み立てる file reader は境界を文字列検索から隠せる。
   # 現在必要な動的 operand の source と件数を固定し、追加は明示的な変更にする
   allowedDynamicImports = {
+    "agents/omp/package.nix" = 1;
     "flake.nix" = 1;
   };
   allowedDynamicFileReads = {
     "accounts/checks.nix" = 1;
     "accounts/module.nix" = 3;
     "agents/codex/module.nix" = 1;
+    "agents/omp/module.nix" = 1;
     "agents/opencode/module.nix" = 1;
     "commands/impl/mk-command.nix" = 1;
     "containers/searxng/module.nix" = 1;

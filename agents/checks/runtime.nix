@@ -410,6 +410,7 @@ in
       runtimeClientNames == [
         "claude"
         "codex"
+        "omp"
         "opencode"
       ];
     assert builtins.all (

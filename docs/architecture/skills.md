@@ -190,7 +190,7 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 
 `dependency-analysis`は、node、edge、方向、granularityを先に定義し、source、call、data、runtime、build、deployment、ownershipの依存を型なしの一graphへ潰さない。fan-in、fan-out、cycle、transitive reachabilityは構造の事実であり、数値だけで欠陥とは判定しない。具体的な変更から影響を追う仕事は`impact-analysis`、構造の良否は`architecture-review`、新しい依存方向の決定は設計Skillへ渡す。
 
-代表scenarioは [`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json) に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先し、`rg`や`ast-grep`の一致は候補としてsourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
+代表scenarioは [`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json) に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先する。表現や所在が不明な候補は Zvec-Grep、exact text や構文 pattern の候補は`rg`や`ast-grep`で探索し、sourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
 
 baselineでは、agent resource reaperの保持日数と実行間隔がNix option、package、systemd unit、observation、checkへどう伝播するかを調べた。最初の検索結果はsource参照、生成、runtime起動、文書、検査を混在させ、node、edge、方向、granularityを調査後に後付けした。型付きedgeへ分けると、保持日数はpackageへ埋め込まれる一方、実行間隔はtimer unitだけへ投影され、observationはtimer名しか参照しないと区別できた。文字列探索だけではNix evaluationによるconsumerの網羅性を証明できず、activation時の挙動も未確認として残った。
 

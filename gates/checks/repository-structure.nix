@@ -622,6 +622,7 @@ in
               "memory"
               "playwright"
               "searxng"
+              "sonarqube"
             ];
           };
         }

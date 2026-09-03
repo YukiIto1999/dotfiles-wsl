@@ -56,6 +56,12 @@ in
 
         ${lib.getExe toolchain.actrun} --help > actrun-help
         grep -q . actrun-help
+
+        ${lib.getExe toolchain.zvec-grep} version > zg-version
+        grep -Fxq '0.2.1' zg-version
+        printf '%s\n' 'semantic search needle' > zg-fixture
+        ${lib.getExe toolchain.zvec-grep} query --rg -n -F 'semantic search needle' zg-fixture > zg-exact
+        grep -Fq 'semantic search needle' zg-exact
         touch $out
       '';
 

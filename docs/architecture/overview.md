@@ -60,7 +60,7 @@ WSL guest の安定性は [`host/module.nix`](../../host/module.nix) が所有�
 
 [`containers/module.nix`](../../containers/module.nix) は Docker daemon、`dotfiles-backends` network、型付き service contract、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は backend container を NixOS の OCI container module へ渡す。全 container は `pull = "never"` で起動する。upstream image は明示的な同期、Nix 生成 image は `imageFile` の load が取得責任を持つ。Agentmemory、Crawl4AI、SearXNG、SonarQube の application 固有宣言は各 `containers/` unit、対応する MCP front は各 `mcp/` unit が所有する。
 
-MCP は `dotfiles.mcp.targets`、`dotfiles.mcp.fronts`、`dotfiles.mcp.gateway` の三つに分ける。target は provider、純 stdio executable、server lifecycle を所有し、front は lifecycle から導いた HTTP adapter、資源境界、backend 依存を所有する。gateway は全 front を束ねる単一 endpoint であり、front の起動依存を持たない。host が必要とする provider は [`flake.nix`](../../flake.nix) の固定 roster が決める。
+MCP は `dotfiles.mcp.targets`、`dotfiles.mcp.fronts`、`dotfiles.mcp.gateway` の三つに分ける。target は provider、executable、server transport、server lifecycle を所有し、front は transport と lifecycle から導いた HTTP endpoint、資源境界、backend 依存を所有する。gateway は全 front を束ねる単一 endpoint であり、front の起動依存を持たない。host が必要とする provider は [`flake.nix`](../../flake.nix) の固定 roster が決める。
 
 SOPS の暗号文は repository に置き、sops-nix が activation 時に host key で復号する。復号済み secret と template は runtime にだけ生成され、consumer の file、環境ファイルへ渡る。鍵と credential の境界は[セキュリティ設計](security.md)、通常の編集は [Secrets](../operations/secrets.md)に分けている。
 

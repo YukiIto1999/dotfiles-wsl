@@ -10,7 +10,8 @@
     "memory": 8774,
     "playwright": 8776,
     "searxng": 8775,
-    "sonarqube": 8778
+    "sonarqube": 8778,
+    "zvec-grep": 8784
   },
   "gateway": {
     "id": "default",

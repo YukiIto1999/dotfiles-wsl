@@ -22,6 +22,7 @@
 - [構成概要](architecture/overview.md)では、NixOS、Home Manager、生成 command の責務境界が分かる。
 - [責務と履歴の凝集](architecture/cohesion.md)では、unit、file、commit を分ける基準が分かる。
 - [AI tooling](architecture/ai-tooling.md)では、AI CLI、agentgateway、MCP server、Docker backend の接続関係が分かる。
+- [Repository 所有 Skill の composition](architecture/repository-skills.md)では、外部 repository の Skill を固定、選択、client 配備する将来設計が分かる。
 - [Skill portfolio](architecture/skills.md)では、配備済み Skill、候補の責務境界、donor の扱いが分かる。
 - [セキュリティ設計](architecture/security.md)では、credential、host key、通信経路の信頼境界が分かる。
 

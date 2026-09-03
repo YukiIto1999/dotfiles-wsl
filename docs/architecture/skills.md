@@ -16,6 +16,8 @@ Skill は原則として作らない。基礎モデル、repository policy、必
 
 local Skill の正本は [`agents/shared/skills/`](../../agents/shared/skills) である。plugin source の revision は [`flake.nix`](../../flake.nix)、採用する plugin の選択は [`agents/module.nix`](../../agents/module.nix) が所有する。構成上の配備対象は次の command で取得する。
 
+donor と、repository 所有の Skill source は区別する。donor は方法を再構成して local Skill を作る材料であり、元 repository の Skill を配備しない。repository 所有は配置とrevisionの正本を示すだけで、直接採用の十分条件ではない。下記のsignature procedure規則を満たしたSkillだけをownerの固定sourceから明示選択する。target 構成と追加の admission 条件は [Repository 所有 Skill の composition](repository-skills.md) に記録するが、まだ実装していない。
+
 Codexに同梱される同名のsystem `skill-creator`は、[`skills.config`](https://developers.openai.com/codex/config-reference#skillsconfig)で無効化し、local版だけをrouting対象にする。ClaudeとOpenCodeでもplugin版を配備せず、同じlocal正本を使う。
 
 ```sh

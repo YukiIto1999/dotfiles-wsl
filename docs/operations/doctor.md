@@ -17,7 +17,7 @@ dotfiles-doctor --json
 |---|---|
 | roster と path | `roster`、`path-match`、`command-version`、`release-tree`、`deployed-path`、`path-metadata`、`managed-roots` |
 | systemd と再起動 | `systemd-service`、`systemd-timer`、`restart-counter` |
-| 容量と swap | `filesystem-threshold`、`numeric-command-threshold`、`swap-policy`、`journal-size` |
+| 容量と committed memory | `filesystem-threshold`、`numeric-command-threshold`、`swap-policy`、`journal-size` |
 | container と protocol | `container-image`、`http-health`、`normalized-protocol` |
 
 [`commands/doctor/module.nix`](../../commands/doctor/module.nix) は registry 全体を key 順の JSON に投影し、[`commands/doctor/impl/doctor.sh`](../../commands/doctor/impl/doctor.sh) が各 observation を同じ runner で処理する。個別 probe は宣言した timeout、許可した変数だけの環境、専用の一時 directory で動く。stdout は上限を設けた JSON fragment だけを受理し、stderr は捨てる。不正、過大、timeout、非ゼロ終了は owner が宣言した固定 failure message に置き換える。
@@ -31,7 +31,7 @@ agent の管理下領域は次の四つを一度に集計する。
 - `~/.cache/dotfiles-wsl/sessions`
 - `~/.local/state/dotfiles-wsl/agent-resources`
 
-home や project 全体は再帰 scan しない。doctor は cleanup、GC、service 再起動、trim を実行しない。
+home や project 全体は再帰 scan しない。doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、Windows C、D、E drive、Windows committed memory、swap topology を観測対象とする。Windows の各 probe は同じ有界な数値 contract を使い、drive は空き率、committed memory は使用率を返す。
 
 ## 結果
 

@@ -24,6 +24,10 @@ let
     "vm.compaction_proactiveness" = 40;
     "vm.defrag_mode" = 1;
   };
+  expectedNixStorageReserve = {
+    "min-free" = 171798691840;
+    "max-free" = 274877906944;
+  };
   virtualMemorySysctl = builtins.intersectAttrs expectedVirtualMemorySysctl hostConfig.boot.kernel.sysctl;
   hostObservationKeys = [
     "host/fstrim"
@@ -35,7 +39,10 @@ let
     "host/root-filesystem"
     "host/swap"
     "host/system-generation"
+    "host/windows-c-drive"
     "host/windows-d-drive"
+    "host/windows-e-drive"
+    "host/windows-memory-commit"
   ];
   hostObservations = lib.filterAttrs (
     name: _: lib.hasPrefix "host/" name
@@ -160,6 +167,36 @@ let
       timeoutSeconds = 10;
       warning = 15;
     };
+    "host/windows-c-drive" = {
+      checkId = "resource/windows-c-drive";
+      failure = 10;
+      failureMessage = "could not observe Windows C drive free space";
+      kind = "numeric-command-threshold";
+      metric = "free-percent";
+      resourceKey = "windowsCDrive";
+      timeoutSeconds = 10;
+      warning = 15;
+    };
+    "host/windows-e-drive" = {
+      checkId = "resource/windows-e-drive";
+      failure = 10;
+      failureMessage = "could not observe Windows E drive free space";
+      kind = "numeric-command-threshold";
+      metric = "free-percent";
+      resourceKey = "windowsEDrive";
+      timeoutSeconds = 10;
+      warning = 15;
+    };
+    "host/windows-memory-commit" = {
+      checkId = "resource/windows-memory-commit";
+      failure = 95;
+      failureMessage = "could not observe Windows committed memory";
+      kind = "numeric-command-threshold";
+      metric = "used-percent";
+      resourceKey = "windowsMemoryCommit";
+      timeoutSeconds = 10;
+      warning = 85;
+    };
   };
   hostObservationDefinitions = builtins.filter (
     definition: lib.hasSuffix "/host/module.nix" (toString definition.file)
@@ -172,6 +209,7 @@ let
     fstrimInterval = hostConfig.services.fstrim.interval;
     homeManagerUnit = "home-manager-${hostConfig.dotfiles.host.username}.service";
     nixGc = hostConfig.nix.gc;
+    nixStorageReserve = builtins.intersectAttrs expectedNixStorageReserve hostConfig.nix.settings;
     timers = hostConfig.systemd.timers;
     inherit virtualMemorySysctl;
     zram = zramGenerator.settings.zram0;
@@ -198,6 +236,7 @@ let
     && lib.hasInfix "SystemMaxUse=${toString (builtins.div (journalObservation.maximumBytes or 0) 1073741824)}G" candidateConfiguration.journald.extraConfig
     && candidateConfiguration.nixGc.automatic
     && candidateConfiguration.nixGc.persistent
+    && candidateConfiguration.nixStorageReserve == expectedNixStorageReserve
     && (nixGcObservation.timer or null) == "nix-gc.timer"
     && builtins.hasAttr "nix-gc" candidateConfiguration.timers
     && (fstrimObservation.timer or null) == "fstrim.timer"
@@ -211,6 +250,11 @@ let
   thresholdMutation = hostObservations // {
     "host/root-filesystem" = hostObservations."host/root-filesystem" or { } // {
       warning = 86;
+    };
+  };
+  nixStorageReserveMutation = stabilityConfiguration // {
+    nixStorageReserve = expectedNixStorageReserve // {
+      "min-free" = 0;
     };
   };
   failureMessageMutation = hostObservations // {
@@ -265,10 +309,18 @@ let
   descriptionVariantStabilityObservations = selectStabilityObservations (
     lib.filterAttrs (name: _: lib.hasPrefix "host/" name) descriptionVariantConfig.dotfiles.observations
   );
-  powershellProbe = ''$drive = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'"; if ($null -eq $drive -or $drive.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($drive.FreeSpace * 100) / $drive.Size))'';
-  mkWindowsDriveObservation = import ./package.nix;
+  windowsObservationCommands = {
+    "host/windows-c-drive" = "dotfiles-observe-windows-c-drive";
+    "host/windows-d-drive" = "dotfiles-observe-windows-d-drive";
+    "host/windows-e-drive" = "dotfiles-observe-windows-e-drive";
+    "host/windows-memory-commit" = "dotfiles-observe-windows-memory-commit";
+  };
+  powershellProbe = ''
+    $volume = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'"; if ($null -eq $volume -or $volume.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($volume.FreeSpace * 100) / $volume.Size))
+  '';
+  mkWindowsPercentageObservation = import ./package.nix;
   mkFakePowerShell =
-    name: body:
+    expectedProbe: name: body:
     pkgs.writeShellScript name ''
       set -euo pipefail
 
@@ -277,22 +329,31 @@ let
       test "$2" = -NoProfile
       test "$3" = -NonInteractive
       test "$4" = -Command
-      test "$5" = ${lib.escapeShellArg powershellProbe}
+      test "$5" = ${lib.escapeShellArg expectedProbe}
       ${body}
     '';
-  successfulPowerShell = mkFakePowerShell "windows-drive-success" "printf '20\\r\\n'";
-  noisyPowerShell = mkFakePowerShell "windows-drive-noisy" ''
+  successfulPowerShell = mkFakePowerShell powershellProbe "windows-drive-success" "printf '20\\r\\n'";
+  noisyPowerShell = mkFakePowerShell powershellProbe "windows-drive-noisy" ''
     printf '20\r\nnoise\n'
     printf 'WINDOWS_DRIVE_NOISY_STDERR_POISON\n' >&2
   '';
-  invalidPowerShell = mkFakePowerShell "windows-drive-invalid" "printf '101\\r\\n'";
-  statusPowerShell = mkFakePowerShell "windows-drive-status" "printf '20\\r\\n'; exit 7";
-  timeoutPowerShell = mkFakePowerShell "windows-drive-timeout" "sleep 3; printf '20\\r\\n'";
+  invalidPowerShell = mkFakePowerShell powershellProbe "windows-drive-invalid" "printf '101\\r\\n'";
+  statusPowerShell =
+    mkFakePowerShell powershellProbe "windows-drive-status"
+      "printf '20\\r\\n'; exit 7";
+  timeoutPowerShell =
+    mkFakePowerShell powershellProbe "windows-drive-timeout"
+      "sleep 3; printf '20\\r\\n'";
   mkProbe =
     powershellCommand:
-    mkWindowsDriveObservation {
-      inherit pkgs lib powershellCommand;
-      drive = "D:";
+    mkWindowsPercentageObservation {
+      inherit
+        pkgs
+        lib
+        powershellCommand
+        powershellProbe
+        ;
+      commandName = "dotfiles-observe-windows-d-drive";
       timeoutSeconds = 0.1;
     };
   successfulProbe = mkProbe successfulPowerShell;
@@ -309,16 +370,19 @@ in
     assert lib.assertMsg (
       observationProjection == expectedObservationProjection
     ) "host runtime observation shape or canonical value drifted";
-    assert lib.assertMsg (
-      hostObservations."host/windows-d-drive".command.dotfilesObservationCommandKind
-      == "numeric-command-threshold"
-      &&
-        hostObservations."host/windows-d-drive".command.meta.mainProgram == "dotfiles-observe-windows-drive"
-      &&
-        lib.getExe hostObservations."host/windows-d-drive".command == "${
-          lib.getBin hostObservations."host/windows-d-drive".command
-        }/bin/dotfiles-observe-windows-drive"
-    ) "Windows drive observation command is not a dedicated numeric threshold package";
+    assert lib.assertMsg (lib.all
+      (
+        name:
+        let
+          command = hostObservations.${name}.command;
+          mainProgram = command.meta.mainProgram;
+        in
+        command.dotfilesObservationCommandKind == "numeric-command-threshold"
+        && mainProgram == windowsObservationCommands.${name}
+        && lib.getExe command == "${lib.getBin command}/bin/${mainProgram}"
+      )
+      (builtins.attrNames windowsObservationCommands)
+    ) "Windows resource observations must use dedicated numeric threshold packages";
     assert lib.assertMsg (
       hostDefinitionKeys == hostObservationKeys
       && builtins.all (name: lib.hasPrefix "host/" name) hostDefinitionKeys
@@ -328,6 +392,9 @@ in
     assert lib.assertMsg (
       !(stabilityContractMatches stabilityConfiguration thresholdMutation)
     ) "root filesystem threshold mutation escaped the stability contract";
+    assert lib.assertMsg (
+      !(stabilityContractMatches nixStorageReserveMutation hostObservations)
+    ) "Nix storage reserve mutation escaped the stability contract";
     assert lib.assertMsg (
       !(stabilityContractMatches stabilityConfiguration failureMessageMutation)
     ) "wrong non-empty failure message escaped the stability contract";

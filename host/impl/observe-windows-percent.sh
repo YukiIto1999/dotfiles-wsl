@@ -14,20 +14,20 @@ if output=$(
 ); then
   output=${output%$'\x1f'}
   if [[ $output == *$'\r\n' ]]; then
-    free_percent=${output%$'\r\n'}
+    observed_percent=${output%$'\r\n'}
   elif [[ $output == *$'\n' ]]; then
-    free_percent=${output%$'\n'}
+    observed_percent=${output%$'\n'}
   elif [[ $output == *$'\r' ]]; then
-    free_percent=${output%$'\r'}
+    observed_percent=${output%$'\r'}
   else
-    free_percent=$output
+    observed_percent=$output
   fi
 else
   exit 1
 fi
 
-if [[ $free_percent =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((free_percent <= 100)); then
-  printf '%s\n' "$free_percent"
+if [[ $observed_percent =~ ^(0|[1-9][0-9]{0,2})$ ]] && ((observed_percent <= 100)); then
+  printf '%s\n' "$observed_percent"
   exit 0
 fi
 

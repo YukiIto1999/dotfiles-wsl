@@ -34,9 +34,9 @@
       }
     },
     {
-      "id": "domain-model-with-docs",
-      "prompt": "注文と返金のdomain modelをgrill with docsで詰め、既存のdomain文書へ決定を残してください。",
-      "expectedSkills": ["grill-with-docs", "grilling", "domain-modeling"],
+      "id": "domain-decisions-recorded",
+      "prompt": "注文と返金のdomain modelを質問で詰め、既存のdomain文書へ決定を残してください。",
+      "expectedSkills": ["grilling", "domain-modeling"],
       "expected": {
         "usesDomainScenarios": true,
         "recordsOnlyResolvedDecisions": true,
@@ -47,13 +47,13 @@
       "id": "direct-implementation",
       "prompt": "仕様は確定済みです。このfeatureを実装してください。",
       "expectedSkills": [],
-      "mustNotTrigger": ["grilling", "grill-with-docs"]
+      "mustNotTrigger": ["grilling"]
     },
     {
       "id": "open-ended-brainstorm",
       "prompt": "このproductの可能性を自由にbrainstormしてください。まだ候補を絞りません。",
       "expectedSkills": [],
-      "mustNotTrigger": ["grilling", "grill-with-docs"]
+      "mustNotTrigger": ["grilling"]
     }
   ]
 }

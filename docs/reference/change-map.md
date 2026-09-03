@@ -14,7 +14,7 @@
 | PATH 上の汎用ツールを増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `dotfiles.toolchain.packages`。nixpkgs に無い汎用ツールは `toolchain/package/NAME.nix` を作り、`dotfiles.toolchain.packages` が callPackage する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | language server を増減する | [`toolchain/module.nix`](../../toolchain/module.nix) の `dotfiles.toolchain.lsp`。登録は各 CLI の module が変換する | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix)。CLI は `dotfiles.telemetry` を読む | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| VM の空き page、compaction、zram、journal 保持、fstrim を変える | [`host/module.nix`](../../host/module.nix) の host 安定化 contract | `host-stability-contract`、`dotfiles-rebuild --plan`、`dotfiles-rebuild`。zram、swap priority、標準 timer は `dotfiles-doctor` でも確認する |
+| VM の空き page、compaction、zram、journal 保持、fstrim、Nix の容量 reserve、Windows drive と committed memory の観測を変える | [`host/module.nix`](../../host/module.nix) の host 安定化 contract | `host-stability-contract`、`dotfiles-rebuild --plan`、`dotfiles-rebuild`。zram、swap priority、標準 timer、Windows の資源閾値は `dotfiles-doctor` でも確認する |
 | 品質 gate の server、database、provisioning を変える | [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)。MCP package と target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix)、credential の値は [`sops/assets/secrets.yaml`](../../sops/assets/secrets.yaml) | 宣言変更後に `dotfiles-rebuild`。admin credential の変更は [SonarQube admin password rotation](../operations/secrets.md#sonarqube-admin-password-rotation) に従う |
 
 ## Runtime observation

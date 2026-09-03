@@ -23,7 +23,22 @@ let
       zramPriority = 100;
       minimumSwapGiB = 8;
       maximumJournalGiB = 4;
-      windowsDrive = "D:";
+      minimumNixFreeGiB = 160;
+      targetNixFreeGiB = 256;
+      windowsDrives = {
+        c = {
+          letter = "C:";
+          resourceKey = "windowsCDrive";
+        };
+        d = {
+          letter = "D:";
+          resourceKey = "windowsDDrive";
+        };
+        e = {
+          letter = "E:";
+          resourceKey = "windowsEDrive";
+        };
+      };
       homeManagerServiceName = "home-manager-${cfg.username}";
     in
     rec {
@@ -56,11 +71,21 @@ let
         failure = 95;
       };
       windows = {
-        drive = windowsDrive;
         powershellCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-        metric = "free-percent";
-        warning = 15;
-        failure = 10;
+        drives = lib.mapAttrs (
+          _: drive:
+          drive
+          // {
+            metric = "free-percent";
+            warning = 15;
+            failure = 10;
+          }
+        ) windowsDrives;
+        memoryCommit = {
+          metric = "used-percent";
+          warning = 85;
+          failure = 95;
+        };
       };
       journal = {
         storage = "persistent";
@@ -71,6 +96,10 @@ let
       nixGc = {
         timerName = "nix-gc";
         serviceName = "nix-gc";
+        storageReserve = {
+          minimumBytes = minimumNixFreeGiB * gibibyte;
+          targetBytes = targetNixFreeGiB * gibibyte;
+        };
         settings = {
           automatic = true;
           dates = "weekly";
@@ -101,8 +130,25 @@ let
             inherit checkId resourceKey failureMessage;
             inherit timeoutSeconds;
           };
+          driveObservations = lib.mapAttrs' (
+            name: drive:
+            lib.nameValuePair "host/windows-${name}-drive" (
+              common "resource/windows-${name}-drive" drive.resourceKey
+                "could not observe Windows ${lib.toUpper name} drive free space"
+              // {
+                kind = "numeric-command-threshold";
+                command = windowsDriveObservations.${name};
+                inherit (drive)
+                  metric
+                  warning
+                  failure
+                  ;
+              }
+            )
+          ) windows.drives;
         in
-        {
+        driveObservations
+        // {
           "host/system-generation" =
             common "system-generation" null "could not resolve the current system generation"
             // {
@@ -128,12 +174,13 @@ let
                 failure
                 ;
             };
-          "host/windows-d-drive" =
-            common "resource/windows-d-drive" "windowsDDrive" "could not observe Windows D drive free space"
+          "host/windows-memory-commit" =
+            common "resource/windows-memory-commit" "windowsMemoryCommit"
+              "could not observe Windows committed memory"
             // {
               kind = "numeric-command-threshold";
-              command = windowsDriveObservation;
-              inherit (windows)
+              command = windowsMemoryCommitObservation;
+              inherit (windows.memoryCommit)
                 metric
                 warning
                 failure
@@ -196,11 +243,28 @@ let
             };
         };
     };
-  windowsDriveObservation = import ./package.nix {
-    inherit pkgs lib;
-    inherit (stabilityContract.windows) drive powershellCommand;
-    inherit (stabilityContract) timeoutSeconds;
-  };
+  mkWindowsPercentageObservation = import ./package.nix;
+  windowsPercentageObservation =
+    commandName: powershellProbe:
+    mkWindowsPercentageObservation {
+      inherit
+        pkgs
+        lib
+        commandName
+        powershellProbe
+        ;
+      inherit (stabilityContract.windows) powershellCommand;
+      inherit (stabilityContract) timeoutSeconds;
+    };
+  windowsDriveObservations = lib.mapAttrs (
+    name: drive:
+    windowsPercentageObservation "dotfiles-observe-windows-${name}-drive" ''
+      $volume = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${drive.letter}'"; if ($null -eq $volume -or $volume.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($volume.FreeSpace * 100) / $volume.Size))
+    ''
+  ) stabilityContract.windows.drives;
+  windowsMemoryCommitObservation = windowsPercentageObservation "dotfiles-observe-windows-memory-commit" ''
+    $memory = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory; if ($null -eq $memory -or $memory.CommitLimit -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($memory.CommittedBytes * 100) / $memory.CommitLimit))
+  '';
   zramGenerator = "${pkgs.zram-generator}/lib/systemd/system-generators/zram-generator";
   zramSetup = pkgs.writeShellScript "dotfiles-zram-setup" ''
     set -euo pipefail
@@ -296,6 +360,8 @@ in
       "root"
       cfg.username
     ];
+    min-free = stabilityContract.nixGc.storageReserve.minimumBytes;
+    max-free = stabilityContract.nixGc.storageReserve.targetBytes;
   };
 
   # 常時起動でない WSL で取りこぼした GC を次回起動で補完

@@ -8,6 +8,7 @@
       noto-fonts-cjk-sans
       noto-fonts-cjk-serif
       noto-fonts-color-emoji
+      plemoljp-nf
     ];
     fontconfig = {
       enable = true;
@@ -21,6 +22,7 @@
           "Noto Sans"
         ];
         monospace = [
+          "PlemolJP Console NF"
           "Noto Sans Mono CJK JP"
           "Noto Sans Mono"
         ];

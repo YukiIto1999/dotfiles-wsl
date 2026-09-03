@@ -31,7 +31,7 @@
 | 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
 | MCP unit が OCI、secret template、同名 backend の service contract を所有せず、同名 backend の secret には MCP 外の owner が宣言済みの場合だけ `restartUnits` を寄与する | `mcp-no-container-ownership` |
 | host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |
-| target の provider、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
+| target の provider、server lifecycle、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
 | Codex MCP front が agent owner の実行 path を引用して使い、home path や binary 名を組み立てない | `mcp-codex-client-executable-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
 | GitHub account と `github-<account>` target が完全一致し、欠落、追加、改名を拒否する | `github-account-target-contract` |
@@ -41,8 +41,8 @@
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
-| front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
-| front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
+| service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
+| service lifecycle front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
@@ -62,6 +62,8 @@
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し、front の起動依存と子 process を持たない | `gateway-front-contract` |
 | front が宣言した port で loopback に listen し、書き込み領域、backend dependency、通信方針を持つ | `mcp-front-contract` |
+| browser target だけが session lifecycle を使い、inner listener、管理 listener、TTL grace、stdio executable が session front config に一致する | `mcp-front-session-lifecycle` |
+| session front が session ごとに stdio state を分離し、個別 DELETE と TTL で子 process を終了して次の session を受け入れる | `mcp-session-front-behavior` |
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
 | Chrome DevTools の front が host の chromium を使い CDP を露出しない | `chrome-devtools-front` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
@@ -86,7 +88,7 @@
 
 | 制約 | 検証 |
 |---|---|
-| MCP session が active な GET body の間 reap されない | `agentgateway-session-lifecycle` |
+| MCP session が active な GET body の間 reap されず、session front の listener address を loopback に固定できる | `agentgateway-session-lifecycle` |
 | agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、共通 project build cache、明示済み環境値、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
 | GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |

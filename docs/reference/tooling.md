@@ -58,6 +58,6 @@ owner module は意味と観測値を持ち、`observations` は型、`commands/
 | telemetry | [`telemetry/module.nix`](../../telemetry/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.telemetry` |
 | 品質 gate | server、database、provisioning は [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)、MCP package と target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.virtualisation.oci-containers.containers.sonarqube` |
 
-target は provider、port、起動関数、backend unit、probe を持つ。front は target から一度だけ導かれ、backend unit を `requires` と `after` に持つ。agentgateway は全 front を一つの URL へ公開するが、front service の依存は持たない。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
+target は provider、純 stdio executable、server lifecycle、port、backend unit、probe を持つ。front は target から一度だけ導かれ、backend unit を `requires` と `after` に持つ。`service` lifecycle は stdio server を共有し、`session` lifecycle は downstream session ごとに生成する。公開 agentgateway は全 front を一つの URL へ束ねるが、front service の依存は持たない。credential、container、host process の境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
 構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に `dotfiles-doctor` で宣言と実状態の収束を確認する。

@@ -4,8 +4,6 @@
   serverBuilder,
 }:
 
-# Playwright は操作、DevTools は観測と原因究明を担う。browser は host の
-# chromium を使い、CDP を host へ露出しない
 let
   pkg = mkNpmMcp {
     pname = "chrome-devtools-mcp";

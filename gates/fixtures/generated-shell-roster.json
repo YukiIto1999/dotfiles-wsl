@@ -30,7 +30,7 @@
       "10s"
     ]
   },
-  "mcpFronts": [
+  "mcpExecutables": [
     "chrome-devtools",
     "codex",
     "context7",

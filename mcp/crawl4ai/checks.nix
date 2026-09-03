@@ -190,8 +190,9 @@ let
   expectedIsolationSpecJSON = builtins.toJSON expectedIsolationSpec;
   expectedIsolationTarget = {
     provider = "crawl4ai";
+    executable = lib.getExe isolationPackage;
+    serverLifecycle = "service";
     port = expectedPort;
-    serve = "proxy:${lib.getExe isolationPackage}";
     needsNetwork = false;
     waitUnits = expectedWaitUnits;
     probe = {
@@ -216,8 +217,6 @@ let
             spec:
             assert builtins.toJSON spec == expectedIsolationSpecJSON;
             isolationPackage
-          else if path == ../package/serve-over-proxy.nix then
-            executable: "proxy:${executable}"
           else
             pkgs.callPackage path args;
       };
@@ -256,8 +255,9 @@ let
                     lib.types.submodule {
                       options = {
                         provider = lib.mkOption { type = lib.types.str; };
+                        executable = lib.mkOption { type = lib.types.str; };
+                        serverLifecycle = lib.mkOption { type = lib.types.str; };
                         port = lib.mkOption { type = lib.types.port; };
-                        serve = lib.mkOption { type = lib.types.str; };
                         needsNetwork = lib.mkOption {
                           type = lib.types.bool;
                           default = false;
@@ -289,11 +289,12 @@ let
     in
     builtins.toJSON {
       inherit (isolatedTarget)
+        executable
         needsNetwork
         port
         probe
         provider
-        serve
+        serverLifecycle
         waitUnits
         ;
     };

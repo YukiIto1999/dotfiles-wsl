@@ -6,7 +6,6 @@
   serverBuilder,
 }:
 
-# 自己 host の SonarQube への stdio front。資格情報は起動時に sops file から読む
 let
   pkg = mkNpmMcp {
     pname = "sonarqube-mcp-server";
@@ -20,7 +19,7 @@ serverBuilder {
   name = "sonarqube-mcp";
   env.SONARQUBE_URL = sonarqubeUrl;
   env.SONARQUBE_USERNAME = username;
-  # env の値は export 時に展開される。password を store へ焼かない
+  # 評価時展開では Nix store に混入する SonarQube password
   env.SONARQUBE_PASSWORD = "$(<${passwordFile})";
   requireNonEmpty = [ passwordFile ];
   command = "${pkg}/bin/sonarqube-mcp-server";

@@ -20,9 +20,7 @@ let
     agentmemoryHooks = toString hostConfig.dotfiles.agents.agentmemory.hooks;
     commands = lib.mapAttrs (_: package: lib.getExe package) hostConfig.dotfiles.commands;
     commandSmoke.timeoutArgs = commandSmokeTimeoutArgs;
-    mcpFronts = lib.mapAttrs (
-      _: front: hostConfig.systemd.services.${front.service}.serviceConfig.ExecStart
-    ) hostConfig.dotfiles.mcp.fronts;
+    mcpExecutables = lib.mapAttrs (_: target: target.executable) hostConfig.dotfiles.mcp.targets;
     host.wslview = lib.getExe wslviewPackage;
   };
 in
@@ -64,7 +62,7 @@ in
         jq -e '
           (.agentmemoryHooks | length) > 0 and
           (.commands | length) > 0 and
-          (.mcpFronts | length) > 0 and
+          (.mcpExecutables | length) > 0 and
           (.host | length) > 0
         ' "$expected" >/dev/null
 
@@ -113,7 +111,6 @@ in
         diff -u expected-command-smoke-timeout.json actual-command-smoke-timeout.json
         jq -e 'any(.commandSmoke.timeoutArgs[]; startswith("--kill-after="))' "$actual" >/dev/null
         mapfile -t commandSmokeTimeoutArgs < <(jq -r '.commandSmoke.timeoutArgs[]' "$actual")
-        # elapsed の閾値ではなく、GNU timeout が KILL した status を固定する。
         set +e
         {
           timeout --kill-after=0.10s 0.05s env --ignore-signal=TERM sleep 1
@@ -135,22 +132,16 @@ in
         diff -u expected-host.json actual-host.json
         lintGenerated "$(jq -r '.host.wslview' "$actual")"
 
-        jq -S '.mcpFronts' "$expected" > expected-fronts.json
-        jq -S '.mcpFronts | keys' "$actual" > actual-fronts.json
-        diff -u expected-fronts.json actual-fronts.json
-        while IFS=$'\t' read -r id command; do
-          inspected=0
-          for token in $command; do
-            test -f "$token" || continue
-            isGeneratedShell "$token" || continue
-            inspected=$((inspected + 1))
-            lintGenerated "$token"
-          done
-          if [ "$inspected" -lt 1 ]; then
-            echo "no generated shell wrapper found for MCP front: $id" >&2
+        jq -S '.mcpExecutables' "$expected" > expected-mcp-executables.json
+        jq -S '.mcpExecutables | keys' "$actual" > actual-mcp-executables.json
+        diff -u expected-mcp-executables.json actual-mcp-executables.json
+        while IFS=$'\t' read -r id executable; do
+          if ! isGeneratedShell "$executable"; then
+            echo "MCP executable is not a generated shell wrapper: $id" >&2
             exit 1
           fi
-        done < <(jq -r '.mcpFronts | to_entries[] | [.key, .value] | @tsv' "$actual")
+          lintGenerated "$executable"
+        done < <(jq -r '.mcpExecutables | to_entries[] | [.key, .value] | @tsv' "$actual")
 
         touch $out
       '';

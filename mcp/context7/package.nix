@@ -1,6 +1,5 @@
 { mkNpmMcp, serverBuilder }:
 
-# context7 cloud に接続する library docs front、backend なし
 let
   pkg = mkNpmMcp {
     pname = "context7-mcp";

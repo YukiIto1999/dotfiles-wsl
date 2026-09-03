@@ -7,7 +7,6 @@
 
 let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
-  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
     serverBuilder = mkMcpServer;
     agentmemoryUrl = config.dotfiles.containers.services.agentmemory.endpoints.http.url;
@@ -17,8 +16,9 @@ in
 {
   dotfiles.mcp.targets.memory = {
     provider = "memory";
+    executable = lib.getExe front;
+    serverLifecycle = "service";
     port = 8774;
-    serve = serveOverProxy (lib.getExe front);
     waitUnits = config.dotfiles.containers.services.agentmemory.units;
     probe = {
       tool = "memory_recall";

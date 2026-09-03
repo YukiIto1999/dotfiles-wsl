@@ -18,13 +18,12 @@ rustPlatform.buildRustPackage rec {
 
   cargoHash = "sha256-AtdPXCxSf/PHHnCDOzLojQyRRbXraObpim6RNF2gybw=";
 
-  # idle reap 後 session の 404 化と backend error の 200 化、downstream SSE の keepalive と active-stream guard
   patches = [
-    ./package/mcp-session-recovery.patch
-    ./package/mcp-downstream-lifecycle.patch
+    ./agentgateway/mcp-session-recovery.patch
+    ./agentgateway/mcp-downstream-lifecycle.patch
+    ./agentgateway/mcp-loopback-bind.patch
   ];
 
-  # aws-lc-sys / jemalloc-sys の C ビルド
   nativeBuildInputs = [
     cmake
     perl
@@ -35,7 +34,6 @@ rustPlatform.buildRustPackage rec {
     "agentgateway-app"
   ];
 
-  # tokio unstable cfg と sandbox で欠落する build info
   env = {
     RUSTFLAGS = "--cfg tokio_unstable";
     AGENTGATEWAY_BUILD_buildVersion = version;
@@ -44,7 +42,6 @@ rustPlatform.buildRustPackage rec {
 
   doCheck = true;
 
-  # patch が固定する downstream session lifecycle の回帰だけを実行する
   cargoTestFlags = [
     "-p"
     "agentgateway"

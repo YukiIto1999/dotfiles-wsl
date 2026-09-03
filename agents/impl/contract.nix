@@ -165,6 +165,7 @@ let
         type = types.enum [
           "native"
           "rendered"
+          "declared"
           "unsupported"
         ];
       };
@@ -252,6 +253,10 @@ let
       && client.definitions != { }
     else if client.definitionMode == "rendered" then
       client.definitionsDestination != null
+      && client.definitionFormat != null
+      && client.definitions != { }
+    else if client.definitionMode == "declared" then
+      client.definitionsDestination == null
       && client.definitionFormat != null
       && client.definitions != { }
     else

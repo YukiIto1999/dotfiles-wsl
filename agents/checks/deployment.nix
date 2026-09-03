@@ -234,11 +234,14 @@ let
           artifact = artifacts."agents/${clientName}/definitions/${name}";
           expectedFormat = if client.definitionFormat == "toml" then "toml" else "markdown";
         in
-        homeConfig.home.file."${client.definitionsDestination}/${name}.${suffix}".source
-        == normalizeSource client.definitions.${name}
-        && artifact.source == normalizeSource client.definitions.${name}
-        && artifact.format == expectedFormat
-        && artifact.deployedAt == "${homePrefix}/${client.definitionsDestination}/${name}.${suffix}"
+        if client.definitionsDestination == null then
+          !(artifacts ? "agents/${clientName}/definitions/${name}")
+        else
+          homeConfig.home.file."${client.definitionsDestination}/${name}.${suffix}".source
+          == normalizeSource client.definitions.${name}
+          && artifact.source == normalizeSource client.definitions.${name}
+          && artifact.format == expectedFormat
+          && artifact.deployedAt == "${homePrefix}/${client.definitionsDestination}/${name}.${suffix}"
       ) (builtins.attrNames client.definitions);
     in
     homeConfig.home.file.${client.rulesDestination}.source
@@ -263,7 +266,9 @@ let
       ++ map (name: "agents/${clientName}/skills/${name}") (
         builtins.attrNames hostConfig.dotfiles.agents.shared.skills
       )
-      ++ map (name: "agents/${clientName}/definitions/${name}") (builtins.attrNames client.definitions)
+      ++ lib.optionals (client.definitionsDestination != null) (
+        map (name: "agents/${clientName}/definitions/${name}") (builtins.attrNames client.definitions)
+      )
       ++ map (id: "agents/${clientName}/${id}") (
         builtins.attrNames expected.clients.${clientName}.managedFiles
       )
@@ -515,11 +520,7 @@ in
           --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.cache/dotfiles-wsl"} \
           --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.local/state/dotfiles-wsl"} \
           --arg systemSkillCreator ${lib.escapeShellArg "${hostConfig.dotfiles.host.homeDir}/.codex/skills/.system/skill-creator"} '
-          .permissions.dev.filesystem == {($cacheRoot): "write", ($stateRoot): "write"} and
-          .permissions["agent-read-only"] == {
-            extends: ":read-only",
-            filesystem: {($cacheRoot): "write", ($stateRoot): "write"}
-          } and
+          .permissions == {dev: {filesystem: {($cacheRoot): "write", ($stateRoot): "write"}}} and
           .skills.config == [{path: $systemSkillCreator, enabled: false}] and
           (has("sandbox_mode") | not) and
           (has("sandbox_workspace_write") | not)
@@ -560,14 +561,8 @@ in
           jq --exit-status '
             (has("sandbox_mode") | not) and
             (has("sandbox_workspace_write") | not) and
-            if (.name | IN("architect", "designer", "explorer", "planner", "reviewer", "security"))
-            then
-              .default_permissions == "agent-read-only" and
-              (has("permissions") | not)
-            else
-              (has("default_permissions") | not) and
-              (has("permissions") | not)
-            end
+            (has("default_permissions") | not) and
+            (has("permissions") | not)
           ' codex-definition.json > /dev/null
         done
         jq '.mcp_servers.extra = {url: "https://unexpected.invalid/mcp"}' \

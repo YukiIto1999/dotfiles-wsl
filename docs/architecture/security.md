@@ -51,7 +51,7 @@ Codex と OpenCode は GitHub release を dotfiles が管理する。GitHub API 
 [`agents/codex/assets/config.toml`](../../agents/codex/assets/config.toml) は既定の permission profile を `dev` とし、`:workspace` を継承して workspace roots、`~/projects`、`~/workspace` への書込と network access を許可する。approval policy は `never` なので、Codex の local command は profile の範囲内で対話承認なしに実行される。
 
 [`agents/codex/module.nix`](../../agents/codex/module.nix) は同名の `dev` profile を system config と project config で拡張する。system config は agent runtime の cache と state、dotfiles checkout の project config はその `.git` だけを書込対象に加える。permission profile と旧 `sandbox_mode`、`sandbox_workspace_write` は混在させない。
-`agent-read-only` profile は `:read-only` を継承して agent runtime の cache と state だけを書込可能にし、read-only な agent definition が `default_permissions` で選択する。
+subagent は親 session の permission profile を継ぐ。Codex の agent role override が運ぶのは model、reasoning、instructions、personality、service tier、feature 無効化、skill 選択だけであり、role file の `default_permissions` は読み捨てられる。read-only の agent definition にも独自の sandbox 境界はない。
 既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
 
 agent runtime の共有 cache は user 所有の directory `0700` と marker file `0600` で識別する。launcher と GC は同じ `gc.lock` を取り、共有 cache の型、所有者、symlink、mode、marker を検証する。GC が allocated bytes 基準で共有 cache を空にするのは、inactive project cache を先に回収しても容量上限を超え、active agent session が一件もない場合に限る。

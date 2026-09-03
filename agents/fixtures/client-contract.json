@@ -108,8 +108,8 @@
       "rulesDestination": ".codex/AGENTS.md",
       "skillsDestination": ".codex/skills",
       "definitions": {
-        "mode": "rendered",
-        "destination": ".codex/agents",
+        "mode": "declared",
+        "destination": null,
         "format": "toml",
         "names": [
           "architect",

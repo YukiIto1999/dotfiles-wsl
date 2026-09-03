@@ -313,15 +313,18 @@ let
   codexDefinitionSources = builtins.attrValues clients.codex.definitions;
   ompDefinitionSources = builtins.attrValues clients.omp.definitions;
   opencodeDefinitionSources = builtins.attrValues clients.opencode.definitions;
+  # 生成側とは独立に期待値を持つ。OMP は実装が同一の server だけ上流名を使い、OpenCode は
+  # built-in id との衝突を避けるため所有者を前置する
   ompLspNames = {
     bash = "bashls";
-    csharp = "omnisharp";
+    csharp = "roslyn-ls";
     java = "jdtls";
     nix = "nixd";
     python = "ty";
     rust = "rust-analyzer";
-    typescript = "typescript-language-server";
+    typescript = "tsgo";
   };
+  opencodeLspName = name: "dotfiles-${name}";
 in
 {
   agent-config-migration =
@@ -1057,7 +1060,9 @@ in
         printf '%s' ${lib.escapeShellArg (builtins.toJSON (builtins.attrNames roster))} \
           | jq --sort-keys '.' > expected-names.json
         diff --unified expected-names.json claude-names.json
-        diff --unified expected-names.json opencode-names.json
+        printf '%s' ${lib.escapeShellArg (builtins.toJSON (lib.sort builtins.lessThan (map opencodeLspName (builtins.attrNames roster))))} \
+          | jq --sort-keys '.' > expected-opencode-names.json
+        diff --unified expected-opencode-names.json opencode-names.json
         printf '%s' ${lib.escapeShellArg (builtins.toJSON (lib.sort builtins.lessThan (builtins.attrValues ompLspNames)))} \
           | jq --sort-keys '.' > expected-omp-names.json
         diff --unified expected-omp-names.json omp-names.json
@@ -1082,9 +1087,9 @@ in
               lib.escapeShellArg (builtins.toJSON (builtins.attrNames roster.${name}.extensions))
             } \
             --argjson options ${lib.escapeShellArg (builtins.toJSON roster.${name}.initializationOptions)} '
-            .lsp["${name}"].command == $command and
-            (.lsp["${name}"].extensions | sort) == ($extensions | sort) and
-            (.lsp["${name}"].initialization // {}) == $options
+            .lsp["${opencodeLspName name}"].command == $command and
+            (.lsp["${opencodeLspName name}"].extensions | sort) == ($extensions | sort) and
+            (.lsp["${opencodeLspName name}"].initialization // {}) == $options
           ' ${artifactSource "agents/opencode/config"} > /dev/null
 
           jq --exit-status \

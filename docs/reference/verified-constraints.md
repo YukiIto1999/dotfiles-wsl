@@ -47,7 +47,7 @@
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
 | Agent Package Manager が宣言した version で起動する | `agent-apm-binary-runs` |
-| LSP roster と対応 client の登録が一致し、OMP の有効条件が checkout に依存せず、拡張子が衝突しない | `lsp-registration` |
+| LSP roster と対応 client の登録が一致し、client ごとの server id 規則と OMP の有効条件を満たし、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |
 | SonarQube の service contract、server と DB の topology、image、volume、環境 file、再起動、secret metadata、provision service と timer が固定値に一致する | `sonarqube-container` |

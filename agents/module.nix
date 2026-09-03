@@ -2,22 +2,22 @@
   config,
   lib,
   pkgs,
-  pluginSources,
   ...
 }:
 
 let
   cfg = config.dotfiles;
-  mkCommand = import ../commands/impl/mk-command.nix { inherit config lib pkgs; };
+  mkCommand = import ../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
+  routing = import ./roles/routing.nix;
   clientNames = builtins.attrNames agents.clients;
   clientExecutables = lib.mapAttrs (
     _: client:
     if client.package != null then
       lib.getExe client.package
     else
-      "${cfg.host.homeDir}/.local/bin/${client.binary}"
+      "${cfg.workstation.homeDir}/.local/bin/${client.binary}"
   ) agents.clients;
   runtime = import ./package.nix { inherit lib pkgs runtimeContract; };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
@@ -42,42 +42,12 @@ let
     ) runtimeClientNames
   );
 
-  pluginPaths = [
-    (pluginSources.openai-plugins + "/plugins/codex-security")
-  ];
+  enabledSkillNames = builtins.filter (
+    name: builtins.hasAttr name cfg.skills.registry
+  ) cfg.skills.enabled;
+  allSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name}.source);
 
-  findSkillsIn =
-    pluginPath:
-    let
-      skillsRoot = pluginPath + "/skills";
-      entries = if builtins.pathExists skillsRoot then builtins.readDir skillsRoot else { };
-    in
-    lib.mapAttrs' (name: _: lib.nameValuePair name (skillsRoot + "/${name}")) (
-      lib.filterAttrs (
-        name: type: type == "directory" && builtins.pathExists (skillsRoot + "/${name}/SKILL.md")
-      ) entries
-    );
-
-  pluginSkills = lib.foldl' (skills: path: skills // findSkillsIn path) { } pluginPaths;
-  pluginSkillNames = lib.concatMap (path: builtins.attrNames (findSkillsIn path)) pluginPaths;
-  pluginSkillDupes = lib.unique (
-    builtins.filter (
-      name: lib.count (candidate: candidate == name) pluginSkillNames > 1
-    ) pluginSkillNames
-  );
-
-  localSkillsRoot = ./shared/skills;
-  localSkills = lib.mapAttrs' (name: _: lib.nameValuePair name (localSkillsRoot + "/${name}")) (
-    lib.filterAttrs (
-      name: type: type == "directory" && builtins.pathExists (localSkillsRoot + "/${name}/SKILL.md")
-    ) (builtins.readDir localSkillsRoot)
-  );
-  localVsPluginDupes = builtins.filter (name: builtins.hasAttr name pluginSkills) (
-    builtins.attrNames localSkills
-  );
-  allSkills = pluginSkills // localSkills;
-
-  definitionsRoot = ./shared/definitions;
+  definitionsRoot = ./roles;
   sharedDefinitions =
     lib.mapAttrs'
       (
@@ -174,7 +144,7 @@ let
   seedScript = lib.concatMapStrings (
     row:
     let
-      target = "${cfg.host.homeDir}/${row.file.destination}";
+      target = "${cfg.workstation.homeDir}/${row.file.destination}";
     in
     ''
       target=${lib.escapeShellArg target}
@@ -182,7 +152,7 @@ let
         install -Dm600 ${lib.escapeShellArg (toString row.file.source)} "$target"
       fi
       ${lib.optionalString (row.file.seedMigrationCommand != null) ''
-        ${lib.getExe row.file.seedMigrationCommand} "$target" ${lib.escapeShellArg cfg.host.homeDir} || exit $?
+        ${lib.getExe row.file.seedMigrationCommand} "$target" ${lib.escapeShellArg cfg.workstation.homeDir} || exit $?
       ''}
     ''
   ) seedRows;
@@ -199,7 +169,7 @@ let
           deployedAt = "/etc/${row.file.destination}";
         }
         // lib.optionalAttrs (row.file.deployment == "home") {
-          deployedAt = "${cfg.host.homeDir}/${row.file.destination}";
+          deployedAt = "${cfg.workstation.homeDir}/${row.file.destination}";
         }
       )
     ) deploymentRows
@@ -289,7 +259,7 @@ let
         name: client:
         let
           visiblePath = clientExecutables.${name};
-          releaseRoot = "${cfg.host.homeDir}/.local/share/dotfiles/agents/${name}";
+          releaseRoot = "${cfg.workstation.homeDir}/.local/share/dotfiles/agents/${name}";
         in
         commonObservation "agent/${name}" null
           "${client.binary} is unavailable or its version command failed"
@@ -321,7 +291,7 @@ let
       ledgerRetentionDays = agents.runtime.ledgerRetentionDays;
       cache = rec {
         inherit relativeCacheRoot;
-        root = "${cfg.host.homeDir}/${relativeCacheRoot}";
+        root = "${cfg.workstation.homeDir}/${relativeCacheRoot}";
         buildsRoot = "${root}/builds";
         sharedRoot = "${root}/shared";
         sessionsRoot = "${root}/sessions";
@@ -332,9 +302,9 @@ let
       };
       state = rec {
         inherit relativeStateRoot;
-        root = "${cfg.host.homeDir}/${relativeStateRoot}";
+        root = "${cfg.workstation.homeDir}/${relativeStateRoot}";
         relativeResourcesRoot = "${relativeStateRoot}/agent-resources";
-        resourcesRoot = "${cfg.host.homeDir}/${relativeResourcesRoot}";
+        resourcesRoot = "${cfg.workstation.homeDir}/${relativeResourcesRoot}";
       };
       timers = {
         autoupdate = {
@@ -406,7 +376,7 @@ in
       inherit clientExecutables;
       packages = {
         inherit apm;
-        agentmemoryHooks = config.dotfiles.agents.agentmemory.hooks;
+        agentmemoryHooks = config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
         projectCacheGc = runtimeContract.packages.gc;
         verification = runtimeContract.packages.verify;
       };
@@ -421,27 +391,20 @@ in
         ];
       };
       shared = {
-        rules = ./shared/AGENTS.md;
+        rules = ./policy/AGENTS.md;
         skills = allSkills;
         definitions = sharedDefinitions;
+        inherit routing;
       };
     };
 
-    dotfiles.artifacts = managedArtifacts;
-    dotfiles.observations = runtimeContract.observations;
-    dotfiles.commands = {
+    dotfiles.managedArtifacts = managedArtifacts;
+    dotfiles.health.observations = runtimeContract.observations;
+    dotfiles.platform.cli.commands = {
       inherit (runtimeContract.packages) installAgents agentResource agentWorktree;
     };
 
     assertions = agentContract.assertionsFor agents ++ [
-      {
-        assertion = localVsPluginDupes == [ ];
-        message = "Duplicate skill names between local and plugins: ${lib.concatStringsSep ", " localVsPluginDupes}";
-      }
-      {
-        assertion = pluginSkillDupes == [ ];
-        message = "Duplicate skill names across plugins: ${lib.concatStringsSep ", " pluginSkillDupes}";
-      }
       {
         assertion = homeDestinations == lib.unique homeDestinations;
         message = "Agent home destinations must be unique";
@@ -477,7 +440,7 @@ in
       config.dotfiles.agents.packages.verification
     ];
 
-    home-manager.users.${cfg.host.username} =
+    home-manager.users.${cfg.workstation.username} =
       { lib, ... }:
       {
         home.packages = [
@@ -500,9 +463,9 @@ in
       wants = [ "network-online.target" ];
       serviceConfig = {
         Type = "oneshot";
-        User = cfg.host.username;
+        User = cfg.workstation.username;
         Environment = [
-          "HOME=${cfg.host.homeDir}"
+          "HOME=${cfg.workstation.homeDir}"
           "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
         ];
         ExecStart = runtimeContract.commands.autoupdate;
@@ -521,8 +484,8 @@ in
       description = "Agent cache を容量制御";
       serviceConfig = {
         Type = "oneshot";
-        User = cfg.host.username;
-        Environment = "HOME=${cfg.host.homeDir}";
+        User = cfg.workstation.username;
+        Environment = "HOME=${cfg.workstation.homeDir}";
         ExecStart = runtimeContract.commands.projectCacheGc;
       };
     };
@@ -539,8 +502,8 @@ in
       description = "Reap inactive agent-owned linked worktrees";
       serviceConfig = {
         Type = "oneshot";
-        User = cfg.host.username;
-        Environment = "HOME=${cfg.host.homeDir}";
+        User = cfg.workstation.username;
+        Environment = "HOME=${cfg.workstation.homeDir}";
         UMask = "0077";
         ExecStart = runtimeContract.commands.resourceReaper;
       };

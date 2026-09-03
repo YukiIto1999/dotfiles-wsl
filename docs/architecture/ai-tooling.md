@@ -1,128 +1,124 @@
 # AI tooling
 
-**読み手:** 責務の境界と要素の関係を理解したい人。学習中に読む。
+**読み手:** Agent、Skill、Capability、provider、runtimeの境界を変更する人。
 
-AI CLI の binary、共通資材、MCP 接続は別の経路で配備する。upstream installer と release で入れる binary は `~/.local/bin` の可変物、OMP は flake lock に固定した Nix package である。rules、skills、agents、managed config と MCP service は NixOS generation が宣言する。対象の追加や変更箇所は[変更箇所](../reference/change-map.md)を参照する。
+AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycleを持つ。upstream installerとreleaseで入れるbinaryは`~/.local/bin`の可変物、OMPはflake inputに固定したNix packageである。policy、Skill、role、managed config、MCP serviceはNixOS generationが宣言する。
 
-## 配備の流れ
+## 配備と呼出し
 
 ```text
-agents/shared/AGENTS.md ─────────────────┐
-agents/shared/definitions/*.md ─ client変換 ─┤
-agents/shared/skills/* ──────────────────┼─ Nix store ──► 各 client の設定領域
-flake input の plugin skills ────────────┘
+agents/policy/AGENTS.md ───────────────────┐
+agents/roles/*.md ── client変換 ──────────┤
+skills/*/skill/ ──────────────────────────┼─► Nix store ─► 各clientの設定領域
+flake inputのplugin Skill ─────────────────┘
 
-AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► MCP front (target ごと)
-      │                                              ├─ service lifecycle ─► 共有 stdio server
-      │                                              └─ session lifecycle ─► session ごとの stdio server
-      ├── LSP ──► language server (PATH 上の binary)
-      └── OTLP ──► telemetry collector
+Agent ─► Skill ─► Capability ─► provider adapter ─► Platform MCP ─► gateway
+                         └────► backend / credential / persistent state
+
+AI CLI ─► LSP ─► language server
+       └► OTLP ─► telemetry collector
 ```
 
-[`agents/module.nix`](../../agents/module.nix) の `dotfiles.agents` が、共有 source、各 client の capability、配備先、gateway fragment、最終 managed file、入手方法を型付き contract として定義する。[`flake.nix`](../../flake.nix) は account、agent client、container application、MCP provider、language server の required roster を default なしで宣言する。通常構成と gateway port variant のどちらでも提供集合との完全一致を求め、空集合、未知、欠落、余分な ID を評価時に拒否する。
+[`agents/roles/routing.nix`](../../agents/roles/routing.nix)はroleからSkillへのroutingとrole間handoffだけを持つ。provider名、backend名、直接provider例外は置かない。Skillの依存は各[`skills/NAME/module.nix`](../../skills)が`requiresSkills`と`requiresCapabilities`で宣言する。
 
-### Client binary の更新
+実行時の原則は`Agent → Skill → Capability → provider/runtime`である。Agentはtask、権限、委譲、成果物handoffを所有する。Skillは反復する判断、手順、停止条件を所有する。Capabilityはconsumerに依存しない機能contractである。provider adapter、container、database、credential、stateはCapabilityの実装詳細であり、AgentやSkillへ逆依存しない。
 
-client contract は三種類の供給経路を持つ。`dotfiles-install-agents` は Claude Code と Antigravity の upstream installer、Codex と OpenCode の GitHub release を更新する。OMP は Bun/Rust native addon を含む upstream の Nix package を `flake.lock` に固定し、system rebuild で更新するため installer manifest と日次更新から除外する。GitHub release の asset、architecture ごとの entrypoint、`requiredPaths`、`retainedReleases` は各 client module の一つの `install` contract に置く。
+Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能はAgentが直接使う。repositoryに配備するproviderは次のCapabilityを通す。
 
-GitHub release 経路は GitHub API の SHA-256 digest と取得した archive を照合し、member 名、type、件数、論理 size、重複、path 衝突を展開前に検査する。展開後は owner、mode、link、entrypoint と required path を調べ、隔離した環境で version probe を通した tree だけを公開する。
+| Capability | Task入口 | 実装 |
+|---|---|---|
+| `library-documentation`、`web-content`、`web-discovery` | `web-research` | Context7、Crawl4AI、SearXNG |
+| `repository-search` | `repository-research` | Zvec-Grep |
+| `github-resources` | `github-operations` | GitHub MCP |
+| `code-quality` | `code-review` | SonarQube |
+| `browser-automation` | `browser-operation` | Playwright |
+| `browser-diagnostics` | `performance-analysis` | Chrome DevTools |
+| `project-memory` | `memory-management` | AgentMemory |
+| `agent-session` | 別clientの独立sessionを起動するAgent | Codex MCP |
 
-管理対象の release は `~/.local/share/dotfiles/agents/<client>/releases/sha256-<digest>` に置く。`current` は同じ client root 内の相対 symlink、`~/.local/bin/<binary>` は `current` 内の entrypoint を指す相対 symlink である。Codex の full package では `bin/codex` と `bin/codex-code-mode-host`、`codex-path/rg`、`codex-resources/bwrap`、`codex-package.json` を一つの release tree として検証する。OpenCode は archive 内の単一 entrypoint を同じ release lifecycle で扱う。どちらも管理済み release を 2 世代まで保持する。
+Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置く規則ではない。Skill本文は全clientへ配備する一方、Capability実装はtransport、service lifecycle、network、credential、永続dataを所有するため、`capabilities/`に置く。
 
-公開処理は lock と固定した directory descriptor の下で release、`current`、visible symlink の identity を照合する。通常の失敗では切替前の状態へ戻し、変更または所有を確認できない object は削除しない。操作と確認方法は [Agent client の更新](../operations/agent-clients.md)に分ける。
+## Profileとregistry
 
-Claude Code、Codex、OMP、OpenCode は、Home Manager が `~/.local/bin` より前へ置く共通 runtime wrapper から起動する。wrapper は実体を移動せず、upstream binary または OMP の Nix store executable を絶対 path で実行する。Antigravity は同じ CLI 起動境界を持たないため対象外である。
+[`profiles/workstation.nix`](../../profiles/workstation.nix)は有効なAgent client、Skill、Capability、language server、identityを選ぶ。MCP providerやcontainer backendを直接列挙しない。
 
-runtime は session ID、owner process、boot ID、管理下 `TMPDIR` を記録する。`CARGO_HOME` と `XDG_CACHE_HOME` が未設定なら、それぞれ `~/.cache/dotfiles-wsl/shared/cargo-home` と `~/.cache/dotfiles-wsl/shared/xdg-cache` を全 project、全 client で共有する。明示値は空文字列も含めて変更しない。
+[`skills/module.nix`](../../skills/module.nix)はSkill ID、source、Skill依存、Capability依存を検証する。[`capabilities/module.nix`](../../capabilities/module.nix)はCapability依存closure、provider owner、backend ownerを検証し、`dotfiles.platform.mcp.enabledProviders`と`dotfiles.platform.containers.enabled`を導く。現在のconsumer数はownershipの判断に使わない。
 
-Git repository では git common directory から project ID を作り、linked worktree 間で `~/.cache/dotfiles-wsl/builds/<project-id>/cargo-target` を共有する。明示された `CARGO_TARGET_DIR` と project 固有の Cargo `target-dir` は上書きしない。GC は project cache と共有 cache の allocated bytes 合計が 64GiB を超えた場合に動き、30 日未使用の project cache、LRU 順の inactive project cache を先に削除する。それでも上限を超え、active agent session が一件もない場合だけ共有 cache を空にし、再計測後も上限を超えれば失敗する。active project cache で超過が残る場合は回収と失敗の対象にしない。symlink、所有者、型、marker を確認できない managed cache があれば、どの cache も削除せず失敗する。
+Agent clientへ配るのは`skills/<id>/skill/`だけである。Nix module、依存metadata、fixtureは配備先へ混ぜない。plugin Skillも同じregistryへ入れ、同名IDを評価時に拒否する。
 
-`dotfiles-agent-verify` は HEAD、tracked diff、non-ignored untracked content、command、環境全体から fingerprint を作る。同一 fingerprint の成功だけを再利用し、raw 環境値は保存しない。agent 内の Nix shim は明示 out-link がない `nix build` と `nix-build` へ no-link option を加え、Nix store を pin する `result*` symlink の増殖を防ぐ。
+## Client binary
 
-agent 内の `git worktree add` は [`agents/impl/resource/`](../../agents/impl/resource) の `dotfiles-agent-worktree` へ接続し、新規 linked worktree を session 台帳へ登録する。終了時と hourly reaper は、台帳所有、clean、HEAD 不変、利用中 process なしを再確認した worktree だけを削除する。既存、dirty、commit 済み、所有者不明の worktree は自動削除しない。
+client contractはupstream installer、GitHub release、Nix packageの三経路を持つ。`dotfiles-install-agents`はClaude CodeとAntigravityのupstream installer、CodexとOpenCodeのGitHub releaseを更新する。OMPはBun/Rust native addonを含むupstream Nix packageを`flake.lock`に固定し、rebuildで更新する。
 
-この root は agent client 専用である。agent ではない CLI に共通の契約と配備が必要になった時点で、別の root `clis/` を作る。現在は該当する CLI がないため、空の分類は置かない。
+Codex runtimeのrelease asset、architecture別entrypoint、`requiredPaths`、`retainedReleases`は[`capabilities/agent-session/codex/module.nix`](../../capabilities/agent-session/codex/module.nix)が所有する。Agent client設定とCodex MCP adapterは同じruntime contractを消費する。他clientのinstall contractは各[`agents/clients/NAME/module.nix`](../../agents/clients)が所有する。
 
-## 共通 rules、agent、skill
+GitHub release経路はGitHub APIのSHA-256 digestとarchiveを照合し、member名、type、件数、論理size、重複、path衝突を展開前に検査する。展開後はowner、mode、link、entrypoint、required path、version probeを通したtreeだけを公開する。
 
-[`agents/shared/AGENTS.md`](../../agents/shared/AGENTS.md) は全 client へ配る共通 rules の正本である。Home Manager が client ごとの規定 path に同じ immutable source を配備する。
+管理releaseは`~/.local/share/dotfiles/agents/<client>/releases/sha256-<digest>`に置く。`current`は同じclient root内の相対symlink、`~/.local/bin/<binary>`は`current`内のentrypointを指す相対symlinkである。lockと固定したdirectory descriptorの下でidentityを照合し、所有を確認できないobjectは削除しない。
 
-静的 agent の正本は [`agents/shared/definitions/`](../../agents/shared/definitions) に置く。Claude Code は Markdown をそのまま使い、Codex は TOML、OMP と OpenCode は各自の tool 名を持つ frontmatter Markdown へ build 時に変換する。Antigravity は `definitionMode = "unsupported"` と宣言し、設定漏れと未対応を区別する。変換は各 client module が所有する。
+Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前へ置く共通runtime wrapperから起動する。wrapperはupstream binaryまたはNix store executableを絶対pathで実行する。Antigravityは同じCLI起動境界を持たない。
 
-配備の形は `definitionMode` が決める。`native` と `rendered` は home 配下の規定 path へ symlink する。Codex は `declared` を使い、home へは配らず、`config.toml` の `[agents.<role>]` から Nix store の実体を `config_file` で指す。Codex が role file を `O_NOFOLLOW` で開き、symlink を拒否するためである。
+runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、linked worktree間でCargo targetを共有する。project固有のCargo`target-dir`は上書きしない。
 
-local skill は [`agents/shared/skills/`](../../agents/shared/skills) から自動検出する。local skill と [`flake.nix`](../../flake.nix) に固定した plugin skill は、どちらも Nix store source として全 client へ配備する。本文の変更にも rebuild が必要である。local と plugin、plugin 同士の同名 skill は評価時に拒否する。
+`dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。managed worktreeはsession台帳、clean、HEAD不変、利用中processなしを確認できる場合だけ回収する。
 
-複数の owner repository から Skill と runtime package を取り込む target 構成は、[Repository 所有 Skill の composition](repository-skills.md)に記録する。これは未実装であり、現行の `dotfiles.agents.shared.skills` と plugin 自動検出の説明を置き換えていない。
+## Policy、role、Skill
 
-配備済み Skill と評価前の候補を分け、候補の責務境界と donor は [Skill portfolio](skills.md) に記録する。
+[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的roleは[`agents/roles/`](../../agents/roles)に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
 
-## CLI ごとの差
+`native`と`rendered`のroleはhome配下へ配備する。Codexの`declared` roleはhomeへsymlinkせず、`config.toml`の`[agents.<role>]`からNix storeの実体を`config_file`で指す。Codexがrole fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
 
-| Client | Agent definitions | LSP | Telemetry | Agentmemory |
-|---|---|---|---|---|
-| Claude Code | native Markdown | plugin | managed settings | lifecycle hooks |
-| Codex | rendered TOML | unsupported | unsupported | lifecycle hooks |
-| OMP | rendered frontmatter Markdown | native config | unsupported | native hooks |
-| OpenCode | rendered frontmatter Markdown | config | unsupported | capture plugin |
-| Antigravity | unsupported | unsupported | unsupported | unsupported |
+| Client | Role | Skill投影 | LSP | Telemetry | AgentMemory |
+|---|---|---|---|---|---|
+| Claude Code | rendered Markdown | required Skillをpreload | plugin | managed settings | lifecycle hooks |
+| Codex | rendered TOML | bodyからdynamic routing | unsupported | unsupported | lifecycle hooks |
+| OMP | rendered Markdown | required Skillをautoload | native config | unsupported | native hooks |
+| OpenCode | rendered Markdown | Skill toolでdynamic routing | config | unsupported | capture plugin |
+| Antigravity | unsupported | unsupported | unsupported | unsupported | unsupported |
 
-全 client が共通 rules、skills、単一 gateway の設定を持つ。Claude Code の user settings と Codex の user config は client が更新し得るため、Home Manager activation は配備先に通常 file、symlink、directory などの既存物がない場合だけ seed を書く。seed は runtime drift の対象にしない。OMP では共有対象の `AGENTS.md`、skills、agents、`mcp.json`、`lsp.json`、hooks だけを Home Manager が所有し、OMP が書き換える `config.yml` と認証 DB `agent.db` は client 所有の可変 file として残す。system または Home Manager が配備する managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。OpenCode と Antigravity の gateway config は Home Manager が所有する。
+Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
 
-## MCP target、front、gateway
+## MCP Platform
 
-[`flake.nix`](../../flake.nix) の `dotfiles.mcp.enabledProviders` は、この host が必要とする provider unit を固定する。各 [`mcp/NAME/module.nix`](../../mcp) は `dotfiles.mcp.targets` に provider ID、executable、server transport、server lifecycle、port、外部通信の要否、backend unit、読み取り用 probe を宣言する。provider roster と target が公開する provider 集合は完全一致し、provider が target を持たない状態も未承認 provider の target も評価時に拒否する。target 名は gateway が tool 名へ付ける prefix であり、package 名とは別である。
+各[`capabilities/`](../../capabilities)実装が`dotfiles.platform.mcp.targets`へprovider ID、executable、server transport、server lifecycle、port、通信要件、backend unit、probeを登録する。[`platform/mcp/module.nix`](../../platform/mcp/module.nix)はtargetからfrontを一度だけ導く。
 
-[`mcp/module.nix`](../../mcp/module.nix) は `dotfiles.mcp.targets` から `dotfiles.mcp.fronts` を一度だけ導く。`stdio` transport の `service` lifecycle は `mcp-proxy` と一つの stdio server を front service の寿命で共有し、`session` lifecycle は一 target の agentgateway が downstream session ごとに stdio server を生成する。`streamable-http` transport は provider の foreground server を front service として直接起動する。session front は listener 自身を loopback に bind し、管理 listener を持たない。backend を持つ target では `waitUnits` を front の `requires` と `after` の両方へ設定する。外部通信が不要な front は systemd の通信制限でも loopback に閉じる。
+`stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
 
-[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` は単一 endpoint の ID、port、URL、service、runtime directory、YAML source、target 名を公開する。gateway は全 front へ loopback HTTP で接続し、front service を起動依存に持たず、子 process も作らない。各 AI CLI が知る接続先はこの URL だけである。session の idle policy は `dotfiles.mcp.sessionPolicy` が所有し、session front の TTL は gateway の TTL に grace を加えて先行 expiry を防ぐ。
+[`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
 
-target を持つかどうかは、agent が消費するかで決まる。agent が読み書きするものは target、人が browser で開くだけのものは endpoint に留める。SonarQube のように両方あるものは両方持つ。container application の endpoint は [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)、agent が使う target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix) が宣言する。
+browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
 
-browser を使う target は二つある。[`playwright`](../../mcp/playwright) は通常の操作、snapshot、screenshot、console、network の観測に使う。[`chrome-devtools`](../../mcp/chrome-devtools) はperformance trace、heap、Lighthouseなどの詳細観測に使う。両 target は `session` lifecycle を使い、tab、page、browser process を downstream session 間で共有しない。chromium package は `dotfiles.mcp.chromium` で共有し、二つの closure を持たない。
+現在のtarget名は次で取得できる。
 
-MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。現在の target は `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.targets --apply builtins.attrNames` で取得する。
+```bash
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.targets --apply builtins.attrNames
+```
 
-session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle は body の終了時刻から数え、明示 DELETE は即座に session を削除する。browser front は outer session より長い TTL を cleanup fallback として持つ。
+## Container Platform
 
-## Docker backend
+[`platform/containers/module.nix`](../../platform/containers/module.nix)は型付きservice contract、Docker daemon、`dotfiles-backends` network、OCI image inventory、image同期を所有する。[`platform/containers/impl/container-backend.nix`](../../platform/containers/impl/container-backend.nix)はCapability実装が使うpure builderである。
 
-[`containers/module.nix`](../../containers/module.nix) は `dotfiles.containers` の型付き service contract、Docker daemon、`dotfiles-backends` network、OCI image の同期を所有する。[`container-backend.nix`](../../containers/impl/container-backend.nix) は container 宣言と systemd 依存を組み立て、必要な host port だけを `127.0.0.1` に publish する。front は host loopback の backend port に接続する。
+application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。AgentMemory、Crawl4AI、SearXNG、SonarQubeをgeneric Platformへ列挙しない。SonarQubeは[`server`](../../capabilities/code-quality/sonarqube/server)、[`database`](../../capabilities/code-quality/sonarqube/database)、[`provisioning`](../../capabilities/code-quality/sonarqube/provisioning)、[`mcp`](../../capabilities/code-quality/sonarqube/mcp)へ分ける。
 
-application 固有の contract と container 宣言は各 application の [`containers`](../../containers) unit が所有する。対応する [`mcp`](../../mcp) unit には front package と target だけを置き、secret の値、path、owner、mode、template、OCI container、provisioning は宣言しない。front が owner の既存 secret file を直接読む場合に限り、MCP unit はその secret の `restartUnits` に front service を加える。SonarQube の front は container owner が公開する endpoint、admin password file、backend unit を型付き contract から読む。
+全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と`dotfiles-sync-images`、Nix生成imageは`imageFile`が取得を担当する。Docker build artifact GCはdangling imageとBuildKit cacheだけを扱い、tagged image、container、volumeは削除しない。
 
-全 container は暗黙 pull を無効にしている。upstream image は digest 固定の宣言と `dotfiles-sync-images`、Nix 生成 image は `imageFile` が取得を担当する。image があるかは docker が答えるので、同期の状態を別に記録しない。操作手順は [OCI images](../operations/oci-images.md)を参照する。
+## AgentMemory
 
-Docker build artifact GC は、dangling image と BuildKit cache だけを所有する。daemon の native policy は、image と共有しない cache のうち 60 日未使用のものを先に回収し、残りを含めて 30GB に保つ。全 cache は 100GB に保ち、各規則で 10GB を残す。`defaultKeepStorage` は回収しない下限であって上限ではないため使わない。6 時間ごとの persistent timer は dangling image を回収してから、internal image と frontend image を含む BuildKit cache を 100GB まで回収する。tagged image、container、volume は削除しない。GC service は Docker を soft dependency として参照し、Docker や各 backend から GC への起動依存は持たない。
-
-## agentmemory
-
-[`containers/agentmemory/module.nix`](../../containers/agentmemory/module.nix) は upstream package root、version、endpoint と agentmemory engine の Docker container を所有する。[`agents/agentmemory/module.nix`](../../agents/agentmemory/module.nix) はその型付き upstream contract から lifecycle hook package と OpenCode capture plugin を導き、agent 側へ配備する。保存先は host の `/var/lib/agentmemory/data` を container の `/data` へ mount した領域であり、Nix store には保存しない。[`mcp/memory/module.nix`](../../mcp/memory/module.nix) は engine の型付き endpoint と client version を読み、MCP front と memory target を配備する。
+[`capabilities/project-memory/agentmemory/`](../../capabilities/project-memory/agentmemory)がupstream version、engine backend、MCP adapter、client integrationを所有する。保存先はhostの`/var/lib/agentmemory/data`をcontainerの`/data`へmountした領域であり、Nix storeには保存しない。
 
 ```text
 Claude Code / Codex / OMP hooks ─┐
-OpenCode capture plugin ─────────┼─► 127.0.0.1 の engine API ─► /var/lib/agentmemory/data
+OpenCode capture plugin ─────────┼─► 127.0.0.1のengine API ─► /var/lib/agentmemory/data
                                  │
-AI CLI ─► gateway ─► memory MCP front ──────────────────┘
-
-session start ─► recall と context 注入
-session event ─► 観測、要約、reflect、consolidation
+AI CLI ─► gateway ─► memory MCP ┘
 ```
 
-Claude Code と Codex は設定から、OMP は native TypeScript hook adapter から `/run/current-system/sw/bin/agentmemory-hook-*` を呼ぶ。OpenCode は Home Manager が配備した capture plugin を自動ロードする。Antigravity は gateway 経由の memory target を使えるが、自動 capture の設定はない。現在の差異は個別 CLI module と managed config が正本である。
+LLM処理は外部のOpenAI互換endpointを使う。API keyはSOPS templateがruntime環境ファイルへ展開し、Dockerがcontainerへ渡す。sessionのpromptやcodeが外部providerへ送られる信頼境界を持つ。
 
-agentmemory の LLM 処理は外部の OpenAI 互換 endpoint を使う。API key は SOPS template が runtime の環境ファイルへ展開し、Docker が container 環境へ渡す。session の prompt や code が外部 provider へ送られる境界を持つ。
+## LSPと観測
 
-## LSP と観測
+language serverのbinaryとrosterは`toolchain/`が所有する。client形式への写像は[`agents/impl/lsp.nix`](../../agents/impl/lsp.nix)が持つ。Claude Codeはplugin、OMPは`lsp.json`、OpenCodeはconfigの`lsp` blockへ投影し、未対応clientには配らない。
 
-language server の binary は `toolchain` が PATH へ置き、roster も同じ unit が持つ。roster から各 client の登録形式への写像は [`agents/impl/lsp.nix`](../../agents/impl/lsp.nix) が単独で持ち、各 client の module は生成した attrset を自分の配備形式へ包むだけにする。Claude Code は `settings.json` に LSP の設定 key を持たないので、plugin と marketplace を Nix store に生成して managed settings から指す。OMP は `lsp.json`、OpenCode は設定ファイルの `lsp` block へ配る。LSP を持たない CLI には配らない。
+managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。
 
-roster が宣言するのは、checkout の内容ではなく環境が提供する集合である。したがって「宣言した server は client と checkout に関係なく、対応する拡張子を開いた時点で有効になる」を不変条件とする。ところが登録の既定は client ごとに違う。Claude Code は有効条件の field を持たず拡張子だけで解決する。OMP は宣言した名前で上流 `defaults.json` の同名 server へ shallow merge するので、`rootMarkers` を宣言しないと Cargo.toml や package.json の有無で有効集合が変わる。OpenCode は同 id の built-in から `root` 解決を引き継ぐので、workspace root の位置が上流の marker 表で決まり、marker が見つからないときに諦める実装では起動もしない。
-
-そこで写像は継承を制御する。OMP へは `rootMarkers` に cwd 自体を渡して有効条件を自分で決め、名前は実装が同一の server だけ上流に合わせる。csharp の roslyn-ls と typescript の tsgo は上流の同名 server とは別実装なので自前の名前を与え、OmniSharp と tsserver 向けの設定を受け取らない。OpenCode は config に `root` を書けないため、id に所有者を前置して built-in から切り離す。前置しないと同じ roster の中で由来が分かれる。`bash`、`csharp`、`rust`、`typescript` は上流 built-in と同名で root を借り、`java`、`nix`、`python` は同名の built-in が無いので project directory を使っていた。
-
-同じ拡張子を二つの server が宣言すると、先に登録された片方だけが動き、もう片方は黙って起動しない。roster と各 client の登録の一致、client ごとの id 規則、OMP の有効条件、拡張子の衝突は `lsp-registration` が検査する。
-
-telemetry collector は OTLP を loopback で受け、生の record を残す。集計しないのは、どの操作で token を使ったかを後から追うためである。CLI は endpoint を `dotfiles.telemetry` から取るので、port を変えても CLI 側の宣言は変わらない。
-
-配備後の調査は [Doctor](../operations/doctor.md)、構成変更の適用は [Rebuild](../operations/rebuild.md)に従う。
+telemetry collectorはOTLPをloopbackで受け、生recordを残す。CLIはendpointを`dotfiles.telemetry`から読むため、port変更をclient側へ重複して書かない。配備後の調査は[Doctor](../operations/doctor.md)、適用は[Rebuild](../operations/rebuild.md)に従う。

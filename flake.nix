@@ -42,7 +42,7 @@
         openai-plugins = openaiPlugins;
       };
 
-      collectUnits = import ./gates/impl/collect-units.nix { inherit (nixpkgs) lib; };
+      collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };
       units = collectUnits ./.;
 
       unitModules = builtins.filter builtins.pathExists (map (unit: unit.path + "/module.nix") units);
@@ -64,53 +64,7 @@
             ++ nixpkgs.lib.toList machineModules;
         };
 
-      normalMachineModule = {
-        dotfiles = {
-          accounts = [
-            "account-1"
-            "account-2"
-            "account-3"
-          ];
-          host = { };
-          toolchain = {
-            enabledLsp = [
-              "bash"
-              "csharp"
-              "java"
-              "nix"
-              "python"
-              "rust"
-              "typescript"
-            ];
-            git.workIdentity = "~/projects/business/";
-          };
-          agents.enabled = [
-            "antigravity"
-            "claude"
-            "codex"
-            "omp"
-            "opencode"
-          ];
-          containers.enabled = [
-            "agentmemory"
-            "crawl4ai"
-            "searxng"
-            "sonarqube"
-          ];
-          mcp.enabledProviders = [
-            "chrome-devtools"
-            "codex"
-            "context7"
-            "crawl4ai"
-            "github"
-            "memory"
-            "playwright"
-            "searxng"
-            "sonarqube"
-            "zvec-grep"
-          ];
-        };
-      };
+      normalMachineModule = import ./profiles/workstation.nix;
 
       maintenancePkgs = nixpkgs.legacyPackages.${system};
     in
@@ -127,17 +81,17 @@
           sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
             mkdir -p "$out"
             cp -R --preserve=mode ${self}/. "$out/"
-            test -x "$out/commands/rebuild/impl/bootstrap.sh"
+            test -x "$out/workstation/activation/rebuild/impl/bootstrap.sh"
           '';
           # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
-          dotfiles-install-agents = hostConfig.dotfiles.commands.installAgents;
-          dotfiles-doctor = hostConfig.dotfiles.commands.doctor;
-          dotfiles-rebuild = hostConfig.dotfiles.commands.rebuild;
-          dotfiles-sync-images = hostConfig.dotfiles.commands.syncImages;
+          dotfiles-install-agents = hostConfig.dotfiles.platform.cli.commands.installAgents;
+          dotfiles-doctor = hostConfig.dotfiles.platform.cli.commands.doctor;
+          dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
+          dotfiles-sync-images = hostConfig.dotfiles.platform.cli.commands.syncImages;
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {
-        packages = self.nixosConfigurations.${hostName}.config.dotfiles.gates.devShellPackages;
+        packages = self.nixosConfigurations.${hostName}.config.dotfiles.toolchain.devShellPackages;
       };
 
       formatter.${system} = maintenancePkgs.nixfmt-tree;
@@ -170,7 +124,7 @@
           # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
           artifactVariantSystem = mkNixosSystem [
             normalMachineModule
-            { dotfiles.mcp.gateway.port = 9876; }
+            { dotfiles.platform.mcp.gateway.port = 9876; }
           ];
           artifactVariantConfig = artifactVariantSystem.config;
 
@@ -194,19 +148,19 @@
           inherit units;
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
-            execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
-            mergeCheckParts = import ./gates/impl/merge-check-parts.nix { inherit lib; };
-            unitOwnership = import ./gates/impl/unit-ownership.nix { inherit lib; };
+            execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
+            mergeCheckParts = import ./checks/impl/merge-check-parts.nix { inherit lib; };
+            unitOwnership = import ./checks/impl/unit-ownership.nix { inherit lib; };
             observationRegistryModule = {
-              options.dotfiles.observations = lib.mkOption {
-                type = self.nixosConfigurations.${hostName}.options.dotfiles.observations.type;
+              options.dotfiles.health.observations = lib.mkOption {
+                type = self.nixosConfigurations.${hostName}.options.dotfiles.health.observations.type;
                 default = { };
                 internal = true;
               };
             };
-            containerArgv = import ./containers/impl/container-argv.nix {
+            containerArgv = import ./platform/containers/impl/container-argv.nix {
               inherit lib hostConfig;
-              execTokens = import ./gates/impl/exec-tokens.nix { inherit lib; };
+              execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
             };
           };
           # gateway port を変えた第二の評価。artifact が宣言に追随することを示す

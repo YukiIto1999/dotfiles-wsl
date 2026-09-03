@@ -1,0 +1,8 @@
+let
+  sink = value: value;
+  target = ./platform/containers/impl/container-backend.nix;
+in
+{
+  direct = sink ./platform/containers/impl/container-backend.nix;
+  alias = sink target;
+}

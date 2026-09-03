@@ -9,7 +9,7 @@
       "input": {
         "base": "bea5113fea086ade4dd1e71e6998cf04a1fd4ae4",
         "head": "3e94a0258c05973ef4321ea5879d90fa5335f014",
-        "path": "mcp/chrome-devtools/checks.nix"
+        "path": "capabilities/browser-diagnostics/chrome-devtools/mcp/checks.nix"
       },
       "baseline": {
         "finding": "set -e下の! grepが禁止flag検出を失敗として伝播しない",
@@ -32,7 +32,7 @@
       "input": {
         "base": "b7850248e1270bdbe4f9d907178b130be6d5875e",
         "head": "cf1fb79a3a422afb89f5ea158b186c7368ff3625",
-        "paths": ["observations/module.nix", "observations/checks.nix"]
+        "paths": ["health/module.nix", "health/checks.nix"]
       },
       "baseline": {
         "finding": "NULとDELもfixtureへ列挙する",

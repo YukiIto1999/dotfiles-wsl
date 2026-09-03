@@ -159,6 +159,34 @@ let
     };
   };
 
+  agentSkillRouteType = types.submodule {
+    options = {
+      agent = lib.mkOption { type = nonEmptyStringType; };
+      skill = lib.mkOption { type = nonEmptyStringType; };
+      activation = lib.mkOption {
+        type = types.enum [
+          "required"
+          "dynamic"
+        ];
+      };
+    };
+  };
+
+  agentHandoffType = types.submodule {
+    options = {
+      from = lib.mkOption { type = nonEmptyStringType; };
+      to = lib.mkOption { type = nonEmptyStringType; };
+      artifact = lib.mkOption { type = nonEmptyStringType; };
+    };
+  };
+
+  routingType = types.submodule {
+    options = {
+      agentSkills = lib.mkOption { type = types.listOf agentSkillRouteType; };
+      agentHandoffs = lib.mkOption { type = types.listOf agentHandoffType; };
+    };
+  };
+
   clientType = types.submodule {
     options = {
       binary = lib.mkOption { type = safeBasenameType; };
@@ -262,6 +290,14 @@ let
           "unsupported"
         ];
       };
+      skillProjectionMode = lib.mkOption {
+        type = types.enum [
+          "preload"
+          "dynamic"
+          "unsupported"
+        ];
+        description = "required Skill route の client 固有 projection。";
+      };
     };
   };
 
@@ -283,6 +319,14 @@ let
       client.definitionsDestination == null
       && client.definitionFormat == null
       && client.definitions == { };
+  skillProjectionContractValid =
+    client:
+    if client.skillProjectionMode == "preload" then
+      client.definitionMode == "rendered" && client.definitionFormat == "frontmatter-markdown"
+    else if client.skillProjectionMode == "dynamic" then
+      client.definitionMode != "unsupported"
+    else
+      client.definitionMode == "unsupported";
 
   installContractValid =
     client:
@@ -484,6 +528,11 @@ in
         readOnly = true;
         internal = true;
       };
+      routing = lib.mkOption {
+        type = routingType;
+        readOnly = true;
+        internal = true;
+      };
     };
     clients = lib.mkOption {
       type = types.attrsOf clientType;
@@ -498,6 +547,9 @@ in
       clientNames = builtins.attrNames cfg.clients;
       invalidDefinitionClients = builtins.filter (
         name: !definitionContractValid cfg.clients.${name}
+      ) clientNames;
+      invalidSkillProjectionClients = builtins.filter (
+        name: !skillProjectionContractValid cfg.clients.${name}
       ) clientNames;
       invalidClientNames = builtins.filter (name: !validClientName name) clientNames;
       invalidInstallClients = builtins.filter (
@@ -606,6 +658,12 @@ in
         message =
           "agent definition mode conflicts with destination, format, or sources: "
           + lib.concatStringsSep ", " invalidDefinitionClients;
+      }
+      {
+        assertion = invalidSkillProjectionClients == [ ];
+        message =
+          "agent Skill projection conflicts with definition mode or format: "
+          + lib.concatStringsSep ", " invalidSkillProjectionClients;
       }
       {
         assertion = invalidInstallClients == [ ];

@@ -21,7 +21,8 @@
     "capabilities": {
       "lsp": "unsupported",
       "telemetry": "unsupported",
-      "agentmemory": "unsupported"
+      "agentmemory": "unsupported",
+      "skills": "unsupported"
     },
     "capabilityManagedFiles": {
       "lsp": null,
@@ -52,9 +53,9 @@
       "rulesDestination": ".claude/CLAUDE.md",
       "skillsDestination": ".claude/skills",
       "definitions": {
-        "mode": "native",
+        "mode": "rendered",
         "destination": ".claude/agents",
-        "format": null,
+        "format": "frontmatter-markdown",
         "names": [
           "architect",
           "designer",
@@ -68,7 +69,8 @@
     "capabilities": {
       "lsp": "supported",
       "telemetry": "supported",
-      "agentmemory": "hooks"
+      "agentmemory": "hooks",
+      "skills": "preload"
     },
     "capabilityManagedFiles": {
       "lsp": "managed-settings",
@@ -125,7 +127,8 @@
     "capabilities": {
       "lsp": "unsupported",
       "telemetry": "unsupported",
-      "agentmemory": "hooks"
+      "agentmemory": "hooks",
+      "skills": "dynamic"
     },
     "capabilityManagedFiles": {
       "lsp": null,
@@ -219,7 +222,8 @@
       "capabilities": {
         "lsp": "supported",
         "telemetry": "unsupported",
-        "agentmemory": "hooks"
+        "agentmemory": "hooks",
+        "skills": "preload"
       },
       "capabilityManagedFiles": {
         "lsp": "lsp",
@@ -275,7 +279,8 @@
     "capabilities": {
       "lsp": "supported",
       "telemetry": "unsupported",
-      "agentmemory": "plugin"
+      "agentmemory": "plugin",
+      "skills": "dynamic"
     },
     "capabilityManagedFiles": {
       "lsp": "config",

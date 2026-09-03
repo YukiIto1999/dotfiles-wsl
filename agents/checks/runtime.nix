@@ -11,8 +11,8 @@
 let
   agentConfig = hostConfig.dotfiles.agents;
   inherit (agentConfig) clients;
-  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.host.username};
-  installAgents = hostConfig.dotfiles.commands.installAgents;
+  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
+  installAgents = hostConfig.dotfiles.platform.cli.commands.installAgents;
   runtime = import ../package.nix {
     inherit lib pkgs;
     runtimeContract = runtimePackageContract;
@@ -144,13 +144,13 @@ let
   );
 
   observationTimeoutSeconds = 10;
-  homeDir = hostConfig.dotfiles.host.homeDir;
+  homeDir = hostConfig.dotfiles.workstation.homeDir;
   runtimeContractSupport = import ./support/runtime-contract.nix {
     inherit homeDir;
   };
   inherit (runtimeContractSupport) expectedAgentRuntime runtimePackageContract;
   selectAgentObservations = lib.filterAttrs (name: _: lib.hasPrefix "agents/" name);
-  agentObservations = selectAgentObservations hostConfig.dotfiles.observations;
+  agentObservations = selectAgentObservations hostConfig.dotfiles.health.observations;
   commonAgentObservation = checkId: resourceKey: failureMessage: {
     inherit checkId resourceKey failureMessage;
     timeoutSeconds = observationTimeoutSeconds;
@@ -237,7 +237,7 @@ let
   ) clients;
   agentObservationDefinitions = builtins.filter (
     definition: lib.hasSuffix "/agents/module.nix" (toString definition.file)
-  ) hostOptions.dotfiles.observations.definitionsWithLocations;
+  ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
   agentDefinitionKeys = lib.unique (
     lib.concatMap (definition: builtins.attrNames definition.value) agentObservationDefinitions
   );
@@ -274,7 +274,7 @@ let
         service != null
         && timer != null
         && service.serviceConfig.Type == "oneshot"
-        && service.serviceConfig.User == hostConfig.dotfiles.host.username
+        && service.serviceConfig.User == hostConfig.dotfiles.workstation.username
         && timer.wantedBy == [ "timers.target" ]
         && timer.timerConfig == expectedTimerConfig
         && (
@@ -401,7 +401,9 @@ in
         "projectCacheGc"
         "verification"
       ];
-    assert agentConfig.packages.agentmemoryHooks == hostConfig.dotfiles.agents.agentmemory.hooks;
+    assert
+      agentConfig.packages.agentmemoryHooks
+      == hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
     assert agentConfig.packages.projectCacheGc == runtime.gc;
     assert agentConfig.packages.verification == runtime.verify;
     assert builtins.head homeConfig.home.sessionPath == "$HOME/${wrapperDirectory}";
@@ -429,15 +431,15 @@ in
       agentDefinitionKeys == builtins.attrNames expectedAgentObservations
     ) "agent observations must be defined by the agents owner";
     assert lib.assertMsg
-      (agentRuntimeContractMatches expectedRuntimeConfiguration hostConfig.dotfiles.observations)
+      (agentRuntimeContractMatches expectedRuntimeConfiguration hostConfig.dotfiles.health.observations)
       "agent runtime contract is not wired to observations, packages, services, or timers";
     assert lib.assertMsg (
       !agentRuntimeContractMatches expectedRuntimeConfiguration removeManagedRootMutation
     ) "agent runtime contract accepted a missing managed root";
     assert lib.assertMsg (
-      !agentRuntimeContractMatches highBytesMutation hostConfig.dotfiles.observations
-      && !agentRuntimeContractMatches lowBytesMutation hostConfig.dotfiles.observations
-      && !agentRuntimeContractMatches inactiveDaysMutation hostConfig.dotfiles.observations
+      !agentRuntimeContractMatches highBytesMutation hostConfig.dotfiles.health.observations
+      && !agentRuntimeContractMatches lowBytesMutation hostConfig.dotfiles.health.observations
+      && !agentRuntimeContractMatches inactiveDaysMutation hostConfig.dotfiles.health.observations
       && runtime.gc != highBytesMutationRuntime.gc
       && runtime.gc != lowBytesMutationRuntime.gc
       && runtime.gc != inactiveDaysMutationRuntime.gc
@@ -448,13 +450,14 @@ in
     assert lib.assertMsg (lib.all
       (
         timer:
-        !agentRuntimeContractMatches (removeTimerMutation timer.name) hostConfig.dotfiles.observations
-        && !agentRuntimeContractMatches (changeTimerMutation timer.name) hostConfig.dotfiles.observations
+        !agentRuntimeContractMatches (removeTimerMutation timer.name) hostConfig.dotfiles.health.observations
+        && !agentRuntimeContractMatches (changeTimerMutation timer.name) hostConfig.dotfiles.health.observations
       )
       (builtins.attrValues expectedAgentRuntime.timers)
     ) "agent runtime contract accepted a missing or changed timer";
     assert lib.assertMsg (
-      selectAgentObservations descriptionVariantConfig.dotfiles.observations == expectedAgentObservations
+      selectAgentObservations descriptionVariantConfig.dotfiles.health.observations
+      == expectedAgentObservations
     ) "agent observation keys depend on service descriptions";
     assert lib.assertMsg (
       !agentRuntimeContractMatches expectedRuntimeConfiguration staleAgentObservationMutation
@@ -553,7 +556,7 @@ in
       == lib.getExe runtime.gc;
     assert
       hostConfig.systemd.services.dotfiles-agent-project-cache-gc.serviceConfig.User
-      == hostConfig.dotfiles.host.username;
+      == hostConfig.dotfiles.workstation.username;
     assert hostConfig.systemd.services.dotfiles-agent-project-cache-gc.serviceConfig.Type == "oneshot";
     assert hostConfig.systemd.timers.dotfiles-agent-project-cache-gc.timerConfig.OnCalendar == "daily";
     assert hostConfig.systemd.timers.dotfiles-agent-project-cache-gc.timerConfig.Persistent;

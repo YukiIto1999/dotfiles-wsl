@@ -8,15 +8,15 @@
 
 ## Agent client の実行契約
 
-`agents` は client ID ごとに次の値を所有する。
+Agent client unitはclient IDごとに設定配備とruntime wrapper適用を所有する。binaryの供給契約は通常そのclient unitが所有するが、同じbinaryをAgent以外も必要とする場合は対応するCapabilityへ置く。
 
-- 配備する実行ファイルの絶対 path
-- agent runtime wrapper の対象か、非対応か
-- client package が提供する実行ファイル名
+- 配備する実行ファイルの絶対path
+- Agent runtime wrapperの対象か、非対応か
+- packageが提供する実行ファイル名
 
-wrapper 対象は client 名で判定せず、default を持たない列挙値で宣言する。Claude Code、Codex、OMP、OpenCode は wrapper 対象、Antigravity は非対応とする。
+wrapper対象はclient名で判定せず、defaultを持たない列挙値で宣言する。Claude Code、Codex、OMP、OpenCodeはwrapper対象、Antigravityは非対応とする。
 
-`mcp/codex` は `agents` が公開する Codex の実行 path を読み、`mcp-server` 引数だけを加える。home directory、`.local/bin`、binary 名を MCP 側で組み立てない。wrapper、runtime observation、MCP target は同じ実行 path を参照する。
+Codex binaryは[`capabilities/agent-session/codex/`](../../capabilities/agent-session/codex)が所有する。Agent clientとMCP adapterは同じ`runtime.executable` contractを読み、home directory、`.local/bin`、binary名を再構築しない。Agent、Skill、Capabilityの依存方向を逆転させず、CapabilityはAgent設定を参照しない。
 
 ## Check file の境界
 
@@ -30,9 +30,9 @@ wrapper 対象は client 名で判定せず、default を持たない列挙値�
 - runtime wrapper、cache、verification
 - session resourceとworktree lifecycle
 
-`commands/doctor/checks/` は registry projection と runtime probe を分ける。runtime fixture は出力形式と失敗条件ごとに `fixtures/` へ置き、check 本体へ生成処理を集めない。
+`health/checks/` はregistry projectionとruntime probeを分ける。runtime fixtureは出力形式と失敗条件ごとに`fixtures/`へ置き、check本体へ生成処理を集めない。
 
-`gates/checks/` は repository structure、runtime registry、unit boundary、documentation、static analysis へ分ける。`checks/` は unit 内で許可する layer 名へ追加するが、任意の directory 名は許可しない。
+`checks/checks/` はrepository structure、runtime registry、unit boundary、documentation、static analysisへ分ける。`checks/`はunit内で許可するlayer名へ追加するが、任意のdirectory名は許可しない。
 
 ## SOPSへの寄与
 

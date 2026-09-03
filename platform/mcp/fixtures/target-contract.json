@@ -1,0 +1,52 @@
+{
+  "enabledProviders": [
+    "http-provider",
+    "session-provider",
+    "stdio-provider"
+  ],
+  "targets": {
+    "http-adapter": {
+      "needsNetwork": false,
+      "port": 8772,
+      "probe": {
+        "args": {},
+        "timeout": 3,
+        "tool": "inspect"
+      },
+      "provider": "http-provider",
+      "serverLifecycle": "service",
+      "serverTransport": "streamable-http",
+      "waitUnits": [
+        "synthetic-http.service"
+      ]
+    },
+    "session-adapter": {
+      "needsNetwork": true,
+      "port": 8770,
+      "probe": {
+        "args": {
+          "scope": "session"
+        },
+        "timeout": 2,
+        "tool": "query"
+      },
+      "provider": "session-provider",
+      "serverLifecycle": "session",
+      "waitUnits": []
+    },
+    "stdio-adapter": {
+      "needsNetwork": false,
+      "port": 8771,
+      "probe": {
+        "args": {},
+        "timeout": 1,
+        "tool": "status"
+      },
+      "provider": "stdio-provider",
+      "serverLifecycle": "service",
+      "waitUnits": [
+        "synthetic-stdio.service"
+      ]
+    }
+  }
+}

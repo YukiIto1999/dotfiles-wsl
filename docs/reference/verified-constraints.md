@@ -28,11 +28,10 @@
 | container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
 | container service contract から service、restart、image、health、roster、Docker build artifact GC の observation を漏れなく導き、追加と削除に追随する | `container-runtime-observation-contract` |
 | dangling image と BuildKit cache の回収順序、daemon policy、timer が固定され、Docker と backend が GC に依存しない | `docker-build-artifact-gc-contract` |
-| 共通 container helper の import が一件以上存在し、`containers` 以外の unit は import、readFile、別構文で参照しない | `unit-boundary-name-only` |
-| MCP unit が OCI、secret template、同名 backend の service contract を所有せず、同名 backend の secret には MCP 外の owner が宣言済みの場合だけ `restartUnits` を寄与する | `mcp-no-container-ownership` |
-| host の固定 provider roster と target の provider 集合が通常評価と variant 評価で完全一致する | `mcp-provider-roster` |
-| target の provider、server transport、server lifecycle、port、probe、通信方針、backend unit が固定 fixture に一致する | `mcp-target-contract` |
-| Codex MCP front が agent owner の実行 path を引用して使い、home path や binary 名を組み立てない | `mcp-codex-client-executable-contract` |
+| 共通container helperのimportが承認済みCapability実装に限られ、CapabilityからAgentまたはSkillへの逆依存がない | `unit-boundary-name-only` |
+| MCP targetのprovider集合がCapability registryから導かれ、通常評価とvariant評価で一致する | `mcp-provider-registry` |
+| targetのprovider、server transport、server lifecycle、port、probe、通信方針、backend unitが固定fixtureに一致する | `mcp-target-contract` |
+| Codex MCP frontが`agent-session` Capabilityの実行pathを引用して使い、home pathやbinary名を組み立てない | `mcp-codex-client-executable-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
 | GitHub account と `github-<account>` target が完全一致し、欠落、追加、改名を拒否する | `github-account-target-contract` |
 | repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |
@@ -56,8 +55,8 @@
 | 生成 config artifact が登録簿に載り、宣言の変更に追随する | `artifact-registry` |
 | GitHub account roster、暗号化 template、登録 artifact、Git identity の生成先が typed contract と一致する | `account-deployment-contract` |
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
-| host の固定 client roster、提供集合、型metadata、capability、installer、managed file が固定 fixture に一致し、不正な branch field、必須 field 欠落、freeform field、mode 矛盾を変異入力で拒否する | `agent-client-roster` |
-| 共通 rules が UTF-8、非空、見出しを持ち、配備対象の Skill、subagent、MCP provider が rules または Skill 本文に入口を持ち、LSP と agentmemory の client 差分を記載し、shared・OMP・OpenCode の definition frontmatter、Codex TOML、Claude の byte equality が実配備 source で成立する | `agent-definition-rendering` |
+| profileの固定client roster、提供集合、型metadata、capability、installer、managed fileが固定fixtureに一致し、不正なbranch field、必須field欠落、freeform field、mode矛盾を変異入力で拒否する | `agent-client-roster` |
+| 共通rulesが配備対象のSkillとsubagentをrouteし、`routing.nix`のSkill、agent、handoff、MCP providerが完全かつ重複せず、Skill本文とagent定義に各edgeがあり、raw toolは直接利用集合だけで、Claude CodeとOMPのrequired Skill preload、OpenCodeのSkill tool、Codexのdynamic定義が実配備sourceへ投影される | `agent-definition-rendering` |
 | agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、OMP の認証状態が管理外であること、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
 | seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |
@@ -66,7 +65,7 @@
 | browser target だけが session lifecycle を使い、inner listener、管理 listener、TTL grace、stdio executable が session front config に一致する | `mcp-front-session-lifecycle` |
 | session front が session ごとに stdio state を分離し、個別 DELETE と TTL で子 process を終了して次の session を受け入れる | `mcp-session-front-behavior` |
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
-| Chrome DevTools の front が host の chromium を使い CDP を露出しない | `chrome-devtools-front` |
+| browser-runtime CapabilityがChromium packageを一度だけ公開し、PlaywrightとChrome DevToolsが同じcontractを使う | `browser-runtime-chromium-contract`、`chrome-devtools-front` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
 | agentmemory backend の image、設定、mount、環境 file、health、upstream package が固定値と一致する | `agentmemory-container` |
 | AgentMemory の lifecycle hook roster、endpoint、OpenCode plugin と upstream version が一致する | `agentmemory-client-integration` |
@@ -77,11 +76,11 @@
 | SearXNG MCP front の package、port、backend unit が一致し、initialize に応答する | `searxng-front` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | SOPS secret 宣言から path、owner、group、mode の observation だけを導き、内容と source path を含めない | `sops-runtime-observation-contract` |
-| host が有効化した container application と service contract の key が一致する | `container-application-roster` |
-| OCI image の宣言が container と pull 方針に一致する | `oci-image-contract` |
-| container application の endpoint URL と port が OCI publish、unit が systemd service に完全一致し、health が宣言済み HTTP endpoint を参照する | `nixos-toplevel` (`containers/module.nix` の assertion) |
-| MCP provider roster、target ID、port、GitHub account、front 集合が型付き assertion を満たす | `nixos-toplevel` (`mcp/module.nix` の assertion) |
-| image id が container を一意に指す | `nixos-toplevel` (`containers/module.nix` の assertion) |
+| 有効なcontainer applicationとservice contractのkeyが一致する | `container-application-registry` |
+| OCI imageの宣言がcontainerとpull方針に一致する | `oci-image-contract` |
+| container applicationのendpoint URLとportがOCI publish、unitがsystemd serviceに完全一致し、healthが宣言済みHTTP endpointを参照する | `nixos-toplevel`（`platform/containers/module.nix`のassertion） |
+| Capability、MCP target、container backend、GitHub account、front集合が型付きassertionを満たす | `nixos-toplevel`（`capabilities/module.nix`と`platform/mcp/module.nix`のassertion） |
+| image IDがcontainerを一意に指す | `nixos-toplevel`（`platform/containers/module.nix`のassertion） |
 | 全 module から system closure を評価できる | `nixos-toplevel` |
 | gateway port を変え、同じ固定 provider roster を使う第二の評価からも system closure を評価できる | `nixos-variant-toplevel` |
 
@@ -117,8 +116,8 @@
 | 制約 | 検証 |
 |---|---|
 | 固定した virtual tree の再帰走査で通常ファイルの `module.nix` だけを unit marker とし、flake の unit ID が source 内の該当 directory と一致する | `unit-module-marker` |
-| tracked flake source の root が固定した責務 roster と基盤 file だけを持ち、SonarQube、AgentMemory、agent 補助 package、SOPS 資産が各 owner に分かれ、container から agents への逆依存と旧責務 path が存在しない | `structure-responsibility-roots` |
-| unit の直下が層の file 名か子 unit だけであり、移動済みの Agentmemory と SearXNG の資産が旧 path に再作成されない | `structure-layer-names` |
+| tracked flake sourceのrootが固定した責務rosterと基盤fileだけを持ち、Agent、Skill、Capability、Platform、secret、identity、health、artifactのownerが分離され、CapabilityからAgentまたはSkillへの逆依存と旧責務pathが存在しない | `structure-responsibility-roots` |
+| unit直下が許可したlayer file、material directory、子unitだけであり、移動済み資材が旧pathへ再作成されない | `structure-layer-names` |
 
 ## 形式
 
@@ -145,4 +144,4 @@
 - 通信制限による失敗が観測できること。`IPAddressDeny` の遮断は timeout として現れ、unit は active のままなので doctor の unit 検査は緑を保つ。tool を呼ぶまで表面化しない。
 - container が image 由来で expose する port を把握していること。宣言は publish する port しか持たない。crawl4ai の image は内部 valkey の 6379 を expose しており、`dotfiles-backends` network 上の他 container から到達する。
 - 宣言した port が実機で空いていること。検査は宣言どうしの衝突しか見ない。他 project の process が先に取っていると front は起動できず、`Restart=always` で再試行を続ける。
-- unit の依存が設計の依存表に載っている組だけであること。依存の向きを検査していない。
+- optionを介した依存の意味が設計した責務に一致すること。物理importと禁止した逆依存は検査するが、公開contractを使う理由までは静的に判定しない。

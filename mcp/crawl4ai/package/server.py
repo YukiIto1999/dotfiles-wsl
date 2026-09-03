@@ -8,7 +8,6 @@ from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
 
 crawl4aiBase = os.environ["CRAWL4AI_URL"]
-# 0.9 以降は AuthGate が全 path を gate する。token は file から読む
 authHeaders = {
     "Authorization": "Bearer " + open(os.environ["CRAWL4AI_TOKEN_FILE"]).read().strip()
 }
@@ -39,8 +38,7 @@ async def listTools():
     ]
 
 
-# crawl4ai の tool 名は REST path と 1:1 対応。
-# SDK は schema に無い名前も handler へ渡すので、path へ載せる前に照合する
+# 未登録 tool 名もハンドラーへ渡す SDK の dispatch 仕様
 @server.call_tool()
 async def callTool(name, arguments):
     known = {tool.get("name") for tool in await loadTools()}

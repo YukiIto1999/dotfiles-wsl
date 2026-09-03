@@ -8,7 +8,6 @@
 let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   mkNpmMcp = pkgs.callPackage ../package/mk-npm.nix { };
-  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   backend = config.dotfiles.containers.services.sonarqube;
   front = pkgs.callPackage ./package.nix {
     inherit mkNpmMcp;
@@ -21,8 +20,9 @@ in
 {
   dotfiles.mcp.targets.sonarqube = {
     provider = "sonarqube";
+    executable = lib.getExe front;
+    serverLifecycle = "service";
     port = 8778;
-    serve = serveOverProxy (lib.getExe front);
     waitUnits = backend.units;
     probe = {
       tool = "system_status";

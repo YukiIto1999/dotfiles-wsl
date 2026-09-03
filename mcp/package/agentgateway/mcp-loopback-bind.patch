@@ -1,0 +1,49 @@
+diff --git a/crates/agentgateway/src/types/local.rs b/crates/agentgateway/src/types/local.rs
+index 6ab06e3..21e036c 100644
+--- a/crates/agentgateway/src/types/local.rs
++++ b/crates/agentgateway/src/types/local.rs
+@@ -1003,0 +1004,2 @@ struct LocalBind {
++	#[serde(default)]
++	address: Option<IpAddr>,
+@@ -2313,6 +2315,8 @@ async fn convert(
+-		let sockaddr = if cfg!(target_family = "unix") && config.ipv6_enabled {
+-			SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), b.port)
+-		} else {
+-			// Windows and IPv6 don't mix well apparently?
+-			SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), b.port)
+-		};
++		let address = b.address.unwrap_or_else(|| {
++			if cfg!(target_family = "unix") && config.ipv6_enabled {
++				IpAddr::V6(Ipv6Addr::UNSPECIFIED)
++			} else {
++				IpAddr::V4(Ipv4Addr::UNSPECIFIED)
++			}
++		});
++		let sockaddr = SocketAddr::new(address, b.port);
+diff --git a/crates/agentgateway/src/types/local_tests.rs b/crates/agentgateway/src/types/local_tests.rs
+index 0f87d2d..e509052 100644
+--- a/crates/agentgateway/src/types/local_tests.rs
++++ b/crates/agentgateway/src/types/local_tests.rs
+@@ -150,0 +151,22 @@ fn assert_hostname_target(target: &Target, expected_host: &str, expected_port: u
++#[tokio::test]
++async fn downstream_lifecycle_local_bind_address() {
++	let normalized = normalize_test_yaml(
++		r#"
++binds:
++- address: 127.0.0.1
++  port: 1080
++  listeners:
++  - routes:
++    - backends:
++      - dynamic: {}
++"#,
++	)
++	.await
++	.expect("loopback bind should normalize");
++
++	assert_eq!(
++		normalized.binds[0].address,
++		"127.0.0.1:1080".parse().unwrap()
++	);
++}
++

@@ -8,7 +8,6 @@
 let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   mkNpmMcp = pkgs.callPackage ../package/mk-npm.nix { };
-  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
     inherit mkNpmMcp;
     serverBuilder = mkMcpServer;
@@ -16,13 +15,13 @@ let
   };
 in
 {
-  # Playwrightへ統合しない。trace、heap、Lighthouseは別の観測契約を持つため。
+  # 異なる観測契約を持つ trace・heap・Lighthouse の Playwright 統合禁止
   dotfiles.mcp.targets.chrome-devtools = {
     provider = "chrome-devtools";
+    executable = lib.getExe front;
+    serverLifecycle = "session";
     port = 8779;
-    # chromium が任意の web を開く
     needsNetwork = true;
-    serve = serveOverProxy (lib.getExe front);
     probe = {
       tool = "list_pages";
       args = { };

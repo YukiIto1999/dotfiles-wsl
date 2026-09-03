@@ -87,8 +87,6 @@ let
             spec:
             assert builtins.toJSON spec == builtins.toJSON expectedMcpSpec;
             isolationFrontPackageFor spec
-          else if path == ../package/serve-over-proxy.nix then
-            executable: "proxy:${executable}"
           else
             pkgs.callPackage path args;
       };
@@ -127,8 +125,9 @@ let
                     lib.types.submodule {
                       options = {
                         provider = lib.mkOption { type = lib.types.str; };
+                        executable = lib.mkOption { type = lib.types.str; };
+                        serverLifecycle = lib.mkOption { type = lib.types.str; };
                         port = lib.mkOption { type = lib.types.port; };
-                        serve = lib.mkOption { type = lib.types.str; };
                         needsNetwork = lib.mkOption {
                           type = lib.types.bool;
                           default = false;
@@ -162,8 +161,9 @@ let
       isolatedTarget = evaluation.config.dotfiles.mcp.targets.sonarqube;
       expectedTarget = {
         provider = "sonarqube";
+        executable = lib.getExe (isolationFrontPackageFor expectedMcpSpec);
+        serverLifecycle = "service";
         port = expectedPort;
-        serve = "proxy:${lib.getExe (isolationFrontPackageFor expectedMcpSpec)}";
         needsNetwork = false;
         waitUnits = expectedWaitUnits;
         probe = {
@@ -176,11 +176,12 @@ let
     {
       actual = builtins.toJSON {
         inherit (isolatedTarget)
+          executable
           needsNetwork
           port
           probe
           provider
-          serve
+          serverLifecycle
           waitUnits
           ;
       };

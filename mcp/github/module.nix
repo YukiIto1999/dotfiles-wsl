@@ -5,7 +5,6 @@
   ...
 }:
 
-# account ごとに 1 instance、PAT は spawn 時に sops file から読む
 let
   cfg = config.dotfiles;
   githubTargets = builtins.attrNames (
@@ -15,9 +14,7 @@ let
     map (account: "github-${account}") cfg.accounts
   );
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
-  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
 
-  # upstream default から copilot を除いた採用 toolset
   toolsets = [
     "context"
     "issues"
@@ -30,19 +27,17 @@ let
     index: account:
     lib.nameValuePair "github-${account}" {
       provider = "github";
-      # http mode は request ごとの OAuth を要求し、PAT を環境変数で持つ形と噛み合わない
-      port = 8780 + index;
-      # api.github.com へ出る
-      needsNetwork = true;
-      serve = serveOverProxy (
-        lib.getExe (
-          pkgs.callPackage ./package.nix {
-            inherit toolsets;
-            serverBuilder = mkMcpServer;
-            tokenFile = config.sops.secrets."accounts/${account}/token".path;
-          }
-        )
+      executable = lib.getExe (
+        pkgs.callPackage ./package.nix {
+          inherit toolsets;
+          serverBuilder = mkMcpServer;
+          tokenFile = config.sops.secrets."accounts/${account}/token".path;
+        }
       );
+      serverLifecycle = "service";
+      # 環境変数の PAT と両立しないリクエスト単位 OAuth の HTTP モード不採用
+      port = 8780 + index;
+      needsNetwork = true;
       probe = {
         tool = "get_me";
         args = { };
@@ -53,7 +48,7 @@ in
 {
   dotfiles.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
 
-  # front は起動時に一度だけ token を読む。rotation を拾うには再起動が要る
+  # 起動後のトークン再読込に対応しない github-mcp-server の制約
   sops.secrets = lib.listToAttrs (
     map (account: {
       name = "accounts/${account}/token";

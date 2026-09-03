@@ -7,12 +7,16 @@
 
 let
   cfg = config.dotfiles.mcp;
+  frontCommand = pkgs.callPackage ./package/front-command.nix { };
   targetNames = builtins.attrNames cfg.targets;
+  isExecutable = value: builtins.match "/[^[:space:]]+" value != null;
+  invalidExecutables = builtins.filter (
+    name: !isExecutable cfg.targets.${name}.executable
+  ) targetNames;
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
   restartFailureCount = 20;
 
-  # target が front の名前、URL、書き込み領域を一度だけ決める。
   fronts = lib.mapAttrs (name: target: {
     inherit name;
     inherit (target) port;
@@ -78,7 +82,7 @@ in
   options.dotfiles.mcp = {
     enabledProviders = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      description = "この host が必要とする mcp/<provider> unit ID。";
+      description = "host が必要とする mcp/<provider> unit ID の重複しない一覧";
     };
 
     targets = lib.mkOption {
@@ -87,72 +91,129 @@ in
           options = {
             provider = lib.mkOption {
               type = lib.types.str;
-              description = "target を所有する mcp/<provider> unit ID。";
+              description = "target の責務を所有する mcp/<provider> unit ID";
+            };
+            executable = lib.mkOption {
+              type = lib.types.addCheck lib.types.str isExecutable;
+              description = "front が引数なしで起動する純粋な stdio MCP server の絶対 path";
+            };
+            serverLifecycle = lib.mkOption {
+              type = lib.types.enum [
+                "service"
+                "session"
+              ];
+              description = "stdio server の存続期間を所有する front service または downstream session";
             };
             port = lib.mkOption {
               type = lib.types.ints.between 8770 8789;
-              description = "front が loopback へ bind する port。";
-            };
-            serve = lib.mkOption {
-              type = lib.types.functionTo lib.types.str;
-              description = "port を受け取り、Streamable HTTP front の起動 command を返す関数。";
+              description = "front が loopback で待ち受ける一意な port";
             };
             needsNetwork = lib.mkOption {
               type = lib.types.bool;
               default = false;
-              description = "front が loopback の外へ接続するか。";
+              description = "true が loopback 外への接続を許可する front の通信要件";
             };
             waitUnits = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [ ];
-              description = "front が起動前に必要とする backend unit。";
+              description = "front の起動と存続に必要な backend unit の一覧";
             };
             probe = lib.mkOption {
               readOnly = true;
               type = lib.types.submodule {
                 options = {
-                  tool = lib.mkOption { type = lib.types.str; };
-                  args = lib.mkOption { type = lib.types.attrsOf lib.types.anything; };
-                  timeout = lib.mkOption { type = lib.types.ints.between 1 120; };
+                  tool = lib.mkOption {
+                    type = lib.types.str;
+                    description = "target の生存確認と契約照合に使う副作用のない tool 名";
+                  };
+                  args = lib.mkOption {
+                    type = lib.types.attrsOf lib.types.anything;
+                    description = "tool の契約照合に使う JSON 引数";
+                  };
+                  timeout = lib.mkOption {
+                    type = lib.types.ints.between 1 120;
+                    description = "失敗判定まで許容する probe の最大待機秒数";
+                  };
                 };
               };
-              description = "doctor が target の tool 名を照合するための読み取り専用 probe。";
+              description = "doctor による target の tool 契約照合に使う読み取り専用 probe";
             };
           };
         }
       );
       default = { };
       internal = true;
-      description = "agentgateway が公開する MCP target。";
+      description = "公開 gateway が束ねる MCP target の実行契約";
     };
 
     fronts = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
           options = {
-            name = lib.mkOption { type = lib.types.str; };
-            port = lib.mkOption { type = lib.types.port; };
-            url = lib.mkOption { type = lib.types.str; };
-            service = lib.mkOption { type = lib.types.str; };
-            runtimeDirectory = lib.mkOption { type = lib.types.str; };
-            runtimeDirectoryPath = lib.mkOption { type = lib.types.str; };
+            name = lib.mkOption {
+              type = lib.types.str;
+              description = "target と front を対応付ける識別子";
+            };
+            port = lib.mkOption {
+              type = lib.types.port;
+              description = "対応する target から継承する loopback 待ち受け port";
+            };
+            url = lib.mkOption {
+              type = lib.types.str;
+              description = "公開 gateway が接続する front の MCP endpoint URL";
+            };
+            service = lib.mkOption {
+              type = lib.types.str;
+              description = "front の process と再起動を所有する systemd service 名";
+            };
+            runtimeDirectory = lib.mkOption {
+              type = lib.types.str;
+              description = "systemd が所有する front の実行時 directory 名";
+            };
+            runtimeDirectoryPath = lib.mkOption {
+              type = lib.types.str;
+              description = "front に許可する実行時書き込み領域の絶対 path";
+            };
           };
         }
       );
       readOnly = true;
       internal = true;
-      description = "target から導いた常駐 Streamable HTTP front。";
+      description = "target の実行契約から一意に導く Streamable HTTP front の接続契約";
+    };
+
+    sessionPolicy = lib.mkOption {
+      readOnly = true;
+      internal = true;
+      type = lib.types.submodule {
+        options = {
+          idleSeconds = lib.mkOption {
+            type = lib.types.ints.positive;
+            description = "公開 gateway が無通信 session を保持する秒数";
+          };
+          frontGraceSeconds = lib.mkOption {
+            type = lib.types.ints.positive;
+            description = "session front の先行失効を防ぐ追加保持秒数";
+          };
+        };
+      };
+      description = "公開 gateway と session front が共有する MCP session の idle 契約";
     };
 
     chromium = lib.mkOption {
       type = lib.types.package;
       readOnly = true;
       internal = true;
-      description = "browser target が共有する Chromium package。";
+      description = "browser target 間で実装と version を共有する Chromium package";
     };
   };
 
   config.dotfiles.mcp.fronts = fronts;
+  config.dotfiles.mcp.sessionPolicy = {
+    idleSeconds = 1800;
+    # 公開 gateway と同じ TTL で起こりうる session front の先行失効回避
+    frontGraceSeconds = 60;
+  };
   config.dotfiles.mcp.chromium = pkgs.chromium;
   config.dotfiles.observations =
     serviceObservations
@@ -181,7 +242,11 @@ in
         RuntimeDirectory = front.runtimeDirectory;
         RuntimeDirectoryMode = "0700";
         Environment = [ "HOME=${config.dotfiles.host.homeDir}" ];
-        ExecStart = target.serve front.port;
+        ExecStart = frontCommand {
+          inherit (target) executable serverLifecycle;
+          inherit (front) port;
+          inherit (cfg) sessionPolicy;
+        };
         MemoryMax = "2G";
       }
       // lib.optionalAttrs (!target.needsNetwork) {
@@ -217,6 +282,10 @@ in
     {
       assertion = ports == lib.unique ports;
       message = "MCP target ports must be unique";
+    }
+    {
+      assertion = invalidExecutables == [ ];
+      message = "MCP target executables must be absolute paths without arguments";
     }
   ];
 }

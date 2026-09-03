@@ -8,7 +8,6 @@
 let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
   mkNpmMcp = pkgs.callPackage ../package/mk-npm.nix { };
-  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
     inherit mkNpmMcp;
     serverBuilder = mkMcpServer;
@@ -18,8 +17,9 @@ in
 {
   dotfiles.mcp.targets.searxng = {
     provider = "searxng";
+    executable = lib.getExe front;
+    serverLifecycle = "service";
     port = 8775;
-    serve = serveOverProxy (lib.getExe front);
     waitUnits = config.dotfiles.containers.services.searxng.units;
     probe = {
       tool = "searxng_web_search";

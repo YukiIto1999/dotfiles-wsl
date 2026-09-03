@@ -12,9 +12,9 @@ agents/shared/definitions/*.md ─ client変換 ─┤
 agents/shared/skills/* ──────────────────┼─ Nix store ──► 各 client の設定領域
 flake input の plugin skills ────────────┘
 
-AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► 常駐 MCP front (target ごと)
-      │                                              │
-      │                                              └─► host process または Docker backend
+AI CLI ── HTTP /mcp ──► agentgateway ── HTTP ──► MCP front (target ごと)
+      │                                              ├─ service lifecycle ─► 共有 stdio server
+      │                                              └─ session lifecycle ─► session ごとの stdio server
       ├── LSP ──► language server (PATH 上の binary)
       └── OTLP ──► telemetry collector
 ```
@@ -70,19 +70,19 @@ local skill は [`agents/shared/skills/`](../../agents/shared/skills) から自�
 
 ## MCP target、front、gateway
 
-[`flake.nix`](../../flake.nix) の `dotfiles.mcp.enabledProviders` は、この host が必要とする provider unit を固定する。各 [`mcp/NAME/module.nix`](../../mcp) は `dotfiles.mcp.targets` に provider ID、port、起動関数、外部通信の要否、backend unit、読み取り用 probe を宣言する。provider roster と target が公開する provider 集合は完全一致し、provider が target を持たない状態も未承認 provider の target も評価時に拒否する。target 名は gateway が tool 名へ付ける prefix であり、package 名とは別である。
+[`flake.nix`](../../flake.nix) の `dotfiles.mcp.enabledProviders` は、この host が必要とする provider unit を固定する。各 [`mcp/NAME/module.nix`](../../mcp) は `dotfiles.mcp.targets` に provider ID、純 stdio executable、server lifecycle、port、外部通信の要否、backend unit、読み取り用 probe を宣言する。provider roster と target が公開する provider 集合は完全一致し、provider が target を持たない状態も未承認 provider の target も評価時に拒否する。target 名は gateway が tool 名へ付ける prefix であり、package 名とは別である。
 
-[`mcp/module.nix`](../../mcp/module.nix) は `dotfiles.mcp.targets` から `dotfiles.mcp.fronts` を一度だけ導く。front は target ごとの systemd service として常駐し、stdio server は `mcp-proxy` が Streamable HTTP へ載せる。backend を持つ target では `waitUnits` を front の `requires` と `after` の両方へ設定する。外部通信が不要な front は systemd の通信制限で loopback に閉じる。
+[`mcp/module.nix`](../../mcp/module.nix) は `dotfiles.mcp.targets` から `dotfiles.mcp.fronts` を一度だけ導く。`service` lifecycle は `mcp-proxy` と一つの stdio server を front service の寿命で共有する。`session` lifecycle は一 target の agentgateway を HTTP adapter とし、downstream session ごとに stdio server を生成して `DELETE` または idle expiry で終了する。session front は listener 自身を loopback に bind し、管理 listener を持たない。backend を持つ target では `waitUnits` を front の `requires` と `after` の両方へ設定する。外部通信が不要な front は systemd の通信制限でも loopback に閉じる。
 
-[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` は単一 endpoint の ID、port、URL、service、runtime directory、YAML source、target 名を公開する。gateway は全 front へ loopback HTTP で接続し、front service を起動依存に持たず、子 process も作らない。各 AI CLI が知る接続先はこの URL だけである。downstream の session が増えても front process は増えない。
+[`mcp/gateway/module.nix`](../../mcp/gateway/module.nix) の `dotfiles.mcp.gateway` は単一 endpoint の ID、port、URL、service、runtime directory、YAML source、target 名を公開する。gateway は全 front へ loopback HTTP で接続し、front service を起動依存に持たず、子 process も作らない。各 AI CLI が知る接続先はこの URL だけである。session の idle policy は `dotfiles.mcp.sessionPolicy` が所有し、session front の TTL は gateway の TTL に grace を加えて先行 expiry を防ぐ。
 
 target を持つかどうかは、agent が消費するかで決まる。agent が読み書きするものは target、人が browser で開くだけのものは endpoint に留める。SonarQube のように両方あるものは両方持つ。container application の endpoint は [`containers/sonarqube/module.nix`](../../containers/sonarqube/module.nix)、agent が使う target は [`mcp/sonarqube/module.nix`](../../mcp/sonarqube/module.nix) が宣言する。
 
-browser を使う target は二つある。[`playwright`](../../mcp/playwright) は通常の操作、snapshot、screenshot、console、network の観測に使う。[`chrome-devtools`](../../mcp/chrome-devtools) はperformance trace、heap、Lighthouseなどの詳細観測に使う。両targetはisolated browser contextで動くため、sessionを共有すると仮定しない。chromium は `dotfiles.mcp.chromium` で共有し、二つの closure を持たない。
+browser を使う target は二つある。[`playwright`](../../mcp/playwright) は通常の操作、snapshot、screenshot、console、network の観測に使う。[`chrome-devtools`](../../mcp/chrome-devtools) はperformance trace、heap、Lighthouseなどの詳細観測に使う。両 target は `session` lifecycle を使い、tab、page、browser process を downstream session 間で共有しない。chromium package は `dotfiles.mcp.chromium` で共有し、二つの closure を持たない。
 
 MCP target の実装は、host process だけで完結するものと常駐 backend を使うものに分かれる。現在の target は `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.mcp.targets --apply builtins.attrNames` で取得する。
 
-session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle の 30 分は body の終了時刻から数え、明示 DELETE は即座に session を削除する。
+session の生存は downstream が response body を保持しているかで決まる。pending の SSE stream は 15 秒ごとに comment frame を返し、body が生きている GET stream は idle TTL を超えても reap されない。idle は body の終了時刻から数え、明示 DELETE は即座に session を削除する。browser front は outer session より長い TTL を cleanup fallback として持つ。
 
 ## Docker backend
 

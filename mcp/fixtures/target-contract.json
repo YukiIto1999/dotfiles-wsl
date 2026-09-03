@@ -20,6 +20,7 @@
         "tool": "list_pages"
       },
       "provider": "chrome-devtools",
+      "serverLifecycle": "session",
       "waitUnits": []
     },
     "codex": {
@@ -36,6 +37,7 @@
         "tool": "codex"
       },
       "provider": "codex",
+      "serverLifecycle": "service",
       "waitUnits": []
     },
     "context7": {
@@ -50,6 +52,7 @@
         "tool": "resolve-library-id"
       },
       "provider": "context7",
+      "serverLifecycle": "service",
       "waitUnits": []
     },
     "crawl4ai": {
@@ -65,6 +68,7 @@
         "tool": "ask"
       },
       "provider": "crawl4ai",
+      "serverLifecycle": "service",
       "waitUnits": [
         "docker-crawl4ai.service"
       ]
@@ -78,6 +82,7 @@
         "tool": "get_me"
       },
       "provider": "github",
+      "serverLifecycle": "service",
       "waitUnits": []
     },
     "github-account-2": {
@@ -89,6 +94,7 @@
         "tool": "get_me"
       },
       "provider": "github",
+      "serverLifecycle": "service",
       "waitUnits": []
     },
     "github-account-3": {
@@ -100,6 +106,7 @@
         "tool": "get_me"
       },
       "provider": "github",
+      "serverLifecycle": "service",
       "waitUnits": []
     },
     "memory": {
@@ -115,6 +122,7 @@
         "tool": "memory_recall"
       },
       "provider": "memory",
+      "serverLifecycle": "service",
       "waitUnits": [
         "docker-agentmemory.service"
       ]
@@ -130,6 +138,7 @@
         "tool": "browser_tabs"
       },
       "provider": "playwright",
+      "serverLifecycle": "session",
       "waitUnits": []
     },
     "searxng": {
@@ -144,6 +153,7 @@
         "tool": "searxng_web_search"
       },
       "provider": "searxng",
+      "serverLifecycle": "service",
       "waitUnits": [
         "docker-searxng.service"
       ]
@@ -157,6 +167,7 @@
         "tool": "system_status"
       },
       "provider": "sonarqube",
+      "serverLifecycle": "service",
       "waitUnits": [
         "docker-sonarqube.service",
         "docker-sonarqube-db.service"

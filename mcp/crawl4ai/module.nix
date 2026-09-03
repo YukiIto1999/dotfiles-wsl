@@ -7,7 +7,6 @@
 
 let
   mkMcpServer = pkgs.callPackage ../package/mk-server.nix { };
-  serveOverProxy = pkgs.callPackage ../package/serve-over-proxy.nix { };
   front = pkgs.callPackage ./package.nix {
     serverBuilder = mkMcpServer;
     crawl4aiUrl = config.dotfiles.containers.services.crawl4ai.endpoints.http.url;
@@ -17,8 +16,9 @@ in
 {
   dotfiles.mcp.targets.crawl4ai = {
     provider = "crawl4ai";
+    executable = lib.getExe front;
+    serverLifecycle = "service";
     port = 8773;
-    serve = serveOverProxy (lib.getExe front);
     waitUnits = config.dotfiles.containers.services.crawl4ai.units;
     probe = {
       tool = "ask";

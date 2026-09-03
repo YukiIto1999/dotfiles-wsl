@@ -8,7 +8,7 @@
 }:
 
 let
-  agentgateway = pkgs.callPackage ./package.nix { };
+  agentgateway = pkgs.callPackage ../package/agentgateway.nix { };
   fixtureProbes = {
     alpha = {
       tool = "ping";
@@ -121,7 +121,12 @@ let
     (service // { wants = [ firstFrontService ]; })
   ];
 
-  lifecyclePatch = builtins.readFile ./package/mcp-downstream-lifecycle.patch;
+  lifecyclePatch = builtins.concatStringsSep "\n" (
+    map builtins.readFile [
+      ../package/agentgateway/mcp-downstream-lifecycle.patch
+      ../package/agentgateway/mcp-loopback-bind.patch
+    ]
+  );
   filter = builtins.head agentgateway.checkFlags;
   definedTests = builtins.filter (match: match != null) (
     map (line: builtins.match "\\+[[:space:]]*(async )?fn (${filter}[a-z_]+)\\(.*" line) (
@@ -588,7 +593,7 @@ in
 
         ${agentgateway}/bin/agentgateway --validate-only -f ${gateway.source}
         ${agentgateway}/bin/agentgateway --validate-only -f ${variantGateway.source}
-      test "$(yq -r '.config.mcp.sessionTtl' ${gateway.source})" = 30m
+      test "$(yq -r '.config.mcp.sessionTtl' ${gateway.source})" = 1800s
       test "$(yq -r '.config.adminAddr' ${gateway.source})" = 127.0.0.1:15000
       test "$(yq -r '.config.statsAddr' ${gateway.source})" = 127.0.0.1:15020
       test "$(yq -r '.config.readinessAddr' ${gateway.source})" = 127.0.0.1:15021
@@ -604,7 +609,7 @@ in
     '';
 
   agentgateway-session-lifecycle =
-    assert builtins.length definedTests == 3;
+    assert builtins.length definedTests == 4;
     assert serviceConfig.ExecStart == "${agentgateway}/bin/agentgateway -f ${gateway.source}";
     agentgateway;
 }

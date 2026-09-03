@@ -56,7 +56,7 @@
 | GitHub account roster、暗号化 template、登録 artifact、Git identity の生成先が typed contract と一致する | `account-deployment-contract` |
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
 | host の固定 client roster、提供集合、型metadata、capability、installer、managed file が固定 fixture に一致し、不正な branch field、必須 field 欠落、freeform field、mode 矛盾を変異入力で拒否する | `agent-client-roster` |
-| 共通 rules が UTF-8、非空、見出しを持ち、shared と OpenCode の definition frontmatter、Codex TOML、Claude の byte equality が実配備 source で成立する | `agent-definition-rendering` |
+| 共通 rules が UTF-8、非空、見出しを持ち、配備対象の Skill、subagent、MCP provider が rules または Skill 本文に入口を持ち、LSP と agentmemory の client 差分を記載し、shared と OpenCode の definition frontmatter、Codex TOML、Claude の byte equality が実配備 source で成立する | `agent-definition-rendering` |
 | agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
 | seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |

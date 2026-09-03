@@ -299,6 +299,12 @@ let
   ) managedRows;
 
   sharedDefinitionSources = builtins.attrValues hostConfig.dotfiles.agents.shared.definitions;
+  sharedDefinitionNames = builtins.attrNames hostConfig.dotfiles.agents.shared.definitions;
+  sharedSkillNames = builtins.attrNames hostConfig.dotfiles.agents.shared.skills;
+  sharedSkillSources = builtins.attrValues hostConfig.dotfiles.agents.shared.skills;
+  mcpProviderNames = lib.unique (
+    map (target: target.provider) (builtins.attrValues hostConfig.dotfiles.mcp.targets)
+  );
   securityDefinitionSource = hostConfig.dotfiles.agents.shared.definitions.security;
   claudeDefinitionSources = builtins.attrValues clients.claude.definitions;
   codexDefinitionSources = builtins.attrValues clients.codex.definitions;
@@ -488,8 +494,8 @@ in
           ' > /dev/null
 
         grep -Fq 'dotfiles-doctor` は `dotfiles.observations` の全登録を観測し' ${self}/agents/shared/AGENTS.md
-        grep -Fq 'skill を含む managed artifact と current source の不一致も検査する' ${self}/agents/shared/AGENTS.md
-        grep -Fq 'skill の動作や意味、subagents 表と実際の agent 機能との整合は observation に登録しておらず、自動検査しない' ${self}/agents/shared/AGENTS.md
+        grep -Fq 'Skill を含む managed artifact と current source の不一致も検査する' ${self}/agents/shared/AGENTS.md
+        grep -Fq 'Skill の動作や意味と実際の agent 機能との整合は自動検査しない' ${self}/agents/shared/AGENTS.md
         grep -Fq 'seed は runtime drift の対象にしない' ${self}/docs/architecture/ai-tooling.md
         grep -Fq 'managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する' ${self}/docs/architecture/ai-tooling.md
 
@@ -845,6 +851,12 @@ in
           pkgs.yq
         ];
         rulesSource = hostConfig.dotfiles.agents.shared.rules;
+        routedDefinitionNames = lib.concatStringsSep " " sharedDefinitionNames;
+        routedMcpProviderNames = lib.concatStringsSep " " mcpProviderNames;
+        routedSkillNames = lib.concatStringsSep " " sharedSkillNames;
+        routedSkillSources = lib.concatStringsSep " " (
+          map (source: "${source}/SKILL.md") sharedSkillSources
+        );
         inherit securityDefinitionSource;
         sharedSources = sharedDefinitionSources;
         claudeSources = claudeDefinitionSources;
@@ -857,6 +869,41 @@ in
         test -s "$rulesSource"
         iconv -f UTF-8 -t UTF-8 "$rulesSource" > /dev/null
         grep -Eq '^#{1,6}[[:space:]]+[^[:space:]]' "$rulesSource"
+
+        for name in $routedSkillNames; do
+          if ! grep -Fq "\`$name\`" "$rulesSource"; then
+            echo "shared Skill has no AGENTS.md route: $name" >&2
+            exit 1
+          fi
+        done
+        for name in $routedDefinitionNames; do
+          if ! grep -Fq "\`$name\`" "$rulesSource"; then
+            echo "shared subagent has no AGENTS.md route: $name" >&2
+            exit 1
+          fi
+        done
+        for provider in $routedMcpProviderNames; do
+          found=false
+          for source in "$rulesSource" $routedSkillSources; do
+            if grep -Fiq "$provider" "$source"; then
+              found=true
+              break
+            fi
+          done
+          if [ "$found" != true ]; then
+            echo "MCP provider has no AGENTS.md or Skill route: $provider" >&2
+            exit 1
+          fi
+        done
+
+        grep -Fq 'LSP は Claude Code と OpenCode で利用でき' "$rulesSource"
+        grep -Fq '自動連携は Claude Code と Codex が lifecycle hooks' "$rulesSource"
+        for obsolete in memory_lesson_recall memory_lesson_save '~/.claude/projects/<X>/memory/'; do
+          if grep -Fq "$obsolete" "$rulesSource"; then
+            echo "obsolete memory route remains in AGENTS.md: $obsolete" >&2
+            exit 1
+          fi
+        done
 
         check_frontmatter() {
           local source=$1 closing

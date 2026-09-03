@@ -29,28 +29,18 @@ Think in English. Respond in Japanese.
 ## 行動
 
 - 既存コンテキストは `AGENTS.md` / `CLAUDE.md` / README / docs を確認する。
+- session が提示する Skill、subagent、MCP tool、LSP を利用可否の正本とし、対応する入口がある作業はその入口を使う。
 - ローカルコードの検索は Read / Grep / Glob を、広域探索や構造把握が必要なら `rg` と `ast-grep` を使う。
-- ライブラリ、フレームワークの仕様は `web-research` の手順で `context7` を先に使う。
-- Web 調査は `web-research` を使う。SearXNG と Crawl4AI はこの Skill を通し、独力の WebSearch で済ませない。
-- GitHub 操作は対象アカウントの `github-<account>` を使う。`gh` の active user は `accounts` 先頭固定。
 - 検索は `rg`、列挙は `fd`、表示は `bat`、一覧は `eza`、diff は `delta` が使える。
 - JSON / YAML / HTTP は `jq` / `yq` / `xh` が使える。
 
 ## 資源と検証
 
-- agent runtime が `TMPDIR`、全 project 共通の `CARGO_HOME` と `XDG_CACHE_HOME`、project 単位の build cache を割り当てる。利用者が明示した値は空文字列も含めて変更せず、project が明示する Cargo `target-dir` も上書きしない。session ごとの cache を `/tmp` に作らない。
+- managed runtime wrapper を持つ client では、agent runtime が `TMPDIR`、全 project 共通の `CARGO_HOME` と `XDG_CACHE_HOME`、project 単位の build cache を割り当てる。利用者が明示した値は空文字列も含めて変更せず、project が明示する Cargo `target-dir` も上書きしない。session ごとの cache を `/tmp` に作らない。
 - `nix build` は明示した out-link が必要な場合を除き `--no-link`、`nix-build` は `--no-out-link` を使う。agent runtime の shim を絶対 path で迂回しない。
 - 編集中は変更箇所に対応する focused check を使う。高コストな最終確認は `dotfiles-agent-verify -- COMMAND [ARG...]` から一度だけ実行する。同じ source、command、環境で成功済みの確認を繰り返さない。
 - agent session 内で linked worktree を作るときは `git worktree add` または `dotfiles-agent-worktree add` を使い、runtime の管理入口を迂回しない。終了時に自動削除できるのは、台帳所有、clean、HEAD 不変、利用中 process なしをすべて満たす worktree だけである。
 - 自分が起動した server、container、background process と作成した一時資源を作業中に把握し、終了時に自分の所有物だけ停止、回収する。既存物や所有者不明の資源を削除しない。
-
-## memory
-
-- 長期記憶の基盤は agentmemory。lifecycle hooks が全セッションを自動観測し、session 開始時に関連記憶を注入する。
-- 過去の決定、経緯、教訓は gateway の `memory` MCP target で先に引く。検索は `memory_recall` / `memory_lesson_recall`。
-- 訂正を受けた時、方針が確定した時は `memory_lesson_save` に教訓を保存する。重要な決定やパターンは `memory_save`。project は git toplevel の basename。
-- 長時間の作業では、経緯と決定を随時 native memory `~/.claude/projects/<X>/memory/` に記録し、compact に備える。
-- 資格情報、トークン、秘密鍵、個人情報、未検証の推測、短期タスク専用の作業メモは memory に保存しない。
 
 ## subagents
 
@@ -70,9 +60,11 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 
 ## skills
 
-繰り返し作業は手で再現せず、対応する skill を読む。`nix flake check` は `agents/shared/skills/` と plugin skills の配備配線を検査する。`dotfiles-doctor` は `dotfiles.observations` の全登録を観測し、skill を含む managed artifact と current source の不一致も検査する。skill の動作や意味、subagents 表と実際の agent 機能との整合は observation に登録しておらず、自動検査しない。
+繰り返し作業は手で再現せず、対応する Skill を読む。下表は全 client に配る共通 Skill の責務を示す。client 固有または plugin 由来の Skill は session が提示した名前を使い、namespace がある場合は省略しない。
 
-| 目的 | skill |
+`nix flake check` は配備対象の Skill、subagent、MCP provider がこの rules または Skill 本文に入口を持つことと、配備配線を検査する。`dotfiles-doctor` は `dotfiles.observations` の全登録を観測し、Skill を含む managed artifact と current source の不一致も検査する。Skill の動作や意味と実際の agent 機能との整合は自動検査しない。
+
+| 目的 | Skill |
 |---|---|
 | 日本語文書の作成、推敲 | `ja-writing` |
 | 外部 Web の調査 | `web-research` |
@@ -98,18 +90,62 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 | セキュリティ分析の起点 | `security-scan` |
 | セキュリティ分析の個別 phase | `threat-model` / `finding-discovery` / `validation` / `attack-path-analysis` / `fix-finding` |
 | 実装前のUI方針 | `ui-design` |
-| skill 作成 | `skill-creator` |
+| Skill 作成 | `skill-creator` |
+
+## 基盤
+
+### MCP
+
+全 client は単一の gateway から MCP target を使う。Skill が MCP target の利用規律を持つ場合は、その Skill を入口にする。該当する Skill がない用途だけ、次の target を直接使う。target の内側にある host process、container、database は起動や接続を個別に操作しない。
+
+| 目的 | 入口 |
+|---|---|
+| 外部 Web の調査 | `web-research`。library と framework の仕様は同じ Skill の手順で `context7` を先に使う |
+| GitHub 操作 | 対象アカウントの `github-<account>`。`gh` の active user は `accounts` 先頭固定 |
+| code review の解析補助 | `code-review` |
+| browser の操作、DOM、console、network、screenshot | `playwright` |
+| browser の performance trace、heap、Lighthouse | `chrome-devtools`。Playwright と session を共有すると仮定しない |
+| 別 client の独立した Codex session | `codex`。現在の client の subagent で足りる役割分担には使わない |
+| 過去の経緯の検索と長期記憶の保存 | `memory`。下記の agentmemory 規律に従う |
+
+### LSP
+
+LSP は Claude Code と OpenCode で利用でき、Codex と Antigravity では未対応である。対応 client では、symbol の定義、参照、diagnostic を意味的に調べるときに LSP を使う。未対応または現在の session に提供されていない場合はローカル検索へ戻り、agent が language server を追加、再設定、直接起動しない。
+
+### agentmemory
+
+明示的な検索と保存は、全 client から gateway の `memory` target を使う。自動連携は Claude Code と Codex が lifecycle hooks、OpenCode が capture plugin を使い、Antigravity にはない。自動連携は明示的な検索と保存を代替しない。
+
+- 過去の決定、経緯、教訓は作業前に `memory_recall` または `memory_smart_search` で引く。
+- 訂正、確定した方針、再利用する決定やパターンは `memory_save` で保存する。project は git toplevel の basename とする。
+- 資格情報、トークン、秘密鍵、個人情報、未検証の推測、短期タスク専用の作業メモは保存しない。
 
 ## dotfiles
 
 - 通常 rebuild: `dotfiles-rebuild`
 - 実用状態検証: `dotfiles-doctor`
+- Agent client binary の更新: checkout から `nix run .#dotfiles-install-agents`
 - Home Manager backup 整理: `dotfiles-cleanup --delete`
 - system backup 整理: `sudo dotfiles-cleanup --delete --system`
 - VS Code Server 整理: `dotfiles-cleanup --delete --vscode-server`
 - secrets enrollment: `docs/operations/sops-enrollment.md` に従い、host key の公開鍵を `sops/assets/.sops.yaml` へ追加して `sops updatekeys` を実行する。
 - secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops --config ~/dotfiles-wsl/sops/assets/.sops.yaml ~/dotfiles-wsl/sops/assets/secrets.yaml`
 - 公開入口は `~/dotfiles-wsl/README.md`、詳細手順、構成、変更箇所は `~/dotfiles-wsl/docs/README.md` から辿る。
+
+### Agent の変更箇所
+
+生成済みの rules、Skill、subagent、client config は直接編集しない。新規ファイルは rebuild 前に `git add` して flake source に含める。
+
+| 変更目的 | 正本 | 適用 |
+|---|---|---|
+| 共通 rules | `agents/shared/AGENTS.md` | `dotfiles-rebuild` |
+| local Skill | `agents/shared/skills/NAME/` | `dotfiles-rebuild` |
+| subagent | `agents/shared/definitions/NAME.md` | `dotfiles-rebuild` |
+| plugin 由来の Skill | `flake.nix` の plugin input と `flake.lock` | `dotfiles-rebuild` |
+| client の capability、変換、配備先 | `agents/NAME/module.nix` と `agents/NAME/assets/` | `dotfiles-rebuild` |
+| client binary | 各 `agents/NAME/module.nix` の `install` contract | `nix run .#dotfiles-install-agents` |
+
+Agent client の更新は `docs/operations/agent-clients.md`、構造は `docs/architecture/ai-tooling.md`、目的別の正本は `docs/reference/change-map.md` に従う。
 
 ## 禁則
 

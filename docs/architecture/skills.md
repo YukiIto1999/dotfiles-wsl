@@ -26,7 +26,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills
 
 2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grill-with-docs`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`skill-creator`、`tdd`、`ui-design`、`web-research`
+- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`skill-creator`、`tdd`、`ui-design`、`web-research`
 - security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
 
 Superpowers は構成上の配備対象から除外した。以下は目標とする責務の候補群であり、既存Skillの継続、改修、rename、統合と、未実装の候補を含む。表の名前だけでは実装済みと判断しない。
@@ -45,7 +45,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 | 種別 | 候補 |
 |---|---|
-| 特殊 | `skill-creator`、`grilling`、`grill-with-docs`、`tdd`、`refactoring`、`prototype`、`migration` |
+| 特殊 | `skill-creator`、`grilling`、`tdd`、`refactoring`、`prototype`、`migration` |
 | writing | `ja-writing`、`commit-writing`、`change-writing`、`description-writing`、`documentation-writing`、`comment-writing` |
 | research | `web-research` |
 | analysis | `bug-analysis`、`dependency-analysis`、`impact-analysis`、`performance-analysis` |
@@ -59,7 +59,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `documentation-writing` は宣言の契約を書く。目的と、該当する事前条件、事後条件、不変条件、副作用、失敗条件を扱う。`comment-writing` は実装コメントを書く前に、構造、命名、コード本体で表せないかを調べる。残すのは、自然に見える実装を採らなかった理由と、現在も有効な制約だけである。変更履歴、古いコード、処理の言い換えは扱わない。
 
-`web-research` は外部の問いに対してsourceを探索、評価、比較し、引用可能な根拠を作る。`grill-with-docs` は未解決のproductやdomain判断を利用者との質問で詰め、共有理解をrepository文書へ残す。外部事実の収集と、利用者が所有する決定を同じ仕事にしない。
+`web-research` は外部の問いに対してsourceを探索、評価、比較し、引用可能な根拠を作る。`grilling` は未解決のproductやdomain判断を利用者との質問で詰める。domainの意味の確定と文書への記録は `domain-modeling` が所有する。外部事実の収集と、利用者が所有する決定を同じ仕事にしない。
 
 `domain-modeling` は概念と語彙を定義する。`naming-review` は定義済みの意味を入力に、code、schema、DB、UI、文書の語彙、役割、単位、粒度を監査する。
 
@@ -119,7 +119,7 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 
 文章、code、UIのslopを一つのSkillへ統合しない。文章は主張と根拠、codeはcorrectnessと変更コスト、UIは利用者の仕事とinteractionを基準にする。AIらしさや著者推定のscoreは品質指標に使わない。
 
-上流Skillを直接採用するのは、分解すると方法自体の価値を失うsignature procedureに限る。`grill-with-docs`は、薄いwrapper、依存先、license、固定revision、compositionを確認した上で採用した。
+上流Skillを直接採用するのは、分解すると方法自体の価値を失うsignature procedureに限る。`grill-with-docs`は薄いwrapperとしてこの条件で採用したが、質問のprocedureは`grilling`、意味の確定と記録は`domain-modeling`が所有し、wrapperが独自の判断を持たないため配備から外した。上流は現在も`grill-with-docs`を保守しており、除外はこのrepositoryの判断である。
 
 候補の発見には、次の会話記録も使った。会話内の結論は一次資料や正本ではなく、調査対象と反例を得るための入力として扱う。
 
@@ -565,18 +565,18 @@ MattのSkillは、modelを変える仕事と既存語彙を読むだけの仕事
 
 代表scenarioは [`agents/fixtures/domain-modeling-skill.json`](../../agents/fixtures/domain-modeling-skill.json) に置く。近接する語彙の監査、DB schema設計、module境界設計、既存用語集の参照では発火しない。baselineは個人、組織、取消、返金を分離できたが、`Customer Organization`と`Representation`を利用者が意味を確定する前に正規語として採用し、観測事実だけでは決まらない不変条件を並べた。このSkillは、具体的なscenarioで反証し、観測と利用者判断を分けてからmodelを確定する手順を補う。
 
-### grill-with-docsで採用したdonor
+### grillingで採用したdonor
 
 | Donor | License | 採用した内容 | Local modification |
 |---|---|---|---|
-| [Matt Pocock grill-with-docs](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/grill-with-docs/SKILL.md) | MIT。配備package内に原文のnoticeを含める | `grilling`を`domain-modeling`と合成する一文のwrapperを本文ごと採用 | 共有frontmatter契約にない`disable-model-invocation`を除き、自動発火を防ぐ境界をdescriptionへ移した |
-| [Matt Pocock grilling](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/productivity/grilling/SKILL.md) | MIT。配備package内に原文のnoticeを含める | decision tree、依存が解けたfrontier単位の質問、各問への推奨、事実はagentが調べdecisionは利用者が決めること、共有理解まで実装しないこと | 事実確認のたびにsubagentを必須にせず、repositoryのsubagent規律に合わせた。質問の装飾だけを簡素化した |
+| [Matt Pocock grilling](https://github.com/mattpocock/skills/blob/85f83d3fde1d3a90d5c9a657f6998c79a6c37308/skills/productivity/grilling/SKILL.md) | MIT。配備package内に原文のnoticeを含める | decision tree、依存が解けたfrontier単位の質問、各問への推奨、一巡に複数問を置き区切り線で分けるtemplate、事実はagentが調べdecisionは利用者が決めること、共有理解まで実装しないこと | 事実確認のたびにsubagentを必須にせず、repositoryのsubagent規律に合わせた。emojiによる装飾は採らず、見出しと推奨の行だけを残した |
+| [Matt Pocock grill-with-docs](https://github.com/mattpocock/skills/blob/85f83d3fde1d3a90d5c9a657f6998c79a6c37308/skills/engineering/grill-with-docs/SKILL.md) | MIT | `grilling`を`domain-modeling`と合成する一文のwrapperを一度配備した | wrapperは配備から外し、domain決定を残す経路を`grilling`本文から`domain-modeling`へ向けた |
 
-`grilling`は明示的な依頼を受け、未決定事項を依存順に質問するprocedureを所有する。domainの意味は決めず、設計文書も書かない。`grill-with-docs`は独自の判断を持たず、二つを合成するsignature procedureとして置く。通常の設計、直接実装、候補を広げるだけのbrainstormでは発火しない。代表scenarioは [`agents/fixtures/grilling-skill.json`](../../agents/fixtures/grilling-skill.json) に置く。baselineは一問ごとに回答を待ち、同じ前提から今決められる他の論点と、後続の依存関係を示さなかった。このSkillは同じfrontierを一巡にまとめ、回答に依存する質問だけを後へ送る。
+`grilling`は明示的な依頼を受け、未決定事項を依存順に質問するprocedureを所有する。domainの意味は決めず、設計文書も書かない。domain決定を文書へ残す場合は`domain-modeling`へ渡す。通常の設計、直接実装、候補を広げるだけのbrainstormでは発火しない。代表scenarioは [`agents/fixtures/grilling-skill.json`](../../agents/fixtures/grilling-skill.json) に置く。baselineは一問ごとに回答を待ち、同じ前提から今決められる他の論点と、後続の依存関係を示さなかった。このSkillは同じfrontierを一巡にまとめ、回答に依存する質問だけを後へ送る。
 
 ## 評価状況
 
-配備対象のlocal Skill 23個は`quick_validate.py`を通過している。形式検証は成果改善を示さないため、これだけで完成とは判定しない。`prototype`はbaselineとの差がなく、`ui-review`はforward evalが成立しなかったため、どちらも配備対象から外した。
+評価時点の配備対象local Skill 23個は`quick_validate.py`を通過している。形式検証は成果改善を示さないため、これだけで完成とは判定しない。`prototype`はbaselineとの差がなく、`ui-review`はforward evalが成立しなかったため、どちらも配備対象から外した。`grill-with-docs`は評価後に外した。質問のprocedureは`grilling`、意味の確定と記録は`domain-modeling`が所有し、wrapperに残る判断が無いためである。現在の配備対象は22個で、以下の評価記録は当時の23個に対するものである。
 
 [WAXA 0.3.1](https://github.com/mizchi/skills/tree/7a0d72866a0bb3e9ac3e2768c328b09ba2bc40c4/tools/waxa)を一時利用し、23個すべてを監査した。静的auditのraw findingは47件、errorは0件だった。23件はfrontmatterの`Does not`を読まない非対象検査、21件はrepository rootのlicenseを読まない検査、3件は`Use for`をtriggerと認識しない正規表現によるもので、Skillの実不備は0件だった。
 

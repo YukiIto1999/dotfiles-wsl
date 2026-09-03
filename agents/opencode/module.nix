@@ -8,21 +8,10 @@
 let
   cfg = config.dotfiles;
   opencodeBase = builtins.fromJSON (builtins.readFile ./assets/opencode.json);
+  lspProjection = import ../impl/lsp.nix { inherit lib; };
 
   opencodeBaseWithLsp = (pkgs.formats.json { }).generate "opencode-base-with-lsp.json" (
-    opencodeBase
-    // {
-      lsp = lib.mapAttrs (
-        _: server:
-        {
-          command = [ server.command ] ++ server.args;
-          extensions = builtins.attrNames server.extensions;
-        }
-        // lib.optionalAttrs (server.initializationOptions != { }) {
-          initialization = server.initializationOptions;
-        }
-      ) cfg.toolchain.lsp;
-    }
+    opencodeBase // { lsp = lspProjection.opencode cfg.toolchain.lsp; }
   );
   opencodeGatewayConfig = (pkgs.formats.json { }).generate "opencode-gateway.json" {
     mcp.gateway = {

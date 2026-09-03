@@ -66,7 +66,7 @@ skillSources.<source-id> = {
 
 ## Runtime command の contract
 
-Skill が owner 固有 command を呼ぶ場合だけ、`requiredCommands` に agent が実行する安定名を記す。`git` や `rg` など agent 共通の基礎 command はここへ重複して宣言しない。Skill は自身と同じ source entry の `commands` だけを要求できる。
+Skill が owner 固有 command を呼ぶ場合だけ、`requiredCommands` に agent が実行する安定名を記す。`git`、`rg`、`zg` など agent 共通の基礎 command はここへ重複して宣言しない。Skill は自身と同じ source entry の `commands` だけを要求できる。
 
 composition は `input` から解決した同じ revision を `provider` 関数へ渡す。通常 flake input の package を使う場合も、その input が公開する同一 lock node の package を選ぶ。別 revision や別 owner から同名 executable を供給しない。
 

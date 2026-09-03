@@ -11,6 +11,7 @@
     "playwright"
     "searxng"
     "sonarqube"
+    "zvec-grep"
     "missing-provider"
   ];
 }

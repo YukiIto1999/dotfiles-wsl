@@ -42,7 +42,7 @@ SearXNGで候補URLを探す。`query`は必須、`language`、`categories`、`t
 
 ### repository内部を調べる
 
-このSkillを使わない。`rg`、`ast-grep`、Git history、local docsを使う。
+このSkillを使わない。表現や所在が不明な探索は Zvec-Grep、exact search は`rg`、構文 pattern は`ast-grep`を使い、Git historyとlocal docsで確かめる。
 
 ## 探索型調査
 

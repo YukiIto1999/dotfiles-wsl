@@ -140,6 +140,7 @@ in
   config.dotfiles.toolchain.packages = {
     # GitHub Actions のローカル実行。nix 統合を持つ
     actrun = pkgs.callPackage ./package/actrun.nix { };
+    zvec-grep = pkgs.callPackage ./package/zvec-grep.nix { };
 
     inherit (pkgs)
       # 言語 runtime

@@ -2,7 +2,7 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-secret は `sops/assets/secrets.yaml` に age で暗号化して置く。復号できるのは host 鍵と recovery 鍵の 2 つで、`sops/assets/.sops.yaml` がその recipient を宣言する。
+secret は `secrets/sops/assets/secrets.yaml` に age で暗号化して置く。復号できるのは host 鍵と recovery 鍵の 2 つで、`secrets/sops/assets/.sops.yaml` がその recipient を宣言する。
 
 ## 鍵の置き場
 
@@ -19,8 +19,8 @@ recovery 鍵は host 鍵を失ったときの唯一の復元手段になる。**
 
 ```sh
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops --config ~/dotfiles-wsl/sops/assets/.sops.yaml \
-  ~/dotfiles-wsl/sops/assets/secrets.yaml
+  sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml \
+  ~/dotfiles-wsl/secrets/sops/assets/secrets.yaml
 dotfiles-rebuild
 ```
 
@@ -33,18 +33,18 @@ age-keygen -o host.key                       # 新 host で生成する
 sudo install -m 0400 -o root -g root host.key /var/lib/sops-nix/key.txt
 ```
 
-生成した公開鍵を `sops/assets/.sops.yaml` の `keys` に host anchor として追加し、`creation_rules` から参照する。既存の鍵を持つ machine で再暗号化する。
+生成した公開鍵を `secrets/sops/assets/.sops.yaml` の `keys` に host anchor として追加し、`creation_rules` から参照する。既存の鍵を持つ machine で再暗号化する。
 
 ```sh
 SOPS_AGE_KEY_FILE=/media/offline/recovery-key.txt \
-  sops --config sops/assets/.sops.yaml updatekeys sops/assets/secrets.yaml
+  sops --config secrets/sops/assets/.sops.yaml updatekeys secrets/sops/assets/secrets.yaml
 ```
 
 新しい鍵で復号できることを確かめてから、古い recipient を外す。**確かめる前に外すと全 secret を失う。**
 
 ```sh
 SOPS_AGE_KEY_FILE=host.key \
-  sops --config sops/assets/.sops.yaml decrypt sops/assets/secrets.yaml > /dev/null
+  sops --config secrets/sops/assets/.sops.yaml decrypt secrets/sops/assets/secrets.yaml > /dev/null
 ```
 
 ## 検査

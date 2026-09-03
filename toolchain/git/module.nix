@@ -63,7 +63,7 @@ in
     };
   };
 
-  config.home-manager.users.${cfg.host.username} =
+  config.home-manager.users.${cfg.workstation.username} =
     {
       config,
       lib,
@@ -82,12 +82,12 @@ in
           core.excludesFile = "~/.config/git/ignore";
           core.hooksPath = "~/.config/git/hooks";
           merge.conflictstyle = "diff3";
-          include.path = "${dotfiles.host.homeDir}/${dotfiles.toolchain.git.identity.destinations.default}";
+          include.path = "${dotfiles.workstation.homeDir}/${dotfiles.toolchain.git.identity.destinations.default}";
         };
         includes = lib.optionals (dotfiles.toolchain.git.workIdentity != null) [
           {
             condition = "gitdir:${dotfiles.toolchain.git.workIdentity}";
-            path = "${dotfiles.host.homeDir}/${dotfiles.toolchain.git.identity.destinations.work}";
+            path = "${dotfiles.workstation.homeDir}/${dotfiles.toolchain.git.identity.destinations.work}";
           }
         ];
       };
@@ -103,7 +103,7 @@ in
 
       home.file = {
         ".config/git/ignore".source =
-          config.lib.file.mkOutOfStoreSymlink "${dotfiles.host.dotfilesDir}/toolchain/git/assets/ignore";
+          config.lib.file.mkOutOfStoreSymlink "${dotfiles.workstation.dotfilesDir}/toolchain/git/assets/ignore";
         ".config/git/hooks/pre-commit" = mkGitHook "pre-commit";
         ".config/git/hooks/commit-msg" = mkGitHook "commit-msg";
       };

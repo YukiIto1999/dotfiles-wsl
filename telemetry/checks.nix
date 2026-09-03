@@ -12,7 +12,7 @@
 let
   inherit (helpers.execTokens) tokensOf onlyValue valuesOf;
   contract = hostConfig.dotfiles.telemetry;
-  collectorConfig = hostConfig.dotfiles.artifacts."telemetry/collector".source;
+  collectorConfig = hostConfig.dotfiles.managedArtifacts."telemetry/collector".source;
   service = hostConfig.systemd.services.${contract.service}.serviceConfig;
 
   telemetryObservationsFor =
@@ -47,12 +47,12 @@ let
         };
     };
   selectTelemetryObservations = lib.filterAttrs (name: _: lib.hasPrefix "telemetry/" name);
-  telemetryObservations = selectTelemetryObservations hostConfig.dotfiles.observations;
+  telemetryObservations = selectTelemetryObservations hostConfig.dotfiles.health.observations;
   expectedTelemetryObservations = telemetryObservationsFor contract;
   telemetryObservationKeys = builtins.attrNames expectedTelemetryObservations;
   telemetryObservationDefinitions = builtins.filter (
     definition: lib.hasSuffix "/telemetry/module.nix" (toString definition.file)
-  ) hostOptions.dotfiles.observations.definitionsWithLocations;
+  ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
   telemetryDefinitionKeys = lib.unique (
     lib.concatMap (definition: builtins.attrNames definition.value) telemetryObservationDefinitions
   );
@@ -100,7 +100,7 @@ let
         }
       )
     ]).config;
-  descriptionVariantObservations = selectTelemetryObservations descriptionVariantConfig.dotfiles.observations;
+  descriptionVariantObservations = selectTelemetryObservations descriptionVariantConfig.dotfiles.health.observations;
 in
 {
   # config の妥当性は schema の読みではなく collector 自身に判定させる

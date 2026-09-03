@@ -9,17 +9,17 @@
         "type": "staged-diff",
         "changes": [
           {
-            "path": "agents/shared/skills/git-commit-writer/SKILL.md",
+            "path": "skills/git-commit-writer/skill/SKILL.md",
             "before": "name: git-commit-writer",
             "after": "file removed; responsibility moves to commit-writing"
           },
           {
-            "path": "agents/shared/skills/commit-writing/SKILL.md",
+            "path": "skills/commit-writing/skill/SKILL.md",
             "before": "file absent",
             "after": "writes one purpose from staged diff and never changes the index"
           },
           {
-            "path": "agents/shared/AGENTS.md",
+            "path": "agents/policy/AGENTS.md",
             "before": "routes commit messages to git-commit-writer",
             "after": "routes commit messages to commit-writing"
           }
@@ -40,12 +40,12 @@
         "type": "staged-diff",
         "changes": [
           {
-            "path": "agents/shared/skills/comment-writing/SKILL.md",
+            "path": "skills/comment-writing/skill/SKILL.md",
             "before": "file absent",
             "after": "adds implementation-comment decision guidance"
           },
           {
-            "path": "host/module.nix",
+            "path": "workstation/module.nix",
             "before": "vm.swappiness = 60",
             "after": "vm.swappiness = 100"
           }
@@ -65,17 +65,17 @@
         "type": "staged-diff",
         "changes": [
           {
-            "path": "agents/shared/skills/commit-writing/SKILL.md",
+            "path": "skills/commit-writing/skill/SKILL.md",
             "before": "git-commit-writer may change the index",
             "after": "commit-writing reports mixed purposes without changing the index"
           },
           {
-            "path": "agents/shared/skills/change-writing/SKILL.md",
+            "path": "skills/change-writing/skill/SKILL.md",
             "before": "separate PR and changelog templates",
             "after": "one change-description method with artifact-specific reference"
           },
           {
-            "path": "agents/shared/skills/comment-writing/SKILL.md",
+            "path": "skills/comment-writing/skill/SKILL.md",
             "before": "file absent",
             "after": "implementation comments preserve only a rejected alternative and its current constraint"
           }

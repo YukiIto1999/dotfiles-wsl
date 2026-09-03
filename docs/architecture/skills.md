@@ -14,20 +14,19 @@ Skill は原則として作らない。基礎モデル、repository policy、必
 
 ## 構成上の配備対象
 
-local Skill の正本は [`agents/shared/skills/`](../../agents/shared/skills) である。plugin source の revision は [`flake.nix`](../../flake.nix)、採用する plugin の選択は [`agents/module.nix`](../../agents/module.nix) が所有する。構成上の配備対象は次の command で取得する。
+local Skillの正本は[`skills/<id>/skill/`](../../skills)である。各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`を`dotfiles.skills.registry`へ登録する。plugin sourceのrevisionは[`flake.nix`](../../flake.nix)、plugin Skillの検出と同名拒否は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が所有する。
 
-donor と、repository 所有の Skill source は区別する。donor は方法を再構成して local Skill を作る材料であり、元 repository の Skill を配備しない。repository 所有は配置とrevisionの正本を示すだけで、直接採用の十分条件ではない。下記のsignature procedure規則を満たしたSkillだけをownerの固定sourceから明示選択する。target 構成と追加の admission 条件は [Repository 所有 Skill の composition](repository-skills.md) に記録するが、まだ実装していない。
+donorとrepository所有のSkill sourceは区別する。donorは方法を再構成してlocal Skillを作る材料であり、元repositoryのSkillを配備しない。repository所有は配置とrevisionの正本を示すだけで、直接採用の十分条件ではない。signature procedure規則を満たしたSkillだけを固定sourceから登録する。target構成と追加のadmission条件は[Repository所有Skillのcomposition](repository-skills.md)に記録する。
 
 Codexに同梱される同名のsystem `skill-creator`は、[`skills.config`](https://developers.openai.com/codex/config-reference#skillsconfig)で無効化し、local版だけをrouting対象にする。ClaudeとOpenCodeでもplugin版を配備せず、同じlocal正本を使う。
 
 ```sh
-nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.shared.skills --apply builtins.attrNames
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 ```
 
-2026-08-14 時点の構成は、次の Skill を配備対象にしている。rebuild 前の環境と起動済みagentには古い配備が残り得る。
+有効なSkillは[`profiles/workstation.nix`](../../profiles/workstation.nix)がregistryのkeyから選ぶ。Agent clientはこの有効集合だけを各client形式へ投影する。rebuild前の環境と起動済みagentには古い配備が残り得る。
 
-- local: `bug-analysis`、`code-design`、`code-review`、`commit-writing`、`change-writing`、`comment-writing`、`dependency-analysis`、`description-writing`、`documentation-writing`、`domain-modeling`、`error-design`、`grilling`、`impact-analysis`、`interface-design`、`ja-writing`、`module-design`、`performance-analysis`、`refactoring`、`skill-creator`、`tdd`、`ui-design`、`web-research`
-- security plugin: `security-scan`、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`、`fix-finding`
+MCP専用の薄いwrapperは置かない。`repository-research`は探索経路とsource検証、`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory-management`はrecallの検証、保存admission、privacy、failure fallbackを所有する。SkillとCapabilityの対応、Agentごとのrouteは[`agents/roles/routing.nix`](../../agents/roles/routing.nix)を正本にする。
 
 Superpowers は構成上の配備対象から除外した。以下は目標とする責務の候補群であり、既存Skillの継続、改修、rename、統合と、未実装の候補を含む。表の名前だけでは実装済みと判断しない。
 
@@ -47,7 +46,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 |---|---|
 | 特殊 | `skill-creator`、`grilling`、`tdd`、`refactoring`、`prototype`、`migration` |
 | writing | `ja-writing`、`commit-writing`、`change-writing`、`description-writing`、`documentation-writing`、`comment-writing` |
-| research | `web-research` |
+| research | `web-research`、`repository-research` |
+| operation | `browser-operation`、`github-operations`、`memory-management` |
 | analysis | `bug-analysis`、`dependency-analysis`、`impact-analysis`、`performance-analysis` |
 | review | `code-review`、`architecture-review`、`test-review`、`interface-review`、`naming-review`、`ui-review` |
 | design | `ui-design`、`code-design`、`module-design`、`interface-design`、`architecture-design`、`db-design`、`component-design`、`test-design`、`error-design` |
@@ -61,6 +61,12 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `web-research` は外部の問いに対してsourceを探索、評価、比較し、引用可能な根拠を作る。`grilling` は未解決のproductやdomain判断を利用者との質問で詰める。domainの意味の確定と文書への記録は `domain-modeling` が所有する。外部事実の収集と、利用者が所有する決定を同じ仕事にしない。
 
+`repository-research`は、表現や所在が不明なlocal概念、関係、複数fileのbehaviorを見つけ、現在のsourceでmaterial claimを検証する。既知のexact text、path、symbolはraw toolへ残し、依存graphは`dependency-analysis`、具体的変更のblast radiusは`impact-analysis`へ渡す。
+
+`github-operations`は、GitHub MCPのaccount targetとresourceを一意にし、write前後のstate、曖昧な結果の再試行、merge、delete、history変更の直前確認を扱う。変更説明は`change-writing`、review判断は`code-review`、commit messageは`commit-writing`が所有する。
+
+`memory-management`は、過去の記録を候補としてrecallし、一次sourceで検証してから採否を決める。保存対象は検証済みの訂正、確定方針、再利用patternに限り、secret、個人情報、推測、短期task情報を除く。memoryを正本やrepository調査の代替にしない。
+
 `domain-modeling` は概念と語彙を定義する。`naming-review` は定義済みの意味を入力に、code、schema、DB、UI、文書の語彙、役割、単位、粒度を監査する。
 
 `dependency-analysis` は node、edge、方向、granularity を定義して依存の事実を作る。`impact-analysis` は具体的な変更を起点に、code、data、runtime、deployment、契約、所有へ伝播する影響を導く。
@@ -70,6 +76,8 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 `ui-design`は、利用者の仕事、実際のcontent、既存design systemを入力に、情報階層、interaction、利用者に見えるstateとfeedback、visual、responsive、accessibilityを決め、実装前のbriefで止める。module-privateなcomponent treeとstate ownerは`code-design`が所有する。確定済みUIの実装には独立Skillを置かず、briefと既存design systemを制約とする通常の実装作業へ渡す。
 
 `ui-review`候補は、利用者の仕事を実browserで遂行し、情報階層、interaction、visual、responsive、accessibility、content、feedback、recoveryを監査する。browserは証拠を得る手段であり、console、network、DOM、memory、securityを横断する`browser-review`は作らない。機能障害の原因は`bug-analysis`、性能は`performance-analysis`、セキュリティは`security-scan`へ送る。forward evalが成立していないため、まだ配備しない。
+
+`browser-operation`は、既知の利用者taskまたは受入条件を実browserで実行し、freshなsnapshot、DOM、console、network、必要なscreenshotから証拠を返す。UIの良否は判断せず、設計と監査は`ui-design`または`ui-review`候補、原因分析は`bug-analysis`、性能は`performance-analysis`へ渡す。
 
 セキュリティreviewはpluginの`security-scan`が所有するため、別の`security-review`は作らない。read-onlyのsecurity agentはthreat model、finding discovery、validation、attack path、最終reportまでを所有する。検証済みまたは技術的に妥当なfindingの修正を明示された場合だけ、実装agentが別phaseで`fix-finding`を使う。
 
@@ -162,7 +170,7 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
 | [Matt Pocock research](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/research/SKILL.md) | MIT | claimを一次資料まで辿り、sourceが直接支える範囲で結論を書く | 常にbackground agentを使うこと、調査のたびにfileを作ること |
-| Context7、SearXNG、Crawl4AIの配備時tool schema | 該当なし。Context7とSearXNGは [`package.nix`](../../mcp/context7/package.nix) と [`package.nix`](../../mcp/searxng/package.nix)、Crawl4AIは [`module.nix`](../../containers/crawl4ai/module.nix) の固定revisionから配備する | URL探索、本文取得、library docs、agent判断の分離と、実在する引数 | 配備されていないtool、SDK専用引数、固定件数のsource取得 |
+| Context7、SearXNG、Crawl4AIの配備時tool schema | 該当なし。Context7とSearXNGは [`package.nix`](../../capabilities/library-documentation/context7/mcp/package.nix) と [`package.nix`](../../capabilities/web-discovery/searxng/mcp/package.nix)、Crawl4AIは [`module.nix`](../../capabilities/web-content/crawl4ai/backend/module.nix) の固定revisionから配備する | URL探索、本文取得、library docs、agent判断の分離と、実在する引数 | 配備されていないtool、SDK専用引数、固定件数のsource取得 |
 
 旧`web-researcher`は、正規仕様一件で決まる問いにも複数sourceを要求し、指定URLの要約でも検索を始めた。`time_range`を最新判定に使い、解消可能な矛盾も両論併記した。さらに、言語指定、JavaScript実行、PDF、本文filterの説明が現行MCP schemaと一致していなかった。
 
@@ -190,7 +198,7 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 
 `dependency-analysis`は、node、edge、方向、granularityを先に定義し、source、call、data、runtime、build、deployment、ownershipの依存を型なしの一graphへ潰さない。fan-in、fan-out、cycle、transitive reachabilityは構造の事実であり、数値だけで欠陥とは判定しない。具体的な変更から影響を追う仕事は`impact-analysis`、構造の良否は`architecture-review`、新しい依存方向の決定は設計Skillへ渡す。
 
-代表scenarioは [`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json) に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先する。表現や所在が不明な候補は Zvec-Grep、exact text や構文 pattern の候補は`rg`や`ast-grep`で探索し、sourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
+代表scenarioは[`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json)に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先する。表現や所在が不明な候補は`repository-research`へ渡し、exact textや構文patternの候補は`rg`や`ast-grep`で直接探索してsourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
 
 baselineでは、agent resource reaperの保持日数と実行間隔がNix option、package、systemd unit、observation、checkへどう伝播するかを調べた。最初の検索結果はsource参照、生成、runtime起動、文書、検査を混在させ、node、edge、方向、granularityを調査後に後付けした。型付きedgeへ分けると、保持日数はpackageへ埋め込まれる一方、実行間隔はtimer unitだけへ投影され、observationはtimer名しか参照しないと区別できた。文字列探索だけではNix evaluationによるconsumerの網羅性を証明できず、activation時の挙動も未確認として残った。
 
@@ -200,7 +208,7 @@ baselineでは、agent resource reaperの保持日数と実行間隔がNix optio
 |---|---|---|---|
 | [WondelAI working-with-legacy-code](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/working-with-legacy-code) | MIT | change pointからobservableへ外向きに辿るeffect sketch、影響が収束するpinch point、compilerをimpact evidenceとして使うこと | legacy codeの変更手順、characterization test、dependency breaking、refactoring実装 |
 | [Addy Osmani deprecation-and-migration](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/deprecation-and-migration/SKILL.md) | MIT | active consumerとtouchpointの確認、old/new共存、利用状況の観測、additive準備とdestructive除去の境界 | migration方式の選択、deadline、実行手順、無条件のdown migrationや固定pattern |
-| [`dependency-analysis`](../../agents/shared/skills/dependency-analysis/SKILL.md) | local | 型付きdependency graphを具体的変更のeffect pathの証拠として使うこと | repository全体のgraph作成を毎回やり直すこと |
+| [`dependency-analysis`](../../skills/dependency-analysis/skill/SKILL.md) | local | 型付きdependency graphを具体的変更のeffect pathの証拠として使うこと | repository全体のgraph作成を毎回やり直すこと |
 
 `impact-analysis`は一つの変更前後を固定し、consumerが観測する契約差からcode、data、runtime、deployment、operation、test、docs、ownerへ外向きに影響を追う。確実な影響、条件付きの影響、未観測の外部consumerやdynamic edgeを分ける。変更fileの列挙、一般的なdependency map、migration実装、新しい設計は所有しない。
 
@@ -284,7 +292,7 @@ baselineと同型の別fixtureでは、productionの二つの関数とcontract t
 
 pluginの`skill-creator`はSkill作成を既定経路にし、基礎モデル、policy、reference、script、tool、既存Skillで足りるかを判定しない。このrepositoryではlocal版へ置き換え、具体的なbaseline不足、mechanism、責務境界、routing、composition、restraint、ablationからSkillの要否を決める。
 
-runtime本文は[admissionと評価](../../agents/shared/skills/skill-creator/references/admission-and-evaluation.md)だけを必要時に読み、外部sourceの採否は[provenance](../../agents/shared/skills/skill-creator/references/provenance.md)へ分ける。代表scenarioは[`agents/fixtures/skill-creator-skill.json`](../../agents/fixtures/skill-creator-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
+runtime本文は[admissionと評価](../../skills/skill-creator/skill/references/admission-and-evaluation.md)だけを必要時に読み、外部sourceの採否は[provenance](../../skills/skill-creator/skill/references/provenance.md)へ分ける。代表scenarioは[`agents/fixtures/skill-creator-skill.json`](../../agents/fixtures/skill-creator-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
 
 決定的なYAML契約を再利用するscenarioでは、Codex同梱版とlocal版のどちらもSkillを作らず、共有schemaと必須CIを選んだ。このcaseでは改善はなかった。API変更の互換性とrolloutの見落としを扱うscenarioでは、同梱版は判断を`code-review`へ追加した。local版は既存`impact-analysis`がconsumer、共存、rollback条件を所有すると確認し、影響の証拠だけを受け取ってfindingとseverityを`code-review`へ残した。同じ判断の複製を避け、既存Skillとのcompositionを選べたため、local版を配備する。
 
@@ -576,7 +584,9 @@ MattのSkillは、modelを変える仕事と既存語彙を読むだけの仕事
 
 ## 評価状況
 
-評価時点の配備対象local Skill 23個は`quick_validate.py`を通過している。形式検証は成果改善を示さないため、これだけで完成とは判定しない。`prototype`はbaselineとの差がなく、`ui-review`はforward evalが成立しなかったため、どちらも配備対象から外した。`grill-with-docs`は評価後に外した。質問のprocedureは`grilling`、意味の確定と記録は`domain-modeling`が所有し、wrapperに残る判断が無いためである。現在の配備対象は22個で、以下の評価記録は当時の23個に対するものである。
+評価時点の配備対象local Skill 23個は`quick_validate.py`を通過している。形式検証は成果改善を示さないため、これだけで完成とは判定しない。`prototype`はbaselineとの差がなく、`ui-review`はforward evalが成立しなかったため、どちらも配備対象から外した。`grill-with-docs`は評価後に外した。質問のprocedureは`grilling`、意味の確定と記録は`domain-modeling`が所有し、wrapperに残る判断が無いためである。現在の配備対象は26個で、以下の評価記録は当時の23個に対するものである。
+
+2026-09-03に、追加した4個をbaselineとforward evalで比較した。入力と期待結果は[`agents/fixtures/routing-skills.json`](../../agents/fixtures/routing-skills.json)に置く。`repository-research`はbaselineもsemantic探索とsource確認を選べたが、repository、revision、scopeの固定とmaterial claim単位の検証を明示した。`browser-operation`はbaselineの一律network確認と復元を、主張に必要な証拠と安全なcleanupだけへ狭めた。`github-operations`は最初のmerge依頼を確認済みとしたbaselineに対し、account、head SHA、merge方法を示す実行直前確認を要求した。`memory-management`はtimeout後に同じoperationを再試行したbaselineに対し、失敗を記録してlocal正本へ移り、provenance、project basename、save admissionを固定した。4個ともMCP APIの列挙ではなく、この差を生む判断を所有するため配備を維持する。
 
 [WAXA 0.3.1](https://github.com/mizchi/skills/tree/7a0d72866a0bb3e9ac3e2768c328b09ba2bc40c4/tools/waxa)を一時利用し、23個すべてを監査した。静的auditのraw findingは47件、errorは0件だった。23件はfrontmatterの`Does not`を読まない非対象検査、21件はrepository rootのlicenseを読まない検査、3件は`Use for`をtriggerと認識しない正規表現によるもので、Skillの実不備は0件だった。
 

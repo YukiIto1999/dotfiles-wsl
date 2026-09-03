@@ -94,6 +94,12 @@ in
       managedFile = "mcp";
     };
     managedFiles = {
+      config = {
+        source = ./assets/config.seed.yml;
+        format = "yaml";
+        deployment = "seed";
+        destination = ".omp/agent/config.yml";
+      };
       mcp = {
         source = gatewayConfig;
         format = "json";

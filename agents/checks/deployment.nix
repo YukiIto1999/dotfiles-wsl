@@ -400,7 +400,6 @@ in
       row:
       !lib.elem row.file.destination [
         ".omp/agent/agent.db"
-        ".omp/agent/config.yml"
       ]
     ) managedRows;
     assert lib.any (
@@ -878,6 +877,7 @@ in
         ${fixtureSeedActivation}
         test -d "$fixture/home/.claude/settings.json"
         test -s "$fixture/home/.codex/config.toml"
+        test -s "$fixture/home/.omp/agent/config.yml"
 
         rmdir "$fixture/home/.claude/settings.json"
         ${fixtureSeedActivation}

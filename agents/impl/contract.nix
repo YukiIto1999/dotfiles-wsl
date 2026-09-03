@@ -131,9 +131,24 @@ let
     };
   }) (install: (install.kind or null) == "github-release");
 
+  nixPackageInstallType = types.addCheck (types.submodule {
+    options = {
+      kind = lib.mkOption {
+        type = types.enum [ "nix-package" ];
+      };
+      updateOwner = lib.mkOption {
+        type = types.enum [ "flake-lock" ];
+      };
+      layout = lib.mkOption {
+        type = types.enum [ "nix-store" ];
+      };
+    };
+  }) (install: (install.kind or null) == "nix-package");
+
   installType = types.oneOf [
     installerScriptInstallType
     githubReleaseInstallType
+    nixPackageInstallType
   ];
 
   runtimeTimerType = types.submodule {
@@ -147,6 +162,11 @@ let
   clientType = types.submodule {
     options = {
       binary = lib.mkOption { type = safeBasenameType; };
+      package = lib.mkOption {
+        type = types.nullOr types.package;
+        default = null;
+        description = "nix-package install の実体。その他の install kind では null。";
+      };
       runtimeWrapperMode = lib.mkOption {
         type = types.enum [
           "managed"
@@ -265,9 +285,15 @@ let
       && client.definitions == { };
 
   installContractValid =
-    install:
+    client:
+    let
+      inherit (client) install;
+      packageMatchesInstall = (install.kind == "nix-package") == (client.package != null);
+    in
     if install.kind == "installer-script" then
-      true
+      packageMatchesInstall
+    else if install.kind == "nix-package" then
+      packageMatchesInstall
     else
       let
         requiredPathIds = builtins.attrNames install.requiredPaths;
@@ -279,7 +305,8 @@ let
           in
           requiredPath != null && requiredPath.kind == "file" && requiredPath.executable;
       in
-      builtins.all validRelativeDestination entrypoints
+      packageMatchesInstall
+      && builtins.all validRelativeDestination entrypoints
       && builtins.all validRelativeDestination requiredPathIds
       && (
         if install.layout == "single-binary" then
@@ -474,7 +501,7 @@ in
       ) clientNames;
       invalidClientNames = builtins.filter (name: !validClientName name) clientNames;
       invalidInstallClients = builtins.filter (
-        name: !installContractValid cfg.clients.${name}.install
+        name: !installContractValid cfg.clients.${name}
       ) clientNames;
       sharedDestinationRows = lib.concatMap (
         clientName:

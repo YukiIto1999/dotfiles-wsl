@@ -40,7 +40,9 @@ upstream OCI image は digest を Nix 宣言へ固定し、registry 取得を `d
 
 ## Agent client の供給経路
 
-[`agents/impl/contract.nix`](../../agents/impl/contract.nix) は client binary の更新を `installer-script` と `github-release` に分ける。Claude Code と Antigravity は HTTPS で取得した upstream installer を実行し、配備 layout も upstream が所有する。この経路では dotfiles が payload の digest、archive 構造、原子的な公開を検証しない。信頼対象は installer の配布元、TLS 経路、実行時の upstream script である。
+[`agents/impl/contract.nix`](../../agents/impl/contract.nix) は client binary の供給を `installer-script`、`github-release`、`nix-package` に分ける。Claude Code と Antigravity は HTTPS で取得した upstream installer を実行し、配備 layout も upstream が所有する。この経路では dotfiles が payload の digest、archive 構造、原子的な公開を検証しない。信頼対象は installer の配布元、TLS 経路、実行時の upstream script である。
+
+OMPはupstream flakeのsource revisionとNAR hashを`flake.lock`に固定し、upstreamが定義するNix buildとnix-community binary cacheを信頼する。OMPの`config.yml`と`agent.db`は設定ユーザーだけが所有する可変状態であり、認証情報をNix storeやcheckoutへ取り込まない。
 
 Codex と OpenCode は GitHub release を dotfiles が管理する。GitHub API が返す SHA-256 digest と download 内容を一致させ、archive を展開する前に member の path、type、件数、論理 size、重複、衝突を拒否する。展開後は symlink、hard link、special file、owner、mode、required path を検査し、固定した directory descriptor から entrypoint の version probe を実行する。検証済み tree は digest を名前にした release directory へ置き、`current` と visible binary の相対 symlink を identity 比較付きの rename で切り替える。通常の失敗では EXIT trap が旧状態へ戻し、曖昧な object は削除せず残す。
 

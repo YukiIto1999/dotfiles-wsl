@@ -47,7 +47,7 @@
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
 | Agent Package Manager が宣言した version で起動する | `agent-apm-binary-runs` |
-| LSP roster と対応 client の登録が一致し、拡張子が衝突しない | `lsp-registration` |
+| LSP roster と対応 client の登録が一致し、OMP の有効条件が checkout に依存せず、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |
 | SonarQube の service contract、server と DB の topology、image、volume、環境 file、再起動、secret metadata、provision service と timer が固定値に一致する | `sonarqube-container` |
@@ -56,8 +56,8 @@
 | GitHub account roster、暗号化 template、登録 artifact、Git identity の生成先が typed contract と一致する | `account-deployment-contract` |
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
 | host の固定 client roster、提供集合、型metadata、capability、installer、managed file が固定 fixture に一致し、不正な branch field、必須 field 欠落、freeform field、mode 矛盾を変異入力で拒否する | `agent-client-roster` |
-| 共通 rules が UTF-8、非空、見出しを持ち、配備対象の Skill、subagent、MCP provider が rules または Skill 本文に入口を持ち、LSP と agentmemory の client 差分を記載し、shared と OpenCode の definition frontmatter、Codex TOML、Claude の byte equality が実配備 source で成立する | `agent-definition-rendering` |
-| agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
+| 共通 rules が UTF-8、非空、見出しを持ち、配備対象の Skill、subagent、MCP provider が rules または Skill 本文に入口を持ち、LSP と agentmemory の client 差分を記載し、shared・OMP・OpenCode の definition frontmatter、Codex TOML、Claude の byte equality が実配備 source で成立する | `agent-definition-rendering` |
+| agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、OMP の認証状態が管理外であること、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
 | seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し、front の起動依存と子 process を持たない | `gateway-front-contract` |

@@ -103,6 +103,19 @@ Nixのtypeやclosure checkは、sourceがprivate dataを含まないことを意
 
 ownerがprivate dataを含まない固定可能な配布artifactを用意し、記録済みcommitを解決できるようにするか、同等のimmutable snapshot contractへ上流Skillを変更するまでadmissionを保留する。確認した範囲ではowner rootに`LICENSE`または`COPYING`もなく、利用条件の確定が必要である。
 
+#### 監査Skill(standard-conformance)の設計案
+
+全repositoryへ配る標準監査Skillは、owner repositoryであるarchitecture-standard側に`standard-apply`の姉妹として新設し、この文書のcompositionで取り込む。責務は次に固定する。
+
+- 対象repositoryのADRが記録するstandard commitを照合先とし、現行標準との差は監査結果でなく「pin更新の提案」として分けて報告する。
+- 手順は、言語とsurfaceの検出、設定drift監査(BannedSymbols・clippy.toml・oxlint設定と標準要求の差分)、規律照合の順で行う。報告は`{"violations":[{"rule","file:line","evidence","mechanizable"}]}`の書式に固定する。
+- 段階適用は対象repository側で持つ。初回監査の結果を対象repositoryのdocs配下へ基線として保存し、以後は基線に無い新規違反だけをfailとし、基線は単調減少させる。標準本文にもdotfiles-wslにも基線を持たせない。
+
+#### admission保留の解消案
+
+commit object問題は、標準本文をNix storeへ取り込まず、workstation上のcheckout pathをruntimeのstore外設定として渡す構成で解消できる。pinするのはSkill sourceだけとし、ADRのcommit解決はcheckoutのGitへ委ねる。これは「非公開pathはruntimeのstore外設定で扱う」の既存契約と整合し、規範が頻繁に動くrepositoryに対してrevision更新の往復も消す。代償は標準本文の参照が固定snapshotでなくなることであり、照合の再現性はADRのcommit記録とcheckout側のGitで担保する。
+LICENSEはowner側の追加が必要であり、admissionの前提として残る。
+
 ### vibe-knowledge
 
 private recordを含むrepository自体をinputにしない。owner側にprivate dataを含まないSkill配布sourceと、必要なら同じpinから作るCapability実装ができた後でadmissionを行う。

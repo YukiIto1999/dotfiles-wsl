@@ -111,6 +111,15 @@ ownerがprivate dataを含まない固定可能な配布artifactを用意し、�
 - 手順は、言語とsurfaceの検出、設定drift監査(BannedSymbols・clippy.toml・oxlint設定と標準要求の差分)、規律照合の順で行う。報告は`{"violations":[{"rule","file:line","evidence","mechanizable"}]}`の書式に固定する。
 - 段階適用は対象repository側で持つ。初回監査の結果を対象repositoryのdocs配下へ基線として保存し、以後は基線に無い新規違反だけをfailとし、基線は単調減少させる。標準本文にもdotfiles-wslにも基線を持たせない。
 
+#### 申し立てSkill(standard-feedback)の設計案(2026-09-04、所有者発案)
+
+標準への改訂提案の還流は、標準側が各projectの`docs/`を読みに行く形にせず、project側から`architecture-standard`のGitHub issueとして起票するSkillで行う。dotfiles-wslが全repositoryへ配布する。
+
+- trigger: 標準適用中に、規律の矛盾・不成立・欠落・曖昧さへ実測で突き当たったとき。project側の`docs/revision`への記録は従来どおり残し、issueはその送信路とする。
+- issue本文の書式を固定する: 対象規律の条文名指し(見出し逐語)、実測の証跡(file:line・コマンド結果)、提案の一文、project名とpin済み標準commit。
+- 起票はGitHub Capability(gateway経由)を要求する。重複起票を避けるため、起票前に同条文のopen issueを検索して追記へ切り替える。
+- 標準側はissue trackerを申し立ての唯一の受信箱とし、裁定(採択・棄却・保留)を必ずissue上で返す。tec/tcsに実在した「提案が数ヶ月読まれない」「棄却理由が返らず作業を3回捨てる」再発をこれで防ぐ。
+
 #### admission保留の解消案
 
 commit object問題は、標準本文をNix storeへ取り込まず、workstation上のcheckout pathをruntimeのstore外設定として渡す構成で解消できる。pinするのはSkill sourceだけとし、ADRのcommit解決はcheckoutのGitへ委ねる。これは「非公開pathはruntimeのstore外設定で扱う」の既存契約と整合し、規範が頻繁に動くrepositoryに対してrevision更新の往復も消す。代償は標準本文の参照が固定snapshotでなくなることであり、照合の再現性はADRのcommit記録とcheckout側のGitで担保する。

@@ -4,7 +4,7 @@
 
 Think in English. Respond in Japanese.
 
-- 日本語の文書は `ja-writing` skill の規範に従う。
+- 日本語で成果物（README、仕様、設計文書、ADR、解説、コミットメッセージ、PR）を作成または編集する際は、ドラフト時および完了前に必ず `ja-writing` skill を読み、その推敲規律に従う。
 - 人向けの成果物は Markdown で書く。XML 風タグで整形しない。
 
 ## 作業規律

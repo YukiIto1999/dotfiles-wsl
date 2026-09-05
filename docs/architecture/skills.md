@@ -18,41 +18,42 @@ local Skillの正本は[`skills/<id>/skill/`](../../skills)である。各`modul
 
 donorとrepository所有のSkill sourceは区別する。donorは方法を再構成してlocal Skillを作る材料であり、元repositoryのSkillを配備しない。repository所有は配置とrevisionの正本を示すだけで、直接採用の十分条件ではない。signature procedure規則を満たしたSkillだけを固定sourceから登録する。target構成と追加のadmission条件は[Repository所有Skillのcomposition](repository-skills.md)に記録する。
 
-Codexに同梱される同名のsystem `skill-creator`は、[`skills.config`](https://developers.openai.com/codex/config-reference#skillsconfig)で無効化し、local版だけをrouting対象にする。ClaudeとOpenCodeでもplugin版を配備せず、同じlocal正本を使う。
+Codexに同梱されるsystem `skill-creator`は、[`skills.config`](https://developers.openai.com/codex/config-reference#skillsconfig)で無効化し、localの`skill-design`だけをrouting対象にする。ClaudeとOpenCodeでも同等のローカル正本を使う。
 
 ```sh
 nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 ```
 
-有効なSkillは[`profiles/workstation.nix`](../../profiles/workstation.nix)がregistryのkeyから選ぶ。Agent clientはこの有効集合だけを各client形式へ投影する。rebuild前の環境と起動済みagentには古い配備が残り得る。
+有効なSkillは[`profiles/workstation.nix`](../../profiles/workstation.nix)がregistryのkeyから選ぶ。Agent clientはこの有効集合だけを各client形式へ投影する。
 
-MCP専用の薄いwrapperは置かない。`repository-research`は探索経路とsource検証、`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory-management`はrecallの検証、保存admission、privacy、failure fallbackを所有する。SkillとCapabilityの対応、Agentごとのrouteは[`agents/roles/routing.nix`](../../agents/roles/routing.nix)を正本にする。
+MCP専用の薄いwrapperは置かない。`repository-research`は探索経路とsource検証、`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。SkillとCapabilityの対応、Agentごとのrouteは[`agents/roles/routing.nix`](../../agents/roles/routing.nix)を正本にする。
 
-Superpowers は構成上の配備対象から除外した。以下は目標とする責務の候補群であり、既存Skillの継続、改修、rename、統合と、未実装の候補を含む。表の名前だけでは実装済みと判断しない。
+## 体系と接尾辞
 
-## 候補群
-
-名前の接尾辞は作業の種類を表す。
+Skill名は作業の種類を表す接尾辞で統一する。
 
 - `-writing`: 文章を生成、推敲する。
 - `-analysis`: 証拠から原因、構造、影響を導く。
 - `-review`: 既存成果物を規範と証拠で監査し、finding を出す。
 - `-design`: 実装前に構造、契約、方針を決める。
 - `-modeling`: 概念、状態、不変条件、語彙を定義する。
+- `-research`: 外部事実やローカルリポジトリを探索、評価、検証する。
+- `-operation`: 外部ツールや実サービス、基盤を安全に操作する。
+- `-implementation`: 確定仕様やテスト、構造改善方針に基づいてコード変更を実装する。
 
-方法そのものを指す固有名は、この接尾辞へ無理に合わせない。
+基礎的な共通前提を持つ特殊な手順（`grilling`, `memory`）を除き、すべてのSkillはこの命名体系に従う。
 
-| 種別 | 候補 |
+| 種別 | 構成Skill |
 |---|---|
-| 特殊 | `skill-creator`、`grilling`、`tdd`、`refactoring`、`prototype`、`migration` |
+| 特殊 | `grilling`、`memory` |
+| implementation | `tdd-implementation`、`refactoring-implementation` |
 | writing | `ja-writing`、`commit-writing`、`change-writing`、`description-writing`、`documentation-writing`、`comment-writing` |
 | research | `web-research`、`repository-research` |
-| operation | `browser-operation`、`github-operations`、`memory-management` |
+| operation | `browser-operation`、`github-operations` |
 | analysis | `bug-analysis`、`dependency-analysis`、`impact-analysis`、`performance-analysis` |
-| review | `code-review`、`architecture-review`、`test-review`、`interface-review`、`naming-review`、`ui-review` |
-| design | `ui-design`、`code-design`、`module-design`、`interface-design`、`architecture-design`、`db-design`、`component-design`、`test-design`、`error-design` |
-| modeling | `domain-modeling`、`data-modeling` |
-
+| review | `code-review`、`security-review` |
+| design | `skill-design`、`ui-design`、`code-design`、`module-design`、`interface-design`、`error-design` |
+| modeling | `domain-modeling` |
 ## 責務境界
 
 `commit-writing` は一つのcommitが解決する問題と目的を履歴へ残す。`change-writing` は既に存在する差分を、PR、changelog、release noteの読み手へ説明する。`description-writing` はREADME、ADR、仕様、報告、技術解説を、読者の問いと文書の目的から構成する。差分固有の説明を一般文書へ混ぜない。
@@ -65,7 +66,7 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `github-operations`は、GitHub MCPのaccount targetとresourceを一意にし、write前後のstate、曖昧な結果の再試行、merge、delete、history変更の直前確認を扱う。変更説明は`change-writing`、review判断は`code-review`、commit messageは`commit-writing`が所有する。
 
-`memory-management`は、過去の記録を候補としてrecallし、一次sourceで検証してから採否を決める。保存対象は検証済みの訂正、確定方針、再利用patternに限り、secret、個人情報、推測、短期task情報を除く。memoryを正本やrepository調査の代替にしない。
+`memory`は、過去の記録を候補としてrecallし、一次sourceで検証してから採否を決める。保存対象は検証済みの訂正、確定方針、再利用patternに限り、secret、個人情報、推測、短期task情報を除く。memoryを正本やrepository調査の代替にしない。
 
 `domain-modeling` は概念と語彙を定義する。`naming-review` は定義済みの意味を入力に、code、schema、DB、UI、文書の語彙、役割、単位、粒度を監査する。
 
@@ -75,11 +76,11 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `ui-design`は、利用者の仕事、実際のcontent、既存design systemを入力に、情報階層、interaction、利用者に見えるstateとfeedback、visual、responsive、accessibilityを決め、実装前のbriefで止める。module-privateなcomponent treeとstate ownerは`code-design`が所有する。確定済みUIの実装には独立Skillを置かず、briefと既存design systemを制約とする通常の実装作業へ渡す。
 
-`ui-review`候補は、利用者の仕事を実browserで遂行し、情報階層、interaction、visual、responsive、accessibility、content、feedback、recoveryを監査する。browserは証拠を得る手段であり、console、network、DOM、memory、securityを横断する`browser-review`は作らない。機能障害の原因は`bug-analysis`、性能は`performance-analysis`、セキュリティは`security-scan`へ送る。forward evalが成立していないため、まだ配備しない。
+`ui-review`候補は、利用者の仕事を実browserで遂行し、情報階層、interaction、visual、responsive、accessibility、content、feedback、recoveryを監査する。browserは証拠を得る手段であり、console、network、DOM、memory、securityを横断する`browser-review`は作らない。機能障害の原因は`bug-analysis`、性能は`performance-analysis`、セキュリティは`security-review`へ送る。forward evalが成立していないため、まだ配備しない。
 
 `browser-operation`は、既知の利用者taskまたは受入条件を実browserで実行し、freshなsnapshot、DOM、console、network、必要なscreenshotから証拠を返す。UIの良否は判断せず、設計と監査は`ui-design`または`ui-review`候補、原因分析は`bug-analysis`、性能は`performance-analysis`へ渡す。
 
-セキュリティreviewはpluginの`security-scan`が所有するため、別の`security-review`は作らない。read-onlyのsecurity agentはthreat model、finding discovery、validation、attack path、最終reportまでを所有する。検証済みまたは技術的に妥当なfindingの修正を明示された場合だけ、実装agentが別phaseで`fix-finding`を使う。
+セキュリティreviewは`security-review`が所有する。脅威モデリング、脆弱性候補の発見、成立条件の検証、攻撃経路の追跡、修正の引き渡しまでを、単一Skill内のフェーズとリファレンス文書で所有する。
 
 `code-design` は module 内部の型、関数、変換、純粋核と effect、抽象、局所性を決める。UI module内のmodule-privateなcomponent tree、props、state owner、composition、既存primitiveのreuseも同じ責務に含める。`module-design` は actor、change driver、責務、所有、境界、依存方向を決める。`interface-design` は確定済みの境界に、exact type、failure、side effect、ordering、互換性を持つconsumer-visible contractを与える。`architecture-design` は system 全体の topology、quality attribute、deployment、integration を決める。
 
@@ -89,15 +90,9 @@ Superpowers は構成上の配備対象から除外した。以下は目標と�
 
 `data-modeling`候補は、確定済みのdomainの意味を、正準形、valid state、lifecycle、serializationへ写す。`db-design`候補は、代表workloadから物理schema、constraint、access path、transaction、保存と復旧の受入条件を決める。既存databaseの監査は独立Skillにせず、対象engineの一次資料と既存review手段を使う。sourceからtargetへの移行手順は`migration`へ渡す。
 
-`test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd` は確定済みのbehaviorを一つのobservableな縦のsliceにし、意味のあるRED、最小GREEN、触れた範囲のREFACTORを反復する。原因未確定の障害、test suiteの監査、独立した構造変更は所有しない。
+`test-design` は risk、contract、oracle、test level、fidelity を決める。`tdd-implementation` は確定済みのbehaviorを一つのobservableな縦のsliceにし、意味のあるRED、最小GREEN、触れた範囲のREFACTORを反復する。原因未確定の障害、test suiteの監査、独立した構造変更は所有しない。
 
-`refactoring` は保存するobservableと構造上の痛みを先に固定し、既存の安全網か必要最小限のcharacterizationを使って、一つの可逆な内部変更ずつ検証する。新しいbehavior、public contract、architecture、migrationは所有しない。TDD中の局所REFACTORは`tdd`に残す。
-
-`prototype`候補は、設計や実装を止める一つの経験的な問いを、隔離した使い捨ての実行可能物で判定する。基礎モデルとの差を確認できなかったため配備しない。
-
-`migration`候補は、承認済みのsourceからtargetへ、共存条件、各段の正本、変換、進行と撤退のgate、不可逆点後のrecovery、旧経路の除去を扱う。現時点では基礎モデルと既存Skillで不足を確認できていないため実装しない。
-
-ここに境界を書いていない候補は、名前だけを仮置きした調査対象である。Job、trigger、判断所有権、根拠、完了条件、非責務を定めるまで実装しない。
+`refactoring-implementation` は保存するobservableと構造上の痛みを先に固定し、既存の安全網か必要最小限のcharacterizationを使って、一つの可逆な内部変更ずつ検証する。新しいbehavior、public contract、architecture、migrationは所有しない。TDD中の局所REFACTORは`tdd-implementation`に残す。
 
 ## Donor の扱い
 
@@ -528,10 +523,7 @@ forward evalでは、手袋とtabletを使う倉庫の出荷例外処理を対�
 | [Anthropic webapp-testing](https://github.com/anthropics/skills/blob/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/webapp-testing/SKILL.md) | Apache-2.0 | 動的画面のreconnaissance後にselectorと操作を決め、server lifecycleとbrowser logを管理すること | Python script、headless固定、`networkidle`の一律要求、独自browser起動 |
 | [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | W3C仕様。本文は非転載 | 該当する達成基準をaccessibility findingの規範根拠にすること | 全基準のchecklist化、未試験画面の準拠宣言、要件と無関係なscore |
 
-console、network、storage、DOM、event、performance、memory、securityを一つのSkillへまとめると、証拠取得と原因、性能、セキュリティの判断を同時に所有する。browserはtoolであり、この横断分類はSkillのJobにならない。既知の障害は`bug-analysis`、性能症状は`performance-analysis`、攻撃可能性は`security-scan`へ送り、利用者が観測するUI品質だけを候補の責務に残す。
-
-2026-08-14のforward evalでは、一時的な問い合わせ振り分け画面をlocalhostで起動し、Playwrightへviewport、navigation、snapshotを要求した。258秒間応答せず、HTTP requestも画面へ到達しなかったため中断した。実画面の証拠とSkill出力は得られず、改善は未測定である。起動したserverと一時画面は中断後に回収した。このため、候補本文とfixtureはruntimeへ入れない。
-
+console、network、storage、DOM、event、performance、memory、securityを一つのSkillへまとめると、証拠取得と原因、性能、セキュリティの判断を同時に所有する。browserはtoolであり、この横断分類はSkillのJobにならない。既知の障害は`bug-analysis`、性能症状は`performance-analysis`、攻撃可能性は`security-review`へ送り、利用者が観測するUI品質だけを責務とする。
 ### component-designを独立Skillにしない判断
 
 | Donor | License | 利用できる知見 | 固定規則にしない内容 |
@@ -581,20 +573,6 @@ MattのSkillは、modelを変える仕事と既存語彙を読むだけの仕事
 | [Matt Pocock grill-with-docs](https://github.com/mattpocock/skills/blob/85f83d3fde1d3a90d5c9a657f6998c79a6c37308/skills/engineering/grill-with-docs/SKILL.md) | MIT | `grilling`を`domain-modeling`と合成する一文のwrapperを一度配備した | wrapperは配備から外し、domain決定を残す経路を`grilling`本文から`domain-modeling`へ向けた |
 
 `grilling`は明示的な依頼を受け、未決定事項を依存順に質問するprocedureを所有する。domainの意味は決めず、設計文書も書かない。domain決定を文書へ残す場合は`domain-modeling`へ渡す。通常の設計、直接実装、候補を広げるだけのbrainstormでは発火しない。代表scenarioは [`agents/fixtures/grilling-skill.json`](../../agents/fixtures/grilling-skill.json) に置く。baselineは一問ごとに回答を待ち、同じ前提から今決められる他の論点と、後続の依存関係を示さなかった。このSkillは同じfrontierを一巡にまとめ、回答に依存する質問だけを後へ送る。
-
-## 評価状況
-
-評価時点の配備対象local Skill 23個は`quick_validate.py`を通過している。形式検証は成果改善を示さないため、これだけで完成とは判定しない。`prototype`はbaselineとの差がなく、`ui-review`はforward evalが成立しなかったため、どちらも配備対象から外した。`grill-with-docs`は評価後に外した。質問のprocedureは`grilling`、意味の確定と記録は`domain-modeling`が所有し、wrapperに残る判断が無いためである。現在の配備対象は26個で、以下の評価記録は当時の23個に対するものである。
-
-2026-09-03に、追加した4個をbaselineとforward evalで比較した。入力と期待結果は[`agents/fixtures/routing-skills.json`](../../agents/fixtures/routing-skills.json)に置く。`repository-research`はbaselineもsemantic探索とsource確認を選べたが、repository、revision、scopeの固定とmaterial claim単位の検証を明示した。`browser-operation`はbaselineの一律network確認と復元を、主張に必要な証拠と安全なcleanupだけへ狭めた。`github-operations`は最初のmerge依頼を確認済みとしたbaselineに対し、account、head SHA、merge方法を示す実行直前確認を要求した。`memory-management`はtimeout後に同じoperationを再試行したbaselineに対し、失敗を記録してlocal正本へ移り、provenance、project basename、save admissionを固定した。4個ともMCP APIの列挙ではなく、この差を生む判断を所有するため配備を維持する。
-
-[WAXA 0.3.1](https://github.com/mizchi/skills/tree/7a0d72866a0bb3e9ac3e2768c328b09ba2bc40c4/tools/waxa)を一時利用し、23個すべてを監査した。静的auditのraw findingは47件、errorは0件だった。23件はfrontmatterの`Does not`を読まない非対象検査、21件はrepository rootのlicenseを読まない検査、3件は`Use for`をtriggerと認識しない正規表現によるもので、Skillの実不備は0件だった。
-
-外部toolを必要としない19個は、Skillありとbaselineを各1回、near-missは23個すべてを実行した。出力を確認した最終判定はtypical 19件中19件、near-miss 23件中23件がpassだった。WAXAのraw判定ではtypical 2件、near-miss 16件がfailだったが、前者はrubricが責務境界を誤読し、後者は`OTHER`に理由を添えた出力を完全一致検査が拒否していた。baselineは19件中10件がpassした。1 trialのscore差だけでは安定したupliftを示さない。
-
-WAXAでは実行できない4個も別に評価した。`grill-with-docs`は未決定事項の依存順を守り、baselineが先取りした質問と未提示の概念を増やさなかった。`web-research`はContext7のquota超過後も設定済みGitHub MCPから同じ版の一次資料を取得し、baselineの独力Web検索を避けた。旧`TDD` Skillを単純なbehavior追加へ適用した比較では、Skillありとbaselineが同じ実装に到達し、双方が同一GREENを一度重ねた。設計feedbackを必要とする料金scenarioでは、baselineが責務混在を残したのに対し、改訂後のSkillは料金判断と監査送信を別ownerへ分け、既存caseを保ってextensionを追加した。`code-review`は別modelのtool利用が4回ともpermission拒否またはtimeoutとなり、repositoryを使う比較は成立しなかった。artifactだけを与えたAI生成と人手の対比較では、Skillありとbaselineが同じ認可findingとfindingなし判定を返した。
-
-以上はSkill本文の欠陥を示さなかったが、23個すべてのmaterial upliftを証明したものでもない。旧`tdd`の重複実行は過去のprocess restraint findingとして残し、設計feedbackの改善とは分けて扱う。`code-review`のtool統合比較は評価基盤を直すまで未測定とし、artifact対比較でupliftのなかったrisk指示は追加しない。`database-review`と`browser-review`は追加せず、security reviewはsecurity pluginへ集約した。`ui-review`はPlaywright経路が安定した後に、forward evalと`bug-analysis`、`performance-analysis`とのcompositionを確認してから再検討する。
 
 ## Skill 化の条件
 

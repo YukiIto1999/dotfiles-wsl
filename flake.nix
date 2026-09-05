@@ -16,6 +16,7 @@
     # OMP は Bun/Rust native addon を含むため、upstream の Nix package をそのまま使う。
     omp.url = "github:can1357/oh-my-pi";
 
+
     orca = {
       url = "github:stablyai/orca/637dc30a3211ec0667c55118a4d17edbee5cff80";
       flake = false;

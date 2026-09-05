@@ -56,3 +56,12 @@ MCP unit は secret の値、path、owner、mode、template を所有しない�
 構造変更では、変更前に契約の重複と名前依存を再現する focused check を失敗させる。実装後は check ID 集合の完全一致、各 owner check、文書 link、構造 gate を確認する。
 
 履歴変更では、全 commit について message hook、空 commit、merge、重複 subject、最終 tree、metadata を検査する。新しく作る中間 tree は、変更された Nix、shell、JSON をその commit から取り出して構文検査する。最終 source の全検証は一度だけ実行し、履歴だけの再生成では同じ source build を繰り返さない。
+
+## 設計文書の規律
+
+アーキテクチャ設計書（`docs/architecture/*.md`）は、現在有効なアーキテクチャの構造、境界、不変条件、設計判断の根拠のみを現在形で記述する。
+
+- 過去の作業履歴、削除された機能の言及、旧構成の差分経過（「〜を除外した」「〜を消した」等）を設計書に書かない。
+- 特定日付のスナップショットや作業ログを不変契約へ混入させない。
+- 将来の検討事項や未実装の言い訳を残さず、現在成立している責務境界のみを記録する。
+- 変更の経緯と理由は、Gitのコミットメッセージ（`commit-writing`）およびPR説明（`change-writing`）へ完結させる。

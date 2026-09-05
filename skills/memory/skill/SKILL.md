@@ -1,5 +1,5 @@
 ---
-name: memory-management
+name: memory
 description: Recalls and admits durable project memory through the configured Memory MCP. Use before work whose outcome may depend on prior project decisions, history, or lessons, and when a verified correction, settled policy, or reusable pattern may warrant explicit saving. Verifies recalled leads against primary sources and excludes sensitive, speculative, or transient content. Does not treat memory as a source of truth, replace repository research, or maintain task notes.
 ---
 

@@ -113,7 +113,7 @@
     {
       "id": "implement-handlers",
       "prompt": "内部failure設計と期待behaviorは確定済みです。REDからhandlerとproduction codeを実装してください。",
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "mustNotTrigger": ["error-design"]
     },
     {

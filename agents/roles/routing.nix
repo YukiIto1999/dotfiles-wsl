@@ -82,7 +82,7 @@
     }
     {
       agent = "implementer";
-      skill = "refactoring";
+      skill = "refactoring-implementation";
       activation = "dynamic";
     }
     {
@@ -95,10 +95,9 @@
       skill = "security-review";
       activation = "dynamic";
     }
-
     {
       agent = "implementer";
-      skill = "tdd";
+      skill = "tdd-implementation";
       activation = "dynamic";
     }
     {

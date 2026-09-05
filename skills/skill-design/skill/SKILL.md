@@ -1,5 +1,5 @@
 ---
-name: skill-creator
+name: skill-design
 description: Decides whether a recurring agent capability deficit warrants a Skill, then creates, revises, or evaluates the smallest sufficient Skill package. Use when asked to turn a workflow or repeated correction into a Skill, change an existing Skill's responsibility or routing, compare it with baseline behavior, or audit Skill overlap and effectiveness. Starts with concrete scenarios and a mechanism gate, and permits a well-supported decision to create nothing. Does not build a portfolio from a taxonomy, install third-party Skills, turn a single principle or tool invocation into a Skill, or own the domain method that the candidate Skill will teach.
 ---
 

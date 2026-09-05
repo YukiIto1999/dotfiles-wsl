@@ -7,6 +7,7 @@
 let
   pluginPaths = [
     (pluginSources.openai-plugins + "/plugins/codex-security")
+    pluginSources.orca
   ];
   findSkillsIn =
     pluginPath:

@@ -267,7 +267,8 @@
         "nixpkgs": "nixpkgs",
         "omp": "omp",
         "openaiPlugins": "openaiPlugins",
-        "sops-nix": "sops-nix"
+        "sops-nix": "sops-nix",
+        "orca": "orca"
       }
     },
     "rust-overlay": {
@@ -382,6 +383,23 @@
       "original": {
         "owner": "numtide",
         "repo": "treefmt-nix",
+        "type": "github"
+      }
+    },
+    "orca": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1788513069,
+        "narHash": "sha256-6lHiMItSaodmjqN1ojnViSsh4cbLvFah0uQQXAXvflU=",
+        "owner": "stablyai",
+        "repo": "orca",
+        "rev": "637dc30a3211ec0667c55118a4d17edbee5cff80",
+        "type": "github"
+      },
+      "original": {
+        "owner": "stablyai",
+        "repo": "orca",
+        "rev": "637dc30a3211ec0667c55118a4d17edbee5cff80",
         "type": "github"
       }
     }

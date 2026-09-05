@@ -29,9 +29,8 @@ Think in English. Respond in Japanese.
 ## 行動
 
 - 既存コンテキストは `AGENTS.md` / `CLAUDE.md` / README / docs を確認する。
-- session が提示する Skill、subagent、MCP tool、LSP を利用可否の正本とし、対応する入口がある作業はその入口を使う。
-- ローカルのexact text、identifier、path、regex、全件列挙はRead / Grep / Glob / LSPまたは`rg`を直接使う。表現や所在が不明な概念、関係、複数fileの横断探索は`repository-research`を入口にする。
-- shellではexact searchに`rg`、indexed semantic searchに`zg query`を使う。indexの作成、再構築、削除はagentが暗黙に実行しない。構文patternの検索と一括書き換えは`ast-grep`、列挙は`fd`、表示は`bat`、一覧は`eza`、diffは`delta`を使う。
+- session が提示する専用ツール（LSP / Read / Grep / Glob / Edit / Write 等）を利用可否の正本とし、調査・参照追跡・編集の第一選択とする。
+- シェルの CLI は、専用ツールでは担えない統計・集計・パイプライン処理や構文一括書き換え（`ast-grep`）、ファイル列挙（`fd`）、表示（`bat` / `eza`）、差分表示（`delta`）に限定して使う。shell の exact search には `rg`、indexed semantic search には `zg query` を使う。index の作成、再構築、削除は agent が暗黙に実行しない。
 - JSON / YAML / HTTP は `jq` / `yq` / `xh` が使える。
 
 ## 資源と検証
@@ -95,7 +94,11 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 | 宣言のdocumentation comment作成 | `documentation-writing` |
 | 実装commentの要否判断と作成 | `comment-writing` |
 | セキュリティ分析の起点 | `security-scan` |
-| セキュリティ分析の個別 phase | `threat-model` / `finding-discovery` / `validation` / `attack-path-analysis` / `fix-finding` |
+| 脅威モデリングと資産・脅威分析 | `threat-model` |
+| 脆弱性候補の静的・動的発見 | `finding-discovery` |
+| 脆弱性候補の成立条件の検証 | `validation` |
+| 攻撃経路の追跡と影響範囲分析 | `attack-path-analysis` |
+| 確定した脆弱性の修正と確認 | `fix-finding` |
 | 実装前のUI方針 | `ui-design` |
 | Skill 作成 | `skill-creator` |
 
@@ -138,7 +141,7 @@ LSP は Claude Code、OMP、OpenCode で利用でき、Codex と Antigravity で
 
 ### Agent の変更箇所
 
-生成済みの rules、Skill、subagent、client config は直接編集しない。新規ファイルは rebuild 前に `git add` して flake source に含める。
+生成済みの rules、Skill、subagent、client config は直接編集しない。変更は dotfiles 内の正本に行い、作業ツリーに未コミットの変更を残さずコミットしてから `dotfiles-rebuild` を実行する（新規ファイルは `git add` を忘れない）。名前解決スタック等でキャッシュ取得が失敗する場合は `NIX_CONFIG="substitute = false" dotfiles-rebuild` でローカルビルドを継続できる。
 
 | 変更目的 | 正本 | 適用 |
 |---|---|---|
@@ -158,4 +161,4 @@ Agent client の更新は `docs/operations/agent-clients.md`、構造は `docs/a
 - パッケージマネージャでグローバルインストールしない。パッケージは nix / devenv で導入する。
 - `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml ~/dotfiles-wsl/secrets/sops/assets/secrets.yaml` 編集後の rebuild で行う。
 - 資格情報を平文に書かない。GitHub PAT は SOPS + age の `~/dotfiles-wsl/secrets/sops/assets/secrets.yaml` に集約する。
-- commit message は scope なし、50 文字以内の `<type>: <日本語の要約>` 一行だけにする。AI attribution も commit-msg hook が block する。
+- commit message は scope なし、50 文字以内の `<type>: <日本語の要約>` 一行だけにする。中黒（・）は語の簡潔な並置に限り許容する。AI attribution も commit-msg hook が block する。本文・検査・参照更新を 1 つのコミットに閉じ、未検証の中間コミットを残さない。

@@ -122,7 +122,7 @@
       "id": "existing-component-refactor",
       "prompt": "既存component treeのbehaviorを保ち、state重複を除くようにcodeを移動、統合してください。",
       "expectedSkills": [
-        "refactoring"
+        "refactoring-implementation"
       ],
       "mustNotTrigger": [
         "code-design"
@@ -155,13 +155,13 @@
     {
       "id": "behavior-preserving-refactor",
       "prompt": "既存codeの重複をbehaviorを変えずに解消し、focused checkと一緒に編集してください。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "mustNotTrigger": ["code-design"]
     },
     {
       "id": "implement-known-behavior",
       "prompt": "内部設計と期待behaviorは確定済みです。REDからproduction codeを実装してください。",
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "mustNotTrigger": ["code-design"]
     },
     {

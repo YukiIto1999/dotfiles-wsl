@@ -5,7 +5,7 @@
     {
       "id": "extract-behavior-preserving-structure",
       "prompt": "公開APIの出力、error、side effectを変えずに、この長い計算から検証済みの純粋な部分を抽出してください。既存testは通っています。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "expected": {
         "definesPreservationContract": true,
         "runsPassingBaselineFirst": true,
@@ -16,7 +16,7 @@
     {
       "id": "move-module-preserve-entrypoint",
       "prompt": "外部import pathとruntime behaviorを保ったまま、責務が確定済みの実装をowner moduleへ移してください。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "expected": {
         "tracesCallersAndReferences": true,
         "preservesPublicEntrypoint": true,
@@ -26,7 +26,7 @@
     {
       "id": "testability-seam",
       "prompt": "public APIを変えず、現在時刻への直接依存だけを最小seamへ置き換えて既存behaviorをcharacterizationできるようにしてください。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "expected": {
         "reusesExistingInjectionFirst": true,
         "keepsSeamMinimal": true,
@@ -37,7 +37,7 @@
     {
       "id": "shared-production-test-helper",
       "prompt": "productionとcontract checkにある同じ計算を一つのhelperへ共有するrefactorをしてください。現在のcheckはproduction結果を独立計算して比較しています。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "expected": {
         "examinesWhetherDuplicationIsIntentional": true,
         "preservesIndependentOracle": true,
@@ -47,7 +47,7 @@
     {
       "id": "remove-unneeded-wrapper",
       "prompt": "behaviorを変えず、標準libraryと同じ処理をするlocal wrapperを除去してください。参照元と例外の違いは確認してください。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "expected": {
         "prefersExistingMechanism": true,
         "doesNotUseLineCountAsSuccess": true,
@@ -57,44 +57,44 @@
     {
       "id": "new-behavior",
       "prompt": "CLIへ新しい--json optionを追加し、出力契約を実装してください。",
-      "expectedSkills": ["tdd"],
-      "mustNotTrigger": ["refactoring"]
+      "expectedSkills": ["tdd-implementation"],
+      "mustNotTrigger": ["refactoring-implementation"]
     },
     {
       "id": "active-tdd-cleanup",
       "prompt": "いまGREENになった一つのTDD sliceで、触れた関数の重複だけを整理してください。",
-      "expectedSkills": ["tdd"],
-      "mustNotTrigger": ["refactoring"]
+      "expectedSkills": ["tdd-implementation"],
+      "mustNotTrigger": ["refactoring-implementation"]
     },
     {
       "id": "architecture-redesign",
       "prompt": "service境界とpublic contractを見直し、新しいmodule構成を設計してください。",
       "expectedSkills": [],
-      "mustNotTrigger": ["refactoring"]
+      "mustNotTrigger": ["refactoring-implementation"]
     },
     {
       "id": "data-migration",
       "prompt": "既存schemaから新schemaへbackfillと切替を行ってください。old/new versionは同時稼働します。",
       "expectedSkills": [],
-      "mustNotTrigger": ["refactoring"]
+      "mustNotTrigger": ["refactoring-implementation"]
     },
     {
       "id": "read-only-review",
       "prompt": "このdiffに不要な抽象や複雑性がないかreviewしてください。編集はしません。",
       "expectedSkills": ["code-review"],
-      "mustNotTrigger": ["refactoring"]
+      "mustNotTrigger": ["refactoring-implementation"]
     },
     {
       "id": "performance-optimization",
       "prompt": "計測済みのhot pathを速くし、latencyを変えてください。機能出力は同じです。",
       "expectedSkills": [],
-      "mustNotTrigger": ["refactoring"]
+      "mustNotTrigger": ["refactoring-implementation"]
     },
     {
       "id": "format-only",
       "prompt": "formatterを実行して空白と改行だけを揃えてください。",
       "expectedSkills": [],
-      "mustNotTrigger": ["refactoring"]
+      "mustNotTrigger": ["refactoring-implementation"]
     }
   ]
 }

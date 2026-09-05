@@ -1,5 +1,5 @@
 _: {
-  config.dotfiles.skills.registry.tdd = {
+  config.dotfiles.skills.registry."refactoring-implementation" = {
     source = ./skill;
     requiresCapabilities = [ ];
     requiresSkills = [ ];

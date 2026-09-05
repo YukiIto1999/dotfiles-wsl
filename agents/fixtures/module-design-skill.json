@@ -95,7 +95,7 @@
     {
       "id": "behavior-preserving-move",
       "prompt": "既に決まったmodule境界へfileを移し、behaviorを保ったまま参照を更新してください。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "mustNotTrigger": ["module-design"]
     },
     {

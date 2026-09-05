@@ -77,4 +77,4 @@ exact interfaceとhard constraintに反する案を先に落とす。残る案�
 - 採らなかった案と具体的な費用
 - 後続の実装とTDDが確認するproperty
 
-pseudocodeは関係を明確にする場合だけ使う。production code、test、ADR、実装計画を作らない。既存構造を変更する仕事は`refactoring`、確定済みbehaviorの実装は`tdd`へ渡す。
+pseudocodeは関係を明確にする場合だけ使う。production code、test、ADR、実装計画を作らない。既存構造を変更する仕事は`refactoring-implementation`、確定済みbehaviorの実装は`tdd-implementation`へ渡す。

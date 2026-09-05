@@ -243,20 +243,20 @@
         "type": "github"
       }
     },
-    "openaiPlugins": {
+    "orca": {
       "flake": false,
       "locked": {
-        "lastModified": 1779213345,
-        "narHash": "sha256-65QHWoAF4XNqGfZhsu4kH9mhgJeZxFvd+9yopGAuN80=",
-        "owner": "openai",
-        "repo": "plugins",
-        "rev": "ed8ce2eacc07964f0f556519e0737a420da14e00",
+        "lastModified": 1788513069,
+        "narHash": "sha256-6lHiMItSaodmjqN1ojnViSsh4cbLvFah0uQQXAXvflU=",
+        "owner": "stablyai",
+        "repo": "orca",
+        "rev": "637dc30a3211ec0667c55118a4d17edbee5cff80",
         "type": "github"
       },
       "original": {
-        "owner": "openai",
-        "repo": "plugins",
-        "rev": "ed8ce2eacc07964f0f556519e0737a420da14e00",
+        "owner": "stablyai",
+        "repo": "orca",
+        "rev": "637dc30a3211ec0667c55118a4d17edbee5cff80",
         "type": "github"
       }
     },
@@ -266,9 +266,9 @@
         "nixos-wsl": "nixos-wsl",
         "nixpkgs": "nixpkgs",
         "omp": "omp",
-        "openaiPlugins": "openaiPlugins",
-        "sops-nix": "sops-nix",
-        "orca": "orca"
+
+        "orca": "orca",
+        "sops-nix": "sops-nix"
       }
     },
     "rust-overlay": {
@@ -383,23 +383,6 @@
       "original": {
         "owner": "numtide",
         "repo": "treefmt-nix",
-        "type": "github"
-      }
-    },
-    "orca": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1788513069,
-        "narHash": "sha256-6lHiMItSaodmjqN1ojnViSsh4cbLvFah0uQQXAXvflU=",
-        "owner": "stablyai",
-        "repo": "orca",
-        "rev": "637dc30a3211ec0667c55118a4d17edbee5cff80",
-        "type": "github"
-      },
-      "original": {
-        "owner": "stablyai",
-        "repo": "orca",
-        "rev": "637dc30a3211ec0667c55118a4d17edbee5cff80",
         "type": "github"
       }
     }

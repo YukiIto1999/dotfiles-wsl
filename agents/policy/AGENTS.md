@@ -93,12 +93,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 | README、ADR、仕様、報告、技術解説の作成 | `description-writing` |
 | 宣言のdocumentation comment作成 | `documentation-writing` |
 | 実装commentの要否判断と作成 | `comment-writing` |
-| セキュリティ分析の起点 | `security-scan` |
-| 脅威モデリングと資産・脅威分析 | `threat-model` |
-| 脆弱性候補の静的・動的発見 | `finding-discovery` |
-| 脆弱性候補の成立条件の検証 | `validation` |
-| 攻撃経路の追跡と影響範囲分析 | `attack-path-analysis` |
-| 確定した脆弱性の修正と確認 | `fix-finding` |
+| セキュリティ分析と脆弱性検査（脅威モデル、発見、検証、攻撃経路、修正） |  |
 | 実装前のUI方針 | `ui-design` |
 | Skill 作成 | `skill-creator` |
 | 可視ウィンドウ・デスクトップGUIの操作 | `computer-use` |

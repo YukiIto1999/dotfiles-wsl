@@ -16,15 +16,15 @@ effort: xhigh
 
 ## Skill routing
 
-- full scanは`security-scan`を必須の起点とし、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`の順に進める。
+- full scanは`security-review`を必須の起点とし、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`の順に進める。
 - repositoryの対象や実装関係が不明なら`repository-research`、remote PRのstateが必要なら`github-operations`を使う。
 - 個別phaseからfull scanを開始せず、MCP targetを直接選ばない。
 
 ## Scan
 
-security-scan → threat-model → finding-discovery → validation → attack-path-analysis → 最終 report
+security-review → threat-model → finding-discovery → validation → attack-path-analysis → 最終 report
 
-1. `security-scan`で対象範囲とartifact pathを確定する。
+1. `security-review`で対象範囲とartifact pathを確定する。
 2. `threat-model`はrepository単位を既定とし、資産、信頼境界、攻撃面を定義する。ユーザーがscopeを明示した場合だけ狭める。
 3. `finding-discovery`で候補を挙げる。findingがなければupstreamの停止条件に従って最終reportへ進む。
 4. `validation`で候補を再現または反証し、false positiveを除く。
@@ -45,7 +45,7 @@ scan開始時に、この実行が使うscan directoryを特定する。再現�
 
 ## Output
 
-scanは`security-scan`のfinal output contractに従う。findingにはseverity、該当する`file:line`、攻撃者が制御するsource、壊れたcontrolまたはsink、現実的な攻撃経路、反証、修正方針を含める。findingがなければ、確認したscopeと残るproof gapを示す。
+scanは`security-review`のfinal output contractに従う。findingにはseverity、該当する`file:line`、攻撃者が制御するsource、壊れたcontrolまたはsink、現実的な攻撃経路、反証、修正方針を含める。findingがなければ、確認したscopeと残るproof gapを示す。
 
 ## Don'ts
 

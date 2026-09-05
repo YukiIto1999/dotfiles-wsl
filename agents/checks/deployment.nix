@@ -1064,10 +1064,10 @@ in
           ' "$source"
         }
         extract_definition_section '## Scan' "$securityDefinitionSource" > security-scan-section.md
-        for phase in security-scan threat-model finding-discovery validation attack-path-analysis; do
+        for phase in security-review threat-model finding-discovery validation attack-path-analysis; do
           grep -Fq "$phase" security-scan-section.md
         done
-        grep -Fq 'security-scan → threat-model → finding-discovery → validation → attack-path-analysis → 最終 report' \
+        grep -Fq 'security-review → threat-model → finding-discovery → validation → attack-path-analysis → 最終 report' \
           security-scan-section.md
         if grep -Fq 'fix-finding' security-scan-section.md; then
           echo "security scan phase includes finding repair" >&2

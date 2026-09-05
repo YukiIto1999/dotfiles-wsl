@@ -82,11 +82,6 @@
     }
     {
       agent = "implementer";
-      skill = "fix-finding";
-      activation = "dynamic";
-    }
-    {
-      agent = "implementer";
       skill = "refactoring";
       activation = "dynamic";
     }
@@ -95,6 +90,12 @@
       skill = "repository-research";
       activation = "dynamic";
     }
+    {
+      agent = "implementer";
+      skill = "security-review";
+      activation = "dynamic";
+    }
+
     {
       agent = "implementer";
       skill = "tdd";
@@ -137,16 +138,6 @@
     }
     {
       agent = "security";
-      skill = "attack-path-analysis";
-      activation = "dynamic";
-    }
-    {
-      agent = "security";
-      skill = "finding-discovery";
-      activation = "dynamic";
-    }
-    {
-      agent = "security";
       skill = "github-operations";
       activation = "dynamic";
     }
@@ -157,18 +148,8 @@
     }
     {
       agent = "security";
-      skill = "security-scan";
+      skill = "security-review";
       activation = "required";
-    }
-    {
-      agent = "security";
-      skill = "threat-model";
-      activation = "dynamic";
-    }
-    {
-      agent = "security";
-      skill = "validation";
-      activation = "dynamic";
     }
   ];
 

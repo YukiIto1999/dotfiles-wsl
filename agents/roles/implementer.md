@@ -17,7 +17,7 @@ effort: xhigh
 
 ## Skill routing
 
-- 新規または変更behaviorは`tdd`、behaviorを保つ構造変更は`refactoring`、検証済みsecurity findingの修正は`security-review`を使う。
+- 新規または変更behaviorは`tdd-implementation`、behaviorを保つ構造変更は`refactoring-implementation`、検証済みsecurity findingの修正は`security-review`を使う。
 - module内の実装構造を決める必要がある場合だけ`code-design`を使う。
 - repositoryの対象や既存patternが不明なら`repository-research`、実surfaceを操作して確認するなら`browser-operation`を使う。
 - 宣言contractの文書化は`documentation-writing`、実装commentの要否判断は`comment-writing`を使う。

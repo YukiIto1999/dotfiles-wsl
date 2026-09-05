@@ -1,5 +1,5 @@
 ---
-name: refactoring
+name: refactoring-implementation
 description: Restructures existing code without changing a fixed set of observable behaviors. Use when asked to extract, inline, move, rename, consolidate, simplify, remove indirection, or improve testability while preserving functionality. Establishes a passing behavior baseline, adds characterization only when necessary, makes one reversible structural change at a time, and reruns focused evidence. Does not implement new behavior, optimize performance or resource use, redesign architecture or public contracts, perform a migration, review code without editing, or own the local REFACTOR step inside an active TDD cycle.
 ---
 
@@ -17,7 +17,7 @@ description: Restructures existing code without changing a fixed set of observab
 - 呼び出し元、参照、owner、既存ADRと規約
 - 変更中に使うfocused command
 
-現在のbehaviorに誤りがあり期待結果も変えるなら、別のbehavior changeとして`bug-analysis`と`tdd`へ渡す。module境界、public contract、architectureを新しく決めるなら設計、dataやprotocolのold/newを切り替えるなら別のmigration計画として扱う。latency、throughput、memory、resource useの改善が目的なら、`performance-analysis`でbottleneckを確定し、最適化の実装へ渡す。
+現在のbehaviorに誤りがあり期待結果も変えるなら、別のbehavior changeとして`bug-analysis`と`tdd-implementation`へ渡す。module境界、public contract、architectureを新しく決めるなら設計、dataやprotocolのold/newを切り替えるなら別のmigration計画として扱う。latency、throughput、memory、resource useの改善が目的なら、`performance-analysis`でbottleneckを確定し、最適化の実装へ渡す。
 
 ## Safety netを成立させる
 

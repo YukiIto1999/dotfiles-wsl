@@ -41,7 +41,7 @@
     {
       "id": "conflicting-memory-with-sensitive-log",
       "prompt": "Past memory conflicts with current source. This session produced a proposal, a test success, a credential-bearing log, and an accepted policy; the Memory MCP times out once.",
-      "expectedSkills": ["memory-management"],
+      "expectedSkills": ["memory"],
       "expected": {
         "prefersVerifiedCurrentPrimarySources": true,
         "doesNotRetryTheSameTimedOutOperation": true,

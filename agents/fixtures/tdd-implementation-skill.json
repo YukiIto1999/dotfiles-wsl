@@ -5,7 +5,7 @@
     {
       "id": "new-observable-behavior",
       "prompt": "確定済み仕様に従い、CLIの--dry-runが削除候補を表示して状態を変えないbehaviorをTDDで実装してください。既存のcontract checkとShell fixtureを使えます。",
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "expected": {
         "choosesOneVerticalSlice": true,
         "provesRedForIntendedBehavior": true,
@@ -17,7 +17,7 @@
     {
       "id": "confirmed-bug-fix",
       "prompt": "原因はempty inputでoffsetを1増やす分岐だと再現済みです。公開APIの結果を先にREDにし、最小修正をTDDで入れてください。",
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "expected": {
         "usesConfirmedCause": true,
         "testsObservableOutcome": true,
@@ -27,7 +27,7 @@
     {
       "id": "connected-type-change",
       "prompt": "確定済みのResult型をconsumerの公開signatureへ接続し、既存callerのtype errorとfailure behaviorのtestを順にREDにして実装してください。",
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "expected": {
         "requiresConnectedTypeRed": true,
         "alsoProvesBehaviorRed": true,
@@ -37,7 +37,7 @@
     {
       "id": "observable-boundary-interaction",
       "prompt": "adapterが一つのidempotency key付きcommandを送る契約は確定済みです。fake portで外部から観測できるcommandをREDにして実装してください。",
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "expected": {
         "usesObservableInteractionContract": true,
         "avoidsPrivateCallAssertions": true,
@@ -54,7 +54,7 @@
         "verificationCommand": "cd \"$TMPDIR/tdd-design-eval\" && PYTHONDONTWRITEBYTECODE=1 python verify.py",
         "canonicalFixtureReadOnly": true
       },
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "expected": {
         "concretizesOneTestListItemAtATime": true,
         "keepsEachSliceWithOneActorAndChangeReason": true,
@@ -68,7 +68,7 @@
     {
       "id": "single-case-without-extension-axis",
       "prompt": "確定仕様どおり、既存formatterへmarkdown出力を一種類だけ追加してください。差し替え契約や後続formatの要件はありません。TDDで進めてください。",
-      "expectedSkills": ["tdd"],
+      "expectedSkills": ["tdd-implementation"],
       "expected": {
         "implementsOneObservableDirectly": true,
         "doesNotInventStrategyOrInterface": true,
@@ -79,57 +79,57 @@
       "id": "batch-tests-before-implementation",
       "prompt": "仕様の完了条件を固定するため、全受入testを先に一括作成してから、まとめて実装してください。短いRED-GREEN-REFACTORの反復は行いません。",
       "expectedSkills": [],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "unknown-bug-cause",
       "prompt": "checkoutが時々500を返します。原因はまだ不明です。まず原因を特定してください。",
       "expectedSkills": ["bug-analysis"],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "test-strategy",
       "prompt": "決済systemのrisk、oracle、test level、実DBを使う範囲を設計してください。実装はしません。",
       "expectedSkills": [],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "existing-test-review",
       "prompt": "既存test suiteの不足、脆いassertion、mockへの過剰依存をreviewしてください。",
       "expectedSkills": [],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "standalone-refactor",
       "prompt": "behaviorを変えずに、このmoduleの責務と依存を整理してください。characterization testは既に通っています。",
       "expectedSkills": [
-        "refactoring"
+        "refactoring-implementation"
       ],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "throwaway-prototype",
       "prompt": "libraryの適合性だけを見る捨てるprototypeを作ってください。production behaviorはまだ決めません。",
       "expectedSkills": [],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "retroactive-tests",
       "prompt": "実装済みのpatchへ後から不足testを追加してください。REDを先に実測するためproduction codeを戻さないでください。",
       "expectedSkills": [],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "no-automated-observable",
       "prompt": "behaviorは確定していますが、現状は実機の物理LEDを人が見る以外に結果を観測できません。test専用hookを足してTDDで実装してください。",
       "expectedSkills": [],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     },
     {
       "id": "docs-only-change",
       "prompt": "READMEの誤字を直してください。実行behaviorは変わりません。",
       "expectedSkills": [],
-      "mustNotTrigger": ["tdd"]
+      "mustNotTrigger": ["tdd-implementation"]
     }
   ]
 }

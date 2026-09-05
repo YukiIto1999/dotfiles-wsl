@@ -108,13 +108,13 @@
     {
       "id": "implement-refactoring",
       "prompt": "behaviorを保ったままこの重複実装を統合してください。reviewだけではありません。",
-      "expectedSkills": ["refactoring"],
+      "expectedSkills": ["refactoring-implementation"],
       "mustNotTrigger": ["code-review"]
     },
     {
       "id": "full-security-scan",
       "prompt": "repository全体を脅威モデルからsecurity scanしてください。",
-      "expectedSkills": ["security-scan"],
+      "expectedSkills": ["security-review"],
       "mustNotTrigger": ["code-review"]
     },
     {

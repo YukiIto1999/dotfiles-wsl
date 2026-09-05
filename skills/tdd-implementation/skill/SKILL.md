@@ -1,5 +1,5 @@
 ---
-name: tdd
+name: tdd-implementation
 description: Implements an understood behavioral change through one observable vertical slice at a time using RED, minimal GREEN, and touched-scope REFACTOR. Use when adding or correcting behavior and a meaningful automated verifier can be run. Proves that each check fails for the intended reason before production changes, then uses concrete cycle feedback to improve responsibility and real extension seams without predesigning abstractions. Does not diagnose unknown failures, choose an overall test strategy, review existing tests, perform a standalone refactor, or validate a throwaway prototype.
 ---
 
@@ -58,7 +58,7 @@ GREENの後、触れた範囲で何がどの理由により変わったかを確
 
 observableを変えずに、証拠のある圧だけをGREENのまま解消する。sourceを変えたら影響するfocused checkを実行し、既存behaviorのtestを変更せず保つ。命名、重複、分岐、実装詳細も同じ範囲で整える。
 
-public contract、module owner、system topologyの再設計が要るなら、TDDのREFACTORで決めず、`interface-design`、`module-design`、`code-design`へ戻す。別の目的を持つ広いbehavior-preserving transformationは`refactoring`へ渡す。TDDのREFACTORを理由に変更範囲を広げない。
+public contract、module owner、system topologyの再設計が要るなら、TDDのREFACTORで決めず、`interface-design`、`module-design`、`code-design`へ戻す。別の目的を持つ広いbehavior-preserving transformationは`refactoring-implementation`へ渡す。TDDのREFACTORを理由に変更範囲を広げない。
 
 ## 次のsliceへ進む
 

@@ -74,13 +74,13 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 | local repositoryのsemantic・横断調査 | `repository-research` |
 | 実browserの操作と受入確認 | `browser-operation` |
 | GitHub resourceの安全なread / write | `github-operations` |
-| 過去のproject経緯の検索と長期記憶の保存 | `memory-management` |
+| 過去のproject経緯の検索と長期記憶の保存 | `memory` |
 | bug、test失敗、incidentの原因分析 | `bug-analysis` |
 | import、call、data、runtime、build、deploymentの依存分析 | `dependency-analysis` |
 | 具体的な変更のconsumer、互換性、rollout、rollback影響分析 | `impact-analysis` |
 | latency、throughput、CPU、memory、I/O、DB、browser性能のbottleneck分析 | `performance-analysis` |
-| 確定済みbehaviorをRED、最小GREEN、REFACTORで実装 | `tdd` |
-| observableを保った内部構造の段階的な改善 | `refactoring` |
+| 確定済みbehaviorをRED、最小GREEN、REFACTORで実装 | `tdd-implementation` |
+| observableを保った内部構造の段階的な改善 | `refactoring-implementation` |
 | domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
 | module境界、公開contract、visualが固定済みの内部codeとcomponent構造の設計 | `code-design` |
 | moduleの責務、state、artifact、粗いcontract、依存方向の設計 | `module-design` |
@@ -93,9 +93,9 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 | README、ADR、仕様、報告、技術解説の作成 | `description-writing` |
 | 宣言のdocumentation comment作成 | `documentation-writing` |
 | 実装commentの要否判断と作成 | `comment-writing` |
-| セキュリティ分析と脆弱性検査（脅威モデル、発見、検証、攻撃経路、修正） |  |
+| セキュリティ分析と脆弱性検査（脅威モデル、発見、検証、攻撃経路、修正） | `security-review` |
 | 実装前のUI方針 | `ui-design` |
-| Skill 作成 | `skill-creator` |
+| Skill 作成 | `skill-design` |
 | 可視ウィンドウ・デスクトップGUIの操作 | `computer-use` |
 | Orcaのワークツリー、端末、内蔵ブラウザ操作 | `orca-cli` |
 | 複数エージェント間の構造化協調・タスク委譲 | `orchestration` |
@@ -118,7 +118,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 | code reviewの解析候補 | `code-review` | `code-quality` |
 | browser操作、DOM、console、network、screenshot | `browser-operation` | `browser-automation` |
 | browserのperformance trace、heap、Lighthouse | `performance-analysis` | `browser-diagnostics` |
-| 過去の経緯の検索と長期記憶の保存 | `memory-management` | `project-memory` |
+| 過去の経緯の検索と長期記憶の保存 | `memory` | `project-memory` |
 | 別clientの独立したsession | agentから直接。現在のclientのsubagentで足りる役割分担には使わない | `agent-session` |
 
 ### LSP
@@ -127,7 +127,7 @@ LSP は Claude Code、OMP、OpenCode で利用でき、Codex と Antigravity で
 
 ### agentmemory
 
-明示的な検索と保存は`memory-management`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携はClaude Code、Codex、OMPがlifecycle hooks、OpenCodeがcapture pluginを使い、Antigravityにはない。自動連携は同Skillのrecall、検証、保存判断を代替しない。
+明示的な検索と保存は`memory`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携はClaude Code、Codex、OMPがlifecycle hooks、OpenCodeがcapture pluginを使い、Antigravityにはない。自動連携は同Skillのrecall、検証、保存判断を代替しない。
 
 ## dotfiles
 

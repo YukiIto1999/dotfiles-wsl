@@ -60,5 +60,5 @@ handled、recovered、dropped、dead-letter、terminal failureを最終的に処
 - 一度だけ観測する場所と保持するcontext
 - 既存seamで後続testが確認するproperty
 
-production code、test、review finding、incident diagnosisは作らない。内部functionやalgorithmは`code-design`、確定済み設計の実装は`tdd`へ渡す。
+production code、test、review finding、incident diagnosisは作らない。内部functionやalgorithmは`code-design`、確定済み設計の実装は`tdd-implementation`へ渡す。
 依頼されていないADR、計画、report形式を発明しない。

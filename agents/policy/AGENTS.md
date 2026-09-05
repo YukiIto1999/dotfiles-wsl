@@ -101,6 +101,13 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 | 確定した脆弱性の修正と確認 | `fix-finding` |
 | 実装前のUI方針 | `ui-design` |
 | Skill 作成 | `skill-creator` |
+| 可視ウィンドウ・デスクトップGUIの操作 | `computer-use` |
+| Orcaのワークツリー、端末、内蔵ブラウザ操作 | `orca-cli` |
+| 複数エージェント間の構造化協調・タスク委譲 | `orchestration` |
+| iOSシミュレータの操作・テスト | `orca-emulator` |
+| Androidエミュレータ・実機の操作・テスト | `orca-emulator-android` |
+| Linearチケットの取得、更新、PR紐付け | `orca-linear` / `linear-tickets` |
+| ワークスペース単位の環境レシピ設定 | `orca-per-workspace-env` |
 
 ## 基盤
 

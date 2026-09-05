@@ -7,9 +7,14 @@
 let
   cfg = config.dotfiles.workstation;
   launcherName = "wslview";
-  windowsCommand = "/mnt/c/Windows/System32/cmd.exe";
+  windowsCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
   wslview = pkgs.writeShellScriptBin launcherName ''
-    exec ${windowsCommand} /c start "" "$1" 2>/dev/null
+    if [ "$#" -eq 0 ]; then
+      exit 0
+    fi
+    target=$1
+    escaped="''${target//\'/\'\'}"
+    exec ${windowsCommand} -NoProfile -Command "Start-Process '$escaped'"
   '';
 
   # Orca などの外部ツールが非ログインシェルで呼び出す標準 POSIX / coreutils コマンド

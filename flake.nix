@@ -16,13 +16,8 @@
     # OMP は Bun/Rust native addon を含むため、upstream の Nix package をそのまま使う。
     omp.url = "github:can1357/oh-my-pi";
 
-    # vendored な agent/skill source、flake = false で plain tree 扱い
     orca = {
       url = "github:stablyai/orca/637dc30a3211ec0667c55118a4d17edbee5cff80";
-      flake = false;
-    };
-    openaiPlugins = {
-      url = "github:openai/plugins/ed8ce2eacc07964f0f556519e0737a420da14e00";
       flake = false;
     };
   };
@@ -35,19 +30,15 @@
       home-manager,
       sops-nix,
       omp,
-      openaiPlugins,
       orca,
       ...
     }:
     let
       system = "x86_64-linux";
       hostName = "nixos";
-
       pluginSources = {
-        openai-plugins = openaiPlugins;
         orca = orca;
       };
-
       collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };
       units = collectUnits ./.;
 

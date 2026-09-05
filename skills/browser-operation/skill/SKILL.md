@@ -68,6 +68,6 @@ materialな不一致を見つけたら症状、再現経路、直前と直後の
 
 ## Non-goals
 
-UIの新規設計、改善提案、visual・accessibilityを含む監査は`ui-design`へ渡す。機能不良の原因特定は`bug-analysis`、計測を伴う速度・memory・Core Web Vitalsの分析は`performance-analysis`、脅威や脆弱性の調査は`security-scan`が所有する。
+UIの新規設計、改善提案、visual・accessibilityを含む監査は`ui-design`へ渡す。機能不良の原因特定は`bug-analysis`、計測を伴う速度・memory・Core Web Vitalsの分析は`performance-analysis`、脅威や脆弱性の調査は`security-review`が所有する。
 
 このSkillはfrontend実装、網羅的なtest設計、公開Web調査、credential管理、APIを直接叩く代替verificationを行わない。指定taskの実行または既知の受入条件のbrowser verificationを終え、証拠とcleanupを返した時点で停止する。

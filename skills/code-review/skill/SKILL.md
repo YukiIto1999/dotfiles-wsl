@@ -44,7 +44,7 @@ consumer-visible contractを変更するdiffでは、実在consumer、required�
 - 既存の機械検証が同じ問題を十分に拒否する
 - 問題がない場合に備えて数を埋めている
 
-未確認事項はfindingに偽装せず、結論を左右するevidence gapとして分ける。脅威発見と攻撃経路は`security-scan`、runtime障害の原因は`bug-analysis`へ渡す。system-wideな構造とtest suite自体の品質は、このSkillのscope外として明示する。別のreview結果を受け取った場合は、同じfindingを重複して報告しない。
+未確認事項はfindingに偽装せず、結論を左右するevidence gapとして分ける。脅威発見と攻撃経路は`security-review`、runtime障害の原因は`bug-analysis`へ渡す。system-wideな構造とtest suite自体の品質は、このSkillのscope外として明示する。別のreview結果を受け取った場合は、同じfindingを重複して報告しない。
 
 ## Severityを付けて返す
 

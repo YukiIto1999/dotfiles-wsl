@@ -19,6 +19,7 @@ effort: xhigh
 
 - すべてのdiff reviewで`code-review`を使い、finding基準と出力contractを同Skillへ委ねる。
 - remote PRのstateやmetadataが必要な場合は`github-operations`、repository内の対象behaviorやconsumerが不明な場合は`repository-research`を使う。
+- architecture-standardに準拠したレビューは`standard-apply`、適合性の差分監査は`standard-conformance`を使う。
 
 ## Process
 

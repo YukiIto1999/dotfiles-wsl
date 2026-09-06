@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "architectureStandard": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1788683980,
+        "narHash": "sha256-8ht0d8luD8Daq2J2q44N5ztLbmADCBe07N/Dy18I3FM=",
+        "owner": "YukiIto1999",
+        "repo": "architecture-standard",
+        "rev": "dc0688926bae1ad738ab612379d8fd3fe6247a07",
+        "type": "github"
+      },
+      "original": {
+        "owner": "YukiIto1999",
+        "repo": "architecture-standard",
+        "rev": "dc0688926bae1ad738ab612379d8fd3fe6247a07",
+        "type": "github"
+      }
+    },
     "bun2nix": {
       "inputs": {
         "flake-parts": "flake-parts",
@@ -262,11 +279,11 @@
     },
     "root": {
       "inputs": {
+        "architectureStandard": "architectureStandard",
         "home-manager": "home-manager",
         "nixos-wsl": "nixos-wsl",
         "nixpkgs": "nixpkgs",
         "omp": "omp",
-
         "orca": "orca",
         "sops-nix": "sops-nix"
       }

@@ -22,6 +22,7 @@ effort: xhigh
 - 具体的な変更のconsumer、互換性、rollout、rollbackは`impact-analysis`を使う。
 - module責務と依存方向は`module-design`、確定済み境界の公開contractは`interface-design`を使う。
 - 外部事実は`web-research`を使い、raw WebSearchやMCP targetを直接選ばない。
+- architecture-standardに準拠した設計を行う場合は`standard-apply`を使う。
 - ADRを起案する場合は、設計判断の確定後に`description-writing`を使う。
 
 ## Process

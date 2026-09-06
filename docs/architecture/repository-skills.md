@@ -1,143 +1,65 @@
-# Repository所有Skillのcomposition
+# 外部リポジトリ所有Skillの構成
 
-**読み手:** 外部repositoryが所有するSkillを、このhostのAgentへ取り込む設計・実装を担当する人。変更前に読む。
+**読み手:** 外部リポジトリが所有するSkillをこのホストのエージェントへ取り込む設計と契約を理解・保守する人。
 
-この文書は外部repository所有Skillの将来設計を定める。現行のlocal SkillとOpenAI security pluginはすでに[`skills/`](../../skills)のregistryへ統合済みである。外部repositoryが所有する手順、domain contract、private dataの形式はここでは設計しない。
+外部リポジトリが所有するSkillは、owner repositoryから直接取得する。`dotfiles-wsl`は固定したコミットから採用対象を登録し、`dotfiles.skills.registry`でローカルSkillと単一の共通契約へ統合する。エージェントクライアントはこの有効集合を消費するだけであり、取得経路の選択やプラグイン構造の差異を意識しない。
 
-## 決定
+## 構成と責務
 
-外部repositoryが所有するSkillはowner repositoryから直接取得する。`dotfiles-wsl`は固定したrevisionから採用対象だけを登録し、`dotfiles.skills.registry`でlocal Skillと合成する。Agent clientは有効なSkill集合を消費するだけで、sourceの選択やSkill依存を所有しない。
-
-| Owner | 所有するもの |
+| 主体 | 所有するもの |
 |---|---|
-| Skillのowner repository | `SKILL.md`、reference、script、eval、Skill固有commandの公開手段 |
-| `flake.nix` | private dataを含まないsourceとrevisionの固定、`pluginSources`への受け渡し |
-| `skills` | sourceの正規化、registry、Skill依存、Capability依存、重複と欠落の拒否 |
-| `profiles/workstation.nix` | このhostで有効にするSkill集合 |
-| `agents/clients/<id>` | 有効なSkillを各clientのdestinationへ投影するadapter |
-| `capabilities` | Skillが必要とするconsumer非依存のcommand、provider、runtime contract |
+| Skillのowner repository | `SKILL.md`、リファレンス文書、テストフィクスチャ、実行スクリプト |
+| `flake.nix` | 外部ソースのURLとコミットリビジョンの固定、`pluginSources`への受け渡し |
+| `skills/plugins/` | 外部ソースの走査と正規化、共通レジストリ契約への登録 |
+| `profiles/workstation.nix` | ホストで有効にするSkill集合の選択 |
+| `agents/clients/<id>` | 有効なSkillを各エージェントの配備先（`~/.claude/skills/` 等）へ投影するアダプタ |
+| `capabilities` | Skillが必要とする外部ツール、プロバイダ、実行時基盤の契約 |
 
-Skillはdomainの判断と一緒に変更されるため、owner repositoryに置く。中央repositoryへ複製すると、本文、reference、evalの変更理由とrevisionがownerから分かれる。donorを参考に`dotfiles-wsl`が別のSkillを所有し直す場合だけlocal Skillとする。
+ツールの操作マニュアルや外部標準の手順は、仕様を決定するowner repository側に置く。中央リポジトリへ本文を手作業で複製すると、変更理由とリビジョンが乖離してメンテナンス負債となるため、外部Skillはソースリポジトリから宣言的に参照する。
 
-依存方向は次に固定する。
+依存の方向は次に固定する。外部リポジトリから`dotfiles-wsl`への逆依存、およびCapabilityからSkillやエージェントへの逆依存は作らない。
 
 ```text
 source:  dotfiles-wsl -> pinned owner repository
 runtime: Agent -> Skill -> Capability -> provider/runtime
 ```
 
-owner repositoryから`dotfiles-wsl`への逆依存、CapabilityからSkillまたはAgentへの逆依存は作らない。
+## 外部ソースの登録契約
 
-## 現行contract
+外部ソースを追加・保守する際は、`flake.nix`で取得したソース実体を`specialArgs.pluginSources`へ渡す。リポジトリ固有のファイル走査と正規化は`skills/plugins/module.nix`が担当する。
 
-local Skillは`skills/<id>/module.nix`が次のcontractを登録する。
+外部ソース内の各Skillは、以下の標準契約を満たす必要がある。
 
-```nix
-config.dotfiles.skills.registry.<id> = {
-  source = ./skill;
-  requiresSkills = [ ];
-  requiresCapabilities = [ ];
-};
-```
+- ソースリポジトリのルート直下に`skills/<id>/SKILL.md`の標準配置を持つ。
+- Skill IDは安全なkebab-caseで命名されている。
+- ソースをまたぐ同一Skill IDが存在せず、名前衝突が排除されている。
 
-[`skills/module.nix`](../../skills/module.nix)はID、`SKILL.md`の存在、依存先、依存の重複、有効集合のclosureを検査する。[`capabilities/module.nix`](../../capabilities/module.nix)はSkillが要求したCapabilityの存在と有効化を検査する。[`profiles/workstation.nix`](../../profiles/workstation.nix)はregistryのkeyを有効集合として選ぶ。
+## 導入済み外部ソース
 
-OpenAI security pluginは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が固定source内の`skills/`をregistryへ投影し、複数plugin間の同名Skillを拒否する。plugin sourceの追加やrevision更新では、upstreamが追加したSkillも有効集合へ入るため、lock更新とSkill rosterのreviewを同じ変更で行う。
+現在、以下の 2 つの外部リポジトリからSkillを取り込んでいる。
 
-全clientへの共通配備は維持する。sourceごとのclient選択は、必要性が実証されていないため導入しない。
+### Orca
+Orcaデスクトップ環境および内蔵ツールの操作手順を提供する。
 
-## 外部sourceの追加contract
-
-外部sourceを追加するときは、`flake.nix`が取得したsourceだけを`specialArgs.pluginSources`へ渡す。repository固有のlayout、採用Skill、依存は`flake.nix`へ置かず、`skills`配下のsource adapterが正規化する。
-
-adapterは各採用Skillについて次を確定する。
-
-- 安全なkebab-caseのSkill ID
-- `SKILL.md`を含むimmutableなsource directory
-- 合成する別SkillのID
-- 必要なsemantic Capability ID
-- sourceをまたぐ同名Skillの不在
-
-同名Skillに優先順位、alias、overrideは設けず、重複を拒否する。frontmatterの`name`はSkill IDと一致させる。
-
-## Runtime command
-
-Skill固有commandを直接Skill registryのfieldとして増やさない。人や複数Agentから利用できる機能ならsemantic Capabilityとして所有し、provider package、runtime executable、backendをそのCapabilityへ置く。Skillは`requiresCapabilities`でそのIDだけを要求する。
-
-`git`やrepository標準の基礎commandはCapabilityとして重複登録しない。特定Skillにしか意味がなく、独立したruntime lifecycleも持たないscriptはSkillの`skill/scripts/`へ置く。
-
-wrapperに埋め込めるのはNix storeから読まれてよい非秘密値だけである。secretや非公開pathをderivationへ束縛しない。実行時secretは対応するCapabilityがSOPS境界から受け取り、Skill sourceへcredential fieldを追加しない。
-
-## 拒否する構成
-
-evaluationとbuild checkは次を拒否する。
-
-- Skill ID、Capability ID、依存IDが安全なkebab-caseでない
-- 採用Skillのdirectoryまたは直下の`SKILL.md`がない
-- registryにないSkillまたはCapabilityを要求する
-- 有効なSkillが無効なSkillまたはCapabilityを要求する
-- `requiresSkills`または`requiresCapabilities`に重複がある
-- sourceをまたいでSkill IDが重複する
-- CapabilityがAgentまたはSkillを参照する
-- provider/backendをprofileが直接選ぶ
-- secret、mutable state、private recordをSkill sourceとしてNix storeへ取り込む
-
-## Admission
-
-repositoryがSkillを所有しているだけでは配備しない。次をすべて満たしたsourceとSkillだけをregistryへ加える。
-
-1. source全体にprivate record、evidence、credentialがなく、Nix storeへ取り込めることを人が確認する。
-2. 上流Skillの直接採用が[Skill portfolio](skills.md)のsignature procedure規則を満たす。local Skillへの再構成が規範やroutingの複製になる場合だけ直接採用する。
-3. licenseと利用条件を確認する。
-4. Skillが必要とするruntime機能を既存Capabilityで表せるか確認する。新しいCapabilityはconsumer非依存の意味とlifecycleがある場合だけ作る。
-5. owner evalに加え、実際の全client配備集合でtrigger、near-miss、欠ける依存、immutable sourceを検査する。
-6. SkillがGit objectやrepository metadataを必要とする場合、固定source artifactがその操作を実行できる。
-
-Nixのtypeやclosure checkは、sourceがprivate dataを含まないことを意味から証明できない。`pluginSources`への登録はreviewが必要なtrust decisionである。非公開pathはruntimeのstore外設定で扱う。
-
-## 保留中のsource
+- `orca-cli`: ワークツリー、端末セッション、内蔵ブラウザの操作。
+- `orchestration`: 複数エージェント間の構造化メッセージングとタスク委譲。
+- `computer-use`: OSウィンドウおよびデスクトップUIの操作。
+- `orca-emulator` / `orca-emulator-android`: モバイルエミュレータ操作。
+- `orca-linear` / `linear-tickets`: Linearチケットの取得とPR紐付け。
+- `orca-per-workspace-env`: ワークスペース単位の環境設定。
 
 ### architecture-standard
+ソフトウェア設計およびアーキテクチャ標準の最新規範を参照・適用する。標準本文は手元の配備ツリー（`<standard-root>`）から相対参照で直接読み取り、過去のコミット探索やローカルの固定パスを仮定しない。
 
-`standard-apply`は標準本文とprocess mappingから分離すると価値を失うsignature procedureなのでglobal配備候補になる。ただし、対象projectのADRが指すGit commit objectを読むため、通常の`flake = false` source treeだけでは必要なobjectを持たない。
+- `standard-apply`: 最新の規律（原則、関心事、構造、ツール）に基づき、設計、実装、リファクタリング、レビュー、意味回収を進める入口Skill。
+- `standard-conformance`: 静的解析設定やコード境界を最新標準と照合し、差分管理可能なJSON形式で違反を報告する読み取り専用監査Skill。段階的適用の基線（`docs/conformance-baseline.json`）は対象プロジェクト側で管理し単調減少させる。
+- `standard-feedback`: 標準適用中に規律の矛盾、不成立、欠落、曖昧さを実測した際、`YukiIto1999/architecture-standard`のGitHub Issueへ改訂提案を還流するSkill。重複起票を防ぐ事前検索を行い、GitHub MCP経由で固定書式の提案を送信する。
 
-ownerがprivate dataを含まない固定可能な配布artifactを用意し、記録済みcommitを解決できるようにするか、同等のimmutable snapshot contractへ上流Skillを変更するまでadmissionを保留する。確認した範囲ではowner rootに`LICENSE`または`COPYING`もなく、利用条件の確定が必要である。
+## 拒否条件
 
-#### 監査Skill(standard-conformance)の設計案
+以下の状態は評価およびビルド検査で拒否される。
 
-全repositoryへ配る標準監査Skillは、owner repositoryであるarchitecture-standard側に`standard-apply`の姉妹として新設し、この文書のcompositionで取り込む。責務は次に固定する。
-
-- 対象repositoryのADRが記録するstandard commitを照合先とし、現行標準との差は監査結果でなく「pin更新の提案」として分けて報告する。
-- 手順は、言語とsurfaceの検出、設定drift監査(BannedSymbols・clippy.toml・oxlint設定と標準要求の差分)、規律照合の順で行う。報告は`{"violations":[{"rule","file:line","evidence","mechanizable"}]}`の書式に固定する。
-- 段階適用は対象repository側で持つ。初回監査の結果を対象repositoryのdocs配下へ基線として保存し、以後は基線に無い新規違反だけをfailとし、基線は単調減少させる。標準本文にもdotfiles-wslにも基線を持たせない。
-
-#### 申し立てSkill(standard-feedback)の設計案(2026-09-04、所有者発案)
-
-標準への改訂提案の還流は、標準側が各projectの`docs/`を読みに行く形にせず、project側から`architecture-standard`のGitHub issueとして起票するSkillで行う。dotfiles-wslが全repositoryへ配布する。
-
-- trigger: 標準適用中に、規律の矛盾・不成立・欠落・曖昧さへ実測で突き当たったとき。project側の`docs/revision`への記録は従来どおり残し、issueはその送信路とする。
-- issue本文の書式を固定する: 対象規律の条文名指し(見出し逐語)、実測の証跡(file:line・コマンド結果)、提案の一文、project名とpin済み標準commit。
-- 起票はGitHub Capability(gateway経由)を要求する。重複起票を避けるため、起票前に同条文のopen issueを検索して追記へ切り替える。
-- 標準側はissue trackerを申し立ての唯一の受信箱とし、裁定(採択・棄却・保留)を必ずissue上で返す。tec/tcsに実在した「提案が数ヶ月読まれない」「棄却理由が返らず作業を3回捨てる」再発をこれで防ぐ。
-
-#### admission保留の解消案
-
-commit object問題は、標準本文をNix storeへ取り込まず、workstation上のcheckout pathをruntimeのstore外設定として渡す構成で解消できる。pinするのはSkill sourceだけとし、ADRのcommit解決はcheckoutのGitへ委ねる。これは「非公開pathはruntimeのstore外設定で扱う」の既存契約と整合し、規範が頻繁に動くrepositoryに対してrevision更新の往復も消す。代償は標準本文の参照が固定snapshotでなくなることであり、照合の再現性はADRのcommit記録とcheckout側のGitで担保する。
-LICENSEはowner側の追加が必要であり、admissionの前提として残る。
-
-### vibe-knowledge
-
-private recordを含むrepository自体をinputにしない。owner側にprivate dataを含まないSkill配布sourceと、必要なら同じpinから作るCapability実装ができた後でadmissionを行う。
-
-## 検証と導入
-
-新しいsourceの導入では次を同じ変更に含める。
-
-- flake inputと`flake.lock`
-- `skills`配下のsource adapterとregistry contract
-- 必要なSkill/Capability dependency
-- 全clientの配備projection
-- trigger、near-miss、依存欠落、重複を検出するcheck
-- [Skill portfolio](skills.md)のprovenanceと採用理由
-
-`architecture-standard`と`vibe-knowledge`は現時点で加えない。revision更新ではupstreamの追加、削除、renameを暗黙の変更として扱わず、最終registryと配備結果を確認する。
+- 採用Skillのディレクトリまたは直下の`SKILL.md`が存在しない。
+- ソースをまたいで同一のSkill IDが重複している。
+- レジストリに存在しないCapabilityを要求している。
+- 秘密情報、認証資格情報、またはプライベートな作業記録をSkillソースとしてNix storeへ取り込んでいる。

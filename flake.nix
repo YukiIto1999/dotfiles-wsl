@@ -16,9 +16,13 @@
     # OMP は Bun/Rust native addon を含むため、upstream の Nix package をそのまま使う。
     omp.url = "github:can1357/oh-my-pi";
 
-
     orca = {
       url = "github:stablyai/orca/637dc30a3211ec0667c55118a4d17edbee5cff80";
+      flake = false;
+    };
+
+    architectureStandard = {
+      url = "github:YukiIto1999/architecture-standard/dc0688926bae1ad738ab612379d8fd3fe6247a07";
       flake = false;
     };
   };
@@ -32,6 +36,7 @@
       sops-nix,
       omp,
       orca,
+      architectureStandard,
       ...
     }:
     let
@@ -39,6 +44,7 @@
       hostName = "nixos";
       pluginSources = {
         orca = orca;
+        architecture-standard = architectureStandard;
       };
       collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };
       units = collectUnits ./.;

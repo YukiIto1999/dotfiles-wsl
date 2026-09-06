@@ -32,6 +32,11 @@
     }
     {
       agent = "architect";
+      skill = "standard-apply";
+      activation = "dynamic";
+    }
+    {
+      agent = "architect";
       skill = "web-research";
       activation = "dynamic";
     }
@@ -97,6 +102,11 @@
     }
     {
       agent = "implementer";
+      skill = "standard-apply";
+      activation = "dynamic";
+    }
+    {
+      agent = "implementer";
       skill = "tdd-implementation";
       activation = "dynamic";
     }
@@ -133,6 +143,16 @@
     {
       agent = "reviewer";
       skill = "repository-research";
+      activation = "dynamic";
+    }
+    {
+      agent = "reviewer";
+      skill = "standard-apply";
+      activation = "dynamic";
+    }
+    {
+      agent = "reviewer";
+      skill = "standard-conformance";
       activation = "dynamic";
     }
     {

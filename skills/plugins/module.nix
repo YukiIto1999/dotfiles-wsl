@@ -7,6 +7,7 @@
 let
   pluginPaths = [
     pluginSources.orca
+    pluginSources.architecture-standard
   ];
   findSkillsIn =
     pluginPath:

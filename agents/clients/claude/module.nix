@@ -15,8 +15,8 @@ let
     name:
     map (route: route.skill) (
       builtins.filter (
-        route: route.agent == name && route.activation == "required"
-      ) cfg.agents.shared.routing.agentSkills
+        route: route.subagent == name && route.activation == "required"
+      ) cfg.agents.shared.routing.subagentSkills
     );
 
   userSettingsSeed = ./assets/settings.json;
@@ -56,7 +56,7 @@ let
     cp ${lspJson} $out/lsp/.lsp.json
   '';
 
-  buildAgent =
+  buildSubagent =
     name: srcPath:
     pkgs.runCommand "claude-agent-${name}.md"
       {
@@ -100,10 +100,10 @@ in
     runtimeWrapperMode = "managed";
     rulesDestination = ".claude/CLAUDE.md";
     skillsDestination = ".claude/skills";
-    definitionMode = "rendered";
-    definitionsDestination = ".claude/agents";
-    definitionFormat = "frontmatter-markdown";
-    definitions = lib.mapAttrs buildAgent cfg.agents.shared.definitions;
+    subagentMode = "rendered";
+    subagentsDestination = ".claude/agents";
+    subagentFormat = "frontmatter-markdown";
+    subagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
     gatewayConfig = {
       source = managedMcp;
       format = "json";

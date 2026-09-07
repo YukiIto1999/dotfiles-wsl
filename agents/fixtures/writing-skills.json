@@ -60,7 +60,7 @@
     },
     {
       "id": "change-description",
-      "prompt": "Write a PR body for an explicitly supplied staged diff. Verified facts are quick_validate.py for all local skills, git diff --check, agent-artifact-contract, agent-definition-rendering, and docs-links, all with exit status 0.",
+      "prompt": "Write a PR body for an explicitly supplied staged diff. Verified facts are quick_validate.py for all local skills, git diff --check, agent-artifact-contract, agent-subagent-rendering, and docs-links, all with exit status 0.",
       "input": {
         "type": "staged-diff",
         "changes": [

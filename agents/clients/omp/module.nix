@@ -34,11 +34,11 @@ let
     name:
     map (route: route.skill) (
       builtins.filter (
-        route: route.agent == name && route.activation == "required"
-      ) cfg.agents.shared.routing.agentSkills
+        route: route.subagent == name && route.activation == "required"
+      ) cfg.agents.shared.routing.subagentSkills
     );
 
-  buildAgent =
+  buildSubagent =
     name: srcPath:
     let
       fm = splitFrontmatter srcPath;
@@ -84,10 +84,10 @@ in
     runtimeWrapperMode = "managed";
     rulesDestination = ".omp/agent/AGENTS.md";
     skillsDestination = ".omp/agent/skills";
-    definitionMode = "rendered";
-    definitionsDestination = ".omp/agent/agents";
-    definitionFormat = "frontmatter-markdown";
-    definitions = lib.mapAttrs buildAgent cfg.agents.shared.definitions;
+    subagentMode = "rendered";
+    subagentsDestination = ".omp/agent/agents";
+    subagentFormat = "frontmatter-markdown";
+    subagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
     gatewayConfig = {
       source = gatewayConfig;
       format = "json";

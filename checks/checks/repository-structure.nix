@@ -820,7 +820,7 @@ in
         "checks"
         "package"
         "policy"
-        "roles"
+        "subagents"
         "skill"
         "LICENSE"
       ];

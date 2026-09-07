@@ -152,8 +152,8 @@ LSP は Claude Code、OMP、OpenCode で利用でき、Codex と Antigravity で
 |---|---|---|
 | 共通 rules | `agents/policy/AGENTS.md` | `dotfiles-rebuild` |
 | local Skill | `skills/NAME/module.nix` と `skills/NAME/skill/` | `dotfiles-rebuild` |
-| subagent role | `agents/roles/NAME.md` | `dotfiles-rebuild` |
-| role と Skill の routing | `agents/roles/routing.nix` | `dotfiles-rebuild` |
+| subagent 定義 | `agents/subagents/NAME.md` | `dotfiles-rebuild` |
+| subagent と Skill の routing | `agents/subagents/routing.nix` | `dotfiles-rebuild` |
 | plugin 由来の Skill | `skills/plugins/`、`flake.nix` の plugin input、`flake.lock` | `dotfiles-rebuild` |
 | client の capability、変換、配備先 | `agents/clients/NAME/module.nix` と `agents/clients/NAME/assets/` | `dotfiles-rebuild` |
 | client binary | `agents/clients/NAME/module.nix`。Codex runtime は `capabilities/agent-session/codex/module.nix` | `nix run .#dotfiles-install-agents` |

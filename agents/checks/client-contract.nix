@@ -45,11 +45,11 @@ let
         skillsDestination
         versionArgs
         ;
-      definitions = {
-        mode = client.definitionMode;
-        destination = client.definitionsDestination;
-        format = client.definitionFormat;
-        names = builtins.attrNames client.definitions;
+      subagents = {
+        mode = client.subagentMode;
+        destination = client.subagentsDestination;
+        format = client.subagentFormat;
+        names = builtins.attrNames client.subagents;
       };
       capabilities = {
         lsp = client.lspMode;
@@ -142,7 +142,7 @@ let
         internal = true;
         readOnly = true;
       };
-      definitions = {
+      subagents = {
         type = "attrsOf";
         internal = true;
         readOnly = true;
@@ -169,10 +169,10 @@ let
       agentmemoryMode = "enum";
       binary = "str";
       capabilityManagedFiles = "submodule";
-      definitionFormat = "nullOr";
-      definitionMode = "enum";
-      definitions = "attrsOf";
-      definitionsDestination = "nullOr";
+      subagentFormat = "nullOr";
+      subagentMode = "enum";
+      subagents = "attrsOf";
+      subagentsDestination = "nullOr";
       gatewayConfig = "submodule";
       install = "either";
       lspMode = "enum";
@@ -202,7 +202,7 @@ let
   fixtureSource = ../policy/AGENTS.md;
   fixtureSeedMigrationCommand = pkgs.writeShellScriptBin "dotfiles-migrate-codex-config" "exit 0";
   agentContract = import ../impl/contract.nix { inherit lib; };
-  fixtureDefinitions = lib.genAttrs expected.clients.claude.definitions.names (_: fixtureSource);
+  fixtureSubagents = lib.genAttrs expected.clients.claude.subagents.names (_: fixtureSource);
   expectedRuntimeWrapperModes = {
     antigravity = "unsupported";
     claude = "managed";
@@ -221,10 +221,10 @@ let
       ;
     runtimeWrapperMode = expectedRuntimeWrapperModes.${name};
     package = if client ? package then pkgs.writeShellScriptBin client.binary "exit 0" else null;
-    definitionMode = client.definitions.mode;
-    definitionsDestination = client.definitions.destination;
-    definitionFormat = client.definitions.format;
-    definitions = lib.genAttrs client.definitions.names (_: fixtureSource);
+    subagentMode = client.subagents.mode;
+    subagentsDestination = client.subagents.destination;
+    subagentFormat = client.subagents.format;
+    subagents = lib.genAttrs client.subagents.names (_: fixtureSource);
     gatewayConfig = client.gateway // {
       source = fixtureSource;
     };
@@ -249,10 +249,10 @@ let
     shared = {
       rules = fixtureSource;
       skills.fixture = fixtureSource;
-      definitions = fixtureDefinitions;
+      subagents = fixtureSubagents;
       routing = {
-        agentSkills = [ ];
-        agentHandoffs = [ ];
+        subagentSkills = [ ];
+        subagentHandoffs = [ ];
       };
     };
     clients = candidateClients;
@@ -522,8 +522,8 @@ let
   invalidSkillsDestinationCandidate = mutateClient "claude" {
     skillsDestination = ".claude//skills";
   };
-  invalidDefinitionsDestinationCandidate = mutateClient "claude" {
-    definitionsDestination = "/tmp/agents";
+  invalidSubagentsDestinationCandidate = mutateClient "claude" {
+    subagentsDestination = "/tmp/agents";
   };
   invalidMultipleSharedDestinationsCandidate = mutateClient "claude" {
     rulesDestination = "../AGENTS.md";
@@ -573,16 +573,16 @@ in
     );
     assert builtins.all (valid: valid) (builtins.attrValues (requiredStringChecksFor baseCandidate));
     assert !contractIsValid (baseCandidate // { enabled = [ "claude" ]; });
-    assert !contractIsValid (mutateClient "claude" { definitionFormat = "toml"; });
+    assert !contractIsValid (mutateClient "claude" { subagentFormat = "toml"; });
     assert
       !contractIsValid (
         mutateClient "antigravity" {
-          definitionsDestination = ".gemini/agents";
-          definitionFormat = "frontmatter-markdown";
-          definitions.fixture = fixtureSource;
+          subagentsDestination = ".gemini/agents";
+          subagentFormat = "frontmatter-markdown";
+          subagents.fixture = fixtureSource;
         }
       );
-    assert !contractIsValid (mutateClient "codex" { definitionFormat = null; });
+    assert !contractIsValid (mutateClient "codex" { subagentFormat = null; });
     assert
       !contractIsValid (
         mutateClient "opencode" {
@@ -627,10 +627,10 @@ in
     assert builtins.elem
       "agent shared destinations must be canonical home-relative paths: claude/skillsDestination (.claude//skills)"
       (failedContractMessages invalidSkillsDestinationCandidate);
-    assert !contractIsValid invalidDefinitionsDestinationCandidate;
+    assert !contractIsValid invalidSubagentsDestinationCandidate;
     assert builtins.elem
-      "agent shared destinations must be canonical home-relative paths: claude/definitionsDestination (/tmp/agents)"
-      (failedContractMessages invalidDefinitionsDestinationCandidate);
+      "agent shared destinations must be canonical home-relative paths: claude/subagentsDestination (/tmp/agents)"
+      (failedContractMessages invalidSubagentsDestinationCandidate);
     assert builtins.elem
       "agent shared destinations must be canonical home-relative paths: claude/rulesDestination (../AGENTS.md), claude/skillsDestination (.claude//skills)"
       (failedContractMessages invalidMultipleSharedDestinationsCandidate);
@@ -668,11 +668,11 @@ in
     assert !contractIsValid (mutateClient "codex" { versionArgs = [ "" ]; });
     assert !contractIsValid (mutateClient "claude" { rulesDestination = ""; });
     assert !contractIsValid (mutateClient "claude" { skillsDestination = ""; });
-    assert !contractIsValid (mutateClient "claude" { definitionsDestination = ""; });
+    assert !contractIsValid (mutateClient "claude" { subagentsDestination = ""; });
     assert
       !contractIsValid (
         mutateClient "claude" {
-          definitions = baseCandidate.clients.claude.definitions // {
+          subagents = baseCandidate.clients.claude.subagents // {
             "" = fixtureSource;
           };
         }
@@ -743,7 +743,7 @@ in
         baseCandidate
         // {
           shared = baseCandidate.shared // {
-            definitions = baseCandidate.shared.definitions // {
+            subagents = baseCandidate.shared.subagents // {
               "" = fixtureSource;
             };
           };

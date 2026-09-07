@@ -62,10 +62,10 @@
 
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
-| default Git identityを変える | [`identity/module.nix`](../../identity/module.nix)のtemplateと[`secrets/sops/assets/secrets.yaml`](../../secrets/sops/assets/secrets.yaml) | host keyを指定してSOPSで編集し、`dotfiles-rebuild` |
+| default Git identityを変える | [`identity/module.nix`](../../identity/module.nix)のtemplateと[`secrets/sops/assets/secrets.json`](../../secrets/sops/assets/secrets.json) | host keyを指定してSOPSで編集し、`dotfiles-rebuild` |
 | work identityの対象と値を変える | [`toolchain/git/module.nix`](../../toolchain/git/module.nix)、[`identity/module.nix`](../../identity/module.nix)、暗号化済みsecret | `dotfiles-rebuild` |
-| GitHub accountを増減する | [`profiles/workstation.nix`](../../profiles/workstation.nix)の`dotfiles.identity.github`と暗号化済みsecret | rosterと暗号化済み値を同じ変更に含める。moduleは変えない |
-| application credentialを追加・変更する | 対応するCapabilityの`sops.secrets`とtemplate、[`secrets/sops/assets/secrets.yaml`](../../secrets/sops/assets/secrets.yaml) | host keyを指定してSOPSで編集し、`dotfiles-rebuild` |
+| GitHub accountを増減する | 暗号化済み[`secrets/sops/assets/secrets.json`](../../secrets/sops/assets/secrets.json)の`accounts` | host keyを指定してSOPSで編集し、`dotfiles-rebuild`。宣言側は変えない |
+| application credentialを追加・変更する | 対応するCapabilityの`sops.secrets`とtemplate、[`secrets/sops/assets/secrets.json`](../../secrets/sops/assets/secrets.json) | host keyを指定してSOPSで編集し、`dotfiles-rebuild` |
 | host recipientを追加する | [`secrets/sops/assets/.sops.yaml`](../../secrets/sops/assets/.sops.yaml) | [SOPSの鍵](../operations/sops-enrollment.md)に従う |
 
 通常のsecret編集commandは次の形に統一する。
@@ -73,7 +73,7 @@
 ```bash
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
   sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml \
-  ~/dotfiles-wsl/secrets/sops/assets/secrets.yaml
+  ~/dotfiles-wsl/secrets/sops/assets/secrets.json
 ```
 
 ## 運用入口

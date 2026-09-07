@@ -10,6 +10,20 @@ let
   accountIdType = lib.types.addCheck lib.types.str (
     value: builtins.match "[a-z0-9]+(-[a-z0-9]+)*" value != null
   );
+  # 誰が登録済みかは暗号化済み store の key 構造が持つ。宣言側へ id を書かない
+  accountOf = path: builtins.elemAt (lib.splitString "/" path) 1;
+  accountPaths = builtins.filter (path: lib.hasPrefix "accounts/" path) config.dotfiles.secrets.paths;
+  storeAccounts = lib.unique (map accountOf accountPaths);
+  storePrimaries = lib.unique (
+    map accountOf (builtins.filter (path: lib.hasSuffix "/primary" path) accountPaths)
+  );
+  accountsMissingCredentials = builtins.filter (
+    account:
+    !(
+      builtins.elem "accounts/${account}/username" accountPaths
+      && builtins.elem "accounts/${account}/token" accountPaths
+    )
+  ) storeAccounts;
   inherit (config.dotfiles.workstation) homeDir username;
   inherit (config.sops) placeholder;
   mkUserSecretFile = import ../secrets/sops/impl/user-secret-file.nix { inherit username; };
@@ -36,17 +50,21 @@ in
   options.dotfiles.identity.github = {
     accounts = lib.mkOption {
       type = lib.types.listOf accountIdType;
-      example = [
-        "personal"
-        "work"
-      ];
-      description = "この host が使う GitHub account id。sops secret 対、gh host user、github MCP target に対応する。";
+      readOnly = true;
+      internal = true;
+      description = "暗号化済み store から導出した GitHub account id。gh host user と github MCP target に対応する。";
     };
     primary = lib.mkOption {
-      type = accountIdType;
-      example = "personal";
-      description = "gh の active user と hosts.yml の既定 token になる account id。accounts の要素でなければならない。";
+      type = lib.types.str;
+      readOnly = true;
+      internal = true;
+      description = "store が primary と印を付けた account id。gh の active user と hosts.yml の既定 token になる。";
     };
+  };
+
+  config.dotfiles.identity.github = {
+    accounts = storeAccounts;
+    primary = if builtins.length storePrimaries == 1 then builtins.head storePrimaries else "";
   };
 
   config.sops.secrets =
@@ -106,12 +124,16 @@ in
 
   config.assertions = [
     {
-      assertion = cfg.accounts != [ ] && cfg.accounts == lib.unique cfg.accounts;
-      message = "dotfiles.identity.github.accounts must be non-empty and free of duplicates";
+      assertion = storeAccounts != [ ];
+      message = "the encrypted store must declare at least one entry under accounts/";
     }
     {
-      assertion = builtins.elem cfg.primary cfg.accounts;
-      message = "dotfiles.identity.github.primary must be one of dotfiles.identity.github.accounts";
+      assertion = builtins.length storePrimaries == 1;
+      message = "exactly one account in the encrypted store must carry a primary marker, found ${toString (builtins.length storePrimaries)}";
+    }
+    {
+      assertion = accountsMissingCredentials == [ ];
+      message = "accounts in the encrypted store must hold both username and token: ${lib.concatStringsSep ", " accountsMissingCredentials}";
     }
   ];
 }

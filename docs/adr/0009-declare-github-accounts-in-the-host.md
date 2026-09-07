@@ -4,7 +4,7 @@
 
 ## Status
 
-Accepted
+Superseded by [ADR 0010](0010-derive-the-account-roster-from-the-store.md)
 
 ## Context
 

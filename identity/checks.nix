@@ -18,11 +18,7 @@ let
   homeDir = hostConfig.dotfiles.workstation.homeDir;
   variantTemplate = variantConfig.sops.templates."gh-hosts.yml";
   primary = hostConfig.dotfiles.identity.github.primary;
-  reversedAccountsTemplate =
-    (mkNixosSystem [
-      normalMachineModule
-      { dotfiles.identity.github.accounts = lib.mkForce (lib.reverseList accounts); }
-    ]).config.sops.templates."gh-hosts.yml";
+  storeFile = hostConfig.sops.defaultSopsFile;
   noWorkIdentityConfig =
     (mkNixosSystem [
       normalMachineModule
@@ -36,9 +32,6 @@ in
   account-deployment-contract =
     assert accounts != [ ];
     assert builtins.elem primary accounts;
-    # 並べ替えが primary を動かさないこと。位置ではなく宣言が primary を決める
-    assert lib.hasInfix hostConfig.sops.placeholder."accounts/${primary}/token"
-      reversedAccountsTemplate.content;
     assert variantConfig.dotfiles.identity.github.accounts == accounts;
     assert variantTemplate.content == accountTemplate.content;
     assert accountTemplate.content == builtins.readFile accountArtifact.source;
@@ -65,5 +58,17 @@ in
     assert !(identityDestinationType.check "safe/../outside");
     assert !(identityDestinationType.check "safe//outside");
     assert !(identityDestinationType.check "safe\noutside");
-    pkgs.runCommandLocal "check-account-deployment-contract" { } "touch $out";
+    # 導出は Nix の fromJSON、期待値は jq。同じ store を別経路で読んで一致を見る
+    pkgs.runCommandLocal "check-account-deployment-contract"
+      {
+        nativeBuildInputs = [ pkgs.jq ];
+        derivedAccounts = lib.concatStringsSep " " accounts;
+        derivedPrimary = primary;
+      }
+      ''
+        set -euo pipefail
+        test "$(jq -r '.accounts | keys_unsorted | sort | join(" ")' ${storeFile})" = "$derivedAccounts"
+        test "$(jq -r '[.accounts | to_entries[] | select(.value | has("primary")) | .key] | join(" ")' ${storeFile})" = "$derivedPrimary"
+        touch $out
+      '';
 }

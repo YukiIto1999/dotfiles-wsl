@@ -2,7 +2,7 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-暗号化済み secret の正本は `secrets/sops/assets/secrets.yaml`、復号に使う host key は `/var/lib/sops-nix/key.txt` である。secret 名の完全な一覧は、各 consumer に隣接する `sops.secrets` 宣言を正本とし、この文書には複製しない。
+暗号化済み secret の正本は `secrets/sops/assets/secrets.json`、復号に使う host key は `/var/lib/sops-nix/key.txt` である。secret 名の完全な一覧は、各 consumer に隣接する `sops.secrets` 宣言を正本とし、この文書には複製しない。
 
 ## 編集
 
@@ -11,9 +11,9 @@
 ```bash
 cd ~/dotfiles-wsl
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops --config secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.yaml
-git diff --check -- secrets/sops/assets/secrets.yaml
-git diff -- secrets/sops/assets/secrets.yaml
+  sops --config secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
+git diff --check -- secrets/sops/assets/secrets.json
+git diff -- secrets/sops/assets/secrets.json
 ```
 
 平文を別ファイル、shell history、Git patch、ログへ書かない。通常の値変更で `sops updatekeys` は要らない。recipient と host key を変える手順は [SOPS の鍵](sops-enrollment.md)にある。
@@ -30,9 +30,9 @@ identity の値は `identity/module.nix` の SOPS template を介して配備す
 
 ## GitHub account
 
-`dotfiles.identity.github.accounts` がこの host の GitHub account roster を宣言し、`dotfiles.identity.github.primary` が `gh` の active user と既定 token になる account を指す。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `identity/module.nix`、MCP の token 読み込みは `capabilities/github-resources/github/mcp/module.nix` が所有する。account がいくつあるかは host の宣言だけが持ち、module は非空、重複なし、ID の形だけを検査する。
+GitHub account の roster は暗号化済み store が持つ。sops は値だけを暗号化して key の構造を平文で残すので、`accounts` 配下の key が登録済み account の正本であり、`identity/module.nix` はそこから roster を導出する。宣言側に account ID を書かない。`gh` の active user と既定 token になる account は、その entry に `primary` の key を置いて印を付ける。username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。
 
-account の追加と削除では `profiles/workstation.nix` の roster と対応する暗号化済み key を同時に変更する。`primary` を変えるときは roster の要素を指す。並べ替えは挙動を変えない。`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
+account の追加と削除は store の編集だけで完結する。`accounts` へ entry を足し、`username` と `token` を入れ、`primary` はどれか一つの entry にだけ置く。module も profile も変えない。登録済み account を確かめるには `gh auth status` を使い、`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
 
 ## Agentmemory
 

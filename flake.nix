@@ -43,7 +43,7 @@
       system = "x86_64-linux";
       hostName = "nixos";
       pluginSources = {
-        orca = orca;
+        inherit orca;
         architecture-standard = architectureStandard;
       };
       collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };

@@ -83,7 +83,8 @@ let
     _: source:
     lib.mapAttrs (
       skillId: metadata:
-      metadata // {
+      metadata
+      // {
         source = source.source + "/skills/${skillId}";
       }
     ) source.skills

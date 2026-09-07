@@ -8,6 +8,7 @@
 let
   cfg = config.dotfiles;
   mkCommand = import ../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
+  policy = import ./impl/policy.nix { inherit lib pkgs; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   routing = import ./subagents/routing.nix;
@@ -45,7 +46,8 @@ let
   enabledSkillNames = builtins.filter (
     name: builtins.hasAttr name cfg.skills.registry
   ) cfg.skills.enabled;
-  allSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name}.source);
+  enabledSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name});
+  allSkills = lib.mapAttrs (_: skill: skill.source) enabledSkills;
 
   subagentsRoot = ./subagents;
   sharedSubagents =
@@ -59,6 +61,14 @@ let
 
   subagentFileName =
     client: name: if client.subagentFormat == "toml" then "${name}.toml" else "${name}.md";
+
+  policyRules = policy.render {
+    template = ./policy/AGENTS.md;
+    skills = enabledSkills;
+    subagents = sharedSubagents;
+    capabilities = cfg.capabilities.enabled;
+    inherit (agents) clients;
+  };
 
   normalizeSource =
     source:
@@ -389,7 +399,7 @@ in
         ];
       };
       shared = {
-        rules = ./policy/AGENTS.md;
+        rules = policyRules;
         skills = allSkills;
         subagents = sharedSubagents;
         inherit routing;

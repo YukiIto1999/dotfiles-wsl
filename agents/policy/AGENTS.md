@@ -43,19 +43,11 @@ Think in English. Respond in Japanese.
 
 ## subagents
 
-複雑な作業、独立した視点が必要な作業、レビューやセキュリティ確認では subagent を使う。agent は Claude / Codex / OMP / OpenCode に配備する。Antigravity は静的な agent 機能を持たないため対象外。
+複雑な作業、独立した視点が必要な作業、レビューやセキュリティ確認では subagent を使う。配備先の client は `## 基盤` の client の能力表が示す。
 
 subagent は文脈の再構築と報告の読み直しの分だけ高くつく。独立して並列化できる作業にだけ使う。数回の tool 呼び出しで終わる調査、単一ファイルの編集、自分の作業の検証は自分で行う。委譲したら結果を再導出せず、その報告を使って先に進む。
 
-| 目的 | subagent |
-|---|---|
-| コードベース探索、定義と参照の検索 | `explorer` |
-| 実装計画、phase 分割、リスク整理 | `planner` |
-| 設計判断、影響範囲、ADR 起案 | `architect` |
-| 計画に沿った実装、テスト、検証 | `implementer` |
-| diff review、severity 付き指摘 | `reviewer` |
-| 脅威モデリング、攻撃経路整理 | `security` |
-| 実装前のUI brief | `designer` |
+@subagentRoster@
 
 ## skills
 
@@ -67,70 +59,29 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 
 `nix flake check` は配備対象の Skill、subagent、Skill が宣言する Capability 依存と配備配線を検査する。`dotfiles-doctor` は `dotfiles.health.observations` の全登録を観測し、Skill を含む managed artifact と current source の不一致も検査する。Skill の動作や意味と実際の agent 機能との整合は自動検査しない。
 
-| 目的 | Skill |
-|---|---|
-| 日本語文書の作成、推敲 | `ja-writing` |
-| 外部 Web の調査 | `web-research` |
-| local repositoryのsemantic・横断調査 | `repository-research` |
-| 実browserの操作と受入確認 | `browser-operation` |
-| GitHub resourceの安全なread / write | `github-operations` |
-| 過去のproject経緯の検索と長期記憶の保存 | `memory` |
-| bug、test失敗、incidentの原因分析 | `bug-analysis` |
-| import、call、data、runtime、build、deploymentの依存分析 | `dependency-analysis` |
-| 具体的な変更のconsumer、互換性、rollout、rollback影響分析 | `impact-analysis` |
-| latency、throughput、CPU、memory、I/O、DB、browser性能のbottleneck分析 | `performance-analysis` |
-| 確定済みbehaviorをRED、最小GREEN、REFACTORで実装 | `tdd-implementation` |
-| observableを保った内部構造の段階的な改善 | `refactoring-implementation` |
-| domain概念、境界、語彙、不変条件の設計 | `domain-modeling` |
-| module境界、公開contract、visualが固定済みの内部codeとcomponent構造の設計 | `code-design` |
-| moduleの責務、state、artifact、粗いcontract、依存方向の設計 | `module-design` |
-| moduleやprocess境界のexact contract、failure、互換性の設計 | `interface-design` |
-| 固定済みmodule、責務owner、公開contract内のfailure表現、翻訳、伝播、回復、観測の設計 | `error-design` |
-| planやdecisionを依存順の質問で詰める | `grilling` |
-| commit / PR 前の diff review | `code-review` |
-| staged diff から commit message 作成 | `commit-writing` |
-| PR、changelog、release noteの作成 | `change-writing` |
-| README、ADR、仕様、報告、技術解説の作成 | `description-writing` |
-| 宣言のdocumentation comment作成 | `documentation-writing` |
-| 実装commentの要否判断と作成 | `comment-writing` |
-| セキュリティ分析と脆弱性検査（脅威モデル、発見、検証、攻撃経路、修正） | `security-review` |
-| 実装前のUI方針 | `ui-design` |
-| Skill 作成 | `skill-design` |
-| 可視ウィンドウ・デスクトップGUIの操作 | `computer-use` |
-| Orcaのワークツリー、端末、内蔵ブラウザ操作 | `orca-cli` |
-| 複数エージェント間の構造化協調・タスク委譲 | `orchestration` |
-| iOSシミュレータの操作・テスト | `orca-emulator` |
-| Androidエミュレータ・実機の操作・テスト | `orca-emulator-android` |
-| Linearチケットの取得、更新、PR紐付け | `orca-linear` |
-| ワークスペース単位の環境レシピ設定 | `orca-per-workspace-env` |
-| architecture-standardの最新規律に基づく設計・実装・監査 | `standard-apply` |
-| architecture-standardに対する静的適合性・設定driftの監査 | `standard-conformance` |
-| architecture-standardへの規律改訂・矛盾申し立てのIssue起票 | `standard-feedback` |
+@skillRoster@
 
 ## 基盤
 
 ### MCP
 
-全clientは単一のgatewayからprovider実装を使う。container、service、databaseを背後に持つ実装は、対応する Capability の内側に置く。agentはSkillを入口にし、Skillは下表のCapabilityだけを要求する。provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。
+全clientは単一のgatewayからprovider実装を使う。container、service、databaseを背後に持つ実装は、対応する Capability の内側に置く。agentはSkillを入口にし、Skillが宣言したCapabilityだけを要求する。provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。
 
-| 目的 | 入口 | Capability |
-|---|---|---|
-| 外部Web、library、frameworkの調査 | `web-research` | `library-documentation` / `web-content` / `web-discovery` |
-| local repositoryのsemantic・横断調査 | `repository-research` | `repository-search` |
-| GitHub resourceのread / write | `github-operations` | `github-resources` |
-| code reviewの解析候補 | `code-review` | `code-quality` |
-| browser操作、DOM、console、network、screenshot | `browser-operation` | `browser-automation` |
-| browserのperformance trace、heap、Lighthouse | `performance-analysis` | `browser-diagnostics` |
-| 過去の経緯の検索と長期記憶の保存 | `memory` | `project-memory` |
-| 別clientの独立したsession | agentから直接。現在のclientのsubagentで足りる役割分担には使わない | `agent-session` |
+入口 Skill を持たない Capability は、他の Capability の依存か、agent が直接使うものである。後者に当たるのは別 client の独立した session だけで、現在の client の subagent で足りる役割分担には使わない。
+
+@capabilityRoster@
+
+### client の能力
+
+@clientMatrix@
 
 ### LSP
 
-LSP は Claude Code、OMP、OpenCode で利用でき、Codex と Antigravity では未対応である。対応 client では、symbol の定義、参照、diagnostic を意味的に調べるときに LSP を使う。未対応または現在の session に提供されていない場合はローカル検索へ戻り、agent が language server を追加、再設定、直接起動しない。
+対応 client では、symbol の定義、参照、diagnostic を意味的に調べるときに LSP を使う。未対応または現在の session に提供されていない場合はローカル検索へ戻り、agent が language server を追加、再設定、直接起動しない。
 
 ### agentmemory
 
-明示的な検索と保存は`memory`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携はClaude Code、Codex、OMPがlifecycle hooks、OpenCodeがcapture pluginを使い、Antigravityにはない。自動連携は同Skillのrecall、検証、保存判断を代替しない。
+明示的な検索と保存は`memory`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携の経路は client ごとに異なり、client の能力表が示す。自動連携は同Skillのrecall、検証、保存判断を代替しない。
 
 ## dotfiles
 
@@ -147,16 +98,6 @@ LSP は Claude Code、OMP、OpenCode で利用でき、Codex と Antigravity で
 ### Agent の変更箇所
 
 生成済みの rules、Skill、subagent、client config は直接編集しない。変更は dotfiles 内の正本に行い、作業ツリーに未コミットの変更を残さずコミットしてから `dotfiles-rebuild` を実行する（新規ファイルは `git add` を忘れない）。名前解決スタック等でキャッシュ取得が失敗する場合は `NIX_CONFIG="substitute = false" dotfiles-rebuild` でローカルビルドを継続できる。
-
-| 変更目的 | 正本 | 適用 |
-|---|---|---|
-| 共通 rules | `agents/policy/AGENTS.md` | `dotfiles-rebuild` |
-| local Skill | `skills/NAME/module.nix` と `skills/NAME/skill/` | `dotfiles-rebuild` |
-| subagent 定義 | `agents/subagents/NAME.md` | `dotfiles-rebuild` |
-| subagent と Skill の routing | `agents/subagents/routing.nix` | `dotfiles-rebuild` |
-| plugin 由来の Skill | `skills/plugins/`、`flake.nix` の plugin input、`flake.lock` | `dotfiles-rebuild` |
-| client の capability、変換、配備先 | `agents/clients/NAME/module.nix` と `agents/clients/NAME/assets/` | `dotfiles-rebuild` |
-| client binary | `agents/clients/NAME/module.nix`。Codex runtime は `capabilities/agent-session/codex/module.nix` | `nix run .#dotfiles-install-agents` |
 
 Agent client の更新は `docs/operations/agent-clients.md`、構造は `docs/architecture/ai-tooling.md`、目的別の正本は `docs/reference/change-map.md` に従う。
 

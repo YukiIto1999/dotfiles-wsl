@@ -553,12 +553,6 @@ in
         done
         grep -Fq 'tool_call hooks must fail open' "$ompHook"
 
-        grep -Fq 'dotfiles-doctor` は `dotfiles.health.observations` の全登録を観測し' ${self}/agents/policy/AGENTS.md
-        grep -Fq 'Skill を含む managed artifact と current source の不一致も検査する' ${self}/agents/policy/AGENTS.md
-        grep -Fq 'Skill の動作や意味と実際の agent 機能との整合は自動検査しない' ${self}/agents/policy/AGENTS.md
-        grep -Fq 'seed は runtime drift の対象にしない' ${self}/docs/architecture/ai-tooling.md
-        grep -Fq 'managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する' ${self}/docs/architecture/ai-tooling.md
-
         jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
           '. == {mcpServers: {gateway: {type: "http", url: $expected}}}' \
           ${clients.claude.gatewayConfig.source} > /dev/null
@@ -941,8 +935,6 @@ in
           pkgs.yq
         ];
         rulesSource = hostConfig.dotfiles.agents.shared.rules;
-        subagentNames = lib.concatStringsSep " " sharedSubagentNames;
-        routedSkillNames = lib.concatStringsSep " " sharedSkillNames;
         requiredSkillsJson = builtins.toJSON requiredSkillsBySubagent;
         routingJson = builtins.toJSON routingContract;
         inherit sharedSubagentFarm;
@@ -954,6 +946,35 @@ in
         codexSources = codexSubagentSources;
         ompSources = ompSubagentSources;
         opencodeSources = opencodeSubagentSources;
+        skillEntries = lib.concatStringsSep " " (
+          lib.mapAttrsToList (
+            name: source: "${name}=${source}/SKILL.md"
+          ) hostConfig.dotfiles.agents.shared.skills
+        );
+        subagentEntries = lib.concatStringsSep " " (
+          lib.mapAttrsToList (name: source: "${name}=${source}") hostConfig.dotfiles.agents.shared.subagents
+        );
+        expectedCapabilityRows = lib.concatStringsSep "\n" (
+          map (
+            capability:
+            let
+              entrySkills = builtins.attrNames (
+                lib.filterAttrs (
+                  name: _: builtins.elem capability hostConfig.dotfiles.skills.registry.${name}.requiresCapabilities
+                ) hostConfig.dotfiles.agents.shared.skills
+              );
+            in
+            "| `${capability}` | ${
+              if entrySkills == [ ] then "なし" else lib.concatMapStringsSep " / " (name: "`${name}`") entrySkills
+            } |"
+          ) hostConfig.dotfiles.capabilities.enabled
+        );
+        expectedClientRows = lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (
+            id: client:
+            "| `${id}` | `${client.subagentMode}` | `${client.skillProjectionMode}` | `${client.lspMode}` | `${client.telemetryMode}` | `${client.agentmemoryMode}` |"
+          ) clients
+        );
       }
       ''
         set -euo pipefail
@@ -964,40 +985,61 @@ in
         while IFS=$'\t' read -r subagent skill; do
           source="$sharedSubagentFarm/$subagent"
           if ! grep -Fq "\`$skill\`" "$source"; then
-            echo "agent Skill route is absent from definition: $agent/$skill" >&2
+            echo "subagent Skill route is absent from its definition: $subagent/$skill" >&2
             exit 1
           fi
         done < <(jq -r '.subagentSkills[] | [.subagent, .skill] | @tsv' <<<"$routingJson")
         while IFS=$'\t' read -r from to artifact; do
           source="$sharedSubagentFarm/$from"
           if ! grep -Fq "\`$artifact\`" "$source" || ! grep -Fq "$to" "$source"; then
-            echo "agent handoff route is absent from definition: $from/$to/$artifact" >&2
+            echo "subagent handoff route is absent from its definition: $from/$to/$artifact" >&2
             exit 1
           fi
         done < <(jq -r '.subagentHandoffs[] | [.from, .to, .artifact] | @tsv' <<<"$routingJson")
 
-        for name in $routedSkillNames; do
-          if ! grep -Fq "\`$name\`" "$rulesSource"; then
-            echo "shared Skill has no AGENTS.md route: $name" >&2
+        # 期待行は生成器の表組立てとは別に組む。description は YAML の block scalar と
+        # quoted string を使うため、抽出だけは同じ parser を通す
+        : > expected-rows.txt
+        for entry in $skillEntries $subagentEntries; do
+          name=''${entry%%=*}
+          source=''${entry#*=}
+          closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$source")
+          test -n "$closing"
+          sed -n "2,$((closing - 1))p" "$source" > expected-frontmatter.yaml
+          description=$(yq -r '.description' expected-frontmatter.yaml)
+          if [ -z "$description" ] || [ "$description" = null ]; then
+            echo "frontmatter declares no description: $source" >&2
             exit 1
           fi
+          printf '| %s | `%s` |\n' "$description" "$name" >> expected-rows.txt
         done
-        for name in $subagentNames; do
-          if ! grep -Fq "\`$name\`" "$rulesSource"; then
-            echo "shared subagent has no AGENTS.md route: $name" >&2
-            exit 1
-          fi
-        done
-
-
-        grep -Fq 'LSP は Claude Code、OMP、OpenCode で利用でき' "$rulesSource"
-        grep -Fq '自動連携はClaude Code、Codex、OMPがlifecycle hooks' "$rulesSource"
-        for obsolete in memory_lesson_recall memory_lesson_save '~/.claude/projects/<X>/memory/'; do
-          if grep -Fq "$obsolete" "$rulesSource"; then
-            echo "obsolete memory route remains in AGENTS.md: $obsolete" >&2
-            exit 1
-          fi
-        done
+        printf '%s\n' "$expectedCapabilityRows" >> expected-rows.txt
+        printf '%s\n' "$expectedClientRows" >> expected-rows.txt
+        # 見出しと区切りも期待値に含め、表の行集合を両方向で一致させる
+        {
+          printf '| 目的 | Skill |\n'
+          printf '| 目的 | subagent |\n'
+          printf '| Capability | 入口 Skill |\n'
+          printf '| client | subagent | Skill 投影 | LSP | Telemetry | AgentMemory |\n'
+          printf '| --- | --- |\n'
+          printf '| --- | --- | --- | --- | --- | --- |\n'
+        } >> expected-rows.txt
+        missing=$(grep -Fxv -f "$rulesSource" expected-rows.txt || true)
+        if [ -n "$missing" ]; then
+          echo "generated policy is missing rows derived from the declarations:" >&2
+          printf '%s\n' "$missing" >&2
+          exit 1
+        fi
+        extra=$(grep -E '^\|.*\|$' "$rulesSource" | grep -Fxv -f expected-rows.txt || true)
+        if [ -n "$extra" ]; then
+          echo "generated policy has table rows that no declaration produces:" >&2
+          printf '%s\n' "$extra" >&2
+          exit 1
+        fi
+        if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$rulesSource"; then
+          echo 'generated policy retains an unsubstituted marker' >&2
+          exit 1
+        fi
 
         check_frontmatter() {
           local source=$1 closing

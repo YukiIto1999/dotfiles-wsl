@@ -35,7 +35,7 @@ Nix storeのcandidate system
 | `identity/` | Git authorとGitHub account identity |
 | `secrets/` | secretの意味的なroot。SOPS実装は`secrets/sops/` |
 | `toolchain/` | PATH上の開発ツール、language server、Git設定、dev shell |
-| `agents/` | Agent client、role、policy、runtime、delegation、Skill配備 |
+| `agents/` | Agent client、subagent、policy、runtime、delegation、Skill配備 |
 | `skills/` | task procedureとSkill間・Capabilityへの依存metadata |
 | `capabilities/` | consumer非依存の機能contract、provider adapter、backend、state、credential、lifecycle |
 | `platform/` | provider・application非依存のMCP、container、CLI builder |

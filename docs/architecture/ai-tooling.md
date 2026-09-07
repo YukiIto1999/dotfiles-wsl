@@ -8,7 +8,7 @@ AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycle�
 
 ```text
 agents/policy/AGENTS.md ───────────────────┐
-agents/roles/*.md ── client変換 ──────────┤
+agents/subagents/*.md ── client変換 ──────────┤
 skills/*/skill/ ──────────────────────────┼─► Nix store ─► 各clientの設定領域
 flake inputのplugin Skill ─────────────────┘
 
@@ -19,7 +19,7 @@ AI CLI ─► LSP ─► language server
        └► OTLP ─► telemetry collector
 ```
 
-[`agents/roles/routing.nix`](../../agents/roles/routing.nix)はroleからSkillへのroutingとrole間handoffだけを持つ。provider名、backend名、直接provider例外は置かない。Skillの依存は各[`skills/NAME/module.nix`](../../skills)が`requiresSkills`と`requiresCapabilities`で宣言する。
+[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)はsubagentからSkillへのroutingとsubagent間handoffだけを持つ。provider名、backend名、直接provider例外は置かない。Skillの依存は各[`skills/NAME/module.nix`](../../skills)が`requiresSkills`と`requiresCapabilities`で宣言する。
 
 実行時の原則は`Agent → Skill → Capability → provider/runtime`である。Agentはtask、権限、委譲、成果物handoffを所有する。Skillは反復する判断、手順、停止条件を所有する。Capabilityはconsumerに依存しない機能contractである。provider adapter、container、database、credential、stateはCapabilityの実装詳細であり、AgentやSkillへ逆依存しない。
 
@@ -64,11 +64,11 @@ runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録す�
 
 ## Policy、role、Skill
 
-[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的roleは[`agents/roles/`](../../agents/roles)に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
+[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的subagentは[`agents/subagents/`](../../agents/subagents)に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
 
-`native`と`rendered`のroleはhome配下へ配備する。Codexの`declared` roleはhomeへsymlinkせず、`config.toml`の`[agents.<role>]`からNix storeの実体を`config_file`で指す。Codexがrole fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
+`native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<role>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
 
-| Client | Role | Skill投影 | LSP | Telemetry | AgentMemory |
+| Client | subagent | Skill投影 | LSP | Telemetry | AgentMemory |
 |---|---|---|---|---|---|
 | Claude Code | rendered Markdown | required Skillをpreload | plugin | managed settings | lifecycle hooks |
 | Codex | rendered TOML | bodyからdynamic routing | unsupported | unsupported | lifecycle hooks |

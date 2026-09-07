@@ -26,7 +26,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 
 有効なSkillは[`profiles/workstation.nix`](../../profiles/workstation.nix)がregistryのkeyから選ぶ。Agent clientはこの有効集合だけを各client形式へ投影する。
 
-MCP専用の薄いwrapperは置かない。`repository-research`は探索経路とsource検証、`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。SkillとCapabilityの対応、Agentごとのrouteは[`agents/roles/routing.nix`](../../agents/roles/routing.nix)を正本にする。
+MCP専用の薄いwrapperは置かない。`repository-research`は探索経路とsource検証、`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。SkillとCapabilityの対応、subagentごとのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
 
 ## 体系と接尾辞
 

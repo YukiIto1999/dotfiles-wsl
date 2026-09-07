@@ -12,7 +12,7 @@
       "versionArgs": ["--version"],
       "rulesDestination": ".gemini/AGENTS.md",
       "skillsDestination": ".gemini/antigravity-cli/skills",
-      "definitions": {
+      "subagents": {
         "mode": "unsupported",
         "destination": null,
         "format": null,
@@ -52,7 +52,7 @@
       "versionArgs": ["--version"],
       "rulesDestination": ".claude/CLAUDE.md",
       "skillsDestination": ".claude/skills",
-      "definitions": {
+      "subagents": {
         "mode": "rendered",
         "destination": ".claude/agents",
         "format": "frontmatter-markdown",
@@ -110,7 +110,7 @@
       "versionArgs": ["--version"],
       "rulesDestination": ".codex/AGENTS.md",
       "skillsDestination": ".codex/skills",
-      "definitions": {
+      "subagents": {
         "mode": "declared",
         "destination": null,
         "format": "toml",
@@ -205,7 +205,7 @@
       ],
       "rulesDestination": ".omp/agent/AGENTS.md",
       "skillsDestination": ".omp/agent/skills",
-      "definitions": {
+      "subagents": {
         "mode": "rendered",
         "destination": ".omp/agent/agents",
         "format": "frontmatter-markdown",
@@ -267,7 +267,7 @@
       "versionArgs": ["--version"],
       "rulesDestination": ".config/opencode/AGENTS.md",
       "skillsDestination": ".config/opencode/skills",
-      "definitions": {
+      "subagents": {
         "mode": "rendered",
         "destination": ".config/opencode/agents",
         "format": "frontmatter-markdown",

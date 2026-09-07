@@ -10,7 +10,7 @@ let
   mkCommand = import ../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
-  routing = import ./roles/routing.nix;
+  routing = import ./subagents/routing.nix;
   clientNames = builtins.attrNames agents.clients;
   clientExecutables = lib.mapAttrs (
     _: client:
@@ -47,20 +47,18 @@ let
   ) cfg.skills.enabled;
   allSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name}.source);
 
-  definitionsRoot = ./roles;
-  sharedDefinitions =
+  subagentsRoot = ./subagents;
+  sharedSubagents =
     lib.mapAttrs'
-      (
-        filename: _: lib.nameValuePair (lib.removeSuffix ".md" filename) (definitionsRoot + "/${filename}")
-      )
+      (filename: _: lib.nameValuePair (lib.removeSuffix ".md" filename) (subagentsRoot + "/${filename}"))
       (
         lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".md" name) (
-          builtins.readDir definitionsRoot
+          builtins.readDir subagentsRoot
         )
       );
 
-  definitionFileName =
-    client: name: if client.definitionFormat == "toml" then "${name}.toml" else "${name}.md";
+  subagentFileName =
+    client: name: if client.subagentFormat == "toml" then "${name}.toml" else "${name}.md";
 
   normalizeSource =
     source:
@@ -76,17 +74,17 @@ let
     clientName:
     let
       client = agents.clients.${clientName};
-      definitionRows = lib.optionals (client.definitionsDestination != null) (
+      subagentRows = lib.optionals (client.subagentsDestination != null) (
         lib.mapAttrsToList (name: source: {
           inherit clientName;
-          id = "definitions/${name}";
+          id = "subagents/${name}";
           file = {
             inherit source;
-            format = if client.definitionFormat == "toml" then "toml" else "markdown";
+            format = if client.subagentFormat == "toml" then "toml" else "markdown";
             deployment = "home";
-            destination = "${client.definitionsDestination}/${definitionFileName client name}";
+            destination = "${client.subagentsDestination}/${subagentFileName client name}";
           };
-        }) client.definitions
+        }) client.subagents
       );
     in
     [
@@ -111,7 +109,7 @@ let
         destination = "${client.skillsDestination}/${name}";
       };
     }) agents.shared.skills
-    ++ definitionRows
+    ++ subagentRows
   ) clientNames;
 
   managedFileRows = lib.concatMap (
@@ -393,7 +391,7 @@ in
       shared = {
         rules = ./policy/AGENTS.md;
         skills = allSkills;
-        definitions = sharedDefinitions;
+        subagents = sharedSubagents;
         inherit routing;
       };
     };

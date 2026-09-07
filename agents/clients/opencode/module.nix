@@ -33,7 +33,7 @@ let
       body = lib.concatStringsSep "\n---\n" (builtins.tail parts);
     };
 
-  buildAgent =
+  buildSubagent =
     name: srcPath:
     let
       fm = splitFrontmatter srcPath;
@@ -59,10 +59,10 @@ in
     runtimeWrapperMode = "managed";
     rulesDestination = ".config/opencode/AGENTS.md";
     skillsDestination = ".config/opencode/skills";
-    definitionMode = "rendered";
-    definitionsDestination = ".config/opencode/agents";
-    definitionFormat = "frontmatter-markdown";
-    definitions = lib.mapAttrs buildAgent cfg.agents.shared.definitions;
+    subagentMode = "rendered";
+    subagentsDestination = ".config/opencode/agents";
+    subagentFormat = "frontmatter-markdown";
+    subagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
     gatewayConfig = {
       source = opencodeGatewayConfig;
       format = "json";

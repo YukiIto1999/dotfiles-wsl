@@ -2,7 +2,7 @@
 
 **読み手:** Agent、Skill、Capability、provider、runtimeの境界を変更する人。
 
-AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycleを持つ。upstream installerとreleaseで入れるbinaryは`~/.local/bin`の可変物、OMPはflake inputに固定したNix packageである。policy、Skill、role、managed config、MCP serviceはNixOS generationが宣言する。
+AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycleを持つ。upstream installerとreleaseで入れるbinaryは`~/.local/bin`の可変物、OMPはflake inputに固定したNix packageである。policy、Skill、subagent、managed config、MCP serviceはNixOS generationが宣言する。
 
 ## 配備と呼出し
 
@@ -25,16 +25,17 @@ AI CLI ─► LSP ─► language server
 
 Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能はAgentが直接使う。repositoryに配備するproviderは次のCapabilityを通す。
 
-| Capability | Task入口 | 実装 |
-|---|---|---|
-| `library-documentation`、`web-content`、`web-discovery` | `web-research` | Context7、Crawl4AI、SearXNG |
-| `repository-search` | `repository-research` | Zvec-Grep |
-| `github-resources` | `github-operations` | GitHub MCP |
-| `code-quality` | `code-review` | SonarQube |
-| `browser-automation` | `browser-operation` | Playwright |
-| `browser-diagnostics` | `performance-analysis` | Chrome DevTools |
-| `project-memory` | `memory-management` | AgentMemory |
-| `agent-session` | 別clientの独立sessionを起動するAgent | Codex MCP |
+Capability実装の正本は各`capabilities/<id>/module.nix`にある。Task入口の正本は各`skills/<id>/module.nix`にある`requiresCapabilities`である。現在のCapability IDは次で取得できる。
+
+```bash
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.registry --apply builtins.attrNames
+```
+
+各Skillが宣言するCapabilityは次で取得できる。
+
+```bash
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.registry --apply 'builtins.mapAttrs (_: skill: skill.requiresCapabilities)'
+```
 
 Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置く規則ではない。Skill本文は全clientへ配備する一方、Capability実装はtransport、service lifecycle、network、credential、永続dataを所有するため、`capabilities/`に置く。
 
@@ -62,19 +63,16 @@ runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録す�
 
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。managed worktreeはsession台帳、clean、HEAD不変、利用中processなしを確認できる場合だけ回収する。
 
-## Policy、role、Skill
+## Policy、subagent、Skill
 
-[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的subagentは[`agents/subagents/`](../../agents/subagents)に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
+[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的subagentは`agents/subagents/`に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
 
-`native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<role>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
+`native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<subagent>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
+client別の能力配備の正本は各`agents/clients/<id>/module.nix`のmode宣言である。現在の各clientのmodeは次で取得できる。
 
-| Client | subagent | Skill投影 | LSP | Telemetry | AgentMemory |
-|---|---|---|---|---|---|
-| Claude Code | rendered Markdown | required Skillをpreload | plugin | managed settings | lifecycle hooks |
-| Codex | rendered TOML | bodyからdynamic routing | unsupported | unsupported | lifecycle hooks |
-| OMP | rendered Markdown | required Skillをautoload | native config | unsupported | native hooks |
-| OpenCode | rendered Markdown | Skill toolでdynamic routing | config | unsupported | capture plugin |
-| Antigravity | unsupported | unsupported | unsupported | unsupported | unsupported |
+```bash
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply 'builtins.mapAttrs (_: client: { inherit (client) subagentMode skillProjectionMode lspMode telemetryMode agentmemoryMode; })'
+```
 
 Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
 

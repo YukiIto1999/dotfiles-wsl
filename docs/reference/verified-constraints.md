@@ -56,7 +56,7 @@
 | GitHub account roster、暗号化 template、登録 artifact、Git identity の生成先が typed contract と一致する | `account-deployment-contract` |
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
 | profileの固定client roster、提供集合、型metadata、capability、installer、managed fileが固定fixtureに一致し、不正なbranch field、必須field欠落、freeform field、mode矛盾を変異入力で拒否する | `agent-client-roster` |
-| 共通rulesが配備対象のSkillとsubagentをrouteし、`routing.nix`のSkill、agent、handoff、MCP providerが完全かつ重複せず、Skill本文とagent定義に各edgeがあり、raw toolは直接利用集合だけで、Claude CodeとOMPのrequired Skill preload、OpenCodeのSkill tool、Codexのdynamic定義が実配備sourceへ投影される | `agent-subagent-rendering` |
+| 生成した共通rulesが、Skill registryのlabelとid、subagentのfrontmatter、clientのmode宣言から独立に組んだ期待行と一致し、未置換markerを残さず、`routing.nix`のSkill、subagent、handoffが完全かつ重複せず、Skill本文とsubagent定義に各edgeがあり、raw toolは直接利用集合だけで、Claude CodeとOMPのrequired Skill preload、OpenCodeのSkill tool、Codexのdynamic定義が実配備sourceへ投影される | `agent-subagent-rendering` |
 | agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、OMP の認証状態が管理外であること、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
 | seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |

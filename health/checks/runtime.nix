@@ -60,6 +60,7 @@ in
             {id:"fixture/systemd-service",status:"pass"},
             {id:"fixture/systemd-socket",status:"pass"},
             {id:"fixture/systemd-timer",status:"pass"},
+            {id:"fixture/timer-exit",status:"pass"},
             {id:"fixture/restart-service",status:"pass"},
             {id:"fixture/restart-container",status:"pass"},
             {id:"fixture/filesystem",status:"pass"},
@@ -97,9 +98,9 @@ in
         set -e
         test "$failure_status" -eq 1
         jq -e '
-          (.checks | length) == 19
+          (.checks | length) == 20
           and all(.checks[]; .status == "fail")
-          and (.failures | length) == 19
+          and (.failures | length) == 20
           and .warnings == []
           and .resources.managedRoots == [{path:"/fixture/root-ok",bytes:42}]
           and .resources.serviceRestarts == []

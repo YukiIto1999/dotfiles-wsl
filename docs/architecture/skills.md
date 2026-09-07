@@ -240,7 +240,7 @@ baselineでは、agent resource reaperの公開optionと内部contract fieldを�
 
 SRPはclassの大きさでなく、actorと変更理由をsliceとownerへ対応させる判断として使う。OCPはinterfaceを増やす指示ではない。新しいcaseで既存caseのtestと本文を保ち、既存の直和や方針契約へ追加する。明示されたextension contractがない場合、一つのcaseから抽象を予測せず、複数の具体例から安定部分と変動部分を反証可能な形で確認してから最小のseamを置く。三つ目の同種要求は、その判断を行う目安であって絶対条件ではない。
 
-代表scenarioは [`agents/fixtures/tdd-skill.json`](../../agents/fixtures/tdd-skill.json) に置く。baselineでは、agent resource reaperの`dryRun`について、削除対象の意味、公開option、package、Shell fixtureまで広く調べられた。一方、contract projectionの複数checkをまとめてREDにした後、全ledger、lock、worktreeのbehavior fixtureを一括で作る順序だった。
+代表scenarioは [`agents/fixtures/tdd-implementation-skill.json`](../../agents/fixtures/tdd-implementation-skill.json) に置く。baselineでは、agent resource reaperの`dryRun`について、削除対象の意味、公開option、package、Shell fixtureまで広く調べられた。一方、contract projectionの複数checkをまとめてREDにした後、全ledger、lock、worktreeのbehavior fixtureを一括で作る順序だった。
 
 現行Skillへ料金caseを順次追加するscenarioを与えると、各caseのREDとGREENは分けたが、料金判断と監査ログの責務混在を分析せず、既存caseを保ったextensionの判断条件もなかった。条件分岐を同じ関数へ足し続けてもSkill違反にならず、短いcycleから得た具体的な設計圧をSRPとOCPへ変換できなかった。
 
@@ -264,7 +264,7 @@ SRPはclassの大きさでなく、actorと変更理由をsliceとownerへ対応
 
 `refactoring`は、保存対象を選び、現在のbehaviorを観測できる安全網を成立させた後、一つの内部構造変更ずつ同じ証拠で検証する。line countの削減や新しい抽象は成果ではない。Matt Pocockの`improve-codebase-architecture`は新しいmodule構成を選ぶため、`architecture-design`側のdonorとして残し、このSkillへは統合しない。
 
-代表scenarioは [`agents/fixtures/refactoring-skill.json`](../../agents/fixtures/refactoring-skill.json) に置く。baselineでは、cleanupのproductionとcontract checkに重複した計算を共有する依頼に対し、自己参照oracleの危険を認識し、固定fixtureを追加する案まで出せた。一方、既存の小さい`home-backup-root.nix`も置換する広いhelperを最初から設計し、変更前のfocused checkと一段ごとのcheckpointを置かず、最後にrepository全体のcheckを予定した。新しいSkillは、意図的な独立計算かを先に問い、共有する場合もoracleの独立性を保ち、既存mechanismを残せる最小の一段から進める。
+代表scenarioは [`agents/fixtures/refactoring-implementation-skill.json`](../../agents/fixtures/refactoring-implementation-skill.json) に置く。baselineでは、cleanupのproductionとcontract checkに重複した計算を共有する依頼に対し、自己参照oracleの危険を認識し、固定fixtureを追加する案まで出せた。一方、既存の小さい`home-backup-root.nix`も置換する広いhelperを最初から設計し、変更前のfocused checkと一段ごとのcheckpointを置かず、最後にrepository全体のcheckを予定した。新しいSkillは、意図的な独立計算かを先に問い、共有する場合もoracleの独立性を保ち、既存mechanismを残せる最小の一段から進める。
 
 隔離fixtureのforward evalでは、public outputと例外を固定する既存2 testを変更前に実行し、exit 0を確認した。testを増やさず、重複したtrimと空名検証だけを一つの内部helperへ抽出し、同じcommandが2 test通過のexit 0を維持した。表示名とslugの異なる変換は統合せず、追加refactoringを行わなかった。fixtureは評価後に削除した。
 
@@ -287,7 +287,7 @@ baselineと同型の別fixtureでは、productionの二つの関数とcontract t
 
 pluginの`skill-creator`はSkill作成を既定経路にし、基礎モデル、policy、reference、script、tool、既存Skillで足りるかを判定しない。このrepositoryではlocal版へ置き換え、具体的なbaseline不足、mechanism、責務境界、routing、composition、restraint、ablationからSkillの要否を決める。
 
-runtime本文は[admissionと評価](../../skills/skill-creator/skill/references/admission-and-evaluation.md)だけを必要時に読み、外部sourceの採否は[provenance](../../skills/skill-creator/skill/references/provenance.md)へ分ける。代表scenarioは[`agents/fixtures/skill-creator-skill.json`](../../agents/fixtures/skill-creator-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
+runtime本文は[admissionと評価](../../skills/skill-design/skill/references/admission-and-evaluation.md)だけを必要時に読み、外部sourceの採否は[provenance](../../skills/skill-design/skill/references/provenance.md)へ分ける。代表scenarioは[`agents/fixtures/skill-design-skill.json`](../../agents/fixtures/skill-design-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
 
 決定的なYAML契約を再利用するscenarioでは、Codex同梱版とlocal版のどちらもSkillを作らず、共有schemaと必須CIを選んだ。このcaseでは改善はなかった。API変更の互換性とrolloutの見落としを扱うscenarioでは、同梱版は判断を`code-review`へ追加した。local版は既存`impact-analysis`がconsumer、共存、rollback条件を所有すると確認し、影響の証拠だけを受け取ってfindingとseverityを`code-review`へ残した。同じ判断の複製を避け、既存Skillとのcompositionを選べたため、local版を配備する。
 

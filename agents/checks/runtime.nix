@@ -227,6 +227,7 @@ let
         oneFileSystem = true;
         cachePolicy = "allocated-bytes";
       };
+    "agents/maintenance/autoupdate" = timerObservation expectedAgentRuntime.timers.autoupdate.name;
     "agents/maintenance/project-cache-gc" =
       timerObservation expectedAgentRuntime.timers.projectCacheGc.name;
     "agents/maintenance/resource-reaper" =

@@ -12,6 +12,7 @@ set -euo pipefail
 : "${INSTALL_AGENTS_CLIENT_SLASH:?}"
 : "${INSTALL_AGENTS_CLIENT_CHARACTER:?}"
 : "${INSTALL_AGENTS_SINGLE_BINARY:?}"
+: "${INSTALL_AGENTS_CLIENT_ISOLATION:?}"
 : "${ATOMIC_PUBLISH:?}"
 : "${FIXTURE_SOURCES:?}"
 : "${FIXTURE_RUNTIME_SHELL:?}"
@@ -1045,3 +1046,24 @@ jq -e --arg digest "$opencode_digest" '
 ' "$opencode_marker" >/dev/null
 "$opencode_home/.local/bin/opencode" --version | grep -Fx 'codex fixture 1.0.0'
 assert_no_temps "$opencode_home" opencode opencode
+
+# client ごとの更新は独立である。先頭 client の失敗は後続 client の更新を止めず、
+# 失敗した client 名だけが集約して報告される。
+make_archive isolation valid
+isolation_archive=$archive_path
+isolation_home=$fixture/isolation-home
+isolation_api=$fixture/isolation-api.json
+prepare_home "$isolation_home"
+write_api "$isolation_api" "$asset_x86" "$isolation_archive"
+configure_run "$isolation_home" "$isolation_archive" "$isolation_api"
+set +e
+"$INSTALL_AGENTS_CLIENT_ISOLATION" >"$fixture/isolation.stdout" 2>"$fixture/isolation.stderr"
+isolation_status=$?
+set -e
+test "$isolation_status" -eq 1
+grep -Fx 'FATAL: client install failed: absent' "$fixture/isolation.stderr"
+assert_codex_publish "$isolation_home" "$isolation_archive"
+test ! -e "$isolation_home/.local/bin/absent"
+test ! -L "$isolation_home/.local/bin/absent"
+test ! -e "$isolation_home/.local/share/dotfiles/agents/absent/current"
+assert_no_temps "$isolation_home" absent absent

@@ -150,6 +150,21 @@ let
       };
     }
   ];
+  clientIsolationFixtureManifest = builtins.toJSON [
+    (
+      packageTreeFixtureRecord
+      // {
+        name = "absent";
+        binary = "absent";
+        install = packageTreeFixtureRecord.install // {
+          releaseByArch = lib.mapAttrs (
+            _arch: release: release // { asset = "absent-asset.tar.gz"; }
+          ) packageTreeFixtureRecord.install.releaseByArch;
+        };
+      }
+    )
+    packageTreeFixtureRecord
+  ];
   packageTreeFixtureCurl = pkgs.writeShellApplication {
     name = "curl";
     runtimeInputs = [ pkgs.coreutils ];
@@ -242,6 +257,7 @@ let
   invalidClientSlashFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-slash-agent" invalidClientSlashFixtureManifest;
   invalidClientCharacterFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-character-agent" invalidClientCharacterFixtureManifest;
   singleBinaryFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-single-binary-agent" singleBinaryFixtureManifest;
+  clientIsolationFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-isolation-agents" clientIsolationFixtureManifest;
 in
 {
   agent-apm-binary-runs = pkgs.runCommandLocal "check-agent-apm-binary-runs" { } ''
@@ -284,6 +300,7 @@ in
         export INSTALL_AGENTS_CLIENT_SLASH=${lib.getExe invalidClientSlashFixtureInstaller}
         export INSTALL_AGENTS_CLIENT_CHARACTER=${lib.getExe invalidClientCharacterFixtureInstaller}
         export INSTALL_AGENTS_SINGLE_BINARY=${lib.getExe singleBinaryFixtureInstaller}
+        export INSTALL_AGENTS_CLIENT_ISOLATION=${lib.getExe clientIsolationFixtureInstaller}
         export ATOMIC_PUBLISH=${atomicPublishFixtureExe}
         export ATOMIC_PUBLISH_PRODUCTION=${atomicPublishExe}
         export FIXTURE_SOURCES=${../fixtures/install-agents}

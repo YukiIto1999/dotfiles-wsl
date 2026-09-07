@@ -46,6 +46,8 @@ OMPはupstream flakeのsource revisionとNAR hashを`flake.lock`に固定し、u
 
 Codex と OpenCode は GitHub release を dotfiles が管理する。GitHub API が返す SHA-256 digest と download 内容を一致させ、archive を展開する前に member の path、type、件数、論理 size、重複、衝突を拒否する。展開後は symlink、hard link、special file、owner、mode、required path を検査し、固定した directory descriptor から entrypoint の version probe を実行する。検証済み tree は digest を名前にした release directory へ置き、`current` と visible binary の相対 symlink を identity 比較付きの rename で切り替える。通常の失敗では EXIT trap が旧状態へ戻し、曖昧な object は削除せず残す。
 
+client ごとの更新は互いに独立である。一つの client の失敗は他の client の取得と公開を止めず、失敗した client 名を集約して非ゼロで終える。失敗そのものは `dotfiles-agent-autoupdate.timer` の観測から見える。
+
 この publish は同じ client root の lock を守る installer 同士を直列化する。同じ UID の悪意ある process が private name または固定済み inode を syscall 間で改変する攻撃までは防がない。`SIGKILL` や電源断では EXIT trap を実行できず、durable transaction journal もないため、途中状態からの自動 rollback は保証しない。これは受け入れている境界であり、更新後の release tree は `dotfiles-doctor` で観測する。
 
 ## Codex sandbox

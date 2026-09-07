@@ -97,6 +97,7 @@
 | agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |
 | agent が作った worktree だけを登録し、clean、HEAD 不変、未使用の場合だけ隔離と再検査後に回収する | `agent-resource-behavior` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
+| WSL の extraBin に必須の名前が揃い、名前が重複せず、store 由来の entry が実行可能である | `wsl-extra-bin-contract` |
 | cleanup が現在と保持中の Home Manager generation から backup の exact path を導き、home と system の削除を別の権限境界で実行する | `cleanup-home-backups` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-container` |
 | Crawl4AI の API token が user 用 file contract と root 所有の環境ファイルへ分かれる | `crawl4ai-container` |

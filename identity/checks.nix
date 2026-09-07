@@ -17,6 +17,12 @@ let
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
   homeDir = hostConfig.dotfiles.workstation.homeDir;
   variantTemplate = variantConfig.sops.templates."gh-hosts.yml";
+  primary = hostConfig.dotfiles.identity.github.primary;
+  reversedAccountsTemplate =
+    (mkNixosSystem [
+      normalMachineModule
+      { dotfiles.identity.github.accounts = lib.mkForce (lib.reverseList accounts); }
+    ]).config.sops.templates."gh-hosts.yml";
   noWorkIdentityConfig =
     (mkNixosSystem [
       normalMachineModule
@@ -29,6 +35,10 @@ in
 {
   account-deployment-contract =
     assert accounts != [ ];
+    assert builtins.elem primary accounts;
+    # 並べ替えが primary を動かさないこと。位置ではなく宣言が primary を決める
+    assert lib.hasInfix hostConfig.sops.placeholder."accounts/${primary}/token"
+      reversedAccountsTemplate.content;
     assert variantConfig.dotfiles.identity.github.accounts == accounts;
     assert variantTemplate.content == accountTemplate.content;
     assert accountTemplate.content == builtins.readFile accountArtifact.source;

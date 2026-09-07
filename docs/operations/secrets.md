@@ -30,9 +30,9 @@ identity の値は `identity/module.nix` の SOPS template を介して配備す
 
 ## GitHub account
 
-`dotfiles.identity.github.accounts` が GitHub account の roster を生成する。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `identity/module.nix`、MCP の token 読み込みは `capabilities/github-resources/github/mcp/module.nix` が所有する。配列の先頭が `gh` の active user と既定 token になる。
+`dotfiles.identity.github.accounts` がこの host の GitHub account roster を宣言し、`dotfiles.identity.github.primary` が `gh` の active user と既定 token になる account を指す。各 account ID の username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。credential の宣言と `gh` への配備は `identity/module.nix`、MCP の token 読み込みは `capabilities/github-resources/github/mcp/module.nix` が所有する。account がいくつあるかは host の宣言だけが持ち、module は非空、重複なし、ID の形だけを検査する。
 
-account の追加、削除、順序変更では `dotfiles.identity.github.accounts` と対応する暗号化済み key を同時に変更する。`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
+account の追加と削除では `profiles/workstation.nix` の roster と対応する暗号化済み key を同時に変更する。`primary` を変えるときは roster の要素を指す。並べ替えは挙動を変えない。`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
 
 ## Agentmemory
 

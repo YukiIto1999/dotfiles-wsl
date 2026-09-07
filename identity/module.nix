@@ -7,11 +7,9 @@
 
 let
   cfg = config.dotfiles.identity.github;
-  accountIds = [
-    "account-1"
-    "account-2"
-    "account-3"
-  ];
+  accountIdType = lib.types.addCheck lib.types.str (
+    value: builtins.match "[a-z0-9]+(-[a-z0-9]+)*" value != null
+  );
   inherit (config.dotfiles.workstation) homeDir username;
   inherit (config.sops) placeholder;
   mkUserSecretFile = import ../secrets/sops/impl/user-secret-file.nix { inherit username; };
@@ -30,18 +28,25 @@ let
     );
   ghHostsTemplate = pkgs.replaceVars ./assets/hosts.yml {
     accountUsers = lib.concatMapStrings buildGhUser cfg.accounts;
-    primaryUsername = placeholder."accounts/${builtins.head cfg.accounts}/username";
-    primaryToken = placeholder."accounts/${builtins.head cfg.accounts}/token";
+    primaryUsername = placeholder."accounts/${cfg.primary}/username";
+    primaryToken = placeholder."accounts/${cfg.primary}/token";
   };
 in
 {
-  options.dotfiles.identity.github.accounts = lib.mkOption {
-    type = lib.types.listOf (lib.types.enum accountIds);
-    example = [
-      "account-1"
-      "account-2"
-    ];
-    description = "GitHub account id。sops secret 対、gh host user、github MCP target に対応する。先頭が primary で、gh の active user と hosts.yml の既定 token になる。";
+  options.dotfiles.identity.github = {
+    accounts = lib.mkOption {
+      type = lib.types.listOf accountIdType;
+      example = [
+        "personal"
+        "work"
+      ];
+      description = "この host が使う GitHub account id。sops secret 対、gh host user、github MCP target に対応する。";
+    };
+    primary = lib.mkOption {
+      type = accountIdType;
+      example = "personal";
+      description = "gh の active user と hosts.yml の既定 token になる account id。accounts の要素でなければならない。";
+    };
   };
 
   config.sops.secrets =
@@ -101,11 +106,12 @@ in
 
   config.assertions = [
     {
-      assertion =
-        cfg.accounts != [ ]
-        && cfg.accounts == lib.unique cfg.accounts
-        && lib.sort builtins.lessThan cfg.accounts == accountIds;
-      message = "dotfiles.identity.github.accounts must contain every supported account exactly once";
+      assertion = cfg.accounts != [ ] && cfg.accounts == lib.unique cfg.accounts;
+      message = "dotfiles.identity.github.accounts must be non-empty and free of duplicates";
+    }
+    {
+      assertion = builtins.elem cfg.primary cfg.accounts;
+      message = "dotfiles.identity.github.primary must be one of dotfiles.identity.github.accounts";
     }
   ];
 }

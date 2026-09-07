@@ -53,7 +53,7 @@
 | SonarQube の service contract、server と DB の topology、image、volume、環境 file、再起動、secret metadata、provision service と timer が固定値に一致する | `sonarqube-container` |
 | SonarQube MCP front は SOPS の poison stub と canary A / B、型付き credential の canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact が runtime password file を読む | `sonarqube-front` |
 | 生成 config artifact が登録簿に載り、宣言の変更に追随する | `artifact-registry` |
-| GitHub account roster、暗号化 template、登録 artifact、Git identity の生成先が typed contract と一致する | `account-deployment-contract` |
+| GitHub account roster が host の宣言だけで決まり、primary が roster の要素で並べ替えに依存せず、暗号化 template、登録 artifact、Git identity の生成先が typed contract と一致する | `account-deployment-contract` |
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
 | profileの固定client roster、提供集合、型metadata、capability、installer、managed fileが固定fixtureに一致し、不正なbranch field、必須field欠落、freeform field、mode矛盾を変異入力で拒否する | `agent-client-roster` |
 | 生成した共通rulesが、Skill registryのlabelとid、subagentのfrontmatter、clientのmode宣言から独立に組んだ期待行と一致し、未置換markerを残さず、`routing.nix`のSkill、subagent、handoffが完全かつ重複せず、Skill本文とsubagent定義に各edgeがあり、raw toolは直接利用集合だけで、Claude CodeとOMPのrequired Skill preload、OpenCodeのSkill tool、Codexのdynamic定義が実配備sourceへ投影される | `agent-subagent-rendering` |

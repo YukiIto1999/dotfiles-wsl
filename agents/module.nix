@@ -368,6 +368,7 @@ let
             oneFileSystem = true;
             cachePolicy = "allocated-bytes";
           };
+        "agents/maintenance/autoupdate" = timerObservation timers.autoupdate;
         "agents/maintenance/project-cache-gc" = timerObservation timers.projectCacheGc;
         "agents/maintenance/resource-reaper" = timerObservation timers.resourceReaper;
       }

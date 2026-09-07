@@ -291,17 +291,21 @@ probe_systemd_unit() {
 }
 
 probe_systemd_timer() {
-  local timer service timer_load unit_file active service_load result
+  local timer service timer_load unit_file active service_load result exit_status
   timer=$($jq_command -r '.timer' <<<"$observation")
   service=$($jq_command -r '.service' <<<"$observation")
+  # Result は rebuild の reset-failed で success へ戻る。最後の起動が非ゼロで終えた事実は
+  # ExecMainStatus に残るため、両方を読まないと失敗した maintenance job を見落とす
   if timer_load=$($systemctl_command show "$timer" --property=LoadState --value 2>/dev/null) \
     && unit_file=$($systemctl_command show "$timer" --property=UnitFileState --value 2>/dev/null) \
     && active=$($systemctl_command show "$timer" --property=ActiveState --value 2>/dev/null) \
     && service_load=$($systemctl_command show "$service" --property=LoadState --value 2>/dev/null) \
     && result=$($systemctl_command show "$service" --property=Result --value 2>/dev/null) \
+    && exit_status=$($systemctl_command show "$service" --property=ExecMainStatus --value 2>/dev/null) \
     && [[ $timer_load == loaded && $service_load == loaded ]] \
     && { value_is_allowed unitFileStates "$unit_file" || value_is_allowed activeStates "$active"; } \
-    && value_is_allowed serviceResults "$result"; then
+    && value_is_allowed serviceResults "$result" \
+    && [[ $exit_status == 0 ]]; then
     emit_pass
   else
     emit_failure

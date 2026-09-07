@@ -1297,6 +1297,7 @@ install_github_release() {
   client_root_identity=
 }
 
+failed_clients=()
 while IFS= read -r record; do
   kind=$(jq -e -r '.install.kind | select(type == "string" and length > 0)' <<<"$record") \
     || fail "install kind is missing"
@@ -1304,9 +1305,25 @@ while IFS= read -r record; do
     || fail "client name is missing"
   valid_client_name "$name" || fail "unsafe client name: $name"
 
-  case $kind in
-    installer-script) install_installer_script "$record" ;;
-    github-release) install_github_release "$record" ;;
-    *) fail "unknown install kind for $name: $kind" ;;
-  esac
+  # client ごとの更新は互いに独立である。一つの upstream が落ちても残りは更新し、
+  # 失敗は subshell に閉じたまま集約して最後に報告する。subshell は errexit と
+  # 後片付け trap を自前で持ち直す。親の設定は継承されず、EXIT trap も届かない
+  set +e
+  (
+    set -e
+    trap cleanup_install_temps EXIT
+    case $kind in
+      installer-script) install_installer_script "$record" ;;
+      github-release) install_github_release "$record" ;;
+      *) fail "unknown install kind for $name: $kind" ;;
+    esac
+  )
+  status=$?
+  set -e
+  ((status == 0)) || failed_clients+=("$name")
 done < <(jq -e -c '.[]' <<<"$install_manifest")
+
+if ((${#failed_clients[@]} > 0)); then
+  echo "FATAL: client install failed: ${failed_clients[*]}" >&2
+  exit 1
+fi

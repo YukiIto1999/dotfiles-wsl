@@ -17,6 +17,9 @@ case "$tool" in
       Result)
         if [[ $target == *result-fail* ]]; then printf 'exit-code\n'; else printf 'success\n'; fi
         ;;
+      ExecMainStatus)
+        if [[ $target == *exit-fail* ]]; then printf '28\n'; else printf '0\n'; fi
+        ;;
       UnitFileState)
         if [[ $target == *fail* ]]; then printf 'disabled\n'; else printf 'enabled\n'; fi
         ;;

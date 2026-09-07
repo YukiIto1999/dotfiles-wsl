@@ -15,7 +15,7 @@
 | repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | doctor が owner の observation registry を欠落なく key 順に投影し、17 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
-| 17 種類の observation kind の pass、warn、fail、resource、restart 集約と、protocol の不正、過大出力、非ゼロ終了、timeout を固定 message と終了 status に反映する | `doctor-runtime` |
+| 17 種類の observation kind の pass、warn、fail、resource、restart 集約と、protocol の不正、過大出力、非ゼロ終了、timeout を固定 message と終了 status に反映する。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする | `doctor-runtime` |
 | WSL 専用 zram lifecycle、journald、標準 fstrim、Nix の容量 reserve、Windows drive と committed memory の観測、service 非依存が宣言どおりである | `host-stability-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
 | runtime observation registry が 17 種類の observation kind、必須 field、path と ID、閾値、専用 command package を型で制限し、定義位置を owner と照合する | `observation-contract` |
@@ -91,7 +91,7 @@
 | MCP session が active な GET body の間 reap されず、session front の listener address を loopback に固定できる | `agentgateway-session-lifecycle` |
 | agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、共通 project build cache、明示済み環境値、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
-| GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
+| GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。client ごとの失敗は隔離され、後続 client の公開を止めず、失敗した client 名だけを報告する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
 | agent cache GC が allocated bytes を正本にし、不正な managed path を検出すると削除前に失敗し、inactive project cache を先に回収して active session がない場合だけ共有 cache を空にし、再計測する | `agent-project-cache-gc` |
 | source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない | `agent-verification-cache` |
 | agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |

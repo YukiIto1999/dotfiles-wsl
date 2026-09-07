@@ -291,6 +291,13 @@ let
       activeStates = [ "active" ];
       serviceResults = [ "success" ];
     };
+    "fixture/09b-timer-exit" = common "timer-exit" "systemd-timer" // {
+      timer = "timer-ok.timer";
+      service = "timer-ok.service";
+      unitFileStates = [ "enabled" ];
+      activeStates = [ "active" ];
+      serviceResults = [ "success" ];
+    };
     "fixture/10-restart-service" = common "restart-service" "restart-counter" // {
       sourceKind = "systemd-service";
       target = "service-ok.service";
@@ -372,6 +379,9 @@ let
     };
     "fixture/09-systemd-timer" = passValues."fixture/09-systemd-timer" // {
       timer = "timer-fail.timer";
+    };
+    "fixture/09b-timer-exit" = passValues."fixture/09b-timer-exit" // {
+      service = "timer-exit-fail.service";
     };
     "fixture/10-restart-service" = passValues."fixture/10-restart-service" // {
       target = "service-error.service";

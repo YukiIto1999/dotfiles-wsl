@@ -11,6 +11,8 @@ nix run .#dotfiles-install-agents
 
 current generation では `dotfiles-agent-autoupdate.timer` が同じ installer を日次実行する。起動予定と直近の結果は systemd から確認する。
 
+installer は宣言済みの全 client を更新する。一つの client の失敗は他の client の更新を止めず、失敗した client 名だけが service の終了時に報告される。
+
 OMP はこの installer の対象ではない。公式 flake の Nix package を `flake.lock` に固定しているため、更新は `nix flake update omp` の後に通常の rebuild で行う。
 
 ```sh

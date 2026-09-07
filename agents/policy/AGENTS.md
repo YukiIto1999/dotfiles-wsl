@@ -101,7 +101,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 | 複数エージェント間の構造化協調・タスク委譲 | `orchestration` |
 | iOSシミュレータの操作・テスト | `orca-emulator` |
 | Androidエミュレータ・実機の操作・テスト | `orca-emulator-android` |
-| Linearチケットの取得、更新、PR紐付け | `orca-linear` / `linear-tickets` |
+| Linearチケットの取得、更新、PR紐付け | `orca-linear` |
 | ワークスペース単位の環境レシピ設定 | `orca-per-workspace-env` |
 | architecture-standardの最新規律に基づく設計・実装・監査 | `standard-apply` |
 | architecture-standardに対する静的適合性・設定driftの監査 | `standard-conformance` |

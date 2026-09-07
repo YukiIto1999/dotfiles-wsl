@@ -14,7 +14,7 @@ Skill は原則として作らない。基礎モデル、repository policy、必
 
 ## 構成上の配備対象
 
-local Skillの正本は[`skills/<id>/skill/`](../../skills)である。各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`を`dotfiles.skills.registry`へ登録する。plugin sourceのrevisionは[`flake.nix`](../../flake.nix)、plugin Skillの検出と同名拒否は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が所有する。
+local Skillの正本は[`skills/<id>/skill/`](../../skills)である。各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`を`dotfiles.skills.registry`へ登録する。plugin sourceのrevisionは[`flake.nix`](../../flake.nix)、plugin Skillの採用集合、依存宣言、source存在確認、同名拒否は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表が所有する。
 
 donorとrepository所有のSkill sourceは区別する。donorは方法を再構成してlocal Skillを作る材料であり、元repositoryのSkillを配備しない。repository所有は配置とrevisionの正本を示すだけで、直接採用の十分条件ではない。signature procedure規則を満たしたSkillだけを固定sourceから登録する。target構成と追加のadmission条件は[Repository所有Skillのcomposition](repository-skills.md)に記録する。
 

@@ -5,6 +5,9 @@
 }:
 
 let
+  # 採用表が plugin 由来 Skill 集合の正本である。upstream に Skill が増えてもここへ書くまで登録しない。
+  # 採用の条件は、方法自体に固有価値がある signature procedure であること、local Skill と責務が重複しないこと、
+  # owner repository が SKILL.md を `skills/<id>/` の標準配置で持つことである。
   adoptedPluginSkills = {
     orca = {
       source = pluginSources.orca;

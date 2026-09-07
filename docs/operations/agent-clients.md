@@ -13,8 +13,6 @@ current generation では `dotfiles-agent-autoupdate.timer` が同じ installer 
 
 installer は宣言済みの全 client を更新する。一つの client の失敗は他の client の更新を止めず、失敗した client 名だけが service の終了時に報告される。
 
-OMP はこの installer の対象ではない。公式 flake の Nix package を `flake.lock` に固定しているため、更新は `nix flake update omp` の後に通常の rebuild で行う。
-
 ```sh
 systemctl status dotfiles-agent-autoupdate.timer
 systemctl status dotfiles-agent-autoupdate.service
@@ -28,14 +26,7 @@ installer が受け取る manifest は次の command で表示できる。creden
 nix run .#dotfiles-install-agents -- --print-manifest | jq .
 ```
 
-OMP が manifest に含まれず、Nix store の実体を参照していることは次で確認する。
-
-```sh
-omp --version
-readlink -f ~/.local/share/dotfiles-agent/bin/omp
-```
-
-Codex と OpenCode の管理済み release は client ごとの directory にある。`current` と visible binary は相対 symlink であり、release 名は取得した archive の SHA-256 digest から決まる。
+Codex、OpenCode、OMP の管理済み release は client ごとの directory にある。`current` と visible binary は相対 symlink であり、release 名は取得した asset の SHA-256 digest から決まる。OMP の asset は archive ではなく単一の実行 file なので、release tree は entrypoint だけを持つ。
 
 ```sh
 find ~/.local/share/dotfiles/agents -maxdepth 3 -mindepth 2 -print
@@ -43,9 +34,11 @@ readlink ~/.local/share/dotfiles/agents/codex/current
 readlink ~/.local/bin/codex
 readlink ~/.local/share/dotfiles/agents/opencode/current
 readlink ~/.local/bin/opencode
+readlink ~/.local/share/dotfiles/agents/omp/current
+readlink ~/.local/bin/omp
 ```
 
-GitHub release の取得、digest 照合、archive 検査、required path 検査、version probe のどれかが失敗した場合は、新しい `current` へ切り替えない。publish 中の通常の失敗でも旧 `current` へ rollback する。所有または identity を確認できない object は削除せず、エラーとして残す。Claude Code と Antigravity の配置と rollback は upstream installer の責務である。
+GitHub release の取得、digest 照合、archive または raw asset の検査、required path 検査、version probe のどれかが失敗した場合は、新しい `current` へ切り替えない。publish 中の通常の失敗でも旧 `current` へ rollback する。所有または identity を確認できない object は削除せず、エラーとして残す。Claude Code と Antigravity の配置と rollback は upstream installer の責務である。
 
 `SIGKILL`、電源断、WSL の強制停止では自動 rollback を保証しない。中断後は installer を再実行し、同じ checkout の contract を使う `nix run .#dotfiles-doctor` で検査する。再実行が失敗するか `agent/<client>` check が `fail` になった場合は、残った object を手で削除しない。check ID から client を特定し、上記の client directory、`current`、visible binary を調査する。
 

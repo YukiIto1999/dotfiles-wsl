@@ -12,6 +12,9 @@ set -euo pipefail
 : "${INSTALL_AGENTS_CLIENT_SLASH:?}"
 : "${INSTALL_AGENTS_CLIENT_CHARACTER:?}"
 : "${INSTALL_AGENTS_SINGLE_BINARY:?}"
+: "${INSTALL_AGENTS_RAW_ASSET:?}"
+: "${INSTALL_AGENTS_RAW_PACKAGE_TREE:?}"
+: "${INSTALL_AGENTS_RAW_NESTED_ENTRYPOINT:?}"
 : "${INSTALL_AGENTS_CLIENT_ISOLATION:?}"
 : "${ATOMIC_PUBLISH:?}"
 : "${FIXTURE_SOURCES:?}"
@@ -87,9 +90,10 @@ write_api() {
 
   digest=$(digest_of "$archive")
   repo=openai/codex
-  if [[ $asset == opencode-* ]]; then
-    repo=anomalyco/opencode
-  fi
+  case $asset in
+    opencode-*) repo=anomalyco/opencode ;;
+    omp-*) repo=can1357/oh-my-pi ;;
+  esac
   url="https://github.com/$repo/releases/download/fixture-v1/$asset"
 
   case $mode in
@@ -1046,6 +1050,54 @@ jq -e --arg digest "$opencode_digest" '
 ' "$opencode_marker" >/dev/null
 "$opencode_home/.local/bin/opencode" --version | grep -Fx 'codex fixture 1.0.0'
 assert_no_temps "$opencode_home" opencode opencode
+
+# raw asset は download した file 自体を entrypoint として publish する。
+raw_payload=$fixture/raw-payload
+mkdir -p "$raw_payload"
+tar -xzf "$opencode_archive" -C "$raw_payload"
+raw_asset=$fixture/omp-linux-x64
+mv "$raw_payload/opencode" "$raw_asset"
+raw_home=$fixture/raw-home
+raw_api=$fixture/raw-api.json
+prepare_home "$raw_home"
+write_api "$raw_api" omp-linux-x64 "$raw_asset"
+configure_run "$raw_home" "$raw_asset" "$raw_api"
+"$INSTALL_AGENTS_RAW_ASSET"
+raw_digest=$(digest_of "$raw_asset")
+raw_release=$raw_home/.local/share/dotfiles/agents/omp/releases/sha256-$raw_digest
+test "$(readlink "$raw_home/.local/share/dotfiles/agents/omp/current")" \
+  = "releases/sha256-$raw_digest"
+test "$(readlink "$raw_home/.local/bin/omp")" \
+  = '../share/dotfiles/agents/omp/current/omp'
+test ! -L "$raw_release/omp"
+test "$(stat -c %a -- "$raw_release/omp")" = 700
+test "$(digest_of "$raw_release/omp")" = "$raw_digest"
+jq -e --arg digest "$raw_digest" '
+  keys == ["client", "digest", "layout", "schema"] and
+  .schema == 1 and .client == "omp" and .digest == $digest and
+  .layout == "single-binary"
+' "$raw_release/.dotfiles-agent-release.json" >/dev/null
+grep -Fx 'https://github.com/can1357/oh-my-pi/releases/download/fixture-v1/omp-linux-x64' \
+  "$FIXTURE_CURL_LOG"
+test ! -s "$FIXTURE_TAR_LOG"
+"$raw_home/.local/bin/omp" --version | grep -Fx 'codex fixture 1.0.0'
+assert_no_temps "$raw_home" omp omp
+
+# raw asset は archive の member 検査を持たないため single-binary layout 以外を download 前に拒む。
+raw_package_tree_home=$fixture/raw-package-tree-home
+prepare_home "$raw_package_tree_home"
+expect_failure raw-package-tree "$INSTALL_AGENTS_RAW_PACKAGE_TREE" "$raw_package_tree_home" \
+  "$raw_asset" "$raw_api" x86_64 omp omp omp
+test ! -s "$FIXTURE_CURL_LOG"
+grep -Fq 'a raw release asset requires the single-binary layout for omp' \
+  "$fixture/raw-package-tree.stderr"
+
+# raw asset の entrypoint は path 成分を持てない。
+raw_nested_home=$fixture/raw-nested-home
+prepare_home "$raw_nested_home"
+expect_failure raw-nested-entrypoint "$INSTALL_AGENTS_RAW_NESTED_ENTRYPOINT" "$raw_nested_home" \
+  "$raw_asset" "$raw_api" x86_64 omp omp bin/omp
+grep -Fq 'unsafe raw release entrypoint: bin/omp' "$fixture/raw-nested-entrypoint.stderr"
 
 # client ごとの更新は独立である。先頭 client の失敗は後続 client の更新を止めず、
 # 失敗した client 名だけが集約して報告される。

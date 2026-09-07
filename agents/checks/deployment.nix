@@ -115,13 +115,10 @@ let
       (builtins.readFile ../clients/codex/impl/migrate-config.sh)
   );
 
-  expectedInstallManifest =
-    map
-      (name: {
-        inherit name;
-        inherit (expected.clients.${name}) binary versionArgs install;
-      })
-      (builtins.filter (name: expected.clients.${name}.install.kind != "nix-package") expected.required);
+  expectedInstallManifest = map (name: {
+    inherit name;
+    inherit (expected.clients.${name}) binary versionArgs install;
+  }) expected.required;
   agentmemoryHookCommand = name: "/run/current-system/sw/bin/agentmemory-hook-${name}";
   expectedHook =
     {
@@ -397,7 +394,9 @@ in
     assert clients.codex.gatewayConfig.source != clients.codex.managedFiles.system.source;
     assert clients.omp.gatewayConfig.source == clients.omp.managedFiles.mcp.source;
     assert clients.opencode.gatewayConfig.source != clients.opencode.managedFiles.config.source;
-    assert lib.count (package: package == clients.omp.package) homeConfig.home.packages == 1;
+    assert lib.all (exe: lib.hasPrefix "${hostConfig.dotfiles.workstation.homeDir}/.local/bin/" exe) (
+      builtins.attrValues hostConfig.dotfiles.agents.clientExecutables
+    );
     assert lib.all (
       row:
       !lib.elem row.file.destination [

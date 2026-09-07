@@ -1,15 +1,12 @@
 {
   config,
   lib,
-  omp,
   pkgs,
   ...
 }:
 
 let
   cfg = config.dotfiles;
-  mkOmpPackage = import ./package.nix;
-  ompPackage = mkOmpPackage { inherit lib omp pkgs; };
   lspProjection = import ../../impl/lsp.nix { inherit lib; };
 
   gatewayConfig = (pkgs.formats.json { }).generate "omp-mcp.json" {
@@ -80,7 +77,6 @@ in
 {
   dotfiles.agents.clients.omp = {
     binary = "omp";
-    package = ompPackage;
     runtimeWrapperMode = "managed";
     rulesDestination = ".omp/agent/AGENTS.md";
     skillsDestination = ".omp/agent/skills";
@@ -128,9 +124,23 @@ in
     agentmemoryMode = "hooks";
     skillProjectionMode = "preload";
     install = {
-      kind = "nix-package";
-      updateOwner = "flake-lock";
-      layout = "nix-store";
+      kind = "github-release";
+      updateOwner = "dotfiles";
+      layout = "single-binary";
+      assetFormat = "raw";
+      repo = "can1357/oh-my-pi";
+      retainedReleases = 2;
+      releaseByArch = {
+        x86_64 = {
+          asset = "omp-linux-x64";
+          entrypoint = "omp";
+        };
+        aarch64 = {
+          asset = "omp-linux-arm64";
+          entrypoint = "omp";
+        };
+      };
+      requiredPaths = { };
     };
   };
 }

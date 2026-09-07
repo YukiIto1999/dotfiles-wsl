@@ -87,7 +87,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 
 - 通常 rebuild: `dotfiles-rebuild`
 - 実用状態検証: `dotfiles-doctor`
-- Agent client binary の更新: upstream / release 管理 client は checkout から `nix run .#dotfiles-install-agents`。OMP は flake input 更新後に rebuild
+- Agent client binary の更新: checkout から `nix run .#dotfiles-install-agents`
 - Home Manager backup 整理: `dotfiles-cleanup --delete`
 - system backup 整理: `sudo dotfiles-cleanup --delete --system`
 - VS Code Server 整理: `dotfiles-cleanup --delete --vscode-server`

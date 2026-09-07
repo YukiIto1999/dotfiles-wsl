@@ -2,7 +2,7 @@
 
 **読み手:** Agent、Skill、Capability、provider、runtimeの境界を変更する人。
 
-AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycleを持つ。upstream installerとreleaseで入れるbinaryは`~/.local/bin`の可変物、OMPはflake inputに固定したNix packageである。policy、Skill、subagent、managed config、MCP serviceはNixOS generationが宣言する。
+AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycleを持つ。upstream installerとGitHub releaseで入れるbinaryは`~/.local/bin`の可変物である。policy、Skill、subagent、managed config、MCP serviceはNixOS generationが宣言する。
 
 ## 配備と呼出し
 
@@ -49,15 +49,15 @@ Agent clientへ配るのは`skills/<id>/skill/`だけである。Nix module、�
 
 ## Client binary
 
-client contractはupstream installer、GitHub release、Nix packageの三経路を持つ。`dotfiles-install-agents`はClaude CodeとAntigravityのupstream installer、CodexとOpenCodeのGitHub releaseを更新する。OMPはBun/Rust native addonを含むupstream Nix packageを`flake.lock`に固定し、rebuildで更新する。
+client contractはupstream installerとGitHub releaseの二経路を持つ。`dotfiles-install-agents`はClaude CodeとAntigravityのupstream installer、Codex、OpenCode、OMPのGitHub releaseを更新する。client単位の更新は互いに独立で、一つの失敗は他のclientを止めず、失敗したclient名を集約して非ゼロで終える。
 
 Codex runtimeのrelease asset、architecture別entrypoint、`requiredPaths`、`retainedReleases`は[`capabilities/agent-session/codex/module.nix`](../../capabilities/agent-session/codex/module.nix)が所有する。Agent client設定とCodex MCP adapterは同じruntime contractを消費する。他clientのinstall contractは各[`agents/clients/NAME/module.nix`](../../agents/clients)が所有する。
 
-GitHub release経路はGitHub APIのSHA-256 digestとarchiveを照合し、member名、type、件数、論理size、重複、path衝突を展開前に検査する。展開後はowner、mode、link、entrypoint、required path、version probeを通したtreeだけを公開する。
+GitHub release経路はGitHub APIのSHA-256 digestと取得したassetを照合する。`assetFormat`が`tar.gz`のときはmember名、type、件数、論理size、重複、path衝突を展開前に検査する。`raw`のときはassetが単一の実行fileそのものなので、path成分を持たないentrypointとして配置し、以降は同じ検査へ渡す。展開後はowner、mode、link、entrypoint、required path、version probeを通したtreeだけを公開する。`raw`は`single-binary` layout以外と組み合わせられない。
 
 管理releaseは`~/.local/share/dotfiles/agents/<client>/releases/sha256-<digest>`に置く。`current`は同じclient root内の相対symlink、`~/.local/bin/<binary>`は`current`内のentrypointを指す相対symlinkである。lockと固定したdirectory descriptorの下でidentityを照合し、所有を確認できないobjectは削除しない。
 
-Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前へ置く共通runtime wrapperから起動する。wrapperはupstream binaryまたはNix store executableを絶対pathで実行する。Antigravityは同じCLI起動境界を持たない。
+Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前へ置く共通runtime wrapperから起動する。wrapperはinstallerが管理する`~/.local/bin`のbinaryを絶対pathで実行する。Antigravityは同じCLI起動境界を持たない。
 
 runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、linked worktree間でCargo targetを共有する。project固有のCargo`target-dir`は上書きしない。
 

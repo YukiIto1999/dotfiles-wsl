@@ -91,7 +91,7 @@
 | MCP session が active な GET body の間 reap されず、session front の listener address を loopback に固定できる | `agentgateway-session-lifecycle` |
 | agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、共通 project build cache、明示済み環境値、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
-| GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。client ごとの失敗は隔離され、後続 client の公開を止めず、失敗した client 名だけを報告する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
+| GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。raw asset は single-binary layout と path 成分のない entrypoint だけを受理し、mode 0700 で公開する。client ごとの失敗は隔離され、後続 client の公開を止めず、失敗した client 名だけを報告する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
 | agent cache GC が allocated bytes を正本にし、不正な managed path を検出すると削除前に失敗し、inactive project cache を先に回収して active session がない場合だけ共有 cache を空にし、再計測する | `agent-project-cache-gc` |
 | source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない | `agent-verification-cache` |
 | agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |

@@ -35,35 +35,32 @@ let
     // lib.optionalAttrs (file.seedMigrationCommand != null) {
       seedMigrationCommand = lib.getName file.seedMigrationCommand;
     };
-  projectClient =
-    client:
-    {
-      inherit (client)
-        binary
-        capabilityManagedFiles
-        rulesDestination
-        skillsDestination
-        versionArgs
-        ;
-      subagents = {
-        mode = client.subagentMode;
-        destination = client.subagentsDestination;
-        format = client.subagentFormat;
-        names = builtins.attrNames client.subagents;
-      };
-      capabilities = {
-        lsp = client.lspMode;
-        telemetry = client.telemetryMode;
-        agentmemory = client.agentmemoryMode;
-        skills = client.skillProjectionMode;
-      };
-      gateway = {
-        inherit (client.gatewayConfig) format managedFile;
-      };
-      managedFiles = lib.mapAttrs (_: projectManagedFile) client.managedFiles;
-      inherit (client) install;
-    }
-    // lib.optionalAttrs (client.package != null) { package = lib.getName client.package; };
+  projectClient = client: {
+    inherit (client)
+      binary
+      capabilityManagedFiles
+      rulesDestination
+      skillsDestination
+      versionArgs
+      ;
+    subagents = {
+      mode = client.subagentMode;
+      destination = client.subagentsDestination;
+      format = client.subagentFormat;
+      names = builtins.attrNames client.subagents;
+    };
+    capabilities = {
+      lsp = client.lspMode;
+      telemetry = client.telemetryMode;
+      agentmemory = client.agentmemoryMode;
+      skills = client.skillProjectionMode;
+    };
+    gateway = {
+      inherit (client.gatewayConfig) format managedFile;
+    };
+    managedFiles = lib.mapAttrs (_: projectManagedFile) client.managedFiles;
+    inherit (client) install;
+  };
   actualContract = lib.mapAttrs (_: projectClient) clients;
 
   clientOptions = builtins.removeAttrs (
@@ -177,7 +174,6 @@ let
       install = "either";
       lspMode = "enum";
       managedFiles = "attrsOf";
-      package = "nullOr";
       rulesDestination = "str";
       runtimeWrapperMode = "enum";
       skillsDestination = "str";
@@ -220,7 +216,6 @@ let
       install
       ;
     runtimeWrapperMode = expectedRuntimeWrapperModes.${name};
-    package = if client ? package then pkgs.writeShellScriptBin client.binary "exit 0" else null;
     subagentMode = client.subagents.mode;
     subagentsDestination = client.subagents.destination;
     subagentFormat = client.subagents.format;
@@ -263,11 +258,7 @@ let
     };
   };
   expectedClientExecutables = lib.mapAttrs (
-    _: client:
-    if client.package != null then
-      lib.getExe client.package
-    else
-      "${hostConfig.dotfiles.workstation.homeDir}/.local/bin/${client.binary}"
+    _: client: "${hostConfig.dotfiles.workstation.homeDir}/.local/bin/${client.binary}"
   ) clients;
   mutateRuntimeTimer =
     timerName: update:
@@ -315,10 +306,10 @@ let
             "agentWorktree"
             "stateRoot"
           ];
-          contractWithoutPackages = evaluatedContract // {
+          contractWithoutSeedCommands = evaluatedContract // {
             clients = lib.mapAttrs (
               _: client:
-              builtins.removeAttrs client [ "package" ]
+              client
               // {
                 managedFiles = lib.mapAttrs (
                   _: file: builtins.removeAttrs file [ "seedMigrationCommand" ]
@@ -327,7 +318,7 @@ let
             ) evaluatedContract.clients;
           };
         in
-        builtins.deepSeq contractWithoutPackages (
+        builtins.deepSeq contractWithoutSeedCommands (
           builtins.all (assertion: assertion.assertion) evaluated.config.assertions
         )
       );
@@ -550,9 +541,14 @@ in
       runtimeWrapperModeVariantHome.home.file."${wrapperDirectory}/${clients.antigravity.binary}".executable;
     assert !(runtimeWrapperModeVariantHome.home.file ? "${wrapperDirectory}/${clients.codex.binary}");
     assert contractIsValid baseCandidate;
-    assert !contractIsValid (mutateClient "omp" { package = null; });
     assert
-      !contractIsValid (mutateClient "claude" { package = pkgs.writeShellScriptBin "claude" "exit 0"; });
+      !contractIsValid (
+        mutateClient "omp" {
+          install = baseCandidate.clients.omp.install // {
+            layout = "package-tree";
+          };
+        }
+      );
     assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = ""; });
     assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad/name"; });
     assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = "bad name"; });

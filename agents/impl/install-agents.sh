@@ -1147,15 +1147,32 @@ publish_validated_payload() {
 prepare_and_validate_archive() {
   local record=$1 payload=$2 scratch=$3
 
-  validate_archive "$active_stage/archive.tar.gz" "$scratch"
+  validate_archive "$resolved_download" "$scratch"
   mkdir -m 0700 -- "$payload"
   # GNU tar は --keep-old-files と --no-overwrite-dir を併用できない。fresh payload と
   # 事前の canonical path/duplicate 検査で file の上書きを閉じ、directory metadata を守る。
   (
     umask 077
-    tar --extract --gzip --file "$active_stage/archive.tar.gz" --directory "$payload" \
+    tar --extract --gzip --file "$resolved_download" --directory "$payload" \
       --no-same-owner --no-same-permissions --no-overwrite-dir
   ) || fail "archive extraction failed: $resolved_asset"
+  write_release_marker "$record" "$payload" "$resolved_digest"
+  validate_tree_safety "$payload" "$scratch"
+  validate_required_paths "$record" "$payload" "$scratch"
+}
+
+# raw asset は単一の実行 file で、archive の member 検査に相当する境界を持たない。
+# 新しい payload へ entrypoint だけを置き、archive 経路と同じ mode と検証へ渡す
+prepare_and_validate_raw() {
+  local record=$1 payload=$2 scratch=$3
+
+  [[ $resolved_entrypoint =~ ^[A-Za-z0-9._+-]+$ ]] \
+    || fail "unsafe raw release entrypoint: $resolved_entrypoint"
+  mkdir -m 0700 -- "$payload"
+  (umask 077; cp -- "$resolved_download" "$payload/$resolved_entrypoint") \
+    || fail "cannot stage raw release asset: $resolved_asset"
+  chmod 0700 -- "$payload/$resolved_entrypoint" \
+    || fail "cannot make raw release asset executable: $resolved_asset"
   write_release_marker "$record" "$payload" "$resolved_digest"
   validate_tree_safety "$payload" "$scratch"
   validate_required_paths "$record" "$payload" "$scratch"
@@ -1166,11 +1183,15 @@ publish_single_binary() {
   local before_manifest=$scratch/tree-before.manifest after_manifest=$scratch/tree-after.manifest
 
   mkdir -m 0700 -- "$scratch"
-  prepare_and_validate_archive "$record" "$payload" "$scratch"
+  case $asset_format in
+    tar.gz) prepare_and_validate_archive "$record" "$payload" "$scratch" ;;
+    raw) prepare_and_validate_raw "$record" "$payload" "$scratch" ;;
+    *) fail "unsupported release asset format for $name: $asset_format" ;;
+  esac
   [[ -f $payload/$resolved_entrypoint && ! -L $payload/$resolved_entrypoint ]] \
-    || fail "binary not found in archive: $resolved_entrypoint"
+    || fail "binary not found in release payload: $resolved_entrypoint"
   [[ -x $payload/$resolved_entrypoint ]] \
-    || fail "binary is not executable in archive: $resolved_entrypoint"
+    || fail "binary is not executable in release payload: $resolved_entrypoint"
   validate_payload "$record" "$payload" "$scratch" "$before_manifest"
   probe_payload_entrypoint "$record" "$payload" "$scratch" "$resolved_entrypoint" \
     "$before_manifest" "$after_manifest"
@@ -1192,7 +1213,7 @@ publish_package_tree() {
 }
 
 install_github_release() {
-  local record=$1 name binary layout client_root_path_identity
+  local record=$1 name binary layout asset_format client_root_path_identity
   local releases_root_path_identity visible_parent_path_identity active_stage_path_identity
 
   name=$(jq -e -r '.name | select(type == "string" and length > 0)' <<<"$record") \
@@ -1202,6 +1223,10 @@ install_github_release() {
   [[ $binary =~ ^[A-Za-z0-9._+-]+$ ]] || fail "unsafe binary name for $name: $binary"
   layout=$(jq -e -r '.install.layout | select(. == "single-binary" or . == "package-tree")' \
     <<<"$record") || fail "unsupported GitHub release layout for $name"
+  asset_format=$(jq -e -r '.install.assetFormat | select(. == "tar.gz" or . == "raw")' \
+    <<<"$record") || fail "unsupported release asset format for $name"
+  [[ $asset_format != raw || $layout == single-binary ]] \
+    || fail "a raw release asset requires the single-binary layout for $name"
   retained_releases=$(jq -e -r \
     '.install.retainedReleases | select(type == "number" and floor == . and . >= 2 and . <= 10)' \
     <<<"$record") || fail "invalid retainedReleases for $name"
@@ -1258,15 +1283,20 @@ install_github_release() {
 
   resolve_github_release "$record"
   log "$name"
-  curl_https --output "$active_stage/archive.tar.gz" "$resolved_url"
-  resolved_digest=$(sha256sum -- "$active_stage/archive.tar.gz") \
-    || fail "cannot hash downloaded archive: $resolved_asset"
+  case $asset_format in
+    tar.gz) resolved_download=$active_stage/archive.tar.gz ;;
+    raw) resolved_download=$active_stage/asset ;;
+    *) fail "unsupported release asset format for $name: $asset_format" ;;
+  esac
+  curl_https --output "$resolved_download" "$resolved_url"
+  resolved_digest=$(sha256sum -- "$resolved_download") \
+    || fail "cannot hash downloaded asset: $resolved_asset"
   resolved_digest=${resolved_digest%% *}
-  [[ $resolved_digest =~ ^[0-9a-f]{64}$ ]] || fail "downloaded archive digest is invalid"
+  [[ $resolved_digest =~ ^[0-9a-f]{64}$ ]] || fail "downloaded asset digest is invalid"
   [[ $resolved_api_digest =~ ^sha256:[0-9a-f]{64}$ ]] \
     || fail "release asset digest is malformed or missing: $resolved_asset"
   [[ $resolved_api_digest == "sha256:$resolved_digest" ]] \
-    || fail "release asset digest does not match downloaded archive: $resolved_asset"
+    || fail "release asset digest does not match the downloaded asset: $resolved_asset"
 
   case $layout in
     single-binary) publish_single_binary "$record" "$name" "$binary" ;;

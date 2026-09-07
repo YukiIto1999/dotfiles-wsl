@@ -13,9 +13,6 @@
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
-    # OMP は Bun/Rust native addon を含むため、upstream の Nix package をそのまま使う。
-    omp.url = "github:can1357/oh-my-pi";
-
     orca = {
       url = "github:stablyai/orca/637dc30a3211ec0667c55118a4d17edbee5cff80";
       flake = false;
@@ -34,7 +31,6 @@
       nixos-wsl,
       home-manager,
       sops-nix,
-      omp,
       orca,
       architectureStandard,
       ...
@@ -56,7 +52,7 @@
         nixpkgs.lib.nixosSystem {
           inherit system;
           specialArgs = {
-            inherit omp pluginSources self;
+            inherit pluginSources self;
           };
           modules =
             unitModules

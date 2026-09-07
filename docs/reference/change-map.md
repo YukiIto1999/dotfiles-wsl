@@ -64,7 +64,7 @@
 |---|---|---|
 | default Git identityを変える | [`identity/module.nix`](../../identity/module.nix)のtemplateと[`secrets/sops/assets/secrets.yaml`](../../secrets/sops/assets/secrets.yaml) | host keyを指定してSOPSで編集し、`dotfiles-rebuild` |
 | work identityの対象と値を変える | [`toolchain/git/module.nix`](../../toolchain/git/module.nix)、[`identity/module.nix`](../../identity/module.nix)、暗号化済みsecret | `dotfiles-rebuild` |
-| GitHub accountを増減する | [`profiles/workstation.nix`](../../profiles/workstation.nix)の`dotfiles.identity.github.accounts`、[`identity/module.nix`](../../identity/module.nix)、[`capabilities/github-resources/github/`](../../capabilities/github-resources/github)、暗号化済みsecret | rosterと暗号化済み値を同じ変更に含める |
+| GitHub accountを増減する | [`profiles/workstation.nix`](../../profiles/workstation.nix)の`dotfiles.identity.github`と暗号化済みsecret | rosterと暗号化済み値を同じ変更に含める。moduleは変えない |
 | application credentialを追加・変更する | 対応するCapabilityの`sops.secrets`とtemplate、[`secrets/sops/assets/secrets.yaml`](../../secrets/sops/assets/secrets.yaml) | host keyを指定してSOPSで編集し、`dotfiles-rebuild` |
 | host recipientを追加する | [`secrets/sops/assets/.sops.yaml`](../../secrets/sops/assets/.sops.yaml) | [SOPSの鍵](../operations/sops-enrollment.md)に従う |
 

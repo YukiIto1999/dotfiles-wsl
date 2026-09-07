@@ -675,6 +675,12 @@ in
         ]
         [
           "dotfiles"
+          "identity"
+          "github"
+          "primary"
+        ]
+        [
+          "dotfiles"
           "agents"
           "enabled"
         ]
@@ -699,7 +705,7 @@ in
       ) requiredRosterOptionPaths;
       fixtures = [
         ../fixtures/invalid/missing-rosters.nix
-        ../fixtures/invalid/unknown-account.nix
+        ../fixtures/invalid/account-primary-outside-roster.nix
         ../fixtures/invalid/unknown-agent.nix
         ../fixtures/invalid/unknown-capability.nix
         ../fixtures/invalid/unknown-lsp.nix
@@ -717,13 +723,18 @@ in
           };
         }
         {
-          name = "missing-account";
-          module = { lib, ... }: {
-            dotfiles.identity.github.accounts = lib.mkForce [
-              "account-1"
-              "account-2"
-            ];
-          };
+          name = "duplicate-account";
+          module =
+            { lib, ... }:
+            {
+              dotfiles.identity.github = {
+                accounts = lib.mkForce [
+                  "duplicated"
+                  "duplicated"
+                ];
+                primary = lib.mkForce "duplicated";
+              };
+            };
         }
         {
           name = "empty-agent-roster";

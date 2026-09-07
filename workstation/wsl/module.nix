@@ -97,8 +97,16 @@ in
     wslConf = {
       boot.systemd = true;
       interop.appendWindowsPath = false;
+      network.generateResolvConf = false;
     };
   };
+
+  # WSL が生成する resolv.conf は NAT DNS proxy 10.255.255.254 だけを指すが、この proxy は A も AAAA も
+  # 応答しない時間帯があり、nix の fetch が名前解決に失敗する。生成を止めて公開 resolver を固定する。
+  config.networking.nameservers = [
+    "1.1.1.1"
+    "8.8.8.8"
+  ];
 
   config.environment.systemPackages = [ wslview ];
 }

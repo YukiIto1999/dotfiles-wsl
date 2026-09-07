@@ -39,6 +39,12 @@ upstream OCI image の確認と同期には `dotfiles-sync-images --status` と 
 
 Nix unit は `module.nix` を marker にし、build がある場合は `package.nix`、検査がある場合は `checks.nix` を持つ。`impl/`、`assets/`、`fixtures/`、`skill/` は必要な unit だけが使う。境界と依存方向は[構成概要](docs/architecture/overview.md)に記載する。
 
+## アーキテクチャ標準
+
+アーキテクチャの標準は `flake.nix` の `architectureStandard` input が指す [architecture-standard](https://github.com/YukiIto1999/architecture-standard) にある。準拠の基準は、配備されている現在の標準本文である。適用は、標準の README の適用の4則と利用の手順に従う。
+
+採用の判断は [ADR 0001](docs/adr/0001-adopt-architecture-standard.md)、標準本文の参照方法と版の固定は [ADR 0002](docs/adr/0002-pin-standard-as-flake-input.md) に記録する。
+
 ## ドキュメント
 
 [ドキュメント索引](docs/README.md)から、目的に合う文書を選ぶ。

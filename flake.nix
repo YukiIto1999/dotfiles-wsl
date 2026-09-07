@@ -145,6 +145,7 @@
             self
             hostConfig
             mkNixosSystem
+            pluginSources
             sops-nix
             ;
           inherit normalMachineModule;

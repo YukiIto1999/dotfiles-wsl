@@ -25,6 +25,7 @@ let
     identity = "identity";
     managedArtifacts = "managed-artifacts";
     platform = "platform";
+    secrets = "secrets";
     skills = "skills";
     telemetry = "telemetry";
     toolchain = "toolchain";
@@ -669,18 +670,6 @@ in
       requiredRosterOptionPaths = [
         [
           "dotfiles"
-          "identity"
-          "github"
-          "accounts"
-        ]
-        [
-          "dotfiles"
-          "identity"
-          "github"
-          "primary"
-        ]
-        [
-          "dotfiles"
           "agents"
           "enabled"
         ]
@@ -705,7 +694,6 @@ in
       ) requiredRosterOptionPaths;
       fixtures = [
         ../fixtures/invalid/missing-rosters.nix
-        ../fixtures/invalid/account-primary-outside-roster.nix
         ../fixtures/invalid/unknown-agent.nix
         ../fixtures/invalid/unknown-capability.nix
         ../fixtures/invalid/unknown-lsp.nix
@@ -716,26 +704,6 @@ in
         module = fixture;
       }) fixtures;
       isolatedRosterCases = [
-        {
-          name = "empty-account-roster";
-          module = { lib, ... }: {
-            dotfiles.identity.github.accounts = lib.mkForce [ ];
-          };
-        }
-        {
-          name = "duplicate-account";
-          module =
-            { lib, ... }:
-            {
-              dotfiles.identity.github = {
-                accounts = lib.mkForce [
-                  "duplicated"
-                  "duplicated"
-                ];
-                primary = lib.mkForce "duplicated";
-              };
-            };
-        }
         {
           name = "empty-agent-roster";
           module = { lib, ... }: {

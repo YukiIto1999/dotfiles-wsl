@@ -129,7 +129,7 @@ main() {
   local -r USER_HOME="/home/${TARGET_USER}"
   local -r DOTFILES="${USER_HOME}/dotfiles-wsl"
   local -r SOPS_CONFIG="${DOTFILES}/secrets/sops/assets/.sops.yaml"
-  local -r SECRETS_FILE="${DOTFILES}/secrets/sops/assets/secrets.yaml"
+  local -r SECRETS_FILE="${DOTFILES}/secrets/sops/assets/secrets.json"
   local -r AGE_KEY="/var/lib/sops-nix/key.txt"
   local -r FLAKE_REF="git+file://${DOTFILES}"
   local -r TOTAL=${#BOOTSTRAP_STAGES[@]}

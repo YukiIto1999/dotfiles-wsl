@@ -27,7 +27,7 @@ trap - ERR
 
 DOTFILES="$test_root/dotfiles-wsl"
 SOPS_CONFIG="$DOTFILES/sops/assets/.sops.yaml"
-SECRETS_FILE="$DOTFILES/sops/assets/secrets.yaml"
+SECRETS_FILE="$DOTFILES/sops/assets/secrets.json"
 AGE_KEY="$test_root/var/lib/sops-nix/key.txt"
 export SUDO_USER
 SUDO_USER=$(id -un)

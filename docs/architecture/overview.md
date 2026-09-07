@@ -80,7 +80,8 @@ CapabilityがPlatformのpure builderを使う場合は、正本pathを明示し�
 repository固有optionはownerに対応するnamespaceへ置く。
 
 - `dotfiles.workstation`
-- `dotfiles.identity.github.accounts`
+- `dotfiles.secrets.paths`
+- `dotfiles.identity.github`
 - `dotfiles.agents`
 - `dotfiles.skills`
 - `dotfiles.capabilities`
@@ -126,6 +127,6 @@ JSON、TOML、YAMLの設定は、配備を担当するmoduleが一度だけ生�
 
 ## Secretとruntime state
 
-SOPS暗号文は[`secrets/sops/assets/secrets.yaml`](../../secrets/sops/assets/secrets.yaml)に置く。sops-nixがactivation時にhost keyで復号し、復号済みsecretとtemplateはruntimeにだけ生成する。GitHub account identityは`identity/`、application credentialは対応するCapabilityが所有する。
+SOPS暗号文は[`secrets/sops/assets/secrets.json`](../../secrets/sops/assets/secrets.json)に置く。sops-nixがactivation時にhost keyで復号し、復号済みsecretとtemplateはruntimeにだけ生成する。GitHub account identityは`identity/`、application credentialは対応するCapabilityが所有する。
 
 mutableなruntime stateをNix宣言へ逆輸入しない。NixOSまたはHome Managerの生成先を直接編集しても正本は変わらず、次のactivationで上書きされる。Claude CodeとCodexのuser-owned seed config、OMPの`config.yml`と`agent.db`は利用者またはclientが所有し、artifact drift観測から除外する。

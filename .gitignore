@@ -28,4 +28,3 @@ Thumbs.db
 *.unencrypted
 secrets.yaml
 secrets.yml
-!secrets/sops/assets/secrets.yaml

@@ -9,7 +9,9 @@
   "clients": {
     "antigravity": {
       "binary": "agy",
-      "versionArgs": ["--version"],
+      "versionArgs": [
+        "--version"
+      ],
       "rulesDestination": ".gemini/AGENTS.md",
       "skillsDestination": ".gemini/antigravity-cli/skills",
       "subagents": {
@@ -18,17 +20,17 @@
         "format": null,
         "names": []
       },
-    "capabilities": {
-      "lsp": "unsupported",
-      "telemetry": "unsupported",
-      "agentmemory": "unsupported",
-      "skills": "unsupported"
-    },
-    "capabilityManagedFiles": {
-      "lsp": null,
-      "telemetry": null,
-      "agentmemory": null
-    },
+      "capabilities": {
+        "lsp": "unsupported",
+        "telemetry": "unsupported",
+        "agentmemory": "unsupported",
+        "skills": "unsupported"
+      },
+      "capabilityManagedFiles": {
+        "lsp": null,
+        "telemetry": null,
+        "agentmemory": null
+      },
       "gateway": {
         "format": "json",
         "managedFile": "mcp"
@@ -49,7 +51,9 @@
     },
     "claude": {
       "binary": "claude",
-      "versionArgs": ["--version"],
+      "versionArgs": [
+        "--version"
+      ],
       "rulesDestination": ".claude/CLAUDE.md",
       "skillsDestination": ".claude/skills",
       "subagents": {
@@ -66,17 +70,17 @@
           "security"
         ]
       },
-    "capabilities": {
-      "lsp": "supported",
-      "telemetry": "supported",
-      "agentmemory": "hooks",
-      "skills": "preload"
-    },
-    "capabilityManagedFiles": {
-      "lsp": "managed-settings",
-      "telemetry": "managed-settings",
-      "agentmemory": "managed-settings"
-    },
+      "capabilities": {
+        "lsp": "supported",
+        "telemetry": "supported",
+        "agentmemory": "hooks",
+        "skills": "preload"
+      },
+      "capabilityManagedFiles": {
+        "lsp": "managed-settings",
+        "telemetry": "managed-settings",
+        "agentmemory": "managed-settings"
+      },
       "gateway": {
         "format": "json",
         "managedFile": "managed-mcp"
@@ -107,7 +111,9 @@
     },
     "codex": {
       "binary": "codex",
-      "versionArgs": ["--version"],
+      "versionArgs": [
+        "--version"
+      ],
       "rulesDestination": ".codex/AGENTS.md",
       "skillsDestination": ".codex/skills",
       "subagents": {
@@ -124,17 +130,17 @@
           "security"
         ]
       },
-    "capabilities": {
-      "lsp": "unsupported",
-      "telemetry": "unsupported",
-      "agentmemory": "hooks",
-      "skills": "dynamic"
-    },
-    "capabilityManagedFiles": {
-      "lsp": null,
-      "telemetry": null,
-      "agentmemory": "system"
-    },
+      "capabilities": {
+        "lsp": "unsupported",
+        "telemetry": "unsupported",
+        "agentmemory": "hooks",
+        "skills": "dynamic"
+      },
+      "capabilityManagedFiles": {
+        "lsp": null,
+        "telemetry": null,
+        "agentmemory": "system"
+      },
       "gateway": {
         "format": "toml",
         "managedFile": "system"
@@ -194,12 +200,12 @@
             "kind": "file",
             "executable": true
           }
-        }
+        },
+        "assetFormat": "tar.gz"
       }
     },
     "omp": {
       "binary": "omp",
-      "package": "omp",
       "versionArgs": [
         "--version"
       ],
@@ -257,14 +263,30 @@
         }
       },
       "install": {
-        "kind": "nix-package",
-        "updateOwner": "flake-lock",
-        "layout": "nix-store"
+        "kind": "github-release",
+        "updateOwner": "dotfiles",
+        "layout": "single-binary",
+        "assetFormat": "raw",
+        "repo": "can1357/oh-my-pi",
+        "retainedReleases": 2,
+        "releaseByArch": {
+          "x86_64": {
+            "asset": "omp-linux-x64",
+            "entrypoint": "omp"
+          },
+          "aarch64": {
+            "asset": "omp-linux-arm64",
+            "entrypoint": "omp"
+          }
+        },
+        "requiredPaths": {}
       }
     },
     "opencode": {
       "binary": "opencode",
-      "versionArgs": ["--version"],
+      "versionArgs": [
+        "--version"
+      ],
       "rulesDestination": ".config/opencode/AGENTS.md",
       "skillsDestination": ".config/opencode/skills",
       "subagents": {
@@ -281,17 +303,17 @@
           "security"
         ]
       },
-    "capabilities": {
-      "lsp": "supported",
-      "telemetry": "unsupported",
-      "agentmemory": "plugin",
-      "skills": "dynamic"
-    },
-    "capabilityManagedFiles": {
-      "lsp": "config",
-      "telemetry": null,
-      "agentmemory": "agentmemory-plugin"
-    },
+      "capabilities": {
+        "lsp": "supported",
+        "telemetry": "unsupported",
+        "agentmemory": "plugin",
+        "skills": "dynamic"
+      },
+      "capabilityManagedFiles": {
+        "lsp": "config",
+        "telemetry": null,
+        "agentmemory": "agentmemory-plugin"
+      },
       "gateway": {
         "format": "json",
         "managedFile": "config"
@@ -324,7 +346,8 @@
             "entrypoint": "opencode"
           }
         },
-        "requiredPaths": {}
+        "requiredPaths": {},
+        "assetFormat": "tar.gz"
       }
     }
   }

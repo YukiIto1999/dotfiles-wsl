@@ -107,48 +107,49 @@ let
     };
   }) (install: (install.kind or null) == "installer-script");
 
-  githubReleaseInstallType = types.addCheck (types.submodule {
-    options = {
-      kind = lib.mkOption {
-        type = types.enum [ "github-release" ];
-      };
-      updateOwner = lib.mkOption {
-        type = types.enum [ "dotfiles" ];
-      };
-      layout = lib.mkOption {
-        type = types.enum [
-          "single-binary"
-          "package-tree"
-        ];
-      };
-      repo = lib.mkOption { type = types.str; };
-      retainedReleases = lib.mkOption { type = types.ints.between 2 10; };
-      releaseByArch = lib.mkOption { type = releaseByArchType; };
-      requiredPaths = lib.mkOption {
-        type = types.attrsOf requiredPathType;
-        default = { };
-      };
-    };
-  }) (install: (install.kind or null) == "github-release");
-
-  nixPackageInstallType = types.addCheck (types.submodule {
-    options = {
-      kind = lib.mkOption {
-        type = types.enum [ "nix-package" ];
-      };
-      updateOwner = lib.mkOption {
-        type = types.enum [ "flake-lock" ];
-      };
-      layout = lib.mkOption {
-        type = types.enum [ "nix-store" ];
-      };
-    };
-  }) (install: (install.kind or null) == "nix-package");
+  githubReleaseInstallType =
+    types.addCheck
+      (types.submodule {
+        options = {
+          kind = lib.mkOption {
+            type = types.enum [ "github-release" ];
+          };
+          updateOwner = lib.mkOption {
+            type = types.enum [ "dotfiles" ];
+          };
+          layout = lib.mkOption {
+            type = types.enum [
+              "single-binary"
+              "package-tree"
+            ];
+          };
+          # upstream が archive を出さない client もある。raw は asset そのものが entrypoint で、
+          # archive の member 検査に相当する境界を持たないため single-binary だけに許す
+          assetFormat = lib.mkOption {
+            type = types.enum [
+              "tar.gz"
+              "raw"
+            ];
+            default = "tar.gz";
+          };
+          repo = lib.mkOption { type = types.str; };
+          retainedReleases = lib.mkOption { type = types.ints.between 2 10; };
+          releaseByArch = lib.mkOption { type = releaseByArchType; };
+          requiredPaths = lib.mkOption {
+            type = types.attrsOf requiredPathType;
+            default = { };
+          };
+        };
+      })
+      (
+        install:
+        (install.kind or null) == "github-release"
+        && ((install.assetFormat or "tar.gz") != "raw" || install.layout == "single-binary")
+      );
 
   installType = types.oneOf [
     installerScriptInstallType
     githubReleaseInstallType
-    nixPackageInstallType
   ];
 
   runtimeTimerType = types.submodule {
@@ -190,11 +191,6 @@ let
   clientType = types.submodule {
     options = {
       binary = lib.mkOption { type = safeBasenameType; };
-      package = lib.mkOption {
-        type = types.nullOr types.package;
-        default = null;
-        description = "nix-package install の実体。その他の install kind では null。";
-      };
       runtimeWrapperMode = lib.mkOption {
         type = types.enum [
           "managed"
@@ -324,12 +320,9 @@ let
     client:
     let
       inherit (client) install;
-      packageMatchesInstall = (install.kind == "nix-package") == (client.package != null);
     in
     if install.kind == "installer-script" then
-      packageMatchesInstall
-    else if install.kind == "nix-package" then
-      packageMatchesInstall
+      true
     else
       let
         requiredPathIds = builtins.attrNames install.requiredPaths;
@@ -341,8 +334,7 @@ let
           in
           requiredPath != null && requiredPath.kind == "file" && requiredPath.executable;
       in
-      packageMatchesInstall
-      && builtins.all validRelativeDestination entrypoints
+      builtins.all validRelativeDestination entrypoints
       && builtins.all validRelativeDestination requiredPathIds
       && (
         if install.layout == "single-binary" then

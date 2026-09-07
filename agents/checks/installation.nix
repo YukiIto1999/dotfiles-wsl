@@ -18,6 +18,7 @@ let
       kind = "github-release";
       updateOwner = "dotfiles";
       layout = "package-tree";
+      assetFormat = "tar.gz";
       repo = "openai/codex";
       retainedReleases = 2;
       releaseByArch = {
@@ -134,6 +135,7 @@ let
         kind = "github-release";
         updateOwner = "dotfiles";
         layout = "single-binary";
+        assetFormat = "tar.gz";
         repo = "anomalyco/opencode";
         retainedReleases = 2;
         releaseByArch = {
@@ -149,6 +151,55 @@ let
         requiredPaths = { };
       };
     }
+  ];
+  rawAssetFixtureRecord = {
+    name = "omp";
+    binary = "omp";
+    versionArgs = [ "--version" ];
+    install = {
+      kind = "github-release";
+      updateOwner = "dotfiles";
+      layout = "single-binary";
+      assetFormat = "raw";
+      repo = "can1357/oh-my-pi";
+      retainedReleases = 2;
+      releaseByArch = {
+        x86_64 = {
+          asset = "omp-linux-x64";
+          entrypoint = "omp";
+        };
+        aarch64 = {
+          asset = "omp-linux-arm64";
+          entrypoint = "omp";
+        };
+      };
+      requiredPaths = { };
+    };
+  };
+  rawAssetFixtureManifest = builtins.toJSON [ rawAssetFixtureRecord ];
+  rawPackageTreeFixtureManifest = builtins.toJSON [
+    (
+      rawAssetFixtureRecord
+      // {
+        install = rawAssetFixtureRecord.install // {
+          layout = "package-tree";
+        };
+      }
+    )
+  ];
+  rawNestedEntrypointFixtureManifest = builtins.toJSON [
+    (
+      rawAssetFixtureRecord
+      // {
+        install = rawAssetFixtureRecord.install // {
+          releaseByArch = rawAssetFixtureRecord.install.releaseByArch // {
+            x86_64 = rawAssetFixtureRecord.install.releaseByArch.x86_64 // {
+              entrypoint = "bin/omp";
+            };
+          };
+        };
+      }
+    )
   ];
   clientIsolationFixtureManifest = builtins.toJSON [
     (
@@ -257,6 +308,9 @@ let
   invalidClientSlashFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-slash-agent" invalidClientSlashFixtureManifest;
   invalidClientCharacterFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-character-agent" invalidClientCharacterFixtureManifest;
   singleBinaryFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-single-binary-agent" singleBinaryFixtureManifest;
+  rawAssetFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-raw-asset-agent" rawAssetFixtureManifest;
+  rawPackageTreeFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-raw-package-tree-agent" rawPackageTreeFixtureManifest;
+  rawNestedEntrypointFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-raw-nested-entrypoint-agent" rawNestedEntrypointFixtureManifest;
   clientIsolationFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-isolation-agents" clientIsolationFixtureManifest;
 in
 {
@@ -300,6 +354,9 @@ in
         export INSTALL_AGENTS_CLIENT_SLASH=${lib.getExe invalidClientSlashFixtureInstaller}
         export INSTALL_AGENTS_CLIENT_CHARACTER=${lib.getExe invalidClientCharacterFixtureInstaller}
         export INSTALL_AGENTS_SINGLE_BINARY=${lib.getExe singleBinaryFixtureInstaller}
+        export INSTALL_AGENTS_RAW_ASSET=${lib.getExe rawAssetFixtureInstaller}
+        export INSTALL_AGENTS_RAW_PACKAGE_TREE=${lib.getExe rawPackageTreeFixtureInstaller}
+        export INSTALL_AGENTS_RAW_NESTED_ENTRYPOINT=${lib.getExe rawNestedEntrypointFixtureInstaller}
         export INSTALL_AGENTS_CLIENT_ISOLATION=${lib.getExe clientIsolationFixtureInstaller}
         export ATOMIC_PUBLISH=${atomicPublishFixtureExe}
         export ATOMIC_PUBLISH_PRODUCTION=${atomicPublishExe}

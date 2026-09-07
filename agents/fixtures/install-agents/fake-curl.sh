@@ -80,7 +80,7 @@ case $url in
     ;;
   https://github.com/*/releases/download/*)
     [[ -n $output ]] || exit 64
-    [[ ${output##*/} == archive.tar.gz ]] || exit 64
+    [[ ${output##*/} == archive.tar.gz || ${output##*/} == asset ]] || exit 64
     cp -- "$FIXTURE_ARCHIVE" "$output"
     ;;
   *)

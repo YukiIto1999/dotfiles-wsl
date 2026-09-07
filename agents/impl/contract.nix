@@ -159,9 +159,9 @@ let
     };
   };
 
-  agentSkillRouteType = types.submodule {
+  subagentSkillRouteType = types.submodule {
     options = {
-      agent = lib.mkOption { type = nonEmptyStringType; };
+      subagent = lib.mkOption { type = nonEmptyStringType; };
       skill = lib.mkOption { type = nonEmptyStringType; };
       activation = lib.mkOption {
         type = types.enum [
@@ -172,7 +172,7 @@ let
     };
   };
 
-  agentHandoffType = types.submodule {
+  subagentHandoffType = types.submodule {
     options = {
       from = lib.mkOption { type = nonEmptyStringType; };
       to = lib.mkOption { type = nonEmptyStringType; };
@@ -182,8 +182,8 @@ let
 
   routingType = types.submodule {
     options = {
-      agentSkills = lib.mkOption { type = types.listOf agentSkillRouteType; };
-      agentHandoffs = lib.mkOption { type = types.listOf agentHandoffType; };
+      subagentSkills = lib.mkOption { type = types.listOf subagentSkillRouteType; };
+      subagentHandoffs = lib.mkOption { type = types.listOf subagentHandoffType; };
     };
   };
 
@@ -209,7 +209,7 @@ let
       install = lib.mkOption { type = installType; };
       rulesDestination = lib.mkOption { type = types.str; };
       skillsDestination = lib.mkOption { type = types.str; };
-      definitionMode = lib.mkOption {
+      subagentMode = lib.mkOption {
         type = types.enum [
           "native"
           "rendered"
@@ -217,11 +217,11 @@ let
           "unsupported"
         ];
       };
-      definitionsDestination = lib.mkOption {
+      subagentsDestination = lib.mkOption {
         type = types.nullOr types.str;
         default = null;
       };
-      definitionFormat = lib.mkOption {
+      subagentFormat = lib.mkOption {
         type = types.nullOr (
           types.enum [
             "toml"
@@ -230,7 +230,7 @@ let
         );
         default = null;
       };
-      definitions = lib.mkOption {
+      subagents = lib.mkOption {
         type = types.attrsOf types.path;
         default = { };
       };
@@ -301,32 +301,24 @@ let
     };
   };
 
-  definitionContractValid =
+  subagentContractValid =
     client:
-    if client.definitionMode == "native" then
-      client.definitionsDestination != null
-      && client.definitionFormat == null
-      && client.definitions != { }
-    else if client.definitionMode == "rendered" then
-      client.definitionsDestination != null
-      && client.definitionFormat != null
-      && client.definitions != { }
-    else if client.definitionMode == "declared" then
-      client.definitionsDestination == null
-      && client.definitionFormat != null
-      && client.definitions != { }
+    if client.subagentMode == "native" then
+      client.subagentsDestination != null && client.subagentFormat == null && client.subagents != { }
+    else if client.subagentMode == "rendered" then
+      client.subagentsDestination != null && client.subagentFormat != null && client.subagents != { }
+    else if client.subagentMode == "declared" then
+      client.subagentsDestination == null && client.subagentFormat != null && client.subagents != { }
     else
-      client.definitionsDestination == null
-      && client.definitionFormat == null
-      && client.definitions == { };
+      client.subagentsDestination == null && client.subagentFormat == null && client.subagents == { };
   skillProjectionContractValid =
     client:
     if client.skillProjectionMode == "preload" then
-      client.definitionMode == "rendered" && client.definitionFormat == "frontmatter-markdown"
+      client.subagentMode == "rendered" && client.subagentFormat == "frontmatter-markdown"
     else if client.skillProjectionMode == "dynamic" then
-      client.definitionMode != "unsupported"
+      client.subagentMode != "unsupported"
     else
-      client.definitionMode == "unsupported";
+      client.subagentMode == "unsupported";
 
   installContractValid =
     client:
@@ -389,10 +381,10 @@ let
       versionArguments = invalidClientsFor (client: client.versionArgs);
       rulesDestinations = invalidClientsFor (client: [ client.rulesDestination ]);
       skillsDestinations = invalidClientsFor (client: [ client.skillsDestination ]);
-      definitionsDestinations = invalidClientsFor (
-        client: lib.optional (client.definitionsDestination != null) client.definitionsDestination
+      subagentsDestinations = invalidClientsFor (
+        client: lib.optional (client.subagentsDestination != null) client.subagentsDestination
       );
-      definitionIds = invalidClientsFor (client: builtins.attrNames client.definitions);
+      subagentIds = invalidClientsFor (client: builtins.attrNames client.subagents);
       managedFileIds = invalidClientsFor (client: builtins.attrNames client.managedFiles);
       managedFileDestinations = invalidClientsFor (
         client: map (file: file.destination) (builtins.attrValues client.managedFiles)
@@ -422,8 +414,8 @@ let
       sharedSkillIds = map displayEmpty (
         builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.shared.skills)
       );
-      sharedDefinitionIds = map displayEmpty (
-        builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.shared.definitions)
+      sharedSubagentIds = map displayEmpty (
+        builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.shared.subagents)
       );
     };
 
@@ -523,7 +515,7 @@ in
         readOnly = true;
         internal = true;
       };
-      definitions = lib.mkOption {
+      subagents = lib.mkOption {
         type = types.attrsOf types.path;
         readOnly = true;
         internal = true;
@@ -545,8 +537,8 @@ in
     cfg:
     let
       clientNames = builtins.attrNames cfg.clients;
-      invalidDefinitionClients = builtins.filter (
-        name: !definitionContractValid cfg.clients.${name}
+      invalidSubagentClients = builtins.filter (
+        name: !subagentContractValid cfg.clients.${name}
       ) clientNames;
       invalidSkillProjectionClients = builtins.filter (
         name: !skillProjectionContractValid cfg.clients.${name}
@@ -572,10 +564,10 @@ in
             value = client.skillsDestination;
           }
         ]
-        ++ lib.optional (client.definitionsDestination != null) {
+        ++ lib.optional (client.subagentsDestination != null) {
           inherit clientName;
-          field = "definitionsDestination";
-          value = client.definitionsDestination;
+          field = "subagentsDestination";
+          value = client.subagentsDestination;
         }
       ) clientNames;
       invalidSharedDestinationRows = builtins.filter (
@@ -644,8 +636,8 @@ in
         message = "dotfiles.agents.shared.skills must not be empty";
       }
       {
-        assertion = cfg.shared.definitions != { };
-        message = "dotfiles.agents.shared.definitions must not be empty";
+        assertion = cfg.shared.subagents != { };
+        message = "dotfiles.agents.shared.subagents must not be empty";
       }
       {
         assertion = requiredStringFailures == { };
@@ -654,15 +646,15 @@ in
           + lib.concatStringsSep "; " requiredStringFailureMessages;
       }
       {
-        assertion = invalidDefinitionClients == [ ];
+        assertion = invalidSubagentClients == [ ];
         message =
-          "agent definition mode conflicts with destination, format, or sources: "
-          + lib.concatStringsSep ", " invalidDefinitionClients;
+          "agent subagent mode conflicts with destination, format, or sources: "
+          + lib.concatStringsSep ", " invalidSubagentClients;
       }
       {
         assertion = invalidSkillProjectionClients == [ ];
         message =
-          "agent Skill projection conflicts with definition mode or format: "
+          "agent Skill projection conflicts with subagent mode or format: "
           + lib.concatStringsSep ", " invalidSkillProjectionClients;
       }
       {

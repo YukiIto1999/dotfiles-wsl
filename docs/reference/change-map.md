@@ -40,7 +40,7 @@
 |---|---|---|
 | Agent clientの設定または配備形式を変える | [`agents/clients/<id>/`](../../agents/clients)と[`agents/module.nix`](../../agents/module.nix) | client固有check、`dotfiles-rebuild` |
 | client binaryの供給経路を変える | clientの`install` contract。複数consumerが共有するCodexは[`capabilities/agent-session/codex/`](../../capabilities/agent-session/codex) | `agent-client-roster`、installer checks、`dotfiles-install-agents` |
-| roleを追加・変更する | [`agents/roles/`](../../agents/roles)と[`agents/roles/routing.nix`](../../agents/roles/routing.nix) | `agent-definition-rendering` |
+| subagentを追加・変更する | `agents/subagents/`と[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix) | `agent-subagent-rendering` |
 | AgentMemoryのclient integration、engine、MCP、backendを変える | [`capabilities/project-memory/agentmemory/`](../../capabilities/project-memory/agentmemory) | `agentmemory-client-integration`とbackend/MCP checks |
 | session、build cache、verification reuseを変える | [`agents/impl/runtime/`](../../agents/impl/runtime)と[`agents/module.nix`](../../agents/module.nix) | 対応するruntime focused check |
 | linked worktreeの登録と回収を変える | [`agents/impl/resource/`](../../agents/impl/resource)と[`agents/module.nix`](../../agents/module.nix) | `agent-resource-contract`、`agent-resource-behavior` |

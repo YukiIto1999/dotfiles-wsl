@@ -1,178 +1,178 @@
 {
-  agentSkills = [
+  subagentSkills = [
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "dependency-analysis";
       activation = "dynamic";
     }
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "description-writing";
       activation = "dynamic";
     }
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "impact-analysis";
       activation = "dynamic";
     }
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "interface-design";
       activation = "dynamic";
     }
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "module-design";
       activation = "dynamic";
     }
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "repository-research";
       activation = "dynamic";
     }
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "standard-apply";
       activation = "dynamic";
     }
     {
-      agent = "architect";
+      subagent = "architect";
       skill = "web-research";
       activation = "dynamic";
     }
     {
-      agent = "designer";
+      subagent = "designer";
       skill = "browser-operation";
       activation = "dynamic";
     }
     {
-      agent = "designer";
+      subagent = "designer";
       skill = "repository-research";
       activation = "dynamic";
     }
     {
-      agent = "designer";
+      subagent = "designer";
       skill = "ui-design";
       activation = "required";
     }
     {
-      agent = "explorer";
+      subagent = "explorer";
       skill = "dependency-analysis";
       activation = "dynamic";
     }
     {
-      agent = "explorer";
+      subagent = "explorer";
       skill = "repository-research";
       activation = "required";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "browser-operation";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "code-design";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "comment-writing";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "documentation-writing";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "refactoring-implementation";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "repository-research";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "security-review";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "standard-apply";
       activation = "dynamic";
     }
     {
-      agent = "implementer";
+      subagent = "implementer";
       skill = "tdd-implementation";
       activation = "dynamic";
     }
     {
-      agent = "planner";
+      subagent = "planner";
       skill = "dependency-analysis";
       activation = "dynamic";
     }
     {
-      agent = "planner";
+      subagent = "planner";
       skill = "impact-analysis";
       activation = "dynamic";
     }
     {
-      agent = "planner";
+      subagent = "planner";
       skill = "repository-research";
       activation = "dynamic";
     }
     {
-      agent = "planner";
+      subagent = "planner";
       skill = "web-research";
       activation = "dynamic";
     }
     {
-      agent = "reviewer";
+      subagent = "reviewer";
       skill = "code-review";
       activation = "required";
     }
     {
-      agent = "reviewer";
+      subagent = "reviewer";
       skill = "github-operations";
       activation = "dynamic";
     }
     {
-      agent = "reviewer";
+      subagent = "reviewer";
       skill = "repository-research";
       activation = "dynamic";
     }
     {
-      agent = "reviewer";
+      subagent = "reviewer";
       skill = "standard-apply";
       activation = "dynamic";
     }
     {
-      agent = "reviewer";
+      subagent = "reviewer";
       skill = "standard-conformance";
       activation = "dynamic";
     }
     {
-      agent = "security";
+      subagent = "security";
       skill = "github-operations";
       activation = "dynamic";
     }
     {
-      agent = "security";
+      subagent = "security";
       skill = "repository-research";
       activation = "dynamic";
     }
     {
-      agent = "security";
+      subagent = "security";
       skill = "security-review";
       activation = "required";
     }
   ];
 
-  agentHandoffs = [
+  subagentHandoffs = [
     {
       from = "architect";
       to = "implementer";

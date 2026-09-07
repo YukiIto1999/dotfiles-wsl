@@ -31,7 +31,7 @@
 | Agent client | [`agents/clients/`](../../agents/clients)と`dotfiles.agents.clients` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply builtins.attrNames` |
 | Client installer | 各clientの`install` contractと[`agents/impl/install-agents.sh`](../../agents/impl/install-agents.sh) | `nix run .#dotfiles-install-agents -- --print-manifest` |
 | Agent runtimeとworktree台帳 | [`agents/module.nix`](../../agents/module.nix)、[`agents/impl/runtime/`](../../agents/impl/runtime)、[`agents/impl/resource/`](../../agents/impl/resource) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.runtime` |
-| 静的role | [`agents/roles/`](../../agents/roles) | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |
+| 静的subagent | `agents/subagents/` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |
 | local Skill | [`skills/`](../../skills) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled` |
 | Capability | [`capabilities/`](../../capabilities)の`dotfiles.capabilities.registry` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.enabled` |
 | plugin Skill | [`flake.nix`](../../flake.nix)のplugin inputと[`flake.lock`](../../flake.lock) | clientごとの生成設定を参照する |

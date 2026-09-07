@@ -230,22 +230,22 @@ let
         && artifact.format == "directory"
         && artifact.deployedAt == "${homePrefix}/${client.skillsDestination}/${name}"
       ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills);
-      definitionsMatch = lib.all (
+      subagentsMatch = lib.all (
         name:
         let
-          suffix = if client.definitionFormat == "toml" then "toml" else "md";
-          artifact = artifacts."agents/${clientName}/definitions/${name}";
-          expectedFormat = if client.definitionFormat == "toml" then "toml" else "markdown";
+          suffix = if client.subagentFormat == "toml" then "toml" else "md";
+          artifact = artifacts."agents/${clientName}/subagents/${name}";
+          expectedFormat = if client.subagentFormat == "toml" then "toml" else "markdown";
         in
-        if client.definitionsDestination == null then
-          !(artifacts ? "agents/${clientName}/definitions/${name}")
+        if client.subagentsDestination == null then
+          !(artifacts ? "agents/${clientName}/subagents/${name}")
         else
-          homeConfig.home.file."${client.definitionsDestination}/${name}.${suffix}".source
-          == normalizeSource client.definitions.${name}
-          && artifact.source == normalizeSource client.definitions.${name}
+          homeConfig.home.file."${client.subagentsDestination}/${name}.${suffix}".source
+          == normalizeSource client.subagents.${name}
+          && artifact.source == normalizeSource client.subagents.${name}
           && artifact.format == expectedFormat
-          && artifact.deployedAt == "${homePrefix}/${client.definitionsDestination}/${name}.${suffix}"
-      ) (builtins.attrNames client.definitions);
+          && artifact.deployedAt == "${homePrefix}/${client.subagentsDestination}/${name}.${suffix}"
+      ) (builtins.attrNames client.subagents);
     in
     homeConfig.home.file.${client.rulesDestination}.source
     == normalizeSource hostConfig.dotfiles.agents.shared.rules
@@ -256,7 +256,7 @@ let
     ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills)
     && rulesMatch
     && skillsMatch
-    && definitionsMatch
+    && subagentsMatch
   ) (builtins.attrNames clients);
 
   expectedArtifactIds = lib.sort builtins.lessThan (
@@ -269,8 +269,8 @@ let
       ++ map (name: "agents/${clientName}/skills/${name}") (
         builtins.attrNames hostConfig.dotfiles.agents.shared.skills
       )
-      ++ lib.optionals (client.definitionsDestination != null) (
-        map (name: "agents/${clientName}/definitions/${name}") (builtins.attrNames client.definitions)
+      ++ lib.optionals (client.subagentsDestination != null) (
+        map (name: "agents/${clientName}/subagents/${name}") (builtins.attrNames client.subagents)
       )
       ++ map (id: "agents/${clientName}/${id}") (
         builtins.attrNames expected.clients.${clientName}.managedFiles
@@ -301,8 +301,8 @@ let
     row: row.file.seedMigrationCommand != null
   ) managedRows;
 
-  sharedDefinitionSources = builtins.attrValues hostConfig.dotfiles.agents.shared.definitions;
-  sharedDefinitionNames = builtins.attrNames hostConfig.dotfiles.agents.shared.definitions;
+  sharedSubagentSources = builtins.attrValues hostConfig.dotfiles.agents.shared.subagents;
+  sharedSubagentNames = builtins.attrNames hostConfig.dotfiles.agents.shared.subagents;
   sharedSkillNames = builtins.attrNames hostConfig.dotfiles.agents.shared.skills;
   registrySkillSourcesMatch = lib.all (
     name:
@@ -312,29 +312,31 @@ let
       == toString hostConfig.dotfiles.skills.registry.${name}.source
   ) sharedSkillNames;
   routingContract = hostConfig.dotfiles.agents.shared.routing;
-  routedSkillNames = lib.unique (map (route: route.skill) routingContract.agentSkills);
-  routedAgentNames = lib.unique (map (route: route.agent) routingContract.agentSkills);
-  agentSkillRouteKeys = map (route: "${route.agent}/${route.skill}") routingContract.agentSkills;
-  agentHandoffKeys = map (
+  routedSkillNames = lib.unique (map (route: route.skill) routingContract.subagentSkills);
+  routedSubagentNames = lib.unique (map (route: route.subagent) routingContract.subagentSkills);
+  subagentSkillRouteKeys = map (
+    route: "${route.subagent}/${route.skill}"
+  ) routingContract.subagentSkills;
+  subagentHandoffKeys = map (
     route: "${route.from}/${route.to}/${route.artifact}"
-  ) routingContract.agentHandoffs;
-  requiredSkillsByAgent = lib.genAttrs sharedDefinitionNames (
+  ) routingContract.subagentHandoffs;
+  requiredSkillsBySubagent = lib.genAttrs sharedSubagentNames (
     name:
     map (route: route.skill) (
       builtins.filter (
-        route: route.agent == name && route.activation == "required"
-      ) routingContract.agentSkills
+        route: route.subagent == name && route.activation == "required"
+      ) routingContract.subagentSkills
     )
   );
-  securityDefinitionSource = hostConfig.dotfiles.agents.shared.definitions.security;
-  claudeDefinitionSources = builtins.attrValues clients.claude.definitions;
-  codexDefinitionSources = builtins.attrValues clients.codex.definitions;
-  ompDefinitionSources = builtins.attrValues clients.omp.definitions;
-  opencodeDefinitionSources = builtins.attrValues clients.opencode.definitions;
-  sharedDefinitionFarm = pkgs.linkFarm "shared-agent-definitions" (
+  securitySubagentSource = hostConfig.dotfiles.agents.shared.subagents.security;
+  claudeSubagentSources = builtins.attrValues clients.claude.subagents;
+  codexSubagentSources = builtins.attrValues clients.codex.subagents;
+  ompSubagentSources = builtins.attrValues clients.omp.subagents;
+  opencodeSubagentSources = builtins.attrValues clients.opencode.subagents;
+  sharedSubagentFarm = pkgs.linkFarm "shared-subagents" (
     lib.mapAttrsToList (name: path: {
       inherit name path;
-    }) hostConfig.dotfiles.agents.shared.definitions
+    }) hostConfig.dotfiles.agents.shared.subagents
   );
   # 生成側とは独立に期待値を持つ。OMP は実装が同一の server だけ上流名を使い、OpenCode は
   # built-in id との衝突を避けるため所有者を前置する
@@ -425,7 +427,7 @@ in
           pkgs.ripgrep
           pkgs.taplo
         ];
-        codexDefinitionSources = lib.concatStringsSep " " (map toString codexDefinitionSources);
+        codexSubagentSources = lib.concatStringsSep " " (map toString codexSubagentSources);
       }
       ''
         set -euo pipefail
@@ -623,14 +625,14 @@ in
           (has("sandbox_mode") | not) and
           (has("sandbox_workspace_write") | not)
         ' codex-user-seed.json > /dev/null
-        for definition in $codexDefinitionSources; do
-          remarshal -if toml -of json "$definition" > codex-definition.json
+        for subagent in $codexSubagentSources; do
+          remarshal -if toml -of json "$subagent" > codex-subagent.json
           jq --exit-status '
             (has("sandbox_mode") | not) and
             (has("sandbox_workspace_write") | not) and
             (has("default_permissions") | not) and
             (has("permissions") | not)
-          ' codex-definition.json > /dev/null
+          ' codex-subagent.json > /dev/null
         done
         jq '.mcp_servers.extra = {url: "https://unexpected.invalid/mcp"}' \
           codex-system.json > codex-system-extra-server.json
@@ -895,40 +897,40 @@ in
         fi
         test ! -e ${self}/agents/shared
         test -f ${self}/agents/policy/AGENTS.md
-        test -f ${self}/agents/roles/routing.nix
+        test -f ${self}/agents/subagents/routing.nix
         for client in antigravity claude codex omp opencode; do
           test -f "${self}/agents/clients/$client/module.nix"
         done
         touch $out
       '';
 
-  agent-definition-rendering =
-    assert clients.claude.definitions != hostConfig.dotfiles.agents.shared.definitions;
-    assert builtins.attrNames clients.claude.definitions == sharedDefinitionNames;
-    assert clients.antigravity.definitions == { };
+  agent-subagent-rendering =
+    assert clients.claude.subagents != hostConfig.dotfiles.agents.shared.subagents;
+    assert builtins.attrNames clients.claude.subagents == sharedSubagentNames;
+    assert clients.antigravity.subagents == { };
     assert lib.all (name: builtins.elem name sharedSkillNames) routedSkillNames;
-    assert lib.sort builtins.lessThan routedAgentNames == sharedDefinitionNames;
-    assert builtins.length agentSkillRouteKeys == builtins.length (lib.unique agentSkillRouteKeys);
-    assert builtins.length agentHandoffKeys == builtins.length (lib.unique agentHandoffKeys);
+    assert lib.sort builtins.lessThan routedSubagentNames == sharedSubagentNames;
+    assert
+      builtins.length subagentSkillRouteKeys == builtins.length (lib.unique subagentSkillRouteKeys);
+    assert builtins.length subagentHandoffKeys == builtins.length (lib.unique subagentHandoffKeys);
     assert lib.all (
-      route:
-      builtins.elem route.from sharedDefinitionNames && builtins.elem route.to sharedDefinitionNames
-    ) routingContract.agentHandoffs;
+      route: builtins.elem route.from sharedSubagentNames && builtins.elem route.to sharedSubagentNames
+    ) routingContract.subagentHandoffs;
     assert clients.claude.skillProjectionMode == "preload";
     assert clients.omp.skillProjectionMode == "preload";
     assert clients.codex.skillProjectionMode == "dynamic";
     assert clients.opencode.skillProjectionMode == "dynamic";
     assert clients.antigravity.skillProjectionMode == "unsupported";
-    assert sharedDefinitionSources != [ ];
-    assert claudeDefinitionSources != [ ];
-    assert codexDefinitionSources != [ ];
-    assert ompDefinitionSources != [ ];
-    assert opencodeDefinitionSources != [ ];
+    assert sharedSubagentSources != [ ];
+    assert claudeSubagentSources != [ ];
+    assert codexSubagentSources != [ ];
+    assert ompSubagentSources != [ ];
+    assert opencodeSubagentSources != [ ];
     assert lib.all (source: lib.hasPrefix builtins.storeDir (toString source)) (
       builtins.attrValues hostConfig.dotfiles.agents.shared.skills
     );
     assert registrySkillSourcesMatch;
-    pkgs.runCommandLocal "check-agent-definition-rendering"
+    pkgs.runCommandLocal "check-agent-subagent-rendering"
       {
         nativeBuildInputs = [
           pkgs.coreutils
@@ -939,19 +941,19 @@ in
           pkgs.yq
         ];
         rulesSource = hostConfig.dotfiles.agents.shared.rules;
-        routedDefinitionNames = lib.concatStringsSep " " sharedDefinitionNames;
+        subagentNames = lib.concatStringsSep " " sharedSubagentNames;
         routedSkillNames = lib.concatStringsSep " " sharedSkillNames;
-        requiredSkillsJson = builtins.toJSON requiredSkillsByAgent;
+        requiredSkillsJson = builtins.toJSON requiredSkillsBySubagent;
         routingJson = builtins.toJSON routingContract;
-        inherit sharedDefinitionFarm;
-        claudeDefinitionsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.claude.definitions);
-        ompDefinitionsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.omp.definitions);
-        inherit securityDefinitionSource;
-        sharedSources = sharedDefinitionSources;
-        claudeSources = claudeDefinitionSources;
-        codexSources = codexDefinitionSources;
-        ompSources = ompDefinitionSources;
-        opencodeSources = opencodeDefinitionSources;
+        inherit sharedSubagentFarm;
+        claudeSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.claude.subagents);
+        ompSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.omp.subagents);
+        inherit securitySubagentSource;
+        sharedSources = sharedSubagentSources;
+        claudeSources = claudeSubagentSources;
+        codexSources = codexSubagentSources;
+        ompSources = ompSubagentSources;
+        opencodeSources = opencodeSubagentSources;
       }
       ''
         set -euo pipefail
@@ -959,20 +961,20 @@ in
         test -s "$rulesSource"
         iconv -f UTF-8 -t UTF-8 "$rulesSource" > /dev/null
         grep -Eq '^#{1,6}[[:space:]]+[^[:space:]]' "$rulesSource"
-        while IFS=$'\t' read -r agent skill; do
-          source="$sharedDefinitionFarm/$agent"
+        while IFS=$'\t' read -r subagent skill; do
+          source="$sharedSubagentFarm/$subagent"
           if ! grep -Fq "\`$skill\`" "$source"; then
             echo "agent Skill route is absent from definition: $agent/$skill" >&2
             exit 1
           fi
-        done < <(jq -r '.agentSkills[] | [.agent, .skill] | @tsv' <<<"$routingJson")
+        done < <(jq -r '.subagentSkills[] | [.subagent, .skill] | @tsv' <<<"$routingJson")
         while IFS=$'\t' read -r from to artifact; do
-          source="$sharedDefinitionFarm/$from"
+          source="$sharedSubagentFarm/$from"
           if ! grep -Fq "\`$artifact\`" "$source" || ! grep -Fq "$to" "$source"; then
             echo "agent handoff route is absent from definition: $from/$to/$artifact" >&2
             exit 1
           fi
-        done < <(jq -r '.agentHandoffs[] | [.from, .to, .artifact] | @tsv' <<<"$routingJson")
+        done < <(jq -r '.subagentHandoffs[] | [.from, .to, .artifact] | @tsv' <<<"$routingJson")
 
         for name in $routedSkillNames; do
           if ! grep -Fq "\`$name\`" "$rulesSource"; then
@@ -980,7 +982,7 @@ in
             exit 1
           fi
         done
-        for name in $routedDefinitionNames; do
+        for name in $subagentNames; do
           if ! grep -Fq "\`$name\`" "$rulesSource"; then
             echo "shared subagent has no AGENTS.md route: $name" >&2
             exit 1
@@ -1027,7 +1029,7 @@ in
               . == "Edit" or . == "Write" or . == "Bash" or
               . == "Skill" or . == "mcp__gateway"))
           ' frontmatter.yaml > /dev/null
-        done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$claudeDefinitionsJson")
+        done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$claudeSubagentsJson")
         for source in $opencodeSources; do
           check_frontmatter "$source"
           yq --exit-status '
@@ -1049,13 +1051,13 @@ in
             (.tools | all(. == "read" or . == "grep" or . == "glob" or
               . == "edit" or . == "write" or . == "bash"))
           ' frontmatter.yaml > /dev/null
-        done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$ompDefinitionsJson")
+        done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$ompSubagentsJson")
         for source in $codexSources; do
-          remarshal -if toml -of json "$source" > definition.json
-          jq --exit-status '.developer_instructions | length > 0' definition.json > /dev/null
+          remarshal -if toml -of json "$source" > subagent.json
+          jq --exit-status '.developer_instructions | length > 0' subagent.json > /dev/null
         done
 
-        extract_definition_section() {
+        extract_subagent_section() {
           local heading=$1 source=$2
           awk -v heading="$heading" '
             $0 == heading { inside = 1; next }
@@ -1063,7 +1065,7 @@ in
             inside { print }
           ' "$source"
         }
-        extract_definition_section '## Scan' "$securityDefinitionSource" > security-scan-section.md
+        extract_subagent_section '## Scan' "$securitySubagentSource" > security-scan-section.md
         for phase in security-review threat-model finding-discovery validation attack-path-analysis; do
           grep -Fq "$phase" security-scan-section.md
         done
@@ -1073,25 +1075,25 @@ in
           echo "security scan phase includes finding repair" >&2
           exit 1
         fi
-        extract_definition_section '## Finding fix handoff' "$securityDefinitionSource" \
+        extract_subagent_section '## Finding fix handoff' "$securitySubagentSource" \
           > security-fix-handoff-section.md
         grep -Fq 'fix-finding' security-fix-handoff-section.md
         grep -Fq 'validated-finding-attack-path' security-fix-handoff-section.md
         grep -Fq '修正を実装しない' security-fix-handoff-section.md
         grep -Fq '$HOME/.local/state/dotfiles-wsl/security-scans/<repo_name>' \
-          "$securityDefinitionSource"
+          "$securitySubagentSource"
         grep -Fq '再現用の使い捨てdataだけを割り当て済み`TMPDIR`へ置き' \
-          "$securityDefinitionSource"
+          "$securitySubagentSource"
         grep -Fq 'plugin既定の`/tmp/codex-security-scans/<repo_name>`は使わない' \
-          "$securityDefinitionSource"
+          "$securitySubagentSource"
         security_frontmatter_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' \
-          "$securityDefinitionSource")
-        sed -n "2,$((security_frontmatter_end - 1))p" "$securityDefinitionSource" \
+          "$securitySubagentSource")
+        sed -n "2,$((security_frontmatter_end - 1))p" "$securitySubagentSource" \
           > security-frontmatter.yaml
         yq --exit-status '.tools == ["Read", "Bash", "Grep", "Glob"]' \
           security-frontmatter.yaml > /dev/null
 
-        compare_definition_bodies() {
+        compare_subagent_bodies() {
           local shared=$1 rendered=$2 shared_end rendered_end
           shared_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$shared")
           rendered_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$rendered")
@@ -1103,13 +1105,13 @@ in
           <(printf '%s\n' $sharedSources) \
           <(printf '%s\n' $claudeSources) \
           | while IFS=$'\t' read -r shared claude; do
-              compare_definition_bodies "$shared" "$claude"
+              compare_subagent_bodies "$shared" "$claude"
             done
         paste \
           <(printf '%s\n' $sharedSources) \
           <(printf '%s\n' $ompSources) \
           | while IFS=$'\t' read -r shared omp; do
-              compare_definition_bodies "$shared" "$omp"
+              compare_subagent_bodies "$shared" "$omp"
             done
 
         touch $out

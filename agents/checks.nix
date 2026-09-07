@@ -24,7 +24,6 @@ let
     "agent-artifact-contract"
     "agent-client-roster"
     "agent-config-migration"
-    "agent-definition-rendering"
     "agent-installer-behavior"
     "agent-nix-build-shims"
     "agent-project-cache-gc"
@@ -32,6 +31,7 @@ let
     "agent-resource-contract"
     "agent-runtime-behavior"
     "agent-runtime-contract"
+    "agent-subagent-rendering"
     "agent-verification-cache"
     "lsp-registration"
   ];

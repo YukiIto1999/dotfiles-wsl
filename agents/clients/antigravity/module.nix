@@ -11,10 +11,10 @@ in
     runtimeWrapperMode = "unsupported";
     rulesDestination = ".gemini/AGENTS.md";
     skillsDestination = ".gemini/antigravity-cli/skills";
-    definitionMode = "unsupported";
-    definitionsDestination = null;
-    definitionFormat = null;
-    definitions = { };
+    subagentMode = "unsupported";
+    subagentsDestination = null;
+    subagentFormat = null;
+    subagents = { };
     gatewayConfig = {
       source = mcpConfig;
       format = "json";

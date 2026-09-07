@@ -55,7 +55,6 @@ let
   platformContainersUnit = unitById "platform/containers";
   platformMcpUnit = unitById "platform/mcp";
   machineInputProjection = cfg: {
-    accounts = cfg.dotfiles.identity.github.accounts;
     agents = cfg.dotfiles.agents.enabled;
     capabilities = cfg.dotfiles.capabilities.enabled;
     skills = cfg.dotfiles.skills.enabled;

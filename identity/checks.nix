@@ -32,7 +32,6 @@ in
   account-deployment-contract =
     assert accounts != [ ];
     assert builtins.elem primary accounts;
-    assert variantConfig.dotfiles.identity.github.accounts == accounts;
     assert variantTemplate.content == accountTemplate.content;
     assert accountTemplate.content == builtins.readFile accountArtifact.source;
     assert

@@ -351,8 +351,13 @@ in
         ${pkgs.python3}/bin/python ${behaviorBackend} "$PWD/observed.json" &
         backend_pid=$!
         trap 'kill "$backend_pid" 2>/dev/null || true' EXIT
-        curl --silent --show-error --fail --retry 20 --retry-all-errors --retry-delay 0 \
-          http://127.0.0.1:18080/mcp/schema >/dev/null
+        for _ in $(seq 1 100); do
+          if curl --silent --fail http://127.0.0.1:18080/mcp/schema >/dev/null 2>&1; then
+            break
+          fi
+          sleep 0.1
+        done
+        curl --silent --show-error --fail http://127.0.0.1:18080/mcp/schema >/dev/null
         timeout 20 ${pkgs.python3}/bin/python ${behaviorDriver} ${lib.getExe behaviorPackage}
         jq -e \
           '. == {

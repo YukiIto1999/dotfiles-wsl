@@ -2,7 +2,7 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-secret は `secrets/sops/assets/secrets.yaml` に age で暗号化して置く。復号できるのは host 鍵と recovery 鍵の 2 つで、`secrets/sops/assets/.sops.yaml` がその recipient を宣言する。
+secret は `secrets/sops/assets/secrets.json` に age で暗号化して置く。復号できるのは host 鍵と recovery 鍵の 2 つで、`secrets/sops/assets/.sops.yaml` がその recipient を宣言する。
 
 ## 鍵の置き場
 
@@ -20,11 +20,11 @@ recovery 鍵は host 鍵を失ったときの唯一の復元手段になる。**
 ```sh
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
   sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml \
-  ~/dotfiles-wsl/secrets/sops/assets/secrets.yaml
+  ~/dotfiles-wsl/secrets/sops/assets/secrets.json
 dotfiles-rebuild
 ```
 
-`secrets.yaml` は flake 経由で store に入るので、編集しただけでは `/run/secrets` に反映されない。rebuild が要る。
+`secrets.json` は flake 経由で store に入るので、編集しただけでは `/run/secrets` に反映されない。rebuild が要る。
 
 ## 新しい host を登録する
 
@@ -37,14 +37,14 @@ sudo install -m 0400 -o root -g root host.key /var/lib/sops-nix/key.txt
 
 ```sh
 SOPS_AGE_KEY_FILE=/media/offline/recovery-key.txt \
-  sops --config secrets/sops/assets/.sops.yaml updatekeys secrets/sops/assets/secrets.yaml
+  sops --config secrets/sops/assets/.sops.yaml updatekeys secrets/sops/assets/secrets.json
 ```
 
 新しい鍵で復号できることを確かめてから、古い recipient を外す。**確かめる前に外すと全 secret を失う。**
 
 ```sh
 SOPS_AGE_KEY_FILE=host.key \
-  sops --config secrets/sops/assets/.sops.yaml decrypt secrets/sops/assets/secrets.yaml > /dev/null
+  sops --config secrets/sops/assets/.sops.yaml decrypt secrets/sops/assets/secrets.json > /dev/null
 ```
 
 ## 検査

@@ -9,7 +9,7 @@
 }:
 
 let
-  sopsFile = "${self}/secrets/sops/assets/secrets.yaml";
+  sopsFile = "${self}/secrets/sops/assets/secrets.json";
   sopsConfigFile = "${self}/secrets/sops/assets/.sops.yaml";
   templates = hostConfig.sops.templates;
   inHome = template: lib.hasPrefix hostConfig.dotfiles.workstation.homeDir template.path;
@@ -185,27 +185,34 @@ in
     assert hostConfig.sops.age.keyFile == "/var/lib/sops-nix/key.txt";
     assert !hostConfig.sops.age.generateKey;
     assert hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z.mode == "0400";
-    pkgs.runCommandLocal "check-sops-policy" { nativeBuildInputs = with pkgs; [ yq-go ]; } ''
-      set -euo pipefail
+    pkgs.runCommandLocal "check-sops-policy"
+      {
+        nativeBuildInputs = with pkgs; [
+          jq
+          yq-go
+        ];
+      }
+      ''
+        set -euo pipefail
 
-      # 宣言した recipient と、暗号文が実際に持つ recipient が一致すること
-      # anchor は explode しないと alias 名のまま出る
-      yq -r 'explode(.) | .creation_rules[0].key_groups[0].age[]' ${sopsConfigFile} \
-        | sort > declared
-      yq -r '.sops.age[].recipient' ${sopsFile} | sort > actual
-      diff -u declared actual
+        # 宣言した recipient と、暗号文が実際に持つ recipient が一致すること
+        # anchor は explode しないと alias 名のまま出る
+        yq -r 'explode(.) | .creation_rules[0].key_groups[0].age[]' ${sopsConfigFile} \
+          | sort > declared
+        jq -r '.sops.age[].recipient' ${sopsFile} | sort > actual
+        diff -u declared actual
 
-      # host 鍵と recovery 鍵の二つ。片方だけだと復旧手段が無い
-      test "$(wc -l < declared)" -eq 2
+        # host 鍵と recovery 鍵の二つ。片方だけだと復旧手段が無い
+        test "$(wc -l < declared)" -eq 2
 
-      # 平文が残っていないこと。! 付きの command は set -e の対象外なので
-      # 否定を条件式で書く
-      if grep -qE '^[a-z_]+: [^E]' ${sopsFile}; then
-        echo "secrets.yaml holds a plaintext value" >&2
-        exit 1
-      fi
-      touch $out
-    '';
+        # 暗号化されていない leaf が残っていないこと。sops の metadata は対象外
+        if jq -e 'del(.sops) | [paths(scalars) as $p | getpath($p)]
+          | map(select(startswith("ENC[") | not)) | length > 0' ${sopsFile} > /dev/null; then
+          echo 'the encrypted store holds a plaintext value' >&2
+          exit 1
+        fi
+        touch $out
+      '';
 
   # secret file は user 所有で 0600。各 unit が mode を決めない
   sops-secret-file-mode =

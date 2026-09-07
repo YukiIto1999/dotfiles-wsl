@@ -27,9 +27,9 @@ sudo install -m 0400 -o root -g root /tmp/host.key /var/lib/sops-nix/key.txt
 
 ```bash
 SOPS_AGE_KEY_FILE=/media/offline/recovery-key.txt \
-  sops --config secrets/sops/assets/.sops.yaml updatekeys secrets/sops/assets/secrets.yaml
+  sops --config secrets/sops/assets/.sops.yaml updatekeys secrets/sops/assets/secrets.json
 SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops --config secrets/sops/assets/.sops.yaml decrypt secrets/sops/assets/secrets.yaml > /dev/null
+  sops --config secrets/sops/assets/.sops.yaml decrypt secrets/sops/assets/secrets.json > /dev/null
 ```
 
 最後の復号が成功してから先へ進む。**確かめる前に旧 recipient を外すと全 secret を失う。**手順の詳細は [SOPS の鍵](sops-enrollment.md)にある。
@@ -42,7 +42,7 @@ git diff -- secrets/sops/assets
 git status --short
 ```
 
-`git status --short` に表示される変更は `secrets/sops/assets/.sops.yaml` と `secrets/sops/assets/secrets.yaml` の二つだけにする。bootstrap 前は Git identity が未配備なので、この時点では commit しない。鍵の交換が済んだら recovery key をホストから取り外す。
+`git status --short` に表示される変更は `secrets/sops/assets/.sops.yaml` と `secrets/sops/assets/secrets.json` の二つだけにする。bootstrap 前は Git identity が未配備なので、この時点では commit しない。鍵の交換が済んだら recovery key をホストから取り外す。
 
 ## Bootstrap
 
@@ -63,7 +63,7 @@ sudo bash workstation/activation/rebuild/impl/bootstrap.sh
 | 4 | root の Git `safe.directory` に checkout を登録する |
 | 5 | flake、lock、暗号化済み secrets、host key の存在と host key の owner、mode を検査する |
 | 6 | flake build から見えない未追跡ファイルがないことを確認する |
-| 7 | host key で `secrets/sops/assets/secrets.yaml` を復号できることを確認する |
+| 7 | host key で `secrets/sops/assets/secrets.json` を復号できることを確認する |
 | 8 | AI CLI を upstream から `~/.local/bin` へ配置する |
 | 9 | flake が固定した `nixos-rebuild` で boot generation を作る |
 | 10 | `/etc/nixos` を `~/dotfiles-wsl` への symlink にする |
@@ -98,7 +98,7 @@ git diff -- secrets/sops/assets
 git status --short
 ```
 
-doctor が成功し、`git status --short` に暗号化済みファイル二つ以外の変更がないことを確認する。sops-nix が配備した Git identity を使い、`secrets/sops/assets/.sops.yaml` と `secrets/sops/assets/secrets.yaml` を同じ commit に記録する。
+doctor が成功し、`git status --short` に暗号化済みファイル二つ以外の変更がないことを確認する。sops-nix が配備した Git identity を使い、`secrets/sops/assets/.sops.yaml` と `secrets/sops/assets/secrets.json` を同じ commit に記録する。
 
 ## 別 host への再現
 

@@ -4,15 +4,6 @@
   dotfiles = {
     workstation = { };
 
-    identity.github = {
-      accounts = [
-        "account-1"
-        "account-2"
-        "account-3"
-      ];
-      primary = "account-1";
-    };
-
     toolchain = {
       enabledLsp = [
         "bash"

@@ -92,7 +92,8 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 - system backup 整理: `sudo dotfiles-cleanup --delete --system`
 - VS Code Server 整理: `dotfiles-cleanup --delete --vscode-server`
 - secrets enrollment: `docs/operations/sops-enrollment.md` に従い、host key の公開鍵を `secrets/sops/assets/.sops.yaml` へ追加して `sops updatekeys` を実行する。
-- secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml ~/dotfiles-wsl/secrets/sops/assets/secrets.yaml`
+- secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml ~/dotfiles-wsl/secrets/sops/assets/secrets.json`
+- 登録済み account の確認: `gh auth status`。account ID と個数は宣言側に無く、暗号化済み store が持つ。`gh auth login` と `gh auth switch` は使わない
 - 公開入口は `~/dotfiles-wsl/README.md`、詳細手順、構成、変更箇所は `~/dotfiles-wsl/docs/README.md` から辿る。
 
 ### Agent の変更箇所
@@ -105,6 +106,6 @@ Agent client の更新は `docs/operations/agent-clients.md`、構造は `docs/a
 
 - dotfiles で管理している設定ファイルは直接編集しない。変更は dotfiles に入れる。
 - パッケージマネージャでグローバルインストールしない。パッケージは nix / devenv で導入する。
-- `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml ~/dotfiles-wsl/secrets/sops/assets/secrets.yaml` 編集後の rebuild で行う。
-- 資格情報を平文に書かない。GitHub PAT は SOPS + age の `~/dotfiles-wsl/secrets/sops/assets/secrets.yaml` に集約する。
+- `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml ~/dotfiles-wsl/secrets/sops/assets/secrets.json` 編集後の rebuild で行う。
+- 資格情報を平文に書かない。GitHub PAT は SOPS + age の `~/dotfiles-wsl/secrets/sops/assets/secrets.json` に集約する。
 - commit message は scope なし、50 文字以内の `<type>: <日本語の要約>` 一行だけにする。中黒（・）は語の簡潔な並置に限り許容する。AI attribution も commit-msg hook が block する。本文・検査・参照更新を 1 つのコミットに閉じ、未検証の中間コミットを残さない。

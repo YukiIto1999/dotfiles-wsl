@@ -120,6 +120,7 @@ let
     "platform/cli/impl/mk-command.nix" = 1;
     "capabilities/web-discovery/searxng/backend/module.nix" = 1;
     "checks/impl/exec-tokens.nix" = 1;
+    "secrets/sops/module.nix" = 1;
   };
 in
 {

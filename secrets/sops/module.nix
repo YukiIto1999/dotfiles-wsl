@@ -6,6 +6,18 @@
 }:
 
 let
+  store = ./assets/secrets.json;
+  # sops は値だけを暗号化し、key の構造は平文で残す。どの secret が登録済みかは
+  # この構造が正本であり、宣言側へ写さずここから導出する
+  flattenPaths =
+    prefix: value:
+    if builtins.isAttrs value then
+      lib.concatMap (name: flattenPaths (prefix ++ [ name ]) value.${name}) (builtins.attrNames value)
+    else
+      [ (lib.concatStringsSep "/" prefix) ];
+  storePaths = lib.sort builtins.lessThan (
+    flattenPaths [ ] (builtins.removeAttrs (builtins.fromJSON (builtins.readFile store)) [ "sops" ])
+  );
   secretObservations = lib.mapAttrs' (
     id: secret:
     lib.nameValuePair "sops/${id}" {
@@ -21,7 +33,16 @@ let
   ) config.sops.secrets;
 in
 {
-  config.sops.defaultSopsFile = ./assets/secrets.yaml;
+  options.dotfiles.secrets.paths = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    readOnly = true;
+    internal = true;
+    description = "暗号化済み store が持つ secret path の一覧。値は保持しない。";
+  };
+
+  config.dotfiles.secrets.paths = storePaths;
+
+  config.sops.defaultSopsFile = store;
   config.sops.age.keyFile = "/var/lib/sops-nix/key.txt";
   config.sops.age.generateKey = false;
 

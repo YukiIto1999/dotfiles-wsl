@@ -51,7 +51,7 @@ Agent clientへ配るのは`skills/<id>/skill/`だけである。Nix module、�
 
 client contractはupstream installerとGitHub releaseの二経路を持つ。`dotfiles-install-agents`はClaude CodeとAntigravityのupstream installer、Codex、OpenCode、OMPのGitHub releaseを更新する。client単位の更新は互いに独立で、一つの失敗は他のclientを止めず、失敗したclient名を集約して非ゼロで終える。
 
-Codex runtimeのrelease asset、architecture別entrypoint、`requiredPaths`、`retainedReleases`は[`capabilities/agent-session/codex/module.nix`](../../capabilities/agent-session/codex/module.nix)が所有する。Agent client設定とCodex MCP adapterは同じruntime contractを消費する。他clientのinstall contractは各[`agents/clients/NAME/module.nix`](../../agents/clients)が所有する。
+client ごとの install contract は各[`agents/clients/NAME/module.nix`](../../agents/clients)が所有する。release asset、architecture 別 entrypoint、`requiredPaths`、`retainedReleases` もそこに置く。
 
 GitHub release経路はGitHub APIのSHA-256 digestと取得したassetを照合する。`assetFormat`が`tar.gz`のときはmember名、type、件数、論理size、重複、path衝突を展開前に検査する。`raw`のときはassetが単一の実行fileそのものなので、path成分を持たないentrypointとして配置し、以降は同じ検査へ渡す。展開後はowner、mode、link、entrypoint、required path、version probeを通したtreeだけを公開する。`raw`は`single-binary` layout以外と組み合わせられない。
 

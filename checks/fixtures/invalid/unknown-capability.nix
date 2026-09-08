@@ -2,7 +2,6 @@
 
 {
   dotfiles.capabilities.enabled = lib.mkForce [
-    "agent-session"
     "browser-automation"
     "browser-diagnostics"
     "browser-runtime"

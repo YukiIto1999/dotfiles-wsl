@@ -7,8 +7,6 @@
 
 let
   cfg = config.dotfiles;
-  codexRuntime = config.dotfiles.capabilities.agent-session.codex.runtime;
-
   codexModel = "gpt-5.6-sol";
   dotfilesHomeRelative = lib.removePrefix "${cfg.workstation.homeDir}/" cfg.workstation.dotfilesDir;
   dotfilesPathComponents = lib.splitString "/" dotfilesHomeRelative;
@@ -117,7 +115,7 @@ let
 in
 {
   dotfiles.agents.clients.codex = {
-    inherit (codexRuntime) binary;
+    binary = "codex";
     runtimeWrapperMode = "managed";
     rulesDestination = ".codex/AGENTS.md";
     skillsDestination = ".codex/skills";
@@ -155,7 +153,45 @@ in
     telemetryMode = "unsupported";
     agentmemoryMode = "hooks";
     skillProjectionMode = "dynamic";
-    inherit (codexRuntime) install;
+    install = {
+      kind = "github-release";
+      updateOwner = "dotfiles";
+      layout = "package-tree";
+      repo = "openai/codex";
+      retainedReleases = 2;
+      releaseByArch = {
+        x86_64 = {
+          asset = "codex-package-x86_64-unknown-linux-musl.tar.gz";
+          entrypoint = "bin/codex";
+        };
+        aarch64 = {
+          asset = "codex-package-aarch64-unknown-linux-musl.tar.gz";
+          entrypoint = "bin/codex";
+        };
+      };
+      requiredPaths = {
+        "bin/codex" = {
+          kind = "file";
+          executable = true;
+        };
+        "codex-package.json" = {
+          kind = "file";
+          executable = false;
+        };
+        "bin/codex-code-mode-host" = {
+          kind = "file";
+          executable = true;
+        };
+        "codex-path/rg" = {
+          kind = "file";
+          executable = true;
+        };
+        "codex-resources/bwrap" = {
+          kind = "file";
+          executable = true;
+        };
+      };
+    };
   };
 
   # codex の workspace-write sandbox が PATH 上に要求する bubblewrap

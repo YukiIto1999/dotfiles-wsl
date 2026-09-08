@@ -47,6 +47,13 @@ let
     && containerNames != [ ]
     && builtins.length scripts == 3 * builtins.length containerNames;
 
+  upstreamImages = map (entry: entry.image.image) (
+    builtins.filter (entry: entry.image.kind == "upstream") imageDefinitions
+  );
+
+  # prune から外すための tag。上流 tag と別 namespace にして他 project と競合させない
+  pinnedReference = image: "dotfiles-pinned/${lib.head (lib.splitString "@" image)}";
+
   systemUnits = hostConfig.environment.etc."systemd/system".source;
 
   observationTimeoutSeconds = 10;
@@ -683,6 +690,108 @@ in
       builtins.attrValues hostConfig.virtualisation.oci-containers.containers
     );
     pkgs.runCommandLocal "check-oci-image-contract" { } "touch $out";
+
+  # 宣言済み image が docker image prune の dangling 判定に落ちないことは、
+  # 宣言を読んでも分からない。docker 境界を差し替えて sync の実挙動で確かめる
+  oci-image-sync-behavior =
+    assert upstreamImages != [ ];
+    pkgs.runCommandLocal "check-oci-image-sync-behavior"
+      {
+        nativeBuildInputs = [
+          hostConfig.dotfiles.platform.cli.commands.syncImages
+          pkgs.coreutils
+          pkgs.gnused
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        fixture=$PWD/fixture
+        mkdir -p "$fixture/store"
+        export FAKE_STORE=$fixture/store
+
+        printf '#!%s\n' ${pkgs.runtimeShell} > "$fixture/docker"
+        cat >> "$fixture/docker" <<'FAKE'
+        set -euo pipefail
+        key() { printf '%s' "$1" | tr '/:@' '___'; }
+        printf '%s\n' "$*" >> "$FAKE_LOG"
+        case "$1 $2" in
+          'image inspect')
+            entry=$FAKE_STORE/$(key "$5")
+            [ -f "$entry" ] || exit 1
+            cat "$entry"
+            ;;
+          'pull --quiet')
+            printf 'sha256:%s\n' "$(printf '%s' "$3" | sha256sum | cut -c1-64)" \
+              > "$FAKE_STORE/$(key "$3")"
+            ;;
+          tag*)
+            cp "$FAKE_STORE/$(key "$2")" "$FAKE_STORE/$(key "$3")"
+            ;;
+          *) exit 2 ;;
+        esac
+        FAKE
+        chmod +x "$fixture/docker"
+
+        sed -e "s|${lib.escapeRegex (lib.getExe pkgs.docker)}|$fixture/docker|g" \
+          "$(type -P dotfiles-sync-images)" > "$fixture/dotfiles-sync-images"
+        chmod +x "$fixture/dotfiles-sync-images"
+
+        expect_line() {
+          grep -Fxq "$2" "$1" && return 0
+          echo "$1 does not contain: $2" >&2
+          exit 1
+        }
+
+        export FAKE_LOG=$fixture/empty-status.log
+        if "$fixture/dotfiles-sync-images" --status > empty-status.out; then
+          echo "status reported a synced state with no image present" >&2
+          exit 1
+        fi
+        ${lib.concatMapStrings (image: ''
+          expect_line empty-status.out ${lib.escapeShellArg "MISSING: ${image}"}
+        '') upstreamImages}
+
+        export FAKE_LOG=$fixture/pull.log
+        "$fixture/dotfiles-sync-images" > pull.out
+        ${lib.concatMapStrings (image: ''
+          expect_line "$fixture/pull.log" ${lib.escapeShellArg "pull --quiet ${image}"}
+          expect_line "$fixture/pull.log" ${lib.escapeShellArg "tag ${image} ${pinnedReference image}"}
+        '') upstreamImages}
+
+        export FAKE_LOG=$fixture/synced.log
+        "$fixture/dotfiles-sync-images" --status > synced.out
+        ${lib.concatMapStrings (image: ''
+          expect_line synced.out ${lib.escapeShellArg "OK: ${image}"}
+        '') upstreamImages}
+        if grep -qE '^(pull|tag) ' "$fixture/synced.log"; then
+          echo "a synced state still pulled or tagged" >&2
+          exit 1
+        fi
+
+        # digest だけで pull 済みの既存 image。pull なしで pin だけ回復する
+        rm "$FAKE_STORE"/dotfiles-pinned*
+        export FAKE_LOG=$fixture/unpinned-status.log
+        if "$fixture/dotfiles-sync-images" --status > unpinned-status.out; then
+          echo "status reported a synced state with an unpinned image" >&2
+          exit 1
+        fi
+        ${lib.concatMapStrings (image: ''
+          expect_line unpinned-status.out ${lib.escapeShellArg "UNPINNED: ${image}"}
+        '') upstreamImages}
+
+        export FAKE_LOG=$fixture/repin.log
+        "$fixture/dotfiles-sync-images" > repin.out
+        ${lib.concatMapStrings (image: ''
+          expect_line "$fixture/repin.log" ${lib.escapeShellArg "tag ${image} ${pinnedReference image}"}
+        '') upstreamImages}
+        if grep -q '^pull ' "$fixture/repin.log"; then
+          echo "an image that was already present was pulled again" >&2
+          exit 1
+        fi
+
+        touch $out
+      '';
 
   container-argv-contract =
     let

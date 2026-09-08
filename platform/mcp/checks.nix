@@ -526,8 +526,8 @@ in
           requiredOutcomeIds
           requiredResourceKeys
           ;
-        gatewayTimeout = 120;
-        outerTimeout = 600;
+        gatewayTimeout = 60;
+        outerTimeout = 300;
       };
     assert
       lib.getExe protocolObservation.command

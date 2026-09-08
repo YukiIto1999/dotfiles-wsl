@@ -16,7 +16,7 @@ Agent client unitはclient IDごとに設定配備とruntime wrapper適用を所
 
 wrapper対象はclient名で判定せず、defaultを持たない列挙値で宣言する。Claude Code、Codex、OMP、OpenCodeはwrapper対象、Antigravityは非対応とする。
 
-Codex binaryは[`capabilities/agent-session/codex/`](../../capabilities/agent-session/codex)が所有する。Agent clientとMCP adapterは同じ`runtime.executable` contractを読み、home directory、`.local/bin`、binary名を再構築しない。Agent、Skill、Capabilityの依存方向を逆転させず、CapabilityはAgent設定を参照しない。
+Codex binary の release contract は、その唯一の consumer である[`agents/clients/codex/module.nix`](../../agents/clients/codex/module.nix)が所有する。Agent、Skill、Capability の依存方向を逆転させず、Capability は Agent 設定を参照しない。
 
 ## Check file の境界
 

@@ -20,12 +20,6 @@ let
       "../../../../platform/containers/impl/container-backend.nix";
   };
   allowedCrossUnitReferences = {
-    "capabilities/agent-session/codex/mcp/checks.nix" = [
-      "../../../../platform/mcp/package/mk-server.nix"
-    ];
-    "capabilities/agent-session/codex/mcp/module.nix" = [
-      "../../../../platform/mcp/package/mk-server.nix"
-    ];
     "capabilities/browser-diagnostics/chrome-devtools/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
       "../../../../platform/mcp/package/mk-npm.nix"

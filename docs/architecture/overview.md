@@ -111,7 +111,6 @@ repository固有optionはownerに対応するnamespaceへ置く。
 | `github-resources` | GitHub MCPとaccount credential |
 | `project-memory` | AgentMemory MCP、backend、client integration |
 | `code-quality` | SonarQube MCP、server、database、provisioning |
-| `agent-session` | Codex runtime contractとMCP adapter |
 
 MCP targetの型、front生成、gatewayは[`platform/mcp/`](../../platform/mcp)が所有する。container service contract、OCI image inventory、Docker network、image同期は[`platform/containers/`](../../platform/containers)が所有する。application固有のserver、database、credential、volume、health endpointは対応するCapability内に置く。
 

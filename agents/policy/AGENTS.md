@@ -67,7 +67,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 
 全clientは単一のgatewayからprovider実装を使う。container、service、databaseを背後に持つ実装は、対応する Capability の内側に置く。agentはSkillを入口にし、Skillが宣言したCapabilityだけを要求する。provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。
 
-入口 Skill を持たない Capability は、他の Capability の依存か、agent が直接使うものである。後者に当たるのは別 client の独立した session だけで、現在の client の subagent で足りる役割分担には使わない。
+入口 Skill を持たない Capability は、他の Capability の依存である。agent がそれを直接起動したり、接続を個別に操作したりしない。
 
 @capabilityRoster@
 

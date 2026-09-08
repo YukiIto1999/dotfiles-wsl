@@ -28,7 +28,6 @@
     skills.enabled = builtins.attrNames config.dotfiles.skills.registry;
 
     capabilities.enabled = [
-      "agent-session"
       "browser-automation"
       "browser-diagnostics"
       "browser-runtime"

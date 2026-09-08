@@ -35,6 +35,7 @@ let
     from urllib.parse import parse_qs, urlparse
 
     observed_path = sys.argv[1]
+    observed_post_path = sys.argv[2]
 
 
     class Handler(BaseHTTPRequestHandler):
@@ -57,7 +58,12 @@ let
                                 "name": "ask",
                                 "description": "fixture",
                                 "inputSchema": {"type": "object"},
-                            }
+                            },
+                            {
+                                "name": "md",
+                                "description": "fixture",
+                                "inputSchema": {"type": "object"},
+                            },
                         ]
                     },
                 )
@@ -80,7 +86,18 @@ let
             self.send_json(404, {"detail": "not found"})
 
         def do_POST(self):
-            self.send_json(405, {"detail": "Method Not Allowed"})
+            parsed = urlparse(self.path)
+            if parsed.path != "/md":
+                self.send_json(405, {"detail": "Method Not Allowed"})
+                return
+            length = int(self.headers.get("content-length", "0"))
+            body = json.loads(self.rfile.read(length) or "{}")
+            if body != {"url": "https://fixture.invalid/page", "f": "fit"}:
+                self.send_json(400, {"detail": "unexpected body"})
+                return
+            with open(observed_post_path, "w") as observed:
+                json.dump({"method": "POST", "body": body}, observed)
+            self.send_json(200, {"markdown": "# fixture", "success": True})
 
         def log_message(self, format, *args):
             pass
@@ -141,7 +158,7 @@ let
 
     tools = request({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
     assert "result" in tools, tools
-    assert [tool["name"] for tool in tools["result"]["tools"]] == ["ask"], tools
+    assert [tool["name"] for tool in tools["result"]["tools"]] == ["ask", "md"], tools
 
     call = request(
         {
@@ -161,6 +178,21 @@ let
     assert call["result"].get("isError", False) is False, call
     result = json.loads(call["result"]["content"][0]["text"])
     assert result == {"doc_results": [{"text": "health", "score": 1}]}, result
+
+    fetch = request(
+        {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "tools/call",
+            "params": {
+                "name": "md",
+                "arguments": {"url": "https://fixture.invalid/page", "f": "fit"},
+            },
+        }
+    )
+    assert fetch["result"].get("isError", False) is False, fetch
+    fetched = json.loads(fetch["result"]["content"][0]["text"])
+    assert fetched == {"markdown": "# fixture", "success": True}, fetched
 
     process.stdin.close()
     assert process.wait(timeout=10) == 0, process.stderr.read()
@@ -196,11 +228,10 @@ let
     needsNetwork = false;
     waitUnits = expectedWaitUnits;
     probe = {
-      tool = "ask";
+      tool = "md";
       args = {
-        context_type = "doc";
-        query = "health";
-        max_results = 1;
+        url = "https://example.com";
+        f = "fit";
       };
       timeout = 60;
     };
@@ -348,7 +379,8 @@ in
 
         jq -e '.result.serverInfo.name == "crawl4ai"' response.json >/dev/null
 
-        ${pkgs.python3}/bin/python ${behaviorBackend} "$PWD/observed.json" &
+        ${pkgs.python3}/bin/python ${behaviorBackend} "$PWD/observed.json" \
+          "$PWD/observed-post.json" &
         backend_pid=$!
         trap 'kill "$backend_pid" 2>/dev/null || true' EXIT
         for _ in $(seq 1 100); do
@@ -369,6 +401,12 @@ in
             }
           }' \
           observed.json >/dev/null
+        jq -e \
+          '. == {
+            method: "POST",
+            body: { url: "https://fixture.invalid/page", f: "fit" }
+          }' \
+          observed-post.json >/dev/null
 
         touch $out
       '';

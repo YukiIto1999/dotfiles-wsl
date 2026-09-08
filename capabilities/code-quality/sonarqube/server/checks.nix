@@ -155,6 +155,7 @@ in
       ];
     assert
       server.extraOptions == [
+        "--init"
         "--network=dotfiles-backends"
         "--memory=4g"
         "-p"
@@ -166,6 +167,7 @@ in
     assert database.volumes == [ "sonarqube-db:/var/lib/postgresql/data" ];
     assert
       database.extraOptions == [
+        "--init"
         "--network=dotfiles-backends"
         "--memory=1g"
       ];

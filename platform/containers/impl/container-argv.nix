@@ -37,6 +37,7 @@ let
     "docker"
     "run"
     "--rm"
+    "--init"
   ];
 
   # flag が取る値と、それ自身を argv から除いた残り

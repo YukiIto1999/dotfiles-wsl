@@ -9,7 +9,10 @@
     containers.minimal = {
       image = "registry.example.invalid/minimal:1@sha256:fixture";
       pull = "never";
-      extraOptions = [ "--network=dotfiles-backends" ];
+      extraOptions = [
+        "--init"
+        "--network=dotfiles-backends"
+      ];
     };
 
     systemdServices.docker-minimal = {

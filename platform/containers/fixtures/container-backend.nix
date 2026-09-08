@@ -30,6 +30,7 @@
       environmentFiles = [ "/run/secrets/backend.env" ];
       volumes = [ "/var/lib/backend:/data" ];
       extraOptions = [
+        "--init"
         "--network=dotfiles-backends"
         "--memory=256m"
         "--label=fixture=true"

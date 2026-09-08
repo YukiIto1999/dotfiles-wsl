@@ -52,6 +52,7 @@ in
     assert container.environmentFiles == [ expectedEnvironmentFile ];
     assert
       container.extraOptions == [
+        "--init"
         "--network=dotfiles-backends"
         "--memory=4g"
         "--shm-size=1g"

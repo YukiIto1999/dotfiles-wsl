@@ -31,7 +31,6 @@
 | 共通container helperのimportが承認済みCapability実装に限られ、CapabilityからAgentまたはSkillへの逆依存がない | `unit-boundary-name-only` |
 | MCP targetのprovider集合がCapability registryから導かれ、通常評価とvariant評価で一致する | `mcp-provider-registry` |
 | targetのprovider、server transport、server lifecycle、port、probe、通信方針、backend unitが固定fixtureに一致する | `mcp-target-contract` |
-| Codex MCP frontが`agent-session` Capabilityの実行pathを引用して使い、home pathやbinary名を組み立てない | `mcp-codex-client-executable-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
 | GitHub account と `github-<account>` target が完全一致し、欠落、追加、改名を拒否する | `github-account-target-contract` |
 | repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |

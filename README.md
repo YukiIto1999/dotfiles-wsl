@@ -7,7 +7,7 @@ NixOS、Home Manager、開発ツール、AI コーディング環境、暗号化
 
 ## 管理対象
 
-- NixOS-WSL、Home Manager、WSLg、font、systemd service
+- NixOS-WSL、Home Manager、WSLg、font、時刻と locale、systemd service
 - language server、compiler、formatter、Git、日常利用する CLI
 - Claude Code、Codex、OMP、OpenCode、Antigravity の設定、skills、agents
 - agentgateway、MCP server、Docker backend

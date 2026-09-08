@@ -22,7 +22,11 @@ in
   // lib.optionalAttrs (environmentFiles != [ ]) { inherit environmentFiles; }
   // lib.optionalAttrs (volumes != [ ]) { inherit volumes; }
   // {
+    # container の PID 1 が application 本体だと、application の終了を shim が回収できず
+    # zombie のまま container が running に留まり、systemd の Restart も docker restart も
+    # 効かなくなる。init を PID 1 に置いて子を reap し、終了を container の終了へ伝える
     extraOptions = [
+      "--init"
       "--network=dotfiles-backends"
     ]
     ++ extraOptions

@@ -52,6 +52,7 @@ in
     assert container.volumes == [ "${expectedSettingsPath}:${expectedSettingsPath}:ro" ];
     assert
       container.extraOptions == [
+        "--init"
         "--network=dotfiles-backends"
         "--memory=512m"
         "-p"

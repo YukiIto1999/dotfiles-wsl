@@ -25,7 +25,7 @@
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
-| container backend helper が network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
+| container backend helper が init process、network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
 | container service contract から service、restart、image、health、roster、Docker build artifact GC の observation を漏れなく導き、追加と削除に追随する | `container-runtime-observation-contract` |
 | dangling image と BuildKit cache の回収順序、daemon policy、timer が固定され、Docker と backend が GC に依存しない | `docker-build-artifact-gc-contract` |
 | 共通container helperのimportが承認済みCapability実装に限られ、CapabilityからAgentまたはSkillへの逆依存がない | `unit-boundary-name-only` |

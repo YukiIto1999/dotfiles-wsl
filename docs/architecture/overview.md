@@ -31,7 +31,7 @@ Nix storeのcandidate system
 | Root | 所有する責務 |
 |---|---|
 | `profiles/` | machineが選択するidentity、Agent client、Skill、Capability、language server |
-| `workstation/` | user、WSL、Nix、Home Manager、font、storage、安定性、activation |
+| `workstation/` | user、WSL、Nix、Home Manager、font、時刻とlocale、storage、安定性、activation |
 | `identity/` | Git authorとGitHub account identity |
 | `secrets/` | secretの意味的なroot。SOPS実装は`secrets/sops/` |
 | `toolchain/` | PATH上の開発ツール、language server、Git設定、dev shell |

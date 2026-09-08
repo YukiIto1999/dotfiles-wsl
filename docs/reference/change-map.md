@@ -11,6 +11,7 @@
 | 有効なidentity、Agent、Skill、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `nix flake check`、`dotfiles-rebuild --plan` |
 | username、home、checkout pathを変える | [`workstation/module.nix`](../../workstation/module.nix)の`dotfiles.workstation` | identity migrationとして扱い、通常rebuildと混ぜない |
 | Nix binary cacheを増減する | [`workstation/nix/assets/nix-caches.nix`](../../workstation/nix/assets/nix-caches.nix) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
+| 時刻とlocaleを変える | [`workstation/locale/module.nix`](../../workstation/locale/module.nix) | `host-locale-contract`、`dotfiles-rebuild` |
 | PATH上の汎用toolを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | language serverを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)のregistryと[`profiles/workstation.nix`](../../profiles/workstation.nix)の選択。client形式への写像は[`agents/impl/lsp.nix`](../../agents/impl/lsp.nix) | `lsp-registration`、`dotfiles-rebuild` |
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix) | 対応するtelemetry check、`dotfiles-rebuild` |

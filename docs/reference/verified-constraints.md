@@ -100,6 +100,7 @@
 | WSL の extraBin に必須の名前が揃い、名前が重複せず、store 由来の entry が実行可能である | `wsl-extra-bin-contract` |
 | local と plugin の全 Skill の SKILL.md が frontmatter を持ち、name が directory 名と一致し、description が空でない | `skill-frontmatter-contract` |
 | cleanup が現在と保持中の Home Manager generation から backup の exact path を導き、home と system の削除を別の権限境界で実行する | `cleanup-home-backups` |
+| image sync が不足分だけを pull し、宣言済み image へ専用 namespace の tag を付けて dangling prune から外し、pin が切れた状態を status で検出する | `oci-image-sync-behavior` |
 | agentmemory の credential が環境ファイル経由で渡る | `agentmemory-container` |
 | Crawl4AI の API token が user 用 file contract と root 所有の環境ファイルへ分かれる | `crawl4ai-container` |
 | SearXNG の standalone secret と settings template がそれぞれ root:root 0400 で配備される | `searxng-container` |

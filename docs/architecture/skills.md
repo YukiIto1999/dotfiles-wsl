@@ -574,6 +574,20 @@ MattのSkillは、modelを変える仕事と既存語彙を読むだけの仕事
 
 `grilling`は明示的な依頼を受け、未決定事項を依存順に質問するprocedureを所有する。domainの意味は決めず、設計文書も書かない。domain決定を文書へ残す場合は`domain-modeling`へ渡す。通常の設計、直接実装、候補を広げるだけのbrainstormでは発火しない。代表scenarioは [`agents/fixtures/grilling-skill.json`](../../agents/fixtures/grilling-skill.json) に置く。baselineは一問ごとに回答を待ち、同じ前提から今決められる他の論点と、後続の依存関係を示さなかった。このSkillは同じfrontierを一巡にまとめ、回答に依存する質問だけを後へ送る。
 
+### 出力styleをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [i-have-adhd](https://github.com/ayghri/i-have-adhd/tree/24d22f783e57cb73c957848b588c6f651b6f9cd8) | MIT | 利用者が実行する手順を一手順一動作の番号付きにすること、完了報告へ利用者が再現できるcommandを添えること、条件比較を構造的な盲検にして次元別の重みとtrial間varianceを併記すること、評価runから利用者levelのplugin、hook、memory、output styleを隔離しmodelをpinすること | 常に所要時間を見積もること、errorで原因と修正を必ず断定すること、listを5件で打ち切ること、英語の定型句禁止リスト、session常駐のoutput style Skill |
+
+`i-have-adhd`は応答の形だけを定める単一Skillで、`disable-model-invocation: true`により利用者の明示invocationで有効化し、解除されるまでsessionに常駐する。10則のうち結論を先に置くこと、tangentの抑制、前置きと締めの排除、errorを平叙で述べることは、clientのpersonality blockと[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)の作業規律が既に所有する。残る差分は、利用者が実行する手順の番号付けと、完了報告への再現commandの二点にとどまる。
+
+出力の形はSkillのJobではない。Skillはtask contextで選ばれる判断と手順を所有し、常時適用する応答規則はclientのpersonalityとrepository policyが所有する。Codexは[`config-system.toml`](../../agents/clients/codex/assets/config-system.toml)で`personality`を宣言し、ompは`PERSONALITY.md`でpreset本文を差し替えられるが現在は宣言せずclient既定のblockを使う。二点の差分のために配備経路を増やさず、必要が生じたときはこのclient設定側で扱う。[`profiles/workstation.nix`](../../profiles/workstation.nix)はregistryの全keyを有効集合にするため、registryへ登録するとmodel invocationを禁じたSkillのdescriptionが全clientの全sessionへ常駐する点も、採らない理由に含まれる。
+
+時間見積りと原因断定の二則は、入れると規律に反する。agent自身が手を動かすこの構成では見積りの宛先がなく、原因と修正を必ず述べさせる規則は証拠のない断定を誘発する。upstreamの[評価結果](https://github.com/ayghri/i-have-adhd/blob/24d22f783e57cb73c957848b588c6f651b6f9cd8/evals/RESULTS.md)でも、候補側だけが`partial-success`で加重0.63の低下を示し、判定者は根拠なく原因を確定して修正を処方したと記録している。全runnerが`--tools ""`で走るため、この測定はtoolを持つagent harnessの証拠ではない。
+
+`evals/`のharnessは、条件を`A`/`B`/`C`へ付け替えgroup keyのdigestで順序を置換する構造的な盲検、重み付きの次元別rubric、複数trial、release gateを持つ。このrepositoryの評価は代表scenarioの出力と発火境界を比べる方式で、自動scoreを使っていない。upstreamも判定者と被験を同じmodel familyに置いたことと、3 trialでは単一caseの0.5未満の差を信号とみなせないことを認めており、14 case、3 trial、2条件の一巡に生成$2.67と判定$0.92を要する。反復する誤判定が観測されていないため、harnessは導入しない。採るのは評価runの隔離とmodel pinの規律だけで、これはSkillとrulesを利用者levelで全clientへ配備するこのhostが、自分の配備物を測り込まないために要る。
+
 ## Skill 化の条件
 
 候補ごとに、Skillなしの代表scenarioで不足を観測する。Skillありの同種scenarioで成果、routing、process、restraint、compositionを比較する。内容、reference、script、Skill自体を除いて結果が変わらなければ削除する。

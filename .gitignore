@@ -22,6 +22,7 @@ Thumbs.db
 /.playwright-mcp/
 /.codex/
 /.opencode/
+/.docs/
 
 # Secret
 *.plain

@@ -502,6 +502,8 @@ in
         User = cfg.workstation.username;
         Environment = "HOME=${cfg.workstation.homeDir}";
         UMask = "0077";
+        TimeoutStartSec = "10min";
+        TimeoutStopSec = "15s";
         ExecStart = runtimeContract.commands.resourceReaper;
       };
     };

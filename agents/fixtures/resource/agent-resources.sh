@@ -2310,6 +2310,10 @@ set +e
 timeout 0.5 tail --pid="$orphan_reap_pid" -f /dev/null
 orphan_wait_status=$?
 set -e
+if ! flock -n "$(state_root)/locks/.worktree-mutation.lock" true; then
+  echo 'reaperがsession lock待機中にglobal mutation lockを保持した' >&2
+  exit 1
+fi
 test "$orphan_wait_status" -eq 124
 test -f "$orphan_retention_lock"
 flock -u 8
@@ -2317,6 +2321,137 @@ exec 8>&-
 wait "$orphan_reap_pid"
 if [ -e "$orphan_retention_lock" ] || [ -L "$orphan_retention_lock" ]; then
   echo 'orphan session lock survived migration pruning' >&2
+  exit 1
+fi
+
+new_case terminal-retention-reaper-reacquire-race
+reacquire_session=reaper-reacquire-session
+reacquire_lock="$(state_root)/locks/$reacquire_session.lock"
+reacquire_mutation_lock="$(state_root)/locks/.worktree-mutation.lock"
+reacquire_ledger_lock="$(state_root)/ledger.lock"
+reacquire_ready=$HOME/reaper-reacquire-ready
+reacquire_release=$HOME/reaper-reacquire-release
+mkdir -p "$(state_root)/locks"
+: >"$reacquire_lock"
+chmod 600 "$reacquire_lock"
+exec 8<>"$reacquire_lock"
+flock -x 8
+(
+  exec 8>&-
+  DOTFILES_AGENT_TEST_REAPER_LOCK="$reacquire_lock" \
+    DOTFILES_AGENT_TEST_REAPER_READY="$reacquire_ready" \
+    DOTFILES_AGENT_TEST_REAPER_RELEASE="$reacquire_release" \
+    "$CONTROLLED_REAPER_RESOURCE" reap
+) &
+reacquire_reap_pid=$!
+trap ': >"$reacquire_release"; kill "$reacquire_reap_pid" "${reacquire_begin_pid-}" 2>/dev/null || true' EXIT
+reacquire_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$reacquire_reap_pid/fd/8" 2>/dev/null || true)" != \
+  "$reacquire_lock" ]; do
+  if ((SECONDS >= reacquire_deadline)); then
+    echo 'reaper did not wait for the orphan session lock' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+: >"$reacquire_mutation_lock"
+chmod 600 "$reacquire_mutation_lock"
+exec 7<>"$reacquire_mutation_lock"
+flock -x 7
+exec 9<>"$reacquire_ledger_lock"
+flock -x 9
+flock -u 8
+exec 8>&-
+wait_for_file "$reacquire_ready"
+(
+  exec 7>&- 9>&-
+  reacquire_owner_pid=$BASHPID
+  exec env \
+    DOTFILES_AGENT_SESSION_ID="$reacquire_session" \
+    DOTFILES_AGENT_CLIENT=fixture-client \
+    DOTFILES_AGENT_OWNER_PID="$reacquire_owner_pid" \
+    DOTFILES_AGENT_OWNER_START_TIME="$(proc_start_time "$reacquire_owner_pid")" \
+    DOTFILES_AGENT_BOOT_ID="$(</proc/sys/kernel/random/boot_id)" \
+    "$RESOURCE" begin-session "$reacquire_session"
+) &
+reacquire_begin_pid=$!
+: >"$reacquire_release"
+reacquire_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$reacquire_begin_pid/fd/9" 2>/dev/null || true)" != \
+  "$reacquire_ledger_lock" ]; do
+  if ((SECONDS >= reacquire_deadline)); then
+    echo 'begin-session did not acquire the released session lock' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+reacquire_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$reacquire_reap_pid/fd/7" 2>/dev/null || true)" != \
+  "$reacquire_mutation_lock" ]; do
+  if ((SECONDS >= reacquire_deadline)); then
+    echo 'reaper did not retry the global mutation lock' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+flock -u 7
+exec 7>&-
+reacquire_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$reacquire_reap_pid/fd/8" 2>/dev/null || true)" != \
+  "$reacquire_lock" ]; do
+  if ((SECONDS >= reacquire_deadline)); then
+    echo 'reaper did not retry the busy session lock' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+set +e
+timeout 0.5 flock -x "$reacquire_mutation_lock" true
+reacquire_global_status=$?
+set -e
+if ((reacquire_global_status != 0)); then
+  echo 'reaper held the global mutation lock while reacquiring a busy session lock' >&2
+  exit 1
+fi
+flock -u 9
+exec 9>&-
+wait "$reacquire_begin_pid"
+wait "$reacquire_reap_pid"
+trap - EXIT
+test "$(jq -r '.status' "$(state_root)/sessions/$reacquire_session.json")" = active
+
+new_case reaper-stale-session-scan
+stale_scan_session=stale-scan-session
+begin_session "$stale_scan_session"
+stale_scan_lock="$(state_root)/locks/$stale_scan_session.lock"
+stale_scan_ledger="$(state_root)/sessions/$stale_scan_session.json"
+exec 8<>"$stale_scan_lock"
+flock -x 8
+(
+  exec 8>&-
+  "$RESOURCE" reap
+) &
+stale_scan_reap_pid=$!
+trap 'kill "$stale_scan_reap_pid" 2>/dev/null || true' EXIT
+stale_scan_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$stale_scan_reap_pid/fd/8" 2>/dev/null || true)" != \
+  "$stale_scan_lock" ]; do
+  if ((SECONDS >= stale_scan_deadline)); then
+    echo 'reaper did not reach the stale session scan entry' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+rm -f -- "$stale_scan_ledger"
+flock -u 8
+exec 8>&-
+set +e
+wait "$stale_scan_reap_pid"
+stale_scan_status=$?
+set -e
+trap - EXIT
+if ((stale_scan_status != 0)); then
+  echo 'reaper failed when a scanned session disappeared before processing' >&2
   exit 1
 fi
 

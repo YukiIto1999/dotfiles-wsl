@@ -123,6 +123,51 @@ let
         ]
         (builtins.readFile ../impl/resource/agent-resource.sh);
   };
+  controlledReaperFlock = pkgs.writeShellScriptBin "flock" ''
+    real_flock=${pkgs.util-linux}/bin/flock
+    if [[ ''${1-} == -x && ''${2-} == 8 \
+      && -n ''${DOTFILES_AGENT_TEST_REAPER_LOCK-} \
+      && -n ''${DOTFILES_AGENT_TEST_REAPER_READY-} \
+      && -n ''${DOTFILES_AGENT_TEST_REAPER_RELEASE-} \
+      && ! -e $DOTFILES_AGENT_TEST_REAPER_READY ]]; then
+      target=$(${pkgs.coreutils}/bin/readlink -e /proc/self/fd/8 2>/dev/null || true)
+      if [[ $target == "$DOTFILES_AGENT_TEST_REAPER_LOCK" ]]; then
+        "$real_flock" "$@"
+        : >"$DOTFILES_AGENT_TEST_REAPER_READY"
+        while [[ ! -e $DOTFILES_AGENT_TEST_REAPER_RELEASE ]]; do
+          ${pkgs.coreutils}/bin/sleep 0.01
+        done
+        exit 0
+      fi
+    fi
+    exec "$real_flock" "$@"
+  '';
+  controlledReaperResource = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource-reaper-fixture";
+    runtimeInputs = with pkgs; [
+      controlledReaperFlock
+      coreutils
+      gawk
+      git
+      jq
+      util-linux
+    ];
+    text =
+      builtins.replaceStrings
+        [
+          "@gitCommand@"
+          "@ledgerRetentionDays@"
+          "@stateRootRelative@"
+          "@resourceStateRootRelative@"
+        ]
+        [
+          (lib.escapeShellArg (lib.getExe pkgs.git))
+          "30"
+          runtimePackageContract.state.relativeStateRoot
+          runtimePackageContract.state.relativeResourcesRoot
+        ]
+        (builtins.readFile ../impl/resource/agent-resource.sh);
+  };
   controlledPruneRm = pkgs.writeShellScriptBin "rm" ''
     real_rm=${pkgs.coreutils}/bin/rm
     target=''${!#}
@@ -616,6 +661,10 @@ in
     assert lib.assertMsg (
       reaper.serviceConfig.ExecStart == "${lib.getExe runtime.agentResource} reap"
     ) "agent resource reaper command changed";
+    assert lib.assertMsg (
+      (reaper.serviceConfig.TimeoutStartSec or null) == "10min"
+      && (reaper.serviceConfig.TimeoutStopSec or null) == "15s"
+    ) "agent resource reaperの実行時間上限が変更された";
     assert lib.assertMsg (builtins.all (
       serviceConfig: !reaperServiceConfigValid serviceConfig
     ) reaperEnvironmentMutations) "agent resource reaper contract accepted a missing or changed HOME";
@@ -654,6 +703,7 @@ in
         export AUDIT_RESOURCE=${lib.getExe auditAgentResource}
         export AUDIT_WORKTREE=${lib.getExe auditAgentWorktree}
         export CONTROLLED_PROC_RESOURCE=${lib.getExe controlledProcResource}
+        export CONTROLLED_REAPER_RESOURCE=${lib.getExe controlledReaperResource}
         export CONTROLLED_PRUNE_RESOURCE=${lib.getExe controlledPruneResource}
         export COUNTING_RESOURCE=${lib.getExe countingAgentResource}
         export OVERFLOW_RESOURCE=${lib.getExe overflowResource}

@@ -146,6 +146,14 @@ acquire_mutation_lock() {
   flock -x 7
 }
 
+creation_lock_is_current() {
+  local expected_lock=$1 path_identity descriptor_identity
+  validate_regular_file "$expected_lock" || return 1
+  path_identity=$(stat -c '%d:%i' -- "$expected_lock") || return 1
+  descriptor_identity=$(stat -Lc '%d:%i' -- /proc/self/fd/8) || return 1
+  [ "$descriptor_identity" = "$path_identity" ]
+}
+
 acquire_creation_lock() {
   local session_id=$1 expected_lock inherited_target path_identity descriptor_identity
   validate_id session "$session_id"
@@ -173,14 +181,50 @@ acquire_creation_lock() {
     ensure_lock_file "$expected_lock"
     exec 8<>"$expected_lock"
     flock -x 8
-    if validate_regular_file "$expected_lock"; then
-      path_identity=$(stat -c '%d:%i' -- "$expected_lock") || path_identity=
-      descriptor_identity=$(stat -Lc '%d:%i' -- /proc/self/fd/8) || descriptor_identity=
-      if [ -n "$path_identity" ] && [ "$descriptor_identity" = "$path_identity" ]; then
-        return
-      fi
+    if creation_lock_is_current "$expected_lock"; then
+      return
     fi
     exec 8>&-
+  done
+}
+
+try_acquire_creation_lock() {
+  local session_id=$1 expected_lock inherited_target flock_status
+  validate_id session "$session_id"
+  expected_lock="$locks_root/$session_id.lock"
+
+  if [ "${DOTFILES_AGENT_CREATION_LOCK_FD-}" = 8 ]; then
+    ensure_lock_file "$expected_lock"
+    inherited_target=$(readlink -e -- /proc/self/fd/8 2>/dev/null) ||
+      die 'inherited creation lock descriptor is ambiguous'
+    [ "$inherited_target" = "$expected_lock" ] ||
+      die 'inherited creation lock does not match the session'
+    if flock -xnE 75 8; then
+      creation_lock_is_current "$expected_lock" ||
+        die 'inherited creation lock path changed while waiting'
+      return
+    else
+      flock_status=$?
+      [ "$flock_status" -eq 75 ] && return 1
+      die "cannot acquire creation lock: $session_id"
+    fi
+  fi
+
+  while :; do
+    ensure_lock_file "$expected_lock"
+    exec 8<>"$expected_lock"
+    if flock -xnE 75 8; then
+      if creation_lock_is_current "$expected_lock"; then
+        return
+      fi
+      exec 8>&-
+      continue
+    else
+      flock_status=$?
+      exec 8>&-
+      [ "$flock_status" -eq 75 ] && return 1
+      die "cannot acquire creation lock: $session_id"
+    fi
   done
 }
 
@@ -193,6 +237,27 @@ acquire_ledger_lock() {
 release_locks() {
   exec 9>&-
   exec 8>&-
+}
+
+acquire_reaper_locks() {
+  local session_id=$1
+
+  while :; do
+    acquire_mutation_lock
+    if try_acquire_creation_lock "$session_id"; then
+      acquire_ledger_lock
+      return
+    fi
+    exec 7>&-
+    # begin-sessionはglobal lockを取らないため、session lock待機中はglobal lockを解放する。
+    acquire_creation_lock "$session_id"
+    release_locks
+  done
+}
+
+release_reaper_locks() {
+  release_locks
+  exec 7>&-
 }
 
 atomic_write() {
@@ -1534,7 +1599,7 @@ cleanup_session() {
 reap_one_session() {
   local session_id=$1 session_file reason status
   session_file="$sessions_root/$session_id.json"
-  [ -f "$session_file" ] && [ ! -L "$session_file" ] || return
+  [ -f "$session_file" ] && [ ! -L "$session_file" ] || return 0
   status=$(jq -r '.status' "$session_file")
   if [ "$status" = active ]; then
     if ! reason=$(orphan_reason "$session_file"); then
@@ -1632,14 +1697,13 @@ prune_orphan_creation_locks() {
   release_locks
 
   for session_id in "${session_ids[@]}"; do
-    acquire_creation_lock "$session_id"
-    acquire_ledger_lock
+    acquire_reaper_locks "$session_id"
     session_file="$sessions_root/$session_id.json"
     if [ ! -e "$session_file" ] && [ ! -L "$session_file" ] \
       && ! session_has_worktree_record "$session_id"; then
       remove_current_creation_lock "$session_id"
     fi
-    release_locks
+    release_reaper_locks
   done
 }
 
@@ -1659,11 +1723,10 @@ reap_sessions() {
   release_locks
 
   for session_id in "${session_ids[@]}"; do
-    acquire_creation_lock "$session_id"
-    acquire_ledger_lock
+    acquire_reaper_locks "$session_id"
     reap_one_session "$session_id"
     prune_terminal_ledgers_for_session "$session_id"
-    release_locks
+    release_reaper_locks
   done
   prune_orphan_creation_locks
 }
@@ -1762,7 +1825,6 @@ register-worktree)
   ;;
 reap)
   [ "$#" -eq 1 ] || usage
-  acquire_mutation_lock
   reap_sessions
   ;;
 *) usage ;;

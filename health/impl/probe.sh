@@ -425,8 +425,20 @@ probe_numeric_command_threshold() {
   emit_threshold "$value" "$metric" "$warning" "$failure" "$resources"
 }
 
+zram_device_identity() {
+  local path=$1
+  if [[ $path =~ ^/dev/zram([0-9]+)$ ]]; then
+    printf 'zram%s\n' "${BASH_REMATCH[1]}"
+  elif [[ $path =~ ^/zram([0-9]+)$ ]]; then
+    printf 'zram%s\n' "${BASH_REMATCH[1]}"
+  else
+    return 1
+  fi
+}
+
 probe_swap_policy() {
-  local minimum algorithm require_zram zram_above output name swap_type size priority extra observed_algorithm
+  local minimum algorithm require_zram zram_above output name swap_type size priority extra
+  local identity observed_algorithm
   local valid=1 total=0 zram_count=0 disk_count=0 min_zram_priority=0 max_disk_priority=0
   local -A algorithms_by_device=()
   local -a algorithms=()
@@ -437,8 +449,12 @@ probe_swap_policy() {
   if output=$($zramctl_command --noheadings --raw --output NAME,ALGORITHM 2>/dev/null); then
     while read -r name observed_algorithm extra; do
       [[ -n $name ]] || continue
-      if [[ -n ${extra-} || $name != /dev/zram* || -z $observed_algorithm ]]; then valid=0; break; fi
-      algorithms_by_device[$name]=$observed_algorithm
+      if [[ -n ${extra-} || -z $observed_algorithm ]] \
+        || ! identity=$(zram_device_identity "$name"); then
+        valid=0
+        break
+      fi
+      algorithms_by_device[$identity]=$observed_algorithm
     done <<<"$output"
   else
     valid=0
@@ -446,12 +462,15 @@ probe_swap_policy() {
   if output=$($swapon_command --show=NAME,TYPE,SIZE,PRIO --bytes --noheadings --raw 2>/dev/null); then
     while read -r name swap_type size priority extra; do
       [[ -n $name ]] || continue
-      if [[ -n ${extra-} || -z $swap_type || ! $size =~ ^(0|[1-9][0-9]*)$ || ! $priority =~ ^-?[0-9]+$ ]]; then valid=0; break; fi
+      if [[ -n ${extra-} || -z $swap_type || ! $size =~ ^(0|[1-9][0-9]*)$ || ! $priority =~ ^-?[0-9]+$ ]]; then
+        valid=0
+        break
+      fi
       total=$((total + size))
-      if [[ $name == /dev/zram* ]]; then
+      if identity=$(zram_device_identity "$name"); then
         ((zram_count += 1))
         if ((zram_count == 1 || priority < min_zram_priority)); then min_zram_priority=$priority; fi
-        observed_algorithm=${algorithms_by_device[$name]-}
+        observed_algorithm=${algorithms_by_device[$identity]-}
         [[ $observed_algorithm == "$algorithm" ]] || valid=0
         [[ -z $observed_algorithm ]] || algorithms+=("$observed_algorithm")
       else

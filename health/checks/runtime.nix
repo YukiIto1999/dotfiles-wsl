@@ -15,8 +15,8 @@ let
     managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
-    passDoctor
     poisonDoctor
+    passDoctor
     releaseDirectoryDoctor
     releaseEscapeDoctor
     releaseMissingLinkFixtures
@@ -26,6 +26,8 @@ let
     rosterOmitDoctor
     timeoutDoctor
     warningDoctor
+    zramInvalidPathDoctor
+    zramPathDoctor
     ;
   inherit (base.support) mkRow;
   inherit (fragments)
@@ -91,6 +93,41 @@ in
             }
           }
         ' <<<"$pass_output" >/dev/null
+        zram_path_output=$(${lib.getExe zramPathDoctor} --json)
+        jq -e '
+          .checks == [{id:"fixture/swap-zram-path",status:"pass"}]
+          and .warnings == []
+          and .failures == []
+          and .resources.fixtureSwap == {
+            totalBytes:8589934592,
+            zramDevices:1,
+            diskDevices:1,
+            minZramPriority:100,
+            maxDiskPriority:-2,
+            algorithms:["lzo-rle"]
+          }
+        ' <<<"$zram_path_output" >/dev/null
+        set +e
+        zram_invalid_path_output=$(${lib.getExe zramInvalidPathDoctor} --json)
+        zram_invalid_path_status=$?
+        set -e
+        test "$zram_invalid_path_status" -eq 1
+        jq -e '
+          .checks == [{id:"fixture/swap-invalid-zram-path",status:"fail"}]
+          and .warnings == []
+          and .failures == [{
+            id:"fixture/swap-invalid-zram-path",
+            message:"fixture swap-invalid-zram-path failed"
+          }]
+          and .resources.fixtureSwap == {
+            totalBytes:8589934592,
+            zramDevices:0,
+            diskDevices:2,
+            minZramPriority:0,
+            maxDiskPriority:100,
+            algorithms:[]
+          }
+        ' <<<"$zram_invalid_path_output" >/dev/null
 
         set +e
         failure_output=$(${lib.getExe failureDoctor} --json)

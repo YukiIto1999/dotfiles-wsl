@@ -501,181 +501,261 @@ in
         ];
       }
       ''
-        set -euo pipefail
+                set -euo pipefail
 
-        test "$(${lib.getExe successfulProbe})" = 20
+                test "$(${lib.getExe successfulProbe})" = 20
 
-        assert_failed_probe() {
-          local name=$1
-          local command=$2
-          local stdout="$TMPDIR/windows-drive-$name.stdout"
-          local stderr="$TMPDIR/windows-drive-$name.stderr"
-          local status
+                assert_failed_probe() {
+                  local name=$1
+                  local command=$2
+                  local stdout="$TMPDIR/windows-drive-$name.stdout"
+                  local stderr="$TMPDIR/windows-drive-$name.stderr"
+                  local status
 
-          if "$command" >"$stdout" 2>"$stderr"; then
-            status=0
-          else
-            status=$?
+                  if "$command" >"$stdout" 2>"$stderr"; then
+                    status=0
+                  else
+                    status=$?
+                  fi
+                  if ((status != 1)); then
+                    echo "Windows drive $name probe returned status $status instead of 1" >&2
+                    return 1
+                  fi
+                  if [[ -s $stdout ]]; then
+                    echo "Windows drive $name probe leaked stdout" >&2
+                    return 1
+                  fi
+                  if [[ -s $stderr ]]; then
+                    echo "Windows drive $name probe leaked stderr" >&2
+                    return 1
+                  fi
+                }
+
+                assert_failed_probe noisy ${lib.getExe noisyProbe}
+                assert_failed_probe invalid ${lib.getExe invalidProbe}
+                assert_failed_probe status ${lib.getExe statusProbe}
+                assert_failed_probe timeout ${lib.getExe timeoutProbe}
+
+                service=${systemUnits}/fstrim.service
+                service_drop_in=${systemUnits}/fstrim.service.d/overrides.conf
+                timer=${systemUnits}/fstrim.timer
+                timer_drop_in=${systemUnits}/fstrim.timer.d/overrides.conf
+                zram_service=${systemUnits}/dotfiles-zram-swap.service
+                zram_wants=${systemUnits}/swap.target.wants/dotfiles-zram-swap.service
+
+                test -L "$service"
+                test -L "$timer"
+                test -f "$service_drop_in"
+                test -f "$timer_drop_in"
+                test -L "$zram_service"
+                test -L "$zram_wants"
+
+                grep -Fxq 'DefaultDependencies=false' "$zram_service"
+                conflict_targets=$(sed -n 's/^Conflicts=//p' "$zram_service")
+                if ! tr ' ' '\n' <<<"$conflict_targets" | grep -Fxq shutdown.target; then
+                  echo 'dotfiles-zram-swap does not conflict with shutdown.target' >&2
+                  exit 1
+                fi
+                before_targets=$(sed -n 's/^Before=//p' "$zram_service")
+                for target in swap.target shutdown.target; do
+                  if ! tr ' ' '\n' <<<"$before_targets" | grep -Fxq "$target"; then
+                    echo "dotfiles-zram-swap is not ordered before $target" >&2
+                    exit 1
+                  fi
+                done
+                grep -Fxq 'Type=oneshot' "$zram_service"
+                grep -Fxq 'RemainAfterExit=true' "$zram_service"
+
+                verify_no_ordering_cycle() {
+                  local unit_path=$1
+                  local stderr=$2
+                  local runtime=$TMPDIR/systemd-analyze-runtime
+                  local status=0
+
+                  mkdir -p "$runtime"
+                  HOME=$TMPDIR \
+                    XDG_RUNTIME_DIR="$runtime" \
+                    SYSTEMD_UNIT_PATH="$unit_path" \
+                    ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify --man=no --generators=no \
+                      basic.target \
+                      2>"$stderr" || status=$?
+                  if ((status != 0)); then
+                    return 2
+                  fi
+                  ! grep -Eq 'Found ordering cycle|deleted to break ordering cycle' "$stderr"
+                }
+
+                if ! verify_no_ordering_cycle "${systemUnits}" "$TMPDIR/zram-units.stderr"; then
+                  sed -n '1,80p' "$TMPDIR/zram-units.stderr" >&2
+                  echo 'generated system unit tree failed ordering verification' >&2
+                  exit 1
+                fi
+
+                cycle_unit_overlay=$TMPDIR/zram-cycle-units
+                mkdir -p "$cycle_unit_overlay/dotfiles-zram-swap.service.d"
+                printf '[Unit]\nAfter=basic.target\n' > "$cycle_unit_overlay/dotfiles-zram-swap.service.d/cycle.conf"
+                cycle_result=0
+                verify_no_ordering_cycle "$cycle_unit_overlay:${systemUnits}" "$TMPDIR/zram-cycle.stderr" \
+                  || cycle_result=$?
+                if ((cycle_result != 1)); then
+                  sed -n '1,80p' "$TMPDIR/zram-cycle.stderr" >&2
+                  echo 'After=basic.target cycle mutation escaped host unit verification' >&2
+                  exit 1
+                fi
+
+                zram_setup=$(sed -n 's/^ExecStart=//p' "$zram_service")
+                zram_teardown=$(sed -n 's/^ExecStopPost=//p' "$zram_service")
+                zram_generator=$(sed -n 's|^\(/nix/store/[^ ]*/lib/systemd/system-generators/zram-generator\).*|\1|p' "$zram_setup")
+                test -x "$zram_generator"
+                test -x "$zram_setup"
+                test -x "$zram_teardown"
+
+                lifecycle_root=$TMPDIR/zram-lifecycle
+                mkdir -p "$lifecycle_root/bin" "$lifecycle_root/sys/block/zram0"
+                : > "$lifecycle_root/operations"
+                : > "$lifecycle_root/proc-swaps"
+                touch "$lifecycle_root/sys/block/zram0/reset"
+                cat > "$lifecycle_root/bin/grep" <<EOF
+        #!${lib.getExe pkgs.bash}
+        exec ${lib.getExe pkgs.gnugrep} "\$@"
+        EOF
+                cat > "$lifecycle_root/bin/test" <<EOF
+        #!${lib.getExe pkgs.bash}
+        if [ "\$1" = -b ] && [ "\$2" = /dev/zram0 ]; then
+          exit 0
+        fi
+        exec ${lib.getExe' pkgs.coreutils "test"} "\$@"
+        EOF
+                cat > "$lifecycle_root/bin/modprobe" <<EOF
+        #!${lib.getExe pkgs.bash}
+        printf 'modprobe %s\n' "\$*" >> "$lifecycle_root/operations"
+        EOF
+                cat > "$lifecycle_root/bin/swapon" <<EOF
+        #!${lib.getExe pkgs.bash}
+        printf 'swapon %s\n' "\$*" >> "$lifecycle_root/operations"
+        EOF
+                cat > "$lifecycle_root/bin/zram-generator" <<EOF
+        #!${lib.getExe pkgs.bash}
+        if [ "\$1" = --setup-device ]; then
+          printf 'generator setup %s\n' "\$2" >> "$lifecycle_root/operations"
+          if ${lib.getExe' pkgs.coreutils "test"} -e "$lifecycle_root/fail-setup"; then
+            exit 7
           fi
-          if ((status != 1)); then
-            echo "Windows drive $name probe returned status $status instead of 1" >&2
-            return 1
-          fi
-          if [[ -s $stdout ]]; then
-            echo "Windows drive $name probe leaked stdout" >&2
-            return 1
-          fi
-          if [[ -s $stderr ]]; then
-            echo "Windows drive $name probe leaked stderr" >&2
-            return 1
-          fi
-        }
-
-        assert_failed_probe noisy ${lib.getExe noisyProbe}
-        assert_failed_probe invalid ${lib.getExe invalidProbe}
-        assert_failed_probe status ${lib.getExe statusProbe}
-        assert_failed_probe timeout ${lib.getExe timeoutProbe}
-
-        service=${systemUnits}/fstrim.service
-        service_drop_in=${systemUnits}/fstrim.service.d/overrides.conf
-        timer=${systemUnits}/fstrim.timer
-        timer_drop_in=${systemUnits}/fstrim.timer.d/overrides.conf
-        zram_service=${systemUnits}/dotfiles-zram-swap.service
-        zram_wants=${systemUnits}/swap.target.wants/dotfiles-zram-swap.service
-
-        test -L "$service"
-        test -L "$timer"
-        test -f "$service_drop_in"
-        test -f "$timer_drop_in"
-        test -L "$zram_service"
-        test -L "$zram_wants"
-
-        grep -Fxq 'DefaultDependencies=false' "$zram_service"
-        conflict_targets=$(sed -n 's/^Conflicts=//p' "$zram_service")
-        if ! tr ' ' '\n' <<<"$conflict_targets" | grep -Fxq shutdown.target; then
-          echo 'dotfiles-zram-swap does not conflict with shutdown.target' >&2
-          exit 1
+        elif [ "\$1" = --reset-device ]; then
+          printf 'generator reset %s\n' "\$2" >> "$lifecycle_root/operations"
+        else
+          exit 64
         fi
-        before_targets=$(sed -n 's/^Before=//p' "$zram_service")
-        for target in swap.target shutdown.target; do
-          if ! tr ' ' '\n' <<<"$before_targets" | grep -Fxq "$target"; then
-            echo "dotfiles-zram-swap is not ordered before $target" >&2
-            exit 1
-          fi
-        done
-        grep -Fxq 'Type=oneshot' "$zram_service"
-        grep -Fxq 'RemainAfterExit=true' "$zram_service"
+        EOF
+                chmod +x "$lifecycle_root/bin/"*
+                patch_lifecycle() {
+                  sed \
+                    -e "s|/nix/store/[^/]*/bin/grep|$lifecycle_root/bin/grep|g" \
+                    -e "s|/nix/store/[^/]*/bin/modprobe|$lifecycle_root/bin/modprobe|g" \
+                    -e "s|/nix/store/[^/]*/lib/systemd/system-generators/zram-generator|$lifecycle_root/bin/zram-generator|g" \
+                    -e "s|/nix/store/[^/]*/bin/swapon|$lifecycle_root/bin/swapon|g" \
+                    -e "s|/proc/swaps|$lifecycle_root/proc-swaps|g" \
+                    -e "s|/sys/block/zram0/reset|$lifecycle_root/sys/block/zram0/reset|g" \
+                    "$1" >"$2"
+                  chmod +x "$2"
+                }
+                patched_setup=$lifecycle_root/setup
+                patched_teardown=$lifecycle_root/teardown
+                patch_lifecycle "$zram_setup" "$patched_setup"
+                patch_lifecycle "$zram_teardown" "$patched_teardown"
+                run_lifecycle() {
+                  local script=$1
+                  set +e
+                  PATH="$lifecycle_root/bin:$PATH" \
+                    ${lib.getExe pkgs.bash} -c 'enable -n test; source "$1"' lifecycle "$script"
+                  local status=$?
+                  set -e
+                  return "$status"
+                }
+                for active_name in /zram0 /dev/zram0; do
+                  printf '%s partition 4294967296 100\n' "$active_name" > "$lifecycle_root/proc-swaps"
+                  : > "$lifecycle_root/operations"
+                  run_lifecycle "$patched_setup"
+                  run_lifecycle "$patched_teardown"
+                  if grep -q . "$lifecycle_root/operations"; then
+                    echo "active zram lifecycle performed an operation" >&2
+                    exit 1
+                  fi
+                done
+                : > "$lifecycle_root/proc-swaps"
+                : > "$lifecycle_root/operations"
+                touch "$lifecycle_root/fail-setup"
+                setup_status=0
+                run_lifecycle "$patched_setup" || setup_status=$?
+                test "$setup_status" -eq 7
+                run_lifecycle "$patched_teardown"
+                grep -Fxq 'modprobe zram num_devices=1' "$lifecycle_root/operations"
+                grep -Fxq 'generator setup zram0' "$lifecycle_root/operations"
+                grep -Fxq 'generator reset zram0' "$lifecycle_root/operations"
+                ! grep -Fq 'swapon ' "$lifecycle_root/operations"
+                ! grep -Fq 'swapoff ' "$lifecycle_root/operations"
 
-        verify_no_ordering_cycle() {
-          local unit_path=$1
-          local stderr=$2
-          local runtime=$TMPDIR/systemd-analyze-runtime
-          local status=0
+                grep -Fxq 'ConditionVirtualization=!container' "$service"
+                grep -Fxq 'ConditionVirtualization=' "$service_drop_in"
+                grep -Fxq 'ConditionVirtualization=wsl' "$service_drop_in"
+                grep -Eq '^ExecStart=.+/fstrim ' "$service"
+                if grep -q '^ExecStart=' "$service_drop_in"; then
+                  echo 'fstrim.service drop-in replaced the vendor ExecStart' >&2
+                  exit 1
+                fi
 
-          mkdir -p "$runtime"
-          HOME=$TMPDIR \
-            XDG_RUNTIME_DIR="$runtime" \
-            SYSTEMD_UNIT_PATH="$unit_path" \
-            ${pkgs.systemd}/bin/systemd-analyze --user verify --man=no --generators=no \
-              basic.target \
-              2>"$stderr" || status=$?
-          if ((status != 0)); then
-            return 2
-          fi
-          ! grep -Eq 'Found ordering cycle|deleted to break ordering cycle' "$stderr"
-        }
+                grep -Fxq 'ConditionVirtualization=!container' "$timer"
+                grep -Fxq 'ConditionVirtualization=' "$timer_drop_in"
+                grep -Fxq 'ConditionVirtualization=wsl' "$timer_drop_in"
+                grep -Fxq 'OnCalendar=weekly' "$timer"
+                grep -Fxq 'Persistent=true' "$timer"
+                grep -Fxq 'OnCalendar=' "$timer_drop_in"
+                grep -Fxq 'OnCalendar=weekly' "$timer_drop_in"
+                if grep -q '^Persistent=' "$timer_drop_in"; then
+                  echo 'fstrim.timer drop-in replaced the vendor persistence setting' >&2
+                  exit 1
+                fi
 
-        if ! verify_no_ordering_cycle "${systemUnits}" "$TMPDIR/zram-units.stderr"; then
-          sed -n '1,80p' "$TMPDIR/zram-units.stderr" >&2
-          echo 'generated system unit tree failed ordering verification' >&2
-          exit 1
-        fi
+                dependency_pattern='^(After|Before|Requires|Requisite|Wants|BindsTo|PartOf|Upholds|Conflicts|PropagatesReloadTo|ReloadPropagatedFrom|JoinsNamespaceOf)=.*(dotfiles-zram-swap\.service|systemd-zram-setup@[^[:space:]]*\.service|(dev-)?zram[^[:space:]]*\.swap)'
+                dependency_probe=$TMPDIR/zram-dependency-probe.service
+                printf '%s\n' 'Requires=dotfiles-zram-swap.service' > "$dependency_probe"
+                if ! grep -Eq "$dependency_pattern" "$dependency_probe"; then
+                  echo 'zram dependency pattern does not cover the WSL lifecycle service' >&2
+                  exit 1
+                fi
+                if find -L ${systemUnits} -type f \( -name '*.service' -o -name '*.conf' \) \
+                  -exec grep -HnE "$dependency_pattern" {} +; then
+                  echo 'a generated service depends on a zram swap or setup unit' >&2
+                  exit 1
+                fi
 
-        cycle_unit_overlay=$TMPDIR/zram-cycle-units
-        mkdir -p "$cycle_unit_overlay/dotfiles-zram-swap.service.d"
-        printf '[Unit]\nAfter=basic.target\n' > "$cycle_unit_overlay/dotfiles-zram-swap.service.d/cycle.conf"
-        cycle_result=0
-        verify_no_ordering_cycle "$cycle_unit_overlay:${systemUnits}" "$TMPDIR/zram-cycle.stderr" \
-          || cycle_result=$?
-        if ((cycle_result != 1)); then
-          sed -n '1,80p' "$TMPDIR/zram-cycle.stderr" >&2
-          echo 'After=basic.target cycle mutation escaped host unit verification' >&2
-          exit 1
-        fi
+                while IFS= read -r dependency_link; do
+                  dependency=$(basename "$dependency_link")
+                  target=$(readlink "$dependency_link")
+                  if printf '%s\n%s\n' "$dependency" "$target" \
+                    | grep -Eq 'dotfiles-zram-swap\.service|systemd-zram-setup@.*\.service|(dev-)?zram.*\.swap'; then
+                    echo "a generated service dependency symlink references zram: $dependency_link" >&2
+                    exit 1
+                  fi
+                done < <(
+                  find ${systemUnits} -type l \
+                    \( -path '*.service.wants/*' -o -path '*.service.requires/*' -o -path '*.service.upholds/*' \) \
+                    -print
+                )
 
-        zram_setup=$(sed -n 's/^ExecStart=//p' "$zram_service")
-        zram_teardown=$(sed -n 's/^ExecStopPost=//p' "$zram_service")
-        test -x "$zram_setup"
-        test -x "$zram_teardown"
-        grep -Fq 'modprobe zram num_devices=1' "$zram_setup"
-        grep -Fq 'zram-generator --setup-device zram0' "$zram_setup"
-        grep -Fq 'swapon --priority 100 /dev/zram0' "$zram_setup"
-        grep -Fq '/proc/swaps' "$zram_teardown"
-        grep -Fq 'swapoff /dev/zram0' "$zram_teardown"
-        grep -Fq '/sys/block/zram0' "$zram_teardown"
-        grep -Fq 'zram-generator --reset-device zram0' "$zram_teardown"
+                grep -Fxq 'Storage=persistent' ${journaldConfig}
+                grep -Fxq 'SystemMaxUse=4G' ${journaldConfig}
+                grep -Fxq 'MaxRetentionSec=30day' ${journaldConfig}
 
-        grep -Fxq 'ConditionVirtualization=!container' "$service"
-        grep -Fxq 'ConditionVirtualization=' "$service_drop_in"
-        grep -Fxq 'ConditionVirtualization=wsl' "$service_drop_in"
-        grep -Eq '^ExecStart=.+/fstrim ' "$service"
-        if grep -q '^ExecStart=' "$service_drop_in"; then
-          echo 'fstrim.service drop-in replaced the vendor ExecStart' >&2
-          exit 1
-        fi
+                grep -Fxq '[zram0]' ${zramConfig}
+                grep -Fxq 'compression-algorithm=lzo-rle' ${zramConfig}
+                grep -Fxq 'swap-priority=100' ${zramConfig}
+                grep -Fxq 'zram-size=25 / 100 * ram' ${zramConfig}
+                if grep -q '^writeback-device=' ${zramConfig}; then
+                  echo 'zram writeback was enabled' >&2
+                  exit 1
+                fi
 
-        grep -Fxq 'ConditionVirtualization=!container' "$timer"
-        grep -Fxq 'ConditionVirtualization=' "$timer_drop_in"
-        grep -Fxq 'ConditionVirtualization=wsl' "$timer_drop_in"
-        grep -Fxq 'OnCalendar=weekly' "$timer"
-        grep -Fxq 'Persistent=true' "$timer"
-        grep -Fxq 'OnCalendar=' "$timer_drop_in"
-        grep -Fxq 'OnCalendar=weekly' "$timer_drop_in"
-        if grep -q '^Persistent=' "$timer_drop_in"; then
-          echo 'fstrim.timer drop-in replaced the vendor persistence setting' >&2
-          exit 1
-        fi
-
-        dependency_pattern='^(After|Before|Requires|Requisite|Wants|BindsTo|PartOf|Upholds|Conflicts|PropagatesReloadTo|ReloadPropagatedFrom|JoinsNamespaceOf)=.*(dotfiles-zram-swap\.service|systemd-zram-setup@[^[:space:]]*\.service|(dev-)?zram[^[:space:]]*\.swap)'
-        dependency_probe=$TMPDIR/zram-dependency-probe.service
-        printf '%s\n' 'Requires=dotfiles-zram-swap.service' > "$dependency_probe"
-        if ! grep -Eq "$dependency_pattern" "$dependency_probe"; then
-          echo 'zram dependency pattern does not cover the WSL lifecycle service' >&2
-          exit 1
-        fi
-        if find -L ${systemUnits} -type f \( -name '*.service' -o -name '*.conf' \) \
-          -exec grep -HnE "$dependency_pattern" {} +; then
-          echo 'a generated service depends on a zram swap or setup unit' >&2
-          exit 1
-        fi
-
-        while IFS= read -r dependency_link; do
-          dependency=$(basename "$dependency_link")
-          target=$(readlink "$dependency_link")
-          if printf '%s\n%s\n' "$dependency" "$target" \
-            | grep -Eq 'dotfiles-zram-swap\.service|systemd-zram-setup@.*\.service|(dev-)?zram.*\.swap'; then
-            echo "a generated service dependency symlink references zram: $dependency_link" >&2
-            exit 1
-          fi
-        done < <(
-          find ${systemUnits} -type l \
-            \( -path '*.service.wants/*' -o -path '*.service.requires/*' -o -path '*.service.upholds/*' \) \
-            -print
-        )
-
-        grep -Fxq 'Storage=persistent' ${journaldConfig}
-        grep -Fxq 'SystemMaxUse=4G' ${journaldConfig}
-        grep -Fxq 'MaxRetentionSec=30day' ${journaldConfig}
-
-        grep -Fxq '[zram0]' ${zramConfig}
-        grep -Fxq 'compression-algorithm=lzo-rle' ${zramConfig}
-        grep -Fxq 'swap-priority=100' ${zramConfig}
-        grep -Fxq 'zram-size=25 / 100 * ram' ${zramConfig}
-        if grep -q '^writeback-device=' ${zramConfig}; then
-          echo 'zram writeback was enabled' >&2
-          exit 1
-        fi
-
-        touch $out
+                touch $out
       '';
 }

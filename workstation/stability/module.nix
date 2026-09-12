@@ -43,10 +43,13 @@ let
     inherit (windowsMemoryCommit) powershellCommand;
     timeoutSeconds = observationTimeoutSeconds;
   };
-  zramGenerator = "${pkgs.zram-generator}/lib/systemd/system-generators/zram-generator";
+  zramGenerator = "${pkgs.zram-generator.outPath}/lib/systemd/system-generators/zram-generator";
   zramSetup = pkgs.writeShellScript "dotfiles-zram-setup" ''
     set -euo pipefail
 
+    if ${lib.getExe pkgs.gnugrep} -Eq '^(/dev)?/zram0[[:space:]]' /proc/swaps; then
+      exit 0
+    fi
     ${lib.getExe' pkgs.kmod "modprobe"} zram num_devices=1
     test -b /dev/zram0
     ${zramGenerator} --setup-device zram0
@@ -55,8 +58,8 @@ let
   zramTeardown = pkgs.writeShellScript "dotfiles-zram-teardown" ''
     set -euo pipefail
 
-    if ${lib.getExe pkgs.gnugrep} -q '^/dev/zram0[[:space:]]' /proc/swaps; then
-      ${lib.getExe' pkgs.util-linux "swapoff"} /dev/zram0
+    if ${lib.getExe pkgs.gnugrep} -Eq '^(/dev)?/zram0[[:space:]]' /proc/swaps; then
+      exit 0
     fi
     if test -e /sys/block/zram0/reset; then
       ${zramGenerator} --reset-device zram0

@@ -48,6 +48,25 @@ let
       inherit pkgs lib tools;
       observations = rowsFor values;
     };
+  mkFixtureDoctorWithTools =
+    fixtureTools: values:
+    mkDoctor {
+      inherit pkgs lib;
+      tools = fixtureTools;
+      observations = rowsFor values;
+    };
+  zramPathSwapon = pkgs.writeShellApplication {
+    name = "fixture-swapon-zram-path";
+    text = ''
+      printf '/zram0 partition 4294967296 100\n/dev/sda partition 4294967296 -2\n'
+    '';
+  };
+  zramInvalidPathSwapon = pkgs.writeShellApplication {
+    name = "fixture-swapon-invalid-zram-path";
+    text = ''
+      printf '/dev/zram0-not-a-device partition 4294967296 100\n/dev/sda partition 4294967296 -2\n'
+    '';
+  };
   mkOutputCommand =
     name: output:
     pkgs.writeShellApplication {
@@ -409,6 +428,33 @@ let
     };
     "fixture/18-normalized" = normalizedValue normalizedFailCommand;
   };
+  zramPathDoctor =
+    mkFixtureDoctorWithTools
+      (
+        tools
+        // {
+          swapon = lib.getExe zramPathSwapon;
+        }
+      )
+      {
+        "fixture/swap-zram-path" = passValues."fixture/14-swap" // {
+          checkId = "fixture/swap-zram-path";
+        };
+      };
+  zramInvalidPathDoctor =
+    mkFixtureDoctorWithTools
+      (
+        tools
+        // {
+          swapon = lib.getExe zramInvalidPathSwapon;
+        }
+      )
+      {
+        "fixture/swap-invalid-zram-path" = passValues."fixture/14-swap" // {
+          checkId = "fixture/swap-invalid-zram-path";
+          failureMessage = "fixture swap-invalid-zram-path failed";
+        };
+      };
   warningValues = {
     "fixture/01-filesystem" = passValues."fixture/12-filesystem" // {
       checkId = "fixture/warn-filesystem";
@@ -667,6 +713,8 @@ in
     managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
+    zramInvalidPathDoctor
+    zramPathDoctor
     passDoctor
     poisonDoctor
     releaseDirectoryDoctor

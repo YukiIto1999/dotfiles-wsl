@@ -128,6 +128,87 @@ let
     pwd -P > "$PWD_CAPTURE"
     ${lib.getExe pkgs.git} config --get advice.detachedHead > "$CONFIG_CAPTURE" || true
   '';
+  fixtureAgentResource = pkgs.writeShellApplication {
+    name = "fixture-agent-resource";
+    runtimeInputs = with pkgs; [
+      coreutils
+      gawk
+    ];
+    text = ''
+      set -euo pipefail
+      case "$1" in
+        begin-session)
+          test -d "$TMPDIR"
+          test -f "''${TMPDIR%/tmp}/metadata.json"
+          test "$DOTFILES_AGENT_SESSION_ID" = "$2"
+          test "$DOTFILES_AGENT_CLIENT" = fixture-client
+          test "$DOTFILES_AGENT_BOOT_ID" = "$(cat /proc/sys/kernel/random/boot_id)"
+          test "$DOTFILES_AGENT_OWNER_START_TIME" = \
+            "$(awk '{print $22}' "/proc/$DOTFILES_AGENT_OWNER_PID/stat")"
+          printf 'begin:%s\n' "$2" >>"$HOOK_LOG"
+          ;;
+        cleanup-session)
+          test ! -e "$TMPDIR"
+          test "$DOTFILES_AGENT_SESSION_ID" = "$2"
+          test "$DOTFILES_AGENT_CLIENT" = fixture-client
+          test "$DOTFILES_AGENT_BOOT_ID" = "$(cat /proc/sys/kernel/random/boot_id)"
+          test "$DOTFILES_AGENT_OWNER_START_TIME" = \
+            "$(awk '{print $22}' "/proc/$DOTFILES_AGENT_OWNER_PID/stat")"
+          printf 'cleanup:%s\n' "$2" >>"$HOOK_LOG"
+          ;;
+        *)
+          exit 64
+          ;;
+      esac
+      test "''${HOOK_FAIL:-0}" != 1
+      exec ${lib.getExe runtime.agentResource} "$@"
+    '';
+  };
+  visibleNewAgentResource = pkgs.writeShellApplication {
+    name = "dotfiles-agent-resource";
+    text = ''
+      : >"''${PATH_RESOURCE_USED:?}"
+      exec ${lib.getExe runtime.agentResource} "$@"
+    '';
+  };
+  oldLauncherSource =
+    builtins.replaceStrings
+      [
+        "resource_command=@resourceCommand@\n"
+        "  \"$resource_command\" cleanup-session \"$DOTFILES_AGENT_SESSION_ID\" || true\n"
+        "\"$resource_command\" begin-session \"$DOTFILES_AGENT_SESSION_ID\" @beginSessionFlag@ || true\n"
+      ]
+      [
+        ""
+        "  if resource_command=$(command -v dotfiles-agent-resource 2>/dev/null); then\n    \"$resource_command\" cleanup-session \"$DOTFILES_AGENT_SESSION_ID\" || true\n  fi\n"
+        "if resource_command=$(command -v dotfiles-agent-resource 2>/dev/null); then\n  \"$resource_command\" begin-session \"$DOTFILES_AGENT_SESSION_ID\" || true\nfi\n"
+      ]
+      (builtins.readFile ../impl/runtime/launcher.sh);
+  oldDynamicLauncher = pkgs.writeShellApplication {
+    name = "fixture-old-agent-runtime";
+    runtimeInputs = with pkgs; [
+      coreutils
+      gawk
+      git
+      jq
+      taplo
+      util-linux
+    ];
+    text =
+      builtins.replaceStrings
+        [
+          "@agentShimDirectory@"
+          "@cacheRootRelative@"
+        ]
+        [
+          "${runtime.agentShims}/bin"
+          runtimePackageContract.cache.relativeCacheRoot
+        ]
+        oldLauncherSource;
+  };
+  fixtureLauncher = runtime.mkLauncher {
+    resourceCommand = lib.getExe fixtureAgentResource;
+  };
   fixtureNixBuildShims = runtime.mkNixBuildShims {
     nixCommand = fakeNix;
     nixBuildCommand = fakeNix;
@@ -144,6 +225,7 @@ let
   );
 
   observationTimeoutSeconds = 10;
+  managedRootsObservationTimeoutSeconds = 60;
   homeDir = hostConfig.dotfiles.workstation.homeDir;
   runtimeContractSupport = import ./support/runtime-contract.nix {
     inherit homeDir;
@@ -216,6 +298,7 @@ let
       commonAgentObservation "resource/managed-roots" "managedRoots"
         "could not summarize every managed resource root"
       // {
+        timeoutSeconds = managedRootsObservationTimeoutSeconds;
         kind = "managed-roots";
         paths = with expectedAgentRuntime; [
           cache.buildsRoot
@@ -488,6 +571,7 @@ in
           grep -Fq ${lib.escapeShellArg (lib.getExe runtime.launcher)} "$wrapper"
         '') runtimeClientNames}
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.launcher}
+        grep -Fq ${lib.escapeShellArg (lib.getExe runtime.agentResource)} ${lib.getExe runtime.launcher}
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.gc}
         grep -Fq '68719476736' ${lib.getExe runtime.gc}
         grep -Fq '51539607552' ${lib.getExe runtime.gc}
@@ -526,7 +610,9 @@ in
           pkgs.jq
           pkgs.util-linux
         ];
-        LAUNCHER = lib.getExe runtime.launcher;
+        LAUNCHER = lib.getExe fixtureLauncher;
+        OLD_LAUNCHER = lib.getExe oldDynamicLauncher;
+        VISIBLE_RESOURCE_DIR = "${visibleNewAgentResource}/bin";
         AGENT_SHIM_DIR = runtime.agentShims;
         GIT_SHIM_DIR = fixtureAgentShims;
       }

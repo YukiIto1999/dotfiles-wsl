@@ -229,6 +229,7 @@ let
   runtimeContract =
     let
       observationTimeoutSeconds = 10;
+      managedRootsObservationTimeoutSeconds = 60;
       relativeCacheRoot = ".cache/dotfiles-wsl";
       relativeStateRoot = ".local/state/dotfiles-wsl";
       releaseFor =
@@ -350,6 +351,7 @@ let
           commonObservation "resource/managed-roots" "managedRoots"
             "could not summarize every managed resource root"
           // {
+            timeoutSeconds = managedRootsObservationTimeoutSeconds;
             kind = "managed-roots";
             paths = [
               cache.buildsRoot

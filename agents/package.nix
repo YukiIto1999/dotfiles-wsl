@@ -158,28 +158,38 @@ let
     gitCommand = lib.getExe pkgs.git;
     worktreeCommand = lib.getExe agentWorktree;
   };
-  launcher = pkgs.writeShellApplication {
-    name = "dotfiles-agent-runtime";
-    runtimeInputs = with pkgs; [
-      coreutils
-      gawk
-      git
-      jq
-      taplo
-      util-linux
-    ];
-    text =
-      builtins.replaceStrings
-        [
-          "@agentShimDirectory@"
-          "@cacheRootRelative@"
-        ]
-        [
-          "${agentShims}/bin"
-          cacheRootRelative
-        ]
-        (builtins.readFile ./impl/runtime/launcher.sh);
-  };
+  mkLauncher =
+    {
+      resourceCommand ? lib.getExe agentResource,
+      beginSessionFlag ? "--indexed-worktrees",
+    }:
+    pkgs.writeShellApplication {
+      name = "dotfiles-agent-runtime";
+      runtimeInputs = with pkgs; [
+        coreutils
+        gawk
+        git
+        jq
+        taplo
+        util-linux
+      ];
+      text =
+        builtins.replaceStrings
+          [
+            "@agentShimDirectory@"
+            "@resourceCommand@"
+            "@beginSessionFlag@"
+            "@cacheRootRelative@"
+          ]
+          [
+            "${agentShims}/bin"
+            (lib.escapeShellArg (toString resourceCommand))
+            (toString beginSessionFlag)
+            cacheRootRelative
+          ]
+          (builtins.readFile ./impl/runtime/launcher.sh);
+    };
+  launcher = mkLauncher { };
   projectCacheGcSource =
     builtins.replaceStrings
       [
@@ -236,6 +246,7 @@ in
     agentShims
     agentWorktree
     launcher
+    mkLauncher
     gc
     mkAgentShims
     mkAgentResource

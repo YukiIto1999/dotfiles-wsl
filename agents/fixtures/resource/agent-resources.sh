@@ -47,7 +47,7 @@ begin_session() {
   DOTFILES_AGENT_OWNER_START_TIME=$(proc_start_time "$owner_pid")
   export DOTFILES_AGENT_BOOT_ID
   DOTFILES_AGENT_BOOT_ID=$(</proc/sys/kernel/random/boot_id)
-  "$RESOURCE" begin-session "$session"
+  "$RESOURCE" begin-session "$session" --indexed-worktrees
 }
 
 add_managed_worktree() {
@@ -181,7 +181,7 @@ clean_path="$HOME/managed"
 unowned_path="$HOME/unowned"
 create_repo "$clean_repo"
 begin_session clean-session
-"$RESOURCE" begin-session clean-session
+"$RESOURCE" begin-session clean-session --indexed-worktrees
 add_managed_worktree "$clean_repo" "$clean_path"
 "$REAL_GIT" -C "$clean_repo" worktree add -q --detach "$unowned_path" HEAD
 clean_record=$(record_for_path "$clean_path")
@@ -875,7 +875,7 @@ concurrent_one="$HOME/one"
 concurrent_two="$HOME/two"
 create_repo "$concurrent_repo"
 begin_session concurrent-session
-"$RESOURCE" begin-session concurrent-session
+"$RESOURCE" begin-session concurrent-session --indexed-worktrees
 (
   cd "$concurrent_repo"
   "$WORKTREE" add --detach "$concurrent_one" HEAD >/dev/null
@@ -2248,6 +2248,365 @@ if ((linear_jq_calls > linear_jq_bound)); then
   echo "reap exceeded linear jq bound: calls=$linear_jq_calls bound=$linear_jq_bound" >&2
   exit 1
 fi
+# Each session consumes the indexed worktree ledger set once; a large terminal
+# backlog must not multiply external ledger parsing by the session count.
+indexed_session_count=16
+indexed_worktree_count=64
+indexed_state_root=$(state_root)
+indexed_owner_start_time=$(proc_start_time $$)
+indexed_boot_id=$(</proc/sys/kernel/random/boot_id)
+indexed_updated_at=$(date +%s)
+mkdir -p "$indexed_state_root/sessions" "$indexed_state_root/worktrees" \
+  "$indexed_state_root/locks"
+chmod 700 "$indexed_state_root" "$indexed_state_root/sessions" \
+  "$indexed_state_root/worktrees" "$indexed_state_root/locks"
+for index in $(seq -w 1 "$indexed_session_count"); do
+  indexed_session_id="indexed-session-$index"
+  jq -cn \
+    --arg session_id "$indexed_session_id" \
+    --arg boot_id "$indexed_boot_id" \
+    --arg owner_start_time "$indexed_owner_start_time" \
+    --argjson owner_pid "$$" \
+    --argjson updated_at "$indexed_updated_at" \
+    '{version: 1, session_id: $session_id, client: "fixture-client",
+      owner_pid: $owner_pid, owner_start_time: $owner_start_time,
+      boot_id: $boot_id, status: "ended", reason: "cleanup",
+      updated_at: $updated_at}' \
+    >"$indexed_state_root/sessions/$indexed_session_id.json"
+  chmod 600 "$indexed_state_root/sessions/$indexed_session_id.json"
+  : >"$indexed_state_root/locks/$indexed_session_id.lock"
+  chmod 600 "$indexed_state_root/locks/$indexed_session_id.lock"
+done
+for index in $(seq -w 1 "$indexed_worktree_count"); do
+  indexed_session_id="indexed-session-$(printf '%02d' "$indexed_session_count")"
+  indexed_common_dir="$HOME/indexed-common-$index"
+  indexed_path="$HOME/indexed-worktree-$index"
+  indexed_record_id=$(printf '%s\0%s' "$indexed_common_dir" "$indexed_path" |
+    sha256sum | cut -d ' ' -f 1)
+  jq -cn \
+    --arg session_id "$indexed_session_id" \
+    --arg common_dir "$indexed_common_dir" \
+    --arg path "$indexed_path" \
+    '{version: 1, session_id: $session_id, common_dir: $common_dir, path: $path,
+      initial_head: "0000000000000000000000000000000000000000",
+      status: "removed", last_reason: "fixture", updated_at: 0}' \
+    >"$indexed_state_root/worktrees/$indexed_record_id.json"
+  chmod 600 "$indexed_state_root/worktrees/$indexed_record_id.json"
+done
+indexed_jq_counter="$HOME/indexed-jq-count"
+indexed_jq_file_counter="$HOME/indexed-jq-file-count"
+printf '0\n' >"$indexed_jq_counter"
+printf '0\n' >"$indexed_jq_file_counter"
+DOTFILES_AGENT_TEST_JQ_COUNTER="$indexed_jq_counter" \
+  DOTFILES_AGENT_TEST_JQ_FILE_COUNTER="$indexed_jq_file_counter" \
+  "$COUNTING_RESOURCE" reap
+indexed_jq_calls=$(<"$indexed_jq_counter")
+indexed_jq_bound=$((indexed_worktree_count * 12 + indexed_session_count * 30))
+if ((indexed_jq_calls > indexed_jq_bound)); then
+  echo "reap reparsed the worktree ledger per session: calls=$indexed_jq_calls bound=$indexed_jq_bound" >&2
+  exit 1
+fi
+indexed_jq_file_count=$(<"$indexed_jq_file_counter")
+indexed_jq_file_bound=$((indexed_worktree_count * 8 + indexed_session_count * 24))
+if ((indexed_jq_file_count > indexed_jq_file_bound)); then
+  echo "reap passed too many JSON operands: count=$indexed_jq_file_count bound=$indexed_jq_file_bound" >&2
+  exit 1
+fi
+
+# Active v2 sessions use the preflight index as well; their worktree set must
+# not be reparsed once per active session.
+new_case reap-active-v2-index
+active_v2_session_count=16
+active_v2_worktree_count=64
+active_v2_state_root=$(state_root)
+active_v2_owner_start_time=$(proc_start_time $$)
+active_v2_boot_id=$(</proc/sys/kernel/random/boot_id)
+active_v2_updated_at=$(date +%s)
+mkdir -p "$active_v2_state_root/sessions" "$active_v2_state_root/worktrees" \
+  "$active_v2_state_root/locks"
+chmod 700 "$active_v2_state_root" "$active_v2_state_root/sessions" \
+  "$active_v2_state_root/worktrees" "$active_v2_state_root/locks"
+for index in $(seq -w 1 "$active_v2_session_count"); do
+  active_v2_session_id="active-v2-session-$index"
+  jq -cn \
+    --arg session_id "$active_v2_session_id" \
+    --arg boot_id "$active_v2_boot_id" \
+    --arg owner_start_time "$active_v2_owner_start_time" \
+    --argjson owner_pid "$$" \
+    --argjson updated_at "$active_v2_updated_at" \
+    '{version: 2, session_id: $session_id, client: "fixture-client",
+      owner_pid: $owner_pid, owner_start_time: $owner_start_time,
+      boot_id: $boot_id, status: "active", reason: "active",
+      updated_at: $updated_at}' \
+    >"$active_v2_state_root/sessions/$active_v2_session_id.json"
+  chmod 600 "$active_v2_state_root/sessions/$active_v2_session_id.json"
+  : >"$active_v2_state_root/locks/$active_v2_session_id.lock"
+  chmod 600 "$active_v2_state_root/locks/$active_v2_session_id.lock"
+done
+for index in $(seq -w 1 "$active_v2_worktree_count"); do
+  active_v2_session_id="active-v2-session-$(printf '%02d' "$active_v2_session_count")"
+  active_v2_common_dir="$HOME/active-v2-common-$index"
+  active_v2_path="$HOME/active-v2-worktree-$index"
+  active_v2_record_id=$(printf '%s\0%s' "$active_v2_common_dir" "$active_v2_path" |
+    sha256sum | cut -d ' ' -f 1)
+  jq -cn \
+    --arg session_id "$active_v2_session_id" \
+    --arg common_dir "$active_v2_common_dir" \
+    --arg path "$active_v2_path" \
+    '{version: 1, session_id: $session_id, common_dir: $common_dir, path: $path,
+      initial_head: "0000000000000000000000000000000000000000",
+      status: "removed", last_reason: "fixture", updated_at: 0}' \
+    >"$active_v2_state_root/worktrees/$active_v2_record_id.json"
+  chmod 600 "$active_v2_state_root/worktrees/$active_v2_record_id.json"
+done
+active_v2_jq_counter="$HOME/active-v2-jq-count"
+active_v2_jq_file_counter="$HOME/active-v2-jq-file-count"
+printf '0\n' >"$active_v2_jq_counter"
+printf '0\n' >"$active_v2_jq_file_counter"
+DOTFILES_AGENT_TEST_JQ_COUNTER="$active_v2_jq_counter" \
+  DOTFILES_AGENT_TEST_JQ_FILE_COUNTER="$active_v2_jq_file_counter" \
+  "$COUNTING_RESOURCE" reap
+active_v2_jq_file_count=$(<"$active_v2_jq_file_counter")
+active_v2_jq_file_bound=$((active_v2_worktree_count * 8 + active_v2_session_count * 24))
+if ((active_v2_jq_file_count > active_v2_jq_file_bound)); then
+  echo "active v2 reaper reparsed too many JSON operands: count=$active_v2_jq_file_count bound=$active_v2_jq_file_bound" >&2
+  exit 1
+fi
+
+# A pre-switch resource writer can publish a terminal record for another live
+# session while the reaper waits for the original session lock.  The reaper
+# must load ownership only after that lock is acquired.
+new_case reap-old-writer-rebind
+old_rebind_repo="$HOME/repo"
+old_rebind_path="$HOME/managed"
+old_rebind_session_a=reap-old-writer-a
+old_rebind_session_b=reap-old-writer-b
+old_rebind_lock_a="$(state_root)/locks/$old_rebind_session_a.lock"
+old_rebind_owner_a=
+old_rebind_owner_b=
+create_repo "$old_rebind_repo"
+sleep infinity &
+old_rebind_owner_a=$!
+fixture_trap_pid=$old_rebind_owner_a
+trap 'kill "$fixture_trap_pid" 2>/dev/null || true' EXIT
+begin_session "$old_rebind_session_a" "$old_rebind_owner_a"
+add_managed_worktree "$old_rebind_repo" "$old_rebind_path"
+old_rebind_record=$(record_for_path "$old_rebind_path")
+jq 'del(.git_dir, .worktree_device, .worktree_inode) |
+  .status = "removed" | .last_reason = "fixture"' "$old_rebind_record" \
+  >"$HOME/old-rebind-record.tmp"
+chmod 600 "$HOME/old-rebind-record.tmp"
+mv -T "$HOME/old-rebind-record.tmp" "$old_rebind_record"
+"$RESOURCE" cleanup-session "$old_rebind_session_a"
+sleep infinity &
+old_rebind_owner_b=$!
+begin_session "$old_rebind_session_b" "$old_rebind_owner_b"
+jq '.version = 1' "$(state_root)/sessions/$old_rebind_session_b.json" \
+  >"$HOME/old-rebind-session.tmp"
+chmod 600 "$HOME/old-rebind-session.tmp"
+mv -T "$HOME/old-rebind-session.tmp" "$(state_root)/sessions/$old_rebind_session_b.json"
+old_rebind_common=$("$REAL_GIT" -C "$old_rebind_path" \
+  rev-parse --path-format=absolute --git-common-dir)
+old_rebind_head=$("$REAL_GIT" -C "$old_rebind_path" rev-parse HEAD)
+old_rebind_resource="$HOME/old-resource"
+awk '
+  /^[[:space:]]*advance_worktree_generation[[:space:]]*$/ { next }
+  { sub(/ advance_worktree_generation ;;/, " : ;;"); print }
+' "$RESOURCE" >"$old_rebind_resource"
+chmod 700 "$old_rebind_resource"
+kill "$old_rebind_owner_a"
+wait "$old_rebind_owner_a" 2>/dev/null || true
+(
+  exec 8<>"$old_rebind_lock_a"
+  flock -x 8
+  : >"$HOME/old-rebind-locked"
+  while [ ! -e "$HOME/old-rebind-start" ]; do sleep 0.01; done
+  "$old_rebind_resource" register-worktree "$old_rebind_session_b" \
+    "$old_rebind_common" "$old_rebind_path" "$old_rebind_head"
+  : >"$HOME/old-rebind-written"
+  while [ ! -e "$HOME/old-rebind-unlock" ]; do sleep 0.01; done
+  flock -u 8
+) &
+old_rebind_helper_pid=$!
+trap ': >"$HOME/old-rebind-unlock"; kill "$old_rebind_helper_pid" \
+  "$old_rebind_owner_b" 2>/dev/null || true' EXIT
+wait_for_file "$HOME/old-rebind-locked"
+"$RESOURCE" reap &
+old_rebind_reap_pid=$!
+trap ': >"$HOME/old-rebind-unlock"; kill "$old_rebind_reap_pid" \
+  "$old_rebind_helper_pid" "$old_rebind_owner_b" 2>/dev/null || true' EXIT
+old_rebind_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$old_rebind_reap_pid/fd/8" 2>/dev/null || true)" != \
+  "$old_rebind_lock_a" ]; do
+  if ((SECONDS >= old_rebind_deadline)); then
+    echo 'reaper did not wait for the old-writer session lock' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+: >"$HOME/old-rebind-start"
+wait_for_file "$HOME/old-rebind-written"
+: >"$HOME/old-rebind-unlock"
+wait "$old_rebind_helper_pid"
+wait "$old_rebind_reap_pid"
+trap - EXIT
+unset fixture_trap_pid
+test -d "$old_rebind_path"
+test "$(jq -r '.session_id' "$old_rebind_record")" = "$old_rebind_session_b"
+kill "$old_rebind_owner_b"
+wait "$old_rebind_owner_b" 2>/dev/null || true
+
+# A pre-switch writer can also create a brand-new record while the reaper is
+# waiting on that session lock.  The post-lock load must discover it in the
+# same run and clean the orphaned worktree.
+new_case reap-old-writer-new
+old_new_repo="$HOME/repo"
+old_new_path="$HOME/managed"
+old_new_session=reap-old-writer-new-session
+old_new_lock="$(state_root)/locks/$old_new_session.lock"
+old_new_mutation_lock="$(state_root)/locks/.worktree-mutation.lock"
+old_new_locked="$HOME/old-new-locked"
+old_new_start="$HOME/old-new-start"
+old_new_written="$HOME/old-new-written"
+old_new_unlock="$HOME/old-new-unlock"
+create_repo "$old_new_repo"
+sleep infinity &
+old_new_owner_pid=$!
+fixture_trap_pid=$old_new_owner_pid
+trap 'kill "$fixture_trap_pid" 2>/dev/null || true' EXIT
+begin_session "$old_new_session" "$old_new_owner_pid"
+jq '.version = 1' "$(state_root)/sessions/$old_new_session.json" \
+  >"$HOME/old-new-session.tmp"
+chmod 600 "$HOME/old-new-session.tmp"
+mv -T "$HOME/old-new-session.tmp" "$(state_root)/sessions/$old_new_session.json"
+old_new_resource="$HOME/old-resource"
+awk '
+  /^[[:space:]]*advance_worktree_generation[[:space:]]*$/ { next }
+  { sub(/ advance_worktree_generation ;;/, " : ;;"); print }
+' "$RESOURCE" >"$old_new_resource"
+chmod 700 "$old_new_resource"
+(
+  exec 8<>"$old_new_lock"
+  flock -x 8
+  : >"$old_new_locked"
+  while [ ! -e "$old_new_start" ]; do sleep 0.01; done
+  "$REAL_GIT" -C "$old_new_repo" worktree add --detach \
+    "$old_new_path" HEAD >/dev/null
+  old_new_common=$("$REAL_GIT" -C "$old_new_repo" \
+    rev-parse --path-format=absolute --git-common-dir)
+  old_new_head=$("$REAL_GIT" -C "$old_new_path" rev-parse HEAD)
+  exec 7<>"$old_new_mutation_lock"
+  flock -x 7
+  DOTFILES_AGENT_SESSION_ID="$old_new_session" \
+    DOTFILES_AGENT_MUTATION_LOCK_FD=7 \
+    DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+    "$old_new_resource" register-worktree "$old_new_session" \
+      "$old_new_common" "$old_new_path" "$old_new_head"
+  : >"$old_new_written"
+  while [ ! -e "$old_new_unlock" ]; do sleep 0.01; done
+  flock -u 8
+) &
+old_new_helper_pid=$!
+trap ': >"$old_new_unlock"; kill "$old_new_helper_pid" \
+  "$old_new_owner_pid" 2>/dev/null || true' EXIT
+wait_for_file "$old_new_locked"
+"$RESOURCE" reap &
+old_new_reap_pid=$!
+trap ': >"$old_new_unlock"; kill "$old_new_reap_pid" "$old_new_helper_pid" \
+  "$old_new_owner_pid" 2>/dev/null || true' EXIT
+old_new_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$old_new_reap_pid/fd/8" 2>/dev/null || true)" != \
+  "$old_new_lock" ]; do
+  if ((SECONDS >= old_new_deadline)); then
+    echo 'reaper did not wait for old-writer new-record lock' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+: >"$old_new_start"
+wait_for_file "$old_new_written"
+kill "$old_new_owner_pid"
+wait "$old_new_owner_pid" 2>/dev/null || true
+: >"$old_new_unlock"
+wait "$old_new_helper_pid"
+wait "$old_new_reap_pid"
+trap - EXIT
+unset fixture_trap_pid
+old_new_record=$(record_for_path "$old_new_path")
+test ! -e "$old_new_path"
+test "$(jq -r '.status' "$old_new_record")" = removed
+# A current writer can publish a worktree after the reaper's initial index.  Its
+# generation advance must force a post-lock reindex before the session is
+# cleaned.
+new_case reap-generation-race
+generation_repo="$HOME/repo"
+generation_path="$HOME/managed"
+generation_session=reap-generation-session
+generation_lock="$(state_root)/locks/$generation_session.lock"
+generation_mutation_lock="$(state_root)/locks/.worktree-mutation.lock"
+generation_locked="$HOME/generation-locked"
+generation_start="$HOME/generation-start"
+generation_written="$HOME/generation-written"
+generation_unlock="$HOME/generation-unlock"
+create_repo "$generation_repo"
+sleep infinity &
+generation_owner_pid=$!
+fixture_trap_pid=$generation_owner_pid
+trap 'kill "$fixture_trap_pid" 2>/dev/null || true' EXIT
+begin_session "$generation_session" "$generation_owner_pid"
+(
+  exec 8<>"$generation_lock"
+  flock -x 8
+  : >"$generation_locked"
+  while [ ! -e "$generation_start" ]; do sleep 0.01; done
+  "$REAL_GIT" -C "$generation_repo" worktree add --detach \
+    "$generation_path" HEAD >/dev/null
+  generation_common=$("$REAL_GIT" -C "$generation_repo" \
+    rev-parse --path-format=absolute --git-common-dir)
+  generation_head=$("$REAL_GIT" -C "$generation_path" rev-parse HEAD)
+  exec 7<>"$generation_mutation_lock"
+  flock -x 7
+  DOTFILES_AGENT_SESSION_ID="$generation_session" \
+    DOTFILES_AGENT_MUTATION_LOCK_FD=7 \
+    DOTFILES_AGENT_CREATION_LOCK_FD=8 \
+    "$RESOURCE" register-worktree "$generation_session" \
+      "$generation_common" "$generation_path" "$generation_head"
+  : >"$generation_written"
+  while [ ! -e "$generation_unlock" ]; do sleep 0.01; done
+  flock -u 8
+) &
+generation_helper_pid=$!
+trap ': >"$generation_unlock"; kill "$generation_helper_pid" \
+  "$generation_owner_pid" 2>/dev/null || true' EXIT
+wait_for_file "$generation_locked"
+"$RESOURCE" reap &
+generation_reap_pid=$!
+trap ': >"$generation_unlock"; kill "$generation_reap_pid" \
+  "$generation_helper_pid" "$generation_owner_pid" 2>/dev/null || true' EXIT
+generation_deadline=$((SECONDS + 5))
+while [ "$(readlink -e "/proc/$generation_reap_pid/fd/8" 2>/dev/null || true)" != \
+  "$generation_lock" ]; do
+  if ((SECONDS >= generation_deadline)); then
+    echo 'reaper did not wait for generation-race session lock' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+: >"$generation_start"
+wait_for_file "$generation_written"
+generation_record=$(record_for_path "$generation_path")
+test -f "$generation_record"
+kill "$generation_owner_pid"
+wait "$generation_owner_pid" 2>/dev/null || true
+: >"$generation_unlock"
+wait "$generation_helper_pid"
+wait "$generation_reap_pid"
+trap - EXIT
+unset fixture_trap_pid
+test ! -e "$generation_path"
+test "$(jq -r '.status' "$generation_record")" = removed
+
+
 
 # Terminal ledgers use their recorded update time for bounded retention. Ledger
 # expiry never authorizes deleting a worktree.
@@ -2372,7 +2731,7 @@ wait_for_file "$reacquire_ready"
     DOTFILES_AGENT_OWNER_PID="$reacquire_owner_pid" \
     DOTFILES_AGENT_OWNER_START_TIME="$(proc_start_time "$reacquire_owner_pid")" \
     DOTFILES_AGENT_BOOT_ID="$(</proc/sys/kernel/random/boot_id)" \
-    "$RESOURCE" begin-session "$reacquire_session"
+    "$RESOURCE" begin-session "$reacquire_session" --indexed-worktrees
 ) &
 reacquire_begin_pid=$!
 : >"$reacquire_release"

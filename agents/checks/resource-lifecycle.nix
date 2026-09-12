@@ -25,6 +25,20 @@ let
     fi
     [[ $count =~ ^[0-9]+$ ]] || exit 64
     printf '%s\n' "$((count + 1))" >"$counter"
+    file_counter=''${DOTFILES_AGENT_TEST_JQ_FILE_COUNTER-}
+    if [[ -n $file_counter ]]; then
+      file_count=0
+      if [[ -f $file_counter ]]; then
+        IFS= read -r file_count <"$file_counter"
+      fi
+      [[ $file_count =~ ^[0-9]+$ ]] || exit 64
+      for argument in "$@"; do
+        if [[ $argument == *.json ]]; then
+          file_count=$((file_count + 1))
+        fi
+      done
+      printf '%s\n' "$file_count" >"$file_counter"
+    fi
     exec ${lib.getExe pkgs.jq} "$@"
   '';
   countingAgentResource = pkgs.writeShellApplication {

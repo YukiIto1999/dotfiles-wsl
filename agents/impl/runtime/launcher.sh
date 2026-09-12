@@ -153,6 +153,26 @@ test -x "$upstream" || die "upstream binary is not executable: $upstream"
 
 cache_root="$HOME/@cacheRootRelative@"
 resource_command=@resourceCommand@
+
+# shellcheck disable=SC2329 # 旧ランチャーfixtureでは呼び出し箇所を置換する。
+run_resource_hook() {
+  local action=$1
+  local status
+  shift
+
+  if timeout --kill-after=2s 5s \
+    "$resource_command" "$action" "$@"; then
+    return 0
+  else
+    status=$?
+  fi
+
+  if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+    printf 'dotfiles-agent-runtime: resource %sが5秒以内に完了しないため処理を継続します\n' \
+      "$action" >&2
+  fi
+  return 0
+}
 sessions_root="$cache_root/sessions"
 builds_root="$cache_root/builds"
 mkdir -p "$HOME/.cache"
@@ -245,7 +265,7 @@ cleanup() {
     flock -u "$lock_fd" || true
   fi
   exec {lock_fd}>&- || true
-  "$resource_command" cleanup-session "$DOTFILES_AGENT_SESSION_ID" || true
+  run_resource_hook cleanup-session "$DOTFILES_AGENT_SESSION_ID"
 
   exit "$status"
 }
@@ -254,7 +274,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-"$resource_command" begin-session "$DOTFILES_AGENT_SESSION_ID" @beginSessionFlag@ || true
+run_resource_hook begin-session "$DOTFILES_AGENT_SESSION_ID" @beginSessionFlag@
 
 set +e
 "$upstream" "$@"

@@ -59,7 +59,9 @@ GitHub release経路はGitHub APIのSHA-256 digestと取得したassetを照合�
 
 Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前へ置く共通runtime wrapperから起動する。wrapperはinstallerが管理する`~/.local/bin`のbinaryを絶対pathで実行する。Antigravityは同じCLI起動境界を持たない。
 
-runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、linked worktree間でCargo targetを共有する。project固有のCargo`target-dir`は上書きしない。
+runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。resource台帳の開始・終了フックは各5秒で打ち切り、台帳処理の停止をclient本体へ連鎖させない。打ち切った台帳はreaperの回復対象になる。
+
+`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、linked worktree間でCargo targetを共有する。project固有のCargo`target-dir`は上書きしない。
 
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。managed worktreeはsession台帳、clean、HEAD不変、利用中processなしを確認できる場合だけ回収する。
 
@@ -75,6 +77,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --app
 ```
 
 Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
+OMPのseedはBash interceptorを有効にし、直接の再帰検索を専用検索手段へ誘導する。既存の`config.yml`はOMP自身の設定commandで移行する。
 
 ## MCP Platform
 

@@ -40,6 +40,8 @@ advisor:
   syncBacklog: "1"
 prewalk:
   enabled: false
+bashInterceptor:
+  enabled: true
 task:
   prewalk: false
   agentModelOverrides:

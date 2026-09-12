@@ -124,6 +124,39 @@ v2_session_id=$(cat "$capture/session-id")
 v2_resource_session="$HOME/.local/state/dotfiles-wsl/agent-resources/sessions/$v2_session_id.json"
 test "$(jq -r '.version' "$v2_resource_session")" = 2
 test ! -e "$PATH_RESOURCE_USED"
+
+begin_hang_marker=$fixture/begin-hang
+set +e
+(
+  cd "$repo"
+  HOOK_HANG_ACTION=begin-session HOOK_HANG_MARKER=$begin_hang_marker \
+    FAKE_STATUS=17 timeout 8s \
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+begin_hang_status=$?
+set -e
+test -e "$begin_hang_marker"
+if [ "$begin_hang_status" -ne 17 ]; then
+  echo "ランチャーがbegin-sessionの待機を制限しなかった: status $begin_hang_status" >&2
+  exit 1
+fi
+
+cleanup_hang_marker=$fixture/cleanup-hang
+set +e
+(
+  cd "$repo"
+  HOOK_HANG_ACTION=cleanup-session HOOK_HANG_MARKER=$cleanup_hang_marker \
+    FAKE_STATUS=18 timeout 8s \
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+cleanup_hang_status=$?
+set -e
+test -e "$cleanup_hang_marker"
+if [ "$cleanup_hang_status" -ne 18 ]; then
+  echo "ランチャーがcleanup-sessionの待機を制限しなかった: status $cleanup_hang_status" >&2
+  exit 1
+fi
+
 (
   cd "$repo"
   "$OLD_LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"

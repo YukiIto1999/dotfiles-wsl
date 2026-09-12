@@ -873,6 +873,9 @@ in
         test -d "$fixture/home/.claude/settings.json"
         test -s "$fixture/home/.codex/config.toml"
         test -s "$fixture/home/.omp/agent/config.yml"
+        remarshal -if yaml -of json "$fixture/home/.omp/agent/config.yml" > omp-seed.json
+        jq --exit-status '.bashInterceptor.enabled == true' omp-seed.json \
+          > /dev/null
 
         rmdir "$fixture/home/.claude/settings.json"
         ${fixtureSeedActivation}

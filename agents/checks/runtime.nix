@@ -136,6 +136,10 @@ let
     ];
     text = ''
       set -euo pipefail
+      if [ "''${HOOK_HANG_ACTION-}" = "$1" ]; then
+        : >"''${HOOK_HANG_MARKER:?}"
+        sleep 30
+      fi
       case "$1" in
         begin-session)
           test -d "$TMPDIR"
@@ -175,8 +179,8 @@ let
     builtins.replaceStrings
       [
         "resource_command=@resourceCommand@\n"
-        "  \"$resource_command\" cleanup-session \"$DOTFILES_AGENT_SESSION_ID\" || true\n"
-        "\"$resource_command\" begin-session \"$DOTFILES_AGENT_SESSION_ID\" @beginSessionFlag@ || true\n"
+        "  run_resource_hook cleanup-session \"$DOTFILES_AGENT_SESSION_ID\"\n"
+        "run_resource_hook begin-session \"$DOTFILES_AGENT_SESSION_ID\" @beginSessionFlag@\n"
       ]
       [
         ""

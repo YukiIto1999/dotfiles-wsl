@@ -31,6 +31,7 @@ Think in English. Respond in Japanese.
 - 既存コンテキストは `AGENTS.md` / `CLAUDE.md` / README / docs を確認する。
 - session が提示する専用ツール（LSP / Read / Grep / Glob / Edit / Write 等）を利用可否の正本とし、調査・参照追跡・編集の第一選択とする。
 - シェルの CLI は、専用ツールでは担えない統計・集計・パイプライン処理や構文一括書き換え（`ast-grep`）、ファイル列挙（`fd`）、表示（`bat` / `eza`）、差分表示（`delta`）に限定して使う。shell の exact search には `rg`、indexed semantic search には `zg query` を使う。index の作成、再構築、削除は agent が暗黙に実行しない。
+- 再帰検索に`grep -r` / `grep -R`を使わない。`rg`または`git grep`でignore境界を維持し、生成物を調べる必要がある場合は対象pathと読取量を先に限定する。
 - JSON / YAML / HTTP は `jq` / `yq` / `xh` が使える。
 
 ## 資源と検証

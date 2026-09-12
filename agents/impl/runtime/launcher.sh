@@ -152,6 +152,7 @@ esac
 test -x "$upstream" || die "upstream binary is not executable: $upstream"
 
 cache_root="$HOME/@cacheRootRelative@"
+resource_command=@resourceCommand@
 sessions_root="$cache_root/sessions"
 builds_root="$cache_root/builds"
 mkdir -p "$HOME/.cache"
@@ -244,9 +245,7 @@ cleanup() {
     flock -u "$lock_fd" || true
   fi
   exec {lock_fd}>&- || true
-  if resource_command=$(command -v dotfiles-agent-resource 2>/dev/null); then
-    "$resource_command" cleanup-session "$DOTFILES_AGENT_SESSION_ID" || true
-  fi
+  "$resource_command" cleanup-session "$DOTFILES_AGENT_SESSION_ID" || true
 
   exit "$status"
 }
@@ -255,9 +254,7 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if resource_command=$(command -v dotfiles-agent-resource 2>/dev/null); then
-  "$resource_command" begin-session "$DOTFILES_AGENT_SESSION_ID" || true
-fi
+"$resource_command" begin-session "$DOTFILES_AGENT_SESSION_ID" @beginSessionFlag@ || true
 
 set +e
 "$upstream" "$@"

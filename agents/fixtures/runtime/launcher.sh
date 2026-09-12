@@ -6,36 +6,6 @@ fixture_home=$fixture/home
 capture=$fixture/capture
 mkdir -p "$fixture_home/.local/bin" "$fixture/bin" "$capture"
 
-cat > "$fixture/bin/dotfiles-agent-resource" <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-case "$1" in
-  begin-session)
-    test -d "$TMPDIR"
-    test -f "${TMPDIR%/tmp}/metadata.json"
-    test "$DOTFILES_AGENT_SESSION_ID" = "$2"
-    test "$DOTFILES_AGENT_CLIENT" = fixture-client
-    test "$DOTFILES_AGENT_BOOT_ID" = "$(cat /proc/sys/kernel/random/boot_id)"
-    test "$DOTFILES_AGENT_OWNER_START_TIME" = "$(awk '{print $22}' "/proc/$DOTFILES_AGENT_OWNER_PID/stat")"
-    printf 'begin:%s\n' "$2" >> "$HOOK_LOG"
-    ;;
-  cleanup-session)
-    test ! -e "$TMPDIR"
-    test "$DOTFILES_AGENT_SESSION_ID" = "$2"
-    test "$DOTFILES_AGENT_CLIENT" = fixture-client
-    test "$DOTFILES_AGENT_BOOT_ID" = "$(cat /proc/sys/kernel/random/boot_id)"
-    test "$DOTFILES_AGENT_OWNER_START_TIME" = "$(awk '{print $22}' "/proc/$DOTFILES_AGENT_OWNER_PID/stat")"
-    printf 'cleanup:%s\n' "$2" >> "$HOOK_LOG"
-    ;;
-  *)
-    exit 64
-    ;;
-esac
-test "${HOOK_FAIL:-0}" != 1
-SCRIPT
-chmod +x "$fixture/bin/dotfiles-agent-resource"
-sed -i "1c#!$BASH" "$fixture/bin/dotfiles-agent-resource"
-
 cat > "$fixture_home/.local/bin/fake-agent" <<'SCRIPT'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -93,7 +63,8 @@ git -C "$repo" commit -qm initial
 export HOME=$fixture_home
 export CAPTURE=$capture
 export HOOK_LOG=$capture/hooks
-export PATH="$fixture/bin:$PATH"
+export PATH_RESOURCE_USED=$capture/path-resource-used
+export PATH="$fixture/bin:$VISIBLE_RESOURCE_DIR:$PATH"
 unset CARGO_HOME CARGO_TARGET_DIR XDG_CACHE_HOME
 mkdir -p "$HOME/.cache/dotfiles-wsl/sessions" "$HOME/.cache/dotfiles-wsl/builds"
 chmod 0777 "$HOME/.cache/dotfiles-wsl" \
@@ -144,10 +115,23 @@ test "$(sed -n '1s/:.*//p' "$capture/hooks")" = begin
 test "$(sed -n '2s/:.*//p' "$capture/hooks")" = cleanup
 test "$(sed -n '1s/^[^:]*://p' "$capture/hooks")" = "$(cat "$capture/session-id")"
 test "$(sed -n '2s/^[^:]*://p' "$capture/hooks")" = "$(cat "$capture/session-id")"
+
 mapfile -d '' -t argv < "$capture/argv"
 test "${#argv[@]}" -eq 2
 test "${argv[0]}" = 'space arg'
 test "${argv[1]}" = $'line\narg'
+v2_session_id=$(cat "$capture/session-id")
+v2_resource_session="$HOME/.local/state/dotfiles-wsl/agent-resources/sessions/$v2_session_id.json"
+test "$(jq -r '.version' "$v2_resource_session")" = 2
+test ! -e "$PATH_RESOURCE_USED"
+(
+  cd "$repo"
+  "$OLD_LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+legacy_session_id=$(cat "$capture/session-id")
+legacy_resource_session="$HOME/.local/state/dotfiles-wsl/agent-resources/sessions/$legacy_session_id.json"
+test "$(jq -r '.version' "$legacy_resource_session")" = 1
+test -e "$PATH_RESOURCE_USED"
 
 # A GC scan holding gc.lock must see the session directory until it releases
 # the lock.  Launcher cleanup then removes the session before returning.

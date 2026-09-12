@@ -2,9 +2,13 @@ set -euo pipefail
 shopt -s nullglob
 
 program=dotfiles-agent-resource
-usage_text="usage: $program begin-session SESSION | validate-session SESSION | cleanup-session SESSION | begin-worktree-add SESSION COMMON-DIR PATH INITIAL-HEAD REQUESTED-HEAD ROSTER-FINGERPRINT PARENT-DEVICE PARENT-INODE | record-worktree-add-identity SESSION COMMON-DIR PATH INITIAL-HEAD | complete-worktree-add SESSION COMMON-DIR PATH INITIAL-HEAD | register-worktree SESSION COMMON-DIR PATH INITIAL-HEAD | reap"
+usage_text="usage: $program begin-session SESSION [--indexed-worktrees] | validate-session SESSION | cleanup-session SESSION | begin-worktree-add SESSION COMMON-DIR PATH INITIAL-HEAD REQUESTED-HEAD ROSTER-FINGERPRINT PARENT-DEVICE PARENT-INODE | record-worktree-add-identity SESSION COMMON-DIR PATH INITIAL-HEAD | complete-worktree-add SESSION COMMON-DIR PATH INITIAL-HEAD | register-worktree SESSION COMMON-DIR PATH INITIAL-HEAD | reap"
 git_command=@gitCommand@
 quarantine_transaction_record=
+session_worktree_records=
+declare -A worktree_records_by_session=()
+declare -A snapshot_legacy_active_sessions=()
+worktree_index_generation=
 
 die() {
   printf '%s: %s\n' "$program" "$1" >&2
@@ -145,6 +149,31 @@ acquire_mutation_lock() {
   fi
   flock -x 7
 }
+try_acquire_mutation_lock() {
+  local inherited_target flock_status
+  if [ "${DOTFILES_AGENT_CREATION_LOCK_FD-}" = 8 ] &&
+    [ "${DOTFILES_AGENT_MUTATION_LOCK_FD-}" != 7 ]; then
+    die 'inherited creation lock requires the managed mutation lock'
+  fi
+  ensure_lock_file "$mutation_lock_file"
+
+  if [ "${DOTFILES_AGENT_MUTATION_LOCK_FD-}" = 7 ]; then
+    inherited_target=$(readlink -e -- /proc/self/fd/7 2>/dev/null) ||
+      die 'inherited mutation lock descriptor is ambiguous'
+    [ "$inherited_target" = "$mutation_lock_file" ] ||
+      die 'inherited mutation lock does not match the managed lock'
+  else
+    exec 7<>"$mutation_lock_file"
+  fi
+  if flock -xnE 75 7; then
+    return 0
+  else
+    flock_status=$?
+    [ "$flock_status" -eq 75 ] && return 1
+    die 'cannot acquire managed mutation lock'
+  fi
+}
+
 
 creation_lock_is_current() {
   local expected_lock=$1 path_identity descriptor_identity
@@ -241,18 +270,91 @@ release_locks() {
 
 acquire_reaper_locks() {
   local session_id=$1
+  ensure_lock_file "$mutation_lock_file"
 
   while :; do
-    acquire_mutation_lock
     if try_acquire_creation_lock "$session_id"; then
-      acquire_ledger_lock
-      return
+      if try_acquire_mutation_lock; then
+        acquire_ledger_lock
+        return
+      fi
+      exec 8>&-
+      sleep 0.01
+      continue
     fi
-    exec 7>&-
-    # begin-sessionはglobal lockを取らないため、session lock待機中はglobal lockを解放する。
+    # Never hold the global mutation lock while waiting for a session lock.
     acquire_creation_lock "$session_id"
-    release_locks
   done
+}
+
+read_worktree_generation() {
+  local generation
+  if [ ! -e "$worktree_generation_file" ] && [ ! -L "$worktree_generation_file" ]; then
+    printf '0\n'
+    return
+  fi
+  validate_regular_file "$worktree_generation_file" ||
+    die "worktree generation file is ambiguous: $worktree_generation_file"
+  generation=$(<"$worktree_generation_file")
+  [[ $generation =~ ^[0-9]+$ ]] ||
+    die "worktree generation is invalid: $worktree_generation_file"
+  printf '%s\n' "$generation"
+}
+
+advance_worktree_generation() {
+  local generation temporary
+  generation=$(read_worktree_generation)
+  temporary=$(mktemp "$state_root/.worktree-generation.XXXXXXXX")
+  chmod 600 "$temporary"
+  printf '%s\n' "$((generation + 1))" >"$temporary"
+  mv -T -- "$temporary" "$worktree_generation_file"
+}
+
+refresh_worktree_index_if_changed() {
+  local current_generation
+  current_generation=$(read_worktree_generation)
+  if [ "$current_generation" != "$worktree_index_generation" ]; then
+    preflight_ledgers || die 'ledger preflight failed'
+    worktree_index_generation=$current_generation
+  fi
+}
+
+update_worktree_index_generation() {
+  worktree_index_generation=$(read_worktree_generation)
+}
+
+load_legacy_session_worktree_records() {
+  local session_id=$1 record record_session_id
+  session_worktree_records=
+  for record in "$worktrees_root"/*.json; do
+    [ -e "$record" ] || continue
+    record_session_id=$(jq -r '.session_id' "$record") ||
+      die "cannot read worktree ledger: $record"
+    [ "$record_session_id" = "$session_id" ] || continue
+    session_worktree_records+="$record"$'\n'
+  done
+}
+
+load_cached_session_worktree_records() {
+  local session_id=$1 record record_session_id
+  session_worktree_records=
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    [ -e "$record" ] || continue
+    record_session_id=$(jq -r '.session_id' "$record") ||
+      die "cannot revalidate worktree ledger: $record"
+    [ "$record_session_id" = "$session_id" ] || continue
+    session_worktree_records+="$record"$'\n'
+  done <<<"${worktree_records_by_session[$session_id]-}"
+}
+
+load_session_worktree_records() {
+  local session_id=$1
+  if [ "${snapshot_legacy_active_sessions[$session_id]-}" = true ]; then
+    load_legacy_session_worktree_records "$session_id"
+  else
+    load_cached_session_worktree_records "$session_id"
+  fi
 }
 
 release_reaper_locks() {
@@ -270,6 +372,9 @@ atomic_write() {
   chmod 600 "$temporary"
   printf '%s\n' "$json" >"$temporary"
   jq --exit-status . "$temporary" >/dev/null || die "refusing invalid ledger JSON"
+  case "$target" in
+  "$worktrees_root"/*) advance_worktree_generation ;;
+  esac
   mv -T -- "$temporary" "$target"
 }
 
@@ -281,7 +386,7 @@ session_schema_is_valid() {
       keys == ["boot_id", "client", "owner_pid", "owner_start_time", "reason", "session_id", "status", "version"]
       or keys == ["boot_id", "client", "owner_pid", "owner_start_time", "reason", "session_id", "status", "updated_at", "version"]
     )
-    and .version == 1
+    and (.version == 1 or .version == 2)
     and (.session_id | type == "string")
     and (.client | type == "string")
     and (.boot_id | type == "string")
@@ -344,7 +449,9 @@ worktree_schema_is_valid() {
 
 preflight_ledgers() {
   local entry name session_id session_file common_dir path expected_id
-
+  local session_status session_version
+  worktree_records_by_session=()
+  snapshot_legacy_active_sessions=()
   for entry in "$sessions_root"/* "$worktrees_root"/*; do
     [ -e "$entry" ] || [ -L "$entry" ] || continue
     name=${entry##*/}
@@ -370,6 +477,11 @@ preflight_ledgers() {
         return 1
       fi
       session_id=$(jq -r '.session_id' "$entry")
+      session_status=$(jq -r '.status' "$entry")
+      session_version=$(jq -r '.version' "$entry")
+      if [ "$session_status" = active ] && [ "$session_version" = 1 ]; then
+        snapshot_legacy_active_sessions["$session_id"]=true
+      fi
       if [ "$name" != "$session_id.json" ]; then
         printf '%s: preserve malformed-ledger: %s\n' "$program" "$entry" >&2
         return 1
@@ -397,6 +509,7 @@ preflight_ledgers() {
         printf '%s: preserve missing-session: %s\n' "$program" "$entry" >&2
         return 1
       fi
+      worktree_records_by_session["$session_id"]+="$entry"$'\n'
       ;;
     esac
   done
@@ -781,6 +894,7 @@ recover_adding_worktree() {
     expected_roster=$(jq -r '.roster_fingerprint' "$record") || return 1
     if current_roster=$(current_worktree_roster_fingerprint "$common_dir") &&
       [ "$current_roster" = "$expected_roster" ]; then
+      advance_worktree_generation
       rm -f -- "$record"
       printf '%s: aborted incomplete worktree add: %s\n' "$program" "$path" >&2
       return 0
@@ -1322,8 +1436,9 @@ cleanup_worktree_record() {
 
 cleanup_session_records() {
   local session_id=$1 record status
-  for record in "$worktrees_root"/*.json; do
-    [ "$(jq -r '.session_id' "$record")" = "$session_id" ] || continue
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    [ -e "$record" ] || continue
     status=$(jq -r '.status' "$record")
     case "$status" in
     adding) recover_adding_worktree "$record" || true ;;
@@ -1331,12 +1446,17 @@ cleanup_session_records() {
     quarantining) recover_quarantining_worktree "$record" || true ;;
     removing) recover_removing_worktree "$record" || true ;;
     esac
-  done
+  done <<<"$session_worktree_records"
 }
 
 begin_session() {
-  local session_id=$1 client owner_pid owner_start boot_id session_file json actual_start now
+  local session_id=$1 indexed=${2-} capability client owner_pid owner_start boot_id session_file json actual_start now
   validate_id session "$session_id"
+  case "$indexed" in
+  '') capability=1 ;;
+  --indexed-worktrees) capability=2 ;;
+  *) die 'invalid session capability' ;;
+  esac
   [ "${DOTFILES_AGENT_SESSION_ID-}" = "$session_id" ] || die 'session argument does not match environment'
   client=${DOTFILES_AGENT_CLIENT-}
   validate_id client "$client"
@@ -1359,7 +1479,8 @@ begin_session() {
     --argjson owner_pid "$owner_pid" \
     --arg owner_start_time "$owner_start" \
     --argjson now "$now" \
-    '{version: 1, session_id: $session_id, client: $client, boot_id: $boot_id,
+    --argjson capability "$capability" \
+    '{version: $capability, session_id: $session_id, client: $client, boot_id: $boot_id,
       owner_pid: $owner_pid, owner_start_time: $owner_start_time, status: "active", reason: "active",
       updated_at: $now}')
   if [ -e "$session_file" ] || [ -L "$session_file" ]; then
@@ -1592,6 +1713,7 @@ cleanup_session() {
   preflight_ledgers || die 'ledger preflight failed'
   session_file="$sessions_root/$session_id.json"
   [ -f "$session_file" ] && [ ! -L "$session_file" ] || die "session is not registered: $session_id"
+  load_session_worktree_records "$session_id"
   mark_session "$session_file" cleanup
   cleanup_session_records "$session_id"
 }
@@ -1637,9 +1759,11 @@ ledger_is_expired() {
 
 session_has_worktree_record() {
   local session_id=$1 record
-  for record in "$worktrees_root"/*.json; do
-    [ "$(jq -r '.session_id' "$record")" != "$session_id" ] || return 0
-  done
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    [ -e "$record" ] || continue
+    return 0
+  done <<<"$session_worktree_records"
   return 1
 }
 
@@ -1658,15 +1782,17 @@ remove_current_creation_lock() {
 
 prune_terminal_ledgers_for_session() {
   local session_id=$1 record session_file
-  for record in "$worktrees_root"/*.json; do
-    [ "$(jq -r '.session_id' "$record")" = "$session_id" ] || continue
+  while IFS= read -r record; do
+    [ -n "$record" ] || continue
+    [ -e "$record" ] || continue
     case "$(jq -r '.status' "$record")" in
     preserved | removed)
       ledger_is_expired "$record" || continue
+      advance_worktree_generation
       rm -f -- "$record"
       ;;
     esac
-  done
+  done <<<"$session_worktree_records"
   session_file="$sessions_root/$session_id.json"
   [ -f "$session_file" ] && [ ! -L "$session_file" ] || return 0
   [ "$(jq -r '.status' "$session_file")" = ended ] || return 0
@@ -1684,7 +1810,8 @@ prune_orphan_creation_locks() {
 
   acquire_creation_lock reaper-scan
   acquire_ledger_lock
-  preflight_ledgers || die 'ledger preflight failed'
+  # A missing session cannot be reactivated by cooperating writers.  The initial
+  # preflight index is therefore conservative for this presence-only check.
   for entry in "$locks_root"/*.lock; do
     name=${entry##*/}
     [ "$name" != reaper-scan.lock ] || continue
@@ -1698,6 +1825,7 @@ prune_orphan_creation_locks() {
 
   for session_id in "${session_ids[@]}"; do
     acquire_reaper_locks "$session_id"
+    load_session_worktree_records "$session_id"
     session_file="$sessions_root/$session_id.json"
     if [ ! -e "$session_file" ] && [ ! -L "$session_file" ] \
       && ! session_has_worktree_record "$session_id"; then
@@ -1714,6 +1842,7 @@ reap_sessions() {
   acquire_creation_lock reaper-scan
   acquire_ledger_lock
   preflight_ledgers || die 'ledger preflight failed'
+  update_worktree_index_generation
   for entry in "$sessions_root"/*.json; do
     name=${entry##*/}
     session_id=${name%.json}
@@ -1724,8 +1853,11 @@ reap_sessions() {
 
   for session_id in "${session_ids[@]}"; do
     acquire_reaper_locks "$session_id"
+    refresh_worktree_index_if_changed
+    load_session_worktree_records "$session_id"
     reap_one_session "$session_id"
     prune_terminal_ledgers_for_session "$session_id"
+    update_worktree_index_generation
     release_reaper_locks
   done
   prune_orphan_creation_locks
@@ -1754,6 +1886,7 @@ state_root="$HOME/@resourceStateRootRelative@"
 sessions_root="$state_root/sessions"
 worktrees_root="$state_root/worktrees"
 locks_root="$state_root/locks"
+worktree_generation_file="$state_root/worktree-generation"
 ensure_directory "$HOME/.local" false
 ensure_directory "$HOME/.local/state" false
 ensure_directory "$HOME/@stateRootRelative@" true
@@ -1773,10 +1906,10 @@ ledger_retention_now=$(date +%s)
 
 case "${1-}" in
 begin-session)
-  [ "$#" -eq 2 ] || usage
+  [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || usage
   acquire_creation_lock "$2"
   acquire_ledger_lock
-  begin_session "$2"
+  begin_session "$2" "${3-}"
   ;;
 validate-session)
   [ "$#" -eq 2 ] || usage

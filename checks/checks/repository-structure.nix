@@ -5,6 +5,7 @@
   self,
   hostConfig,
   hostOptions,
+  machineOptions,
   mkNixosSystem,
   normalMachineModule,
   units,
@@ -404,6 +405,121 @@ in
         {
           path = [
             "dotfiles"
+            "agents"
+            "enabled"
+          ];
+          owners = [
+            "agents"
+            "profiles"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "capabilities"
+            "enabled"
+          ];
+          owners = [
+            "capabilities"
+            "profiles"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "skills"
+            "enabled"
+          ];
+          owners = [
+            "profiles"
+            "skills"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "toolchain"
+            "enabledLsp"
+          ];
+          owners = [
+            "profiles"
+            "toolchain"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "toolchain"
+            "git"
+            "workIdentity"
+          ];
+          owners = [
+            "profiles"
+            "toolchain"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "workstation"
+            "windowsDrives"
+          ];
+          owners = [
+            "profiles"
+            "workstation"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "workstation"
+            "swap"
+            "zramMemoryPercent"
+          ];
+          owners = [
+            "profiles"
+            "workstation"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "workstation"
+            "swap"
+            "minimumTotalGiB"
+          ];
+          owners = [
+            "profiles"
+            "workstation"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "workstation"
+            "windowsMemoryCommit"
+            "warning"
+          ];
+          owners = [
+            "profiles"
+            "workstation"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
+            "workstation"
+            "windowsMemoryCommit"
+            "failure"
+          ];
+          owners = [
+            "profiles"
+            "workstation"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
             "platform"
             "mcp"
             "enabledProviders"
@@ -621,7 +737,12 @@ in
         definitionValue.fixture = "fixture";
       };
       declarationViolations = map describe (declarationViolationsFor hostOptions);
-      definitionViolations = map describeDefinition (definitionViolationsFor hostOptions);
+      definitionViolations = lib.concatLists (
+        lib.mapAttrsToList (
+          hostName: options:
+          map (violation: "${hostName}:${describeDefinition violation}") (definitionViolationsFor options)
+        ) machineOptions
+      );
     in
     assert lib.sort builtins.lessThan rootUnitNames == lib.sort builtins.lessThan expectedRootUnitNames;
     assert actualRootOptionOwners == expectedRootOptionOwners;

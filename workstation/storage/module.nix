@@ -1,10 +1,12 @@
 {
+  config,
   pkgs,
   lib,
   ...
 }:
 
 let
+  cfg = config.dotfiles.workstation;
   gibibyte = 1073741824;
   observationTimeoutSeconds = 10;
   maximumJournalGiB = 4;
@@ -15,20 +17,15 @@ let
     failure = 95;
   };
   powershellCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-  windowsDrives = {
-    c = {
-      letter = "C:";
-      resourceKey = "windowsCDrive";
-    };
-    d = {
-      letter = "D:";
-      resourceKey = "windowsDDrive";
-    };
-    e = {
-      letter = "E:";
-      resourceKey = "windowsEDrive";
-    };
-  };
+  windowsDrives = builtins.listToAttrs (
+    map (
+      name:
+      lib.nameValuePair name {
+        letter = "${lib.toUpper name}:";
+        resourceKey = "windows${lib.toUpper name}Drive";
+      }
+    ) cfg.windowsDrives
+  );
   journal = {
     storage = "persistent";
     maximumBytes = maximumJournalGiB * gibibyte;
@@ -79,6 +76,22 @@ let
   ) windowsDrives;
 in
 {
+  options.dotfiles.workstation.windowsDrives = lib.mkOption {
+    type = lib.types.listOf (lib.types.strMatching "[a-z]");
+    description = "この host で観測する Windows drive letter。";
+  };
+
+  config.assertions = [
+    {
+      assertion = cfg.windowsDrives != [ ];
+      message = "dotfiles.workstation.windowsDrives must not be empty";
+    }
+    {
+      assertion = builtins.length cfg.windowsDrives == builtins.length (lib.unique cfg.windowsDrives);
+      message = "dotfiles.workstation.windowsDrives must be unique";
+    }
+  ];
+
   config.dotfiles.health.observations = driveObservations // {
     "host/root-filesystem" = {
       kind = "filesystem-threshold";

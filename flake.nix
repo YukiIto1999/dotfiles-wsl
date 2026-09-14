@@ -37,7 +37,13 @@
     }:
     let
       system = "x86_64-linux";
-      hostName = "nixos";
+      inherit (nixpkgs) lib;
+      referenceHostName = "nixos";
+      hostProfileDirectory = ./profiles/hosts;
+      hostProfileEntries = lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".nix" name) (
+        builtins.readDir hostProfileDirectory
+      );
+      hostNames = map (lib.removeSuffix ".nix") (builtins.attrNames hostProfileEntries);
       pluginSources = {
         inherit orca;
         architecture-standard = architectureStandard;
@@ -49,7 +55,7 @@
 
       mkNixosSystem =
         machineModules:
-        nixpkgs.lib.nixosSystem {
+        lib.nixosSystem {
           inherit system;
           specialArgs = {
             inherit pluginSources self;
@@ -61,20 +67,30 @@
               sops-nix.nixosModules.sops
               home-manager.nixosModules.home-manager
             ]
-            ++ nixpkgs.lib.toList machineModules;
+            ++ lib.toList machineModules;
         };
 
-      normalMachineModule = import ./profiles/workstation.nix;
+      mkMachineModule = hostName: {
+        imports = [
+          ./profiles/workstation.nix
+          (hostProfileDirectory + "/${hostName}.nix")
+        ];
+        networking.hostName = hostName;
+      };
+      normalMachineModule = mkMachineModule referenceHostName;
+      nixosSystems = lib.genAttrs hostNames (hostName: mkNixosSystem (mkMachineModule hostName));
+      machineConfigs = lib.mapAttrs (_: machine: machine.config) nixosSystems;
+      machineOptions = lib.mapAttrs (_: machine: machine.options) nixosSystems;
 
       maintenancePkgs = nixpkgs.legacyPackages.${system};
     in
     {
-      nixosConfigurations.${hostName} = mkNixosSystem normalMachineModule;
+      nixosConfigurations = nixosSystems;
 
       packages.${system} =
         let
-          hostConfig = self.nixosConfigurations.${hostName}.config;
-          inherit (self.nixosConfigurations.${hostName}) pkgs;
+          hostConfig = machineConfigs.${referenceHostName};
+          inherit (nixosSystems.${referenceHostName}) pkgs;
         in
         {
           inherit (pkgs) age sops;
@@ -91,7 +107,7 @@
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {
-        packages = self.nixosConfigurations.${hostName}.config.dotfiles.toolchain.devShellPackages;
+        packages = machineConfigs.${referenceHostName}.dotfiles.toolchain.devShellPackages;
       };
 
       formatter.${system} = maintenancePkgs.nixfmt-tree;
@@ -117,8 +133,8 @@
                 )
               }";
 
-          hostConfig = self.nixosConfigurations.${hostName}.config;
-          inherit (self.nixosConfigurations.${hostName}) pkgs;
+          hostConfig = machineConfigs.${referenceHostName};
+          inherit (nixosSystems.${referenceHostName}) pkgs;
           inherit (pkgs) lib;
 
           # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
@@ -128,8 +144,11 @@
           ];
           artifactVariantConfig = artifactVariantSystem.config;
 
-          checkSet = {
-            nixos-toplevel = self.nixosConfigurations.${hostName}.config.system.build.toplevel;
+          hostToplevelChecks = lib.mapAttrs' (
+            hostName: machine: lib.nameValuePair "${hostName}-toplevel" machine.config.system.build.toplevel
+          ) nixosSystems;
+
+          checkSet = hostToplevelChecks // {
             nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel;
           };
         in
@@ -140,12 +159,15 @@
             lib
             self
             hostConfig
+            hostNames
+            machineConfigs
+            machineOptions
             mkNixosSystem
             pluginSources
             sops-nix
             ;
           inherit normalMachineModule;
-          hostOptions = self.nixosConfigurations.${hostName}.options;
+          hostOptions = nixosSystems.${referenceHostName}.options;
           inherit units;
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
@@ -154,7 +176,7 @@
             unitOwnership = import ./checks/impl/unit-ownership.nix { inherit lib; };
             observationRegistryModule = {
               options.dotfiles.health.observations = lib.mkOption {
-                type = self.nixosConfigurations.${hostName}.options.dotfiles.health.observations.type;
+                type = nixosSystems.${referenceHostName}.options.dotfiles.health.observations.type;
                 default = { };
                 internal = true;
               };

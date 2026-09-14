@@ -1,16 +1,18 @@
 {
+  config,
   pkgs,
   lib,
   ...
 }:
 
 let
+  cfg = config.dotfiles.workstation;
   gibibyte = 1073741824;
   observationTimeoutSeconds = 10;
   zramAlgorithm = "lzo-rle";
-  zramMemoryPercent = 25;
+  zramMemoryPercent = cfg.swap.zramMemoryPercent;
   zramPriority = 100;
-  minimumSwapGiB = 8;
+  minimumSwapGiB = cfg.swap.minimumTotalGiB;
   virtualMemorySysctl = {
     "vm.min_free_kbytes" = 262144;
     "vm.watermark_scale_factor" = 100;
@@ -30,8 +32,8 @@ let
   windowsMemoryCommit = {
     powershellCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
     metric = "used-percent";
-    warning = 85;
-    failure = 95;
+    warning = cfg.windowsMemoryCommit.warning;
+    failure = cfg.windowsMemoryCommit.failure;
   };
   mkWindowsPercentageObservation = import ../package.nix;
   windowsMemoryCommitObservation = mkWindowsPercentageObservation {
@@ -67,6 +69,40 @@ let
   '';
 in
 {
+  options.dotfiles.workstation = {
+    swap = {
+      zramMemoryPercent = lib.mkOption {
+        type = lib.types.ints.between 1 100;
+        default = 25;
+        description = "物理 memory に対する zram device size の割合。";
+      };
+      minimumTotalGiB = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 8;
+        description = "zram と disk swap を合わせた最小容量。";
+      };
+    };
+    windowsMemoryCommit = {
+      warning = lib.mkOption {
+        type = lib.types.ints.between 1 100;
+        default = 85;
+        description = "Windows committed memory 使用率の警告値。";
+      };
+      failure = lib.mkOption {
+        type = lib.types.ints.between 1 100;
+        default = 95;
+        description = "Windows committed memory 使用率の異常値。";
+      };
+    };
+  };
+
+  config.assertions = [
+    {
+      assertion = cfg.windowsMemoryCommit.warning < cfg.windowsMemoryCommit.failure;
+      message = "Windows committed memory warning threshold must be below failure";
+    }
+  ];
+
   config.dotfiles.health.observations = {
     "host/swap" = {
       kind = "swap-policy";

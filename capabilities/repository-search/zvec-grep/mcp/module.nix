@@ -8,6 +8,7 @@
 let
   port = 8784;
   endpoint = "http://127.0.0.1:${toString port}/mcp";
+  staleLockPath = "${config.dotfiles.workstation.homeDir}/.zvec-grep/daemon/instance.lock";
   front = pkgs.callPackage ./package.nix {
     zvecGrep = config.dotfiles.toolchain.packages.zvec-grep;
     inherit port;
@@ -31,6 +32,9 @@ in
       timeout = 30;
     };
   };
+
+  # `r` は同一 boot の switch でも走って live lock を消すため、boot 限定の `r!` にする。
+  systemd.tmpfiles.settings."zvec-grep".${staleLockPath}."r!" = { };
 
   home-manager.users.${config.dotfiles.workstation.username}.home.sessionVariables = {
     ZVEC_GREP_MODE = "auto";

@@ -102,6 +102,10 @@ nix() {
   elif [[ $1 == run ]]; then
     [[ $* == "run ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents" ]]
     : > "$test_root/install-agents-called"
+  elif [[ $1 == eval ]]; then
+    [[ $* == "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.containers.enabled --apply containers: if containers == [ ] then \"false\" else \"true\"" ]]
+    [[ ${CONTAINERS_ENABLED:-true} != error ]] || return 1
+    printf '%s\n' "${CONTAINERS_ENABLED:-true}"
   else
     [[ $* == "build --no-link --print-out-paths --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.system.build.nixos-rebuild" ]]
     printf '%s\n' "$test_upstream_rebuild"
@@ -173,8 +177,10 @@ cmp "$test_root/expected-bootstrap-stages.log" "$bootstrap_stage_log"
 
 # bootstrap は初回 boot 後の収束順を一つの continuation として表示する。
 bootstrap_output=$test_root/bootstrap-output.log
+containerless_output=$test_root/bootstrap-containerless-output.log
 run_bootstrap_stages() { :; }
-main --host "$TARGET_HOST" > "$bootstrap_output"
+
+CONTAINERS_ENABLED=true main --host "$TARGET_HOST" > "$bootstrap_output"
 terminate_line=$(grep -nFx '  wsl -t NixOS' "$bootstrap_output" | cut -d: -f1)
 launch_line=$(grep -nFx '  wsl -d NixOS' "$bootstrap_output" | cut -d: -f1)
 sync_line=$(grep -nFx '  dotfiles-sync-images' "$bootstrap_output" | cut -d: -f1)
@@ -182,3 +188,18 @@ rebuild_line=$(grep -nFx '  dotfiles-rebuild' "$bootstrap_output" | cut -d: -f1)
 doctor_line=$(grep -nFx '  dotfiles-doctor' "$bootstrap_output" | cut -d: -f1)
 [[ $terminate_line -lt $launch_line && $launch_line -lt $sync_line &&
   $sync_line -lt $rebuild_line && $rebuild_line -lt $doctor_line ]]
+
+CONTAINERS_ENABLED=false main --host "$TARGET_HOST" > "$containerless_output"
+if grep -Fxq '  dotfiles-sync-images' "$containerless_output"; then
+  printf 'containerless bootstrap requested image synchronization\n' >&2
+  exit 1
+fi
+launch_line=$(grep -nFx '  wsl -d NixOS' "$containerless_output" | cut -d: -f1)
+rebuild_line=$(grep -nFx '  dotfiles-rebuild' "$containerless_output" | cut -d: -f1)
+doctor_line=$(grep -nFx '  dotfiles-doctor' "$containerless_output" | cut -d: -f1)
+[[ $launch_line -lt $rebuild_line && $rebuild_line -lt $doctor_line ]]
+
+if (CONTAINERS_ENABLED=error; print_completion >/dev/null 2>&1); then
+  printf 'bootstrap ignored a failed container Capability evaluation\n' >&2
+  exit 1
+fi

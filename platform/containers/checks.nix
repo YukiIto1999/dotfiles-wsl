@@ -437,6 +437,75 @@ let
     ]).config;
   extraContainerObservations = selectContainerObservations extraContainerVariantConfig.dotfiles.health.observations;
 
+  containerlessCapabilityIds = [
+    "browser-automation"
+    "browser-diagnostics"
+    "browser-runtime"
+    "github-resources"
+    "library-documentation"
+    "repository-search"
+  ];
+  containerlessVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce containerlessCapabilityIds;
+        }
+      )
+    ]).config;
+  memoryOnlyCapabilityIds = containerlessCapabilityIds ++ [ "project-memory" ];
+  memoryOnlyVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce memoryOnlyCapabilityIds;
+        }
+      )
+    ]).config;
+  containerlessObservations = selectContainerObservations containerlessVariantConfig.dotfiles.health.observations;
+  disabledContainerTargets = [
+    "crawl4ai"
+    "memory"
+    "searxng"
+    "sonarqube"
+  ];
+  disabledContainerServices = [
+    "docker-agentmemory"
+    "docker-build-artifact-gc"
+    "docker-crawl4ai"
+    "docker-dotfiles-backends-network"
+    "docker-searxng"
+    "docker-sonarqube"
+    "docker-sonarqube-db"
+    "sonarqube-provision"
+  ];
+  disabledContainerTimers = [
+    "docker-build-artifact-gc"
+    "sonarqube-provision"
+  ];
+  disabledContainerSecrets = [
+    "crawl4ai/api_token"
+    "opencode/go_api_key"
+    "searxng/secret_key"
+    "sonarqube/admin_password"
+    "sonarqube/db_password"
+  ];
+  disabledContainerTemplates = [
+    "agentmemory.env"
+    "crawl4ai.env"
+    "searxng-settings.yml"
+    "sonarqube-db.env"
+    "sonarqube.env"
+  ];
+  disabledContainerArtifacts = [
+    "containers/agentmemory/config"
+    "containers/searxng/settings-template"
+  ];
+
   removedContainerServices = builtins.removeAttrs hostConfig.dotfiles.platform.containers.services [
     sampleApplication
   ];
@@ -676,6 +745,56 @@ in
     assert enabled == provided;
     assert variantEnabled == variantProvided;
     pkgs.runCommandLocal "check-container-application-registry" { } "touch $out";
+
+  container-capability-gating =
+    assert builtins.deepSeq memoryOnlyVariantConfig.system.build.toplevel.drvPath true;
+    assert builtins.deepSeq containerlessVariantConfig.system.build.toplevel.drvPath true;
+    assert memoryOnlyVariantConfig.dotfiles.capabilities.enabled == memoryOnlyCapabilityIds;
+    assert memoryOnlyVariantConfig.dotfiles.platform.containers.enabled == [ "agentmemory" ];
+    assert
+      builtins.attrNames memoryOnlyVariantConfig.dotfiles.platform.containers.services
+      == [ "agentmemory" ];
+    assert
+      builtins.attrNames memoryOnlyVariantConfig.virtualisation.oci-containers.containers
+      == [ "agentmemory" ];
+    assert memoryOnlyVariantConfig.virtualisation.docker.enable;
+    assert builtins.hasAttr "memory" memoryOnlyVariantConfig.dotfiles.platform.mcp.targets;
+    assert lib.all (name: !builtins.hasAttr name memoryOnlyVariantConfig.dotfiles.platform.mcp.targets)
+      [
+        "crawl4ai"
+        "searxng"
+        "sonarqube"
+      ];
+    assert containerlessVariantConfig.dotfiles.capabilities.enabled == containerlessCapabilityIds;
+    assert containerlessVariantConfig.dotfiles.platform.containers.enabled == [ ];
+    assert containerlessVariantConfig.dotfiles.platform.containers.services == { };
+    assert containerlessVariantConfig.virtualisation.oci-containers.containers == { };
+    assert !containerlessVariantConfig.virtualisation.docker.enable;
+    assert
+      !builtins.elem "docker"
+        containerlessVariantConfig.users.users.${containerlessVariantConfig.dotfiles.workstation.username}.extraGroups;
+    assert !builtins.hasAttr "syncImages" containerlessVariantConfig.dotfiles.platform.cli.commands;
+    assert !builtins.hasAttr "imageDigest" containerlessVariantConfig.dotfiles.platform.cli.commands;
+    assert containerlessObservations == { };
+    assert lib.all (
+      name: !builtins.hasAttr name containerlessVariantConfig.dotfiles.platform.mcp.targets
+    ) disabledContainerTargets;
+    assert lib.all (
+      name: !builtins.hasAttr name containerlessVariantConfig.systemd.services
+    ) disabledContainerServices;
+    assert lib.all (
+      name: !builtins.hasAttr name containerlessVariantConfig.systemd.timers
+    ) disabledContainerTimers;
+    assert lib.all (
+      name: !builtins.hasAttr name containerlessVariantConfig.sops.secrets
+    ) disabledContainerSecrets;
+    assert lib.all (
+      name: !builtins.hasAttr name containerlessVariantConfig.sops.templates
+    ) disabledContainerTemplates;
+    assert lib.all (
+      name: !builtins.hasAttr name containerlessVariantConfig.dotfiles.managedArtifacts
+    ) disabledContainerArtifacts;
+    pkgs.runCommandLocal "check-container-capability-gating" { } "touch $out";
 
   # image は digest で固定し、参照が repository と digest に整合すること。
   # 宣言を写した期待値は宣言と写しの一致しか見ない

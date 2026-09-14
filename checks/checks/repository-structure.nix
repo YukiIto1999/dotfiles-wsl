@@ -800,11 +800,6 @@ in
         ]
         [
           "dotfiles"
-          "skills"
-          "enabled"
-        ]
-        [
-          "dotfiles"
           "toolchain"
           "enabledLsp"
         ]
@@ -813,11 +808,9 @@ in
         path: (lib.attrByPath path { } hostOptions) ? default
       ) requiredRosterOptionPaths;
       fixtures = [
-        ../fixtures/invalid/missing-rosters.nix
         ../fixtures/invalid/unknown-agent.nix
         ../fixtures/invalid/unknown-capability.nix
         ../fixtures/invalid/unknown-lsp.nix
-        ../fixtures/invalid/unknown-skill.nix
       ];
       fixtureCases = map (fixture: {
         name = toString fixture;
@@ -847,15 +840,9 @@ in
           };
         }
         {
-          name = "empty-skill-roster";
+          name = "overridden-derived-skill-roster";
           module = { lib, ... }: {
-            dotfiles.skills.enabled = lib.mkForce [ ];
-          };
-        }
-        {
-          name = "missing-required-skill";
-          module = { lib, ... }: {
-            dotfiles.skills.enabled = lib.mkForce [ "ui-design" ];
+            dotfiles.skills.enabled = lib.mkForce [ "repository-research" ];
           };
         }
         {

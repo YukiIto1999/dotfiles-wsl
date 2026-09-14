@@ -2,6 +2,8 @@
   pkgs,
   lib,
   hostConfig,
+  mkNixosSystem,
+  normalMachineModule,
   ...
 }:
 
@@ -58,6 +60,27 @@ let
         print("\n".join(violations), file=sys.stderr)
         raise SystemExit(1)
   '';
+  containerCapabilityIds = [
+    "code-quality"
+    "project-memory"
+    "web-content"
+    "web-discovery"
+  ];
+  containerlessCapabilityIds = builtins.filter (
+    name: !builtins.elem name containerCapabilityIds
+  ) hostConfig.dotfiles.capabilities.enabled;
+  containerlessConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce containerlessCapabilityIds;
+        }
+      )
+    ]).config;
+  enabledSkills = containerlessConfig.dotfiles.skills.enabled;
+  containerlessRegistry = containerlessConfig.dotfiles.skills.registry;
 in
 {
   # local Skill と plugin 由来 Skill を同じ contract で検査する。source の出所で分岐しない
@@ -70,4 +93,26 @@ in
         python3 ${validator} ${manifest}
         touch $out
       '';
+
+  skill-capability-gating =
+    assert builtins.elem "repository-research" enabledSkills;
+    assert builtins.elem "code-review" enabledSkills;
+    assert !builtins.elem "memory" enabledSkills;
+    assert !builtins.elem "web-research" enabledSkills;
+    assert containerlessRegistry."code-review".requiresCapabilities == [ ];
+    assert builtins.elem "code-quality" containerlessRegistry."code-review".optionalCapabilities;
+    assert !builtins.elem "code-quality" containerlessConfig.dotfiles.capabilities.resolved;
+    assert lib.all (
+      name:
+      lib.all (
+        capability: builtins.elem capability containerlessConfig.dotfiles.capabilities.resolved
+      ) containerlessRegistry.${name}.requiresCapabilities
+    ) enabledSkills;
+    assert lib.all (
+      name:
+      lib.all (
+        dependency: builtins.elem dependency enabledSkills
+      ) containerlessRegistry.${name}.requiresSkills
+    ) enabledSkills;
+    pkgs.runCommandLocal "check-skill-capability-gating" { } "touch $out";
 }

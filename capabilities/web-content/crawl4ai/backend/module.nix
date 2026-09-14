@@ -5,6 +5,7 @@
 }:
 
 let
+  enabled = builtins.elem "web-content" config.dotfiles.capabilities.resolved;
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
   };
@@ -29,7 +30,7 @@ in
     readOnly = true;
   };
 
-  config = {
+  config = lib.mkIf enabled {
     dotfiles.capabilities.web-content.crawl4ai.credentials.apiTokenFile =
       config.sops.secrets."crawl4ai/api_token".path;
 

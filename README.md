@@ -26,7 +26,16 @@ dotfiles-rebuild
 dotfiles-doctor
 ```
 
-upstream OCI image の確認と同期には `dotfiles-sync-images --status` と `dotfiles-sync-images` を使う。secret の編集、鍵の追加、rebuild の中断や復旧は、対応する runbook に従う。
+containerを有効にしたactive hostでは、rebuild後に配備された `dotfiles-sync-images --status` と `dotfiles-sync-images` を使う。secret の編集、鍵の追加、rebuild の中断や復旧は、対応する runbook に従う。
+
+checkoutから対象hostを明示して実行する場合は、次のhost構成を直接指定する。
+
+```bash
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages
+```
+
+containerを選ばないhostには `dotfiles-sync-images` を配備しないため、これらのcommandは実行しない。
 
 ## 構成
 

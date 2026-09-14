@@ -126,9 +126,17 @@ in
       type = lib.types.listOf capabilityIdType;
       description = "この host で有効にする Capability ID";
     };
+
+    resolved = lib.mkOption {
+      type = lib.types.listOf capabilityIdType;
+      readOnly = true;
+      internal = true;
+      description = "直接選択または依存関係から有効になった Capability ID。";
+    };
   };
 
   config = {
+    dotfiles.capabilities.resolved = enabledRegistryNames;
     dotfiles.platform.mcp.enabledProviders = enabledProviders;
     dotfiles.platform.containers.enabled = enabledBackends;
 

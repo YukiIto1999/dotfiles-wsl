@@ -11,7 +11,7 @@
 | Skillのowner repository | `SKILL.md`、リファレンス文書、テストフィクスチャ、実行スクリプト |
 | `flake.nix` | 外部ソースのURLとコミットリビジョンの固定、`pluginSources`への受け渡し |
 | `skills/plugins/` | 採用表に基づく外部Skillの登録、source存在確認、同名拒否 |
-| `profiles/workstation.nix` | ホストで有効にするSkill集合の選択 |
+| `skills/module.nix` | 選択したCapabilityとSkill間依存から有効なSkill集合を導出 |
 | `agents/clients/<id>` | 有効なSkillを各エージェントの配備先（`~/.claude/skills/` 等）へ投影するアダプタ |
 | `capabilities` | Skillが必要とする外部ツール、プロバイダ、実行時基盤の契約 |
 
@@ -26,7 +26,7 @@ runtime: Agent -> Skill -> Capability -> provider/runtime
 
 ## 外部ソースの登録契約
 
-外部ソースを追加・保守する際は、`flake.nix`で取得したソース実体を`specialArgs.pluginSources`へ渡す。`skills/plugins/module.nix`の採用表がsourceごとの実体、採用するSkill ID、および各Skillの`requiresCapabilities` / `requiresSkills`を宣言し、レジストリには採用表に記載したSkillだけを登録する。したがって、upstreamにSkillが追加されても採用表を変更しない限り登録対象は変わらない。
+外部ソースを追加・保守する際は、`flake.nix`で取得したソース実体を`specialArgs.pluginSources`へ渡す。`skills/plugins/module.nix`の採用表がsourceごとの実体、採用するSkill ID、および各Skillの`requiresCapabilities` / `optionalCapabilities` / `requiresSkills`を宣言し、レジストリには採用表に記載したSkillだけを登録する。したがって、upstreamにSkillが追加されても採用表を変更しない限り登録対象は変わらない。
 
 外部ソース内の採用Skillは、以下の標準契約を満たす必要がある。
 
@@ -51,5 +51,5 @@ Orcaデスクトップ環境および内蔵ツールの操作手順を提供す�
 
 - 採用Skillのディレクトリまたは直下の`SKILL.md`が存在しない。
 - ソースをまたいで同一のSkill IDが重複している。
-- レジストリに存在しないCapabilityを要求している。
+- レジストリに存在しないCapabilityをhard依存またはoptional依存として参照している。
 - 秘密情報、認証資格情報、またはプライベートな作業記録をSkillソースとしてNix storeへ取り込んでいる。

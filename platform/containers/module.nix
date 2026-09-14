@@ -8,6 +8,7 @@
 let
   myCfg = config.dotfiles;
   cfg = config.dotfiles.platform.containers;
+  hasContainers = cfg.enabled != [ ];
   mkCommand = import ../cli/impl/mk-command.nix { inherit config lib pkgs; };
   portBindings = import ./impl/port-bindings.nix { inherit lib; };
   configuredContainers = config.virtualisation.oci-containers.containers;
@@ -412,140 +413,144 @@ in
     };
   };
 
-  config = {
-    dotfiles.platform.cli.commands = { inherit syncImages imageDigest; };
-    dotfiles.health.observations = containerObservations;
+  config = lib.mkMerge [
+    (lib.mkIf hasContainers {
+      dotfiles.platform.cli.commands = { inherit syncImages imageDigest; };
+      dotfiles.health.observations = containerObservations;
 
-    users.users.${myCfg.workstation.username}.extraGroups = [ "docker" ];
+      users.users.${myCfg.workstation.username}.extraGroups = [ "docker" ];
 
-    virtualisation = {
-      docker = {
-        enable = true;
-        daemon.settings.builder.gc = buildArtifactGcContract.daemonGc;
+      virtualisation = {
+        docker = {
+          enable = true;
+          daemon.settings.builder.gc = buildArtifactGcContract.daemonGc;
+        };
+        oci-containers.backend = "docker";
       };
-      oci-containers.backend = "docker";
-    };
 
-    systemd.services.${buildArtifactGcContract.name} = {
-      description = "Prune dangling Docker images and bounded BuildKit cache";
-      inherit (buildArtifactGcContract.service) after wants;
-      unitConfig.ConditionPathExists = buildArtifactGcContract.service.conditionPathExists;
-      serviceConfig = {
-        Type = buildArtifactGcContract.service.type;
-        ExecStart = buildArtifactGcContract.service.execStart;
+      systemd.services.${buildArtifactGcContract.name} = {
+        description = "Prune dangling Docker images and bounded BuildKit cache";
+        inherit (buildArtifactGcContract.service) after wants;
+        unitConfig.ConditionPathExists = buildArtifactGcContract.service.conditionPathExists;
+        serviceConfig = {
+          Type = buildArtifactGcContract.service.type;
+          ExecStart = buildArtifactGcContract.service.execStart;
+        };
       };
-    };
 
-    systemd.timers.${buildArtifactGcContract.name} = {
-      description = "Periodic Docker build artifact pruning";
-      inherit (buildArtifactGcContract.timer) wantedBy timerConfig;
-    };
-
-    systemd.services.docker-dotfiles-backends-network = {
-      description = "Docker network for backing services";
-      after = [ "docker.service" ];
-      requires = [ "docker.service" ];
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
+      systemd.timers.${buildArtifactGcContract.name} = {
+        description = "Periodic Docker build artifact pruning";
+        inherit (buildArtifactGcContract.timer) wantedBy timerConfig;
       };
-      script = ''
-        ${pkgs.docker}/bin/docker network inspect dotfiles-backends >/dev/null 2>&1 \
-          || ${pkgs.docker}/bin/docker network create dotfiles-backends
-      '';
-    };
 
-    assertions = [
-      {
-        assertion = serviceEntries != [ ] && emptyContractServices == [ ];
-        message =
-          "dotfiles.platform.containers services must have non-empty endpoints, units, and images: "
-          + lib.concatStringsSep " " emptyContractServices;
-      }
-      {
-        assertion = endpointDriftServices == [ ];
-        message =
-          "dotfiles.platform.containers endpoints must exactly match their URLs and OCI published ports: "
-          + lib.concatStringsSep " " endpointDriftServices;
-      }
-      {
-        assertion = unitDriftServices == [ ];
-        message =
-          "dotfiles.platform.containers units must exactly match their image-derived systemd services: "
-          + lib.concatStringsSep " " unitDriftServices;
-      }
-      {
-        assertion = healthDriftServices == [ ];
-        message =
-          "dotfiles.platform.containers health checks must name an HTTP endpoint and an absolute path: "
-          + lib.concatStringsSep " " healthDriftServices;
-      }
-      {
-        assertion = cfg.enabled == builtins.attrNames cfg.services;
-        message = "dotfiles.platform.containers.enabled must exactly match the declared service keys";
-      }
-      {
-        assertion =
-          builtins.length (map (image: image.container) imageDefinitions)
-          == builtins.length (lib.unique (map (image: image.container) imageDefinitions));
-        message = "dotfiles.platform.containers image records must map to unique containers";
-      }
-      {
-        assertion = lib.all (
-          image:
-          builtins.hasAttr image.container configuredContainers
-          && configuredContainers.${image.container}.image == image.image
-          && (configuredContainers.${image.container}.imageFile or null) == image.imageFile
-          && configuredContainers.${image.container}.pull == "never"
-        ) imageDefinitions;
-        message = "dotfiles.platform.containers images must match the OCI image, imageFile, and pull policy";
-      }
-      {
-        assertion =
-          lib.sort builtins.lessThan (map (image: image.container) imageDefinitions)
-          == lib.sort builtins.lessThan (builtins.attrNames configuredContainers);
-        message = "dotfiles.platform.containers images must cover every deployed OCI container exactly once";
-      }
-      {
-        assertion = lib.all (
-          image:
-          if image.kind == "upstream" then
-            image.repository != null
-            && image.repository != ""
-            && image.digest != null
-            && builtins.match "^sha256:[0-9a-f]{64}$" image.digest != null
-            && (
-              let
-                parts = lib.splitString "@" image.image;
-                reference = builtins.elemAt parts 0;
-              in
-              builtins.length parts == 2
-              && builtins.elemAt parts 1 == image.digest
-              && lib.hasPrefix "${image.repository}:" reference
-              &&
-                builtins.match "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$" (
-                  lib.removePrefix "${image.repository}:" reference
-                ) != null
-            )
-            && image.imageFile == null
-          else
-            image.repository == null && image.digest == null && image.imageFile != null
-        ) imageDefinitions;
-        message = "dotfiles.platform.containers images must use digest-locked upstream images or Nix imageFile sources";
-      }
-      {
-        assertion = lib.all (container: container.pull == "never") (
-          builtins.attrValues configuredContainers
-        );
-        message = "all OCI containers must disable implicit pulls";
-      }
-      {
-        assertion = lib.all (
-          binding: builtins.match "^127\\.0\\.0\\.1:[0-9]+:[0-9]+$" binding != null
-        ) publishedPortBindings;
-        message = "OCI container host ports must be published on loopback";
-      }
-    ];
-  };
+      systemd.services.docker-dotfiles-backends-network = {
+        description = "Docker network for backing services";
+        after = [ "docker.service" ];
+        requires = [ "docker.service" ];
+        wantedBy = [ "multi-user.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          ${pkgs.docker}/bin/docker network inspect dotfiles-backends >/dev/null 2>&1 \
+            || ${pkgs.docker}/bin/docker network create dotfiles-backends
+        '';
+      };
+
+    })
+    {
+      assertions = [
+        {
+          assertion = emptyContractServices == [ ];
+          message =
+            "dotfiles.platform.containers services must have non-empty endpoints, units, and images: "
+            + lib.concatStringsSep " " emptyContractServices;
+        }
+        {
+          assertion = endpointDriftServices == [ ];
+          message =
+            "dotfiles.platform.containers endpoints must exactly match their URLs and OCI published ports: "
+            + lib.concatStringsSep " " endpointDriftServices;
+        }
+        {
+          assertion = unitDriftServices == [ ];
+          message =
+            "dotfiles.platform.containers units must exactly match their image-derived systemd services: "
+            + lib.concatStringsSep " " unitDriftServices;
+        }
+        {
+          assertion = healthDriftServices == [ ];
+          message =
+            "dotfiles.platform.containers health checks must name an HTTP endpoint and an absolute path: "
+            + lib.concatStringsSep " " healthDriftServices;
+        }
+        {
+          assertion = cfg.enabled == builtins.attrNames cfg.services;
+          message = "dotfiles.platform.containers.enabled must exactly match the declared service keys";
+        }
+        {
+          assertion =
+            builtins.length (map (image: image.container) imageDefinitions)
+            == builtins.length (lib.unique (map (image: image.container) imageDefinitions));
+          message = "dotfiles.platform.containers image records must map to unique containers";
+        }
+        {
+          assertion = lib.all (
+            image:
+            builtins.hasAttr image.container configuredContainers
+            && configuredContainers.${image.container}.image == image.image
+            && (configuredContainers.${image.container}.imageFile or null) == image.imageFile
+            && configuredContainers.${image.container}.pull == "never"
+          ) imageDefinitions;
+          message = "dotfiles.platform.containers images must match the OCI image, imageFile, and pull policy";
+        }
+        {
+          assertion =
+            lib.sort builtins.lessThan (map (image: image.container) imageDefinitions)
+            == lib.sort builtins.lessThan (builtins.attrNames configuredContainers);
+          message = "dotfiles.platform.containers images must cover every deployed OCI container exactly once";
+        }
+        {
+          assertion = lib.all (
+            image:
+            if image.kind == "upstream" then
+              image.repository != null
+              && image.repository != ""
+              && image.digest != null
+              && builtins.match "^sha256:[0-9a-f]{64}$" image.digest != null
+              && (
+                let
+                  parts = lib.splitString "@" image.image;
+                  reference = builtins.elemAt parts 0;
+                in
+                builtins.length parts == 2
+                && builtins.elemAt parts 1 == image.digest
+                && lib.hasPrefix "${image.repository}:" reference
+                &&
+                  builtins.match "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$" (
+                    lib.removePrefix "${image.repository}:" reference
+                  ) != null
+              )
+              && image.imageFile == null
+            else
+              image.repository == null && image.digest == null && image.imageFile != null
+          ) imageDefinitions;
+          message = "dotfiles.platform.containers images must use digest-locked upstream images or Nix imageFile sources";
+        }
+        {
+          assertion = lib.all (container: container.pull == "never") (
+            builtins.attrValues configuredContainers
+          );
+          message = "all OCI containers must disable implicit pulls";
+        }
+        {
+          assertion = lib.all (
+            binding: builtins.match "^127\\.0\\.0\\.1:[0-9]+:[0-9]+$" binding != null
+          ) publishedPortBindings;
+          message = "OCI container host ports must be published on loopback";
+        }
+      ];
+    }
+  ];
 }

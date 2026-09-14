@@ -8,8 +8,8 @@
 
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
-| 全hostで有効なidentity、Agent、Skill、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `nix flake check`、`dotfiles-rebuild --plan` |
-| hostを登録し、Windows drive、swap、Windows committed memoryのhost差分を変える | [`profiles/hosts/`](../../profiles/hosts)のhost名と同じNix file。optionの意味と既定値は[`workstation/storage/module.nix`](../../workstation/storage/module.nix)と[`workstation/stability/module.nix`](../../workstation/stability/module.nix) | `machine-profile-contract`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
+| 全hostで有効なidentity、Agent、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `nix flake check`、`dotfiles-rebuild --plan` |
+| hostを登録し、Windows drive、swap、Windows committed memory、host固有Capabilityを変える | [`profiles/hosts/`](../../profiles/hosts)のhost名と同じNix file。optionの意味と既定値は[`workstation/storage/module.nix`](../../workstation/storage/module.nix)、[`workstation/stability/module.nix`](../../workstation/stability/module.nix)、[`capabilities/module.nix`](../../capabilities/module.nix) | `machine-profile-contract`、`container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
 | username、home、checkout pathを変える | [`workstation/module.nix`](../../workstation/module.nix)の`dotfiles.workstation` | identity migrationとして扱い、通常rebuildと混ぜない |
 | Nix binary cacheを増減する | [`workstation/nix/assets/nix-caches.nix`](../../workstation/nix/assets/nix-caches.nix) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 時刻とlocaleを変える | [`workstation/locale/module.nix`](../../workstation/locale/module.nix) | `host-locale-contract`、`dotfiles-rebuild` |
@@ -22,8 +22,8 @@
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
 | top-level responsibilityを追加・削除する | [`docs/architecture/overview.md`](../architecture/overview.md)でownerと依存方向を決め、rootの`module.nix`を入口にする | `structure-responsibility-roots`、`unit-boundary-name-only` |
-| Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix) | dependency closureとprovider/backend一意性を`nix flake check`で確認する |
-| Skillを追加・削除する | [`skills/`](../../skills)の`module.nix`、`skill/`、依存metadata。profileはregistry名から有効化する | Skill renderingとrequired Capabilityのcheck |
+| Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`nix flake check`で確認する |
+| Skillを追加・削除する | [`skills/`](../../skills)の`module.nix`、`skill/`、依存metadata。配備対象は有効なCapabilityから導く | Skill renderingとrequired Capabilityのcheck |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 
 ## Runtime observationと生成artifact
@@ -56,7 +56,8 @@
 | gatewayのport、YAML、protocol観測を変える | [`platform/mcp/gateway/`](../../platform/mcp/gateway) | gateway checks、`dotfiles-doctor` |
 | container共通schema、network、image同期を変える | [`platform/containers/module.nix`](../../platform/containers/module.nix)と[`platform/containers/impl/container-backend.nix`](../../platform/containers/impl/container-backend.nix) | Platform container checks、`dotfiles-rebuild` |
 | application backend、endpoint、volumeを変える | 対応するCapability内のbackend/server/database unit | Capability固有check、`dotfiles-doctor` |
-| upstream OCI imageを更新する | Capability実装の`dotfiles.platform.containers.services.<name>.images`にあるrepository、digest、canonical reference | `nix run .#dotfiles-sync-images -- --status`、`nix run .#dotfiles-sync-images`、`dotfiles-rebuild` |
+| hostでcontainer applicationを有効化・無効化する | [`profiles/hosts/`](../../profiles/hosts)の`dotfiles.capabilities.enabled`。container名ではなく所有するCapability IDを選ぶ | `container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
+| upstream OCI imageを更新する | Capability実装の`dotfiles.platform.containers.services.<name>.images`にあるrepository、digest、canonical reference | containerを有効にした対象hostで、checkoutから`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status`または`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages`を実行し、適用後は同hostの`dotfiles-sync-images`と`dotfiles-rebuild`を使う |
 | 固定packageのhashを更新する | 対応するCapabilityの`package.nix` | `nix store prefetch-file --hash-type sha256 --json <url>`、`nix flake check` |
 | SonarQube server、database、provisioning、MCPを変える | [`capabilities/code-quality/sonarqube/`](../../capabilities/code-quality/sonarqube)の各unit | 対応するSonarQube check、credential変更時は[Secrets](../operations/secrets.md#sonarqube-admin-password-rotation) |
 
@@ -84,4 +85,4 @@ sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
 |---|---|---|
 | rebuildのpreflight、lock、restart判定を変える | [`workstation/activation/rebuild/`](../../workstation/activation/rebuild) | rebuild focused checks、`dotfiles-rebuild --plan` |
 | cleanup対象を変える | [`maintenance/`](../../maintenance) | cleanup contract、対象なしのdry run |
-| OCI image同期を変える | [`platform/containers/`](../../platform/containers) | image sync checks、`dotfiles-sync-images --status` |
+| OCI image同期を変える | [`platform/containers/`](../../platform/containers) | image sync checks、containerを有効にしたhostの`dotfiles-sync-images --status` |

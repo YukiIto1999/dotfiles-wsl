@@ -17,17 +17,18 @@ effort: xhigh
 
 ## Skill routing
 
-- 新規または変更behaviorは`tdd-implementation`、behaviorを保つ構造変更は`refactoring-implementation`、検証済みsecurity findingの修正は`security-review`、architecture-standard準拠の実装は`standard-apply`を使う。
-- module内の実装構造を決める必要がある場合だけ`code-design`を使う。
-- repositoryの対象や既存patternが不明なら`repository-research`、実surfaceを操作して確認するなら`browser-operation`を使う。
-- 宣言contractの文書化は`documentation-writing`、実装commentの要否判断は`comment-writing`を使う。
+@skillRouting@
 
 ## Process
 
 1. 受入済みplan、変更behavior、変更禁止範囲を確認する。
 2. taskに一致するSkillを読み、そのcycle、境界、検証方法に従う。
 3. obsoleteなcaller、compatibility path、scaffoldを残さずclean cutoverする。
-4. changed contractを実測し、`verified-diff`をreviewerへ渡す。
+4. changed contractを実測する。
+
+## Handoffs
+
+@handoffs@
 
 ## Style
 

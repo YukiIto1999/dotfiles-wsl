@@ -6,6 +6,7 @@
 }:
 
 let
+  enabled = builtins.elem "github-resources" config.dotfiles.capabilities.resolved;
   cfg = config.dotfiles.identity.github;
   githubTargets = builtins.attrNames (
     lib.filterAttrs (_: target: target.provider == "github") config.dotfiles.platform.mcp.targets
@@ -46,20 +47,22 @@ let
     };
 in
 {
-  dotfiles.platform.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
+  config = lib.mkIf enabled {
+    dotfiles.platform.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
 
-  # 起動後のトークン再読込に対応しない github-mcp-server の制約
-  sops.secrets = lib.listToAttrs (
-    map (account: {
-      name = "accounts/${account}/token";
-      value.restartUnits = [ "mcp-front-github-${account}.service" ];
-    }) cfg.accounts
-  );
+    # 起動後のトークン再読込に対応しない github-mcp-server の制約
+    sops.secrets = lib.listToAttrs (
+      map (account: {
+        name = "accounts/${account}/token";
+        value.restartUnits = [ "mcp-front-github-${account}.service" ];
+      }) cfg.accounts
+    );
 
-  assertions = [
-    {
-      assertion = githubTargets == expectedGithubTargets;
-      message = "GitHub target IDs must match github-<account> exactly";
-    }
-  ];
+    assertions = [
+      {
+        assertion = githubTargets == expectedGithubTargets;
+        message = "GitHub target IDs must match github-<account> exactly";
+      }
+    ];
+  };
 }

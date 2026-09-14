@@ -1,4 +1,4 @@
-{ config, ... }:
+_:
 
 {
   dotfiles = {
@@ -25,19 +25,13 @@
       "opencode"
     ];
 
-    skills.enabled = builtins.attrNames config.dotfiles.skills.registry;
-
     capabilities.enabled = [
       "browser-automation"
       "browser-diagnostics"
       "browser-runtime"
-      "code-quality"
       "github-resources"
       "library-documentation"
-      "project-memory"
       "repository-search"
-      "web-content"
-      "web-discovery"
     ];
   };
 }

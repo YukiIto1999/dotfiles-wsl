@@ -4,6 +4,8 @@
   hostConfig,
   hostOptions,
   variantConfig,
+  mkNixosSystem,
+  normalMachineModule,
   self,
   ...
 }:
@@ -23,6 +25,53 @@ let
   installAgents = hostConfig.dotfiles.platform.cli.commands.installAgents;
   installAgentsExe = lib.getExe installAgents;
   atomicPublish = import ../impl/atomic-publish.nix { inherit pkgs; };
+  restrictedCapabilities = builtins.filter (
+    name:
+    !(builtins.elem name [
+      "code-quality"
+      "project-memory"
+    ])
+  ) hostConfig.dotfiles.capabilities.enabled;
+  restrictedAgentConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce restrictedCapabilities;
+        }
+      )
+    ]).config;
+  restrictedAgentSubagents = restrictedAgentConfig.dotfiles.agents.shared.subagents;
+  restrictedAgentRouting = restrictedAgentConfig.dotfiles.agents.shared.routing;
+  restrictedAgentRules = restrictedAgentConfig.dotfiles.agents.shared.rules;
+  minimalCapabilityAgentConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ];
+        }
+      )
+    ]).config;
+  minimalCapabilitySubagents = minimalCapabilityAgentConfig.dotfiles.agents.shared.subagents;
+  minimalCapabilitySkills = minimalCapabilityAgentConfig.dotfiles.agents.shared.skills;
+  minimalCapabilityUnavailableSkills = builtins.filter (
+    name: !(builtins.hasAttr name minimalCapabilitySkills)
+  ) (builtins.attrNames minimalCapabilityAgentConfig.dotfiles.skills.registry);
+  minimalCapabilitySubagentSources = builtins.attrValues minimalCapabilitySubagents;
+  transitiveCapabilityAgentConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce [ "browser-automation" ];
+        }
+      )
+    ]).config;
+  transitiveCapabilityRules = transitiveCapabilityAgentConfig.dotfiles.agents.shared.rules;
   atomicPublishExe = lib.getExe' atomicPublish "dotfiles-agent-atomic-publish";
 
   losslessVersionArgs = [
@@ -308,6 +357,7 @@ let
       toString hostConfig.dotfiles.agents.shared.skills.${name}
       == toString hostConfig.dotfiles.skills.registry.${name}.source
   ) sharedSkillNames;
+  rawRoutingContract = import ../subagents/routing.nix;
   routingContract = hostConfig.dotfiles.agents.shared.routing;
   routedSkillNames = lib.unique (map (route: route.skill) routingContract.subagentSkills);
   routedSubagentNames = lib.unique (map (route: route.subagent) routingContract.subagentSkills);
@@ -576,6 +626,10 @@ in
           jq --exit-status --arg expected "$expected" \
             '.mcp_servers == {gateway: {url: $expected}}'
         }
+        if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' ${artifactSource "agents/codex/system"}; then
+          echo "generated Codex system config retains an unsubstituted marker" >&2
+          exit 1
+        fi
         remarshal -if toml -of json ${artifactSource "agents/codex/system"} > codex-system.json
         codex_mcp_matches ${lib.escapeShellArg gatewayUrl} < codex-system.json > /dev/null
         jq --exit-status \
@@ -900,6 +954,66 @@ in
         touch $out
       '';
 
+  agent-capability-gating =
+    assert builtins.deepSeq restrictedAgentConfig.system.build.toplevel.drvPath true;
+    assert !builtins.hasAttr "agentmemoryHooks" restrictedAgentConfig.dotfiles.agents.packages;
+    assert lib.all (client: client.agentmemoryMode == "unsupported") (
+      builtins.attrValues restrictedAgentConfig.dotfiles.agents.clients
+    );
+    assert
+      !builtins.hasAttr "agents/opencode/agentmemory-plugin" restrictedAgentConfig.dotfiles.managedArtifacts;
+    assert
+      !builtins.hasAttr "agents/omp/agentmemory-hook" restrictedAgentConfig.dotfiles.managedArtifacts;
+    assert builtins.hasAttr "code-review" restrictedAgentConfig.dotfiles.agents.shared.skills;
+    assert builtins.hasAttr "reviewer" restrictedAgentSubagents;
+    assert builtins.hasAttr "reviewer" restrictedAgentConfig.dotfiles.agents.clients.claude.subagents;
+    assert builtins.hasAttr "reviewer" restrictedAgentConfig.dotfiles.agents.clients.omp.subagents;
+    assert lib.any (route: route.skill == "code-review") restrictedAgentRouting.subagentSkills;
+    assert lib.any (
+      route: route.from == "reviewer" || route.to == "reviewer"
+    ) restrictedAgentRouting.subagentHandoffs;
+    pkgs.runCommandLocal "check-agent-capability-gating"
+      {
+        nativeBuildInputs = [ pkgs.gnugrep ];
+        minimalCapabilitySubagentSources =
+          lib.concatMapStringsSep " " toString
+            minimalCapabilitySubagentSources;
+        minimalCapabilityUnavailableSkills = lib.concatStringsSep " " minimalCapabilityUnavailableSkills;
+      }
+      ''
+        for source in $minimalCapabilitySubagentSources; do
+          for skill in $minimalCapabilityUnavailableSkills; do
+            if grep -Fq "\`$skill\`" "$source"; then
+              echo "unavailable Skill remained in subagent source: $source/$skill" >&2
+              exit 1
+            fi
+          done
+        done
+        if grep -Fq agentmemory ${restrictedAgentRules}; then
+          echo "disabled AgentMemory remained in agent policy" >&2
+          exit 1
+        fi
+        for required in '`reviewer`' '`code-review`'; do
+          if ! grep -Fq "$required" ${restrictedAgentRules}; then
+            echo "optional code-quality removed review policy: $required" >&2
+            exit 1
+          fi
+        done
+        if grep -Fq agentmemory ${
+          restrictedAgentConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source
+        }; then
+          echo "disabled AgentMemory remained in Claude settings" >&2
+          exit 1
+        fi
+        if grep -Fq agentmemory ${
+          restrictedAgentConfig.dotfiles.managedArtifacts."agents/codex/system".source
+        }; then
+          echo "disabled AgentMemory remained in Codex settings" >&2
+          exit 1
+        fi
+        touch $out
+      '';
+
   agent-subagent-rendering =
     assert clients.claude.subagents != hostConfig.dotfiles.agents.shared.subagents;
     assert builtins.attrNames clients.claude.subagents == sharedSubagentNames;
@@ -938,7 +1052,8 @@ in
         ];
         rulesSource = hostConfig.dotfiles.agents.shared.rules;
         requiredSkillsJson = builtins.toJSON requiredSkillsBySubagent;
-        routingJson = builtins.toJSON routingContract;
+        inherit transitiveCapabilityRules;
+        routingJson = builtins.toJSON rawRoutingContract;
         inherit sharedSubagentFarm;
         claudeSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.claude.subagents);
         ompSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.omp.subagents);
@@ -962,14 +1077,18 @@ in
             let
               entrySkills = builtins.attrNames (
                 lib.filterAttrs (
-                  name: _: builtins.elem capability hostConfig.dotfiles.skills.registry.${name}.requiresCapabilities
+                  name: _:
+                  builtins.elem capability (
+                    hostConfig.dotfiles.skills.registry.${name}.requiresCapabilities
+                    ++ hostConfig.dotfiles.skills.registry.${name}.optionalCapabilities
+                  )
                 ) hostConfig.dotfiles.agents.shared.skills
               );
             in
             "| `${capability}` | ${
               if entrySkills == [ ] then "なし" else lib.concatMapStringsSep " / " (name: "`${name}`") entrySkills
             } |"
-          ) hostConfig.dotfiles.capabilities.enabled
+          ) hostConfig.dotfiles.capabilities.resolved
         );
         expectedClientRows = lib.concatStringsSep "\n" (
           lib.mapAttrsToList (
@@ -984,6 +1103,8 @@ in
         test -s "$rulesSource"
         iconv -f UTF-8 -t UTF-8 "$rulesSource" > /dev/null
         grep -Eq '^#{1,6}[[:space:]]+[^[:space:]]' "$rulesSource"
+        grep -Fxq '| `browser-runtime` | なし |' "$transitiveCapabilityRules"
+        grep -Fxq '| `browser-automation` | `browser-operation` |' "$transitiveCapabilityRules"
         while IFS=$'\t' read -r subagent skill; do
           source="$sharedSubagentFarm/$subagent"
           if ! grep -Fq "\`$skill\`" "$source"; then
@@ -1056,6 +1177,10 @@ in
 
         for source in $sharedSources; do
           check_frontmatter "$source"
+          if grep -Eq '@(skillRouting|handoffs)@' "$source"; then
+            echo "generated subagent retained a routing marker: $source" >&2
+            exit 1
+          fi
           yq --exit-status '
             (.tools | all(. == "Read" or . == "Grep" or . == "Glob" or
               . == "Edit" or . == "Write" or . == "Bash"))

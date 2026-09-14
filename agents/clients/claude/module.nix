@@ -7,6 +7,7 @@
 
 let
   cfg = config.dotfiles;
+  projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   lspProjection = import ../../impl/lsp.nix { inherit lib; };
   managedMcp = pkgs.replaceVars ./assets/managed-mcp.json {
     gatewayUrl = config.dotfiles.platform.mcp.gateway.url;
@@ -88,11 +89,22 @@ let
         } > "$out"
       '';
 
-  managedSettings = pkgs.replaceVars ./assets/managed-settings.json {
+  managedSettingsBase = pkgs.replaceVars ./assets/managed-settings.json {
     lspMarketplacePath = "${lspMarketplace}";
     telemetryEndpoint = cfg.telemetry.endpoint;
     telemetryProtocol = cfg.telemetry.protocol;
   };
+  managedSettings =
+    if projectMemoryEnabled then
+      managedSettingsBase
+    else
+      pkgs.runCommandLocal "claude-managed-settings-without-agentmemory.json"
+        {
+          nativeBuildInputs = [ pkgs.jq ];
+        }
+        ''
+          jq 'del(.hooks)' ${managedSettingsBase} > "$out"
+        '';
 in
 {
   dotfiles.agents.clients.claude = {
@@ -132,11 +144,11 @@ in
     capabilityManagedFiles = {
       lsp = "managed-settings";
       telemetry = "managed-settings";
-      agentmemory = "managed-settings";
+      agentmemory = if projectMemoryEnabled then "managed-settings" else null;
     };
     lspMode = "supported";
     telemetryMode = "supported";
-    agentmemoryMode = "hooks";
+    agentmemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
     skillProjectionMode = "preload";
     install = {
       kind = "installer-script";

@@ -7,6 +7,7 @@
 
 # self-hosted SearXNG。cache は SQLite で、limiter を使わないので valkey は要らない
 let
+  enabled = builtins.elem "web-discovery" config.dotfiles.capabilities.resolved;
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
   };
@@ -30,7 +31,7 @@ let
   };
 in
 {
-  config = {
+  config = lib.mkIf enabled {
     dotfiles.platform.containers.services.searxng = {
       endpoints.http = {
         protocol = "http";

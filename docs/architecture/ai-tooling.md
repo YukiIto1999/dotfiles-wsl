@@ -19,13 +19,13 @@ AI CLI ─► LSP ─► language server
        └► OTLP ─► telemetry collector
 ```
 
-[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)はsubagentからSkillへのroutingとsubagent間handoffだけを持つ。provider名、backend名、直接provider例外は置かない。Skillの依存は各[`skills/NAME/module.nix`](../../skills)が`requiresSkills`と`requiresCapabilities`で宣言する。
+[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)はsubagentからSkillへのroutingとsubagent間handoffだけを持つ。provider名、backend名、直接provider例外は置かない。Skillの依存は各[`skills/NAME/module.nix`](../../skills)が`requiresSkills`、`requiresCapabilities`、`optionalCapabilities`で宣言する。
 
 実行時の原則は`Agent → Skill → Capability → provider/runtime`である。Agentはtask、権限、委譲、成果物handoffを所有する。Skillは反復する判断、手順、停止条件を所有する。Capabilityはconsumerに依存しない機能contractである。provider adapter、container、database、credential、stateはCapabilityの実装詳細であり、AgentやSkillへ逆依存しない。
 
 Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能はAgentが直接使う。repositoryに配備するproviderは次のCapabilityを通す。
 
-Capability実装の正本は各`capabilities/<id>/module.nix`にある。Task入口の正本は各`skills/<id>/module.nix`にある`requiresCapabilities`である。現在のCapability IDは次で取得できる。
+Capability実装の正本は各`capabilities/<id>/module.nix`にある。Task入口の正本は各[`skills/<id>/module.nix`](../../skills)にある`requiresCapabilities`と`optionalCapabilities`である。前者だけがSkill配備をゲートし、後者は利用可能なときpolicyのCapability対応へ記載する。現在のCapability IDは次で取得できる。
 
 ```bash
 nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.registry --apply builtins.attrNames
@@ -34,18 +34,18 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.registr
 各Skillが宣言するCapabilityは次で取得できる。
 
 ```bash
-nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.registry --apply 'builtins.mapAttrs (_: skill: skill.requiresCapabilities)'
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.registry --apply 'builtins.mapAttrs (_: skill: { inherit (skill) requiresCapabilities optionalCapabilities; })'
 ```
 
-Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置く規則ではない。Skill本文は全clientへ配備する一方、Capability実装はtransport、service lifecycle、network、credential、永続dataを所有するため、`capabilities/`に置く。
+Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置く規則ではない。選択したSkill本文はclientへ配備する一方、Capability実装はtransport、service lifecycle、network、credential、永続dataを所有するため、`capabilities/`に置く。
 
 ## Profileとregistry
 
-[`profiles/workstation.nix`](../../profiles/workstation.nix)は有効なAgent client、Skill、Capability、language server、identityを選ぶ。MCP providerやcontainer backendを直接列挙しない。
+[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のAgent client、Capability、language server、identityを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有のCapabilityをsemantic IDで加える。MCP providerやcontainer backendはprofileへ直接列挙しない。
 
-[`skills/module.nix`](../../skills/module.nix)はSkill ID、source、Skill依存、Capability依存を検証する。[`capabilities/module.nix`](../../capabilities/module.nix)はCapability依存closure、provider owner、backend ownerを検証し、`dotfiles.platform.mcp.enabledProviders`と`dotfiles.platform.containers.enabled`を導く。現在のconsumer数はownershipの判断に使わない。
+[`skills/module.nix`](../../skills/module.nix)はSkill ID、Skill依存、hard Capability依存から、選択したCapabilityで実行できるSkillを導く。[`capabilities/module.nix`](../../capabilities/module.nix)はCapability依存closure、provider owner、backend ownerを検証し、`dotfiles.capabilities.resolved`、`dotfiles.platform.mcp.enabledProviders`、`dotfiles.platform.containers.enabled`を導く。現在のconsumer数はownershipの判断に使わない。
 
-Agent clientへ配るのは`skills/<id>/skill/`だけである。Nix module、依存metadata、fixtureは配備先へ混ぜない。plugin Skillも同じregistryへ入れ、同名IDを評価時に拒否する。
+Agent clientへ配るのは有効な`skills/<id>/skill/`だけである。必要なSkillを失ったsubagentとそのhandoffも配備しない。Nix module、依存metadata、fixtureは配備先へ混ぜない。plugin Skillも同じregistryへ入れ、同名IDを評価時に拒否する。
 
 ## Client binary
 
@@ -101,7 +101,9 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.targets
 
 application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。AgentMemory、Crawl4AI、SearXNG、SonarQubeをgeneric Platformへ列挙しない。SonarQubeは[`server`](../../capabilities/code-quality/sonarqube/server)、[`database`](../../capabilities/code-quality/sonarqube/database)、[`provisioning`](../../capabilities/code-quality/sonarqube/provisioning)、[`mcp`](../../capabilities/code-quality/sonarqube/mcp)へ分ける。
 
-全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と`dotfiles-sync-images`、Nix生成imageは`imageFile`が取得を担当する。Docker build artifact GCはdangling imageとBuildKit cacheだけを扱い、tagged image、container、volumeは削除しない。
+Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。container backendが一件もなければ、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
+
+全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と、containerを有効にしたhostへ配備する`dotfiles-sync-images`が取得を担当し、Nix生成imageは`imageFile`が取得を担当する。Docker build artifact GCはdangling imageとBuildKit cacheだけを扱い、tagged image、container、volumeは削除しない。
 
 ## AgentMemory
 

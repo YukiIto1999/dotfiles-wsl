@@ -7,11 +7,12 @@
 
 let
   cfg = config.dotfiles;
+  projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   mkCommand = import ../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   policy = import ./impl/policy.nix { inherit lib pkgs; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
-  routing = import ./subagents/routing.nix;
+  rawRouting = import ./subagents/routing.nix;
   clientNames = builtins.attrNames agents.clients;
   clientExecutables = lib.mapAttrs (
     _: client: "${cfg.workstation.homeDir}/.local/bin/${client.binary}"
@@ -39,14 +40,52 @@ let
     ) runtimeClientNames
   );
 
-  enabledSkillNames = builtins.filter (
-    name: builtins.hasAttr name cfg.skills.registry
-  ) cfg.skills.enabled;
+  allSkillNames = builtins.attrNames cfg.skills.registry;
+  rawSubagentSkillEdges = map (route: "${route.subagent}/${route.skill}") rawRouting.subagentSkills;
+  rawSubagentHandoffEdges = map (
+    route: "${route.from}/${route.to}/${route.artifact}"
+  ) rawRouting.subagentHandoffs;
+  unknownRawRoutingSubagents = lib.unique (
+    map (route: route.subagent) (
+      builtins.filter (
+        route: !builtins.hasAttr route.subagent allSharedSubagents
+      ) rawRouting.subagentSkills
+    )
+  );
+  unknownRawRoutingSkills = lib.unique (
+    map (route: route.skill) (
+      builtins.filter (route: !builtins.elem route.skill allSkillNames) rawRouting.subagentSkills
+    )
+  );
+  invalidRawRoutingActivations = lib.unique (
+    map (route: route.activation) (
+      builtins.filter (
+        route:
+        !(builtins.elem route.activation [
+          "required"
+          "dynamic"
+        ])
+      ) rawRouting.subagentSkills
+    )
+  );
+  unknownRawHandoffEndpoints = lib.unique (
+    lib.concatMap (
+      route:
+      lib.optional (!builtins.hasAttr route.from allSharedSubagents) route.from
+      ++ lib.optional (!builtins.hasAttr route.to allSharedSubagents) route.to
+    ) rawRouting.subagentHandoffs
+  );
+  duplicateRawSubagentSkillEdges =
+    builtins.length rawSubagentSkillEdges != builtins.length (lib.unique rawSubagentSkillEdges);
+  duplicateRawSubagentHandoffEdges =
+    builtins.length rawSubagentHandoffEdges != builtins.length (lib.unique rawSubagentHandoffEdges);
+
+  enabledSkillNames = cfg.skills.enabled;
   enabledSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name});
   allSkills = lib.mapAttrs (_: skill: skill.source) enabledSkills;
 
   subagentsRoot = ./subagents;
-  sharedSubagents =
+  allSharedSubagents =
     lib.mapAttrs'
       (filename: _: lib.nameValuePair (lib.removeSuffix ".md" filename) (subagentsRoot + "/${filename}"))
       (
@@ -54,6 +93,46 @@ let
           builtins.readDir subagentsRoot
         )
       );
+  unavailableRequiredSubagents = lib.unique (
+    map (route: route.subagent) (
+      builtins.filter (
+        route: route.activation == "required" && !(builtins.elem route.skill enabledSkillNames)
+      ) rawRouting.subagentSkills
+    )
+  );
+  eligibleSubagents = builtins.removeAttrs allSharedSubagents unavailableRequiredSubagents;
+  routing = {
+    subagentSkills = builtins.filter (
+      route:
+      builtins.hasAttr route.subagent eligibleSubagents && builtins.elem route.skill enabledSkillNames
+    ) rawRouting.subagentSkills;
+    subagentHandoffs = builtins.filter (
+      route: builtins.hasAttr route.from eligibleSubagents && builtins.hasAttr route.to eligibleSubagents
+    ) rawRouting.subagentHandoffs;
+  };
+  renderSubagent =
+    name: source:
+    let
+      routes = builtins.filter (route: route.subagent == name) routing.subagentSkills;
+      handoffs = builtins.filter (route: route.from == name) routing.subagentHandoffs;
+      routingLines =
+        if routes == [ ] then
+          "- なし"
+        else
+          lib.concatMapStringsSep "\n" (
+            route: "- `${route.skill}`（${if route.activation == "required" then "必須" else "必要時"}）"
+          ) routes;
+      handoffLines =
+        if handoffs == [ ] then
+          "- なし"
+        else
+          lib.concatMapStringsSep "\n" (route: "- `${route.artifact}`を`${route.to}`へ渡す。") handoffs;
+    in
+    pkgs.replaceVars source {
+      skillRouting = routingLines;
+      handoffs = handoffLines;
+    };
+  sharedSubagents = lib.mapAttrs renderSubagent eligibleSubagents;
 
   subagentFileName =
     client: name: if client.subagentFormat == "toml" then "${name}.toml" else "${name}.md";
@@ -62,7 +141,7 @@ let
     template = ./policy/AGENTS.md;
     skills = enabledSkills;
     subagents = sharedSubagents;
-    capabilities = cfg.capabilities.enabled;
+    capabilities = cfg.capabilities.resolved;
     inherit (agents) clients;
   };
 
@@ -380,9 +459,11 @@ in
       inherit clientExecutables;
       packages = {
         inherit apm;
-        agentmemoryHooks = config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
         projectCacheGc = runtimeContract.packages.gc;
         verification = runtimeContract.packages.verify;
+      }
+      // lib.optionalAttrs projectMemoryEnabled {
+        agentmemoryHooks = config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
       };
       stateRoot = "~/${runtimeContract.state.relativeResourcesRoot}";
       inherit (runtimeContract.packages) agentResource agentWorktree;
@@ -408,7 +489,42 @@ in
       inherit (runtimeContract.packages) installAgents agentResource agentWorktree;
     };
 
-    assertions = agentContract.assertionsFor agents ++ [
+    assertions = [
+      {
+        assertion = unknownRawRoutingSubagents == [ ];
+        message =
+          "Subagent Skill routes reference unknown subagents: "
+          + lib.concatStringsSep ", " unknownRawRoutingSubagents;
+      }
+      {
+        assertion = unknownRawRoutingSkills == [ ];
+        message =
+          "Subagent Skill routes reference unknown Skills: "
+          + lib.concatStringsSep ", " unknownRawRoutingSkills;
+      }
+      {
+        assertion = invalidRawRoutingActivations == [ ];
+        message =
+          "Subagent Skill routes must use required or dynamic activation: "
+          + lib.concatStringsSep ", " invalidRawRoutingActivations;
+      }
+      {
+        assertion = !duplicateRawSubagentSkillEdges;
+        message = "Subagent Skill routes must not contain duplicate edges";
+      }
+      {
+        assertion = unknownRawHandoffEndpoints == [ ];
+        message =
+          "Subagent handoffs reference unknown subagents: "
+          + lib.concatStringsSep ", " unknownRawHandoffEndpoints;
+      }
+      {
+        assertion = !duplicateRawSubagentHandoffEdges;
+        message = "Subagent handoffs must not contain duplicate edges";
+      }
+    ]
+    ++ agentContract.assertionsFor agents
+    ++ [
       {
         assertion = homeDestinations == lib.unique homeDestinations;
         message = "Agent home destinations must be unique";
@@ -439,9 +555,11 @@ in
 
     environment.etc = lib.listToAttrs systemManagedEntries;
     environment.systemPackages = [
-      config.dotfiles.agents.packages.agentmemoryHooks
       config.dotfiles.agents.packages.projectCacheGc
       config.dotfiles.agents.packages.verification
+    ]
+    ++ lib.optionals projectMemoryEnabled [
+      config.dotfiles.agents.packages.agentmemoryHooks
     ];
 
     home-manager.users.${cfg.workstation.username} =

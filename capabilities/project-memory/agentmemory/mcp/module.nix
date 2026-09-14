@@ -6,6 +6,7 @@
 }:
 
 let
+  enabled = builtins.elem "project-memory" config.dotfiles.capabilities.resolved;
   mkMcpServer = pkgs.callPackage ../../../../platform/mcp/package/mk-server.nix { };
   front = pkgs.callPackage ./package.nix {
     serverBuilder = mkMcpServer;
@@ -14,20 +15,22 @@ let
   };
 in
 {
-  dotfiles.platform.mcp.targets.memory = {
-    provider = "memory";
-    executable = lib.getExe front;
-    serverLifecycle = "service";
-    port = 8774;
-    waitUnits = config.dotfiles.platform.containers.services.agentmemory.units;
-    probe = {
-      tool = "memory_recall";
-      args = {
-        query = "dotfiles-doctor-probe-no-match";
-        limit = 1;
-        format = "compact";
+  config = lib.mkIf enabled {
+    dotfiles.platform.mcp.targets.memory = {
+      provider = "memory";
+      executable = lib.getExe front;
+      serverLifecycle = "service";
+      port = 8774;
+      waitUnits = config.dotfiles.platform.containers.services.agentmemory.units;
+      probe = {
+        tool = "memory_recall";
+        args = {
+          query = "dotfiles-doctor-probe-no-match";
+          limit = 1;
+          format = "compact";
+        };
+        timeout = 30;
       };
-      timeout = 30;
     };
   };
 }

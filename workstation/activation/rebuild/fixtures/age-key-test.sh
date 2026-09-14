@@ -29,10 +29,21 @@ DOTFILES="$test_root/dotfiles-wsl"
 SOPS_CONFIG="$DOTFILES/sops/assets/.sops.yaml"
 SECRETS_FILE="$DOTFILES/sops/assets/secrets.json"
 AGE_KEY="$test_root/var/lib/sops-nix/key.txt"
+TARGET_HOST=tcs-a295
 export SUDO_USER
 SUDO_USER=$(id -un)
 export TOTAL=2
 export STEP=0
+
+[[ $(parse_target_host --host "$TARGET_HOST") == "$TARGET_HOST" ]]
+if parse_target_host --host TCS-A295 >/dev/null 2>&1; then
+  printf 'bootstrap accepted an invalid host name\n' >&2
+  exit 1
+fi
+if parse_target_host "$TARGET_HOST" >/dev/null 2>&1; then
+  printf 'bootstrap accepted a positional host name\n' >&2
+  exit 1
+fi
 
 mkdir -p "$DOTFILES/sops/assets" "$(dirname -- "$AGE_KEY")"
 git -C "$DOTFILES" init -q
@@ -88,15 +99,20 @@ nix() {
     [[ ${SOPS_AGE_KEY_FILE:-} == "$AGE_KEY" ]]
     [[ $* == "shell ${FLAKE_REF}#sops -c sops --config ${SOPS_CONFIG} -d ${SECRETS_FILE}" ]]
     : > "$test_root/sops-verify-called"
+  elif [[ $1 == run ]]; then
+    [[ $* == "run ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents" ]]
+    : > "$test_root/install-agents-called"
   else
-    [[ $* == "build --no-link --print-out-paths --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.nixos.config.system.build.nixos-rebuild" ]]
+    [[ $* == "build --no-link --print-out-paths --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.system.build.nixos-rebuild" ]]
     printf '%s\n' "$test_upstream_rebuild"
   fi
 }
 verify_secrets
 [[ -e $test_root/sops-verify-called ]]
+install_agent_clients >/dev/null
+[[ -e $test_root/install-agents-called ]]
 install_boot_generation >/dev/null
-grep -Fqx "boot --no-reexec --flake ${FLAKE_REF}#nixos -L " "$bootstrap_call_log"
+grep -Fqx "boot --no-reexec --flake ${FLAKE_REF}#${TARGET_HOST} -L " "$bootstrap_call_log"
 
 real_key="$AGE_KEY.real"
 mv "$AGE_KEY" "$real_key"
@@ -137,7 +153,7 @@ verify_secrets() { record_bootstrap_stage verify_secrets; }
 install_agent_clients() { record_bootstrap_stage install_agent_clients; }
 install_boot_generation() {
   record_bootstrap_stage install_boot_generation
-  "$test_upstream_rebuild/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#nixos" -L
+  "$test_upstream_rebuild/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#${TARGET_HOST}" -L
 }
 link_nixos() { record_bootstrap_stage link_nixos; }
 
@@ -158,7 +174,7 @@ cmp "$test_root/expected-bootstrap-stages.log" "$bootstrap_stage_log"
 # bootstrap は初回 boot 後の収束順を一つの continuation として表示する。
 bootstrap_output=$test_root/bootstrap-output.log
 run_bootstrap_stages() { :; }
-main > "$bootstrap_output"
+main --host "$TARGET_HOST" > "$bootstrap_output"
 terminate_line=$(grep -nFx '  wsl -t NixOS' "$bootstrap_output" | cut -d: -f1)
 launch_line=$(grep -nFx '  wsl -d NixOS' "$bootstrap_output" | cut -d: -f1)
 sync_line=$(grep -nFx '  dotfiles-sync-images' "$bootstrap_output" | cut -d: -f1)

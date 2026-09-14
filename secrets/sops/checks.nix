@@ -3,6 +3,7 @@
   lib,
   self,
   hostConfig,
+  hostNames,
   hostOptions,
   helpers,
   ...
@@ -202,8 +203,36 @@ in
         jq -r '.sops.age[].recipient' ${sopsFile} | sort > actual
         diff -u declared actual
 
-        # host 鍵と recovery 鍵の二つ。片方だけだと復旧手段が無い
-        test "$(wc -l < declared)" -eq 2
+        # keys の宣言が creation_rules から漏れなく参照されること。
+        # 参照し忘れた鍵は宣言だけが残り、その host は復号できない
+        yq -r '.keys[]' ${sopsConfigFile} | sort > defined
+        diff -u defined declared
+
+        # anchor は alias の指す先を人が読んで確かめる唯一の手掛かり
+        yq -r '.keys[] | anchor' ${sopsConfigFile} | sort > anchors
+        if grep -qx "" anchors; then
+          echo 'every key needs an anchor' >&2
+          exit 1
+        fi
+        test "$(sort -u anchors | wc -l)" -eq "$(wc -l < anchors)"
+        test "$(sort -u declared | wc -l)" -eq "$(wc -l < declared)"
+
+        # recovery 鍵はちょうど一つ。無いと host 鍵を失った時に復旧できず、
+        # 複数あると外部媒体で保管すべき鍵が曖昧になる
+        test "$(grep -cx recovery anchors || true)" -eq 1
+
+        # host 鍵は一つ以上。複数の host が同じ暗号文を共有する
+        test "$(grep -c '^host-' anchors || true)" -ge 1
+
+        # profile と anchor の完全一致は要求しない。鍵の先行 enrollment と段階退役を妨げるため。
+        for anchor in ${
+          lib.concatMapStringsSep " " (hostName: lib.escapeShellArg "host-${hostName}") hostNames
+        }; do
+          if ! grep -qxF "$anchor" anchors; then
+            echo "registered host has no SOPS recipient: $anchor" >&2
+            exit 1
+          fi
+        done
 
         # 暗号化されていない leaf が残っていないこと。sops の metadata は対象外
         if jq -e 'del(.sops) | [paths(scalars) as $p | getpath($p)]

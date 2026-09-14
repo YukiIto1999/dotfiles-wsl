@@ -3,12 +3,16 @@
   lib,
   hostConfig,
   hostOptions,
+  hostNames,
+  machineConfigs,
   mkNixosSystem,
   normalMachineModule,
   ...
 }:
 
 let
+  workstation = hostConfig.dotfiles.workstation;
+  windowsDriveObservationKeys = map (drive: "host/windows-${drive}-drive") workstation.windowsDrives;
   zram = hostConfig.zramSwap;
   zramGenerator = hostConfig.services.zram-generator;
   zramService = hostConfig.systemd.services.dotfiles-zram-swap or { };
@@ -29,21 +33,21 @@ let
     "max-free" = 274877906944;
   };
   virtualMemorySysctl = builtins.intersectAttrs expectedVirtualMemorySysctl hostConfig.boot.kernel.sysctl;
-  hostObservationKeys = [
-    "host/fstrim"
-    "host/home-manager"
-    "host/home-manager-restart"
-    "host/journald"
-    "host/nix-daemon"
-    "host/nix-gc"
-    "host/root-filesystem"
-    "host/swap"
-    "host/system-generation"
-    "host/windows-c-drive"
-    "host/windows-d-drive"
-    "host/windows-e-drive"
-    "host/windows-memory-commit"
-  ];
+  hostObservationKeys = lib.sort builtins.lessThan (
+    [
+      "host/fstrim"
+      "host/home-manager"
+      "host/home-manager-restart"
+      "host/journald"
+      "host/nix-daemon"
+      "host/nix-gc"
+      "host/root-filesystem"
+      "host/swap"
+      "host/system-generation"
+      "host/windows-memory-commit"
+    ]
+    ++ windowsDriveObservationKeys
+  );
   hostObservations = lib.filterAttrs (
     name: _: lib.hasPrefix "host/" name
   ) hostConfig.dotfiles.health.observations;
@@ -53,7 +57,7 @@ let
   observationProjection = lib.mapAttrs (
     _: observation: builtins.removeAttrs observation [ "command" ]
   ) stabilityObservations;
-  expectedObservationProjection = {
+  expectedBaseObservationProjection = {
     "host/fstrim" = {
       activeStates = [ "active" ];
       checkId = "maintenance/fstrim.timer";
@@ -138,9 +142,9 @@ let
     };
     "host/swap" = {
       checkId = "resource/swap";
-      failureMessage = "swap must include lzo-rle zram above any disk swap with at least 8 GiB total";
+      failureMessage = "swap must include lzo-rle zram above any disk swap with at least ${toString workstation.swap.minimumTotalGiB} GiB total";
       kind = "swap-policy";
-      minimumTotalBytes = 8589934592;
+      minimumTotalBytes = workstation.swap.minimumTotalGiB * 1073741824;
       requiredZramAlgorithm = "lzo-rle";
       requireZram = true;
       resourceKey = "swap";
@@ -157,47 +161,34 @@ let
       resourceKey = null;
       timeoutSeconds = 10;
     };
-    "host/windows-d-drive" = {
-      checkId = "resource/windows-d-drive";
-      failure = 10;
-      failureMessage = "could not observe Windows D drive free space";
-      kind = "numeric-command-threshold";
-      metric = "free-percent";
-      resourceKey = "windowsDDrive";
-      timeoutSeconds = 10;
-      warning = 15;
-    };
-    "host/windows-c-drive" = {
-      checkId = "resource/windows-c-drive";
-      failure = 10;
-      failureMessage = "could not observe Windows C drive free space";
-      kind = "numeric-command-threshold";
-      metric = "free-percent";
-      resourceKey = "windowsCDrive";
-      timeoutSeconds = 10;
-      warning = 15;
-    };
-    "host/windows-e-drive" = {
-      checkId = "resource/windows-e-drive";
-      failure = 10;
-      failureMessage = "could not observe Windows E drive free space";
-      kind = "numeric-command-threshold";
-      metric = "free-percent";
-      resourceKey = "windowsEDrive";
-      timeoutSeconds = 10;
-      warning = 15;
-    };
     "host/windows-memory-commit" = {
       checkId = "resource/windows-memory-commit";
-      failure = 95;
+      failure = workstation.windowsMemoryCommit.failure;
       failureMessage = "could not observe Windows committed memory";
       kind = "numeric-command-threshold";
       metric = "used-percent";
       resourceKey = "windowsMemoryCommit";
       timeoutSeconds = 10;
-      warning = 85;
+      warning = workstation.windowsMemoryCommit.warning;
     };
   };
+  expectedWindowsDriveObservationProjection = builtins.listToAttrs (
+    map (
+      drive:
+      lib.nameValuePair "host/windows-${drive}-drive" {
+        checkId = "resource/windows-${drive}-drive";
+        failure = 10;
+        failureMessage = "could not observe Windows ${lib.toUpper drive} drive free space";
+        kind = "numeric-command-threshold";
+        metric = "free-percent";
+        resourceKey = "windows${lib.toUpper drive}Drive";
+        timeoutSeconds = 10;
+        warning = 15;
+      }
+    ) workstation.windowsDrives
+  );
+  expectedObservationProjection =
+    expectedBaseObservationProjection // expectedWindowsDriveObservationProjection;
   hostObservationModuleSuffixes = [
     "/workstation/module.nix"
     "/workstation/activation/module.nix"
@@ -322,12 +313,53 @@ let
       name: _: lib.hasPrefix "host/" name
     ) descriptionVariantConfig.dotfiles.health.observations
   );
-  windowsObservationCommands = {
-    "host/windows-c-drive" = "dotfiles-observe-windows-c-drive";
-    "host/windows-d-drive" = "dotfiles-observe-windows-d-drive";
-    "host/windows-e-drive" = "dotfiles-observe-windows-e-drive";
-    "host/windows-memory-commit" = "dotfiles-observe-windows-memory-commit";
-  };
+  windowsObservationCommands =
+    lib.genAttrs windowsDriveObservationKeys (name: "dotfiles-observe-${lib.removePrefix "host/" name}")
+    // {
+      "host/windows-memory-commit" = "dotfiles-observe-windows-memory-commit";
+    };
+  driveObservationKeysFor =
+    candidate:
+    lib.sort builtins.lessThan (
+      map (drive: "host/windows-${drive}-drive") candidate.dotfiles.workstation.windowsDrives
+    );
+  actualDriveObservationKeysFor =
+    candidate:
+    lib.sort builtins.lessThan (
+      builtins.filter (name: lib.hasPrefix "host/windows-" name && lib.hasSuffix "-drive" name) (
+        builtins.attrNames candidate.dotfiles.health.observations
+      )
+    );
+  machineProfileContractMatches =
+    name:
+    let
+      candidate = machineConfigs.${name};
+      candidateWorkstation = candidate.dotfiles.workstation;
+      candidateSwap = candidate.dotfiles.health.observations."host/swap";
+      candidateWindowsMemory = candidate.dotfiles.health.observations."host/windows-memory-commit";
+    in
+    candidate.networking.hostName == name
+    && actualDriveObservationKeysFor candidate == driveObservationKeysFor candidate
+    &&
+      candidate.services.zram-generator.settings.zram0.zram-size
+      == "${toString candidateWorkstation.swap.zramMemoryPercent} / 100 * ram"
+    && candidateSwap.minimumTotalBytes == candidateWorkstation.swap.minimumTotalGiB * 1073741824
+    && candidateWindowsMemory.warning == candidateWorkstation.windowsMemoryCommit.warning
+    && candidateWindowsMemory.failure == candidateWorkstation.windowsMemoryCommit.failure;
+  memoryVariantConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.workstation.swap = {
+          zramMemoryPercent = 40;
+          minimumTotalGiB = 6;
+        };
+        dotfiles.workstation.windowsMemoryCommit = {
+          warning = 80;
+          failure = 90;
+        };
+      }
+    ]).config;
   powershellProbe = ''
     $volume = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'"; if ($null -eq $volume -or $volume.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($volume.FreeSpace * 100) / $volume.Size))
   '';
@@ -376,6 +408,33 @@ let
   timeoutProbe = mkProbe timeoutPowerShell;
 in
 {
+  machine-profile-contract =
+    assert lib.assertMsg (
+      hostNames == builtins.attrNames machineConfigs
+    ) "host registry and evaluated machine configs diverged";
+    assert lib.assertMsg (lib.all machineProfileContractMatches hostNames)
+      "machine profile facts did not reach the host configuration";
+    assert lib.assertMsg (
+      machineConfigs.nixos.dotfiles.workstation.windowsDrives == [
+        "c"
+        "d"
+        "e"
+      ]
+    ) "nixos Windows drive inventory drifted";
+    assert lib.assertMsg (
+      machineConfigs.tcs-a295.dotfiles.workstation.windowsDrives == [
+        "c"
+        "d"
+      ]
+    ) "tcs-a295 Windows drive inventory drifted";
+    assert lib.assertMsg (
+      memoryVariantConfig.services.zram-generator.settings.zram0.zram-size == "40 / 100 * ram"
+      && memoryVariantConfig.dotfiles.health.observations."host/swap".minimumTotalBytes == 6 * 1073741824
+      && memoryVariantConfig.dotfiles.health.observations."host/windows-memory-commit".warning == 80
+      && memoryVariantConfig.dotfiles.health.observations."host/windows-memory-commit".failure == 90
+    ) "machine-specific memory policy did not reach runtime observations";
+    pkgs.runCommandLocal "check-machine-profile-contract" { } "touch $out";
+
   host-stability-contract =
     assert lib.assertMsg (
       builtins.attrNames stabilityObservations == hostObservationKeys
@@ -434,7 +493,7 @@ in
       zramGenerator.settings.zram0 == {
         compression-algorithm = "lzo-rle";
         swap-priority = 100;
-        zram-size = "25 / 100 * ram";
+        zram-size = "${toString workstation.swap.zramMemoryPercent} / 100 * ram";
       }
     ) "zram-generator output does not match the swap contract";
     assert lib.assertMsg (lib.elem "swap.target" (

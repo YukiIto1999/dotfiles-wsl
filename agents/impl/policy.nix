@@ -20,7 +20,9 @@ in
         capability:
         let
           entrySkills = builtins.attrNames (
-            lib.filterAttrs (_: skill: builtins.elem capability skill.requiresCapabilities) skills
+            lib.filterAttrs (
+              _: skill: builtins.elem capability (skill.requiresCapabilities ++ skill.optionalCapabilities)
+            ) skills
           );
         in
         [
@@ -36,6 +38,11 @@ in
         (code client.telemetryMode)
         (code client.agentmemoryMode)
       ]) clients;
+      agentmemoryPolicy = lib.optionalString (builtins.elem "project-memory" capabilities) ''
+        ### agentmemory
+
+        明示的な検索と保存は`memory`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携の経路は client ごとに異なり、client の能力表が示す。自動連携は同Skillのrecall、検証、保存判断を代替しない。
+      '';
     in
     pkgs.runCommandLocal "agents-policy.md"
       {
@@ -54,6 +61,7 @@ in
         subagentEntries = entries subagents;
         capabilityRows = tsv capabilityRows;
         clientRows = tsv clientRows;
+        inherit agentmemoryPolicy;
       }
       ''
         set -euo pipefail
@@ -115,7 +123,8 @@ in
           --subst-var-by skillRoster "$skillRoster" \
           --subst-var-by subagentRoster "$subagentRoster" \
           --subst-var-by capabilityRoster "$capabilityRoster" \
-          --subst-var-by clientMatrix "$clientMatrix"
+          --subst-var-by clientMatrix "$clientMatrix" \
+          --subst-var-by agentmemoryPolicy "$agentmemoryPolicy"
 
         # marker が残るのは template と生成器の対応が崩れた状態であり、静かに通さない
         if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$out"; then

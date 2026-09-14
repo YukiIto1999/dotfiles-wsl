@@ -22,6 +22,24 @@ let
   services = hostConfig.systemd.services;
   targets = hostConfig.dotfiles.platform.mcp.targets;
   variantTargets = variantConfig.dotfiles.platform.mcp.targets;
+  nonContainerCapabilitiesDisabledConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ];
+        }
+      )
+    ]).config;
+  nonContainerCapabilitiesDisabledTargets =
+    nonContainerCapabilitiesDisabledConfig.dotfiles.platform.mcp.targets;
+  nonContainerCapabilitiesDisabledProviders =
+    nonContainerCapabilitiesDisabledConfig.dotfiles.platform.mcp.enabledProviders;
+  nonContainerCapabilitiesDisabledHome =
+    nonContainerCapabilitiesDisabledConfig.home-manager.users.${nonContainerCapabilitiesDisabledConfig.dotfiles.workstation.username};
+  nonContainerCapabilitiesDisabledToplevel =
+    nonContainerCapabilitiesDisabledConfig.system.build.toplevel.drvPath;
   configOf = front: services.${front.service}.serviceConfig;
   lifecycleOf = target: target.serverLifecycle or null;
   transportOf = target: target.serverTransport or null;
@@ -562,6 +580,14 @@ in
     assert lib.sort builtins.lessThan enabledProviders == lib.sort builtins.lessThan provided;
     assert lib.sort builtins.lessThan variantEnabled == lib.sort builtins.lessThan variantProvided;
     pkgs.runCommandLocal "check-mcp-provider-registry" { } "touch $out";
+
+  mcp-capability-gating =
+    assert nonContainerCapabilitiesDisabledToplevel != "";
+    assert builtins.attrNames nonContainerCapabilitiesDisabledTargets == [ "memory" ];
+    assert nonContainerCapabilitiesDisabledProviders == [ "memory" ];
+    assert !(nonContainerCapabilitiesDisabledHome.home.sessionVariables ? ZVEC_GREP_MODE);
+    assert !(nonContainerCapabilitiesDisabledHome.home.sessionVariables ? ZVEC_GREP_SERVER_URL);
+    pkgs.runCommandLocal "check-mcp-capability-gating" { } "touch $out";
 
   mcp-target-contract =
     assert expectedContract.targets != { };

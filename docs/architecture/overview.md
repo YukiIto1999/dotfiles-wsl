@@ -6,7 +6,7 @@
 
 ## System generation
 
-[`flake.nix`](../../flake.nix)は、`module.nix`を持つdirectoryを[`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)で収集し、NixOS-WSL、sops-nix、Home Managerと同じNixOS評価へ渡す。[`profiles/workstation.nix`](../../profiles/workstation.nix)は全hostで共有するidentity、Agent、Skill、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実だけを持つ。`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
+[`flake.nix`](../../flake.nix)は、`module.nix`を持つdirectoryを[`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)で収集し、NixOS-WSL、sops-nix、Home Managerと同じNixOS評価へ渡す。[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加Capabilityを持つ。Skillは選択したCapabilityとSkill依存から導く。`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
 
 host profileの値は`dotfiles.workstation`の型付きoptionを通してowner moduleへ渡す。Windows driveの一覧はhostが宣言し、storage moduleが対応するobservationを生成する。zramは物理memoryに対する割合で算出するため、memory容量そのものは宣言しない。swap容量とWindows committed memoryの閾値だけをhostごとに上書きできる。
 
@@ -95,9 +95,9 @@ repository固有optionはownerに対応するnamespaceへ置く。
 - `dotfiles.telemetry`
 - `dotfiles.toolchain`
 
-`profiles/workstation.nix`が共有する`dotfiles.capabilities.enabled`をsemantic IDで選ぶ。[`capabilities/module.nix`](../../capabilities/module.nix)は依存closureを求め、MCP provider rosterとcontainer backend rosterを導出する。providerとbackendの一覧をhost profileへ重複して書かない。
+[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通の`dotfiles.capabilities.enabled`をsemantic IDで選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の選択を加える。[`capabilities/module.nix`](../../capabilities/module.nix)は依存closureを`dotfiles.capabilities.resolved`として公開し、MCP provider rosterとcontainer backend rosterを導出する。providerとbackendの一覧をprofileへ書かない。
 
-`dotfiles.skills.registry`は各[`skills/`](../../skills) unitが登録する`source`、`requiresSkills`、`requiresCapabilities`を持つ。Agent clientはregistryから有効なSkillだけを配備し、Skill本文以外のmodule metadataをclientのSkill directoryへ写さない。
+`dotfiles.skills.registry`は各[`skills/`](../../skills) unitが登録する`source`、`requiresSkills`、`requiresCapabilities`、`optionalCapabilities`を持つ。依存するSkillを含め、hard Capability依存を満たすSkillが既定で有効になり、optional Capabilityは利用可能な場合だけpolicyの入口対応へ記載される。Agent clientはこの派生したSkill本文だけを配備する。
 
 ## Capability実装
 

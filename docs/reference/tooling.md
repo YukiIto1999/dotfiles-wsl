@@ -18,13 +18,20 @@
 
 ## 運用command
 
-利用者向けの入口は`dotfiles-`prefixを持つ生成commandである。[`platform/cli/module.nix`](../../platform/cli/module.nix)は`dotfiles.platform.cli.commands` optionとsystem package登録を持ち、各owner moduleは[`platform/cli/impl/mk-command.nix`](../../platform/cli/impl/mk-command.nix)を明示的にimportする。bootstrapから呼ぶflake packageの公開は[`flake.nix`](../../flake.nix)の`packages`にある。
+利用者向けの入口は`dotfiles-`prefixを持つ生成commandである。[`platform/cli/module.nix`](../../platform/cli/module.nix)は`dotfiles.platform.cli.commands` optionとsystem package登録を持ち、各owner moduleは[`platform/cli/impl/mk-command.nix`](../../platform/cli/impl/mk-command.nix)を明示的にimportする。`packages`にないhost固有commandをcheckoutから呼ぶときは、対象hostの`nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.<name>`を直接指定する。
+
+containerを有効にしたhostのimage同期は次のpathで実行する。
+
+```bash
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages
+```
 
 現在の一覧は`nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.cli.commands --apply builtins.attrNames`で確認する。
 
 ## Agent、Skill、Capability
 
-[`profiles/workstation.nix`](../../profiles/workstation.nix)が有効なAgent client、Skill、Capability、language server、identity accountを選ぶ。providerとbackendはCapabilityから導出し、profileに直接列挙しない。
+[`profiles/workstation.nix`](../../profiles/workstation.nix)が全host共通のAgent client、Capability、language server、identity accountを選び、`profiles/hosts/<host-id>.nix`がhost固有のCapabilityを加える。Skill、provider、backendはCapabilityから導出し、profileに直接列挙しない。
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
@@ -33,7 +40,7 @@
 | Agent runtimeとworktree台帳 | [`agents/module.nix`](../../agents/module.nix)、[`agents/impl/runtime/`](../../agents/impl/runtime)、[`agents/impl/resource/`](../../agents/impl/resource) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.runtime` |
 | 静的subagent | `agents/subagents/` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |
 | local Skill | [`skills/`](../../skills) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled` |
-| Capability | [`capabilities/`](../../capabilities)の`dotfiles.capabilities.registry` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.enabled` |
+| Capability | [`capabilities/`](../../capabilities)の`dotfiles.capabilities.registry`とprofileの選択 | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.resolved` |
 | plugin Skill | [`flake.nix`](../../flake.nix)のplugin inputと[`flake.lock`](../../flake.lock) | clientごとの生成設定を参照する |
 
 依存方向は`Agent -> Skill -> Capability -> provider/runtime`である。Skill-firstはtask routingの規則であり、providerをSkill配下へ置くという意味ではない。

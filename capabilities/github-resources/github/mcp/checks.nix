@@ -27,6 +27,9 @@ let
                 dotfiles.identity.github.accounts = lib.mkOption {
                   type = lib.types.listOf lib.types.str;
                 };
+                dotfiles.capabilities.resolved = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                };
                 dotfiles.platform.mcp.targets = lib.mkOption {
                   type = lib.types.attrsOf lib.types.raw;
                   default = { };
@@ -43,6 +46,7 @@ let
 
               config = {
                 dotfiles.identity.github.accounts = accounts;
+                dotfiles.capabilities.resolved = [ "github-resources" ];
                 dotfiles.platform.mcp.targets = lib.mkForce candidateTargets;
               };
             }

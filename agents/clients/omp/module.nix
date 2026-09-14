@@ -7,6 +7,7 @@
 
 let
   cfg = config.dotfiles;
+  projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   lspProjection = import ../../impl/lsp.nix { inherit lib; };
 
   gatewayConfig = (pkgs.formats.json { }).generate "omp-mcp.json" {
@@ -18,15 +19,6 @@ let
 
   lspConfig = (pkgs.formats.json { }).generate "omp-lsp.json" (lspProjection.omp cfg.toolchain.lsp);
 
-  splitFrontmatter =
-    src:
-    let
-      parts = lib.splitString "\n---\n" (builtins.readFile src);
-    in
-    {
-      frontmatter = lib.removePrefix "---\n" (builtins.head parts);
-      body = lib.concatStringsSep "\n---\n" (builtins.tail parts);
-    };
   requiredSkillsFor =
     name:
     map (route: route.skill) (
@@ -38,16 +30,25 @@ let
   buildSubagent =
     name: srcPath:
     let
-      fm = splitFrontmatter srcPath;
       requiredSkills = builtins.toJSON (requiredSkillsFor name);
     in
     pkgs.runCommand "omp-agent-${name}.md"
       {
-        nativeBuildInputs = [ pkgs.yq ];
-        inherit (fm) frontmatter body;
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.gawk
+          pkgs.gnused
+          pkgs.yq
+        ];
         inherit requiredSkills;
       }
       ''
+        test "$(head -n 1 ${srcPath})" = '---'
+        closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' ${srcPath})
+        test -n "$closing"
+        sed -n "2,$((closing - 1))p" ${srcPath} > frontmatter.yaml
+        tail -n "+$((closing + 1))" ${srcPath} > body.md
+
         rendered=$(yq -y --argjson requiredSkills "$requiredSkills" '
           .tools |= map(
             if . == "Read" then "read"
@@ -65,12 +66,12 @@ let
             then .autoloadSkills = $requiredSkills
             else del(.autoloadSkills)
             end
-        ' <<<"$frontmatter")
+        ' frontmatter.yaml)
         {
           printf '%s\n' '---'
           printf '%s\n' "$rendered"
           printf '%s\n' '---'
-          printf '%s' "$body"
+          cat body.md
         } > "$out"
       '';
 in
@@ -108,6 +109,8 @@ in
         deployment = "home";
         destination = ".omp/agent/lsp.json";
       };
+    }
+    // lib.optionalAttrs projectMemoryEnabled {
       agentmemory-hook = {
         source = ./assets/agentmemory.ts;
         format = "text";
@@ -117,11 +120,11 @@ in
     };
     capabilityManagedFiles = {
       lsp = "lsp";
-      agentmemory = "agentmemory-hook";
+      agentmemory = if projectMemoryEnabled then "agentmemory-hook" else null;
     };
     lspMode = "supported";
     telemetryMode = "unsupported";
-    agentmemoryMode = "hooks";
+    agentmemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
     skillProjectionMode = "preload";
     install = {
       kind = "github-release";

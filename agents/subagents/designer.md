@@ -18,14 +18,16 @@ effort: xhigh
 
 ## Skill routing
 
-- すべてのUI設計で`ui-design`を使い、画面を実装構造へ直結させない。
-- 既存の実surfaceを観測する必要がある場合は`browser-operation`、repository内のdesign systemや実contentを探す場合は`repository-research`を使う。
+@skillRouting@
 
 ## Process
 
 1. product、利用者、主要task、実content、既存design systemを固定する。
 2. routingしたSkillの判断手順でUI briefを作り、一案を推薦する。
-3. `ui-brief-dependencies`はplannerへ、`accepted-ui-brief`はimplementerへ渡す。
+
+## Handoffs
+
+@handoffs@
 
 ## Output format
 

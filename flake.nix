@@ -103,7 +103,6 @@
           dotfiles-install-agents = hostConfig.dotfiles.platform.cli.commands.installAgents;
           dotfiles-doctor = hostConfig.dotfiles.platform.cli.commands.doctor;
           dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
-          dotfiles-sync-images = hostConfig.dotfiles.platform.cli.commands.syncImages;
         };
 
       devShells.${system}.default = maintenancePkgs.mkShellNoCC {

@@ -36,7 +36,7 @@ agentgateway と各 front は設定ユーザーの systemd service として動�
 
 agentmemory の API key は SOPS template から Docker の environment file を経て container 環境に入る。agentmemory の session 内容は host volume に保存され、LLM 処理の対象は外部 provider へ送られる。
 
-upstream OCI image は digest を Nix 宣言へ固定し、registry 取得を `dotfiles-sync-images` に限定する。container 起動時の暗黙 pull は無効である。同期と更新は [OCI images](../operations/oci-images.md)に従う。
+upstream OCI image は digest を Nix 宣言へ固定し、containerを有効にしたhostの`dotfiles-sync-images`にregistry取得を限定する。container起動時の暗黙pullは無効である。同期と更新は [OCI images](../operations/oci-images.md)に従う。
 
 ## Agent client の供給経路
 

@@ -107,9 +107,6 @@ let
   allowedDynamicFileReads = {
     "identity/checks.nix" = 1;
     "identity/module.nix" = 3;
-    "agents/clients/codex/module.nix" = 1;
-    "agents/clients/omp/module.nix" = 1;
-    "agents/clients/opencode/module.nix" = 1;
     "platform/cli/impl/mk-command.nix" = 1;
     "capabilities/web-discovery/searxng/backend/module.nix" = 1;
     "checks/impl/exec-tokens.nix" = 1;

@@ -80,9 +80,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 
 対応 client では、symbol の定義、参照、diagnostic を意味的に調べるときに LSP を使う。未対応または現在の session に提供されていない場合はローカル検索へ戻り、agent が language server を追加、再設定、直接起動しない。
 
-### agentmemory
-
-明示的な検索と保存は`memory`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携の経路は client ごとに異なり、client の能力表が示す。自動連携は同Skillのrecall、検証、保存判断を代替しない。
+@agentmemoryPolicy@
 
 ## dotfiles
 

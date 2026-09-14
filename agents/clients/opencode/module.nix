@@ -7,6 +7,7 @@
 
 let
   cfg = config.dotfiles;
+  projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   opencodeBase = builtins.fromJSON (builtins.readFile ./assets/opencode.json);
   lspProjection = import ../../impl/lsp.nix { inherit lib; };
 
@@ -23,33 +24,30 @@ let
     jq --sort-keys --slurp '.[0] * .[1]' ${opencodeBaseWithLsp} ${opencodeGatewayConfig} > "$out"
   '';
 
-  splitFrontmatter =
-    src:
-    let
-      parts = lib.splitString "\n---\n" (builtins.readFile src);
-    in
-    {
-      frontmatter = lib.removePrefix "---\n" (builtins.head parts);
-      body = lib.concatStringsSep "\n---\n" (builtins.tail parts);
-    };
-
   buildSubagent =
     name: srcPath:
-    let
-      fm = splitFrontmatter srcPath;
-    in
     pkgs.runCommand "${name}.md"
       {
-        nativeBuildInputs = [ pkgs.yq ];
-        inherit (fm) frontmatter body;
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.gawk
+          pkgs.gnused
+          pkgs.yq
+        ];
       }
       ''
-        tools=$(yq -y '.tools |= (((. + ["Skill"]) | unique) | map({(ascii_downcase):true}) | add)' <<<"$frontmatter")
+        test "$(head -n 1 ${srcPath})" = '---'
+        closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' ${srcPath})
+        test -n "$closing"
+        sed -n "2,$((closing - 1))p" ${srcPath} > frontmatter.yaml
+        tail -n "+$((closing + 1))" ${srcPath} > body.md
+
+        tools=$(yq -y '.tools |= (((. + ["Skill"]) | unique) | map({(ascii_downcase):true}) | add)' frontmatter.yaml)
         {
           printf '%s\n' '---'
           printf '%s\n' "$tools"
           printf '%s\n' '---'
-          printf '%s\n' "$body"
+          cat body.md
         } > "$out"
       '';
 in
@@ -75,6 +73,8 @@ in
         deployment = "home";
         destination = ".config/opencode/opencode.json";
       };
+    }
+    // lib.optionalAttrs projectMemoryEnabled {
       agentmemory-plugin = {
         source = config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.opencodePlugin;
         format = "text";
@@ -84,11 +84,11 @@ in
     };
     capabilityManagedFiles = {
       lsp = "config";
-      agentmemory = "agentmemory-plugin";
+      agentmemory = if projectMemoryEnabled then "agentmemory-plugin" else null;
     };
     lspMode = "supported";
     telemetryMode = "unsupported";
-    agentmemoryMode = "plugin";
+    agentmemoryMode = if projectMemoryEnabled then "plugin" else "unsupported";
     skillProjectionMode = "dynamic";
     install = {
       kind = "github-release";

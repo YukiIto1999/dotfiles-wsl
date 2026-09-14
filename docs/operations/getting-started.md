@@ -2,7 +2,7 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-新規の NixOS-WSL ホストを `~/dotfiles-wsl` から構築する。中断のない通常系は、host key の enrollment、bootstrap、WSL 再起動、OCI image の同期、rebuild、doctor の順に進める。
+新規の NixOS-WSL ホストを `~/dotfiles-wsl` から構築する。中断のない通常系は、host key の enrollment、bootstrap、WSL 再起動、containerを選ぶhostだけOCI imageの同期、rebuild、doctor の順に進める。
 
 ## 前提
 
@@ -78,7 +78,15 @@ wsl -t NixOS
 wsl -d NixOS
 ```
 
-再ログイン後は通常ユーザーで upstream OCI image を同期し、同じ checkout を `dotfiles-rebuild` で適用する。
+再ログイン後は、bootstrapが表示したhost別の継続手順を通常ユーザーで実行する。container Capabilityを選ぶhostでは、upstream OCI imageを同期してから同じcheckoutを適用する。以下の短いcommandは、active host configurationが配備したものを使う。
+
+checkoutから対象hostを明示して実行する場合は、次のpathを使う。
+
+```bash
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages
+```
+active host configurationが配備したcommandは、次のように短い名前で実行する。
 
 ```bash
 cd ~/dotfiles-wsl
@@ -86,7 +94,14 @@ dotfiles-sync-images
 dotfiles-rebuild
 ```
 
-初回 boot generation の container unit は、Docker cache に upstream image がないため失敗し得る。`dotfiles-sync-images` の後に `dotfiles-rebuild` を実行すると、同期済み image を使って service が収束する。rebuild が別の WSL 再起動を指示した場合は、表示された手順を完了してから検証へ進む。
+container Capabilityを一つも選ばないhostでは同期command自体を配備しない。bootstrapの表示どおり、rebuildだけを実行する。
+
+```bash
+cd ~/dotfiles-wsl
+dotfiles-rebuild
+```
+
+初回boot generationのcontainer unitは、Docker cacheにupstream imageがないため失敗し得る。containerを選ぶhostでは、`dotfiles-sync-images`の後に`dotfiles-rebuild`を実行すると、同期済みimageを使ってserviceが収束する。rebuildが別のWSL再起動を指示した場合は、表示された手順を完了してから検証へ進む。
 
 ## 検証
 
@@ -106,6 +121,8 @@ doctor が成功し、`git status --short` に暗号化済みファイル二つ�
 別ホストでも clone から検証まで同じ順序を使い、ホストごとに登録済みの host ID と新しい host key を使う。既存ホストの `/var/lib/sops-nix/key.txt` や `~/.config/sops/age/keys.txt` はコピーしない。
 
 Windows drive の一覧は対応する [`profiles/hosts/`](../../profiles/hosts) の profile に置く。memory と swap の既定値は実装側の共通方針で、差が必要な host だけ同じ profile から `dotfiles.workstation.swap` または `dotfiles.workstation.windowsMemoryCommit` を上書きする。
+
+全host共通のCapabilityは[`profiles/workstation.nix`](../../profiles/workstation.nix)、containerを含むhost固有のCapabilityは同じhost profileの`dotfiles.capabilities.enabled`で選ぶ。`code-quality`、`project-memory`、`web-content`、`web-discovery`を外すと、対応するcontainerだけでなくMCP target、credential、health observation、client integrationも配備されない。container backendを一つも選ばないhostではDocker自体を配備しない。
 
 新しい enrollment を始める前に、直前のホストで生じた暗号化済み差分を commit し、その repository を利用する全ホストへ同期する。bootstrap 前に差分を退避する必要がある場合は、平文を保存せず、外部媒体へ Git patch を作る。
 

@@ -10,11 +10,26 @@ let
     value: value != "" && builtins.match "[a-z0-9]+(-[a-z0-9]+)*" value != null
   );
   registryNames = builtins.attrNames cfg.registry;
+  capabilityRegistryNames = builtins.attrNames config.dotfiles.capabilities.registry;
   missingSkillFiles = builtins.filter (
     name: !builtins.pathExists (cfg.registry.${name}.source + "/SKILL.md")
   ) registryNames;
-  unknownEnabled = builtins.filter (name: !builtins.hasAttr name cfg.registry) cfg.enabled;
-  duplicateEnabled = builtins.length cfg.enabled != builtins.length (lib.unique cfg.enabled);
+  unknownRequiredCapabilities = lib.concatMap (
+    name:
+    map (capability: "${name}/${capability}") (
+      builtins.filter (
+        capability: !builtins.elem capability capabilityRegistryNames
+      ) cfg.registry.${name}.requiresCapabilities
+    )
+  ) registryNames;
+  unknownOptionalCapabilities = lib.concatMap (
+    name:
+    map (capability: "${name}/${capability}") (
+      builtins.filter (
+        capability: !builtins.elem capability capabilityRegistryNames
+      ) cfg.registry.${name}.optionalCapabilities
+    )
+  ) registryNames;
   unknownSkillDependencies = lib.concatMap (
     name:
     map (dependency: "${name}/${dependency}") (
@@ -23,26 +38,61 @@ let
       ) cfg.registry.${name}.requiresSkills
     )
   ) registryNames;
-  duplicateDependencies = builtins.filter (
+  duplicateMetadata = lib.concatMap (
     name:
     let
       skill = cfg.registry.${name};
+      duplicate = values: builtins.length values != builtins.length (lib.unique values);
     in
-    builtins.length skill.requiresCapabilities
-    != builtins.length (lib.unique skill.requiresCapabilities)
-    || builtins.length skill.requiresSkills != builtins.length (lib.unique skill.requiresSkills)
+    lib.optional (duplicate skill.requiresCapabilities) "${name}/requiresCapabilities"
+    ++ lib.optional (duplicate skill.optionalCapabilities) "${name}/optionalCapabilities"
+    ++ lib.optional (duplicate skill.requiresSkills) "${name}/requiresSkills"
   ) registryNames;
-  disabledRequiredSkills = lib.concatMap (
+  overlappingCapabilities = lib.concatMap (
     name:
-    if builtins.hasAttr name cfg.registry then
-      map (dependency: "${name}/${dependency}") (
-        builtins.filter (
-          dependency: !builtins.elem dependency cfg.enabled
-        ) cfg.registry.${name}.requiresSkills
-      )
-    else
-      [ ]
-  ) cfg.enabled;
+    map (capability: "${name}/${capability}") (
+      builtins.filter (
+        capability: builtins.elem capability cfg.registry.${name}.requiresCapabilities
+      ) cfg.registry.${name}.optionalCapabilities
+    )
+  ) registryNames;
+  skillClosure =
+    initial:
+    let
+      visit =
+        pending: visited:
+        if pending == [ ] then
+          visited
+        else
+          let
+            name = builtins.head pending;
+            remaining = builtins.tail pending;
+            dependencies =
+              if builtins.hasAttr name cfg.registry then cfg.registry.${name}.requiresSkills else [ ];
+          in
+          if builtins.elem name visited then
+            visit remaining visited
+          else
+            visit (remaining ++ dependencies) (visited ++ [ name ]);
+    in
+    visit initial [ ];
+  requiredCapabilitiesFor =
+    name:
+    lib.unique (
+      lib.concatMap (
+        dependency:
+        if builtins.hasAttr dependency cfg.registry then
+          cfg.registry.${dependency}.requiresCapabilities
+        else
+          [ ]
+      ) (skillClosure [ name ])
+    );
+  deployableSkills = builtins.filter (
+    name:
+    lib.all (capability: builtins.elem capability config.dotfiles.capabilities.resolved) (
+      requiredCapabilitiesFor name
+    )
+  ) registryNames;
 in
 {
   options.dotfiles.skills = {
@@ -58,6 +108,11 @@ in
               type = lib.types.listOf skillIdType;
               description = "Skill の手順が利用する consumer 非依存 Capability ID";
             };
+            optionalCapabilities = lib.mkOption {
+              type = lib.types.listOf skillIdType;
+              default = [ ];
+              description = "Skill の手順が利用するとより豊かになる Capability ID";
+            };
             requiresSkills = lib.mkOption {
               type = lib.types.listOf skillIdType;
               description = "Skill の手順が合成する別の Skill ID";
@@ -72,34 +127,38 @@ in
 
     enabled = lib.mkOption {
       type = lib.types.listOf skillIdType;
-      description = "全 agent client へ配備する Skill ID の重複しない一覧";
+      readOnly = true;
+      internal = true;
+      description = "resolved Capability で配備可能な Skill ID の一覧";
     };
   };
+  config.dotfiles.skills.enabled = deployableSkills;
 
   config.assertions = [
     {
-      assertion = cfg.enabled != [ ] && !duplicateEnabled;
-      message = "dotfiles.skills.enabled must be non-empty and contain no duplicate Skill IDs";
-    }
-    {
-      assertion = unknownEnabled == [ ];
-      message = "Unknown enabled Skill IDs: ${lib.concatStringsSep ", " unknownEnabled}";
-    }
-    {
       assertion = missingSkillFiles == [ ];
       message = "Skill sources must contain SKILL.md: ${lib.concatStringsSep ", " missingSkillFiles}";
+    }
+    {
+      assertion = unknownRequiredCapabilities == [ ] && unknownOptionalCapabilities == [ ];
+      message =
+        "Skills reference unknown Capabilities: "
+        + lib.concatStringsSep ", " (unknownRequiredCapabilities ++ unknownOptionalCapabilities);
     }
     {
       assertion = unknownSkillDependencies == [ ];
       message = "Unknown Skill dependencies: ${lib.concatStringsSep ", " unknownSkillDependencies}";
     }
     {
-      assertion = duplicateDependencies == [ ];
-      message = "Skill dependency lists must not contain duplicates: ${lib.concatStringsSep ", " duplicateDependencies}";
+      assertion = duplicateMetadata == [ ];
+      message =
+        "Skill metadata lists must not contain duplicates: " + lib.concatStringsSep ", " duplicateMetadata;
     }
     {
-      assertion = disabledRequiredSkills == [ ];
-      message = "Enabled Skills require disabled Skills: ${lib.concatStringsSep ", " disabledRequiredSkills}";
+      assertion = overlappingCapabilities == [ ];
+      message =
+        "Skill required and optional Capabilities must not overlap: "
+        + lib.concatStringsSep ", " overlappingCapabilities;
     }
   ];
 }

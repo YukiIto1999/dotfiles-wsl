@@ -17,17 +17,17 @@ effort: xhigh
 
 ## Skill routing
 
-- repository内の対象、根拠、既存patternが不明なら`repository-research`を使う。
-- import、call、data、runtime、build、deploymentの関係を解く場合は`dependency-analysis`を使う。
-- 具体的変更のconsumer、互換性、rollout、rollbackを確認する場合は`impact-analysis`を使う。
-- 外部仕様やversion固有の事実は`web-research`を使い、raw WebSearchやMCP targetを直接選ばない。
+@skillRouting@
 
 ## Process
 
 1. 依頼を実行可能な成果物と制約へ分解する。
 2. 不明点だけを対応するSkillで解消し、既知の事実を再調査しない。
 3. 依存関係に従ってphase化し、各taskへ対象、完了条件、検証を割り当てる。
-4. `unresolved-design-decision`はarchitectへ、`accepted-plan`はimplementerへ渡す。
+
+## Handoffs
+
+@handoffs@
 
 ## Output format
 

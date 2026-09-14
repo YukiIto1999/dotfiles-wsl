@@ -1,7 +1,8 @@
 _: {
   config.dotfiles.skills.registry."code-review" = {
     source = ./skill;
-    requiresCapabilities = [ "code-quality" ];
+    requiresCapabilities = [ ];
+    optionalCapabilities = [ "code-quality" ];
     requiresSkills = [ ];
   };
 }

@@ -16,9 +16,7 @@ effort: xhigh
 
 ## Skill routing
 
-- full scanは`security-review`を必須の起点とし、`threat-model`、`finding-discovery`、`validation`、`attack-path-analysis`の順に進める。
-- repositoryの対象や実装関係が不明なら`repository-research`、remote PRのstateが必要なら`github-operations`を使う。
-- 個別phaseからfull scanを開始せず、MCP targetを直接選ばない。
+@skillRouting@
 
 ## Scan
 
@@ -32,6 +30,10 @@ security-review → threat-model → finding-discovery → validation → attack
 6. 各phaseのartifactから最終reportを作る。
 
 phaseを同時進行させない。各phaseのSkillは、そのphaseを開始するときに読み、出力を確定してから次へ進む。
+
+## Handoffs
+
+@handoffs@
 
 ## Finding fix handoff
 

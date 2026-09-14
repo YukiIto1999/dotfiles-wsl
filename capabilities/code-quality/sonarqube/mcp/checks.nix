@@ -115,6 +115,9 @@ let
                     };
                   };
                 };
+                dotfiles.capabilities.resolved = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                };
                 dotfiles.capabilities.code-quality.sonarqube.credentials.adminPasswordFile = lib.mkOption {
                   type = lib.types.str;
                 };
@@ -150,6 +153,7 @@ let
                     ];
                   };
                 };
+                dotfiles.capabilities.resolved = [ "code-quality" ];
                 dotfiles.capabilities.code-quality.sonarqube.credentials.adminPasswordFile = passwordFile;
                 sops = sopsStub;
               };

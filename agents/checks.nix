@@ -22,6 +22,7 @@ let
   expectedCheckNames = [
     "agent-apm-binary-runs"
     "agent-artifact-contract"
+    "agent-capability-gating"
     "agent-client-roster"
     "agent-config-migration"
     "agent-installer-behavior"

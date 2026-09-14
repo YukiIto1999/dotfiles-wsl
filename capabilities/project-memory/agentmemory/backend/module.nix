@@ -6,6 +6,7 @@
 }:
 
 let
+  enabled = builtins.elem "project-memory" config.dotfiles.capabilities.resolved;
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
   };
@@ -49,7 +50,7 @@ in
     };
   };
 
-  config = {
+  config = lib.mkIf enabled {
     dotfiles.capabilities.project-memory.agentmemory.upstream = {
       inherit (agentmemory) version;
       root = agentmemory.upstreamRoot;

@@ -7,6 +7,7 @@
 
 let
   cfg = config.dotfiles;
+  projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   codexModel = "gpt-5.6-sol";
   dotfilesHomeRelative = lib.removePrefix "${cfg.workstation.homeDir}/" cfg.workstation.dotfilesDir;
   dotfilesPathComponents = lib.splitString "/" dotfilesHomeRelative;
@@ -29,10 +30,26 @@ let
   codexGatewayConfig = (pkgs.formats.toml { }).generate "codex-gateway.toml" {
     mcp_servers.gateway.url = config.dotfiles.platform.mcp.gateway.url;
   };
-  codexSystemBase = pkgs.replaceVars ./assets/config-system.toml {
+  codexSystemBaseTemplate = pkgs.replaceVars ./assets/config-system.toml {
     inherit codexModel;
     homeDir = cfg.workstation.homeDir;
   };
+  codexSystemBaseWithoutAgentMemory =
+    pkgs.runCommandLocal "codex-system-base-without-agentmemory.toml"
+      {
+        nativeBuildInputs = [
+          pkgs.jq
+          pkgs.remarshal
+        ];
+      }
+      ''
+        set -euo pipefail
+        remarshal -if toml -of json ${codexSystemBaseTemplate} \
+          | jq 'del(.hooks)' \
+          | remarshal -if json -of toml > "$out"
+      '';
+  codexSystemBase =
+    if projectMemoryEnabled then codexSystemBaseTemplate else codexSystemBaseWithoutAgentMemory;
   # subagent file は symlink だと O_NOFOLLOW で開けないため、store の実体を直接指す
   codexAgentsConfig = (pkgs.formats.toml { }).generate "codex-agents.toml" {
     agents = {
@@ -41,9 +58,19 @@ let
     }
     // lib.mapAttrs (_: source: { config_file = toString source; }) codexSubagents;
   };
-  codexSystemConfig = pkgs.runCommandLocal "codex-system-config.toml" { } ''
-    cat ${codexSystemBase} ${codexAgentsConfig} ${codexRuntimeConfig} ${codexGatewayConfig} > "$out"
-  '';
+  codexSystemConfig =
+    pkgs.runCommandLocal "codex-system-config.toml"
+      {
+        nativeBuildInputs = [ pkgs.gnugrep ];
+      }
+      ''
+        set -euo pipefail
+        cat ${codexSystemBase} ${codexAgentsConfig} ${codexRuntimeConfig} ${codexGatewayConfig} > "$out"
+        if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$out"; then
+          echo "Codex system config has an unresolved template marker" >&2
+          exit 1
+        fi
+      '';
   codexUserSeed = pkgs.replaceVars ./assets/config.toml {
     inherit codexModel;
     homeDir = cfg.workstation.homeDir;
@@ -75,40 +102,35 @@ let
         (builtins.readFile ./impl/migrate-config.sh);
   };
 
-  splitFrontmatter =
-    src:
-    let
-      parts = lib.splitString "\n---\n" (builtins.readFile src);
-    in
-    {
-      frontmatter = lib.removePrefix "---\n" (builtins.head parts);
-      body = lib.concatStringsSep "\n---\n" (builtins.tail parts);
-    };
-
   buildSubagent =
     name: srcPath:
-    let
-      fm = splitFrontmatter srcPath;
-    in
     pkgs.runCommand "${name}.toml"
       {
         nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.gawk
+          pkgs.gnused
           pkgs.remarshal
           pkgs.yq
         ];
-        inherit (fm) frontmatter body;
       }
       ''
+        test "$(head -n 1 ${srcPath})" = '---'
+        closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' ${srcPath})
+        test -n "$closing"
+        sed -n "2,$((closing - 1))p" ${srcPath} > frontmatter.yaml
+        tail -n "+$((closing + 1))" ${srcPath} > body.md
+
         # frontmatter から codex agent schema への変換
         yq -y '
           del(.tools)
           | if has("effort") then .model_reasoning_effort = .effort | del(.effort) else . end
-        ' <<<"$frontmatter" | remarshal -if yaml -of toml > "$out"
+        ' frontmatter.yaml | remarshal -if yaml -of toml > "$out"
         {
           printf 'model = "${codexModel}"\n'
           printf 'developer_instructions = """\n'
-          printf '%s\n' "$body"
-          printf '"""\n'
+          cat body.md
+          printf '\n"""\n'
         } >> "$out"
       '';
   codexSubagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
@@ -148,10 +170,10 @@ in
         seedMigrationCommand = migrateCodexConfig;
       };
     };
-    capabilityManagedFiles.agentmemory = "system";
+    capabilityManagedFiles.agentmemory = if projectMemoryEnabled then "system" else null;
     lspMode = "unsupported";
     telemetryMode = "unsupported";
-    agentmemoryMode = "hooks";
+    agentmemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
     skillProjectionMode = "dynamic";
     install = {
       kind = "github-release";

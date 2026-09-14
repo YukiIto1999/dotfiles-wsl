@@ -5,6 +5,7 @@
 }:
 
 let
+  enabled = builtins.elem "code-quality" config.dotfiles.capabilities.resolved;
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
   };
@@ -32,7 +33,7 @@ in
     readOnly = true;
   };
 
-  config = {
+  config = lib.mkIf enabled {
     dotfiles.capabilities.code-quality.sonarqube.credentials.adminPasswordFile =
       config.sops.secrets."sonarqube/admin_password".path;
 

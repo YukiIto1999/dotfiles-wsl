@@ -16,6 +16,8 @@ let
   service = hostConfig.systemd.services.${front.service};
   endpoint = "http://127.0.0.1:${toString port}/mcp";
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
+  staleLockPath = "${hostConfig.dotfiles.workstation.homeDir}/.zvec-grep/daemon/instance.lock";
+  staleLockRule = hostConfig.systemd.tmpfiles.settings."zvec-grep".${staleLockPath}."r!" or null;
 in
 {
   zvec-grep-front =
@@ -30,6 +32,15 @@ in
     assert service.serviceConfig.ExecStart == lib.getExe frontPackage;
     assert homeConfig.home.sessionVariables.ZVEC_GREP_MODE == "auto";
     assert homeConfig.home.sessionVariables.ZVEC_GREP_SERVER_URL == endpoint;
+    assert
+      staleLockRule == {
+        age = "-";
+        argument = "";
+        group = "-";
+        mode = "-";
+        type = "r!";
+        user = "-";
+      };
     pkgs.runCommandLocal "check-zvec-grep-front"
       {
         nativeBuildInputs = with pkgs; [
@@ -39,12 +50,22 @@ in
           gnugrep
           gnused
           jq
+          systemd
         ];
       }
       ''
         set -euo pipefail
 
         grep -Fq ${lib.escapeShellArg endpoint} ${hostConfig.dotfiles.platform.mcp.gateway.source}
+
+        test_root=$TMPDIR/tmpfiles-root
+        mkdir -p "$test_root$(dirname ${lib.escapeShellArg staleLockPath})"
+        printf '{"pid":1}\n' > "$test_root${staleLockPath}"
+        printf 'r! %s - - - - -\n' ${lib.escapeShellArg staleLockPath} > zvec-grep.conf
+        systemd-tmpfiles --remove --root="$test_root" - < zvec-grep.conf
+        test -e "$test_root${staleLockPath}"
+        systemd-tmpfiles --remove --boot --root="$test_root" - < zvec-grep.conf
+        test ! -e "$test_root${staleLockPath}"
 
         export HOME=$TMPDIR/home
         mkdir -p "$HOME"

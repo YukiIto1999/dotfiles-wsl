@@ -7,6 +7,12 @@ die()     { trap - ERR; echo "FATAL: $*" >&2; exit 1; }
 as_user() { sudo -u "${SUDO_USER}" "$@"; }
 step()    { printf '[%d/%d] %s\n' "$((++STEP))" "${TOTAL}" "$*"; }
 
+parse_target_host() {
+  [[ $# -eq 2 && $1 == --host ]] || return 2
+  [[ $2 =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] || return 2
+  printf '%s\n' "$2"
+}
+
 trap 'die "line ${LINENO}: ${BASH_COMMAND}"' ERR
 
 ensure_root() {
@@ -67,18 +73,18 @@ verify_secrets() {
 }
 
 install_agent_clients() {
-  as_user nix run "${FLAKE_REF}#dotfiles-install-agents"
+  as_user nix run "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents"
   step "agent clients installed from upstream"
 }
 
 install_boot_generation() {
   local upstream_rebuild
   upstream_rebuild=$(nix build --no-link --print-out-paths --no-write-lock-file \
-    "${FLAKE_REF}#nixosConfigurations.nixos.config.system.build.nixos-rebuild")
+    "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.system.build.nixos-rebuild")
   [[ ${upstream_rebuild} != *$'\n'* && ${upstream_rebuild} == /nix/store/* &&
     -x ${upstream_rebuild}/bin/nixos-rebuild ]] \
     || die "failed to resolve the pinned nixos-rebuild"
-  "${upstream_rebuild}/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#nixos" -L
+  "${upstream_rebuild}/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#${TARGET_HOST}" -L
   step "nixos-rebuild boot complete"
 }
 
@@ -124,6 +130,10 @@ declare -ar BOOTSTRAP_STAGES=(
 )
 
 main() {
+  local TARGET_HOST
+  TARGET_HOST=$(parse_target_host "$@") \
+    || die "usage: sudo bash workstation/activation/rebuild/impl/bootstrap.sh --host <host-id>"
+  readonly TARGET_HOST
   # config 生成前に実行するため dotfiles.workstation.username を参照できない。既定値と同じ "nixos" を使う
   local -r TARGET_USER="nixos"
   local -r USER_HOME="/home/${TARGET_USER}"

@@ -16,12 +16,13 @@
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | doctor が owner の observation registry を欠落なく key 順に投影し、17 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
 | 17 種類の observation kind の pass、warn、fail、resource、restart 集約と、protocol の不正、過大出力、非ゼロ終了、timeout を固定 message と終了 status に反映する。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする | `doctor-runtime` |
-| WSL 専用 zram lifecycle、journald、標準 fstrim、Nix の容量 reserve、Windows drive と committed memory の観測、service 非依存が宣言どおりである | `host-stability-contract` |
+| host profile の Windows drive だけを観測し、profile で上書きした zram、swap、Windows committed memory の値を runtime contract へ反映する | `machine-profile-contract` |
+| WSL 専用 zram lifecycle、journald、標準 fstrim、Nix の容量 reserve、host profile から導いた Windows drive と committed memory の観測、service 非依存が宣言どおりである | `host-stability-contract` |
 | 宣言した time zone と default locale が実際の日時書式に現れ、UTC と C へ無言で戻らない | `host-locale-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
 | runtime observation registry が 17 種類の observation kind、必須 field、path と ID、閾値、専用 command package を型で制限し、定義位置を owner と照合する | `observation-contract` |
 | required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
-| 宣言した recipient と暗号文の recipient が一致し host 鍵と recovery 鍵が揃う | `sops-policy` |
+| 宣言、参照、暗号文の recipient が一致し、recovery 鍵が一つ、host 鍵が一つ以上あり、登録した全 host の鍵を含む | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
 | container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
@@ -38,11 +39,11 @@
 | MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |
 | MCP target、front、gateway から service、restart、roster、protocol observation を漏れなく導き、追加、削除、変更、stale entry に追随する | `mcp-runtime-observation-contract` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
-| generation が無い状態から age 鍵を配って rebuild へ渡し、鍵 path が宣言と一致する | `bootstrap-age-key` |
+| generation がない状態から対象 host を明示し、age 鍵を使ってその host の Agent と boot generation を作り、鍵 path が宣言と一致する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | stdio service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
 | service lifecycle front と native Streamable HTTP front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
-| Zvec-Grep front が native Streamable HTTP endpoint を直接公開し、agent toolset が意味検索だけを公開する | `zvec-grep-front` |
+| Zvec-Grep front が native Streamable HTTP endpoint を直接公開し、agent toolset が意味検索だけを公開し、boot 時だけ前 boot の instance lock を除去する | `zvec-grep-front` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
@@ -81,7 +82,7 @@
 | container applicationのendpoint URLとportがOCI publish、unitがsystemd serviceに完全一致し、healthが宣言済みHTTP endpointを参照する | `nixos-toplevel`（`platform/containers/module.nix`のassertion） |
 | Capability、MCP target、container backend、GitHub account、front集合が型付きassertionを満たす | `nixos-toplevel`（`capabilities/module.nix`と`platform/mcp/module.nix`のassertion） |
 | image IDがcontainerを一意に指す | `nixos-toplevel`（`platform/containers/module.nix`のassertion） |
-| 全 module から system closure を評価できる | `nixos-toplevel` |
+| 登録した各 host の全 module から system closure を評価できる | `nixos-toplevel`、`tcs-a295-toplevel` |
 | gateway port を変え、同じ固定 provider roster を使う第二の評価からも system closure を評価できる | `nixos-variant-toplevel` |
 
 ## runtime の振る舞い

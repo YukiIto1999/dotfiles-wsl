@@ -2,13 +2,22 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-container は `pull = "never"` で起動する。宣言した digest の image が事前に無いと起動しない。`dotfiles-sync-images` がその事前配置を行う。
+containerは `pull = "never"` で起動する。宣言した digest の image が事前に無いと起動しない。containerを選択したhostだけが `dotfiles-sync-images` を配備する。containerless hostにはこのcommandがないため、以下の手順は実行しない。
 
 ## 使う
+
+rebuild後のactive hostでは、配備されたcommandを短い名前で実行する。
 
 ```sh
 dotfiles-sync-images --status   # 足りない image と pin の切れた image を挙げる。exit 1 なら未同期
 dotfiles-sync-images            # 足りないものを pull し、pin を付け直す
+```
+
+checkoutから対象hostを明示して実行する場合は、host構成のcommandを直接指定する。
+
+```sh
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status
+nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages
 ```
 
 image が既にあるかは docker が答える。同期の状態を別に記録しない。

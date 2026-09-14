@@ -276,6 +276,9 @@ let
                     };
                   };
                 };
+                dotfiles.capabilities.resolved = lib.mkOption {
+                  type = lib.types.listOf lib.types.str;
+                };
                 dotfiles.capabilities.web-content.crawl4ai.credentials.apiTokenFile = lib.mkOption {
                   type = lib.types.str;
                 };
@@ -308,6 +311,7 @@ let
                     units = expectedWaitUnits;
                   };
                 };
+                dotfiles.capabilities.resolved = [ "web-content" ];
                 dotfiles.capabilities.web-content.crawl4ai.credentials.apiTokenFile = expectedTokenFile;
                 sops = sopsStub;
               };

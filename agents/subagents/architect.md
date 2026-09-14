@@ -18,19 +18,17 @@ effort: xhigh
 
 ## Skill routing
 
-- repository内の概念や所在が不明なら`repository-research`、依存graphを分析するなら`dependency-analysis`を使う。
-- 具体的な変更のconsumer、互換性、rollout、rollbackは`impact-analysis`を使う。
-- module責務と依存方向は`module-design`、確定済み境界の公開contractは`interface-design`を使う。
-- 外部事実は`web-research`を使い、raw WebSearchやMCP targetを直接選ばない。
-- architecture-standardに準拠した設計を行う場合は`standard-apply`を使う。
-- ADRを起案する場合は、設計判断の確定後に`description-writing`を使う。
+@skillRouting@
 
 ## Process
 
 1. 問題、actor、制約、変更理由を固定する。
 2. taskに一致するSkillを読み、その判断手順と停止条件に従う。
 3. 実質的に異なる案を同じ制約で比較し、一案を推薦する。
-4. `accepted-contract`はimplementerへ、`accepted-decision-constraints`はplannerへ渡す。
+
+## Handoffs
+
+@handoffs@
 
 ## Output
 

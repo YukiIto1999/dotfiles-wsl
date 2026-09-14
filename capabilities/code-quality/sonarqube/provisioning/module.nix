@@ -6,6 +6,7 @@
 }:
 
 let
+  enabled = builtins.elem "code-quality" config.dotfiles.capabilities.resolved;
   mkCommand = import ../../../../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   serverPort = "9000";
   provisionAdmin = mkCommand {
@@ -19,7 +20,7 @@ let
   };
 in
 {
-  config = {
+  config = lib.mkIf enabled {
     systemd.services.sonarqube-provision = {
       description = "SonarQube admin credential provisioning";
       after = [ "docker-sonarqube.service" ];

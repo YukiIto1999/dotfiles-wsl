@@ -1,4 +1,9 @@
-{ lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 {
   options.dotfiles.capabilities.browser-runtime.package = lib.mkOption {
@@ -8,5 +13,7 @@
     description = "browser Capability implementation が共有する browser runtime package";
   };
 
-  config.dotfiles.capabilities.browser-runtime.package = pkgs.chromium;
+  config = lib.mkIf (builtins.elem "browser-runtime" config.dotfiles.capabilities.resolved) {
+    dotfiles.capabilities.browser-runtime.package = pkgs.chromium;
+  };
 }

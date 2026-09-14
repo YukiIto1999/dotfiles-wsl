@@ -5,6 +5,7 @@
 }:
 
 let
+  enabled = builtins.elem "code-quality" config.dotfiles.capabilities.resolved;
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
   };
@@ -23,7 +24,7 @@ let
   };
 in
 {
-  config = {
+  config = lib.mkIf enabled {
     dotfiles.platform.containers.services.sonarqube = {
       units = [ "docker-sonarqube-db.service" ];
       containerPolicy = {

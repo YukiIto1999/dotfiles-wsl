@@ -18,15 +18,17 @@ effort: xhigh
 
 ## Skill routing
 
-- すべての探索は`repository-research`から始め、semantic retrieval、exact search、LSPの選択と一次source確認を同Skillへ委ねる。
-- 一般的な所在探索ではなく、node、edge、directionを定義した依存graphが必要な場合だけ`dependency-analysis`を使う。
+@skillRouting@
 
 ## Work
 
 1. callerから得た問い、既知のsymbol、必要なevidenceを固定する。
 2. routingしたSkillの停止条件まで調査する。
 3. ファイル、symbol、依存関係、根拠位置だけを圧縮して返す。
-4. `dependency-facts`はarchitectへ、`repository-evidence`はplannerへ渡す。
+
+## Handoffs
+
+@handoffs@
 
 ## Output format
 

@@ -13,6 +13,39 @@ parse_target_host() {
   printf '%s\n' "$2"
 }
 
+container_sync_required() {
+  nix eval --raw --no-write-lock-file \
+    "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.containers.enabled" \
+    --apply 'containers: if containers == [ ] then "false" else "true"'
+}
+
+print_completion() {
+  local sync_required
+  local sync_command=""
+
+  sync_required=$(container_sync_required) \
+    || die "failed to evaluate container Capability selection for ${TARGET_HOST}"
+  if [[ ${sync_required} == true ]]; then
+    sync_command=$'  dotfiles-sync-images\n'
+  fi
+
+  cat <<MSG
+
+Bootstrap completed.
+
+Restart this WSL distribution from PowerShell:
+
+  wsl -t NixOS
+  wsl -d NixOS
+
+Then run:
+
+${sync_command}  dotfiles-rebuild
+  dotfiles-doctor
+
+MSG
+}
+
 trap 'die "line ${LINENO}: ${BASH_COMMAND}"' ERR
 
 ensure_root() {
@@ -147,22 +180,7 @@ main() {
 
   run_bootstrap_stages
 
-  cat <<MSG
-
-Bootstrap completed.
-
-Restart this WSL distribution from PowerShell:
-
-  wsl -t NixOS
-  wsl -d NixOS
-
-Then run:
-
-  dotfiles-sync-images
-  dotfiles-rebuild
-  dotfiles-doctor
-
-MSG
+  print_completion
 }
 
 if [[ ${BASH_SOURCE[0]} == "$0" ]]; then

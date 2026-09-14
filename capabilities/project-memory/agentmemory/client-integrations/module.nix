@@ -6,6 +6,7 @@
 }:
 
 let
+  enabled = builtins.elem "project-memory" config.dotfiles.capabilities.resolved;
   agentmemory = pkgs.callPackage ./package.nix {
     agentmemoryUrl = config.dotfiles.platform.containers.services.agentmemory.endpoints.http.url;
     upstreamRoot = config.dotfiles.capabilities.project-memory.agentmemory.upstream.root;
@@ -31,7 +32,9 @@ in
     };
   };
 
-  config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations = {
-    inherit (agentmemory) hooks opencodePlugin version;
+  config = lib.mkIf enabled {
+    dotfiles.capabilities.project-memory.agentmemory.clientIntegrations = {
+      inherit (agentmemory) hooks opencodePlugin version;
+    };
   };
 }

@@ -6,6 +6,7 @@
 }:
 
 let
+  enabled = builtins.elem "code-quality" config.dotfiles.capabilities.resolved;
   mkMcpServer = pkgs.callPackage ../../../../platform/mcp/package/mk-server.nix { };
   mkNpmMcp = pkgs.callPackage ../../../../platform/mcp/package/mk-npm.nix { };
   backend = config.dotfiles.platform.containers.services.sonarqube;
@@ -18,16 +19,18 @@ let
   };
 in
 {
-  dotfiles.platform.mcp.targets.sonarqube = {
-    provider = "sonarqube";
-    executable = lib.getExe front;
-    serverLifecycle = "service";
-    port = 8778;
-    waitUnits = backend.units;
-    probe = {
-      tool = "system_status";
-      args = { };
-      timeout = 30;
+  config = lib.mkIf enabled {
+    dotfiles.platform.mcp.targets.sonarqube = {
+      provider = "sonarqube";
+      executable = lib.getExe front;
+      serverLifecycle = "service";
+      port = 8778;
+      waitUnits = backend.units;
+      probe = {
+        tool = "system_status";
+        args = { };
+        timeout = 30;
+      };
     };
   };
 }

@@ -16,6 +16,8 @@ let
   zram = hostConfig.zramSwap;
   zramGenerator = hostConfig.services.zram-generator;
   zramService = hostConfig.systemd.services.dotfiles-zram-swap or { };
+  wslMemoryReclaimService = hostConfig.systemd.services.dotfiles-wsl-memory-reclaim or { };
+  wslMemoryReclaimTimer = hostConfig.systemd.timers.dotfiles-wsl-memory-reclaim or { };
   journald = hostConfig.services.journald;
   fstrimService = hostConfig.systemd.services.fstrim or { };
   fstrimTimer = hostConfig.systemd.timers.fstrim;
@@ -45,6 +47,7 @@ let
       "host/swap"
       "host/system-generation"
       "host/windows-memory-commit"
+      "host/wsl-memory-reclaim"
     ]
     ++ windowsDriveObservationKeys
   );
@@ -68,6 +71,21 @@ let
       serviceResults = [ "success" ];
       timeoutSeconds = 10;
       timer = "fstrim.timer";
+      unitFileStates = [
+        "enabled"
+        "enabled-runtime"
+      ];
+    };
+    "host/wsl-memory-reclaim" = {
+      activeStates = [ "active" ];
+      checkId = "maintenance/dotfiles-wsl-memory-reclaim.timer";
+      failureMessage = "dotfiles-wsl-memory-reclaim.timer or its service is not operational";
+      kind = "systemd-timer";
+      resourceKey = null;
+      service = "dotfiles-wsl-memory-reclaim.service";
+      serviceResults = [ "success" ];
+      timeoutSeconds = 10;
+      timer = "dotfiles-wsl-memory-reclaim.timer";
       unitFileStates = [
         "enabled"
         "enabled-runtime"
@@ -523,6 +541,26 @@ in
     assert lib.assertMsg (lib.elem pkgs.util-linux (
       zramService.path or [ ]
     )) "dotfiles-zram-swap must expose mkswap from util-linux";
+    assert lib.assertMsg (
+      wslMemoryReclaimService.serviceConfig.Type or null == "oneshot"
+    ) "WSL memory reclaim must be an isolated oneshot service";
+    assert lib.assertMsg (
+      wslMemoryReclaimService.serviceConfig.TimeoutStartSec or null == "20s"
+    ) "WSL memory reclaim must not remain blocked indefinitely";
+    assert lib.assertMsg (
+      wslMemoryReclaimService.serviceConfig.Nice or null == 19
+      && wslMemoryReclaimService.serviceConfig.IOSchedulingClass or null == "idle"
+    ) "WSL memory reclaim must yield to active sessions";
+    assert lib.assertMsg (
+      wslMemoryReclaimService.unitConfig.ConditionVirtualization or null == "wsl"
+    ) "WSL memory reclaim must run only under WSL";
+    assert lib.assertMsg (
+      lib.elem "timers.target" (wslMemoryReclaimTimer.wantedBy or [ ])
+      && wslMemoryReclaimTimer.timerConfig.OnBootSec or null == "45s"
+      && wslMemoryReclaimTimer.timerConfig.OnUnitInactiveSec or null == "30s"
+      && wslMemoryReclaimTimer.timerConfig.AccuracySec or null == "5s"
+      && !(wslMemoryReclaimTimer.timerConfig.Persistent or true)
+    ) "WSL memory reclaim timer contract drifted";
     assert lib.assertMsg (journald.storage == "persistent") "journald storage is not persistent";
     assert lib.assertMsg (lib.hasInfix "SystemMaxUse=4G" journald.extraConfig)
       "journald SystemMaxUse is not bounded at 4G";
@@ -601,6 +639,9 @@ in
                 timer_drop_in=${systemUnits}/fstrim.timer.d/overrides.conf
                 zram_service=${systemUnits}/dotfiles-zram-swap.service
                 zram_wants=${systemUnits}/swap.target.wants/dotfiles-zram-swap.service
+                wsl_reclaim_service=${systemUnits}/dotfiles-wsl-memory-reclaim.service
+                wsl_reclaim_timer=${systemUnits}/dotfiles-wsl-memory-reclaim.timer
+                wsl_reclaim_wants=${systemUnits}/timers.target.wants/dotfiles-wsl-memory-reclaim.timer
 
                 test -L "$service"
                 test -L "$timer"
@@ -608,6 +649,9 @@ in
                 test -f "$timer_drop_in"
                 test -L "$zram_service"
                 test -L "$zram_wants"
+                test -L "$wsl_reclaim_service"
+                test -L "$wsl_reclaim_timer"
+                test -L "$wsl_reclaim_wants"
 
                 grep -Fxq 'DefaultDependencies=false' "$zram_service"
                 conflict_targets=$(sed -n 's/^Conflicts=//p' "$zram_service")
@@ -624,6 +668,141 @@ in
                 done
                 grep -Fxq 'Type=oneshot' "$zram_service"
                 grep -Fxq 'RemainAfterExit=true' "$zram_service"
+
+                grep -Fxq 'ConditionVirtualization=wsl' "$wsl_reclaim_service"
+                grep -Fxq 'Type=oneshot' "$wsl_reclaim_service"
+                grep -Fxq 'TimeoutStartSec=20s' "$wsl_reclaim_service"
+                grep -Fxq 'Nice=19' "$wsl_reclaim_service"
+                grep -Fxq 'IOSchedulingClass=idle' "$wsl_reclaim_service"
+                grep -Fxq 'ConditionVirtualization=wsl' "$wsl_reclaim_timer"
+                grep -Fxq 'OnBootSec=45s' "$wsl_reclaim_timer"
+                grep -Fxq 'OnUnitInactiveSec=30s' "$wsl_reclaim_timer"
+                grep -Fxq 'AccuracySec=5s' "$wsl_reclaim_timer"
+                grep -Fxq 'Persistent=false' "$wsl_reclaim_timer"
+
+                wsl_reclaim_command=$(sed -n 's/^ExecStart=//p' "$wsl_reclaim_service")
+                test -x "$wsl_reclaim_command"
+                reclaim_root=$TMPDIR/wsl-memory-reclaim
+                mkdir -p "$reclaim_root"
+                meminfo=$reclaim_root/meminfo
+                drop_caches=$reclaim_root/drop-caches
+                state_directory=$reclaim_root/state
+                legacy_state=$state_directory/last-success
+                state=$state_directory/last-success-uptime-seconds
+                uptime=$reclaim_root/uptime
+
+                write_meminfo() {
+                  local total=$1
+                  local free=$2
+                  local cached=$3
+                  local shmem=$4
+                  local dirty=$5
+                  local writeback=$6
+                  printf 'MemTotal: %s kB\nMemFree: %s kB\nCached: %s kB\nShmem: %s kB\nDirty: %s kB\nWriteback: %s kB\n' \
+                    "$total" "$free" "$cached" "$shmem" "$dirty" "$writeback" > "$meminfo"
+                }
+
+                run_reclaim() {
+                  WSL_MEMORY_RECLAIM_MEMINFO_PATH=$meminfo \
+                    WSL_MEMORY_RECLAIM_DROP_CACHES_PATH=$drop_caches \
+                    WSL_MEMORY_RECLAIM_STATE_DIRECTORY=$state_directory \
+                    WSL_MEMORY_RECLAIM_ELAPSED_SECONDS=$1 \
+                    "$wsl_reclaim_command"
+                }
+
+                run_reclaim_from_uptime() {
+                  WSL_MEMORY_RECLAIM_MEMINFO_PATH=$meminfo \
+                    WSL_MEMORY_RECLAIM_UPTIME_PATH=$uptime \
+                    WSL_MEMORY_RECLAIM_DROP_CACHES_PATH=$drop_caches \
+                    WSL_MEMORY_RECLAIM_STATE_DIRECTORY=$state_directory \
+                    "$wsl_reclaim_command"
+                }
+
+                expect_reclaim_failure() {
+                  if run_reclaim "$1"; then
+                    echo 'WSL memory reclaim accepted invalid runtime state' >&2
+                    exit 1
+                  fi
+                }
+
+                mkdir -p "$state_directory"
+                printf '1789494733\n' > "$legacy_state"
+                : > "$drop_caches"
+                write_meminfo 41943040 16777216 12582912 0 0 0
+                run_reclaim 1000
+                test ! -s "$drop_caches"
+                test ! -e "$state"
+                printf 'invalid\n' > "$state"
+                expect_reclaim_failure 1000
+                test ! -s "$drop_caches"
+                grep -Fxq invalid "$state"
+                rm "$state"
+
+                write_meminfo 41943040 8388608 4194304 0 0 0
+                run_reclaim 1000
+                test ! -s "$drop_caches"
+                test ! -e "$state"
+
+                write_meminfo 41943040 8388608 12582912 1048576 3145728 2097152
+                run_reclaim 1000
+                test ! -s "$drop_caches"
+                test ! -e "$state"
+
+                write_meminfo 41943040 8388608 12582912 1048576 0 0
+                run_reclaim 1000
+                grep -Fxq 1 "$drop_caches"
+                grep -Fxq 1000 "$state"
+                grep -Fxq 1789494733 "$legacy_state"
+
+                : > "$drop_caches"
+                run_reclaim 1050
+                test ! -s "$drop_caches"
+                grep -Fxq 1000 "$state"
+
+                run_reclaim 1120
+                grep -Fxq 1 "$drop_caches"
+                grep -Fxq 1120 "$state"
+
+                : > "$drop_caches"
+                write_meminfo 41943040 8388608 12582912 1048576 0 0
+                expect_reclaim_failure 1100
+                test ! -s "$drop_caches"
+                grep -Fxq 1120 "$state"
+
+                printf '1240.75 0.00\n' > "$uptime"
+                run_reclaim_from_uptime
+                grep -Fxq 1 "$drop_caches"
+                grep -Fxq 1240 "$state"
+                test ! -e "$state.tmp"
+
+                : > "$drop_caches"
+                printf 'invalid\n' > "$state"
+                expect_reclaim_failure 1300
+                test ! -s "$drop_caches"
+                grep -Fxq invalid "$state"
+                printf '09\n' > "$state"
+                expect_reclaim_failure 1300
+                test ! -s "$drop_caches"
+                grep -Fxq 09 "$state"
+
+                printf '9223372036854775808\n' > "$state"
+                expect_reclaim_failure 1300
+                test ! -s "$drop_caches"
+                grep -Fxq 9223372036854775808 "$state"
+                printf '1240\n' > "$state"
+
+                : > "$drop_caches"
+                printf 'MemTotal: invalid kB\n' > "$meminfo"
+                expect_reclaim_failure 1300
+                test ! -s "$drop_caches"
+                grep -Fxq 1240 "$state"
+
+                write_meminfo 41943040 8388608 12582912 1048576 0 0
+                chmod a-w "$drop_caches"
+                expect_reclaim_failure 1300
+                chmod u+w "$drop_caches"
+                test ! -s "$drop_caches"
+                grep -Fxq 1240 "$state"
 
                 verify_no_ordering_cycle() {
                   local unit_path=$1

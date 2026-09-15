@@ -141,6 +141,7 @@
         "dotfiles-agent-autoupdate"
         "dotfiles-agent-project-cache-gc"
         "dotfiles-agent-resource-reaper"
+        "dotfiles-wsl-memory-reclaim"
         "dotfiles-zram-swap"
         "docker-build-artifact-gc"
         "docker-dotfiles-backends-network"

@@ -54,4 +54,20 @@ systemctl --failed
 journalctl -u UNIT -n 30
 ```
 
+## WSLが重い場合
+
+Orcaの描画停止だけでOMP sessionの停止を断定しない。既存terminalが応答する場合はterminalを閉じず、`wsl --shutdown`も実行しない。これは全distributionと既存sessionを終了し、実行中状態とprompt cacheを失わせる。
+
+WSL内部では`dotfiles-wsl-memory-reclaim.timer`が30秒ごとにmemoryを観測する。`MemFree`が30%未満かつ`Cached`から`Shmem`、`Dirty`、`Writeback`を除いたclean page cacheが8 GiB以上の場合だけ回収する。同一bootの経過時間で120秒間は再実行しない。process終了、service再起動、dirty pageの`sync`は行わない。
+
+閾値未達とcooldownは正常なno-opとしてjournalへ記録せず、回収と機能不全だけを記録する。
+
+```sh
+systemctl status dotfiles-wsl-memory-reclaim.timer
+systemctl status dotfiles-wsl-memory-reclaim.service
+journalctl -u dotfiles-wsl-memory-reclaim.service -n 30
+```
+
+sessionを復旧する場合は、利用者が明示したsession名と文面だけを使う。spinner、経過時間、最終出力から作業中か入力待ちかを推測して一括入力しない。
+
 宣言と実装の整合は `nix flake check` が build 前に検査する。doctor は activation 後の実状態だけを観測する。

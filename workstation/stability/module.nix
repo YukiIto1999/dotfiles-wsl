@@ -35,6 +35,32 @@ let
     warning = cfg.windowsMemoryCommit.warning;
     failure = cfg.windowsMemoryCommit.failure;
   };
+  wslMemoryReclaim = {
+    minimumFreePercent = 30;
+    minimumCleanPageCacheGiB = 8;
+    cooldownSeconds = 120;
+    intervalSeconds = 30;
+  };
+  wslMemoryReclaimCommand = pkgs.writeShellApplication {
+    name = "dotfiles-reclaim-wsl-cache";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.gawk
+    ];
+    text =
+      builtins.replaceStrings
+        [
+          "@minimumFreePercent@"
+          "@minimumCleanPageCacheKiB@"
+          "@cooldownSeconds@"
+        ]
+        [
+          (toString wslMemoryReclaim.minimumFreePercent)
+          (toString (wslMemoryReclaim.minimumCleanPageCacheGiB * 1024 * 1024))
+          (toString wslMemoryReclaim.cooldownSeconds)
+        ]
+        (builtins.readFile ./impl/reclaim-wsl-cache.sh);
+  };
   mkWindowsPercentageObservation = import ../package.nix;
   windowsMemoryCommitObservation = mkWindowsPercentageObservation {
     inherit pkgs lib;
@@ -122,6 +148,21 @@ in
       command = windowsMemoryCommitObservation;
       inherit (windowsMemoryCommit) metric warning failure;
     };
+    "host/wsl-memory-reclaim" = {
+      kind = "systemd-timer";
+      checkId = "maintenance/dotfiles-wsl-memory-reclaim.timer";
+      resourceKey = null;
+      timeoutSeconds = observationTimeoutSeconds;
+      failureMessage = "dotfiles-wsl-memory-reclaim.timer or its service is not operational";
+      timer = "dotfiles-wsl-memory-reclaim.timer";
+      service = "dotfiles-wsl-memory-reclaim.service";
+      unitFileStates = [
+        "enabled"
+        "enabled-runtime"
+      ];
+      activeStates = [ "active" ];
+      serviceResults = [ "success" ];
+    };
   };
 
   config.boot.kernel.sysctl = virtualMemorySysctl;
@@ -153,6 +194,30 @@ in
       RemainAfterExit = true;
       ExecStart = zramSetup;
       ExecStopPost = zramTeardown;
+    };
+  };
+
+  config.systemd.services.dotfiles-wsl-memory-reclaim = {
+    description = "Reclaim clean WSL page cache before session transport stalls";
+    unitConfig.ConditionVirtualization = "wsl";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = lib.getExe wslMemoryReclaimCommand;
+      TimeoutStartSec = "20s";
+      Nice = 19;
+      IOSchedulingClass = "idle";
+    };
+  };
+
+  config.systemd.timers.dotfiles-wsl-memory-reclaim = {
+    description = "Observe WSL free pages before session transport stalls";
+    wantedBy = [ "timers.target" ];
+    unitConfig.ConditionVirtualization = "wsl";
+    timerConfig = {
+      OnBootSec = "45s";
+      OnUnitInactiveSec = "${toString wslMemoryReclaim.intervalSeconds}s";
+      AccuracySec = "5s";
+      Persistent = false;
     };
   };
 }

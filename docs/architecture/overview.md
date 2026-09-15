@@ -28,6 +28,8 @@ Nix storeのcandidate system
 
 `/run/current-system`は実行中のgeneration、`/nix/var/nix/profiles/system`はsystem profile、`/run/booted-system`はWSL起動時のgenerationを表す。`wsl.conf`とactivation interfaceの差分に応じて、live switchとWSL cold startを分ける。
 
+WSLのmemory安定性は[`workstation/stability/module.nix`](../../workstation/stability/module.nix)が所有する。kernel watermarkとproactive compactionでVMBusが使う高次pageの余地を圧迫前に確保し、`MemFree`が30%を下回って8 GiB以上のclean page cacheを持つ場合だけtimerから回収する。process、Agent session、toolの使用量には上限を設けず、dirty pageの書き出しやprocess終了も行わない。
+
 ## 責務root
 
 | Root | 所有する責務 |

@@ -60,12 +60,19 @@ Orcaの描画停止だけでOMP sessionの停止を断定しない。既存termi
 
 WSL内部では`dotfiles-wsl-memory-reclaim.timer`が30秒ごとにmemoryを観測する。`MemFree`が30%未満かつ`Cached`から`Shmem`、`Dirty`、`Writeback`を除いたclean page cacheが8 GiB以上の場合だけ回収する。同一bootの経過時間で120秒間は再実行しない。process終了、service再起動、dirty pageの`sync`は行わない。
 
-閾値未達とcooldownは正常なno-opとしてjournalへ記録せず、回収と機能不全だけを記録する。
+clean page cacheが少ない状態でも新規sessionだけが停止し、kernel journalに`Relay`の`Waiting for abnormally long accept`、`SessionLeader`の`accept4 failed 110`、`vmbus_alloc_ring`のorder-7 allocation failureが並ぶ場合は、page cacheではなくWSLのRelay/vsock障害である。`dotfiles-wsl-relay-recovery.timer`は30秒ごとにkernel warningを確認し、warningに記録されたPIDだけをNixOS側のroot serviceで処理する。
+
+serviceは対象PIDについてprocess名が`Relay`、実行fileが`/init`、親PIDが1、起動後5分以上、かつprocessの起動時刻がwarning以前であることを確認し、signal直前にも同一processであることを再確認する。条件を全て満たすprocessだけを終了する。`SessionLeader`、`Relay(<pid>)`、warningに現れないRelay、Orca terminal、OMP sessionは対象外である。Windows scheduled task、`wsl --debug-shell`、cross-OS request fileは使用しない。
+
+閾値未達と該当processなしは正常なno-opとしてjournalへ記録せず、Relayの除去と機能不全だけを記録する。
 
 ```sh
 systemctl status dotfiles-wsl-memory-reclaim.timer
 systemctl status dotfiles-wsl-memory-reclaim.service
 journalctl -u dotfiles-wsl-memory-reclaim.service -n 30
+systemctl status dotfiles-wsl-relay-recovery.timer
+systemctl status dotfiles-wsl-relay-recovery.service
+journalctl -u dotfiles-wsl-relay-recovery.service -n 30
 ```
 
 sessionを復旧する場合は、利用者が明示したsession名と文面だけを使う。spinner、経過時間、最終出力から作業中か入力待ちかを推測して一括入力しない。

@@ -41,6 +41,10 @@ let
     cooldownSeconds = 120;
     intervalSeconds = 30;
   };
+  wslRelayRecovery = {
+    minimumAgeSeconds = 300;
+    intervalSeconds = 30;
+  };
   wslMemoryReclaimCommand = pkgs.writeShellApplication {
     name = "dotfiles-reclaim-wsl-cache";
     runtimeInputs = [
@@ -60,6 +64,22 @@ let
           (toString wslMemoryReclaim.cooldownSeconds)
         ]
         (builtins.readFile ./impl/reclaim-wsl-cache.sh);
+  };
+  wslRelayRecoveryCommand = pkgs.writeShellApplication {
+    name = "dotfiles-recover-stale-wsl-relays";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.glibc.bin
+      pkgs.gawk
+      pkgs.util-linux
+    ];
+    text =
+      builtins.replaceStrings
+        [ "@minimumAgeSeconds@" ]
+        [
+          (toString wslRelayRecovery.minimumAgeSeconds)
+        ]
+        (builtins.readFile ./impl/recover-stale-wsl-relays.sh);
   };
   mkWindowsPercentageObservation = import ../package.nix;
   windowsMemoryCommitObservation = mkWindowsPercentageObservation {
@@ -163,6 +183,21 @@ in
       activeStates = [ "active" ];
       serviceResults = [ "success" ];
     };
+    "host/wsl-relay-recovery" = {
+      kind = "systemd-timer";
+      checkId = "maintenance/dotfiles-wsl-relay-recovery.timer";
+      resourceKey = null;
+      timeoutSeconds = observationTimeoutSeconds;
+      failureMessage = "dotfiles-wsl-relay-recovery.timer or its service is not operational";
+      timer = "dotfiles-wsl-relay-recovery.timer";
+      service = "dotfiles-wsl-relay-recovery.service";
+      unitFileStates = [
+        "enabled"
+        "enabled-runtime"
+      ];
+      activeStates = [ "active" ];
+      serviceResults = [ "success" ];
+    };
   };
 
   config.boot.kernel.sysctl = virtualMemorySysctl;
@@ -216,6 +251,30 @@ in
     timerConfig = {
       OnBootSec = "45s";
       OnUnitInactiveSec = "${toString wslMemoryReclaim.intervalSeconds}s";
+      AccuracySec = "5s";
+      Persistent = false;
+    };
+  };
+
+  config.systemd.services.dotfiles-wsl-relay-recovery = {
+    description = "Recover WSL transport by removing kernel-identified stale Relay processes";
+    unitConfig.ConditionVirtualization = "wsl";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = lib.getExe wslRelayRecoveryCommand;
+      TimeoutStartSec = "20s";
+      Nice = 19;
+      IOSchedulingClass = "idle";
+    };
+  };
+
+  config.systemd.timers.dotfiles-wsl-relay-recovery = {
+    description = "Observe WSL kernel warnings for stale Relay processes";
+    wantedBy = [ "timers.target" ];
+    unitConfig.ConditionVirtualization = "wsl";
+    timerConfig = {
+      OnBootSec = "${toString wslRelayRecovery.intervalSeconds}s";
+      OnUnitInactiveSec = "${toString wslRelayRecovery.intervalSeconds}s";
       AccuracySec = "5s";
       Persistent = false;
     };

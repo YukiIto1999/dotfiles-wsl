@@ -18,6 +18,8 @@ let
   zramService = hostConfig.systemd.services.dotfiles-zram-swap or { };
   wslMemoryReclaimService = hostConfig.systemd.services.dotfiles-wsl-memory-reclaim or { };
   wslMemoryReclaimTimer = hostConfig.systemd.timers.dotfiles-wsl-memory-reclaim or { };
+  wslRelayRecoveryService = hostConfig.systemd.services.dotfiles-wsl-relay-recovery or { };
+  wslRelayRecoveryTimer = hostConfig.systemd.timers.dotfiles-wsl-relay-recovery or { };
   journald = hostConfig.services.journald;
   fstrimService = hostConfig.systemd.services.fstrim or { };
   fstrimTimer = hostConfig.systemd.timers.fstrim;
@@ -48,6 +50,7 @@ let
       "host/system-generation"
       "host/windows-memory-commit"
       "host/wsl-memory-reclaim"
+      "host/wsl-relay-recovery"
     ]
     ++ windowsDriveObservationKeys
   );
@@ -86,6 +89,21 @@ let
       serviceResults = [ "success" ];
       timeoutSeconds = 10;
       timer = "dotfiles-wsl-memory-reclaim.timer";
+      unitFileStates = [
+        "enabled"
+        "enabled-runtime"
+      ];
+    };
+    "host/wsl-relay-recovery" = {
+      activeStates = [ "active" ];
+      checkId = "maintenance/dotfiles-wsl-relay-recovery.timer";
+      failureMessage = "dotfiles-wsl-relay-recovery.timer or its service is not operational";
+      kind = "systemd-timer";
+      resourceKey = null;
+      service = "dotfiles-wsl-relay-recovery.service";
+      serviceResults = [ "success" ];
+      timeoutSeconds = 10;
+      timer = "dotfiles-wsl-relay-recovery.timer";
       unitFileStates = [
         "enabled"
         "enabled-runtime"
@@ -561,6 +579,26 @@ in
       && wslMemoryReclaimTimer.timerConfig.AccuracySec or null == "5s"
       && !(wslMemoryReclaimTimer.timerConfig.Persistent or true)
     ) "WSL memory reclaim timer contract drifted";
+    assert lib.assertMsg (
+      wslRelayRecoveryService.serviceConfig.Type or null == "oneshot"
+    ) "WSL relay recovery must be an isolated oneshot service";
+    assert lib.assertMsg (
+      wslRelayRecoveryService.serviceConfig.TimeoutStartSec or null == "20s"
+    ) "WSL relay recovery must not remain blocked indefinitely";
+    assert lib.assertMsg (
+      wslRelayRecoveryService.serviceConfig.Nice or null == 19
+      && wslRelayRecoveryService.serviceConfig.IOSchedulingClass or null == "idle"
+    ) "WSL relay recovery must yield to active sessions";
+    assert lib.assertMsg (
+      wslRelayRecoveryService.unitConfig.ConditionVirtualization or null == "wsl"
+    ) "WSL relay recovery must run only under WSL";
+    assert lib.assertMsg (
+      lib.elem "timers.target" (wslRelayRecoveryTimer.wantedBy or [ ])
+      && wslRelayRecoveryTimer.timerConfig.OnBootSec or null == "30s"
+      && wslRelayRecoveryTimer.timerConfig.OnUnitInactiveSec or null == "30s"
+      && wslRelayRecoveryTimer.timerConfig.AccuracySec or null == "5s"
+      && !(wslRelayRecoveryTimer.timerConfig.Persistent or true)
+    ) "WSL relay recovery timer contract drifted";
     assert lib.assertMsg (journald.storage == "persistent") "journald storage is not persistent";
     assert lib.assertMsg (lib.hasInfix "SystemMaxUse=4G" journald.extraConfig)
       "journald SystemMaxUse is not bounded at 4G";
@@ -642,6 +680,9 @@ in
                 wsl_reclaim_service=${systemUnits}/dotfiles-wsl-memory-reclaim.service
                 wsl_reclaim_timer=${systemUnits}/dotfiles-wsl-memory-reclaim.timer
                 wsl_reclaim_wants=${systemUnits}/timers.target.wants/dotfiles-wsl-memory-reclaim.timer
+                wsl_relay_recovery_service=${systemUnits}/dotfiles-wsl-relay-recovery.service
+                wsl_relay_recovery_timer=${systemUnits}/dotfiles-wsl-relay-recovery.timer
+                wsl_relay_recovery_wants=${systemUnits}/timers.target.wants/dotfiles-wsl-relay-recovery.timer
 
                 test -L "$service"
                 test -L "$timer"
@@ -652,6 +693,9 @@ in
                 test -L "$wsl_reclaim_service"
                 test -L "$wsl_reclaim_timer"
                 test -L "$wsl_reclaim_wants"
+                test -L "$wsl_relay_recovery_service"
+                test -L "$wsl_relay_recovery_timer"
+                test -L "$wsl_relay_recovery_wants"
 
                 grep -Fxq 'DefaultDependencies=false' "$zram_service"
                 conflict_targets=$(sed -n 's/^Conflicts=//p' "$zram_service")
@@ -679,6 +723,143 @@ in
                 grep -Fxq 'OnUnitInactiveSec=30s' "$wsl_reclaim_timer"
                 grep -Fxq 'AccuracySec=5s' "$wsl_reclaim_timer"
                 grep -Fxq 'Persistent=false' "$wsl_reclaim_timer"
+
+                grep -Fxq 'ConditionVirtualization=wsl' "$wsl_relay_recovery_service"
+                grep -Fxq 'Type=oneshot' "$wsl_relay_recovery_service"
+                grep -Fxq 'TimeoutStartSec=20s' "$wsl_relay_recovery_service"
+                grep -Fxq 'Nice=19' "$wsl_relay_recovery_service"
+                grep -Fxq 'IOSchedulingClass=idle' "$wsl_relay_recovery_service"
+                grep -Fxq 'ConditionVirtualization=wsl' "$wsl_relay_recovery_timer"
+                grep -Fxq 'OnBootSec=30s' "$wsl_relay_recovery_timer"
+                grep -Fxq 'OnUnitInactiveSec=30s' "$wsl_relay_recovery_timer"
+                grep -Fxq 'AccuracySec=5s' "$wsl_relay_recovery_timer"
+                grep -Fxq 'Persistent=false' "$wsl_relay_recovery_timer"
+
+                wsl_relay_recovery_command=$(sed -n 's/^ExecStart=//p' "$wsl_relay_recovery_service")
+                test -x "$wsl_relay_recovery_command"
+                relay_recovery_root=$TMPDIR/wsl-relay-recovery
+                relay_kernel_log=$relay_recovery_root/kernel.log
+                relay_proc=$relay_recovery_root/proc
+                relay_signal_log=$relay_recovery_root/signal.log
+                relay_output=$relay_recovery_root/output.log
+                fake_signal=$relay_recovery_root/fake-signal
+                mkdir -p "$relay_proc"
+                printf '2000.00 0.00\n' > "$relay_proc/uptime"
+                printf '%s\n' \
+                  '#!${pkgs.runtimeShell}' \
+                  'printf "%s\n" "$*" >> "$WSL_RELAY_RECOVERY_SIGNAL_LOG"' \
+                  'rm -rf -- "$WSL_RELAY_RECOVERY_PROC_ROOT/$2"' \
+                  > "$fake_signal"
+                chmod +x "$fake_signal"
+
+                write_relay_stat() {
+                  local process_id=$1
+                  local process_name=$2
+                  local process_parent=$3
+                  local process_started=$4
+                  local field
+                  printf '%s (%s) S %s' "$process_id" "$process_name" "$process_parent"
+                  for field in $(seq 5 21); do
+                    printf ' 0'
+                  done
+                  printf ' %s\n' "$process_started"
+                }
+
+                write_relay_process() {
+                  local process_id=$1
+                  local process_name=$2
+                  local process_parent=$3
+                  local process_started=$4
+                  local process_executable=$5
+                  mkdir -p "$relay_proc/$process_id"
+                  printf '%s\n' "$process_name" > "$relay_proc/$process_id/comm"
+                  write_relay_stat "$process_id" "$process_name" "$process_parent" "$process_started" \
+                    > "$relay_proc/$process_id/stat"
+                  ln -s "$process_executable" "$relay_proc/$process_id/exe"
+                }
+
+                run_relay_recovery() {
+                  WSL_RELAY_RECOVERY_KERNEL_LOG_PATH=$relay_kernel_log \
+                    WSL_RELAY_RECOVERY_PROC_ROOT=$relay_proc \
+                    WSL_RELAY_RECOVERY_SIGNAL_COMMAND=$fake_signal \
+                    WSL_RELAY_RECOVERY_SIGNAL_LOG=$relay_signal_log \
+                    WSL_RELAY_RECOVERY_CLOCK_TICKS=100 \
+                    "$wsl_relay_recovery_command"
+                }
+
+                : > "$relay_kernel_log"
+                run_relay_recovery > "$relay_output"
+                test ! -s "$relay_output"
+                test ! -e "$relay_signal_log"
+
+                printf '%s\n' \
+                  '[900.000001] WSL (2589000 - SessionLeader) ERROR: UtilAcceptVsock:273: accept4 failed 110' \
+                  '[900.000002] WSL (2589001 - Relay(300)) ERROR: ordinary relay output' \
+                  > "$relay_kernel_log"
+                run_relay_recovery > "$relay_output"
+                test ! -s "$relay_output"
+                test ! -e "$relay_signal_log"
+
+                write_relay_process 100 Relay 1 10000 /init
+                write_relay_process 101 Relay 1 10000 /init
+                write_relay_process 102 Relay 1 195000 /init
+                write_relay_process 103 Relay 55 10000 /init
+                write_relay_process 104 'Relay(42)' 1 10000 /init
+                write_relay_process 105 Relay 1 10000 /usr/bin/other
+                write_relay_process 106 Relay 1 95000 /init
+                write_relay_process 107 Relay 1 170010 /init
+                write_relay_process 108 Relay 1 90000 /init
+                write_relay_process 109 Relay 1 10000 /init
+                rm "$relay_proc/109/stat"
+                mkfifo "$relay_proc/109/stat"
+                printf '%s\n' \
+                  '[900.000001] WSL (100 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[900.000003] WSL (103 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[900.000004] WSL (104 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[900.000005] WSL (105 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[900.000006] WSL (106 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[900.000001] WSL (108 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[900.000007] WSL (109 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[1900.000008] WSL (107 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  '[1975.000002] WSL (102 - Relay) ERROR: UtilAcceptVsock:246: Waiting for abnormally long accept(12)' \
+                  > "$relay_kernel_log"
+                {
+                  write_relay_stat 109 Relay 1 10000 > "$relay_proc/109/stat"
+                  write_relay_stat 109 Relay 1 95000 > "$relay_proc/109/stat"
+                } &
+                relay_stat_writer=$!
+                run_relay_recovery > "$relay_output"
+                wait "$relay_stat_writer"
+                if [[ $(<"$relay_signal_log") != '-9 100' ]]; then
+                  echo 'WSL relay recovery signaled an ineligible process:' >&2
+                  cat "$relay_signal_log" >&2
+                  exit 1
+                fi
+                grep -Fxq 'WSL stale Relay removed: pid=100 age=1900s' "$relay_output"
+                test ! -e "$relay_proc/100"
+                for preserved_id in 101 102 103 104 105 106 107 108 109; do
+                  test -d "$relay_proc/$preserved_id"
+                done
+                rm "$relay_proc/109/stat"
+                write_relay_stat 109 Relay 1 95000 > "$relay_proc/109/stat"
+
+                run_relay_recovery > "$relay_output"
+                test ! -s "$relay_output"
+                test "$(wc -l < "$relay_signal_log")" -eq 1
+
+                WSL_RELAY_RECOVERY_KERNEL_LOG_PATH=$relay_recovery_root/missing \
+                  WSL_RELAY_RECOVERY_PROC_ROOT=$relay_proc \
+                  WSL_RELAY_RECOVERY_SIGNAL_COMMAND=$fake_signal \
+                  WSL_RELAY_RECOVERY_SIGNAL_LOG=$relay_signal_log \
+                  WSL_RELAY_RECOVERY_CLOCK_TICKS=100 \
+                  "$wsl_relay_recovery_command" \
+                  > "$relay_recovery_root/missing.stdout" \
+                  2> "$relay_recovery_root/missing.stderr" \
+                  && {
+                    echo 'WSL relay recovery accepted an unreadable kernel log' >&2
+                    exit 1
+                  }
+                grep -Fq 'WSL relay recovery failed:' "$relay_recovery_root/missing.stderr"
 
                 wsl_reclaim_command=$(sed -n 's/^ExecStart=//p' "$wsl_reclaim_service")
                 test -x "$wsl_reclaim_command"

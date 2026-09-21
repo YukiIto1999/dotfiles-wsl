@@ -103,7 +103,13 @@ let
           nativeBuildInputs = [ pkgs.jq ];
         }
         ''
-          jq 'del(.hooks)' ${managedSettingsBase} > "$out"
+          jq '.hooks |= (
+                map_values(
+                  map(.hooks |= map(select(.command | test("agentmemory-hook-") | not)))
+                  | map(select(.hooks | length > 0))
+                )
+                | map_values(select(length > 0))
+              )' ${managedSettingsBase} > "$out"
         '';
 in
 {

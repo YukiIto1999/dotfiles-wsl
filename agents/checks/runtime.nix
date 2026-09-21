@@ -488,12 +488,14 @@ in
         "apm"
         "projectCacheGc"
         "verification"
+        "verificationGate"
       ];
     assert
       agentConfig.packages.agentmemoryHooks
       == hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
     assert agentConfig.packages.projectCacheGc == runtime.gc;
     assert agentConfig.packages.verification == runtime.verify;
+    assert agentConfig.packages.verificationGate == runtime.gate;
     assert builtins.head homeConfig.home.sessionPath == "$HOME/${wrapperDirectory}";
     assert lib.elem "$HOME/.local/bin" homeConfig.home.sessionPath;
     assert
@@ -669,6 +671,7 @@ in
 
   agent-verification-cache =
     assert lib.count (package: package == runtime.verify) hostConfig.environment.systemPackages == 1;
+    assert lib.count (package: package == runtime.gate) hostConfig.environment.systemPackages == 1;
     pkgs.runCommandLocal "check-agent-verification-cache"
       {
         nativeBuildInputs = [
@@ -679,6 +682,7 @@ in
           pkgs.gnused
         ];
         VERIFY = lib.getExe runtime.verify;
+        GATE = lib.getExe runtime.gate;
       }
       ''
         bash ${../fixtures/runtime/verify.sh}

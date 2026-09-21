@@ -216,6 +216,18 @@ let
     ];
     text = projectCacheGcSource;
   };
+  gate = pkgs.writeShellApplication {
+    name = "dotfiles-agent-gate";
+    runtimeInputs = with pkgs; [
+      coreutils
+      git
+      gnugrep
+      jq
+    ];
+    text = builtins.replaceStrings [ "@cacheRootRelative@" ] [ cacheRootRelative ] (
+      builtins.readFile ./impl/runtime/gate.sh
+    );
+  };
   verify = pkgs.writeShellApplication {
     name = "dotfiles-agent-verify";
     runtimeInputs = with pkgs; [
@@ -223,9 +235,11 @@ let
       diffutils
       git
     ];
-    text = builtins.replaceStrings [ "@cacheRootRelative@" ] [ cacheRootRelative ] (
-      builtins.readFile ./impl/runtime/verify.sh
-    );
+    text =
+      builtins.replaceStrings
+        [ "@cacheRootRelative@" "@gate@" ]
+        [ cacheRootRelative "${gate}/bin/dotfiles-agent-gate" ]
+        (builtins.readFile ./impl/runtime/verify.sh);
   };
   mkWrapper =
     {
@@ -247,6 +261,7 @@ in
     agentWorktree
     launcher
     mkLauncher
+    gate
     gc
     mkAgentShims
     mkAgentResource

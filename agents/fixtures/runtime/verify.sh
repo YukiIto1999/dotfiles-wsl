@@ -387,7 +387,53 @@ export MUTATE_COUNT=$fixture/mutate-count
 test "$(cat "$MUTATE_COUNT")" = 2
 
 test -n "$(find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.success' -print -quit)"
-test -z "$(find "$home/.cache/dotfiles-wsl/verification" -type f ! -name '*.success' -print -quit)"
+test -z "$(find "$home/.cache/dotfiles-wsl/verification" -type f \
+  ! -name '*.success' ! -name '*.verified' ! -name '*.waived' -print -quit)"
+
+# 成功した走行は、木そのものの控えも残す。残さなければ門は「通っていない」としか答えられず、
+# 通した後の周まで止め続ける。
+test -n "$(find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.verified' -print -quit)"
+
+# 門は、入口を宣言する repository でだけ「通っていない」と答える。
+# 宣言が無ければ何も要求しない。
+gate_repo=$fixture/gate-repo
+mkdir -p "$gate_repo"
+git -C "$gate_repo" init -q
+git -C "$gate_repo" config user.name fixture
+git -C "$gate_repo" config user.email fixture@example.invalid
+printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
+printf 'held\n' >"$gate_repo/tracked"
+git -C "$gate_repo" add devenv.nix tracked
+git -C "$gate_repo" commit -qm initial
+test "$("$GATE" entry --repo "$gate_repo")" = 'devenv shell -- verify'
+if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
+  echo 'gate passed a tree the entrance never ran on' >&2
+  exit 1
+fi
+"$GATE" record --repo "$gate_repo" --command 'devenv shell -- verify'
+"$GATE" check --repo "$gate_repo" >/dev/null
+printf 'changed\n' >"$gate_repo/tracked"
+if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
+  echo 'gate passed a tree that changed after the entrance ran' >&2
+  exit 1
+fi
+"$GATE" waive --repo "$gate_repo" --reason 'fixture' >/dev/null
+"$GATE" check --repo "$gate_repo" >/dev/null 2>&1
+
+# 入口を宣言しない repository は素通りする。
+rm "$gate_repo/devenv.nix"
+"$GATE" check --repo "$gate_repo" >/dev/null
+
+# 未追跡の綴りが増えた木も、通した木とは別物として扱う。
+printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
+git -C "$gate_repo" checkout -q -- tracked
+"$GATE" record --repo "$gate_repo" --command 'devenv shell -- verify'
+"$GATE" check --repo "$gate_repo" >/dev/null
+printf 'new\n' >"$gate_repo/untracked"
+if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
+  echo 'gate passed a tree that gained an untracked file' >&2
+  exit 1
+fi
 
 outside=$fixture/outside
 mkdir "$outside"

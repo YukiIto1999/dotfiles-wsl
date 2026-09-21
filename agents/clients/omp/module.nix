@@ -109,6 +109,12 @@ in
         deployment = "home";
         destination = ".omp/agent/lsp.json";
       };
+      verification-gate = {
+        source = ./assets/verification-gate.ts;
+        format = "text";
+        deployment = "home";
+        destination = ".omp/agent/hooks/pre/verification-gate.ts";
+      };
     }
     // lib.optionalAttrs projectMemoryEnabled {
       agentmemory-hook = {

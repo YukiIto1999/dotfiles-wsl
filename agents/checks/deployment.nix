@@ -191,6 +191,22 @@ let
         // lib.optionalAttrs (matcher != null) { inherit matcher; }
       )
     ];
+  gateHook =
+    {
+      kind,
+      matcher ? null,
+    }:
+    (
+      {
+        hooks = [
+          {
+            type = "command";
+            command = "/run/current-system/sw/bin/dotfiles-agent-gate hook ${kind}";
+          }
+        ];
+      }
+      // lib.optionalAttrs (matcher != null) { inherit matcher; }
+    );
   expectedClaudeHooks = {
     SessionStart = expectedHook { name = "session-start"; };
     UserPromptSubmit = expectedHook { name = "prompt-submit"; };
@@ -198,14 +214,19 @@ let
       name = "pre-tool-use";
       matcher = "Edit|Write|Read|Glob|Grep";
     };
-    PostToolUse = expectedHook { name = "post-tool-use"; };
+    PostToolUse = expectedHook { name = "post-tool-use"; } ++ [
+      (gateHook {
+        kind = "arm";
+        matcher = "Edit|Write|MultiEdit|NotebookEdit";
+      })
+    ];
     PostToolUseFailure = expectedHook { name = "post-tool-failure"; };
     PreCompact = expectedHook { name = "pre-compact"; };
     SubagentStart = expectedHook { name = "subagent-start"; };
     SubagentStop = expectedHook { name = "subagent-stop"; };
     Notification = expectedHook { name = "notification"; };
     TaskCompleted = expectedHook { name = "task-completed"; };
-    Stop = expectedHook { name = "stop"; };
+    Stop = expectedHook { name = "stop"; } ++ [ (gateHook { kind = "stop"; }) ];
     SessionEnd = expectedHook { name = "session-end"; };
   };
   expectedCodexHooks = {

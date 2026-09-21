@@ -260,6 +260,11 @@
           "format": "json",
           "deployment": "home",
           "destination": ".omp/agent/mcp.json"
+        },
+        "verification-gate": {
+          "format": "text",
+          "deployment": "home",
+          "destination": ".omp/agent/hooks/pre/verification-gate.ts"
         }
       },
       "install": {

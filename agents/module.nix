@@ -409,6 +409,7 @@ let
         inherit (runtime)
           agentResource
           agentWorktree
+          gate
           gc
           launcher
           verify
@@ -461,6 +462,7 @@ in
         inherit apm;
         projectCacheGc = runtimeContract.packages.gc;
         verification = runtimeContract.packages.verify;
+        verificationGate = runtimeContract.packages.gate;
       }
       // lib.optionalAttrs projectMemoryEnabled {
         agentmemoryHooks = config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
@@ -557,6 +559,7 @@ in
     environment.systemPackages = [
       config.dotfiles.agents.packages.projectCacheGc
       config.dotfiles.agents.packages.verification
+      config.dotfiles.agents.packages.verificationGate
     ]
     ++ lib.optionals projectMemoryEnabled [
       config.dotfiles.agents.packages.agentmemoryHooks

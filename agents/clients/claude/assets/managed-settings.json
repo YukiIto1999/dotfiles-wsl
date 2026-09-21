@@ -66,6 +66,15 @@
             "command": "/run/current-system/sw/bin/agentmemory-hook-post-tool-use"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook arm"
+          }
+        ]
       }
     ],
     "PostToolUseFailure": [
@@ -134,6 +143,14 @@
           {
             "type": "command",
             "command": "/run/current-system/sw/bin/agentmemory-hook-stop"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook stop"
           }
         ]
       }

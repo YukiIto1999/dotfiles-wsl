@@ -104,7 +104,6 @@ Agent client の更新は `docs/operations/agent-clients.md`、構造は `docs/a
 
 ## 禁則
 
-- 起動して操作していない画面の変更を、完了、修正済み、動作すると報告しない。観測した字面、遷移先、応答のいずれも挙げられない報告は出さない。
 - dotfiles で管理している設定ファイルは直接編集しない。変更は dotfiles に入れる。
 - パッケージマネージャでグローバルインストールしない。パッケージは nix / devenv で導入する。
 - `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml ~/dotfiles-wsl/secrets/sops/assets/secrets.json` 編集後の rebuild で行う。

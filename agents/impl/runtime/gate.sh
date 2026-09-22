@@ -15,8 +15,11 @@ usage: dotfiles-agent-gate <command> [options]
   arm --session ID [--path PATH]        その session が編集した repository を控える
   check [--repo DIR] [--session ID]     未検証なら理由を出して 1 で終わる
   waive --reason TEXT [--repo DIR]      理由を残していまの木を一度だけ通す
-  hook <arm|stop>                       client の hook から stdin の JSON で起こす
   entry [--repo DIR]                    その repository の検証入口の綴りを答える
+  skill --path PATH                     その綴りを触る前に読む skill の名を答える
+  learned --session ID --path NAME      その周で読んだ skill を控える
+  teach --session ID --path PATH        読んでいなければ理由を出して 1 で終わる
+  hook <arm|edit|stop>                  client の hook から stdin の JSON で起こす
 USAGE
   exit 64
 }
@@ -161,12 +164,69 @@ command_waive() {
   printf '%s を未検証のまま通す理由を控えた: %s\n' "$top" "$reason"
 }
 
+# その綴りを触る前に読ませる skill。判断の時点で規律を呼ばずに書くと、
+# 後段の門は「稚拙な設計が正しく実装されたこと」しか検められない。
+skill_for() {
+  case $1 in
+  *.md | *.txt | *.json | *.lock) printf '' ;;
+  */tests/* | *.test.ts | *.test.tsx | *Tests.cs | *.doubles.ts | *.doubles.tsx | *.feature)
+    printf ''
+    ;;
+  */application/ports/* | */contracts/canonical/* | *.tsp) printf 'interface-design' ;;
+  *Refusal*.cs | *Failure*.cs | */errors/*) printf 'error-design' ;;
+  */domain/* | */entities/*) printf 'domain-modeling' ;;
+  *.tsx | */surfaces/viewer/* | */runtimes/web/*) printf 'ui-design' ;;
+  *.csproj) printf 'module-design' ;;
+  */core/* | */surfaces/* | */libs/*) printf 'code-design' ;;
+  *) printf '' ;;
+  esac
+}
+
+# その skill が配備されているか。配られていない名で止めると、読みようがない要求になる。
+skill_stands() {
+  local named=$1 root
+  for root in "$HOME/.omp/agent/skills" "$HOME/.claude/skills" "$HOME/.config/opencode/skills"; do
+    [ -d "$root/$named" ] && return 0
+  done
+  return 1
+}
+
+# 読んだ規律の名。`skill://名` でも、配られた実体の path でも同じ名を答える
+# (client によって、hook へ届く前に内部 URL が path へ解けている)。
+skill_read_in() {
+  case $1 in
+  skill://*) printf '%s' "${1#skill://}" | cut -d/ -f1 ;;
+  */skills/*) printf '%s' "${1#*/skills/}" | cut -d/ -f1 ;;
+  *) printf '' ;;
+  esac
+}
+
+command_learned() {
+  local session=$1 named=$2
+  [ -n "$session" ] && [ -n "$named" ] || return 0
+  ensure_dir "$sessions_root/$session/skills"
+  : >"$sessions_root/$session/skills/$named"
+}
+
+# 読んでいない規律の領域を触らせない。読むのは数秒なので抜け道は置かない。
+command_teach() {
+  local session=$1 path=$2 named
+  named=$(skill_for "$path")
+  [ -n "$named" ] || return 0
+  skill_stands "$named" || return 0
+  [ -n "$session" ] || return 0
+  [ -f "$sessions_root/$session/skills/$named" ] && return 0
+  printf '%s を触る前に skill://%s を読む。\n' "$path" "$named" | tee /dev/stderr
+  printf '  この周でまだ読んでいない。規律を呼ばずに書いた設計は、後段の門では直せない。\n' |
+    tee /dev/stderr
+  return 1
+}
+
 command_hook() {
-  local kind=$1 payload session cwd path marker held status=0
+  local kind=$1 payload session cwd path named marker held status=0
   payload=$(cat)
   session=$(printf '%s' "$payload" | jq -r '.session_id // empty')
   cwd=$(printf '%s' "$payload" | jq -r '.cwd // empty')
-  [ -n "$cwd" ] || cwd=$PWD
 
   case $kind in
   arm)
@@ -176,10 +236,32 @@ command_hook() {
     case $path in /*) ;; *) path="$cwd/$path" ;; esac
     command_arm "$session" "$path" || true
     ;;
+  learn)
+    # 読んだだけの周は止めない。規律を読んだ事実だけを控える。
+    path=$(printf '%s' "$payload" |
+      jq -r '.tool_input.path // .tool_input.file_path // .tool_input.filePath // empty')
+    command_learned "$session" "$(skill_read_in "$path")"
+    exit 0
+    ;;
+  edit)
+    # 読んだ規律を控える。読ませる側と控える側を分けると、読んだのに止まる周が出る。
+    path=$(printf '%s' "$payload" |
+      jq -r '.tool_input.path // .tool_input.file_path // .tool_input.filePath // empty')
+    named=$(skill_read_in "$path")
+    if [ -n "$named" ]; then
+      command_learned "$session" "$named"
+      exit 0
+    fi
+    [ -n "$path" ] || exit 0
+    case $path in /*) ;; *) path="$cwd/$path" ;; esac
+    command_teach "$session" "$path" || exit 2
+    exit 0
+    ;;
   stop)
     # この session が編集した repository だけを問う。読むだけの周は素通りする。
     if [ -n "$session" ] && [ -d "$sessions_root/$session" ]; then
       for marker in "$sessions_root/$session"/*; do
+        [ -d "$marker" ] && continue
         [ -f "$marker" ] || continue
         held=$(cat "$marker")
         [ -d "$held" ] || continue
@@ -220,7 +302,7 @@ main() {
       path=$2
       shift 2
       ;;
-    arm | stop) break ;;
+    arm | stop | edit | learn) break ;;
     *) usage ;;
     esac
   done
@@ -231,6 +313,9 @@ main() {
   check) command_check "$repo" ;;
   waive) command_waive "$repo" "$reason" ;;
   entry) entry_of "$(repo_top_of "$repo")" ;;
+  learned) command_learned "$session" "$path" ;;
+  teach) command_teach "$session" "$path" ;;
+  skill) skill_for "$path" ;;
   hook) command_hook "${1-}" ;;
   *) usage ;;
   esac

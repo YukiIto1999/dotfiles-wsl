@@ -56,6 +56,24 @@
             "command": "/run/current-system/sw/bin/agentmemory-hook-pre-tool-use"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook edit"
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook learn"
+          }
+        ]
       }
     ],
     "PostToolUse": [

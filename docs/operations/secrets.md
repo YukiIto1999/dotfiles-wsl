@@ -34,11 +34,13 @@ GitHub account の roster は暗号化済み store が持つ。sops は値だけ
 
 account の追加と削除は store の編集だけで完結する。`accounts` へ entry を足し、`username` と `token` を入れ、`primary` はどれか一つの entry にだけ置く。module も profile も変えない。登録済み account を確かめるには `gh auth status` を使い、`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
 
-## Agentmemory
+## Hindsight
 
-AgentMemory の LLM provider 用 credential は `capabilities/project-memory/agentmemory/backend/module.nix` が宣言する SOPS template から environment file へ配備する。template の更新は agentmemory container の unit を再起動する。同 Capability の MCP adapter は backend の型付き endpoint と client version を読み、credential は所有しない。
+HindsightのLLM provider用credentialは[`capabilities/project-memory/hindsight/backend/module.nix`](../../capabilities/project-memory/hindsight/backend/module.nix)が宣言する`hindsight.env` templateからenvironment fileへ配備する。templateはroot所有のmode `0400`で、更新時に`docker-hindsight.service`を再起動する。既存の`opencode/go_api_key`をcredentialとして使い、endpoint、model、named volume、local model mountはsecret inventoryへ入れず、設定変更はconsumer moduleで行う。
 
-endpoint、model、保存領域は secret inventory ではない。credential の値だけを SOPS で編集し、設定変更は consumer module で行う。
+HindsightのAPIは`127.0.0.1:3111`、memory MCP frontは`127.0.0.1:8774`である。client integrationのhookとOpenCode pluginはcredentialを所有せず、`dotfiles-memory`を経由してAPIへ接続する。credentialの値をclient設定、Nix source、ログへ書かない。
+
+retain入力は設定した外部LLMへ送られる。capture入力はSOPS secretへ追加するものではなく、indicator filteringもsecretやPIIを完全には検出しない。legacy native importの原文書類はHindsightのpersistent volumeへlocal保存し、再抽出のためにLLMへ送らない。
 
 ## Crawl4AI
 

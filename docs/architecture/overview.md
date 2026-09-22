@@ -113,10 +113,14 @@ repository固有optionはownerに対応するnamespaceへ置く。
 | `web-content` | Crawl4AI MCPとbackend |
 | `library-documentation` | Context7 MCP |
 | `github-resources` | GitHub MCPとaccount credential |
-| `project-memory` | AgentMemory MCP、backend、client integration |
+| `project-memory` | Hindsight MCP、backend、runtime、client integration |
 | `code-quality` | SonarQube MCP、server、database、provisioning |
 
-MCP targetの型、front生成、gatewayは[`platform/mcp/`](../../platform/mcp)が所有する。container service contract、OCI image inventory、Docker network、image同期は[`platform/containers/`](../../platform/containers)が所有する。application固有のserver、database、credential、volume、health endpointは対応するCapability内に置く。
+MCP targetの型、front生成、gatewayは[`platform/mcp/`](../../platform/mcp)が所有する。container service contract、OCI image inventory、Docker network、image同期は[`platform/containers/`](../../platform/containers)が所有する。application固有のserver、database、credential、volume、health endpointは対応するCapability内に置く。project memoryでは[`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)がHindsight backend、`dotfiles-memory` runtime、memory MCP front、client integrationを分担する。
+
+project memoryのgeneric optionは`dotfiles.capabilities.project-memory.runtime`（`bin/dotfiles-memory`を含むpackage）、`dotfiles.capabilities.project-memory.clientIntegrations.hooks`、`dotfiles.capabilities.project-memory.clientIntegrations.opencodePlugin`である。clientの`projectMemoryMode`と`capabilityManagedFiles.projectMemory`は、hooksまたはpluginの入口とmanaged fileを表し、Hindsightのprovider名やbackend pathをclient contractへ漏らさない。
+
+memory MCPは`localhost:8774`のfrontから、`localhost:3111`のHindsight APIへ接続する。Hindsightのpersistent stateはnamed volume、宣言で固定したmultilingual embedding/reranker modelはread-only mount、LLM credentialは対応Capabilityのruntime secretであり、Nix storeやclient configへ保存しない。
 
 Chromium packageは`browser-runtime`が一度だけ決め、PlaywrightとChrome DevToolsが共有する。SonarQubeはserver、database、provisioning、MCPを別unitにし、server endpoint、DB lifecycle、admin操作、MCP adapterの変更理由を混ぜない。
 

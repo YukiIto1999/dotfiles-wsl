@@ -9,6 +9,8 @@ composer:
 theme:
   dark: titanium
 setupVersion: 2
+memory:
+  backend: off
 providers:
   webSearchOrder:
     []

@@ -29,7 +29,7 @@ in
     capabilityManagedFiles = { };
     lspMode = "unsupported";
     telemetryMode = "unsupported";
-    agentmemoryMode = "unsupported";
+    projectMemoryMode = "unsupported";
     skillProjectionMode = "unsupported";
     install = {
       kind = "installer-script";

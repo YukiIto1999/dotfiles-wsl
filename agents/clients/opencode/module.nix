@@ -75,20 +75,20 @@ in
       };
     }
     // lib.optionalAttrs projectMemoryEnabled {
-      agentmemory-plugin = {
-        source = config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.opencodePlugin;
+      project-memory-plugin = {
+        source = config.dotfiles.capabilities.project-memory.clientIntegrations.opencodePlugin;
         format = "text";
         deployment = "home";
-        destination = ".config/opencode/plugins/agentmemory-capture.ts";
+        destination = ".config/opencode/plugins/project-memory.ts";
       };
     };
     capabilityManagedFiles = {
       lsp = "config";
-      agentmemory = if projectMemoryEnabled then "agentmemory-plugin" else null;
+      projectMemory = if projectMemoryEnabled then "project-memory-plugin" else null;
     };
     lspMode = "supported";
     telemetryMode = "unsupported";
-    agentmemoryMode = if projectMemoryEnabled then "plugin" else "unsupported";
+    projectMemoryMode = if projectMemoryEnabled then "plugin" else "unsupported";
     skillProjectionMode = "dynamic";
     install = {
       kind = "github-release";

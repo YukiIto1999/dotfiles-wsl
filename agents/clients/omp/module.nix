@@ -117,20 +117,22 @@ in
       };
     }
     // lib.optionalAttrs projectMemoryEnabled {
-      agentmemory-hook = {
-        source = ./assets/agentmemory.ts;
+      project-memory-hook = {
+        source = pkgs.replaceVars ./assets/project-memory.ts {
+          memoryBinary = lib.getExe cfg.capabilities.project-memory.runtime;
+        };
         format = "text";
         deployment = "home";
-        destination = ".omp/agent/hooks/pre/agentmemory.ts";
+        destination = ".omp/agent/hooks/pre/project-memory.ts";
       };
     };
     capabilityManagedFiles = {
       lsp = "lsp";
-      agentmemory = if projectMemoryEnabled then "agentmemory-hook" else null;
+      projectMemory = if projectMemoryEnabled then "project-memory-hook" else null;
     };
     lspMode = "supported";
     telemetryMode = "unsupported";
-    agentmemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
+    projectMemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
     skillProjectionMode = "preload";
     install = {
       kind = "github-release";

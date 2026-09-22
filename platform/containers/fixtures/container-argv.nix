@@ -1,4 +1,8 @@
-{ pkgs, ... }:
+{
+  pkgs,
+  stopTimeout ? null,
+  ...
+}:
 
 let
   containerName = "synthetic-backend";
@@ -7,7 +11,9 @@ let
   volumeName = "synthetic-state";
   image = "registry.example.invalid/synthetic-backend:1";
   startScript = pkgs.writeText "synthetic-container-start" ''
-    exec docker run --rm --name ${containerName} --network dotfiles-backends --pull never --env-file ${secretPath} -v ${volumeName}:/data ${image}
+    docker run --rm --name ${containerName} --network dotfiles-backends --pull never --env-file ${secretPath} -v ${volumeName}:/data ${
+      if stopTimeout == null then "" else "--stop-timeout=${stopTimeout}"
+    } ${image}
   '';
   auxiliaryScript = pkgs.writeText "synthetic-container-auxiliary" ''
     exit 0

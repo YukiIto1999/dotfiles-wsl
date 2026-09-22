@@ -12,7 +12,7 @@ let
       "../../../../platform/containers/impl/container-backend.nix";
     "capabilities/code-quality/sonarqube/server/module.nix" =
       "../../../../platform/containers/impl/container-backend.nix";
-    "capabilities/project-memory/agentmemory/backend/module.nix" =
+    "capabilities/project-memory/hindsight/backend/module.nix" =
       "../../../../platform/containers/impl/container-backend.nix";
     "capabilities/web-content/crawl4ai/backend/module.nix" =
       "../../../../platform/containers/impl/container-backend.nix";
@@ -45,10 +45,10 @@ let
       "../../../../platform/mcp/package/mk-server.nix"
       "../../../../platform/mcp/package/mk-npm.nix"
     ];
-    "capabilities/project-memory/agentmemory/mcp/checks.nix" = [
+    "capabilities/project-memory/hindsight/mcp/checks.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
     ];
-    "capabilities/project-memory/agentmemory/mcp/module.nix" = [
+    "capabilities/project-memory/hindsight/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
     ];
     "capabilities/web-content/crawl4ai/mcp/checks.nix" = [
@@ -89,6 +89,10 @@ let
       target = deeplyNestedCapabilityCommandHelper;
       line = "  mkCommand = import ${deeplyNestedCapabilityCommandHelper} { inherit config lib pkgs; };";
     };
+    "capabilities/project-memory/hindsight/runtime/module.nix" = {
+      target = deeplyNestedCapabilityCommandHelper;
+      line = "  mkCommand = import ${deeplyNestedCapabilityCommandHelper} { inherit config lib pkgs; };";
+    };
     "maintenance/cleanup/module.nix" = {
       target = nestedCommandHelper;
       line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";
@@ -120,7 +124,7 @@ in
   unit-boundary-name-only =
     assert lib.assertMsg (
       builtins.length (builtins.attrNames allowedPureHelperImports) == 5
-    ) "Platform container builder consumers changed without updating the boundary contract";
+    ) "helper consumers changed without updating the boundary contract";
     pkgs.runCommandLocal "check-unit-boundary-name-only"
       {
         nativeBuildInputs = [

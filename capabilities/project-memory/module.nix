@@ -1,8 +1,8 @@
 _: {
   config.dotfiles.capabilities.registry."project-memory" = {
-    implementation = "agentmemory";
+    implementation = "hindsight";
     providers = [ "memory" ];
-    backends = [ "agentmemory" ];
+    backends = [ "hindsight" ];
     requiresCapabilities = [ ];
   };
 }

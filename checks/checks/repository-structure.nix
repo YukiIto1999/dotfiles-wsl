@@ -178,7 +178,12 @@ in
           "dotfiles"
           "capabilities"
           "project-memory"
-          "agentmemory"
+          "runtime"
+        ]
+        [
+          "dotfiles"
+          "capabilities"
+          "project-memory"
           "clientIntegrations"
           "hooks"
         ]
@@ -186,9 +191,8 @@ in
           "dotfiles"
           "capabilities"
           "project-memory"
-          "agentmemory"
-          "upstream"
-          "version"
+          "clientIntegrations"
+          "opencodePlugin"
         ]
         [
           "dotfiles"

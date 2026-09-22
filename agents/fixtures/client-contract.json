@@ -23,13 +23,13 @@
       "capabilities": {
         "lsp": "unsupported",
         "telemetry": "unsupported",
-        "agentmemory": "unsupported",
+        "projectMemory": "unsupported",
         "skills": "unsupported"
       },
       "capabilityManagedFiles": {
         "lsp": null,
         "telemetry": null,
-        "agentmemory": null
+        "projectMemory": null
       },
       "gateway": {
         "format": "json",
@@ -73,13 +73,13 @@
       "capabilities": {
         "lsp": "supported",
         "telemetry": "supported",
-        "agentmemory": "hooks",
+        "projectMemory": "hooks",
         "skills": "preload"
       },
       "capabilityManagedFiles": {
         "lsp": "managed-settings",
         "telemetry": "managed-settings",
-        "agentmemory": "managed-settings"
+        "projectMemory": "managed-settings"
       },
       "gateway": {
         "format": "json",
@@ -133,13 +133,13 @@
       "capabilities": {
         "lsp": "unsupported",
         "telemetry": "unsupported",
-        "agentmemory": "hooks",
+        "projectMemory": "hooks",
         "skills": "dynamic"
       },
       "capabilityManagedFiles": {
         "lsp": null,
         "telemetry": null,
-        "agentmemory": "system"
+        "projectMemory": "system"
       },
       "gateway": {
         "format": "toml",
@@ -228,13 +228,13 @@
       "capabilities": {
         "lsp": "supported",
         "telemetry": "unsupported",
-        "agentmemory": "hooks",
+        "projectMemory": "hooks",
         "skills": "preload"
       },
       "capabilityManagedFiles": {
         "lsp": "lsp",
         "telemetry": null,
-        "agentmemory": "agentmemory-hook"
+        "projectMemory": "project-memory-hook"
       },
       "gateway": {
         "format": "json",
@@ -246,10 +246,10 @@
           "deployment": "seed",
           "destination": ".omp/agent/config.yml"
         },
-        "agentmemory-hook": {
+        "project-memory-hook": {
           "format": "text",
           "deployment": "home",
-          "destination": ".omp/agent/hooks/pre/agentmemory.ts"
+          "destination": ".omp/agent/hooks/pre/project-memory.ts"
         },
         "lsp": {
           "format": "json",
@@ -311,23 +311,23 @@
       "capabilities": {
         "lsp": "supported",
         "telemetry": "unsupported",
-        "agentmemory": "plugin",
+        "projectMemory": "plugin",
         "skills": "dynamic"
       },
       "capabilityManagedFiles": {
         "lsp": "config",
         "telemetry": null,
-        "agentmemory": "agentmemory-plugin"
+        "projectMemory": "project-memory-plugin"
       },
       "gateway": {
         "format": "json",
         "managedFile": "config"
       },
       "managedFiles": {
-        "agentmemory-plugin": {
+        "project-memory-plugin": {
           "format": "text",
           "deployment": "home",
-          "destination": ".config/opencode/plugins/agentmemory-capture.ts"
+          "destination": ".config/opencode/plugins/project-memory.ts"
         },
         "config": {
           "format": "json",

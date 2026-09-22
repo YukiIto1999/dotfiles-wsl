@@ -26,6 +26,7 @@ let
     "--network" = _: value: value == "dotfiles-backends";
     "--memory" = _: value: builtins.match "[0-9]+[mg]" value != null;
     "--shm-size" = _: value: builtins.match "[0-9]+[mg]" value != null;
+    "--stop-timeout" = _: value: builtins.match "[1-9][0-9]*" value != null;
     "--name" = name: value: value == name;
     "--pull" = _: value: value == "never";
     "--log-driver" = _: value: value == "journald";

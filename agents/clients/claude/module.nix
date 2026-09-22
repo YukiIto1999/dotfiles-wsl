@@ -98,14 +98,14 @@ let
     if projectMemoryEnabled then
       managedSettingsBase
     else
-      pkgs.runCommandLocal "claude-managed-settings-without-agentmemory.json"
+      pkgs.runCommandLocal "claude-managed-settings-without-project-memory.json"
         {
           nativeBuildInputs = [ pkgs.jq ];
         }
         ''
           jq '.hooks |= (
                 map_values(
-                  map(.hooks |= map(select(.command | test("agentmemory-hook-") | not)))
+                  map(.hooks |= map(select(.command | test("dotfiles-memory hook --harness") | not)))
                   | map(select(.hooks | length > 0))
                 )
                 | map_values(select(length > 0))
@@ -150,11 +150,11 @@ in
     capabilityManagedFiles = {
       lsp = "managed-settings";
       telemetry = "managed-settings";
-      agentmemory = if projectMemoryEnabled then "managed-settings" else null;
+      projectMemory = if projectMemoryEnabled then "managed-settings" else null;
     };
     lspMode = "supported";
     telemetryMode = "supported";
-    agentmemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
+    projectMemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
     skillProjectionMode = "preload";
     install = {
       kind = "installer-script";

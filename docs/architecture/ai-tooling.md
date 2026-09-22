@@ -70,11 +70,13 @@ runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録す�
 [`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的subagentは`agents/subagents/`に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
 
 `native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<subagent>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
-client別の能力配備の正本は各`agents/clients/<id>/module.nix`のmode宣言である。現在の各clientのmodeは次で取得できる。
+client別の能力配備の正本は各`agents/clients/<id>/module.nix`のmode宣言である。`projectMemoryMode`は`hooks`、`plugin`、`unsupported`のいずれかで、対応する配備先は`capabilityManagedFiles.projectMemory`が指すmanaged fileである。現在の各clientのmodeは次で取得できる。
 
 ```bash
-nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply 'builtins.mapAttrs (_: client: { inherit (client) subagentMode skillProjectionMode lspMode telemetryMode agentmemoryMode; })'
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply 'builtins.mapAttrs (_: client: { inherit (client) subagentMode skillProjectionMode lspMode telemetryMode projectMemoryMode; })'
 ```
+
+`projectMemoryMode`はclient固有のcapture入口を表すが、明示的な検索、検証、保存の判断を代替しない。
 
 Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
 OMPのseedはBash interceptorを有効にし、直接の再帰検索を専用検索手段へ誘導する。既存の`config.yml`はOMP自身の設定commandで移行する。
@@ -99,24 +101,38 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.targets
 
 [`platform/containers/module.nix`](../../platform/containers/module.nix)は型付きservice contract、Docker daemon、`dotfiles-backends` network、OCI image inventory、image同期を所有する。[`platform/containers/impl/container-backend.nix`](../../platform/containers/impl/container-backend.nix)はCapability実装が使うpure builderである。
 
-application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。AgentMemory、Crawl4AI、SearXNG、SonarQubeをgeneric Platformへ列挙しない。SonarQubeは[`server`](../../capabilities/code-quality/sonarqube/server)、[`database`](../../capabilities/code-quality/sonarqube/database)、[`provisioning`](../../capabilities/code-quality/sonarqube/provisioning)、[`mcp`](../../capabilities/code-quality/sonarqube/mcp)へ分ける。
+application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。Hindsight、Crawl4AI、SearXNG、SonarQubeをgeneric Platformへ列挙しない。SonarQubeは[`server`](../../capabilities/code-quality/sonarqube/server)、[`database`](../../capabilities/code-quality/sonarqube/database)、[`provisioning`](../../capabilities/code-quality/sonarqube/provisioning)、[`mcp`](../../capabilities/code-quality/sonarqube/mcp)へ分ける。
 
 Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。container backendが一件もなければ、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
 
 全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と、containerを有効にしたhostへ配備する`dotfiles-sync-images`が取得を担当し、Nix生成imageは`imageFile`が取得を担当する。Docker build artifact GCはdangling imageとBuildKit cacheだけを扱い、tagged image、container、volumeは削除しない。
 
-## AgentMemory
+## Project memory
 
-[`capabilities/project-memory/agentmemory/`](../../capabilities/project-memory/agentmemory)がupstream version、engine backend、MCP adapter、client integrationを所有する。保存先はhostの`/var/lib/agentmemory/data`をcontainerの`/data`へmountした領域であり、Nix storeには保存しない。
+現行のproject memory実装は[`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)が所有する。`backend`はHindsight、`runtime`は`bin/dotfiles-memory`を含むpackage、`mcp`はmemory providerのfront、`client-integrations`は共通hook packageとOpenCode pluginをそれぞれ持つ。Capabilityが公開するgeneric optionは`dotfiles.capabilities.project-memory.runtime`と`dotfiles.capabilities.project-memory.clientIntegrations.{hooks,opencodePlugin}`であり、client moduleはprovider名やbackend pathを直接参照しない。移行元のexportはrepository外のbackupに保全する。
 
 ```text
 Claude Code / Codex / OMP hooks ─┐
-OpenCode capture plugin ─────────┼─► 127.0.0.1のengine API ─► /var/lib/agentmemory/data
-                                 │
-AI CLI ─► gateway ─► memory MCP ┘
+OpenCode capture plugin ─────────┼─► dotfiles-memory ─► 127.0.0.1:3111 Hindsight
+                                 │                         │
+AI CLI ─► gateway ─► memory MCP ┘                         └─► hindsight-data volume
 ```
 
-LLM処理は外部のOpenAI互換endpointを使う。API keyはSOPS templateがruntime環境ファイルへ展開し、Dockerがcontainerへ渡す。sessionのpromptやcodeが外部providerへ送られる信頼境界を持つ。
+memory MCPのendpointは`front`のport `8774`、Hindsight APIは`localhost:3111`である。MCPの入口は`memory_health`、`memory_recall`、`memory_save`、`memory_status`、`memory_verify`で、project/global/legacyのscopeを明示する。healthはHindsightのdatabaseとmodel readinessだけを確認し、LLMが利用できることやretainが成功したことは証明しない。
+
+project scopeのidentityは、`dotfiles-memory`が絶対`cwd`からGit common directoryを解決して導く。同じrepositoryのlinked worktreeは共有し、basenameが同じ別repositoryは分離する。legacy scopeはAgentMemoryの未検証履歴をread-onlyで検索する領域で、自動recallには混ぜず、current sourceで確認した知識をprojectまたはglobalへ明示的に保存する。
+
+Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`に保持する。宣言で固定したmultilingual embeddingとrerankerのmodel mountはNix storeからread-onlyで渡し、retain時のextraction inputはSOPSから展開したcredentialで設定する外部LLMへ送られる。native legacy importは指定snapshotの全recordを元IDとcanonical raw record documentで保持し、local re-embeddingだけを行い、LLMによる再抽出とlegacy consolidationを行わない。
+
+client連携は直近の完結したuser/assistant turnを自動captureし、対応するsession開始とprompt送信でproject/globalのrecall結果をreinjectionする。native adapterはassistantの正常終了を示す情報を保持し、runtimeは最新のassistantが正常終了したturnだけを採用する。失敗、途中終了、終了状態不明のturnを過去の応答で補わない。OMPは末尾から最大128entryを辿り、OpenCodeは最新128messageだけを取得する。両clientはcapture対象のtextと区切り分を12000文字以内に制限し、上限内にuser側の境界が見つからない場合は部分保存せず警告する。
+
+ClaudeとCodexのStopでは、利用者メッセージの由来を確認してnativeの最終応答を優先する。Codexではhookのturn IDもtranscriptに照合する。CodexはStop後に`task_complete`を記録するため、Stop処理中にはその記録を要求しない。PreCompactとSessionEndではtranscriptの正常終了を確認する。
+
+OpenCodeのrecall結果は同じturnのmodel呼出しで共有し、次のpromptで置き換え、idleで破棄する。title生成などの補助呼出しで消費しない。idle eventのcaptureはpluginが追跡し、`dispose`で開始済み処理の完了または失敗通知を待つ。履歴取得とhook実行には29秒、警告通知には1秒のabort期限を設定する。event loopやhostが停止している時間を含めた実時間の上限は保証しない。
+
+既知のmemory/injection blockは決定的に除外するが、secretやPIIをすべて検出できる保証ではない。失敗時に別のmemory backendへfallbackしない。saveが`pending`または`indeterminate`なら保存済みと扱わず、返されたoperationとdocumentのIDを同じscopeの`memory_status`へ渡して確認する。`indeterminate`は送信後の通信断や期限切れで結果を確認できない状態で、runtimeはsaveを自動再送しない。
+
+LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有のruntime environment fileを経てcontainerへ渡し、client hookやMCP frontへは配らない。sessionのretain入力が外部providerへ送られる信頼境界を持つ。
 
 ## LSPと観測
 

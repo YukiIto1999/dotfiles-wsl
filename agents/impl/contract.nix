@@ -259,7 +259,7 @@ let
               type = types.nullOr types.str;
               default = null;
             };
-            agentmemory = lib.mkOption {
+            projectMemory = lib.mkOption {
               type = types.nullOr types.str;
               default = null;
             };
@@ -279,7 +279,7 @@ let
           "unsupported"
         ];
       };
-      agentmemoryMode = lib.mkOption {
+      projectMemoryMode = lib.mkOption {
         type = types.enum [
           "hooks"
           "plugin"
@@ -351,7 +351,7 @@ let
     in
     ((client.lspMode == "supported") == (bindings.lsp != null))
     && ((client.telemetryMode == "supported") == (bindings.telemetry != null))
-    && ((client.agentmemoryMode != "unsupported") == (bindings.agentmemory != null))
+    && ((client.projectMemoryMode != "unsupported") == (bindings.projectMemory != null))
     && builtins.all (file: builtins.hasAttr file client.managedFiles) referencedFiles;
 
   # これらは command 名、argv、配備 path、生成 file 名、参照 key である。

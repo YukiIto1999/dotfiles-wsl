@@ -474,10 +474,10 @@ let
     "sonarqube"
   ];
   disabledContainerServices = [
-    "docker-agentmemory"
     "docker-build-artifact-gc"
     "docker-crawl4ai"
     "docker-dotfiles-backends-network"
+    "docker-hindsight"
     "docker-searxng"
     "docker-sonarqube"
     "docker-sonarqube-db"
@@ -495,14 +495,13 @@ let
     "sonarqube/db_password"
   ];
   disabledContainerTemplates = [
-    "agentmemory.env"
     "crawl4ai.env"
+    "hindsight.env"
     "searxng-settings.yml"
     "sonarqube-db.env"
     "sonarqube.env"
   ];
   disabledContainerArtifacts = [
-    "containers/agentmemory/config"
     "containers/searxng/settings-template"
   ];
 
@@ -750,13 +749,12 @@ in
     assert builtins.deepSeq memoryOnlyVariantConfig.system.build.toplevel.drvPath true;
     assert builtins.deepSeq containerlessVariantConfig.system.build.toplevel.drvPath true;
     assert memoryOnlyVariantConfig.dotfiles.capabilities.enabled == memoryOnlyCapabilityIds;
-    assert memoryOnlyVariantConfig.dotfiles.platform.containers.enabled == [ "agentmemory" ];
+    assert memoryOnlyVariantConfig.dotfiles.platform.containers.enabled == [ "hindsight" ];
     assert
-      builtins.attrNames memoryOnlyVariantConfig.dotfiles.platform.containers.services
-      == [ "agentmemory" ];
+      builtins.attrNames memoryOnlyVariantConfig.dotfiles.platform.containers.services == [ "hindsight" ];
     assert
       builtins.attrNames memoryOnlyVariantConfig.virtualisation.oci-containers.containers
-      == [ "agentmemory" ];
+      == [ "hindsight" ];
     assert memoryOnlyVariantConfig.virtualisation.docker.enable;
     assert builtins.hasAttr "memory" memoryOnlyVariantConfig.dotfiles.platform.mcp.targets;
     assert lib.all (name: !builtins.hasAttr name memoryOnlyVariantConfig.dotfiles.platform.mcp.targets)
@@ -924,10 +922,22 @@ in
       valid = evaluate fixture.valid;
       missingSecretReader = evaluate fixture.missingSecretReader;
       missingVolumeOwner = evaluate fixture.missingVolumeOwner;
+      stopFixture =
+        value:
+        import ./fixtures/container-argv.nix {
+          inherit pkgs;
+          stopTimeout = value;
+        };
+      gracefulStop = evaluate (stopFixture "45").valid;
+      indefiniteStop = evaluate (stopFixture "-1").valid;
+      immediateStop = evaluate (stopFixture "0").valid;
     in
     assert valid.secretReaders == fixture.expected.secretReaders;
     assert valid.volumeOwners == fixture.expected.volumeOwners;
     assert valid.wrongValues == [ ];
+    assert gracefulStop.unexpectedTokens == [ ] && gracefulStop.wrongValues == [ ];
+    assert indefiniteStop.wrongValues == [ "synthetic-backend:--stop-timeout=-1" ];
+    assert immediateStop.wrongValues == [ "synthetic-backend:--stop-timeout=0" ];
     assert
       missingSecretReader.wrongValues
       == [ "synthetic-backend:--env-file=/run/secrets/rendered/synthetic-secret.env" ];

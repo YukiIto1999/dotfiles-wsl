@@ -18,8 +18,8 @@
     "service": "agentgateway-default"
   },
   "containers": [
-    "agentmemory",
     "crawl4ai",
+    "hindsight",
     "searxng",
     "sonarqube",
     "sonarqube-db"
@@ -42,5 +42,5 @@
     "sonarqube/admin_password",
     "sonarqube/db_password"
   ],
-  "agentmemoryPersistentMount": "/var/lib/agentmemory/data:/data"
+  "projectMemoryPersistentMount": "hindsight-data:/home/hindsight/.pg0"
 }

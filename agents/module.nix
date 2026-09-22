@@ -465,7 +465,7 @@ in
         verificationGate = runtimeContract.packages.gate;
       }
       // lib.optionalAttrs projectMemoryEnabled {
-        agentmemoryHooks = config.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
+        projectMemoryHooks = config.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
       };
       stateRoot = "~/${runtimeContract.state.relativeResourcesRoot}";
       inherit (runtimeContract.packages) agentResource agentWorktree;
@@ -562,7 +562,7 @@ in
       config.dotfiles.agents.packages.verificationGate
     ]
     ++ lib.optionals projectMemoryEnabled [
-      config.dotfiles.agents.packages.agentmemoryHooks
+      config.dotfiles.agents.packages.projectMemoryHooks
     ];
 
     home-manager.users.${cfg.workstation.username} =

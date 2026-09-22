@@ -828,6 +828,30 @@ fi
 test -d "$malformed_path"
 grep -Fq 'malformed-ledger' "$HOME/cleanup.log"
 
+rm -- "$(state_root)/worktrees/malformed.json"
+malformed_record=$(record_for_path "$malformed_path")
+cp -- "$malformed_record" "$HOME/valid-ledger.json"
+printf '{' >>"$malformed_record"
+if "$RESOURCE" cleanup-session malformed-session 2>"$HOME/trailing-cleanup.log"; then
+  echo 'valid ledger prefix followed by malformed JSON did not fail closed' >&2
+  exit 1
+fi
+test -d "$malformed_path"
+test "$(jq -r '.status' "$(state_root)/sessions/malformed-session.json")" = active
+grep -Fq 'malformed-ledger' "$HOME/trailing-cleanup.log"
+
+for trailing_json in '{"version":3}' 'null'; do
+  cp -- "$HOME/valid-ledger.json" "$malformed_record"
+  printf '%s\n' "$trailing_json" >>"$malformed_record"
+  if "$RESOURCE" cleanup-session malformed-session 2>"$HOME/schema-cleanup.log"; then
+    echo 'schema-invalid trailing JSON did not fail closed' >&2
+    exit 1
+  fi
+  test -d "$malformed_path"
+  test "$(jq -r '.status' "$(state_root)/sessions/malformed-session.json")" = active
+  grep -Fq 'malformed-ledger' "$HOME/schema-cleanup.log"
+done
+
 # Managed creation preflights the ledger. Registration failures known before
 # git runs must not leave a newly-created unowned worktree behind.
 new_case create-preflight
@@ -2312,6 +2336,82 @@ if ((indexed_jq_file_count > indexed_jq_file_bound)); then
   echo "reap passed too many JSON operands: count=$indexed_jq_file_count bound=$indexed_jq_file_bound" >&2
   exit 1
 fi
+
+# Cleanup of an empty target still validates every ledger, but each ledger
+# should require a bounded parser budget rather than four jq processes.
+new_case cleanup-linear-jq
+cleanup_scale_target=cleanup-scale-target
+cleanup_scale_target_ledger="$(state_root)/sessions/$cleanup_scale_target.json"
+begin_session "$cleanup_scale_target"
+cleanup_scale_unrelated_session_count=8
+cleanup_scale_unrelated_worktree_count=64
+cleanup_scale_state_root=$(state_root)
+cleanup_scale_owner_start_time=$(proc_start_time $$)
+cleanup_scale_boot_id=$(</proc/sys/kernel/random/boot_id)
+cleanup_scale_updated_at=$(date +%s)
+mkdir -p "$cleanup_scale_state_root/sessions" "$cleanup_scale_state_root/worktrees" \
+  "$cleanup_scale_state_root/locks"
+chmod 700 "$cleanup_scale_state_root" "$cleanup_scale_state_root/sessions" \
+  "$cleanup_scale_state_root/worktrees" "$cleanup_scale_state_root/locks"
+cleanup_scale_unrelated_ledgers=()
+for index in $(seq 1 "$cleanup_scale_unrelated_session_count"); do
+  cleanup_scale_session_id="cleanup-scale-unrelated-$index"
+  cleanup_scale_session_ledger="$cleanup_scale_state_root/sessions/$cleanup_scale_session_id.json"
+  jq -cn \
+    --arg session_id "$cleanup_scale_session_id" \
+    --arg boot_id "$cleanup_scale_boot_id" \
+    --arg owner_start_time "$cleanup_scale_owner_start_time" \
+    --argjson owner_pid "$$" \
+    --argjson updated_at "$cleanup_scale_updated_at" \
+    '{version: 2, session_id: $session_id, client: "fixture-client",
+      owner_pid: $owner_pid, owner_start_time: $owner_start_time,
+      boot_id: $boot_id, status: "ended", reason: "fixture",
+      updated_at: $updated_at}' \
+    >"$cleanup_scale_session_ledger"
+  chmod 600 "$cleanup_scale_session_ledger"
+  cleanup_scale_unrelated_ledgers+=("$cleanup_scale_session_ledger")
+  : >"$cleanup_scale_state_root/locks/$cleanup_scale_session_id.lock"
+  chmod 600 "$cleanup_scale_state_root/locks/$cleanup_scale_session_id.lock"
+done
+for index in $(seq 1 "$cleanup_scale_unrelated_worktree_count"); do
+  cleanup_scale_session_id="cleanup-scale-unrelated-$cleanup_scale_unrelated_session_count"
+  cleanup_scale_common_dir="$HOME/cleanup-scale-common-$index"
+  cleanup_scale_path="$HOME/cleanup-scale-worktree-$index"
+  cleanup_scale_record_id=$(printf '%s\0%s' "$cleanup_scale_common_dir" \
+    "$cleanup_scale_path" | sha256sum | cut -d ' ' -f 1)
+  cleanup_scale_record="$cleanup_scale_state_root/worktrees/$cleanup_scale_record_id.json"
+  jq -cn \
+    --arg session_id "$cleanup_scale_session_id" \
+    --arg common_dir "$cleanup_scale_common_dir" \
+    --arg path "$cleanup_scale_path" \
+    '{version: 1, session_id: $session_id, common_dir: $common_dir, path: $path,
+      initial_head: "0000000000000000000000000000000000000000",
+      status: "removed", last_reason: "fixture", updated_at: 0}' \
+    >"$cleanup_scale_record"
+  chmod 600 "$cleanup_scale_record"
+  cleanup_scale_unrelated_ledgers+=("$cleanup_scale_record")
+done
+for ledger in "${cleanup_scale_unrelated_ledgers[@]}"; do
+  sha256sum "$ledger"
+done >"$HOME/cleanup-scale-before"
+cleanup_scale_jq_counter="$HOME/cleanup-scale-jq-count"
+printf '0\n' >"$cleanup_scale_jq_counter"
+DOTFILES_AGENT_TEST_JQ_COUNTER="$cleanup_scale_jq_counter" \
+  "$COUNTING_RESOURCE" cleanup-session "$cleanup_scale_target"
+cleanup_scale_ledger_count=$((1 + cleanup_scale_unrelated_session_count +
+  cleanup_scale_unrelated_worktree_count))
+cleanup_scale_jq_calls=$(<"$cleanup_scale_jq_counter")
+cleanup_scale_jq_bound=$((cleanup_scale_ledger_count * 3))
+if ((cleanup_scale_jq_calls > cleanup_scale_jq_bound)); then
+  echo "cleanup parsed too many ledger values: calls=$cleanup_scale_jq_calls bound=$cleanup_scale_jq_bound" >&2
+  exit 1
+fi
+test "$(jq -r '.status' "$cleanup_scale_target_ledger")" = ended
+test "$(jq -r '.reason' "$cleanup_scale_target_ledger")" = cleanup
+for ledger in "${cleanup_scale_unrelated_ledgers[@]}"; do
+  sha256sum "$ledger"
+done >"$HOME/cleanup-scale-after"
+cmp -- "$HOME/cleanup-scale-before" "$HOME/cleanup-scale-after"
 
 # Active v2 sessions use the preflight index as well; their worktree set must
 # not be reparsed once per active session.

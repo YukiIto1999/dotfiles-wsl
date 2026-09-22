@@ -111,11 +111,12 @@ ensure_directory() {
 }
 
 validate_regular_file() {
-  local path=$1
+  local path=$1 metadata owner mode
   [ ! -L "$path" ] || return 1
   [ -f "$path" ] || return 1
-  [ "$(stat -c %u "$path")" = "$(id -u)" ] || return 1
-  [ "$(stat -c %a "$path")" = 600 ] || return 1
+  metadata=$(stat -c '%u %a' -- "$path") || return 1
+  read -r owner mode <<<"$metadata"
+  [ "$owner" = "$resource_owner_uid" ] && [ "$mode" = 600 ]
 }
 
 ensure_lock_file() {
@@ -378,9 +379,7 @@ atomic_write() {
   mv -T -- "$temporary" "$target"
 }
 
-session_schema_is_valid() {
-  local path=$1
-  jq --exit-status '
+session_schema_filter='
     type == "object"
     and (
       keys == ["boot_id", "client", "owner_pid", "owner_start_time", "reason", "session_id", "status", "version"]
@@ -395,12 +394,13 @@ session_schema_is_valid() {
     and (.status == "active" or .status == "ended")
     and (.reason | type == "string" and length > 0)
     and ((has("updated_at") | not) or (.updated_at | type == "number" and . >= 0 and floor == .))
-  ' "$path" >/dev/null
-}
+'
 
-worktree_schema_is_valid() {
+session_schema_is_valid() {
   local path=$1
-  jq --exit-status '
+  jq --exit-status "$session_schema_filter" "$path" >/dev/null
+}
+worktree_schema_filter='
     type == "object"
     and (
       (
@@ -444,7 +444,39 @@ worktree_schema_is_valid() {
     and (.status == "adding" or .status == "owned" or .status == "quarantining" or .status == "removing" or .status == "preserved" or .status == "removed")
     and (.last_reason | type == "string" and length > 0)
     and ((has("updated_at") | not) or (.updated_at | type == "number" and . >= 0 and floor == .))
-  ' "$path" >/dev/null
+'
+
+worktree_schema_is_valid() {
+  local path=$1
+  jq --exit-status "$worktree_schema_filter" "$path" >/dev/null
+}
+
+parse_ledger_fields() {
+  local path=$1 schema_filter=$2 field_filter=$3 output_filter parser_pid
+  local -a fields=()
+  output_filter="if ($schema_filter) then
+    $field_filter
+  else
+    error(\"invalid ledger schema\")
+  end"
+  mapfile -d '' -t fields < <(jq -j "$output_filter" "$path")
+  parser_pid=$!
+  wait "$parser_pid" || return 1
+  parsed_ledger_fields=("${fields[@]}")
+}
+
+parse_session_ledger() {
+  local path=$1
+  parse_ledger_fields "$path" "$session_schema_filter" \
+    '.session_id, "\u0000", .status, "\u0000", (.version | tostring), "\u0000"' || return 1
+  [ "${#parsed_ledger_fields[@]}" -eq 3 ]
+}
+
+parse_worktree_ledger() {
+  local path=$1
+  parse_ledger_fields "$path" "$worktree_schema_filter" \
+    '.session_id, "\u0000", .common_dir, "\u0000", .path, "\u0000"' || return 1
+  [ "${#parsed_ledger_fields[@]}" -eq 3 ]
 }
 
 preflight_ledgers() {
@@ -472,13 +504,13 @@ preflight_ledgers() {
     fi
     case "$entry" in
     "$sessions_root"/*)
-      if ! session_schema_is_valid "$entry"; then
+      if ! parse_session_ledger "$entry"; then
         printf '%s: preserve malformed-ledger: %s\n' "$program" "$entry" >&2
         return 1
       fi
-      session_id=$(jq -r '.session_id' "$entry")
-      session_status=$(jq -r '.status' "$entry")
-      session_version=$(jq -r '.version' "$entry")
+      session_id=${parsed_ledger_fields[0]}
+      session_status=${parsed_ledger_fields[1]}
+      session_version=${parsed_ledger_fields[2]}
       if [ "$session_status" = active ] && [ "$session_version" = 1 ]; then
         snapshot_legacy_active_sessions["$session_id"]=true
       fi
@@ -488,17 +520,17 @@ preflight_ledgers() {
       fi
       ;;
     "$worktrees_root"/*)
-      if ! worktree_schema_is_valid "$entry"; then
+      if ! parse_worktree_ledger "$entry"; then
         printf '%s: preserve malformed-ledger: %s\n' "$program" "$entry" >&2
         return 1
       fi
-      session_id=$(jq -r '.session_id' "$entry")
+      session_id=${parsed_ledger_fields[0]}
+      common_dir=${parsed_ledger_fields[1]}
+      path=${parsed_ledger_fields[2]}
       if ! [[ $session_id =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$ ]]; then
         printf '%s: preserve malformed-ledger: %s\n' "$program" "$entry" >&2
         return 1
       fi
-      common_dir=$(jq -r '.common_dir' "$entry")
-      path=$(jq -r '.path' "$entry")
       expected_id=$(printf '%s\0%s' "$common_dir" "$path" | sha256sum | cut -d ' ' -f 1)
       if [ "$name" != "$expected_id.json" ]; then
         printf '%s: preserve malformed-ledger: %s\n' "$program" "$entry" >&2

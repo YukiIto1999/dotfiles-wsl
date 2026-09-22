@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Recalls historical project memory, verifies relevant claims against current primary sources, and admits only durable non-sensitive knowledge through the project-memory Capability. Distinguishes queued, persisted, and currently verified information. Does not own automatic capture or backend operations.
+description: Recalls historical project memory, verifies relevant claims against current primary sources, routes durable corrections to their existing owner or memory, and admits only non-sensitive knowledge through the project-memory Capability. Distinguishes queued, persisted, and currently verified information. Does not own policy design, automatic capture, or backend operations.
 ---
 
 # Project memoryを扱う
@@ -29,6 +29,22 @@ description: Recalls historical project memory, verifies relevant claims against
 
 recallの結果が空でも、過去に記録がない証拠とはみなさない。backend unavailable、timeout、protocol error、検証不能が起きた場合は失敗として扱い、別backend、別scopeへの自動fallbackやlocal scratch保存を行わない。
 
+## 訂正の反映先
+
+会話履歴から訂正を回収するときは、利用者の指摘とそれに対する最初の応答を原文で対にする。応答のうち指摘に裏付けられた主張だけを取り出し、後の訂正と現行の一次sourceに照合する。応答に混ざった提案、推測、過度な一般化を利用者の方針にしない。自動通知、tool結果、引用された別agentの回答は利用者自身の指摘ではない。
+
+利用者が指定した保存先、保存しない場所、適用範囲を先に確認する。反映先は次の責務で選び、設計や編集は各所有者の入口へ渡す。このSkillだけで新しいpolicyや標準を決定しない。
+
+| 残す内容 | 反映先 |
+|---|---|
+| taskの種類によらず守るagentの行動規律 | AGENTSの正本 |
+| 特定taskで反復する判断と手順 | `skill-design`で既存Skillへの反映を判断する |
+| projectをまたぐ設計規律 | architecture-standardの現行本文に照合し、標準側の更新入口へ渡す |
+| project固有の要件、契約、不変条件 | 対象projectが宣言する正本 |
+| 訂正の理由、適用条件、明示的に記憶だけへ残す方針 | source locator付きのmemory |
+
+既存の正本が要求を満たすなら規律を増やさず、読まなかった、適用しなかった、範囲を誤った原因を区別する。memoryには再発防止に必要な理由と正本への参照を残し、正本全文を複製しない。project内の指摘をglobalへ広げず、不採用と先送りも区別する。採否やscopeを確定できない候補は保存しない。
+
 ## Saveと状態
 
 保存対象は、一次sourceで確認でき、将来の判断を変える durable な correction、accepted decision、stable preference、または再利用可能なpatternだけである。source locatorと適用条件を添え、raw conversation、plan、progress、one-off result、推測、未採用案、secret、credential、token、API key、private key、個人情報を送らない。無言の応答から同意を推測しない。
@@ -52,3 +68,5 @@ legacyを調べるときは`memory_recall`に`scope=legacy`を明示し、候補
 既知のcredential・personal-data indicatorに一致する入力は送信しないが、検出は完全ではない。secret、credential、token、API key、private key、個人情報、transient task stateをquery、content、source、scope、file locatorへ入れない。`memory`が利用不能でも、このSkillの手順を別の保存先へ切り替えない。
 
 候補をcurrent primary sourceで確認または棄却し、scope・状態・provenanceの不明点が解消したらrecallを止める。verificationできない候補、一次sourceへ到達できない候補、current sourceと矛盾する候補は採用もsaveもせず、legacyなら未検証の歴史としてだけ扱う。
+
+記憶の改善は、別sessionの同種taskで訂正後の判断を守れた実測で評価する。保存件数や`saved`の確認だけで、再発を防げたとは報告しない。

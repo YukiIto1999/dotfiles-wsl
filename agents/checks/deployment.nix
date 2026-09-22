@@ -210,10 +210,21 @@ let
   expectedClaudeHooks = {
     SessionStart = expectedHook { name = "session-start"; };
     UserPromptSubmit = expectedHook { name = "prompt-submit"; };
-    PreToolUse = expectedHook {
-      name = "pre-tool-use";
-      matcher = "Edit|Write|Read|Glob|Grep";
-    };
+    PreToolUse =
+      expectedHook {
+        name = "pre-tool-use";
+        matcher = "Edit|Write|Read|Glob|Grep";
+      }
+      ++ [
+        (gateHook {
+          kind = "edit";
+          matcher = "Edit|Write|MultiEdit|NotebookEdit";
+        })
+        (gateHook {
+          kind = "learn";
+          matcher = "Read";
+        })
+      ];
     PostToolUse = expectedHook { name = "post-tool-use"; } ++ [
       (gateHook {
         kind = "arm";
@@ -622,6 +633,16 @@ in
           grep -Fq "\"$hook\"" "$ompHook"
         done
         grep -Fq 'tool_call hooks must fail open' "$ompHook"
+
+        gateHookFile=${clients.omp.managedFiles.verification-gate.source}
+        for event in tool_call tool_result session_stop; do
+          grep -Fq "pi.on(\"$event\"" "$gateHookFile"
+        done
+        for kind in arm edit learn stop; do
+          grep -Fq "\"$kind\"" "$gateHookFile"
+        done
+        grep -Fq 'block: true' "$gateHookFile"
+        grep -Fq 'decision: "block"' "$gateHookFile"
 
         jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
           '. == {mcpServers: {gateway: {type: "http", url: $expected}}}' \

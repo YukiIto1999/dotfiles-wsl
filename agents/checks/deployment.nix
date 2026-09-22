@@ -168,9 +168,11 @@ let
     inherit name;
     inherit (expected.clients.${name}) binary versionArgs install;
   }) expected.required;
-  agentmemoryHookCommand = name: "/run/current-system/sw/bin/agentmemory-hook-${name}";
+  projectMemoryHookCommand =
+    harness: name: "/run/current-system/sw/bin/dotfiles-memory hook --harness ${harness} ${name}";
   expectedHook =
     {
+      harness,
       name,
       matcher ? null,
       extra ? { },
@@ -182,7 +184,7 @@ let
             (
               {
                 type = "command";
-                command = agentmemoryHookCommand name;
+                command = projectMemoryHookCommand harness name;
               }
               // extra
             )
@@ -208,51 +210,63 @@ let
       // lib.optionalAttrs (matcher != null) { inherit matcher; }
     );
   expectedClaudeHooks = {
-    SessionStart = expectedHook { name = "session-start"; };
-    UserPromptSubmit = expectedHook { name = "prompt-submit"; };
-    PreToolUse =
-      expectedHook {
-        name = "pre-tool-use";
-        matcher = "Edit|Write|Read|Glob|Grep";
-      }
-      ++ [
-        (gateHook {
-          kind = "edit";
-          matcher = "Edit|Write|MultiEdit|NotebookEdit";
-        })
-        (gateHook {
-          kind = "learn";
-          matcher = "Read";
-        })
-      ];
-    PostToolUse = expectedHook { name = "post-tool-use"; } ++ [
+    SessionStart = expectedHook {
+      harness = "claude";
+      name = "session-start";
+    };
+    UserPromptSubmit = expectedHook {
+      harness = "claude";
+      name = "prompt-submit";
+    };
+    PreToolUse = [
+      (gateHook {
+        kind = "edit";
+        matcher = "Edit|Write|MultiEdit|NotebookEdit";
+      })
+      (gateHook {
+        kind = "learn";
+        matcher = "Read";
+      })
+    ];
+    PostToolUse = [
       (gateHook {
         kind = "arm";
         matcher = "Edit|Write|MultiEdit|NotebookEdit";
       })
     ];
-    PostToolUseFailure = expectedHook { name = "post-tool-failure"; };
-    PreCompact = expectedHook { name = "pre-compact"; };
-    SubagentStart = expectedHook { name = "subagent-start"; };
-    SubagentStop = expectedHook { name = "subagent-stop"; };
-    Notification = expectedHook { name = "notification"; };
-    TaskCompleted = expectedHook { name = "task-completed"; };
-    Stop = expectedHook { name = "stop"; } ++ [ (gateHook { kind = "stop"; }) ];
-    SessionEnd = expectedHook { name = "session-end"; };
+    PreCompact = expectedHook {
+      harness = "claude";
+      name = "pre-compact";
+    };
+    Stop =
+      expectedHook {
+        harness = "claude";
+        name = "stop";
+      }
+      ++ [ (gateHook { kind = "stop"; }) ];
+    SessionEnd = expectedHook {
+      harness = "claude";
+      name = "session-end";
+    };
   };
   expectedCodexHooks = {
     SessionStart = expectedHook {
+      harness = "codex";
       name = "session-start";
-      extra.statusMessage = "agentmemory: loading session context";
+      extra.statusMessage = "project-memory: loading session context";
     };
-    UserPromptSubmit = expectedHook { name = "prompt-submit"; };
-    PreToolUse = expectedHook {
-      name = "pre-tool-use";
-      matcher = "Edit|Write|Read|Glob|Grep";
+    UserPromptSubmit = expectedHook {
+      harness = "codex";
+      name = "prompt-submit";
     };
-    PostToolUse = expectedHook { name = "post-tool-use"; };
-    PreCompact = expectedHook { name = "pre-compact"; };
-    Stop = expectedHook { name = "stop"; };
+    PreCompact = expectedHook {
+      harness = "codex";
+      name = "pre-compact";
+    };
+    Stop = expectedHook {
+      harness = "codex";
+      name = "stop";
+    };
   };
 
   managedRows = lib.concatMap (
@@ -476,24 +490,15 @@ in
     assert clients.codex.gatewayConfig.source != clients.codex.managedFiles.system.source;
     assert clients.omp.gatewayConfig.source == clients.omp.managedFiles.mcp.source;
     assert clients.opencode.gatewayConfig.source != clients.opencode.managedFiles.config.source;
-    assert lib.all (exe: lib.hasPrefix "${hostConfig.dotfiles.workstation.homeDir}/.local/bin/" exe) (
-      builtins.attrValues hostConfig.dotfiles.agents.clientExecutables
-    );
-    assert lib.all (
-      row:
-      !lib.elem row.file.destination [
-        ".omp/agent/agent.db"
-      ]
-    ) managedRows;
     assert lib.any (
       definition:
       lib.hasInfix "/agents/module.nix" (toString definition.file)
-      && lib.elem hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks definition.value
+      && lib.elem hostConfig.dotfiles.capabilities.project-memory.clientIntegrations.hooks definition.value
     ) hostOptions.environment.systemPackages.definitionsWithLocations;
     assert
-      clients.opencode.managedFiles.agentmemory-plugin.source
-      == hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.opencodePlugin;
-    assert !(builtins.hasAttr "containers/agentmemory/opencode-capture" artifacts);
+      clients.opencode.managedFiles.project-memory-plugin.source
+      == hostConfig.dotfiles.capabilities.project-memory.clientIntegrations.opencodePlugin;
+    assert !(builtins.hasAttr "containers/project-memory/opencode-capture" artifacts);
     assert lib.all (
       definition:
       lib.hasInfix "/agents/" (toString definition.file)
@@ -597,7 +602,7 @@ in
         test "''${generatedCaptured[4]}" = 'pipe|value'
 
         claudeCapabilities=${
-          clients.claude.managedFiles.${clients.claude.capabilityManagedFiles.agentmemory}.source
+          clients.claude.managedFiles.${clients.claude.capabilityManagedFiles.projectMemory}.source
         }
         test "$claudeCapabilities" = ${
           clients.claude.managedFiles.${clients.claude.capabilityManagedFiles.telemetry}.source
@@ -615,7 +620,7 @@ in
         ' "$claudeCapabilities" > /dev/null
 
         codexCapabilities=${
-          clients.codex.managedFiles.${clients.codex.capabilityManagedFiles.agentmemory}.source
+          clients.codex.managedFiles.${clients.codex.capabilityManagedFiles.projectMemory}.source
         }
         remarshal -if toml -of json "$codexCapabilities" \
           | jq --exit-status \
@@ -623,16 +628,6 @@ in
             .hooks == $hooks
           ' > /dev/null
 
-        ompHook=${clients.omp.managedFiles.agentmemory-hook.source}
-        for event in session_start before_agent_start tool_call tool_result \
-          session_before_compact session_stop session_shutdown; do
-          grep -Fq "pi.on(\"$event\"" "$ompHook"
-        done
-        for hook in session-start prompt-submit pre-tool-use post-tool-use \
-          post-tool-failure pre-compact stop session-end; do
-          grep -Fq "\"$hook\"" "$ompHook"
-        done
-        grep -Fq 'tool_call hooks must fail open' "$ompHook"
 
         gateHookFile=${clients.omp.managedFiles.verification-gate.source}
         for event in tool_call tool_result session_stop; do
@@ -998,14 +993,14 @@ in
 
   agent-capability-gating =
     assert builtins.deepSeq restrictedAgentConfig.system.build.toplevel.drvPath true;
-    assert !builtins.hasAttr "agentmemoryHooks" restrictedAgentConfig.dotfiles.agents.packages;
-    assert lib.all (client: client.agentmemoryMode == "unsupported") (
+    assert !builtins.hasAttr "projectMemoryHooks" restrictedAgentConfig.dotfiles.agents.packages;
+    assert lib.all (client: client.projectMemoryMode == "unsupported") (
       builtins.attrValues restrictedAgentConfig.dotfiles.agents.clients
     );
     assert
-      !builtins.hasAttr "agents/opencode/agentmemory-plugin" restrictedAgentConfig.dotfiles.managedArtifacts;
+      !builtins.hasAttr "agents/opencode/project-memory-plugin" restrictedAgentConfig.dotfiles.managedArtifacts;
     assert
-      !builtins.hasAttr "agents/omp/agentmemory-hook" restrictedAgentConfig.dotfiles.managedArtifacts;
+      !builtins.hasAttr "agents/omp/project-memory-hook" restrictedAgentConfig.dotfiles.managedArtifacts;
     assert builtins.hasAttr "code-review" restrictedAgentConfig.dotfiles.agents.shared.skills;
     assert builtins.hasAttr "reviewer" restrictedAgentSubagents;
     assert builtins.hasAttr "reviewer" restrictedAgentConfig.dotfiles.agents.clients.claude.subagents;
@@ -1031,8 +1026,8 @@ in
             fi
           done
         done
-        if grep -Fq agentmemory ${restrictedAgentRules}; then
-          echo "disabled AgentMemory remained in agent policy" >&2
+        if grep -Fq project-memory ${restrictedAgentRules}; then
+          echo "disabled project-memory remained in agent policy" >&2
           exit 1
         fi
         for required in '`reviewer`' '`code-review`'; do
@@ -1041,16 +1036,16 @@ in
             exit 1
           fi
         done
-        if grep -Fq agentmemory ${
+        if grep -Fq project-memory ${
           restrictedAgentConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source
         }; then
-          echo "disabled AgentMemory remained in Claude settings" >&2
+          echo "disabled project-memory remained in Claude settings" >&2
           exit 1
         fi
-        if grep -Fq agentmemory ${
+        if grep -Fq project-memory ${
           restrictedAgentConfig.dotfiles.managedArtifacts."agents/codex/system".source
         }; then
-          echo "disabled AgentMemory remained in Codex settings" >&2
+          echo "disabled project-memory remained in Codex settings" >&2
           exit 1
         fi
         touch $out
@@ -1135,7 +1130,7 @@ in
         expectedClientRows = lib.concatStringsSep "\n" (
           lib.mapAttrsToList (
             id: client:
-            "| `${id}` | `${client.subagentMode}` | `${client.skillProjectionMode}` | `${client.lspMode}` | `${client.telemetryMode}` | `${client.agentmemoryMode}` |"
+            "| `${id}` | `${client.subagentMode}` | `${client.skillProjectionMode}` | `${client.lspMode}` | `${client.telemetryMode}` | `${client.projectMemoryMode}` |"
           ) clients
         );
       }
@@ -1185,7 +1180,7 @@ in
           printf '| 目的 | Skill |\n'
           printf '| 目的 | subagent |\n'
           printf '| Capability | 入口 Skill |\n'
-          printf '| client | subagent | Skill 投影 | LSP | Telemetry | AgentMemory |\n'
+          printf '| client | subagent | Skill 投影 | LSP | Telemetry | Project memory |\n'
           printf '| --- | --- |\n'
           printf '| --- | --- | --- | --- | --- | --- |\n'
         } >> expected-rows.txt

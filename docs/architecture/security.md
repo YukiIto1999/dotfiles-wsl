@@ -10,7 +10,7 @@
 
 host key は一台の runtime identity であり、別ホストへコピーしない。offline recovery key は host key と分離してホスト外に保管し、enrollment と復旧の間だけ接続する。repository の [`secrets/sops/assets/.sops.yaml`](../../secrets/sops/assets/.sops.yaml) は公開 recipient、[`secrets/sops/assets/secrets.json`](../../secrets/sops/assets/secrets.json) は暗号文を保持する。復号鍵は Git に置かない。
 
-sops-nix は activation 時に暗号文を復号する。`sops.secrets` の secret file は `/run/secrets`、配備 path を指定しない template は `/run/secrets/rendered` に平文を生成する。agentmemory の環境ファイルは後者に属する。
+sops-nix は activation 時に暗号文を復号する。`sops.secrets` の secret file は `/run/secrets`、配備 path を指定しない template は `/run/secrets/rendered` に平文を生成する。Hindsightの環境ファイルは後者に属し、client hookやMCP frontへは配らない。
 
 Git identity の template は設定ユーザーの `~/.config/git/identity.conf` と、work identity を使う場合の `~/.config/git/work-identity.conf` を明示する。GitHub CLI の template も設定ユーザーの `~/.config/gh/hosts.yml` を明示する。[`secrets/sops/impl/user-secret-file.nix`](../../secrets/sops/impl/user-secret-file.nix) が user 所有と mode `0600` を固定し、[`identity/module.nix`](../../identity/module.nix) が username を渡して明示的に import する。sops-nix は平文 target を runtime に生成する。Nix 宣言には secret value ではなく placeholder を置くため、平文を Nix store の設定 artifact に含めない。各 secret file と template の owner、mode、その path を読める consumer process が secret ごとの信頼境界になる。
 
@@ -34,7 +34,8 @@ agentgateway と各 front は設定ユーザーの systemd service として動�
 
 設定ユーザーは `docker` group に属する。Docker API を使える主体は container の起動、mount、inspect が可能であり、container 環境へ渡した secret も読める。Docker group、root、Docker daemon を backend secret と host filesystem の信頼境界に含める。
 
-agentmemory の API key は SOPS template から Docker の environment file を経て container 環境に入る。agentmemory の session 内容は host volume に保存され、LLM 処理の対象は外部 provider へ送られる。
+HindsightのLLM credentialはSOPS templateからroot所有の`hindsight.env`へ展開し、Dockerのenvironment fileを経てcontainerだけへ渡す。Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`へ保存し、宣言で固定したmultilingual embedding/reranker modelはNix storeからread-onlyでmountする。APIはhostの`127.0.0.1:3111`、memory MCP frontは`127.0.0.1:8774`であり、gateway経由のclientはHindsightへ直接credentialを渡さない。
+自動captureはboundedなuser/assistant turnをretain対象にする。既知のinjection blockを決定的に除外するが、secretやPIIをすべて検出する保証はないため、retain入力を安全な保管場所とは扱わない。原文書類はlocal volumeに残る一方、extraction inputは設定した外部LLMへ送られる。legacy native importは元recordをlocalで文書化してre-embeddingするだけで、LLMへ再送しない。
 
 upstream OCI image は digest を Nix 宣言へ固定し、containerを有効にしたhostの`dotfiles-sync-images`にregistry取得を限定する。container起動時の暗黙pullは無効である。同期と更新は [OCI images](../operations/oci-images.md)に従う。
 
@@ -77,7 +78,7 @@ sandbox は gateway の client 認証、Docker daemon の権限、Windows intero
 | user credential | 設定ユーザーと credential consumer | Git identity、PAT、CLI 設定 |
 | agentgateway と front | loopback の port へ到達する client、service user | prompt、tool argument、tool result |
 | Docker | root、docker group、daemon、container | backend request、volume data、環境 secret |
-| 外部 provider | provider と通信経路 | agentmemory の処理対象 session |
+| 外部 provider | provider と通信経路 | Hindsightのextraction input、LLM処理対象のretain内容 |
 | Windows interop | Linux 呼び出し元、Windows process | command argument、Windows filesystem data |
 
-doctor は境界の一部について service 状態、file source、owner、mode、MCP lifecycle を観測するが、secret value、PAT scope、network firewall、Windows 側 policy、agentmemory の保存内容は検査しない。検査範囲と失敗時の調査は [Doctor](../operations/doctor.md)を参照する。
+doctor は境界の一部について service 状態、file source、owner、mode、MCP lifecycle を観測するが、secret value、PAT scope、network firewall、Windows 側 policy、Hindsightの保存内容やLLM retention結果は検査しない。health/readinessが成功しても、LLMが利用できることやretainが保存済みであることは示さない。検査範囲と失敗時の調査は [Doctor](../operations/doctor.md)を参照する。

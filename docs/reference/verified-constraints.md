@@ -58,7 +58,7 @@
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
 | profileの固定client roster、提供集合、型metadata、capability、installer、managed fileが固定fixtureに一致し、不正なbranch field、必須field欠落、freeform field、mode矛盾を変異入力で拒否する | `agent-client-roster` |
 | 生成した共通rulesが、Skill registryのlabelとid、subagentのfrontmatter、clientのmode宣言から独立に組んだ期待行と一致し、未置換markerを残さず、有効Capabilityで絞った`routing.nix`のSkill、subagent、handoffが完全かつ重複せず、各edgeを生成subagent sourceへ投影し、raw toolは直接利用集合だけで、Claude CodeとOMPのrequired Skill preload、OpenCodeのSkill tool、Codexのdynamic定義が実配備sourceへ投影される | `agent-subagent-rendering`、`agent-capability-gating` |
-| agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、agentmemory client source、OMP の認証状態が管理外であること、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
+| agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、project-memory client source、OMP の認証状態が管理外であること、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
 | seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し、front の起動依存と子 process を持たない | `gateway-front-contract` |
@@ -68,9 +68,8 @@
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
 | browser-runtime CapabilityがChromium packageを一度だけ公開し、PlaywrightとChrome DevToolsが同じcontractを使う | `browser-runtime-chromium-contract`、`chrome-devtools-front` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
-| agentmemory backend の image、設定、mount、環境 file、health、upstream package が固定値と一致する | `agentmemory-container` |
-| AgentMemory の lifecycle hook roster、endpoint、OpenCode plugin と upstream version が一致する | `agentmemory-client-integration` |
-| agentmemory MCP front の package、port、backend unit が一致し、initialize に応答する | `agentmemory-front` |
+| Hindsight backendのimage、API endpoint、named volume、read-only model mount、環境 file、health、stop timeoutが宣言どおりである | `hindsight-container` |
+| memory MCP frontのpackage、port、backend unit、health probeが一致する | `hindsight-front` |
 | Crawl4AI backend の image、publish、credential option の型、read-only 属性、値、environment file、health contract が固定値と一致する | `crawl4ai-container` |
 | Crawl4AI MCP front は SOPS の poison stub と canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact の環境変数と initialize probe の応答を検査する | `crawl4ai-front` |
 | SearXNG backend の image、publish、standalone secret、settings template、health contract が固定値と一致する | `searxng-container` |
@@ -80,7 +79,7 @@
 | 有効なcontainer applicationとservice contractのkeyが一致する | `container-application-registry` |
 | container Capabilityを一件だけ選んだ構成では対応するcontainer一式だけを配備し、container Capabilityを零件にした構成ではDocker、container Capability所有のMCP target、secret、artifactを配備しない | `container-capability-gating` |
 | 非container Capabilityを選ばない構成では所有するMCP targetとsession variableを配備せず、provider集合と残存targetが一致する | `mcp-capability-gating` |
-| `project-memory`と`code-quality`を選ばない構成ではAgentMemoryのhook package、client mode、managed file、および利用不能なSkill、subagent、handoff、policy記述を配備しない | `agent-capability-gating` |
+| `project-memory`と`code-quality`を選ばない構成ではHindsightのhook package、client mode、managed file、および利用不能なSkill、subagent、handoff、policy記述を配備しない | `agent-capability-gating` |
 | 有効なCapabilityまたはSkill依存を満たせないSkillをAgent clientへ配備しない | `skill-capability-gating` |
 | OCI imageの宣言がcontainerとpull方針に一致する | `oci-image-contract` |
 | container applicationのendpoint URLとportがOCI publish、unitがsystemd serviceに完全一致し、healthが宣言済みHTTP endpointを参照する | `nixos-toplevel`（`platform/containers/module.nix`のassertion） |
@@ -96,6 +95,8 @@
 | MCP session が active な GET body の間 reap されず、session front の listener address を loopback に固定できる | `agentgateway-session-lifecycle` |
 | agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、共通 project build cache、明示済み環境値、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
+| project-memory runtimeが絶対cwd、Git common directory由来のproject scope、explicit scope、legacy read-only、pending retain、capture/reinjection filteringを契約どおり扱う | `project-memory-runtime-behavior` |
+| OpenCodeの同時sessionへ想起結果が混在せず、古いpromptの遅延応答が新しい結果を上書きせず、履歴取得と通知の停止待ちを期限内で打ち切る | `project-memory-client-integrations` |
 | GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。raw asset は single-binary layout と path 成分のない entrypoint だけを受理し、mode 0700 で公開する。client ごとの失敗は隔離され、後続 client の公開を止めず、失敗した client 名だけを報告する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
 | agent cache GC が allocated bytes を正本にし、不正な managed path を検出すると削除前に失敗し、inactive project cache を先に回収して active session がない場合だけ共有 cache を空にし、再計測する | `agent-project-cache-gc` |
 | source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない | `agent-verification-cache` |
@@ -106,7 +107,7 @@
 | local と plugin の全 Skill の SKILL.md が frontmatter を持ち、name が directory 名と一致し、description が空でない | `skill-frontmatter-contract` |
 | cleanup が現在と保持中の Home Manager generation から backup の exact path を導き、home と system の削除を別の権限境界で実行する | `cleanup-home-backups` |
 | image sync が不足分だけを pull し、宣言済み image へ専用 namespace の tag を付けて dangling prune から外し、pin が切れた状態を status で検出する | `oci-image-sync-behavior` |
-| agentmemory の credential が環境ファイル経由で渡る | `agentmemory-container` |
+| HindsightのcredentialがSOPS templateからroot所有の環境 fileを経てcontainerへ渡る | `hindsight-container` |
 | Crawl4AI の API token が user 用 file contract と root 所有の環境ファイルへ分かれる | `crawl4ai-container` |
 | SearXNG の standalone secret と settings template がそれぞれ root:root 0400 で配備される | `searxng-container` |
 

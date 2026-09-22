@@ -484,15 +484,15 @@ in
   agent-runtime-contract =
     assert
       builtins.attrNames agentConfig.packages == [
-        "agentmemoryHooks"
         "apm"
         "projectCacheGc"
+        "projectMemoryHooks"
         "verification"
         "verificationGate"
       ];
     assert
-      agentConfig.packages.agentmemoryHooks
-      == hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
+      agentConfig.packages.projectMemoryHooks
+      == hostConfig.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
     assert agentConfig.packages.projectCacheGc == runtime.gc;
     assert agentConfig.packages.verification == runtime.verify;
     assert agentConfig.packages.verificationGate == runtime.gate;

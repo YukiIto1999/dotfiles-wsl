@@ -34,8 +34,8 @@ let
     inherit codexModel;
     homeDir = cfg.workstation.homeDir;
   };
-  codexSystemBaseWithoutAgentMemory =
-    pkgs.runCommandLocal "codex-system-base-without-agentmemory.toml"
+  codexSystemBaseWithoutProjectMemory =
+    pkgs.runCommandLocal "codex-system-base-without-project-memory.toml"
       {
         nativeBuildInputs = [
           pkgs.jq
@@ -49,7 +49,7 @@ let
           | remarshal -if json -of toml > "$out"
       '';
   codexSystemBase =
-    if projectMemoryEnabled then codexSystemBaseTemplate else codexSystemBaseWithoutAgentMemory;
+    if projectMemoryEnabled then codexSystemBaseTemplate else codexSystemBaseWithoutProjectMemory;
   # subagent file は symlink だと O_NOFOLLOW で開けないため、store の実体を直接指す
   codexAgentsConfig = (pkgs.formats.toml { }).generate "codex-agents.toml" {
     agents = {
@@ -170,10 +170,10 @@ in
         seedMigrationCommand = migrateCodexConfig;
       };
     };
-    capabilityManagedFiles.agentmemory = if projectMemoryEnabled then "system" else null;
+    capabilityManagedFiles.projectMemory = if projectMemoryEnabled then "system" else null;
     lspMode = "unsupported";
     telemetryMode = "unsupported";
-    agentmemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
+    projectMemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
     skillProjectionMode = "dynamic";
     install = {
       kind = "github-release";

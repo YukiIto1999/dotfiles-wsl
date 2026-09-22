@@ -36,10 +36,10 @@ in
         (code client.skillProjectionMode)
         (code client.lspMode)
         (code client.telemetryMode)
-        (code client.agentmemoryMode)
+        (code client.projectMemoryMode)
       ]) clients;
-      agentmemoryPolicy = lib.optionalString (builtins.elem "project-memory" capabilities) ''
-        ### agentmemory
+      projectMemoryPolicy = lib.optionalString (builtins.elem "project-memory" capabilities) ''
+        ### project-memory
 
         明示的な検索と保存は`memory`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携の経路は client ごとに異なり、client の能力表が示す。自動連携は同Skillのrecall、検証、保存判断を代替しない。
       '';
@@ -56,12 +56,12 @@ in
         skillHeader = "目的\tSkill";
         subagentHeader = "目的\tsubagent";
         capabilityHeader = "Capability\t入口 Skill";
-        clientHeader = "client\tsubagent\tSkill 投影\tLSP\tTelemetry\tAgentMemory";
+        clientHeader = "client\tsubagent\tSkill 投影\tLSP\tTelemetry\tProject memory";
         skillEntries = entries (lib.mapAttrs (_: skill: "${skill.source}/SKILL.md") skills);
         subagentEntries = entries subagents;
         capabilityRows = tsv capabilityRows;
         clientRows = tsv clientRows;
-        inherit agentmemoryPolicy;
+        inherit projectMemoryPolicy;
       }
       ''
         set -euo pipefail
@@ -124,7 +124,7 @@ in
           --subst-var-by subagentRoster "$subagentRoster" \
           --subst-var-by capabilityRoster "$capabilityRoster" \
           --subst-var-by clientMatrix "$clientMatrix" \
-          --subst-var-by agentmemoryPolicy "$agentmemoryPolicy"
+          --subst-var-by projectMemoryPolicy "$projectMemoryPolicy"
 
         # marker が残るのは template と生成器の対応が崩れた状態であり、静かに通さない
         if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$out"; then

@@ -41,9 +41,10 @@
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
 | Agent clientの設定または配備形式を変える | [`agents/clients/<id>/`](../../agents/clients)と[`agents/module.nix`](../../agents/module.nix) | client固有check、`dotfiles-rebuild` |
+| clientの`projectMemoryMode`または`capabilityManagedFiles.projectMemory`を変える | [`agents/impl/contract.nix`](../../agents/impl/contract.nix)と各[`agents/clients/<id>/module.nix`](../../agents/clients)のmode・managed file宣言 | `project-memory-client-integration`、`agent-artifact-contract` |
 | client binaryの供給経路を変える | clientの`install` contract | `agent-client-roster`、installer checks、`dotfiles-install-agents` |
 | subagentを追加・変更する | `agents/subagents/`と[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix) | `agent-subagent-rendering` |
-| AgentMemoryのclient integration、engine、MCP、backendを変える | [`capabilities/project-memory/agentmemory/`](../../capabilities/project-memory/agentmemory) | `agentmemory-client-integration`とbackend/MCP checks |
+| project memoryのruntime、client integration、engine、MCP、backendを変える | [`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)とgeneric optionを宣言するCapability module | `project-memory-runtime-behavior`、`project-memory-client-integration`、`hindsight-container`、`hindsight-front` |
 | session、build cache、verification reuseを変える | [`agents/impl/runtime/`](../../agents/impl/runtime)と[`agents/module.nix`](../../agents/module.nix) | 対応するruntime focused check |
 | linked worktreeの登録と回収を変える | [`agents/impl/resource/`](../../agents/impl/resource)と[`agents/module.nix`](../../agents/module.nix) | `agent-resource-contract`、`agent-resource-behavior` |
 

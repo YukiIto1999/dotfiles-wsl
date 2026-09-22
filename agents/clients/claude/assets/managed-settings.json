@@ -32,7 +32,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-session-start"
+            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude session-start"
           }
         ]
       }
@@ -42,21 +42,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-prompt-submit"
+            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude prompt-submit"
           }
         ]
       }
     ],
     "PreToolUse": [
-      {
-        "matcher": "Edit|Write|Read|Glob|Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-pre-tool-use"
-          }
-        ]
-      },
       {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
@@ -78,14 +69,6 @@
     ],
     "PostToolUse": [
       {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-post-tool-use"
-          }
-        ]
-      },
-      {
         "matcher": "Edit|Write|MultiEdit|NotebookEdit",
         "hooks": [
           {
@@ -95,62 +78,12 @@
         ]
       }
     ],
-    "PostToolUseFailure": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-post-tool-failure"
-          }
-        ]
-      }
-    ],
     "PreCompact": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-pre-compact"
-          }
-        ]
-      }
-    ],
-    "SubagentStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-subagent-start"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-subagent-stop"
-          }
-        ]
-      }
-    ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-notification"
-          }
-        ]
-      }
-    ],
-    "TaskCompleted": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-task-completed"
+            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude pre-compact"
           }
         ]
       }
@@ -160,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-stop"
+            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude stop"
           }
         ]
       },
@@ -178,7 +111,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/run/current-system/sw/bin/agentmemory-hook-session-end"
+            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude session-end"
           }
         ]
       }

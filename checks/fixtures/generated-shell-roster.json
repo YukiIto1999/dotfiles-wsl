@@ -1,17 +1,6 @@
 {
-  "agentmemoryHooks": [
-    "agentmemory-hook-notification",
-    "agentmemory-hook-post-tool-failure",
-    "agentmemory-hook-post-tool-use",
-    "agentmemory-hook-pre-compact",
-    "agentmemory-hook-pre-tool-use",
-    "agentmemory-hook-prompt-submit",
-    "agentmemory-hook-session-end",
-    "agentmemory-hook-session-start",
-    "agentmemory-hook-stop",
-    "agentmemory-hook-subagent-start",
-    "agentmemory-hook-subagent-stop",
-    "agentmemory-hook-task-completed"
+  "projectMemoryHooks": [
+    "dotfiles-memory"
   ],
   "commands": {
     "agentResource": "dotfiles-agent-resource",
@@ -20,6 +9,7 @@
     "doctor": "dotfiles-doctor",
     "imageDigest": "dotfiles-image-digest",
     "installAgents": "dotfiles-install-agents",
+    "memory": "dotfiles-memory",
     "rebuild": "dotfiles-rebuild",
     "syncImages": "dotfiles-sync-images",
     "wslRestartRequired": "dotfiles-wsl-restart-required"

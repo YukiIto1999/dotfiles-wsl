@@ -11,7 +11,7 @@
 - recovery key を読み取り専用の外部媒体から一時的に参照できるようにする。host key はこの host で生成し、別ホストの鍵をコピーしない。
 - `profiles/hosts/<host-id>.nix` が存在する host ID を使う。現在の登録値は `nixos` と `tcs-a295` である。ID は63文字以内の小文字英数字またはハイフンで構成し、英数字で始めて終える。
 
-再現対象は tracked source と `flake.lock` から生成する system と Home Manager の設定である。AI CLI の login session、agentmemory のデータ、host key はホスト固有であり、別ホストから複製しない。AI CLI 本体は bootstrap 時点の upstream 版を取得するため、`flake.lock` の再現対象には含まれない。
+再現対象は tracked source と `flake.lock` から生成する system と Home Manager の設定である。AI CLI の login session、Hindsightのnamed volumeにあるproject-memory data、host keyはホスト固有であり、別ホストから複製しない。AI CLI 本体は bootstrap 時点の upstream 版を取得するため、`flake.lock` の再現対象には含まれない。
 
 ## Host key
 

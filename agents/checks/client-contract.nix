@@ -52,7 +52,7 @@ let
     capabilities = {
       lsp = client.lspMode;
       telemetry = client.telemetryMode;
-      agentmemory = client.agentmemoryMode;
+      projectMemory = client.projectMemoryMode;
       skills = client.skillProjectionMode;
     };
     gateway = {
@@ -163,7 +163,7 @@ let
       readOnly = true;
     };
     client = {
-      agentmemoryMode = "enum";
+      projectMemoryMode = "enum";
       binary = "str";
       capabilityManagedFiles = "submodule";
       subagentFormat = "nullOr";
@@ -189,7 +189,7 @@ let
       source = "path";
     };
     capabilityManagedFile = {
-      agentmemory = "nullOr";
+      projectMemory = "nullOr";
       lsp = "nullOr";
       telemetry = "nullOr";
     };
@@ -235,7 +235,7 @@ let
     ) client.managedFiles;
     lspMode = client.capabilities.lsp;
     telemetryMode = client.capabilities.telemetry;
-    agentmemoryMode = client.capabilities.agentmemory;
+    projectMemoryMode = client.capabilities.projectMemory;
     skillProjectionMode = client.capabilities.skills;
   }) expected.clients;
   baseCandidate = {
@@ -641,14 +641,14 @@ in
       !contractIsValid (
         mutateClient "opencode" {
           managedFiles = builtins.removeAttrs baseCandidate.clients.opencode.managedFiles [
-            "agentmemory-plugin"
+            "project-memory-plugin"
           ];
         }
       );
     assert
       !contractIsValid (
         mutateClient "codex" {
-          capabilityManagedFiles.agentmemory = null;
+          capabilityManagedFiles.projectMemory = null;
         }
       );
     assert !contractIsValid emptyBinaryCandidate;

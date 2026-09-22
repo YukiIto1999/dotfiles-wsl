@@ -26,22 +26,20 @@
         )
       );
 
-      agentmemoryPersistentMounts = builtins.filter (
+      hindsightPersistentMounts = builtins.filter (
         volume:
         let
           segments = lib.splitString ":" volume;
         in
-        builtins.length segments >= 2
-        && lib.hasPrefix "/var/lib/" (lib.head segments)
-        && builtins.elemAt segments 1 == "/data"
-      ) containers.agentmemory.volumes;
+        builtins.length segments >= 2 && builtins.elemAt segments 1 == "/home/hindsight/.pg0"
+      ) containers.hindsight.volumes;
 
       actual =
         assert lib.assertMsg (
           builtins.length containerNetworks == 1
         ) "runtime identity requires one container network: actual=${builtins.toJSON containerNetworks}";
-        assert lib.assertMsg (builtins.length agentmemoryPersistentMounts == 1)
-          "runtime identity requires one agentmemory persistent mount: actual=${builtins.toJSON agentmemoryPersistentMounts}";
+        assert lib.assertMsg (builtins.length hindsightPersistentMounts == 1)
+          "runtime identity requires one Hindsight persistent mount: actual=${builtins.toJSON hindsightPersistentMounts}";
         {
           mcpTargets = lib.mapAttrs (_: target: target.port) hostConfig.dotfiles.platform.mcp.targets;
           gateway = {
@@ -50,7 +48,7 @@
           containers = lib.sort builtins.lessThan (builtins.attrNames containers);
           containerNetwork = lib.head containerNetworks;
           secrets = lib.sort builtins.lessThan (builtins.attrNames hostConfig.sops.secrets);
-          agentmemoryPersistentMount = lib.head agentmemoryPersistentMounts;
+          projectMemoryPersistentMount = lib.head hindsightPersistentMounts;
         };
       identityMatches = candidate: candidate == expected;
       missingTargetMutation = actual // {

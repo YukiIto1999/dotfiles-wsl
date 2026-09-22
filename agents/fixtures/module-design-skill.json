@@ -3,8 +3,8 @@
   "evaluatedAt": "2026-08-14",
   "cases": [
     {
-      "id": "agentmemory-owner-direction",
-      "prompt": "AgentMemoryのbackend packageをagentsへ移し、containerから参照する案があります。現行はcontainerがbackend sourceとruntime stateを所有し、agentsとMCPがtyped contractを消費します。この制約からmodule責務を比較して一案を選んでください。",
+      "id": "project-memory-owner-direction",
+      "prompt": "project-memoryのbackend packageをagentsへ移し、containerから参照する案があります。現行はcontainerがbackend sourceとruntime stateを所有し、agentsとMCPがtyped contractを消費します。この制約からmodule責務を比較して一案を選んでください。",
       "expectedSkills": ["module-design"],
       "expected": {
         "separatesSourceDependencyFromRuntimeInteraction": true,

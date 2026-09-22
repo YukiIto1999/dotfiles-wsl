@@ -17,7 +17,7 @@ let
     "10s"
   ];
   generatedShellActual = {
-    agentmemoryHooks = toString hostConfig.dotfiles.capabilities.project-memory.agentmemory.clientIntegrations.hooks;
+    projectMemoryHooks = toString hostConfig.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
     commands = lib.mapAttrs (_: package: lib.getExe package) hostConfig.dotfiles.platform.cli.commands;
     commandSmoke.timeoutArgs = commandSmokeTimeoutArgs;
     mcpExecutables = lib.mapAttrs (
@@ -62,7 +62,7 @@ in
         actual=${generatedShellActualFile}
 
         jq -e '
-          (.agentmemoryHooks | length) > 0 and
+          (.projectMemoryHooks | length) > 0 and
           (.commands | length) > 0 and
           (.mcpExecutables | length) > 0 and
           (.workstation | length) > 0
@@ -94,14 +94,14 @@ in
           shellcheck --severity=warning "$source"
         }
 
-        jq -r '.agentmemoryHooks[]' "$expected" | sort > expected-hooks
-        find "$(jq -r '.agentmemoryHooks' "$actual")/bin" \
+        jq -r '.projectMemoryHooks[]' "$expected" | sort > expected-hooks
+        find "$(jq -r '.projectMemoryHooks' "$actual")/bin" \
           -maxdepth 1 -type f -o -type l \
           | while IFS= read -r hook; do basename "$hook"; done \
           | sort > actual-hooks
         diff -u expected-hooks actual-hooks
         while IFS= read -r hook; do
-          lintGenerated "$(jq -r '.agentmemoryHooks' "$actual")/bin/$hook"
+          lintGenerated "$(jq -r '.projectMemoryHooks' "$actual")/bin/$hook"
         done < expected-hooks
 
         jq -S '.commands' "$expected" > expected-commands.json

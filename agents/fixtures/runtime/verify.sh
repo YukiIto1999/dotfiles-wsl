@@ -435,6 +435,28 @@ if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
   exit 1
 fi
 
+# 設計の規律を読まずに、その規律が持つ領域を触らせない。
+mkdir -p "$home/.omp/agent/skills/ui-design" "$home/.omp/agent/skills/domain-modeling"
+test "$("$GATE" skill --path /r/surfaces/viewer/features/x/y.tsx)" = ui-design
+test "$("$GATE" skill --path /r/core/b/domain/Invoice.cs)" = domain-modeling
+test "$("$GATE" skill --path /r/core/b/application/ports/IFoo.cs)" = interface-design
+test -z "$("$GATE" skill --path /r/surfaces/viewer/x.test.tsx)"
+test -z "$("$GATE" skill --path /r/docs/note.md)"
+
+if "$GATE" teach --session fixture-skills --path /r/surfaces/viewer/features/x/y.tsx >/dev/null 2>&1; then
+  echo 'gate let an unread discipline be edited' >&2
+  exit 1
+fi
+"$GATE" learned --session fixture-skills --path ui-design
+"$GATE" teach --session fixture-skills --path /r/surfaces/viewer/features/x/y.tsx >/dev/null
+# 読んだ規律は一つずつである。別の領域は別の規律を要る。
+if "$GATE" teach --session fixture-skills --path /r/core/b/domain/Invoice.cs >/dev/null 2>&1; then
+  echo 'gate accepted one discipline as a licence for another' >&2
+  exit 1
+fi
+# 配られていない規律の領域は、読みようがないので止めない。
+"$GATE" teach --session fixture-skills --path /r/core/b/application/ports/IFoo.cs >/dev/null
+
 outside=$fixture/outside
 mkdir "$outside"
 cd "$outside"

@@ -19,6 +19,22 @@ let
 
   lspConfig = (pkgs.formats.json { }).generate "omp-lsp.json" (lspProjection.omp cfg.toolchain.lsp);
 
+  # omp は hook directory の中の symlink を読み込まない。Home Manager は file ごとに symlink を張るため、
+  # directory ごと配備し、その中を実 file にする
+  hookDirectory = pkgs.runCommandLocal "omp-hooks-pre" { } (
+    ''
+      mkdir "$out"
+      cp ${./assets/verification-gate.ts} "$out/verification-gate.ts"
+    ''
+    + lib.optionalString projectMemoryEnabled ''
+      cp ${
+        pkgs.replaceVars ./assets/project-memory.ts {
+          memoryBinary = lib.getExe cfg.capabilities.project-memory.runtime;
+        }
+      } "$out/project-memory.ts"
+    ''
+  );
+
   requiredSkillsFor =
     name:
     map (route: route.skill) (
@@ -109,26 +125,16 @@ in
         deployment = "home";
         destination = ".omp/agent/lsp.json";
       };
-      verification-gate = {
-        source = ./assets/verification-gate.ts;
-        format = "text";
+      hooks = {
+        source = hookDirectory;
+        format = "directory";
         deployment = "home";
-        destination = ".omp/agent/hooks/pre/verification-gate.ts";
-      };
-    }
-    // lib.optionalAttrs projectMemoryEnabled {
-      project-memory-hook = {
-        source = pkgs.replaceVars ./assets/project-memory.ts {
-          memoryBinary = lib.getExe cfg.capabilities.project-memory.runtime;
-        };
-        format = "text";
-        deployment = "home";
-        destination = ".omp/agent/hooks/pre/project-memory.ts";
+        destination = ".omp/agent/hooks/pre";
       };
     };
     capabilityManagedFiles = {
       lsp = "lsp";
-      projectMemory = if projectMemoryEnabled then "project-memory-hook" else null;
+      projectMemory = if projectMemoryEnabled then "hooks" else null;
     };
     lspMode = "supported";
     telemetryMode = "unsupported";

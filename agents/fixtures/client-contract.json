@@ -234,7 +234,7 @@
       "capabilityManagedFiles": {
         "lsp": "lsp",
         "telemetry": null,
-        "projectMemory": "project-memory-hook"
+        "projectMemory": "hooks"
       },
       "gateway": {
         "format": "json",
@@ -246,10 +246,10 @@
           "deployment": "seed",
           "destination": ".omp/agent/config.yml"
         },
-        "project-memory-hook": {
-          "format": "text",
+        "hooks": {
+          "format": "directory",
           "deployment": "home",
-          "destination": ".omp/agent/hooks/pre/project-memory.ts"
+          "destination": ".omp/agent/hooks/pre"
         },
         "lsp": {
           "format": "json",
@@ -260,11 +260,6 @@
           "format": "json",
           "deployment": "home",
           "destination": ".omp/agent/mcp.json"
-        },
-        "verification-gate": {
-          "format": "text",
-          "deployment": "home",
-          "destination": ".omp/agent/hooks/pre/verification-gate.ts"
         }
       },
       "install": {

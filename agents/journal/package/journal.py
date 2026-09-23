@@ -57,14 +57,26 @@ def completed_day(now: datetime, tz: ZoneInfo, start_hour: int) -> date:
     return (boundary - timedelta(days=1)).date()
 
 
-def output_path(journal: Path, day: date, host: str) -> Path:
-    return journal / f"{day:%Y}" / f"{day:%m%d}" / f"{host}.md"
+def output_path(journal: Path, day: date, machine: str) -> Path:
+    return journal / f"{day:%Y}" / f"{day:%m%d}" / f"{machine}.md"
 
 
-def pending_days(now: datetime, tz: ZoneInfo, start_hour: int, lookback: int, journal: Path, host: str) -> list[date]:
+def pending_days(now: datetime, tz: ZoneInfo, start_hour: int, lookback: int, journal: Path, machine: str) -> list[date]:
     latest = completed_day(now, tz, start_hour)
     days = (latest - timedelta(days=offset) for offset in range(lookback))
-    return sorted(day for day in days if not output_path(journal, day, host).exists())
+    return sorted(day for day in days if not output_path(journal, day, machine).exists())
+
+
+def machine_name(command: str) -> str:
+    # Linux の host 名は distribution の既定値のまま機械ごとに変わらない。Windows の computer 名で機械を区別する
+    try:
+        result = subprocess.run([command], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise JournalError(f"{command} failed: {error}") from None
+    name = result.stdout.strip()
+    if result.returncode != 0 or not name:
+        raise JournalError(f"{command} did not print the machine name: {result.stderr.strip()[-500:]}")
+    return name
 
 
 def entry_time(entry: dict) -> datetime | None:
@@ -240,7 +252,9 @@ def summarize_session(options: argparse.Namespace, session: Session) -> str:
     return "\n\n".join(summaries)
 
 
-def compose(options: argparse.Namespace, day: date, start: datetime, end: datetime, sessions: list[Session]) -> str:
+def compose(
+    options: argparse.Namespace, machine: str, day: date, start: datetime, end: datetime, sessions: list[Session]
+) -> str:
     projects: dict[str, Project] = {}
     for session in sessions:
         root = project_root(session.cwd)
@@ -255,7 +269,7 @@ def compose(options: argparse.Namespace, day: date, start: datetime, end: dateti
 
     tz = start.tzinfo
     lines = [
-        f"# {day.isoformat()} {options.host}",
+        f"# {day.isoformat()} {machine}",
         "",
         f"対象は {start:%Y-%m-%d %H:%M} から {end:%Y-%m-%d %H:%M} まで（{tz}）の omp の作業である。",
         "",
@@ -317,7 +331,7 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="dotfiles-agent-journal", description=__doc__)
     parser.add_argument("--sessions-root", required=True, type=Path)
     parser.add_argument("--journal-dir", required=True, type=Path)
-    parser.add_argument("--host", required=True)
+    parser.add_argument("--machine-command", required=True)
     parser.add_argument("--timezone", required=True)
     parser.add_argument("--start-hour", required=True, type=int)
     parser.add_argument("--lookback-days", required=True, type=int)
@@ -333,12 +347,13 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     tz = ZoneInfo(options.timezone)
     journal = options.journal_dir
     try:
+        machine = machine_name(options.machine_command)
         branch = sync(journal)
     except JournalError as error:
         print(f"dotfiles-agent-journal: {error}", file=sys.stderr)
         return 1
     days = [options.date] if options.date else pending_days(
-        now or datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, options.host
+        now or datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, machine
     )
     # 一日の失敗で後の日を止めない。失敗した日は file を作らないので、次の実行が拾い直す
     failed = []
@@ -349,7 +364,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             if not sessions:
                 print(f"{day}: omp の作業はない")
                 continue
-            record(journal, output_path(journal, day, options.host), day, compose(options, day, start, end, sessions))
+            record(journal, output_path(journal, day, machine), day, compose(options, machine, day, start, end, sessions))
             publish(journal, branch)
         except JournalError as error:
             print(f"dotfiles-agent-journal: {day}: {error}", file=sys.stderr)

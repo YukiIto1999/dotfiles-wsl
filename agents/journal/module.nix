@@ -21,7 +21,7 @@ let
       zoneinfo = "${pkgs.tzdata}/share/zoneinfo";
       sessionsRoot = "${cfg.workstation.homeDir}/.omp/agent/sessions";
       journalDir = "${cfg.workstation.environmentDir}/agent-journal";
-      host = config.networking.hostName;
+      machineCommand = "/mnt/c/Windows/System32/hostname.exe";
       timeZone = config.time.timeZone;
       startHour = toString startHour;
       lookbackDays = "7";

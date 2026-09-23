@@ -2,7 +2,7 @@ export PYTHONTZPATH="@zoneinfo@"
 exec "@python@" "@source@/journal.py" \
   --sessions-root "@sessionsRoot@" \
   --journal-dir "@journalDir@" \
-  --host "@host@" \
+  --machine-command "@machineCommand@" \
   --timezone "@timeZone@" \
   --start-hour "@startHour@" \
   --lookback-days "@lookbackDays@" \

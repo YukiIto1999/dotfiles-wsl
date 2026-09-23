@@ -2,12 +2,12 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-新規の NixOS-WSL ホストを `~/dotfiles-wsl` から構築する。中断のない通常系は、host key の enrollment、bootstrap、WSL 再起動、containerを選ぶhostだけOCI imageの同期、rebuild、doctor の順に進める。
+新規の NixOS-WSL ホストを、この repository の checkout から構築する。中断のない通常系は、host key の enrollment、bootstrap、WSL 再起動、containerを選ぶhostだけOCI imageの同期、rebuild、doctor の順に進める。
 
 ## 前提
 
-- NixOS-WSL を用意し、`nixos` ユーザーでログインする。[bootstrap script](../../workstation/activation/rebuild/impl/bootstrap.sh) はこのユーザーと `/home/nixos/dotfiles-wsl` を初回構築の固定値として検査する。
-- リポジトリを `~/dotfiles-wsl` へ clone し、作業ツリーを変更のない状態にする。
+- NixOS-WSL を用意し、構築する host 構成の `dotfiles.workstation.username` と同じユーザーでログインする。宣言は checkout の root で `nix eval --raw .#nixosConfigurations.<host-id>.config.dotfiles.workstation.username` を実行して確かめる。登録済みの host はどれも既定値の `nixos` を使い、これは NixOS-WSL の初期ユーザーと同じである。別のユーザー名を宣言する host は、そのユーザーが存在しないため初回構築できない。[bootstrap script](../../workstation/activation/rebuild/impl/bootstrap.sh) は、`sudo` の実行元ユーザーがこの宣言と一致することを検査する。
+- リポジトリを host 構成の `dotfiles.workstation.dotfilesDir` が指す場所へ clone し、作業ツリーを変更のない状態にする。場所は checkout の root で `nix eval --raw .#nixosConfigurations.<host-id>.config.dotfiles.workstation.dotfilesDir` を実行して確かめる。実行した checkout がこの場所と異なれば、bootstrap は宣言された path を表示して止まる。
 - recovery key を読み取り専用の外部媒体から一時的に参照できるようにする。host key はこの host で生成し、別ホストの鍵をコピーしない。
 - `profiles/hosts/<host-id>.nix` が存在する host ID を使う。現在の登録値は `nixos` と `tcs-a295` である。ID は63文字以内の小文字英数字またはハイフンで構成し、英数字で始めて終える。
 
@@ -15,10 +15,9 @@
 
 ## Host key
 
-この host で鍵を生成し、root だけが読める場所へ置く。
+以降の command は checkout の root で実行する。この host で鍵を生成し、root だけが読める場所へ置く。
 
 ```bash
-cd ~/dotfiles-wsl
 age-keygen -o /tmp/host.key
 sudo install -m 0400 -o root -g root /tmp/host.key /var/lib/sops-nix/key.txt
 ```
@@ -46,10 +45,9 @@ git status --short
 
 ## Bootstrap
 
-`nixos` ユーザーから `sudo` を介し、構築対象の host ID を明示して実行する。
+host 構成が宣言する主ユーザーから `sudo` を介し、構築対象の host ID を明示して実行する。
 
 ```bash
-cd ~/dotfiles-wsl
 HOST_ID=tcs-a295
 sudo bash workstation/activation/rebuild/impl/bootstrap.sh --host "$HOST_ID"
 ```
@@ -58,14 +56,15 @@ sudo bash workstation/activation/rebuild/impl/bootstrap.sh --host "$HOST_ID"
 
 | 順序 | 処理 |
 |---|---|
-| 1 | root として実行され、`sudo` の実行元が `nixos` ユーザーであることを確認する |
+| 1 | root として実行され、`sudo` の実行元ユーザーが分かることを確認する |
 | 2 | root の Git `safe.directory` に checkout を登録する |
 | 3 | flake、lock、暗号化済み secrets、host key の存在と host key の owner、mode を検査する |
-| 4 | flake build から見えない未追跡ファイルがないことを確認する |
-| 5 | host key で `secrets/sops/assets/secrets.json` を復号できることを確認する |
-| 6 | 選択した host 構成の AI CLI を upstream から `~/.local/bin` へ配置する |
-| 7 | 選択した host 構成と flake が固定した `nixos-rebuild` で boot generation を作る |
-| 8 | `/etc/nixos` を `~/dotfiles-wsl` への symlink にする |
+| 4 | 選択した host 構成の `dotfiles.workstation.username` と `dotfiles.workstation.dotfilesDir` が、`sudo` の実行元ユーザーと実行した checkout に一致することを確認する |
+| 5 | flake build から見えない未追跡ファイルがないことを確認する |
+| 6 | host key で `secrets/sops/assets/secrets.json` を復号できることを確認する |
+| 7 | 選択した host 構成の AI CLI を upstream から `~/.local/bin` へ配置する |
+| 8 | 選択した host 構成と flake が固定した `nixos-rebuild` で boot generation を作る |
+| 9 | `/etc/nixos` を checkout への symlink にする |
 
 ## 初回同期
 
@@ -87,7 +86,6 @@ nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncI
 active host configurationが配備したcommandは、次のように短い名前で実行する。
 
 ```bash
-cd ~/dotfiles-wsl
 dotfiles-sync-images
 dotfiles-rebuild
 ```
@@ -95,7 +93,6 @@ dotfiles-rebuild
 container Capabilityを一つも選ばないhostでは同期command自体を配備しない。bootstrapの表示どおり、rebuildだけを実行する。
 
 ```bash
-cd ~/dotfiles-wsl
 dotfiles-rebuild
 ```
 

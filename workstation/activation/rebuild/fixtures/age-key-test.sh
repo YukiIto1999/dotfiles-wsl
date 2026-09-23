@@ -3,7 +3,7 @@ set -euo pipefail
 
 bootstrap=${1:?bootstrap script path is required}
 test_upstream_rebuild=${2:?test nixos-rebuild package is required}
-test_root=$(mktemp -d)
+test_root=$(cd -- "$(mktemp -d)" && pwd -P)
 bootstrap_pid=
 bootstrap_rebuild_release=
 cleanup() {
@@ -21,11 +21,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+DOTFILES="$test_root/dotfiles-wsl"
+# bootstrap は自分の置き場所から checkout を決めるので、checkout 内と同じ配置で読み込む
+checkout_bootstrap="$DOTFILES/workstation/activation/rebuild/impl/bootstrap.sh"
+mkdir -p "$(dirname -- "$checkout_bootstrap")"
+cp -- "$bootstrap" "$checkout_bootstrap"
+
 # shellcheck source=/dev/null
-source "$bootstrap"
+source "$checkout_bootstrap"
 trap - ERR
 
-DOTFILES="$test_root/dotfiles-wsl"
+[[ $(checkout_root "$checkout_bootstrap") == "$DOTFILES" ]]
 SOPS_CONFIG="$DOTFILES/sops/assets/.sops.yaml"
 SECRETS_FILE="$DOTFILES/sops/assets/secrets.json"
 AGE_KEY="$test_root/var/lib/sops-nix/key.txt"
@@ -103,9 +109,19 @@ nix() {
     [[ $* == "run ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents" ]]
     : > "$test_root/install-agents-called"
   elif [[ $1 == eval ]]; then
-    [[ $* == "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.containers.enabled --apply containers: if containers == [ ] then \"false\" else \"true\"" ]]
-    [[ ${CONTAINERS_ENABLED:-true} != error ]] || return 1
-    printf '%s\n' "${CONTAINERS_ENABLED:-true}"
+    case $* in
+      "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.workstation.username")
+        printf '%s' "${HOST_USERNAME:-$SUDO_USER}"
+        ;;
+      "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.workstation.dotfilesDir")
+        printf '%s' "${HOST_DOTFILES_DIR:-$DOTFILES}"
+        ;;
+      *)
+        [[ $* == "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.containers.enabled --apply containers: if containers == [ ] then \"false\" else \"true\"" ]]
+        [[ ${CONTAINERS_ENABLED:-true} != error ]] || return 1
+        printf '%s\n' "${CONTAINERS_ENABLED:-true}"
+        ;;
+    esac
   else
     [[ $* == "build --no-link --print-out-paths --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.system.build.nixos-rebuild" ]]
     printf '%s\n' "$test_upstream_rebuild"
@@ -117,6 +133,16 @@ install_agent_clients >/dev/null
 [[ -e $test_root/install-agents-called ]]
 install_boot_generation >/dev/null
 grep -Fqx "boot --no-reexec --flake ${FLAKE_REF}#${TARGET_HOST} -L " "$bootstrap_call_log"
+
+verify_host_identity >/dev/null
+if (HOST_USERNAME=someone-else; verify_host_identity >/dev/null 2>&1); then
+  printf 'bootstrap accepted a sudo user that the host does not declare\n' >&2
+  exit 1
+fi
+if (HOST_DOTFILES_DIR=$test_root/elsewhere; verify_host_identity >/dev/null 2>&1); then
+  printf 'bootstrap accepted a checkout outside the declared path\n' >&2
+  exit 1
+fi
 
 real_key="$AGE_KEY.real"
 mv "$AGE_KEY" "$real_key"
@@ -151,6 +177,7 @@ record_bootstrap_stage() {
 }
 ensure_root() { record_bootstrap_stage ensure_root; }
 register_safe_directories() { record_bootstrap_stage register_safe_directories; }
+verify_host_identity() { record_bootstrap_stage verify_host_identity; }
 preflight() { record_bootstrap_stage preflight; }
 verify_tracked_flake_files() { record_bootstrap_stage verify_tracked_flake_files; }
 verify_secrets() { record_bootstrap_stage verify_secrets; }

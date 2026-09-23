@@ -3,7 +3,7 @@
 YukiIto1999 が WSL2 上の NixOS を再現し、日常運用するための個人用 dotfiles。
 NixOS、Home Manager、開発ツール、AI コーディング環境、暗号化済み secrets を一つの flake で管理する。
 
-このリポジトリは `nixos` ユーザー、`~/dotfiles-wsl` への checkout、所有者が保管する SOPS recovery key を前提とする。一般向けの NixOS distribution や、そのまま利用できる fork ではない。再利用する場合は host、account、secret、固定 path を自分の環境に合わせて置き換える必要がある。
+このリポジトリは、host 構成の `dotfiles.workstation.username` が宣言する主 user、`dotfiles.workstation.dotfilesDir` が宣言する checkout の場所、所有者が保管する SOPS recovery key を前提とする。一般向けの NixOS distribution や、そのまま利用できる fork ではない。再利用する場合は host、account、secret を自分の環境に合わせて置き換える必要がある。
 
 ## 管理対象
 
@@ -20,7 +20,6 @@ NixOS、Home Manager、開発ツール、AI コーディング環境、暗号化
 所有者が新しい host を構築するときは[セットアップ手順](docs/operations/getting-started.md)に従う。通常の変更は、候補 generation を確認してから同じ checkout を適用する。
 
 ```bash
-cd ~/dotfiles-wsl
 dotfiles-rebuild --plan
 dotfiles-rebuild
 dotfiles-doctor

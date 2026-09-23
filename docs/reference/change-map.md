@@ -72,12 +72,11 @@
 | application credentialを追加・変更する | 対応するCapabilityの`sops.secrets`とtemplate、[`secrets/sops/assets/secrets.json`](../../secrets/sops/assets/secrets.json) | host keyを指定してSOPSで編集し、`dotfiles-rebuild` |
 | host recipientを追加する | [`secrets/sops/assets/.sops.yaml`](../../secrets/sops/assets/.sops.yaml) | [SOPSの鍵](../operations/sops-enrollment.md)に従う |
 
-通常のsecret編集commandは次の形に統一する。
+通常のsecret編集commandは、checkoutのrootで実行する次の形に統一する。
 
 ```bash
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml \
-  ~/dotfiles-wsl/secrets/sops/assets/secrets.json
+  sops --config secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
 ```
 
 ## 運用入口

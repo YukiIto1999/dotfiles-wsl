@@ -6,10 +6,9 @@
 
 ## 編集
 
-通常の編集では host key を明示して SOPS を起動する。
+通常の編集では、checkout の root で host key を明示して SOPS を起動する。
 
 ```bash
-cd ~/dotfiles-wsl
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
   sops --config secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
 git diff --check -- secrets/sops/assets/secrets.json

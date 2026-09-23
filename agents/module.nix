@@ -143,6 +143,7 @@ let
     subagents = sharedSubagents;
     capabilities = cfg.capabilities.resolved;
     inherit (agents) clients;
+    inherit (cfg.workstation) dotfilesDir;
   };
 
   normalizeSource =

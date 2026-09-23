@@ -2,10 +2,9 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-現在の checkout が宣言する client binary を更新する。
+現在の checkout が宣言する client binary を、checkout の root から更新する。
 
 ```sh
-cd ~/dotfiles-wsl
 nix run .#dotfiles-install-agents
 ```
 

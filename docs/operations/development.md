@@ -6,10 +6,9 @@
 
 ## Dev shell
 
-checkout ごとに `.envrc` を一度だけ許可すると、ディレクトリへ入ったときに既定の devShell が有効になる。
+checkout ごとに、その root で `.envrc` を一度だけ許可すると、ディレクトリへ入ったときに既定の devShell が有効になる。
 
 ```bash
-cd ~/dotfiles-wsl
 direnv allow
 ```
 

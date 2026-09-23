@@ -59,6 +59,9 @@ in
       serviceConfig = {
         Type = "oneshot";
         User = cfg.workstation.username;
+        # 次の 06:00 に前回の実行が残っていると timer は起動しない。記録済みの日は一日ごとに push 済みなので、
+        # 打ち切っても失うのは途中の一日だけで、次の実行が拾い直す
+        TimeoutStartSec = "6h";
         Environment = [
           "HOME=${cfg.workstation.homeDir}"
           "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"

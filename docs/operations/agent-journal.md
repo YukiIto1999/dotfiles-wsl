@@ -20,14 +20,14 @@ commit は Git の既定 identity で作り、`origin` へ push する。日誌�
 
 ## timer
 
-`dotfiles-agent-journal.timer` は毎日 06:00 に起動し、直前に終わった 1 日から 7 日前までのうち、まだ file のない日を記録して push する。WSL が止まっていて起動を逃した場合は、次に起動したときに実行する。omp の作業がない日は file を作らない。
+`dotfiles-agent-journal.timer` は毎日 06:00 に起動し、直前に終わった 1 日から 7 日前までのうち、まだ file のない日を記録する。記録した日は 1 日ごとに commit して push する。model の呼び出しなどで失敗した日は file を作らずに次の日へ進み、次の実行で作り直す。1 回の実行は 6 時間で打ち切る。WSL が止まっていて起動を逃した場合は、次に起動したときに実行する。omp の作業がない日は file を作らない。
 
 ```sh
 systemctl status dotfiles-agent-journal.timer
 journalctl -u dotfiles-agent-journal.service -n 50
 ```
 
-失敗は `dotfiles-doctor` の `maintenance/dotfiles-agent-journal.timer` に現れる。commit 済みで push できなかった日誌は、次の実行で push する。
+失敗した日があると service は非ゼロで終わり、`dotfiles-doctor` の `maintenance/dotfiles-agent-journal.timer` に現れる。commit 済みで push できなかった日誌は、次に記録した日と一緒に push する。
 
 ## 手動で作り直す
 

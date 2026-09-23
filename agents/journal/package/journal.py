@@ -325,28 +325,35 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     options = parse(argv)
     tz = ZoneInfo(options.timezone)
     journal = options.journal_dir
     try:
         branch = sync(journal)
-        days = [options.date] if options.date else pending_days(
-            datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, options.host
-        )
-        for day in days:
-            start, end = window(day, tz, options.start_hour)
+    except JournalError as error:
+        print(f"dotfiles-agent-journal: {error}", file=sys.stderr)
+        return 1
+    days = [options.date] if options.date else pending_days(
+        now or datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, options.host
+    )
+    # 一日の失敗で後の日を止めない。失敗した日は file を作らないので、次の実行が拾い直す
+    failed = []
+    for day in days:
+        start, end = window(day, tz, options.start_hour)
+        try:
             sessions = sessions_in(options.sessions_root, start, end, tz)
             if not sessions:
                 print(f"{day}: omp の作業はない")
                 continue
             record(journal, output_path(journal, day, options.host), day, compose(options, day, start, end, sessions))
-            print(f"{day}: {len(sessions)} session を記録した")
-        publish(journal, branch)
-    except JournalError as error:
-        print(f"dotfiles-agent-journal: {error}", file=sys.stderr)
-        return 1
-    return 0
+            publish(journal, branch)
+        except JournalError as error:
+            print(f"dotfiles-agent-journal: {day}: {error}", file=sys.stderr)
+            failed.append(day)
+            continue
+        print(f"{day}: {len(sessions)} session を記録した")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

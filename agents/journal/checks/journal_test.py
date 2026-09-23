@@ -129,9 +129,13 @@ class JournalTest(unittest.TestCase):
         self.fake_omp = self.workspace / "omp"
         self.fake_omp.write_text(
             f"#!{sys.executable}\n"
-            "import sys\n"
+            "import os, sys\n"
             f"with open({str(self.prompts)!r}, 'a', encoding='utf-8') as log:\n"
-            "    log.write(sys.stdin.read() + '\\n---\\n')\n"
+            "    material = sys.stdin.read()\n"
+            "    log.write(material + '\\n---\\n')\n"
+            "marker = os.environ.get('FAKE_OMP_FAIL_ON')\n"
+            "if marker and marker in material:\n"
+            "    sys.exit('model unavailable')\n"
             "print('### 依頼\\n- 要約された依頼')\n"
         )
         self.fake_omp.chmod(0o755)
@@ -141,8 +145,8 @@ class JournalTest(unittest.TestCase):
         self.journal = self.workspace / "agent-journal"
         git("clone", "-q", str(self.remote), str(self.journal))
 
-    def run_journal(self, *extra: str) -> None:
-        status = journal.main([
+    def run_journal(self, *extra: str, now: datetime | None = None, status: int = 0) -> None:
+        result = journal.main([
             "--sessions-root", str(self.sessions),
             "--journal-dir", str(self.journal),
             "--host", HOST,
@@ -153,8 +157,11 @@ class JournalTest(unittest.TestCase):
             "--model", "fake/model",
             "--thinking", "low",
             *extra,
-        ])
-        self.assertEqual(status, 0)
+        ], now=now)
+        self.assertEqual(result, status)
+
+    def published(self) -> list[str]:
+        return git("--git-dir", str(self.remote), "ls-tree", "-r", "--name-only", "main").splitlines()
 
     def test_day_is_summarized_from_its_window_and_published(self):
         self.run_journal("--date", DAY.isoformat())
@@ -175,6 +182,21 @@ class JournalTest(unittest.TestCase):
         commits = git("--git-dir", str(self.remote), "rev-list", "--count", "main")
         self.run_journal("--date", DAY.isoformat())
         self.assertEqual(git("--git-dir", str(self.remote), "rev-list", "--count", "main"), commits)
+
+    def test_a_failed_day_does_not_block_other_days(self):
+        os.environ["FAKE_OMP_FAIL_ON"] = "前々日の依頼"
+        self.addCleanup(os.environ.pop, "FAKE_OMP_FAIL_ON", None)
+        now = local("2026-09-24T06:00:00")
+
+        # 09-21 は model が失敗し、それより後の 09-22 と 09-23 は記録される
+        self.run_journal(now=now, status=1)
+        self.assertEqual(self.published(), ["2026/0922/testhost.md", "2026/0923/testhost.md"])
+
+        del os.environ["FAKE_OMP_FAIL_ON"]
+        self.run_journal(now=now)
+        self.assertEqual(
+            self.published(), ["2026/0921/testhost.md", "2026/0922/testhost.md", "2026/0923/testhost.md"]
+        )
 
     def test_pending_days_end_at_the_last_completed_window(self):
         before = journal.pending_days(local("2026-09-24T05:59:59"), TZ, 6, 2, self.journal, HOST)

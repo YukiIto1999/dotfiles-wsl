@@ -2,7 +2,7 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-omp の session 記録から 1 日分の作業と判断を要約し、`agent-journal` repository に host ごとの Markdown として記録する。1 日は 06:00 から翌日の 06:00 までとし、深夜の作業は前日に入る。
+omp の session 記録から 1 日分の作業と判断を要約し、`agent-journal` repository に機械ごとの Markdown として記録する。1 日は 06:00 から翌日の 06:00 までとし、深夜の作業は前日に入る。
 
 ## 前提
 
@@ -16,7 +16,7 @@ commit は Git の既定 identity で作り、`origin` へ push する。日誌�
 
 ## 出力
 
-日誌は `<yyyy>/<MMdd>/<host-id>.md` に書く。冒頭の表は、session 記録から数えた project ごとの session 数、request 数、費用である。project ごとの本文は model が書いた依頼、決定と根拠、変更と検証、未決事項で、各項目には根拠にした session の短い ID が付く。本文の後には、その project の session の完全な ID と、同じ時間帯の commit を並べる。session の記録は `omp --resume <session の ID>` で開ける。
+日誌は `<yyyy>/<MMdd>/<機械名>.md` に書く。機械名は Windows のコンピューター名で、`hostname.exe` の出力と同じである。NixOS の host 名はどの機械でも既定値のまま同じなので使わない。コンピューター名を得られないときは何も書かずに失敗する。冒頭の表は、session 記録から数えた project ごとの session 数、request 数、費用である。project ごとの本文は model が書いた依頼、決定と根拠、変更と検証、未決事項で、各項目には根拠にした session の短い ID が付く。本文の後には、その project の session の完全な ID と、同じ時間帯の commit を並べる。session の記録は `omp --resume <session の ID>` で開ける。
 
 ## timer
 

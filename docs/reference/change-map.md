@@ -9,7 +9,7 @@
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
 | 全hostで有効なidentity、Agent、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `nix flake check`、`dotfiles-rebuild --plan` |
-| hostを登録し、Windows drive、swap、Windows committed memory、host固有Capabilityを変える | [`profiles/hosts/`](../../profiles/hosts)のhost名と同じNix file。optionの意味と既定値は[`workstation/storage/module.nix`](../../workstation/storage/module.nix)、[`workstation/stability/module.nix`](../../workstation/stability/module.nix)、[`capabilities/module.nix`](../../capabilities/module.nix) | `machine-profile-contract`、`container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
+| hostを登録し、swap、Windows committed memory、host固有Capabilityを変える | [`profiles/hosts/`](../../profiles/hosts)のhost名と同じNix file。optionの意味と既定値は[`workstation/stability/module.nix`](../../workstation/stability/module.nix)、[`capabilities/module.nix`](../../capabilities/module.nix) | `machine-profile-contract`、`container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
 | username、home、checkout path、環境系repositoryの置き場所を変える | [`workstation/module.nix`](../../workstation/module.nix)の`dotfiles.workstation` | identity migrationとして扱い、通常rebuildと混ぜない |
 | Nix binary cacheを増減する | [`workstation/nix/assets/nix-caches.nix`](../../workstation/nix/assets/nix-caches.nix) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 時刻とlocaleを変える | [`workstation/locale/module.nix`](../../workstation/locale/module.nix) | `host-locale-contract`、`dotfiles-rebuild` |

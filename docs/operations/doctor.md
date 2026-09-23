@@ -33,7 +33,7 @@ agent の管理下領域は次の四つを一度に集計する。
 - `~/.cache/dotfiles-wsl/sessions`
 - `~/.local/state/dotfiles-wsl/agent-resources`
 
-home や project 全体は再帰 scan しない。doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、Windows C、D、E drive、Windows committed memory、swap topology を観測対象とする。Windows の各 probe は同じ有界な数値 contract を使い、drive は空き率、committed memory は使用率を返す。
+home や project 全体は再帰 scan しない。doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、Windows drive、Windows committed memory、swap topology を観測対象とする。Windows drive は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。Windows committed memory は PowerShell から使用率を得る。
 
 ## 結果
 

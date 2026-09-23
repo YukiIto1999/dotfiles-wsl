@@ -187,6 +187,8 @@ def commits_between(root: str, start: datetime, end: datetime) -> list[str]:
 
 
 def summarize(options: argparse.Namespace, prompt: str, material: str) -> str:
+    # cwd を Git の外に置く。project memory の hook が動いても保存先の project を決められず、日誌の入力を保存しない
+    # cwd を repository の中へ移すと、この保証は黙って消える
     with tempfile.TemporaryDirectory(prefix="agent-journal-") as workdir:
         try:
             result = subprocess.run(

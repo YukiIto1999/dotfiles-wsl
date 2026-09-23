@@ -504,6 +504,12 @@ in
       lib.hasInfix "/agents/" (toString definition.file)
       && !lib.hasInfix "/containers/" (toString definition.file)
     ) hostOptions.dotfiles.agents.clients.definitionsWithLocations;
+    # omp は hook directory の中の symlink を読まない。directory ごと配備し、中身は実 file にする
+    assert lib.assertMsg (
+      !lib.any (target: lib.hasPrefix ".omp/agent/hooks/pre/" target) (
+        builtins.attrNames homeConfig.home.file
+      )
+    ) "omp hooks must not be deployed as individual file symlinks";
     pkgs.runCommandLocal "check-agent-artifact-contract"
       {
         nativeBuildInputs = [
@@ -629,7 +635,14 @@ in
           ' > /dev/null
 
 
-        gateHookFile=${clients.omp.managedFiles.verification-gate.source}
+        ompHookDirectory=${homeConfig.home.file.".omp/agent/hooks/pre".source}
+        for hook in verification-gate.ts project-memory.ts; do
+          if [ ! -f "$ompHookDirectory/$hook" ] || [ -L "$ompHookDirectory/$hook" ]; then
+            echo "omp hook is not a regular file in the deployed directory: $hook" >&2
+            exit 1
+          fi
+        done
+        gateHookFile=$ompHookDirectory/verification-gate.ts
         for event in tool_call tool_result session_stop; do
           grep -Fq "pi.on(\"$event\"" "$gateHookFile"
         done
@@ -999,8 +1012,7 @@ in
     );
     assert
       !builtins.hasAttr "agents/opencode/project-memory-plugin" restrictedAgentConfig.dotfiles.managedArtifacts;
-    assert
-      !builtins.hasAttr "agents/omp/project-memory-hook" restrictedAgentConfig.dotfiles.managedArtifacts;
+    assert builtins.hasAttr "agents/omp/hooks" restrictedAgentConfig.dotfiles.managedArtifacts;
     assert builtins.hasAttr "code-review" restrictedAgentConfig.dotfiles.agents.shared.skills;
     assert builtins.hasAttr "reviewer" restrictedAgentSubagents;
     assert builtins.hasAttr "reviewer" restrictedAgentConfig.dotfiles.agents.clients.claude.subagents;
@@ -1040,6 +1052,12 @@ in
           restrictedAgentConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source
         }; then
           echo "disabled project-memory remained in Claude settings" >&2
+          exit 1
+        fi
+        if [ -e ${
+          restrictedAgentConfig.dotfiles.managedArtifacts."agents/omp/hooks".source
+        }/project-memory.ts ]; then
+          echo "disabled project-memory remained in OMP hooks" >&2
           exit 1
         fi
         if grep -Fq project-memory ${

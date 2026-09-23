@@ -70,6 +70,7 @@ runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録す�
 [`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的subagentは`agents/subagents/`に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
 
 `native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<subagent>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
+OMPのhookは`~/.omp/agent/hooks/pre`をdirectoryごとhomeへ配備し、その中をNix storeの実fileにする。OMPはhook directory内のsymlinkを読み込まず、Home Managerがfileごとに張るsymlinkでは全hookが無視されるためである。
 client別の能力配備の正本は各`agents/clients/<id>/module.nix`のmode宣言である。`projectMemoryMode`は`hooks`、`plugin`、`unsupported`のいずれかで、対応する配備先は`capabilityManagedFiles.projectMemory`が指すmanaged fileである。現在の各clientのmodeは次で取得できる。
 
 ```bash

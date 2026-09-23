@@ -198,6 +198,15 @@ class JournalTest(unittest.TestCase):
             self.published(), ["2026/0921/testhost.md", "2026/0922/testhost.md", "2026/0923/testhost.md"]
         )
 
+    def test_the_model_never_runs_inside_a_git_work_tree(self):
+        # project memory は cwd の Git common directory から保存先を決める。work tree の中で要約すると日誌の入力が記憶に入る
+        previous = tempfile.tempdir
+        tempfile.tempdir = str(self.project)
+        self.addCleanup(setattr, tempfile, "tempdir", previous)
+
+        self.run_journal("--date", DAY.isoformat(), status=1)
+        self.assertFalse(self.prompts.exists())
+
     def test_pending_days_end_at_the_last_completed_window(self):
         before = journal.pending_days(local("2026-09-24T05:59:59"), TZ, 6, 2, self.journal, HOST)
         at = journal.pending_days(local("2026-09-24T06:00:00"), TZ, 6, 2, self.journal, HOST)

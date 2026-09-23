@@ -187,9 +187,12 @@ def commits_between(root: str, start: datetime, end: datetime) -> list[str]:
 
 
 def summarize(options: argparse.Namespace, prompt: str, material: str) -> str:
-    # cwd を Git の外に置く。project memory の hook が動いても保存先の project を決められず、日誌の入力を保存しない
-    # cwd を repository の中へ移すと、この保証は黙って消える
+    # cwd を Git の外に置く。project memory の hook が動いても保存先の project を決められず、日誌の入力を保存しない。
+    # 一時 directory の場所は TMPDIR で変わるため、work tree の中なら model を呼ばずに止める
     with tempfile.TemporaryDirectory(prefix="agent-journal-") as workdir:
+        inside = subprocess.run(["git", "-C", workdir, "rev-parse", "--is-inside-work-tree"], capture_output=True)
+        if inside.returncode == 0:
+            raise JournalError(f"{workdir} is inside a Git work tree; set TMPDIR outside any repository")
         try:
             result = subprocess.run(
                 [

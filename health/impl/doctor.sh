@@ -79,6 +79,7 @@ fragment_is_valid() {
     and (
       .[0] as $fragment
       | $observation[0].value as $contract
+      | ($contract.kind == "numeric-command-threshold-set") as $threshold_set
       | (
           if $contract.kind == "normalized-protocol"
           then $contract.allowedOutcomeIds
@@ -88,7 +89,7 @@ fragment_is_valid() {
       | (
           if $contract.kind == "normalized-protocol"
           then $contract.requiredOutcomeIds
-          elif $contract.kind == "roster" and $contract.failureOnly
+          elif ($contract.kind == "roster" and $contract.failureOnly) or $threshold_set
           then []
           else [$contract.checkId]
           end
@@ -128,7 +129,16 @@ fragment_is_valid() {
         and (keys | sort) == ["key","value"]
         and (.key | type) == "string" and (.key | length) > 0)
       and ($check_ids | length) == ($check_ids | unique | length)
-      and all($check_ids[]; . as $id | ($allowed_check_ids | index($id)) != null)
+      and (
+        if $threshold_set
+        then $check_ids == [$contract.checkId]
+          or (($check_ids | length) > 0
+            and all($check_ids[];
+              startswith($contract.checkId + "/")
+              and (ltrimstr($contract.checkId + "/") | test("^[a-z0-9][a-z0-9-]*$"))))
+        else all($check_ids[]; . as $id | ($allowed_check_ids | index($id)) != null)
+        end
+      )
       and all($required_check_ids[]; . as $id | ($check_ids | index($id)) != null)
       and ($warning_ids | sort) == ($warn_check_ids | sort)
       and ($failure_ids | sort) == ($fail_check_ids | sort)

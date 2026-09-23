@@ -326,6 +326,19 @@ let
     failure = lib.mkOption { type = percent; };
   } thresholdOrderIsValid;
 
+  # command は一行に「<名前> <百分率>」を並べる。doctor は名前ごとに閾値を当て、check ID を「<checkId>/<名前>」にする
+  numericCommandThresholdSetType = mkObservationType "numeric-command-threshold-set" {
+    command = lib.mkOption { type = purposeCommandPackage "numeric-command-threshold-set"; };
+    metric = lib.mkOption {
+      type = types.enum [
+        "used-percent"
+        "free-percent"
+      ];
+    };
+    warning = lib.mkOption { type = percent; };
+    failure = lib.mkOption { type = percent; };
+  } thresholdOrderIsValid;
+
   swapPolicyType = mkObservationType "swap-policy" {
     minimumTotalBytes = lib.mkOption { type = types.ints.positive; };
     requiredZramAlgorithm = lib.mkOption {
@@ -394,6 +407,7 @@ let
     restartCounterType
     filesystemThresholdType
     numericCommandThresholdType
+    numericCommandThresholdSetType
     swapPolicyType
     journalSizeType
     containerImageType

@@ -11,16 +11,18 @@ dotfiles-doctor --json
 
 ## 検査契約
 
-[`health/module.nix`](../../health/module.nix) は次の 17 種類の observation kind を閉じた union として受け付ける。
+[`health/module.nix`](../../health/module.nix) は次の 19 種類の observation kind を閉じた union として受け付ける。
 
 | 対象 | kind |
 |---|---|
 | roster と path | `roster`、`path-match`、`command-version`、`release-tree`、`deployed-path`、`path-metadata`、`managed-roots` |
-| systemd と再起動 | `systemd-service`、`systemd-timer`、`restart-counter` |
-| 容量と committed memory | `filesystem-threshold`、`numeric-command-threshold`、`swap-policy`、`journal-size` |
+| systemd と再起動 | `systemd-service`、`systemd-socket`、`systemd-timer`、`restart-counter` |
+| 容量と committed memory | `filesystem-threshold`、`numeric-command-threshold`、`numeric-command-threshold-set`、`swap-policy`、`journal-size` |
 | container と protocol | `container-image`、`http-health`、`normalized-protocol` |
 
 [`health/module.nix`](../../health/module.nix) は registry 全体を key 順の JSON に投影し、[`health/impl/doctor.sh`](../../health/impl/doctor.sh) が各 observation を同じ runner で処理する。個別 probe は宣言した timeout、許可した変数だけの環境、専用の一時 directory で動く。stdout は上限を設けた JSON fragment だけを受理し、stderr は捨てる。不正、過大、timeout、非ゼロ終了は owner が宣言した固定 failure message に置き換える。
+
+観測する対象の数が実行時に決まる資源には `numeric-command-threshold-set` を使う。owner の command は 1 行に 1 つ `<名前> <百分率>` を返し、doctor は名前ごとに閾値を当てて `<checkId>/<名前>` の check を作る。1 行でも読めなければ、どの値も使わずに observation 全体を固定 failure message で失敗させる。
 
 MCP gateway の initialize、tools/list、target probe は Platform MCP の `normalized-protocol` observer が行う。doctor 自体には MCP の状態機械を持たせない。
 

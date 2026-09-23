@@ -13,6 +13,7 @@ let
         };
       });
   numericCommand = mkDedicatedCommand "numeric-command-threshold";
+  numericSetCommand = mkDedicatedCommand "numeric-command-threshold-set";
   normalizedProtocolCommand = mkDedicatedCommand "normalized-protocol";
   cmdExecutable = pkgs.writeShellApplication {
     name = "cmd.exe";
@@ -150,6 +151,13 @@ let
       warning = 15;
       failure = 10;
     };
+    "host/numeric-command-threshold-set" = common "numeric-command-threshold-set" // {
+      kind = "numeric-command-threshold-set";
+      command = numericSetCommand;
+      metric = "free-percent";
+      warning = 15;
+      failure = 10;
+    };
     "host/swap-policy" = common "swap-policy" // {
       kind = "swap-policy";
       minimumTotalBytes = 8589934592;
@@ -190,6 +198,7 @@ let
   replace = name: value: valid // { ${name} = value; };
   restartCounter = valid."host/restart-counter";
   numericThreshold = valid."host/numeric-command-threshold";
+  numericThresholdSet = valid."host/numeric-command-threshold-set";
   normalizedProtocol = valid."host/normalized-protocol";
 in
 {
@@ -237,6 +246,16 @@ in
     );
     numericCommandWrongPurpose = replace "host/numeric-command-threshold" (
       numericThreshold // { command = normalizedProtocolCommand; }
+    );
+    numericSetCommandWrongPurpose = replace "host/numeric-command-threshold-set" (
+      numericThresholdSet // { command = numericCommand; }
+    );
+    numericSetInvalidThresholdOrder = replace "host/numeric-command-threshold-set" (
+      numericThresholdSet
+      // {
+        warning = 10;
+        failure = 15;
+      }
     );
     normalizedCommandWrongPurpose = replace "host/normalized-protocol" (
       valid."host/normalized-protocol" // { command = numericCommand; }

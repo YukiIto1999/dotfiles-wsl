@@ -34,6 +34,23 @@ let
     in
     lib.all (id: !builtins.elem id forbidden) row.value.allowedOutcomeIds
   ) normalizedRows;
+  # 集合の observation は「<checkId>/<名前>」の check を作る。その名前空間に他の check ID を置かせない
+  contractCheckIdsFor =
+    row:
+    if row.value.kind == "normalized-protocol" then
+      row.value.allowedOutcomeIds
+    else
+      builtins.filter (id: id != null) [ row.value.checkId ];
+  thresholdSetItemsDoNotCollide = lib.all (
+    row:
+    let
+      prefix = "${row.value.checkId}/";
+      otherIds = lib.concatMap contractCheckIdsFor (
+        builtins.filter (other: other.key != row.key) observations
+      );
+    in
+    row.value.checkId == null || lib.all (id: !lib.hasPrefix prefix id) otherIds
+  ) (builtins.filter (row: row.value.kind == "numeric-command-threshold-set") observations);
 
   directResourceKeys = builtins.filter (key: key != null) (
     map (row: row.value.resourceKey) directRows
@@ -69,6 +86,10 @@ in
       {
         assertion = normalizedIdsDoNotCollide;
         message = "normalized protocol outcome IDs must not collide with another observation contract";
+      }
+      {
+        assertion = thresholdSetItemsDoNotCollide;
+        message = "threshold set item IDs must not collide with another observation contract";
       }
       {
         assertion = normalizedFallbackResourcesMatch;

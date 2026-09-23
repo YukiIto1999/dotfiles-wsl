@@ -19,6 +19,19 @@ let
           dotfilesObservationCommandKind = "normalized-protocol";
         };
       });
+  markedSetCommand =
+    (pkgs.writeShellApplication {
+      name = "fixture-marked-set";
+      text = "exit 0";
+    }).overrideAttrs
+      (old: {
+        meta = (old.meta or { }) // {
+          mainProgram = "fixture-marked-set";
+        };
+        passthru = (old.passthru or { }) // {
+          dotfilesObservationCommandKind = "numeric-command-threshold-set";
+        };
+      });
   rosterContract = id: resourceKey: {
     kind = "roster";
     checkId = id;
@@ -40,6 +53,17 @@ let
     requiredOutcomeIds = [ "fixture/normalized" ];
     requiredResourceKeys = [ "normalizedResource" ];
     envelopeVersion = 1;
+  };
+  setContract = {
+    kind = "numeric-command-threshold-set";
+    checkId = "fixture/set";
+    resourceKey = "setResource";
+    timeoutSeconds = 10;
+    failureMessage = "fixture set failed";
+    command = markedSetCommand;
+    metric = "free-percent";
+    warning = 15;
+    failure = 10;
   };
   evalRegistry =
     registry:
@@ -86,6 +110,7 @@ let
     "fixture/one" = rosterContract "fixture/one" null;
     "fixture/two" = rosterContract "fixture/two" null;
     "fixture/normalized" = normalizedContract;
+    "fixture/set" = setContract;
   };
   invalidAssertionRegistries = [
     (
@@ -143,6 +168,22 @@ let
           checkId = "fixture/normalized-two";
           resourceKey = "normalizedResourceTwo";
           requiredResourceKeys = [ "normalizedResourceTwo" ];
+        };
+      }
+    )
+    # 集合の item は「<checkId>/<名前>」になるので、その下に別の check ID を置けない
+    (
+      assertionBase
+      // {
+        "fixture/one" = rosterContract "fixture/set/c" null;
+      }
+    )
+    (
+      assertionBase
+      // {
+        "fixture/normalized" = normalizedContract // {
+          allowedOutcomeIds = [ "fixture/set/c" ];
+          requiredOutcomeIds = [ "fixture/set/c" ];
         };
       }
     )

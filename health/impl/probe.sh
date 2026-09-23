@@ -346,19 +346,24 @@ probe_restart_counter() {
   fi
 }
 
-emit_threshold() {
-  local value=$1 metric=$2 warning=$3 failure=$4 resources=$5 status message
+threshold_status() {
+  local value=$1 metric=$2 warning=$3 failure=$4
   if [[ $metric == used-percent ]]; then
-    if ((value >= failure)); then status=fail
-    elif ((value >= warning)); then status=warn
-    else status=pass
+    if ((value >= failure)); then printf 'fail\n'
+    elif ((value >= warning)); then printf 'warn\n'
+    else printf 'pass\n'
     fi
   else
-    if ((value < failure)); then status=fail
-    elif ((value < warning)); then status=warn
-    else status=pass
+    if ((value < failure)); then printf 'fail\n'
+    elif ((value < warning)); then printf 'warn\n'
+    else printf 'pass\n'
     fi
   fi
+}
+
+emit_threshold() {
+  local value=$1 metric=$2 warning=$3 failure=$4 resources=$5 status message
+  status=$(threshold_status "$value" "$metric" "$warning" "$failure")
   message="$metric crossed its $status threshold"
   if [[ $status == fail ]]; then
     emit_direct fail "$message" "$resources"
@@ -423,6 +428,57 @@ probe_numeric_command_threshold() {
   fi
   resources=$(resource_array "$resource_value")
   emit_threshold "$value" "$metric" "$warning" "$failure" "$resources"
+}
+
+probe_numeric_command_threshold_set() {
+  local command metric warning failure measurements name value status
+  local items=()
+  command=$($jq_command -r '.command' <<<"$observation")
+  metric=$($jq_command -r '.metric' <<<"$observation")
+  warning=$($jq_command '.warning' <<<"$observation")
+  failure=$($jq_command '.failure' <<<"$observation")
+  if ! capture_bounded 4096 "$command"; then
+    emit_failure
+    return
+  fi
+  # 名前は check ID の最後の一節になる。一つでも読めない行があれば、どの値も信用しない
+  if ! measurements=$($jq_command -Rser '
+    (sub("\n$"; "") | split("\n")) as $lines
+    | if ($lines | length) > 0
+        and all($lines[]; test("^[a-z0-9][a-z0-9-]{0,31} (0|[1-9][0-9]{0,2})$"))
+        and all($lines[]; (split(" ")[1] | tonumber) <= 100)
+      then $lines | sort | join("\n")
+      else error("invalid measurements")
+      end
+  ' "$capture_file" 2>/dev/null); then
+    emit_failure
+    return
+  fi
+  while read -r name value; do
+    status=$(threshold_status "$value" "$metric" "$warning" "$failure")
+    items+=("$($jq_command -cn --arg name "$name" --argjson value "$value" --arg status "$status" \
+      '{name:$name,value:$value,status:$status}')")
+  done <<<"$measurements"
+  printf '%s\n' "${items[@]}" | $jq_command -sc \
+    --arg id "$check_id" \
+    --arg metric "$metric" \
+    --arg key "$resource_key" '
+      map(. + {id: ($id + "/" + .name)}) as $items
+      | {
+          checks: [$items[] | {id, status}],
+          warnings: [$items[] | select(.status == "warn") | {id, message: "\($metric) crossed its warn threshold"}],
+          failures: [$items[] | select(.status == "fail") | {id, message: "\($metric) crossed its fail threshold"}],
+          resources: (
+            if $key == "" then []
+            else [{
+              key: $key,
+              value: [$items[] | {name} + (if $metric == "used-percent" then {usedPercent: .value} else {freePercent: .value} end)]
+            }]
+            end
+          ),
+          restart: null
+        }
+    '
 }
 
 zram_device_identity() {
@@ -616,6 +672,7 @@ case "$kind" in
   restart-counter) probe_restart_counter ;;
   filesystem-threshold) probe_filesystem_threshold ;;
   numeric-command-threshold) probe_numeric_command_threshold ;;
+  numeric-command-threshold-set) probe_numeric_command_threshold_set ;;
   swap-policy) probe_swap_policy ;;
   journal-size) probe_journal_size ;;
   container-image) probe_container_image ;;

@@ -12,7 +12,6 @@
 
 let
   workstation = hostConfig.dotfiles.workstation;
-  windowsDriveObservationKeys = map (drive: "host/windows-${drive}-drive") workstation.windowsDrives;
   zram = hostConfig.zramSwap;
   zramGenerator = hostConfig.services.zram-generator;
   zramService = hostConfig.systemd.services.dotfiles-zram-swap or { };
@@ -37,23 +36,21 @@ let
     "max-free" = 274877906944;
   };
   virtualMemorySysctl = builtins.intersectAttrs expectedVirtualMemorySysctl hostConfig.boot.kernel.sysctl;
-  hostObservationKeys = lib.sort builtins.lessThan (
-    [
-      "host/fstrim"
-      "host/home-manager"
-      "host/home-manager-restart"
-      "host/journald"
-      "host/nix-daemon"
-      "host/nix-gc"
-      "host/root-filesystem"
-      "host/swap"
-      "host/system-generation"
-      "host/windows-memory-commit"
-      "host/wsl-memory-reclaim"
-      "host/wsl-relay-recovery"
-    ]
-    ++ windowsDriveObservationKeys
-  );
+  hostObservationKeys = [
+    "host/fstrim"
+    "host/home-manager"
+    "host/home-manager-restart"
+    "host/journald"
+    "host/nix-daemon"
+    "host/nix-gc"
+    "host/root-filesystem"
+    "host/swap"
+    "host/system-generation"
+    "host/windows-drives"
+    "host/windows-memory-commit"
+    "host/wsl-memory-reclaim"
+    "host/wsl-relay-recovery"
+  ];
   hostObservations = lib.filterAttrs (
     name: _: lib.hasPrefix "host/" name
   ) hostConfig.dotfiles.health.observations;
@@ -63,7 +60,7 @@ let
   observationProjection = lib.mapAttrs (
     _: observation: builtins.removeAttrs observation [ "command" ]
   ) stabilityObservations;
-  expectedBaseObservationProjection = {
+  expectedObservationProjection = {
     "host/fstrim" = {
       activeStates = [ "active" ];
       checkId = "maintenance/fstrim.timer";
@@ -197,6 +194,16 @@ let
       resourceKey = null;
       timeoutSeconds = 10;
     };
+    "host/windows-drives" = {
+      checkId = "resource/windows-drives";
+      failure = 10;
+      failureMessage = "could not observe Windows drive free space";
+      kind = "numeric-command-threshold-set";
+      metric = "free-percent";
+      resourceKey = "windowsDrives";
+      timeoutSeconds = 10;
+      warning = 15;
+    };
     "host/windows-memory-commit" = {
       checkId = "resource/windows-memory-commit";
       failure = workstation.windowsMemoryCommit.failure;
@@ -208,23 +215,6 @@ let
       warning = workstation.windowsMemoryCommit.warning;
     };
   };
-  expectedWindowsDriveObservationProjection = builtins.listToAttrs (
-    map (
-      drive:
-      lib.nameValuePair "host/windows-${drive}-drive" {
-        checkId = "resource/windows-${drive}-drive";
-        failure = 10;
-        failureMessage = "could not observe Windows ${lib.toUpper drive} drive free space";
-        kind = "numeric-command-threshold";
-        metric = "free-percent";
-        resourceKey = "windows${lib.toUpper drive}Drive";
-        timeoutSeconds = 10;
-        warning = 15;
-      }
-    ) workstation.windowsDrives
-  );
-  expectedObservationProjection =
-    expectedBaseObservationProjection // expectedWindowsDriveObservationProjection;
   hostObservationModuleSuffixes = [
     "/workstation/module.nix"
     "/workstation/activation/module.nix"
@@ -349,23 +339,13 @@ let
       name: _: lib.hasPrefix "host/" name
     ) descriptionVariantConfig.dotfiles.health.observations
   );
-  windowsObservationCommands =
-    lib.genAttrs windowsDriveObservationKeys (name: "dotfiles-observe-${lib.removePrefix "host/" name}")
-    // {
-      "host/windows-memory-commit" = "dotfiles-observe-windows-memory-commit";
-    };
-  driveObservationKeysFor =
+  # drive は実行時に mount から見つける。host profile は drive を知らず、全 host が同じ観測を持つ
+  windowsDrivesObservationFor =
     candidate:
-    lib.sort builtins.lessThan (
-      map (drive: "host/windows-${drive}-drive") candidate.dotfiles.workstation.windowsDrives
-    );
-  actualDriveObservationKeysFor =
-    candidate:
-    lib.sort builtins.lessThan (
-      builtins.filter (name: lib.hasPrefix "host/windows-" name && lib.hasSuffix "-drive" name) (
-        builtins.attrNames candidate.dotfiles.health.observations
-      )
-    );
+    let
+      observation = candidate.dotfiles.health.observations."host/windows-drives";
+    in
+    observation // { command = lib.getExe observation.command; };
   machineProfileContractMatches =
     name:
     let
@@ -375,7 +355,7 @@ let
       candidateWindowsMemory = candidate.dotfiles.health.observations."host/windows-memory-commit";
     in
     candidate.networking.hostName == name
-    && actualDriveObservationKeysFor candidate == driveObservationKeysFor candidate
+    && windowsDrivesObservationFor candidate == windowsDrivesObservationFor hostConfig
     &&
       candidate.services.zram-generator.settings.zram0.zram-size
       == "${toString candidateWorkstation.swap.zramMemoryPercent} / 100 * ram"
@@ -396,9 +376,7 @@ let
         };
       }
     ]).config;
-  powershellProbe = ''
-    $volume = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='D:'"; if ($null -eq $volume -or $volume.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($volume.FreeSpace * 100) / $volume.Size))
-  '';
+  powershellProbe = "[Console]::WriteLine(20)";
   mkWindowsPercentageObservation = import ./package.nix;
   mkFakePowerShell =
     expectedProbe: name: body:
@@ -413,17 +391,19 @@ let
       test "$5" = ${lib.escapeShellArg expectedProbe}
       ${body}
     '';
-  successfulPowerShell = mkFakePowerShell powershellProbe "windows-drive-success" "printf '20\\r\\n'";
-  noisyPowerShell = mkFakePowerShell powershellProbe "windows-drive-noisy" ''
+  successfulPowerShell =
+    mkFakePowerShell powershellProbe "windows-percent-success"
+      "printf '20\\r\\n'";
+  noisyPowerShell = mkFakePowerShell powershellProbe "windows-percent-noisy" ''
     printf '20\r\nnoise\n'
-    printf 'WINDOWS_DRIVE_NOISY_STDERR_POISON\n' >&2
+    printf 'WINDOWS_PERCENT_NOISY_STDERR_POISON\n' >&2
   '';
-  invalidPowerShell = mkFakePowerShell powershellProbe "windows-drive-invalid" "printf '101\\r\\n'";
+  invalidPowerShell = mkFakePowerShell powershellProbe "windows-percent-invalid" "printf '101\\r\\n'";
   statusPowerShell =
-    mkFakePowerShell powershellProbe "windows-drive-status"
+    mkFakePowerShell powershellProbe "windows-percent-status"
       "printf '20\\r\\n'; exit 7";
   timeoutPowerShell =
-    mkFakePowerShell powershellProbe "windows-drive-timeout"
+    mkFakePowerShell powershellProbe "windows-percent-timeout"
       "sleep 3; printf '20\\r\\n'";
   mkProbe =
     powershellCommand:
@@ -434,7 +414,7 @@ let
         powershellCommand
         powershellProbe
         ;
-      commandName = "dotfiles-observe-windows-d-drive";
+      commandName = "dotfiles-observe-windows-fixture";
       timeoutSeconds = 0.1;
     };
   successfulProbe = mkProbe successfulPowerShell;
@@ -442,6 +422,36 @@ let
   invalidProbe = mkProbe invalidPowerShell;
   statusProbe = mkProbe statusPowerShell;
   timeoutProbe = mkProbe timeoutPowerShell;
+  mkWindowsDrivesObservation = import ./storage/package.nix;
+  # WSL の drvfs は source を drive の root にする。drive の下の directory や他の 9p mount は drive ではない
+  mkFakeDf =
+    name: body:
+    pkgs.writeShellScript name ''
+      set -euo pipefail
+
+      test "$*" = '-t 9p --block-size=1K --output=source,size,avail'
+      ${body}
+    '';
+  mkDrivesProbe =
+    name: body:
+    mkWindowsDrivesObservation {
+      inherit pkgs lib;
+      dfCommand = mkFakeDf name body;
+    };
+  drivesProbe = mkDrivesProbe "df-drives" ''
+    printf 'Filesystem      1K-blocks      Avail\n'
+    printf 'drivers              1000        990\n'
+    printf 'D:\\                  2000       1000\n'
+    printf 'C:\\Users             1000          1\n'
+    printf 'C:\\                  1000         99\n'
+    printf 'C:\\                  1000         99\n'
+  '';
+  drivesFailedProbes = {
+    df-status = mkDrivesProbe "df-status" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ 1000 99\\n'; exit 1";
+    no-drive = mkDrivesProbe "df-no-drive" "printf 'Filesystem 1K-blocks Avail\\ndrivers 1000 990\\n'";
+    zero-size = mkDrivesProbe "df-zero-size" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ 0 0\\n'";
+    non-numeric = mkDrivesProbe "df-non-numeric" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ - -\\n'";
+  };
 in
 {
   machine-profile-contract =
@@ -450,19 +460,9 @@ in
     ) "host registry and evaluated machine configs diverged";
     assert lib.assertMsg (lib.all machineProfileContractMatches hostNames)
       "machine profile facts did not reach the host configuration";
-    assert lib.assertMsg (
-      machineConfigs.nixos.dotfiles.workstation.windowsDrives == [
-        "c"
-        "d"
-        "e"
-      ]
-    ) "nixos Windows drive inventory drifted";
-    assert lib.assertMsg (
-      machineConfigs.tcs-a295.dotfiles.workstation.windowsDrives == [
-        "c"
-        "d"
-      ]
-    ) "tcs-a295 Windows drive inventory drifted";
+    assert lib.assertMsg (lib.all (
+      name: !(machineConfigs.${name}.dotfiles.workstation ? windowsDrives)
+    ) hostNames) "host profiles must not declare a Windows drive inventory";
     assert lib.assertMsg (
       memoryVariantConfig.services.zram-generator.settings.zram0.zram-size == "40 / 100 * ram"
       && memoryVariantConfig.dotfiles.health.observations."host/swap".minimumTotalBytes == 6 * 1073741824
@@ -478,19 +478,21 @@ in
     assert lib.assertMsg (
       observationProjection == expectedObservationProjection
     ) "host runtime observation shape or canonical value drifted";
-    assert lib.assertMsg (lib.all
-      (
-        name:
-        let
-          command = hostObservations.${name}.command;
-          mainProgram = command.meta.mainProgram;
-        in
-        command.dotfilesObservationCommandKind == "numeric-command-threshold"
-        && mainProgram == windowsObservationCommands.${name}
-        && lib.getExe command == "${lib.getBin command}/bin/${mainProgram}"
-      )
-      (builtins.attrNames windowsObservationCommands)
-    ) "Windows resource observations must use dedicated numeric threshold packages";
+    assert lib.assertMsg (
+      let
+        command = hostObservations."host/windows-memory-commit".command;
+      in
+      command.dotfilesObservationCommandKind == "numeric-command-threshold"
+      && command.meta.mainProgram == "dotfiles-observe-windows-memory-commit"
+    ) "Windows committed memory must use a dedicated numeric threshold package";
+    assert lib.assertMsg (
+      let
+        command = hostObservations."host/windows-drives".command;
+      in
+      command.dotfilesObservationCommandKind == "numeric-command-threshold-set"
+      && command.meta.mainProgram == "dotfiles-observe-windows-drives"
+      && lib.getExe command == "${lib.getBin command}/bin/dotfiles-observe-windows-drives"
+    ) "Windows drives must use a dedicated numeric threshold set package";
     assert lib.assertMsg (
       hostDefinitionKeys == hostObservationKeys
       && builtins.all (name: lib.hasPrefix "host/" name) hostDefinitionKeys
@@ -643,8 +645,8 @@ in
                 assert_failed_probe() {
                   local name=$1
                   local command=$2
-                  local stdout="$TMPDIR/windows-drive-$name.stdout"
-                  local stderr="$TMPDIR/windows-drive-$name.stderr"
+                  local stdout="$TMPDIR/probe-$name.stdout"
+                  local stderr="$TMPDIR/probe-$name.stderr"
                   local status
 
                   if "$command" >"$stdout" 2>"$stderr"; then
@@ -653,15 +655,15 @@ in
                     status=$?
                   fi
                   if ((status != 1)); then
-                    echo "Windows drive $name probe returned status $status instead of 1" >&2
+                    echo "$name probe returned status $status instead of 1" >&2
                     return 1
                   fi
                   if [[ -s $stdout ]]; then
-                    echo "Windows drive $name probe leaked stdout" >&2
+                    echo "$name probe leaked stdout" >&2
                     return 1
                   fi
                   if [[ -s $stderr ]]; then
-                    echo "Windows drive $name probe leaked stderr" >&2
+                    echo "$name probe leaked stderr" >&2
                     return 1
                   fi
                 }
@@ -670,6 +672,13 @@ in
                 assert_failed_probe invalid ${lib.getExe invalidProbe}
                 assert_failed_probe status ${lib.getExe statusProbe}
                 assert_failed_probe timeout ${lib.getExe timeoutProbe}
+
+                test "$(${lib.getExe drivesProbe})" = $'d 50\nc 9'
+                ${lib.concatStringsSep "\n" (
+                  lib.mapAttrsToList (
+                    name: probe: "assert_failed_probe drives-${name} ${lib.getExe probe}"
+                  ) drivesFailedProbes
+                )}
 
                 service=${systemUnits}/fstrim.service
                 service_drop_in=${systemUnits}/fstrim.service.d/overrides.conf

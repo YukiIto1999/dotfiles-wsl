@@ -1,12 +1,10 @@
 {
-  config,
   pkgs,
   lib,
   ...
 }:
 
 let
-  cfg = config.dotfiles.workstation;
   gibibyte = 1073741824;
   observationTimeoutSeconds = 10;
   maximumJournalGiB = 4;
@@ -16,16 +14,6 @@ let
     warning = 85;
     failure = 95;
   };
-  powershellCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
-  windowsDrives = builtins.listToAttrs (
-    map (
-      name:
-      lib.nameValuePair name {
-        letter = "${lib.toUpper name}:";
-        resourceKey = "windows${lib.toUpper name}Drive";
-      }
-    ) cfg.windowsDrives
-  );
   journal = {
     storage = "persistent";
     maximumBytes = maximumJournalGiB * gibibyte;
@@ -41,58 +29,20 @@ let
       "wsl"
     ];
   };
-  mkWindowsPercentageObservation = import ../package.nix;
-  windowsPercentageObservation =
-    commandName: powershellProbe:
-    mkWindowsPercentageObservation {
-      inherit
-        pkgs
-        lib
-        commandName
-        powershellProbe
-        powershellCommand
-        ;
+in
+{
+  config.dotfiles.health.observations = {
+    "host/windows-drives" = {
+      kind = "numeric-command-threshold-set";
+      checkId = "resource/windows-drives";
+      resourceKey = "windowsDrives";
       timeoutSeconds = observationTimeoutSeconds;
-    };
-  windowsDriveObservations = lib.mapAttrs (
-    name: drive:
-    windowsPercentageObservation "dotfiles-observe-windows-${name}-drive" ''
-      $volume = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='${drive.letter}'"; if ($null -eq $volume -or $volume.Size -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($volume.FreeSpace * 100) / $volume.Size))
-    ''
-  ) windowsDrives;
-  driveObservations = lib.mapAttrs' (
-    name: drive:
-    lib.nameValuePair "host/windows-${name}-drive" {
-      kind = "numeric-command-threshold";
-      checkId = "resource/windows-${name}-drive";
-      inherit (drive) resourceKey;
-      timeoutSeconds = observationTimeoutSeconds;
-      failureMessage = "could not observe Windows ${lib.toUpper name} drive free space";
-      command = windowsDriveObservations.${name};
+      failureMessage = "could not observe Windows drive free space";
+      command = import ./package.nix { inherit pkgs lib; };
       metric = "free-percent";
       warning = 15;
       failure = 10;
-    }
-  ) windowsDrives;
-in
-{
-  options.dotfiles.workstation.windowsDrives = lib.mkOption {
-    type = lib.types.listOf (lib.types.strMatching "[a-z]");
-    description = "この host で観測する Windows drive letter。";
-  };
-
-  config.assertions = [
-    {
-      assertion = cfg.windowsDrives != [ ];
-      message = "dotfiles.workstation.windowsDrives must not be empty";
-    }
-    {
-      assertion = builtins.length cfg.windowsDrives == builtins.length (lib.unique cfg.windowsDrives);
-      message = "dotfiles.workstation.windowsDrives must be unique";
-    }
-  ];
-
-  config.dotfiles.health.observations = driveObservations // {
+    };
     "host/root-filesystem" = {
       kind = "filesystem-threshold";
       checkId = "resource/root-filesystem";

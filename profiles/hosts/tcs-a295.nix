@@ -1,9 +1,4 @@
 {
-  dotfiles.workstation.windowsDrives = [
-    "c"
-    "d"
-  ];
-
   dotfiles.capabilities.enabled = [
     "code-quality"
     "project-memory"

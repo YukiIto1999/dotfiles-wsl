@@ -466,17 +466,6 @@ in
           path = [
             "dotfiles"
             "workstation"
-            "windowsDrives"
-          ];
-          owners = [
-            "profiles"
-            "workstation"
-          ];
-        }
-        {
-          path = [
-            "dotfiles"
-            "workstation"
             "swap"
             "zramMemoryPercent"
           ];

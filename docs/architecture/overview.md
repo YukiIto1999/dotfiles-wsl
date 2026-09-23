@@ -8,7 +8,7 @@
 
 [`flake.nix`](../../flake.nix)は、`module.nix`を持つdirectoryを[`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)で収集し、NixOS-WSL、sops-nix、Home Managerと同じNixOS評価へ渡す。[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加Capabilityを持つ。Skillは選択したCapabilityとSkill依存から導く。`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
 
-host profileの値は`dotfiles.workstation`の型付きoptionを通してowner moduleへ渡す。Windows driveの一覧はhostが宣言し、storage moduleが対応するobservationを生成する。zramは物理memoryに対する割合で算出するため、memory容量そのものは宣言しない。swap容量とWindows committed memoryの閾値だけをhostごとに上書きできる。
+host profileの値は`dotfiles.workstation`の型付きoptionを通してowner moduleへ渡す。Windows driveはhostごとに異なるが宣言せず、storage moduleがWSLのmountから実行時に見つけて観測する。zramは物理memoryに対する割合で算出するため、memory容量そのものは宣言しない。swap容量とWindows committed memoryの閾値だけをhostごとに上書きできる。
 
 ```text
 checkout

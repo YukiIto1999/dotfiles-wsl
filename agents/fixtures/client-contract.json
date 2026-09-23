@@ -149,7 +149,7 @@
         "project": {
           "format": "toml",
           "deployment": "home",
-          "destination": "dotfiles-wsl/.codex/config.toml"
+          "destination": "environment/dotfiles-wsl/.codex/config.toml"
         },
         "system": {
           "format": "toml",

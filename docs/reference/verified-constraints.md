@@ -102,7 +102,7 @@
 | source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない | `agent-verification-cache` |
 | agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |
 | agent が作った worktree だけを登録し、clean、HEAD 不変、未使用の場合だけ隔離と再検査後に回収する | `agent-resource-behavior` |
-| 作業日誌が区切り時刻から翌日の区切り時刻までの利用者の指示、応答、tool の意図、commit だけを model へ渡し、thinking、tool の結果、subagent の記録、範囲外の entry を渡さず、host ごとの file を push する。同じ日を作り直しても内容が同じなら commit を増やさず、timer は最後に完了した日までの未作成の日だけを選ぶ。model が失敗した日は file を作らずに後の日を記録して非ゼロで終わり、次の実行でその日を作る | `agent-journal-behavior` |
+| 作業日誌が区切り時刻から翌日の区切り時刻までの利用者の指示、応答、tool の意図、commit だけを model へ渡し、thinking、tool の結果、subagent の記録、範囲外の entry を渡さず、host ごとの file を push する。同じ日を作り直しても内容が同じなら commit を増やさず、timer は最後に完了した日までの未作成の日だけを選ぶ。model が失敗した日は file を作らずに後の日を記録して非ゼロで終わり、次の実行でその日を作る。一時 directory が Git の work tree の中にあれば model を呼ばない | `agent-journal-behavior` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | WSL の extraBin に必須の名前が揃い、名前が重複せず、store 由来の entry が実行可能である | `wsl-extra-bin-contract` |
 | local と plugin の全 Skill の SKILL.md が frontmatter を持ち、name が directory 名と一致し、description が空でない | `skill-frontmatter-contract` |

@@ -90,6 +90,26 @@ let
     text = "head -c 65 /dev/zero | tr '\\0' 1";
   };
   numericNoiseCommand = mkOutputCommand "fixture-numeric-noise" "20\njunk";
+  numericSetPassCommand = mkOutputCommand "fixture-numeric-set-pass" "c 20\nd 30";
+  numericSetWarnCommand = mkOutputCommand "fixture-numeric-set-warn" "c 10";
+  numericSetFailCommand = mkOutputCommand "fixture-numeric-set-fail" "c 9\nd 5";
+  numericSetUsedCommand = mkOutputCommand "fixture-numeric-set-used" "c 90\nd 96";
+  # 同じ名前の重複、ID に使えない名前、範囲外、雑音、過大、非ゼロ終了は、どれも observation 全体の失敗にする
+  numericSetInvalidCommands = {
+    empty = mkOutputCommand "fixture-numeric-set-empty" "";
+    duplicate = mkOutputCommand "fixture-numeric-set-duplicate" "c 20\nc 30";
+    uppercase = mkOutputCommand "fixture-numeric-set-uppercase" "C 20";
+    range = mkOutputCommand "fixture-numeric-set-range" "c 101";
+    noise = mkOutputCommand "fixture-numeric-set-noise" "c 20\njunk";
+    oversize = pkgs.writeShellApplication {
+      name = "fixture-numeric-set-oversize";
+      text = "for index in {1..1000}; do printf 'd%s 20\\n' \"$index\"; done";
+    };
+    nonzero = pkgs.writeShellApplication {
+      name = "fixture-numeric-set-nonzero";
+      text = "printf 'c 20\\n'; exit 3";
+    };
+  };
 
   normalizedPassEnvelope = {
     schemaVersion = 1;
@@ -363,6 +383,13 @@ let
       url = "http://127.0.0.1/health-pass";
     };
     "fixture/18-normalized" = normalizedValue normalizedPassCommand;
+    "fixture/19-numeric-set" = common "numeric-set" "numeric-command-threshold-set" // {
+      command = lib.getExe numericSetPassCommand;
+      metric = "free-percent";
+      warning = 15;
+      failure = 10;
+      resourceKey = "fixtureNumericSet";
+    };
   };
   failureValues = passValues // {
     "fixture/01-roster" = passValues."fixture/01-roster" // {
@@ -427,6 +454,9 @@ let
       url = "http://127.0.0.1/health-fail";
     };
     "fixture/18-normalized" = normalizedValue normalizedFailCommand;
+    "fixture/19-numeric-set" = passValues."fixture/19-numeric-set" // {
+      command = lib.getExe numericSetFailCommand;
+    };
   };
   zramPathDoctor =
     mkFixtureDoctorWithTools
@@ -471,6 +501,10 @@ let
     "fixture/04-restart-container" = passValues."fixture/11-restart-container" // {
       checkId = "fixture/warn-container";
       target = "container-warn";
+    };
+    "fixture/05-numeric-set" = passValues."fixture/19-numeric-set" // {
+      checkId = "fixture/warn-numeric-set";
+      command = lib.getExe numericSetWarnCommand;
     };
   };
 
@@ -517,6 +551,25 @@ let
       command = lib.getExe numericNoiseCommand;
     };
   };
+  numericSetUsedDoctor = mkFixtureDoctor {
+    "fixture/numeric-set-used" = passValues."fixture/19-numeric-set" // {
+      checkId = "fixture/numeric-set-used";
+      command = lib.getExe numericSetUsedCommand;
+      metric = "used-percent";
+      warning = 85;
+      failure = 95;
+      resourceKey = "fixtureNumericSetUsed";
+    };
+  };
+  numericSetInvalidDoctors = lib.mapAttrs (
+    name: command:
+    mkFixtureDoctor {
+      "fixture/numeric-set-invalid-${name}" = passValues."fixture/19-numeric-set" // {
+        checkId = "fixture/numeric-set-invalid-${name}";
+        command = lib.getExe command;
+      };
+    }
+  ) numericSetInvalidCommands;
   filesystemFreeDoctor = mkFixtureDoctor {
     "fixture/filesystem-free" = passValues."fixture/12-filesystem" // {
       checkId = "fixture/filesystem-free";
@@ -713,6 +766,8 @@ in
     managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
+    numericSetInvalidDoctors
+    numericSetUsedDoctor
     zramInvalidPathDoctor
     zramPathDoctor
     passDoctor

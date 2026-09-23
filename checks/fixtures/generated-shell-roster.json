@@ -3,6 +3,7 @@
     "dotfiles-memory"
   ],
   "commands": {
+    "agentJournal": "dotfiles-agent-journal",
     "agentResource": "dotfiles-agent-resource",
     "agentWorktree": "dotfiles-agent-worktree",
     "cleanup": "dotfiles-cleanup",

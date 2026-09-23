@@ -10,7 +10,7 @@
 |---|---|---|
 | 全hostで有効なidentity、Agent、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `nix flake check`、`dotfiles-rebuild --plan` |
 | hostを登録し、Windows drive、swap、Windows committed memory、host固有Capabilityを変える | [`profiles/hosts/`](../../profiles/hosts)のhost名と同じNix file。optionの意味と既定値は[`workstation/storage/module.nix`](../../workstation/storage/module.nix)、[`workstation/stability/module.nix`](../../workstation/stability/module.nix)、[`capabilities/module.nix`](../../capabilities/module.nix) | `machine-profile-contract`、`container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
-| username、home、checkout pathを変える | [`workstation/module.nix`](../../workstation/module.nix)の`dotfiles.workstation` | identity migrationとして扱い、通常rebuildと混ぜない |
+| username、home、checkout path、環境系repositoryの置き場所を変える | [`workstation/module.nix`](../../workstation/module.nix)の`dotfiles.workstation` | identity migrationとして扱い、通常rebuildと混ぜない |
 | Nix binary cacheを増減する | [`workstation/nix/assets/nix-caches.nix`](../../workstation/nix/assets/nix-caches.nix) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 時刻とlocaleを変える | [`workstation/locale/module.nix`](../../workstation/locale/module.nix) | `host-locale-contract`、`dotfiles-rebuild` |
 | PATH上の汎用toolを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
@@ -47,6 +47,7 @@
 | project memoryのruntime、client integration、engine、MCP、backendを変える | [`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)とgeneric optionを宣言するCapability module | `project-memory-runtime-behavior`、`project-memory-client-integration`、`hindsight-container`、`hindsight-front` |
 | session、build cache、verification reuseを変える | [`agents/impl/runtime/`](../../agents/impl/runtime)と[`agents/module.nix`](../../agents/module.nix) | 対応するruntime focused check |
 | linked worktreeの登録と回収を変える | [`agents/impl/resource/`](../../agents/impl/resource)と[`agents/module.nix`](../../agents/module.nix) | `agent-resource-contract`、`agent-resource-behavior` |
+| 作業日誌の時間帯、model、入力、出力先を変える | [`agents/journal/`](../../agents/journal) | `agent-journal-behavior`、`dotfiles-rebuild` |
 
 ## MCP、container、Capability実装
 

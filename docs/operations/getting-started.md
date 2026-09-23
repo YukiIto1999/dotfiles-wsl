@@ -58,16 +58,14 @@ sudo bash workstation/activation/rebuild/impl/bootstrap.sh --host "$HOST_ID"
 
 | 順序 | 処理 |
 |---|---|
-| 1 | enrollment、rebuild、bootstrap が共有する operation lock を取得する |
-| 2 | active な enrollment がないことを確認する |
-| 3 | active な rebuild がないことを確認する |
-| 4 | root の Git `safe.directory` に checkout を登録する |
-| 5 | flake、lock、暗号化済み secrets、host key の存在と host key の owner、mode を検査する |
-| 6 | flake build から見えない未追跡ファイルがないことを確認する |
-| 7 | host key で `secrets/sops/assets/secrets.json` を復号できることを確認する |
-| 8 | 選択した host 構成の AI CLI を upstream から `~/.local/bin` へ配置する |
-| 9 | 選択した host 構成と flake が固定した `nixos-rebuild` で boot generation を作る |
-| 10 | `/etc/nixos` を `~/dotfiles-wsl` への symlink にする |
+| 1 | root として実行され、`sudo` の実行元が `nixos` ユーザーであることを確認する |
+| 2 | root の Git `safe.directory` に checkout を登録する |
+| 3 | flake、lock、暗号化済み secrets、host key の存在と host key の owner、mode を検査する |
+| 4 | flake build から見えない未追跡ファイルがないことを確認する |
+| 5 | host key で `secrets/sops/assets/secrets.json` を復号できることを確認する |
+| 6 | 選択した host 構成の AI CLI を upstream から `~/.local/bin` へ配置する |
+| 7 | 選択した host 構成と flake が固定した `nixos-rebuild` で boot generation を作る |
+| 8 | `/etc/nixos` を `~/dotfiles-wsl` への symlink にする |
 
 ## 初回同期
 

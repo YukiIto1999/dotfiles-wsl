@@ -15,6 +15,8 @@ let
     managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
+    numericSetInvalidDoctors
+    numericSetUsedDoctor
     poisonDoctor
     passDoctor
     releaseDirectoryDoctor
@@ -71,7 +73,9 @@ in
             {id:"fixture/journal",status:"pass"},
             {id:"fixture/container-image",status:"pass"},
             {id:"fixture/http-health",status:"pass"},
-            {id:"fixture/protocol",status:"pass"}
+            {id:"fixture/protocol",status:"pass"},
+            {id:"fixture/numeric-set/c",status:"pass"},
+            {id:"fixture/numeric-set/d",status:"pass"}
           ]
           and .warnings == []
           and .failures == []
@@ -81,6 +85,7 @@ in
             fixtureJournal:{bytes:1024},
             managedRoots:[{path:"/fixture/root-ok",bytes:42}],
             fixtureProtocol:{state:"ok"},
+            fixtureNumericSet:[{name:"c",freePercent:20},{name:"d",freePercent:30}],
             serviceRestarts:[{unit:"service-ok.service",count:0}],
             containerRestarts:[{container:"container-ok",count:0}],
             fixtureSwap:{
@@ -135,9 +140,11 @@ in
         set -e
         test "$failure_status" -eq 1
         jq -e '
-          (.checks | length) == 20
+          (.checks | length) == 22
           and all(.checks[]; .status == "fail")
-          and (.failures | length) == 20
+          and (.failures | length) == 22
+          and ([.failures[] | select(.id == "fixture/numeric-set/c" or .id == "fixture/numeric-set/d") | .message]
+            == ["free-percent crossed its fail threshold","free-percent crossed its fail threshold"])
           and .warnings == []
           and .resources.managedRoots == [{path:"/fixture/root-ok",bytes:42}]
           and .resources.serviceRestarts == []
@@ -148,9 +155,10 @@ in
 
         warning_output=$(${lib.getExe warningDoctor} --json)
         jq -e '
-          (.checks | length) == 4
+          (.checks | length) == 5
           and all(.checks[]; .status == "warn")
-          and (.warnings | length) == 4
+          and (.warnings | length) == 5
+          and any(.warnings[]; . == {id:"fixture/warn-numeric-set/c",message:"free-percent crossed its warn threshold"})
           and .failures == []
           and .resources.serviceRestarts == [{unit:"service-warn.service",count:5}]
           and .resources.containerRestarts == [{container:"container-warn",count:5}]
@@ -302,6 +310,37 @@ in
           .checks == [{id:"fixture/numeric-noise",status:"fail"}]
           and .failures == [{id:"fixture/numeric-noise",message:"fixture numeric failed"}]
         ' <<<"$numeric_noise_output" >/dev/null
+
+        set +e
+        numeric_set_used_output=$(${lib.getExe numericSetUsedDoctor} --json)
+        numeric_set_used_status=$?
+        set -e
+        test "$numeric_set_used_status" -eq 1
+        jq -e '
+          .checks == [
+            {id:"fixture/numeric-set-used/c",status:"warn"},
+            {id:"fixture/numeric-set-used/d",status:"fail"}
+          ]
+          and .warnings == [{id:"fixture/numeric-set-used/c",message:"used-percent crossed its warn threshold"}]
+          and .failures == [{id:"fixture/numeric-set-used/d",message:"used-percent crossed its fail threshold"}]
+          and .resources.fixtureNumericSetUsed == [{name:"c",usedPercent:90},{name:"d",usedPercent:96}]
+        ' <<<"$numeric_set_used_output" >/dev/null
+
+        ${lib.concatStringsSep "\n" (
+          lib.mapAttrsToList (name: doctor: ''
+            set +e
+            numeric_set_invalid_output=$(${lib.getExe doctor} --json)
+            numeric_set_invalid_status=$?
+            set -e
+            test "$numeric_set_invalid_status" -eq 1
+            jq -e '
+              .checks == [{id:"fixture/numeric-set-invalid-${name}",status:"fail"}]
+              and .warnings == []
+              and .failures == [{id:"fixture/numeric-set-invalid-${name}",message:"fixture numeric-set failed"}]
+              and .resources == {serviceRestarts:[],containerRestarts:[]}
+            ' <<<"$numeric_set_invalid_output" >/dev/null
+          '') numericSetInvalidDoctors
+        )}
 
         filesystem_free_output=$(${lib.getExe filesystemFreeDoctor} --json)
         jq -e '

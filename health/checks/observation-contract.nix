@@ -18,6 +18,10 @@ let
       expectedName = "fixture-numeric-command-threshold-command";
     }
     {
+      command = fixture.valid."host/numeric-command-threshold-set".command;
+      expectedName = "fixture-numeric-command-threshold-set-command";
+    }
+    {
       command = fixture.valid."host/normalized-protocol".command;
       expectedName = "fixture-normalized-protocol-command";
     }
@@ -115,6 +119,12 @@ let
         name = "numeric-command:${name}";
         registry = replaceObservation "host/numeric-command-threshold" (
           fixture.valid."host/numeric-command-threshold" // { inherit command; }
+        );
+      }
+      {
+        name = "numeric-set-command:${name}";
+        registry = replaceObservation "host/numeric-command-threshold-set" (
+          fixture.valid."host/numeric-command-threshold-set" // { inherit command; }
         );
       }
       {
@@ -277,7 +287,7 @@ let
 in
 {
   observation-contract =
-    assert builtins.length (builtins.attrNames fixture.valid) == 18;
+    assert builtins.length (builtins.attrNames fixture.valid) == 19;
     assert evaluationSucceeds validEvaluation;
     assert evaluationSucceeds (evalRegistry { });
     assert evaluationSucceeds optionalCommonEvaluation;
@@ -287,9 +297,9 @@ in
     assert optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".checkId == null;
     assert
       optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".resourceKey == null;
-    assert builtins.length missingRequiredCases == 120;
-    assert builtins.length kindReplacementCases == 306;
-    assert builtins.length invalidCommandCases == 18;
+    assert builtins.length missingRequiredCases == 127;
+    assert builtins.length kindReplacementCases == 342;
+    assert builtins.length invalidCommandCases == 27;
     assert lib.all (
       projection:
       projection.command.meta.mainProgram == projection.expectedName

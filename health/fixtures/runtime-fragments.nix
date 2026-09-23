@@ -244,6 +244,52 @@ let
           inherit (normalizedPassEnvelope) resources;
         };
     };
+    # 集合の kind だけが「<checkId>/<名前>」の check を返せる
+    direct-item-check-id.fragment =
+      id:
+      validFragment
+      // {
+        checks = [
+          {
+            inherit id;
+            status = "pass";
+          }
+          {
+            id = "${id}/c";
+            status = "pass";
+          }
+        ];
+      };
+    set-foreign-item = {
+      set = true;
+      fragment = _: passFragment "fixture/elsewhere/c";
+    };
+    set-invalid-item-name = {
+      set = true;
+      fragment = id: passFragment "${id}/C";
+    };
+    set-without-checks = {
+      set = true;
+      fragment = _: validFragment;
+    };
+    set-mixes-fallback-and-item = {
+      set = true;
+      fragment =
+        id:
+        validFragment
+        // {
+          checks = [
+            {
+              inherit id;
+              status = "pass";
+            }
+            {
+              id = "${id}/c";
+              status = "pass";
+            }
+          ];
+        };
+    };
     nonrestart-restart-injection.fragment =
       id:
       passFragment id
@@ -344,6 +390,8 @@ let
       baseObservation =
         if fixture.normalized or false then
           normalizedValue normalizedPassCommand
+        else if fixture.set or false then
+          passValues."fixture/19-numeric-set"
         else
           passValues."fixture/01-roster";
       observation =

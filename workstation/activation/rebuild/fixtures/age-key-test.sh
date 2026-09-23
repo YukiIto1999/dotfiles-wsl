@@ -163,9 +163,7 @@ if (preflight >/dev/null 2>&1); then
   exit 1
 fi
 
-# main と同じ stage runner が operation lock を activation 完了まで保持する。
-[[ -z ${DOTFILES_OPERATION_DIRECTORY_LOCK_FD:-} &&
-  -z ${DOTFILES_OPERATION_LEGACY_LOCK_FD:-} ]]
+# main と同じ stage runner が、宣言した順に全 stage を実行する。
 bootstrap_stage_log=$test_root/bootstrap-stages.log
 bootstrap_rebuild_ready=$test_root/bootstrap-rebuild.ready
 bootstrap_rebuild_release=$test_root/bootstrap-rebuild.release

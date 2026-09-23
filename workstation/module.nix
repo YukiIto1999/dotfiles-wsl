@@ -27,6 +27,12 @@ in
       description = "out-of-store symlink と script が参照する checkout の絶対パス。";
     };
 
+    environmentDir = lib.mkOption {
+      type = lib.types.str;
+      default = "${cfg.homeDir}/environment";
+      description = "dotfiles と一緒に手入れする環境系 repository を並べる directory の絶対パス。";
+    };
+
     binaryCaches = lib.mkOption {
       type = lib.types.listOf (
         lib.types.submodule {

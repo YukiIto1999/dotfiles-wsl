@@ -137,6 +137,7 @@
       # port を持たないと宣言した unit。増えるときは必ずこの表に現れる
       withoutListener = [
         "dotfiles-agent-autoupdate"
+        "dotfiles-agent-journal"
         "dotfiles-agent-project-cache-gc"
         "dotfiles-agent-resource-reaper"
         "dotfiles-wsl-memory-reclaim"

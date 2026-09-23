@@ -291,7 +291,7 @@ let
     activeStates = [ "active" ];
     serviceResults = [ "success" ];
   };
-  expectedAgentObservations = {
+  expectedRuntimeObservations = {
     "agents/roster" = commonAgentObservation "agent-roster" null "agent roster is empty" // {
       kind = "roster";
       members = agentConfig.enabled;
@@ -323,12 +323,22 @@ let
   // lib.mapAttrs' (
     name: client: lib.nameValuePair "agents/client/${name}" (expectedClientObservation name client)
   ) clients;
-  agentObservationDefinitions = builtins.filter (
-    definition: lib.hasSuffix "/agents/module.nix" (toString definition.file)
-  ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
-  agentDefinitionKeys = lib.unique (
-    lib.concatMap (definition: builtins.attrNames definition.value) agentObservationDefinitions
-  );
+  # agents root の keyspace は runtime contract と作業日誌の timer で閉じる。どちらでもない key は stale として落とす
+  expectedJournalObservations = {
+    "agents/maintenance/journal" = timerObservation "dotfiles-agent-journal";
+  };
+  expectedAgentObservations = expectedRuntimeObservations // expectedJournalObservations;
+  definitionKeysIn =
+    suffix:
+    lib.unique (
+      lib.concatMap (definition: builtins.attrNames definition.value) (
+        builtins.filter (
+          definition: lib.hasSuffix suffix (toString definition.file)
+        ) hostOptions.dotfiles.health.observations.definitionsWithLocations
+      )
+    );
+  agentDefinitionKeys = definitionKeysIn "/agents/module.nix";
+  journalDefinitionKeys = definitionKeysIn "/agents/journal/module.nix";
   runtimeConfiguration = configuration: {
     runtime = configuration.dotfiles.agents.runtime;
     services = lib.genAttrs [
@@ -518,8 +528,11 @@ in
       && agentObservations == expectedAgentObservations
     ) "agent runtime observation registry is incomplete";
     assert lib.assertMsg (
-      agentDefinitionKeys == builtins.attrNames expectedAgentObservations
+      agentDefinitionKeys == builtins.attrNames expectedRuntimeObservations
     ) "agent observations must be defined by the agents owner";
+    assert lib.assertMsg (
+      journalDefinitionKeys == builtins.attrNames expectedJournalObservations
+    ) "the journal observation must be defined by the journal unit";
     assert lib.assertMsg
       (agentRuntimeContractMatches expectedRuntimeConfiguration hostConfig.dotfiles.health.observations)
       "agent runtime contract is not wired to observations, packages, services, or timers";

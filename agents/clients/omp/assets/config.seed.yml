@@ -1,8 +1,8 @@
 modelRoles:
-  tiny: google-antigravity/gemini-3.1-flash-lite:high
-  default: google-antigravity/gemini-3.8-flash-tiered:high
-  advisor: google-antigravity/gemini-3.8-flash-tiered:high
-  dev: anthropic/claude-opus-5:xhigh
+  tiny: opencode-go/deepseek-v4.1-flash:high
+  default: anthropic/claude-opus-5-5:xhigh
+  advisor: google-antigravity/gemini-3.8-flash:high
+  dev: anthropic/claude-opus-5-5:xhigh
 symbolPreset: nerd
 composer:
   shape: band
@@ -15,21 +15,17 @@ providers:
   webSearchOrder:
     []
   anthropic:
-    serverSideFallback: true
+    serverSideFallback: false
 retry:
   fallbackChains:
-    planner:
+    tiny:
+      - google-antigravity/gemini-3.8-flash:high
+    advisor:
+      - opencode-go/deepseek-v4.1-flash:high
+    anthropic/claude-opus-5-5:xhigh:
       - openai-codex/gpt-5.6-sol:xhigh
-    architect:
-      - openai-codex/gpt-5.6-sol:xhigh
-    reviewer:
-      - anthropic/claude-fable-5:xhigh
-    security:
-      - anthropic/claude-fable-5:xhigh
-    implementer:
-      - anthropic/claude-sonnet-5:xhigh
-    anthropic/claude-opus-5:xhigh:
-      - openai-codex/gpt-5.6-terra:xhigh
+    openai-codex/gpt-5.6-sol:xhigh:
+      - anthropic/claude-opus-5-5:xhigh
   modelFallback: true
   usageAwareFallback: true
 dev:
@@ -47,12 +43,8 @@ bashInterceptor:
 task:
   prewalk: false
   agentModelOverrides:
-    planner: anthropic/claude-fable-5:xhigh
-    architect: anthropic/claude-fable-5:xhigh
     reviewer: openai-codex/gpt-5.6-sol:xhigh
     security: openai-codex/gpt-5.6-sol:xhigh
-    implementer: openai-codex/gpt-5.6-luna:xhigh
-    explorer: google-antigravity/gemini-3.8-flash-tiered:high
   showResolvedModelBadge: true
   enableLsp: true
 model:

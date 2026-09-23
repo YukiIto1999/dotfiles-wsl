@@ -17,10 +17,11 @@ recovery 鍵は host 鍵を失ったときの唯一の復元手段になる。**
 
 ## secret を編集する
 
+checkout の root で実行する。
+
 ```sh
 sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops --config ~/dotfiles-wsl/secrets/sops/assets/.sops.yaml \
-  ~/dotfiles-wsl/secrets/sops/assets/secrets.json
+  sops --config secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
 dotfiles-rebuild
 ```
 

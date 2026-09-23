@@ -39,7 +39,7 @@
 | MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |
 | MCP target、front、gateway から service、restart、roster、protocol observation を漏れなく導き、追加、削除、変更、stale entry に追随する | `mcp-runtime-observation-contract` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
-| generation がない状態から対象 host を明示し、age 鍵を使ってその host の Agent と boot generation を作り、鍵 path が宣言と一致する | `bootstrap-age-key` |
+| generation がない状態から対象 host を明示し、age 鍵を使ってその host の Agent と boot generation を作り、鍵 path が宣言と一致する。bootstrap は自分の置き場所から checkout を決め、`sudo` の実行元ユーザーか checkout が host の宣言と異なれば止まる | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | stdio service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
 | service lifecycle front と native Streamable HTTP front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |

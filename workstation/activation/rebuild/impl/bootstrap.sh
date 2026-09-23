@@ -13,6 +13,18 @@ parse_target_host() {
   printf '%s\n' "$2"
 }
 
+# この script は checkout の workstation/activation/rebuild/impl/ に置かれる
+checkout_root() {
+  local script_dir
+  script_dir=$(cd -- "$(dirname -- "$1")" && pwd -P) || return 1
+  (cd -- "${script_dir}/../../../.." && pwd -P)
+}
+
+host_setting() {
+  nix eval --raw --no-write-lock-file \
+    "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.workstation.$1"
+}
+
 container_sync_required() {
   nix eval --raw --no-write-lock-file \
     "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.containers.enabled" \
@@ -49,9 +61,8 @@ MSG
 trap 'die "line ${LINENO}: ${BASH_COMMAND}"' ERR
 
 ensure_root() {
-  [[ ${EUID} -eq 0 ]]     || die "run as root (sudo bash bootstrap/impl/bootstrap.sh)"
-  [[ -n ${SUDO_USER:-} ]] || die "SUDO_USER must be set (invoke via sudo from nixos)"
-  [[ ${SUDO_USER} == "${TARGET_USER}" ]] || die "run via sudo from ${TARGET_USER}; current SUDO_USER=${SUDO_USER}"
+  [[ ${EUID} -eq 0 ]]     || die "run as root (sudo bash workstation/activation/rebuild/impl/bootstrap.sh)"
+  [[ -n ${SUDO_USER:-} ]] || die "SUDO_USER must be set (invoke via sudo from the host's primary user)"
 }
 
 preflight() {
@@ -79,6 +90,19 @@ preflight() {
   [[ $(stat -c '%a' -- "${AGE_KEY}") == 400 ]] \
     || die "${AGE_KEY} must have mode 0400"
   step "preflight complete"
+}
+
+verify_host_identity() {
+  local username dotfiles_dir
+  username=$(host_setting username) \
+    || die "failed to evaluate dotfiles.workstation.username for ${TARGET_HOST}"
+  dotfiles_dir=$(host_setting dotfilesDir) \
+    || die "failed to evaluate dotfiles.workstation.dotfilesDir for ${TARGET_HOST}"
+  [[ ${SUDO_USER} == "${username}" ]] \
+    || die "run via sudo from ${username}; current SUDO_USER=${SUDO_USER}"
+  [[ ${DOTFILES} == "${dotfiles_dir}" ]] \
+    || die "${TARGET_HOST} declares the checkout at ${dotfiles_dir}; this bootstrap runs from ${DOTFILES}"
+  step "host user and checkout match ${TARGET_HOST}"
 }
 
 register_safe_directories() {
@@ -155,6 +179,7 @@ run_bootstrap_stages() {
 declare -ar BOOTSTRAP_STAGES=(
   register_safe_directories
   preflight
+  verify_host_identity
   verify_tracked_flake_files
   verify_secrets
   install_agent_clients
@@ -167,10 +192,10 @@ main() {
   TARGET_HOST=$(parse_target_host "$@") \
     || die "usage: sudo bash workstation/activation/rebuild/impl/bootstrap.sh --host <host-id>"
   readonly TARGET_HOST
-  # config 生成前に実行するため dotfiles.workstation.username を参照できない。既定値と同じ "nixos" を使う
-  local -r TARGET_USER="nixos"
-  local -r USER_HOME="/home/${TARGET_USER}"
-  local -r DOTFILES="${USER_HOME}/dotfiles-wsl"
+  local DOTFILES
+  DOTFILES=$(checkout_root "${BASH_SOURCE[0]}") \
+    || die "failed to resolve the checkout containing bootstrap.sh"
+  readonly DOTFILES
   local -r SOPS_CONFIG="${DOTFILES}/secrets/sops/assets/.sops.yaml"
   local -r SECRETS_FILE="${DOTFILES}/secrets/sops/assets/secrets.json"
   local -r AGE_KEY="/var/lib/sops-nix/key.txt"

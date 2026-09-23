@@ -204,6 +204,7 @@ let
     "managed-roots"
     "normalized-protocol"
     "numeric-command-threshold"
+    "numeric-command-threshold-set"
     "path-match"
     "path-metadata"
     "release-tree"

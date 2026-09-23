@@ -115,7 +115,7 @@ doctor が成功し、`git status --short` に暗号化済みファイル二つ�
 
 別ホストでも clone から検証まで同じ順序を使い、ホストごとに登録済みの host ID と新しい host key を使う。既存ホストの `/var/lib/sops-nix/key.txt` や `~/.config/sops/age/keys.txt` はコピーしない。
 
-Windows drive の一覧は対応する [`profiles/hosts/`](../../profiles/hosts) の profile に置く。memory と swap の既定値は実装側の共通方針で、差が必要な host だけ同じ profile から `dotfiles.workstation.swap` または `dotfiles.workstation.windowsMemoryCommit` を上書きする。
+memory と swap の既定値は実装側の共通方針で、差が必要な host だけ対応する [`profiles/hosts/`](../../profiles/hosts) の profile から `dotfiles.workstation.swap` または `dotfiles.workstation.windowsMemoryCommit` を上書きする。Windows drive は profile に書かない。doctor が WSL の mount から実行時に見つける。
 
 全host共通のCapabilityは[`profiles/workstation.nix`](../../profiles/workstation.nix)、containerを含むhost固有のCapabilityは同じhost profileの`dotfiles.capabilities.enabled`で選ぶ。`code-quality`、`project-memory`、`web-content`、`web-discovery`を外すと、対応するcontainerだけでなくMCP target、credential、health observation、client integrationも配備されない。container backendを一つも選ばないhostではDocker自体を配備しない。
 

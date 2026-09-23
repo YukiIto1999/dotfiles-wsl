@@ -49,6 +49,7 @@ let
           "yaml"
           "markdown"
           "text"
+          "directory"
         ];
       };
       deployment = lib.mkOption {

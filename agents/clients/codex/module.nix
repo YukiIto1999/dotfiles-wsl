@@ -8,7 +8,7 @@
 let
   cfg = config.dotfiles;
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
-  codexModel = "gpt-5.6-sol";
+  codexModel = "gpt-6-sol";
   dotfilesHomeRelative = lib.removePrefix "${cfg.workstation.homeDir}/" cfg.workstation.dotfilesDir;
   dotfilesPathComponents = lib.splitString "/" dotfilesHomeRelative;
   dotfilesDirIsBelowHome =

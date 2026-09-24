@@ -23,8 +23,8 @@ retry:
     advisor:
       - opencode-go/deepseek-v4.1-flash:high
     anthropic/claude-opus-5-5:xhigh:
-      - openai-codex/gpt-5.6-sol:xhigh
-    openai-codex/gpt-5.6-sol:xhigh:
+      - openai-codex/gpt-6-sol:xhigh
+    openai-codex/gpt-6-sol:xhigh:
       - anthropic/claude-opus-5-5:xhigh
   modelFallback: true
   usageAwareFallback: true
@@ -43,8 +43,8 @@ bashInterceptor:
 task:
   prewalk: false
   agentModelOverrides:
-    reviewer: openai-codex/gpt-5.6-sol:xhigh
-    security: openai-codex/gpt-5.6-sol:xhigh
+    reviewer: openai-codex/gpt-6-sol:xhigh
+    security: openai-codex/gpt-6-sol:xhigh
   showResolvedModelBadge: true
   enableLsp: true
 model:

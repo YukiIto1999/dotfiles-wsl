@@ -57,6 +57,16 @@ allocated_bytes() {
   du -s -B1 -- "$1" | cut -f 1
 }
 
+expect_unresolved() {
+  local log=$1
+  shift
+  if "$@" 2>"$log"; then
+    echo "GC reported success while orphan sessions remained unresolved: $log" >&2
+    exit 1
+  fi
+  grep -Fq 'orphan sessions remain unresolved' "$log"
+}
+
 stale_id=$(printf stale | sha256sum | cut -d ' ' -f 1)
 recent_id=$(printf recent | sha256sum | cut -d ' ' -f 1)
 active_id=$(printf active | sha256sum | cut -d ' ' -f 1)
@@ -179,21 +189,14 @@ make_cache "$mutation_home" "$active_id" 1 32
 make_shared_cache "$mutation_home" 32
 mutation_high=$(($(allocated_bytes "$mutation_home/.cache/dotfiles-wsl/shared") - 1))
 mutation_marker=$mutation_home/mutated
-set +e
 HOME=$mutation_home DOTFILES_AGENT_TEST_GC_MUTATION_MODE=restore \
   DOTFILES_AGENT_TEST_GC_MUTATION_PROJECT_ID="$mutation_project_id" \
   DOTFILES_AGENT_TEST_GC_MUTATION_MARKER="$mutation_marker" \
   DOTFILES_AGENT_GC_HIGH_BYTES=$mutation_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$MUTATION_GC" 2>"$mutation_home/gc.log"
-mutation_status=$?
-set -e
+  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$mutation_home/gc.log" "$MUTATION_GC"
 test -e "$mutation_marker"
-if [ "$mutation_status" -ne 0 ]; then
-  echo "GC terminated after restoring a mutated session (status $mutation_status)" >&2
-  exit 1
-fi
 if [ ! -d "$mutation_home/.cache/dotfiles-wsl/sessions/mutated-session" ]; then
-  echo "GC stranded a session after quarantine revalidation failure (status $mutation_status)" >&2
+  echo "GC stranded a session after quarantine revalidation failure" >&2
   exit 1
 fi
 test "$(jq -r '.project_id' \
@@ -217,19 +220,12 @@ make_shared_cache "$blocked_restore_home" 32
 blocked_restore_high=$(($(allocated_bytes \
   "$blocked_restore_home/.cache/dotfiles-wsl/shared") - 1))
 blocked_restore_marker=$blocked_restore_home/mutated
-set +e
 HOME=$blocked_restore_home DOTFILES_AGENT_TEST_GC_MUTATION_MODE=block-restore \
   DOTFILES_AGENT_TEST_GC_MUTATION_PROJECT_ID="$mutation_project_id" \
   DOTFILES_AGENT_TEST_GC_MUTATION_MARKER="$blocked_restore_marker" \
   DOTFILES_AGENT_GC_HIGH_BYTES=$blocked_restore_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$MUTATION_GC" 2>"$blocked_restore_home/gc.log"
-blocked_restore_status=$?
-set -e
+  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$blocked_restore_home/gc.log" "$MUTATION_GC"
 test -e "$blocked_restore_marker"
-if [ "$blocked_restore_status" -ne 0 ]; then
-  echo "GC terminated after a failed quarantine restore (status $blocked_restore_status)" >&2
-  exit 1
-fi
 test -d "$blocked_restore_home/.cache/dotfiles-wsl/sessions/blocked-session"
 test ! -e "$blocked_restore_home/.cache/dotfiles-wsl/sessions/blocked-session/metadata.json"
 test -n "$(find "$blocked_restore_home/.cache/dotfiles-wsl/sessions" \
@@ -237,12 +233,12 @@ test -n "$(find "$blocked_restore_home/.cache/dotfiles-wsl/sessions" \
 test -e "$blocked_restore_home/.cache/dotfiles-wsl/builds/$active_id/payload/file-0"
 test -e "$blocked_restore_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
 grep -Fq 'cannot restore quarantined session' "$blocked_restore_home/gc.log" || {
-  echo "GC omitted the failed-restore diagnostic (status $blocked_restore_status)" >&2
+  echo "GC omitted the failed-restore diagnostic" >&2
   exit 1
 }
 rmdir "$blocked_restore_home/.cache/dotfiles-wsl/sessions/blocked-session"
 HOME=$blocked_restore_home DOTFILES_AGENT_GC_HIGH_BYTES=$blocked_restore_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC" 2>"$blocked_restore_home/second-gc.log"
+  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$blocked_restore_home/second-gc.log" "$GC"
 if [ ! -e "$blocked_restore_home/.cache/dotfiles-wsl/builds/$active_id/payload/file-0" ]; then
   echo 'GC removed a project cache while an unresolved quarantine remained' >&2
   exit 1
@@ -283,7 +279,7 @@ make_shared_cache "$invalid_quarantine_home" 32
 invalid_quarantine_high=$(($(allocated_bytes \
   "$invalid_quarantine_home/.cache/dotfiles-wsl/shared") - 1))
 HOME=$invalid_quarantine_home DOTFILES_AGENT_GC_HIGH_BYTES=$invalid_quarantine_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC" 2>"$invalid_quarantine_home/gc.log"
+  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$invalid_quarantine_home/gc.log" "$GC"
 test -d \
   "$invalid_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
 test -e "$invalid_quarantine_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
@@ -291,24 +287,47 @@ test -e \
   "$invalid_quarantine_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
 grep -Fq 'unresolved quarantined session root' "$invalid_quarantine_home/gc.log"
 
-# A session that carries no metadata has not claimed anything yet. It is retained
-# and suppresses cache deletion, and every other session is still collected.
-incomplete_home=$fixture/incomplete-session-home
-mkdir -p "$incomplete_home/.cache/dotfiles-wsl/sessions/incomplete" \
-  "$incomplete_home/.cache/dotfiles-wsl/builds"
-make_session_metadata "$incomplete_home" "$pressure_old_id" orphan-session \
+# A session without metadata has no live owner. It is removed like an orphan
+# and protects neither a project cache nor the shared cache.
+unclaimed_home=$fixture/unclaimed-session-home
+unclaimed_session=$unclaimed_home/.cache/dotfiles-wsl/sessions/unclaimed-session
+mkdir -p "$unclaimed_session/tmp/left" "$unclaimed_home/.cache/dotfiles-wsl/builds"
+: > "$unclaimed_session/tmp/left/file"
+make_session_metadata "$unclaimed_home" "$pressure_old_id" orphan-session \
   "$missing_pid" "$current_boot_id" 0
-make_cache "$incomplete_home" "$pressure_old_id" 1 32
-make_shared_cache "$incomplete_home" 32
-incomplete_high=$(($(allocated_bytes \
-  "$incomplete_home/.cache/dotfiles-wsl/shared") - 1))
-HOME=$incomplete_home DOTFILES_AGENT_GC_HIGH_BYTES=$incomplete_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC" 2>"$incomplete_home/gc.log"
-test -d "$incomplete_home/.cache/dotfiles-wsl/sessions/incomplete"
-test ! -e "$incomplete_home/.cache/dotfiles-wsl/sessions/orphan-session"
-test -e "$incomplete_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
-test -e "$incomplete_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
-grep -Fq 'incomplete session' "$incomplete_home/gc.log"
+make_cache "$unclaimed_home" "$pressure_old_id" 1 32
+make_shared_cache "$unclaimed_home" 32
+unclaimed_high=$(($(allocated_bytes \
+  "$unclaimed_home/.cache/dotfiles-wsl/shared") - 1))
+HOME=$unclaimed_home DOTFILES_AGENT_GC_HIGH_BYTES=$unclaimed_high \
+  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
+test ! -e "$unclaimed_session"
+test ! -e "$unclaimed_home/.cache/dotfiles-wsl/sessions/orphan-session"
+test ! -e "$unclaimed_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
+test ! -e "$unclaimed_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
+test -z "$(find "$unclaimed_home/.cache/dotfiles-wsl/sessions" \
+  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
+
+# A session without metadata that the run cannot delete fails the run, but it
+# still protects no cache because it has no owner.
+unremovable_unclaimed_home=$fixture/unremovable-unclaimed-home
+unremovable_unclaimed_session=$unremovable_unclaimed_home/.cache/dotfiles-wsl/sessions/unclaimed-session
+mkdir -p "$unremovable_unclaimed_session/tmp/locked" \
+  "$unremovable_unclaimed_home/.cache/dotfiles-wsl/builds"
+: > "$unremovable_unclaimed_session/tmp/locked/pinned"
+chmod 0500 "$unremovable_unclaimed_session/tmp/locked"
+make_cache "$unremovable_unclaimed_home" "$pressure_old_id" 1 32
+make_shared_cache "$unremovable_unclaimed_home" 32
+unremovable_unclaimed_high=$(($(allocated_bytes \
+  "$unremovable_unclaimed_home/.cache/dotfiles-wsl/shared") - 1))
+HOME=$unremovable_unclaimed_home DOTFILES_AGENT_GC_HIGH_BYTES=$unremovable_unclaimed_high \
+  DOTFILES_AGENT_GC_LOW_BYTES=0 \
+  expect_unresolved "$unremovable_unclaimed_home/gc.log" "$GC"
+test -d "$unremovable_unclaimed_session"
+test ! -e "$unremovable_unclaimed_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
+test ! -e "$unremovable_unclaimed_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
+grep -Fq 'preserve unremovable-orphan' "$unremovable_unclaimed_home/gc.log"
+chmod 0700 "$unremovable_unclaimed_session/tmp/locked"
 
 # An orphan the run cannot delete returns to its own path instead of being
 # stranded in a quarantine root, so unrelated caches are still collected.
@@ -325,7 +344,7 @@ make_cache "$unremovable_home" "$pressure_old_id" 1 32
 make_cache "$unremovable_home" "$stale_id" 40 2
 make_shared_cache "$unremovable_home" 32
 HOME=$unremovable_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
-  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC" 2>"$unremovable_home/gc.log"
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 expect_unresolved "$unremovable_home/gc.log" "$GC"
 test -d "$unremovable_session"
 test -z "$(find "$unremovable_home/.cache/dotfiles-wsl/sessions" \
   -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
@@ -348,7 +367,7 @@ rmdir_race_high=$(($(allocated_bytes \
 rmdir_race_marker=$rmdir_race_home/raced
 HOME=$rmdir_race_home DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER=$rmdir_race_marker \
   DOTFILES_AGENT_GC_HIGH_BYTES=$rmdir_race_high DOTFILES_AGENT_GC_LOW_BYTES=0 \
-  "$RMDIR_RACE_GC" 2>"$rmdir_race_home/gc.log"
+  expect_unresolved "$rmdir_race_home/gc.log" "$RMDIR_RACE_GC"
 test -e "$rmdir_race_marker"
 test -e \
   "$rmdir_race_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted/fixture-blocker"
@@ -366,16 +385,30 @@ HOME=$wrong_owner_home DOTFILES_AGENT_TEST_WRONG_OWNER_PID="$$" \
   DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$WRONG_OWNER_GC"
 test -d "$wrong_owner_home/.cache/dotfiles-wsl/sessions/wrong-owner"
 
-malformed_session_home=$fixture/malformed-session-home
-mkdir -p "$malformed_session_home/.cache/dotfiles-wsl/sessions/malformed" \
-  "$malformed_session_home/.cache/dotfiles-wsl/builds"
-printf '{}\n' > "$malformed_session_home/.cache/dotfiles-wsl/sessions/malformed/metadata.json"
-if HOME=$malformed_session_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
-  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"; then
-  echo 'GC accepted malformed session metadata' >&2
-  exit 1
-fi
-test -d "$malformed_session_home/.cache/dotfiles-wsl/sessions/malformed"
+# Metadata damaged in place no longer identifies its owner, so the session may
+# be live. It is kept, every cache is kept, and the run fails, while ordinary
+# orphans are still reclaimed.
+damaged_metadata_home=$fixture/damaged-metadata-home
+damaged_metadata=$damaged_metadata_home/.cache/dotfiles-wsl/sessions/damaged-session/metadata.json
+mkdir -p "${damaged_metadata%/*}/tmp" "$damaged_metadata_home/.cache/dotfiles-wsl/builds"
+head -c 4096 /dev/zero > "$damaged_metadata"
+damaged_metadata_sum=$(sha256sum < "$damaged_metadata")
+make_session_metadata "$damaged_metadata_home" "$pressure_old_id" orphan-session \
+  "$missing_pid" "$current_boot_id" 0
+make_cache "$damaged_metadata_home" "$pressure_old_id" 40 32
+make_shared_cache "$damaged_metadata_home" 32
+damaged_metadata_high=$(($(allocated_bytes \
+  "$damaged_metadata_home/.cache/dotfiles-wsl/shared") - 1))
+HOME=$damaged_metadata_home DOTFILES_AGENT_GC_HIGH_BYTES=$damaged_metadata_high \
+  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$damaged_metadata_home/gc.log" "$GC"
+test ! -e "$damaged_metadata_home/.cache/dotfiles-wsl/sessions/orphan-session"
+test -d "${damaged_metadata%/*}/tmp"
+test "$(sha256sum < "$damaged_metadata")" = "$damaged_metadata_sum"
+test -z "$(find "$damaged_metadata_home/.cache/dotfiles-wsl/sessions" \
+  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
+test -e "$damaged_metadata_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
+test -e "$damaged_metadata_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
+grep -Fq "$damaged_metadata" "$damaged_metadata_home/gc.log"
 
 symlink_session_home=$fixture/symlink-session-home
 mkdir -p "$symlink_session_home/.cache/dotfiles-wsl/sessions/symlink-metadata" \

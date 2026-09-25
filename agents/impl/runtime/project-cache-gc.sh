@@ -145,7 +145,7 @@ retained_after_quarantine_cleanup() {
 }
 
 remove_orphan_session() {
-  local session=$1 session_id=$2 project_id=$3 metadata path_device quarantine_root quarantine_path state reason
+  local session=$1 session_id=$2 project_id=$3 kind=$4 metadata path_device quarantine_root quarantine_path state reason
   metadata="$session/metadata.json"
   path_device=$(stat -c %d -- "$session") || die "cannot inspect session device: $session"
   quarantine_root=$(mktemp -d "$sessions_root/.gc-quarantine.XXXXXXXX") || {
@@ -193,7 +193,11 @@ remove_orphan_session() {
   fi
   metadata="$quarantine_path/metadata.json"
   reason=
-  if [ -L "$metadata" ] || [ ! -f "$metadata" ] ||
+  if [ "$kind" = unclaimed ]; then
+    if [ -e "$metadata" ] || [ -L "$metadata" ]; then
+      reason=quarantined-session-claimed
+    fi
+  elif [ -L "$metadata" ] || [ ! -f "$metadata" ] ||
     [ "$(stat -c %u -- "$metadata" 2>/dev/null)" != "$(id -u)" ] ||
     ! chmod 600 -- "$metadata" 2>/dev/null ||
     [ "$(stat -c %a -- "$metadata" 2>/dev/null)" != 600 ] ||
@@ -210,11 +214,18 @@ remove_orphan_session() {
     fi
     return
   fi
-  state=$(session_owner_state "$metadata")
+  state=orphan
+  if [ "$kind" = claimed ]; then
+    state=$(session_owner_state "$metadata")
+  fi
   if [ "$state" != orphan ]; then
     if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" \
       "quarantined-owner-$state"; then
-      printf 'retained\n'
+      if [ "$state" = live ]; then
+        printf 'live\n'
+      else
+        printf 'retained\n'
+      fi
     else
       printf 'retained-hidden\n'
     fi
@@ -330,8 +341,9 @@ trap cleanup_scan EXIT
 current_boot_id=$(cat /proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
 declare -A active_projects=()
 active_session_count=0
-declare -a orphan_sessions=() orphan_session_ids=() orphan_project_ids=()
+declare -a orphan_sessions=() orphan_session_ids=() orphan_project_ids=() orphan_kinds=()
 cache_gc_suppressed=false
+sessions_unresolved=false
 gc_owner_uid=$(id -u)
 
 : > "$scan_file"
@@ -378,19 +390,30 @@ while IFS= read -r -d '' session; do
   metadata="$session/metadata.json"
   validate_managed_directory "$session"
   if [ ! -e "$metadata" ] && [ ! -L "$metadata" ]; then
-    cache_gc_suppressed=true
-    printf 'dotfiles-agent-project-cache-gc: skip cache GC: incomplete session: %s\n' \
-      "$session" >&2
+    # The launcher writes metadata before releasing gc.lock and before starting
+    # the client, so a session without metadata here has no live owner.
+    orphan_sessions+=("$session")
+    orphan_session_ids+=("$session_id")
+    orphan_project_ids+=('')
+    orphan_kinds+=(unclaimed)
     continue
   fi
   validate_managed_file "$metadata" 'session metadata'
-  validate_session_metadata "$metadata" "$session_id" || die "session metadata is invalid: $metadata"
+  if ! validate_session_metadata "$metadata" "$session_id"; then
+    # Invalid metadata no longer identifies the owner or project, so the session
+    # may still be live. It is kept, and no cache is removed in this run.
+    cache_gc_suppressed=true
+    printf 'dotfiles-agent-project-cache-gc: skip cache GC: invalid session metadata: %s\n' \
+      "$metadata" >&2
+    continue
+  fi
   project_id=$(jq -r '.project_id' "$metadata")
   session_state=$(session_owner_state "$metadata")
   if [ "$session_state" = orphan ]; then
     orphan_sessions+=("$session")
     orphan_session_ids+=("$session_id")
     orphan_project_ids+=("$project_id")
+    orphan_kinds+=(claimed)
   else
     active_projects[$project_id]=1
     active_session_count=$((active_session_count + 1))
@@ -399,7 +422,7 @@ done < "$scan_file"
 
 for index in "${!orphan_sessions[@]}"; do
   removal_result=$(remove_orphan_session "${orphan_sessions[$index]}" \
-    "${orphan_session_ids[$index]}" "${orphan_project_ids[$index]}")
+    "${orphan_session_ids[$index]}" "${orphan_project_ids[$index]}" "${orphan_kinds[$index]}")
   case "$removal_result" in
   deleted) ;;
   deleted-hidden)
@@ -407,9 +430,12 @@ for index in "${!orphan_sessions[@]}"; do
     printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session created while handling: %s\n' \
       "${orphan_sessions[$index]}" >&2
     ;;
-  retained | retained-hidden)
-    active_projects[${orphan_project_ids[$index]}]=1
-    active_session_count=$((active_session_count + 1))
+  live | retained | retained-hidden)
+    [ "$removal_result" = live ] || sessions_unresolved=true
+    if [ "${orphan_kinds[$index]}" = claimed ]; then
+      active_projects[${orphan_project_ids[$index]}]=1
+      active_session_count=$((active_session_count + 1))
+    fi
     if [ "$removal_result" = retained-hidden ]; then
       cache_gc_suppressed=true
       printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session created while handling: %s\n' \
@@ -496,4 +522,8 @@ if [ "$cache_gc_suppressed" = false ] && [ "$total_bytes" -gt "$high_bytes" ] &&
   done
   test "$total_bytes" -le "$high_bytes" \
     || die "allocated cache bytes remain above the high watermark after shared purge"
+fi
+
+if [ "$cache_gc_suppressed" = true ] || [ "$sessions_unresolved" = true ]; then
+  die 'orphan sessions remain unresolved'
 fi

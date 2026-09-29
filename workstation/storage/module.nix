@@ -20,15 +20,6 @@ let
     systemMaxUse = "${toString maximumJournalGiB}G";
     maximumRetention = "30day";
   };
-  fstrim = {
-    timerName = "fstrim";
-    serviceName = "fstrim";
-    interval = "weekly";
-    virtualizationCondition = [
-      ""
-      "wsl"
-    ];
-  };
 in
 {
   config.dotfiles.health.observations = {
@@ -64,21 +55,6 @@ in
       failureMessage = "could not observe journald disk usage";
       inherit (journal) maximumBytes;
     };
-    "host/fstrim" = {
-      kind = "systemd-timer";
-      checkId = "maintenance/${fstrim.timerName}.timer";
-      resourceKey = null;
-      timeoutSeconds = observationTimeoutSeconds;
-      failureMessage = "${fstrim.timerName}.timer or its service is not operational";
-      timer = "${fstrim.timerName}.timer";
-      service = "${fstrim.serviceName}.service";
-      unitFileStates = [
-        "enabled"
-        "enabled-runtime"
-      ];
-      activeStates = [ "active" ];
-      serviceResults = [ "success" ];
-    };
   };
 
   # 障害履歴を残しつつ、長期稼働時の journal に明示的な上限を設ける
@@ -90,15 +66,6 @@ in
     '';
   };
 
-  # util-linux の unit 本体、ExecStart、schedule は再利用し、WSL で失敗する
-  # vendor condition だけを drop-in で置き換える
-  config.services.fstrim.interval = fstrim.interval;
-  config.systemd.services.${fstrim.serviceName} = {
-    overrideStrategy = "asDropin";
-    unitConfig.ConditionVirtualization = fstrim.virtualizationCondition;
-  };
-  config.systemd.timers.${fstrim.timerName} = {
-    overrideStrategy = "asDropin";
-    unitConfig.ConditionVirtualization = fstrim.virtualizationCondition;
-  };
+  # WSL は root ext4 を discard 付きで mount するため、定期 TRIM を重ねて I/O を増やさない。
+  config.services.fstrim.enable = false;
 }

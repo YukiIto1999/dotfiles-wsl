@@ -4,8 +4,8 @@ let
   cfg = config.dotfiles.workstation;
   gibibyte = 1073741824;
   observationTimeoutSeconds = 10;
-  minimumNixFreeGiB = 160;
-  targetNixFreeGiB = 256;
+  minimumNixFreeGiB = 32;
+  targetNixFreeGiB = 64;
   binaryCaches = import ./assets/nix-caches.nix;
   nixGc = {
     timerName = "nix-gc";
@@ -71,7 +71,9 @@ in
 
   # 常時起動でない WSL で取りこぼした GC を次回起動で補完
   config.nix.gc = nixGc.settings;
-  config.nix.optimise.automatic = true;
+  # 大規模store走査はAgentのビルドI/Oと競合してVHDを長時間停止させるため、
+  # 自動optimiseは実行しない。必要な場合だけ全session停止後の保守で行う。
+  config.nix.optimise.automatic = false;
 
   # crates.io が curl 既定 UA を 403 拒否するため指定する許可 UA
   config.systemd.services.nix-daemon.environment.NIX_CURL_FLAGS = "--user-agent=Nixpkgs";

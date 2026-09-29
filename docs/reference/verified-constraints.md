@@ -17,7 +17,7 @@
 | doctor が owner の observation registry を欠落なく key 順に投影し、19 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
 | 19 種類の observation kind の pass、warn、fail、resource、restart 集約と、数値集合の名前ごとの check、protocol の不正、過大出力、非ゼロ終了、timeout を固定 message と終了 status に反映する。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする | `doctor-runtime` |
 | Windows drive の一覧を host profile に持たせず全 host で同じ観測にし、profile で上書きした zram、swap、Windows committed memory の値を runtime contract へ反映する | `machine-profile-contract` |
-| WSL 専用 zram lifecycle、clean page cache回収timer、journald、標準 fstrim、Nix の容量 reserve、WSL の mount から実行時に見つけた Windows drive と committed memory の観測、service非依存が宣言どおりである | `host-stability-contract` |
+| WSL 専用 zram lifecycle、page cache回収timerの不在、journald、定期fstrimの無効化、Nix の容量 reserve、WSL の mount から実行時に見つけた Windows drive と committed memory の観測、service非依存が宣言どおりである | `host-stability-contract` |
 | 宣言した time zone と default locale が実際の日時書式に現れ、UTC と C へ無言で戻らない | `host-locale-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
 | runtime observation registry が 19 種類の observation kind、必須 field、path と ID、閾値、専用 command package を型で制限し、定義位置を owner と照合する | `observation-contract` |

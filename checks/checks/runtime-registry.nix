@@ -140,12 +140,9 @@
         "dotfiles-agent-journal"
         "dotfiles-agent-project-cache-gc"
         "dotfiles-agent-resource-reaper"
-        "dotfiles-wsl-memory-reclaim"
-        "dotfiles-wsl-relay-recovery"
         "dotfiles-zram-swap"
         "docker-build-artifact-gc"
         "docker-dotfiles-backends-network"
-        "fstrim"
         "nix-daemon"
         "sonarqube-provision"
       ];

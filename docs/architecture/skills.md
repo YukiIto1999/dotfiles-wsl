@@ -52,7 +52,7 @@ Skill名は作業の種類を表す接尾辞で統一する。
 | operation | `browser-operation`、`github-operations` |
 | analysis | `bug-analysis`、`dependency-analysis`、`impact-analysis`、`performance-analysis` |
 | review | `code-review`、`security-review` |
-| design | `skill-design`、`ui-design`、`code-design`、`module-design`、`interface-design`、`error-design` |
+| design | `skill-design`、`environment-design`、`ui-design`、`code-design`、`module-design`、`interface-design`、`error-design` |
 | modeling | `domain-modeling` |
 ## 責務境界
 
@@ -66,7 +66,9 @@ Skill名は作業の種類を表す接尾辞で統一する。
 
 `github-operations`は、GitHub MCPのaccount targetとresourceを一意にし、write前後のstate、曖昧な結果の再試行、merge、delete、history変更の直前確認を扱う。変更説明は`change-writing`、review判断は`code-review`、commit messageは`commit-writing`が所有する。
 
-`memory`は、過去の記録を候補としてrecallし、一次sourceで検証してから採否を決める。保存対象は検証済みの訂正、確定方針、再利用patternに限り、secret、個人情報、推測、短期task情報を除く。memoryを正本やrepository調査の代替にしない。
+`memory`は、過去の記録を候補としてrecallし、一次sourceで検証してから採否を決める。保存対象は検証済みの訂正、確定方針、再利用patternに限り、secret、個人情報、推測、短期task情報を除く。memoryを正本やrepository調査の代替にしない。訂正をmemoryへ残すかどうかは決めない。
+
+`environment-design`は、今の作業の外へ残す改善、訂正、教訓を主張に分け、architecture-standard、dotfiles-wslのagent能力、dotfiles-wslの基盤、upstream、対象project、memoryのうち一つの所有者へ振り分ける。所有者の現行本文を先に読み、既存の規律で足りれば規律を増やさず、読まれなかった、適用されなかった、誤読されたという原因の側へ振り分け直す。文面は各所有者の入口が決める。標準は作業checkoutの`standard-update`、dotfiles-wslのagent能力は`skill-design`へ渡し、標準の版の更新とrebuildを経てagentへ届くまでを閉じる。`skill-design`は、不足が規範の欠落や別repositoryの所有物にある場合に`environment-design`へ戻す。
 
 `domain-modeling` は概念と語彙を定義する。`naming-review` は定義済みの意味を入力に、code、schema、DB、UI、文書の語彙、役割、単位、粒度を監査する。
 
@@ -290,6 +292,14 @@ pluginの`skill-creator`はSkill作成を既定経路にし、基礎モデル、
 runtime本文は[admissionと評価](../../skills/skill-design/skill/references/admission-and-evaluation.md)だけを必要時に読み、外部sourceの採否は[provenance](../../skills/skill-design/skill/references/provenance.md)へ分ける。代表scenarioは[`agents/fixtures/skill-design-skill.json`](../../agents/fixtures/skill-design-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
 
 決定的なYAML契約を再利用するscenarioでは、Codex同梱版とlocal版のどちらもSkillを作らず、共有schemaと必須CIを選んだ。このcaseでは改善はなかった。API変更の互換性とrolloutの見落としを扱うscenarioでは、同梱版は判断を`code-review`へ追加した。local版は既存`impact-analysis`がconsumer、共存、rollback条件を所有すると確認し、影響の証拠だけを受け取ってfindingとseverityを`code-review`へ残した。同じ判断の複製を避け、既存Skillとのcompositionを選べたため、local版を配備する。
+
+### environment-designの評価
+
+改善や訂正の反映先は、`memory`の反映先表が訂正の保存時にだけ扱い、`skill-design`はdotfiles内の機構だけを比べていた。標準自体を変える`standard-update`は標準の作業checkoutにしかなく、dotfilesのsessionからの経路と、版の更新を経て配備されるまでの手順はどこにも書かれていなかった。反映先の判断を`environment-design`へ集め、`memory`は保存だけを所有する。代表scenarioは[`agents/fixtures/environment-design-skill.json`](../../agents/fixtures/environment-design-skill.json)に置く。
+
+baselineは3件とも所有者を正しく選んだが、環境の構成、配備の経路、標準の運用Skillの所在をそれぞれ一から探索し、6分44秒から8分24秒を要した。標準への規律追加では、所有者のfileが従うと定める直接参照を読まないまま段の裁定を見立てた。
+
+Skillありの同種scenarioでは、標準の確認点を加える依頼を、既に標準にある規範と、reviewで照合を確かめる確認点とに分けた。規範を`process/review.md`へ複製せず、作業checkoutの`standard-update`へ確認点だけを渡し、版の更新が他の未取り込みcommitも取り込むことを利用者の確認事項に挙げた。所要は8分24秒から4分35秒へ減った。reviewの見落としの依頼は規範、agentの手順、reviewの確認点、機械検査に分け、`error-design`がどのsubagentのroutingにもない導線の欠落を見つけた。所要はbaselineとほぼ同じだった。訂正の再発の依頼では、baselineと同じく文面を足さずに完了判定のhookを反映先に選んだが、hookを抜けうる経路を列挙したため18分45秒を要し、速さの改善はなかった。所有者が確定している依頼、基盤の設定変更、memoryのrecall、module境界の設計を含むrouting 7件では、`environment-design`は所有者が未確定の2件だけで選ばれた。
 
 ### migrationをSkill化しない判断
 

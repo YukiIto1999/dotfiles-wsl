@@ -25,7 +25,7 @@ Think in English. Respond in Japanese.
 - ローカルで完結する作業は確認を挟まず最後まで進める。push、deploy、release、履歴改変などの非可逆な操作だけ、実行直前に確認する。
 - 承認済み、確定済みの事項を蒸し返さない。同じ論点で作業を再度止めない。
 - できないと結論する前に、使える手段を尽くす。
-- 訂正や教訓の永続化では、`memory` Skillの反映先判断に従う。既存の規律を参照・適用しなかった失敗を、同じ規律の追加で済ませない。
+- 改善、訂正、教訓を今の作業の外へ残すときは、`environment-design` Skill で反映先を決める。既存の規律を参照・適用しなかった失敗を、同じ規律の追加で済ませない。
 
 ## 行動
 
@@ -96,6 +96,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 - secrets 編集: `sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt sops --config @dotfilesDir@/secrets/sops/assets/.sops.yaml @dotfilesDir@/secrets/sops/assets/secrets.json`
 - 登録済み account の確認: `gh auth status`。account ID と個数は宣言側に無く、暗号化済み store が持つ。`gh auth login` と `gh auth switch` は使わない
 - 公開入口は `@dotfilesDir@/README.md`、詳細手順、構成、変更箇所は `@dotfilesDir@/docs/README.md` から辿る。
+- 環境系 repository（dotfiles-wsl、architecture-standard など）の作業 checkout は `@environmentDir@` の下に置く。
 
 ### Agent の変更箇所
 

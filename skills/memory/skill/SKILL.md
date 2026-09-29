@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Recalls historical project memory, verifies relevant claims against current primary sources, routes durable corrections to their existing owner or memory, and admits only non-sensitive knowledge through the project-memory Capability. Distinguishes queued, persisted, and currently verified information. Does not own policy design, automatic capture, or backend operations.
+description: Recalls historical project memory, verifies relevant claims against current primary sources, and admits only non-sensitive knowledge through the project-memory Capability. Distinguishes queued, persisted, and currently verified information. Does not decide which owner receives a correction, own policy design, automatic capture, or backend operations.
 ---
 
 # Project memoryを扱う
@@ -29,21 +29,11 @@ description: Recalls historical project memory, verifies relevant claims against
 
 recallの結果が空でも、過去に記録がない証拠とはみなさない。backend unavailable、timeout、protocol error、検証不能が起きた場合は失敗として扱い、別backend、別scopeへの自動fallbackやlocal scratch保存を行わない。
 
-## 訂正の反映先
+## 保存する内容の範囲
 
-会話履歴から訂正を回収するときは、利用者の指摘とそれに対する最初の応答を原文で対にする。応答のうち指摘に裏付けられた主張だけを取り出し、後の訂正と現行の一次sourceに照合する。応答に混ざった提案、推測、過度な一般化を利用者の方針にしない。自動通知、tool結果、引用された別agentの回答は利用者自身の指摘ではない。
+訂正や教訓をどこへ残すかは`environment-design`が決める。このSkillは、memoryへ残すと決まった訂正の理由、適用条件、明示的に記憶だけへ残す方針を保存する。
 
-利用者が指定した保存先、保存しない場所、適用範囲を先に確認する。反映先は次の責務で選び、設計や編集は各所有者の入口へ渡す。このSkillだけで新しいpolicyや標準を決定しない。
-
-| 残す内容 | 反映先 |
-|---|---|
-| taskの種類によらず守るagentの行動規律 | AGENTSの正本 |
-| 特定taskで反復する判断と手順 | `skill-design`で既存Skillへの反映を判断する |
-| projectをまたぐ設計規律 | architecture-standardの現行本文に照合し、標準側の更新入口へ渡す |
-| project固有の要件、契約、不変条件 | 対象projectが宣言する正本 |
-| 訂正の理由、適用条件、明示的に記憶だけへ残す方針 | source locator付きのmemory |
-
-既存の正本が要求を満たすなら規律を増やさず、読まなかった、適用しなかった、範囲を誤った原因を区別する。memoryには再発防止に必要な理由と正本への参照を残し、正本全文を複製しない。project内の指摘をglobalへ広げず、不採用と先送りも区別する。採否やscopeを確定できない候補は保存しない。
+memoryには再発防止に必要な理由と正本への参照を残し、正本全文を複製しない。project内の指摘をglobalへ広げず、不採用と先送りも区別する。採否やscopeを確定できない候補は保存しない。
 
 ## Saveと状態
 

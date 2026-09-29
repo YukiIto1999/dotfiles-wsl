@@ -101,6 +101,19 @@ in
     };
   };
 
+  # モデルを退避した Windows の G: は、Google Drive が未起動でも WSL の起動を妨げないよう
+  # 初回アクセス時にだけ mount する。モデル cache の symlink はこの安定した mount point を参照する。
+  config.fileSystems."/mnt/g" = {
+    device = "G:";
+    fsType = "drvfs";
+    options = [
+      "rw"
+      "nofail"
+      "x-systemd.automount"
+      "x-systemd.mount-timeout=10s"
+    ];
+  };
+
   # WSL が生成する resolv.conf は NAT DNS proxy 10.255.255.254 だけを指すが、この proxy は A も AAAA も
   # 応答しない時間帯があり、nix の fetch が名前解決に失敗する。生成を止めて公開 resolver を固定する。
   config.networking.nameservers = [

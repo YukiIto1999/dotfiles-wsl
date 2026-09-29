@@ -101,6 +101,11 @@ in
     };
   };
 
+  # WSLは各起動要求をsystemd user sessionへ同期する。自動終了後の次回起動でも
+  # user managerとruntime directoryを先に確立できるよう、両方を宣言的に維持する。
+  config.users.users.${cfg.username}.linger = true;
+  config.users.users.root.linger = true;
+
   # モデルを退避した Windows の G: は、Google Drive が未起動でも WSL の起動を妨げないよう
   # 初回アクセス時にだけ mount する。モデル cache の symlink はこの安定した mount point を参照する。
   config.fileSystems."/mnt/g" = {

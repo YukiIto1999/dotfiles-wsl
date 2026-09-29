@@ -9,6 +9,7 @@ let
   extraBin = hostConfig.wsl.extraBin;
   extraBinNames = map (entry: entry.name) extraBin;
   modelDrive = hostConfig.fileSystems."/mnt/g" or { };
+  workstationUsername = hostConfig.dotfiles.workstation.username;
 
   requiredBins = [
     "awk"
@@ -33,6 +34,17 @@ let
   storeEntries = lib.filter (entry: entry.src != "/init") extraBin;
 in
 {
+  wsl-user-session-contract =
+    assert lib.assertMsg (
+      (hostConfig.users.users.${workstationUsername}.linger or null) == true
+    ) "WSL default user must keep a persistent systemd user manager";
+    assert lib.assertMsg (
+      (hostConfig.users.users.root.linger or null) == true
+    ) "WSL root user must keep a persistent systemd user manager";
+    pkgs.runCommandLocal "check-wsl-user-session-contract" { } ''
+      touch $out
+    '';
+
   wsl-model-drive-contract =
     assert lib.assertMsg (
       modelDrive.device or null == "G:"

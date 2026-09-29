@@ -105,6 +105,7 @@
 | 作業日誌が区切り時刻から翌日の区切り時刻までの利用者の指示、応答、tool の意図、commit だけを model へ渡し、thinking、tool の結果、subagent の記録、範囲外の entry を渡さず、host ごとの file を push する。同じ日を作り直しても内容が同じなら commit を増やさず、timer は最後に完了した日までの未作成の日だけを選ぶ。model が失敗した日は file を作らずに後の日を記録して非ゼロで終わり、次の実行でその日を作る。一時 directory が Git の work tree の中にあれば model を呼ばない | `agent-journal-behavior` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | モデル用の Windows G: ドライブを `/mnt/g` へ drvfs で割り当て、未接続時に WSL の起動を妨げない systemd automount にする | `wsl-model-drive-contract` |
+| WSL の既定 user と root の systemd user manager を linger で常駐させ、WSL の自動終了後の起動でも login session を作れるようにする | `wsl-user-session-contract` |
 | WSL の extraBin に必須の名前が揃い、名前が重複せず、store 由来の entry が実行可能である | `wsl-extra-bin-contract` |
 | local と plugin の全 Skill の SKILL.md が frontmatter を持ち、name が directory 名と一致し、description が空でない | `skill-frontmatter-contract` |
 | cleanup が現在と保持中の Home Manager generation から backup の exact path を導き、home と system の削除を別の権限境界で実行する | `cleanup-home-backups` |

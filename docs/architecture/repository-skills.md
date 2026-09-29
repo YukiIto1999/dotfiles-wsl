@@ -45,6 +45,8 @@ Orcaデスクトップ環境および内蔵ツールの操作手順を提供す�
 ### architecture-standard
 ソフトウェア設計およびアーキテクチャ標準の最新規範を参照・適用する。標準本文は手元の配備ツリー（`<standard-root>`）から相対参照で直接読み取り、過去のコミット探索やローカルの固定パスを仮定しない。採用対象と依存宣言は採用表で管理し、`standard-feedback`だけが`github-resources`を要求する。
 
+標準自体を変える`standard-update`と監査する`standard-audit`は、標準の作業checkoutを作業directoryにして動く運用入口であり、`skills/<id>/`の標準配置も持たないため採用しない。別のrepositoryのsessionから標準を変える場合は、`environment-design`が作業checkoutの`standard-update`へ渡し、標準のpushとこのrepositoryの版の更新を経て配備する。
+
 ## 拒否条件
 
 以下の状態は評価およびビルド検査で拒否される。

@@ -2,7 +2,7 @@
 
 **読み手:** 変更する値の正本と検証入口を探す保守者。作業前に読む。
 
-同じ目的に複数の設定経路を作らない。profileは有効な機能を選び、各ownerのmoduleは意味、実装、runtime contractを持つ。変更後の通常適用は`dotfiles-rebuild --plan`、`dotfiles-rebuild`、`dotfiles-doctor`の順で行う。
+同じ目的に複数の設定経路を作らない。profileは有効な機能を選び、各ownerのmoduleは意味、実装、runtime contractを持つ。変更後の通常適用は`dotfiles-rebuild --plan`、`dotfiles-rebuild`、`dotfiles-doctor`の順で行う。変更がこのrepositoryに属するか、architecture-standard、upstream、対象projectに属するかは`environment-design` Skillで決める。
 
 ## Workstationとtoolchain
 
@@ -24,6 +24,7 @@
 | top-level responsibilityを追加・削除する | [`docs/architecture/overview.md`](../architecture/overview.md)でownerと依存方向を決め、rootの`module.nix`を入口にする | `structure-responsibility-roots`、`unit-boundary-name-only` |
 | Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`nix flake check`で確認する |
 | Skillを追加・削除する | [`skills/`](../../skills)の`module.nix`、`skill/`、依存metadata。配備対象は有効なCapabilityから導く | Skill renderingとrequired Capabilityのcheck |
+| plugin Skill sourceとarchitecture-standardの版を更新する | [`flake.nix`](../../flake.nix)の該当inputのrevと[`flake.lock`](../../flake.lock)。採用するSkillは[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 固定していた版からの差分を確認し、`nix flake check`、`dotfiles-rebuild` |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 
 ## Runtime observationと生成artifact

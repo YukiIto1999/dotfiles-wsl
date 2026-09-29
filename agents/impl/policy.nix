@@ -15,6 +15,7 @@ in
       capabilities,
       clients,
       dotfilesDir,
+      environmentDir,
     }:
     let
       capabilityRows = map (
@@ -62,7 +63,7 @@ in
         subagentEntries = entries subagents;
         capabilityRows = tsv capabilityRows;
         clientRows = tsv clientRows;
-        inherit projectMemoryPolicy dotfilesDir;
+        inherit projectMemoryPolicy dotfilesDir environmentDir;
       }
       ''
         set -euo pipefail
@@ -126,7 +127,8 @@ in
           --subst-var-by capabilityRoster "$capabilityRoster" \
           --subst-var-by clientMatrix "$clientMatrix" \
           --subst-var-by projectMemoryPolicy "$projectMemoryPolicy" \
-          --subst-var-by dotfilesDir "$dotfilesDir"
+          --subst-var-by dotfilesDir "$dotfilesDir" \
+          --subst-var-by environmentDir "$environmentDir"
 
         # marker が残るのは template と生成器の対応が崩れた状態であり、静かに通さない
         if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$out"; then

@@ -11,6 +11,8 @@ description: Decides whether a recurring agent capability deficit warrants a Ski
 
 利用者の目的、反復するtask、過去の訂正、repository policy、既存Skillとその配備経路、reference、script、tool、評価方法を確認する。候補名や外部repositoryの分類から始めない。
 
+不足がagentの再現ではなく、projectをまたぐ規範の欠落や、標準、upstream、対象projectが所有する内容にある場合は、Skillの要否を判断せず`environment-design`へ所有者の判断を戻す。
+
 具体的な代表scenarioを集め、Skillなしで実行するか、既存の実行記録からbaselineを得る。事実、解釈、判断を分け、基礎モデルが失敗した箇所と成果への影響を記録する。想像上の不足だけなら止める。
 
 ## 最小のmechanismを選ぶ

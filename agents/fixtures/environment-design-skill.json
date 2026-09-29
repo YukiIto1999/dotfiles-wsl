@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "evaluatedAt": "2026-09-29",
+  "cases": [
+    {
+      "id": "standard-change-from-dotfiles",
+      "prompt": "architecture-standard の process/review.md の確認点に『差分が追加した test が内部実装に結合していないか』を加えたい。dotfiles-wsl で動いているこの session から進め方を示して。",
+      "expectedSkills": [
+        "environment-design"
+      ],
+      "expected": {
+        "separatesNormFromCheckpoint": true,
+        "doesNotDuplicateExistingNorm": true,
+        "chainsToStandardUpdateInCheckout": true,
+        "requiresPushAndPinUpdateBeforeDelivered": true,
+        "disclosesOtherCommitsPulledByPin": true
+      }
+    },
+    {
+      "id": "recurring-covered-correction",
+      "prompt": "別の業務 project で、検証を実際には回していないのに『テストは通るはずです』と完了報告し、利用者に訂正された。この教訓を今後の全作業で守らせたい。どこに残すべきか決めて。",
+      "expectedSkills": [
+        "environment-design"
+      ],
+      "expected": {
+        "findsExistingPolicyAndStandardText": true,
+        "addsNoNewProse": true,
+        "routesToEnforcementMechanismOwner": true,
+        "doesNotCopyRuleIntoMemory": true
+      }
+    },
+    {
+      "id": "methodology-spanning-owners",
+      "prompt": "code review で、例外やエラーを握りつぶして成功扱いにする変更を見落とすことが続いている。設計の考え方と review のやり方の両面で、この作業環境のどこに何を入れるべきか決めて。",
+      "expectedSkills": [
+        "environment-design"
+      ],
+      "expected": {
+        "splitsNormAndAgentProcedure": true,
+        "readsExistingStandardAndSkillText": true,
+        "handsAgentProcedureToSkillDesign": true,
+        "handsNormChangesToStandardUpdate": true
+      }
+    },
+    {
+      "id": "upstream-skill-drift",
+      "prompt": "orca-cli skill の説明が古くなっていて、今の orca と合わない。直したい。",
+      "expectedSkills": [
+        "environment-design"
+      ],
+      "expected": {
+        "routesContentToUpstream": true,
+        "limitsDotfilesToAdoptionAndVersion": true,
+        "doesNotEditDeployedCopy": true
+      }
+    },
+    {
+      "id": "near-miss-fixed-skill-owner",
+      "prompt": "commit message を書くたびに同じ訂正を受けている。この手順を既存の commit-writing Skill に足すべきか、新しい Skill にすべきか判断して。",
+      "expectedSkills": [
+        "skill-design"
+      ],
+      "mustNotTrigger": [
+        "environment-design"
+      ]
+    },
+    {
+      "id": "near-miss-infrastructure-change",
+      "prompt": "SonarQube の MCP target の port を 9100 に変えて。",
+      "expectedSkills": [],
+      "mustNotTrigger": [
+        "environment-design"
+      ]
+    },
+    {
+      "id": "near-miss-memory-recall",
+      "prompt": "昨日の作業で決めた Hindsight の検索 scope の話を思い出して、今の実装と合っているか確かめて。",
+      "expectedSkills": [
+        "memory"
+      ],
+      "mustNotTrigger": [
+        "environment-design"
+      ]
+    },
+    {
+      "id": "near-miss-module-ownership",
+      "prompt": "dotfiles-wsl の capabilities と platform の責務の切り方を見直したい。どちらが MCP gateway を所有すべきか設計して。",
+      "expectedSkills": [
+        "module-design"
+      ],
+      "mustNotTrigger": [
+        "environment-design"
+      ]
+    }
+  ]
+}

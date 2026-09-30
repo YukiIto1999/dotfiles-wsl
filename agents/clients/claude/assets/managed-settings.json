@@ -65,6 +65,15 @@
             "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook learn"
           }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook observe"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -74,6 +83,26 @@
           {
             "type": "command",
             "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook arm"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook observe"
+          }
+        ]
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook observe"
           }
         ]
       }

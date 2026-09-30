@@ -289,7 +289,8 @@ if [ "$status" -eq 0 ] \
   mv -T "$record_tmp" "$success_file" || rm -f -- "$record_tmp"
   # 木そのものの控えも残す。環境と argv を混ぜないので、後から別の process が
   # 「この木で入口が通ったか」を同じ手で問える(dotfiles-agent-gate が読む)。
-  "@gate@" record --repo "$repo_top" --command "$*" || true
+  # 走らせた場所と綴りを渡し、宣言した入口を根で通した走行かは門が決める。
+  "@gate@" record --repo "$PWD" --command "$*" || true
 fi
 
 exit "$status"

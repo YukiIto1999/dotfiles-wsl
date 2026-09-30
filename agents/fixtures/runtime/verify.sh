@@ -390,10 +390,6 @@ test -n "$(find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.succes
 test -z "$(find "$home/.cache/dotfiles-wsl/verification" -type f \
   ! -name '*.success' ! -name '*.verified' ! -name '*.waived' -print -quit)"
 
-# 成功した走行は、木そのものの控えも残す。残さなければ門は「通っていない」としか答えられず、
-# 通した後の周まで止め続ける。
-test -n "$(find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.verified' -print -quit)"
-
 # 門は、入口を宣言する repository でだけ「通っていない」と答える。
 # 宣言が無ければ何も要求しない。
 gate_repo=$fixture/gate-repo
@@ -410,7 +406,28 @@ if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
   echo 'gate passed a tree the entrance never ran on' >&2
   exit 1
 fi
-"$GATE" record --repo "$gate_repo" --command 'devenv shell -- verify'
+
+# 門を開けるのは、宣言した入口を repository の根で通した走行だけである。部分的な検査や
+# 下の directory での入口が通っても、この木で入口が通ったことにはならない。
+mkdir -p "$fixture/entry-bin" "$gate_repo/nested"
+cat >"$fixture/entry-bin/devenv" <<'SCRIPT'
+#!/usr/bin/env bash
+exit 0
+SCRIPT
+chmod +x "$fixture/entry-bin/devenv"
+sed -i "1c#!$BASH" "$fixture/entry-bin/devenv"
+cd "$gate_repo"
+COUNT=$fixture/gate-focused-count "$VERIFY" -- "$fixture/check" focused
+if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
+  echo 'gate passed a tree on which only a focused check ran' >&2
+  exit 1
+fi
+(cd "$gate_repo/nested" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
+  echo 'gate passed a tree on which the entrance ran below the repository root' >&2
+  exit 1
+fi
+PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify
 "$GATE" check --repo "$gate_repo" >/dev/null
 printf 'changed\n' >"$gate_repo/tracked"
 if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
@@ -434,6 +451,44 @@ if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
   echo 'gate passed a tree that gained an untracked file' >&2
   exit 1
 fi
+
+# shell の呼び出しは、作業場所の木を変えた時だけ stop で問う repository に加わる。
+# 読むだけの呼び出しは、未検証の木の上でも stop を止めない。
+shell_repo=$fixture/shell-repo
+mkdir -p "$shell_repo"
+git -C "$shell_repo" init -q
+git -C "$shell_repo" config user.name fixture
+git -C "$shell_repo" config user.email fixture@example.invalid
+printf 'scripts.verify.exec = "true";\n' >"$shell_repo/devenv.nix"
+printf 'held\n' >"$shell_repo/tracked"
+git -C "$shell_repo" add devenv.nix tracked
+git -C "$shell_repo" commit -qm initial
+shell_observe() {
+  printf '{"session_id":"fixture-shell","hook_event_name":"%s","tool_use_id":"%s","cwd":"%s","tool_name":"bash","tool_input":%s}' \
+    "$1" "$2" "$3" "$4" | "$GATE" hook observe
+}
+shell_stop() {
+  printf '{"session_id":"fixture-shell","cwd":"%s"}' "$shell_repo" |
+    "$GATE" hook stop >/dev/null 2>&1
+}
+shell_observe PreToolUse read "$shell_repo" '{"command":"git status"}'
+shell_observe PostToolUse read "$shell_repo" '{"command":"git status"}'
+shell_stop
+# 作業場所は tool の cwd を先に採り、session の cwd からの相対も解く。失敗した呼び出しでも、
+# 変えた木は問う。
+shell_observe PreToolUse write "$fixture" '{"command":"change","cwd":"shell-repo"}'
+printf 'changed\n' >"$shell_repo/tracked"
+shell_observe PostToolUseFailure write "$fixture" '{"command":"change","cwd":"shell-repo"}'
+set +e
+shell_stop
+shell_stop_status=$?
+set -e
+if [ "$shell_stop_status" -ne 2 ]; then
+  echo "stop did not hold a tree a shell call changed: $shell_stop_status" >&2
+  exit 1
+fi
+(cd "$shell_repo" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+shell_stop
 
 # 設計の規律を読まずに、その規律が持つ領域を触らせない。
 mkdir -p "$home/.omp/agent/skills/ui-design" "$home/.omp/agent/skills/domain-modeling"

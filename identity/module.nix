@@ -10,13 +10,33 @@ let
   accountIdType = lib.types.addCheck lib.types.str (
     value: builtins.match "[a-z0-9]+(-[a-z0-9]+)*" value != null
   );
+  # GitHub の user 名と organization 名。URL の path と Git 設定の subsection へそのまま入る
+  ownerType = lib.types.addCheck lib.types.str (
+    value: builtins.match "[A-Za-z0-9]+(-[A-Za-z0-9]+)*" value != null
+  );
   # 誰が登録済みかは暗号化済み store の key 構造が持つ。宣言側へ id を書かない
   accountOf = path: builtins.elemAt (lib.splitString "/" path) 1;
   accountPaths = builtins.filter (path: lib.hasPrefix "accounts/" path) config.dotfiles.secrets.paths;
   storeAccounts = lib.unique (map accountOf accountPaths);
-  storePrimaries = lib.unique (
-    map accountOf (builtins.filter (path: lib.hasSuffix "/primary" path) accountPaths)
+  # account 直下の key だけを印として読む。primary という名前の owner を印と取り違えない
+  storePrimaries = builtins.filter (
+    account: builtins.elem "accounts/${account}/primary" accountPaths
+  ) storeAccounts;
+  # accounts/<id>/owners/<owner> の key は、その owner の repository へ HTTPS で接続する account の印
+  ownersOf =
+    account:
+    let
+      prefix = "accounts/${account}/owners/";
+    in
+    map (lib.removePrefix prefix) (builtins.filter (lib.hasPrefix prefix) accountPaths);
+  storeOwners = lib.genAttrs storeAccounts ownersOf;
+  # GitHub は owner 名の大文字と小文字を区別しない。表記が違っても同じ owner として数える
+  ownerKeys = map lib.toLower (lib.concatLists (builtins.attrValues storeOwners));
+  duplicatedOwners = lib.unique (
+    builtins.filter (owner: lib.count (key: key == owner) ownerKeys > 1) ownerKeys
   );
+  # primary の repository は gh の既定 token で届く。印は既定と異なる account を選ぶためだけに置く
+  primaryOwners = lib.concatMap ownersOf storePrimaries;
   accountsMissingCredentials = builtins.filter (
     account:
     !(
@@ -60,11 +80,18 @@ in
       internal = true;
       description = "store が primary と印を付けた account id。gh の active user と hosts.yml の既定 token になる。";
     };
+    owners = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf ownerType);
+      readOnly = true;
+      internal = true;
+      description = "store が account ごとに印を付けた GitHub owner。その owner の repository へ HTTPS で接続するときに、この account の token を使う。primary は印を持たず gh の既定 token を使う。";
+    };
   };
 
   config.dotfiles.identity.github = {
     accounts = storeAccounts;
     primary = if builtins.length storePrimaries == 1 then builtins.head storePrimaries else "";
+    owners = storeOwners;
   };
 
   config.sops.secrets =
@@ -74,7 +101,7 @@ in
           name = "accounts/${a}/username";
           value = { };
         }
-        # github front が起動時に主 user で読む token file
+        # github front と Git の credential helper が主 user で読む token file
         {
           name = "accounts/${a}/token";
           value = {
@@ -134,6 +161,14 @@ in
     {
       assertion = accountsMissingCredentials == [ ];
       message = "accounts in the encrypted store must hold both username and token: ${lib.concatStringsSep ", " accountsMissingCredentials}";
+    }
+    {
+      assertion = duplicatedOwners == [ ];
+      message = "a GitHub owner in the encrypted store must be marked on exactly one account: ${lib.concatStringsSep ", " duplicatedOwners}";
+    }
+    {
+      assertion = primaryOwners == [ ];
+      message = "the primary account reaches its owners through gh and must not carry owner markers: ${lib.concatStringsSep ", " primaryOwners}";
     }
   ];
 }

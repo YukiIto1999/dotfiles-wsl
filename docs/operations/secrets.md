@@ -29,9 +29,19 @@ identity の値は `identity/module.nix` の SOPS template を介して配備す
 
 ## GitHub account
 
-GitHub account の roster は暗号化済み store が持つ。sops は値だけを暗号化して key の構造を平文で残すので、`accounts` 配下の key が登録済み account の正本であり、`identity/module.nix` はそこから roster を導出する。宣言側に account ID を書かない。`gh` の active user と既定 token になる account は、その entry に `primary` の key を置いて印を付ける。username は `gh` の設定が消費し、token は `gh` と account ごとの GitHub MCP target が消費する。
+GitHub account の roster は暗号化済み store が持つ。sops は値だけを暗号化して key の構造を平文で残すので、`accounts` 配下の key が登録済み account の正本であり、`identity/module.nix` はそこから roster を導出する。宣言側に account ID を書かない。`gh` の active user と既定 token になる account は、その entry に `primary` の key を置いて印を付ける。username は `gh` の設定が消費し、token は `gh`、account ごとの GitHub MCP target、Git の credential helper が消費する。
 
 account の追加と削除は store の編集だけで完結する。`accounts` へ entry を足し、`username` と `token` を入れ、`primary` はどれか一つの entry にだけ置く。module も profile も変えない。登録済み account を確かめるには `gh auth status` を使い、`gh auth login` と `gh auth switch` は使わない。token は最小権限にし、平文を module や生成設定へ書かない。
+
+HTTPS の Git は、`github.com` の repository に `gh` の helper が返す primary の token を使う。primary 以外の account でしか読めない owner の repository には、担当する account の entry に `owners` の key を置き、その下に owner 名の key を置いて印を付ける。値は読まず、`primary` と同じく key の有無だけが意味を持つ。
+
+```bash
+sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
+  sops --config secrets/sops/assets/.sops.yaml set secrets/sops/assets/secrets.json \
+  '["accounts"]["<account-id>"]["owners"]["<owner>"]' '"true"'
+```
+
+`identity/module.nix` は印から account ごとの owner を導出し、`toolchain/git/module.nix` は `https://github.com/<owner>` の credential helper を、その account の token file を読む helper へ置き換える。同じ owner を二つの account に置く構成と、primary に印を置く構成は評価時に拒否する。Git は URL の path を大文字と小文字を区別して照合するため、remote URL の owner は印と同じ表記で書く。remote URL に token を埋め込まない。
 
 ## Hindsight
 

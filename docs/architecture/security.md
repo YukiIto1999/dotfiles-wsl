@@ -18,7 +18,9 @@ Git identity の template は設定ユーザーの `~/.config/git/identity.conf`
 
 [`identity/module.nix`](../../identity/module.nix) は account ごとの username と PAT を SOPS secret として宣言する。sops-nix template は `hosts.yml` を mode `0600` で user home に配備し、GitHub MCP wrapper は runtime の secret file から PAT を読んで子 process の環境へ渡す。secret value と実 account username は Nix source、doctor 出力、文書へ転記しない。
 
-PAT の権限は用途に必要な repository と operation に限定する。設定ユーザー、root、PAT を読む MCP process は credential の信頼境界に含まれる。`gh auth login` や `gh auth switch` で別の credential store を作らず、SOPS の宣言経路へ集約する。
+HTTPS の Git は、`github.com` 全体で `gh` の credential helper を使い、primary の PAT を受け取る。store が owner の印を付けた account について、[`toolchain/git/module.nix`](../../toolchain/git/module.nix) は `https://github.com/<owner>` の helper を、その account の user 所有 `0400` の PAT file を読む helper へ置き換える。Git 設定と Nix store には PAT file の path だけが入り、PAT は remote URL、Git 設定、生成 artifact に書かない。helper は Git の保存と破棄の要求を無視し、SOPS 以外に credential の複製を作らない。
+
+PAT の権限は用途に必要な repository と operation に限定する。設定ユーザー、root、PAT を読む MCP process と Git credential helper は credential の信頼境界に含まれる。`gh auth login` や `gh auth switch` で別の credential store を作らず、SOPS の宣言経路へ集約する。
 
 ## agentgateway
 

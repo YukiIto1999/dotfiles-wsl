@@ -12,12 +12,11 @@ import unittest
 from unittest.mock import patch
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 
 PACKAGE = Path(sys.argv.pop(1)).resolve()
 sys.path.insert(0, str(PACKAGE))
-from hooks import last_complete_turn, transcript_messages
 import memory as memory_module
 from memory import Client, MemoryFailure
 
@@ -37,14 +36,26 @@ class Backend(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        path = unquote(urlparse(self.path).path)
+        url = urlparse(self.path)
+        path = unquote(url.path)
         self.state["requests"].append(("GET", path))
         if path == "/v1/default/banks":
             self.respond(200, {"banks": [{"bank_id": bank} for bank in self.state["banks"]]})
         elif "/operations/" in path:
             self.respond(200, {"operation_id": path.rsplit("/", 1)[1], "status": self.state["operation_state"]})
+        elif path.endswith("/documents"):
+            # 一頁に一件だけ返し、client が total まで頁を辿ることを要求する
+            query = parse_qs(url.query)
+            wanted = set(query.get("tags", []))
+            listed = [
+                {key: document[key] for key in ("id", "bank_id", "tags", "document_metadata")}
+                for document in self.state["documents"].values()
+                if wanted & set(document["tags"])
+            ]
+            offset = int(query.get("offset", ["0"])[0])
+            self.respond(200, {"items": listed[offset:offset + 1], "total": len(listed), "limit": 1, "offset": offset})
         elif "/documents/" in path:
-            document = self.state["document"]
+            document = self.state["documents"].get(path.split("/documents/", 1)[1])
             if document is None:
                 self.respond(404, {})
             else:
@@ -72,6 +83,7 @@ class Backend(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         bank = self.path.split("/")[4]
         if self.path.endswith("/memories/recall"):
+            self.state["recalls"].append(body)
             self.respond(self.state["recall_status"], {"results": []})
             return
         if self.state["retain_status"] != 200:
@@ -79,8 +91,8 @@ class Backend(BaseHTTPRequestHandler):
             return
         item = body["items"][0]
         self.state["items"].append(item)
-        self.state["document"] = {
-            "id": item["document_id"], "bank_id": bank,
+        self.state["documents"][item["document_id"]] = {
+            "id": item["document_id"], "bank_id": bank, "tags": item["tags"],
             "original_text": item["content"], "document_metadata": item["metadata"],
             "memory_unit_count": 1,
         }
@@ -117,7 +129,7 @@ class RuntimeContract(unittest.TestCase):
         return subprocess.run(["git", *arguments], check=True, capture_output=True, text=True)
 
     def setUp(self):
-        Backend.state = {"requests": [], "banks": set(), "operation_state": "completed", "document": None, "items": [], "retain_status": 200, "recall_status": 200}
+        Backend.state = {"requests": [], "banks": set(), "operation_state": "completed", "documents": {}, "items": [], "recalls": [], "retain_status": 200, "recall_status": 200}
 
     def command(self, command, payload=None, *arguments):
         result = subprocess.run(
@@ -131,6 +143,9 @@ class RuntimeContract(unittest.TestCase):
     def save(self):
         return self.command("save", {"cwd": str(self.repo), "content": "利用者の訂正は推測より優先する。", "source": "user-confirmed:fixture"})
 
+    def bank(self):
+        return json.loads(self.command("project", None, str(self.repo)).stdout)["bank_id"]
+
     def test_retain_404_is_failure_not_saved(self):
         Backend.state["retain_status"] = 404
         result = self.save()
@@ -140,7 +155,7 @@ class RuntimeContract(unittest.TestCase):
 
     def test_pending_operation_is_not_saved(self):
         Backend.state["operation_state"] = "pending"
-        result = self.command("hook", {"cwd": str(self.repo), "session_id": "pending-case", "messages": [{"role": "user", "content": "このprojectでは訂正を先に確認する。"}, {"role": "assistant", "content": "確認しました。", "complete": True}]}, "--harness", "omp", "stop")
+        result = self.save()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["state"], "pending")
 
@@ -234,20 +249,12 @@ class RuntimeContract(unittest.TestCase):
         self.assertIn("invalid_input", result.stderr)
         self.assertEqual(Backend.state["requests"], [])
 
-    def test_incomplete_latest_assistant_is_not_captured(self):
-        result = last_complete_turn([
-            {"role": "user", "content": "genuine-user-correction"},
-            {"role": "assistant", "content": "earlier-complete-answer", "complete": True},
-            {"role": "assistant", "content": "", "complete": False},
-        ])
-        self.assertIsNone(result)
-
     def test_saved_requires_durable_matching_document(self):
         saved = self.save()
         self.assertEqual(saved.returncode, 0, saved.stderr)
         receipt = json.loads(saved.stdout)
         self.assertEqual(receipt["state"], "saved")
-        Backend.state["document"]["original_text"] = "different persisted content"
+        Backend.state["documents"][receipt["document_id"]]["original_text"] = "different persisted content"
         checked = self.command("status", {"cwd": str(self.repo), **{key: receipt[key] for key in ("scope", "operation_id", "document_id")}})
         self.assertNotEqual(checked.returncode, 0)
         self.assertIn("not_verified", checked.stderr)
@@ -300,104 +307,58 @@ class RuntimeContract(unittest.TestCase):
         finally:
             self.git("-C", str(self.repo), "worktree", "remove", str(worktree))
 
-    def test_capture_rejects_credential_shaped_json_before_http(self):
-        result = self.command("hook", {"cwd": str(self.repo), "session_id": "privacy-case", "messages": [{"role": "user", "content": '{"api_key": "synthetic-secret-value"}'}, {"role": "assistant", "content": "保存しません。", "complete": True}]}, "--harness", "omp", "stop")
+    def test_save_rejects_credential_shaped_json_before_http(self):
+        result = self.command("save", {"cwd": str(self.repo), "content": '{"api_key": "synthetic-secret-value"}', "source": "user-confirmed:privacy"})
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("privacy", result.stderr)
         self.assertNotIn("synthetic-secret-value", result.stderr + result.stdout)
         self.assertEqual(Backend.state["requests"], [])
 
-    def test_recalled_context_cannot_be_recaptured(self):
-        result = last_complete_turn([
-            {"role": "user", "content": "<project_memory>old-history-marker</project_memory>\n新しい訂正です。"},
-            {"role": "assistant", "content": "訂正を確認しました。", "complete": True},
-            {"role": "tool", "content": "raw-tool-secret"},
-        ])
-        self.assertIn("新しい訂正", result)
-        self.assertNotIn("old-history-marker", result)
-        self.assertNotIn("raw-tool-secret", result)
-
-    def transcript(self, harness, rows):
-        path = self.root / (harness + ".jsonl")
-        path.write_text("\n".join(json.dumps(row) for row in rows))
-        return last_complete_turn(transcript_messages(str(path), harness))
-
-    def test_claude_summary_is_not_user_instruction(self):
-        result = self.transcript("claude", [
-            {"type": "user", "promptSource": "sdk", "message": {"role": "user", "content": "genuine-user-correction"}},
-            {"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": "verified-answer"}], "stop_reason": "end_turn"}},
-            {"type": "user", "isCompactSummary": True, "message": {"role": "user", "content": "synthetic-summary"}},
-            {"type": "assistant", "isSidechain": True, "message": {"role": "assistant", "content": [{"type": "text", "text": "subagent-guess"}], "stop_reason": "end_turn"}},
-        ])
-        self.assertIn("genuine-user-correction", result)
-        self.assertNotIn("synthetic-summary", result)
-        self.assertNotIn("subagent-guess", result)
-
-    def test_claude_stop_final_message_overrides_lagging_transcript(self):
-        path = self.root / "claude-lagging.jsonl"
-        rows = [
-            {"type": "user", "promptSource": "sdk", "message": {"content": "genuine-user-correction"}},
-            {"type": "assistant", "message": {"content": [{"type": "text", "text": "partial-unverified"}], "stop_reason": None}},
-        ]
-        path.write_text("\n".join(json.dumps(row) for row in rows))
-        payload = {
-            "cwd": str(self.repo), "session_id": "lagging", "transcript_path": str(path),
-            "hook_event_name": "StopFailure", "last_assistant_message": "verified-final",
-        }
-        failed = self.command("hook", payload, "--harness", "claude", "stop")
-        self.assertEqual(failed.returncode, 0, failed.stderr)
+    def test_conversation_turn_events_are_refused_without_backend_requests(self):
+        turn = {"cwd": str(self.repo), "session_id": "turn", "messages": [
+            {"role": "user", "content": "このprojectでは訂正を先に確認する。"},
+            {"role": "assistant", "content": "確認しました。", "complete": True},
+        ]}
+        for event in ("stop", "pre-compact", "session-end"):
+            with self.subTest(event=event):
+                result = self.command("hook", turn, "--harness", "omp", event)
+                self.assertNotEqual(result.returncode, 0)
         self.assertEqual(Backend.state["requests"], [])
-        rows[-1]["message"]["stop_reason"] = "end_turn"
-        path.write_text("\n".join(json.dumps(row) for row in rows))
-        payload["hook_event_name"] = "Stop"
-        completed = self.command("hook", payload, "--harness", "claude", "stop")
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        content = Backend.state["document"]["original_text"]
-        self.assertIn("genuine-user-correction", content)
-        self.assertIn("verified-final", content)
-        self.assertNotIn("partial-unverified", content)
 
-    def test_codex_uses_actual_user_events_not_synthetic_messages(self):
-        result = self.transcript("codex", [
-            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "turn-1"}},
-            {"type": "event_msg", "payload": {"type": "user_message", "message": "genuine-user-correction"}},
-            {"type": "response_item", "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "synthetic-compaction"}]}},
-            {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "verified-answer"}]}},
-            {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "turn-1", "last_agent_message": "verified-answer", "error": None}},
+    def test_prompt_recall_query_excludes_injected_history(self):
+        Backend.state["banks"].add(self.bank())
+        result = self.command("hook", {"cwd": str(self.repo), "prompt": "<project_memory>old-history-marker</project_memory>\n新しい訂正です。"}, "--harness", "omp", "prompt-submit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        queries = [recall["query"] for recall in Backend.state["recalls"]]
+        self.assertEqual(len(queries), 1)
+        self.assertIn("新しい訂正", queries[0])
+        self.assertNotIn("old-history-marker", queries[0])
+
+    def test_curated_lists_only_explicit_saves_across_pages(self):
+        empty = self.command("curated", {"cwd": str(self.repo), "scope": "project"})
+        self.assertEqual(empty.returncode, 0, empty.stderr)
+        self.assertEqual(json.loads(empty.stdout)["memories"], [])
+        bank = self.bank()
+        Backend.state["banks"].add(bank)
+
+        def document(identifier, kind, text):
+            return {
+                "id": identifier, "bank_id": bank, "tags": ["kind:" + kind], "original_text": text,
+                "document_metadata": {"kind": kind, "source": identifier + "#source", "content_sha256": "fixture"},
+                "memory_unit_count": 1,
+            }
+
+        Backend.state["documents"] = {item["id"]: item for item in (
+            document("correction/a", "correction", "検証は focused check を先に通す。"),
+            document("capture/b", "capture", "4件のタスクが入力待ち"),
+            document("preference/c", "preference", "報告は日本語で書く。"),
+        )}
+        result = self.command("curated", {"cwd": str(self.repo), "scope": "project"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["memories"], [
+            {"document_id": "correction/a", "kind": "correction", "source": "correction/a#source", "content": "検証は focused check を先に通す。"},
+            {"document_id": "preference/c", "kind": "preference", "source": "preference/c#source", "content": "報告は日本語で書く。"},
         ])
-        self.assertIn("genuine-user-correction", result)
-        self.assertNotIn("synthetic-compaction", result)
-
-    def test_codex_failed_terminal_event_invalidates_partial_answer(self):
-        result = self.transcript("codex", [
-            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "failed-turn"}},
-            {"type": "event_msg", "payload": {"type": "user_message", "message": "genuine-user-correction"}},
-            {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "partial-unverified"}]}},
-            {"type": "event_msg", "payload": {"type": "task_complete", "turn_id": "failed-turn", "last_agent_message": None, "error": {"message": "provider failed"}}},
-        ])
-        self.assertIsNone(result)
-
-    def test_codex_stop_uses_current_turn_before_task_complete_is_recorded(self):
-        path = self.root / "codex-stop.jsonl"
-        path.write_text("\n".join(json.dumps(row) for row in [
-            {"type": "event_msg", "payload": {"type": "task_started", "turn_id": "current"}},
-            {"type": "event_msg", "payload": {"type": "user_message", "message": "genuine-user-correction"}},
-            {"type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "partial-commentary"}]}},
-        ]))
-        payload = {
-            "cwd": str(self.repo), "session_id": "codex-stop", "transcript_path": str(path),
-            "hook_event_name": "Stop", "turn_id": "wrong-turn", "last_assistant_message": "verified-final",
-        }
-        unrelated = self.command("hook", payload, "--harness", "codex", "stop")
-        self.assertEqual(unrelated.returncode, 0, unrelated.stderr)
-        self.assertEqual(Backend.state["requests"], [])
-        payload["turn_id"] = "current"
-        completed = self.command("hook", payload, "--harness", "codex", "stop")
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        content = Backend.state["document"]["original_text"]
-        self.assertIn("genuine-user-correction", content)
-        self.assertIn("verified-final", content)
-        self.assertNotIn("partial-commentary", content)
 
 
 if __name__ == "__main__":

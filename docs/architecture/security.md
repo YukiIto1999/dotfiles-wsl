@@ -37,7 +37,7 @@ agentgateway と各 front は設定ユーザーの systemd service として動�
 設定ユーザーは `docker` group に属する。Docker API を使える主体は container の起動、mount、inspect が可能であり、container 環境へ渡した secret も読める。Docker group、root、Docker daemon を backend secret と host filesystem の信頼境界に含める。
 
 HindsightのLLM credentialはSOPS templateからroot所有の`hindsight.env`へ展開し、Dockerのenvironment fileを経てcontainerだけへ渡す。Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`へ保存し、宣言で固定したmultilingual embedding/reranker modelはNix storeからread-onlyでmountする。APIはhostの`127.0.0.1:3111`、memory MCP frontは`127.0.0.1:8774`であり、gateway経由のclientはHindsightへ直接credentialを渡さない。
-自動captureはboundedなuser/assistant turnをretain対象にする。既知のinjection blockを決定的に除外するが、secretやPIIをすべて検出する保証はないため、retain入力を安全な保管場所とは扱わない。原文書類はlocal volumeに残る一方、extraction inputは設定した外部LLMへ送られる。legacy native importは元recordをlocalで文書化してre-embeddingするだけで、LLMへ再送しない。
+clientは会話のturnをretain対象にしない。retain対象は明示的な`memory_save`と、omp の session 記録から利用者の発言だけを外部modelへ渡して候補を選ぶ記憶の収穫である。既知のinjection blockを決定的に除外するが、secretやPIIをすべて検出する保証はないため、retain入力を安全な保管場所とは扱わない。原文書類はlocal volumeに残る一方、extraction inputは設定した外部LLMへ送られる。
 
 upstream OCI image は digest を Nix 宣言へ固定し、containerを有効にしたhostの`dotfiles-sync-images`にregistry取得を限定する。container起動時の暗黙pullは無効である。同期と更新は [OCI images](../operations/oci-images.md)に従う。
 

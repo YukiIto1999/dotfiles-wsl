@@ -323,11 +323,15 @@ let
   // lib.mapAttrs' (
     name: client: lib.nameValuePair "agents/client/${name}" (expectedClientObservation name client)
   ) clients;
-  # agents root の keyspace は runtime contract と作業日誌の timer で閉じる。どちらでもない key は stale として落とす
+  # agents root の keyspace は runtime contract、作業日誌、記憶の収穫の timer で閉じる。どれでもない key は stale として落とす
   expectedJournalObservations = {
     "agents/maintenance/journal" = timerObservation "dotfiles-agent-journal";
   };
-  expectedAgentObservations = expectedRuntimeObservations // expectedJournalObservations;
+  expectedHarvestObservations = {
+    "agents/maintenance/memory-harvest" = timerObservation "dotfiles-agent-memory-harvest";
+  };
+  expectedAgentObservations =
+    expectedRuntimeObservations // expectedJournalObservations // expectedHarvestObservations;
   definitionKeysIn =
     suffix:
     lib.unique (
@@ -339,6 +343,7 @@ let
     );
   agentDefinitionKeys = definitionKeysIn "/agents/module.nix";
   journalDefinitionKeys = definitionKeysIn "/agents/journal/module.nix";
+  harvestDefinitionKeys = definitionKeysIn "/agents/memory-harvest/module.nix";
   runtimeConfiguration = configuration: {
     runtime = configuration.dotfiles.agents.runtime;
     services = lib.genAttrs [
@@ -533,6 +538,9 @@ in
     assert lib.assertMsg (
       journalDefinitionKeys == builtins.attrNames expectedJournalObservations
     ) "the journal observation must be defined by the journal unit";
+    assert lib.assertMsg (
+      harvestDefinitionKeys == builtins.attrNames expectedHarvestObservations
+    ) "the memory harvest observation must be defined by the memory harvest unit";
     assert lib.assertMsg
       (agentRuntimeContractMatches expectedRuntimeConfiguration hostConfig.dotfiles.health.observations)
       "agent runtime contract is not wired to observations, packages, services, or timers";

@@ -107,40 +107,12 @@
         ]
       }
     ],
-    "PreCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude pre-compact"
-          }
-        ]
-      }
-    ],
     "Stop": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude stop"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
             "command": "/run/current-system/sw/bin/dotfiles-agent-gate hook stop"
-          }
-        ]
-      }
-    ],
-    "SessionEnd": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/run/current-system/sw/bin/dotfiles-memory hook --harness claude session-end"
           }
         ]
       }

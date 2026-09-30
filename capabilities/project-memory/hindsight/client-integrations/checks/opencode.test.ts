@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
+import { afterAll, beforeAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,12 +6,8 @@ import { join } from "node:path";
 const { default: plugin } = await import(process.env.MEMORY_PLUGIN!);
 const workspace = mkdtempSync(join(tmpdir(), "project-memory-client-"));
 const gates = new Map<string, ReturnType<typeof gate>>();
-type RetainItem = { document_id: string; content: string; metadata: Record<string, string> };
-type FixtureDocument = {
-  id: string; bank_id: string; original_text: string;
-  document_metadata: Record<string, string>; memory_unit_count: number;
-};
-const documents = new Map<string, FixtureDocument>();
+// hook が backend へ送った要求。turn の終わりに会話を送らないことを確かめる
+const requests: string[] = [];
 let bank: string;
 let server: ReturnType<typeof Bun.serve>;
 
@@ -44,27 +40,8 @@ beforeAll(async () => {
     idleTimeout: 0,
     async fetch(request: Request) {
       const path = new URL(request.url).pathname;
-      if (path === "/stall") return Promise.withResolvers<Response>().promise;
+      requests.push(`${request.method} ${path}`);
       if (path === "/v1/default/banks") return Response.json({ banks: [{ bank_id: bank }] });
-      if (request.method === "PATCH" && path.endsWith("/config")) {
-        const body = await request.json() as { updates: unknown };
-        return Response.json({ bank_id: bank, overrides: body.updates });
-      }
-      if (request.method === "POST" && path.endsWith("/memories")) {
-        const body = await request.json() as { items: RetainItem[]; operation_id: string };
-        const item = body.items[0];
-        documents.set(item.document_id, {
-          id: item.document_id, bank_id: bank, original_text: item.content,
-          document_metadata: item.metadata, memory_unit_count: 1,
-        });
-        return Response.json({ success: true, bank_id: bank, async: true, items_count: 1, operation_id: body.operation_id });
-      }
-      if (path.includes("/operations/")) {
-        return Response.json({ operation_id: path.split("/operations/")[1], status: "completed" });
-      }
-      if (path.includes("/documents/")) {
-        return Response.json(documents.get(decodeURIComponent(path.split("/documents/")[1])));
-      }
       if (path.endsWith("/memories/recall")) {
         const { query } = await request.json() as { query: string };
         const pending = gates.get(query);
@@ -88,7 +65,6 @@ async function hooks() {
   return plugin({
     worktree: workspace,
     client: {
-      session: { messages: async () => ({ data: [] }) },
       tui: { showToast: async () => ({ data: true }) },
     },
   });
@@ -142,108 +118,27 @@ test("auxiliary model requests do not consume the active turn recall", async () 
   await callbacks["experimental.chat.system.transform"]({ sessionID: "new-session" }, title);
   await callbacks["experimental.chat.system.transform"]({ sessionID: "new-session" }, response);
   expect(response.system.join("\n")).toContain(claims["fast-current"]);
-  await callbacks.event({ event: { type: "session.idle", properties: { sessionID: "new-session" } } });
-  const afterTurn = { system: [] as string[] };
-  await callbacks["experimental.chat.system.transform"]({ sessionID: "new-session" }, afterTurn);
-  expect(afterTurn.system).toEqual([]);
 });
 
-test("capture aborts stalled history and warning requests", async () => {
-  const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
-  const timeout = spyOn(AbortSignal, "timeout").mockImplementation(() => nativeTimeout(1));
-  let warningVisible = false;
-  const callbacks = await plugin({
-    worktree: workspace,
-    client: {
-      session: {
-        messages: async ({ signal }: { signal: AbortSignal }) => ({
-          data: await (await fetch(new URL("/stall", server.url), { signal })).json(),
-        }),
-      },
-      tui: {
-        showToast: async ({ body, signal }: { body: { variant: string }; signal: AbortSignal }) => {
-          warningVisible = body.variant === "warning";
-          await fetch(new URL("/stall", server.url), { signal });
-        },
-      },
-    },
-  });
-  try {
-    await callbacks.event({ event: { type: "session.idle", properties: { sessionID: "stalled" } } });
-    expect(warningVisible).toBe(true);
-  } finally {
-    timeout.mockRestore();
-  }
-});
-
-test("dispose waits for unawaited capture and its failure warning", async () => {
-  const history = gate();
-  const notification = gate();
-  let warning = "";
-  const callbacks = await plugin({
-    worktree: workspace,
-    client: {
-      session: {
-        messages: async () => {
-          history.seen.resolve();
-          await history.release.promise;
-          throw new Error("history unavailable");
-        },
-      },
-      tui: {
-        showToast: async ({ body }: { body: { message: string } }) => {
-          warning = body.message;
-          notification.seen.resolve();
-          await notification.release.promise;
-        },
-      },
-    },
-  });
-  const capture = callbacks.event({ event: { type: "session.idle", properties: { sessionID: "closing" } } });
-  await history.seen.promise;
-  let disposed = false;
-  const disposal = Promise.resolve(callbacks.dispose?.()).then(() => { disposed = true; });
-  try {
-    await Promise.resolve();
-    expect(disposed).toBe(false);
-    history.release.resolve();
-    await notification.seen.promise;
-    expect(disposed).toBe(false);
-    notification.release.resolve();
-    await disposal;
-    expect(warning).toContain("history unavailable");
-  } finally {
-    history.release.resolve();
-    notification.release.resolve();
-    await capture;
-    await disposal;
-  }
-});
-
-test("failed assistant turns are not retained while completed turns are", async () => {
-  let failed = true;
+test("session idle discards the recall and sends nothing to memory", async () => {
+  // 完結した turn を履歴に置く。会話を保存する実装ならここで送る
   const callbacks = await plugin({
     worktree: workspace,
     client: {
       session: {
         messages: async () => ({ data: [
           { info: { role: "user" }, parts: [{ type: "text", text: "検証済みの訂正だけを保存する。" }] },
-          {
-            info: {
-              role: "assistant", time: { completed: 1 }, finish: "stop",
-              ...(failed ? { error: { name: "APIError" } } : {}),
-            },
-            parts: [{ type: "text", text: failed ? "unfinished-claim" : "verified-final-answer" }],
-          },
+          { info: { role: "assistant", time: { completed: 1 }, finish: "stop" }, parts: [{ type: "text", text: "完了した応答" }] },
         ] }),
       },
       tui: { showToast: async () => ({ data: true }) },
     },
   });
-  await callbacks.event({ event: { type: "session.idle", properties: { sessionID: "incomplete" } } });
-  expect([...documents.values()].filter((doc) => doc.document_metadata.source === "session:opencode:incomplete")).toEqual([]);
-  failed = false;
-  await callbacks.event({ event: { type: "session.idle", properties: { sessionID: "complete" } } });
-  const saved = [...documents.values()].find((doc) => doc.document_metadata.source === "session:opencode:complete");
-  expect(saved?.original_text).toContain("verified-final-answer");
+  await callbacks["chat.message"]({ sessionID: "idle-session" }, { parts: [{ type: "text", text: "fast-current" }] });
+  const before = requests.length;
+  await callbacks.event({ event: { type: "session.idle", properties: { sessionID: "idle-session" } } });
+  expect(requests.slice(before)).toEqual([]);
+  const afterTurn = { system: [] as string[] };
+  await callbacks["experimental.chat.system.transform"]({ sessionID: "idle-session" }, afterTurn);
+  expect(afterTurn.system).toEqual([]);
 });

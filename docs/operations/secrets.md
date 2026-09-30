@@ -49,7 +49,7 @@ HindsightのLLM provider用credentialは[`capabilities/project-memory/hindsight/
 
 HindsightのAPIは`127.0.0.1:3111`、memory MCP frontは`127.0.0.1:8774`である。client integrationのhookとOpenCode pluginはcredentialを所有せず、`dotfiles-memory`を経由してAPIへ接続する。credentialの値をclient設定、Nix source、ログへ書かない。
 
-retain入力は設定した外部LLMへ送られる。capture入力はSOPS secretへ追加するものではなく、indicator filteringもsecretやPIIを完全には検出しない。legacy native importの原文書類はHindsightのpersistent volumeへlocal保存し、再抽出のためにLLMへ送らない。
+retain入力は設定した外部LLMへ送られる。明示的な保存と記憶の収穫の入力はSOPS secretへ追加するものではなく、indicator filteringもsecretやPIIを完全には検出しない。
 
 ## Crawl4AI
 

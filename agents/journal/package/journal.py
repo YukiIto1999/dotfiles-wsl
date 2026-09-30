@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, tzinfo
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -25,13 +25,23 @@ class JournalError(Exception):
 
 
 @dataclass
+class Prompt:
+    """利用者が書いた発言。entry の ID で session file の原文へ戻れる。"""
+
+    id: str
+    text: str
+
+
+@dataclass
 class Session:
     id: str
     title: str
     cwd: str
+    path: Path
     first: datetime
     last: datetime
     lines: list[str] = field(default_factory=list)
+    prompts: list[Prompt] = field(default_factory=list)
     requests: int = 0
     cost: float = 0.0
 
@@ -104,7 +114,7 @@ def text_of(content: Any) -> str:
     return "\n".join(texts)
 
 
-def read_session(path: Path, start: datetime, end: datetime, tz: ZoneInfo) -> Session | None:
+def read_session(path: Path, start: datetime, end: datetime, tz: tzinfo) -> Session | None:
     header: dict | None = None
     title = ""
     session: Session | None = None
@@ -134,11 +144,14 @@ def read_session(path: Path, start: datetime, end: datetime, tz: ZoneInfo) -> Se
             if role not in ("user", "assistant"):
                 continue
             if session is None:
-                session = Session(str(header.get("id") or path.stem), title, str(header.get("cwd") or ""), moment, moment)
+                session = Session(str(header.get("id") or path.stem), title, str(header.get("cwd") or ""), path, moment, moment)
             session.last = max(session.last, moment)
             clock = moment.astimezone(tz).strftime("%H:%M")
             content = message.get("content")
             if role == "user":
+                # agent が書いた指示は role が user でも attribution が agent になる。利用者の発言だけを残す
+                if message.get("attribution") == "user" and isinstance(entry.get("id"), str):
+                    session.prompts.append(Prompt(entry["id"], text_of(content)))
                 text = clip(text_of(content))
                 if text:
                     session.lines.append(f"[{clock} 利用者] {text}")
@@ -164,7 +177,7 @@ def read_session(path: Path, start: datetime, end: datetime, tz: ZoneInfo) -> Se
     return session
 
 
-def sessions_in(root: Path, start: datetime, end: datetime, tz: ZoneInfo) -> list[Session]:
+def sessions_in(root: Path, start: datetime, end: datetime, tz: tzinfo) -> list[Session]:
     found = []
     for path in sorted(root.glob("*/*.jsonl")):
         try:
@@ -198,8 +211,8 @@ def commits_between(root: str, start: datetime, end: datetime) -> list[str]:
     return result.stdout.splitlines() if result.returncode == 0 else []
 
 
-def summarize(options: argparse.Namespace, prompt: str, material: str) -> str:
-    # cwd を Git の外に置く。project memory の hook が動いても保存先の project を決められず、日誌の入力を保存しない。
+def summarize(options: argparse.Namespace, prompt: Path, material: str) -> str:
+    # cwd を Git の外に置く。project memory の hook が動いても想起先の project を決められず、記憶を model の入力へ混ぜない。
     # 一時 directory の場所は TMPDIR で変わるため、work tree の中なら model を呼ばずに止める
     with tempfile.TemporaryDirectory(prefix="agent-journal-") as workdir:
         inside = subprocess.run(["git", "-C", workdir, "rev-parse", "--is-inside-work-tree"], capture_output=True)
@@ -212,7 +225,7 @@ def summarize(options: argparse.Namespace, prompt: str, material: str) -> str:
                     "--no-tools", "--no-lsp", "--no-title",
                     "--model", options.model, "--thinking", options.thinking,
                     "--max-time", f"{MODEL_TIMEOUT_SECONDS - 60}",
-                    "--system-prompt", str(PROMPTS / prompt),
+                    "--system-prompt", str(prompt),
                 ],
                 input=material,
                 capture_output=True,
@@ -221,10 +234,10 @@ def summarize(options: argparse.Namespace, prompt: str, material: str) -> str:
                 timeout=MODEL_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            raise JournalError(f"{prompt}: the model did not answer within {MODEL_TIMEOUT_SECONDS}s") from None
+            raise JournalError(f"{prompt.name}: the model did not answer within {MODEL_TIMEOUT_SECONDS}s") from None
     summary = result.stdout.strip()
     if result.returncode != 0 or not summary:
-        raise JournalError(f"{prompt}: the model failed: {result.stderr.strip()[-500:]}")
+        raise JournalError(f"{prompt.name}: the model failed: {result.stderr.strip()[-500:]}")
     return summary
 
 
@@ -248,7 +261,7 @@ def summarize_session(options: argparse.Namespace, session: Session) -> str:
     summaries = []
     for index, part in enumerate(parts, start=1):
         material = f"session: {session.id}\ntitle: {session.title}\ncwd: {session.cwd}\n範囲: {index}/{len(parts)}\n\n{part}"
-        summaries.append(summarize(options, "session.md", material))
+        summaries.append(summarize(options, PROMPTS / "session.md", material))
     return "\n\n".join(summaries)
 
 
@@ -265,7 +278,7 @@ def compose(
         for session in project.sessions:
             blocks.append(f"## session {session.id[:8]} {session.title}\n{summarize_session(options, session)}")
         blocks.append("## commit\n" + ("\n".join(project.commits) or "なし"))
-        project.body = summarize(options, "project.md", "\n\n".join(blocks))
+        project.body = summarize(options, PROMPTS / "project.md", "\n\n".join(blocks))
 
     tz = start.tzinfo
     lines = [

@@ -204,7 +204,7 @@ class JournalTest(unittest.TestCase):
         )
 
     def test_the_model_never_runs_inside_a_git_work_tree(self):
-        # project memory は cwd の Git common directory から保存先を決める。work tree の中で要約すると日誌の入力が記憶に入る
+        # project memory は cwd の Git common directory から想起先を決める。work tree の中で呼ぶと記憶が model の入力に混ざる
         previous = tempfile.tempdir
         tempfile.tempdir = str(self.project)
         self.addCleanup(setattr, tempfile, "tempdir", previous)

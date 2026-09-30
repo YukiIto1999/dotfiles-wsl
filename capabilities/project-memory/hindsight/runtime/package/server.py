@@ -9,8 +9,8 @@ from mcp.server.stdio import stdio_server
 from memory import Client, MemoryFailure
 
 CWD = {"type": "string", "description": "Absolute current Git working-directory path; the service derives canonical project identity."}
-SCOPE = {"type": "string", "enum": ["project", "global", "legacy"], "description": "Explicit memory scope. Legacy is unverified read-only history, excluded from automatic recall. Global is explicitly admitted cross-project preferences."}
-SAVE_SCOPE = {**SCOPE, "enum": ["project", "global"], "default": "project", "description": "Project is the documented default for saves; global is explicitly admitted cross-project preferences."}
+SCOPE = {"type": "string", "enum": ["project", "global"], "description": "Explicit memory scope. Global is explicitly admitted cross-project preferences."}
+SAVE_SCOPE = {**SCOPE, "default": "project", "description": "Project is the documented default for saves; global is explicitly admitted cross-project preferences."}
 OPERATIONS = {
     "health": ("Check Hindsight database/model readiness. This does not prove LLM availability or a successful write.", {}, []),
     "recall": (

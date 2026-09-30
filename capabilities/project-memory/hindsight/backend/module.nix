@@ -81,7 +81,7 @@ in
         HINDSIGHT_API_LLM_PROVIDER=anthropic
         HINDSIGHT_API_LLM_API_KEY=${config.sops.placeholder."opencode/go_api_key"}
         HINDSIGHT_API_LLM_BASE_URL=https://opencode.ai/zen/go
-        HINDSIGHT_API_LLM_MODEL=minimax-m2.7
+        HINDSIGHT_API_LLM_MODEL=minimax-m3
         HINDSIGHT_API_LLM_DEFAULT_HEADERS={"User-Agent":"hindsight/${version} (dotfiles-project-memory)"}
         HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
         HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=/opt/hindsight/models/embedding

@@ -1,12 +1,14 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 const GATE = "/run/current-system/sw/bin/dotfiles-agent-gate";
-const EDITING_TOOLS = new Set(["edit", "write", "ast_edit"]);
-const READING_TOOLS = new Set(["read"]);
+const EDITING_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: true };
+const READING_TOOLS: Record<string, true> = { read: true };
+// 書き込み先を入力から読めない tool。前後の木の指紋を比べて、変えた repository だけを門にかける。
+const SHELL_TOOLS: Record<string, true> = { bash: true, eval: true };
 
 async function gate(
   pi: ExtensionAPI,
-  kind: "arm" | "edit" | "learn" | "stop",
+  kind: "arm" | "edit" | "learn" | "observe" | "stop",
   payload: Record<string, unknown>,
   cwd: string,
   signal?: AbortSignal,
@@ -41,29 +43,44 @@ export default function verificationGate(pi: ExtensionAPI): void {
       tool_name: event.toolName,
       tool_input: event.input,
     };
-    if (READING_TOOLS.has(event.toolName)) {
+    if (SHELL_TOOLS[event.toolName] === true) {
+      await gate(
+        pi,
+        "observe",
+        { ...payload, hook_event_name: "PreToolUse", tool_use_id: event.toolCallId },
+        ctx.cwd,
+      );
+      return;
+    }
+    if (READING_TOOLS[event.toolName] === true) {
       await gate(pi, "learn", payload, ctx.cwd);
       return;
     }
-    if (!EDITING_TOOLS.has(event.toolName)) return;
+    if (EDITING_TOOLS[event.toolName] !== true) return;
     const held = await gate(pi, "edit", payload, ctx.cwd);
     if (held.code === 0 || held.text.length === 0) return;
     return { block: true as const, reason: held.text };
   });
 
   pi.on("tool_result", async (event, ctx: ExtensionContext) => {
-    if (event.isError || !EDITING_TOOLS.has(event.toolName)) return;
-    await gate(
-      pi,
-      "arm",
-      {
-        session_id: ctx.sessionManager.getSessionId(),
-        cwd: ctx.cwd,
-        tool_name: event.toolName,
-        tool_input: event.input,
-      },
-      ctx.cwd,
-    );
+    const payload = {
+      session_id: ctx.sessionManager.getSessionId(),
+      cwd: ctx.cwd,
+      tool_name: event.toolName,
+      tool_input: event.input,
+    };
+    // 失敗した shell の呼び出しも木を変えうるので、結果を問わず後の指紋を採る。
+    if (SHELL_TOOLS[event.toolName] === true) {
+      await gate(
+        pi,
+        "observe",
+        { ...payload, hook_event_name: "PostToolUse", tool_use_id: event.toolCallId },
+        ctx.cwd,
+      );
+      return;
+    }
+    if (event.isError || EDITING_TOOLS[event.toolName] !== true) return;
+    await gate(pi, "arm", payload, ctx.cwd);
   });
 
   pi.on("session_stop", async (event, ctx: ExtensionContext) => {

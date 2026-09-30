@@ -227,11 +227,25 @@ let
         kind = "learn";
         matcher = "Read";
       })
+      (gateHook {
+        kind = "observe";
+        matcher = "Bash";
+      })
     ];
     PostToolUse = [
       (gateHook {
         kind = "arm";
         matcher = "Edit|Write|MultiEdit|NotebookEdit";
+      })
+      (gateHook {
+        kind = "observe";
+        matcher = "Bash";
+      })
+    ];
+    PostToolUseFailure = [
+      (gateHook {
+        kind = "observe";
+        matcher = "Bash";
       })
     ];
     PreCompact = expectedHook {
@@ -646,7 +660,7 @@ in
         for event in tool_call tool_result session_stop; do
           grep -Fq "pi.on(\"$event\"" "$gateHookFile"
         done
-        for kind in arm edit learn stop; do
+        for kind in arm edit learn observe stop; do
           grep -Fq "\"$kind\"" "$gateHookFile"
         done
         grep -Fq 'block: true' "$gateHookFile"

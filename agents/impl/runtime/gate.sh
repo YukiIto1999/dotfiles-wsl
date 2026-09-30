@@ -11,7 +11,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: dotfiles-agent-gate <command> [options]
 
-  record [--repo DIR] [--command TEXT]  検証入口が通った木の控えを書く
+  record [--repo DIR] [--command TEXT]  DIR が根で TEXT が検証入口の綴りなら木の控えを書く
   arm --session ID [--path PATH]        その session が編集した repository を控える
   check [--repo DIR] [--session ID]     未検証なら理由を出して 1 で終わる
   waive --reason TEXT [--repo DIR]      理由を残していまの木を一度だけ通す
@@ -19,7 +19,7 @@ usage: dotfiles-agent-gate <command> [options]
   skill --path PATH                     その綴りを触る前に読む skill の名を答える
   learned --session ID --path NAME      その周で読んだ skill を控える
   teach --session ID --path PATH        読んでいなければ理由を出して 1 で終わる
-  hook <arm|edit|stop>                  client の hook から stdin の JSON で起こす
+  hook <arm|edit|learn|observe|stop>    client の hook から stdin の JSON で起こす
 USAGE
   exit 64
 }
@@ -104,9 +104,13 @@ ensure_dir() {
   chmod 700 "$1"
 }
 
+# 宣言した入口を repository の根で通した走行だけを控える。部分的な検査や下の directory での
+# 走行が通っても、入口がこの木で通ったことにはならない。
 command_record() {
   local repo=${1:-$PWD} text=${2:-} top state fingerprint
   top=$(repo_top_of "$repo") || return 0
+  [ "$(realpath -e -- "$repo")" = "$(realpath -e -- "$top")" ] || return 0
+  [ -n "$text" ] && [ "$text" = "$(entry_of "$top")" ] || return 0
   state=$(state_dir_of "$top") || return 0
   ensure_dir "$state"
   fingerprint=$(source_fingerprint "$top")
@@ -123,6 +127,33 @@ command_arm() {
   id=$(project_id_of "$top") || return 0
   ensure_dir "$sessions_root/$session"
   printf '%s\n' "$top" >"$sessions_root/$session/$id"
+}
+
+# shell の呼び出しは綴りから書き込み先を読めない。呼ぶ前と後で作業場所の木の指紋を比べ、
+# 変わった repository だけを控える。読むだけの呼び出しは指紋が変わらないので stop を止めない。
+# 後の側は前に控えた repository を測る。呼び出しの中で cwd が移っても、同じ木を比べる。
+command_observe() {
+  local session=$1 call=$2 phase=$3 path=$4 calls state top before
+  local -a held
+  [ -n "$session" ] && [ -n "$call" ] || return 0
+  calls="$sessions_root/$session/calls"
+  state="$calls/$(printf '%s' "$call" | sha256sum | cut -d ' ' -f 1)"
+  case $phase in
+  PreToolUse)
+    top=$(repo_top_of "$path") || return 0
+    before=$(source_fingerprint "$top") || return 0
+    ensure_dir "$calls"
+    printf '%s\n%s\n' "$before" "$top" >"$state"
+    ;;
+  PostToolUse | PostToolUseFailure)
+    [ -f "$state" ] || return 0
+    mapfile -t held <"$state"
+    rm -f -- "$state"
+    before=${held[0]-} top=${held[1]-}
+    [ -n "$before" ] && [ -d "$top" ] || return 0
+    [ "$(source_fingerprint "$top")" = "$before" ] || command_arm "$session" "$top"
+    ;;
+  esac
 }
 
 # 未検証なら理由を stdout と stderr の両方へ出して 1 で終わる。
@@ -236,6 +267,17 @@ command_hook() {
     case $path in /*) ;; *) path="$cwd/$path" ;; esac
     command_arm "$session" "$path" || true
     ;;
+  observe)
+    # 作業場所は tool の cwd を先に採る。omp の bash は session の cwd からの相対も許す。
+    path=$(printf '%s' "$payload" | jq -r '.tool_input.cwd // empty')
+    [ -n "$path" ] || path=$cwd
+    case $path in /*) ;; *) path="$cwd/$path" ;; esac
+    command_observe "$session" \
+      "$(printf '%s' "$payload" | jq -r '.tool_use_id // empty')" \
+      "$(printf '%s' "$payload" | jq -r '.hook_event_name // empty')" \
+      "$path" || true
+    exit 0
+    ;;
   learn)
     # 読んだだけの周は止めない。規律を読んだ事実だけを控える。
     path=$(printf '%s' "$payload" |
@@ -260,6 +302,8 @@ command_hook() {
   stop)
     # この session が編集した repository だけを問う。読むだけの周は素通りする。
     if [ -n "$session" ] && [ -d "$sessions_root/$session" ]; then
+      # 前だけ控えて後が届かなかった呼び出し(他の hook や許可に止められたもの)の控えを捨てる。
+      rm -rf -- "$sessions_root/$session/calls"
       for marker in "$sessions_root/$session"/*; do
         [ -d "$marker" ] && continue
         [ -f "$marker" ] || continue
@@ -302,7 +346,7 @@ main() {
       path=$2
       shift 2
       ;;
-    arm | stop | edit | learn) break ;;
+    arm | stop | edit | learn | observe) break ;;
     *) usage ;;
     esac
   done

@@ -7,7 +7,7 @@
       "prompt": "Commit 3e94a0258c05973ef4321ea5879d90fa5335f014 を親commitとの差分でreviewしてください。",
       "expectedSkills": ["code-review"],
       "input": {
-        "base": "bea5113fea086ade4dd1e71e6998cf04a1fd4ae4",
+        "base": "49c364a77bf95a0ae9828f363a03d04439cbf708",
         "head": "3e94a0258c05973ef4321ea5879d90fa5335f014",
         "path": "capabilities/browser-diagnostics/chrome-devtools/mcp/checks.nix"
       },

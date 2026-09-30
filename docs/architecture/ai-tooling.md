@@ -61,7 +61,7 @@ Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前
 
 runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。resource台帳の開始・終了フックは各5秒で打ち切り、台帳処理の停止をclient本体へ連鎖させない。打ち切った台帳はreaperの回復対象になる。
 
-`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、linked worktree間でCargo targetを共有する。project固有のCargo`target-dir`は上書きしない。
+`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、Cargoの中間成果物は`CARGO_BUILD_BUILD_DIR`でproject cacheの下に置き、`{workspace-path-hash}`でcheckoutごとに分ける。最終成果物は各checkoutの`target`に残る。同じworkspaceのcheckoutどうしで中間成果物を共有すると、Cargoが別checkoutのbuildをfreshと判定するため、linked worktreeとも共有しない。利用者が明示した`CARGO_TARGET_DIR`と`CARGO_BUILD_BUILD_DIR`、project固有のCargo`target-dir`と`build-dir`は上書きしない。一時的な写しでbuildするtoolは、写しごとに中間成果物がproject cacheへ残るため、`CARGO_BUILD_BUILD_DIR`を外して起動する。
 
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。managed worktreeはsession台帳、clean、HEAD不変、利用中processなしを確認できる場合だけ回収する。
 

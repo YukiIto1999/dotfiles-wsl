@@ -37,7 +37,7 @@ project_identity() {
   fi
 }
 
-project_has_cargo_target_dir() {
+project_has_cargo_output_dir() {
   local directory config_file
   directory=$(pwd -P)
 
@@ -54,7 +54,8 @@ project_has_cargo_target_dir() {
       if ! taplo lint --no-auto-config --no-schema "$config_file" >/dev/null 2>&1; then
         return 0
       fi
-      if taplo get --file-path "$config_file" build.target-dir >/dev/null 2>&1; then
+      if taplo get --file-path "$config_file" build.target-dir >/dev/null 2>&1 \
+        || taplo get --file-path "$config_file" build.build-dir >/dev/null 2>&1; then
         return 0
       fi
     done
@@ -98,7 +99,9 @@ create_project_cache() {
     || die "project cache marker is invalid: $marker"
   touch "$marker"
 
-  printf '%s/cargo-target\n' "$project_root"
+  # 同じ workspace の checkout どうしで中間成果物を共有すると、Cargo が別 checkout の
+  # build を fresh と判定する。Cargo 自身が workspace の path ごとに分ける。
+  printf '%s/cargo-build/{workspace-path-hash}\n' "$project_root"
 }
 
 create_shared_cache() {
@@ -202,15 +205,13 @@ fi
 canonical_project=$(project_identity) || die 'cannot derive project identity'
 project_id=$(printf '%s' "$canonical_project" | sha256sum | cut -d ' ' -f 1)
 
-if [ "${CARGO_TARGET_DIR+x}" != x ] && [ -n "${CARGO_TARGET_DIR-}" ]; then
+if [ "${CARGO_BUILD_BUILD_DIR+x}" = x ] || [ "${CARGO_TARGET_DIR+x}" = x ]; then
+  # Explicit values, including empty ones, belong to the caller.
   :
-elif [ "${CARGO_TARGET_DIR+x}" = x ]; then
-  # An explicitly empty value belongs to the caller as well.
-  :
-elif ! project_has_cargo_target_dir; then
+elif ! project_has_cargo_output_dir; then
   ensure_managed_directory "$builds_root"
-  CARGO_TARGET_DIR=$(create_project_cache "$builds_root" "$project_id")
-  export CARGO_TARGET_DIR
+  CARGO_BUILD_BUILD_DIR=$(create_project_cache "$builds_root" "$project_id")
+  export CARGO_BUILD_BUILD_DIR
 fi
 
 boot_id=$(cat /proc/sys/kernel/random/boot_id) || die 'cannot read boot id'

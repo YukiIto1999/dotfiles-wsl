@@ -22,6 +22,7 @@ printf '%s\n' "$TMPDIR" > "$CAPTURE/tmpdir"
 printf '%s\n' "$CARGO_HOME" > "$CAPTURE/cargo-home"
 printf '%s\n' "$XDG_CACHE_HOME" > "$CAPTURE/xdg-cache-home"
 printf '%s\n' "${CARGO_TARGET_DIR-unset}" > "$CAPTURE/cargo-target"
+printf '%s\n' "${CARGO_BUILD_BUILD_DIR-unset}" > "$CAPTURE/cargo-build-dir"
 if [ "${PROBE_CACHE_WRITES:-0}" = 1 ]; then
   test -n "$CARGO_HOME"
   test -n "$XDG_CACHE_HOME"
@@ -65,7 +66,7 @@ export CAPTURE=$capture
 export HOOK_LOG=$capture/hooks
 export PATH_RESOURCE_USED=$capture/path-resource-used
 export PATH="$fixture/bin:$VISIBLE_RESOURCE_DIR:$PATH"
-unset CARGO_HOME CARGO_TARGET_DIR XDG_CACHE_HOME
+unset CARGO_HOME CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR XDG_CACHE_HOME
 mkdir -p "$HOME/.cache/dotfiles-wsl/sessions" "$HOME/.cache/dotfiles-wsl/builds"
 chmod 0777 "$HOME/.cache/dotfiles-wsl" \
   "$HOME/.cache/dotfiles-wsl/sessions" \
@@ -213,8 +214,9 @@ set -e
 test "$hook_failure_status" -eq 19
 
 project_id=$(cat "$capture/project-id")
-expected_target="$fixture_home/.cache/dotfiles-wsl/builds/$project_id/cargo-target"
-test "$(cat "$capture/cargo-target")" = "$expected_target"
+expected_build_dir="$fixture_home/.cache/dotfiles-wsl/builds/$project_id/cargo-build/{workspace-path-hash}"
+test "$(cat "$capture/cargo-build-dir")" = "$expected_build_dir"
+test "$(cat "$capture/cargo-target")" = unset
 jq --exit-status \
   --arg project_id "$project_id" \
   '. == {version: 1, project_id: $project_id}' \
@@ -270,18 +272,33 @@ test -z "$(cat "$capture/xdg-cache-home")"
 
 (
   cd "$repo"
+  CARGO_BUILD_BUILD_DIR=/explicit "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+test "$(cat "$capture/cargo-build-dir")" = /explicit
+
+(
+  cd "$repo"
+  CARGO_BUILD_BUILD_DIR='' "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+test -z "$(cat "$capture/cargo-build-dir")"
+
+(
+  cd "$repo"
   CARGO_TARGET_DIR=/explicit "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
 )
 test "$(cat "$capture/cargo-target")" = /explicit
+test "$(cat "$capture/cargo-build-dir")" = unset
 
 mkdir -p "$repo/.cargo"
-printf '[build]\ntarget-dir = "project-target"\n' > "$repo/.cargo/config.toml"
-(
-  cd "$repo"
-  unset CARGO_TARGET_DIR
-  "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-test "$(cat "$capture/cargo-target")" = unset
+for key in target-dir build-dir; do
+  printf '[build]\n%s = "project-output"\n' "$key" > "$repo/.cargo/config.toml"
+  (
+    cd "$repo"
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+  )
+  test "$(cat "$capture/cargo-build-dir")" = unset
+  test "$(cat "$capture/cargo-target")" = unset
+done
 
 rm "$repo/.cargo/config.toml"
 git -C "$repo" worktree add -qb linked "$fixture/linked"

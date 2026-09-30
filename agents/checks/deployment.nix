@@ -248,20 +248,7 @@ let
         matcher = "Bash";
       })
     ];
-    PreCompact = expectedHook {
-      harness = "claude";
-      name = "pre-compact";
-    };
-    Stop =
-      expectedHook {
-        harness = "claude";
-        name = "stop";
-      }
-      ++ [ (gateHook { kind = "stop"; }) ];
-    SessionEnd = expectedHook {
-      harness = "claude";
-      name = "session-end";
-    };
+    Stop = [ (gateHook { kind = "stop"; }) ];
   };
   expectedCodexHooks = {
     SessionStart = expectedHook {
@@ -272,14 +259,6 @@ let
     UserPromptSubmit = expectedHook {
       harness = "codex";
       name = "prompt-submit";
-    };
-    PreCompact = expectedHook {
-      harness = "codex";
-      name = "pre-compact";
-    };
-    Stop = expectedHook {
-      harness = "codex";
-      name = "stop";
     };
   };
 
@@ -1021,6 +1000,8 @@ in
   agent-capability-gating =
     assert builtins.deepSeq restrictedAgentConfig.system.build.toplevel.drvPath true;
     assert !builtins.hasAttr "projectMemoryHooks" restrictedAgentConfig.dotfiles.agents.packages;
+    assert !builtins.hasAttr "agentMemoryHarvest" restrictedAgentConfig.dotfiles.platform.cli.commands;
+    assert !builtins.hasAttr "dotfiles-agent-memory-harvest" restrictedAgentConfig.systemd.timers;
     assert lib.all (client: client.projectMemoryMode == "unsupported") (
       builtins.attrValues restrictedAgentConfig.dotfiles.agents.clients
     );

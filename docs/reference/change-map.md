@@ -48,7 +48,8 @@
 | project memoryのruntime、client integration、engine、MCP、backendを変える | [`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)とgeneric optionを宣言するCapability module | `project-memory-runtime-behavior`、`project-memory-client-integrations`、`hindsight-container`、`hindsight-front` |
 | session、build cache、verification reuseを変える | [`agents/impl/runtime/`](../../agents/impl/runtime)と[`agents/module.nix`](../../agents/module.nix) | 対応するruntime focused check |
 | linked worktreeの登録と回収を変える | [`agents/impl/resource/`](../../agents/impl/resource)と[`agents/module.nix`](../../agents/module.nix) | `agent-resource-contract`、`agent-resource-behavior` |
-| 作業日誌の時間帯、model、入力、出力先を変える | [`agents/journal/`](../../agents/journal) | `agent-journal-behavior`、`dotfiles-rebuild` |
+| 作業日誌の時間帯、model、入力、出力先を変える | [`agents/journal/`](../../agents/journal) | `agent-journal-behavior`、session記録の読み方とmodelの呼び方を変えた場合は`agent-memory-harvest-behavior`、`dotfiles-rebuild` |
+| 記憶の収穫の対象、判定の梯子、model、時刻、state fileを変える | [`agents/memory-harvest/`](../../agents/memory-harvest)。保存と一覧の契約は[`capabilities/project-memory/hindsight/runtime/`](../../capabilities/project-memory/hindsight/runtime/) | `agent-memory-harvest-behavior`、`project-memory-runtime-behavior`、`dotfiles-rebuild` |
 
 ## MCP、container、Capability実装
 

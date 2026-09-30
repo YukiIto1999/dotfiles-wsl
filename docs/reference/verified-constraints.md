@@ -80,7 +80,7 @@
 | 有効なcontainer applicationとservice contractのkeyが一致する | `container-application-registry` |
 | container Capabilityを一件だけ選んだ構成では対応するcontainer一式だけを配備し、container Capabilityを零件にした構成ではDocker、container Capability所有のMCP target、secret、artifactを配備しない | `container-capability-gating` |
 | 非container Capabilityを選ばない構成では所有するMCP targetとsession variableを配備せず、provider集合と残存targetが一致する | `mcp-capability-gating` |
-| `project-memory`と`code-quality`を選ばない構成ではHindsightのhook package、client mode、managed file、および利用不能なSkill、subagent、handoff、policy記述を配備しない | `agent-capability-gating` |
+| `project-memory`と`code-quality`を選ばない構成ではHindsightのhook package、記憶の収穫のcommandとtimer、client mode、managed file、および利用不能なSkill、subagent、handoff、policy記述を配備しない | `agent-capability-gating` |
 | 有効なCapabilityまたはSkill依存を満たせないSkillをAgent clientへ配備しない | `skill-capability-gating` |
 | OCI imageの宣言がcontainerとpull方針に一致する | `oci-image-contract` |
 | container applicationのendpoint URLとportがOCI publish、unitがsystemd serviceに完全一致し、healthが宣言済みHTTP endpointを参照する | `nixos-toplevel`（`platform/containers/module.nix`のassertion） |
@@ -96,14 +96,15 @@
 | MCP session が active な GET body の間 reap されず、session front の listener address を loopback に固定できる | `agentgateway-session-lifecycle` |
 | agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、checkout ごとの Cargo build-dir、明示済み環境値と project の出力先設定、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
-| project-memory runtimeが絶対cwd、Git common directory由来のproject scope、explicit scope、legacy read-only、pending retain、capture/reinjection filteringを契約どおり扱う | `project-memory-runtime-behavior` |
-| OpenCodeの同時sessionへ想起結果が混在せず、古いpromptの遅延応答が新しい結果を上書きせず、履歴取得と通知の停止待ちを期限内で打ち切る | `project-memory-client-integrations` |
+| project-memory runtimeが絶対cwd、Git common directory由来のproject scope、explicit scope、pending retainを契約どおり扱い、会話turnのhook eventをbackendへ送らずに拒否し、recall queryから注入blockを除き、明示的に保存した記憶だけを全頁から一覧する | `project-memory-runtime-behavior` |
+| OpenCodeの同時sessionへ想起結果が混在せず、古いpromptの遅延応答が新しい結果を上書きせず、idleで想起結果を捨てて会話をmemoryへ送らない | `project-memory-client-integrations` |
 | GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。raw asset は single-binary layout と path 成分のない entrypoint だけを受理し、mode 0700 で公開する。client ごとの失敗は隔離され、後続 client の公開を止めず、失敗した client 名だけを報告する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
 | agent cache GC が allocated bytes を正本にし、不正な managed path を検出すると削除前に失敗し、metadata のない session を所有者のいない orphan として回収し、内容が不正な metadata を持つ session は所有者を判定できないため残してその実行の cache 削除を止め、他の orphan は回収し、inactive project cache を先に回収して active session がない場合だけ共有 cache を空にし、再計測し、未解決の session を残した実行を失敗で終える | `agent-project-cache-gc` |
 | source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない。検証の門は宣言した入口を repository の根で通した木だけを通し、shell の呼び出しは木を変えた場合だけ門を立てる | `agent-verification-cache` |
 | agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |
 | agent が作った worktree だけを登録し、clean、HEAD 不変、未使用の場合だけ隔離と再検査後に回収する | `agent-resource-behavior` |
 | 作業日誌が区切り時刻から翌日の区切り時刻までの利用者の指示、応答、tool の意図、commit だけを model へ渡し、thinking、tool の結果、subagent の記録、範囲外の entry を渡さず、host ごとの file を push する。同じ日を作り直しても内容が同じなら commit を増やさず、timer は最後に完了した日までの未作成の日だけを選ぶ。model が失敗した日は file を作らずに後の日を記録して非ゼロで終わり、次の実行でその日を作る。一時 directory が Git の work tree の中にあれば model を呼ばない | `agent-journal-behavior` |
+| 記憶の収穫が前回成功した実行から後の利用者の発言だけを model へ渡し、応答、tool の結果、注入した記憶、subagent の記録を渡さない。将来の場面を返さなかった候補、保存済みの記憶と同じ内容の候補、source が保存済みの記憶にある発言を保存せず、場面を保存する本文に含めず、候補を session file と entry ID の source で保存する。pending は status が saved を返すまで保存済みと報告せず、資格情報に見える候補の拒否では失敗にしない。model や保存の失敗では非ゼロで終わり、読み終えた位置を進めない | `agent-memory-harvest-behavior` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
 | モデル用の Windows G: ドライブを `/mnt/g` へ drvfs で割り当て、未接続時に WSL の起動を妨げない systemd automount にする | `wsl-model-drive-contract` |
 | WSL の既定 user と root の systemd user manager を linger で常駐させ、WSL の自動終了後の起動でも login session を作れるようにする | `wsl-user-session-contract` |

@@ -77,7 +77,7 @@ client別の能力配備の正本は各`agents/clients/<id>/module.nix`のmode�
 nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply 'builtins.mapAttrs (_: client: { inherit (client) subagentMode skillProjectionMode lspMode telemetryMode projectMemoryMode; })'
 ```
 
-`projectMemoryMode`はclient固有のcapture入口を表すが、明示的な検索、検証、保存の判断を代替しない。
+`projectMemoryMode`はclient固有の想起注入の入口を表すが、明示的な検索、検証、保存の判断を代替しない。
 
 Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
 OMPのseedはBash interceptorを有効にし、直接の再帰検索を専用検索手段へ誘導する。既存の`config.yml`はOMP自身の設定commandで移行する。
@@ -110,38 +110,49 @@ Capability実装はregistry metadataを常に宣言し、backend、MCP target、
 
 ## Project memory
 
-現行のproject memory実装は[`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)が所有する。`backend`はHindsight、`runtime`は`bin/dotfiles-memory`を含むpackage、`mcp`はmemory providerのfront、`client-integrations`は共通hook packageとOpenCode pluginをそれぞれ持つ。Capabilityが公開するgeneric optionは`dotfiles.capabilities.project-memory.runtime`と`dotfiles.capabilities.project-memory.clientIntegrations.{hooks,opencodePlugin}`であり、client moduleはprovider名やbackend pathを直接参照しない。移行元のexportはrepository外のbackupに保全する。
+現行のproject memory実装は[`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)が所有する。`backend`はHindsight、`runtime`は`bin/dotfiles-memory`を含むpackage、`mcp`はmemory providerのfront、`client-integrations`は共通hook packageとOpenCode pluginをそれぞれ持つ。Capabilityが公開するgeneric optionは`dotfiles.capabilities.project-memory.runtime`と`dotfiles.capabilities.project-memory.clientIntegrations.{hooks,opencodePlugin}`であり、client moduleはprovider名やbackend pathを直接参照しない。
 
 ```text
 Claude Code / Codex / OMP hooks ─┐
-OpenCode capture plugin ─────────┼─► dotfiles-memory ─► 127.0.0.1:3111 Hindsight
+OpenCode recall plugin ──────────┤
+agent memory harvest ────────────┼─► dotfiles-memory ─► 127.0.0.1:3111 Hindsight
                                  │                         │
 AI CLI ─► gateway ─► memory MCP ┘                         └─► hindsight-data volume
 ```
 
-memory MCPのendpointは`front`のport `8774`、Hindsight APIは`localhost:3111`である。MCPの入口は`memory_health`、`memory_recall`、`memory_save`、`memory_status`、`memory_verify`で、project/global/legacyのscopeを明示する。healthはHindsightのdatabaseとmodel readinessだけを確認し、LLMが利用できることやretainが成功したことは証明しない。
+memory MCPのendpointは`front`のport `8774`、Hindsight APIは`localhost:3111`である。MCPの入口は`memory_health`、`memory_recall`、`memory_save`、`memory_status`、`memory_verify`で、project/globalのscopeを明示する。healthはHindsightのdatabaseとmodel readinessだけを確認し、LLMが利用できることやretainが成功したことは証明しない。
 
-project scopeのidentityは、`dotfiles-memory`が絶対`cwd`からGit common directoryを解決して導く。同じrepositoryのlinked worktreeは共有し、basenameが同じ別repositoryは分離する。legacy scopeはAgentMemoryの未検証履歴をread-onlyで検索する領域で、自動recallには混ぜず、current sourceで確認した知識をprojectまたはglobalへ明示的に保存する。
+project scopeのidentityは、`dotfiles-memory`が絶対`cwd`からGit common directoryを解決して導く。同じrepositoryのlinked worktreeは共有し、basenameが同じ別repositoryは分離する。projectを特定できないAgentMemory由来の未検証履歴を読むlegacy scopeは、検証済みの知識だけを残すため廃止した。
 
-Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`に保持する。宣言で固定したmultilingual embeddingとrerankerのmodel mountはNix storeからread-onlyで渡し、retain時のextraction inputはSOPSから展開したcredentialで設定する外部LLMへ送られる。native legacy importは指定snapshotの全recordを元IDとcanonical raw record documentで保持し、local re-embeddingだけを行い、LLMによる再抽出とlegacy consolidationを行わない。
+Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`に保持する。宣言で固定したmultilingual embeddingとrerankerのmodel mountはNix storeからread-onlyで渡し、retain時のextraction inputはSOPSから展開したcredentialで設定する外部LLMへ送られる。
 
-client連携は直近の完結したuser/assistant turnを自動captureし、対応するsession開始とprompt送信でproject/globalのrecall結果をreinjectionする。native adapterはassistantの正常終了を示す情報を保持し、runtimeは最新のassistantが正常終了したturnだけを採用する。失敗、途中終了、終了状態不明のturnを過去の応答で補わない。OMPは末尾から最大128entryを辿り、OpenCodeは最新128messageだけを取得する。両clientはcapture対象のtextと区切り分を12000文字以内に制限し、上限内にuser側の境界が見つからない場合は部分保存せず警告する。
+client連携は、対応するsession開始とprompt送信でproject/globalのrecall結果をreinjectionするだけで、会話のturnをHindsightへ送らない。runtimeの`hook`も`session-start`と`prompt-submit`以外のeventを拒否する。以前は完結したturnを自動captureしていたが、抽出modelがretain missionに反して進捗やprocess IDのような一時的な状態まで事実として残し、自動recallがそれを毎turnへ注入し、抽出が定額枠を消費したため廃止した。保存は明示的な`memory_save`と、次の[記憶の収穫](#記憶の収穫)だけが行う。
 
-ClaudeとCodexのStopでは、利用者メッセージの由来を確認してnativeの最終応答を優先する。Codexではhookのturn IDもtranscriptに照合する。CodexはStop後に`task_complete`を記録するため、Stop処理中にはその記録を要求しない。PreCompactとSessionEndではtranscriptの正常終了を確認する。
-
-OpenCodeのrecall結果は同じturnのmodel呼出しで共有し、次のpromptで置き換え、idleで破棄する。title生成などの補助呼出しで消費しない。idle eventのcaptureはpluginが追跡し、`dispose`で開始済み処理の完了または失敗通知を待つ。履歴取得とhook実行には29秒、警告通知には1秒のabort期限を設定する。event loopやhostが停止している時間を含めた実時間の上限は保証しない。
+OpenCodeのrecall結果は同じturnのmodel呼出しで共有し、次のpromptで置き換え、idleで破棄する。title生成などの補助呼出しで消費しない。hook実行には30秒、警告通知には1秒のabort期限を設定する。event loopやhostが停止している時間を含めた実時間の上限は保証しない。
 
 既知のmemory/injection blockは決定的に除外するが、secretやPIIをすべて検出できる保証ではない。失敗時に別のmemory backendへfallbackしない。saveが`pending`または`indeterminate`なら保存済みと扱わず、返されたoperationとdocumentのIDを同じscopeの`memory_status`へ渡して確認する。`indeterminate`は送信後の通信断や期限切れで結果を確認できない状態で、runtimeはsaveを自動再送しない。
 
-LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有のruntime environment fileを経てcontainerへ渡し、client hookやMCP frontへは配らない。sessionのretain入力が外部providerへ送られる信頼境界を持つ。
+LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有のruntime environment fileを経てcontainerへ渡し、client hookやMCP frontへは配らない。明示的な保存と記憶の収穫のretain入力が外部providerへ送られる信頼境界を持つ。
 
 ## 作業日誌
 
 [`agents/journal/`](../../agents/journal)は、omp の session 記録から日次の作業日誌を作る。project memory が判断を想起のために蓄えるのに対し、作業日誌は全 project の作業を日付順に読める記録として残す。入力は`~/.omp/agent/sessions/`直下の project ごとの session file で、親 session の隣に置かれる subagent の記録は親と内容が重なるため読まない。各 entry の時刻で 06:00 から翌日の 06:00 までを切り出し、利用者の指示、エージェントの応答、tool の名前と意図だけを model へ渡す。thinking、tool の結果、tool の引数は渡さない。project ごとの commit 一覧は Git から読む。
 
-要約は omp の print mode で二段に行い、session ごとの要約を project ごとにまとめる。起動時は session file、rules、Skill、自動検出する extension、tool を読み込まない。project memory の hook は extension とは別に読み込まれ得るため、要約は Git の work tree ではない一時 directory で実行し、一時 directory が work tree の中にあれば model を呼ばずにその日を失敗にする。project scope の保存先は cwd の Git common directory から決まるので、この cwd では決まらず、日誌の入力は project memory に保存されない。model は omp の`tiny`役割と同じ`opencode-go/deepseek-v4.1-flash`で、認証は omp が保持するものを使う。session の本文には secret や個人情報が混ざり得る。prompt は秘密に見えるものを書かないよう指示するが、検出を保証しない。日誌の repository への commit は全 repository 共通の Git hook を通るが、pre-commit hook が拒否するのは GitHub token の形だけである。
+要約は omp の print mode で二段に行い、session ごとの要約を project ごとにまとめる。起動時は session file、rules、Skill、自動検出する extension、tool を読み込まない。project memory の hook は extension とは別に読み込まれることがあり、prompt ごとに cwd の Git common directory から決まる project の記憶を想起して注入する。このため要約は Git の work tree ではない一時 directory で実行し、一時 directory が work tree の中にあれば model を呼ばずにその日を失敗にする。この cwd では project が決まらず、記憶は model の入力に混ざらない。model は omp の`tiny`役割と同じ`opencode-go/deepseek-v4.1-flash`で、認証は omp が保持するものを使う。session の本文には secret や個人情報が混ざり得る。prompt は秘密に見えるものを書かないよう指示するが、検出を保証しない。日誌の repository への commit は全 repository 共通の Git hook を通るが、pre-commit hook が拒否するのは GitHub token の形だけである。
 
 日誌の repository は`dotfiles.workstation.environmentDir`の下に置き、flake の入力にはしない。dotfiles が配備した timer が書き込む出力だからである。
+
+## 記憶の収穫
+
+[`agents/memory-harvest/`](../../agents/memory-harvest)は、omp の session 記録から利用者の訂正、決定、好みを取り出し、project memory へ保存する。session 記録の読み方と omp の呼び出しは作業日誌の package を読み込んで共有し、model も作業日誌と同じ定額の`opencode-go/deepseek-v4.1-flash`と thinking `low`を使う。作業の大半は omp で行うため、Claude Code、Codex、OpenCode の session 記録は読まない。
+
+入力は`~/.omp/agent/sessions/`直下の session file のうち、前回成功した実行から今回の開始までの entry である。attribution が`user`の発言だけを読み、`<project_memory>`と`<system-reminder>`の block を除く。エージェントの応答、tool の結果、注入した文脈、subagent の記録は model へ渡さない。cwd から Git project を決められない session は読まずに報告する。
+
+model には project ごとに、明示的に保存した記憶（`dotfiles-memory curated`）と利用者の発言を渡し、将来の別 session の判断を変える発言だけを候補にさせる。次の発言は候補にしない。今回の作業への依頼、計画、進捗の確認、質問、同意だけの返事、その場だけの許可や禁止、状況に依存する優先度や締切、人の名前を含むもの、利用者が標準、AGENTS、Skill、文書、hook、code へ入れるよう求めた規律、製品の仕様、現在の状態から分かること、保存済みの記憶と同じ内容、secret や個人情報を含むものである。正本に入るものを記憶に重ねないためである。
+
+model は候補ごとに、将来の別 session で同じ判断を迫られる場面を一行で書き、書けない発言は候補にしない。場面を返さなかった候補は保存せず、場面を保存する本文にも含めない。初回の収穫で、その場の禁止や一回限りの許可が好みとして保存されたため、判定を場面に結び付けた。model の判定とは別に、source が保存済みの記憶にある発言は model へ渡さず、保存済みの記憶と文字列が一致する候補は保存しない。失敗した実行を繰り返しても、同じ発言から記憶を二つ作らないためである。
+
+候補は一件ずつ`dotfiles-memory save`へ、scope `project`、session の cwd、kind、source `<session file>#<entry id>`で渡す。`pending`または`indeterminate`の receipt は保存済みと報告せず、state file に残して次の実行で`dotfiles-memory status`へ渡す。state file の読み終えた位置は、全 project の取り出しが成功した実行だけが進める。runtime が資格情報や個人情報に見える候補を拒んだ場合は、その候補だけを捨てて失敗にしない。発言は model の provider へ、保存した内容は Hindsight の抽出 model へ送られる。運用は[記憶の収穫](../operations/memory-harvest.md)に従う。
 
 ## LSPと観測
 

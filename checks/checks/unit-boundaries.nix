@@ -89,6 +89,10 @@ let
       target = nestedCommandHelper;
       line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";
     };
+    "agents/memory-harvest/module.nix" = {
+      target = nestedCommandHelper;
+      line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";
+    };
     "capabilities/code-quality/sonarqube/provisioning/module.nix" = {
       target = deeplyNestedCapabilityCommandHelper;
       line = "  mkCommand = import ${deeplyNestedCapabilityCommandHelper} { inherit config lib pkgs; };";

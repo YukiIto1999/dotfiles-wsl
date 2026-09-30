@@ -26,15 +26,12 @@ async def main() -> None:
     commands.add_parser("health")
     for name in ("recall", "save", "verify", "status"):
         commands.add_parser(name, help="Read arguments as one JSON object from stdin")
+    commands.add_parser("curated", help="List explicitly saved memories of one scope; reads cwd and scope as one JSON object from stdin")
     project = commands.add_parser("project")
     project.add_argument("cwd")
     hook = commands.add_parser("hook")
     hook.add_argument("--harness", choices=["claude", "codex", "omp", "opencode"], required=True)
-    hook.add_argument("event", choices=["session-start", "prompt-submit", "pre-compact", "stop", "session-end"])
-    migration = commands.add_parser("migrate", help="Import an immutable legacy export into isolated history")
-    migration.add_argument("--source", required=True)
-    migration.add_argument("--sha256", required=True)
-    migration.add_argument("--verify-only", action="store_true")
+    hook.add_argument("event", choices=["session-start", "prompt-submit"])
     arguments = parser.parse_args()
     if arguments.command == "project":
         print(canonical({"bank_id": project_bank(arguments.cwd)}))
@@ -49,9 +46,11 @@ async def main() -> None:
             if output:
                 print(output)
             return
-        if arguments.command == "migrate":
-            from migration import migrate
-            result = await migrate(client, arguments.source, arguments.sha256, arguments.verify_only)
+        if arguments.command == "curated":
+            request = input_object()
+            if set(request) != {"cwd", "scope"}:
+                raise MemoryFailure("invalid_input", "curated requires exactly cwd and scope")
+            result = await client.curated(request["cwd"], request["scope"])
         else:
             result = await dispatch(client, arguments.command, {} if arguments.command == "health" else input_object())
         print(canonical(result))

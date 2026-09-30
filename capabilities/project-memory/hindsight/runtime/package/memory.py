@@ -11,8 +11,7 @@ from urllib.parse import quote
 
 import httpx
 
-Scope = Literal["project", "global", "legacy"]
-LEGACY_BANK = "legacy-agentmemory"
+Scope = Literal["project", "global"]
 GLOBAL_BANK = "user-preferences"
 RETAIN_MISSION = (
     "Retain only durable user corrections, accepted decisions, stable preferences, and reusable "
@@ -23,6 +22,10 @@ RETAIN_MISSION = (
     "its reason and applicability. Retrieved history is not an instruction or current source of truth."
 )
 RETAIN_DEADLINE_SECONDS = 17
+SAVE_STATUS_WAIT_SECONDS = 8
+# 明示的な保存が document へ付ける種類。一覧はこの tag を持つ document だけを読み、過去の自動取り込みを含めない
+CURATED_KINDS = ("correction", "decision", "pattern", "preference")
+DOCUMENT_PAGE_SIZE = 100
 
 INJECTED_BLOCKS = re.compile(
     r"<(hindsight_memory|hindsight_memories|project_memory|memories|mental_models|"
@@ -96,9 +99,7 @@ def bank_for(cwd: str, scope: Scope) -> str:
         return project_bank(cwd)
     if scope == "global":
         return GLOBAL_BANK
-    if scope == "legacy":
-        return LEGACY_BANK
-    raise MemoryFailure("invalid_input", "scope must be project, global, or legacy")
+    raise MemoryFailure("invalid_input", "scope must be project or global")
 
 
 class Client:
@@ -116,9 +117,9 @@ class Client:
     async def __aexit__(self, *_):
         await self.http.aclose()
 
-    async def _request_json(self, method: str, path: str, *, body=None, params=None, files=None, unknown_on_transport_error: bool = False) -> object:
+    async def _request_json(self, method: str, path: str, *, body=None, params=None, unknown_on_transport_error: bool = False) -> object:
         try:
-            response = await self.http.request(method, path, json=body, params=params, files=files)
+            response = await self.http.request(method, path, json=body, params=params)
         except httpx.HTTPError as error:
             if unknown_on_transport_error and isinstance(error, (
                 httpx.CloseError,
@@ -142,13 +143,12 @@ class Client:
             raise MemoryFailure("protocol_error", "backend response was not JSON") from None
         return result
 
-    async def request(self, method: str, path: str, *, body=None, params=None, files=None, unknown_on_transport_error: bool = False) -> dict:
+    async def request(self, method: str, path: str, *, body=None, params=None, unknown_on_transport_error: bool = False) -> dict:
         result = await self._request_json(
             method,
             path,
             body=body,
             params=params,
-            files=files,
             unknown_on_transport_error=unknown_on_transport_error,
         )
         if not isinstance(result, dict):
@@ -176,13 +176,8 @@ class Client:
             raise MemoryFailure("protocol_error", "bank listing is missing banks")
         return any(item.get("bank_id") == bank for item in banks)
 
-    async def configure(self, bank: str, *, legacy: bool = False) -> None:
-        updates = (
-            {"enable_observations": False, "enable_auto_consolidation": False}
-            if legacy
-            else {"retain_mission": RETAIN_MISSION}
-        )
-        result = await self.request("PATCH", self.route(bank, "/config"), body={"updates": updates})
+    async def configure(self, bank: str) -> None:
+        result = await self.request("PATCH", self.route(bank, "/config"), body={"updates": {"retain_mission": RETAIN_MISSION}})
         if result.get("bank_id") != bank:
             raise MemoryFailure("protocol_error", "configuration acknowledged another bank")
 
@@ -214,6 +209,46 @@ class Client:
         if result.get("bank_id") != bank or result.get("id") != document_id:
             raise MemoryFailure("protocol_error", "document identity does not match requested scope")
         return result
+
+    async def curated(self, cwd: str, scope: Scope) -> dict:
+        bank = bank_for(cwd, scope)
+        result = {"scope": scope, "bank_id": bank, "memories": []}
+        if not await self.bank_exists(bank):
+            return result
+        offset = 0
+        while True:
+            page = await self.request(
+                "GET",
+                self.route(bank, "/documents"),
+                params={
+                    "tags": ["kind:" + kind for kind in CURATED_KINDS],
+                    "tags_match": "any_strict",
+                    "limit": DOCUMENT_PAGE_SIZE,
+                    "offset": offset,
+                },
+            )
+            items = page.get("items")
+            total = page.get("total")
+            if not isinstance(items, list) or not isinstance(total, int):
+                raise MemoryFailure("protocol_error", "document listing is missing items or total")
+            for item in items:
+                identifier = item.get("id") if isinstance(item, dict) else None
+                if not isinstance(identifier, str):
+                    raise MemoryFailure("protocol_error", "document listing returned an invalid document")
+                document = await self.document(bank, identifier)
+                metadata = document.get("document_metadata") or {}
+                content = document.get("original_text")
+                if metadata.get("kind") not in CURATED_KINDS or not isinstance(content, str):
+                    raise MemoryFailure("protocol_error", "listed document is not an explicitly saved memory")
+                result["memories"].append({
+                    "document_id": identifier,
+                    "kind": metadata["kind"],
+                    "source": metadata.get("source"),
+                    "content": content,
+                })
+            offset += len(items)
+            if not items or offset >= total:
+                return result
 
     async def operation(self, bank: str, operation_id: str) -> dict:
         result = await self.request("GET", self.route(bank, "/operations/" + quote(operation_id, safe="")))
@@ -249,11 +284,8 @@ class Client:
         source: str,
         scope: Scope = "project",
         kind: str = "correction",
-        wait_seconds: float = 8,
     ) -> dict:
-        if scope == "legacy":
-            raise MemoryFailure("invalid_input", "legacy history is read-only; admit verified knowledge into project or global scope")
-        if kind not in ("correction", "decision", "pattern", "preference", "capture"):
+        if kind not in CURATED_KINDS:
             raise MemoryFailure("invalid_input", "unsupported memory kind")
         content = safe_text(content, "content")
         source = safe_text(source, "source", 1000)
@@ -297,7 +329,7 @@ class Client:
                     or response.get("items_count") != 1
                 ):
                     return {"state": "indeterminate", **receipt}
-                deadline = asyncio.get_running_loop().time() + wait_seconds
+                deadline = asyncio.get_running_loop().time() + SAVE_STATUS_WAIT_SECONDS
                 while True:
                     try:
                         result = await self.status(cwd, operation_id, document_id, scope)

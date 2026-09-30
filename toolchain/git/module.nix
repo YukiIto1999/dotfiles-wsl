@@ -33,6 +33,25 @@ let
     );
     executable = true;
   };
+
+  credentialTokenFile = pkgs.writeShellApplication {
+    name = "git-credential-token-file";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = builtins.readFile ./assets/credential-token-file;
+  };
+  # gh の helper は active user の token しか返さない。primary 以外の account が担当する
+  # owner は URL の path で切り分け、その account の token file を返す helper に替える
+  ownerCredentials = lib.concatMapAttrs (
+    account: owners:
+    lib.genAttrs (map (owner: "https://github.com/${owner}") owners) (_: {
+      helper = [
+        ""
+        "${lib.getExe credentialTokenFile} ${
+          lib.escapeShellArg config.sops.secrets."accounts/${account}/token".path
+        }"
+      ];
+    })
+  ) cfg.identity.github.owners;
 in
 {
   options.dotfiles.toolchain.git = {
@@ -95,6 +114,9 @@ in
           core.hooksPath = "~/.config/git/hooks";
           merge.conflictstyle = "diff3";
           include.path = "${dotfiles.workstation.homeDir}/${dotfiles.toolchain.git.identity.destinations.default}";
+          # git は URL に一致した section の helper を file の順に積み、空の値でそれまでを捨てる。
+          # subsection は名前順に並ぶので、owner の section は host 全体の gh の section より後に来る
+          credential = ownerCredentials;
         };
         includes = lib.optionals (dotfiles.toolchain.git.workIdentity != null) [
           {

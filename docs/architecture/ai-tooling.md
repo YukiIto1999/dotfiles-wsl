@@ -126,6 +126,8 @@ project scopeのidentityは、`dotfiles-memory`が絶対`cwd`からGit common di
 
 Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`に保持する。宣言で固定したmultilingual embeddingとrerankerのmodel mountはNix storeからread-onlyで渡し、retain時のextraction inputはSOPSから展開したcredentialで設定する外部LLMへ送られる。
 
+抽出modelは定額のOpenCode Goで呼べる`minimax-m3`である。保存が明示的な保存と記憶の収穫だけになり件数が少ないため、2026-09-30に`memories/dry-run-extract`で5 modelを比べ、日本語と利用者の制約を保ち、応答が最も速く出力tokenが最も少ないものを選んだ。抽出すべきでない一回限りの許可を事実にしなかったのは`qwen3.8-max`だけだったが、同じ入力で出力tokenが4倍から19倍多く、定額枠を圧迫する。`minimax-m3`はその許可を事実にしたため、何を保存するかは抽出modelに頼らず、保存する前に決める。
+
 client連携は、対応するsession開始とprompt送信でproject/globalのrecall結果をreinjectionするだけで、会話のturnをHindsightへ送らない。runtimeの`hook`も`session-start`と`prompt-submit`以外のeventを拒否する。以前は完結したturnを自動captureしていたが、抽出modelがretain missionに反して進捗やprocess IDのような一時的な状態まで事実として残し、自動recallがそれを毎turnへ注入し、抽出が定額枠を消費したため廃止した。保存は明示的な`memory_save`と、次の[記憶の収穫](#記憶の収穫)だけが行う。
 
 OpenCodeのrecall結果は同じturnのmodel呼出しで共有し、次のpromptで置き換え、idleで破棄する。title生成などの補助呼出しで消費しない。hook実行には30秒、警告通知には1秒のabort期限を設定する。event loopやhostが停止している時間を含めた実時間の上限は保証しない。

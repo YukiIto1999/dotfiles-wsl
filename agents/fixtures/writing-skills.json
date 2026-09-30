@@ -30,7 +30,49 @@
         "onePurpose": true,
         "recordsPurpose": true,
         "changesIndex": false,
-        "example": "fix: commit message作成でindexを変更しない"
+        "readsStandardFiles": [
+          "principles/documentation/commit-purpose.md",
+          "principles/documentation/sentence-endings.md"
+        ],
+        "typePrefix": true,
+        "subjectEndsWithNoun": true,
+        "subjectHasTouten": false,
+        "subjectHasKuten": false,
+        "runsCommitMsgHookBeforeFinishing": true,
+        "bypassesHook": false,
+        "example": "fix: commit message作成時のindex変更の防止"
+      }
+    },
+    {
+      "id": "commit-subject-form",
+      "prompt": "Write one commit message for this staged diff.",
+      "input": {
+        "type": "staged-diff",
+        "request": "Review comment from Sato: subjects ending with verbs read as cut-off sentences in git log.",
+        "changes": [
+          {
+            "path": "toolchain/git/assets/hooks/commit-msg",
+            "before": "accepts subjects ending with a verb, adjective, or particle",
+            "after": "rejects subjects ending with a verb, adjective, or particle"
+          },
+          {
+            "path": "CONTRIBUTING.md",
+            "before": "subject examples end with verbs",
+            "after": "subject examples end with nouns and the hook rejection is documented"
+          }
+        ]
+      },
+      "expectedSkills": ["commit-writing", "ja-writing"],
+      "expected": {
+        "onePurpose": true,
+        "containsPersonalName": false,
+        "typePrefix": true,
+        "subjectEndsWithNoun": true,
+        "subjectHasTouten": false,
+        "joinsTwoConcernsWithSpaceOrNakaguro": false,
+        "runsCommitMsgHookBeforeFinishing": true,
+        "bypassesHook": false,
+        "example": "fix: 動詞や助詞で終わる件名の拒否"
       }
     },
     {
@@ -100,10 +142,44 @@
         "implementation": ["comment-writing"]
       },
       "expected": {
-        "documentationIncludes": ["precondition", "idempotency", "side effect", "known failure"],
+        "documentationIncludes": ["purpose summary", "input parameter", "return value", "precondition", "idempotency", "side effect", "known failure"],
         "documentationInventsConflictCondition": false,
+        "documentationSummaryIsNameTranslation": false,
+        "documentationSummaryOneLine": true,
+        "documentationLinesEndWithNoun": true,
+        "documentationLinesHavePunctuation": false,
+        "documentationLinesBundleTwoConcerns": false,
         "implementationIncludes": ["rejected exponential backoff", "authoritative Retry-After constraint"],
-        "implementationNarratesLoop": false
+        "implementationNarratesLoop": false,
+        "implementationEndsWithNoun": true,
+        "implementationHasKutenOrDesuMasu": false,
+        "implementationExample": "上流の Retry-After が待機時間の正本のため指数バックオフは不採用"
+      }
+    },
+    {
+      "id": "private-declaration-documentation",
+      "prompt": "Add documentation comments to this TypeScript module. Only the exported function has one today, and its summary is 注文を決済する.",
+      "input": {
+        "language": "typescript",
+        "declarations": [
+          "export function settle<T extends Order>(order: T, ledger: Ledger): Result<Receipt, SettlementError>",
+          "function idempotencyKey(order: Order): string"
+        ]
+      },
+      "expectedSkills": ["documentation-writing"],
+      "expected": {
+        "readsStandardFiles": [
+          "principles/comment/declaration-contracts.md",
+          "principles/documentation/sentence-endings.md",
+          "languages/typescript/conventions.md"
+        ],
+        "documentsPrivateDeclarations": true,
+        "coversEveryParamTypeParamAndReturn": true,
+        "keepsVerbEndedSummary": false,
+        "summaryIsNameTranslation": false,
+        "linesEndWithNoun": true,
+        "linesHavePunctuation": false,
+        "decorativeMarkup": false
       }
     },
     {
@@ -127,7 +203,39 @@
       "expected": {
         "preservesRequestedRegister": true,
         "addsUnverifiedCause": false,
-        "forcesStyleVariation": false
+        "forcesStyleVariation": false,
+        "sentencesEndWithKuten": true,
+        "fragmentEndings": false
+      }
+    },
+    {
+      "id": "japanese-markdown-prose",
+      "prompt": "trace-mapのREADME日本語版に、英語版の次の段落と同じ内容の段落をMarkdownで書いてください。trace-map reads local trace JSON and prints service-to-service edges. It never uploads data, so traces from production can stay on the workstation.",
+      "expectedSkills": ["description-writing", "ja-writing"],
+      "expected": {
+        "readsStandardFiles": [
+          "principles/documentation/sentence-endings.md",
+          "principles/naming/unified-vocabulary.md",
+          "principles/documentation/minimal-high-signal.md",
+          "principles/documentation/separate-document-types.md"
+        ],
+        "matchesEnglishCanonical": true,
+        "sentencesEndWithKuten": true,
+        "oneSentencePerLine": true,
+        "fragmentEndings": false,
+        "coinedTranslations": false,
+        "emphasisOnSentencesReaderWouldNotMisread": false
+      }
+    },
+    {
+      "id": "japanese-label-boundary",
+      "prompt": "この実装コメントを日本語として自然にしてください。// 上流の Retry-After が待機時間の正本のため指数バックオフは不採用",
+      "expectedSkills": ["comment-writing", "ja-writing"],
+      "expected": {
+        "addsKuten": false,
+        "rewritesIntoSentence": false,
+        "endsWithNoun": true,
+        "keepsRejectedAlternativeAndConstraint": true
       }
     },
     {

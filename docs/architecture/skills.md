@@ -136,7 +136,7 @@ Ponytailは、削除、標準機能、既存機構、既存依存、新しい所
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
-| [architecture-standard](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | commitの直接目的、宣言の契約、実装commentのWhy not、文書種別と読者 | 本文の複製。local Skillの短い手順へ再構成した |
+| [architecture-standard](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | commitの直接目的、宣言の契約、実装commentのWhy not、文書種別と読者、記述の種類ごとの文末、定着した語、強調の絞り込み | 本文の複製。規則ごとに標準の所有fileを示し、Skillには読む時点、完了前の確認、失敗例だけを置いた |
 | [japanese-tech-writing](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d/c7189cdc9c2520be50418209834145bdf3a46e97) | Gist本文に表示なし | 論証、段落、認知負荷、不確実性 | 書籍原稿向けの整形規則と本文の複製 |
 | [stop-ai-slop-jp](https://github.com/iKora128/stop-ai-slop-jp/tree/e09d32796f253a62693885757cea484c275d06f2)、[slop-nuki](https://github.com/chezou/slop-nuki/tree/1bdf627b5991f4f806069619c9bde407960feac7) | MIT | 空句と定型構成の発見、読者と媒体に応じた語調 | AI著者判定、score、毒や揺らぎの強制、禁止語の機械適用 |
 | [Anthropic doc-coauthoring](https://github.com/anthropics/skills/blob/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/doc-coauthoring/SKILL.md) | 該当directoryに個別表示なし | 読者、目的、既存template、重要文書のfresh-reader確認 | 全文書での質問数、brainstorm数、節ごとの固定workflow |
@@ -161,6 +161,26 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 | 顧客向けの丁寧なincident報告を書く | 旧`ja-writing`は語尾の均一化を避ける規則が、明示された敬体と競合した | 読者、媒体、明示された語調を優先し、事実と不確実性だけを保った |
 
 評価中に実行したのは、Skill出力の比較、全local Skillへの`quick_validate.py`、`git diff --check`、配備contractのfocused checkだけである。評価のためのSkillや恒久workflowは追加していない。
+
+2026-10-01に`commit-writing`、`comment-writing`、`documentation-writing`、`ja-writing`を作り直した。
+2026-08-13の作成時には、利用者が説明していた件名、実装コメント、ドキュメントコメントの体言止めと句読点の規則をどのSkillも取り込まず、実装コメントの型は句点と動詞終わりを含んでいた。
+各Skillは規則の文面を持たず、architecture-standardの所有fileを規則ごとに示し、配備済みの`standard-apply`の実体から二段上を標準本文として読む。
+`commit-writing`は件名をcommit-msg hookへ通してから完了とし、hookが判定しない一つの関心と個人名を標準の完了条件で確かめる。
+`ja-writing`は散文の形を扱い、件名とコメントのラベルの形は各Skillへ残す。
+参照する`principles/documentation/sentence-endings.md`は、`flake.nix`の`architectureStandard`の版を更新するまで配備されない。
+
+同じ日に、旧Skillと新Skillを新しいClaude Code sessionで比べた。
+両者とも同じtemp repository、同じmodel、未配備のcommit-msg hookの新版、同じ標準の作業checkoutを使い、Skill本文だけを変えた。
+
+| Scenario | 旧Skillの結果 | 新Skillの結果 |
+|---|---|---|
+| 外部APIのtimeoutを足したstaged diffのcommit message。依頼文に指摘者の名前を含む | `fix: 注文APIが応答しなくても定期取得を止めない`。動詞終わりでhookを実行しなかった | `fix: 外部APIの無応答による注文取得の停止防止`。標準を読み、hookを通し、名前を除いた |
+| 非公開関数を含むTypeScript moduleのドキュメントコメント | 要約が句点と動詞で終わる複数文で、`@param`と`@returns`がなかった | 全行が名詞で終わり、非公開関数とfieldにも付け、引数と戻り値を全て書いた |
+| 並行upsertをdeadlockで採らない逐次loopの実装コメント | `Promise.all で並行にしない。…deadlock するため。` | `…deadlock するため Promise.all による並行 upsert は不可` |
+| 導入判断向けの日本語2段落 | 一行に複数の文を置いた | 句点ごとに改行し、一行に一文だけを置いた |
+
+発火しないnear-miss、既存scenarioの再実行、節ごとのablationは行っていない。
+追加した代表scenarioは`commit-subject-form`、`private-declaration-documentation`、`japanese-markdown-prose`、`japanese-label-boundary`である。
 
 ### web-researchで採用したdonor
 

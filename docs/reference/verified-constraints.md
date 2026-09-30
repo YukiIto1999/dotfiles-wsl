@@ -93,7 +93,7 @@
 | 制約 | 検証 |
 |---|---|
 | MCP session が active な GET body の間 reap されず、session front の listener address を loopback に固定できる | `agentgateway-session-lifecycle` |
-| agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、共通 project build cache、明示済み環境値、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
+| agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、checkout ごとの Cargo build-dir、明示済み環境値と project の出力先設定、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
 | project-memory runtimeが絶対cwd、Git common directory由来のproject scope、explicit scope、legacy read-only、pending retain、capture/reinjection filteringを契約どおり扱う | `project-memory-runtime-behavior` |
 | OpenCodeの同時sessionへ想起結果が混在せず、古いpromptの遅延応答が新しい結果を上書きせず、履歴取得と通知の停止待ちを期限内で打ち切る | `project-memory-client-integrations` |

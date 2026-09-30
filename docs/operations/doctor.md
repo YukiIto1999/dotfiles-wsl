@@ -33,7 +33,7 @@ agent の管理下領域は次の四つを一度に集計する。
 - `~/.cache/dotfiles-wsl/sessions`
 - `~/.local/state/dotfiles-wsl/agent-resources`
 
-home や project 全体は再帰 scan しない。doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、Windows drive、Windows committed memory、swap topology を観測対象とする。Windows drive は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。Windows committed memory は PowerShell から使用率を得る。
+home や project 全体は再帰 scan しない。doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、WSL の root VHD、Windows drive、Windows committed memory、swap topology を観測対象とする。Windows drive は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。Windows committed memory は PowerShell から使用率を得る。root VHD は root disk の容量を `resource/wsl-vhd/capacity`、PowerShell で読んだ Windows 側の `.wslconfig` の VHD 設定を `resource/wsl-vhd/wslconfig` に出す。
 
 ## 結果
 
@@ -54,6 +54,26 @@ failure の unit を調べる場合は、結果の ID に対応する owner 宣�
 ```sh
 systemctl --failed
 journalctl -u UNIT -n 30
+```
+
+## WSL の VHD が宣言と異なる場合
+
+root VHD の容量上限と sparse 設定は、Windows 側の `%UserProfile%\.wslconfig` が VHD の作成時にだけ与える。repository は `.wslconfig` を配らず、意図した値を [`workstation/storage/module.nix`](../../workstation/storage/module.nix) の `wslVhd` に宣言する。sparse VHD が Windows drive を使い切ると root の ext4 が壊れるため、どちらの fail も放置しない。
+
+`resource/wsl-vhd/wslconfig` が fail の場合は、`.wslconfig` の `[wsl2]` の `defaultVhdSize` と `[experimental]` の `sparseVhd` を宣言値に合わせる。WSL は同じ key の二つ目以降を無視するため、重複した行も消す。この設定は次に作る VHD にだけ効き、既存の VHD と稼働中の session を変えないので、WSL を再起動せずに doctor を再実行する。
+
+`resource/wsl-vhd/capacity` が fail の場合は、root VHD が宣言と異なる設定で作られたか、後から resize されている。root disk の容量を byte 単位で確かめる。
+
+```sh
+lsblk -bdno SIZE "$(findmnt -no SOURCE /)"
+```
+
+作り直す場合は、先に `.wslconfig` を直し、全 session を止めてから Windows 側で export と import を行う。import は宣言した上限と sparse 設定で新しい VHD を作る。`wsl --unregister` は既存の VHD を削除するため、`BACKUP.tar` を最後まで書けたことを確かめてから実行する。`BACKUP.tar` は使用中の容量を収容できる drive に置く。
+
+```powershell
+wsl --export NixOS BACKUP.tar
+wsl --unregister NixOS
+wsl --import NixOS INSTALL_DIR BACKUP.tar --version 2
 ```
 
 ## WSLが重い場合

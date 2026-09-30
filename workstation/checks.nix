@@ -41,6 +41,7 @@ let
     "host/system-generation"
     "host/windows-drives"
     "host/windows-memory-commit"
+    "host/wsl-vhd"
   ];
   hostObservations = lib.filterAttrs (
     name: _: lib.hasPrefix "host/" name
@@ -159,6 +160,23 @@ let
       resourceKey = "windowsMemoryCommit";
       timeoutSeconds = 10;
       warning = workstation.windowsMemoryCommit.warning;
+    };
+    "host/wsl-vhd" = {
+      allowedOutcomeIds = [
+        "resource/wsl-vhd/capacity"
+        "resource/wsl-vhd/wslconfig"
+      ];
+      checkId = "resource/wsl-vhd";
+      envelopeVersion = 1;
+      failureMessage = "could not observe the WSL root VHD";
+      kind = "normalized-protocol";
+      requiredOutcomeIds = [
+        "resource/wsl-vhd/capacity"
+        "resource/wsl-vhd/wslconfig"
+      ];
+      requiredResourceKeys = [ ];
+      resourceKey = null;
+      timeoutSeconds = 20;
     };
   };
   hostObservationModuleSuffixes = [
@@ -395,6 +413,112 @@ let
     zero-size = mkDrivesProbe "df-zero-size" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ 0 0\\n'";
     non-numeric = mkDrivesProbe "df-non-numeric" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ - -\\n'";
   };
+  mkWslVhdObservation = import ./storage/impl/wsl-vhd-package.nix;
+  # root の device 番号、sysfs の sector 数、PowerShell が返す .wslconfig を差し替える
+  wslVhdStat = pkgs.writeShellScript "wsl-vhd-stat" ''
+    set -euo pipefail
+
+    test "$*" = '--format=%Hd:%Ld /'
+    printf '8:48\n'
+  '';
+  mkWslVhdBlockDevices = device: sectors: pkgs.writeTextDir "${device}/size" "${toString sectors}\n";
+  mkWslconfigPowerShell =
+    name: body:
+    pkgs.writeShellScript name ''
+      set -euo pipefail
+
+      test "$#" -eq 5
+      test "$1" = -NoLogo
+      test "$2" = -NoProfile
+      test "$3" = -NonInteractive
+      test "$4" = -Command
+      ${body}
+    '';
+  printWslconfig =
+    name: content: mkWslconfigPowerShell name "printf '%s' ${lib.escapeShellArg content}";
+  mkWslVhdProbe =
+    {
+      blockDevices ? mkWslVhdBlockDevices "8:48" 1677721600,
+      powershellCommand ? printWslconfig "wslconfig-declared" (
+        "[wsl2]\r\ndefaultVhdSize=800GB\r\nmemory=40GB\r\n\r\n[general]\r\ninstanceIdleTimeout=-1\r\n\r\n"
+        + "[experimental]\r\nautoMemoryReclaim=gradual\r\nsparseVhd=false\r\n"
+      ),
+    }:
+    mkWslVhdObservation {
+      inherit
+        pkgs
+        lib
+        blockDevices
+        powershellCommand
+        ;
+      sizeBytes = 800 * 1073741824;
+      sparse = false;
+      statCommand = wslVhdStat;
+      timeoutSeconds = 1;
+    };
+  # 容量と .wslconfig は独立に判定し、PowerShell が失敗しても容量の結果を返す
+  wslVhdCases = {
+    declared = {
+      probe = mkWslVhdProbe { };
+      capacity = "pass";
+      wslconfig = "pass";
+    };
+    other-capacity = {
+      probe = mkWslVhdProbe { blockDevices = mkWslVhdBlockDevices "8:48" 2147483648; };
+      capacity = "fail";
+      wslconfig = "pass";
+    };
+    unknown-device = {
+      probe = mkWslVhdProbe { blockDevices = mkWslVhdBlockDevices "8:0" 1677721600; };
+      capacity = "fail";
+      wslconfig = "pass";
+    };
+    equivalent-notation = {
+      probe = mkWslVhdProbe {
+        powershellCommand = printWslconfig "wslconfig-equivalent" "  [WSL2]  # cap\n  DefaultVhdSize = \"819200MB\"  # 800 GiB\n[Experimental]\nSPARSEVHD=False\n";
+      };
+      capacity = "pass";
+      wslconfig = "pass";
+    };
+    first-value-wins = {
+      probe = mkWslVhdProbe {
+        powershellCommand = printWslconfig "wslconfig-duplicate" "[wsl2]\ndefaultVhdSize=1TB\ndefaultVhdSize=800GB\n[experimental]\nsparseVhd=false\n";
+      };
+      capacity = "pass";
+      wslconfig = "fail";
+    };
+    sparse-enabled = {
+      probe = mkWslVhdProbe {
+        powershellCommand = printWslconfig "wslconfig-sparse" "[wsl2]\ndefaultVhdSize=800GB\n[experimental]\nsparseVhd=true\n";
+      };
+      capacity = "pass";
+      wslconfig = "fail";
+    };
+    sparse-outside-experimental = {
+      probe = mkWslVhdProbe {
+        powershellCommand = printWslconfig "wslconfig-wrong-section" "[wsl2]\ndefaultVhdSize=800GB\nsparseVhd=false\n";
+      };
+      capacity = "pass";
+      wslconfig = "fail";
+    };
+    missing-file = {
+      probe = mkWslVhdProbe { powershellCommand = mkWslconfigPowerShell "wslconfig-missing" ":"; };
+      capacity = "pass";
+      wslconfig = "fail";
+    };
+    powershell-status = {
+      probe = mkWslVhdProbe {
+        powershellCommand = mkWslconfigPowerShell "wslconfig-status" "printf '[wsl2]\\ndefaultVhdSize=800GB\\n[experimental]\\nsparseVhd=false\\n'; exit 1";
+      };
+      capacity = "pass";
+      wslconfig = "fail";
+    };
+    powershell-timeout = {
+      probe = mkWslVhdProbe { powershellCommand = mkWslconfigPowerShell "wslconfig-timeout" "sleep 30"; };
+      capacity = "pass";
+      wslconfig = "fail";
+    };
+  };
 in
 {
   machine-profile-contract =
@@ -436,6 +560,13 @@ in
       && command.meta.mainProgram == "dotfiles-observe-windows-drives"
       && lib.getExe command == "${lib.getBin command}/bin/dotfiles-observe-windows-drives"
     ) "Windows drives must use a dedicated numeric threshold set package";
+    assert lib.assertMsg (
+      let
+        command = hostObservations."host/wsl-vhd".command;
+      in
+      command.dotfilesObservationCommandKind == "normalized-protocol"
+      && command.meta.mainProgram == "dotfiles-observe-wsl-vhd"
+    ) "WSL VHD must use a dedicated normalized protocol package";
     assert lib.assertMsg (
       hostDefinitionKeys == hostObservationKeys
       && builtins.all (name: lib.hasPrefix "host/" name) hostDefinitionKeys
@@ -521,6 +652,7 @@ in
         nativeBuildInputs = [
           pkgs.findutils
           pkgs.gnugrep
+          pkgs.jq
         ];
       }
       ''
@@ -564,6 +696,37 @@ in
                   lib.mapAttrsToList (
                     name: probe: "assert_failed_probe drives-${name} ${lib.getExe probe}"
                   ) drivesFailedProbes
+                )}
+
+                assert_wsl_vhd() {
+                  local name=$1
+                  local command=$2
+                  local capacity=$3
+                  local wslconfig=$4
+                  local stdout="$TMPDIR/wsl-vhd-$name.stdout"
+
+                  if ! "$command" >"$stdout" 2>"$TMPDIR/wsl-vhd-$name.stderr"; then
+                    echo "WSL VHD $name probe did not produce an envelope" >&2
+                    return 1
+                  fi
+                  if ! jq -e --arg capacity "$capacity" --arg wslconfig "$wslconfig" '
+                    .schemaVersion == 1
+                    and .resources == []
+                    and (.outcomes | length) == 2
+                    and (.outcomes | map({key: .id, value: .status}) | from_entries)
+                      == {"resource/wsl-vhd/capacity": $capacity, "resource/wsl-vhd/wslconfig": $wslconfig}
+                    and all(.outcomes[]; (.message | length) > 0)
+                  ' "$stdout" >/dev/null; then
+                    echo "WSL VHD $name probe did not report capacity $capacity and .wslconfig $wslconfig" >&2
+                    cat "$stdout" >&2
+                    return 1
+                  fi
+                }
+
+                ${lib.concatStringsSep "\n" (
+                  lib.mapAttrsToList (
+                    name: case: "assert_wsl_vhd ${name} ${lib.getExe case.probe} ${case.capacity} ${case.wslconfig}"
+                  ) wslVhdCases
                 )}
 
                 zram_service=${systemUnits}/dotfiles-zram-swap.service

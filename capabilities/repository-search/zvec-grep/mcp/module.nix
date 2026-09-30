@@ -41,6 +41,8 @@ in
     home-manager.users.${config.dotfiles.workstation.username}.home.sessionVariables = {
       ZVEC_GREP_MODE = "auto";
       ZVEC_GREP_SERVER_URL = endpoint;
+      # direct mode の CLI も front と同じ固定 model を読む
+      ZVEC_GREP_MODEL_CACHE = "${front.modelCache}";
     };
   };
 }

@@ -43,7 +43,7 @@
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | stdio service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
 | service lifecycle front と native Streamable HTTP front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
-| Zvec-Grep front が native Streamable HTTP endpoint を直接公開し、agent toolset が意味検索だけを公開し、boot 時だけ前 boot の instance lock を除去する | `zvec-grep-front` |
+| Zvec-Grep front が native Streamable HTTP endpoint を直接公開し、agent toolset が意味検索だけを公開し、boot 時だけ前 boot の instance lock を除去する。front と direct mode の CLI は hash 固定の embedding model を network なしで読む | `zvec-grep-front` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |

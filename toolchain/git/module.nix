@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 
@@ -17,8 +18,19 @@ let
     )
   );
 
-  mkGitHook = name: {
-    source = ./assets/hooks + "/${name}";
+  # hook は git を呼んだ process の PATH で動く。systemd service など bash を持たない
+  # 呼び出し元からも同じ検査を通すため、interpreter と使う command を hook 自身に固定する。
+  mkGitHook = name: text: {
+    source = lib.getExe (
+      pkgs.writeShellApplication {
+        inherit name text;
+        runtimeInputs = [
+          pkgs.coreutils
+          pkgs.git
+          pkgs.gnugrep
+        ];
+      }
+    );
     executable = true;
   };
 in
@@ -104,8 +116,12 @@ in
       home.file = {
         ".config/git/ignore".source =
           config.lib.file.mkOutOfStoreSymlink "${dotfiles.workstation.dotfilesDir}/toolchain/git/assets/ignore";
-        ".config/git/hooks/pre-commit" = mkGitHook "pre-commit";
-        ".config/git/hooks/commit-msg" = mkGitHook "commit-msg";
+        ".config/git/hooks/pre-commit" = mkGitHook "pre-commit" (
+          builtins.readFile ./assets/hooks/pre-commit
+        );
+        ".config/git/hooks/commit-msg" = mkGitHook "commit-msg" (
+          builtins.readFile ./assets/hooks/commit-msg
+        );
       };
     };
 }

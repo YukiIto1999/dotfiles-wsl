@@ -32,6 +32,7 @@ in
     assert service.serviceConfig.ExecStart == lib.getExe frontPackage;
     assert homeConfig.home.sessionVariables.ZVEC_GREP_MODE == "auto";
     assert homeConfig.home.sessionVariables.ZVEC_GREP_SERVER_URL == endpoint;
+    assert homeConfig.home.sessionVariables.ZVEC_GREP_MODEL_CACHE == "${frontPackage.modelCache}";
     assert
       staleLockRule == {
         age = "-";
@@ -140,6 +141,21 @@ in
           sed -n 's/^data: //p' tools.body | jq -c 'select(.id == 2)' >tools.json
         fi
         jq -e '[.result.tools[].name] == ["zvec_grep_search"]' tools.json >/dev/null
+
+        # build sandbox に network は無く HOME も空なので、index と query の成功は
+        # front と CLI が download せずに固定 model を読めることを示す
+        workspace=$TMPDIR/workspace
+        mkdir -p "$workspace"
+        printf '%s\n' 'export function parseDuration(text) { return Number.parseInt(text, 10) * 1000; }' > "$workspace/duration.js"
+        printf '%s\n' 'def render_markdown_table(rows): return "|".join(rows)' > "$workspace/table.py"
+        ZVEC_GREP_MODE=server ZVEC_GREP_SERVER_URL=${lib.escapeShellArg endpoint} \
+          ${lib.getExe zvecGrep} index "$workspace"
+        (
+          cd "$workspace"
+          ZVEC_GREP_MODEL_CACHE=${lib.escapeShellArg homeConfig.home.sessionVariables.ZVEC_GREP_MODEL_CACHE} \
+            ${lib.getExe zvecGrep} query --mode direct --vector 'convert a time string to milliseconds' --limit 1
+        ) > direct-query.out
+        grep -Fq 'duration.js' direct-query.out
 
         kill "$server_pid"
         wait "$server_pid" || true

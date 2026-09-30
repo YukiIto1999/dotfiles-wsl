@@ -28,6 +28,19 @@ effective_lines() {
   printf '%s\n' "${body[@]}"
 }
 
+# 違反した規則と理由の提示による commit の拒否
+#   $1: 違反した規則
+#   $2 以降: 理由と直し方の各行
+#   終了: status 1 での hook の終了
+reject() {
+  printf 'commit message: %s\n' "$1" >&2
+  shift
+  if (( $# > 0 )); then
+    printf '  %s\n' "$@" >&2
+  fi
+  exit 1
+}
+
 main() {
   local -r msg="$1"
   local -a raw
@@ -37,34 +50,69 @@ main() {
   mapfile -t hits < <(scan_ai_attribution "${raw[@]}")
   if (( ${#hits[@]} > 0 )); then
     printf 'AI attribution: %s\n' "${hits[@]}" >&2
-    echo "commit message から AI attribution を削除する" >&2
-    exit 1
+    reject "AI attribution を削除する。"
   fi
 
   local -a body
   mapfile -t body < <(effective_lines "${raw[@]}")
 
   if (( ${#body[@]} != 1 )) || [[ "${body[0]}" =~ ^[[:space:]]*$ ]]; then
-    echo "commit message: subject 1 行だけを書く" >&2
-    exit 1
+    reject "subject 1 行だけを書く。"
   fi
 
   local -r subject="${body[0]}"
   if (( ${#subject} > 50 )); then
-    echo "commit message: 50 文字以内にする" >&2
-    exit 1
+    reject "50 文字以内にする。"
   fi
 
   local -r subject_pattern='^(feat|fix|refactor|docs|test|build|ci|chore|style|perf|revert): [^[:space:]].*$'
   if [[ ! "$subject" =~ $subject_pattern ]] \
     || [[ "$subject" =~ [[:space:]]$ ]]; then
-    echo "commit message: scope なしの '<type>: <日本語の要約>' にする" >&2
-    exit 1
+    reject "scope なしの '<type>: <日本語の要約>' にする。"
   fi
 
   if ! printf '%s\n' "$subject" | grep -qP '[\p{Hiragana}\p{Katakana}\p{Han}]'; then
-    echo "commit message: 要約を日本語で書く" >&2
-    exit 1
+    reject "要約を日本語で書く。"
+  fi
+
+  local -r summary="${subject#*: }"
+  local -r closing_hint='「…の追加」「…の見直し」のように名詞で終える。'
+
+  if [[ "$summary" == *、* ]]; then
+    reject "要約に読点「、」を使わない。" \
+      "件名は句点を付けない一行の見出しであり、読点はその一行に二つの関心が入っている印になる。" \
+      "関心が二つなら commit を分け、語を簡潔に並べるだけなら中黒「・」を使う。"
+  fi
+
+  if [[ "$summary" == *。* ]]; then
+    reject "要約に句点「。」を付けない。" \
+      "件名は文ではなく、一覧で読む見出しである。"
+  fi
+
+  # 括弧書きごとの末尾判定は括弧の手前の動詞終わりを見逃すため不採用
+  local -r trailing_note='^(.*[^[:space:]])[[:space:]]*[（(][^（）()]*[）)]$'
+  local closing="$summary"
+  if [[ "$closing" =~ $trailing_note ]]; then
+    closing="${BASH_REMATCH[1]}"
+  fi
+
+  # 「い」全体の拒否は「扱い」「違い」のような名詞の末尾も拒むため不採用
+  local -r predicate_ending='.{0,4}(ない|無い|しい|たい|[るすくぐむぶぬつうただ])$'
+  if [[ "$closing" =~ $predicate_ending ]]; then
+    reject "要約を動詞や形容詞で終えない。末尾が「…${BASH_REMATCH[0]}」になっている。" \
+      "件名は句点を付けない見出しである。" \
+      "名詞で終えると、時制も主語も意図の表明も持たないラベルとして閉じ、一覧で揃って読める。" \
+      "動詞や形容詞で終えると文になり、句点がないため途中で切れた文に読める。" \
+      "「…する」「…した」は、見出しに要らない予定や報告も持ち込む。" \
+      "$closing_hint"
+  fi
+
+  # 「と」「て」「の」は「こと」「割り当て」「もの」のような名詞の末尾にもなるため対象外
+  local -r particle_ending='.{0,4}[へをにでがは]$'
+  if [[ "$closing" =~ $particle_ending ]]; then
+    reject "要約を助詞で終えない。末尾が「…${BASH_REMATCH[0]}」になっている。" \
+      "助詞で終えると後ろの動詞を省いた文の切れ端になり、見出しとして閉じない。" \
+      "$closing_hint"
   fi
 
   exit 0

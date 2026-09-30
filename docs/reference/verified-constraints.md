@@ -140,7 +140,7 @@
 | Nix の整形 | `nixfmt` |
 | Nix の未使用束縛 | `deadnix` |
 | Nix の慣用 | `statix` |
-| commit 件名が scope なし、50 文字以内の日本語一行である | `git-commit-message-contract` |
+| commit 件名が scope なし、50 文字以内の日本語一行であり、要約が読点と句点を含まず、動詞、形容詞、助詞で終わらない | `git-commit-message-contract` |
 | shell の静的検査 | `shellcheck` (shebang を持つ file が対象、fragment は `writeShellApplication` が build 時に見る) |
 | GitHub Actions workflow の妥当性 | `actionlint` |
 | devenv と direnv を home だけが所有し、binary cache が一度だけ登録される | `development-tool-ownership` |
@@ -159,3 +159,4 @@
 - container が image 由来で expose する port を把握していること。宣言は publish する port しか持たない。crawl4ai の image は内部 valkey の 6379 を expose しており、`dotfiles-backends` network 上の他 container から到達する。
 - 宣言した port が実機で空いていること。検査は宣言どうしの衝突しか見ない。他 project の process が先に取っていると front は起動できず、`Restart=always` で再試行を続ける。
 - optionを介した依存の意味が設計した責務に一致すること。物理importと禁止した逆依存は検査するが、公開contractを使う理由までは静的に判定しない。
+- commit 件名の要約が名詞で終わること。hook は動詞の終止形と過去形、「ない」「しい」「たい」、一部の助詞で終わる要約だけを拒否し、「設定を見直し」のような助詞に続く連用形、「遅い」のような形容詞、「のみ」「とか」で終わる要約は通す。「扱い」「の見直し」のような名詞と区別するには形態素解析が要る。

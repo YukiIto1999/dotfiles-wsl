@@ -332,7 +332,7 @@ def record(journal: Path, path: Path, day: date, document: str) -> None:
     relative = str(path.relative_to(journal))
     git(journal, "add", "--", relative)
     if git(journal, "diff", "--cached", "--quiet", "--", relative, check=False).returncode != 0:
-        git(journal, "commit", "--quiet", "-m", f"docs: {day.isoformat()} の日誌を記録する", "--", relative)
+        git(journal, "commit", "--quiet", "-m", f"docs: {day.isoformat()} の日誌", "--", relative)
 
 
 def publish(journal: Path, branch: str) -> None:

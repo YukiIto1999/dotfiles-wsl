@@ -68,29 +68,10 @@ source_fingerprint() {
   } | sha256sum | cut -d ' ' -f 1
 }
 
-# その repository が宣言する検証入口。宣言が無ければ空を返し、門は何も要求しない。
+# その repository が宣言する T1 の検証入口。宣言が無ければ空を返し、門は何も要求しない。
+# 段の名前と宣言の置き場の解決は git の pre-push と共有する。
 entry_of() {
-  local repo=$1
-  if [ -f "$repo/devenv.nix" ] && grep -q 'scripts\.verify' "$repo/devenv.nix"; then
-    printf 'devenv shell -- verify'
-    return 0
-  fi
-  local recipe
-  for recipe in justfile Justfile; do
-    if [ -f "$repo/$recipe" ] && grep -qE '^verify[[:space:]]*:' "$repo/$recipe"; then
-      printf 'just verify'
-      return 0
-    fi
-  done
-  if [ -f "$repo/package.json" ] && jq -e '.scripts.verify' "$repo/package.json" >/dev/null 2>&1; then
-    if [ -f "$repo/pnpm-lock.yaml" ]; then printf 'pnpm verify'; else printf 'npm run verify'; fi
-    return 0
-  fi
-  if [ -f "$repo/Makefile" ] && grep -qE '^verify[[:space:]]*:' "$repo/Makefile"; then
-    printf 'make verify'
-    return 0
-  fi
-  printf ''
+  "@verificationEntry@" --repo "$1" verify
 }
 
 state_dir_of() {

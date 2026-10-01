@@ -15,6 +15,7 @@
 | 時刻とlocaleを変える | [`workstation/locale/module.nix`](../../workstation/locale/module.nix) | `host-locale-contract`、`dotfiles-rebuild` |
 | PATH上の汎用toolを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | language serverを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)のregistryと[`profiles/workstation.nix`](../../profiles/workstation.nix)の選択。client形式への写像は[`agents/impl/lsp.nix`](../../agents/impl/lsp.nix) | `lsp-registration`、`dotfiles-rebuild` |
+| 検証の段の入口名と宣言の置き場を変える | [`toolchain/verification/`](../../toolchain/verification)。段の意味と時間予算はarchitecture-standard | `verification-entry-resolution`、`agent-verification-cache`、`dotfiles-rebuild` |
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix) | 対応するtelemetry check、`dotfiles-rebuild` |
 
 ## Repository structure

@@ -2,6 +2,7 @@
   pkgs,
   lib,
   runtimeContract,
+  verificationEntry,
 }:
 
 let
@@ -221,12 +222,13 @@ let
     runtimeInputs = with pkgs; [
       coreutils
       git
-      gnugrep
       jq
     ];
-    text = builtins.replaceStrings [ "@cacheRootRelative@" ] [ cacheRootRelative ] (
-      builtins.readFile ./impl/runtime/gate.sh
-    );
+    text =
+      builtins.replaceStrings
+        [ "@cacheRootRelative@" "@verificationEntry@" ]
+        [ cacheRootRelative (lib.getExe verificationEntry) ]
+        (builtins.readFile ./impl/runtime/gate.sh);
   };
   verify = pkgs.writeShellApplication {
     name = "dotfiles-agent-verify";

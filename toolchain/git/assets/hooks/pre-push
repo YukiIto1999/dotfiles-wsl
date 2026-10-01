@@ -23,10 +23,13 @@ record_bypass() {
 
 # timeout は自分の process group を作り、予算を超えると子孫ごと止める。
 # 端末の Ctrl-C はその group へ届かないため、hook が受けた signal を group へ渡す。
+# git が hook へ渡す GIT_DIR などを入口へ渡すと、入口の中で一時 repository に向けた git の操作が
+# push 元の repository を書き換えるため、git の repository 固有の環境変数を外して起動する。
 run_within_budget() {
   local top=$1 pid status
   shift
-  (cd "$top" && exec timeout --kill-after=30s "$budget_seconds" "$@") </dev/null &
+  # shellcheck disable=SC2046
+  (cd "$top" && unset $(git rev-parse --local-env-vars) && exec timeout --kill-after=30s "$budget_seconds" "$@") </dev/null &
   pid=$!
   trap 'interrupted=1; kill -TERM -- "-$pid" 2>/dev/null || true' INT TERM HUP
   while :; do

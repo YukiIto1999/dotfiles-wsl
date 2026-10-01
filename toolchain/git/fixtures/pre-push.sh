@@ -87,3 +87,20 @@ fi
 grep -qF 'verify-push: 予算 0分01秒 を超えたため止めた' stderr || fail 'pre-push did not report the budget overrun'
 sleep 4
 test ! -e "$LATE" || fail 'the over-budget verify-push kept running after the push was refused'
+
+# 入口は git が hook へ渡す GIT_DIR などを受け継がない。受け継ぐと、入口の中で一時 repository に
+# 向けた git の操作が、push 元の repository の設定と index を書き換える。
+linked_main=$(new_repo linked-main)
+printf 'verify-push:\n\tgit init -q "$(SCRATCH)"\n\tgit -C "$(SCRATCH)" config core.bare true\n' \
+  >"$linked_main/Makefile"
+git -C "$linked_main" add Makefile
+git -C "$linked_main" commit -q -m 'test: 検査の追加'
+git -C "$linked_main" worktree add -q -b linked "$PWD/linked"
+printf 'linked\n' >>"$PWD/linked/tracked"
+git -C "$PWD/linked" commit -q -am 'test: 検査の追加'
+SCRATCH=$PWD/scratch git -C "$PWD/linked" -c core.hooksPath="$HOOKS" push -q origin linked 2>stderr \
+  || fail 'push from a linked worktree was refused'
+test "$(git -C "$linked_main" config --type=bool --get core.bare)" = false \
+  || fail 'verify-push inherited the git environment and rewrote the pushing repository'
+test "$(git -C "$PWD/scratch" config --type=bool --get core.bare)" = true \
+  || fail 'verify-push did not reach its own scratch repository'

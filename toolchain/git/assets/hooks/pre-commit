@@ -2,14 +2,14 @@
 set -euo pipefail
 
 list_staged() {
-  git diff --cached --name-only --diff-filter=ACM --no-renames 2>/dev/null || true
+  git diff --cached --name-only -z --diff-filter=ACM --no-renames 2>/dev/null || true
 }
 
 filter_pat_leaks() {
   local f
-  while read -r f; do
+  while IFS= read -r -d '' f; do
     [[ -z ${f} ]] && continue
-    git diff --cached --no-color "${f}" \
+    git diff --cached --no-color -- "${f}" \
       | grep -vE '^\+\+\+ ' \
       | grep -E '^\+' \
       | grep -qE '(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}' \

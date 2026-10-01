@@ -63,7 +63,7 @@ main() {
     exit 130
   fi
   if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && [ "$elapsed" -ge "$budget_seconds" ]; then
-    printf 'verify-push: 予算 %s を超えたため止めた(経過 %s)。予算に収まらない検証は verify-full へ移す\n' \
+    printf 'verify-push: 予算 %s を超えたため止めた(経過 %s)。より安い検証へ置き換えるか verify-full へ移す\n' \
       "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
     exit 1
   fi

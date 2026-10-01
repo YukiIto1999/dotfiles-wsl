@@ -30,13 +30,13 @@ clone しただけの repository の code を、commit や checkout のたびに
 
 ## 検証の段と入口
 
-repository は検証の段ごとに入口を宣言する。段の意味と時間予算は architecture-standard が定め、dotfiles は入口の名前と置き場だけを解決する。
+repository は検証の段ごとに入口を宣言する。段の意味と時間予算は architecture-standard の `process/verification.md` が定め、dotfiles は入口の名前と置き場だけを解決する。
 
 | 段 | 入口の名前 | 実行する者 |
 |---|---|---|
 | T1 | `verify` | agent が作業を終える前の門(`dotfiles-agent-gate`) |
 | T2 | `verify-push` | push の前の pre-push |
-| T3 | `verify-full` | 利用者や project が決めた時機。commit と push を止めない |
+| T3 | `verify-full` | project が選んだ契機。commit と push を止めない |
 
 入口は次の順に探し、最初に見つかった宣言を使う。
 
@@ -51,7 +51,7 @@ repository は検証の段ごとに入口を宣言する。段の意味と時間
 
 pre-push は、repository が `verify-push` を宣言していれば repository の根で実行する。宣言が無ければ何もせず、何も出力しない。検証するのは push する commit ではなく作業木である。
 
-予算は 15 分である。超えると検証を子孫の process ごと止めて push を拒み、予算に収まらない検証を `verify-full` へ移すよう伝える。通った場合も失敗した場合も、経過時間を stderr へ出す。
+予算は 15 分である。超えると検証を子孫の process ごと止めて push を拒み、より安い検証へ置き換えるか `verify-full` へ移すよう伝える。通った場合も失敗した場合も、経過時間を stderr へ出す。
 
 検証を通さずに push する必要があるときは、理由を添えて次の環境変数を渡す。
 

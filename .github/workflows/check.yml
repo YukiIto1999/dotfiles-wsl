@@ -25,5 +25,9 @@ jobs:
             impure-env = NIX_CURL_FLAGS=--user-agent=Nixpkgs
             access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
+      # Ubuntu 24.04 の runner は AppArmor で非特権の user namespace を禁じ、installer の検査が使う unshare が落ちる
+      - name: allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: flake check
         run: nix flake check "git+file://${GITHUB_WORKSPACE}" -L

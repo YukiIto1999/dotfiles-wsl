@@ -5,7 +5,6 @@
     "browser-automation"
     "browser-diagnostics"
     "browser-runtime"
-    "code-quality"
     "github-resources"
     "library-documentation"
     "project-memory"

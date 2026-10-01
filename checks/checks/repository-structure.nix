@@ -91,17 +91,6 @@ in
 {
   structure-responsibility-roots =
     let
-      expectedSonarqubeUnits = [
-        "capabilities/code-quality/sonarqube/database"
-        "capabilities/code-quality/sonarqube/mcp"
-        "capabilities/code-quality/sonarqube/provisioning"
-        "capabilities/code-quality/sonarqube/server"
-      ];
-      actualSonarqubeUnits = lib.sort builtins.lessThan (
-        map (unit: unit.id) (
-          builtins.filter (unit: lib.hasPrefix "capabilities/code-quality/sonarqube/" unit.id) units
-        )
-      );
       expectedRootEntries = [
         ".editorconfig"
         ".envrc"
@@ -158,13 +147,6 @@ in
           "crawl4ai"
           "credentials"
         ]
-        [
-          "dotfiles"
-          "platform"
-          "containers"
-          "sonarqube"
-          "credentials"
-        ]
       ];
       presentLegacyOptions = builtins.filter (path: lib.hasAttrByPath path hostOptions) legacyOptionPaths;
       requiredCapabilityPaths = [
@@ -202,14 +184,6 @@ in
           "credentials"
           "apiTokenFile"
         ]
-        [
-          "dotfiles"
-          "capabilities"
-          "code-quality"
-          "sonarqube"
-          "credentials"
-          "adminPasswordFile"
-        ]
       ];
       missingCapabilityContracts = builtins.filter (
         path: !lib.hasAttrByPath path hostOptions
@@ -221,8 +195,6 @@ in
         ++ lib.optional (hostConfig.dotfiles.toolchain.packages ? apm) "toolchain-apm"
         ++ lib.optional (!(hostConfig.dotfiles.agents.packages ? apm)) "missing-agents-apm";
     in
-    assert lib.assertMsg (actualSonarqubeUnits == expectedSonarqubeUnits)
-      "SonarQube responsibilities must be split into Capability server, database, provisioning, and MCP units";
     assert lib.assertMsg (rootEntriesMatch rootEntries) (
       "flake source root entries differ from the responsibility roster: actual="
       + builtins.toJSON (builtins.attrNames rootEntries)

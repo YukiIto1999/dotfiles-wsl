@@ -32,7 +32,6 @@
     "memory",
     "playwright",
     "searxng",
-    "sonarqube",
     "zvec-grep"
   ],
   "workstation": {

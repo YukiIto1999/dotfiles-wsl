@@ -22,9 +22,7 @@ in
         capability:
         let
           entrySkills = builtins.attrNames (
-            lib.filterAttrs (
-              _: skill: builtins.elem capability (skill.requiresCapabilities ++ skill.optionalCapabilities)
-            ) skills
+            lib.filterAttrs (_: skill: builtins.elem capability skill.requiresCapabilities) skills
           );
         in
         [

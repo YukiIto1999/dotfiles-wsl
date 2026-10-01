@@ -64,7 +64,6 @@
 | hostでcontainer applicationを有効化・無効化する | [`profiles/hosts/`](../../profiles/hosts)の`dotfiles.capabilities.enabled`。container名ではなく所有するCapability IDを選ぶ | `container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
 | upstream OCI imageを更新する | Capability実装の`dotfiles.platform.containers.services.<name>.images`にあるrepository、digest、canonical reference | containerを有効にした対象hostで、checkoutから`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status`または`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages`を実行し、適用後は同hostの`dotfiles-sync-images`と`dotfiles-rebuild`を使う |
 | 固定packageのhashを更新する | 対応するCapabilityの`package.nix` | `nix store prefetch-file --hash-type sha256 --json <url>`、`nix flake check` |
-| SonarQube server、database、provisioning、MCPを変える | [`capabilities/code-quality/sonarqube/`](../../capabilities/code-quality/sonarqube)の各unit | 対応するSonarQube check、credential変更時は[Secrets](../operations/secrets.md#sonarqube-admin-password-rotation) |
 
 ## Secretとidentity
 

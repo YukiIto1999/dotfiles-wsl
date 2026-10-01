@@ -26,11 +26,7 @@ let
   installAgentsExe = lib.getExe installAgents;
   atomicPublish = import ../impl/atomic-publish.nix { inherit pkgs; };
   restrictedCapabilities = builtins.filter (
-    name:
-    !(builtins.elem name [
-      "code-quality"
-      "project-memory"
-    ])
+    name: name != "project-memory"
   ) hostConfig.dotfiles.capabilities.enabled;
   restrictedAgentConfig =
     (mkNixosSystem [
@@ -42,8 +38,6 @@ let
         }
       )
     ]).config;
-  restrictedAgentSubagents = restrictedAgentConfig.dotfiles.agents.shared.subagents;
-  restrictedAgentRouting = restrictedAgentConfig.dotfiles.agents.shared.routing;
   restrictedAgentRules = restrictedAgentConfig.dotfiles.agents.shared.rules;
   minimalCapabilityAgentConfig =
     (mkNixosSystem [
@@ -1008,14 +1002,6 @@ in
     assert
       !builtins.hasAttr "agents/opencode/project-memory-plugin" restrictedAgentConfig.dotfiles.managedArtifacts;
     assert builtins.hasAttr "agents/omp/hooks" restrictedAgentConfig.dotfiles.managedArtifacts;
-    assert builtins.hasAttr "code-review" restrictedAgentConfig.dotfiles.agents.shared.skills;
-    assert builtins.hasAttr "reviewer" restrictedAgentSubagents;
-    assert builtins.hasAttr "reviewer" restrictedAgentConfig.dotfiles.agents.clients.claude.subagents;
-    assert builtins.hasAttr "reviewer" restrictedAgentConfig.dotfiles.agents.clients.omp.subagents;
-    assert lib.any (route: route.skill == "code-review") restrictedAgentRouting.subagentSkills;
-    assert lib.any (
-      route: route.from == "reviewer" || route.to == "reviewer"
-    ) restrictedAgentRouting.subagentHandoffs;
     pkgs.runCommandLocal "check-agent-capability-gating"
       {
         nativeBuildInputs = [ pkgs.gnugrep ];
@@ -1037,12 +1023,6 @@ in
           echo "disabled project-memory remained in agent policy" >&2
           exit 1
         fi
-        for required in '`reviewer`' '`code-review`'; do
-          if ! grep -Fq "$required" ${restrictedAgentRules}; then
-            echo "optional code-quality removed review policy: $required" >&2
-            exit 1
-          fi
-        done
         if grep -Fq project-memory ${
           restrictedAgentConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source
         }; then
@@ -1127,11 +1107,7 @@ in
             let
               entrySkills = builtins.attrNames (
                 lib.filterAttrs (
-                  name: _:
-                  builtins.elem capability (
-                    hostConfig.dotfiles.skills.registry.${name}.requiresCapabilities
-                    ++ hostConfig.dotfiles.skills.registry.${name}.optionalCapabilities
-                  )
+                  name: _: builtins.elem capability hostConfig.dotfiles.skills.registry.${name}.requiresCapabilities
                 ) hostConfig.dotfiles.agents.shared.skills
               );
             in

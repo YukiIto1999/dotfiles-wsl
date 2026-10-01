@@ -117,7 +117,7 @@ doctor が成功し、`git status --short` に暗号化済みファイル二つ�
 
 memory と swap の既定値は実装側の共通方針で、差が必要な host だけ対応する [`profiles/hosts/`](../../profiles/hosts) の profile から `dotfiles.workstation.swap` または `dotfiles.workstation.windowsMemoryCommit` を上書きする。Windows drive は profile に書かない。doctor が WSL の mount から実行時に見つける。
 
-全host共通のCapabilityは[`profiles/workstation.nix`](../../profiles/workstation.nix)、containerを含むhost固有のCapabilityは同じhost profileの`dotfiles.capabilities.enabled`で選ぶ。`code-quality`、`project-memory`、`web-content`、`web-discovery`を外すと、対応するcontainerだけでなくMCP target、credential、health observation、client integrationも配備されない。container backendを一つも選ばないhostではDocker自体を配備しない。
+全host共通のCapabilityは[`profiles/workstation.nix`](../../profiles/workstation.nix)、containerを含むhost固有のCapabilityは同じhost profileの`dotfiles.capabilities.enabled`で選ぶ。`project-memory`、`web-content`、`web-discovery`を外すと、対応するcontainerだけでなくMCP target、credential、health observation、client integrationも配備されない。container backendを一つも選ばないhostではDocker自体を配備しない。
 
 新しい enrollment を始める前に、直前のホストで生じた暗号化済み差分を commit し、その repository を利用する全ホストへ同期する。bootstrap 前に差分を退避する必要がある場合は、平文を保存せず、外部媒体へ Git patch を作る。
 

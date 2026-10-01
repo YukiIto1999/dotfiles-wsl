@@ -57,6 +57,13 @@ let
     ];
   };
   gitConfig = evaluation.config.home-manager.users.${username}.xdg.configFile."git/config".source;
+  hookPrefix = ".config/git/hooks/";
+  homeFiles = hostConfig.home-manager.users.${username}.home.file;
+  hookFiles = lib.filterAttrs (name: _: lib.hasPrefix hookPrefix name) homeFiles;
+  deployedHooks = lib.mapAttrs' (
+    name: file: lib.nameValuePair (lib.removePrefix hookPrefix name) file.source
+  ) hookFiles;
+  hooksDirectory = pkgs.linkFarm "git-hooks" deployedHooks;
 in
 {
   # 生成した Git 設定を実際の git に読ませ、URL ごとに選ばれる helper と token を見る
@@ -118,6 +125,31 @@ in
         expect_gh https://github.com/fixture-primary/repo.git
         # path の一致は segment 単位。名前が前方一致するだけの owner を取り込まない
         expect_gh https://github.com/fixture-org-other/repo.git
+        touch $out
+      '';
+
+  # 配備した hook 一式を実際の git に起こさせ、dotfiles の検査と repository の hook の連鎖を見る
+  git-hook-dispatch =
+    assert lib.all (name: deployedHooks ? ${name}) [
+      "commit-msg"
+      "post-checkout"
+      "post-merge"
+      "pre-commit"
+      "pre-push"
+      "prepare-commit-msg"
+    ];
+    pkgs.runCommandLocal "check-git-hook-dispatch"
+      {
+        nativeBuildInputs = with pkgs; [
+          bash
+          coreutils
+          git
+          gnugrep
+        ];
+        HOOKS = hooksDirectory;
+      }
+      ''
+        bash ${./fixtures/hooks.sh}
         touch $out
       '';
 }

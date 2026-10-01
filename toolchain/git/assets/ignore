@@ -26,6 +26,7 @@ $RECYCLE.BIN/
 devenv.local.nix
 result
 result-*
+!result-*.*
 
 # AI
 .mcp.json

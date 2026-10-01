@@ -26,7 +26,7 @@ runtime: Agent -> Skill -> Capability -> provider/runtime
 
 ## 外部ソースの登録契約
 
-外部ソースを追加・保守する際は、`flake.nix`で取得したソース実体を`specialArgs.pluginSources`へ渡す。`skills/plugins/module.nix`の採用表がsourceごとの実体、採用するSkill ID、および各Skillの`requiresCapabilities` / `optionalCapabilities` / `requiresSkills`を宣言し、レジストリには採用表に記載したSkillだけを登録する。したがって、upstreamにSkillが追加されても採用表を変更しない限り登録対象は変わらない。
+外部ソースを追加・保守する際は、`flake.nix`で取得したソース実体を`specialArgs.pluginSources`へ渡す。`skills/plugins/module.nix`の採用表がsourceごとの実体、採用するSkill ID、および各Skillの`requiresCapabilities` / `requiresSkills`を宣言し、レジストリには採用表に記載したSkillだけを登録する。したがって、upstreamにSkillが追加されても採用表を変更しない限り登録対象は変わらない。
 
 外部ソース内の採用Skillは、以下の標準契約を満たす必要がある。
 
@@ -53,5 +53,5 @@ Orcaデスクトップ環境および内蔵ツールの操作手順を提供す�
 
 - 採用Skillのディレクトリまたは直下の`SKILL.md`が存在しない。
 - ソースをまたいで同一のSkill IDが重複している。
-- レジストリに存在しないCapabilityをhard依存またはoptional依存として参照している。
+- レジストリに存在しないCapabilityを依存として参照している。
 - 秘密情報、認証資格情報、またはプライベートな作業記録をSkillソースとしてNix storeへ取り込んでいる。

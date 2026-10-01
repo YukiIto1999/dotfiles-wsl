@@ -145,7 +145,6 @@
         "docker-build-artifact-gc"
         "docker-dotfiles-backends-network"
         "nix-daemon"
-        "sonarqube-provision"
       ];
 
       registered = lib.sort builtins.lessThan (

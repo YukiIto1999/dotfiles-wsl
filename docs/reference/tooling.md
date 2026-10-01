@@ -65,7 +65,6 @@ owner moduleは意味と観測値を持ち、`health`は型、実行、集約だ
 | Docker backend | [`platform/containers/module.nix`](../../platform/containers/module.nix)のcontractと各Capability実装 | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.containers.services --apply builtins.attrNames` |
 | MCP front | [`platform/mcp/module.nix`](../../platform/mcp/module.nix)がtargetから導く`dotfiles.platform.mcp.fronts` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.fronts`。稼働は`systemctl status mcp-front-<name>` |
 | telemetry | [`telemetry/module.nix`](../../telemetry/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.telemetry` |
-| code quality | [`capabilities/code-quality/sonarqube/`](../../capabilities/code-quality/sonarqube) | `nix eval --json .#nixosConfigurations.nixos.config.virtualisation.oci-containers.containers.sonarqube` |
 
 MCP targetはprovider、executable、transport、lifecycle、port、backend unit、probeを持つ。generic Platformはprovider IDとapplication IDを列挙せず、Capability実装から登録値を受ける。公開agentgatewayは全frontを一つのURLへ束ねるが、front serviceの起動依存は持たない。credential、container、host processの境界は[セキュリティ設計](../architecture/security.md)を参照する。
 

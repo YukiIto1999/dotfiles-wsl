@@ -14,7 +14,7 @@ Skill は原則として作らない。基礎モデル、repository policy、必
 
 ## 構成上の配備対象
 
-local Skillの正本は[`skills/<id>/skill/`](../../skills)である。各`module.nix`がsource、`requiresSkills`、hard依存の`requiresCapabilities`、policyへ関連づける`optionalCapabilities`を`dotfiles.skills.registry`へ登録する。plugin sourceのrevisionは[`flake.nix`](../../flake.nix)、plugin Skillの採用集合、依存宣言、source存在確認、同名拒否は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表が所有する。
+local Skillの正本は[`skills/<id>/skill/`](../../skills)である。各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`を`dotfiles.skills.registry`へ登録する。plugin sourceのrevisionは[`flake.nix`](../../flake.nix)、plugin Skillの採用集合、依存宣言、source存在確認、同名拒否は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表が所有する。
 
 donorとrepository所有のSkill sourceは区別する。donorは方法を再構成してlocal Skillを作る材料であり、元repositoryのSkillを配備しない。repository所有は配置とrevisionの正本を示すだけで、直接採用の十分条件ではない。signature procedure規則を満たしたSkillだけを固定sourceから登録する。target構成と追加のadmission条件は[Repository所有Skillのcomposition](repository-skills.md)に記録する。
 
@@ -24,7 +24,7 @@ Codexに同梱されるsystem `skill-creator`は、[`skills.config`](https://dev
 nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 ```
 
-有効なSkillは[`skills/module.nix`](../../skills/module.nix)が、選択したCapabilityとSkill間依存を満たすregistry entryから導く。`dotfiles.skills.enabled`はread-onlyの内部派生値であり、Agent clientはこの有効集合だけを各client形式へ投影する。`optionalCapabilities`は配備可否を変えず、resolved Capabilityがpolicyに存在するとき入口Skillの対応へ含める。
+有効なSkillは[`skills/module.nix`](../../skills/module.nix)が、選択したCapabilityとSkill間依存を満たすregistry entryから導く。`dotfiles.skills.enabled`はread-onlyの内部派生値であり、Agent clientはこの有効集合だけを各client形式へ投影する。
 
 MCP専用の薄いwrapperは置かない。`repository-research`は探索経路とsource検証、`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。SkillとCapabilityの対応、subagentごとのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
 
@@ -499,7 +499,7 @@ baselineでは、`3e94a025`のChrome DevTools追加をreviewし、`set -e`下の
 
 AI生成と人手という表示だけを変えた認可diffと、決定的なsnapshot検査済みの低影響diffでも比較した。Skillありとbaselineはどちらも、認可diffを同じCritical、低影響diffをfindingなしと判定した。既存能力で足りるため、影響と検出可能性のrisk modelはruntime Skillへ追加しない。
 
-同じrevisionの解析結果があるrepositoryでは、SonarQubeのissue、security hotspot、quality gateをchanged fileの候補発見に使う。解析結果だけでfindingを確定せず、該当source、diff、consumer、失敗経路で反証する。review中にissueの状態やcommentは変更しない。
+static analysisは、repositoryのbuildとlintに組み込まれたanalyzerが今回のsourceに出した診断だけを使う。外部serverの解析は、解析したrevisionをreview対象へ対応付けられないことが多く、候補発見に届かなかったため使わない。差分が追加したsuppressionは、規則、範囲、理由が揃っているかを確かめる。
 
 ### code-designで採用したdonor
 

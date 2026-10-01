@@ -22,14 +22,6 @@ let
       ) cfg.registry.${name}.requiresCapabilities
     )
   ) registryNames;
-  unknownOptionalCapabilities = lib.concatMap (
-    name:
-    map (capability: "${name}/${capability}") (
-      builtins.filter (
-        capability: !builtins.elem capability capabilityRegistryNames
-      ) cfg.registry.${name}.optionalCapabilities
-    )
-  ) registryNames;
   unknownSkillDependencies = lib.concatMap (
     name:
     map (dependency: "${name}/${dependency}") (
@@ -45,16 +37,7 @@ let
       duplicate = values: builtins.length values != builtins.length (lib.unique values);
     in
     lib.optional (duplicate skill.requiresCapabilities) "${name}/requiresCapabilities"
-    ++ lib.optional (duplicate skill.optionalCapabilities) "${name}/optionalCapabilities"
     ++ lib.optional (duplicate skill.requiresSkills) "${name}/requiresSkills"
-  ) registryNames;
-  overlappingCapabilities = lib.concatMap (
-    name:
-    map (capability: "${name}/${capability}") (
-      builtins.filter (
-        capability: builtins.elem capability cfg.registry.${name}.requiresCapabilities
-      ) cfg.registry.${name}.optionalCapabilities
-    )
   ) registryNames;
   skillClosure =
     initial:
@@ -108,11 +91,6 @@ in
               type = lib.types.listOf skillIdType;
               description = "Skill の手順が利用する consumer 非依存 Capability ID";
             };
-            optionalCapabilities = lib.mkOption {
-              type = lib.types.listOf skillIdType;
-              default = [ ];
-              description = "Skill の手順が利用するとより豊かになる Capability ID";
-            };
             requiresSkills = lib.mkOption {
               type = lib.types.listOf skillIdType;
               description = "Skill の手順が合成する別の Skill ID";
@@ -140,10 +118,8 @@ in
       message = "Skill sources must contain SKILL.md: ${lib.concatStringsSep ", " missingSkillFiles}";
     }
     {
-      assertion = unknownRequiredCapabilities == [ ] && unknownOptionalCapabilities == [ ];
-      message =
-        "Skills reference unknown Capabilities: "
-        + lib.concatStringsSep ", " (unknownRequiredCapabilities ++ unknownOptionalCapabilities);
+      assertion = unknownRequiredCapabilities == [ ];
+      message = "Skills reference unknown Capabilities: ${lib.concatStringsSep ", " unknownRequiredCapabilities}";
     }
     {
       assertion = unknownSkillDependencies == [ ];
@@ -153,12 +129,6 @@ in
       assertion = duplicateMetadata == [ ];
       message =
         "Skill metadata lists must not contain duplicates: " + lib.concatStringsSep ", " duplicateMetadata;
-    }
-    {
-      assertion = overlappingCapabilities == [ ];
-      message =
-        "Skill required and optional Capabilities must not overlap: "
-        + lib.concatStringsSep ", " overlappingCapabilities;
     }
   ];
 }

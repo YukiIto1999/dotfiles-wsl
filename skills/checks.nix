@@ -61,7 +61,6 @@ let
         raise SystemExit(1)
   '';
   containerCapabilityIds = [
-    "code-quality"
     "project-memory"
     "web-content"
     "web-discovery"
@@ -99,9 +98,6 @@ in
     assert builtins.elem "code-review" enabledSkills;
     assert !builtins.elem "memory" enabledSkills;
     assert !builtins.elem "web-research" enabledSkills;
-    assert containerlessRegistry."code-review".requiresCapabilities == [ ];
-    assert builtins.elem "code-quality" containerlessRegistry."code-review".optionalCapabilities;
-    assert !builtins.elem "code-quality" containerlessConfig.dotfiles.capabilities.resolved;
     assert lib.all (
       name:
       lib.all (

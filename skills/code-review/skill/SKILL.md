@@ -19,7 +19,7 @@ repositoryが定めるfocused test、type check、lint、static analysisを、�
 
 formatterやlintが決定したstyleを人手findingとして再掲しない。機械検証の成功は、必要な検査が存在することや、test自体が正しいことを保証しない。
 
-対象repositoryがSonarQubeへ登録され、同じbranch、PR、commitの解析結果を参照できる場合は、`sonarqube` MCP targetでchanged fileのissue、security hotspot、quality gateを確認する。結果は候補発見の証拠であり、findingの正本ではない。該当sourceと今回のdiffを読み、実在する失敗経路と影響を反証してから採否を決める。解析がない、またはrevisionを対応付けられない場合は利用せず、reviewを止めない。issueの状態変更やcomment投稿は行わない。
+static analysisの結果は、repositoryのbuildとlintに組み込まれたanalyzerが今回のsourceに出した診断を正本にする。外部serverの解析結果や、別revisionを解析した結果は使わない。差分がsuppressionを追加した場合は、対象の規則、範囲、理由が揃っているかを確かめ、理由のない抑止や、新しい違反を既存の抑止に紛れ込ませる変更を候補にする。
 
 ## 変更経路を追う
 

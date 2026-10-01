@@ -99,7 +99,7 @@ repository固有optionはownerに対応するnamespaceへ置く。
 
 [`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通の`dotfiles.capabilities.enabled`をsemantic IDで選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の選択を加える。[`capabilities/module.nix`](../../capabilities/module.nix)は依存closureを`dotfiles.capabilities.resolved`として公開し、MCP provider rosterとcontainer backend rosterを導出する。providerとbackendの一覧をprofileへ書かない。
 
-`dotfiles.skills.registry`は各[`skills/`](../../skills) unitが登録する`source`、`requiresSkills`、`requiresCapabilities`、`optionalCapabilities`を持つ。依存するSkillを含め、hard Capability依存を満たすSkillが既定で有効になり、optional Capabilityは利用可能な場合だけpolicyの入口対応へ記載される。Agent clientはこの派生したSkill本文だけを配備する。
+`dotfiles.skills.registry`は各[`skills/`](../../skills) unitが登録する`source`、`requiresSkills`、`requiresCapabilities`を持つ。依存するSkillを含め、Capability依存を満たすSkillが既定で有効になる。Agent clientはこの派生したSkill本文だけを配備する。
 
 ## Capability実装
 
@@ -114,7 +114,6 @@ repository固有optionはownerに対応するnamespaceへ置く。
 | `library-documentation` | Context7 MCP |
 | `github-resources` | GitHub MCPとaccount credential |
 | `project-memory` | Hindsight MCP、backend、runtime、client integration |
-| `code-quality` | SonarQube MCP、server、database、provisioning |
 
 MCP targetの型、front生成、gatewayは[`platform/mcp/`](../../platform/mcp)が所有する。container service contract、OCI image inventory、Docker network、image同期は[`platform/containers/`](../../platform/containers)が所有する。application固有のserver、database、credential、volume、health endpointは対応するCapability内に置く。project memoryでは[`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)がHindsight backend、`dotfiles-memory` runtime、memory MCP front、client integrationを分担する。
 
@@ -122,7 +121,7 @@ project memoryのgeneric optionは`dotfiles.capabilities.project-memory.runtime`
 
 memory MCPは`localhost:8774`のfrontから、`localhost:3111`のHindsight APIへ接続する。Hindsightのpersistent stateはnamed volume、宣言で固定したmultilingual embedding/reranker modelはread-only mount、LLM credentialは対応Capabilityのruntime secretであり、Nix storeやclient configへ保存しない。
 
-Chromium packageは`browser-runtime`が一度だけ決め、PlaywrightとChrome DevToolsが共有する。SonarQubeはserver、database、provisioning、MCPを別unitにし、server endpoint、DB lifecycle、admin操作、MCP adapterの変更理由を混ぜない。
+Chromium packageは`browser-runtime`が一度だけ決め、PlaywrightとChrome DevToolsが共有する。
 
 ## Artifact、health、command
 

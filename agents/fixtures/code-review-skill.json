@@ -49,54 +49,34 @@
       }
     },
     {
-      "id": "sonarqube-matching-revision",
-      "prompt": "同じcommitを解析済みのSonarQube projectがあるbranch diffをreviewしてください。",
+      "id": "analyzer-diagnostic-in-diff",
+      "prompt": "buildのanalyzerがchanged fileへcognitive complexityの診断を出しているbranch diffをreviewしてください。",
       "expectedSkills": [
         "code-review"
       ],
       "input": {
         "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
-        "sonarProject": "fixture-project",
-        "sonarBranch": "feature/contract",
-        "sonarRevision": "0123456789abcdef0123456789abcdef01234567"
+        "analyzerOutput": "buildとlintを同じsourceで実行した診断"
       },
       "expected": {
-        "usesSonarQubeResultsAsCandidates": true,
+        "usesAnalyzerOutputOfReviewedSourceAsCandidates": true,
         "verifiesCandidatesAgainstSourceAndDiff": true,
-        "doesNotTreatSonarQubeAsFindingOracle": true,
-        "doesNotMutateSonarQube": true
+        "doesNotConsultExternalAnalysisServer": true
       }
     },
     {
-      "id": "sonarqube-stale-revision",
-      "prompt": "同名branchのSonarQube解析はありますが、解析commitがreview対象より古い状態でdiffをreviewしてください。",
+      "id": "suppression-without-reason",
+      "prompt": "既存違反の抑止の一覧へ、理由を書かずに新しい関数を加えたdiffをreviewしてください。",
       "expectedSkills": [
         "code-review"
       ],
       "input": {
         "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
-        "sonarProject": "fixture-project",
-        "sonarBranch": "feature/contract",
-        "sonarRevision": "fedcba9876543210fedcba9876543210fedcba98"
+        "buildPasses": true
       },
       "expected": {
-        "skipsStaleSonarQubeResults": true,
-        "continuesReviewWithoutSonarQube": true
-      }
-    },
-    {
-      "id": "sonarqube-project-unregistered",
-      "prompt": "review対象repositoryがSonarQubeへ登録されていない状態でbranch diffをreviewしてください。",
-      "expectedSkills": [
-        "code-review"
-      ],
-      "input": {
-        "sourceRevision": "0123456789abcdef0123456789abcdef01234567",
-        "sonarProject": null
-      },
-      "expected": {
-        "doesNotGuessProjectMapping": true,
-        "continuesReviewWithoutSonarQube": true
+        "reportsUnjustifiedSuppression": true,
+        "doesNotTreatPassingBuildAsProof": true
       }
     },
     {

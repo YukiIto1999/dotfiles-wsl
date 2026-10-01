@@ -51,8 +51,6 @@
 | LSP roster と対応 client の登録が一致し、client ごとの server id 規則と OMP の有効条件を満たし、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |
-| SonarQube の service contract、server と DB の topology、image、volume、環境 file、再起動、secret metadata、provision service と timer が固定値に一致する | `sonarqube-container` |
-| SonarQube MCP front は SOPS の poison stub と canary A / B、型付き credential の canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact が runtime password file を読む | `sonarqube-front` |
 | 生成 config artifact が登録簿に載り、宣言の変更に追随する | `artifact-registry` |
 | GitHub account roster、primary、account ごとの owner の印が暗号化済み store の key 構造から導出され、別経路で読んだ store と一致し、暗号化 template、登録 artifact、Git identity の生成先が typed contract と一致する。fixture store で、primary という名前の owner を primary の印と読まないこと、primary への owner の印、大文字小文字だけが違う owner の重複、owner 名でない入れ子の key を拒否する | `account-deployment-contract` |
 | fixture の owner の印から Home Manager が描画した Git 設定を git に読ませ、印のある owner の URL は担当 account の token file だけを helper に使い、印のない owner と名前が前方一致するだけの owner は gh の helper へ落ちる | `git-credential-routing` |
@@ -80,7 +78,7 @@
 | 有効なcontainer applicationとservice contractのkeyが一致する | `container-application-registry` |
 | container Capabilityを一件だけ選んだ構成では対応するcontainer一式だけを配備し、container Capabilityを零件にした構成ではDocker、container Capability所有のMCP target、secret、artifactを配備しない | `container-capability-gating` |
 | 非container Capabilityを選ばない構成では所有するMCP targetとsession variableを配備せず、provider集合と残存targetが一致する | `mcp-capability-gating` |
-| `project-memory`と`code-quality`を選ばない構成ではHindsightのhook package、記憶の収穫のcommandとtimer、client mode、managed file、および利用不能なSkill、subagent、handoff、policy記述を配備しない | `agent-capability-gating` |
+| `project-memory`を選ばない構成ではHindsightのhook package、記憶の収穫のcommandとtimer、client mode、managed file、および利用不能なSkill、subagent、handoff、policy記述を配備しない | `agent-capability-gating` |
 | 有効なCapabilityまたはSkill依存を満たせないSkillをAgent clientへ配備しない | `skill-capability-gating` |
 | OCI imageの宣言がcontainerとpull方針に一致する | `oci-image-contract` |
 | container applicationのendpoint URLとportがOCI publish、unitがsystemd serviceに完全一致し、healthが宣言済みHTTP endpointを参照する | `nixos-toplevel`（`platform/containers/module.nix`のassertion） |

@@ -9,7 +9,6 @@
     "memory": 8774,
     "playwright": 8776,
     "searxng": 8775,
-    "sonarqube": 8778,
     "zvec-grep": 8784
   },
   "gateway": {
@@ -20,9 +19,7 @@
   "containers": [
     "crawl4ai",
     "hindsight",
-    "searxng",
-    "sonarqube",
-    "sonarqube-db"
+    "searxng"
   ],
   "containerNetwork": "dotfiles-backends",
   "secrets": [
@@ -38,9 +35,7 @@
     "identity/work/email",
     "identity/work/name",
     "opencode/go_api_key",
-    "searxng/secret_key",
-    "sonarqube/admin_password",
-    "sonarqube/db_password"
+    "searxng/secret_key"
   ],
   "projectMemoryPersistentMount": "hindsight-data:/home/hindsight/.pg0"
 }

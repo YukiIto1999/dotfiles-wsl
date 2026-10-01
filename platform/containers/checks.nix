@@ -471,7 +471,6 @@ let
     "crawl4ai"
     "memory"
     "searxng"
-    "sonarqube"
   ];
   disabledContainerServices = [
     "docker-build-artifact-gc"
@@ -479,27 +478,19 @@ let
     "docker-dotfiles-backends-network"
     "docker-hindsight"
     "docker-searxng"
-    "docker-sonarqube"
-    "docker-sonarqube-db"
-    "sonarqube-provision"
   ];
   disabledContainerTimers = [
     "docker-build-artifact-gc"
-    "sonarqube-provision"
   ];
   disabledContainerSecrets = [
     "crawl4ai/api_token"
     "opencode/go_api_key"
     "searxng/secret_key"
-    "sonarqube/admin_password"
-    "sonarqube/db_password"
   ];
   disabledContainerTemplates = [
     "crawl4ai.env"
     "hindsight.env"
     "searxng-settings.yml"
-    "sonarqube-db.env"
-    "sonarqube.env"
   ];
   disabledContainerArtifacts = [
     "containers/searxng/settings-template"
@@ -761,7 +752,6 @@ in
       [
         "crawl4ai"
         "searxng"
-        "sonarqube"
       ];
     assert containerlessVariantConfig.dotfiles.capabilities.enabled == containerlessCapabilityIds;
     assert containerlessVariantConfig.dotfiles.platform.containers.enabled == [ ];

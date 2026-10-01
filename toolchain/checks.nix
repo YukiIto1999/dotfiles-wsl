@@ -205,4 +205,43 @@ in
         touch "$out"
       '';
 
+  git-pre-commit-leak-contract =
+    pkgs.runCommandLocal "check-git-pre-commit-leak-contract"
+      {
+        nativeBuildInputs = with pkgs; [
+          bash
+          coreutils
+          git
+          gnugrep
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        hook=${self}/toolchain/git/assets/hooks/pre-commit
+        export HOME=$PWD/home GIT_CONFIG_NOSYSTEM=1
+        mkdir -p "$HOME" repo
+        cd repo
+        git init -q
+
+        token="ghp_$(printf 'a%.0s' {1..36})"
+        for name in 'plain.txt' '日本語の名前.txt' 'space name.txt' '-dash.txt'; do
+          printf '%s\n' "$token" > "./$name"
+          git add -- "./$name"
+          if bash "$hook" 2> stderr; then
+            echo "pre-commit accepted a token in: $name" >&2
+            exit 1
+          fi
+          grep -Fq "PAT leak in $name" stderr
+          git rm -q --cached -- "./$name"
+          rm -- "./$name"
+        done
+
+        printf 'no secret\n' > '日本語の名前.txt'
+        git add -- '日本語の名前.txt'
+        bash "$hook"
+
+        touch "$out"
+      '';
+
 }

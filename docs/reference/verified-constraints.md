@@ -141,6 +141,7 @@
 | Nix の未使用束縛 | `deadnix` |
 | Nix の慣用 | `statix` |
 | commit 件名が scope なし、50 文字以内の日本語一行であり、要約が読点と句点を含まず、動詞、形容詞、助詞で終わらない | `git-commit-message-contract` |
+| pre-commit が日本語、空白、先頭の `-` を含む file 名でも staged の追加行を検査し、GitHub token を含む commit を拒む | `git-pre-commit-leak-contract` |
 | shell の静的検査 | `shellcheck` (shebang を持つ file が対象、fragment は `writeShellApplication` が build 時に見る) |
 | GitHub Actions workflow の妥当性 | `actionlint` |
 | devenv と direnv を home だけが所有し、binary cache が一度だけ登録される | `development-tool-ownership` |

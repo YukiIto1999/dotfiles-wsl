@@ -64,6 +64,15 @@ let
     name: file: lib.nameValuePair (lib.removePrefix hookPrefix name) file.source
   ) hookFiles;
   hooksDirectory = pkgs.linkFarm "git-hooks" deployedHooks;
+  # 予算の超過は 15 分待たずに確かめる。配備と同じ組み立てに短い予算だけを渡す
+  shortBudgetHooks = import ./package.nix {
+    inherit lib pkgs;
+    verificationEntry = hostConfig.dotfiles.toolchain.verification.entry;
+    pushBudgetSeconds = 1;
+  };
+  shortBudgetHooksDirectory = pkgs.linkFarm "git-hooks-short-budget" (
+    lib.mapAttrs (_: lib.getExe) shortBudgetHooks
+  );
 in
 {
   # 生成した Git 設定を実際の git に読ませ、URL ごとに選ばれる helper と token を見る
@@ -150,6 +159,25 @@ in
       }
       ''
         bash ${./fixtures/hooks.sh}
+        touch $out
+      '';
+
+  # 配備した pre-push が T2 の入口を引いて実行し、結果、省略、予算で push を通すか拒むかを見る
+  git-pre-push-verification =
+    pkgs.runCommandLocal "check-git-pre-push-verification"
+      {
+        nativeBuildInputs = with pkgs; [
+          bash
+          coreutils
+          git
+          gnugrep
+          gnumake
+        ];
+        HOOKS = hooksDirectory;
+        SHORT_BUDGET_HOOKS = shortBudgetHooksDirectory;
+      }
+      ''
+        bash ${./fixtures/pre-push.sh}
         touch $out
       '';
 }

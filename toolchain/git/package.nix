@@ -2,6 +2,10 @@
 {
   lib,
   pkgs,
+  # T2 の入口を repository の宣言から引く command
+  verificationEntry,
+  # T2 の時間予算。超えた検証は止める
+  pushBudgetSeconds,
 }:
 
 let
@@ -42,6 +46,15 @@ let
   globalChecks = {
     pre-commit = mkScript "git-global-pre-commit" (builtins.readFile ./assets/hooks/pre-commit);
     commit-msg = mkScript "git-global-commit-msg" (builtins.readFile ./assets/hooks/commit-msg);
+    pre-push = mkScript "git-global-pre-push" (
+      builtins.replaceStrings
+        [ "@verificationEntry@" "@budgetSeconds@" ]
+        [
+          (lib.getExe verificationEntry)
+          (toString pushBudgetSeconds)
+        ]
+        (builtins.readFile ./assets/hooks/pre-push)
+    );
   };
 
   dispatcher =

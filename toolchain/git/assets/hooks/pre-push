@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# push の前に、repository が宣言する T2 の検証入口 verify-push を作業木で通す。
+# 宣言しない repository では何もしない。予算を超えた検証は止めて push を拒む。
+verification_entry=@verificationEntry@
+budget_seconds=@budgetSeconds@
+bypass_log=$HOME/.local/state/dotfiles-wsl/git/verify-push-bypass.log
+
+duration() {
+  printf '%d分%02d秒' $(($1 / 60)) $(($1 % 60))
+}
+
+# 利用者が理由を添えて検証を省いた push を、後から辿れるように控える。
+record_bypass() {
+  local top=$1 entry=$2 reason=$3 head
+  head=$(git -C "$top" rev-parse --verify -q HEAD || printf 'none')
+  mkdir -p "${bypass_log%/*}"
+  printf '%s\trepo=%s\thead=%s\tentry=%s\treason=%s\n' \
+    "$(date -Iseconds)" "$top" "$head" "$entry" "$reason" >>"$bypass_log"
+  printf 'verify-push: %s を省いた。理由: %s(%s に記録した)\n' "$entry" "$reason" "$bypass_log" >&2
+}
+
+# timeout は自分の process group を作り、予算を超えると子孫ごと止める。
+# 端末の Ctrl-C はその group へ届かないため、hook が受けた signal を group へ渡す。
+run_within_budget() {
+  local top=$1 pid status
+  shift
+  (cd "$top" && exec timeout --kill-after=30s "$budget_seconds" "$@") </dev/null &
+  pid=$!
+  trap 'interrupted=1; kill -TERM -- "-$pid" 2>/dev/null || true' INT TERM HUP
+  while :; do
+    status=0
+    wait "$pid" || status=$?
+    # signal で中断された wait は job の終了を待たずに戻る。job が残っていれば待ち直す
+    kill -0 "$pid" 2>/dev/null || break
+  done
+  trap - INT TERM HUP
+  return "$status"
+}
+
+main() {
+  local top entry started elapsed status=0
+  local -a command
+  top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+  entry=$("$verification_entry" --repo "$top" verify-push)
+  [ -n "$entry" ] || exit 0
+
+  if [ -n "${DOTFILES_VERIFY_PUSH_BYPASS-}" ]; then
+    record_bypass "$top" "$entry" "$DOTFILES_VERIFY_PUSH_BYPASS"
+    exit 0
+  fi
+
+  read -r -a command <<<"$entry"
+  printf 'verify-push: %s を実行する(予算 %s)\n' "$entry" "$(duration "$budget_seconds")" >&2
+  interrupted=0
+  started=$SECONDS
+  run_within_budget "$top" "${command[@]}" || status=$?
+  elapsed=$((SECONDS - started))
+
+  if [ "$interrupted" -eq 1 ]; then
+    printf 'verify-push: 中断した(経過 %s)\n' "$(duration "$elapsed")" >&2
+    exit 130
+  fi
+  if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && [ "$elapsed" -ge "$budget_seconds" ]; then
+    printf 'verify-push: 予算 %s を超えたため止めた(経過 %s)。予算に収まらない検証は verify-full へ移す\n' \
+      "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
+    exit 1
+  fi
+  if [ "$status" -ne 0 ]; then
+    printf 'verify-push: 失敗した(終了 %d、経過 %s)\n' "$status" "$(duration "$elapsed")" >&2
+    exit "$status"
+  fi
+  printf 'verify-push: 通った(経過 %s)\n' "$(duration "$elapsed")" >&2
+}
+
+main "$@"

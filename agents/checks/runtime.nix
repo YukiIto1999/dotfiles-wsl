@@ -13,8 +13,9 @@ let
   inherit (agentConfig) clients;
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
   installAgents = hostConfig.dotfiles.platform.cli.commands.installAgents;
+  verificationEntry = hostConfig.dotfiles.toolchain.verification.entry;
   runtime = import ../package.nix {
-    inherit lib pkgs;
+    inherit lib pkgs verificationEntry;
     runtimeContract = runtimePackageContract;
   };
   wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
@@ -426,7 +427,7 @@ let
   runtimeWithCacheMutation =
     cacheMutation:
     import ../package.nix {
-      inherit lib pkgs;
+      inherit lib pkgs verificationEntry;
       runtimeContract = runtimePackageContract // {
         cache = runtimePackageContract.cache // cacheMutation;
       };
@@ -437,7 +438,7 @@ let
   runtimeWithRelativeRootMutation =
     update:
     import ../package.nix {
-      inherit lib pkgs;
+      inherit lib pkgs verificationEntry;
       runtimeContract = runtimePackageContract // update;
     };
   relativeCacheRootMutationRuntime = runtimeWithRelativeRootMutation {

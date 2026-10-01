@@ -98,7 +98,8 @@
 | OpenCodeの同時sessionへ想起結果が混在せず、古いpromptの遅延応答が新しい結果を上書きせず、idleで想起結果を捨てて会話をmemoryへ送らない | `project-memory-client-integrations` |
 | GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。raw asset は single-binary layout と path 成分のない entrypoint だけを受理し、mode 0700 で公開する。client ごとの失敗は隔離され、後続 client の公開を止めず、失敗した client 名だけを報告する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
 | agent cache GC が allocated bytes を正本にし、不正な managed path を検出すると削除前に失敗し、metadata のない session を所有者のいない orphan として回収し、内容が不正な metadata を持つ session は所有者を判定できないため残してその実行の cache 削除を止め、他の orphan は回収し、inactive project cache を先に回収して active session がない場合だけ共有 cache を空にし、再計測し、未解決の session を残した実行を失敗で終える | `agent-project-cache-gc` |
-| source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない。検証の門は宣言した入口を repository の根で通した木だけを通し、shell の呼び出しは木を変えた場合だけ門を立てる | `agent-verification-cache` |
+| source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない。検証の門は T1 の `verify` だけを問い、宣言した入口を repository の根で通した木だけを通し、shell の呼び出しは木を変えた場合だけ門を立てる | `agent-verification-cache` |
+| 検証の段 `verify`、`verify-push`、`verify-full` の入口を devenv の script、just の recipe、package.json の script、Makefile の target の順に repository の根の宣言から引き、後ろに続く段の名前を前の段の宣言と読まず、git の木の外と段に無い名前には答えない | `verification-entry-resolution` |
 | agent resource command と reaper の package、state root、timer が宣言どおりである | `agent-resource-contract` |
 | agent が作った worktree だけを登録し、clean、HEAD 不変、未使用の場合だけ隔離と再検査後に回収する | `agent-resource-behavior` |
 | 作業日誌が区切り時刻から翌日の区切り時刻までの利用者の指示、応答、tool の意図、commit だけを model へ渡し、thinking、tool の結果、subagent の記録、範囲外の entry を渡さず、host ごとの file を push する。同じ日を作り直しても内容が同じなら commit を増やさず、timer は最後に完了した日までの未作成の日だけを選ぶ。model が失敗した日は file を作らずに後の日を記録して非ゼロで終わり、次の実行でその日を作る。一時 directory が Git の work tree の中にあれば model を呼ばない | `agent-journal-behavior` |

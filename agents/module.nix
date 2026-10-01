@@ -17,7 +17,10 @@ let
   clientExecutables = lib.mapAttrs (
     _: client: "${cfg.workstation.homeDir}/.local/bin/${client.binary}"
   ) agents.clients;
-  runtime = import ./package.nix { inherit lib pkgs runtimeContract; };
+  runtime = import ./package.nix {
+    inherit lib pkgs runtimeContract;
+    verificationEntry = cfg.toolchain.verification.entry;
+  };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (
     name: agents.clients.${name}.runtimeWrapperMode == "managed"

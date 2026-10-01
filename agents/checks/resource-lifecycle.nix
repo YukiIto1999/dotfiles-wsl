@@ -7,15 +7,18 @@
 
 let
   agentConfig = hostConfig.dotfiles.agents;
+  inherit (hostConfig.dotfiles.toolchain.verification) entry;
   runtime = import ../package.nix {
     inherit lib pkgs;
     runtimeContract = runtimePackageContract;
+    verificationEntry = entry;
   };
   sevenDayRuntime = import ../package.nix {
     inherit lib pkgs;
     runtimeContract = runtimePackageContract // {
       ledgerRetentionDays = 7;
     };
+    verificationEntry = entry;
   };
   countingJq = pkgs.writeShellScriptBin "jq" ''
     counter=''${DOTFILES_AGENT_TEST_JQ_COUNTER:?}

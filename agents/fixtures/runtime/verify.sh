@@ -441,6 +441,11 @@ fi
 rm "$gate_repo/devenv.nix"
 "$GATE" check --repo "$gate_repo" >/dev/null
 
+# 門が問うのは T1 の verify だけである。push 前や全量の段だけを宣言する repository は止めない。
+printf 'scripts.verify-push.exec = "true";\nscripts.verify-full.exec = "true";\n' >"$gate_repo/devenv.nix"
+test -z "$("$GATE" entry --repo "$gate_repo")"
+"$GATE" check --repo "$gate_repo" >/dev/null
+
 # 未追跡の綴りが増えた木も、通した木とは別物として扱う。
 printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
 git -C "$gate_repo" checkout -q -- tracked

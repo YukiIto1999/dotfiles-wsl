@@ -38,7 +38,7 @@ WSLのmemory安定性は[`workstation/stability/module.nix`](../../workstation/s
 | `workstation/` | user、WSL、Nix、Home Manager、font、時刻とlocale、storage、安定性、activation |
 | `identity/` | Git authorとGitHub account identity |
 | `secrets/` | secretの意味的なroot。SOPS実装は`secrets/sops/` |
-| `toolchain/` | PATH上の開発ツール、language server、Git設定、dev shell |
+| `toolchain/` | PATH上の開発ツール、language server、Git設定、検証の段の入口解決、dev shell |
 | `agents/` | Agent client、subagent、policy、runtime、delegation、Skill配備、作業日誌、記憶の収穫 |
 | `skills/` | task procedureとSkill間・Capabilityへの依存metadata |
 | `capabilities/` | consumer非依存の機能contract、provider adapter、backend、state、credential、lifecycle |

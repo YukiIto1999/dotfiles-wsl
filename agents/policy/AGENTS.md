@@ -110,4 +110,5 @@ Agent client の更新は `docs/operations/agent-clients.md`、構造は `docs/a
 - パッケージマネージャでグローバルインストールしない。パッケージは nix / devenv で導入する。
 - `gh auth login` / `gh auth switch` は使わない。トークンの切替は `sops --config @dotfilesDir@/secrets/sops/assets/.sops.yaml @dotfilesDir@/secrets/sops/assets/secrets.json` 編集後の rebuild で行う。
 - 資格情報を平文に書かない。GitHub PAT は SOPS + age の `@dotfilesDir@/secrets/sops/assets/secrets.json` に集約する。
+- repository の hook を信頼する `git config dotfiles.hooks.trusted true` は利用者だけが設定する。agent は信頼を与えず、repository 側で `core.hooksPath` を上書きしない。
 - commit message は scope なし、50 文字以内の `<type>: <日本語の要約>` 一行だけにし、type 接頭辞はどの repository でも省かない。要約は変更の目的を一つだけ示し、個人名を含めず、「〜の追加」「〜の見直し」のような体言止めで終える。「…する」「…した」「…を直す」「…にする」「…しない」のような動詞や形容詞の終わり方、「…へ」「…に」のような助詞の終わり方、読点「、」、句点「。」は使わない。件名は句点を付けない見出しであり、名詞で終えれば時制も意図の表明も持たないラベルとして閉じるが、動詞で終えると句点を欠いた文に読め、読点は一行に二つの関心がある印になるためである。中黒（・）は語の簡潔な並置に限り許容する。これらの規則と AI attribution は commit-msg hook が block する。本文・検査・参照更新を 1 つのコミットに閉じ、未検証の中間コミットを残さない。

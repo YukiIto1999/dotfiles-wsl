@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# global の hooksPath に置く hook の本体。dotfiles の検査を先に通し、続けて repository の
+# `.githooks/<hook>` を同じ argv と stdin で走らせる。どちらかが失敗すれば、その終了 status で止める。
+hook=@hook@
+global_check=@globalCheck@
+
+# git が stdin に内容を渡すのは pre-push の ref と post-rewrite の書き換え表だけで、他は /dev/null である。
+# 両方へ同じ内容を渡すため、一度だけ読んで控える。
+input=
+case $hook in
+pre-push | post-rewrite)
+  input=$(mktemp)
+  trap 'rm -f -- "$input"' EXIT
+  cat >"$input"
+  ;;
+esac
+
+run() {
+  if [ -n "$input" ]; then
+    "$@" <"$input"
+  else
+    "$@"
+  fi
+}
+
+if [ -n "$global_check" ]; then
+  run "$global_check" "$@"
+fi
+
+top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+repo_hook=$top/.githooks/$hook
+[ -f "$repo_hook" ] && [ -x "$repo_hook" ] || exit 0
+
+# clone しただけの repository の code を走らせない。信頼は利用者が repository ごとに与える。
+if [ "$(git config --type=bool --get dotfiles.hooks.trusted 2>/dev/null || true)" != true ]; then
+  printf 'dotfiles: 信頼していない repository の %s を実行しない(信頼するなら git config dotfiles.hooks.trusted true)\n' \
+    "$repo_hook" >&2
+  exit 0
+fi
+
+run "$repo_hook" "$@"

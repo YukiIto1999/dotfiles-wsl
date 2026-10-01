@@ -18,21 +18,7 @@ let
     )
   );
 
-  # hook は git を呼んだ process の PATH で動く。systemd service など bash を持たない
-  # 呼び出し元からも同じ検査を通すため、interpreter と使う command を hook 自身に固定する。
-  mkGitHook = name: text: {
-    source = lib.getExe (
-      pkgs.writeShellApplication {
-        inherit name text;
-        runtimeInputs = [
-          pkgs.coreutils
-          pkgs.git
-          pkgs.gnugrep
-        ];
-      }
-    );
-    executable = true;
-  };
+  hooks = import ./package.nix { inherit lib pkgs; };
 
   credentialTokenFile = pkgs.writeShellApplication {
     name = "git-credential-token-file";
@@ -111,6 +97,8 @@ in
           init.defaultBranch = "main";
           pull.rebase = false;
           core.excludesFile = "~/.config/git/ignore";
+          # 全 repository の hook をここの dispatcher が受け、信頼した repository の `.githooks/` へつなぐ。
+          # repository が hooksPath を上書きすると、dotfiles の検査ごと外れる
           core.hooksPath = "~/.config/git/hooks";
           merge.conflictstyle = "diff3";
           include.path = "${dotfiles.workstation.homeDir}/${dotfiles.toolchain.git.identity.destinations.default}";
@@ -138,12 +126,13 @@ in
       home.file = {
         ".config/git/ignore".source =
           config.lib.file.mkOutOfStoreSymlink "${dotfiles.workstation.dotfilesDir}/toolchain/git/assets/ignore";
-        ".config/git/hooks/pre-commit" = mkGitHook "pre-commit" (
-          builtins.readFile ./assets/hooks/pre-commit
-        );
-        ".config/git/hooks/commit-msg" = mkGitHook "commit-msg" (
-          builtins.readFile ./assets/hooks/commit-msg
-        );
-      };
+      }
+      // lib.mapAttrs' (
+        name: hook:
+        lib.nameValuePair ".config/git/hooks/${name}" {
+          source = lib.getExe hook;
+          executable = true;
+        }
+      ) hooks;
     };
 }

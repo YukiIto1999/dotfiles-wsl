@@ -15,6 +15,7 @@
 - [Agent client](operations/agent-clients.md)では、現在の checkout からの更新、日次 timer、release の確認方法が分かる。
 - [作業日誌](operations/agent-journal.md)では、omp の作業日誌の出力先、日次 timer、作り直し方が分かる。
 - [記憶の収穫](operations/memory-harvest.md)では、omp の session 記録から訂正を project memory へ保存する timer、log の読み方、状態の扱いが分かる。
+- [Git hook](operations/git-hooks.md)では、dotfiles の検査と repository の hook の実行順序、repository の信頼が分かる。
 - [開発](operations/development.md)では、devShell、整形、ローカル検査、CI の使い分けが分かる。
 
 ## 説明 — `architecture/`

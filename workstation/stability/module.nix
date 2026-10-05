@@ -13,11 +13,18 @@ let
   zramMemoryPercent = cfg.swap.zramMemoryPercent;
   zramPriority = 100;
   minimumSwapGiB = cfg.swap.minimumTotalGiB;
+  pageblockKbytes = 2048;
+  lowmemZones = 2;
+  migratetypes = 3;
+  khugepagedMinFreeKbytes = lowmemZones * (2 + migratetypes * migratetypes) * pageblockKbytes;
+  # WSL の kernel は distro の再起動を越えて旧世代の値を保つため kernel の既定値の宣言の省略は不可
   virtualMemorySysctl = {
-    "vm.min_free_kbytes" = 262144;
-    "vm.watermark_scale_factor" = 100;
-    "vm.compaction_proactiveness" = 40;
-    "vm.defrag_mode" = 1;
+    # high watermark に比例する boost が空き block のある zone でも GFP_KERNEL の VMBus ring 確保を watermark で落とすため min と kswapd の間隔の引き上げは不可
+    "vm.min_free_kbytes" = khugepagedMinFreeKbytes;
+    "vm.watermark_scale_factor" = 10;
+    "vm.compaction_proactiveness" = 20;
+    # fallback を禁じると unmovable な order-7 の VMBus ring 確保が失敗するため有効化は不可
+    "vm.defrag_mode" = 0;
   };
   swap = {
     minimumTotalBytes = minimumSwapGiB * gibibyte;
@@ -45,6 +52,14 @@ let
     inherit (windowsMemoryCommit) powershellCommand;
     timeoutSeconds = observationTimeoutSeconds;
   };
+  wslMemoryObservation = import ./impl/wsl-memory-package.nix {
+    inherit pkgs lib;
+    journalTimeoutSeconds = 20;
+    pressureWarning = 10;
+    pressureFailure = 40;
+    relayMinimumAgeSeconds = 300;
+  };
+  wslMemoryContract = wslMemoryObservation.dotfilesObservationContract;
   zramGenerator = "${pkgs.zram-generator.outPath}/lib/systemd/system-generators/zram-generator";
   zramSetup = pkgs.writeShellScript "dotfiles-zram-setup" ''
     set -euo pipefail
@@ -121,6 +136,20 @@ in
       failureMessage = "could not observe Windows committed memory";
       command = windowsMemoryCommitObservation;
       inherit (windowsMemoryCommit) metric warning failure;
+    };
+    "host/wsl-memory" = {
+      kind = "normalized-protocol";
+      checkId = "resource/wsl-memory";
+      resourceKey = null;
+      timeoutSeconds = wslMemoryContract.outerTimeout;
+      failureMessage = "could not observe WSL memory health";
+      command = wslMemoryObservation;
+      inherit (wslMemoryContract)
+        allowedOutcomeIds
+        requiredOutcomeIds
+        requiredResourceKeys
+        envelopeVersion
+        ;
     };
   };
 

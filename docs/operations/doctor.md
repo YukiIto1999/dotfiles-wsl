@@ -100,7 +100,7 @@ wsl --import NixOS INSTALL_DIR BACKUP.tar --version 2
 
 Orcaの描画停止だけでOMP sessionの停止を断定しない。既存terminalが応答する場合はterminalを閉じず、`wsl --shutdown`も実行しない。これは全distributionと既存sessionを終了し、実行中状態とprompt cacheを失わせる。
 
-WSL内部では定期的な`drop_caches`を実行しない。clean page cacheの一括破棄は、複数のAgentが必要ファイルを同時に再読込みしてVHDのI/Oキューを急増させるためである。メモリ安定化はkernel watermark、proactive compaction、zramで行う。
+WSL内部では定期的な`drop_caches`を実行しない。clean page cacheの一括破棄は、複数のAgentが必要ファイルを同時に再読込みしてVHDのI/Oキューを急増させるためである。メモリ安定化はAgent runtimeの`agents.slice`の上限、zram、kernelの既定のwatermarkとcompactionで行う。
 
 新規sessionだけが停止し、kernel journalに`Relay`の`Waiting for abnormally long accept`や`SessionLeader`の`accept4 failed 110`がある場合も、Relayを定期走査してkillしない。Dドライブの空き、WSL内の空き、ルートの読み書き可否をそれぞれ確認し、稼働中sessionを記録したうえで障害を切り分ける。WSL内の空きだけではVHDXを収容するWindows側の空きは分からない。
 
@@ -108,6 +108,23 @@ WSL内部では定期的な`drop_caches`を実行しない。clean page cacheの
 df -h / /mnt/d
 findmnt -no SOURCE,OPTIONS /
 ```
+
+`resource/wsl-memory/*` は、新しい WSL session と interop の接続が作れなくなる前兆と結果を、VM の中だけで観測する。
+どれも `/proc` と kernel log を読むだけで、Windows の interop を通らない。
+
+| check | 観測 | 判定 |
+|---|---|---|
+| `vmbus-ring-failures` | この boot の kernel log にある `vmbus_alloc_ring` の確保失敗の件数 | 1 件以上で `fail` |
+| `stuck-relays` | 親を失って PID 1 の子として 300 秒以上残る `Relay` の数 | 1 個以上で `fail` |
+| `high-order-pages` | 空きが boost を含む min と Normal への lowmem reserve を超える zone にある、order 7 以上と order 9 以上の空き block の数 | order 7 以上が 0 で `fail`、order 9 以上が 0 で `warn` |
+| `memory-pressure`、`io-pressure` | PSI の `full` の 60 秒平均 | 10% 以上で `warn`、40% 以上で `fail` |
+
+新しい session は VMBus の ring に 512 KiB、つまり order 7 の連続領域を確保し、確保に失敗すると `Relay` が accept を待ったまま残る。
+`vmbus-ring-failures` と `stuck-relays` は、WSL を再起動するまで `fail` のまま残る。
+`high-order-pages` の order 9 は空いた pageblock 一つ分に当たり、これが無くなると高次の確保は他の用途の block を分割するしかない。
+PSI の `full` は、実行可能な全 task が memory または I/O を待って止まっていた時間の割合である。
+40% を超えた時間帯には、正常な service に対する doctor の probe と MCP の呼出しも期限を超えた。
+kernel log の走査が 20 秒で終わらない場合は、`vmbus-ring-failures` を期限を示す `warn` にし、他の check の結果は残す。
 
 sessionを復旧する場合は、利用者が明示したsession名と文面だけを使う。spinner、経過時間、最終出力から作業中か入力待ちかを推測して一括入力しない。
 

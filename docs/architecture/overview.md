@@ -28,7 +28,20 @@ Nix storeのcandidate system
 
 `/run/current-system`は実行中のgeneration、`/nix/var/nix/profiles/system`はsystem profile、`/run/booted-system`はWSL起動時のgenerationを表す。`wsl.conf`とactivation interfaceの差分に応じて、live switchとWSL cold startを分ける。
 
-WSLのmemory安定性は[`workstation/stability/module.nix`](../../workstation/stability/module.nix)が所有する。kernel watermark、proactive compaction、zramでVMBusが使う高次pageの余地を圧迫前に確保する。定期的な`drop_caches`は全セッションのディスク再読込みを誘発するため使用せず、process、Agent session、toolの使用量にも上限を設けない。
+WSLのmemory安定性は[`workstation/stability/module.nix`](../../workstation/stability/module.nix)が所有する。
+新しいWSL sessionはVMBus ringに512 KiB、つまりorder 7の連続領域を`GFP_KERNEL`で確保し、order 3を超える確保は再試行されないため、一度の失敗で接続できなくなる。
+この確保は、zoneの空きがboostを含むmin watermarkを上回り、どれかのmigratetypeにorder 7以上の空きblockが残っていれば成功する。
+空きを使い切らないことはAgent runtimeの`agents.slice`の上限が受け持ち、空きblockはkernelの既定のcompactionとmigratetypeのfallbackが作る。
+そのため`vm.min_free_kbytes`、`vm.watermark_scale_factor`、`vm.compaction_proactiveness`はkernelの既定値にする。
+minとwatermarkの間隔を引き上げるとhigh watermarkに比例するboostも大きくなり、空きblockがあってもwatermarkの検査で確保が落ちるためである。
+2026-10-02の確保失敗では、Normal zoneにorder 7以上の空きblockが174個あったが、空き972 MiBに対してboost 740 MiBを含むminが971 MiBあり、確保の大きさと予約分を引いた空きがminを下回った。
+既定値のminは、THPを有効にしたkernelでkhugepagedがzoneごとに11個のpageblockを空けるように決める値で、このVMのNormal zoneではboostを含めても最大で約208 MiBになる。
+`vm.defrag_mode`は無効にする。
+有効にするとunmovableな高次pageの確保が他のmigratetypeのblockを借りられず、新しいWSL sessionが使うVMBus ringの確保が失敗するためである。
+WSLのkernelはdistroの再起動を越えて旧世代の値を保つため、既定値も宣言する。
+効果はdoctorの`resource/wsl-memory/high-order-pages`と`vmbus-ring-failures`で確かめる。
+定期的な`drop_caches`は全セッションのディスク再読込みを誘発するため使用しない。
+Agent sessionのmemoryの上限とCPUの配分は、[AI tooling](ai-tooling.md)が示すとおりAgent runtimeが`agents.slice`で持つ。
 
 ## 責務root
 

@@ -19,17 +19,17 @@ let
   systemUnits = hostConfig.environment.etc."systemd/system".source;
   journaldConfig = hostConfig.environment.etc."systemd/journald.conf".source;
   zramConfig = hostConfig.environment.etc."systemd/zram-generator.conf".source;
-  expectedVirtualMemorySysctl = {
-    "vm.min_free_kbytes" = 262144;
-    "vm.watermark_scale_factor" = 100;
-    "vm.compaction_proactiveness" = 40;
-    "vm.defrag_mode" = 1;
-  };
   expectedNixStorageReserve = {
     "min-free" = 34359738368;
     "max-free" = 68719476736;
   };
-  virtualMemorySysctl = builtins.intersectAttrs expectedVirtualMemorySysctl hostConfig.boot.kernel.sysctl;
+  wslMemoryOutcomeIds = [
+    "resource/wsl-memory/high-order-pages"
+    "resource/wsl-memory/io-pressure"
+    "resource/wsl-memory/memory-pressure"
+    "resource/wsl-memory/stuck-relays"
+    "resource/wsl-memory/vmbus-ring-failures"
+  ];
   hostObservationKeys = [
     "host/home-manager"
     "host/home-manager-restart"
@@ -41,6 +41,7 @@ let
     "host/system-generation"
     "host/windows-drives"
     "host/windows-memory-commit"
+    "host/wsl-memory"
     "host/wsl-vhd"
   ];
   hostObservations = lib.filterAttrs (
@@ -161,6 +162,17 @@ let
       timeoutSeconds = 10;
       warning = workstation.windowsMemoryCommit.warning;
     };
+    "host/wsl-memory" = {
+      allowedOutcomeIds = wslMemoryOutcomeIds;
+      checkId = "resource/wsl-memory";
+      envelopeVersion = 1;
+      failureMessage = "could not observe WSL memory health";
+      kind = "normalized-protocol";
+      requiredOutcomeIds = wslMemoryOutcomeIds;
+      requiredResourceKeys = [ "wslMemory" ];
+      resourceKey = null;
+      timeoutSeconds = 30;
+    };
     "host/wsl-vhd" = {
       allowedOutcomeIds = [
         "resource/wsl-vhd/capacity"
@@ -203,7 +215,6 @@ let
     nixOptimiseAutomatic = hostConfig.nix.optimise.automatic;
     nixStorageReserve = builtins.intersectAttrs expectedNixStorageReserve hostConfig.nix.settings;
     timers = hostConfig.systemd.timers;
-    inherit virtualMemorySysctl;
     zram = zramGenerator.settings.zram0;
   };
   stabilityContractMatches =
@@ -234,8 +245,7 @@ let
     && (homeManagerObservation.unit or null) == candidateConfiguration.homeManagerUnit
     && (homeManagerRestartObservation.target or null) == candidateConfiguration.homeManagerUnit
     && (homeManagerRestartObservation.warningAt or null) == 5
-    && (homeManagerRestartObservation.failureAt or null) == 20
-    && candidateConfiguration.virtualMemorySysctl == expectedVirtualMemorySysctl;
+    && (homeManagerRestartObservation.failureAt or null) == 20;
   thresholdMutation = hostObservations // {
     "host/root-filesystem" = hostObservations."host/root-filesystem" or { } // {
       warning = 86;
@@ -519,6 +529,216 @@ let
       wslconfig = "fail";
     };
   };
+  mkWslMemoryObservation = import ./stability/impl/wsl-memory-package.nix;
+  mkZoneinfo =
+    name:
+    {
+      dma32Free,
+      normalFree ? 487862,
+      normalMin ? 59160,
+    }:
+    pkgs.writeText name ''
+      Node 0, zone    DMA32
+        pages free     ${toString dma32Free}
+              min      6375
+              low      16364
+              high     26353
+              protection: (0, 36208, 36208, 36208)
+      Node 0, zone   Normal
+        pages free     ${toString normalFree}
+              min      ${toString normalMin}
+              low      151854
+              high     244548
+              protection: (0, 0, 0, 0)
+      Node 0, zone  Movable
+        pages free     0
+              min      32
+              protection: (0, 0, 0, 0)
+    '';
+  mkBuddyinfo =
+    name: normalHighOrders:
+    pkgs.writeText name ''
+      Node 0, zone    DMA32   1551   1317   1679   2502   1557    710    263    105      0      0      0
+      Node 0, zone   Normal   2976  14639  10542   7585   4104    781     25 ${normalHighOrders}
+    '';
+  mkPressure =
+    name: memoryFull: ioFull:
+    pkgs.runCommandLocal name { } ''
+      mkdir -p "$out"
+      printf 'some avg10=1.00 avg60=1.00 avg300=1.00 total=1\nfull avg10=1.00 avg60=%s avg300=1.00 total=1\n' \
+        ${memoryFull} >"$out/memory"
+      printf 'some avg10=1.00 avg60=1.00 avg300=1.00 total=1\nfull avg10=1.00 avg60=%s avg300=1.00 total=1\n' \
+        ${ioFull} >"$out/io"
+    '';
+  mkKernelLog =
+    name: matches: latest:
+    pkgs.writeShellScript name ''
+      for argument in "$@"; do
+        if [[ $argument == --grep=* ]]; then
+          ${if matches == "" then "exit 1" else "printf '%s\\n' ${lib.escapeShellArg matches}; exit 0"}
+        fi
+      done
+      printf '%s' ${lib.escapeShellArg latest}
+    '';
+  mkProcessList = name: rows: pkgs.writeShellScript name "printf '%s\\n' ${lib.escapeShellArg rows}";
+  mkWslMemoryProbe =
+    {
+      journalctlCommand ? mkKernelLog "kernel-log-clean" "" "kernel: latest\n",
+      psCommand ? mkProcessList "processes-live" "427501 121645 Relay(427503)\n 1 299 Relay\n1515710 65537 Relay",
+      zoneinfo ? mkZoneinfo "zoneinfo-roomy" { dma32Free = 135220; },
+      buddyinfo ? mkBuddyinfo "buddyinfo-roomy" "4 3 2 1",
+      pressureRoot ? mkPressure "pressure-calm" "9.99" "9.99",
+    }:
+    mkWslMemoryObservation {
+      inherit
+        pkgs
+        lib
+        journalctlCommand
+        psCommand
+        zoneinfo
+        buddyinfo
+        pressureRoot
+        ;
+      journalTimeoutSeconds = 1;
+      pressureWarning = 10;
+      pressureFailure = 40;
+      relayMinimumAgeSeconds = 300;
+    };
+  wslMemoryCases = {
+    calm = {
+      probe = mkWslMemoryProbe { };
+      statuses = {
+        vmbus-ring-failures = "pass";
+        stuck-relays = "pass";
+        high-order-pages = "pass";
+        memory-pressure = "pass";
+        io-pressure = "pass";
+      };
+      resource = {
+        vmbusRingFailures = 0;
+        stuckRelays = 0;
+        ringOrderBlocks = 115;
+        pageblocks = 3;
+        memoryFullAvg60 = 9.99;
+        ioFullAvg60 = 9.99;
+      };
+    };
+    fragmented = {
+      probe = mkWslMemoryProbe {
+        journalctlCommand =
+          mkKernelLog "kernel-log-failures" " vmbus_alloc_ring+0x78/0xd0\n vmbus_alloc_ring+0x78/0xd0"
+            "kernel: latest\n";
+        psCommand = mkProcessList "processes-orphaned" "427501 121645 Relay(427503)\n 1 299 Relay\n 1 300 Relay\n 1 68114 Relay";
+        buddyinfo = mkBuddyinfo "buddyinfo-fragmented" "0 0 0 0";
+        pressureRoot = mkPressure "pressure-stalled" "10.00" "40.00";
+      };
+      statuses = {
+        vmbus-ring-failures = "fail";
+        stuck-relays = "fail";
+        high-order-pages = "warn";
+        memory-pressure = "warn";
+        io-pressure = "fail";
+      };
+      resource = {
+        vmbusRingFailures = 2;
+        stuckRelays = 2;
+        ringOrderBlocks = 105;
+        pageblocks = 0;
+        memoryFullAvg60 = 10;
+        ioFullAvg60 = 40;
+      };
+    };
+    reserved = {
+      probe = mkWslMemoryProbe {
+        zoneinfo = mkZoneinfo "zoneinfo-reserved" { dma32Free = 42710; };
+        buddyinfo = mkBuddyinfo "buddyinfo-reserved" "0 0 0 0";
+      };
+      statuses = {
+        vmbus-ring-failures = "pass";
+        stuck-relays = "pass";
+        high-order-pages = "fail";
+        memory-pressure = "pass";
+        io-pressure = "pass";
+      };
+      resource = {
+        vmbusRingFailures = 0;
+        stuckRelays = 0;
+        ringOrderBlocks = 0;
+        pageblocks = 0;
+        memoryFullAvg60 = 9.99;
+        ioFullAvg60 = 9.99;
+      };
+    };
+    # boost を含む min を下回る zone の空き block まで数えると watermark で落ちる VMBus ring の確保を pass と誤るため zone の空きによる除外の省略は不可
+    boosted = {
+      probe = mkWslMemoryProbe {
+        zoneinfo = mkZoneinfo "zoneinfo-boosted" {
+          dma32Free = 42710;
+          normalFree = 248000;
+          normalMin = 248600;
+        };
+        buddyinfo = mkBuddyinfo "buddyinfo-boosted" "131 40 3 0";
+      };
+      statuses = {
+        vmbus-ring-failures = "pass";
+        stuck-relays = "pass";
+        high-order-pages = "fail";
+        memory-pressure = "pass";
+        io-pressure = "pass";
+      };
+      resource = {
+        vmbusRingFailures = 0;
+        stuckRelays = 0;
+        ringOrderBlocks = 0;
+        pageblocks = 0;
+        memoryFullAvg60 = 9.99;
+        ioFullAvg60 = 9.99;
+      };
+    };
+    unreadable = {
+      probe = mkWslMemoryProbe {
+        journalctlCommand = mkKernelLog "kernel-log-unreadable" "" "";
+        psCommand = pkgs.writeShellScript "processes-unreadable" "exit 1";
+        buddyinfo = "/nonexistent/buddyinfo";
+        pressureRoot = "/nonexistent/pressure";
+      };
+      statuses = {
+        vmbus-ring-failures = "fail";
+        stuck-relays = "fail";
+        high-order-pages = "fail";
+        memory-pressure = "fail";
+        io-pressure = "fail";
+      };
+      resource = {
+        vmbusRingFailures = null;
+        stuckRelays = null;
+        ringOrderBlocks = null;
+        pageblocks = null;
+        memoryFullAvg60 = null;
+        ioFullAvg60 = null;
+      };
+    };
+    slow-kernel-log = {
+      probe = mkWslMemoryProbe {
+        journalctlCommand = pkgs.writeShellScript "kernel-log-slow" "sleep 30";
+      };
+      statuses = {
+        vmbus-ring-failures = "warn";
+        stuck-relays = "pass";
+        high-order-pages = "pass";
+        memory-pressure = "pass";
+        io-pressure = "pass";
+      };
+      resource = {
+        vmbusRingFailures = null;
+        stuckRelays = 0;
+        ringOrderBlocks = 115;
+        pageblocks = 3;
+        memoryFullAvg60 = 9.99;
+        ioFullAvg60 = 9.99;
+      };
+    };
+  };
 in
 {
   machine-profile-contract =
@@ -567,6 +787,13 @@ in
       command.dotfilesObservationCommandKind == "normalized-protocol"
       && command.meta.mainProgram == "dotfiles-observe-wsl-vhd"
     ) "WSL VHD must use a dedicated normalized protocol package";
+    assert lib.assertMsg (
+      let
+        command = hostObservations."host/wsl-memory".command;
+      in
+      command.dotfilesObservationCommandKind == "normalized-protocol"
+      && command.meta.mainProgram == "dotfiles-observe-wsl-memory"
+    ) "WSL memory must use a dedicated normalized protocol package";
     assert lib.assertMsg (
       hostDefinitionKeys == hostObservationKeys
       && builtins.all (name: lib.hasPrefix "host/" name) hostDefinitionKeys
@@ -727,6 +954,38 @@ in
                   lib.mapAttrsToList (
                     name: case: "assert_wsl_vhd ${name} ${lib.getExe case.probe} ${case.capacity} ${case.wslconfig}"
                   ) wslVhdCases
+                )}
+
+                assert_wsl_memory() {
+                  local name=$1
+                  local command=$2
+                  local expected=$3
+                  local stdout="$TMPDIR/wsl-memory-$name.stdout"
+
+                  if ! "$command" >"$stdout" 2>"$TMPDIR/wsl-memory-$name.stderr"; then
+                    echo "WSL memory $name probe did not produce an envelope" >&2
+                    return 1
+                  fi
+                  if ! jq -e --argjson expected "$expected" '
+                    .schemaVersion == 1
+                    and (.outcomes | map({key: (.id | ltrimstr("resource/wsl-memory/")), value: .status}) | from_entries)
+                      == $expected.statuses
+                    and .resources == [{key: "wslMemory", value: $expected.resource}]
+                    and all(.outcomes[]; (.message | length) > 0)
+                  ' "$stdout" >/dev/null; then
+                    echo "WSL memory $name probe did not report $expected" >&2
+                    cat "$stdout" >&2
+                    return 1
+                  fi
+                }
+
+                ${lib.concatStringsSep "\n" (
+                  lib.mapAttrsToList (
+                    name: case:
+                    "assert_wsl_memory ${name} ${lib.getExe case.probe} ${
+                      lib.escapeShellArg (builtins.toJSON { inherit (case) statuses resource; })
+                    }"
+                  ) wslMemoryCases
                 )}
 
                 zram_service=${systemUnits}/dotfiles-zram-swap.service

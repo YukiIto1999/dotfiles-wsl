@@ -24,11 +24,14 @@ PAT の権限は用途に必要な repository と operation に限定する。�
 
 ## agentgateway
 
-[`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix) の listener は port だけを指定し、client authentication と listen address の制限を設定していない。現行 runtime は認証なしで gateway の port を listen する。各 AI CLI の接続 URL が `localhost` でも、listener 自体を loopback 限定と扱ってはならない。
+[`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)のlistenerはportだけを指定し、client認証を設けない。
+listenerのbind addressとは別に、systemd serviceの`IPAddressDeny=any`とloopbackの`IPAddressAllow`でcgroupの通信をloopbackに制限する。
+設定した通信制限はserviceの境界であり、CLIの接続URLがlocalhostであることだけを制限の根拠にしない。
 
-gateway の port へ到達できる process と network peer は、gateway が公開する MCP tool を呼べる信頼境界に入る。front の port も loopback で listen するので、同じ境界に入る。実際に Windows 側や外部 network から到達できるかは WSL の network mode、Windows Firewall、host 側の転送設定に依存する。gateway の deny rule は個別 tool の公開制御であり、client 認証の代わりにはならない。
-
-agentgateway と各 front は設定ユーザーの systemd service として動く。front が読める checkout、home、runtime secret と、実行できる command が tool call の権限上限になる。gateway の bind または認証を変える場合は [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix) を正本として見直す。
+loopbackのgatewayとfrontへ到達できるprocessは、公開MCP toolを呼べる信頼境界に入る。
+Windows側からの到達性はWSLのnetwork modeと転送経路にも依存し、doctorのservice検査だけでは外部到達性を証明しない。
+gatewayのdeny ruleはtoolの公開制御であり、client認証の代わりにはならない。
+gatewayとfrontは設定ユーザーのserviceとして動き、読めるcheckout、home、runtime secretと、実行できるcommandがtool callの権限上限になる。
 
 ## Docker
 
@@ -49,7 +52,8 @@ Codex、OpenCode、OMP は GitHub release を dotfiles が管理する。GitHub 
 
 単一実行 file の asset は、upstream の build 環境と loader の互換性に依存する。dotfiles は `programs.nix-ld` が供給する loader で entrypoint を probe し、probe を通らない release は公開しない。OMP の `config.yml` と `agent.db` は設定ユーザーだけが所有する可変状態であり、認証情報を Nix store や checkout へ取り込まない。
 
-client ごとの更新は互いに独立である。一つの client の失敗は他の client の取得と公開を止めず、失敗した client 名を集約して非ゼロで終える。失敗そのものは `dotfiles-agent-autoupdate.timer` の観測から見える。
+採用clientの更新は互いに独立で、一つの失敗は他clientの取得と公開を止めず、失敗したclient名を集約して非ゼロで終える。
+自動更新を選んだclientだけがtimerから更新され、timerを採用した場合はdoctorで失敗を観測する。
 
 この publish は同じ client root の lock を守る installer 同士を直列化する。同じ UID の悪意ある process が private name または固定済み inode を syscall 間で改変する攻撃までは防がない。`SIGKILL` や電源断では EXIT trap を実行できず、durable transaction journal もないため、途中状態からの自動 rollback は保証しない。これは受け入れている境界であり、更新後の release tree は `dotfiles-doctor` で観測する。
 
@@ -85,7 +89,11 @@ sandbox は gateway の client 認証、Docker daemon の権限、Windows intero
 
 ## Windows interop
 
-[`workstation/wsl/module.nix`](../../workstation/wsl/module.nix) は WSLInterop を有効にし、Windows 側の固定 command を呼ぶ `wslview` を system closure に入れる。Linux process から Windows process を起動する時点で WSL の境界を越える。渡した URL、path、引数は Windows 側の process が処理する。
+[`workstation/wsl/module.nix`](../../workstation/wsl/module.nix)はWSLInteropを有効にし、単一URLまたはpathをWindowsへ渡す`wslview`を配備する。
+Windows PowerShellの場所はhost optionで指定し、Linux processから起動するときにWSLの境界を越える。
+targetはUTF-8のBase64として渡し、PowerShell codeや追加application引数として評価しない。
+Linux pathはwslpathでWindows pathへ変換し、関連付けられたWindows applicationへ起動要求を送る。
+要求の終了status 0は、applicationの表示成功を保証しない。
 
 `appendWindowsPath = false` のため、Windows の executable directory を Linux の PATH へ自動追加しない。ただし固定 path を使う明示的な Windows command と `/mnt/c` の file access を無効にはしない。doctor は launcher の store source と Windows command の起動経路を検査するが、Windows application や Windows 側の file 権限までは保証しない。
 

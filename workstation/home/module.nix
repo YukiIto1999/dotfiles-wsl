@@ -64,6 +64,14 @@ in
           enable = true;
         })
       // {
+        atuin = {
+          enable = true;
+          enableBashIntegration = true;
+          settings = {
+            auto_sync = false;
+            update_check = false;
+          };
+        };
         direnv = {
           enable = true;
           enableBashIntegration = true;

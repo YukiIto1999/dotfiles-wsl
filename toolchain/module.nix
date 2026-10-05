@@ -165,6 +165,8 @@ in
       semgrep
       # 環境の観測と実行
       just
+      btop
+      hyperfine
       nvd
       wget
       curl

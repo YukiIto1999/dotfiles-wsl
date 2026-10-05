@@ -191,9 +191,7 @@ in
       responsibilityViolations =
         lib.optional (legacyPaths != [ ]) "legacy-roots"
         ++ lib.optional (presentLegacyOptions != [ ]) "legacy-options"
-        ++ lib.optional (missingCapabilityContracts != [ ]) "missing-capability-contracts"
-        ++ lib.optional (hostConfig.dotfiles.toolchain.packages ? apm) "toolchain-apm"
-        ++ lib.optional (!(hostConfig.dotfiles.agents.packages ? apm)) "missing-agents-apm";
+        ++ lib.optional (missingCapabilityContracts != [ ]) "missing-capability-contracts";
     in
     assert lib.assertMsg (rootEntriesMatch rootEntries) (
       "flake source root entries differ from the responsibility roster: actual="
@@ -530,7 +528,42 @@ in
           ];
           owners = [ "capabilities" ];
         }
-      ];
+      ]
+      ++
+        map
+          (path: {
+            path = [ "dotfiles" ] ++ lib.splitString "." path;
+            owners = [
+              (builtins.head (lib.splitString "." path))
+              "profiles"
+            ];
+          })
+          [
+            "agents.journal.enable"
+            "agents.memoryHarvest.enable"
+            "agents.slice.memoryHighPercent"
+            "agents.slice.memoryMaxPercent"
+            "agents.slice.memorySwapMaxPercent"
+            "agents.slice.cpuWeight"
+            "agents.slice.userManager.memoryHighPercent"
+            "agents.slice.userManager.memoryMaxPercent"
+            "agents.automaticUpdates.clients"
+            "telemetry.enable"
+            "workstation.wsl.distroName"
+            "workstation.wsl.powershellCommand"
+            "workstation.wsl.nameservers"
+            "workstation.wsl.extraDrives"
+            "workstation.wsl.windowsConfig.memoryGiB"
+            "workstation.wsl.windowsConfig.processors"
+            "workstation.wsl.windowsConfig.swapGiB"
+            "workstation.storage.vhd.sizeGiB"
+            "workstation.storage.vhd.sparse"
+            "workstation.storage.journal.maximumGiB"
+            "workstation.nix.maxJobs"
+            "workstation.nix.cores"
+            "workstation.nix.minimumFreeGiB"
+            "workstation.nix.targetFreeGiB"
+          ];
 
       # module system の全 option leaf を辿る。dotfiles 配下だけを起点にすると、
       # repository が別 root を追加した場合に検査対象から外れてしまう。

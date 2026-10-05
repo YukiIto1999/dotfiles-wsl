@@ -1,15 +1,13 @@
-{ config, ... }:
+{ config, lib, ... }:
 
 let
   cfg = config.dotfiles.workstation;
   gibibyte = 1073741824;
   observationTimeoutSeconds = 10;
-  minimumNixFreeGiB = 32;
-  targetNixFreeGiB = 64;
-  # 1 回の nix 呼出しの build 並列度。builder は nix-daemon の子として system.slice で動き、
-  # agents.slice の上限を受けないため、ここで 12 vCPU を超えないようにする。
-  maxJobs = 4;
-  buildCores = 3;
+  minimumNixFreeGiB = cfg.nix.minimumFreeGiB;
+  targetNixFreeGiB = cfg.nix.targetFreeGiB;
+  maxJobs = cfg.nix.maxJobs;
+  buildCores = cfg.nix.cores;
   # 同じ system.slice の journald、udevd、container、MCP front（既定 100）より build を後に回す。
   nixDaemonCpuWeight = 50;
   binaryCaches = import ./assets/nix-caches.nix;
@@ -29,6 +27,40 @@ let
   };
 in
 {
+  options.dotfiles.workstation.nix = {
+    maxJobs = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 1;
+      description = "nix-daemon の同時 build 数";
+    };
+    cores = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 1;
+      description = "各 Nix build に渡す CPU core 数";
+    };
+    minimumFreeGiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 4;
+      description = "Nix 自動 GC を開始する store 空き容量 GiB";
+    };
+    targetFreeGiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 8;
+      description = "Nix 自動 GC の目標 store 空き容量 GiB";
+    };
+  };
+
+  config.assertions = [
+    {
+      assertion = cfg.nix.minimumFreeGiB < cfg.nix.targetFreeGiB;
+      message = "Nix minimumFreeGiB must be below targetFreeGiB";
+    }
+    {
+      assertion = cfg.nix.targetFreeGiB < cfg.storage.vhd.sizeGiB;
+      message = "Nix targetFreeGiB must be below the declared root VHD capacity";
+    }
+  ];
+
   config.dotfiles.workstation.binaryCaches = binaryCaches;
   config.dotfiles.health.observations = {
     "host/nix-daemon" = {

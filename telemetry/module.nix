@@ -76,6 +76,13 @@ let
 in
 {
   options.dotfiles.telemetry = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = lib.any (client: client.telemetryMode == "supported") (
+        builtins.attrValues cfg.agents.clients
+      );
+      description = "採用clientの使用量をOpenTelemetry collectorへ収集するか。";
+    };
     endpoint = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
@@ -103,7 +110,7 @@ in
     };
   };
 
-  config.dotfiles.managedArtifacts."telemetry/collector" = {
+  config.dotfiles.managedArtifacts."telemetry/collector" = lib.mkIf cfg.telemetry.enable {
     format = "yaml";
     deployedAt = "/etc/${stateDir}/collector.yaml";
     source = collectorConfig;
@@ -121,9 +128,9 @@ in
     };
   };
 
-  config.dotfiles.health.observations = telemetryObservations;
+  config.dotfiles.health.observations = lib.mkIf cfg.telemetry.enable telemetryObservations;
 
-  config.systemd.services.${serviceName} = {
+  config.systemd.services.${serviceName} = lib.mkIf cfg.telemetry.enable {
     description = "OpenTelemetry collector for AI CLI usage";
     after = [ "network.target" ];
     wantedBy = [ "multi-user.target" ];
@@ -138,6 +145,8 @@ in
     };
   };
 
-  config.environment.etc."${stateDir}/collector.yaml".source = collectorConfig;
+  config.environment.etc."${stateDir}/collector.yaml" = lib.mkIf cfg.telemetry.enable {
+    source = collectorConfig;
+  };
 
 }

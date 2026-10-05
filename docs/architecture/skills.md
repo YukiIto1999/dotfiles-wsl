@@ -2,7 +2,9 @@
 
 **読み手:** Skill の責務境界、選定根拠、現在の導入状態を理解したい人。学習中に読む。
 
-Skill は、反復する作業で基礎モデルより良い判断を再現する能力として置く。候補名の一覧を完成形の taxonomy とみなさず、代表 scenario で不足と改善を確認できたものだけ配備する。外部 Skill は完成品でなく、procedure、失敗例、判断材料を得る donor として扱う。
+Skillは、反復する作業で基礎モデルより良い判断を再現する能力として置く。
+候補名の一覧を完成形のtaxonomyとみなさず、代表scenarioで不足と改善を確認できたものだけ配備する。
+外部Skillは、方法を再構成するdonorとして使う場合と、本文と資材をそのまま採用するsourceとして使う場合を区別する。
 
 ## 判断原則
 
@@ -14,9 +16,14 @@ Skill は原則として作らない。基礎モデル、repository policy、必
 
 ## 構成上の配備対象
 
-local Skillの正本は[`skills/<id>/skill/`](../../skills)である。各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`を`dotfiles.skills.registry`へ登録する。plugin sourceのrevisionは[`flake.nix`](../../flake.nix)、plugin Skillの採用集合、依存宣言、source存在確認、同名拒否は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表が所有する。
+local Skillの正本は[`skills/<id>/skill/`](../../skills)である。
+各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`を`dotfiles.skills.registry`へ登録し、外部Skillも同じ契約を使う。
+固定した外部sourceの取得は[`flake.nix`](../../flake.nix)、既存pluginの採用集合と依存宣言は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が所有する。
+registryのsourceは`SKILL.md`があるdirectoryを指し、upstreamのrepository内での配置を共通化する必要はない。
 
-donorとrepository所有のSkill sourceは区別する。donorは方法を再構成してlocal Skillを作る材料であり、元repositoryのSkillを配備しない。repository所有は配置とrevisionの正本を示すだけで、直接採用の十分条件ではない。signature procedure規則を満たしたSkillだけを固定sourceから登録する。target構成と追加のadmission条件は[Repository所有Skillのcomposition](repository-skills.md)に記録する。
+donorはlocal Skillを作る判断材料であり、donorを参照しただけでは元のSkillを配備しない。
+一方、直接採用ではupstreamの本文、reference、scriptを複製せず、同じIDのlocal版も明示的なNix option overrideで元の外部sourceへ戻せる。
+供給元と依存metadataを選ぶowner、登録条件、差替手順は[外部リポジトリ所有Skillの構成](repository-skills.md)にまとめる。
 
 Codexに同梱されるsystem `skill-creator`は、[`skills.config`](https://developers.openai.com/codex/config-reference#skillsconfig)で無効化し、localの`skill-design`だけをrouting対象にする。ClaudeとOpenCodeでも同等のローカル正本を使う。
 
@@ -100,38 +107,6 @@ Skill名は作業の種類を表す接尾辞で統一する。
 
 独自Skillは、モデルが一から作った規則を正本にしない。donorの一次本文から、具体的なprocedure、failure mode、trade-off、counterexampleを抽出し、[`architecture-standard`](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) とこのrepositoryの制約に合わせて再構成する。donor不在か改善未確認の規則は、原則としてruntime Skillへ入れない。
 
-| Donor | 主に補強する責務 |
-|---|---|
-| [Matt Pocock skills](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df) | `bug-analysis`、`dependency-analysis`、`domain-modeling`、`code-design`、`module-design`、`code-review`、`tdd`、`prototype`、`web-research` |
-| [Addy Osmani agent-skills](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c) | `impact-analysis`、`interface-design`、`code-review`、`tdd`、`bug-analysis`、`ui-design`、`performance-analysis`、security plugin |
-| [WondelAI skills](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | `impact-analysis`、`refactoring`、`module-design`、`architecture-design`、`architecture-review`、`db-design`、`ui-design`、`ui-review` |
-| [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `skill-creator`、`test-design`、`test-review`、`tdd` |
-| [Vercel agent skills](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc) | `component-design`、`performance-analysis`、`ui-review` |
-| [Anthropic skills](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434) | `skill-creator`、`ui-design`、`ui-review`、`description-writing` |
-| [OpenAI Skills guidance](https://openai.com/academy/skills/) | `skill-creator`、routing評価、MCPを含むworkflow packaging |
-| [PlanetScale database skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488) | `db-design`、database監査、`migration` |
-| [Supabase agent skills](https://github.com/supabase/agent-skills/tree/v0.1.8) | `db-design`、database監査、security plugin、`migration` |
-| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | `code-design`、`module-design`、`refactoring`、`code-review`、`skill-creator` |
-| [decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect)、Clairvoyance | `dependency-analysis`、`module-design`、`architecture-design`、`architecture-review`。Clairvoyanceは採用前にsourceを固定する |
-| [effect-fp-skill](https://github.com/mikezupper/effect-fp-skill) | `code-design`、`data-modeling`、`error-design`。Effect固有APIは汎用規則にしない |
-| [Hallmark](https://github.com/Nutlope/Hallmark/tree/13ac0ec7e148655948100b6396439e481361d690)、[Impeccable](https://github.com/pbakaus/impeccable/tree/c8f476b330395031bc8f7a7aee8d848bc85c81e4) | `ui-design`、`ui-review` |
-| [japanese-tech-writing](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d)、[stop-ai-slop-jp](https://github.com/iKora128/stop-ai-slop-jp)、[slop-nuki](https://github.com/chezou/slop-nuki) | `ja-writing` |
-| [code-humanizer](https://github.com/LeonardNJU/code-humanizer)、[deai-code](https://github.com/golovatskygroup/deai-code) | 品質判断だけを `code-review` に使い、著者推定を除く |
-| [differential-review](https://github.com/trailofbits/skills/tree/main/plugins/differential-review) | security plugin |
-| [Speakeasy writing-openapi-specs](https://github.com/speakeasy-api/skills/tree/d2eab5991ef881b39a26ab47432cf273c2c1abb5/skills/writing-openapi-specs) | raw OpenAPIを扱う場合の `interface-design`、`interface-review` reference |
-
-Ponytailは、削除、標準機能、既存機構、既存依存、新しい所有物の順に解決手段を問い直す。全coding taskへ強制するSkillとしては採らず、追加によって問題を解いたように見せる傾向を補正するlensとして各候補へ配る。
-
-文章、code、UIのslopを一つのSkillへ統合しない。文章は主張と根拠、codeはcorrectnessと変更コスト、UIは利用者の仕事とinteractionを基準にする。AIらしさや著者推定のscoreは品質指標に使わない。
-
-上流Skillを直接採用するのは、分解すると方法自体の価値を失うsignature procedureに限る。`grill-with-docs`は薄いwrapperとしてこの条件で採用したが、質問のprocedureは`grilling`、意味の確定と記録は`domain-modeling`が所有し、wrapperが独自の判断を持たないため配備から外した。上流は現在も`grill-with-docs`を保守しており、除外はこのrepositoryの判断である。
-
-候補の発見には、次の会話記録も使った。会話内の結論は一次資料や正本ではなく、調査対象と反例を得るための入力として扱う。
-
-- [AIらしさ、設計判断、一貫性](https://chatgpt.com/share/6a7d14a7-5ed0-83ee-9f50-a7c178a9e282)
-- [Skill候補の横断調査](https://chatgpt.com/share/6a7d14b9-b444-83ee-9dbe-d6eb7458758d)
-- [Matt、Addy、Web品質、WondelAI](https://chatgpt.com/share/6a7d1c95-beb8-83e8-ac31-24016faef00d)
-
 ### writing系で採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
@@ -147,40 +122,6 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 
 見出しは`description-writing`が所有し、拾い読みで引ける簡潔なラベルにする。結論や説明を文にして詰めない。
 
-### writing系の代表scenario
-
-2026-08-13に、旧Skillと基礎モデルを次の近接scenarioで比較した。自動scoreは使わず、出力と発火境界を確認した。再評価する入力と期待結果は [`agents/fixtures/writing-skills.json`](../../agents/fixtures/writing-skills.json) に置く。
-
-| Scenario | 変更前の不足 | 変更後の結果 |
-|---|---|---|
-| staged diffからcommit messageを書く | 複数目的ならwriterがindexを変更する指示だった | 一つの目的とrevert理由を確認し、indexを変更しない |
-| 明示したdiffからPR本文を書く | branch全体を固定で読み、空の`Related: none`と未実行checkを要求した | 明示範囲だけを読み、目的、主要変更、実行済み検証、実在する影響だけを書いた |
-| 宣言commentと実装commentを書く | 専用Skillがなく、契約と実装説明を分けてrouteできなかった | 宣言は前提、冪等性、副作用、既知の失敗を記述し、実装commentは採らない指数backoffと`Retry-After`制約の一文だけにした |
-| 曖昧な変数名を直す | コメント系Skillとの境界が未定義だった | `documentation-writing`、`comment-writing`、`ja-writing`はいずれも発火しなかった |
-| READMEとrelease changelogをrouteする | PRとchangelogが別の固定templateだった | READMEは`description-writing`、release changelogは`change-writing`へ分けた |
-| 顧客向けの丁寧なincident報告を書く | 旧`ja-writing`は語尾の均一化を避ける規則が、明示された敬体と競合した | 読者、媒体、明示された語調を優先し、事実と不確実性だけを保った |
-
-評価中に実行したのは、Skill出力の比較、全local Skillへの`quick_validate.py`、`git diff --check`、配備contractのfocused checkだけである。評価のためのSkillや恒久workflowは追加していない。
-
-2026-10-01に`commit-writing`、`comment-writing`、`documentation-writing`、`ja-writing`を作り直した。
-2026-08-13の作成時には、利用者が説明していた件名、実装コメント、ドキュメントコメントの体言止めと句読点の規則をどのSkillも取り込まず、実装コメントの型は句点と動詞終わりを含んでいた。
-各Skillは規則の文面を持たず、architecture-standardの所有fileを規則ごとに示し、配備済みの`standard-apply`の実体から二段上を標準本文として読む。
-`commit-writing`は件名をcommit-msg hookへ通してから完了とし、hookが判定しない一つの関心と個人名を標準の完了条件で確かめる。
-`ja-writing`は散文の形を扱い、件名とコメントのラベルの形は各Skillへ残す。
-参照する`principles/documentation/sentence-endings.md`は、`flake.nix`の`architectureStandard`の版を更新するまで配備されない。
-
-同じ日に、旧Skillと新Skillを新しいClaude Code sessionで比べた。
-両者とも同じtemp repository、同じmodel、未配備のcommit-msg hookの新版、同じ標準の作業checkoutを使い、Skill本文だけを変えた。
-
-| Scenario | 旧Skillの結果 | 新Skillの結果 |
-|---|---|---|
-| 外部APIのtimeoutを足したstaged diffのcommit message。依頼文に指摘者の名前を含む | `fix: 注文APIが応答しなくても定期取得を止めない`。動詞終わりでhookを実行しなかった | `fix: 外部APIの無応答による注文取得の停止防止`。標準を読み、hookを通し、名前を除いた |
-| 非公開関数を含むTypeScript moduleのドキュメントコメント | 要約が句点と動詞で終わる複数文で、`@param`と`@returns`がなかった | 全行が名詞で終わり、非公開関数とfieldにも付け、引数と戻り値を全て書いた |
-| 並行upsertをdeadlockで採らない逐次loopの実装コメント | `Promise.all で並行にしない。…deadlock するため。` | `…deadlock するため Promise.all による並行 upsert は不可` |
-| 導入判断向けの日本語2段落 | 一行に複数の文を置いた | 句点ごとに改行し、一行に一文だけを置いた |
-
-発火しないnear-miss、既存scenarioの再実行、節ごとのablationは行っていない。
-追加した代表scenarioは`commit-subject-form`、`private-declaration-documentation`、`japanese-markdown-prose`、`japanese-label-boundary`である。
 
 ### web-researchで採用したdonor
 
@@ -189,9 +130,8 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 | [Matt Pocock research](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/research/SKILL.md) | MIT | claimを一次資料まで辿り、sourceが直接支える範囲で結論を書く | 常にbackground agentを使うこと、調査のたびにfileを作ること |
 | Context7、SearXNG、Crawl4AIの配備時tool schema | 該当なし。Context7とSearXNGは [`package.nix`](../../capabilities/library-documentation/context7/mcp/package.nix) と [`package.nix`](../../capabilities/web-discovery/searxng/mcp/package.nix)、Crawl4AIは [`module.nix`](../../capabilities/web-content/crawl4ai/backend/module.nix) の固定revisionから配備する | URL探索、本文取得、library docs、agent判断の分離と、実在する引数 | 配備されていないtool、SDK専用引数、固定件数のsource取得 |
 
-旧`web-researcher`は、正規仕様一件で決まる問いにも複数sourceを要求し、指定URLの要約でも検索を始めた。`time_range`を最新判定に使い、解消可能な矛盾も両論併記した。さらに、言語指定、JavaScript実行、PDF、本文filterの説明が現行MCP schemaと一致していなかった。
+代表scenarioと期待する探索経路は[`agents/fixtures/web-research-skill.json`](../../agents/fixtures/web-research-skill.json)に置く。
 
-`web-research`は問いに応じて、指定URLの直接取得、既知の一次資料、Context7、探索型調査を選ぶ。source数は固定せず、規範的な値を一つの現行仕様が所有する場合は一件で止める。近接scenarioと期待する経路は [`agents/fixtures/web-research-skill.json`](../../agents/fixtures/web-research-skill.json) に置く。実環境ではSearXNGへ`site:agentskills.io specification`を渡しても公式domainが結果に出なかった。一方、Crawl4AIは既知の正規URL `https://agentskills.io/specification` から本文、title、主要節、取得成功状態を返した。この差も、検索と本文取得を別の能力として扱う理由である。
 
 ### bug-analysisで採用したdonor
 
@@ -203,7 +143,6 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 
 `bug-analysis`は分析結果を所有し、修正を所有しない。test、CLI、request、trace、差分、runtime観測のうち、症状を判別できる最小のsignalを選ぶ。再現不能なincidentでも観測済み証拠を捨てず、事実、仮説、不明点を分ける。原因はfailure siteではなく、最初に誤ったstateか契約違反として示す。近接scenarioは [`agents/fixtures/bug-analysis-skill.json`](../../agents/fixtures/bug-analysis-skill.json) に置く。
 
-旧Superpowersとdonor本文を同じscenarioへ適用すると、診断依頼でも修正とTDDまで所有し、performanceだけの問題や原因確定後の実装でも発火した。clean reproがないincidentでは、既存logを分析する前に仮説を禁じる。新しいSkillは、診断と修正、機能障害とperformance分析を分け、再現できない場合も観測済み証拠から確定事項と不足を返す。
 
 ### dependency-analysisで採用したdonor
 
@@ -217,7 +156,6 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 
 代表scenarioは[`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json)に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先する。表現や所在が不明な候補は`repository-research`へ渡し、exact textや構文patternの候補は`rg`や`ast-grep`で直接探索してsourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
 
-baselineでは、agent resource reaperの保持日数と実行間隔がNix option、package、systemd unit、observation、checkへどう伝播するかを調べた。最初の検索結果はsource参照、生成、runtime起動、文書、検査を混在させ、node、edge、方向、granularityを調査後に後付けした。型付きedgeへ分けると、保持日数はpackageへ埋め込まれる一方、実行間隔はtimer unitだけへ投影され、observationはtimer名しか参照しないと区別できた。文字列探索だけではNix evaluationによるconsumerの網羅性を証明できず、activation時の挙動も未確認として残った。
 
 ### impact-analysisで採用したdonor
 
@@ -231,7 +169,6 @@ baselineでは、agent resource reaperの保持日数と実行間隔がNix optio
 
 代表scenarioは [`agents/fixtures/impact-analysis-skill.json`](../../agents/fixtures/impact-analysis-skill.json) に置く。dependency upgradeでは`web-research`がversion固有の外部契約を調べ、`impact-analysis`がrepository内の利用と照合する。sourceのchangelogだけでlocal impactが確定したとはみなさない。
 
-baselineでは、agent resource reaperの公開optionと内部contract fieldを、意味と値を保ったまま改名する影響を調べた。option宣言、contract組立、package入力、check fixtureは確実に追随する一方、Shell変数、ledger schema、削除時期は変更不要と区別できた。repository外のoption consumer、derivation hash、switch時のunit再起動は、静的検索だけでは確定できなかった。dependency path上にあることと、observableが実際に変わることを分け、改名、削除、意味変更を別のchange contractとして扱う必要があった。
 
 ### performance-analysisで採用したdonor
 
@@ -245,9 +182,10 @@ baselineでは、agent resource reaperの公開optionと内部contract fieldを�
 
 `performance-analysis`は、latency、throughput、CPU、memory、allocation、GC、I/O、database、network、build、browser性能に共通する測定と因果確認を所有する。尺度、workload、environment、revision、sampleを固定し、平均だけでなく分布とvarianceを見る。resource利用率とsaturation、wall timeとon-CPU time、live memoryとallocation、service timeとqueueingを分ける。
 
-代表scenarioは [`agents/fixtures/performance-analysis-skill.json`](../../agents/fixtures/performance-analysis-skill.json) に置く。baselineでは、同じ負荷のrelease A/Bでcheckout APIのp95が186msから442msへ悪化したartifactから、`reserve_inventory`のsequential scanをbottleneckとして特定できた。一方、closed workloadからproductionへの外挿、run間variance、observer effectを判断手順として固定していなかった。新しいSkillは比較可能性と測定誤差を先に扱い、critical path上の時間差とcontrolled probeが同じ指標を動かした場合だけbottleneckと判定する。plan選択理由のような未確定のroot causeは、箇所の特定と分けて残す。
+代表scenarioは[`agents/fixtures/performance-analysis-skill.json`](../../agents/fixtures/performance-analysis-skill.json)に置く。
 
-### tddで調査したsourceと採否
+
+### tdd-implementationのdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
@@ -256,25 +194,17 @@ baselineでは、agent resource reaperの公開optionと内部contract fieldを�
 | [Addy Osmani test-driven-development](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/test-driven-development/SKILL.md) | MIT | repositoryのtest toolと規約を先に読むこと、REDの理由を確認すること、最小GREEN、GREEN中のREFACTOR、同じ成功済みcheckを無変更で繰り返さないこと | 固定のtest pyramid、全変更への一律発火、無条件のfull suite、test設計とbrowser検証の所有 |
 | [Kent Beck Canon TDD](https://tidyfirst.substack.com/p/canon-tdd) | 記事本文に再利用license表示なし | Test Listから一項目だけをconcrete testにし、各GREENが明らかにした設計を次のtest選択へ戻すこと、test作成時は主にinterfaceを決めること | 全項目のtestを先に具体化すること、実装設計をTest Listへ混ぜること、必要以上のrefactoring |
 | [Loglass「AIに先にテストを全部書かせる」はTDDじゃない](https://zenn.dev/loglass/articles/16745471ef55ff) | 記事本文に再利用license表示なし | AIによるtest一括作成と、短いcycleで設計を育てるTDDを別の方法として扱うこと | test一括作成をTDDと呼ぶこと、数分という固定cycle、SDDの構成をTDDへ持ち込むこと |
-| [Qiita「AI駆動開発の品質問題をTDD×9つの品質ゲートで解決する」](https://qiita.com/TMiyamoto/items/e18bf9fb61f33d643fe1) | 記事本文に再利用license表示なし | なし | 9段階の固定workflow、80%の合格点、300行の上限、12 agent reviewを成果比較なしで一般化すること |
 
-`tdd`は、既に意味と期待結果が決まったbehaviorを実装し、その具体的なcycleから触れた範囲の設計を改善する規律を所有する。testを大量に先行作成せず、consumerが観測する一つのsliceについて、production変更前のRED、最小GREEN、触れた範囲のREFACTORを完結させる。testの種類を選ぶ一般論、既存suiteの評価、原因分析、独立したrefactoringは別の仕事である。
+`tdd-implementation`は、既に意味と期待結果が決まったbehaviorを実装し、その具体的なcycleから触れた範囲の設計を改善する規律を所有する。
+testを大量に先行作成せず、consumerが観測する一つのsliceについて、production変更前のRED、最小GREEN、触れた範囲のREFACTORを完結させる。
+testの種類を選ぶ一般論、既存suiteの評価、原因分析、独立したrefactoringは別の仕事である。
 
 SRPはclassの大きさでなく、actorと変更理由をsliceとownerへ対応させる判断として使う。OCPはinterfaceを増やす指示ではない。新しいcaseで既存caseのtestと本文を保ち、既存の直和や方針契約へ追加する。明示されたextension contractがない場合、一つのcaseから抽象を予測せず、複数の具体例から安定部分と変動部分を反証可能な形で確認してから最小のseamを置く。三つ目の同種要求は、その判断を行う目安であって絶対条件ではない。
 
-代表scenarioは [`agents/fixtures/tdd-implementation-skill.json`](../../agents/fixtures/tdd-implementation-skill.json) に置く。baselineでは、agent resource reaperの`dryRun`について、削除対象の意味、公開option、package、Shell fixtureまで広く調べられた。一方、contract projectionの複数checkをまとめてREDにした後、全ledger、lock、worktreeのbehavior fixtureを一括で作る順序だった。
+代表scenarioは[`agents/fixtures/tdd-implementation-skill.json`](../../agents/fixtures/tdd-implementation-skill.json)に置く。
 
-現行Skillへ料金caseを順次追加するscenarioを与えると、各caseのREDとGREENは分けたが、料金判断と監査ログの責務混在を分析せず、既存caseを保ったextensionの判断条件もなかった。条件分岐を同じ関数へ足し続けてもSkill違反にならず、短いcycleから得た具体的な設計圧をSRPとOCPへ変換できなかった。
 
-最初のforward evalは三つのcaseを別cycleで通し、既存`FeePolicy`を再利用し、既存caseのtestと本文を保った。一方、監査呼び出しを一箇所へ集めただけで、料金判断と監査を同じ関数に残した。重複除去を責務分離と誤認したため、別の変更理由に属する判断を対応するownerへ移す条件をSkillへ追加した。
-
-修正後のforward evalでは、固定fixtureの`trial`、`gold`、`suspended`を一つずつREDからGREENへ進め、料金と可否の判断を専用ownerへ移し、公開関数には監査送信を残した。既存`FeePolicy`を再利用し、新しいinterfaceやstrategyを追加していない。4件のtestに加え、責務境界、既存basic testの不変性、classと関数の構成を判定する [`verify.py`](../../agents/fixtures/tdd/verify.py) も成功した。
-
-未見のdoctor JSON変更へSkillを適用すると、依頼上は新規に見えた`--json`が既に存在し、`status`の値域は未確定だと確認した。最初のsliceを`schemaVersion: 1`の公開だけに絞り、既存runtime checkの欠落をRED、report literalへの一項目追加を最小GREENとし、text出力、終了status、check順序は後続へ残した。全featureを先にtest設計せず、推測を加えずに一つのpublic observableへ収束したため、baselineで不足したslice分離とrestraintは改善した。forward evalでは編集とbuildを行っていない。
-
-続けて隔離したCLI fixtureへ適用した。JSON全体を比較するtestを先に作り、`bash .tdd-eval/test-json.sh`は`schemaVersion`欠落を理由にexit 1となった。JSON literalへ`schemaVersion: 1`だけを追加すると、同じcommandがexit 0になった。整理すべき重複はなく、REFACTORと追加検証を増やさなかった。fixtureは評価後に削除した。
-
-### refactoringで採用したdonor
+### refactoring-implementationのdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
@@ -284,200 +214,21 @@ SRPはclassの大きさでなく、actorと変更理由をsliceとownerへ対応
 | [dotnet testability-obstacle](https://github.com/dotnet/skills/blob/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-test/skills/testability-obstacle/SKILL.md) | MIT | 既存seamの再利用、必要memberだけの最小抽象、public signatureとdefault wiringの保存、seam自体とbehaviorの別検証 | C#固有の`TimeProvider`、`AsyncLocal`、process-global mutable seam |
 | [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | MIT | 新しい所有物の前に、削除、標準機能、既存mechanism、既存dependencyで足りるかを問う変換選択のlens | 全coding taskへの強制、最短diffと最少fileの最適化、一実装interfaceの一律削除、reviewとauditのworkflow |
 
-`refactoring`は、保存対象を選び、現在のbehaviorを観測できる安全網を成立させた後、一つの内部構造変更ずつ同じ証拠で検証する。line countの削減や新しい抽象は成果ではない。Matt Pocockの`improve-codebase-architecture`は新しいmodule構成を選ぶため、`architecture-design`側のdonorとして残し、このSkillへは統合しない。
+`refactoring-implementation`は、保存対象を選び、現在のbehaviorを観測できる安全網を成立させた後、一つの内部構造変更ずつ同じ証拠で検証する。
+line countの削減や新しい抽象は成果ではない。
+Matt Pocockの`improve-codebase-architecture`は新しいmodule構成を選ぶため、このSkillへ統合しない。
 
-代表scenarioは [`agents/fixtures/refactoring-implementation-skill.json`](../../agents/fixtures/refactoring-implementation-skill.json) に置く。baselineでは、cleanupのproductionとcontract checkに重複した計算を共有する依頼に対し、自己参照oracleの危険を認識し、固定fixtureを追加する案まで出せた。一方、既存の小さい`home-backup-root.nix`も置換する広いhelperを最初から設計し、変更前のfocused checkと一段ごとのcheckpointを置かず、最後にrepository全体のcheckを予定した。新しいSkillは、意図的な独立計算かを先に問い、共有する場合もoracleの独立性を保ち、既存mechanismを残せる最小の一段から進める。
+代表scenarioは[`agents/fixtures/refactoring-implementation-skill.json`](../../agents/fixtures/refactoring-implementation-skill.json)に置く。
 
-隔離fixtureのforward evalでは、public outputと例外を固定する既存2 testを変更前に実行し、exit 0を確認した。testを増やさず、重複したtrimと空名検証だけを一つの内部helperへ抽出し、同じcommandが2 test通過のexit 0を維持した。表示名とslugの異なる変換は統合せず、追加refactoringを行わなかった。fixtureは評価後に削除した。
 
-baselineと同型の別fixtureでは、productionの二つの関数とcontract testが同じpath正規化を持つ共有依頼へ適用した。変更前にfixture内で`python -m unittest -v`を実行し、1 test通過のexit 0を確認した。production内だけを`_normalize_destinations`へ抽出し、testの独立計算はoracleとして残した。同じcommandが1 test通過のexit 0を維持し、test fileは変更しなかった。fixtureは評価後に削除した。
+### skill-designのdonor
 
-### prototypeをSkill化しない判断
-
-| Donor | License | 採用した内容 | 採らなかった内容 |
-|---|---|---|---|
-| [Matt Pocock prototype](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/prototype) | MIT | 一つの質問、最小の実行可能物、observableの可視化、反証例、本番永続化の回避、判断の記録 | 単一HTML、URL parameter式UI、UI variationを3案既定・5案上限とすること、prototype codeを条件付きで本番へ昇格すること |
-| [Addy Osmani doubt-driven-development、source-driven-development](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | 明示した主張、最小artifact、反証、判定分類、停止条件、版依存の外部仕様を先に確認すること | 全判断での別model review、三cycle固定、すべてのframework判断への引用要求 |
-| [architecture-standard design process、evolution](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 観測事実と解釈の分離、完了条件とrollback条件、可逆な小段階、不可逆判断の延期 | 本番変更用の手順や構造をprototypeへ持ち込むこと |
-| [WondelAI pragmatic-programmer](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/pragmatic-programmer) | MIT | 残す本番品質のtracer bulletと、知識を得て捨てるprototypeの区別 | correctness、test、edge caseを一律に無視すること |
-
-候補の責務は、文書や既存codeから確定できない一つの経験的な不確実性を、隔離した使い捨ての実行可能物で判定することとした。成果はcodeではなく、環境、版、raw observation、`支持 / 反証 / 判定不能`、判断への含意である。本番codeへ残す縦slice、性能bottleneckの診断、障害原因の分析、migration rehearsalは所有しない。
-
-最初のforward evalは、transient user serviceの終了statusを調べたが、user busが存在せず判定不能で終わった。別のfresh-session比較では、`flock`中のfileを`mv`で置換した後もpathnameの排他が保たれるかを実測した。baselineと候補ありの両方が、支持条件と反証条件を先に定め、旧inodeと新inode、二番目のlock取得statusを一回の隔離実験で観測し、pathnameの置換後は排他を維持できないと同じ結論へ到達した。両方とも一時資源を回収し、別のlock実験へ範囲を広げなかった。独立Skillによる改善がないため、donorは判断材料として残し、runtime Skillは追加しない。
-
-### skill-creatorで採用したdonor
-
-pluginの`skill-creator`はSkill作成を既定経路にし、基礎モデル、policy、reference、script、tool、既存Skillで足りるかを判定しない。このrepositoryではlocal版へ置き換え、具体的なbaseline不足、mechanism、責務境界、routing、composition、restraint、ablationからSkillの要否を決める。
+`skill-design`は、基礎モデル、policy、reference、script、tool、既存Skillで不足を解消できるかを先に判断する。
+独立したSkillを作る場合も、具体的な不足、mechanism、責務境界、routing、composition、restraint、ablationから要否を決める。
 
 runtime本文は[admissionと評価](../../skills/skill-design/skill/references/admission-and-evaluation.md)だけを必要時に読み、外部sourceの採否は[provenance](../../skills/skill-design/skill/references/provenance.md)へ分ける。代表scenarioは[`agents/fixtures/skill-design-skill.json`](../../agents/fixtures/skill-design-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
 
-決定的なYAML契約を再利用するscenarioでは、Codex同梱版とlocal版のどちらもSkillを作らず、共有schemaと必須CIを選んだ。このcaseでは改善はなかった。API変更の互換性とrolloutの見落としを扱うscenarioでは、同梱版は判断を`code-review`へ追加した。local版は既存`impact-analysis`がconsumer、共存、rollback条件を所有すると確認し、影響の証拠だけを受け取ってfindingとseverityを`code-review`へ残した。同じ判断の複製を避け、既存Skillとのcompositionを選べたため、local版を配備する。
 
-### environment-designの評価
-
-改善や訂正の反映先は、`memory`の反映先表が訂正の保存時にだけ扱い、`skill-design`はdotfiles内の機構だけを比べていた。標準自体を変える`standard-update`は標準の作業checkoutにしかなく、dotfilesのsessionからの経路と、版の更新を経て配備されるまでの手順はどこにも書かれていなかった。反映先の判断を`environment-design`へ集め、`memory`は保存だけを所有する。代表scenarioは[`agents/fixtures/environment-design-skill.json`](../../agents/fixtures/environment-design-skill.json)に置く。
-
-baselineは3件とも所有者を正しく選んだが、環境の構成、配備の経路、標準の運用Skillの所在をそれぞれ一から探索し、6分44秒から8分24秒を要した。標準への規律追加では、所有者のfileが従うと定める直接参照を読まないまま段の裁定を見立てた。
-
-Skillありの同種scenarioでは、標準の確認点を加える依頼を、既に標準にある規範と、reviewで照合を確かめる確認点とに分けた。規範を`process/review.md`へ複製せず、作業checkoutの`standard-update`へ確認点だけを渡し、版の更新が他の未取り込みcommitも取り込むことを利用者の確認事項に挙げた。所要は8分24秒から4分35秒へ減った。reviewの見落としの依頼は規範、agentの手順、reviewの確認点、機械検査に分け、`error-design`がどのsubagentのroutingにもない導線の欠落を見つけた。所要はbaselineとほぼ同じだった。訂正の再発の依頼では、baselineと同じく文面を足さずに完了判定のhookを反映先に選んだが、hookを抜けうる経路を列挙したため18分45秒を要し、速さの改善はなかった。所有者が確定している依頼、基盤の設定変更、memoryのrecall、module境界の設計を含むrouting 7件では、`environment-design`は所有者が未確定の2件だけで選ばれた。
-
-### migrationをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [Addy Osmani deprecation-and-migration](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/deprecation-and-migration/SKILL.md) | MIT | consumer別のtouchpoint、additiveな準備、backfill、read切替、旧usage確認後の削除 | 全migrationへのdown path強制、固定の責任分担、観測不能なconsumerも含む厳密なusage zero |
-| [WondelAI release-it](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/release-it) | MIT | deployとreleaseの分離、新旧版の互換確認、段階gateごとの観測 | canaryやblue-greenの選択、traffic率、観測時間、rollback時間の固定値 |
-| [PlanetScale database-skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488/skills) | MIT | engineと版ごとのlock、algorithm、replica lag、throttle、cutover延期、cancelとretryの確認 | `LOCK=NONE`、Vitess strategy、PlanetScale deploy request、特定toolの優先 |
-| [Supabase agent-skills v0.1.8](https://github.com/supabase/agent-skills/tree/8331f910845103c08d51f6ca1d86ebb7d1f745e3) | MIT | 既存projectのschema管理方式を先に確認し、試行中はmigration historyを汚さず、確定後にreview可能なartifactを作ること | Supabase CLI、MCP、advisor、固定batch件数とtimeout |
-| [architecture-standard migration](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/process/migration.md) | repository rootに表示なし | mutable stateの並行移送におけるsnapshot、watermark、record version、final drain、write fence、正本切替 | 全migrationのforward-only化、outbox、checksum、三段階の一律要求 |
-
-外部資料には共通する有用な知見があるが、固有のprocedureはdata store、並行更新、停止許容、consumer更新方法によって変わる。Addyのdown migration必須とarchitecture-standardのforward-onlyは両立せず、共通化できるのは不可逆点の前後で実行可能なrecoveryを選ぶことまでである。rollback、roll-forward、restore、replay、compensationのどれを使うかは対象から決める。
-
-baselineでは、session ledger v1の`owner_start_time`をv2の`owner_process_start`へ改名し、rebuild前後のagentが共存するscenarioを使った。詳細を列挙した依頼と、目的だけを示した自然な依頼の双方で、現行のexact-key validatorと全ledger preflightから、v1/v2 dual-readerとv1 writerを先に配備し、旧reader排除後にv2 writerと再実行可能な変換へ進む計画を導けた。別schemaであるruntime cache metadataを除外し、bridge generationをrollback先にし、`updated_at`を持たないledgerのmtimeをretention基準として保存する点までrepository evidenceから特定できた。
-
-Skillなしでもsource、target、consumer、正本、共存、cutover、recovery、cleanupを具体化でき、誘導を減らした同一scenarioでも不足を観測できなかった。現状は`impact-analysis`がconsumerと共存条件を渡し、対象固有の設計と`tdd`がcompatibility codeとtransformerを実装すれば足りる。反復する失敗が観測されるまで、donorは調査記録に留め、runtime Skillとrouting costを増やさない。
-
-### naming-reviewをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [architecture-standard naming](https://github.com/YukiIto1999/architecture-standard/blob/88d7317dd5054e09f003f0bdca34295e158b40de/principles/naming.md) | repository rootに表示なし | 同じ概念と別概念の語彙、型と単位、参照範囲、code、schema、DB、UI、文書の横断確認 | 英語、boolean prefix、collection複数形、略語禁止の一律適用 |
-| [Matt Pocock domain-modeling、codebase-design、code-review](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | glossary参照と語彙決定の分離、repository規約の優先、規約違反と意味矛盾の根拠を分けること | glossary更新、ADR、module taxonomy、diff全体のreview |
-| [Addy Osmani code-review-and-quality、api-and-interface-design](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | 公開名をobservable contractとして扱い、misleading nameを表面的な統一より優先すること | REST URL、field casing、boolean prefix、enum形式の固定 |
-| [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | MIT | 外部規約より既存projectのnaming familyを先に確認し、成果物の役割を同種peerと比べること | DTO suffix、interface prefix、folder、class shape、casingの固定 |
-
-候補の責務は、確定済みの意味、役割、単位、粒度、scope、context内の語彙に対し、既存名の不一致を根拠付きfindingへまとめることに限定した。正式語が未確定なら`domain-modeling`、rename実装は`refactoring`、diff全体の判定は`code-review`が所有する。
-
-baselineでは、Account、Member、Membership、Invoice、minor unit、UTC instant、boolean predicateを定義し、API、DB、type、function、fieldの命名だけを監査した。Skillなしでも、MembershipをUserやAccountとして表す役割不一致、AccountとOrganizationの語彙分裂、金額の単位とowner、Dateとinstant、Statusとpredicate、Atとdurationの矛盾を、語彙を新規決定せず六つの根本findingへまとめられた。独立methodologyによる改善を観測できないため、現時点ではrepository規約と基礎モデルで足りる。
-
-### test-designをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [architecture-standard tests](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de/structure/tests) | repository rootに表示なし | propertyからobservable、oracle、最内側の十分な手段を選び、同じpropertyを重複検査しないこと | 固定pyramid、directory、runner、coverage、mutation、MC/DCの一律threshold |
-| [dotnet test skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-test/skills) | MIT | fault modelからtest obligationを導き、ambient operationとtestability obstacleを特定すること | C#固有seam、A–F grade、test行数、sourceとtest fileの静的pairing |
-| [Matt Pocock tdd](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/tdd) | MIT | callerが観測するbehavior、SUTと独立したliteralやspecのoracle、内部interactionよりstateとoutcomeを優先すること | public APIだけへの限定、seamごとの確認停止、mockやtest DBの固定判断 |
-| [Addy Osmani test-driven-development](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/test-driven-development/SKILL.md) | MIT | repositoryのtest規約、resourceによるfidelity、time、order、shared stateの制御 | 80/15/5 pyramid、realを常に優先する順位、全behavior変更への自動発火 |
-| [Anthropic webapp-testing](https://github.com/anthropics/skills/tree/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/webapp-testing) | Apache-2.0 | static HTMLとrender後stateの区別、action前のreadiness predicate | Python Playwright、headless Chromium、`networkidle`、固定timeout、実行workflow |
-
-候補の責務は、確定済みbehaviorとriskを、observable、独立oracle、seamとtest level、必要なfidelity、data、fault、concurrency、決定性、residual riskへ変換することに限定した。test実装は`tdd`、既存suiteのfindingは`test-review`が所有する。browser実行は証拠取得の手段であり、独立した判断責務にはしない。
-
-baselineでは、agent bundleのatomic publish transactionについて、consumerが完全な旧releaseか新releaseだけを見る契約を入力にした。Skillなしでも、本番validatorと独立したtree manifest oracleを選び、実process、Linux filesystem、`flock`、本番rename helperを使うbehavior testへ絞れた。crash前後、並行installer、同一release再実行の四caseを同期markerで制御し、unlinkとsymlinkの二段切替、未完成releaseの公開、lock除去、manifest比較除去のmutationがどのcaseで検出されるかまで対応付けた。kernel crash、電源断、consumer側の複数回path解決などのresidual riskも分離できたため、独立Skillによる改善を確認できない。
-
-### test-reviewをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 固定規則にしない内容 |
-|---|---|---|---|
-| [dotnet test-gap-analysis、testability](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9/plugins/dotnet-test/skills) | MIT | fault modelからのobligation、pseudo-mutation、ambient dependency、観測不能なseam | grade、行数、C# wrapper、sourceとtestの静的対応 |
-| [Matt Pocock tdd、code-review](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | consumer observable、独立oracle、意味のあるRED、機械検査との重複回避 | TDD workflow、issue tracker、parallel agent |
-| [Addy Osmani test-driven-development](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/test-driven-development/SKILL.md) | MIT | 時刻、順序、共有状態、resource fidelity | 80/15/5、real優先の固定順位、全変更への発火 |
-| [architecture-standard verification、tests](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | oracle、RED証跡、mutation、coverageを未検証箇所の探索に使うこと | coverage、mutation threshold、test構成の一律適用 |
-
-候補の責務は、既存suiteを固定済みのcontractとriskへ照合し、`fault → observable → oracle → test evidence`を追って、obligation欠落、自己参照oracle、誤ったpass条件、fidelity不足、contractを保存しないdouble、非決定性をfindingにすることとした。test実装は`tdd`、固定diffが導入したtest問題は`code-review`、現在のfailure原因は`bug-analysis`が所有する。
-
-baselineでは、`cleanup-home-backups` checkを監査した。root外の無関係な`*.hm-back`を保存するfixtureはある一方、選択された`dotfiles-wsl` root内ではprovenanceに関係なく同suffixを削除する実装と期待値になっていた。通常能力だけでこの未検証data loss経路をMajorとして特定し、隔離した一時`HOME`への非破壊previewで、root内の無関係なbackupだけが削除候補になることを再現できた。固有methodologyによる改善を観測できないためruntime Skillは追加しない。oracleの実装複製、実contractを保存しないfake、flaky、問題のないsuiteを含む比較で反復不足が出た場合だけ再検討する。
-
-### 探索的テストをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [ABAB↑↓BA「AI開発時代だからこそ、テストの役割を見つめ直す」](https://zenn.dev/ababup1192/articles/77b844dcfc1529) | 記事本文に再利用license表示なし | 自動の検証は書かれたものしか判定しないこと、操作の結果から次に試すことを決めること、見つけた欠陥を同じ種類を覆う最も速い層の検証へ移すこと、agentによる探索を合否に使わないこと | 不具合の種類と検証手段の対応表、E2Eが受け持つ範囲の固定 |
-| 同じ著者のX投稿（[UIの探索とQAの役割](https://x.com/ababupdownba/status/2104373188197314594)、[理想の手順](https://x.com/ababupdownba/status/2104703767853903878)、[文言とブランド](https://x.com/ababupdownba/status/2104700914942812382)） | 表示なし | 機能を作り終えた後に変更範囲を洗い出し、charterを決めて触る順序 | 著者が整備途中とする手順の固定、QAの役割の付与、文言とブランドの規則の常設 |
-| architecture-standardの`structure/tests/methods.md`の「探索」「見つけた欠陥」節、`process/implementation.md`の「順序」節にある探索的テストの手順と「確認点」 | repository rootに表示なし | 探索を行う時点、charter、記録、事象の分類、欠陥の自動の検証への移し替え、合否に使わないこと | Skillへの本文の複製 |
-
-候補の責務は、振る舞いを変えた後に、変更した範囲と組み合わさる機能をcharterに沿って触り、書かれていない欠陥、仕様の漏れ、使い勝手の問題を見つけて自動の検証へ移すことだった。
-この規範は、探索を行う時点、記録、事象の分類、欠陥の移し替えを含めてarchitecture-standardが所有する。
-規範は標準の版`a528e61`で入り、`standard-apply`を通じてagentへ届く。
-
-baselineには、利用者が画面からの網羅的な確認を求めた業務systemの長いsessionの実行記録を使った。
-利用者は最初の依頼で、画面からの操作、画面内の切り替えの全確認、条件ごとのパターン差、主要以外のユースケース、連打や迷った操作、見た目、操作しやすさの確認を求めた。
-Skillなしの基礎モデルは、領域ごとのcharterと、連打、二度押し、戻る、再読込、空送信、異常値、迷い操作の観点、三つのviewport、問題のなかった操作の一覧を持つbriefを作り、六つのsubagentへ割り当てた。
-商品の領域だけで61件の所見が再現手順と証拠付きで返り、修正側のbriefは直す前に失敗するtestを要求した。
-第三者が報告した「下書きの商品を公開中にしたら消えた」事象は、30分のsession切れで公開の要求が401になり、画面がログインへ誘導しなかったことが原因だった。
-最初のbriefは公開の一括変更を確かめたが、放置によるsession切れとの組み合わせを観点に含めず、事故の後のbriefで基礎モデル自身がこの観点を加えた。
-
-利用者は最初の指示を二度送り直した。
-二度目の再送の直前に、agentは4回目のcompactionの後で第三者の指摘12件を範囲とする計画を返し、探索の観点を計画に含めていなかった。
-再送の後のbriefは全観点を戻した。
-観測した不足は探索の方法ではなく、探索を始める契機が利用者の指示にしかなかったことと、長いsessionで常設の指示が落ちたことである。
-前者は標準の手順が所有し、後者は4回目のcompactionの要約が最初の指示の9項目のうち第三者の台帳だけを残したことが原因であり、どちらもSkillで扱う不足ではない。
-計画を立てた時点の文脈には最初の指示も一度目の再送も残っておらず、計画は要約にない観点を無視したのではなく知らなかった。
-compactionで常設の指示が落ちる欠落の扱いは[AI tooling](ai-tooling.md#policysubagentskill)が記録する。
-
-欠陥を直す前のREDと、性質を判定できる最も内側の決定的なverifierの選択は`tdd-implementation`が持ち、記事の「同じ種類を覆う最も速い層へ移す」判断と同じである。
-実browserでの操作と証拠は`browser-operation`が持ち、受入条件のverificationへ探索を足さないその規則は、探索の結果を合否に使わない標準と矛盾しない。
-見た目、操作しやすさ、文言の品質の判断は`ui-review`候補が持つ。
-探索はUIに限らず、事象を欠陥、仕様の漏れ、意図した振る舞いに分けて自動の検証と設計へ戻すため、severity付きのUI監査とはJobが異なり、`ui-review`候補へ統合しない。
-原因の特定は`bug-analysis`が持つ。
-
-標準に従うprojectでは、常時適用するpolicyは標準の規範を複製する。
-標準に従わないprojectへ探索を課すかはproject横断の規範の判断であり、`environment-design`へ戻す。
-探索は操作の結果から次を決める意味判断であり、scriptにできず、必要時に読むreferenceの役は標準本文が既に果たす。
-baselineと異なる固有の方法がないため、runtime Skillの追加と既存Skillの変更を行わない。
-作る候補がないため、forward evalは行っていない。
-
-`browser-operation`には、利用者taskで最短の実経路を使い、操作を受入条件に必要な最小限にする規則があり、探索の操作をこのSkillへ委ねたときに寄り道を抑えうる。
-baselineでは、主agentがこのSkillを読んだ後にも探索のbriefを作り、探索したsubagentは自前のPlaywright scriptで操作したため、この競合は観測していない。
-標準の手順で始まった探索が`browser-operation`を経て最短経路へ縮むことを観測した場合に、境界を見直す。
-
-### data-modelingをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [architecture-standard data、type、separation](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 正準形、valid state、正本と互換表現の分離、事実と現在値の区別 | 全dataのevent化、固定layer、DSL |
-| [Matt Pocock domain-modeling](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/domain-modeling) | MIT | 具体scenarioと反例、確定済みと未決定の分離 | 文書配置、domainの意味とdata表現の二重所有 |
-| [effect-fp-skill domain-types](https://github.com/mikezupper/effect-fp-skill/blob/e3ee107dc4e8a301fbddea43e85d4d1404fa15fc/references/domain-types.md) | CC BY 4.0 | parse後の正準形、状態固有data、wire表現との変換 | Effect、TypeScript、Schema、brand、Optionの強制 |
-| [WondelAI DDIA、DDD、Pragmatic Programmer](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | identityとvalue、導出可能なdata、event sourcingの適用条件 | score、固定taxonomy、UUIDやevent sourcingの一律採用 |
-
-候補の責務は、domainの意味、owner、不変条件、lifecycleが確定した後に、identity、正準形、状態固有data、absence、時刻、導出値、serializationとreader、writer互換性を決めることに限定した。公開contractは`interface-design`、private typeとfunctionは`code-design`、物理schemaは`db-design`が所有する。
-
-baselineでは、agent resourceのsessionとworktree ledgerを対象にした。Skillなしでも、session ownerを`(boot_id, owner_pid, owner_start_time)`、worktree identityを正準化済み`(common_dir, path)`、filename hashとdevice、inodeを別の導出値と実体証明に分けられた。既存fieldだけで状態別の必須data、正準遷移、terminal state、`updated_at`とmtimeの互換、v1 exact-key reader、未知dataのfail-closedまで設計し、event log、generic envelope、新versionを棄却した。さらに、診断値である`last_reason`が`quarantine-remove-root-unresolved`だけ回復分岐を兼ね、`status`だけではvalid stateが定まらない混在も特定できた。独立methodologyによる改善余地を観測できないため、現時点では基礎モデルと既存設計Skillの境界で足りる。
-
-### db-designをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [PlanetScale database-skills](https://github.com/planetscale/database-skills/tree/af0ce0cfb65cca4cc21d18ca0d9cf270ca99d488) | MIT | exact queryからのindex設計、read、write、storage cost、実planと代表負荷による確認、engine別のDDL lockとrestore | 固定型、`LOCK=NONE`、Vitess固有workflow、固定retention |
-| [Supabase agent-skills v0.1.8](https://github.com/supabase/agent-skills/tree/8331f910845103c08d51f6ca1d86ebb7d1f745e3) | MIT | keyの範囲、局所性、分散生成のtrade-off、predicateとprojectionに対応するindex、短いtransactionと一定のlock順序 | PostgreSQL固有の既定、RLS、CLI、固定batch値 |
-| [WondelAI DDIA、DDD](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | access pattern、skew、consistencyからのstorage設計、阻止するanomalyからのisolation選択、代表dataと並行性による計測 | score、固定taxonomy、UUID、B-tree、polyglot persistenceの一律採用 |
-| [architecture-standard data、storage、migration](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | logicalとphysicalの分離、constraintとwrite path、再生成可能な派生copy、同条件での計測、不可逆点に応じたrecovery | 全relationへのFK、永久保存、単一store、outbox、forward-onlyの一律要求 |
-
-候補の責務は、確定済みの論理data model、owner、不変条件、lifecycle、engineと代表workloadから、物理schema、型、key、constraint、access path、index、transaction、isolation、retention、capacity、backupとrestoreを選ぶことに限定した。公開queryは`interface-design`、発生中のbottleneckは`performance-analysis`、backfillとcutoverの順序は`migration`が所有する。既存schemaのfindingは対象engineの一次資料を使う監査で扱い、独立Skillにはしない。
-
-baselineでは、`tec-lane-buyer-cart`のcart ledgerを対象にし、既存migrationを見ずにADR、port、store、integration specificationから設計した。Skillなしでも、買い手単位のsettlement、settled lines、再構築可能なcurrent projectionという三relation、複合key、同一台帳内FK、最小index、一確定一transaction、履歴保持、projection再構築とPITRを導けた。これは同repositoryの`deploy/database/up/0039_cart_selections.sql`にある主要構造と一致した。さらに、`ordinal`と`line_id`の一意性、空白型番、append-only、`max(version) + 1`の並行更新という既存設計の未強制条件も分離できた。独立methodologyによる改善を観測できないため、donorは判断材料として残し、runtime Skillは追加しない。
-
-### database-reviewをSkill化しない判断
-
-既存databaseの監査では、domain invariant、DDL、全write path、transaction、test、engine仕様を対応付ける。PlanetScaleとSupabaseの資料はengine固有のconstraint、index、lock、RLS、rolloutを補うが、独立したreview procedureを与えない。
-
-baselineではPostgreSQLのaudit ledgerを監査し、親rowの更新と削除だけを拒否しても、任意の子rowを後から追加でき、`TRUNCATE`がrow triggerを通らないためimmutabilityが閉じない問題を特定できた。既存のreview能力とengine一次資料で実害のあるfindingまで到達しており、Skill固有の改善を観測していない。反復してisolation anomaly、workload、restoreの欠落を見逃す証拠が得られるまで追加しない。
-
-### architecture-designをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [architecture-standard design、separation、evolution](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 事実、要件、境界、戦術の順序、actorとchange reason、可逆性、ADR | project固有技術、固定layer、全依存のinward化 |
-| [Matt Pocock codebase-design、Design It Twice](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | materially differentな案、同じconstraintでの比較、seam、locality、deletion test | 固定数の案、personaとsubagent、interfaceだけへの限定 |
-| [WondelAI DDIA、Release It!](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | consistency、availability、latency、failure、integration、deployment、capacity、recoveryのtrade-off | score、特定store、saga、breaker、bulkhead、負荷倍率の一律採用 |
-| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | MIT | 現状維持、新componentなし、既存mechanismを比較対象にすること | shortest diff、fewest files、常時発火 |
-
-候補の責務は、確定済みの問題、domain ownership、外部contract、quality attribute、運用制約から、process、service、worker、store、queue、external systemのtopology、dataとcontrol flow、runtime、deployment、failure、trustの境界を比較することとした。moduleの責務は`module-design`、exact contractは`interface-design`、未確認のruntime特性は隔離実験や各analysis、既存構造のfindingは`architecture-review`が所有する。
-
-baselineでは、self-hosted Web調査基盤を対象にし、実装を見ずに`agent client → gateway → SearXNG/Crawl4AI別front → 別backend container → 外部Web`を設計した。direct接続案と統合service案を棄却し、capability別のfailureとdeployment、loopback、credential境界、固定image、runtime probe、段階rolloutとgeneration rollbackまで既存構造と一致した。欠けた`web_url_read`拒否とdownstreamの`failOpen`は、選択済みgatewayへ与えるauthorizationとfailure contractのexact bindingである。system-level constraintを後続の`interface-design`とsecurityへ渡せばarchitecture判断は保存されるため、このscenarioから独立Skillの改善を確認できない。
-
-### architecture-reviewをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 固定規則にしない内容 |
-|---|---|---|---|
-| [architecture-standard review、separation、dependency](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 機械検証、actorとchange reason、sourceとruntime、未変更consumer、段階的な収縮 | 固定layer、inward dependency、port、DIの普遍化 |
-| [Shane Vitarana decomplect](https://github.com/shanev/skills/tree/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect) | MIT | couplingのstrength、distance、volatility、ownership、shared state、temporal contract | functional core、purity、immutability、confidence thresholdの強制 |
-| [Matt Pocock improve-codebase-architecture、codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | scope、change amplification、caller burden、locality、deletion test | deep module、HTML report、grilling、target designの生成 |
-| [WondelAI DDIA、software-design-philosophy、team-topologies](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966) | MIT | consistency、failure、deployment、ownership、handoff、cognitive loadのtrade-off | score、store、team taxonomy、serviceとの一対一対応 |
-| [Ponytail audit](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/.openclaw/skills/ponytail-audit/SKILL.md) | MIT | componentなし、既存mechanism、削除可能性を反証に使うこと | LOC、dependency数、service数の最小化 |
-
-候補の責務は、固定したsystemについて、宣言済みのarchitecture claimを、source、runtime、data、control、build、deployment、ownership、failureの別々の証拠へ照合し、実際の変更、検証、配備、運用costを持つsystemic findingだけを返すこととした。graphの事実は`dependency-analysis`、具体的変更の伝播は`impact-analysis`、新しい責務配置は`module-design`が所有する。
-
-baselineでは、`790d3a10`のrepository option統一を対象にした。gateway portだけを変えるvariantが通常machineのmodule rosterを再記述し、`toolchain.git.workIdentity`を欠落させたため、検証構成が実配備と異なるtopologyになることをMajorとして検出した。後続の`d1e6003e`はvariantを`normalMachineModule`とport overrideの合成へ直し、`11e04b95`は通常構成とのprojection一致を機械検証へ固定した。architectureの方法論を与えない独立reviewerも、同じ欠落、consumerへの影響、修正へ到達した。固定diffでは`code-review`と基礎モデルで足り、現行system全体の監査に固有の改善は未観測であるため、runtime Skillは追加しない。
 
 ### module-designで採用したdonor
 
@@ -491,9 +242,8 @@ baselineでは、`790d3a10`のrepository option統一を対象にした。gatewa
 
 `module-design`は、actor、change driver、stateとartifact lifecycleを固定し、責務配置の異なる案をhard constraint、変更伝播、caller burden、runtime crossing、build、deploy、可逆性で比較する。moduleを増やすことも減らすことも目的にせず、同じ制約下で他案を支配する案か、優先するriskに対するtrade-offを選ぶ。
 
-代表scenarioは [`agents/fixtures/module-design-skill.json`](../../agents/fixtures/module-design-skill.json) に置く。baselineでは、AgentMemory backendのnpm sourceとpackageをagent integrationへ移す案を正しく逆依存として棄却できた。一方、共通versionとupstream releaseを理由に、新しいvendor名のrepository rootへbackend、hook、plugin、MCP entrypointを集約する案を推奨した。現行のcontainer ownerがbackend sourceとruntime stateを持ち、agent integrationとMCPが型付きcontractを消費する境界で足りるかを対照にせず、root ownershipとrelease contractを増やした。新しいSkillは、新moduleなしを候補に含め、独立したchange driver、state、artifact lifecycle、accountable ownerを封じ込めない境界を棄却する。
+代表scenarioは[`agents/fixtures/module-design-skill.json`](../../agents/fixtures/module-design-skill.json)に置く。
 
-forward evalでは、Git identity templateと生成先のownerを実装から比較した。`accounts`所有、`toolchain/git`所有、新しい`identity` module、`sops`所有を同じ制約で比べ、Git構文とinclude pathを`toolchain/git`、identity値とsecret配備を`accounts`に残す現行案を選んだ。新moduleは独立consumer、state、artifact lifecycleを持たずcontractを一段増やすとして棄却した。依頼されていないADR形式まで生成したため、成果に必要な判断だけを返し、文書形式を発明しない停止条件を追加した。
 
 ### interface-designで採用したdonor
 
@@ -508,22 +258,8 @@ forward evalでは、Git identity templateと生成先のownerを実装から比
 
 `interface-design`は、固定済みのownerとseamに対し、consumerの代表usageからsemantic contractを決め、repositoryの既存bindingへexactに写す。existing source of truthを別名で複製せず、provider layoutやvendor errorを公開しない。互換性はreaderとwriterの向きごとに判定し、同時運用が必要な非互換contractだけをversion化する。
 
-代表scenarioは [`agents/fixtures/interface-design-skill.json`](../../agents/fixtures/interface-design-skill.json) に置く。baselineでは、AgentMemoryの`upstream.root`を狭めるため、hook entrypointとplugin pathを型付きfieldへ変換できた。一方、既存のservice contractが既に持つURLとunitを新しい`runtime` optionへ複製し、一致assertionで正本を二つにした。上流が定義していないHTTP API contractをpackage versionから作り、backendとMCPのlockstep更新も要求した。新しいSkillは、既存正本の再利用、semantic contractとreleaseの分離、consumer usageから必要なsurfaceだけを導く手順を補う。
+代表scenarioは[`agents/fixtures/interface-design-skill.json`](../../agents/fixtures/interface-design-skill.json)に置く。
 
-forward evalでは、agent ownerのCodex executableをMCP側へmirrorし、一致assertionを置く提案を検討した。既存の`dotfiles.agents.clientExecutables.codex`がabsolute path、read-only、internal、defaultなしのexact contractを既に持ち、MCPはそこへ引数だけ加えると確認した。mirrorはsource dependencyを消さず、同じ意味のreaderと将来の削除コストを増やすため、新しいinterfaceを作らない案を選んだ。依頼なしにADR形式で回答したため、結果を推薦、contract、compatibility、verification obligationへ限定する出力規則を追加した。
-
-### interface-reviewをSkill化しない判断
-
-| Donor | License | 利用できる知見 | 固定規則にしない内容 |
-|---|---|---|---|
-| [Addy Osmani api-and-interface-design、code-review-and-quality](https://github.com/addyosmani/agent-skills/tree/be42637c5af93fdc8526b68ec2f2651b930f316c/skills) | MIT | observable contract、consumer影響、根拠付きfinding | REST規則、数値threshold、万能review、multi-modelの強制 |
-| [Matt Pocock code-review、codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering) | MIT | repository規約と要求の分離、callerが知るinvariant、error、ordering | diff限定、issue tracker、固定smell、deep moduleへの再設計 |
-| [architecture-standard review、contracts](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 正本、binding、生成物、provider、未変更consumerの照合と機械検証の優先 | 固定directory、pagination、HTTP binding、version配置の一律適用 |
-| [OpenAPI 3.2.0](https://github.com/OAI/OpenAPI-Specification/tree/99710bcb26cbe4be646565eebeb04348f02374b5)、[TypeSpec 1.15.0](https://github.com/microsoft/typespec/tree/f30cd352f93997e04c75d48c7ace6947a1d5d07a) | Apache-2.0、MIT | schema、compiler、linter、emitterを決定的な証拠に使うこと | 規格適合だけでprovider behaviorとconsumer assumptionを証明すること |
-
-候補の責務は、既存のconsumer-visible contractを、semantic source、binding、生成物、provider behavior、consumer assumptionの順に追い、readerとwriterの方向別に互換性を監査することとした。新contractは`interface-design`、consumer列挙は`impact-analysis`、一般的な差分は`code-review`が所有する。
-
-baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査観点を与えた実行は、推定owner root内の無関係な`*.hm-back`も削除できることをMajorとして検出したが、入力が方法論を漏らしていたためadmission根拠から外した。方法論を与えない独立reviewerも同じ問題を検出し、さらにruntimeの`HOME`で対象userが変わることと、`--system`がhome削除後にsystem削除へ進む権限境界をMajorとして検出した。固有methodologyによる改善を観測できないため、既存contract単体の監査は基礎モデル、interface変更を含む差分は`code-review`で扱い、runtime Skillは追加しない。
 
 ### code-reviewで調査したsourceと採否
 
@@ -534,15 +270,14 @@ baselineでは、現行`dotfiles-cleanup`の公開CLIを対象にした。監査
 | [Ponytail review](https://github.com/DietrichGebert/ponytail/blob/2ed6c52c9d7e5e56942508591085fd45dea277d3/.openclaw/skills/ponytail-review/SKILL.md) | MIT | 削除、直接実装、既存helper、標準機能を新しい所有物の対照にすること | LOCとdependency数の最小化、single implementation abstractionの一律否定 |
 | [code-humanizer](https://github.com/LeonardNJU/code-humanizer/tree/8ffe07b2f1301f4285c9ccaed387bd203ff6ef4c)、[deai-code](https://github.com/golovatskygroup/deai-code/tree/35d9f87f25221577fdaa1b7f2ebb212d921dea5d) | MIT | 重複helper、broad exception、fallback、説明comment、投機的抽象を現在の変更costから疑うこと | AI著者推定、score、出自別severity、人間らしく見せる目的 |
 | [architecture-standard review、audit](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de/process) | repository rootに表示なし | 機械検証の優先、未変更consumer、生成物、設定、今回導入した問題の因果 | project固有standardの本文、全severity見出し、finding数の強制 |
-| [Zenn「そのAI生成コード、全部レビューしますか？全部信じますか？」](https://zenn.dev/r_kaga/articles/66c190413d3ab9)、[Martin Fowler「To Vibe or Not to Vibe」](https://martinfowler.com/articles/exploring-gen-ai/to-vibe-or-not-vibe.html) | 記事本文に再利用license表示なし | なし | 影響と検出可能性によるreview深度は既存Skillとbaselineが同じ判断を行い、追加指示によるupliftがなかった。機械的なrisk scoreとAI固有の誤り確率も採らない |
 
-旧`code-reviewer`は、CriticalとMajorがなくてもMinorを作る規則を持ち、requirement、未変更consumer、生成物を標準入力にしていなかった。Skill IDを`code-review`へ揃え、変更の目的とrepository constraintを別に照合し、今回の差分が導入または悪化させた実害だけをfindingにする。security、architecture、test suiteの専門監査は所有しない。
+`code-review`は要件とrepositoryの制約を別に照合し、指定された差分が導入または悪化させた実害だけをfindingにする。
+代表scenarioは[`agents/fixtures/code-review-skill.json`](../../agents/fixtures/code-review-skill.json)に置く。
 
-baselineでは、`3e94a025`のChrome DevTools追加をreviewし、`set -e`下の`! grep`が禁止flagを検出してもcheckを失敗させない問題をmerge blockerとして検出した。7分後の`1d33da1b`は同じ箇所を明示的な条件分岐へ直しており、findingと一致した。一方、問題のない`cf1fb79a`のpath制御文字拒否では、旧Skillの規則に従って同じ文字classを通る追加fixtureをMinorとして要求したが、現行まで修正されず述語とtestは維持されている。新しいSkillはゼロfindingを正しい結果とし、機械検証と重複する列挙を棄却する。固定したbase、head、baseline、候補出力、oracleは [`agents/fixtures/code-review-skill.json`](../../agents/fixtures/code-review-skill.json) に置く。
 
-AI生成と人手という表示だけを変えた認可diffと、決定的なsnapshot検査済みの低影響diffでも比較した。Skillありとbaselineはどちらも、認可diffを同じCritical、低影響diffをfindingなしと判定した。既存能力で足りるため、影響と検出可能性のrisk modelはruntime Skillへ追加しない。
-
-static analysisは、repositoryのbuildとlintに組み込まれたanalyzerが今回のsourceに出した診断だけを使う。外部serverの解析は、解析したrevisionをreview対象へ対応付けられないことが多く、候補発見に届かなかったため使わない。差分が追加したsuppressionは、規則、範囲、理由が揃っているかを確かめる。
+static analysisは、repositoryのbuildとlintに組み込まれたanalyzerが対象sourceに出した診断を使う。
+外部serverの解析結果は、解析したrevisionをreview対象へ対応付けられない限り根拠にしない。
+差分が追加したsuppressionは、規則、範囲、理由が揃っているかを確かめる。
 
 ### code-designで採用したdonor
 
@@ -558,9 +293,8 @@ static analysisは、repositoryのbuildとlintに組み込まれたanalyzerが�
 
 `code-design`は、固定済みmoduleとexact interfaceを入力に、内部表現、function、data flow、algorithm、判断とeffectの配置を決める。既存mechanismか直接実装を対照にし、新しいprivate abstractionは実在する知識、変化、変更か検証costを局所化する場合だけ残す。実装、refactoring、TDD、reviewは所有しない。
 
-代表scenarioは [`agents/fixtures/code-design-skill.json`](../../agents/fixtures/code-design-skill.json) に置く。baselineでは、doctorの重複ID、安定順序、summaryを一つのjq finalizerへ置く判断はできた。一方、既存の五配列を使えば足りる内部処理へ、observation envelope、JSONL file、record関数、source用main guardを追加し、数値scoreで案を選んだ。新しいSkillは、既存表現と直接実装を対照にし、pure/effect分離やprivate abstractionを具体的な変更costで正当化する手順を補う。
+代表scenarioは[`agents/fixtures/code-design-skill.json`](../../agents/fixtures/code-design-skill.json)に置く。
 
-forward evalでは、AgentMemoryの全hookに共通URL、二つのhookにだけ固有の定数環境を渡す内部構造を設計した。既存`hookNames`を正本に保ち、完全なspec一覧や汎用wrapper builderを棄却し、疎な例外mapを選べた。一方、閉じた定数をshell行へ変換する専用rendererを追加したため、escaping責任だけを増やすhelperを棄却し、既存literalかnative builderを優先する規則を追加した。
 
 ### ui-designで採用したdonor
 
@@ -574,41 +308,11 @@ forward evalでは、AgentMemoryの全hookに共通URL、二つのhookにだけ�
 | [Addy Osmani frontend-ui-engineering](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/frontend-ui-engineering/SKILL.md) | MIT | design system、content-first layout、semantic token、意味のある状態 | React構造、固定breakpoint、行数threshold、実装workflow |
 | [WondelAI design-everyday-things](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/design-everyday-things/SKILL.md)、[microinteractions](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/microinteractions/SKILL.md) | MIT | affordance、signifier、mapping、constraint、feedbackと、trigger、rule、feedback、recovery | score、固定時間、signature moment、review severity |
 
-baselineは、既存design systemがある画面にも新しいcardとfilter componentを根拠なく足し、mobileをcard化した。新しいSkillは既存worldを継承し、必要なgapだけを拡張する。component tree、props、state ownerは`code-design`へ渡す。代表scenarioは[`agents/fixtures/ui-design-skill.json`](../../agents/fixtures/ui-design-skill.json)に置く。
 
 pluginの`frontend-design`は、実装前にextreme aesthetic、特徴的なfont、motion、unexpected layoutを選び直すため、承認済みbriefと既存design systemを正本にできない。frontend実装に独立Skillが必要な不足も観測していないため、donorとしてだけ使い、配備しない。
 
-forward evalでは、手袋とtabletを使う倉庫の出荷例外処理を対象にし、一覧から原因確認、処理、競合、通信断、結果確認までを一つのflowへ閉じた。既存primitiveを再利用し、card一覧を棄却できた。一方、根拠のない60対40の分割比率と56pxの新tokenを確定したため、数値は既存system、実content、platform要件、測定からだけ導き、gapは新しい部品名でなく不足能力として渡す規則を追加した。
+代表scenarioは[`agents/fixtures/ui-design-skill.json`](../../agents/fixtures/ui-design-skill.json)に置く。
 
-修正後のcomposition evalでは、請求差異の解決画面について`ui-design`でbriefを閉じてから`code-design`でpage-privateな構造へ写した。SkillなしではDrawer幅、表の最小幅、表示行数を根拠なく固定し、20個前後のcomponentと5個のhookへ分けた。Skillありでは正確な数値を既存規約か実測へ戻し、既存primitiveを保った8境界と3つの純粋判断へ縮めた。UI方針とcomponent責務の二重所有は生じなかった。
-
-同じ監査一覧のpromptでaccessibility referenceだけを外すablationも行った。本体だけでもkeyboard、focus、status、Drawerからの復帰は設計できたが、referenceありの場合だけcontrast 4.5:1と3:1、24×24 CSS pxまたは間隔例外、tableとlistのsemantic条件まで具体化した。この差が実装前のconstraintを閉じるため、referenceを残す。
-
-### ui-review候補のdonorとbrowser-reviewを作らない判断
-
-候補の`ui-review`はPlaywrightで代表task、keyboard操作、desktopとmobile、materialなstateを確認し、必要な箇所だけChrome DevToolsで詳細観測する。findingは利用者への影響、再現手順、visualまたはruntime evidence、severityを持つ。WondelAIのusability lens、ImpeccableとHallmarkの既存artifact監査、Anthropicのbrowser reconnaissance、WCAG 2.2を組み合わせる。
-
-| Donor | License | 採用した内容 | 採らなかった内容 |
-|---|---|---|---|
-| [WondelAI ux-heuristics](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/ux-heuristics/SKILL.md) | MIT | system status、現実の語彙、control、consistency、error prevention、recognition、recoveryを反証観点にすること | 10点score、固定click数、選択肢数、tap target、全画面への一律heuristic |
-| [Impeccable critique](https://github.com/pbakaus/impeccable/blob/c8f476b330395031bc8f7a7aee8d848bc85c81e4/.agents/skills/impeccable/reference/critique.md) | Apache-2.0 | live artifactを見て、visual判断とbrowser evidenceを分け、product固有性と利用者影響を照合すること | 二agent強制、score、persona、detector、snapshot永続化、質問workflow |
-| [Hallmark audit](https://github.com/Nutlope/Hallmark/blob/13ac0ec7e148655948100b6396439e481361d690/skills/hallmark/references/verbs/audit.md) | MIT | 既存artifactとproduct contextを先に確認し、架空のcontentやmetricをfinding根拠にしないこと | anti-slop gate、theme分類、build、redesign、studyとの一体化 |
-| [Anthropic webapp-testing](https://github.com/anthropics/skills/blob/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/webapp-testing/SKILL.md) | Apache-2.0 | 動的画面のreconnaissance後にselectorと操作を決め、server lifecycleとbrowser logを管理すること | Python script、headless固定、`networkidle`の一律要求、独自browser起動 |
-| [WCAG 2.2](https://www.w3.org/TR/WCAG22/) | W3C仕様。本文は非転載 | 該当する達成基準をaccessibility findingの規範根拠にすること | 全基準のchecklist化、未試験画面の準拠宣言、要件と無関係なscore |
-
-console、network、storage、DOM、event、performance、memory、securityを一つのSkillへまとめると、証拠取得と原因、性能、セキュリティの判断を同時に所有する。browserはtoolであり、この横断分類はSkillのJobにならない。既知の障害は`bug-analysis`、性能症状は`performance-analysis`、攻撃可能性は`security-review`へ送り、利用者が観測するUI品質だけを責務とする。
-### component-designを独立Skillにしない判断
-
-| Donor | License | 利用できる知見 | 固定規則にしない内容 |
-|---|---|---|---|
-| [Vercel composition patterns](https://github.com/vercel-labs/agent-skills/tree/b8caa260a420a73042e35521de4b5c8baf6446cc/skills/composition-patterns) | 対象SkillはMIT。repository rootに表示なし | behaviorを選ぶflagの組合せを明示variantやcompositionにすること、協調partsだけがstate contractを共有すること | compound component、provider、context、React APIの一律採用 |
-| [Addy Osmani frontend-ui-engineering](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/frontend-ui-engineering/SKILL.md) | MIT | design systemと隣接patternの確認、state scopeに応じたlocal、lifted、contextの選択 | 200行threshold、固定file tree、container/presenter、prop階層の数値基準 |
-| [Feature-Sliced Design](https://github.com/feature-sliced/documentation/tree/1d371daf8abf722779b0fd30a4bcf3b6b292e752) | MIT | use-caseによる局所化、page固有UIを無理に抽出しないこと、shared primitiveから業務policyを除くこと | 固定layer、segment名、barrel、same-layer規則の輸入 |
-| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | deletion test、change locality、callerへ漏れる知識による抽出判断 | component固有taxonomy、固定数の案とsubagent |
-
-候補の責務は、確定済みのfeature、画面state、module境界、design systemから、module-privateなcomponent tree、state owner、props、event、slotを決めることとした。これはmodule内部の構造を決める`code-design`と同じtrigger、入力、判断所有権を持つ。別Skillにすると同じ設計を二重所有するため、既存componentの確認とfeature-localな直接案を`code-design`へ統合した。shared ownerへの昇格は`module-design`、外部公開するcomponent APIは`interface-design`が所有する。
-
-baselineでは、`tec-lane-buyer-cart`のbuyer cart画面を、既存component実装を見ずに設計した。Skillなしでも、pageをremote stateとmutationのownerにし、widgetをport非依存に保ち、業務判定をentity modelへ残し、local stateの複製を避けられた。一方、既存の`Split`、`Facts`、`Table`、`Row`、`Cell`、`Badge`を設計前に確認せず、独立stateも再利用理由もない局所componentを分けた。この不足は`code-design`が既に持つ隣接実装と既存mechanismの確認で防げる。component固有の独立methodologyによる改善ではないため、新しいSkillを追加しない。
 
 ### error-designで採用したdonor
 
@@ -623,9 +327,8 @@ baselineでは、`tec-lane-buyer-cart`のbuyer cart画面を、既存component�
 
 `error-design`は、扱いの異なるfailureだけを列挙し、意味を知るownerへ置き、provider errorを最初の既存boundaryで一度だけ翻訳する。処理できる場所まで意味を保ち、固定済みのretry、観測owner内で処理点を一つにする。後者は、donorのboundary処理とterminal handler責任を、このrepositoryの二重処理防止へ統合した判断である。共通Error型、Result、exception hierarchy、error registryを成果にせず、既存表現で足りる案を必ず対照にする。
 
-代表scenarioは [`agents/fixtures/error-design-skill.json`](../../agents/fixtures/error-design-skill.json) に置く。baselineでは、agent resourceのvalidation、filesystem、lock、proc identity、race、cleanupを分類し、global trust failureとrecord単位のpreserveを分けられた。一方、Bashの既存status、ledger reason、stderrで必要な意味を表せるかを確認せず、全経路へ汎用Resultとboundary translatorを導入した。新しいSkillは、callerの扱い、回復、公開mappingが異なるfailureだけを区別し、既存表現を保つ案から比較する手順を補う。
+代表scenarioは[`agents/fixtures/error-design-skill.json`](../../agents/fixtures/error-design-skill.json)に置く。
 
-forward evalでは、doctorの公開JSON、exit status、observation境界を固定し、missing tool、非zero、malformed output、semantic mismatch、caller cancellation、cleanupを設計した。既存statusと固定failure recordを保ち、独立observationは集約し、runner invariantの破壊とcaller cancellationだけを停止条件にできた。原因別enum、Result、retry、追加logは棄却した。一方、caller cancellationとobservation deadline、代替成功と保守的failure mappingを混同し、raw causeを無条件に保持できる記述が露出したため、contractとconsumerの有無から扱いを決めるよう本文を限定した。
 
 ### domain-modelingで採用したdonor
 
@@ -634,35 +337,27 @@ forward evalでは、doctorの公開JSON、exit status、observation境界を固
 | [Matt Pocock domain-modeling](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/domain-modeling) | MIT | 曖昧語への質問、具体的なedge case、codeとの矛盾確認、決定済み語彙の即時記録、ADRを残す三条件 | `CONTEXT.md`、`CONTEXT-MAP.md`、`docs/adr/`の固定配置と、一つの用語集形式 |
 | [architecture-standard](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | 不変条件から整合性境界を考えること、事実と現在状態、識別子、時刻を区別すること、意味と単位を型へ伝える観点 | aggregate、型、純粋性、eventをすべてのdomain modelへ先に要求すること |
 
-MattのSkillは、modelを変える仕事と既存語彙を読むだけの仕事を分ける点で有効だった。一方、文書配置をSkillが決めるため、このrepositoryの既存構成と衝突する。新しい`domain-modeling`は具体的なscenarioから概念、context、語彙、不変条件を決め、code、schema、API、UI、testの意味を照合する。実装上の型、module、table、endpointは後続の設計へ渡す。
+代表scenarioは[`agents/fixtures/domain-modeling-skill.json`](../../agents/fixtures/domain-modeling-skill.json)に置く。
 
-代表scenarioは [`agents/fixtures/domain-modeling-skill.json`](../../agents/fixtures/domain-modeling-skill.json) に置く。近接する語彙の監査、DB schema設計、module境界設計、既存用語集の参照では発火しない。baselineは個人、組織、取消、返金を分離できたが、`Customer Organization`と`Representation`を利用者が意味を確定する前に正規語として採用し、観測事実だけでは決まらない不変条件を並べた。このSkillは、具体的なscenarioで反証し、観測と利用者判断を分けてからmodelを確定する手順を補う。
 
 ### grillingで採用したdonor
 
 | Donor | License | 採用した内容 | Local modification |
 |---|---|---|---|
 | [Matt Pocock grilling](https://github.com/mattpocock/skills/blob/85f83d3fde1d3a90d5c9a657f6998c79a6c37308/skills/productivity/grilling/SKILL.md) | MIT。配備package内に原文のnoticeを含める | decision tree、依存が解けたfrontier単位の質問、各問への推奨、一巡に複数問を置き区切り線で分けるtemplate、事実はagentが調べdecisionは利用者が決めること、共有理解まで実装しないこと | 事実確認のたびにsubagentを必須にせず、repositoryのsubagent規律に合わせた。emojiによる装飾は採らず、見出しと推奨の行だけを残した |
-| [Matt Pocock grill-with-docs](https://github.com/mattpocock/skills/blob/85f83d3fde1d3a90d5c9a657f6998c79a6c37308/skills/engineering/grill-with-docs/SKILL.md) | MIT | `grilling`を`domain-modeling`と合成する一文のwrapperを一度配備した | wrapperは配備から外し、domain決定を残す経路を`grilling`本文から`domain-modeling`へ向けた |
 
-`grilling`は明示的な依頼を受け、未決定事項を依存順に質問するprocedureを所有する。domainの意味は決めず、設計文書も書かない。domain決定を文書へ残す場合は`domain-modeling`へ渡す。通常の設計、直接実装、候補を広げるだけのbrainstormでは発火しない。代表scenarioは [`agents/fixtures/grilling-skill.json`](../../agents/fixtures/grilling-skill.json) に置く。baselineは一問ごとに回答を待ち、同じ前提から今決められる他の論点と、後続の依存関係を示さなかった。このSkillは同じfrontierを一巡にまとめ、回答に依存する質問だけを後へ送る。
+`grilling`は明示的な依頼を受け、未決定事項を依存順に質問するprocedureを所有する。
+domainの意味とその記録は`domain-modeling`へ渡す。
+代表scenarioは[`agents/fixtures/grilling-skill.json`](../../agents/fixtures/grilling-skill.json)に置く。
 
-### 出力styleをSkill化しない判断
 
-| Donor | License | 利用できる知見 | 汎用化しない内容 |
-|---|---|---|---|
-| [i-have-adhd](https://github.com/ayghri/i-have-adhd/tree/24d22f783e57cb73c957848b588c6f651b6f9cd8) | MIT | 利用者が実行する手順を一手順一動作の番号付きにすること、完了報告へ利用者が再現できるcommandを添えること、条件比較を構造的な盲検にして次元別の重みとtrial間varianceを併記すること、評価runから利用者levelのplugin、hook、memory、output styleを隔離しmodelをpinすること | 常に所要時間を見積もること、errorで原因と修正を必ず断定すること、listを5件で打ち切ること、英語の定型句禁止リスト、session常駐のoutput style Skill |
-
-`i-have-adhd`は応答の形だけを定める単一Skillで、`disable-model-invocation: true`により利用者の明示invocationで有効化し、解除されるまでsessionに常駐する。10則のうち結論を先に置くこと、tangentの抑制、前置きと締めの排除、errorを平叙で述べることは、clientのpersonality blockと[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)の作業規律が既に所有する。残る差分は、利用者が実行する手順の番号付けと、完了報告への再現commandの二点にとどまる。
-
-出力の形はSkillのJobではない。Skillはtask contextで選ばれる判断と手順を所有し、常時適用する応答規則はclientのpersonalityとrepository policyが所有する。Codexは[`config-system.toml`](../../agents/clients/codex/assets/config-system.toml)で`personality`を宣言し、ompは`PERSONALITY.md`でpreset本文を差し替えられるが現在は宣言せずclient既定のblockを使う。二点の差分のために配備経路を増やさず、必要が生じたときはこのclient設定側で扱う。[`profiles/workstation.nix`](../../profiles/workstation.nix)はregistryの全keyを有効集合にするため、registryへ登録するとmodel invocationを禁じたSkillのdescriptionが全clientの全sessionへ常駐する点も、採らない理由に含まれる。
-
-時間見積りと原因断定の二則は、入れると規律に反する。agent自身が手を動かすこの構成では見積りの宛先がなく、原因と修正を必ず述べさせる規則は証拠のない断定を誘発する。upstreamの[評価結果](https://github.com/ayghri/i-have-adhd/blob/24d22f783e57cb73c957848b588c6f651b6f9cd8/evals/RESULTS.md)でも、候補側だけが`partial-success`で加重0.63の低下を示し、判定者は根拠なく原因を確定して修正を処方したと記録している。全runnerが`--tools ""`で走るため、この測定はtoolを持つagent harnessの証拠ではない。
-
-`evals/`のharnessは、条件を`A`/`B`/`C`へ付け替えgroup keyのdigestで順序を置換する構造的な盲検、重み付きの次元別rubric、複数trial、release gateを持つ。このrepositoryの評価は代表scenarioの出力と発火境界を比べる方式で、自動scoreを使っていない。upstreamも判定者と被験を同じmodel familyに置いたことと、3 trialでは単一caseの0.5未満の差を信号とみなせないことを認めており、14 case、3 trial、2条件の一巡に生成$2.67と判定$0.92を要する。反復する誤判定が観測されていないため、harnessは導入しない。採るのは評価runの隔離とmodel pinの規律だけで、これはSkillとrulesを利用者levelで全clientへ配備するこのhostが、自分の配備物を測り込まないために要る。
 
 ## Skill 化の条件
 
-候補ごとに、Skillなしの代表scenarioで不足を観測する。Skillありの同種scenarioで成果、routing、process、restraint、compositionを比較する。内容、reference、script、Skill自体を除いて結果が変わらなければ削除する。
+候補ごとに、Skillなしの代表scenarioで不足を観測する。
+Skillありの同種scenarioで成果、routing、process、restraint、compositionを比較し、内容、reference、script、Skill自体を除いて結果が変わらなければ削除する。
 
-外部sourceは採用時のrevision、license、採用理由、local modificationを追跡する。sourceの分類や作者名をruntime構造に使わない。詳細な知識は一段のreferenceへ分け、`SKILL.md` は発火後に必要なprocedureと打ち切り条件だけを持つ。
+外部sourceは採用時のrevision、license、採用理由、local modificationを追跡する。
+sourceの分類や作者名をruntime構造に使わない。
+local Skillの詳細な知識は一段のreferenceへ分け、`SKILL.md`には発火後に必要なprocedureと打ち切り条件を置く。
+直接採用する外部Skillの資材はupstreamの構成を保ち、このrepositoryの本文へ移し替えない。

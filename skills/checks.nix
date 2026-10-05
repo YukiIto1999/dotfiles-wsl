@@ -12,6 +12,88 @@ let
   manifest = pkgs.writeText "skill-frontmatter-manifest.json" (
     builtins.toJSON (lib.mapAttrs (_: skill: "${skill.source}") registry)
   );
+  externalSkill = {
+    source = ./fixtures/external-source/procedures/external-procedure;
+    requiresCapabilities = [ "browser-automation" ];
+    requiresSkills = [ "code-design" ];
+  };
+  replacementSkill = {
+    source = ./fixtures/external-source/procedures/bug-analysis;
+    requiresCapabilities = [ ];
+    requiresSkills = [ ];
+  };
+  sourceAdoptionModule = {
+    dotfiles.skills.registry = {
+      external-procedure = externalSkill;
+      bug-analysis = lib.mkForce replacementSkill;
+    };
+  };
+  sourceConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      sourceAdoptionModule
+    ]).config;
+  sourceManifest = pkgs.writeText "skill-source-manifest.json" (
+    builtins.toJSON {
+      external-procedure = "${sourceConfig.dotfiles.agents.shared.skills.external-procedure}";
+      bug-analysis = "${sourceConfig.dotfiles.agents.shared.skills.bug-analysis}";
+    }
+  );
+  mismatchedManifest = pkgs.writeText "skill-mismatched-name-manifest.json" (
+    builtins.toJSON { renamed-procedure = "${externalSkill.source}"; }
+  );
+  evaluateSkills =
+    resolved: modules:
+    (lib.evalModules {
+      modules = [
+        ./module.nix
+        ./browser-operation/module.nix
+        ./bug-analysis/module.nix
+        ./code-design/module.nix
+        {
+          options = {
+            assertions = lib.mkOption {
+              type = lib.types.listOf lib.types.raw;
+              default = [ ];
+            };
+            dotfiles.capabilities.registry = lib.mkOption {
+              type = lib.types.attrsOf lib.types.raw;
+              default = {
+                browser-automation = { };
+              };
+            };
+            dotfiles.capabilities.resolved = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+            };
+          };
+          config.dotfiles.capabilities.resolved = resolved;
+        }
+      ]
+      ++ modules;
+    }).config;
+  sourceContractPasses =
+    modules:
+    let
+      config = evaluateSkills [ "browser-automation" ] modules;
+      result = builtins.tryEval (
+        builtins.deepSeq config.dotfiles.skills.registry (
+          builtins.deepSeq config.assertions (lib.all (entry: entry.assertion) config.assertions)
+        )
+      );
+    in
+    result.success && result.value;
+  rejectedSources = [
+    (externalSkill.source + "/missing")
+    (externalSkill.source + "/SKILL.md")
+    ./fixtures/invalid-source
+  ];
+  noCapabilitiesBefore =
+    evaluateSkills
+      [ ]
+      [
+        { dotfiles.skills.registry.external-procedure = externalSkill; }
+      ];
+  noCapabilitiesAfter = evaluateSkills [ ] [ sourceAdoptionModule ];
   validator = pkgs.writeText "skill-frontmatter-contract.py" ''
     import json
     import re
@@ -51,7 +133,7 @@ let
             continue
         if fields.get("name") != skill_id:
             violations.append(
-                f"{skill_id}: frontmatter name が directory 名と一致しない: {fields.get('name')!r}"
+                f"{skill_id}: frontmatter name が registry ID と一致しない: {fields.get('name')!r}"
             )
         if not fields.get("description"):
             violations.append(f"{skill_id}: description が空")
@@ -82,6 +164,90 @@ let
   containerlessRegistry = containerlessConfig.dotfiles.skills.registry;
 in
 {
+  skill-source-contract =
+    assert sourceContractPasses [ sourceAdoptionModule ];
+    assert lib.all (
+      source:
+      !(sourceContractPasses [
+        {
+          dotfiles.skills.registry.external-procedure = externalSkill // {
+            inherit source;
+          };
+        }
+      ])
+    ) rejectedSources;
+    assert
+      !(sourceContractPasses [
+        { dotfiles.skills.registry."Unsafe_ID" = externalSkill; }
+      ]);
+    assert
+      !(sourceContractPasses [
+        {
+          dotfiles.skills.registry.external-procedure = externalSkill // {
+            requiresCapabilities = [ "missing-capability" ];
+          };
+        }
+      ]);
+    assert
+      !(sourceContractPasses [
+        {
+          dotfiles.skills.registry.external-procedure = externalSkill // {
+            requiresSkills = [ "missing-skill" ];
+          };
+        }
+      ]);
+    assert
+      !(sourceContractPasses [
+        { dotfiles.skills.registry.external-procedure.source = externalSkill.source; }
+      ]);
+    assert
+      !(sourceContractPasses [
+        { dotfiles.skills.registry.bug-analysis = replacementSkill; }
+      ]);
+    assert
+      !(sourceContractPasses [
+        { dotfiles.skills.registry.bug-analysis.source = ./bug-analysis/skill; }
+      ]);
+    assert
+      !(sourceContractPasses [
+        sourceAdoptionModule
+        { dotfiles.skills.registry.bug-analysis = lib.mkForce replacementSkill; }
+      ]);
+    assert !builtins.elem "bug-analysis" noCapabilitiesBefore.dotfiles.skills.enabled;
+    assert builtins.elem "bug-analysis" noCapabilitiesAfter.dotfiles.skills.enabled;
+    assert !builtins.elem "external-procedure" noCapabilitiesAfter.dotfiles.skills.enabled;
+    assert noCapabilitiesAfter.dotfiles.skills.registry.bug-analysis.requiresSkills == [ ];
+    assert
+      toString sourceConfig.dotfiles.agents.shared.skills.bug-analysis
+      == toString replacementSkill.source;
+    assert
+      toString sourceConfig.dotfiles.agents.shared.skills.external-procedure
+      == toString externalSkill.source;
+    assert
+      toString sourceConfig.dotfiles.agents.shared.skills.bug-analysis
+      != toString hostConfig.dotfiles.skills.registry.bug-analysis.source;
+    pkgs.runCommandLocal "check-skill-source-contract"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.gnugrep
+          pkgs.python3
+        ];
+      }
+      ''
+        set -euo pipefail
+        python3 ${validator} ${sourceManifest}
+        source=${sourceConfig.dotfiles.agents.shared.skills.external-procedure}
+        test "$(cat "$source/references/contract.txt")" = "External source reference fixture."
+        test "$(bash "$source/scripts/read-reference.sh")" = "External source reference fixture."
+        if python3 ${validator} ${mismatchedManifest} >frontmatter-error 2>&1; then
+          echo "mismatched registry ID unexpectedly passed" >&2
+          exit 1
+        fi
+        grep -F "frontmatter name が registry ID と一致しない" frontmatter-error
+        touch $out
+      '';
+
   # local Skill と plugin 由来 Skill を同じ contract で検査する。source の出所で分岐しない
   skill-frontmatter-contract =
     pkgs.runCommandLocal "check-skill-frontmatter-contract"

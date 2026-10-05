@@ -10,7 +10,7 @@ let
   rebuildVars = {
     configuredDotfiles = lib.escapeShellArg config.dotfiles.workstation.dotfilesDir;
     hostName = config.networking.hostName;
-    distroName = config.wsl.wslConf.user.default or "NixOS";
+    distroName = lib.escapeShellArg config.dotfiles.workstation.wsl.distroName;
     nixosRebuild = lib.escapeShellArg (lib.getExe config.system.build.nixos-rebuild);
     sudoCommand = lib.escapeShellArg "${config.security.wrapperDir}/sudo";
     nvd = lib.escapeShellArg (lib.getExe pkgs.nvd);

@@ -517,6 +517,17 @@ fi
 # 配られていない規律の領域は、読みようがないので止めない。
 "$GATE" teach --session fixture-skills --path /r/core/b/application/ports/IFoo.cs >/dev/null
 
+"$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
+mkdir -p "$home/.local/share/fixture adapter/procedures/ui-design"
+if "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1; then
+  echo 'gate ignored the contract skill root' >&2
+  exit 1
+fi
+jq -nc --arg path "$home/.local/share/fixture adapter/procedures/ui-design/SKILL.md" \
+  '{session_id:"fixture-custom-root",tool_input:{path:$path}}' \
+  | "$CUSTOM_SKILL_ROOT_GATE" hook learn
+"$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
+
 outside=$fixture/outside
 mkdir "$outside"
 cd "$outside"

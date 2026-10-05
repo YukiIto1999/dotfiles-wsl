@@ -19,10 +19,11 @@ let
     name: checkDirectory.${name} != "regular"
   ) actualCheckFiles;
   expectedCheckNames = [
-    "agent-apm-binary-runs"
     "agent-artifact-contract"
     "agent-capability-gating"
+    "agent-claude-managed-policy"
     "agent-client-roster"
+    "agent-client-selection"
     "agent-config-migration"
     "agent-installer-behavior"
     "agent-nix-build-shims"

@@ -123,8 +123,12 @@ let
     ];
     text =
       builtins.replaceStrings
-        [ "@cacheRootRelative@" "@verificationEntry@" ]
-        [ cacheRootRelative (lib.getExe verificationEntry) ]
+        [ "@cacheRootRelative@" "@verificationEntry@" "@skillRoots@" ]
+        [
+          cacheRootRelative
+          (lib.getExe verificationEntry)
+          (lib.escapeShellArgs runtimeContract.skillRoots)
+        ]
         (builtins.readFile ./impl/runtime/gate.sh);
   };
   verify = pkgs.writeShellApplication {

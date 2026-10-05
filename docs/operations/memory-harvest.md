@@ -6,7 +6,9 @@ omp の session 記録から、利用者の訂正、決定、好みのうち将�
 
 ## 前提
 
-`project-memory` Capability と omp が有効な host だけに配備する。保存先は session の cwd から決まる project scope で、cwd が Git の work tree でない session は読まない。
+`dotfiles.agents.memoryHarvest.enable = true`を宣言し、`project-memory` CapabilityとOMPを採用したhostだけに配備する。
+既定では無効であり、新しいPCで利用者発言の外部modelへの送信を自動で始めない。
+保存先はsessionのcwdから決まるproject scopeで、cwdがGitのworktreeでないsessionは読まない。
 
 ## timer
 

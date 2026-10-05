@@ -10,7 +10,7 @@
 |---|---|---|
 | system package | [`workstation/module.nix`](../../workstation/module.nix)と各ownerの`environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
 | 汎用ツール | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages`。devenvとactrunは[`flake.nix`](../../flake.nix)で固定した公式release inputから選ぶ | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
-| Home Manager program | [`workstation/module.nix`](../../workstation/module.nix)の`programs` | 同じunitを参照する |
+| Home Manager program | [`workstation/home/module.nix`](../../workstation/home/module.nix)の`programs`。Atuinは同期なしのローカル履歴 | 同じunitを参照する |
 | language server | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.lsp` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.toolchain.lsp --apply builtins.attrNames` |
 | 保守用devShell | [`flake.nix`](../../flake.nix)の`devShells` | `nix develop --command echo`の後に`$PATH`を確認する |
 
@@ -31,11 +31,12 @@ nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncI
 
 ## Agent、Skill、Capability
 
-[`profiles/workstation.nix`](../../profiles/workstation.nix)が全host共通のAgent client、Capability、language server、identity accountを選び、`profiles/hosts/<host-id>.nix`がhost固有のCapabilityを加える。Skill、provider、backendはCapabilityから導出し、profileに直接列挙しない。
+[`profiles/workstation.nix`](../../profiles/workstation.nix)が共有するAgent client、Capability、language server、identityを選び、`profiles/hosts/<host-id>.nix`がhost固有の値と選択を持つ。
+Skill、provider、backendはCapabilityから導出し、profileに直接列挙しない。
 
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
-| Agent client | [`agents/clients/`](../../agents/clients)と`dotfiles.agents.clients` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply builtins.attrNames` |
+| Agent adapter | [`agents/clients/`](../../agents/clients)が`dotfiles.agents.registry`へ登録し、`enabled`から採用済み`clients`を導く | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply builtins.attrNames` |
 | Client installer | 各clientの`install` contractと[`agents/impl/install-agents.sh`](../../agents/impl/install-agents.sh) | `nix run .#dotfiles-install-agents -- --print-manifest` |
 | Agent runtime | [`agents/module.nix`](../../agents/module.nix)、[`agents/impl/runtime/`](../../agents/impl/runtime) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.runtime` |
 | 静的subagent | `agents/subagents/` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |

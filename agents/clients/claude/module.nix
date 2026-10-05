@@ -8,7 +8,6 @@
 let
   cfg = config.dotfiles;
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
-  lspProjection = import ../../impl/lsp.nix { inherit lib; };
   managedMcp = pkgs.replaceVars ./assets/managed-mcp.json {
     gatewayUrl = config.dotfiles.platform.mcp.gateway.url;
   };
@@ -24,7 +23,17 @@ let
 
   # settings.json に lspServers は無く、登録経路は plugin だけである
   lspJson = (pkgs.formats.json { }).generate "claude-lsp.json" (
-    lspProjection.claude cfg.toolchain.lsp
+    lib.mapAttrs (
+      _: server:
+      {
+        inherit (server) command;
+        extensionToLanguage = server.extensions;
+      }
+      // lib.optionalAttrs (server.args != [ ]) { inherit (server) args; }
+      // lib.optionalAttrs (server.initializationOptions != { }) {
+        inherit (server) initializationOptions;
+      }
+    ) cfg.toolchain.lsp
   );
 
   # directory source の marketplace は git を持たないので version を明示する。
@@ -95,28 +104,34 @@ let
     telemetryProtocol = cfg.telemetry.protocol;
   };
   managedSettings =
-    if projectMemoryEnabled then
-      managedSettingsBase
-    else
-      pkgs.runCommandLocal "claude-managed-settings-without-project-memory.json"
-        {
-          nativeBuildInputs = [ pkgs.jq ];
-        }
-        ''
-          jq '.hooks |= (
+    pkgs.runCommandLocal "claude-managed-settings.json" { nativeBuildInputs = [ pkgs.jq ]; }
+      ''
+        jq --rawfile policy ${cfg.agents.shared.rules} \
+          --argjson projectMemoryEnabled ${lib.boolToString projectMemoryEnabled} \
+          --argjson telemetryEnabled ${lib.boolToString cfg.telemetry.enable} '
+          .claudeMd = $policy
+          | if $telemetryEnabled then . else
+              .env.CLAUDE_CODE_ENABLE_TELEMETRY = "0"
+              | .env.OTEL_METRICS_EXPORTER = "none"
+              | .env.OTEL_LOGS_EXPORTER = "none"
+            end
+          | if $projectMemoryEnabled then . else
+              .hooks |= (
                 map_values(
                   map(.hooks |= map(select(.command | test("dotfiles-memory hook --harness") | not)))
                   | map(select(.hooks | length > 0))
                 )
                 | map_values(select(length > 0))
-              )' ${managedSettingsBase} > "$out"
-        '';
+              )
+            end
+        ' ${managedSettingsBase} > "$out"
+      '';
 in
 {
-  dotfiles.agents.clients.claude = {
+  dotfiles.agents.registry.claude = {
     binary = "claude";
     runtimeWrapperMode = "managed";
-    rulesDestination = ".claude/CLAUDE.md";
+    rulesDestination = null;
     skillsDestination = ".claude/skills";
     subagentMode = "rendered";
     subagentsDestination = ".claude/agents";

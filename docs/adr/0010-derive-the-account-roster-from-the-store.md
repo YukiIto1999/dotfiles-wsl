@@ -8,11 +8,12 @@ Accepted
 
 ## Context
 
-[ADR 0009](0009-declare-github-accounts-in-the-host.md) は roster を機構から host の宣言へ移した。しかし sops は値だけを暗号化して key の構造を平文で残すため、roster は最初から暗号化済み store が持っていた。`profiles/workstation.nix` の宣言はその写しであり、`docs/operations/secrets.md` が「roster と暗号化済み key を同時に変更する」という運用規律で二つの複製を同期させていた。手で同期する複製が二つある状態そのものが、この repository が排除している形である。
+SOPSは値を暗号化し、keyの構造を平文で残すため、暗号化済みstoreがaccount rosterを持つ。
+同じrosterをhost宣言へ写すと、二つの正本を手で同期する必要が生じる。
 
 宣言側に account の ID を書くと、もう一つ弊害が出る。tree を読む人が、どの entry がどの account かという同一性の判断を要求される。機構が表すべき抽象は account であり、誰が登録済みかは data の事実である。
 
-候補は三つあった。ADR 0009 の形を維持する案、key 構造だけを写した JSON index を commit して検査で一致を縛る案、store を Nix が native に読める形にして直接導出する案である。
+候補は、host宣言にもrosterを持つ案、key構造を写したJSON indexをcommitして検査で一致を縛る案、storeから直接導出する案である。
 
 一つ目は複製を残す。二つ目は複製を一つ増やして検査で埋める形で、解こうとしている問題と同じ構造になる。三つ目は複製が増えず、宣言した secret が store に無いという失敗自体が構造的に消える。Nix に YAML parser は無いが、sops は JSON を native に扱い、`builtins.fromJSON` は import from derivation を伴わずに評価時に読める。
 

@@ -6,7 +6,7 @@ let
   };
 in
 {
-  dotfiles.agents.clients.antigravity = {
+  dotfiles.agents.registry.antigravity = {
     binary = "agy";
     runtimeWrapperMode = "unsupported";
     rulesDestination = ".gemini/AGENTS.md";

@@ -12,6 +12,7 @@
     "memory": "dotfiles-memory",
     "rebuild": "dotfiles-rebuild",
     "syncImages": "dotfiles-sync-images",
+    "wslConfig": "dotfiles-wsl-config",
     "wslRestartRequired": "dotfiles-wsl-restart-required"
   },
   "commandSmoke": {

@@ -1,13 +1,15 @@
 {
+  config,
   pkgs,
   lib,
   ...
 }:
 
 let
+  cfg = config.dotfiles.workstation.storage;
   gibibyte = 1073741824;
   observationTimeoutSeconds = 10;
-  maximumJournalGiB = 4;
+  maximumJournalGiB = cfg.journal.maximumGiB;
   rootFilesystem = {
     path = "/";
     metric = "used-percent";
@@ -20,12 +22,10 @@ let
     systemMaxUse = "${toString maximumJournalGiB}G";
     maximumRetention = "30day";
   };
-  # sparse VHD が host drive を使い切ると root ext4 が壊れる（2026-09-28）。VHD は上限付きの non-sparse
-  # にする。この二つは Windows 側の .wslconfig が VHD の作成時に与えるため配らず、doctor が宣言との差を検出する
   wslVhd = {
-    sizeBytes = 800 * gibibyte;
-    sparse = false;
-    powershellCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+    sizeBytes = cfg.vhd.sizeGiB * gibibyte;
+    sparse = cfg.vhd.sparse;
+    powershellCommand = config.dotfiles.workstation.wsl.powershellCommand;
   };
   wslVhdObservation = import ./impl/wsl-vhd-package.nix {
     inherit pkgs lib;
@@ -35,6 +35,26 @@ let
   wslVhdContract = wslVhdObservation.dotfilesObservationContract;
 in
 {
+  options.dotfiles.workstation.storage = {
+    vhd = {
+      sizeGiB = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 256;
+        description = "Windows 準備と doctor で使用する root VHD 容量 GiB";
+      };
+      sparse = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "新規 VHD の sparse 選択 既存 VHD を変更しない宣言値";
+      };
+    };
+    journal.maximumGiB = lib.mkOption {
+      type = lib.types.ints.positive;
+      default = 1;
+      description = "journald 使用容量の上限 GiB";
+    };
+  };
+
   config.dotfiles.health.observations = {
     "host/windows-drives" = {
       kind = "numeric-command-threshold-set";

@@ -10,9 +10,14 @@ let
     value: value != "" && builtins.match "[a-z0-9]+(-[a-z0-9]+)*" value != null
   );
   registryNames = builtins.attrNames cfg.registry;
+  invalidSkillIds = builtins.filter (name: !skillIdType.check name) registryNames;
   capabilityRegistryNames = builtins.attrNames config.dotfiles.capabilities.registry;
-  missingSkillFiles = builtins.filter (
-    name: !builtins.pathExists (cfg.registry.${name}.source + "/SKILL.md")
+  invalidSkillSources = builtins.filter (
+    name:
+    let
+      source = cfg.registry.${name}.source;
+    in
+    !builtins.pathExists (source + "/SKILL.md") || (builtins.readDir source)."SKILL.md" != "regular"
   ) registryNames;
   unknownRequiredCapabilities = lib.concatMap (
     name:
@@ -84,15 +89,19 @@ in
         lib.types.submodule {
           options = {
             source = lib.mkOption {
-              type = lib.types.path;
-              description = "client へ配備する SKILL.md を含む directory";
+              type = lib.types.uniq lib.types.path;
+              description = "client へ本文と資材をそのまま配備する SKILL.md 所在 directory";
             };
             requiresCapabilities = lib.mkOption {
-              type = lib.types.listOf skillIdType;
+              type = (lib.types.listOf skillIdType) // {
+                emptyValue = { };
+              };
               description = "Skill の手順が利用する consumer 非依存 Capability ID";
             };
             requiresSkills = lib.mkOption {
-              type = lib.types.listOf skillIdType;
+              type = (lib.types.listOf skillIdType) // {
+                emptyValue = { };
+              };
               description = "Skill の手順が合成する別の Skill ID";
             };
           };
@@ -114,8 +123,14 @@ in
 
   config.assertions = [
     {
-      assertion = missingSkillFiles == [ ];
-      message = "Skill sources must contain SKILL.md: ${lib.concatStringsSep ", " missingSkillFiles}";
+      assertion = invalidSkillIds == [ ];
+      message = "Skill IDs must use safe kebab-case: ${lib.concatStringsSep ", " invalidSkillIds}";
+    }
+    {
+      assertion = invalidSkillSources == [ ];
+      message =
+        "Skill sources must contain a regular SKILL.md file: "
+        + lib.concatStringsSep ", " invalidSkillSources;
     }
     {
       assertion = unknownRequiredCapabilities == [ ];

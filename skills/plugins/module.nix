@@ -5,9 +5,7 @@
 }:
 
 let
-  # 採用表が plugin 由来 Skill 集合の正本である。upstream に Skill が増えてもここへ書くまで登録しない。
-  # 採用の条件は、方法自体に固有価値がある signature procedure であること、local Skill と責務が重複しないこと、
-  # owner repository が SKILL.md を `skills/<id>/` の標準配置で持つことである。
+  # upstream の追加による採用集合の暗黙変更を防ぐため directory の自動列挙は不採用
   adoptedPluginSkills = {
     orca = {
       source = pluginSources.orca;
@@ -69,19 +67,6 @@ let
       name: lib.count (candidate: candidate == name) pluginSkillNames > 1
     ) pluginSkillNames
   );
-  missingPluginSkills = lib.concatMap (
-    sourceName:
-    let
-      source = adoptedPluginSkills.${sourceName};
-    in
-    lib.concatMap (
-      skillId:
-      let
-        skillPath = source.source + "/skills/${skillId}/SKILL.md";
-      in
-      if builtins.pathExists skillPath then [ ] else [ "${sourceName}/${skillId}" ]
-    ) (builtins.attrNames source.skills)
-  ) pluginSourceNames;
   pluginSkills = lib.concatMapAttrs (
     _: source:
     lib.mapAttrs (
@@ -100,10 +85,6 @@ in
     {
       assertion = duplicatePluginSkills == [ ];
       message = "Duplicate Skill IDs across plugins: ${lib.concatStringsSep ", " duplicatePluginSkills}";
-    }
-    {
-      assertion = missingPluginSkills == [ ];
-      message = "Adopted plugin Skills must contain SKILL.md: ${lib.concatStringsSep ", " missingPluginSkills}";
     }
   ];
 }

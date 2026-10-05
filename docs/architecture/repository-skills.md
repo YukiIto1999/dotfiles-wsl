@@ -1,57 +1,113 @@
 # 外部リポジトリ所有Skillの構成
 
-**読み手:** 外部リポジトリが所有するSkillをこのホストのエージェントへ取り込む設計と契約を理解・保守する人。
+**読み手:** 外部Skillの登録と供給元の差替を保守する人が、作業中に契約を参照する。
 
-外部リポジトリが所有するSkillは、owner repositoryから直接取得する。`dotfiles-wsl`は固定したコミットから採用対象を登録し、`dotfiles.skills.registry`でローカルSkillと単一の共通契約へ統合する。エージェントクライアントはこの有効集合を消費するだけであり、取得経路の選択やプラグイン構造の差異を意識しない。
+外部Skillもlocal Skillも、`dotfiles.skills.registry`の一つのentryとして登録する。
+clientは`dotfiles.skills.enabled`から選んだentryのsourceを配備するだけであり、供給元ごとのregistryや取得処理を持たない。
+Skillのsourceは固定したrepositoryから直接参照し、本文や資材を`skills/<id>/skill/`へ手作業で複製しない。
 
-## 構成と責務
+## 所有
 
 | 主体 | 所有するもの |
 |---|---|
-| Skillのowner repository | `SKILL.md`、リファレンス文書、テストフィクスチャ、実行スクリプト |
-| `flake.nix` | 外部ソースのURLとコミットリビジョンの固定、`pluginSources`への受け渡し |
-| `skills/plugins/` | 採用表に基づく外部Skillの登録、source存在確認、同名拒否 |
-| `skills/module.nix` | 選択したCapabilityとSkill間依存から有効なSkill集合を導出 |
-| `agents/clients/<id>` | 有効なSkillを各エージェントの配備先（`~/.claude/skills/` 等）へ投影するアダプタ |
-| `capabilities` | Skillが必要とする外部ツール、プロバイダ、実行時基盤の契約 |
+| Skillのowner repository | `SKILL.md`、reference、script、同梱資材 |
+| `flake.nix`と`flake.lock` | 外部sourceの取得先とrevisionの固定、`specialArgs.pluginSources`への受け渡し |
+| 採用を宣言するNix module | 採用ID、source directory、`requiresCapabilities`、`requiresSkills` |
+| `skills/plugins/module.nix` | 既存pluginの採用表と、表内のID衝突の拒否 |
+| `skills/module.nix` | 最終registryのsourceと依存の検査、配備可能なSkill集合の導出 |
+| `agents/clients/<id>` | 有効なSkillを各clientの配備先へ投影するadapter |
+| `capabilities` | Skillが必要とする外部tool、provider、実行時基盤の契約 |
 
-ツールの操作マニュアルや外部標準の手順は、仕様を決定するowner repository側に置く。中央リポジトリへ本文を手作業で複製すると、変更理由とリビジョンが乖離してメンテナンス負債となるため、外部Skillはソースリポジトリから宣言的に参照する。
-
-依存の方向は次に固定する。外部リポジトリから`dotfiles-wsl`への逆依存、およびCapabilityからSkillやエージェントへの逆依存は作らない。
+依存metadataはupstreamの本文から自動生成せず、取込側のNix module ownerが本文、reference、scriptを読んで宣言する。
+上流がmetadataを持たないことは、依存がない根拠にはならない。
+空の依存listも、取込側が確認した宣言であり、未指定時のdefaultではない。
+sourceの更新や差替では、本文と資材だけでなくこの宣言も見直す。
 
 ```text
 source:  dotfiles-wsl -> pinned owner repository
 runtime: Agent -> Skill -> Capability -> provider/runtime
 ```
 
-## 外部ソースの登録契約
+## 登録契約
 
-外部ソースを追加・保守する際は、`flake.nix`で取得したソース実体を`specialArgs.pluginSources`へ渡す。`skills/plugins/module.nix`の採用表がsourceごとの実体、採用するSkill ID、および各Skillの`requiresCapabilities` / `requiresSkills`を宣言し、レジストリには採用表に記載したSkillだけを登録する。したがって、upstreamにSkillが追加されても採用表を変更しない限り登録対象は変わらない。
+| Field | 契約 |
+|---|---|
+| registry key | 安全なkebab-caseのSkill ID |
+| `source` | 直下に通常fileの`SKILL.md`があるdirectoryへのNix path |
+| `requiresCapabilities` | 取込ownerが宣言する既知のCapability IDのlist。明示必須 |
+| `requiresSkills` | 取込ownerが宣言する既知のSkill IDのlist。明示必須 |
+| `enabled` | resolved Capabilityと推移的なSkill依存を満たすIDから導くread-onlyの一覧 |
 
-外部ソース内の採用Skillは、以下の標準契約を満たす必要がある。
+`SKILL.md`のfrontmatterにはregistry IDと一致する`name`と、空でない`description`が必要である。
+sourceのdirectory名やupstreamでの配置は自由であり、全repositoryに`skills/<id>/`を要求しない。
+source directoryを直接渡すため、同梱のreferenceやscriptもそのまま使え、本文を変換するadapterは不要である。
+repository内の別directoryを相対参照するSkillでは、その参照先を含む固定sourceを保ち、Skill directoryだけを切り出さない。
 
-- 採用表にSkill IDと依存宣言を明記する。
-- ソースリポジトリのルート直下に`skills/<id>/SKILL.md`の標準配置を持つ。
-- Skill IDは安全なkebab-caseで命名されている。
-- ソースをまたぐ同一Skill IDが存在せず、名前衝突が排除されている。
+同じ優先度で同IDのsourceを複数moduleが宣言すると、同じpathを指定していてもNix optionのmergeが失敗する。
+暗黙の後勝ちや同名aliasを使わず、意図した差替には既存の`lib.mkForce`を使う。
+同じ優先度の差替が二つある場合も拒否する。
 
-## 導入済み外部ソース
+## 外部sourceの追加
 
-現在、以下の2つの外部リポジトリからSkillを取り込んでいる。採用するSkillの集合と依存宣言は、[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表を唯一の正本とする。
+1. upstreamの採用するrevisionとlicenseを確認し、固定したflake inputを`flake.nix`と`flake.lock`で宣言する。
+2. そのsource実体を`specialArgs.pluginSources`へ渡し、`SKILL.md`と必要な資材があるdirectoryを選ぶ。
+3. 取込を所有するmoduleで、採用IDの`dotfiles.skills.registry`にsourceと二つの依存listを明示する。
+4. 同IDが既にある場合は、別entryを追加せず次節の差替として扱う。
 
-### Orca
-Orcaデスクトップ環境および内蔵ツールの操作手順を提供する。採用対象と依存宣言は採用表で管理する。`linear-tickets`は`orca-linear`のlegacy aliasであり、同じ判断を二つのSkillが所有してroutingが割れるため採用しない。
+既存pluginの追加採用は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表を変更する。
+この表が使う`skills/<id>/`は既存sourceの配置であり、registryの共通要件ではない。
+upstreamにSkillが増えても、採用moduleが登録するまで配備対象にはならない。
+Skill登録時の自動download、更新時の無固定取得、新しいsource registryは導入しない。
+sourceをNix storeへ取り込む前に、秘密情報、認証資格情報、非公開の作業記録が含まれないことを取込ownerが確認する。
+その内容検査をsource存在確認で代替せず、自動検出されるともみなさない。
 
-### architecture-standard
-ソフトウェア設計およびアーキテクチャ標準の最新規範を参照・適用する。標準本文は手元の配備ツリー（`<standard-root>`）から相対参照で直接読み取り、過去のコミット探索やローカルの固定パスを仮定しない。採用対象と依存宣言は採用表で管理し、`standard-feedback`だけが`github-resources`を要求する。
+## 同IDの差替
 
-標準自体を変える`standard-update`と監査する`standard-audit`は、標準の作業checkoutを作業directoryにして動く運用入口であり、`skills/<id>/`の標準配置も持たないため採用しない。別のrepositoryのsessionから標準を変える場合は、`environment-design`が作業checkoutの`standard-update`へ渡し、標準のpushとこのrepositoryの版の更新を経て配備する。
+差替先の固定sourceとfrontmatterのIDを確認し、取込ownerが依存宣言を見直してから、採用するmoduleでentry全体を`lib.mkForce`にする。
+entry全体を置き換えると、旧sourceの依存listが差替先へ暗黙に残らない。
+clientやroutingが使うIDは維持され、本文と資材の供給元だけを交換できる。
 
-## 拒否条件
+次のmoduleは、同梱fixtureを使ってlocalの`bug-analysis`を同IDの別sourceへ差し替える再現例である。
+空の依存listはこのfixtureの宣言であり、実際の上流Skillについて依存がないと主張する例ではない。
+例の相対pathは`profiles/hosts/`のhost moduleへ書く場合の指定である。
 
-以下の状態は評価およびビルド検査で拒否される。
+```nix
+{ lib, ... }: {
+  dotfiles.skills.registry.bug-analysis = lib.mkForce {
+    source = ../../skills/fixtures/external-source/procedures/bug-analysis;
+    requiresCapabilities = [ ];
+    requiresSkills = [ ];
+  };
+}
+```
 
-- 採用Skillのディレクトリまたは直下の`SKILL.md`が存在しない。
-- ソースをまたいで同一のSkill IDが重複している。
-- レジストリに存在しないCapabilityを依存として参照している。
-- 秘密情報、認証資格情報、またはプライベートな作業記録をSkillソースとしてNix storeへ取り込んでいる。
+実際の差替では、このsourceを固定したupstreamのSkill directoryへ置き換え、確認した依存listを同じentryへ宣言する。
+依存契約を変えないと取込ownerが確認した場合は、entryの`source`だけを`lib.mkForce`で置き換えることもできる。
+たとえばlocalの`grilling`を元の外部Skillへ戻す場合は、固定したMatt Pocock repositoryの`skills/productivity/grilling/`をsourceに選び、licenseと本文、依存を見直す。
+上流のnameが異なる場合は本文を書き換えて同IDを装わず、ID変更に伴うcallerとroutingの変更として扱う。
+元に戻すときは差替定義を取り除くか、元の採用moduleが指すsourceへ明示的に戻す。
+外部Skillへの恒久切替で旧local本文が不要になった場合は、旧登録と本文を削除し、同IDの配備経路を二つ残さない。
+
+## 現在のplugin
+
+採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orcaとarchitecture-standardの固定sourceを使う。
+Orcaのlegacy aliasである`linear-tickets`は`orca-linear`とroutingを分けるため採用しない。
+architecture-standardの規範本文は配備済みsourceから読み、`standard-feedback`は`github-resources`を要求する。
+
+標準自体を変える`standard-update`と監査する`standard-audit`は、標準の作業checkoutを使う運用入口であり、このhostへの採用対象ではない。
+別repositoryから標準を変えるときは、`environment-design`から標準の作業checkoutへ渡す。
+
+## 検査
+
+[`skills/checks.nix`](../../skills/checks.nix)の`skill-source-contract`は、外部sourceの直接採用、同IDのentry差替、依存metadataの切替、client共有sourceへの反映、referenceとscriptの利用を検査する。
+不存在source、fileをsourceにした指定、directoryの`SKILL.md`、不正ID、未知の依存、metadata未指定、無指定の同ID衝突、競合する差替も拒否する。
+frontmatterとIDの不一致は、このcheckと`skill-frontmatter-contract`が検査する。
+sourceの検査は優先度を解決した最終registryに対して行い、不採用になった旧sourceを別経路で検査しない。
+
+```sh
+nix build .#checks.x86_64-linux.skill-source-contract \
+  .#checks.x86_64-linux.skill-frontmatter-contract \
+  .#checks.x86_64-linux.skill-capability-gating
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
+```
+

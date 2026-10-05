@@ -1,53 +1,117 @@
-# SOPS の鍵
+# SOPSの鍵
 
-**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+**読み手:** secretを編集する運用者と、新しいホストや鍵を登録する運用者が、作業中に読む。
 
-secret は `secrets/sops/assets/secrets.json` に age で暗号化して置く。復号できるのは各 host の鍵と recovery 鍵で、`secrets/sops/assets/.sops.yaml` がその recipient を宣言する。複数の host が同じ暗号文を共有するため、host 鍵は host の数だけ recipient に並ぶ。
+secretは`secrets/sops/assets/secrets.json`にageで暗号化して置き、`secrets/sops/assets/.sops.yaml`がrecipientを宣言する。
+複数のホストが同じ暗号文を共有するため、併用するhost keyとrecovery keyをrecipientとして残す。
 
 ## 鍵の置き場
 
-| 鍵 | 置き場 | 権限 |
+| 対象 | 置き場 | ownerとmode |
 |---|---|---|
-| host | `/var/lib/sops-nix/key.txt` | root のみ、0400 |
-| recovery | machine の外 | 運用者が保管する |
+| host key directory | `/var/lib/sops-nix` | root:root、0700、symlink不可 |
+| host key | `/var/lib/sops-nix/key.txt` | root:root、0400、symlink不可 |
+| recovery key | ホスト外の外部媒体 | 運用者が保管し、登録時だけ読み取り専用で参照 |
 
-host 鍵は sops-nix が activation 時に読む。**home や repo に複製を置かない。**複製があると、その場所を読めるすべての process が全 secret を復号できる。host 鍵は host ごとに生成し、他の host へ複製しない。
+host keyはsops-nixがactivation時に読む。
+home、repository、一時directoryへ秘密鍵の複製を置かず、rootだけが読める鍵による操作はsudoを介する。
+host keyはホストごとに生成し、別のホストへコピーしない。
+全host keyを失った場合に備え、recovery keyをホスト外で保管する。
 
-recovery 鍵は host 鍵を失ったときの唯一の復元手段になる。**machine の中に置くと復元手段にならない。**
+## secretの編集
 
-## secret を編集する
-
-checkout の root で実行する。
+checkoutのrootで、flakeが固定したSOPSを取得して編集する。
 
 ```sh
-sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops --config secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
+SOPS_PACKAGE=$(nix build --no-link --print-out-paths .#sops)
+sudo env SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
+  "$SOPS_PACKAGE/bin/sops" --config secrets/sops/assets/.sops.yaml \
+  secrets/sops/assets/secrets.json
+git diff --check
+git diff -- secrets/sops/assets/secrets.json
+git add -- secrets/sops/assets/secrets.json
+git commit -m 'chore: 暗号化secretsの更新'
 dotfiles-rebuild
 ```
 
-`secrets.json` は flake 経由で store に入るので、編集しただけでは `/run/secrets` に反映されない。rebuild が要る。
+平文を別ファイル、shell history、Git patch、ログへ書かない。
+通常の値変更では`updatekeys`を使わない。
+`secrets.json`を編集しただけでは`/run/secrets`に反映されず、通常のrebuildにはcommitが必要である。
 
-## 新しい host を登録する
+## 新しいhostの登録
+
+対象hostのprofileは、鍵の登録前にcommitしたsourceとして用意する。
+新しいホストのcheckoutのrootで、同じflakeのageとSOPSを取得する。
 
 ```sh
-age-keygen -o host.key                       # 新 host で生成する
-sudo install -m 0400 -o root -g root host.key /var/lib/sops-nix/key.txt
+AGE_PACKAGE=$(nix --extra-experimental-features 'nix-command flakes' \
+  build --no-link --print-out-paths .#age)
+SOPS_PACKAGE=$(nix --extra-experimental-features 'nix-command flakes' \
+  build --no-link --print-out-paths .#sops)
 ```
 
-生成した公開鍵を `secrets/sops/assets/.sops.yaml` の `keys` に `host-<host-id>` anchor として追加し、`creation_rules` から参照する。同じ host ID の [`profiles/hosts/`](../../profiles/hosts) profile を用意し、既存の鍵を持つ machine で再暗号化する。
+root専用のdirectory内で直接鍵を生成する。
+既存の鍵やsymlinkがある場合は上書きせず止まるため、既存鍵の交換は下の復旧手順を使う。
+
+```sh
+sudo sh -c '
+  set -eu
+  test ! -L /var/lib/sops-nix
+  install -d -m 0700 -o root -g root /var/lib/sops-nix
+  test ! -e /var/lib/sops-nix/key.txt
+  test ! -L /var/lib/sops-nix/key.txt
+  umask 077
+  "$1/bin/age-keygen" -o /var/lib/sops-nix/key.txt
+  chmod 0400 /var/lib/sops-nix/key.txt
+' sh "$AGE_PACKAGE"
+sudo stat -c '%U:%G %a %n' /var/lib/sops-nix /var/lib/sops-nix/key.txt
+sudo "$AGE_PACKAGE/bin/age-keygen" -y /var/lib/sops-nix/key.txt
+```
+
+`stat`の結果がdirectoryは`root:root 700`、鍵は`root:root 400`であることを確認する。
+表示した公開鍵を`secrets/sops/assets/.sops.yaml`の`keys`に`host-<host-id>`anchorとして追加し、`creation_rules`から参照する。
+秘密鍵の内容は表示しない。
+
+読み取り専用の外部媒体からrecovery keyを参照し、暗号文のrecipientを更新する。
+続いて新しいhost keyで実際に復号できることを確認する。
 
 ```sh
 SOPS_AGE_KEY_FILE=/media/offline/recovery-key.txt \
-  sops --config secrets/sops/assets/.sops.yaml updatekeys secrets/sops/assets/secrets.json
+  "$SOPS_PACKAGE/bin/sops" --config secrets/sops/assets/.sops.yaml \
+  updatekeys secrets/sops/assets/secrets.json
+sudo env SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
+  "$SOPS_PACKAGE/bin/sops" --config secrets/sops/assets/.sops.yaml \
+  decrypt secrets/sops/assets/secrets.json > /dev/null
 ```
 
-併用する host の recipient は外さない。外すのは退役した host の分だけで、外す前に残す鍵で復号できることを確かめる。**確かめる前に外すと全 secret を失う。**
+復号が成功するまで旧recipientを外さない。
+併用するhostのrecipientは、登録後も残す。
 
 ```sh
-SOPS_AGE_KEY_FILE=host.key \
-  sops --config secrets/sops/assets/.sops.yaml decrypt secrets/sops/assets/secrets.json > /dev/null
+git diff --check
+git diff -- secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
+git status --short
 ```
+
+変更は上記の暗号化済みファイル二つだけにし、復号の確認後にrecovery keyの外部媒体を取り外す。
+初回構築ではまだGit identityがないため、差分を保持して[bootstrap](getting-started.md#bootstrap)へ進み、boot generationへの再ログイン後に二つのファイルを同じcommitへ記録する。
+そのcommitを終えてからimage同期と通常のrebuildへ進む。
+既にGit identityを配備したホストで登録する場合は、確認後に二つのファイルを同じcommitへ記録し、併用するホストへsourceを同期する。
+登録操作は自動commitやdirty拒否の例外を使わない。
+
+## 鍵を失った場合
+
+鍵を失った新しいホストでは、profileと暗号文をcloneし、上の手順で新しいhost keyを生成する。
+recovery keyで新しい公開鍵をrecipientへ追加し、新しいhost keyによる復号を確認してからbootstrapする。
+失われた旧host keyのrecipientを外す場合も、先に残す鍵による復号を確認する。
+漏洩した鍵を退役させる場合は、recipientを外すだけで既に取得されたsecretの平文を無効化できないため、対応するcredentialも失効させて交換する。
+
+recovery keyも失い、復号できるhost keyも残っていない場合は、暗号文からsecretを復元できない。
+SOPS鍵の再登録はsystem generationやcontainerの永続dataのrestoreではないため、それぞれのbackupを別に扱う。
 
 ## 検査
 
-`sops-policy` が、`keys` の宣言、`creation_rules` の参照、暗号文の recipient の三者一致、anchor と recipient の重複の不在、recovery anchor がちょうど一つで `host-` anchor が一つ以上あること、登録済み host に対応する anchor があることを見る。`sops-secret-file-mode` が home に置く secret の mode と owner を見る。
+`sops-policy`は、`keys`の宣言、`creation_rules`の参照、暗号文のrecipientの一致と重複の不在を検査する。
+recovery anchorがちょうど一つ、`host-`anchorが一つ以上あり、登録済みhostのanchorが存在することも検査する。
+`bootstrap-age-key`は鍵のownerとmode、symlink拒否、実際のage/SOPS復号、初回commitから通常のrebuildへ進む継続手順を検査する。
+これらのfixtureは一時directoryを使い、実機の鍵、profile、service、WSLを変更しない。

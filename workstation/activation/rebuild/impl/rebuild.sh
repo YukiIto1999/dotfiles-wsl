@@ -1,14 +1,13 @@
-# NixOS の generation と profile が transaction を持つ。ここはその上に層を作らず、
-# WSL 固有の再起動判定と、flake を汚れたまま適用しないことだけを足す
 usage() {
   cat <<'USAGE'
 usage:
-  dotfiles-rebuild [--plan]
+  dotfiles-rebuild [--rollback] [--plan]
 
-Build the flake and switch to it. NixOS keeps the previous generation, so a failed
-activation leaves the running system on the profile it already had; run the command
-again after fixing the cause. Use `nixos-rebuild --rollback switch` to step back.
+Build the committed flake and switch to it, or select the previous system generation
+with --rollback. Both actions check the working tree and the WSL restart requirement.
 With --plan, print what would change and exit without switching.
+A failed activation can leave the profile and running services in different states;
+inspect the system before retrying or rolling back.
 USAGE
 }
 
@@ -18,25 +17,60 @@ die() {
 }
 
 plan_only=0
-case "${1-}" in
-  --plan) plan_only=1 ;;
-  --help | -h) usage; exit 0 ;;
-  "") ;;
-  *) usage >&2; exit 2 ;;
-esac
+rollback=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --plan)
+      ((plan_only == 0)) || { usage >&2; exit 2; }
+      plan_only=1
+      ;;
+    --rollback)
+      ((rollback == 0)) || { usage >&2; exit 2; }
+      rollback=1
+      ;;
+    --help | -h)
+      [[ $# -eq 1 && $plan_only -eq 0 && $rollback -eq 0 ]] || { usage >&2; exit 2; }
+      usage
+      exit 0
+      ;;
+    *) usage >&2; exit 2 ;;
+  esac
+  shift
+done
 
 dotfiles=@configuredDotfiles@
+system_profile="@systemProfilePath@"
+distro_name=@distroName@
 cd "$dotfiles" || die 2 "cannot enter $dotfiles"
 
-# flake は tracked file しか見ない。未 stage の変更は無視されるので、気づかずに
-# 古い内容を配備しないよう先に止める
-if [[ -n $(git status --porcelain --untracked-files=no) ]]; then
-  die 2 "commit or stage the working tree before rebuilding"
-fi
+working_tree=$(git status --porcelain --untracked-files=no) ||
+  die 2 "could not inspect the working tree"
+[[ -z $working_tree ]] || die 2 "commit the working tree before rebuilding"
 
-candidate=$(nix build --no-link --print-out-paths \
-  "$dotfiles#nixosConfigurations.@hostName@.config.system.build.toplevel") ||
-  die 2 "candidate build failed"
+if ((rollback)); then
+  generations=$(@sudoCommand@ nix-env --list-generations --profile "$system_profile") ||
+    die 2 "could not list system generations"
+  previous_generation=
+  current_found=0
+  while read -r generation metadata; do
+    [[ $generation =~ ^[0-9]+$ ]] || continue
+    if [[ $metadata == *"(current)"* ]]; then
+      current_found=1
+      break
+    fi
+    previous_generation=$generation
+  done <<< "$generations"
+  [[ $current_found -eq 1 && -n $previous_generation ]] ||
+    die 2 "no previous system generation is available"
+  candidate=$(readlink -e "$system_profile-$previous_generation-link") ||
+    die 2 "could not resolve the previous system generation"
+  rebuild_args=(switch --rollback)
+else
+  candidate=$(nix build --no-link --print-out-paths \
+    "$dotfiles#nixosConfigurations.@hostName@.config.system.build.toplevel") ||
+    die 2 "candidate build failed"
+  rebuild_args=(switch --flake "$dotfiles#@hostName@")
+fi
 
 restart_plan=$(@wslRestartRequired@ --plan "$candidate") ||
   die 2 "could not classify the restart requirement"
@@ -47,13 +81,19 @@ if ((plan_only)); then
   exit 0
 fi
 
-@sudoCommand@ @nixosRebuild@ switch --flake "$dotfiles#@hostName@" ||
-  die 2 "nixos-rebuild switch failed; the previous generation is still active"
+if ! @sudoCommand@ @nixosRebuild@ "${rebuild_args[@]}"; then
+  printf 'Inspect the system profile, running system and failed services before retrying:\n' >&2
+  printf '  readlink -f %s\n' "$system_profile" >&2
+  printf '  readlink -f /run/current-system\n' >&2
+  printf '  systemctl --failed\n' >&2
+  printf '  journalctl -b -p err\n' >&2
+  die 2 "nixos-rebuild ${rebuild_args[*]} failed; activation may be partially applied"
+fi
 
 case $restart_plan in
   switch) ;;
   *)
     printf 'WSL restart required. From Windows:\n' >&2
-    printf '  wsl.exe --terminate %s\n' "@distroName@" >&2
+    printf "  wsl.exe --terminate '%s'\n" "${distro_name//\'/\'\'}" >&2
     ;;
 esac

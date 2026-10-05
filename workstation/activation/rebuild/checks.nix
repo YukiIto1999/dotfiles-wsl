@@ -15,17 +15,44 @@ let
     fi
     exit 2
   '';
-  # bootstrap は generation が無い時点で走るので、rebuild を差し替えて呼び出しを記録する
   fakeRebuild = pkgs.writeShellScriptBin "nixos-rebuild" ''
+    [[ ''${NIX_CONFIG:-} == *'experimental-features = nix-command flakes'* ]]
     printf '%q ' "$@" >> "$BOOTSTRAP_CALL_LOG"
     printf '\n' >> "$BOOTSTRAP_CALL_LOG"
-    if [[ -n ''${BOOTSTRAP_REBUILD_READY:-} ]]; then
-      : > "$BOOTSTRAP_REBUILD_READY"
-      while [[ ! -e $BOOTSTRAP_REBUILD_RELEASE ]]; do
-        sleep 0.01
-      done
-    fi
   '';
+  rebuildDependencies = pkgs.runCommand "rebuild-test-dependencies" { } ''
+    mkdir -p "$out/bin"
+    cp ${./fixtures/rebuild-dependency.sh} "$out/dependency"
+    chmod u+w "$out/dependency"
+    substituteInPlace "$out/dependency" --replace-fail '#!/usr/bin/env bash' '#!${pkgs.bash}/bin/bash'
+    chmod +x "$out/dependency"
+    for name in nix nix-env nvd sudo nixos-rebuild; do
+      ln -s ../dependency "$out/bin/$name"
+    done
+  '';
+  testRestartPlanner = pkgs.writeShellScript "test-restart-planner" ''
+    exec "$REBUILD_RESTART_PLANNER" \
+      --booted-system "$REBUILD_BOOTED_SYSTEM" \
+      --current-system "$REBUILD_RUNNING_SYSTEM" "$@"
+  '';
+  testRebuildScript = pkgs.replaceVars ./impl/rebuild.sh {
+    configuredDotfiles = ''"$REBUILD_CHECKOUT"'';
+    hostName = "fixture-host";
+    distroName = lib.escapeShellArg "Fixture Distro";
+    systemProfilePath = "$REBUILD_SYSTEM_PROFILE";
+    nixosRebuild = lib.escapeShellArg "${rebuildDependencies}/bin/nixos-rebuild";
+    sudoCommand = lib.escapeShellArg "${rebuildDependencies}/bin/sudo";
+    nvd = lib.escapeShellArg "${rebuildDependencies}/bin/nvd";
+    wslRestartRequired = lib.escapeShellArg testRestartPlanner;
+  };
+  testRebuild = pkgs.writeShellApplication {
+    name = "dotfiles-rebuild-test";
+    runtimeInputs = with pkgs; [
+      coreutils
+      git
+    ];
+    text = ''exec ${pkgs.bash}/bin/bash -euo pipefail ${testRebuildScript} "$@"'';
+  };
 in
 {
   wsl-restart-policy = pkgs.runCommandLocal "check-wsl-restart-policy" { } ''
@@ -171,17 +198,21 @@ in
     touch $out
   '';
 
-  # 入口が nixos-rebuild を直接呼ばせないことだけを見る。generation と rollback は
-  # NixOS が持つので、その上に検査を積まない
   rebuild-entrypoint =
-    pkgs.runCommandLocal "check-rebuild-entrypoint" { nativeBuildInputs = [ pkgs.gnugrep ]; }
+    pkgs.runCommandLocal "check-rebuild-entrypoint"
+      {
+        nativeBuildInputs = with pkgs; [
+          bash
+          coreutils
+          git
+          gnugrep
+        ];
+      }
       ''
-        set -euo pipefail
-        guard=${lib.getExe hostConfig.dotfiles.platform.cli.commands.rebuild}
-        grep -q 'nixos-rebuild' "$guard"
-        grep -q 'git status --porcelain' "$guard"
-        grep -q 'wsl-restart-required\|wslRestartRequired' "$guard" || \
-          grep -q -- '--plan' "$guard"
+        bash ${./fixtures/rebuild-test.sh} \
+          ${lib.getExe testRebuild} \
+          ${rebuildDependencies} \
+          ${lib.getExe wslRestartRequired}
         touch $out
       '';
 
@@ -192,19 +223,12 @@ in
           age
           bash
           coreutils
-          diffutils
           git
           gnugrep
-          gnused
           sops
-          util-linux
         ];
       }
       ''
-        # bootstrap は generation が無い時点で走るので config を読めず、鍵 path を
-        # literal で持つ。二つの転記がずれると鍵を別の場所へ置く
-        grep -Fq ${lib.escapeShellArg hostConfig.sops.age.keyFile} ${./impl/bootstrap.sh}
-
         bash ${./fixtures/age-key-test.sh} \
           ${./impl/bootstrap.sh} \
           ${fakeRebuild}

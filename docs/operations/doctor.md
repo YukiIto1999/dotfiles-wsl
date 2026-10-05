@@ -53,7 +53,12 @@ doctor は directory の容量を再帰的に数えない。
 巨大な build cache の `du` は負荷の下で期限内に終わらず、それ自体が I/O を足すためである。
 Linux root の空きは `resource/root-filesystem` の使用率で見る。
 
-doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、WSL の root VHD、Windows drive、Windows committed memory、swap topology を観測対象とする。Windows drive は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。Windows committed memory は PowerShell から使用率を得る。root VHD は root disk の容量を `resource/wsl-vhd/capacity`、PowerShell で読んだ Windows 側の `.wslconfig` の VHD 設定を `resource/wsl-vhd/wslconfig` に出す。
+doctor は cleanup、GC、service 再起動、trim を実行しない。
+Linux root、WSL の root VHD、Windows drive、Windows committed memory、swap topology を観測対象とする。
+Windows drive の観測対象は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。
+未 mount の drive の空きと VHDX の配置先は、この結果だけでは分からない。
+Windows committed memory は host が選んだ PowerShell から使用率を得る。
+root VHD は root disk の容量を `resource/wsl-vhd/capacity`、PowerShell で読んだ Windows 側の `.wslconfig` の VHD 設定を `resource/wsl-vhd/wslconfig` に出す。
 
 ## 結果
 
@@ -76,11 +81,98 @@ systemctl --failed
 journalctl -u UNIT -n 30
 ```
 
+## host の選択
+
+別 PC では [`profiles/hosts/`](../../profiles/hosts) の対象 host で、Windows の登録名と資源条件を選ぶ。
+option の正本は WSL、storage、Nix、stability の各 owner module であり、現在 PC の DNS、G:、VM 資源、VHD、Nix 並列度と容量 reserve は `profiles/hosts/nixos.nix` に限って宣言する。
+主 user の既定 `nixos` と WSL の登録名の既定 `NixOS` は独立している。
+
+| option | 既定と用途 |
+|---|---|
+| `dotfiles.workstation.wsl.distroName` | `NixOS`、Windows に登録した distribution 名 |
+| `wsl.nameservers` | `[]`、WSL の生成 DNS を使用、必要な host だけ resolver を明示 |
+| `wsl.extraDrives` | `[]`、必要な host だけ `["G:"]` 等を `/mnt/g` 等へ非阻害 automount |
+| `wsl.powershellCommand` | `/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe`、Windows command の入口 |
+| `wsl.windowsConfig.memoryGiB`、`processors`、`swapGiB` | `null`、WSL 既定を維持、指定値だけ Windows 準備用 template に出力 |
+| `storage.vhd.sizeGiB`、`sparse` | `256` GiB と `false`、作成予定の VHD と doctor の期待値 |
+| `storage.journal.maximumGiB` | `1` GiB、journald の容量上限 |
+| `nix.maxJobs`、`cores` | 各 `1`、同時 build 数と各 build の CPU 数 |
+| `nix.minimumFreeGiB`、`targetFreeGiB` | `4` GiB と `8` GiB、store 自動 GC の開始値と目標値 |
+| `swap.zramMemoryPercent`、`minimumTotalGiB` | RAM の `25`% と合計 `1` GiB、zram と swap の最低条件 |
+
+表の `wsl`、`storage`、`nix`、`swap` はすべて `dotfiles.workstation` の配下である。
+Nix の目標 reserve は VHD 容量より小さくし、VM processor 数を宣言する場合は `maxJobs * cores` がその数を超えないようにする。
+Windows の RAM、CPU、VHDX 配置先の空き、pagefile と disk swap を先に確認し、VM 上限と VHD 上限を host に合わせる。
+VHD 上限は Windows drive の空き容量を予約せず、sparse を明示しても host drive 枯渇の保護が不要になるわけではない。
+zram と Agent の資源保護は維持し、Windows の template 値を稼働中 VM の実 RAM とみなさない。
+
+## Windows の準備
+
+初回 system closure の適用前には、checkout で対象 host の template を表示する。
+
+```sh
+HOST=nixos
+nix eval --raw ".#nixosConfigurations.$HOST.config.dotfiles.workstation.wsl.windowsConfigTemplate"
+```
+
+適用済み host では `dotfiles-wsl-config` が同じ本文を表示し、`--help` で用途を確認できる。
+どちらの入口も Windows の file を上書きせず、WSL の停止、VHD の resize、再作成を実行しない。
+Windows の `%UserProfile%\.wslconfig` を backup してから表示した key を既存の対応 section へ統合し、重複 key を除く。
+無関係な既存 key と他の distribution の必要条件を消さず、`memory`、`processors`、`swap` が WSL2 VM 全体に作用することを確認する。
+`null` の key は template に出ないので、WSL 自動既定へ戻す場合は既存 file の該当 key も手動で除く。
+VHD 設定は次に作る VHD の準備であり、既存 VHD の容量や稼働中 VM の資源上限を変更したことにはならない。
+VM 資源設定の反映に停止が必要な場合は全 distribution の作業を記録し、利用者が停止を選べる保守時に行う。
+反映後は Windows で `wsl --list --verbose` の登録名、Linux で実 RAM、CPU 数、swap を確認し、doctor の容量と資源結果を合わせて判断する。
+
+```sh
+free -h
+nproc --all
+swapon --show
+dotfiles-doctor
+```
+
+## Windows 相互操作
+
+`wslview [--] URL_OR_PATH` は一つの URL、Windows 絶対 path、既存 Linux file または directory を Windows の既定 application で開く。
+Linux path は `realpath` で絶対 path にし、`wslpath -w` で drive path または distribution の UNC path に変換する。
+Windows の drive path と UNC path、URI scheme のある URL はそのまま渡す。
+`file:` URL は Windows 側で解釈する URL であり、Linux の `file:///home/...` を自動変換する入口ではないので、Linux file は path で指定する。
+空白、日本語、引用符、`&`、`$`、`;` を含む target は一つの引数に引用し、本文は UTF-8 の Base64 として Windows に渡す。
+target を PowerShell の code や application の追加引数として評価しない。
+先頭が `-` の path は `--` の後に置き、application 引数は受け付けない。
+
+| 終了 status | 意味 |
+|---|---|
+| `0` | Windows が起動要求を受理、または `--help` が成功 |
+| `2` | target 不足、複数 target、空文字、改行を含む target、不明 option |
+| `1` | Linux path が存在しない、path 変換失敗、Windows の起動処理が例外 |
+| その他の非ゼロ | PowerShell の起動失敗や Windows process の終了 status |
+
+`0` だけでは browser の読込み、file の表示、Windows 側の権限を保証しない。
+対話的な実機 smoke は、対象 launcher の絶対 path を指定して明示的に実行する。
+
+```sh
+bash workstation/wsl/impl/smoke-windows.sh "$(command -v wslview)" --open
+```
+
+smoke は example.com の URL、特殊文字を含む一時 directory とローカル HTML を開き、引数不正の status も確認する。
+browser の URL、Explorer の directory 名、HTML の表示文字を目で確認して記録し、Enter で一時 file を除く。
+clipboard、Windows 設定、既存 VHD、WSL session の状態は変更しない。
+回帰 check `wslview-behavior` は URL、Windows path、Linux path、特殊文字、余分な引数、変換失敗、Windows 失敗 status を検査し、`wsl-host-policy-contract` は別 PC の DNS、drive 不在、登録名、VM 資源、VHD、Nix 設定と template を検査する。
+
+Explorer は `wslview DIRECTORY`、path 変換は既存の `/bin/wslpath` で足りるため、専用 wrapper は増やさない。
+clipboard を使う場合も Windows の既存 `clip.exe` と PowerShell の `Get-Clipboard` を明示的に呼べるため、汎用 Windows 操作 framework は設けない。
+clipboard の読書きは内容を変更し得るので smoke から外し、利用する時に日本語と改行の往復を別途確認する。
+
 ## WSL の VHD が宣言と異なる場合
 
-root VHD の容量上限と sparse 設定は、Windows 側の `%UserProfile%\.wslconfig` が VHD の作成時にだけ与える。repository は `.wslconfig` を配らず、意図した値を [`workstation/storage/module.nix`](../../workstation/storage/module.nix) の `wslVhd` に宣言する。sparse VHD が Windows drive を使い切ると root の ext4 が壊れるため、どちらの fail も放置しない。
+root VHD の容量上限と sparse 設定の期待値は、`dotfiles.workstation.storage.vhd` から Windows 準備用 template と doctor へ導く。
+Windows 側の `%UserProfile%\.wslconfig` の `defaultVhdSize` と `sparseVhd` は新規 VHD の作成条件であり、既存の root VHD の sparse 属性までは doctor が検査していない。
+既定の non-sparse 方針を維持し、Windows drive の空き率と容量差の fail を確認する。
 
-`resource/wsl-vhd/wslconfig` が fail の場合は、`.wslconfig` の `[wsl2]` の `defaultVhdSize` と `[experimental]` の `sparseVhd` を宣言値に合わせる。WSL は同じ key の二つ目以降を無視するため、重複した行も消す。この設定は次に作る VHD にだけ効き、既存の VHD と稼働中の session を変えないので、WSL を再起動せずに doctor を再実行する。
+`resource/wsl-vhd/wslconfig` が fail の場合は、Windows 準備入口の本文を確認して、`.wslconfig` の `[wsl2]` の `defaultVhdSize` と `[experimental]` の `sparseVhd` を host の宣言値に合わせる。
+WSL は同じ key の二つ目以降を無視するため、重複した行も消す。
+この設定確認は既存の VHD と稼働中の session を変えないので、WSL を再起動せずに doctor を再実行できる。
 
 `resource/wsl-vhd/capacity` が fail の場合は、root VHD が宣言と異なる設定で作られたか、後から resize されている。root disk の容量を byte 単位で確かめる。
 
@@ -88,13 +180,23 @@ root VHD の容量上限と sparse 設定は、Windows 側の `%UserProfile%\.ws
 lsblk -bdno SIZE "$(findmnt -no SOURCE /)"
 ```
 
-作り直す場合は、先に `.wslconfig` を直し、全 session を止めてから Windows 側で export と import を行う。import は宣言した上限と sparse 設定で新しい VHD を作る。`wsl --unregister` は既存の VHD を削除するため、`BACKUP.tar` を最後まで書けたことを確かめてから実行する。`BACKUP.tar` は使用中の容量を収容できる drive に置く。
+容量差を template の書換えだけで直そうとせず、既存 VHD の維持、保守時の resize、新しい登録名での復元のどれを選ぶかを先に決める。
+移行する場合は全 session を終了できる保守時に Windows 側で export し、元の登録を残したまま別名へ import する。
+次の `Distro` は host option の `distroName` に合わせ、`Backup` と `InstallDir` は十分な空きのある実在する配置先を選ぶ。
 
 ```powershell
-wsl --export NixOS BACKUP.tar
-wsl --unregister NixOS
-wsl --import NixOS INSTALL_DIR BACKUP.tar --version 2
+$Distro = 'NixOS'
+$Backup = 'E:\Backups\NixOS.tar'
+$RecoveryName = 'NixOS-Recovery'
+$InstallDir = 'E:\WSL\NixOS-Recovery'
+wsl --export $Distro $Backup
+if ($LASTEXITCODE -ne 0) { throw 'export failed; original distribution must be preserved' }
+wsl --import $RecoveryName $InstallDir $Backup --version 2
+if ($LASTEXITCODE -ne 0) { throw 'import failed; original distribution must be preserved' }
 ```
+
+export と import の終了 status だけで backup と復旧の成功を断定せず、別名で起動して file、秘密鍵の権限、必要な data、root 容量、doctor の結果を確認する。
+元の VHD を削除する `wsl --unregister` はこの手順に含めず、Windows 設定から破壊的な再作成を自動実行しない。
 
 ## WSLが重い場合
 
@@ -102,10 +204,12 @@ Orcaの描画停止だけでOMP sessionの停止を断定しない。既存termi
 
 WSL内部では定期的な`drop_caches`を実行しない。clean page cacheの一括破棄は、複数のAgentが必要ファイルを同時に再読込みしてVHDのI/Oキューを急増させるためである。メモリ安定化はAgent runtimeの`agents.slice`の上限、zram、kernelの既定のwatermarkとcompactionで行う。
 
-新規sessionだけが停止し、kernel journalに`Relay`の`Waiting for abnormally long accept`や`SessionLeader`の`accept4 failed 110`がある場合も、Relayを定期走査してkillしない。Dドライブの空き、WSL内の空き、ルートの読み書き可否をそれぞれ確認し、稼働中sessionを記録したうえで障害を切り分ける。WSL内の空きだけではVHDXを収容するWindows側の空きは分からない。
+新規 session だけが停止し、kernel journal に `Relay` の `Waiting for abnormally long accept` や `SessionLeader` の `accept4 failed 110` がある場合も、Relay を定期走査して kill しない。
+VHDX を置いた Windows drive の空き、WSL 内の空き、root の読み書き可否をそれぞれ確認し、稼働中 session を記録したうえで障害を切り分ける。
+WSL 内の空きだけでは VHDX を収容する Windows 側の空きは分からない。
 
 ```sh
-df -h / /mnt/d
+df -h /
 findmnt -no SOURCE,OPTIONS /
 ```
 

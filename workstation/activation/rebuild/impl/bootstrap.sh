@@ -7,6 +7,8 @@ die()     { trap - ERR; echo "FATAL: $*" >&2; exit 1; }
 as_user() { sudo -u "${SUDO_USER}" "$@"; }
 step()    { printf '[%d/%d] %s\n' "$((++STEP))" "${TOTAL}" "$*"; }
 
+declare -ar NIX_COMMAND=(nix --extra-experimental-features 'nix-command flakes')
+
 parse_target_host() {
   [[ $# -eq 2 && $1 == --host ]] || return 2
   [[ $2 =~ ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$ ]] || return 2
@@ -21,20 +23,24 @@ checkout_root() {
 }
 
 host_setting() {
-  nix eval --raw --no-write-lock-file \
+  "${NIX_COMMAND[@]}" eval --raw --no-write-lock-file \
     "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.workstation.$1"
 }
 
 container_sync_required() {
-  nix eval --raw --no-write-lock-file \
+  "${NIX_COMMAND[@]}" eval --raw --no-write-lock-file \
     "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.containers.enabled" \
     --apply 'containers: if containers == [ ] then "false" else "true"'
 }
 
 print_completion() {
-  local sync_required
+  local sync_required distro_name checkout_command
   local sync_command=""
 
+  distro_name=$(host_setting wsl.distroName) \
+    || die "failed to evaluate dotfiles.workstation.wsl.distroName for ${TARGET_HOST}"
+  distro_name=${distro_name//\'/\'\'}
+  printf -v checkout_command '%q' "${DOTFILES}"
   sync_required=$(container_sync_required) \
     || die "failed to evaluate container Capability selection for ${TARGET_HOST}"
   if [[ ${sync_required} == true ]]; then
@@ -47,10 +53,24 @@ Bootstrap completed.
 
 Restart this WSL distribution from PowerShell:
 
-  wsl -t NixOS
-  wsl -d NixOS
+  wsl.exe --terminate '${distro_name}'
+  wsl.exe --distribution '${distro_name}'
 
-Then run:
+After logging in as ${SUDO_USER}, review the encrypted enrollment changes:
+
+  cd ${checkout_command}
+  git diff --check
+  git diff -- secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
+  git status --short
+
+Only the two enrollment files may be changed. After reviewing them, use the Git
+identity installed by the boot generation to commit both files:
+
+  git add -- secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
+  git commit -m "chore: hostの鍵登録"
+  git status --short
+
+The tracked working tree must be clean before continuing:
 
 ${sync_command}  dotfiles-rebuild
   dotfiles-doctor
@@ -124,24 +144,25 @@ verify_tracked_flake_files() {
 
 verify_secrets() {
   SOPS_AGE_KEY_FILE="${AGE_KEY}" \
-    nix shell "${FLAKE_REF}#sops" -c sops --config "${SOPS_CONFIG}" -d "${SECRETS_FILE}" >/dev/null \
+    "${NIX_COMMAND[@]}" shell "${FLAKE_REF}#sops" -c sops --config "${SOPS_CONFIG}" -d "${SECRETS_FILE}" >/dev/null \
     || die "${AGE_KEY} cannot decrypt ${SECRETS_FILE}"
   step "secrets decryption verified"
 }
 
 install_agent_clients() {
-  as_user nix run "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents"
+  as_user "${NIX_COMMAND[@]}" run "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents"
   step "agent clients installed from upstream"
 }
 
 install_boot_generation() {
   local upstream_rebuild
-  upstream_rebuild=$(nix build --no-link --print-out-paths --no-write-lock-file \
+  upstream_rebuild=$("${NIX_COMMAND[@]}" build --no-link --print-out-paths --no-write-lock-file \
     "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.system.build.nixos-rebuild")
   [[ ${upstream_rebuild} != *$'\n'* && ${upstream_rebuild} == /nix/store/* &&
     -x ${upstream_rebuild}/bin/nixos-rebuild ]] \
     || die "failed to resolve the pinned nixos-rebuild"
-  "${upstream_rebuild}/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#${TARGET_HOST}" -L
+  NIX_CONFIG="${NIX_CONFIG:-}"$'\nexperimental-features = nix-command flakes' \
+    "${upstream_rebuild}/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#${TARGET_HOST}" -L
   step "nixos-rebuild boot complete"
 }
 

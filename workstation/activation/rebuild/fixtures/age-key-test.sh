@@ -4,18 +4,9 @@ set -euo pipefail
 bootstrap=${1:?bootstrap script path is required}
 test_upstream_rebuild=${2:?test nixos-rebuild package is required}
 test_root=$(cd -- "$(mktemp -d)" && pwd -P)
-bootstrap_pid=
-bootstrap_rebuild_release=
 cleanup() {
   local status=$?
 
-  if [[ -n ${bootstrap_rebuild_release} ]]; then
-    : > "$bootstrap_rebuild_release"
-  fi
-  if [[ -n ${bootstrap_pid} ]]; then
-    kill "$bootstrap_pid" 2>/dev/null || true
-    wait "$bootstrap_pid" 2>/dev/null || true
-  fi
   rm -rf -- "$test_root"
   exit "$status"
 }
@@ -32,13 +23,13 @@ source "$checkout_bootstrap"
 trap - ERR
 
 [[ $(checkout_root "$checkout_bootstrap") == "$DOTFILES" ]]
-SOPS_CONFIG="$DOTFILES/sops/assets/.sops.yaml"
-SECRETS_FILE="$DOTFILES/sops/assets/secrets.json"
+SOPS_CONFIG="$DOTFILES/secrets/sops/assets/.sops.yaml"
+SECRETS_FILE="$DOTFILES/secrets/sops/assets/secrets.json"
 AGE_KEY="$test_root/var/lib/sops-nix/key.txt"
 TARGET_HOST=tcs-a295
 export SUDO_USER
 SUDO_USER=$(id -un)
-export TOTAL=2
+export TOTAL=${#BOOTSTRAP_STAGES[@]}
 export STEP=0
 
 [[ $(parse_target_host --host "$TARGET_HOST") == "$TARGET_HOST" ]]
@@ -51,9 +42,18 @@ if parse_target_host "$TARGET_HOST" >/dev/null 2>&1; then
   exit 1
 fi
 
-mkdir -p "$DOTFILES/sops/assets" "$(dirname -- "$AGE_KEY")"
+mkdir -p "$DOTFILES/secrets/sops/assets" "$(dirname -- "$AGE_KEY")"
+chmod 0700 "$(dirname -- "$AGE_KEY")"
 git -C "$DOTFILES" init -q
-touch "$DOTFILES/flake.nix" "$DOTFILES/flake.lock" "$SOPS_CONFIG" "$SECRETS_FILE" "$AGE_KEY"
+git -C "$DOTFILES" config user.name 'Bootstrap fixture'
+git -C "$DOTFILES" config user.email 'fixture@example.invalid'
+touch "$DOTFILES/flake.nix" "$DOTFILES/flake.lock"
+age-keygen -o "$AGE_KEY" 2>/dev/null
+chmod 0400 "$AGE_KEY"
+recipient=$(age-keygen -y "$AGE_KEY")
+printf 'creation_rules:\n  - age: %s\n' "$recipient" > "$SOPS_CONFIG"
+printf '{"fixture":"bootstrap"}\n' | sops --encrypt --age "$recipient" \
+  --input-type json --output-type json /dev/stdin > "$SECRETS_FILE"
 
 as_user() {
   "$@"
@@ -75,8 +75,7 @@ stat() {
     "%u:%g:$AGE_KEY:bad-key-owner") printf '%s\n' 1000:100 ;;
     "%a:$AGE_KEY:bad-key-mode") printf '%s\n' 600 ;;
     "%u:%g:"*) printf '%s\n' 0:0 ;;
-    "%a:$(dirname -- "$AGE_KEY"):"*) printf '%s\n' 700 ;;
-    "%a:$AGE_KEY:"*) printf '%s\n' 400 ;;
+    "%a:"*) command stat -c "$format" -- "$path" ;;
     *) return 1 ;;
   esac
 }
@@ -101,10 +100,14 @@ bootstrap_call_log=$test_root/bootstrap-calls.log
 export BOOTSTRAP_CALL_LOG=$bootstrap_call_log
 FLAKE_REF="git+file://$DOTFILES"
 nix() {
+  [[ $1 == --extra-experimental-features && $2 == 'nix-command flakes' ]]
+  shift 2
   if [[ $1 == shell ]]; then
     [[ ${SOPS_AGE_KEY_FILE:-} == "$AGE_KEY" ]]
     [[ $* == "shell ${FLAKE_REF}#sops -c sops --config ${SOPS_CONFIG} -d ${SECRETS_FILE}" ]]
     : > "$test_root/sops-verify-called"
+    shift 3
+    "$@"
   elif [[ $1 == run ]]; then
     [[ $* == "run ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents" ]]
     : > "$test_root/install-agents-called"
@@ -115,6 +118,10 @@ nix() {
         ;;
       "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.workstation.dotfilesDir")
         printf '%s' "${HOST_DOTFILES_DIR:-$DOTFILES}"
+        ;;
+      "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.workstation.wsl.distroName")
+        [[ ${HOST_DISTRO_NAME:-Fixture Distro} != error ]] || return 1
+        printf '%s' "${HOST_DISTRO_NAME:-Fixture Distro}"
         ;;
       *)
         [[ $* == "eval --raw --no-write-lock-file ${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.containers.enabled --apply containers: if containers == [ ] then \"false\" else \"true\"" ]]
@@ -129,6 +136,11 @@ nix() {
 }
 verify_secrets
 [[ -e $test_root/sops-verify-called ]]
+age-keygen -o "$test_root/wrong-key" 2>/dev/null
+if (AGE_KEY="$test_root/wrong-key"; verify_secrets >/dev/null 2>&1); then
+  printf 'bootstrap accepted a key that cannot decrypt the enrolled secrets\n' >&2
+  exit 1
+fi
 install_agent_clients >/dev/null
 [[ -e $test_root/install-agents-called ]]
 install_boot_generation >/dev/null
@@ -163,68 +175,73 @@ if (preflight >/dev/null 2>&1); then
   exit 1
 fi
 
-# main と同じ stage runner が、宣言した順に全 stage を実行する。
-bootstrap_stage_log=$test_root/bootstrap-stages.log
-bootstrap_rebuild_ready=$test_root/bootstrap-rebuild.ready
-bootstrap_rebuild_release=$test_root/bootstrap-rebuild.release
-export BOOTSTRAP_REBUILD_READY=$bootstrap_rebuild_ready
-export BOOTSTRAP_REBUILD_RELEASE=$bootstrap_rebuild_release
+rm "$key_dir"
+mv "$real_key_dir" "$key_dir"
 
-record_bootstrap_stage() {
-  printf '%s\n' "$1" >> "$bootstrap_stage_log"
+git -C "$DOTFILES" add .
+git -C "$DOTFILES" commit -qm initial
+printf '# enrolled host\n' >> "$SOPS_CONFIG"
+SOPS_AGE_KEY_FILE="$AGE_KEY" sops --config "$SOPS_CONFIG" set "$SECRETS_FILE" \
+  '["fixture"]' '"enrolled"'
+export HOME="$test_root/home"
+mkdir -p "$HOME"
+ensure_root() { :; }
+: > "$bootstrap_call_log"
+link_nixos() {
+  [[ -s $bootstrap_call_log ]]
+  printf '%s\n' "$DOTFILES" > "$test_root/etc-nixos-link"
 }
-ensure_root() { record_bootstrap_stage ensure_root; }
-register_safe_directories() { record_bootstrap_stage register_safe_directories; }
-verify_host_identity() { record_bootstrap_stage verify_host_identity; }
-preflight() { record_bootstrap_stage preflight; }
-verify_tracked_flake_files() { record_bootstrap_stage verify_tracked_flake_files; }
-verify_secrets() { record_bootstrap_stage verify_secrets; }
-install_agent_clients() { record_bootstrap_stage install_agent_clients; }
-install_boot_generation() {
-  record_bootstrap_stage install_boot_generation
-  "$test_upstream_rebuild/bin/nixos-rebuild" boot --no-reexec --flake "${FLAKE_REF}#${TARGET_HOST}" -L
-}
-link_nixos() { record_bootstrap_stage link_nixos; }
+run_bootstrap_stages > "$test_root/bootstrap-stages-output"
+[[ $(cat "$test_root/etc-nixos-link") == "$DOTFILES" ]]
+[[ -n $(git -C "$DOTFILES" status --porcelain --untracked-files=no) ]]
 
-run_bootstrap_stages >/dev/null &
-bootstrap_pid=$!
-for _ in {1..500}; do
-  [[ -e $bootstrap_rebuild_ready ]] && break
-  kill -0 "$bootstrap_pid" 2>/dev/null || break
-  sleep 0.01
-done
-[[ -e $bootstrap_rebuild_ready ]]
-: > "$bootstrap_rebuild_release"
-wait "$bootstrap_pid"
-bootstrap_pid=
-printf '%s\n' ensure_root "${BOOTSTRAP_STAGES[@]}" > "$test_root/expected-bootstrap-stages.log"
-cmp "$test_root/expected-bootstrap-stages.log" "$bootstrap_stage_log"
-
-# bootstrap は初回 boot 後の収束順を一つの continuation として表示する。
 bootstrap_output=$test_root/bootstrap-output.log
 containerless_output=$test_root/bootstrap-containerless-output.log
-run_bootstrap_stages() { :; }
-
-CONTAINERS_ENABLED=true main --host "$TARGET_HOST" > "$bootstrap_output"
-terminate_line=$(grep -nFx '  wsl -t NixOS' "$bootstrap_output" | cut -d: -f1)
-launch_line=$(grep -nFx '  wsl -d NixOS' "$bootstrap_output" | cut -d: -f1)
+CONTAINERS_ENABLED=true print_completion > "$bootstrap_output"
+terminate_line=$(grep -nFx "  wsl.exe --terminate 'Fixture Distro'" "$bootstrap_output" | cut -d: -f1)
+launch_line=$(grep -nFx "  wsl.exe --distribution 'Fixture Distro'" "$bootstrap_output" | cut -d: -f1)
+commit_line=$(grep -nF '  git commit ' "$bootstrap_output" | cut -d: -f1)
 sync_line=$(grep -nFx '  dotfiles-sync-images' "$bootstrap_output" | cut -d: -f1)
 rebuild_line=$(grep -nFx '  dotfiles-rebuild' "$bootstrap_output" | cut -d: -f1)
 doctor_line=$(grep -nFx '  dotfiles-doctor' "$bootstrap_output" | cut -d: -f1)
-[[ $terminate_line -lt $launch_line && $launch_line -lt $sync_line &&
-  $sync_line -lt $rebuild_line && $rebuild_line -lt $doctor_line ]]
+[[ $terminate_line -lt $launch_line && $launch_line -lt $commit_line &&
+  $commit_line -lt $sync_line && $sync_line -lt $rebuild_line &&
+  $rebuild_line -lt $doctor_line ]]
 
-CONTAINERS_ENABLED=false main --host "$TARGET_HOST" > "$containerless_output"
+continuation_log=$test_root/continuation.log
+dotfiles-sync-images() { printf 'sync\n' >> "$continuation_log"; }
+dotfiles-rebuild() {
+  [[ -z $(git status --porcelain --untracked-files=no) ]]
+  [[ $(git show --pretty=format: --name-only HEAD | sort) == \
+    $'secrets/sops/assets/.sops.yaml\nsecrets/sops/assets/secrets.json' ]]
+  printf 'rebuild\n' >> "$continuation_log"
+}
+dotfiles-doctor() { printf 'doctor\n' >> "$continuation_log"; }
+(
+  cd "$DOTFILES"
+  while IFS= read -r line; do
+    case $line in
+      '  cd '*|'  git '*|'  dotfiles-'*) eval "${line#  }" ;;
+    esac
+  done < "$bootstrap_output"
+) > "$test_root/continuation-output"
+[[ $(cat "$continuation_log") == $'sync\nrebuild\ndoctor' ]]
+
+CONTAINERS_ENABLED=false print_completion > "$containerless_output"
 if grep -Fxq '  dotfiles-sync-images' "$containerless_output"; then
   printf 'containerless bootstrap requested image synchronization\n' >&2
   exit 1
 fi
-launch_line=$(grep -nFx '  wsl -d NixOS' "$containerless_output" | cut -d: -f1)
+commit_line=$(grep -nF '  git commit ' "$containerless_output" | cut -d: -f1)
 rebuild_line=$(grep -nFx '  dotfiles-rebuild' "$containerless_output" | cut -d: -f1)
 doctor_line=$(grep -nFx '  dotfiles-doctor' "$containerless_output" | cut -d: -f1)
-[[ $launch_line -lt $rebuild_line && $rebuild_line -lt $doctor_line ]]
+[[ $commit_line -lt $rebuild_line && $rebuild_line -lt $doctor_line ]]
 
 if (CONTAINERS_ENABLED=error; print_completion >/dev/null 2>&1); then
   printf 'bootstrap ignored a failed container Capability evaluation\n' >&2
+  exit 1
+fi
+if (HOST_DISTRO_NAME=error; print_completion >/dev/null 2>&1); then
+  printf 'bootstrap ignored a failed distribution name evaluation\n' >&2
   exit 1
 fi

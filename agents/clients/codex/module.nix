@@ -136,7 +136,7 @@ let
   codexSubagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
 in
 {
-  dotfiles.agents.clients.codex = {
+  dotfiles.agents.registry.codex = {
     binary = "codex";
     runtimeWrapperMode = "managed";
     rulesDestination = ".codex/AGENTS.md";
@@ -217,9 +217,11 @@ in
   };
 
   # codex の workspace-write sandbox が PATH 上に要求する bubblewrap
-  environment.systemPackages = [ pkgs.bubblewrap ];
+  environment.systemPackages = lib.optionals (builtins.elem "codex" cfg.agents.enabled) [
+    pkgs.bubblewrap
+  ];
 
-  assertions = [
+  assertions = lib.optionals (builtins.elem "codex" cfg.agents.enabled) [
     {
       assertion = dotfilesDirIsBelowHome;
       message = "dotfiles.workstation.dotfilesDir must be a normalized path below dotfiles.workstation.homeDir for Codex project config deployment";

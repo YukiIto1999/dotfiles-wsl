@@ -31,9 +31,15 @@ let
   };
 in
 {
+  options.dotfiles.agents.memoryHarvest.enable = lib.mkEnableOption "OMPの利用者発言からの記憶の収穫";
+
   config =
     lib.mkIf
-      (builtins.elem "omp" cfg.agents.enabled && builtins.elem "project-memory" cfg.capabilities.resolved)
+      (
+        cfg.agents.memoryHarvest.enable
+        && builtins.elem "omp" cfg.agents.enabled
+        && builtins.elem "project-memory" cfg.capabilities.resolved
+      )
       {
         dotfiles.platform.cli.commands.agentMemoryHarvest = harvest;
 

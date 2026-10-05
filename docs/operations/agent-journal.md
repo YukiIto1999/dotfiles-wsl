@@ -6,7 +6,11 @@ omp の session 記録から 1 日分の作業と判断を要約し、`agent-jou
 
 ## 前提
 
-`dotfiles.workstation.environmentDir` の下の `agent-journal` に、日誌の repository を clone しておく。場所は checkout の root で確かめる。
+hostで`dotfiles.agents.journal.enable = true`を宣言し、OMPを採用した場合だけcommandとtimerを配備する。
+既定では無効であり、新しいPCへ自動pushを引き継がない。
+
+有効にする前に、`dotfiles.workstation.environmentDir`の下の`agent-journal`へ、日誌のrepositoryをcloneしておく。
+場所はcheckoutのrootで確かめる。
 
 ```bash
 nix eval --raw .#nixosConfigurations.<host-id>.config.dotfiles.workstation.environmentDir

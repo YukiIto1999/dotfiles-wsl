@@ -12,11 +12,16 @@ let
   agentConfig = hostConfig.dotfiles.agents;
   inherit (agentConfig) clients;
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
-  installAgents = hostConfig.dotfiles.platform.cli.commands.installAgents;
   verificationEntry = hostConfig.dotfiles.toolchain.verification.entry;
   runtime = import ../package.nix {
     inherit lib pkgs verificationEntry;
     runtimeContract = runtimePackageContract;
+  };
+  customSkillRootRuntime = import ../package.nix {
+    inherit lib pkgs verificationEntry;
+    runtimeContract = runtimePackageContract // {
+      skillRoots = [ ".local/share/fixture adapter/procedures" ];
+    };
   };
   wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
     if [[ $# -eq 3 && $1 == -c && $2 == %u \
@@ -224,12 +229,18 @@ let
     name: client: lib.nameValuePair "agents/client/${name}" (expectedClientObservation name client)
   ) clients;
   # agents root の keyspace は runtime contract、作業日誌、記憶の収穫の timer で閉じる。どれでもない key は stale として落とす
-  expectedJournalObservations = {
+  expectedJournalObservations = lib.optionalAttrs agentConfig.journal.enable {
     "agents/maintenance/journal" = timerObservation "dotfiles-agent-journal";
   };
-  expectedHarvestObservations = {
-    "agents/maintenance/memory-harvest" = timerObservation "dotfiles-agent-memory-harvest";
-  };
+  expectedHarvestObservations =
+    lib.optionalAttrs
+      (
+        agentConfig.memoryHarvest.enable
+        && builtins.elem "project-memory" hostConfig.dotfiles.capabilities.resolved
+      )
+      {
+        "agents/maintenance/memory-harvest" = timerObservation "dotfiles-agent-memory-harvest";
+      };
   expectedAgentObservations =
     expectedRuntimeObservations // expectedJournalObservations // expectedHarvestObservations;
   definitionKeysIn =
@@ -277,7 +288,8 @@ let
         && timer.timerConfig == expectedTimerConfig
         && (
           if id == "autoupdate" then
-            service.serviceConfig.ExecStart == lib.getExe installAgents
+            service.serviceConfig.ExecStart
+            == hostConfig.systemd.services.dotfiles-agent-autoupdate.serviceConfig.ExecStart
           else
             service.serviceConfig.ExecStart == lib.getExe runtime.gc
         );
@@ -376,7 +388,6 @@ in
   agent-runtime-contract =
     assert
       builtins.attrNames agentConfig.packages == [
-        "apm"
         "projectCacheGc"
         "projectMemoryHooks"
         "verification"
@@ -562,9 +573,11 @@ in
           pkgs.findutils
           pkgs.git
           pkgs.gnused
+          pkgs.jq
         ];
         VERIFY = lib.getExe runtime.verify;
         GATE = lib.getExe runtime.gate;
+        CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
       }
       ''
         bash ${../fixtures/runtime/verify.sh}

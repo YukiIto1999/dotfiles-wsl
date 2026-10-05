@@ -9,10 +9,24 @@ let
   cfg = config.dotfiles;
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   opencodeBase = builtins.fromJSON (builtins.readFile ./assets/opencode.json);
-  lspProjection = import ../../impl/lsp.nix { inherit lib; };
 
   opencodeBaseWithLsp = (pkgs.formats.json { }).generate "opencode-base-with-lsp.json" (
-    opencodeBase // { lsp = lspProjection.opencode cfg.toolchain.lsp; }
+    opencodeBase
+    // {
+      # 同名 built-in の root 解決を継承するため登録 ID の共用は不可
+      lsp = lib.mapAttrs' (
+        name: server:
+        lib.nameValuePair "dotfiles-${name}" (
+          {
+            command = [ server.command ] ++ server.args;
+            extensions = builtins.attrNames server.extensions;
+          }
+          // lib.optionalAttrs (server.initializationOptions != { }) {
+            initialization = server.initializationOptions;
+          }
+        )
+      ) cfg.toolchain.lsp;
+    }
   );
   opencodeGatewayConfig = (pkgs.formats.json { }).generate "opencode-gateway.json" {
     mcp.gateway = {
@@ -52,7 +66,7 @@ let
       '';
 in
 {
-  dotfiles.agents.clients.opencode = {
+  dotfiles.agents.registry.opencode = {
     binary = "opencode";
     runtimeWrapperMode = "managed";
     rulesDestination = ".config/opencode/AGENTS.md";

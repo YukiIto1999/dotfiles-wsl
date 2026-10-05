@@ -13,10 +13,10 @@
 | unit directory の各 segment が小文字 kebab-case である | `structure-unit-directory-names` |
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
-| 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
+| rebuildはunstaged/staged変更とGit検査失敗を拒否し、planで切り替えず、rollbackは残る直前generationをbuildせず選び、WSL判定とswitch失敗時の調査入口を示す | `rebuild-entrypoint` |
 | doctor が owner の observation registry を欠落なく key 順に投影し、19 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
 | 19 種類の observation kind の pass、warn、fail、resource、restart 集約と、数値集合の名前ごとの check を反映する。protocol の不正、過大出力、非ゼロ終了、期限前の kill は固定 message の fail に、期限切れは期限の秒数を示す warn にする。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする。slice の照合は実行 file の link 先の前方一致と cgroup の path の component の一致で行い、削除済みの実行 file を含め、名前が似た兄弟 directory と slice を区別する | `doctor-runtime` |
-| Windows drive の一覧を host profile に持たせず全 host で同じ観測にし、profile で上書きした zram、swap、Windows committed memory の値を runtime contract へ反映する | `machine-profile-contract` |
+| Windows driveの観測inventoryは実mountから導き、hostのNix並列度とreserve、journal容量、swap、Windows committed memoryの値をruntime contractへ反映する | `machine-profile-contract` |
 | WSL 専用 zram lifecycle、page cache回収timerの不在、journald、定期fstrimの無効化、Nix の容量 reserve、WSL の mount から実行時に見つけた Windows drive と committed memory の観測、root VHD の容量と `.wslconfig` の VHD 設定を宣言値と照合する観測、service非依存が宣言どおりである。WSL memory の観測が VMBus ring の確保失敗、親を失った Relay、boost を含む min と lowmem reserve を考慮した高次の空き block、PSI の閾値の境界を判定し、読めない入力を fail に、kernel log の走査の期限切れを warn にする | `host-stability-contract` |
 | 宣言した time zone と default locale が実際の日時書式に現れ、UTC と C へ無言で戻らない | `host-locale-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
@@ -42,7 +42,7 @@
 | MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、要求の期限切れを期限の秒数を示す warn に、tools/call の MCP error、契約外の応答、接続の失敗を種類ごとの固定 message の fail にし、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |
 | MCP target、front、gateway から service、restart、roster、protocol observation を漏れなく導き、追加、削除、変更、stale entry に追随する | `mcp-runtime-observation-contract` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
-| generation がない状態から対象 host を明示し、age 鍵を使ってその host の Agent と boot generation を作り、鍵 path が宣言と一致する。bootstrap は自分の置き場所から checkout を決め、`sudo` の実行元ユーザーか checkout が host の宣言と異なれば止まる | `bootstrap-age-key` |
+| bootstrapの鍵生成、age/SOPS復号、誤鍵拒否、mode・owner・symlink拒否、宣言identity一致、enrollmentの手動commit後のclean化と同期から検証までの順序を隔離fixtureで観測する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | stdio service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
 | service lifecycle front と native Streamable HTTP front の wrapper が条件付き exec で起動不能にならない | `mcp-front-starts` |
@@ -50,7 +50,6 @@
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | Zvec-GrepのCLIが固定文字列の検索で一致した行を返す | `toolchain-binary-runs` |
-| Agent Package Manager が宣言した version で起動する | `agent-apm-binary-runs` |
 | LSP roster と対応 client の登録が一致し、client ごとの server id 規則と OMP の有効条件を満たし、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |
@@ -59,6 +58,8 @@
 | fixture の owner の印から Home Manager が描画した Git 設定を git に読ませ、印のある owner の URL は担当 account の token file だけを helper に使い、印のない owner と名前が前方一致するだけの owner は gh の helper へ落ちる | `git-credential-routing` |
 | 配備先を持つ artifact だけから source と destination の observation を導き、欠落、変更、古い entry を拒否する | `artifact-runtime-observation-contract` |
 | profileの固定client roster、提供集合、型metadata、capability、installer、managed fileが固定fixtureに一致し、不正なbranch field、必須field欠落、freeform field、mode矛盾を変異入力で拒否する | `agent-client-roster` |
+| OMP-only、Codexへの交換、Claude追加試用、Antigravity-onlyで非採用clientの配備、installer、health、policy、Skill rootを残さない | `agent-client-selection` |
+| Claudeの共通policyをmanaged settingsのclaudeMdへ投影し、CLAUDE.mdの配備宣言を持たない | `agent-claude-managed-policy` |
 | 生成した共通rulesが、Skill registryのlabelとid、subagentのfrontmatter、clientのmode宣言から独立に組んだ期待行と一致し、未置換markerを残さず、有効Capabilityで絞った`routing.nix`のSkill、subagent、handoffが完全かつ重複せず、各edgeを生成subagent sourceへ投影し、raw toolは直接利用集合だけで、Claude CodeとOMPのrequired Skill preload、OpenCodeのSkill tool、Codexのdynamic定義が実配備sourceへ投影される | `agent-subagent-rendering`、`agent-capability-gating` |
 | agent の最終 managed file から system、home、seed、artifact の配備を導き、gateway 一件、project-memory client source、OMP の hook が symlink でない実 file として directory ごと配備されること、OMP の認証状態が管理外であること、旧 path と runtime identity の不在、既存物を壊さない seed を検査する | `agent-artifact-contract` |
 | seed migration は宣言した command へ既存 config と home を argv で渡し、client 固有の分岐を共通 module に置かない | `agent-config-migration` |
@@ -109,10 +110,12 @@
 | 作業日誌が区切り時刻から翌日の区切り時刻までの利用者の指示、応答、tool の意図、commit だけを model へ渡し、thinking、tool の結果、subagent の記録、範囲外の entry を渡さず、host ごとの file を push する。同じ日を作り直しても内容が同じなら commit を増やさず、timer は最後に完了した日までの未作成の日だけを選ぶ。model が失敗した日は file を作らずに後の日を記録して非ゼロで終わり、次の実行でその日を作る。一時 directory が Git の work tree の中にあれば model を呼ばない。機械名は宣言値で、宣言の無い host は host ID を使い、file 名に使えない機械名を型が拒否する | `agent-journal-behavior` |
 | 記憶の収穫が前回成功した実行から後の利用者の発言だけを model へ渡し、応答、tool の結果、注入した記憶、subagent の記録を渡さない。将来の場面を返さなかった候補、保存済みの記憶と同じ内容の候補、source が保存済みの記憶にある発言を保存せず、場面を保存する本文に含めず、候補を session file と entry ID の source で保存する。pending は status が saved を返すまで保存済みと報告せず、資格情報に見える候補の拒否では失敗にしない。model や保存の失敗では非ゼロで終わり、読み終えた位置を進めない | `agent-memory-harvest-behavior` |
 | WSL 再起動の要否を判定できる | `wsl-restart-policy` |
-| モデル用の Windows G: ドライブを `/mnt/g` へ drvfs で割り当て、未接続時に WSL の起動を妨げない systemd automount にする | `wsl-model-drive-contract` |
+| 別PCのWSL資源、登録名、生成DNS、任意drive、Nix reserveと並列度を評価し、Windows準備用templateは表示だけを行う | `wsl-host-policy-contract` |
+| wslviewはURL、Windows path、変換したLinux pathと特殊文字を単一targetとして扱い、不正引数、変換失敗、Windows終了statusを維持する | `wslview-behavior` |
 | WSL の既定 user と root の systemd user manager を linger で常駐させ、WSL の自動終了後の起動でも login session を作れるようにする | `wsl-user-session-contract` |
 | WSL の extraBin に必須の名前が揃い、名前が重複せず、store 由来の entry が実行可能である | `wsl-extra-bin-contract` |
-| local と plugin の全 Skill の SKILL.md が frontmatter を持ち、name が directory 名と一致し、description が空でない | `skill-frontmatter-contract` |
+| localとpluginの全SkillのSKILL.mdがfrontmatterを持ち、nameがregistry IDと一致し、descriptionが空でない | `skill-frontmatter-contract` |
+| 外部Skillの本文、reference、scriptを直接採用し、同IDの明示差替えと依存metadataの除去を反映し、不正source、未知依存、曖昧な重複を拒否する | `skill-source-contract` |
 | cleanup が現在と保持中の Home Manager generation から backup の exact path を導き、home と system の削除を別の権限境界で実行する | `cleanup-home-backups` |
 | image sync が不足分だけを pull し、宣言済み image へ専用 namespace の tag を付けて dangling prune から外し、pin が切れた状態を status で検出する | `oci-image-sync-behavior` |
 | HindsightのcredentialがSOPS templateからroot所有の環境 fileを経てcontainerへ渡る | `hindsight-container` |

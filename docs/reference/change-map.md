@@ -9,12 +9,14 @@
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
 | 全hostで有効なidentity、Agent、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `nix flake check`、`dotfiles-rebuild --plan` |
-| hostを登録し、swap、Windows committed memory、作業日誌の機械名、host固有Capabilityを変える | [`profiles/hosts/`](../../profiles/hosts)のhost名と同じNix file。optionの意味と既定値は[`workstation/stability/module.nix`](../../workstation/stability/module.nix)、[`agents/journal/module.nix`](../../agents/journal/module.nix)、[`capabilities/module.nix`](../../capabilities/module.nix) | `machine-profile-contract`、`agent-journal-behavior`、`container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
+| hostを登録し、WSL資源、登録名、DNS、追加drive、VHD、Nix並列度とreserveを変える | [`profiles/hosts/`](../../profiles/hosts)と、[`workstation/wsl/module.nix`](../../workstation/wsl/module.nix)、[`workstation/storage/module.nix`](../../workstation/storage/module.nix)、[`workstation/nix/module.nix`](../../workstation/nix/module.nix)のowner option | `wsl-host-policy-contract`、`machine-profile-contract`、対象hostのtoplevel、`dotfiles-wsl-config` |
+| swap、Windows committed memory、日誌の機械名と自動処理、host固有Capabilityを変える | [`profiles/hosts/`](../../profiles/hosts)と各ownerの型付きoption | `machine-profile-contract`、`agent-journal-behavior`、`container-capability-gating`、対象hostのtoplevel |
 | username、home、checkout path、環境系repositoryの置き場所を変える | [`workstation/module.nix`](../../workstation/module.nix)の`dotfiles.workstation` | identity migrationとして扱い、通常rebuildと混ぜない |
 | Nix binary cacheを増減する | [`workstation/nix/assets/nix-caches.nix`](../../workstation/nix/assets/nix-caches.nix) | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
 | 時刻とlocaleを変える | [`workstation/locale/module.nix`](../../workstation/locale/module.nix) | `host-locale-contract`、`dotfiles-rebuild` |
 | PATH上の汎用toolを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages` | `dotfiles-rebuild --plan`、`dotfiles-rebuild` |
-| language serverを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)のregistryと[`profiles/workstation.nix`](../../profiles/workstation.nix)の選択。client形式への写像は[`agents/impl/lsp.nix`](../../agents/impl/lsp.nix) | `lsp-registration`、`dotfiles-rebuild` |
+| BashやAtuinなどHome Managerのprogramを変える | [`workstation/home/module.nix`](../../workstation/home/module.nix)の`programs` | 新しいshellでの操作確認、`dotfiles-rebuild` |
+| language serverを増減する | [`toolchain/module.nix`](../../toolchain/module.nix)のregistryとprofileの選択。client形式への写像は[`agents/clients/`](../../agents/clients)のadapter | `lsp-registration`、`dotfiles-rebuild` |
 | 検証の段の入口名と宣言の置き場を変える | [`toolchain/verification/`](../../toolchain/verification)。段の意味と時間予算はarchitecture-standard | `verification-entry-resolution`、`agent-verification-cache`、`git-pre-push-verification`、`dotfiles-rebuild` |
 | Git hookの種類、dotfilesの検査、repositoryのhookへの連鎖、push前の検証の予算を変える | [`toolchain/git/package.nix`](../../toolchain/git/package.nix)、[`toolchain/git/module.nix`](../../toolchain/git/module.nix)、[`toolchain/git/assets/hooks/`](../../toolchain/git/assets/hooks)。手順は[Git hook](../operations/git-hooks.md) | `git-hook-dispatch`、`git-pre-push-verification`、`git-commit-message-contract`、`git-pre-commit-leak-contract`、`dotfiles-rebuild` |
 | 使用量の観測先を変える | [`telemetry/module.nix`](../../telemetry/module.nix) | 対応するtelemetry check、`dotfiles-rebuild` |
@@ -26,6 +28,7 @@
 | top-level responsibilityを追加・削除する | [`docs/architecture/overview.md`](../architecture/overview.md)でownerと依存方向を決め、rootの`module.nix`を入口にする | `structure-responsibility-roots`、`unit-boundary-name-only` |
 | Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`nix flake check`で確認する |
 | Skillを追加・削除する | [`skills/`](../../skills)の`module.nix`、`skill/`、依存metadata。配備対象は有効なCapabilityから導く | Skill renderingとrequired Capabilityのcheck |
+| 外部Skillを採用し、同IDの供給元を差し替える | [`skills/module.nix`](../../skills/module.nix)のregistry.sourceと明示的なoverride。本文、reference、scriptは固定した外部sourceが所有する | `skill-source-contract`、`skill-frontmatter-contract`、`skill-capability-gating` |
 | plugin Skill sourceとarchitecture-standardの版を更新する | [`flake.nix`](../../flake.nix)の該当inputのrevと[`flake.lock`](../../flake.lock)。採用するSkillは[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 固定していた版からの差分を確認し、`nix flake check`、`dotfiles-rebuild` |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 

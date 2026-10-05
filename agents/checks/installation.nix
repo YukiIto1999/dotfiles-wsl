@@ -1,13 +1,10 @@
 {
   pkgs,
   lib,
-  hostConfig,
   ...
 }:
 
 let
-  agentConfig = hostConfig.dotfiles.agents;
-  apm = agentConfig.packages.apm;
   atomicPublish = import ../impl/atomic-publish.nix { inherit pkgs; };
   atomicPublishExe = lib.getExe' atomicPublish "dotfiles-agent-atomic-publish";
   packageTreeFixtureRecord = {
@@ -314,20 +311,6 @@ let
   clientIsolationFixtureInstaller = mkInstallerBehaviorFixture "fixture-install-client-isolation-agents" clientIsolationFixtureManifest;
 in
 {
-  agent-apm-binary-runs = pkgs.runCommandLocal "check-agent-apm-binary-runs" { } ''
-    set -euo pipefail
-
-    version=$(${lib.getExe apm} --version)
-    case $version in
-      "Agent Package Manager (APM) CLI version ${apm.version}"*) ;;
-      *)
-        echo "unexpected apm version banner: $version" >&2
-        exit 1
-        ;;
-    esac
-    touch $out
-  '';
-
   agent-installer-behavior =
     pkgs.runCommandLocal "check-agent-installer-behavior"
       {

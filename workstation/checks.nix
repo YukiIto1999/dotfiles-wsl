@@ -20,8 +20,8 @@ let
   journaldConfig = hostConfig.environment.etc."systemd/journald.conf".source;
   zramConfig = hostConfig.environment.etc."systemd/zram-generator.conf".source;
   expectedNixStorageReserve = {
-    "min-free" = 34359738368;
-    "max-free" = 68719476736;
+    "min-free" = workstation.nix.minimumFreeGiB * 1073741824;
+    "max-free" = workstation.nix.targetFreeGiB * 1073741824;
   };
   wslMemoryOutcomeIds = [
     "resource/wsl-memory/high-order-pages"
@@ -80,7 +80,7 @@ let
       checkId = "resource/journald";
       failureMessage = "could not observe journald disk usage";
       kind = "journal-size";
-      maximumBytes = 4294967296;
+      maximumBytes = workstation.storage.journal.maximumGiB * 1073741824;
       resourceKey = "journald";
       timeoutSeconds = 10;
     };
@@ -332,20 +332,28 @@ let
       == "${toString candidateWorkstation.swap.zramMemoryPercent} / 100 * ram"
     && candidateSwap.minimumTotalBytes == candidateWorkstation.swap.minimumTotalGiB * 1073741824
     && candidateWindowsMemory.warning == candidateWorkstation.windowsMemoryCommit.warning
-    && candidateWindowsMemory.failure == candidateWorkstation.windowsMemoryCommit.failure;
+    && candidateWindowsMemory.failure == candidateWorkstation.windowsMemoryCommit.failure
+    && candidate.nix.settings.max-jobs == candidateWorkstation.nix.maxJobs
+    && candidate.nix.settings.cores == candidateWorkstation.nix.cores
+    && candidate.nix.settings.min-free == candidateWorkstation.nix.minimumFreeGiB * 1073741824
+    && candidate.nix.settings.max-free == candidateWorkstation.nix.targetFreeGiB * 1073741824
+    &&
+      candidate.dotfiles.health.observations."host/journald".maximumBytes
+      == candidateWorkstation.storage.journal.maximumGiB * 1073741824
+    && lib.hasInfix "defaultVhdSize=${toString candidateWorkstation.storage.vhd.sizeGiB}GB" candidateWorkstation.wsl.windowsConfigTemplate;
   memoryVariantConfig =
     (mkNixosSystem [
       normalMachineModule
-      {
+      ({ lib, ... }: {
         dotfiles.workstation.swap = {
           zramMemoryPercent = 40;
-          minimumTotalGiB = 6;
+          minimumTotalGiB = lib.mkForce 6;
         };
         dotfiles.workstation.windowsMemoryCommit = {
           warning = 80;
           failure = 90;
         };
-      }
+      })
     ]).config;
   powershellProbe = "[Console]::WriteLine(20)";
   mkWindowsPercentageObservation = import ./package.nix;
@@ -453,6 +461,8 @@ let
         "[wsl2]\r\ndefaultVhdSize=800GB\r\nmemory=40GB\r\n\r\n[general]\r\ninstanceIdleTimeout=-1\r\n\r\n"
         + "[experimental]\r\nautoMemoryReclaim=gradual\r\nsparseVhd=false\r\n"
       ),
+      sizeBytes ? 800 * 1073741824,
+      sparse ? false,
     }:
     mkWslVhdObservation {
       inherit
@@ -461,8 +471,7 @@ let
         blockDevices
         powershellCommand
         ;
-      sizeBytes = 800 * 1073741824;
-      sparse = false;
+      inherit sizeBytes sparse;
       statCommand = wslVhdStat;
       timeoutSeconds = 1;
     };
@@ -528,6 +537,16 @@ let
       capacity = "pass";
       wslconfig = "fail";
     };
+  };
+  hostVhdVariant = {
+    probe = mkWslVhdProbe {
+      blockDevices = mkWslVhdBlockDevices "8:48" 536870912;
+      powershellCommand = printWslconfig "wslconfig-host-variant" "[wsl2]\ndefaultVhdSize=256GB\n[experimental]\nsparseVhd=true\n";
+      sizeBytes = 256 * 1073741824;
+      sparse = true;
+    };
+    capacity = "pass";
+    wslconfig = "pass";
   };
   mkWslMemoryObservation = import ./stability/impl/wsl-memory-package.nix;
   mkZoneinfo =
@@ -867,8 +886,9 @@ in
       && !(builtins.hasAttr "dotfiles-wsl-memory-reclaim" hostConfig.systemd.timers)
     ) "WSL memory reclaim must not evict page cache during active sessions";
     assert lib.assertMsg (journald.storage == "persistent") "journald storage is not persistent";
-    assert lib.assertMsg (lib.hasInfix "SystemMaxUse=4G" journald.extraConfig)
-      "journald SystemMaxUse is not bounded at 4G";
+    assert lib.assertMsg
+      (lib.hasInfix "SystemMaxUse=${toString workstation.storage.journal.maximumGiB}G" journald.extraConfig)
+      "journald SystemMaxUse does not follow the host storage policy";
     assert lib.assertMsg (lib.hasInfix "MaxRetentionSec=30day" journald.extraConfig)
       "journald retention is not bounded at 30 days";
     assert lib.assertMsg (
@@ -955,6 +975,7 @@ in
                     name: case: "assert_wsl_vhd ${name} ${lib.getExe case.probe} ${case.capacity} ${case.wslconfig}"
                   ) wslVhdCases
                 )}
+                assert_wsl_vhd host-policy ${lib.getExe hostVhdVariant.probe} ${hostVhdVariant.capacity} ${hostVhdVariant.wslconfig}
 
                 assert_wsl_memory() {
                   local name=$1
@@ -1171,13 +1192,13 @@ in
                 )
 
                 grep -Fxq 'Storage=persistent' ${journaldConfig}
-                grep -Fxq 'SystemMaxUse=4G' ${journaldConfig}
+                grep -Fxq 'SystemMaxUse=${toString workstation.storage.journal.maximumGiB}G' ${journaldConfig}
                 grep -Fxq 'MaxRetentionSec=30day' ${journaldConfig}
 
                 grep -Fxq '[zram0]' ${zramConfig}
                 grep -Fxq 'compression-algorithm=lzo-rle' ${zramConfig}
                 grep -Fxq 'swap-priority=100' ${zramConfig}
-                grep -Fxq 'zram-size=25 / 100 * ram' ${zramConfig}
+                grep -Fxq 'zram-size=${toString workstation.swap.zramMemoryPercent} / 100 * ram' ${zramConfig}
                 if grep -q '^writeback-device=' ${zramConfig}; then
                   echo 'zram writeback was enabled' >&2
                   exit 1

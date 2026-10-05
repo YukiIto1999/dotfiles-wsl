@@ -13,6 +13,9 @@ let
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   rawRouting = import ./subagents/routing.nix;
+  selectedClients = lib.genAttrs (builtins.filter (
+    name: builtins.hasAttr name agents.registry
+  ) agents.enabled) (name: agents.registry.${name});
   clientNames = builtins.attrNames agents.clients;
   clientExecutables = lib.mapAttrs (
     _: client: "${cfg.workstation.homeDir}/.local/bin/${client.binary}"
@@ -176,18 +179,16 @@ let
         }) client.subagents
       );
     in
-    [
-      {
-        inherit clientName;
-        id = "rules";
-        file = {
-          source = agents.shared.rules;
-          format = "markdown";
-          deployment = "home";
-          destination = client.rulesDestination;
-        };
-      }
-    ]
+    lib.optional (client.rulesDestination != null) {
+      inherit clientName;
+      id = "rules";
+      file = {
+        source = agents.shared.rules;
+        format = "markdown";
+        deployment = "home";
+        destination = client.rulesDestination;
+      };
+    }
     ++ lib.mapAttrsToList (name: source: {
       inherit clientName;
       id = "skills/${name}";
@@ -273,36 +274,39 @@ let
       inherit (client) install;
     };
 
-  installManifest = builtins.toJSON (map installRecord clientNames);
+  installManifestFor = names: builtins.toJSON (map installRecord names);
   atomicPublish = import ./impl/atomic-publish.nix { inherit pkgs; };
 
-  installAgents = mkCommand {
-    name = "dotfiles-install-agents";
-    src = ./impl/install-agents.sh;
-    vars = {
-      inherit installManifest;
-      atomicPublishCommand = lib.escapeShellArg (
-        lib.getExe' atomicPublish "dotfiles-agent-atomic-publish"
-      );
-      probeEnvironment = "";
-      transactionHookCommand = lib.escapeShellArg "${pkgs.coreutils}/bin/true";
-      versionArgsDecoder = builtins.readFile ./impl/version-args.sh;
+  mkInstaller =
+    name: names:
+    mkCommand {
+      inherit name;
+      src = ./impl/install-agents.sh;
+      vars = {
+        installManifest = installManifestFor names;
+        atomicPublishCommand = lib.escapeShellArg (
+          lib.getExe' atomicPublish "dotfiles-agent-atomic-publish"
+        );
+        probeEnvironment = "";
+        transactionHookCommand = lib.escapeShellArg "${pkgs.coreutils}/bin/true";
+        versionArgsDecoder = builtins.readFile ./impl/version-args.sh;
+      };
+      runtimeInputs = with pkgs; [
+        atomicPublish
+        bash
+        curl
+        diffutils
+        findutils
+        gawk
+        jq
+        gnutar
+        gzip
+        coreutils
+        util-linux
+      ];
     };
-    runtimeInputs = with pkgs; [
-      atomicPublish
-      bash
-      curl
-      diffutils
-      findutils
-      gawk
-      jq
-      gnutar
-      gzip
-      coreutils
-      util-linux
-    ];
-  };
-  apm = pkgs.callPackage ./package/apm.nix { };
+  installAgents = mkInstaller "dotfiles-install-agents" clientNames;
+  updateAgents = mkInstaller "dotfiles-update-agents" agents.automaticUpdates.clients;
 
   allHomeEntries = homeManagedEntries;
   homeDestinations = map (entry: entry.name) allHomeEntries;
@@ -397,15 +401,20 @@ let
         inactiveDays = 30;
       };
       sliceUnit = "agents.slice";
+      skillRoots = lib.unique (map (name: agents.clients.${name}.skillsDestination) clientNames);
       state = {
         root = "${cfg.workstation.homeDir}/${relativeStateRoot}";
       };
       timers = {
-        autoupdate = {
-          name = "dotfiles-agent-autoupdate";
-          onCalendar = "daily";
-          persistent = true;
-        };
+        autoupdate =
+          if agents.automaticUpdates.clients == [ ] then
+            null
+          else
+            {
+              name = "dotfiles-agent-autoupdate";
+              onCalendar = "daily";
+              persistent = true;
+            };
         projectCacheGc = {
           name = "dotfiles-agent-project-cache-gc";
           onCalendar = "daily";
@@ -422,7 +431,7 @@ let
           ;
       };
       commands = {
-        autoupdate = lib.getExe packages.installAgents;
+        autoupdate = lib.getExe updateAgents;
         projectCacheGc = lib.getExe packages.gc;
       };
       observations = {
@@ -432,8 +441,9 @@ let
           minimumCount = 1;
           failureOnly = true;
         };
-        "agents/maintenance/autoupdate" = timerObservation timers.autoupdate;
         "agents/maintenance/project-cache-gc" = timerObservation timers.projectCacheGc;
+      }
+      // lib.optionalAttrs (runtimeClientNames != [ ]) {
         "agents/slice-placement" =
           commonObservation "agent/slice-placement" "agentSlicePlacement"
             "agent client processes run outside ${sliceUnit}"
@@ -442,6 +452,9 @@ let
             executableRoots = lib.concatMap executableRootsFor runtimeClientNames;
             slice = sliceUnit;
           };
+      }
+      // lib.optionalAttrs (timers.autoupdate != null) {
+        "agents/maintenance/autoupdate" = timerObservation timers.autoupdate;
       }
       // lib.mapAttrs' (
         name: client: lib.nameValuePair "agents/client/${name}" (clientObservation name client)
@@ -453,9 +466,9 @@ in
 
   config = {
     dotfiles.agents = {
+      clients = selectedClients;
       inherit clientExecutables;
       packages = {
-        inherit apm;
         projectCacheGc = runtimeContract.packages.gc;
         verification = runtimeContract.packages.verify;
         verificationGate = runtimeContract.packages.gate;
@@ -464,7 +477,7 @@ in
         projectMemoryHooks = config.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
       };
       runtime = {
-        inherit (runtimeContract) timers state;
+        inherit (runtimeContract) timers state skillRoots;
         cache = builtins.removeAttrs runtimeContract.cache [ "relativeCacheRoot" ];
       };
       shared = {
@@ -538,13 +551,13 @@ in
         message = "Agent cache low watermark must be below the high watermark";
       }
       {
-        assertion = agents.slice.memoryHighGiB < agents.slice.memoryMaxGiB;
+        assertion = agents.slice.memoryHighPercent < agents.slice.memoryMaxPercent;
         message = "Agent slice MemoryHigh must be below MemoryMax";
       }
       {
         assertion =
-          agents.slice.memoryMaxGiB < agents.slice.userManager.memoryMaxGiB
-          && agents.slice.userManager.memoryHighGiB < agents.slice.userManager.memoryMaxGiB;
+          agents.slice.memoryMaxPercent < agents.slice.userManager.memoryMaxPercent
+          && agents.slice.userManager.memoryHighPercent < agents.slice.userManager.memoryMaxPercent;
         message = "User manager memory limits must enclose the agent slice and keep MemoryHigh below MemoryMax";
       }
       {
@@ -557,8 +570,13 @@ in
       }
       {
         assertion =
-          map (timer: timer.name) (builtins.attrValues runtimeContract.timers)
-          == lib.unique (map (timer: timer.name) (builtins.attrValues runtimeContract.timers));
+          map (timer: timer.name) (
+            builtins.filter (timer: timer != null) (builtins.attrValues runtimeContract.timers)
+          ) == lib.unique (
+            map (timer: timer.name) (
+              builtins.filter (timer: timer != null) (builtins.attrValues runtimeContract.timers)
+            )
+          );
         message = "Agent runtime timer names must be unique";
       }
     ];
@@ -576,7 +594,6 @@ in
     home-manager.users.${cfg.workstation.username} =
       { lib, ... }:
       {
-        home.packages = [ apm ];
         home.file = lib.mkMerge [
           (lib.listToAttrs allHomeEntries)
           runtimeWrappers
@@ -588,20 +605,20 @@ in
     systemd.user.slices.${lib.removeSuffix ".slice" runtimeContract.sliceUnit} = {
       description = "Agent session の資源上限";
       sliceConfig = {
-        MemoryHigh = "${toString agents.slice.memoryHighGiB}G";
-        MemoryMax = "${toString agents.slice.memoryMaxGiB}G";
-        MemorySwapMax = "${toString agents.slice.memorySwapMaxGiB}G";
+        MemoryHigh = "${toString agents.slice.memoryHighPercent}%";
+        MemoryMax = "${toString agents.slice.memoryMaxPercent}%";
+        MemorySwapMax = "${toString agents.slice.memorySwapMaxPercent}%";
         CPUWeight = agents.slice.cpuWeight;
       };
     };
 
     # Chromium が自ら app.slice へ作る scope による agents.slice の迂回
     systemd.services."user@".serviceConfig = {
-      MemoryHigh = "${toString agents.slice.userManager.memoryHighGiB}G";
-      MemoryMax = "${toString agents.slice.userManager.memoryMaxGiB}G";
+      MemoryHigh = "${toString agents.slice.userManager.memoryHighPercent}%";
+      MemoryMax = "${toString agents.slice.userManager.memoryMaxPercent}%";
     };
 
-    systemd.services.${runtimeContract.timers.autoupdate.name} = {
+    systemd.services.dotfiles-agent-autoupdate = lib.mkIf (runtimeContract.timers.autoupdate != null) {
       description = "Agent client を latest へ更新";
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
@@ -616,7 +633,7 @@ in
       };
     };
 
-    systemd.timers.${runtimeContract.timers.autoupdate.name} = {
+    systemd.timers.dotfiles-agent-autoupdate = lib.mkIf (runtimeContract.timers.autoupdate != null) {
       wantedBy = [ "timers.target" ];
       timerConfig = {
         OnCalendar = runtimeContract.timers.autoupdate.onCalendar;

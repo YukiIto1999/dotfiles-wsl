@@ -39,6 +39,11 @@ let
       )
     ]).config;
   restrictedAgentRules = restrictedAgentConfig.dotfiles.agents.shared.rules;
+  telemetryDisabledConfig =
+    (mkNixosSystem [
+      normalMachineModule
+      { dotfiles.telemetry.enable = false; }
+    ]).config;
   minimalCapabilityAgentConfig =
     (mkNixosSystem [
       normalMachineModule
@@ -295,11 +300,17 @@ let
     let
       client = clients.${clientName};
       homePrefix = hostConfig.dotfiles.workstation.homeDir;
-      rulesArtifact = artifacts."agents/${clientName}/rules";
+      rulesArtifact = artifacts."agents/${clientName}/rules" or null;
       rulesMatch =
-        rulesArtifact.source == normalizeSource hostConfig.dotfiles.agents.shared.rules
-        && rulesArtifact.format == "markdown"
-        && rulesArtifact.deployedAt == "${homePrefix}/${client.rulesDestination}";
+        if client.rulesDestination == null then
+          rulesArtifact == null
+        else
+          rulesArtifact.source == normalizeSource hostConfig.dotfiles.agents.shared.rules
+          && rulesArtifact.format == "markdown"
+          && rulesArtifact.deployedAt == "${homePrefix}/${client.rulesDestination}"
+          &&
+            homeConfig.home.file.${client.rulesDestination}.source
+            == normalizeSource hostConfig.dotfiles.agents.shared.rules;
       skillsMatch = lib.all (
         name:
         let
@@ -326,9 +337,7 @@ let
           && artifact.deployedAt == "${homePrefix}/${client.subagentsDestination}/${name}.${suffix}"
       ) (builtins.attrNames client.subagents);
     in
-    homeConfig.home.file.${client.rulesDestination}.source
-    == normalizeSource hostConfig.dotfiles.agents.shared.rules
-    && lib.all (
+    lib.all (
       name:
       homeConfig.home.file."${client.skillsDestination}/${name}".source
       == normalizeSource hostConfig.dotfiles.agents.shared.skills.${name}
@@ -344,7 +353,7 @@ let
       let
         client = clients.${clientName};
       in
-      [ "agents/${clientName}/rules" ]
+      lib.optional (client.rulesDestination != null) "agents/${clientName}/rules"
       ++ map (name: "agents/${clientName}/skills/${name}") (
         builtins.attrNames hostConfig.dotfiles.agents.shared.skills
       )
@@ -430,8 +439,199 @@ let
     typescript = "tsgo";
   };
   opencodeLspName = name: "dotfiles-${name}";
+  selectionCases = {
+    omp-only = {
+      enabled = [ "omp" ];
+      automaticUpdates = [ ];
+    };
+    replacement = {
+      enabled = [ "codex" ];
+      automaticUpdates = [ ];
+    };
+    trial = {
+      enabled = [
+        "claude"
+        "omp"
+      ];
+      automaticUpdates = [ "claude" ];
+    };
+    upstream-only = {
+      enabled = [ "antigravity" ];
+      automaticUpdates = [ ];
+    };
+  };
+  selectionConfigs = lib.mapAttrs (
+    _: selection:
+    (mkNixosSystem [
+      normalMachineModule
+      {
+        dotfiles.agents.enabled = lib.mkForce selection.enabled;
+        dotfiles.agents.automaticUpdates.clients = lib.mkForce selection.automaticUpdates;
+      }
+    ]).config
+  ) selectionCases;
+  selectionContractMatches =
+    name: configuration:
+    let
+      selection = selectionCases.${name};
+      selected = configuration.dotfiles.agents.clients;
+      unselected = builtins.filter (id: !(builtins.elem id selection.enabled)) expected.required;
+      home = configuration.home-manager.users.${configuration.dotfiles.workstation.username};
+      artifactIds = builtins.filter (lib.hasPrefix "agents/") (
+        builtins.attrNames configuration.dotfiles.managedArtifacts
+      );
+      clientObservationIds = builtins.filter (lib.hasPrefix "agents/client/") (
+        builtins.attrNames configuration.dotfiles.health.observations
+      );
+      noClientDeployment =
+        id:
+        let
+          client = configuration.dotfiles.agents.registry.${id};
+        in
+        !(builtins.hasAttr "${wrapperDirectory}/${client.binary}" home.home.file)
+        && (client.rulesDestination == null || !(builtins.hasAttr client.rulesDestination home.home.file))
+        && !lib.any (lib.hasPrefix "${client.skillsDestination}/") (builtins.attrNames home.home.file)
+        && (
+          client.subagentsDestination == null
+          || !lib.any (lib.hasPrefix "${client.subagentsDestination}/") (builtins.attrNames home.home.file)
+        )
+        && !(builtins.hasAttr "agents/${id}/rules" configuration.dotfiles.managedArtifacts)
+        && !lib.any (lib.hasPrefix "agents/${id}/") artifactIds
+        && builtins.all (
+          file:
+          if file.deployment == "system" then
+            !(builtins.hasAttr file.destination configuration.environment.etc)
+          else if file.deployment == "home" then
+            !(builtins.hasAttr file.destination home.home.file)
+          else
+            !lib.hasInfix "${configuration.dotfiles.workstation.homeDir}/${file.destination}" home.home.activation.seedAgentConfigs.data
+        ) (builtins.attrValues client.managedFiles);
+      updatesEnabled = selection.automaticUpdates != [ ];
+    in
+    builtins.deepSeq configuration.system.build.toplevel.drvPath (
+      builtins.attrNames configuration.dotfiles.agents.registry == expected.required
+      && builtins.attrNames selected == selection.enabled
+      && builtins.attrNames configuration.dotfiles.agents.clientExecutables == selection.enabled
+      && configuration.dotfiles.health.observations."agents/roster".members == selection.enabled
+      && clientObservationIds == map (id: "agents/client/${id}") selection.enabled
+      && builtins.all noClientDeployment unselected
+      &&
+        configuration.dotfiles.agents.runtime.skillRoots
+        == map (id: expected.clients.${id}.skillsDestination) selection.enabled
+      && (configuration.dotfiles.agents.runtime.timers.autoupdate != null) == updatesEnabled
+      && (configuration.systemd.services ? dotfiles-agent-autoupdate) == updatesEnabled
+      && (configuration.systemd.timers ? dotfiles-agent-autoupdate) == updatesEnabled
+      && (configuration.dotfiles.health.observations ? "agents/maintenance/autoupdate") == updatesEnabled
+      && !(configuration.dotfiles.agents.packages ? apm)
+    );
+  wrapperDirectory = ".local/share/dotfiles-agent/bin";
 in
 {
+  agent-client-selection =
+    assert lib.all (name: selectionContractMatches name selectionConfigs.${name}) (
+      builtins.attrNames selectionCases
+    );
+    pkgs.runCommandLocal "check-agent-client-selection"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.gnugrep
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        jq -e '.autoupdate == false' ${clients.opencode.managedFiles.config.source}
+        ${lib.concatMapStrings (
+          name:
+          let
+            configuration = selectionConfigs.${name};
+            selection = selectionCases.${name};
+            installer = lib.getExe configuration.dotfiles.platform.cli.commands.installAgents;
+            updater = configuration.systemd.services.dotfiles-agent-autoupdate.serviceConfig.ExecStart or null;
+            policyFile = configuration.dotfiles.agents.shared.rules;
+            gate = lib.getExe configuration.dotfiles.agents.packages.verificationGate;
+          in
+          ''
+            ${installer} --print-manifest > ${name}-manifest.json
+            jq -e --argjson names ${lib.escapeShellArg (builtins.toJSON selection.enabled)} \
+              'map(.name) == $names' ${name}-manifest.json
+            ${lib.optionalString (updater != null) ''
+              ${updater} --print-manifest > ${name}-updates.json
+              jq -e --argjson names ${lib.escapeShellArg (builtins.toJSON selection.automaticUpdates)} \
+                'map(.name) == $names' ${name}-updates.json
+            ''}
+            ${lib.concatMapStrings (
+              id:
+              let
+                row = lib.escapeShellArg "| `${id}` |";
+              in
+              if builtins.elem id selection.enabled then
+                ''
+                  grep -Fq ${row} ${policyFile}
+                ''
+              else
+                ''
+                  if grep -Fq ${row} ${policyFile}; then
+                    echo "unselected client policy remains: ${name}/${id}" >&2
+                    exit 1
+                  fi
+                ''
+            ) expected.required}
+            export HOME="$PWD/${name}-home"
+            mkdir -p "$HOME"
+            ${lib.concatMapStrings (id: ''
+              mkdir -p "$HOME/${expected.clients.${id}.skillsDestination}/code-design"
+            '') (builtins.filter (id: !(builtins.elem id selection.enabled)) expected.required)}
+            ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null
+            mkdir -p "$HOME/${
+              expected.clients.${builtins.head selection.enabled}.skillsDestination
+            }/code-design"
+            if ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null 2>&1; then
+              echo "selected Skill root did not enforce its discipline: ${name}" >&2
+              exit 1
+            fi
+            ${gate} learned --session ${name} --path code-design
+            ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null
+          ''
+        ) (builtins.attrNames selectionCases)}
+        touch "$out"
+      '';
+
+  agent-claude-managed-policy =
+    assert clients.claude.rulesDestination == null;
+    assert !(homeConfig.home.file ? ".claude/CLAUDE.md");
+    assert !(hostConfig.environment.etc ? "claude-code/CLAUDE.md");
+    assert !(artifacts ? "agents/claude/rules");
+    assert !(telemetryDisabledConfig.systemd.services ? otel-collector);
+    assert !(telemetryDisabledConfig.dotfiles.managedArtifacts ? "telemetry/collector");
+    assert
+      lib.filterAttrs (
+        name: _: lib.hasPrefix "telemetry/" name
+      ) telemetryDisabledConfig.dotfiles.health.observations == { };
+    pkgs.runCommandLocal "check-agent-claude-managed-policy"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+        jq -e --rawfile policy ${agentConfig.shared.rules} \
+          '.claudeMd == $policy and (.claudeMd | length > 0) and .env.DISABLE_AUTOUPDATER == "1"' \
+          ${artifactSource "agents/claude/managed-settings"}
+        jq -e --rawfile policy ${selectionConfigs.trial.dotfiles.agents.shared.rules} \
+          '.claudeMd == $policy and (.claudeMd | contains("| `claude` |"))' \
+          ${selectionConfigs.trial.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
+        jq -e --rawfile policy ${restrictedAgentRules} '.claudeMd == $policy' \
+          ${restrictedAgentConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
+        jq -e '.env.CLAUDE_CODE_ENABLE_TELEMETRY == "0"
+          and .env.OTEL_METRICS_EXPORTER == "none" and .env.OTEL_LOGS_EXPORTER == "none"' \
+          ${telemetryDisabledConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
+        touch "$out"
+      '';
+
   agent-config-migration =
     assert map (row: "${row.clientName}/${row.id}") managedRowsWithSeedMigration == [ "codex/user" ];
     assert fixtureGenericSeedActivation != fixtureSeedActivation;
@@ -490,7 +690,7 @@ in
       definition:
       lib.hasInfix "/agents/" (toString definition.file)
       && !lib.hasInfix "/containers/" (toString definition.file)
-    ) hostOptions.dotfiles.agents.clients.definitionsWithLocations;
+    ) hostOptions.dotfiles.agents.registry.definitionsWithLocations;
     # omp は hook directory の中の symlink を読まない。directory ごと配備し、中身は実 file にする
     assert lib.assertMsg (
       !lib.any (target: lib.hasPrefix ".omp/agent/hooks/pre/" target) (

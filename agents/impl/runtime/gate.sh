@@ -197,8 +197,9 @@ skill_for() {
 # その skill が配備されているか。配られていない名で止めると、読みようがない要求になる。
 skill_stands() {
   local named=$1 root
-  for root in "$HOME/.omp/agent/skills" "$HOME/.claude/skills" "$HOME/.config/opencode/skills"; do
-    [ -d "$root/$named" ] && return 0
+  local -a roots=(@skillRoots@)
+  for root in "${roots[@]}"; do
+    [ -d "$HOME/$root/$named" ] && return 0
   done
   return 1
 }
@@ -206,11 +207,20 @@ skill_stands() {
 # 読んだ規律の名。`skill://名` でも、配られた実体の path でも同じ名を答える
 # (client によって、hook へ届く前に内部 URL が path へ解けている)。
 skill_read_in() {
-  case $1 in
-  skill://*) printf '%s' "${1#skill://}" | cut -d/ -f1 ;;
-  */skills/*) printf '%s' "${1#*/skills/}" | cut -d/ -f1 ;;
-  *) printf '' ;;
+  local path=$1 root relative
+  local -a roots=(@skillRoots@)
+  case $path in
+  skill://*) printf '%s' "${path#skill://}" | cut -d/ -f1; return ;;
   esac
+  for root in "${roots[@]}"; do
+    case $path in
+    "$HOME/$root/"*) relative=${path#"$HOME/$root/"} ;;
+    "$root/"*) relative=${path#"$root/"} ;;
+    *) continue ;;
+    esac
+    printf '%s' "${relative%%/*}"
+    return
+  done
 }
 
 command_learned() {

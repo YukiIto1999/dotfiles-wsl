@@ -8,7 +8,16 @@
 let
   cfg = config.dotfiles;
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
-  lspProjection = import ../../impl/lsp.nix { inherit lib; };
+  # tsgo と roslyn-ls の別実装向け設定継承を避けるため上流名の流用は不可
+  lspNames = {
+    bash = "bashls";
+    csharp = "roslyn-ls";
+    java = "jdtls";
+    nix = "nixd";
+    python = "ty";
+    rust = "rust-analyzer";
+    typescript = "tsgo";
+  };
 
   gatewayConfig = (pkgs.formats.json { }).generate "omp-mcp.json" {
     mcpServers.gateway = {
@@ -17,7 +26,21 @@ let
     };
   };
 
-  lspConfig = (pkgs.formats.json { }).generate "omp-lsp.json" (lspProjection.omp cfg.toolchain.lsp);
+  lspConfig = (pkgs.formats.json { }).generate "omp-lsp.json" (
+    lib.mapAttrs' (
+      name: server:
+      lib.nameValuePair lspNames.${name} (
+        {
+          inherit (server) command args;
+          fileTypes = builtins.attrNames server.extensions;
+          rootMarkers = [ "." ];
+        }
+        // lib.optionalAttrs (server.initializationOptions != { }) {
+          initOptions = server.initializationOptions;
+        }
+      )
+    ) cfg.toolchain.lsp
+  );
 
   # omp は hook directory の中の symlink を読み込まない。Home Manager は file ごとに symlink を張るため、
   # directory ごと配備し、その中を実 file にする
@@ -92,7 +115,7 @@ let
       '';
 in
 {
-  dotfiles.agents.clients.omp = {
+  dotfiles.agents.registry.omp = {
     binary = "omp";
     runtimeWrapperMode = "managed";
     rulesDestination = ".omp/agent/AGENTS.md";

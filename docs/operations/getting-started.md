@@ -1,127 +1,185 @@
 # セットアップ
 
-**読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
+**読み手:** 新しいNixOS-WSLホストを構築する運用者が、作業中に読む。
 
-新規の NixOS-WSL ホストを、この repository の checkout から構築する。中断のない通常系は、host key の enrollment、bootstrap、WSL 再起動、containerを選ぶhostだけOCI imageの同期、rebuild、doctor の順に進める。
+初回構築は、Windows側の準備、host選択、host keyの登録、bootstrap、WSL再起動、enrollment差分のcommit、必要なOCI imageの同期、通常のrebuild、認証、検証の順に進める。
+bootstrapはGit identityを含む初回boot generationを用意し、通常のrebuildはcommit済みのcheckoutだけを適用する。
 
-## 前提
+## Windowsとcheckout
 
-- NixOS-WSL を用意し、構築する host 構成の `dotfiles.workstation.username` と同じユーザーでログインする。宣言は checkout の root で `nix eval --raw .#nixosConfigurations.<host-id>.config.dotfiles.workstation.username` を実行して確かめる。登録済みの host はどれも既定値の `nixos` を使い、これは NixOS-WSL の初期ユーザーと同じである。別のユーザー名を宣言する host は、そのユーザーが存在しないため初回構築できない。[bootstrap script](../../workstation/activation/rebuild/impl/bootstrap.sh) は、`sudo` の実行元ユーザーがこの宣言と一致することを検査する。
-- リポジトリを host 構成の `dotfiles.workstation.dotfilesDir` が指す場所へ clone し、作業ツリーを変更のない状態にする。場所は checkout の root で `nix eval --raw .#nixosConfigurations.<host-id>.config.dotfiles.workstation.dotfilesDir` を実行して確かめる。実行した checkout がこの場所と異なれば、bootstrap は宣言された path を表示して止まる。
-- recovery key を読み取り専用の外部媒体から一時的に参照できるようにする。host key はこの host で生成し、別ホストの鍵をコピーしない。
-- `profiles/hosts/<host-id>.nix` が存在する host ID を使う。現在の登録値は `nixos` と `tcs-a295` である。ID は63文字以内の小文字英数字またはハイフンで構成し、英数字で始めて終える。
+WSL distributionを用意する前に、[Windows側の準備](doctor.md)でRAM、CPU、DNS、VHD、driveの条件を確認する。
+Windowsの`.wslconfig`はこのrepositoryから自動上書きされない。
+既存のNix環境では、対象hostの`dotfiles.workstation.wsl.windowsConfigTemplate`を`nix eval --raw`で取得できる。
+既存VHDの容量や保存場所は新しい設定だけでは変わらないため、既存distributionを移す場合も同じ手順のbackupとrestore条件を確認する。
 
-再現対象は tracked source と `flake.lock` から生成する system と Home Manager の設定である。AI CLI の login session、Hindsightのnamed volumeにあるproject-memory data、host keyはホスト固有であり、別ホストから複製しない。AI CLI 本体は bootstrap 時点の upstream 版を取得するため、`flake.lock` の再現対象には含まれない。
+主ユーザーの既定値はNixOS-WSLの初期ユーザーと同じ`nixos`で、checkoutの既定値は`/home/nixos/environment/dotfiles-wsl`である。
+このユーザーでログインし、Gitとflake CLIが未設定の初期imageでも使える一時的な作業環境を用意する。
+clone前は公開repositoryの`flake.lock`からroot inputのnixpkgs固定revを取得し、そのGitを使う。
+
+```bash
+export NIX_CONFIG="${NIX_CONFIG:-}"$'\nexperimental-features = nix-command flakes'
+NIXPKGS_REF=$(nix eval --impure --raw --expr '
+  let
+    lock = builtins.fromJSON (builtins.readFile (builtins.fetchurl
+      "https://raw.githubusercontent.com/YukiIto1999/dotfiles-wsl/main/flake.lock"));
+    source = lock.nodes.${lock.nodes.root.inputs.nixpkgs}.locked;
+  in "github:${source.owner}/${source.repo}/${source.rev}"
+')
+nix shell "$NIXPKGS_REF#git" --command bash
+```
+
+開始したshellで以降の初回手順を続ける。
+この準備はGitを恒久導入せず、初期imageのflake設定も書き換えない。
+
+```bash
+mkdir -p ~/environment
+git clone https://github.com/YukiIto1999/dotfiles-wsl ~/environment/dotfiles-wsl
+cd ~/environment/dotfiles-wsl
+HOST_ID=tcs-a295
+NIXPKGS_REF=$(nix eval --impure --raw --expr '
+  let
+    lock = builtins.fromJSON (builtins.readFile ./flake.lock);
+    source = lock.nodes.${lock.nodes.root.inputs.nixpkgs}.locked;
+  in "github:${source.owner}/${source.repo}/${source.rev}"
+')
+```
+
+clone後はローカルの`flake.lock`から再取得した固定revを使い、公開branchが更新されてもbootstrapのGitをcheckoutのsourceに合わせる。
+
+`HOST_ID`には`profiles/hosts/<host-id>.nix`が存在するIDを選ぶ。
+hostの設定を変える場合は、信頼できる既存環境でprofileをcommitし、そのsourceを新しいホストへcloneする。
+新しいhost IDは63文字以内の小文字英数字またはハイフンで構成し、英数字で始めて終える。
+
+checkoutのrootで、構築対象の宣言を確かめる。
+
+```bash
+nix eval --raw ".#nixosConfigurations.${HOST_ID}.config.dotfiles.workstation.username"
+nix eval --raw ".#nixosConfigurations.${HOST_ID}.config.dotfiles.workstation.dotfilesDir"
+nix eval --raw ".#nixosConfigurations.${HOST_ID}.config.dotfiles.workstation.wsl.distroName"
+git status --short
+```
+
+ユーザー名、checkoutの絶対path、Windowsのdistribution登録名は別の設定である。
+`dotfiles.workstation.wsl.distroName`の既定値は`NixOS`で、Windowsの`wsl.exe --list --verbose`に表示される名前と合わせる。
+ユーザー名やcheckoutを変更したhostでは、そのユーザーとsudo権限を初期環境で用意し、宣言どおりのpathへcloneする。
+bootstrapはsudoの実行元ユーザーと実際のcheckoutが宣言に一致しなければ止まる。
+host keyの登録を始める前のcheckoutには、未commitの変更と未追跡ファイルを残さない。
 
 ## Host key
 
-以降の command は checkout の root で実行する。この host で鍵を生成し、root だけが読める場所へ置く。
-
-```bash
-age-keygen -o /tmp/host.key
-sudo install -m 0400 -o root -g root /tmp/host.key /var/lib/sops-nix/key.txt
-```
-
-生成した公開鍵を `secrets/sops/assets/.sops.yaml` の `keys` に host anchor として追加し、`creation_rules` から参照する。併用する host の anchor は残したまま追加する。続けて recovery key で再暗号化する。
-
-```bash
-SOPS_AGE_KEY_FILE=/media/offline/recovery-key.txt \
-  sops --config secrets/sops/assets/.sops.yaml updatekeys secrets/sops/assets/secrets.json
-SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
-  sops --config secrets/sops/assets/.sops.yaml decrypt secrets/sops/assets/secrets.json > /dev/null
-```
-
-最後の復号が成功してから先へ進む。**確かめる前に旧 recipient を外すと全 secret を失う。**手順の詳細は [SOPS の鍵](sops-enrollment.md)にある。
+[SOPSの鍵](sops-enrollment.md#新しいhostの登録)の手順で、このホスト専用の鍵を生成してrecipientへ追加する。
+その手順はcheckoutの`age`と`sops`を取得し、`/var/lib/sops-nix`をroot:root、0700、`key.txt`をroot:root、0400として用意する。
+rootだけが読めるhost keyでの復号はsudo経由で行い、成功するまでbootstrapへ進まない。
+既存ホストの鍵をコピーせず、併用するrecipientを残す。
 
 変更対象を確認する。
 
 ```bash
 git diff --check
-git diff -- secrets/sops/assets
+git diff -- secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
 git status --short
 ```
 
-`git status --short` に表示される変更は `secrets/sops/assets/.sops.yaml` と `secrets/sops/assets/secrets.json` の二つだけにする。bootstrap 前は Git identity が未配備なので、この時点では commit しない。鍵の交換が済んだら recovery key をホストから取り外す。
+変更は`secrets/sops/assets/.sops.yaml`と`secrets/sops/assets/secrets.json`の二つだけにする。
+初回のGit identityはまだ配備されていないため、この時点ではcommitしない。
+復号の確認後にrecovery keyの外部媒体を取り外し、暗号化済みの差分を保持したままbootstrapを実行する。
 
 ## Bootstrap
 
-host 構成が宣言する主ユーザーから `sudo` を介し、構築対象の host ID を明示して実行する。
+hostが宣言する主ユーザーからsudoを介し、root側でも固定revのGitを含むshellを用意して対象host IDを明示する。
 
 ```bash
-HOST_ID=tcs-a295
-sudo bash workstation/activation/rebuild/impl/bootstrap.sh --host "$HOST_ID"
+sudo nix --extra-experimental-features 'nix-command flakes' \
+  shell "$NIXPKGS_REF#git" --command \
+  bash workstation/activation/rebuild/impl/bootstrap.sh --host "$HOST_ID"
 ```
 
-[bootstrap script](../../workstation/activation/rebuild/impl/bootstrap.sh) は次の順序で初回 generation を用意する。
+sudoが設定する`SUDO_USER`をそのままbootstrapへ渡すため、rootへ直接ログインしたshellでは実行しない。
+bootstrapはrootと主ユーザーのNix呼び出しにflake用のflagを明示し、upstreamのboot処理にも同じfeature設定を渡す。
+初期imageのroot側にGitがない場合やflake CLIが無効な場合でも、通常ユーザーの一時shellのPATHだけには依存しない。
 
-| 順序 | 処理 |
-|---|---|
-| 1 | root として実行され、`sudo` の実行元ユーザーが分かることを確認する |
-| 2 | root の Git `safe.directory` に checkout を登録する |
-| 3 | flake、lock、暗号化済み secrets、host key の存在と host key の owner、mode を検査する |
-| 4 | 選択した host 構成の `dotfiles.workstation.username` と `dotfiles.workstation.dotfilesDir` が、`sudo` の実行元ユーザーと実行した checkout に一致することを確認する |
-| 5 | flake build から見えない未追跡ファイルがないことを確認する |
-| 6 | host key で `secrets/sops/assets/secrets.json` を復号できることを確認する |
-| 7 | 選択した host 構成の AI CLI を upstream から `~/.local/bin` へ配置する |
-| 8 | 選択した host 構成と flake が固定した `nixos-rebuild` で boot generation を作る |
-| 9 | `/etc/nixos` を checkout への symlink にする |
+[bootstrap script](../../workstation/activation/rebuild/impl/bootstrap.sh)は、鍵の存在と権限、hostとcheckoutの一致、未追跡ファイルの不在、host keyによる復号を検査する。
+続いて採用したAgent clientを取得し、flakeが固定した`nixos-rebuild`で対象hostのboot generationを作り、`/etc/nixos`をcheckoutへのsymlinkにする。
+bootstrapは差分を自動commitせず、通常のrebuildのdirty拒否も変更しない。
 
-## 初回同期
+## 再起動とcommit
 
-bootstrap が完了したら、PowerShell から NixOS-WSL を停止して起動する。
+bootstrapが表示するdistribution名を使い、PowerShellで対象のNixOS-WSLだけを停止して起動する。
+他のsessionが作業中の場合は、その作業が終わるまで停止しない。
+既定の登録名では次のcommandになる。
 
 ```powershell
-wsl -t NixOS
-wsl -d NixOS
+wsl.exe --terminate 'NixOS'
+wsl.exe --distribution 'NixOS'
 ```
 
-再ログイン後は、bootstrapが表示したhost別の継続手順を通常ユーザーで実行する。container Capabilityを選ぶhostでは、upstream OCI imageを同期してから同じcheckoutを適用する。以下の短いcommandは、active host configurationが配備したものを使う。
-
-checkoutから対象hostを明示して実行する場合は、次のpathを使う。
+再ログイン後は、通常ユーザーで元のcheckoutへ戻る。
+boot generationが配備したGit identityを確認し、暗号化済みのenrollment差分だけをcommitする。
 
 ```bash
-nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status
-nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages
+cd ~/environment/dotfiles-wsl
+git var GIT_AUTHOR_IDENT
+git diff --check
+git diff -- secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
+git status --short
+git add -- secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json
+git commit -m 'chore: hostの鍵登録'
+git status --short
 ```
-active host configurationが配備したcommandは、次のように短い名前で実行する。
+
+checkoutを変更したhostでは、bootstrapが表示する`cd`のpathを使う。
+identityの確認やcommitが失敗した場合は、その原因を調べて直し、未commitのまま通常のrebuildへ進まない。
+commit後のtracked working treeがcleanであることを確認する。
+
+## 初回同期と適用
+
+containerを選ぶhostでは、配備済みの短いcommandでupstream OCI imageを同期してから同じcheckoutを適用する。
 
 ```bash
 dotfiles-sync-images
 dotfiles-rebuild
 ```
 
-container Capabilityを一つも選ばないhostでは同期command自体を配備しない。bootstrapの表示どおり、rebuildだけを実行する。
+containerを一つも選ばないhostには同期commandを配備しないため、bootstrapの表示どおり`dotfiles-rebuild`だけを実行する。
+checkoutから別hostを明示して同期する入口は[OCI images](oci-images.md)にある。
 
-```bash
-dotfiles-rebuild
-```
+初回boot generationのcontainer unitは、Docker cacheにimageがないため失敗することがある。
+image同期後のrebuildでserviceを収束させる。
+rebuildがWSL再起動を指示した場合は、表示された手順を完了してから認証と検証へ進む。
+switchが非ゼロで終わった場合は、前世代がactiveだと決めつけず、[Rebuildの調査とrollback](rebuild.md#失敗時の調査)を使う。
 
-初回boot generationのcontainer unitは、Docker cacheにupstream imageがないため失敗し得る。containerを選ぶhostでは、`dotfiles-sync-images`の後に`dotfiles-rebuild`を実行すると、同期済みimageを使ってserviceが収束する。rebuildが別のWSL再起動を指示した場合は、表示された手順を完了してから検証へ進む。
+## 認証と検証
 
-## 検証
-
-system generation、service、managed file、OCI image、AI CLI、MCP の実状態を検査する。
+採用したAgent clientを起動し、そのclientのlogin手順で認証する。
+OMPを選ぶhostでは、[subscription login](agent-clients.md#omp-の-subscription-login)を使う。
+GitHub accountはSOPSから配備されるため、`gh auth status`で確認し、別のホストのlogin sessionはコピーしない。
+認証後は採用したclientで実際の接続を確認する。
 
 ```bash
 dotfiles-doctor
-git diff --check
-git diff -- secrets/sops/assets
+systemctl --failed
 git status --short
 ```
 
-doctor が成功し、`git status --short` に暗号化済みファイル二つ以外の変更がないことを確認する。sops-nix が配備した Git identity を使い、`secrets/sops/assets/.sops.yaml` と `secrets/sops/assets/secrets.json` を同じ commit に記録する。
+doctorの終了statusが0でも`warn`は残るため、[Doctorの結果](doctor.md#結果)でwarningを確認する。
+初回構築の成功条件は、host keyによる復号、enrollment差分のcommit、必要なimageの同期、通常のrebuildの成功、再起動指示の完了、採用clientの認証と接続、doctorのfailure解消、cleanなtracked working treeである。
+これらを実行していないホストは構築済みとして扱わない。
 
-## 別 host への再現
+## 別ホストへの再現
 
-別ホストでも clone から検証まで同じ順序を使い、ホストごとに登録済みの host ID と新しい host key を使う。既存ホストの `/var/lib/sops-nix/key.txt` や `~/.config/sops/age/keys.txt` はコピーしない。
+tracked sourceと`flake.lock`はsystemとHome Manager設定の再現対象である。
+Agent CLI本体はinstallerがupstreamから取得するため、取得した版は[Agent clientの確認手順](agent-clients.md)で別に記録する。
+CLIのlogin session、host key、採用したcontainerの永続data、Windowsの資源とdistribution登録はsourceのcloneだけでは再現されない。
+永続dataを引き継ぐ場合は、そのdataのbackupとrestoreを行い、空のdataでの初回起動をrestoreの成功とみなさない。
+dataの所在、停止とexport、元のdistributionを消さないrestoreの受入条件は[データの復旧](recovery.md)に従う。
 
-memory と swap の既定値は実装側の共通方針で、差が必要な host だけ対応する [`profiles/hosts/`](../../profiles/hosts) の profile から `dotfiles.workstation.swap` または `dotfiles.workstation.windowsMemoryCommit` を上書きする。Windows drive は profile に書かない。doctor が WSL の mount から実行時に見つける。
+全host共通のCapabilityは[`profiles/workstation.nix`](../../profiles/workstation.nix)、host固有の選択は[`profiles/hosts/`](../../profiles/hosts)の`dotfiles.capabilities.enabled`で管理する。
+RAM、CPU、disk、DNS、drive、VHD、distribution名のhost差は[Windows側の準備](doctor.md)で確認する。
 
-全host共通のCapabilityは[`profiles/workstation.nix`](../../profiles/workstation.nix)、containerを含むhost固有のCapabilityは同じhost profileの`dotfiles.capabilities.enabled`で選ぶ。`project-memory`、`web-content`、`web-discovery`を外すと、対応するcontainerだけでなくMCP target、credential、health observation、client integrationも配備されない。container backendを一つも選ばないhostではDocker自体を配備しない。
-
-新しい enrollment を始める前に、直前のホストで生じた暗号化済み差分を commit し、その repository を利用する全ホストへ同期する。bootstrap 前に差分を退避する必要がある場合は、平文を保存せず、外部媒体へ Git patch を作る。
+次のenrollmentを始める前に、暗号化済み差分をcommitしたsourceを併用する全ホストへ同期する。
+bootstrap前に中断する場合は、平文やhost keyを含めず、暗号化済み差分だけを外部媒体へ保存する。
 
 ```bash
-git diff --binary -- secrets/sops/assets \
-  > /media/offline/desktop-nixos-enrollment.patch
+git diff --binary -- secrets/sops/assets/.sops.yaml secrets/sops/assets/secrets.json \
+  > /media/offline/host-enrollment.patch
 ```

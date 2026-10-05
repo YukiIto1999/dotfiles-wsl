@@ -37,7 +37,7 @@ let
     };
   };
   windowsMemoryCommit = {
-    powershellCommand = "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
+    powershellCommand = cfg.wsl.powershellCommand;
     metric = "used-percent";
     warning = cfg.windowsMemoryCommit.warning;
     failure = cfg.windowsMemoryCommit.failure;
@@ -93,8 +93,8 @@ in
       };
       minimumTotalGiB = lib.mkOption {
         type = lib.types.ints.positive;
-        default = 8;
-        description = "zram と disk swap を合わせた最小容量。";
+        default = 1;
+        description = "zram と disk swap を合わせた最小容量 GiB";
       };
     };
     windowsMemoryCommit = {

@@ -21,9 +21,9 @@ let
     name = lib.removeSuffix ".slice" containerPlacement.undeclared;
     # 値の根拠は docs/architecture/ai-tooling.md の「containerの配置と上限」
     sliceConfig = {
-      MemoryHigh = "3G";
-      MemoryMax = "4G";
-      MemorySwapMax = "4G";
+      MemoryHigh = "7.5%";
+      MemoryMax = "10%";
+      MemorySwapMax = "10%";
       CPUWeight = 50;
     };
   };

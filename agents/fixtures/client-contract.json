@@ -55,7 +55,7 @@
       "versionArgs": [
         "--version"
       ],
-      "rulesDestination": ".claude/CLAUDE.md",
+      "rulesDestination": null,
       "skillsDestination": ".claude/skills",
       "subagents": {
         "mode": "rendered",

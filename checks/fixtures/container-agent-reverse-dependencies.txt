@@ -1,4 +1,4 @@
-config.dotfiles.agents.packages.apm
-import ../../agents/package/apm.nix
+config.dotfiles.agents.clients.omp
+import ../../agents/module.nix
 builtins.readFile ${self}/agents/module.nix
 builtins.readFile (self + "/agents/module.nix")

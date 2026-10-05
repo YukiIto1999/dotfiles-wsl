@@ -16,7 +16,10 @@ Accepted
 
 ## Decision
 
-構造に影響する決定を `docs/adr/` へ置く。ファイル名は 4 桁の連番と英語 kebab の slug とし、一つの判断に一つの記録を対応させる。節構成は Status、Context、Decision、Consequences とし、比較した候補と採らなかった理由を Context に含める。覆すときは古い記録を消さず、置換済みとして印を付ける。
+構造に影響する現在有効な決定を`docs/adr/`へ置く。
+ファイル名は4桁の連番と英語kebabのslugとし、一つの判断に一つの記録を対応させる。
+節構成はStatus、Context、Decision、Consequencesとし、比較した候補と採らない理由をContextに含める。
+置換済みの記録は非追跡の`work/`かGit履歴へ残し、追跡する文書と参照は現在有効な判断へ揃える。
 
 変更の直接の目的は commit message と PR 説明が持ち、構造に影響する判断の文脈、代替案、帰結はこの記録が持つ。`cohesion.md` の「設計文書の規律」はこの分担に合わせて改める。
 

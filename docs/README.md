@@ -1,6 +1,8 @@
 # ドキュメント
 
-ルートの [README](../README.md) から着手した作業を、種別別の文書へ引き継ぐ。ディレクトリと文書の種別は一対一で、各文書は冒頭に読み手を書く。
+ルートの[README](../README.md)から、目的に合う現在の手順、構成、参照先へ進む。
+`docs/`に作業ログ、日付ごとの実測、過去の調査、未実装の計画を蓄積しない。
+それらは追跡対象外の`work/`へ置き、有効になった契約と手順だけを対応する文書へ反映する。
 
 ## 手順 — `operations/`
 
@@ -8,6 +10,7 @@
 
 - [セットアップ](operations/getting-started.md)では、新規ホストの鍵の用意から初回検証までの順序が分かる。
 - [rebuild](operations/rebuild.md)では、通常適用の効果判定と中断後の再開方法が分かる。
+- [データの復旧](operations/recovery.md)では、設定と永続dataの再現境界、WSLのbackup、別名restoreの成功条件が分かる。
 - [SOPS の鍵](operations/sops-enrollment.md)では、鍵の置き場、secret の編集、新しい host の登録が分かる。
 - [secrets](operations/secrets.md)では、暗号化済み secret の編集方法と鍵の扱いが分かる。
 - [OCI image](operations/oci-images.md)では、upstream image の確認、同期、更新手順が分かる。
@@ -25,8 +28,8 @@
 - [構成概要](architecture/overview.md)では、Profile、Workstation、Agent、Skill、Capability、Platform、運用基盤の責務境界が分かる。
 - [責務と履歴の凝集](architecture/cohesion.md)では、unit、file、commitを分ける基準が分かる。
 - [AI tooling](architecture/ai-tooling.md)では、AgentからSkill、Capability、MCP/container Platformへ至る依存関係が分かる。
-- [Repository所有Skillのcomposition](architecture/repository-skills.md)では、外部repository所有Skillを固定、登録、client配備する計画と境界が分かる。
-- [Skill portfolio](architecture/skills.md)では、Skill registry、候補の責務境界、donorの扱いが分かる。
+- [Skill source](architecture/repository-skills.md)では、外部repository所有Skillの固定、登録、明示的な差替えの境界が分かる。
+- [Skill portfolio](architecture/skills.md)では、採用済みSkillの責務とsourceの来歴が分かる。
 - [セキュリティ設計](architecture/security.md)では、credential、host key、通信経路の信頼境界が分かる。
 
 ## 参照 — `reference/`
@@ -41,4 +44,7 @@
 
 構造に影響する判断の経緯を確かめたい人が、判断を見直すときに読む。
 
-一つの判断に一つの記録を対応させ、4桁の連番と英語 kebab の slug で名付ける。記録は Status、Context、Decision、Consequences を持ち、比較した候補と採らなかった理由を Context に含める。覆した記録は消さず、置換済みとして印を付ける。個別の記録はこの索引へ列挙せず、`docs/adr/` の内容を正本とする。
+構造に影響する現在有効な判断を、`docs/adr/`へ一件ずつ置く。
+ファイル名は4桁の連番と英語kebabのslugにする。
+Status、Context、Decision、Consequencesで現在の契約、比較した候補、採らない理由を示す。
+判断を置き換えた場合は、過去の記録を`work/`かGit履歴へ残し、追跡文書の本文と参照を新しい判断へ揃える。

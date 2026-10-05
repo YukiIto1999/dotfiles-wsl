@@ -209,7 +209,7 @@ let
         default = [ "--version" ];
       };
       install = lib.mkOption { type = installType; };
-      rulesDestination = lib.mkOption { type = types.str; };
+      rulesDestination = lib.mkOption { type = types.nullOr types.str; };
       skillsDestination = lib.mkOption { type = types.str; };
       subagentMode = lib.mkOption {
         type = types.enum [
@@ -374,10 +374,12 @@ let
     in
     {
       enabledIds = map displayEmpty (builtins.filter (id: !nonEmpty id) cfg.enabled);
-      clientIds = map displayEmpty (builtins.filter (id: !nonEmpty id) clientNames);
+      clientIds = map displayEmpty (builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.registry));
       binaries = invalidClientsFor (client: [ client.binary ]);
       versionArguments = invalidClientsFor (client: client.versionArgs);
-      rulesDestinations = invalidClientsFor (client: [ client.rulesDestination ]);
+      rulesDestinations = invalidClientsFor (
+        client: lib.optional (client.rulesDestination != null) client.rulesDestination
+      );
       skillsDestinations = invalidClientsFor (client: [ client.skillsDestination ]);
       subagentsDestinations = invalidClientsFor (
         client: lib.optional (client.subagentsDestination != null) client.subagentsDestination
@@ -428,6 +430,11 @@ in
       type = types.listOf types.str;
       description = "この host が必要とする agent client ID。";
     };
+    automaticUpdates.clients = lib.mkOption {
+      type = types.listOf types.str;
+      default = [ ];
+      description = "自動更新する採用済み client ID。空なら手動更新のみ。";
+    };
     packages = lib.mkOption {
       type = types.attrsOf types.package;
       readOnly = true;
@@ -441,6 +448,11 @@ in
       description = "agent client ID ごとの実行 path。";
     };
     runtime = {
+      skillRoots = lib.mkOption {
+        type = types.listOf (types.addCheck types.str validRelativeDestination);
+        readOnly = true;
+        internal = true;
+      };
       cache = lib.mkOption {
         type = types.submodule {
           options = {
@@ -469,7 +481,7 @@ in
       timers = lib.mkOption {
         type = types.submodule {
           options = {
-            autoupdate = lib.mkOption { type = runtimeTimerType; };
+            autoupdate = lib.mkOption { type = types.nullOr runtimeTimerType; };
             projectCacheGc = lib.mkOption { type = runtimeTimerType; };
           };
         };
@@ -478,20 +490,20 @@ in
       };
     };
     slice = {
-      memoryHighGiB = lib.mkOption {
-        type = types.ints.positive;
-        default = 24;
-        description = "agents.slice の MemoryHigh（GiB）。超えた分は slice 内の reclaim と throttle で抑える。";
+      memoryHighPercent = lib.mkOption {
+        type = types.ints.between 1 99;
+        default = 60;
+        description = "agents.sliceのMemoryHighを物理RAMの百分率で指定する。";
       };
-      memoryMaxGiB = lib.mkOption {
-        type = types.ints.positive;
-        default = 28;
-        description = "agents.slice の MemoryMax（GiB）。超えると kernel が slice 内の process を OOM kill する。";
+      memoryMaxPercent = lib.mkOption {
+        type = types.ints.between 1 99;
+        default = 70;
+        description = "agents.sliceのMemoryMaxを物理RAMの百分率で指定する。";
       };
-      memorySwapMaxGiB = lib.mkOption {
-        type = types.ints.unsigned;
-        default = 8;
-        description = "agents.slice の MemorySwapMax（GiB）。";
+      memorySwapMaxPercent = lib.mkOption {
+        type = types.ints.between 0 100;
+        default = 20;
+        description = "agents.sliceのMemorySwapMaxを物理RAMの百分率で指定する。";
       };
       cpuWeight = lib.mkOption {
         type = types.ints.between 1 10000;
@@ -499,15 +511,15 @@ in
         description = "agents.slice の CPUWeight。同じ user manager の他の slice の既定 100 より低くする。";
       };
       userManager = {
-        memoryHighGiB = lib.mkOption {
-          type = types.ints.positive;
-          default = 27;
-          description = "user manager（user@.service）全体の MemoryHigh（GiB）。agents.slice と、Chromium が自ら作る app.slice の scope を合わせて抑える。";
+        memoryHighPercent = lib.mkOption {
+          type = types.ints.between 1 99;
+          default = 67;
+          description = "user manager全体のMemoryHighを物理RAMの百分率で指定する。";
         };
-        memoryMaxGiB = lib.mkOption {
-          type = types.ints.positive;
-          default = 30;
-          description = "user manager（user@.service）全体の MemoryMax（GiB）。agents.slice の外へ出た Chromium も含めて VM の残りを基盤に残す。";
+        memoryMaxPercent = lib.mkOption {
+          type = types.ints.between 1 99;
+          default = 75;
+          description = "user manager全体のMemoryMaxを物理RAMの百分率で指定する。";
         };
       };
     };
@@ -533,10 +545,16 @@ in
         internal = true;
       };
     };
-    clients = lib.mkOption {
+    registry = lib.mkOption {
       type = types.attrsOf clientType;
       default = { };
+      description = "選択可能な agent client adapter。登録だけでは配備しない。";
+    };
+    clients = lib.mkOption {
+      type = types.attrsOf clientType;
+      readOnly = true;
       internal = true;
+      description = "enabled が選んだ client adapter。";
     };
   };
 
@@ -544,13 +562,16 @@ in
     cfg:
     let
       clientNames = builtins.attrNames cfg.clients;
+      unknownEnabledClients = builtins.filter (name: !(builtins.hasAttr name cfg.registry)) cfg.enabled;
       invalidSubagentClients = builtins.filter (
         name: !subagentContractValid cfg.clients.${name}
       ) clientNames;
       invalidSkillProjectionClients = builtins.filter (
         name: !skillProjectionContractValid cfg.clients.${name}
       ) clientNames;
-      invalidClientNames = builtins.filter (name: !validClientName name) clientNames;
+      invalidClientNames = builtins.filter (name: !validClientName name) (
+        builtins.attrNames cfg.registry
+      );
       invalidInstallClients = builtins.filter (
         name: !installContractValid cfg.clients.${name}
       ) clientNames;
@@ -559,12 +580,12 @@ in
         let
           client = cfg.clients.${clientName};
         in
-        [
-          {
-            inherit clientName;
-            field = "rulesDestination";
-            value = client.rulesDestination;
-          }
+        lib.optional (client.rulesDestination != null) {
+          inherit clientName;
+          field = "rulesDestination";
+          value = client.rulesDestination;
+        }
+        ++ [
           {
             inherit clientName;
             field = "skillsDestination";
@@ -635,8 +656,16 @@ in
           "agent client IDs must be safe basenames: " + lib.concatStringsSep ", " invalidClientNames;
       }
       {
-        assertion = lib.sort builtins.lessThan cfg.enabled == lib.sort builtins.lessThan clientNames;
-        message = "dotfiles.agents.enabled must exactly match the declared client keys";
+        assertion = unknownEnabledClients == [ ];
+        message =
+          "dotfiles.agents.enabled references unavailable adapters: "
+          + lib.concatStringsSep ", " unknownEnabledClients;
+      }
+      {
+        assertion =
+          cfg.automaticUpdates.clients == lib.unique cfg.automaticUpdates.clients
+          && builtins.all (name: builtins.elem name cfg.enabled) cfg.automaticUpdates.clients;
+        message = "dotfiles.agents.automaticUpdates.clients must contain unique enabled client IDs";
       }
       {
         assertion = cfg.shared.skills != { };

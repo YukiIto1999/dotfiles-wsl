@@ -17,13 +17,16 @@ _:
       git.workIdentity = "~/projects/business/";
     };
 
-    agents.enabled = [
-      "antigravity"
-      "claude"
-      "codex"
-      "omp"
-      "opencode"
-    ];
+    agents = {
+      enabled = [
+        "antigravity"
+        "claude"
+        "codex"
+        "omp"
+        "opencode"
+      ];
+      automaticUpdates.clients = [ "omp" ];
+    };
 
     capabilities.enabled = [
       "browser-automation"

@@ -19,8 +19,8 @@ let
     (mkNixosSystem [
       normalMachineModule
       {
-        dotfiles.agents.clients.antigravity.runtimeWrapperMode = lib.mkForce "managed";
-        dotfiles.agents.clients.codex.runtimeWrapperMode = lib.mkForce "unsupported";
+        dotfiles.agents.registry.antigravity.runtimeWrapperMode = lib.mkForce "managed";
+        dotfiles.agents.registry.codex.runtimeWrapperMode = lib.mkForce "unsupported";
       }
     ]).config;
   runtimeWrapperModeVariantHome =
@@ -64,7 +64,7 @@ let
   actualContract = lib.mapAttrs (_: projectClient) clients;
 
   clientOptions = builtins.removeAttrs (
-    hostOptions.dotfiles.agents.clients.type.nestedTypes.elemType.getSubOptions
+    hostOptions.dotfiles.agents.registry.type.nestedTypes.elemType.getSubOptions
       [ ]
   ) [ "_module" ];
   managedFileOptions = builtins.removeAttrs (
@@ -91,6 +91,12 @@ let
       elementType = hostOptions.dotfiles.agents.clients.type.nestedTypes.elemType.name;
       internal = hostOptions.dotfiles.agents.clients.internal or false;
       hasDefault = hostOptions.dotfiles.agents.clients ? default;
+      readOnly = hostOptions.dotfiles.agents.clients.readOnly or false;
+    };
+    registry = {
+      type = hostOptions.dotfiles.agents.registry.type.name;
+      elementType = hostOptions.dotfiles.agents.registry.type.nestedTypes.elemType.name;
+      hasDefault = hostOptions.dotfiles.agents.registry ? default;
     };
     clientExecutables = {
       type = hostOptions.dotfiles.agents.clientExecutables.type.name;
@@ -146,6 +152,12 @@ let
       type = "attrsOf";
       elementType = "submodule";
       internal = true;
+      hasDefault = false;
+      readOnly = true;
+    };
+    registry = {
+      type = "attrsOf";
+      elementType = "submodule";
       hasDefault = true;
     };
     clientExecutables = {
@@ -166,7 +178,7 @@ let
       install = "either";
       lspMode = "enum";
       managedFiles = "attrsOf";
-      rulesDestination = "str";
+      rulesDestination = "nullOr";
       runtimeWrapperMode = "enum";
       skillsDestination = "str";
       skillProjectionMode = "enum";
@@ -282,7 +294,12 @@ let
             );
             default = [ ];
           };
-          config.dotfiles.agents = candidate;
+          config.dotfiles.agents = builtins.removeAttrs candidate [ "clients" ] // {
+            registry = candidate.clients;
+            clients = lib.genAttrs (builtins.filter (
+              name: builtins.hasAttr name candidate.clients
+            ) candidate.enabled) (name: config.dotfiles.agents.registry.${name});
+          };
           config.assertions = agentContract.assertionsFor config.dotfiles.agents;
         })
       ];
@@ -295,7 +312,7 @@ let
           evaluated = evalContract candidate;
           evaluatedContract = evaluated.config.dotfiles.agents;
           contractWithoutSeedCommands = evaluatedContract // {
-            clients = lib.mapAttrs (
+            registry = lib.mapAttrs (
               _: client:
               client
               // {
@@ -303,7 +320,8 @@ let
                   _: file: builtins.removeAttrs file [ "seedMigrationCommand" ]
                 ) client.managedFiles;
               }
-            ) evaluatedContract.clients;
+            ) evaluatedContract.registry;
+            clients = contractWithoutSeedCommands.registry;
           };
         in
         builtins.deepSeq contractWithoutSeedCommands (
@@ -556,7 +574,16 @@ in
       failedContractMessages (renameClient "codex" ".")
     );
     assert builtins.all (valid: valid) (builtins.attrValues (requiredStringChecksFor baseCandidate));
-    assert !contractIsValid (baseCandidate // { enabled = [ "claude" ]; });
+    assert contractIsValid (baseCandidate // { enabled = [ "claude" ]; });
+    assert !contractIsValid (baseCandidate // { enabled = [ "missing" ]; });
+    assert !contractIsValid (baseCandidate // { automaticUpdates.clients = [ "missing" ]; });
+    assert contractIsValid (
+      baseCandidate
+      // {
+        enabled = [ "omp" ];
+        automaticUpdates.clients = [ "omp" ];
+      }
+    );
     assert !contractIsValid (mutateClient "claude" { subagentFormat = "toml"; });
     assert
       !contractIsValid (

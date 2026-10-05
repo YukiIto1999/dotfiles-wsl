@@ -8,7 +8,10 @@
 
 [`flake.nix`](../../flake.nix)は、`module.nix`を持つdirectoryを[`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)で収集し、NixOS-WSL、sops-nix、Home Managerと同じNixOS評価へ渡す。[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加Capabilityを持つ。Skillは選択したCapabilityとSkill依存から導く。`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
 
-host profileの値は`dotfiles.workstation`などの型付きoptionを通してowner moduleへ渡す。Windows driveはhostごとに異なるが宣言せず、storage moduleがWSLのmountから実行時に見つけて観測する。zramは物理memoryに対する割合で算出するため、memory容量そのものは宣言しない。hostごとに上書きできるのは、swap容量、Windows committed memoryの閾値、作業日誌の機械名である。
+host profileの値は型付きoptionを通してowner moduleへ渡す。
+WSL登録名、Windows準備用のVM資源、追加drive、DNS、VHD方針、Nixの並列度と空き容量reserveはhostで選ぶ。
+追加driveのmount宣言と、storageが実際のWSL mountから導くWindows driveの観測inventoryは別であり、観測対象をprofileへ写さない。
+zramとagentのmemory上限は物理RAMの割合で指定し、現在PCのRAM容量を共通moduleへ固定しない。
 
 ```text
 checkout
@@ -34,8 +37,6 @@ WSLのmemory安定性は[`workstation/stability/module.nix`](../../workstation/s
 空きを使い切らないことはAgent runtimeの`agents.slice`の上限が受け持ち、空きblockはkernelの既定のcompactionとmigratetypeのfallbackが作る。
 そのため`vm.min_free_kbytes`、`vm.watermark_scale_factor`、`vm.compaction_proactiveness`はkernelの既定値にする。
 minとwatermarkの間隔を引き上げるとhigh watermarkに比例するboostも大きくなり、空きblockがあってもwatermarkの検査で確保が落ちるためである。
-2026-10-02の確保失敗では、Normal zoneにorder 7以上の空きblockが174個あったが、空き972 MiBに対してboost 740 MiBを含むminが971 MiBあり、確保の大きさと予約分を引いた空きがminを下回った。
-既定値のminは、THPを有効にしたkernelでkhugepagedがzoneごとに11個のpageblockを空けるように決める値で、このVMのNormal zoneではboostを含めても最大で約208 MiBになる。
 `vm.defrag_mode`は無効にする。
 有効にするとunmovableな高次pageの確保が他のmigratetypeのblockを借りられず、新しいWSL sessionが使うVMBus ringの確保が失敗するためである。
 WSLのkernelはdistroの再起動を越えて旧世代の値を保つため、既定値も宣言する。

@@ -18,12 +18,12 @@
 
 stdenvNoCC.mkDerivation rec {
   pname = "apm";
-  version = "0.26.0";
+  version = "0.33.0";
 
   # nixpkgs に無いので upstream の release を固定する
   src = fetchurl {
     url = "https://github.com/microsoft/apm/releases/download/v${version}/apm-linux-x86_64.tar.gz";
-    hash = "sha256-OvukVcUoOFK6TDkvZovnwntlvEoPpgqLU6RibFJihDE=";
+    hash = "sha256-5jdEAsdDGPfIvvl6kNhXLQSf2rDcOHFJLGsGR66eiB8=";
   };
 
   sourceRoot = "apm-linux-x86_64";

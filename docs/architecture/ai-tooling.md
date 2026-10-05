@@ -131,6 +131,10 @@ AGENTSにある、過去の利用者指示を会話の原文で確かめる規�
 
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
 
+SearXNGのstdio providerはprocess単位でtool呼出しのrateと同時実行数を制限するため、共有frontに接続するsessionも同じ上限を使う。
+呼出しrateは[`package.nix`](../../capabilities/web-discovery/searxng/mcp/package.nix)の`MCP_TOOL_RATE_MAX`で指定し、同時実行数は固定したupstream packageの既定値を使う。
+HTTP専用のsession作成rateをstdioの呼出し制限として設定しない。
+
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
 
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。

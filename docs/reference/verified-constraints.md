@@ -49,7 +49,7 @@
 | Zvec-Grep front が native Streamable HTTP endpoint を直接公開し、agent toolset が意味検索だけを公開し、boot 時だけ前 boot の instance lock を除去する。front と direct mode の CLI は hash 固定の embedding model を network なしで読む | `zvec-grep-front` |
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
-| 上流 release から作った binary が空環境で起動する | `toolchain-binary-runs` |
+| Zvec-GrepのCLIが固定文字列の検索で一致した行を返す | `toolchain-binary-runs` |
 | Agent Package Manager が宣言した version で起動する | `agent-apm-binary-runs` |
 | LSP roster と対応 client の登録が一致し、client ごとの server id 規則と OMP の有効条件を満たし、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |

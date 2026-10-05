@@ -49,7 +49,6 @@ let
     "test"
     "touch"
     "tr"
-    "true"
     "uname"
     "uniq"
     "wc"

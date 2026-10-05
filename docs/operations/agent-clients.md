@@ -10,7 +10,11 @@ nix run .#dotfiles-install-agents
 
 current generation では `dotfiles-agent-autoupdate.timer` が同じ installer を日次実行する。起動予定と直近の結果は systemd から確認する。
 
-installer は宣言済みの全 client を更新する。一つの client の失敗は他の client の更新を止めず、失敗した client 名だけが service の終了時に報告される。
+installerは宣言済みの全clientのinstallerとversion probeを実行する。
+一つのclientの失敗は他のclientの処理を止めず、失敗したclient名だけがserviceの終了時に報告される。
+
+Antigravityのbootstrapは既存のbinaryを更新しないため、導入済みのCLIは`agy update`で更新する。
+実行中のsessionは終了させず、新しいbinaryは次回起動から使う。
 
 ```sh
 systemctl status dotfiles-agent-autoupdate.timer

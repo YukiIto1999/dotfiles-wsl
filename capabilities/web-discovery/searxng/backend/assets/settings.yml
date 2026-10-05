@@ -15,5 +15,3 @@ engines:
     disabled: false
   - name: yandex
     disabled: false
-  - name: presearch
-    disabled: false

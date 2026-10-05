@@ -17,6 +17,24 @@ dotfiles-rebuild          # 適用する
 
 **WSL の再起動要否を判定する。**`/sbin/init` の入れ替えや default user の変更は、`wsl.exe --terminate` を経ないと反映されない。`--plan` が `switch`、`switch-restart`、`boot-restart`、`boot-two-stage` のいずれかを返す。
 
+inputやpackageを更新すると、MCP frontやcontainerを含むserviceがactivationで再起動し得る。
+別のsessionが作業中なら、source更新と検査までを先に済ませ、service切替とWSL再起動はその作業が終わってから実行する。
+
+## Inputの更新
+
+NixOS、WSL、Home Managerのstable branchを維持したまま、checkoutのrootで更新する。
+
+```sh
+nix flake update nixpkgs nixos-wsl home-manager sops-nix
+```
+
+devenvとactrunは、`flake.nix`の公式release commitを差し替えた後に`nix flake lock`でupstreamの依存を固定する。
+hostのnixpkgsには追従させず、host全体のchannelを変えずに各公式packageのcompilerと依存を使う。
+devenvの公式packageはimport-from-derivationを使うため、version評価にもそのderivationの取得またはbuildが必要となる。
+
+NixOS-WSLの更新で既定の`wsl.extraBin`に追加されたコマンドは、project側の追加から外す。
+`wsl-extra-bin-contract`で、各`/bin`の名前が一意であることと必須コマンドの実行可能性を確認する。
+
 ## 失敗したとき
 
 activation が失敗しても profile は前の generation を指したままか、切り替わった上で一部の unit だけが失敗している。どちらも打ち直しで進む。

@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  self,
   ...
 }:
 
@@ -138,9 +139,9 @@ in
   };
 
   config.dotfiles.toolchain.packages = {
-    # GitHub Actions のローカル実行。nix 統合を持つ
-    actrun = pkgs.callPackage ./package/actrun.nix { };
+    actrun = self.inputs.actrun.packages.${pkgs.stdenv.hostPlatform.system}.default;
     zvec-grep = pkgs.callPackage ./package/zvec-grep.nix { };
+    devenv = self.inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
     inherit (pkgs)
       # 言語 runtime
@@ -164,7 +165,6 @@ in
       semgrep
       # 環境の観測と実行
       just
-      devenv
       nvd
       wget
       curl

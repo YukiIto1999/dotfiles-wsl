@@ -7,16 +7,16 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "agentgateway";
-  version = "1.3.1";
+  version = "1.6.0";
 
   src = fetchFromGitHub {
     owner = "agentgateway";
     repo = "agentgateway";
     tag = "v${version}";
-    hash = "sha256-Sx/7ClG3D+o1p6+tam61O3K0EfcaDe7xKXnodUxwOtE=";
+    hash = "sha256-rxRDONkTVFbav+cVO+aYtIzjcFu9JfnD/DTwumXgEYA=";
   };
 
-  cargoHash = "sha256-AtdPXCxSf/PHHnCDOzLojQyRRbXraObpim6RNF2gybw=";
+  cargoHash = "sha256-PCE/wyslj4UPHocBKNp24QaqeKIGXRig9KZovBqdcHo=";
 
   patches = [
     ./agentgateway/mcp-session-recovery.patch

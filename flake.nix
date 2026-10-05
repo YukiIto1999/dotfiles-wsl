@@ -13,13 +13,16 @@
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
+    devenv.url = "github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222";
+    actrun.url = "github:mizchi/actrun/1db9aff5b364de6eacda68e3f2ce2238f9992272";
+
     orca = {
-      url = "github:stablyai/orca/637dc30a3211ec0667c55118a4d17edbee5cff80";
+      url = "github:stablyai/orca/a7927b28ce45cbb044add478d957abe36c99ccd8";
       flake = false;
     };
 
     architectureStandard = {
-      url = "github:YukiIto1999/architecture-standard/56b051447f518c6b4f1631405deab3535934eeea";
+      url = "github:YukiIto1999/architecture-standard/e5c6533d92318e94471c0316aa3b522442f182dd";
       flake = false;
     };
   };

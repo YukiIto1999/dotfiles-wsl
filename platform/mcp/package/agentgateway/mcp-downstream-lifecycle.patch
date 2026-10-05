@@ -1,39 +1,45 @@
 diff --git a/crates/agentgateway/src/mcp/handler.rs b/crates/agentgateway/src/mcp/handler.rs
-index 80ed380..2a475fa 100644
 --- a/crates/agentgateway/src/mcp/handler.rs
 +++ b/crates/agentgateway/src/mcp/handler.rs
-@@ -845,6 +845,9 @@ pub(crate) struct GuardrailsCtx {
+@@ -1803,6 +1803,9 @@ pub(crate) struct GuardrailsCtx {
  	pub req_ctx: Arc<IncomingRequestContext>,
  }
  
 +// 下流 client の 60 秒 read timeout を下回る SSE keepalive 間隔
 +const DOWNSTREAM_SSE_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(15);
 +
- fn messages_to_response(
+ pub(super) fn messages_to_response(
  	id: RequestId,
  	stream: impl Stream<Item = Result<ServerJsonRpcMessage, ClientError>> + Send + 'static,
-@@ -852,7 +855,7 @@ fn messages_to_response(
+@@ -1812,7 +1815,7 @@ pub(super) fn messages_to_response(
  ) -> Result<Response, UpstreamError> {
  	Ok(mcp::session::sse_stream_response(
- 		into_sse_stream(id, stream, mcp_log),
--		None,
-+		Some(DOWNSTREAM_SSE_KEEPALIVE),
+ 		into_sse_stream(id, stream, mcp_log, downstream_modern),
+-		keep_alive,
++		keep_alive.or(Some(DOWNSTREAM_SSE_KEEPALIVE)),
  	))
  }
  
-@@ -975,11 +978,32 @@ fn accepted_response() -> Response {
- #[cfg(test)]
+@@ -2264,4 +2267,5 @@
  mod tests {
- 	use futures_util::stream;
+ 	use futures_util::{StreamExt, stream};
 +	use http_body_util::BodyExt;
- 	use rmcp::model::{CallToolResult, ListToolsResult};
+ 	use rmcp::model::{CallToolResult, ListResourcesResult, ListToolsResult};
  	use serde_json::json;
- 
- 	use super::*;
+@@ -2343,6 +2347,33 @@ mod tests {
+ 		assert!(legacy["result"].get("cacheScope").is_none());
+ 	}
  
 +	#[tokio::test(start_paused = true)]
 +	async fn downstream_lifecycle_pending_sse_emits_keepalive() {
-+		let response = messages_to_response(RequestId::Number(0), Messages::pending(), None).unwrap();
++		let response = messages_to_response(
++			RequestId::Number(0),
++			Messages::pending(),
++			None,
++			false,
++			None,
++		)
++		.unwrap();
 +
 +		let frame = tokio::time::timeout(
 +			std::time::Duration::from_secs(60),
@@ -55,18 +61,18 @@ index 80ed380..2a475fa 100644
  	async fn messages_to_response_captures_first_matching_tool_result() {
  		let log = AsyncLog::default();
 diff --git a/crates/agentgateway/src/mcp/session.rs b/crates/agentgateway/src/mcp/session.rs
-index 79fb4d0..1e99d17 100644
 --- a/crates/agentgateway/src/mcp/session.rs
 +++ b/crates/agentgateway/src/mcp/session.rs
-@@ -41,6 +41,7 @@ struct SessionEntry {
+@@ -51,7 +51,8 @@ struct SessionEntry {
  	session: Session,
+ 	backend_id: ResourceName,
  	last_access: Instant,
  	idle_ttl: Duration,
 +	active_streams: usize,
  }
  
  const SESSION_REAP_INTERVAL: Duration = Duration::from_secs(30);
-@@ -662,6 +663,31 @@ impl SessionManager {
+@@ -886,6 +887,34 @@ impl SessionManager {
  		Some(entry.session.clone().with_inputs(builder))
  	}
  
@@ -82,6 +88,9 @@ index 79fb4d0..1e99d17 100644
 +	) -> Option<(Session, SessionStreamGuard)> {
 +		let mut sessions = self.sessions.write().ok()?;
 +		let entry = sessions.get_mut(id)?;
++		if entry.backend_id != builder.backend_id {
++			return None;
++		}
 +		entry.last_access = Instant::now();
 +		entry.active_streams += 1;
 +		let session = entry.session.clone().with_inputs(builder);
@@ -98,31 +107,31 @@ index 79fb4d0..1e99d17 100644
  	pub fn get_or_resume_session(
  		&self,
  		id: &str,
-@@ -696,6 +722,7 @@ impl SessionManager {
- 				session: sess.clone(),
+@@ -928,6 +957,7 @@ impl SessionManager {
+ 				backend_id,
  				last_access: Instant::now(),
  				idle_ttl,
 +				active_streams: 0,
  			},
  		);
  		Ok(Some(sess))
-@@ -722,6 +749,7 @@ impl SessionManager {
- 				session: sess,
+@@ -956,6 +986,7 @@ impl SessionManager {
+ 				backend_id,
  				last_access: Instant::now(),
  				idle_ttl,
 +				active_streams: 0,
  			},
  		);
  	}
-@@ -762,6 +790,7 @@ impl SessionManager {
- 				session: sess.clone(),
+@@ -1000,6 +1031,7 @@ impl SessionManager {
+ 				backend_id,
  				last_access: Instant::now(),
  				idle_ttl,
 +				active_streams: 0,
  			},
  		);
  		(sess, rx)
-@@ -785,6 +814,29 @@ impl Drop for SessionManager {
+@@ -1031,6 +1063,29 @@ impl Drop for SessionManager {
  	}
  }
  
@@ -152,7 +161,7 @@ index 79fb4d0..1e99d17 100644
  async fn run_idle_reaper(sessions: Arc<RwLock<HashMap<String, SessionEntry>>>) {
  	let mut ticker = tokio::time::interval(SESSION_REAP_INTERVAL);
  	ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-@@ -798,7 +850,9 @@ fn reap_expired_entries(sessions: &Arc<RwLock<HashMap<String, SessionEntry>>>) {
+@@ -1044,7 +1099,9 @@ fn reap_expired_entries(sessions: &Arc<RwLock<HashMap<String, SessionEntry>>>) {
  	let now = Instant::now();
  	let mut guard = sessions.write().expect("write lock");
  	let pre = guard.len();
@@ -163,7 +172,7 @@ index 79fb4d0..1e99d17 100644
  	let post = guard.len();
  	if post < pre {
  		tracing::debug!("reaped {} sessions", pre - post);
-@@ -894,3 +948,120 @@ fn get_client_info() -> ClientInfo {
+@@ -1140,3 +1197,124 @@ fn get_client_info() -> ClientConfig {
  		Implementation::new("agentgateway", BuildInfo::new().version.to_string());
  	client_info
  }
@@ -182,6 +191,7 @@ index 79fb4d0..1e99d17 100644
 +
 +	fn relay_inputs() -> RelayInputs {
 +		RelayInputs {
++			backend_id: ResourceName::new("downstream-lifecycle".into(), "tests".into()),
 +			backend: McpBackendGroup {
 +				targets: vec![],
 +				failure_mode: FailureMode::FailOpen,
@@ -194,12 +204,14 @@ index 79fb4d0..1e99d17 100644
 +	}
 +
 +	fn registered_session(manager: &SessionManager) -> String {
-+		let relay = relay_inputs()
-+			.build_new_connections()
++		let inputs = relay_inputs();
++		let backend_id = inputs.backend_id.clone();
++		let relay = inputs
++			.build_new_connections(&IncomingRequestContext::empty())
 +			.expect("relay with zero targets");
 +		let session = manager.create_session(relay);
 +		let id = session.id.to_string();
-+		manager.insert_session(session, LONG_TTL);
++		manager.insert_session(backend_id, session, LONG_TTL);
 +		id
 +	}
 +
@@ -251,6 +263,7 @@ index 79fb4d0..1e99d17 100644
 +		let (_session, guard) = manager
 +			.get_session_for_stream(&id, relay_inputs())
 +			.expect("registered session");
++		let body = http::Body::empty().with_drop_guard(guard);
 +		assert_eq!(
 +			read_entry(&manager, &id, |entry| entry.active_streams),
 +			1,
@@ -258,7 +271,7 @@ index 79fb4d0..1e99d17 100644
 +		);
 +
 +		let ended_at = Instant::now();
-+		drop(guard);
++		drop(body);
 +
 +		assert_eq!(
 +			read_entry(&manager, &id, |entry| entry.active_streams),
@@ -285,10 +298,9 @@ index 79fb4d0..1e99d17 100644
 +	}
 +}
 diff --git a/crates/agentgateway/src/mcp/streamablehttp.rs b/crates/agentgateway/src/mcp/streamablehttp.rs
-index fcf4f2d..f9d2ad6 100644
 --- a/crates/agentgateway/src/mcp/streamablehttp.rs
 +++ b/crates/agentgateway/src/mcp/streamablehttp.rs
-@@ -199,12 +199,18 @@ impl StreamableHttpService {
+@@ -270,12 +270,18 @@ impl StreamableHttpService {
  			return mcp::Error::SessionIdRequired.into();
  		};
  
@@ -305,7 +317,7 @@ index fcf4f2d..f9d2ad6 100644
 +		session
 +			.get_stream(parts)
 +			.await
-+			.map(|response| response.map(|body| DropBody::new(body, guard)))
++			.map(|response| response.map(|body| body.with_drop_guard(guard)))
  	}
  
- 	pub async fn handle_delete(&self, request: Request) -> Result<Response, ProxyError> {
+ 	pub async fn handle_delete(

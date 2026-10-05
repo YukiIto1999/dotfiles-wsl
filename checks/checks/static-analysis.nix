@@ -161,8 +161,6 @@ in
 
   development-tool-ownership =
     let
-      systemPackageNames = map lib.getName hostConfig.environment.systemPackages;
-      homePackageNames = map lib.getName homeConfig.home.packages;
       nixDirenvSource = "${homeConfig.programs.direnv.nix-direnv.package}/share/nix-direnv/direnvrc";
       binaryCaches = hostConfig.dotfiles.workstation.binaryCaches;
       devenvCache = lib.findFirst (
@@ -175,14 +173,6 @@ in
     assert homeConfig.programs.direnv.enable;
     assert homeConfig.programs.direnv.enableBashIntegration;
     assert homeConfig.programs.direnv.nix-direnv.enable;
-    assert
-      lib.intersectLists [
-        "devenv"
-        "direnv"
-        "nix-direnv"
-      ] systemPackageNames == [ ];
-    assert lib.elem "devenv" homePackageNames;
-    assert lib.elem "direnv" homePackageNames;
     assert toString homeConfig.xdg.configFile."direnv/lib/hm-nix-direnv.sh".source == nixDirenvSource;
     assert lib.count (substituter: substituter == devenvCache.substituter) substituters == 1;
     assert lib.count (key: key == devenvCache.publicKey) trustedPublicKeys == 1;

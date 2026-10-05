@@ -7,10 +7,10 @@
 let
   pkg = mkNpmMcp {
     pname = "chrome-devtools-mcp";
-    version = "1.6.0";
-    hash = "sha256-HmMsLZcUtPgrTPq077nOV1CFx1/+XpdyODEprwEsnIQ=";
+    version = "1.10.1";
+    hash = "sha256-ASy89ugy1PZwna0MIde+8XCJ6Ure6c8zF50V6gqa3ys=";
     lockFile = ./package/package-lock.json;
-    npmDepsHash = "sha256-el2Ljp5g9L+3lewaMrfsvX1Oo/b05gUgzkdqtce37Eg=";
+    npmDepsHash = "sha256-f2NTg/ijemxWlSpVranPCYQo11N4hcj1uW0KAt1ZCOw=";
   };
 in
 serverBuilder {

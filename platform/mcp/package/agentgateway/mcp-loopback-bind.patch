@@ -1,16 +1,21 @@
 diff --git a/crates/agentgateway/src/types/local.rs b/crates/agentgateway/src/types/local.rs
-index 6ab06e3..21e036c 100644
 --- a/crates/agentgateway/src/types/local.rs
 +++ b/crates/agentgateway/src/types/local.rs
-@@ -1003,0 +1004,2 @@ struct LocalBind {
+@@ -1220,6 +1220,8 @@ struct LocalBind {
+ 	#[serde(default)]
+ 	port: Option<u16>,
 +	#[serde(default)]
 +	address: Option<IpAddr>,
-@@ -2313,6 +2315,8 @@ async fn convert(
+ 	/// Protocol handling for the entire bind. When omitted, it is inferred from the listeners.
+ 	#[serde(default)]
+ 	protocol: Option<LocalBindProtocol>,
+ 	/// Named listeners bound on this port, which may use different protocols and TLS.
+@@ -3177,6 +3179,8 @@ async fn convert(
 -		let sockaddr = if cfg!(target_family = "unix") && config.ipv6_enabled {
--			SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), b.port)
+-			SocketAddr::new(IpAddr::V6(Ipv6Addr::UNSPECIFIED), bind_port)
 -		} else {
 -			// Windows and IPv6 don't mix well apparently?
--			SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), b.port)
+-			SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), bind_port)
 -		};
 +		let address = b.address.unwrap_or_else(|| {
 +			if cfg!(target_family = "unix") && config.ipv6_enabled {
@@ -19,12 +24,14 @@ index 6ab06e3..21e036c 100644
 +				IpAddr::V4(Ipv4Addr::UNSPECIFIED)
 +			}
 +		});
-+		let sockaddr = SocketAddr::new(address, b.port);
++		let sockaddr = SocketAddr::new(address, bind_port);
 diff --git a/crates/agentgateway/src/types/local_tests.rs b/crates/agentgateway/src/types/local_tests.rs
-index 0f87d2d..e509052 100644
 --- a/crates/agentgateway/src/types/local_tests.rs
 +++ b/crates/agentgateway/src/types/local_tests.rs
-@@ -150,0 +151,22 @@ fn assert_hostname_target(target: &Target, expected_host: &str, expected_port: u
+@@ -1200,6 +1200,28 @@ async fn test_llm_mcp_same_port_is_rejected() {
+ 	);
+ }
+ 
 +#[tokio::test]
 +async fn downstream_lifecycle_local_bind_address() {
 +	let normalized = normalize_test_yaml(
@@ -47,3 +54,6 @@ index 0f87d2d..e509052 100644
 +	);
 +}
 +
+ #[tokio::test]
+ async fn test_gateway_bind_address_is_per_gateway() {
+ 	let normalized = normalize_test_yaml(

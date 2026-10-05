@@ -11,7 +11,7 @@ let
   };
   port = "11235";
   repository = "unclecode/crawl4ai";
-  digest = "sha256:bd36741e7bdd35ddc1a05d9183e1d6d8cefb61dd640d944a25d026b76e917690";
+  digest = "sha256:048848e548fad60c670bd656cbb3eb204fd999709a30365d3697c411ce50796d";
   image = "${repository}:latest@${digest}";
 
   backend = mkContainerBackend "crawl4ai" {

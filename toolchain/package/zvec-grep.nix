@@ -8,16 +8,16 @@
 
 buildNpmPackage rec {
   pname = "zvec-grep";
-  version = "0.2.1";
+  version = "0.2.2";
 
   src = fetchFromGitHub {
     owner = "zvec-ai";
     repo = "zvec-grep";
     rev = "v${version}";
-    hash = "sha256-8bP+w2YSzWlTJbipmF8ighraZRDye0uiZmd8+Pz4WE8=";
+    hash = "sha256-TDEK7ioPJWShJr5Ch3S6ObwgKqNnP8p9JTWYE2QZ3Z4=";
   };
 
-  npmDepsHash = "sha256-pc04qzhnYaS0xpQAYwN6HEG8oPEqoBIBMVKC1OZ0L+8=";
+  npmDepsHash = "sha256-ykSQ5aTt/pgow6GIJAZ6Vo8MqasrLhtKAagHcQgdI4s=";
   npmFlags = [ "--ignore-scripts" ];
   nativeBuildInputs = [ autoPatchelfHook ];
   buildInputs = [ stdenv.cc.cc.lib ];

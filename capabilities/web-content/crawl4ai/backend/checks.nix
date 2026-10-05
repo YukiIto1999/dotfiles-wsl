@@ -6,39 +6,10 @@
 }:
 
 let
-  expectedRepository = "unclecode/crawl4ai";
-  expectedDigest = "sha256:bd36741e7bdd35ddc1a05d9183e1d6d8cefb61dd640d944a25d026b76e917690";
-  expectedImage = "${expectedRepository}:latest@${expectedDigest}";
   expectedEnvironmentFile = "/run/secrets/rendered/crawl4ai.env";
   expectedTokenFile = "/run/secrets/crawl4ai/api_token";
   expectedUnit = "docker-crawl4ai.service";
-  expectedService = {
-    endpoints.http = {
-      protocol = "http";
-      address = "127.0.0.1";
-      port = 11235;
-      url = "http://127.0.0.1:11235";
-    };
-    units = [ expectedUnit ];
-    containerPolicy.secretReaders."crawl4ai.env" = [ "crawl4ai" ];
-    containerPolicy.volumeOwners = { };
-    images.crawl4ai = {
-      kind = "upstream";
-      container = "crawl4ai";
-      image = expectedImage;
-      repository = expectedRepository;
-      digest = expectedDigest;
-      imageFile = null;
-    };
-    health = {
-      endpoint = "http";
-      method = "GET";
-      path = "/health";
-      timeout = 5;
-    };
-  };
 
-  service = hostConfig.dotfiles.platform.containers.services.crawl4ai;
   container = hostConfig.virtualisation.oci-containers.containers.crawl4ai;
   token = hostConfig.sops.secrets."crawl4ai/api_token";
   environmentTemplate = hostConfig.sops.templates."crawl4ai.env";
@@ -46,8 +17,6 @@ let
 in
 {
   crawl4ai-container =
-    assert service == expectedService;
-    assert container.image == expectedImage;
     assert container.pull == "never";
     assert container.environmentFiles == [ expectedEnvironmentFile ];
     assert

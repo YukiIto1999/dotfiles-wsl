@@ -36,9 +36,11 @@ digest を更新すると pin は新しい image へ移り、古い image は da
 dotfiles-image-digest searxng/searxng:latest
 ```
 
-得た値を宣言した unit の `digest` へ書き、`dotfiles-sync-images` と `dotfiles-rebuild` を実行する。
+得た値を宣言したunitの`digest`へ書き、checkoutから対象hostの`syncImages` commandを実行して新しいimageを事前に同期する。
+変更のcommit後に`dotfiles-rebuild --plan`で切替条件を確認してから配備する。
 
-**index digest を使う。**`docker pull repo:tag` が解決するのは index で、per-arch の manifest digest とは意味が違う。
+`dotfiles-image-digest`はこのhostが使うlinux/amd64のmanifest digestを返す。
+tagのindex digestとは区別し、commandの出力をそのまま宣言へ固定する。
 
 ## 検査
 

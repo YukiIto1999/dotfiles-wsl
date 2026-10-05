@@ -65,15 +65,15 @@ let
 
   clientOptions = builtins.removeAttrs (
     hostOptions.dotfiles.agents.clients.type.nestedTypes.elemType.getSubOptions
-    [ ]
+      [ ]
   ) [ "_module" ];
   managedFileOptions = builtins.removeAttrs (
     clientOptions.managedFiles.type.nestedTypes.elemType.getSubOptions
-    [ ]
+      [ ]
   ) [ "_module" ];
   capabilityManagedFileOptions = builtins.removeAttrs (
     clientOptions.capabilityManagedFiles.type.getSubOptions
-    [ ]
+      [ ]
   ) [ "_module" ];
   optionMetadata = {
     enabled = {

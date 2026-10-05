@@ -15,8 +15,8 @@ let
 
   port = "8080";
   repository = "searxng/searxng";
-  digest = "sha256:ec536bcd1e83577aad4cc07f7ecb9a30858a9a905d2d57c8796abc83f872a036";
-  image = "${repository}:2026.8.1-8892414dc@${digest}";
+  digest = "sha256:b0497f6e93b5e98b1a15c66b333afed176266af34f479a46ed87514f4a441eda";
+  image = "${repository}:2026.10.4-d48c4b555@${digest}";
 
   settingsTemplate = pkgs.replaceVars ./assets/settings.yml {
     searxngSecret = placeholder."searxng/secret_key";

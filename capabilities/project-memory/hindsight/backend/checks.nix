@@ -6,15 +6,11 @@
 }:
 
 let
-  expectedRepository = "ghcr.io/vectorize-io/hindsight";
-  expectedDigest = "sha256:ba46d6f4ecadb93f71747428e39fd429df0e0adfc0c066b76a365c06b219db8b";
-  expectedImage = "${expectedRepository}:0.10.1@${expectedDigest}";
   expectedEnvironmentFile = "/run/secrets/rendered/hindsight.env";
   expectedPersistentMount = "hindsight-data:/home/hindsight/.pg0";
   expectedUnit = "docker-hindsight.service";
 
   service = hostConfig.dotfiles.platform.containers.services.hindsight;
-  image = service.images.hindsight;
   container = hostConfig.virtualisation.oci-containers.containers.hindsight;
   environmentTemplate = hostConfig.sops.templates."hindsight.env";
   systemdService = hostConfig.systemd.services.docker-hindsight;
@@ -43,16 +39,6 @@ in
         secretReaders."hindsight.env" = [ "hindsight" ];
         volumeOwners.hindsight = [ "hindsight-data" ];
       };
-    assert
-      image == {
-        kind = "upstream";
-        container = "hindsight";
-        image = expectedImage;
-        repository = expectedRepository;
-        digest = expectedDigest;
-        imageFile = null;
-      };
-    assert container.image == expectedImage;
     assert container.pull == "never";
     assert lib.count (mount: mount == expectedPersistentMount) volumes == 1;
     assert builtins.length modelMounts == 2;

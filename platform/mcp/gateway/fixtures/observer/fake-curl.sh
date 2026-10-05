@@ -120,6 +120,7 @@ if [[ $request == DELETE ]]; then
   [[ ${headers[mcp-protocol-version]-} == 2025-06-18 ]] || exit 64
   [[ $write_out == '%{http_code}' ]] || exit 64
   [[ -z ${MCP_OBSERVER_DELETE_MARKER-} ]] || "$touch_command" "$MCP_OBSERVER_DELETE_MARKER"
+  [[ $case_name == delete-timeout ]] && exit 28
   printf '%s' "$delete_status"
   exit 0
 fi
@@ -143,6 +144,7 @@ case "$method" in
       }
     ' "$data_file" >/dev/null || exit 64
     [[ $case_name == observer-timeout ]] && "$sleep_command" 3
+    [[ $case_name == init-timeout ]] && exit 28
     if [[ $case_name == network-error || $case_name == secret-network ]]; then
       printf '%s\n' "${secret:-fixture transport error}" >&2
       exit 7
@@ -174,6 +176,7 @@ case "$method" in
     "$jq_command" -e '. == {jsonrpc:"2.0",method:"notifications/initialized",params:{}}' \
       "$data_file" >/dev/null || exit 64
     [[ $case_name == notification-error ]] && exit 22
+    [[ $case_name == notification-timeout ]] && exit 28
     if [[ $case_name == argv-secret ]]; then
       printf '%s\n' "$$" >"${MCP_OBSERVER_CURL_PID_FILE:?}"
       for _ in {1..500}; do
@@ -205,6 +208,7 @@ case "$method" in
     [[ ${headers[mcp-protocol-version]-} == 2025-06-18 ]] || exit 64
     "$jq_command" -e '. == {jsonrpc:"2.0",id:2,method:"tools/list",params:{}}' \
       "$data_file" >/dev/null || exit 64
+    [[ $case_name == tools-list-timeout ]] && exit 28
     response='{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"alpha_ping"},{"name":"zeta_status"}]}}'
     [[ $case_name == tools-missing ]] && response='{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"alpha_ping"}]}}'
     [[ $case_name == tools-wrong-exact ]] && response='{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"alpha_other"},{"name":"zeta_status"}]}}'
@@ -237,6 +241,13 @@ case "$method" in
       done
       [[ -e $parallel_root/alpha_ping && -e $parallel_root/zeta_status ]] || exit 64
     fi
+    [[ $case_name == target-timeout && $tool == zeta_status ]] && exit 28
+    [[ $case_name == target-connect-failure && $tool == alpha_ping ]] && exit 7
+    if [[ $case_name == target-http-error && $tool == alpha_ping ]]; then
+      write_response 404 application/json '{"jsonrpc":"2.0","id":null,"error":{"code":-32001,"message":"Session not found"}}'
+      exit 22
+    fi
+    [[ $case_name == target-undecodable && $tool == alpha_ping ]] && content_type=text/plain
     response=$("$jq_command" -cn --argjson id "$rpc_id" '{
       jsonrpc:"2.0",
       $id,
@@ -253,6 +264,10 @@ case "$method" in
       && response=$("$jq_command" -cn --argjson id "$rpc_id" '{jsonrpc:"2.0",$id,error:{code:-32000,message:"private upstream detail"}}')
     [[ $case_name == target-is-error && $tool == alpha_ping ]] \
       && response=$("$jq_command" -cn --argjson id "$rpc_id" '{jsonrpc:"2.0",$id,result:{isError:true,content:[]}}')
+    [[ $case_name == target-malformed-error && $tool == alpha_ping ]] \
+      && response=$("$jq_command" -cn --argjson id "$rpc_id" '{jsonrpc:"2.0",$id,error:{message:"private upstream detail"}}')
+    [[ $case_name == target-result-and-error && $tool == alpha_ping ]] \
+      && response=$("$jq_command" -cn --argjson id "$rpc_id" '{jsonrpc:"2.0",$id,result:{content:[]},error:{code:-32000,message:"private upstream detail"}}')
     [[ $case_name == target-missing-content && $tool == alpha_ping ]] \
       && response=$("$jq_command" -cn --argjson id "$rpc_id" '{jsonrpc:"2.0",$id,result:{}}')
     [[ $case_name == target-invalid-is-error && $tool == alpha_ping ]] \

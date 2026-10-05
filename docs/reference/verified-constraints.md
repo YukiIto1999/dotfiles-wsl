@@ -15,7 +15,7 @@
 | repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
 | doctor が owner の observation registry を欠落なく key 順に投影し、19 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
-| 19 種類の observation kind の pass、warn、fail、resource、restart 集約と、数値集合の名前ごとの check、protocol の不正、過大出力、非ゼロ終了、timeout を固定 message と終了 status に反映する。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする | `doctor-runtime` |
+| 19 種類の observation kind の pass、warn、fail、resource、restart 集約と、数値集合の名前ごとの check を反映する。protocol の不正、過大出力、非ゼロ終了、期限前の kill は固定 message の fail に、期限切れは期限の秒数を示す warn にする。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする | `doctor-runtime` |
 | Windows drive の一覧を host profile に持たせず全 host で同じ観測にし、profile で上書きした zram、swap、Windows committed memory の値を runtime contract へ反映する | `machine-profile-contract` |
 | WSL 専用 zram lifecycle、page cache回収timerの不在、journald、定期fstrimの無効化、Nix の容量 reserve、WSL の mount から実行時に見つけた Windows drive と committed memory の観測、root VHD の容量と `.wslconfig` の VHD 設定を宣言値と照合する観測、service非依存が宣言どおりである | `host-stability-contract` |
 | 宣言した time zone と default locale が実際の日時書式に現れ、UTC と C へ無言で戻らない | `host-locale-contract` |
@@ -36,7 +36,7 @@
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |
 | GitHub account と `github-<account>` target が完全一致し、欠落、追加、改名を拒否する | `github-account-target-contract` |
 | repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |
-| MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |
+| MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、要求の期限切れを期限の秒数を示す warn に、tools/call の MCP error、契約外の応答、接続の失敗を種類ごとの固定 message の fail にし、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |
 | MCP target、front、gateway から service、restart、roster、protocol observation を漏れなく導き、追加、削除、変更、stale entry に追随する | `mcp-runtime-observation-contract` |
 | runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
 | generation がない状態から対象 host を明示し、age 鍵を使ってその host の Agent と boot generation を作り、鍵 path が宣言と一致する。bootstrap は自分の置き場所から checkout を決め、`sudo` の実行元ユーザーか checkout が host の宣言と異なれば止まる | `bootstrap-age-key` |

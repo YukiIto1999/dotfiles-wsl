@@ -204,6 +204,9 @@ in
             run_case network-error '[
               {"id":"mcp-session","status":"fail","message":"MCP initialize request failed"}
             ]'
+            run_case init-timeout '[
+              {"id":"mcp-session","status":"warn","message":"observation did not finish within 2s"}
+            ]'
             run_case missing-session '[
               {"id":"mcp-session","status":"fail","message":"MCP initialize did not return exactly one session ID"}
             ]'
@@ -236,6 +239,9 @@ in
             ]'
           run_case notification-error '[
             {"id":"mcp-session","status":"fail","message":"MCP initialized notification failed"}
+          ]'
+          run_case notification-timeout '[
+            {"id":"mcp-session","status":"warn","message":"observation did not finish within 2s"}
           ]'
           for notification_case in \
             notification-json-error \
@@ -280,31 +286,41 @@ in
               {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
               {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
             ]'
-            run_case target-error '[
+            run_case tools-list-timeout '[
               {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
-              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
-              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+              {"id":"mcp-tools","status":"warn","message":"observation did not finish within 2s"},
+              {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
               {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
             ]'
-            run_case target-is-error '[
+            run_case target-timeout '[
               {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
               {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
-              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
-              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+              {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
+              {"id":"mcp-target/zeta","status":"warn","message":"observation did not finish within 1s"}
             ]'
-            run_case target-missing-content '[
+            run_case target-connect-failure '[
               {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
               {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
-              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call connection to the gateway failed"},
               {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
             ]'
-            run_case target-invalid-is-error '[
-              {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
-              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
-              {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
-              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
-            ]'
-            for content_case in \
+            for mcp_error_case in \
+              target-error \
+              target-is-error \
+              target-http-error; do
+              run_case "$mcp_error_case" '[
+                {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
+                {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+                {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call returned an MCP error"},
+                {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+              ]'
+            done
+            for contract_case in \
+              target-undecodable \
+              target-result-and-error \
+              target-malformed-error \
+              target-missing-content \
+              target-invalid-is-error \
               target-non-object-content \
               target-unsupported-content \
               target-missing-content-type \
@@ -318,15 +334,21 @@ in
               target-resource-missing-field \
               target-resource-missing-object \
               target-resource-missing-uri; do
-              run_case "$content_case" '[
+              run_case "$contract_case" '[
                 {"id":"mcp-session","status":"pass","message":"MCP session lifecycle passed"},
                 {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
-                {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call failed or returned an MCP error"},
+                {"id":"mcp-target/alpha","status":"fail","message":"MCP tools/call response violates the MCP contract"},
                 {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
               ]'
             done
             run_case delete-failure '[
               {"id":"mcp-session","status":"fail","message":"MCP session DELETE failed"},
+              {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
+              {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
+              {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}
+            ]'
+            run_case delete-timeout '[
+              {"id":"mcp-session","status":"warn","message":"observation did not finish within 2s"},
               {"id":"mcp-tools","status":"pass","message":"MCP tools/list covers every target probe"},
               {"id":"mcp-target/alpha","status":"pass","message":"MCP tools/call passed"},
               {"id":"mcp-target/zeta","status":"pass","message":"MCP tools/call passed"}

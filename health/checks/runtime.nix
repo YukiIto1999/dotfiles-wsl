@@ -12,6 +12,7 @@ let
     failureDoctor
     filesystemFreeDoctor
     invalidNormalizedDoctors
+    killedProbeDoctor
     managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
@@ -26,6 +27,7 @@ let
     restartThresholdFailureDoctor
     rosterFailureOnlyDoctor
     rosterOmitDoctor
+    termTimeoutDoctor
     timeoutDoctor
     warningDoctor
     zramInvalidPathDoctor
@@ -427,18 +429,33 @@ in
           '') releaseMissingLinkFixtures
         )}
 
-        set +e
         timeout_output=$(${lib.getExe timeoutDoctor} --json)
-        timeout_status=$?
-        set -e
-        test "$timeout_status" -eq 1
         jq -e '
-          .checks == [{id:"fixture/timeout-fallback",status:"fail"}]
-          and .failures == [{id:"fixture/timeout-fallback",message:"fixture normalized-fallback failed"}]
+          .checks == [{id:"fixture/timeout-fallback",status:"warn"}]
+          and .warnings == [{id:"fixture/timeout-fallback",message:"observation did not finish within 1s"}]
+          and .failures == []
         ' <<<"$timeout_output" >/dev/null
         test -s orphan.pid
         orphan_pid=$(<orphan.pid)
         ! kill -0 "$orphan_pid" 2>/dev/null
+
+        term_timeout_output=$(${lib.getExe termTimeoutDoctor} --json)
+        jq -e '
+          .checks == [{id:"fixture/term-timeout",status:"warn"}]
+          and .warnings == [{id:"fixture/term-timeout",message:"observation did not finish within 1s"}]
+          and .failures == []
+        ' <<<"$term_timeout_output" >/dev/null
+
+        set +e
+        killed_probe_output=$(${lib.getExe killedProbeDoctor} --json)
+        killed_probe_status=$?
+        set -e
+        test "$killed_probe_status" -eq 1
+        jq -e '
+          .checks == [{id:"fixture/killed-probe",status:"fail"}]
+          and .warnings == []
+          and .failures == [{id:"fixture/killed-probe",message:"fixture killed-probe failed"}]
+        ' <<<"$killed_probe_output" >/dev/null
 
         set +e
         ${lib.getExe passDoctor} --json extra >/dev/null 2>&1

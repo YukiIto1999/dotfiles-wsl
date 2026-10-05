@@ -212,6 +212,15 @@ let
       wait
     '';
   };
+  normalizedSlowCommand = pkgs.writeShellApplication {
+    name = "fixture-normalized-slow";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = "sleep 30";
+  };
+  killedProbe = pkgs.writeShellApplication {
+    name = "fixture-killed-probe";
+    text = "kill -KILL $$";
+  };
 
   releaseFixture = pkgs.runCommandLocal "dotfiles-doctor-release-fixture" { } ''
     mkdir -p "$out/bin" "$out/releases/sha256-pass/bin" "$out/releases/sha256-pass/share"
@@ -539,6 +548,23 @@ let
       timeoutSeconds = 1;
     };
   };
+  termTimeoutDoctor = mkFixtureDoctor {
+    "fixture/normalized-slow" = (normalizedValue normalizedSlowCommand) // {
+      checkId = "fixture/term-timeout";
+      timeoutSeconds = 1;
+    };
+  };
+  killedProbeDoctor = mkDoctor {
+    inherit pkgs lib tools;
+    observations = rowsFor {
+      "fixture/killed-probe" = common "killed-probe" "roster" // {
+        members = [ "fixture" ];
+        minimumCount = 1;
+        failureOnly = false;
+      };
+    };
+    probeOverride = killedProbe;
+  };
   numericOversizeDoctor = mkFixtureDoctor {
     "fixture/numeric-oversize" = passValues."fixture/13-numeric" // {
       checkId = "fixture/numeric-oversize";
@@ -763,6 +789,7 @@ in
     failureDoctor
     filesystemFreeDoctor
     invalidNormalizedDoctors
+    killedProbeDoctor
     managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
@@ -779,6 +806,7 @@ in
     restartThresholdFailureDoctor
     rosterFailureOnlyDoctor
     rosterOmitDoctor
+    termTimeoutDoctor
     timeoutDoctor
     warningDoctor
     ;

@@ -20,11 +20,29 @@ dotfiles-doctor --json
 | 容量と committed memory | `filesystem-threshold`、`numeric-command-threshold`、`numeric-command-threshold-set`、`swap-policy`、`journal-size` |
 | container と protocol | `container-image`、`http-health`、`normalized-protocol` |
 
-[`health/module.nix`](../../health/module.nix) は registry 全体を key 順の JSON に投影し、[`health/impl/doctor.sh`](../../health/impl/doctor.sh) が各 observation を同じ runner で処理する。個別 probe は宣言した timeout、許可した変数だけの環境、専用の一時 directory で動く。stdout は上限を設けた JSON fragment だけを受理し、stderr は捨てる。不正、過大、timeout、非ゼロ終了は owner が宣言した固定 failure message に置き換える。
+[`health/module.nix`](../../health/module.nix) は registry 全体を key 順の JSON に投影し、[`health/impl/doctor.sh`](../../health/impl/doctor.sh) が各 observation を同じ runner で処理する。
+個別 probe は宣言した timeout、許可した変数だけの環境、専用の一時 directory で動く。
+stdout は上限を設けた JSON fragment だけを受理し、stderr は捨てる。
+不正、過大、非ゼロ終了の結果は、owner が宣言した固定 failure message の `fail` に置き換える。
+宣言した timeout までに終わらない probe は、`observation did not finish within <秒数>s` という message の `warn` にする。
+期限切れは観測が終わらなかったことだけを示し、対象の故障を示さないためである。
+memory と I/O が逼迫すると、正常な service の probe も、swap と page cache から追い出された process と binary の読み戻しだけで期限を超える。
+これを `fail` にすると恒常的な fail が出力を読み飛ばす習慣を作り、[ADR 0013](../adr/0013-drop-the-codex-mcp-session-capability.md) が避けた状態に戻る。
+`warn` は終了 status を変えないが、期限切れの check は結果に残る。
 
 観測する対象の数が実行時に決まる資源には `numeric-command-threshold-set` を使う。owner の command は 1 行に 1 つ `<名前> <百分率>` を返し、doctor は名前ごとに閾値を当てて `<checkId>/<名前>` の check を作る。1 行でも読めなければ、どの値も使わずに observation 全体を固定 failure message で失敗させる。
 
 MCP gateway の initialize、tools/list、target probe は Platform MCP の `normalized-protocol` observer が行う。doctor 自体には MCP の状態機械を持たせない。
+
+observer は要求ごとに期限を持ち、期限内に終わらない要求を、その期限の秒数を示す `observation did not finish within <秒数>s` の `warn` にする。
+target の tools/call の期限は target の probe が宣言した timeout、それ以外の要求の期限は全 target の timeout の最大値である。
+target の tools/call の故障は `fail` のまま、次の message で種類を示す。
+
+| message | 条件 |
+|---|---|
+| `MCP tools/call returned an MCP error` | JSON-RPC の error、`isError` が true の tool 結果、HTTP 400 以上の status |
+| `MCP tools/call response violates the MCP contract` | 一つの JSON-RPC 応答として読めないか、result と error の形が MCP の規約に合わない応答 |
+| `MCP tools/call connection to the gateway failed` | 接続の拒否、切断、空の応答など、HTTP の応答を得られない失敗 |
 
 agent の管理下領域は次の四つを一度に集計する。
 

@@ -49,6 +49,20 @@ record_fallback_failure() {
   failures+=("$($jq_command -cn --arg id "$id" --arg message "$message" '{id:$id,message:$message}')")
 }
 
+record_timeout_warning() {
+  local observation=$1 timeout_seconds=$2 id message
+  id=$($jq_command -r '.value.checkId' <<<"$observation")
+  message="observation did not finish within ${timeout_seconds}s"
+  checks+=("$($jq_command -cn --arg id "$id" '{id:$id,status:"warn"}')")
+  warnings+=("$($jq_command -cn --arg id "$id" --arg message "$message" '{id:$id,message:$message}')")
+}
+
+# 期限内に外部から KILL された probe も 137 を返すため終了 status だけによる期限切れの判定は不可
+probe_timed_out() {
+  local status=$1 elapsed_microseconds=$2 timeout_seconds=$3
+  ((status == 124 || status == 137)) && ((elapsed_microseconds >= timeout_seconds * 1000000))
+}
+
 append_fragment() {
   local fragment_file=$1 row kind target count
   while IFS= read -r row; do checks+=("$row"); done \
@@ -194,6 +208,7 @@ for index in "${!observation_rows[@]}"; do
   printf '%s\n' "$observation" >"$observation_file"
   mkdir -m 700 -- "$observation_scratch"
 
+  started_at=${EPOCHREALTIME//[!0-9]/}
   set +e
   $timeout_command --signal=TERM --kill-after=2s "${timeout_seconds}s" \
     $env_command -i \
@@ -209,6 +224,7 @@ for index in "${!observation_rows[@]}"; do
     | $head_command -c 131073 >"$fragment_file"
   pipeline_status=("${PIPESTATUS[@]}")
   set -e
+  elapsed_microseconds=$((${EPOCHREALTIME//[!0-9]/} - started_at))
   fragment_size=$($wc_command -c <"$fragment_file")
 
   if [[ $fragment_size =~ ^[0-9]+$ ]] \
@@ -216,6 +232,8 @@ for index in "${!observation_rows[@]}"; do
     && ((pipeline_status[0] == 0 && pipeline_status[1] == 0)) \
     && fragment_is_valid "$fragment_file" "$observation_file"; then
     append_fragment "$fragment_file"
+  elif probe_timed_out "${pipeline_status[0]}" "$elapsed_microseconds" "$timeout_seconds"; then
+    record_timeout_warning "$observation" "$timeout_seconds"
   else
     record_fallback_failure "$observation"
   fi

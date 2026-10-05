@@ -20,7 +20,7 @@ write_session_headers() {
     >"$session_header_file"
 }
 delete_session() {
-  local delete_status
+  local delete_status curl_status=0
   delete_status=$("$curl_command" \
     --silent \
     --show-error \
@@ -29,8 +29,9 @@ delete_session() {
     --output /dev/null \
     --write-out '%{http_code}' \
     --header "@$session_header_file" \
-    "$gateway_url" 2>/dev/null) \
-    && [[ $delete_status =~ ^[0-9]{3}$ ]] \
+    "$gateway_url" 2>/dev/null) || curl_status=$?
+  ((curl_status == 0)) || return "$curl_status"
+  [[ $delete_status =~ ^[0-9]{3}$ ]] \
     && { ((delete_status >= 200 && delete_status < 300)) || ((delete_status == 405)); }
 }
 cleanup() {
@@ -52,6 +53,9 @@ trap cleanup EXIT
 trap 'terminate 130' INT
 trap 'terminate 143' TERM
 
+curl_timeout_status=28
+curl_http_error_status=22
+
 declare -A outcome_status=()
 declare -A outcome_message=()
 
@@ -59,6 +63,16 @@ set_outcome() {
   local id=$1
   outcome_status["$id"]=$2
   outcome_message["$id"]=$3
+}
+
+# 期限切れは観測の未完了だけを示し対象の故障を示さないため fail による報告は不可
+set_request_failure() {
+  local id=$1 curl_status=$2 timeout_seconds=$3 failure_message=$4
+  if ((curl_status == curl_timeout_status)); then
+    set_outcome "$id" warn "observation did not finish within ${timeout_seconds}s"
+  else
+    set_outcome "$id" fail "$failure_message"
+  fi
 }
 
 decode_response() {
@@ -220,7 +234,8 @@ notification_body=$scratch_root/notification.body
   }
 ' >"$initialize_request"
 
-if ! "$curl_command" \
+initialize_curl_status=0
+"$curl_command" \
   --silent \
   --show-error \
   --fail-with-body \
@@ -231,8 +246,10 @@ if ! "$curl_command" \
   --header 'content-type: application/json' \
   --header 'accept: application/json, text/event-stream' \
   --data-binary "@$initialize_request" \
-  "$gateway_url" 2>/dev/null; then
-  set_outcome mcp-session fail "MCP initialize request failed"
+  "$gateway_url" 2>/dev/null || initialize_curl_status=$?
+if ((initialize_curl_status != 0)); then
+  set_request_failure mcp-session "$initialize_curl_status" "$gateway_timeout" \
+    "MCP initialize request failed"
   emit_envelope
   exit 0
 fi
@@ -279,8 +296,8 @@ fi
 "$jq_command" -cn \
   '{jsonrpc:"2.0",method:"notifications/initialized",params:{}}' \
   >"$notification_request"
-notification_status=
-if ! notification_status=$("$curl_command" \
+notification_curl_status=0
+notification_status=$("$curl_command" \
   --silent \
   --show-error \
   --fail-with-body \
@@ -293,9 +310,11 @@ if ! notification_status=$("$curl_command" \
   --header 'accept: application/json, text/event-stream' \
   --header "@$session_header_file" \
   --data-binary "@$notification_request" \
-  "$gateway_url" 2>/dev/null) \
+  "$gateway_url" 2>/dev/null) || notification_curl_status=$?
+if ((notification_curl_status != 0)) \
   || ! is_empty_accepted_response "$notification_headers" "$notification_body" "$notification_status"; then
-  set_outcome mcp-session fail "MCP initialized notification failed"
+  set_request_failure mcp-session "$notification_curl_status" "$gateway_timeout" \
+    "MCP initialized notification failed"
   emit_envelope
   exit 0
 fi
@@ -306,7 +325,8 @@ tools_body=$scratch_root/tools-list.body
 tools_json=$scratch_root/tools-list.json
 "$jq_command" -cn '{jsonrpc:"2.0",id:2,method:"tools/list",params:{}}' >"$tools_request"
 
-if "$curl_command" \
+tools_curl_status=0
+"$curl_command" \
   --silent \
   --show-error \
   --fail-with-body \
@@ -318,7 +338,8 @@ if "$curl_command" \
   --header 'accept: application/json, text/event-stream' \
   --header "@$session_header_file" \
   --data-binary "@$tools_request" \
-  "$gateway_url" 2>/dev/null \
+  "$gateway_url" 2>/dev/null || tools_curl_status=$?
+if ((tools_curl_status == 0)) \
   && decode_response "$tools_headers" "$tools_body" 2 "$tools_json" \
   && "$jq_command" -e --argjson probes "$probes_json" '
     . as $response
@@ -336,14 +357,17 @@ if "$curl_command" \
   ' "$tools_json" >/dev/null 2>&1; then
   set_outcome mcp-tools pass "MCP tools/list covers every target probe"
 else
-  set_outcome mcp-tools fail "MCP tools/list response does not cover every target probe"
+  set_request_failure mcp-tools "$tools_curl_status" "$gateway_timeout" \
+    "MCP tools/list response does not cover every target probe"
 fi
 
 run_target() {
   local index=$1
   local target_id=$2
+  local outcome_id=mcp-target/$target_id
   local rpc_id=$((index + 3))
-  local target_timeout call_request call_headers call_body call_json
+  local target_timeout call_request call_headers call_body call_json call_result
+  local call_curl_status=0
   target_timeout=$("$jq_command" -r --arg id "$target_id" '.[$id].timeout' <<<"$probes_json")
   call_request=$scratch_root/tools-call-$index-request.json
   call_headers=$scratch_root/tools-call-$index.headers
@@ -365,7 +389,7 @@ run_target() {
       }
     ' >"$call_request"
 
-  if "$curl_command" \
+  "$curl_command" \
     --silent \
     --show-error \
     --fail-with-body \
@@ -377,48 +401,77 @@ run_target() {
     --header 'accept: application/json, text/event-stream' \
     --header "@$session_header_file" \
     --data-binary "@$call_request" \
-    "$gateway_url" 2>/dev/null \
-    && decode_response "$call_headers" "$call_body" "$rpc_id" "$call_json" \
-    && "$jq_command" -e --argjson rpc_id "$rpc_id" '
-      def string_field($name):
-        has($name) and (.[$name] | type == "string");
-      def valid_resource_contents:
-        type == "object"
-        and string_field("uri")
-        and (
-          (string_field("text") and (has("blob") | not))
-          or (string_field("blob") and (has("text") | not))
-        );
-      def valid_content_block:
-        type == "object"
-        and string_field("type")
-        and (
-          if .type == "text" then
-            string_field("text")
-          elif .type == "image" or .type == "audio" then
-            string_field("data") and string_field("mimeType")
-          elif .type == "resource_link" then
-            string_field("name") and string_field("uri")
-          elif .type == "resource" then
-            has("resource") and (.resource | valid_resource_contents)
-          else
-            false
-          end
-        );
-      .jsonrpc == "2.0"
-      and .id == $rpc_id
-      and has("result")
-      and (has("error") | not)
-      and (.result | type == "object")
-      and (.result.content | type == "array")
-      and all(.result.content[]; valid_content_block)
-      and ((.result | has("isError") | not) or (.result.isError | type == "boolean"))
-      and ((.result.isError // false) == false)
-    ' "$call_json" >/dev/null 2>&1; then
-    printf 'pass\n' >"$scratch_root/tools-call-$index.status"
+    "$gateway_url" 2>/dev/null || call_curl_status=$?
+
+  if ((call_curl_status == 0)); then
+    call_result=invalid
+    if decode_response "$call_headers" "$call_body" "$rpc_id" "$call_json"; then
+      call_result=$("$jq_command" -r '
+        def string_field($name):
+          has($name) and (.[$name] | type == "string");
+        def valid_resource_contents:
+          type == "object"
+          and string_field("uri")
+          and (
+            (string_field("text") and (has("blob") | not))
+            or (string_field("blob") and (has("text") | not))
+          );
+        def valid_content_block:
+          type == "object"
+          and string_field("type")
+          and (
+            if .type == "text" then
+              string_field("text")
+            elif .type == "image" or .type == "audio" then
+              string_field("data") and string_field("mimeType")
+            elif .type == "resource_link" then
+              string_field("name") and string_field("uri")
+            elif .type == "resource" then
+              has("resource") and (.resource | valid_resource_contents)
+            else
+              false
+            end
+          );
+        def valid_error:
+          type == "object"
+          and (.code | type == "number" and . == floor)
+          and string_field("message");
+        def valid_result:
+          type == "object"
+          and (.content | type == "array")
+          and all(.content[]; valid_content_block)
+          and ((has("isError") | not) or (.isError | type == "boolean"));
+        if has("result") and has("error") then
+          "invalid"
+        elif has("error") then
+          if .error | valid_error then "mcp-error" else "invalid" end
+        elif .result | valid_result | not then
+          "invalid"
+        elif .result.isError then
+          "mcp-error"
+        else
+          "pass"
+        end
+      ' "$call_json" 2>/dev/null)
+    fi
+  elif ((call_curl_status == curl_http_error_status)); then
+    # Streamable HTTP が session の失効や認可の拒否を HTTP status で返すため契約外の応答としての扱いは不可
+    call_result=mcp-error
   else
-    printf 'fail\n' >"$scratch_root/tools-call-$index.status"
+    call_result=transport
   fi
+
+  case $call_result in
+    pass) set_outcome "$outcome_id" pass "MCP tools/call passed" ;;
+    mcp-error) set_outcome "$outcome_id" fail "MCP tools/call returned an MCP error" ;;
+    invalid) set_outcome "$outcome_id" fail "MCP tools/call response violates the MCP contract" ;;
+    transport)
+      set_request_failure "$outcome_id" "$call_curl_status" "$target_timeout" \
+        "MCP tools/call connection to the gateway failed"
+      ;;
+  esac
+  printf '%s\n%s\n' "${outcome_status[$outcome_id]}" "${outcome_message[$outcome_id]}" \
+    >"$scratch_root/tools-call-$index.outcome"
 }
 
 target_ids=()
@@ -432,18 +485,19 @@ for pid in "${target_pids[@]}"; do
   wait "$pid"
 done
 for index in "${!target_ids[@]}"; do
-  target_id=${target_ids[$index]}
-  if [[ $(<"$scratch_root/tools-call-$index.status") == pass ]]; then
-    set_outcome "mcp-target/$target_id" pass "MCP tools/call passed"
-  else
-    set_outcome "mcp-target/$target_id" fail "MCP tools/call failed or returned an MCP error"
-  fi
+  {
+    IFS= read -r target_status
+    IFS= read -r target_message
+  } <"$scratch_root/tools-call-$index.outcome"
+  set_outcome "mcp-target/${target_ids[$index]}" "$target_status" "$target_message"
 done
 
-if delete_session; then
+delete_result=0
+delete_session || delete_result=$?
+if ((delete_result == 0)); then
   set_outcome mcp-session pass "MCP session lifecycle passed"
 else
-  set_outcome mcp-session fail "MCP session DELETE failed"
+  set_request_failure mcp-session "$delete_result" "$gateway_timeout" "MCP session DELETE failed"
 fi
 session_cleanup_required=0
 

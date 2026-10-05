@@ -77,18 +77,6 @@ def pending_days(now: datetime, tz: ZoneInfo, start_hour: int, lookback: int, jo
     return sorted(day for day in days if not output_path(journal, day, machine).exists())
 
 
-def machine_name(command: str) -> str:
-    # Linux の host 名は distribution の既定値のまま機械ごとに変わらない。Windows の computer 名で機械を区別する
-    try:
-        result = subprocess.run([command], capture_output=True, text=True, timeout=60)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise JournalError(f"{command} failed: {error}") from None
-    name = result.stdout.strip()
-    if result.returncode != 0 or not name:
-        raise JournalError(f"{command} did not print the machine name: {result.stderr.strip()[-500:]}")
-    return name
-
-
 def entry_time(entry: dict) -> datetime | None:
     value = entry.get("timestamp")
     if not isinstance(value, str):
@@ -344,7 +332,7 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="dotfiles-agent-journal", description=__doc__)
     parser.add_argument("--sessions-root", required=True, type=Path)
     parser.add_argument("--journal-dir", required=True, type=Path)
-    parser.add_argument("--machine-command", required=True)
+    parser.add_argument("--machine-name", required=True)
     parser.add_argument("--timezone", required=True)
     parser.add_argument("--start-hour", required=True, type=int)
     parser.add_argument("--lookback-days", required=True, type=int)
@@ -359,8 +347,8 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     options = parse(argv)
     tz = ZoneInfo(options.timezone)
     journal = options.journal_dir
+    machine = options.machine_name
     try:
-        machine = machine_name(options.machine_command)
         branch = sync(journal)
     except JournalError as error:
         print(f"dotfiles-agent-journal: {error}", file=sys.stderr)

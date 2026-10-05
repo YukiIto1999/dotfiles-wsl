@@ -16,7 +16,14 @@ commit は Git の既定 identity で作り、`origin` へ push する。日誌�
 
 ## 出力
 
-日誌は `<yyyy>/<MMdd>/<機械名>.md` に書く。機械名は Windows のコンピューター名で、`hostname.exe` の出力と同じである。NixOS の host 名はどの機械でも既定値のまま同じなので使わない。コンピューター名を得られないときは何も書かずに失敗する。冒頭の表は、session 記録から数えた project ごとの session 数、request 数、費用である。project ごとの本文は model が書いた依頼、決定と根拠、変更と検証、未決事項で、各項目には根拠にした session の短い ID が付く。本文の後には、その project の session の完全な ID と、同じ時間帯の commit を並べる。session の記録は `omp --resume <session の ID>` で開ける。
+日誌は `<yyyy>/<MMdd>/<機械名>.md` に書く。
+機械名は `dotfiles.agents.journal.machineName` の宣言値で、既定値は host ID である。
+既存の日誌の file 名を引き継ぐ host は、[`profiles/hosts/`](../../profiles/hosts) の host profile で機械名を宣言する。
+`nixos` は既存の日誌に合わせて Windows のコンピューター名 `y-itoh` を宣言している。
+機械名は Windows の interop から実行時に取得しないので、interop が応答しなくても日誌は止まらない。
+file 名に使えない文字を含む機械名は、評価の時点で option の型が拒否する。
+
+冒頭の表は、session 記録から数えた project ごとの session 数、request 数、費用である。project ごとの本文は model が書いた依頼、決定と根拠、変更と検証、未決事項で、各項目には根拠にした session の短い ID が付く。本文の後には、その project の session の完全な ID と、同じ時間帯の commit を並べる。session の記録は `omp --resume <session の ID>` で開ける。
 
 ## timer
 

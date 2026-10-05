@@ -21,7 +21,7 @@ let
       zoneinfo = "${pkgs.tzdata}/share/zoneinfo";
       sessionsRoot = "${cfg.workstation.homeDir}/.omp/agent/sessions";
       journalDir = "${cfg.workstation.environmentDir}/agent-journal";
-      machineCommand = "/mnt/c/Windows/System32/hostname.exe";
+      inherit (cfg.agents.journal) machineName;
       timeZone = config.time.timeZone;
       startHour = toString startHour;
       lookbackDays = "7";
@@ -33,6 +33,13 @@ let
   };
 in
 {
+  options.dotfiles.agents.journal.machineName = lib.mkOption {
+    type = lib.types.strMatching "[A-Za-z0-9][A-Za-z0-9._-]*";
+    default = config.networking.hostName;
+    defaultText = lib.literalExpression "config.networking.hostName";
+    description = "作業日誌の file 名 `<yyyy>/<MMdd>/<機械名>.md` に使う機械名。既存の日誌の名前を引き継ぐ host は profile で宣言する。";
+  };
+
   config = lib.mkIf (builtins.elem "omp" cfg.agents.enabled) {
     dotfiles.platform.cli.commands.agentJournal = journal;
 

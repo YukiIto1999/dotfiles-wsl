@@ -392,6 +392,18 @@ in
         {
           path = [
             "dotfiles"
+            "agents"
+            "journal"
+            "machineName"
+          ];
+          owners = [
+            "agents"
+            "profiles"
+          ];
+        }
+        {
+          path = [
+            "dotfiles"
             "capabilities"
             "enabled"
           ];

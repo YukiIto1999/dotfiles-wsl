@@ -140,11 +140,6 @@ class JournalTest(unittest.TestCase):
         )
         self.fake_omp.chmod(0o755)
 
-        # Windows の hostname.exe と同じく CRLF で終わる
-        self.machine = self.workspace / "hostname.exe"
-        self.machine.write_text(f"#!/bin/sh\nprintf '{HOST}\\r\\n'\n")
-        self.machine.chmod(0o755)
-
         self.remote = self.workspace / "remote.git"
         git("init", "-q", "--bare", str(self.remote))
         self.journal = self.workspace / "agent-journal"
@@ -154,7 +149,7 @@ class JournalTest(unittest.TestCase):
         result = journal.main([
             "--sessions-root", str(self.sessions),
             "--journal-dir", str(self.journal),
-            "--machine-command", str(self.machine),
+            "--machine-name", HOST,
             "--timezone", "Asia/Tokyo",
             "--start-hour", "6",
             "--lookback-days", "7",
@@ -210,14 +205,6 @@ class JournalTest(unittest.TestCase):
         self.addCleanup(setattr, tempfile, "tempdir", previous)
 
         self.run_journal("--date", DAY.isoformat(), status=1)
-        self.assertFalse(self.prompts.exists())
-
-    def test_an_unknown_machine_records_nothing(self):
-        # 機械を判別できないまま書くと、別の機械の日誌と同じ file 名になる
-        self.machine.write_text("#!/bin/sh\nprintf '\\r\\n'\n")
-
-        self.run_journal("--date", DAY.isoformat(), status=1)
-        self.assertEqual(list(self.journal.rglob("*.md")), [])
         self.assertFalse(self.prompts.exists())
 
     def test_pending_days_end_at_the_last_completed_window(self):

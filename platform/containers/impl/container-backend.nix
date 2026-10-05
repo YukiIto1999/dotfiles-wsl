@@ -12,6 +12,7 @@ name:
 }:
 let
   networkUnit = "docker-dotfiles-backends-network.service";
+  placement = import ./cgroup-placement.nix;
 in
 {
   containers."${name}" = {
@@ -28,6 +29,7 @@ in
     extraOptions = [
       "--init"
       "--network=dotfiles-backends"
+      "--cgroup-parent=${placement.declared}"
     ]
     ++ extraOptions
     ++ lib.concatMap (port: [

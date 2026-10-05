@@ -12,6 +12,7 @@
       extraOptions = [
         "--init"
         "--network=dotfiles-backends"
+        "--cgroup-parent=system.slice"
       ];
     };
 

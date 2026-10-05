@@ -54,6 +54,7 @@ in
       container.extraOptions == [
         "--init"
         "--network=dotfiles-backends"
+        "--cgroup-parent=system.slice"
         "--memory=512m"
         "-p"
         "127.0.0.1:8080:8080"

@@ -25,11 +25,13 @@
 | 宣言、参照、暗号文の recipient が一致し、recovery 鍵が一つ、host 鍵が一つ以上あり、登録した全 host の鍵を含む | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
-| container の argv が語彙・所有・loopback の contract に収まる | `container-argv-contract` |
+| container の argv が語彙・所有・loopback・cgroup 配置の contract に収まる | `container-argv-contract` |
 | container を起こすのは ExecStart だけ | `container-exec-content` |
-| container backend helper が init process、network 依存、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
-| container service contract から service、restart、image、health、roster、Docker build artifact GC の observation を漏れなく導き、追加と削除に追随する | `container-runtime-observation-contract` |
+| container backend helper が init process、network 依存、cgroup 配置、再起動方針、publish 順序、依存、mount、環境 file、image 取得方針を一つの形で生成する | `container-backend-contract` |
+| container service contract から service、restart、image、health、roster、配置、Docker build artifact GC の observation を漏れなく導き、追加と削除に追随する | `container-runtime-observation-contract` |
 | dangling image と BuildKit cache の回収順序、daemon policy、timer が固定され、Docker と backend が GC に依存しない | `docker-build-artifact-gc-contract` |
+| 宣言済み backend が system.slice、それ以外の container が daemon の既定の上限付き slice に置かれ、既定の欠落、slice の上限の欠落、backend の flag の欠落、上限付き slice の下への入れ子を拒否し、生成した daemon config を dockerd が受理する | `container-cgroup-placement` |
+| container の配置の観測が running の container ごとの scope の slice を宣言と照合し、宣言済み backend と宣言外の container の取り違えを fail にし、消えた scope を無視し、docker の失敗を observation の失敗にする | `container-placement-observation-behavior` |
 | 共通container helperのimportが承認済みCapability実装に限られ、CapabilityからAgentまたはSkillへの逆依存がない | `unit-boundary-name-only` |
 | MCP targetのprovider集合がCapability registryから導かれ、通常評価とvariant評価で一致する | `mcp-provider-registry` |
 | targetのprovider、server transport、server lifecycle、port、probe、通信方針、backend unitが固定fixtureに一致する | `mcp-target-contract` |

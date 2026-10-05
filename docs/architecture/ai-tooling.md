@@ -97,9 +97,11 @@ launcherはscopeを作れないとclientを起動せずに失敗する。user ma
 
 Cargoの並列度は既定のままにする。2026-10-03の実測ではcargo 7個に対しrustcとclippy-driverが合わせて10個で、memoryを押し上げていたのは一つのbuildの`-j`ではなく同時に走るsessionの数だった。slice全体の上限はcargo以外のtoolchainにも同じく効き、`CARGO_BUILD_JOBS`はprojectの`build.jobs`より優先されて上書きしてしまう。
 
-agentが起動する`nix build`のbuilderはnix-daemonの子としてsystem.sliceで動き、`agents.slice`の上限を受けない。[`workstation/nix/module.nix`](../../workstation/nix/module.nix)は`max-jobs`を4、`cores`を3に固定し、1回のnix呼出しの並列度を12 vCPUに収める。`max-jobs`は呼出しごとの上限なので、同時に走る呼出しの数は抑えない。nix-daemonの`CPUWeight`は50にし、同じsystem.sliceのjournald、udevd、container、MCP frontより後に回す。Docker daemonが起こすcontainerも`agents.slice`の外にある。
+agentが起動する`nix build`のbuilderはnix-daemonの子としてsystem.sliceで動き、`agents.slice`の上限を受けない。[`workstation/nix/module.nix`](../../workstation/nix/module.nix)は`max-jobs`を4、`cores`を3に固定し、1回のnix呼出しの並列度を12 vCPUに収める。`max-jobs`は呼出しごとの上限なので、同時に走る呼出しの数は抑えない。nix-daemonの`CPUWeight`は50にし、同じsystem.sliceのjournald、udevd、宣言済みbackend、MCP frontより後に回す。
+Docker daemonが起こすcontainerも`agents.slice`の外にあり、宣言外のcontainerには[containerの配置と上限](#containerの配置と上限)の`containers.slice`が別の上限を置く。
 
-Chromiumはuser busへ届くと自ら`app.slice`にscopeを作って移るため、agentのtestが起動したbrowserも`agents.slice`を抜ける。2026-10-03時点の`app.slice`の`memory.peak`は19.3 GiBだった。そこでuser manager（`user@.service`）全体にも`MemoryHigh` 27G、`MemoryMax` 30Gを置き、`agents.slice`と`app.slice`の合計を抑える。値は`dotfiles.agents.slice.userManager`で変えられ、`agents.slice`の`MemoryMax`より大きくなければ評価が失敗する。VMの40 GiBから30 GiBを引いた残りを、system.sliceの基盤、WSLの`/init`配下、kernelの高次pageの余地に残す。
+Chromiumはuser busへ届くと自ら`app.slice`にscopeを作って移るため、agentのtestが起動したbrowserも`agents.slice`を抜ける。2026-10-03時点の`app.slice`の`memory.peak`は19.3 GiBだった。そこでuser manager（`user@.service`）全体にも`MemoryHigh` 27G、`MemoryMax` 30Gを置き、`agents.slice`と`app.slice`の合計を抑える。値は`dotfiles.agents.slice.userManager`で変えられ、`agents.slice`の`MemoryMax`より大きくなければ評価が失敗する。
+VMの40 GiBから30 GiBを引いた残りは、system.sliceの基盤、`containers.slice`、WSLの`/init`配下、kernelの高次pageの余地で分ける。
 
 ## Policy、subagent、Skill
 
@@ -148,6 +150,31 @@ application固有のcontainer、endpoint、credential、volume、provisioningは
 Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。container backendが一件もなければ、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
 
 全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と、containerを有効にしたhostへ配備する`dotfiles-sync-images`が取得を担当し、Nix生成imageは`imageFile`が取得を担当する。Docker build artifact GCはdangling imageとBuildKit cacheだけを扱い、tagged image、container、volumeは削除しない。
+
+### containerの配置と上限
+
+Docker daemonの`cgroup-parent`は`containers.slice`であり、`--cgroup-parent`を持たないcontainerはすべてこのsliceの`docker-<id>.scope`に入る。
+agentのtestがtestcontainersで起こすcontainer、compose、手で起こしたcontainerがこれに当たる。
+宣言済みbackendは[`container-backend.nix`](../../platform/containers/impl/container-backend.nix)が`--cgroup-parent=system.slice`を付けるので、基盤のserviceと同じsystem.sliceに残り、このsliceの上限を受けない。
+[dockerd reference](https://docs.docker.com/reference/cli/dockerd/#default-cgroup-parent)によれば、containerごとの`--cgroup-parent`はdaemonの値より優先され、systemd driverではslice名がcgroup treeの位置を表すので、`containers.slice`はroot直下に作られる。
+[systemd.slice(5)](https://www.freedesktop.org/software/systemd/man/latest/systemd.slice.html)によれば、sliceに置いた資源の上限はslice内の全unitのprocessに効く。
+[Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)によれば、`memory.current`と`memory.swap.current`は子孫のcgroupを含めて数えられ、`memory.max`に達して回収できなければそのcgroupの中でOOM killerが動く。
+
+| 設定 | 値 | 根拠 |
+|---|---|---|
+| `MemoryMax` | 4G | VMのMemTotal 39.2 GiBからuser managerの`MemoryMax` 30Gを引いた残り9.2 GiBを、このsliceと基盤で分ける。2026-10-04の実測では、runningの宣言外container 12個の`memory.peak`の合計が1.1 GiBで、最大はPGroonga 1個の146 MiBだった。4Gはその3倍余りで、基盤には5.2 GiBが残る。基盤の見積りは、system.sliceのanon 1.3 GiB、Hindsightが`memory.peak` 3.4 GiBまで戻る増分2.9 GiB、kernelの回収できないslab 0.5 GiBの合計4.6 GiBである。 |
+| `MemoryHigh` | 3G | 超えた分はslice内のreclaimとthrottleで抑え、`MemoryMax`までの1 GiBを緩衝に使う。 |
+| `MemorySwapMax` | 4G | [Docker](https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details)は`--memory`だけを指定したcontainerに同じ量のswapを許す。sliceも同じ比にし、残ったcontainerのpageでswapを埋めない。 |
+| `CPUWeight` | 50 | root直下の`system.slice`と`user.slice`（共に100）より後に回す。nix-daemonと同じく、agentが起こした処理を基盤より後にする。 |
+
+containerを`agents.slice`の下に置く案は採らない。
+system managerのdockerdはuser managerへ委譲したsubtreeにscopeを作れず、rootless Dockerへ移すと宣言済みbackendを含むdaemon全体の移行になるためである。
+sliceをsystem.sliceの下に置く案も採らない。
+system.sliceの使用量に宣言外のcontainerが混ざり、基盤の実測と分けられなくなるためである。
+containerごとの`--memory`に頼る案も採らない。
+testcontainersのcontainerは他のprojectのtest codeが作り、2026-10-04の時点でPGroongaのcontainerは上限を持っていなかった。
+
+doctorの`container-placement`は、runningのcontainerごとにscopeのsliceをsystemdに問い合わせ、宣言済みbackendがsystem.slice、それ以外が`containers.slice`にいなければfailにする。
 
 ## Project memory
 

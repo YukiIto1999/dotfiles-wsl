@@ -32,6 +32,7 @@
       extraOptions = [
         "--init"
         "--network=dotfiles-backends"
+        "--cgroup-parent=system.slice"
         "--memory=256m"
         "--label=fixture=true"
         "-p"

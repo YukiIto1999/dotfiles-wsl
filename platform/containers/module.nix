@@ -15,6 +15,18 @@ let
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
   restartFailureCount = 20;
+  containerPlacement = import ./impl/cgroup-placement.nix;
+
+  undeclaredContainerSlice = {
+    name = lib.removeSuffix ".slice" containerPlacement.undeclared;
+    # 値の根拠は docs/architecture/ai-tooling.md の「containerの配置と上限」
+    sliceConfig = {
+      MemoryHigh = "3G";
+      MemoryMax = "4G";
+      MemorySwapMax = "4G";
+      CPUWeight = 50;
+    };
+  };
 
   buildArtifactGcContract =
     let
@@ -379,6 +391,10 @@ let
           inherit url;
         }
       ) serviceEntries;
+      declaredContainers = map (entry: entry.image.container) imageEntries;
+      placementObservation = import ./impl/container-placement-package.nix {
+        inherit pkgs lib declaredContainers;
+      };
     in
     builtins.listToAttrs (
       [
@@ -386,9 +402,22 @@ let
           common "container-roster" "container roster is empty"
           // {
             kind = "roster";
-            members = map (entry: entry.image.container) imageEntries;
+            members = declaredContainers;
             minimumCount = 1;
             failureOnly = true;
+          }
+        ))
+        (mkEntry "containers/placement" (
+          common "container-placement" "could not observe container cgroup placement"
+          // {
+            kind = "normalized-protocol";
+            command = placementObservation;
+            inherit (placementObservation.dotfilesObservationContract)
+              envelopeVersion
+              allowedOutcomeIds
+              requiredOutcomeIds
+              requiredResourceKeys
+              ;
           }
         ))
         (mkEntry "containers/build-artifact-gc" buildArtifactGcContract.observation)
@@ -423,9 +452,17 @@ in
       virtualisation = {
         docker = {
           enable = true;
-          daemon.settings.builder.gc = buildArtifactGcContract.daemonGc;
+          daemon.settings = {
+            builder.gc = buildArtifactGcContract.daemonGc;
+            cgroup-parent = containerPlacement.undeclared;
+          };
         };
         oci-containers.backend = "docker";
+      };
+
+      systemd.slices.${undeclaredContainerSlice.name} = {
+        description = "Docker containers outside the declared backends";
+        inherit (undeclaredContainerSlice) sliceConfig;
       };
 
       systemd.services.${buildArtifactGcContract.name} = {

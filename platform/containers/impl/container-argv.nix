@@ -6,6 +6,7 @@
 
 let
   inherit (execTokens) valuesOf argvOfScript;
+  placement = import ./cgroup-placement.nix;
 
   # 生成された start script が docker へ渡す argv。宣言のどの経路から来ても
   # ここに現れるので、extraOptions だけを見ると networks や user を取り逃す
@@ -24,6 +25,7 @@ let
     "--user" = _: value: builtins.match "[1-9][0-9]*:[1-9][0-9]*" value != null;
     "--env-file" = name: value: builtins.elem value (readableSecrets name);
     "--network" = _: value: value == "dotfiles-backends";
+    "--cgroup-parent" = _: value: value == placement.declared;
     "--memory" = _: value: builtins.match "[0-9]+[mg]" value != null;
     "--shm-size" = _: value: builtins.match "[0-9]+[mg]" value != null;
     "--stop-timeout" = _: value: builtins.match "[1-9][0-9]*" value != null;
@@ -142,9 +144,11 @@ let
   );
 
   # 宣言が無ければ検査も走らない。container ごとに一度ずつ現れることを要求する
+  # daemon の既定の上限付き slice に落ちるため --cgroup-parent のない backend は不可
   requiredFlags = [
     "--name"
     "--network"
+    "--cgroup-parent"
     "--pull"
   ];
 

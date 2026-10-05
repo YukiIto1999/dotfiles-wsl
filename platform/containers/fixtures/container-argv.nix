@@ -1,6 +1,7 @@
 {
   pkgs,
   stopTimeout ? null,
+  cgroupParent ? "system.slice",
   ...
 }:
 
@@ -11,7 +12,9 @@ let
   volumeName = "synthetic-state";
   image = "registry.example.invalid/synthetic-backend:1";
   startScript = pkgs.writeText "synthetic-container-start" ''
-    docker run --rm --name ${containerName} --network dotfiles-backends --pull never --env-file ${secretPath} -v ${volumeName}:/data ${
+    docker run --rm --name ${containerName} --network dotfiles-backends ${
+      if cgroupParent == null then "" else "--cgroup-parent=${cgroupParent}"
+    } --pull never --env-file ${secretPath} -v ${volumeName}:/data ${
       if stopTimeout == null then "" else "--stop-timeout=${stopTimeout}"
     } ${image}
   '';

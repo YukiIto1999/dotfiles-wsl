@@ -93,3 +93,4 @@ sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
 | rebuildのpreflight、lock、restart判定を変える | [`workstation/activation/rebuild/`](../../workstation/activation/rebuild) | rebuild focused checks、`dotfiles-rebuild --plan` |
 | cleanup対象を変える | [`maintenance/`](../../maintenance) | cleanup contract、対象なしのdry run |
 | OCI image同期を変える | [`platform/containers/`](../../platform/containers) | image sync checks、containerを有効にしたhostの`dotfiles-sync-images --status` |
+| containerのcgroup配置と上限を変える | [`platform/containers/`](../../platform/containers) | `container-cgroup-placement`、`container-placement-observation-behavior`、rebuild後のdoctorの`container-placement` |

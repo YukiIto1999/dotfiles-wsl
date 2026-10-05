@@ -56,6 +56,15 @@ let
 
   systemUnits = hostConfig.environment.etc."systemd/system".source;
 
+  fakeDocker = pkgs.writeShellApplication {
+    name = "docker";
+    text = builtins.readFile ./fixtures/fake-docker.sh;
+  };
+  fakeSystemctl = pkgs.writeShellApplication {
+    name = "systemctl";
+    text = builtins.readFile ./fixtures/fake-systemctl.sh;
+  };
+
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
   restartFailureCount = 20;
@@ -225,6 +234,7 @@ let
           inherit url;
         }
       ) serviceEntries;
+      declaredContainers = map (entry: entry.image.container) imageEntries;
     in
     builtins.listToAttrs (
       [
@@ -232,9 +242,22 @@ let
           common "container-roster" "container roster is empty"
           // {
             kind = "roster";
-            members = map (entry: entry.image.container) imageEntries;
+            members = declaredContainers;
             minimumCount = 1;
             failureOnly = true;
+          }
+        ))
+        (mkEntry "containers/placement" (
+          common "container-placement" "could not observe container cgroup placement"
+          // {
+            kind = "normalized-protocol";
+            command = import ./impl/container-placement-package.nix {
+              inherit pkgs lib declaredContainers;
+            };
+            envelopeVersion = 1;
+            allowedOutcomeIds = [ "container-placement" ];
+            requiredOutcomeIds = [ "container-placement" ];
+            requiredResourceKeys = [ ];
           }
         ))
         (mkEntry "containers/build-artifact-gc" expectedBuildArtifactGc.observation)
@@ -309,6 +332,7 @@ let
   healthRemovalMutation = removeObservation sampleObservationKeys.health;
   timerRemovalMutation = removeObservation "containers/build-artifact-gc";
   rosterRemovalMutation = removeObservation "containers/roster";
+  placementRemovalMutation = removeObservation "containers/placement";
   addStaleObservation =
     source: name:
     containerObservations
@@ -322,6 +346,7 @@ let
     (addStaleObservation sampleObservationKeys.image "containers/image/stale")
     (addStaleObservation sampleObservationKeys.health "containers/health/stale")
     (addStaleObservation "containers/roster" "containers/stale-roster")
+    (addStaleObservation "containers/placement" "containers/stale-placement")
     (addStaleObservation "containers/build-artifact-gc" "containers/stale-build-artifact-gc")
   ];
   daemonPolicyMutation = hostConfig // {
@@ -673,6 +698,11 @@ in
         rosterRemovalMutation
       )
     ) "container roster observation removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+        placementRemovalMutation
+      )
+    ) "container placement observation removal escaped the owner contract";
     assert lib.assertMsg (lib.all (
       observations:
       !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services observations)
@@ -921,10 +951,21 @@ in
       gracefulStop = evaluate (stopFixture "45").valid;
       indefiniteStop = evaluate (stopFixture "-1").valid;
       immediateStop = evaluate (stopFixture "0").valid;
+      placementFixture =
+        value:
+        import ./fixtures/container-argv.nix {
+          inherit pkgs;
+          cgroupParent = value;
+        };
+      boundedBackend = evaluate (placementFixture "containers.slice").valid;
+      unplacedBackend = evaluate (placementFixture null).valid;
     in
     assert valid.secretReaders == fixture.expected.secretReaders;
     assert valid.volumeOwners == fixture.expected.volumeOwners;
     assert valid.wrongValues == [ ];
+    assert valid.missingFlags == [ ];
+    assert boundedBackend.wrongValues == [ "synthetic-backend:--cgroup-parent=containers.slice" ];
+    assert unplacedBackend.missingFlags == [ "synthetic-backend:--cgroup-parent" ];
     assert gracefulStop.unexpectedTokens == [ ] && gracefulStop.wrongValues == [ ];
     assert indefiniteStop.wrongValues == [ "synthetic-backend:--stop-timeout=-1" ];
     assert immediateStop.wrongValues == [ "synthetic-backend:--stop-timeout=0" ];
@@ -986,4 +1027,193 @@ in
       test "$inspected" -eq ${toString (3 * builtins.length containerNames)}
       touch $out
     '';
+
+  # 宣言の転記では配置を確かめられないため docker の配置の規則を宣言に当てた導出で照合
+  container-cgroup-placement =
+    let
+      inherit (helpers.execTokens) valuesOf;
+      # cgroup-parent の無い daemon で systemd driver が container を置く slice
+      dockerDefaultParent = "system.slice";
+      sliceOf =
+        settings: argv:
+        let
+          flags = valuesOf argv "--cgroup-parent";
+        in
+        if flags != [ ] then lib.last flags else settings.cgroup-parent or dockerDefaultParent;
+      limitsOf =
+        configuration: slice:
+        (configuration.systemd.slices.${lib.removeSuffix ".slice" slice} or { sliceConfig = { }; })
+        .sliceConfig;
+      bounded =
+        configuration: slice:
+        lib.all (key: builtins.hasAttr key (limitsOf configuration slice)) [
+          "MemoryHigh"
+          "MemoryMax"
+          "MemorySwapMax"
+        ];
+      # systemd の slice 名は dash で親を表すため名前の一致だけの判定は不可
+      within =
+        parent: slice: slice == parent || lib.hasPrefix "${lib.removeSuffix ".slice" parent}-" slice;
+      undeclaredRun = [
+        "docker"
+        "run"
+        "--rm"
+        "example.invalid/test:1"
+      ];
+      undeclaredSliceOf =
+        configuration: sliceOf configuration.virtualisation.docker.daemon.settings undeclaredRun;
+      placementHolds =
+        configuration: argvs:
+        let
+          settings = configuration.virtualisation.docker.daemon.settings;
+          undeclared = undeclaredSliceOf configuration;
+        in
+        argvs != { }
+        && bounded configuration undeclared
+        && lib.all (argv: !(within undeclared (sliceOf settings argv))) (builtins.attrValues argvs);
+      hostArgv = helpers.containerArgv.containerArgv;
+      hostUndeclaredSlice = undeclaredSliceOf hostConfig;
+      withoutDaemonParent = hostConfig // {
+        virtualisation = hostConfig.virtualisation // {
+          docker = hostConfig.virtualisation.docker // {
+            daemon = hostConfig.virtualisation.docker.daemon // {
+              settings = builtins.removeAttrs hostConfig.virtualisation.docker.daemon.settings [
+                "cgroup-parent"
+              ];
+            };
+          };
+        };
+      };
+      withoutSliceLimits = hostConfig // {
+        systemd = hostConfig.systemd // {
+          slices = builtins.removeAttrs hostConfig.systemd.slices [
+            (lib.removeSuffix ".slice" hostUndeclaredSlice)
+          ];
+        };
+      };
+      unplacedArgv = lib.mapAttrs (
+        _: builtins.filter (token: !(lib.hasPrefix "--cgroup-parent" token))
+      ) hostArgv;
+      nestedArgv = lib.mapAttrs (
+        _: argv:
+        lib.take 2 argv
+        ++ [ "--cgroup-parent=${lib.removeSuffix ".slice" hostUndeclaredSlice}-backends.slice" ]
+        ++ lib.drop 2 argv
+      ) unplacedArgv;
+      daemonConfigFiles = map (lib.removePrefix "--config-file=") (
+        builtins.filter (token: builtins.isString token && lib.hasPrefix "--config-file=" token) (
+          builtins.split "[[:space:]]+" (toString hostConfig.systemd.services.docker.serviceConfig.ExecStart)
+        )
+      );
+      # builtins.split が string context を落とすため ExecStart から取り出した path の直接の参照は不可
+      daemonConfig =
+        (pkgs.formats.json { }).generate "daemon.json"
+          hostConfig.virtualisation.docker.daemon.settings;
+    in
+    assert lib.assertMsg (placementHolds hostConfig hostArgv)
+      "declared backends must stay outside, and other containers inside, the bounded container slice";
+    assert lib.assertMsg (
+      !(placementHolds withoutDaemonParent hostArgv)
+    ) "containers without a daemon cgroup parent escaped the placement contract";
+    assert lib.assertMsg (
+      !(placementHolds withoutSliceLimits hostArgv)
+    ) "an unbounded default container slice escaped the placement contract";
+    assert lib.assertMsg (
+      !(placementHolds hostConfig unplacedArgv)
+    ) "declared backends without --cgroup-parent escaped the placement contract";
+    assert lib.assertMsg (
+      !(placementHolds hostConfig nestedArgv)
+    ) "declared backends nested under the bounded slice escaped the placement contract";
+    assert lib.assertMsg (
+      daemonConfigFiles == [ "${daemonConfig}" ]
+    ) "docker.service must read exactly the daemon config generated from the declared settings";
+    pkgs.runCommandLocal "check-container-cgroup-placement" { } ''
+      set -euo pipefail
+      # 未知の key を持つ daemon config で docker が起動しないため dockerd 自身の検証
+      ${lib.getExe' hostConfig.virtualisation.docker.package "dockerd"} --validate \
+        --config-file=${daemonConfig}
+      touch $out
+    '';
+
+  # 配置の判定は docker と systemd の答えで決まるため両方の境界の差し替えで observation を実行
+  container-placement-observation-behavior =
+    let
+      placement = import ./impl/cgroup-placement.nix;
+      inherit (containerObservations."containers/roster") members;
+      observe = import ./impl/container-placement-package.nix {
+        inherit pkgs lib;
+        declaredContainers = members;
+        dockerCommand = lib.getExe fakeDocker;
+        systemctlCommand = lib.getExe fakeSystemctl;
+      };
+    in
+    assert members != [ ];
+    pkgs.runCommandLocal "check-container-placement-observation-behavior"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.gnugrep
+          pkgs.jq
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        export FAKE_CONTAINERS=$PWD/containers FAKE_SCOPES=$PWD/scopes FAKE_SYSTEMCTL_LOG=$PWD/systemctl.log
+        declared=${lib.escapeShellArg (builtins.head members)}
+        protected=${placement.declared}
+        bounded=${placement.undeclared}
+
+        expect() {
+          local output=$1 status=$2 needle=$3
+          jq -e --arg status "$status" '
+            .schemaVersion == 1
+            and .resources == []
+            and (.outcomes | length) == 1
+            and .outcomes[0].id == "container-placement"
+            and .outcomes[0].status == $status
+          ' "$output" > /dev/null || { cat "$output" >&2; exit 1; }
+          jq -r '.outcomes[0].message' "$output" | grep -Fq -- "$needle" || {
+            echo "$output does not mention: $needle" >&2
+            exit 1
+          }
+        }
+
+        cat > containers <<EOF
+        backend|$declared|running|||
+        testcase|sharp_kalam|running|||
+        finished|jolly_bhabha|exited|||
+        EOF
+        printf '%s\n' "docker-backend.scope|$protected" "docker-testcase.scope|$bounded" > scopes
+        ${lib.getExe observe} > placed.json
+        expect placed.json pass "2 running containers"
+
+        printf '%s\n' "docker-backend.scope|$protected" "docker-testcase.scope|$protected" > scopes
+        ${lib.getExe observe} > escaped.json
+        expect escaped.json fail "sharp_kalam in $protected instead of $bounded"
+
+        printf '%s\n' "docker-backend.scope|$bounded" "docker-testcase.scope|$bounded" > scopes
+        ${lib.getExe observe} > confined.json
+        expect confined.json fail "$declared in $bounded instead of $protected"
+
+        printf '%s\n' "docker-backend.scope|$protected" > scopes
+        ${lib.getExe observe} > vanished.json
+        expect vanished.json pass "1 running containers"
+
+        rm systemctl.log
+        printf '%s\n' "finished|jolly_bhabha|exited|||" > containers
+        ${lib.getExe observe} > idle.json
+        expect idle.json pass "0 running containers"
+        if [ -e systemctl.log ]; then
+          echo "systemctl was asked about scopes with no running container" >&2
+          exit 1
+        fi
+
+        if FAKE_DOCKER_LS_STATUS=1 ${lib.getExe observe} > failed.json 2>&1; then
+          echo "a failed container listing was reported as a placement" >&2
+          exit 1
+        fi
+
+        touch $out
+      '';
 }

@@ -37,6 +37,22 @@ let
       unsharedMaxUsedSpace = "30GB";
       maxUsedSpace = "100GB";
       staleKeepDuration = "1440h";
+      periodHours = 6;
+      reclaimSubstitutions = {
+        "@dockerCommand@" = lib.escapeShellArg docker;
+        # session-id は reusable-containers の feature でしか付かないため session 単位の判定は不可
+        "@labelKey@" = lib.escapeShellArg "org.testcontainers.managed-by";
+        "@labelValue@" = lib.escapeShellArg "testcontainers";
+        "@minimumAgeSeconds@" = toString (periodHours * 3600);
+      };
+      reclaimStoppedTestcontainers = pkgs.writeShellApplication {
+        name = "docker-reclaim-stopped-testcontainers";
+        runtimeInputs = [ pkgs.coreutils ];
+        text =
+          builtins.replaceStrings (builtins.attrNames reclaimSubstitutions)
+            (builtins.attrValues reclaimSubstitutions)
+            (builtins.readFile ./impl/reclaim-stopped-testcontainers.sh);
+      };
     in
     rec {
       inherit name;
@@ -65,7 +81,11 @@ let
         wants = [ dockerService ];
         conditionPathExists = "/var/run/docker.sock";
         type = "oneshot";
-        execStart = map lib.escapeShellArgs [
+        # container の削除で dangling になる image を同じ実行で回収するため image prune より後の回収は不可
+        execStart = [
+          (lib.getExe reclaimStoppedTestcontainers)
+        ]
+        ++ map lib.escapeShellArgs [
           [
             docker
             "image"
@@ -88,7 +108,7 @@ let
       timer = {
         wantedBy = [ "timers.target" ];
         timerConfig = {
-          OnCalendar = "*-*-* 00/6:00:00";
+          OnCalendar = "*-*-* 00/${toString periodHours}:00:00";
           Persistent = true;
           Unit = serviceUnit;
         };
@@ -466,7 +486,7 @@ in
       };
 
       systemd.services.${buildArtifactGcContract.name} = {
-        description = "Prune dangling Docker images and bounded BuildKit cache";
+        description = "Remove stopped testcontainers and prune dangling Docker images and bounded BuildKit cache";
         inherit (buildArtifactGcContract.service) after wants;
         unitConfig.ConditionPathExists = buildArtifactGcContract.service.conditionPathExists;
         serviceConfig = {
@@ -476,7 +496,7 @@ in
       };
 
       systemd.timers.${buildArtifactGcContract.name} = {
-        description = "Periodic Docker build artifact pruning";
+        description = "Periodic Docker leftover pruning";
         inherit (buildArtifactGcContract.timer) wantedBy timerConfig;
       };
 

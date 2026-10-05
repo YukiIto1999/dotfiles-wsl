@@ -46,5 +46,9 @@ case "${1-} ${2-}" in
     shift 2
     list "$@"
     ;;
+  'container rm')
+    shift 2
+    printf '%s\n' "$@" >>"$FAKE_DOCKER_LOG"
+    ;;
   *) exit 64 ;;
 esac

@@ -96,7 +96,8 @@ let
           }
         ];
       };
-      execStartTokens = [
+      reclaimProgram = "docker-reclaim-stopped-testcontainers";
+      pruneTokens = [
         [
           (lib.getExe pkgs.docker)
           "image"
@@ -136,6 +137,17 @@ let
         serviceResults = [ "success" ];
       };
     };
+
+  # 回収の中身は reclaim の振る舞いの check の担当のため store path の転記での照合は不可
+  isReclaimCommand =
+    tokens:
+    builtins.length tokens == 1
+    && lib.hasSuffix "/bin/${expectedBuildArtifactGc.reclaimProgram}" (builtins.head tokens);
+  gcCommandsMatch =
+    execStartTokens:
+    execStartTokens != [ ]
+    && isReclaimCommand (builtins.head execStartTokens)
+    && builtins.tail execStartTokens == expectedBuildArtifactGc.pruneTokens;
 
   selectContainerObservations = lib.filterAttrs (name: _: lib.hasPrefix "containers/" name);
   containerObservations = selectContainerObservations hostConfig.dotfiles.health.observations;
@@ -303,7 +315,7 @@ let
     actual == expected
     && lib.attrByPath [ "builder" "gc" ] null gc.daemonSettings == expectedBuildArtifactGc.daemonGc
     && gc.service != null
-    && execStartTokens == expectedBuildArtifactGc.execStartTokens
+    && gcCommandsMatch execStartTokens
     && gc.timer != null
     && gc.timer.timerConfig == expectedBuildArtifactGc.timerConfig;
 
@@ -375,12 +387,27 @@ let
       };
     };
   };
+  hostGcExecStart = (buildArtifactGcConfiguration hostConfig).service.serviceConfig.ExecStart;
+  hostReclaimExec = builtins.head hostGcExecStart;
+  imagePruneExec = lib.escapeShellArgs (builtins.head expectedBuildArtifactGc.pruneTokens);
+  cachePruneExec = lib.escapeShellArgs (builtins.elemAt expectedBuildArtifactGc.pruneTokens 1);
   imagePruneMutation = withBuildArtifactGcExecStart hostConfig [
-    (lib.escapeShellArgs (builtins.elemAt expectedBuildArtifactGc.execStartTokens 1))
+    hostReclaimExec
+    cachePruneExec
   ];
   cacheBudgetMutation = withBuildArtifactGcExecStart hostConfig [
-    (lib.escapeShellArgs (builtins.head expectedBuildArtifactGc.execStartTokens))
+    hostReclaimExec
+    imagePruneExec
     "${lib.getExe pkgs.docker} buildx prune --force --all --max-used-space 101GB --reserved-space 10GB"
+  ];
+  reclaimRemovalMutation = withBuildArtifactGcExecStart hostConfig [
+    imagePruneExec
+    cachePruneExec
+  ];
+  reclaimAfterPruneMutation = withBuildArtifactGcExecStart hostConfig [
+    imagePruneExec
+    cachePruneExec
+    hostReclaimExec
   ];
 
   additionalObservationVariantConfig =
@@ -599,9 +626,8 @@ in
     assert lib.assertMsg (
       gc.service.unitConfig.ConditionPathExists == "/var/run/docker.sock"
     ) "Docker build artifact GC service must require the Docker socket";
-    assert lib.assertMsg (
-      execStartTokens == expectedBuildArtifactGc.execStartTokens
-    ) "Docker build artifact GC commands changed: actual=${builtins.toJSON execStartTokens}";
+    assert lib.assertMsg (gcCommandsMatch execStartTokens)
+      "Docker build artifact GC commands changed: actual=${builtins.toJSON execStartTokens}";
     assert lib.assertMsg (gc.timer != null) "Docker build artifact GC timer is missing";
     assert lib.assertMsg (
       gc.timer.wantedBy == [ "timers.target" ]
@@ -628,6 +654,17 @@ in
         containerObservations
       )
     ) "Docker BuildKit cache budget mutation escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches reclaimRemovalMutation hostConfig.dotfiles.platform.containers.services
+        containerObservations
+      )
+    ) "stopped testcontainers reclaim removal escaped the owner contract";
+    assert lib.assertMsg (
+      !(containerContractMatches reclaimAfterPruneMutation
+        hostConfig.dotfiles.platform.containers.services
+        containerObservations
+      )
+    ) "stopped testcontainers reclaim after the image prune escaped the owner contract";
     pkgs.runCommandLocal "check-docker-build-artifact-gc-contract"
       {
         nativeBuildInputs = [
@@ -1134,6 +1171,69 @@ in
         --config-file=${daemonConfig}
       touch $out
     '';
+
+  # 回収の対象は docker が返す状態と label と作成時刻で決まるため docker 境界の差し替えで deploy する script を実行
+  docker-stopped-testcontainers-reclaim-behavior =
+    assert isReclaimCommand (tokensOf hostReclaimExec);
+    pkgs.runCommandLocal "check-docker-stopped-testcontainers-reclaim-behavior"
+      {
+        nativeBuildInputs = [
+          pkgs.coreutils
+          pkgs.diffutils
+          pkgs.gnugrep
+          pkgs.gnused
+        ];
+      }
+      ''
+        set -euo pipefail
+
+        sed -e "s|${lib.escapeRegex (lib.getExe pkgs.docker)}|${lib.getExe fakeDocker}|g" \
+          ${hostReclaimExec} > reclaim
+        chmod +x reclaim
+
+        export FAKE_CONTAINERS=$PWD/containers FAKE_DOCKER_LOG=$PWD/removed
+        label=org.testcontainers.managed-by
+        now=$(date +%s)
+        # docker の CreatedAt と同じ日時と offset と zone 名の形
+        created() { TZ=$1 date --date="@$((now - $2))" '+%Y-%m-%d %H:%M:%S %z %Z'; }
+        # 作成から start までの途中に当たる年齢と所有者の test が終わっている年齢
+        young=$((10 * 60))
+        old=$((3 * 24 * 60 * 60))
+
+        cat > containers <<EOF
+        exited-old|a|exited|$(created UTC0 "$old")|$label|testcontainers
+        created-old|b|created|$(created JST-9 "$old")|$label|testcontainers
+        dead-old|c|dead|$(created UTC0 "$old")|$label|testcontainers
+        running-old|d|running|$(created UTC0 "$old")|$label|testcontainers
+        paused-old|e|paused|$(created UTC0 "$old")|$label|testcontainers
+        restarting-old|f|restarting|$(created UTC0 "$old")|$label|testcontainers
+        removing-old|g|removing|$(created UTC0 "$old")|$label|testcontainers
+        created-young|h|created|$(created JST-9 "$young")|$label|testcontainers
+        exited-young|i|exited|$(created UTC0 "$young")|$label|testcontainers
+        exited-compose|j|exited|$(created UTC0 "$old")|com.docker.compose.project|locust
+        exited-declared|k|exited|$(created UTC0 "$old")||
+        exited-other-value|l|exited|$(created UTC0 "$old")|$label|the-time-wizard
+        EOF
+        ./reclaim > reclaim.out
+        printf '%s\n' --volumes exited-old created-old dead-old > expected
+        diff expected removed
+
+        rm removed
+        grep -Ev '^(exited|created|dead)-old\|' containers > survivors
+        mv survivors containers
+        ./reclaim > nothing.out
+        if [ -e removed ]; then
+          echo "docker rm ran with no stopped testcontainers container" >&2
+          exit 1
+        fi
+
+        if FAKE_DOCKER_LS_STATUS=1 ./reclaim > failed.out 2>&1; then
+          echo "a failed container listing was treated as an empty one" >&2
+          exit 1
+        fi
+
+        touch $out
+      '';
 
   # 配置の判定は docker と systemd の答えで決まるため両方の境界の差し替えで observation を実行
   container-placement-observation-behavior =

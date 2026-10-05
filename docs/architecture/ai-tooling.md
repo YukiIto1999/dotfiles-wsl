@@ -149,7 +149,8 @@ application固有のcontainer、endpoint、credential、volume、provisioningは
 
 Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。container backendが一件もなければ、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
 
-全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と、containerを有効にしたhostへ配備する`dotfiles-sync-images`が取得を担当し、Nix生成imageは`imageFile`が取得を担当する。Docker build artifact GCはdangling imageとBuildKit cacheだけを扱い、tagged image、container、volumeは削除しない。
+全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と、containerを有効にしたhostへ配備する`dotfiles-sync-images`が取得を担当し、Nix生成imageは`imageFile`が取得を担当する。
+Docker build artifact GCは停止済みのtestcontainersのcontainer、dangling image、BuildKit cacheを扱い、tagged image、named volume、それ以外のcontainerは削除しない。
 
 ### containerの配置と上限
 
@@ -175,6 +176,17 @@ containerごとの`--memory`に頼る案も採らない。
 testcontainersのcontainerは他のprojectのtest codeが作り、2026-10-04の時点でPGroongaのcontainerは上限を持っていなかった。
 
 doctorの`container-placement`は、runningのcontainerごとにscopeのsliceをsystemdに問い合わせ、宣言済みbackendがsystem.slice、それ以外が`containers.slice`にいなければfailにする。
+
+### 停止済みのtestcontainersの回収
+
+Rust版のtestcontainersはRyukを持たず、containerの破棄をtestのprocessに任せる。
+processがSIGKILLされるか、docker APIの要求がclientの期限を超えると、containerは所有者のないまま残る。
+`docker-build-artifact-gc`は6時間ごとに、label `org.testcontainers.managed-by=testcontainers`を持ち、状態が`created`、`exited`、`dead`のいずれかで、作成から6時間を過ぎたcontainerを匿名volumeとともに削除する。
+6時間はtimerの周期と同じ値で、作成からstartまでの途中にあるcontainerを消さないための下限である。
+session単位で判定しないのは、`org.testcontainers.session-id`のlabelが`reusable-containers` featureを有効にしたときにしか付かないためである。
+`running`のcontainerは所有者の生死を判定できないので削除せず、`containers.slice`の上限の内に置いたまま、作ったprojectの破棄処理で直す。
+`docker rm`は`--force`なしではrunningのcontainerを拒むので、一覧を取った後にstartされたcontainerも削除されない。
+回収は`docker image prune`より前に走り、削除したcontainerだけが参照していたtagのないimageを同じ実行で回収する。
 
 ## Project memory
 

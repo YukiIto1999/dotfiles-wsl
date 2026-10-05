@@ -105,6 +105,11 @@ let
         type = types.enum [ "upstream-managed" ];
       };
       scriptUrl = lib.mkOption { type = types.str; };
+      executableRoot = lib.mkOption {
+        type = types.nullOr nonEmptyStringType;
+        default = null;
+        description = "upstream installer が実行 file の実体を置く home 相対 directory。runtime wrapper を使う client では必須。";
+      };
     };
   }) (install: (install.kind or null) == "installer-script");
 
@@ -470,6 +475,40 @@ in
         };
         readOnly = true;
         internal = true;
+      };
+    };
+    slice = {
+      memoryHighGiB = lib.mkOption {
+        type = types.ints.positive;
+        default = 24;
+        description = "agents.slice の MemoryHigh（GiB）。超えた分は slice 内の reclaim と throttle で抑える。";
+      };
+      memoryMaxGiB = lib.mkOption {
+        type = types.ints.positive;
+        default = 28;
+        description = "agents.slice の MemoryMax（GiB）。超えると kernel が slice 内の process を OOM kill する。";
+      };
+      memorySwapMaxGiB = lib.mkOption {
+        type = types.ints.unsigned;
+        default = 8;
+        description = "agents.slice の MemorySwapMax（GiB）。";
+      };
+      cpuWeight = lib.mkOption {
+        type = types.ints.between 1 10000;
+        default = 50;
+        description = "agents.slice の CPUWeight。同じ user manager の他の slice の既定 100 より低くする。";
+      };
+      userManager = {
+        memoryHighGiB = lib.mkOption {
+          type = types.ints.positive;
+          default = 27;
+          description = "user manager（user@.service）全体の MemoryHigh（GiB）。agents.slice と、Chromium が自ら作る app.slice の scope を合わせて抑える。";
+        };
+        memoryMaxGiB = lib.mkOption {
+          type = types.ints.positive;
+          default = 30;
+          description = "user manager（user@.service）全体の MemoryMax（GiB）。agents.slice の外へ出た Chromium も含めて VM の残りを基盤に残す。";
+        };
       };
     };
     shared = {

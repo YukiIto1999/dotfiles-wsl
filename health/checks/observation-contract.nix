@@ -161,6 +161,15 @@ let
       );
     }
     {
+      name = "absolute-executable-root:${control.name}";
+      registry = replaceObservation "host/process-slice" (
+        fixture.valid."host/process-slice"
+        // {
+          executableRoots = [ "/fixture/releases${control.value}split" ];
+        }
+      );
+    }
+    {
       name = "relative-entrypoint:${control.name}";
       registry = replaceObservation "host/release-tree" (
         fixture.valid."host/release-tree"
@@ -239,6 +248,9 @@ let
       "host/path-metadata" = fixture.valid."host/path-metadata" // {
         path = "/fixture/path with space";
       };
+      "host/process-slice" = fixture.valid."host/process-slice" // {
+        executableRoots = [ "/fixture/releases root" ];
+      };
       "host/release-tree" = fixture.valid."host/release-tree" // {
         visiblePath = "/fixture/visible path";
         visibleTarget = "../current/bin/tool name";
@@ -287,7 +299,7 @@ let
 in
 {
   observation-contract =
-    assert builtins.length (builtins.attrNames fixture.valid) == 18;
+    assert builtins.length (builtins.attrNames fixture.valid) == 19;
     assert evaluationSucceeds validEvaluation;
     assert evaluationSucceeds (evalRegistry { });
     assert evaluationSucceeds optionalCommonEvaluation;
@@ -297,8 +309,8 @@ in
     assert optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".checkId == null;
     assert
       optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".resourceKey == null;
-    assert builtins.length missingRequiredCases == 120;
-    assert builtins.length kindReplacementCases == 306;
+    assert builtins.length missingRequiredCases == 125;
+    assert builtins.length kindReplacementCases == 342;
     assert builtins.length invalidCommandCases == 27;
     assert lib.all (
       projection:

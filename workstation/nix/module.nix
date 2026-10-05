@@ -6,6 +6,12 @@ let
   observationTimeoutSeconds = 10;
   minimumNixFreeGiB = 32;
   targetNixFreeGiB = 64;
+  # 1 回の nix 呼出しの build 並列度。builder は nix-daemon の子として system.slice で動き、
+  # agents.slice の上限を受けないため、ここで 12 vCPU を超えないようにする。
+  maxJobs = 4;
+  buildCores = 3;
+  # 同じ system.slice の journald、udevd、container、MCP front（既定 100）より build を後に回す。
+  nixDaemonCpuWeight = 50;
   binaryCaches = import ./assets/nix-caches.nix;
   nixGc = {
     timerName = "nix-gc";
@@ -67,6 +73,8 @@ in
     ];
     min-free = nixGc.storageReserve.minimumBytes;
     max-free = nixGc.storageReserve.targetBytes;
+    max-jobs = maxJobs;
+    cores = buildCores;
   };
 
   # 常時起動でない WSL で取りこぼした GC を次回起動で補完
@@ -77,4 +85,5 @@ in
 
   # crates.io が curl 既定 UA を 403 拒否するため指定する許可 UA
   config.systemd.services.nix-daemon.environment.NIX_CURL_FLAGS = "--user-agent=Nixpkgs";
+  config.systemd.services.nix-daemon.serviceConfig.CPUWeight = nixDaemonCpuWeight;
 }

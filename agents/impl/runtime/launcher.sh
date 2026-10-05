@@ -273,7 +273,11 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 set +e
-"$upstream" "$@"
+# upstream と子孫を slice の資源上限へ入れる。scope を作れなければ upstream を起動しない。
+# systemd-run は既定で引数の $ を展開するため、展開を止めて argv をそのまま渡す。
+@systemdRunCommand@ --user --scope --quiet --collect --expand-environment=no \
+  --slice=@sliceUnit@ --unit="dotfiles-agent-${session_id#"$project_id".}.scope" \
+  -- "$upstream" "$@"
 status=$?
 set -e
 exit "$status"

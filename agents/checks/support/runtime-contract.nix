@@ -32,6 +32,7 @@ let
     cache = expectedAgentRuntime.cache // {
       relativeCacheRoot = ".cache/dotfiles-wsl";
     };
+    sliceUnit = "agents.slice";
   };
 in
 {

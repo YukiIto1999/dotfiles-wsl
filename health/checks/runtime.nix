@@ -26,8 +26,10 @@ let
     restartThresholdFailureDoctor
     rosterFailureOnlyDoctor
     rosterOmitDoctor
+    strayProcessDoctor
     termTimeoutDoctor
     timeoutDoctor
+    unreadableProcessDoctor
     warningDoctor
     zramInvalidPathDoctor
     zramPathDoctor
@@ -75,7 +77,8 @@ in
             {id:"fixture/http-health",status:"pass"},
             {id:"fixture/protocol",status:"pass"},
             {id:"fixture/numeric-set/c",status:"pass"},
-            {id:"fixture/numeric-set/d",status:"pass"}
+            {id:"fixture/numeric-set/d",status:"pass"},
+            {id:"fixture/process-slice",status:"pass"}
           ]
           and .warnings == []
           and .failures == []
@@ -85,6 +88,7 @@ in
             fixtureJournal:{bytes:1024},
             fixtureProtocol:{state:"ok"},
             fixtureNumericSet:[{name:"c",freePercent:20},{name:"d",freePercent:30}],
+            fixtureProcessSlice:{inside:2,outside:0},
             serviceRestarts:[{unit:"service-ok.service",count:0}],
             containerRestarts:[{container:"container-ok",count:0}],
             fixtureSwap:{
@@ -139,12 +143,13 @@ in
         set -e
         test "$failure_status" -eq 1
         jq -e '
-          (.checks | length) == 21
+          (.checks | length) == 22
           and all(.checks[]; .status == "fail")
-          and (.failures | length) == 21
+          and (.failures | length) == 22
           and ([.failures[] | select(.id == "fixture/numeric-set/c" or .id == "fixture/numeric-set/d") | .message]
             == ["free-percent crossed its fail threshold","free-percent crossed its fail threshold"])
           and .warnings == []
+          and .resources.fixtureProcessSlice == {inside:0,outside:2}
           and .resources.serviceRestarts == []
           and .resources.containerRestarts == []
           and ([.failures[].id] | index("fixture/normalized-fallback")) == null
@@ -347,6 +352,29 @@ in
           and .failures == []
           and .resources.fixtureFilesystemFree == {freePercent:90}
         ' <<<"$filesystem_free_output" >/dev/null
+
+        set +e
+        stray_process_output=$(${lib.getExe strayProcessDoctor} --json)
+        stray_process_status=$?
+        set -e
+        test "$stray_process_status" -eq 1
+        jq -e '
+          .checks == [{id:"fixture/stray-process",status:"fail"}]
+          and .warnings == []
+          and .failures == [{id:"fixture/stray-process",message:"fixture stray-process failed"}]
+          and .resources.fixtureProcessSlice == {inside:1,outside:2}
+        ' <<<"$stray_process_output" >/dev/null
+
+        set +e
+        unreadable_process_output=$(${lib.getExe unreadableProcessDoctor} --json)
+        unreadable_process_status=$?
+        set -e
+        test "$unreadable_process_status" -eq 1
+        jq -e '
+          .checks == [{id:"fixture/unreadable-process",status:"fail"}]
+          and .failures == [{id:"fixture/unreadable-process",message:"fixture unreadable-process failed"}]
+          and .resources == {serviceRestarts:[],containerRestarts:[]}
+        ' <<<"$unreadable_process_output" >/dev/null
 
         roster_omit_output=$(${lib.getExe rosterOmitDoctor} --json)
         jq -e '

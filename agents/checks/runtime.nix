@@ -115,6 +115,28 @@ let
   fakeNix = pkgs.writeShellScript "fake-nix-command" ''
     printf '%s\0' "$@" > "$ARG_CAPTURE"
   '';
+  # systemd-run --scope は自身を scope へ入れた後に command を exec する。sandbox には user
+  # manager がないため、引数を記録して同じ process のまま command を exec する。
+  fakeSystemdRun = pkgs.writeShellScript "fake-systemd-run" ''
+    printf '%s\0' "$@" > "$SYSTEMD_RUN_CAPTURE"
+    printf '%s\n' "$$" > "$SYSTEMD_RUN_CAPTURE.pid"
+    if [ "''${SYSTEMD_RUN_FAIL-}" = 1 ]; then
+      printf 'Failed to connect to user scope bus\n' >&2
+      exit 1
+    fi
+    while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
+      shift
+    done
+    [ "$#" -gt 1 ] || exit 2
+    shift
+    exec "$@"
+  '';
+  fixtureLauncher = runtime.mkLauncher { systemdRunCommand = fakeSystemdRun; };
+  cappedUserSlices = map (name: "${name}.slice") (
+    builtins.attrNames (
+      lib.filterAttrs (_: slice: slice.sliceConfig ? MemoryMax) hostConfig.systemd.user.slices
+    )
+  );
   fakeGit = pkgs.writeShellScript "fake-git-command" ''
     printf '%s\0' "$@" > "$ARG_CAPTURE"
   '';
@@ -221,6 +243,19 @@ let
     "agents/maintenance/autoupdate" = timerObservation expectedAgentRuntime.timers.autoupdate.name;
     "agents/maintenance/project-cache-gc" =
       timerObservation expectedAgentRuntime.timers.projectCacheGc.name;
+    "agents/slice-placement" =
+      commonAgentObservation "agent/slice-placement" "agentSlicePlacement"
+        "agent client processes run outside agents.slice"
+      // {
+        kind = "process-slice";
+        executableRoots = [
+          "${homeDir}/.local/share/claude/versions"
+          "${homeDir}/.local/share/dotfiles/agents/codex/releases"
+          "${homeDir}/.local/share/dotfiles/agents/omp/releases"
+          "${homeDir}/.local/share/dotfiles/agents/opencode/releases"
+        ];
+        slice = "agents.slice";
+      };
   }
   // lib.mapAttrs' (
     name: client: lib.nameValuePair "agents/client/${name}" (expectedClientObservation name client)
@@ -492,7 +527,8 @@ in
           pkgs.jq
           pkgs.util-linux
         ];
-        LAUNCHER = lib.getExe runtime.launcher;
+        LAUNCHER = lib.getExe fixtureLauncher;
+        CAPPED_SLICES = lib.concatStringsSep " " cappedUserSlices;
         AGENT_SHIM_DIR = runtime.agentShims;
         GIT_SHIM_DIR = fixtureAgentShims;
         RACING_GIT_SHIM_DIR = racingAgentShims;

@@ -98,6 +98,11 @@ let
       group = "root";
       mode = "0400";
     };
+    "host/process-slice" = common "process-slice" // {
+      kind = "process-slice";
+      executableRoots = [ "/home/fixture/.local/share/dotfiles/agents/fixture/releases" ];
+      slice = "agents.slice";
+    };
     "host/systemd-service" = common "systemd-service" // {
       kind = "systemd-service";
       unit = "fixture.service";
@@ -236,6 +241,12 @@ in
     );
     systemdSocketServiceUnit = replace "host/systemd-socket" (
       valid."host/systemd-socket" // { unit = "fixture.service"; }
+    );
+    processSliceScopeUnit = replace "host/process-slice" (
+      valid."host/process-slice" // { slice = "agents.scope"; }
+    );
+    processSliceRelativeRoot = replace "host/process-slice" (
+      valid."host/process-slice" // { executableRoots = [ "agents/fixture/releases" ]; }
     );
     numericCommandWrongPurpose = replace "host/numeric-command-threshold" (
       numericThreshold // { command = normalizedProtocolCommand; }

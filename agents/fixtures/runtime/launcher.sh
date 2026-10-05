@@ -36,6 +36,7 @@ fi
 command -v nix > "$CAPTURE/nix-command"
 command -v git > "$CAPTURE/git-command"
 printf '%s\0' "$@" > "$CAPTURE/argv"
+printf '%s\n' "$$" > "$CAPTURE/agent-pid"
 cp "${TMPDIR%/tmp}/metadata.json" "$CAPTURE/metadata.json"
 stat -c %a "$TMPDIR" > "$CAPTURE/tmp-mode"
 stat -c %a "${TMPDIR%/tmp}" > "$CAPTURE/session-mode"
@@ -48,6 +49,9 @@ if [ -n "${RACE_READY-}" ] && [ -n "${RACE_RELEASE-}" ] \
   while [ ! -e "$RACE_RELEASE" ]; do
     sleep 0.01
   done
+fi
+if [ -n "${FAKE_SIGNAL-}" ]; then
+  kill -s "$FAKE_SIGNAL" "$$"
 fi
 exit "${FAKE_STATUS:-0}"
 SCRIPT
@@ -66,6 +70,7 @@ git -C "$repo" commit -qm initial
 export HOME=$fixture_home
 export CAPTURE=$capture
 export PATH="$fixture/bin:$PATH"
+export SYSTEMD_RUN_CAPTURE=$fixture/systemd-run
 unset CARGO_HOME CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR XDG_CACHE_HOME
 mkdir -p "$HOME/.cache/dotfiles-wsl/sessions" "$HOME/.cache/dotfiles-wsl/builds"
 chmod 0777 "$HOME/.cache/dotfiles-wsl" \
@@ -116,6 +121,59 @@ mapfile -d '' -t argv < "$capture/argv"
 test "${#argv[@]}" -eq 2
 test "${argv[0]}" = 'space arg'
 test "${argv[1]}" = $'line\narg'
+
+# upstream runs in a scope under the declared capped slice, as the very process systemd-run
+# started, with argv passed through unexpanded.
+mapfile -d '' -t launch < "$SYSTEMD_RUN_CAPTURE"
+separator=0
+while [ "${launch[$separator]}" != -- ]; do
+  separator=$((separator + 1))
+done
+scope_options=("${launch[@]:0:separator}")
+scope_command=("${launch[@]:separator+1}")
+session_id=$(cat "$capture/session-id")
+session_project_id=$(cat "$capture/project-id")
+scope_slice=
+for option in "${scope_options[@]}"; do
+  case $option in
+    --slice=*) scope_slice=${option#--slice=} ;;
+  esac
+done
+case " $CAPPED_SLICES " in
+  *" $scope_slice "*) ;;
+  *)
+    echo "launcher used a slice without a declared memory cap: $scope_slice" >&2
+    exit 1
+    ;;
+esac
+test "$(printf '%s\n' "${scope_options[@]}" | sort)" = "$(printf '%s\n' --collect \
+  --expand-environment=no --quiet --scope --user "--slice=$scope_slice" \
+  "--unit=dotfiles-agent-${session_id#"$session_project_id".}.scope" | sort)"
+test "${#scope_command[@]}" -eq 3
+test "${scope_command[0]}" = "$fixture_home/.local/bin/fake-agent"
+test "${scope_command[1]}" = 'space arg'
+test "${scope_command[2]}" = $'line\narg'
+test "$(cat "$SYSTEMD_RUN_CAPTURE.pid")" = "$(cat "$capture/agent-pid")"
+
+# A signal that ends upstream reaches the caller as its status. When systemd-run cannot create
+# the scope, upstream never starts, the launcher fails, and the session is removed.
+set +e
+(
+  cd "$repo"
+  FAKE_SIGNAL=TERM "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+signal_status=$?
+rm -f "$capture/agent-pid"
+(
+  cd "$repo"
+  SYSTEMD_RUN_FAIL=1 "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent" 2>/dev/null
+)
+unreachable_status=$?
+set -e
+test "$signal_status" -eq 143
+test "$unreachable_status" -ne 0
+test ! -e "$capture/agent-pid"
+test -z "$(ls -A "$HOME/.cache/dotfiles-wsl/sessions")"
 
 # A GC scan holding gc.lock must see the session directory until it releases
 # the lock.  Launcher cleanup then removes the session before returning.

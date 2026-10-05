@@ -27,6 +27,7 @@ let
     curl = "${fakeTools}/bin/curl";
     df = "${fakeTools}/bin/df";
     docker = "${fakeTools}/bin/docker";
+    find = "${pkgs.findutils}/bin/find";
     env = "${pkgs.coreutils}/bin/env";
     head = "${pkgs.coreutils}/bin/head";
     journalctl = "${fakeTools}/bin/journalctl";
@@ -41,10 +42,63 @@ let
     wc = "${pkgs.coreutils}/bin/wc";
     zramctl = "${fakeTools}/bin/zramctl";
   };
+  agentSlice = "/user.slice/user-1000.slice/user@1000.service/agents.slice";
+  mkProcFixture =
+    name: processes:
+    pkgs.runCommandLocal name { } ''
+      mkdir -p "$out"
+      process() {
+        mkdir -p "$out/$1"
+        ln -s "$2" "$out/$1/exe"
+        printf '0::%s\n' "$3" >"$out/$1/cgroup"
+      }
+      ${lib.concatMapStringsSep "\n" (row: "process ${lib.escapeShellArgs row}") processes}
+    '';
+  procFixture = mkProcFixture "dotfiles-doctor-fixture-proc" [
+    [
+      "101"
+      "/fixture/agents/omp/releases/a/bin/omp"
+      "${agentSlice}/dotfiles-agent-omp.101.a.scope"
+    ]
+    [
+      "102"
+      "/fixture/bin/bash"
+      "/init.scope"
+    ]
+    [
+      "103"
+      "/fixture/agents/omp/releases-old/bin/omp"
+      "/init.scope"
+    ]
+    [
+      "104"
+      "/fixture/agents/claude/versions/2.0.0 (deleted)"
+      "${agentSlice}/dotfiles-agent-claude.104.b.scope"
+    ]
+  ];
+  strayProcFixture = mkProcFixture "dotfiles-doctor-fixture-stray-proc" [
+    [
+      "101"
+      "/fixture/agents/omp/releases/a/bin/omp"
+      "${agentSlice}/dotfiles-agent-omp.101.a.scope"
+    ]
+    [
+      "201"
+      "/fixture/agents/omp/releases/b/bin/omp (deleted)"
+      "/init.scope"
+    ]
+    [
+      "202"
+      "/fixture/agents/omp/releases/a/bin/omp"
+      "/user.slice/user-1000.slice/user@1000.service/xagents.slice/stray.scope"
+    ]
+  ];
+  emptyProcFixture = mkProcFixture "dotfiles-doctor-fixture-empty-proc" [ ];
   mkFixtureDoctor =
     values:
     mkDoctor {
       inherit pkgs lib tools;
+      procRoot = procFixture;
       observations = rowsFor values;
     };
   mkFixtureDoctorWithTools =
@@ -391,6 +445,14 @@ let
       failure = 10;
       resourceKey = "fixtureNumericSet";
     };
+    "fixture/20-process-slice" = common "process-slice" "process-slice" // {
+      executableRoots = [
+        "/fixture/agents/omp/releases"
+        "/fixture/agents/claude/versions"
+      ];
+      slice = "agents.slice";
+      resourceKey = "fixtureProcessSlice";
+    };
   };
   failureValues = passValues // {
     "fixture/01-roster" = passValues."fixture/01-roster" // {
@@ -451,6 +513,9 @@ let
     "fixture/18-normalized" = normalizedValue normalizedFailCommand;
     "fixture/19-numeric-set" = passValues."fixture/19-numeric-set" // {
       command = lib.getExe numericSetFailCommand;
+    };
+    "fixture/20-process-slice" = passValues."fixture/20-process-slice" // {
+      slice = "other.slice";
     };
   };
   zramPathDoctor =
@@ -526,6 +591,26 @@ let
   poisonDoctor = mkFixtureDoctor {
     "fixture/normalized-poison" = (normalizedValue normalizedPoisonCommand) // {
       checkId = "fixture/poison-fallback";
+    };
+  };
+  strayProcessDoctor = mkDoctor {
+    inherit pkgs lib tools;
+    procRoot = strayProcFixture;
+    observations = rowsFor {
+      "fixture/stray-process" = passValues."fixture/20-process-slice" // {
+        checkId = "fixture/stray-process";
+        failureMessage = "fixture stray-process failed";
+      };
+    };
+  };
+  unreadableProcessDoctor = mkDoctor {
+    inherit pkgs lib tools;
+    procRoot = emptyProcFixture;
+    observations = rowsFor {
+      "fixture/unreadable-process" = passValues."fixture/20-process-slice" // {
+        checkId = "fixture/unreadable-process";
+        failureMessage = "fixture unreadable-process failed";
+      };
     };
   };
   timeoutDoctor = mkFixtureDoctor {
@@ -784,8 +869,10 @@ in
     restartThresholdFailureDoctor
     rosterFailureOnlyDoctor
     rosterOmitDoctor
+    strayProcessDoctor
     termTimeoutDoctor
     timeoutDoctor
+    unreadableProcessDoctor
     warningDoctor
     ;
 

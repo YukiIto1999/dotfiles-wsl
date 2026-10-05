@@ -161,6 +161,7 @@ in
       updateOwner = "upstream-installer";
       layout = "upstream-managed";
       scriptUrl = "https://claude.ai/install.sh";
+      executableRoot = ".local/share/claude/versions";
     };
   };
 }

@@ -339,11 +339,24 @@ let
         activeStates = [ "active" ];
         serviceResults = [ "success" ];
       };
+      releaseRootFor = name: "${cfg.workstation.homeDir}/.local/share/dotfiles/agents/${name}";
+      # launcher が起動する upstream の実体を置く directory。更新前の release で動き続ける process も含む
+      executableRootsFor =
+        name:
+        let
+          inherit (agents.clients.${name}) install;
+        in
+        if install.kind == "github-release" then
+          [ "${releaseRootFor name}/releases" ]
+        else
+          lib.optional (
+            install.executableRoot != null
+          ) "${cfg.workstation.homeDir}/${install.executableRoot}";
       clientObservation =
         name: client:
         let
           visiblePath = clientExecutables.${name};
-          releaseRoot = "${cfg.workstation.homeDir}/.local/share/dotfiles/agents/${name}";
+          releaseRoot = releaseRootFor name;
         in
         commonObservation "agent/${name}" null
           "${client.binary} is unavailable or its version command failed"
@@ -383,6 +396,7 @@ let
         lowBytes = 51539607552;
         inactiveDays = 30;
       };
+      sliceUnit = "agents.slice";
       state = {
         root = "${cfg.workstation.homeDir}/${relativeStateRoot}";
       };
@@ -420,6 +434,14 @@ let
         };
         "agents/maintenance/autoupdate" = timerObservation timers.autoupdate;
         "agents/maintenance/project-cache-gc" = timerObservation timers.projectCacheGc;
+        "agents/slice-placement" =
+          commonObservation "agent/slice-placement" "agentSlicePlacement"
+            "agent client processes run outside ${sliceUnit}"
+          // {
+            kind = "process-slice";
+            executableRoots = lib.concatMap executableRootsFor runtimeClientNames;
+            slice = sliceUnit;
+          };
       }
       // lib.mapAttrs' (
         name: client: lib.nameValuePair "agents/client/${name}" (clientObservation name client)
@@ -516,6 +538,24 @@ in
         message = "Agent cache low watermark must be below the high watermark";
       }
       {
+        assertion = agents.slice.memoryHighGiB < agents.slice.memoryMaxGiB;
+        message = "Agent slice MemoryHigh must be below MemoryMax";
+      }
+      {
+        assertion =
+          agents.slice.memoryMaxGiB < agents.slice.userManager.memoryMaxGiB
+          && agents.slice.userManager.memoryHighGiB < agents.slice.userManager.memoryMaxGiB;
+        message = "User manager memory limits must enclose the agent slice and keep MemoryHigh below MemoryMax";
+      }
+      {
+        assertion = lib.all (
+          name:
+          agents.clients.${name}.install.kind == "github-release"
+          || agents.clients.${name}.install.executableRoot != null
+        ) runtimeClientNames;
+        message = "Agent clients behind the runtime wrapper must declare where their executables live";
+      }
+      {
         assertion =
           map (timer: timer.name) (builtins.attrValues runtimeContract.timers)
           == lib.unique (map (timer: timer.name) (builtins.attrValues runtimeContract.timers));
@@ -544,6 +584,22 @@ in
         home.sessionPath = lib.mkBefore [ "$HOME/${runtimeWrapperDirectory}" ];
         home.activation.seedAgentConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] seedScript;
       };
+
+    systemd.user.slices.${lib.removeSuffix ".slice" runtimeContract.sliceUnit} = {
+      description = "Agent session の資源上限";
+      sliceConfig = {
+        MemoryHigh = "${toString agents.slice.memoryHighGiB}G";
+        MemoryMax = "${toString agents.slice.memoryMaxGiB}G";
+        MemorySwapMax = "${toString agents.slice.memorySwapMaxGiB}G";
+        CPUWeight = agents.slice.cpuWeight;
+      };
+    };
+
+    # Chromium が自ら app.slice へ作る scope による agents.slice の迂回
+    systemd.services."user@".serviceConfig = {
+      MemoryHigh = "${toString agents.slice.userManager.memoryHighGiB}G";
+      MemoryMax = "${toString agents.slice.userManager.memoryMaxGiB}G";
+    };
 
     systemd.services.${runtimeContract.timers.autoupdate.name} = {
       description = "Agent client を latest へ更新";

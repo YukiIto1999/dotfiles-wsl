@@ -144,6 +144,7 @@
         "docker-build-artifact-gc"
         "docker-dotfiles-backends-network"
         "nix-daemon"
+        "user@"
       ];
 
       registered = lib.sort builtins.lessThan (

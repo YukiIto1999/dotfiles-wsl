@@ -206,6 +206,7 @@ let
     "numeric-command-threshold-set"
     "path-match"
     "path-metadata"
+    "process-slice"
     "release-tree"
     "restart-counter"
     "roster"

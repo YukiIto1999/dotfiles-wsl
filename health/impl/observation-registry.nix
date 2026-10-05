@@ -160,6 +160,7 @@ let
   serviceUnit = types.addCheck safeToken (lib.hasSuffix ".service");
   socketUnit = types.addCheck safeToken (lib.hasSuffix ".socket");
   timerUnit = types.addCheck safeToken (lib.hasSuffix ".timer");
+  sliceUnit = types.addCheck safeToken (lib.hasSuffix ".slice");
 
   thresholdOrderIsValid =
     observation:
@@ -251,6 +252,11 @@ let
     mode = lib.mkOption {
       type = types.addCheck types.str (value: builtins.match "[0-7]{4}" value != null);
     };
+  } (_: true);
+
+  processSliceType = mkObservationType "process-slice" {
+    executableRoots = lib.mkOption { type = uniqueNonEmptyListOf absolutePath; };
+    slice = lib.mkOption { type = sliceUnit; };
   } (_: true);
 
   systemdServiceType = mkObservationType "systemd-service" {
@@ -393,6 +399,7 @@ let
     releaseTreeType
     deployedPathType
     pathMetadataType
+    processSliceType
     systemdServiceType
     systemdSocketType
     systemdTimerType

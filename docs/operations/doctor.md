@@ -11,12 +11,12 @@ dotfiles-doctor --json
 
 ## 検査契約
 
-[`health/module.nix`](../../health/module.nix) は次の 18 種類の observation kind を閉じた union として受け付ける。
+[`health/module.nix`](../../health/module.nix) は次の 19 種類の observation kind を閉じた union として受け付ける。
 
 | 対象 | kind |
 |---|---|
 | roster と path | `roster`、`path-match`、`command-version`、`release-tree`、`deployed-path`、`path-metadata` |
-| systemd と再起動 | `systemd-service`、`systemd-socket`、`systemd-timer`、`restart-counter` |
+| systemd、cgroup と再起動 | `systemd-service`、`systemd-socket`、`systemd-timer`、`restart-counter`、`process-slice` |
 | 容量と committed memory | `filesystem-threshold`、`numeric-command-threshold`、`numeric-command-threshold-set`、`swap-policy`、`journal-size` |
 | container と protocol | `container-image`、`http-health`、`normalized-protocol` |
 
@@ -43,6 +43,11 @@ target の tools/call の故障は `fail` のまま、次の message で種類�
 | `MCP tools/call returned an MCP error` | JSON-RPC の error、`isError` が true の tool 結果、HTTP 400 以上の status |
 | `MCP tools/call response violates the MCP contract` | 一つの JSON-RPC 応答として読めないか、result と error の形が MCP の規約に合わない応答 |
 | `MCP tools/call connection to the gateway failed` | 接続の拒否、切断、空の応答など、HTTP の応答を得られない失敗 |
+
+`process-slice` は、owner が宣言した directory の下の実行 file で動く process が、宣言した systemd slice の cgroup に入っているかを見る。
+probe は `/proc/<PID>/exe` の link 先を directory の前方一致で照合するので、更新後も旧 release で動き続ける process と、削除済みの実行 file で動く process も対象になる。
+process の `environ` は、swap に出た page の読み戻しを誘発するので読まない。
+slice の外の process が一つでもあれば `fail` にし、slice の内と外の process 数を resource に出す。
 
 doctor は directory の容量を再帰的に数えない。
 巨大な build cache の `du` は負荷の下で期限内に終わらず、それ自体が I/O を足すためである。

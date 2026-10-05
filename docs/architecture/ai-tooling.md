@@ -59,11 +59,47 @@ GitHub release経路はGitHub APIのSHA-256 digestと取得したassetを照合�
 
 Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前へ置く共通runtime wrapperから起動する。wrapperはinstallerが管理する`~/.local/bin`のbinaryを絶対pathで実行する。Antigravityは同じCLI起動境界を持たない。
 
-runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。session中に`git worktree add`で作られたworktreeは、runtimeのgit shimがpathと作成時のHEADをsession directoryへ記録する。runtimeは終了時に、HEADが作成時のままのworktreeだけを`git worktree remove`へ渡す。`git worktree remove`は変更、untracked file、lockを持つworktreeを拒むので、それらとsessionの外で作られたworktreeは残る。削除の失敗はclientの終了statusを変えない。同時に走った別の`git worktree add`と区別できないworktreeは記録せず、SIGKILLで終わったsessionのworktreeは回収しない。
+runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録し、clientを`agents.slice`のscopeで起動する（[資源の上限](#資源の上限)）。session中に`git worktree add`で作られたworktreeは、runtimeのgit shimがpathと作成時のHEADをsession directoryへ記録する。runtimeは終了時に、HEADが作成時のままのworktreeだけを`git worktree remove`へ渡す。`git worktree remove`は変更、untracked file、lockを持つworktreeを拒むので、それらとsessionの外で作られたworktreeは残る。削除の失敗はclientの終了statusを変えない。同時に走った別の`git worktree add`と区別できないworktreeは記録せず、SIGKILLで終わったsessionのworktreeは回収しない。
 
 `CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、Cargoの中間成果物は`CARGO_BUILD_BUILD_DIR`でproject cacheの下に置き、`{workspace-path-hash}`でcheckoutごとに分ける。最終成果物は各checkoutの`target`に残る。同じworkspaceのcheckoutどうしで中間成果物を共有すると、Cargoが別checkoutのbuildをfreshと判定するため、linked worktreeとも共有しない。利用者が明示した`CARGO_TARGET_DIR`と`CARGO_BUILD_BUILD_DIR`、project固有のCargo`target-dir`と`build-dir`は上書きしない。一時的な写しでbuildするtoolは、写しごとに中間成果物がproject cacheへ残るため、`CARGO_BUILD_BUILD_DIR`を外して起動する。
 
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
+
+## 資源の上限
+
+wrapperから起動したclientは、launcherが`systemd-run --user --scope`で作るsession単位のscopeの中で動き、そのscopeはsystemd userの`agents.slice`に属する。scope名は`dotfiles-agent-<client>.<pid>.<suffix>.scope`で、session directoryの名前から導く。clientが起動したbuild、test、browser、VMもscopeに入るため、slice全体で次の上限を共有する。値は`dotfiles.agents.slice`のoptionで変えられる。
+
+| 設定 | 既定 | 根拠 |
+|---|---|---|
+| `MemoryHigh` | 24G | VMは40GB（MemTotal 39.2 GiB）である。超えた分はslice内のreclaimとthrottleで抑え、`MemoryMax`までの4 GiBを緩衝に使う。 |
+| `MemoryMax` | 28G | 残る約11 GiBをsystem.slice、container、MCP front、kernelに残す。2026-10-03の実測はsystem.sliceが1.5 GiB、宣言containerの常駐が合計0.3 GiB、MCP frontが各19〜51 MiB、slabが1.9 GiBだった。containerの`--memory`の合計8.5 GiBとMCPの`MemoryMax`の合計22.5 GiBは個別の天井で、同時に使い切ることは想定しない。 |
+| `MemorySwapMax` | 8G | swapは16 GiBのdisk swapとzramである。agentだけでswapを使い切り、基盤のswap-inを止めないようにする。 |
+| `CPUWeight` | 50 | 同じuser managerの`app.slice`や`session.slice`（既定100）に対してagentを後に回す。system.sliceとの配分は上位の`user.slice`と`system.slice`の重み（共に100）で決まる。 |
+
+I/Oの制御は入れない。
+要件は、agentのbuildやtestのI/Oが、journald、udevd、MCP、containerのbackend、Interop、新しいWSL sessionの応答を止めないことである。
+障害時に40〜60%あったio fullは、page cacheの読み直しとswapから来ており、そこへ作用するのはmemoryの上限である。
+
+このkernelはblk-iocostを持たないため`io.weight`が無く、cgroup単位でI/Oを分ける手段はBFQ、`io.max`、`io.latency`に限られる。
+root VHDはhostのSATA SSD上のVHDXで、guestには12個のqueueを持つ回転型の仮想diskに見え、2026-10-02のVM起動以来、読み込み1回に平均44.6 msかかっている。
+BFQは、二つ以上のcgroupに未完了のrequestがあると、処理中のqueueが空いても次のrequestを短時間待ってdeviceを遊ばせる。
+全processがcgroupに分かれたこの系では負荷の下でこの待ちがほぼ常に入り、既に飽和したdiskのthroughputをさらに下げる。
+BFQの重みは兄弟のcgroupの間でしか効かず、`agents.slice`に`IOWeight`を付けても、rootの直下でsystem.sliceやinit.scopeとuser.sliceが同じ重みで分け合うことは変わらない。
+`io.max`はdeviceに空きがあっても上限を超えさせず、値の根拠になるdeviceの能力はhostのSSDの状態で変わる。
+`io.latency`はsystem.sliceに目標を付けると目標を持たない兄弟のcgroupを絞るため、Interopと新しいsessionが動くinit.scopeも絞られ、目標の値にも実測が要る。
+
+判断は、全agent sessionが`agents.slice`に入った後のPSIで見直す。
+doctorの`resource/wsl-memory/io-pressure`が`warn`になった時間帯に、`/sys/fs/cgroup/system.slice/systemd-journald.service/`と`/sys/fs/cgroup/init.scope/`の`io.pressure`と`memory.pressure`の`some`の60秒平均を読む。
+`io.pressure`が10%以上で`memory.pressure`が10%未満なら、agentのI/Oが基盤を止めているので、BFQとの比較に進む。
+両方が10%以上なら基盤のpageが追い出されているので、I/Oの制御ではなく基盤のmemoryの保護で直す。
+
+launcherはscopeを作れないとclientを起動せずに失敗する。user managerに届かない状況で上限のないsessionを起こさないためである。scopeの外で動くclientのprocessはdoctorの`agent/slice-placement`が報告する。
+
+Cargoの並列度は既定のままにする。2026-10-03の実測ではcargo 7個に対しrustcとclippy-driverが合わせて10個で、memoryを押し上げていたのは一つのbuildの`-j`ではなく同時に走るsessionの数だった。slice全体の上限はcargo以外のtoolchainにも同じく効き、`CARGO_BUILD_JOBS`はprojectの`build.jobs`より優先されて上書きしてしまう。
+
+agentが起動する`nix build`のbuilderはnix-daemonの子としてsystem.sliceで動き、`agents.slice`の上限を受けない。[`workstation/nix/module.nix`](../../workstation/nix/module.nix)は`max-jobs`を4、`cores`を3に固定し、1回のnix呼出しの並列度を12 vCPUに収める。`max-jobs`は呼出しごとの上限なので、同時に走る呼出しの数は抑えない。nix-daemonの`CPUWeight`は50にし、同じsystem.sliceのjournald、udevd、container、MCP frontより後に回す。Docker daemonが起こすcontainerも`agents.slice`の外にある。
+
+Chromiumはuser busへ届くと自ら`app.slice`にscopeを作って移るため、agentのtestが起動したbrowserも`agents.slice`を抜ける。2026-10-03時点の`app.slice`の`memory.peak`は19.3 GiBだった。そこでuser manager（`user@.service`）全体にも`MemoryHigh` 27G、`MemoryMax` 30Gを置き、`agents.slice`と`app.slice`の合計を抑える。値は`dotfiles.agents.slice.userManager`で変えられ、`agents.slice`の`MemoryMax`より大きくなければ評価が失敗する。VMの40 GiBから30 GiBを引いた残りを、system.sliceの基盤、WSLの`/init`配下、kernelの高次pageの余地に残す。
 
 ## Policy、subagent、Skill
 

@@ -55,28 +55,37 @@ let
     nixBuildCommand = "${pkgs.nix}/bin/nix-build";
     gitCommand = lib.getExe pkgs.git;
   };
-  launcher = pkgs.writeShellApplication {
-    name = "dotfiles-agent-runtime";
-    runtimeInputs = with pkgs; [
-      coreutils
-      gawk
-      git
-      jq
-      taplo
-      util-linux
-    ];
-    text =
-      builtins.replaceStrings
-        [
-          "@agentShimDirectory@"
-          "@cacheRootRelative@"
-        ]
-        [
-          "${agentShims}/bin"
-          cacheRootRelative
-        ]
-        (builtins.readFile ./impl/runtime/launcher.sh);
-  };
+  mkLauncher =
+    {
+      systemdRunCommand ? lib.getExe' pkgs.systemd "systemd-run",
+    }:
+    pkgs.writeShellApplication {
+      name = "dotfiles-agent-runtime";
+      runtimeInputs = with pkgs; [
+        coreutils
+        gawk
+        git
+        jq
+        taplo
+        util-linux
+      ];
+      text =
+        builtins.replaceStrings
+          [
+            "@agentShimDirectory@"
+            "@cacheRootRelative@"
+            "@systemdRunCommand@"
+            "@sliceUnit@"
+          ]
+          [
+            "${agentShims}/bin"
+            cacheRootRelative
+            (lib.escapeShellArg (toString systemdRunCommand))
+            runtimeContract.sliceUnit
+          ]
+          (builtins.readFile ./impl/runtime/launcher.sh);
+    };
+  launcher = mkLauncher { };
   projectCacheGcSource =
     builtins.replaceStrings
       [
@@ -146,6 +155,7 @@ in
   inherit
     agentShims
     launcher
+    mkLauncher
     gate
     gc
     mkAgentShims

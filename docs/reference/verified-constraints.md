@@ -14,13 +14,13 @@
 | option の接頭辞が宣言した unit の名前と一致する | `option-namespace` |
 | repository の Nix source に旧 option namespace と global helper injection が残らない | `dotfiles-option-namespace` |
 | 適用の入口が working tree と WSL 再起動を確かめてから nixos-rebuild を呼ぶ | `rebuild-entrypoint` |
-| doctor が owner の observation registry を欠落なく key 順に投影し、18 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
-| 18 種類の observation kind の pass、warn、fail、resource、restart 集約と、数値集合の名前ごとの check を反映する。protocol の不正、過大出力、非ゼロ終了、期限前の kill は固定 message の fail に、期限切れは期限の秒数を示す warn にする。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする | `doctor-runtime` |
+| doctor が owner の observation registry を欠落なく key 順に投影し、19 種類の observation kind を一つずつ汎用 probe に対応させ、旧 owner 固有 inventory と状態機械を持たない | `doctor-coverage` |
+| 19 種類の observation kind の pass、warn、fail、resource、restart 集約と、数値集合の名前ごとの check を反映する。protocol の不正、過大出力、非ゼロ終了、期限前の kill は固定 message の fail に、期限切れは期限の秒数を示す warn にする。timer は `Result` が success でも service の最後の終了 status が非ゼロなら fail にする。slice の照合は実行 file の link 先の前方一致と cgroup の path の component の一致で行い、削除済みの実行 file を含め、名前が似た兄弟 directory と slice を区別する | `doctor-runtime` |
 | Windows drive の一覧を host profile に持たせず全 host で同じ観測にし、profile で上書きした zram、swap、Windows committed memory の値を runtime contract へ反映する | `machine-profile-contract` |
 | WSL 専用 zram lifecycle、page cache回収timerの不在、journald、定期fstrimの無効化、Nix の容量 reserve、WSL の mount から実行時に見つけた Windows drive と committed memory の観測、root VHD の容量と `.wslconfig` の VHD 設定を宣言値と照合する観測、service非依存が宣言どおりである | `host-stability-contract` |
 | 宣言した time zone と default locale が実際の日時書式に現れ、UTC と C へ無言で戻らない | `host-locale-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
-| runtime observation registry が 18 種類の observation kind、必須 field、path と ID、閾値、専用 command package を型で制限し、定義位置を owner と照合する | `observation-contract` |
+| runtime observation registry が 19 種類の observation kind、必須 field、path と ID、閾値、専用 command package を型で制限し、定義位置を owner と照合する | `observation-contract` |
 | required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
 | 宣言、参照、暗号文の recipient が一致し、recovery 鍵が一つ、host 鍵が一つ以上あり、登録した全 host の鍵を含む | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
@@ -92,7 +92,8 @@
 | 制約 | 検証 |
 |---|---|
 | MCP session が active な GET body の間 reap されず、session front の listener address を loopback に固定できる | `agentgateway-session-lifecycle` |
-| agent runtime の package、timer、四つの managed root、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、checkout ごとの Cargo build-dir、明示済み環境値と project の出力先設定、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
+| agent runtime の package、timer、slice 配置、client roster と release tree observation が一つの contract から導かれ、wrapper が upstream binary、session metadata、共有 Cargo/XDG cache、checkout ごとの Cargo build-dir、明示済み環境値と project の出力先設定、元の終了 status を保つ | `agent-runtime-contract`、`agent-runtime-behavior` |
+| launcher が upstream を memory 上限を宣言した user slice の session ごとの scope で起動し、argv を展開せず、upstream の終了 status と signal を返し、scope を作れなければ upstream を起動せずに失敗する | `agent-runtime-behavior` |
 | agent 内の Nix build が明示 out-link を尊重し、既定では result symlink を作らない | `agent-nix-build-shims` |
 | project-memory runtimeが絶対cwd、Git common directory由来のproject scope、explicit scope、pending retainを契約どおり扱い、会話turnのhook eventをbackendへ送らずに拒否し、recall queryから注入blockを除き、明示的に保存した記憶だけを全頁から一覧する | `project-memory-runtime-behavior` |
 | OpenCodeの同時sessionへ想起結果が混在せず、古いpromptの遅延応答が新しい結果を上書きせず、idleで想起結果を捨てて会話をmemoryへ送らない | `project-memory-client-integrations` |

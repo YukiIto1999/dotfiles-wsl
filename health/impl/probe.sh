@@ -9,9 +9,11 @@ cmp_command=@cmpCommand@
 curl_command=@curlCommand@
 df_command=@dfCommand@
 docker_command=@dockerCommand@
+find_command=@findCommand@
 head_command=@headCommand@
 journalctl_command=@journalctlCommand@
 jq_command=@jqCommand@
+proc_root=@procRoot@
 readlink_command=@readlinkCommand@
 stat_command=@statCommand@
 swapon_command=@swaponCommand@
@@ -236,6 +238,48 @@ probe_path_metadata() {
   else
     emit_failure
   fi
+}
+
+cgroup_path() {
+  local line
+  while IFS= read -r line; do
+    if [[ $line == 0::* ]]; then
+      printf '%s\n' "${line#0::}"
+      return 0
+    fi
+  done <"$1"
+  return 1
+}
+
+# environ を読むと swap に出た process の page を読み戻すため実行 file の link 先以外による agent の判別は不可
+probe_process_slice() {
+  local slice listing process target root path inside=0 outside=0 resource_value resources
+  local -a roots=()
+  slice=$($jq_command -r '.slice' <<<"$observation")
+  mapfile -t roots < <($jq_command -r '.executableRoots[]' <<<"$observation")
+  listing=$($find_command "$proc_root"/[0-9]*/exe -maxdepth 0 -printf '%h\t%l\n' 2>/dev/null) || true
+  if [[ -z $listing ]]; then
+    emit_failure
+    return
+  fi
+  while IFS=$'\t' read -r process target; do
+    [[ -n $target ]] || continue
+    for root in "${roots[@]}"; do
+      [[ $target == "$root"/* ]] || continue
+      if path=$(cgroup_path "$process/cgroup" 2>/dev/null); then
+        if [[ $path/ == */"$slice"/* ]]; then
+          inside=$((inside + 1))
+        else
+          outside=$((outside + 1))
+        fi
+      fi
+      break
+    done
+  done <<<"$listing"
+  resource_value=$($jq_command -cn --argjson inside "$inside" --argjson outside "$outside" \
+    '{inside:$inside,outside:$outside}')
+  resources=$(resource_array "$resource_value")
+  if ((outside == 0)); then emit_pass "$resources"; else emit_failure "$resources"; fi
 }
 
 probe_systemd_unit() {
@@ -628,6 +672,7 @@ case "$kind" in
   release-tree) probe_release_tree ;;
   deployed-path) probe_deployed_path ;;
   path-metadata) probe_path_metadata ;;
+  process-slice) probe_process_slice ;;
   systemd-service) probe_systemd_unit ;;
   systemd-socket) probe_systemd_unit ;;
   systemd-timer) probe_systemd_timer ;;

@@ -46,7 +46,8 @@
         "kind": "installer-script",
         "updateOwner": "upstream-installer",
         "layout": "upstream-managed",
-        "scriptUrl": "https://antigravity.google/cli/install.sh"
+        "scriptUrl": "https://antigravity.google/cli/install.sh",
+        "executableRoot": null
       }
     },
     "claude": {
@@ -106,7 +107,8 @@
         "kind": "installer-script",
         "updateOwner": "upstream-installer",
         "layout": "upstream-managed",
-        "scriptUrl": "https://claude.ai/install.sh"
+        "scriptUrl": "https://claude.ai/install.sh",
+        "executableRoot": ".local/share/claude/versions"
       }
     },
     "codex": {

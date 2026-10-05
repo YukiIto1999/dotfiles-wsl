@@ -3,11 +3,13 @@
   lib,
   observations,
   probeOverride ? null,
+  procRoot ? "/proc",
   tools ? {
     cmp = "${pkgs.diffutils}/bin/cmp";
     curl = lib.getExe pkgs.curl;
     df = "${pkgs.coreutils}/bin/df";
     docker = lib.getExe pkgs.docker;
+    find = "${pkgs.findutils}/bin/find";
     env = "${pkgs.coreutils}/bin/env";
     head = "${pkgs.coreutils}/bin/head";
     journalctl = "${pkgs.systemd}/bin/journalctl";
@@ -30,9 +32,11 @@ let
     "@curlCommand@" = lib.escapeShellArg tools.curl;
     "@dfCommand@" = lib.escapeShellArg tools.df;
     "@dockerCommand@" = lib.escapeShellArg tools.docker;
+    "@findCommand@" = lib.escapeShellArg tools.find;
     "@headCommand@" = lib.escapeShellArg tools.head;
     "@journalctlCommand@" = lib.escapeShellArg tools.journalctl;
     "@jqCommand@" = lib.escapeShellArg tools.jq;
+    "@procRoot@" = lib.escapeShellArg procRoot;
     "@readlinkCommand@" = lib.escapeShellArg tools.readlink;
     "@statCommand@" = lib.escapeShellArg tools.stat;
     "@swaponCommand@" = lib.escapeShellArg tools.swapon;

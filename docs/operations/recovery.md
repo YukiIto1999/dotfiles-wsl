@@ -45,6 +45,8 @@ Windowsの`.wslconfig`と追加drive上のdataはexportに含まれないため�
 
 元のdistributionを削除せず、新しい名前と空の保存directoryへimportする。
 復旧確認前に`wsl.exe --unregister`を使わない。
+別名のdistributionもWSL2のkernelを共有するため、既存環境との資源やnetworkの分離は保証されない。
+既存のdotfiles環境が稼働中の場合は、zramとcontainer networkへ干渉しないことを起動前に確認し、分離できなければ別PCか独立したVMでrestoreを検証する。
 
 ```powershell
 wsl.exe --import 'NixOS-Restore' 'D:\WSL\NixOS-Restore' 'E:\EncryptedBackup\NixOS.tar' --version 2

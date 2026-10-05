@@ -2,7 +2,7 @@
 
 **読み手:** 新しいNixOS-WSLホストを構築する運用者が、作業中に読む。
 
-初回構築は、Windows側の準備、host選択、host keyの登録、bootstrap、WSL再起動、enrollment差分のcommit、必要なOCI imageの同期、通常のrebuild、認証、検証の順に進める。
+初回構築は、Windows側の準備、host選択、host keyの登録、bootstrap、WSL再起動、enrollment差分のcommit、Agent CLIの導入、必要なOCI imageの同期、通常のrebuild、認証、検証の順に進める。
 bootstrapはGit identityを含む初回boot generationを用意し、通常のrebuildはcommit済みのcheckoutだけを適用する。
 
 ## Windowsとcheckout
@@ -11,6 +11,22 @@ WSL distributionを用意する前に、[Windows側の準備](doctor.md)でRAM�
 Windowsの`.wslconfig`はこのrepositoryから自動上書きされない。
 既存のNix環境では、対象hostの`dotfiles.workstation.wsl.windowsConfigTemplate`を`nix eval --raw`で取得できる。
 既存VHDの容量や保存場所は新しい設定だけでは変わらないため、既存distributionを移す場合も同じ手順のbackupとrestore条件を確認する。
+
+初期distributionは[公式のNixOS-WSL導入手順](https://nix-community.github.io/NixOS-WSL/install.html#install-nixos-wsl)に従い、[公式release](https://github.com/nix-community/NixOS-WSL/releases)のx86_64用`nixos.wsl`から作成する。
+このcheckoutはNixOS 26.05を使うため、同じ系列のstable imageを選び、公開されたSHA-256とdownloadしたfileのhashを照合する。
+Windows PowerShellで既存の登録名を確認し、未使用の名前と新しい保存directoryを指定する。
+
+```powershell
+wsl.exe --version
+wsl.exe --list --verbose
+Get-FileHash -Algorithm SHA256 .\nixos.wsl
+wsl.exe --import 'NixOS' 'D:\WSL\NixOS' .\nixos.wsl --version 2
+wsl.exe --distribution 'NixOS' --user nixos
+```
+
+保存先は実際のdriveと空のdirectoryへ置き換える。
+`NixOS`が登録済みなら別名を選び、既存distributionを削除せず、後続のhost profileにも同じ登録名を設定する。
+WSL自体が未導入の場合は先に公式のprerequisiteを満たし、Windowsの再起動が必要なら既存sessionの終了を確認してから行う。
 
 主ユーザーの既定値はNixOS-WSLの初期ユーザーと同じ`nixos`で、checkoutの既定値は`/home/nixos/environment/dotfiles-wsl`である。
 このユーザーでログインし、Gitとflake CLIが未設定の初期imageでも使える一時的な作業環境を用意する。
@@ -99,13 +115,16 @@ bootstrapはrootと主ユーザーのNix呼び出しにflake用のflagを明示�
 初期imageのroot側にGitがない場合やflake CLIが無効な場合でも、通常ユーザーの一時shellのPATHだけには依存しない。
 
 [bootstrap script](../../workstation/activation/rebuild/impl/bootstrap.sh)は、鍵の存在と権限、hostとcheckoutの一致、未追跡ファイルの不在、host keyによる復号を検査する。
-続いて採用したAgent clientを取得し、flakeが固定した`nixos-rebuild`で対象hostのboot generationを作り、`/etc/nixos`をcheckoutへのsymlinkにする。
+続いてflakeが固定した`nixos-rebuild`で対象hostのboot generationを作り、`/etc/nixos`をcheckoutへのsymlinkにする。
+初期imageではgeneric Linux向けnative CLIの実行に必要な`nix-ld`がまだ配備されていないため、bootstrap中にAgent installerを実行しない。
 bootstrapは差分を自動commitせず、通常のrebuildのdirty拒否も変更しない。
 
 ## 再起動とcommit
 
 bootstrapが表示するdistribution名を使い、PowerShellで対象のNixOS-WSLだけを停止して起動する。
 他のsessionが作業中の場合は、その作業が終わるまで停止しない。
+別名のdistributionもWSL2のkernelを共有するため、別名登録だけでは既存環境との資源やnetworkの分離を保証しない。
+既存のdotfiles環境が稼働しているPCで並行検証する場合は、zramとcontainer networkの共用を起動前に確認し、干渉を避けられない場合は別PCか独立したVMで検証する。
 既定の登録名では次のcommandになる。
 
 ```powershell
@@ -133,6 +152,12 @@ commit後のtracked working treeがcleanであることを確認する。
 
 ## 初回同期と適用
 
+再ログイン後はboot generationの`nix-ld`を使える状態で、採用したAgent CLIを導入する。
+
+```bash
+dotfiles-install-agents
+```
+
 containerを選ぶhostでは、配備済みの短いcommandでupstream OCI imageを同期してから同じcheckoutを適用する。
 
 ```bash
@@ -140,7 +165,7 @@ dotfiles-sync-images
 dotfiles-rebuild
 ```
 
-containerを一つも選ばないhostには同期commandを配備しないため、bootstrapの表示どおり`dotfiles-rebuild`だけを実行する。
+containerを一つも選ばないhostには同期commandを配備しないため、CLIの導入後にbootstrapの表示どおり`dotfiles-rebuild`を実行する。
 checkoutから別hostを明示して同期する入口は[OCI images](oci-images.md)にある。
 
 初回boot generationのcontainer unitは、Docker cacheにimageがないため失敗することがある。

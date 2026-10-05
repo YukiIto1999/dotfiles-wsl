@@ -72,6 +72,8 @@ identity installed by the boot generation to commit both files:
 
 The tracked working tree must be clean before continuing:
 
+  dotfiles-install-agents
+
 ${sync_command}  dotfiles-rebuild
   dotfiles-doctor
 
@@ -149,11 +151,6 @@ verify_secrets() {
   step "secrets decryption verified"
 }
 
-install_agent_clients() {
-  as_user "${NIX_COMMAND[@]}" run "${FLAKE_REF}#nixosConfigurations.${TARGET_HOST}.config.dotfiles.platform.cli.commands.installAgents"
-  step "agent clients installed from upstream"
-}
-
 install_boot_generation() {
   local upstream_rebuild
   upstream_rebuild=$("${NIX_COMMAND[@]}" build --no-link --print-out-paths --no-write-lock-file \
@@ -203,7 +200,6 @@ declare -ar BOOTSTRAP_STAGES=(
   verify_host_identity
   verify_tracked_flake_files
   verify_secrets
-  install_agent_clients
   install_boot_generation
   link_nixos
 )

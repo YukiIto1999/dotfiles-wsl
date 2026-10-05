@@ -253,13 +253,6 @@ let
     };
   } (_: true);
 
-  managedRootsType = mkObservationType "managed-roots" {
-    paths = lib.mkOption { type = uniqueNonEmptyListOf absolutePath; };
-    missingAsZero = lib.mkOption { type = types.bool; };
-    oneFileSystem = lib.mkOption { type = types.bool; };
-    cachePolicy = lib.mkOption { type = types.enum [ "allocated-bytes" ]; };
-  } (_: true);
-
   systemdServiceType = mkObservationType "systemd-service" {
     unit = lib.mkOption { type = serviceUnit; };
     loadStates = lib.mkOption { type = uniqueNonEmptyListOf loadState; };
@@ -400,7 +393,6 @@ let
     releaseTreeType
     deployedPathType
     pathMetadataType
-    managedRootsType
     systemdServiceType
     systemdSocketType
     systemdTimerType

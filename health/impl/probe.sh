@@ -9,7 +9,6 @@ cmp_command=@cmpCommand@
 curl_command=@curlCommand@
 df_command=@dfCommand@
 docker_command=@dockerCommand@
-du_command=@duCommand@
 head_command=@headCommand@
 journalctl_command=@journalctlCommand@
 jq_command=@jqCommand@
@@ -237,42 +236,6 @@ probe_path_metadata() {
   else
     emit_failure
   fi
-}
-
-probe_managed_roots() {
-  local missing_as_zero one_file_system path kind output bytes observed extra row
-  local valid=1
-  local -a rows=()
-  local -a du_args=(--summarize --block-size=1)
-  missing_as_zero=$($jq_command -r '.missingAsZero' <<<"$observation")
-  one_file_system=$($jq_command -r '.oneFileSystem' <<<"$observation")
-  [[ $one_file_system == true ]] && du_args+=(--one-file-system)
-  while IFS= read -r path; do
-    if kind=$($stat_command --format=%F -- "$path" 2>/dev/null); then
-      if [[ $kind != directory ]]; then
-        valid=0
-        continue
-      fi
-    elif [[ $missing_as_zero == true && ! -e $path && ! -L $path ]]; then
-      rows+=("$($jq_command -cn --arg path "$path" '{path:$path,bytes:0}')")
-      continue
-    else
-      valid=0
-      continue
-    fi
-    if output=$($du_command "${du_args[@]}" -- "$path" 2>/dev/null); then
-      IFS=$'\t' read -r bytes observed extra <<<"$output"
-      if [[ $bytes =~ ^(0|[1-9][0-9]*)$ && $observed == "$path" && -z ${extra-} ]]; then
-        row=$($jq_command -cn --arg path "$path" --argjson bytes "$bytes" '{path:$path,bytes:$bytes}')
-        rows+=("$row")
-        continue
-      fi
-    fi
-    valid=0
-  done < <($jq_command -r '.paths[]' <<<"$observation")
-  resources_value=$(printf '%s\n' "${rows[@]}" | $jq_command -sc 'map(select(type == "object"))')
-  resources=$(resource_array "$resources_value")
-  if ((valid == 1)); then emit_pass "$resources"; else emit_failure "$resources"; fi
 }
 
 probe_systemd_unit() {
@@ -665,7 +628,6 @@ case "$kind" in
   release-tree) probe_release_tree ;;
   deployed-path) probe_deployed_path ;;
   path-metadata) probe_path_metadata ;;
-  managed-roots) probe_managed_roots ;;
   systemd-service) probe_systemd_unit ;;
   systemd-socket) probe_systemd_unit ;;
   systemd-timer) probe_systemd_timer ;;

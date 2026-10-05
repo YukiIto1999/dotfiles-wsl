@@ -312,7 +312,6 @@ let
   runtimeContract =
     let
       observationTimeoutSeconds = 10;
-      managedRootsObservationTimeoutSeconds = 60;
       relativeCacheRoot = ".cache/dotfiles-wsl";
       relativeStateRoot = ".local/state/dotfiles-wsl";
       releaseFor =
@@ -431,22 +430,6 @@ let
           minimumCount = 1;
           failureOnly = true;
         };
-        "agents/managed-roots" =
-          commonObservation "resource/managed-roots" "managedRoots"
-            "could not summarize every managed resource root"
-          // {
-            timeoutSeconds = managedRootsObservationTimeoutSeconds;
-            kind = "managed-roots";
-            paths = [
-              cache.buildsRoot
-              cache.sharedRoot
-              cache.sessionsRoot
-              state.resourcesRoot
-            ];
-            missingAsZero = true;
-            oneFileSystem = true;
-            cachePolicy = "allocated-bytes";
-          };
         "agents/maintenance/autoupdate" = timerObservation timers.autoupdate;
         "agents/maintenance/project-cache-gc" = timerObservation timers.projectCacheGc;
         "agents/maintenance/resource-reaper" = timerObservation timers.resourceReaper;

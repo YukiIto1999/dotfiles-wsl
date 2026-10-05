@@ -201,7 +201,6 @@ let
     "filesystem-threshold"
     "http-health"
     "journal-size"
-    "managed-roots"
     "normalized-protocol"
     "numeric-command-threshold"
     "numeric-command-threshold-set"

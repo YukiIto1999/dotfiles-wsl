@@ -18,7 +18,7 @@ let
     cp ${./fake-runtime-tool.sh} "$out/libexec/fake-runtime-tool"
     chmod +x "$out/libexec/fake-runtime-tool"
     patchShebangs "$out/libexec/fake-runtime-tool"
-    for name in curl df docker du journalctl stat swapon systemctl zramctl; do
+    for name in curl df docker journalctl stat swapon systemctl zramctl; do
       ln -s ../libexec/fake-runtime-tool "$out/bin/$name"
     done
   '';
@@ -27,7 +27,6 @@ let
     curl = "${fakeTools}/bin/curl";
     df = "${fakeTools}/bin/df";
     docker = "${fakeTools}/bin/docker";
-    du = "${fakeTools}/bin/du";
     env = "${pkgs.coreutils}/bin/env";
     head = "${pkgs.coreutils}/bin/head";
     journalctl = "${fakeTools}/bin/journalctl";
@@ -313,13 +312,6 @@ let
       group = "root";
       mode = "0400";
     };
-    "fixture/07-managed-roots" = common "managed-roots" "managed-roots" // {
-      paths = [ "/fixture/root-ok" ];
-      missingAsZero = false;
-      oneFileSystem = true;
-      cachePolicy = "allocated-bytes";
-      resourceKey = "managedRoots";
-    };
     "fixture/08-systemd-service" = common "systemd-service" "systemd-service" // {
       unit = "service-ok.service";
       loadStates = [ "loaded" ];
@@ -419,12 +411,6 @@ let
     };
     "fixture/06-path-metadata" = passValues."fixture/06-path-metadata" // {
       path = "/fixture/metadata-error";
-    };
-    "fixture/07-managed-roots" = passValues."fixture/07-managed-roots" // {
-      paths = [
-        "/fixture/root-ok"
-        "/fixture/root-bad"
-      ];
     };
     "fixture/08-systemd-service" = passValues."fixture/08-systemd-service" // {
       unit = "service-fail.service";
@@ -667,13 +653,6 @@ let
       "fixture/release-missing-${name}" = observation;
     };
   }) releaseMissingLinkObservations;
-  managedSpaceDoctor = mkFixtureDoctor {
-    "fixture/managed-space" = passValues."fixture/07-managed-roots" // {
-      checkId = "fixture/managed-space";
-      paths = [ "/fixture/root with space" ];
-      resourceKey = "managedSpace";
-    };
-  };
 
   invalidNormalizedCommands = {
     nonzero = normalizedNonzeroCommand;
@@ -790,7 +769,6 @@ in
     filesystemFreeDoctor
     invalidNormalizedDoctors
     killedProbeDoctor
-    managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
     numericSetInvalidDoctors

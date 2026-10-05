@@ -8,7 +8,6 @@
     curl = lib.getExe pkgs.curl;
     df = "${pkgs.coreutils}/bin/df";
     docker = lib.getExe pkgs.docker;
-    du = "${pkgs.coreutils}/bin/du";
     env = "${pkgs.coreutils}/bin/env";
     head = "${pkgs.coreutils}/bin/head";
     journalctl = "${pkgs.systemd}/bin/journalctl";
@@ -31,7 +30,6 @@ let
     "@curlCommand@" = lib.escapeShellArg tools.curl;
     "@dfCommand@" = lib.escapeShellArg tools.df;
     "@dockerCommand@" = lib.escapeShellArg tools.docker;
-    "@duCommand@" = lib.escapeShellArg tools.du;
     "@headCommand@" = lib.escapeShellArg tools.head;
     "@journalctlCommand@" = lib.escapeShellArg tools.journalctl;
     "@jqCommand@" = lib.escapeShellArg tools.jq;

@@ -13,7 +13,6 @@ let
     filesystemFreeDoctor
     invalidNormalizedDoctors
     killedProbeDoctor
-    managedSpaceDoctor
     numericNoiseDoctor
     numericOversizeDoctor
     numericSetInvalidDoctors
@@ -62,7 +61,6 @@ in
             {id:"fixture/release-tree",status:"pass"},
             {id:"fixture/deployed-path",status:"pass"},
             {id:"fixture/path-metadata",status:"pass"},
-            {id:"fixture/managed-roots",status:"pass"},
             {id:"fixture/systemd-service",status:"pass"},
             {id:"fixture/systemd-socket",status:"pass"},
             {id:"fixture/systemd-timer",status:"pass"},
@@ -85,7 +83,6 @@ in
             fixtureFilesystem:{usedPercent:10},
             fixtureNumeric:{freePercent:20},
             fixtureJournal:{bytes:1024},
-            managedRoots:[{path:"/fixture/root-ok",bytes:42}],
             fixtureProtocol:{state:"ok"},
             fixtureNumericSet:[{name:"c",freePercent:20},{name:"d",freePercent:30}],
             serviceRestarts:[{unit:"service-ok.service",count:0}],
@@ -142,13 +139,12 @@ in
         set -e
         test "$failure_status" -eq 1
         jq -e '
-          (.checks | length) == 22
+          (.checks | length) == 21
           and all(.checks[]; .status == "fail")
-          and (.failures | length) == 22
+          and (.failures | length) == 21
           and ([.failures[] | select(.id == "fixture/numeric-set/c" or .id == "fixture/numeric-set/d") | .message]
             == ["free-percent crossed its fail threshold","free-percent crossed its fail threshold"])
           and .warnings == []
-          and .resources.managedRoots == [{path:"/fixture/root-ok",bytes:42}]
           and .resources.serviceRestarts == []
           and .resources.containerRestarts == []
           and ([.failures[].id] | index("fixture/normalized-fallback")) == null
@@ -351,14 +347,6 @@ in
           and .failures == []
           and .resources.fixtureFilesystemFree == {freePercent:90}
         ' <<<"$filesystem_free_output" >/dev/null
-
-        managed_space_output=$(${lib.getExe managedSpaceDoctor} --json)
-        jq -e '
-          .checks == [{id:"fixture/managed-space",status:"pass"}]
-          and .warnings == []
-          and .failures == []
-          and .resources.managedSpace == [{path:"/fixture/root with space",bytes:42}]
-        ' <<<"$managed_space_output" >/dev/null
 
         roster_omit_output=$(${lib.getExe rosterOmitDoctor} --json)
         jq -e '

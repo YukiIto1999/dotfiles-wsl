@@ -11,11 +11,11 @@ dotfiles-doctor --json
 
 ## 検査契約
 
-[`health/module.nix`](../../health/module.nix) は次の 19 種類の observation kind を閉じた union として受け付ける。
+[`health/module.nix`](../../health/module.nix) は次の 18 種類の observation kind を閉じた union として受け付ける。
 
 | 対象 | kind |
 |---|---|
-| roster と path | `roster`、`path-match`、`command-version`、`release-tree`、`deployed-path`、`path-metadata`、`managed-roots` |
+| roster と path | `roster`、`path-match`、`command-version`、`release-tree`、`deployed-path`、`path-metadata` |
 | systemd と再起動 | `systemd-service`、`systemd-socket`、`systemd-timer`、`restart-counter` |
 | 容量と committed memory | `filesystem-threshold`、`numeric-command-threshold`、`numeric-command-threshold-set`、`swap-policy`、`journal-size` |
 | container と protocol | `container-image`、`http-health`、`normalized-protocol` |
@@ -44,14 +44,11 @@ target の tools/call の故障は `fail` のまま、次の message で種類�
 | `MCP tools/call response violates the MCP contract` | 一つの JSON-RPC 応答として読めないか、result と error の形が MCP の規約に合わない応答 |
 | `MCP tools/call connection to the gateway failed` | 接続の拒否、切断、空の応答など、HTTP の応答を得られない失敗 |
 
-agent の管理下領域は次の四つを一度に集計する。
+doctor は directory の容量を再帰的に数えない。
+巨大な build cache の `du` は負荷の下で期限内に終わらず、それ自体が I/O を足すためである。
+Linux root の空きは `resource/root-filesystem` の使用率で見る。
 
-- `~/.cache/dotfiles-wsl/builds`
-- `~/.cache/dotfiles-wsl/shared`
-- `~/.cache/dotfiles-wsl/sessions`
-- `~/.local/state/dotfiles-wsl/agent-resources`
-
-home や project 全体は再帰 scan しない。doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、WSL の root VHD、Windows drive、Windows committed memory、swap topology を観測対象とする。Windows drive は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。Windows committed memory は PowerShell から使用率を得る。root VHD は root disk の容量を `resource/wsl-vhd/capacity`、PowerShell で読んだ Windows 側の `.wslconfig` の VHD 設定を `resource/wsl-vhd/wslconfig` に出す。
+doctor は cleanup、GC、service 再起動、trim を実行しない。Linux root、WSL の root VHD、Windows drive、Windows committed memory、swap topology を観測対象とする。Windows drive は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。Windows committed memory は PowerShell から使用率を得る。root VHD は root disk の容量を `resource/wsl-vhd/capacity`、PowerShell で読んだ Windows 側の `.wslconfig` の VHD 設定を `resource/wsl-vhd/wslconfig` に出す。
 
 ## 結果
 

@@ -98,13 +98,6 @@ let
       group = "root";
       mode = "0400";
     };
-    "host/managed-roots" = common "managed-roots" // {
-      kind = "managed-roots";
-      paths = [ "/home/fixture/.cache/dotfiles-wsl" ];
-      missingAsZero = true;
-      oneFileSystem = true;
-      cachePolicy = "allocated-bytes";
-    };
     "host/systemd-service" = common "systemd-service" // {
       kind = "systemd-service";
       unit = "fixture.service";

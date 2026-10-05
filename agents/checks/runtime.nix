@@ -230,7 +230,6 @@ let
   );
 
   observationTimeoutSeconds = 10;
-  managedRootsObservationTimeoutSeconds = 60;
   homeDir = hostConfig.dotfiles.workstation.homeDir;
   runtimeContractSupport = import ./support/runtime-contract.nix {
     inherit homeDir;
@@ -299,22 +298,6 @@ let
       minimumCount = 1;
       failureOnly = true;
     };
-    "agents/managed-roots" =
-      commonAgentObservation "resource/managed-roots" "managedRoots"
-        "could not summarize every managed resource root"
-      // {
-        timeoutSeconds = managedRootsObservationTimeoutSeconds;
-        kind = "managed-roots";
-        paths = with expectedAgentRuntime; [
-          cache.buildsRoot
-          cache.sharedRoot
-          cache.sessionsRoot
-          state.resourcesRoot
-        ];
-        missingAsZero = true;
-        oneFileSystem = true;
-        cachePolicy = "allocated-bytes";
-      };
     "agents/maintenance/autoupdate" = timerObservation expectedAgentRuntime.timers.autoupdate.name;
     "agents/maintenance/project-cache-gc" =
       timerObservation expectedAgentRuntime.timers.projectCacheGc.name;
@@ -398,11 +381,6 @@ let
     candidateRuntime: candidateObservations:
     timerWiringMatches candidateRuntime
     && selectAgentObservations candidateObservations == expectedAgentObservations;
-  removeManagedRootMutation = agentObservations // {
-    "agents/managed-roots" = agentObservations."agents/managed-roots" or { } // {
-      paths = builtins.tail (agentObservations."agents/managed-roots".paths or [ ]);
-    };
-  };
   highBytesMutation = expectedRuntimeConfiguration // {
     runtime = expectedRuntimeConfiguration.runtime // {
       cache = expectedRuntimeConfiguration.runtime.cache // {
@@ -545,9 +523,6 @@ in
     assert lib.assertMsg
       (agentRuntimeContractMatches expectedRuntimeConfiguration hostConfig.dotfiles.health.observations)
       "agent runtime contract is not wired to observations, packages, services, or timers";
-    assert lib.assertMsg (
-      !agentRuntimeContractMatches expectedRuntimeConfiguration removeManagedRootMutation
-    ) "agent runtime contract accepted a missing managed root";
     assert lib.assertMsg (
       !agentRuntimeContractMatches highBytesMutation hostConfig.dotfiles.health.observations
       && !agentRuntimeContractMatches lowBytesMutation hostConfig.dotfiles.health.observations

@@ -56,22 +56,12 @@ case "$tool" in
     path=${3-}
     [[ ${2-} == -- ]] || exit 64
     case "$format" in
-      --format=%F)
-        [[ $path != *bad* ]] || { printf 'regular file\n'; exit 0; }
-        [[ $path != *error* ]] || exit 7
-        printf 'directory\n'
-        ;;
       --format=%U:%G:%a)
         [[ $path != *error* ]] || exit 7
         if [[ $path == *bad* ]]; then printf 'nobody:nogroup:777\n'; else printf 'root:root:400\n'; fi
         ;;
       *) exit 64 ;;
     esac
-    ;;
-  du)
-    path=${!#}
-    [[ $path != *error* ]] || exit 7
-    printf '42\t%s\n' "$path"
     ;;
   df)
     path=${!#}

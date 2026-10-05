@@ -155,9 +155,9 @@ let
   ];
   pathControlCases = lib.concatMap (control: [
     {
-      name = "absolute-managed-root:${control.name}";
-      registry = replaceObservation "host/managed-roots" (
-        fixture.valid."host/managed-roots" // { paths = [ "/fixture/root${control.value}split" ]; }
+      name = "absolute-metadata-path:${control.name}";
+      registry = replaceObservation "host/path-metadata" (
+        fixture.valid."host/path-metadata" // { path = "/fixture/path${control.value}split"; }
       );
     }
     {
@@ -236,8 +236,8 @@ let
   spacedPathsEvaluation = evalRegistry (
     fixture.valid
     // {
-      "host/managed-roots" = fixture.valid."host/managed-roots" // {
-        paths = [ "/fixture/root with space" ];
+      "host/path-metadata" = fixture.valid."host/path-metadata" // {
+        path = "/fixture/path with space";
       };
       "host/release-tree" = fixture.valid."host/release-tree" // {
         visiblePath = "/fixture/visible path";
@@ -287,7 +287,7 @@ let
 in
 {
   observation-contract =
-    assert builtins.length (builtins.attrNames fixture.valid) == 19;
+    assert builtins.length (builtins.attrNames fixture.valid) == 18;
     assert evaluationSucceeds validEvaluation;
     assert evaluationSucceeds (evalRegistry { });
     assert evaluationSucceeds optionalCommonEvaluation;
@@ -297,8 +297,8 @@ in
     assert optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".checkId == null;
     assert
       optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".resourceKey == null;
-    assert builtins.length missingRequiredCases == 127;
-    assert builtins.length kindReplacementCases == 342;
+    assert builtins.length missingRequiredCases == 120;
+    assert builtins.length kindReplacementCases == 306;
     assert builtins.length invalidCommandCases == 27;
     assert lib.all (
       projection:

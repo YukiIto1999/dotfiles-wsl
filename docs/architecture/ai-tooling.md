@@ -82,6 +82,11 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --app
 Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
 OMPのseedはBash interceptorを有効にし、直接の再帰検索を専用検索手段へ誘導する。既存の`config.yml`はOMP自身の設定commandで移行する。
 
+OMPのcompactionで利用者のmessageを要約と別に原文で残すのは、OpenAI ResponsesのV2 streaming compactionだけである。
+それ以外の方法は直近の範囲より前を要約かarchiveだけで渡すため、要約が利用者の常設の指示を落とすと、agentは指示があったこと自体を知る手段を失う。
+AGENTSにある、過去の利用者指示を会話の原文で確かめる規律も、存在を知らない指示には適用されない。
+この欠落はupstreamのOMPで直す対象であり、seedの設定やpolicyの文では補わない。
+
 ## MCP Platform
 
 各[`capabilities/`](../../capabilities)実装が`dotfiles.platform.mcp.targets`へprovider ID、executable、server transport、server lifecycle、port、通信要件、backend unit、probeを登録する。[`platform/mcp/module.nix`](../../platform/mcp/module.nix)はtargetからfrontを一度だけ導く。

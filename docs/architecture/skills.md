@@ -377,6 +377,49 @@ baselineでは、agent bundleのatomic publish transactionについて、consume
 
 baselineでは、`cleanup-home-backups` checkを監査した。root外の無関係な`*.hm-back`を保存するfixtureはある一方、選択された`dotfiles-wsl` root内ではprovenanceに関係なく同suffixを削除する実装と期待値になっていた。通常能力だけでこの未検証data loss経路をMajorとして特定し、隔離した一時`HOME`への非破壊previewで、root内の無関係なbackupだけが削除候補になることを再現できた。固有methodologyによる改善を観測できないためruntime Skillは追加しない。oracleの実装複製、実contractを保存しないfake、flaky、問題のないsuiteを含む比較で反復不足が出た場合だけ再検討する。
 
+### 探索的テストをSkill化しない判断
+
+| Donor | License | 利用できる知見 | 汎用化しない内容 |
+|---|---|---|---|
+| [ABAB↑↓BA「AI開発時代だからこそ、テストの役割を見つめ直す」](https://zenn.dev/ababup1192/articles/77b844dcfc1529) | 記事本文に再利用license表示なし | 自動の検証は書かれたものしか判定しないこと、操作の結果から次に試すことを決めること、見つけた欠陥を同じ種類を覆う最も速い層の検証へ移すこと、agentによる探索を合否に使わないこと | 不具合の種類と検証手段の対応表、E2Eが受け持つ範囲の固定 |
+| 同じ著者のX投稿（[UIの探索とQAの役割](https://x.com/ababupdownba/status/2104373188197314594)、[理想の手順](https://x.com/ababupdownba/status/2104703767853903878)、[文言とブランド](https://x.com/ababupdownba/status/2104700914942812382)） | 表示なし | 機能を作り終えた後に変更範囲を洗い出し、charterを決めて触る順序 | 著者が整備途中とする手順の固定、QAの役割の付与、文言とブランドの規則の常設 |
+| architecture-standardの`structure/tests/methods.md`の「探索」「見つけた欠陥」節、`process/implementation.md`の「順序」節にある探索的テストの手順と「確認点」 | repository rootに表示なし | 探索を行う時点、charter、記録、事象の分類、欠陥の自動の検証への移し替え、合否に使わないこと | Skillへの本文の複製 |
+
+候補の責務は、振る舞いを変えた後に、変更した範囲と組み合わさる機能をcharterに沿って触り、書かれていない欠陥、仕様の漏れ、使い勝手の問題を見つけて自動の検証へ移すことだった。
+この規範は、探索を行う時点、記録、事象の分類、欠陥の移し替えを含めてarchitecture-standardが所有する。
+規範は2026-10-03に標準の作業checkoutへ入ったが、配備済みの版`56b0514`には含まれず、`architectureStandard`の版を更新するまで`standard-apply`を通じてagentへ届かない。
+
+baselineには、利用者が画面からの網羅的な確認を求めた業務systemの長いsessionの実行記録を使った。
+利用者は最初の依頼で、画面からの操作、画面内の切り替えの全確認、条件ごとのパターン差、主要以外のユースケース、連打や迷った操作、見た目、操作しやすさの確認を求めた。
+Skillなしの基礎モデルは、領域ごとのcharterと、連打、二度押し、戻る、再読込、空送信、異常値、迷い操作の観点、三つのviewport、問題のなかった操作の一覧を持つbriefを作り、六つのsubagentへ割り当てた。
+商品の領域だけで61件の所見が再現手順と証拠付きで返り、修正側のbriefは直す前に失敗するtestを要求した。
+第三者が報告した「下書きの商品を公開中にしたら消えた」事象は、30分のsession切れで公開の要求が401になり、画面がログインへ誘導しなかったことが原因だった。
+最初のbriefは公開の一括変更を確かめたが、放置によるsession切れとの組み合わせを観点に含めず、事故の後のbriefで基礎モデル自身がこの観点を加えた。
+
+利用者は最初の指示を二度送り直した。
+二度目の再送の直前に、agentは4回目のcompactionの後で第三者の指摘12件を範囲とする計画を返し、探索の観点を計画に含めていなかった。
+再送の後のbriefは全観点を戻した。
+観測した不足は探索の方法ではなく、探索を始める契機が利用者の指示にしかなかったことと、長いsessionで常設の指示が落ちたことである。
+前者は標準の手順が所有し、後者は4回目のcompactionの要約が最初の指示の9項目のうち第三者の台帳だけを残したことが原因であり、どちらもSkillで扱う不足ではない。
+計画を立てた時点の文脈には最初の指示も一度目の再送も残っておらず、計画は要約にない観点を無視したのではなく知らなかった。
+compactionで常設の指示が落ちる欠落の扱いは[AI tooling](ai-tooling.md#policysubagentskill)が記録する。
+
+欠陥を直す前のREDと、性質を判定できる最も内側の決定的なverifierの選択は`tdd-implementation`が持ち、記事の「同じ種類を覆う最も速い層へ移す」判断と同じである。
+実browserでの操作と証拠は`browser-operation`が持ち、受入条件のverificationへ探索を足さないその規則は、探索の結果を合否に使わない標準と矛盾しない。
+見た目、操作しやすさ、文言の品質の判断は`ui-review`候補が持つ。
+探索はUIに限らず、事象を欠陥、仕様の漏れ、意図した振る舞いに分けて自動の検証と設計へ戻すため、severity付きのUI監査とはJobが異なり、`ui-review`候補へ統合しない。
+原因の特定は`bug-analysis`が持つ。
+
+標準に従うprojectでは、常時適用するpolicyは標準の規範を複製する。
+標準に従わないprojectへ探索を課すかはproject横断の規範の判断であり、`environment-design`へ戻す。
+探索は操作の結果から次を決める意味判断であり、scriptにできず、必要時に読むreferenceの役は標準本文が既に果たす。
+baselineと異なる固有の方法がないため、runtime Skillの追加と既存Skillの変更を行わない。
+作る候補がないため、forward evalは行っていない。
+
+`browser-operation`には、利用者taskで最短の実経路を使い、操作を受入条件に必要な最小限にする規則があり、探索の操作をこのSkillへ委ねたときに寄り道を抑えうる。
+baselineでは、主agentがこのSkillを読んだ後にも探索のbriefを作り、探索したsubagentは自前のPlaywright scriptで操作したため、この競合は観測していない。
+標準の手順で始まった探索が`browser-operation`を経て最短経路へ縮むことを観測した場合に、境界を見直す。
+
 ### data-modelingをSkill化しない判断
 
 | Donor | License | 利用できる知見 | 汎用化しない内容 |

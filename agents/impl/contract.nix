@@ -435,30 +435,7 @@ in
       internal = true;
       description = "agent client ID ごとの実行 path。";
     };
-    stateRoot = lib.mkOption {
-      type = types.str;
-      readOnly = true;
-      internal = true;
-      description = "agent が所有する session と linked worktree ledger の state root。";
-    };
-    agentResource = lib.mkOption {
-      type = types.package;
-      readOnly = true;
-      internal = true;
-      description = "agent session resource ledger と reaper の command package。";
-    };
-    agentWorktree = lib.mkOption {
-      type = types.package;
-      readOnly = true;
-      internal = true;
-      description = "linked worktree を生成して ownership ledger へ登録する command package。";
-    };
     runtime = {
-      ledgerRetentionDays = lib.mkOption {
-        type = types.ints.positive;
-        default = 30;
-        description = "終了済み agent resource ledger の保持日数。";
-      };
       cache = lib.mkOption {
         type = types.submodule {
           options = {
@@ -479,7 +456,6 @@ in
         type = types.submodule {
           options = {
             root = lib.mkOption { type = absolutePathType; };
-            resourcesRoot = lib.mkOption { type = absolutePathType; };
           };
         };
         readOnly = true;
@@ -490,7 +466,6 @@ in
           options = {
             autoupdate = lib.mkOption { type = runtimeTimerType; };
             projectCacheGc = lib.mkOption { type = runtimeTimerType; };
-            resourceReaper = lib.mkOption { type = runtimeTimerType; };
           };
         };
         readOnly = true;

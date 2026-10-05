@@ -3,8 +3,8 @@
   "evaluatedAt": "2026-08-14",
   "cases": [
     {
-      "id": "agent-resource-reaper",
-      "prompt": "agent resourceの公開CLI、ledger schema、stderr、exit status、module境界は固定です。malformed ledger、proc参照race、dirty worktree、remove失敗を、内部でどこに保持、翻訳、伝播、集約するか設計してください。",
+      "id": "batch-reaper",
+      "prompt": "worktreeを回収するbatch commandの公開CLI、record schema、stderr、exit status、module境界は固定です。壊れたrecord、process参照のrace、未commitの変更を持つworktree、削除失敗を、内部でどこに保持、翻訳、伝播、集約するか設計してください。",
       "expectedSkills": ["error-design"],
       "expected": {
         "reusesExistingStatusAndReason": true,

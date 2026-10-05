@@ -59,11 +59,11 @@ GitHub release経路はGitHub APIのSHA-256 digestと取得したassetを照合�
 
 Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前へ置く共通runtime wrapperから起動する。wrapperはinstallerが管理する`~/.local/bin`のbinaryを絶対pathで実行する。Antigravityは同じCLI起動境界を持たない。
 
-runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。resource台帳の開始・終了フックは各5秒で打ち切り、台帳処理の停止をclient本体へ連鎖させない。打ち切った台帳はreaperの回復対象になる。
+runtimeはsession ID、owner process、boot ID、管理下`TMPDIR`を記録する。session中に`git worktree add`で作られたworktreeは、runtimeのgit shimがpathと作成時のHEADをsession directoryへ記録する。runtimeは終了時に、HEADが作成時のままのworktreeだけを`git worktree remove`へ渡す。`git worktree remove`は変更、untracked file、lockを持つworktreeを拒むので、それらとsessionの外で作られたworktreeは残る。削除の失敗はclientの終了statusを変えない。同時に走った別の`git worktree add`と区別できないworktreeは記録せず、SIGKILLで終わったsessionのworktreeは回収しない。
 
 `CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Git repositoryではgit common directoryからproject IDを作り、Cargoの中間成果物は`CARGO_BUILD_BUILD_DIR`でproject cacheの下に置き、`{workspace-path-hash}`でcheckoutごとに分ける。最終成果物は各checkoutの`target`に残る。同じworkspaceのcheckoutどうしで中間成果物を共有すると、Cargoが別checkoutのbuildをfreshと判定するため、linked worktreeとも共有しない。利用者が明示した`CARGO_TARGET_DIR`と`CARGO_BUILD_BUILD_DIR`、project固有のCargo`target-dir`と`build-dir`は上書きしない。一時的な写しでbuildするtoolは、写しごとに中間成果物がproject cacheへ残るため、`CARGO_BUILD_BUILD_DIR`を外して起動する。
 
-`dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。managed worktreeはsession台帳、clean、HEAD不変、利用中processなしを確認できる場合だけ回収する。
+`dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
 
 ## Policy、subagent、Skill
 

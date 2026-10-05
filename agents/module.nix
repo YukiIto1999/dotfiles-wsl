@@ -372,7 +372,6 @@ let
         );
     in
     rec {
-      ledgerRetentionDays = agents.runtime.ledgerRetentionDays;
       cache = rec {
         inherit relativeCacheRoot;
         root = "${cfg.workstation.homeDir}/${relativeCacheRoot}";
@@ -384,11 +383,8 @@ let
         lowBytes = 51539607552;
         inactiveDays = 30;
       };
-      state = rec {
-        inherit relativeStateRoot;
+      state = {
         root = "${cfg.workstation.homeDir}/${relativeStateRoot}";
-        relativeResourcesRoot = "${relativeStateRoot}/agent-resources";
-        resourcesRoot = "${cfg.workstation.homeDir}/${relativeResourcesRoot}";
       };
       timers = {
         autoupdate = {
@@ -401,17 +397,10 @@ let
           onCalendar = "daily";
           persistent = true;
         };
-        resourceReaper = {
-          name = "dotfiles-agent-resource-reaper";
-          onCalendar = "hourly";
-          persistent = true;
-        };
       };
       packages = {
         inherit installAgents;
         inherit (runtime)
-          agentResource
-          agentWorktree
           gate
           gc
           launcher
@@ -421,7 +410,6 @@ let
       commands = {
         autoupdate = lib.getExe packages.installAgents;
         projectCacheGc = lib.getExe packages.gc;
-        resourceReaper = "${lib.getExe packages.agentResource} reap";
       };
       observations = {
         "agents/roster" = commonObservation "agent-roster" null "agent roster is empty" // {
@@ -432,7 +420,6 @@ let
         };
         "agents/maintenance/autoupdate" = timerObservation timers.autoupdate;
         "agents/maintenance/project-cache-gc" = timerObservation timers.projectCacheGc;
-        "agents/maintenance/resource-reaper" = timerObservation timers.resourceReaper;
       }
       // lib.mapAttrs' (
         name: client: lib.nameValuePair "agents/client/${name}" (clientObservation name client)
@@ -454,15 +441,9 @@ in
       // lib.optionalAttrs projectMemoryEnabled {
         projectMemoryHooks = config.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
       };
-      stateRoot = "~/${runtimeContract.state.relativeResourcesRoot}";
-      inherit (runtimeContract.packages) agentResource agentWorktree;
       runtime = {
-        inherit (runtimeContract) timers;
+        inherit (runtimeContract) timers state;
         cache = builtins.removeAttrs runtimeContract.cache [ "relativeCacheRoot" ];
-        state = builtins.removeAttrs runtimeContract.state [
-          "relativeStateRoot"
-          "relativeResourcesRoot"
-        ];
       };
       shared = {
         rules = policyRules;
@@ -475,7 +456,7 @@ in
     dotfiles.managedArtifacts = managedArtifacts;
     dotfiles.health.observations = runtimeContract.observations;
     dotfiles.platform.cli.commands = {
-      inherit (runtimeContract.packages) installAgents agentResource agentWorktree;
+      inherit (runtimeContract.packages) installAgents;
     };
 
     assertions = [
@@ -602,29 +583,6 @@ in
       timerConfig = {
         OnCalendar = runtimeContract.timers.projectCacheGc.onCalendar;
         Persistent = runtimeContract.timers.projectCacheGc.persistent;
-      };
-    };
-
-    systemd.services.${runtimeContract.timers.resourceReaper.name} = {
-      description = "Reap inactive agent-owned linked worktrees";
-      serviceConfig = {
-        Type = "oneshot";
-        User = cfg.workstation.username;
-        Environment = "HOME=${cfg.workstation.homeDir}";
-        UMask = "0077";
-        TimeoutStartSec = "10min";
-        TimeoutStopSec = "15s";
-        ExecStart = runtimeContract.commands.resourceReaper;
-      };
-    };
-
-    systemd.timers.${runtimeContract.timers.resourceReaper.name} = {
-      description = "Hourly agent resource ownership reaper";
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = runtimeContract.timers.resourceReaper.onCalendar;
-        Persistent = runtimeContract.timers.resourceReaper.persistent;
-        Unit = "${runtimeContract.timers.resourceReaper.name}.service";
       };
     };
   };

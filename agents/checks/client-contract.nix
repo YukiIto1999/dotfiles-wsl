@@ -81,10 +81,6 @@ let
       elementType = hostOptions.dotfiles.agents.enabled.type.nestedTypes.elemType.name;
       hasDefault = hostOptions.dotfiles.agents.enabled ? default;
     };
-    runtime.ledgerRetentionDays = {
-      type = hostOptions.dotfiles.agents.runtime.ledgerRetentionDays.type.name;
-      default = hostOptions.dotfiles.agents.runtime.ledgerRetentionDays.default;
-    };
     shared = lib.mapAttrs (_: option: {
       type = option.type.name;
       internal = option.internal or false;
@@ -123,10 +119,6 @@ let
       type = "listOf";
       elementType = "str";
       hasDefault = false;
-    };
-    runtime.ledgerRetentionDays = {
-      type = "positiveInt";
-      default = 30;
     };
     shared = {
       rules = {
@@ -301,11 +293,7 @@ let
       attempted = builtins.tryEval (
         let
           evaluated = evalContract candidate;
-          evaluatedContract = builtins.removeAttrs evaluated.config.dotfiles.agents [
-            "agentResource"
-            "agentWorktree"
-            "stateRoot"
-          ];
+          evaluatedContract = evaluated.config.dotfiles.agents;
           contractWithoutSeedCommands = evaluatedContract // {
             clients = lib.mapAttrs (
               _: client:
@@ -551,8 +539,8 @@ in
       );
     assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = ""; });
     assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad/name"; });
-    assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = "bad name"; });
-    assert !contractIsValid (mutateRuntimeTimer "resourceReaper" { name = ".hidden"; });
+    assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad name"; });
+    assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = ".hidden"; });
     assert contractIsValid (mutateRuntimeTimer "autoupdate" { name = maximumTimerName; });
     assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = oversizedTimerName; });
     assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = ""; });

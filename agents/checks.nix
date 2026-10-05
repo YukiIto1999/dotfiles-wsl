@@ -10,7 +10,6 @@ let
     "client-contract.nix"
     "deployment.nix"
     "installation.nix"
-    "resource-lifecycle.nix"
     "runtime.nix"
   ];
   actualCheckFiles = lib.sort builtins.lessThan (
@@ -28,8 +27,6 @@ let
     "agent-installer-behavior"
     "agent-nix-build-shims"
     "agent-project-cache-gc"
-    "agent-resource-behavior"
-    "agent-resource-contract"
     "agent-runtime-behavior"
     "agent-runtime-contract"
     "agent-subagent-rendering"
@@ -41,7 +38,6 @@ let
     (import ./checks/deployment.nix args)
     (import ./checks/installation.nix args)
     (import ./checks/runtime.nix args)
-    (import ./checks/resource-lifecycle.nix args)
   ];
 in
 assert lib.assertMsg (

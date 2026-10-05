@@ -137,6 +137,26 @@ create_shared_cache() {
   printf '%s\n' "$shared_root"
 }
 
+# session 中に git worktree add で作った worktree のうち、HEAD が作成時のままのものを削除する。
+# git worktree remove は変更、untracked file、lock を持つ worktree を拒むので、それらは残る。
+# shellcheck disable=SC2329 # EXIT trap invokes this function indirectly.
+remove_session_worktrees() {
+  local record=$1 index path head
+  local -a fields=()
+
+  if [ ! -f "$record" ] || [ -L "$record" ]; then
+    return 0
+  fi
+  mapfile -d '' -t fields <"$record" || return 0
+  for ((index = 0; index + 1 < ${#fields[@]}; index += 2)); do
+    path=${fields[index]}
+    head=${fields[index + 1]}
+    if [ "$(git -C "$path" rev-parse --verify --quiet HEAD 2>/dev/null)" = "$head" ]; then
+      git -C "$path" worktree remove -- "$path" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 if [ "$#" -lt 2 ]; then
   die 'usage: dotfiles-agent-runtime CLIENT ABSOLUTE-UPSTREAM [ARG...]'
 fi
@@ -155,27 +175,6 @@ esac
 test -x "$upstream" || die "upstream binary is not executable: $upstream"
 
 cache_root="$HOME/@cacheRootRelative@"
-resource_command=@resourceCommand@
-
-# shellcheck disable=SC2329 # 旧ランチャーfixtureでは呼び出し箇所を置換する。
-run_resource_hook() {
-  local action=$1
-  local status
-  shift
-
-  if timeout --kill-after=2s 5s \
-    "$resource_command" "$action" "$@"; then
-    return 0
-  else
-    status=$?
-  fi
-
-  if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
-    printf 'dotfiles-agent-runtime: resource %sが5秒以内に完了しないため処理を継続します\n' \
-      "$action" >&2
-  fi
-  return 0
-}
 sessions_root="$cache_root/sessions"
 builds_root="$cache_root/builds"
 mkdir -p "$HOME/.cache"
@@ -244,9 +243,7 @@ mv -T "$metadata_tmp" "$session_dir/metadata.json"
 export DOTFILES_AGENT_SESSION_ID=$session_id
 export DOTFILES_AGENT_CLIENT=$client
 export DOTFILES_AGENT_PROJECT_ID=$project_id
-export DOTFILES_AGENT_OWNER_PID=$$
-export DOTFILES_AGENT_OWNER_START_TIME=$owner_start_time
-export DOTFILES_AGENT_BOOT_ID=$boot_id
+export DOTFILES_AGENT_WORKTREE_RECORD="$session_dir/worktrees"
 export TMPDIR="$session_dir/tmp"
 export PATH="@agentShimDirectory@:$PATH"
 flock -u "$lock_fd"
@@ -255,6 +252,7 @@ flock -u "$lock_fd"
 cleanup() {
   local status=$?
   trap - EXIT HUP INT TERM
+  remove_session_worktrees "$DOTFILES_AGENT_WORKTREE_RECORD"
 
   if flock -x "$lock_fd"; then
     if [ -n "${session_dir-}" ] \
@@ -266,7 +264,6 @@ cleanup() {
     flock -u "$lock_fd" || true
   fi
   exec {lock_fd}>&- || true
-  run_resource_hook cleanup-session "$DOTFILES_AGENT_SESSION_ID"
 
   exit "$status"
 }
@@ -274,8 +271,6 @@ trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-
-run_resource_hook begin-session "$DOTFILES_AGENT_SESSION_ID" @beginSessionFlag@
 
 set +e
 "$upstream" "$@"

@@ -5,8 +5,6 @@
   "commands": {
     "agentJournal": "dotfiles-agent-journal",
     "agentMemoryHarvest": "dotfiles-agent-memory-harvest",
-    "agentResource": "dotfiles-agent-resource",
-    "agentWorktree": "dotfiles-agent-worktree",
     "cleanup": "dotfiles-cleanup",
     "doctor": "dotfiles-doctor",
     "imageDigest": "dotfiles-image-digest",

@@ -2,7 +2,6 @@
 
 let
   expectedAgentRuntime = {
-    ledgerRetentionDays = 30;
     cache = {
       root = "${homeDir}/.cache/dotfiles-wsl";
       buildsRoot = "${homeDir}/.cache/dotfiles-wsl/builds";
@@ -15,7 +14,6 @@ let
     };
     state = {
       root = "${homeDir}/.local/state/dotfiles-wsl";
-      resourcesRoot = "${homeDir}/.local/state/dotfiles-wsl/agent-resources";
     };
     timers = {
       autoupdate = {
@@ -28,20 +26,11 @@ let
         onCalendar = "daily";
         persistent = true;
       };
-      resourceReaper = {
-        name = "dotfiles-agent-resource-reaper";
-        onCalendar = "hourly";
-        persistent = true;
-      };
     };
   };
   runtimePackageContract = expectedAgentRuntime // {
     cache = expectedAgentRuntime.cache // {
       relativeCacheRoot = ".cache/dotfiles-wsl";
-    };
-    state = expectedAgentRuntime.state // {
-      relativeStateRoot = ".local/state/dotfiles-wsl";
-      relativeResourcesRoot = ".local/state/dotfiles-wsl/agent-resources";
     };
   };
 in

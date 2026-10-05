@@ -28,7 +28,7 @@ subshell は errexit と後片付けの EXIT trap を自前で持ち直す。bas
 
 一つの upstream の障害は、その client の更新だけを止める。失敗した client 名は service の終了時に一度だけ報告され、timer の失敗として doctor から見える。
 
-観測の強化は autoupdate に限らず、fstrim、nix-gc、project-cache-gc、resource-reaper、container の timer にも同じ判定を与える。rebuild 直後でも、最後の起動が失敗した maintenance job は pass にならない。
+観測の強化は autoupdate に限らず、fstrim、nix-gc、project-cache-gc、container の timer にも同じ判定を与える。rebuild 直後でも、最後の起動が失敗した maintenance job は pass にならない。
 
 隔離の境界は process ではなく subshell である。client 間で state を共有する設計に変えるなら、この境界を見直す必要がある。
 

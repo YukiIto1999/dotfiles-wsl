@@ -15,9 +15,8 @@ test "${XDG_CACHE_HOME+x}" = x
 printf '%s\n' "$DOTFILES_AGENT_SESSION_ID" > "$CAPTURE/session-id"
 printf '%s\n' "$DOTFILES_AGENT_CLIENT" > "$CAPTURE/client"
 printf '%s\n' "$DOTFILES_AGENT_PROJECT_ID" > "$CAPTURE/project-id"
-printf '%s\n' "$DOTFILES_AGENT_OWNER_PID" > "$CAPTURE/owner-pid"
-printf '%s\n' "$DOTFILES_AGENT_OWNER_START_TIME" > "$CAPTURE/owner-start-time"
-printf '%s\n' "$DOTFILES_AGENT_BOOT_ID" > "$CAPTURE/boot-id"
+printf '%s\n' "$PPID" > "$CAPTURE/owner-pid"
+awk '{print $22}' "/proc/$PPID/stat" > "$CAPTURE/owner-start-time"
 printf '%s\n' "$TMPDIR" > "$CAPTURE/tmpdir"
 printf '%s\n' "$CARGO_HOME" > "$CAPTURE/cargo-home"
 printf '%s\n' "$XDG_CACHE_HOME" > "$CAPTURE/xdg-cache-home"
@@ -30,6 +29,9 @@ if [ "${PROBE_CACHE_WRITES:-0}" = 1 ]; then
   printf 'cargo\n' > "$CARGO_HOME/fixture-write/probe"
   mkdir -p "$XDG_CACHE_HOME/fixture-write"
   printf 'xdg\n' > "$XDG_CACHE_HOME/fixture-write/probe"
+fi
+if [ -n "${AGENT_ACTION-}" ]; then
+  "$BASH" -c "$AGENT_ACTION"
 fi
 command -v nix > "$CAPTURE/nix-command"
 command -v git > "$CAPTURE/git-command"
@@ -63,9 +65,7 @@ git -C "$repo" commit -qm initial
 
 export HOME=$fixture_home
 export CAPTURE=$capture
-export HOOK_LOG=$capture/hooks
-export PATH_RESOURCE_USED=$capture/path-resource-used
-export PATH="$fixture/bin:$VISIBLE_RESOURCE_DIR:$PATH"
+export PATH="$fixture/bin:$PATH"
 unset CARGO_HOME CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR XDG_CACHE_HOME
 mkdir -p "$HOME/.cache/dotfiles-wsl/sessions" "$HOME/.cache/dotfiles-wsl/builds"
 chmod 0777 "$HOME/.cache/dotfiles-wsl" \
@@ -91,7 +91,6 @@ test "$(jq -r '.owner_pid | type' "$capture/metadata.json")" = number
 test "$(jq -r '.owner_start_time | type' "$capture/metadata.json")" = string
 test "$(jq -r '.owner_pid' "$capture/metadata.json")" = "$(cat "$capture/owner-pid")"
 test "$(jq -r '.owner_start_time' "$capture/metadata.json")" = "$(cat "$capture/owner-start-time")"
-test "$(jq -r '.boot_id' "$capture/metadata.json")" = "$(cat "$capture/boot-id")"
 test "$(cat "$capture/nix-command")" = "$AGENT_SHIM_DIR/bin/nix"
 test "$(cat "$capture/git-command")" = "$AGENT_SHIM_DIR/bin/git"
 test "$(stat -c %a "$HOME/.cache/dotfiles-wsl")" = 700
@@ -112,60 +111,11 @@ test "$(cat "$capture/session-mode")" = 700
 test "$(cat "$capture/metadata-mode")" = 600
 test "$(cat "$capture/lock-mode")" = 600
 test ! -e "$(cat "$capture/tmpdir")"
-test "$(sed -n '1s/:.*//p' "$capture/hooks")" = begin
-test "$(sed -n '2s/:.*//p' "$capture/hooks")" = cleanup
-test "$(sed -n '1s/^[^:]*://p' "$capture/hooks")" = "$(cat "$capture/session-id")"
-test "$(sed -n '2s/^[^:]*://p' "$capture/hooks")" = "$(cat "$capture/session-id")"
 
 mapfile -d '' -t argv < "$capture/argv"
 test "${#argv[@]}" -eq 2
 test "${argv[0]}" = 'space arg'
 test "${argv[1]}" = $'line\narg'
-v2_session_id=$(cat "$capture/session-id")
-v2_resource_session="$HOME/.local/state/dotfiles-wsl/agent-resources/sessions/$v2_session_id.json"
-test "$(jq -r '.version' "$v2_resource_session")" = 2
-test ! -e "$PATH_RESOURCE_USED"
-
-begin_hang_marker=$fixture/begin-hang
-set +e
-(
-  cd "$repo"
-  HOOK_HANG_ACTION=begin-session HOOK_HANG_MARKER=$begin_hang_marker \
-    FAKE_STATUS=17 timeout 8s \
-    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-begin_hang_status=$?
-set -e
-test -e "$begin_hang_marker"
-if [ "$begin_hang_status" -ne 17 ]; then
-  echo "ランチャーがbegin-sessionの待機を制限しなかった: status $begin_hang_status" >&2
-  exit 1
-fi
-
-cleanup_hang_marker=$fixture/cleanup-hang
-set +e
-(
-  cd "$repo"
-  HOOK_HANG_ACTION=cleanup-session HOOK_HANG_MARKER=$cleanup_hang_marker \
-    FAKE_STATUS=18 timeout 8s \
-    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-cleanup_hang_status=$?
-set -e
-test -e "$cleanup_hang_marker"
-if [ "$cleanup_hang_status" -ne 18 ]; then
-  echo "ランチャーがcleanup-sessionの待機を制限しなかった: status $cleanup_hang_status" >&2
-  exit 1
-fi
-
-(
-  cd "$repo"
-  "$OLD_LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-legacy_session_id=$(cat "$capture/session-id")
-legacy_resource_session="$HOME/.local/state/dotfiles-wsl/agent-resources/sessions/$legacy_session_id.json"
-test "$(jq -r '.version' "$legacy_resource_session")" = 1
-test -e "$PATH_RESOURCE_USED"
 
 # A GC scan holding gc.lock must see the session directory until it releases
 # the lock.  Launcher cleanup then removes the session before returning.
@@ -204,15 +154,6 @@ exec 9>&-
 wait "$race_launcher_pid"
 test ! -e "$race_session"
 
-set +e
-(
-  cd "$repo"
-  HOOK_FAIL=1 FAKE_STATUS=19 "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-hook_failure_status=$?
-set -e
-test "$hook_failure_status" -eq 19
-
 project_id=$(cat "$capture/project-id")
 expected_build_dir="$fixture_home/.cache/dotfiles-wsl/builds/$project_id/cargo-build/{workspace-path-hash}"
 test "$(cat "$capture/cargo-build-dir")" = "$expected_build_dir"
@@ -227,7 +168,7 @@ test "$(stat -c %a "$fixture_home/.cache/dotfiles-wsl/builds/$project_id/.dotfil
 expect_shared_cache_failure() {
   local bad_home=$1 status
   set +e
-  HOME=$bad_home CAPTURE=$capture HOOK_LOG=$capture/hooks \
+  HOME=$bad_home CAPTURE=$capture \
     "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
   status=$?
   set -e
@@ -327,3 +268,41 @@ test "$outside_project_id" != "$main_project_id"
 test "${#outside_project_id}" -eq 64
 test "$(cat "$capture/cargo-home")" = "$main_cargo_home"
 test "$(cat "$capture/xdg-cache-home")" = "$main_xdg_cache_home"
+
+# The session removes the worktrees it created with git worktree add while they stay clean and at
+# their initial HEAD. Changed, dirty, and pre-existing worktrees remain, and the exit status holds.
+worktree_repo=$fixture/worktree-repo
+git init -q "$worktree_repo"
+git -C "$worktree_repo" config user.name fixture
+git -C "$worktree_repo" config user.email fixture@example.invalid
+printf 'tracked\n' > "$worktree_repo/tracked"
+git -C "$worktree_repo" add tracked
+git -C "$worktree_repo" commit -qm initial
+git -C "$worktree_repo" worktree add -q --detach "$fixture/preexisting"
+set +e
+(
+  cd "$worktree_repo"
+  WORKTREES=$fixture FAKE_STATUS=31 AGENT_ACTION='
+    set -euo pipefail
+    git worktree add -q --detach "$WORKTREES/clean"
+    git worktree add -q -b changed "$WORKTREES/changed"
+    git -C "$WORKTREES/changed" commit -q --allow-empty -m change
+    git worktree add -q --detach "$WORKTREES/untracked"
+    : > "$WORKTREES/untracked/new-file"
+    git worktree add -q --detach "$WORKTREES/modified"
+    printf "modified\n" > "$WORKTREES/modified/tracked"
+  ' "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+)
+worktree_status=$?
+set -e
+test "$worktree_status" -eq 31
+test ! -e "$fixture/clean"
+test -d "$fixture/changed"
+test -d "$fixture/untracked"
+test -d "$fixture/modified"
+test -d "$fixture/preexisting"
+git -C "$worktree_repo" worktree list --porcelain > "$fixture/worktree-list"
+if grep -Fxq "worktree $fixture/clean" "$fixture/worktree-list"; then
+  echo 'removed worktree is still registered' >&2
+  exit 1
+fi

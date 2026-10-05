@@ -117,103 +117,19 @@ let
   '';
   fakeGit = pkgs.writeShellScript "fake-git-command" ''
     printf '%s\0' "$@" > "$ARG_CAPTURE"
-    pwd -P > "$PWD_CAPTURE"
+  '';
+  # shim が add の前後に読む worktree 一覧の間へ、別の session の add が割り込んだ状態を再現する。
+  racingGit = pkgs.writeShellScript "racing-git-command" ''
+    previous=
     for argument in "$@"; do
-      if [ "$argument" = dotfiles-agent-managed-worktree ]; then
-        exec ${lib.getExe pkgs.git} "$@"
+      if [ "$previous" = worktree ] && [ "$argument" = add ] && [ -n "''${RACE_WORKTREE-}" ]; then
+        ${lib.getExe pkgs.git} -C "$RACE_REPO" worktree add -q --detach "$RACE_WORKTREE"
+        break
       fi
+      previous=$argument
     done
+    exec ${lib.getExe pkgs.git} "$@"
   '';
-  fakeAgentWorktree = pkgs.writeShellScript "fake-agent-worktree-command" ''
-    printf '%s\0' "$@" > "$ARG_CAPTURE"
-    pwd -P > "$PWD_CAPTURE"
-    ${lib.getExe pkgs.git} config --get advice.detachedHead > "$CONFIG_CAPTURE" || true
-  '';
-  fixtureAgentResource = pkgs.writeShellApplication {
-    name = "fixture-agent-resource";
-    runtimeInputs = with pkgs; [
-      coreutils
-      gawk
-    ];
-    text = ''
-      set -euo pipefail
-      if [ "''${HOOK_HANG_ACTION-}" = "$1" ]; then
-        : >"''${HOOK_HANG_MARKER:?}"
-        sleep 30
-      fi
-      case "$1" in
-        begin-session)
-          test -d "$TMPDIR"
-          test -f "''${TMPDIR%/tmp}/metadata.json"
-          test "$DOTFILES_AGENT_SESSION_ID" = "$2"
-          test "$DOTFILES_AGENT_CLIENT" = fixture-client
-          test "$DOTFILES_AGENT_BOOT_ID" = "$(cat /proc/sys/kernel/random/boot_id)"
-          test "$DOTFILES_AGENT_OWNER_START_TIME" = \
-            "$(awk '{print $22}' "/proc/$DOTFILES_AGENT_OWNER_PID/stat")"
-          printf 'begin:%s\n' "$2" >>"$HOOK_LOG"
-          ;;
-        cleanup-session)
-          test ! -e "$TMPDIR"
-          test "$DOTFILES_AGENT_SESSION_ID" = "$2"
-          test "$DOTFILES_AGENT_CLIENT" = fixture-client
-          test "$DOTFILES_AGENT_BOOT_ID" = "$(cat /proc/sys/kernel/random/boot_id)"
-          test "$DOTFILES_AGENT_OWNER_START_TIME" = \
-            "$(awk '{print $22}' "/proc/$DOTFILES_AGENT_OWNER_PID/stat")"
-          printf 'cleanup:%s\n' "$2" >>"$HOOK_LOG"
-          ;;
-        *)
-          exit 64
-          ;;
-      esac
-      test "''${HOOK_FAIL:-0}" != 1
-      exec ${lib.getExe runtime.agentResource} "$@"
-    '';
-  };
-  visibleNewAgentResource = pkgs.writeShellApplication {
-    name = "dotfiles-agent-resource";
-    text = ''
-      : >"''${PATH_RESOURCE_USED:?}"
-      exec ${lib.getExe runtime.agentResource} "$@"
-    '';
-  };
-  oldLauncherSource =
-    builtins.replaceStrings
-      [
-        "resource_command=@resourceCommand@\n"
-        "  run_resource_hook cleanup-session \"$DOTFILES_AGENT_SESSION_ID\"\n"
-        "run_resource_hook begin-session \"$DOTFILES_AGENT_SESSION_ID\" @beginSessionFlag@\n"
-      ]
-      [
-        ""
-        "  if resource_command=$(command -v dotfiles-agent-resource 2>/dev/null); then\n    \"$resource_command\" cleanup-session \"$DOTFILES_AGENT_SESSION_ID\" || true\n  fi\n"
-        "if resource_command=$(command -v dotfiles-agent-resource 2>/dev/null); then\n  \"$resource_command\" begin-session \"$DOTFILES_AGENT_SESSION_ID\" || true\nfi\n"
-      ]
-      (builtins.readFile ../impl/runtime/launcher.sh);
-  oldDynamicLauncher = pkgs.writeShellApplication {
-    name = "fixture-old-agent-runtime";
-    runtimeInputs = with pkgs; [
-      coreutils
-      gawk
-      git
-      jq
-      taplo
-      util-linux
-    ];
-    text =
-      builtins.replaceStrings
-        [
-          "@agentShimDirectory@"
-          "@cacheRootRelative@"
-        ]
-        [
-          "${runtime.agentShims}/bin"
-          runtimePackageContract.cache.relativeCacheRoot
-        ]
-        oldLauncherSource;
-  };
-  fixtureLauncher = runtime.mkLauncher {
-    resourceCommand = lib.getExe fixtureAgentResource;
-  };
   fixtureNixBuildShims = runtime.mkNixBuildShims {
     nixCommand = fakeNix;
     nixBuildCommand = fakeNix;
@@ -222,7 +138,11 @@ let
     nixCommand = fakeNix;
     nixBuildCommand = fakeNix;
     gitCommand = fakeGit;
-    worktreeCommand = fakeAgentWorktree;
+  };
+  racingAgentShims = runtime.mkAgentShims {
+    nixCommand = fakeNix;
+    nixBuildCommand = fakeNix;
+    gitCommand = racingGit;
   };
   wrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (name: clients.${name}.runtimeWrapperMode == "managed") (
@@ -301,8 +221,6 @@ let
     "agents/maintenance/autoupdate" = timerObservation expectedAgentRuntime.timers.autoupdate.name;
     "agents/maintenance/project-cache-gc" =
       timerObservation expectedAgentRuntime.timers.projectCacheGc.name;
-    "agents/maintenance/resource-reaper" =
-      timerObservation expectedAgentRuntime.timers.resourceReaper.name;
   }
   // lib.mapAttrs' (
     name: client: lib.nameValuePair "agents/client/${name}" (expectedClientObservation name client)
@@ -333,12 +251,10 @@ let
     services = lib.genAttrs [
       expectedAgentRuntime.timers.autoupdate.name
       expectedAgentRuntime.timers.projectCacheGc.name
-      expectedAgentRuntime.timers.resourceReaper.name
     ] (name: configuration.systemd.services.${name} or null);
     timers = lib.genAttrs [
       expectedAgentRuntime.timers.autoupdate.name
       expectedAgentRuntime.timers.projectCacheGc.name
-      expectedAgentRuntime.timers.resourceReaper.name
     ] (name: configuration.systemd.timers.${name} or null);
   };
   expectedRuntimeConfiguration = runtimeConfiguration hostConfig;
@@ -353,9 +269,6 @@ let
           expectedTimerConfig = {
             OnCalendar = timerContract.onCalendar;
             Persistent = timerContract.persistent;
-          }
-          // lib.optionalAttrs (id == "resourceReaper") {
-            Unit = "${timerContract.name}.service";
           };
         in
         service != null
@@ -367,10 +280,8 @@ let
         && (
           if id == "autoupdate" then
             service.serviceConfig.ExecStart == lib.getExe installAgents
-          else if id == "projectCacheGc" then
-            service.serviceConfig.ExecStart == lib.getExe runtime.gc
           else
-            service.serviceConfig.ExecStart == "${lib.getExe runtime.agentResource} reap"
+            service.serviceConfig.ExecStart == lib.getExe runtime.gc
         );
     in
     candidate.runtime == expectedAgentRuntime
@@ -424,16 +335,6 @@ let
       relativeCacheRoot = ".cache/dotfiles-wsl-mutated";
     };
   };
-  relativeStateRootMutationRuntime = runtimeWithRelativeRootMutation {
-    state = runtimePackageContract.state // {
-      relativeStateRoot = ".local/state/dotfiles-wsl-mutated";
-    };
-  };
-  relativeResourcesRootMutationRuntime = runtimeWithRelativeRootMutation {
-    state = runtimePackageContract.state // {
-      relativeResourcesRoot = ".local/state/dotfiles-wsl/agent-resources-mutated";
-    };
-  };
   packageTreeRequiredPathMutation = agentObservations // {
     "agents/client/codex" = agentObservations."agents/client/codex" or { } // {
       requiredPaths =
@@ -470,7 +371,6 @@ let
       {
         systemd.services.dotfiles-agent-autoupdate.description = lib.mkForce "description mutation";
         systemd.services.dotfiles-agent-project-cache-gc.description = lib.mkForce "description mutation";
-        systemd.services.dotfiles-agent-resource-reaper.description = lib.mkForce "description mutation";
       }
     ]).config;
 in
@@ -554,14 +454,6 @@ in
       && runtime.gc != relativeCacheRootMutationRuntime.gc
       && runtime.verify != relativeCacheRootMutationRuntime.verify
     ) "agent runtime packages ignored a relative cache root mutation";
-    assert lib.assertMsg (
-      runtime.agentResource != relativeStateRootMutationRuntime.agentResource
-      && runtime.agentWorktree != relativeStateRootMutationRuntime.agentWorktree
-    ) "agent resource packages ignored a relative state root mutation";
-    assert lib.assertMsg (
-      runtime.agentResource != relativeResourcesRootMutationRuntime.agentResource
-      && runtime.agentWorktree != relativeResourcesRootMutationRuntime.agentWorktree
-    ) "agent resource packages ignored a relative resources root mutation";
     pkgs.runCommandLocal "check-agent-runtime-contract"
       {
         nativeBuildInputs = [ pkgs.gnugrep ];
@@ -574,13 +466,10 @@ in
           grep -Fq ${lib.escapeShellArg (lib.getExe runtime.launcher)} "$wrapper"
         '') runtimeClientNames}
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.launcher}
-        grep -Fq ${lib.escapeShellArg (lib.getExe runtime.agentResource)} ${lib.getExe runtime.launcher}
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.gc}
         grep -Fq '68719476736' ${lib.getExe runtime.gc}
         grep -Fq '51539607552' ${lib.getExe runtime.gc}
         grep -Fq 'inactive_before=$((now - 30 * 24 * 60 * 60))' ${lib.getExe runtime.gc}
-        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe runtime.agentResource}
-        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe runtime.agentWorktree}
         grep -Fq 'verification_root="$HOME/.cache/dotfiles-wsl/verification"' ${lib.getExe runtime.verify}
 
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
@@ -589,16 +478,6 @@ in
         ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
         ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
         ! grep -Fxq 'verification_root="$HOME/.cache/dotfiles-wsl/verification"' ${lib.getExe relativeCacheRootMutationRuntime.verify}
-
-        grep -Fq 'ensure_directory "$HOME/.local/state/dotfiles-wsl-mutated" true' ${lib.getExe relativeStateRootMutationRuntime.agentResource}
-        grep -Fq 'ensure_directory "$HOME/.local/state/dotfiles-wsl-mutated" true' ${lib.getExe relativeStateRootMutationRuntime.agentWorktree}
-        ! grep -Fxq 'ensure_directory "$HOME/.local/state/dotfiles-wsl" true' ${lib.getExe relativeStateRootMutationRuntime.agentResource}
-        ! grep -Fxq 'ensure_directory "$HOME/.local/state/dotfiles-wsl" true' ${lib.getExe relativeStateRootMutationRuntime.agentWorktree}
-
-        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources-mutated"' ${lib.getExe relativeResourcesRootMutationRuntime.agentResource}
-        grep -Fq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources-mutated"' ${lib.getExe relativeResourcesRootMutationRuntime.agentWorktree}
-        ! grep -Fxq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe relativeResourcesRootMutationRuntime.agentResource}
-        ! grep -Fxq 'state_root="$HOME/.local/state/dotfiles-wsl/agent-resources"' ${lib.getExe relativeResourcesRootMutationRuntime.agentWorktree}
         touch $out
       '';
 
@@ -613,11 +492,10 @@ in
           pkgs.jq
           pkgs.util-linux
         ];
-        LAUNCHER = lib.getExe fixtureLauncher;
-        OLD_LAUNCHER = lib.getExe oldDynamicLauncher;
-        VISIBLE_RESOURCE_DIR = "${visibleNewAgentResource}/bin";
+        LAUNCHER = lib.getExe runtime.launcher;
         AGENT_SHIM_DIR = runtime.agentShims;
         GIT_SHIM_DIR = fixtureAgentShims;
+        RACING_GIT_SHIM_DIR = racingAgentShims;
       }
       ''
         bash ${../fixtures/runtime/launcher.sh}

@@ -140,7 +140,6 @@
         "dotfiles-agent-journal"
         "dotfiles-agent-memory-harvest"
         "dotfiles-agent-project-cache-gc"
-        "dotfiles-agent-resource-reaper"
         "dotfiles-zram-swap"
         "docker-build-artifact-gc"
         "docker-dotfiles-backends-network"

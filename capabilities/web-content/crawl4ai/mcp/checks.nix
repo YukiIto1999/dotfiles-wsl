@@ -228,10 +228,11 @@ let
     needsNetwork = false;
     waitUnits = expectedWaitUnits;
     probe = {
-      tool = "md";
+      tool = "ask";
       args = {
-        url = "https://example.com";
-        f = "fit";
+        context_type = "doc";
+        query = "health";
+        max_results = 1;
       };
       timeout = 60;
     };

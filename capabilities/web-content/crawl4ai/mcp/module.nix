@@ -22,13 +22,13 @@ in
       serverLifecycle = "service";
       port = 8773;
       waitUnits = config.dotfiles.platform.containers.services.crawl4ai.units;
-      # `ask` は Crawl4AI 自身の library index を返すだけで、browser を使う本文取得経路を
-      # 通らない。fetch が壊れても pass するため、probe は `md` で実際に一枚取得する
+      # Chromium の cold start と外部への取得を doctor のたびに起こすため本文取得の `md` による probe は不可
       probe = {
-        tool = "md";
+        tool = "ask";
         args = {
-          url = "https://example.com";
-          f = "fit";
+          context_type = "doc";
+          query = "health";
+          max_results = 1;
         };
         timeout = 60;
       };

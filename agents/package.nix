@@ -93,12 +93,14 @@ let
         "@gcHighBytes@"
         "@gcLowBytes@"
         "@gcInactiveDays@"
+        "@sliceUnit@"
       ]
       [
         cacheRootRelative
         (toString runtimeContract.cache.highBytes)
         (toString runtimeContract.cache.lowBytes)
         (toString runtimeContract.cache.inactiveDays)
+        runtimeContract.sliceUnit
       ]
       (builtins.readFile ./impl/runtime/project-cache-gc.sh);
   gc = pkgs.writeShellApplication {

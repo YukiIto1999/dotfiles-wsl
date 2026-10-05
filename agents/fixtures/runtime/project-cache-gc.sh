@@ -1,44 +1,111 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-make_cache() {
-  local home=$1 project_id=$2 age=$3 file_count=$4 index
-  local cache="$home/.cache/dotfiles-wsl/builds/$project_id"
-  mkdir -p "$cache/payload"
-  jq -cn --arg project_id "$project_id" '{version: 1, project_id: $project_id}' \
-    > "$cache/.dotfiles-agent-cache.json"
-  for ((index = 0; index < file_count; index++)); do
-    printf 'allocated\n' > "$cache/payload/file-$index"
-  done
-  touch -d "$age days ago" "$cache/.dotfiles-agent-cache.json"
-  chmod 0777 "$cache"
-  chmod 0666 "$cache/.dotfiles-agent-cache.json"
+# Cargo 1.98 lays out a build-dir templated with {workspace-path-hash} as
+# cargo-build/<2 hex>/<14 hex>/<profile>/ and takes an exclusive flock on
+# <profile>/.cargo-build-lock while it builds. A unit keeps its fingerprint in
+# .fingerprint/<package>-<hash>/, and Cargo reads its hash file on every build
+# that includes the unit. The unit's outputs in deps/ and build/ carry the same hash.
+entry_path() {
+  printf '%s\n' "$1/.cache/dotfiles-wsl/cargo-build/${2:0:2}/${2:2}"
 }
 
-make_session_metadata() {
-  local home=$1 project_id=$2 session_id=$3 owner_pid=$4 boot_id=$5 owner_start_time=$6
-  local session="$home/.cache/dotfiles-wsl/sessions/$session_id"
-  mkdir -p "$session/tmp"
+unit_hash() {
+  printf '%s' "$1/$2" | sha256sum | cut -c 1-16
+}
+
+make_unit() {
+  local entry=$1 name=$2 used=$3 file_count=$4 hash profile fingerprint index
+  hash=$(unit_hash "$entry" "$name")
+  profile=$entry/debug
+  fingerprint=$profile/.fingerprint/$name-$hash
+  mkdir -p "$fingerprint" "$profile/deps" "$profile/build/$name-$hash/out"
+  : > "$profile/.cargo-build-lock"
+  printf '%s\n' "$hash" > "$fingerprint/lib-$name"
+  : > "$fingerprint/dep-lib-$name"
+  printf 'allocated\n' > "$profile/deps/lib$name-$hash.rlib"
+  printf 'allocated\n' > "$profile/deps/$name-$hash.d"
+  for ((index = 0; index < file_count; index++)); do
+    printf 'allocated\n' > "$profile/build/$name-$hash/out/file-$index"
+  done
+  find "$fingerprint" "$profile/deps/lib$name-$hash.rlib" "$profile/deps/$name-$hash.d" \
+    "$profile/build/$name-$hash" -type f -exec touch -d "$used" {} +
+}
+
+unit_paths() {
+  local entry=$1 name=$2 hash
+  hash=$(unit_hash "$entry" "$name")
+  printf '%s\n' "$entry/debug/.fingerprint/$name-$hash" "$entry/debug/deps/lib$name-$hash.rlib" \
+    "$entry/debug/deps/$name-$hash.d" "$entry/debug/build/$name-$hash"
+}
+
+expect_unit() {
+  local state=$1 path
+  shift
+  while IFS= read -r path; do
+    if [ "$state" = kept ] && [ ! -e "$path" ]; then
+      echo "GC removed a path of a unit it had to keep: $path" >&2
+      exit 1
+    fi
+    if [ "$state" = reclaimed ] && [ -e "$path" ]; then
+      echo "GC kept a path of a unit it had to reclaim: $path" >&2
+      exit 1
+    fi
+  done < <(unit_paths "$@")
+}
+
+unit_bytes() {
+  local -a paths
+  mapfile -t paths < <(unit_paths "$@")
+  du -s -c -B1 -- "${paths[@]}" | tail -n 1 | cut -f 1
+}
+
+# A test binary in deps/ that keeps running until it is killed. It was built with its
+# unit, so it carries the unit's last use.
+make_test_binary() {
+  printf '#!%s\nsleep "$1"\n' "$BASH" > "$1"
+  chmod +x "$1"
+  touch -d "$2" "$1"
+}
+
+# Sessions use the launcher's name form PROJECT_ID.CLIENT.SUFFIX.
+session_project_id=$(printf session-project | sha256sum | cut -d ' ' -f 1)
+session_path() {
+  printf '%s\n' "$1/.cache/dotfiles-wsl/sessions/$session_project_id.fixture.$2"
+}
+
+write_session_metadata() {
+  local target=$1 session_id=$2 owner_pid=$3 boot_id=$4 owner_start_time=$5
   jq -cn \
     --arg session_id "$session_id" \
     --arg client fixture \
-    --arg project_id "$project_id" \
+    --arg project_id "$session_project_id" \
     --arg boot_id "$boot_id" \
     --argjson owner_pid "$owner_pid" \
     --arg owner_start_time "$owner_start_time" \
     '{version: 1, session_id: $session_id, client: $client, project_id: $project_id,
       boot_id: $boot_id, owner_pid: $owner_pid, owner_start_time: $owner_start_time}' \
-    > "$session/metadata.json"
+    > "$target"
+}
+
+make_session_metadata() {
+  local home=$1 suffix=$2 owner_pid=$3 boot_id=$4 owner_start_time=$5 session
+  session=$(session_path "$home" "$suffix")
+  mkdir -p "$session/tmp"
+  write_session_metadata "$session/metadata.json" "${session##*/}" \
+    "$owner_pid" "$boot_id" "$owner_start_time"
   chmod 0777 "$session"
   chmod 0666 "$session/metadata.json"
 }
 
 make_session() {
-  local home=$1 project_id=$2
-  local owner_start_time
-  owner_start_time=$(awk '{print $22}' "/proc/$$/stat")
-  make_session_metadata "$home" "$project_id" "session-$project_id" "$$" \
-    "$(cat /proc/sys/kernel/random/boot_id)" "$owner_start_time"
+  make_session_metadata "$1" live "$$" "$current_boot_id" "$current_start_time"
+}
+
+make_home() {
+  mkdir -p "$1/.cache/dotfiles-wsl/sessions" "$1/.cache/dotfiles-wsl/cargo-build"
+  chmod 0777 "$1/.cache/dotfiles-wsl" "$1/.cache/dotfiles-wsl/sessions" \
+    "$1/.cache/dotfiles-wsl/cargo-build"
 }
 
 make_shared_cache() {
@@ -57,433 +124,533 @@ allocated_bytes() {
   du -s -B1 -- "$1" | cut -f 1
 }
 
+cache_bytes() {
+  printf '%s\n' "$((
+    $(allocated_bytes "$1/.cache/dotfiles-wsl/shared")
+    + $(allocated_bytes "$1/.cache/dotfiles-wsl/cargo-build")
+  ))"
+}
+
+trash_is_empty() {
+  test -z "$(find "$1/.cache/dotfiles-wsl/trash" -mindepth 1 -print -quit)"
+}
+
 expect_unresolved() {
   local log=$1
   shift
   if "$@" 2>"$log"; then
-    echo "GC reported success while orphan sessions remained unresolved: $log" >&2
+    echo "GC reported success while cache entries remained unresolved: $log" >&2
     exit 1
   fi
-  grep -Fq 'orphan sessions remain unresolved' "$log"
+  grep -Fq 'agent cache entries remain unresolved' "$log"
 }
 
-stale_id=$(printf stale | sha256sum | cut -d ' ' -f 1)
-recent_id=$(printf recent | sha256sum | cut -d ' ' -f 1)
-active_id=$(printf active | sha256sum | cut -d ' ' -f 1)
-retained_id=$(printf retained | sha256sum | cut -d ' ' -f 1)
-deleted_orphan_id=$(printf deleted-orphan | sha256sum | cut -d ' ' -f 1)
-pressure_old_id=$(printf pressure-old | sha256sum | cut -d ' ' -f 1)
-pressure_new_id=$(printf pressure-new | sha256sum | cut -d ' ' -f 1)
+wait_for() {
+  local path=$1
+  for _ in {1..600}; do
+    [ ! -e "$path" ] || return 0
+    sleep 0.05
+  done
+  echo "timed out waiting for $path" >&2
+  exit 1
+}
+
+first_entry_id=$(printf first-entry | sha256sum | cut -c 1-16)
+second_entry_id=$(printf second-entry | sha256sum | cut -c 1-16)
+locked_entry_id=$(printf locked-entry | sha256sum | cut -c 1-16)
+current_boot_id=$(cat /proc/sys/kernel/random/boot_id)
+current_start_time=$(awk '{print $22}' "/proc/$$/stat")
+missing_pid=999999999
+test ! -e "/proc/$missing_pid"
 
 fixture=$PWD/gc-fixture
-home=$fixture/home
-mkdir -p "$home/.cache/dotfiles-wsl/sessions" "$home/.cache/dotfiles-wsl/builds"
-chmod 0777 "$home/.cache/dotfiles-wsl" \
-  "$home/.cache/dotfiles-wsl/sessions" \
-  "$home/.cache/dotfiles-wsl/builds"
-make_cache "$home" "$stale_id" 40 2
-make_cache "$home" "$recent_id" 1 2
-make_cache "$home" "$active_id" 40 2
-make_session "$home" "$active_id"
-make_shared_cache "$home" 2
 
+# A unit that no build used for the inactivity limit goes even below the high
+# watermark, while units a build used stay in the same entry, a live session or not.
+home=$fixture/home
+make_home "$home"
+make_session "$home"
+make_shared_cache "$home" 2
+entry=$(entry_path "$home" "$first_entry_id")
+make_unit "$entry" old '40 days ago' 4
+make_unit "$entry" recent '1 day ago' 4
+# A fresh build compiles nothing and writes nothing, but it reads the hash file.
+make_unit "$entry" fresh '40 days ago' 4
+touch -a -d '1 hour ago' "$entry/debug/.fingerprint/fresh-$(unit_hash "$entry" fresh)/lib-fresh"
+# Cargo reads the fingerprint JSON only for a unit it then rebuilds, so a tool that
+# only inspected the JSON does not make an old unit look used.
+make_unit "$entry" inspected '40 days ago' 4
+inspected_json=$entry/debug/.fingerprint/inspected-$(unit_hash "$entry" inspected)/lib-inspected.json
+printf '{}\n' > "$inspected_json"
+touch -m -d '40 days ago' "$inspected_json"
+touch -a -d '1 hour ago' "$inspected_json"
+# Cargo never finds outputs fresh without a fingerprint carrying their hash, so they
+# go once nothing wrote or read them for 48 hours.
+printf 'allocated\n' > "$entry/debug/deps/liborphan-0123456789abcdef.rlib"
+mkdir -p "$entry/debug/build/orphan-0123456789abcdef/out"
+touch -d '3 days ago' "$entry/debug/deps/liborphan-0123456789abcdef.rlib" \
+  "$entry/debug/build/orphan-0123456789abcdef/out" "$entry/debug/build/orphan-0123456789abcdef"
+printf 'allocated\n' > "$entry/debug/deps/libnew_orphan-fedcba9876543210.rlib"
+# An output without the hash in its name cannot be matched to a unit and stays.
+printf 'allocated\n' > "$entry/debug/deps/libplain.so"
+# rustc names incremental directories with its own hash, so only their age counts.
+mkdir -p "$entry/debug/incremental/old-0abc/s-old" "$entry/debug/incremental/recent-0def/s-new"
+touch -d '40 days ago' "$entry/debug/incremental/old-0abc/s-old" "$entry/debug/incremental/old-0abc"
+lock_inode=$(stat -c %i "$entry/debug/.cargo-build-lock")
+# Under relatime a read moves an atime older than the mtime, so this atime shows
+# whether the GC read the file instead of only calling stat.
+recent_hash_file=$entry/debug/.fingerprint/recent-$(unit_hash "$entry" recent)/lib-recent
+touch -a -d '2 days ago' "$recent_hash_file"
+recent_atime=$(stat -c %X "$recent_hash_file")
 HOME=$home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
   DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
-test ! -e "$home/.cache/dotfiles-wsl/builds/$stale_id"
-test -d "$home/.cache/dotfiles-wsl/builds/$recent_id"
-test -d "$home/.cache/dotfiles-wsl/builds/$active_id"
+expect_unit reclaimed "$entry" old
+expect_unit kept "$entry" recent
+expect_unit kept "$entry" fresh
+expect_unit reclaimed "$entry" inspected
+test ! -e "$entry/debug/deps/liborphan-0123456789abcdef.rlib"
+test ! -e "$entry/debug/build/orphan-0123456789abcdef"
+test -e "$entry/debug/deps/libnew_orphan-fedcba9876543210.rlib"
+test -e "$entry/debug/deps/libplain.so"
+test ! -e "$entry/debug/incremental/old-0abc"
+test -d "$entry/debug/incremental/recent-0def"
+# A Cargo that opened the lock file before the reclaim waits on that inode, so
+# the lock file stays at its path and the waiter excludes later builds.
+test "$(stat -c %i "$entry/debug/.cargo-build-lock")" = "$lock_inode"
+test "$(stat -c %X "$recent_hash_file")" = "$recent_atime"
+test -d "$(session_path "$home" live)"
+trash_is_empty "$home"
 test "$(stat -c %a "$home/.cache/dotfiles-wsl")" = 700
 test "$(stat -c %a "$home/.cache/dotfiles-wsl/sessions")" = 700
-test "$(stat -c %a "$home/.cache/dotfiles-wsl/builds")" = 700
+test "$(stat -c %a "$home/.cache/dotfiles-wsl/cargo-build")" = 700
+test "$(stat -c %a "$home/.cache/dotfiles-wsl/trash")" = 700
 test "$(stat -c %a "$home/.cache/dotfiles-wsl/shared")" = 700
 test "$(stat -c %a "$home/.cache/dotfiles-wsl/shared/cargo-home")" = 700
 test "$(stat -c %a "$home/.cache/dotfiles-wsl/shared/xdg-cache")" = 700
 test "$(stat -c %a "$home/.cache/dotfiles-wsl/shared/.dotfiles-agent-cache.json")" = 600
 test "$(stat -c %a "$home/.cache/dotfiles-wsl/gc.lock")" = 600
-test "$(stat -c %a "$home/.cache/dotfiles-wsl/builds/$recent_id")" = 700
-test "$(stat -c %a "$home/.cache/dotfiles-wsl/builds/$recent_id/.dotfiles-agent-cache.json")" = 600
-test "$(stat -c %a "$home/.cache/dotfiles-wsl/sessions/session-$active_id")" = 700
-test "$(stat -c %a "$home/.cache/dotfiles-wsl/sessions/session-$active_id/metadata.json")" = 600
+test "$(stat -c %a "$(session_path "$home" live)")" = 700
+test "$(stat -c %a "$(session_path "$home" live)/metadata.json")" = 600
+
+# A live build can remove or lock files while the GC walks a cache. du and find
+# then exit non-zero but still report the rest, and the GC run must still succeed.
+partial_home=$fixture/partial-home
+make_home "$partial_home"
+partial_entry=$(entry_path "$partial_home" "$first_entry_id")
+make_unit "$partial_entry" recent '1 day ago' 2
+partial_unreadable=$partial_entry/debug/build/recent-$(unit_hash "$partial_entry" recent)/out/unreadable
+mkdir -m 000 "$partial_unreadable"
+HOME=$partial_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+expect_unit kept "$partial_entry" recent
+chmod 700 "$partial_unreadable"
 
 orphan_home=$fixture/orphan-home
-mkdir -p "$orphan_home/.cache/dotfiles-wsl/sessions" \
-  "$orphan_home/.cache/dotfiles-wsl/builds"
-current_boot_id=$(cat /proc/sys/kernel/random/boot_id)
-current_start_time=$(awk '{print $22}' "/proc/$$/stat")
-missing_pid=999999999
-test ! -e "/proc/$missing_pid"
-make_session_metadata "$orphan_home" "$active_id" missing-owner "$missing_pid" \
-  "$current_boot_id" 0
-make_session_metadata "$orphan_home" "$active_id" boot-mismatch "$$" \
+make_home "$orphan_home"
+make_session_metadata "$orphan_home" missing-owner "$missing_pid" "$current_boot_id" 0
+make_session_metadata "$orphan_home" boot-mismatch "$$" \
   00000000-0000-0000-0000-000000000000 "$current_start_time"
-make_session_metadata "$orphan_home" "$active_id" start-mismatch "$$" \
-  "$current_boot_id" 0
-make_session_metadata "$orphan_home" "$active_id" live-owner "$$" \
-  "$current_boot_id" "$current_start_time"
+make_session_metadata "$orphan_home" start-mismatch "$$" "$current_boot_id" 0
+make_session "$orphan_home"
 HOME=$orphan_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
   DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
 for orphan_session in missing-owner boot-mismatch start-mismatch; do
-  if [ -e "$orphan_home/.cache/dotfiles-wsl/sessions/$orphan_session" ] ||
-    [ -L "$orphan_home/.cache/dotfiles-wsl/sessions/$orphan_session" ]; then
+  if [ -e "$(session_path "$orphan_home" "$orphan_session")" ]; then
     echo "GC retained orphan session: $orphan_session" >&2
     exit 1
   fi
 done
-test -d "$orphan_home/.cache/dotfiles-wsl/sessions/live-owner"
-test -z "$(find "$orphan_home/.cache/dotfiles-wsl/sessions" \
-  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
+test -d "$(session_path "$orphan_home" live)"
+trash_is_empty "$orphan_home"
 
-# An orphan that becomes live after quarantine is retained and continues to
-# protect both its initially validated project cache and the shared cache.
-retained_home=$fixture/retained-home
-mkdir -p "$retained_home/.cache/dotfiles-wsl/sessions" \
-  "$retained_home/.cache/dotfiles-wsl/builds"
-make_session_metadata "$retained_home" "$retained_id" retained-session "$missing_pid" \
-  "$current_boot_id" 0
-make_cache "$retained_home" "$retained_id" 1 32
-make_shared_cache "$retained_home" 32
-retained_high=$(($(allocated_bytes "$retained_home/.cache/dotfiles-wsl/shared") - 1))
-retained_marker=$retained_home/mutated
-HOME=$retained_home DOTFILES_AGENT_TEST_GC_MUTATION_MODE=live-owner \
-  DOTFILES_AGENT_TEST_GC_LIVE_PID="$$" \
-  DOTFILES_AGENT_TEST_GC_LIVE_START_TIME="$current_start_time" \
-  DOTFILES_AGENT_TEST_GC_MUTATION_MARKER="$retained_marker" \
-  DOTFILES_AGENT_GC_HIGH_BYTES=$retained_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$MUTATION_GC"
-test -e "$retained_marker"
-test -d "$retained_home/.cache/dotfiles-wsl/sessions/retained-session"
-if [ ! -e "$retained_home/.cache/dotfiles-wsl/builds/$retained_id/payload/file-0" ]; then
-  echo 'GC removed the cache of a session retained after quarantine' >&2
-  exit 1
-fi
-if [ ! -e "$retained_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0" ]; then
-  echo 'GC purged the shared cache while a retained session was live' >&2
-  exit 1
-fi
-test -z "$(find "$retained_home/.cache/dotfiles-wsl/sessions" \
-  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
+# A dead launcher whose session scope still has processes keeps its session.
+scope_home=$fixture/scope-home
+scope_cgroup=$fixture/cgroup
+make_home "$scope_home"
+make_session_metadata "$scope_home" 4242.scoped "$missing_pid" "$current_boot_id" 0
+mkdir -p "$scope_cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/agents.slice/dotfiles-agent-fixture.4242.scoped.scope"
+HOME=$scope_home DOTFILES_AGENT_GC_CGROUP_ROOT=$scope_cgroup \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+test -d "$(session_path "$scope_home" 4242.scoped)"
+rm -r "$scope_cgroup"
+HOME=$scope_home DOTFILES_AGENT_GC_CGROUP_ROOT=$scope_cgroup \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+test ! -e "$(session_path "$scope_home" 4242.scoped)"
 
-# A truly deleted orphan does not protect its project or shared cache.
+# A truly deleted orphan does not protect the shared cache.
 deleted_orphan_home=$fixture/deleted-orphan-home
-mkdir -p "$deleted_orphan_home/.cache/dotfiles-wsl/sessions" \
-  "$deleted_orphan_home/.cache/dotfiles-wsl/builds"
-make_session_metadata "$deleted_orphan_home" "$deleted_orphan_id" deleted-session \
-  "$missing_pid" "$current_boot_id" 0
-make_cache "$deleted_orphan_home" "$deleted_orphan_id" 1 32
+make_home "$deleted_orphan_home"
+make_session_metadata "$deleted_orphan_home" deleted "$missing_pid" "$current_boot_id" 0
+deleted_orphan_entry=$(entry_path "$deleted_orphan_home" "$first_entry_id")
+make_unit "$deleted_orphan_entry" idle '3 days ago' 32
 make_shared_cache "$deleted_orphan_home" 32
 deleted_orphan_high=$(($(allocated_bytes \
   "$deleted_orphan_home/.cache/dotfiles-wsl/shared") - 1))
 HOME=$deleted_orphan_home DOTFILES_AGENT_GC_HIGH_BYTES=$deleted_orphan_high \
   DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
-test ! -e "$deleted_orphan_home/.cache/dotfiles-wsl/sessions/deleted-session"
-test ! -e "$deleted_orphan_home/.cache/dotfiles-wsl/builds/$deleted_orphan_id"
+test ! -e "$(session_path "$deleted_orphan_home" deleted)"
+expect_unit reclaimed "$deleted_orphan_entry" idle
 test ! -e "$deleted_orphan_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
-
-mutation_project_id=$(printf mutation-project | sha256sum | cut -d ' ' -f 1)
-mutation_home=$fixture/mutation-home
-mkdir -p "$mutation_home/.cache/dotfiles-wsl/sessions" \
-  "$mutation_home/.cache/dotfiles-wsl/builds"
-make_session_metadata "$mutation_home" "$active_id" mutated-session "$missing_pid" \
-  "$current_boot_id" 0
-make_cache "$mutation_home" "$active_id" 1 32
-make_shared_cache "$mutation_home" 32
-mutation_high=$(($(allocated_bytes "$mutation_home/.cache/dotfiles-wsl/shared") - 1))
-mutation_marker=$mutation_home/mutated
-HOME=$mutation_home DOTFILES_AGENT_TEST_GC_MUTATION_MODE=restore \
-  DOTFILES_AGENT_TEST_GC_MUTATION_PROJECT_ID="$mutation_project_id" \
-  DOTFILES_AGENT_TEST_GC_MUTATION_MARKER="$mutation_marker" \
-  DOTFILES_AGENT_GC_HIGH_BYTES=$mutation_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$mutation_home/gc.log" "$MUTATION_GC"
-test -e "$mutation_marker"
-if [ ! -d "$mutation_home/.cache/dotfiles-wsl/sessions/mutated-session" ]; then
-  echo "GC stranded a session after quarantine revalidation failure" >&2
-  exit 1
-fi
-test "$(jq -r '.project_id' \
-  "$mutation_home/.cache/dotfiles-wsl/sessions/mutated-session/metadata.json")" = \
-  "$mutation_project_id"
-test -e "$mutation_home/.cache/dotfiles-wsl/builds/$active_id/payload/file-0"
-test -e "$mutation_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
-test -z "$(find "$mutation_home/.cache/dotfiles-wsl/sessions" \
-  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
-HOME=$mutation_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
-  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
-test ! -e "$mutation_home/.cache/dotfiles-wsl/sessions/mutated-session"
-
-blocked_restore_home=$fixture/blocked-restore-home
-mkdir -p "$blocked_restore_home/.cache/dotfiles-wsl/sessions" \
-  "$blocked_restore_home/.cache/dotfiles-wsl/builds"
-make_session_metadata "$blocked_restore_home" "$active_id" blocked-session "$missing_pid" \
-  "$current_boot_id" 0
-make_cache "$blocked_restore_home" "$active_id" 1 32
-make_shared_cache "$blocked_restore_home" 32
-blocked_restore_high=$(($(allocated_bytes \
-  "$blocked_restore_home/.cache/dotfiles-wsl/shared") - 1))
-blocked_restore_marker=$blocked_restore_home/mutated
-HOME=$blocked_restore_home DOTFILES_AGENT_TEST_GC_MUTATION_MODE=block-restore \
-  DOTFILES_AGENT_TEST_GC_MUTATION_PROJECT_ID="$mutation_project_id" \
-  DOTFILES_AGENT_TEST_GC_MUTATION_MARKER="$blocked_restore_marker" \
-  DOTFILES_AGENT_GC_HIGH_BYTES=$blocked_restore_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$blocked_restore_home/gc.log" "$MUTATION_GC"
-test -e "$blocked_restore_marker"
-test -d "$blocked_restore_home/.cache/dotfiles-wsl/sessions/blocked-session"
-test ! -e "$blocked_restore_home/.cache/dotfiles-wsl/sessions/blocked-session/metadata.json"
-test -n "$(find "$blocked_restore_home/.cache/dotfiles-wsl/sessions" \
-  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
-test -e "$blocked_restore_home/.cache/dotfiles-wsl/builds/$active_id/payload/file-0"
-test -e "$blocked_restore_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
-grep -Fq 'cannot restore quarantined session' "$blocked_restore_home/gc.log" || {
-  echo "GC omitted the failed-restore diagnostic" >&2
-  exit 1
-}
-rmdir "$blocked_restore_home/.cache/dotfiles-wsl/sessions/blocked-session"
-HOME=$blocked_restore_home DOTFILES_AGENT_GC_HIGH_BYTES=$blocked_restore_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$blocked_restore_home/second-gc.log" "$GC"
-if [ ! -e "$blocked_restore_home/.cache/dotfiles-wsl/builds/$active_id/payload/file-0" ]; then
-  echo 'GC removed a project cache while an unresolved quarantine remained' >&2
-  exit 1
-fi
-if [ ! -e "$blocked_restore_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0" ]; then
-  echo 'GC purged the shared cache while an unresolved quarantine remained' >&2
-  exit 1
-fi
-grep -Fq 'unresolved quarantined session' "$blocked_restore_home/second-gc.log"
-
-# An empty, owned quarantine root is a resolved interrupted transaction and
-# does not suppress cache collection.
-empty_quarantine_home=$fixture/empty-quarantine-home
-mkdir -p "$empty_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted" \
-  "$empty_quarantine_home/.cache/dotfiles-wsl/builds"
-chmod 700 \
-  "$empty_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
-make_cache "$empty_quarantine_home" "$pressure_old_id" 1 32
-make_shared_cache "$empty_quarantine_home" 32
-empty_quarantine_high=$(($(allocated_bytes \
-  "$empty_quarantine_home/.cache/dotfiles-wsl/shared") - 1))
-HOME=$empty_quarantine_home DOTFILES_AGENT_GC_HIGH_BYTES=$empty_quarantine_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
-test ! -e \
-  "$empty_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
-test ! -e "$empty_quarantine_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
-test ! -e "$empty_quarantine_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
-
-# An empty quarantine root with unexpected permissions is ambiguous. It is
-# retained and suppresses all cache deletion for the run.
-invalid_quarantine_home=$fixture/invalid-quarantine-home
-mkdir -p "$invalid_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted" \
-  "$invalid_quarantine_home/.cache/dotfiles-wsl/builds"
-chmod 755 \
-  "$invalid_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
-make_cache "$invalid_quarantine_home" "$pressure_old_id" 1 32
-make_shared_cache "$invalid_quarantine_home" 32
-invalid_quarantine_high=$(($(allocated_bytes \
-  "$invalid_quarantine_home/.cache/dotfiles-wsl/shared") - 1))
-HOME=$invalid_quarantine_home DOTFILES_AGENT_GC_HIGH_BYTES=$invalid_quarantine_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$invalid_quarantine_home/gc.log" "$GC"
-test -d \
-  "$invalid_quarantine_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
-test -e "$invalid_quarantine_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
-test -e \
-  "$invalid_quarantine_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
-grep -Fq 'unresolved quarantined session root' "$invalid_quarantine_home/gc.log"
+trash_is_empty "$deleted_orphan_home"
 
 # A session without metadata has no live owner. It is removed like an orphan
-# and protects neither a project cache nor the shared cache.
+# and does not protect the shared cache.
 unclaimed_home=$fixture/unclaimed-session-home
-unclaimed_session=$unclaimed_home/.cache/dotfiles-wsl/sessions/unclaimed-session
-mkdir -p "$unclaimed_session/tmp/left" "$unclaimed_home/.cache/dotfiles-wsl/builds"
+unclaimed_session=$(session_path "$unclaimed_home" unclaimed)
+make_home "$unclaimed_home"
+mkdir -p "$unclaimed_session/tmp/left"
 : > "$unclaimed_session/tmp/left/file"
-make_session_metadata "$unclaimed_home" "$pressure_old_id" orphan-session \
-  "$missing_pid" "$current_boot_id" 0
-make_cache "$unclaimed_home" "$pressure_old_id" 1 32
+unclaimed_entry=$(entry_path "$unclaimed_home" "$first_entry_id")
+make_unit "$unclaimed_entry" idle '3 days ago' 32
 make_shared_cache "$unclaimed_home" 32
-unclaimed_high=$(($(allocated_bytes \
-  "$unclaimed_home/.cache/dotfiles-wsl/shared") - 1))
+unclaimed_high=$(($(allocated_bytes "$unclaimed_home/.cache/dotfiles-wsl/shared") - 1))
 HOME=$unclaimed_home DOTFILES_AGENT_GC_HIGH_BYTES=$unclaimed_high \
   DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
 test ! -e "$unclaimed_session"
-test ! -e "$unclaimed_home/.cache/dotfiles-wsl/sessions/orphan-session"
-test ! -e "$unclaimed_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
+expect_unit reclaimed "$unclaimed_entry" idle
 test ! -e "$unclaimed_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
-test -z "$(find "$unclaimed_home/.cache/dotfiles-wsl/sessions" \
-  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
 
-# A session without metadata that the run cannot delete fails the run, but it
-# still protects no cache because it has no owner.
-unremovable_unclaimed_home=$fixture/unremovable-unclaimed-home
-unremovable_unclaimed_session=$unremovable_unclaimed_home/.cache/dotfiles-wsl/sessions/unclaimed-session
-mkdir -p "$unremovable_unclaimed_session/tmp/locked" \
-  "$unremovable_unclaimed_home/.cache/dotfiles-wsl/builds"
-: > "$unremovable_unclaimed_session/tmp/locked/pinned"
-chmod 0500 "$unremovable_unclaimed_session/tmp/locked"
-make_cache "$unremovable_unclaimed_home" "$pressure_old_id" 1 32
-make_shared_cache "$unremovable_unclaimed_home" 32
-unremovable_unclaimed_high=$(($(allocated_bytes \
-  "$unremovable_unclaimed_home/.cache/dotfiles-wsl/shared") - 1))
-HOME=$unremovable_unclaimed_home DOTFILES_AGENT_GC_HIGH_BYTES=$unremovable_unclaimed_high \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 \
-  expect_unresolved "$unremovable_unclaimed_home/gc.log" "$GC"
-test -d "$unremovable_unclaimed_session"
-test ! -e "$unremovable_unclaimed_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
-test ! -e "$unremovable_unclaimed_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
-grep -Fq 'preserve unremovable-orphan' "$unremovable_unclaimed_home/gc.log"
-chmod 0700 "$unremovable_unclaimed_session/tmp/locked"
-
-# An orphan the run cannot delete returns to its own path instead of being
-# stranded in a quarantine root, so unrelated caches are still collected.
-unremovable_home=$fixture/unremovable-session-home
-mkdir -p "$unremovable_home/.cache/dotfiles-wsl/sessions" \
-  "$unremovable_home/.cache/dotfiles-wsl/builds"
-make_session_metadata "$unremovable_home" "$pressure_old_id" unremovable-session \
-  "$missing_pid" "$current_boot_id" 0
-unremovable_session=$unremovable_home/.cache/dotfiles-wsl/sessions/unremovable-session
-mkdir -p "$unremovable_session/tmp/locked"
-: > "$unremovable_session/tmp/locked/pinned"
-chmod 0500 "$unremovable_session/tmp/locked"
-make_cache "$unremovable_home" "$pressure_old_id" 1 32
-make_cache "$unremovable_home" "$stale_id" 40 2
-make_shared_cache "$unremovable_home" 32
-HOME=$unremovable_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
-  DOTFILES_AGENT_GC_LOW_BYTES=500000000 expect_unresolved "$unremovable_home/gc.log" "$GC"
-test -d "$unremovable_session"
-test -z "$(find "$unremovable_home/.cache/dotfiles-wsl/sessions" \
-  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
-test -e "$unremovable_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
-test ! -e "$unremovable_home/.cache/dotfiles-wsl/builds/$stale_id"
-grep -Fq 'cannot remove quarantined orphan' "$unremovable_home/gc.log"
-grep -Fq 'preserve unremovable-orphan' "$unremovable_home/gc.log"
-chmod 0700 "$unremovable_session/tmp/locked"
-
-# If a validated empty root changes immediately before rmdir, the run retains
-# the root and suppresses cache deletion instead of treating it as resolved.
-rmdir_race_home=$fixture/rmdir-race-home
-mkdir -p "$rmdir_race_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted" \
-  "$rmdir_race_home/.cache/dotfiles-wsl/builds"
-chmod 700 "$rmdir_race_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted"
-make_cache "$rmdir_race_home" "$pressure_old_id" 1 32
-make_shared_cache "$rmdir_race_home" 32
-rmdir_race_high=$(($(allocated_bytes \
-  "$rmdir_race_home/.cache/dotfiles-wsl/shared") - 1))
-rmdir_race_marker=$rmdir_race_home/raced
-HOME=$rmdir_race_home DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER=$rmdir_race_marker \
-  DOTFILES_AGENT_GC_HIGH_BYTES=$rmdir_race_high DOTFILES_AGENT_GC_LOW_BYTES=0 \
-  expect_unresolved "$rmdir_race_home/gc.log" "$RMDIR_RACE_GC"
-test -e "$rmdir_race_marker"
-test -e \
-  "$rmdir_race_home/.cache/dotfiles-wsl/sessions/.gc-quarantine.interrupted/fixture-blocker"
-test -e "$rmdir_race_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
-test -e "$rmdir_race_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
-grep -Fq 'quarantined session root changed during resolution' "$rmdir_race_home/gc.log"
+readonly_home=$fixture/readonly-session-home
+readonly_session=$(session_path "$readonly_home" readonly)
+readonly_external=$fixture/readonly-external
+make_home "$readonly_home"
+make_session_metadata "$readonly_home" readonly "$missing_pid" "$current_boot_id" 0
+mkdir -p "$readonly_session/tmp/locked/nested" "$readonly_external"
+: > "$readonly_session/tmp/locked/nested/payload"
+: > "$readonly_external/preserved"
+ln -s "$readonly_external" "$readonly_session/tmp/locked/external"
+chmod 0500 "$readonly_session/tmp/locked" "$readonly_external"
+chmod 0000 "$readonly_session/tmp/locked/nested"
+HOME=$readonly_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+test ! -e "$readonly_session"
+trash_is_empty "$readonly_home"
+test -f "$readonly_external/preserved"
+test "$(stat -c %a "$readonly_external")" = 500
+chmod 0700 "$readonly_external"
 
 wrong_owner_home=$fixture/wrong-owner-home
-mkdir -p "$wrong_owner_home/.cache/dotfiles-wsl/sessions" \
-  "$wrong_owner_home/.cache/dotfiles-wsl/builds"
-make_session_metadata "$wrong_owner_home" "$active_id" wrong-owner "$$" \
-  "$current_boot_id" "$current_start_time"
+make_home "$wrong_owner_home"
+make_session "$wrong_owner_home"
 HOME=$wrong_owner_home DOTFILES_AGENT_TEST_WRONG_OWNER_PID="$$" \
   DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
   DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$WRONG_OWNER_GC"
-test -d "$wrong_owner_home/.cache/dotfiles-wsl/sessions/wrong-owner"
+test -d "$(session_path "$wrong_owner_home" live)"
 
 # Metadata damaged in place no longer identifies its owner, so the session may
-# be live. It is kept, every cache is kept, and the run fails, while ordinary
-# orphans are still reclaimed.
+# be live. It is kept, it blocks the shared cache purge, and the run fails,
+# while ordinary orphans and unused units are still reclaimed.
 damaged_metadata_home=$fixture/damaged-metadata-home
-damaged_metadata=$damaged_metadata_home/.cache/dotfiles-wsl/sessions/damaged-session/metadata.json
-mkdir -p "${damaged_metadata%/*}/tmp" "$damaged_metadata_home/.cache/dotfiles-wsl/builds"
+damaged_session=$(session_path "$damaged_metadata_home" damaged)
+damaged_metadata=$damaged_session/metadata.json
+make_home "$damaged_metadata_home"
+mkdir -p "$damaged_session/tmp"
 head -c 4096 /dev/zero > "$damaged_metadata"
 damaged_metadata_sum=$(sha256sum < "$damaged_metadata")
-make_session_metadata "$damaged_metadata_home" "$pressure_old_id" orphan-session \
-  "$missing_pid" "$current_boot_id" 0
-make_cache "$damaged_metadata_home" "$pressure_old_id" 40 32
+make_session_metadata "$damaged_metadata_home" orphan "$missing_pid" "$current_boot_id" 0
+damaged_entry=$(entry_path "$damaged_metadata_home" "$first_entry_id")
+make_unit "$damaged_entry" old '40 days ago' 32
 make_shared_cache "$damaged_metadata_home" 32
 damaged_metadata_high=$(($(allocated_bytes \
   "$damaged_metadata_home/.cache/dotfiles-wsl/shared") - 1))
 HOME=$damaged_metadata_home DOTFILES_AGENT_GC_HIGH_BYTES=$damaged_metadata_high \
   DOTFILES_AGENT_GC_LOW_BYTES=0 expect_unresolved "$damaged_metadata_home/gc.log" "$GC"
-test ! -e "$damaged_metadata_home/.cache/dotfiles-wsl/sessions/orphan-session"
-test -d "${damaged_metadata%/*}/tmp"
+test ! -e "$(session_path "$damaged_metadata_home" orphan)"
+test -d "$damaged_session/tmp"
 test "$(sha256sum < "$damaged_metadata")" = "$damaged_metadata_sum"
-test -z "$(find "$damaged_metadata_home/.cache/dotfiles-wsl/sessions" \
-  -maxdepth 1 -name '.gc-quarantine.*' -print -quit)"
-test -e "$damaged_metadata_home/.cache/dotfiles-wsl/builds/$pressure_old_id/payload/file-0"
+expect_unit reclaimed "$damaged_entry" old
 test -e "$damaged_metadata_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
 grep -Fq "$damaged_metadata" "$damaged_metadata_home/gc.log"
 
+# While the GC removes large units, it does not hold gc.lock. A launcher started
+# during the removal completes while the removal is still blocked.
+slow_home=$fixture/slow-home
+slow_ready=$fixture/slow-ready
+slow_release=$fixture/slow-release
+make_home "$slow_home"
+slow_entry=$(entry_path "$slow_home" "$first_entry_id")
+make_unit "$slow_entry" old '40 days ago' 64
+make_unit "$slow_entry" recent '1 day ago' 2
+make_session "$slow_home"
+HOME=$slow_home DOTFILES_AGENT_TEST_RM_READY=$slow_ready \
+  DOTFILES_AGENT_TEST_RM_RELEASE=$slow_release \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+  "$SLOW_RM_GC" &
+slow_gc_pid=$!
+wait_for "$slow_ready"
+mkdir -p "$fixture/outside"
+set +e
+(
+  cd "$fixture/outside"
+  HOME=$slow_home SYSTEMD_RUN_CAPTURE=$fixture/systemd-run \
+    timeout 30 "$LAUNCHER" fixture-client "$(type -P true)"
+)
+launcher_status=$?
+set -e
+if [ "$launcher_status" -ne 0 ]; then
+  echo "launcher did not finish while the GC removed units: status $launcher_status" >&2
+  exit 1
+fi
+kill -0 "$slow_gc_pid"
+: > "$slow_release"
+wait "$slow_gc_pid"
+expect_unit reclaimed "$slow_entry" old
+expect_unit kept "$slow_entry" recent
+trash_is_empty "$slow_home"
+
+# A run killed in the middle of a removal leaves a partial entry in trash, and the
+# next run removes it and succeeds.
+killed_home=$fixture/killed-home
+killed_ready=$fixture/killed-ready
+make_home "$killed_home"
+killed_entry=$(entry_path "$killed_home" "$first_entry_id")
+make_unit "$killed_entry" old '40 days ago' 16
+HOME=$killed_home DOTFILES_AGENT_TEST_RM_READY=$killed_ready \
+  DOTFILES_AGENT_TEST_RM_RELEASE=$fixture/never-released \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+  "$SLOW_RM_GC" &
+killed_gc_pid=$!
+wait_for "$killed_ready"
+kill -KILL "$killed_gc_pid" "$(cat "$killed_ready")"
+wait "$killed_gc_pid" || true
+test -n "$(find "$killed_home/.cache/dotfiles-wsl/trash" -mindepth 1 -maxdepth 1 -print -quit)"
+HOME=$killed_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+trash_is_empty "$killed_home"
+expect_unit reclaimed "$killed_entry" old
+
 symlink_session_home=$fixture/symlink-session-home
-mkdir -p "$symlink_session_home/.cache/dotfiles-wsl/sessions/symlink-metadata" \
-  "$symlink_session_home/.cache/dotfiles-wsl/builds"
-ln -s /dev/null \
-  "$symlink_session_home/.cache/dotfiles-wsl/sessions/symlink-metadata/metadata.json"
+symlink_session=$(session_path "$symlink_session_home" symlink)
+make_home "$symlink_session_home"
+mkdir -p "$symlink_session"
+ln -s /dev/null "$symlink_session/metadata.json"
 if HOME=$symlink_session_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
   DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"; then
   echo 'GC accepted symlink session metadata' >&2
   exit 1
 fi
-test -L "$symlink_session_home/.cache/dotfiles-wsl/sessions/symlink-metadata/metadata.json"
+test -L "$symlink_session/metadata.json"
 
 ambiguous_session_home=$fixture/ambiguous-session-home
-mkdir -p "$ambiguous_session_home/.cache/dotfiles-wsl/sessions" \
-  "$ambiguous_session_home/.cache/dotfiles-wsl/builds" \
-  "$ambiguous_session_home/outside"
-ln -s "$ambiguous_session_home/outside" \
-  "$ambiguous_session_home/.cache/dotfiles-wsl/sessions/ambiguous"
+make_home "$ambiguous_session_home"
+mkdir -p "$ambiguous_session_home/outside"
+ln -s "$ambiguous_session_home/outside" "$(session_path "$ambiguous_session_home" ambiguous)"
 if HOME=$ambiguous_session_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
   DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"; then
   echo 'GC accepted ambiguous session path' >&2
   exit 1
 fi
-test -L "$ambiguous_session_home/.cache/dotfiles-wsl/sessions/ambiguous"
+test -L "$(session_path "$ambiguous_session_home" ambiguous)"
 
+# Above the high watermark, units go by their last use across every entry until
+# the total reaches the low watermark. An entry whose lock Cargo holds is not touched.
 pressure_home=$fixture/pressure-home
-mkdir -p "$pressure_home/.cache/dotfiles-wsl/sessions" "$pressure_home/.cache/dotfiles-wsl/builds"
-make_cache "$pressure_home" "$pressure_old_id" 2 32
-make_cache "$pressure_home" "$pressure_new_id" 1 16
+make_home "$pressure_home"
 make_shared_cache "$pressure_home" 0
-pressure_high=$((
-  $(allocated_bytes "$pressure_home/.cache/dotfiles-wsl/builds/$pressure_old_id")
-  + $(allocated_bytes "$pressure_home/.cache/dotfiles-wsl/builds/$pressure_new_id")
-  + $(allocated_bytes "$pressure_home/.cache/dotfiles-wsl/shared") - 1
-))
+make_session "$pressure_home"
+locked_entry=$(entry_path "$pressure_home" "$locked_entry_id")
+first_entry=$(entry_path "$pressure_home" "$first_entry_id")
+second_entry=$(entry_path "$pressure_home" "$second_entry_id")
+make_unit "$locked_entry" locked '50 days ago' 8
+make_unit "$first_entry" oldest '10 days ago' 8
+make_unit "$second_entry" middle '7 days ago' 8
+make_unit "$first_entry" newer '5 days ago' 8
+make_unit "$second_entry" newest '1 hour ago' 8
+pressure_total=$(cache_bytes "$pressure_home")
 pressure_low=$((
-  $(allocated_bytes "$pressure_home/.cache/dotfiles-wsl/builds/$pressure_new_id")
-  + $(allocated_bytes "$pressure_home/.cache/dotfiles-wsl/shared")
+  pressure_total - $(unit_bytes "$first_entry" oldest) - $(unit_bytes "$second_entry" middle)
+  + $(unit_bytes "$first_entry" newer) / 2
 ))
-HOME=$pressure_home DOTFILES_AGENT_GC_HIGH_BYTES=$pressure_high \
+exec {cargo_lock_fd}<"$locked_entry/debug/.cargo-build-lock"
+flock -x "$cargo_lock_fd"
+HOME=$pressure_home DOTFILES_AGENT_GC_HIGH_BYTES=$((pressure_total - 1)) \
   DOTFILES_AGENT_GC_LOW_BYTES=$pressure_low "$GC"
-test ! -e "$pressure_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
-test -d "$pressure_home/.cache/dotfiles-wsl/builds/$pressure_new_id"
+exec {cargo_lock_fd}<&-
+expect_unit kept "$locked_entry" locked
+expect_unit reclaimed "$first_entry" oldest
+expect_unit reclaimed "$second_entry" middle
+expect_unit kept "$first_entry" newer
+expect_unit kept "$second_entry" newest
+test -d "$(session_path "$pressure_home" live)"
+test "$(cache_bytes "$pressure_home")" -le "$pressure_low"
+trash_is_empty "$pressure_home"
+
+# Cargo reads the hash file of every unit when an invocation starts and releases its
+# lock before it runs test binaries. Under relatime that read leaves an atime at most
+# 24 hours older than the start, so a unit read within 48 hours stays even under
+# capacity pressure, while its test binary runs without any lock.
+running_home=$fixture/running-entry-home
+make_home "$running_home"
+make_session "$running_home"
+running_entry=$(entry_path "$running_home" "$first_entry_id")
+make_unit "$running_entry" tested '40 days ago' 2
+running_binary=$running_entry/debug/deps/tested-$(unit_hash "$running_entry" tested)
+make_test_binary "$running_binary" '40 days ago'
+touch -a -d '47 hours ago' \
+  "$running_entry/debug/.fingerprint/tested-$(unit_hash "$running_entry" tested)/lib-tested"
+"$running_binary" 300 &
+running_pid=$!
+HOME=$running_home DOTFILES_AGENT_GC_HIGH_BYTES=1 DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
+kill "$running_pid"
+wait "$running_pid" || true
+expect_unit kept "$running_entry" tested
+test -e "$running_binary"
+
+# The 48 hours do not depend on a running process. A unit read 47 hours ago stays under
+# capacity pressure, and a unit read 49 hours ago goes.
+recent_use_home=$fixture/recent-use-home
+make_home "$recent_use_home"
+make_session "$recent_use_home"
+recent_use_entry=$(entry_path "$recent_use_home" "$first_entry_id")
+make_unit "$recent_use_entry" within '40 days ago' 2
+make_unit "$recent_use_entry" beyond '40 days ago' 2
+touch -a -d '47 hours ago' \
+  "$recent_use_entry/debug/.fingerprint/within-$(unit_hash "$recent_use_entry" within)/lib-within"
+touch -a -d '49 hours ago' \
+  "$recent_use_entry/debug/.fingerprint/beyond-$(unit_hash "$recent_use_entry" beyond)/lib-beyond"
+HOME=$recent_use_home DOTFILES_AGENT_GC_HIGH_BYTES=1 DOTFILES_AGENT_GC_LOW_BYTES=0 \
+  "$GC" 2> "$recent_use_home/gc.log"
+expect_unit kept "$recent_use_entry" within
+expect_unit reclaimed "$recent_use_entry" beyond
+# What stays above the high watermark is reported, and the next run retries it.
+grep -Fq 'remain above the high watermark' "$recent_use_home/gc.log"
+
+# A test runner can execute a test binary without Cargo, which reads no fingerprint.
+# Running or reading any output of a unit counts as using it.
+direct_home=$fixture/direct-use-home
+make_home "$direct_home"
+direct_entry=$(entry_path "$direct_home" "$first_entry_id")
+make_unit "$direct_entry" executed '40 days ago' 2
+make_unit "$direct_entry" idle '40 days ago' 2
+direct_rlib=$direct_entry/debug/deps/libexecuted-$(unit_hash "$direct_entry" executed).rlib
+touch -m -d '40 days ago' "$direct_rlib"
+touch -a -d '1 hour ago' "$direct_rlib"
+HOME=$direct_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+expect_unit kept "$direct_entry" executed
+expect_unit reclaimed "$direct_entry" idle
+
+# A process that starts running a file of the entry after the GC chose its units can
+# read any unit of the entry, as a test reads its OUT_DIR. Under Cargo's lock the GC
+# looks for such a process and leaves the whole entry.
+exec_race_home=$fixture/exec-race-home
+make_home "$exec_race_home"
+exec_race_entry=$(entry_path "$exec_race_home" "$first_entry_id")
+make_unit "$exec_race_entry" data '40 days ago' 2
+cp "$(type -P sleep)" "$exec_race_entry/debug/deps/sleep"
+touch -d '40 days ago' "$exec_race_entry/debug/deps/sleep"
+{
+  printf '%q 300 < /dev/null > /dev/null 2>&1 &\n' "$exec_race_entry/debug/deps/sleep"
+  printf 'printf "%%s\\n" "$!" > %q\n' "$fixture/exec-race.pid"
+} > "$fixture/exec-start.sh"
+HOME=$exec_race_home DOTFILES_AGENT_TEST_BEFORE_RECLAIM=$fixture/exec-start.sh \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$RACING_GC"
+exec_race_pid=$(cat "$fixture/exec-race.pid")
+test "$(readlink "/proc/$exec_race_pid/exe")" = "$exec_race_entry/debug/deps/sleep"
+kill "$exec_race_pid"
+expect_unit kept "$exec_race_entry" data
+
+# A test that starts after the GC chose its unit read the unit's hash file first, so
+# the check under Cargo's lock keeps the running binary.
+test_race_home=$fixture/test-race-home
+make_home "$test_race_home"
+test_race_entry=$(entry_path "$test_race_home" "$first_entry_id")
+make_unit "$test_race_entry" tested '40 days ago' 2
+test_race_binary=$test_race_entry/debug/deps/tested-$(unit_hash "$test_race_entry" tested)
+make_test_binary "$test_race_binary" '40 days ago'
+{
+  printf 'cat -- %q > /dev/null\n' \
+    "$test_race_entry/debug/.fingerprint/tested-$(unit_hash "$test_race_entry" tested)/lib-tested"
+  printf '%q 300 < /dev/null > /dev/null 2>&1 &\n' "$test_race_binary"
+  printf 'printf "%%s\\n" "$!" > %q\n' "$fixture/test-race.pid"
+} > "$fixture/test-start.sh"
+HOME=$test_race_home DOTFILES_AGENT_TEST_BEFORE_RECLAIM=$fixture/test-start.sh \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$RACING_GC"
+kill "$(cat "$fixture/test-race.pid")"
+expect_unit kept "$test_race_entry" tested
+test -e "$test_race_binary"
+
+# Without atime updates a fresh build leaves no trace, so the GC reclaims no unit and
+# fails instead of judging use from stale times.
+noatime_home=$fixture/noatime-home
+make_home "$noatime_home"
+noatime_entry=$(entry_path "$noatime_home" "$first_entry_id")
+make_unit "$noatime_entry" old '40 days ago' 2
+HOME=$noatime_home DOTFILES_AGENT_TEST_MOUNT_OPTIONS=rw,noatime \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+  expect_unresolved "$noatime_home/gc.log" "$MOUNT_OPTIONS_GC"
+grep -Fq 'atime' "$noatime_home/gc.log"
+expect_unit kept "$noatime_entry" old
+
+# A build that uses a unit after the GC chose it reads the unit's hash file. The GC
+# checks the unit again under Cargo's lock and keeps it, even with no capacity pressure.
+fresh_race_home=$fixture/fresh-race-home
+make_home "$fresh_race_home"
+fresh_race_entry=$(entry_path "$fresh_race_home" "$first_entry_id")
+make_unit "$fresh_race_entry" old '40 days ago' 4
+fresh_race_hash_file=$fresh_race_entry/debug/.fingerprint/old-$(unit_hash "$fresh_race_entry" old)/lib-old
+printf 'cat -- %q > /dev/null\n' "$fresh_race_hash_file" > "$fixture/fresh-use.sh"
+HOME=$fresh_race_home DOTFILES_AGENT_TEST_BEFORE_RECLAIM=$fixture/fresh-use.sh \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$RACING_GC"
+test -e "$fixture/fresh-use.sh.done"
+expect_unit kept "$fresh_race_entry" old
+# Reading the hash file moved its atime, as Cargo's fresh build does on this file system.
+test "$(stat -c %X "$fresh_race_hash_file")" -gt "$(date -d '1 day ago' +%s)"
+
+# A build that takes the lock of the entry the GC chose under capacity pressure makes
+# the GC skip that entry and reclaim the next unit by last use until the low watermark.
+busy_pressure_home=$fixture/busy-pressure-home
+make_home "$busy_pressure_home"
+make_shared_cache "$busy_pressure_home" 0
+make_session "$busy_pressure_home"
+busy_pressure_old=$(entry_path "$busy_pressure_home" "$first_entry_id")
+busy_pressure_new=$(entry_path "$busy_pressure_home" "$second_entry_id")
+make_unit "$busy_pressure_old" oldest '10 days ago' 8
+make_unit "$busy_pressure_new" newer '3 days ago' 32
+busy_pressure_total=$(cache_bytes "$busy_pressure_home")
+busy_pressure_low=$((busy_pressure_total - $(unit_bytes "$busy_pressure_old" oldest)))
+{
+  printf 'flock --no-fork -x %q sleep 300 < /dev/null > /dev/null 2>&1 &\n' \
+    "$busy_pressure_old/debug/.cargo-build-lock"
+  printf 'printf "%%s\\n" "$!" > %q\n' "$fixture/busy-pressure.pid"
+  printf 'while flock -n -s %q true; do sleep 0.05; done\n' "$busy_pressure_old/debug/.cargo-build-lock"
+} > "$fixture/busy-pressure.sh"
+HOME=$busy_pressure_home DOTFILES_AGENT_TEST_BEFORE_RECLAIM=$fixture/busy-pressure.sh \
+  DOTFILES_AGENT_GC_HIGH_BYTES=$((busy_pressure_total - 1)) \
+  DOTFILES_AGENT_GC_LOW_BYTES=$busy_pressure_low "$RACING_GC"
+kill "$(cat "$fixture/busy-pressure.pid")"
+expect_unit kept "$busy_pressure_old" oldest
+expect_unit reclaimed "$busy_pressure_new" newer
+test "$(cache_bytes "$busy_pressure_home")" -le "$busy_pressure_low"
+trash_is_empty "$busy_pressure_home"
 
 shared_pressure_home=$fixture/shared-pressure-home
-mkdir -p "$shared_pressure_home/.cache/dotfiles-wsl/sessions" \
-  "$shared_pressure_home/.cache/dotfiles-wsl/builds"
-make_cache "$shared_pressure_home" "$pressure_old_id" 1 16
+make_home "$shared_pressure_home"
+shared_pressure_entry=$(entry_path "$shared_pressure_home" "$first_entry_id")
+make_unit "$shared_pressure_entry" idle '3 days ago' 16
 make_shared_cache "$shared_pressure_home" 32
 shared_pressure_high=$((
   $(allocated_bytes "$shared_pressure_home/.cache/dotfiles-wsl/shared") - 1
 ))
 HOME=$shared_pressure_home DOTFILES_AGENT_GC_HIGH_BYTES=$shared_pressure_high \
   DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
-test ! -e "$shared_pressure_home/.cache/dotfiles-wsl/builds/$pressure_old_id"
+expect_unit reclaimed "$shared_pressure_entry" idle
 test ! -e "$shared_pressure_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
 test -d "$shared_pressure_home/.cache/dotfiles-wsl/shared/cargo-home"
 test -d "$shared_pressure_home/.cache/dotfiles-wsl/shared/xdg-cache"
 test -f "$shared_pressure_home/.cache/dotfiles-wsl/shared/.dotfiles-agent-cache.json"
+trash_is_empty "$shared_pressure_home"
 
 active_shared_home=$fixture/active-shared-home
-mkdir -p "$active_shared_home/.cache/dotfiles-wsl/sessions" \
-  "$active_shared_home/.cache/dotfiles-wsl/builds"
+make_home "$active_shared_home"
 make_shared_cache "$active_shared_home" 32
-make_cache "$active_shared_home" "$active_id" 1 32
-make_session "$active_shared_home" "$active_id"
+make_session "$active_shared_home"
 HOME=$active_shared_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
   DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
 test -e "$active_shared_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
-test -e "$active_shared_home/.cache/dotfiles-wsl/builds/$active_id/payload/file-0"
 
 unrecoverable_home=$fixture/unrecoverable-home
-mkdir -p "$unrecoverable_home/.cache/dotfiles-wsl/sessions" \
-  "$unrecoverable_home/.cache/dotfiles-wsl/builds"
+make_home "$unrecoverable_home"
 make_shared_cache "$unrecoverable_home" 1
 if HOME=$unrecoverable_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
   DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"; then
@@ -492,21 +659,41 @@ if HOME=$unrecoverable_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
 fi
 test ! -e "$unrecoverable_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
 
+# Without a session the shared cache goes first, and units the 48 hours protect may
+# still keep the total above the high watermark. Time ends that excess, so the GC
+# records it and succeeds, as it does with a session.
+protected_home=$fixture/protected-no-session-home
+make_home "$protected_home"
+make_shared_cache "$protected_home" 2
+protected_entry=$(entry_path "$protected_home" "$first_entry_id")
+make_unit "$protected_entry" recent '1 day ago' 32
+protected_after_purge=$((
+  $(cache_bytes "$protected_home")
+  - $(allocated_bytes "$protected_home/.cache/dotfiles-wsl/shared/cargo-home/payload")
+))
+HOME=$protected_home \
+  DOTFILES_AGENT_GC_HIGH_BYTES=$((protected_after_purge - $(unit_bytes "$protected_entry" recent) / 2)) \
+  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC" 2> "$protected_home/gc.log"
+expect_unit kept "$protected_entry" recent
+test ! -e "$protected_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
+grep -Fq 'remain above the high watermark' "$protected_home/gc.log"
+
 ambiguous_home=$fixture/ambiguous-home
-mkdir -p "$ambiguous_home/.cache/dotfiles-wsl/sessions/bad" \
-  "$ambiguous_home/.cache/dotfiles-wsl/builds"
-make_cache "$ambiguous_home" "$stale_id" 40 2
-ln -s nowhere "$ambiguous_home/.cache/dotfiles-wsl/sessions/bad/metadata.json"
+make_home "$ambiguous_home"
+mkdir -p "$(session_path "$ambiguous_home" bad)"
+ambiguous_entry=$(entry_path "$ambiguous_home" "$first_entry_id")
+make_unit "$ambiguous_entry" old '40 days ago' 2
+ln -s nowhere "$(session_path "$ambiguous_home" bad)/metadata.json"
 if HOME=$ambiguous_home DOTFILES_AGENT_GC_HIGH_BYTES=1 DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"; then
   echo 'GC accepted ambiguous session metadata' >&2
   exit 1
 fi
-test -d "$ambiguous_home/.cache/dotfiles-wsl/builds/$stale_id"
+expect_unit kept "$ambiguous_entry" old
 
 malformed_home=$fixture/malformed-home
-mkdir -p "$malformed_home/.cache/dotfiles-wsl/sessions" \
-  "$malformed_home/.cache/dotfiles-wsl/builds"
-make_cache "$malformed_home" "$stale_id" 40 2
+make_home "$malformed_home"
+malformed_entry=$(entry_path "$malformed_home" "$first_entry_id")
+make_unit "$malformed_entry" old '40 days ago' 2
 mkdir -p "$malformed_home/.cache/dotfiles-wsl/shared/cargo-home" \
   "$malformed_home/.cache/dotfiles-wsl/shared/xdg-cache"
 printf '{}\n' > "$malformed_home/.cache/dotfiles-wsl/shared/.dotfiles-agent-cache.json"
@@ -515,28 +702,17 @@ if HOME=$malformed_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
   echo 'GC accepted malformed shared cache marker' >&2
   exit 1
 fi
-test -d "$malformed_home/.cache/dotfiles-wsl/builds/$stale_id"
+expect_unit kept "$malformed_entry" old
 
-unowned_home=$fixture/unowned-home
-mkdir -p "$unowned_home/.cache/dotfiles-wsl/sessions" \
-  "$unowned_home/.cache/dotfiles-wsl/builds/unowned"
-make_shared_cache "$unowned_home" 2
-if HOME=$unowned_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
+# A build-dir root that is not the GC's own directory fails the run before
+# anything is removed, and what it points to stays.
+symlink_root_home=$fixture/symlink-root-home
+mkdir -p "$symlink_root_home/.cache/dotfiles-wsl/sessions" "$fixture/symlink-root-target"
+printf 'kept\n' > "$fixture/symlink-root-target/payload"
+ln -s "$fixture/symlink-root-target" "$symlink_root_home/.cache/dotfiles-wsl/cargo-build"
+if HOME=$symlink_root_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
   DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"; then
-  echo 'GC accepted unowned project cache' >&2
+  echo 'GC accepted a symlink build-dir root' >&2
   exit 1
 fi
-test -e "$unowned_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
-
-symlink_home=$fixture/symlink-home
-mkdir -p "$symlink_home/.cache/dotfiles-wsl/sessions" \
-  "$symlink_home/.cache/dotfiles-wsl/builds"
-make_shared_cache "$symlink_home" 2
-ln -s "$symlink_home/.cache/dotfiles-wsl/shared" \
-  "$symlink_home/.cache/dotfiles-wsl/builds/symlink-cache"
-if HOME=$symlink_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
-  DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"; then
-  echo 'GC accepted symlink project cache' >&2
-  exit 1
-fi
-test -e "$symlink_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
+test "$(cat "$fixture/symlink-root-target/payload")" = kept

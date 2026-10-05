@@ -445,7 +445,7 @@ in
         type = types.submodule {
           options = {
             root = lib.mkOption { type = absolutePathType; };
-            buildsRoot = lib.mkOption { type = absolutePathType; };
+            cargoBuildRoot = lib.mkOption { type = absolutePathType; };
             sharedRoot = lib.mkOption { type = absolutePathType; };
             sessionsRoot = lib.mkOption { type = absolutePathType; };
             verificationRoot = lib.mkOption { type = absolutePathType; };

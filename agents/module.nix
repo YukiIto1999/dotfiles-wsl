@@ -388,7 +388,7 @@ let
       cache = rec {
         inherit relativeCacheRoot;
         root = "${cfg.workstation.homeDir}/${relativeCacheRoot}";
-        buildsRoot = "${root}/builds";
+        cargoBuildRoot = "${root}/cargo-build";
         sharedRoot = "${root}/shared";
         sessionsRoot = "${root}/sessions";
         verificationRoot = "${root}/verification";

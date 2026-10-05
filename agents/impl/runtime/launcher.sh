@@ -68,42 +68,6 @@ project_has_cargo_output_dir() {
   return 1
 }
 
-create_project_cache() {
-  local builds_root=$1 project_id=$2 project_root marker marker_tmp created=false
-  project_root="$builds_root/$project_id"
-  marker="$project_root/.dotfiles-agent-cache.json"
-
-  if mkdir -m 700 "$project_root" 2>/dev/null; then
-    created=true
-  else
-    test ! -L "$project_root" || die "project cache is a symlink: $project_root"
-    test -d "$project_root" || die "project cache is not a directory: $project_root"
-    test "$(stat -c %u "$project_root")" = "$(id -u)" \
-      || die "project cache has another owner: $project_root"
-  fi
-  chmod 700 "$project_root" || die "cannot secure project cache: $project_root"
-  test "$(stat -c %a "$project_root")" = 700 \
-    || die "project cache mode is not 0700: $project_root"
-
-  if [ "$created" = true ]; then
-    marker_tmp=$(mktemp "$project_root/.owner.XXXXXXXX")
-    jq -cn --arg project_id "$project_id" \
-      '{version: 1, project_id: $project_id}' > "$marker_tmp"
-    chmod 600 "$marker_tmp"
-    mv -T "$marker_tmp" "$marker"
-  fi
-
-  secure_managed_file "$marker" 'project cache marker'
-  jq --exit-status --arg project_id "$project_id" \
-    '. == {version: 1, project_id: $project_id}' "$marker" >/dev/null \
-    || die "project cache marker is invalid: $marker"
-  touch "$marker"
-
-  # 同じ workspace の checkout どうしで中間成果物を共有すると、Cargo が別 checkout の
-  # build を fresh と判定する。Cargo 自身が workspace の path ごとに分ける。
-  printf '%s/cargo-build/{workspace-path-hash}\n' "$project_root"
-}
-
 create_shared_cache() {
   local cache_root=$1 shared_root marker marker_tmp created=false
   shared_root="$cache_root/shared"
@@ -176,7 +140,7 @@ test -x "$upstream" || die "upstream binary is not executable: $upstream"
 
 cache_root="$HOME/@cacheRootRelative@"
 sessions_root="$cache_root/sessions"
-builds_root="$cache_root/builds"
+cargo_build_root="$cache_root/cargo-build"
 mkdir -p "$HOME/.cache"
 ensure_managed_directory "$cache_root"
 ensure_managed_directory "$sessions_root"
@@ -208,8 +172,9 @@ if [ "${CARGO_BUILD_BUILD_DIR+x}" = x ] || [ "${CARGO_TARGET_DIR+x}" = x ]; then
   # Explicit values, including empty ones, belong to the caller.
   :
 elif ! project_has_cargo_output_dir; then
-  ensure_managed_directory "$builds_root"
-  CARGO_BUILD_BUILD_DIR=$(create_project_cache "$builds_root" "$project_id")
+  ensure_managed_directory "$cargo_build_root"
+  # 同じ workspace の別 checkout の build を Cargo が fresh と判定するため checkout 間で共有する build-dir は不可
+  CARGO_BUILD_BUILD_DIR="$cargo_build_root/{workspace-path-hash}"
   export CARGO_BUILD_BUILD_DIR
 fi
 
@@ -247,6 +212,8 @@ export DOTFILES_AGENT_WORKTREE_RECORD="$session_dir/worktrees"
 export TMPDIR="$session_dir/tmp"
 export PATH="@agentShimDirectory@:$PATH"
 flock -u "$lock_fd"
+# client と子孫へ lock の fd を渡さない。
+exec {lock_fd}>&-
 
 # shellcheck disable=SC2329 # EXIT trap invokes this function indirectly.
 cleanup() {
@@ -254,16 +221,14 @@ cleanup() {
   trap - EXIT HUP INT TERM
   remove_session_worktrees "$DOTFILES_AGENT_WORKTREE_RECORD"
 
-  if flock -x "$lock_fd"; then
-    if [ -n "${session_dir-}" ] \
-      && [[ "$session_dir" == "$sessions_root/"* ]] \
-      && [ ! -L "$session_dir" ] \
-      && [ -d "$session_dir" ]; then
-      rm -rf --one-file-system -- "$session_dir" || true
-    fi
-    flock -u "$lock_fd" || true
+  # この launcher が生きている間、GC は session を生きているものとして扱い触れない。
+  # 削除に lock は要らず、GC と次の launcher を待たせない。
+  if [ -n "${session_dir-}" ] \
+    && [[ "$session_dir" == "$sessions_root/"* ]] \
+    && [ ! -L "$session_dir" ] \
+    && [ -d "$session_dir" ]; then
+    rm -rf --one-file-system -- "$session_dir" || true
   fi
-  exec {lock_fd}>&- || true
 
   exit "$status"
 }

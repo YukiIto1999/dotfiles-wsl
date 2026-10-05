@@ -4,7 +4,7 @@ let
   expectedAgentRuntime = {
     cache = {
       root = "${homeDir}/.cache/dotfiles-wsl";
-      buildsRoot = "${homeDir}/.cache/dotfiles-wsl/builds";
+      cargoBuildRoot = "${homeDir}/.cache/dotfiles-wsl/cargo-build";
       sharedRoot = "${homeDir}/.cache/dotfiles-wsl/shared";
       sessionsRoot = "${homeDir}/.cache/dotfiles-wsl/sessions";
       verificationRoot = "${homeDir}/.cache/dotfiles-wsl/verification";

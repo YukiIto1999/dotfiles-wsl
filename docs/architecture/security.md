@@ -61,7 +61,25 @@ client ごとの更新は互いに独立である。一つの client の失敗�
 subagent は親 session の permission profile を継ぐ。Codex の subagent override が運ぶのは model、reasoning、instructions、personality、service tier、feature 無効化、skill 選択だけであり、subagent file の `default_permissions` は読み捨てられる。read-only の subagent 定義にも独自の sandbox 境界はない。
 既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
 
-agent runtime の共有 cache は user 所有の directory `0700` と marker file `0600` で識別する。launcher と GC は同じ `gc.lock` を取り、共有 cache の型、所有者、symlink、mode、marker を検証する。GC が allocated bytes 基準で共有 cache を空にするのは、inactive project cache を先に回収しても容量上限を超え、active agent session が一件もない場合に限る。
+agent runtime の共有 cache は user 所有の directory `0700` と marker file `0600` で識別する。launcher と GC は同じ `gc.lock` を取り、共有 cache の型、所有者、symlink、mode、marker を検証する。GC は lock の下で rename だけを行い、計測と削除を lock の外で行う。削除する entry は同じ filesystem の `trash` へ rename してから消すので、lock を待つ launcher が削除の長さに従属しない。GC が allocated bytes 基準で共有 cache を空にするのは、使われていない Cargo の unit を先に回収しても容量上限を超え、active agent session が一件もない場合に限る。
+GC は trash 内の自分が所有する directory にだけ読取・書込・実行権限を戻し、read-only の一時 directory も削除する。
+その際に symlink は辿らず、別の所有者の directory の権限は変更しない。
+Cargo の build-dir の root も user 所有の directory `0700` であり、symlink や別の所有者の root では launcher は起動を拒み、GC は失敗する。
+共有 cache を空にしても、48 時間の保護と lock で見送った unit で上限を超えるだけなら、GC は残った量を記録して成功で終え、次の実行に回す。
+それらの unit を除いても上限を超える場合だけ、人の手が要る状態として失敗する。
+GC は Cargo の build-dir を unit ごとに回収し、Cargo が build の間に握る `.cargo-build-lock` か `.cargo-lock` の flock を自分も取れた entry だけを触り、rename の間その lock を保持する。
+GC は Cargo の lock を取った後にその entry を走査し直し、回収を決めた後に最終使用か member の inode が変わった unit は回収しない。
+走査の後に別の build がその unit を使ったことを、lock を取る前の結果のまま見落とさないためである。
+lock を待つ Cargo は開いた lock file の inode を lock するので、GC は lock file と profile の directory を動かさず、unit の fingerprint と成果物だけを `trash` へ移す。
+Cargo は test の実行前に lock を解くので、GC は最終使用が直近 48 時間以内の unit、成果物、incremental の directory を、lock を取れても回収しない。
+Cargo は invocation の開始時に unit の hash file を読み、relatime はその atime を最大 24 時間古いまま残すので、48 時間は 24 時間までの invocation が使う unit を守る幅である。
+test runner は Cargo を介さず test binary を実行し fingerprint を読まないので、GC は unit の最終使用を fingerprint と成果物のすべての file の atime と mtime から測る。
+GC は Cargo の lock を取った後、entry を走査し直す時点で `/proc/*/exe` を調べ、entry の中の file を実行している process があればその entry を丸ごと見送る。
+test は実行中に別の unit の `OUT_DIR` を読むので、実行中の file の unit だけを残すのでは足りない。
+GC を始めた時点で一度だけ調べると、その後に始まった test を見落とすので、lock を取った entry ごとに調べる。
+調べてから rename を終えるまでに始まった実行は、成果物の最終使用が 48 時間以内でない限り守れない。
+atime を更新しない mount では Cargo の使用が見えないので、GC は unit を回収せずに失敗する。
+launcher は build-dir に触れないので、GC は unit の rename に `gc.lock` を取らない。
 
 sandbox は gateway の client 認証、Docker daemon の権限、Windows interop の境界を代替しない。network access が有効なので、sandbox 内 process は到達可能な endpoint へ接続できる。MCP tool は gateway と各 server の user 権限、secret、backend 境界も合わせて評価する。
 

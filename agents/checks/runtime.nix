@@ -26,92 +26,55 @@ let
     fi
     exec ${pkgs.coreutils}/bin/stat "$@"
   '';
-  wrongOwnerGc = pkgs.writeShellApplication {
-    name = "dotfiles-agent-project-cache-gc-wrong-owner-fixture";
-    runtimeInputs = with pkgs; [
-      coreutils
-      findutils
-      gawk
-      jq
-      util-linux
-    ];
-    text = ''
-      export PATH=${wrongOwnerStat}/bin:$PATH
-      ${runtime.projectCacheGcSource}
-    '';
-  };
-  gcMutationMv = pkgs.writeShellScriptBin "mv" ''
-    real_mv=${pkgs.coreutils}/bin/mv
-    if [[ $# -eq 4 && $1 == -T && $2 == -- \
-      && $4 == */.gc-quarantine.*/session \
-      && -n ''${DOTFILES_AGENT_TEST_GC_MUTATION_MODE-} ]]; then
-      set +e
-      "$real_mv" "$@"
-      status=$?
-      set -e
-      if ((status == 0)); then
-        case $DOTFILES_AGENT_TEST_GC_MUTATION_MODE in
-        live-owner)
-          ${lib.getExe pkgs.jq} \
-            --argjson owner_pid "$DOTFILES_AGENT_TEST_GC_LIVE_PID" \
-            --arg owner_start_time "$DOTFILES_AGENT_TEST_GC_LIVE_START_TIME" \
-            '.owner_pid = $owner_pid | .owner_start_time = $owner_start_time' \
-            "$4/metadata.json" >"$4/metadata.tmp"
-          ;;
-        *)
-          ${lib.getExe pkgs.jq} --arg project_id "$DOTFILES_AGENT_TEST_GC_MUTATION_PROJECT_ID" \
-            '.project_id = $project_id' "$4/metadata.json" >"$4/metadata.tmp"
-          ;;
-        esac
-        ${pkgs.coreutils}/bin/chmod 600 "$4/metadata.tmp"
-        "$real_mv" -T -- "$4/metadata.tmp" "$4/metadata.json"
-        if [[ $DOTFILES_AGENT_TEST_GC_MUTATION_MODE == block-restore ]]; then
-          ${pkgs.coreutils}/bin/mkdir -m 700 -- "$3"
-        fi
-        : >"$DOTFILES_AGENT_TEST_GC_MUTATION_MARKER"
-      fi
-      exit "$status"
-    fi
-    exec "$real_mv" "$@"
-  '';
-  mutationGc = pkgs.writeShellApplication {
-    name = "dotfiles-agent-project-cache-gc-mutation-fixture";
-    runtimeInputs = with pkgs; [
-      coreutils
-      findutils
-      gawk
-      jq
-      util-linux
-    ];
-    text = ''
-      export PATH=${gcMutationMv}/bin:$PATH
-      ${runtime.projectCacheGcSource}
-    '';
-  };
-  gcRaceRmdir = pkgs.writeShellScriptBin "rmdir" ''
+  gcWithCommand =
+    name: command:
+    pkgs.writeShellApplication {
+      name = "dotfiles-agent-project-cache-gc-${name}-fixture";
+      runtimeInputs = with pkgs; [
+        coreutils
+        findutils
+        gawk
+        jq
+        util-linux
+      ];
+      text = ''
+        export PATH=${command}/bin:$PATH
+        ${runtime.projectCacheGcSource}
+      '';
+    };
+  wrongOwnerGc = gcWithCommand "wrong-owner" wrongOwnerStat;
+  # trash の削除を止めて、GC がその間 gc.lock を握っていないことと、kill の後を再現する。
+  slowTrashRm = pkgs.writeShellScriptBin "rm" ''
     target=''${!#}
-    if [[ $target == */.gc-quarantine.* \
-      && -n ''${DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER-} \
-      && ! -e ''${DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER} ]]; then
-      : >"$target/fixture-blocker"
-      : >"$DOTFILES_AGENT_TEST_GC_RMDIR_RACE_MARKER"
+    if [[ $target == */trash/* && -n ''${DOTFILES_AGENT_TEST_RM_READY-} ]]; then
+      printf '%s\n' "$$" > "$DOTFILES_AGENT_TEST_RM_READY.tmp"
+      ${pkgs.coreutils}/bin/mv -T -- "$DOTFILES_AGENT_TEST_RM_READY.tmp" "$DOTFILES_AGENT_TEST_RM_READY"
+      while [[ ! -e $DOTFILES_AGENT_TEST_RM_RELEASE ]]; do
+        ${pkgs.coreutils}/bin/sleep 0.05
+      done
     fi
-    exec ${pkgs.coreutils}/bin/rmdir "$@"
+    exec ${pkgs.coreutils}/bin/rm "$@"
   '';
-  rmdirRaceGc = pkgs.writeShellApplication {
-    name = "dotfiles-agent-project-cache-gc-rmdir-race-fixture";
-    runtimeInputs = with pkgs; [
-      coreutils
-      findutils
-      gawk
-      jq
-      util-linux
-    ];
-    text = ''
-      export PATH=${gcRaceRmdir}/bin:$PATH
-      ${runtime.projectCacheGcSource}
-    '';
-  };
+  slowRmGc = gcWithCommand "slow-rm" slowTrashRm;
+  # GC が回収する unit を選んだ後、Cargo の lock を取る前に、別の Cargo の動きを一度だけ差し込む。
+  racingMktemp = pkgs.writeShellScriptBin "mktemp" ''
+    action=''${DOTFILES_AGENT_TEST_BEFORE_RECLAIM-}
+    if [[ -n $action && ''${!#} == */trash/units.* && ! -e $action.done ]]; then
+      : > "$action.done"
+      ${pkgs.bash}/bin/bash "$action"
+    fi
+    exec ${pkgs.coreutils}/bin/mktemp "$@"
+  '';
+  racingGc = gcWithCommand "racing" racingMktemp;
+  # sandbox の file system を変えずに atime を更新しない mount を GC に見せる。
+  mountOptionsFindmnt = pkgs.writeShellScriptBin "findmnt" ''
+    if [[ -n ''${DOTFILES_AGENT_TEST_MOUNT_OPTIONS-} ]]; then
+      printf '%s\n' "$DOTFILES_AGENT_TEST_MOUNT_OPTIONS"
+      exit 0
+    fi
+    exec ${pkgs.util-linux}/bin/findmnt "$@"
+  '';
+  mountOptionsGc = gcWithCommand "mount-options" mountOptionsFindmnt;
   fakeNix = pkgs.writeShellScript "fake-nix-command" ''
     printf '%s\0' "$@" > "$ARG_CAPTURE"
   '';
@@ -567,16 +530,24 @@ in
     pkgs.runCommandLocal "check-agent-project-cache-gc"
       {
         nativeBuildInputs = [
+          pkgs.cargo
           pkgs.coreutils
+          pkgs.findutils
           pkgs.jq
+          pkgs.rustc
+          pkgs.stdenv.cc
+          pkgs.util-linux
         ];
         GC = lib.getExe runtime.gc;
-        MUTATION_GC = lib.getExe mutationGc;
-        RMDIR_RACE_GC = lib.getExe rmdirRaceGc;
+        SLOW_RM_GC = lib.getExe slowRmGc;
+        RACING_GC = lib.getExe racingGc;
+        MOUNT_OPTIONS_GC = lib.getExe mountOptionsGc;
         WRONG_OWNER_GC = lib.getExe wrongOwnerGc;
+        LAUNCHER = lib.getExe fixtureLauncher;
       }
       ''
         bash ${../fixtures/runtime/project-cache-gc.sh}
+        bash ${../fixtures/runtime/project-cache-gc-cargo.sh}
         touch $out
       '';
 

@@ -46,7 +46,7 @@ nix flake check -L --no-write-lock-file
 dotfiles-agent-verify -- nix flake check -L --no-write-lock-file
 ```
 
-同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、runtime が割り当てる project cache を使う。
+同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、runtime が割り当てる Cargo の build-dir を使う。
 
 `nix flake check` は検査結果を返し、`nix fmt` のように source を整形しない。検査項目の正本は各 unit の `checks.nix` であり、`flake.nix` の `mergeChecks` がそれらを集めて id の重複を拒否する。check 名の一覧はここに複製しない。どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
 

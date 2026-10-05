@@ -72,10 +72,10 @@ export CAPTURE=$capture
 export PATH="$fixture/bin:$PATH"
 export SYSTEMD_RUN_CAPTURE=$fixture/systemd-run
 unset CARGO_HOME CARGO_TARGET_DIR CARGO_BUILD_BUILD_DIR XDG_CACHE_HOME
-mkdir -p "$HOME/.cache/dotfiles-wsl/sessions" "$HOME/.cache/dotfiles-wsl/builds"
+mkdir -p "$HOME/.cache/dotfiles-wsl/sessions" "$HOME/.cache/dotfiles-wsl/cargo-build"
 chmod 0777 "$HOME/.cache/dotfiles-wsl" \
   "$HOME/.cache/dotfiles-wsl/sessions" \
-  "$HOME/.cache/dotfiles-wsl/builds"
+  "$HOME/.cache/dotfiles-wsl/cargo-build"
 
 set +e
 (
@@ -100,7 +100,7 @@ test "$(cat "$capture/nix-command")" = "$AGENT_SHIM_DIR/bin/nix"
 test "$(cat "$capture/git-command")" = "$AGENT_SHIM_DIR/bin/git"
 test "$(stat -c %a "$HOME/.cache/dotfiles-wsl")" = 700
 test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/sessions")" = 700
-test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/builds")" = 700
+test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/cargo-build")" = 700
 test "$(cat "$capture/cargo-home")" = "$HOME/.cache/dotfiles-wsl/shared/cargo-home"
 test "$(cat "$capture/xdg-cache-home")" = "$HOME/.cache/dotfiles-wsl/shared/xdg-cache"
 test "$(cat "$HOME/.cache/dotfiles-wsl/shared/cargo-home/fixture-write/probe")" = cargo
@@ -175,8 +175,8 @@ test "$unreachable_status" -ne 0
 test ! -e "$capture/agent-pid"
 test -z "$(ls -A "$HOME/.cache/dotfiles-wsl/sessions")"
 
-# A GC scan holding gc.lock must see the session directory until it releases
-# the lock.  Launcher cleanup then removes the session before returning.
+# Once the client runs, the launcher holds no gc.lock and passes no lock fd to it.
+# Its exit cleanup removes the session without waiting for a GC that holds the lock.
 race_ready=$fixture/race-ready
 race_release=$fixture/race-release
 race_session_file=$fixture/race-session
@@ -192,36 +192,51 @@ for _ in {1..100}; do
 done
 test -e "$race_ready"
 race_session=$(<"$race_session_file")
+for descriptor in "/proc/$(cat "$capture/agent-pid")/fd"/*; do
+  if [ "$(readlink "$descriptor")" = "$HOME/.cache/dotfiles-wsl/gc.lock" ]; then
+    echo 'client inherited the gc.lock descriptor' >&2
+    exit 1
+  fi
+done
 exec 9<>"$HOME/.cache/dotfiles-wsl/gc.lock"
 flock -x 9
 : > "$race_release"
 set +e
-timeout 0.5 tail --pid="$race_launcher_pid" -f /dev/null
+timeout 10 tail --pid="$race_launcher_pid" -f /dev/null
 race_wait_status=$?
 set -e
-if [ "$race_wait_status" -ne 124 ]; then
-  echo "launcher exited while GC held gc.lock: status $race_wait_status" >&2
-  exit 1
-fi
-if [ ! -d "$race_session" ]; then
-  echo 'launcher removed session while GC held gc.lock' >&2
-  exit 1
-fi
 flock -u 9
 exec 9>&-
+if [ "$race_wait_status" -ne 0 ]; then
+  echo "launcher waited for gc.lock at exit: status $race_wait_status" >&2
+  exit 1
+fi
 wait "$race_launcher_pid"
 test ! -e "$race_session"
 
-project_id=$(cat "$capture/project-id")
-expected_build_dir="$fixture_home/.cache/dotfiles-wsl/builds/$project_id/cargo-build/{workspace-path-hash}"
-test "$(cat "$capture/cargo-build-dir")" = "$expected_build_dir"
+# Cargo separates checkouts by the workspace path, so every session shares one build-dir root.
+test "$(cat "$capture/cargo-build-dir")" = \
+  "$fixture_home/.cache/dotfiles-wsl/cargo-build/{workspace-path-hash}"
 test "$(cat "$capture/cargo-target")" = unset
-jq --exit-status \
-  --arg project_id "$project_id" \
-  '. == {version: 1, project_id: $project_id}' \
-  "$fixture_home/.cache/dotfiles-wsl/builds/$project_id/.dotfiles-agent-cache.json" > /dev/null
-test "$(stat -c %a "$fixture_home/.cache/dotfiles-wsl/builds/$project_id")" = 700
-test "$(stat -c %a "$fixture_home/.cache/dotfiles-wsl/builds/$project_id/.dotfiles-agent-cache.json")" = 600
+test ! -e "$fixture_home/.cache/dotfiles-wsl/builds"
+
+# A build-dir root that is not the launcher's own directory stays, and the client does not start.
+symlink_build_home=$fixture/symlink-build-home
+mkdir -p "$symlink_build_home/.cache/dotfiles-wsl" "$fixture/symlink-build-target"
+printf 'kept\n' > "$fixture/symlink-build-target/payload"
+ln -s "$fixture/symlink-build-target" "$symlink_build_home/.cache/dotfiles-wsl/cargo-build"
+rm -f "$capture/agent-pid"
+set +e
+(
+  cd "$repo"
+  HOME=$symlink_build_home "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent" 2>/dev/null
+)
+symlink_build_status=$?
+set -e
+test "$symlink_build_status" -eq 70
+test ! -e "$capture/agent-pid"
+test -L "$symlink_build_home/.cache/dotfiles-wsl/cargo-build"
+test "$(cat "$fixture/symlink-build-target/payload")" = kept
 
 expect_shared_cache_failure() {
   local bad_home=$1 status
@@ -234,20 +249,17 @@ expect_shared_cache_failure() {
 }
 
 symlink_home=$fixture/symlink-home
-mkdir -p "$symlink_home/.cache/dotfiles-wsl/sessions" \
-  "$symlink_home/.cache/dotfiles-wsl/builds"
+mkdir -p "$symlink_home/.cache/dotfiles-wsl/sessions"
 ln -s "$repo" "$symlink_home/.cache/dotfiles-wsl/shared"
 expect_shared_cache_failure "$symlink_home"
 
 wrong_type_home=$fixture/wrong-type-home
-mkdir -p "$wrong_type_home/.cache/dotfiles-wsl/sessions" \
-  "$wrong_type_home/.cache/dotfiles-wsl/builds"
+mkdir -p "$wrong_type_home/.cache/dotfiles-wsl/sessions"
 printf 'not a directory\n' > "$wrong_type_home/.cache/dotfiles-wsl/shared"
 expect_shared_cache_failure "$wrong_type_home"
 
 malformed_home=$fixture/malformed-home
 mkdir -p "$malformed_home/.cache/dotfiles-wsl/sessions" \
-  "$malformed_home/.cache/dotfiles-wsl/builds" \
   "$malformed_home/.cache/dotfiles-wsl/shared/cargo-home" \
   "$malformed_home/.cache/dotfiles-wsl/shared/xdg-cache"
 printf '{}\n' > "$malformed_home/.cache/dotfiles-wsl/shared/.dotfiles-agent-cache.json"
@@ -301,31 +313,23 @@ done
 
 rm "$repo/.cargo/config.toml"
 git -C "$repo" worktree add -qb linked "$fixture/linked"
-(
-  cd "$repo"
-  "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-main_project_id=$(cat "$capture/project-id")
-main_cargo_home=$(cat "$capture/cargo-home")
-main_xdg_cache_home=$(cat "$capture/xdg-cache-home")
-(
-  cd "$fixture/linked"
-  "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-test "$(cat "$capture/project-id")" = "$main_project_id"
-test "$(cat "$capture/cargo-home")" = "$main_cargo_home"
-test "$(cat "$capture/xdg-cache-home")" = "$main_xdg_cache_home"
-
 mkdir -p "$fixture/outside"
-(
-  cd "$fixture/outside"
-  "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
-)
-outside_project_id=$(cat "$capture/project-id")
-test "$outside_project_id" != "$main_project_id"
-test "${#outside_project_id}" -eq 64
-test "$(cat "$capture/cargo-home")" = "$main_cargo_home"
-test "$(cat "$capture/xdg-cache-home")" = "$main_xdg_cache_home"
+declare -A checkout_project_ids=()
+for checkout in "$repo" "$fixture/linked" "$fixture/outside"; do
+  (
+    cd "$checkout"
+    "$LAUNCHER" fixture-client "$fixture_home/.local/bin/fake-agent"
+  )
+  checkout_project_ids[$checkout]=$(cat "$capture/project-id")
+  test "$(cat "$capture/cargo-build-dir")" = \
+    "$fixture_home/.cache/dotfiles-wsl/cargo-build/{workspace-path-hash}"
+  test "$(cat "$capture/cargo-home")" = "$fixture_home/.cache/dotfiles-wsl/shared/cargo-home"
+  test "$(cat "$capture/xdg-cache-home")" = "$fixture_home/.cache/dotfiles-wsl/shared/xdg-cache"
+done
+# A linked worktree belongs to the project of its main checkout.
+test "${checkout_project_ids[$fixture/linked]}" = "${checkout_project_ids[$repo]}"
+test "${checkout_project_ids[$fixture/outside]}" != "${checkout_project_ids[$repo]}"
+test "${#checkout_project_ids[$fixture/outside]}" -eq 64
 
 # The session removes the worktrees it created with git worktree add while they stay clean and at
 # their initial HEAD. Changed, dirty, and pre-existing worktrees remain, and the exit status holds.

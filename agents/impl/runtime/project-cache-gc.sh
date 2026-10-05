@@ -1,15 +1,20 @@
 set -euo pipefail
+shopt -s nullglob dotglob lastpipe
 
 die() {
   printf 'dotfiles-agent-project-cache-gc: %s\n' "$1" >&2
   exit 70
 }
 
+note() {
+  printf 'dotfiles-agent-project-cache-gc: %s\n' "$1" >&2
+}
+
 validate_managed_directory() {
   local path=$1
   test ! -L "$path" || die "managed path is a symlink: $path"
   test -d "$path" || die "managed path is not a directory: $path"
-  test "$(stat -c %u "$path")" = "$(id -u)" || die "managed path has another owner: $path"
+  test "$(stat -c %u "$path")" = "$uid" || die "managed path has another owner: $path"
   chmod 700 "$path" || die "cannot secure managed directory: $path"
   test "$(stat -c %a "$path")" = 700 || die "managed directory mode is not 0700: $path"
 }
@@ -18,27 +23,17 @@ validate_managed_file() {
   local path=$1 description=$2
   test ! -L "$path" || die "$description is a symlink: $path"
   test -f "$path" || die "$description is not a regular file: $path"
-  test "$(stat -c %u "$path")" = "$(id -u)" || die "$description has another owner: $path"
+  test "$(stat -c %u "$path")" = "$uid" || die "$description has another owner: $path"
   chmod 600 "$path" || die "cannot secure $description: $path"
   test "$(stat -c %a "$path")" = 600 || die "$description mode is not 0600: $path"
 }
 
-validate_project_cache() {
-  local path=$1 project_id=$2 marker
-  marker="$path/.dotfiles-agent-cache.json"
-
-  test ! -L "$path" || return 1
-  test -d "$path" || return 1
-  test "$(stat -c %u "$path")" = "$(id -u)" || return 1
-  chmod 700 "$path" || return 1
-  test "$(stat -c %a "$path")" = 700 || return 1
-  test ! -L "$marker" || return 1
-  test -f "$marker" || return 1
-  test "$(stat -c %u "$marker")" = "$(id -u)" || return 1
-  chmod 600 "$marker" || return 1
-  test "$(stat -c %a "$marker")" = 600 || return 1
-  jq --exit-status --arg project_id "$project_id" \
-    '. == {version: 1, project_id: $project_id}' "$marker" >/dev/null 2>&1
+# lock の下では rename だけを行う。削除は GC が lock を解いてから trash に対して行い、
+# lock を待つ側の時間を rename の長さに抑える。--no-copy は rename できないときに
+# copy へ切り替えず失敗させる。
+move_to_trash() {
+  local trash_root=$1 source=$2 kind=$3
+  mv --no-copy -T -- "$source" "$trash_root/$kind.${source##*/}.$$.${EPOCHREALTIME//[.,]/}"
 }
 
 validate_session_metadata() {
@@ -47,6 +42,7 @@ validate_session_metadata() {
     keys == ["boot_id", "client", "owner_pid", "owner_start_time", "project_id", "session_id", "version"] and
     .version == 1 and
     .session_id == $session_id and
+    ((.project_id + ".") as $prefix | .session_id | startswith($prefix)) and
     (.client | type == "string" and test("^[A-Za-z0-9._-]+$")) and
     (.project_id | type == "string" and test("^[0-9a-f]{64}$")) and
     (.boot_id | type == "string" and test("^[A-Fa-f0-9-]+$")) and
@@ -81,7 +77,7 @@ session_owner_state() {
     printf 'unknown\n'
     return
   }
-  if [ "$owner_uid" != "$(id -u)" ]; then
+  if [ "$owner_uid" != "$uid" ]; then
     printf 'unknown\n'
     return
   fi
@@ -100,156 +96,15 @@ session_owner_state() {
   printf 'live\n'
 }
 
-restore_quarantined_session() {
-  local original=$1 quarantine=$2 quarantine_root=$3 reason=$4
-  if [ ! -e "$original" ] && [ ! -L "$original" ] &&
-    mv -T -- "$quarantine" "$original"; then
-    printf 'dotfiles-agent-project-cache-gc: preserve %s: %s\n' "$reason" "$original" >&2
-    if rmdir -- "$quarantine_root" 2>/dev/null; then
-      return 0
-    fi
-    printf 'dotfiles-agent-project-cache-gc: unresolved quarantined session root: %s\n' \
-      "$quarantine_root" >&2
-    return 1
+# launcher が SIGKILL で消えても、client は session の scope の中で動き続ける。
+# scope の cgroup が残る間は session を生きているものとして扱う。
+session_state() {
+  local session_id=$1 metadata=$2 state
+  state=$(session_owner_state "$metadata")
+  if [ "$state" = orphan ] && [ -d "$slice_cgroup/dotfiles-agent-${session_id#*.}.scope" ]; then
+    state=live
   fi
-  printf 'dotfiles-agent-project-cache-gc: cannot restore quarantined session after %s: %s (quarantine: %s)\n' \
-    "$reason" "$original" "$quarantine" >&2
-  return 1
-}
-
-quarantined_session_root_is_valid() {
-  local path=$1
-  [ ! -L "$path" ] || return 1
-  [ -d "$path" ] || return 1
-  [ "$(stat -c %u -- "$path" 2>/dev/null)" = "$(id -u)" ] || return 1
-  chmod 700 -- "$path" 2>/dev/null || return 1
-  [ "$(stat -c %a -- "$path" 2>/dev/null)" = 700 ]
-}
-
-quarantined_session_root_can_restore() {
-  local path=$1
-  [ ! -L "$path" ] || return 1
-  [ -d "$path" ] || return 1
-  [ "$(stat -c %u -- "$path" 2>/dev/null)" = "$(id -u)" ]
-}
-
-retained_after_quarantine_cleanup() {
-  local quarantine_root=$1
-  if rmdir -- "$quarantine_root" 2>/dev/null; then
-    printf 'retained\n'
-    return
-  fi
-  printf 'dotfiles-agent-project-cache-gc: unresolved quarantined session root: %s\n' \
-    "$quarantine_root" >&2
-  printf 'retained-hidden\n'
-}
-
-remove_orphan_session() {
-  local session=$1 session_id=$2 project_id=$3 kind=$4 metadata path_device quarantine_root quarantine_path state reason
-  metadata="$session/metadata.json"
-  path_device=$(stat -c %d -- "$session") || die "cannot inspect session device: $session"
-  quarantine_root=$(mktemp -d "$sessions_root/.gc-quarantine.XXXXXXXX") || {
-    printf 'dotfiles-agent-project-cache-gc: cannot create session quarantine: %s\n' \
-      "$sessions_root" >&2
-    printf 'retained\n'
-    return
-  }
-  chmod 700 -- "$quarantine_root" || {
-    printf 'dotfiles-agent-project-cache-gc: cannot secure session quarantine: %s\n' \
-      "$quarantine_root" >&2
-    retained_after_quarantine_cleanup "$quarantine_root"
-    return
-  }
-  if [ -L "$quarantine_root" ] || [ ! -d "$quarantine_root" ] ||
-    [ "$(stat -c %u -- "$quarantine_root")" != "$(id -u)" ] ||
-    [ "$(stat -c %a -- "$quarantine_root")" != 700 ] ||
-    [ "$(stat -c %d -- "$quarantine_root")" != "$path_device" ]; then
-    printf 'dotfiles-agent-project-cache-gc: session quarantine is ambiguous: %s\n' \
-      "$quarantine_root" >&2
-    retained_after_quarantine_cleanup "$quarantine_root"
-    return
-  fi
-  quarantine_path="$quarantine_root/session"
-  if ! mv -T -- "$session" "$quarantine_path"; then
-    printf 'dotfiles-agent-project-cache-gc: cannot quarantine session: %s\n' "$session" >&2
-    retained_after_quarantine_cleanup "$quarantine_root"
-    return
-  fi
-
-  if ! quarantined_session_root_is_valid "$quarantine_path"; then
-    if quarantined_session_root_can_restore "$quarantine_path"; then
-      if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" \
-        ambiguous-quarantine-path; then
-        printf 'retained\n'
-      else
-        printf 'retained-hidden\n'
-      fi
-    else
-      printf 'dotfiles-agent-project-cache-gc: cannot restore ambiguous quarantined session: %s (quarantine: %s)\n' \
-        "$session" "$quarantine_path" >&2
-      printf 'retained-hidden\n'
-    fi
-    return
-  fi
-  metadata="$quarantine_path/metadata.json"
-  reason=
-  if [ "$kind" = unclaimed ]; then
-    if [ -e "$metadata" ] || [ -L "$metadata" ]; then
-      reason=quarantined-session-claimed
-    fi
-  elif [ -L "$metadata" ] || [ ! -f "$metadata" ] ||
-    [ "$(stat -c %u -- "$metadata" 2>/dev/null)" != "$(id -u)" ] ||
-    ! chmod 600 -- "$metadata" 2>/dev/null ||
-    [ "$(stat -c %a -- "$metadata" 2>/dev/null)" != 600 ] ||
-    ! validate_session_metadata "$metadata" "$session_id"; then
-    reason=invalid-quarantined-metadata
-  elif [ "$(jq -r '.project_id' "$metadata" 2>/dev/null)" != "$project_id" ]; then
-    reason=quarantined-project-changed
-  fi
-  if [ -n "$reason" ]; then
-    if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" "$reason"; then
-      printf 'retained\n'
-    else
-      printf 'retained-hidden\n'
-    fi
-    return
-  fi
-  state=orphan
-  if [ "$kind" = claimed ]; then
-    state=$(session_owner_state "$metadata")
-  fi
-  if [ "$state" != orphan ]; then
-    if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" \
-      "quarantined-owner-$state"; then
-      if [ "$state" = live ]; then
-        printf 'live\n'
-      else
-        printf 'retained\n'
-      fi
-    else
-      printf 'retained-hidden\n'
-    fi
-    return
-  fi
-
-  if ! rm -rf --one-file-system -- "$quarantine_path"; then
-    printf 'dotfiles-agent-project-cache-gc: cannot remove quarantined orphan: %s\n' \
-      "$quarantine_path" >&2
-    if restore_quarantined_session "$session" "$quarantine_path" "$quarantine_root" \
-      unremovable-orphan; then
-      printf 'retained\n'
-    else
-      printf 'retained-hidden\n'
-    fi
-    return
-  fi
-  if ! rmdir -- "$quarantine_root" 2>/dev/null; then
-    printf 'dotfiles-agent-project-cache-gc: preserve quarantine root: %s\n' \
-      "$quarantine_root" >&2
-    printf 'deleted-hidden\n'
-    return
-  fi
-  printf 'deleted\n'
+  printf '%s\n' "$state"
 }
 
 create_shared_cache() {
@@ -292,11 +147,239 @@ validate_shared_cache() {
 }
 
 allocated_bytes() {
-  local path=$1 bytes
-  bytes=$(du -s -B1 -- "$path" | cut -f 1) \
-    || die "cannot measure allocated cache bytes: $path"
-  [[ "$bytes" =~ ^[0-9]+$ ]] || die "allocated cache size is invalid: $path"
-  printf '%s\n' "$bytes"
+  local path=$1 output
+  # 計測中に live build が消した file による du の非ゼロ終了の許容。合計が減るだけで削除は増えない
+  output=$(du -s -B1 -- "$path" 2>/dev/null) || true
+  output=${output%%$'\t'*}
+  [[ "$output" =~ ^[0-9]+$ ]] || die "cannot measure allocated cache bytes: $path"
+  printf '%s\n' "$output"
+}
+
+# Cargo 1.95 の .cargo-lock と 1.98 の .cargo-build-lock はどちらも build の間だけ [<target>/]<profile>/ に置く排他 flock のため entry ごとに一つの lock file での判定は不可
+lock_entry() {
+  local lock fd
+  for lock in "$1"/*/.cargo-build-lock "$1"/*/*/.cargo-build-lock "$1"/*/.cargo-lock "$1"/*/*/.cargo-lock; do
+    [ -f "$lock" ] || return 1
+    exec {fd}<"$lock" || return 1
+    entry_lock_fds+=("$fd")
+    flock -n -x "$fd" || return 1
+  done
+}
+
+unlock_entry() {
+  local fd
+  for fd in "${entry_lock_fds[@]}"; do
+    exec {fd}<&-
+  done
+  entry_lock_fds=()
+}
+
+# Cargo は fresh な build で何も書かず各 unit の .fingerprint/<package>-<hash>/ の hash file を読むだけのため mtime や invoked.timestamp での最終使用の測定は不可
+# test runner は Cargo を介さず成果物を実行し fingerprint を読まないため fingerprint の file だけでの最終使用の測定は不可
+# GC 自身が file を読むと atime が最終使用を表さなくなるため stat 以外での file の参照は不可
+# GC 自身の走査が directory の atime を動かすため directory の atime での最終使用の測定は不可
+# Cargo は fingerprint の JSON を build し直す unit でだけ読むため JSON の atime での最終使用の測定は不可
+# 同じ crate の別の build も同じ名前の接頭辞を持つため crate 名での成果物の照合は不可
+# 名前に hash を持たない成果物は持ち主の unit を決められないため回収は不可
+# rustc は incremental の directory に unit とは別の hash を付けるため fingerprint との照合は不可
+scan_units() {
+  local base=$cargo_build_root prefix='' lock_depth=4 item_depth=3 with_members=1
+  if [ "$#" -gt 0 ]; then
+    base=$cargo_build_root/$1 prefix=$1/ lock_depth=2 item_depth=1 with_members=0
+  fi
+  awk -v with_members="$with_members" '
+    BEGIN { RS = "\0" }
+    ARGIND == 1 {
+      if (match($0, /^([0-9a-f]{2}\/[0-9a-f]{14})\/(.+)\/\.cargo-(build-)?lock$/, lock)) {
+        profiles[lock[1], lock[2]] = 1
+      }
+      next
+    }
+    match($0, /^([0-9]+) ([0-9]+) ([0-9.]+) ([0-9.]+) (.) ([0-9a-f]{2}\/[0-9a-f]{14})\/(.+)$/, f) {
+      entry = f[6]
+      count = split(f[7], part, "/")
+      if ((entry, part[1]) in profiles) {
+        depth = 2
+        profile = part[1]
+      } else if (count > 1 && (entry, part[1] "/" part[2]) in profiles) {
+        depth = 3
+        profile = part[1] "/" part[2]
+      } else {
+        next
+      }
+      if (count <= depth) next
+      category = part[depth]
+      name = part[depth + 1]
+      member = profile "/" category "/" name
+      used = f[4] + 0
+      if (f[5] == "f" && part[count] !~ /\.json$/ && f[3] + 0 > used) used = f[3] + 0
+      if (category == "incremental") {
+        group = entry SUBSEP "incremental" SUBSEP member
+        if (!(group in last) || used > last[group]) last[group] = used
+      } else {
+        if (category == "deps" && name == "artifact") {
+          if (count <= depth + 1) next
+          name = part[depth + 2]
+          member = member "/" name
+          pattern = "-([0-9a-f]{16})$"
+        } else if (category == ".fingerprint") {
+          pattern = "-([0-9a-f]{16})$"
+        } else if (category == "deps" || category == "build" || category == "examples") {
+          pattern = "-([0-9a-f]{16})(\\.|$)"
+        } else {
+          next
+        }
+        if (!match(name, pattern, hash)) next
+        group = entry SUBSEP "unit" SUBSEP hash[1]
+        if (category == ".fingerprint") fingerprinted[entry, hash[1]] = 1
+        if (f[5] == "f" && (!(group in last) || used > last[group])) last[group] = used
+      }
+      if (f[5] == "f" && (!(group in touched) || used > touched[group])) touched[group] = used
+      members[group][member] = 1
+      if (f[7] == member) identity[group, member] = f[1]
+      if (!(f[1] in counted)) {
+        counted[f[1]] = 1
+        size[group] += f[2] * 512
+      }
+    }
+    END {
+      PROCINFO["sorted_in"] = "@ind_str_asc"
+      for (group in members) {
+        split(group, id, SUBSEP)
+        kind = id[2]
+        used = (group in last) ? last[group] : touched[group]
+        if (kind == "unit" && !((id[1], id[3]) in fingerprinted)) kind = "orphan"
+        ident = ""
+        for (member in members[group]) {
+          ident = ident (((group, member) in identity) ? identity[group, member] : "-") ","
+        }
+        printf "G %s %d %.9f %d %s %s %s%c", kind, used, used, size[group], id[1], id[3], ident, 0
+        if (with_members) {
+          for (member in members[group]) printf "M %s/%s%c", id[1], member, 0
+        }
+      }
+    }
+  ' \
+    <(find "$base" -mindepth "$lock_depth" -maxdepth "$((lock_depth + 1))" -type f \
+      \( -name .cargo-build-lock -o -name .cargo-lock \) -printf "$prefix%P\\0" 2>/dev/null) \
+    <(find "$base" -mindepth "$item_depth" -printf "%i %b %A@ %T@ %y $prefix%P\\0" 2>/dev/null)
+}
+
+# 走査の後に directory が symlink へ置き換わると cd が build-dir の外を指すため検証の無い移動は不可
+move_members() {
+  local trash=$1 directory=$2 path=$cargo_build_root component
+  local -a components names
+  IFS=/ read -r -a components <<<"$directory"
+  for component in "${components[@]}"; do
+    path=$path/$component
+    if [ -L "$path" ]; then
+      note "build-dir path is a symlink: $path"
+      unresolved=true
+      return
+    fi
+  done
+  mapfile -t names <<<"${3%$'\n'}"
+  if ! printf '%s\0' "${names[@]}" |
+    (cd -- "$cargo_build_root/$directory" && xargs -0 mv --no-copy -t "$trash/$directory" --); then
+    note "cannot move build units to trash: $cargo_build_root/$directory"
+    unresolved=true
+  fi
+}
+
+# 走査の後に始まる test は一度きりの走査に現れないため Cargo の lock を取る前の /proc の確認は不可
+entry_runs_executable() {
+  local executable
+  while IFS= read -r -d '' executable; do
+    [[ $executable != "$build_root_real/$1"/* ]] || return 0
+  done < <(find /proc/[0-9]*/exe -maxdepth 0 -printf '%l\0' 2>/dev/null)
+  return 1
+}
+
+# lock を待つ Cargo は開いた lock file の inode を lock するため lock file や unit の無くなった entry の移動は不可
+# launcher は build-dir に触れないため unit の rename の間の gc.lock の保持は不要
+# 走査の後に別の Cargo が unit を使い直すため走査の時点の最終使用だけでの回収は不可
+reclaim_units() {
+  local entry=$1 root=$cargo_build_root/$1 trash group index member record kind used_exact bytes key ident
+  local -a groups=("${@:2}") moving=()
+  local -A current=() current_bytes=() by_directory=() trash_directories=()
+  trash=$(mktemp -d "$trash_root/units.XXXXXXXX") || die "cannot create a trash entry for $root"
+  for group in "${groups[@]}"; do
+    for ((index = group_first[group]; index < group_first[group] + group_count[group]; index++)); do
+      trash_directories[$trash/${group_members[index]%/*}]=1
+    done
+  done
+  mkdir -p -- "${!trash_directories[@]}"
+  # test は実行中に別の unit の OUT_DIR を読むため実行中の file の属する unit だけの保護は不可
+  if ! lock_entry "$root" || entry_runs_executable "$entry"; then
+    unlock_entry
+    busy_entries[$entry]=1
+    return
+  fi
+  while IFS= read -r -d '' record; do
+    read -r _tag kind _used used_exact bytes _entry key ident <<<"$record"
+    current[$kind/$key]="$used_exact $ident"
+    current_bytes[$kind/$key]=$bytes
+  done < <(scan_units "$entry")
+  for group in "${groups[@]}"; do
+    finished_groups[$group]=1
+    [ "${current[${group_kinds[group]}/${group_keys[group]}]-}" = \
+      "${group_used_exact[group]} ${group_idents[group]}" ] || continue
+    moving+=("$group")
+    for ((index = group_first[group]; index < group_first[group] + group_count[group]; index++)); do
+      member=${group_members[index]}
+      [[ $member != *$'\n'* ]] || continue
+      [ -e "$cargo_build_root/$member" ] || [ -L "$cargo_build_root/$member" ] || continue
+      by_directory[${member%/*}]+=${member##*/}$'\n'
+    done
+  done
+  for directory in "${!by_directory[@]}"; do
+    move_members "$trash" "$directory" "${by_directory[$directory]}"
+  done
+  for group in "${moving[@]}"; do
+    for ((index = group_first[group]; index < group_first[group] + group_count[group]; index++)); do
+      member=$cargo_build_root/${group_members[index]}
+      if [ -e "$member" ] || [ -L "$member" ]; then
+        continue 2
+      fi
+    done
+    total_bytes=$((total_bytes - current_bytes[${group_kinds[group]}/${group_keys[group]}]))
+    units_left=$((units_left - group_bytes[group]))
+  done
+  unlock_entry
+}
+
+reclaim_groups() {
+  local group entry
+  local -a groups
+  local -A by_entry=()
+  for group in "$@"; do
+    by_entry[${group_entries[group]}]+=" $group"
+  done
+  for entry in "${!by_entry[@]}"; do
+    read -r -a groups <<<"${by_entry[$entry]}"
+    reclaim_units "$entry" "${groups[@]}"
+  done
+}
+
+# trash の中身は session からも launcher からも参照されない。中断した実行の残りも含めて消す。
+empty_trash() {
+  local entry
+  for entry in "$trash_root"/*; do
+    if ! find -P "$entry" -xdev -type d -uid "$EUID" ! -perm -u=rwx \
+      -exec chmod u+rwx -- {} \; \
+      || ! rm -rf --one-file-system -- "$entry"; then
+      note "cannot remove trash entry: $entry"
+      unresolved=true
+    fi
+  done
+}
+
+any_session() {
+  local session
+  for session in "$sessions_root"/*; do
+    [ -n "${dead_sessions[$session]+x}" ] || return 0
+  done
+  return 1
 }
 
 high_bytes=${DOTFILES_AGENT_GC_HIGH_BYTES:-@gcHighBytes@}
@@ -306,11 +389,17 @@ case "$high_bytes:$low_bytes" in
 esac
 test "$low_bytes" -le "$high_bytes" || die 'GC low watermark exceeds high watermark'
 
+uid=$(id -u)
+current_boot_id=$(cat /proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
+cgroup_root=${DOTFILES_AGENT_GC_CGROUP_ROOT:-/sys/fs/cgroup}
+slice_cgroup="$cgroup_root/user.slice/user-$uid.slice/user@$uid.service/@sliceUnit@"
+
 cache_root="$HOME/@cacheRootRelative@"
 sessions_root="$cache_root/sessions"
-builds_root="$cache_root/builds"
+cargo_build_root="$cache_root/cargo-build"
+trash_root="$cache_root/trash"
 mkdir -p "$HOME/.cache"
-for path in "$cache_root" "$sessions_root" "$builds_root"; do
+for path in "$cache_root" "$sessions_root" "$cargo_build_root" "$trash_root"; do
   if ! mkdir -m 700 "$path" 2>/dev/null; then
     validate_managed_directory "$path"
   fi
@@ -322,208 +411,169 @@ if (set -o noclobber; : > "$lock_file") 2>/dev/null; then
 fi
 validate_managed_file "$lock_file" 'GC lock'
 exec {lock_fd}<>"$lock_file"
+
+unresolved=false
+empty_trash
+
+# launcher は共有 cache の marker を lock の下で検証するので、作成も lock の下で行う。
 flock -x "$lock_fd"
-
 shared_root=$(create_shared_cache "$cache_root")
+flock -u "$lock_fd"
 
-scan_file=$(mktemp "$cache_root/.gc-scan.XXXXXXXX")
-# shellcheck disable=SC2329 # EXIT trap invokes this function indirectly.
-cleanup_scan() {
-  local status=$?
-  trap - EXIT
-  if [[ "$scan_file" == "$cache_root/"* ]] && [ ! -L "$scan_file" ] && [ -f "$scan_file" ]; then
-    rm -f -- "$scan_file" || true
-  fi
-  exit "$status"
-}
-trap cleanup_scan EXIT
-
-current_boot_id=$(cat /proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
-declare -A active_projects=()
+declare -A dead_sessions=()
+declare -a unclaimed_sessions=()
 active_session_count=0
-declare -a orphan_sessions=() orphan_session_ids=() orphan_project_ids=() orphan_kinds=()
-cache_gc_suppressed=false
-sessions_unresolved=false
-gc_owner_uid=$(id -u)
 
-: > "$scan_file"
-find "$sessions_root" -mindepth 1 -maxdepth 1 \
-  -name '.gc-quarantine.*' -print0 > "$scan_file" \
-  || die 'cannot enumerate quarantined agent sessions'
-while IFS= read -r -d '' quarantine_root; do
-  if [ -L "$quarantine_root" ] || [ ! -d "$quarantine_root" ] ||
-    [ "$(stat -c %u -- "$quarantine_root" 2>/dev/null)" != "$gc_owner_uid" ] ||
-    [ "$(stat -c %a -- "$quarantine_root" 2>/dev/null)" != 700 ]; then
-    cache_gc_suppressed=true
-    printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session root: %s\n' \
-      "$quarantine_root" >&2
-    continue
-  fi
-  quarantine_contents=$(find "$quarantine_root" -mindepth 1 -maxdepth 1 \
-    -print -quit 2>/dev/null) || {
-    cache_gc_suppressed=true
-    printf 'dotfiles-agent-project-cache-gc: skip cache GC: cannot inspect quarantined session root: %s\n' \
-      "$quarantine_root" >&2
-    continue
-  }
-  if [ -n "$quarantine_contents" ]; then
-    cache_gc_suppressed=true
-    printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session: %s\n' \
-      "$quarantine_root" >&2
-    continue
-  fi
-  if ! rmdir -- "$quarantine_root" 2>/dev/null; then
-    cache_gc_suppressed=true
-    printf 'dotfiles-agent-project-cache-gc: skip cache GC: quarantined session root changed during resolution: %s\n' \
-      "$quarantine_root" >&2
-    continue
-  fi
-  printf 'dotfiles-agent-project-cache-gc: resolved empty quarantined session root: %s\n' \
-    "$quarantine_root" >&2
-done < "$scan_file"
-
-find "$sessions_root" -mindepth 1 -maxdepth 1 \
-  ! -name '.gc-quarantine.*' -print0 > "$scan_file" \
+find "$sessions_root" -mindepth 1 -maxdepth 1 -print0 | mapfile -d '' -t sessions \
   || die 'cannot enumerate agent sessions'
-while IFS= read -r -d '' session; do
+for session in "${sessions[@]}"; do
   session_id=${session##*/}
   metadata="$session/metadata.json"
   validate_managed_directory "$session"
   if [ ! -e "$metadata" ] && [ ! -L "$metadata" ]; then
-    # The launcher writes metadata before releasing gc.lock and before starting
-    # the client, so a session without metadata here has no live owner.
-    orphan_sessions+=("$session")
-    orphan_session_ids+=("$session_id")
-    orphan_project_ids+=('')
-    orphan_kinds+=(unclaimed)
+    unclaimed_sessions+=("$session")
     continue
   fi
   validate_managed_file "$metadata" 'session metadata'
   if ! validate_session_metadata "$metadata" "$session_id"; then
-    # Invalid metadata no longer identifies the owner or project, so the session
-    # may still be live. It is kept, and no cache is removed in this run.
-    cache_gc_suppressed=true
-    printf 'dotfiles-agent-project-cache-gc: skip cache GC: invalid session metadata: %s\n' \
-      "$metadata" >&2
+    # Invalid metadata no longer identifies the owner, so the session may still
+    # be live. It is kept and blocks the shared cache purge, and the run fails.
+    unresolved=true
+    note "invalid session metadata: $metadata"
     continue
   fi
-  project_id=$(jq -r '.project_id' "$metadata")
-  session_state=$(session_owner_state "$metadata")
-  if [ "$session_state" = orphan ]; then
-    orphan_sessions+=("$session")
-    orphan_session_ids+=("$session_id")
-    orphan_project_ids+=("$project_id")
-    orphan_kinds+=(claimed)
+  if [ "$(session_state "$session_id" "$metadata")" = orphan ]; then
+    dead_sessions[$session]=1
   else
-    active_projects[$project_id]=1
     active_session_count=$((active_session_count + 1))
   fi
-done < "$scan_file"
+done
 
-for index in "${!orphan_sessions[@]}"; do
-  removal_result=$(remove_orphan_session "${orphan_sessions[$index]}" \
-    "${orphan_session_ids[$index]}" "${orphan_project_ids[$index]}" "${orphan_kinds[$index]}")
-  case "$removal_result" in
-  deleted) ;;
-  deleted-hidden)
-    cache_gc_suppressed=true
-    printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session created while handling: %s\n' \
-      "${orphan_sessions[$index]}" >&2
-    ;;
-  live | retained | retained-hidden)
-    [ "$removal_result" = live ] || sessions_unresolved=true
-    if [ "${orphan_kinds[$index]}" = claimed ]; then
-      active_projects[${orphan_project_ids[$index]}]=1
-      active_session_count=$((active_session_count + 1))
-    fi
-    if [ "$removal_result" = retained-hidden ]; then
-      cache_gc_suppressed=true
-      printf 'dotfiles-agent-project-cache-gc: skip cache GC: unresolved quarantined session created while handling: %s\n' \
-        "${orphan_sessions[$index]}" >&2
-    fi
-    ;;
-  *) die "invalid orphan removal result: $removal_result" ;;
-  esac
+# 持ち主の死んだ session は生き返らない。metadata の無い session は、launcher が
+# lock を解く前に metadata を書くので、lock の下でもまだ無ければ持ち主がいない。
+for session in "${!dead_sessions[@]}" "${unclaimed_sessions[@]}"; do
+  flock -x "$lock_fd"
+  if [ ! -L "$session" ] && [ -d "$session" ] &&
+    { [ -n "${dead_sessions[$session]+x}" ] ||
+      { [ ! -e "$session/metadata.json" ] && [ ! -L "$session/metadata.json" ]; }; } &&
+    ! move_to_trash "$trash_root" "$session" session; then
+    note "cannot move orphan session to trash: $session"
+    unresolved=true
+  fi
+  flock -u "$lock_fd"
 done
 
 # No cache is removed until every managed root and entry has passed validation.
 validate_shared_cache "$shared_root"
-shared_size=$(allocated_bytes "$shared_root")
+total_bytes=$(($(allocated_bytes "$shared_root") + $(allocated_bytes "$cargo_build_root")))
+build_root_real=$(realpath -e -- "$cargo_build_root") || die "cannot resolve $cargo_build_root"
 
-declare -a cache_ids=() cache_paths=() cache_sizes=() cache_mtimes=()
-total_bytes=$shared_size
-: > "$scan_file"
-find "$builds_root" -mindepth 1 -maxdepth 1 -print0 > "$scan_file" \
-  || die 'cannot enumerate project caches'
-while IFS= read -r -d '' cache; do
-  project_id=${cache##*/}
-  if [[ ! "$project_id" =~ ^[0-9a-f]{64}$ ]] || ! validate_project_cache "$cache" "$project_id"; then
-    die "project cache is not managed: $cache"
-  fi
+# noatime では fresh な build の読み込みが atime を動かさず使用が見えないため atime を更新しない mount での unit の回収は不可
+units_judgeable=true
+mount_options=$(findmnt -n -o OPTIONS --target "$cargo_build_root") || mount_options=''
+case ",$mount_options," in
+  ,,|*,noatime,*)
+    note "cannot judge when Cargo units were used: $cargo_build_root does not update atime (mount options: ${mount_options:-unknown})"
+    unresolved=true
+    units_judgeable=false
+    ;;
+esac
 
-  size=$(allocated_bytes "$cache")
-  mtime=$(stat -c %Y "$cache/.dotfiles-agent-cache.json") \
-    || die "cannot read project cache age: $cache"
-  cache_ids+=("$project_id")
-  cache_paths+=("$cache")
-  cache_sizes+=("$size")
-  cache_mtimes+=("$mtime")
-  total_bytes=$((total_bytes + size))
-done < "$scan_file"
-
-now=$(date +%s)
-inactive_before=$((now - @gcInactiveDays@ * 24 * 60 * 60))
-declare -A removed=()
-
-remove_cache() {
-  local index=$1 project_id cache
-  [ "$cache_gc_suppressed" = false ] || return 0
-  project_id=${cache_ids[$index]}
-  cache=${cache_paths[$index]}
-  test -z "${active_projects[$project_id]+x}" || return 0
-  validate_project_cache "$cache" "$project_id" \
-    || die "project cache changed during GC: $cache"
-  rm -rf --one-file-system -- "$cache"
-  removed[$index]=1
-  total_bytes=$((total_bytes - cache_sizes[index]))
-}
-
-for index in "${!cache_ids[@]}"; do
-  if [ "${cache_mtimes[$index]}" -lt "$inactive_before" ]; then
-    remove_cache "$index"
-  fi
+declare -a group_kinds=() group_used=() group_used_exact=() group_bytes=() group_entries=()
+declare -a group_keys=() group_idents=() group_first=() group_count=() group_members=()
+declare -a entry_lock_fds=()
+while IFS= read -r -d '' record; do
+  case $record in
+    'G '*)
+      read -r _tag kind used used_exact bytes entry key ident <<<"$record"
+      group=${#group_kinds[@]}
+      group_kinds+=("$kind")
+      group_used+=("$used")
+      group_used_exact+=("$used_exact")
+      group_bytes+=("$bytes")
+      group_entries+=("$entry")
+      group_keys+=("$key")
+      group_idents+=("$ident")
+      group_first+=("${#group_members[@]}")
+      group_count+=(0)
+      ;;
+    'M '*)
+      group_members+=("${record#M }")
+      group_count[group]=$((group_count[group] + 1))
+      ;;
+  esac
+done < <([ "$units_judgeable" = false ] || scan_units)
+units_left=0
+for bytes in "${group_bytes[@]}"; do
+  units_left=$((units_left + bytes))
 done
 
+now=$(date +%s)
+# Cargo は invocation の開始時だけ hash file を読み relatime はその atime を最大 24 時間古いまま残すため 24 時間までの invocation が使う unit に 48 時間より短い保護は不可
+recent_before=$((now - 48 * 60 * 60))
+inactive_before=$((now - @gcInactiveDays@ * 24 * 60 * 60))
+declare -A finished_groups=() busy_entries=()
+declare -a inactive_groups=() pressure_groups=()
+
+for group in "${!group_kinds[@]}"; do
+  [ "${group_used[group]}" -lt "$recent_before" ] || continue
+  if [ "${group_kinds[group]}" = orphan ] || [ "${group_used[group]}" -lt "$inactive_before" ]; then
+    inactive_groups+=("$group")
+  fi
+done
+reclaim_groups "${inactive_groups[@]}"
+
+# lock を取れない entry と走査の後に使われた unit は選んだ後に分かるため選んだ時点の bytes での停止は不可
 if [ "$total_bytes" -gt "$high_bytes" ]; then
-  while IFS=' ' read -r _mtime _project_id index; do
-    test "$total_bytes" -gt "$low_bytes" || break
-    test -z "${removed[$index]+x}" || continue
-    remove_cache "$index"
-  done < <(
-    for index in "${!cache_ids[@]}"; do
-      printf '%s %s %s\n' "${cache_mtimes[$index]}" "${cache_ids[$index]}" "$index"
-    done | sort -n -k1,1 -k2,2
-  )
-fi
-
-if [ "$cache_gc_suppressed" = false ] && [ "$total_bytes" -gt "$high_bytes" ] &&
-  [ "$active_session_count" -eq 0 ]; then
-  validate_shared_cache "$shared_root"
-  rm -rf --one-file-system -- "$shared_root/cargo-home" "$shared_root/xdg-cache"
-  mkdir -m 700 "$shared_root/cargo-home" "$shared_root/xdg-cache"
-  validate_shared_cache "$shared_root"
-  total_bytes=$(allocated_bytes "$shared_root")
-  for index in "${!cache_ids[@]}"; do
-    test -n "${removed[$index]+x}" && continue
-    validate_project_cache "${cache_paths[$index]}" "${cache_ids[$index]}" \
-      || die "project cache changed during final measurement: ${cache_paths[$index]}"
-    size=$(allocated_bytes "${cache_paths[$index]}")
-    total_bytes=$((total_bytes + size))
+  while [ "$total_bytes" -gt "$low_bytes" ]; do
+    pressure_groups=()
+    projected_bytes=$total_bytes
+    while IFS=' ' read -r _used group; do
+      [ "$projected_bytes" -gt "$low_bytes" ] || break
+      pressure_groups+=("$group")
+      projected_bytes=$((projected_bytes - group_bytes[group]))
+    done < <(
+      for group in "${!group_kinds[@]}"; do
+        if [ -z "${finished_groups[$group]+x}" ] && [ -z "${busy_entries[${group_entries[group]}]+x}" ] &&
+          [ "${group_used[group]}" -lt "$recent_before" ]; then
+          printf '%s %s\n' "${group_used[group]}" "$group"
+        fi
+      done | sort -k1,1n -k2,2n
+    )
+    [ "${#pressure_groups[@]}" -gt 0 ] || break
+    reclaim_groups "${pressure_groups[@]}"
   done
-  test "$total_bytes" -le "$high_bytes" \
-    || die "allocated cache bytes remain above the high watermark after shared purge"
 fi
 
-if [ "$cache_gc_suppressed" = true ] || [ "$sessions_unresolved" = true ]; then
-  die 'orphan sessions remain unresolved'
+empty_trash
+
+if [ "$total_bytes" -gt "$high_bytes" ] && [ "$active_session_count" -eq 0 ]; then
+  purged=false
+  flock -x "$lock_fd"
+  if ! any_session; then
+    validate_shared_cache "$shared_root"
+    if ! move_to_trash "$trash_root" "$shared_root/cargo-home" shared ||
+      ! move_to_trash "$trash_root" "$shared_root/xdg-cache" shared; then
+      die "cannot move the shared cache to trash: $shared_root"
+    fi
+    mkdir -m 700 "$shared_root/cargo-home" "$shared_root/xdg-cache"
+    validate_shared_cache "$shared_root"
+    purged=true
+  fi
+  flock -u "$lock_fd"
+  if [ "$purged" = true ]; then
+    empty_trash
+    total_bytes=$(($(allocated_bytes "$shared_root") + $(allocated_bytes "$cargo_build_root")))
+    # 48 時間の保護と lock で見送った unit による超過は時間で解消するため共有 cache を空にした後の上限超過だけでの失敗は不可
+    test "$((total_bytes - units_left))" -le "$high_bytes" \
+      || die "cache content the GC cannot reclaim stays above the high watermark after shared purge"
+  fi
+fi
+
+if [ "$total_bytes" -gt "$high_bytes" ]; then
+  note "allocated cache bytes remain above the high watermark: $total_bytes > $high_bytes"
+fi
+
+if [ "$unresolved" = true ]; then
+  die 'agent cache entries remain unresolved'
 fi

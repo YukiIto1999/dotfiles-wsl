@@ -402,34 +402,36 @@ let
   statusProbe = mkProbe statusPowerShell;
   timeoutProbe = mkProbe timeoutPowerShell;
   mkWindowsDrivesObservation = import ./storage/package.nix;
-  # WSL の drvfs は source を drive の root にする。drive の下の directory や他の 9p mount は drive ではない
-  mkFakeDf =
-    name: body:
-    pkgs.writeShellScript name ''
-      set -euo pipefail
-
-      test "$*" = '-t 9p --block-size=1K --output=source,size,avail'
-      ${body}
-    '';
   mkDrivesProbe =
-    name: body:
+    name: mounts: body:
     mkWindowsDrivesObservation {
       inherit pkgs lib;
-      dfCommand = mkFakeDf name body;
+      mountsFile = pkgs.writeText "${name}-mounts" mounts;
+      dfCommand = pkgs.writeShellScript name ''
+        set -euo pipefail
+        ${body}
+      '';
     };
-  drivesProbe = mkDrivesProbe "df-drives" ''
-    printf 'Filesystem      1K-blocks      Avail\n'
-    printf 'drivers              1000        990\n'
-    printf 'D:\\                  2000       1000\n'
-    printf 'C:\\Users             1000          1\n'
-    printf 'C:\\                  1000         99\n'
-    printf 'C:\\                  1000         99\n'
+  driveMounts = ''
+    drivers /drivers 9p ro 0 0
+    D:\134 /mnt/d 9p rw 0 0
+    C:\134Users /mnt/c-users 9p rw 0 0
+    C:\134 /mnt/c\040disk 9p rw 0 0
+    C:\134 /mnt/c-duplicate 9p rw 0 0
+    G: /mnt/g 9p rw 0 0
+  '';
+  drivesProbe = mkDrivesProbe "df-drives" driveMounts ''
+    case "''${!#}" in
+      /mnt/d) printf '1K-blocks Avail\n2000 1000\n' ;;
+      "/mnt/c disk") printf '1K-blocks Avail\n1000 99\n' ;;
+      *) printf 'df: inaccessible unrelated mount\n' >&2; exit 1 ;;
+    esac
   '';
   drivesFailedProbes = {
-    df-status = mkDrivesProbe "df-status" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ 1000 99\\n'; exit 1";
-    no-drive = mkDrivesProbe "df-no-drive" "printf 'Filesystem 1K-blocks Avail\\ndrivers 1000 990\\n'";
-    zero-size = mkDrivesProbe "df-zero-size" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ 0 0\\n'";
-    non-numeric = mkDrivesProbe "df-non-numeric" "printf 'Filesystem 1K-blocks Avail\\nC:\\\\ - -\\n'";
+    df-status = mkDrivesProbe "df-status" driveMounts "printf '1K-blocks Avail\\n1000 99\\n'; exit 1";
+    no-drive = mkDrivesProbe "df-no-drive" "drivers /drivers 9p ro 0 0\n" "exit 1";
+    zero-size = mkDrivesProbe "df-zero-size" driveMounts "printf '1K-blocks Avail\\n0 0\\n'";
+    non-numeric = mkDrivesProbe "df-non-numeric" driveMounts "printf '1K-blocks Avail\\n- -\\n'";
   };
   mkWslVhdObservation = import ./storage/impl/wsl-vhd-package.nix;
   # root の device 番号、sysfs の sector 数、PowerShell が返す .wslconfig を差し替える

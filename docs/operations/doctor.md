@@ -56,6 +56,8 @@ Linux root の空きは `resource/root-filesystem` の使用率で見る。
 doctor は cleanup、GC、service 再起動、trim を実行しない。
 Linux root、WSL の root VHD、Windows drive、Windows committed memory、swap topology を観測対象とする。
 Windows drive の観測対象は宣言せず、WSL が drvfs として mount した drive の root を実行時に見つけて、drive ごとの空き率を `resource/windows-drives/<drive letter>` に出す。
+mount table の source が drive の root を表す9p mountだけを先に選び、対象driveごとに `df` を実行するため、対象外の9p mountの測定失敗はdrive観測を止めない。
+対象driveの測定が一つでも失敗した場合は、部分的な空き率を公開せず観測全体を `fail` にする。
 未 mount の drive の空きと VHDX の配置先は、この結果だけでは分からない。
 Windows committed memory は host が選んだ PowerShell から使用率を得る。
 root VHD は root disk の容量を `resource/wsl-vhd/capacity`、PowerShell で読んだ Windows 側の `.wslconfig` の VHD 設定を `resource/wsl-vhd/wslconfig` に出す。

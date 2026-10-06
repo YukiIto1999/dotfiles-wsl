@@ -2,6 +2,7 @@
   pkgs,
   lib,
   dfCommand ? "${pkgs.coreutils}/bin/df",
+  mountsFile ? "/proc/self/mounts",
 }:
 
 let
@@ -9,9 +10,11 @@ let
 in
 (pkgs.writeShellApplication {
   inherit name;
-  text = builtins.replaceStrings [ "@dfCommand@" ] [ (lib.escapeShellArg dfCommand) ] (
-    builtins.readFile ./impl/observe-windows-drives.sh
-  );
+  text =
+    builtins.replaceStrings
+      [ "@dfCommand@" "@mountsFile@" ]
+      [ (lib.escapeShellArg dfCommand) (lib.escapeShellArg (toString mountsFile)) ]
+      (builtins.readFile ./impl/observe-windows-drives.sh);
 }).overrideAttrs
   (old: {
     meta = (old.meta or { }) // {

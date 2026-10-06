@@ -15,6 +15,8 @@ gatewayのbrowser-diagnostics toolを入口にし、sessionが公開したschema
 Chromeを別processとして起動したり、MCPやcontainerの設定、接続先、packageを追加しない。
 `list_pages`で対象のURLとtitleを確認し、取得したpage IDをpage-scoped呼出しへ渡す。
 別sessionのpage IDやPlaywrightのtab/refを流用しない。
+会話の再開や同じ会話IDは、providerのpageやtraceが残っている証拠にはならない。
+再開時は公開toolで現在のpageとtraceの可用性を確かめ、元のsessionの状態が失われていた場合は、取得済みartifactで判断できる範囲と再接続後に未観測の範囲を分ける。
 既存pageのaccount切替、logout、storage消去、profileの初期化を行わない。
 
 専用pageを作れる場合は作成時のIDを記録し、終了時には自分のpageだけを閉じる。
@@ -28,6 +30,9 @@ providerの保存先とcallerに割り当てた`TMPDIR`は別のprocessの契約
 2. loadingの問題では対象navigationを含むtraceを取り、返り値のinsight set ID、計測区間、実際に観測された指標を記録する。
 3. interactionの問題では入力直前から結果のpaintまでを計測し、実際のcontrolへ操作を行う。
    eventの合成、APIやstorageの直接変更で利用者経路を代用しない。
+   clickの次のpaintで終わる指標と、非同期responseの後に結果が表示されるまでの待ち時間を混ぜない。
+   結果が非同期に更新される経路では、同じtrace内のrequest終了、response処理、後続のmain-thread work、layout、結果のpaintを時系列で対応させ、区間ごとの実測値とsourceを示す。
+   inputから最初のpaintまでの値だけで後続の停止を説明せず、見えていない区間の時間やnetworkの寄与をsourceの定数から推定して測定値にしない。
 4. `performance_analyze_insight`にはtraceが返したinsight名とIDを使い、版の異なる名前を推測しない。
 5. traceや必要な指標を取得できなければ、その失敗と未測定項目を残す。
    sourceやnetworkで判断できる範囲は続けるが、速度改善やCWVの合格を推定しない。

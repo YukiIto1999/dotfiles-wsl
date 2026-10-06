@@ -281,6 +281,8 @@ frontend実装やreviewのためだけの同役割Skillは増やさない。
 
 これらの方法は当repositoryの手順として書き直し、runtime本文や実行referenceにdonor呼出しを残さない。
 legal情報と採否の記録はこの保守文書に置き、外部原版そのものの本文とlicenseは固定sourceで保持する。
+browserのinteractionはinputから最初のpaintまでの指標と、非同期response後の結果表示までを分け、request、main-thread work、layout、paintを同じtraceとsourceへ対応させる。
+会話を再開してもproviderのpageとtraceの保持は保証されないため、現在の公開toolで可用性を確認し、取得済みartifactと新sessionの観測を区別する。
 
 ## Custom Skillの採用条件
 

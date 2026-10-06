@@ -223,10 +223,6 @@ let
         matcher = "Edit|Write|MultiEdit|NotebookEdit";
       })
       (gateHook {
-        kind = "learn";
-        matcher = "Read";
-      })
-      (gateHook {
         kind = "observe";
         matcher = "Bash";
       })
@@ -235,6 +231,10 @@ let
       (gateHook {
         kind = "arm";
         matcher = "Edit|Write|MultiEdit|NotebookEdit";
+      })
+      (gateHook {
+        kind = "learn";
+        matcher = "Read";
       })
       (gateHook {
         kind = "observe";
@@ -587,6 +587,10 @@ in
             mkdir -p "$HOME/${
               expected.clients.${builtins.head selection.enabled}.skillsDestination
             }/code-design"
+            cp ${configuration.dotfiles.agents.shared.skills.code-design}/SKILL.md \
+              "$HOME/${
+                expected.clients.${builtins.head selection.enabled}.skillsDestination
+              }/code-design/SKILL.md"
             if ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null 2>&1; then
               echo "selected Skill root did not enforce its discipline: ${name}" >&2
               exit 1

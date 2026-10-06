@@ -5,6 +5,7 @@
   hostOptions,
   mkNixosSystem,
   normalMachineModule,
+  pluginSources,
   ...
 }:
 
@@ -562,6 +563,25 @@ in
         touch $out
       '';
 
+  agent-skill-read-gate =
+    pkgs.runCommandLocal "check-agent-skill-read-gate"
+      {
+        nativeBuildInputs = [
+          pkgs.bash
+          pkgs.coreutils
+          pkgs.git
+          pkgs.nodejs
+          pkgs.jq
+        ];
+        GATE = lib.getExe runtime.gate;
+        CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
+        COVERAGE_CHECKER = "${pluginSources.architecture-standard}/skills/standard-conformance/scripts/check-coverage.mjs";
+      }
+      ''
+        bash ${../fixtures/runtime/verify.sh} --skills-only
+        touch $out
+      '';
+
   agent-verification-cache =
     assert lib.count (package: package == runtime.verify) hostConfig.environment.systemPackages == 1;
     assert lib.count (package: package == runtime.gate) hostConfig.environment.systemPackages == 1;
@@ -574,10 +594,12 @@ in
           pkgs.git
           pkgs.gnused
           pkgs.jq
+          pkgs.nodejs
         ];
         VERIFY = lib.getExe runtime.verify;
         GATE = lib.getExe runtime.gate;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
+        COVERAGE_CHECKER = "${pluginSources.architecture-standard}/skills/standard-conformance/scripts/check-coverage.mjs";
       }
       ''
         bash ${../fixtures/runtime/verify.sh}

@@ -6,6 +6,433 @@ home=$fixture/home
 repo=$fixture/repo
 gitlink_repo=$fixture/gitlink-repo
 nested_gitlink_repo=$fixture/nested-gitlink-repo
+
+skill_edit() {
+  jq -nc --arg session "$1" --arg cwd "$home" --arg path "$2" \
+    '{session_id:$session,cwd:$cwd,tool_name:"write",tool_input:{path:$path}}' |
+    "$GATE" hook edit >/dev/null 2>&1
+}
+
+skill_read_event() {
+  local extra=${5-} path relative result='{}' resolved
+  [ -n "$extra" ] || extra='{}'
+  path=$(printf '%s' "$4" | jq -r '.path // .file_path // .filePath // empty')
+  case $path in
+  skill://*)
+    relative=${path#skill://}
+    case $relative in */*) ;; *) relative="$relative/SKILL.md" ;; esac
+    path="$home/.omp/agent/skills/$relative"
+    ;;
+  /*) ;;
+  *) path="$home/$path" ;;
+  esac
+  if [ -f "$path" ] && { [ "$3" = read ] || [ "$3" = Read ]; }; then
+    resolved=$(realpath -e -- "$path")
+    result=$(jq -nc --rawfile body "$path" --arg resolved "$resolved" --arg tool "$3" '
+      ($body | gsub("\r\n?"; "\n") | sub("^\uFEFF"; "")) as $normalized |
+      ($normalized | sub("\n$"; "")) as $display |
+      ($normalized | split("\n") | if last == "" then .[:-1] else . end | length) as $lines |
+      if $tool == "read" then
+        {tool_result:{content:[{type:"text",text:$display}],
+          details:{resolvedPath:$resolved,totalLines:$lines,
+            displayContent:{text:$display,startLine:1,lineNumbers:[range(1;$lines+1)]}}}}
+      else
+        {tool_response:{type:"text",file:{filePath:$resolved,content:$display,
+          numLines:$lines,startLine:1,totalLines:$lines}}}
+      end')
+  fi
+  jq -nc --arg session "$1" --arg event "$2" --arg tool "$3" \
+    --arg cwd "$home" --argjson input "$4" --argjson extra "$extra" --argjson result "$result" \
+    '($input | if $tool == "Read" and has("path") then .file_path = .path | del(.path) else . end) as $native |
+      {session_id:$session,cwd:$cwd,hook_event_name:$event,tool_name:$tool,tool_input:$native} * $result * $extra' |
+    "$GATE" hook learn
+}
+
+expect_unread_skill() {
+  if skill_edit "$1" /r/core/library.ts; then
+    echo "gate accepted an incomplete Skill read: $1" >&2
+    exit 1
+  fi
+}
+
+check_skill_learning() {
+  local source="$fixture/skill-source" deployed="$home/.omp/agent/skills"
+  local body input session rejected status
+  mkdir -p "$source/code-design/references" "$deployed" \
+    "$deployed/ui-design" "$deployed/domain-modeling"
+  printf '# Code design\n\nRead the complete procedure before designing code.\n' >"$source/code-design/SKILL.md"
+  printf '# Reference\n' >"$source/code-design/references/existing.md"
+  ln -s "$source/code-design" "$deployed/code-design"
+  printf '# UI design\n' >"$deployed/ui-design/SKILL.md"
+  printf '# Domain modeling\n' >"$deployed/domain-modeling/SKILL.md"
+  body="$deployed/code-design/SKILL.md"
+
+  test "$("$GATE" skill --path /r/surfaces/viewer/features/x/y.tsx)" = ui-design
+  test "$("$GATE" skill --path /r/core/b/domain/Invoice.cs)" = domain-modeling
+  test "$("$GATE" skill --path /r/core/b/application/ports/IFoo.cs)" = interface-design
+  test -z "$("$GATE" skill --path /r/surfaces/viewer/x.test.tsx)"
+  test -z "$("$GATE" skill --path /r/docs/note.md)"
+  expect_unread_skill fixture-unread
+
+  input=$(jq -nc --arg path "$body" '{path:$path}')
+  for rejected in PreToolUse PostToolUseFailure ""; do
+    session="fixture-event-${rejected:-missing}"
+    skill_read_event "$session" "$rejected" read "$input"
+    expect_unread_skill "$session"
+  done
+  skill_read_event fixture-result-error PostToolUse read "$input" '{"is_error":true}'
+  expect_unread_skill fixture-result-error
+  skill_read_event fixture-response-error PostToolUse Read "$input" '{"tool_response":{"error":"read failed"}}'
+  expect_unread_skill fixture-response-error
+  skill_read_event fixture-response-failed PostToolUse Read "$input" '{"tool_response":{"success":false}}'
+  expect_unread_skill fixture-response-failed
+  skill_read_event fixture-result-truncated PostToolUse read "$input" \
+    '{"tool_result":{"details":{"truncation":{"truncated":true}}}}'
+  expect_unread_skill fixture-result-truncated
+  skill_read_event fixture-result-summary PostToolUse read "$input" \
+    '{"tool_result":{"details":{"summary":{"lines":1,"elidedSpans":1,"elidedLines":2}}}}'
+  expect_unread_skill fixture-result-summary
+  skill_read_event fixture-result-output-cap PostToolUse read "$input" \
+    '{"tool_result":{"details":{"meta":{"truncation":{"direction":"head","truncatedBy":"lines","totalLines":3,"totalBytes":80,"outputLines":1,"outputBytes":14}}}}}'
+  expect_unread_skill fixture-result-output-cap
+  skill_read_event fixture-result-columns PostToolUse read "$input" \
+    '{"tool_result":{"details":{"meta":{"limits":{"columnTruncated":{"maxColumn":40,"unit":"chars"}}}}}}'
+  expect_unread_skill fixture-result-columns
+  skill_read_event fixture-result-page PostToolUse read "$input" \
+    '{"tool_result":{"details":{"displayContent":{"lineNumbers":[1]}}}}'
+  expect_unread_skill fixture-result-page
+  skill_read_event fixture-result-body PostToolUse read "$input" \
+    '{"tool_result":{"content":[{"type":"text","text":"different returned body"}],"details":{"displayContent":{"text":"different returned body"}}}}'
+  expect_unread_skill fixture-result-body
+  skill_read_event fixture-result-rendered PostToolUse read "$input" \
+    '{"tool_result":{"content":[{"type":"text","text":"Only a notice was returned."}]}}'
+  expect_unread_skill fixture-result-rendered
+  cp "$body" "$fixture/other-code-skill.md"
+  skill_read_event fixture-result-source PostToolUse read "$input" \
+    "$(jq -nc --arg path "$fixture/other-code-skill.md" '{tool_result:{details:{resolvedPath:$path}}}')"
+  expect_unread_skill fixture-result-source
+  skill_read_event fixture-claude-token-cap PostToolUse Read "$input" \
+    '{"tool_response":{"file":{"truncatedByTokenCap":true}}}'
+  expect_unread_skill fixture-claude-token-cap
+  skill_read_event fixture-claude-page PostToolUse Read "$input" \
+    '{"tool_response":{"file":{"numLines":1}}}'
+  expect_unread_skill fixture-claude-page
+  skill_read_event fixture-claude-unchanged PostToolUse Read "$input" \
+    '{"tool_response":{"type":"file_unchanged"}}'
+  expect_unread_skill fixture-claude-unchanged
+  skill_read_event fixture-claude-body PostToolUse Read "$input" \
+    '{"tool_response":{"file":{"content":"different returned body"}}}'
+  expect_unread_skill fixture-claude-body
+  skill_read_event fixture-claude-source PostToolUse Read "$input" \
+    "$(jq -nc --arg path "$fixture/other-code-skill.md" '{tool_response:{file:{filePath:$path}}}')"
+  expect_unread_skill fixture-claude-source
+  skill_read_event fixture-write-event PostToolUse write "$input"
+  expect_unread_skill fixture-write-event
+
+  for rejected in \
+    "$deployed/code-design/references/nonexistent.md" \
+    "$deployed/code-design/references/existing.md" \
+    'skill://code-design/references/existing.md' \
+    "$body:1-2" 'skill://code-design:1-2' 'skill://code-design/SKILL.md:raw' \
+    "$deployed/code-design" "$source/code-design/SKILL.md"; do
+    session="fixture-path-$(printf '%s' "$rejected" | sha256sum | cut -d ' ' -f 1)"
+    input=$(jq -nc --arg path "$rejected" '{path:$path}')
+    skill_read_event "$session" PostToolUse read "$input"
+    expect_unread_skill "$session"
+  done
+  input=$(jq -nc --arg path "$body" '{file_path:$path,offset:1}')
+  skill_read_event fixture-offset PostToolUse Read "$input"
+  expect_unread_skill fixture-offset
+  input=$(jq -nc --arg path "$body" '{file_path:$path,limit:2}')
+  skill_read_event fixture-limit PostToolUse Read "$input"
+  expect_unread_skill fixture-limit
+  input=$(jq -nc --arg path "$deployed/code-design/references/nonexistent.md" '{path:$path}')
+  skill_read_event fixture-edit-bypass PreToolUse write "$input"
+  skill_edit fixture-edit-bypass "$deployed/code-design/references/nonexistent.md"
+  expect_unread_skill fixture-edit-bypass
+  skill_edit fixture-edit-body-bypass "$body"
+  expect_unread_skill fixture-edit-body-bypass
+
+  mkdir -p "$home/.cache/dotfiles-wsl/verification/sessions/fixture-old-marker/skills"
+  : >"$home/.cache/dotfiles-wsl/verification/sessions/fixture-old-marker/skills/code-design"
+  expect_unread_skill fixture-old-marker
+
+  cat "$body" >/dev/null
+  input=$(jq -nc --arg path "$body" '{path:$path}')
+  skill_read_event fixture-body PostToolUse read "$input"
+  skill_edit fixture-body /r/core/library.ts
+  input=$(jq -nc --arg path "$body" '{file_path:$path}')
+  skill_read_event fixture-claude PostToolUse Read "$input" '{"tool_response":{"type":"text"}}'
+  skill_edit fixture-claude /r/core/library.ts
+  for rejected in 'skill://code-design' 'skill://code-design/SKILL.md' \
+    '.omp/agent/skills/code-design/SKILL.md'; do
+    session="fixture-canonical-$(printf '%s' "$rejected" | sha256sum | cut -d ' ' -f 1)"
+    input=$(jq -nc --arg path "$rejected" '{path:$path}')
+    skill_read_event "$session" PostToolUse read "$input"
+    skill_edit "$session" /r/core/library.ts
+  done
+  printf '\nChanged design procedure.\n' >>"$source/code-design/SKILL.md"
+  expect_unread_skill fixture-body
+  expect_unread_skill fixture-claude
+  cat "$body" >/dev/null
+  input=$(jq -nc --arg path "$body" '{path:$path}')
+  skill_read_event fixture-body PostToolUse read "$input"
+  skill_edit fixture-body /r/core/library.ts
+
+  if "$GATE" teach --session fixture-skills --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1; then
+    echo 'gate let an unread discipline be edited' >&2
+    exit 1
+  fi
+  "$GATE" learned --session fixture-skills --path ui-design
+  "$GATE" teach --session fixture-skills --path /r/surfaces/viewer/x.tsx >/dev/null
+  if "$GATE" teach --session fixture-skills --path /r/core/b/domain/Invoice.cs >/dev/null 2>&1; then
+    echo 'gate accepted one discipline as a licence for another' >&2
+    exit 1
+  fi
+  "$GATE" teach --session fixture-skills --path /r/core/b/application/ports/IFoo.cs >/dev/null
+  mkdir -p "$deployed/module-design"
+  set +e
+  "$GATE" learned --session fixture-empty-skill --path module-design >/dev/null 2>&1
+  status=$?
+  set -e
+  if [ "$status" -eq 0 ]; then
+    echo 'trusted learned command accepted a missing canonical Skill body' >&2
+    exit 1
+  fi
+  input='{"path":"skill://module-design"}'
+  skill_read_event fixture-missing-body PostToolUse read "$input"
+  if skill_edit fixture-missing-body /r/module.csproj; then
+    echo 'gate accepted a successful event without an existing canonical body' >&2
+    exit 1
+  fi
+
+  "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
+  body="$home/.local/share/fixture adapter/procedures/ui-design/SKILL.md"
+  mkdir -p "$(dirname "$body")"
+  printf '# Custom UI design\n' >"$body"
+  if "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1; then
+    echo 'gate ignored the contract skill root' >&2
+    exit 1
+  fi
+  cat "$body" >/dev/null
+  input=$(jq -nc --arg path "$body" '{path:$path}')
+  GATE="$CUSTOM_SKILL_ROOT_GATE" skill_read_event fixture-custom-root PostToolUse read "$input"
+  "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
+}
+
+conformance_stop() {
+  jq -nc --arg session "$1" --arg cwd "$home" '{session_id:$session,cwd:$cwd}' |
+    "$GATE" hook stop
+}
+
+expect_conformance_pending() {
+  local output status
+  set +e
+  output=$(conformance_stop "$1" 2>&1)
+  status=$?
+  set -e
+  if [ "$status" -ne 2 ]; then
+    echo "gate let conformance end without current completed coverage: $1 ($status)" >&2
+    exit 1
+  fi
+  case $output in
+  *"--session $1"*) ;;
+  *) echo "conformance stop omitted the actual session command: $1" >&2; exit 1 ;;
+  esac
+}
+
+check_conformance_completion() {
+  local standard="$fixture/conformance-standard" project="$fixture/conformance-project"
+  local report="$fixture/conformance-report.json" body input area output
+  local checker="$standard/skills/standard-conformance/scripts/check-coverage.mjs"
+  local deployed="$home/.omp/agent/skills"
+  mkdir -p "$(dirname "$checker")" "$project/docs" "$deployed"
+  cp "$COVERAGE_CHECKER" "$checker"
+  cp "$(dirname "$COVERAGE_CHECKER")/../SKILL.md" "$standard/skills/standard-conformance/SKILL.md"
+  chmod u+w "$checker" "$standard/skills/standard-conformance/SKILL.md"
+  printf '# Standard\n' >"$standard/README.md"
+  for area in principles concerns structure tools languages process; do
+    mkdir -p "$standard/$area"
+    printf '# %s\n' "$area" >"$standard/$area/rule.md"
+  done
+  git -C "$project" init -q
+  git -C "$project" config user.name fixture
+  git -C "$project" config user.email fixture@example.invalid
+  printf 'source\n' >"$project/tracked"
+  printf '{"violations":[]}\n' >"$project/docs/conformance-baseline.json"
+  git -C "$project" add tracked docs/conformance-baseline.json
+  git -C "$project" commit -qm initial
+  ln -s "$standard/skills/standard-conformance" "$deployed/standard-conformance"
+  mkdir -p "$deployed/standard-apply"
+  printf '# Standard apply\n' >"$deployed/standard-apply/SKILL.md"
+  body="$deployed/standard-conformance/SKILL.md"
+
+  input='{"path":"skill://standard-apply"}'
+  skill_read_event fixture-apply-only PostToolUse read "$input"
+  conformance_stop fixture-apply-only >/dev/null
+  input=$(jq -nc --arg path "$body" '{path:$path}')
+  skill_read_event fixture-conformance-pre PreToolUse read "$input"
+  conformance_stop fixture-conformance-pre >/dev/null
+  skill_read_event fixture-conformance-failed PostToolUseFailure read "$input"
+  skill_read_event fixture-conformance-truncated PostToolUse read "$input" \
+    '{"tool_result":{"details":{"truncation":{"truncated":true}}}}'
+  conformance_stop fixture-conformance-truncated >/dev/null
+  skill_read_event fixture-conformance-summary PostToolUse read "$input" \
+    '{"tool_result":{"details":{"summary":{"lines":1,"elidedSpans":1,"elidedLines":2}}}}'
+  conformance_stop fixture-conformance-summary >/dev/null
+  skill_read_event fixture-conformance-claude-cap PostToolUse Read "$input" \
+    '{"tool_response":{"file":{"truncatedByTokenCap":true}}}'
+  conformance_stop fixture-conformance-claude-cap >/dev/null
+  conformance_stop fixture-conformance-failed >/dev/null
+  input='{"path":"skill://standard-conformance/references/other.md"}'
+  skill_read_event fixture-conformance-reference PostToolUse read "$input"
+  conformance_stop fixture-conformance-reference >/dev/null
+  input=$(jq -nc --arg path "$body" '{path:$path}')
+  cat "$body" >/dev/null
+  skill_read_event fixture-conformance PostToolUse read "$input"
+  expect_conformance_pending fixture-conformance
+
+  node "$checker" inventory --standard-root "$standard" --project-root "$project" |
+    jq '{violations:[],baseline:{file:"docs/conformance-baseline.json"},
+      coverage:{standardDigest,projectDigest,entries:[.documents[] |
+        {document:.,disposition:"checked",evidence:["fixture:source-read"],
+         checks:[{kind:"review",status:"passed",evidence:"fixture:completed-review"}]}]}}' >"$report"
+  jq '.coverage.entries |= .[1:]' "$report" >"$fixture/conformance-incomplete.json"
+  if "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$fixture/conformance-incomplete.json" >/dev/null 2>&1; then
+    echo 'gate recorded an incomplete coverage check as conformance' >&2
+    exit 1
+  fi
+  expect_conformance_pending fixture-conformance
+  "$GATE" record --session fixture-conformance --repo "$project" --command 'true'
+  expect_conformance_pending fixture-conformance
+  cp "$report" "$project/internal-report.json"
+  if "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$project/internal-report.json" >/dev/null 2>&1; then
+    echo 'gate accepted a report inside the audited Git checkout' >&2
+    exit 1
+  fi
+  rm "$project/internal-report.json"
+  expect_conformance_pending fixture-conformance
+
+  "$GATE" learned --session fixture-conformance-admin --path standard-conformance
+  if "$GATE" conformance --session fixture-conformance-admin --repo "$project" \
+    --standard-root "$standard" --report "$report" >/dev/null 2>&1; then
+    echo 'administrative learned created a conformance receipt without a successful read' >&2
+    exit 1
+  fi
+  conformance_stop fixture-conformance-admin >/dev/null
+
+  "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$report" >/dev/null
+  conformance_stop fixture-conformance >/dev/null
+  printf '\n' >>"$report"
+  expect_conformance_pending fixture-conformance
+  "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$report" >/dev/null
+  conformance_stop fixture-conformance >/dev/null
+
+  printf '# Changed standard\n' >"$standard/README.md"
+  expect_conformance_pending fixture-conformance
+  printf '# Standard\n' >"$standard/README.md"
+  conformance_stop fixture-conformance >/dev/null
+  printf 'changed\n' >"$project/tracked"
+  expect_conformance_pending fixture-conformance
+  printf 'source\n' >"$project/tracked"
+  conformance_stop fixture-conformance >/dev/null
+  cp "$checker" "$fixture/original-checker"
+  printf '\n' >>"$checker"
+  expect_conformance_pending fixture-conformance
+  cp "$fixture/original-checker" "$checker"
+  conformance_stop fixture-conformance >/dev/null
+  cp "$standard/skills/standard-conformance/SKILL.md" "$fixture/original-conformance-skill"
+  printf '\nChanged procedure.\n' >>"$standard/skills/standard-conformance/SKILL.md"
+  expect_conformance_pending fixture-conformance
+  if "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$report" >/dev/null 2>&1; then
+    echo 'gate accepted changed Skill content without a successful reread' >&2
+    exit 1
+  fi
+  cp "$fixture/original-conformance-skill" "$standard/skills/standard-conformance/SKILL.md"
+  "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$report" >/dev/null
+  conformance_stop fixture-conformance >/dev/null
+
+  jq '.baseline.file = "docs/alternate-baseline.json"' "$report" >"$fixture/conformance-alternate.json"
+  if "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$fixture/conformance-alternate.json" >/dev/null 2>&1; then
+    echo 'gate accepted a noncanonical baseline authority' >&2
+    exit 1
+  fi
+  expect_conformance_pending fixture-conformance
+
+  cp -r "$standard" "$fixture/other-standard"
+  if "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$fixture/other-standard" --report "$report" >/dev/null 2>&1; then
+    echo 'gate accepted a copied standard bundle with identical Skill bytes' >&2
+    exit 1
+  fi
+  expect_conformance_pending fixture-conformance
+  ln -s "$standard" "$fixture/standard-root-link"
+  "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$fixture/standard-root-link" --report "$report" >/dev/null
+  conformance_stop fixture-conformance >/dev/null
+  ln -sfn "$fixture/other-standard/skills/standard-conformance" "$deployed/standard-conformance"
+  expect_conformance_pending fixture-conformance
+  if "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$fixture/other-standard" --report "$report" >/dev/null 2>&1; then
+    echo 'gate accepted a new physical bundle without a successful canonical reread' >&2
+    exit 1
+  fi
+  ln -sfn "$standard/skills/standard-conformance" "$deployed/standard-conformance"
+  "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$report" >/dev/null
+  conformance_stop fixture-conformance >/dev/null
+  printf '\nDifferent Skill procedure.\n' >>"$fixture/other-standard/skills/standard-conformance/SKILL.md"
+  if "$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$fixture/other-standard" --report "$report" >/dev/null 2>&1; then
+    echo 'gate accepted a standard root with a different Skill body' >&2
+    exit 1
+  fi
+
+  printf '{"violations":[{"rule":"README.md#fixture","file":"tracked","line":1,"evidence":"fixture:existing","mechanizable":false}]}\n' \
+    >"$project/docs/conformance-baseline.json"
+  node "$checker" inventory --standard-root "$standard" --project-root "$project" |
+    jq --slurpfile baseline "$project/docs/conformance-baseline.json" \
+      '{violations:$baseline[0].violations,baseline:{file:"docs/conformance-baseline.json"},
+        coverage:{standardDigest,projectDigest,entries:[.documents[] |
+          {document:.,disposition:"checked",evidence:["fixture:source-read"],
+           checks:[{kind:"review",status:"passed",evidence:"fixture:completed-review"}]}]}}' >"$report"
+  output=$("$GATE" conformance --session fixture-conformance --repo "$project" \
+    --standard-root "$standard" --report "$report")
+  printf '%s' "$output" | jq -e '.status == "WARN"' >/dev/null
+  conformance_stop fixture-conformance >/dev/null
+
+  rm "$checker"
+  output=$(conformance_stop fixture-conformance 2>&1) && {
+    echo 'gate accepted old deployed conformance without its checker' >&2
+    exit 1
+  }
+  case $output in
+  *source*update*) ;;
+  *) echo 'gate omitted the source update reason for a missing checker' >&2; exit 1 ;;
+  esac
+}
+
+if [ "${1-}" = --conformance-only ]; then
+  mkdir -p "$home"
+  export HOME=$home
+  check_conformance_completion
+  exit 0
+fi
+
+if [ "${1-}" = --skills-only ]; then
+  mkdir -p "$home"
+  export HOME=$home
+  check_skill_learning
+  check_conformance_completion
+  exit 0
+fi
 mkdir -p "$home" "$repo" "$gitlink_repo" "$nested_gitlink_repo"
 git -C "$nested_gitlink_repo" init -q
 git -C "$nested_gitlink_repo" config user.name fixture
@@ -495,38 +922,8 @@ fi
 (cd "$shell_repo" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
 shell_stop
 
-# 設計の規律を読まずに、その規律が持つ領域を触らせない。
-mkdir -p "$home/.omp/agent/skills/ui-design" "$home/.omp/agent/skills/domain-modeling"
-test "$("$GATE" skill --path /r/surfaces/viewer/features/x/y.tsx)" = ui-design
-test "$("$GATE" skill --path /r/core/b/domain/Invoice.cs)" = domain-modeling
-test "$("$GATE" skill --path /r/core/b/application/ports/IFoo.cs)" = interface-design
-test -z "$("$GATE" skill --path /r/surfaces/viewer/x.test.tsx)"
-test -z "$("$GATE" skill --path /r/docs/note.md)"
-
-if "$GATE" teach --session fixture-skills --path /r/surfaces/viewer/features/x/y.tsx >/dev/null 2>&1; then
-  echo 'gate let an unread discipline be edited' >&2
-  exit 1
-fi
-"$GATE" learned --session fixture-skills --path ui-design
-"$GATE" teach --session fixture-skills --path /r/surfaces/viewer/features/x/y.tsx >/dev/null
-# 読んだ規律は一つずつである。別の領域は別の規律を要る。
-if "$GATE" teach --session fixture-skills --path /r/core/b/domain/Invoice.cs >/dev/null 2>&1; then
-  echo 'gate accepted one discipline as a licence for another' >&2
-  exit 1
-fi
-# 配られていない規律の領域は、読みようがないので止めない。
-"$GATE" teach --session fixture-skills --path /r/core/b/application/ports/IFoo.cs >/dev/null
-
-"$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
-mkdir -p "$home/.local/share/fixture adapter/procedures/ui-design"
-if "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1; then
-  echo 'gate ignored the contract skill root' >&2
-  exit 1
-fi
-jq -nc --arg path "$home/.local/share/fixture adapter/procedures/ui-design/SKILL.md" \
-  '{session_id:"fixture-custom-root",tool_input:{path:$path}}' \
-  | "$CUSTOM_SKILL_ROOT_GATE" hook learn
-"$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
+check_skill_learning
+check_conformance_completion
 
 outside=$fixture/outside
 mkdir "$outside"

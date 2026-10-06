@@ -25,17 +25,17 @@
     "architectureStandard": {
       "flake": false,
       "locked": {
-        "lastModified": 1791119127,
-        "narHash": "sha256-PlMtn08BEPQDRJq9MnaJv957Zkz0hdLQNfRLbtMDHJc=",
+        "lastModified": 1791251703,
+        "narHash": "sha256-uFPvvy3OTJq6aCkCwNgA8CDmuaw4+EBHgc9XLBwgqpQ=",
         "owner": "YukiIto1999",
         "repo": "architecture-standard",
-        "rev": "e5c6533d92318e94471c0316aa3b522442f182dd",
+        "rev": "271b6a3cec3f53c22a0f6d8d803b9420669e3f31",
         "type": "github"
       },
       "original": {
         "owner": "YukiIto1999",
         "repo": "architecture-standard",
-        "rev": "e5c6533d92318e94471c0316aa3b522442f182dd",
+        "rev": "271b6a3cec3f53c22a0f6d8d803b9420669e3f31",
         "type": "github"
       }
     },

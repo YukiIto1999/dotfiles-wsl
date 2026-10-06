@@ -17,8 +17,10 @@ usage: dotfiles-agent-gate <command> [options]
   waive --reason TEXT [--repo DIR]      理由を残していまの木を一度だけ通す
   entry [--repo DIR]                    その repository の検証入口の綴りを答える
   skill --path PATH                     その綴りを触る前に読む skill の名を答える
-  learned --session ID --path NAME      その周で読んだ skill を控える
+  learned --session ID --path NAME      管理者が既存の配備済み skill 本文を明示的に承認する
   teach --session ID --path PATH        読んでいなければ理由を出して 1 で終わる
+  conformance --session ID --repo PROJECT --standard-root ROOT --report REPORT
+                                        実際の coverage checker が通った監査の receipt を保存する
   hook <arm|edit|learn|observe|stop>    client の hook から stdin の JSON で起こす
 USAGE
   exit 64
@@ -204,48 +206,288 @@ skill_stands() {
   return 1
 }
 
-# 読んだ規律の名。`skill://名` でも、配られた実体の path でも同じ名を答える
-# (client によって、hook へ届く前に内部 URL が path へ解けている)。
+skill_name_is_valid() {
+  [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]]
+}
+
+skill_body_of() {
+  local named=$1 root body
+  local -a roots=(@skillRoots@)
+  skill_name_is_valid "$named" || return 1
+  for root in "${roots[@]}"; do
+    body="$HOME/$root/$named/SKILL.md"
+    [ -f "$body" ] || continue
+    printf '%s\n' "$body"
+    return 0
+  done
+  return 1
+}
+
 skill_read_in() {
-  local path=$1 root relative
+  local path=$1 root relative named
   local -a roots=(@skillRoots@)
   case $path in
-  skill://*) printf '%s' "${path#skill://}" | cut -d/ -f1; return ;;
+  skill://*)
+    named=${path#skill://}
+    named=${named%/SKILL.md}
+    skill_body_of "$named"
+    return
+    ;;
   esac
   for root in "${roots[@]}"; do
     case $path in
     "$HOME/$root/"*) relative=${path#"$HOME/$root/"} ;;
-    "$root/"*) relative=${path#"$root/"} ;;
     *) continue ;;
     esac
-    printf '%s' "${relative%%/*}"
-    return
+    named=${relative%%/*}
+    skill_name_is_valid "$named" || return 1
+    [ "$relative" = "$named/SKILL.md" ] && [ -f "$path" ] || return 1
+    printf '%s\n' "$path"
+    return 0
   done
+  return 1
+}
+
+read_result_proof() {
+  local payload=$1 body=$2
+  node --input-type=commonjs - "$body" "$payload" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const crypto = require("node:crypto");
+const requireProof = condition => { if (!condition) process.exit(1); };
+const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const normalize = text => {
+  requireProof(typeof text === "string");
+  return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
+};
+try {
+  const event = JSON.parse(process.argv[3]);
+  const physicalPath = fs.realpathSync(process.argv[2]);
+  const bytes = fs.readFileSync(physicalPath);
+  const complete = normalize(bytes.toString("utf8"));
+  const withoutFinalNewline = complete.endsWith("\n") ? complete.slice(0, -1) : complete;
+  const matchesBody = text => {
+    const actual = normalize(text);
+    return actual === complete || actual === withoutFinalNewline;
+  };
+  let actualPath;
+  if (event.tool_name === "read") {
+    const result = event.tool_result;
+    requireProof(object(result) && object(result.details));
+    const details = result.details;
+    requireProof(details.truncation == null || (object(details.truncation) && details.truncation.truncated === false));
+    requireProof(details.summary == null);
+    requireProof(details.meta == null || object(details.meta));
+    requireProof(details.meta?.truncation == null && details.meta?.artifactError == null);
+    requireProof(details.meta?.limits?.columnTruncated == null);
+    requireProof(Number.isSafeInteger(details.totalLines) && details.totalLines > 0);
+    const display = details.displayContent;
+    requireProof(object(display) && display.startLine === 1 && matchesBody(display.text));
+    requireProof(Array.isArray(display.lineNumbers) && display.lineNumbers.length === details.totalLines);
+    requireProof(display.lineNumbers.every((line, index) => line === index + 1));
+    requireProof(Array.isArray(result.content) && result.content.length > 0);
+    const rendered = normalize(result.content.map(block => {
+      requireProof(object(block) && block.type === "text" && typeof block.text === "string");
+      return block.text;
+    }).join("\n"));
+    const displayed = normalize(display.text);
+    requireProof(displayed.length > 0);
+    let included = rendered.includes(displayed);
+    if (!included) {
+      const lines = displayed.split("\n");
+      for (const separator of [":", "|"]) {
+        if (rendered.includes(lines.map((line, index) => `${index + 1}${separator}${line}`).join("\n"))) {
+          included = true;
+          break;
+        }
+      }
+    }
+    requireProof(included);
+    actualPath = details.resolvedPath ?? (details.meta?.source?.type === "path" ? details.meta.source.value : undefined);
+  } else {
+    requireProof(event.tool_name === "Read" && event.tool_response?.type === "text");
+    const file = event.tool_response.file;
+    requireProof(object(file) && file.startLine === 1 && file.truncatedByTokenCap !== true);
+    requireProof(Number.isSafeInteger(file.totalLines) && file.totalLines > 0 && file.numLines === file.totalLines);
+    requireProof(matchesBody(file.content));
+    actualPath = file.filePath;
+  }
+  requireProof(typeof actualPath === "string" && actualPath.length > 0);
+  const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
+  requireProof(fs.realpathSync(path.resolve(cwd, actualPath)) === physicalPath);
+  console.log(JSON.stringify({ digest: crypto.createHash("sha256").update(bytes).digest("hex"), physicalPath }));
+} catch {
+  process.exit(1);
+}
+NODE
+}
+
+record_skill_read() {
+  local session=$1 body=$2 digest=${3-} named resolved
+  [ -n "$session" ] || return 0
+  named=${body%/SKILL.md}
+  named=${named##*/}
+  if [ -z "$digest" ]; then
+    resolved=$(realpath -e -- "$body") || return 1
+    digest=$(sha256sum <"$resolved" | cut -d ' ' -f 1) || return 1
+  fi
+  ensure_dir "$sessions_root/$session/skills"
+  printf '%s\n%s\n' "$digest" "$body" >"$sessions_root/$session/skills/$named"
 }
 
 command_learned() {
-  local session=$1 named=$2
-  [ -n "$session" ] && [ -n "$named" ] || return 0
-  ensure_dir "$sessions_root/$session/skills"
-  : >"$sessions_root/$session/skills/$named"
+  local session=$1 named=$2 body
+  [ -n "$session" ] && [ -n "$named" ] || fail 'learned には --session と --path NAME が要る'
+  body=$(skill_body_of "$named") || fail "配備済み skill の本文が存在しない: $named"
+  record_skill_read "$session" "$body"
 }
 
-# 読んでいない規律の領域を触らせない。読むのは数秒なので抜け道は置かない。
 command_teach() {
-  local session=$1 path=$2 named
+  local session=$1 path=$2 named marker body resolved digest
+  local -a held
   named=$(skill_for "$path")
   [ -n "$named" ] || return 0
   skill_stands "$named" || return 0
   [ -n "$session" ] || return 0
-  [ -f "$sessions_root/$session/skills/$named" ] && return 0
+  marker="$sessions_root/$session/skills/$named"
+  if [ -f "$marker" ] &&
+    mapfile -t held <"$marker" &&
+    [ "${#held[@]}" -eq 2 ] &&
+    body=$(skill_read_in "${held[1]}") &&
+    [[ $body == */"$named"/SKILL.md ]] &&
+    resolved=$(realpath -e -- "$body") &&
+    digest=$(sha256sum <"$resolved" | cut -d ' ' -f 1) &&
+    [ "${held[0]}" = "$digest" ]; then
+    return 0
+  fi
   printf '%s を触る前に skill://%s を読む。\n' "$path" "$named" | tee /dev/stderr
-  printf '  この周でまだ読んでいない。規律を呼ばずに書いた設計は、後段の門では直せない。\n' |
+  printf '  この周で現在の本文をまだ読んでいない。規律を呼ばずに書いた設計は、後段の門では直せない。\n' |
     tee /dev/stderr
   return 1
 }
 
+record_conformance_requirement() {
+  local session=$1 body=$2 cwd=$3 physical=$4 state
+  [ -n "$session" ] && [[ $body == */standard-conformance/SKILL.md ]] || return 0
+  state="$sessions_root/$session/conformance"
+  ensure_dir "$state"
+  cp "$sessions_root/$session/skills/standard-conformance" "$state/required"
+  printf '%s\n' "$physical" >>"$state/required"
+  printf '%s\n' "$cwd" >"$state/project-hint"
+}
+
+conformance_skill_digest() {
+  local session=$1 root=$2 body resolved current root_body root_digest bundle_root actual_root
+  local -a required learned
+  mapfile -t required <"$sessions_root/$session/conformance/required" || return 1
+  mapfile -t learned <"$sessions_root/$session/skills/standard-conformance" || return 1
+  [ "${#required[@]}" -eq 3 ] && [ "${#learned[@]}" -eq 2 ] || return 1
+  [ "${required[0]}" = "${learned[0]}" ] && [ "${required[1]}" = "${learned[1]}" ] || return 1
+  body=$(skill_read_in "${learned[1]}") || return 1
+  [[ $body == */standard-conformance/SKILL.md ]] || return 1
+  resolved=$(realpath -e -- "$body") || return 1
+  [ "${required[2]}" = "$resolved" ] || return 1
+  bundle_root=$(dirname -- "$(dirname -- "$(dirname -- "$resolved")")")
+  actual_root=$(realpath -e -- "$root") || return 1
+  [ "$bundle_root" = "$actual_root" ] || return 1
+  current=$(sha256sum <"$resolved" | cut -d ' ' -f 1) || return 1
+  [ "${learned[0]}" = "$current" ] || return 1
+  root_body=$(realpath -e -- "$root/skills/standard-conformance/SKILL.md") || return 1
+  root_digest=$(sha256sum <"$root_body" | cut -d ' ' -f 1) || return 1
+  [ "$current" = "$root_digest" ] || return 1
+  printf '%s\n' "$current"
+}
+
+command_conformance() {
+  local session=$1 repo=$2 root=$3 report=$4 state checker skill_digest checker_digest report_digest result status
+  [ -n "$session" ] && [ -n "$root" ] && [ -n "$report" ] ||
+    fail 'conformance には --session、--repo、--standard-root、--report が要る'
+  state="$sessions_root/$session/conformance"
+  [ -f "$state/required" ] || fail 'この session で standard-conformance の本文を成功した読取で確認していない'
+  rm -f -- "$state/receipt.json"
+  root=$(realpath -e -- "$root") || fail 'standard root を読めない'
+  repo=$(realpath -e -- "$repo") || fail 'project root を読めない'
+  report=$(realpath -e -- "$report") || fail '監査報告を読めない'
+  skill_digest=$(conformance_skill_digest "$session" "$root") ||
+    fail 'ROOT の正本束が、この session で成功readした現在の配備正本束と一致しない。canonical 本文を読み直す'
+  checker=$(realpath -e -- "$root/skills/standard-conformance/scripts/check-coverage.mjs") ||
+    fail 'coverage checker がない旧配備のため source update が必要'
+  [ -f "$checker" ] || fail 'coverage checker が通常fileでないため source update が必要'
+  checker_digest=$(sha256sum <"$checker" | cut -d ' ' -f 1)
+  report_digest=$(sha256sum <"$report" | cut -d ' ' -f 1)
+  if result=$(node "$checker" check --standard-root "$root" --project-root "$repo" --report "$report"); then
+    status=0
+  else
+    status=$?
+  fi
+  printf '%s\n' "$result"
+  [ "$status" -eq 0 ] || return "$status"
+  printf '%s' "$result" | jq -e '
+    (.status == "PASS" or .status == "WARN") and
+    (.standardDigest | type == "string" and test("^[0-9a-f]{64}$")) and
+    (.projectDigest | type == "string" and test("^[0-9a-f]{64}$"))
+  ' >/dev/null || fail 'coverage checker の成功結果に正本とprojectのdigestがないため source update が必要'
+  [ "$checker_digest" = "$(sha256sum <"$checker" | cut -d ' ' -f 1)" ] &&
+    [ "$report_digest" = "$(sha256sum <"$report" | cut -d ' ' -f 1)" ] ||
+    fail 'coverage check の走行中に checker または監査報告が変わった'
+  jq -n --argjson result "$result" --arg root "$root" --arg project "$repo" \
+    --arg report "$report" --arg checker "$checker" --arg skill "$skill_digest" \
+    --arg reportDigest "$report_digest" --arg checkerDigest "$checker_digest" \
+    '{version:1,status:$result.status,standardRoot:$root,projectRoot:$project,
+      reportPath:$report,checkerPath:$checker,skillDigest:$skill,
+      standardDigest:$result.standardDigest,projectDigest:$result.projectDigest,
+      reportDigest:$reportDigest,checkerDigest:$checkerDigest}' >"$state/receipt.json"
+}
+
+command_conformance_stop() {
+  local session=$1 state receipt root="" project="" report checker skill_digest report_digest checker_digest inventory reason resolved
+  local -a required
+  state="$sessions_root/$session/conformance"
+  [ -f "$state/required" ] || return 0
+  receipt="$state/receipt.json"
+  if [ -f "$receipt" ]; then
+    root=$(jq -r '.standardRoot // empty' "$receipt") || root=""
+    project=$(jq -r '.projectRoot // empty' "$receipt") || project=""
+    report=$(jq -r '.reportPath // empty' "$receipt") || report=""
+    if [ -n "$root" ] && [ -n "$project" ] && [ -f "$report" ] &&
+      checker=$(realpath -e -- "$root/skills/standard-conformance/scripts/check-coverage.mjs") &&
+      skill_digest=$(conformance_skill_digest "$session" "$root") &&
+      report_digest=$(sha256sum <"$report" | cut -d ' ' -f 1) &&
+      checker_digest=$(sha256sum <"$checker" | cut -d ' ' -f 1) &&
+      jq -e --arg checker "$checker" --arg skill "$skill_digest" \
+        --arg report "$report_digest" --arg script "$checker_digest" '
+        .version == 1 and (.status == "PASS" or .status == "WARN") and
+        .checkerPath == $checker and .skillDigest == $skill and
+        .reportDigest == $report and .checkerDigest == $script
+      ' "$receipt" >/dev/null &&
+      inventory=$(node "$checker" inventory --standard-root "$root" --project-root "$project") &&
+      jq -e --argjson inventory "$inventory" '
+        $inventory.status == "INVENTORY" and
+        .standardDigest == $inventory.standardDigest and .projectDigest == $inventory.projectDigest
+      ' "$receipt" >/dev/null; then
+      return 0
+    fi
+  fi
+  if [ -z "$root" ] && mapfile -t required <"$state/required" &&
+    [ "${#required[@]}" -eq 3 ] && resolved=$(realpath -e -- "${required[2]}"); then
+    root=$(dirname -- "$(dirname -- "$(dirname -- "$resolved")")")
+  fi
+  [ -n "$project" ] || project=$(cat "$state/project-hint")
+  reason='監査の完了が現在の標準とprojectに対して確認できない。'
+  if [ -n "$root" ] && [ ! -f "$root/skills/standard-conformance/scripts/check-coverage.mjs" ]; then
+    reason='coverage checker がない旧配備のため source update が必要。監査は未確認である。'
+  fi
+  {
+    printf '%s\n' "$reason"
+    printf '  実際の監査報告を Git checkout の外に置いて通す:\n'
+    printf '  dotfiles-agent-gate conformance --session %q --repo %q --standard-root %q --report %q\n' \
+      "$session" "${project:-PROJECT}" "${root:-ROOT}" "${report:-REPORT}"
+  } | tee /dev/stderr
+  return 1
+}
+
 command_hook() {
-  local kind=$1 payload session cwd path named marker held status=0
+  local kind=$1 payload session cwd path body proof digest physical marker held status=0
   payload=$(cat)
   session=$(printf '%s' "$payload" | jq -r '.session_id // empty')
   cwd=$(printf '%s' "$payload" | jq -r '.cwd // empty')
@@ -270,28 +512,34 @@ command_hook() {
     exit 0
     ;;
   learn)
-    # 読んだだけの周は止めない。規律を読んだ事実だけを控える。
+    printf '%s' "$payload" | jq -e '
+      .hook_event_name == "PostToolUse" and
+      (.tool_name == "read" or .tool_name == "Read") and
+      .is_error != true and .isError != true and
+      .tool_response.is_error != true and
+      .tool_response.error == null and .tool_response.success != false and
+      (.tool_input | type == "object" and (has("offset") or has("limit") | not))
+    ' >/dev/null || exit 0
     path=$(printf '%s' "$payload" |
       jq -r '.tool_input.path // .tool_input.file_path // .tool_input.filePath // empty')
-    command_learned "$session" "$(skill_read_in "$path")"
+    case $path in skill://* | /*) ;; *) path="$cwd/$path" ;; esac
+    body=$(skill_read_in "$path") || exit 0
+    proof=$(read_result_proof "$payload" "$body") || exit 0
+    digest=$(printf '%s' "$proof" | jq -er '.digest | select(test("^[0-9a-f]{64}$"))') || exit 0
+    physical=$(printf '%s' "$proof" | jq -er '.physicalPath | select(length > 0)') || exit 0
+    record_skill_read "$session" "$body" "$digest"
+    record_conformance_requirement "$session" "$body" "$cwd" "$physical"
     exit 0
     ;;
   edit)
-    # 読んだ規律を控える。読ませる側と控える側を分けると、読んだのに止まる周が出る。
     path=$(printf '%s' "$payload" |
       jq -r '.tool_input.path // .tool_input.file_path // .tool_input.filePath // empty')
-    named=$(skill_read_in "$path")
-    if [ -n "$named" ]; then
-      command_learned "$session" "$named"
-      exit 0
-    fi
     [ -n "$path" ] || exit 0
     case $path in /*) ;; *) path="$cwd/$path" ;; esac
     command_teach "$session" "$path" || exit 2
     exit 0
     ;;
   stop)
-    # この session が編集した repository だけを問う。読むだけの周は素通りする。
     if [ -n "$session" ] && [ -d "$sessions_root/$session" ]; then
       # 前だけ控えて後が届かなかった呼び出し(他の hook や許可に止められたもの)の控えを捨てる。
       rm -rf -- "$sessions_root/$session/calls"
@@ -303,6 +551,7 @@ command_hook() {
         command_check "$held" || status=2
       done
     fi
+    command_conformance_stop "$session" || status=2
     exit "$status"
     ;;
   *) usage ;;
@@ -314,7 +563,7 @@ main() {
   [ -n "$command" ] || usage
   shift || true
 
-  local repo=$PWD session="" reason="" text="" path=""
+  local repo=$PWD session="" reason="" text="" path="" standard_root="" report=""
   while [ "$#" -gt 0 ]; do
     case $1 in
     --repo)
@@ -337,6 +586,14 @@ main() {
       path=$2
       shift 2
       ;;
+    --standard-root)
+      standard_root=$2
+      shift 2
+      ;;
+    --report)
+      report=$2
+      shift 2
+      ;;
     arm | stop | edit | learn | observe) break ;;
     *) usage ;;
     esac
@@ -350,6 +607,7 @@ main() {
   entry) entry_of "$(repo_top_of "$repo")" ;;
   learned) command_learned "$session" "$path" ;;
   teach) command_teach "$session" "$path" ;;
+  conformance) command_conformance "$session" "$repo" "$standard_root" "$report" ;;
   skill) skill_for "$path" ;;
   hook) command_hook "${1-}" ;;
   *) usage ;;

@@ -30,6 +30,7 @@ let
     "agent-project-cache-gc"
     "agent-runtime-behavior"
     "agent-runtime-contract"
+    "agent-skill-read-gate"
     "agent-subagent-rendering"
     "agent-verification-cache"
     "lsp-registration"

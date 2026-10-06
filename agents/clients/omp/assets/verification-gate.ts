@@ -26,11 +26,13 @@ async function gate(
       ],
       { cwd, signal, timeout: 20_000 },
     );
-    return { code: result.code, text: result.stdout.trim() };
+    return {
+      code: result.code,
+      text: result.stdout.trim() || result.stderr.trim() || `Verification gate ${kind} exited with code ${result.code}.`,
+    };
   } catch (error) {
-    // 門が起こせないこと自体で仕事を止めない。止めるのは未検証と未読を観測したときだけである。
     pi.logger.warn("verification gate could not run", { kind, error: String(error) });
-    return { code: 0, text: "" };
+    return { code: 1, text: `Verification gate ${kind} could not run: ${String(error)}` };
   }
 }
 
@@ -52,13 +54,9 @@ export default function verificationGate(pi: ExtensionAPI): void {
       );
       return;
     }
-    if (READING_TOOLS[event.toolName] === true) {
-      await gate(pi, "learn", payload, ctx.cwd);
-      return;
-    }
     if (EDITING_TOOLS[event.toolName] !== true) return;
     const held = await gate(pi, "edit", payload, ctx.cwd);
-    if (held.code === 0 || held.text.length === 0) return;
+    if (held.code === 0) return;
     return { block: true as const, reason: held.text };
   });
 
@@ -79,6 +77,21 @@ export default function verificationGate(pi: ExtensionAPI): void {
       );
       return;
     }
+    if (READING_TOOLS[event.toolName] === true) {
+      if (event.isError) return;
+      await gate(
+        pi,
+        "learn",
+        {
+          ...payload,
+          hook_event_name: "PostToolUse",
+          is_error: false,
+          tool_result: { content: event.content, details: event.details },
+        },
+        ctx.cwd,
+      );
+      return;
+    }
     if (event.isError || EDITING_TOOLS[event.toolName] !== true) return;
     await gate(pi, "arm", payload, ctx.cwd);
   });
@@ -95,7 +108,7 @@ export default function verificationGate(pi: ExtensionAPI): void {
       ctx.cwd,
       event.signal,
     );
-    if (held.code === 0 || held.text.length === 0) return;
+    if (held.code === 0) return;
     return { decision: "block" as const, reason: held.text };
   });
 }

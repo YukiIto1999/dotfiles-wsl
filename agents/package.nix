@@ -120,6 +120,7 @@ let
       coreutils
       git
       jq
+      nodejs
     ];
     text =
       builtins.replaceStrings

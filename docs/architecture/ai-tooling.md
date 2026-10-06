@@ -72,6 +72,27 @@ runtimeはsession ID、sessionを始めたproject、owner process、boot ID、�
 
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
 
+[`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
+記録するのは、成功した読取後のeventで観測した`skill://NAME`、`skill://NAME/SKILL.md`、設定済みSkill rootの`NAME/SKILL.md`の本文読取だけであり、呼出し前、失敗、reference、部分読取、編集操作は証拠にしない。
+記録の前に、OMPの実resultが示すsourceと表示本文、Claudeの成功したtext resultが示すfile pathと本文を現在のcanonical本文へ照合し、省略、要約、token cap、途中のpage、本文を持たない結果は証拠にしない。
+記録には配備先のsymlinkを解決した本文のSHA-256を保存し、編集時に現在の本文と照合するため、配備内容が変わったら読み直す。
+`learned --session ID --path NAME`は、既存の配備済み本文を管理者が明示的に承認するための信頼された操作として残し、通常の読取hookの代わりには使わない。
+
+`standard-conformance`のcanonical本文を成功した読取eventで読んだsessionは、監査完了の確認が済むまで終了できない。
+`standard-apply`だけの読取や管理者の`learned`操作から、この監査義務を推定しない。
+`dotfiles-agent-gate conformance --session ID --repo PROJECT --standard-root ROOT --report REPORT`は、成功read時に記録したcanonical `SKILL.md`の物理pathの三段上を正本rootとし、現在の配備先と指定ROOTの物理pathとの一致を要求する。
+同じ物理rootを指すsymlinkは受理するが、同じSkill本文をコピーした別の正本束は受理しない。
+現在のSkill本文hashも照合してから、この正本束に含まれる実際のcoverage checkerをNodeで実行する。
+報告は対象Git checkoutの外に置き、baselineの正本は対象projectのrootを表す`PROJECT`の下の`PROJECT/docs/conformance-baseline.json`とする。
+checkerがexit 0で`PASS`か`WARN`を返した場合だけ、観測した標準とprojectのdigest、報告とcheckerのhash、各pathをsessionのreceiptへ保存する。
+終了時は現在のinventoryとこれらのhashを照合し、同じ木の`check`を重複実行せずに、確認の欠落や後の変更を拒否する。
+旧配備のSkillにcheckerがなければ確認済みとして通さず、source updateと実session IDを含む実行commandを案内する。
+
+OMPのgate起動例外は説明付きの非ゼロ結果となり、編集前とsession終了時の判定はgateが起動しない場合も処理を止める。
+読取後の記録、編集後のrepository登録、shell実行後の変更観測は実行済みのtoolを取り消せず、後段hook自体が失敗すると記録が残らないこともある。
+終了時の検証gateが要求するのは、編集を記録したrepository自身が宣言するT1の`verify`入口だけであり、入口を持たないrepositoryには要求しない。
+このgateは通常のhook経路でtoolが返した全文とその鮮度、成功readした配備正本束との一致、文書単位の監査完了を確認するもので、悪意あるagentからの防御、注意や理解、後続compactionでの本文保持、正しい監査対象の選択、証拠やcheckの意味と真偽、標準全体への意味的な適合を保証しない。
+
 ## 資源の上限
 
 wrapperから起動したclientは、launcherが`systemd-run --user --scope`で作るsession単位のscopeの中で動き、そのscopeはsystemd userの`agents.slice`に属する。scope名は`dotfiles-agent-<client>.<pid>.<suffix>.scope`で、session directoryの名前から導く。clientが起動したbuild、test、browser、VMもscopeに入るため、slice全体で次の上限を共有する。値は`dotfiles.agents.slice`のoptionで変えられる。

@@ -23,7 +23,7 @@ effort: xhigh
 
 1. 受入済みplan、変更behavior、変更禁止範囲を確認する。
 2. taskに一致するSkillを読み、test-firstなら`tdd`のred → greenを使い、refactoringは確定したbehaviorとscopeを保つ実装作業として進める。
-   CLIの契約は`cli-design`、property-based testの入力領域と独立oracleは`property-testing`で確定し、既存の実装loopへ渡す。
+   CLIとterminalの契約は標準のconsole構造、property-based testの入力領域と独立oracleは`property-testing`で確定し、既存の実装loopへ渡す。
 3. obsoleteなcaller、compatibility path、scaffoldを残さずclean cutoverする。
 4. changed contractを実測する。
 

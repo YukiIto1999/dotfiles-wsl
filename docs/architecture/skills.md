@@ -139,9 +139,10 @@ guideを独自Skillへ再編集せず、projectのbrowser supportと前提を照
 
 ## 標準Skillの配備条件
 
-`cli-design`と`property-testing`の正本はarchitecture-standardの`skills/<id>/SKILL.md`であり、両方とも`requiresSkills = [ \"standard-apply\" ]`、`requiresCapabilities = [ ]`を使う。
-published revisionを固定してwhole sourceから両Skillを直接採用し、architectとimplementerのdynamic routeへ登録する。
-CLIの公開契約とterminalの取得を`cli-design`、入力領域と独立oracleとshrinkingを`property-testing`へ分け、実装は既存の`tdd`へ渡す。
+`property-testing`の正本はarchitecture-standardの`skills/property-testing/SKILL.md`であり、`requiresSkills = [ \"standard-apply\" ]`、`requiresCapabilities = [ ]`を使う。
+published revisionを固定してwhole sourceから直接採用し、architectとimplementerのdynamic routeへ登録する。
+CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfaces/console/layout.md`へ進み、moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとshrinkingは`property-testing`、実装は既存の`tdd`が扱う。
+標準の`skills/cli-design/`はwhole source内に保持するが、named discoveryとsubagent routeには登録しない。
 未commitのlocal checkoutを恒久sourceにせず、標準の公開後に固定inputとlockを更新する。
 
 ## Custom Skillの責務

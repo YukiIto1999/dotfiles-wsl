@@ -22,11 +22,6 @@
     }
     {
       subagent = "architect";
-      skill = "cli-design";
-      activation = "dynamic";
-    }
-    {
-      subagent = "architect";
       skill = "property-testing";
       activation = "dynamic";
     }
@@ -98,11 +93,6 @@
     {
       subagent = "implementer";
       skill = "codebase-design";
-      activation = "dynamic";
-    }
-    {
-      subagent = "implementer";
-      skill = "cli-design";
       activation = "dynamic";
     }
     {

@@ -67,10 +67,6 @@ let
             "web-research"
           ];
         };
-        cli-design = {
-          requiresCapabilities = [ ];
-          requiresSkills = [ "standard-apply" ];
-        };
         property-testing = {
           requiresCapabilities = [ ];
           requiresSkills = [ "standard-apply" ];

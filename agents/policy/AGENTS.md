@@ -72,7 +72,7 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 
 `codebase-design`はmodule、interface、seamを設計する共通語彙であり、`diagnosing-bugs`は故障と性能回帰のfeedback loopから修正、regression testまでを扱う。
 test-firstの実装には`tdd`のred → greenを使い、refactoringをそのloopへ混ぜない。
-CLIの公開契約やterminalを取得する一回限りの操作を設計するときは`cli-design`を使う。
+CLIとterminalの契約は`standard-apply`が読む標準のconsole構造に従い、moduleのinterfaceとseamを`codebase-design`で設計する。
 入力領域、独立oracle、state machine、shrinkingを設計するときは`property-testing`を使い、単にtest数を増やす目的では起動しない。
 実装とrefactoringでは、新規機構より不要な処理の削除、既存owner、標準library、native機能、導入済みdependencyを先に比較し、要件と安全性を削減対象にしない。
 通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecの並列workerへ渡して、二軸を分けて集約する。

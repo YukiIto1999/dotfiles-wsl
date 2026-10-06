@@ -575,6 +575,9 @@ in
         ];
         GATE = lib.getExe runtime.gate;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
+        CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
+        UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;
+        DOMAIN_MODELING_SOURCE = hostConfig.dotfiles.agents.shared.skills.domain-modeling;
         COVERAGE_CHECKER = "${pluginSources.architecture-standard}/skills/standard-conformance/scripts/check-coverage.mjs";
       }
       ''
@@ -599,6 +602,9 @@ in
         VERIFY = lib.getExe runtime.verify;
         GATE = lib.getExe runtime.gate;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
+        CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
+        UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;
+        DOMAIN_MODELING_SOURCE = hostConfig.dotfiles.agents.shared.skills.domain-modeling;
         COVERAGE_CHECKER = "${pluginSources.architecture-standard}/skills/standard-conformance/scripts/check-coverage.mjs";
       }
       ''

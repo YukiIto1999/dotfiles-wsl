@@ -10,7 +10,7 @@ AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycle�
 agents/policy/AGENTS.md ───────────────────┐
 agents/subagents/*.md ── client変換 ──────────┤
 skills/*/skill/ ──────────────────────────┼─► Nix store ─► 各clientの設定領域
-flake inputのplugin Skill ─────────────────┘
+Orca / architecture-standard / Matt / Ponytailの固定source ─┘
 
 Agent ─► Skill ─► Capability ─► provider adapter ─► Platform MCP ─► gateway
                          └────► backend / credential / persistent state
@@ -19,13 +19,16 @@ AI CLI ─► LSP ─► language server
        └► OTLP ─► telemetry collector
 ```
 
-[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)はsubagentからSkillへのroutingとsubagent間handoffだけを持つ。provider名、backend名、直接provider例外は置かない。Skillの依存は各[`skills/NAME/module.nix`](../../skills)が`requiresSkills`と`requiresCapabilities`で宣言する。
+[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)はsubagentからSkillへのroutingとsubagent間handoffだけを持ち、provider名、backend名、直接provider例外は置かない。
+Skillの依存は取込ownerのNix moduleが`requiresSkills`と`requiresCapabilities`で宣言し、外部Skillでは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が所有する。
 
 実行時の原則は`Agent → Skill → Capability → provider/runtime`である。Agentはtask、権限、委譲、成果物handoffを所有する。Skillは反復する判断、手順、停止条件を所有する。Capabilityはconsumerに依存しない機能contractである。provider adapter、container、database、credential、stateはCapabilityの実装詳細であり、AgentやSkillへ逆依存しない。
 
 Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能はAgentが直接使う。repositoryに配備するproviderは次のCapabilityを通す。
 
-Capability実装の正本は各`capabilities/<id>/module.nix`にある。Task入口の正本は各[`skills/<id>/module.nix`](../../skills)にある`requiresCapabilities`であり、Skill配備をゲートし、policyのCapability対応へ記載する。現在のCapability IDは次で取得できる。
+Capability実装の正本は各`capabilities/<id>/module.nix`にあり、Task入口はlocalまたはpluginの採用moduleにある`requiresCapabilities`が宣言する。
+この宣言はSkill配備をゲートし、policyのCapability対応へ記載する。
+現在のCapability IDは次で取得できる。
 
 ```bash
 nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.registry --apply builtins.attrNames
@@ -51,6 +54,8 @@ Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置�
 Agent clientへ配るのは、解決したSkill registryの`source` directoryとその本文、reference、scriptである。
 必要なSkillを失ったsubagentとそのhandoffも配備しない。
 Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsource差替えはNixの明示的なoverrideだけで行う。
+Orca、architecture-standard、Matt Pocock、Ponytailは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
+採用IDとpath、revision、licenseの関係は[Skill portfolio](skills.md#直接採用)、登録と差替の契約は[外部リポジトリ所有Skillの構成](repository-skills.md)を参照する。
 
 ## Client binary
 
@@ -147,6 +152,8 @@ HTTP専用のsession作成rateをstdioの呼出し制限として設定しない
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
 
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
+`browser-diagnostics`のSkill入口は`diagnosing-bugs`であり、実browserを使う操作は`browser-operation`の規律を通す。
+Matt/Ponytailの原版を採用しても、gateway接続、accountの選択、権限、副作用の安全境界を上流本文のtool例で置き換えない。
 
 現在のtarget名は次で取得できる。
 

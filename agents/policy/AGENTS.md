@@ -54,7 +54,9 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 
 ## skills
 
-繰り返し作業は手で再現せず、対応する Skill を読む。下表は全 client に配る共通 Skill の責務を示す。client 固有または plugin 由来の Skill は session が提示した名前を使い、namespace がある場合は省略しない。
+繰り返し作業は手で再現せず、対応するSkillを読む。
+下表の目的欄は配備元のfrontmatter descriptionをそのまま使い、Matt/PonytailのSkillもupstreamの名前、本文、付属資料で配る。
+client固有またはplugin由来のSkillはsessionが提示した名前を使い、namespaceがある場合は省略しない。
 
 依存方向は `agent → Skill → Capability → provider / runtime` とする。agent は task の委譲、context、権限、成果物の引渡しを所有し、Skill は反復する判断と手順を所有し、Capability は consumer 非依存の意味、state、security、lifecycle を所有する。provider と runtime は Capability の実装詳細であり、agent や Skill が直接選ばない。
 
@@ -64,13 +66,27 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 
 @skillRoster@
 
+`codebase-design`はmodule、interface、seamを設計する共通語彙であり、`diagnosing-bugs`は故障と性能回帰のfeedback loopから修正、regression testまでを扱う。
+test-firstの実装には`tdd`のred → greenを使い、refactoringをそのloopへ混ぜない。
+`ponytail`は実装やrefactoringを含むcoding taskで既存機構、標準library、native機能を優先し、`ponytail-review`は過剰設計だけをレビューする。
+通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecの並列workerへ渡して、二軸を分けて集約する。
+reviewerはcallerが渡した一つのaxis briefだけを担当し、再帰的なspawnや軸間の統合、並べ直しをしない。
+raw upstreamの`code-review`にstaged / unstaged diffを代入しない。
+`setup-matt-pocock-skills`はengineering Skillが使うrepository設定を確認して合意後に書く依存commandであり、`improve-codebase-architecture`は利用者が明示的に呼ぶ探索commandである。
+upstreamの手順や簡潔化の提案によって、指定された要件、安全策、秘密情報の扱い、操作の承認、実行していない検証の報告に関する規律を弱めない。
+
 ## 基盤
 
 ### MCP
 
-全clientは単一のgatewayからprovider実装を使う。container、service、databaseを背後に持つ実装は、対応する Capability の内側に置く。agentはSkillを入口にし、Skillが宣言したCapabilityだけを要求する。provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。
+全clientは単一のgatewayからprovider実装を使う。
+container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
+agentはSkillを入口にし、下表でそのSkillに対応づけられたCapabilityだけを使う。
+browser-diagnosticsの入口は`diagnosing-bugs`だが、実際のbrowser操作は`browser-operation`、GitHub操作は`github-operations`など、sessionが提供する環境のtool routingに従う。
+upstreamがCLIや直接接続を例示していても、provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。
 
-入口 Skill を持たない Capability は、他の Capability の依存である。agent がそれを直接起動したり、接続を個別に操作したりしない。
+入口Skillを持たないCapabilityは、他のCapabilityの依存である。
+agentがそれを直接起動したり、接続を個別に操作したりしない。
 
 @capabilityRoster@
 

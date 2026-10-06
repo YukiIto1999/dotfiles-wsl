@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-14",
   "cases": [
     {
       "id": "existing-system-operations-flow",
@@ -48,7 +47,7 @@
       "prompt": "既存design systemを使い、請求差異を調査する画面のUI briefを作った上で、page固有component tree、state owner、propsを設計してください。production codeは書かないでください。",
       "expectedSkills": [
         "ui-design",
-        "code-design"
+        "codebase-design"
       ],
       "expected": {
         "keepsUiDecisionsSeparateFromComponentStructure": true,
@@ -59,7 +58,7 @@
       "id": "private-component-tree-only",
       "prompt": "情報階層、interaction、visual、responsive方針は確定済みです。page固有component tree、state owner、props、eventを設計してください。",
       "expectedSkills": [
-        "code-design"
+        "codebase-design"
       ],
       "mustNotTrigger": [
         "ui-design"
@@ -68,7 +67,7 @@
     {
       "id": "frontend-implementation",
       "prompt": "承認済みのUI briefとcomponent設計に従い、このReact画面をproduction品質で実装してください。",
-      "expectedSkills": [],
+      "expectedSkills": ["ponytail"],
       "mustNotTrigger": [
         "ui-design"
       ]
@@ -85,7 +84,7 @@
       "id": "shared-component-owner",
       "prompt": "複数featureが使うUI primitiveのownerとdependency directionを決めてください。見た目とinteraction方針は確定済みです。",
       "expectedSkills": [
-        "module-design"
+        "codebase-design"
       ],
       "mustNotTrigger": [
         "ui-design"
@@ -95,7 +94,7 @@
       "id": "public-component-contract",
       "prompt": "共有componentを外部featureへ公開するprops、event、互換性をexact contractとして設計してください。内部treeと見た目は扱いません。",
       "expectedSkills": [
-        "interface-design"
+        "codebase-design"
       ],
       "mustNotTrigger": [
         "ui-design"
@@ -105,7 +104,7 @@
       "id": "browser-performance-cause",
       "prompt": "この画面の入力遅延をbrowser traceで測定し、critical path上のbottleneckを特定してください。UIの見た目は変更しません。",
       "expectedSkills": [
-        "performance-analysis"
+        "diagnosing-bugs"
       ],
       "mustNotTrigger": [
         "ui-design"

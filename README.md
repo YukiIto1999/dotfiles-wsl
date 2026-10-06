@@ -14,10 +14,12 @@ OS、Home Manager、開発ツール、AIコーディング環境、暗号化済�
 - compiler、language server、formatter、Gitと、`btop`、`hyperfine`などのCLIを配備する。
 - Bashの履歴はAtuinでローカルに保存し、自動同期を有効にしない。
 - AI clientはregistryのadapterから選び、採用したclientだけに設定、Skill、subagentを配備する。
-- Skillはrepository内の正本と、revisionを固定した外部sourceから採用する。
+- Skillはrepository内のcustom正本と、revisionを固定したOrca、architecture-standard、Matt Pocock、Ponytailの原版から採用する。
 - MCP server、Docker backend、GitHub PAT、backend credentialを宣言する。
 
-生成済みの設定ファイルは直接編集しない。正本は、この checkout 内の Nix 宣言、asset、暗号化済み secret に置く。
+生成済みの設定ファイルは直接編集しない。
+配備宣言はこのcheckout内のNix、asset、暗号化済みsecretが所有し、外部Skillの本文と資材は固定sourceの任意directoryを原名のIDで直接参照する。
+本文変換や旧名のaliasは作らず、sourceと責務の違いは[Skill portfolio](docs/architecture/skills.md)にまとめる。
 
 ## 操作
 

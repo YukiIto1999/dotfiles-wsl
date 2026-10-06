@@ -116,7 +116,7 @@
 | WSL の既定 user と root の systemd user manager を linger で常駐させ、WSL の自動終了後の起動でも login session を作れるようにする | `wsl-user-session-contract` |
 | WSL の extraBin に必須の名前が揃い、名前が重複せず、store 由来の entry が実行可能である | `wsl-extra-bin-contract` |
 | localとpluginの全SkillのSKILL.mdがfrontmatterを持ち、nameがregistry IDと一致し、descriptionが空でない | `skill-frontmatter-contract` |
-| 外部Skillの本文、reference、scriptを直接採用し、同IDの明示差替えと依存metadataの除去を反映し、不正source、未知依存、曖昧な重複を拒否する | `skill-source-contract` |
+| 外部Skill directoryを変換せず直接登録し、同IDの明示差替え、依存metadataの切替、client共有sourceへの反映を検査し、不正source、未知依存、曖昧な重複を拒否する | `skill-source-contract` |
 | cleanup が現在と保持中の Home Manager generation から backup の exact path を導き、home と system の削除を別の権限境界で実行する | `cleanup-home-backups` |
 | image sync が不足分だけを pull し、宣言済み image へ専用 namespace の tag を付けて dangling prune から外し、pin が切れた状態を status で検出する | `oci-image-sync-behavior` |
 | HindsightのcredentialがSOPS templateからroot所有の環境 fileを経てcontainerへ渡る | `hindsight-container` |

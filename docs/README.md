@@ -28,8 +28,8 @@
 - [構成概要](architecture/overview.md)では、Profile、Workstation、Agent、Skill、Capability、Platform、運用基盤の責務境界が分かる。
 - [責務と履歴の凝集](architecture/cohesion.md)では、unit、file、commitを分ける基準が分かる。
 - [AI tooling](architecture/ai-tooling.md)では、AgentからSkill、Capability、MCP/container Platformへ至る依存関係が分かる。
-- [Skill source](architecture/repository-skills.md)では、外部repository所有Skillの固定、登録、明示的な差替えの境界が分かる。
-- [Skill portfolio](architecture/skills.md)では、採用済みSkillの責務とsourceの来歴が分かる。
+- [Skill source](architecture/repository-skills.md)では、固定した上流原版の直接登録と、供給元を明示的に差し替える契約が分かる。
+- [Skill portfolio](architecture/skills.md)では、直接採用する原版のIDと来歴、routing、残すcustom Skillの責務が分かる。
 - [セキュリティ設計](architecture/security.md)では、credential、host key、通信経路の信頼境界が分かる。
 
 ## 参照 — `reference/`

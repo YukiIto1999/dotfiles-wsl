@@ -4,7 +4,7 @@
 
 外部Skillもlocal Skillも、`dotfiles.skills.registry`の一つのentryとして登録する。
 clientは`dotfiles.skills.enabled`から選んだentryのsourceを配備するだけであり、供給元ごとのregistryや取得処理を持たない。
-Skillのsourceは固定したrepositoryから直接参照し、本文や資材を`skills/<id>/skill/`へ手作業で複製しない。
+Skillのsourceは固定したrepositoryから直接参照し、本文や資材を`skills/<id>/skill/`へ複製、変換せず、原名のIDを使う。
 
 ## 所有
 
@@ -40,7 +40,7 @@ runtime: Agent -> Skill -> Capability -> provider/runtime
 
 `SKILL.md`のfrontmatterにはregistry IDと一致する`name`と、空でない`description`が必要である。
 sourceのdirectory名やupstreamでの配置は自由であり、全repositoryに`skills/<id>/`を要求しない。
-source directoryを直接渡すため、同梱のreferenceやscriptもそのまま使え、本文を変換するadapterは不要である。
+source directoryを直接渡すため、同梱のreferenceやscriptも上流のまま使い、本文変換や旧名のaliasを作らない。
 repository内の別directoryを相対参照するSkillでは、その参照先を含む固定sourceを保ち、Skill directoryだけを切り出さない。
 
 同じ優先度で同IDのsourceを複数moduleが宣言すると、同じpathを指定していてもNix optionのmergeが失敗する。
@@ -55,7 +55,7 @@ repository内の別directoryを相対参照するSkillでは、その参照先�
 4. 同IDが既にある場合は、別entryを追加せず次節の差替として扱う。
 
 既存pluginの追加採用は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表を変更する。
-この表が使う`skills/<id>/`は既存sourceの配置であり、registryの共通要件ではない。
+採用表ではsource rootからの相対directory pathを選べるため、Mattの`skills/engineering/<id>/`や`skills/productivity/<id>/`も、そのまま登録できる。
 upstreamにSkillが増えても、採用moduleが登録するまで配備対象にはならない。
 Skill登録時の自動download、更新時の無固定取得、新しいsource registryは導入しない。
 sourceをNix storeへ取り込む前に、秘密情報、認証資格情報、非公開の作業記録が含まれないことを取込ownerが確認する。
@@ -67,14 +67,14 @@ sourceをNix storeへ取り込む前に、秘密情報、認証資格情報、�
 entry全体を置き換えると、旧sourceの依存listが差替先へ暗黙に残らない。
 clientやroutingが使うIDは維持され、本文と資材の供給元だけを交換できる。
 
-次のmoduleは、同梱fixtureを使ってlocalの`bug-analysis`を同IDの別sourceへ差し替える再現例である。
+次のmoduleは、同梱fixtureで`browser-operation`を同IDの別sourceへ差し替える登録契約の例である。
 空の依存listはこのfixtureの宣言であり、実際の上流Skillについて依存がないと主張する例ではない。
-例の相対pathは`profiles/hosts/`のhost moduleへ書く場合の指定である。
+例の相対pathは`profiles/hosts/`のhost moduleへ書く場合の指定であり、fixtureを恒久的なSkillの供給元にはしない。
 
 ```nix
 { lib, ... }: {
-  dotfiles.skills.registry.bug-analysis = lib.mkForce {
-    source = ../../skills/fixtures/external-source/procedures/bug-analysis;
+  dotfiles.skills.registry.browser-operation = lib.mkForce {
+    source = ../../skills/fixtures/external-source/procedures/browser-operation;
     requiresCapabilities = [ ];
     requiresSkills = [ ];
   };
@@ -83,14 +83,14 @@ clientやroutingが使うIDは維持され、本文と資材の供給元だけ�
 
 実際の差替では、このsourceを固定したupstreamのSkill directoryへ置き換え、確認した依存listを同じentryへ宣言する。
 依存契約を変えないと取込ownerが確認した場合は、entryの`source`だけを`lib.mkForce`で置き換えることもできる。
-たとえばlocalの`grilling`を元の外部Skillへ戻す場合は、固定したMatt Pocock repositoryの`skills/productivity/grilling/`をsourceに選び、licenseと本文、依存を見直す。
 上流のnameが異なる場合は本文を書き換えて同IDを装わず、ID変更に伴うcallerとroutingの変更として扱う。
 元に戻すときは差替定義を取り除くか、元の採用moduleが指すsourceへ明示的に戻す。
 外部Skillへの恒久切替で旧local本文が不要になった場合は、旧登録と本文を削除し、同IDの配備経路を二つ残さない。
 
 ## 現在のplugin
 
-採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orcaとarchitecture-standardの固定sourceを使う。
+採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orca、architecture-standard、Matt Pocock、Ponytailの固定sourceを使う。
+MattとPonytailの採用ID、directory path、revision、licenseとroutingの違いは[Skill portfolio](skills.md#直接採用)にまとめる。
 Orcaのlegacy aliasである`linear-tickets`は`orca-linear`とroutingを分けるため採用しない。
 architecture-standardの規範本文は配備済みsourceから読み、`standard-feedback`は`github-resources`を要求する。
 
@@ -100,9 +100,14 @@ clientごとの`.claude/skills/`などはadapterの投影先であり、正本�
 同梱のClaude Code専用evaluatorは任意のconsumerであり、通常のSkill利用のCapability要件にはしない。
 別repositoryから標準を変えるときは、`environment-design`から作業checkoutの`skills/standard-update/SKILL.md`へ渡し、配備済みsourceを編集しない。
 
+Mattの`code-review`は`setup-matt-pocock-skills`を、`tdd`は`codebase-design`と`code-review`をSkill依存に持つ。
+`diagnosing-bugs`は`improve-codebase-architecture`を、`improve-codebase-architecture`は`codebase-design`、`domain-modeling`、`grilling`を使う。
+`research`の外部tool利用にはcustomの`web-research`を組み合わせ、browserやGitHubの実呼出しも環境側のroutingを維持する。
+原版のcommandやtool例を合わせるために本文を書き換えず、安全規律、権限、gatewayへの接続は取込側が所有する。
+
 ## 検査
 
-[`skills/checks.nix`](../../skills/checks.nix)の`skill-source-contract`は、外部sourceの直接採用、同IDのentry差替、依存metadataの切替、client共有sourceへの反映、referenceとscriptの利用を検査する。
+[`skills/checks.nix`](../../skills/checks.nix)の`skill-source-contract`は、sourceの直接登録、同IDのentry差替、依存metadataの切替、client共有sourceへの反映を検査する。
 不存在source、fileをsourceにした指定、directoryの`SKILL.md`、不正ID、未知の依存、metadata未指定、無指定の同ID衝突、競合する差替も拒否する。
 frontmatterとIDの不一致は、このcheckと`skill-frontmatter-contract`が検査する。
 sourceの検査は優先度を解決した最終registryに対して行い、不採用になった旧sourceを別経路で検査しない。

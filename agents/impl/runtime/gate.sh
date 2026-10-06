@@ -186,12 +186,12 @@ skill_for() {
   */tests/* | *.test.ts | *.test.tsx | *Tests.cs | *.doubles.ts | *.doubles.tsx | *.feature)
     printf ''
     ;;
-  */application/ports/* | */contracts/canonical/* | *.tsp) printf 'interface-design' ;;
-  *Refusal*.cs | *Failure*.cs | */errors/*) printf 'error-design' ;;
+  */application/ports/* | */contracts/canonical/* | *.tsp) printf 'codebase-design' ;;
+  *Refusal*.cs | *Failure*.cs | */errors/*) printf 'codebase-design' ;;
   */domain/* | */entities/*) printf 'domain-modeling' ;;
   *.tsx | */surfaces/viewer/* | */runtimes/web/*) printf 'ui-design' ;;
-  *.csproj) printf 'module-design' ;;
-  */core/* | */surfaces/* | */libs/*) printf 'code-design' ;;
+  *.csproj) printf 'codebase-design' ;;
+  */core/* | */surfaces/* | */libs/*) printf 'codebase-design' ;;
   *) printf '' ;;
   esac
 }

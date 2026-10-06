@@ -25,6 +25,16 @@
       url = "github:YukiIto1999/architecture-standard/73d685fb7a9ae3d8be4fd9d494e2f6342f103a19";
       flake = false;
     };
+
+    mattSkills = {
+      url = "github:mattpocock/skills/8b78b531ab965735c5dc74f6f7a219e1e37326df";
+      flake = false;
+    };
+
+    ponytail = {
+      url = "github:DietrichGebert/ponytail/2ed6c52c9d7e5e56942508591085fd45dea277d3";
+      flake = false;
+    };
   };
 
   outputs =
@@ -36,6 +46,8 @@
       sops-nix,
       orca,
       architectureStandard,
+      mattSkills,
+      ponytail,
       ...
     }:
     let
@@ -48,7 +60,8 @@
       );
       hostNames = map (lib.removeSuffix ".nix") (builtins.attrNames hostProfileEntries);
       pluginSources = {
-        inherit orca;
+        inherit orca ponytail;
+        matt-pocock = mattSkills;
         architecture-standard = architectureStandard;
       };
       collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };

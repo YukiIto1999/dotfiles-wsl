@@ -581,21 +581,21 @@ in
             export HOME="$PWD/${name}-home"
             mkdir -p "$HOME"
             ${lib.concatMapStrings (id: ''
-              mkdir -p "$HOME/${expected.clients.${id}.skillsDestination}/code-design"
+              mkdir -p "$HOME/${expected.clients.${id}.skillsDestination}/codebase-design"
             '') (builtins.filter (id: !(builtins.elem id selection.enabled)) expected.required)}
             ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null
             mkdir -p "$HOME/${
               expected.clients.${builtins.head selection.enabled}.skillsDestination
-            }/code-design"
-            cp ${configuration.dotfiles.agents.shared.skills.code-design}/SKILL.md \
+            }/codebase-design"
+            cp ${configuration.dotfiles.agents.shared.skills.codebase-design}/SKILL.md \
               "$HOME/${
                 expected.clients.${builtins.head selection.enabled}.skillsDestination
-              }/code-design/SKILL.md"
+              }/codebase-design/SKILL.md"
             if ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null 2>&1; then
               echo "selected Skill root did not enforce its discipline: ${name}" >&2
               exit 1
             fi
-            ${gate} learned --session ${name} --path code-design
+            ${gate} learned --session ${name} --path codebase-design
             ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null
           ''
         ) (builtins.attrNames selectionCases)}
@@ -1254,6 +1254,14 @@ in
     assert clients.antigravity.subagents == { };
     assert lib.all (name: builtins.elem name sharedSkillNames) routedSkillNames;
     assert lib.sort builtins.lessThan routedSubagentNames == sharedSubagentNames;
+    assert requiredSkillsBySubagent.reviewer == [ ];
+    assert lib.any (
+      route: route.subagent == "reviewer" && route.skill == "code-review" && route.activation == "dynamic"
+    ) routingContract.subagentSkills;
+    assert lib.any (
+      route:
+      route.subagent == "reviewer" && route.skill == "ponytail-review" && route.activation == "dynamic"
+    ) routingContract.subagentSkills;
     assert
       builtins.length subagentSkillRouteKeys == builtins.length (lib.unique subagentSkillRouteKeys);
     assert builtins.length subagentHandoffKeys == builtins.length (lib.unique subagentHandoffKeys);
@@ -1335,6 +1343,9 @@ in
         grep -Eq '^#{1,6}[[:space:]]+[^[:space:]]' "$rulesSource"
         grep -Fxq '| `browser-runtime` | なし |' "$transitiveCapabilityRules"
         grep -Fxq '| `browser-automation` | `browser-operation` |' "$transitiveCapabilityRules"
+        ${lib.optionalString (builtins.elem "browser-diagnostics" hostConfig.dotfiles.capabilities.resolved) ''
+          grep -Fxq '| `browser-diagnostics` | `diagnosing-bugs` |' "$rulesSource"
+        ''}
         while IFS=$'\t' read -r subagent skill; do
           source="$sharedSubagentFarm/$subagent"
           if ! grep -Fq "\`$skill\`" "$source"; then

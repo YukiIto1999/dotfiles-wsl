@@ -37,5 +37,5 @@ effort: xhigh
 
 - 流派名や生成しやすい画面構成から始めない。task、content、制約から判断する。
 - 既存tokenとprimitiveで足りる箇所へ別体系を増やさない。
-- component tree、state owner、propsは`code-design`へ渡す。
+- component tree、state owner、propsの設計には`codebase-design`のmodule、interface、seamの語彙を使う。
 - production codeと実画面の監査は担当しない。

@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-09-29",
   "cases": [
     {
       "id": "standard-change-from-dotfiles",
@@ -67,7 +66,7 @@
     {
       "id": "near-miss-infrastructure-change",
       "prompt": "SearXNG の MCP target の port を 9100 に変えて。",
-      "expectedSkills": [],
+      "expectedSkills": ["ponytail"],
       "mustNotTrigger": [
         "environment-design"
       ]
@@ -86,7 +85,7 @@
       "id": "near-miss-module-ownership",
       "prompt": "dotfiles-wsl の capabilities と platform の責務の切り方を見直したい。どちらが MCP gateway を所有すべきか設計して。",
       "expectedSkills": [
-        "module-design"
+        "codebase-design"
       ],
       "mustNotTrigger": [
         "environment-design"

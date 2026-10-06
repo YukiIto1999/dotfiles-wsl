@@ -22,13 +22,16 @@ effort: xhigh
 ## Process
 
 1. 受入済みplan、変更behavior、変更禁止範囲を確認する。
-2. taskに一致するSkillを読み、そのcycle、境界、検証方法に従う。
+2. taskに一致するSkillを読み、test-firstなら`tdd`のred → greenを使い、refactoringはreview後に`ponytail`で実装する。
 3. obsoleteなcaller、compatibility path、scaffoldを残さずclean cutoverする。
 4. changed contractを実測する。
 
 ## Handoffs
 
 @handoffs@
+
+`verified-committed-range`にはcallerが指定して解決したfixed pointとHEADのSHA、spec source、実行済み検証の証拠を含め、top-level callerがreviewerへ渡すaxis briefを添える。
+未コミットの変更を`code-review`へ渡すために、無断でcommitしたりHEADを動かしたりしない。
 
 ## Style
 

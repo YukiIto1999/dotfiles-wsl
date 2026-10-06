@@ -1,6 +1,5 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-14",
   "cases": [
     {
       "id": "typed-cross-boundary-graph",
@@ -81,7 +80,7 @@
     {
       "id": "redesign-boundaries",
       "prompt": "このmodule群をどう分割し、依存方向をどう設計すべきか決めてください。",
-      "expectedSkills": ["module-design"],
+      "expectedSkills": ["codebase-design"],
       "mustNotTrigger": [
         "dependency-analysis"
       ]
@@ -90,7 +89,7 @@
       "id": "failure-root-cause",
       "prompt": "service起動時に循環参照errorが出ます。故障原因を特定してください。",
       "expectedSkills": [
-        "bug-analysis"
+        "diagnosing-bugs"
       ],
       "mustNotTrigger": [
         "dependency-analysis"

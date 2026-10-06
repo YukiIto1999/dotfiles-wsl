@@ -27,9 +27,9 @@
 |---|---|---|
 | top-level responsibilityを追加・削除する | [`docs/architecture/overview.md`](../architecture/overview.md)でownerと依存方向を決め、rootの`module.nix`を入口にする | `structure-responsibility-roots`、`unit-boundary-name-only` |
 | Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`nix flake check`で確認する |
-| Skillを追加・削除する | [`skills/`](../../skills)の`module.nix`、`skill/`、依存metadata。配備対象は有効なCapabilityから導く | Skill renderingとrequired Capabilityのcheck |
-| 外部Skillを採用し、同IDの供給元を差し替える | [`skills/module.nix`](../../skills/module.nix)のregistry.sourceと明示的なoverride。本文、reference、scriptは固定した外部sourceが所有する | `skill-source-contract`、`skill-frontmatter-contract`、`skill-capability-gating` |
-| plugin Skill sourceとarchitecture-standardの版を更新する | [`flake.nix`](../../flake.nix)の該当inputのrevと[`flake.lock`](../../flake.lock)。採用するSkillは[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 固定していた版からの差分を確認し、`nix flake check`、`dotfiles-rebuild` |
+| Skillを追加・削除する | localは[`skills/<id>/`](../../skills)のmoduleと`skill/`、外部sourceは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表。依存metadataとcallerのroutingを同時に変える | Skill renderingとrequired Capabilityのcheck |
+| 外部Skillを採用し、同IDの供給元を差し替える | 採用moduleのregistry.sourceと明示的なoverride。source内の任意directoryを直接指し、原名のID、本文、reference、scriptを変換しない | `skill-source-contract`、`skill-frontmatter-contract`、`skill-capability-gating` |
+| Orca、architecture-standard、Matt、Ponytailのsource版を更新する | [`flake.nix`](../../flake.nix)の該当inputのrevと[`flake.lock`](../../flake.lock)。採用pathと依存は[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分を確認し、`nix flake check`、`dotfiles-rebuild` |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 
 ## Runtime observationと生成artifact

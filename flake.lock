@@ -251,6 +251,23 @@
         "type": "github"
       }
     },
+    "mattSkills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786611981,
+        "narHash": "sha256-jsXcMkhu15MxR0zXnLLJeni0q0Aew2UxUSojl6zmOvg=",
+        "owner": "mattpocock",
+        "repo": "skills",
+        "rev": "8b78b531ab965735c5dc74f6f7a219e1e37326df",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mattpocock",
+        "repo": "skills",
+        "rev": "8b78b531ab965735c5dc74f6f7a219e1e37326df",
+        "type": "github"
+      }
+    },
     "moon-registry": {
       "flake": false,
       "locked": {
@@ -490,15 +507,34 @@
         "type": "github"
       }
     },
+    "ponytail": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1786139041,
+        "narHash": "sha256-bGdXvzhWPwGdz3T2Yh2h6lf+3PBRFAfdBxP5pESmCHI=",
+        "owner": "DietrichGebert",
+        "repo": "ponytail",
+        "rev": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+        "type": "github"
+      },
+      "original": {
+        "owner": "DietrichGebert",
+        "repo": "ponytail",
+        "rev": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
+        "type": "github"
+      }
+    },
     "root": {
       "inputs": {
         "actrun": "actrun",
         "architectureStandard": "architectureStandard",
         "devenv": "devenv",
         "home-manager": "home-manager",
+        "mattSkills": "mattSkills",
         "nixos-wsl": "nixos-wsl",
         "nixpkgs": "nixpkgs_4",
         "orca": "orca",
+        "ponytail": "ponytail",
         "sops-nix": "sops-nix"
       }
     },

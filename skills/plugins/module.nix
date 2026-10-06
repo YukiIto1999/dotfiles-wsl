@@ -68,6 +68,79 @@ let
         };
       };
     };
+    matt-pocock = {
+      source = pluginSources.matt-pocock;
+      skills = {
+        codebase-design = {
+          directory = "skills/engineering/codebase-design";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        diagnosing-bugs = {
+          directory = "skills/engineering/diagnosing-bugs";
+          requiresCapabilities = [ "browser-diagnostics" ];
+          requiresSkills = [
+            "browser-operation"
+            "improve-codebase-architecture"
+          ];
+        };
+        tdd = {
+          directory = "skills/engineering/tdd";
+          requiresCapabilities = [ ];
+          requiresSkills = [
+            "codebase-design"
+            "code-review"
+          ];
+        };
+        domain-modeling = {
+          directory = "skills/engineering/domain-modeling";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        grilling = {
+          directory = "skills/productivity/grilling";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        code-review = {
+          directory = "skills/engineering/code-review";
+          requiresCapabilities = [ ];
+          requiresSkills = [ "setup-matt-pocock-skills" ];
+        };
+        improve-codebase-architecture = {
+          directory = "skills/engineering/improve-codebase-architecture";
+          requiresCapabilities = [ ];
+          requiresSkills = [
+            "codebase-design"
+            "domain-modeling"
+            "grilling"
+          ];
+        };
+        setup-matt-pocock-skills = {
+          directory = "skills/engineering/setup-matt-pocock-skills";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        research = {
+          directory = "skills/engineering/research";
+          requiresCapabilities = [ ];
+          requiresSkills = [ "web-research" ];
+        };
+      };
+    };
+    ponytail = {
+      source = pluginSources.ponytail;
+      skills = {
+        ponytail = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        ponytail-review = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+      };
+    };
   };
   pluginSourceNames = builtins.attrNames adoptedPluginSkills;
   pluginSkillNames = lib.concatMap (
@@ -82,9 +155,9 @@ let
     _: source:
     lib.mapAttrs (
       skillId: metadata:
-      metadata
+      builtins.removeAttrs metadata [ "directory" ]
       // {
-        source = source.source + "/skills/${skillId}";
+        source = source.source + "/${metadata.directory or "skills/${skillId}"}";
       }
     ) source.skills
   ) adoptedPluginSkills;

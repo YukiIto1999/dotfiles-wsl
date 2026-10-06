@@ -11,7 +11,8 @@ description: Analyzes dependency structures by defining node, edge, direction, a
 
 何を知るための分析かを先に決める。対象のrepository、subsystem、revision、environmentと、test、generated、vendored codeを含めるかを明示する。
 
-具体的な変更による影響範囲、既存構造の良否、新しい境界や依存方向は、このSkillで判断しない。故障原因は`bug-analysis`の責務である。
+具体的な変更による影響範囲、既存構造の良否、新しい境界や依存方向は、このSkillで判断しない。
+故障原因や性能劣化の診断は`diagnosing-bugs`の責務である。
 
 ## Graphの意味を定義する
 

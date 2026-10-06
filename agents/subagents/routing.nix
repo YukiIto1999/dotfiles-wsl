@@ -17,12 +17,12 @@
     }
     {
       subagent = "architect";
-      skill = "interface-design";
+      skill = "codebase-design";
       activation = "dynamic";
     }
     {
       subagent = "architect";
-      skill = "module-design";
+      skill = "domain-modeling";
       activation = "dynamic";
     }
     {
@@ -43,6 +43,11 @@
     {
       subagent = "designer";
       skill = "browser-operation";
+      activation = "dynamic";
+    }
+    {
+      subagent = "designer";
+      skill = "codebase-design";
       activation = "dynamic";
     }
     {
@@ -72,7 +77,7 @@
     }
     {
       subagent = "implementer";
-      skill = "code-design";
+      skill = "codebase-design";
       activation = "dynamic";
     }
     {
@@ -87,7 +92,7 @@
     }
     {
       subagent = "implementer";
-      skill = "refactoring-implementation";
+      skill = "ponytail";
       activation = "dynamic";
     }
     {
@@ -107,7 +112,7 @@
     }
     {
       subagent = "implementer";
-      skill = "tdd-implementation";
+      skill = "tdd";
       activation = "dynamic";
     }
     {
@@ -133,11 +138,16 @@
     {
       subagent = "reviewer";
       skill = "code-review";
-      activation = "required";
+      activation = "dynamic";
     }
     {
       subagent = "reviewer";
       skill = "github-operations";
+      activation = "dynamic";
+    }
+    {
+      subagent = "reviewer";
+      skill = "ponytail-review";
       activation = "dynamic";
     }
     {
@@ -206,7 +216,7 @@
     {
       from = "implementer";
       to = "reviewer";
-      artifact = "verified-diff";
+      artifact = "verified-committed-range";
     }
     {
       from = "planner";

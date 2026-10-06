@@ -68,4 +68,8 @@ responsive設計では幅ごとの縮小版を作らず、taskの優先度に従
 - 既存design systemで足りる箇所と、根拠のあるgap
 - 採らなかった案と具体的な費用
 
-production code、CSS、component tree、state owner、propsを作らない。内部component構造は`code-design`、shared ownerは`module-design`、公開component contractは`interface-design`へ渡す。確定済みbriefの実装に独立Skillは使わず、briefと既存design systemを制約とする通常の実装作業へ渡す。実画面の監査は対象外とし、機能障害は`bug-analysis`、性能は`performance-analysis`、securityは`security-review`が所有する。
+production code、CSS、component tree、state owner、propsを作らない。
+component構造、ownership、公開interfaceの設計は、`codebase-design`のdeep-module語彙とseamの原則を使う仕事へ渡す。
+確定済みbriefの実装は、briefと既存design systemを制約とする通常の実装作業へ渡す。
+実画面の監査は対象外とし、機能障害や性能問題は`diagnosing-bugs`、securityは`security-review`が所有する。
+性能問題では`diagnosing-bugs`のPerf branchに従う。

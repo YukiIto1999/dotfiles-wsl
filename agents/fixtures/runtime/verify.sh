@@ -58,18 +58,34 @@ expect_unread_skill() {
 check_skill_learning() {
   local source="$fixture/skill-source" deployed="$home/.omp/agent/skills"
   local body input session rejected status
-  mkdir -p "$source/code-design/references" "$deployed" \
-    "$deployed/ui-design" "$deployed/domain-modeling"
-  printf '# Code design\n\nRead the complete procedure before designing code.\n' >"$source/code-design/SKILL.md"
-  printf '# Reference\n' >"$source/code-design/references/existing.md"
-  ln -s "$source/code-design" "$deployed/code-design"
-  printf '# UI design\n' >"$deployed/ui-design/SKILL.md"
-  printf '# Domain modeling\n' >"$deployed/domain-modeling/SKILL.md"
-  body="$deployed/code-design/SKILL.md"
+  local -a design_paths=(
+    /r/core/library.ts
+    /r/core/b/application/ports/IFoo.cs
+    /r/contracts/canonical/Order.cs
+    /r/contracts/types.tsp
+    /r/core/b/domain/OrderFailure.cs
+    /r/core/b/errors/cause.ts
+    /r/module.csproj
+    /r/libs/shared/codec.ts
+    /r/surfaces/cli/main.ts
+  )
+  mkdir -p "$source" "$deployed"
+  cp -R "$CODEBASE_DESIGN_SOURCE" "$source/codebase-design"
+  chmod -R u+w "$source/codebase-design"
+  ln -s "$source/codebase-design" "$deployed/codebase-design"
+  ln -s "$UI_DESIGN_SOURCE" "$deployed/ui-design"
+  ln -s "$DOMAIN_MODELING_SOURCE" "$deployed/domain-modeling"
+  body="$deployed/codebase-design/SKILL.md"
 
   test "$("$GATE" skill --path /r/surfaces/viewer/features/x/y.tsx)" = ui-design
   test "$("$GATE" skill --path /r/core/b/domain/Invoice.cs)" = domain-modeling
-  test "$("$GATE" skill --path /r/core/b/application/ports/IFoo.cs)" = interface-design
+  for rejected in "${design_paths[@]}"; do
+    test "$("$GATE" skill --path "$rejected")" = codebase-design
+    if skill_edit fixture-unread "$rejected"; then
+      echo "gate accepted an unread codebase-design path: $rejected" >&2
+      exit 1
+    fi
+  done
   test -z "$("$GATE" skill --path /r/surfaces/viewer/x.test.tsx)"
   test -z "$("$GATE" skill --path /r/docs/note.md)"
   expect_unread_skill fixture-unread
@@ -130,11 +146,11 @@ check_skill_learning() {
   expect_unread_skill fixture-write-event
 
   for rejected in \
-    "$deployed/code-design/references/nonexistent.md" \
-    "$deployed/code-design/references/existing.md" \
-    'skill://code-design/references/existing.md' \
-    "$body:1-2" 'skill://code-design:1-2' 'skill://code-design/SKILL.md:raw' \
-    "$deployed/code-design" "$source/code-design/SKILL.md"; do
+    "$deployed/codebase-design/nonexistent.md" \
+    "$deployed/codebase-design/DEEPENING.md" \
+    'skill://codebase-design/DEEPENING.md' \
+    "$body:1-2" 'skill://codebase-design:1-2' 'skill://codebase-design/SKILL.md:raw' \
+    "$deployed/codebase-design" "$source/codebase-design/SKILL.md"; do
     session="fixture-path-$(printf '%s' "$rejected" | sha256sum | cut -d ' ' -f 1)"
     input=$(jq -nc --arg path "$rejected" '{path:$path}')
     skill_read_event "$session" PostToolUse read "$input"
@@ -146,32 +162,34 @@ check_skill_learning() {
   input=$(jq -nc --arg path "$body" '{file_path:$path,limit:2}')
   skill_read_event fixture-limit PostToolUse Read "$input"
   expect_unread_skill fixture-limit
-  input=$(jq -nc --arg path "$deployed/code-design/references/nonexistent.md" '{path:$path}')
+  input=$(jq -nc --arg path "$deployed/codebase-design/nonexistent.md" '{path:$path}')
   skill_read_event fixture-edit-bypass PreToolUse write "$input"
-  skill_edit fixture-edit-bypass "$deployed/code-design/references/nonexistent.md"
+  skill_edit fixture-edit-bypass "$deployed/codebase-design/nonexistent.md"
   expect_unread_skill fixture-edit-bypass
   skill_edit fixture-edit-body-bypass "$body"
   expect_unread_skill fixture-edit-body-bypass
 
   mkdir -p "$home/.cache/dotfiles-wsl/verification/sessions/fixture-old-marker/skills"
-  : >"$home/.cache/dotfiles-wsl/verification/sessions/fixture-old-marker/skills/code-design"
+  : >"$home/.cache/dotfiles-wsl/verification/sessions/fixture-old-marker/skills/codebase-design"
   expect_unread_skill fixture-old-marker
 
   cat "$body" >/dev/null
   input=$(jq -nc --arg path "$body" '{path:$path}')
   skill_read_event fixture-body PostToolUse read "$input"
-  skill_edit fixture-body /r/core/library.ts
+  for rejected in "${design_paths[@]}"; do
+    skill_edit fixture-body "$rejected"
+  done
   input=$(jq -nc --arg path "$body" '{file_path:$path}')
   skill_read_event fixture-claude PostToolUse Read "$input" '{"tool_response":{"type":"text"}}'
   skill_edit fixture-claude /r/core/library.ts
-  for rejected in 'skill://code-design' 'skill://code-design/SKILL.md' \
-    '.omp/agent/skills/code-design/SKILL.md'; do
+  for rejected in 'skill://codebase-design' 'skill://codebase-design/SKILL.md' \
+    '.omp/agent/skills/codebase-design/SKILL.md'; do
     session="fixture-canonical-$(printf '%s' "$rejected" | sha256sum | cut -d ' ' -f 1)"
     input=$(jq -nc --arg path "$rejected" '{path:$path}')
     skill_read_event "$session" PostToolUse read "$input"
     skill_edit "$session" /r/core/library.ts
   done
-  printf '\nChanged design procedure.\n' >>"$source/code-design/SKILL.md"
+  printf '\nChanged fixture body digest.\n' >>"$source/codebase-design/SKILL.md"
   expect_unread_skill fixture-body
   expect_unread_skill fixture-claude
   cat "$body" >/dev/null
@@ -189,27 +207,35 @@ check_skill_learning() {
     echo 'gate accepted one discipline as a licence for another' >&2
     exit 1
   fi
-  "$GATE" teach --session fixture-skills --path /r/core/b/application/ports/IFoo.cs >/dev/null
-  mkdir -p "$deployed/module-design"
+  "$GATE" learned --session fixture-skills --path codebase-design
+  for rejected in "${design_paths[@]}"; do
+    "$GATE" teach --session fixture-skills --path "$rejected" >/dev/null
+  done
+  if "$GATE" teach --session fixture-skills --path /r/core/b/domain/Invoice.cs >/dev/null 2>&1; then
+    echo 'gate accepted codebase-design as a licence for domain-modeling' >&2
+    exit 1
+  fi
+  rm "$source/codebase-design/SKILL.md"
   set +e
-  "$GATE" learned --session fixture-empty-skill --path module-design >/dev/null 2>&1
+  "$GATE" learned --session fixture-empty-skill --path codebase-design >/dev/null 2>&1
   status=$?
   set -e
   if [ "$status" -eq 0 ]; then
     echo 'trusted learned command accepted a missing canonical Skill body' >&2
     exit 1
   fi
-  input='{"path":"skill://module-design"}'
+  input='{"path":"skill://codebase-design"}'
   skill_read_event fixture-missing-body PostToolUse read "$input"
   if skill_edit fixture-missing-body /r/module.csproj; then
     echo 'gate accepted a successful event without an existing canonical body' >&2
     exit 1
   fi
+  cp "$CODEBASE_DESIGN_SOURCE/SKILL.md" "$source/codebase-design/SKILL.md"
 
   "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
   body="$home/.local/share/fixture adapter/procedures/ui-design/SKILL.md"
   mkdir -p "$(dirname "$body")"
-  printf '# Custom UI design\n' >"$body"
+  cp "$UI_DESIGN_SOURCE/SKILL.md" "$body"
   if "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1; then
     echo 'gate ignored the contract skill root' >&2
     exit 1

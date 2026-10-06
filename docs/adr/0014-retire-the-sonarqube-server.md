@@ -22,7 +22,10 @@ Accepted
 
 cognitive complexity は各 repository の analyzer が測る。C# は SonarAnalyzer.CSharp の S3776、Rust は clippy の `cognitive_complexity`、TypeScript は architecture-standard の linter 規定に従い、通常の build と lint の段で新しい違反を失敗にする。既存の違反は各 project の抑止の仕組みに理由付きで列挙し、backlog にする。言語ごとの選定と閾値の正本は architecture-standard が持つ。
 
-`code-review` Skill は、今回の source に対して build と lint が出した診断を静的解析の正本にする。`code-quality` だけが使っていた Skill の `optionalCapabilities` は、利用者がいなくなるため廃止する。
+当時のlocal `code-review` Skillは、今回のsourceに対してbuildとlintが出した診断を静的解析の正本とした。
+`code-quality`だけが使っていたSkillの`optionalCapabilities`は、利用者がいなくなるため廃止した。
+その後`code-review`はMatt Pocockの原版へ切り替え、local版の手順は残していない。
+現行のfixed pointから`HEAD`までのreview契約は[Skill portfolio](../architecture/skills.md#routing)を参照する。
 
 ## Consequences
 

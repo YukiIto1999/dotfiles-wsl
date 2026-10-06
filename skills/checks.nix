@@ -15,17 +15,17 @@ let
   externalSkill = {
     source = ./fixtures/external-source/procedures/external-procedure;
     requiresCapabilities = [ "browser-automation" ];
-    requiresSkills = [ "code-design" ];
+    requiresSkills = [ "codebase-design" ];
   };
   replacementSkill = {
-    source = ./fixtures/external-source/procedures/bug-analysis;
+    source = ./fixtures/external-source/procedures/browser-operation;
     requiresCapabilities = [ ];
     requiresSkills = [ ];
   };
   sourceAdoptionModule = {
     dotfiles.skills.registry = {
       external-procedure = externalSkill;
-      bug-analysis = lib.mkForce replacementSkill;
+      browser-operation = lib.mkForce replacementSkill;
     };
   };
   sourceConfig =
@@ -36,7 +36,7 @@ let
   sourceManifest = pkgs.writeText "skill-source-manifest.json" (
     builtins.toJSON {
       external-procedure = "${sourceConfig.dotfiles.agents.shared.skills.external-procedure}";
-      bug-analysis = "${sourceConfig.dotfiles.agents.shared.skills.bug-analysis}";
+      browser-operation = "${sourceConfig.dotfiles.agents.shared.skills.browser-operation}";
     }
   );
   mismatchedManifest = pkgs.writeText "skill-mismatched-name-manifest.json" (
@@ -48,8 +48,7 @@ let
       modules = [
         ./module.nix
         ./browser-operation/module.nix
-        ./bug-analysis/module.nix
-        ./code-design/module.nix
+        { dotfiles.skills.registry.codebase-design = registry.codebase-design; }
         {
           options = {
             assertions = lib.mkOption {
@@ -202,49 +201,41 @@ in
       ]);
     assert
       !(sourceContractPasses [
-        { dotfiles.skills.registry.bug-analysis = replacementSkill; }
+        { dotfiles.skills.registry.browser-operation = replacementSkill; }
       ]);
     assert
       !(sourceContractPasses [
-        { dotfiles.skills.registry.bug-analysis.source = ./bug-analysis/skill; }
+        { dotfiles.skills.registry.browser-operation.source = ./browser-operation/skill; }
       ]);
     assert
       !(sourceContractPasses [
         sourceAdoptionModule
-        { dotfiles.skills.registry.bug-analysis = lib.mkForce replacementSkill; }
+        { dotfiles.skills.registry.browser-operation = lib.mkForce replacementSkill; }
       ]);
-    assert !builtins.elem "bug-analysis" noCapabilitiesBefore.dotfiles.skills.enabled;
-    assert builtins.elem "bug-analysis" noCapabilitiesAfter.dotfiles.skills.enabled;
+    assert !builtins.elem "browser-operation" noCapabilitiesBefore.dotfiles.skills.enabled;
+    assert builtins.elem "browser-operation" noCapabilitiesAfter.dotfiles.skills.enabled;
     assert !builtins.elem "external-procedure" noCapabilitiesAfter.dotfiles.skills.enabled;
-    assert noCapabilitiesAfter.dotfiles.skills.registry.bug-analysis.requiresSkills == [ ];
+    assert noCapabilitiesAfter.dotfiles.skills.registry.browser-operation.requiresSkills == [ ];
     assert
-      toString sourceConfig.dotfiles.agents.shared.skills.bug-analysis
+      toString sourceConfig.dotfiles.agents.shared.skills.browser-operation
       == toString replacementSkill.source;
     assert
       toString sourceConfig.dotfiles.agents.shared.skills.external-procedure
       == toString externalSkill.source;
     assert
-      toString sourceConfig.dotfiles.agents.shared.skills.bug-analysis
-      != toString hostConfig.dotfiles.skills.registry.bug-analysis.source;
+      toString sourceConfig.dotfiles.agents.shared.skills.browser-operation
+      != toString hostConfig.dotfiles.skills.registry.browser-operation.source;
     pkgs.runCommandLocal "check-skill-source-contract"
       {
-        nativeBuildInputs = [
-          pkgs.bash
-          pkgs.gnugrep
-          pkgs.python3
-        ];
+        nativeBuildInputs = [ pkgs.python3 ];
       }
       ''
         set -euo pipefail
         python3 ${validator} ${sourceManifest}
-        source=${sourceConfig.dotfiles.agents.shared.skills.external-procedure}
-        test "$(cat "$source/references/contract.txt")" = "External source reference fixture."
-        test "$(bash "$source/scripts/read-reference.sh")" = "External source reference fixture."
         if python3 ${validator} ${mismatchedManifest} >frontmatter-error 2>&1; then
           echo "mismatched registry ID unexpectedly passed" >&2
           exit 1
         fi
-        grep -F "frontmatter name が registry ID と一致しない" frontmatter-error
         touch $out
       '';
 

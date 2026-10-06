@@ -133,4 +133,8 @@ browser または device flow は OMP の案内に従い、API key ではなく�
 
 認証情報は OMP が `~/.omp/agent/agent.db` に保存する。
 この file と、OMP が対話設定を書き込む `~/.omp/agent/config.yml` は dotfiles 管理外である。
+
+advisor は期間限定の `opencode-go/longcat-2.5-preview-free:high` を主にし、`opencode-go/deepseek-v4.1-flash:high` を fallback にする。
+モデルを変更するときは、新規環境用の `agents/clients/omp/assets/config.seed.yml` と既存環境の `~/.omp/agent/config.yml` をそれぞれ更新する。
+seed は設定ファイルが存在しない場合だけ配備されるため、rebuild では既存環境のモデル設定を更新しない。
 対して `AGENTS.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。

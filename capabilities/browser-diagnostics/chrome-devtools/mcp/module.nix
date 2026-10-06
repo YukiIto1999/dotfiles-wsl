@@ -13,6 +13,7 @@ let
     inherit mkNpmMcp;
     serverBuilder = mkMcpServer;
     chromium = config.dotfiles.capabilities.browser-runtime.package;
+    runtimeDirectoryPath = config.dotfiles.platform.mcp.fronts.chrome-devtools.runtimeDirectoryPath;
   };
 in
 {

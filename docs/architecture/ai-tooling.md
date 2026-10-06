@@ -181,9 +181,12 @@ published packageが持つsnapshot headerとmulti-snapshot APIを基準に、現
 deadlineを超えたworkerだけを終了し、未完了の解析を空の結果として返さず、他sessionのgraphには触れない。
 これはNode old-spaceの上限であり、processのRSSを1 GiB以下に保証するものではない。
 
-Chromeのcaptureは公開toolが許すprivateな保存先を必要とする。
-privateな保存先がworkspace境界から拒否された場合はcapture不能を報告し、ChromeからMemLabへの受け渡しを完了と扱わない。
-repositoryへ秘密情報を含むsnapshotを保存してこの制約を回避しない。
+Chromeのfile exportの保存先制限は、clientのtool harnessやgatewayではなく、固定したChrome MCP packageのcanonical path検査が所有する。
+[`package.nix`](../../capabilities/browser-diagnostics/chrome-devtools/mcp/package.nix)は既存frontの`runtimeDirectoryPath`を`mk-server`の`env.TMPDIR`とCLIの`--filesystemRoot`へ渡し、systemdがmode `0700`で所有するprivateな領域だけを既定の保存先にする。
+providerはcallerごとに割り当てた`TMPDIR`を起動時には知らないため、callerのsession cacheやworkspace全体をfilesystem rootへ追加しない。
+[`browser-performance`](../../skills/browser-performance/skill/SKILL.md)はtrace、screenshot、heapに共通のprovider-owned private stagingを作り、capture後のfileをmode `0600`でcallerの`TMPDIR`へ移動して自分のstagingを回収する。
+[`heap-analysis`](../../skills/heap-analysis/skill/SKILL.md)は転送後のlocal fileを公開MemLab toolへ渡し、不要なresident graphと自分のfileを回収する。
+privateなruntime保存先が拒否された場合はcapture不能を報告し、repository、symlink、共有`/tmp`への保存や無制限path設定で回避しない。
 外部のtool例があっても、実tool schema、gateway接続、account選択、権限、副作用の安全境界を取込側の契約で確認する。
 
 現在のtarget名は次で取得できる。

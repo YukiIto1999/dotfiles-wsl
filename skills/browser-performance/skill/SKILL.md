@@ -19,6 +19,8 @@ Chromeを別processとして起動したり、MCPやcontainerの設定、接続�
 
 専用pageを作れる場合は作成時のIDを記録し、終了時には自分のpageだけを閉じる。
 networkやtraceにはtoken、個人情報、非公開URLが含まれ得るため、artifactをlocalに保存し、共有する証拠は必要箇所だけを秘匿化する。
+fileをexportするときは、次の非公開artifactの受け渡しを使う。
+providerの保存先とcallerに割り当てた`TMPDIR`は別のprocessの契約として扱い、callerの環境変数を書き換えない。
 
 ## 問いに合うtraceを取る
 
@@ -53,6 +55,24 @@ sourceへアクセスできる場合は実際のmanifest、bundler設定、impor
 不要なcodeの削除は対象経路だけでなく、conditional loadや別consumerも調べてから提案する。
 sourceがない第三者のsiteでは、観測したnetworkとDOMまでを根拠にし、server内部やbuild設定を断定しない。
 
+## 非公開artifactの受け渡し
+
+Chrome providerは、frontが所有するmode `0700`のruntime directoryを自身の`TMPDIR`とfilesystem rootに使う。
+trace、screenshot、heapのfile exportは同じ保存先と回収手順を使う。
+
+1. `systemctl show mcp-front-chrome-devtools.service --property=RuntimeDirectory --value`で配備済みfrontのdirectory名を取得し、`/run/`下の絶対pathを確定する。
+   directoryが一つで、現在の利用者が所有するmode `0700`の実directoryであることを確認する。
+   directoryがない、symlinkである、所有者やpermissionが異なる場合は、変更せずCapabilityの配備不備として返す。
+2. 確認したruntime directory内に`mktemp -d`で自分専用のmode `0700`のstagingを作り、公開toolの`filePath`へその中の絶対pathを渡す。
+   解析と保持のためには、callerの割り当て済み`TMPDIR`内にも別の非公開directoryを作る。
+3. capture成功後はfileをmode `0600`にしてcallerのdirectoryへ移動し、空になった自分のstagingだけを回収する。
+   後続の解析へは移動後の絶対pathとcapture条件を渡し、終了時は自分のfileとdirectoryだけを回収する。
+4. captureや転送に失敗した場合は自分のstaging内のpartial fileを回収し、未取得または未転送のartifactを成功と扱わない。
+   providerのruntime directoryでもpathが拒否された場合は、配備済みwrapperのfilesystem rootとproviderの保存先の不一致を返す。
+
+拒否された保存先をrepository、symlink、共有`/tmp`へ変えたり、workspace全体の許可、任意page code、別providerの直接起動で回避しない。
+同じ拒否を確認するためだけにexportを再試行しない。
+
 ## 専門の判断へ渡す
 
 LCP自体が依頼の主題、またはtraceでLCPがbottleneckと確認された場合は、対象page、測定条件、trace ID、resourceと観測を`debug-optimize-lcp`へ渡す。
@@ -63,9 +83,8 @@ heapの保持、detached DOM、操作反復後のmemory増加が疑われる場�
 heap用toolの不足をLCPやnetworkの測定で埋めない。
 
 browserのheap captureを依頼された場合は、対象page、取得許可、操作sequence、GCと終了条件を固定してから、公開された`take_heapsnapshot`のschemaを確認する。
-captureの間にpageを停止させる影響と、snapshotに秘密情報が含まれる可能性を確認し、許可されたprivateな絶対pathへ保存する。
-保存先がtoolのworkspace境界から拒否された場合は、repositoryへの保存、symlink、別providerの直接起動で回避しない。
-capture不能とその境界を返し、未取得のsnapshotを`heap-analysis`へ渡したことにしない。
+captureの間にpageを停止させる影響と、snapshotに秘密情報が含まれる可能性を確認し、非公開artifactの受け渡しで保存と転送を行う。
+capture不能ならその境界と不足する配備契約を返し、未取得のsnapshotを`heap-analysis`へ渡したことにしない。
 
 accessibilityの実画面監査は`a11y-debugging`、既知の受入条件のPlaywright verificationは`browser-operation`へ渡す。
 .NETの比較microbenchmarkは`microbenchmarking`、MSBuild性能は`msbuild`、native codeや一般の故障のfeedback loopは`diagnosing-bugs`が所有する。

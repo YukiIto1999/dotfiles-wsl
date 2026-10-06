@@ -2,6 +2,7 @@
   mkNpmMcp,
   chromium,
   serverBuilder,
+  runtimeDirectoryPath,
 }:
 
 let
@@ -15,5 +16,6 @@ let
 in
 serverBuilder {
   name = "chrome-devtools-mcp";
-  command = "${pkg}/bin/chrome-devtools-mcp --headless --isolated --executablePath ${chromium}/bin/chromium";
+  env.TMPDIR = runtimeDirectoryPath;
+  command = "${pkg}/bin/chrome-devtools-mcp --headless --isolated --executablePath ${chromium}/bin/chromium --filesystemRoot ${runtimeDirectoryPath}";
 }

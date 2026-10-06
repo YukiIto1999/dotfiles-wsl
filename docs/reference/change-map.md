@@ -29,7 +29,7 @@
 | Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`nix flake check`で確認する |
 | Skillを追加・削除する | localは[`skills/<id>/`](../../skills)のmoduleと`skill/`、外部sourceは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表。依存metadataとcallerのroutingを同時に変える | Skill renderingとrequired Capabilityのcheck |
 | 外部Skillを採用し、同IDの供給元を差し替える | 採用moduleのregistry.sourceと明示的なoverride。source内の任意directoryを直接指し、原名のID、本文、reference、scriptを変換しない | `skill-source-contract`、`skill-frontmatter-contract`、`skill-capability-gating` |
-| Orca、architecture-standard、Matt、Ponytailのsource版を更新する | [`flake.nix`](../../flake.nix)の該当inputのrevと[`flake.lock`](../../flake.lock)。採用pathと依存は[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分を確認し、`nix flake check`、`dotfiles-rebuild` |
+| Orca、architecture-standard、Matt、Chrome DevTools、.NET、Modern Web guidance の source 版を更新する | [`flake.nix`](../../flake.nix) の該当 input の rev と [`flake.lock`](../../flake.lock)。Skill の採用 path と依存、guide 資材の公開は [`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分を確認し、`nix flake check`、`dotfiles-rebuild` |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 
 ## Runtime observationと生成artifact

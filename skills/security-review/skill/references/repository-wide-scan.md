@@ -19,9 +19,9 @@ Use an exhaustive instance-finding workflow rather than the diff-scan workflow's
 
 Repository-wide scans must:
 
-- Load the per-scan threat model path from `../../../references/scan-artifacts.md` as the repo-specific threat-model source of truth.
+- Load the per-scan threat model path from `scan-artifacts.md` as the repo-specific threat-model source of truth.
 - Build an entrypoint and trust-boundary inventory before validation: routes, handlers, templates, serializers, deserializers, query builders, shell/process calls, file/path APIs, network fetches/callbacks, auth/authz middleware, session/cookie config, secret/config sources, IaC or policy resources, and agent/tool boundaries.
-- Create `runtime_inventory.md`, `seed_research.md` when seed hints exist, `exhaustive-file-checklist.md`, and `repository_coverage_ledger.md` using the artifact paths from `../../../references/scan-artifacts.md`.
+- Create `runtime_inventory.md`, `seed_research.md` when seed hints exist, `exhaustive-file-checklist.md`, and `repository_coverage_ledger.md` using the artifact paths from `scan-artifacts.md`.
 - Create a high-impact coverage ledger before deep validation. The ledger is a coverage artifact, not a list of potential findings, and must include rows without candidates as well as reportable candidates.
 - Keep every applicable high-impact, user-seeded, advisory-seeded, or tag-seeded row open until that exact area is closed as `reportable`, `suppressed`, `not_applicable`, or `deferred` with exact evidence or proof-gap reasons.
 - Enumerate every technically distinct high-impact vulnerable instance discovered under those families, not just one representative example per class.
@@ -30,7 +30,7 @@ Repository-wide scans must:
 
 ## Discovery Execution
 
-During finding discovery, apply this repository-wide workflow instead of the diff-centered discovery workflow. Use `../../finding-discovery/SKILL.md` for the candidate output contract and `../../../references/scan-artifacts.md` for repository-wide artifact paths.
+During finding discovery, apply this repository-wide workflow instead of the diff-centered discovery workflow. Use `finding-discovery.md` for the candidate output contract and `scan-artifacts.md` for repository-wide artifact paths.
 
 Run this broader but still bounded workflow:
 

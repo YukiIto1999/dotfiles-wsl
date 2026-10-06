@@ -4,7 +4,7 @@ Use this guidance when the security scan target is a specific code-diff or PR.
 
 ## Workflow
 
-1. Load the per-scan threat model path from `../../../references/scan-artifacts.md` as the repo-specific threat-model source of truth.
+1. Load the per-scan threat model path from `scan-artifacts.md` as the repo-specific threat-model source of truth.
 2. Investigate the actual diff and any supporting files the patch relies on. You must enumerate ALL plausible security finding candidates. Continue reviewing until you have covered the diff and its immediate supporting code comprehensively enough that no additional distinct plausible candidates remain.
 3. Follow the chain of files needed to understand the effects of the change.
 4. Trace attacker-controlled inputs through the minimal surrounding code needed to understand propagation and controls.

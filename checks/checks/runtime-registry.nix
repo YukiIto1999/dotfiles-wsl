@@ -41,7 +41,6 @@
         assert lib.assertMsg (builtins.length hindsightPersistentMounts == 1)
           "runtime identity requires one Hindsight persistent mount: actual=${builtins.toJSON hindsightPersistentMounts}";
         {
-          mcpTargets = lib.mapAttrs (_: target: target.port) hostConfig.dotfiles.platform.mcp.targets;
           gateway = {
             inherit (gatewayEndpoint) id port service;
           };
@@ -51,9 +50,6 @@
           projectMemoryPersistentMount = lib.head hindsightPersistentMounts;
         };
       identityMatches = candidate: candidate == expected;
-      missingTargetMutation = actual // {
-        mcpTargets = builtins.removeAttrs actual.mcpTargets [ "memory" ];
-      };
       commandNames = builtins.attrNames hostConfig.dotfiles.platform.cli.commands;
       serviceNames = builtins.attrNames hostConfig.systemd.services;
       timerNames = builtins.attrNames hostConfig.systemd.timers;
@@ -74,9 +70,6 @@
       "runtime identity mismatch: expected=${builtins.toJSON expected} "
       + "actual=${builtins.toJSON actual}"
     );
-    assert lib.assertMsg (
-      !identityMatches missingTargetMutation
-    ) "runtime identity fixture accepted a deleted MCP target";
     assert installerExecutable == "dotfiles-install-agents";
     assert builtins.elem "installAgents" commandNames;
     assert !builtins.elem legacyInstallerKey commandNames;

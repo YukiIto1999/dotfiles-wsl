@@ -22,6 +22,16 @@
     }
     {
       subagent = "architect";
+      skill = "cli-design";
+      activation = "dynamic";
+    }
+    {
+      subagent = "architect";
+      skill = "property-testing";
+      activation = "dynamic";
+    }
+    {
+      subagent = "architect";
       skill = "domain-modeling";
       activation = "dynamic";
     }
@@ -43,6 +53,16 @@
     {
       subagent = "designer";
       skill = "browser-operation";
+      activation = "dynamic";
+    }
+    {
+      subagent = "designer";
+      skill = "a11y-debugging";
+      activation = "dynamic";
+    }
+    {
+      subagent = "designer";
+      skill = "browser-performance";
       activation = "dynamic";
     }
     {
@@ -82,17 +102,22 @@
     }
     {
       subagent = "implementer";
+      skill = "cli-design";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "property-testing";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
       skill = "comment-writing";
       activation = "dynamic";
     }
     {
       subagent = "implementer";
       skill = "documentation-writing";
-      activation = "dynamic";
-    }
-    {
-      subagent = "implementer";
-      skill = "ponytail";
       activation = "dynamic";
     }
     {
@@ -113,6 +138,36 @@
     {
       subagent = "implementer";
       skill = "tdd";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "browser-performance";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "a11y-debugging";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "msbuild";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "run-tests";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "microbenchmarking";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "nuget-trusted-publishing";
       activation = "dynamic";
     }
     {
@@ -147,11 +202,6 @@
     }
     {
       subagent = "reviewer";
-      skill = "ponytail-review";
-      activation = "dynamic";
-    }
-    {
-      subagent = "reviewer";
       skill = "repository-research";
       activation = "dynamic";
     }
@@ -163,6 +213,16 @@
     {
       subagent = "reviewer";
       skill = "standard-conformance";
+      activation = "dynamic";
+    }
+    {
+      subagent = "reviewer";
+      skill = "msbuild";
+      activation = "dynamic";
+    }
+    {
+      subagent = "reviewer";
+      skill = "microbenchmarking";
       activation = "dynamic";
     }
     {

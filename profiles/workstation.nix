@@ -33,6 +33,7 @@ _:
       "browser-diagnostics"
       "browser-runtime"
       "github-resources"
+      "heap-diagnostics"
       "library-documentation"
       "repository-search"
     ];

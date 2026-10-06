@@ -10,6 +10,7 @@ let
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   mkCommand = import ../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   policy = import ./impl/policy.nix { inherit lib pkgs; };
+  isReferenceOnlySkill = import ./impl/skill-discovery.nix { inherit lib; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   rawRouting = import ./subagents/routing.nix;
@@ -88,7 +89,9 @@ let
 
   enabledSkillNames = cfg.skills.enabled;
   enabledSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name});
-  allSkills = lib.mapAttrs (_: skill: skill.source) enabledSkills;
+  discoverableSkills = lib.filterAttrs (_: skill: !isReferenceOnlySkill skill.source) enabledSkills;
+  discoverableSkillNames = builtins.attrNames discoverableSkills;
+  allSkills = lib.mapAttrs (_: skill: skill.source) discoverableSkills;
 
   subagentsRoot = ./subagents;
   allSharedSubagents =
@@ -102,7 +105,7 @@ let
   unavailableRequiredSubagents = lib.unique (
     map (route: route.subagent) (
       builtins.filter (
-        route: route.activation == "required" && !(builtins.elem route.skill enabledSkillNames)
+        route: route.activation == "required" && !(builtins.elem route.skill discoverableSkillNames)
       ) rawRouting.subagentSkills
     )
   );
@@ -110,7 +113,8 @@ let
   routing = {
     subagentSkills = builtins.filter (
       route:
-      builtins.hasAttr route.subagent eligibleSubagents && builtins.elem route.skill enabledSkillNames
+      builtins.hasAttr route.subagent eligibleSubagents
+      && builtins.elem route.skill discoverableSkillNames
     ) rawRouting.subagentSkills;
     subagentHandoffs = builtins.filter (
       route: builtins.hasAttr route.from eligibleSubagents && builtins.hasAttr route.to eligibleSubagents

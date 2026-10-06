@@ -25,6 +25,28 @@ Do not restate this checklist in the final threat model output.
 - If a vulnerability class requires attacker control that does not exist in the repo's real-world usage, say so in the severity calibration discussion.
 - When possible, point to specific files, components, or controls that ground the threat model.
 
+## Build the system and attacker model
+
+For each material data flow, record source and destination, the asset crossing the boundary, the protocol or channel, the controlling actor, authentication/authorization, encryption, validation/normalization, and the exact code or configuration anchor.
+Distinguish a verified control, an intended control, and an unverified deployment assumption.
+Use a compact flow diagram only when it makes those relationships clearer; keep paths and evidence anchors in the adjacent text.
+
+Tie assets to confidentiality, integrity, availability, and concrete user or operator harm.
+Specify attacker capabilities and non-capabilities, including authentication level, tenant membership, input ownership, network exposure, and privileges the attacker does not already have.
+Do not give a remote attacker arbitrary local files, environment values, administrator permissions, or CI write access without repository or supplied-context evidence.
+
+Construct abuse paths as attacker goal, entrypoint, boundary crossed, required preconditions, violated invariant, and impact.
+Assign stable threat IDs and link each path to its assets and current controls.
+Keep these paths as threat hypotheses until discovery and validation establish an actual vulnerable instance.
+
+Rank likelihood and impact separately with qualitative reasons, then explain how existing controls and material assumptions affect priority.
+Do not multiply invented numeric scores.
+For each consequential threat, distinguish evidence-backed existing mitigations from recommended controls, and name the boundary or owner where prevention and detection belong.
+
+Resolve material assumptions from repository and deployment evidence first.
+Ask only for missing service context that would change scope or risk; if it remains unavailable, keep conclusions conditional and state the unresolved question.
+Before completion, account for every discovered entrypoint and trust boundary with a threat, a control-backed exclusion, or an explicit evidence gap.
+
 ## Output Contract
 
 When generating a threat model, structure it in Markdown with these sections:
@@ -46,3 +68,6 @@ Within those sections, make sure the output covers:
 - which vulnerability classes are less severe or out of scope in context
 - severity calibration with concrete examples at each level
 - references to concrete files or controls when those materially ground the model
+- boundary/data-flow evidence, assets and security objectives, attacker capabilities and non-capabilities
+- stable threat IDs, concrete abuse paths, likelihood and impact reasons, current and recommended controls
+- focused review locations tied to the threat IDs, and assumptions that could change their priority

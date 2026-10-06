@@ -1,4 +1,5 @@
 {
+  config,
   lib,
   pluginSources,
   ...
@@ -66,6 +67,14 @@ let
             "web-research"
           ];
         };
+        cli-design = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ "standard-apply" ];
+        };
+        property-testing = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ "standard-apply" ];
+        };
       };
     };
     matt-pocock = {
@@ -78,11 +87,8 @@ let
         };
         diagnosing-bugs = {
           directory = "skills/engineering/diagnosing-bugs";
-          requiresCapabilities = [ "browser-diagnostics" ];
-          requiresSkills = [
-            "browser-operation"
-            "improve-codebase-architecture"
-          ];
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
         };
         tdd = {
           directory = "skills/engineering/tdd";
@@ -121,21 +127,92 @@ let
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
-        research = {
-          directory = "skills/engineering/research";
+        grill-with-docs = {
+          directory = "skills/engineering/grill-with-docs";
           requiresCapabilities = [ ];
-          requiresSkills = [ "web-research" ];
+          requiresSkills = [
+            "grilling"
+            "domain-modeling"
+          ];
         };
-      };
-    };
-    ponytail = {
-      source = pluginSources.ponytail;
-      skills = {
-        ponytail = {
+        grill-me = {
+          directory = "skills/productivity/grill-me";
+          requiresCapabilities = [ ];
+          requiresSkills = [ "grilling" ];
+        };
+        to-spec = {
+          directory = "skills/engineering/to-spec";
+          requiresCapabilities = [ ];
+          requiresSkills = [ "setup-matt-pocock-skills" ];
+        };
+        to-tickets = {
+          directory = "skills/engineering/to-tickets";
+          requiresCapabilities = [ ];
+          requiresSkills = [ "setup-matt-pocock-skills" ];
+        };
+        prototype = {
+          directory = "skills/engineering/prototype";
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
-        ponytail-review = {
+        retro = {
+          directory = "skills/engineering/retro";
+          requiresCapabilities = [ ];
+          requiresSkills = [ "writing-for-agents" ];
+        };
+        writing-for-agents = {
+          directory = "skills/productivity/writing-for-agents";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+      };
+    };
+    chrome-devtools = {
+      source = pluginSources.chrome-devtools;
+      skills = {
+        a11y-debugging = {
+          requiresCapabilities = [ "browser-diagnostics" ];
+          requiresSkills = [ ];
+        };
+        debug-optimize-lcp = {
+          requiresCapabilities = [ "browser-diagnostics" ];
+          requiresSkills = [ ];
+        };
+      };
+    };
+    dotnet = {
+      source = pluginSources.dotnet;
+      skills = {
+        msbuild = {
+          directory = "plugins/dotnet/skills/msbuild";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        run-tests = {
+          directory = "plugins/dotnet-test/skills/run-tests";
+          requiresCapabilities = [ ];
+          requiresSkills = [
+            "platform-detection"
+            "filter-syntax"
+          ];
+        };
+        platform-detection = {
+          directory = "plugins/dotnet-test/skills/platform-detection";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        filter-syntax = {
+          directory = "plugins/dotnet-test/skills/filter-syntax";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        microbenchmarking = {
+          directory = "plugins/dotnet-diag/skills/microbenchmarking";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        nuget-trusted-publishing = {
+          directory = "plugins/dotnet-advanced/skills/nuget-trusted-publishing";
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
@@ -164,6 +241,14 @@ let
 in
 {
   config.dotfiles.skills.registry = pluginSkills;
+
+  config.home-manager.users.${config.dotfiles.workstation.username}.home.file.".local/share/dotfiles-agent/references/modern-web-guidance".source =
+    pluginSources.modern-web-guidance;
+  config.dotfiles.managedArtifacts."skills/references/modern-web-guidance" = {
+    format = "directory";
+    source = pluginSources.modern-web-guidance;
+    deployedAt = "${config.dotfiles.workstation.homeDir}/.local/share/dotfiles-agent/references/modern-web-guidance";
+  };
 
   config.assertions = [
     {

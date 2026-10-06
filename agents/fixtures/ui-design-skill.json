@@ -67,7 +67,7 @@
     {
       "id": "frontend-implementation",
       "prompt": "承認済みのUI briefとcomponent設計に従い、このReact画面をproduction品質で実装してください。",
-      "expectedSkills": ["ponytail"],
+      "expectedSkills": [],
       "mustNotTrigger": [
         "ui-design"
       ]
@@ -75,7 +75,7 @@
     {
       "id": "rendered-ui-audit",
       "prompt": "起動中の画面をbrowserで操作し、情報階層、操作性、responsive、accessibility、feedback、recoveryの問題を証拠付きで監査してください。再設計はまだしません。",
-      "expectedSkills": [],
+      "expectedSkills": ["browser-operation", "a11y-debugging"],
       "mustNotTrigger": [
         "ui-design"
       ]
@@ -104,7 +104,7 @@
       "id": "browser-performance-cause",
       "prompt": "この画面の入力遅延をbrowser traceで測定し、critical path上のbottleneckを特定してください。UIの見た目は変更しません。",
       "expectedSkills": [
-        "diagnosing-bugs"
+        "browser-performance"
       ],
       "mustNotTrigger": [
         "ui-design"

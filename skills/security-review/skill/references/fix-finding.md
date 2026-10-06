@@ -1,10 +1,3 @@
----
-name: fix-finding
-description: Use when the user explicitly asks to fix and verify a validated or plausible security finding. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.
-metadata:
-  short-description: Fix and verify security findings
----
-
 # Fix Finding
 
 ## Objective
@@ -96,7 +89,7 @@ In the final response, include:
 - whether code changes were needed or the issue was already fixed
 - remaining uncertainty or skipped validation, if any
 
-If using a scan artifact directory, resolve it using `../../references/scan-artifacts.md`, then write a visible report to the fix report path. If there is no existing scan directory, a final chat summary is sufficient unless the user asks for a file.
+If using a scan artifact directory, resolve it using `scan-artifacts.md`, then write a visible report to the fix report path. If there is no existing scan directory, a final chat summary is sufficient unless the user asks for a file.
 
 ## Hard Rules
 

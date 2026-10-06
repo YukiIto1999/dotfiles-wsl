@@ -23,6 +23,10 @@ let
     "capabilities/github-resources/github/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
     ];
+    "capabilities/heap-diagnostics/memlab/mcp/module.nix" = [
+      "../../../../platform/mcp/package/mk-server.nix"
+      "../../../../platform/mcp/package/mk-npm.nix"
+    ];
     "capabilities/library-documentation/context7/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
       "../../../../platform/mcp/package/mk-npm.nix"
@@ -95,6 +99,7 @@ let
     "flake.nix" = 1;
   };
   allowedDynamicFileReads = {
+    "agents/impl/skill-discovery.nix" = 1;
     "identity/checks.nix" = 1;
     "identity/module.nix" = 3;
     "platform/cli/impl/mk-command.nix" = 1;

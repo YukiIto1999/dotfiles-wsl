@@ -25,17 +25,17 @@
     "architectureStandard": {
       "flake": false,
       "locked": {
-        "lastModified": 1791264852,
-        "narHash": "sha256-qJm6V7SElQP8vXLWx9UaGKnd0Cw5ElMw+Euvsc/Sg64=",
+        "lastModified": 1791300529,
+        "narHash": "sha256-U0UvPYZncg/BimGqbmkY0FN9gcbrV9aDji2kxKseV9A=",
         "owner": "YukiIto1999",
         "repo": "architecture-standard",
-        "rev": "73d685fb7a9ae3d8be4fd9d494e2f6342f103a19",
+        "rev": "5ca3db08e5eca9a24a8f6ec0764a7eb7240d91ca",
         "type": "github"
       },
       "original": {
         "owner": "YukiIto1999",
         "repo": "architecture-standard",
-        "rev": "73d685fb7a9ae3d8be4fd9d494e2f6342f103a19",
+        "rev": "5ca3db08e5eca9a24a8f6ec0764a7eb7240d91ca",
         "type": "github"
       }
     },
@@ -69,6 +69,23 @@
         "owner": "cachix",
         "ref": "latest",
         "repo": "cachix",
+        "type": "github"
+      }
+    },
+    "chromeDevtoolsSkills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791205445,
+        "narHash": "sha256-ZX2F5zPZG2FvNfQXdmLKv0uPQsSB65ShGv2ab6cM8jA=",
+        "owner": "ChromeDevTools",
+        "repo": "chrome-devtools-mcp",
+        "rev": "cf2eab96d96cad3d47ce769b9638815d1775500f",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ChromeDevTools",
+        "repo": "chrome-devtools-mcp",
+        "rev": "cf2eab96d96cad3d47ce769b9638815d1775500f",
         "type": "github"
       }
     },
@@ -114,6 +131,23 @@
         "owner": "cachix",
         "repo": "devenv",
         "rev": "b904dcb51fe48c30db250038241507f60752f222",
+        "type": "github"
+      }
+    },
+    "dotnetSkills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791282421,
+        "narHash": "sha256-lzsNmCL7OYijADUEjGJzR8dl2P7VXh6TRTDkEfg/rMs=",
+        "owner": "dotnet",
+        "repo": "skills",
+        "rev": "0dcd43ceb15e15a2c45dd54075fbcf3a30632154",
+        "type": "github"
+      },
+      "original": {
+        "owner": "dotnet",
+        "repo": "skills",
+        "rev": "0dcd43ceb15e15a2c45dd54075fbcf3a30632154",
         "type": "github"
       }
     },
@@ -254,17 +288,34 @@
     "mattSkills": {
       "flake": false,
       "locked": {
-        "lastModified": 1786611981,
-        "narHash": "sha256-jsXcMkhu15MxR0zXnLLJeni0q0Aew2UxUSojl6zmOvg=",
+        "lastModified": 1791199038,
+        "narHash": "sha256-oN3OQPouK6wrrGzmgNdvdOVLsOJVGaK7cy3BZoE10AA=",
         "owner": "mattpocock",
         "repo": "skills",
-        "rev": "8b78b531ab965735c5dc74f6f7a219e1e37326df",
+        "rev": "4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d",
         "type": "github"
       },
       "original": {
         "owner": "mattpocock",
         "repo": "skills",
-        "rev": "8b78b531ab965735c5dc74f6f7a219e1e37326df",
+        "rev": "4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d",
+        "type": "github"
+      }
+    },
+    "modernWebGuidance": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791238443,
+        "narHash": "sha256-R/lioj5t5oA7wRy/nkFP1imtY/G6X4P9KY9OCmvyKD8=",
+        "owner": "GoogleChrome",
+        "repo": "modern-web-guidance",
+        "rev": "650eb83619134adb947b1ee8755e6511270bc444",
+        "type": "github"
+      },
+      "original": {
+        "owner": "GoogleChrome",
+        "repo": "modern-web-guidance",
+        "rev": "650eb83619134adb947b1ee8755e6511270bc444",
         "type": "github"
       }
     },
@@ -507,34 +558,19 @@
         "type": "github"
       }
     },
-    "ponytail": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1786139041,
-        "narHash": "sha256-bGdXvzhWPwGdz3T2Yh2h6lf+3PBRFAfdBxP5pESmCHI=",
-        "owner": "DietrichGebert",
-        "repo": "ponytail",
-        "rev": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
-        "type": "github"
-      },
-      "original": {
-        "owner": "DietrichGebert",
-        "repo": "ponytail",
-        "rev": "2ed6c52c9d7e5e56942508591085fd45dea277d3",
-        "type": "github"
-      }
-    },
     "root": {
       "inputs": {
         "actrun": "actrun",
         "architectureStandard": "architectureStandard",
+        "chromeDevtoolsSkills": "chromeDevtoolsSkills",
         "devenv": "devenv",
+        "dotnetSkills": "dotnetSkills",
         "home-manager": "home-manager",
         "mattSkills": "mattSkills",
+        "modernWebGuidance": "modernWebGuidance",
         "nixos-wsl": "nixos-wsl",
         "nixpkgs": "nixpkgs_4",
         "orca": "orca",
-        "ponytail": "ponytail",
         "sops-nix": "sops-nix"
       }
     },

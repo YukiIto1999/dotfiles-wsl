@@ -22,6 +22,8 @@ Skillのsourceは固定したrepositoryから直接参照し、本文や資材�
 上流がmetadataを持たないことは、依存がない根拠にはならない。
 空の依存listも、取込側が確認した宣言であり、未指定時のdefaultではない。
 sourceの更新や差替では、本文と資材だけでなくこの宣言も見直す。
+hard依存には、Skillの主要手順を成立させるため必須のものだけを置く。
+native branchも成立する一般診断にbrowserを要求せず、browser、heap、cloudなどの条件付きbranchは利用可能な専門入口へ証拠を渡す。
 
 ```text
 source:  dotfiles-wsl -> pinned owner repository
@@ -42,6 +44,9 @@ runtime: Agent -> Skill -> Capability -> provider/runtime
 sourceのdirectory名やupstreamでの配置は自由であり、全repositoryに`skills/<id>/`を要求しない。
 source directoryを直接渡すため、同梱のreferenceやscriptも上流のまま使い、本文変換や旧名のaliasを作らない。
 repository内の別directoryを相対参照するSkillでは、その参照先を含む固定sourceを保ち、Skill directoryだけを切り出さない。
+`enabled`は依存を満たすsource集合であり、native discovery集合と同一ではない。
+`user-invocable: false`と`disable-model-invocation: true`の両方を持つhelperは、全clientのnamed Skill directoryとsubagent routeから除き、consumerが固定raw sourceを`Read`する。
+その絶対pathをpolicy rosterへ示し、whole sourceと元のsibling関係を保つため、helper名のaliasやwrapperは作らない。
 
 同じ優先度で同IDのsourceを複数moduleが宣言すると、同じpathを指定していてもNix optionのmergeが失敗する。
 暗黙の後勝ちや同名aliasを使わず、意図した差替には既存の`lib.mkForce`を使う。
@@ -89,8 +94,8 @@ clientやroutingが使うIDは維持され、本文と資材の供給元だけ�
 
 ## 現在のplugin
 
-採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orca、architecture-standard、Matt Pocock、Ponytailの固定sourceを使う。
-MattとPonytailの採用ID、directory path、revision、licenseとroutingの違いは[Skill portfolio](skills.md#直接採用)にまとめる。
+採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skillsの固定sourceを使う。
+採用ID、directory path、revision、licenseとroutingの違いは[Skill portfolio](skills.md#直接採用)にまとめる。
 Orcaのlegacy aliasである`linear-tickets`は`orca-linear`とroutingを分けるため採用しない。
 architecture-standardの規範本文は配備済みsourceから読み、`standard-feedback`は`github-resources`を要求する。
 
@@ -101,9 +106,19 @@ clientごとの`.claude/skills/`などはadapterの投影先であり、正本�
 別repositoryから標準を変えるときは、`environment-design`から作業checkoutの`skills/standard-update/SKILL.md`へ渡し、配備済みsourceを編集しない。
 
 Mattの`code-review`は`setup-matt-pocock-skills`を、`tdd`は`codebase-design`と`code-review`をSkill依存に持つ。
-`diagnosing-bugs`は`improve-codebase-architecture`を、`improve-codebase-architecture`は`codebase-design`、`domain-modeling`、`grilling`を使う。
-`research`の外部tool利用にはcustomの`web-research`を組み合わせ、browserやGitHubの実呼出しも環境側のroutingを維持する。
+`diagnosing-bugs`はbrowserを使わないbranchも持つためbrowser Capabilityへのhard依存を持たず、architecture探索を常に呼ぶ依存も置かない。
+`improve-codebase-architecture`は`codebase-design`、`domain-modeling`、`grilling`を、`grill-with-docs`は`grilling`と`domain-modeling`を、`grill-me`は`grilling`を使う。
+`to-spec`と`to-tickets`はtracker設定の`setup-matt-pocock-skills`を、`retro`は`writing-for-agents`を使う。
+raw `research`とPonytailは配備せず、調査と実装・reviewの原則を既存の自立した手順へ統合する。
+Googleの二Skillとcustom `browser-performance`だけをbrowser-diagnosticsでgateし、Playwrightの`browser-operation`とnative診断を別に保つ。
+.NET `run-tests`は`platform-detection`と`filter-syntax`をSkill依存に持ち、後者はfiltered runのreference-only helperとして扱う。
+.NETの実行前提は対象projectのSDKとrunnerであり、一般のbrowserやcloud Capabilityではない。
+原版の起動flagを維持し、policy rosterもfrontmatterから明示呼出しとreference-onlyを区別する。
 原版のcommandやtool例を合わせるために本文を書き換えず、安全規律、権限、gatewayへの接続は取込側が所有する。
+
+Modern Web GuidanceはSkill registryへ採らず、source全体をhome assetとして`~/.local/share/dotfiles-agent/references/modern-web-guidance/`へ参照させる。
+managed-artifact登録によりsourceと配備先の関係を維持し、対象機能のguideを原文で読む。
+全frontendへ起動するwrapperや同等のcustom Skillは作らない。
 
 ## 検査
 

@@ -66,7 +66,7 @@
     {
       "id": "near-miss-infrastructure-change",
       "prompt": "SearXNG の MCP target の port を 9100 に変えて。",
-      "expectedSkills": ["ponytail"],
+      "expectedSkills": [],
       "mustNotTrigger": [
         "environment-design"
       ]

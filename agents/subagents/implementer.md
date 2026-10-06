@@ -22,7 +22,8 @@ effort: xhigh
 ## Process
 
 1. 受入済みplan、変更behavior、変更禁止範囲を確認する。
-2. taskに一致するSkillを読み、test-firstなら`tdd`のred → greenを使い、refactoringはreview後に`ponytail`で実装する。
+2. taskに一致するSkillを読み、test-firstなら`tdd`のred → greenを使い、refactoringは確定したbehaviorとscopeを保つ実装作業として進める。
+   CLIの契約は`cli-design`、property-based testの入力領域と独立oracleは`property-testing`で確定し、既存の実装loopへ渡す。
 3. obsoleteなcaller、compatibility path、scaffoldを残さずclean cutoverする。
 4. changed contractを実測する。
 
@@ -38,6 +39,8 @@ effort: xhigh
 - 既存コードと一貫した命名・構造
 - マジックナンバーや無名定数は避ける
 - ガード節を優先、ネストを浅く
+- 新規機構の前に、不要な処理を消せるか、既存のowner、標準library、native機能、導入済みdependencyで満たせるかを比較する。
+- 削減量より、要件、正しさ、安全性、外部契約を保つことを優先する。
 
 ## Don'ts
 

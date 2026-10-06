@@ -1,10 +1,3 @@
----
-name: finding-discovery
-description: Use when Codex is already in the finding-discovery phase of a security scan or the user explicitly asks to discover candidate security findings in a repository or code change. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.
-metadata:
-  short-description: Discover security findings
----
-
 # Security Finding Discovery
 
 ## Objective
@@ -13,8 +6,8 @@ Investigate the proposed code or code changes for technically plausible security
 
 ## Artifact Resolution
 
-The path references in this skill are the default locations for this phase.
-If the user explicitly provides a different path for a required input or output, use the user-provided path instead of the corresponding default path referenced in this skill.
+The artifact paths in `scan-artifacts.md` are defaults for this phase.
+Explicit user-provided input and output paths take precedence.
 If a required input is still missing, stop and ask the user for it before continuing.
 Use the shared scan artifact path conventions in `scan-artifacts.md`.
 
@@ -160,4 +153,4 @@ Otherwise, for each candidate include:
 - Do not add `relevant_lines` when no bug exists. For diff-scoped scans, add `relevant_lines` only when the bug overlaps the diff and those lines are relevant to the bug.
 - Do not turn discovery into full validation or full severity calibration.
 - Continue reviewing until no additional distinct plausible candidates remain.
-- Save a final visible report using the finding discovery report path from `../../references/scan-artifacts.md`.
+- Save a final visible report using the finding discovery report path from `scan-artifacts.md`.

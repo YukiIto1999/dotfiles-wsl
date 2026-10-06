@@ -1,16 +1,4 @@
 {
-  "mcpTargets": {
-    "chrome-devtools": 8779,
-    "context7": 8771,
-    "crawl4ai": 8773,
-    "github-account-1": 8780,
-    "github-account-2": 8781,
-    "github-account-3": 8782,
-    "memory": 8774,
-    "playwright": 8776,
-    "searxng": 8775,
-    "zvec-grep": 8784
-  },
   "gateway": {
     "id": "default",
     "port": 8765,

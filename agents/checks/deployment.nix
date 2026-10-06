@@ -16,6 +16,10 @@ let
   inherit (agentConfig) clients;
   variantClients = variantConfig.dotfiles.agents.clients;
   homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
+  policySkills = lib.genAttrs hostConfig.dotfiles.skills.enabled (
+    name: hostConfig.dotfiles.skills.registry.${name}
+  );
+  isReferenceOnlySkill = import ../impl/skill-discovery.nix { inherit lib; };
   artifacts = hostConfig.dotfiles.managedArtifacts;
   artifactSource = id: artifacts.${id}.source;
   gatewayUrl = hostConfig.dotfiles.platform.mcp.gateway.url;
@@ -54,12 +58,7 @@ let
         }
       )
     ]).config;
-  minimalCapabilitySubagents = minimalCapabilityAgentConfig.dotfiles.agents.shared.subagents;
   minimalCapabilitySkills = minimalCapabilityAgentConfig.dotfiles.agents.shared.skills;
-  minimalCapabilityUnavailableSkills = builtins.filter (
-    name: !(builtins.hasAttr name minimalCapabilitySkills)
-  ) (builtins.attrNames minimalCapabilityAgentConfig.dotfiles.skills.registry);
-  minimalCapabilitySubagentSources = builtins.attrValues minimalCapabilitySubagents;
   transitiveCapabilityAgentConfig =
     (mkNixosSystem [
       normalMachineModule
@@ -70,7 +69,6 @@ let
         }
       )
     ]).config;
-  transitiveCapabilityRules = transitiveCapabilityAgentConfig.dotfiles.agents.shared.rules;
   atomicPublishExe = lib.getExe' atomicPublish "dotfiles-agent-atomic-publish";
 
   losslessVersionArgs = [
@@ -1206,62 +1204,64 @@ in
     assert
       !builtins.hasAttr "agents/opencode/project-memory-plugin" restrictedAgentConfig.dotfiles.managedArtifacts;
     assert builtins.hasAttr "agents/omp/hooks" restrictedAgentConfig.dotfiles.managedArtifacts;
-    pkgs.runCommandLocal "check-agent-capability-gating"
-      {
-        nativeBuildInputs = [ pkgs.gnugrep ];
-        minimalCapabilitySubagentSources =
-          lib.concatMapStringsSep " " toString
-            minimalCapabilitySubagentSources;
-        minimalCapabilityUnavailableSkills = lib.concatStringsSep " " minimalCapabilityUnavailableSkills;
-      }
-      ''
-        for source in $minimalCapabilitySubagentSources; do
-          for skill in $minimalCapabilityUnavailableSkills; do
-            if grep -Fq "\`$skill\`" "$source"; then
-              echo "unavailable Skill remained in subagent source: $source/$skill" >&2
-              exit 1
-            fi
-          done
-        done
-        if grep -Fq project-memory ${restrictedAgentRules}; then
-          echo "disabled project-memory remained in agent policy" >&2
-          exit 1
-        fi
-        if grep -Fq project-memory ${
-          restrictedAgentConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source
-        }; then
-          echo "disabled project-memory remained in Claude settings" >&2
-          exit 1
-        fi
-        if [ -e ${
-          restrictedAgentConfig.dotfiles.managedArtifacts."agents/omp/hooks".source
-        }/project-memory.ts ]; then
-          echo "disabled project-memory remained in OMP hooks" >&2
-          exit 1
-        fi
-        if grep -Fq project-memory ${
-          restrictedAgentConfig.dotfiles.managedArtifacts."agents/codex/system".source
-        }; then
-          echo "disabled project-memory remained in Codex settings" >&2
-          exit 1
-        fi
-        touch $out
-      '';
+    assert builtins.hasAttr "diagnosing-bugs" minimalCapabilitySkills;
+    assert lib.all (skill: !builtins.hasAttr skill minimalCapabilitySkills) [
+      "a11y-debugging"
+      "browser-performance"
+      "debug-optimize-lcp"
+    ];
+    assert lib.all (
+      route: builtins.hasAttr route.skill minimalCapabilitySkills
+    ) minimalCapabilityAgentConfig.dotfiles.agents.shared.routing.subagentSkills;
+    pkgs.runCommandLocal "check-agent-capability-gating" { } ''
+      if [ -e ${
+        restrictedAgentConfig.dotfiles.managedArtifacts."agents/omp/hooks".source
+      }/project-memory.ts ]; then
+        echo "disabled project-memory remained in OMP hooks" >&2
+        exit 1
+      fi
+      touch $out
+    '';
 
   agent-subagent-rendering =
+    assert builtins.elem "browser-automation"
+      transitiveCapabilityAgentConfig.dotfiles.capabilities.resolved;
+    assert builtins.elem "browser-runtime"
+      transitiveCapabilityAgentConfig.dotfiles.capabilities.resolved;
+    assert
+      !(builtins.elem "browser-diagnostics" transitiveCapabilityAgentConfig.dotfiles.capabilities.resolved);
+    assert builtins.hasAttr "browser-operation"
+      transitiveCapabilityAgentConfig.dotfiles.agents.shared.skills;
+    assert
+      !builtins.hasAttr "browser-performance" transitiveCapabilityAgentConfig.dotfiles.agents.shared.skills;
     assert clients.claude.subagents != hostConfig.dotfiles.agents.shared.subagents;
     assert builtins.attrNames clients.claude.subagents == sharedSubagentNames;
     assert clients.antigravity.subagents == { };
+    assert builtins.elem "filter-syntax" hostConfig.dotfiles.skills.enabled;
+    assert isReferenceOnlySkill hostConfig.dotfiles.skills.registry.filter-syntax.source;
+    assert !builtins.hasAttr "filter-syntax" hostConfig.dotfiles.agents.shared.skills;
+    assert !(isReferenceOnlySkill hostConfig.dotfiles.skills.registry.grill-me.source);
+    assert builtins.hasAttr "grill-me" hostConfig.dotfiles.agents.shared.skills;
+    assert lib.all (
+      clientName:
+      !(builtins.hasAttr "${clients.${clientName}.skillsDestination}/filter-syntax" homeConfig.home.file)
+      && !(builtins.hasAttr "agents/${clientName}/skills/filter-syntax" artifacts)
+    ) (builtins.attrNames clients);
     assert lib.all (name: builtins.elem name sharedSkillNames) routedSkillNames;
     assert lib.sort builtins.lessThan routedSubagentNames == sharedSubagentNames;
     assert requiredSkillsBySubagent.reviewer == [ ];
     assert lib.any (
       route: route.subagent == "reviewer" && route.skill == "code-review" && route.activation == "dynamic"
     ) routingContract.subagentSkills;
-    assert lib.any (
-      route:
-      route.subagent == "reviewer" && route.skill == "ponytail-review" && route.activation == "dynamic"
-    ) routingContract.subagentSkills;
+    assert
+      !(lib.any (
+        route:
+        builtins.elem route.skill [
+          "ponytail"
+          "ponytail-review"
+          "filter-syntax"
+        ]
+      ) routingContract.subagentSkills);
     assert
       builtins.length subagentSkillRouteKeys == builtins.length (lib.unique subagentSkillRouteKeys);
     assert builtins.length subagentHandoffKeys == builtins.length (lib.unique subagentHandoffKeys);
@@ -1286,6 +1286,7 @@ in
       {
         nativeBuildInputs = [
           pkgs.coreutils
+          pkgs.diffutils
           pkgs.glibc.bin
           pkgs.gnugrep
           pkgs.jq
@@ -1294,7 +1295,6 @@ in
         ];
         rulesSource = hostConfig.dotfiles.agents.shared.rules;
         requiredSkillsJson = builtins.toJSON requiredSkillsBySubagent;
-        inherit transitiveCapabilityRules;
         routingJson = builtins.toJSON rawRoutingContract;
         inherit sharedSubagentFarm;
         claudeSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.claude.subagents);
@@ -1305,10 +1305,14 @@ in
         codexSources = codexSubagentSources;
         ompSources = ompSubagentSources;
         opencodeSources = opencodeSubagentSources;
+        discoverableSkillNamesJson = builtins.toJSON sharedSkillNames;
+        helperSource = hostConfig.dotfiles.skills.registry.filter-syntax.source;
+        consumerSources = lib.concatMapStringsSep " " (
+          clientName:
+          toString homeConfig.home.file."${clients.${clientName}.skillsDestination}/run-tests".source
+        ) (builtins.attrNames clients);
         skillEntries = lib.concatStringsSep " " (
-          lib.mapAttrsToList (
-            name: source: "${name}=${source}/SKILL.md"
-          ) hostConfig.dotfiles.agents.shared.skills
+          lib.mapAttrsToList (name: skill: "${name}=${skill.source}/SKILL.md") policySkills
         );
         subagentEntries = lib.concatStringsSep " " (
           lib.mapAttrsToList (name: source: "${name}=${source}") hostConfig.dotfiles.agents.shared.subagents
@@ -1320,7 +1324,7 @@ in
               entrySkills = builtins.attrNames (
                 lib.filterAttrs (
                   name: _: builtins.elem capability hostConfig.dotfiles.skills.registry.${name}.requiresCapabilities
-                ) hostConfig.dotfiles.agents.shared.skills
+                ) policySkills
               );
             in
             "| `${capability}` | ${
@@ -1339,13 +1343,17 @@ in
         set -euo pipefail
 
         test -s "$rulesSource"
+        mkdir projected-skills
+        for consumerSource in $consumerSources; do
+          ln -s "$consumerSource" projected-skills/run-tests
+          test ! -e projected-skills/filter-syntax
+          originalConsumer=$(realpath projected-skills/run-tests)
+          test -r "$originalConsumer/../filter-syntax/SKILL.md"
+          cmp "$helperSource/SKILL.md" "$originalConsumer/../filter-syntax/SKILL.md"
+          rm projected-skills/run-tests
+        done
         iconv -f UTF-8 -t UTF-8 "$rulesSource" > /dev/null
         grep -Eq '^#{1,6}[[:space:]]+[^[:space:]]' "$rulesSource"
-        grep -Fxq '| `browser-runtime` | なし |' "$transitiveCapabilityRules"
-        grep -Fxq '| `browser-automation` | `browser-operation` |' "$transitiveCapabilityRules"
-        ${lib.optionalString (builtins.elem "browser-diagnostics" hostConfig.dotfiles.capabilities.resolved) ''
-          grep -Fxq '| `browser-diagnostics` | `diagnosing-bugs` |' "$rulesSource"
-        ''}
         while IFS=$'\t' read -r subagent skill; do
           source="$sharedSubagentFarm/$subagent"
           if ! grep -Fq "\`$skill\`" "$source"; then
@@ -1364,7 +1372,13 @@ in
         # 期待行は生成器の表組立てとは別に組む。description は YAML の block scalar と
         # quoted string を使うため、抽出だけは同じ parser を通す
         : > expected-rows.txt
-        for entry in $skillEntries $subagentEntries; do
+        for kind in skill subagent; do
+          if [ "$kind" = skill ]; then
+            entries=$skillEntries
+          else
+            entries=$subagentEntries
+          fi
+          for entry in $entries; do
           name=''${entry%%=*}
           source=''${entry#*=}
           closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$source")
@@ -1375,17 +1389,40 @@ in
             echo "frontmatter declares no description: $source" >&2
             exit 1
           fi
-          printf '| %s | `%s` |\n' "$description" "$name" >> expected-rows.txt
+          if [ "$kind" = skill ]; then
+            expectedDiscovery=$(yq -r '
+              (.["user-invocable"] == false and .["disable-model-invocation"] == true) | not
+            ' expected-frontmatter.yaml)
+            actualDiscovery=$(jq -r --arg name "$name" 'index($name) != null' <<<"$discoverableSkillNamesJson")
+            if [ "$actualDiscovery" != "$expectedDiscovery" ]; then
+              echo "native Skill discovery disagrees with invocation flags: $name" >&2
+              exit 1
+            fi
+            invocation=$(yq -r '
+              if .["user-invocable"] == false and .["disable-model-invocation"] == true then "依存referenceのみ"
+              elif .["disable-model-invocation"] == true then "明示呼出しのみ"
+              elif .["user-invocable"] == false then "自動のみ"
+              else "task一致時" end
+            ' expected-frontmatter.yaml)
+            if [ "$invocation" = "依存referenceのみ" ]; then
+              invocation="$invocation: \`$source\` をRead"
+            fi
+            printf '| %s | `%s` | %s |\n' "$description" "$name" "$invocation" >> expected-rows.txt
+          else
+            printf '| %s | `%s` |\n' "$description" "$name" >> expected-rows.txt
+          fi
+        done
         done
         printf '%s\n' "$expectedCapabilityRows" >> expected-rows.txt
         printf '%s\n' "$expectedClientRows" >> expected-rows.txt
         # 見出しと区切りも期待値に含め、表の行集合を両方向で一致させる
         {
-          printf '| 目的 | Skill |\n'
+          printf '| 目的 | Skill | 起動 |\n'
           printf '| 目的 | subagent |\n'
           printf '| Capability | 入口 Skill |\n'
           printf '| client | subagent | Skill 投影 | LSP | Telemetry | Project memory |\n'
           printf '| --- | --- |\n'
+          printf '| --- | --- | --- |\n'
           printf '| --- | --- | --- | --- | --- | --- |\n'
         } >> expected-rows.txt
         missing=$(grep -Fxv -f "$rulesSource" expected-rows.txt || true)

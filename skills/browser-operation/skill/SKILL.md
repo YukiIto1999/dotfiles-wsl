@@ -69,7 +69,8 @@ materialな不一致を見つけたら症状、再現経路、直前と直後の
 ## Non-goals
 
 UIの新規設計や実装前の改善提案は`ui-design`へ渡す。
-機能不良や速度・memory・Core Web Vitalsの問題は`diagnosing-bugs`へ渡し、性能問題ではupstreamのPerf branchに従ってbaselineを計測してから原因を絞る。
+機能不良は`diagnosing-bugs`、browserのloading、interaction、layout shiftやnetworkの性能測定は`browser-performance`、heap保持の原因調査は`heap-analysis`へ渡す。
+それぞれのSkillが利用可能なときだけ、観測した症状と実経路を引き渡し、未測定の原因を補わない。
 脅威や脆弱性の調査は`security-review`が所有する。
 
 このSkillはfrontend実装、網羅的なtest設計、公開Web調査、credential管理、APIを直接叩く代替verificationを行わない。指定taskの実行または既知の受入条件のbrowser verificationを終え、証拠とcleanupを返した時点で停止する。

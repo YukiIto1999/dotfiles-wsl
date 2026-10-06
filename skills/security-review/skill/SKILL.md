@@ -1,11 +1,17 @@
 ---
 name: security-review
-description: "Use when the user asks for a full security review of a pull request, commit, branch, patch, working-tree diff, or repository. Runs distinct phases: threat modeling, finding discovery, validation, attack-path analysis, and final report assembly."
+description: Reviews a pull request, commit, branch, patch, working-tree diff, or repository for security vulnerabilities, and creates or updates an explicitly requested repository-grounded threat model. Separates system and attacker modeling, candidate discovery, instance-preserving validation, attack-path analysis, and reporting. Does not turn generic architecture work into a security audit or report a threat hypothesis as a validated vulnerability.
 ---
 
 # Security Review
 
 Used when a user wants to review a pull request, commit, branch diff, working-tree patch, or repository for security vulnerabilities. Keep the review phases separate and produce a final markdown report.
+
+For an explicit threat-model-only request, resolve the scope and artifacts, run `references/threat-model.md`, return the model and material assumptions, and stop before finding discovery.
+For a full security review, use all applicable phases below.
+All paths in `SKILL.md` are relative to this Skill directory; paths within a reference are relative to that reference's directory.
+Use `repository-research` for unknown local relationships, `web-research` for public advisory evidence, and `github-operations` for GitHub resources when those jobs are needed and available.
+Those evidence jobs do not change scan scope or grant external write permissions.
 
 Keep these phases distinct and run them in linear order:
 

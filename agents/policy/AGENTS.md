@@ -55,8 +55,12 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 ## skills
 
 繰り返し作業は手で再現せず、対応するSkillを読む。
-下表の目的欄は配備元のfrontmatter descriptionをそのまま使い、Matt/PonytailのSkillもupstreamの名前、本文、付属資料で配る。
+下表の目的欄は配備元のfrontmatter descriptionをそのまま使い、外部Skillも原名、本文、付属資料、起動flagを保って配る。
 client固有またはplugin由来のSkillはsessionが提示した名前を使い、namespaceがある場合は省略しない。
+起動欄の「明示呼出しのみ」は利用者が呼んだcommandであり、一般taskの自動routingへ加えない。
+`user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、clientのnamed Skill discovery directoryとsubagent routeへ投影しない。
+起動欄の「依存referenceのみ」はconsumerが必要条件で読む原版sourceであり、表示された絶対pathを`Read`で開く。
+`filter-syntax`はplatformとframeworkが確定したfiltered runで、`run-tests`が必要とした場合だけ読み、Skill起動toolで名前を解決しない。
 
 依存方向は `agent → Skill → Capability → provider / runtime` とする。agent は task の委譲、context、権限、成果物の引渡しを所有し、Skill は反復する判断と手順を所有し、Capability は consumer 非依存の意味、state、security、lifecycle を所有する。provider と runtime は Capability の実装詳細であり、agent や Skill が直接選ばない。
 
@@ -68,11 +72,23 @@ Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP�
 
 `codebase-design`はmodule、interface、seamを設計する共通語彙であり、`diagnosing-bugs`は故障と性能回帰のfeedback loopから修正、regression testまでを扱う。
 test-firstの実装には`tdd`のred → greenを使い、refactoringをそのloopへ混ぜない。
-`ponytail`は実装やrefactoringを含むcoding taskで既存機構、標準library、native機能を優先し、`ponytail-review`は過剰設計だけをレビューする。
+CLIの公開契約やterminalを取得する一回限りの操作を設計するときは`cli-design`を使う。
+入力領域、独立oracle、state machine、shrinkingを設計するときは`property-testing`を使い、単にtest数を増やす目的では起動しない。
+実装とrefactoringでは、新規機構より不要な処理の削除、既存owner、標準library、native機能、導入済みdependencyを先に比較し、要件と安全性を削減対象にしない。
 通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecの並列workerへ渡して、二軸を分けて集約する。
 reviewerはcallerが渡した一つのaxis briefだけを担当し、再帰的なspawnや軸間の統合、並べ直しをしない。
 raw upstreamの`code-review`にstaged / unstaged diffを代入しない。
 `setup-matt-pocock-skills`はengineering Skillが使うrepository設定を確認して合意後に書く依存commandであり、`improve-codebase-architecture`は利用者が明示的に呼ぶ探索commandである。
+`grill-with-docs`と`grill-me`は明示的なinterview依頼に対するstatefulとstatelessの入口、`to-spec`と`to-tickets`は確定した会話の仕様化と承認したticket分割に使う。
+`prototype`はdesign questionを動かして確かめる場合だけ使い、既存の実装依頼を試作品へ置き換えない。
+`retro`の改善案を恒久化するときは`environment-design`でownerを決める。
+
+.NET testのcommandや実行は`run-tests`、test platformの識別だけは`platform-detection`、build XMLやMSBuild failureとbuild性能は`msbuild`、BenchmarkDotNetの比較測定は`microbenchmarking`を使う。
+`nuget-trusted-publishing`はnuget.orgのOIDC publishing設定とAPI key移行だけに使い、一般のGitHub release、private feed、Azure Artifactsへ広げない。
+外部Skillの例がpackage更新、SDK変更、global install、追加profile、build、publishを含んでも、repositoryのpinと今回の実行許可を優先する。
+
+frontendのnative Web APIを選ぶときは、`$HOME/.local/share/dotfiles-agent/references/modern-web-guidance/skills/modern-web-guidance/guides/`から対象機能のguideだけを読む。
+guideの前提とbrowser supportを現projectで確認し、同梱の全frontend強制起動wrapperは呼ばない。
 upstreamの手順や簡潔化の提案によって、指定された要件、安全策、秘密情報の扱い、操作の承認、実行していない検証の報告に関する規律を弱めない。
 
 ## 基盤
@@ -82,7 +98,10 @@ upstreamの手順や簡潔化の提案によって、指定された要件、安
 全clientは単一のgatewayからprovider実装を使う。
 container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
 agentはSkillを入口にし、下表でそのSkillに対応づけられたCapabilityだけを使う。
-browser-diagnosticsの入口は`diagnosing-bugs`だが、実際のbrowser操作は`browser-operation`、GitHub操作は`github-operations`など、sessionが提供する環境のtool routingに従う。
+browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とし、Playwrightで既知の経路を操作・検証するときは`browser-operation`を使う。
+native C#/Rustを含む一般診断は`diagnosing-bugs`が所有し、browser toolを使わないbranchにbrowser Capabilityを要求しない。
+@heapDiagnosticsPolicy@
+GitHub操作は`github-operations`、Webとrepository調査は対応するSkillなど、sessionが提供するCapability入口からtoolを呼ぶ。
 upstreamがCLIや直接接続を例示していても、provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。
 
 入口Skillを持たないCapabilityは、他のCapabilityの依存である。

@@ -21,18 +21,6 @@
       "10s"
     ]
   },
-  "mcpExecutables": [
-    "chrome-devtools",
-    "context7",
-    "crawl4ai",
-    "github-account-1",
-    "github-account-2",
-    "github-account-3",
-    "memory",
-    "playwright",
-    "searxng",
-    "zvec-grep"
-  ],
   "workstation": {
     "wslview": "wslview"
   }

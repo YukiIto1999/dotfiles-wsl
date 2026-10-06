@@ -52,12 +52,16 @@ merge、resource・file・branchのdelete、commitを生成するcontent変更�
 
 PR本文、changelog、release noteなど変更説明の内容は`change-writing`に渡す。
 fixed pointを指定した`git diff <fixed-point>...HEAD`のcommit済み差分のreviewは`code-review`へ渡し、StandardsとSpecの所見を受け取る。
-`code-review`のupstream契約はstaged・unstaged差分のreviewや、approve、comment、request changesの判断を含まない。
+`code-review`のcommitted-range契約はstaged・unstaged差分のreviewや、approve、comment、request changesの判断を含まない。
 reviewの送信種別は、利用者の指定または明示的に委ねられたreview判断から確定する。
 GitHub上のcontent変更にcommit messageが必要なら`commit-writing`に渡す。
 このSkillは確定した内容と判断を対象resourceへ反映するだけで、表現や判断を作り直さない。
 
 生成と反映を一緒に依頼された場合は、隣接Skillの成果を得てから本手順へ戻る。handoffを理由に、identity確認、pre-read、直前確認を省略しない。
+
+nuget.orgへ公開するpackageのOIDC設定、API keyからの移行、`NuGet/login`は`nuget-trusted-publishing`へ渡す。
+一般のGitHub releaseやprivate feedの依頼を同Skillへ広げない。
+workflowやsecretの反映、releaseの実行が必要になったら、同じaccount targetと直前確認の手順へ戻る。
 
 ## 安全に報告する
 

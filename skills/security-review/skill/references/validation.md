@@ -1,10 +1,3 @@
----
-name: validation
-description: Use when Codex is already in the validation phase of a security scan or the user explicitly asks to determine whether one or more candidate security findings are valid. Do not use as the primary trigger for full PR, commit, branch, patch, or repository scans.
-metadata:
-  short-description: Validate candidate security findings
----
-
 # Security Validation
 
 ## Objective
@@ -13,10 +6,10 @@ Take candidate findings from discovery and produce the strongest evidence-backed
 
 ## Artifact Resolution
 
-The path references in this skill are the default locations for this phase.
-If the user explicitly provides a different path for a required input or output, use the user-provided path instead of the corresponding default path referenced in this skill.
+The artifact paths in `scan-artifacts.md` are defaults for this phase.
+Explicit user-provided input and output paths take precedence.
 If a required input is still missing, stop and ask the user for it before continuing.
-Use the shared scan artifact path conventions in `../../references/scan-artifacts.md`.
+Use the shared scan artifact path conventions in `scan-artifacts.md`.
 
 ## Workflow
 
@@ -32,7 +25,7 @@ Use the shared scan artifact path conventions in `../../references/scan-artifact
    - large internal repository mode: for repository-wide scans where runtime reproduction requires unavailable internal services, secrets, cloud accounts, service meshes, or local production data, use static trace plus existing tests and deploy/config evidence once the candidate has a complete source/control/sink/impact tuple. Missing internal runtime setup is not suppression evidence.
 4. For non-compiled stacks, attempt to generate PoCs or targeted commands that exercise the vulnerable path and trigger the vulnerability.
 5. For compiled stacks, prefer dynamic validation when it is feasible with bounded setup: build a debug variant or targeted test harness when available, reproduce the vulnerable behavior with a small PoC, then use valgrind, ASan, or a non-interactive debugger trace when those tools materially improve confidence.
-6. Save any PoC files, inputs, or logs under the validation artifacts path from `../../references/scan-artifacts.md`.
+6. Save any PoC files, inputs, or logs under the validation artifacts path from `scan-artifacts.md`.
 7. If validation is not feasible, document what was tried, what remains uncertain, and the exact proof gap.
 8. Return a clear validation assessment per finding grounded in the evidence, proof gaps, and remaining uncertainty.
 
@@ -45,7 +38,7 @@ Use the shared scan artifact path conventions in `../../references/scan-artifact
 
 ## Validation Guidance
 
-Follow the instance-preserving validation rules, validation checklist, and confidence guidance in `references/validation-guidance.md`.
+Follow the instance-preserving validation rules, validation checklist, and confidence guidance in `validation-guidance.md`.
 
 ## Output Contract
 
@@ -86,7 +79,7 @@ For repository-wide scans, also include a validation closure table with columns:
 - Keep commands short, bounded, and non-interactive.
 - Use stronger validation methods such as crashing PoCs, valgrind, ASan, debugger traces, focused tests, or realistic interface reproduction before falling back to code understanding when the stack and scan scope make that feasible.
 - Calibrate confidence from the validation method and evidence, not from how dangerous the bug class sounds.
-- Keep validation artifacts and the final visible report in the validation paths from `../../references/scan-artifacts.md` so the full scan bundle lives together.
+- Keep validation artifacts and the final visible report in the validation paths from `scan-artifacts.md` so the full scan bundle lives together.
 - Make a serious, bounded effort to get runtime validation working when it would materially change reportability, confidence, or severity. Consult repository guidance such as `AGENTS.md`, `README.md`, setup docs, test docs, build files, and package-manager metadata to identify the required dependencies, generated files, services, and setup steps.
 - For scans that should not modify the target tree, use a disposable copy or generated-artifact directory under the validation artifacts path for builds, generated clients, patched test harnesses, and PoC files. A no-edit target rule does not forbid output-only build copies when they are needed to validate the original code.
 - For repository-wide scans, update the validation report and closure table as each reportable, suppressed, not_applicable, or deferred row is decided. Do not leave validated rows only in transient notes, terminal logs, or validation artifacts; later phases must be able to reconstruct surviving findings from the saved validation report if the scan is interrupted.

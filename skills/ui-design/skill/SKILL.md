@@ -36,17 +36,27 @@ layoutはtaskの順序、比較対象、content量、操作頻度から導く。
 
 状態名を列挙して終えず、利用者に見える差、可能な次の操作、focusの移動、保存済みか未保存かを示す。animationは状態変化や空間関係の理解を助ける場合だけ使い、feedbackをmotionだけに依存させない。
 
+action名は利用者が起こす結果で表し、button、処理中、完了、errorで同じ語を保つ。
+空状態と失敗は雰囲気で埋めず、何がないか、何が起きたか、次にできる操作を示す。
+入力は意味、必要なformat、autofill、paste、IME、errorとの対応を決め、不要な再入力を要求しない。
+
 ## Visual directionをproductから導く
 
 productの目的、利用場面、contentの性質、brand、既存design systemから、一貫したvisual directionを一文で定める。typographyの役割と階層、色の意味、spacingとdensity、surfaceの区別、iconやimageの必要性、motionの用途を、そのdirectionと主要taskに対応させる。
 
 特有の語彙、data、作業環境から必要な個性を作る。意味のないgradient、過剰なcard、decorative metric、generic dashboard layoutで差別化を代用しない。既存design systemがない場合も、今回必要な役割だけを定め、完成したtoken catalogを先回りして作らない。
 
+個性を持たせる場合はproductの内容をもっともよく伝える一箇所へ集中し、その周囲の階層と操作を静かに保つ。
+font、番号、罫線、label、imageはそれぞれが伝える意味を説明できる場合だけ加える。
+
 ## Contentと表示条件で壊す
 
 正常なdesktop画面だけで設計を確定しない。実際に起こり得る範囲から、長い文字列、翻訳後の増幅、0件、大量件数、欠損、遅延、partial data、権限不足、stale stateを当て、階層、操作、feedbackが保たれるか確認する。
 
 responsive設計では幅ごとの縮小版を作らず、taskの優先度に従って保持、並べ替え、折り畳み、別画面化する情報と操作を決める。pointer、touch、keyboardで主要taskを完了できる経路を示す。
+
+notchやsoftware keyboard、sticky領域でcontentとfocusが隠れない配置を決める。
+日付、数値、currency、翻訳されたaction名は対象localeで確認し、serverとclientが異なる表示条件も仮定として残す。
 
 アクセシビリティ要件を具体化するときは[accessibility](references/accessibility.md)を読む。準拠を宣言するのではなく、今回のinteractionについてsemantic structure、keyboard、focus、status、contrast、target、motionの設計判断を残す。
 
@@ -69,7 +79,7 @@ responsive設計では幅ごとの縮小版を作らず、taskの優先度に従
 - 採らなかった案と具体的な費用
 
 production code、CSS、component tree、state owner、propsを作らない。
-component構造、ownership、公開interfaceの設計は、`codebase-design`のdeep-module語彙とseamの原則を使う仕事へ渡す。
+component構造、ownership、公開interfaceの設計は`codebase-design`へ、briefと制約を入力として渡す。
 確定済みbriefの実装は、briefと既存design systemを制約とする通常の実装作業へ渡す。
-実画面の監査は対象外とし、機能障害や性能問題は`diagnosing-bugs`、securityは`security-review`が所有する。
-性能問題では`diagnosing-bugs`のPerf branchに従う。
+実画面のaccessibility監査は`a11y-debugging`、機能障害は`diagnosing-bugs`、browser性能は`browser-performance`、securityは`security-review`へ渡す。
+実装前のbriefを、実画面の監査結果や性能の実測として報告しない。

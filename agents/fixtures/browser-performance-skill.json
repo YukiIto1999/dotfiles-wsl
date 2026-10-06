@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "mixed-loading-network-and-source",
+      "prompt": "This web page loads slowly and shifts while its API response arrives. Diagnose the critical path with browser evidence, then relate the deployed requests to the source. We have an existing baseline trace from the same revision and device settings.",
+      "expectedSkills": ["browser-performance"],
+      "expected": {
+        "fixesPageRevisionAndMeasurementConditions": true,
+        "reusesTheComparableBaseline": true,
+        "tracesRequestsAndInitiatorsToActualSource": true,
+        "separatesObservedBottlenecksFromEstimatedSavings": true,
+        "doesNotClaimUnusedCodeFromOneNavigation": true,
+        "preservesAccountsAndSessionOwnedPages": true
+      }
+    },
+    {
+      "id": "interaction-not-navigation-inp",
+      "prompt": "The initial load is fine, but typing in a search field stalls after suggestions arrive. Diagnose that interaction without changing the visual design or publishing anything.",
+      "expectedSkills": ["browser-performance"],
+      "expected": {
+        "recordsTheActualInputSequence": true,
+        "capturesTheInteractionCriticalPath": true,
+        "doesNotInferFieldInpFromNavigation": true,
+        "distinguishesScriptLayoutAndPaintEvidence": true,
+        "doesNotMakeUnrequestedChanges": true
+      }
+    },
+    {
+      "id": "lcp-specialist-composition",
+      "prompt": "Investigate this page's mixed loading and interaction slowdown using the existing comparable trace. If the loading analysis identifies LCP as the critical bottleneck, carry the page and trace evidence into the LCP-specific optimization rather than taking another baseline.",
+      "expectedSkills": ["browser-performance", "debug-optimize-lcp"],
+      "expected": {
+        "passesTheExistingTraceAndPageIdentity": true,
+        "usesLcpElementResourceAndSubpartEvidence": true,
+        "doesNotRetakeAValidBaseline": true,
+        "remeasuresOnlyWhenExecutionIsAuthorized": true
+      }
+    },
+    {
+      "id": "lcp-only-near-miss",
+      "prompt": "The only requested metric is LCP. Use the existing trace's largest contentful element and request to explain the late image load. No general browser audit is requested.",
+      "expectedSkills": ["debug-optimize-lcp"],
+      "mustNotTrigger": ["browser-performance", "ui-design"]
+    },
+    {
+      "id": "native-csharp-latency-near-miss",
+      "prompt": "A C# worker now takes longer to process the same queue items after a refactor. There is no browser or web UI. Diagnose the regression.",
+      "expectedSkills": ["diagnosing-bugs"],
+      "mustNotTrigger": ["browser-performance", "browser-operation", "debug-optimize-lcp"]
+    },
+    {
+      "id": "known-form-validation-near-miss",
+      "prompt": "Verify that this form displays its specified validation message after an empty input without submitting in the user's signed-in tab. No performance investigation is requested.",
+      "expectedSkills": ["browser-operation"],
+      "mustNotTrigger": ["browser-performance", "debug-optimize-lcp"]
+    },
+    {
+      "id": "real-screen-accessibility-near-miss",
+      "prompt": "Audit this running page's keyboard access, focused element visibility, accessible names and contrast. Do not redesign or measure loading speed.",
+      "expectedSkills": ["a11y-debugging"],
+      "mustNotTrigger": ["browser-performance", "ui-design", "debug-optimize-lcp"]
+    }
+  ]
+}

@@ -24,6 +24,7 @@ effort: xhigh
 
 1. 問題、actor、制約、変更理由を固定する。
 2. moduleのinterfaceとseamには`codebase-design`の語彙を使い、用語やADRを作成・変更するときは`domain-modeling`に従う。
+   CLIとterminalの契約には`cli-design`、property-based testの入力とoracleには`property-testing`を使う。
 3. 実質的に異なる案を同じ制約で比較し、一案を推薦する。
 4. 深められるmoduleを広く探索する`/improve-codebase-architecture`は、利用者が明示したときだけ使うupstream commandとして扱う。
 

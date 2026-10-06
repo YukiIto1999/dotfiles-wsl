@@ -47,7 +47,9 @@ description: Decides whether a recurring agent capability deficit warrants a Ski
 
 `description`をrouting contractとして、primary Job、主要trigger、重要な非対象を先に書く。本文は観察、判断、行動、referenceを読む条件、禁止事項、打ち切り、検証だけを持つ。sourceのtaxonomy、長い解説、一般論、評価harnessを移植しない。
 
-詳細知識は一段だけのfocused referenceへ分ける。決定的な抽出、検証、変換だけをscriptへ置き、意味判断を押し込まない。外部sourceを使う場合は、[provenance](references/provenance.md)の形式でrevision、license、採用理由、local modificationを追跡する。
+詳細知識は一段だけのfocused referenceへ分ける。
+決定的な抽出、検証、変換だけをscriptへ置き、意味判断を押し込まない。
+外部知見のrevision、license、採用理由、変更点は、runtimeから参照しないrepositoryの保守文書へ記録する。
 
 ## Forward evalで存在理由を確かめる
 

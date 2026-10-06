@@ -4,8 +4,8 @@ Use this reference with `repository-wide-scan.md` for repository-wide security s
 
 ## Artifact Requirements
 
-- Load the per-scan threat model path from `../../../references/scan-artifacts.md` as the repo-specific threat-model source of truth.
-- Build and save a runtime inventory using the runtime inventory path from `../../../references/scan-artifacts.md`.
+- Load the per-scan threat model path from `scan-artifacts.md` as the repo-specific threat-model source of truth.
+- Build and save a runtime inventory using the runtime inventory path from `scan-artifacts.md`.
   - Do not proceed past repository-wide discovery until `runtime_inventory.md` exists on disk and is referenced by the discovery report. Missing `runtime_inventory.md` means discovery is incomplete, even if candidates or a coverage ledger already exist.
   - Save the runtime inventory immediately after the initial entrypoint/trust-boundary pass, before deep sink review. Large-repo scans should leave this checkpoint even if later validation or environment setup is interrupted.
   - Derive product and privileged surfaces from router declarations, OpenAPI or RPC metadata, public or anonymous endpoints, applied specs, ingress/service config, job/worker definitions, package exports, and privileged local or agent/tool surfaces before free-text sink search.
@@ -22,7 +22,7 @@ Use this reference with `repository-wide-scan.md` for repository-wide security s
 ## Seed Research
 
 - First capture user-provided scope hints such as CVE/GHSA/advisory identifiers, package versions, named vulnerability families, or release/security-test references.
-- When the user request or scan context includes CVE, GHSA, advisory, issue, release, package-version, or explicit vulnerability-family identifiers, run an advisory seed pass before deep frontier scanning and save it to the advisory seed research path from `../../../references/scan-artifacts.md`.
+- When the user request or scan context includes CVE, GHSA, advisory, issue, release, package-version, or explicit vulnerability-family identifiers, run an advisory seed pass before deep frontier scanning and save it to the advisory seed research path from `scan-artifacts.md`.
 - Use authoritative advisory text, project security notes, release notes, fix commits, pull requests, issue trackers, and security tests when network access or local history is available. Record the sources searched, candidate files/functions/classes/hunks, expected vulnerable behavior, and any failed lookup attempts.
 - Treat those candidates as seed rows only: validate the vulnerable behavior against the checked-out repository before reporting. Do not let the seed lane replace the repository-wide frontier pass.
 - When CVE/advisory context has a generic or unhelpful category, prioritize advisory, fix-commit, release-note, and security-test lookup before broad sink hotspot scanning. If external lookup is unavailable or inconclusive, run a local regression-seed pass over project-specific protocol, parser, validator, and utility names plus the CVE/advisory terms; do not assume obvious REST/upload/XML hotspots are the intended security regression.
@@ -47,12 +47,12 @@ Use this reference with `repository-wide-scan.md` for repository-wide security s
 
 - For each file in the list, starting with the already annotated ones:
   - IMPORTANT: Ideally only assign each agent a single file or a very small set of files!!! If you give them too many files, the results will get a LOT WORSE! If you have to, give a max of 5 files! This is not batching, this is a targeted scalpal ensuring maximum analysis of a single file!
-  - Task a sub-agent to perform targeted vulnerability research in it. Make sure to tell the agent to follow $finding-discovery skill but with the scope of only that single file.
+  - Give the worker the exact file scope, threat model, ledger rows, and the procedure and output contract from `finding-discovery.md`.
   - When ever you or a sub-agent has finished the exaustive reading and analyzing of the target file, check it off on the list.
   - CRITICALLY IMPORTANT! You CANNOT check a file off UNTIL YOU OR A SUBAGENT HAS READ THE FULL FILE! Not just broad searching! Not just skim! READ EVERY SINGLE LINE! If dispatching a subpagent make sure to include this!
   - You CAN NOT check off files just because they appear in searches. Only reading the file will allow you to check it off.
   - You MUST process each file one at a time. Do not simple read all the files or search through them all. This is a process where each file must get your undivided attention! That is the only way to perform a exhaustive security audit!
 - Do not skip any files in the check list. Do not stop or return to the user until every single file in the list has been checked off. Even if you have found and logged vulnerabilities, it is critical that you continue tasking sub-agents or performing vulnerability research on all files in the list.
-- If you have subagents avaliable in your current tool set, you MUST use them. Before starting this phase, if the user has not mentioned allowing sub-agents, stop and explicity ask them to allow for the use of sub-agents, as not using them is something which will make this plugin not work. That is the only efficent and effective way to perform this scan.
+- Use available subagents only for independent, bounded file or boundary reviews within the session's delegation permissions. Record each worker's inspected scope and evidence; lack of subagents does not block a sequential scan.
 - If sub-agents are not avaliable in your environment, iterate through all files in the list yourself, performing the same detailed vulnerability research on each one.
 - When you hit a cap of active agents, perform additional analysis on the target until one of the agents has returned with its results. Once you confirm the results are recorded and checked off on the file list, spawn the next agent with the next file in the list.

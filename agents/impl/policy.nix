@@ -43,6 +43,10 @@ in
 
         明示的な検索と保存は`memory`を入口にし、同Skillが`project-memory` Capabilityを使う。自動連携の経路は client ごとに異なり、client の能力表が示す。自動連携は同Skillのrecall、検証、保存判断を代替しない。
       '';
+      heapDiagnosticsPolicy = lib.optionalString (builtins.elem "heap-diagnostics" capabilities) ''
+        heap-diagnosticsの入口は`heap-analysis`とし、local snapshot、比較条件、retainerの証拠から原因を調べる。
+        heap artifactをproject-memoryへ送らず、providerの任意host code実行toolや独自接続で分析を代用しない。
+      '';
     in
     pkgs.runCommandLocal "agents-policy.md"
       {
@@ -53,7 +57,7 @@ in
           pkgs.gnused
           pkgs.yq
         ];
-        skillHeader = "目的\tSkill";
+        skillHeader = "目的\tSkill\t起動";
         subagentHeader = "目的\tsubagent";
         capabilityHeader = "Capability\t入口 Skill";
         clientHeader = "client\tsubagent\tSkill 投影\tLSP\tTelemetry\tProject memory";
@@ -61,7 +65,12 @@ in
         subagentEntries = entries subagents;
         capabilityRows = tsv capabilityRows;
         clientRows = tsv clientRows;
-        inherit projectMemoryPolicy dotfilesDir environmentDir;
+        inherit
+          projectMemoryPolicy
+          heapDiagnosticsPolicy
+          dotfilesDir
+          environmentDir
+          ;
       }
       ''
         set -euo pipefail
@@ -110,7 +119,21 @@ in
           for entry in "$@"; do
             name=''${entry%%=*}
             source=''${entry#*=}
-            printf '%s\t`%s`\n' "$(description_of "$source")" "$name"
+            if [ "$header" = "$skillHeader" ]; then
+              description=$(description_of "$source")
+              invocation=$(yq -r '
+                if .["user-invocable"] == false and .["disable-model-invocation"] == true then "依存referenceのみ"
+                elif .["disable-model-invocation"] == true then "明示呼出しのみ"
+                elif .["user-invocable"] == false then "自動のみ"
+                else "task一致時" end
+              ' frontmatter.yaml)
+              if [ "$invocation" = "依存referenceのみ" ]; then
+                invocation="$invocation: \`$source\` をRead"
+              fi
+              printf '%s\t`%s`\t%s\n' "$description" "$name" "$invocation"
+            else
+              printf '%s\t`%s`\n' "$(description_of "$source")" "$name"
+            fi
           done
         }
 
@@ -125,6 +148,7 @@ in
           --subst-var-by capabilityRoster "$capabilityRoster" \
           --subst-var-by clientMatrix "$clientMatrix" \
           --subst-var-by projectMemoryPolicy "$projectMemoryPolicy" \
+          --subst-var-by heapDiagnosticsPolicy "$heapDiagnosticsPolicy" \
           --subst-var-by dotfilesDir "$dotfilesDir" \
           --subst-var-by environmentDir "$environmentDir"
 

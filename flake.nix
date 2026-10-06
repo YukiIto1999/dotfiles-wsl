@@ -22,17 +22,27 @@
     };
 
     architectureStandard = {
-      url = "github:YukiIto1999/architecture-standard/73d685fb7a9ae3d8be4fd9d494e2f6342f103a19";
+      url = "github:YukiIto1999/architecture-standard/5ca3db08e5eca9a24a8f6ec0764a7eb7240d91ca";
       flake = false;
     };
 
     mattSkills = {
-      url = "github:mattpocock/skills/8b78b531ab965735c5dc74f6f7a219e1e37326df";
+      url = "github:mattpocock/skills/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d";
       flake = false;
     };
 
-    ponytail = {
-      url = "github:DietrichGebert/ponytail/2ed6c52c9d7e5e56942508591085fd45dea277d3";
+    chromeDevtoolsSkills = {
+      url = "github:ChromeDevTools/chrome-devtools-mcp/cf2eab96d96cad3d47ce769b9638815d1775500f";
+      flake = false;
+    };
+
+    dotnetSkills = {
+      url = "github:dotnet/skills/0dcd43ceb15e15a2c45dd54075fbcf3a30632154";
+      flake = false;
+    };
+
+    modernWebGuidance = {
+      url = "github:GoogleChrome/modern-web-guidance/650eb83619134adb947b1ee8755e6511270bc444";
       flake = false;
     };
   };
@@ -47,7 +57,9 @@
       orca,
       architectureStandard,
       mattSkills,
-      ponytail,
+      chromeDevtoolsSkills,
+      dotnetSkills,
+      modernWebGuidance,
       ...
     }:
     let
@@ -60,9 +72,12 @@
       );
       hostNames = map (lib.removeSuffix ".nix") (builtins.attrNames hostProfileEntries);
       pluginSources = {
-        inherit orca ponytail;
+        inherit orca;
         matt-pocock = mattSkills;
         architecture-standard = architectureStandard;
+        chrome-devtools = chromeDevtoolsSkills;
+        dotnet = dotnetSkills;
+        modern-web-guidance = modernWebGuidance;
       };
       collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };
       units = collectUnits ./.;

@@ -1,12 +1,12 @@
-# Final Report and Codex Review Directives
+# Final Security Report
 
-Use this guidance when assembling the final Codex Security markdown report and Codex app review directives.
+Use this guidance when assembling the final security review report.
 
 ## Final Output
 
 The final output must be markdown.
 
-Write the final markdown report to the final scan report path from `../../../references/scan-artifacts.md`. Keep the threat model and validation artifacts alongside it using that layout so the full scan bundle lives together.
+Write the final markdown report to the final scan report path from `scan-artifacts.md`. Keep the threat model and validation artifacts alongside it using that layout so the full scan bundle lives together.
 
 When there are no reportable findings, include a short `No findings` section that explains why nothing survived discovery or the later reportability gates. For repository-wide scans with a coverage ledger, still include `Coverage Closure` so seeded, suppressed, not_applicable, and deferred rows remain auditable.
 
@@ -84,22 +84,3 @@ The threat model is not part of the final output.
 
 Include the final report path in the response so the user can find it easily.
 
-## Codex Review Directives
-
-For Codex app rendering, emit one `::code-comment{...}` directive per surviving finding in the final response. The markdown report and review directives should agree on title, priority, file, line range, and core explanation.
-
-For each reportable finding, emit a Codex review directive in this form:
-
-`::code-comment{title="[P2] Example title (medium)" body="One-paragraph review explanation." file="/absolute/path/to/file" start=10 end=12 priority=2 confidence=0.55}`
-
-Directive requirements:
-
-- `title`, `body`, and `file` are required
-- `title` should include both the final priority and severity, formatted like `[P1] Example title (high)`
-- `file` should be an absolute path
-- `start` and `end` should be tight 1-based line numbers
-- `priority` should match the final priority mapping
-- `confidence` should be numeric when available
-- emit one directive per finding and none when there are no findings
-- inline Markdown code spans are allowed and encouraged for short identifiers, flags, function names, and config keys, such as `git -c`, `--config`, and `diff.external`
-- do not put double quote characters inside quoted attribute values, including escaped quotes like `\"`; rewrite quoted command examples without quotes or leave them only in the markdown report

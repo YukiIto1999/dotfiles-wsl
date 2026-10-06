@@ -72,7 +72,7 @@
     {
       "id": "migration-execution",
       "prompt": "schema移行をexpand、backfill、contractの順に実装して実行してください。",
-      "expectedSkills": ["ponytail"],
+      "expectedSkills": [],
       "mustNotTrigger": [
         "impact-analysis"
       ]

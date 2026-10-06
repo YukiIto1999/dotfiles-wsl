@@ -66,10 +66,11 @@
 | 生成 config artifact が配備先の source と一致する | `agent-artifact-contract`、`gateway-artifact-contract` |
 | gateway が全 target へ HTTP で接続し、front の起動依存と子 process を持たない | `gateway-front-contract` |
 | front が宣言した port で loopback に listen し、書き込み領域、backend dependency、通信方針を持つ | `mcp-front-contract` |
-| browser target だけが session lifecycle を使い、inner listener、管理 listener、TTL grace、stdio executable が session front config に一致する | `mcp-front-session-lifecycle` |
+| session lifecycleを宣言するtargetのinner listener、管理listener、TTL grace、stdio executableがsession front configに一致する | `mcp-front-session-lifecycle` |
 | session front が session ごとに stdio state を分離し、個別 DELETE と TTL で子 process を終了して次の session を受け入れる | `mcp-session-front-behavior` |
 | Playwright の front が生成物を runtime directory に閉じる | `playwright-front` |
 | browser-runtime CapabilityがChromium packageを一度だけ公開し、PlaywrightとChrome DevToolsが同じcontractを使う | `browser-runtime-chromium-contract`、`chrome-devtools-front` |
+| heap解析が任意code実行toolと未load fileの比較を拒否し、実snapshotで保持object、session分離、unload後のhandle失効を確認し、同期regexのdeadline終了を他sessionへ波及させない | `heap-diagnostics` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
 | Hindsight backendのimage、API endpoint、named volume、read-only model mount、環境 file、health、stop timeoutが宣言どおりである | `hindsight-container` |
 | memory MCP frontのpackage、port、backend unit、health probeが一致する | `hindsight-front` |

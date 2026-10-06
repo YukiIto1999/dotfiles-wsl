@@ -10,7 +10,7 @@ AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycle�
 agents/policy/AGENTS.md ───────────────────┐
 agents/subagents/*.md ── client変換 ──────────┤
 skills/*/skill/ ──────────────────────────┼─► Nix store ─► 各clientの設定領域
-Orca / architecture-standard / Matt / Ponytailの固定source ─┘
+Orca / architecture-standard / Matt / Google / .NETの固定source ─┘
 
 Agent ─► Skill ─► Capability ─► provider adapter ─► Platform MCP ─► gateway
                          └────► backend / credential / persistent state
@@ -45,16 +45,23 @@ Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置�
 ## Profileとregistry
 
 [`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のAgent client、Capability、language server、identityを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有のCapabilityをsemantic IDで加える。MCP providerやcontainer backendはprofileへ直接列挙しない。
+共通profileはheap-diagnosticsも選び、provider名の`memlab`ではなく意味上のCapabilityから採用する。
 
 各client adapterは`dotfiles.agents.registry`へ登録し、profileの`enabled`から採用済みの`clients`を導く。
 配備、installer、runtime wrapper、health、policyの能力表は採用集合だけを読む。
 
 [`skills/module.nix`](../../skills/module.nix)はSkill ID、Skill依存、hard Capability依存から、選択したCapabilityで実行できるSkillを導く。[`capabilities/module.nix`](../../capabilities/module.nix)はCapability依存closure、provider owner、backend ownerを検証し、`dotfiles.capabilities.resolved`、`dotfiles.platform.mcp.enabledProviders`、`dotfiles.platform.containers.enabled`を導く。現在のconsumer数はownershipの判断に使わない。
+hard依存は主要手順の必須条件であり、条件付きbrowserやcloud branchで一般Skill全体をgateしない。
 
 Agent clientへ配るのは、解決したSkill registryの`source` directoryとその本文、reference、scriptである。
 必要なSkillを失ったsubagentとそのhandoffも配備しない。
 Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsource差替えはNixの明示的なoverrideだけで行う。
-Orca、architecture-standard、Matt Pocock、Ponytailは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
+Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skillsは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
+原版の起動flagも保持し、policy rosterがtask一致、明示command、consumerから読むreference-onlyを区別する。
+`user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
+consumerはpolicy rosterのraw source絶対pathを`Read`で開き、固定source実体のsibling referenceを利用する。
+片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
+Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
 採用IDとpath、revision、licenseの関係は[Skill portfolio](skills.md#直接採用)、登録と差替の契約は[外部リポジトリ所有Skillの構成](repository-skills.md)を参照する。
 
 ## Client binary
@@ -152,8 +159,32 @@ HTTP専用のsession作成rateをstdioの呼出し制限として設定しない
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
 
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
-`browser-diagnostics`のSkill入口は`diagnosing-bugs`であり、実browserを使う操作は`browser-operation`の規律を通す。
-Matt/Ponytailの原版を採用しても、gateway接続、accountの選択、権限、副作用の安全境界を上流本文のtool例で置き換えない。
+`browser-diagnostics`のSkill入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`であり、Playwright操作の入口は`browser-operation`である。
+一般の`diagnosing-bugs`はbrowser Capabilityを要求せず、必要なbranchだけ専門入口へ渡す。
+heap-diagnosticsのregistryは[`capabilities/heap-diagnostics/module.nix`](../../capabilities/heap-diagnostics/module.nix)が所有し、providerは`memlab`だけ、backendとCapability依存は空である。
+入口の`heap-analysis`はheap-diagnosticsだけを要求し、heap artifactをproject-memoryへ送らず、ChromeまたはNode.jsのlocal snapshotと比較条件を扱う。
+native .NET/Rustのdump、RSSだけの増加、歴史的memoryの検索や保存は所有しない。
+
+providerの[`module.nix`](../../capabilities/heap-diagnostics/memlab/mcp/module.nix)はport `8777`、stdioのsession lifecycle、`needsNetwork = false`を宣言し、downstream sessionごとにresident snapshotとhandleを分離する。
+共通frontの`MemoryMax = \"2G\"`とは別に、[`package.nix`](../../capabilities/heap-diagnostics/memlab/mcp/package.nix)がNode old-spaceを`1024` MiB、解析timeoutを`45000` msへ制限する。
+fileを載せる前にheaderと現在のresident stateを調べ、重いwalkや複数loadを並行させず、不要なsnapshotをunloadする。
+
+配備するのは固定archive hashとpackage-lockを持つpublished `@memlab/mcp-server` `2.86.0`であり、調査用Git sourceの`915` prefixの版と同一視しない。
+published packageが持つsnapshot headerとmulti-snapshot APIを基準に、現在のschemaを確認する。
+原版のtool bodyは変更せず、localの[`readonly-server.mjs`](../../capabilities/heap-diagnostics/memlab/mcp/package/readonly-server.mjs)を追加し、33の解析・session登録だけを公開する。
+`eval`、`for_each`、`eval_across`、`batch`と任意codeを実行するcomposite経路は登録しない。
+この入口制限をVMによる安全なsandboxやheap内の秘密情報の無害化と呼ばず、取得許可、絶対path、localでの保持、報告時の秘匿化を別に守る。
+
+[`admission.mjs`](../../capabilities/heap-diagnostics/memlab/mcp/package/admission.mjs)はlocalの絶対pathだけをloadに許可し、`force`によるadmissionの回避を拒否する。
+比較はguard付きでload済みのresident snapshotだけを受け付け、fresh fileから比較APIへ直接入る経路を拒否する。
+[`supervised-server.mjs`](../../capabilities/heap-diagnostics/memlab/mcp/package/supervised-server.mjs)はsession専用workerのstdioをpipeにし、同期処理にも独立したdeadlineを適用する。
+deadlineを超えたworkerだけを終了し、未完了の解析を空の結果として返さず、他sessionのgraphには触れない。
+これはNode old-spaceの上限であり、processのRSSを1 GiB以下に保証するものではない。
+
+Chromeのcaptureは公開toolが許すprivateな保存先を必要とする。
+privateな保存先がworkspace境界から拒否された場合はcapture不能を報告し、ChromeからMemLabへの受け渡しを完了と扱わない。
+repositoryへ秘密情報を含むsnapshotを保存してこの制約を回避しない。
+外部のtool例があっても、実tool schema、gateway接続、account選択、権限、副作用の安全境界を取込側の契約で確認する。
 
 現在のtarget名は次で取得できる。
 

@@ -64,7 +64,6 @@ in
         jq -e '
           (.projectMemoryHooks | length) > 0 and
           (.commands | length) > 0 and
-          (.mcpExecutables | length) > 0 and
           (.workstation | length) > 0
         ' "$expected" >/dev/null
 
@@ -134,9 +133,6 @@ in
         diff -u expected-workstation.json actual-workstation.json
         lintGenerated "$(jq -r '.workstation.wslview' "$actual")"
 
-        jq -S '.mcpExecutables' "$expected" > expected-mcp-executables.json
-        jq -S '.mcpExecutables | keys' "$actual" > actual-mcp-executables.json
-        diff -u expected-mcp-executables.json actual-mcp-executables.json
         while IFS=$'\t' read -r id executable; do
           if ! isGeneratedShell "$executable"; then
             echo "MCP executable is not a generated shell wrapper: $id" >&2

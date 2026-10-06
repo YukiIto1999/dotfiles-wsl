@@ -94,8 +94,11 @@ clientやroutingが使うIDは維持され、本文と資材の供給元だけ�
 Orcaのlegacy aliasである`linear-tickets`は`orca-linear`とroutingを分けるため採用しない。
 architecture-standardの規範本文は配備済みsourceから読み、`standard-feedback`は`github-resources`を要求する。
 
-標準自体を変える`standard-update`と監査する`standard-audit`は、標準の作業checkoutを使う運用入口であり、このhostへの採用対象ではない。
-別repositoryから標準を変えるときは、`environment-design`から標準の作業checkoutへ渡す。
+architecture-standardの運用Skillは、同repositoryの`skills/<id>/`を正本とし、`standard-update`と`standard-audit`も既存の採用表から配備する。
+clientごとの`.claude/skills/`などはadapterの投影先であり、正本の所有先ではない。
+`standard-update`は最後のscoped auditに`standard-audit`を、外部Web調査に`web-research`を使うため、この二つをSkill依存として宣言する。
+同梱のClaude Code専用evaluatorは任意のconsumerであり、通常のSkill利用のCapability要件にはしない。
+別repositoryから標準を変えるときは、`environment-design`から作業checkoutの`skills/standard-update/SKILL.md`へ渡し、配備済みsourceを編集しない。
 
 ## 検査
 

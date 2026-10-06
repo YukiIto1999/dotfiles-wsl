@@ -11,7 +11,7 @@ description: Decides which owner in the agent working environment receives an im
 
 | 所有者 | 所有するもの | 入口 |
 |---|---|---|
-| architecture-standard | projectをまたいで人の開発者にも求める設計、実装、運用の規範と、`standard-apply`など標準の運用Skill | 作業checkoutの`.claude/skills/standard-update/SKILL.md` |
+| architecture-standard | projectをまたいで人の開発者にも求める設計、実装、運用の規範と、`standard-apply`など標準の運用Skill | 作業checkoutの`skills/standard-update/SKILL.md` |
 | dotfiles-wslのagent能力 | AGENTS、local Skill、reference、script、subagent | `skill-design` |
 | dotfiles-wslの基盤 | 配備、hook、client設定、Capability、MCP、toolchain、外部sourceの採用表と版 | dotfilesの`docs/reference/change-map.md` |
 | upstream | Orcaなど外部repositoryが所有するSkillとtoolの中身 | owner repositoryへの提案。dotfilesは採用表と版だけを持つ |
@@ -48,7 +48,9 @@ description: Decides which owner in the agent working environment receives an im
 
 所有者の入口へ、主張、根拠のsource locator、現行本文との差、未確定事項を渡す。入口は主張を未採用の候補として受け取り、採否と文面を決める。このSkillは文面を決めない。
 
-- architecture-standard: 作業checkoutの`.claude/skills/standard-update/SKILL.md`を読み、checkoutのrootを作業directoryにして従う。現在のprojectをrootにしない。利用者が変更でなく記録だけを求めた場合は`standard-feedback`でIssueにする。
+- architecture-standard: 作業checkoutの`skills/standard-update/SKILL.md`を読み、checkoutのrootを作業directoryにして従う。
+  現在のprojectをrootにしない。
+  利用者が変更でなく記録だけを求めた場合は`standard-feedback`でIssueにする。
 - dotfiles-wslのagent能力: `skill-design`で、何もしない、policy、reference、script、既存Skill、新しいSkillのどれにするかを決める。
 - dotfiles-wslの基盤: change-mapが示す正本と検証入口に従う。
 - upstream: owner repositoryへの提案として扱い、配備物を手元で書き換えない。dotfiles側の変更は採用表と版に限る。

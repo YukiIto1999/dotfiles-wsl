@@ -47,6 +47,10 @@ let
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
+        standard-audit = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
         standard-conformance = {
           requiresCapabilities = [ ];
           requiresSkills = [ ];
@@ -54,6 +58,13 @@ let
         standard-feedback = {
           requiresCapabilities = [ "github-resources" ];
           requiresSkills = [ ];
+        };
+        standard-update = {
+          requiresCapabilities = [ ];
+          requiresSkills = [
+            "standard-audit"
+            "web-research"
+          ];
         };
       };
     };

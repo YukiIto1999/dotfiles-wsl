@@ -28,7 +28,8 @@ semantic探索とexact anchorの両方が必要なら、概念と関係を保っ
 ## Zvec-Grepを使う条件
 
 semanticまたはmixedなrepository調査では、`repository-search` Capabilityが公開する`zvec_grep_search`を先に使う。
-このsessionの入口は`xd://mcp__gateway_zvec_grep_zvec_grep_search`であり、schemaを読んでから`root`へdaemonに見えるworkspaceの絶対path、`query`へ問い、`autoUpdate: false`をJSONで渡す。
+URI deviceを公開するclientでは`xd://mcp__gateway_zvec_grep_zvec_grep_search`などが入口となり、MCP toolを直接公開するclientではそのネイティブな呼出し形式を使う。
+現在公開された実tool名とschemaを確認し、`root`へdaemonに見えるworkspaceの絶対path、`query`へ問い、`autoUpdate: false`を渡す。
 複数の問いは`queries`、確認済みexact anchorは補助の`fts`、補助の意味検索は`vector`へ分けられ、一つの順位へ統合する場合だけ`fuse: true`を使う。
 これらは検索経路であり、hard filterとは扱わない。
 応答のroot、scope、freshness、`background_refresh`を読み、current indexから返った十分なsnippetは直ちに使い、更新中という理由だけでstatus確認や再検索を足さない。

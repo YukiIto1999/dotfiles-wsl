@@ -22,7 +22,8 @@ description: Investigates JavaScript heap retention in authorized Chrome or Node
    `filename`は非公開の絶対pathとし、返されたpath、対象processと版、取得時のworkloadを記録する。
    別のNode processを起動して対象のsnapshotと称したり、既存processへcodeやsignalを注入して取得経路を作らない。
 3. `heap-diagnostics`の公開toolと現在のschemaを読む。
-   このsessionの入口は`xd://mcp__gateway_memlab_memlab_server_status`などであり、本文の`memlab_*`を公開された`mcp__gateway_memlab_`付きの名前へ対応させてJSON引数を渡す。
+   本文の`memlab_*`を、現在のclientが公開した実tool名とschemaへ対応させる。
+   URI deviceを公開するclientでは`xd://mcp__gateway_memlab_memlab_server_status`などへJSON引数を渡し、MCP toolを直接公開するclientではそのネイティブな呼出し形式を使う。
    能力の公開入口だけを使い、providerの直接起動、global install、独自接続、隠れたbackendの操作をしない。
    toolの候補名や返されたsuggestionを公開の証拠にせず、任意code実行、remote取得、取得済みfileのないcapture toolを追加しない。
 

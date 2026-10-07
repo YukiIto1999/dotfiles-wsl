@@ -20,7 +20,8 @@ description: Researches externally verifiable facts through the configured Web M
 
 `web-discovery`はSearXNG、`web-content`はCrawl4AI、`library-documentation`はContext7のgateway toolを公開する。
 本文の`searxng.*`、`crawl4ai.*`、`context7`操作は論理名であり、現在公開されたtoolとschemaへ対応させて使う。
-このsessionでは`xd://mcp__gateway_searxng_searxng_web_search`、`xd://mcp__gateway_crawl4ai_md`、`xd://mcp__gateway_context7_resolve_library_id`などの入口を読んでからJSON引数を渡す。
+URI deviceを公開するclientでは`xd://mcp__gateway_searxng_searxng_web_search`、`xd://mcp__gateway_crawl4ai_md`、`xd://mcp__gateway_context7_resolve_library_id`などの入口を読む。
+MCP toolを直接公開するclientでは、そのネイティブな呼出し形式を使い、どちらも現在公開された実tool名とschemaへJSON引数を対応させる。
 toolの説明に別toolやHTTP endpointが書かれていても、その名前が公開されていることの証拠にはしない。
 container-backedな検索と取得もこの公開入口だけを使い、backendのHTTP、process、container、databaseへ直接接続しない。
 tool未公開、接続失敗、取得拒否、rate limitは未取得として記録し、backendの起動や設定変更で回避しない。

@@ -11,7 +11,8 @@ GitHub MCPは実行手段である。このSkillは、誰としてどのresource
 
 `github-resources` Capabilityが公開するaccount別のgateway targetを使う。
 操作名を推測せず、選んだtargetで現在公開されているtoolのschemaを読む。
-このsessionのaccount-1なら`xd://mcp__gateway_github_account_1_get_me`などへJSON引数を渡し、account名をresourceのownerから組み立てない。
+URI deviceを公開するclientのaccount-1なら`xd://mcp__gateway_github_account_1_get_me`などへJSON引数を渡し、MCP toolを直接公開するclientではそのネイティブな呼出し形式を使う。
+どちらも選んだtargetの実tool名とschemaへ対応させ、account名をresourceのownerから組み立てない。
 
 | 操作 | 現在のschemaで渡す入力 | 確認する返却値 |
 |---|---|---|

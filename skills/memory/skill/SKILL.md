@@ -7,7 +7,8 @@ description: Recalls historical project memory, verifies relevant claims against
 
 `memory`は過去の記録を候補として読み、現在の一次資料で確かめた知識だけを明示的に保存する手段である。記録は承認や現在の実装検証の代わりにはならない。`project-memory` Capabilityが提供する`memory_health`、`memory_recall`、`memory_save`、`memory_status`、`memory_verify`を使い、backendの起動、接続、移行は操作しない。
 
-本文の`memory_*`は公開操作の論理名であり、このsessionでは`xd://mcp__gateway_memory_memory_recall`などへ対応する。
+本文の`memory_*`は公開操作の論理名であり、現在のclientが公開した実tool名とschemaへ対応させる。
+URI deviceを公開するclientでは`xd://mcp__gateway_memory_memory_recall`などを使い、MCP toolを直接公開するclientではそのネイティブな呼出し形式を使う。
 呼出し前にその入口のschemaを読み、以下の引数をJSONで渡す。
 `memory_health`は`{}`、recallは`cwd`、`query`、`scope`、verifyはrecallが返した`memory_id`と同じ`cwd`、`scope`を使う。
 公開入口がない場合は利用不能と返し、container、database、model、serviceの直接操作で復旧しない。

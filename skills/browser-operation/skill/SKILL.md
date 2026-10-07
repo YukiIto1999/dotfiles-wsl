@@ -14,7 +14,9 @@ Playwrightは実行手段であり、何を操作し、どの状態を成功と�
 ## 公開入口
 
 `browser-automation` Capabilityのgatewayに公開されたPlaywright toolを使う。
-本文の`playwright.browser_*`は論理名であり、このsessionでは`xd://mcp__gateway_playwright_browser_tabs`などの公開入口へ対応させ、schemaを読んでからJSON引数を渡す。
+本文の`playwright.browser_*`は論理名であり、現在のclientが公開した実tool名とschemaへ対応させる。
+URI deviceを公開するclientでは`xd://mcp__gateway_playwright_browser_tabs`などの入口を読み、JSON引数を渡す。
+MCP toolを直接公開するclientでは、そのネイティブな呼出し形式を使い、URI deviceがあると仮定しない。
 tab一覧は`browser_tabs`の`action: "list"`、作成は`"new"`、選択と終了は`"select"`または`"close"`と一覧の`index`を使う。
 snapshotと通常の操作は選択中のtabに作用し、Chrome DevToolsのpage IDとは共有しない。
 toolが公開されていない、接続できない、または対象へ到達できない場合は、その境界を未確認として返し、別browser、provider、containerを直接起動しない。

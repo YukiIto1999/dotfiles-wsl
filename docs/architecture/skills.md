@@ -181,6 +181,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfac
 言語に応じた推敲、追加の観測、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。
 containerを背後に持つMCPも公開Capabilityから使い、Skillからproviderのprocessやdatabaseへ直接接続しない。
 既知のexact textとpathとsymbolはRead、Grep、LSPなどで直接調べ、単一toolの呼出しをSkillで包まない。
+本文の`xd://`入口はURI deviceを公開するclient用の例であり、MCPを直接呼ぶclientでは現在のネイティブな公開tool名とschemaへ対応させる。
 
 独自Skillの本文と実行用referencesには、着想元の紹介やadoption rationaleを置かない。
 来歴とlicenseはこの文書の次節に置き、正本の標準への参照と実際の委譲先Skill名は実行に必要な導線として残す。

@@ -12,7 +12,9 @@ description: Measures and diagnoses browser loading, responsiveness, layout shif
 変更許可と測定許可を別に扱い、診断依頼だけではsourceやbrowser設定を変更しない。
 
 `browser-diagnostics` Capabilityのgatewayに公開されたChrome DevTools toolを入口にし、呼出し前に現在のschemaを読む。
-このsessionの`xd://mcp__gateway_chrome_devtools_list_pages`などが公開入口であり、本文の短い操作名をその入口へ対応させてJSON引数を渡す。
+本文の短い操作名を、現在のclientが公開した実tool名とschemaへ対応させる。
+URI deviceを公開するclientでは`xd://mcp__gateway_chrome_devtools_list_pages`などの入口へJSON引数を渡す。
+MCP toolを直接公開するclientでは、そのネイティブな呼出し形式を使い、URI deviceがあると仮定しない。
 Chromeを別processとして起動したり、MCPやcontainerの設定、接続先、packageを追加しない。
 `list_pages`へ`{}`を渡してURL、title、page IDを確認し、`pageId`を要求する呼出しにはそのIDを渡す。
 選択中のpageに作用するschemaなら、先に`select_page`の`pageId`で対象を選ぶ。

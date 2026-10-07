@@ -12,7 +12,7 @@
     }
     {
       subagent = "architect";
-      skill = "tech-article-reproducibility";
+      skill = "article-reproduction";
       activation = "dynamic";
     }
     {
@@ -122,7 +122,7 @@
     }
     {
       subagent = "implementer";
-      skill = "tech-article-reproducibility";
+      skill = "article-reproduction";
       activation = "dynamic";
     }
     {

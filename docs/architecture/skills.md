@@ -118,7 +118,7 @@ testがgreenでも目的との因果関係がない変更を指摘し、unrelate
 findingは発生条件、影響、最小のchanged rangeと根拠を持ち、指定したaxis内だけで返す。
 
 `description-writing`は、一次資料に基づく内容、読者の問いに沿う構成、返った所見を採用する編集判断を所有する。
-READMEの開始手順、setup、tutorialなど再現する操作がある場合だけ、独立したcustom [`tech-article-reproducibility`](../../skills/tech-article-reproducibility/skill/SKILL.md)へ渡す。
+READMEの開始手順、setup、tutorialなど再現する操作がある場合だけ、独立したcustom [`article-reproduction`](../../skills/article-reproduction/skill/SKILL.md)へ渡す。
 完成した記事と添付のrevision、読者と到達点、環境と開始状態、順序付き操作、入力、期待exitと個別streamと生成物、既存証拠、許可範囲を渡し、判定とlocator付きblocking点を受け取って修正へ戻る。
 書き手側では同じ再現性loopを重ねず、変更した手順や前提だけを同じownerへ戻す。
 既存記事の単独reviewも同じownerが扱い、概念説明や単なる参照表には起動しない。
@@ -129,7 +129,7 @@ sourceに照らす図、出力注釈、HTMLを含む速習資料の仕事だけ�
 freshなreaderを起動できないworkerは入力と未実施理由をtop-level callerへ返し、自分の既知draftの再読で代用しない。
 模擬readerの反応とlogからのrecallは、実commandの証拠や実際の翌日の人間の記憶測定とは区別する。
 用語の意味、context、`GLOSSARY.md`、domainのADRを変更する仕事は既存の`domain-modeling`へ渡し、実装mapをdomain定義へ混ぜない。
-architectの`explainer`と`tech-article-reproducibility`、implementerの`tech-article-reproducibility`は該当taskだけのdynamic routeであり、一般設計やcodingの必須preloadにしない。
+architectの`explainer`と`article-reproduction`、implementerの`article-reproduction`は該当taskだけのdynamic routeであり、一般設計やcodingの必須preloadにしない。
 raw sourceの採用は`mizchi/explainer`に限り、donorとして調べた`mizchi/skills`をwhole sourceの配備対象にはしない。
 外部scriptの実行入口と制約は[toolingの外部CLI](../reference/tooling.md#外部cli)が持つ。
 
@@ -180,8 +180,8 @@ CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfac
 |---|---|---|
 | `change-writing` | 明示した差分から変更の目的と利用者への影響を説明する判断 | 差分と検証記録を読み、日本語の表現を`ja-writing`へ渡す。 |
 | `comment-writing` | 実装commentを残す理由と最小の内容の判断 | 正本の標準と制約を読み、日本語の表現を`ja-writing`へ渡す。 |
-| `description-writing` | 一次資料に基づく内容と読者の問いに沿う構成の判断 | 再現する手順を`tech-article-reproducibility`、速習資料を原版`explainer`、独立した理解確認を原版`first-reader`へ条件付きで渡し、返却結果から編集を再開する。 |
-| `tech-article-reproducibility` | 記事の開始条件と操作から到達点を再現できるかの判断 | 記述reviewと実行証拠を区別し、必要なbrowser操作や.NET testだけを専門入口へ渡す。 |
+| `description-writing` | 一次資料に基づく内容と読者の問いに沿う構成の判断 | 再現する手順を`article-reproduction`、速習資料を原版`explainer`、独立した理解確認を原版`first-reader`へ条件付きで渡し、返却結果から編集を再開する。 |
+| `article-reproduction` | 記事の開始条件と操作から到達点を再現できるかの判断 | 記述reviewと実行証拠を区別し、必要なbrowser操作や.NET testだけを専門入口へ渡す。 |
 | `documentation-writing` | 宣言の契約をdocumentation commentへ記す判断 | 宣言と実装と契約を調べ、日本語の表現を`ja-writing`へ渡す。 |
 | `ja-writing` | 日本語の表現と推敲の判断 | 正本の標準を読み、渡された文章を扱う。 |
 | `dependency-analysis` | nodeとedgeを固定して依存の事実を作る判断 | 未知の概念と関係だけ`repository-research`へ渡し、設計と診断を別の仕事として扱う。 |
@@ -243,7 +243,7 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 | [extract-glossary](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/extract-glossary/SKILL.md) | 個別licenseなし。root READMEのMIT default宣言。本文は非転載 | onboarding文書で既存語彙と入口を読み、source付きの実装mapをdomain定義から分けること | 別glossary Skill、固定fileとdiagram一式、名前から推測したdomain定義、実装mapの`GLOSSARY.md`への転記 |
 | [retrospective-codify](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/retrospective-codify/SKILL.md) | 個別licenseなし。root READMEのMIT default宣言。本文は非転載 | `environment-design`で観測した失敗と最後の成立を入力と出力の差で対にし、もっともらしい説明と因果の証拠を分けること | 新しいretrospective owner、既存規律が読まれなかった場合の重複guidance、global ast-grep規則、配備copyの直接編集 |
 
-再現性の入力と返却は[reproduction-contract](../../skills/tech-article-reproducibility/skill/references/reproduction-contract.md)が所有し、代表scenarioは[`skills/tech-article-reproducibility/fixtures/scenarios.json`](../../skills/tech-article-reproducibility/fixtures/scenarios.json)に置く。
+再現性の入力と返却は[reproduction-contract](../../skills/article-reproduction/skill/references/reproduction-contract.md)が所有し、代表scenarioは[`skills/article-reproduction/fixtures/scenarios.json`](../../skills/article-reproduction/fixtures/scenarios.json)に置く。
 [`agents/fixtures/writing-skills.json`](../../agents/fixtures/writing-skills.json)の執筆handoff例は期待するbehaviorを記したfixtureであり、変更後の発火や実行成功を測定した記録ではない。
 `environment-design`の既存のowner選択と重複排除は維持し、教訓から検査、policy、方法のどれを選ぶかは選んだownerの入口へ返す。
 

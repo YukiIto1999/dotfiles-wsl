@@ -93,7 +93,7 @@ CI workflowの変更やローカル再現では、projectのtask正本を保ち�
 候補はsourceで確かめ、共通化は変更理由と契約で判断する。
 JSXの取り逃し、言語別の成熟度、型解決の不在があるため、候補0件を重複の不在や設計の正しさとしない。
 速習資料や章立て教材は原版の`explainer`または`explainer-book`、初見の読み手の体験は原版の`first-reader`へ渡す。
-一般文書は`description-writing`、実行手順の記事の再現性は独自の`tech-article-reproducibility`が所有し、同じ執筆・読解・再現を重ねない。
+一般文書は`description-writing`、実行手順の記事の再現性は独自の`article-reproduction`が所有し、同じ執筆・読解・再現を重ねない。
 原版の検証表示は実行範囲の証拠であり、未観測のexit、stream、業務結果を補わない。
 外部CLIの実行条件と配備の正本は、`@dotfilesDir@/docs/reference/tooling.md`から必要な入口だけを読む。
 

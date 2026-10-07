@@ -49,7 +49,7 @@ wrapperのCWD変更や`NODE_PATH`だけでは、祖先packageが選ばれる挙�
 図とHTMLは出力を開いて読んだ範囲を証拠にし、checkerの合格だけで実画面受入やa11y全適合としない。
 
 [`checks`のloop](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/skills/explainer/scripts/verify-doc.mjs#L46-L75)はsubprocessのexitを捨て、stdoutとstderrを結合した出力を照合する。
-既知の非zero subprocessでも`VERIFIED`になるため、wrapperのexit 0と`VERIFIED`だけを実行成功の証明にせず、custom `tech-article-reproducibility`がcommandごとのexit、個別stream、到達stateを記事の期待と照合する。
+既知の非zero subprocessでも`VERIFIED`になるため、wrapperのexit 0と`VERIFIED`だけを実行成功の証明にせず、custom `article-reproduction`がcommandごとのexit、個別stream、到達stateを記事の期待と照合する。
 optional D2、TALA、ELK、TLC、Apalacheなどのbackendはこのpackageで供給せず、実行に必要なら別の許可済み前提として扱う。
 `first-reader`はraw source内のPython 3 stdlib scriptを使い、模擬readerやrecall-from-logを実command再現や実際の翌日の人間の記憶測定へ置き換えない。
 

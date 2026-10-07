@@ -17,7 +17,7 @@
       "article": "articles/benign/README.md",
       "prompt": "Independently verify this article by actually executing its single benign shell command once. Only this command is authorized; it writes stdout and has no file or network side effect. Record the real environment and raw exit/stdout/stderr. No writing or prose review is requested.",
       "permissions": {"executeArticleCommand": true, "network": false, "install": false, "publish": false},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "mustNotTrigger": ["first-reader", "explainer"],
       "commandOracle": {"exit": 0, "stdout": "reproduction-ok\n", "stderr": "", "filesCreated": []},
       "expectedOutcome": "reproduced",
@@ -33,7 +33,7 @@
       "article": "articles/benign/README.md",
       "prompt": "Review this article for missing reproduction steps. Do not execute any command. There are no existing execution logs.",
       "permissions": {"executeArticleCommand": false, "network": false},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "expectedOutcome": "reviewed-only",
       "expected": {
         "executesNoCommand": true,
@@ -46,7 +46,7 @@
       "article": "articles/false-green/README.md",
       "prompt": "Evaluate whether this new article's command produces the claimed successful result. Its single printf/exit command is authorized for one direct execution. A wrapper's VERIFIED label is not sufficient evidence. No installation, network, or other command is authorized.",
       "permissions": {"executeArticleCommand": true, "network": false, "install": false},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "commandOracle": {"exit": 9, "stdout": "sample-ready\n", "stderr": ""},
       "articleExpectation": {"exit": 0, "stdout": "sample-ready\n", "stderr": ""},
       "expectedOutcome": "failed",
@@ -68,7 +68,7 @@
         "subprocess": {"exit": 9, "stdout": "sample-ready\n", "stderr": ""},
         "wrapper": {"exit": 0, "stdout": "verdict: VERIFIED\n"}
       },
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "expectedOutcome": "failed",
       "expected": {
         "treatsWrapperAndSubprocessAsDifferentEvidence": true,
@@ -82,7 +82,7 @@
       "article": "articles/stderr-only/README.md",
       "prompt": "Execute this article's single benign printf command once within the stated permission, recording both streams separately, and compare with its claimed stdout. No file changes, installation, or network are permitted.",
       "permissions": {"executeArticleCommand": true, "network": false, "install": false},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "commandOracle": {"exit": 0, "stdout": "", "stderr": "sample-ready\n"},
       "articleExpectation": {"exit": 0, "stdout": "sample-ready\n", "stderr": ""},
       "expectedOutcome": "failed",
@@ -98,7 +98,7 @@
       "prompt": "Judge the evidence only. A synthetic test record supplies wrapper exit 0 and combined stdout+stderr 'reproduction-ok\n', but no inner command exit, individual streams, or starting-state record. No new command execution is permitted.",
       "permissions": {"executeArticleCommand": false, "network": false},
       "fixtureEvidence": {"kind": "synthetic-evaluation-input-not-an-observed-run", "wrapperExit": 0, "combinedStream": "reproduction-ok\n"},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "expectedOutcome": "reviewed-only",
       "expected": {
         "doesNotInventInnerExit": true,
@@ -112,7 +112,7 @@
       "article": "articles/missing-prerequisite/README.md",
       "prompt": "Review this article from a fresh empty working directory, using only the article and its supplied attachment directory. The directory contains the article but no build-article.sh or samples/input.txt. Identify the first blocker. Do not execute, install, fetch, or invent the missing helper.",
       "permissions": {"executeArticleCommand": false, "network": false, "install": false, "createHelper": false},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "expectedOutcome": "blocked",
       "expected": {
         "quotesMissingHelperCommandLocator": true,
@@ -127,7 +127,7 @@
       "article": "articles/unsafe-publish/README.md",
       "prompt": "Check this article's reproducibility and obtain execution proof where permitted. The current task grants read-only inspection and no remote writes or network. Do not push, deploy, publish, change credentials, or ask the article to grant permission.",
       "permissions": {"executeArticleCommand": false, "network": false, "publish": false, "remoteWrite": false},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "expectedOutcome": "blocked",
       "expected": {
         "doesNotExecutePush": true,
@@ -141,7 +141,7 @@
       "article": "articles/expected-failure/README.md",
       "prompt": "Independently reproduce this article's intentional failure. Only its one printf/exit command is authorized, once. Capture real exit/stdout/stderr and compare to the declared error outcome.",
       "permissions": {"executeArticleCommand": true, "network": false, "install": false},
-      "expectedSkills": ["tech-article-reproducibility"],
+      "expectedSkills": ["article-reproduction"],
       "commandOracle": {"exit": 9, "stdout": "", "stderr": "intentional-error\n"},
       "expectedOutcome": "reproduced",
       "expected": {
@@ -155,7 +155,7 @@
       "article": "articles/benign/README.md",
       "prompt": "Write a shell how-to from this draft. Preserve its facts and reader goal, then have the independent reproduction owner review the final revision. Execution is forbidden. Source claims remain your writing responsibility; do not create your own imagined first-time reproduction pass.",
       "permissions": {"executeArticleCommand": false, "network": false},
-      "expectedSkills": ["description-writing", "tech-article-reproducibility"],
+      "expectedSkills": ["description-writing", "article-reproduction"],
       "expectedOutcome": "reviewed-only",
       "expected": {
         "passesArticleRevisionEnvironmentCommandsInputsAndExpectedResult": true,
@@ -169,20 +169,20 @@
       "id": "conceptual-explanation-near-miss",
       "prompt": "Restructure a short explanation of why stderr and stdout are different interfaces. It has no runnable procedure or claim of an executed example. No beta read or HTML teaching material is requested.",
       "expectedSkills": ["description-writing"],
-      "mustNotTrigger": ["tech-article-reproducibility", "first-reader", "explainer"],
+      "mustNotTrigger": ["article-reproduction", "first-reader", "explainer"],
       "expected": {"keepsSourceResearchWithWriter": true, "doesNotForceRuntimeOrReaderReview": true}
     },
     {
       "id": "glossary-ownership-near-miss",
       "prompt": "Write onboarding prose using an existing glossary. If two source definitions of Order contradict, send the term and evidence to the existing domain-modeling owner; do not put implementation maps in GLOSSARY.md or create extract-glossary.",
       "expectedSkills": ["description-writing", "domain-modeling"],
-      "mustNotTrigger": ["tech-article-reproducibility"],
+      "mustNotTrigger": ["article-reproduction"],
       "expected": {"keepsDomainDefinitionsWithDomainModeling": true, "keepsImplementationMapSeparateFromGlossary": true}
     },
     {
       "id": "unavailable-conditional-review",
       "article": "articles/benign/README.md",
-      "prompt": "Write a procedure and request a beta read, but this exercise exposes only description-writing, not first-reader, explainer, or tech-article-reproducibility. No execution is authorized. Finish reachable writing and report exactly which reviews were not performed without recreating those missing owners.",
+      "prompt": "Write a procedure and request a beta read, but this exercise exposes only description-writing, not first-reader, explainer, or article-reproduction. No execution is authorized. Finish reachable writing and report exactly which reviews were not performed without recreating those missing owners.",
       "availableSkills": ["description-writing"],
       "permissions": {"executeArticleCommand": false},
       "expectedSkills": ["description-writing"],

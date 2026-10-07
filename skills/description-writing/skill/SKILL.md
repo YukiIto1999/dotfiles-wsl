@@ -1,6 +1,6 @@
 ---
 name: description-writing
-description: Writes or restructures substantial technical prose such as README, ADR, specification, proposal, report, guide, or article for a known audience. Owns source-backed content and reader-question structure, then hands runnable procedures to tech-article-reproducibility and requested reader-experience checks to first-reader. Uses explainer only for its specialized learning-material job. Does not verify command execution itself, change a domain glossary, or write code comments, declaration documentation, commit messages, changelogs, or PR-only summaries.
+description: Writes or restructures substantial technical prose such as README, ADR, specification, proposal, report, guide, or article for a known audience. Owns source-backed content and reader-question structure, then hands runnable procedures to article-reproduction and requested reader-experience checks to first-reader. Uses explainer only for its specialized learning-material job. Does not verify command execution itself, change a domain glossary, or write code comments, declaration documentation, commit messages, changelogs, or PR-only summaries.
 ---
 
 # 構造的な技術文書を書く
@@ -48,7 +48,7 @@ description: Writes or restructures substantial technical prose such as README, 
 
 ### 手順の再現性
 
-setup、tutorial、操作guide、READMEの開始手順など、読者がcommandや操作で結果へ到達する部分がある場合、または「動いた」と主張する場合は、利用可能な`tech-article-reproducibility`へ渡す。
+setup、tutorial、操作guide、READMEの開始手順など、読者がcommandや操作で結果へ到達する部分がある場合、または「動いた」と主張する場合は、利用可能な`article-reproduction`へ渡す。
 再現対象のない概念説明、ADRの背景、単なる参照表には発火しない。
 
 入力の形は、同Skillを読んで到達する`references/reproduction-contract.md`で定める。

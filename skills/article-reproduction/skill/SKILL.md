@@ -1,5 +1,5 @@
 ---
-name: tech-article-reproducibility
+name: article-reproduction
 description: Judges whether a reader can reproduce a technical article's runnable procedure from its stated inputs and prerequisites. Use for setup guides, tutorials, README quickstarts, claims that commands worked, or a standalone reproduction review. Separates missing-step review from execution proof, checks subprocess exit and distinct stdout/stderr against the claimed result, and executes only within granted authority. Does not research article facts, rewrite prose, simulate reader attention, install tools, or authorize publication.
 ---
 

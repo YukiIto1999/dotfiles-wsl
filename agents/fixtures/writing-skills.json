@@ -185,7 +185,7 @@
     {
       "id": "description-routing",
       "prompt": "Write a README for trace-map. It reads local trace JSON and prints service-to-service edges. The reader is an engineer deciding whether to install it. The start command is nix run .#trace-map -- sample.json. It never uploads data. Architecture details are in docs/architecture.md.",
-      "expectedSkills": ["description-writing", "ja-writing", "tech-article-reproducibility"],
+      "expectedSkills": ["description-writing", "ja-writing", "article-reproduction"],
       "nearMiss": {
         "prompt": "Write a PR body for the change.",
         "expectedSkills": ["change-writing", "ja-writing"]

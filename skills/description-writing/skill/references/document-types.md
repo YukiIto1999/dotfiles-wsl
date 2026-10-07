@@ -19,7 +19,7 @@ OS、shell、runtimeとtoolのversion、作業directory、必要な権限を明�
 code、config、sample入力を記事に含めるか、読者が取得できる固定revisionの入口を示す。
 placeholderには値の決め方と秘密情報の扱いを添え、commandの期待exit、stdoutとstderr、確認する生成物または状態を区別する。
 危険な操作は対象と影響を先に示し、背景説明を途中へ挟まない。
-これは執筆する内容の契約であり、実行や再現性の判定は`tech-article-reproducibility`へ渡す。
+これは執筆する内容の契約であり、実行や再現性の判定は`article-reproduction`へ渡す。
 
 ## 参照
 

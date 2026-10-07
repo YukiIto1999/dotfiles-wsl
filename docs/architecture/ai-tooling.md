@@ -74,7 +74,7 @@ explainerのraw sourceとsibling配置はそのまま保持し、別ownerの[`to
 package作成時に置き換えるのはruntime用manifestとlockだけであり、upstreamのSkill本文やscriptは変更しない。
 wrapperは書込み可能な一時CWDへ管理下のpackageと依存を参照させるが、upstreamが記事側の祖先packageを優先する条件やcheckerの限界を消さないため、対象directoryと証拠の制約は[外部CLI](../reference/tooling.md#外部cli)へ集約する。
 任意shell、外部送信、model課金の許可や、optional D2とformal backendの供給をraw採用から推定しない。
-`description-writing`とcustom `tech-article-reproducibility`は単独で成立する判断を持ち、raw `explainer`、`first-reader`、browserや.NET実行への引渡しを該当branchだけで行う。
+`description-writing`とcustom `article-reproduction`は単独で成立する判断を持ち、raw `explainer`、`first-reader`、browserや.NET実行への引渡しを該当branchだけで行う。
 これらを一般の執筆やcodingのhard依存へ広げず、返却証拠から同じownerの仕事を再開し、writer側の再現性loopやreader試行を重ねない。
 採用IDとpath、revision、licenseの関係は[Skill portfolio](skills.md#直接採用)、登録と差替の契約は[外部リポジトリ所有Skillの構成](repository-skills.md)を参照する。
 

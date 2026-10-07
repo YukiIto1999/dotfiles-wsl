@@ -31,8 +31,8 @@ description: Writes a commit message from the staged diff and repository policy.
 6. 正本の形で件名を書く。
    依頼文、issue、review、diffに現れた依頼者、作業者、参考にした人の名前は件名へ移さない。
 7. 構造判断の文脈、代替案、帰結は、repositoryがADRを採用していればADRへ置く。
-8. 日本語の語の選び方には`ja-writing`を併用する。
-   `ja-writing`が扱う散文の文の形は、件名の文末と句読点に当てない。
+8. 日本語の語の選び方には、利用可能なら`ja-writing`を併用し、staged diffから確定した目的を保つ。
+   `ja-writing`が扱う散文の文の形は件名の文末と句読点に当てず、利用できない場合も正本とrepository policyで件名を仕上げる。
 
 ## 完了前の確認
 
@@ -60,7 +60,8 @@ description: Writes a commit message from the staged diff and repository policy.
 | `fix: 佐藤さん指摘の件名の読点の拒否` | 個人名 | `fix: 読点を含む件名の拒否` |
 | hookを実行せず「Skillが体言止めを定めている」と報告した | 根拠の確認 | 正本を読み、hookの結果を示す |
 
-空白、中黒、個人名の3件はhookを通るため、完了前の確認の3でしか見つからない。
+空白、中黒、個人名をhookが判定するかは、対象repositoryのhookで確認する。
+hookを通るだけでは、一つの関心と個人名の不在を確認したことにならない。
 
 ## 出力
 

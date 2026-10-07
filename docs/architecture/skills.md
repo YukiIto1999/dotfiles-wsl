@@ -147,30 +147,46 @@ CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfac
 
 ## Custom Skillの責務
 
-writing系では、`commit-writing`がcommitの目的、`change-writing`が差分の説明、`description-writing`が読者の問いに沿うREADMEや技術文書の構成を所有する。
-`documentation-writing`は宣言の契約、`comment-writing`は実装のWhy notと有効な制約、`ja-writing`は標準に沿う日本語の表現を扱う。
-これらはcoding workflowの原版を別名へ分割したものではない。
+独自Skillは、単独で成立する判断方法と、Skillやtoolを組み合わせる作業手順の二種類に分ける。
+判断方法には、必要な証拠が不足したときだけ調査や観測を委譲する分岐を置き、MCPやbrowserを常時の配備条件にしない。
+作業手順には、公開入口、渡す対象と証拠、返る成果、再開地点、利用できない場合の扱いを置く。
+この区分は責務の説明であり、frontmatterやregistryへ分類用のfieldを追加しない。
 
-`web-research`は問いをclaimへ分解し、URL探索、本文取得、library docsのtool選択、一次資料の比較、引用可能な根拠の統合までを自立して扱う。
-`repository-research`は未知のlocal概念や関係を探索し、現在のsourceでclaimを検証する。
-既知のexact text、path、symbolはraw toolで直接調べ、依存graphは`dependency-analysis`、具体的変更のblast radiusは`impact-analysis`へ渡す。
+| 判断方法 | 所有する判断 | 必要時の導線 |
+|---|---|---|
+| `change-writing` | 明示した差分から変更の目的と利用者への影響を説明する判断 | 差分と検証記録を読み、日本語の表現を`ja-writing`へ渡す。 |
+| `comment-writing` | 実装commentを残す理由と最小の内容の判断 | 正本の標準と制約を読み、日本語の表現を`ja-writing`へ渡す。 |
+| `description-writing` | 読者の問いに沿う技術文書の構成の判断 | 既存文書と一次資料を読み、日本語の表現を`ja-writing`へ渡す。 |
+| `documentation-writing` | 宣言の契約をdocumentation commentへ記す判断 | 宣言と実装と契約を調べ、日本語の表現を`ja-writing`へ渡す。 |
+| `ja-writing` | 日本語の表現と推敲の判断 | 正本の標準を読み、渡された文章を扱う。 |
+| `dependency-analysis` | nodeとedgeを固定して依存の事実を作る判断 | 未知の概念と関係だけ`repository-research`へ渡し、設計と診断を別の仕事として扱う。 |
+| `impact-analysis` | 一つの変更から契約と利用箇所と運用への影響を追う判断 | 不足する調査を`repository-research`へ渡し、設計や診断へ影響の証拠を引き継ぐ。 |
+| `skill-design` | Skillの要否と責務と導線の判断 | 既存Skillと公開toolを調べ、配備先や正本の変更が必要なら`environment-design`へ渡す。 |
+| `ui-design` | 実contentと既存design systemに基づく実装前briefの判断 | 未知の構造は`repository-research`、必要な実surfaceの観測は`browser-operation`、実装構造は`codebase-design`へ渡す。 |
+| `security-review` | 脅威モデリングから候補の検証と攻撃経路へ進む判断 | 不足する証拠だけ調査や観測のSkillへ渡し、security判断とphaseの進行を引き取る。 |
 
-`dependency-analysis`はnode、edge、方向、granularityを定義して依存の事実を作り、`impact-analysis`は一つの具体的変更からcode、data、runtime、deployment、契約、所有へ影響を追う。
-設計やarchitecture探索とは成果物が異なるため、依存の事実と具体的変更の影響を独立して所有する。
+| 作業手順 | 公開入口 | 合成と引継ぎ |
+|---|---|---|
+| `browser-operation` | `browser-automation`のPlaywright MCP | 実surfaceの状態遷移を観測し、性能や障害の診断は対象と証拠を添えて専門Skillへ渡す。 |
+| `browser-performance` | `browser-diagnostics`のChrome DevTools MCP | 固定した測定条件と観測をLCPの専門Skillや`heap-analysis`へ渡し、戻った証拠から診断を続ける。 |
+| `heap-analysis` | `heap-diagnostics`の公開MemLab MCP | browserのcaptureだけを`browser-performance`へ委譲し、返ったcaller所有のprivate fileを解析する。 |
+| `github-operations` | `github-resources`のaccount別GitHub MCP | accountと対象resourceを固定し、write前後の状態を確認する。 |
+| `memory` | `project-memory`の公開MCP | recallを一次資料で検証し、保存の受理と永続化を区別する。 |
+| `repository-research` | `repository-search`のZvec-Grep MCPとnative repository tools | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
+| `web-research` | `web-discovery`、`web-content`、`library-documentation`の公開MCP | 探索と本文取得とlibrary docsを問いに応じて選び、localの問いは`repository-research`へ渡す。 |
+| `environment-design` | ownerの正本と既存Skillの入口 | 標準、dotfiles、upstream、対象project、memoryへ振り分け、Skillの責務や手順の変更は`skill-design`へ渡す。 |
+| `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 一つの目的に閉じた件名を作り、実際のhookを通す。日本語の推敲は条件付きで`ja-writing`へ渡す。 |
 
-`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はaccount target、resource identity、write前後のstate、曖昧な結果、不可逆操作を所有する。
-`memory`はrecallの一次source検証と保存admission、privacy、failure semanticsを扱い、repository調査や正本を代替しない。
-`browser-performance`はtraceの測定条件を固定し、loading、interaction、CLS、networkからresourceとsourceへ原因を追う。
-LCPとheapの専門仕事は、同じbaselineと観測を専門Skillへ渡し、重複計測を避ける。
-代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置き、native性能、LCPだけの依頼、a11y、既知の経路verificationを近接する別仕事として扱う。
+`requiresSkills`は無条件に必要な配備前提だけを表す。
+言語に応じた推敲、追加の観測、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。
+containerを背後に持つMCPも公開Capabilityから使い、Skillからproviderのprocessやdatabaseへ直接接続しない。
+既知のexact textとpathとsymbolはRead、Grep、LSPなどで直接調べ、単一toolの呼出しをSkillで包まない。
 
-`environment-design`は永続的な訂正や改善を標準、dotfiles、upstream、対象project、memoryの適切なownerへ振り分ける。
-`skill-design`は基礎モデル、policy、reference、script、tool、既存Skillで足りるかを先に判断し、独立したSkillの要否とroutingを設計する。
-
-`ui-design`は利用者の仕事、実content、既存design systemから、情報階層、interaction、visible state、feedback、responsive、accessibilityを実装前のbriefへ閉じる。
-module内のcomponent構成やinterfaceは`codebase-design`へ渡し、確定したUIの実装を別のcustom Skillに分けない。
-`security-review`は明示的な脅威モデリングと、候補の発見、成立条件の検証、攻撃経路の追跡、修正への引渡しを所有する。
-phase referenceは同じdirectoryから解決し、別SkillのfrontmatterやCodex専用のreport directiveを持たない。
+独自Skillの本文と実行用referencesには、着想元の紹介やadoption rationaleを置かない。
+来歴とlicenseはこの文書の次節に置き、正本の標準への参照と実際の委譲先Skill名は実行に必要な導線として残す。
+採用した外部原版は変更しない。
+phase referenceは同じdirectoryから解決し、別Skillのfrontmatterや特定clientだけのreport directiveを持たない。
+browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置く。
 
 ## Custom Skillの来歴
 

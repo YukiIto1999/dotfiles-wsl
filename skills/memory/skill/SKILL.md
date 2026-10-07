@@ -7,6 +7,11 @@ description: Recalls historical project memory, verifies relevant claims against
 
 `memory`は過去の記録を候補として読み、現在の一次資料で確かめた知識だけを明示的に保存する手段である。記録は承認や現在の実装検証の代わりにはならない。`project-memory` Capabilityが提供する`memory_health`、`memory_recall`、`memory_save`、`memory_status`、`memory_verify`を使い、backendの起動、接続、移行は操作しない。
 
+本文の`memory_*`は公開操作の論理名であり、このsessionでは`xd://mcp__gateway_memory_memory_recall`などへ対応する。
+呼出し前にその入口のschemaを読み、以下の引数をJSONで渡す。
+`memory_health`は`{}`、recallは`cwd`、`query`、`scope`、verifyはrecallが返した`memory_id`と同じ`cwd`、`scope`を使う。
+公開入口がない場合は利用不能と返し、container、database、model、serviceの直接操作で復旧しない。
+
 ## 入力境界とscope
 
 `memory_health`を除く各MCP操作には、現在のGit working directoryを表す絶対`cwd`を渡す。serviceはGit common directoryからproject identityを導くため、表示名やディレクトリ名をidentityとして作らない。同じrepositoryのlinked worktreeは共有し、末尾名が同じ別repositoryは分離される。
@@ -30,7 +35,10 @@ recallの結果が空でも、過去に記録がない証拠とはみなさな�
 
 ## 保存する内容の範囲
 
-訂正や教訓をどこへ残すかは`environment-design`が決める。このSkillは、memoryへ残すと決まった訂正の理由、適用条件、明示的に記憶だけへ残す方針を保存する。
+訂正や教訓の所有者が未確定の場合だけ、利用可能な`environment-design`へ候補、一次source、適用条件、既存の正本を渡し、反映先とmemoryへ保存する部分の判断を受け取る。
+すでに同Skillからmemory所有と決まった入力を受け取った場合は振り分けを繰り返さず、以下の保存判断へ進む。
+所有者を確定できない場合は保存しない。
+このSkillは、memoryへ残すと決まった訂正の理由、適用条件、明示的に記憶だけへ残す方針を保存する。
 
 memoryには再発防止に必要な理由と正本への参照を残し、正本全文を複製しない。project内の指摘をglobalへ広げず、不採用と先送りも区別する。採否やscopeを確定できない候補は保存しない。
 
@@ -44,6 +52,9 @@ memoryには再発防止に必要な理由と正本への参照を残し、正�
 ## Saveと状態
 
 保存対象は、一次sourceで確認でき、将来の判断を変える durable な correction、accepted decision、stable preference、または再利用可能なpatternだけである。source locatorと適用条件を添え、raw conversation、plan、progress、one-off result、推測、未採用案、secret、credential、token、API key、private key、個人情報を送らない。無言の応答から同意を推測しない。
+
+`memory_save`へ`cwd`、一つの主張を表す`content`、一次source locatorを表す`source`、確定した`scope`と適合する`kind`を渡す。
+scopeの既定値を利用者のglobal保存への同意に読み替えない。
 
 `memory_save`の応答が`pending`なら処理中、`indeterminate`なら送信後の通信断や期限切れで保存結果を確認できていない。どちらもsavedとは言わない。返された`operation_id`と`document_id`を同じ絶対`cwd`と明示scopeで`memory_status`へ渡し、terminal operationの完了、persisted documentの存在、document checksumの一致を確認して初めてsavedと扱う。statusがpending、failed、unavailable、またはchecksumを確認できない場合は保存済みと報告せず、saveの再送やfallbackを勝手に追加しない。
 
@@ -60,5 +71,8 @@ omp の session 記録からの定期収穫は、利用者の発言だけを読�
 既知のcredential・personal-data indicatorに一致する入力は送信しないが、検出は完全ではない。secret、credential、token、API key、private key、個人情報、transient task stateをquery、content、source、scope、file locatorへ入れない。`memory`が利用不能でも、このSkillの手順を別の保存先へ切り替えない。
 
 候補をcurrent primary sourceで確認または棄却し、scope・状態・provenanceの不明点が解消したらrecallを止める。verificationできない候補、一次sourceへ到達できない候補、current sourceと矛盾する候補は採用もsaveもしない。
+
+結果には採用または棄却した主張、scope、memory ID、確認した原文と現在の一次source、未確認事項を含める。
+saveを行った場合はoperation ID、document IDと実際に確認したterminal stateも返し、provider側の記録をcleanupとして削除しない。
 
 記憶の改善は、別sessionの同種taskで訂正後の判断を守れた実測で評価する。保存件数や`saved`の確認だけで、再発を防げたとは報告しない。

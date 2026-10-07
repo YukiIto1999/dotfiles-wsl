@@ -22,9 +22,13 @@ If a critical field is missing, inspect the repository to fill it from code evid
 
 Use this guidance whenever reproducing the finding, running tests, or validating the fix:
 
+Fixing and runtime validation require the caller's explicit permission and retain the Operation Boundaries in `../SKILL.md`.
+Resolve remote and container-backed dependencies only through declared public Capability tools; setup repair is not permission to control provider services, containers, or databases.
+Inspect progress only for this task's own build, test, or reproduction jobs, and preserve unrelated sessions.
+
 - Try hard to make runtime validation run before falling back to code inspection.
 - First consult the repository instructions such as `AGENTS.md`, `README.md`, setup docs, test docs, build files, or package-manager metadata for the necessary requirements.
-- If dependencies, generated files, services, or local setup are missing, use the repository's documented setup, package manager, build system, or existing test commands to install or generate what is needed.
+- If dependencies, generated files, services, or local setup are missing, use documented project setup or existing test commands only within the allowed changes and resources. Record an unavailable public dependency as a proof gap instead of starting or repairing its private backend.
 - Treat setup errors as intermediate blockers to investigate and repair with targeted commands, not as an immediate reason to abandon runtime validation.
 - Do not abandon a reproduction, build, test, or validation command just because it takes time when there is output, resource usage, generated artifacts, or other evidence of progress and no hard evidence of failure.
 - If a long-running command appears inconclusive, run targeted checks such as process status, recent logs, output file timestamps, resource usage, or test runner status to distinguish progress from a hang before stopping or weakening validation.

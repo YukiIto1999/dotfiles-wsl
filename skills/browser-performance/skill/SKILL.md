@@ -11,9 +11,12 @@ description: Measures and diagnoses browser loading, responsiveness, layout shif
 利用者が報告した症状と、比較する指標、正常な状態、既存のtraceやfield dataを区別する。
 変更許可と測定許可を別に扱い、診断依頼だけではsourceやbrowser設定を変更しない。
 
-gatewayのbrowser-diagnostics toolを入口にし、sessionが公開したschemaを呼出し前に読む。
+`browser-diagnostics` Capabilityのgatewayに公開されたChrome DevTools toolを入口にし、呼出し前に現在のschemaを読む。
+このsessionの`xd://mcp__gateway_chrome_devtools_list_pages`などが公開入口であり、本文の短い操作名をその入口へ対応させてJSON引数を渡す。
 Chromeを別processとして起動したり、MCPやcontainerの設定、接続先、packageを追加しない。
-`list_pages`で対象のURLとtitleを確認し、取得したpage IDをpage-scoped呼出しへ渡す。
+`list_pages`へ`{}`を渡してURL、title、page IDを確認し、`pageId`を要求する呼出しにはそのIDを渡す。
+選択中のpageに作用するschemaなら、先に`select_page`の`pageId`で対象を選ぶ。
+専用pageは`new_page`の`url`で作成し、`take_snapshot`が返した最新の`uid`を`click`やform操作へ渡す。
 別sessionのpage IDやPlaywrightのtab/refを流用しない。
 会話の再開や同じ会話IDは、providerのpageやtraceが残っている証拠にはならない。
 再開時は公開toolで現在のpageとtraceの可用性を確かめ、元のsessionの状態が失われていた場合は、取得済みartifactで判断できる範囲と再接続後に未観測の範囲を分ける。
@@ -27,20 +30,22 @@ providerの保存先とcallerに割り当てた`TMPDIR`は別のprocessの契約
 ## 問いに合うtraceを取る
 
 1. matchingする既存traceがあれば、その条件と対象区間を確認して再利用する。
-2. loadingの問題では対象navigationを含むtraceを取り、返り値のinsight set ID、計測区間、実際に観測された指標を記録する。
-3. interactionの問題では入力直前から結果のpaintまでを計測し、実際のcontrolへ操作を行う。
+2. loadingでは対象URLへのnavigation後に`performance_start_trace`へ`pageId`と`reload: true`を渡し、対象navigationを含める。
+   `autoStop: true`で完了した結果か、自分で開始したtraceに対する`performance_stop_trace`の結果から、insight set ID、計測区間、実際の指標を記録する。
+3. interactionでは`reload: false`、`autoStop: false`で入力直前に開始し、実controlを操作して結果のpaintまで観測した後、同じ`pageId`で停止する。
    eventの合成、APIやstorageの直接変更で利用者経路を代用しない。
    clickの次のpaintで終わる指標と、非同期responseの後に結果が表示されるまでの待ち時間を混ぜない。
    結果が非同期に更新される経路では、同じtrace内のrequest終了、response処理、後続のmain-thread work、layout、結果のpaintを時系列で対応させ、区間ごとの実測値とsourceを示す。
    inputから最初のpaintまでの値だけで後続の停止を説明せず、見えていない区間の時間やnetworkの寄与をsourceの定数から推定して測定値にしない。
-4. `performance_analyze_insight`にはtraceが返したinsight名とIDを使い、版の異なる名前を推測しない。
+4. `performance_analyze_insight`へ同じ`pageId`と、traceが返した`insightSetId`、`insightName`を渡し、版の異なる名前を推測しない。
 5. traceや必要な指標を取得できなければ、その失敗と未測定項目を残す。
    sourceやnetworkで判断できる範囲は続けるが、速度改善やCWVの合格を推定しない。
 
 reloadだけではcacheが空だった証拠にならない。
 cache条件を確認できない測定をcold loadと呼ばず、loading traceだけでINPを測ったとも書かない。
 一つのlab sampleをfieldのpercentileや実利用者全体のCWVへ置き換えない。
-閾値を判定へ使う場合は、その指標、集計方法、対象platformの現行定義を`web-research`で確認する。
+閾値を判定へ使う場合は、指標、集計方法、対象platformとversionを`web-research`へ渡し、現行定義と一次sourceを受け取ってから照合する。
+同Skillが利用不能で定義を確認できなければ、実測値だけを返し、未確認の閾値による合否を付けない。
 
 ## Traceからresourceとsourceへ追う
 
@@ -65,8 +70,9 @@ sourceがない第三者のsiteでは、観測したnetworkとDOMまでを根拠
 Chrome providerは、frontが所有するmode `0700`のruntime directoryを自身の`TMPDIR`とfilesystem rootに使う。
 trace、screenshot、heapのfile exportは同じ保存先と回収手順を使う。
 
-1. `systemctl show mcp-front-chrome-devtools.service --property=RuntimeDirectory --value`で配備済みfrontのdirectory名を取得し、`/run/`下の絶対pathを確定する。
-   directoryが一つで、現在の利用者が所有するmode `0700`の実directoryであることを確認する。
+1. Capabilityが宣言する`runtimeDirectoryPath`を保存先として使う。
+   現行の`browser-diagnostics` frontでは`/run/mcp-front-chrome-devtools`であり、公開された配備契約と異なる場合はその契約のpathを確認してから使う。
+   現在の利用者が所有するmode `0700`の実directoryであることを確認する。
    directoryがない、symlinkである、所有者やpermissionが異なる場合は、変更せずCapabilityの配備不備として返す。
 2. 確認したruntime directory内に`mktemp -d`で自分専用のmode `0700`のstagingを作り、公開toolの`filePath`へその中の絶対pathを渡す。
    解析と保持のためには、callerの割り当て済み`TMPDIR`内にも別の非公開directoryを作る。
@@ -80,19 +86,28 @@ trace、screenshot、heapのfile exportは同じ保存先と回収手順を使�
 
 ## 専門の判断へ渡す
 
-LCP自体が依頼の主題、またはtraceでLCPがbottleneckと確認された場合は、対象page、測定条件、trace ID、resourceと観測を`debug-optimize-lcp`へ渡す。
+LCP自体が依頼の主題、またはtraceでLCPがbottleneckと確認された場合だけ、利用可能な`debug-optimize-lcp`へ対象page、測定条件、traceの返却IDまたはartifact、resourceと観測を渡す。
+LCPの原因と比較結果を受け取り、元の性能結果へ統合する。
 同じbaselineを二度取り直さず、専門Skillが必要とする不足だけを追加する。
+同Skillが利用不能なら取得済みtraceを返し、未実施のLCP専門診断を明示する。
 
-heapの保持、detached DOM、操作反復後のmemory増加が疑われる場合は、`heap-analysis`が利用可能なら操作sequence、比較条件、local snapshotを渡す。
-同Skillが使うheap-diagnostics Capabilityが利用不能なら、heap原因は未確認として返す。
+heap保持、detached DOM、操作反復後のmemory増加が疑われる場合は、利用可能な`heap-analysis`へ操作と終了sequence、比較条件、取得済みlocal snapshotを渡し、保持経路と実装上の寿命の結果を受け取る。
+snapshotが不足する場合は次のcapture手順で許可された分だけ取得する。
+heap-diagnostics Capabilityまたは専門Skillが利用不能なら、取得済みの観測を返し、heap原因は未確認とする。
 heap用toolの不足をLCPやnetworkの測定で埋めない。
 
-browserのheap captureを依頼された場合は、対象page、取得許可、操作sequence、GCと終了条件を固定してから、公開された`take_heapsnapshot`のschemaを確認する。
+browserのheap captureを依頼された場合は、対象page、取得許可、操作sequence、GCと終了条件を固定し、`take_heapsnapshot`の現在のschemaへ`pageId`と非公開staging内の絶対`filePath`を渡す。
 captureの間にpageを停止させる影響と、snapshotに秘密情報が含まれる可能性を確認し、非公開artifactの受け渡しで保存と転送を行う。
-capture不能ならその境界と不足する配備契約を返し、未取得のsnapshotを`heap-analysis`へ渡したことにしない。
+`heap-analysis`からの取得依頼はcapture-onlyとして扱い、転送後のpath、capture条件、観測した終了点、fileの回収責任を同じcallerへ返して止める。
+この取得経路から`heap-analysis`を再呼出ししない。
+capture不能ならその境界と不足する配備契約を返し、未取得のsnapshotを渡したことにしない。
 
-accessibilityの実画面監査は`a11y-debugging`、既知の受入条件のPlaywright verificationは`browser-operation`へ渡す。
-.NETの比較microbenchmarkは`microbenchmarking`、MSBuild性能は`msbuild`、native codeや一般の故障のfeedback loopは`diagnosing-bugs`が所有する。
+実画面のaccessibility監査が必要なら`a11y-debugging`へ対象page、入力方法、該当controlと観測証拠を渡し、検証された問題と未確認事項を受け取る。
+既知の受入条件のverificationが必要なら`browser-operation`へURL、許可されたaccountと操作、経路、期待結果を渡し、条件ごとの観測結果を受け取る。
+.NETの比較microbenchmarkは`microbenchmarking`へ対象、baseline、workloadと実行条件、MSBuild性能は`msbuild`へprojectと遅いcommand、logと環境を渡す。
+native codeや一般の故障の原因診断は`diagnosing-bugs`へ症状、再現経路、期待と実際、関連sourceを渡す。
+これらの別専門作業は依頼に含まれ、Skillが利用可能な場合だけ行い、結果をcallerへ返して元の測定scopeへ戻る。
+利用不能なら証拠と未実施の仕事を返し、別手段で専門診断を済ませたことにしない。
 
 ## 原因と比較を閉じる
 
@@ -105,3 +120,7 @@ request成功、content、interaction、必要なcacheやsecurity条件が保た
 
 結果には条件、実測した指標、traceまたはrequestの証拠、原因とsourceの対応、提案または実施した変更、比較のばらつき、未測定項目を含める。
 証拠で支えられる結論が出たら止め、関係しない全項目の監査を追加しない。
+
+終了時は、自分で開始した未停止のtraceだけを公開`performance_stop_trace`で停止し、自分で作成したpageだけを`close_page`の`pageId`で閉じる。
+最後のpageなど公開toolが終了を拒否する場合はbrowser全体を終了せず、残したpageと理由を返す。
+callerへ渡したartifactは合意した保持と回収責任に従い、他のsessionのpage、trace、fileは回収しない。

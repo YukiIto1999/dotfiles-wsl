@@ -13,7 +13,9 @@ description: Explains an existing change to reviewers, users, or operators. Use 
 4. 実行済みの検証と未確認事項を分ける。command名やcheck名は正本で確認し、実行していないものを完了済みにしない。
 5. [成果物別の構成](references/artifacts.md)から必要な項目だけ使う。空の節と`none`のplaceholderを作らない。
 6. 同じ結果へ収束する細かなcommitは、読者が理解する一つの変更へまとめる。異なる目的は混ぜない。
-7. 日本語なら`ja-writing`を併用する。
+7. 日本語なら、利用可能な`ja-writing`へ、読者、成果物の種類、根拠と未確認事項を保ったdraftを渡して表現を整える。
+   戻った文面を対象diffと照合し、目的、互換性、検証の確度が変わっていなければ採用する。
+   利用できない場合はrepositoryの表記規則で説明を仕上げ、専門の推敲が未実施であることを区別する。
 
 ## 打ち切り条件
 

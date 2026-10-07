@@ -10,7 +10,10 @@ description: Produces a pre-implementation UI brief from product tasks, real con
 ## 現在の文脈を確認する
 
 productの目的、利用者、利用場面、主要task、実データと値の範囲、表示文言、端末、入力方法、技術上と運用上の制約を確認する。repositoryがある場合は、既存画面、design system、token、shared primitive、content規約、accessibility要件を先に読む。
-実装済みsurfaceの状態や実contentをbrowserで確認する場合は`browser-operation`へ観測taskを渡し、その証拠を設計入力として使う。repository内のdesign system、token、shared primitiveの所在や関係が不明なら`repository-research`を使う。
+実装済みsurfaceの状態や実contentが設計判断を変える場合だけ、利用可能な`browser-operation`へURL、観測するtaskとstate、viewport、許可されたaccountと操作を渡す。
+返されたsnapshot、必要なappearanceの証拠、未確認事項を設計入力へ戻し、観測を理由に設計やaccount変更を委ねない。
+repository内のdesign system、token、shared primitiveの所在や関係が不明な場合だけ、利用可能な`repository-research`へroot、問いと既知のanchorを渡し、source locator付きの関係と制約を受け取る。
+どちらもこの設計方法を始める必須条件ではなく、利用不能ならその観測の不足と判断を変える仮定をbriefに残す。
 
 観測した事実、確定済みの制約、未確認の仮定を分ける。実データがない場合は、空、最短、最長、欠損、大量、権限差、遅延を含む代表例を仮定として明示する。利用者やbrandの情報がないまま、架空のpersonaやvisual identityを補わない。
 
@@ -79,7 +82,9 @@ notchやsoftware keyboard、sticky領域でcontentとfocusが隠れない配置�
 - 採らなかった案と具体的な費用
 
 production code、CSS、component tree、state owner、propsを作らない。
-component構造、ownership、公開interfaceの設計は`codebase-design`へ、briefと制約を入力として渡す。
+component構造、ownership、公開interfaceの設計が依頼に含まれる場合だけ、利用可能な`codebase-design`へbrief、制約、既存design systemを渡し、構造上の判断と実装へ渡す契約を受け取る。
 確定済みbriefの実装は、briefと既存design systemを制約とする通常の実装作業へ渡す。
-実画面のaccessibility監査は`a11y-debugging`、機能障害は`diagnosing-bugs`、browser性能は`browser-performance`、securityは`security-review`へ渡す。
-実装前のbriefを、実画面の監査結果や性能の実測として報告しない。
+実画面のaccessibility監査は`a11y-debugging`へ対象surface、入力方法、設計要件と観測証拠、機能障害の原因診断は`diagnosing-bugs`へ期待と実際、再現経路と関連sourceを渡す。
+browser性能は`browser-performance`へURL、経路と測定条件、securityは`security-review`へ対象scope、境界と根拠を渡す。
+これらは別専門作業が依頼され、Skillが利用可能な場合だけ行い、検証された所見と不足証拠を受け取ってcallerへ返す。
+利用不能な枝を実施済みとせず、実装前のbriefを実画面の監査結果や性能の実測として報告しない。

@@ -46,20 +46,32 @@ description: Decides which owner in the agent working environment receives an im
 
 ## 入口へ渡す
 
-所有者の入口へ、主張、根拠のsource locator、現行本文との差、未確定事項を渡す。入口は主張を未採用の候補として受け取り、採否と文面を決める。このSkillは文面を決めない。
+所有者の入口へ、主張、根拠のsource locator、現行本文との差、適用範囲、許可された変更、未確定事項を渡す。
+入口は主張を未採用の候補として受け取り、採否と文面を決める。
+採否、変更した正本と範囲、必要な配送手順、残る不足を受け取って「配送まで閉じる」へ戻り、このSkillが文面を決め直さない。
 
-- architecture-standard: 作業checkoutの`skills/standard-update/SKILL.md`を読み、checkoutのrootを作業directoryにして従う。
-  現在のprojectをrootにしない。
-  利用者が変更でなく記録だけを求めた場合は`standard-feedback`でIssueにする。
-- dotfiles-wslのagent能力: `skill-design`で、何もしない、policy、reference、script、既存Skill、新しいSkillのどれにするかを決める。
-- dotfiles-wslの基盤: change-mapが示す正本と検証入口に従う。
-- upstream: owner repositoryへの提案として扱い、配備物を手元で書き換えない。dotfiles側の変更は採用表と版に限る。
-- 対象project: projectが宣言する正本と決定の記録に置く。
-- memory: `memory`の保存判断に従う。sessionに`memory`がなければ所有者の候補から外す。
+- architecture-standardの変更: 作業checkoutの`skills/standard-update/SKILL.md`を読み、checkoutのrootを作業directoryにして従う。
+  現在のprojectをrootにせず、正本の変更結果と配送に必要な版を受け取る。
+  変更でなくIssueへの記録が依頼された場合だけ、利用可能な`standard-feedback`へ規律、具体的な不足と根拠を渡し、作成結果のURLまたは未投稿の理由を受け取る。
+- dotfiles-wslのagent能力: 利用可能な`skill-design`へ具体的なscenario、反復した不足、既存policyとSkill、制約を渡す。
+  何もしない、policy、reference、script、既存Skill、新しいSkillの選択と、採用した場合の変更結果を受け取る。
+- dotfiles-wslの基盤: change-mapが示す正本と検証入口へ、変更契約と根拠を渡し、反映したsourceと配備上の不足を受け取る。
+- upstream: owner repositoryへの提案として扱い、配備物を手元で書き換えない。
+  dotfiles側の変更は採用表と版に限り、owner側の採否と反映revisionを配送へ引き継ぐ。
+- 対象project: projectが宣言する正本と決定の記録へ、project固有の契約、根拠と逸脱理由を渡し、記録した場所と未確定事項を受け取る。
+- memory: 利用可能な`memory`へ保存候補、一次source、適用条件、確定したscopeを渡し、保存判断と実際のterminal stateを受け取る。
+  ownershipを再判断する依頼にせず、同Skillが棄却した候補を別の保存先へ回さない。
+
+所有者の入口が利用不能なら、渡す内容と不足する入口を返し、handoffや変更が済んだことにしない。
+`skill-design`や`memory`の分岐は、その所有者に該当する主張がある場合だけ使う。
 
 主張が複数の所有者へ分かれた場合は、参照される側から変える。標準の規範を手順へ再構成するSkillは、標準の変更が確定してから変える。
 
 ## 配送まで閉じる
+
+配送の説明は実行許可ではない。
+commit、push、版更新、check、rebuildは現在の依頼とsessionの許可がある場合だけ行い、禁止された操作や他sessionを中断する操作を入口へのhandoffで正当化しない。
+配送が未許可なら変更済みsourceと未実施の配送段を返し、provider、service、containerへ直接接続して配備を代用しない。
 
 dotfiles-wslの変更は、commitして`dotfiles-rebuild`を実行した後に始めたsessionへ届く。
 
@@ -69,4 +81,6 @@ architecture-standardの変更は、標準のcommit、push、dotfilesの`flake.n
 
 現在のtaskが環境の変更を許可していなければ、振り分けの結果と入口へ渡す内容を報告して止める。標準については、`standard-feedback`でIssueにするかを利用者に確認してよい。所有者の現行本文を読めない場合は推測で振り分けない。
 
-報告は主張ごとに、所有者、使った入口、変更の結果、配送の状態を示す。配送の状態は、届いた、利用者の確認待ち、許可なしで未着手のいずれかにする。確認できなかったことは、見た場所と共に残す。
+報告は主張ごとに、所有者、使った入口、採否と変更の結果、配送の状態を示す。
+届いた、確認待ち、許可なしで未着手、入口または証拠が不足して未完了を区別し、sourceが変わっただけで配備済みとは書かない。
+確認できなかったことは、見た場所と共に残す。

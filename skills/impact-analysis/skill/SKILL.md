@@ -28,7 +28,10 @@ source diffだけでなく、consumerが観測できるものを起点にする�
 
 ## Consumerを外向きに追う
 
-変更点からeffect sketchを外向きに描く。`dependency-analysis`の結果があれば証拠として使うが、この分析では具体的な変更に関係するpathだけを辿る。
+変更点からeffect sketchを外向きに描く。
+`dependency-analysis`の結果があれば証拠として使い、具体的な変更に関係するpathだけを辿る。
+複数種類の依存構造を先に整理する必要がある場合だけ、scope、変更点、必要なnodeとedgeの意味を`dependency-analysis`へ渡す。
+返った型付きgraphのsourceと未解決edgeを確認してconsumer追跡へ戻り、repository全体のgraph作成を前提にしない。
 
 1. 定義、writer、producer、ownerを確認する。
 2. direct reader、caller、subscriber、loader、deployerを正規のresolver、schema、manifest、traceで確認する。
@@ -37,6 +40,13 @@ source diffだけでなく、consumerが観測できるものを起点にする�
 5. staticに見えないdynamic loading、reflection、configuration、external consumer、manual operationを別枠で調べる。
 
 compilerやtype checkerは到達可能な参照を列挙する証拠になり得るが、runtime data、外部consumer、意味上の互換性まで証明しない。`rg`のhit数をblast radiusにしない。
+
+既知のpathは`Read`、file名は`Glob`、symbolの定義と参照は利用可能なLSP、exact textは`Grep`や`rg`で直接調べる。
+consumerの所在や関係が不明な場合だけ、変更前後、repositoryのscope、既知のanchor、探すreaderやwriterを`repository-research`へ渡す。
+返ったsource-backedな経路と未確定事項を、consumerごとの契約差へ照合する。
+repository commandや公開Capabilityでresolver、trace、利用状況を取得する場合は、実際の操作と引数をその契約で確認する。
+container-backedな証拠も公開Capabilityから取得し、providerのprocess、database、containerへの直接accessで補わない。
+補助SkillやCapabilityを使えない場合はnative toolで確認できる経路を進め、残るconsumerとobservableはUnknownとして必要な証拠を示す。
 
 ## 互換性と状態を確認する
 
@@ -49,7 +59,13 @@ compilerやtype checkerは到達可能な参照を列挙する証拠になり得
 - retry、replay、rollbackで同じ変更を再適用して安全か
 - downgrade後もnew stateを扱えるか
 
-Hyrumの法則を理由にすべてを互換契約へ昇格させない。log、metric、test、support record、public docs、実consumerから、依存されているobservableを確かめる。利用状況を観測できない外部consumerは「影響なし」でなく「不明」とする。
+観測可能というだけですべてを互換契約へ昇格させない。
+log、metric、test、support record、public docs、実consumerから、依存されているobservableを確かめる。
+利用状況を観測できない外部consumerは「影響なし」でなく「不明」とする。
+
+dependency upgradeでversion固有の外部契約が必要なら、対象library、変更前後のversion、利用するAPI、既知の公式URLと問いを`web-research`へ渡す。
+返った一次資料のlocatorと適用version、契約差、未確認事項をlocalの実consumerと照合する。
+changelogだけではlocal impactを確定せず、外部契約を取得できなければ該当する互換性をUnknownに残す。
 
 ## Rollout境界を見つける
 
@@ -85,3 +101,9 @@ Hyrumの法則を理由にすべてを互換契約へ昇格させない。log、
 - 不足している証拠と、それを得る観測
 
 変更fileの予想一覧だけで終えず、各対象がなぜ影響を受けるかを示す。実装方針、architectureの良否、migration計画はimpact mapから自動的に決めない。
+
+新しい境界やinterfaceを選ぶ仕事が依頼された場合は、impact map、守る契約、共存とrollbackの制約を、利用可能な`codebase-design`へ渡す。
+戻った設計判断はimpactの観測事実とは分け、その案で変わるobservableがあれば新しい変更として分析する。
+既存の故障や性能regressionの診断が依頼された場合は、症状、変更前後のrevisionとenvironment、影響経路の証拠と不明点を、利用可能な`diagnosing-bugs`へ渡す。
+診断が返す確認済みの原因だけを、その証拠と条件に限って使う。
+handoffできない場合はimpact mapを返し、未実施の設計や診断と引き継げる証拠を示す。

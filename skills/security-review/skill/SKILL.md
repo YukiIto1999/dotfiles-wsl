@@ -10,8 +10,27 @@ Used when a user wants to review a pull request, commit, branch diff, working-tr
 For an explicit threat-model-only request, resolve the scope and artifacts, run `references/threat-model.md`, return the model and material assumptions, and stop before finding discovery.
 For a full security review, use all applicable phases below.
 All paths in `SKILL.md` are relative to this Skill directory; paths within a reference are relative to that reference's directory.
-Use `repository-research` for unknown local relationships, `web-research` for public advisory evidence, and `github-operations` for GitHub resources when those jobs are needed and available.
-Those evidence jobs do not change scan scope or grant external write permissions.
+The review method and phase decisions below are self-contained; evidence gathering does not require every specialty Skill.
+Use the following handoffs only when their evidence job is needed and the Skill is available:
+
+| Evidence gap | Inputs passed | Returned evidence and continuation |
+|---|---|---|
+| Unknown local relationship | `repository-research`: absolute repository root, revision, boundary or flow question, known anchors | Source locators, verified relationships, and unresolved edges; use them in the current phase |
+| Public advisory or version context | `web-research`: advisory ID or public URL, package/version, exact claim to check | Primary-source text, applicability, and uncertainty; preserve seeds and validate against local code |
+| GitHub resource | `github-operations`: account context, canonical owner/repo, resource kind and number or ref, requested read | Exact identity, state, SHA, diff or comments; use the evidence without posting or changing the resource |
+| Authorized browser-interface reproduction | `browser-operation`: URL, test account, approved interaction and crafted input, expected invariant and observable result | Observed route, before/after state and request evidence when needed; resume validation, not a separate security scan |
+
+If a needed Skill or public operation is unavailable, retain the evidence gap and continue only where the phase can reach a supported conclusion.
+These jobs do not change scan scope, transfer security judgment, or grant external write permissions.
+
+## Operation Boundaries
+
+Keep exact file, symbol, diff, and history inspection as direct Read, Grep, Glob, LSP, and bounded Git operations.
+Use declared public Capability tools for remote, browser, or container-backed evidence; resolve the actual exposed name and current schema through the responsible Skill.
+Do not inspect or control provider processes, Docker containers, databases, or private backend endpoints to recover a missing tool.
+Runtime reproduction and setup repair must stay within the caller's approved target, commands, resources, and side effects.
+Do not run exploit input against a real account, shared service, or third-party target without explicit authorization.
+Record a blocked reproduction as a proof gap rather than bypassing permissions or claiming it succeeded.
 
 Keep these phases distinct and run them in linear order:
 
@@ -59,6 +78,8 @@ Follow this plan in order. Do not skip ahead to a later phase until the current 
 ## Finding Fix Handoff
 
 When validated findings are to be fixed, follow `references/fix-finding.md`. Hand off the validated finding, affected security invariant, reproduction evidence, and attack path to the implementation agent.
+Only an explicit fix request authorizes that implementation work.
+Receive changed source locations, regression and legitimate-behavior evidence, and remaining risks from the implementation agent; append that outcome without rewriting the earlier scan evidence.
 
 ## Hard Rules
 
@@ -67,3 +88,5 @@ When validated findings are to be fixed, follow `references/fix-finding.md`. Han
 - Use tools to inspect the repository before making decisions.
 - Do not emit a finding unless it survives validation and attack-path analysis.
 - Avoid destructive commands and broad unbounded scans; prefer targeted, reversible commands.
+- Preserve the private scan bundle for the caller. Remove only disposable files or copies created for this scan when they are no longer evidence, and stop only validation jobs that this scan started and owns.
+- Do not remove supplied models, user changes, other sessions' artifacts, or provider state during cleanup.

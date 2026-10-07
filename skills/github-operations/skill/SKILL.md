@@ -7,6 +7,32 @@ description: Safely performs account-scoped GitHub reads and requested writes th
 
 GitHub MCPは実行手段である。このSkillは、誰としてどのresourceを操作するか、どのreadを根拠にwriteしてよいか、結果をどう確定するかを所有する。GitHub上で操作できることを、ユーザーがその副作用を依頼した証拠にはしない。
 
+## 公開操作を解決する
+
+`github-resources` Capabilityが公開するaccount別のgateway targetを使う。
+操作名を推測せず、選んだtargetで現在公開されているtoolのschemaを読む。
+このsessionのaccount-1なら`xd://mcp__gateway_github_account_1_get_me`などへJSON引数を渡し、account名をresourceのownerから組み立てない。
+
+| 操作 | 現在のschemaで渡す入力 | 確認する返却値 |
+|---|---|---|
+| identity | 選んだtargetの`get_me`へ`{}` | 実行login |
+| issueの現state | `issue_read`へ`method: "get"`、`owner`、`repo`、`issue_number` | canonical URL、番号、state、変更するfield |
+| PRの現stateとdiff | `pull_request_read`へ`method: "get"`または`"get_diff"`、`owner`、`repo`、`pullNumber` | PR identity、head/baseとSHA、stateまたは実diff |
+| branchの解決 | `list_branches`へ`owner`、`repo`と必要なpagination | exactなbranch名とhead SHA |
+| issueの依頼された更新 | `issue_write`へ`method: "update"`、同じtarget、`issue_number`と変更するfieldだけ | 更新されたID、URL、state |
+| 指定されたreviewの送信 | `pull_request_review_write`へ対象、`method`、確定した`event`、本文、必要な`commitID` | review ID、送信state、対象commit |
+
+branchは一覧の一ページで不存在と決めず、対象のexact名を確認するまで必要なpageを読む。
+reviewの`create`で`event`を省くとpending reviewを作るため、送信済みとは扱わない。
+`submit_pending`は同じidentityのpending reviewを現stateで確認した場合だけ使い、thread操作には現reviewから得た`threadId`を使う。
+他の操作も選んだtargetのschemaへ同じidentityとresource識別子を対応させる。
+tool未公開、認証失敗、権限不足ではその境界を返し、provider、container、別account、認証を変更して回避しない。
+
+branch作成が依頼された場合は、確認したsource branchを`create_branch`の`from_branch`、新branchを`branch`へ明示する。
+file更新では同じbranchを`get_file_contents`の`ref`へ渡して現blob SHAを取得し、直前確認後に`create_or_update_file`へ`branch`、`path`、raw `content`、確定した`message`、既存fileなら`sha`を渡す。
+mergeの直前確認後は、`merge_pull_request`へ対象PR、確認した`merge_method`と`expectedHeadSha`を渡し、結果のSHAとstateを確定する。
+これらは選んだaccount targetに実際に公開されている場合だけ使い、secret設定など対応する公開操作がないwriteをproviderの直接APIで補わない。
+
 ## identityとtargetを固定する
 
 1. 依頼と既存contextから、`account target`、実行主体のGitHub login、`owner/repo`、issueまたはPRの種別と番号、対象branchを取り出す。branch間の操作ではheadとbaseを区別する。
@@ -50,18 +76,21 @@ merge、resource・file・branchのdelete、commitを生成するcontent変更�
 
 ## 隣接Skillへ引き渡す
 
-PR本文、changelog、release noteなど変更説明の内容は`change-writing`に渡す。
-fixed pointを指定した`git diff <fixed-point>...HEAD`のcommit済み差分のreviewは`code-review`へ渡し、StandardsとSpecの所見を受け取る。
-`code-review`のcommitted-range契約はstaged・unstaged差分のreviewや、approve、comment、request changesの判断を含まない。
-reviewの送信種別は、利用者の指定または明示的に委ねられたreview判断から確定する。
-GitHub上のcontent変更にcommit messageが必要なら`commit-writing`に渡す。
+PR本文、changelog、release noteの作成が必要なら、利用可能な`change-writing`へ成果物、読者、exactな差分範囲、issue、互換性と実行済み検証を渡し、確定した変更説明を受け取る。
+commit済み差分のreviewが必要なら、`code-review`へ利用者が指定したfixed pointとHEADのSHA、`git diff <fixed-point>...HEAD`で表す範囲、spec sourceと標準sourceを渡し、StandardsとSpecの所見を受け取る。
+そのcommitted-range契約をstaged・unstaged差分のreviewや、approve、comment、request changesの判断へ広げない。
+reviewの送信種別は利用者の指定または明示的に委ねられたreview判断から確定する。
+commit messageが必要で、同じ変更を表す既存のstaged diffがある場合だけ、`commit-writing`へrepositoryとそのstaged diff、policyを渡し、検査結果を伴うmessageを受け取る。
+remote contentだけの変更を同Skillのstaged-diff契約へ偽装せず、対応する入力がなければmessageの不足を返す。
 このSkillは確定した内容と判断を対象resourceへ反映するだけで、表現や判断を作り直さない。
+専門Skillが利用不能なら未作成の本文、message、または未実施のreviewを明示し、それを必要とするwriteは行わない。
 
 生成と反映を一緒に依頼された場合は、隣接Skillの成果を得てから本手順へ戻る。handoffを理由に、identity確認、pre-read、直前確認を省略しない。
 
-nuget.orgへ公開するpackageのOIDC設定、API keyからの移行、`NuGet/login`は`nuget-trusted-publishing`へ渡す。
-一般のGitHub releaseやprivate feedの依頼を同Skillへ広げない。
-workflowやsecretの反映、releaseの実行が必要になったら、同じaccount targetと直前確認の手順へ戻る。
+nuget.orgへ公開するpackageのOIDC設定、API keyからの移行、`NuGet/login`が主題なら、利用可能な`nuget-trusted-publishing`へpackage、公開workflow、repositoryと実行identity、現在の認証方式、許可された変更を渡す。
+認証契約、必要なworkflow変更、移行の検証結果を受け取り、一般のGitHub releaseやprivate feedの依頼を同Skillへ広げない。
+workflowやsecretの反映、release実行が明示的に依頼された場合だけ、確定した成果を同じaccount targetと直前確認の手順へ戻す。
+Skillまたは必要な公開操作が利用不能なら、その仕事を未実施として返す。
 
 ## 安全に報告する
 

@@ -11,6 +11,10 @@ Explicit user-provided input and output paths take precedence.
 If a required input is still missing, stop and ask the user for it before continuing.
 Use the shared scan artifact path conventions in `scan-artifacts.md`.
 
+Before dynamic validation, identify the authorized target, test data, permitted effects, resource bound, and output location.
+The Operation Boundaries in `../SKILL.md` apply to setup and reproduction; a missing service or Capability does not authorize provider/backend access or infrastructure changes.
+When this reference is used on its own, carry those boundaries with the candidate input.
+
 ## Workflow
 
 1. Before starting, create a detailed validation rubric with up to five criteria for the candidate.
@@ -31,7 +35,7 @@ Use the shared scan artifact path conventions in `scan-artifacts.md`.
 
 ## Usage Guidance
 
-- Prefer short, bounded commands (git, grep -nI within changed dirs, build/test runners, minimal PoCs).
+- Prefer short, bounded direct operations: Git, native Grep within the scoped directories, approved build/test runners, and minimal PoCs.
 - Avoid interactive editors (vi), long-running repo-wide scans, and network access unless essential.
 - If you need to use debuggers, invoke them non-interactively (gdb: "-q -batch -ex run -ex bt -ex quit"; lldb: "-b -o run -o bt -o quit").
 - When creating PoCs to validate the vulnerability, you should attempt to trigger them against the actual application/library directly. Ideally this shows how an attacker would trigger the bug.

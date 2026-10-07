@@ -32,12 +32,18 @@ description: Analyzes dependency structures by defining node, edge, direction, a
 
 - package manifest、compiler、module resolver、schema、service定義、deployment manifest
 - AST、symbol reference、call hierarchy、query plan、runtime trace
-- 表現や所在が不明な候補は`repository-research`で探索し、exact textや構文patternの候補は`rg`や`ast-grep`で直接探索して定義元で確認
+- 既知のpathは`Read`、file名は`Glob`、symbolの定義と参照は利用可能なLSP、exact textは`Grep`や`rg`、構文patternは利用可能な`ast-grep`で直接確認する。
+- 表現や所在が不明な場合だけ、scope、知りたい関係、edge type、既知のanchorを`repository-research`へ渡し、sourceで確認した定義と経路、未確定事項を受け取って抽出を続ける。
 - ownership fileとGit historyによるowner、change-driver、co-changeの確認
 
 文字列一致をsemantic dependencyとみなさない。alias、re-export、生成物、feature flag、dynamic loading、reflection、configuration、ambient stateを確認する。静的証拠からruntime edgeを断定せず、解決できないedgeは推測で補わない。
 
 scriptは抽出、正規化、集計に使い、nodeやedgeの意味付けと設計判断を埋め込まない。既存toolが十分なら専用scriptを作らない。
+
+manifestやtraceの取得には、repositoryが宣言するcommandか、sessionに公開されたCapability toolを使う。
+MCPの操作名と実際のtool名や引数は区別し、利用前に公開schemaで確認する。
+container-backedな証拠も公開されたCapability経由で取得し、providerのprocess、database、containerへ直接入らない。
+`repository-research`や必要なCapabilityが使えない場合は、既知の入口からnative toolで確認できる範囲を進め、取得できないedgeと必要な証拠を未解決として返す。
 
 ## 抽出結果を確かめる
 
@@ -68,4 +74,10 @@ metricはgraph contractの後にだけ使う。
 - 観測事実、解釈、未解決事項
 - 抽出coverageと動的依存の限界
 
-graphから新しいarchitectureを自動的に提案しない。具体的な影響判断、良否判定、境界設計が必要なら、分析結果を証拠として別の仕事へ渡す。
+graphから新しいarchitectureを自動的に提案しない。
+一つの変更の影響判断が必要なら、変更前後の契約、型付きgraph、source locator、未解決edgeを`impact-analysis`へ渡し、consumerごとのimpactと確度を受け取る。
+境界やinterfaceの設計が依頼された場合は、問い、graphの意味、観測した依存、変更制約を`codebase-design`へ渡し、設計判断を依存の観測事実とは分けて扱う。
+故障や性能regressionの診断が依頼された場合は、症状、revision、environment、関連するedgeの証拠と不明点を`diagnosing-bugs`へ渡す。
+受け取った原因は、その診断が確認した条件と証拠に限って使い、graphだけから原因を認定しない。
+これらのhandoffは、その専門仕事が依頼され、対応するSkillが利用可能な場合だけ行う。
+使えない場合も依存分析は完了させ、未実施の専門仕事と引き継げる証拠を返す。

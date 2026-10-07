@@ -27,22 +27,33 @@ semantic探索とexact anchorの両方が必要なら、概念と関係を保っ
 
 ## Zvec-Grepを使う条件
 
-semanticまたはmixedなrepository調査では、対象workspaceのabsolute rootと問いを渡して`zvec-grep` MCPを先に使う。応答のfreshness、root、scopeを確認し、current indexから返った十分なsnippetは候補発見として直ちに使う。indexがない場合はpersistent indexを作成または再構築せず、nativeなrepository toolへ戻る。
+semanticまたはmixedなrepository調査では、`repository-search` Capabilityが公開する`zvec_grep_search`を先に使う。
+このsessionの入口は`xd://mcp__gateway_zvec_grep_zvec_grep_search`であり、schemaを読んでから`root`へdaemonに見えるworkspaceの絶対path、`query`へ問い、`autoUpdate: false`をJSONで渡す。
+複数の問いは`queries`、確認済みexact anchorは補助の`fts`、補助の意味検索は`vector`へ分けられ、一つの順位へ統合する場合だけ`fuse: true`を使う。
+これらは検索経路であり、hard filterとは扱わない。
+応答のroot、scope、freshness、`background_refresh`を読み、current indexから返った十分なsnippetは直ちに使い、更新中という理由だけでstatus確認や再検索を足さない。
+公開入口が利用不能、またはindexがない場合はnativeなrepository toolへ戻り、その探索経路を結果に記す。
 
-queryには調査対象の概念、期待する関係、制約をそのまま含める。確認済みのsymbolや用語はanchorとして追加できるが、それだけでsemantic intentを狭めない。persistent indexのrefresh、削除、設定変更を行わず、探索のためにindex管理を利用者へ求めない。
+queryには調査対象の概念、期待する関係、制約をそのまま含める。
+確認済みのsymbolや用語はanchorとして追加できるが、それだけでsemantic intentを狭めない。
+persistent indexの作成、refresh、再構築、削除、設定変更を行わず、探索のためにindex管理を利用者へ求めない。
 
 結果が無関係または偏っている場合は、落ちた概念や関係を補って問いを組み直す。それでも有力候補が得られなければ、似たqueryを反復せず、exact探索か既知の入口からのsource追跡へ切り替える。
 
 ## Sourceで検証する
 
-Zvec-Grepのsnippet、score、近接した語は候補であり、claimの根拠ではない。materialなclaimごとに次を行う。
+検索scoreと語の近接は証拠ではない。
+current indexのsource locator付きsnippetが主張を支える範囲を全て含む場合は、既読sourceとして扱う。
+materialなclaimごとに次を行う。
 
-1. 候補が指す現在のsource fileと必要な周辺を直接読む。
+1. snippetの外に必要な定義、control、周辺条件がある場合だけ、候補が指すsource fileの該当範囲を直接読む。
 2. 定義、caller、reader、writer、設定、schema、testなど、その関係を成立させる両端を確認する。
 3. 静的な参照とruntime behavior、規範的な契約と例示、production codeとtestやgenerated codeを区別する。
 4. fileと範囲に紐づけて、sourceが直接示す事実、そこからの解釈、未確認事項を分ける。
 
-名前の類似、同じsnippet内の共起、検索順位だけから関係を断定しない。sourceを直接確認できない候補は証拠へ昇格させない。探索後にsourceが変わっていれば、直接読んだ現在のsourceを優先し、index由来の推測を捨てる。
+名前の類似、snippet内の共起、検索順位だけから関係を断定しない。
+必要なsourceがsnippetにも直接の読取りにもなければ、候補を証拠へ昇格させない。
+sourceが変わっていれば直接読んだ現在のsourceを優先し、index由来の古い推測を捨てる。
 
 ## 停止条件
 
@@ -64,6 +75,11 @@ Zvec-Grepのsnippet、score、近接した語は候補であり、claimの根拠
 
 ## Handoffとnon-goals
 
-node、edge、方向、granularityを定義して依存graph、cycle、fan-in、fan-out、transitive reachabilityを分析する仕事は`dependency-analysis`へ渡す。具体的な変更についてconsumer、互換性、rollout、rollbackを含むblast radiusを追う仕事は`impact-analysis`へ渡す。公開URL、最新情報、外部仕様などlocal repository外の証拠は`web-research`へ渡す。
+依存graph、cycle、fan-in、fan-out、transitive reachabilityの分析が必要な場合は、利用可能な`dependency-analysis`へ問い、scope、検証済みのnodeとedgeの候補、source locatorを渡し、graphの定義と根拠付きの分析を受け取る。
+具体的な変更のblast radiusが必要なら`impact-analysis`へ変更契約、revision、確認したconsumerと境界、未確定事項を渡し、互換性、rollout、rollbackへの影響を受け取る。
+公開URL、最新情報、外部仕様が必要なら`web-research`へ外部の問い、versionと時点、確認済みURLを渡し、一次source付きの結果を受け取る。
+専門結果を元の問いへ結び付けて返し、利用不能な枝は不足する専門作業と証拠を明示する。
 
-このSkillはpersistent indexを管理せず、既知のexact text、path、symbol探索を包まない。architectureの良否判定、設計、bugの原因診断、変更の実装も所有しない。別Skillへ渡す場合は、ここで検証済みのsourceと未確定事項だけを証拠として引き継ぐ。
+このSkillはpersistent indexを管理せず、既知のexact text、path、symbol探索を包まない。
+architectureの良否判定、設計、bugの原因診断、変更の実装も所有しない。
+別Skillへ渡す場合は、ここで検証済みのsourceと未確定事項だけを証拠として引き継ぐ。

@@ -12,7 +12,8 @@
 | signature procedure | 分解や一般化で価値が失われる固有の手順 |
 | custom Skill | 反復する文脈依存の不足に、独立した方法、routing、判断所有権がある |
 
-toolを使えること自体をSkillにしない。Skillは、toolをいつ、何の証拠のために使い、結果をどう評価するかまで所有する場合だけ候補になる。
+独自の判断や推敲の方法は、toolを使わなくてもSkillの候補になる。
+toolの利用を定める場合は、いつ、何の証拠のために使い、結果をどう評価するかまで所有し、呼び出し一回だけを独立したJobにしない。
 
 ## Admission gate
 
@@ -37,6 +38,13 @@ baselineとforward evalは、分類表のcellではなく実taskから作る。�
 - composition: 一緒に使う可能性が高いSkillがあるtask
 
 promptへSkill名や本文の語彙を埋めて発火と成果を誘導しない。評価criterionは方法の復唱でなく、正しいoutcomeと不要な行動の不在を測る。
+
+各scenarioには、与える入力と制約、根拠の取得先、期待する成果、その条件で必要な委譲と返却結果、不要な操作を対応させる。
+compositionを含む場合は、Skill名の出現ではなく、入力と証拠の受け渡し、返却結果による継続、判断所有権の重複がないことを確かめる。
+方法だけで完了するscenarioでは、成果の質を測り、toolや他Skillを使わないことを不足としない。
+作業経路のscenarioでは、実際の公開schemaで操作と入力を照合し、取得結果の評価と次の判断まで追う。
+利用できないSkillやCapabilityがあるscenarioでは、偽の返却結果を作らず、独立した成果と不足証拠を分けて止めるかを確かめる。
+この対応はcandidateの実taskに合わせ、全Skillへ同じworkflowや成果物templateを強制しない。
 
 ## 比較観点
 

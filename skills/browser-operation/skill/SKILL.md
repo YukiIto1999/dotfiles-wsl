@@ -11,6 +11,14 @@ description: Executes a specified user task or verifies an implemented surface i
 
 Playwrightは実行手段であり、何を操作し、どの状態を成功と認め、どこで止めるかはこのSkillが判断する。
 
+## 公開入口
+
+`browser-automation` Capabilityのgatewayに公開されたPlaywright toolを使う。
+本文の`playwright.browser_*`は論理名であり、このsessionでは`xd://mcp__gateway_playwright_browser_tabs`などの公開入口へ対応させ、schemaを読んでからJSON引数を渡す。
+tab一覧は`browser_tabs`の`action: "list"`、作成は`"new"`、選択と終了は`"select"`または`"close"`と一覧の`index`を使う。
+snapshotと通常の操作は選択中のtabに作用し、Chrome DevToolsのpage IDとは共有しない。
+toolが公開されていない、接続できない、または対象へ到達できない場合は、その境界を未確認として返し、別browser、provider、containerを直接起動しない。
+
 ## 入力を固定する
 
 開始前に、依頼とrepositoryから次を確定する。
@@ -24,7 +32,11 @@ Playwrightは実行手段であり、何を操作し、どの状態を成功と�
 
 ## 対象tabと初期状態を観測する
 
-最初に`playwright.browser_tabs`でtabを列挙し、URLとtitleから対象を特定する。既存tabを使う理由がなければ専用tabを作り、作成したtabを所有対象として記録する。利用者が開いていた別tab、別account、別環境を推測で選ばない。
+最初に`playwright.browser_tabs`の`action: "list"`でtabを列挙し、URLとtitleから対象を特定する。
+既存tabを使う理由がなければ専用tabを作り、作成したtabとsessionを所有対象として記録する。
+選択には現在の一覧の`index`を渡し、tabの作成や終了で番号が変わった場合は一覧を取り直す。
+利用者が開いていた別tab、別account、別環境を推測で選ばない。
+navigationには`browser_navigate`の`url`へ確定した入口を渡す。
 
 対象tabを選択またはnavigationしたら、`playwright.browser_snapshot`で現在のaccessibility tree、表示文言、control、状態、参照先を読む。操作対象はこの観測から決める。snapshotで判別できない属性やDOM上の状態だけを、読み取り専用の`playwright.browser_evaluate`で確認する。screenshot上の座標や見た目を操作対象の特定に使わない。
 
@@ -34,7 +46,8 @@ snapshotのrefはその時点の状態にだけ有効とみなす。navigation�
 
 1. 操作前の状態と、成功を示す画面上の変化を特定する。
 2. fresh snapshotのrole、label、text、refを優先し、対象が一意であることを確かめる。
-3. 複数fieldを同じformへ入力するときは`playwright.browser_fill_form`で一括入力し、fieldごとの断片的な操作を避ける。
+   clickはそのsnapshotの`ref`を`browser_click`へ渡し、期待文言の出現は`browser_wait_for`の`text`、消失は`textGone`で待つ。
+3. 複数fieldを同じformへ入力するときは`playwright.browser_fill_form`の`fields`へ各fieldの`name`、`type`、fresh snapshotの`ref`、`value`を渡して一括入力する。
 4. click、入力、key操作は受入条件へ必要な最小限にする。`evaluate`でproductのevent、API、storageを書き換えてUI経路を迂回しない。
 5. 非同期更新は固定sleepではなく、期待するtextの出現、処理中表示の消失などを`playwright.browser_wait_for`で待つ。条件を観測できない場合だけ短い時間待機し、その後に状態を取り直す。
 6. 操作後のsnapshotまたは必要なDOM状態を読み、期待結果と照合してから次へ進む。
@@ -58,6 +71,10 @@ snapshotのrefはその時点の状態にだけ有効とみなす。navigation�
 - browser errorが受入条件または観測した異常に関係するときだけconsoleを確認する。「console errorなし」と述べるなら、対象操作を含む区間のmessageを実際に確認する。
 - requestの発生、method、endpoint、statusが結果判定に必要なときだけnetworkを確認する。対象URLで絞り、成功したstatic resource、body、headerを既定で収集しない。
 
+screenshotの保存先を指定する場合は、現在の公開output契約から非公開directoryを確認し、`filename`へその中の絶対pathを渡す。
+別processの相対pathの解決先やcallerの`TMPDIR`を同じ保存先とみなさず、返ったartifactのpathと読取可否を確認する。
+保存先が拒否された場合は、共有directory、symlink、providerの設定変更で回避しない。
+
 各受入条件を`pass`、`fail`、`未確認`のいずれかにし、実際に観測した状態を添える。最終結果には対象environmentとURL、実行した利用者経路、条件ごとの証拠、保存したscreenshotがあればそのpath、安全上実行しなかった操作、残る不確実性を含める。観測していない状態を推測で補わない。
 
 materialな不一致を見つけたら症状、再現経路、直前と直後の状態を保存する。独立した残りの条件は副作用なしに確認できる場合だけ続ける。原因の仮説検証へ広げない。
@@ -68,9 +85,17 @@ materialな不一致を見つけたら症状、再現経路、直前と直後の
 
 ## Non-goals
 
-UIの新規設計や実装前の改善提案は`ui-design`へ渡す。
-機能不良は`diagnosing-bugs`、browserのloading、interaction、layout shiftやnetworkの性能測定は`browser-performance`、heap保持の原因調査は`heap-analysis`へ渡す。
-それぞれのSkillが利用可能なときだけ、観測した症状と実経路を引き渡し、未測定の原因を補わない。
-脅威や脆弱性の調査は`security-review`が所有する。
+次の専門作業が依頼に含まれる場合だけ、利用可能なSkillへ渡す。
+
+| 条件 | Skillへ渡す入力 | 受け取る結果 |
+|---|---|---|
+| 実装前のUI判断が必要 | `ui-design`へ利用者task、実content、観測したstate、既存の制約 | UI briefと設計上の未確定事項 |
+| 観測した機能不良の原因診断が必要 | `diagnosing-bugs`へ期待と実際、再現経路、前後のsnapshot、関連するerror | 原因を支える証拠と次の検証または修正判断 |
+| loading、interaction、layout shift、networkの性能測定が必要 | `browser-performance`へURL、経路、測定条件、観測した遅延 | 実測値、原因との対応、未測定項目 |
+| JavaScript heap保持の調査が必要 | `heap-analysis`へ操作と終了sequence、反復条件、取得済みsnapshotがあればその非公開path | 保持経路、寿命、比較で確かめたこと |
+| 脅威や脆弱性の調査が必要 | `security-review`へ対象scope、経路、観測証拠、関連source | 検証を通過した所見と証拠の不足 |
+
+専門結果は元のtaskの観測結果と区別してcallerへ返し、handoffを理由に同じ操作を再実行しない。
+Skillが利用不能なら証拠と不足する専門作業を返し、原因や測定結果を補わない。
 
 このSkillはfrontend実装、網羅的なtest設計、公開Web調査、credential管理、APIを直接叩く代替verificationを行わない。指定taskの実行または既知の受入条件のbrowser verificationを終え、証拠とcleanupを返した時点で停止する。

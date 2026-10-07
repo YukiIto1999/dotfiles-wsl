@@ -6,6 +6,6 @@ _: {
       "web-content"
       "web-discovery"
     ];
-    requiresSkills = [ "repository-research" ];
+    requiresSkills = [ ];
   };
 }

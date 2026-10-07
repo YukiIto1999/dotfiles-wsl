@@ -549,6 +549,30 @@ test "$(stat -c %a "$success_file")" = 600
 "$VERIFY" -- "$fixture/check" first
 test "$(cat "$COUNT")" = 1
 
+(
+  dense_repo=$fixture/dense-repo
+  dense_count=$fixture/dense-count
+  special_path=$'末尾\n\t\\name'
+  mkdir "$dense_repo"
+  git -C "$dense_repo" init -q
+  git -C "$dense_repo" config user.name fixture
+  git -C "$dense_repo" config user.email fixture@example.invalid
+  for ((i = 0; i < 513; i++)); do
+    printf 'tracked\n' >"$dense_repo/file-$i"
+  done
+  printf 'special\n' >"$dense_repo/$special_path"
+  git -C "$dense_repo" add --all
+  git -C "$dense_repo" commit -qm initial
+  cd "$dense_repo"
+  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
+  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
+  test "$(cat "$dense_count")" = 1
+  chmod 0444 -- "$special_path"
+  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
+  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
+  test "$(cat "$dense_count")" = 2
+)
+
 original_count=$COUNT
 export COUNT=$fixture/mode-count
 "$VERIFY" -- "$fixture/check" mode

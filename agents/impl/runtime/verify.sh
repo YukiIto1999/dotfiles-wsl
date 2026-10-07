@@ -84,67 +84,117 @@ write_command_identity() {
 write_tracked_metadata() {
   local repository=$1 tracked=$2 guard=$3 namespace=$4
   local record index_fields index_mode path absolute semantic_path
-  local index_oid index_stage kind metadata_format
-  local metadata_before metadata_after guard_before guard_after
+  local index_oid index_stage metadata digest offset batch
+  local -a paths=() regulars=()
+  local -A metadata_before=() guards_before=() hashes=()
+  local -A metadata_after=() guards_after=()
 
+  batch=$(mktemp -d "$scratch/.tracked-batch.XXXXXXXX") || return 1
   while IFS= read -r -d '' record; do
     [[ $record == *$'\t'* ]] || return 1
     index_fields=${record%%$'\t'*}
     index_mode=${index_fields%% *}
-    index_oid=${index_fields#* }
-    index_oid=${index_oid%% *}
     index_stage=${index_fields##* }
     [ "$index_stage" = 0 ] || return 1
+    path=${record#*$'\t'}
+    absolute=$repository/$path
+    if [ ! -e "$absolute" ] && [ ! -L "$absolute" ]; then
+      [ "$index_mode" != 160000 ] || return 1
+      continue
+    fi
+    paths+=("$absolute")
+    if [ "$index_mode" = 160000 ]; then
+      [ -d "$absolute" ] && [ ! -L "$absolute" ] || return 1
+    elif [ -L "$absolute" ]; then
+      continue
+    elif [ -f "$absolute" ]; then
+      regulars+=("$absolute")
+    else
+      return 1
+    fi
+  done <"$tracked"
+
+  : >"$batch/before"
+  for ((offset = 0; offset < ${#paths[@]}; offset += 128)); do
+    stat --printf '%n\0%f:%u:%g:%h:%s\0%d:%i:%f:%u:%g:%h:%s:%y:%z\0' \
+      -- "${paths[@]:offset:128}" >>"$batch/before" 2>/dev/null || return 1
+  done
+  while IFS= read -r -d '' absolute \
+    && IFS= read -r -d '' metadata \
+    && IFS= read -r -d '' record; do
+    metadata_before["$absolute"]=$metadata
+    guards_before["$absolute"]=$record
+  done <"$batch/before"
+
+  : >"$batch/hashes"
+  for ((offset = 0; offset < ${#regulars[@]}; offset += 128)); do
+    sha256sum --zero -- "${regulars[@]:offset:128}" >>"$batch/hashes" || return 1
+  done
+  while IFS= read -r -d '' record; do
+    digest=${record:0:64}
+    [[ $digest =~ ^[0-9a-f]{64}$ ]] || return 1
+    hashes["${record:66}"]=$digest
+  done <"$batch/hashes"
+
+  while IFS= read -r -d '' record; do
+    index_fields=${record%%$'\t'*}
+    index_mode=${index_fields%% *}
+    index_oid=${index_fields#* }
+    index_oid=${index_oid%% *}
     path=${record#*$'\t'}
     absolute=$repository/$path
     semantic_path=$namespace$path
     printf 'index\0%s\0path\0%s\0' "$index_fields" "$semantic_path"
     if [ ! -e "$absolute" ] && [ ! -L "$absolute" ]; then
-      [ "$index_mode" != 160000 ] || return 1
+      [ -z "${metadata_before["$absolute"]-}" ] || return 1
       printf 'missing\0'
       printf 'path\0%s\0missing\0' "$semantic_path" >>"$guard"
-      [ ! -e "$absolute" ] && [ ! -L "$absolute" ] || return 1
       continue
     fi
+    metadata=${metadata_before["$absolute"]-}
+    [ -n "$metadata" ] || return 1
+    if [ "$index_mode" = 160000 ]; then
+      metadata=${metadata%:*}
+      metadata=${metadata%:*}
+    fi
+    printf 'lstat\0%s\0' "$metadata"
+    printf 'path\0%s\0lstat\0%s\0' "$semantic_path" "${guards_before["$absolute"]}" >>"$guard"
     if [ "$index_mode" = 160000 ]; then
       [ -d "$absolute" ] && [ ! -L "$absolute" ] || return 1
-      kind=gitlink
-      metadata_format='%f:%u:%g'
+      write_clean_gitlink "$absolute" "$index_oid" "$semantic_path/" "$guard" || return 1
     elif [ -L "$absolute" ]; then
-      kind=symlink
-      metadata_format='%f:%u:%g:%h:%s'
+      printf 'symlink\0'
+      readlink --zero -- "$absolute" || return 1
     elif [ -f "$absolute" ]; then
-      kind=regular
-      metadata_format='%f:%u:%g:%h:%s'
+      digest=${hashes["$absolute"]-}
+      [ -n "$digest" ] || return 1
+      printf 'regular\0%s  -\n' "$digest"
     else
       return 1
     fi
-    metadata_before=$(stat -c "$metadata_format" -- "$absolute" 2>/dev/null) \
-      || return 1
-    guard_before=$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$absolute" 2>/dev/null) \
-      || return 1
-    printf 'lstat\0%s\0' "$metadata_before"
-    printf 'path\0%s\0lstat\0%s\0' "$semantic_path" "$guard_before" >>"$guard"
-    case $kind in
-    symlink)
-      printf 'symlink\0'
-      readlink --zero -- "$absolute" || return 1
-      ;;
-    regular)
-      printf 'regular\0'
-      sha256sum <"$absolute" || return 1
-      ;;
-    gitlink)
-      write_clean_gitlink "$absolute" "$index_oid" "$semantic_path/" "$guard" || return 1
-      ;;
-    *) return 1 ;;
-    esac
-    metadata_after=$(stat -c "$metadata_format" -- "$absolute" 2>/dev/null) \
-      || return 1
-    guard_after=$(stat -c '%d:%i:%f:%u:%g:%h:%s:%y:%z' -- "$absolute" 2>/dev/null) \
-      || return 1
-    [ "$metadata_after" = "$metadata_before" ] || return 1
-    [ "$guard_after" = "$guard_before" ] || return 1
+  done <"$tracked"
+
+  : >"$batch/after"
+  for ((offset = 0; offset < ${#paths[@]}; offset += 128)); do
+    stat --printf '%n\0%f:%u:%g:%h:%s\0%d:%i:%f:%u:%g:%h:%s:%y:%z\0' \
+      -- "${paths[@]:offset:128}" >>"$batch/after" 2>/dev/null || return 1
+  done
+  while IFS= read -r -d '' absolute \
+    && IFS= read -r -d '' metadata \
+    && IFS= read -r -d '' record; do
+    metadata_after["$absolute"]=$metadata
+    guards_after["$absolute"]=$record
+  done <"$batch/after"
+  for absolute in "${paths[@]}"; do
+    [ "${metadata_after["$absolute"]-}" = "${metadata_before["$absolute"]}" ] || return 1
+    [ "${guards_after["$absolute"]-}" = "${guards_before["$absolute"]}" ] || return 1
+  done
+  while IFS= read -r -d '' record; do
+    path=${record#*$'\t'}
+    absolute=$repository/$path
+    if [ -z "${metadata_before["$absolute"]-}" ]; then
+      [ ! -e "$absolute" ] && [ ! -L "$absolute" ] || return 1
+    fi
   done <"$tracked"
 }
 

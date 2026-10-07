@@ -214,6 +214,23 @@ let
         };
       };
     };
+    explainer = {
+      source = pluginSources.explainer;
+      skills = {
+        explainer = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ "first-reader" ];
+        };
+        explainer-book = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ "explainer" ];
+        };
+        first-reader = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+      };
+    };
   };
   pluginSourceNames = builtins.attrNames adoptedPluginSkills;
   pluginSkillNames = lib.concatMap (

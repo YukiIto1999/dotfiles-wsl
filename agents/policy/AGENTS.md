@@ -64,9 +64,13 @@ client固有またはplugin由来のSkillはsessionが提示した名前を使�
 
 依存方向は `agent → Skill → Capability → provider / runtime` とする。agent は task の委譲、context、権限、成果物の引渡しを所有し、Skill は反復する判断と手順を所有し、Capability は consumer 非依存の意味、state、security、lifecycle を所有する。provider と runtime は Capability の実装詳細であり、agent や Skill が直接選ばない。
 
-Read / Grep / Glob / Edit / Write / Bash などの単純な local 操作、LSP、subagent と別 AI agent の起動は Skill で包まない。これらは agent が直接使う Capability とし、provider が必要な操作は対応する Skill が宣言した Capability を入口にする。単一 tool 呼出しだけを目的とする Skill は作らない。
+Read / Grep / Glob / Edit / Write / Bash、LSP、subagentのようなharness機能と、schemaを確認して使う汎用CLIは直接使う。
+反復する専門判断は一致するSkillから入り、providerを持つ能力はそのSkillが宣言するCapabilityへ渡す。
+単一toolの呼出しを包むSkillは作らない。
 
-`nix flake check` は配備対象の Skill、subagent、Skill が宣言する Capability 依存と配備配線を検査する。`dotfiles-doctor` は `dotfiles.health.observations` の全登録を観測し、Skill を含む managed artifact と current source の不一致も検査する。Skill の動作や意味と実際の agent 機能との整合は自動検査しない。
+toolやSkillの追加では、供給元と実行依存だけでなく、発火する仕事、既存caller、渡す入力、返却結果を取り込む地点を同時に変更する。
+配備checkはsource、依存と投影を検査し、doctorは実状態とdriftを観測するが、自然な発火や成果の品質までは証明しない。
+追加した入口は、その仕事の実行と近接する非対象の両方で確かめる。
 
 @skillRoster@
 
@@ -82,6 +86,16 @@ raw upstreamの`code-review`にstaged / unstaged diffを代入しない。
 `grill-with-docs`と`grill-me`は明示的なinterview依頼に対するstatefulとstatelessの入口、`to-spec`と`to-tickets`は確定した会話の仕様化と承認したticket分割に使う。
 `prototype`はdesign questionを動かして確かめる場合だけ使い、既存の実装依頼を試作品へ置き換えない。
 `retro`の改善案を恒久化するときは`environment-design`でownerを決める。
+
+CI workflowの変更やローカル再現では、projectのtask正本を保ち、`actrun`のlintとdry-runで対応範囲と実行計画を調べる。
+実行前にactionの信頼、secretとnetwork、変更を含むworkspaceと保存先を確認し、ローカルrunnerの成功をGitHub側のpermission、event、serviceの成立と同一視しない。
+重複候補を探すC#・Rust・TypeScriptの作業では、対象と比較目的を固定し、`similarity-generic`、`similarity-rs`、`similarity-ts`をそれぞれ使う。
+候補はsourceで確かめ、共通化は変更理由と契約で判断する。
+JSXの取り逃し、言語別の成熟度、型解決の不在があるため、候補0件を重複の不在や設計の正しさとしない。
+速習資料や章立て教材は原版の`explainer`または`explainer-book`、初見の読み手の体験は原版の`first-reader`へ渡す。
+一般文書は`description-writing`、実行手順の記事の再現性は独自の`tech-article-reproducibility`が所有し、同じ執筆・読解・再現を重ねない。
+原版の検証表示は実行範囲の証拠であり、未観測のexit、stream、業務結果を補わない。
+外部CLIの実行条件と配備の正本は、`@dotfilesDir@/docs/reference/tooling.md`から必要な入口だけを読む。
 
 .NET testのcommandや実行は`run-tests`、test platformの識別だけは`platform-detection`、build XMLやMSBuild failureとbuild性能は`msbuild`、BenchmarkDotNetの比較測定は`microbenchmarking`を使う。
 `nuget-trusted-publishing`はnuget.orgのOIDC publishing設定とAPI key移行だけに使い、一般のGitHub release、private feed、Azure Artifactsへ広げない。

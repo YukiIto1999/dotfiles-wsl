@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "evaluatedAt": "2026-08-13",
+  "authoredAt": "2026-10-07",
   "cases": [
     {
       "id": "commit-purpose",
@@ -185,7 +185,7 @@
     {
       "id": "description-routing",
       "prompt": "Write a README for trace-map. It reads local trace JSON and prints service-to-service edges. The reader is an engineer deciding whether to install it. The start command is nix run .#trace-map -- sample.json. It never uploads data. Architecture details are in docs/architecture.md.",
-      "expectedSkills": ["description-writing", "ja-writing"],
+      "expectedSkills": ["description-writing", "ja-writing", "tech-article-reproducibility"],
       "nearMiss": {
         "prompt": "Write a PR body for the change.",
         "expectedSkills": ["change-writing", "ja-writing"]
@@ -193,7 +193,21 @@
       "expected": {
         "includes": ["job", "local-only data boundary", "start command", "architecture link"],
         "inventedSections": false,
-        "duplicatesArchitecture": false
+        "duplicatesArchitecture": false,
+        "reproductionHandoffIncludes": [
+          "final article revision and attachments",
+          "reader and intended outcome",
+          "environment and initial state",
+          "ordered commands, code, config and sample input",
+          "expected exit, stdout, stderr and artifacts",
+          "source locators",
+          "existing execution evidence and missing evidence",
+          "side-effect authority"
+        ],
+        "guessesMissingHandoffFacts": false,
+        "withoutExecutionEvidence": ["reviewed-only", "blocked"],
+        "writerRepeatsReproduction": false,
+        "claimsReproducedWithoutExecution": false
       }
     },
     {

@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "name": "benign-output",
+      "cmd": "sh -c 'printf \"%s\\n\" \"reproduction-ok\"'",
+      "cwd": ".",
+      "expect": ["reproduction-ok"]
+    }
+  ]
+}

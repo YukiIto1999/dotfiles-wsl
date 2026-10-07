@@ -151,6 +151,23 @@
         "type": "github"
       }
     },
+    "explainerSkills": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1791278496,
+        "narHash": "sha256-X28LASU60zC8Q/8asgAr2UWIMxjYsVPEvd/bTro3c4o=",
+        "owner": "mizchi",
+        "repo": "explainer",
+        "rev": "578defba7249fde5366689424ed6017f76b5598b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mizchi",
+        "repo": "explainer",
+        "rev": "578defba7249fde5366689424ed6017f76b5598b",
+        "type": "github"
+      }
+    },
     "flake-compat": {
       "flake": false,
       "locked": {
@@ -565,6 +582,7 @@
         "chromeDevtoolsSkills": "chromeDevtoolsSkills",
         "devenv": "devenv",
         "dotnetSkills": "dotnetSkills",
+        "explainerSkills": "explainerSkills",
         "home-manager": "home-manager",
         "mattSkills": "mattSkills",
         "modernWebGuidance": "modernWebGuidance",

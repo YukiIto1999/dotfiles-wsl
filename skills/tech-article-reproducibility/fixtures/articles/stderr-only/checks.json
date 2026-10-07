@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "name": "stdout-output",
+      "cmd": "sh -c 'printf \"%s\\n\" \"sample-ready\" >&2'",
+      "cwd": ".",
+      "expect": ["sample-ready"]
+    }
+  ]
+}

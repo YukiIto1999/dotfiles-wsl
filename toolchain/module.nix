@@ -140,6 +140,10 @@ in
 
   config.dotfiles.toolchain.packages = {
     actrun = self.inputs.actrun.packages.${pkgs.stdenv.hostPlatform.system}.default;
+    similarity = pkgs.callPackage ./package/similarity.nix { };
+    explainer = pkgs.callPackage ./package/explainer/package.nix {
+      explainerSource = self.inputs.explainerSkills;
+    };
     zvec-grep = pkgs.callPackage ./package/zvec-grep.nix { };
     devenv = self.inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.default;
 

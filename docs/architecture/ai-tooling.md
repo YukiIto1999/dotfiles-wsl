@@ -10,10 +10,12 @@ AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycle�
 agents/policy/AGENTS.md ───────────────────┐
 agents/subagents/*.md ── client変換 ──────────┤
 skills/*/skill/ ──────────────────────────┼─► Nix store ─► 各clientの設定領域
-Orca / architecture-standard / Matt / Google / .NETの固定source ─┘
+Orca / architecture-standard / Matt / Google / .NET / mizchi explainerの固定source ─┘
 
 Agent ─► Skill ─► Capability ─► provider adapter ─► Platform MCP ─► gateway
                          └────► backend / credential / persistent state
+
+Agent ─► harness primitive / managed CLI ─► toolchain runtime
 
 AI CLI ─► LSP ─► language server
        └► OTLP ─► telemetry collector
@@ -22,9 +24,14 @@ AI CLI ─► LSP ─► language server
 [`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)はsubagentからSkillへのroutingとsubagent間handoffだけを持ち、provider名、backend名、直接provider例外は置かない。
 Skillの依存は取込ownerのNix moduleが`requiresSkills`と`requiresCapabilities`で宣言し、外部Skillでは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が所有する。
 
-実行時の原則は`Agent → Skill → Capability → provider/runtime`である。Agentはtask、権限、委譲、成果物handoffを所有する。Skillは反復する判断、手順、停止条件を所有する。Capabilityはconsumerに依存しない機能contractである。provider adapter、container、database、credential、stateはCapabilityの実装詳細であり、AgentやSkillへ逆依存しない。
+専門判断が必要なtaskは`Agent → Skill`で方法を選び、配備するproviderは`Capability → provider/runtime`の公開契約を通す。
+Agentはtask、権限、委譲、成果物handoffを所有する。
+Skillは反復する判断、手順、停止条件を所有し、primitive操作のたびに起動するwrapperにはしない。
+Capabilityはconsumerに依存しない機能contractである。
+provider adapter、container、database、credential、stateはCapabilityの実装詳細であり、AgentやSkillへ逆依存しない。
 
-Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能はAgentが直接使う。repositoryに配備するproviderは次のCapabilityを通す。
+Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能と、決定的な操作を担うmanaged CLIはAgentが直接使う。
+repositoryに配備するproviderは次のCapabilityを通し、公開契約を確認せず内部processやcontainerへ接続しない。
 
 Capability実装の正本は各`capabilities/<id>/module.nix`にあり、Task入口はlocalまたはpluginの採用moduleにある`requiresCapabilities`が宣言する。
 この宣言はSkill配備をゲートし、policyのCapability対応へ記載する。
@@ -56,12 +63,19 @@ hard依存は主要手順の必須条件であり、条件付きbrowserやcloud 
 Agent clientへ配るのは、解決したSkill registryの`source` directoryとその本文、reference、scriptである。
 必要なSkillを失ったsubagentとそのhandoffも配備しない。
 Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsource差替えはNixの明示的なoverrideだけで行う。
-Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skillsは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
+Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skills、mizchi explainerは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
 原版の起動flagも保持し、policy rosterがtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
 consumerはpolicy rosterのraw source絶対pathを`Read`で開き、固定source実体のsibling referenceを利用する。
 片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
 Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
+外部Skillのraw directoryを配ることと、同梱scriptの実行依存を供給することは別の契約である。
+explainerのraw sourceとsibling配置はそのまま保持し、別ownerの[`toolchain/package/explainer/package.nix`](../../toolchain/package/explainer/package.nix)が固定したmanifestとlock、browser、絶対pathを要求する実行wrapperを供給する。
+package作成時に置き換えるのはruntime用manifestとlockだけであり、upstreamのSkill本文やscriptは変更しない。
+wrapperは書込み可能な一時CWDへ管理下のpackageと依存を参照させるが、upstreamが記事側の祖先packageを優先する条件やcheckerの限界を消さないため、対象directoryと証拠の制約は[外部CLI](../reference/tooling.md#外部cli)へ集約する。
+任意shell、外部送信、model課金の許可や、optional D2とformal backendの供給をraw採用から推定しない。
+`description-writing`とcustom `tech-article-reproducibility`は単独で成立する判断を持ち、raw `explainer`、`first-reader`、browserや.NET実行への引渡しを該当branchだけで行う。
+これらを一般の執筆やcodingのhard依存へ広げず、返却証拠から同じownerの仕事を再開し、writer側の再現性loopやreader試行を重ねない。
 採用IDとpath、revision、licenseの関係は[Skill portfolio](skills.md#直接採用)、登録と差替の契約は[外部リポジトリ所有Skillの構成](repository-skills.md)を参照する。
 
 ## Client binary

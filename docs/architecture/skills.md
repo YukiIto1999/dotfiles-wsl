@@ -39,7 +39,9 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 
 有効なSkillは[`skills/module.nix`](../../skills/module.nix)が、選択したCapabilityとSkill間依存を満たすregistry entryから導く。`dotfiles.skills.enabled`はread-onlyの内部派生値であり、Agent clientはこの有効集合だけを各client形式へ投影する。
 
-MCP専用の薄いwrapperは置かない。`repository-research`は探索経路とsource検証、`browser-operation`は実surfaceの状態遷移と副作用境界、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。SkillとCapabilityの対応、subagentごとのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
+MCP専用の薄いwrapperは置かない。
+`repository-research`は探索経路とsource検証、`browser-operation`は要求と変更pathから実画面と業務結果へ至る受入判断、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。
+SkillとCapabilityの対応、subagentごとのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
 
 ## 直接採用
 
@@ -52,6 +54,7 @@ sourceはrepository全体を保持し、rootのlicenseと同梱資材を残し�
 | [Matt Pocock skills](https://github.com/mattpocock/skills/tree/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d) | `mattSkills` | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | [MIT](https://github.com/mattpocock/skills/blob/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/LICENSE) |
 | [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp/tree/cf2eab96d96cad3d47ce769b9638815d1775500f) | `chromeDevtoolsSkills` | `cf2eab96d96cad3d47ce769b9638815d1775500f` | [Apache-2.0](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/cf2eab96d96cad3d47ce769b9638815d1775500f/LICENSE) |
 | [.NET skills](https://github.com/dotnet/skills/tree/0dcd43ceb15e15a2c45dd54075fbcf3a30632154) | `dotnetSkills` | `0dcd43ceb15e15a2c45dd54075fbcf3a30632154` | [MIT](https://github.com/dotnet/skills/blob/0dcd43ceb15e15a2c45dd54075fbcf3a30632154/LICENSE) |
+| [mizchi explainer](https://github.com/mizchi/explainer/tree/578defba7249fde5366689424ed6017f76b5598b) | `explainerSkills` | `578defba7249fde5366689424ed6017f76b5598b` | [MIT](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/LICENSE)。同梱`first-reader`は[Apache-2.0とNOTICE](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/skills/first-reader/NOTICE)を保持 |
 
 次のpathは各固定sourceのrootからの相対pathであり、directoryの配置やSkill名をlocalの命名体系へ変換しない。
 
@@ -80,6 +83,9 @@ sourceはrepository全体を保持し、rootのlicenseと同梱資材を残し�
 | `filter-syntax` | .NET `plugins/dotnet-test/skills/filter-syntax` | filtered runでconsumerが読むreference-only helper |
 | `microbenchmarking` | .NET `plugins/dotnet-diag/skills/microbenchmarking` | BenchmarkDotNetで実callerに対応する比較instrumentを設計・実行 |
 | `nuget-trusted-publishing` | .NET `plugins/dotnet-advanced/skills/nuget-trusted-publishing` | nuget.orgのOIDC publishing設定とAPI key移行 |
+| `explainer` | explainer `skills/explainer` | 読者の既知を除いた速習資料、sourceと出力の注釈、図とHTML |
+| `explainer-book` | explainer `skills/explainer-book` | 概念の順序、章ごとの到達点と演習が必要な教材 |
+| `first-reader` | explainer `skills/first-reader` | freshな模擬readerによる読書経験とrecallの報告。本文は書き換えない |
 
 ## Routing
 
@@ -111,7 +117,25 @@ reviewerは目的をrequest、issue、specから固定し、全changed subsystem
 testがgreenでも目的との因果関係がない変更を指摘し、unrelated cleanupを同じ修正へ混ぜない。
 findingは発生条件、影響、最小のchanged rangeと根拠を持ち、指定したaxis内だけで返す。
 
-`browser-operation`はPlaywrightの実経路verificationと副作用境界を持ち、browser-automationだけを要求する。
+`description-writing`は、一次資料に基づく内容、読者の問いに沿う構成、返った所見を採用する編集判断を所有する。
+READMEの開始手順、setup、tutorialなど再現する操作がある場合だけ、独立したcustom [`tech-article-reproducibility`](../../skills/tech-article-reproducibility/skill/SKILL.md)へ渡す。
+完成した記事と添付のrevision、読者と到達点、環境と開始状態、順序付き操作、入力、期待exitと個別streamと生成物、既存証拠、許可範囲を渡し、判定とlocator付きblocking点を受け取って修正へ戻る。
+書き手側では同じ再現性loopを重ねず、変更した手順や前提だけを同じownerへ戻す。
+既存記事の単独reviewも同じownerが扱い、概念説明や単なる参照表には起動しない。
+`reviewed-only`、`reproduced`、`failed`、`blocked`は記述review、実行証拠との一致、観測した矛盾、前提または権限不足を区別し、未実行を再現済みとは扱わない。
+
+sourceに照らす図、出力注釈、HTMLを含む速習資料の仕事だけを原版`explainer`へ渡し、章立てと演習が必要なら`explainer-book`を使う。
+依頼されたbeta readや重要文書の独立した理解確認は原版`first-reader`へ渡し、同じrevisionで既に得たreader結果を再利用する。
+freshなreaderを起動できないworkerは入力と未実施理由をtop-level callerへ返し、自分の既知draftの再読で代用しない。
+模擬readerの反応とlogからのrecallは、実commandの証拠や実際の翌日の人間の記憶測定とは区別する。
+用語の意味、context、`GLOSSARY.md`、domainのADRを変更する仕事は既存の`domain-modeling`へ渡し、実装mapをdomain定義へ混ぜない。
+architectの`explainer`と`tech-article-reproducibility`、implementerの`tech-article-reproducibility`は該当taskだけのdynamic routeであり、一般設計やcodingの必須preloadにしない。
+raw sourceの採用は`mizchi/explainer`に限り、donorとして調べた`mizchi/skills`をwhole sourceの配備対象にはしない。
+外部scriptの実行入口と制約は[toolingの外部CLI](../reference/tooling.md#外部cli)が持つ。
+
+`browser-operation`は要求と変更pathから重要な実経路、状態遷移、contentと表示条件を選び、fresh DOM操作、実際に読んだrendered screenshot、業務結果を対応させる。
+関連する拒否、回復、契約が必要とする再取得までclaimごとに閉じ、未確認条件と証拠を返す。
+永久testの作成や専門監査は別ownerとし、配備ではbrowser-automationだけを要求する。
 browser-diagnosticsの入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面a11yの`a11y-debugging`とする。
 Googleの固定sourceは配備するChrome DevTools MCP 1.10.1に対応し、必要なreferenceを切り離さない。
 例の引数や値はsessionの実tool schemaで確認し、page IDを固定する。
@@ -156,18 +180,19 @@ CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfac
 |---|---|---|
 | `change-writing` | 明示した差分から変更の目的と利用者への影響を説明する判断 | 差分と検証記録を読み、日本語の表現を`ja-writing`へ渡す。 |
 | `comment-writing` | 実装commentを残す理由と最小の内容の判断 | 正本の標準と制約を読み、日本語の表現を`ja-writing`へ渡す。 |
-| `description-writing` | 読者の問いに沿う技術文書の構成の判断 | 既存文書と一次資料を読み、日本語の表現を`ja-writing`へ渡す。 |
+| `description-writing` | 一次資料に基づく内容と読者の問いに沿う構成の判断 | 再現する手順を`tech-article-reproducibility`、速習資料を原版`explainer`、独立した理解確認を原版`first-reader`へ条件付きで渡し、返却結果から編集を再開する。 |
+| `tech-article-reproducibility` | 記事の開始条件と操作から到達点を再現できるかの判断 | 記述reviewと実行証拠を区別し、必要なbrowser操作や.NET testだけを専門入口へ渡す。 |
 | `documentation-writing` | 宣言の契約をdocumentation commentへ記す判断 | 宣言と実装と契約を調べ、日本語の表現を`ja-writing`へ渡す。 |
 | `ja-writing` | 日本語の表現と推敲の判断 | 正本の標準を読み、渡された文章を扱う。 |
 | `dependency-analysis` | nodeとedgeを固定して依存の事実を作る判断 | 未知の概念と関係だけ`repository-research`へ渡し、設計と診断を別の仕事として扱う。 |
 | `impact-analysis` | 一つの変更から契約と利用箇所と運用への影響を追う判断 | 不足する調査を`repository-research`へ渡し、設計や診断へ影響の証拠を引き継ぐ。 |
-| `skill-design` | Skillの要否と責務と導線の判断 | 既存Skillと公開toolを調べ、配備先や正本の変更が必要なら`environment-design`へ渡す。 |
+| `skill-design` | Skillの要否、責務と導線、実行結果に基づく採否の判断 | 固定したcriteriaとfresh実行で改訂し、規範や配備先の不足だけを`environment-design`へ渡す。 |
 | `ui-design` | 実contentと既存design systemに基づく実装前briefの判断 | 未知の構造は`repository-research`、必要な実surfaceの観測は`browser-operation`、実装構造は`codebase-design`へ渡す。 |
 | `security-review` | 脅威モデリングから候補の検証と攻撃経路へ進む判断 | 不足する証拠だけ調査や観測のSkillへ渡し、security判断とphaseの進行を引き取る。 |
 
 | 作業手順 | 公開入口 | 合成と引継ぎ |
 |---|---|---|
-| `browser-operation` | `browser-automation`のPlaywright MCP | 実surfaceの状態遷移を観測し、性能や障害の診断は対象と証拠を添えて専門Skillへ渡す。 |
+| `browser-operation` | `browser-automation`のPlaywright MCP | 要求と変更pathから実画面と業務結果のmatrixを作り、観測した証拠と未確認条件を返す。専門監査や原因診断は別の依頼として渡す。 |
 | `browser-performance` | `browser-diagnostics`のChrome DevTools MCP | 固定した測定条件と観測をLCPの専門Skillや`heap-analysis`へ渡し、戻った証拠から診断を続ける。 |
 | `heap-analysis` | `heap-diagnostics`の公開MemLab MCP | browserのcaptureだけを`browser-performance`へ委譲し、返ったcaller所有のprivate fileを解析する。 |
 | `github-operations` | `github-resources`のaccount別GitHub MCP | accountと対象resourceを固定し、write前後の状態を確認する。 |
@@ -180,7 +205,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfac
 `requiresSkills`は無条件に必要な配備前提だけを表す。
 言語に応じた推敲、追加の観測、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。
 containerを背後に持つMCPも公開Capabilityから使い、Skillからproviderのprocessやdatabaseへ直接接続しない。
-既知のexact textとpathとsymbolはRead、Grep、LSPなどで直接調べ、単一toolの呼出しをSkillで包まない。
+既知のexact textとpathとsymbolはRead、Grep、LSPなどで、決定的なCLI操作は実binaryで直接扱い、一回のtool呼出しをSkillで包まない。
 本文の`xd://`入口はURI deviceを公開するclient用の例であり、MCPを直接呼ぶclientでは現在のネイティブな公開tool名とschemaへ対応させる。
 
 独自Skillの本文と実行用referencesには、着想元の紹介やadoption rationaleを置かない。
@@ -208,6 +233,20 @@ browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.jso
 natural-japaneseは形態素解析による検出層を持つが、上流の[検証レポート](https://github.com/coji/natural-japanese/blob/0f1cc1c5a4e2aa7590598c88a15c213a60d9545a/corpus/reports/readability-sweep.md)は読みやすさ検出器の候補14件すべてを不採用にしている。上手な人間の文章に対するfalse positiveは表記ゆれ96.4%、句読点混在100%、冗長表現辞書25.5%である。弁別力が出た受身率、「が」の連鎖、こそあど密度は、下手な人間の文章をほとんど拾わないため撤回されている。残る弁別力はAI著者判定の指標であり、scoreを品質指標にしない方針と一致しない。このrepositoryにも検出器を置かず、規則だけを`ja-writing`へ入れた。
 
 見出しは`description-writing`が所有し、拾い読みで引ける簡潔なラベルにする。結論や説明を文にして詰めない。
+
+### 技術記事と環境改善のdonor
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [tech-article-reproducibility](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/tech-article-reproducibility/SKILL.md) | 個別licenseなし。[root README](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/README.md#license)のMIT default宣言を記録し、本文は非転載 | 記事の環境、入力、操作、到達点を辿り、再現を止める不足を引用とlocatorへ結び付ける独立した判断 | 想像上のreader実行を実証にすること、20点のpublish閾値、主観的成功率、個人path、固定WebFetch、raw本文の配備 |
+| [explainer verify-doc](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/skills/explainer/scripts/verify-doc.mjs#L46-L75) | MIT。固定raw sourceは別途そのまま採用 | wrapperの成功と内側のexit、stdout、stderrを区別する必要性を示す具体的なcheckerの限界 | checkerを書き換えた代用品、`VERIFIED`を再現性の独立gateにすること |
+| [extract-glossary](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/extract-glossary/SKILL.md) | 個別licenseなし。root READMEのMIT default宣言。本文は非転載 | onboarding文書で既存語彙と入口を読み、source付きの実装mapをdomain定義から分けること | 別glossary Skill、固定fileとdiagram一式、名前から推測したdomain定義、実装mapの`GLOSSARY.md`への転記 |
+| [retrospective-codify](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/retrospective-codify/SKILL.md) | 個別licenseなし。root READMEのMIT default宣言。本文は非転載 | `environment-design`で観測した失敗と最後の成立を入力と出力の差で対にし、もっともらしい説明と因果の証拠を分けること | 新しいretrospective owner、既存規律が読まれなかった場合の重複guidance、global ast-grep規則、配備copyの直接編集 |
+
+再現性の入力と返却は[reproduction-contract](../../skills/tech-article-reproducibility/skill/references/reproduction-contract.md)が所有し、代表scenarioは[`skills/tech-article-reproducibility/fixtures/scenarios.json`](../../skills/tech-article-reproducibility/fixtures/scenarios.json)に置く。
+[`agents/fixtures/writing-skills.json`](../../agents/fixtures/writing-skills.json)の執筆handoff例は期待するbehaviorを記したfixtureであり、変更後の発火や実行成功を測定した記録ではない。
+`environment-design`の既存のowner選択と重複排除は維持し、教訓から検査、policy、方法のどれを選ぶかは選んだownerの入口へ返す。
+
 
 
 ### web-researchで採用したdonor
@@ -250,21 +289,24 @@ fan-in、fan-out、cycle、transitive reachabilityは構造の事実であり、
 
 ### skill-designのdonor
 
-`skill-design`は、基礎モデル、policy、reference、script、tool、既存Skillで不足を解消できるかを先に判断する。
-独立したSkillを作る場合も、具体的な不足、mechanism、責務境界、routing、composition、restraint、ablationから要否を決める。
+`skill-design`はempiricalな実行と振り返りを中心とする独立したOMP Skillへ置き換えた。
+Iteration 0、固定したcritical、fresh実行、Understanding / Planning / Execution / Formattingの診断、Issue / Cause / General Fix Rule、失敗台帳、一テーマの反復、holdoutと停止条件を一つの手順にした。
+旧版のmechanism gate、no-skill対照、natural trigger、near-miss、composition、restraint、ablation、retireは別の評価loopにせず、その手順へ組み込んだ。
 
-runtime本文は[admissionと評価](../../skills/skill-design/skill/references/admission-and-evaluation.md)だけを必要時に読み、sourceの履歴とlegal情報はこの保守文書に置く。
-代表scenarioは[`agents/fixtures/skill-design-skill.json`](../../agents/fixtures/skill-design-skill.json)に置き、Skillを作らない判断と近接Skillへ渡す判断も成功として扱う。
+共通手順は[SKILL.md](../../skills/skill-design/skill/SKILL.md)が持ち、評価の起動時だけ[fresh executionの契約](../../skills/skill-design/skill/references/fresh-execution.md)を読む。
+代表scenarioは[`agents/fixtures/skill-design-skill.json`](../../agents/fixtures/skill-design-skill.json)に置き、Skillを作らない判断と近接ownerへ渡す判断も成功として扱う。
+tool-freeなstateless completionのmethod-onlyと、実toolや自然発火を観測するfull-environmentを区別し、候補を除いた初期環境を作れない場合のbaselineは未測定とする。
+top-levelがdispatchと評価を所有し、workerは一つのscenarioの成果と診断を返すため、子から再帰的に評価者を起動しない。
+sourceの完成、形式validatorの成功、実測した発火と採否を別の状態として報告する。
 
 | Donor | Revision / date | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|---|
-| Codex system `skill-creator` | Codex CLI `0.147.0`、2026-08-14 | 配布物内に個別表示なし。本文は非転載 | conciseな本文、descriptionでのrouting、必要なresourceだけを追加すること | Skill作成を既定にする入口、mechanism gateの欠如、local版と同じnameによるrouting競合。`skills.config`で無効化した |
-| [Anthropic skill-creator](https://github.com/anthropics/claude-plugins-official/tree/ae21a9367949f92df4e31231d7efe43eaa08207c/plugins/skill-creator) | `ae21a9367949f92df4e31231d7efe43eaa08207c` | Apache-2.0 | realistic test、baselineとの対照、iteration、description routing、leanな本文、ablationに相当する削減 | Claude専用subagent prompt、viewer、grader、description optimizer、directory workflow |
-| [OpenAI Academy: Using skills](https://openai.com/academy/skills/) | 2026-04-10 | [Terms of Use](https://openai.com/policies/terms-of-use/)。本文は非転載 | 反復task、inputとoutputとguardrail、組合せ可能な小さいbuilding block、toolを含むworkflow | ChatGPTのinstall、workspace、共有手順 |
-| [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `7953ba85365219dc7df5d73634e1f9d0bfabf0b9` | MIT | natural stimulus、baseline対Skill、dormancy guard、outcome中心のrubric、eval自体のfault分離、retire判断 | Vally schema、.NET固有fixture、sign testの固定閾値、repository専用CI |
-| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | `2ed6c52c9d7e5e56942508591085fd45dea277d3` | MIT | 新規所有物の前に不要、既存mechanism、標準機能、導入済みdependencyを比較するlens、安全性を削減対象にしないこと | 全coding taskへの常時注入、mode、line数とtoken削減をSkill admissionの目的にすること |
-
-
+| [empirical-prompt-tuning](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/empirical-prompt-tuning/SKILL.md) | `62f580819410cb1d398e4d7f234bbd0aad1c1a15` | 個別licenseなし。[root README](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/README.md#license)のMIT default宣言。本文は非転載 | Iteration 0、phase別の詰まり、固定critical、構造化した振り返り、失敗台帳、一テーマの反復、holdoutと停止 | raw本文、Claude Task専用contract、未取得usageの推定、自己採点の転記、作者の効率閾値の普遍化、別eval owner |
+| [optimizing-descriptions](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/optimizing-descriptions/SKILL.md)、[Agent Skills guidance](https://agentskills.io/skill-creation/optimizing-descriptions) | 固定revision、公式guidanceは2026-10-07取得 | donorはroot READMEのMIT default宣言。guidance本文は非転載 | 意図に基づくpositiveとnear-miss、freshな複数trial、trainとholdoutの分離、descriptionだけを変える枝 | 失敗queryの単語の列挙、見たholdoutを未使用と称すること、tool-free選択を実Skill discoveryと称すること |
+| [Codex skills](https://developers.openai.com/codex/skills/)、[Anthropic best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices)、[agent eval guidance](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) | 2026-10-07取得 | 公式本文は非転載 | triggerと本文の整合、現実的なtask、安定した環境、成果と実行記録を照合するgrader | 形式検査や自己申告だけの能力判定、provider専用harnessとviewer |
+| [Matt writing-for-agents](https://github.com/mattpocock/skills/blob/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/productivity/writing-for-agents/SKILL.md)、[Skill mechanics](https://github.com/mattpocock/skills/blob/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/productivity/writing-for-agents/SKILL-MECHANICS.md) | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | MIT | packageを書く枝でのcontext pointer、情報階層、明確な完了条件、削減 | 全構造判断や評価への必須preload、別のprompt改善loop |
+| [dotnet skills](https://github.com/dotnet/skills/tree/7953ba85365219dc7df5d73634e1f9d0bfabf0b9) | `7953ba85365219dc7df5d73634e1f9d0bfabf0b9` | MIT | natural stimulus、no-skill対照、dormancy guard、outcome中心のrubric、eval fault分離、retire | Vally schema、.NET固有fixture、sign testの固定閾値、repository専用CI |
+| [Ponytail](https://github.com/DietrichGebert/ponytail/tree/2ed6c52c9d7e5e56942508591085fd45dea277d3) | `2ed6c52c9d7e5e56942508591085fd45dea277d3` | MIT | 不要、既存mechanism、標準機能、導入済みdependencyを先に比較し、安全性を削減対象にしないこと | raw採用、全coding taskへの常時注入、line数やtoken削減をadmissionの目的にすること |
 
 ### ui-designで採用したdonor
 
@@ -287,6 +329,16 @@ frontend実装やreviewのためだけの同役割Skillは増やさない。
 
 代表scenarioは[`agents/fixtures/ui-design-skill.json`](../../agents/fixtures/ui-design-skill.json)に置く。
 
+
+### browser-operationの実画面受入
+
+要求と変更path、状態遷移、表示条件、画像と業務結果のmatrixは、利用者が報告した実画面確認の不足を埋めるcustomの設計である。
+以下のdonorが完全な受入方法を提供するとしたものではなく、永久test suiteやCIのownerも増やさない。
+
+| Donor | License | 採用した内容 | 採らなかった内容 |
+|---|---|---|---|
+| [playwright-test](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/playwright-test/SKILL.md) | 個別licenseなし。root READMEのMIT default宣言を記録し、本文とcodeは非転載 | 条件に基づく待機、one-shot取得との区別、必要なrequest待機の事前登録、利用者向けlocator、dialog閉鎖後の結果確認 | raw採用、configとCIとretry template、auth抽出、API mockとHAR、合成event、DnD内部操作、固定case数 |
+| [Playwright best practices](https://playwright.dev/docs/best-practices#test-user-visible-behavior)、[actionability](https://playwright.dev/docs/actionability#visible)、[screenshots](https://playwright.dev/docs/screenshots#full-page-screenshots)、[emulation](https://playwright.dev/docs/emulation#viewport) | 公式guidance。2026-10-07取得。本文は非転載 | 実際の利用者の出力、fresh locator、結果条件、viewport画像とfull-pageの違い、resizeと実deviceの違い | DOMのvisible判定だけでの画面合格、forceによる迂回、画像pathだけの目視済み主張、単一経路を全条件の保証にすること |
 
 ### browser-performanceとsecurity-reviewの方法
 

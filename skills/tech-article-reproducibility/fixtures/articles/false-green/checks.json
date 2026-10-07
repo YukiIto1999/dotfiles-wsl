@@ -1,0 +1,10 @@
+{
+  "checks": [
+    {
+      "name": "false-green-output",
+      "cmd": "sh -c 'printf \"%s\\n\" \"sample-ready\"; exit 9'",
+      "cwd": ".",
+      "expect": ["sample-ready"]
+    }
+  ]
+}

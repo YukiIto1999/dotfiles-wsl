@@ -41,6 +41,11 @@
       flake = false;
     };
 
+    explainerSkills = {
+      url = "github:mizchi/explainer/578defba7249fde5366689424ed6017f76b5598b";
+      flake = false;
+    };
+
     modernWebGuidance = {
       url = "github:GoogleChrome/modern-web-guidance/650eb83619134adb947b1ee8755e6511270bc444";
       flake = false;
@@ -59,6 +64,7 @@
       mattSkills,
       chromeDevtoolsSkills,
       dotnetSkills,
+      explainerSkills,
       modernWebGuidance,
       ...
     }:
@@ -77,6 +83,7 @@
         architecture-standard = architectureStandard;
         chrome-devtools = chromeDevtoolsSkills;
         dotnet = dotnetSkills;
+        explainer = explainerSkills;
         modern-web-guidance = modernWebGuidance;
       };
       collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };

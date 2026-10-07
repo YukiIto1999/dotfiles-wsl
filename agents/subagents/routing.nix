@@ -12,6 +12,16 @@
     }
     {
       subagent = "architect";
+      skill = "tech-article-reproducibility";
+      activation = "dynamic";
+    }
+    {
+      subagent = "architect";
+      skill = "explainer";
+      activation = "dynamic";
+    }
+    {
+      subagent = "architect";
       skill = "impact-analysis";
       activation = "dynamic";
     }
@@ -108,6 +118,11 @@
     {
       subagent = "implementer";
       skill = "documentation-writing";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "tech-article-reproducibility";
       activation = "dynamic";
     }
     {

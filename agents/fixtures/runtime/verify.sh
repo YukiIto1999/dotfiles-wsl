@@ -55,6 +55,126 @@ expect_unread_skill() {
   fi
 }
 
+edit_with_tmpdir() {
+  local tmpdir=$1
+  shift
+  TMPDIR=$tmpdir skill_edit "$@"
+}
+
+expect_edit_allowed() {
+  if ! edit_with_tmpdir "$1" "$2" "$3"; then
+    echo "gate blocked an edit that needs no Skill: $3 (TMPDIR=$1)" >&2
+    exit 1
+  fi
+}
+
+expect_edit_blocked() {
+  if edit_with_tmpdir "$1" "$2" "$3"; then
+    echo "gate accepted an unread Skill path: $3 (TMPDIR=$1)" >&2
+    exit 1
+  fi
+}
+
+check_isolated_scratch() {
+  local sessions="$home/.cache/dotfiles-wsl/sessions" production="$fixture/scratch-production"
+  local scratch="$sessions/fixture-scratch.omp.4242.AbCd1234/tmp"
+  local forged="$sessions/fixture-forged.omp.4243.AbCd1234" inside="$sessions/fixture-inside-git.omp.4244.AbCd1234"
+  local relative path tmpdir
+  local ui_read='{"path":"skill://ui-design"}'
+
+  mkdir -p "$scratch/reproduction" "$scratch/existing/runtimes/web" "$forged" "$inside/tmp" \
+    "$fixture/forged-target" "$production/runtimes/web" "$production/surfaces/viewer" "$production/core"
+  git init -q "$production"
+  git init -q "$inside"
+  printf 'export {};\n' >"$production/runtimes/web/App.tsx"
+  printf 'export {};\n' >"$scratch/existing/runtimes/web/App.tsx"
+  mkdir "$home/.cache/dotfiles-wsl/.git"
+  expect_edit_allowed "$scratch" fixture-empty-git-marker "$scratch/runtimes/web/App.tsx"
+  printf 'unrecognized metadata\n' >"$home/.cache/dotfiles-wsl/.git/config"
+  expect_edit_blocked "$scratch" fixture-unknown-git-marker "$scratch/runtimes/web/App.tsx"
+  rm "$home/.cache/dotfiles-wsl/.git/config"
+  rmdir "$home/.cache/dotfiles-wsl/.git"
+
+  for path in \
+    "$scratch/reproduction/runtimes/web/App.tsx" \
+    "$scratch/reproduction/surfaces/viewer/features/x.tsx" \
+    "$scratch/reproduction/core/library.ts" \
+    "$scratch/reproduction/b/domain/Invoice.cs" \
+    "$scratch/reproduction/fixtures/surfaces/viewer/x.tsx" \
+    "$scratch/reproduction/inner/../runtimes/web/Dotdot.tsx" \
+    "$scratch/existing/runtimes/web/App.tsx" \
+    ".cache/dotfiles-wsl/sessions/fixture-scratch.omp.4242.AbCd1234/tmp/relative/runtimes/web/App.tsx"; do
+    expect_edit_allowed "$scratch" fixture-scratch-unread "$path"
+  done
+  ln -s "$scratch/reproduction" "$scratch/alias"
+  expect_edit_allowed "$scratch" fixture-scratch-unread "$scratch/alias/runtimes/web/Aliased.tsx"
+  ln -s "$scratch" "$fixture/scratch-spelling"
+  expect_edit_allowed "$fixture/scratch-spelling" fixture-scratch-unread "$scratch/reproduction/runtimes/web/App.tsx"
+  test -z "$(TMPDIR=$scratch "$GATE" skill --path "$scratch/reproduction/runtimes/web/App.tsx")"
+  test "$(TMPDIR=$scratch "$GATE" skill --path "$production/runtimes/web/App.tsx")" = ui-design
+
+  for tmpdir in "" "$fixture" "$home" "$sessions" "${scratch%/tmp}" "$scratch/reproduction"; do
+    expect_edit_blocked "$tmpdir" fixture-scratch-foreign "$scratch/reproduction/runtimes/web/App.tsx"
+  done
+  ln -s "$fixture/forged-target" "$forged/tmp"
+  expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$fixture/forged-target/runtimes/web/App.tsx"
+  expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$forged/tmp/runtimes/web/App.tsx"
+  expect_edit_blocked "$inside/tmp" fixture-scratch-foreign "$inside/tmp/runtimes/web/App.tsx"
+
+  for path in \
+    "$production/runtimes/web/App.tsx" \
+    "$production/runtimes/web/Created.tsx" \
+    "$production/core/library.ts" \
+    "$production/surfaces/viewer/fixtures/Page.ts" \
+    "$production/runtimes/web/fixtures/App.tsx" \
+    /r/core/fixtures/library.ts; do
+    expect_edit_blocked "$scratch" fixture-production-unread "$path"
+  done
+  skill_read_event fixture-production-read PostToolUse read "$ui_read"
+  expect_edit_allowed "$scratch" fixture-production-read "$production/runtimes/web/App.tsx"
+  expect_edit_blocked "$scratch" fixture-production-read "$production/core/library.ts"
+  skill_read_event fixture-scratch-partial PostToolUse read "$ui_read" '{"is_error":true}'
+  expect_edit_blocked "$scratch" fixture-scratch-partial "$production/runtimes/web/App.tsx"
+  expect_edit_allowed "$scratch" fixture-scratch-partial "$scratch/reproduction/runtimes/web/App.tsx"
+
+  relative=$(realpath -m --relative-to="$scratch" "$production/runtimes/web/App.tsx")
+  expect_edit_blocked "$scratch" fixture-traversal "$scratch/$relative"
+  expect_edit_blocked "$scratch" fixture-traversal "$scratch/missing/../$relative"
+  expect_edit_blocked "$scratch" fixture-traversal "$production/surfaces/viewer/tests/../Page.tsx"
+  expect_edit_blocked "$scratch" fixture-traversal /r/surfaces/viewer/tests/../x.tsx
+  ln -s "$production" "$scratch/production-link"
+  ln -s "$production/runtimes/web/Pending.tsx" "$scratch/pending.tsx"
+  ln -s "$production/core/library.ts" "$scratch/notes.md"
+  for path in \
+    "$scratch/production-link/runtimes/web/App.tsx" \
+    "$scratch/production-link/runtimes/web/Created.tsx" \
+    "$scratch/pending.tsx" \
+    "$scratch/notes.md"; do
+    expect_edit_blocked "$scratch" fixture-symlink "$path"
+  done
+
+  git init -q "$scratch/clone"
+  mkdir "$scratch/linked"
+  printf 'gitdir: %s\n' "$production/.git" >"$scratch/linked/.git"
+  for path in \
+    "$scratch/clone/runtimes/web/App.tsx" \
+    "$scratch/clone/new/surfaces/viewer/x.tsx" \
+    "$scratch/clone/core/library.ts" \
+    "$scratch/linked/runtimes/web/App.tsx"; do
+    expect_edit_blocked "$scratch" fixture-clone "$path"
+  done
+  skill_read_event fixture-clone-read PostToolUse read "$ui_read"
+  expect_edit_allowed "$scratch" fixture-clone-read "$scratch/clone/runtimes/web/App.tsx"
+
+  for path in \
+    /r/surfaces/viewer/x.test.tsx \
+    /r/surfaces/viewer/x.doubles.tsx \
+    /r/tests/conformance/small/viewer.ts \
+    "$production/surfaces/viewer/tests/small/Page.tsx"; do
+    expect_edit_allowed "$fixture" fixture-test-paths "$path"
+  done
+}
+
 check_skill_learning() {
   local source="$fixture/skill-source" deployed="$home/.omp/agent/skills"
   local body input session rejected status
@@ -244,6 +364,7 @@ check_skill_learning() {
   input=$(jq -nc --arg path "$body" '{path:$path}')
   GATE="$CUSTOM_SKILL_ROOT_GATE" skill_read_event fixture-custom-root PostToolUse read "$input"
   "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
+  check_isolated_scratch
 }
 
 conformance_stop() {

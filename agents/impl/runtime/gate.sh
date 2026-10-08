@@ -196,6 +196,65 @@ skill_for() {
   esac
 }
 
+# 環境の TMPDIR 値の信用は全 path を使い捨て扱いにできるため launcher 割当ての物理 path の形だけを許可
+runtime_scratch_root() {
+  local physical sessions relative session
+  [ -n "${TMPDIR-}" ] || return 1
+  physical=$(realpath -e -- "$TMPDIR" 2>/dev/null) || return 1
+  sessions=$(realpath -e -- "$cache_root/sessions" 2>/dev/null) || return 1
+  [ -d "$physical" ] || return 1
+  case $physical in
+  "$sessions"/*) relative=${physical#"$sessions"/} ;;
+  *) return 1 ;;
+  esac
+  session=${relative%/tmp}
+  [ "$relative" = "$session/tmp" ] && [[ $session =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+  printf '%s\n' "$physical"
+}
+
+# Git 探索が所有権や環境変数で非検出になるため祖先の metadata による判定
+isolated_scratch() {
+  local canonical=$1 root dir
+  local -a entries
+  root=$(runtime_scratch_root) || return 1
+  case $canonical in
+  "$root"/*) ;;
+  *) return 1 ;;
+  esac
+  dir=${canonical%/*}
+  while :; do
+    if [ -e "$dir/.git" ] || [ -L "$dir/.git" ]; then
+      if [ -d "$dir/.git" ] && [ ! -L "$dir/.git" ] &&
+        [ -r "$dir/.git" ] && [ -x "$dir/.git" ] &&
+        (
+          shopt -s nullglob dotglob
+          entries=("$dir/.git/"*)
+          [ "${#entries[@]}" -eq 0 ]
+        ); then
+        :
+      else
+        return 1
+      fi
+    fi
+    [ -n "$dir" ] || break
+    dir=${dir%/*}
+  done
+  return 0
+}
+
+# 触る前に読む skill。綴りへの規則適用は tests/.. や symlink で行き先の規則を免れるため realpath -m の行き先へ適用
+skill_required_for() {
+  local canonical
+  if ! canonical=$(realpath -m -- "$1" 2>/dev/null); then
+    skill_for "$1"
+    return
+  fi
+  if isolated_scratch "$canonical"; then
+    return 0
+  fi
+  skill_for "$canonical"
+}
+
 # その skill が配備されているか。配られていない名で止めると、読みようがない要求になる。
 skill_stands() {
   local named=$1 root
@@ -345,7 +404,7 @@ command_learned() {
 command_teach() {
   local session=$1 path=$2 named marker body resolved digest
   local -a held
-  named=$(skill_for "$path")
+  named=$(skill_required_for "$path")
   [ -n "$named" ] || return 0
   skill_stands "$named" || return 0
   [ -n "$session" ] || return 0
@@ -608,7 +667,7 @@ main() {
   learned) command_learned "$session" "$path" ;;
   teach) command_teach "$session" "$path" ;;
   conformance) command_conformance "$session" "$repo" "$standard_root" "$report" ;;
-  skill) skill_for "$path" ;;
+  skill) skill_required_for "$path" ;;
   hook) command_hook "${1-}" ;;
   *) usage ;;
   esac

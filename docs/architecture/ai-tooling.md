@@ -101,6 +101,10 @@ fileごとのprocess起動を避けるため、tracked fileのmetadataと内容h
 読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
 
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
+編集対象はsymlinkと`..`を解決したpathで判定する。
+agent runtimeが割り当てた`~/.cache/dotfiles-wsl/sessions/<session>/tmp`の内側にあり、祖先にGit metadataを持たない一時fileは対象から外す。
+空であると確認できる実directoryの`.git`はmetadataに数えないが、空でないdirectory、file、symlinkは除外を認めない。
+任意の`TMPDIR`、Git checkout内の一時file、checkoutへ向くsymlinkは対象から外さない。
 記録するのは、成功した読取後のeventで観測した`skill://NAME`、`skill://NAME/SKILL.md`、設定済みSkill rootの`NAME/SKILL.md`の本文読取だけであり、呼出し前、失敗、reference、部分読取、編集操作は証拠にしない。
 記録の前に、OMPの実resultが示すsourceと表示本文、Claudeの成功したtext resultが示すfile pathと本文を現在のcanonical本文へ照合し、省略、要約、token cap、途中のpage、本文を持たない結果は証拠にしない。
 記録には配備先のsymlinkを解決した本文のSHA-256を保存し、編集時に現在の本文と照合するため、配備内容が変わったら読み直す。

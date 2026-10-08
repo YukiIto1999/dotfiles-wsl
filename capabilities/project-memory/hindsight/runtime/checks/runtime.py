@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -20,7 +21,77 @@ sys.path.insert(0, str(PACKAGE))
 import memory as memory_module
 from memory import Client, MemoryFailure
 
+# 実在しない合成の資格情報。提供元の bare な `apikey_` 接頭辞の形だけを持つ
 SECRET = "apikey_" + "SYNTHETIC0123456789abcdef"
+QUERY_MARKER = "synthetic-query-marker"
+# 失敗した request の例外が運び得る値。報告へ漏れてはならない
+LEAKY_DETAIL = f"https://synthetic-user:synthetic-pass@backend.invalid/v1?q={QUERY_MARKER} body=synthetic-body-marker {SECRET}"
+LEAKED = ("synthetic-user", "synthetic-pass", QUERY_MARKER, "synthetic-body-marker", SECRET)
+# 失敗した request の例外と、それを報告する固定の分類
+TRANSPORT_CATEGORIES = (
+    (httpx.ConnectTimeout, "backend connect timed out"),
+    (httpx.ConnectError, "backend connect failed"),
+    (httpx.ReadTimeout, "backend read timed out"),
+    (httpx.ReadError, "backend read failed"),
+    (httpx.WriteTimeout, "backend write timed out"),
+    (httpx.WriteError, "backend write failed"),
+    (httpx.PoolTimeout, "backend connection pool timed out"),
+    (httpx.RemoteProtocolError, "backend protocol error"),
+    (httpx.LocalProtocolError, "backend protocol error"),
+    (httpx.DecodingError, "backend protocol error"),
+    (httpx.CloseError, "backend request failed"),
+    (httpx.ProxyError, "backend request failed"),
+    (httpx.UnsupportedProtocol, "backend request failed"),
+    (httpx.TooManyRedirects, "backend request failed"),
+)
+# retain の request を送ったかもしれない失敗。応答を失った save は indeterminate を返す
+AMBIGUOUS_RETAIN = (
+    httpx.CloseError,
+    httpx.DecodingError,
+    httpx.ReadError,
+    httpx.ReadTimeout,
+    httpx.RemoteProtocolError,
+    httpx.WriteError,
+    httpx.WriteTimeout,
+)
+# 接続を作れなかった失敗。save は失敗として返し、indeterminate にはしない
+UNSENT_RETAIN = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
+
+
+@contextlib.asynccontextmanager
+async def backend_double(handler):
+    client = Client("http://memory.test")
+    await client.http.aclose()
+    client.http = httpx.AsyncClient(base_url="http://memory.test", transport=httpx.MockTransport(handler), timeout=None)
+    try:
+        yield client
+    finally:
+        await client.http.aclose()
+
+
+def retain_handler(*, config=None, retain=None, status=None):
+    """save の各段階を、指定した例外で失敗させる。指定のない段階は成功の応答を返す。"""
+    sent = []
+
+    async def handler(request):
+        path = request.url.path
+        bank = path.split("/")[4]
+        if request.method == "PATCH":
+            if config:
+                raise config(LEAKY_DETAIL)
+            return httpx.Response(200, json={"bank_id": bank, "overrides": {}})
+        if request.method == "POST" and path.endswith("/memories"):
+            sent.append(path)
+            if retain:
+                raise retain(LEAKY_DETAIL)
+            body = json.loads(request.content)
+            return httpx.Response(200, json={"success": True, "bank_id": bank, "async": True, "items_count": 1, "operation_id": body["operation_id"]})
+        if request.method == "GET" and "/operations/" in path and status:
+            raise status(LEAKY_DETAIL)
+        raise AssertionError(f"unexpected request: {request.method} {path}")
+
+    handler.sent = sent
+    return handler
 
 
 class Backend(BaseHTTPRequestHandler):
@@ -372,7 +443,6 @@ class RuntimeContract(unittest.TestCase):
             capture_output=True, text=True, timeout=25, env=environment,
         )
 
-
     def test_validate_answers_for_each_text_locally_without_a_url(self):
         texts = [
             "検証は focused check を先に通す。",
@@ -391,13 +461,11 @@ class RuntimeContract(unittest.TestCase):
         self.assertNotIn(SECRET, result.stdout)
         self.assertEqual(json.loads(self.validate({"texts": []}).stdout), {"allowed": []})
 
-
     def test_validate_makes_no_backend_request_even_when_a_backend_is_configured(self):
         result = self.validate({"texts": [SECRET, "安全な文"]}, url=self.url)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {"allowed": [False, True]})
         self.assertEqual(Backend.state["requests"], [])
-
 
     def test_validate_rejects_a_malformed_contract_without_disclosing_text(self):
         cases = {
@@ -417,16 +485,6 @@ class RuntimeContract(unittest.TestCase):
                 self.assertIn("project-memory: invalid_input:", result.stderr)
                 self.assertNotIn(SECRET, result.stderr)
 
-
-    def test_prompt_privacy_check_applies_to_the_user_text_that_remains(self):
-        Backend.state["banks"].add(self.bank())
-        result = self.command("hook", {"cwd": str(self.repo), "prompt": f"<project_memory>old</project_memory>\nこの値を使う {SECRET}"}, "--harness", "omp", "prompt-submit")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("privacy", result.stderr)
-        self.assertNotIn(SECRET, result.stderr + result.stdout)
-        self.assertEqual(Backend.state["requests"], [])
-
-
     def test_prompt_of_only_injected_blocks_recalls_nothing_even_when_the_blocks_look_sensitive(self):
         Backend.state["banks"].add(self.bank())
         prompts = (
@@ -443,13 +501,19 @@ class RuntimeContract(unittest.TestCase):
                 self.assertEqual(result.stdout, "")
                 self.assertEqual(Backend.state["requests"], [])
 
+    def test_prompt_privacy_check_applies_to_the_user_text_that_remains(self):
+        Backend.state["banks"].add(self.bank())
+        result = self.command("hook", {"cwd": str(self.repo), "prompt": f"<project_memory>old</project_memory>\nこの値を使う {SECRET}"}, "--harness", "omp", "prompt-submit")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("privacy", result.stderr)
+        self.assertNotIn(SECRET, result.stderr + result.stdout)
+        self.assertEqual(Backend.state["requests"], [])
 
     def test_prompt_without_a_prompt_field_is_invalid_not_empty(self):
         result = self.command("hook", {"cwd": str(self.repo)}, "--harness", "omp", "prompt-submit")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid_input", result.stderr)
         self.assertEqual(Backend.state["requests"], [])
-
 
     def test_a_normal_prompt_recalls_both_scopes(self):
         Backend.state["banks"].update({self.bank(), "user-preferences"})
@@ -464,7 +528,6 @@ class RuntimeContract(unittest.TestCase):
             self.assertIn("新しい訂正", recall["query"])
             self.assertNotIn("old-history-marker", recall["query"])
 
-
     def test_a_backend_failure_is_not_hidden_by_the_empty_prompt_rule(self):
         Backend.state["banks"].update({self.bank(), "user-preferences"})
         Backend.state["recall_status"] = 500
@@ -472,6 +535,80 @@ class RuntimeContract(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("HTTP 500", result.stderr)
 
+    def test_read_failures_report_a_fixed_category_without_request_details(self):
+        for error, category in TRANSPORT_CATEGORIES:
+            with self.subTest(error=error.__name__):
+                async def handler(request):
+                    raise error(LEAKY_DETAIL)
+
+                async def scenario():
+                    async with backend_double(handler) as client:
+                        await client.recall(str(self.repo), QUERY_MARKER, "project")
+
+                with self.assertRaises(MemoryFailure) as caught:
+                    asyncio.run(scenario())
+                self.assertEqual(caught.exception.code, "unavailable")
+                self.assertEqual(str(caught.exception), f"unavailable: {category}; outcome is not verified")
+                for leaked in LEAKED:
+                    self.assertNotIn(leaked, repr(caught.exception))
+
+    def test_a_refused_connection_is_reported_without_url_credentials_or_query(self):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        environment = {**os.environ, "PROJECT_MEMORY_URL": f"http://synthetic-user:synthetic-pass@127.0.0.1:{port}"}
+        requests = (
+            (("recall",), {"cwd": str(self.repo), "query": QUERY_MARKER, "scope": "project"}),
+            (("hook", "--harness", "omp", "prompt-submit"), {"cwd": str(self.repo), "prompt": QUERY_MARKER}),
+        )
+        for arguments, payload in requests:
+            with self.subTest(command=arguments[0]):
+                result = subprocess.run(
+                    [sys.executable, str(PACKAGE / "main.py"), *arguments],
+                    input=json.dumps(payload), capture_output=True, text=True, timeout=25, env=environment,
+                )
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(set(result.stderr.splitlines()), {"project-memory: unavailable: backend connect failed; outcome is not verified"})
+
+    def save_through(self, handler):
+        async def scenario():
+            async with backend_double(handler) as client:
+                return await client.save(str(self.repo), "利用者の訂正は推測より優先する。", "user-confirmed:transport")
+
+        return asyncio.run(scenario())
+
+    def test_save_stays_indeterminate_when_the_retain_outcome_is_unknown(self):
+        for error in AMBIGUOUS_RETAIN:
+            with self.subTest(error=error.__name__):
+                handler = retain_handler(retain=error)
+                receipt = self.save_through(handler)
+                self.assertEqual(set(receipt), {"state", "scope", "operation_id", "document_id"})
+                self.assertEqual(receipt["state"], "indeterminate")
+                self.assertEqual(len(handler.sent), 1)
+                for leaked in LEAKED:
+                    self.assertNotIn(leaked, json.dumps(receipt))
+
+    def test_save_stays_indeterminate_when_the_status_check_cannot_reach_the_backend(self):
+        for error, _ in TRANSPORT_CATEGORIES:
+            with self.subTest(error=error.__name__):
+                handler = retain_handler(status=error)
+                receipt = self.save_through(handler)
+                self.assertEqual(receipt["state"], "indeterminate")
+                self.assertEqual(len(handler.sent), 1)
+
+    def test_save_fails_without_a_receipt_when_no_connection_was_made(self):
+        for error in UNSENT_RETAIN:
+            with self.subTest(error=error.__name__):
+                with self.assertRaises(MemoryFailure) as caught:
+                    self.save_through(retain_handler(retain=error))
+                self.assertEqual(caught.exception.code, "unavailable")
+        with self.subTest(step="configure"):
+            handler = retain_handler(config=httpx.ReadTimeout)
+            with self.assertRaises(MemoryFailure) as caught:
+                self.save_through(handler)
+            self.assertEqual(str(caught.exception), "unavailable: backend read timed out; outcome is not verified")
+            self.assertEqual(handler.sent, [])
 
 
 if __name__ == "__main__":

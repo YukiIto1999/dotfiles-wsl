@@ -54,6 +54,23 @@ class _RequestOutcomeUnknown(Exception):
     pass
 
 
+TRANSPORT_FAILURES = (
+    (httpx.ConnectTimeout, "backend connect timed out"),
+    (httpx.ConnectError, "backend connect failed"),
+    (httpx.ReadTimeout, "backend read timed out"),
+    (httpx.ReadError, "backend read failed"),
+    (httpx.WriteTimeout, "backend write timed out"),
+    (httpx.WriteError, "backend write failed"),
+    (httpx.PoolTimeout, "backend connection pool timed out"),
+    ((httpx.ProtocolError, httpx.DecodingError), "backend protocol error"),
+)
+
+
+def transport_failure(error: httpx.HTTPError) -> MemoryFailure:
+    category = next((text for kinds, text in TRANSPORT_FAILURES if isinstance(error, kinds)), "backend request failed")
+    return MemoryFailure("unavailable", f"{category}; outcome is not verified")
+
+
 def canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -143,7 +160,7 @@ class Client:
                 httpx.WriteTimeout,
             )):
                 raise _RequestOutcomeUnknown from None
-            raise MemoryFailure("unavailable", "backend request failed; outcome is not verified") from None
+            raise transport_failure(error) from None
         if not 200 <= response.status_code < 300:
             code = "not_found" if response.status_code == 404 else "backend_error"
             raise MemoryFailure(code, f"backend returned HTTP {response.status_code}; operation did not report success")

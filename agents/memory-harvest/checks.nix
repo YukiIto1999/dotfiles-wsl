@@ -1,18 +1,25 @@
-{ pkgs, ... }:
+{
+  lib,
+  pkgs,
+  hostConfig,
+  ...
+}:
 
+let
+  runtime = hostConfig.dotfiles.capabilities.project-memory.runtime.override {
+    apiUrl = "http://127.0.0.1:18082";
+  };
+in
 {
   agent-memory-harvest-behavior =
     pkgs.runCommandLocal "check-agent-memory-harvest-behavior"
       {
-        nativeBuildInputs = [
-          pkgs.git
-          pkgs.python3
-        ];
+        nativeBuildInputs = [ pkgs.git ];
       }
       ''
         export HOME="$TMPDIR/home"
         mkdir -p "$HOME"
-        python3 ${./checks/harvest_test.py} ${./package} ${../journal/package}
+        ${pkgs.python3}/bin/python ${./checks/harvest_test.py} ${./package} ${../journal/package} ${lib.getExe runtime}
         touch "$out"
       '';
 }

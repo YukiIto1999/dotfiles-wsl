@@ -20,6 +20,8 @@ sys.path.insert(0, str(PACKAGE))
 import memory as memory_module
 from memory import Client, MemoryFailure
 
+SECRET = "apikey_" + "SYNTHETIC0123456789abcdef"
+
 
 class Backend(BaseHTTPRequestHandler):
     state = {}
@@ -359,6 +361,71 @@ class RuntimeContract(unittest.TestCase):
             {"document_id": "correction/a", "kind": "correction", "source": "correction/a#source", "content": "検証は focused check を先に通す。"},
             {"document_id": "preference/c", "kind": "preference", "source": "preference/c#source", "content": "報告は日本語で書く。"},
         ])
+
+    def validate(self, payload, *, url=None):
+        environment = {key: value for key, value in os.environ.items() if key != "PROJECT_MEMORY_URL"}
+        if url:
+            environment["PROJECT_MEMORY_URL"] = url
+        return subprocess.run(
+            [sys.executable, str(PACKAGE / "main.py"), "validate"],
+            input=payload if isinstance(payload, str) else json.dumps(payload),
+            capture_output=True, text=True, timeout=25, env=environment,
+        )
+
+
+    def test_validate_answers_for_each_text_locally_without_a_url(self):
+        texts = [
+            "検証は focused check を先に通す。",
+            SECRET,
+            f"この値は {SECRET} です",
+            "ghp" + "_" + "SYNTHETIC0123456789abcdef",
+            "password: synthetic-value",
+            "owner@example.invalid",
+            "https://synthetic-user:synthetic-pass@example.invalid/",
+            "",
+        ]
+        result = self.validate({"texts": texts})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"allowed": [True, False, False, False, False, False, False, True]})
+        self.assertEqual(result.stderr, "")
+        self.assertNotIn(SECRET, result.stdout)
+        self.assertEqual(json.loads(self.validate({"texts": []}).stdout), {"allowed": []})
+
+
+    def test_validate_makes_no_backend_request_even_when_a_backend_is_configured(self):
+        result = self.validate({"texts": [SECRET, "安全な文"]}, url=self.url)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"allowed": [False, True]})
+        self.assertEqual(Backend.state["requests"], [])
+
+
+    def test_validate_rejects_a_malformed_contract_without_disclosing_text(self):
+        cases = {
+            "not json": "not-json " + SECRET,
+            "not an object": json.dumps([SECRET]),
+            "missing texts": json.dumps({}),
+            "extra field": json.dumps({"texts": [SECRET], "cwd": "/"}),
+            "texts is not a list": json.dumps({"texts": SECRET}),
+            "text is not a string": json.dumps({"texts": [SECRET, 3]}),
+            "too deeply nested": "[" * 100000 + "]" * 100000,
+        }
+        for name, payload in cases.items():
+            with self.subTest(case=name):
+                result = self.validate(payload)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("project-memory: invalid_input:", result.stderr)
+                self.assertNotIn(SECRET, result.stderr)
+
+
+    def test_prompt_privacy_check_applies_to_the_user_text_that_remains(self):
+        Backend.state["banks"].add(self.bank())
+        result = self.command("hook", {"cwd": str(self.repo), "prompt": f"<project_memory>old</project_memory>\nこの値を使う {SECRET}"}, "--harness", "omp", "prompt-submit")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("privacy", result.stderr)
+        self.assertNotIn(SECRET, result.stderr + result.stdout)
+        self.assertEqual(Backend.state["requests"], [])
+
 
 
 if __name__ == "__main__":

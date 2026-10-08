@@ -5,14 +5,14 @@ import os
 import sys
 
 from hooks import run_hook
-from memory import Client, MemoryFailure, canonical, project_bank
+from memory import Client, MemoryFailure, canonical, project_bank, validate_texts
 from server import dispatch, run_server
 
 
 def input_object() -> dict:
     try:
         value = json.load(sys.stdin)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise MemoryFailure("invalid_input", "stdin must contain one JSON object") from None
     if not isinstance(value, dict):
         raise MemoryFailure("invalid_input", "stdin must contain one JSON object")
@@ -27,6 +27,11 @@ async def main() -> None:
     for name in ("recall", "save", "verify", "status"):
         commands.add_parser(name, help="Read arguments as one JSON object from stdin")
     commands.add_parser("curated", help="List explicitly saved memories of one scope; reads cwd and scope as one JSON object from stdin")
+    commands.add_parser(
+        "validate",
+        help="Check texts for credential and personal-data indicators without contacting the backend; "
+        'reads {"texts": [...]} as one JSON object from stdin and prints {"allowed": [...]}',
+    )
     project = commands.add_parser("project")
     project.add_argument("cwd")
     hook = commands.add_parser("hook")
@@ -35,6 +40,9 @@ async def main() -> None:
     arguments = parser.parse_args()
     if arguments.command == "project":
         print(canonical({"bank_id": project_bank(arguments.cwd)}))
+        return
+    if arguments.command == "validate":
+        print(canonical(validate_texts(input_object())))
         return
     url = os.environ["PROJECT_MEMORY_URL"]
     if arguments.command == "mcp":

@@ -137,14 +137,26 @@ def curated(options: argparse.Namespace, cwd: str) -> list[dict]:
     return memories
 
 
+# 資格情報や個人情報に見える text を model へ渡さないための判定。判定は dotfiles-memory validate だけが持ち、ここでは複製しない。
+# record の text が一つでも通らなければ record 全体を通さない。応答が欠けても余っても通ったものとして扱わず、失敗にする
+def screen(options: argparse.Namespace, records: list[tuple[str, ...]]) -> list[bool]:
+    texts = [text for record in records for text in record]
+    allowed = memory(options, "validate", {"texts": texts}).get("allowed")
+    if not isinstance(allowed, list) or len(allowed) != len(texts) or not all(isinstance(flag, bool) for flag in allowed):
+        raise HarvestError("dotfiles-memory validate did not answer one boolean per text")
+    verdicts = iter(allowed)
+    return [all([next(verdicts) for _ in record]) for record in records]
+
+
 def messages_of(sessions: list[Session], stored: set[str]) -> list[Message]:
     found = []
     for session in sessions:
         for prompt in session.prompts:
             source = f"{session.path}#{prompt.id}"
             text = INJECTED.sub("", prompt.text).strip()
+            # clip で切り落とす部分にも資格情報が入り得るため、原文のまま返し、model へ渡す直前に切る
             if text and source not in stored:
-                found.append(Message(source, session.cwd, clip(text)))
+                found.append(Message(source, session.cwd, text))
     return found
 
 
@@ -195,12 +207,33 @@ def harvest_project(options: argparse.Namespace, sessions: list[Session], pendin
     stored = {item["source"] for item in existing if isinstance(item.get("source"), str)}
     stored |= {receipt["source"] for receipt in pending}
     known = {normalized(item["content"]) for item in existing}
-    messages = {f"m{index}": message for index, message in enumerate(messages_of(sessions, stored), start=1)}
+    found = messages_of(sessions, stored)
+    if not found:
+        return
+    # model へ渡す全ての text を、clip する前の原文で一度に確かめる。通らなかった record は丸ごと外し、通った発言と出所は残す
+    root = project_root(cwd)
+    verdicts = iter(screen(options, [
+        (root,),
+        *((message.text,) for message in found),
+        *((str(item.get("kind")), item["content"]) for item in existing),
+    ]))
+    root_allowed = next(verdicts)
+    messages: dict[str, Message] = {}
+    for message in found:
+        if next(verdicts):
+            messages[f"m{len(messages) + 1}"] = message
+        else:
+            print(f"excluded: {message.source}: privacy")
+    remembered = [item for item in existing if next(verdicts)]
+    if len(remembered) < len(existing):
+        print(f"excluded: {len(existing) - len(remembered)} saved memories: privacy")
     if not messages:
         return
-    memories = "\n".join(f"- ({item.get('kind')}) {clip(item['content'])}" for item in existing) or "なし"
-    for part in chunks([f"[{ref}] {message.text}" for ref, message in messages.items()]):
-        material = f"project: {project_root(cwd)}\n\n## 保存済みの記憶\n{memories}\n\n## 利用者の発言\n{part}"
+    memories = "\n".join(f"- ({item.get('kind')}) {clip(item['content'])}" for item in remembered) or "なし"
+    # project の場所に資格情報が入っていれば、場所は model へ渡さない
+    heading = f"project: {root}\n\n" if root_allowed else ""
+    for part in chunks([f"[{ref}] {clip(message.text)}" for ref, message in messages.items()]):
+        material = f"{heading}## 保存済みの記憶\n{memories}\n\n## 利用者の発言\n{part}"
         for message, kind, content, situation in candidates(summarize(options, PROMPT, material), messages):
             if not situation:
                 print(f"no-situation: {message.source}")

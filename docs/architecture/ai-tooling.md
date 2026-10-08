@@ -295,6 +295,11 @@ LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有の
 [`agents/memory-harvest/`](../../agents/memory-harvest)は、omp の session 記録から利用者の訂正、決定、好みを取り出し、project memory へ保存する。session 記録の読み方と omp の呼び出しは作業日誌の package を読み込んで共有し、model も作業日誌と同じ定額の`opencode-go/deepseek-v4.1-flash`と thinking `low`を使う。作業の大半は omp で行うため、Claude Code、Codex、OpenCode の session 記録は読まない。
 
 入力は`~/.omp/agent/sessions/`直下の session file のうち、前回成功した実行から今回の開始までの entry である。attribution が`user`の発言だけを読み、`<project_memory>`と`<system-reminder>`の block を除く。エージェントの応答、tool の結果、注入した文脈、subagent の記録は model へ渡さない。cwd から Git project を決められない session は読まずに報告する。
+modelを呼ぶ前に`dotfiles-memory validate`へ発言の全文、保存済みの記憶のkindと本文、projectのpathを渡し、保存時と同じ既知の資格情報や個人情報の指標で検査する。
+このcommandはbackendへ接続せず、検査対象の本文を返さない。
+発言と保存済みの記憶は不許可のrecord全体を除き、projectのpathが不許可なら見出しへ含めない。
+長い本文をclipするのは検査を通した後であり、不正な応答や検査失敗ではmodelを呼ばず、読み終えた位置も進めない。
+指標に合わないsecretや個人情報まで検出できる保証はなく、作業日誌の送信前検査には使っていない。
 
 model には project ごとに、明示的に保存した記憶（`dotfiles-memory curated`）と利用者の発言を渡し、将来の別 session の判断を変える発言だけを候補にさせる。次の発言は候補にしない。今回の作業への依頼、計画、進捗の確認、質問、同意だけの返事、その場だけの許可や禁止、状況に依存する優先度や締切、人の名前を含むもの、利用者が標準、AGENTS、Skill、文書、hook、code へ入れるよう求めた規律、製品の仕様、現在の状態から分かること、保存済みの記憶と同じ内容、secret や個人情報を含むものである。正本に入るものを記憶に重ねないためである。
 

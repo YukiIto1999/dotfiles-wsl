@@ -35,11 +35,12 @@ INJECTED_BLOCKS = re.compile(
 )
 SENSITIVE = re.compile(
     r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
-    r"\b(?:ghp_|github_pat_|sk-proj-|sk-ant-)[A-Za-z0-9_-]{12,}|"
+    r"\b(?:ghp_|github_pat_|sk-proj-|sk-ant-|apikey_)[A-Za-z0-9_-]{12,}|"
     r"(?i:\b(?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|"
     r"client[_-]?secret|authorization)[\"']?\s*[:=]\s*[\"']?\S+)|"
     r"https?://[^\s/@]+:[^\s/@]+@|"
-    r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b"
+    r"(?<![A-Za-z0-9.!#$%&'*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+"
+    r"@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b"
 )
 
 
@@ -61,13 +62,24 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+def sensitive(text: str) -> bool:
+    return SENSITIVE.search(text) is not None
+
+
+def validate_texts(request: dict) -> dict:
+    texts = request.get("texts")
+    if set(request) != {"texts"} or not isinstance(texts, list) or not all(isinstance(text, str) for text in texts):
+        raise MemoryFailure("invalid_input", "validate requires exactly texts: a list of strings")
+    return {"allowed": [not sensitive(text) for text in texts]}
+
+
 def safe_text(value: object, field: str, maximum: int = 16000) -> str:
     if not isinstance(value, str) or not value.strip():
         raise MemoryFailure("invalid_input", f"{field} must be nonempty text")
     value = value.strip()
     if len(value) > maximum:
         raise MemoryFailure("invalid_input", f"{field} exceeds {maximum} characters")
-    if SENSITIVE.search(value):
+    if sensitive(value):
         raise MemoryFailure("privacy", f"{field} contains credential or personal-data indicators; not transmitted")
     return value
 

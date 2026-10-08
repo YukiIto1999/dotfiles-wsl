@@ -28,9 +28,13 @@ log の各行は候補ごとの結果である。
 | `duplicate:` | 保存済みの記憶と同じ内容なので保存しなかった |
 | `no-situation:` | 将来の別 session で同じ判断を迫られる場面を model が書かなかったので保存しなかった |
 | `rejected:` | 資格情報や個人情報に見えるため、runtime が保存を拒んだ |
+| `excluded:` | modelへの送信前検査で発言または保存済みの記憶を除外した。本文はlogへ出さない |
 | `skipped:` | cwd から Git project を決められない session を読まなかった |
 
-model の呼び出し、一覧、保存のいずれかが失敗すると service は非ゼロで終わり、`dotfiles-doctor` の `maintenance/dotfiles-agent-memory-harvest.timer` に現れる。読み終えた位置は進めないので、次の実行が同じ範囲を読み直す。保存済みの発言は読み直しでも model へ渡さない。前回の`pending`が status で失敗した場合は、log の source が指す発言を確かめ、残すなら`memory` Skill で明示的に保存する。
+送信前検査、modelの呼び出し、一覧、保存のいずれかが失敗するとserviceは非ゼロで終わり、`dotfiles-doctor`の`maintenance/dotfiles-agent-memory-harvest.timer`に現れる。
+読み終えた位置は進めないので、次の実行が同じ範囲を読み直す。
+保存済みの発言は読み直しでもmodelへ渡さない。
+前回の`pending`がstatusで失敗した場合は、logのsourceが指す発言を確かめ、残すなら`memory` Skillで明示的に保存する。
 
 ## 状態
 

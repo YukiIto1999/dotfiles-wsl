@@ -26,6 +26,18 @@ let
     };
   };
 
+  modelsConfig = (pkgs.formats.yaml { }).generate "omp-models.yml" {
+    providers.typesafe = {
+      baseUrl = "https://api.typesafe.ai";
+      apiKey =
+        "!sudo -n env SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt "
+        + "${lib.getExe pkgs.sops} --config "
+        + lib.escapeShellArg "${cfg.workstation.dotfilesDir}/secrets/sops/assets/.sops.yaml"
+        + " decrypt --extract '[\"typesafe\"][\"api_key\"]' "
+        + lib.escapeShellArg "${cfg.workstation.dotfilesDir}/secrets/sops/assets/secrets.json";
+    };
+  };
+
   lspConfig = (pkgs.formats.json { }).generate "omp-lsp.json" (
     lib.mapAttrs' (
       name: server:
@@ -135,6 +147,12 @@ in
         format = "yaml";
         deployment = "seed";
         destination = ".omp/agent/config.yml";
+      };
+      models = {
+        source = modelsConfig;
+        format = "yaml";
+        deployment = "seed";
+        destination = ".omp/agent/models.yml";
       };
       mcp = {
         source = gatewayConfig;

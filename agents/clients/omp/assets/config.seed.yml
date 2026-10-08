@@ -1,8 +1,11 @@
 modelRoles:
   tiny: opencode-go/deepseek-v4.1-flash:high
+  judge: typesafe/jev-latest
   default: anthropic/claude-opus-5-5:xhigh
   advisor: opencode-go/longcat-2.5-preview-free:high
-  dev: anthropic/claude-opus-5-5:xhigh
+  dev: anthropic/claude-sonnet-5-5:xhigh
+disabledProviders:
+  - openrouter
 symbolPreset: nerd
 composer:
   shape: band
@@ -22,6 +25,9 @@ retry:
       - google-antigravity/gemini-3.8-flash:high
     advisor:
       - opencode-go/deepseek-v4.1-flash:high
+    judge: []
+    dev:
+      - openai-codex/gpt-6.1-sol:xhigh
     anthropic/claude-opus-5-5:xhigh:
       - openai-codex/gpt-6.1-sol:xhigh
     openai-codex/gpt-6.1-sol:xhigh:
@@ -43,6 +49,7 @@ bashInterceptor:
 task:
   prewalk: false
   agentModelOverrides:
+    implementer: "@dev"
     reviewer: openai-codex/gpt-6.1-sol:xhigh
     security: openai-codex/gpt-6.1-sol:xhigh
   showResolvedModelBadge: true

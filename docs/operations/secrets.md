@@ -2,7 +2,8 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-暗号化済み secret の正本は `secrets/sops/assets/secrets.json`、復号に使う host key は `/var/lib/sops-nix/key.txt` である。secret 名の完全な一覧は、各 consumer に隣接する `sops.secrets` 宣言を正本とし、この文書には複製しない。
+暗号化済み secret の正本は `secrets/sops/assets/secrets.json`、復号に使う host key は `/var/lib/sops-nix/key.txt` である。
+secret の取得方法は各 consumer の module が所有し、平文 file を配備するものは `sops.secrets`、要求時に復号するものは native credential command を宣言する。
 
 ## 編集
 
@@ -17,7 +18,9 @@ git diff -- secrets/sops/assets/secrets.json
 
 平文を別ファイル、shell history、Git patch、ログへ書かない。通常の値変更で `sops updatekeys` は要らない。recipient と host key を変える手順は [SOPS の鍵](sops-enrollment.md)にある。
 
-secret を追加するときは、先に値を消費する module に `sops.secrets` と必要な template または file owner を宣言し、同じ key path を SOPS で追加する。consumer の宣言を確認してから `dotfiles-rebuild --plan` と `dotfiles-rebuild` を実行する。
+secret を追加するときは、先に値を消費する module に取得方法を宣言し、同じ key path を SOPS で追加する。
+平文 file を配備する場合は `sops.secrets` と必要な template または file owner を宣言し、consumer を確認してから `dotfiles-rebuild --plan` と `dotfiles-rebuild` を実行する。
+OMP の TypeSafe credential は [`agents/clients/omp/module.nix`](../../agents/clients/omp/module.nix) が宣言する native command で `typesafe/api_key` だけを復号し、取得結果を平文 file や OMP の認証 DB へ保存しない。
 
 MCP front が既存の secret file を起動時に読む場合は、その secret の `restartUnits` に front service を加える。所有境界は [AI tooling](../architecture/ai-tooling.md#container-platform) に従う。
 

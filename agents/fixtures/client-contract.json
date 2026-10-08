@@ -262,6 +262,11 @@
           "format": "json",
           "deployment": "home",
           "destination": ".omp/agent/mcp.json"
+        },
+        "models": {
+          "format": "yaml",
+          "deployment": "seed",
+          "destination": ".omp/agent/models.yml"
         }
       },
       "install": {

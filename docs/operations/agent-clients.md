@@ -134,7 +134,18 @@ browser または device flow は OMP の案内に従い、API key ではなく�
 認証情報は OMP が `~/.omp/agent/agent.db` に保存する。
 この file と、OMP が対話設定を書き込む `~/.omp/agent/config.yml` は dotfiles 管理外である。
 
+`dev` は `anthropic/claude-sonnet-5-5:xhigh` を主モデル、`retry.fallbackChains.dev` の `openai-codex/gpt-6.1-sol:xhigh` を fallback にし、`task.agentModelOverrides.implementer` の `@dev` 参照で実装エージェントへ接続する。
+この参照により、親セッションのモデル選択を変えずに、`modelRoles.dev` で実装モデルを選べる。
+
+OpenRouter は `disabledProviders` で無効にし、Judge は `modelRoles.judge: typesafe/jev-latest` と `retry.fallbackChains.judge: []` で TypeSafe 公式 API へ固定する。
+Judge 未設定時の OMP 内蔵候補には OpenRouter が含まれるため、chat のモデル選択だけではその呼出しを防げない。
+TypeSafe の API key は SOPS store の `typesafe/api_key` に保持し、`models.yml` の command-resolved secret から要求時に復号する。
+取得 command と公式 endpoint の seed は `agents/clients/omp/module.nix` が生成し、key の値を `models.yml` や OMP の認証 DB へ複製しない。
+command は非対話の `sudo` で host key を使うため、実行権限がなければ認証を利用できない。
+native Judge を使う `find.enabled` は既定の `auto` に任せる。
+project の `disabledProviders` 配列は global の配列を置き換えるため、project 側に指定する場合も `openrouter` を含める。
+
 advisor は期間限定の `opencode-go/longcat-2.5-preview-free:high` を主にし、`opencode-go/deepseek-v4.1-flash:high` を fallback にする。
 モデルを変更するときは、新規環境用の `agents/clients/omp/assets/config.seed.yml` と既存環境の `~/.omp/agent/config.yml` をそれぞれ更新する。
-seed は設定ファイルが存在しない場合だけ配備されるため、rebuild では既存環境のモデル設定を更新しない。
+`config.yml` と `models.yml` の seed は配備先が存在しない場合だけ作成するため、rebuild では既存環境の可変設定を更新しない。
 対して `AGENTS.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。

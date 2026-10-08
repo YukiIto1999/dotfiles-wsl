@@ -270,6 +270,7 @@ Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`に
 
 抽出modelは定額のOpenCode Goで呼べる`minimax-m3`であり、保存すべき内容の判断を抽出modelへ委ねない。
 client連携はsession開始とprompt送信で想起結果を注入し、会話turnをHindsightへ保存しない。
+promptから既知の注入blockを除いた残りが空なら想起せず、残った利用者発言にだけprivacyと長さの検査を行う。
 保存は明示的な`memory_save`と、有効にした[記憶の収穫](#記憶の収穫)が行う。
 
 OpenCodeのrecall結果は同じturnのmodel呼出しで共有し、次のpromptで置き換え、idleで破棄する。title生成などの補助呼出しで消費しない。hook実行には30秒、警告通知には1秒のabort期限を設定する。event loopやhostが停止している時間を含めた実時間の上限は保証しない。

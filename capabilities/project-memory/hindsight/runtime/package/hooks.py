@@ -34,12 +34,17 @@ async def run_hook(client: Client, harness: str, event: str, payload: dict) -> s
         raise MemoryFailure("invalid_input", "hook payload is missing cwd")
     async with asyncio.timeout(18):
         if event in ("session-start", "prompt-submit"):
-            query = (
-                "Stable project conventions and user corrections relevant when beginning work"
-                if event == "session-start"
-                else payload.get("prompt", payload.get("user_prompt", ""))
-            )
-            query = strip_injection(safe_text(query, "prompt", 128000))[:2000]
+            if event == "session-start":
+                query = "Stable project conventions and user corrections relevant when beginning work"
+            else:
+                prompt = payload.get("prompt", payload.get("user_prompt"))
+                if not isinstance(prompt, str):
+                    raise MemoryFailure("invalid_input", "prompt must be text")
+                # 注入された block は利用者の発言ではない。除いた残りが空なら想起せず、privacy の判定は残りだけに掛ける
+                query = strip_injection(prompt)
+                if not query:
+                    return ""
+                query = safe_text(query, "prompt", 128000)[:2000]
             async with asyncio.TaskGroup() as group:
                 project = group.create_task(client.recall(cwd, query, "project", 1600))
                 preferences = group.create_task(client.recall(cwd, query, "global", 400))

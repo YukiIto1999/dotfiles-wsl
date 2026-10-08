@@ -427,6 +427,52 @@ class RuntimeContract(unittest.TestCase):
         self.assertEqual(Backend.state["requests"], [])
 
 
+    def test_prompt_of_only_injected_blocks_recalls_nothing_even_when_the_blocks_look_sensitive(self):
+        Backend.state["banks"].add(self.bank())
+        prompts = (
+            {"prompt": f"<project_memory>owner@example.invalid {SECRET}</project_memory>"},
+            {"prompt": f"<system-reminder>\n  {SECRET}\n</system-reminder>\n  <project_memory>old</project_memory> \n"},
+            {"user_prompt": f"<project_memory>{SECRET}</project_memory>"},
+            {"prompt": ""},
+            {"prompt": "   \n\t"},
+        )
+        for payload in prompts:
+            with self.subTest(payload=sorted(payload)):
+                result = self.command("hook", {"cwd": str(self.repo), **payload}, "--harness", "omp", "prompt-submit")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(Backend.state["requests"], [])
+
+
+    def test_prompt_without_a_prompt_field_is_invalid_not_empty(self):
+        result = self.command("hook", {"cwd": str(self.repo)}, "--harness", "omp", "prompt-submit")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid_input", result.stderr)
+        self.assertEqual(Backend.state["requests"], [])
+
+
+    def test_a_normal_prompt_recalls_both_scopes(self):
+        Backend.state["banks"].update({self.bank(), "user-preferences"})
+        result = self.command("hook", {"cwd": str(self.repo), "prompt": "<project_memory>old-history-marker</project_memory>\n新しい訂正です。"}, "--harness", "omp", "prompt-submit")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        recalled = sorted(path for method, path in Backend.state["requests"] if method == "POST")
+        self.assertEqual(recalled, sorted([
+            f"/v1/default/banks/{self.bank()}/memories/recall",
+            "/v1/default/banks/user-preferences/memories/recall",
+        ]))
+        for recall in Backend.state["recalls"]:
+            self.assertIn("新しい訂正", recall["query"])
+            self.assertNotIn("old-history-marker", recall["query"])
+
+
+    def test_a_backend_failure_is_not_hidden_by_the_empty_prompt_rule(self):
+        Backend.state["banks"].update({self.bank(), "user-preferences"})
+        Backend.state["recall_status"] = 500
+        result = self.command("hook", {"cwd": str(self.repo), "prompt": "<project_memory>old</project_memory>\n実際の質問です。"}, "--harness", "omp", "prompt-submit")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("HTTP 500", result.stderr)
+
+
 
 if __name__ == "__main__":
     unittest.main()

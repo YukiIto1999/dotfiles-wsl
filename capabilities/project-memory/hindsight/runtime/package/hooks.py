@@ -40,7 +40,7 @@ async def run_hook(client: Client, harness: str, event: str, payload: dict) -> s
                 prompt = payload.get("prompt", payload.get("user_prompt"))
                 if not isinstance(prompt, str):
                     raise MemoryFailure("invalid_input", "prompt must be text")
-                # 注入された block は利用者の発言ではない。除いた残りが空なら想起せず、privacy の判定は残りだけに掛ける
+                # 注入 block は利用者の発言ではなく privacy 判定の対象外のため全文への safe_text 先行は不可
                 query = strip_injection(prompt)
                 if not query:
                     return ""

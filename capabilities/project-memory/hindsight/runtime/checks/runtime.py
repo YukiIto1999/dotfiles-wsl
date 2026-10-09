@@ -68,6 +68,15 @@ async def backend_double(handler):
 
 
 def retain_handler(*, config=None, retain=None, status=None):
+    """save の通信失敗時の確定状態を検証する HTTP handler
+
+    config: 設定更新時に注入する例外型で None は正常応答
+    retain: retain 到達時に注入する例外型で None は非同期受付
+    status: operation 確認時に注入する例外型で None は確認要求の拒否
+    例外型の前提: 合成の通信詳細を引数に取るコンストラクタ
+    戻り値: retain 到達順の path を sent 属性に記録する非同期 HTTP handler
+    handler の失敗: 未指定の status 確認時の AssertionError
+    """
     sent = []
 
     async def handler(request):

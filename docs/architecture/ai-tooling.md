@@ -303,6 +303,7 @@ LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有の
 
 入力は`~/.omp/agent/sessions/`直下の session file のうち、前回成功した実行から今回の開始までの entry である。attribution が`user`の発言だけを読み、`<project_memory>`と`<system-reminder>`の block を除く。エージェントの応答、tool の結果、注入した文脈、subagent の記録は model へ渡さない。cwd から Git project を決められない session は読まずに報告する。
 modelを呼ぶ前に`dotfiles-memory validate`へ発言の全文、保存済みの記憶のkindと本文、projectのpathを渡し、保存時と同じ既知の資格情報や個人情報の指標で検査する。
+日本語の文に直接続く既知形式のAPI keyも不許可とし、URLの資格情報検査は本文を切り詰めずに行う。
 このcommandはbackendへ接続せず、検査対象の本文を返さない。
 発言と保存済みの記憶は不許可のrecord全体を除き、projectのpathが不許可なら見出しへ含めない。
 長い本文をclipするのは検査を通した後であり、不正な応答や検査失敗ではmodelを呼ばず、読み終えた位置も進めない。

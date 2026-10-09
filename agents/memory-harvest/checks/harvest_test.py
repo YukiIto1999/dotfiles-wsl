@@ -31,14 +31,13 @@ NEGATIVES = [
     "注文一覧は締め日の降順で表示する",
 ]
 SITUATION = "別の変更を検証する順番を決めるとき"
-# 実在しない合成の資格情報。提供元の bare な `apikey_` 接頭辞の形だけを持つ
 SECRET = "apikey_" + "SYNTHETIC0123456789abcdef"
-# clip の上限を越えた先にだけ資格情報を持つ発言。先頭の安全な部分だけを model へ渡してはならない
 CLIP_LEAK_MARKER = "clip-leak-marker"
 CLIP_LEAK = f"{CLIP_LEAK_MARKER} " + "前置きの文。" * journal.MESSAGE_CHARS + SECRET
-# 既知の指標だけを持つ短い発言
 KNOWN_LEAK_MARKER = "known-leak-marker"
 KNOWN_LEAK = f"{KNOWN_LEAK_MARKER} password: synthetic-value"
+ADJACENT_LEAK_MARKER = "adjacent-leak-marker"
+ADJACENT_LEAK = f"{ADJACENT_LEAK_MARKER} 値は{SECRET}です"
 
 
 def stamp(value: str) -> str:
@@ -63,7 +62,6 @@ def assistant(entry_id: str, at: str, text: str) -> dict:
     }
 
 
-# 資格情報を持つ発言。model にも保存にも渡してはならない
 LEAKS = [
     user("l0000001", "2026-09-29T10:20:00", CLIP_LEAK),
     user("l0000002", "2026-09-29T10:21:00", KNOWN_LEAK),
@@ -111,7 +109,6 @@ candidates = [
 print(json.dumps(candidates, ensure_ascii=False))
 """
 
-# dotfiles-memory の代わり。受けた要求を記録し、環境変数で指定した結果を返す。
 FAKE_MEMORY = """\
 import json, os, subprocess, sys
 from pathlib import Path
@@ -287,11 +284,23 @@ class HarvestTest(unittest.TestCase):
 
         for source in (self.locator("l0000001"), self.locator("l0000002")):
             self.assertIn(f"excluded: {source}: privacy", output)
-        # 資格情報を持つ発言は丸ごと外し、同じ session の他の発言は通す
         material = self.omp_log.read_text(encoding="utf-8")
         self.assertIn(CORRECTION, material)
         everything = "\n".join([material, output, self.errors.getvalue(), self.memory_argv()])
         for leaked in (CLIP_LEAK_MARKER, KNOWN_LEAK_MARKER, SECRET, "synthetic-value"):
+            self.assertNotIn(leaked, everything)
+        self.assertEqual([save["source"] for save in self.calls("save")], [self.locator("u0000001")])
+
+    def test_a_key_beside_japanese_text_is_excluded_while_a_safe_message_is_kept(self):
+        self.write_session([ENTRIES[0], user("l0000003", "2026-09-29T10:22:00", ADJACENT_LEAK)])
+
+        output = self.run_harvest()
+
+        self.assertIn(f"excluded: {self.locator('l0000003')}: privacy", output)
+        material = self.omp_log.read_text(encoding="utf-8")
+        self.assertIn(CORRECTION, material)
+        everything = "\n".join([material, output, self.errors.getvalue(), self.memory_argv()])
+        for leaked in (ADJACENT_LEAK_MARKER, SECRET):
             self.assertNotIn(leaked, everything)
         self.assertEqual([save["source"] for save in self.calls("save")], [self.locator("u0000001")])
 

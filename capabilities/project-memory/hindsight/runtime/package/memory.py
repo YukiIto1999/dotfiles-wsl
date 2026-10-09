@@ -33,12 +33,14 @@ INJECTED_BLOCKS = re.compile(
     r"hindsight_knowledge|hindsight_knowledge_refresh|hindsight_bank)\b[^>]*>.*?</\1\s*>",
     re.DOTALL | re.IGNORECASE,
 )
+# 日本語の文字を語の一部とみなし隣接する鍵の接頭辞と鍵名を見逃すため前方の \b は不可
+# 利用者名へ colon を許すと password との分割が曖昧になり長い入力の探索が二次時間になるため不可
 SENSITIVE = re.compile(
     r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|"
-    r"\b(?:ghp_|github_pat_|sk-proj-|sk-ant-|apikey_)[A-Za-z0-9_-]{12,}|"
-    r"(?i:\b(?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"(?<![A-Za-z0-9_])(?:ghp_|github_pat_|sk-proj-|sk-ant-|apikey_)[A-Za-z0-9_-]{12,}|"
+    r"(?i:(?<![A-Za-z0-9_])(?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|"
     r"client[_-]?secret|authorization)[\"']?\s*[:=]\s*[\"']?\S+)|"
-    r"https?://[^\s/@]+:[^\s/@]+@|"
+    r"https?://[^\s/@:]+:[^\s/@]+@|"
     r"(?<![A-Za-z0-9.!#$%&'*+/=?^_`{|}~-])[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+"
     r"@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+\b"
 )

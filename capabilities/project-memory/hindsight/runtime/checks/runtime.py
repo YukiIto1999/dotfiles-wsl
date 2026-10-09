@@ -21,13 +21,13 @@ sys.path.insert(0, str(PACKAGE))
 import memory as memory_module
 from memory import Client, MemoryFailure
 
-# 実在しない合成の資格情報。提供元の bare な `apikey_` 接頭辞の形だけを持つ
 SECRET = "apikey_" + "SYNTHETIC0123456789abcdef"
 QUERY_MARKER = "synthetic-query-marker"
-# 失敗した request の例外が運び得る値。報告へ漏れてはならない
 LEAKY_DETAIL = f"https://synthetic-user:synthetic-pass@backend.invalid/v1?q={QUERY_MARKER} body=synthetic-body-marker {SECRET}"
 LEAKED = ("synthetic-user", "synthetic-pass", QUERY_MARKER, "synthetic-body-marker", SECRET)
-# 失敗した request の例外と、それを報告する固定の分類
+TOKEN_PREFIXES = ("ghp_", "github_pat_", "sk-proj-", "sk-ant-", "apikey_")
+LONG_URL_COLONS = 240000
+LONG_INPUT_DEADLINE_SECONDS = 8
 TRANSPORT_CATEGORIES = (
     (httpx.ConnectTimeout, "backend connect timed out"),
     (httpx.ConnectError, "backend connect failed"),
@@ -44,7 +44,6 @@ TRANSPORT_CATEGORIES = (
     (httpx.UnsupportedProtocol, "backend request failed"),
     (httpx.TooManyRedirects, "backend request failed"),
 )
-# retain の request を送ったかもしれない失敗。応答を失った save は indeterminate を返す
 AMBIGUOUS_RETAIN = (
     httpx.CloseError,
     httpx.DecodingError,
@@ -54,7 +53,6 @@ AMBIGUOUS_RETAIN = (
     httpx.WriteError,
     httpx.WriteTimeout,
 )
-# 接続を作れなかった失敗。save は失敗として返し、indeterminate にはしない
 UNSENT_RETAIN = (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)
 
 
@@ -70,7 +68,6 @@ async def backend_double(handler):
 
 
 def retain_handler(*, config=None, retain=None, status=None):
-    """save の各段階を、指定した例外で失敗させる。指定のない段階は成功の応答を返す。"""
     sent = []
 
     async def handler(request):
@@ -433,14 +430,14 @@ class RuntimeContract(unittest.TestCase):
             {"document_id": "preference/c", "kind": "preference", "source": "preference/c#source", "content": "報告は日本語で書く。"},
         ])
 
-    def validate(self, payload, *, url=None):
+    def validate(self, payload, *, url=None, timeout=25):
         environment = {key: value for key, value in os.environ.items() if key != "PROJECT_MEMORY_URL"}
         if url:
             environment["PROJECT_MEMORY_URL"] = url
         return subprocess.run(
             [sys.executable, str(PACKAGE / "main.py"), "validate"],
             input=payload if isinstance(payload, str) else json.dumps(payload),
-            capture_output=True, text=True, timeout=25, env=environment,
+            capture_output=True, text=True, timeout=timeout, env=environment,
         )
 
     def test_validate_answers_for_each_text_locally_without_a_url(self):
@@ -460,6 +457,31 @@ class RuntimeContract(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         self.assertNotIn(SECRET, result.stdout)
         self.assertEqual(json.loads(self.validate({"texts": []}).stdout), {"allowed": []})
+
+    def test_validate_rejects_known_keys_beside_japanese_text(self):
+        keys = [prefix + "SYNTHETIC0123456789abcdef" for prefix in TOKEN_PREFIXES]
+        rejected = [template.format(key) for key in keys for template in ("値は{}", "値は{}です", "{}を使う")]
+        rejected += ["値はpassword: synthetic-value", "設定はapi_key=synthetic-value", "認証はAuthorization: synthetic-value"]
+        allowed = ["検証は password の扱いを決めてから進める"]
+        result = self.validate({"texts": rejected + allowed})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"allowed": [False] * len(rejected) + [True] * len(allowed)})
+
+    def test_validate_rejects_url_credentials_with_a_colon_in_the_password_but_not_a_port(self):
+        result = self.validate({"texts": [
+            "https://synthetic-user:synthetic:pass@example.invalid/",
+            "https://example.invalid:8443/path",
+        ]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"allowed": [False, True]})
+
+    def test_validate_answers_a_long_safe_url_within_a_bounded_time(self):
+        result = self.validate(
+            {"texts": ["https://example.invalid" + ":" * LONG_URL_COLONS, "https://synthetic-user:synthetic:pass@example.invalid/"]},
+            timeout=LONG_INPUT_DEADLINE_SECONDS,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {"allowed": [True, False]})
 
     def test_validate_makes_no_backend_request_even_when_a_backend_is_configured(self):
         result = self.validate({"texts": [SECRET, "安全な文"]}, url=self.url)

@@ -137,8 +137,7 @@ def curated(options: argparse.Namespace, cwd: str) -> list[dict]:
     return memories
 
 
-# 資格情報や個人情報に見える text を model へ渡さないための判定。判定は dotfiles-memory validate だけが持ち、ここでは複製しない。
-# record の text が一つでも通らなければ record 全体を通さない。応答が欠けても余っても通ったものとして扱わず、失敗にする
+# 判定の正本が dotfiles-memory validate だけのため harvest 側での正規表現の複製は不可
 def screen(options: argparse.Namespace, records: list[tuple[str, ...]]) -> list[bool]:
     texts = [text for record in records for text in record]
     allowed = memory(options, "validate", {"texts": texts}).get("allowed")
@@ -154,8 +153,8 @@ def messages_of(sessions: list[Session], stored: set[str]) -> list[Message]:
         for prompt in session.prompts:
             source = f"{session.path}#{prompt.id}"
             text = INJECTED.sub("", prompt.text).strip()
-            # clip で切り落とす部分にも資格情報が入り得るため、原文のまま返し、model へ渡す直前に切る
             if text and source not in stored:
+                # 切り落とす後半の資格情報を判定できないためここでの clip は不可
                 found.append(Message(source, session.cwd, text))
     return found
 
@@ -210,7 +209,6 @@ def harvest_project(options: argparse.Namespace, sessions: list[Session], pendin
     found = messages_of(sessions, stored)
     if not found:
         return
-    # model へ渡す全ての text を、clip する前の原文で一度に確かめる。通らなかった record は丸ごと外し、通った発言と出所は残す
     root = project_root(cwd)
     verdicts = iter(screen(options, [
         (root,),
@@ -230,7 +228,6 @@ def harvest_project(options: argparse.Namespace, sessions: list[Session], pendin
     if not messages:
         return
     memories = "\n".join(f"- ({item.get('kind')}) {clip(item['content'])}" for item in remembered) or "なし"
-    # project の場所に資格情報が入っていれば、場所は model へ渡さない
     heading = f"project: {root}\n\n" if root_allowed else ""
     for part in chunks([f"[{ref}] {clip(message.text)}" for ref, message in messages.items()]):
         material = f"{heading}## 保存済みの記憶\n{memories}\n\n## 利用者の発言\n{part}"

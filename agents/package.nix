@@ -114,39 +114,63 @@ let
     ];
     text = projectCacheGcSource;
   };
-  gate = pkgs.writeShellApplication {
-    name = "dotfiles-agent-gate";
-    runtimeInputs = with pkgs; [
-      coreutils
-      git
-      jq
-      nodejs
-    ];
-    text =
-      builtins.replaceStrings
-        [ "@cacheRootRelative@" "@verificationEntry@" "@skillRoots@" ]
-        [
-          cacheRootRelative
-          (lib.getExe verificationEntry)
-          (lib.escapeShellArgs runtimeContract.skillRoots)
-        ]
-        (builtins.readFile ./impl/runtime/gate.sh);
-  };
-  verificationCache = pkgs.writeShellApplication {
-    name = "dotfiles-agent-verification-cache";
-    runtimeInputs = with pkgs; [
-      coreutils
-      diffutils
-      git
-    ];
-    text =
-      builtins.replaceStrings [ "@cacheRootRelative@" "@gate@" ] [ cacheRootRelative (lib.getExe gate) ]
-        (builtins.readFile ./impl/runtime/verify-cache.sh);
-  };
+  mkGate =
+    {
+      commandShims ? null,
+    }:
+    pkgs.writeShellApplication {
+      name = "dotfiles-agent-gate";
+      runtimeInputs =
+        lib.optional (commandShims != null) commandShims
+        ++ (with pkgs; [
+          coreutils
+          git
+          jq
+          nodejs
+        ]);
+      text =
+        builtins.replaceStrings
+          [ "@cacheRootRelative@" "@verificationEntry@" "@skillRoots@" ]
+          [
+            cacheRootRelative
+            (lib.getExe verificationEntry)
+            (lib.escapeShellArgs runtimeContract.skillRoots)
+          ]
+          (builtins.readFile ./impl/runtime/gate.sh);
+    };
+  gate = mkGate { };
+  mkVerificationCache =
+    {
+      gateCommand,
+      commandShims ? null,
+    }:
+    pkgs.writeShellApplication {
+      name = "dotfiles-agent-verification-cache";
+      runtimeInputs =
+        lib.optional (commandShims != null) commandShims
+        ++ (with pkgs; [
+          coreutils
+          diffutils
+          git
+        ]);
+      text =
+        builtins.replaceStrings
+          [ "@cacheRootRelative@" "@gate@" ]
+          [ cacheRootRelative (lib.getExe gateCommand) ]
+          (builtins.readFile ./impl/runtime/verify-cache.sh);
+    };
   mkVerify =
     {
       t1BudgetSeconds ? 120,
+      commandShims ? null,
     }:
+    let
+      verifyGate = mkGate { inherit commandShims; };
+      verifyCache = mkVerificationCache {
+        gateCommand = verifyGate;
+        inherit commandShims;
+      };
+    in
     pkgs.writeShellApplication {
       name = "dotfiles-agent-verify";
       runtimeInputs = with pkgs; [
@@ -158,8 +182,8 @@ let
           [ "@t1BudgetSeconds@" "@gate@" "@verificationCache@" ]
           [
             (toString t1BudgetSeconds)
-            (lib.escapeShellArg (lib.getExe gate))
-            (lib.escapeShellArg (lib.getExe verificationCache))
+            (lib.escapeShellArg (lib.getExe verifyGate))
+            (lib.escapeShellArg (lib.getExe verifyCache))
           ]
           (builtins.readFile ./impl/runtime/verify.sh);
     };

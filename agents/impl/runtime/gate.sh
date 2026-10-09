@@ -11,7 +11,10 @@ usage() {
   cat >&2 <<'USAGE'
 usage: dotfiles-agent-gate <command> [options]
 
-  record [--repo DIR] [--command TEXT]  DIR が根で TEXT が検証入口の綴りなら木の控えを書く
+  record --pending TOKEN [--repo DIR] [--command TEXT]
+                                        DIR が根で TEXT が検証入口の綴りなら公開しない仮の控えを作る
+  publish --pending TOKEN [--repo DIR]  仮の控えを木の控えとして公開する。deadline の下で呼ぶ
+  discard --pending TOKEN             その走行の仮の控えと公開した控え、一時fileだけを捨てる
   arm --session ID [--path PATH]        その session が編集した repository を控える
   check [--repo DIR] [--session ID]     未検証なら理由を出して 1 で終わる
   waive --reason TEXT [--repo DIR]      理由を残していまの木を一度だけ通す
@@ -52,7 +55,7 @@ source_fingerprint() {
   local repo=$1 head path
   head=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || printf 'none')
   {
-    printf 'dotfiles-agent-gate-v2\0head\0%s\0tracked\0' "$head"
+    printf 'dotfiles-agent-gate-v3\0head\0%s\0tracked\0' "$head"
     git -C "$repo" -c color.ui=false diff --binary --full-index --no-ext-diff --no-textconv HEAD --
     printf '\0untracked\0'
     while IFS= read -r -d '' path; do
@@ -89,16 +92,102 @@ ensure_dir() {
 
 # 宣言した入口を repository の根で通した走行だけを控える。部分的な検査や下の directory での
 # 走行が通っても、入口がこの木で通ったことにはならない。
+receipt_scratch=
+
+receipt_token_is_valid() {
+  [[ $1 =~ ^[0-9]{16}\.[0-9]+$ ]]
+}
+
+verified_receipt_token=
+verified_receipt_exists() {
+  local candidate token producer
+  local -a record
+  verified_receipt_token=
+  for candidate in "$1/$2".*.verified; do
+    [ -f "$candidate" ] || continue
+    mapfile -t record <"$candidate"
+    [ "${#record[@]}" -gt 0 ] || continue
+    [ "${record[-1]-}" = completed=true ] || continue
+    token=${candidate#"$1/$2."}
+    token=${token%.verified}
+    receipt_token_is_valid "$token" || continue
+    producer=${token##*.}
+    kill -0 "$producer" 2>/dev/null && continue
+    if [ -z "$verified_receipt_token" ] \
+      || [ "$((10#${token%%.*}))" -gt "$((10#${verified_receipt_token%%.*}))" ]; then
+      verified_receipt_token=$token
+    fi
+  done
+  [ -n "$verified_receipt_token" ]
+}
+
 command_record() {
-  local repo=${1:-$PWD} text=${2:-} top state fingerprint
+  local repo=${1:-$PWD} text=${2:-} token=${3:-} top state fingerprint
+  receipt_token_is_valid "$token" || fail 'record には正しい --pending が要る'
   top=$(repo_top_of "$repo") || return 0
   [ "$(realpath -e -- "$repo")" = "$(realpath -e -- "$top")" ] || return 0
-  [ -n "$text" ] && [ "$text" = "$(entry_of "$top")" ] || return 0
   state=$(state_dir_of "$top") || return 0
+  # 後段の再採取でsourceが結び直されるため同じtokenへの上書きは不可
+  [ ! -f "$state/.pending.$token" ] || return 0
+  [ -n "$text" ] && [ "$text" = "$(entry_of "$top")" ] || return 0
   ensure_dir "$state"
   fingerprint=$(source_fingerprint "$top")
-  printf 'version=1\nsource=%s\ncommand=%s\nat=%s\n' \
-    "$fingerprint" "$text" "$(date -Iseconds)" >"$state/$fingerprint.verified"
+  receipt_scratch=$(mktemp "$state/.receipt.$token.XXXXXXXX")
+  trap 'rm -f -- "$receipt_scratch"' EXIT
+  printf 'version=3\nsource=%s\ncommand=%s\nat=%s\n' \
+    "$fingerprint" "$text" "$(date -Iseconds)" >"$receipt_scratch"
+  mv -T -- "$receipt_scratch" "$state/.pending.$token"
+  trap - EXIT
+}
+
+command_publish() {
+  local repo=${1:-$PWD} token=${2:-} top state pending source=
+  receipt_token_is_valid "$token" || fail 'publish には正しい --pending が要る'
+  top=$(repo_top_of "$repo") || return 0
+  state=$(state_dir_of "$top") || return 0
+  pending=$state/.pending.$token
+  [ -f "$pending" ] || return 0
+  { IFS= read -r _ && IFS= read -r source; } <"$pending" || true
+  source=${source#source=}
+  if ! [[ $source =~ ^[0-9a-f]{64}$ ]]; then
+    rm -f -- "$pending"
+    fail '仮の控えの指紋が読めないため公開しない'
+  fi
+  mv -T -- "$pending" "$state/$source.$token.verified"
+  printf '%s\n' "$state/$source.$token.verified"
+}
+
+command_discard() {
+  local token=$1 scratch
+  receipt_token_is_valid "$token" || fail 'discard には正しい --pending が要る'
+  rm -f -- "$verification_root"/*/.pending."$token" \
+    "$verification_root"/*/*."$token".verified "$verification_root"/*/.receipt."$token".*
+  for scratch in "$verification_root"/.fingerprint."$token".*; do
+    [ -d "$scratch" ] && [ ! -L "$scratch" ] || continue
+    rm -rf --one-file-system -- "$scratch"
+  done
+}
+
+command_settle() {
+  local repo=${1:-$PWD} token=${2:-} top state own name fingerprint other other_token
+  receipt_token_is_valid "$token" || fail 'settle には正しい --pending が要る'
+  top=$(repo_top_of "$repo") || return 0
+  state=$(state_dir_of "$top") || return 0
+  for own in "$state"/*."$token".verified; do
+    [ -f "$own" ] || return 0
+    name=${own##*/}
+    fingerprint=${name%%.*}
+    for other in "$state/$fingerprint".*.verified; do
+      [ -f "$other" ] || continue
+      name=${other##*/}
+      other_token=${name#"$fingerprint".}
+      other_token=${other_token%.verified}
+      receipt_token_is_valid "$other_token" || continue
+      if [ "$((10#${other_token%%.*}))" -lt "$((10#${token%%.*}))" ]; then
+        rm -f -- "$other"
+      fi
+    done
+  done
 }
 
 command_arm() {
@@ -148,7 +237,8 @@ command_check() {
   [ -n "$entry" ] || return 0
   state=$(state_dir_of "$top") || return 0
   fingerprint=$(source_fingerprint "$top")
-  if [ -f "$state/$fingerprint.verified" ]; then
+  if verified_receipt_exists "$state" "$fingerprint"; then
+    command_settle "$top" "$verified_receipt_token" || true
     return 0
   fi
   if [ -f "$state/$fingerprint.waived" ]; then
@@ -630,7 +720,7 @@ main() {
   [ -n "$command" ] || usage
   shift || true
 
-  local repo=$PWD session="" reason="" text="" path="" standard_root="" report=""
+  local repo=$PWD session="" reason="" text="" path="" standard_root="" report="" pending=""
   while [ "$#" -gt 0 ]; do
     case $1 in
     --repo)
@@ -661,13 +751,19 @@ main() {
       report=$2
       shift 2
       ;;
+    --pending)
+      pending=$2
+      shift 2
+      ;;
     arm | stop | edit | learn | observe) break ;;
     *) usage ;;
     esac
   done
 
   case $command in
-  record) command_record "$repo" "$text" ;;
+  record) command_record "$repo" "$text" "$pending" ;;
+  publish) command_publish "$repo" "$pending" ;;
+  discard) command_discard "$pending" ;;
   arm) command_arm "$session" "${path:-$repo}" ;;
   check) command_check "$repo" ;;
   waive) command_waive "$repo" "$reason" ;;

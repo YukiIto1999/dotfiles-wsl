@@ -100,6 +100,10 @@ runtimeはsession ID、sessionを始めたproject、owner process、boot ID、�
 fileごとのprocess起動を避けるため、tracked fileのmetadataと内容hashはコマンド行長の上限内でまとめて取得する。
 読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
 宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決から成功証跡の保存までを120秒で制限し、予算超過時は検証processの子孫を止めて成功として扱わない。
+検証の証跡は走行tokenごとに、metadataの読み取り前後を照合した検査前のsourceへ固定し、時間内の保存と後始末を見届けたwrapperが完了を記す。
+T1の走行中のmetadata変化はcache keyとは別に照合し、検査後に編集されたsourceへ証跡を結び直さない。
+公開途中の証跡やまだ動いているwrapperの証跡は終了gateを開かず、期限超過や中断では同じ走行tokenの証跡と一時fileだけを回収するため、別の完了済み走行の証跡は巻き込まない。
+古い証跡の整理はT1へ含めず、終了gateが同じ木の完了済み証跡を受理するときに行う。
 
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
 OMP hook は write の本文と read の全文を JSON に含めたまま gate の stdin へ送り、read の証明を照合する Node process へも pipe で渡す。

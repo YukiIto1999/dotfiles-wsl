@@ -18,7 +18,45 @@ let
     inherit lib pkgs verificationEntry;
     runtimeContract = runtimePackageContract;
   };
-  shortBudgetVerify = runtime.mkVerify { t1BudgetSeconds = 1; };
+  shortBudgetVerify = runtime.mkVerify { t1BudgetSeconds = 2; };
+  stallingCommand =
+    name:
+    pkgs.writeShellScriptBin name ''
+      control=''${DOTFILES_AGENT_TEST_STALL-}
+      utility= when= pattern=
+      if [[ -n $control && -f $control ]]; then
+        read -r utility when pattern < "$control"
+      fi
+      target=''${!#}
+      stall() {
+        if [[ $utility == ${name} && $when == "$1" && $target == $pattern ]]; then
+          printf '%s %s %s\n' "$utility" "$when" "$target" >> "$control.ready"
+          while [[ ! -e $control.release ]]; do
+            ${pkgs.coreutils}/bin/sleep 0.05
+          done
+        fi
+      }
+      stall before
+      ${pkgs.coreutils}/bin/${name} "$@"
+      status=$?
+      stall after
+      exit "$status"
+    '';
+  stallingShims = pkgs.symlinkJoin {
+    name = "dotfiles-agent-stalling-shims";
+    paths = map stallingCommand [
+      "mv"
+      "rm"
+    ];
+  };
+  stallingVerify = runtime.mkVerify {
+    t1BudgetSeconds = 3;
+    commandShims = stallingShims;
+  };
+  cancellableVerify = runtime.mkVerify {
+    t1BudgetSeconds = 60;
+    commandShims = stallingShims;
+  };
   customSkillRootRuntime = import ../package.nix {
     inherit lib pkgs verificationEntry;
     runtimeContract = runtimePackageContract // {
@@ -620,12 +658,15 @@ in
           pkgs.coreutils
           pkgs.findutils
           pkgs.git
+          pkgs.gnumake
           pkgs.gnused
           pkgs.jq
           pkgs.nodejs
         ];
         VERIFY = lib.getExe runtime.verify;
         SHORT_BUDGET_VERIFY = lib.getExe shortBudgetVerify;
+        STALLING_VERIFY = lib.getExe stallingVerify;
+        CANCELLABLE_VERIFY = lib.getExe cancellableVerify;
         GATE = lib.getExe runtime.gate;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
         CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;

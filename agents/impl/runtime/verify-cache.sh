@@ -1,5 +1,20 @@
 set -euo pipefail
 
+usage() {
+  printf 'usage: dotfiles-agent-verification-cache [--receipt TOKEN] -- COMMAND [ARG...]\n' >&2
+  exit 64
+}
+
+receipt_token=
+if [ "${1-}" = --receipt ]; then
+  [ "$#" -ge 2 ] || usage
+  receipt_token=$2
+  shift 2
+fi
+[ "${1-}" = -- ] || usage
+shift
+[ "$#" -gt 0 ] || usage
+
 if ! repo_top=$(git rev-parse --show-toplevel 2>/dev/null) \
   || ! common_dir=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
   || ! repo_top=$(realpath -e -- "$repo_top") \
@@ -42,7 +57,9 @@ if ! ensure_state_directory "$HOME/@cacheRootRelative@" \
   exec "$@"
 fi
 
-scratch=$(mktemp -d "$verification_root/.fingerprint.XXXXXXXX")
+scratch_prefix=$verification_root/.fingerprint
+[ -z "$receipt_token" ] || scratch_prefix=$scratch_prefix.$receipt_token
+scratch=$(mktemp -d "$scratch_prefix.XXXXXXXX")
 # shellcheck disable=SC2329 # EXIT trap invokes this function indirectly.
 cleanup() {
   local status=$?
@@ -74,7 +91,7 @@ write_command_identity() {
 write_tracked_metadata() {
   local repository=$1 tracked=$2 guard=$3 namespace=$4
   local record index_fields index_mode path absolute semantic_path
-  local index_oid index_stage metadata digest offset batch
+  local index_oid index_stage metadata digest offset batch validation_guard
   local -a paths=() regulars=()
   local -A metadata_before=() guards_before=() hashes=()
   local -A metadata_after=() guards_after=()
@@ -143,12 +160,15 @@ write_tracked_metadata() {
     fi
     metadata=${metadata_before["$absolute"]-}
     [ -n "$metadata" ] || return 1
+    validation_guard=${guards_before["$absolute"]}
     if [ "$index_mode" = 160000 ]; then
       metadata=${metadata%:*}
       metadata=${metadata%:*}
+      record=${validation_guard#*:}
+      validation_guard="${validation_guard%%:*}:${record%%:*}:$metadata"
     fi
     printf 'lstat\0%s\0' "$metadata"
-    printf 'path\0%s\0lstat\0%s\0' "$semantic_path" "${guards_before["$absolute"]}" >>"$guard"
+    printf 'path\0%s\0lstat\0%s\0' "$semantic_path" "$validation_guard" >>"$guard"
     if [ "$index_mode" = 160000 ]; then
       [ -d "$absolute" ] && [ ! -L "$absolute" ] || return 1
       write_clean_gitlink "$absolute" "$index_oid" "$semantic_path/" "$guard" || return 1
@@ -239,6 +259,14 @@ write_clean_gitlink() {
   [ "$head_after" = "$head_before" ] || return 1
 }
 
+write_untracked_guard() {
+  local path
+  while IFS= read -r -d '' path; do
+    printf 'path\0%s\0' "$path"
+    stat --printf '%d:%i:%f:%u:%g:%h:%s:%y:%z\0' -- "$repo_top/$path" || return 1
+  done <"$1"
+}
+
 fingerprint() {
   local untracked=$scratch/untracked tracked=$scratch/tracked-index path mode relative_cwd head
   local link_target tracked_after=$scratch/tracked-index-after
@@ -247,6 +275,8 @@ fingerprint() {
   local tracked_guard=$scratch/tracked-guard
   local tracked_guard_after=$scratch/tracked-guard-after
   local tracked_diff=$scratch/tracked-diff
+  local semantic untracked_after=$scratch/untracked-after
+  local untracked_guard=$scratch/untracked-guard untracked_guard_after=$scratch/untracked-guard-after
   head=$(git -C "$repo_top" rev-parse --verify HEAD 2>/dev/null) || return 1
   relative_cwd=$(realpath --relative-to "$repo_top" "$(pwd -P)") || return 1
   git -C "$repo_top" ls-files --stage -z >"$tracked" || return 1
@@ -255,17 +285,11 @@ fingerprint() {
     >"$tracked_metadata" || return 1
   git -C "$repo_top" -c color.ui=false diff \
     --binary --full-index --no-ext-diff --no-textconv HEAD -- >"$tracked_diff" || return 1
-  git -C "$repo_top" ls-files --stage -z >"$tracked_after" || return 1
-  cmp -- "$tracked" "$tracked_after" || return 1
-  : >"$tracked_guard_after"
-  write_tracked_metadata "$repo_top" "$tracked_after" "$tracked_guard_after" "" \
-    >"$tracked_metadata_after" || return 1
-  cmp -- "$tracked_metadata" "$tracked_metadata_after" || return 1
-  cmp -- "$tracked_guard" "$tracked_guard_after" || return 1
   git -C "$repo_top" ls-files --others --exclude-standard -z >"$untracked" || return 1
+  write_untracked_guard "$untracked" >"$untracked_guard" || return 1
 
-  {
-    printf 'dotfiles-agent-verify-v5\0common-dir\0%s\0repo-head\0%s\0cwd\0%s\0' \
+  semantic=$({
+    printf 'dotfiles-agent-verify-v6\0common-dir\0%s\0repo-head\0%s\0cwd\0%s\0' \
       "$common_dir" "$head" "$relative_cwd"
     printf 'tracked-diff\0'
     cat "$tracked_diff" || return 1
@@ -290,21 +314,53 @@ fingerprint() {
     write_command_identity "$1" || return 1
     printf 'environment\0'
     env -0 | LC_ALL=C sort -z || return 1
-  } | sha256sum | cut -d ' ' -f 1
+  } | sha256sum | cut -d ' ' -f 1) || return 1
+
+  # 検査したsourceと公開するsourceがずれるため検査後の採取は不可
+  stage_receipt "$@"
+  git -C "$repo_top" ls-files --stage -z >"$tracked_after" || return 1
+  cmp -- "$tracked" "$tracked_after" || return 1
+  : >"$tracked_guard_after"
+  write_tracked_metadata "$repo_top" "$tracked_after" "$tracked_guard_after" "" \
+    >"$tracked_metadata_after" || return 1
+  cmp -- "$tracked_metadata" "$tracked_metadata_after" || return 1
+  cmp -- "$tracked_guard" "$tracked_guard_after" || return 1
+  [ "$(git -C "$repo_top" rev-parse --verify HEAD)" = "$head" ] || return 1
+  git -C "$repo_top" ls-files --others --exclude-standard -z >"$untracked_after" || return 1
+  cmp -- "$untracked" "$untracked_after" || return 1
+  write_untracked_guard "$untracked" >"$untracked_guard_after" || return 1
+  cmp -- "$untracked_guard" "$untracked_guard_after" || return 1
+  printf '%s\n' "$semantic"
+  if [ -n "$receipt_token" ]; then
+    cat "$tracked_guard" "$untracked_guard" | sha256sum | cut -d ' ' -f 1
+  fi
 }
 
-if ! before=$(fingerprint "$@"); then
+stage_receipt() {
+  [ -z "$receipt_token" ] \
+    || "@gate@" record --repo "$PWD" --command "$*" --pending "$receipt_token" \
+    || true
+}
+
+discard_receipt() {
+  [ -z "$receipt_token" ] || "@gate@" discard --pending "$receipt_token" || true
+}
+
+if ! before_state=$(fingerprint "$@"); then
+  discard_receipt
   trap - EXIT
   rm -rf --one-file-system -- "$scratch"
   exec "$@"
 fi
+before=${before_state%%$'\n'*}
 
 success_file="$project_state/$before.success"
-expected_record=$(printf 'version=5\nfingerprint=%s\n' "$before")
+expected_record=$(printf 'version=6\nfingerprint=%s\n' "$before")
 success_file_is_safe=false
 if prepare_success_file "$success_file"; then
   success_file_is_safe=true
 fi
+
 if [ "$success_file_is_safe" = true ] \
   && [ ! -L "$success_file" ] \
   && [ -f "$success_file" ] \
@@ -320,14 +376,18 @@ set -e
 
 if [ "$status" -eq 0 ] \
   && [ "$success_file_is_safe" = true ] \
-  && after=$(fingerprint "$@") \
-  && [ "$before" = "$after" ] \
+  && after_state=$(fingerprint "$@") \
+  && [ "$before_state" = "$after_state" ] \
   && prepare_success_file "$success_file"; then
-  "@gate@" record --repo "$PWD" --command "$*" || true
-  record_tmp=$(mktemp "$project_state/.success.XXXXXXXX")
+  record_tmp=$(mktemp "$scratch/.success.XXXXXXXX")
   printf '%s' "$expected_record" > "$record_tmp"
   chmod 600 "$record_tmp"
-  mv -T "$record_tmp" "$success_file" || rm -f -- "$record_tmp"
+  if ! mv -T "$record_tmp" "$success_file"; then
+    rm -f -- "$record_tmp"
+    discard_receipt
+  fi
+else
+  discard_receipt
 fi
 
 exit "$status"

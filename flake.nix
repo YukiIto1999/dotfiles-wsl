@@ -232,6 +232,9 @@
 
       unitChecksPackage = "verification-unit-checks";
       closureChecksPackage = "verification-host-closures";
+      runWithin = import ./toolchain/verification/package.nix {
+        pkgs = systemPkgs;
+      };
 
       lockedSource = "path:${self}?narHash=${self.narHash}";
       sourceRef = lib.escapeShellArg lockedSource;
@@ -240,8 +243,9 @@
       verificationTiers = {
         verify = {
           description = "T1: unit の検査と全 host の評価";
+          # app の shell を残すと呼び出し側の signal で shell だけが先に終わり run-within の待機が見えなくなるため exec なしは不可
           commands = ''
-            ${systemPkgs.coreutils}/bin/timeout --kill-after=30s 120 nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
+            exec ${lib.getExe runWithin} 120 nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
           '';
         };
         verify-push = {

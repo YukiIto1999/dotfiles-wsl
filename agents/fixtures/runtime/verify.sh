@@ -550,8 +550,6 @@ check_conformance_completion() {
     exit 1
   fi
   expect_conformance_pending fixture-conformance
-  "$GATE" record --session fixture-conformance --repo "$project" --command 'true'
-  expect_conformance_pending fixture-conformance
   cp "$report" "$project/internal-report.json"
   if "$GATE" conformance --session fixture-conformance --repo "$project" \
     --standard-root "$standard" --report "$project/internal-report.json" >/dev/null 2>&1; then
@@ -663,6 +661,232 @@ check_conformance_completion() {
   *source*update*) ;;
   *) echo 'gate omitted the source update reason for a missing checker' >&2; exit 1 ;;
   esac
+}
+
+stall_litter() {
+  find "$home/.cache/dotfiles-wsl/verification" -mindepth 1 -name '.*' -print | sort
+}
+
+stall_receipt_count() {
+  find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.verified' -print | wc -l
+}
+
+stall_repository() {
+  git init -q "$1"
+  printf 'scripts.verify.exec = "true";\n' >"$1/devenv.nix"
+  git -C "$1" add devenv.nix
+  git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+}
+
+expect_closed_gate() {
+  if "$GATE" check --repo "$1" >/dev/null 2>&1; then
+    echo "gate accepted a T1 that did not finish inside its budget: $2" >&2
+    exit 1
+  fi
+}
+
+expect_open_gate() {
+  if ! "$GATE" check --repo "$1" >/dev/null 2>&1; then
+    echo "gate closed on a tree that a completed T1 verified: $2" >&2
+    exit 1
+  fi
+}
+
+check_receipt_boundaries() {
+  local control=$fixture/stall-control previous=$PWD
+  local name utility when pattern initial_runs retry_runs repository litter_before receipts_before status wrapper
+  local -x DOTFILES_AGENT_TEST_STALL=$control
+  local -x STALL_RUNS=
+  local -x PATH="$fixture/stall-bin:$PATH"
+
+  mkdir "$fixture/stall-bin"
+  cat >"$fixture/stall-bin/devenv" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+count=0
+test ! -e "$STALL_RUNS" || count=$(cat "$STALL_RUNS")
+printf '%s\n' "$((count + 1))" >"$STALL_RUNS"
+SCRIPT
+  chmod +x "$fixture/stall-bin/devenv"
+  sed -i "1c#!$BASH" "$fixture/stall-bin/devenv"
+
+  while read -r name utility when pattern initial_runs retry_runs <&3; do
+    printf 'receipt boundary: %s\n' "$name" >&2
+    repository=$fixture/stall-$name
+    stall_repository "$repository"
+    STALL_RUNS=$fixture/stall-$name-runs
+    litter_before=$(stall_litter)
+    receipts_before=$(stall_receipt_count)
+    cd "$repository"
+
+    printf '%s %s %s\n' "$utility" "$when" "$pattern" >"$control"
+    rm -f "$control.ready"
+    set +e
+    "$STALLING_VERIFY" -- devenv shell -- verify
+    status=$?
+    set -e
+    rm -f "$control"
+    if [ "$status" -ne 124 ]; then
+      echo "T1 stopped at $name exited $status instead of the deadline status" >&2
+      exit 1
+    fi
+    if [ ! -s "$control.ready" ]; then
+      echo "T1 never reached the stage to stop at: $name" >&2
+      exit 1
+    fi
+    test "$(cat "$STALL_RUNS" 2>/dev/null || printf 0)" = "$initial_runs"
+    expect_closed_gate "$repository" "$name"
+    if [ "$(stall_litter)" != "$litter_before" ] || [ "$(stall_receipt_count)" != "$receipts_before" ]; then
+      echo "T1 stopped at $name left receipts or temporary state behind" >&2
+      printf 'temporary state before:\n%s\nafter:\n%s\nreceipts before=%s after=%s\n' \
+        "$litter_before" "$(stall_litter)" "$receipts_before" "$(stall_receipt_count)" >&2
+      exit 1
+    fi
+
+    "$STALLING_VERIFY" -- devenv shell -- verify
+    expect_open_gate "$repository" "retry after $name"
+    if [ "$(cat "$STALL_RUNS")" != "$retry_runs" ]; then
+      echo "retry after $name ran the command $(cat "$STALL_RUNS") times instead of $retry_runs" >&2
+      exit 1
+    fi
+    test "$(stall_litter)" = "$litter_before"
+    test "$(stall_receipt_count)" = "$((receipts_before + 1))"
+  done 3<<'SCENARIOS'
+save-before mv before *.success 1 2
+save-after mv after *.success 1 1
+staged-after mv after */.pending.* 0 1
+cleanup-after rm after */.fingerprint.* 1 1
+publish-before mv before *.verified 1 1
+publish-after mv after *.verified 1 1
+SCENARIOS
+
+  while read -r name utility when pattern initial_runs <&4; do
+    printf 'receipt cancellation: %s\n' "$name" >&2
+    repository=$fixture/stall-$name
+    stall_repository "$repository"
+    STALL_RUNS=$fixture/stall-$name-runs
+    litter_before=$(stall_litter)
+    receipts_before=$(stall_receipt_count)
+    cd "$repository"
+    printf '%s %s %s\n' "$utility" "$when" "$pattern" >"$control"
+    rm -f "$control.ready"
+    "$CANCELLABLE_VERIFY" -- devenv shell -- verify &
+    wrapper=$!
+    for _ in $(seq 1 200); do
+      [ ! -s "$control.ready" ] || break
+      sleep 0.05
+    done
+    if [ ! -s "$control.ready" ]; then
+      kill -KILL "$wrapper"
+      echo "T1 never reached the stage to cancel at: $name" >&2
+      exit 1
+    fi
+    expect_closed_gate "$repository" "$name while publication is still running"
+    kill -TERM "$wrapper"
+    set +e
+    wait "$wrapper"
+    status=$?
+    set -e
+    rm -f "$control"
+    if [ "$status" -eq 0 ]; then
+      echo "a T1 cancelled at $name reported success" >&2
+      exit 1
+    fi
+    test "$(cat "$STALL_RUNS" 2>/dev/null || printf 0)" = "$initial_runs"
+    expect_closed_gate "$repository" "$name"
+    if [ "$(stall_litter)" != "$litter_before" ] || [ "$(stall_receipt_count)" != "$receipts_before" ]; then
+      echo "a T1 cancelled at $name left receipts or temporary state behind" >&2
+      exit 1
+    fi
+    # cache key に SHLVL を含むため同期起動での再試行は不可
+    "$CANCELLABLE_VERIFY" -- devenv shell -- verify &
+    wait "$!"
+    expect_open_gate "$repository" "retry after $name"
+    test "$(cat "$STALL_RUNS")" = 1
+    test "$(stall_litter)" = "$litter_before"
+    test "$(stall_receipt_count)" = "$((receipts_before + 1))"
+  done 4<<'SCENARIOS'
+cancel-staged mv after */.pending.* 0
+cancel-published mv after *.verified 1
+SCENARIOS
+
+  for name in late-source capture-source; do
+    repository=$fixture/stall-$name
+    git init -q "$repository"
+    printf '.PHONY: verify\nverify:\n\tprintf old >> ../%s-result\n' "$name" >"$repository/Makefile"
+    git -C "$repository" add Makefile
+    git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+    litter_before=$(stall_litter)
+    cd "$repository"
+    if [ "$name" = late-source ]; then pattern='*.success'; else pattern='*/.pending.*'; fi
+    printf 'mv after %s\n' "$pattern" >"$control"
+    rm -f "$control.ready" "$control.release"
+    "$CANCELLABLE_VERIFY" -- make verify &
+    wrapper=$!
+    for _ in $(seq 1 200); do
+      [ ! -s "$control.ready" ] || break
+      sleep 0.05
+    done
+    if [ ! -s "$control.ready" ]; then
+      kill -TERM "$wrapper"
+      wait "$wrapper" || true
+      echo "T1 never reached the source replacement boundary: $name" >&2
+      exit 1
+    fi
+    printf '.PHONY: verify\nverify:\n\tprintf new >> ../%s-result\n' "$name" >Makefile
+    touch "$control.release"
+    wait "$wrapper"
+    rm -f "$control" "$control.ready" "$control.release"
+    expect_closed_gate "$repository" "$name unchecked replacement"
+    if [ "$name" = late-source ]; then
+      test "$(cat "$fixture/$name-result")" = old
+    else
+      test "$(cat "$fixture/$name-result")" = new
+      printf '.PHONY: verify\nverify:\n\tprintf old >> ../%s-result\n' "$name" >Makefile
+      expect_closed_gate "$repository" "$name discarded capture"
+      printf '.PHONY: verify\nverify:\n\tprintf new >> ../%s-result\n' "$name" >Makefile
+    fi
+    "$CANCELLABLE_VERIFY" -- make verify
+    expect_open_gate "$repository" "$name checked replacement"
+    if [ "$name" = late-source ]; then
+      test "$(cat "$fixture/$name-result")" = oldnew
+    else
+      test "$(cat "$fixture/$name-result")" = newnew
+    fi
+    test "$(stall_litter)" = "$litter_before"
+  done
+
+  name=survivor
+  repository=$fixture/stall-$name
+  stall_repository "$repository"
+  STALL_RUNS=$fixture/stall-$name-runs
+  litter_before=$(stall_litter)
+  receipts_before=$(stall_receipt_count)
+  cd "$repository"
+  "$STALLING_VERIFY" -- devenv shell -- verify
+  expect_open_gate "$repository" "$name completed run"
+  test "$(stall_receipt_count)" = "$((receipts_before + 1))"
+  printf 'mv after *.verified\n' >"$control"
+  rm -f "$control.ready"
+  set +e
+  "$STALLING_VERIFY" -- devenv shell -- verify
+  status=$?
+  set -e
+  rm -f "$control"
+  if [ "$status" -ne 124 ] || [ ! -s "$control.ready" ]; then
+    echo "the second T1 on the same tree was not stopped during publication: $status" >&2
+    exit 1
+  fi
+  expect_open_gate "$repository" "$name earlier completed receipt"
+  test "$(stall_receipt_count)" = "$((receipts_before + 1))"
+  "$STALLING_VERIFY" -- devenv shell -- verify
+  "$STALLING_VERIFY" -- devenv shell -- verify
+  expect_open_gate "$repository" "$name repeated runs"
+  test "$(cat "$STALL_RUNS")" = 1
+  test "$(stall_receipt_count)" = "$((receipts_before + 1))"
+  test "$(stall_litter)" = "$litter_before"
+
+  cd "$previous"
 }
 
 if [ "${1-}" = --conformance-only ]; then
@@ -1147,7 +1371,7 @@ test -z "$("$GATE" entry --repo "$gate_repo")"
 # 未追跡の綴りが増えた木も、通した木とは別物として扱う。
 printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
 git -C "$gate_repo" checkout -q -- tracked
-"$GATE" record --repo "$gate_repo" --command 'devenv shell -- verify'
+PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify
 "$GATE" check --repo "$gate_repo" >/dev/null
 printf 'new\n' >"$gate_repo/untracked"
 if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
@@ -1237,6 +1461,7 @@ sleep 4
 test ! -e "$fixture/deadline-late"
 PATH="$fixture/budget-bin:$PATH" "$SHORT_BUDGET_VERIFY" -- devenv shell -- verify
 "$GATE" check --repo "$budget_repo" >/dev/null
+check_receipt_boundaries
 
 check_skill_learning
 check_conformance_completion

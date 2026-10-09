@@ -40,11 +40,71 @@ fail() {
   exit 1
 }
 
-mkdir -p "$repo/nested/__pycache__"
-touch "$repo/nested/__pycache__/entry" "$repo/nested/module.pyc" "$repo/nested/module.pyo"
-for name in nested/__pycache__/entry nested/module.pyc nested/module.pyo; do
-  git -C "$repo" check-ignore -q -- "$name" || fail "global ignore accepted a Python cache: $name"
+ignored_paths=(
+  nested/__pycache__/entry nested/module.pyc nested/module.pyo
+  dotnet/obj/Debug/project.assets.json dotnet/bin/Debug/net10.0/app.dll
+  dotnet/Bin/Release/net10.0/app.dll dotnet/.vs/cache
+  dotnet/TestResults/run.trx dotnet/BenchmarkDotNet.Artifacts/results/summary
+  dotnet/app.csproj.user dotnet/solution.sln.DotSettings.user
+  crates/demo/target/debug/demo crates/demo/source.rs.bk crates/demo/rustc-ice-123.txt
+  web/node_modules/package/index.js web/app.tsbuildinfo
+  web/.next/cache/data web/.svelte-kit/generated/server.js web/.vite/deps/data
+  web/.yarn/install-state.gz web/.parcel-cache/data web/.nyc_output/results.json
+  web/.pnpm-store/package web/npm-debug.log.1
+  python/.venv/pyvenv.cfg python/.pytest_cache/data python/.mypy_cache/data
+  python/.ruff_cache/data python/.tox/py/bin/python python/.nox/session/data
+  python/demo.egg-info/PKG-INFO python/.ipynb_checkpoints/notebook.ipynb
+  python/.pixi/envs/default/bin/python
+  jvm/.gradle/cache jvm/App.class jvm/hs_err_pid123.txt
+  native/CMakeFiles/cache native/CMakeCache.txt native/cmake-build-debug/cache
+  go/run.coverprofile swift/.build/debug/app swift/xcuserdata/user/settings
+  dart/.dart_tool/package_config.json dart/.flutter-plugins-dependencies
+  ruby/.yardoc/cache ruby/.byebug_history haskell/.stack-work/cache
+  elixir/.elixir_ls/cache elixir/_build/dev/lib/app/ebin/app.beam
+  r/.Rproj.user/settings terraform/.terraform/providers/cache terraform/local.tfstate
+  os/._resource os/.Trash-1000/cache os/ehthumbs_vista.db
+)
+trackable_paths=(
+  dotnet/app.cs dotnet/app.csproj dotnet/Directory.Build.props dotnet/packages.lock.json
+  crates/demo/src/main.rs crates/demo/Cargo.toml crates/demo/Cargo.lock
+  crates/demo/.cargo/config.toml web/src/app.ts web/src/app.js web/package.json
+  web/package-lock.json web/pnpm-lock.yaml web/yarn.lock web/bun.lock web/bun.lockb
+  web/tsconfig.json web/.yarn/patches/fix.patch web/.yarn/releases/yarn.cjs
+  web/.yarn/plugins/plugin.cjs python/uv.lock python/poetry.lock python/pyproject.toml
+  python/.pixi/config.toml jvm/gradle/wrapper/gradle-wrapper.jar native/Makefile
+  native/CMakeLists.txt native/CMakePresets.json assets/model.obj assets/sdk.dll
+  assets/library.so assets/archive.zip bin/tool build/tasks.sh dist/library.js
+  vendor/library/source.php go/go.mod go/go.sum go/go.work swift/Package.resolved
+  dart/pubspec.lock ruby/Gemfile.lock haskell/cabal.project.freeze r/data/study.RData
+  terraform/main.tf terraform/.terraform.lock.hcl terraform/example.tfvars .env.example
+)
+for name in "${ignored_paths[@]}" "${trackable_paths[@]}"; do
+  mkdir -p "$repo/$(dirname "$name")"
+  touch "$repo/$name"
 done
+for name in "${ignored_paths[@]}"; do
+  git -C "$repo" check-ignore -q -- "$name" || fail "global ignore accepted a generated file: $name"
+done
+for name in "${trackable_paths[@]}"; do
+  if git -C "$repo" check-ignore -q -- "$name"; then
+    fail "global ignore hid a source, shared setting or lockfile: $name"
+  fi
+done
+git -C "$repo" add --all
+for name in "${trackable_paths[@]}"; do
+  git -C "$repo" ls-files --error-unmatch -- "$name" >/dev/null || fail "git add missed: $name"
+done
+for name in "${ignored_paths[@]}"; do
+  if git -C "$repo" ls-files --error-unmatch -- "$name" >/dev/null 2>&1; then
+    fail "git add staged a generated file: $name"
+  fi
+done
+printf '!web/.next/\n!web/.next/**\n' >"$repo/.gitignore"
+git -C "$repo" add .gitignore web/.next/cache/data
+git -C "$repo" ls-files --error-unmatch -- web/.next/cache/data >/dev/null \
+  || fail 'repository exception did not override the global ignore'
+printf 'global ignore: %s generated paths excluded; %s source/configuration paths staged; repository exception accepted\n' \
+  "${#ignored_paths[@]}" "${#trackable_paths[@]}"
 
 commit() {
   printf '%s\n' "$1" >>"$repo/tracked"

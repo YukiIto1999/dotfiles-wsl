@@ -25,7 +25,13 @@ PAT の権限は用途に必要な repository と operation に限定する。�
 ## Git の追跡対象
 
 [`toolchain/git/module.nix`](../../toolchain/git/module.nix) は global の `core.excludesFile` を `~/.config/git/ignore` に向け、[`toolchain/git/assets/ignore`](../../toolchain/git/assets/ignore) を正本として配備する。
-この ignore は secret 用の一般的な file 名に加え、Python の `__pycache__/`、`*.pyc`、`*.pyo` を追跡対象から外す。
+この ignore は OS、editor、secret 用の一般的な file 名に加え、.NET、Rust、JavaScript/TypeScript、Python、JVM、CMake、Go、Swift、Dart、Ruby、Haskell、Elixir、R、Terraform の既定の生成物と local cache を除外する。
+選定には [GitHub の gitignore templates](https://github.com/github/gitignore) を参照し、主に [Visual Studio](https://github.com/github/gitignore/blob/main/VisualStudio.gitignore)、[Rust](https://github.com/github/gitignore/blob/main/Rust.gitignore)、[Node](https://github.com/github/gitignore/blob/main/Node.gitignore) の生成物を採用する。
+全 repository に適用するため、`bin/`、`build/`、`dist/`、`vendor/`、一般的な binary や archive の拡張子は一律に除外しない。
+.NET の `bin/` は `Debug/` と `Release/` の下だけを除外し、独自の configuration や出力先は project の `.gitignore` に記す。
+lockfile、Gradle wrapper、Yarn の patches、plugins、releases、Pixi の config は追跡できる状態を保つ。
+project が生成物や cache を意図的に共有する場合は、その repository の `.gitignore` で対象の親 directory と内容を `!` で再包含する。
+正本は checkout への symlink なので変更はこの WSL ユーザーの Git に即時反映されるが、Windows 側の Git や設定を導入していない clone には適用されない。
 ignore は既に追跡した file には効かず、`git add -f` でも迂回できるため、secret の保護を file 名だけに任せない。
 
 [`toolchain/git/assets/hooks/pre-commit`](../../toolchain/git/assets/hooks/pre-commit) は file 名によらず staged の追加行を検査する。

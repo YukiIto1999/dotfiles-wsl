@@ -4,6 +4,20 @@ Thumbs.db
 Desktop.ini
 ehthumbs.db
 $RECYCLE.BIN/
+.AppleDouble
+.LSOverride
+.localized
+__MACOSX/
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.Trash-*/
+.fuse_hidden*
+.nfs*
+.directory
+Thumbs.db:encryptable
+ehthumbs_vista.db
 
 # Editor
 *~
@@ -15,9 +29,13 @@ $RECYCLE.BIN/
 .vscode/
 *.iml
 *.code-workspace
+.history/
+.vscode-test/
 
 # Log
 *.log
+nohup.out
+*.stackdump
 
 # Nix
 .direnv/
@@ -32,6 +50,154 @@ result-*
 __pycache__/
 *.pyc
 *.pyo
+.venv/
+venv/
+__pypackages__/
+.eggs/
+*.egg-info/
+.tox/
+.nox/
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.pdm-build/
+.pdm-python
+.ipynb_checkpoints/
+**/.pixi/*
+!**/.pixi/config.toml
+.coverage
+.coverage.*
+
+# .NET
+.vs/
+[Oo]bj/
+**/[Bb]in/[Dd]ebug/
+**/[Bb]in/[Rr]elease/
+[Tt]est[Rr]esults/
+BenchmarkDotNet.Artifacts/
+.artifacts/
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.userprefs
+*.DotSettings.user
+_ReSharper*/
+_NCrunch_*/
+.NCrunch_*/
+nCrunchTemp_*/
+*.binlog
+*.coverage
+*.coveragexml
+
+# Rust / Maven
+target/
+*.rs.bk
+mutants.out*/
+rustc-ice-*.txt
+
+# JavaScript / TypeScript
+node_modules/
+jspm_packages/
+.npm/
+.pnpm-store/
+.parcel-cache/
+.next/
+.nuxt/
+.output/
+.svelte-kit/
+.vite/
+.astro/
+.turbo/
+.docusaurus/
+.nyc_output/
+.eslintcache
+.stylelintcache
+.node_repl_history
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+**/.yarn/install-state.gz
+**/.yarn/build-state.yml
+**/.yarn/unplugged/
+**/.angular/cache/
+**/.vuepress/dist/
+**/.vitepress/dist/
+**/.vitepress/cache/
+
+# Java / Kotlin / Gradle
+.gradle/
+.gradletasknamecache
+*.class
+hs_err_pid*
+replay_pid*
+
+# C / C++ / CMake
+CMakeFiles/
+CMakeScripts/
+CMakeCache.txt
+CMakeLists.txt.user
+CMakeUserPresets.json
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+compile_commands.json
+cmake-build-*/
+_deps/
+
+# Go
+*.coverprofile
+profile.cov
+
+# Swift / Xcode
+.build/
+xcuserdata/
+**/Carthage/Build/
+*.dSYM/
+
+# Dart / Flutter
+.dart_tool/
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# Ruby
+.yardoc/
+_yardoc/
+.bundle/
+.byebug_history
+
+# Haskell
+.stack-work/
+.cabal-sandbox/
+dist-newstyle/
+.hpc/
+cabal.project.local
+
+# Elixir / Erlang
+_build/
+.elixir_ls/
+erl_crash.dump
+
+# R
+.Rhistory
+.Rapp.history
+.RData
+.RDataTmp
+.Ruserdata
+.Rproj.user/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.tfstate.lock.info
 
 # AI
 .mcp.json

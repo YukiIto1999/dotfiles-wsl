@@ -199,7 +199,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfac
 | `memory` | `project-memory`の公開MCP | recallを一次資料で検証し、保存の受理と永続化を区別する。 |
 | `repository-research` | `repository-search`のZvec-Grep MCPとnative repository tools | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
 | `web-research` | `web-discovery`、`web-content`、`library-documentation`の公開MCP | 探索と本文取得とlibrary docsを問いに応じて選び、localの問いは`repository-research`へ渡す。 |
-| `environment-design` | ownerの正本と既存Skillの入口 | 標準、dotfiles、upstream、対象project、memoryへ振り分け、Skillの責務や手順の変更は`skill-design`へ渡す。 |
+| `environment-design` | ownerの正本と既存Skillの入口 | 外部toolの採用や差替えは、更新後のcallerと配備契約を確認してから変更を振り分ける。標準、dotfiles、upstream、対象project、memoryへ渡し、Skillの責務や手順の変更は`skill-design`へ渡す。 |
 | `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 一つの目的に閉じた件名を作り、実際のhookを通す。日本語の推敲は条件付きで`ja-writing`へ渡す。 |
 
 `requiresSkills`は無条件に必要な配備前提だけを表す。
@@ -213,6 +213,7 @@ containerを背後に持つMCPも公開Capabilityから使い、Skillからprovi
 採用した外部原版は変更しない。
 phase referenceは同じdirectoryから解決し、別Skillのfrontmatterや特定clientだけのreport directiveを持たない。
 browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置く。
+外部toolの統合は[`agents/fixtures/environment-integration-skill.json`](../../agents/fixtures/environment-integration-skill.json)の代表scenarioで、callerと実装、共通配備と現状調査を区別して評価する。
 
 ## Custom Skillの来歴
 

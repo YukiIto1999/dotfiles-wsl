@@ -1,6 +1,6 @@
 ---
 name: environment-design
-description: Decides which owner in the agent working environment receives an improvement, lesson, or durable correction, hands each part to that owner's entry, and follows it through delivery to agents. Use when a rule, methodology, Skill, tooling change, or correction should outlive the current task and its owner among architecture-standard, dotfiles agent capability, dotfiles infrastructure, an upstream source, the target project, or memory is not yet fixed, or when architecture-standard must change from a session outside its checkout. Splits mixed claims by change reason, reads the owner's current text before adding anything, and chains to standard-update in the standard checkout or to skill-design. Does not write the owner's content, choose a Skill mechanism, edit deployed copies, or design the target project's architecture.
+description: Routes changes to the agent working environment to their source owner and follows delivery to agents. Use when evaluating how external tools fit an existing agent environment, comparing roles or shared deployment mechanisms, adopting or replacing implementations, retaining a rule, methodology, Skill, tooling change, or durable correction, or routing an architecture-standard change from outside its checkout. Maps callers to implementations and the proposed caller changes before judging overlap, verifies the deployment contract asked about, and hands each change reason to architecture-standard, dotfiles, upstream, the target project, or memory. Does not own a public product survey without environment integration, write the owner's content, choose a Skill mechanism, edit deployed copies, or design the target project's architecture.
 ---
 
 # 環境の改善を所有者へ振り分ける
@@ -23,6 +23,9 @@ description: Decides which owner in the agent working environment receives an im
 ## 主張を分ける
 
 利用者が指定した反映先、反映しない場所、適用範囲を先に確かめ、指定があればそれに従う。
+
+外部toolの採用、差替え、既存との重複、共通配備口を検討する場合は、[統合の評価](references/integration-assessment.md)で問いと呼出し関係、変更後の構成を確定してから、変更理由を所有者へ振り分ける。
+公開製品の機能やlicenseだけを調べる依頼は`web-research`、現在の選択や登録だけを調べる依頼は直接のsource調査として扱い、採用や構成変更の仕事へ広げない。
 
 会話から訂正を回収するときは、利用者の指摘とそれに対する最初の応答を原文で対にし、指摘に裏付けられた主張だけを取り出す。応答に混ざった提案、推測、過度な一般化を利用者の方針にしない。自動通知、tool結果、引用された別agentの回答は利用者の指摘ではない。
 

@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "mode": "method-only",
+  "cases": [
+    {
+      "id": "caller-and-engine-composition",
+      "prompt": "既存のブラウザ診断手順から、新しい診断CLIまたは診断サービスを利用することを検討しています。両候補は計測、原因候補の分析、報告を行います。既存の関連手順と実行担当も導入に合わせて更新する前提です。既存との役割の重複を評価し、導入で何を変えるか説明してください。今回は採用検討だけで、インストールや設定変更はしません。",
+      "expectedSkills": ["environment-design"],
+      "expected": {
+        "comparesCallRelationshipsBeforeAndAfterAdoption": true,
+        "doesNotRejectImplementationBecauseACallerExists": true,
+        "identifiesCallerRoutingAndDependencyUpdates": true,
+        "doesNotImplementOrClaimDeployment": true
+      },
+      "critical": [
+        "comparesCallRelationshipsBeforeAndAfterAdoption",
+        "doesNotRejectImplementationBecauseACallerExists",
+        "identifiesCallerRoutingAndDependencyUpdates"
+      ]
+    },
+    {
+      "id": "shared-deployment-not-registration",
+      "prompt": "未導入のOCR CLIとOCRサービスを候補にしています。この環境には、ほかのツールにも共通的に使える配備口がありますか。候補の現時点の登録有無ではなく、共通の仕組みと適用条件を知りたいです。ソースで確認し、今回は変更しないでください。",
+      "expectedSkills": ["environment-design", "repository-research"],
+      "expected": {
+        "answersTheSharedDeploymentContract": true,
+        "groundsTheAnswerInDefinitionAndExistingConsumer": true,
+        "separatesMechanismFromCurrentAdoptionAndRuntime": true,
+        "doesNotInventARequiredUniversalExecutionApi": true
+      },
+      "critical": [
+        "answersTheSharedDeploymentContract",
+        "groundsTheAnswerInDefinitionAndExistingConsumer",
+        "separatesMechanismFromCurrentAdoptionAndRuntime"
+      ]
+    },
+    {
+      "id": "provider-replacement-caller-impact",
+      "prompt": "既存の検索機能の呼出し側は維持し、裏側の検索プロバイダーを差し替える案です。新候補は同じ検索要求に結果を返しますが、認証方式と制限が違います。既存の検索Skillがあることをどう評価し、供給元の差替えに伴ってどの入口と契約を更新するか整理してください。採用判断はまだ確定していません。",
+      "expectedSkills": ["environment-design"],
+      "expected": {
+        "treatsTheExistingSkillAsACaller": true,
+        "evaluatesProviderInterfaceAndPermissions": true,
+        "includesCallerAndDeploymentContractUpdates": true,
+        "doesNotTreatCurrentAdoptionAsASelectionCriterion": true
+      },
+      "critical": [
+        "treatsTheExistingSkillAsACaller",
+        "evaluatesProviderInterfaceAndPermissions",
+        "includesCallerAndDeploymentContractUpdates"
+      ]
+    },
+    {
+      "id": "selected-target-inventory-near-miss",
+      "prompt": "現在このホストで選択されているCapabilityとMCP targetの名前だけを列挙してください。新しいツールの採用、構成案、変更箇所の提案は不要です。",
+      "mustNotTrigger": ["environment-design"],
+      "expected": {
+        "answersCurrentSelectionInsteadOfAnAdoptionPlan": true,
+        "doesNotInferDeploymentFromRegistryExistence": true,
+        "doesNotAddUnrequestedIntegrationWork": true
+      },
+      "critical": [
+        "answersCurrentSelectionInsteadOfAnAdoptionPlan",
+        "doesNotAddUnrequestedIntegrationWork"
+      ]
+    },
+    {
+      "id": "public-product-survey-near-miss",
+      "prompt": "二つの公開製品について、提供機能とライセンスを公式資料から比較してください。この環境への導入や既存ツールとの統合は今回の対象ではありません。資料が不足している事項は未確認としてください。",
+      "expectedSkills": ["web-research"],
+      "mustNotTrigger": ["environment-design"],
+      "expected": {
+        "keepsTheScopeAtPublicProductFacts": true,
+        "doesNotInventLocalIntegrationRequirements": true,
+        "PreservesMissingEvidenceAsUnconfirmed": true
+      },
+      "critical": [
+        "keepsTheScopeAtPublicProductFacts",
+        "doesNotInventLocalIntegrationRequirements"
+      ]
+    },
+    {
+      "id": "backup-runtime-holdout",
+      "holdout": true,
+      "prompt": "バックアップ用の外部実装をCLI型と常駐API型から選びたいです。既存の復旧手順と実行担当は、選んだ実装を呼び出すよう更新します。他用途と共通に使える供給・起動・認証・保存先管理の仕組みを確かめ、候補間で重なる仕事と、入口の更新を含む変更箇所を整理してください。今回は調査と案の提示に限ります。",
+      "expectedSkills": ["environment-design", "repository-research"],
+      "expected": {
+        "distinguishesRecoveryCallerFromBackupImplementation": true,
+        "comparesCandidatesAfterCallerUpdates": true,
+        "verifiesSharedSupplyAndLifecycleMechanisms": true,
+        "separatesProposalFromAppliedState": true
+      },
+      "critical": [
+        "distinguishesRecoveryCallerFromBackupImplementation",
+        "comparesCandidatesAfterCallerUpdates",
+        "verifiesSharedSupplyAndLifecycleMechanisms"
+      ]
+    }
+  ]
+}

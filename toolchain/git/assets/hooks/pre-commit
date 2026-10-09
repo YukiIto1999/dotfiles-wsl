@@ -5,25 +5,26 @@ list_staged() {
   git diff --cached --name-only -z --diff-filter=ACM --no-renames 2>/dev/null || true
 }
 
-filter_pat_leaks() {
+filter_secret_leaks() {
   local f
+  local secret_pattern='(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}|AGE-SECRET-KEY-(PQ-)?1[QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L]{58}|(^|[^A-Za-z0-9_])(apikey_|sk-proj-|sk-ant-|sk-or-v1-)[A-Za-z0-9_-]{20,}'
   while IFS= read -r -d '' f; do
     [[ -z ${f} ]] && continue
     git diff --cached --no-color -- "${f}" \
       | grep -vE '^\+\+\+ ' \
       | grep -E '^\+' \
-      | grep -qE '(ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{20,}' \
+      | grep -E "${secret_pattern}" >/dev/null \
       && printf '%s\n' "${f}"
   done
 }
 
 main() {
   local -a leaks
-  mapfile -t leaks < <(list_staged | filter_pat_leaks)
+  mapfile -t leaks < <(list_staged | filter_secret_leaks)
   (( ${#leaks[@]} == 0 )) && exit 0
 
-  printf 'PAT leak in %s\n' "${leaks[@]}" >&2
-  echo "move secrets to sops/assets/secrets.json (SOPS + age)" >&2
+  printf 'secret leak in %s\n' "${leaks[@]}" >&2
+  echo "move secrets to secrets/sops/assets/secrets.json (SOPS + age)" >&2
   exit 1
 }
 

@@ -5,6 +5,7 @@ set -euo pipefail
 export HOME=$PWD/home GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=$PWD/home/.gitconfig
 mkdir -p "$HOME"
 git config --global core.hooksPath "$HOOKS"
+git config --global core.excludesFile "$GLOBAL_IGNORE"
 git config --global user.name fixture
 git config --global user.email fixture@example.invalid
 git config --global init.defaultBranch main
@@ -39,10 +40,32 @@ fail() {
   exit 1
 }
 
+mkdir -p "$repo/nested/__pycache__"
+touch "$repo/nested/__pycache__/entry" "$repo/nested/module.pyc" "$repo/nested/module.pyo"
+for name in nested/__pycache__/entry nested/module.pyc nested/module.pyo; do
+  git -C "$repo" check-ignore -q -- "$name" || fail "global ignore accepted a Python cache: $name"
+done
+
 commit() {
   printf '%s\n' "$1" >>"$repo/tracked"
   git -C "$repo" add tracked
   git -C "$repo" commit -q -m 'test: 検査の追加' </dev/null
+}
+
+expect_secret_rejected() {
+  local name=$1 expected_secret=$2
+  rm -f "$marker"
+  git -C "$repo" add -- "$name"
+  if git -C "$repo" commit -q -m 'test: 検査の追加' >commit-output 2>&1; then
+    fail "pre-commit accepted a staged secret in: $name"
+  fi
+  test ! -e "$marker" || fail 'repository pre-commit ran after the global check failed'
+  grep -qF -- "$name" commit-output || fail 'secret rejection did not name the file'
+  if grep -qF -- "$expected_secret" commit-output; then
+    fail 'secret rejection exposed the secret in commit output'
+  fi
+  git -C "$repo" rm -q --cached -- "$name"
+  rm -- "$repo/$name"
 }
 
 # 信頼した repository では、dotfiles の検査の後に repository の hook が同じ argv で走る。
@@ -59,15 +82,36 @@ if git -C "$repo" commit -q --allow-empty -m 'fix: update README' 2>/dev/null; t
   fail 'commit-msg accepted an invalid subject'
 fi
 grep -qx 'hook=commit-msg' "$marker" && fail 'repository commit-msg ran after the global check failed'
+for prefix in ghp_ gho_ ghu_ ghs_ ghr_ github_pat_ apikey_ sk-proj- sk-ant- sk-or-v1-; do
+  token="$prefix$(printf 'a%.0s' {1..36})"
+  printf '%s\n' "$token" >"$repo/leak.txt"
+  expect_secret_rejected leak.txt "$token"
+  commit "recovered-$prefix"
+done
+
+{
+  printf '%s\n' "$token"
+  printf 'ordinary added source line %.0s\n' {1..4096}
+} >"$repo/large-diff.txt"
+expect_secret_rejected large-diff.txt "$token"
+commit recovered-large-diff
+
+age_key=$PWD/generated-age-key
+age-keygen -o "$age_key" 2>/dev/null
+age_secret=$(grep -E '^AGE-SECRET-KEY-' "$age_key")
+cp "$age_key" "$repo/日本語の notes.txt"
+expect_secret_rejected '日本語の notes.txt' "$age_secret"
+recipient=$(age-keygen -y "$age_key")
+printf 'creation_rules:\n  - age: %s\n' "$recipient" >"$repo/.sops.yaml"
+printf 'prefixes = ("apikey_", "sk-proj-", "sk-ant-", "sk-or-v1-", "AGE-SECRET-KEY-")\n' \
+  >"$repo/source.py"
+git -C "$repo" add .sops.yaml source.py
+printf 'unstaged_secret = "%s"\n' "$age_secret" >>"$repo/source.py"
 rm -f "$marker"
-printf 'ghp_%s\n' "$(printf 'a%.0s' {1..36})" >"$repo/leak.txt"
-git -C "$repo" add leak.txt
-if git -C "$repo" commit -q -m 'test: 検査の追加' 2>/dev/null; then
-  fail 'pre-commit accepted a staged token'
-fi
-test ! -e "$marker" || fail 'repository pre-commit ran after the global check failed'
-git -C "$repo" rm -q --cached leak.txt
-rm "$repo/leak.txt"
+git -C "$repo" commit -q -m 'test: 検査の追加'
+grep -qx 'hook=pre-commit' "$marker" || fail 'repository pre-commit did not run after secret removal'
+git -C "$repo" restore -- source.py
+rm -- "$age_key"
 
 # repository の hook の失敗は、その終了 status のまま git へ返る。
 rm -f "$marker"

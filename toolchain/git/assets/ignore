@@ -28,6 +28,11 @@ result
 result-*
 !result-*.*
 
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
 # AI
 .mcp.json
 .claude/settings.local.json

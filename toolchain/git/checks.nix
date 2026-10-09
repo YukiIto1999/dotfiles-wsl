@@ -150,12 +150,14 @@ in
     pkgs.runCommandLocal "check-git-hook-dispatch"
       {
         nativeBuildInputs = with pkgs; [
+          age
           bash
           coreutils
           git
           gnugrep
         ];
         HOOKS = hooksDirectory;
+        GLOBAL_IGNORE = ./assets/ignore;
       }
       ''
         bash ${./fixtures/hooks.sh}

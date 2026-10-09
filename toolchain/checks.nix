@@ -224,10 +224,10 @@ in
           printf '%s\n' "$token" > "./$name"
           git add -- "./$name"
           if bash "$hook" 2> stderr; then
-            echo "pre-commit accepted a token in: $name" >&2
+            echo "pre-commit accepted a secret in: $name" >&2
             exit 1
           fi
-          grep -Fq "PAT leak in $name" stderr
+          grep -Fq -- "$name" stderr
           git rm -q --cached -- "./$name"
           rm -- "./$name"
         done

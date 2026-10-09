@@ -6,7 +6,10 @@ Git の global 設定は `core.hooksPath` を `~/.config/git/hooks` に向け、
 
 ## 実行の順序
 
-dispatcher は dotfiles の検査を先に実行し、通った場合だけ repository の `.githooks/<hook>` を同じ引数と標準入力で実行する。どちらかが失敗すると、その終了 status で Git の操作を止める。dotfiles の検査は pre-commit の GitHub token 検出、commit-msg の件名規約、pre-push の検証で、それ以外の hook では repository 側だけが走る。
+dispatcher は dotfiles の検査を先に実行し、通った場合だけ repository の `.githooks/<hook>` を同じ引数と標準入力で実行する。
+どちらかが失敗すると、その終了 status で Git の操作を止める。
+dotfiles の検査は pre-commit の既知の secret 形式の検出、commit-msg の件名規約、pre-push の検証で、それ以外の hook では repository 側だけが走る。
+pre-commit の検査対象と制限は [セキュリティ境界](../architecture/security.md#git-の追跡対象)を参照する。
 
 dispatcher を置く hook は、githooks(5) の client 側 hook のうち repository が使う名前である。現在の一覧は次で確かめる。
 

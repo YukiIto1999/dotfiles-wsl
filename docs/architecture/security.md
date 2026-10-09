@@ -22,6 +22,19 @@ HTTPS の Git は、`github.com` 全体で `gh` の credential helper を使い�
 
 PAT の権限は用途に必要な repository と operation に限定する。設定ユーザー、root、PAT を読む MCP process と Git credential helper は credential の信頼境界に含まれる。`gh auth login` や `gh auth switch` で別の credential store を作らず、SOPS の宣言経路へ集約する。
 
+## Git の追跡対象
+
+[`toolchain/git/module.nix`](../../toolchain/git/module.nix) は global の `core.excludesFile` を `~/.config/git/ignore` に向け、[`toolchain/git/assets/ignore`](../../toolchain/git/assets/ignore) を正本として配備する。
+この ignore は secret 用の一般的な file 名に加え、Python の `__pycache__/`、`*.pyc`、`*.pyo` を追跡対象から外す。
+ignore は既に追跡した file には効かず、`git add -f` でも迂回できるため、secret の保護を file 名だけに任せない。
+
+[`toolchain/git/assets/hooks/pre-commit`](../../toolchain/git/assets/hooks/pre-commit) は file 名によらず staged の追加行を検査する。
+対象は GitHub token、age の標準鍵と post-quantum 鍵の秘密鍵形式、および `apikey_`、`sk-proj-`、`sk-ant-`、`sk-or-v1-` に英数字、`_`、`-` が 20 文字以上続く API token 形式に限る。
+一致する追加行を含む commit は拒み、出力には対象の file 名と `secrets/sops/assets/secrets.json` への移動案内だけを含め、鍵本文や token 値を出さない。
+公開 age recipient と、prefix だけを記す source は拒否しない。
+未知の形式、分割や符号化した secret、既存の commit 履歴は検査せず、hook の上書きや `--no-verify` でも迂回できるため、全ての credential を検出する保証はない。
+[`toolchain/git/fixtures/hooks.sh`](../../toolchain/git/fixtures/hooks.sh) は `age-keygen` で検証用の秘密鍵を実行時に生成し、実際の commit の拒否と、secret を staged から外して削除した後の commit を検査する。
+
 ## agentgateway
 
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)のlistenerはportだけを指定し、client認証を設けない。

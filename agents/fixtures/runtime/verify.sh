@@ -695,6 +695,8 @@ expect_open_gate() {
 check_receipt_boundaries() {
   local control=$fixture/stall-control previous=$PWD
   local name utility when pattern initial_runs retry_runs repository litter_before receipts_before status wrapper
+  local proof limit foreign process_stat boot_id
+  local -a process_fields
   local -x DOTFILES_AGENT_TEST_STALL=$control
   local -x STALL_RUNS=
   local -x PATH="$fixture/stall-bin:$PATH"
@@ -854,6 +856,77 @@ SCENARIOS
       test "$(cat "$fixture/$name-result")" = newnew
     fi
     test "$(stall_litter)" = "$litter_before"
+  done
+
+  for name in partial-marker producer-identity; do
+    repository=$fixture/stall-$name
+    git init -q "$repository"
+    printf '.PHONY: verify\nverify:\n\tprintf once >> ../%s-result\n' "$name" >"$repository/Makefile"
+    git -C "$repository" add Makefile
+    git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+    cd "$repository"
+    if [ "$name" = partial-marker ]; then
+      printf 'mv after *.verified\n' >"$control"
+      rm -f "$control.ready" "$control.release"
+    fi
+    "$CANCELLABLE_VERIFY" -- make verify &
+    wrapper=$!
+    if [ "$name" = partial-marker ]; then
+      for _ in $(seq 1 200); do
+        [ ! -s "$control.ready" ] || break
+        sleep 0.05
+      done
+      if [ ! -s "$control.ready" ]; then
+        kill -TERM "$wrapper"
+        wait "$wrapper" || true
+        echo 'T1 never reached the partial completion boundary' >&2
+        exit 1
+      fi
+      proof=$(find "$home/.cache/dotfiles-wsl/verification" -type f -name "*.$wrapper.verified")
+      limit=$(($(stat -c %s "$proof") + 14))
+      prlimit --pid "$wrapper" --fsize="$limit:"
+      touch "$control.release"
+      status=0
+      wait "$wrapper" || status=$?
+      rm -f "$control" "$control.ready" "$control.release"
+      test "$status" -ne 0
+      expect_closed_gate "$repository" 'failed partial completion'
+      test ! -e "$proof"
+      "$CANCELLABLE_VERIFY" -- make verify &
+      wait "$!"
+    else
+      wait "$wrapper"
+    fi
+    expect_open_gate "$repository" "$name completed run"
+    test "$(cat "$fixture/$name-result")" = once
+
+    if [ "$name" = producer-identity ]; then
+      proof=$(find "$home/.cache/dotfiles-wsl/verification" -type f -name "*.$wrapper.verified")
+      truncate -s -1 "$proof"
+      expect_closed_gate "$repository" 'unterminated completion marker'
+      printf '\n' >>"$proof"
+      expect_open_gate "$repository" 'restored complete marker'
+      (
+        sleep 60 &
+        foreign=$!
+        trap 'kill "$foreign" 2>/dev/null || true; wait "$foreign" 2>/dev/null || true' EXIT
+        mv -- "$proof" "${proof%.*.verified}.$foreign.verified"
+        proof=${proof%.*.verified}.$foreign.verified
+        expect_open_gate "$repository" 'modeled reused producer PID'
+        process_stat=$(<"/proc/$foreign/stat")
+        read -r -a process_fields <<<"${process_stat##*) }"
+        IFS= read -r boot_id </proc/sys/kernel/random/boot_id
+        if [ "$boot_id" = 00000000-0000-0000-0000-000000000000 ]; then
+          boot_id=11111111-1111-1111-1111-111111111111
+        else
+          boot_id=00000000-0000-0000-0000-000000000000
+        fi
+        sed -i \
+          -e "s/^boot_id=.*/boot_id=$boot_id/" \
+          -e "s/^producer_start_time=.*/producer_start_time=${process_fields[19]}/" "$proof"
+        expect_open_gate "$repository" 'modeled previous boot producer'
+      )
+    fi
   done
 
   name=survivor

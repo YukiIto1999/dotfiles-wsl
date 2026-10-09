@@ -98,21 +98,40 @@ receipt_token_is_valid() {
   [[ $1 =~ ^[0-9]{16}\.[0-9]+$ ]]
 }
 
+producer_start_time() {
+  local process_stat
+  local -a fields
+  process_stat=$(<"/proc/$1/stat") 2>/dev/null || return 1
+  read -r -a fields <<<"${process_stat##*) }"
+  [[ ${fields[19]-} =~ ^[0-9]+$ ]] || return 1
+  printf '%s\n' "${fields[19]}"
+}
+
 verified_receipt_token=
 verified_receipt_exists() {
-  local candidate token producer
+  local candidate token producer boot_id start_time current_start_time current_boot_id
   local -a record
+  IFS= read -r current_boot_id </proc/sys/kernel/random/boot_id || return 1
   verified_receipt_token=
   for candidate in "$1/$2".*.verified; do
     [ -f "$candidate" ] || continue
-    mapfile -t record <"$candidate"
-    [ "${#record[@]}" -gt 0 ] || continue
-    [ "${record[-1]-}" = completed=true ] || continue
+    mapfile record <"$candidate"
+    [ "${#record[@]}" -eq 7 ] || continue
+    [ "${record[0]}" = $'version=4\n' ] || continue
+    [ "${record[-1]}" = $'completed=true\n' ] || continue
     token=${candidate#"$1/$2."}
     token=${token%.verified}
     receipt_token_is_valid "$token" || continue
     producer=${token##*.}
-    kill -0 "$producer" 2>/dev/null && continue
+    boot_id=${record[4]#boot_id=}
+    boot_id=${boot_id%$'\n'}
+    start_time=${record[5]#producer_start_time=}
+    start_time=${start_time%$'\n'}
+    [[ $boot_id =~ ^[A-Fa-f0-9-]+$ && $start_time =~ ^[0-9]+$ ]] || continue
+    if [ "$boot_id" = "$current_boot_id" ] && [ -e "/proc/$producer" ]; then
+      current_start_time=$(producer_start_time "$producer") || continue
+      [ "$start_time" != "$current_start_time" ] || continue
+    fi
     if [ -z "$verified_receipt_token" ] \
       || [ "$((10#${token%%.*}))" -gt "$((10#${verified_receipt_token%%.*}))" ]; then
       verified_receipt_token=$token
@@ -122,7 +141,7 @@ verified_receipt_exists() {
 }
 
 command_record() {
-  local repo=${1:-$PWD} text=${2:-} token=${3:-} top state fingerprint
+  local repo=${1:-$PWD} text=${2:-} token=${3:-} top state fingerprint boot_id start_time
   receipt_token_is_valid "$token" || fail 'record には正しい --pending が要る'
   top=$(repo_top_of "$repo") || return 0
   [ "$(realpath -e -- "$repo")" = "$(realpath -e -- "$top")" ] || return 0
@@ -130,12 +149,14 @@ command_record() {
   # 後段の再採取でsourceが結び直されるため同じtokenへの上書きは不可
   [ ! -f "$state/.pending.$token" ] || return 0
   [ -n "$text" ] && [ "$text" = "$(entry_of "$top")" ] || return 0
+  IFS= read -r boot_id </proc/sys/kernel/random/boot_id || return 0
+  start_time=$(producer_start_time "${token##*.}") || return 0
   ensure_dir "$state"
   fingerprint=$(source_fingerprint "$top")
   receipt_scratch=$(mktemp "$state/.receipt.$token.XXXXXXXX")
   trap 'rm -f -- "$receipt_scratch"' EXIT
-  printf 'version=3\nsource=%s\ncommand=%s\nat=%s\n' \
-    "$fingerprint" "$text" "$(date -Iseconds)" >"$receipt_scratch"
+  printf 'version=4\nsource=%s\ncommand=%s\nat=%s\nboot_id=%s\nproducer_start_time=%s\n' \
+    "$fingerprint" "$text" "$(date -Iseconds)" "$boot_id" "$start_time" >"$receipt_scratch"
   mv -T -- "$receipt_scratch" "$state/.pending.$token"
   trap - EXIT
 }

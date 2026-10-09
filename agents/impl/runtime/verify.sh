@@ -41,7 +41,7 @@ test "$#" -gt 0 || usage
 if ! top=$(git rev-parse --show-toplevel 2>/dev/null); then
   exec @verificationCache@ -- "$@"
 fi
-trap 'interrupted=true; [ -z "$bounded_pid" ] || kill -s TERM "$bounded_pid" 2>/dev/null || true' HUP INT TERM
+trap 'interrupted=true; [ -z "$bounded_pid" ] || kill -s TERM "$bounded_pid" 2>/dev/null || true' HUP INT TERM XFSZ
 entry_file=$(mktemp)
 trap 'rm -f -- "$entry_file"' EXIT
 if ! refresh_remaining; then
@@ -78,7 +78,7 @@ if [ -n "$entry" ] && [ "$*" = "$entry" ] \
     fi
     if [ "$status" -eq 0 ] && [ "$interrupted" = false ]; then
       if [ -n "$published" ]; then
-        printf 'completed=true\n' >>"$published"
+        printf 'completed=true\n' >>"$published" || status=$?
       fi
       refresh_remaining || status=124
     fi

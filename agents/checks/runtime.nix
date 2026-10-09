@@ -662,6 +662,7 @@ in
           pkgs.gnused
           pkgs.jq
           pkgs.nodejs
+          pkgs.util-linux
         ];
         VERIFY = lib.getExe runtime.verify;
         SHORT_BUDGET_VERIFY = lib.getExe shortBudgetVerify;

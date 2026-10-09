@@ -662,6 +662,7 @@ in
           pkgs.gnused
           pkgs.jq
           pkgs.nodejs
+          pkgs.strace
           pkgs.util-linux
         ];
         VERIFY = lib.getExe runtime.verify;

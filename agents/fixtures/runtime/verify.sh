@@ -696,6 +696,7 @@ check_receipt_boundaries() {
   local control=$fixture/stall-control previous=$PWD
   local name utility when pattern initial_runs retry_runs repository litter_before receipts_before status wrapper
   local proof limit foreign process_stat boot_id
+  local denial_trace
   local -a process_fields
   local -x DOTFILES_AGENT_TEST_STALL=$control
   local -x STALL_RUNS=
@@ -913,8 +914,21 @@ SCENARIOS
         mv -- "$proof" "${proof%.*.verified}.$foreign.verified"
         proof=${proof%.*.verified}.$foreign.verified
         expect_open_gate "$repository" 'modeled reused producer PID'
+        status=0
+        strace -f -qq -e trace=openat -P "/proc/$foreign/stat" \
+          -e inject=openat:error=EACCES -o "$fixture/producer-stat-denial.log" \
+          "$GATE" check --repo "$repository" >/dev/null 2>&1 || status=$?
+        denial_trace=$(<"$fixture/producer-stat-denial.log")
+        if [ "$status" -ne 1 ] \
+          || ! [[ $denial_trace == *"/proc/$foreign/stat"*EACCES*"(INJECTED)"* ]]; then
+          echo 'gate did not reject a denied producer identity read' >&2
+          exit 1
+        fi
+        expect_open_gate "$repository" 'recovered producer identity read'
         process_stat=$(<"/proc/$foreign/stat")
         read -r -a process_fields <<<"${process_stat##*) }"
+        sed -i "s/^producer_start_time=.*/producer_start_time=${process_fields[19]}/" "$proof"
+        expect_closed_gate "$repository" 'complete receipt with matching live producer'
         IFS= read -r boot_id </proc/sys/kernel/random/boot_id
         if [ "$boot_id" = 00000000-0000-0000-0000-000000000000 ]; then
           boot_id=11111111-1111-1111-1111-111111111111

@@ -63,10 +63,12 @@ require_clean_source() {
 # git が hook へ渡す GIT_DIR などを入口へ渡すと、入口の中で一時 repository に向けた git の操作が
 # push 元の repository を書き換えるため、git の repository 固有の環境変数を外して起動する。
 run_within_budget() {
-  local top=$1 pid status
+  local top=$1 pid status remaining
   shift
+  remaining=$((budget_seconds - (SECONDS - started)))
+  [ "$remaining" -gt 0 ] || return 124
   # shellcheck disable=SC2046
-  (cd "$top" && unset $(git rev-parse --local-env-vars) && exec timeout --kill-after=30s "$budget_seconds" "$@") </dev/null &
+  (cd "$top" && unset $(git rev-parse --local-env-vars) && exec timeout --kill-after=30s "$remaining" "$@") </dev/null &
   pid=$!
   trap 'interrupted=1; kill -TERM -- "-$pid" 2>/dev/null || true' INT TERM HUP
   while :; do
@@ -79,18 +81,27 @@ run_within_budget() {
   return "$status"
 }
 
+require_run_success() {
+  local status=$1 phase=$2 elapsed=$((SECONDS - started))
+  if [ "$interrupted" -eq 1 ]; then
+    printf 'verify-push: %sを中断した(経過 %s)\n' "$phase" "$(duration "$elapsed")" >&2
+    exit 130
+  fi
+  if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && [ "$elapsed" -ge "$budget_seconds" ]; then
+    printf 'verify-push: %sが予算 %s を超えたため止めた(経過 %s)。必要な検査は減らさず、重複実行、影響範囲の過剰な拡大、起動と build の固定費を見直して実行計画を作り直す\n' \
+      "$phase" "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
+    exit 1
+  fi
+  if [ "$status" -ne 0 ]; then
+    printf 'verify-push: %sに失敗した(終了 %d、経過 %s)\n' "$phase" "$status" "$(duration "$elapsed")" >&2
+    exit "$status"
+  fi
+}
+
 main() {
-  local top entry head ref object started elapsed status=0
+  local top entry entry_file head ref object started=$SECONDS elapsed status=0 interrupted=0
   local -a command pushed=() stale=()
   top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-  # 入口解決失敗を未宣言とする扱いの不採用: 未検証pushの誤受理の回避
-  entry=$("$verification_entry" --repo "$top" verify-push) || {
-    status=$?
-    printf 'verify-push: 入口を解決できず、検証を始められない(終了 %d)\n' "$status" >&2
-    exit "$status"
-  }
-  [ -n "$entry" ] || exit 0
-
   # 削除refへのHEAD一致要求の不採用: Gitがlocal objectとして渡すゼロ値
   head=$(commit_of "$top" HEAD)
   object=
@@ -104,11 +115,20 @@ main() {
     fi
   done
   [ "${#pushed[@]}" -gt 0 ] || exit 0
+  entry_file=$(mktemp)
+  trap 'rm -f -- "$entry_file"' EXIT
+  run_within_budget "$top" "$verification_entry" --repo "$top" verify-push >"$entry_file" || status=$?
+  entry=$(cat "$entry_file")
+  rm -f -- "$entry_file"
+  trap - EXIT
 
-  if [ -n "${DOTFILES_VERIFY_PUSH_BYPASS-}" ]; then
-    record_bypass "$top" "$entry" "$DOTFILES_VERIFY_PUSH_BYPASS"
+  if [ -n "${DOTFILES_VERIFY_PUSH_BYPASS-}" ] \
+    && { [ "$status" -ne 0 ] || [ -n "$entry" ]; }; then
+    record_bypass "$top" "${entry:-未解決}" "$DOTFILES_VERIFY_PUSH_BYPASS"
     exit 0
   fi
+  require_run_success "$status" '入口の解決'
+  [ -n "$entry" ] || exit 0
 
   if [ "${#stale[@]}" -gt 0 ]; then
     refuse "送る ref(${stale[*]})の commit が検証する HEAD(${head:-無し})と異なる。送る commit を checkout してから push する"
@@ -117,24 +137,10 @@ main() {
 
   read -r -a command <<<"$entry"
   printf 'verify-push: %s を実行する(予算 %s)\n' "$entry" "$(duration "$budget_seconds")" >&2
-  interrupted=0
-  started=$SECONDS
   run_within_budget "$top" "${command[@]}" || status=$?
   elapsed=$((SECONDS - started))
 
-  if [ "$interrupted" -eq 1 ]; then
-    printf 'verify-push: 中断した(経過 %s)\n' "$(duration "$elapsed")" >&2
-    exit 130
-  fi
-  if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && [ "$elapsed" -ge "$budget_seconds" ]; then
-    printf 'verify-push: 予算 %s を超えたため止めた(経過 %s)。必要な検査は減らさず、重複実行、影響範囲の過剰な拡大、起動と build の固定費を見直して実行計画を作り直す\n' \
-      "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
-    exit 1
-  fi
-  if [ "$status" -ne 0 ]; then
-    printf 'verify-push: 失敗した(終了 %d、経過 %s)\n' "$status" "$(duration "$elapsed")" >&2
-    exit "$status"
-  fi
+  require_run_success "$status" '検証'
 
   if [ "$(commit_of "$top" HEAD)" != "$head" ]; then
     refuse "検査の間に HEAD が $head から動いた。通った検査は送る commit のものではない"

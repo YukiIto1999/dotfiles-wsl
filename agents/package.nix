@@ -132,19 +132,38 @@ let
         ]
         (builtins.readFile ./impl/runtime/gate.sh);
   };
-  verify = pkgs.writeShellApplication {
-    name = "dotfiles-agent-verify";
+  verificationCache = pkgs.writeShellApplication {
+    name = "dotfiles-agent-verification-cache";
     runtimeInputs = with pkgs; [
       coreutils
       diffutils
       git
     ];
     text =
-      builtins.replaceStrings
-        [ "@cacheRootRelative@" "@gate@" ]
-        [ cacheRootRelative "${gate}/bin/dotfiles-agent-gate" ]
-        (builtins.readFile ./impl/runtime/verify.sh);
+      builtins.replaceStrings [ "@cacheRootRelative@" "@gate@" ] [ cacheRootRelative (lib.getExe gate) ]
+        (builtins.readFile ./impl/runtime/verify-cache.sh);
   };
+  mkVerify =
+    {
+      t1BudgetSeconds ? 120,
+    }:
+    pkgs.writeShellApplication {
+      name = "dotfiles-agent-verify";
+      runtimeInputs = with pkgs; [
+        coreutils
+        git
+      ];
+      text =
+        builtins.replaceStrings
+          [ "@t1BudgetSeconds@" "@gate@" "@verificationCache@" ]
+          [
+            (toString t1BudgetSeconds)
+            (lib.escapeShellArg (lib.getExe gate))
+            (lib.escapeShellArg (lib.getExe verificationCache))
+          ]
+          (builtins.readFile ./impl/runtime/verify.sh);
+    };
+  verify = mkVerify { };
   mkWrapper =
     {
       client,
@@ -163,6 +182,7 @@ in
     agentShims
     launcher
     mkLauncher
+    mkVerify
     gate
     gc
     mkAgentShims

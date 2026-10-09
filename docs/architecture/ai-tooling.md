@@ -99,6 +99,7 @@ runtimeはsession ID、sessionを始めたproject、owner process、boot ID、�
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
 fileごとのprocess起動を避けるため、tracked fileのmetadataと内容hashはコマンド行長の上限内でまとめて取得する。
 読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
+宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決から成功証跡の保存までを120秒で制限し、予算超過時は検証processの子孫を止めて成功として扱わない。
 
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
 OMP hook は write の本文と read の全文を JSON に含めたまま gate の stdin へ送り、read の証明を照合する Node process へも pipe で渡す。

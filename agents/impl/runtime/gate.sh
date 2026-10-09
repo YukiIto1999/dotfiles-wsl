@@ -52,7 +52,7 @@ source_fingerprint() {
   local repo=$1 head path
   head=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || printf 'none')
   {
-    printf 'dotfiles-agent-gate-v1\0head\0%s\0tracked\0' "$head"
+    printf 'dotfiles-agent-gate-v2\0head\0%s\0tracked\0' "$head"
     git -C "$repo" -c color.ui=false diff --binary --full-index --no-ext-diff --no-textconv HEAD --
     printf '\0untracked\0'
     while IFS= read -r -d '' path; do

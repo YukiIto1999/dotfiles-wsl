@@ -1207,6 +1207,37 @@ set -e
 test "$broken_stop_status" -eq 2
 test -s "$fixture/broken-stop.stderr"
 
+budget_repo=$fixture/budget-repo
+git init -q "$budget_repo"
+printf 'scripts.verify.exec = "true";\n' >"$budget_repo/devenv.nix"
+git -C "$budget_repo" add devenv.nix
+git -C "$budget_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+mkdir "$fixture/budget-bin"
+cat >"$fixture/budget-bin/devenv" <<'SCRIPT'
+#!/usr/bin/env bash
+if [ "${DEADLINE_SLOW-}" = 1 ]; then
+  (sleep 3; touch "$DEADLINE_LATE") &
+  wait
+fi
+SCRIPT
+chmod +x "$fixture/budget-bin/devenv"
+sed -i "1c#!$BASH" "$fixture/budget-bin/devenv"
+cd "$budget_repo"
+set +e
+PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=1 DEADLINE_LATE=$fixture/deadline-late \
+  "$SHORT_BUDGET_VERIFY" -- devenv shell -- verify
+deadline_status=$?
+set -e
+test "$deadline_status" -eq 124
+if "$GATE" check --repo "$budget_repo" >/dev/null 2>&1; then
+  echo 'the timed-out T1 left an accepted source receipt' >&2
+  exit 1
+fi
+sleep 4
+test ! -e "$fixture/deadline-late"
+PATH="$fixture/budget-bin:$PATH" "$SHORT_BUDGET_VERIFY" -- devenv shell -- verify
+"$GATE" check --repo "$budget_repo" >/dev/null
+
 check_skill_learning
 check_conformance_completion
 

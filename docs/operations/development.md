@@ -52,6 +52,8 @@ dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
 T1の`verify`は全unitの検査と全hostおよび既存variantのtoplevel評価を行い、T2の`verify-push`はunitの検査とsystem closureを実現する。
 `verify-full`は既存の全量flake checkを呼び、CIと明示的な全量確認の経路を保つ。
 Nix buildの成功だけでは終了gateの証跡にならず、宣言した入口を既存wrapperで通した同じsourceに限り受理される。
+T1は入口の解決、指紋の取得、検査、証跡の保存を含めて120秒以内とし、wrapperが残り時間で停止して非ゼロ終了にする。
+nativeな`verify`自身も検査を120秒で止めるが、wrapperを通さない実行は終了gateを開かない。
 検査を変更したときは、予算を理由に必須の検査をT3へ移さず、Nixの依存と再利用を見直す。
 未追跡fileはNixのGit sourceに含まれないため、検証前に`git add`または`git add -N`で追跡する。
 checkの一覧は複製せず、どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。

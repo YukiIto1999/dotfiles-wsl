@@ -196,6 +196,35 @@ expect_refused 'push whose verify-push entry could not be resolved' \
   "$FAILING_ENTRY_HOOKS" "$declared" refs/heads/main
 test ! -e "$MARKER" || fail 'verify-push ran although its entry could not be resolved'
 
+native=$(new_repo native)
+printf '{ outputs = { self }: { apps.x86_64-linux.verify-push = { type = "app"; program = "/bin/false"; }; }; }\n' \
+  >"$native/flake.nix"
+git -C "$native" add flake.nix
+git -C "$native" commit -q -m 'test: 検査の追加'
+printf 'untracked\n' >"$native/untracked"
+export NIX_REMOTE=$PWD/nix-store
+export NIX_CONFIG='experimental-features = nix-command flakes'
+expect_refused 'native push with excluded source' "$HOOKS" "$native" refs/heads/main
+DOTFILES_VERIFY_PUSH_BYPASS='native fixture の未追跡source' push "$HOOKS" "$native" \
+  || fail 'the native bypass was blocked by untracked source'
+test "$(remote_ref "$native" refs/heads/main)" = "$(git -C "$native" rev-parse HEAD)" \
+  || fail 'the native bypass did not update the remote'
+grep -qF "repo=$native" "$bypass_log" || fail 'the native bypass was not recorded'
+grep -qF 'entry=未解決' "$bypass_log" || fail 'the native bypass lost its unresolved entry'
+printf '{ outputs =\n' >"$native/flake.nix"
+DOTFILES_VERIFY_PUSH_BYPASS='native fixture の評価失敗' push "$HOOKS" "$native" HEAD:refs/heads/broken \
+  || fail 'the native bypass was blocked by failed evaluation'
+grep -qF 'reason=native fixture の評価失敗' "$bypass_log" || fail 'the failed-evaluation bypass lost its reason'
+push "$HOOKS" "$native" --delete broken \
+  || fail 'a source-free deletion was blocked by an invalid flake'
+test -z "$(remote_ref "$native" refs/heads/broken)" || fail 'the native deletion did not reach the remote'
+unset NIX_REMOTE NIX_CONFIG
+
+rm -f "$LATE"
+expect_refused 'push with stalled entry resolution' "$SLOW_ENTRY_HOOKS" "$declared" refs/heads/main
+sleep 4
+test ! -e "$LATE" || fail 'entry resolution descendants survived the push deadline'
+
 # 入口は git が hook へ渡す GIT_DIR などを受け継がない。受け継ぐと、入口の中で一時 repository に
 # 向けた git の操作が、push 元の repository の設定と index を書き換える。
 linked_main=$(new_repo linked-main)

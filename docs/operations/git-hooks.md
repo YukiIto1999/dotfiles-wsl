@@ -64,7 +64,7 @@ annotated tagは参照するcommitで比較し、差分を隠すassume-unchanged
 検証後にHEAD、source、indexの印が変わっていれば、入口が成功してもpushを拒否する。
 入口を宣言しないrepositoryと、送信sourceのない削除だけのpushは検証を要求しない。
 
-予算は15分で、超えた検証を子孫のprocessごと止めてpushを拒否する。
+予算は入口の解決を含めて15分で、超えた検証を子孫のprocessごと止めてpushを拒否する。
 必須検査を`verify-full`へ移すのでなく、必要な保証を保ったまま重複実行、選択範囲、起動とbuildの固定費を見直す。
 成功、失敗、中断時には経過時間をstderrへ出す。
 
@@ -75,3 +75,4 @@ DOTFILES_VERIFY_PUSH_BYPASS='<理由>' git push
 ```
 
 省いた push は、時刻、repository、HEAD、入口、理由を `~/.local/state/dotfiles-wsl/git/verify-push-bypass.log` へ追記する。この省略は利用者だけが使い、agent は使わない。`git push --no-verify` は repository の hook も含めて全てを飛ばし、記録も残らないため使わない。
+入口の解決自体が失敗した場合も、利用者が理由付きbypassを指定すれば検証を省き、入口を`未解決`として記録する。

@@ -68,7 +68,7 @@ let
   shortBudgetHooks = import ./package.nix {
     inherit lib pkgs;
     verificationEntry = hostConfig.dotfiles.toolchain.verification.entry;
-    pushBudgetSeconds = 1;
+    pushBudgetSeconds = 2;
   };
   shortBudgetHooksDirectory = pkgs.linkFarm "git-hooks-short-budget" (
     lib.mapAttrs (_: lib.getExe) shortBudgetHooks
@@ -83,6 +83,21 @@ let
   };
   failingEntryHooksDirectory = pkgs.linkFarm "git-hooks-failing-entry" (
     lib.mapAttrs (_: lib.getExe) failingEntryHooks
+  );
+  slowEntryHooks = import ./package.nix {
+    inherit lib pkgs;
+    verificationEntry = pkgs.writeShellApplication {
+      name = "slow-verification-entry";
+      runtimeInputs = [ pkgs.coreutils ];
+      text = ''
+        (sleep 3; touch "$LATE") &
+        wait
+      '';
+    };
+    pushBudgetSeconds = 1;
+  };
+  slowEntryHooksDirectory = pkgs.linkFarm "git-hooks-slow-entry" (
+    lib.mapAttrs (_: lib.getExe) slowEntryHooks
   );
 in
 {
@@ -188,6 +203,7 @@ in
         HOOKS = hooksDirectory;
         SHORT_BUDGET_HOOKS = shortBudgetHooksDirectory;
         FAILING_ENTRY_HOOKS = failingEntryHooksDirectory;
+        SLOW_ENTRY_HOOKS = slowEntryHooksDirectory;
       }
       ''
         bash ${./fixtures/pre-push.sh}

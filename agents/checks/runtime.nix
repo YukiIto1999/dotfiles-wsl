@@ -18,6 +18,7 @@ let
     inherit lib pkgs verificationEntry;
     runtimeContract = runtimePackageContract;
   };
+  shortBudgetVerify = runtime.mkVerify { t1BudgetSeconds = 1; };
   customSkillRootRuntime = import ../package.nix {
     inherit lib pkgs verificationEntry;
     runtimeContract = runtimePackageContract // {
@@ -492,14 +493,11 @@ in
         grep -Fq '68719476736' ${lib.getExe runtime.gc}
         grep -Fq '51539607552' ${lib.getExe runtime.gc}
         grep -Fq 'inactive_before=$((now - 30 * 24 * 60 * 60))' ${lib.getExe runtime.gc}
-        grep -Fq 'verification_root="$HOME/.cache/dotfiles-wsl/verification"' ${lib.getExe runtime.verify}
 
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
-        grep -Fq 'verification_root="$HOME/.cache/dotfiles-wsl-mutated/verification"' ${lib.getExe relativeCacheRootMutationRuntime.verify}
         ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
         ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
-        ! grep -Fxq 'verification_root="$HOME/.cache/dotfiles-wsl/verification"' ${lib.getExe relativeCacheRootMutationRuntime.verify}
         touch $out
       '';
 
@@ -627,6 +625,7 @@ in
           pkgs.nodejs
         ];
         VERIFY = lib.getExe runtime.verify;
+        SHORT_BUDGET_VERIFY = lib.getExe shortBudgetVerify;
         GATE = lib.getExe runtime.gate;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
         CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;

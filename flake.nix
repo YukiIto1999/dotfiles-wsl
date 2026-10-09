@@ -157,13 +157,15 @@
           { dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ]; }
         ]).config;
 
+      mergeCheckParts = import ./checks/impl/merge-check-parts.nix { inherit lib; };
       hostToplevelChecks = lib.mapAttrs' (
         hostName: machine: lib.nameValuePair "${hostName}-toplevel" machine.config.system.build.toplevel
       ) nixosSystems;
 
-      closureChecks = hostToplevelChecks // {
-        nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel;
-      };
+      closureChecks = mergeCheckParts [
+        hostToplevelChecks
+        { nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel; }
+      ];
 
       unitChecks =
         let
@@ -210,7 +212,7 @@
           # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
           helpers = {
             execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
-            mergeCheckParts = import ./checks/impl/merge-check-parts.nix { inherit lib; };
+            inherit mergeCheckParts;
             unitOwnership = import ./checks/impl/unit-ownership.nix { inherit lib; };
             observationRegistryModule = {
               options.dotfiles.health.observations = lib.mkOption {
@@ -239,7 +241,7 @@
         verify = {
           description = "T1: unit の検査と全 host の評価";
           commands = ''
-            nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
+            ${systemPkgs.coreutils}/bin/timeout --kill-after=30s 120 nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
           '';
         };
         verify-push = {

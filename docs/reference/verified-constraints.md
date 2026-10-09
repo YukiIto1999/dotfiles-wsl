@@ -150,7 +150,8 @@
 | Nix の慣用 | `statix` |
 | commit 件名が scope なし、50 文字以内の日本語一行であり、要約が読点と句点を含まず、動詞、形容詞、助詞で終わらない | `git-commit-message-contract` |
 | pre-commit が日本語、空白、先頭の `-` を含む file 名でも staged の追加行を検査し、GitHub token を含む commit を拒む | `git-pre-commit-leak-contract` |
-| 配備した global ignore が Python cache を除外し、pre-commit が GitHub token、age 秘密鍵、既知の API token を含む実際の commit を本文を出力せずに拒む。secret の削除後は公開 age recipient と prefix 宣言を含む source の commit が成功する | `git-hook-dispatch` |
+| 配備した global ignore が .NET、Rust、JS/TS、Python などの代表的な生成物と cache を除外し、検査対象の source、共有設定、lockfile は `git add` で追跡できる。repository の `.gitignore` の例外指定で共通除外を上書きできる | `git-hook-dispatch` |
+| pre-commit が GitHub token、age 秘密鍵、既知の API token を含む実際の commit を本文を出力せずに拒む。secret の削除後は公開 age recipient と prefix 宣言を含む source の commit が成功する | `git-hook-dispatch` |
 | 配備した hook を実際の git が起こし、dotfiles の検査が拒めば repository の `.githooks/` の hook を走らせず、通れば同じ argv と stdin(pre-push の ref の一覧を含む)で走らせ、その失敗の終了 status を返す。実行権の無い hook は黙って飛ばし、信頼していない repository の hook は走らせずに一行だけ伝える | `git-hook-dispatch` |
 | pre-push は repository が宣言した `verify-push` を根で実行し、宣言が無ければ黙って通す。失敗した検証は push を拒んで remote を変えず、経過時間を伝え、予算を超えた検証を子孫ごと止めて拒む。利用者の理由付きの省略は検証を走らせずに通し、repository と理由を記録へ残す | `git-pre-push-verification` |
 | shell の静的検査 | `shellcheck` (shebang を持つ file が対象、fragment は `writeShellApplication` が build 時に見る) |

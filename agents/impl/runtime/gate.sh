@@ -144,7 +144,7 @@ command_observe() {
 command_check() {
   local repo=$1 top state entry fingerprint reason
   top=$(repo_top_of "$repo") || return 0
-  entry=$(entry_of "$top")
+  entry=$(entry_of "$top") || return $?
   [ -n "$entry" ] || return 0
   state=$(state_dir_of "$top") || return 0
   fingerprint=$(source_fingerprint "$top")
@@ -313,9 +313,11 @@ skill_read_in() {
   return 1
 }
 
+# argv の長さ制限を超える payload の引数渡しは不可
+# JS 本体の heredoc が stdin を使うため payload と同じ FD への入力は不可
 read_result_proof() {
   local payload=$1 body=$2
-  node --input-type=commonjs - "$body" "$payload" <<'NODE'
+  node --input-type=commonjs - "$body" 3< <(printf '%s' "$payload") <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 const crypto = require("node:crypto");
@@ -326,7 +328,7 @@ const normalize = text => {
   return text.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n");
 };
 try {
-  const event = JSON.parse(process.argv[3]);
+  const event = JSON.parse(fs.readFileSync(3, "utf8"));
   const physicalPath = fs.realpathSync(process.argv[2]);
   const bytes = fs.readFileSync(physicalPath);
   const complete = normalize(bytes.toString("utf8"));

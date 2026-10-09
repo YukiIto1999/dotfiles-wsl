@@ -34,21 +34,27 @@ formatter の正本は `flake.nix` の `formatter` であり、CI の整形検�
 
 ## 検査
 
-flake が宣言する build、静的検査、生成設定の構文検査をローカルで実行する。
+検査項目は各unitの`checks.nix`に置き、`flake.nix`が収集して段ごとに実行する。
 
 ```bash
-nix flake check -L --no-write-lock-file
+nix run --no-write-lock-file .#verify-full
 ```
 
-編集中は変更した unit の check だけを `nix build --no-link .#checks.x86_64-linux.<check>` で実行する。最終の全件確認は、最後の source 変更後に一度だけ次の入口から実行する。
+編集中は変更したunitのcheckだけを`nix build --no-link .#checks.x86_64-linux.<check>`で実行する。
+最後のsource変更後には、repositoryの根でT1を一度実行する。
 
 ```bash
-dotfiles-agent-verify -- nix flake check -L --no-write-lock-file
+dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
 ```
 
 同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、runtime が割り当てる Cargo の build-dir を使う。
 
-`nix flake check` は検査結果を返し、`nix fmt` のように source を整形しない。検査項目の正本は各 unit の `checks.nix` であり、`flake.nix` の `mergeChecks` がそれらを集めて id の重複を拒否する。check 名の一覧はここに複製しない。どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
+T1の`verify`は全unitの検査と全hostおよび既存variantのtoplevel評価を行い、T2の`verify-push`はunitの検査とsystem closureを実現する。
+`verify-full`は既存の全量flake checkを呼び、CIと明示的な全量確認の経路を保つ。
+Nix buildの成功だけでは終了gateの証跡にならず、宣言した入口を既存wrapperで通した同じsourceに限り受理される。
+検査を変更したときは、予算を理由に必須の検査をT3へ移さず、Nixの依存と再利用を見直す。
+未追跡fileはNixのGit sourceに含まれないため、検証前に`git add`または`git add -N`で追跡する。
+checkの一覧は複製せず、どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
 
 check を足したら、緑を見る前に赤を見る。検査対象を意図的に壊し、期待した message で落ちることを確かめてから戻す。落ちなければその検査は無効である。一つの検査は一つの結果だけを確かめる。複数を束ねると、最初の失敗が残りを隠す。
 
@@ -70,6 +76,7 @@ repo root から見た path を unit の中の file にそのまま書かない�
 
 ## CI
 
-[`.github/workflows/check.yml`](../../.github/workflows/check.yml) は `main` への push と pull request、手動実行で `nix flake check "git+file://${GITHUB_WORKSPACE}" -L` を実行する。CI は checkout 済みの Git tree を入力にし、検査内容はローカルと同じ経路で各 unit の `checks.nix` から集める。
+[`.github/workflows/check.yml`](../../.github/workflows/check.yml)は`main`へのpushとpull request、手動実行で、checkout済みのGit treeの`verify-full`を実行する。
+CI独自の検査一覧を持たず、rootのNix appから各unitの`checks.nix`とhost closureを検査する。
 
 commit の粒度と件名は [Contributing](../../CONTRIBUTING.md) に従う。

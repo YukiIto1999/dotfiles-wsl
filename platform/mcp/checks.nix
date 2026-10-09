@@ -5,6 +5,7 @@
   hostConfig,
   hostOptions,
   mkNixosSystem,
+  minimalCapabilityConfig,
   normalMachineModule,
   self,
   units,
@@ -22,24 +23,6 @@ let
   services = hostConfig.systemd.services;
   targets = hostConfig.dotfiles.platform.mcp.targets;
   variantTargets = variantConfig.dotfiles.platform.mcp.targets;
-  nonContainerCapabilitiesDisabledConfig =
-    (mkNixosSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ];
-        }
-      )
-    ]).config;
-  nonContainerCapabilitiesDisabledTargets =
-    nonContainerCapabilitiesDisabledConfig.dotfiles.platform.mcp.targets;
-  nonContainerCapabilitiesDisabledProviders =
-    nonContainerCapabilitiesDisabledConfig.dotfiles.platform.mcp.enabledProviders;
-  nonContainerCapabilitiesDisabledHome =
-    nonContainerCapabilitiesDisabledConfig.home-manager.users.${nonContainerCapabilitiesDisabledConfig.dotfiles.workstation.username};
-  nonContainerCapabilitiesDisabledToplevel =
-    nonContainerCapabilitiesDisabledConfig.system.build.toplevel.drvPath;
   configOf = front: services.${front.service}.serviceConfig;
   lifecycleOf = target: target.serverLifecycle or null;
   transportOf = target: target.serverTransport or null;
@@ -472,19 +455,13 @@ let
     "mcp/service/stale" = mcpObservations.${gatewayServiceObservation};
   };
   firstFrontService = (builtins.head fronts).service;
-  descriptionVariantConfig =
+  extraTargetDescriptionVariantConfig =
     (mkNixosSystem [
       normalMachineModule
       {
         systemd.services.${hostConfig.dotfiles.platform.mcp.gateway.service}.description =
           lib.mkForce "Changed gateway description";
         systemd.services.${firstFrontService}.description = lib.mkForce "Changed front description";
-      }
-    ]).config;
-  extraTargetVariantConfig =
-    (mkNixosSystem [
-      normalMachineModule
-      {
         dotfiles.platform.mcp.targets.fixture = {
           provider = "fixture-provider";
           executable = "${pkgs.coreutils}/bin/true";
@@ -553,12 +530,13 @@ in
     assert removedObservationMutation != expectedMcpObservations;
     assert changedObservationMutation != expectedMcpObservations;
     assert staleObservationMutation != expectedMcpObservations;
-    assert observationContractMatches descriptionVariantConfig;
-    assert observationContractMatches extraTargetVariantConfig;
+    assert observationContractMatches extraTargetDescriptionVariantConfig;
     assert observationContractMatches removedTargetVariantConfig;
     assert
       builtins.length (
-        builtins.attrNames (selectMcpObservations extraTargetVariantConfig.dotfiles.health.observations)
+        builtins.attrNames (
+          selectMcpObservations extraTargetDescriptionVariantConfig.dotfiles.health.observations
+        )
       ) == 2 * (builtins.length targetNames + 1) + 4;
     assert
       builtins.length (
@@ -582,11 +560,15 @@ in
     pkgs.runCommandLocal "check-mcp-provider-registry" { } "touch $out";
 
   mcp-capability-gating =
-    assert nonContainerCapabilitiesDisabledToplevel != "";
-    assert builtins.attrNames nonContainerCapabilitiesDisabledTargets == [ "memory" ];
-    assert nonContainerCapabilitiesDisabledProviders == [ "memory" ];
-    assert !(nonContainerCapabilitiesDisabledHome.home.sessionVariables ? ZVEC_GREP_MODE);
-    assert !(nonContainerCapabilitiesDisabledHome.home.sessionVariables ? ZVEC_GREP_SERVER_URL);
+    let
+      home =
+        minimalCapabilityConfig.home-manager.users.${minimalCapabilityConfig.dotfiles.workstation.username};
+    in
+    assert minimalCapabilityConfig.system.build.toplevel.drvPath != "";
+    assert builtins.attrNames minimalCapabilityConfig.dotfiles.platform.mcp.targets == [ "memory" ];
+    assert minimalCapabilityConfig.dotfiles.platform.mcp.enabledProviders == [ "memory" ];
+    assert !(home.home.sessionVariables ? ZVEC_GREP_MODE);
+    assert !(home.home.sessionVariables ? ZVEC_GREP_SERVER_URL);
     pkgs.runCommandLocal "check-mcp-capability-gating" { } "touch $out";
 
   mcp-target-contract =

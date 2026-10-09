@@ -135,6 +135,18 @@ let
     nixBuildCommand = fakeNix;
     gitCommand = racingGit;
   };
+  deployedGateHook = "${homeConfig.home.file.".omp/agent/hooks/pre".source}/verification-gate.ts";
+  hookUsingGate =
+    gate:
+    pkgs.runCommandLocal "omp-verification-gate-hook.ts" { } ''
+      substitute ${deployedGateHook} $out \
+        --replace-fail /run/current-system/sw/bin/dotfiles-agent-gate ${gate}
+    '';
+  hangingGate = pkgs.writeShellScript "hanging-gate" ''
+    ${pkgs.coreutils}/bin/sleep 300 &
+    printf '%s\n' "$!" > descendant.pid
+    wait
+  '';
   wrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (name: clients.${name}.runtimeWrapperMode == "managed") (
     builtins.attrNames clients
@@ -582,6 +594,21 @@ in
       }
       ''
         bash ${../fixtures/runtime/verify.sh} --skills-only
+        touch $out
+      '';
+
+  agent-omp-verification-gate-hook =
+    pkgs.runCommandLocal "check-agent-omp-verification-gate-hook"
+      {
+        nativeBuildInputs = [ pkgs.bun ];
+        GATE_HOOK = hookUsingGate (lib.getExe runtime.gate);
+        HANGING_GATE_HOOK = hookUsingGate hangingGate;
+      }
+      ''
+        export HOME=$PWD/home
+        mkdir -p "$HOME"
+        cp ${../fixtures/runtime/verification-gate.test.ts} verification-gate.test.ts
+        bun test ./verification-gate.test.ts
         touch $out
       '';
 

@@ -30,4 +30,4 @@ jobs:
         run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       - name: flake check
-        run: nix flake check "git+file://${GITHUB_WORKSPACE}" -L
+        run: nix run --no-write-lock-file "git+file://${GITHUB_WORKSPACE}#verify-full"

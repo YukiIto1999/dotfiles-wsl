@@ -795,7 +795,7 @@ in
         touch $out
       '';
 
-  required-roster-negative-eval =
+  nixos-system-negative-eval =
     let
       requiredRosterOptionPaths = [
         [
@@ -875,7 +875,45 @@ in
           };
         }
       ];
-      invalidCases = fixtureCases ++ isolatedRosterCases;
+      packagePolicyCases = [
+        {
+          name = "forced-host-package-config";
+          module = {
+            nixpkgs.config = lib.mkForce { allowUnfree = true; };
+          };
+        }
+        {
+          name = "forced-host-package-overlays";
+          module = {
+            nixpkgs.overlays = lib.mkForce [
+              (_final: previous: {
+                hello = previous.hello.overrideAttrs { pname = "host-override"; };
+              })
+            ];
+          };
+        }
+        {
+          name = "forced-host-package-set";
+          module = {
+            nixpkgs.pkgs = lib.mkForce (
+              pkgs // { hello = pkgs.hello.overrideAttrs { pname = "host-override"; }; }
+            );
+          };
+        }
+        {
+          name = "forced-host-platform";
+          module = {
+            nixpkgs.hostPlatform = lib.mkForce "aarch64-linux";
+          };
+        }
+        {
+          name = "forced-build-platform";
+          module = {
+            nixpkgs.buildPlatform = lib.mkForce "aarch64-linux";
+          };
+        }
+      ];
+      invalidCases = fixtureCases ++ isolatedRosterCases ++ packagePolicyCases;
       forceToplevel = systemConfig: builtins.deepSeq systemConfig.system.build.toplevel.drvPath true;
       negativeResults = map (invalidCase: {
         inherit (invalidCase) name;
@@ -897,12 +935,12 @@ in
       "required roster options must not define defaults: "
       + lib.concatStringsSep " " (map (lib.concatStringsSep ".") rosterOptionsWithDefaults)
     );
-    assert lib.assertMsg normalResult.success "normal required roster evaluation must succeed";
-    assert lib.assertMsg variantResult.success "variant required roster evaluation must succeed";
+    assert lib.assertMsg normalResult.success "normal NixOS system evaluation must succeed";
+    assert lib.assertMsg variantResult.success "variant NixOS system evaluation must succeed";
     assert lib.assertMsg (unexpectedSuccesses == [ ]) (
-      "invalid required roster evaluation succeeded: " + lib.concatStringsSep " " unexpectedSuccesses
+      "invalid NixOS system evaluation succeeded: " + lib.concatStringsSep " " unexpectedSuccesses
     );
-    pkgs.runCommandLocal "check-required-roster-negative-eval" { } "touch $out";
+    pkgs.runCommandLocal "check-nixos-system-negative-eval" { } "touch $out";
 
   structure-layer-names =
     let

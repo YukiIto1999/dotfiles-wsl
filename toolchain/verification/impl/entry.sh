@@ -1,10 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# repository が宣言する検証の段の入口を、呼び出しの綴りで答える。
-# 段は verify(T1)、verify-push(T2)、verify-full(T3)の三つで、宣言が無ければ空を返す。
-# 宣言は devenv の script、just の recipe、package.json の script、Makefile の target の順に探す。
-
 usage() {
   printf 'usage: dotfiles-verify-entry [--repo DIR] verify|verify-push|verify-full\n' >&2
   exit 64
@@ -19,19 +15,49 @@ script_name_of() {
   esac
 }
 
+nix_declaration_of() {
+  local repo=$1 name=$2 metadata store_path nar_hash
+  metadata=$(nix flake metadata --json --no-write-lock-file --no-update-lock-file "$repo") || return $?
+  store_path=$(jq -er '.path' <<<"$metadata") || return $?
+  nar_hash=$(jq -er '.locked.narHash' <<<"$metadata") || return $?
+  nix-instantiate --eval --strict --json \
+    --option pure-eval true --option allow-import-from-derivation false \
+    --argstr source "$store_path" --argstr narHash "$nar_hash" \
+    --argstr system "@system@" --argstr name "$name" \
+    --expr '
+      { source, narHash, system, name }:
+      let
+        flake = builtins.getFlake ("path:" + source + "?narHash=" + narHash);
+        systems = flake.apps or {};
+        apps = if builtins.hasAttr system systems then builtins.getAttr system systems else {};
+        stages = [ "verify" "verify-push" "verify-full" ];
+      in {
+        authoritative = builtins.any (stage: builtins.hasAttr stage apps) stages;
+        declared = builtins.hasAttr name apps;
+      }
+    '
+}
+
 entry_of() {
-  local repo=$1 name=$2 recipe script
-  # 名前の直後を区切りに限り、`scripts.verify-push` を `scripts.verify` の宣言と読まない
+  local repo=$1 name=$2 script declaration untracked
+  if [ -f "$repo/flake.nix" ]; then
+    declaration=$(nix_declaration_of "$repo" "$name") || return $?
+    if jq -e '.authoritative' <<<"$declaration" >/dev/null; then
+      if jq -e '.declared' <<<"$declaration" >/dev/null; then
+        untracked=$(git -C "$repo" ls-files --others --exclude-standard) || return $?
+        if [ -n "$untracked" ]; then
+          printf 'Nix検証のsourceに含まれない未追跡fileがあるため、先に追跡してから検証する:\n%s\n' "$untracked" >&2
+          return 1
+        fi
+        printf 'nix run --no-write-lock-file .#%s' "$name"
+      fi
+      return 0
+    fi
+  fi
   if [ -f "$repo/devenv.nix" ] && grep -qE "scripts\\.${name}([^A-Za-z0-9_'-]|\$)" "$repo/devenv.nix"; then
     printf 'devenv shell -- %s' "$name"
     return 0
   fi
-  for recipe in justfile Justfile; do
-    if [ -f "$repo/$recipe" ] && grep -qE "^${name}[[:space:]]*:" "$repo/$recipe"; then
-      printf 'just %s' "$name"
-      return 0
-    fi
-  done
   script=$(script_name_of "$name")
   if [ -f "$repo/package.json" ] \
     && jq -e --arg script "$script" '.scripts[$script]' "$repo/package.json" >/dev/null 2>&1; then

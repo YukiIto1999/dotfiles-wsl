@@ -1,14 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# push の前に、repository が宣言する T2 の検証入口 verify-push を作業木で通す。
-# 宣言しない repository では何もしない。予算を超えた検証は止めて push を拒む。
+# stashやcheckoutによるsource切替の不採用: 検証のための利用者のworktree変更の回避
 verification_entry=@verificationEntry@
 budget_seconds=@budgetSeconds@
 bypass_log=$HOME/.local/state/dotfiles-wsl/git/verify-push-bypass.log
+difference_lines=10
 
 duration() {
   printf '%d分%02d秒' $(($1 / 60)) $(($1 % 60))
+}
+
+refuse() {
+  printf 'verify-push: %s\n' "$*" >&2
+  exit 1
 }
 
 # 利用者が理由を添えて検証を省いた push を、後から辿れるように控える。
@@ -19,6 +24,38 @@ record_bypass() {
   printf '%s\trepo=%s\thead=%s\tentry=%s\treason=%s\n' \
     "$(date -Iseconds)" "$top" "$head" "$entry" "$reason" >>"$bypass_log"
   printf 'verify-push: %s を省いた。理由: %s(%s に記録した)\n' "$entry" "$reason" "$bypass_log" >&2
+}
+
+commit_of() {
+  git -C "$1" rev-parse --verify -q "$2^{commit}" || true
+}
+
+# commit解決の空同士を一致とする判定の不採用: HEAD未作成とcommitでないobjectの誤受理の回避
+is_head() {
+  [ -n "$2" ] && [ "$(commit_of "$1" "$3")" = "$2" ]
+}
+
+refuse_lines() {
+  local lines=$1 message=$2
+  local -a shown
+  [ -n "$lines" ] || return 0
+  mapfile -t -n "$difference_lines" shown <<<"$lines"
+  {
+    printf 'verify-push: %s\n' "$message"
+    printf '  %s\n' "${shown[@]}"
+  } >&2
+  exit 1
+}
+
+# statusの任意lock取得の不採用: 並行するindex操作との競合の回避
+require_clean_source() {
+  local top=$1 consequence=$2 difference flags
+  difference=$(git -C "$top" --no-optional-locks status --porcelain --untracked-files=all --ignore-submodules=none)
+  refuse_lines "$difference" "index、作業木、未追跡に差分がある。$consequence"
+  # statusだけでのclean判定の不採用: submoduleを含むindexのassume-unchangedとskip-worktreeの不可視性
+  flags=$(git -C "$top" ls-files -v --recurse-submodules)
+  refuse_lines "$(grep -v '^H ' <<<"$flags" || true)" \
+    "検査できない index の印(assume-unchanged、skip-worktree、unmerged)を持つ path がある。$consequence"
 }
 
 # timeout は自分の process group を作り、予算を超えると子孫ごと止める。
@@ -43,16 +80,40 @@ run_within_budget() {
 }
 
 main() {
-  local top entry started elapsed status=0
-  local -a command
+  local top entry head ref object started elapsed status=0
+  local -a command pushed=() stale=()
   top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
-  entry=$("$verification_entry" --repo "$top" verify-push)
+  # 入口解決失敗を未宣言とする扱いの不採用: 未検証pushの誤受理の回避
+  entry=$("$verification_entry" --repo "$top" verify-push) || {
+    status=$?
+    printf 'verify-push: 入口を解決できず、検証を始められない(終了 %d)\n' "$status" >&2
+    exit "$status"
+  }
   [ -n "$entry" ] || exit 0
+
+  # 削除refへのHEAD一致要求の不採用: Gitがlocal objectとして渡すゼロ値
+  head=$(commit_of "$top" HEAD)
+  object=
+  while read -r ref object _ _ || [ -n "$object" ]; do
+    if [[ $object =~ ^0+$ ]]; then
+      continue
+    fi
+    pushed+=("$ref")
+    if ! is_head "$top" "$head" "$object"; then
+      stale+=("$ref")
+    fi
+  done
+  [ "${#pushed[@]}" -gt 0 ] || exit 0
 
   if [ -n "${DOTFILES_VERIFY_PUSH_BYPASS-}" ]; then
     record_bypass "$top" "$entry" "$DOTFILES_VERIFY_PUSH_BYPASS"
     exit 0
   fi
+
+  if [ "${#stale[@]}" -gt 0 ]; then
+    refuse "送る ref(${stale[*]})の commit が検証する HEAD(${head:-無し})と異なる。送る commit を checkout してから push する"
+  fi
+  require_clean_source "$top" '検証する source が送る commit と一致しない。差分を commit するか退避し、index の印を外してから push する'
 
   read -r -a command <<<"$entry"
   printf 'verify-push: %s を実行する(予算 %s)\n' "$entry" "$(duration "$budget_seconds")" >&2
@@ -66,7 +127,7 @@ main() {
     exit 130
   fi
   if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && [ "$elapsed" -ge "$budget_seconds" ]; then
-    printf 'verify-push: 予算 %s を超えたため止めた(経過 %s)。より安い検証へ置き換えるか verify-full へ移す\n' \
+    printf 'verify-push: 予算 %s を超えたため止めた(経過 %s)。必要な検査は減らさず、重複実行、影響範囲の過剰な拡大、起動と build の固定費を見直して実行計画を作り直す\n' \
       "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
     exit 1
   fi
@@ -74,6 +135,11 @@ main() {
     printf 'verify-push: 失敗した(終了 %d、経過 %s)\n' "$status" "$(duration "$elapsed")" >&2
     exit "$status"
   fi
+
+  if [ "$(commit_of "$top" HEAD)" != "$head" ]; then
+    refuse "検査の間に HEAD が $head から動いた。通った検査は送る commit のものではない"
+  fi
+  require_clean_source "$top" '検査の間に source が動いた。通った検査は送る commit のものではない'
   printf 'verify-push: 通った(経過 %s)\n' "$(duration "$elapsed")" >&2
 }
 

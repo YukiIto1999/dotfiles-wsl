@@ -91,22 +91,46 @@
 
       unitModules = builtins.filter builtins.pathExists (map (unit: unit.path + "/module.nix") units);
 
+      readOnlyPackageModule = "${nixpkgs}/nixos/modules/misc/nixpkgs/read-only.nix";
+      packageOwnerModule = {
+        _file = toString ./flake.nix;
+        nixpkgs.pkgs = systemPkgs;
+      };
       mkNixosSystem =
         machineModules:
-        lib.nixosSystem {
-          inherit system;
-          specialArgs = {
-            inherit pluginSources self;
+        let
+          machine = lib.nixosSystem {
+            specialArgs = {
+              inherit pluginSources self;
+            };
+            modules =
+              unitModules
+              ++ [
+                readOnlyPackageModule
+                packageOwnerModule
+                nixos-wsl.nixosModules.default
+                sops-nix.nixosModules.sops
+                home-manager.nixosModules.home-manager
+              ]
+              ++ lib.toList machineModules;
           };
-          modules =
-            unitModules
-            ++ [
-              nixos-wsl.nixosModules.default
-              sops-nix.nixosModules.sops
-              home-manager.nixosModules.home-manager
-            ]
-            ++ lib.toList machineModules;
-        };
+        in
+        assert lib.assertMsg (lib.all (definition: definition.file == packageOwnerModule._file)
+          machine.options.nixpkgs.pkgs.definitionsWithLocations
+        ) "Nixpkgs package set must be declared in flake.nix";
+        assert lib.assertMsg (lib.all
+          (
+            option:
+            lib.all (definition: definition.file == readOnlyPackageModule) option.definitionsWithLocations
+          )
+          [
+            machine.options.nixpkgs.config
+            machine.options.nixpkgs.overlays
+            machine.options.nixpkgs.hostPlatform
+            machine.options.nixpkgs.buildPlatform
+          ]
+        ) "Nixpkgs config, overlays and platforms must be declared in flake.nix";
+        machine;
 
       mkMachineModule = hostName: {
         imports = [
@@ -120,36 +144,28 @@
       machineConfigs = lib.mapAttrs (_: machine: machine.config) nixosSystems;
       machineOptions = lib.mapAttrs (_: machine: machine.options) nixosSystems;
 
-      maintenancePkgs = nixpkgs.legacyPackages.${system};
-    in
-    {
-      nixosConfigurations = nixosSystems;
+      systemPkgs = nixpkgs.legacyPackages.${system};
 
-      packages.${system} =
-        let
-          hostConfig = machineConfigs.${referenceHostName};
-          inherit (nixosSystems.${referenceHostName}) pkgs;
-        in
-        {
-          inherit (pkgs) age sops;
-          sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
-            mkdir -p "$out"
-            cp -R --preserve=mode ${self}/. "$out/"
-            test -x "$out/workstation/activation/rebuild/impl/bootstrap.sh"
-          '';
-          # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
-          dotfiles-install-agents = hostConfig.dotfiles.platform.cli.commands.installAgents;
-          dotfiles-doctor = hostConfig.dotfiles.platform.cli.commands.doctor;
-          dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
-        };
+      artifactVariantSystem = mkNixosSystem [
+        normalMachineModule
+        { dotfiles.platform.mcp.gateway.port = 9876; }
+      ];
+      artifactVariantConfig = artifactVariantSystem.config;
+      minimalCapabilityConfig =
+        (mkNixosSystem [
+          normalMachineModule
+          { dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ]; }
+        ]).config;
 
-      devShells.${system}.default = maintenancePkgs.mkShellNoCC {
-        packages = machineConfigs.${referenceHostName}.dotfiles.toolchain.devShellPackages;
+      hostToplevelChecks = lib.mapAttrs' (
+        hostName: machine: lib.nameValuePair "${hostName}-toplevel" machine.config.system.build.toplevel
+      ) nixosSystems;
+
+      closureChecks = hostToplevelChecks // {
+        nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel;
       };
 
-      formatter.${system} = maintenancePkgs.nixfmt-tree;
-
-      checks.${system} =
+      unitChecks =
         let
           # 各 unit の checks.nix を集め、id の重複を拒否する
           mergeChecks =
@@ -159,7 +175,7 @@
               # 名前は attrset の spine だけで決まるので、値が allCheckNames を参照しても循環しない
               perUnit = map (file: import file (args // { inherit allCheckNames; })) files;
               names = lib.concatMap builtins.attrNames perUnit;
-              allCheckNames = builtins.attrNames checkSet ++ names;
+              allCheckNames = builtins.attrNames closureChecks ++ names;
             in
             if allCheckNames == lib.unique allCheckNames then
               lib.foldl' (acc: set: acc // set) { } perUnit
@@ -173,24 +189,8 @@
           hostConfig = machineConfigs.${referenceHostName};
           inherit (nixosSystems.${referenceHostName}) pkgs;
           inherit (pkgs) lib;
-
-          # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
-          artifactVariantSystem = mkNixosSystem [
-            normalMachineModule
-            { dotfiles.platform.mcp.gateway.port = 9876; }
-          ];
-          artifactVariantConfig = artifactVariantSystem.config;
-
-          hostToplevelChecks = lib.mapAttrs' (
-            hostName: machine: lib.nameValuePair "${hostName}-toplevel" machine.config.system.build.toplevel
-          ) nixosSystems;
-
-          checkSet = hostToplevelChecks // {
-            nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel;
-          };
         in
-        checkSet
-        // mergeChecks {
+        mergeChecks {
           inherit
             pkgs
             lib
@@ -199,6 +199,7 @@
             hostNames
             machineConfigs
             machineOptions
+            minimalCapabilityConfig
             mkNixosSystem
             pluginSources
             sops-nix
@@ -226,5 +227,85 @@
           # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
           variantConfig = artifactVariantConfig;
         } units;
+
+      unitChecksPackage = "verification-unit-checks";
+      closureChecksPackage = "verification-host-closures";
+
+      lockedSource = "path:${self}?narHash=${self.narHash}";
+      sourceRef = lib.escapeShellArg lockedSource;
+      packageRef = name: lib.escapeShellArg "${lockedSource}#packages.${system}.${name}";
+
+      verificationTiers = {
+        verify = {
+          description = "T1: unit の検査と全 host の評価";
+          commands = ''
+            nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
+          '';
+        };
+        verify-push = {
+          description = "T2: unit の検査と全 host の closure";
+          commands = ''
+            nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage} ${packageRef closureChecksPackage}
+          '';
+        };
+        verify-full = {
+          description = "T3: flake の全量 check";
+          commands = ''
+            nix flake check --no-write-lock-file -L ${sourceRef}
+          '';
+        };
+      };
+
+      verificationApp = name: tier: {
+        type = "app";
+        program = lib.getExe (
+          systemPkgs.writeShellApplication {
+            name = "dotfiles-${name}";
+            text = ''
+              if [ "$#" -ne 0 ]; then
+                echo "usage: dotfiles-${name}" >&2
+                exit 64
+              fi
+              ${tier.commands}
+            '';
+          }
+        );
+        meta.description = tier.description;
+      };
+    in
+    {
+      nixosConfigurations = nixosSystems;
+
+      packages.${system} =
+        let
+          hostConfig = machineConfigs.${referenceHostName};
+          inherit (nixosSystems.${referenceHostName}) pkgs;
+        in
+        {
+          inherit (pkgs) age sops;
+          sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
+            mkdir -p "$out"
+            cp -R --preserve=mode ${self}/. "$out/"
+            test -x "$out/workstation/activation/rebuild/impl/bootstrap.sh"
+          '';
+          # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
+          dotfiles-install-agents = hostConfig.dotfiles.platform.cli.commands.installAgents;
+          dotfiles-doctor = hostConfig.dotfiles.platform.cli.commands.doctor;
+          dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
+          ${unitChecksPackage} = builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) closureChecks) (
+            pkgs.linkFarm unitChecksPackage unitChecks
+          );
+          ${closureChecksPackage} = pkgs.linkFarm closureChecksPackage closureChecks;
+        };
+
+      apps.${system} = lib.mapAttrs verificationApp verificationTiers;
+
+      devShells.${system}.default = systemPkgs.mkShellNoCC {
+        packages = machineConfigs.${referenceHostName}.dotfiles.toolchain.devShellPackages;
+      };
+
+      formatter.${system} = systemPkgs.nixfmt-tree;
+
+      checks.${system} = closureChecks // unitChecks;
     };
 }

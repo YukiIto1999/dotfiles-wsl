@@ -41,20 +41,32 @@ repository は検証の段ごとに入口を宣言する。段の意味と時間
 | T2 | `verify-push` | push の前の pre-push |
 | T3 | `verify-full` | project が選んだ契機。commit と push を止めない |
 
-入口は次の順に探し、最初に見つかった宣言を使う。
+共有resolverはrepositoryの正本を呼ぶ文字列だけを返し、検査の定義やcacheを別に持たない。
+Nix appにいずれかの段が宣言されていれば、三段ともNixを正本にし、未宣言の段を他の形式へ補完しない。
+flakeの取得や評価が失敗した場合は、入口未宣言として通さずに拒否する。
 
 | 置き場 | 宣言 | 呼び出し |
 |---|---|---|
+| `flake.nix` | `apps.<system>.verify-push` | `nix run --no-write-lock-file .#verify-push` |
 | `devenv.nix` | `scripts.verify-push` | `devenv shell -- verify-push` |
-| `justfile` | recipe `verify-push` | `just verify-push` |
-| `package.json` | script `verify:push`(T3 は `verify:full`) | lock file に応じて `pnpm verify:push` または `npm run verify:push` |
+| `package.json` | script `verify:push` | lock fileに応じて`pnpm verify:push`または`npm run verify:push` |
 | `Makefile` | target `verify-push` | `make verify-push` |
+
+Nixの検証段を宣言しないrepositoryは、devenv、package.json、Makefileの順で既存の入口を解決する。
+これは他projectの入口への接続であり、dotfilesの検証taskの正本は`flake.nix`だけに置く。
+NixのGit sourceへ入らない未追跡fileを持つrepositoryは、先に追跡してから検証する。
 
 ## push の前の検証
 
-pre-push は、repository が `verify-push` を宣言していれば repository の根で実行する。宣言が無ければ何もせず、何も出力しない。検証するのは push する commit ではなく作業木である。
+pre-pushは、repositoryが`verify-push`を宣言していればrepositoryの根で実行する。
+送信する各refのcommitがHEADと一致し、index、作業木、未追跡file、submoduleに差分がない場合だけ、そのsourceを検証する。
+annotated tagは参照するcommitで比較し、差分を隠すassume-unchangedとskip-worktreeの印も拒否する。
+検証後にHEAD、source、indexの印が変わっていれば、入口が成功してもpushを拒否する。
+入口を宣言しないrepositoryと、送信sourceのない削除だけのpushは検証を要求しない。
 
-予算は 15 分である。超えると検証を子孫の process ごと止めて push を拒み、より安い検証へ置き換えるか `verify-full` へ移すよう伝える。通った場合も失敗した場合も、経過時間を stderr へ出す。
+予算は15分で、超えた検証を子孫のprocessごと止めてpushを拒否する。
+必須検査を`verify-full`へ移すのでなく、必要な保証を保ったまま重複実行、選択範囲、起動とbuildの固定費を見直す。
+成功、失敗、中断時には経過時間をstderrへ出す。
 
 検証を通さずに push する必要があるときは、理由を添えて次の環境変数を渡す。
 

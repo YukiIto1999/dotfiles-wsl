@@ -410,30 +410,22 @@ let
     hostReclaimExec
   ];
 
-  additionalObservationVariantConfig =
-    (mkNixosSystem [
-      normalMachineModule
-      {
-        dotfiles.health.observations."host/independent-container-observation" = {
-          kind = "roster";
-          members = [ "fixture" ];
-          minimumCount = 1;
-          failureOnly = false;
-          checkId = null;
-          resourceKey = null;
-          timeoutSeconds = observationTimeoutSeconds;
-          failureMessage = "independent foreign observation failed";
-        };
-      }
-    ]).config;
-  additionalContainerObservations = selectContainerObservations additionalObservationVariantConfig.dotfiles.health.observations;
-
-  descriptionVariantConfig =
+  foreignObservationDescriptionVariantConfig =
     (mkNixosSystem [
       normalMachineModule
       (
         { lib, ... }:
         {
+          dotfiles.health.observations."host/independent-container-observation" = {
+            kind = "roster";
+            members = [ "fixture" ];
+            minimumCount = 1;
+            failureOnly = false;
+            checkId = null;
+            resourceKey = null;
+            timeoutSeconds = observationTimeoutSeconds;
+            failureMessage = "independent foreign observation failed";
+          };
           systemd.services.${sampleSystemdService}.description =
             lib.mkForce "Descriptions must not select container observations";
           systemd.services.${expectedBuildArtifactGc.name}.description =
@@ -441,7 +433,7 @@ let
         }
       )
     ]).config;
-  descriptionVariantContainerObservations = selectContainerObservations descriptionVariantConfig.dotfiles.health.observations;
+  foreignObservationDescriptionContainerObservations = selectContainerObservations foreignObservationDescriptionVariantConfig.dotfiles.health.observations;
 
   fixtureRepository = "example.invalid/dotfiles-fixture";
   fixtureDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
@@ -745,14 +737,14 @@ in
       !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services observations)
     ) staleObservationMutations) "stale container runtime observations escaped the owner contract";
     assert lib.assertMsg (
-      containerContractMatches additionalObservationVariantConfig
-        additionalObservationVariantConfig.dotfiles.platform.containers.services
-        additionalObservationVariantConfig.dotfiles.health.observations
-      && additionalContainerObservations == expectedContainerObservations
-      && builtins.hasAttr "host/independent-container-observation" additionalObservationVariantConfig.dotfiles.health.observations
+      containerContractMatches foreignObservationDescriptionVariantConfig
+        foreignObservationDescriptionVariantConfig.dotfiles.platform.containers.services
+        foreignObservationDescriptionVariantConfig.dotfiles.health.observations
+      && foreignObservationDescriptionContainerObservations == expectedContainerObservations
+      && builtins.hasAttr "host/independent-container-observation" foreignObservationDescriptionVariantConfig.dotfiles.health.observations
     ) "a foreign observation changed the containers runtime contract";
     assert lib.assertMsg (
-      descriptionVariantContainerObservations == containerObservations
+      foreignObservationDescriptionContainerObservations == containerObservations
     ) "service descriptions must not select container runtime observations";
     assert lib.assertMsg (
       containerContractMatches extraContainerVariantConfig

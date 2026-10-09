@@ -8,6 +8,7 @@ new_repo() {
   local repo=$PWD/$1
   mkdir -p "$repo"
   git -C "$repo" init -q
+  git -C "$repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -q --allow-empty -m 'test: 検証入口の確認'
   printf '%s' "$repo"
 }
 
@@ -30,10 +31,48 @@ expect "$devenv" verify ''
 printf 'scripts.verify.exec = "true";\n' >>"$devenv/devenv.nix"
 expect "$devenv" verify 'devenv shell -- verify'
 
-just=$(new_repo just)
-printf 'verify-push:\n    true\n' >"$just/justfile"
-expect "$just" verify-push 'just verify-push'
-expect "$just" verify ''
+native=$(new_repo 'native apps')
+cat >"$native/flake.nix" <<'NIX'
+{
+  outputs = { self }: {
+    apps.x86_64-linux.verify-push = { type = "app"; program = "/bin/false"; };
+    apps.x86_64-linux.verify-full = { type = "app"; program = "/bin/false"; };
+  };
+}
+NIX
+printf 'verify:\n\tfalse\n' >"$native/Makefile"
+git -C "$native" add flake.nix Makefile
+git -C "$native" -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m 'test: 検証入口の確認'
+expect "$native" verify-push 'nix run --no-write-lock-file .#verify-push'
+expect "$native" verify-full 'nix run --no-write-lock-file .#verify-full'
+expect "$native" verify ''
+mkdir "$native/nested"
+expect "$native/nested" verify-push 'nix run --no-write-lock-file .#verify-push'
+printf 'not verified\n' >"$native/untracked"
+if "$ENTRY" --repo "$native" verify-push >untracked.stdout 2>untracked.stderr; then
+  printf 'resolver accepted untracked source excluded from the Nix flake\n' >&2
+  exit 1
+fi
+test ! -s untracked.stdout
+git -C "$native" add -N untracked
+expect "$native" verify-push 'nix run --no-write-lock-file .#verify-push'
+
+absent=$(new_repo absent)
+printf '{ outputs = { self }: {}; }\n' >"$absent/flake.nix"
+printf 'verify:\n\tfalse\n' >"$absent/Makefile"
+git -C "$absent" add flake.nix Makefile
+expect "$absent" verify 'make verify'
+
+broken=$(new_repo broken)
+printf '{ outputs =\n' >"$broken/flake.nix"
+printf 'verify:\n\tfalse\n' >"$broken/Makefile"
+git -C "$broken" add flake.nix Makefile
+if "$ENTRY" --repo "$broken" verify >broken.stdout 2>broken.stderr; then
+  printf 'resolver treated failed Nix evaluation as an absent declaration\n' >&2
+  exit 1
+fi
+test ! -s broken.stdout
+test -s broken.stderr
 
 pnpm=$(new_repo pnpm)
 printf '{"scripts":{"verify":"true","verify:push":"true","verify:full":"true"}}\n' >"$pnpm/package.json"

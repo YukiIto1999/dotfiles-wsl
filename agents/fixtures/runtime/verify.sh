@@ -13,9 +13,11 @@ skill_edit() {
     "$GATE" hook edit >/dev/null 2>&1
 }
 
-skill_read_event() {
-  local extra=${5-} path relative result='{}' resolved
+# argv の長さ制限を超える読取結果の jq --argjson 渡しは不可
+skill_read_payload() {
+  local extra=${5-} path relative resolved result_file=$fixture/skill-read-result.json
   [ -n "$extra" ] || extra='{}'
+  printf '{}' >"$result_file"
   path=$(printf '%s' "$4" | jq -r '.path // .file_path // .filePath // empty')
   case $path in
   skill://*)
@@ -28,7 +30,7 @@ skill_read_event() {
   esac
   if [ -f "$path" ] && { [ "$3" = read ] || [ "$3" = Read ]; }; then
     resolved=$(realpath -e -- "$path")
-    result=$(jq -nc --rawfile body "$path" --arg resolved "$resolved" --arg tool "$3" '
+    jq -nc --rawfile body "$path" --arg resolved "$resolved" --arg tool "$3" '
       ($body | gsub("\r\n?"; "\n") | sub("^\uFEFF"; "")) as $normalized |
       ($normalized | sub("\n$"; "")) as $display |
       ($normalized | split("\n") | if last == "" then .[:-1] else . end | length) as $lines |
@@ -39,13 +41,16 @@ skill_read_event() {
       else
         {tool_response:{type:"text",file:{filePath:$resolved,content:$display,
           numLines:$lines,startLine:1,totalLines:$lines}}}
-      end')
+      end' >"$result_file"
   fi
   jq -nc --arg session "$1" --arg event "$2" --arg tool "$3" \
-    --arg cwd "$home" --argjson input "$4" --argjson extra "$extra" --argjson result "$result" \
+    --arg cwd "$home" --argjson input "$4" --argjson extra "$extra" --slurpfile result "$result_file" \
     '($input | if $tool == "Read" and has("path") then .file_path = .path | del(.path) else . end) as $native |
-      {session_id:$session,cwd:$cwd,hook_event_name:$event,tool_name:$tool,tool_input:$native} * $result * $extra' |
-    "$GATE" hook learn
+      {session_id:$session,cwd:$cwd,hook_event_name:$event,tool_name:$tool,tool_input:$native} * $result[0] * $extra'
+}
+
+skill_read_event() {
+  skill_read_payload "$@" | "$GATE" hook learn
 }
 
 expect_unread_skill() {
@@ -397,6 +402,70 @@ check_skill_learning() {
   check_isolated_scratch
 }
 
+large_read_teach() {
+  "$CUSTOM_SKILL_ROOT_GATE" teach --session "$1" --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1
+}
+
+large_read_learn() {
+  jq -c --arg session "$2" ".session_id = \$session | $3" "$1" | "$CUSTOM_SKILL_ROOT_GATE" hook learn
+}
+
+expect_large_read_learned() {
+  large_read_learn "$1" "$2" .
+  if ! large_read_teach "$2"; then
+    echo "gate refused a complete Skill read beyond the argument limit: $2" >&2
+    exit 1
+  fi
+}
+
+expect_large_read_refused() {
+  large_read_learn "$1" "$2" "$3"
+  if large_read_teach "$2"; then
+    echo "gate accepted an incomplete or altered Skill read beyond the argument limit: $2" >&2
+    exit 1
+  fi
+}
+
+check_large_read_proof() {
+  local body="$home/.local/share/fixture adapter/procedures/ui-design/SKILL.md"
+  local omp=$fixture/large-read-omp.json claude=$fixture/large-read-claude.json input
+  local cut='.[:-2000]' alter='(.[:100000] + "§" + .[100001:])'
+  chmod u+w "$body"
+  seq -f 'Large discipline line %g keeps the whole read beyond one argument.' 1 4000 >>"$body"
+  test "$(wc -c <"$body")" -gt 131072
+  input=$(jq -nc --arg path "$body" '{path:$path}')
+  skill_read_payload large PostToolUse read "$input" >"$omp"
+  skill_read_payload large PostToolUse Read "$input" >"$claude"
+  test "$(wc -c <"$omp")" -gt 262144
+  test "$(wc -c <"$claude")" -gt 131072
+
+  expect_large_read_learned "$omp" large-omp-complete
+  expect_large_read_learned "$claude" large-claude-complete
+
+  expect_large_read_refused "$omp" large-omp-truncated "
+    (.tool_result.details.displayContent.text | $cut) as \$shown
+    | (\$shown | split(\"\\n\") | length) as \$lines
+    | .tool_result.content[0].text = \$shown
+    | .tool_result.details.displayContent = {text: \$shown, startLine: 1, lineNumbers: [range(1; \$lines + 1)]}
+    | .tool_result.details.totalLines = \$lines"
+  expect_large_read_refused "$omp" large-omp-altered \
+    ".tool_result.content[0].text |= $alter | .tool_result.details.displayContent.text |= $alter"
+  expect_large_read_refused "$omp" large-omp-altered-rendered ".tool_result.content[0].text |= $alter"
+  expect_large_read_refused "$omp" large-omp-altered-display ".tool_result.details.displayContent.text |= $alter"
+  expect_large_read_refused "$omp" large-omp-missing 'del(.tool_result.details.displayContent)'
+  expect_large_read_refused "$omp" large-omp-no-result 'del(.tool_result)'
+  expect_large_read_refused "$claude" large-claude-truncated ".tool_response.file.content |= $cut"
+  expect_large_read_refused "$claude" large-claude-altered ".tool_response.file.content |= $alter"
+  expect_large_read_refused "$claude" large-claude-missing 'del(.tool_response.file)'
+
+  printf 'Changed after the read.\n' >>"$body"
+  if large_read_teach large-omp-complete; then
+    echo 'gate kept a large Skill read after the body changed' >&2
+    exit 1
+  fi
+  expect_large_read_refused "$omp" large-omp-replayed .
+}
+
 conformance_stop() {
   jq -nc --arg session "$1" --arg cwd "$home" '{session_id:$session,cwd:$cwd}' |
     "$GATE" hook stop
@@ -607,6 +676,7 @@ if [ "${1-}" = --skills-only ]; then
   mkdir -p "$home"
   export HOME=$home
   check_skill_learning
+  check_large_read_proof
   check_conformance_completion
   exit 0
 fi
@@ -1122,6 +1192,20 @@ if [ "$shell_stop_status" -ne 2 ]; then
 fi
 (cd "$shell_repo" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
 shell_stop
+
+broken_repo=$fixture/broken-nix-repo
+git init -q "$broken_repo"
+printf '{ outputs =\n' >"$broken_repo/flake.nix"
+git -C "$broken_repo" add flake.nix
+"$GATE" arm --session fixture-broken-nix --path "$broken_repo/flake.nix"
+set +e
+printf '{"session_id":"fixture-broken-nix","cwd":"%s"}' "$broken_repo" |
+  NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
+    "$GATE" hook stop >"$fixture/broken-stop.stdout" 2>"$fixture/broken-stop.stderr"
+broken_stop_status=$?
+set -e
+test "$broken_stop_status" -eq 2
+test -s "$fixture/broken-stop.stderr"
 
 check_skill_learning
 check_conformance_completion

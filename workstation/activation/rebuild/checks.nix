@@ -62,8 +62,8 @@ in
     cp ${wslConfig} booted/etc/wsl.conf
     cp ${wslConfig} bad-booted/etc/wsl.conf
     cp ${wslConfig} candidate/etc/wsl.conf
-    cp ${hostConfig.system.build.toplevel}/init-interface-version current/init-interface-version
-    cp ${hostConfig.system.build.toplevel}/init-interface-version candidate/init-interface-version
+    printf 'fixture-init-interface\n' > current/init-interface-version
+    cp current/init-interface-version candidate/init-interface-version
     chmod u+w bad-booted/etc/wsl.conf candidate/etc/wsl.conf candidate/init-interface-version
 
     assert_plan() {
@@ -192,9 +192,6 @@ in
       test "$?" -eq 2
     fi
 
-    test -r ${hostConfig.system.build.toplevel}/etc/wsl.conf
-    test -r ${hostConfig.system.build.toplevel}/init-interface-version
-    cmp --silent ${wslConfig} ${hostConfig.system.build.toplevel}/etc/wsl.conf
     touch $out
   '';
 

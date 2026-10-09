@@ -8,7 +8,7 @@
 
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
-| 全hostで有効なidentity、Agent、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `nix flake check`、`dotfiles-rebuild --plan` |
+| 全hostで有効なidentity、Agent、Capability、language serverを変える | [`profiles/workstation.nix`](../../profiles/workstation.nix) | `verify`、`verify-push`、`dotfiles-rebuild --plan` |
 | hostを登録し、WSL資源、登録名、DNS、追加drive、VHD、Nix並列度とreserveを変える | [`profiles/hosts/`](../../profiles/hosts)と、[`workstation/wsl/module.nix`](../../workstation/wsl/module.nix)、[`workstation/storage/module.nix`](../../workstation/storage/module.nix)、[`workstation/nix/module.nix`](../../workstation/nix/module.nix)のowner option | `wsl-host-policy-contract`、`machine-profile-contract`、対象hostのtoplevel、`dotfiles-wsl-config` |
 | swap、Windows committed memory、日誌の機械名と自動処理、host固有Capabilityを変える | [`profiles/hosts/`](../../profiles/hosts)と各ownerの型付きoption | `machine-profile-contract`、`agent-journal-behavior`、`container-capability-gating`、対象hostのtoplevel |
 | username、home、checkout path、環境系repositoryの置き場所を変える | [`workstation/module.nix`](../../workstation/module.nix)の`dotfiles.workstation` | identity migrationとして扱い、通常rebuildと混ぜない |
@@ -27,10 +27,10 @@
 | 変更 | 正本 | 検証・適用 |
 |---|---|---|
 | top-level responsibilityを追加・削除する | [`docs/architecture/overview.md`](../architecture/overview.md)でownerと依存方向を決め、rootの`module.nix`を入口にする | `structure-responsibility-roots`、`unit-boundary-name-only` |
-| Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`nix flake check`で確認する |
+| Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`verify`で確認する |
 | Skillを追加・削除する | localは[`skills/<id>/`](../../skills)のmoduleと`skill/`、外部sourceは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表。依存metadataとcallerのroutingを同時に変える | Skill renderingとrequired Capabilityのcheck |
 | 外部Skillを採用し、同IDの供給元を差し替える | 採用moduleのregistry.sourceと明示的なoverride。source内の任意directoryを直接指し、原名のID、本文、reference、scriptを変換しない | `skill-source-contract`、`skill-frontmatter-contract`、`skill-capability-gating` |
-| Orca、architecture-standard、Matt、Chrome DevTools、.NET、Modern Web guidance の source 版を更新する | [`flake.nix`](../../flake.nix) の該当 input の rev と [`flake.lock`](../../flake.lock)。Skill の採用 path と依存、guide 資材の公開は [`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分を確認し、`nix flake check`、`dotfiles-rebuild` |
+| Orca、architecture-standard、Matt、Chrome DevTools、.NET、Modern Web guidanceのsource版を更新する | [`flake.nix`](../../flake.nix)の該当inputのrevと[`flake.lock`](../../flake.lock)。採用pathと依存、guide資材の公開は[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分と`verify`、`verify-push`を確認し、承認後に`dotfiles-rebuild` |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 
 ## Runtime observationと生成artifact
@@ -70,7 +70,7 @@
 | application backend、endpoint、volumeを変える | 対応するCapability内のbackend/server/database unit | Capability固有check、`dotfiles-doctor` |
 | hostでcontainer applicationを有効化・無効化する | [`profiles/hosts/`](../../profiles/hosts)の`dotfiles.capabilities.enabled`。container名ではなく所有するCapability IDを選ぶ | `container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
 | upstream OCI imageを更新する | Capability実装の`dotfiles.platform.containers.services.<name>.images`にあるrepository、digest、canonical reference | containerを有効にした対象hostで、checkoutから`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status`または`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages`を実行し、適用後は同hostの`dotfiles-sync-images`と`dotfiles-rebuild`を使う |
-| 固定packageのhashを更新する | 対応するCapabilityの`package.nix` | `nix store prefetch-file --hash-type sha256 --json <url>`、`nix flake check` |
+| 固定packageのhashを更新する | 対応するCapabilityの`package.nix` | `nix store prefetch-file --hash-type sha256 --json <url>`、`verify`、`verify-push` |
 
 ## Secretとidentity
 

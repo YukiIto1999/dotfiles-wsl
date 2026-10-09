@@ -4,7 +4,7 @@
 
 重要な制約は文書やレビューの指摘で運用せず、build で落ちる形に固定する。この表は固定済みの制約と、その検証手段を列挙する。監査はこの表を照合の対象にする。
 
-`nix flake check` が全件を実行する。個別に走らせるときは `nix build .#checks.x86_64-linux.<検証>` を使う。
+全件は`nix run --no-write-lock-file .#verify-full`で実行し、個別には`nix build --no-link .#checks.x86_64-linux.<検証>`を使う。
 
 ## 宣言と実状態
 
@@ -21,7 +21,7 @@
 | 宣言した time zone と default locale が実際の日時書式に現れ、UTC と C へ無言で戻らない | `host-locale-contract` |
 | 登録簿が空にならない | `registries-non-empty` |
 | runtime observation registry が 19 種類の observation kind、必須 field、path と ID、閾値、専用 command package を型で制限し、定義位置を owner と照合する | `observation-contract` |
-| required roster が空または未知の ID を含む構成を拒否し、通常構成と variant の system closure を評価できる | `required-roster-negative-eval` |
+| NixOS system factory が空・未知 ID の required roster と host 側の Nixpkgs config、overlays、package set、platform の上書きを拒否し、通常構成と variant の system closure を評価できる | `nixos-system-negative-eval` |
 | 宣言、参照、暗号文の recipient が一致し、recovery 鍵が一つ、host 鍵が一つ以上あり、登録した全 host の鍵を含む | `sops-policy` |
 | home に置く secret が user 所有の 0600 である | `sops-secret-file-mode` |
 | loopback port を二人以上が bind しない | `loopback-port-single-owner` |
@@ -105,9 +105,10 @@
 | OpenCodeの同時sessionへ想起結果が混在せず、古いpromptの遅延応答が新しい結果を上書きせず、idleで想起結果を捨てて会話をmemoryへ送らない | `project-memory-client-integrations` |
 | GitHub release installer は API digest、archive の member、論理 size、package-tree の required path を公開前に検査し、隔離環境で probe した single-binary または package-tree を固定 directory descriptor から公開する。raw asset は single-binary layout と path 成分のない entrypoint だけを受理し、mode 0700 で公開する。client ごとの失敗は隔離され、後続 client の公開を止めず、失敗した client 名だけを報告する。相対 link、release 2 世代保持、rollback、並行更新、別 filesystem の visible path も fixture で検査する | `agent-installer-behavior` |
 | agent cache GC が allocated bytes を正本にし、不正な managed path を検出すると削除前に失敗し、持ち主の死んだ session と metadata のない session を回収し、launcher が死んでも scope が残る session を残し、内容が不正な metadata を持つ session は残して共有 cache を空にせずに失敗で終える。Cargo の build-dir は unit ごとに回収し、fingerprint と成果物のすべての file の atime と mtime から最終使用を測り、Cargo が build し直す unit でだけ読む JSON の atime は数えず、GC 自身は file を読まない。最終使用が直近 48 時間以内の unit、成果物、incremental の directory は回収せず、atime を更新しない mount では unit を回収せずに失敗で終える。最終使用が inactive の期限より古い unit と incremental の directory、48 時間使われていない fingerprint の無い成果物を先に回収し、合計が high watermark を超えれば全 entry の unit を最終使用の古い順に選び、lock を取れなかった entry を除いて選び直しながら、実際に回収した bytes で low watermark に達するまで回収する。成果物は名前の hash で fingerprint と照合し、hash を持たない成果物と lock file は残し、Cargo が `.cargo-build-lock` か `.cargo-lock` の flock を握る entry には触れない。Cargo の lock を取った後に、entry の中の file を実行している process があればその entry を見送り、entry を走査し直して、走査の後に最終使用か member の inode が変わった unit は回収しない。それでも上限を超え、active session がない場合だけ共有 cache を空にし、再計測する。48 時間の保護と lock で見送った unit による上限の超過は、session の有無を問わず記録して成功で終え、次の実行に回す。共有 cache を空にした後、それらの unit を除いても上限を超える場合だけ失敗で終える。計測と削除を lock の外で行い、lock の下では trash へ rename するだけなので、大きな cache の削除中も launcher は待たずに起動する。中断した実行が残した trash は次の実行が回収し、消せない entry を残した実行は失敗で終える。本物の Cargo が書いた build-dir でも、最後の fresh な build が使った unit は回収の後も fresh のままで、古い feature だけが使った unit は回収されて compile し直される | `agent-project-cache-gc` |
-| source、command、環境が完全一致した成功だけを再利用し、raw 環境値を保存しない。検証の門は T1 の `verify` だけを問い、宣言した入口を repository の根で通した木だけを通し、shell の呼び出しは木を変えた場合だけ門を立てる | `agent-verification-cache` |
+| source、command、環境が完全一致した成功だけを再利用し、raw環境値を保存しない。門はT1の`verify`を根で通した木だけを受理し、shellが木を変えた場合だけ門を立てる。hookから呼ぶ入口の解決が失敗した場合も終了を拒否する | `agent-verification-cache` |
 | Skillの読取記録は成功後の完全なcanonical本文に限り、本文の変更で失効する。`standard-conformance`の読取後は、実際のcoverage checkerが受理した同じ標準とprojectの監査receiptを要求し、未完了、異なる物理root、sourceや報告の変更で終了を拒否する。検査結果や証拠の内容の正しさは保証しない | `agent-skill-read-gate` |
-| 検証の段 `verify`、`verify-push`、`verify-full` の入口を devenv の script、just の recipe、package.json の script、Makefile の target の順に repository の根の宣言から引き、後ろに続く段の名前を前の段の宣言と読まず、git の木の外と段に無い名前には答えない | `verification-entry-resolution` |
+| OMP hook が argv の容量制限を超える write と完全な read の event を実 gate process へ stdin で届け、本文の欠落、切り詰め、改ざん、更新後の再送を拒否する。20 秒の期限または中断では編集や終了を拒否し、出力 pipe を持つ子孫も停止する | `agent-omp-verification-gate-hook` |
+| 検証の段の入口をNix app、devenv、package.json、Makefileの順に根の宣言から解決する。Nixで段を宣言した場合は他形式へ補完せず、評価失敗と未宣言を区別し、NixのGit sourceに含まれない未追跡fileを拒否する。根の下からの解決、段の区別、Git外の無応答も検査する | `verification-entry-resolution` |
 | agent session 中の `git worktree add` が作った worktree だけを記録し、終了時に HEAD が作成時のままで変更と untracked file のないものだけを削除し、HEAD を進めたもの、変更を持つもの、session の外で作られたもの、同時の add で自分のものと区別できないものを残し、元の終了 status を保つ | `agent-runtime-behavior` |
 | 作業日誌が区切り時刻から翌日の区切り時刻までの利用者の指示、応答、tool の意図、commit だけを model へ渡し、thinking、tool の結果、subagent の記録、範囲外の entry を渡さず、host ごとの file を push する。同じ日を作り直しても内容が同じなら commit を増やさず、timer は最後に完了した日までの未作成の日だけを選ぶ。model が失敗した日は file を作らずに後の日を記録して非ゼロで終わり、次の実行でその日を作る。一時 directory が Git の work tree の中にあれば model を呼ばない。機械名は宣言値で、宣言の無い host は host ID を使い、file 名に使えない機械名を型が拒否する | `agent-journal-behavior` |
 | 記憶の収穫が前回成功した実行から後の利用者の発言だけを model へ渡し、応答、tool の結果、注入した記憶、subagent の記録を渡さない。将来の場面を返さなかった候補、保存済みの記憶と同じ内容の候補、source が保存済みの記憶にある発言を保存せず、場面を保存する本文に含めず、候補を session file と entry ID の source で保存する。pending は status が saved を返すまで保存済みと報告せず、資格情報に見える候補の拒否では失敗にしない。model や保存の失敗では非ゼロで終わり、読み終えた位置を進めない | `agent-memory-harvest-behavior` |
@@ -153,7 +154,7 @@
 | 配備した global ignore が .NET、Rust、JS/TS、Python などの代表的な生成物と cache を除外し、検査対象の source、共有設定、lockfile は `git add` で追跡できる。repository の `.gitignore` の例外指定で共通除外を上書きできる | `git-hook-dispatch` |
 | pre-commit が GitHub token、age 秘密鍵、既知の API token を含む実際の commit を本文を出力せずに拒む。secret の削除後は公開 age recipient と prefix 宣言を含む source の commit が成功する | `git-hook-dispatch` |
 | 配備した hook を実際の git が起こし、dotfiles の検査が拒めば repository の `.githooks/` の hook を走らせず、通れば同じ argv と stdin(pre-push の ref の一覧を含む)で走らせ、その失敗の終了 status を返す。実行権の無い hook は黙って飛ばし、信頼していない repository の hook は走らせずに一行だけ伝える | `git-hook-dispatch` |
-| pre-push は repository が宣言した `verify-push` を根で実行し、宣言が無ければ黙って通す。失敗した検証は push を拒んで remote を変えず、経過時間を伝え、予算を超えた検証を子孫ごと止めて拒む。利用者の理由付きの省略は検証を走らせずに通し、repository と理由を記録へ残す | `git-pre-push-verification` |
+| pre-pushが宣言したT2を根で実行し、送信refのcommitとclean HEADの一致を要求する。差分、差分を隠すindexの印、検査中のsource変更、入口の解決失敗、検査の失敗と予算超過を拒否し、remoteを更新しない。宣言なしと削除だけのpushは検査を要求せず、利用者の理由付き省略は記録を残す | `git-pre-push-verification` |
 | shell の静的検査 | `shellcheck` (shebang を持つ file が対象、fragment は `writeShellApplication` が build 時に見る) |
 | GitHub Actions workflow の妥当性 | `actionlint` |
 | devenv と direnv を home だけが所有し、binary cache が一度だけ登録される | `development-tool-ownership` |

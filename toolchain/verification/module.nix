@@ -12,8 +12,11 @@ let
       git
       gnugrep
       jq
+      nix
     ];
-    text = builtins.readFile ./impl/entry.sh;
+    text = lib.replaceStrings [ "@system@" ] [ pkgs.stdenv.hostPlatform.system ] (
+      builtins.readFile ./impl/entry.sh
+    );
   };
 in
 {

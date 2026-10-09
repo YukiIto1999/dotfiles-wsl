@@ -101,6 +101,9 @@ fileごとのprocess起動を避けるため、tracked fileのmetadataと内容h
 読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
 
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
+OMP hook は write の本文と read の全文を JSON に含めたまま gate の stdin へ送り、read の証明を照合する Node process へも pipe で渡す。
+argv に本文を載せないため、1 引数や argv 全体の容量制限で検証前に失敗しない。
+20 秒の期限または中断では gate の process group 全体を停止し、編集や終了を拒否する。
 編集対象はsymlinkと`..`を解決したpathで判定する。
 agent runtimeが割り当てた`~/.cache/dotfiles-wsl/sessions/<session>/tmp`の内側にあり、祖先にGit metadataを持たない一時fileは対象から外す。
 割当ての確認には、canonical pathの`<session>`と`DOTFILES_AGENT_SESSION_ID`の一致に加え、同じsession directoryの`metadata.json`が実fileであり、`version`が1、`session_id`が`<session>`と一致することを要求する。

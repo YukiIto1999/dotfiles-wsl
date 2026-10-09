@@ -77,7 +77,8 @@ Nix unit は `module.nix` を marker にし、build がある場合は `package.
 
 ## 開発
 
-保守方針、検証方法、コミット形式は [CONTRIBUTING.md](CONTRIBUTING.md) に従う。CI は `main` への push と pull request で `nix flake check` を実行する。
+保守方針、検証方法、コミット形式は[CONTRIBUTING.md](CONTRIBUTING.md)に従う。
+CIは`main`へのpushとpull requestで、Nixの`verify-full`入口を実行する。
 
 ## セキュリティ
 

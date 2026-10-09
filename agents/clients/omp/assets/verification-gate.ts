@@ -6,29 +6,58 @@ const READING_TOOLS: Record<string, true> = { read: true };
 // 書き込み先を入力から読めない tool。前後の木の指紋を比べて、変えた repository だけを門にかける。
 const SHELL_TOOLS: Record<string, true> = { bash: true, eval: true };
 
+type GateKind = "arm" | "edit" | "learn" | "observe" | "stop";
+
+const GATE_TIMEOUT_MS = 20_000;
+
+// 本文が argv の長さ制限を超えるため stdin 非対応の pi.exec は不採用
+// 出力 pipe を持つ子孫が残るため単一 process の終了は不可
 async function gate(
   pi: ExtensionAPI,
-  kind: "arm" | "edit" | "learn" | "observe" | "stop",
+  kind: GateKind,
   payload: Record<string, unknown>,
   cwd: string,
   signal?: AbortSignal,
 ): Promise<{ code: number; text: string }> {
   try {
-    const result = await pi.exec(
-      "/run/current-system/sw/bin/bash",
-      [
-        "-c",
-        'printf "%s" "$1" | exec "$2" hook "$3"',
-        "verification-gate",
-        JSON.stringify(payload),
-        GATE,
-        kind,
-      ],
-      { cwd, signal, timeout: 20_000 },
-    );
+    const child = Bun.spawn([GATE, "hook", kind], {
+      cwd,
+      stdin: Buffer.from(JSON.stringify(payload)),
+      stdout: "pipe",
+      stderr: "pipe",
+      detached: true,
+    });
+    const finished = Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+      child.exited,
+    ]);
+    finished.catch(() => undefined);
+    const deadline = AbortSignal.timeout(GATE_TIMEOUT_MS);
+    const stop = signal ? AbortSignal.any([deadline, signal]) : deadline;
+    const interrupted = new Promise<"interrupted">((resolve) => {
+      if (stop.aborted) resolve("interrupted");
+      else stop.addEventListener("abort", () => resolve("interrupted"), { once: true });
+    });
+    const outcome = await Promise.race([finished, interrupted]);
+    if (outcome === "interrupted") {
+      try {
+        process.kill(-child.pid, "SIGKILL");
+      } catch (error) {
+        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ESRCH") throw error;
+      }
+      return {
+        code: -1,
+        text: deadline.aborted
+          ? `Verification gate ${kind} timed out after ${GATE_TIMEOUT_MS / 1000}s.`
+          : `Verification gate ${kind} was aborted.`,
+      };
+    }
+    const [stdout, stderr] = outcome;
+    const code = child.exitCode ?? -1;
     return {
-      code: result.code,
-      text: result.stdout.trim() || result.stderr.trim() || `Verification gate ${kind} exited with code ${result.code}.`,
+      code,
+      text: stdout.trim() || stderr.trim() || `Verification gate ${kind} exited with code ${code}.`,
     };
   } catch (error) {
     pi.logger.warn("verification gate could not run", { kind, error: String(error) });

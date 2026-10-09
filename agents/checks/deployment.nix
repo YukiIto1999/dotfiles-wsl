@@ -5,6 +5,7 @@
   hostOptions,
   variantConfig,
   mkNixosSystem,
+  minimalCapabilityConfig,
   normalMachineModule,
   self,
   ...
@@ -48,17 +49,7 @@ let
       normalMachineModule
       { dotfiles.telemetry.enable = false; }
     ]).config;
-  minimalCapabilityAgentConfig =
-    (mkNixosSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ];
-        }
-      )
-    ]).config;
-  minimalCapabilitySkills = minimalCapabilityAgentConfig.dotfiles.agents.shared.skills;
+  minimalCapabilitySkills = minimalCapabilityConfig.dotfiles.agents.shared.skills;
   transitiveCapabilityAgentConfig =
     (mkNixosSystem [
       normalMachineModule
@@ -831,15 +822,6 @@ in
             exit 1
           fi
         done
-        gateHookFile=$ompHookDirectory/verification-gate.ts
-        for event in tool_call tool_result session_stop; do
-          grep -Fq "pi.on(\"$event\"" "$gateHookFile"
-        done
-        for kind in arm edit learn observe stop; do
-          grep -Fq "\"$kind\"" "$gateHookFile"
-        done
-        grep -Fq 'block: true' "$gateHookFile"
-        grep -Fq 'decision: "block"' "$gateHookFile"
 
         jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
           '. == {mcpServers: {gateway: {type: "http", url: $expected}}}' \
@@ -1212,7 +1194,7 @@ in
     ];
     assert lib.all (
       route: builtins.hasAttr route.skill minimalCapabilitySkills
-    ) minimalCapabilityAgentConfig.dotfiles.agents.shared.routing.subagentSkills;
+    ) minimalCapabilityConfig.dotfiles.agents.shared.routing.subagentSkills;
     pkgs.runCommandLocal "check-agent-capability-gating" { } ''
       if [ -e ${
         restrictedAgentConfig.dotfiles.managedArtifacts."agents/omp/hooks".source

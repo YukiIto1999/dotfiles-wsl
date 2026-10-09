@@ -168,7 +168,6 @@ in
       # 整備された rule 群による静的解析、security skill の finding source
       semgrep
       # 環境の観測と実行
-      just
       btop
       hyperfine
       nvd

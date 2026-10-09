@@ -20,11 +20,16 @@
 nix build --no-link .#checks.x86_64-linux.<check>
 ```
 
-最後の source 変更後に、全件確認を一度実行する。
+最後のsource変更後に、repositoryの根でT1を一度実行する。
 
 ```bash
-dotfiles-agent-verify -- nix flake check -L --no-write-lock-file
+dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
 ```
+
+検査項目の正本は各unitの`checks.nix`で、段の集約と実行は`flake.nix`が所有する。
+T1はunitの検査と全hostおよび既存variantの評価、T2の`verify-push`はそれらのsystem closureの実現、T3の`verify-full`は全量のflake checkを実行する。
+予算を超えても必要な検査を後の段へ移さず、依存と実行計画を見直す。
+NixのGit sourceから漏れる未追跡fileは、検証前に`git add`または`git add -N`で追跡する。
 
 ## コミット
 

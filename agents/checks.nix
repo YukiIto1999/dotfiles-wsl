@@ -27,6 +27,7 @@ let
     "agent-config-migration"
     "agent-installer-behavior"
     "agent-nix-build-shims"
+    "agent-omp-verification-gate-hook"
     "agent-project-cache-gc"
     "agent-runtime-behavior"
     "agent-runtime-contract"

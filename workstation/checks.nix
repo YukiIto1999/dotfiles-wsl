@@ -270,46 +270,35 @@ let
       warningAt = 6;
     };
   };
-  additionalObservationVariantConfig =
-    (mkNixosSystem [
-      normalMachineModule
-      {
-        dotfiles.health.observations."host/independent-observation" = {
-          kind = "roster";
-          members = [ "fixture" ];
-          minimumCount = 1;
-          failureOnly = false;
-          checkId = null;
-          resourceKey = null;
-          timeoutSeconds = 10;
-          failureMessage = "independent host observation failed";
-        };
-      }
-    ]).config;
-  additionalObservationVariant = lib.filterAttrs (
-    name: _: lib.hasPrefix "host/" name
-  ) additionalObservationVariantConfig.dotfiles.health.observations;
-  zramAlgorithmMutation = stabilityConfiguration // {
-    zram = stabilityConfiguration.zram // {
-      compression-algorithm = "zstd";
-    };
-  };
-  descriptionVariantConfig =
+  independentObservationDescriptionVariantConfig =
     (mkNixosSystem [
       normalMachineModule
       (
         { config, lib, ... }:
         {
+          dotfiles.health.observations."host/independent-observation" = {
+            kind = "roster";
+            members = [ "fixture" ];
+            minimumCount = 1;
+            failureOnly = false;
+            checkId = null;
+            resourceKey = null;
+            timeoutSeconds = 10;
+            failureMessage = "independent host observation failed";
+          };
           systemd.services."home-manager-${config.dotfiles.workstation.username}".description =
             lib.mkForce "A description must not select the Home Manager observation";
         }
       )
     ]).config;
-  descriptionVariantStabilityObservations = selectStabilityObservations (
-    lib.filterAttrs (
-      name: _: lib.hasPrefix "host/" name
-    ) descriptionVariantConfig.dotfiles.health.observations
-  );
+  independentObservationDescriptionVariant = lib.filterAttrs (
+    name: _: lib.hasPrefix "host/" name
+  ) independentObservationDescriptionVariantConfig.dotfiles.health.observations;
+  zramAlgorithmMutation = stabilityConfiguration // {
+    zram = stabilityConfiguration.zram // {
+      compression-algorithm = "zstd";
+    };
+  };
   # drive は実行時に mount から見つける。host profile は drive を知らず、全 host が同じ観測を持つ
   windowsDrivesObservationFor =
     candidate:
@@ -839,13 +828,14 @@ in
     assert lib.assertMsg (
       !(stabilityContractMatches stabilityConfiguration homeManagerRestartThresholdMutation)
     ) "Home Manager restart threshold mutation escaped the stability contract";
-    assert lib.assertMsg (stabilityContractMatches stabilityConfiguration additionalObservationVariant)
+    assert lib.assertMsg
+      (stabilityContractMatches stabilityConfiguration independentObservationDescriptionVariant)
       "an independent host-owned observation changed the stability contract";
     assert lib.assertMsg (
       !(stabilityContractMatches zramAlgorithmMutation hostObservations)
     ) "zram algorithm mutation escaped the stability contract";
     assert lib.assertMsg (
-      descriptionVariantStabilityObservations == stabilityObservations
+      selectStabilityObservations independentObservationDescriptionVariant == stabilityObservations
     ) "service descriptions must not select host runtime observations";
     assert lib.assertMsg (!zram.enable) "zramSwap must stay disabled on WSL";
     assert lib.assertMsg zramGenerator.enable "zram-generator is disabled";

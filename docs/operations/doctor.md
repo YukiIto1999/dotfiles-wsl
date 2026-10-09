@@ -234,4 +234,4 @@ kernel log の走査が 20 秒で終わらない場合は、`vmbus-ring-failures
 
 sessionを復旧する場合は、利用者が明示したsession名と文面だけを使う。spinner、経過時間、最終出力から作業中か入力待ちかを推測して一括入力しない。
 
-宣言と実装の整合は `nix flake check` が build 前に検査する。doctor は activation 後の実状態だけを観測する。
+宣言と実装の整合はNixの検証入口が検査し、doctorはactivation後の実状態だけを観測する。

@@ -73,6 +73,17 @@ let
   shortBudgetHooksDirectory = pkgs.linkFarm "git-hooks-short-budget" (
     lib.mapAttrs (_: lib.getExe) shortBudgetHooks
   );
+  failingEntryHooks = import ./package.nix {
+    inherit lib pkgs;
+    verificationEntry = pkgs.writeShellApplication {
+      name = "failing-verification-entry";
+      text = "exit 70";
+    };
+    pushBudgetSeconds = 15 * 60;
+  };
+  failingEntryHooksDirectory = pkgs.linkFarm "git-hooks-failing-entry" (
+    lib.mapAttrs (_: lib.getExe) failingEntryHooks
+  );
 in
 {
   # 生成した Git 設定を実際の git に読ませ、URL ごとに選ばれる helper と token を見る
@@ -164,7 +175,6 @@ in
         touch $out
       '';
 
-  # 配備した pre-push が T2 の入口を引いて実行し、結果、省略、予算で push を通すか拒むかを見る
   git-pre-push-verification =
     pkgs.runCommandLocal "check-git-pre-push-verification"
       {
@@ -177,6 +187,7 @@ in
         ];
         HOOKS = hooksDirectory;
         SHORT_BUDGET_HOOKS = shortBudgetHooksDirectory;
+        FAILING_ENTRY_HOOKS = failingEntryHooksDirectory;
       }
       ''
         bash ${./fixtures/pre-push.sh}

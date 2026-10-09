@@ -63,24 +63,33 @@ edit_with_tmpdir() {
 
 expect_edit_allowed() {
   if ! edit_with_tmpdir "$1" "$2" "$3"; then
-    echo "gate blocked an edit that needs no Skill: $3 (TMPDIR=$1)" >&2
+    echo "gate blocked an edit that needs no Skill: $3 (TMPDIR=$1 DOTFILES_AGENT_SESSION_ID=${DOTFILES_AGENT_SESSION_ID-unset})" >&2
     exit 1
   fi
 }
 
 expect_edit_blocked() {
   if edit_with_tmpdir "$1" "$2" "$3"; then
-    echo "gate accepted an unread Skill path: $3 (TMPDIR=$1)" >&2
+    echo "gate accepted an unread Skill path: $3 (TMPDIR=$1 DOTFILES_AGENT_SESSION_ID=${DOTFILES_AGENT_SESSION_ID-unset})" >&2
     exit 1
   fi
 }
 
+session_metadata() {
+  jq -nc --arg session_id "$1" --argjson version "$2" --argjson owner_pid "$$" \
+    '{version: $version, session_id: $session_id, client: "omp",
+      project_id: ($session_id | split(".")[0]), boot_id: "0",
+      owner_pid: $owner_pid, owner_start_time: "0"}'
+}
+
 check_isolated_scratch() {
   local sessions="$home/.cache/dotfiles-wsl/sessions" production="$fixture/scratch-production"
-  local scratch="$sessions/fixture-scratch.omp.4242.AbCd1234/tmp"
-  local forged="$sessions/fixture-forged.omp.4243.AbCd1234" inside="$sessions/fixture-inside-git.omp.4244.AbCd1234"
-  local relative path tmpdir
+  local scratch_session=fixture-scratch.omp.4242.AbCd1234 forged_session=fixture-forged.omp.4243.AbCd1234
+  local inside_session=fixture-inside-git.omp.4244.AbCd1234
+  local scratch="$sessions/$scratch_session/tmp" forged="$sessions/$forged_session" inside="$sessions/$inside_session"
+  local relative path tmpdir session variant
   local ui_read='{"path":"skill://ui-design"}'
+  local -x DOTFILES_AGENT_SESSION_ID=$scratch_session
 
   mkdir -p "$scratch/reproduction" "$scratch/existing/runtimes/web" "$forged" "$inside/tmp" \
     "$fixture/forged-target" "$production/runtimes/web" "$production/surfaces/viewer" "$production/core"
@@ -88,6 +97,9 @@ check_isolated_scratch() {
   git init -q "$inside"
   printf 'export {};\n' >"$production/runtimes/web/App.tsx"
   printf 'export {};\n' >"$scratch/existing/runtimes/web/App.tsx"
+  session_metadata "$scratch_session" 1 >"$sessions/$scratch_session/metadata.json"
+  session_metadata "$forged_session" 1 >"$forged/metadata.json"
+  session_metadata "$inside_session" 1 >"$inside/metadata.json"
   mkdir "$home/.cache/dotfiles-wsl/.git"
   expect_edit_allowed "$scratch" fixture-empty-git-marker "$scratch/runtimes/web/App.tsx"
   printf 'unrecognized metadata\n' >"$home/.cache/dotfiles-wsl/.git/config"
@@ -117,9 +129,27 @@ check_isolated_scratch() {
     expect_edit_blocked "$tmpdir" fixture-scratch-foreign "$scratch/reproduction/runtimes/web/App.tsx"
   done
   ln -s "$fixture/forged-target" "$forged/tmp"
-  expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$fixture/forged-target/runtimes/web/App.tsx"
-  expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$forged/tmp/runtimes/web/App.tsx"
-  expect_edit_blocked "$inside/tmp" fixture-scratch-foreign "$inside/tmp/runtimes/web/App.tsx"
+  DOTFILES_AGENT_SESSION_ID=$forged_session expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$fixture/forged-target/runtimes/web/App.tsx"
+  DOTFILES_AGENT_SESSION_ID=$forged_session expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$forged/tmp/runtimes/web/App.tsx"
+  DOTFILES_AGENT_SESSION_ID=$inside_session expect_edit_blocked "$inside/tmp" fixture-scratch-foreign "$inside/tmp/runtimes/web/App.tsx"
+  for session in "$inside_session" ""; do
+    DOTFILES_AGENT_SESSION_ID=$session expect_edit_blocked "$scratch" fixture-scratch-foreign "$scratch/reproduction/runtimes/web/App.tsx"
+  done
+  for variant in handmade malformed foreign-id version linked; do
+    session=fixture-$variant.omp.4245.AbCd1234
+    mkdir -p "$sessions/$session/tmp"
+    case $variant in
+    malformed) printf 'not json\n' >"$sessions/$session/metadata.json" ;;
+    foreign-id) session_metadata "$scratch_session" 1 >"$sessions/$session/metadata.json" ;;
+    version) session_metadata "$session" 2 >"$sessions/$session/metadata.json" ;;
+    linked)
+      session_metadata "$session" 1 >"$fixture/linked-metadata.json"
+      ln -s "$fixture/linked-metadata.json" "$sessions/$session/metadata.json"
+      ;;
+    esac
+    DOTFILES_AGENT_SESSION_ID=$session expect_edit_blocked "$sessions/$session/tmp" fixture-scratch-foreign \
+      "$sessions/$session/tmp/runtimes/web/App.tsx"
+  done
 
   for path in \
     "$production/runtimes/web/App.tsx" \

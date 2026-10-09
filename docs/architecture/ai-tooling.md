@@ -103,6 +103,8 @@ fileごとのprocess起動を避けるため、tracked fileのmetadataと内容h
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
 編集対象はsymlinkと`..`を解決したpathで判定する。
 agent runtimeが割り当てた`~/.cache/dotfiles-wsl/sessions/<session>/tmp`の内側にあり、祖先にGit metadataを持たない一時fileは対象から外す。
+割当ての確認には、canonical pathの`<session>`と`DOTFILES_AGENT_SESSION_ID`の一致に加え、同じsession directoryの`metadata.json`が実fileであり、`version`が1、`session_id`が`<session>`と一致することを要求する。
+metadataを持たない手作りのdirectory、別sessionの識別情報、不正なmetadataでは除外しない。
 空であると確認できる実directoryの`.git`はmetadataに数えないが、空でないdirectory、file、symlinkは除外を認めない。
 任意の`TMPDIR`、Git checkout内の一時file、checkoutへ向くsymlinkは対象から外さない。
 記録するのは、成功した読取後のeventで観測した`skill://NAME`、`skill://NAME/SKILL.md`、設定済みSkill rootの`NAME/SKILL.md`の本文読取だけであり、呼出し前、失敗、reference、部分読取、編集操作は証拠にしない。

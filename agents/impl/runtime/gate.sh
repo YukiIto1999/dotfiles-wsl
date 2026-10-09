@@ -196,10 +196,11 @@ skill_for() {
   esac
 }
 
-# 環境の TMPDIR 値の信用は全 path を使い捨て扱いにできるため launcher 割当ての物理 path の形だけを許可
+# TMPDIR の値と session 名の形は呼び出し側が決められるため launcher の metadata を伴わない許可は不可
 runtime_scratch_root() {
-  local physical sessions relative session
+  local physical sessions relative session metadata
   [ -n "${TMPDIR-}" ] || return 1
+  [ -n "${DOTFILES_AGENT_SESSION_ID-}" ] || return 1
   physical=$(realpath -e -- "$TMPDIR" 2>/dev/null) || return 1
   sessions=$(realpath -e -- "$cache_root/sessions" 2>/dev/null) || return 1
   [ -d "$physical" ] || return 1
@@ -209,10 +210,15 @@ runtime_scratch_root() {
   esac
   session=${relative%/tmp}
   [ "$relative" = "$session/tmp" ] && [[ $session =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || return 1
+  [ "$session" = "$DOTFILES_AGENT_SESSION_ID" ] || return 1
+  metadata="$sessions/$session/metadata.json"
+  [ -f "$metadata" ] && [ ! -L "$metadata" ] || return 1
+  jq -e --arg session "$session" '.version == 1 and .session_id == $session' \
+    "$metadata" >/dev/null 2>&1 || return 1
   printf '%s\n' "$physical"
 }
 
-# Git 探索が所有権や環境変数で非検出になるため祖先の metadata による判定
+# Git 探索は所有権・環境変数で非検出になるため git rev-parse による判定は不可
 isolated_scratch() {
   local canonical=$1 root dir
   local -a entries
@@ -242,7 +248,7 @@ isolated_scratch() {
   return 0
 }
 
-# 触る前に読む skill。綴りへの規則適用は tests/.. や symlink で行き先の規則を免れるため realpath -m の行き先へ適用
+# tests/.. と symlink で行き先の規則を免れるため綴りへの規則適用は不可
 skill_required_for() {
   local canonical
   if ! canonical=$(realpath -m -- "$1" 2>/dev/null); then

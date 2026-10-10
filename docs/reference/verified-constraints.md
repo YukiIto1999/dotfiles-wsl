@@ -71,7 +71,7 @@
 | browser-runtime CapabilityがChromium packageを一度だけ公開し、PlaywrightとChrome DevToolsが同じcontractを使う | `browser-runtime-chromium-contract`、`chrome-devtools-front` |
 | heap解析が任意code実行toolと未load fileの比較を拒否し、実snapshotで保持object、session分離、unload後のhandle失効を確認し、同期regexのdeadline終了を他sessionへ波及させない | `heap-diagnostics` |
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
-| Hindsight backendのimage、API endpoint、named volume、read-only model mount、環境 file、health、stop timeoutが宣言どおりである | `hindsight-container` |
+| Hindsight backendのAPI endpoint、named volume、read-only model mount、環境 fileの権限、health、stop timeoutが契約どおりである | `hindsight-container` |
 | memory MCP frontのpackage、port、backend unit、health probeが一致する | `hindsight-front` |
 | Crawl4AI backend の image、publish、credential option の型、read-only 属性、値、environment file、health contract が固定値と一致する | `crawl4ai-container` |
 | Crawl4AI MCP front は SOPS の poison stub と canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact の環境変数と initialize probe の応答を検査する | `crawl4ai-front` |

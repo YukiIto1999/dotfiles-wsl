@@ -12,7 +12,7 @@ let
   port = "11235";
   repository = "unclecode/crawl4ai";
   digest = "sha256:048848e548fad60c670bd656cbb3eb204fd999709a30365d3697c411ce50796d";
-  image = "${repository}:latest@${digest}";
+  image = "${repository}:0.9.4@${digest}";
 
   backend = mkContainerBackend "crawl4ai" {
     inherit image;

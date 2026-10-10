@@ -15,8 +15,8 @@ let
   };
 
   repository = "ghcr.io/vectorize-io/hindsight";
-  version = "0.10.2";
-  digest = "sha256:9f2a0bfc1af6835a8f09f2168689dd50ecacdde2a0b15369a315d46a542a196e";
+  version = "0.10.3";
+  digest = "sha256:5b6ef2b892703f0e82c448786349c88db60f06d8c9190432b68af00ce6dc45e3";
   image = "${repository}:${version}@${digest}";
   httpPort = "3111";
 

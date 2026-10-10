@@ -26,7 +26,8 @@ image が既にあるかは docker が答える。同期の状態を別に記録
 
 digest だけを指定して pull した image は tag を持たず、`docker image prune` はこれを dangling として消す。rebuild が container を止めている間に `docker-build-artifact-gc.timer` が重なると、宣言済みの image が消えて container が起動しなくなる。`dotfiles-sync-images` は `dotfiles-pinned/<repository>:<tag>` の tag を付け、prune の対象から外す。上流と同じ tag を付けないのは、同じ tag を使う別 project の image を奪わないためである。
 
-digest を更新すると pin は新しい image へ移り、古い image は dangling として GC が回収する。
+同じtagのdigestを更新するとpinは新しいimageへ移り、他の参照がない古いimageはdanglingとしてGCの対象になる。
+宣言のtag自体を変えた場合は古いpinが残るため、切替完了後に使用中のcontainerと現行の宣言から参照されていないことを確認し、その古いpinだけを外す。
 
 ## digest を更新する
 

@@ -4,9 +4,10 @@
   chromium ? pkgs.chromium,
 }:
 
-# browser.userAgent が Chromium の起動オプションへ反映されない playwright-mcp の制約
+# context 単位の userAgent 上書きが UA-CH の brand metadata を消すため native option は不採用
 let
-  userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+  chromeMajor = pkgs.lib.versions.major chromium.version;
+  userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeMajor}.0.0.0 Safari/537.36";
   config = pkgs.writeText "playwright-mcp-config.json" (
     builtins.toJSON {
       browser.launchOptions.args = [

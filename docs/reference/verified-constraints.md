@@ -73,7 +73,7 @@
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
 | Hindsight backendのAPI endpoint、named volume、read-only model mount、環境 fileの権限、health、stop timeoutが契約どおりである | `hindsight-container` |
 | memory MCP frontのpackage、port、backend unit、health probeが一致する | `hindsight-front` |
-| Crawl4AI backend の image、publish、credential option の型、read-only 属性、値、environment file、health contract が固定値と一致する | `crawl4ai-container` |
+| Crawl4AI backendのpublish、credential option、環境 fileの権限と値が契約どおりである | `crawl4ai-container` |
 | Crawl4AI MCP front は SOPS の poison stub と canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact の環境変数と initialize probe の応答を検査する | `crawl4ai-front` |
 | SearXNG backendのpublish、standalone secretとsettings templateの権限と値が契約どおりである | `searxng-container` |
 | SearXNG MCP front の package、port、backend unit が一致し、initialize に応答する | `searxng-front` |

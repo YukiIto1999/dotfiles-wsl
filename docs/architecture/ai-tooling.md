@@ -215,6 +215,7 @@ deadlineを超えたworkerだけを終了し、未完了の解析を空の結果
 これはNode old-spaceの上限であり、processのRSSを1 GiB以下に保証するものではない。
 
 Chrome MCPのruntimeと同梱Skillの供給元は、[`flake.nix`](../../flake.nix)の`chromeDevtoolsMcp` inputに統一する。
+起動時には`--no-usage-statistics --no-performance-crux`を指定し、usage統計の送信とtrace URLを用いるCrUX照会を無効にする。
 
 Chromeのfile exportの保存先制限は、clientのtool harnessやgatewayではなく、固定したChrome MCP packageのcanonical path検査が所有する。
 [`package.nix`](../../capabilities/browser-diagnostics/chrome-devtools/mcp/package.nix)は既存frontの`runtimeDirectoryPath`を`mk-server`の`env.TMPDIR`とCLIの`--filesystemRoot`へ渡し、systemdがmode `0700`で所有するprivateな領域だけを既定の保存先にする。

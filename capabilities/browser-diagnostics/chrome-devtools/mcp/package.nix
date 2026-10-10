@@ -18,5 +18,5 @@ in
 serverBuilder {
   name = "chrome-devtools-mcp";
   env.TMPDIR = runtimeDirectoryPath;
-  command = "${pkg}/bin/chrome-devtools-mcp --headless --isolated --executablePath ${chromium}/bin/chromium --filesystemRoot ${runtimeDirectoryPath}";
+  command = "${pkg}/bin/chrome-devtools-mcp --headless --isolated --no-usage-statistics --no-performance-crux --executablePath ${chromium}/bin/chromium --filesystemRoot ${runtimeDirectoryPath}";
 }

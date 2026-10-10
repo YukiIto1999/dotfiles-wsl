@@ -23,6 +23,12 @@
 決定的な操作はCLIを直接使い、候補や証拠の意味判断が必要な場合だけ該当Skillを使うため、一commandのための新しいSkillは置かない。
 以下はsourceの構成と利用契約であり、この文書を更新しただけで配備や全用途の実行を確認したことにはならない。
 
+### Semgrep
+
+[`toolchain/package/semgrep.nix`](../../toolchain/package/semgrep.nix)がSemgrep `1.180.0`のCLI sourceと同版のpublished wheelから取得するcoreを固定し、nixpkgs全体を更新せずNixOS用に組み立てる。
+既存のCLI入口は変えず、local ruleによる走査では`--metrics off`とversion checkの無効化を明示する。
+この版ではQL ruleが廃止され、binary targetは既定で走査対象から外れるため、その用途をCLI更新の互換性に含めない。
+
 ### Explainer
 
 raw sourceは[`explainerSkills`](../../flake.nix)の[`578defba7249fde5366689424ed6017f76b5598b`](https://github.com/mizchi/explainer/tree/578defba7249fde5366689424ed6017f76b5598b)であり、registryは`skills/explainer`、`skills/explainer-book`、`skills/first-reader`を直接参照する。

@@ -145,6 +145,7 @@ in
       explainerSource = self.inputs.explainerSkills;
     };
     zvec-grep = pkgs.callPackage ./package/zvec-grep.nix { };
+    semgrep = pkgs.callPackage ./package/semgrep.nix { };
     devenv = self.inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.default;
 
     inherit (pkgs)
@@ -165,8 +166,6 @@ in
       ruff
       # 構文 pattern の検索と一括書き換え、pattern は自分で書く
       ast-grep
-      # 整備された rule 群による静的解析、security skill の finding source
-      semgrep
       # 環境の観測と実行
       btop
       hyperfine

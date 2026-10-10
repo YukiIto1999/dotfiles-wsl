@@ -72,21 +72,17 @@
         "type": "github"
       }
     },
-    "chromeDevtoolsSkills": {
+    "chromeDevtoolsMcp": {
       "flake": false,
       "locked": {
-        "lastModified": 1791205445,
-        "narHash": "sha256-ZX2F5zPZG2FvNfQXdmLKv0uPQsSB65ShGv2ab6cM8jA=",
-        "owner": "ChromeDevTools",
-        "repo": "chrome-devtools-mcp",
-        "rev": "cf2eab96d96cad3d47ce769b9638815d1775500f",
-        "type": "github"
+        "lastModified": 499162500,
+        "narHash": "sha256-uFu8/2L0JySGGP+1X5+rT0QyfCq28OMLnhDF4jyLEAY=",
+        "type": "tarball",
+        "url": "https://registry.npmjs.org/chrome-devtools-mcp/-/chrome-devtools-mcp-1.10.1.tgz"
       },
       "original": {
-        "owner": "ChromeDevTools",
-        "repo": "chrome-devtools-mcp",
-        "rev": "cf2eab96d96cad3d47ce769b9638815d1775500f",
-        "type": "github"
+        "type": "tarball",
+        "url": "https://registry.npmjs.org/chrome-devtools-mcp/-/chrome-devtools-mcp-1.10.1.tgz"
       }
     },
     "crate2nix": {
@@ -579,7 +575,7 @@
       "inputs": {
         "actrun": "actrun",
         "architectureStandard": "architectureStandard",
-        "chromeDevtoolsSkills": "chromeDevtoolsSkills",
+        "chromeDevtoolsMcp": "chromeDevtoolsMcp",
         "devenv": "devenv",
         "dotnetSkills": "dotnetSkills",
         "explainerSkills": "explainerSkills",

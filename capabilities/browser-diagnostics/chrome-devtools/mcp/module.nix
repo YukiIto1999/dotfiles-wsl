@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  pluginSources,
   ...
 }:
 
@@ -11,6 +12,7 @@ let
   mkNpmMcp = pkgs.callPackage ../../../../platform/mcp/package/mk-npm.nix { };
   front = pkgs.callPackage ./package.nix {
     inherit mkNpmMcp;
+    src = pluginSources.chrome-devtools;
     serverBuilder = mkMcpServer;
     chromium = config.dotfiles.capabilities.browser-runtime.package;
     runtimeDirectoryPath = config.dotfiles.platform.mcp.fronts.chrome-devtools.runtimeDirectoryPath;

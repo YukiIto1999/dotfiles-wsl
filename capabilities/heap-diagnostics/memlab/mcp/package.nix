@@ -1,16 +1,20 @@
 {
   lib,
+  fetchurl,
   nodejs,
   mkNpmMcp,
   serverBuilder,
 }:
 
 let
+  version = "2.86.0";
   pkg = mkNpmMcp {
     pname = "memlab-mcp";
-    registryPath = "@memlab/mcp-server";
-    version = "2.86.0";
-    hash = "sha256-orLjttxQwd1Dx7MhR1joDiwgaYj+ncBKjj+5EVvzdfc=";
+    inherit version;
+    src = fetchurl {
+      url = "https://registry.npmjs.org/@memlab/mcp-server/-/mcp-server-${version}.tgz";
+      hash = "sha256-orLjttxQwd1Dx7MhR1joDiwgaYj+ncBKjj+5EVvzdfc=";
+    };
     lockFile = ./package/package-lock.json;
     npmDepsHash = "sha256-qT+aXu9gluo08xxceJgTlbXFPex8N6MBCwQz3HWrLp4=";
     extraPostPatch = ''

@@ -214,6 +214,8 @@ published packageが持つsnapshot headerとmulti-snapshot APIを基準に、現
 deadlineを超えたworkerだけを終了し、未完了の解析を空の結果として返さず、他sessionのgraphには触れない。
 これはNode old-spaceの上限であり、processのRSSを1 GiB以下に保証するものではない。
 
+Chrome MCPのruntimeと同梱Skillの供給元は、[`flake.nix`](../../flake.nix)の`chromeDevtoolsMcp` inputに統一する。
+
 Chromeのfile exportの保存先制限は、clientのtool harnessやgatewayではなく、固定したChrome MCP packageのcanonical path検査が所有する。
 [`package.nix`](../../capabilities/browser-diagnostics/chrome-devtools/mcp/package.nix)は既存frontの`runtimeDirectoryPath`を`mk-server`の`env.TMPDIR`とCLIの`--filesystemRoot`へ渡し、systemdがmode `0700`で所有するprivateな領域だけを既定の保存先にする。
 providerはcallerごとに割り当てた`TMPDIR`を起動時には知らないため、callerのsession cacheやworkspace全体をfilesystem rootへ追加しない。

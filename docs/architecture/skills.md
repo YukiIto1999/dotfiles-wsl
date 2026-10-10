@@ -47,16 +47,17 @@ SkillとCapabilityの対応、subagentごとのrouteは[`agents/subagents/routin
 
 固定revisionの正本は[`flake.nix`](../../flake.nix)と[`flake.lock`](../../flake.lock)、採用IDとdirectory pathの正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)である。
 Orcaの操作Skillとarchitecture-standardの運用Skillに加え、次の固定sourceから個別Skillを採用する。
-sourceはrepository全体を保持し、rootのlicenseと同梱資材を残したままSkill directoryを配備先から参照する。
+sourceはrepository全体またはSkillを同梱したpublished package全体を保持し、rootのlicenseと同梱資材を残したままSkill directoryを配備先から参照する。
 
 | Source | Flake input | 固定revision | License |
 |---|---|---|---|
 | [Matt Pocock skills](https://github.com/mattpocock/skills/tree/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d) | `mattSkills` | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | [MIT](https://github.com/mattpocock/skills/blob/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/LICENSE) |
-| [Chrome DevTools MCP](https://github.com/ChromeDevTools/chrome-devtools-mcp/tree/cf2eab96d96cad3d47ce769b9638815d1775500f) | `chromeDevtoolsSkills` | `cf2eab96d96cad3d47ce769b9638815d1775500f` | [Apache-2.0](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/cf2eab96d96cad3d47ce769b9638815d1775500f/LICENSE) |
+| [Chrome DevTools MCP](https://registry.npmjs.org/chrome-devtools-mcp/-/chrome-devtools-mcp-1.10.1.tgz) | `chromeDevtoolsMcp` | `1.10.1`（gitHead `e52c6b59b476c5e04d8dd9fd4bd017ba3b3d65df`） | [Apache-2.0](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/e52c6b59b476c5e04d8dd9fd4bd017ba3b3d65df/LICENSE) |
 | [.NET skills](https://github.com/dotnet/skills/tree/0dcd43ceb15e15a2c45dd54075fbcf3a30632154) | `dotnetSkills` | `0dcd43ceb15e15a2c45dd54075fbcf3a30632154` | [MIT](https://github.com/dotnet/skills/blob/0dcd43ceb15e15a2c45dd54075fbcf3a30632154/LICENSE) |
 | [mizchi explainer](https://github.com/mizchi/explainer/tree/578defba7249fde5366689424ed6017f76b5598b) | `explainerSkills` | `578defba7249fde5366689424ed6017f76b5598b` | [MIT](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/LICENSE)。同梱`first-reader`は[Apache-2.0とNOTICE](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/skills/first-reader/NOTICE)を保持 |
 
 次のpathは各固定sourceのrootからの相対pathであり、directoryの配置やSkill名をlocalの命名体系へ変換しない。
+Chrome MCPのruntimeと採用Skillは同じpublished packageを参照し、runtimeのversionもその`package.json`から取得する。
 
 | ID | Source内のdirectory | 上流が所有する仕事 |
 |---|---|---|

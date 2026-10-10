@@ -100,6 +100,7 @@ let
   };
   allowedDynamicFileReads = {
     "agents/impl/skill-discovery.nix" = 1;
+    "capabilities/browser-diagnostics/chrome-devtools/mcp/package.nix" = 1;
     "identity/checks.nix" = 1;
     "identity/module.nix" = 3;
     "platform/cli/impl/mk-command.nix" = 1;

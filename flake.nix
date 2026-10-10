@@ -31,8 +31,8 @@
       flake = false;
     };
 
-    chromeDevtoolsSkills = {
-      url = "github:ChromeDevTools/chrome-devtools-mcp/cf2eab96d96cad3d47ce769b9638815d1775500f";
+    chromeDevtoolsMcp = {
+      url = "tarball+https://registry.npmjs.org/chrome-devtools-mcp/-/chrome-devtools-mcp-1.10.1.tgz";
       flake = false;
     };
 
@@ -62,7 +62,7 @@
       orca,
       architectureStandard,
       mattSkills,
-      chromeDevtoolsSkills,
+      chromeDevtoolsMcp,
       dotnetSkills,
       explainerSkills,
       modernWebGuidance,
@@ -81,7 +81,7 @@
         inherit orca;
         matt-pocock = mattSkills;
         architecture-standard = architectureStandard;
-        chrome-devtools = chromeDevtoolsSkills;
+        chrome-devtools = chromeDevtoolsMcp;
         dotnet = dotnetSkills;
         explainer = explainerSkills;
         modern-web-guidance = modernWebGuidance;

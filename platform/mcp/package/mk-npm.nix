@@ -1,14 +1,12 @@
 {
   lib,
-  fetchurl,
   buildNpmPackage,
 }:
 
 {
   pname,
   version,
-  registryPath ? pname,
-  hash,
+  src,
   lockFile,
   npmDepsHash,
   npmFlags ? [ "--ignore-scripts" ],
@@ -17,22 +15,15 @@
   extraPostPatch ? "",
 }:
 
-let
-  tarballName = lib.last (lib.splitString "/" registryPath);
-in
 buildNpmPackage (
   {
     inherit
       pname
       version
+      src
       npmDepsHash
       npmFlags
       ;
-    src = fetchurl {
-      url = "https://registry.npmjs.org/${registryPath}/-/${tarballName}-${version}.tgz";
-      inherit hash;
-    };
-    sourceRoot = "package";
     postPatch = ''
       cp ${lockFile} ./package-lock.json
     ''

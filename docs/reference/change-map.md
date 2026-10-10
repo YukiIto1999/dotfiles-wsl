@@ -30,7 +30,7 @@
 | Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`verify`で確認する |
 | Skillを追加・削除する | localは[`skills/<id>/`](../../skills)のmoduleと`skill/`、外部sourceは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表。依存metadataとcallerのroutingを同時に変える | Skill renderingとrequired Capabilityのcheck |
 | 外部Skillを採用し、同IDの供給元を差し替える | 採用moduleのregistry.sourceと明示的なoverride。source内の任意directoryを直接指し、原名のID、本文、reference、scriptを変換しない | `skill-source-contract`、`skill-frontmatter-contract`、`skill-capability-gating` |
-| Orca、architecture-standard、Matt、Chrome DevTools、.NET、Modern Web guidanceのsource版を更新する | [`flake.nix`](../../flake.nix)の該当inputのrevと[`flake.lock`](../../flake.lock)。採用pathと依存、guide資材の公開は[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分と`verify`、`verify-push`を確認し、承認後に`dotfiles-rebuild` |
+| Orca、architecture-standard、Matt、Chrome DevTools、.NET、Modern Web guidanceのsource版を更新する | [`flake.nix`](../../flake.nix)の該当inputと[`flake.lock`](../../flake.lock)。Chrome DevToolsはruntimeとSkillを同梱したnpm archive URL、他はGit revisionを固定する。採用pathと依存、guide資材の公開は[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分と`verify`、`verify-push`を確認し、承認後に`dotfiles-rebuild` |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 
 ## Runtime observationと生成artifact

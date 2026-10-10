@@ -5,7 +5,7 @@
   serverBuilder,
 }:
 
-# ルート単位の backendAuth が inline target へ届かず全上流へトークンを流す native MCP 直結の不採用
+# native MCP の SSE・WebSocket が platform の対応 transport 外のため直結は不可
 let
   pythonEnv = pkgs.python3.withPackages (ps: [
     ps.mcp

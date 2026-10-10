@@ -155,20 +155,19 @@ in
         resolveTargets() {
           local applications=$1 bindings=$2 output=$3
           jq --slurpfile bindings "$bindings" --arg suffix "$backendSuffix" '
+            (reduce $bindings[0][] as $binding ({};
+              .[$binding.file][$binding.metaVariables.single.A.text] +=
+                [ $binding.metaVariables.single.V.text ]
+            )) as $bindings_by_file
+            |
             def compact: gsub("[[:space:]()+\\\"]"; "");
             def identifier: test("^[A-Za-z_][A-Za-z0-9_\\u0027-]*$");
             def resolves_target($file; $expression; $seen):
               ($expression | compact) as $value
               | if ($value | contains($suffix)) then true
                 elif (($expression | identifier) and (($seen | index($expression)) == null)) then
-                  any($bindings[0][];
-                    .file == $file
-                    and .metaVariables.single.A.text == $expression
-                    and resolves_target(
-                      $file;
-                      .metaVariables.single.V.text;
-                      $seen + [ $expression ]
-                    ))
+                  any(($bindings_by_file[$file][$expression] // [])[];
+                    resolves_target($file; .; $seen + [ $expression ]))
                 else false
                 end;
             [

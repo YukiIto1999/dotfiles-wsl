@@ -33,7 +33,7 @@
 | 宣言済み backend が system.slice、それ以外の container が daemon の既定の上限付き slice に置かれ、既定の欠落、slice の上限の欠落、backend の flag の欠落、上限付き slice の下への入れ子を拒否し、生成した daemon config を dockerd が受理する | `container-cgroup-placement` |
 | 停止済みの testcontainers の回収が label、状態、作成からの経過時間で対象を選び、running、若い container、他の label を残し、匿名 volume ごと削除し、一覧の失敗を空として扱わない | `docker-stopped-testcontainers-reclaim-behavior` |
 | container の配置の観測が running の container ごとの scope の slice を宣言と照合し、宣言済み backend と宣言外の container の取り違えを fail にし、消えた scope を無視し、docker の失敗を observation の失敗にする | `container-placement-observation-behavior` |
-| 共通container helperのimportが承認済みCapability実装に限られ、CapabilityからAgentまたはSkillへの逆依存がない | `unit-boundary-name-only` |
+| 共通container helperの参照が同一fileの別名経由も含めて承認済みCapability実装に限られ、CapabilityからAgentまたはSkillへの逆依存がない | `unit-boundary-name-only` |
 | MCP targetのprovider集合がCapability registryから導かれ、通常評価とvariant評価で一致する | `mcp-provider-registry` |
 | targetのprovider、server transport、server lifecycle、port、probe、通信方針、backend unitが固定fixtureに一致する | `mcp-target-contract` |
 | provider 欠落と追加、ID と port の衝突、probe と通信方針の drift、front dependency と sandbox の欠落を変異入力で拒否する | `mcp-contract-mutations` |

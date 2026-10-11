@@ -28,7 +28,7 @@
       "expectedSkills": ["commit-writing", "ja-writing"],
       "expected": {
         "onePurpose": true,
-        "recordsPurpose": true,
+        "namesTargetAndChange": true,
         "changesIndex": false,
         "readsStandardFiles": [
           "principles/documentation/commit-purpose.md",

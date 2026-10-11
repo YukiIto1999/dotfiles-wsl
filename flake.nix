@@ -22,7 +22,7 @@
     };
 
     architectureStandard = {
-      url = "github:YukiIto1999/architecture-standard/4b23779c03f70c6a6740c147c89bd2edd588747e";
+      url = "github:YukiIto1999/architecture-standard/dc00f40f553bb36ab573272cd45feff1a638c1ad";
       flake = false;
     };
 

@@ -50,6 +50,7 @@
 | PATH 上の実行ファイル名を二人以上が所有しない | `toolchain-single-owner` |
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | Zvec-GrepのCLIが固定文字列の検索で一致した行を返す | `toolchain-binary-runs` |
+| Strix launcherがnativeの終了statusと取消statusを保ち、取消または終了時に所有process groupを有限の猶予で停止して直接の子を待ち、私有tmpfs configを回収する。無関係なprocessとdirectoryを残し、資格情報のないhelpとversionでconfigを作らない | `strix-runtime-behavior` |
 | LSP roster と対応 client の登録が一致し、client ごとの server id 規則と OMP の有効条件を満たし、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |

@@ -52,17 +52,43 @@ fi
 umask 077
 runtime_dir=$(mktemp -d "$runtime_root/strix.XXXXXXXX")
 child=""
+cleanup_grace_seconds=2
+cancellation_status=0
 cleanup() {
-  trap - EXIT INT TERM
+  local cleanup_status=0
+  trap - EXIT
+  trap '' INT TERM
   if [[ -n "$child" ]]; then
-    kill -TERM "$child" 2>/dev/null || true
+    kill -TERM -- "-$child" 2>/dev/null || kill -TERM "$child" 2>/dev/null || true
+    local grace_status=0
+    env --default-signal=INT,TERM timeout "$cleanup_grace_seconds" bash -c "
+      while kill -0 -- \"-\$1\" 2>/dev/null; do
+        sleep 0.05
+      done
+    " bash "$child" || grace_status=$?
+    if (( grace_status != 0 && grace_status != 124 )); then
+      cleanup_status=1
+    fi
+    kill -KILL -- "-$child" 2>/dev/null || kill -KILL "$child" 2>/dev/null || true
     wait "$child" 2>/dev/null || true
+    child=""
   fi
-  rm -rf -- "$runtime_dir"
+  rm -rf -- "$runtime_dir" || cleanup_status=1
+  return "$cleanup_status"
 }
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+finish() {
+  local status=${1:-$?}
+  if ! cleanup; then
+    printf '%s\n' 'strix: ephemeral credential cleanup is incomplete' >&2
+    if (( status == 0 )); then
+      status=1
+    fi
+  fi
+  exit "$status"
+}
+trap finish EXIT
+trap 'if (( cancellation_status == 0 )); then cancellation_status=130; fi' INT
+trap 'if (( cancellation_status == 0 )); then cancellation_status=143; fi' TERM
 
 if [[ -n "$config_source" ]]; then
   cp -- "$config_source" "$runtime_dir/config.json"
@@ -92,14 +118,18 @@ export STRIX_SANDBOX_SHM_SIZE=256m
 export STRIX_SANDBOX_CPUS=2
 export STRIX_SANDBOX_PIDS_LIMIT=256
 
-set +e
-@upstream@ --config "$runtime_dir/config.json" "${args[@]}" &
-child=$!
-wait "$child"
-status=$?
-child=""
-if ! cleanup; then
-  printf '%s\n' 'strix: ephemeral credential cleanup is incomplete' >&2
-  exit 1
+if (( cancellation_status != 0 )); then
+  exit "$cancellation_status"
 fi
-exit "$status"
+set +m
+setsid @upstream@ --config "$runtime_dir/config.json" "${args[@]}" &
+child=$!
+if (( cancellation_status != 0 )); then
+  exit "$cancellation_status"
+fi
+status=0
+wait "$child" || status=$?
+if (( cancellation_status != 0 )); then
+  status=$cancellation_status
+fi
+finish "$status"

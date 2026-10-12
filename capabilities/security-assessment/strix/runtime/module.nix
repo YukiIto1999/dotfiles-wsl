@@ -19,6 +19,7 @@ let
       coreutils
       docker
       git
+      util-linux
     ];
     vars = {
       upstream = lib.getExe native;

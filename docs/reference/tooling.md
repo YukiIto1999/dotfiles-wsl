@@ -39,6 +39,8 @@ remote ruleの取得を含む通信を遮断する仕組みではない。
 
 `strix`のassessmentは管理下のOpenCode Go資格情報とprovider設定を使い、`--help`や`--version`ではその資格情報を読まない。
 上流がAPI keyをconfigへ保存するため、呼出しごとにuser-owned tmpfsの私有directoryへconfigを移し、終了時に回収する。
+native CLIは呼出し専用のprocess groupで起動し、終了時にTERMを送り、2秒の猶予後に残ったgroupへKILLを送って直接の子をwaitしてから私有configを回収する。
+通常の終了statusとINT・TERM取消のstatusを保ち、この回収猶予をassessment全体の制限時間やDocker sandboxの回収と混同しない。
 homeや永続configへkeyを書かないための境界であり、RAM上の一時fileにもkeyを書かないという保証ではない。
 自動updateは拒否し、版の更新はpackageの固定sourceと通常の配備から行う。
 

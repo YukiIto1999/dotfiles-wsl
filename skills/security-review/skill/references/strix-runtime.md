@@ -19,6 +19,9 @@ The managed launcher fixes the endpoint, model, image digest, telemetry setting,
 It reads the existing SOPS credential at invocation; do not retrieve its value or place it in an instruction, argument, report, or permanent config.
 Upstream persists its connection settings, so the launcher redirects its config to a private per-invocation tmpfs directory and removes that directory on exit.
 This is an ephemeral runtime secret file, not a promise that upstream never writes a key.
+The native CLI runs in an invocation-owned process group; cleanup sends TERM to that group, allows a two-second grace, then sends KILL to remaining group members and waits for the direct child before removing the config.
+INT and TERM cancellation retain exit statuses 130 and 143, and ordinary native exit statuses are preserved.
+This cleanup grace is not an assessment wall-time limit and does not clean up Docker sandboxes.
 
 Inspect `strix --help` for the installed release's argument contract.
 Select `--scan-mode`, `--max-turns`, and `--max-budget`, and retain the tool-generated run identity; do not inherit the upstream deep/500-turn defaults.

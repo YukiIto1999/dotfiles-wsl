@@ -41,7 +41,7 @@
 | repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |
 | MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、要求の期限切れを期限の秒数を示す warn に、tools/call の MCP error、契約外の応答、接続の失敗を種類ごとの固定 message の fail にし、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |
 | MCP target、front、gateway から service、restart、roster、protocol observation を漏れなく導き、追加、削除、変更、stale entry に追随する | `mcp-runtime-observation-contract` |
-| runtime identity fixture が現在の宣言から導いた MCP target port、gateway、container 名と network、secret 名、永続 path に完全一致する | `runtime-identity` |
+| backend networkとHindsightの永続mountが各一つであり、公開installer commandと自動更新service/timerの契約を満たす | `runtime-identity` |
 | bootstrapの鍵生成、age/SOPS復号、誤鍵拒否、mode・owner・symlink拒否、宣言identity一致、enrollmentの手動commit後のclean化と同期から検証までの順序を隔離fixtureで観測する | `bootstrap-age-key` |
 | 宣言した systemd service が listener か portless として登録される | `service-listener-registry` |
 | stdio service lifecycle front の wrapper が自分の bind を決めない | `mcp-front-wrapper-bind` |
@@ -51,6 +51,7 @@
 | 宣言した language server の command が package に存在する | `lsp-command-present` |
 | Zvec-GrepのCLIが固定文字列の検索で一致した行を返す | `toolchain-binary-runs` |
 | Strix launcherがnativeの終了statusと取消statusを保ち、取消または終了時に所有process groupを有限の猶予で停止して直接の子を待ち、私有tmpfs configを回収する。無関係なprocessとdirectoryを残し、資格情報のないhelpとversionでconfigを作らない | `strix-runtime-behavior` |
+| SonarScannerの非zeroとsignalを失敗として保存し、tokenを出力せず、同じSHAでもscan中のsource変更を入力fingerprintで識別する | `sonarqube-scan-evidence` |
 | LSP roster と対応 client の登録が一致し、client ごとの server id 規則と OMP の有効条件を満たし、拡張子が衝突しない | `lsp-registration` |
 | telemetry collector の config が妥当で receiver が loopback に閉じる | `telemetry-collector-config` |
 | telemetry contract から collector service と restart count の observation を導き、service description を対象選択に使わない | `telemetry-runtime-observation-contract` |

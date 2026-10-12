@@ -998,6 +998,40 @@ in
         };
       boundedBackend = evaluate (placementFixture "containers.slice").valid;
       unplacedBackend = evaluate (placementFixture null).valid;
+      optionFixture =
+        options:
+        evaluate
+          (import ./fixtures/container-argv.nix {
+            inherit pkgs;
+            extraOptions = options;
+          }).valid;
+      hardenedBackend = optionFixture [
+        "--memory=4g"
+        "--memory-swap=4g"
+        "--cpus=0.5"
+        "--pids-limit=256"
+        "--ulimit=core=0:0"
+        "--ulimit=nofile=8192:131072"
+        "--cap-drop=ALL"
+        "--cap-add=CHOWN"
+        "--security-opt=no-new-privileges"
+        "--read-only"
+        "--tmpfs=/tmp:rw,nosuid,nodev,size=64m,mode=1777"
+      ];
+      rejectedOptions = [
+        "--memory-swap=-1"
+        "--cpus=0"
+        "--pids-limit=-1"
+        "--ulimit=core=1:1"
+        "--ulimit=nofile=131072:8192"
+        "--cap-drop=NET_RAW"
+        "--cap-add=SYS_ADMIN"
+        "--security-opt=seccomp:unconfined"
+        "--tmpfs=/tmp:rw,size=64m"
+        "--tmpfs=/tmp:rw,nosuid,nodev,size=64m,size=1g"
+        "--tmpfs=/../tmp:rw,nosuid,nodev,size=64m"
+      ];
+      writableRoot = optionFixture [ "--read-only=false" ];
     in
     assert valid.secretReaders == fixture.expected.secretReaders;
     assert valid.volumeOwners == fixture.expected.volumeOwners;
@@ -1008,6 +1042,11 @@ in
     assert gracefulStop.unexpectedTokens == [ ] && gracefulStop.wrongValues == [ ];
     assert indefiniteStop.wrongValues == [ "synthetic-backend:--stop-timeout=-1" ];
     assert immediateStop.wrongValues == [ "synthetic-backend:--stop-timeout=0" ];
+    assert hardenedBackend.unexpectedTokens == [ ] && hardenedBackend.wrongValues == [ ];
+    assert lib.all (
+      option: (optionFixture [ option ]).wrongValues == [ "synthetic-backend:${option}" ]
+    ) rejectedOptions;
+    assert writableRoot.unexpectedTokens == [ "synthetic-backend:--read-only=false" ];
     assert
       missingSecretReader.wrongValues
       == [ "synthetic-backend:--env-file=/run/secrets/rendered/synthetic-secret.env" ];

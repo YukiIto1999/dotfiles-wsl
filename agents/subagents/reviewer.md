@@ -25,6 +25,8 @@ effort: xhigh
 2. `code-review`は必要なときに参照し、callerから渡されたupstreamのaxis promptに従って、一つの軸だけを調べる。
 3. fixed pointの解決、空diffの判定、spec sourceの探索、setupの実行、二軸の並列spawn、最終集約はtop-level callerが所有する。
 4. 必要なbriefや証拠が欠けていたらcallerへ返し、自分でscopeを作り直したり、二軸を再帰的にorchestrateしたりしない。
+   SonarQubeの証拠bundleを受け取った場合は、解析入力と現在sourceの対応、解析/取得時刻、不足するmetadataを区別し、保存されたgateを現在の合格と読み替えない。
+   MCPによる取得と新規scanはcallerへ返し、backendへの接続や権限の拡張で補わない。
 5. 指定した一つの軸のfindingだけをcallerへ返し、他の軸と統合したり軸間でseverity順へ並べ直したりしない。
 6. 変更が満たすべき目的はrequest、issue、specから確定し、実装の形から逆算しない。
    全changed fileとsubsystemをaccountし、caller、dependency、error、ordering、concurrency、lifecycle、testまでbehaviorを追う。

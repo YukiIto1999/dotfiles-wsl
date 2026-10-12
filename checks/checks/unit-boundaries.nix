@@ -8,6 +8,10 @@
 
 let
   allowedPureHelperImports = {
+    "capabilities/code-quality/sonarqube/database/module.nix" =
+      "../../../../platform/containers/impl/container-backend.nix";
+    "capabilities/code-quality/sonarqube/server/module.nix" =
+      "../../../../platform/containers/impl/container-backend.nix";
     "capabilities/project-memory/hindsight/backend/module.nix" =
       "../../../../platform/containers/impl/container-backend.nix";
   };
@@ -15,6 +19,12 @@ let
     "capabilities/browser-diagnostics/chrome-devtools/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
       "../../../../platform/mcp/package/mk-npm.nix"
+    ];
+    "capabilities/code-quality/sonarqube/database/module.nix" = [
+      "../../../../platform/containers/impl/port-bindings.nix"
+    ];
+    "capabilities/code-quality/sonarqube/mcp/module.nix" = [
+      "../../../../platform/mcp/package/mk-server.nix"
     ];
     "capabilities/github-resources/github/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
@@ -60,6 +70,14 @@ let
     "agents/memory-harvest/module.nix" = {
       target = nestedCommandHelper;
       line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";
+    };
+    "capabilities/code-quality/sonarqube/provisioning/module.nix" = {
+      target = deeplyNestedCapabilityCommandHelper;
+      line = "  mkCommand = import ${deeplyNestedCapabilityCommandHelper} { inherit config lib pkgs; };";
+    };
+    "capabilities/code-quality/sonarqube/scanner/module.nix" = {
+      target = deeplyNestedCapabilityCommandHelper;
+      line = "  mkCommand = import ${deeplyNestedCapabilityCommandHelper} { inherit config lib pkgs; };";
     };
     "capabilities/project-memory/hindsight/runtime/module.nix" = {
       target = deeplyNestedCapabilityCommandHelper;

@@ -107,6 +107,7 @@ let
         code-review = {
           directory = "skills/engineering/code-review";
           requiresCapabilities = [ ];
+          optionalCapabilities = [ "code-quality" ];
           requiresSkills = [ "setup-matt-pocock-skills" ];
         };
         improve-codebase-architecture = {

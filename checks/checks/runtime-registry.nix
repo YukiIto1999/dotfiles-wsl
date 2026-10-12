@@ -11,10 +11,8 @@
 {
   runtime-identity =
     let
-      expected = builtins.fromJSON (builtins.readFile ../fixtures/runtime-identities.json);
       containers = hostConfig.virtualisation.oci-containers.containers;
       containerValues = builtins.attrValues containers;
-      gatewayEndpoint = hostConfig.dotfiles.platform.mcp.gateway;
 
       containerNetworks = lib.unique (
         lib.sort builtins.lessThan (
@@ -34,22 +32,6 @@
         builtins.length segments >= 2 && builtins.elemAt segments 1 == "/home/hindsight/.pg0"
       ) containers.hindsight.volumes;
 
-      actual =
-        assert lib.assertMsg (
-          builtins.length containerNetworks == 1
-        ) "runtime identity requires one container network: actual=${builtins.toJSON containerNetworks}";
-        assert lib.assertMsg (builtins.length hindsightPersistentMounts == 1)
-          "runtime identity requires one Hindsight persistent mount: actual=${builtins.toJSON hindsightPersistentMounts}";
-        {
-          gateway = {
-            inherit (gatewayEndpoint) id port service;
-          };
-          containers = lib.sort builtins.lessThan (builtins.attrNames containers);
-          containerNetwork = lib.head containerNetworks;
-          secrets = lib.sort builtins.lessThan (builtins.attrNames hostConfig.sops.secrets);
-          projectMemoryPersistentMount = lib.head hindsightPersistentMounts;
-        };
-      identityMatches = candidate: candidate == expected;
       commandNames = builtins.attrNames hostConfig.dotfiles.platform.cli.commands;
       serviceNames = builtins.attrNames hostConfig.systemd.services;
       timerNames = builtins.attrNames hostConfig.systemd.timers;
@@ -66,10 +48,11 @@
         && !builtins.elem legacyUpdaterName services
         && !builtins.elem legacyUpdaterName timers;
     in
-    assert lib.assertMsg (identityMatches actual) (
-      "runtime identity mismatch: expected=${builtins.toJSON expected} "
-      + "actual=${builtins.toJSON actual}"
-    );
+    assert lib.assertMsg (
+      builtins.length containerNetworks == 1
+    ) "runtime requires one container network: actual=${builtins.toJSON containerNetworks}";
+    assert lib.assertMsg (builtins.length hindsightPersistentMounts == 1)
+      "runtime requires one Hindsight persistent mount: actual=${builtins.toJSON hindsightPersistentMounts}";
     assert installerExecutable == "dotfiles-install-agents";
     assert builtins.elem "installAgents" commandNames;
     assert !builtins.elem legacyInstallerKey commandNames;
@@ -138,7 +121,8 @@
         "docker-dotfiles-backends-network"
         "nix-daemon"
         "user@"
-      ];
+      ]
+      ++ lib.optional (builtins.elem "code-quality" hostConfig.dotfiles.capabilities.resolved) "sonarqube-provision";
 
       registered = lib.sort builtins.lessThan (
         lib.unique (

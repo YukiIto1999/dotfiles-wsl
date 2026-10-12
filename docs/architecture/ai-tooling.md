@@ -56,6 +56,11 @@ Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置�
 MCP endpointや常駐backendを追加せず、CLIは共通の`platform/cli`、sandbox imageの同期は共通の`platform/containers`が所有する。
 実行の許可、予算、結果の検証、所有するrunの回収は[Skillの利用契約](../../skills/security-review/skill/references/strix-runtime.md)に従う。
 
+`code-quality`は[SonarQubeの契約](../reference/code-quality.md)を通し、保存済みissueとquality gate、新規scanの出典を提供する。
+取得と現在sourceへの適用判断は同名Skill、通常の二軸reviewは原版`code-review`のcallerが所有する。
+callerが証拠bundleをaxis briefへ渡すため、read-only reviewerへbackend権限を追加しない。
+Git revisionの一致だけで結果を捨てず、逆に保存済みのgateを現在の合格へ読み替えない。
+
 ## Profileとregistry
 
 [`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のAgent client、Capability、language server、identityを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有のCapabilityをsemantic IDで加える。MCP providerやcontainer backendはprofileへ直接列挙しない。

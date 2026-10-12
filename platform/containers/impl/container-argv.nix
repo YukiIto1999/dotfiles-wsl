@@ -16,6 +16,43 @@ let
     name: _: argvOf name
   ) hostConfig.virtualisation.oci-containers.containers;
 
+  allowedUlimit =
+    value:
+    let
+      limits = builtins.match "(nofile|nproc)=([1-9][0-9]*):([1-9][0-9]*)" value;
+    in
+    value == "core=0:0"
+    || (
+      limits != null
+      && builtins.fromJSON (builtins.elemAt limits 1) <= builtins.fromJSON (builtins.elemAt limits 2)
+    );
+
+  allowedTmpfs =
+    value:
+    let
+      parts = lib.splitString ":" value;
+      destination = builtins.head parts;
+      options = lib.splitString "," (lib.last parts);
+      keys = map (option: builtins.head (lib.splitString "=" option)) options;
+    in
+    builtins.length parts == 2
+    && builtins.match "/[A-Za-z0-9_./-]+" destination != null
+    && lib.all (part: part != "" && part != "." && part != "..") (
+      lib.tail (lib.splitString "/" destination)
+    )
+    && lib.all (option: builtins.elem option options) [
+      "rw"
+      "nosuid"
+      "nodev"
+    ]
+    && builtins.elem "size" keys
+    && builtins.length keys == builtins.length (lib.unique keys)
+    && lib.all (
+      option:
+      builtins.match "(rw|nosuid|nodev|size=[1-9][0-9]*[mg]|mode=0?[0-7]{3,4}|(uid|gid)=[0-9]+)" option
+      != null
+    ) options;
+
   # 値を取る flag は、値の検査と対で持つ。検査を書かずに語彙へ入れると
   # residual から消えるだけで無検査になる。-e と --log-driver は使わない
   flagRules = {
@@ -27,6 +64,27 @@ let
     "--network" = _: value: value == "dotfiles-backends";
     "--cgroup-parent" = _: value: value == placement.declared;
     "--memory" = _: value: builtins.match "[0-9]+[mg]" value != null;
+    "--memory-swap" = _: value: builtins.match "[1-9][0-9]*[mg]" value != null;
+    "--cpus" = _: value: builtins.match "([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)" value != null;
+    "--pids-limit" = _: value: builtins.match "[1-9][0-9]*" value != null;
+    "--ulimit" = _: allowedUlimit;
+    "--cap-drop" = _: value: value == "ALL";
+    "--cap-add" =
+      _: value:
+      builtins.elem value [
+        "CHOWN"
+        "DAC_OVERRIDE"
+        "FOWNER"
+        "SETGID"
+        "SETUID"
+      ];
+    "--security-opt" =
+      _: value:
+      builtins.elem value [
+        "no-new-privileges"
+        "no-new-privileges:true"
+      ];
+    "--tmpfs" = _: allowedTmpfs;
     "--shm-size" = _: value: builtins.match "[0-9]+[mg]" value != null;
     "--stop-timeout" = _: value: builtins.match "[1-9][0-9]*" value != null;
     "--name" = name: value: value == name;
@@ -41,6 +99,7 @@ let
     "run"
     "--rm"
     "--init"
+    "--read-only"
   ];
 
   # flag が取る値と、それ自身を argv から除いた残り

@@ -86,6 +86,8 @@ CLIとterminalの契約は`standard-apply`が読む標準のconsole構造に従�
 入力領域、独立oracle、state machine、shrinkingを設計するときは`property-testing`を使い、単にtest数を増やす目的では起動しない。
 実装とrefactoringでは、新規機構より不要な処理の削除、既存owner、標準library、native機能、導入済みdependencyを先に比較し、要件と安全性を削減対象にしない。
 通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecの並列workerへ渡して、二軸を分けて集約する。
+SonarQubeの保存済み解析やquality gateを補助根拠にする場合は、callerが`code-quality`で取得と現在sourceへの適用を判断し、解析入力と取得時点を区別した証拠bundleをaxis briefへ渡す。
+providerが使えない場合も通常のreviewを続け、新規scanは対象sourceの送信と結果更新が許可された場合だけ行う。
 reviewerはcallerが渡した一つのaxis briefだけを担当し、再帰的なspawnや軸間の統合、並べ直しをしない。
 raw upstreamの`code-review`にstaged / unstaged diffを代入しない。
 `setup-matt-pocock-skills`はengineering Skillが使うrepository設定を確認して合意後に書く依存commandであり、`improve-codebase-architecture`は利用者が明示的に呼ぶ探索commandである。

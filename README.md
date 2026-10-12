@@ -21,6 +21,8 @@ OS、Home Manager、開発ツール、AIコーディング環境、暗号化済�
 配備宣言はこのcheckout内のNix、asset、暗号化済みsecretが所有し、外部Skillの本文と資材は固定sourceの任意directoryを原名のIDで直接参照する。
 本文変換や旧名のaliasは作らず、sourceと責務の違いは[Skill portfolio](docs/architecture/skills.md)にまとめる。
 Modern Web Guidanceは対象機能の原文guideを読む外部reference assetとして保持し、全frontendへ起動するwrapperは配備しない。
+SonarQubeは[code-quality](docs/reference/code-quality.md)から必要な静的解析証拠を取得し、現在sourceへの適用を判断してreviewのcallerへ渡す。
+新規scanは対象sourceの送信が許可された場合だけ行い、通常のbuild、lint、二軸reviewを置き換えない。
 
 ## 操作
 

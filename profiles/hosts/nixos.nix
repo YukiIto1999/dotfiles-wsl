@@ -2,6 +2,7 @@
   dotfiles.capabilities.enabled = [
     "project-memory"
     "security-assessment"
+    "code-quality"
   ];
   # 既存の日誌の file 名が Windows のコンピューター名のため host ID の既定値は不可
   dotfiles.agents.journal.machineName = "y-itoh";

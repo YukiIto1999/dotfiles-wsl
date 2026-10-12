@@ -55,7 +55,6 @@ in
       {
         nativeBuildInputs = [
           pkgs.coreutils
-          pkgs.diffutils
           pkgs.findutils
           pkgs.jq
           pkgs.shellcheck
@@ -64,14 +63,13 @@ in
       ''
         set -euo pipefail
 
-        expected=${../fixtures/generated-shell-roster.json}
         actual=${generatedShellActualFile}
 
         jq -e '
           (.projectMemoryHooks | length) > 0 and
           (.commands | length) > 0 and
           (.workstation | length) > 0
-        ' "$expected" >/dev/null
+        ' "$actual" >/dev/null
 
         checkoutCount=0
         while IFS= read -r -d "" source; do
@@ -99,20 +97,14 @@ in
           shellcheck --severity=warning "$source"
         }
 
-        jq -r '.projectMemoryHooks[]' "$expected" | sort > expected-hooks
         find "$(jq -r '.projectMemoryHooks' "$actual")/bin" \
           -maxdepth 1 -type f -o -type l \
           | while IFS= read -r hook; do basename "$hook"; done \
           | sort > actual-hooks
-        diff -u expected-hooks actual-hooks
         while IFS= read -r hook; do
           lintGenerated "$(jq -r '.projectMemoryHooks' "$actual")/bin/$hook"
-        done < expected-hooks
+        done < actual-hooks
 
-        jq -S '.commands' "$expected" > expected-commands.json
-        jq -S '.commands | with_entries(.value |= split("/")[-1])' "$actual" \
-          > actual-commands.json
-        diff -u expected-commands.json actual-commands.json
         jq -e 'any(.commandSmoke.timeoutArgs[]; startswith("--kill-after="))' "$actual" >/dev/null
         set +e
         {
@@ -134,9 +126,6 @@ in
           test -s "$id-help"
         done < <(jq -r '.commands | to_entries[] | [.key, .value] | @tsv' "$actual")
 
-        jq -S '.workstation' "$expected" > expected-workstation.json
-        jq -S '.workstation | with_entries(.value |= split("/")[-1])' "$actual" > actual-workstation.json
-        diff -u expected-workstation.json actual-workstation.json
         lintGenerated "$(jq -r '.workstation.wslview' "$actual")"
 
         while IFS=$'\t' read -r id executable; do

@@ -61,6 +61,10 @@ gatewayとfrontは設定ユーザーのserviceとして動き、読めるcheckou
 HindsightのLLM credentialはSOPS templateからroot所有の`hindsight.env`へ展開し、Dockerのenvironment fileを経てcontainerだけへ渡す。Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`へ保存し、宣言で固定したmultilingual embedding/reranker modelはNix storeからread-onlyでmountする。APIはhostの`127.0.0.1:3111`、memory MCP frontは`127.0.0.1:8774`であり、gateway経由のclientはHindsightへ直接credentialを渡さない。
 clientは会話のturnをretain対象にしない。retain対象は明示的な`memory_save`と、omp の session 記録から利用者の発言だけを外部modelへ渡して候補を選ぶ記憶の収穫である。既知のinjection blockを決定的に除外するが、secretやPIIをすべて検出する保証はないため、retain入力を安全な保管場所とは扱わない。原文書類はlocal volumeに残る一方、extraction inputは設定した外部LLMへ送られる。
 
+SonarQubeのDB passwordはSOPS runtime templateからnative `POSTGRES_PASSWORD_FILE`とread-onlyの`sonar.properties`へ渡し、DockerのEnv/configへ値を保存しない。
+MCPは読み取り用user token、新規scanは別のproject analysis tokenをprivate process environmentで使い、root、Docker group、credential readerを信頼境界に含める。
+default groupの継承権限を含む初期設定と、解析sourceの送信条件は[code-quality](../reference/code-quality.md#runtime-と-credential)が所有する。
+
 upstream OCI image は digest を Nix 宣言へ固定し、containerを有効にしたhostの`dotfiles-sync-images`にregistry取得を限定する。container起動時の暗黙pullは無効である。同期と更新は [OCI images](../operations/oci-images.md)に従う。
 
 ## Agent client の供給経路

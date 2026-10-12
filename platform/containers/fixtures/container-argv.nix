@@ -2,6 +2,7 @@
   pkgs,
   stopTimeout ? null,
   cgroupParent ? "system.slice",
+  extraOptions ? [ ],
   ...
 }:
 
@@ -16,7 +17,7 @@ let
       if cgroupParent == null then "" else "--cgroup-parent=${cgroupParent}"
     } --pull never --env-file ${secretPath} -v ${volumeName}:/data ${
       if stopTimeout == null then "" else "--stop-timeout=${stopTimeout}"
-    } ${image}
+    } ${builtins.concatStringsSep " " extraOptions} ${image}
   '';
   auxiliaryScript = pkgs.writeText "synthetic-container-auxiliary" ''
     exit 0

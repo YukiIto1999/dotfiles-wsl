@@ -116,6 +116,8 @@ registryの固定raw sourceは保持し、policy rosterが表示する絶対path
 native subagentは再帰的にsubagentを起動できないため、`reviewer`は原版のStandardsまたはSpecのbriefと根拠を受け取る、read-onlyの単一軸workerとする。
 `reviewer`の`code-review` routeは必須workflowではなくdynamicな参照であり、自分では再委譲や軸間の統合、順位付けをしない。
 対象projectのissue tracker設定がない場合は上流の`setup-matt-pocock-skills`を使うため、`code-review`のSkill依存にも登録する。
+SonarQubeの補助根拠が必要なbranchだけ、callerが`code-quality`で取得と現在sourceへの適用を確認してaxis briefへ渡す。
+`code-review`の`optionalCapabilities`に登録するが、原版本文を変更せず、SonarQubeの未配備で一般のreviewを止めない。
 未commit差分をreview対象へ含めるために無断でcommitせず、別sessionが作業中のcheckoutでは`HEAD`を動かさない。
 reviewerは目的をrequest、issue、specから固定し、全changed subsystemのbehaviorをcallerとtestまで追う。
 testがgreenでも目的との因果関係がない変更を指摘し、unrelated cleanupを同じ修正へ混ぜない。

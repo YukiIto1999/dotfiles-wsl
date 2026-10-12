@@ -55,7 +55,7 @@ let
     runtimeInputs = [ pkgs.coreutils ];
     text = ''
       case " $* " in
-      *" --budget "*) ;;
+      *" --budget "*|*" --snapshot "*) ;;
       *) sleep 3 ;;
       esac
       exec ${lib.getExe verificationEntry} "$@"

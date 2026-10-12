@@ -18,9 +18,10 @@ usage: dotfiles-agent-gate <command> [options]
   arm --session ID [--path PATH]        その session が編集した repository を控える
   check [--repo DIR] [--session ID]     未検証なら理由を出して 1 で終わる
   waive --reason TEXT [--repo DIR]      理由を残していまの木を一度だけ通す
-  entry [--repo DIR]                    repository が登録する検証入口の綴りを評価器を起動せずに答える
+  entry [--repo DIR] [--policy FILE]      repository が登録する検証入口の綴りを評価器を起動せずに答える
   candidates [--repo DIR]               予算が読めない間に、検証入口になり得る綴りを評価せずに一行ずつ答える
-  budget [--repo DIR]                   その repository の T1 の時間予算を秒で答える。宣言が無い、または不正なら理由を出して 1 で終わる
+  budget [--repo DIR] [--policy FILE]     その repository の T1 の時間予算を秒で答える。宣言が無い、または不正なら理由を出して 1 で終わる
+  snapshot [--repo DIR]                 一度読んだ静的な検証宣言を JSON で答える。entry と budget の --policy に渡す
   skill --path PATH                     その綴りを触る前に読む skill の名を答える
   learned --session ID --path NAME      管理者が既存の配備済み skill 本文を明示的に承認する
   teach --session ID --path PATH        読んでいなければ理由を出して 1 で終わる
@@ -78,14 +79,15 @@ source_fingerprint() {
 # その repository が宣言する T1 の検証入口。宣言が無ければ空を返し、門は何も要求しない。
 # 段の名前と宣言の置き場の解決は git の pre-push と共有する。
 entry_of() {
-  "@verificationEntry@" --repo "$1" verify
+  "@verificationEntry@" --repo "$1" "${policy_args[@]}" verify
 }
 
 declared_entry_of() {
-  local entry
-  entry=$(entry_of "$1") || return $?
+  local entry policy
+  policy=$(snapshot_of "$1") || return $?
+  entry=$("@verificationEntry@" --repo "$1" --policy /dev/stdin verify <<<"$policy") || return $?
   if [ -n "$entry" ]; then
-    budget_of "$1" >/dev/null || return $?
+    "@verificationEntry@" --repo "$1" --policy /dev/stdin --budget verify <<<"$policy" >/dev/null || return $?
   fi
   printf '%s' "$entry"
 }
@@ -95,7 +97,11 @@ candidates_of() {
 }
 
 budget_of() {
-  "@verificationEntry@" --repo "$1" --budget verify
+  "@verificationEntry@" --repo "$1" "${policy_args[@]}" --budget verify
+}
+
+snapshot_of() {
+  "@verificationEntry@" --repo "$1" --snapshot verify
 }
 
 state_dir_of() {
@@ -761,10 +767,16 @@ main() {
   shift || true
 
   local repo=$PWD session="" reason="" text="" path="" standard_root="" report="" pending=""
+  local -a policy_args=()
   while [ "$#" -gt 0 ]; do
     case $1 in
     --repo)
       repo=$2
+      shift 2
+      ;;
+    --policy)
+      [ "$#" -ge 2 ] && [ "${#policy_args[@]}" -eq 0 ] || usage
+      policy_args=(--policy "$2")
       shift 2
       ;;
     --session)
@@ -799,6 +811,9 @@ main() {
     *) usage ;;
     esac
   done
+  if [ "${#policy_args[@]}" -gt 0 ] && [ "$command" != entry ] && [ "$command" != budget ]; then
+    usage
+  fi
 
   case $command in
   record) command_record "$repo" "$text" "$pending" ;;
@@ -810,6 +825,7 @@ main() {
   entry) entry_of "$(repo_top_of "$repo")" ;;
   candidates) candidates_of "$(repo_top_of "$repo")" ;;
   budget) budget_of "$repo" ;;
+  snapshot) snapshot_of "$repo" ;;
   learned) command_learned "$session" "$path" ;;
   teach) command_teach "$session" "$path" ;;
   conformance) command_conformance "$session" "$repo" "$standard_root" "$report" ;;

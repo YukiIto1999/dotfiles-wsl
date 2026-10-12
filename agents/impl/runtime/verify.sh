@@ -53,16 +53,24 @@ if ! top=$(git rev-parse --show-toplevel 2>/dev/null); then
 fi
 trap 'interrupted=true; [ -z "$bounded_pid" ] || kill -s TERM "$bounded_pid" 2>/dev/null || true' HUP INT TERM XFSZ
 entry_file=$(mktemp)
-trap 'rm -f -- "$entry_file"' EXIT
+policy_file=$(mktemp)
+trap 'rm -f -- "$entry_file" "$policy_file"' EXIT
 status=0
-if budget=$(@gate@ budget --repo "$top" 2>&1) && [[ $budget =~ ^[1-9][0-9]*$ ]]; then
-  budget_seconds=$budget
+if @gate@ snapshot --repo "$top" >"$policy_file" 2>"$entry_file"; then
+  if budget=$(@gate@ budget --repo "$top" --policy "$policy_file" 2>&1) && [[ $budget =~ ^[1-9][0-9]*$ ]]; then
+    budget_seconds=$budget
+  else
+    budget_error=$budget
+  fi
+else
+  budget_error=$(cat "$entry_file")
+fi
+if [ -n "$budget_seconds" ]; then
   if ! refresh_remaining; then
     exit 124
   fi
-  run_bounded @gate@ entry --repo "$top" >"$entry_file" || status=$?
+  run_bounded @gate@ entry --repo "$top" --policy "$policy_file" >"$entry_file" || status=$?
 else
-  budget_error=$budget
   # 読めない予算の既定値補完と期限なしの評価は不可のため、評価器を起動せず入口になり得る綴りだけを集める
   @gate@ candidates --repo "$top" >"$entry_file" || status=$?
 fi
@@ -91,7 +99,7 @@ if names_entry "$*" \
   if [ "$status" -eq 0 ]; then
     published=$(cat "$entry_file")
     if refresh_remaining; then
-      run_bounded rm -f -- "$entry_file" || status=$?
+      run_bounded rm -f -- "$entry_file" "$policy_file" || status=$?
       trap - EXIT
     else
       status=124
@@ -112,6 +120,6 @@ if names_entry "$*" \
   fi
   exit 0
 fi
-rm -f -- "$entry_file"
+rm -f -- "$entry_file" "$policy_file"
 trap - EXIT
 exec @verificationCache@ -- "$@"

@@ -107,7 +107,8 @@ runtimeはsession ID、sessionを始めたproject、owner process、boot ID、�
 fileごとのprocess起動を避けるため、tracked fileのmetadataと内容hashはコマンド行長の上限内でまとめて取得する。
 読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
 宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は検証processの子孫を止めて成功として扱わない。
-予算はrepositoryの根の`verification-budget.json`の`verify.seconds`を正本とし、wrapperは走行の開始時に共通providerの`dotfiles-verify-entry --budget verify`から一度だけ読む。
+予算はrepositoryの根の`verification-budget.json`の`verify.seconds`を正本とし、wrapperは走行開始後に共通providerの`dotfiles-verify-entry --snapshot verify`で静的な宣言を一度だけ読む。
+予算と入口は同じsnapshotを`--policy FILE`へ渡して解決するため、解決の間に登録を編集してもcanonicalな呼び出しが無期限のlocal cacheへ切り替わることはなく、snapshotの読取時間も走行開始から数える予算に含まれる。
 走行中に宣言を書き換えても、その走行の期限は延びない。
 Nixの入口は同じfileの`frontend: "nix"`と`entries`から解決し、入口の有無を調べるために評価器を起動しない。
 Nixの取得と評価は検査本体の実行時にだけ行い、その時間も残りの予算で止める。

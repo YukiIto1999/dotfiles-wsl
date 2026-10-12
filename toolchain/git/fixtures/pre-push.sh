@@ -98,6 +98,90 @@ test "$(remote_ref "$declared" refs/heads/main)" = "$head" || fail 'the accepted
 grep -qF "refs/heads/main $head refs/heads/main " refs \
   || fail 'verify-push consumed the ref list meant for the repository hook'
 
+export INSPECTION_GIT
+INSPECTION_GIT=$(command -v git)
+inspection_push() (
+  git() {
+    local inspection=
+    if [[ ${1-} == -C && ${2-} == "$SOURCE_INSPECTION_REPO" ]]; then
+      case " ${*:3} " in
+        *" --no-optional-locks status "*) inspection=status ;;
+        *" ls-files -v "*) inspection=ls-files ;;
+      esac
+      if [[ -n $inspection && $inspection == "$SOURCE_INSPECTION_FAIL" \
+        && ( $SOURCE_INSPECTION_PHASE == before || -e $MARKER ) ]]; then
+        printf '%s\n' "$inspection" >>"$SOURCE_INSPECTION_PROOF"
+        printf 'fixture: source inspection %s failed\n' "$inspection" >&2
+        return 74
+      fi
+    fi
+    "$INSPECTION_GIT" "$@"
+  }
+  export -f git
+  expect_refused "$@"
+)
+
+check_push_metadata_snapshot() (
+  local repository
+  export PUSH_SNAPSHOT_JQ PUSH_SNAPSHOT_METADATA PUSH_SNAPSHOT_PROOF=$PWD/push-snapshot-proof
+  PUSH_SNAPSHOT_JQ=$(command -v jq)
+  repository=$(new_repo snapshot-native)
+  printf '{ outputs = { self }: { apps.x86_64-linux.verify-push = { type = "app"; program = "/bin/false"; }; }; }\n' \
+    >"$repository/flake.nix"
+  PUSH_SNAPSHOT_METADATA=$repository/verification-budget.json
+  printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":15}}\n' \
+    >"$PUSH_SNAPSHOT_METADATA"
+  git -C "$repository" add flake.nix verification-budget.json
+  git -C "$repository" commit -q -m 'test: 入口登録snapshotの検査'
+  jq() {
+    local result status=0
+    if [[ " $* " == *" --arg stage verify-push "* && ! -e $PUSH_SNAPSHOT_PROOF ]]; then
+      result=$("$PUSH_SNAPSHOT_JQ" "$@") || status=$?
+      if [ "$status" -eq 0 ]; then
+        printf '{"version":1,"frontend":"nix","entries":[],"verify-push":{"seconds":15}}\n' \
+          >"$PUSH_SNAPSHOT_METADATA"
+        printf after-budget >"$PUSH_SNAPSHOT_PROOF"
+      fi
+      printf '%s\n' "$result"
+      return "$status"
+    fi
+    "$PUSH_SNAPSHOT_JQ" "$@"
+  }
+  export -f jq
+  expect_refused 'push whose native registration was removed after reading its budget' \
+    "$HOOKS" "$repository" refs/heads/main
+  test "$(cat "$PUSH_SNAPSHOT_PROOF")" = after-budget
+)
+if [ "${1-}" = --snapshot-race-only ]; then
+  check_push_metadata_snapshot
+  exit 0
+fi
+
+inspections=(status ls-files)
+if [ "${1-}" = --inspection-only ] && [ -n "${2-}" ]; then
+  case $2 in status|ls-files) inspections=("$2") ;; *) fail 'unknown source inspection' ;; esac
+fi
+for inspection in "${inspections[@]}"; do
+  for phase in before after; do
+    rm -f "$MARKER" "$PWD/inspection-proof"
+    SOURCE_INSPECTION_REPO=$declared SOURCE_INSPECTION_FAIL=$inspection \
+      SOURCE_INSPECTION_PHASE=$phase SOURCE_INSPECTION_PROOF=$PWD/inspection-proof \
+      inspection_push "push with failed $inspection source inspection ($phase verification)" \
+        "$HOOKS" "$declared" "refs/heads/inspection-$inspection-$phase" \
+        "HEAD:refs/heads/inspection-$inspection-$phase"
+    test "$(cat "$PWD/inspection-proof")" = "$inspection" || fail 'the source inspection failure was not reached'
+    if [ "$phase" = before ]; then
+      test ! -e "$MARKER" || fail 'verification ran after its initial source inspection failed'
+    else
+      test -e "$MARKER" || fail 'the final source inspection failed before verification ran'
+    fi
+    expect_clean_accepted "$declared"
+  done
+done
+[ "${1-}" != --inspection-only ] || exit 0
+check_push_metadata_snapshot
+
+
 rm -f "$MARKER"
 git -C "$declared" rm -q verification-budget.json
 git -C "$declared" commit -q -m 'test: 予算欠落の検査'

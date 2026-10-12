@@ -23,7 +23,7 @@ in
     type = lib.types.package;
     readOnly = true;
     internal = true;
-    description = "repository が宣言する検証の段(verify、verify-push、verify-full)の入口を呼び出しの綴りで答える command。Nix の入口は root の verification-budget.json の frontend と entries に登録し、入口解決では評価器を起動しない。--budget は同じ宣言にある段の時間予算を秒で答え、--candidates は不正な宣言下の canonical 呼び出し判別用の候補を答える。";
+    description = "repository が宣言する検証の段(verify、verify-push、verify-full)の入口を呼び出しの綴りで答える command。Nix の入口は root の verification-budget.json の frontend と entries に登録し、入口解決では評価器を起動しない。--snapshot は一度読んだ宣言を JSON で答え、--policy FILE はその snapshot から入口と --budget の時間予算を解決する。--candidates は不正な宣言下の canonical 呼び出し判別用の候補を答える。";
   };
 
   config.dotfiles.toolchain.verification.entry = entry;

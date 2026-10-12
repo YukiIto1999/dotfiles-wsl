@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'usage: dotfiles-verify-entry [--repo DIR] [--budget | --candidates] verify|verify-push|verify-full\n' >&2
+  printf 'usage: dotfiles-verify-entry [--repo DIR] [--policy FILE] [--budget | --candidates | --snapshot] verify|verify-push|verify-full\n' >&2
   exit 64
 }
 
@@ -20,19 +20,25 @@ native_entry_of() {
   printf 'nix run --no-write-lock-file .#%s' "$1"
 }
 
+parse_policy() {
+  local allow_absent=$1
+  shift
+  jq -cs --argjson allow_absent "$allow_absent" '
+    if length == 1 then .[0] else error("expected one metadata object") end |
+    if $allow_absent and . == null or type == "object" and .version == 1
+      and (
+        (has("frontend") | not) and (has("entries") | not)
+        or .frontend == "nix" and (.entries | type == "array")
+          and all(.entries[]; . == "verify" or . == "verify-push" or . == "verify-full")
+      )
+    then . else error("invalid verification metadata") end
+  ' "$@"
+}
+
 read_policy() {
   local top=$1 file=$1/verification-budget.json
   if [ -e "$file" ] || [ -L "$file" ]; then
-    if ! jq -ecs '
-      if length == 1 then .[0] else error("expected one metadata object") end |
-      if type == "object" and .version == 1
-        and (
-          (has("frontend") | not) and (has("entries") | not)
-          or .frontend == "nix" and (.entries | type == "array")
-            and all(.entries[]; . == "verify" or . == "verify-push" or . == "verify-full")
-        )
-      then . else error("invalid verification metadata") end
-    ' "$file"; then
+    if ! parse_policy false "$file"; then
       printf '%s の検証宣言が不正である\n' "$file" >&2
       return 1
     fi
@@ -45,6 +51,17 @@ read_policy() {
   fi
   printf 'null\n'
 }
+policy_of() {
+  if [ -n "$policy_file" ]; then
+    if ! parse_policy true "$policy_file"; then
+      printf '%s の検証宣言snapshotが読めない、または不正である\n' "$policy_file" >&2
+      return 1
+    fi
+    return
+  fi
+  read_policy "$1"
+}
+
 
 static_entry_of() {
   local repo=$1 name=$2 script
@@ -70,7 +87,7 @@ static_entry_of() {
 # 時間予算が無い宣言を評価して入口の有無を決める方式の不採用: 上限の確定前の任意コード実行
 entry_of() {
   local repo=$1 name=$2 policy untracked
-  policy=$(read_policy "$repo") || return $?
+  policy=$(policy_of "$repo") || return $?
   if jq -e '.frontend == "nix"' <<<"$policy" >/dev/null; then
     if jq -e --arg name "$name" '.entries | index($name) != null' <<<"$policy" >/dev/null; then
       if [ ! -f "$repo/flake.nix" ]; then
@@ -104,7 +121,7 @@ candidates_of() {
 budget_of() {
   local top=$1 name=$2 file policy seconds
   file=$top/verification-budget.json
-  policy=$(read_policy "$top") || return $?
+  policy=$(policy_of "$top") || return $?
   if ! seconds=$(jq -e --arg stage "$name" '
     if type == "object" and (.[$stage] | type == "object")
       and (.[$stage].seconds | type == "number" and . >= 1 and . <= 2147483647 and . == floor)
@@ -120,7 +137,7 @@ budget_of() {
 
 
 main() {
-  local repo=$PWD name="" top mode=entry
+  local repo=$PWD name="" top mode=entry policy_file=
   while [ "$#" -gt 0 ]; do
     case $1 in
     --repo)
@@ -128,7 +145,13 @@ main() {
       repo=$2
       shift 2
       ;;
-    --budget | --candidates)
+    --policy)
+      [ "$#" -ge 2 ] && [ -z "$policy_file" ] || usage
+      policy_file=$2
+      [ -n "$policy_file" ] || usage
+      shift 2
+      ;;
+    --budget | --candidates | --snapshot)
       [ "$mode" = entry ] || usage
       mode=${1#--}
       shift
@@ -142,17 +165,22 @@ main() {
     esac
   done
   [ -n "$name" ] || usage
+  if [ -n "$policy_file" ] && [ "$mode" != entry ] && [ "$mode" != budget ]; then
+    usage
+  fi
   if ! top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null); then
     [ "$mode" != budget ] || {
       printf '%s は git の木の外にあり、時間予算の宣言が無い\n' "$repo" >&2
       return 1
     }
+    [ "$mode" != snapshot ] || printf 'null\n'
     return 0
   fi
   case $mode in
   budget) budget_of "$top" "$name" ;;
   entry) entry_of "$top" "$name" ;;
   candidates) candidates_of "$top" "$name" ;;
+  snapshot) read_policy "$top" ;;
   esac
 }
 

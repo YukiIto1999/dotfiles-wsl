@@ -124,7 +124,10 @@ nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncI
 現在の一覧は`nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.cli.commands --apply builtins.attrNames`で確認する。
 
 管理runtimeの`dotfiles-agent-verify`は`cli.commands`に無く、flakeの`packages`から公開する。まだ配備されていないcheckoutからは`nix run --no-write-lock-file .#dotfiles-agent-verify -- nix run --no-write-lock-file .#verify`でT1を通す。
-T1の時間予算は呼び出し側の引数でなく、rootの`verification-budget.json`の`verify.seconds`が決める。wrapperは[`dotfiles-verify-entry --budget verify`](../../toolchain/verification/impl/entry.sh)で、`verify`のappはflakeから、同じfileを読む。
+T1の時間予算は呼び出し側の引数でなく、rootの`verification-budget.json`の`verify.seconds`が決める。
+wrapperは[`dotfiles-verify-entry --snapshot verify`](../../toolchain/verification/impl/entry.sh)で静的な宣言を一度だけ読み、そのsnapshotを`--policy FILE`へ渡して予算と入口を解決する。
+snapshotの読取から検査と証跡の確定までを同じ走行の予算に含め、途中の登録変更でcanonicalな呼び出しを無期限のcacheへ切り替えない。
+`verify`のappも同じ設定fileから予算を読む。
 Nixの入口の有無は同じfileの`frontend: "nix"`と`entries`から解決し、解決時にNixを取得、評価しない。
 登録や予算が読めない場合は、登録済みの入口を実行せずに拒否し、追跡済みfileの欠落を入口なしとして通さない。
 wrapperは`--candidates`で入口の綴りと局所commandを区別し、後者だけを証跡なしでcacheへ通す。

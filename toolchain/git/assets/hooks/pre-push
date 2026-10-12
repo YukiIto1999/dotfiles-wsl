@@ -51,10 +51,12 @@ refuse_lines() {
 # statusの任意lock取得の不採用: 並行するindex操作との競合の回避
 require_clean_source() {
   local top=$1 consequence=$2 difference flags
-  difference=$(git -C "$top" --no-optional-locks status --porcelain --untracked-files=all --ignore-submodules=none)
+  difference=$(git -C "$top" --no-optional-locks status --porcelain --untracked-files=all --ignore-submodules=none) \
+    || refuse "source の status 検査に失敗した。$consequence"
   refuse_lines "$difference" "index、作業木、未追跡に差分がある。$consequence"
   # statusだけでのclean判定の不採用: submoduleを含むindexのassume-unchangedとskip-worktreeの不可視性
-  flags=$(git -C "$top" ls-files -v --recurse-submodules)
+  flags=$(git -C "$top" ls-files -v --recurse-submodules) \
+    || refuse "source の index flag 検査に失敗した。$consequence"
   refuse_lines "$(grep -v '^H ' <<<"$flags" || true)" \
     "検査できない index の印(assume-unchanged、skip-worktree、unmerged)を持つ path がある。$consequence"
 }
@@ -101,10 +103,10 @@ run_within_budget() {
 resolve_entry() {
   local top=$1
   if [ -z "$budget_seconds" ]; then
-    (cd "$top" && without_git_environment && exec "$verification_entry" --repo "$top" verify-push) </dev/null
+    (cd "$top" && without_git_environment && exec "$verification_entry" --repo "$top" --policy "$policy_file" verify-push) </dev/null
     return
   fi
-  run_within_budget "$top" "$verification_entry" --repo "$top" verify-push
+  run_within_budget "$top" "$verification_entry" --repo "$top" --policy "$policy_file" verify-push
 }
 
 require_run_success() {
@@ -125,7 +127,7 @@ require_run_success() {
 }
 
 main() {
-  local top entry entry_file head ref object budget_error='' budget_result started=$SECONDS elapsed status=0 interrupted=0
+  local top entry entry_file policy_file head ref object budget_error='' budget_result started=$SECONDS elapsed status=0 interrupted=0
   local -a command pushed=() stale=()
   top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
   # 削除refへのHEAD一致要求の不採用: Gitがlocal objectとして渡すゼロ値
@@ -141,17 +143,26 @@ main() {
     fi
   done
   [ "${#pushed[@]}" -gt 0 ] || exit 0
-  if budget_result=$("$verification_entry" --repo "$top" --budget verify-push 2>&1) \
-    && [[ $budget_result =~ ^[1-9][0-9]*$ ]]; then
-    budget_seconds=$budget_result
-  else
-    budget_error=$budget_result
-  fi
   entry_file=$(mktemp)
-  trap 'rm -f -- "$entry_file"' EXIT
-  resolve_entry "$top" >"$entry_file" || status=$?
+  policy_file=$(mktemp)
+  trap 'rm -f -- "$entry_file" "$policy_file"' EXIT
+  if budget_error=$(
+    (cd "$top" && without_git_environment &&
+      exec "$verification_entry" --repo "$top" --snapshot verify-push) 2>&1 >"$policy_file"
+  ); then
+    if budget_result=$("$verification_entry" --repo "$top" --policy "$policy_file" --budget verify-push 2>&1) \
+      && [[ $budget_result =~ ^[1-9][0-9]*$ ]]; then
+      budget_seconds=$budget_result
+    else
+      budget_error=$budget_result
+    fi
+    resolve_entry "$top" >"$entry_file" || status=$?
+  else
+    status=$?
+    printf '%s\n' "$budget_error" >&2
+  fi
   entry=$(cat "$entry_file")
-  rm -f -- "$entry_file"
+  rm -f -- "$entry_file" "$policy_file"
   trap - EXIT
 
   if [ -n "${DOTFILES_VERIFY_PUSH_BYPASS-}" ] \

@@ -238,3 +238,50 @@ if "$ENTRY" --repo "$budgeted" --budget verify-nightly >/dev/null 2>&1; then
   echo 'resolver accepted an unknown budget stage' >&2
   exit 1
 fi
+
+snapshot=$PWD/policy-snapshot.json
+printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":900}}\n' \
+  >"$native/verification-budget.json"
+"$ENTRY" --repo "$native" --snapshot verify-push >"$snapshot"
+printf '{"version":1,"frontend":"nix","entries":[],"verify-push":{"seconds":1}}\n' \
+  >"$native/verification-budget.json"
+test "$("$ENTRY" --repo "$native" --policy "$snapshot" --budget verify-push)" = 900
+test "$("$ENTRY" --repo "$native" --policy "$snapshot" verify-push)" = 'nix run --no-write-lock-file .#verify-push'
+expect "$native" verify-push ''
+rm "$native/verification-budget.json"
+test "$("$ENTRY" --repo "$native" --policy "$snapshot" verify-push)" = 'nix run --no-write-lock-file .#verify-push'
+expect_entry_refused "$native" verify-push 'live declaration deleted after snapshot capture'
+printf 'not json\n' >"$snapshot"
+if "$ENTRY" --repo "$native" --policy "$snapshot" verify-push >entry.stdout 2>entry.stderr; then
+  echo 'resolver accepted a malformed policy snapshot' >&2
+  exit 1
+fi
+test ! -s entry.stdout
+test -s entry.stderr
+rm "$snapshot"
+if "$ENTRY" --repo "$native" --policy "$snapshot" verify-push >entry.stdout 2>entry.stderr; then
+  echo 'resolver accepted a missing policy snapshot' >&2
+  exit 1
+fi
+test ! -s entry.stdout
+test -s entry.stderr
+expect_usage --repo "$native" --snapshot --policy "$snapshot" verify
+printf 'not json\n' >"$native/verification-budget.json"
+if "$ENTRY" --repo "$native" --snapshot verify-push >entry.stdout 2>entry.stderr; then
+  echo 'resolver captured malformed live metadata as a snapshot' >&2
+  exit 1
+fi
+test ! -s entry.stdout
+test -s entry.stderr
+rm "$native/verification-budget.json"
+if "$ENTRY" --repo "$native" --snapshot verify-push >entry.stdout 2>entry.stderr; then
+  echo 'resolver captured deleted tracked metadata as an unenrolled snapshot' >&2
+  exit 1
+fi
+test ! -s entry.stdout
+test -s entry.stderr
+unenrolled=$(new_repo snapshot-unenrolled)
+"$ENTRY" --repo "$unenrolled" --snapshot verify >"$snapshot"
+test "$(cat "$snapshot")" = null
+test -z "$("$ENTRY" --repo "$unenrolled" --policy "$snapshot" verify)"
+test "$("$ENTRY" --repo "$PWD/outside" --snapshot verify)" = null

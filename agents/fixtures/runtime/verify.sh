@@ -722,6 +722,88 @@ expect_budget_refused() {
     exit 1
   fi
 }
+check_metadata_snapshot_boundary() (
+  local repository name status receipts litter
+  export HOME=$home BOUNDARY_JQ
+  BOUNDARY_JQ=$(command -v jq)
+  mkdir -p "$home/.cache/dotfiles-wsl/verification" "$fixture/snapshot-bin"
+  printf '#!%s\nset -euo pipefail\nprintf run >"$SNAPSHOT_RUN"\n(sleep 3; touch "$SNAPSHOT_LATE") &\nwait\n' \
+    "$BASH" >"$fixture/snapshot-bin/nix"
+  chmod +x "$fixture/snapshot-bin/nix"
+  export PATH="$fixture/snapshot-bin:$PATH"
+  jq() {
+    local result status=0
+    if [[ " $* " == *" --arg stage verify "* && ! -e $SNAPSHOT_PROOF ]]; then
+      result=$("$BOUNDARY_JQ" "$@") || status=$?
+      if [ "$status" -eq 0 ]; then
+        case $SNAPSHOT_CHANGE in
+          removed-entry) printf '{"version":1,"frontend":"nix","entries":[],"verify":{"seconds":2}}\n' >"$SNAPSHOT_METADATA" ;;
+          deleted) rm -- "$SNAPSHOT_METADATA" ;;
+          malformed) printf 'not json\n' >"$SNAPSHOT_METADATA" ;;
+        esac
+        printf after-budget >"$SNAPSHOT_PROOF"
+      fi
+      printf '%s\n' "$result"
+      return "$status"
+    fi
+    "$BOUNDARY_JQ" "$@"
+  }
+  export -f jq
+  for name in removed-entry deleted malformed; do
+    repository=$fixture/snapshot-$name
+    git init -q "$repository"
+    printf '{ outputs = { self }: {}; }\n' >"$repository/flake.nix"
+    printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' \
+      >"$repository/verification-budget.json"
+    git -C "$repository" add flake.nix verification-budget.json
+    git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+    export SNAPSHOT_METADATA=$repository/verification-budget.json SNAPSHOT_CHANGE=$name
+    export SNAPSHOT_PROOF=$fixture/snapshot-$name-proof SNAPSHOT_RUN=$fixture/snapshot-$name-run
+    export SNAPSHOT_LATE=$fixture/snapshot-$name-late
+    receipts=$(stall_receipt_count)
+    litter=$(stall_litter)
+    status=0
+    (cd "$repository" && timeout 15 "$VERIFY" -- nix run --no-write-lock-file .#verify) \
+      2>"$fixture/snapshot-$name-stderr" || status=$?
+    if [ "$status" -ne 124 ]; then
+      echo "canonical T1 after a $name metadata edit exited $status instead of retaining its captured deadline" >&2
+      exit 1
+    fi
+    test "$(cat "$SNAPSHOT_PROOF")" = after-budget
+    test "$(cat "$SNAPSHOT_RUN")" = run
+    sleep 4
+    test ! -e "$SNAPSHOT_LATE"
+    test "$(stall_receipt_count)" = "$receipts"
+    test "$(stall_litter)" = "$litter"
+    git -C "$repository" restore --worktree -- verification-budget.json
+    expect_closed_gate "$repository" "$name snapshot race"
+  done
+  printf '#!%s\nprintf focused >"$SNAPSHOT_RUN"\n' "$BASH" >"$fixture/snapshot-bin/focused"
+  chmod +x "$fixture/snapshot-bin/focused"
+  for name in missing invalid-budget malformed; do
+    case $name in
+      missing) rm -- "$SNAPSHOT_METADATA" ;;
+      invalid-budget) printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":0}}\n' >"$SNAPSHOT_METADATA" ;;
+      malformed) printf 'not json\n' >"$SNAPSHOT_METADATA" ;;
+    esac
+    rm -f "$SNAPSHOT_RUN"
+    status=0
+    (cd "$repository" && timeout 15 "$VERIFY" -- nix run --no-write-lock-file .#verify) \
+      2>"$fixture/snapshot-initial-$name-stderr" || status=$?
+    if [ "$status" -ne 78 ]; then
+      echo "canonical T1 with $name metadata exited $status instead of refusing configuration" >&2
+      exit 1
+    fi
+    test ! -e "$SNAPSHOT_RUN"
+    [[ $(<"$fixture/snapshot-initial-$name-stderr") == *verification-budget.json* ]]
+    (cd "$repository" && "$VERIFY" -- "$fixture/snapshot-bin/focused")
+    test "$(cat "$SNAPSHOT_RUN")" = focused
+    test "$(stall_receipt_count)" = "$receipts"
+    git -C "$repository" restore --worktree -- verification-budget.json
+    expect_closed_gate "$repository" "$name metadata refusal"
+  done
+)
+
 
 check_receipt_boundaries() {
   local control=$fixture/stall-control previous=$PWD
@@ -1015,6 +1097,11 @@ if [ "${1-}" = --conformance-only ]; then
   check_conformance_completion
   exit 0
 fi
+if [ "${1-}" = --budget-boundary-only ]; then
+  check_metadata_snapshot_boundary
+  exit 0
+fi
+
 
 if [ "${1-}" = --skills-only ]; then
   mkdir -p "$home"
@@ -1726,6 +1813,8 @@ timeout 60 "$VERIFY" -- nix run --no-write-lock-file .#verify >/dev/null 2>&1 ||
 test "$status" -eq 78
 test "$(stall_receipt_count)" = "$receipts_before"
 cd "$undeclared_repo"
+
+check_metadata_snapshot_boundary
 
 check_receipt_boundaries
 

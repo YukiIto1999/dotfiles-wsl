@@ -70,7 +70,7 @@ let
       name = "failing-verification-entry";
       text = ''
         case " $* " in
-          *" --budget "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
+          *" --budget "*|*" --snapshot "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
           *) exit 70 ;;
         esac
       '';
@@ -86,7 +86,7 @@ let
       runtimeInputs = [ pkgs.coreutils ];
       text = ''
         case " $* " in
-          *" --budget "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
+          *" --budget "*|*" --snapshot "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
         esac
         (sleep 3; touch "$LATE") &
         wait
@@ -196,6 +196,7 @@ in
           git
           gnugrep
           gnumake
+          jq
           nix
         ];
         HOOKS = hooksDirectory;

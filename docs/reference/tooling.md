@@ -26,7 +26,9 @@
 ### Semgrep
 
 [`toolchain/package/semgrep.nix`](../../toolchain/package/semgrep.nix)がSemgrep `1.180.0`のCLI sourceと同版のpublished wheelから取得するcoreを固定し、nixpkgs全体を更新せずNixOS用に組み立てる。
-既存のCLI入口は変えず、local ruleによる走査では`--metrics off`とversion checkの無効化を明示する。
+既存のCLI入口は変えず、package wrapperが上流の環境変数`SEMGREP_SEND_METRICS=off`と`SEMGREP_ENABLE_VERSION_CHECK=0`を既定値にして、metrics送信とversion照会を無効にする。
+明示した環境変数は既定値を上書きし、CLI optionの解釈は上流実装に従う。
+remote ruleの取得を含む通信を遮断する仕組みではない。
 この版ではQL ruleが廃止され、binary targetは既定で走査対象から外れるため、その用途をCLI更新の互換性に含めない。
 
 ### Strix

@@ -147,6 +147,12 @@ python3Packages.buildPythonApplication (finalAttrs: {
     "PATH"
     ":"
     (lib.makeBinPath [ semgrep-core ])
+    "--set-default"
+    "SEMGREP_SEND_METRICS"
+    "off"
+    "--set-default"
+    "SEMGREP_ENABLE_VERSION_CHECK"
+    "0"
   ];
 
   nativeCheckInputs = [

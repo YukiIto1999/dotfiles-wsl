@@ -31,6 +31,9 @@ security-review → threat-model → finding-discovery → validation → attack
 
 phaseを同時進行させない。各phaseのSkillは、そのphaseを開始するときに読み、出力を確定してから次へ進む。
 
+隔離runtimeでの証拠が必要な場合だけ、`security-review`が定める`security-assessment`の契約を読む。
+Strixの結果は該当phaseの候補とcoverageへ戻し、validationを通さず確定findingにしない。
+
 ## Handoffs
 
 @handoffs@

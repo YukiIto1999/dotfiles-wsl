@@ -16,10 +16,16 @@ let
     "--kill-after=2s"
     "10s"
   ];
+  commandSmokeTimeoutOverrides = lib.filterAttrs (_: args: args != commandSmokeTimeoutArgs) (
+    lib.mapAttrs (
+      _: package: package.passthru.commandSmokeTimeoutArgs or commandSmokeTimeoutArgs
+    ) hostConfig.dotfiles.platform.cli.commands
+  );
   generatedShellActual = {
     projectMemoryHooks = toString hostConfig.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
     commands = lib.mapAttrs (_: package: lib.getExe package) hostConfig.dotfiles.platform.cli.commands;
     commandSmoke.timeoutArgs = commandSmokeTimeoutArgs;
+    commandSmoke.timeoutArgsByCommand = commandSmokeTimeoutOverrides;
     mcpExecutables = lib.mapAttrs (
       _: target: target.executable
     ) hostConfig.dotfiles.platform.mcp.targets;
@@ -107,11 +113,7 @@ in
         jq -S '.commands | with_entries(.value |= split("/")[-1])' "$actual" \
           > actual-commands.json
         diff -u expected-commands.json actual-commands.json
-        jq -S '.commandSmoke.timeoutArgs' "$expected" > expected-command-smoke-timeout.json
-        jq -S '.commandSmoke.timeoutArgs' "$actual" > actual-command-smoke-timeout.json
-        diff -u expected-command-smoke-timeout.json actual-command-smoke-timeout.json
         jq -e 'any(.commandSmoke.timeoutArgs[]; startswith("--kill-after="))' "$actual" >/dev/null
-        mapfile -t commandSmokeTimeoutArgs < <(jq -r '.commandSmoke.timeoutArgs[]' "$actual")
         set +e
         {
           timeout --kill-after=0.10s 0.05s env --ignore-signal=TERM sleep 1
@@ -124,6 +126,10 @@ in
         fi
         while IFS=$'\t' read -r id command; do
           lintGenerated "$command"
+          mapfile -t commandSmokeTimeoutArgs < <(
+            jq -r --arg id "$id" \
+              '(.commandSmoke.timeoutArgsByCommand[$id] // .commandSmoke.timeoutArgs)[]' "$actual"
+          )
           timeout "''${commandSmokeTimeoutArgs[@]}" "$command" --help > "$id-help"
           test -s "$id-help"
         done < <(jq -r '.commands | to_entries[] | [.key, .value] | @tsv' "$actual")

@@ -19,7 +19,7 @@
 
 ## 外部CLI
 
-外部CLIの採用は[`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages`が所有する。
+汎用CLIの採用は[`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages`が所有し、Capabilityの実装であるCLIは各Capabilityのruntimeが所有する。
 決定的な操作はCLIを直接使い、候補や証拠の意味判断が必要な場合だけ該当Skillを使うため、一commandのための新しいSkillは置かない。
 以下はsourceの構成と利用契約であり、この文書を更新しただけで配備や全用途の実行を確認したことにはならない。
 
@@ -28,6 +28,21 @@
 [`toolchain/package/semgrep.nix`](../../toolchain/package/semgrep.nix)がSemgrep `1.180.0`のCLI sourceと同版のpublished wheelから取得するcoreを固定し、nixpkgs全体を更新せずNixOS用に組み立てる。
 既存のCLI入口は変えず、local ruleによる走査では`--metrics off`とversion checkの無効化を明示する。
 この版ではQL ruleが廃止され、binary targetは既定で走査対象から外れるため、その用途をCLI更新の互換性に含めない。
+
+### Strix
+
+[`security-assessment/strix/runtime`](../../capabilities/security-assessment/strix/runtime/module.nix)は、[公式release 1.7.0](https://github.com/usestrix/strix/releases/tag/v1.7.0)のhash固定native binaryをNixOS向けに組み立てる。
+`strix`と`dotfiles-strix-runtime`を共通の`platform/cli`から配備し、固定sandbox imageは常駐serviceを作らず共通のimage同期へ登録する。
+後者は記録した所有runのinspectとcleanupだけを受け付け、containerの環境変数、reportの削除、imageの全体pruneを公開しない。
+
+`strix`のassessmentは管理下のOpenCode Go資格情報とprovider設定を使い、`--help`や`--version`ではその資格情報を読まない。
+上流がAPI keyをconfigへ保存するため、呼出しごとにuser-owned tmpfsの私有directoryへconfigを移し、終了時に回収する。
+homeや永続configへkeyを書かないための境界であり、RAM上の一時fileにもkeyを書かないという保証ではない。
+自動updateは拒否し、版の更新はpackageの固定sourceと通常の配備から行う。
+
+使用条件と結果の扱いは[`security-review`のStrix契約](../../skills/security-review/skill/references/strix-runtime.md)に集約する。
+bundled toolの存在だけで実行済みとは扱わず、Trivyが必要な評価では実行された版、入力、DBの鮮度を証拠へ残す。
+CLIの配備、helpの成功、modelへの接続、対象を使ったassessmentの成功は別の証拠として扱う。
 
 ### Explainer
 

@@ -2,7 +2,10 @@
 
 **読み手:** 目的の作業をやり遂げたい運用者。作業中に読む。
 
-containerは `pull = "never"` で起動する。宣言した digest の image が事前に無いと起動しない。containerを選択したhostだけが `dotfiles-sync-images` を配備する。containerless hostにはこのcommandがないため、以下の手順は実行しない。
+常駐containerは `pull = "never"` で起動し、宣言したdigestのimageが事前に無いと起動しない。
+常駐containerまたは必要時だけ起動するruntime imageを選択したhostに、`dotfiles-sync-images`を配備する。
+どちらも選択しないhostにはこのcommandがないため、以下の手順は実行しない。
+runtime imageは`dotfiles.platform.containers.runtimeImages`へ固定参照を登録し、同期だけのためにendpointや常駐unitを作らない。
 
 ## 使う
 

@@ -76,7 +76,7 @@
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | SOPS secret 宣言から path、owner、group、mode の observation だけを導き、内容と source path を含めない | `sops-runtime-observation-contract` |
 | 有効なcontainer applicationとservice contractのkeyが一致する | `container-application-registry` |
-| container Capabilityを一件だけ選んだ構成では対応するcontainer一式だけを配備し、container Capabilityを零件にした構成ではDocker、container Capability所有のMCP target、secret、artifactを配備しない | `container-capability-gating` |
+| 恒常container Capabilityを一件だけ選んだ構成ではそのcontainer一式だけを配備し、恒常containerと隔離runtimeの両方を選ばない構成ではDockerと所有MCP target・secret・artifactを残さず、隔離runtimeだけを選ぶ構成では恒常containerやMCP targetを増やさずDockerと実行用imageを配備する | `container-capability-gating` |
 | 非container Capabilityを選ばない構成では所有するMCP targetとsession variableを配備せず、provider集合と残存targetが一致する | `mcp-capability-gating` |
 | `project-memory`を選ばない構成ではHindsightのhook package、記憶の収穫のcommandとtimer、client mode、managed file、および利用不能なSkill、subagent、handoff、policy記述を配備しない | `agent-capability-gating` |
 | 有効なCapabilityまたはSkill依存を満たせないSkillをAgent clientへ配備しない | `skill-capability-gating` |

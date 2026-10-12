@@ -12,14 +12,10 @@
     "memory": "dotfiles-memory",
     "rebuild": "dotfiles-rebuild",
     "syncImages": "dotfiles-sync-images",
+    "strix": "strix",
+    "strixRuntime": "dotfiles-strix-runtime",
     "wslConfig": "dotfiles-wsl-config",
     "wslRestartRequired": "dotfiles-wsl-restart-required"
-  },
-  "commandSmoke": {
-    "timeoutArgs": [
-      "--kill-after=2s",
-      "10s"
-    ]
   },
   "workstation": {
     "wslview": "wslview"

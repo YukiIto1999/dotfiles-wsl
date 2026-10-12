@@ -499,6 +499,18 @@ let
         }
       )
     ]).config;
+  runtimeOnlyVariantConfig =
+    (mkProbeSystem [
+      normalMachineModule
+      (
+        { lib, ... }:
+        {
+          dotfiles.capabilities.enabled = lib.mkForce (
+            containerlessCapabilityIds ++ [ "security-assessment" ]
+          );
+        }
+      )
+    ]).config;
   memoryOnlyCapabilityIds = containerlessCapabilityIds ++ [ "project-memory" ];
   memoryOnlyVariantConfig =
     (mkProbeSystem [
@@ -790,6 +802,20 @@ in
   container-capability-gating =
     assert lib.all (entry: entry.assertion) memoryOnlyVariantConfig.assertions;
     assert lib.all (entry: entry.assertion) containerlessVariantConfig.assertions;
+    assert lib.all (entry: entry.assertion) runtimeOnlyVariantConfig.assertions;
+    assert runtimeOnlyVariantConfig.virtualisation.docker.enable;
+    assert runtimeOnlyVariantConfig.dotfiles.platform.containers.enabled == [ ];
+    assert runtimeOnlyVariantConfig.dotfiles.platform.containers.services == { };
+    assert runtimeOnlyVariantConfig.virtualisation.oci-containers.containers == { };
+    assert
+      runtimeOnlyVariantConfig.dotfiles.platform.mcp.enabledProviders
+      == containerlessVariantConfig.dotfiles.platform.mcp.enabledProviders;
+    assert builtins.elem "docker"
+      runtimeOnlyVariantConfig.users.users.${runtimeOnlyVariantConfig.dotfiles.workstation.username}.extraGroups;
+    assert builtins.hasAttr "syncImages" runtimeOnlyVariantConfig.dotfiles.platform.cli.commands;
+    assert builtins.hasAttr "opencode/go_api_key" runtimeOnlyVariantConfig.sops.secrets;
+    assert !builtins.hasAttr "hindsight.env" runtimeOnlyVariantConfig.sops.templates;
+    assert !builtins.hasAttr "containers/roster" runtimeOnlyVariantConfig.dotfiles.health.observations;
     assert memoryOnlyVariantConfig.dotfiles.capabilities.enabled == memoryOnlyCapabilityIds;
     assert memoryOnlyVariantConfig.dotfiles.platform.containers.enabled == [ "hindsight" ];
     assert

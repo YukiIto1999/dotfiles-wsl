@@ -514,6 +514,15 @@ in
           ];
           owners = [ "capabilities" ];
         }
+        {
+          path = [
+            "dotfiles"
+            "platform"
+            "containers"
+            "runtimeImages"
+          ];
+          owners = [ "capabilities" ];
+        }
       ]
       ++
         map

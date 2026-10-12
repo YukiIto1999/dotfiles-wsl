@@ -65,6 +65,10 @@ let
       target = deeplyNestedCapabilityCommandHelper;
       line = "  mkCommand = import ${deeplyNestedCapabilityCommandHelper} { inherit config lib pkgs; };";
     };
+    "capabilities/security-assessment/strix/runtime/module.nix" = {
+      target = deeplyNestedCapabilityCommandHelper;
+      line = "  mkCommand = import ${deeplyNestedCapabilityCommandHelper} { inherit config lib pkgs; };";
+    };
     "maintenance/cleanup/module.nix" = {
       target = nestedCommandHelper;
       line = "  mkCommand = import ${nestedCommandHelper} { inherit config lib pkgs; };";

@@ -14,6 +14,7 @@ Orca / architecture-standard / Matt / Google / .NET / mizchi explainerの固定s
 
 Agent ─► Skill ─► Capability ─► provider adapter ─► Platform MCP ─► gateway
                          └────► backend / credential / persistent state
+                         └────► managed CLI runtime ─► 必要時だけ起動するsandbox
 
 Agent ─► harness primitive / managed CLI ─► toolchain runtime
 
@@ -50,6 +51,10 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.registry --ap
 ```
 
 Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置く規則ではない。選択したSkill本文はclientへ配備する一方、Capability実装はtransport、service lifecycle、network、credential、永続dataを所有するため、`capabilities/`に置く。
+
+`security-assessment`は[`Strix runtime`](../../capabilities/security-assessment/strix/runtime/module.nix)を通し、`security-review`と既存のsecurity subagentから、許可された隔離対象でのruntime evidenceが必要な場合だけ使う。
+MCP endpointや常駐backendを追加せず、CLIは共通の`platform/cli`、sandbox imageの同期は共通の`platform/containers`が所有する。
+実行の許可、予算、結果の検証、所有するrunの回収は[Skillの利用契約](../../skills/security-review/skill/references/strix-runtime.md)に従う。
 
 ## Profileとregistry
 
@@ -268,7 +273,8 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.targets
 
 application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。Hindsightをgeneric Platformへ列挙しない。
 
-Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。container backendが一件もなければ、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
+Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。
+container backendもruntime imageも選択しない場合、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
 
 全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と、containerを有効にしたhostへ配備する`dotfiles-sync-images`が取得を担当し、Nix生成imageは`imageFile`が取得を担当する。
 Docker build artifact GCは停止済みのtestcontainersのcontainer、dangling image、BuildKit cacheを扱い、tagged image、named volume、それ以外のcontainerは削除しない。

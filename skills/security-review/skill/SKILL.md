@@ -1,6 +1,6 @@
 ---
 name: security-review
-description: Reviews a pull request, commit, branch, patch, working-tree diff, or repository for security vulnerabilities, and creates or updates an explicitly requested repository-grounded threat model. Separates system and attacker modeling, candidate discovery, instance-preserving validation, attack-path analysis, and reporting. Does not turn generic architecture work into a security audit or report a threat hypothesis as a validated vulnerability.
+description: Reviews a pull request, commit, branch, patch, working-tree diff, or repository for security vulnerabilities, and creates or updates an explicitly requested repository-grounded threat model. Separates system and attacker modeling, candidate discovery, instance-preserving validation, attack-path analysis, and reporting. Uses the managed Strix tool conditionally for authorized isolated runtime evidence, not for static or threat-model-only work. Does not turn generic architecture work into a security audit or report a threat hypothesis as a validated vulnerability.
 ---
 
 # Security Review
@@ -19,9 +19,12 @@ Use the following handoffs only when their evidence job is needed and the Skill 
 | Public advisory or version context | `web-research`: advisory ID or public URL, package/version, exact claim to check | Primary-source text, applicability, and uncertainty; preserve seeds and validate against local code |
 | GitHub resource | `github-operations`: account context, canonical owner/repo, resource kind and number or ref, requested read | Exact identity, state, SHA, diff or comments; use the evidence without posting or changing the resource |
 | Authorized browser-interface reproduction | `browser-operation`: URL, test account, approved interaction and crafted input, expected invariant and observable result | Observed route, before/after state and request evidence when needed; resume validation, not a separate security scan |
+| Authorized isolated runtime assessment | `security-assessment`: approved target and data, isolated workspace, whole-run budget, current discovery or validation evidence gap | Original Strix run bundle, candidate instances, coverage gaps, exit/run status and observed resources; resume the current review phase |
 
 If a needed Skill or public operation is unavailable, retain the evidence gap and continue only where the phase can reach a supported conclusion.
 These jobs do not change scan scope, transfer security judgment, or grant external write permissions.
+When that runtime evidence job is needed and the managed `strix` command is available, read `references/strix-runtime.md` at the invoking phase.
+Strix is a conditional tool implementation, not a replacement Skill or an additional review plan; static and threat-model-only paths remain usable without it.
 
 ## Operation Boundaries
 

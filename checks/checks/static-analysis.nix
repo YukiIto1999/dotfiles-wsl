@@ -101,6 +101,10 @@ in
           -maxdepth 1 -type f -o -type l \
           | while IFS= read -r hook; do basename "$hook"; done \
           | sort > actual-hooks
+        test -s actual-hooks || {
+          echo "project memory hook enumeration is empty" >&2
+          exit 1
+        }
         while IFS= read -r hook; do
           lintGenerated "$(jq -r '.projectMemoryHooks' "$actual")/bin/$hook"
         done < actual-hooks

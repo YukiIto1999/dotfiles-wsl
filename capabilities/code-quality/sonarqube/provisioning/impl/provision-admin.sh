@@ -1,4 +1,7 @@
 set +x
+# Side-effect-free provisioning invocation guidance
+# Output: CLI usage on stdout
+# Return: Successful help output status
 usage() {
   cat <<'USAGE'
 usage: dotfiles-sonarqube-provision [--help]
@@ -35,10 +38,18 @@ until [[ $(curl --silent --show-error --max-time 10 "$SONARQUBE_URL/api/system/s
   sleep 5
 done
 
+# Private curl configuration without a credential argv
+# Argument 1: Single-line admin password
+# Output: Basic authorization header configuration on stdout
+# Return: Header encoding status
 basic_header() {
   printf 'header = "Authorization: Basic %s"\n' "$(printf '%s' "admin:$1" | base64 -w0)"
 }
 
+# Native admin authentication acceptance
+# Argument 1: Candidate single-line admin password
+# Environment: SONARQUBE_URL for the owned server endpoint
+# Return: Zero only for an accepted credential
 validates_as() {
   basic_header "$1" |
     curl --silent --show-error --max-time 20 --config - "$SONARQUBE_URL/api/authentication/validate" |

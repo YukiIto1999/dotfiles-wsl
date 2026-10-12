@@ -33,7 +33,8 @@ clone しただけの repository の code を、commit や checkout のたびに
 
 ## 検証の段と入口
 
-repository は検証の段ごとに入口を宣言する。段の意味と時間予算は architecture-standard の `process/verification.md` が定め、dotfiles は入口の名前と置き場だけを解決する。
+repositoryは検証の段ごとに入口を宣言する。
+段の意味と予算を決める手順はarchitecture-standardの `process/verification.md` が定め、秒数は各repositoryの `verification-budget.json` に置く。
 
 | 段 | 入口の名前 | 実行する者 |
 |---|---|---|
@@ -41,18 +42,20 @@ repository は検証の段ごとに入口を宣言する。段の意味と時間
 | T2 | `verify-push` | push の前の pre-push |
 | T3 | `verify-full` | project が選んだ契機。commit と push を止めない |
 
-共有resolverはrepositoryの正本を呼ぶ文字列だけを返し、検査の定義やcacheを別に持たない。
-Nix appにいずれかの段が宣言されていれば、三段ともNixを正本にし、未宣言の段を他の形式へ補完しない。
-flakeの取得や評価が失敗した場合は、入口未宣言として通さずに拒否する。
+共有resolverはrepositoryの正本を呼ぶ文字列と、宣言した段の予算を返し、検査の定義やcacheを別に持たない。
+Nixを正本にするrepositoryは、根の`verification-budget.json`に`frontend: "nix"`と段名の配列`entries`を登録する。
+共有resolverはその登録だけを読み、入口の有無を調べるためにflakeを取得、評価しない。
+登録に無い段を他形式へ補完せず、登録の不正や追跡済みfileの欠落を入口未宣言として通さない。
+`--candidates`は登録を読めないときにも、評価せずに入口になり得る綴りを返す。
 
 | 置き場 | 宣言 | 呼び出し |
 |---|---|---|
-| `flake.nix` | `apps.<system>.verify-push` | `nix run --no-write-lock-file .#verify-push` |
+| `verification-budget.json`と`flake.nix` | `frontend: "nix"`と`entries`への段名登録、検査本体は`apps.<system>.verify-push` | `nix run --no-write-lock-file .#verify-push` |
 | `devenv.nix` | `scripts.verify-push` | `devenv shell -- verify-push` |
 | `package.json` | script `verify:push` | lock fileに応じて`pnpm verify:push`または`npm run verify:push` |
 | `Makefile` | target `verify-push` | `make verify-push` |
 
-Nixの検証段を宣言しないrepositoryは、devenv、package.json、Makefileの順で既存の入口を解決する。
+Nixを登録しないrepositoryは、devenv、package.json、Makefileの順で既存の入口を解決する。
 これは他projectの入口への接続であり、dotfilesの検証taskの正本は`flake.nix`だけに置く。
 NixのGit sourceへ入らない未追跡fileを持つrepositoryは、先に追跡してから検証する。
 
@@ -64,7 +67,15 @@ annotated tagは参照するcommitで比較し、差分を隠すassume-unchanged
 検証後にHEAD、source、indexの印が変わっていれば、入口が成功してもpushを拒否する。
 入口を宣言しないrepositoryと、送信sourceのない削除だけのpushは検証を要求しない。
 
-予算は入口の解決を含めて15分で、超えた検証を子孫のprocessごと止めてpushを拒否する。
+予算はrootの`verification-budget.json`の`verify-push.seconds`を走行開始時に一度だけ読み、入口の解決、検査、最後のsourceの確認まで同じ上限で止める。
+Nixの取得と評価は検査本体の実行時にだけ行い、その時間も予算へ含める。
+秒数の宣言は`{"version":1,"verify-push":{"seconds":N}}`の形とし、Nは1以上2147483647以下の整数である。
+Nixの入口を使う場合は、同じfileへ`frontend`と`entries`も登録する。
+入口があるのに値が無い、または不正なら検査を実行せずpushを拒否し、既定値や無制限の検証で補わない。
+予算を読めない登録済みのNix入口は、入口なしとして通さず拒否する。
+登録fileを削除しても、indexまたはHEADに追跡されたfileなら欠落として拒否する。
+入口を登録していないrepositoryにだけ、予算を要求しない。
+予算を超えた検査は子孫のprocessごと止めてpushを拒否する。
 必須検査を`verify-full`へ移すのでなく、必要な保証を保ったまま重複実行、選択範囲、起動とbuildの固定費を見直す。
 成功、失敗、中断時には経過時間をstderrへ出す。
 

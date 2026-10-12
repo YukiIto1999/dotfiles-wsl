@@ -4,11 +4,10 @@
   pkgs,
   # T2 の入口を repository の宣言から引く command
   verificationEntry,
-  # T2 の時間予算。超えた検証は止める
-  pushBudgetSeconds,
 }:
 
 let
+  verificationPrograms = import ../verification/package.nix { inherit pkgs; };
   # githooks(5) の client 側 hook のうち、repository が `.githooks/` に置いて使う名前。
   # reference-transaction と post-index-change は ref と index の更新ごとに起動されるため、
   # 置くだけで全 repository の git 操作に process の起動が加わる。配らない。
@@ -48,11 +47,8 @@ let
     commit-msg = mkScript "git-global-commit-msg" (builtins.readFile ./assets/hooks/commit-msg);
     pre-push = mkScript "git-global-pre-push" (
       builtins.replaceStrings
-        [ "@verificationEntry@" "@budgetSeconds@" ]
-        [
-          (lib.getExe verificationEntry)
-          (toString pushBudgetSeconds)
-        ]
+        [ "@verificationEntry@" "@runWithin@" ]
+        [ (lib.getExe verificationEntry) (lib.getExe verificationPrograms.runWithin) ]
         (builtins.readFile ./assets/hooks/pre-push)
     );
   };

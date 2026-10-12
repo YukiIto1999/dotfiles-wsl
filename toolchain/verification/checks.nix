@@ -6,7 +6,7 @@
 }:
 
 let
-  runWithin = import ./package.nix { inherit pkgs; };
+  programs = import ./package.nix { inherit pkgs; };
 in
 {
   verification-entry-resolution =
@@ -20,8 +20,6 @@ in
         ENTRY = lib.getExe hostConfig.dotfiles.toolchain.verification.entry;
       }
       ''
-        export NIX_REMOTE="$PWD/nix-store"
-        export NIX_CONFIG="experimental-features = nix-command flakes"
         bash ${./fixtures/entry.sh}
         touch $out
       '';
@@ -33,10 +31,25 @@ in
           bash
           coreutils
         ];
-        WITHIN = lib.getExe runWithin;
+        WITHIN = lib.getExe programs.runWithin;
       }
       ''
         bash ${./fixtures/run-within.sh}
+        touch $out
+      '';
+
+  verification-run-each =
+    pkgs.runCommandLocal "check-verification-run-each"
+      {
+        nativeBuildInputs = with pkgs; [
+          bash
+          coreutils
+          gnugrep
+        ];
+        EACH = lib.getExe programs.runEach;
+      }
+      ''
+        bash ${./fixtures/run-each.sh}
         touch $out
       '';
 }

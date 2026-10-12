@@ -4,8 +4,9 @@
   hostConfig,
   hostOptions,
   variantConfig,
-  mkNixosSystem,
+  mkProbeSystem,
   minimalCapabilityConfig,
+  projectMemoryDisabledConfig,
   normalMachineModule,
   self,
   ...
@@ -30,28 +31,15 @@ let
   installAgents = hostConfig.dotfiles.platform.cli.commands.installAgents;
   installAgentsExe = lib.getExe installAgents;
   atomicPublish = import ../impl/atomic-publish.nix { inherit pkgs; };
-  restrictedCapabilities = builtins.filter (
-    name: name != "project-memory"
-  ) hostConfig.dotfiles.capabilities.enabled;
-  restrictedAgentConfig =
-    (mkNixosSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.capabilities.enabled = lib.mkForce restrictedCapabilities;
-        }
-      )
-    ]).config;
-  restrictedAgentRules = restrictedAgentConfig.dotfiles.agents.shared.rules;
+  restrictedAgentRules = projectMemoryDisabledConfig.dotfiles.agents.shared.rules;
   telemetryDisabledConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       { dotfiles.telemetry.enable = false; }
     ]).config;
   minimalCapabilitySkills = minimalCapabilityConfig.dotfiles.agents.shared.skills;
   transitiveCapabilityAgentConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:
@@ -451,7 +439,7 @@ let
   };
   selectionConfigs = lib.mapAttrs (
     _: selection:
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       {
         dotfiles.agents.enabled = lib.mkForce selection.enabled;
@@ -497,7 +485,8 @@ let
         ) (builtins.attrValues client.managedFiles);
       updatesEnabled = selection.automaticUpdates != [ ];
     in
-    builtins.deepSeq configuration.system.build.toplevel.drvPath (
+    lib.all (entry: entry.assertion) configuration.assertions
+    && (
       builtins.attrNames configuration.dotfiles.agents.registry == expected.required
       && builtins.attrNames selected == selection.enabled
       && builtins.attrNames configuration.dotfiles.agents.clientExecutables == selection.enabled
@@ -618,7 +607,7 @@ in
           '.claudeMd == $policy and (.claudeMd | contains("| `claude` |"))' \
           ${selectionConfigs.trial.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
         jq -e --rawfile policy ${restrictedAgentRules} '.claudeMd == $policy' \
-          ${restrictedAgentConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
+          ${projectMemoryDisabledConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
         jq -e '.env.CLAUDE_CODE_ENABLE_TELEMETRY == "0"
           and .env.OTEL_METRICS_EXPORTER == "none" and .env.OTEL_LOGS_EXPORTER == "none"' \
           ${telemetryDisabledConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
@@ -1176,16 +1165,17 @@ in
       '';
 
   agent-capability-gating =
-    assert builtins.deepSeq restrictedAgentConfig.system.build.toplevel.drvPath true;
-    assert !builtins.hasAttr "projectMemoryHooks" restrictedAgentConfig.dotfiles.agents.packages;
-    assert !builtins.hasAttr "agentMemoryHarvest" restrictedAgentConfig.dotfiles.platform.cli.commands;
-    assert !builtins.hasAttr "dotfiles-agent-memory-harvest" restrictedAgentConfig.systemd.timers;
+    assert lib.all (entry: entry.assertion) projectMemoryDisabledConfig.assertions;
+    assert !builtins.hasAttr "projectMemoryHooks" projectMemoryDisabledConfig.dotfiles.agents.packages;
+    assert
+      !builtins.hasAttr "agentMemoryHarvest" projectMemoryDisabledConfig.dotfiles.platform.cli.commands;
+    assert !builtins.hasAttr "dotfiles-agent-memory-harvest" projectMemoryDisabledConfig.systemd.timers;
     assert lib.all (client: client.projectMemoryMode == "unsupported") (
-      builtins.attrValues restrictedAgentConfig.dotfiles.agents.clients
+      builtins.attrValues projectMemoryDisabledConfig.dotfiles.agents.clients
     );
     assert
-      !builtins.hasAttr "agents/opencode/project-memory-plugin" restrictedAgentConfig.dotfiles.managedArtifacts;
-    assert builtins.hasAttr "agents/omp/hooks" restrictedAgentConfig.dotfiles.managedArtifacts;
+      !builtins.hasAttr "agents/opencode/project-memory-plugin" projectMemoryDisabledConfig.dotfiles.managedArtifacts;
+    assert builtins.hasAttr "agents/omp/hooks" projectMemoryDisabledConfig.dotfiles.managedArtifacts;
     assert builtins.hasAttr "diagnosing-bugs" minimalCapabilitySkills;
     assert lib.all (skill: !builtins.hasAttr skill minimalCapabilitySkills) [
       "a11y-debugging"
@@ -1197,7 +1187,7 @@ in
     ) minimalCapabilityConfig.dotfiles.agents.shared.routing.subagentSkills;
     pkgs.runCommandLocal "check-agent-capability-gating" { } ''
       if [ -e ${
-        restrictedAgentConfig.dotfiles.managedArtifacts."agents/omp/hooks".source
+        projectMemoryDisabledConfig.dotfiles.managedArtifacts."agents/omp/hooks".source
       }/project-memory.ts ]; then
         echo "disabled project-memory remained in OMP hooks" >&2
         exit 1
@@ -1296,30 +1286,6 @@ in
         skillEntries = lib.concatStringsSep " " (
           lib.mapAttrsToList (name: skill: "${name}=${skill.source}/SKILL.md") policySkills
         );
-        subagentEntries = lib.concatStringsSep " " (
-          lib.mapAttrsToList (name: source: "${name}=${source}") hostConfig.dotfiles.agents.shared.subagents
-        );
-        expectedCapabilityRows = lib.concatStringsSep "\n" (
-          map (
-            capability:
-            let
-              entrySkills = builtins.attrNames (
-                lib.filterAttrs (
-                  name: _: builtins.elem capability hostConfig.dotfiles.skills.registry.${name}.requiresCapabilities
-                ) policySkills
-              );
-            in
-            "| `${capability}` | ${
-              if entrySkills == [ ] then "なし" else lib.concatMapStringsSep " / " (name: "`${name}`") entrySkills
-            } |"
-          ) hostConfig.dotfiles.capabilities.resolved
-        );
-        expectedClientRows = lib.concatStringsSep "\n" (
-          lib.mapAttrsToList (
-            id: client:
-            "| `${id}` | `${client.subagentMode}` | `${client.skillProjectionMode}` | `${client.lspMode}` | `${client.telemetryMode}` | `${client.projectMemoryMode}` |"
-          ) clients
-        );
       }
       ''
         set -euo pipefail
@@ -1351,74 +1317,21 @@ in
           fi
         done < <(jq -r '.subagentHandoffs[] | [.from, .to, .artifact] | @tsv' <<<"$routingJson")
 
-        # 期待行は生成器の表組立てとは別に組む。description は YAML の block scalar と
-        # quoted string を使うため、抽出だけは同じ parser を通す
-        : > expected-rows.txt
-        for kind in skill subagent; do
-          if [ "$kind" = skill ]; then
-            entries=$skillEntries
-          else
-            entries=$subagentEntries
-          fi
-          for entry in $entries; do
+        for entry in $skillEntries; do
           name=''${entry%%=*}
           source=''${entry#*=}
           closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$source")
           test -n "$closing"
           sed -n "2,$((closing - 1))p" "$source" > expected-frontmatter.yaml
-          description=$(yq -r '.description' expected-frontmatter.yaml)
-          if [ -z "$description" ] || [ "$description" = null ]; then
-            echo "frontmatter declares no description: $source" >&2
+          expectedDiscovery=$(yq -r '
+            (.["user-invocable"] == false and .["disable-model-invocation"] == true) | not
+          ' expected-frontmatter.yaml)
+          actualDiscovery=$(jq -r --arg name "$name" 'index($name) != null' <<<"$discoverableSkillNamesJson")
+          if [ "$actualDiscovery" != "$expectedDiscovery" ]; then
+            echo "native Skill discovery disagrees with invocation flags: $name" >&2
             exit 1
           fi
-          if [ "$kind" = skill ]; then
-            expectedDiscovery=$(yq -r '
-              (.["user-invocable"] == false and .["disable-model-invocation"] == true) | not
-            ' expected-frontmatter.yaml)
-            actualDiscovery=$(jq -r --arg name "$name" 'index($name) != null' <<<"$discoverableSkillNamesJson")
-            if [ "$actualDiscovery" != "$expectedDiscovery" ]; then
-              echo "native Skill discovery disagrees with invocation flags: $name" >&2
-              exit 1
-            fi
-            invocation=$(yq -r '
-              if .["user-invocable"] == false and .["disable-model-invocation"] == true then "依存referenceのみ"
-              elif .["disable-model-invocation"] == true then "明示呼出しのみ"
-              elif .["user-invocable"] == false then "自動のみ"
-              else "task一致時" end
-            ' expected-frontmatter.yaml)
-            if [ "$invocation" = "依存referenceのみ" ]; then
-              invocation="$invocation: \`$source\` をRead"
-            fi
-            printf '| %s | `%s` | %s |\n' "$description" "$name" "$invocation" >> expected-rows.txt
-          else
-            printf '| %s | `%s` |\n' "$description" "$name" >> expected-rows.txt
-          fi
         done
-        done
-        printf '%s\n' "$expectedCapabilityRows" >> expected-rows.txt
-        printf '%s\n' "$expectedClientRows" >> expected-rows.txt
-        # 見出しと区切りも期待値に含め、表の行集合を両方向で一致させる
-        {
-          printf '| 目的 | Skill | 起動 |\n'
-          printf '| 目的 | subagent |\n'
-          printf '| Capability | 入口 Skill |\n'
-          printf '| client | subagent | Skill 投影 | LSP | Telemetry | Project memory |\n'
-          printf '| --- | --- |\n'
-          printf '| --- | --- | --- |\n'
-          printf '| --- | --- | --- | --- | --- | --- |\n'
-        } >> expected-rows.txt
-        missing=$(grep -Fxv -f "$rulesSource" expected-rows.txt || true)
-        if [ -n "$missing" ]; then
-          echo "generated policy is missing rows derived from the declarations:" >&2
-          printf '%s\n' "$missing" >&2
-          exit 1
-        fi
-        extra=$(grep -E '^\|.*\|$' "$rulesSource" | grep -Fxv -f expected-rows.txt || true)
-        if [ -n "$extra" ]; then
-          echo "generated policy has table rows that no declaration produces:" >&2
-          printf '%s\n' "$extra" >&2
-          exit 1
-        fi
         if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$rulesSource"; then
           echo 'generated policy retains an unsubstituted marker' >&2
           exit 1

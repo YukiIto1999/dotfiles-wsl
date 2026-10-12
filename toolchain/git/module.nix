@@ -21,8 +21,6 @@ let
   hooks = import ./package.nix {
     inherit lib pkgs;
     verificationEntry = cfg.toolchain.verification.entry;
-    # T2 の時間予算は architecture-standard の段の定義に合わせる
-    pushBudgetSeconds = 15 * 60;
   };
 
   credentialTokenFile = pkgs.writeShellApplication {

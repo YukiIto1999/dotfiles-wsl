@@ -4,7 +4,7 @@
   lib,
   hostConfig,
   hostOptions,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   ...
 }:
@@ -85,7 +85,7 @@ let
   };
 
   descriptionVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:

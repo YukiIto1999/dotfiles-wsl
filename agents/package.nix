@@ -161,7 +161,6 @@ let
     };
   mkVerify =
     {
-      t1BudgetSeconds ? 120,
       commandShims ? null,
     }:
     let
@@ -179,9 +178,8 @@ let
       ];
       text =
         builtins.replaceStrings
-          [ "@t1BudgetSeconds@" "@gate@" "@verificationCache@" ]
+          [ "@gate@" "@verificationCache@" ]
           [
-            (toString t1BudgetSeconds)
             (lib.escapeShellArg (lib.getExe verifyGate))
             (lib.escapeShellArg (lib.getExe verifyCache))
           ]

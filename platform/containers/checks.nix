@@ -4,7 +4,7 @@
   lib,
   hostConfig,
   hostOptions,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   variantConfig,
   ...
@@ -411,7 +411,7 @@ let
   ];
 
   foreignObservationDescriptionVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:
@@ -439,7 +439,7 @@ let
   fixtureDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
   fixtureImage = "${fixtureRepository}:latest@${fixtureDigest}";
   extraContainerVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:
@@ -490,7 +490,7 @@ let
     "repository-search"
   ];
   containerlessVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:
@@ -501,7 +501,7 @@ let
     ]).config;
   memoryOnlyCapabilityIds = containerlessCapabilityIds ++ [ "project-memory" ];
   memoryOnlyVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:
@@ -545,7 +545,7 @@ let
   ];
   removedOciContainers = builtins.removeAttrs hostConfig.virtualisation.oci-containers.containers sampleContainerNames;
   removedContainerVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:
@@ -796,8 +796,8 @@ in
     pkgs.runCommandLocal "check-container-application-registry" { } "touch $out";
 
   container-capability-gating =
-    assert builtins.deepSeq memoryOnlyVariantConfig.system.build.toplevel.drvPath true;
-    assert builtins.deepSeq containerlessVariantConfig.system.build.toplevel.drvPath true;
+    assert lib.all (entry: entry.assertion) memoryOnlyVariantConfig.assertions;
+    assert lib.all (entry: entry.assertion) containerlessVariantConfig.assertions;
     assert memoryOnlyVariantConfig.dotfiles.capabilities.enabled == memoryOnlyCapabilityIds;
     assert memoryOnlyVariantConfig.dotfiles.platform.containers.enabled == [ "hindsight" ];
     assert

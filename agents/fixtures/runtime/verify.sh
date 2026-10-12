@@ -671,10 +671,15 @@ stall_receipt_count() {
   find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.verified' -print | wc -l
 }
 
-stall_repository() {
+declare_budget() {
+  printf '{"version":1,"verify":{"seconds":%s}}\n' "$2" >"$1/verification-budget.json"
+}
+
+t1_repository() {
   git init -q "$1"
   printf 'scripts.verify.exec = "true";\n' >"$1/devenv.nix"
-  git -C "$1" add devenv.nix
+  declare_budget "$1" "$2"
+  git -C "$1" add devenv.nix verification-budget.json
   git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
 }
 
@@ -688,6 +693,32 @@ expect_closed_gate() {
 expect_open_gate() {
   if ! "$GATE" check --repo "$1" >/dev/null 2>&1; then
     echo "gate closed on a tree that a completed T1 verified: $2" >&2
+    exit 1
+  fi
+}
+
+expect_budget_refused() {
+  local repository=$1 name=$2 status=0 litter receipts
+  litter=$(stall_litter)
+  receipts=$(stall_receipt_count)
+  rm -f "$fixture/refused-runs"
+  (cd "$repository" && PATH="$fixture/budget-bin:$PATH" DEADLINE_RUNS=$fixture/refused-runs \
+    "$VERIFY" -- devenv shell -- verify) 2>"$fixture/refused-stderr" || status=$?
+  if [ "$status" -ne 78 ]; then
+    echo "T1 with a $name budget exited $status instead of the configuration status" >&2
+    exit 1
+  fi
+  if [[ $(<"$fixture/refused-stderr") != *verification-budget.json* ]]; then
+    echo "T1 with a $name budget did not name the declaration it refused" >&2
+    exit 1
+  fi
+  if [ -e "$fixture/refused-runs" ]; then
+    echo "T1 with a $name budget ran the entry" >&2
+    exit 1
+  fi
+  expect_closed_gate "$repository" "$name budget"
+  if [ "$(stall_litter)" != "$litter" ] || [ "$(stall_receipt_count)" != "$receipts" ]; then
+    echo "T1 with a $name budget left receipts or temporary state behind" >&2
     exit 1
   fi
 }
@@ -716,7 +747,7 @@ SCRIPT
   while read -r name utility when pattern initial_runs retry_runs <&3; do
     printf 'receipt boundary: %s\n' "$name" >&2
     repository=$fixture/stall-$name
-    stall_repository "$repository"
+    t1_repository "$repository" 3
     STALL_RUNS=$fixture/stall-$name-runs
     litter_before=$(stall_litter)
     receipts_before=$(stall_receipt_count)
@@ -766,14 +797,14 @@ SCENARIOS
   while read -r name utility when pattern initial_runs <&4; do
     printf 'receipt cancellation: %s\n' "$name" >&2
     repository=$fixture/stall-$name
-    stall_repository "$repository"
+    t1_repository "$repository" 60
     STALL_RUNS=$fixture/stall-$name-runs
     litter_before=$(stall_litter)
     receipts_before=$(stall_receipt_count)
     cd "$repository"
     printf '%s %s %s\n' "$utility" "$when" "$pattern" >"$control"
     rm -f "$control.ready"
-    "$CANCELLABLE_VERIFY" -- devenv shell -- verify &
+    "$STALLING_VERIFY" -- devenv shell -- verify &
     wrapper=$!
     for _ in $(seq 1 200); do
       [ ! -s "$control.ready" ] || break
@@ -802,7 +833,7 @@ SCENARIOS
       exit 1
     fi
     # cache key に SHLVL を含むため同期起動での再試行は不可
-    "$CANCELLABLE_VERIFY" -- devenv shell -- verify &
+    "$STALLING_VERIFY" -- devenv shell -- verify &
     wait "$!"
     expect_open_gate "$repository" "retry after $name"
     test "$(cat "$STALL_RUNS")" = 1
@@ -817,14 +848,15 @@ SCENARIOS
     repository=$fixture/stall-$name
     git init -q "$repository"
     printf '.PHONY: verify\nverify:\n\tprintf old >> ../%s-result\n' "$name" >"$repository/Makefile"
-    git -C "$repository" add Makefile
+    declare_budget "$repository" 60
+    git -C "$repository" add Makefile verification-budget.json
     git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
     litter_before=$(stall_litter)
     cd "$repository"
     if [ "$name" = late-source ]; then pattern='*.success'; else pattern='*/.pending.*'; fi
     printf 'mv after %s\n' "$pattern" >"$control"
     rm -f "$control.ready" "$control.release"
-    "$CANCELLABLE_VERIFY" -- make verify &
+    "$STALLING_VERIFY" -- make verify &
     wrapper=$!
     for _ in $(seq 1 200); do
       [ ! -s "$control.ready" ] || break
@@ -849,7 +881,7 @@ SCENARIOS
       expect_closed_gate "$repository" "$name discarded capture"
       printf '.PHONY: verify\nverify:\n\tprintf new >> ../%s-result\n' "$name" >Makefile
     fi
-    "$CANCELLABLE_VERIFY" -- make verify
+    "$STALLING_VERIFY" -- make verify
     expect_open_gate "$repository" "$name checked replacement"
     if [ "$name" = late-source ]; then
       test "$(cat "$fixture/$name-result")" = oldnew
@@ -863,14 +895,15 @@ SCENARIOS
     repository=$fixture/stall-$name
     git init -q "$repository"
     printf '.PHONY: verify\nverify:\n\tprintf once >> ../%s-result\n' "$name" >"$repository/Makefile"
-    git -C "$repository" add Makefile
+    declare_budget "$repository" 60
+    git -C "$repository" add Makefile verification-budget.json
     git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
     cd "$repository"
     if [ "$name" = partial-marker ]; then
       printf 'mv after *.verified\n' >"$control"
       rm -f "$control.ready" "$control.release"
     fi
-    "$CANCELLABLE_VERIFY" -- make verify &
+    "$STALLING_VERIFY" -- make verify &
     wrapper=$!
     if [ "$name" = partial-marker ]; then
       for _ in $(seq 1 200); do
@@ -893,7 +926,7 @@ SCENARIOS
       test "$status" -ne 0
       expect_closed_gate "$repository" 'failed partial completion'
       test ! -e "$proof"
-      "$CANCELLABLE_VERIFY" -- make verify &
+      "$STALLING_VERIFY" -- make verify &
       wait "$!"
     else
       wait "$wrapper"
@@ -945,7 +978,7 @@ SCENARIOS
 
   name=survivor
   repository=$fixture/stall-$name
-  stall_repository "$repository"
+  t1_repository "$repository" 3
   STALL_RUNS=$fixture/stall-$name-runs
   litter_before=$(stall_litter)
   receipts_before=$(stall_receipt_count)
@@ -1408,7 +1441,8 @@ git -C "$gate_repo" config user.name fixture
 git -C "$gate_repo" config user.email fixture@example.invalid
 printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
 printf 'held\n' >"$gate_repo/tracked"
-git -C "$gate_repo" add devenv.nix tracked
+declare_budget "$gate_repo" 60
+git -C "$gate_repo" add devenv.nix tracked verification-budget.json
 git -C "$gate_repo" commit -qm initial
 test "$("$GATE" entry --repo "$gate_repo")" = 'devenv shell -- verify'
 if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
@@ -1475,7 +1509,8 @@ git -C "$shell_repo" config user.name fixture
 git -C "$shell_repo" config user.email fixture@example.invalid
 printf 'scripts.verify.exec = "true";\n' >"$shell_repo/devenv.nix"
 printf 'held\n' >"$shell_repo/tracked"
-git -C "$shell_repo" add devenv.nix tracked
+declare_budget "$shell_repo" 60
+git -C "$shell_repo" add devenv.nix tracked verification-budget.json
 git -C "$shell_repo" commit -qm initial
 shell_observe() {
   printf '{"session_id":"fixture-shell","hook_event_name":"%s","tool_use_id":"%s","cwd":"%s","tool_name":"bash","tool_input":%s}' \
@@ -1504,28 +1539,33 @@ fi
 (cd "$shell_repo" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
 shell_stop
 
-broken_repo=$fixture/broken-nix-repo
-git init -q "$broken_repo"
-printf '{ outputs =\n' >"$broken_repo/flake.nix"
-git -C "$broken_repo" add flake.nix
-"$GATE" arm --session fixture-broken-nix --path "$broken_repo/flake.nix"
+native_budget_repo=$fixture/native-missing-budget-repo
+git init -q "$native_budget_repo"
+printf '{ outputs = { self }: { apps.x86_64-linux.verify = { type = "app"; program = "/bin/false"; }; }; }\n' \
+  >"$native_budget_repo/flake.nix"
+printf '{"version":1,"frontend":"nix","entries":["verify"]}\n' >"$native_budget_repo/verification-budget.json"
+git -C "$native_budget_repo" add flake.nix verification-budget.json
+"$GATE" arm --session fixture-native-budget --path "$native_budget_repo/flake.nix"
 set +e
-printf '{"session_id":"fixture-broken-nix","cwd":"%s"}' "$broken_repo" |
-  NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
-    "$GATE" hook stop >"$fixture/broken-stop.stdout" 2>"$fixture/broken-stop.stderr"
-broken_stop_status=$?
+printf '{"session_id":"fixture-native-budget","cwd":"%s"}' "$native_budget_repo" |
+  "$GATE" hook stop >"$fixture/native-budget-stop.stdout" 2>"$fixture/native-budget-stop.stderr"
+native_budget_stop_status=$?
 set -e
-test "$broken_stop_status" -eq 2
-test -s "$fixture/broken-stop.stderr"
+test "$native_budget_stop_status" -eq 2
+rm "$native_budget_repo/verification-budget.json"
+expect_closed_gate "$native_budget_repo" 'removed tracked native metadata'
 
 budget_repo=$fixture/budget-repo
-git init -q "$budget_repo"
-printf 'scripts.verify.exec = "true";\n' >"$budget_repo/devenv.nix"
-git -C "$budget_repo" add devenv.nix
-git -C "$budget_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+t1_repository "$budget_repo" 2
 mkdir "$fixture/budget-bin"
 cat >"$fixture/budget-bin/devenv" <<'SCRIPT'
 #!/usr/bin/env bash
+if [ -n "${DEADLINE_RUNS-}" ]; then
+  printf 'run\n' >>"$DEADLINE_RUNS"
+fi
+if [ -n "${DEADLINE_REWRITE-}" ]; then
+  printf '{"version":1,"verify":{"seconds":60}}\n' >"$DEADLINE_REWRITE"
+fi
 if [ "${DEADLINE_SLOW-}" = 1 ]; then
   (sleep 3; touch "$DEADLINE_LATE") &
   wait
@@ -1533,10 +1573,11 @@ fi
 SCRIPT
 chmod +x "$fixture/budget-bin/devenv"
 sed -i "1c#!$BASH" "$fixture/budget-bin/devenv"
+test "$("$GATE" budget --repo "$budget_repo")" = 2
 cd "$budget_repo"
 set +e
 PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=1 DEADLINE_LATE=$fixture/deadline-late \
-  "$SHORT_BUDGET_VERIFY" -- devenv shell -- verify
+  "$VERIFY" -- devenv shell -- verify
 deadline_status=$?
 set -e
 test "$deadline_status" -eq 124
@@ -1546,8 +1587,146 @@ if "$GATE" check --repo "$budget_repo" >/dev/null 2>&1; then
 fi
 sleep 4
 test ! -e "$fixture/deadline-late"
-PATH="$fixture/budget-bin:$PATH" "$SHORT_BUDGET_VERIFY" -- devenv shell -- verify
+PATH="$fixture/budget-bin:$PATH" "$VERIFY" -- devenv shell -- verify
 "$GATE" check --repo "$budget_repo" >/dev/null
+
+long_budget_repo=$fixture/long-budget-repo
+t1_repository "$long_budget_repo" 10
+test "$("$GATE" budget --repo "$long_budget_repo")" = 10
+cd "$long_budget_repo"
+PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=1 DEADLINE_LATE=$fixture/long-deadline-late \
+  "$VERIFY" -- devenv shell -- verify
+test -e "$fixture/long-deadline-late"
+expect_open_gate "$long_budget_repo" 'project that declared a larger budget'
+
+rewrite_repo=$fixture/rewrite-budget-repo
+t1_repository "$rewrite_repo" 2
+cd "$rewrite_repo"
+set +e
+PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=1 DEADLINE_LATE=$fixture/rewrite-late \
+  DEADLINE_REWRITE=$rewrite_repo/verification-budget.json "$VERIFY" -- devenv shell -- verify
+rewrite_status=$?
+set -e
+test "$rewrite_status" -eq 124
+expect_closed_gate "$rewrite_repo" 'budget rewritten during the run'
+sleep 4
+test ! -e "$fixture/rewrite-late"
+
+resolution_repo=$fixture/slow-resolution-repo
+t1_repository "$resolution_repo" 2
+cd "$resolution_repo"
+litter_before=$(stall_litter)
+receipts_before=$(stall_receipt_count)
+rm -f "$fixture/resolution-runs"
+set +e
+PATH="$fixture/budget-bin:$PATH" DEADLINE_RUNS=$fixture/resolution-runs \
+  "$SLOW_RESOLUTION_VERIFY" -- devenv shell -- verify
+resolution_status=$?
+set -e
+test "$resolution_status" -eq 124
+test ! -e "$fixture/resolution-runs"
+expect_closed_gate "$resolution_repo" 'resolution that used the whole budget'
+test "$(stall_litter)" = "$litter_before"
+test "$(stall_receipt_count)" = "$receipts_before"
+
+undeclared_repo=$fixture/undeclared-budget-repo
+git init -q "$undeclared_repo"
+printf 'scripts.verify.exec = "true";\n' >"$undeclared_repo/devenv.nix"
+git -C "$undeclared_repo" add devenv.nix
+git -C "$undeclared_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+expect_budget_refused "$undeclared_repo" absent
+while read -r name content <&5; do
+  printf '%s\n' "$content" >"$undeclared_repo/verification-budget.json"
+  expect_budget_refused "$undeclared_repo" "$name"
+done 5<<'BUDGETS'
+zero {"version":1,"verify":{"seconds":0}}
+negative {"version":1,"verify":{"seconds":-5}}
+fractional {"version":1,"verify":{"seconds":1.5}}
+string {"version":1,"verify":{"seconds":"120"}}
+oversized {"version":1,"verify":{"seconds":2147483648}}
+version {"version":2,"verify":{"seconds":120}}
+stage-missing {"version":1}
+seconds-missing {"version":1,"verify":{}}
+other-stage {"version":1,"verify-push":{"seconds":120}}
+array []
+malformed {"version":1,
+BUDGETS
+cd "$undeclared_repo"
+COUNT=$fixture/undeclared-focused-count "$VERIFY" -- "$fixture/check" focused
+test "$(cat "$fixture/undeclared-focused-count")" = 1
+expect_closed_gate "$undeclared_repo" 'focused check beside an unreadable budget'
+
+# 予算が読めない間は、評価が止まる Nix の宣言も評価しない。
+# 入口の綴りと一致する呼び出しだけを実行せず、隣の局所 command は証跡なしで従来どおり走る。
+# 評価器が起動すると止まるため、待ち続けず時間を区切って呼ぶ。
+stalled_repo=$fixture/stalled-nix-repo
+git init -q "$stalled_repo"
+cat >"$stalled_repo/flake.nix" <<'NIX'
+{
+  outputs = { self }: {
+    apps =
+      let fib = n: if n < 2 then n else fib (n - 1) + fib (n - 2);
+      in if fib 60 > 0 then { } else { };
+  };
+}
+NIX
+git -C "$stalled_repo" add flake.nix
+git -C "$stalled_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+cd "$stalled_repo"
+receipts_before=$(stall_receipt_count)
+rm -f "$fixture/stalled-focused-count"
+started=$SECONDS
+COUNT=$fixture/stalled-focused-count NIX_REMOTE="$fixture/nix-store" \
+  NIX_CONFIG="experimental-features = nix-command flakes" \
+  timeout 60 "$VERIFY" -- "$fixture/check" focused-beside-nix
+test "$(cat "$fixture/stalled-focused-count")" = 1
+test "$((SECONDS - started))" -lt 30
+test "$(stall_receipt_count)" = "$receipts_before"
+status=0
+NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
+  timeout 60 "$VERIFY" -- nix run --no-write-lock-file .#verify 2>"$fixture/stalled-refused-stderr" || status=$?
+if [ "$status" -ne 78 ] || [[ $(<"$fixture/stalled-refused-stderr") != *verification-budget.json* ]]; then
+  echo "T1 spelled as the native entry beside an unreadable budget exited $status instead of refusing" >&2
+  exit 1
+fi
+test "$(stall_receipt_count)" = "$receipts_before"
+test -z "$(timeout 60 "$GATE" entry --repo "$stalled_repo")"
+test "$(timeout 60 "$GATE" candidates --repo "$stalled_repo")" = 'nix run --no-write-lock-file .#verify'
+timeout 60 "$GATE" check --repo "$stalled_repo" >/dev/null
+
+printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' >"$stalled_repo/verification-budget.json"
+git -C "$stalled_repo" add verification-budget.json
+git -C "$stalled_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm budget
+litter_before=$(stall_litter)
+started=$SECONDS
+status=0
+NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
+  timeout 60 "$VERIFY" -- nix run --no-write-lock-file .#verify || status=$?
+if [ "$status" -ne 124 ] || [ "$((SECONDS - started))" -ge 30 ]; then
+  echo "T1 over a stalled Nix declaration exited $status instead of stopping at its budget" >&2
+  exit 1
+fi
+expect_closed_gate_within() {
+  local gate_status=0
+  started=$SECONDS
+  NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
+    timeout 60 "$GATE" check --repo "$1" >/dev/null 2>&1 || gate_status=$?
+  if [ "$gate_status" -eq 0 ] || [ "$((SECONDS - started))" -ge 30 ]; then
+    echo "gate over a stalled Nix declaration exited $gate_status instead of stopping at its budget" >&2
+    exit 1
+  fi
+}
+expect_closed_gate_within "$stalled_repo"
+test "$(stall_litter)" = "$litter_before"
+test "$(stall_receipt_count)" = "$receipts_before"
+rm "$stalled_repo/verification-budget.json"
+expect_closed_gate_within "$stalled_repo"
+status=0
+timeout 60 "$VERIFY" -- nix run --no-write-lock-file .#verify >/dev/null 2>&1 || status=$?
+test "$status" -eq 78
+test "$(stall_receipt_count)" = "$receipts_before"
+cd "$undeclared_repo"
+
 check_receipt_boundaries
 
 check_skill_learning

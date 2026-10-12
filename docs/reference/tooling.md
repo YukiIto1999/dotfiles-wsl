@@ -106,6 +106,12 @@ nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncI
 
 現在の一覧は`nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.cli.commands --apply builtins.attrNames`で確認する。
 
+管理runtimeの`dotfiles-agent-verify`は`cli.commands`に無く、flakeの`packages`から公開する。まだ配備されていないcheckoutからは`nix run --no-write-lock-file .#dotfiles-agent-verify -- nix run --no-write-lock-file .#verify`でT1を通す。
+T1の時間予算は呼び出し側の引数でなく、rootの`verification-budget.json`の`verify.seconds`が決める。wrapperは[`dotfiles-verify-entry --budget verify`](../../toolchain/verification/impl/entry.sh)で、`verify`のappはflakeから、同じfileを読む。
+Nixの入口の有無は同じfileの`frontend: "nix"`と`entries`から解決し、解決時にNixを取得、評価しない。
+登録や予算が読めない場合は、登録済みの入口を実行せずに拒否し、追跡済みfileの欠落を入口なしとして通さない。
+wrapperは`--candidates`で入口の綴りと局所commandを区別し、後者だけを証跡なしでcacheへ通す。
+
 ## Agent、Skill、Capability
 
 [`profiles/workstation.nix`](../../profiles/workstation.nix)が共有するAgent client、Capability、language server、identityを選び、`profiles/hosts/<host-id>.nix`がhost固有の値と選択を持つ。

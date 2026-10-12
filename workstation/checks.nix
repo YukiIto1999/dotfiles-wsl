@@ -5,7 +5,7 @@
   hostOptions,
   hostNames,
   machineConfigs,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   ...
 }:
@@ -271,7 +271,7 @@ let
     };
   };
   independentObservationDescriptionVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { config, lib, ... }:
@@ -331,7 +331,7 @@ let
       == candidateWorkstation.storage.journal.maximumGiB * 1073741824
     && lib.hasInfix "defaultVhdSize=${toString candidateWorkstation.storage.vhd.sizeGiB}GB" candidateWorkstation.wsl.windowsConfigTemplate;
   memoryVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       ({ lib, ... }: {
         dotfiles.workstation.swap = {

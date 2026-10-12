@@ -3,7 +3,7 @@
   lib,
   hostConfig,
   hostOptions,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   variantConfig,
   ...
@@ -16,7 +16,7 @@ let
   variantClients = variantConfig.dotfiles.agents.clients;
   wrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeWrapperModeVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       {
         dotfiles.agents.registry.antigravity.runtimeWrapperMode = lib.mkForce "managed";

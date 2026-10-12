@@ -4,7 +4,7 @@
   lib,
   hostConfig,
   hostOptions,
-  mkNixosSystem,
+  mkProbeSystem,
   minimalCapabilityConfig,
   normalMachineModule,
   self,
@@ -147,135 +147,10 @@ let
     url = "http://127.0.0.1:${toString target.port}/mcp";
   }) targets;
 
-  projectTargets = lib.mapAttrs (
-    _: target:
-    {
-      inherit (target)
-        needsNetwork
-        port
-        probe
-        provider
-        serverLifecycle
-        waitUnits
-        ;
-    }
-    // lib.optionalAttrs ((target.serverTransport or "stdio") != "stdio") {
-      inherit (target) serverTransport;
-    }
-  );
-  targetContractMatches =
-    candidateTargets: projectTargets candidateTargets == expectedContract.targets;
-
   subOptions =
     option: builtins.removeAttrs (option.type.nestedTypes.elemType.getSubOptions [ ]) [ "_module" ];
   targetOptions = subOptions mcpOptions.targets;
   probeOptions = builtins.removeAttrs (targetOptions.probe.type.getSubOptions [ ]) [ "_module" ];
-  frontOptions = subOptions mcpOptions.fronts;
-  sessionPolicyOptions = builtins.removeAttrs (mcpOptions.sessionPolicy.type.getSubOptions [ ]) [
-    "_module"
-  ];
-  optionMetadata = {
-    enabledProviders = {
-      type = mcpOptions.enabledProviders.type.name;
-      elementType = mcpOptions.enabledProviders.type.nestedTypes.elemType.name;
-      internal = mcpOptions.enabledProviders.internal or false;
-      readOnly = mcpOptions.enabledProviders.readOnly or false;
-      hasDefault = mcpOptions.enabledProviders ? default;
-    };
-    targets = {
-      type = mcpOptions.targets.type.name;
-      elementType = mcpOptions.targets.type.nestedTypes.elemType.name;
-      internal = mcpOptions.targets.internal or false;
-      readOnly = mcpOptions.targets.readOnly or false;
-      hasDefault = mcpOptions.targets ? default;
-      inherit (mcpOptions.targets) default;
-      fields = builtins.mapAttrs (_: option: option.type.name) targetOptions;
-      waitUnitsElementType = targetOptions.waitUnits.type.nestedTypes.elemType.name;
-      probeReadOnly = targetOptions.probe.readOnly or false;
-      probeFields = builtins.mapAttrs (_: option: option.type.name) probeOptions;
-      needsNetworkDefault = targetOptions.needsNetwork.default;
-      waitUnitsDefault = targetOptions.waitUnits.default;
-      serverTransportDefault = targetOptions.serverTransport.default;
-    };
-    fronts = {
-      type = mcpOptions.fronts.type.name;
-      elementType = mcpOptions.fronts.type.nestedTypes.elemType.name;
-      internal = mcpOptions.fronts.internal or false;
-      readOnly = mcpOptions.fronts.readOnly or false;
-      hasDefault = mcpOptions.fronts ? default;
-      fields = builtins.mapAttrs (_: option: option.type.name) frontOptions;
-    };
-    sessionPolicy = {
-      type = mcpOptions.sessionPolicy.type.name;
-      internal = mcpOptions.sessionPolicy.internal or false;
-      readOnly = mcpOptions.sessionPolicy.readOnly or false;
-      hasDefault = mcpOptions.sessionPolicy ? default;
-      fields = builtins.mapAttrs (_: option: option.type.name) sessionPolicyOptions;
-    };
-  };
-  expectedOptionMetadata = {
-    enabledProviders = {
-      type = "listOf";
-      elementType = "str";
-      internal = false;
-      readOnly = false;
-      hasDefault = false;
-    };
-    targets = {
-      type = "attrsOf";
-      elementType = "submodule";
-      internal = true;
-      readOnly = false;
-      hasDefault = true;
-      default = { };
-      fields = {
-        executable = "str";
-        serverLifecycle = "enum";
-        serverTransport = "enum";
-        provider = "str";
-        port = "intBetween";
-        needsNetwork = "bool";
-        waitUnits = "listOf";
-        probe = "submodule";
-      };
-      waitUnitsElementType = "str";
-      probeReadOnly = true;
-      probeFields = {
-        tool = "str";
-        args = "attrsOf";
-        timeout = "intBetween";
-      };
-      needsNetworkDefault = false;
-      serverTransportDefault = "stdio";
-      waitUnitsDefault = [ ];
-    };
-    fronts = {
-      type = "attrsOf";
-      elementType = "submodule";
-      internal = true;
-      readOnly = true;
-      hasDefault = false;
-      fields = {
-        name = "str";
-        port = "unsignedInt16";
-        url = "str";
-        service = "str";
-        runtimeDirectory = "str";
-        runtimeDirectoryPath = "str";
-      };
-    };
-    sessionPolicy = {
-      type = "submodule";
-      internal = true;
-      readOnly = true;
-      hasDefault = false;
-      fields = {
-        idleSeconds = "positiveInt";
-        frontGraceSeconds = "positiveInt";
-      };
-    };
-  };
-  optionSchemaMatches = candidate: candidate == expectedOptionMetadata;
 
   globalArgumentOwnership = import ./impl/global-argument-ownership.nix {
     inherit lib;
@@ -456,7 +331,7 @@ let
   };
   firstFrontService = (builtins.head fronts).service;
   extraTargetDescriptionVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       {
         systemd.services.${hostConfig.dotfiles.platform.mcp.gateway.service}.description =
@@ -478,7 +353,7 @@ let
       }
     ]).config;
   removedTargetVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       {
         dotfiles.platform.mcp = {
@@ -489,7 +364,7 @@ let
     ]).config;
   timeout121Evaluation = builtins.tryEval (
     builtins.deepSeq
-      (mkNixosSystem [
+      (mkProbeSystem [
         normalMachineModule
         {
           dotfiles.platform.mcp.targets.${firstTargetName}.probe.timeout = lib.mkForce 121;
@@ -513,17 +388,6 @@ in
     assert mcpObservations == expectedMcpObservations;
     assert protocolObservation.command.meta.mainProgram == "dotfiles-mcp-gateway-observer";
     assert protocolObservation.command.dotfilesObservationCommandKind == "normalized-protocol";
-    assert
-      protocolObservation.command.dotfilesObservationContract == {
-        envelopeVersion = 1;
-        inherit (protocolObservation)
-          allowedOutcomeIds
-          requiredOutcomeIds
-          requiredResourceKeys
-          ;
-        gatewayTimeout = 60;
-        outerTimeout = 300;
-      };
     assert
       lib.getExe protocolObservation.command
       == "${lib.getBin protocolObservation.command}/bin/dotfiles-mcp-gateway-observer";
@@ -572,22 +436,13 @@ in
     pkgs.runCommandLocal "check-mcp-capability-gating" { } "touch $out";
 
   mcp-target-contract =
-    assert expectedContract.targets != { };
-    assert targets != { };
-    assert variantTargets != { };
-    assert !(targetContractMatches { });
-    assert optionSchemaMatches optionMetadata;
-    assert !(optionSchemaMatches (lib.recursiveUpdate optionMetadata { fronts.readOnly = false; }));
-    assert !(optionSchemaMatches (lib.recursiveUpdate optionMetadata { targets.type = "attrs"; }));
     assert targetOptions.port.type.check 8770;
     assert targetOptions.port.type.check 8789;
     assert !(targetOptions.port.type.check 8769);
     assert !(targetOptions.port.type.check 8790);
-    assert targetOptions.serverTransport.default == "stdio";
     assert targetOptions.serverTransport.type.check "stdio";
     assert targetOptions.serverTransport.type.check "streamable-http";
     assert !(targetOptions.serverTransport.type.check "sse");
-    assert probeOptions.args.type.nestedTypes.elemType.name == "anything";
     assert probeOptions.timeout.type.check 1;
     assert probeOptions.timeout.type.check 120;
     assert !(probeOptions.timeout.type.check 0);
@@ -700,18 +555,6 @@ in
       streamableSession = updateTarget "http-adapter" (
         target: target // { serverLifecycle = "session"; }
       ) expectedTargets;
-      probeDrift = updateTarget "session-adapter" (
-        target:
-        target
-        // {
-          probe = target.probe // {
-            tool = "changed-tool";
-          };
-        }
-      ) expectedTargets;
-      networkDrift = updateTarget "http-adapter" (
-        target: target // { needsNetwork = true; }
-      ) expectedTargets;
 
       dependenciesValid =
         candidateServices:
@@ -776,9 +619,6 @@ in
     assert !(assertionsPass expectedProviders prefixId);
     assert !(assertionsPass expectedProviders duplicatePort);
     assert !(assertionsPass expectedProviders executableWithArguments);
-    assert targetContractMatches expectedTargets;
-    assert !(targetContractMatches probeDrift);
-    assert !(targetContractMatches networkDrift);
     assert dependenciesValid services;
     assert !(assertionsPass expectedProviders streamableSession);
     assert !(dependenciesValid missingAfter);

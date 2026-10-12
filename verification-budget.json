@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "frontend": "nix",
+  "entries": [
+    "verify",
+    "verify-push",
+    "verify-full"
+  ],
+  "verify": {
+    "seconds": 300
+  },
+  "verify-push": {
+    "seconds": 900
+  }
+}

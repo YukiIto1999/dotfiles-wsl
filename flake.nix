@@ -22,7 +22,7 @@
     };
 
     architectureStandard = {
-      url = "github:YukiIto1999/architecture-standard/dc00f40f553bb36ab573272cd45feff1a638c1ad";
+      url = "github:YukiIto1999/architecture-standard/54b977ab6bf746e6de983538886a0abac8543926";
       flake = false;
     };
 
@@ -132,6 +132,13 @@
         ) "Nixpkgs config, overlays and platforms must be declared in flake.nix";
         machine;
 
+      # 検査用 system ごとの manual 評価が T1 の予算を圧迫するため host と同一構成のままは不可
+      probeModule = {
+        documentation.nixos.enable = false;
+        home-manager.sharedModules = [ { manual.manpages.enable = false; } ];
+      };
+      mkProbeSystem = machineModules: mkNixosSystem (lib.toList machineModules ++ [ probeModule ]);
+
       mkMachineModule = hostName: {
         imports = [
           ./profiles/workstation.nix
@@ -152,9 +159,20 @@
       ];
       artifactVariantConfig = artifactVariantSystem.config;
       minimalCapabilityConfig =
-        (mkNixosSystem [
+        (mkProbeSystem [
           normalMachineModule
           { dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ]; }
+        ]).config;
+      projectMemoryDisabledConfig =
+        (mkProbeSystem [
+          normalMachineModule
+          {
+            dotfiles.capabilities.enabled = lib.mkForce (
+              builtins.filter (
+                name: name != "project-memory"
+              ) machineConfigs.${referenceHostName}.dotfiles.capabilities.enabled
+            );
+          }
         ]).config;
 
       mergeCheckParts = import ./checks/impl/merge-check-parts.nix { inherit lib; };
@@ -202,7 +220,8 @@
             machineConfigs
             machineOptions
             minimalCapabilityConfig
-            mkNixosSystem
+            projectMemoryDisabledConfig
+            mkProbeSystem
             pluginSources
             sops-nix
             ;
@@ -232,9 +251,75 @@
 
       unitChecksPackage = "verification-unit-checks";
       closureChecksPackage = "verification-host-closures";
-      runWithin = import ./toolchain/verification/package.nix {
-        pkgs = systemPkgs;
+      verificationPrograms = import ./toolchain/verification/package.nix { pkgs = systemPkgs; };
+      inherit (verificationPrograms) runWithin runEach;
+
+      # agent wrapperが同じfileを読むためflake内の秒数の直書きは不可
+      verificationBudget = builtins.fromJSON (builtins.readFile ./verification-budget.json);
+      # dotfiles-verify-entryの受理範囲と割れるため別の上限は不可
+      maxBudgetSeconds = 2147483647;
+      # 宣言の欠落を既定値で補うと予算の根拠を失うため既定値は不可
+      budgetSecondsFor =
+        stage:
+        let
+          version = verificationBudget.version or null;
+          seconds = verificationBudget.${stage}.seconds or null;
+        in
+        assert lib.assertMsg
+          (
+            version == 1
+            && (builtins.isInt seconds || builtins.isFloat seconds)
+            && seconds >= 1
+            && seconds <= maxBudgetSeconds
+            && seconds == builtins.floor seconds
+          )
+          "verification-budget.json must declare version 1 and an integral ${stage}.seconds from 1 to ${toString maxBudgetSeconds}";
+        builtins.floor seconds;
+      verifyBudgetSeconds = budgetSecondsFor "verify";
+      pushBudgetSeconds = budgetSecondsFor "verify-push";
+
+      # 単一評価器でのT1予算超過のため逐次実行は不採用
+      t1Evaluators = 2;
+      t1EvaluatorHeapBytes = 4 * 1024 * 1024 * 1024;
+      # system評価の重複を避けるため共通systemを読む検査の別shard配置は不採用
+      t1SystemChecks = builtins.attrNames closureChecks ++ [
+        "nixos-system-negative-eval"
+        # 変更で再buildする静的検査を先に始めるため評価の重いunitsへの配置は不採用
+        "actionlint"
+        "deadnix"
+        "docs-constraint-coverage"
+        "docs-links"
+        "docs-path-labels"
+        "docs-reader"
+        "dotfiles-option-namespace"
+        "nixfmt"
+        "shellcheck"
+        "statix"
+        "unit-boundary-name-only"
+      ];
+      t1Shards = {
+        systems = t1SystemChecks;
+        units = builtins.filter (name: !(builtins.elem name t1SystemChecks)) (
+          builtins.attrNames unitChecks
+        );
       };
+      t1ShardPackage = shard: "verification-t1-${shard}";
+      t1ShardPackages = lib.mapAttrs' (
+        shard: names:
+        let
+          pick = lib.filterAttrs (name: _: builtins.elem name names);
+          unknown = builtins.filter (name: !(closureChecks ? ${name} || unitChecks ? ${name})) names;
+        in
+        lib.nameValuePair (t1ShardPackage shard) (
+          assert lib.assertMsg (unknown == [ ]) "T1 shard ${shard} names no check: ${toString unknown}";
+          builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) (pick closureChecks)) (
+            systemPkgs.linkFarm (t1ShardPackage shard) (pick unitChecks)
+          )
+        )
+      ) t1Shards;
+      t1Installables = lib.concatMapStringsSep " " (shard: packageRef (t1ShardPackage shard)) (
+        builtins.attrNames t1Shards
+      );
 
       lockedSource = "path:${self}?narHash=${self.narHash}";
       sourceRef = lib.escapeShellArg lockedSource;
@@ -245,13 +330,17 @@
           description = "T1: unit の検査と全 host の評価";
           # app の shell を残すと呼び出し側の signal で shell だけが先に終わり run-within の待機が見えなくなるため exec なしは不可
           commands = ''
-            exec ${lib.getExe runWithin} 120 nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
+            export GC_INITIAL_HEAP_SIZE="''${GC_INITIAL_HEAP_SIZE-${toString t1EvaluatorHeapBytes}}"
+            exec ${lib.getExe runWithin} ${toString verifyBudgetSeconds} ${lib.getExe runEach} ${toString t1Evaluators} \
+              nix build --no-link --no-write-lock-file -L -- \
+              ${t1Installables}
           '';
         };
         verify-push = {
           description = "T2: unit の検査と全 host の closure";
           commands = ''
-            nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage} ${packageRef closureChecksPackage}
+            exec ${lib.getExe runWithin} ${toString pushBudgetSeconds} \
+              nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage} ${packageRef closureChecksPackage}
           '';
         };
         verify-full = {
@@ -298,11 +387,14 @@
           dotfiles-install-agents = hostConfig.dotfiles.platform.cli.commands.installAgents;
           dotfiles-doctor = hostConfig.dotfiles.platform.cli.commands.doctor;
           dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
+          # 配備済みのagent wrapperはcli.commandsに登録が無いためcli.commands経由は不可
+          dotfiles-agent-verify = hostConfig.dotfiles.agents.packages.verification;
           ${unitChecksPackage} = builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) closureChecks) (
             pkgs.linkFarm unitChecksPackage unitChecks
           );
           ${closureChecksPackage} = pkgs.linkFarm closureChecksPackage closureChecks;
-        };
+        }
+        // t1ShardPackages;
 
       apps.${system} = lib.mapAttrs verificationApp verificationTiers;
 

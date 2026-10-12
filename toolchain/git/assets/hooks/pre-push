@@ -3,7 +3,8 @@ set -euo pipefail
 
 # stashやcheckoutによるsource切替の不採用: 検証のための利用者のworktree変更の回避
 verification_entry=@verificationEntry@
-budget_seconds=@budgetSeconds@
+within=@runWithin@
+budget_seconds=
 bypass_log=$HOME/.local/state/dotfiles-wsl/git/verify-push-bypass.log
 difference_lines=10
 
@@ -58,19 +59,35 @@ require_clean_source() {
     "検査できない index の印(assume-unchanged、skip-worktree、unmerged)を持つ path がある。$consequence"
 }
 
-# timeout は自分の process group を作り、予算を超えると子孫ごと止める。
-# 端末の Ctrl-C はその group へ届かないため、hook が受けた signal を group へ渡す。
+require_unchanged_source() {
+  local top=$1 head=$2
+  if [ "$(commit_of "$top" HEAD)" != "$head" ]; then
+    refuse "検査の間に HEAD が $head から動いた。通った検査は送る commit のものではない"
+  fi
+  require_clean_source "$top" "検査の間に source が動いた。通った検査は送る commit のものではない"
+}
+
 # git が hook へ渡す GIT_DIR などを入口へ渡すと、入口の中で一時 repository に向けた git の操作が
 # push 元の repository を書き換えるため、git の repository 固有の環境変数を外して起動する。
+# 起動する subshell の中で呼び、その subshell の環境だけを変える。
+without_git_environment() {
+  # shellcheck disable=SC2046
+  unset $(git rev-parse --local-env-vars)
+}
+
+budget_left() {
+  local left=$((budget_seconds - (SECONDS - started)))
+  [ "$left" -gt 0 ] || return 124
+  printf '%d' "$left"
+}
+
 run_within_budget() {
   local top=$1 pid status remaining
   shift
-  remaining=$((budget_seconds - (SECONDS - started)))
-  [ "$remaining" -gt 0 ] || return 124
-  # shellcheck disable=SC2046
-  (cd "$top" && unset $(git rev-parse --local-env-vars) && exec timeout --kill-after=30s "$remaining" "$@") </dev/null &
+  remaining=$(budget_left) || return $?
+  (cd "$top" && without_git_environment && exec "$within" "$remaining" "$@") </dev/null &
   pid=$!
-  trap 'interrupted=1; kill -TERM -- "-$pid" 2>/dev/null || true' INT TERM HUP
+  trap 'interrupted=1; kill -TERM "$pid" 2>/dev/null || true' INT TERM HUP
   while :; do
     status=0
     wait "$pid" || status=$?
@@ -81,13 +98,22 @@ run_within_budget() {
   return "$status"
 }
 
+resolve_entry() {
+  local top=$1
+  if [ -z "$budget_seconds" ]; then
+    (cd "$top" && without_git_environment && exec "$verification_entry" --repo "$top" verify-push) </dev/null
+    return
+  fi
+  run_within_budget "$top" "$verification_entry" --repo "$top" verify-push
+}
+
 require_run_success() {
   local status=$1 phase=$2 elapsed=$((SECONDS - started))
   if [ "$interrupted" -eq 1 ]; then
     printf 'verify-push: %sを中断した(経過 %s)\n' "$phase" "$(duration "$elapsed")" >&2
     exit 130
   fi
-  if { [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; } && [ "$elapsed" -ge "$budget_seconds" ]; then
+  if [ -n "$budget_seconds" ] && [ "$elapsed" -ge "$budget_seconds" ]; then
     printf 'verify-push: %sが予算 %s を超えたため止めた(経過 %s)。必要な検査は減らさず、重複実行、影響範囲の過剰な拡大、起動と build の固定費を見直して実行計画を作り直す\n' \
       "$phase" "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
     exit 1
@@ -99,7 +125,7 @@ require_run_success() {
 }
 
 main() {
-  local top entry entry_file head ref object started=$SECONDS elapsed status=0 interrupted=0
+  local top entry entry_file head ref object budget_error='' budget_result started=$SECONDS elapsed status=0 interrupted=0
   local -a command pushed=() stale=()
   top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
   # 削除refへのHEAD一致要求の不採用: Gitがlocal objectとして渡すゼロ値
@@ -115,9 +141,15 @@ main() {
     fi
   done
   [ "${#pushed[@]}" -gt 0 ] || exit 0
+  if budget_result=$("$verification_entry" --repo "$top" --budget verify-push 2>&1) \
+    && [[ $budget_result =~ ^[1-9][0-9]*$ ]]; then
+    budget_seconds=$budget_result
+  else
+    budget_error=$budget_result
+  fi
   entry_file=$(mktemp)
   trap 'rm -f -- "$entry_file"' EXIT
-  run_within_budget "$top" "$verification_entry" --repo "$top" verify-push >"$entry_file" || status=$?
+  resolve_entry "$top" >"$entry_file" || status=$?
   entry=$(cat "$entry_file")
   rm -f -- "$entry_file"
   trap - EXIT
@@ -129,6 +161,7 @@ main() {
   fi
   require_run_success "$status" '入口の解決'
   [ -n "$entry" ] || exit 0
+  [ -n "$budget_seconds" ] || refuse "時間予算の宣言が無いため入口を実行しない: $budget_error"
 
   if [ "${#stale[@]}" -gt 0 ]; then
     refuse "送る ref(${stale[*]})の commit が検証する HEAD(${head:-無し})と異なる。送る commit を checkout してから push する"
@@ -142,10 +175,12 @@ main() {
 
   require_run_success "$status" '検証'
 
-  if [ "$(commit_of "$top" HEAD)" != "$head" ]; then
-    refuse "検査の間に HEAD が $head から動いた。通った検査は送る commit のものではない"
-  fi
-  require_clean_source "$top" '検査の間に source が動いた。通った検査は送る commit のものではない'
+  export -f require_unchanged_source commit_of require_clean_source refuse_lines refuse
+  export difference_lines
+  status=0
+  run_within_budget "$top" "$BASH" -c "require_unchanged_source \"\$@\"" -- "$top" "$head" || status=$?
+  elapsed=$((SECONDS - started))
+  require_run_success "$status" '検証後のsource確定'
   printf 'verify-push: 通った(経過 %s)\n' "$(duration "$elapsed")" >&2
 }
 

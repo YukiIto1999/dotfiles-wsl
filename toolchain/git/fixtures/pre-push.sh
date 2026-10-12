@@ -30,6 +30,12 @@ new_repo() {
   printf '%s' "$repo"
 }
 
+set_budget() {
+  printf '{"version":1,"verify-push":{"seconds":%s}}\n' "$2" >"$1/verification-budget.json"
+  git -C "$1" add -- verification-budget.json
+  git -C "$1" commit -q -m 'test: 検証予算の変更'
+}
+
 push() {
   local hooks=$1 repo=$2
   shift 2
@@ -74,6 +80,7 @@ test "$(remote_ref "$plain" refs/heads/main)" = "$(git -C "$plain" rev-parse HEA
   || fail 'the push without a verify-push entry did not reach the remote'
 
 declared=$(new_repo declared)
+set_budget "$declared" 15
 # 予算の超過では、recipe の shell が止まっても生き残る子孫まで止まることを見る。
 printf 'STATUS ?= 0\nCHANGE ?= true\nverify-push:\n\tpwd >"$(MARKER)"\n\t$(CHANGE)\n\tif [ -n "$(SLOW)" ]; then (sleep 3; touch "$(LATE)") & wait; fi\n\texit $(STATUS)\n' \
   >"$declared/Makefile"
@@ -90,6 +97,17 @@ test "$(cat "$MARKER")" = "$declared" || fail 'verify-push did not run at the re
 test "$(remote_ref "$declared" refs/heads/main)" = "$head" || fail 'the accepted push did not reach the remote'
 grep -qF "refs/heads/main $head refs/heads/main " refs \
   || fail 'verify-push consumed the ref list meant for the repository hook'
+
+rm -f "$MARKER"
+git -C "$declared" rm -q verification-budget.json
+git -C "$declared" commit -q -m 'test: 予算欠落の検査'
+expect_refused 'push with no declared budget' "$HOOKS" "$declared" refs/heads/main
+test ! -e "$MARKER" || fail 'verify-push ran without a declared budget'
+set_budget "$declared" 0
+expect_refused 'push with an invalid declared budget' "$HOOKS" "$declared" refs/heads/main
+test ! -e "$MARKER" || fail 'verify-push ran with an invalid declared budget'
+set_budget "$declared" 15
+expect_clean_accepted "$declared"
 
 printf 'changed\n' >>"$declared/tracked"
 git -C "$declared" commit -q -am 'test: 検査の追加'
@@ -183,13 +201,15 @@ restore_source "$declared"
 
 printf 'slow\n' >>"$declared/tracked"
 git -C "$declared" commit -q -am 'test: 検査の追加'
+set_budget "$declared" 2
 rm -f "$MARKER"
 SLOW=1 expect_refused 'push with an over-budget verify-push' \
-  "$SHORT_BUDGET_HOOKS" "$declared" refs/heads/main
+  "$HOOKS" "$declared" refs/heads/main
 test -e "$MARKER" || fail 'the over-budget verify-push did not run'
 sleep 4
 test ! -e "$LATE" || fail 'the over-budget verify-push kept running after the push was refused'
 
+set_budget "$declared" 15
 expect_clean_accepted "$declared"
 rm -f "$MARKER"
 expect_refused 'push whose verify-push entry could not be resolved' \
@@ -199,7 +219,9 @@ test ! -e "$MARKER" || fail 'verify-push ran although its entry could not be res
 native=$(new_repo native)
 printf '{ outputs = { self }: { apps.x86_64-linux.verify-push = { type = "app"; program = "/bin/false"; }; }; }\n' \
   >"$native/flake.nix"
-git -C "$native" add flake.nix
+printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":15}}\n' \
+  >"$native/verification-budget.json"
+git -C "$native" add flake.nix verification-budget.json
 git -C "$native" commit -q -m 'test: 検査の追加'
 printf 'untracked\n' >"$native/untracked"
 export NIX_REMOTE=$PWD/nix-store
@@ -211,25 +233,91 @@ test "$(remote_ref "$native" refs/heads/main)" = "$(git -C "$native" rev-parse H
   || fail 'the native bypass did not update the remote'
 grep -qF "repo=$native" "$bypass_log" || fail 'the native bypass was not recorded'
 grep -qF 'entry=未解決' "$bypass_log" || fail 'the native bypass lost its unresolved entry'
-printf '{ outputs =\n' >"$native/flake.nix"
-DOTFILES_VERIFY_PUSH_BYPASS='native fixture の評価失敗' push "$HOOKS" "$native" HEAD:refs/heads/broken \
-  || fail 'the native bypass was blocked by failed evaluation'
-grep -qF 'reason=native fixture の評価失敗' "$bypass_log" || fail 'the failed-evaluation bypass lost its reason'
+printf '{"version":1,"frontend":false}\n' >"$native/verification-budget.json"
+DOTFILES_VERIFY_PUSH_BYPASS='native fixture の登録不正' push "$HOOKS" "$native" HEAD:refs/heads/broken \
+  || fail 'the native bypass was blocked by an invalid registration'
+grep -qF 'reason=native fixture の登録不正' "$bypass_log" || fail 'the invalid-registration bypass lost its reason'
 push "$HOOKS" "$native" --delete broken \
-  || fail 'a source-free deletion was blocked by an invalid flake'
+  || fail 'a source-free deletion was blocked by an invalid registration'
 test -z "$(remote_ref "$native" refs/heads/broken)" || fail 'the native deletion did not reach the remote'
+rm "$native/verification-budget.json"
+expect_refused 'native push with removed tracked metadata' "$HOOKS" "$native" refs/heads/missing-budget \
+  HEAD:refs/heads/missing-budget
+git -C "$native" restore --worktree -- verification-budget.json
+unset NIX_REMOTE NIX_CONFIG
+
+push_bounded() {
+  local hooks=$1 repo=$2
+  shift 2
+  timeout 60 git -C "$repo" -c core.hooksPath="$hooks" push -q origin "$@" 2>stderr
+}
+
+stalled=$(new_repo stalled)
+cat >"$stalled/flake.nix" <<'NIX'
+{
+  outputs = { self }: {
+    apps =
+      let fib = n: if n < 2 then n else fib (n - 1) + fib (n - 2);
+      in if fib 60 > 0 then { } else { };
+  };
+}
+NIX
+git -C "$stalled" add flake.nix
+git -C "$stalled" commit -q -m 'test: 評価が止まる宣言'
+export NIX_REMOTE=$PWD/nix-store
+export NIX_CONFIG='experimental-features = nix-command flakes'
+started=$SECONDS
+status=0
+push_bounded "$HOOKS" "$stalled" main || status=$?
+if [ "$status" -ne 0 ] || [ "$((SECONDS - started))" -ge 30 ]; then
+  fail "push without a declared budget evaluated the Nix declaration (status $status)"
+fi
+test "$(remote_ref "$stalled" refs/heads/main)" = "$(git -C "$stalled" rev-parse HEAD)" \
+  || fail 'the push without a declared budget or a static entry did not reach the remote'
+
+printf 'verify-push:\n\tpwd >"$(MARKER)"\n' >"$stalled/Makefile"
+git -C "$stalled" add Makefile
+git -C "$stalled" commit -q -m 'test: 評価を要しない入口の追加'
+before=$(remote_ref "$stalled" refs/heads/main)
+rm -f "$MARKER"
+started=$SECONDS
+status=0
+push_bounded "$HOOKS" "$stalled" main || status=$?
+if [ "$status" -eq 0 ] || [ "$status" -eq 124 ] || [ "$((SECONDS - started))" -ge 30 ]; then
+  fail "push with a static entry and no declared budget was not refused promptly (status $status)"
+fi
+test "$(remote_ref "$stalled" refs/heads/main)" = "$before" || fail 'the refused push still updated the remote'
+test ! -e "$MARKER" || fail 'verify-push ran without a declared budget'
+
+set_budget "$stalled" 2
+printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":2}}\n' \
+  >"$stalled/verification-budget.json"
+git -C "$stalled" add verification-budget.json
+git -C "$stalled" commit -q -m 'test: Nix 検証入口の登録'
+before=$(remote_ref "$stalled" refs/heads/main)
+started=$SECONDS
+status=0
+push_bounded "$HOOKS" "$stalled" main || status=$?
+if [ "$status" -eq 0 ] || [ "$status" -eq 124 ] || [ "$((SECONDS - started))" -ge 30 ]; then
+  fail "registered native verification was not stopped by its budget (status $status)"
+fi
+test "$(remote_ref "$stalled" refs/heads/main)" = "$before" || fail 'the push stopped by its budget still updated the remote'
+test ! -e "$MARKER" || fail 'native registration fell through to the Make entry'
 unset NIX_REMOTE NIX_CONFIG
 
 rm -f "$LATE"
+set_budget "$declared" 1
 expect_refused 'push with stalled entry resolution' "$SLOW_ENTRY_HOOKS" "$declared" refs/heads/main
 sleep 4
 test ! -e "$LATE" || fail 'entry resolution descendants survived the push deadline'
+set_budget "$declared" 15
 
 # 入口は git が hook へ渡す GIT_DIR などを受け継がない。受け継ぐと、入口の中で一時 repository に
 # 向けた git の操作が、push 元の repository の設定と index を書き換える。
 linked_main=$(new_repo linked-main)
 printf 'verify-push:\n\tgit init -q "$(SCRATCH)"\n\tgit -C "$(SCRATCH)" config core.bare true\n' \
   >"$linked_main/Makefile"
+set_budget "$linked_main" 15
 git -C "$linked_main" add Makefile
 git -C "$linked_main" commit -q -m 'test: 検査の追加'
 git -C "$linked_main" worktree add -q -b linked "$PWD/linked"

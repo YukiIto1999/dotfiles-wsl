@@ -28,6 +28,7 @@ dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
 
 検査項目の正本は各unitの`checks.nix`で、段の集約と実行は`flake.nix`が所有する。
 T1はunitの検査と全hostおよび既存variantの評価、T2の`verify-push`はそれらのsystem closureの実現、T3の`verify-full`は全量のflake checkを実行する。
+T1は評価を`flake.nix`の`t1Shards`で二つの評価器に分けて同時に実行する。
 予算を超えても必要な検査を後の段へ移さず、依存と実行計画を見直す。
 NixのGit sourceから漏れる未追跡fileは、検証前に`git add`または`git add -N`で追跡する。
 

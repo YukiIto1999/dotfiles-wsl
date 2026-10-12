@@ -2,7 +2,7 @@
   pkgs,
   lib,
   hostConfig,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   ...
 }:
@@ -29,7 +29,7 @@ let
     };
   };
   sourceConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       sourceAdoptionModule
     ]).config;
@@ -150,7 +150,7 @@ let
     name: !builtins.elem name containerCapabilityIds
   ) hostConfig.dotfiles.capabilities.enabled;
   containerlessConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       (
         { lib, ... }:

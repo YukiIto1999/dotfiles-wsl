@@ -18,7 +18,9 @@ usage: dotfiles-agent-gate <command> [options]
   arm --session ID [--path PATH]        その session が編集した repository を控える
   check [--repo DIR] [--session ID]     未検証なら理由を出して 1 で終わる
   waive --reason TEXT [--repo DIR]      理由を残していまの木を一度だけ通す
-  entry [--repo DIR]                    その repository の検証入口の綴りを答える
+  entry [--repo DIR]                    repository が登録する検証入口の綴りを評価器を起動せずに答える
+  candidates [--repo DIR]               予算が読めない間に、検証入口になり得る綴りを評価せずに一行ずつ答える
+  budget [--repo DIR]                   その repository の T1 の時間予算を秒で答える。宣言が無い、または不正なら理由を出して 1 で終わる
   skill --path PATH                     その綴りを触る前に読む skill の名を答える
   learned --session ID --path NAME      管理者が既存の配備済み skill 本文を明示的に承認する
   teach --session ID --path PATH        読んでいなければ理由を出して 1 で終わる
@@ -77,6 +79,23 @@ source_fingerprint() {
 # 段の名前と宣言の置き場の解決は git の pre-push と共有する。
 entry_of() {
   "@verificationEntry@" --repo "$1" verify
+}
+
+declared_entry_of() {
+  local entry
+  entry=$(entry_of "$1") || return $?
+  if [ -n "$entry" ]; then
+    budget_of "$1" >/dev/null || return $?
+  fi
+  printf '%s' "$entry"
+}
+
+candidates_of() {
+  "@verificationEntry@" --repo "$1" --candidates verify
+}
+
+budget_of() {
+  "@verificationEntry@" --repo "$1" --budget verify
 }
 
 state_dir_of() {
@@ -148,7 +167,7 @@ command_record() {
   state=$(state_dir_of "$top") || return 0
   # 後段の再採取でsourceが結び直されるため同じtokenへの上書きは不可
   [ ! -f "$state/.pending.$token" ] || return 0
-  [ -n "$text" ] && [ "$text" = "$(entry_of "$top")" ] || return 0
+  [ -n "$text" ] && [ "$text" = "$(declared_entry_of "$top")" ] || return 0
   IFS= read -r boot_id </proc/sys/kernel/random/boot_id || return 0
   start_time=$(producer_start_time "${token##*.}") || return 0
   ensure_dir "$state"
@@ -254,7 +273,7 @@ command_observe() {
 command_check() {
   local repo=$1 top state entry fingerprint reason
   top=$(repo_top_of "$repo") || return 0
-  entry=$(entry_of "$top") || return $?
+  entry=$(declared_entry_of "$top") || return $?
   [ -n "$entry" ] || return 0
   state=$(state_dir_of "$top") || return 0
   fingerprint=$(source_fingerprint "$top")
@@ -789,6 +808,8 @@ main() {
   check) command_check "$repo" ;;
   waive) command_waive "$repo" "$reason" ;;
   entry) entry_of "$(repo_top_of "$repo")" ;;
+  candidates) candidates_of "$(repo_top_of "$repo")" ;;
+  budget) budget_of "$repo" ;;
   learned) command_learned "$session" "$path" ;;
   teach) command_teach "$session" "$path" ;;
   conformance) command_conformance "$session" "$repo" "$standard_root" "$report" ;;

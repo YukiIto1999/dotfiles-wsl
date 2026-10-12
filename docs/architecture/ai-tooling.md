@@ -99,7 +99,16 @@ runtimeはsession ID、sessionを始めたproject、owner process、boot ID、�
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
 fileごとのprocess起動を避けるため、tracked fileのmetadataと内容hashはコマンド行長の上限内でまとめて取得する。
 読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
-宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決から成功証跡の保存までを120秒で制限し、予算超過時は検証processの子孫を止めて成功として扱わない。
+宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は検証processの子孫を止めて成功として扱わない。
+予算はrepositoryの根の`verification-budget.json`の`verify.seconds`を正本とし、wrapperは走行の開始時に共通providerの`dotfiles-verify-entry --budget verify`から一度だけ読む。
+走行中に宣言を書き換えても、その走行の期限は延びない。
+Nixの入口は同じfileの`frontend: "nix"`と`entries`から解決し、入口の有無を調べるために評価器を起動しない。
+Nixの取得と評価は検査本体の実行時にだけ行い、その時間も残りの予算で止める。
+wrapperは固定の予算値を持たない。
+T1の入口を認識したrepositoryで宣言が無い、または不正なら、既定値も無制限も補わず、入口を実行せず証跡も作らずに終了status 78で失敗する。
+入口が無いrepository、入口の綴りに一致しないlocal command、根以外での実行は従来どおりcacheだけを使い、証跡を作らない。
+宣言を読めないrepositoryでは評価器を起動せず、`--candidates`が評価を要しない置き場とflake.nixから集めた入口になり得る綴りだけで判別する。その綴りと一致する根での呼び出しは実行せずに拒否し、一致しないlocal commandは宣言が読める場合と同じくcacheだけを使う。
+終了gateは登録済みの入口の予算を要求し、宣言の不正と追跡済みfileの欠落を入口なしとして通さない。
 検証の証跡は走行tokenごとに、metadataの読み取り前後を照合した検査前のsourceへ固定し、時間内の保存と後始末を見届けたwrapperが完了を記す。
 T1の走行中のmetadata変化はcache keyとは別に照合し、検査後に編集されたsourceへ証跡を結び直さない。
 公開途中の証跡やまだ動いているwrapperの証跡は終了gateを開かず、期限超過や中断では同じ走行tokenの証跡と一時fileだけを回収するため、別の完了済み走行の証跡は巻き込まない。

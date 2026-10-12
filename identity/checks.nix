@@ -4,7 +4,7 @@
   hostConfig,
   hostOptions,
   variantConfig,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   ...
 }:
@@ -21,7 +21,7 @@ let
   primary = hostConfig.dotfiles.identity.github.primary;
   storeFile = hostConfig.sops.defaultSopsFile;
   noWorkIdentityConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       { dotfiles.toolchain.git.workIdentity = lib.mkForce null; }
     ]).config;

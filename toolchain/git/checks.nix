@@ -64,22 +64,17 @@ let
     name: file: lib.nameValuePair (lib.removePrefix hookPrefix name) file.source
   ) hookFiles;
   hooksDirectory = pkgs.linkFarm "git-hooks" deployedHooks;
-  # 予算の超過は 15 分待たずに確かめる。配備と同じ組み立てに短い予算だけを渡す
-  shortBudgetHooks = import ./package.nix {
-    inherit lib pkgs;
-    verificationEntry = hostConfig.dotfiles.toolchain.verification.entry;
-    pushBudgetSeconds = 2;
-  };
-  shortBudgetHooksDirectory = pkgs.linkFarm "git-hooks-short-budget" (
-    lib.mapAttrs (_: lib.getExe) shortBudgetHooks
-  );
   failingEntryHooks = import ./package.nix {
     inherit lib pkgs;
     verificationEntry = pkgs.writeShellApplication {
       name = "failing-verification-entry";
-      text = "exit 70";
+      text = ''
+        case " $* " in
+          *" --budget "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
+          *) exit 70 ;;
+        esac
+      '';
     };
-    pushBudgetSeconds = 15 * 60;
   };
   failingEntryHooksDirectory = pkgs.linkFarm "git-hooks-failing-entry" (
     lib.mapAttrs (_: lib.getExe) failingEntryHooks
@@ -90,11 +85,13 @@ let
       name = "slow-verification-entry";
       runtimeInputs = [ pkgs.coreutils ];
       text = ''
+        case " $* " in
+          *" --budget "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
+        esac
         (sleep 3; touch "$LATE") &
         wait
       '';
     };
-    pushBudgetSeconds = 1;
   };
   slowEntryHooksDirectory = pkgs.linkFarm "git-hooks-slow-entry" (
     lib.mapAttrs (_: lib.getExe) slowEntryHooks
@@ -199,9 +196,9 @@ in
           git
           gnugrep
           gnumake
+          nix
         ];
         HOOKS = hooksDirectory;
-        SHORT_BUDGET_HOOKS = shortBudgetHooksDirectory;
         FAILING_ENTRY_HOOKS = failingEntryHooksDirectory;
         SLOW_ENTRY_HOOKS = slowEntryHooksDirectory;
       }

@@ -6,7 +6,8 @@ usage() {
 }
 
 started_ms=$((${EPOCHREALTIME/[.,]/} / 1000))
-budget_seconds=@t1BudgetSeconds@
+budget_seconds=
+budget_error=
 remaining=
 
 refresh_remaining() {
@@ -33,6 +34,15 @@ run_bounded() {
   return "$status"
 }
 
+# 入口の一覧のいずれかが呼び出しの綴りと一致するか。一覧は entry_file に一行ずつ入る
+names_entry() {
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do
+    [ "$line" != "$1" ] || return 0
+  done <"$entry_file"
+  return 1
+}
+
 if [ "${1-}" = -- ]; then
   shift
 fi
@@ -44,16 +54,26 @@ fi
 trap 'interrupted=true; [ -z "$bounded_pid" ] || kill -s TERM "$bounded_pid" 2>/dev/null || true' HUP INT TERM XFSZ
 entry_file=$(mktemp)
 trap 'rm -f -- "$entry_file"' EXIT
-if ! refresh_remaining; then
-  exit 124
-fi
 status=0
-run_bounded @gate@ entry --repo "$top" >"$entry_file" || status=$?
+if budget=$(@gate@ budget --repo "$top" 2>&1) && [[ $budget =~ ^[1-9][0-9]*$ ]]; then
+  budget_seconds=$budget
+  if ! refresh_remaining; then
+    exit 124
+  fi
+  run_bounded @gate@ entry --repo "$top" >"$entry_file" || status=$?
+else
+  budget_error=$budget
+  # 読めない予算の既定値補完と期限なしの評価は不可のため、評価器を起動せず入口になり得る綴りだけを集める
+  @gate@ candidates --repo "$top" >"$entry_file" || status=$?
+fi
 [ "$interrupted" = false ] || status=130
 [ "$status" -eq 0 ] || exit "$status"
-entry=$(cat "$entry_file")
-if [ -n "$entry" ] && [ "$*" = "$entry" ] \
+if names_entry "$*" \
   && [ "$(realpath -e -- "$PWD")" = "$(realpath -e -- "$top")" ]; then
+  if [ -z "$budget_seconds" ]; then
+    printf 'verify: T1 の入口 %s の時間予算を決められないため実行しない\n%s\n' "$*" "$budget_error" >&2
+    exit 78
+  fi
   if ! refresh_remaining; then
     printf 'verify: T1 の時間予算を入口解決で使い切った\n' >&2
     exit 124

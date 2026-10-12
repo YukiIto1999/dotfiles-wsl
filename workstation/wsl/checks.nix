@@ -2,7 +2,7 @@
   pkgs,
   lib,
   hostConfig,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   ...
 }:
@@ -24,7 +24,7 @@ let
       && lib.elem "x-systemd.automount" mount.options
     ) candidate.dotfiles.workstation.wsl.extraDrives;
   portableConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       ({ lib, ... }: {
         dotfiles.workstation.wsl = {
@@ -47,7 +47,7 @@ let
       })
     ]).config;
   automaticConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       ({ lib, ... }: {
         dotfiles.workstation.wsl = {

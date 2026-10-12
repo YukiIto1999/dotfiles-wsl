@@ -6,7 +6,7 @@
   hostConfig,
   hostOptions,
   machineOptions,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   units,
   variantConfig,
@@ -116,6 +116,7 @@ in
         "statix.toml"
         "telemetry"
         "toolchain"
+        "verification-budget.json"
         "workstation"
       ];
       rootEntriesMatch = entries: builtins.attrNames entries == expectedRootEntries;
@@ -598,9 +599,8 @@ in
         options: builtins.filter (entry: entry.declarations != [ ]) (optionLeavesFor options);
 
       declarationViolationsFor =
-        options:
+        repositoryOptions:
         let
-          repositoryOptions = repositoryOptionsFor options;
           outsideDotfiles = builtins.filter (
             entry: entry.here == [ ] || lib.head entry.here != "dotfiles"
           ) repositoryOptions;
@@ -746,7 +746,7 @@ in
         optionType = lib.types.attrsOf lib.types.str;
         definitionValue.fixture = "fixture";
       };
-      declarationViolations = map describe (declarationViolationsFor hostOptions);
+      declarationViolations = map describe (declarationViolationsFor repositoryOptions);
       definitionViolations = lib.concatLists (
         lib.mapAttrsToList (
           hostName: options:
@@ -757,9 +757,9 @@ in
     assert lib.sort builtins.lessThan rootUnitNames == lib.sort builtins.lessThan expectedRootUnitNames;
     assert actualRootOptionOwners == expectedRootOptionOwners;
     assert missingOwnerDeclarations == [ ];
-    assert declarationViolationsFor correctFixture == [ ];
-    assert declarationViolationsFor wrongOwnerFixture != [ ];
-    assert declarationViolationsFor rogueRootFixture != [ ];
+    assert declarationViolationsFor (repositoryOptionsFor correctFixture) == [ ];
+    assert declarationViolationsFor (repositoryOptionsFor wrongOwnerFixture) != [ ];
+    assert declarationViolationsFor (repositoryOptionsFor rogueRootFixture) != [ ];
     assert definitionViolationsFor correctDefinitionFixture == [ ];
     assert definitionViolationsFor wrongDefinitionFixture != [ ];
     assert definitionViolationsFor sharedRegistryDefinitionFixture == [ ];
@@ -919,7 +919,7 @@ in
         inherit (invalidCase) name;
         result = builtins.tryEval (
           forceToplevel
-            (mkNixosSystem [
+            (mkProbeSystem [
               normalMachineModule
               invalidCase.module
             ]).config

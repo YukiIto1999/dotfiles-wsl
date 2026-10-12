@@ -3,7 +3,7 @@
   lib,
   hostConfig,
   hostOptions,
-  mkNixosSystem,
+  mkProbeSystem,
   normalMachineModule,
   pluginSources,
   ...
@@ -18,7 +18,6 @@ let
     inherit lib pkgs verificationEntry;
     runtimeContract = runtimePackageContract;
   };
-  shortBudgetVerify = runtime.mkVerify { t1BudgetSeconds = 2; };
   stallingCommand =
     name:
     pkgs.writeShellScriptBin name ''
@@ -49,13 +48,23 @@ let
       "rm"
     ];
   };
-  stallingVerify = runtime.mkVerify {
-    t1BudgetSeconds = 3;
-    commandShims = stallingShims;
+  stallingVerify = runtime.mkVerify { commandShims = stallingShims; };
+  # 入口解決の超過だけを再現するため宣言の読取まで遅らせる実装は不可
+  slowResolutionEntry = pkgs.writeShellApplication {
+    name = "slow-resolution-verification-entry";
+    runtimeInputs = [ pkgs.coreutils ];
+    text = ''
+      case " $* " in
+      *" --budget "*) ;;
+      *) sleep 3 ;;
+      esac
+      exec ${lib.getExe verificationEntry} "$@"
+    '';
   };
-  cancellableVerify = runtime.mkVerify {
-    t1BudgetSeconds = 60;
-    commandShims = stallingShims;
+  slowResolutionRuntime = import ../package.nix {
+    inherit lib pkgs;
+    verificationEntry = slowResolutionEntry;
+    runtimeContract = runtimePackageContract;
   };
   customSkillRootRuntime = import ../package.nix {
     inherit lib pkgs verificationEntry;
@@ -428,7 +437,7 @@ let
     "agents/stale" = expectedAgentObservations."agents/roster";
   };
   descriptionVariantConfig =
-    (mkNixosSystem [
+    (mkProbeSystem [
       normalMachineModule
       {
         systemd.services.dotfiles-agent-autoupdate.description = lib.mkForce "description mutation";
@@ -661,14 +670,14 @@ in
           pkgs.gnumake
           pkgs.gnused
           pkgs.jq
+          pkgs.nix
           pkgs.nodejs
           pkgs.strace
           pkgs.util-linux
         ];
         VERIFY = lib.getExe runtime.verify;
-        SHORT_BUDGET_VERIFY = lib.getExe shortBudgetVerify;
         STALLING_VERIFY = lib.getExe stallingVerify;
-        CANCELLABLE_VERIFY = lib.getExe cancellableVerify;
+        SLOW_RESOLUTION_VERIFY = lib.getExe slowResolutionRuntime.verify;
         GATE = lib.getExe runtime.gate;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
         CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;

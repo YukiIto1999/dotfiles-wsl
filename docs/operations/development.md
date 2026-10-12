@@ -79,7 +79,7 @@ T1は`flake.nix`の`t1Shards`で検査を`systems`と`units`の二つに分け�
 最初に失敗したshardの終了statusを返し、動いている評価器を止めて終了を待つ。
 契約検査用のvariantは`mkProbeSystem`で構成し、検査対象と独立したNixOSのmanualとHome Managerのmanpageを生成しない。
 登録した全hostとgateway portを変えた既存variantは、従来どおりmanualを含む構成でtoplevelを評価する。
-`project-memory`を無効にするAgentの検査は、同じvariantのconfigを共有する。
+`project-memory`を無効にするAgentとSkillの検査は、同じvariantのconfigを共有する。
 基準hostのoption宣言一覧は一度だけ作り、root ownerの確認と宣言位置の確認で共有する。
 検査を変更したときは、予算を理由に必須の検査をT3へ移さず、Nixの依存と再利用を見直す。
 

@@ -1,7 +1,7 @@
 ---
 name: planner
 description: 要件から実装計画を作成する。フェーズ分割、依存関係、リスク評価を含む。コード変更はしない。
-tools: [Read, Grep, Glob]
+tools: [Read, Grep, Glob, WebSearch, WebFetch]
 effort: xhigh
 ---
 

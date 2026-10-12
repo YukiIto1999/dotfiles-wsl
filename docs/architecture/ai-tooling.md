@@ -22,7 +22,8 @@ AI CLI ─► LSP ─► language server
 ```
 
 [`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)はsubagentからSkillへのroutingとsubagent間handoffだけを持ち、provider名、backend名、直接provider例外は置かない。
-Skillの依存は取込ownerのNix moduleが`requiresSkills`と`requiresCapabilities`で宣言し、外部Skillでは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が所有する。
+Skillの依存は取込ownerのNix moduleが`requiresSkills`と`requiresCapabilities`で宣言し、条件付きCapability入口は`optionalCapabilities`へ分ける。
+外部Skillでは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)がこのmetadataを所有する。
 
 専門判断が必要なtaskは`Agent → Skill`で方法を選び、配備するproviderは`Capability → provider/runtime`の公開契約を通す。
 Agentはtask、権限、委譲、成果物handoffを所有する。
@@ -33,8 +34,9 @@ provider adapter、container、database、credential、stateはCapabilityの実�
 Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能と、決定的な操作を担うmanaged CLIはAgentが直接使う。
 repositoryに配備するproviderは次のCapabilityを通し、公開契約を確認せず内部processやcontainerへ接続しない。
 
-Capability実装の正本は各`capabilities/<id>/module.nix`にあり、Task入口はlocalまたはpluginの採用moduleにある`requiresCapabilities`が宣言する。
-この宣言はSkill配備をゲートし、policyのCapability対応へ記載する。
+Capability実装の正本は各`capabilities/<id>/module.nix`にあり、Task入口はlocalまたはpluginの採用moduleが宣言する。
+`requiresCapabilities`はSkill全体の必須依存として配備をゲートし、`optionalCapabilities`は該当branchだけの入口として扱う。
+policyのCapability対応には両方を記載し、任意Capabilityの未選択で一般Skill全体を配備から外さない。
 現在のCapability IDは次で取得できる。
 
 ```bash
@@ -44,7 +46,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.capabilities.registr
 各Skillが宣言するCapabilityは次で取得できる。
 
 ```bash
-nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.registry --apply 'builtins.mapAttrs (_: skill: skill.requiresCapabilities)'
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.registry --apply 'builtins.mapAttrs (_: skill: { inherit (skill) requiresCapabilities optionalCapabilities; })'
 ```
 
 Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置く規則ではない。選択したSkill本文はclientへ配備する一方、Capability実装はtransport、service lifecycle、network、credential、永続dataを所有するため、`capabilities/`に置く。
@@ -188,15 +190,35 @@ OMPのcompactionで利用者のmessageを要約と別に原文で残すのは、
 AGENTSにある、過去の利用者指示を会話の原文で確かめる規律も、存在を知らない指示には適用されない。
 この欠落はupstreamのOMPで直す対象であり、seedの設定やpolicyの文では補わない。
 
+## Web調査
+
+Web検索とURL取得は、各clientが公開するnative toolを使う。この環境はWeb検索用のMCP providerもbackendも配備せず、公開するMCPはlibrary docsの`library-documentation`（Context7）だけである。
+[`web-research`](../../skills/web-research/skill/SKILL.md)が問いの分解、source選択、根拠評価を所有し、検索の順位、snippet、生成された回答文をclaimの根拠にしない。
+
+SearXNGとCrawl4AIは配備せず、検索と本文取得のための常設backendを持たない。
+native readerがJavaScript描画後の内容を取得できない場合は、既存の`browser-operation`へ必要な項目の取得を渡す。
+検索系のbackendを追加または代替する場合は、標準toolと既存ブラウザで得られる成果を明確に上回るかを実測し、RAM、CPU、secret、image、lifecycleの保守負担とあわせて判断する。
+
+clientごとに公開されるtoolは次のとおりである。使えるかは配備したsessionのtool一覧で確かめる。
+
+| client | 検索 | URL取得 | subagent |
+|---|---|---|---|
+| OMP | `web_search`。provider chainが応答し、`web_search.enabled`で有効にする | `read`へURLを渡す | frontmatterの`tools`が許可したtoolだけを持つ。`WebSearch`を`web_search`へ変換し、`WebFetch`は`read`で足りるため落とす。許可のないsubagentは検索を持たない |
+| Claude Code | [`WebSearch`](https://code.claude.com/docs/en/tools-reference#websearch-tool-behavior)はtitleとURLだけを返し、Amazon Bedrockでは使えない | [`WebFetch`](https://code.claude.com/docs/en/tools-reference#webfetch-tool-behavior)は取得ページへのpromptの結果を返し、原文ではない。組織policyで止まり得る | [`tools`のallowlist](https://code.claude.com/docs/en/sub-agents)に`WebSearch`と`WebFetch`が必要 |
+| Codex | `web_search`。[既定は`cached`](https://developers.openai.com/codex/config-reference)で、seedは`live`にしない | 専用toolは未確認 | rendererは`tools`を渡さない。継承は未確認 |
+| OpenCode | [`websearch`](https://opencode.ai/docs/tools/)（ExaまたはParallel） | `webfetch` | `tools`へ`websearch`と`webfetch`を渡す。実機での稼働は未確認 |
+| Antigravity | [CLIの公式仕様](https://antigravity.google/docs/cli/features)にはWeb検索の利用が記載されているが、この環境の実行は未確認 | [`read_url_content`](https://antigravity.google/docs/permissions)。権限`read_url`の既定はAsk | この環境はsubagentを配備しない |
+
+
+`architect`と`planner`は`web-research`へ委譲するため、`WebSearch`と`WebFetch`を`tools`に持つ。
+検索かURL取得を持たないsubagentでは、`web-research`が上位の呼出し元へ実行を依頼し、返された原応答だけを根拠にする。
+この引渡しを含む自然発火と成果は測定しておらず、全clientで同じ保証を持つとは言えない。
+
 ## MCP Platform
 
 各[`capabilities/`](../../capabilities)実装が`dotfiles.platform.mcp.targets`へprovider ID、executable、server transport、server lifecycle、port、通信要件、backend unit、probeを登録する。[`platform/mcp/module.nix`](../../platform/mcp/module.nix)はtargetからfrontを一度だけ導く。
 
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
-
-SearXNGのstdio providerはprocess単位でtool呼出しのrateと同時実行数を制限するため、共有frontに接続するsessionも同じ上限を使う。
-呼出しrateは[`package.nix`](../../capabilities/web-discovery/searxng/mcp/package.nix)の`MCP_TOOL_RATE_MAX`で指定し、同時実行数は固定したupstream packageの既定値を使う。
-HTTP専用のsession作成rateをstdioの呼出し制限として設定しない。
 
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
 
@@ -244,7 +266,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.targets
 
 [`platform/containers/module.nix`](../../platform/containers/module.nix)は型付きservice contract、Docker daemon、`dotfiles-backends` network、OCI image inventory、image同期を所有する。[`platform/containers/impl/container-backend.nix`](../../platform/containers/impl/container-backend.nix)はCapability実装が使うpure builderである。
 
-application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。Hindsight、Crawl4AI、SearXNGをgeneric Platformへ列挙しない。
+application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。Hindsightをgeneric Platformへ列挙しない。
 
 Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。container backendが一件もなければ、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
 

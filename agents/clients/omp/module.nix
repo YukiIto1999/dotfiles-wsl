@@ -106,6 +106,7 @@ let
             elif . == "Grep" then "grep"
             elif . == "Glob" then "glob"
             elif . == "WebSearch" then "web_search"
+            elif . == "WebFetch" then empty
             elif . == "Edit" then "edit"
             elif . == "Write" then "write"
             elif . == "Bash" then "bash"

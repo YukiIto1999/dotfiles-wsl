@@ -73,10 +73,6 @@
 | gateway が wildcard へ bind するので通信を cgroup で loopback に限る | `gateway-artifact-contract` |
 | Hindsight backendのAPI endpoint、named volume、read-only model mount、環境 fileの権限、health、stop timeoutが契約どおりである | `hindsight-container` |
 | memory MCP frontのpackage、port、backend unit、health probeが一致する | `hindsight-front` |
-| Crawl4AI backendのpublish、credential option、環境 fileの権限と値が契約どおりである | `crawl4ai-container` |
-| Crawl4AI MCP front は SOPS の poison stub と canary A / B を用いた隔離評価で package spec と target projection を比較し、実 front artifact の環境変数と initialize probe の応答を検査する | `crawl4ai-front` |
-| SearXNG backendのpublish、standalone secretとsettings templateの権限と値が契約どおりである | `searxng-container` |
-| SearXNG MCP front の package、port、backend unit が一致し、initialize に応答する | `searxng-front` |
 | 生成 config artifact が構文として妥当である | `config-syntax` |
 | SOPS secret 宣言から path、owner、group、mode の observation だけを導き、内容と source path を含めない | `sops-runtime-observation-contract` |
 | 有効なcontainer applicationとservice contractのkeyが一致する | `container-application-registry` |
@@ -121,8 +117,6 @@
 | cleanup が現在と保持中の Home Manager generation から backup の exact path を導き、home と system の削除を別の権限境界で実行する | `cleanup-home-backups` |
 | image sync が不足分だけを pull し、宣言済み image へ専用 namespace の tag を付けて dangling prune から外し、pin が切れた状態を status で検出する | `oci-image-sync-behavior` |
 | HindsightのcredentialがSOPS templateからroot所有の環境 fileを経てcontainerへ渡る | `hindsight-container` |
-| Crawl4AI の API token が user 用 file contract と root 所有の環境ファイルへ分かれる | `crawl4ai-container` |
-| SearXNG の standalone secret と settings template がそれぞれ root:root 0400 で配備される | `searxng-container` |
 
 ## 文書
 
@@ -169,9 +163,9 @@
 - 一つの責務の宣言、実装、test が同じ場所にあること。配置の規約を検査していない。
 - 固定 fixture と実装を同じ変更で誤って書き換えないこと。`mcp-target-contract` と `doctor-coverage` は独立 fixture を使うが、意図のレビューは必要になる。
 - front が実際に loopback へ bind すること。起動 command に bind 先が現れることは検査するが、process が本当にその address で listen するかは実機でしか分からない。agentgateway が config に書かない管理 listener を三つ開いていた実例がある。
-- front が loopback の外へ出るかどうかの宣言が実体と一致すること。`needsNetwork` の集合は検査で固定するが、宣言が実装の挙動と合っているかは上流を読むしかない。searxng の `web_url_read` が `SEARXNG_URL` を経由せず引数の URL へ出る実例がある。
+- front が loopback の外へ出るかどうかの宣言が実体と一致すること。`needsNetwork` の集合は検査で固定するが、宣言が実装の挙動と合っているかは上流を読むしかない。
 - 通信制限による失敗が観測できること。`IPAddressDeny` の遮断は timeout として現れ、unit は active のままなので doctor の unit 検査は緑を保つ。tool を呼ぶまで表面化しない。
-- container が image 由来で expose する port を把握していること。宣言は publish する port しか持たない。crawl4ai の image は内部 valkey の 6379 を expose しており、`dotfiles-backends` network 上の他 container から到達する。
+- container が image 由来で expose する port を把握していること。宣言は publish する port しか持たない。
 - 宣言した port が実機で空いていること。検査は宣言どうしの衝突しか見ない。他 project の process が先に取っていると front は起動できず、`Restart=always` で再試行を続ける。
 - optionを介した依存の意味が設計した責務に一致すること。物理importと禁止した逆依存は検査するが、公開contractを使う理由までは静的に判定しない。
 - commit 件名の要約が名詞で終わること。hook は動詞の終止形と過去形、「ない」「しい」「たい」、一部の助詞で終わる要約だけを拒否し、「設定を見直し」のような助詞に続く連用形、「遅い」のような形容詞、「のみ」「とか」で終わる要約は通す。「扱い」「の見直し」のような名詞と区別するには形態素解析が要る。

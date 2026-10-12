@@ -17,7 +17,6 @@ let
   protocolContract = protocolObserver.dotfilesObservationContract;
 
   upstream = front: { mcp.host = front.url; };
-  deniedTools = [ "web_url_read" ];
 
   gatewayConfig = (pkgs.formats.yaml { }).generate "agentgateway-default-config.yaml" {
     config.mcp.sessionTtl = "${toString mcp.sessionPolicy.idleSeconds}s";
@@ -37,9 +36,6 @@ let
                     mcp.targets = lib.mapAttrsToList (name: front: { inherit name; } // upstream front) mcp.fronts;
                   }
                 ];
-                policies.mcpAuthorization.rules = map (name: {
-                  deny = ''mcp.tool.name == "${name}"'';
-                }) deniedTools;
               }
             ];
           }

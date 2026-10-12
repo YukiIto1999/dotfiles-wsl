@@ -4,6 +4,7 @@
   hostConfig,
   mkProbeSystem,
   normalMachineModule,
+  projectMemoryDisabledConfig,
   ...
 }:
 
@@ -93,6 +94,16 @@ let
         { dotfiles.skills.registry.external-procedure = externalSkill; }
       ];
   noCapabilitiesAfter = evaluateSkills [ ] [ sourceAdoptionModule ];
+  optionalSkill = externalSkill // {
+    requiresCapabilities = [ ];
+    optionalCapabilities = [ "browser-automation" ];
+  };
+  optionalCapabilityAbsent =
+    evaluateSkills
+      [ ]
+      [
+        { dotfiles.skills.registry.external-procedure = optionalSkill; }
+      ];
   validator = pkgs.writeText "skill-frontmatter-contract.py" ''
     import json
     import re
@@ -141,26 +152,8 @@ let
         print("\n".join(violations), file=sys.stderr)
         raise SystemExit(1)
   '';
-  containerCapabilityIds = [
-    "project-memory"
-    "web-content"
-    "web-discovery"
-  ];
-  containerlessCapabilityIds = builtins.filter (
-    name: !builtins.elem name containerCapabilityIds
-  ) hostConfig.dotfiles.capabilities.enabled;
-  containerlessConfig =
-    (mkProbeSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.capabilities.enabled = lib.mkForce containerlessCapabilityIds;
-        }
-      )
-    ]).config;
-  enabledSkills = containerlessConfig.dotfiles.skills.enabled;
-  containerlessRegistry = containerlessConfig.dotfiles.skills.registry;
+  enabledSkills = projectMemoryDisabledConfig.dotfiles.skills.enabled;
+  containerlessRegistry = projectMemoryDisabledConfig.dotfiles.skills.registry;
 in
 {
   skill-source-contract =
@@ -187,6 +180,26 @@ in
           };
         }
       ]);
+    assert
+      !(sourceContractPasses [
+        {
+          dotfiles.skills.registry.external-procedure = optionalSkill // {
+            optionalCapabilities = [ "missing-capability" ];
+          };
+        }
+      ]);
+    assert
+      !(sourceContractPasses [
+        {
+          dotfiles.skills.registry.external-procedure = optionalSkill // {
+            optionalCapabilities = [
+              "browser-automation"
+              "browser-automation"
+            ];
+          };
+        }
+      ]);
+    assert builtins.elem "external-procedure" optionalCapabilityAbsent.dotfiles.skills.enabled;
     assert
       !(sourceContractPasses [
         {
@@ -254,11 +267,11 @@ in
     assert builtins.elem "repository-research" enabledSkills;
     assert builtins.elem "code-review" enabledSkills;
     assert !builtins.elem "memory" enabledSkills;
-    assert !builtins.elem "web-research" enabledSkills;
+    assert builtins.elem "web-research" enabledSkills;
     assert lib.all (
       name:
       lib.all (
-        capability: builtins.elem capability containerlessConfig.dotfiles.capabilities.resolved
+        capability: builtins.elem capability projectMemoryDisabledConfig.dotfiles.capabilities.resolved
       ) containerlessRegistry.${name}.requiresCapabilities
     ) enabledSkills;
     assert lib.all (

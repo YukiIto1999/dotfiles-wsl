@@ -5,9 +5,7 @@
     "service": "agentgateway-default"
   },
   "containers": [
-    "crawl4ai",
-    "hindsight",
-    "searxng"
+    "hindsight"
   ],
   "containerNetwork": "dotfiles-backends",
   "secrets": [
@@ -17,13 +15,11 @@
     "accounts/account-2/username",
     "accounts/account-3/token",
     "accounts/account-3/username",
-    "crawl4ai/api_token",
     "identity/default/email",
     "identity/default/name",
     "identity/work/email",
     "identity/work/name",
-    "opencode/go_api_key",
-    "searxng/secret_key"
+    "opencode/go_api_key"
   ],
   "projectMemoryPersistentMount": "hindsight-data:/home/hindsight/.pg0"
 }

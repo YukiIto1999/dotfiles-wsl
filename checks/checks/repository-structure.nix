@@ -141,13 +141,6 @@ in
           "agentmemory"
           "upstream"
         ]
-        [
-          "dotfiles"
-          "platform"
-          "containers"
-          "crawl4ai"
-          "credentials"
-        ]
       ];
       presentLegacyOptions = builtins.filter (path: lib.hasAttrByPath path hostOptions) legacyOptionPaths;
       requiredCapabilityPaths = [
@@ -176,14 +169,6 @@ in
           "project-memory"
           "clientIntegrations"
           "opencodePlugin"
-        ]
-        [
-          "dotfiles"
-          "capabilities"
-          "web-content"
-          "crawl4ai"
-          "credentials"
-          "apiTokenFile"
         ]
       ];
       missingCapabilityContracts = builtins.filter (

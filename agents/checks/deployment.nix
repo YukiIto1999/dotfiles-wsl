@@ -1356,7 +1356,8 @@ in
           fi
           yq --exit-status '
             (.tools | all(. == "Read" or . == "Grep" or . == "Glob" or
-              . == "Edit" or . == "Write" or . == "Bash"))
+              . == "Edit" or . == "Write" or . == "Bash" or
+              . == "WebSearch" or . == "WebFetch"))
           ' frontmatter.yaml > /dev/null
         done
         while IFS=$'\t' read -r name source; do
@@ -1369,6 +1370,7 @@ in
             (.tools | index("mcp__gateway")) != null and
             (.tools | all(. == "Read" or . == "Grep" or . == "Glob" or
               . == "Edit" or . == "Write" or . == "Bash" or
+              . == "WebSearch" or . == "WebFetch" or
               . == "Skill" or . == "mcp__gateway"))
           ' frontmatter.yaml > /dev/null
         done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$claudeSubagentsJson")
@@ -1377,7 +1379,8 @@ in
           yq --exit-status '
             .tools.skill == true and
             (.tools | keys | all(. == "read" or . == "grep" or . == "glob" or
-              . == "edit" or . == "write" or . == "bash" or . == "skill"))
+              . == "edit" or . == "write" or . == "bash" or
+              . == "websearch" or . == "webfetch" or . == "skill"))
           ' frontmatter.yaml > /dev/null
         done
         while IFS=$'\t' read -r name source; do
@@ -1391,7 +1394,8 @@ in
             .["thinking-level"] == "xhigh" and
             (has("effort") | not) and
             (.tools | all(. == "read" or . == "grep" or . == "glob" or
-              . == "edit" or . == "write" or . == "bash"))
+              . == "edit" or . == "write" or . == "bash" or
+              . == "web_search"))
           ' frontmatter.yaml > /dev/null
         done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$ompSubagentsJson")
         for source in $codexSources; do

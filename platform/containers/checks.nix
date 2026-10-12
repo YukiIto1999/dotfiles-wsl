@@ -438,46 +438,46 @@ let
   fixtureRepository = "example.invalid/dotfiles-fixture";
   fixtureDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
   fixtureImage = "${fixtureRepository}:latest@${fixtureDigest}";
+  fixtureContainerModule =
+    { lib, ... }:
+    {
+      dotfiles.platform.containers = {
+        enabled = lib.mkForce (
+          lib.sort builtins.lessThan (hostConfig.dotfiles.platform.containers.enabled ++ [ "fixture" ])
+        );
+        services.fixture = {
+          endpoints.http = {
+            protocol = "http";
+            address = "127.0.0.1";
+            port = 45678;
+            url = "http://127.0.0.1:45678";
+          };
+          units = [ "docker-fixture.service" ];
+          images.fixture = {
+            kind = "upstream";
+            container = "fixture";
+            image = fixtureImage;
+            repository = fixtureRepository;
+            digest = fixtureDigest;
+          };
+          health = {
+            endpoint = "http";
+            method = "GET";
+            path = "/health";
+            timeout = 5;
+          };
+        };
+      };
+      virtualisation.oci-containers.containers.fixture = {
+        image = fixtureImage;
+        pull = "never";
+        ports = [ "127.0.0.1:45678:45678" ];
+      };
+    };
   extraContainerVariantConfig =
     (mkProbeSystem [
       normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.platform.containers = {
-            enabled = lib.mkForce (
-              lib.sort builtins.lessThan (hostConfig.dotfiles.platform.containers.enabled ++ [ "fixture" ])
-            );
-            services.fixture = {
-              endpoints.http = {
-                protocol = "http";
-                address = "127.0.0.1";
-                port = 45678;
-                url = "http://127.0.0.1:45678";
-              };
-              units = [ "docker-fixture.service" ];
-              images.fixture = {
-                kind = "upstream";
-                container = "fixture";
-                image = fixtureImage;
-                repository = fixtureRepository;
-                digest = fixtureDigest;
-              };
-              health = {
-                endpoint = "http";
-                method = "GET";
-                path = "/health";
-                timeout = 5;
-              };
-            };
-          };
-          virtualisation.oci-containers.containers.fixture = {
-            image = fixtureImage;
-            pull = "never";
-            ports = [ "127.0.0.1:45678:45678" ];
-          };
-        }
-      )
+      fixtureContainerModule
     ]).config;
   extraContainerObservations = selectContainerObservations extraContainerVariantConfig.dotfiles.health.observations;
 
@@ -512,49 +512,41 @@ let
     ]).config;
   containerlessObservations = selectContainerObservations containerlessVariantConfig.dotfiles.health.observations;
   disabledContainerTargets = [
-    "crawl4ai"
     "memory"
-    "searxng"
   ];
   disabledContainerServices = [
     "docker-build-artifact-gc"
-    "docker-crawl4ai"
     "docker-dotfiles-backends-network"
     "docker-hindsight"
-    "docker-searxng"
   ];
   disabledContainerTimers = [
     "docker-build-artifact-gc"
   ];
   disabledContainerSecrets = [
-    "crawl4ai/api_token"
     "opencode/go_api_key"
-    "searxng/secret_key"
   ];
   disabledContainerTemplates = [
-    "crawl4ai.env"
     "hindsight.env"
-    "searxng-settings.yml"
-  ];
-  disabledContainerArtifacts = [
-    "containers/searxng/settings-template"
   ];
 
-  removedContainerServices = builtins.removeAttrs hostConfig.dotfiles.platform.containers.services [
-    sampleApplication
-  ];
-  removedOciContainers = builtins.removeAttrs hostConfig.virtualisation.oci-containers.containers sampleContainerNames;
+  removedContainerServices =
+    builtins.removeAttrs extraContainerVariantConfig.dotfiles.platform.containers.services
+      [
+        sampleApplication
+      ];
+  removedOciContainers = builtins.removeAttrs extraContainerVariantConfig.virtualisation.oci-containers.containers sampleContainerNames;
   removedContainerVariantConfig =
     (mkProbeSystem [
       normalMachineModule
+      fixtureContainerModule
       (
         { lib, ... }:
         {
           dotfiles.platform.containers = {
-            enabled = lib.mkForce (builtins.attrNames removedContainerServices);
-            services = lib.mkForce removedContainerServices;
+            enabled = lib.mkOverride 40 (builtins.attrNames removedContainerServices);
+            services = lib.mkOverride 40 removedContainerServices;
           };
-          virtualisation.oci-containers.containers = lib.mkForce removedOciContainers;
+          virtualisation.oci-containers.containers = lib.mkOverride 40 removedOciContainers;
         }
       )
     ]).config;
@@ -807,11 +799,6 @@ in
       == [ "hindsight" ];
     assert memoryOnlyVariantConfig.virtualisation.docker.enable;
     assert builtins.hasAttr "memory" memoryOnlyVariantConfig.dotfiles.platform.mcp.targets;
-    assert lib.all (name: !builtins.hasAttr name memoryOnlyVariantConfig.dotfiles.platform.mcp.targets)
-      [
-        "crawl4ai"
-        "searxng"
-      ];
     assert containerlessVariantConfig.dotfiles.capabilities.enabled == containerlessCapabilityIds;
     assert containerlessVariantConfig.dotfiles.platform.containers.enabled == [ ];
     assert containerlessVariantConfig.dotfiles.platform.containers.services == { };
@@ -838,9 +825,6 @@ in
     assert lib.all (
       name: !builtins.hasAttr name containerlessVariantConfig.sops.templates
     ) disabledContainerTemplates;
-    assert lib.all (
-      name: !builtins.hasAttr name containerlessVariantConfig.dotfiles.managedArtifacts
-    ) disabledContainerArtifacts;
     pkgs.runCommandLocal "check-container-capability-gating" { } "touch $out";
 
   # image は digest で固定し、参照が repository と digest に整合すること。

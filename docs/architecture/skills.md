@@ -22,7 +22,7 @@ custom Skillは一つの明確なjobと判断所有権を持つ。
 ## 構成上の配備対象
 
 local Skillの正本は[`skills/<id>/skill/`](../../skills)である。
-各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`を`dotfiles.skills.registry`へ登録し、外部Skillも同じ契約を使う。
+各`module.nix`がsource、`requiresSkills`、`requiresCapabilities`、`optionalCapabilities`を`dotfiles.skills.registry`へ登録し、外部Skillも同じ契約を使う。
 固定した外部sourceの取得は[`flake.nix`](../../flake.nix)、既存pluginの採用集合と依存宣言は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)が所有する。
 registryのsourceは`SKILL.md`があるdirectoryを指し、upstreamのrepository内での配置を共通化する必要はない。
 
@@ -38,6 +38,9 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 ```
 
 有効なSkillは[`skills/module.nix`](../../skills/module.nix)が、選択したCapabilityとSkill間依存を満たすregistry entryから導く。`dotfiles.skills.enabled`はread-onlyの内部派生値であり、Agent clientはこの有効集合だけを各client形式へ投影する。
+`requiresCapabilities`はSkill全体の配備条件であり、`optionalCapabilities`は条件付き手順の入口を表す。
+任意のCapabilityが未配備でもSkill全体を外さず、実行時には該当する手順だけを使わない。
+共通policyのCapability入口表は両方から導き、toolの入口を作るためだけにSkill全体を必須依存へ変えない。
 
 MCP専用の薄いwrapperは置かない。
 `repository-research`は探索経路とsource検証、`browser-operation`は要求と変更pathから実画面と業務結果へ至る受入判断、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。
@@ -199,7 +202,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfac
 | `github-operations` | `github-resources`のaccount別GitHub MCP | accountと対象resourceを固定し、write前後の状態を確認する。 |
 | `memory` | `project-memory`の公開MCP | recallを一次資料で検証し、保存の受理と永続化を区別する。 |
 | `repository-research` | `repository-search`のZvec-Grep MCPとnative repository tools | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
-| `web-research` | `web-discovery`、`web-content`、`library-documentation`の公開MCP | 探索と本文取得とlibrary docsを問いに応じて選び、localの問いは`repository-research`へ渡す。 |
+| `web-research` | clientのnativeなWeb検索とURL取得、`library-documentation`のContext7 MCP | 探索と本文取得をclientのtoolで行い、library docsはContext7へ渡す。native toolを持たないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
 | `environment-design` | ownerの正本と既存Skillの入口 | 外部toolの採用や差替えは、更新後のcallerと配備契約を確認してから変更を振り分ける。標準、dotfiles、upstream、対象project、memoryへ渡し、Skillの責務や手順の変更は`skill-design`へ渡す。 |
 | `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 一つの目的に閉じた件名を作り、実際のhookを通す。日本語の推敲は条件付きで`ja-writing`へ渡す。 |
 
@@ -256,7 +259,7 @@ natural-japaneseは形態素解析による検出層を持つが、上流の[検
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
 | [Matt Pocock research](https://github.com/mattpocock/skills/blob/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/research/SKILL.md) | MIT | claimを一次資料まで辿り、sourceが直接支える範囲で結論を書く | 常にbackground agentを使うこと、調査のたびにfileを作ること |
-| Context7、SearXNG、Crawl4AIの配備時tool schema | 該当なし。Context7とSearXNGは [`package.nix`](../../capabilities/library-documentation/context7/mcp/package.nix) と [`package.nix`](../../capabilities/web-discovery/searxng/mcp/package.nix)、Crawl4AIは [`module.nix`](../../capabilities/web-content/crawl4ai/backend/module.nix) の固定revisionから配備する | URL探索、本文取得、library docs、agent判断の分離と、実在する引数 | 配備されていないtool、SDK専用引数、固定件数のsource取得 |
+| Context7の配備時tool schema | 該当なし。[`package.nix`](../../capabilities/library-documentation/context7/mcp/package.nix)の固定revisionから配備する | library docsの入口と、実在する引数 | 配備されていないtool、SDK専用引数、固定件数のsource取得 |
 
 代表scenarioと期待する探索経路は[`agents/fixtures/web-research-skill.json`](../../agents/fixtures/web-research-skill.json)に置く。
 

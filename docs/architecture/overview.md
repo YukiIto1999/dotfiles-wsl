@@ -123,8 +123,6 @@ repository固有optionはownerに対応するnamespaceへ置く。
 | `browser-automation` | Playwright MCP |
 | `browser-diagnostics` | Chrome DevTools MCP |
 | `repository-search` | Zvec-Grep MCP |
-| `web-discovery` | SearXNG MCPとbackend |
-| `web-content` | Crawl4AI MCPとbackend |
 | `library-documentation` | Context7 MCP |
 | `github-resources` | GitHub MCPとaccount credential |
 | `project-memory` | Hindsight MCP、backend、runtime、client integration |

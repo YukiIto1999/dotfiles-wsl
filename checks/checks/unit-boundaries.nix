@@ -10,10 +10,6 @@ let
   allowedPureHelperImports = {
     "capabilities/project-memory/hindsight/backend/module.nix" =
       "../../../../platform/containers/impl/container-backend.nix";
-    "capabilities/web-content/crawl4ai/backend/module.nix" =
-      "../../../../platform/containers/impl/container-backend.nix";
-    "capabilities/web-discovery/searxng/backend/module.nix" =
-      "../../../../platform/containers/impl/container-backend.nix";
   };
   allowedCrossUnitReferences = {
     "capabilities/browser-diagnostics/chrome-devtools/mcp/module.nix" = [
@@ -36,20 +32,6 @@ let
     ];
     "capabilities/project-memory/hindsight/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
-    ];
-    "capabilities/web-content/crawl4ai/mcp/checks.nix" = [
-      "../../../../platform/mcp/package/mk-server.nix"
-    ];
-    "capabilities/web-content/crawl4ai/mcp/module.nix" = [
-      "../../../../platform/mcp/package/mk-server.nix"
-    ];
-    "capabilities/web-discovery/searxng/mcp/checks.nix" = [
-      "../../../../platform/mcp/package/mk-server.nix"
-      "../../../../platform/mcp/package/mk-npm.nix"
-    ];
-    "capabilities/web-discovery/searxng/mcp/module.nix" = [
-      "../../../../platform/mcp/package/mk-server.nix"
-      "../../../../platform/mcp/package/mk-npm.nix"
     ];
     "health/checks/registry.nix" = [ "../../platform/cli/module.nix" ];
   };
@@ -104,7 +86,6 @@ let
     "identity/checks.nix" = 1;
     "identity/module.nix" = 3;
     "platform/cli/impl/mk-command.nix" = 1;
-    "capabilities/web-discovery/searxng/backend/module.nix" = 1;
     "checks/impl/exec-tokens.nix" = 1;
     "secrets/sops/module.nix" = 1;
   };
@@ -114,9 +95,6 @@ in
   # exact import だけを通す。他 unit の impl や assets を広く読むと、
   # 宣言していない結合になる
   unit-boundary-name-only =
-    assert lib.assertMsg (
-      builtins.length (builtins.attrNames allowedPureHelperImports) == 3
-    ) "helper consumers changed without updating the boundary contract";
     pkgs.runCommandLocal "check-unit-boundary-name-only"
       {
         nativeBuildInputs = [

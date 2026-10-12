@@ -54,14 +54,6 @@ HindsightのAPIは`127.0.0.1:3111`、memory MCP frontは`127.0.0.1:8774`であ�
 
 retain入力は設定した外部LLMへ送られる。明示的な保存と記憶の収穫の入力はSOPS secretへ追加するものではなく、indicator filteringもsecretやPIIを完全には検出しない。
 
-## Crawl4AI
-
-Crawl4AI の API token は `capabilities/web-content/crawl4ai/backend/module.nix` が宣言し、root 所有の environment file から container へ渡す。同じ unit が user 所有の token file path を型付き contract で公開し、同 Capability の MCP adapter が読む。MCP adapter は SOPS の宣言を直接参照しない。
-
-## SearXNG
-
-SearXNG の server secret は `capabilities/web-discovery/searxng/backend/module.nix` が設定 template に差し込み、root 所有の設定ファイルへ配備する。template の更新は SearXNG container の unit を再起動する。同 Capability の MCP adapter は backend の型付き endpoint だけを読む。
-
-検索設定や OCI image digest は secret ではないため、暗号化済みファイルへ移さない。設定は SearXNG module、image の取得は [OCI images](oci-images.md)で扱う。
+OCI image digest は secret ではないため、暗号化済みファイルへ移さない。image の取得は [OCI images](oci-images.md)で扱う。
 
 入口は [README](../../README.md)、初回の host key 登録は[セットアップ](getting-started.md)、credential の信頼境界は[セキュリティ設計](../architecture/security.md)を参照する。

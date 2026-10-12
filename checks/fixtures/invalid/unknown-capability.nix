@@ -10,7 +10,5 @@
     "project-memory"
     "repository-search"
     "unknown-capability"
-    "web-content"
-    "web-discovery"
   ];
 }

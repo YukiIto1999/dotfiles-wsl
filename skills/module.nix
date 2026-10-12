@@ -19,12 +19,12 @@ let
     in
     !builtins.pathExists (source + "/SKILL.md") || (builtins.readDir source)."SKILL.md" != "regular"
   ) registryNames;
-  unknownRequiredCapabilities = lib.concatMap (
+  unknownCapabilities = lib.concatMap (
     name:
     map (capability: "${name}/${capability}") (
-      builtins.filter (
-        capability: !builtins.elem capability capabilityRegistryNames
-      ) cfg.registry.${name}.requiresCapabilities
+      builtins.filter (capability: !builtins.elem capability capabilityRegistryNames) (
+        cfg.registry.${name}.requiresCapabilities ++ cfg.registry.${name}.optionalCapabilities
+      )
     )
   ) registryNames;
   unknownSkillDependencies = lib.concatMap (
@@ -42,6 +42,7 @@ let
       duplicate = values: builtins.length values != builtins.length (lib.unique values);
     in
     lib.optional (duplicate skill.requiresCapabilities) "${name}/requiresCapabilities"
+    ++ lib.optional (duplicate skill.optionalCapabilities) "${name}/optionalCapabilities"
     ++ lib.optional (duplicate skill.requiresSkills) "${name}/requiresSkills"
   ) registryNames;
   skillClosure =
@@ -96,7 +97,12 @@ in
               type = (lib.types.listOf skillIdType) // {
                 emptyValue = { };
               };
-              description = "Skill の手順が利用する consumer 非依存 Capability ID";
+              description = "Skill 全体の配備に必要な consumer 非依存 Capability ID";
+            };
+            optionalCapabilities = lib.mkOption {
+              type = lib.types.listOf skillIdType;
+              default = [ ];
+              description = "条件付き手順の入口として利用する Capability ID。未配備でも Skill 全体は利用可能";
             };
             requiresSkills = lib.mkOption {
               type = (lib.types.listOf skillIdType) // {
@@ -133,8 +139,8 @@ in
         + lib.concatStringsSep ", " invalidSkillSources;
     }
     {
-      assertion = unknownRequiredCapabilities == [ ];
-      message = "Skills reference unknown Capabilities: ${lib.concatStringsSep ", " unknownRequiredCapabilities}";
+      assertion = unknownCapabilities == [ ];
+      message = "Skills reference unknown Capabilities: ${lib.concatStringsSep ", " unknownCapabilities}";
     }
     {
       assertion = unknownSkillDependencies == [ ];

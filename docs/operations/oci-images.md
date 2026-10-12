@@ -34,7 +34,7 @@ digest だけを指定して pull した image は tag を持たず、`docker im
 固定する digest は `dotfiles-image-digest` で registry から取る。
 
 ```sh
-dotfiles-image-digest searxng/searxng:latest
+dotfiles-image-digest ghcr.io/vectorize-io/hindsight:latest
 ```
 
 得た値を宣言したunitの`digest`へ書き、checkoutから対象hostの`syncImages` commandを実行して新しいimageを事前に同期する。

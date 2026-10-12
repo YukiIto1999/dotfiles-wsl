@@ -36,7 +36,7 @@
 | 共通container helperの参照が同一fileの別名経由も含めて承認済みCapability実装に限られ、CapabilityからAgentまたはSkillへの逆依存がない | `unit-boundary-name-only` |
 | MCP targetのprovider集合がCapability registryから導かれ、通常評価とvariant評価で一致する | `mcp-provider-registry` |
 | targetのportとprobe期限の範囲、server transportの許可値を検査する | `mcp-target-contract` |
-| providerの欠落と追加、IDとportの衝突、不適合なserver lifecycle、front dependencyとsandboxの欠落を変異入力で拒否する | `mcp-contract-mutations` |
+| providerの欠落と追加、IDとportの衝突、不適合なserver lifecycle、front dependencyとsandboxの欠落を変異入力で拒否し、派生frontとprobeへの外部定義を拒否する | `mcp-contract-mutations` |
 | GitHub account と `github-<account>` target が完全一致し、欠落、追加、改名を拒否する | `github-account-target-contract` |
 | repository-owned global module argument がなく、mutation fixture の定義元を unit の最長 path prefix で解決する | `mcp-source-boundary` |
 | MCP gateway observer が initialize、session ID、tools/list、target ごとの tools/call を有界に実行し、要求の期限切れを期限の秒数を示す warn に、tools/call の MCP error、契約外の応答、接続の失敗を種類ごとの固定 message の fail にし、normalized envelope 以外の raw 出力を doctor へ渡さない | `mcp-gateway-observer` |

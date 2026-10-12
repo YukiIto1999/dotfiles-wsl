@@ -517,15 +517,29 @@ in
           );
         in
         result.success && result.value;
-      syntheticConfiguration = (evaluateTargets expectedProviders expectedTargets).config;
-      expectedSyntheticFronts = lib.mapAttrs (name: target: {
-        inherit name;
-        inherit (target) port;
-        service = "mcp-front-${name}";
-        runtimeDirectory = "mcp-front-${name}";
-        runtimeDirectoryPath = "/run/mcp-front-${name}";
-        url = "http://127.0.0.1:${toString target.port}/mcp";
-      }) expectedTargets;
+      protectedTarget = builtins.head (builtins.attrNames expectedTargets);
+      syntheticEvaluation = evaluateTargets expectedProviders expectedTargets;
+      frontOverride = syntheticEvaluation.extendModules {
+        modules = [
+          {
+            dotfiles.platform.mcp.fronts.${protectedTarget}.url = lib.mkForce "http://external.invalid/mcp";
+          }
+        ];
+      };
+      probeOverride = syntheticEvaluation.extendModules {
+        modules = [
+          {
+            dotfiles.platform.mcp.targets.${protectedTarget}.probe.tool = lib.mkForce "external-probe";
+          }
+        ];
+      };
+      frontOverrideResult = builtins.tryEval (
+        builtins.deepSeq frontOverride.config.dotfiles.platform.mcp.fronts.${protectedTarget}.url true
+      );
+      probeOverrideResult = builtins.tryEval (
+        builtins.deepSeq probeOverride.config.dotfiles.platform.mcp.targets.${protectedTarget}.probe.tool
+          true
+      );
 
       renameTarget =
         from: to: candidateTargets:
@@ -608,7 +622,8 @@ in
       };
     in
     assert assertionsPass expectedProviders expectedTargets;
-    assert syntheticConfiguration.dotfiles.platform.mcp.fronts == expectedSyntheticFronts;
+    assert !frontOverrideResult.success;
+    assert !probeOverrideResult.success;
     assert !(assertionsPass [ ] expectedTargets);
     assert !(assertionsPass (expectedProviders ++ [ "session-provider" ]) expectedTargets);
     assert !(assertionsPass (lib.remove "session-provider" expectedProviders) expectedTargets);

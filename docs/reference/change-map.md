@@ -32,7 +32,8 @@
 | Capabilityを追加・削除する | [`capabilities/module.nix`](../../capabilities/module.nix)のregistry、`capabilities/<semantic-id>/module.nix`、[`profiles/workstation.nix`](../../profiles/workstation.nix)または[`profiles/hosts/`](../../profiles/hosts)の選択 | dependency closureとprovider/backend一意性を`verify`で確認する |
 | Skillを追加・削除する | localは[`skills/<id>/`](../../skills)のmoduleと`skill/`、外部sourceは[`skills/plugins/module.nix`](../../skills/plugins/module.nix)の採用表。依存metadataとcallerのroutingを同時に変える | Skill renderingとrequired Capabilityのcheck |
 | 外部Skillを採用し、同IDの供給元を差し替える | 採用moduleのregistry.sourceと明示的なoverride。source内の任意directoryを直接指し、原名のID、本文、reference、scriptを変換しない | `skill-source-contract`、`skill-frontmatter-contract`、`skill-capability-gating` |
-| Orca、architecture-standard、Matt、Chrome DevTools、.NET、Modern Web guidanceのsource版を更新する | [`flake.nix`](../../flake.nix)の該当inputと[`flake.lock`](../../flake.lock)。Chrome DevToolsはruntimeとSkillを同梱したnpm archive URL、他はGit revisionを固定する。採用pathと依存、guide資材の公開は[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分と`verify`、`verify-push`を確認し、承認後に`dotfiles-rebuild` |
+| Orca、architecture-standard、Matt、.NET、Modern Web guidanceのsource版を更新する | [`flake.nix`](../../flake.nix)の該当inputと[`flake.lock`](../../flake.lock)でGit revisionを固定する。採用pathと依存、guide資材の公開は[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | 上流の本文、資材、license、依存の差分と`verify`、`verify-push`を確認し、承認後に`dotfiles-rebuild` |
+| Chrome DevToolsのruntimeと同梱Skillの版を更新する | [`flake.nix`](../../flake.nix)の`chromeDevtoolsMcp` archive URLと[`flake.lock`](../../flake.lock)、[`package-lock.json`](../../capabilities/browser-diagnostics/chrome-devtools/mcp/package/package-lock.json)、[`package.nix`](../../capabilities/browser-diagnostics/chrome-devtools/mcp/package.nix)の`npmDepsHash`。採用Skillのpathは[`skills/plugins/module.nix`](../../skills/plugins/module.nix) | archiveと依存lockを同じ版へ更新し、package buildと採用Skillの契約を確認する。runtimeはCapabilityがflake inputを直接参照し、Skill registryを経由しない |
 | repository横断制約を変える | [`checks/checks/`](../../checks/checks)と[`checks/impl/`](../../checks/impl) | 変更したcheckを意図的に失敗させてから戻す |
 
 ## Runtime observationと生成artifact
@@ -74,7 +75,7 @@
 | application backend、endpoint、volumeを変える | 対応するCapability内のbackend/server/database unit | Capability固有check、`dotfiles-doctor` |
 | hostでcontainer applicationを有効化・無効化する | [`profiles/hosts/`](../../profiles/hosts)の`dotfiles.capabilities.enabled`。container名ではなく所有するCapability IDを選ぶ | `container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
 | upstream OCI imageを更新する | 常駐applicationはCapability実装の`dotfiles.platform.containers.services.<name>.images`、必要時だけ使うsandboxは`dotfiles.platform.containers.runtimeImages`のdigest固定参照 | imageを選択した対象hostで、checkoutから`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status`または`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages`を実行し、適用後は同hostの`dotfiles-sync-images`と`dotfiles-rebuild`を使う |
-| 固定packageのhashを更新する | 対応するCapabilityの`package.nix` | `nix store prefetch-file --hash-type sha256 --json <url>`、`verify`、`verify-push` |
+| Capability実装が取得するpackageのhashを更新する | 対応するCapabilityの`package.nix`。flake inputのarchive hashは[`flake.lock`](../../flake.lock) | `nix store prefetch-file --hash-type sha256 --json <url>`、`verify`、`verify-push` |
 
 ## Secretとidentity
 

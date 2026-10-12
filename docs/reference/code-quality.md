@@ -88,7 +88,11 @@ dotfiles-sonarqube-scan --cwd <absolute-project-root> --project-key <approved-ke
 実 upstream scanner の診断は stderr、receipt path と scanner exit は stdout の JSON に返る。
 wrapper は token を process environment にだけ渡し、debug/verbose を無効にし、診断に raw token が含まれた場合は伏せる。
 scan receipt と `report-task.txt` は user の private state directory に置き、credential は書かない。
-receipt の `scanner_return_code` は native process の return code、`scanner_exit_code` は signal を `128 + signal` に変換した CLI の終了値である。
+receipt の `scanner_return_code` は native process の return code、`scanner_exit_code` は wrapper を含む CLI の終了値である。
+native process だけが signal で終了した場合は、その signal を `128 + signal` へ変換する。
+wrapper の TERM/INT 中断では native process group を TERM、必要なら KILL で停止して回収した後、`wrapper_cancel_signal` と native return code を receipt に保存し、CLI は `128 + wrapper_cancel_signal` で終了する。
+中断後の TERM/INT は回収と receipt の保存を再中断しない。
+入力 file の観測に失敗した場合は fingerprint と観測間の同一性を不明とし、失敗種別を記録するが、開始済み scan の native exit と CE task を失わない。
 CLI の `--wait` は upstream の Compute Engine/gate 待機を有効にし、失敗を同じ非zeroで伝える。
 scan の upload と解析処理の完了は別であり、待機しない場合は同じ CE task が `SUCCESS` になるまで保存済み結果を今回の解析とは呼ばない。
 

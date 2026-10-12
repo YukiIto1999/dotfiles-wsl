@@ -13,10 +13,23 @@ from uuid import uuid4
 
 
 def timestamp():
+    """UTC observation time for evidence provenance
+
+    Returns:
+        ISO 8601 timestamp
+    """
     return datetime.now(timezone.utc).isoformat()
 
 
 def git_output(root, *arguments):
+    """Repository metadata with explicit command-failure absence
+
+    Args:
+        root: Repository working directory
+        arguments: Git subcommand arguments
+    Returns:
+        Raw stdout on success or None on nonzero exit
+    """
     result = subprocess.run(
         ["git", "-C", str(root), *arguments], capture_output=True, check=False
     )
@@ -24,31 +37,54 @@ def git_output(root, *arguments):
 
 
 def observe_input(root):
+    """Content observation without a current-analysis guarantee
+
+    Args:
+        root: Repository source root
+    Returns:
+        Revision metadata with a scoped fingerprint or explicit unknown values
+    """
     revision = git_output(root, "rev-parse", "HEAD")
     paths = git_output(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
     status = git_output(root, "status", "--porcelain=v1", "-z", "--untracked-files=all")
     if revision is None or paths is None or status is None:
         return {"git_revision": None, "dirty": None, "fingerprint": None}
-    digest = hashlib.sha256()
-    for relative in sorted(set(paths.split(b"\0")) - {b""}):
-        path = root / os.fsdecode(relative)
-        digest.update(relative + b"\0")
-        if path.is_symlink():
-            digest.update(b"link\0" + os.fsencode(os.readlink(path)))
-        elif path.is_file():
-            with path.open("rb") as source:
-                digest.update(b"file\0" + hashlib.file_digest(source, "sha256").digest())
-        else:
-            digest.update(b"absent\0")
-    return {
+    observed = {
         "git_revision": revision.decode().strip(),
         "dirty": bool(status),
-        "fingerprint": "sha256:" + digest.hexdigest(),
+        "fingerprint": None,
         "fingerprint_scope": "Git tracked and non-ignored untracked files; symlinks hashed as links",
     }
+    digest = hashlib.sha256()
+    try:
+        for relative in sorted(set(paths.split(b"\0")) - {b""}):
+            path = root / os.fsdecode(relative)
+            digest.update(relative + b"\0")
+            if path.is_symlink():
+                digest.update(b"link\0" + os.fsencode(os.readlink(path)))
+            elif path.is_file():
+                with path.open("rb") as source:
+                    digest.update(b"file\0" + hashlib.file_digest(source, "sha256").digest())
+            else:
+                digest.update(b"absent\0")
+    except OSError as error:
+        observed["observation_error"] = type(error).__name__
+    else:
+        observed["fingerprint"] = "sha256:" + digest.hexdigest()
+    return observed
 
 
 def run_scan(arguments):
+    """Authorized native scan with private execution evidence
+
+    Args:
+        arguments: Parsed CLI configuration with a source-external token file
+    Returns:
+        CLI exit code after native process collection and receipt output
+    Raises:
+        OSError: Unavailable setup or receipt storage
+        ValueError: Invalid project configuration or credential placement
+    """
     root = Path(arguments.cwd).resolve(strict=True)
     if not (root / "sonar-project.properties").is_file():
         raise ValueError("project-owned sonar-project.properties is required")
@@ -101,11 +137,13 @@ def run_scan(arguments):
         stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
         start_new_session=True,
     )
+    wrapper_error = None
     try:
         for line in process.stdout:
             sys.stderr.write(line.replace(token, "[REDACTED]"))
         native_return_code = process.wait()
-    except BaseException:
+    except BaseException as error:
+        signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
         try:
@@ -114,21 +152,39 @@ def run_scan(arguments):
             pass
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
-        raise
+        native_return_code = process.wait()
+        wrapper_error = error
     exit_code = native_return_code if native_return_code >= 0 else 128 - native_return_code
+    cancel_signal = None
+    if isinstance(wrapper_error, SystemExit):
+        exit_code = wrapper_error.code
+        cancel_signal = exit_code - 128
+    elif isinstance(wrapper_error, KeyboardInterrupt):
+        cancel_signal = signal.SIGINT
+        exit_code = 128 + cancel_signal
+    elif wrapper_error is not None:
+        exit_code = 1
     after = observe_input(root)
     receipt.update({
         "scan_finished_at": timestamp(),
         "scanner_exit_code": exit_code,
         "scanner_return_code": native_return_code,
         "input_after": after,
-        "input_unchanged_at_observations": before == after if before["fingerprint"] else None,
+        "input_unchanged_at_observations": (
+            before == after if before["fingerprint"] and after["fingerprint"] else None
+        ),
     })
-    if report.is_file():
-        receipt["report_task"] = dict(
-            line.split("=", 1) for line in report.read_text().splitlines() if "=" in line
-        )
+    if cancel_signal is not None:
+        receipt["wrapper_cancel_signal"] = int(cancel_signal)
+    elif wrapper_error is not None:
+        receipt["wrapper_error"] = type(wrapper_error).__name__
+    try:
+        if report.is_file():
+            receipt["report_task"] = dict(
+                line.split("=", 1) for line in report.read_text().splitlines() if "=" in line
+            )
+    except OSError as error:
+        receipt["report_task_error"] = type(error).__name__
     receipt_path = run_directory / "scan.json"
     receipt_path.write_text(json.dumps(receipt, ensure_ascii=True, indent=2) + "\n")
     print(json.dumps({"receipt": str(receipt_path), "scanner_exit_code": exit_code}))
@@ -136,10 +192,24 @@ def run_scan(arguments):
 
 
 def terminate_scan(signal_number, _frame):
+    """First cancellation with protection against repeated cleanup interruption
+
+    Args:
+        signal_number: TERM or INT cancellation signal
+        _frame: Interrupted Python execution frame
+    Raises:
+        SystemExit: Conventional cancellation exit code
+    """
+    signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
     raise SystemExit(128 + signal_number)
 
 
 def main():
+    """CLI boundary for authorized project analysis
+
+    Returns:
+        Native scan outcome or setup failure exit code
+    """
     parser = argparse.ArgumentParser(
         description="Run upstream SonarScanner CLI with a project token file and input receipt. "
                     "Use the build-specific upstream scanner for Maven, Gradle, and .NET."
@@ -153,6 +223,7 @@ def main():
     parser.add_argument("--wait", action="store_true", help="wait for processing and fail on a failing quality gate")
     arguments = parser.parse_args()
     signal.signal(signal.SIGTERM, terminate_scan)
+    signal.signal(signal.SIGINT, terminate_scan)
     try:
         return run_scan(arguments)
     except (OSError, ValueError):

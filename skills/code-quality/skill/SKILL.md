@@ -59,7 +59,10 @@ dotfiles-sonarqube-scan --cwd <absolute-project-root> --project-key <approved-ke
 ```
 
 この command は実 upstream SonarScanner CLI を起動し、非機密 receipt の path と scanner exit を stdout に返す。
-receipt は開始/終了時刻、Git revision と dirty 状態、観測した入力 fingerprint、run ID、`report-task.txt` の CE task ID を持つ。
+receipt は開始/終了時刻、Git revision と dirty 状態、観測した入力 fingerprint、run ID を持ち、native `report-task.txt` が得られた場合は CE task ID を保存する。
+receipt の native return code と CLI exit を区別し、中断時は `wrapper_cancel_signal` を記録する。
+TERM/INT の中断後も native process group の回収と receipt の保存を完了し、中断を解析完了や gate の合格へ読み替えない。
+入力観測や task metadata が得られない場合は不明とし、開始済み scan の終了証拠は保持する。
 `--wait` は upstream scanner に処理と gate の待機を要求し、gate の失敗を非zeroで伝える。通常取得のために全 project の gate を強制しない。
 upload の成功と analysis complete を分け、待機しない scan では Background Tasks の同じ CE task が `SUCCESS` になったことを確認してから結果へ進む。
 CE task の analysis ID と、解析日時・run ID を receipt に対応付けてから MCP で gate/issues を取得する。

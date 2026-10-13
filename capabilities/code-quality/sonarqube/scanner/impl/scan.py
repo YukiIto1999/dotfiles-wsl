@@ -132,18 +132,52 @@ def run_scan(arguments):
         "-Dsonar.qualitygate.wait=" + str(arguments.wait).lower(),
     ]
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-    process = subprocess.Popen(
-        command, cwd=root, env=environment, stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
-        start_new_session=True,
-    )
+    process = None
+    cancel_signal = None
+    exit_code = None
     wrapper_error = None
+
+    def cancel_started_run(signal_number, frame):
+        """First run cancellation without interruption of finished-scan evidence
+
+        Args:
+            signal_number: TERM or INT cancellation signal
+            frame: Interrupted Python execution frame
+        Returns:
+            None outside interruptible native execution
+        Raises:
+            SystemExit: Owned active native scan cancellation outside cleanup
+        """
+        nonlocal cancel_signal, exit_code
+        if cancel_signal is not None:
+            return
+        cancel_signal = signal_number
+        exit_code = 128 + signal_number
+        receipt["wrapper_cancel_signal"] = int(signal_number)
+        receipt["scanner_exit_code"] = exit_code
+        if process is not None:
+            signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
+            if process.returncode is None and wrapper_error is None:
+                terminate_scan(signal_number, frame)
+
+    signal.signal(signal.SIGTERM, cancel_started_run)
+    signal.signal(signal.SIGINT, cancel_started_run)
     try:
+        process = subprocess.Popen(
+            command, cwd=root, env=environment, stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+            start_new_session=True,
+        )
+        if cancel_signal is not None:
+            terminate_scan(cancel_signal, None)
         for line in process.stdout:
             sys.stderr.write(line.replace(token, "[REDACTED]"))
         native_return_code = process.wait()
     except BaseException as error:
-        signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
+        wrapper_error = error
+        if process is None:
+            raise
+        cleanup_mask = signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGTERM)
         try:
@@ -153,10 +187,12 @@ def run_scan(arguments):
         with suppress(ProcessLookupError):
             os.killpg(process.pid, signal.SIGKILL)
         native_return_code = process.wait()
-        wrapper_error = error
+        signal.pthread_sigmask(signal.SIG_SETMASK, cleanup_mask)
+    after = observe_input(root)
     exit_code = native_return_code if native_return_code >= 0 else 128 - native_return_code
-    cancel_signal = None
-    if isinstance(wrapper_error, SystemExit):
+    if cancel_signal is not None:
+        exit_code = 128 + cancel_signal
+    elif isinstance(wrapper_error, SystemExit):
         exit_code = wrapper_error.code
         cancel_signal = exit_code - 128
     elif isinstance(wrapper_error, KeyboardInterrupt):
@@ -164,7 +200,6 @@ def run_scan(arguments):
         exit_code = 128 + cancel_signal
     elif wrapper_error is not None:
         exit_code = 1
-    after = observe_input(root)
     receipt.update({
         "scan_finished_at": timestamp(),
         "scanner_exit_code": exit_code,
@@ -186,7 +221,16 @@ def run_scan(arguments):
     except OSError as error:
         receipt["report_task_error"] = type(error).__name__
     receipt_path = run_directory / "scan.json"
-    receipt_path.write_text(json.dumps(receipt, ensure_ascii=True, indent=2) + "\n")
+    # 保存中の初回中断が失われるため単一writeでのreceipt公開は不可
+    previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
+    written_exit = exit_code
+    try:
+        receipt_path.write_text(json.dumps(receipt, ensure_ascii=True, indent=2) + "\n")
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
+    signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
+    if written_exit != exit_code:
+        receipt_path.write_text(json.dumps(receipt, ensure_ascii=True, indent=2) + "\n")
     print(json.dumps({"receipt": str(receipt_path), "scanner_exit_code": exit_code}))
     return exit_code
 

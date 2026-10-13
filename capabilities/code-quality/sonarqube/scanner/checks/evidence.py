@@ -3,6 +3,7 @@ import os
 from contextlib import suppress
 from pathlib import Path
 import selectors
+import shutil
 import signal
 import subprocess
 import sys
@@ -34,7 +35,7 @@ class ScanEvidence(unittest.TestCase):
         for arguments in [
             ["init", "-q"],
             ["add", "."],
-            ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture"],
+            ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "test: 解析fixtureの作成"],
         ]:
             subprocess.run(["git", "-C", str(self.root), *arguments], check=True)
         self.token = base / "token"
@@ -58,6 +59,8 @@ class ScanEvidence(unittest.TestCase):
             "        signal.pause()\n"
             "if os.environ.get('SCANNER_SIGNAL'):\n"
             "    os.kill(os.getpid(), int(os.environ['SCANNER_SIGNAL']))\n"
+            "if os.environ.get('POST_SCAN_MARKER'):\n"
+            "    pathlib.Path(os.environ['POST_SCAN_MARKER']).write_text('native finished')\n"
             "sys.exit(int(os.environ.get('SCANNER_EXIT', '0')))\n"
         )
         self.upstream.chmod(0o700)
@@ -118,6 +121,43 @@ class ScanEvidence(unittest.TestCase):
                 self.assertTrue(chunk, "wrapper ended before native fixture became ready")
                 output += chunk
 
+    def collect_process(self, process):
+        """Fixture process collection independent of public readiness delivery
+
+        Args:
+            self: Current regression fixture
+            process: Owned wrapper with single-process native or Git fixtures
+        Returns:
+            None after owned process termination
+        """
+        children = []
+        if process.poll() is None:
+            with suppress(FileNotFoundError):
+                for pid in Path(f"/proc/{process.pid}/task/{process.pid}/children").read_text().split():
+                    with suppress(ProcessLookupError):
+                        children.append(os.pidfd_open(int(pid)))
+            with suppress(ProcessLookupError):
+                process.terminate()
+        try:
+            process.communicate(timeout=15)
+        except subprocess.TimeoutExpired:
+            for descriptor in children:
+                with suppress(ProcessLookupError):
+                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=5)
+        finally:
+            for descriptor in children:
+                try:
+                    with suppress(ProcessLookupError):
+                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                    with selectors.DefaultSelector() as selector:
+                        selector.register(descriptor, selectors.EVENT_READ)
+                        self.assertTrue(selector.select(5), "owned fixture child did not terminate")
+                finally:
+                    os.close(descriptor)
+
     def test_failed_scan_retains_failure_without_printing_token(self):
         """Failed native execution with private token-free evidence
 
@@ -175,12 +215,7 @@ class ScanEvidence(unittest.TestCase):
             self.assertEqual(evidence["report_task"]["ceTaskId"], "fixture-task")
             self.assertFalse(Path(f"/proc/{native_pid}").exists())
         finally:
-            if native_pid is not None:
-                with suppress(ProcessLookupError):
-                    os.killpg(native_pid, signal.SIGKILL)
-            if process.poll() is None:
-                process.kill()
-            process.communicate(timeout=5)
+            self.collect_process(process)
 
     def test_repeated_wrapper_cancellation_reaps_unresponsive_native_process(self):
         """Repeated cancellation without an orphaned unresponsive native process
@@ -215,12 +250,7 @@ class ScanEvidence(unittest.TestCase):
             self.assertEqual(evidence["scanner_return_code"], -signal.SIGKILL)
             self.assertEqual(evidence["report_task"]["ceTaskId"], "fixture-task")
         finally:
-            if native_pid is not None:
-                with suppress(ProcessLookupError):
-                    os.killpg(native_pid, signal.SIGKILL)
-            if process.poll() is None:
-                process.kill()
-            process.communicate(timeout=5)
+            self.collect_process(process)
             os.close(descriptor)
 
     def test_unreadable_post_scan_input_preserves_native_failure_and_task(self):
@@ -256,6 +286,102 @@ class ScanEvidence(unittest.TestCase):
         self.assertNotEqual(evidence["input_before"]["fingerprint"], evidence["input_after"]["fingerprint"])
         self.assertFalse(evidence["input_unchanged_at_observations"])
         self.assertEqual(evidence["current_applicability"], "unassessed")
+
+    def test_first_receipt_write_cancellation_retains_exit_and_task(self):
+        """Deferred cancellation during receipt storage without evidence loss
+
+        Args:
+            self: Current regression fixture
+        Returns:
+            None
+        """
+        site = Path(self.directory.name) / "site"
+        site.mkdir()
+        (site / "sitecustomize.py").write_text(
+            "import os, pathlib, signal\n"
+            "original_write = pathlib.Path.write_text\n"
+            "delivered = False\n"
+            "def write_with_cancel(path, data, *arguments, **keywords):\n"
+            "    \"\"\"One receipt-storage cancellation before the real file write\n"
+            "\n"
+            "    Args:\n"
+            "        path: Native text-write receiver\n"
+            "        data: Text content for the real write\n"
+            "        arguments: Positional text-write options\n"
+            "        keywords: Named text-write options\n"
+            "    Returns:\n"
+            "        Character count from the real file write\n"
+            "    \"\"\"\n"
+            "    global delivered\n"
+            "    if path.name == 'scan.json' and not delivered:\n"
+            "        delivered = True\n"
+            "        os.kill(os.getpid(), signal.SIGTERM)\n"
+            "    return original_write(path, data, *arguments, **keywords)\n"
+            "pathlib.Path.write_text = write_with_cancel\n"
+        )
+        result = self.scan(PYTHONPATH=str(site), SCANNER_EXIT="23")
+        self.assertEqual(result.returncode, 128 + signal.SIGTERM)
+        evidence = json.loads(Path(json.loads(result.stdout)["receipt"]).read_text())
+        self.assertEqual(evidence["wrapper_cancel_signal"], signal.SIGTERM)
+        self.assertEqual(evidence["scanner_return_code"], 23)
+        self.assertEqual(evidence["report_task"]["ceTaskId"], "fixture-task")
+
+    def test_first_post_native_cancellation_retains_exit_and_task(self):
+        """Post-native cancellation with evidence after deferred input observation
+
+        Args:
+            self: Current regression fixture
+        Returns:
+            None
+        """
+        base = Path(self.directory.name)
+        ready = base / "observation-ready"
+        release = base / "observation-release"
+        for fifo in (ready, release):
+            os.mkfifo(fifo, 0o600)
+        ready_descriptor = os.open(ready, os.O_RDONLY | os.O_NONBLOCK)
+        release_descriptor = os.open(release, os.O_RDWR | os.O_NONBLOCK)
+        shim_directory = base / "git-shim"
+        shim_directory.mkdir()
+        shim = shim_directory / "git"
+        shim.write_text(
+            "#!" + sys.executable + "\n"
+            "import os, pathlib, sys\n"
+            "if 'status' in sys.argv and pathlib.Path(os.environ['POST_SCAN_MARKER']).exists():\n"
+            "    release = os.open(os.environ['OBSERVATION_RELEASE'], os.O_RDWR)\n"
+            "    pathlib.Path(os.environ['OBSERVATION_READY']).write_text('ready')\n"
+            "    os.read(release, 4096)\n"
+            "os.execv(" + repr(shutil.which("git")) + ", [" + repr(shutil.which("git")) + ", *sys.argv[1:]])\n"
+        )
+        shim.chmod(0o700)
+        process = subprocess.Popen(
+            self.scan_argv(),
+            env={
+                **self.environment, "PATH": str(shim_directory) + ":" + self.environment["PATH"],
+                "POST_SCAN_MARKER": str(base / "native-finished"), "SCANNER_EXIT": "23",
+                "OBSERVATION_READY": str(ready), "OBSERVATION_RELEASE": str(release),
+            },
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,
+        )
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(ready_descriptor, selectors.EVENT_READ)
+                self.assertTrue(selector.select(5), "post-native observation did not start")
+                os.read(ready_descriptor, 4096)
+            process.send_signal(signal.SIGTERM)
+            with suppress(ProcessLookupError):
+                process.send_signal(signal.SIGTERM)
+            os.write(release_descriptor, b"continue")
+            stdout, _ = process.communicate(timeout=15)
+            self.assertEqual(process.returncode, 128 + signal.SIGTERM)
+            evidence = json.loads(Path(json.loads(stdout)["receipt"]).read_text())
+            self.assertEqual(evidence["wrapper_cancel_signal"], signal.SIGTERM)
+            self.assertEqual(evidence["scanner_return_code"], 23)
+            self.assertEqual(evidence["report_task"]["ceTaskId"], "fixture-task")
+        finally:
+            self.collect_process(process)
+            os.close(ready_descriptor)
+            os.close(release_descriptor)
 
     def test_credential_inside_analyzed_source_is_rejected(self):
         """Source-contained credential rejection before native execution

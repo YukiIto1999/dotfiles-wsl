@@ -1,6 +1,6 @@
 import json
 import os
-from contextlib import suppress
+from contextlib import ExitStack, suppress
 from pathlib import Path
 import selectors
 import shutil
@@ -126,37 +126,60 @@ class ScanEvidence(unittest.TestCase):
 
         Args:
             self: Current regression fixture
-            process: Owned wrapper with single-process native or Git fixtures
+            process: Owned wrapper for bounded-output single-process fixtures
         Returns:
             None after owned process termination
+        Raises:
+            OSError: Unavailable process handle or ownership observation
+            subprocess.TimeoutExpired: Wrapper termination beyond bounded recovery
+            AssertionError: Unconfirmed owned child termination
         """
-        children = []
-        if process.poll() is None:
-            with suppress(FileNotFoundError):
-                for pid in Path(f"/proc/{process.pid}/task/{process.pid}/children").read_text().split():
-                    with suppress(ProcessLookupError):
-                        children.append(os.pidfd_open(int(pid)))
+        def stop_owned_child(descriptor):
+            """Pinned owned child termination before handle release
+
+            Args:
+                descriptor: Verified child pidfd
+            Returns:
+                None after child termination
+            Raises:
+                AssertionError: Missing termination within five seconds
+                OSError: Unavailable child signalling or completion observation
+            """
             with suppress(ProcessLookupError):
-                process.terminate()
-        try:
-            process.communicate(timeout=15)
-        except subprocess.TimeoutExpired:
-            for descriptor in children:
-                with suppress(ProcessLookupError):
-                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
-            if process.poll() is None:
-                process.kill()
-            process.communicate(timeout=5)
-        finally:
-            for descriptor in children:
-                try:
+                signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+            with selectors.DefaultSelector() as selector:
+                selector.register(descriptor, selectors.EVENT_READ)
+                self.assertTrue(selector.select(5), "owned fixture child did not terminate")
+
+        children = []
+        with ExitStack() as resources:
+            for pipe in (process.stdout, process.stderr):
+                if pipe is not None:
+                    resources.callback(pipe.close)
+            try:
+                if process.poll() is None:
+                    with suppress(FileNotFoundError):
+                        for pid in Path(f"/proc/{process.pid}/task/{process.pid}/children").read_text().split():
+                            with suppress(ProcessLookupError):
+                                descriptor = os.pidfd_open(int(pid))
+                                resources.callback(os.close, descriptor)
+                                parent = int(Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[1])
+                                if parent == process.pid:
+                                    children.append(descriptor)
+                                    resources.callback(stop_owned_child, descriptor)
+            finally:
+                if process.poll() is None:
                     with suppress(ProcessLookupError):
-                        signal.pidfd_send_signal(descriptor, signal.SIGKILL)
-                    with selectors.DefaultSelector() as selector:
-                        selector.register(descriptor, selectors.EVENT_READ)
-                        self.assertTrue(selector.select(5), "owned fixture child did not terminate")
-                finally:
-                    os.close(descriptor)
+                        process.terminate()
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    for descriptor in children:
+                        with suppress(ProcessLookupError):
+                            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait(timeout=5)
 
     def test_failed_scan_retains_failure_without_printing_token(self):
         """Failed native execution with private token-free evidence
@@ -250,8 +273,10 @@ class ScanEvidence(unittest.TestCase):
             self.assertEqual(evidence["scanner_return_code"], -signal.SIGKILL)
             self.assertEqual(evidence["report_task"]["ceTaskId"], "fixture-task")
         finally:
-            self.collect_process(process)
-            os.close(descriptor)
+            try:
+                self.collect_process(process)
+            finally:
+                os.close(descriptor)
 
     def test_unreadable_post_scan_input_preserves_native_failure_and_task(self):
         """Unknown post-scan input without native failure or task evidence loss
@@ -379,9 +404,13 @@ class ScanEvidence(unittest.TestCase):
             self.assertEqual(evidence["scanner_return_code"], 23)
             self.assertEqual(evidence["report_task"]["ceTaskId"], "fixture-task")
         finally:
-            self.collect_process(process)
-            os.close(ready_descriptor)
-            os.close(release_descriptor)
+            try:
+                self.collect_process(process)
+            finally:
+                try:
+                    os.close(ready_descriptor)
+                finally:
+                    os.close(release_descriptor)
 
     def test_credential_inside_analyzed_source_is_rejected(self):
         """Source-contained credential rejection before native execution

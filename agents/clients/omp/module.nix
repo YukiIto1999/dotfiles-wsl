@@ -59,7 +59,11 @@ let
   hookDirectory = pkgs.runCommandLocal "omp-hooks-pre" { } (
     ''
       mkdir "$out"
-      cp ${./assets/verification-gate.ts} "$out/verification-gate.ts"
+      cp ${
+        pkgs.replaceVars ./assets/verification-gate.ts {
+          gateBinary = lib.getExe cfg.agents.packages.verificationGate;
+        }
+      } "$out/verification-gate.ts"
     ''
     + lib.optionalString projectMemoryEnabled ''
       cp ${

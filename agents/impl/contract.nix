@@ -453,6 +453,12 @@ in
         readOnly = true;
         internal = true;
       };
+      standardRoot = lib.mkOption {
+        type = absolutePathType;
+        readOnly = true;
+        internal = true;
+        description = "現行規範を読む canonical checkout の root。workstation.environmentDir 配下の architecture-standard で、gate と agent policy が同じ値を使う。";
+      };
       cache = lib.mkOption {
         type = types.submodule {
           options = {

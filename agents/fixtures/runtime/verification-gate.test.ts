@@ -174,3 +174,14 @@ test("a gate that outlives its deadline blocks the edit and its descendants stop
   const descendant = await descendantOf(cwd);
   await until(() => !isRunning(descendant), "the descendant to stop");
 }, TEST_TIMEOUT_MS);
+
+test("a hook loaded for one generation keeps its own gate after the next generation's hook loads", async () => {
+  writeFileSync(skillBody, "# ui-design\nShort discipline.\n");
+  const calls = join(home, "next-generation-gate.calls");
+  const next = await load(process.env.NEXT_GENERATION_GATE_HOOK as string);
+  expect(await write(next, "next-session", { path: GUARDED_PATH, content: "x" })).toBeUndefined();
+  const recorded = readFileSync(calls, "utf8");
+  expect(recorded).toContain("hook edit");
+  await expectBlockedForSkill("older-session");
+  expect(readFileSync(calls, "utf8")).toBe(recorded);
+}, TEST_TIMEOUT_MS);

@@ -97,7 +97,8 @@ clientやroutingが使うIDは維持され、本文と資材の供給元だけ�
 採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skillsの固定sourceを使う。
 採用ID、directory path、revision、licenseとroutingの違いは[Skill portfolio](skills.md#直接採用)にまとめる。
 Orcaのlegacy aliasである`linear-tickets`は`orca-linear`とroutingを分けるため採用しない。
-architecture-standardの規範本文は配備済みsourceから読み、`standard-feedback`は`github-resources`を要求する。
+architecture-standardの規範本文は、配備済みsourceでなくpolicyが案内する現行規範rootから読み、配備するのはその運用Skillの実行packageである。
+`standard-feedback`は`github-resources`を要求する。
 
 architecture-standardの運用Skillは、同repositoryの`skills/<id>/`を正本とし、`standard-update`と`standard-audit`も既存の採用表から配備する。
 clientごとの`.claude/skills/`などはadapterの投影先であり、正本の所有先ではない。

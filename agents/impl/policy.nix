@@ -16,6 +16,7 @@ in
       clients,
       dotfilesDir,
       environmentDir,
+      standardRoot,
     }:
     let
       capabilityRows = map (
@@ -72,6 +73,7 @@ in
           heapDiagnosticsPolicy
           dotfilesDir
           environmentDir
+          standardRoot
           ;
       }
       ''
@@ -152,7 +154,8 @@ in
           --subst-var-by projectMemoryPolicy "$projectMemoryPolicy" \
           --subst-var-by heapDiagnosticsPolicy "$heapDiagnosticsPolicy" \
           --subst-var-by dotfilesDir "$dotfilesDir" \
-          --subst-var-by environmentDir "$environmentDir"
+          --subst-var-by environmentDir "$environmentDir" \
+          --subst-var-by standardRoot "$standardRoot"
 
         # marker が残るのは template と生成器の対応が崩れた状態であり、静かに通さない
         if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$out"; then

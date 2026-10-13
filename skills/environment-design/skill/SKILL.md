@@ -18,7 +18,10 @@ description: Routes changes to the agent working environment to their source own
 | 対象project | そのprojectだけの要件、契約、不変条件、標準からの逸脱 | projectが宣言する正本と決定の記録 |
 | memory | 訂正の理由、適用条件、明示的に記憶だけへ残す方針 | `memory` |
 
-環境系repositoryの作業checkoutは、AGENTSのdotfiles節が示すdirectoryの下にある。配備済みのSkillやNix storeにある標準本文は固定した版の読み取り専用copyであり、編集にも現行本文の確認にも使わない。agent-journalはtimerの出力であり、反映先にしない。
+環境系repositoryの作業checkoutは、AGENTSのdotfiles節が示すdirectoryの下にある。
+現行の標準本文は、AGENTSが案内する現行規範rootで読む。
+配備済みのSkillやNix storeにある標準本文は固定した版の読み取り専用copyであり、編集にも現行本文の確認にも使わない。
+agent-journalはtimerの出力であり、反映先にしない。
 
 ## 主張を分ける
 
@@ -81,7 +84,17 @@ commit、push、版更新、check、rebuildは現在の依頼とsessionの許可
 
 dotfiles-wslの変更は、commitして`dotfiles-rebuild`を実行した後に始めたsessionへ届く。
 
-architecture-standardの変更は、標準のcommit、push、dotfilesの`flake.nix`にある`architectureStandard`の版と`flake.lock`の更新、dotfilesの`nix flake check`とcommit、`dotfiles-rebuild`を経て初めて届く。版を上げると、固定していた版以降の標準の改訂もまとめて取り込むため、その範囲を利用者に示す。pushと版の更新は実行直前に利用者へ確認する。版を更新するまでは、配備済みのagentが旧版の標準を適用し続けるため、届いたと報告しない。upstreamの変更も、upstreamでの反映とdotfilesの版の更新を経て届く。
+architecture-standardの変更は、規範本文と、Skill、checker、設定の実行packageで、届く経路が異なる。
+規範本文は、ownerが受け入れてcanonical checkoutへ統合した時点から、現行規範rootを読む新しい読取りに現れる。
+このため`architectureStandard`の版更新と`dotfiles-rebuild`は要らず、固定した版や`flake.lock`を現行本文の確認に使わない。
+運用Skill、checker、設定は、標準のcommitとpush、dotfilesの`flake.lock`の更新、dotfilesの検証とcommit、`dotfiles-rebuild`を経て、新しく始めたsessionへ不変のpackageとして届く。
+版を上げると、固定していた版以降のSkillとcheckerの差分もまとめて取り込むため、その範囲を利用者に示す。
+pushと版の更新は実行直前に利用者へ確認する。
+具体的なgateを埋め込んだhookで開始したsessionは、そのgateと成功して読んだ実行packageのまま動く。
+配備前から動くsessionの旧hookは、この保持の対象にしない。
+更新した本文を配備済みの実行packageが扱えない場合は、配送不足として報告し、旧本文や旧packageの合格を代用しない。
+本文だけが届いた状態と、本文と実行packageの両方が届いた状態を区別して報告する。
+upstreamの変更も、upstreamでの反映とdotfilesの版の更新を経て届く。
 
 ## 止める条件と報告
 

@@ -13,8 +13,9 @@ description: Writes a commit message from the staged diff and repository policy.
 | 件名に書く対象と変化、一つの対象と変化、個人名の禁止 | `principles/documentation/commit-purpose.md` |
 | 件名の文末、句読点、中黒と並列の接続 | `principles/documentation/sentence-endings.md` |
 
-標準本文は、配備済みの`standard-apply` Skillの`SKILL.md`を実体まで辿り、その二段上のdirectoryから読む。
-正本を読めない場合は記憶や過去の履歴で補わず、読めなかったfileを示してmessageを作らない。
+標準本文は、callerが明示した`<standard-root>`、なければAGENTSが案内する現行規範rootから読む。
+配備済みSkillの所在から導いた固定版は使わない。
+正本を読めない場合は記憶や過去の履歴で補わず、読めなかったrootまたはfileを示してmessageを作らない。
 
 ## 手順
 

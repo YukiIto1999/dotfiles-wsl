@@ -154,6 +154,7 @@ let
     capabilities = cfg.capabilities.resolved;
     inherit (agents) clients;
     inherit (cfg.workstation) dotfilesDir environmentDir;
+    inherit (runtimeContract) standardRoot;
   };
 
   normalizeSource =
@@ -405,6 +406,7 @@ let
         inactiveDays = 30;
       };
       sliceUnit = "agents.slice";
+      standardRoot = "${cfg.workstation.environmentDir}/architecture-standard";
       skillRoots = lib.unique (map (name: agents.clients.${name}.skillsDestination) clientNames);
       state = {
         root = "${cfg.workstation.homeDir}/${relativeStateRoot}";
@@ -481,7 +483,12 @@ in
         projectMemoryHooks = config.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
       };
       runtime = {
-        inherit (runtimeContract) timers state skillRoots;
+        inherit (runtimeContract)
+          timers
+          state
+          skillRoots
+          standardRoot
+          ;
         cache = builtins.removeAttrs runtimeContract.cache [ "relativeCacheRoot" ];
       };
       shared = {

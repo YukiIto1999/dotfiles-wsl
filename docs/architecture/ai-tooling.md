@@ -79,6 +79,9 @@ Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skills�
 原版の起動flagも保持し、policy rosterがtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
 consumerはpolicy rosterのraw source絶対pathを`Read`で開き、固定source実体のsibling referenceを利用する。
+architecture-standardの規範本文は、固定sourceからでなく、policyが案内する現行規範root（`dotfiles.agents.runtime.standardRoot`）から読む。
+同梱のreferenceとscriptは成功してReadした`SKILL.md`の実体のdirectoryから、規範文書のlinkは現行規範rootから解決する。
+固定sourceの標準本文、Git revision、`flake.lock`は実行packageの出典であり、現行規範の根拠にしない。
 片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
 Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
 外部Skillのraw directoryを配ることと、同梱scriptの実行依存を供給することは別の契約である。
@@ -134,6 +137,9 @@ wrapperの生存はPID、boot ID、processの開始時刻で照合するため�
 OMP hook は write の本文と read の全文を JSON に含めたまま gate の stdin へ送り、read の証明を照合する Node process へも pipe で渡す。
 argv に本文を載せないため、1 引数や argv 全体の容量制限で検証前に失敗しない。
 20 秒の期限または中断では gate の process group 全体を停止し、編集や終了を拒否する。
+OMPのhookは、配備時に`@gateBinary@`を`dotfiles.agents.packages.verificationGate`のstore executableへ置換し、各callで`/run/current-system`を再解決しない。
+具体的なstore executableを埋め込んだhookで開始したsessionは、generationを切り替えてもそのgateと成功して読んだ物理sourceのまま動き、新しいgateと実行packageは新しく始めたsessionへ届く。
+この配備より前に読み込まれ、`/run/current-system`を参照するhookは、呼出しごとに現在のgenerationのgateへ解決されるため、旧gateの保持を主張しない。
 編集対象はsymlinkと`..`を解決したpathで判定する。
 agent runtimeが割り当てた`~/.cache/dotfiles-wsl/sessions/<session>/tmp`の内側にあり、祖先にGit metadataを持たない一時fileは対象から外す。
 割当ての確認には、canonical pathの`<session>`と`DOTFILES_AGENT_SESSION_ID`の一致に加え、同じsession directoryの`metadata.json`が実fileであり、`version`が1、`session_id`が`<session>`と一致することを要求する。
@@ -147,9 +153,14 @@ metadataを持たない手作りのdirectory、別sessionの識別情報、不�
 
 `standard-conformance`のcanonical本文を成功した読取eventで読んだsessionは、監査完了の確認が済むまで終了できない。
 `standard-apply`だけの読取や管理者の`learned`操作から、この監査義務を推定しない。
-`dotfiles-agent-gate conformance --session ID --repo PROJECT --standard-root ROOT --report REPORT`は、成功read時に記録したcanonical `SKILL.md`の物理pathの三段上を正本rootとし、現在の配備先と指定ROOTの物理pathとの一致を要求する。
-同じ物理rootを指すsymlinkは受理するが、同じSkill本文をコピーした別の正本束は受理しない。
-現在のSkill本文hashも照合してから、この正本束に含まれる実際のcoverage checkerをNodeで実行する。
+`dotfiles-agent-gate standard-root`は、compiled configurationが持つ信頼された現行規範rootを出力する。
+環境変数やproject内の写しで、このrootを置き換えない。
+`dotfiles-agent-gate conformance --session ID --repo PROJECT --standard-root ROOT --report REPORT`は、規範rootと実行packageを別々に検証する。
+ROOTは信頼された現行規範rootと物理pathが一致しなければならず、同じ物理rootを指すsymlinkは受理するが、同じ本文をコピーした別のrootは受理しない。
+実行packageは、成功read時に記録した`SKILL.md`のsymlink実体のdirectoryである。
+現在のSkill本文hashを照合してから、そのpackageの`scripts/check-coverage.mjs`をNodeで実行し、`--standard-root`へ現行規範rootを渡す。
+規範本文だけが更新された場合は、保存済みのinventoryとreceiptが失効し、実行packageは変わらず識別されたまま使われる。
+更新後の規範本文をそのpackageのcheckerが扱えない場合は、配送不足として失敗し、旧本文でPASSを作らない。
 報告は対象Git checkoutの外に置き、baselineの正本は対象projectのrootを表す`PROJECT`の下の`PROJECT/docs/conformance-baseline.json`とする。
 checkerがexit 0で`PASS`か`WARN`を返した場合だけ、観測した標準とprojectのdigest、報告とcheckerのhash、各pathをsessionのreceiptへ保存する。
 終了時は現在のinventoryとこれらのhashを照合し、同じ木の`check`を重複実行せずに、確認の欠落や後の変更を拒否する。
@@ -158,7 +169,8 @@ checkerがexit 0で`PASS`か`WARN`を返した場合だけ、観測した標準�
 OMPのgate起動例外は説明付きの非ゼロ結果となり、編集前とsession終了時の判定はgateが起動しない場合も処理を止める。
 読取後の記録、編集後のrepository登録、shell実行後の変更観測は実行済みのtoolを取り消せず、後段hook自体が失敗すると記録が残らないこともある。
 終了時の検証gateが要求するのは、編集を記録したrepository自身が宣言するT1の`verify`入口だけであり、入口を持たないrepositoryには要求しない。
-このgateは通常のhook経路でtoolが返した全文とその鮮度、成功readした配備正本束との一致、文書単位の監査完了を確認するもので、悪意あるagentからの防御、注意や理解、後続compactionでの本文保持、正しい監査対象の選択、証拠やcheckの意味と真偽、標準全体への意味的な適合を保証しない。
+このgateは通常のhook経路でtoolが返した全文とその鮮度、成功readした実行packageと現行規範rootの対応、文書単位の監査完了を確認するもので、悪意あるagentからの防御、注意や理解、後続compactionでの本文保持、正しい監査対象の選択、証拠やcheckの意味と真偽、標準全体への意味的な適合を保証しない。
+`dotfiles-doctor`の配備driftのPASSは配備物の同一性の観測であり、現行規範への適合を示さない。
 
 ## 資源の上限
 

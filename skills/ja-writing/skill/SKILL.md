@@ -18,8 +18,9 @@ AIらしさの判定や人間らしさの演出を目的にしない。
 | 強調の絞り込みと各行の削除テスト | `principles/documentation/minimal-high-signal.md` |
 | 公開するlibraryのREADMEとCHANGELOGの言語 | `principles/documentation/separate-document-types.md` |
 
-標準本文は、配備済みの`standard-apply` Skillの`SKILL.md`を実体まで辿り、その二段上のdirectoryから読む。
-正本を読めない場合は記憶で補わず、読めなかったfileを示して止める。
+標準本文は、callerが明示した`<standard-root>`、なければAGENTSが案内する現行規範rootから読む。
+配備済みSkillの所在から導いた固定版は使わない。
+正本を読めない場合は記憶で補わず、読めなかったrootまたはfileを示して止める。
 
 ## 手順
 

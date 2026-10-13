@@ -15,8 +15,9 @@ description: Decides whether an implementation comment should exist and writes t
 | 削除する変更履歴、作業メモ、TODO、コメントアウトしたcode | `principles/comment/no-history-in-source.md` |
 | 各行の文末と句読点 | `principles/documentation/sentence-endings.md` |
 
-標準本文は、配備済みの`standard-apply` Skillの`SKILL.md`を実体まで辿り、その二段上のdirectoryから読む。
-正本を読めない場合は記憶で補わず、読めなかったfileを示して止める。
+標準本文は、callerが明示した`<standard-root>`、なければAGENTSが案内する現行規範rootから読む。
+配備済みSkillの所在から導いた固定版は使わない。
+正本を読めない場合は記憶で補わず、読めなかったrootまたはfileを示して止める。
 
 reviewだけを依頼された場合は、残す、削除する、codeを直す、正本へ移す、のfindingだけを返す。
 編集が依頼範囲にある場合だけ変更する。

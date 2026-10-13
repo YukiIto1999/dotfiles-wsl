@@ -188,12 +188,16 @@ let
     gate:
     pkgs.runCommandLocal "omp-verification-gate-hook.ts" { } ''
       substitute ${deployedGateHook} $out \
-        --replace-fail /run/current-system/sw/bin/dotfiles-agent-gate ${gate}
+        --replace-fail ${lib.getExe runtime.gate} ${gate}
     '';
   hangingGate = pkgs.writeShellScript "hanging-gate" ''
     ${pkgs.coreutils}/bin/sleep 300 &
     printf '%s\n' "$!" > descendant.pid
     wait
+  '';
+  recordingGate = pkgs.writeShellScript "next-generation-gate" ''
+    printf '%s\n' "$*" >> "$HOME/next-generation-gate.calls"
+    ${pkgs.coreutils}/bin/cat > /dev/null
   '';
   wrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (name: clients.${name}.runtimeWrapperMode == "managed") (
@@ -204,6 +208,7 @@ let
   homeDir = hostConfig.dotfiles.workstation.homeDir;
   runtimeContractSupport = import ./support/runtime-contract.nix {
     inherit homeDir;
+    inherit (hostConfig.dotfiles.workstation) environmentDir;
   };
   inherit (runtimeContractSupport) expectedAgentRuntime runtimePackageContract;
   selectAgentObservations = lib.filterAttrs (name: _: lib.hasPrefix "agents/" name);
@@ -395,15 +400,22 @@ let
   highBytesMutationRuntime = runtimeWithCacheMutation { highBytes = 1; };
   lowBytesMutationRuntime = runtimeWithCacheMutation { lowBytes = 1; };
   inactiveDaysMutationRuntime = runtimeWithCacheMutation { inactiveDays = 1; };
-  runtimeWithRelativeRootMutation =
+  runtimeWithContractUpdate =
     update:
     import ../package.nix {
       inherit lib pkgs verificationEntry;
       runtimeContract = runtimePackageContract // update;
     };
-  relativeCacheRootMutationRuntime = runtimeWithRelativeRootMutation {
+  relativeCacheRootMutationRuntime = runtimeWithContractUpdate {
     cache = runtimePackageContract.cache // {
       relativeCacheRoot = ".cache/dotfiles-wsl-mutated";
+    };
+  };
+  compiledStandardRootLine = root: "compiled_standard_root=${lib.escapeShellArg root}";
+  mutatedStandardRoot = "${expectedAgentRuntime.standardRoot}-mutated";
+  standardRootMutation = expectedRuntimeConfiguration // {
+    runtime = expectedRuntimeConfiguration.runtime // {
+      standardRoot = mutatedStandardRoot;
     };
   };
   packageTreeRequiredPathMutation = agentObservations // {
@@ -524,6 +536,9 @@ in
       && runtime.gc != relativeCacheRootMutationRuntime.gc
       && runtime.verify != relativeCacheRootMutationRuntime.verify
     ) "agent runtime packages ignored a relative cache root mutation";
+    assert lib.assertMsg (
+      !agentRuntimeContractMatches standardRootMutation hostConfig.dotfiles.health.observations
+    ) "agent runtime contract accepted a stale standard root";
     pkgs.runCommandLocal "check-agent-runtime-contract"
       {
         nativeBuildInputs = [ pkgs.gnugrep ];
@@ -545,6 +560,7 @@ in
         grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
         ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
         ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
+
         touch $out
       '';
 
@@ -631,6 +647,7 @@ in
           pkgs.jq
         ];
         GATE = lib.getExe runtime.gate;
+        STANDARD_ROOT_LINE = compiledStandardRootLine expectedAgentRuntime.standardRoot;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
         CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
         UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;
@@ -648,6 +665,7 @@ in
         nativeBuildInputs = [ pkgs.bun ];
         GATE_HOOK = hookUsingGate (lib.getExe runtime.gate);
         HANGING_GATE_HOOK = hookUsingGate hangingGate;
+        NEXT_GENERATION_GATE_HOOK = hookUsingGate recordingGate;
       }
       ''
         export HOME=$PWD/home
@@ -679,6 +697,7 @@ in
         STALLING_VERIFY = lib.getExe stallingVerify;
         SLOW_RESOLUTION_VERIFY = lib.getExe slowResolutionRuntime.verify;
         GATE = lib.getExe runtime.gate;
+        STANDARD_ROOT_LINE = compiledStandardRootLine expectedAgentRuntime.standardRoot;
         CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
         CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
         UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;

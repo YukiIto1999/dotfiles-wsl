@@ -113,6 +113,23 @@ frontendのnative Web APIを選ぶときは、`$HOME/.local/share/dotfiles-agent
 guideの前提とbrowser supportを現projectで確認し、同梱の全frontend強制起動wrapperは呼ばない。
 upstreamの手順や簡潔化の提案によって、指定された要件、安全策、秘密情報の扱い、操作の承認、実行していない検証の報告に関する規律を弱めない。
 
+## 現行規範
+
+architecture-standardの現行規範rootは`@standardRoot@`であり、`dotfiles-agent-gate standard-root`も同じ値を出力する。
+標準本文の読取り、現行規範への適合の判断、`standard-conformance`の`--standard-root`は、このrootの現在の本文を使う。
+callerが別のrootを明示した場合は、そのrootに対する判断として使ったrootを示し、現行規範への適合とは書き分ける。
+
+配備されたSkill、checker、設定のstore実体は、実行する手順の不変な供給物であり、規範の正本ではない。
+Skillの`SKILL.md`を成功してReadした実体のdirectoryを`<skill-package-root>`とし、同梱のreferenceとscriptはそこから解決する。
+規範文書のlinkと標準本文の参照は、`<skill-package-root>`や固定したGit revisionから導かず、現行規範rootから解決する。
+
+Git revision、`flake.lock`、gateのreceiptは、供給物と観測の出典であり、現行規範への適合やownerが受け入れた決定の証拠にならない。
+作業中のcheckoutの未commit差分とbranchは、ownerが受け入れる前の候補として扱う。
+`dotfiles-doctor`の配備driftのPASSは、配備物が宣言したsourceと一致したことだけを示し、現行規範への適合を示さない。
+
+現行規範rootか必要なfileを読めない場合は、見た場所と不足したfileを示して止める。
+store上の写し、記憶、過去のrevisionで補わない。
+
 ## 基盤
 
 ### MCP

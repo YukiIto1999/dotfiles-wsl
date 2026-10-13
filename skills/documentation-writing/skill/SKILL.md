@@ -17,8 +17,9 @@ description: Writes or revises documentation comments for types, functions, meth
 | 言語ごとの記法、タグ、節 | `languages/<言語>/conventions.md` |
 | 言語ごとの機械検査 | `languages/<言語>/inspection.md` |
 
-標準本文は、配備済みの`standard-apply` Skillの`SKILL.md`を実体まで辿り、その二段上のdirectoryから読む。
-正本を読めない場合は記憶で補わず、読めなかったfileを示して止める。
+標準本文は、callerが明示した`<standard-root>`、なければAGENTSが案内する現行規範rootから読む。
+配備済みSkillの所在から導いた固定版は使わない。
+正本を読めない場合は記憶で補わず、読めなかったrootまたはfileを示して止める。
 
 ## 手順
 

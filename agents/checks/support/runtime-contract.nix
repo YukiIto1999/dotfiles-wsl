@@ -1,4 +1,4 @@
-{ homeDir }:
+{ homeDir, environmentDir }:
 
 let
   expectedAgentRuntime = {
@@ -9,6 +9,7 @@ let
       ".omp/agent/skills"
       ".config/opencode/skills"
     ];
+    standardRoot = "${environmentDir}/architecture-standard";
     cache = {
       root = "${homeDir}/.cache/dotfiles-wsl";
       cargoBuildRoot = "${homeDir}/.cache/dotfiles-wsl/cargo-build";

@@ -93,7 +93,9 @@ native process だけが signal で終了した場合は、その signal を `12
 wrapper の TERM/INT 中断では native process group を TERM、必要なら KILL で停止して回収した後、`wrapper_cancel_signal` と native return code を receipt に保存し、CLI は `128 + wrapper_cancel_signal` で終了する。
 中断後の TERM/INT は回収と receipt の保存を再中断しない。
 native終了後の入力観測やreceipt保存中の初回中断も、receiptとstdoutの公開前に終了値へ反映する。
-最終receiptとstdoutの返却を確定点とし、この返却中は再中断せず、二つの終了値を一致させる。
+最終receiptの保存とstdoutの返却を確定点とし、その区間では中断状態を固定して、CLIの実終了値とstdout、receiptの終了値を一致させる。
+中断による終了値がnative由来の終了値と同じ場合も、`wrapper_cancel_signal`を保存する。
+wrapper内の失敗処理と初回中断が競合した場合は、中断signalをCLIの終了値へ反映し、native return codeは別に保存する。
 入力 file の観測に失敗した場合は fingerprint と観測間の同一性を不明とし、失敗種別を記録するが、開始済み scan の native exit と CE task を失わない。
 CLI の `--wait` は upstream の Compute Engine/gate 待機を有効にし、失敗を同じ非zeroで伝える。
 scan の upload と解析処理の完了は別であり、待機しない場合は同じ CE task が `SUCCESS` になるまで保存済み結果を今回の解析とは呼ばない。

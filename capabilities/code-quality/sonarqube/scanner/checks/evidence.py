@@ -319,11 +319,11 @@ class ScanEvidence(unittest.TestCase):
             "    return original_write(path, data, *arguments, **keywords)\n"
             "pathlib.Path.write_text = write_with_cancel\n"
         )
-        result = self.scan(PYTHONPATH=str(site), SCANNER_EXIT="23")
+        result = self.scan(PYTHONPATH=str(site), SCANNER_EXIT=str(128 + signal.SIGTERM))
         self.assertEqual(result.returncode, 128 + signal.SIGTERM)
         evidence = json.loads(Path(json.loads(result.stdout)["receipt"]).read_text())
         self.assertEqual(evidence["wrapper_cancel_signal"], signal.SIGTERM)
-        self.assertEqual(evidence["scanner_return_code"], 23)
+        self.assertEqual(evidence["scanner_return_code"], 128 + signal.SIGTERM)
         self.assertEqual(evidence["report_task"]["ceTaskId"], "fixture-task")
 
     def test_first_post_native_cancellation_retains_exit_and_task(self):

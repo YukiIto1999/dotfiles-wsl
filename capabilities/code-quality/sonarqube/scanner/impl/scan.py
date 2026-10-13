@@ -223,13 +223,16 @@ def run_scan(arguments):
     receipt_path = run_directory / "scan.json"
     # 保存中の初回中断が失われるため単一writeでのreceipt公開は不可
     previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
-    written_exit = exit_code
+    if cancel_signal is not None:
+        exit_code = 128 + cancel_signal
+        receipt["scanner_exit_code"] = exit_code
+    written_cancel_signal = cancel_signal
     try:
         receipt_path.write_text(json.dumps(receipt, ensure_ascii=True, indent=2) + "\n")
     finally:
         signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
     signal.pthread_sigmask(signal.SIG_BLOCK, (signal.SIGTERM, signal.SIGINT))
-    if written_exit != exit_code:
+    if written_cancel_signal != cancel_signal:
         receipt_path.write_text(json.dumps(receipt, ensure_ascii=True, indent=2) + "\n")
     print(json.dumps({"receipt": str(receipt_path), "scanner_exit_code": exit_code}))
     return exit_code

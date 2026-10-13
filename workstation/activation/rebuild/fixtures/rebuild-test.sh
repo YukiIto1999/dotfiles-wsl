@@ -34,7 +34,8 @@ git -C "$REBUILD_CHECKOUT" init -q
 git -C "$REBUILD_CHECKOUT" config user.name 'Rebuild fixture'
 git -C "$REBUILD_CHECKOUT" config user.email 'fixture@example.invalid'
 printf 'initial\n' > "$REBUILD_CHECKOUT/tracked"
-git -C "$REBUILD_CHECKOUT" add tracked
+printf 'lock-1\n' > "$REBUILD_CHECKOUT/flake.lock"
+git -C "$REBUILD_CHECKOUT" add tracked flake.lock
 git -C "$REBUILD_CHECKOUT" commit -qm initial
 
 run_rebuild() {
@@ -76,6 +77,44 @@ grep -Fxq 'plan: switch' "$output"
 assert_no_switch
 run_rebuild 0
 grep -Fxq "nixos-rebuild switch --flake $REBUILD_CHECKOUT#fixture-host" "$REBUILD_CALL_LOG"
+
+checkout_git() { git -C "$REBUILD_CHECKOUT" "$@"; }
+standard_subject='fix: 標準の実行 package の最新版への更新'
+assert_clean_tree() { [[ -z $(checkout_git status --porcelain --untracked-files=no) ]]; }
+
+head_before=$(checkout_git rev-parse HEAD)
+REBUILD_LOCK_NEXT=lock-2 run_rebuild 0 --plan
+grep -Fxq 'nix flake update architectureStandard' "$REBUILD_CALL_LOG"
+grep -Fxq 'plan: switch' "$output"
+assert_no_switch
+[[ $(checkout_git rev-parse HEAD) == "$head_before" ]]
+[[ $(<"$REBUILD_CHECKOUT/flake.lock") == lock-1 ]]
+assert_clean_tree
+
+REBUILD_LOCK_NEXT=lock-2 run_rebuild 0
+[[ $(head -n 1 "$REBUILD_CALL_LOG") == 'nix flake update architectureStandard' ]]
+[[ $(checkout_git log -1 --format=%s) == "$standard_subject" ]]
+[[ $(checkout_git show HEAD:flake.lock) == lock-2 ]]
+assert_clean_tree
+grep -Fxq "nixos-rebuild switch --flake $REBUILD_CHECKOUT#fixture-host" "$REBUILD_CALL_LOG"
+
+head_before=$(checkout_git rev-parse HEAD)
+run_rebuild 0
+[[ $(checkout_git rev-parse HEAD) == "$head_before" ]]
+
+REBUILD_UPDATE_STATUS=1 REBUILD_LOCK_NEXT=lock-3 run_rebuild 0
+grep -Fq 'WARN: could not update the standard input' "$output"
+[[ $(checkout_git rev-parse HEAD) == "$head_before" ]]
+grep -Fxq "nixos-rebuild switch --flake $REBUILD_CHECKOUT#fixture-host" "$REBUILD_CALL_LOG"
+
+printf '#!/bin/sh\nexit 1\n' > "$REBUILD_CHECKOUT/.git/hooks/pre-commit"
+chmod +x "$REBUILD_CHECKOUT/.git/hooks/pre-commit"
+REBUILD_LOCK_NEXT=lock-4 run_rebuild 2
+grep -Fq 'could not record the standard update' "$output"
+assert_no_switch
+[[ $(<"$REBUILD_CHECKOUT/flake.lock") == lock-2 ]]
+assert_clean_tree
+rm -f -- "$REBUILD_CHECKOUT/.git/hooks/pre-commit"
 
 export REBUILD_CANDIDATE=$previous
 run_rebuild 0 --rollback --plan

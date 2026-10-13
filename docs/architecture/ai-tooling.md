@@ -79,9 +79,9 @@ Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skills�
 原版の起動flagも保持し、policy rosterがtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
 consumerはpolicy rosterのraw source絶対pathを`Read`で開き、固定source実体のsibling referenceを利用する。
-architecture-standardの規範本文は、固定sourceからでなく、policyが案内する現行規範root（`dotfiles.agents.runtime.standardRoot`）から読む。
+architecture-standardの規範本文は、配備済みsourceからでなく、policyが案内する現行規範root（`dotfiles.agents.runtime.standardRoot`）から読む。
 同梱のreferenceとscriptは成功してReadした`SKILL.md`の実体のdirectoryから、規範文書のlinkは現行規範rootから解決する。
-固定sourceの標準本文、Git revision、`flake.lock`は実行packageの出典であり、現行規範の根拠にしない。
+配備済みsourceの標準本文、Git revision、`flake.lock`は実行packageの出典であり、現行規範の根拠にしない。
 片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
 Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
 外部Skillのraw directoryを配ることと、同梱scriptの実行依存を供給することは別の契約である。

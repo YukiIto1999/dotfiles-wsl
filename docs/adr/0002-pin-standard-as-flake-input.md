@@ -43,6 +43,7 @@ root または必要な file を読めない場合は不足を返し、固定版
 
 規範本文の改訂は、owner が受け入れて canonical checkout へ統合した時点から次の読取りの基準になり、input の更新を待たない。
 input の更新は `flake.lock` を更新する commit として現れ、どの版の Skill と checker を配備したかを履歴から辿れるが、その版は現行規範の基準ではない。
+その更新は人の操作を待たず、[ADR 0015](0015-follow-the-latest-standard-package-at-rebuild.md) のとおり `dotfiles-rebuild` が最新へ進める。
 更新後の規範本文を配備済みの実行 package が扱えない場合は配送不足として失敗し、旧本文や旧 package で合格にしない。
 具体的な store の gate を埋め込んだ hook で開始した session は、その gate と成功して読んだ実行 package のまま動き、更新後の package は新しい session へ届く。
 この配備より前に始まり `/run/current-system` を参照する hook は、呼出しごとに現在の generation の gate へ解決されるため、保持の対象にならない。

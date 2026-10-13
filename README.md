@@ -65,11 +65,12 @@ Nix unit は `module.nix` を marker にし、build がある場合は `package.
 現行規範のrootは `dotfiles.workstation.environmentDir` の下の `architecture-standard` から導き、`dotfiles.agents.runtime.standardRoot` に公開して、全clientのpolicyと `dotfiles-agent-gate standard-root` が案内する。
 適用は、標準の README の適用の4則と利用の手順に従う。
 
-`flake.nix` の `architectureStandard` input はURLにrevを書かず、`flake.lock` が標準の運用Skill、checker、設定を不変の実行packageとして配備する版を固定する。
+`flake.nix` の `architectureStandard` input はURLにrevを書かず、標準の運用Skill、checker、設定は不変の実行packageとして配備する。
+`dotfiles-rebuild` は build の前にこの input を最新へ更新し、`flake.lock` の更新を commit するため、配備される実行packageは常に標準の最新である。
 URL、`flake.lock` のrevisionと内容hashは実行packageの出典であり、現行規範の正本ではない。
 `dotfiles-doctor` の配備driftのPASSは、配備物の同一性を示すだけで、現行規範への適合を示さない。
 
-採用の判断は [ADR 0001](docs/adr/0001-adopt-architecture-standard.md)、標準本文の参照と配備版の固定の分離は [ADR 0002](docs/adr/0002-pin-standard-as-flake-input.md) に記録する。
+採用の判断は [ADR 0001](docs/adr/0001-adopt-architecture-standard.md)、標準本文の参照と配備版の分離は [ADR 0002](docs/adr/0002-pin-standard-as-flake-input.md)、実行packageの最新への追従は [ADR 0015](docs/adr/0015-follow-the-latest-standard-package-at-rebuild.md) に記録する。
 
 ## ドキュメント
 

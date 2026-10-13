@@ -5,6 +5,8 @@ usage:
 
 Build the committed flake and switch to it, or select the previous system generation
 with --rollback. Both actions check the working tree and the WSL restart requirement.
+A build first updates the architectureStandard input to its latest revision and commits
+flake.lock; with --plan the update is applied to the plan only and then discarded.
 With --plan, print what would change and exit without switching.
 A failed activation can leave the profile and running services in different states;
 inspect the system before retrying or rolling back.
@@ -14,6 +16,30 @@ USAGE
 die() {
   printf 'FATAL: %s\n' "$2" >&2
   exit "$1"
+}
+
+standard_subject='fix: 標準の実行 package の最新版への更新'
+
+# オフラインでも修復の rebuild を通す必要のため更新失敗での停止は不採用
+follow_standard() {
+  local update_log
+  update_log=$(mktemp) || die 2 "could not create a temporary file"
+  if ! nix flake update architectureStandard > "$update_log" 2>&1; then
+    printf 'WARN: could not update the standard input; the executed package stays at the locked revision\n' >&2
+    cat "$update_log" >&2
+    rm -f -- "$update_log"
+    return 0
+  fi
+  rm -f -- "$update_log"
+  [[ -n $(git status --porcelain --untracked-files=no) ]] || return 0
+  if ((plan_only)); then
+    trap 'git restore --source=HEAD --staged --worktree -- flake.lock' EXIT
+    return 0
+  fi
+  if ! { git add -- flake.lock && git commit -q -m "$standard_subject" -- flake.lock; }; then
+    git restore --source=HEAD --staged --worktree -- flake.lock
+    die 2 "could not record the standard update"
+  fi
 }
 
 plan_only=0
@@ -46,6 +72,8 @@ cd "$dotfiles" || die 2 "cannot enter $dotfiles"
 working_tree=$(git status --porcelain --untracked-files=no) ||
   die 2 "could not inspect the working tree"
 [[ -z $working_tree ]] || die 2 "commit the working tree before rebuilding"
+
+((rollback)) || follow_standard
 
 if ((rollback)); then
   generations=$(@sudoCommand@ nix-env --list-generations --profile "$system_profile") ||

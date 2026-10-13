@@ -10,6 +10,13 @@ command_name=${0##*/}
 
 case $command_name in
   nix)
+    if [[ $1 == flake && ${2:-} == update && ${3:-} == architectureStandard ]]; then
+      [[ ${REBUILD_UPDATE_STATUS:-0} == 0 ]] || exit "$REBUILD_UPDATE_STATUS"
+      if [[ -n ${REBUILD_LOCK_NEXT:-} ]]; then
+        printf '%s\n' "$REBUILD_LOCK_NEXT" > flake.lock
+      fi
+      exit 0
+    fi
     [[ $1 == build ]]
     [[ ${REBUILD_BUILD_STATUS:-0} == 0 ]] || exit "$REBUILD_BUILD_STATUS"
     printf '%s\n' "$REBUILD_CANDIDATE"

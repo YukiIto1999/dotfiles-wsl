@@ -23,6 +23,13 @@ stageしただけの変更も未commitであり、検査の失敗もcleanとし�
 WSLのplanは`switch`、`switch-restart`、`boot-restart`、`boot-two-stage`のいずれかである。
 適用は固定したupstreamの`nixos-rebuild switch`へ委譲し、再起動が必要ならWindows側のcommandを表示する。
 
+通常の適用と`--plan`は、buildの前に`nix flake update architectureStandard`で標準の実行packageを最新へ更新する。
+更新する対象は`architectureStandard`だけであり、lockが変わると`flake.lock`だけを`fix: 標準の実行 package の最新版への更新`としてcommitする。
+`--plan`は更新したlockでcandidateを用意し、終了時に`flake.lock`をHEADへ戻す。
+更新を取得できなければ警告を出してlockの版のまま続け、commitを作れなければ`flake.lock`をHEADへ戻してswitch前に終了status 2で止まる。
+rollbackは新しいflakeをbuildしないため更新しない。
+判断は[ADR 0015](../adr/0015-follow-the-latest-standard-package-at-rebuild.md)に記録する。
+
 inputやpackageを更新すると、MCP frontやcontainerを含むserviceがactivationで再起動することがある。
 別のsessionが作業中なら、source更新と検査までを先に済ませ、service切替とWSL再起動はその作業が終わってから実行する。
 
@@ -33,6 +40,8 @@ NixOS、WSL、Home Managerのstable branchを維持したまま、checkoutのroo
 ```sh
 nix flake update nixpkgs nixos-wsl home-manager sops-nix
 ```
+
+`architectureStandard`は上の`dotfiles-rebuild`が更新するため、この手順に含めない。
 
 devenvとactrunは、`flake.nix`の公式release commitを差し替えた後に`nix flake lock`でupstreamの依存を固定する。
 hostのnixpkgsには追従させず、host全体のchannelを変えずに各公式packageのcompilerと依存を使う。

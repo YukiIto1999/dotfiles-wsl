@@ -86,10 +86,13 @@ dotfiles-wslの変更は、commitして`dotfiles-rebuild`を実行した後に�
 
 architecture-standardの変更は、規範本文と、Skill、checker、設定の実行packageで、届く経路が異なる。
 規範本文は、ownerが受け入れてcanonical checkoutへ統合した時点から、現行規範rootを読む新しい読取りに現れる。
-規範本文も実行packageも、常に最新を適用する状態を保つ。標準を統合したら、同じ作業の中で`flake.lock`の更新と`dotfiles-rebuild`まで進め、実行packageを旧いまま残さない。固定した版や`flake.lock`は現行本文の確認に使わない。
-運用Skill、checker、設定は、標準のcommitとpush、dotfilesの`flake.lock`の更新、dotfilesの検証とcommit、`dotfiles-rebuild`を経て、新しく始めたsessionへ不変のpackageとして届く。
-版を上げると、固定していた版以降のSkillとcheckerの差分もまとめて取り込む。その範囲は報告に示し、旧い版へ留める理由にしない。
-pushと版の更新は実行直前に利用者へ確認する。
+規範本文も実行packageも、常に最新を適用する状態を保つ。
+`dotfiles-rebuild`は`architectureStandard`を最新へ更新して`flake.lock`をcommitするため、標準を統合したら同じ作業の中で`dotfiles-rebuild`まで進め、実行packageを旧いまま残さない。
+固定した版や`flake.lock`は現行本文の確認に使わない。
+運用Skill、checker、設定は、標準のcommitとpush、dotfilesの検証、`dotfiles-rebuild`を経て、新しく始めたsessionへ不変のpackageとして届く。
+rebuildのたびに、前回の更新以降のSkillとcheckerの差分がまとめて取り込まれる。
+その範囲は報告に示し、旧い版へ留める理由にしない。
+pushは実行直前に利用者へ確認し、`dotfiles-rebuild`による標準の更新は確認を待たない。
 具体的なgateを埋め込んだhookで開始したsessionは、そのgateと成功して読んだ実行packageのまま動く。
 配備前から動くsessionの旧hookは、この保持の対象にしない。
 更新した本文を配備済みの実行packageが扱えない場合は、配送不足として報告し、旧本文や旧packageの合格を代用しない。

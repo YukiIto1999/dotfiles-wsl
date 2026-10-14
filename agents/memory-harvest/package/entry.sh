@@ -4,7 +4,6 @@ exec "@python@" "@source@/harvest.py" \
   --state-file "@stateFile@" \
   --lookback-days "@lookbackDays@" \
   --memory "@memory@" \
-  --omp "@omp@" \
   --model "@model@" \
   --thinking "@thinking@" \
   "$@"

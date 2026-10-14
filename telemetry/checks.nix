@@ -11,7 +11,6 @@
         normalMachineModule,
         ...
       }:
-
       let
         inherit (helpers.execTokens) tokensOf onlyValue valuesOf;
         contract = hostConfig.dotfiles.telemetry;
@@ -34,6 +33,7 @@
               common "service/${serviceName}" "${serviceName} is not operational"
               // {
                 kind = "systemd-service";
+                manager = "system";
                 unit = serviceUnit;
                 loadStates = [ "loaded" ];
                 activeStates = [ "active" ];
@@ -43,6 +43,7 @@
               common "restart/service/${serviceName}" "could not observe restart count for ${serviceName}"
               // {
                 kind = "restart-counter";
+                manager = "system";
                 sourceKind = "systemd-service";
                 target = serviceName;
                 warningAt = 5;

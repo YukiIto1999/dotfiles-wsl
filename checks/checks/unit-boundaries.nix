@@ -8,7 +8,6 @@
 {
   source = [
     (
-
       let
         allowedPureHelperImports = {
           "capabilities/code-quality/sonarqube/database/module.nix" =
@@ -64,6 +63,10 @@
           "agents/module.nix" = {
             target = commandHelper;
             line = "  mkCommand = import ${commandHelper} { inherit config lib pkgs; };";
+          };
+          "agents/checks/supply.nix" = {
+            target = nestedCommandHelper;
+            line = "        mkCommand = import ${nestedCommandHelper} {";
           };
           "agents/journal/module.nix" = {
             target = nestedCommandHelper;

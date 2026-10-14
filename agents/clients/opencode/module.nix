@@ -68,13 +68,15 @@ in
 {
   dotfiles.agents.registry.opencode = {
     binary = "opencode";
-    runtimeWrapperMode = "managed";
-    rulesDestination = ".config/opencode/AGENTS.md";
+    supply.package = "opencode";
+    runtime.managed = { };
+    rules.file.destination = ".config/opencode/AGENTS.md";
     skillsDestination = ".config/opencode/skills";
-    subagentMode = "rendered";
-    subagentsDestination = ".config/opencode/agents";
-    subagentFormat = "frontmatter-markdown";
-    subagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+    subagents.rendered = {
+      destination = ".config/opencode/agents";
+      sources = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+      skillProjection = "dynamic";
+    };
     gatewayConfig = {
       source = opencodeGatewayConfig;
       format = "json";
@@ -96,31 +98,12 @@ in
         destination = ".config/opencode/plugins/project-memory.ts";
       };
     };
-    capabilityManagedFiles = {
-      lsp = "config";
-      projectMemory = if projectMemoryEnabled then "project-memory-plugin" else null;
-    };
-    lspMode = "supported";
-    telemetryMode = "unsupported";
-    projectMemoryMode = if projectMemoryEnabled then "plugin" else "unsupported";
-    skillProjectionMode = "dynamic";
-    install = {
-      kind = "github-release";
-      updateOwner = "dotfiles";
-      layout = "single-binary";
-      repo = "anomalyco/opencode";
-      retainedReleases = 2;
-      releaseByArch = {
-        x86_64 = {
-          asset = "opencode-linux-x64.tar.gz";
-          entrypoint = "opencode";
-        };
-        aarch64 = {
-          asset = "opencode-linux-arm64.tar.gz";
-          entrypoint = "opencode";
-        };
-      };
-      requiredPaths = { };
-    };
+    lsp.supported.managedFile = "config";
+    telemetry.unsupported = { };
+    projectMemory =
+      if projectMemoryEnabled then
+        { plugin.managedFile = "project-memory-plugin"; }
+      else
+        { unsupported = { }; };
   };
 }

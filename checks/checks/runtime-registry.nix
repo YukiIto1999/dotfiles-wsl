@@ -10,7 +10,6 @@
         hostOptions,
         ...
       }:
-
       {
         runtime-identity =
           let
@@ -38,10 +37,13 @@
             commandNames = builtins.attrNames hostConfig.dotfiles.platform.cli.commands;
             serviceNames = builtins.attrNames hostConfig.systemd.services;
             timerNames = builtins.attrNames hostConfig.systemd.timers;
-            installerExecutable = builtins.baseNameOf (
-              lib.getExe hostConfig.dotfiles.platform.cli.commands.installAgents
+            supplyExecutable = builtins.baseNameOf (
+              lib.getExe hostConfig.dotfiles.platform.cli.commands.agentSupply
             );
-            legacyInstallerKey = "install" + "Clis";
+            retiredInstallerKeys = [
+              ("install" + "Clis")
+              "installAgents"
+            ];
             updaterName = "dotfiles-agent-autoupdate";
             legacyUpdaterName = "dotfiles-" + "cli-autoupdate";
             updaterNamesValid =
@@ -56,9 +58,9 @@
           ) "runtime requires one container network: actual=${builtins.toJSON containerNetworks}";
           assert lib.assertMsg (builtins.length hindsightPersistentMounts == 1)
             "runtime requires one Hindsight persistent mount: actual=${builtins.toJSON hindsightPersistentMounts}";
-          assert installerExecutable == "dotfiles-install-agents";
-          assert builtins.elem "installAgents" commandNames;
-          assert !builtins.elem legacyInstallerKey commandNames;
+          assert supplyExecutable == "dotfiles-agent-supply";
+          assert builtins.elem "agentSupply" commandNames;
+          assert !builtins.any (key: builtins.elem key commandNames) retiredInstallerKeys;
           assert updaterNamesValid serviceNames timerNames;
           assert updaterNamesValid serviceNames (builtins.filter (timer: timer == updaterName) timerNames);
           assert !updaterNamesValid serviceNames (builtins.filter (timer: timer != updaterName) timerNames);
@@ -116,8 +118,6 @@
             # port を持たないと宣言した unit。増えるときは必ずこの表に現れる
             withoutListener = [
               "dotfiles-agent-autoupdate"
-              "dotfiles-agent-journal"
-              "dotfiles-agent-memory-harvest"
               "dotfiles-agent-project-cache-gc"
               "dotfiles-zram-swap"
               "docker-build-artifact-gc"

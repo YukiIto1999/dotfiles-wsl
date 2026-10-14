@@ -2,7 +2,7 @@
 
 **読み手:** Agent、Skill、Capability、provider、runtimeの境界を変更する人。
 
-AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycleを持つ。upstream installerとGitHub releaseで入れるbinaryは`~/.local/bin`の可変物である。policy、Skill、subagent、managed config、MCP serviceはNixOS generationが宣言する。
+AI CLIのbinary、共通資材、Capability実装、MCP接続は別のlifecycleを持つ。binaryは供給元が提供するNix packageで、client別のnative Nix profileの世代として更新される。policy、Skill、subagent、managed config、MCP serviceはNixOS generationが宣言し、system generationとclient profileは別の正本と別のrollback対象である。
 
 ## 配備と呼出し
 
@@ -67,7 +67,7 @@ Git revisionの一致だけで結果を捨てず、逆に保存済みのgateを�
 共通profileはheap-diagnosticsも選び、provider名の`memlab`ではなく意味上のCapabilityから採用する。
 
 各client adapterは`dotfiles.agents.registry`へ登録し、profileの`enabled`から採用済みの`clients`を導く。
-配備、installer、runtime wrapper、health、policyの能力表は採用集合だけを読む。
+配備、binary供給、runtime wrapper、health、policyの能力表は採用集合だけを読む。
 
 [`skills/module.nix`](../../skills/module.nix)はSkill ID、Skill依存、hard Capability依存から、選択したCapabilityで実行できるSkillを導く。[`capabilities/module.nix`](../../capabilities/module.nix)はCapability依存closure、provider owner、backend ownerを検証し、`dotfiles.capabilities.resolved`、`dotfiles.platform.mcp.enabledProviders`、`dotfiles.platform.containers.enabled`を導く。現在のconsumer数はownershipの判断に使わない。
 hard依存は主要手順の必須条件であり、条件付きbrowserやcloud branchで一般Skill全体をgateしない。
@@ -96,21 +96,51 @@ wrapperは書込み可能な一時CWDへ管理下のpackageと依存を参照さ
 
 ## Client binary
 
-client contractはupstream installerとGitHub releaseの二経路を持つ。
-`dotfiles-install-agents`は採用したclientを更新し、一つの失敗で他のclientを止めず、失敗したclient名を集約して非ゼロで終える。
-日次更新は`dotfiles.agents.automaticUpdates.clients`で採用集合の部分集合を選び、空ならtimerも配備しない。
+client binaryの供給元は[llm-agents.nix](https://github.com/numtide/llm-agents.nix)で、`flake.lock`が初回構築用のbaselineと供給元の採用を固定する。供給元の package は provider 自身の固定 nixpkgs と Bun で build され、host の stable nixpkgs へ follows させない。「供給元が package 化した最新版」の日次取得は利用者が承認した鮮度であり、製品の最新 release との一致や供給元 HEAD の取得成功を同一視しない。
 
-client ごとの install contract は各[`agents/clients/NAME/module.nix`](../../agents/clients)が所有する。release asset、architecture 別 entrypoint、`requiredPaths`、`retainedReleases` もそこに置く。
+client ごとの供給契約は各[`agents/clients/NAME/module.nix`](../../agents/clients)の`supply.package`と`binary`が所有し、更新と世代の管理は`dotfiles-agent-supply`だけが行う。同じ profile の baseline 初期化、手動更新、timer、rollback、retention は一つの owner を通る。
 
-GitHub release経路はGitHub APIのSHA-256 digestと取得したassetを照合する。`assetFormat`が`tar.gz`のときはmember名、type、件数、論理size、重複、path衝突を展開前に検査する。`raw`のときはassetが単一の実行fileそのものなので、path成分を持たないentrypointとして配置し、以降は同じ検査へ渡す。展開後はowner、mode、link、entrypoint、required path、version probeを通したtreeだけを公開する。`raw`は`single-binary` layout以外と組み合わせられない。
+profile は`~/.local/share/dotfiles/agent-profiles/<client>/profile`で、世代 link は Nix の GC root である。存在しない profile だけを locked baseline から作り、activation は latest を取得せず、既存 profile を巻き戻さない。更新は取得した供給元の exact revision から build と probe を行い、成功した client だけを公開する。一つの失敗は他 client の更新を止めず、外部取消は実行中の子の終了を待って次を始めない。current と直前の世代だけを残し、候補 root が build から公開までを保持する。採用外の client は更新、公開 command、通常の health から外れるが、profile と利用者 state は残る。
 
-管理releaseは`~/.local/share/dotfiles/agents/<client>/releases/sha256-<digest>`に置く。`current`は同じclient root内の相対symlink、`~/.local/bin/<binary>`は`current`内のentrypointを指す相対symlinkである。lockと固定したdirectory descriptorの下でidentityを照合し、所有を確認できないobjectは削除しない。
+`dotfiles.agents.clientExecutables`は採用client IDからprofile内の実行pathへの対応で、profileの`bin`はPATHへ出さない。
+公開commandはHome Managerが`~/.local/bin`より前へ置くwrapperだけである。
+`runtime.managed`のwrapperはprofileの実行pathと、起動時に確定するmanaged config、hook、gate、runtime、Skill、rules、subagentの`clientExecutionDependencies`を受ける。
+初回seedは保護対象に含めず、`runtime.unsupported`はprofileを直接起動する。
+`dotfiles.agents.lifecycle`はwrapperのbuilder、GC rootを取る`protect`、子孫を回収する`supervise`をjournalとmemory harvestにも渡す。
+`supervise`のownerは[`platform/supervise/`](../../platform/supervise)であり、rebuildの非特権処理も同じcommandを使う。
+root activationの扱いは[Rebuild](../operations/rebuild.md)を参照する。
+親の終了で取消を求めるcallerは`--parent-death-cancels`へ自身のPIDを渡すので、supervisorの起動準備より先に親が終了してもcommandを始めない。
 
-Claude Code、Codex、OMP、OpenCodeは、Home Managerが`~/.local/bin`より前へ置く共通runtime wrapperから起動する。wrapperはinstallerが管理する`~/.local/bin`のbinaryを絶対pathで実行する。Antigravityは同じCLI起動境界を持たない。
+adapter の対応なし、subagent、Skill 投影、LSP、telemetry、project memory は`dotfiles.agents.registry`の判別可能な枝で表し、policy の能力表はその枝から導く。`supply`、`rules`、各枝が参照する managed file の実在は構築時の整合として検査する。
 
-runtimeはsession ID、sessionを始めたproject、owner process、boot ID、管理下`TMPDIR`を記録し、clientを`agents.slice`のscopeで起動する（[資源の上限](#資源の上限)）。projectはGit repositoryではgit common directory、それ以外では作業directoryから決めるので、linked worktreeは元のcheckoutと同じprojectになる。session中に`git worktree add`で作られたworktreeは、runtimeのgit shimがpathと作成時のHEADをsession directoryへ記録する。runtimeは終了時に、HEADが作成時のままのworktreeだけを`git worktree remove`へ渡す。`git worktree remove`は変更、untracked file、lockを持つworktreeを拒むので、それらとsessionの外で作られたworktreeは残る。削除の失敗はclientの終了statusを変えない。同時に走った別の`git worktree add`と区別できないworktreeは記録せず、SIGKILLで終わったsessionのworktreeは回収しない。
 
-`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Cargoの中間成果物は`CARGO_BUILD_BUILD_DIR`で全sessionが共有する一つのrootの下に置き、`{workspace-path-hash}`でcheckoutごとに分けるので、どのsessionからbuildしても同じcheckoutは同じbuild-dirを使う。最終成果物は各checkoutの`target`に残る。同じworkspaceのcheckoutどうしで中間成果物を共有すると、Cargoが別checkoutのbuildをfreshと判定するため、linked worktreeとも共有しない。利用者が明示した`CARGO_TARGET_DIR`と`CARGO_BUILD_BUILD_DIR`、project固有のCargo`target-dir`と`build-dir`は上書きしない。一時的な写しでbuildするtoolは、写しごとに中間成果物がbuild-dirのrootへ残るため、`CARGO_BUILD_BUILD_DIR`を外して起動する。
+lifecycleはsession ID、開始したproject、owner process、boot IDをsession directoryへ記録し、clientを`agents.slice`のscopeでsupervisorを通して一度だけ起動する。
+[資源の上限](#資源の上限)はscopeのsliceが持つ。
+管理scratchと、`TMPDIR`を条件にする終了gateの除外は、`TMPDIR`が未指定のときだけ与え、空文字列を含む明示値はそのまま渡す。
+外側のsessionから管理scratchを引き継いだだけの`TMPDIR`は未指定として扱う。
+
+supervisorはchild subreaperとして全子孫を引き取り、kernelが子の残りを報告しない`waitpid`の`ECHILD`を確認してから返る。
+clientの終了、PTY終了の`SIGHUP`、`SIGTERM`で終了を始め、その時点の全子孫へ一度だけ`SIGTERM`を送る。
+猶予中に生まれる後始末の子は中断せず、猶予後は新しい子も含めて`SIGKILL`で回収する。
+残る子があれば失敗として返し、roots、scratch、sessionを解放しない。
+`SIGINT`と`SIGQUIT`はclientの中の操作の取消であり、session全体の終了とは扱わない。
+sessionの実行時間には上限を置かず、終了を始めてからの猶予だけを区切る。
+
+取消後と開始途中の失敗ではclientを起動しない。
+scopeを作れない場合もclientを起動せず、別sessionとMCP frontは止めない。
+supervisorが先に消えた場合はscopeのcgroupが空になるまで残りを止め、終了を見届けてから解放する。
+台帳のI/Oと`gc.lock`の待ちは起動と後始末で合計5秒までとし、超えた起動を拒否して使用中のsessionを回収しない。
+起動前にwrapper、当該clientの`executionDependencies`、lifecycle自身、profileの公開pathから解決したstore objectへsessionのGC rootを取り、一つでも取れなければclientを起動しない。
+その物理pathを実行するため、保護と起動の間にprofileが動いても別の版を実行しない。
+全子孫の終了後にだけGC root、管理scratch、session directoryを解放し、解放できなかった資源はGCに残して非ゼロで終わる。
+
+projectはGit repositoryではgit common directory、それ以外では作業directoryから決めるため、linked worktreeは元のcheckoutと同じprojectになる。
+session中の`git worktree add`はgit shimがpathと作成時のHEADを記録し、終了時にはHEAD不変のworktreeだけを`git worktree remove`へ渡す。
+変更、untracked file、lockを持つworktreeは同commandが拒否し、削除できなくてもclientの終了statusは変えない。
+同時に走った別の`git worktree add`と区別できないもの、session外で作られたもの、SIGKILLで終わったsessionのworktreeは回収しない。
+Orcaが作るworktreeの寿命はOrcaが持つ。
+
+共通のcache方針は、process寿命を持つruntimeではなく[`toolchain/execution/`](../../toolchain/execution)が持つ。managed commandのwrapperは`dotfiles-execution-policy`を一度だけ適用してからlifecycleへ渡し、clientごとのcacheは増やさない。`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Cargoの中間成果物は`CARGO_BUILD_BUILD_DIR`で全sessionが共有する一つのrootの下に置き、`{workspace-path-hash}`でcheckoutごとに分けるので、どのsessionからbuildしても同じcheckoutは同じbuild-dirを使う。最終成果物は各checkoutの`target`に残る。同じworkspaceのcheckoutどうしで中間成果物を共有すると、Cargoが別checkoutのbuildをfreshと判定するため、linked worktreeとも共有しない。利用者が明示した`CARGO_TARGET_DIR`と`CARGO_BUILD_BUILD_DIR`、project固有のCargo`target-dir`と`build-dir`は上書きしない。方針はdirectoryを作らず回収もしない。共有cacheとCargoのbuild root、sessionの台帳を作って検証するのはruntime、容量を回収するのはGCである。`nix build`と`nix-build`が結果linkを作らないshimも同じ方針が`PATH`の先頭へ置く。一時的な写しでbuildするtoolは、写しごとに中間成果物がbuild-dirのrootへ残るため、`CARGO_BUILD_BUILD_DIR`を外して起動する。
 
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
 fileごとのprocess起動を避けるため、tracked fileのmetadataと内容hashはコマンド行長の上限内でまとめて取得する。
@@ -175,7 +205,7 @@ OMPのgate起動例外は説明付きの非ゼロ結果となり、編集前とs
 
 ## 資源の上限
 
-wrapperから起動したclientは、launcherが`systemd-run --user --scope`で作るsession単位のscopeの中で動き、そのscopeはsystemd userの`agents.slice`に属する。scope名は`dotfiles-agent-<client>.<pid>.<suffix>.scope`で、session directoryの名前から導く。clientが起動したbuild、test、browser、VMもscopeに入るため、slice全体で次の上限を共有する。値は`dotfiles.agents.slice`のoptionで変えられる。
+wrapperから起動したclientは、launcherが`systemd-run --user --scope`で作るsession単位のscopeの中で、supervisorが一度だけ起動して動き、そのscopeはsystemd userの`agents.slice`に属する。scope名は`dotfiles-agent-<client>.<pid>.<suffix>.scope`で、session directoryの名前から導く。clientが起動したbuild、test、browser、VMもscopeに入るため、slice全体で次の上限を共有する。値は`dotfiles.agents.slice`のoptionで変えられる。
 
 上限は物理RAMの割合で指定し、systemdが起動時のmemory容量から解決する。
 `agents.slice`の`MemoryHigh`は60%、`MemoryMax`は70%、`MemorySwapMax`はRAMの20%を既定とし、CPUWeightは50にする。
@@ -185,7 +215,8 @@ swapの百分率はswap総量ではなく物理RAMに対する割合である。
 Chromiumはuser busから`app.slice`へscopeを作るため、agent scopeから抜ける場合がある。
 user manager全体にも`MemoryHigh` 67%、`MemoryMax` 75%を置き、agentとbrowserの合計を抑える。
 user managerのmaxはagent sliceのmaxより大きくし、基盤とkernelへRAMを残す。
-launcherはscopeを作れないとclientを起動せず、scope外のclientはdoctorの`agent/slice-placement`が報告する。
+launcherはscopeを作れないとsupervisorもclientも起動せず、scope外のclientはdoctorの`agent/slice-placement`が報告する。
+MCP sessionのbrowserは[`dotfiles-supervise`](../../platform/supervise)の下で起動し、sessionの終了でそのsessionのbrowserと子だけを終了確認まで止める。別のsessionとMCP front本体は止めない。
 
 I/O上限やprojectの`CARGO_BUILD_JOBS`の上書きは加えず、memory上限でpage cacheとswapの圧迫を抑える。
 agentが起動したNix builderはnix-daemonの子としてsystem.sliceで動くため、`agents.slice`の上限を受けない。
@@ -201,13 +232,15 @@ client形式への変換はbuild時に行う。
 
 `native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<subagent>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
 OMPのhookは`~/.omp/agent/hooks/pre`をdirectoryごとhomeへ配備し、その中をNix storeの実fileにする。OMPはhook directory内のsymlinkを読み込まず、Home Managerがfileごとに張るsymlinkでは全hookが無視されるためである。
-client別の能力配備の正本は各`agents/clients/<id>/module.nix`のmode宣言である。`projectMemoryMode`は`hooks`、`plugin`、`unsupported`のいずれかで、対応する配備先は`capabilityManagedFiles.projectMemory`が指すmanaged fileである。現在の各clientのmodeは次で取得できる。
+client別の対応は各`agents/clients/<id>/module.nix`の判別可能な枝で宣言する。
+`projectMemory`の`hooks`か`plugin`の枝は実在する`managedFile`を必須にし、`unsupported`の枝は配備先を持たない。
+現在のtagは次で取得できる。
 
 ```bash
-nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply 'builtins.mapAttrs (_: client: { inherit (client) subagentMode skillProjectionMode lspMode telemetryMode projectMemoryMode; })'
+nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply 'builtins.mapAttrs (_: client: builtins.mapAttrs (_: branch: builtins.head (builtins.attrNames branch)) { inherit (client) runtime rules subagents lsp telemetry projectMemory; })'
 ```
 
-`projectMemoryMode`はclient固有の想起注入の入口を表すが、明示的な検索、検証、保存の判断を代替しない。
+`projectMemory`はclient固有の想起注入の入口を表し、明示的な検索、検証、保存の判断を代替しない。
 
 Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
 OMPのseedはBash interceptorを有効にし、直接の再帰検索を専用検索手段へ誘導する。既存の`config.yml`はOMP自身の設定commandで移行する。
@@ -375,6 +408,34 @@ LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有の
 
 日誌の repository は`dotfiles.workstation.environmentDir`の下に置き、flake の入力にはしない。dotfiles が配備した timer が書き込む出力だからである。
 
+## 非対話 job の寿命
+
+日誌と収穫は、user manager の`agents.slice`に置く oneshot service と timer で定時に動く。手動の`dotfiles-agent-journal`と`dotfiles-agent-memory-harvest`も、同じ job entry を同じ worker へ向けて呼ぶ。timer の service は自身が寿命を持って job entry を直接呼び、manual command は共通 runtime が scope と一時領域を与えてから job entry を呼ぶので、対話用の wrapper は二重に挟まない。
+
+job entry の runner（[`agents/job/`](../../agents/job)）は、同じ job の writer を一つに絞る。排他は user の runtime directory の lock で、timer の実行中に手動で同じ job を呼ぶと worker を始めず非ゼロ（75）で返す。別の job は止めない。lock の fd は共通の supervisor（[`platform/supervise/`](../../platform/supervise)）が保持し、worker と子孫へは渡さない。runner が先に消えても、supervisor が全子孫の終了を kernel の観測で確かめるまで排他は保たれ、runner の死は job の取消として supervisor が子孫を回収する。
+
+実行の上限は 6 時間で、manual と timer のどちらにも同じ値を適用する。
+runner は開始時刻から数えた絶対時刻を`DOTFILES_JOB_DEADLINE`で worker とその子へ渡し、到達すると supervisor へ取消を送る。
+この期限は実行依存の保護から worker の終了までを通して一つである。
+worker は model、Git、memory command の待ち時間をその期限で絞り、期限後は新しい子を始めない。
+子孫の終了を求める TERM、猶予（60 秒）、KILL、終了の確認は supervisor だけが持ち、猶予の経過は完了の判定にならない。
+supervisor が全子孫の終了を確認できなかった場合、runner は実行依存の保護を残して 70 を返す。
+期限と取消は成功として返さず、期限は 124、取消は 128 に signal 番号を足した値で終える。
+supervisor は SIGINT を無視するので、runner が INT を取消として TERM に変えて渡す。
+
+起動前には worker が後から呼び得る実行依存（client の profile、managed config、hook、gate、memory runtime）を、共通 runtime の`dotfiles-agent-protect`で GC root に置く。
+保護の command も worker と同じ supervisor の下で、同じ期限と取消を受けて動かす。
+期限か取消で保護が途中で止まっても、`nix-store`などその子孫の終了を supervisor が確認するまで、root と lock は解かない。
+置けない依存があれば worker を始めない。
+root は supervisor が全子孫の終了を確認した後にだけ解く。
+
+client の profile の実行 path は保護の後も別の版へ動くので、job は model を呼ぶ実行 path を`--executable <option名>=<path>`として runner へ宣言する。
+runner は worker の引数に利用者が`--omp`で明示した値があればそれを含めて、実効の一つだけを保護の command へ渡し、解決した物理 path を`--omp`一つとして worker へ渡す。
+`--omp=<path>`の形も同じに扱い、略記した`--om`は保護できないので拒否する。
+worker は受け取った物理 path だけで model を呼ぶので、profile が別の版へ移っても元の版へ戻っても、保護した版と実行する版は分かれない。
+
+日誌の公開は、生成した file、local commit、remote の内容を分けて判定する。file があるだけの日と、commit だけで push されていない日は公開済みと扱わず、次の通常の実行が本文を作り直さずに未完了の段から続ける。公開済みと言えるのは、`origin`の branch が同じ内容の file を持つ日だけである。
+
 ## 記憶の収穫
 
 `dotfiles.agents.memoryHarvest.enable`を明示的に採用し、OMPとproject-memoryが有効なhostだけに配備する。
@@ -395,12 +456,12 @@ modelは候補ごとに、将来の別sessionで同じ判断を迫られる場�
 場面を保存する本文には含めず、保存済みのsourceと同じ発言はmodelへ渡さない。
 保存済みの記憶と文字列が一致する候補も保存しない。
 
-候補は一件ずつ`dotfiles-memory save`へ、scope `project`、session の cwd、kind、source `<session file>#<entry id>`で渡す。`pending`または`indeterminate`の receipt は保存済みと報告せず、state file に残して次の実行で`dotfiles-memory status`へ渡す。state file の読み終えた位置は、全 project の取り出しが成功した実行だけが進める。runtime が資格情報や個人情報に見える候補を拒んだ場合は、その候補だけを捨てて失敗にしない。発言は model の provider へ、保存した内容は Hindsight の抽出 model へ送られる。運用は[記憶の収穫](../operations/memory-harvest.md)に従う。
+候補は一件ずつ`dotfiles-memory save`へ、scope `project`、session の cwd、kind、source `<session file>#<entry id>`で渡す。`pending`または`indeterminate`の receipt は保存済みと報告せず、受け取った時点で state file へ書き、次の実行で`dotfiles-memory status`へ渡す。取消や runner の突然死でも、受け取った receipt は失われず、送り直しもしない。保存済みと報告できるのは、`save`か`status`が backend の保存確定を返した場合だけであり、service の exit status は抽出と確認の成否を表し、保存の確定ではない。実行の最後に`summary:`の行で、抽出の成否、backend が確定した件数、確定していない receipt の件数を別々に出す。state file の読み終えた位置は、全 project の取り出しが成功した実行だけが進める。位置は読んだ範囲であり、確認待ちの receipt が残っていても進む。全件の保存が完了したと言えるのは、確認待ちの receipt が 0 件になったときだけである。runtime が資格情報や個人情報に見える候補を拒んだ場合は、その候補だけを捨てて失敗にしない。発言は model の provider へ、保存した内容は Hindsight の抽出 model へ送られる。運用は[記憶の収穫](../operations/memory-harvest.md)に従う。
 
 ## LSPと観測
 
-language serverのbinaryとrosterは`toolchain/`が所有し、client形式への写像は各[`agents/clients/`](../../agents/clients)のadapterが持つ。
-Claude Codeはplugin、OMPは`lsp.json`、OpenCodeはconfigの`lsp` blockへ投影し、非採用または未対応clientには配らない。
+language serverの登録とPATHへの配備は`toolchain/`が所有し、hostは`dotfiles.toolchain.enabledLsp`で登録済みIDを重複なく選ぶ。空集合と部分集合を選べ、未知IDと重複は評価で拒否する。
+client形式への写像は各[`agents/clients/`](../../agents/clients)のadapterが持つ。Claude Codeはplugin、OMPは`lsp.json`、OpenCodeはconfigの`lsp` blockへ、採用したserverだけを投影し、非採用または未対応clientには配らない。
 
 managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。
 

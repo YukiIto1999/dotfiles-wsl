@@ -116,7 +116,7 @@ bootstrapはrootと主ユーザーのNix呼び出しにflake用のflagを明示�
 
 [bootstrap script](../../workstation/activation/rebuild/impl/bootstrap.sh)は、鍵の存在と権限、hostとcheckoutの一致、未追跡ファイルの不在、host keyによる復号を検査する。
 続いてflakeが固定した`nixos-rebuild`で対象hostのboot generationを作り、`/etc/nixos`をcheckoutへのsymlinkにする。
-初期imageではgeneric Linux向けnative CLIの実行に必要な`nix-ld`がまだ配備されていないため、bootstrap中にAgent installerを実行しない。
+Agent CLIは供給元のNix packageとして構築され、profileはHome Manager activationがlockのbaselineから作るため、bootstrapはAgent CLIを導入しない。
 bootstrapは差分を自動commitせず、通常のrebuildのdirty拒否も変更しない。
 
 ## 再起動とcommit
@@ -152,10 +152,11 @@ commit後のtracked working treeがcleanであることを確認する。
 
 ## 初回同期と適用
 
-再ログイン後はboot generationの`nix-ld`を使える状態で、採用したAgent CLIを導入する。
+再ログイン後は、boot generationのHome Manager activationが採用したAgent CLIのprofileをlockのbaselineから作る。
+activationはlatestを取得しない。作成を確認する。
 
 ```bash
-dotfiles-install-agents
+dotfiles-agent-supply status
 ```
 
 containerを選ぶhostでは、配備済みの短いcommandでupstream OCI imageを同期してから同じcheckoutを適用する。
@@ -165,7 +166,7 @@ dotfiles-sync-images
 dotfiles-rebuild
 ```
 
-containerを一つも選ばないhostには同期commandを配備しないため、CLIの導入後にbootstrapの表示どおり`dotfiles-rebuild`を実行する。
+containerを一つも選ばないhostには同期commandを配備しないため、bootstrapの表示どおり`dotfiles-rebuild`を実行する。
 checkoutから別hostを明示して同期する入口は[OCI images](oci-images.md)にある。
 
 初回boot generationのcontainer unitは、Docker cacheにimageがないため失敗することがある。
@@ -193,7 +194,7 @@ doctorの終了statusが0でも`warn`は残るため、[Doctorの結果](doctor.
 ## 別ホストへの再現
 
 tracked sourceと`flake.lock`はsystemとHome Manager設定の再現対象である。
-Agent CLI本体はinstallerがupstreamから取得するため、取得した版は[Agent clientの確認手順](agent-clients.md)で別に記録する。
+Agent CLI本体はlockのbaselineから始まり、更新後の版はclient別のNix profileにあるため、取得した版と供給revisionは[Agent clientの確認手順](agent-clients.md)の`dotfiles-agent-supply status`で別に記録する。
 CLIのlogin session、host key、採用したcontainerの永続data、Windowsの資源とdistribution登録はsourceのcloneだけでは再現されない。
 永続dataを引き継ぐ場合は、そのdataのbackupとrestoreを行い、空のdataでの初回起動をrestoreの成功とみなさない。
 dataの所在、停止とexport、元のdistributionを消さないrestoreの受入条件は[データの復旧](recovery.md)に従う。

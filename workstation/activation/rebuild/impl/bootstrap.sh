@@ -72,8 +72,6 @@ identity installed by the boot generation to commit both files:
 
 The tracked working tree must be clean before continuing:
 
-  dotfiles-install-agents
-
 ${sync_command}  dotfiles-rebuild
   dotfiles-doctor
 

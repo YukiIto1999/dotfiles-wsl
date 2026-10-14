@@ -162,7 +162,7 @@ agentがそれを直接起動したり、接続を個別に操作したりしな
 
 - 通常 rebuild: `dotfiles-rebuild`
 - 実用状態検証: `dotfiles-doctor`
-- Agent client binary の更新: checkout から `nix run .#dotfiles-install-agents`
+- Agent client binary の更新と rollback: `dotfiles-agent-supply update`、`dotfiles-agent-supply rollback <client>`。版の確認は `dotfiles-agent-supply status`
 - Home Manager backup 整理: `dotfiles-cleanup --delete`
 - system backup 整理: `sudo dotfiles-cleanup --delete --system`
 - VS Code Server 整理: `dotfiles-cleanup --delete --vscode-server`

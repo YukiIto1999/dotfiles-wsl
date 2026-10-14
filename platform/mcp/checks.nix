@@ -15,7 +15,6 @@
         variantConfig,
         ...
       }:
-
       let
         expectedContract = builtins.fromJSON (builtins.readFile ./fixtures/target-contract.json);
         expectedProviders = expectedContract.enabledProviders;
@@ -261,6 +260,7 @@
                   commonObservation "service/${service}" "${unit} is not operational"
                   // {
                     kind = "systemd-service";
+                    manager = "system";
                     inherit unit;
                     loadStates = [ "loaded" ];
                     activeStates = [ "active" ];
@@ -279,6 +279,7 @@
                   commonObservation "restart/service/${service}" "could not observe restart count for ${unit}"
                   // {
                     kind = "restart-counter";
+                    manager = "system";
                     sourceKind = "systemd-service";
                     target = unit;
                     warningAt = restartWarningCount;
@@ -477,17 +478,24 @@
                             type = lib.types.attrsOf lib.types.raw;
                             default = { };
                           };
+                          managedArtifacts = lib.mkOption {
+                            type = lib.types.attrsOf lib.types.raw;
+                            default = { };
+                          };
                           workstation = {
                             username = lib.mkOption { type = lib.types.str; };
                             homeDir = lib.mkOption { type = lib.types.str; };
                           };
-                          platform.mcp.gateway.service = lib.mkOption { type = lib.types.str; };
                         };
                         assertions = lib.mkOption {
                           type = lib.types.listOf lib.types.raw;
                           default = [ ];
                         };
                         systemd.services = lib.mkOption {
+                          type = lib.types.attrsOf lib.types.raw;
+                          default = { };
+                        };
+                        environment.etc = lib.mkOption {
                           type = lib.types.attrsOf lib.types.raw;
                           default = { };
                         };
@@ -500,7 +508,6 @@
                           };
                           platform.mcp = {
                             enabledProviders = enabled;
-                            gateway.service = "synthetic-gateway";
                             targets = candidateTargets;
                           };
                         };

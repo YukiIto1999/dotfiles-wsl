@@ -64,7 +64,7 @@ probe_timed_out() {
 }
 
 append_fragment() {
-  local fragment_file=$1 row kind target count
+  local fragment_file=$1 observation_file=$2 row kind manager target count
   while IFS= read -r row; do checks+=("$row"); done \
     < <($jq_command -c '.checks[]' "$fragment_file")
   while IFS= read -r row; do warnings+=("$row"); done \
@@ -78,7 +78,8 @@ append_fragment() {
     target=$($jq_command -r '.restart.target' "$fragment_file")
     count=$($jq_command '.restart.count' "$fragment_file")
     if [[ $kind == service ]]; then
-      service_restarts+=("$($jq_command -cn --arg unit "$target" --argjson count "$count" '{unit:$unit,count:$count}')")
+      manager=$($jq_command -r '.value.manager' "$observation_file")
+      service_restarts+=("$($jq_command -cn --arg manager "$manager" --arg unit "$target" --argjson count "$count" '{manager:$manager,unit:$unit,count:$count}')")
     else
       container_restarts+=("$($jq_command -cn --arg container "$target" --argjson count "$count" '{container:$container,count:$count}')")
     fi
@@ -215,6 +216,7 @@ for index in "${!observation_rows[@]}"; do
       HOME="${HOME:-/}" \
       USER="${USER:-}" \
       LOGNAME="${LOGNAME:-}" \
+      XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-}" \
       PATH="$runtime_path" \
       TMPDIR="$observation_scratch" \
       LANG=C \
@@ -231,7 +233,7 @@ for index in "${!observation_rows[@]}"; do
     && ((fragment_size <= 131072)) \
     && ((pipeline_status[0] == 0 && pipeline_status[1] == 0)) \
     && fragment_is_valid "$fragment_file" "$observation_file"; then
-    append_fragment "$fragment_file"
+    append_fragment "$fragment_file" "$observation_file"
   elif probe_timed_out "${pipeline_status[0]}" "$elapsed_microseconds" "$timeout_seconds"; then
     record_timeout_warning "$observation" "$timeout_seconds"
   else

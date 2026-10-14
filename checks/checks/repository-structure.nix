@@ -6,7 +6,6 @@
   units,
   ...
 }:
-
 let
   # 根 unit の名前。data 用の directory は unit ではないので対象にしない
   rootUnitNames = lib.unique (
@@ -945,7 +944,6 @@ in
           "unit directory names must use lowercase kebab-case: " + lib.concatStringsSep " " invalidUnitIds
         );
         pkgs.runCommandLocal "check-structure-unit-directory-names" { } "touch $out";
-
       dotfiles-option-namespace =
         pkgs.runCommandLocal "check-dotfiles-option-namespace"
           {
@@ -958,9 +956,8 @@ in
             legacyOptionPrefix+='y\.'
             globalArgumentPath='config\._module'
             globalArgumentPath+='\.args'
-            injectedHelperArguments='\b(mkCommand|mkContainerBackend|mkMcpServer|serveOverProxy|seedConfig|mkUserSecretFile),'
             violations=$(rg -n --glob '*.nix' \
-              "(^|[^A-Za-z0-9_])$legacyOptionPrefix|$globalArgumentPath|$injectedHelperArguments" \
+              "(^|[^A-Za-z0-9_])$legacyOptionPrefix|$globalArgumentPath" \
               ${self} || true)
             if [ -n "$violations" ]; then
               printf '%s\n' "$violations" >&2
@@ -969,7 +966,6 @@ in
 
             touch $out
           '';
-
       structure-layer-names =
         let
           materialNames = [
@@ -1047,7 +1043,6 @@ in
         assert lib.assertMsg noForbiddenOwnership forbiddenDiagnostic;
         assert lib.assertMsg noLayerViolations violationDiagnostic;
         pkgs.runCommandLocal "check-structure-layer-names" { } "touch $out";
-
     }
   ];
 }

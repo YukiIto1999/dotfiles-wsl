@@ -2,6 +2,7 @@
   pkgs,
   playwrightMcp ? pkgs.playwright-mcp,
   chromium ? pkgs.chromium,
+  supervise,
 }:
 
 # context 単位の userAgent 上書きが UA-CH の brand metadata を消すため native option は不採用
@@ -45,7 +46,9 @@ pkgs.writeShellApplication {
     trap 'forward_signal TERM 130' INT
     trap 'forward_signal TERM 143' TERM
 
-    ${playwrightMcp}/bin/playwright-mcp \
+    # session の終了で、この session の browser と子だけを終了確認まで回収する。別 session と front 本体は止めない。
+    ${pkgs.lib.getExe supervise} --term-grace 10 --kill-grace 5 -- \
+      ${playwrightMcp}/bin/playwright-mcp \
       --browser chromium \
       --executable-path ${chromium}/bin/chromium \
       --headless \

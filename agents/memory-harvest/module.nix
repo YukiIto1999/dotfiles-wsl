@@ -9,8 +9,8 @@ let
   cfg = config.dotfiles;
   mkCommand = import ../../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   name = "dotfiles-agent-memory-harvest";
-  harvest = mkCommand {
-    inherit name;
+  worker = mkCommand {
+    name = "${name}-worker";
     src = ./package/entry.sh;
     runtimeInputs = [ pkgs.git ];
     vars = {
@@ -22,12 +22,21 @@ let
       stateFile = "${cfg.agents.runtime.state.root}/memory-harvest.json";
       lookbackDays = "7";
       memory = lib.getExe cfg.capabilities.project-memory.runtime;
-      omp = cfg.agents.clientExecutables.omp;
       # 作業日誌と同じ定額の model を使い、従量課金の経路へ流さない
       model = "opencode-go/deepseek-v4.1-flash";
       thinking = "low";
     };
-    extra.meta.mainProgram = name;
+    extra.meta.mainProgram = "${name}-worker";
+  };
+  job = cfg.agents.job.mk {
+    inherit name worker;
+    description = "omp の利用者の訂正と決定を project memory に保存";
+    # 一日分をまとめて読み、model の呼び出しを定額枠の中で日に数回へ抑える
+    onCalendar = "*-*-* 07:00:00";
+    executables.omp = cfg.agents.clientExecutables.omp;
+    executionDependencies = cfg.agents.clientExecutionDependencies.omp ++ [
+      cfg.capabilities.project-memory.runtime
+    ];
   };
 in
 {
@@ -41,48 +50,8 @@ in
         && builtins.elem "project-memory" cfg.capabilities.resolved
       )
       {
-        dotfiles.platform.cli.commands.agentMemoryHarvest = harvest;
-
-        dotfiles.health.observations."agents/maintenance/memory-harvest" = {
-          kind = "systemd-timer";
-          checkId = "maintenance/${name}.timer";
-          resourceKey = null;
-          timeoutSeconds = 10;
-          failureMessage = "${name}.timer or its service is not operational";
-          timer = "${name}.timer";
-          service = "${name}.service";
-          unitFileStates = [
-            "enabled"
-            "enabled-runtime"
-          ];
-          activeStates = [ "active" ];
-          serviceResults = [ "success" ];
-        };
-
-        systemd.services.${name} = {
-          description = "omp の利用者の訂正と決定を project memory に保存";
-          after = [ "network-online.target" ];
-          wants = [ "network-online.target" ];
-          serviceConfig = {
-            Type = "oneshot";
-            User = cfg.workstation.username;
-            # 打ち切った実行は読み終えた位置を進めないので、次の実行が同じ範囲を読み直す
-            TimeoutStartSec = "6h";
-            Environment = [
-              "HOME=${cfg.workstation.homeDir}"
-              "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"
-            ];
-            ExecStart = lib.getExe harvest;
-          };
-        };
-
-        # 一日分をまとめて読み、model の呼び出しを定額枠の中で日に数回へ抑える
-        systemd.timers.${name} = {
-          wantedBy = [ "timers.target" ];
-          timerConfig = {
-            OnCalendar = "*-*-* 07:00:00";
-            Persistent = true;
-          };
-        };
+        dotfiles.platform.cli.commands.agentMemoryHarvest = job.command;
+        dotfiles.health.observations."agents/maintenance/memory-harvest" = job.observation;
+        home-manager.users.${cfg.workstation.username}.systemd.user = job.units;
       };
 }

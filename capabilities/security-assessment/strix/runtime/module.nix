@@ -30,10 +30,6 @@ let
       meta.mainProgram = "strix";
       passthru = {
         inherit native image;
-        commandSmokeTimeoutArgs = [
-          "--kill-after=2s"
-          "20s"
-        ];
       };
     };
   };

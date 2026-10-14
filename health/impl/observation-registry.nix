@@ -56,19 +56,6 @@ let
     // {
       description = "${kind}専用markerと安全なmeta.mainProgramを持つpackage";
     };
-  safeRelativePath =
-    value:
-    value != ""
-    && hasNoControlCharacters value
-    && !lib.hasPrefix "/" value
-    && !lib.hasSuffix "/" value
-    && builtins.all (segment: segment != "" && segment != "." && segment != "..") (
-      lib.splitString "/" value
-    );
-  relativePath = types.addCheck nonEmptyString safeRelativePath;
-  relativeSymlinkTarget = types.addCheck nonEmptyString (
-    value: lib.hasPrefix "../" value && safeRelativePath (lib.removePrefix "../" value)
-  );
   httpUrl = types.addCheck nonEmptyString (
     value: builtins.match "https?://[^[:space:][:cntrl:]]+" value != null
   );
@@ -97,19 +84,6 @@ let
     timeoutSeconds = lib.mkOption { type = timeoutSeconds; };
     failureMessage = lib.mkOption { type = nonEmptyString; };
   };
-
-  requiredPathType = types.submodule {
-    options = {
-      kind = lib.mkOption {
-        type = types.enum [
-          "file"
-          "directory"
-        ];
-      };
-      executable = lib.mkOption { type = types.bool; };
-    };
-  };
-  requiredPathsType = types.attrsOf requiredPathType;
 
   loadState = types.enum [
     "loaded"
@@ -161,6 +135,11 @@ let
   socketUnit = types.addCheck safeToken (lib.hasSuffix ".socket");
   timerUnit = types.addCheck safeToken (lib.hasSuffix ".timer");
   sliceUnit = types.addCheck safeToken (lib.hasSuffix ".slice");
+  # 同名 unit が両 manager に並存し得るため manager の既定値は不可
+  systemdManager = types.enum [
+    "system"
+    "user"
+  ];
 
   thresholdOrderIsValid =
     observation:
@@ -215,23 +194,6 @@ let
     expectedSource = lib.mkOption { type = absolutePath; };
   } (_: true);
 
-  releaseTreeType =
-    mkObservationType "release-tree"
-      {
-        visiblePath = lib.mkOption { type = absolutePath; };
-        visibleTarget = lib.mkOption { type = relativeSymlinkTarget; };
-        currentLink = lib.mkOption { type = absolutePath; };
-        releasesRoot = lib.mkOption { type = absolutePath; };
-        entrypoint = lib.mkOption { type = relativePath; };
-        requiredPaths = lib.mkOption { type = requiredPathsType; };
-        versionArgs = lib.mkOption { type = versionArgsType; };
-      }
-      (
-        observation:
-        builtins.isAttrs (observation.requiredPaths or null)
-        && builtins.all safeRelativePath (builtins.attrNames observation.requiredPaths)
-      );
-
   deployedPathType = mkObservationType "deployed-path" {
     source = lib.mkOption { type = absolutePath; };
     destination = lib.mkOption { type = absolutePath; };
@@ -260,6 +222,7 @@ let
   } (_: true);
 
   systemdServiceType = mkObservationType "systemd-service" {
+    manager = lib.mkOption { type = systemdManager; };
     unit = lib.mkOption { type = serviceUnit; };
     loadStates = lib.mkOption { type = uniqueNonEmptyListOf loadState; };
     activeStates = lib.mkOption { type = uniqueNonEmptyListOf activeState; };
@@ -267,6 +230,7 @@ let
   } (_: true);
 
   systemdSocketType = mkObservationType "systemd-socket" {
+    manager = lib.mkOption { type = systemdManager; };
     unit = lib.mkOption { type = socketUnit; };
     loadStates = lib.mkOption { type = uniqueNonEmptyListOf loadState; };
     activeStates = lib.mkOption { type = uniqueNonEmptyListOf activeState; };
@@ -274,6 +238,7 @@ let
   } (_: true);
 
   systemdTimerType = mkObservationType "systemd-timer" {
+    manager = lib.mkOption { type = systemdManager; };
     timer = lib.mkOption { type = timerUnit; };
     service = lib.mkOption { type = serviceUnit; };
     unitFileStates = lib.mkOption { type = uniqueNonEmptyListOf unitFileState; };
@@ -290,6 +255,7 @@ let
             "container"
           ];
         };
+        manager = lib.mkOption { type = systemdManager; };
         target = lib.mkOption { type = safeToken; };
         warningAt = lib.mkOption { type = types.ints.unsigned; };
         failureAt = lib.mkOption { type = types.ints.positive; };
@@ -299,6 +265,8 @@ let
         builtins.isInt (observation.warningAt or null)
         && builtins.isInt (observation.failureAt or null)
         && observation.warningAt < observation.failureAt
+        # Docker が数えるため container の再起動数の user manager 対応は不可
+        && ((observation.sourceKind or null) != "container" || (observation.manager or null) == "system")
       );
 
   filesystemThresholdType = mkObservationType "filesystem-threshold" {
@@ -396,7 +364,6 @@ let
     rosterType
     pathMatchType
     commandVersionType
-    releaseTreeType
     deployedPathType
     pathMetadataType
     processSliceType

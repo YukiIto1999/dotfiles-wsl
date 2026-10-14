@@ -127,12 +127,14 @@ in
 {
   dotfiles.agents.registry.codex = {
     binary = "codex";
-    runtimeWrapperMode = "managed";
-    rulesDestination = ".codex/AGENTS.md";
+    supply.package = "codex";
+    runtime.managed = { };
+    rules.file.destination = ".codex/AGENTS.md";
     skillsDestination = ".codex/skills";
-    subagentMode = "declared";
-    subagentFormat = "toml";
-    subagents = codexSubagents;
+    subagents.declared = {
+      sources = codexSubagents;
+      skillProjection = "dynamic";
+    };
     gatewayConfig = {
       source = codexGatewayConfig;
       format = "toml";
@@ -153,55 +155,14 @@ in
         seedMigrationCommand = migrateCodexConfig;
       };
     };
-    capabilityManagedFiles.projectMemory = if projectMemoryEnabled then "system" else null;
-    lspMode = "unsupported";
-    telemetryMode = "unsupported";
-    projectMemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
-    skillProjectionMode = "dynamic";
-    install = {
-      kind = "github-release";
-      updateOwner = "dotfiles";
-      layout = "package-tree";
-      repo = "openai/codex";
-      retainedReleases = 2;
-      releaseByArch = {
-        x86_64 = {
-          asset = "codex-package-x86_64-unknown-linux-musl.tar.gz";
-          entrypoint = "bin/codex";
-        };
-        aarch64 = {
-          asset = "codex-package-aarch64-unknown-linux-musl.tar.gz";
-          entrypoint = "bin/codex";
-        };
-      };
-      requiredPaths = {
-        "bin/codex" = {
-          kind = "file";
-          executable = true;
-        };
-        "codex-package.json" = {
-          kind = "file";
-          executable = false;
-        };
-        "bin/codex-code-mode-host" = {
-          kind = "file";
-          executable = true;
-        };
-        "codex-path/rg" = {
-          kind = "file";
-          executable = true;
-        };
-        "codex-resources/bwrap" = {
-          kind = "file";
-          executable = true;
-        };
-      };
-    };
+    lsp.unsupported = { };
+    telemetry.unsupported = { };
+    projectMemory =
+      if projectMemoryEnabled then { hooks.managedFile = "system"; } else { unsupported = { }; };
   };
 
   # codex の workspace-write sandbox が PATH 上に要求する bubblewrap
   environment.systemPackages = lib.optionals (builtins.elem "codex" cfg.agents.enabled) [
     pkgs.bubblewrap
   ];
-
 }

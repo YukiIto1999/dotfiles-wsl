@@ -72,12 +72,6 @@ value_is_allowed() {
     >/dev/null <<<"$observation"
 }
 
-relative_path_is_safe() {
-  local value=$1
-  [[ -n $value && $value != /* && $value != */ && $value != *//* ]] \
-    && [[ /$value/ != */./* && /$value/ != */../* ]]
-}
-
 capture_bounded() {
   local limit=$1
   shift
@@ -137,62 +131,6 @@ probe_command_version() {
     && expected_source=$($readlink_command -f -- "$expected" 2>/dev/null) \
     && [[ -n $path_source && $path_source == "$expected_source" ]] \
     && "$path" "${version_args[@]}" >/dev/null 2>&1; then
-    emit_pass
-  else
-    emit_failure
-  fi
-}
-
-probe_release_tree() {
-  local visible visible_target current releases entrypoint actual_visible current_resolved releases_resolved
-  local entrypoint_resolved visible_resolved
-  local entrypoint_path relative_path required_kind required_executable resolved_path
-  local -a version_args=()
-  local valid=1
-  visible=$($jq_command -r '.visiblePath' <<<"$observation")
-  visible_target=$($jq_command -r '.visibleTarget' <<<"$observation")
-  current=$($jq_command -r '.currentLink' <<<"$observation")
-  releases=$($jq_command -r '.releasesRoot' <<<"$observation")
-  entrypoint=$($jq_command -r '.entrypoint' <<<"$observation")
-  mapfile -t version_args < <($jq_command -r '.versionArgs[]' <<<"$observation")
-
-  if [[ ! -L $visible || ! -L $current ]] \
-    || ! actual_visible=$($readlink_command -- "$visible" 2>/dev/null) \
-    || [[ $actual_visible != "$visible_target" ]] \
-    || ! current_resolved=$($readlink_command -f -- "$current" 2>/dev/null) \
-    || ! releases_resolved=$($readlink_command -f -- "$releases" 2>/dev/null) \
-    || [[ -z $current_resolved || ! -d $current_resolved || ! -d $releases_resolved \
-      || ${current_resolved%/*} != "$releases_resolved" ]] \
-    || ! relative_path_is_safe "$entrypoint"; then
-    valid=0
-  fi
-
-  if ((valid == 1)); then
-    entrypoint_path=$current_resolved/$entrypoint
-    while IFS=$'\t' read -r relative_path required_kind required_executable; do
-      resolved_path=$($readlink_command -f -- "$current_resolved/$relative_path" 2>/dev/null) || {
-        valid=0
-        continue
-      }
-      [[ $resolved_path == "$current_resolved"/* ]] || valid=0
-      case "$required_kind" in
-        file) [[ -f $resolved_path ]] || valid=0 ;;
-        directory) [[ -d $resolved_path ]] || valid=0 ;;
-        *) valid=0 ;;
-      esac
-      if [[ $required_executable == true && ! -x $resolved_path ]]; then
-        valid=0
-      fi
-    done < <($jq_command -r '.requiredPaths | to_entries[] | [.key,.value.kind,(.value.executable|tostring)] | @tsv' <<<"$observation")
-  fi
-
-  if ((valid == 1)) \
-    && [[ ! -L $entrypoint_path && -f $entrypoint_path && -x $entrypoint_path ]] \
-    && entrypoint_resolved=$($readlink_command -f -- "$entrypoint_path" 2>/dev/null) \
-    && visible_resolved=$($readlink_command -f -- "$visible" 2>/dev/null) \
-    && [[ -n $entrypoint_resolved && $entrypoint_resolved == "$current_resolved"/* \
-      && $visible_resolved == "$entrypoint_resolved" ]] \
-    && "$entrypoint_resolved" "${version_args[@]}" >/dev/null 2>&1; then
     emit_pass
   else
     emit_failure
@@ -265,7 +203,9 @@ probe_process_slice() {
   while IFS=$'\t' read -r process target; do
     [[ -n $target ]] || continue
     for root in "${roots[@]}"; do
-      [[ $target == "$root"/* ]] || continue
+      # root は glob pattern として扱う。native profile の実体は /nix/store の名前でしか識別できない
+      # shellcheck disable=SC2053
+      [[ $target == $root/* ]] || continue
       if path=$(cgroup_path "$process/cgroup" 2>/dev/null); then
         if [[ $path/ == */"$slice"/* ]]; then
           inside=$((inside + 1))
@@ -282,12 +222,42 @@ probe_process_slice() {
   if ((outside == 0)); then emit_pass "$resources"; else emit_failure "$resources"; fi
 }
 
+# 指定した manager の unit が持つ systemctl show の出力の取得
+#   $1: 問い合わせ先 manager の system と user の別
+#   $2: 問い合わせる unit 名
+#   $3 以降: systemctl show へそのまま渡す追加の引数
+#   出力: systemctl show の標準出力
+#   標準エラー: 破棄
+#   終了: 不正な manager での systemctl 未実行の 1
+#   終了: 他の場合の systemctl の終了 status
+systemd_record() {
+  local manager=$1 unit=$2
+  shift 2
+  # 同名の system unit への fallback は不可のため manager の明示指定
+  case "$manager" in
+    system | user) ;;
+    *) return 1 ;;
+  esac
+  $systemctl_command "--$manager" show "$unit" "$@" 2>/dev/null
+}
+
+# unit の単一 property の値の取得
+#   $1: 問い合わせ先 manager の system と user の別
+#   $2: 問い合わせる unit 名
+#   $3: 取得する property 名
+#   出力: Key= を除いた property の値
+#   終了: systemd_record と同一
+systemd_show() {
+  systemd_record "$1" "$2" --property="$3" --value
+}
+
 probe_systemd_unit() {
-  local unit load active result
+  local manager unit load active result
+  manager=$($jq_command -r '.manager' <<<"$observation")
   unit=$($jq_command -r '.unit' <<<"$observation")
-  if load=$($systemctl_command show "$unit" --property=LoadState --value 2>/dev/null) \
-    && active=$($systemctl_command show "$unit" --property=ActiveState --value 2>/dev/null) \
-    && result=$($systemctl_command show "$unit" --property=Result --value 2>/dev/null) \
+  if load=$(systemd_show "$manager" "$unit" LoadState) \
+    && active=$(systemd_show "$manager" "$unit" ActiveState) \
+    && result=$(systemd_show "$manager" "$unit" Result) \
     && value_is_allowed loadStates "$load" \
     && value_is_allowed activeStates "$active" \
     && value_is_allowed results "$result"; then
@@ -297,36 +267,66 @@ probe_systemd_unit() {
   fi
 }
 
+# systemd の timer と対象 service の最後の実行結果の判定
+#   前提: $observation が systemd-timer の observation
+#   出力: 判定結果の JSON 一件
+#   正常な timer: LoadState が loaded で UnitFileState と ActiveState の少なくとも一方が許可内
+#   失敗の記録: service の LoadState と ExecMainStatus と Result の許可外の値
+#   完了状態: service の ActiveState と SubState の組の inactive/dead と active/exited
+#   完了待ちの状態: service の activating・reloading・deactivating・refreshing の各 ActiveState と active/running の組
+#   判定 pass: 正常な timer と完了状態で失敗の記録なしの service
+#   判定 warn: 正常な timer と完了待ちの状態で失敗の記録なしの service
+#   判定 fail: pass と warn に該当しない全て
+#   不変条件: service の状態は一回の systemctl show の snapshot
 probe_systemd_timer() {
-  local timer service timer_load unit_file active service_load result exit_status
+  local manager timer service timer_load unit_file active snapshot property value
+  local service_load='' result='' exit_status='' service_active='' service_sub=''
+  manager=$($jq_command -r '.manager' <<<"$observation")
   timer=$($jq_command -r '.timer' <<<"$observation")
   service=$($jq_command -r '.service' <<<"$observation")
-  # Result は rebuild の reset-failed で success へ戻る。最後の起動が非ゼロで終えた事実は
-  # ExecMainStatus に残るため、両方を読まないと失敗した maintenance job を見落とす
-  if timer_load=$($systemctl_command show "$timer" --property=LoadState --value 2>/dev/null) \
-    && unit_file=$($systemctl_command show "$timer" --property=UnitFileState --value 2>/dev/null) \
-    && active=$($systemctl_command show "$timer" --property=ActiveState --value 2>/dev/null) \
-    && service_load=$($systemctl_command show "$service" --property=LoadState --value 2>/dev/null) \
-    && result=$($systemctl_command show "$service" --property=Result --value 2>/dev/null) \
-    && exit_status=$($systemctl_command show "$service" --property=ExecMainStatus --value 2>/dev/null) \
-    && [[ $timer_load == loaded && $service_load == loaded ]] \
-    && { value_is_allowed unitFileStates "$unit_file" || value_is_allowed activeStates "$active"; } \
-    && value_is_allowed serviceResults "$result" \
-    && [[ $exit_status == 0 ]]; then
-    emit_pass
-  else
+  if ! { timer_load=$(systemd_show "$manager" "$timer" LoadState) \
+    && unit_file=$(systemd_show "$manager" "$timer" UnitFileState) \
+    && active=$(systemd_show "$manager" "$timer" ActiveState) \
+    && snapshot=$(systemd_record "$manager" "$service" \
+      --property=LoadState,ActiveState,SubState,Result,ExecMainStatus) \
+    && [[ $timer_load == loaded ]] \
+    && { value_is_allowed unitFileStates "$unit_file" || value_is_allowed activeStates "$active"; }; }; then
     emit_failure
+    return
   fi
+  while IFS='=' read -r property value; do
+    case "$property" in
+      LoadState) service_load=$value ;;
+      ActiveState) service_active=$value ;;
+      SubState) service_sub=$value ;;
+      Result) result=$value ;;
+      ExecMainStatus) exit_status=$value ;;
+    esac
+  done <<<"$snapshot"
+  # reset-failed が Result だけを消すため Result 単独での成否判定は不可
+  if [[ $service_load != loaded || $exit_status != 0 ]] \
+    || ! value_is_allowed serviceResults "$result"; then
+    emit_failure
+    return
+  fi
+  case "$service_active:$service_sub" in
+    inactive:dead | active:exited) emit_pass ;;
+    activating:* | reloading:* | deactivating:* | refreshing:* | active:running)
+      emit_direct warn "$service is $service_active/$service_sub; completion not yet observed"
+      ;;
+    *) emit_failure ;;
+  esac
 }
 
 probe_restart_counter() {
-  local source_kind target warning failure count restart status message
+  local source_kind manager target warning failure count restart status message
   source_kind=$($jq_command -r '.sourceKind' <<<"$observation")
+  manager=$($jq_command -r '.manager' <<<"$observation")
   target=$($jq_command -r '.target' <<<"$observation")
   warning=$($jq_command '.warningAt' <<<"$observation")
   failure=$($jq_command '.failureAt' <<<"$observation")
   if [[ $source_kind == systemd-service ]]; then
-    count=$($systemctl_command show "$target" --property=NRestarts --value 2>/dev/null) || {
+    count=$(systemd_show "$manager" "$target" NRestarts) || {
       emit_failure
       return
     }
@@ -669,7 +669,6 @@ case "$kind" in
   roster) probe_roster ;;
   path-match) probe_path_match ;;
   command-version) probe_command_version ;;
-  release-tree) probe_release_tree ;;
   deployed-path) probe_deployed_path ;;
   path-metadata) probe_path_metadata ;;
   process-slice) probe_process_slice ;;

@@ -9,6 +9,7 @@ let
   enabled = builtins.elem "browser-automation" config.dotfiles.capabilities.resolved;
   front = pkgs.callPackage ./package.nix {
     chromium = config.dotfiles.capabilities.browser-runtime.package;
+    supervise = config.dotfiles.platform.supervise.package;
   };
 in
 {

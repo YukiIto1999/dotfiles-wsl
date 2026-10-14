@@ -6,10 +6,8 @@ let
   validClientName =
     value:
     nonEmpty value && value != "." && value != ".." && builtins.match "[A-Za-z0-9._+-]+" value != null;
-  # Installer temp basenames add at most 26 bytes for the leading dot and
-  # ".next.<32-bit pid>.<RANDOM>.<attempt <= 32>".
-  # 128 + 26 remains below Linux NAME_MAX (255).
-  clientBinaryMaxLength = 128;
+  # Linux NAME_MAX。binary 名は公開 wrapper の file 名になる
+  clientBinaryMaxLength = 255;
   validClientBinaryName =
     value: validClientName value && builtins.stringLength value <= clientBinaryMaxLength;
   pathSegments = path: lib.splitString "/" path;
@@ -29,8 +27,13 @@ let
       )
     );
   absolutePathType = types.addCheck types.str validAbsolutePath;
+  relativeDestinationType = types.addCheck types.str validRelativeDestination;
   nonEmptyStringType = types.addCheck types.str nonEmpty;
   safeBasenameType = types.addCheck types.str validClientBinaryName;
+  # llm-agents.nix の package attribute。flake 参照の一成分として引用なしで渡せる文字に限る
+  supplyPackageType = types.addCheck types.str (
+    value: builtins.match "[A-Za-z0-9][A-Za-z0-9._-]*" value != null
+  );
   systemdUnitBasenameType = types.addCheck nonEmptyStringType (
     value:
     builtins.stringLength value <= 247 && builtins.match "[A-Za-z0-9][A-Za-z0-9_.-]*" value != null
@@ -38,6 +41,8 @@ let
   systemdCalendarType = types.addCheck nonEmptyStringType (
     value: builtins.match "[^[:cntrl:]]*" value != null && builtins.match "[[:space:]]*" value == null
   );
+  # attrsOf の key は型で表せないため、空 ID の拒否だけを key の検査として足す
+  nonEmptyKeys = type: types.addCheck type (value: builtins.all nonEmpty (builtins.attrNames value));
 
   managedFileType = types.submodule {
     options = {
@@ -59,7 +64,7 @@ let
           "seed"
         ];
       };
-      destination = lib.mkOption { type = types.str; };
+      destination = lib.mkOption { type = relativeDestinationType; };
       seedMigrationCommand = lib.mkOption {
         type = types.nullOr types.package;
         default = null;
@@ -67,96 +72,64 @@ let
     };
   };
 
-  releaseType = types.submodule {
-    options = {
-      asset = lib.mkOption { type = types.str; };
-      entrypoint = lib.mkOption { type = types.str; };
-    };
+  # 値を持たない枝。対応なしと、追加値のない対応形式を同じ表現にする
+  emptyBranch = types.submodule { };
+  # 対応形式が参照する最終 managedFiles の key。実在の照合は assertionsFor が構築時に行う
+  managedFileBinding = types.submodule {
+    options.managedFile = lib.mkOption { type = nonEmptyStringType; };
   };
+  subagentSources = types.addCheck (nonEmptyKeys (types.attrsOf types.path)) (
+    sources: sources != { }
+  );
 
-  releaseByArchType = types.submodule {
-    options = {
-      x86_64 = lib.mkOption { type = releaseType; };
-      aarch64 = lib.mkOption { type = releaseType; };
-    };
-  };
+  branch = options: types.submodule { inherit options; };
+  tag = type: lib.mkOption { inherit type; };
 
-  requiredPathType = types.submodule {
-    options = {
-      kind = lib.mkOption {
+  subagentsType = types.attrTag {
+    unsupported = tag emptyBranch;
+    native = tag (branch {
+      destination = lib.mkOption { type = relativeDestinationType; };
+      sources = lib.mkOption { type = subagentSources; };
+      skillProjection = lib.mkOption { type = types.enum [ "dynamic" ]; };
+    });
+    rendered = tag (branch {
+      destination = lib.mkOption { type = relativeDestinationType; };
+      sources = lib.mkOption { type = subagentSources; };
+      skillProjection = lib.mkOption {
         type = types.enum [
-          "file"
-          "directory"
+          "preload"
+          "dynamic"
         ];
       };
-      executable = lib.mkOption { type = types.bool; };
-    };
+    });
+    declared = tag (branch {
+      sources = lib.mkOption { type = subagentSources; };
+      skillProjection = lib.mkOption { type = types.enum [ "dynamic" ]; };
+    });
   };
 
-  installerScriptInstallType = types.addCheck (types.submodule {
-    options = {
-      kind = lib.mkOption {
-        type = types.enum [ "installer-script" ];
-      };
-      updateOwner = lib.mkOption {
-        type = types.enum [ "upstream-installer" ];
-      };
-      layout = lib.mkOption {
-        type = types.enum [ "upstream-managed" ];
-      };
-      scriptUrl = lib.mkOption { type = types.str; };
-      executableRoot = lib.mkOption {
-        type = types.nullOr nonEmptyStringType;
-        default = null;
-        description = "upstream installer が実行 file の実体を置く home 相対 directory。runtime wrapper を使う client では必須。";
-      };
-    };
-  }) (install: (install.kind or null) == "installer-script");
+  rulesType = types.attrTag {
+    file = tag (branch {
+      destination = lib.mkOption { type = relativeDestinationType; };
+    });
+    embedded = tag emptyBranch;
+  };
 
-  githubReleaseInstallType =
-    types.addCheck
-      (types.submodule {
-        options = {
-          kind = lib.mkOption {
-            type = types.enum [ "github-release" ];
-          };
-          updateOwner = lib.mkOption {
-            type = types.enum [ "dotfiles" ];
-          };
-          layout = lib.mkOption {
-            type = types.enum [
-              "single-binary"
-              "package-tree"
-            ];
-          };
-          # upstream が archive を出さない client もある。raw は asset そのものが entrypoint で、
-          # archive の member 検査に相当する境界を持たないため single-binary だけに許す
-          assetFormat = lib.mkOption {
-            type = types.enum [
-              "tar.gz"
-              "raw"
-            ];
-            default = "tar.gz";
-          };
-          repo = lib.mkOption { type = types.str; };
-          retainedReleases = lib.mkOption { type = types.ints.between 2 10; };
-          releaseByArch = lib.mkOption { type = releaseByArchType; };
-          requiredPaths = lib.mkOption {
-            type = types.attrsOf requiredPathType;
-            default = { };
-          };
-        };
-      })
-      (
-        install:
-        (install.kind or null) == "github-release"
-        && ((install.assetFormat or "tar.gz") != "raw" || install.layout == "single-binary")
-      );
+  runtimeType = types.attrTag {
+    managed = tag emptyBranch;
+    unsupported = tag emptyBranch;
+  };
 
-  installType = types.oneOf [
-    installerScriptInstallType
-    githubReleaseInstallType
-  ];
+  supportType = types.attrTag {
+    supported = tag managedFileBinding;
+    unsupported = tag emptyBranch;
+  };
+
+  projectMemoryType = types.attrTag {
+    hooks = tag managedFileBinding;
+    plugin = tag managedFileBinding;
+    unsupported = tag emptyBranch;
+  };
 
   runtimeTimerType = types.submodule {
     options = {
@@ -197,45 +170,26 @@ let
   clientType = types.submodule {
     options = {
       binary = lib.mkOption { type = safeBasenameType; };
-      runtimeWrapperMode = lib.mkOption {
-        type = types.enum [
-          "managed"
-          "unsupported"
-        ];
-        description = "agent runtime launcher wrapper の配備可否。";
+      supply = lib.mkOption {
+        type = types.submodule {
+          options.package = lib.mkOption {
+            type = supplyPackageType;
+            description = "供給元 flake の packages.<system> が公開する package attribute。binary は bin/<binary> に置かれる。";
+          };
+        };
+        description = "client binary の供給契約。更新、rollback、世代の保持は dotfiles-agent-supply が client 別の native profile で行う。";
+      };
+      runtime = lib.mkOption {
+        type = runtimeType;
+        description = "agent runtime launcher wrapper の配備可否。unsupported は公開 command を runtime なしの直接起動にする。";
       };
       versionArgs = lib.mkOption {
-        type = types.listOf types.str;
+        type = types.addCheck (types.listOf nonEmptyStringType) (args: args != [ ]);
         default = [ "--version" ];
       };
-      install = lib.mkOption { type = installType; };
-      rulesDestination = lib.mkOption { type = types.nullOr types.str; };
-      skillsDestination = lib.mkOption { type = types.str; };
-      subagentMode = lib.mkOption {
-        type = types.enum [
-          "native"
-          "rendered"
-          "declared"
-          "unsupported"
-        ];
-      };
-      subagentsDestination = lib.mkOption {
-        type = types.nullOr types.str;
-        default = null;
-      };
-      subagentFormat = lib.mkOption {
-        type = types.nullOr (
-          types.enum [
-            "toml"
-            "frontmatter-markdown"
-          ]
-        );
-        default = null;
-      };
-      subagents = lib.mkOption {
-        type = types.attrsOf types.path;
-        default = { };
-      };
+      rules = lib.mkOption { type = rulesType; };
+      skillsDestination = lib.mkOption { type = relativeDestinationType; };
+      subagents = lib.mkOption { type = subagentsType; };
       gatewayConfig = lib.mkOption {
         type = types.submodule {
           options = {
@@ -246,188 +200,55 @@ let
                 "toml"
               ];
             };
-            managedFile = lib.mkOption { type = types.str; };
+            managedFile = lib.mkOption { type = nonEmptyStringType; };
           };
         };
       };
       managedFiles = lib.mkOption {
         type = types.attrsOf managedFileType;
         default = { };
+        # submodule 再構成時に制約が失われるため attrsOf submodule の addCheck は不採用
+        apply =
+          files:
+          assert lib.assertMsg (builtins.all nonEmpty (
+            builtins.attrNames files
+          )) "agent managed file IDs must be non-empty";
+          files;
       };
-      capabilityManagedFiles = lib.mkOption {
-        type = types.submodule {
-          options = {
-            lsp = lib.mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-            telemetry = lib.mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-            projectMemory = lib.mkOption {
-              type = types.nullOr types.str;
-              default = null;
-            };
-          };
-        };
-        default = { };
-      };
-      lspMode = lib.mkOption {
-        type = types.enum [
-          "supported"
-          "unsupported"
-        ];
-      };
-      telemetryMode = lib.mkOption {
-        type = types.enum [
-          "supported"
-          "unsupported"
-        ];
-      };
-      projectMemoryMode = lib.mkOption {
-        type = types.enum [
-          "hooks"
-          "plugin"
-          "unsupported"
-        ];
-      };
-      skillProjectionMode = lib.mkOption {
-        type = types.enum [
-          "preload"
-          "dynamic"
-          "unsupported"
-        ];
-        description = "required Skill route の client 固有 projection。";
-      };
+      lsp = lib.mkOption { type = supportType; };
+      telemetry = lib.mkOption { type = supportType; };
+      projectMemory = lib.mkOption { type = projectMemoryType; };
     };
   };
 
-  subagentContractValid =
+  modeOf = tagged: builtins.head (builtins.attrNames tagged);
+  branchOf = tagged: tagged.${modeOf tagged};
+
+  subagentSourcesOf = client: (branchOf client.subagents).sources or { };
+  subagentDestinationOf = client: (branchOf client.subagents).destination or null;
+  skillProjectionOf =
     client:
-    if client.subagentMode == "native" then
-      client.subagentsDestination != null && client.subagentFormat == null && client.subagents != { }
-    else if client.subagentMode == "rendered" then
-      client.subagentsDestination != null && client.subagentFormat != null && client.subagents != { }
-    else if client.subagentMode == "declared" then
-      client.subagentsDestination == null && client.subagentFormat != null && client.subagents != { }
+    if modeOf client.subagents == "unsupported" then
+      "unsupported"
     else
-      client.subagentsDestination == null && client.subagentFormat == null && client.subagents == { };
-  skillProjectionContractValid =
-    client:
-    if client.skillProjectionMode == "preload" then
-      client.subagentMode == "rendered" && client.subagentFormat == "frontmatter-markdown"
-    else if client.skillProjectionMode == "dynamic" then
-      client.subagentMode != "unsupported"
-    else
-      client.subagentMode == "unsupported";
-
-  installContractValid =
-    client:
-    let
-      inherit (client) install;
-    in
-    if install.kind == "installer-script" then
-      true
-    else
-      let
-        requiredPathIds = builtins.attrNames install.requiredPaths;
-        entrypoints = map (release: release.entrypoint) (builtins.attrValues install.releaseByArch);
-        entrypointRequiredPathValid =
-          entrypoint:
-          let
-            requiredPath = install.requiredPaths.${entrypoint} or null;
-          in
-          requiredPath != null && requiredPath.kind == "file" && requiredPath.executable;
-      in
-      builtins.all validRelativeDestination entrypoints
-      && builtins.all validRelativeDestination requiredPathIds
-      && (
-        if install.layout == "single-binary" then
-          install.requiredPaths == { }
-        else
-          install.requiredPaths != { } && builtins.all entrypointRequiredPathValid entrypoints
-      );
-
-  capabilityContractValid =
-    client:
-    let
-      bindings = client.capabilityManagedFiles;
-      referencedFiles = builtins.filter (file: file != null) (builtins.attrValues bindings);
-    in
-    ((client.lspMode == "supported") == (bindings.lsp != null))
-    && ((client.telemetryMode == "supported") == (bindings.telemetry != null))
-    && ((client.projectMemoryMode != "unsupported") == (bindings.projectMemory != null))
-    && builtins.all (file: builtins.hasAttr file client.managedFiles) referencedFiles;
-
-  # これらは command 名、argv、配備 path、生成 file 名、参照 key である。
-  # optional option の不在は null、tagged branch の不在は型で表し、空文字は受理しない。
-  requiredStringFailuresFor =
-    cfg:
-    let
-      clientNames = builtins.attrNames cfg.clients;
-      invalidClientsFor =
-        select: builtins.filter (name: !builtins.all nonEmpty (select cfg.clients.${name})) clientNames;
-      clientsWhere = predicate: builtins.filter (name: predicate cfg.clients.${name}) clientNames;
-      installClientsWhere = predicate: clientsWhere (client: predicate client.install);
-      displayEmpty = value: if nonEmpty value then value else "<empty>";
-    in
-    {
-      enabledIds = map displayEmpty (builtins.filter (id: !nonEmpty id) cfg.enabled);
-      clientIds = map displayEmpty (builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.registry));
-      binaries = invalidClientsFor (client: [ client.binary ]);
-      versionArguments = invalidClientsFor (client: client.versionArgs);
-      rulesDestinations = invalidClientsFor (
-        client: lib.optional (client.rulesDestination != null) client.rulesDestination
-      );
-      skillsDestinations = invalidClientsFor (client: [ client.skillsDestination ]);
-      subagentsDestinations = invalidClientsFor (
-        client: lib.optional (client.subagentsDestination != null) client.subagentsDestination
-      );
-      subagentIds = invalidClientsFor (client: builtins.attrNames client.subagents);
-      managedFileIds = invalidClientsFor (client: builtins.attrNames client.managedFiles);
-      managedFileDestinations = invalidClientsFor (
-        client: map (file: file.destination) (builtins.attrValues client.managedFiles)
-      );
-      gatewayManagedFileReferences = invalidClientsFor (client: [ client.gatewayConfig.managedFile ]);
-      capabilityManagedFileReferences = invalidClientsFor (
-        client: builtins.filter (value: value != null) (builtins.attrValues client.capabilityManagedFiles)
-      );
-      installScriptUrls = installClientsWhere (
-        install: install.kind == "installer-script" && !nonEmpty install.scriptUrl
-      );
-      installRepositories = installClientsWhere (
-        install: install.kind == "github-release" && !nonEmpty install.repo
-      );
-      installAssetsX86_64 = installClientsWhere (
-        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.x86_64.asset
-      );
-      installAssetsAarch64 = installClientsWhere (
-        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.aarch64.asset
-      );
-      installEntrypointsX86_64 = installClientsWhere (
-        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.x86_64.entrypoint
-      );
-      installEntrypointsAarch64 = installClientsWhere (
-        install: install.kind == "github-release" && !nonEmpty install.releaseByArch.aarch64.entrypoint
-      );
-      sharedSkillIds = map displayEmpty (
-        builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.shared.skills)
-      );
-      sharedSubagentIds = map displayEmpty (
-        builtins.filter (id: !nonEmpty id) (builtins.attrNames cfg.shared.subagents)
-      );
-    };
-
-  requiredStringChecksFor =
-    cfg: lib.mapAttrs (_: failures: failures == [ ]) (requiredStringFailuresFor cfg);
+      (branchOf client.subagents).skillProjection;
+  rulesDestinationOf = client: client.rules.file.destination or null;
+  capabilityFileOf = client: capability: (branchOf client.${capability}).managedFile or null;
 in
 {
-  inherit requiredStringChecksFor requiredStringFailuresFor;
+  inherit
+    modeOf
+    branchOf
+    subagentSourcesOf
+    subagentDestinationOf
+    skillProjectionOf
+    rulesDestinationOf
+    capabilityFileOf
+    ;
 
   options = {
     enabled = lib.mkOption {
-      type = types.listOf types.str;
+      type = types.listOf nonEmptyStringType;
       description = "この host が必要とする agent client ID。";
     };
     automaticUpdates.clients = lib.mkOption {
@@ -445,11 +266,34 @@ in
       type = types.attrsOf absolutePathType;
       readOnly = true;
       internal = true;
-      description = "agent client ID ごとの実行 path。";
+      description = "採用済み agent client ID ごとの native profile 内の実行 path。PATH には置かず、公開 command は runtime wrapper か直接起動 wrapper が指す。";
+    };
+    clientExecutionDependencies = lib.mkOption {
+      type = types.attrsOf (types.listOf absolutePathType);
+      readOnly = true;
+      internal = true;
+      description = ''
+        初回 seed 以外の配備 source を含む採用済み client ごとの不変な実行依存の store path 一覧
+        session と timer job による全子の終了までの GC 保護
+      '';
+    };
+    supply = {
+      root = lib.mkOption {
+        type = absolutePathType;
+        readOnly = true;
+        internal = true;
+        description = "client 別 native profile の親 directory。";
+      };
+      source = lib.mkOption {
+        type = nonEmptyStringType;
+        readOnly = true;
+        internal = true;
+        description = "更新時に最新 revision を解決する供給元の flake reference。flake.lock の採用 input から導く。";
+      };
     };
     runtime = {
       skillRoots = lib.mkOption {
-        type = types.listOf (types.addCheck types.str validRelativeDestination);
+        type = types.listOf relativeDestinationType;
         readOnly = true;
         internal = true;
       };
@@ -564,92 +408,73 @@ in
     };
   };
 
+  # 型が表せない枝間の整合だけを構築時に拒否する。枝の形と必須値、path の形は型が拒否する
   assertionsFor =
     cfg:
     let
       clientNames = builtins.attrNames cfg.clients;
       unknownEnabledClients = builtins.filter (name: !(builtins.hasAttr name cfg.registry)) cfg.enabled;
-      invalidSubagentClients = builtins.filter (
-        name: !subagentContractValid cfg.clients.${name}
-      ) clientNames;
-      invalidSkillProjectionClients = builtins.filter (
-        name: !skillProjectionContractValid cfg.clients.${name}
-      ) clientNames;
       invalidClientNames = builtins.filter (name: !validClientName name) (
         builtins.attrNames cfg.registry
       );
-      invalidInstallClients = builtins.filter (
-        name: !installContractValid cfg.clients.${name}
-      ) clientNames;
-      sharedDestinationRows = lib.concatMap (
+      emptySharedIds = builtins.filter (id: !nonEmpty id) (
+        builtins.attrNames cfg.shared.skills ++ builtins.attrNames cfg.shared.subagents
+      );
+      bindingRows = lib.concatMap (
         clientName:
         let
           client = cfg.clients.${clientName};
+          capabilityRows =
+            lib.concatMap
+              (
+                capability:
+                let
+                  file = capabilityFileOf client capability;
+                in
+                lib.optional (file != null) {
+                  inherit clientName file;
+                  field = capability;
+                }
+              )
+              [
+                "lsp"
+                "telemetry"
+                "projectMemory"
+              ];
         in
-        lib.optional (client.rulesDestination != null) {
-          inherit clientName;
-          field = "rulesDestination";
-          value = client.rulesDestination;
-        }
-        ++ [
+        [
           {
             inherit clientName;
-            field = "skillsDestination";
-            value = client.skillsDestination;
+            field = "gatewayConfig";
+            file = client.gatewayConfig.managedFile;
           }
         ]
-        ++ lib.optional (client.subagentsDestination != null) {
-          inherit clientName;
-          field = "subagentsDestination";
-          value = client.subagentsDestination;
-        }
+        ++ capabilityRows
       ) clientNames;
-      invalidSharedDestinationRows = builtins.filter (
-        row: !validRelativeDestination row.value
-      ) sharedDestinationRows;
-      invalidSharedDestinationLabels = map (
-        row: "${row.clientName}/${row.field} (${row.value})"
-      ) invalidSharedDestinationRows;
-      requiredStringFailures = lib.filterAttrs (_: failures: failures != [ ]) (
-        requiredStringFailuresFor cfg
+      danglingBindingLabels = map (row: "${row.clientName}/${row.field} (${row.file})") (
+        builtins.filter (
+          row: !(builtins.hasAttr row.file cfg.clients.${row.clientName}.managedFiles)
+        ) bindingRows
       );
-      requiredStringFailureMessages = lib.mapAttrsToList (
-        class: failures: "${class} (${lib.concatStringsSep ", " failures})"
-      ) requiredStringFailures;
-      missingGatewayManagedFiles = builtins.filter (
-        name:
-        !(builtins.hasAttr cfg.clients.${name}.gatewayConfig.managedFile cfg.clients.${name}.managedFiles)
-      ) clientNames;
-      invalidCapabilityClients = builtins.filter (
-        name: !capabilityContractValid cfg.clients.${name}
-      ) clientNames;
       managedRows = lib.concatMap (
         clientName:
         lib.mapAttrsToList (id: file: {
           inherit clientName id file;
         }) cfg.clients.${clientName}.managedFiles
       ) clientNames;
-      invalidManagedDestinationRows = builtins.filter (
-        row: !validRelativeDestination row.file.destination
-      ) managedRows;
-      invalidManagedDestinationLabels = map (
-        row: "${row.clientName}/${row.id} (${row.file.deployment}: ${row.file.destination})"
-      ) invalidManagedDestinationRows;
-      invalidSeedMigrationRows = builtins.filter (
-        row: row.file.seedMigrationCommand != null && row.file.deployment != "seed"
-      ) managedRows;
-      invalidSeedMigrationLabels = map (row: "${row.clientName}/${row.id}") invalidSeedMigrationRows;
-      # validator を通った destination 自体が canonical relative path である。
+      invalidSeedMigrationLabels = map (row: "${row.clientName}/${row.id}") (
+        builtins.filter (
+          row: row.file.seedMigrationCommand != null && row.file.deployment != "seed"
+        ) managedRows
+      );
       userManagedDestinations = map (row: row.file.destination) (
         builtins.filter (row: row.file.deployment != "system") managedRows
       );
       systemManagedDestinations = map (row: row.file.destination) (
         builtins.filter (row: row.file.deployment == "system") managedRows
       );
-      clientsWithoutVersionArgs = builtins.filter (
-        name: cfg.clients.${name}.versionArgs == [ ]
-      ) clientNames;
       clientBinaries = map (name: cfg.clients.${name}.binary) clientNames;
+      supplyPackages = map (name: cfg.clients.${name}.supply.package) clientNames;
     in
     [
       {
@@ -682,67 +507,28 @@ in
         message = "dotfiles.agents.shared.subagents must not be empty";
       }
       {
-        assertion = requiredStringFailures == { };
-        message =
-          "agent required semantic strings must be non-empty: "
-          + lib.concatStringsSep "; " requiredStringFailureMessages;
+        assertion = emptySharedIds == [ ];
+        message = "agent shared Skill and subagent IDs must be non-empty";
       }
       {
-        assertion = invalidSubagentClients == [ ];
+        assertion = danglingBindingLabels == [ ];
         message =
-          "agent subagent mode conflicts with destination, format, or sources: "
-          + lib.concatStringsSep ", " invalidSubagentClients;
+          "agent gateway and capability bindings must name a final managedFiles entry: "
+          + lib.concatStringsSep ", " danglingBindingLabels;
       }
       {
-        assertion = invalidSkillProjectionClients == [ ];
-        message =
-          "agent Skill projection conflicts with subagent mode or format: "
-          + lib.concatStringsSep ", " invalidSkillProjectionClients;
-      }
-      {
-        assertion = invalidInstallClients == [ ];
-        message =
-          "agent install lifecycle conflicts with layout or paths: "
-          + lib.concatStringsSep ", " invalidInstallClients;
-      }
-      {
-        assertion = invalidSharedDestinationRows == [ ];
-        message =
-          "agent shared destinations must be canonical home-relative paths: "
-          + lib.concatStringsSep ", " invalidSharedDestinationLabels;
-      }
-      {
-        assertion = invalidManagedDestinationRows == [ ];
-        message =
-          "agent managed destinations must be canonical deployment-relative paths: "
-          + lib.concatStringsSep ", " invalidManagedDestinationLabels;
-      }
-      {
-        assertion = invalidSeedMigrationRows == [ ];
+        assertion = invalidSeedMigrationLabels == [ ];
         message =
           "agent seedMigrationCommand is only valid for seed deployment: "
           + lib.concatStringsSep ", " invalidSeedMigrationLabels;
       }
       {
-        assertion = missingGatewayManagedFiles == [ ];
-        message =
-          "agent gatewayConfig.managedFile must name a final managedFiles entry: "
-          + lib.concatStringsSep ", " missingGatewayManagedFiles;
-      }
-      {
-        assertion = invalidCapabilityClients == [ ];
-        message =
-          "agent capability mode conflicts with its final managed file binding: "
-          + lib.concatStringsSep ", " invalidCapabilityClients;
-      }
-      {
-        assertion = clientsWithoutVersionArgs == [ ];
-        message =
-          "agent versionArgs must not be empty: " + lib.concatStringsSep ", " clientsWithoutVersionArgs;
-      }
-      {
         assertion = clientBinaries == lib.unique clientBinaries;
         message = "agent client binaries must be unique";
+      }
+      {
+        assertion = supplyPackages == lib.unique supplyPackages;
+        message = "agent client supply packages must be unique";
       }
       {
         assertion = userManagedDestinations == lib.unique userManagedDestinations;

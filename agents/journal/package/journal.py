@@ -5,12 +5,16 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, tzinfo
+from enum import Enum
 from pathlib import Path
+from time import time as epoch_seconds
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -18,10 +22,34 @@ PROMPTS = Path(__file__).resolve().parent / "prompts"
 MESSAGE_CHARS = 4000
 CHUNK_CHARS = 40000
 MODEL_TIMEOUT_SECONDS = 900
+DEADLINE_ENV = "DOTFILES_JOB_DEADLINE"
 
 
 class JournalError(Exception):
     pass
+
+
+def child_timeout(limit: float | None) -> float | None:
+    value = os.environ.get(DEADLINE_ENV)
+    if value is None:
+        return limit
+    try:
+        remaining = float(value) - epoch_seconds()
+    except ValueError:
+        raise JournalError(f"{DEADLINE_ENV} is not a number: {value!r}") from None
+    if remaining <= 0:
+        raise JournalError("the job deadline was reached; no new child process is started")
+    return remaining if limit is None else min(limit, remaining)
+
+
+def run(command: list[str], *, limit: float | None = None, **options: Any) -> subprocess.CompletedProcess:
+    timeout = child_timeout(limit)
+    try:
+        return subprocess.run(command, timeout=timeout, **options)
+    except subprocess.TimeoutExpired:
+        raise JournalError(f"{Path(command[0]).name} did not finish within {timeout:.0f}s") from None
+    except OSError as error:
+        raise JournalError(f"{Path(command[0]).name} could not start: {error}") from None
 
 
 @dataclass
@@ -69,12 +97,6 @@ def completed_day(now: datetime, tz: ZoneInfo, start_hour: int) -> date:
 
 def output_path(journal: Path, day: date, machine: str) -> Path:
     return journal / f"{day:%Y}" / f"{day:%m%d}" / f"{machine}.md"
-
-
-def pending_days(now: datetime, tz: ZoneInfo, start_hour: int, lookback: int, journal: Path, machine: str) -> list[date]:
-    latest = completed_day(now, tz, start_hour)
-    days = (latest - timedelta(days=offset) for offset in range(lookback))
-    return sorted(day for day in days if not output_path(journal, day, machine).exists())
 
 
 def entry_time(entry: dict) -> datetime | None:
@@ -180,13 +202,13 @@ def sessions_in(root: Path, start: datetime, end: datetime, tz: tzinfo) -> list[
 
 
 def project_root(cwd: str) -> str:
-    result = subprocess.run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    result = run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     root = result.stdout.strip()
     return root if result.returncode == 0 and root else cwd
 
 
 def commits_between(root: str, start: datetime, end: datetime) -> list[str]:
-    result = subprocess.run(
+    result = run(
         [
             "git", "-C", root, "log", "--all",
             f"--since={start.isoformat()}",
@@ -203,26 +225,24 @@ def summarize(options: argparse.Namespace, prompt: Path, material: str) -> str:
     # cwd を Git の外に置く。project memory の hook が動いても想起先の project を決められず、記憶を model の入力へ混ぜない。
     # 一時 directory の場所は TMPDIR で変わるため、work tree の中なら model を呼ばずに止める
     with tempfile.TemporaryDirectory(prefix="agent-journal-") as workdir:
-        inside = subprocess.run(["git", "-C", workdir, "rev-parse", "--is-inside-work-tree"], capture_output=True)
+        inside = run(["git", "-C", workdir, "rev-parse", "--is-inside-work-tree"], capture_output=True)
         if inside.returncode == 0:
             raise JournalError(f"{workdir} is inside a Git work tree; set TMPDIR outside any repository")
-        try:
-            result = subprocess.run(
-                [
-                    options.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules",
-                    "--no-tools", "--no-lsp", "--no-title",
-                    "--model", options.model, "--thinking", options.thinking,
-                    "--max-time", f"{MODEL_TIMEOUT_SECONDS - 60}",
-                    "--system-prompt", str(prompt),
-                ],
-                input=material,
-                capture_output=True,
-                text=True,
-                cwd=workdir,
-                timeout=MODEL_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            raise JournalError(f"{prompt.name}: the model did not answer within {MODEL_TIMEOUT_SECONDS}s") from None
+        budget = child_timeout(MODEL_TIMEOUT_SECONDS)
+        result = run(
+            [
+                options.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules",
+                "--no-tools", "--no-lsp", "--no-title",
+                "--model", options.model, "--thinking", options.thinking,
+                "--max-time", f"{max(1, int(budget) - 60)}",
+                "--system-prompt", str(prompt),
+            ],
+            limit=MODEL_TIMEOUT_SECONDS,
+            input=material,
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+        )
     summary = result.stdout.strip()
     if result.returncode != 0 or not summary:
         raise JournalError(f"{prompt.name}: the model failed: {result.stderr.strip()[-500:]}")
@@ -296,7 +316,7 @@ def compose(
 
 
 def git(journal: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(["git", "-C", str(journal), *args], capture_output=True, text=True)
+    result = run(["git", "-C", str(journal), *args], capture_output=True, text=True)
     if check and result.returncode != 0:
         raise JournalError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
     return result
@@ -312,20 +332,84 @@ def sync(journal: Path) -> str:
     return branch
 
 
-def record(journal: Path, path: Path, day: date, document: str) -> None:
+class Stage(Enum):
+    ABSENT = "absent"
+    GENERATED = "generated"
+    COMMITTED = "committed"
+    PUBLISHED = "published"
+
+
+def blob(journal: Path, revision: str, relative: str) -> bytes | None:
+    result = run(["git", "-C", str(journal), "show", f"{revision}:{relative}"], capture_output=True)
+    return result.stdout if result.returncode == 0 else None
+
+
+def stage_of(journal: Path, relative: str, branch: str) -> Stage:
+    path = journal / relative
+    if not path.is_file():
+        return Stage.ABSENT
+    body = path.read_bytes()
+    if blob(journal, f"origin/{branch}", relative) == body:
+        return Stage.PUBLISHED
+    if blob(journal, "HEAD", relative) == body:
+        return Stage.COMMITTED
+    return Stage.GENERATED
+
+
+def unfinished_days(journal: Path, machine: str, branch: str) -> list[date]:
+    candidates = {
+        entry[3:]
+        for entry in git(journal, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames").stdout.split("\0")
+        if len(entry) > 3
+    }
+    if git(journal, "rev-parse", "--verify", "--quiet", f"origin/{branch}", check=False).returncode == 0:
+        candidates |= set(filter(None, git(journal, "diff", "--name-only", "-z", f"origin/{branch}", "HEAD").stdout.split("\0")))
+    pattern = re.compile(rf"(\d{{4}})/(\d{{2}})(\d{{2}})/{re.escape(machine)}\.md")
+    days = []
+    for relative in sorted(candidates):
+        match = pattern.fullmatch(relative)
+        if match is None:
+            continue
+        try:
+            day = date(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        except ValueError:
+            continue
+        if stage_of(journal, relative, branch) is not Stage.PUBLISHED:
+            days.append(day)
+    return days
+
+
+def pending_days(
+    now: datetime, tz: ZoneInfo, start_hour: int, lookback: int, journal: Path, machine: str, branch: str
+) -> list[date]:
+    latest = completed_day(now, tz, start_hour)
+    recent = (latest - timedelta(days=offset) for offset in range(lookback))
+    unpublished = {
+        day
+        for day in recent
+        if stage_of(journal, str(output_path(journal, day, machine).relative_to(journal)), branch) is not Stage.PUBLISHED
+    }
+    return sorted(unpublished | set(unfinished_days(journal, machine, branch)))
+
+
+def write(path: Path, document: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
         handle.write(document)
     os.replace(handle.name, path)
-    relative = str(path.relative_to(journal))
+
+
+def commit(journal: Path, relative: str, day: date) -> None:
     git(journal, "add", "--", relative)
     if git(journal, "diff", "--cached", "--quiet", "--", relative, check=False).returncode != 0:
         git(journal, "commit", "--quiet", "-m", f"docs: {day.isoformat()} の日誌", "--", relative)
 
 
-def publish(journal: Path, branch: str) -> None:
-    if git(journal, "rev-parse", "--verify", "--quiet", "HEAD", check=False).returncode == 0:
-        git(journal, "push", "--quiet", "origin", f"HEAD:{branch}")
+def publish(journal: Path, branch: str, relative: str) -> None:
+    git(journal, "push", "--quiet", "origin", f"HEAD:{branch}")
+    # remote の内容が公開の正本のため push の終了 status による判定は不可
+    if blob(journal, f"origin/{branch}", relative) != (journal / relative).read_bytes():
+        raise JournalError(f"{relative} is not at origin/{branch} with the expected content after the push")
 
 
 def parse(argv: list[str] | None) -> argparse.Namespace:
@@ -350,30 +434,48 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     machine = options.machine_name
     try:
         branch = sync(journal)
+        days = [options.date] if options.date else pending_days(
+            now or datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, machine, branch
+        )
     except JournalError as error:
         print(f"dotfiles-agent-journal: {error}", file=sys.stderr)
         return 1
-    days = [options.date] if options.date else pending_days(
-        now or datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, machine
-    )
-    # 一日の失敗で後の日を止めない。失敗した日は file を作らないので、次の実行が拾い直す
     failed = []
     for day in days:
+        path = output_path(journal, day, machine)
+        relative = str(path.relative_to(journal))
         start, end = window(day, tz, options.start_hour)
         try:
-            sessions = sessions_in(options.sessions_root, start, end, tz)
-            if not sessions:
-                print(f"{day}: omp の作業はない")
-                continue
-            record(journal, output_path(journal, day, machine), day, compose(options, machine, day, start, end, sessions))
-            publish(journal, branch)
+            stage = Stage.ABSENT if options.date else stage_of(journal, relative, branch)
+            entered = stage
+            recorded = 0
+            if stage is Stage.ABSENT:
+                sessions = sessions_in(options.sessions_root, start, end, tz)
+                if not sessions:
+                    print(f"{day}: omp の作業はない")
+                    continue
+                write(path, compose(options, machine, day, start, end, sessions))
+                recorded = len(sessions)
+                stage = stage_of(journal, relative, branch)
+            if stage is Stage.GENERATED:
+                commit(journal, relative, day)
+                stage = Stage.COMMITTED
+            if stage is Stage.COMMITTED:
+                publish(journal, branch, relative)
         except JournalError as error:
             print(f"dotfiles-agent-journal: {day}: {error}", file=sys.stderr)
             failed.append(day)
             continue
-        print(f"{day}: {len(sessions)} session を記録した")
+        if entered is Stage.ABSENT:
+            print(f"{day}: {recorded} session を記録した")
+        elif entered is Stage.GENERATED:
+            print(f"{day}: 生成済みの日誌を commit して公開した")
+        else:
+            print(f"{day}: commit 済みの日誌を公開した")
     return 1 if failed else 0
 
 
 if __name__ == "__main__":
+    # 既定の SIGTERM は一時 directory と model の子を残すため既定動作は不可
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
     sys.exit(main())

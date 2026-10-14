@@ -8,13 +8,11 @@ in
 {
   dotfiles.agents.registry.antigravity = {
     binary = "agy";
-    runtimeWrapperMode = "unsupported";
-    rulesDestination = ".gemini/AGENTS.md";
+    supply.package = "antigravity-cli";
+    runtime.unsupported = { };
+    rules.file.destination = ".gemini/AGENTS.md";
     skillsDestination = ".gemini/antigravity-cli/skills";
-    subagentMode = "unsupported";
-    subagentsDestination = null;
-    subagentFormat = null;
-    subagents = { };
+    subagents.unsupported = { };
     gatewayConfig = {
       source = mcpConfig;
       format = "json";
@@ -26,16 +24,8 @@ in
       deployment = "home";
       destination = ".gemini/antigravity-cli/mcp_config.json";
     };
-    capabilityManagedFiles = { };
-    lspMode = "unsupported";
-    telemetryMode = "unsupported";
-    projectMemoryMode = "unsupported";
-    skillProjectionMode = "unsupported";
-    install = {
-      kind = "installer-script";
-      updateOwner = "upstream-installer";
-      layout = "upstream-managed";
-      scriptUrl = "https://antigravity.google/cli/install.sh";
-    };
+    lsp.unsupported = { };
+    telemetry.unsupported = { };
+    projectMemory.unsupported = { };
   };
 }

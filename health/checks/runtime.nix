@@ -2,7 +2,6 @@
 {
   source = [
     (
-
       let
         base = import ../fixtures/runtime-base.nix { inherit pkgs lib; };
         fragments = import ../fixtures/runtime-fragments.nix {
@@ -16,28 +15,25 @@
           filesystemFreeDoctor
           invalidNormalizedDoctors
           killedProbeDoctor
+          managerDoctors
           numericNoiseDoctor
           numericOversizeDoctor
           numericSetInvalidDoctors
           numericSetUsedDoctor
           poisonDoctor
           passDoctor
-          releaseDirectoryDoctor
-          releaseEscapeDoctor
-          releaseMissingLinkFixtures
-          releaseNonExecutableDoctor
           restartThresholdFailureDoctor
           rosterFailureOnlyDoctor
           rosterOmitDoctor
           strayProcessDoctor
           termTimeoutDoctor
           timeoutDoctor
+          timerStateDoctors
           unreadableProcessDoctor
           warningDoctor
           zramInvalidPathDoctor
           zramPathDoctor
           ;
-        inherit (base.support) mkRow;
         inherit (fragments)
           malformedFragmentDoctors
           restartFailureWithoutPayloadDoctor
@@ -63,7 +59,6 @@
                   {id:"fixture/roster",status:"pass"},
                   {id:"fixture/path-match",status:"pass"},
                   {id:"fixture/command-version",status:"pass"},
-                  {id:"fixture/release-tree",status:"pass"},
                   {id:"fixture/deployed-path",status:"pass"},
                   {id:"fixture/path-metadata",status:"pass"},
                   {id:"fixture/systemd-service",status:"pass"},
@@ -91,8 +86,8 @@
                   fixtureJournal:{bytes:1024},
                   fixtureProtocol:{state:"ok"},
                   fixtureNumericSet:[{name:"c",freePercent:20},{name:"d",freePercent:30}],
-                  fixtureProcessSlice:{inside:2,outside:0},
-                  serviceRestarts:[{unit:"service-ok.service",count:0}],
+                  fixtureProcessSlice:{inside:3,outside:0},
+                  serviceRestarts:[{manager:"system",unit:"service-ok.service",count:0}],
                   containerRestarts:[{container:"container-ok",count:0}],
                   fixtureSwap:{
                     totalBytes:8589934592,
@@ -146,13 +141,11 @@
               set -e
               test "$failure_status" -eq 1
               jq -e '
-                (.checks | length) == 22
-                and all(.checks[]; .status == "fail")
-                and (.failures | length) == 22
+                all(.checks[]; .status == "fail")
                 and ([.failures[] | select(.id == "fixture/numeric-set/c" or .id == "fixture/numeric-set/d") | .message]
                   == ["free-percent crossed its fail threshold","free-percent crossed its fail threshold"])
                 and .warnings == []
-                and .resources.fixtureProcessSlice == {inside:0,outside:2}
+                and .resources.fixtureProcessSlice == {inside:0,outside:3}
                 and .resources.serviceRestarts == []
                 and .resources.containerRestarts == []
                 and ([.failures[].id] | index("fixture/normalized-fallback")) == null
@@ -161,12 +154,10 @@
 
               warning_output=$(${lib.getExe warningDoctor} --json)
               jq -e '
-                (.checks | length) == 5
-                and all(.checks[]; .status == "warn")
-                and (.warnings | length) == 5
+                all(.checks[]; .status == "warn")
                 and any(.warnings[]; . == {id:"fixture/warn-numeric-set/c",message:"free-percent crossed its warn threshold"})
                 and .failures == []
-                and .resources.serviceRestarts == [{unit:"service-warn.service",count:5}]
+                and .resources.serviceRestarts == [{manager:"system",unit:"service-warn.service",count:5}]
                 and .resources.containerRestarts == [{container:"container-warn",count:5}]
               ' <<<"$warning_output" >/dev/null
 
@@ -183,10 +174,76 @@
                   message:"service-fail.service reached the restart failure threshold"
                 }]
                 and .resources == {
-                  serviceRestarts:[{unit:"service-fail.service",count:20}],
+                  serviceRestarts:[{manager:"system",unit:"service-fail.service",count:20}],
                   containerRestarts:[]
                 }
               ' <<<"$restart_threshold_failure_output" >/dev/null
+
+              ${lib.concatStringsSep "\n" (
+                lib.concatLists (
+                  lib.mapAttrsToList (
+                    caseName: managers:
+                    lib.mapAttrsToList (
+                      manager: fixture:
+                      let
+                        restartRows = lib.optional (fixture.expectation.restart == "pass") {
+                          inherit manager;
+                          unit = "shared-${caseName}.service";
+                          count = 0;
+                        };
+                        anyFail = lib.any (status: status == "fail") (lib.attrValues fixture.expectation);
+                      in
+                      ''
+                        set +e
+                        manager_output=$(XDG_RUNTIME_DIR=/run/user/1000 ${lib.getExe fixture.doctor} --json)
+                        manager_status=$?
+                        set -e
+                        test "$manager_status" -eq ${if anyFail then "1" else "0"}
+                        jq -e \
+                          --argjson expected ${lib.escapeShellArg (builtins.toJSON fixture.expectation)} \
+                          --argjson restarts ${lib.escapeShellArg (builtins.toJSON restartRows)} '
+                          ([.checks[] | {key: (.id | ltrimstr("fixture/${caseName}-${manager}-")), value: .status}] | from_entries) == $expected
+                          and .warnings == []
+                          and (.failures | length) == ([$expected[] | select(. == "fail")] | length)
+                          and .resources.serviceRestarts == $restarts
+                        ' <<<"$manager_output" >/dev/null
+                      ''
+                    ) managers
+                  ) managerDoctors
+                )
+              )}
+              ${lib.concatStringsSep "\n" (
+                lib.mapAttrsToList (state: fixture: ''
+                  set +e
+                  timer_state_output=$(XDG_RUNTIME_DIR=/run/user/1000 ${lib.getExe fixture.doctor} --json)
+                  timer_state_status=$?
+                  set -e
+                  if [[ "$timer_state_status" != ${if fixture.status == "fail" then "1" else "0"} ]]; then
+                    printf 'timer state ${state}: unexpected exit %s\n' "$timer_state_status" >&2
+                    exit 1
+                  fi
+                  jq -e --arg expected ${lib.escapeShellArg fixture.status} '
+                    .checks == [{id:"fixture/timer-state",status:$expected}]
+                    and (.warnings | length) == (if $expected == "warn" then 1 else 0 end)
+                    and (.failures | length) == (if $expected == "fail" then 1 else 0 end)
+                  ' <<<"$timer_state_output" >/dev/null || {
+                    printf 'timer state ${state}: %s\n' "$timer_state_output" >&2
+                    exit 1
+                  }
+                '') timerStateDoctors
+              )}
+
+              set +e
+              no_runtime_dir_output=$(env -u XDG_RUNTIME_DIR ${lib.getExe managerDoctors.healthy.user.doctor} --json)
+              no_runtime_dir_status=$?
+              set -e
+              test "$no_runtime_dir_status" -eq 1
+              jq -e '
+                (.checks | length) == 3
+                and all(.checks[]; .status == "fail")
+                and (.failures | length) == 3
+                and .resources.serviceRestarts == []
+              ' <<<"$no_runtime_dir_output" >/dev/null
 
               set +e
               human_output=$(${lib.getExe warningDoctor} 2>&1)
@@ -398,55 +455,6 @@
                 and .failures == [{id:"fixture/roster-failure-only",message:"fixture roster failed"}]
               ' <<<"$roster_failure_output" >/dev/null
 
-              set +e
-              release_escape_output=$(${lib.getExe releaseEscapeDoctor} --json)
-              release_escape_status=$?
-              set -e
-              test "$release_escape_status" -eq 1
-              jq -e '
-                .checks == [{id:"fixture/release-escape",status:"fail"}]
-                and .failures == [{id:"fixture/release-escape",message:"fixture release-tree failed"}]
-              ' <<<"$release_escape_output" >/dev/null
-
-              for release_invalid in \
-                ${lib.getExe releaseDirectoryDoctor} \
-                ${lib.getExe releaseNonExecutableDoctor}; do
-                set +e
-                release_invalid_output=$("$release_invalid" --json)
-                release_invalid_status=$?
-                set -e
-                test "$release_invalid_status" -eq 1
-                jq -e '
-                  (.checks | length) == 1
-                  and .checks[0].status == "fail"
-                  and (.failures | length) == 1
-                ' <<<"$release_invalid_output" >/dev/null
-              done
-
-              ${lib.concatStringsSep "\n" (
-                lib.mapAttrsToList (name: fixture: ''
-                  release_observation=release-missing-${name}.json
-                  release_scratch=release-missing-${name}-scratch
-                  mkdir "$release_scratch"
-                  printf '%s\n' ${lib.escapeShellArg (builtins.toJSON (mkRow "fixture/release-missing-${name}" fixture.observation))} >"$release_observation"
-                  set +e
-                  ${lib.getExe fixture.doctor.probe} \
-                    "$release_observation" "$release_scratch" >release-missing-${name}.out
-                  release_missing_status=$?
-                  set -e
-                  test "$release_missing_status" -eq 0
-                  jq -e '
-                    .checks == [{id:${builtins.toJSON fixture.observation.checkId},status:"fail"}]
-                    and .warnings == []
-                    and .failures == [{
-                      id:${builtins.toJSON fixture.observation.checkId},
-                      message:${builtins.toJSON fixture.observation.failureMessage}
-                    }]
-                    and .resources == []
-                    and .restart == null
-                  ' release-missing-${name}.out >/dev/null
-                '') releaseMissingLinkFixtures
-              )}
 
               timeout_output=$(${lib.getExe timeoutDoctor} --json)
               jq -e '

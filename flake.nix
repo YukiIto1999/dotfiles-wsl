@@ -17,6 +17,9 @@
     devenv.url = "github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222";
     actrun.url = "github:mizchi/actrun/1db9aff5b364de6eacda68e3f2ce2238f9992272";
 
+    # client binary の供給元。provider 自身の固定 nixpkgs と Bun を使うため、host の nixpkgs へ follows させない
+    llm-agents.url = "github:numtide/llm-agents.nix";
+
     orca = {
       url = "github:stablyai/orca/a7927b28ce45cbb044add478d957abe36c99ccd8";
       flake = false;
@@ -100,6 +103,7 @@
         ./platform/cli/module.nix
         ./platform/containers/module.nix
         ./platform/mcp/module.nix
+        ./platform/supervise/module.nix
         ./maintenance/cleanup/module.nix
         ./managed-artifacts/module.nix
         ./secrets/sops/module.nix
@@ -200,7 +204,11 @@
 
       closureChecks = mergeCheckParts [
         hostToplevelChecks
-        { nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel; }
+        {
+          nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel;
+          nixos-minimal-capability-toplevel = minimalCapabilityConfig.system.build.toplevel;
+          nixos-project-memory-disabled-toplevel = projectMemoryDisabledConfig.system.build.toplevel;
+        }
       ];
 
       checkFiles = builtins.filter builtins.pathExists (map (unit: unit.path + "/checks.nix") units);
@@ -367,7 +375,6 @@
       # 単一評価器でのT1予算超過のため逐次実行は不採用
       t1Evaluators = 2;
       t1EvaluatorHeapBytes = 4 * 1024 * 1024 * 1024;
-
       t1Shards = {
         source = systemPkgs.linkFarm (t1ShardPackage "source") sourceChecks;
         configuration = builtins.deepSeq (builtins.attrNames allChecks) (
@@ -446,8 +453,8 @@
             cp -R --preserve=mode ${self}/. "$out/"
             test -x "$out/workstation/activation/rebuild/impl/bootstrap.sh"
           '';
-          # 初回 system closure の前、または current generation の command 更新前に checkout から呼ぶ
-          dotfiles-install-agents = hostConfig.dotfiles.platform.cli.commands.installAgents;
+          # 初回の adoption と current generation の command 更新前に checkout から呼ぶ
+          dotfiles-agent-supply = hostConfig.dotfiles.platform.cli.commands.agentSupply;
           dotfiles-doctor = hostConfig.dotfiles.platform.cli.commands.doctor;
           dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
           # 配備済みのagent wrapperはcli.commandsに登録が無いためcli.commands経由は不可

@@ -15,7 +15,8 @@
 - [secrets](operations/secrets.md)では、暗号化済み secret の編集方法と鍵の扱いが分かる。
 - [OCI image](operations/oci-images.md)では、upstream image の確認、同期、更新手順が分かる。
 - [doctor](operations/doctor.md)では、実用状態の検査項目と失敗時の調査先が分かる。
-- [Agent client](operations/agent-clients.md)では、現在の checkout からの更新、日次 timer、release の確認方法が分かる。
+- [Agent client](operations/agent-clients.md)では、採用と試用、供給元からの更新、native profileの世代、rollbackの扱いが分かる。
+- [Orca からの client 起動](operations/orca-launch.md)では、Orca の起動 command、project の devShell への入口、貼る値、実機での確かめ方が分かる。
 - [作業日誌](operations/agent-journal.md)では、omp の作業日誌の出力先、日次 timer、作り直し方が分かる。
 - [記憶の収穫](operations/memory-harvest.md)では、omp の session 記録から訂正を project memory へ保存する timer、log の読み方、状態の扱いが分かる。
 - [Git hook](operations/git-hooks.md)では、dotfiles の検査と repository の hook の実行順序、repository の信頼、検証の段の入口、push 前の検証と省略の記録が分かる。

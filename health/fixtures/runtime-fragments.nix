@@ -303,6 +303,7 @@ let
     restart-target-mismatch = {
       observation = {
         kind = "restart-counter";
+        manager = "system";
         sourceKind = "systemd-service";
         target = "service-ok.service";
       };
@@ -320,6 +321,7 @@ let
     restart-service-kind-mismatch = {
       observation = {
         kind = "restart-counter";
+        manager = "system";
         sourceKind = "systemd-service";
         target = "service-ok.service";
       };
@@ -337,6 +339,7 @@ let
     restart-container-kind-mismatch = {
       observation = {
         kind = "restart-counter";
+        manager = "system";
         sourceKind = "container";
         target = "container-ok";
       };
@@ -354,6 +357,7 @@ let
     restart-pass-without-payload = {
       observation = {
         kind = "restart-counter";
+        manager = "system";
         sourceKind = "systemd-service";
         target = "service-ok.service";
       };
@@ -362,6 +366,7 @@ let
     restart-warn-without-payload = {
       observation = {
         kind = "restart-counter";
+        manager = "system";
         sourceKind = "systemd-service";
         target = "service-ok.service";
       };

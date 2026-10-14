@@ -5,306 +5,103 @@
         pkgs,
         lib,
         hostConfig,
-        hostOptions,
-        mkProbeSystem,
-        normalMachineModule,
         variantConfig,
         ...
       }:
-
       let
-        expected = builtins.fromJSON (builtins.readFile ../fixtures/client-contract.json);
-        agentConfig = hostConfig.dotfiles.agents;
-        inherit (agentConfig) clients;
-        variantClients = variantConfig.dotfiles.agents.clients;
-        wrapperDirectory = ".local/share/dotfiles-agent/bin";
-        runtimeWrapperModeVariantConfig =
-          (mkProbeSystem [
-            normalMachineModule
-            {
-              dotfiles.agents.registry.antigravity.runtimeWrapperMode = lib.mkForce "managed";
-              dotfiles.agents.registry.codex.runtimeWrapperMode = lib.mkForce "unsupported";
-            }
-          ]).config;
-        runtimeWrapperModeVariantHome =
-          runtimeWrapperModeVariantConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
-
-        projectManagedFile =
-          file:
-          builtins.removeAttrs file [
-            "seedMigrationCommand"
-            "source"
-          ]
-          // lib.optionalAttrs (file.seedMigrationCommand != null) {
-            seedMigrationCommand = lib.getName file.seedMigrationCommand;
-          };
-        projectClient = client: {
-          inherit (client)
-            binary
-            capabilityManagedFiles
-            rulesDestination
-            skillsDestination
-            versionArgs
-            ;
-          subagents = {
-            mode = client.subagentMode;
-            destination = client.subagentsDestination;
-            format = client.subagentFormat;
-            names = builtins.attrNames client.subagents;
-          };
-          capabilities = {
-            lsp = client.lspMode;
-            telemetry = client.telemetryMode;
-            projectMemory = client.projectMemoryMode;
-            skills = client.skillProjectionMode;
-          };
-          gateway = {
-            inherit (client.gatewayConfig) format managedFile;
-          };
-          managedFiles = lib.mapAttrs (_: projectManagedFile) client.managedFiles;
-          inherit (client) install;
-        };
-        actualContract = lib.mapAttrs (_: projectClient) clients;
-
-        clientOptions = builtins.removeAttrs (
-          hostOptions.dotfiles.agents.registry.type.nestedTypes.elemType.getSubOptions
-            [ ]
-        ) [ "_module" ];
-        managedFileOptions = builtins.removeAttrs (
-          clientOptions.managedFiles.type.nestedTypes.elemType.getSubOptions
-            [ ]
-        ) [ "_module" ];
-        capabilityManagedFileOptions = builtins.removeAttrs (
-          clientOptions.capabilityManagedFiles.type.getSubOptions
-            [ ]
-        ) [ "_module" ];
-        optionMetadata = {
-          enabled = {
-            type = hostOptions.dotfiles.agents.enabled.type.name;
-            elementType = hostOptions.dotfiles.agents.enabled.type.nestedTypes.elemType.name;
-            hasDefault = hostOptions.dotfiles.agents.enabled ? default;
-          };
-          shared = lib.mapAttrs (_: option: {
-            type = option.type.name;
-            internal = option.internal or false;
-            readOnly = option.readOnly or false;
-          }) hostOptions.dotfiles.agents.shared;
-          clients = {
-            type = hostOptions.dotfiles.agents.clients.type.name;
-            elementType = hostOptions.dotfiles.agents.clients.type.nestedTypes.elemType.name;
-            internal = hostOptions.dotfiles.agents.clients.internal or false;
-            hasDefault = hostOptions.dotfiles.agents.clients ? default;
-            readOnly = hostOptions.dotfiles.agents.clients.readOnly or false;
-          };
-          registry = {
-            type = hostOptions.dotfiles.agents.registry.type.name;
-            elementType = hostOptions.dotfiles.agents.registry.type.nestedTypes.elemType.name;
-            hasDefault = hostOptions.dotfiles.agents.registry ? default;
-          };
-          clientExecutables = {
-            type = hostOptions.dotfiles.agents.clientExecutables.type.name;
-            elementType = hostOptions.dotfiles.agents.clientExecutables.type.nestedTypes.elemType.name;
-            internal = hostOptions.dotfiles.agents.clientExecutables.internal or false;
-            readOnly = hostOptions.dotfiles.agents.clientExecutables.readOnly or false;
-          };
-          client = lib.mapAttrs (_: option: option.type.name) clientOptions;
-          managedFile = lib.mapAttrs (_: option: option.type.name) managedFileOptions;
-          capabilityManagedFile = lib.mapAttrs (_: option: option.type.name) capabilityManagedFileOptions;
-        };
-        runtimeWrapperModeMetadata =
-          if clientOptions ? runtimeWrapperMode then
-            {
-              type = clientOptions.runtimeWrapperMode.type.name;
-              hasDefault = clientOptions.runtimeWrapperMode ? default;
-            }
-          else
-            null;
-        expectedRuntimeWrapperModeMetadata = {
-          type = "enum";
-          hasDefault = false;
-        };
-        expectedOptionMetadata = {
-          enabled = {
-            type = "listOf";
-            elementType = "str";
-            hasDefault = false;
-          };
-          shared = {
-            rules = {
-              type = "path";
-              internal = true;
-              readOnly = true;
-            };
-            skills = {
-              type = "attrsOf";
-              internal = true;
-              readOnly = true;
-            };
-            subagents = {
-              type = "attrsOf";
-              internal = true;
-              readOnly = true;
-            };
-            routing = {
-              type = "submodule";
-              internal = true;
-              readOnly = true;
-            };
-          };
-          clients = {
-            type = "attrsOf";
-            elementType = "submodule";
-            internal = true;
-            hasDefault = false;
-            readOnly = true;
-          };
-          registry = {
-            type = "attrsOf";
-            elementType = "submodule";
-            hasDefault = true;
-          };
-          clientExecutables = {
-            type = "attrsOf";
-            elementType = "str";
-            internal = true;
-            readOnly = true;
-          };
-          client = {
-            projectMemoryMode = "enum";
-            binary = "str";
-            capabilityManagedFiles = "submodule";
-            subagentFormat = "nullOr";
-            subagentMode = "enum";
-            subagents = "attrsOf";
-            subagentsDestination = "nullOr";
-            gatewayConfig = "submodule";
-            install = "either";
-            lspMode = "enum";
-            managedFiles = "attrsOf";
-            rulesDestination = "nullOr";
-            runtimeWrapperMode = "enum";
-            skillsDestination = "str";
-            skillProjectionMode = "enum";
-            telemetryMode = "enum";
-            versionArgs = "listOf";
-          };
-          managedFile = {
-            deployment = "enum";
-            destination = "str";
-            format = "enum";
-            seedMigrationCommand = "nullOr";
-            source = "path";
-          };
-          capabilityManagedFile = {
-            projectMemory = "nullOr";
-            lsp = "nullOr";
-            telemetry = "nullOr";
-          };
-        };
-
-        fixtureSource = ../policy/AGENTS.md;
-        fixtureSeedMigrationCommand = pkgs.writeShellScriptBin "dotfiles-migrate-codex-config" "exit 0";
         agentContract = import ../impl/contract.nix { inherit lib; };
-        fixtureSubagents = lib.genAttrs expected.clients.claude.subagents.names (_: fixtureSource);
-        expectedRuntimeWrapperModes = {
-          antigravity = "unsupported";
-          claude = "managed";
-          codex = "managed";
-          omp = "managed";
-          opencode = "managed";
-        };
-        candidateClients = lib.mapAttrs (name: client: {
-          inherit (client)
-            binary
-            capabilityManagedFiles
-            rulesDestination
-            skillsDestination
-            versionArgs
-            install
-            ;
-          runtimeWrapperMode = expectedRuntimeWrapperModes.${name};
-          subagentMode = client.subagents.mode;
-          subagentsDestination = client.subagents.destination;
-          subagentFormat = client.subagents.format;
-          subagents = lib.genAttrs client.subagents.names (_: fixtureSource);
-          gatewayConfig = client.gateway // {
-            source = fixtureSource;
-          };
-          managedFiles = lib.mapAttrs (
-            _: file:
-            builtins.removeAttrs file [ "seedMigrationCommand" ]
-            // {
+        agentConfig = hostConfig.dotfiles.agents;
+        inherit (agentConfig) registry;
+        adapterNames = builtins.attrNames registry;
+        adapterDirectories = builtins.attrNames (
+          lib.filterAttrs (_: type: type == "directory") (builtins.readDir ../clients)
+        );
+        wrapperDirectory = ".local/share/dotfiles-agent/bin";
+        variantHome = variantConfig.home-manager.users.${variantConfig.dotfiles.workstation.username};
+
+        # 登録済み adapter の実値を出発点にし、固定済みの宣言の写しを持たない。評価済みの値が持つ
+        # _module と derivation を外して、新しい評価へ定義として渡せる素の attrset にする
+        fixtureSource = ../policy/AGENTS.md;
+        fixtureSeedMigrationCommand = pkgs.writeShellScriptBin "dotfiles-migrate-fixture" "exit 0";
+        plain =
+          value:
+          if lib.isDerivation value then
+            value
+          else if builtins.isAttrs value then
+            lib.mapAttrs (_: plain) (builtins.removeAttrs value [ "_module" ])
+          else if builtins.isList value then
+            map plain value
+          else
+            value;
+        neutralClient =
+          client:
+          client
+          // {
+            subagents = lib.mapAttrs (
+              _: branch:
+              branch
+              // lib.optionalAttrs (branch ? sources) {
+                sources = lib.mapAttrs (_: _: fixtureSource) branch.sources;
+              }
+            ) client.subagents;
+            gatewayConfig = client.gatewayConfig // {
               source = fixtureSource;
-            }
-            // lib.optionalAttrs (file ? seedMigrationCommand) {
-              seedMigrationCommand = fixtureSeedMigrationCommand;
-            }
-          ) client.managedFiles;
-          lspMode = client.capabilities.lsp;
-          telemetryMode = client.capabilities.telemetry;
-          projectMemoryMode = client.capabilities.projectMemory;
-          skillProjectionMode = client.capabilities.skills;
-        }) expected.clients;
+            };
+            managedFiles = lib.mapAttrs (
+              _: file:
+              file
+              // {
+                source = fixtureSource;
+              }
+              // lib.optionalAttrs (file.seedMigrationCommand != null) {
+                seedMigrationCommand = fixtureSeedMigrationCommand;
+              }
+            ) client.managedFiles;
+          };
         baseCandidate = {
-          enabled = expected.required;
-          inherit (agentConfig) runtime;
+          enabled = adapterNames;
+          runtime = plain agentConfig.runtime;
+          supply = plain agentConfig.supply;
           shared = {
             rules = fixtureSource;
             skills.fixture = fixtureSource;
-            subagents = fixtureSubagents;
+            subagents = lib.genAttrs (builtins.attrNames agentConfig.shared.subagents) (_: fixtureSource);
             routing = {
               subagentSkills = [ ];
               subagentHandoffs = [ ];
             };
           };
-          clients = candidateClients;
+          clients = lib.mapAttrs (_: client: plain (neutralClient client)) registry;
         };
-        missingRuntimeWrapperModeCandidate = baseCandidate // {
-          clients = baseCandidate.clients // {
-            claude = builtins.removeAttrs baseCandidate.clients.claude [ "runtimeWrapperMode" ];
-          };
-        };
-        expectedClientExecutables = lib.mapAttrs (
-          _: client: "${hostConfig.dotfiles.workstation.homeDir}/.local/bin/${client.binary}"
-        ) clients;
-        mutateRuntimeTimer =
-          timerName: update:
-          baseCandidate
-          // {
-            runtime = baseCandidate.runtime // {
-              timers = baseCandidate.runtime.timers // {
-                ${timerName} = baseCandidate.runtime.timers.${timerName} // update;
-              };
-            };
-          };
-        maximumTimerName = lib.concatStrings (lib.replicate 247 "a");
-        oversizedTimerName = lib.concatStrings (lib.replicate 248 "a");
 
         evalContract =
           candidate:
           lib.evalModules {
             modules = [
-              ({ config, ... }: {
-                options.dotfiles.agents = agentContract.options;
-                options.assertions = lib.mkOption {
-                  type = lib.types.listOf (
-                    lib.types.submodule {
-                      options = {
-                        assertion = lib.mkOption { type = lib.types.bool; };
-                        message = lib.mkOption { type = lib.types.str; };
-                      };
-                    }
-                  );
-                  default = [ ];
-                };
-                config.dotfiles.agents = builtins.removeAttrs candidate [ "clients" ] // {
-                  registry = candidate.clients;
-                  clients = lib.genAttrs (builtins.filter (
-                    name: builtins.hasAttr name candidate.clients
-                  ) candidate.enabled) (name: config.dotfiles.agents.registry.${name});
-                };
-                config.assertions = agentContract.assertionsFor config.dotfiles.agents;
-              })
+              (
+                { config, ... }:
+                {
+                  options.dotfiles.agents = agentContract.options;
+                  options.assertions = lib.mkOption {
+                    type = lib.types.listOf (
+                      lib.types.submodule {
+                        options = {
+                          assertion = lib.mkOption { type = lib.types.bool; };
+                          message = lib.mkOption { type = lib.types.str; };
+                        };
+                      }
+                    );
+                    default = [ ];
+                  };
+                  config.dotfiles.agents = builtins.removeAttrs candidate [ "clients" ] // {
+                    registry = candidate.clients;
+                    clients = lib.genAttrs (builtins.filter (
+                      name: builtins.hasAttr name candidate.clients
+                    ) candidate.enabled) (name: config.dotfiles.agents.registry.${name});
+                  };
+                  config.assertions = agentContract.assertionsFor config.dotfiles.agents;
+                }
+              )
             ];
           };
         contractIsValid =
@@ -313,33 +110,29 @@
             attempted = builtins.tryEval (
               let
                 evaluated = evalContract candidate;
-                evaluatedContract = evaluated.config.dotfiles.agents;
-                contractWithoutSeedCommands = evaluatedContract // {
-                  registry = lib.mapAttrs (
-                    _: client:
-                    client
-                    // {
-                      managedFiles = lib.mapAttrs (
-                        _: file: builtins.removeAttrs file [ "seedMigrationCommand" ]
-                      ) client.managedFiles;
-                    }
-                  ) evaluatedContract.registry;
-                  clients = contractWithoutSeedCommands.registry;
-                };
+                contract = evaluated.config.dotfiles.agents;
+                withoutSeedCommands = lib.mapAttrs (
+                  _: client:
+                  client
+                  // {
+                    managedFiles = lib.mapAttrs (
+                      _: file: builtins.removeAttrs file [ "seedMigrationCommand" ]
+                    ) client.managedFiles;
+                  }
+                ) contract.registry;
+                typedInputs = lib.mapAttrs (name: _: contract.${name}) (
+                  builtins.removeAttrs candidate [ "clients" ]
+                );
               in
-              builtins.deepSeq contractWithoutSeedCommands (
-                builtins.all (assertion: assertion.assertion) evaluated.config.assertions
+              builtins.deepSeq typedInputs (
+                builtins.deepSeq withoutSeedCommands (
+                  builtins.all (assertion: assertion.assertion) evaluated.config.assertions
+                )
               )
             );
           in
           attempted.success && attempted.value;
-        failedContractMessages =
-          candidate:
-          map (entry: entry.message) (
-            builtins.filter (entry: !entry.assertion) (evalContract candidate).config.assertions
-          );
-        requiredStringChecksFor =
-          candidate: agentContract.requiredStringChecksFor (evalContract candidate).config.dotfiles.agents;
+
         mutateClient =
           name: update:
           baseCandidate
@@ -348,6 +141,10 @@
               ${name} = baseCandidate.clients.${name} // update;
             };
           };
+        # 一つの枝を丸ごと別の値へ置き換える。attrTag は枝の追加ではなく置換だけを許す
+        replaceBranch =
+          name: field: value:
+          mutateClient name { ${field} = value; };
         renameClient =
           oldName: newName:
           baseCandidate
@@ -357,228 +154,54 @@
               ${newName} = baseCandidate.clients.${oldName};
             };
           };
-        mutateManagedDestination =
-          clientName: fileId: destination:
+        mutateTimer =
+          timerName: update:
+          baseCandidate
+          // {
+            runtime = baseCandidate.runtime // {
+              timers = baseCandidate.runtime.timers // {
+                ${timerName} = baseCandidate.runtime.timers.${timerName} // update;
+              };
+            };
+          };
+        mutateManagedFile =
+          clientName: fileId: update:
           mutateClient clientName {
             managedFiles = baseCandidate.clients.${clientName}.managedFiles // {
-              ${fileId} = baseCandidate.clients.${clientName}.managedFiles.${fileId} // {
-                inherit destination;
-              };
+              ${fileId} = baseCandidate.clients.${clientName}.managedFiles.${fileId} // update;
             };
           };
-        emptyBinaryCandidate = mutateClient "claude" { binary = ""; };
-        invalidBinaryCandidates = map (binary: mutateClient "claude" { inherit binary; }) [
-          "."
-          ".."
-          "bin/claude"
-          "bad name"
-        ];
-        duplicateBinaryCandidate = mutateClient "codex" {
-          binary = baseCandidate.clients.claude.binary;
-        };
-        binaryCandidateOfLength =
-          length:
-          mutateClient "claude" {
-            binary = lib.concatStrings (lib.replicate length "a");
-          };
-        emptyInstallScriptUrlCandidate = mutateClient "claude" {
-          install = baseCandidate.clients.claude.install // {
-            scriptUrl = "";
-          };
-        };
-        emptyInstallRepoCandidate = mutateClient "codex" {
-          install = baseCandidate.clients.codex.install // {
-            repo = "";
-          };
-        };
-        emptyInstallAarch64AssetCandidate = mutateClient "codex" {
-          install = baseCandidate.clients.codex.install // {
-            releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
-              aarch64 = baseCandidate.clients.codex.install.releaseByArch.aarch64 // {
-                asset = "";
-              };
-            };
-          };
-        };
-        emptyInstallX86AssetCandidate = mutateClient "codex" {
-          install = baseCandidate.clients.codex.install // {
-            releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
-              x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
-                asset = "";
-              };
-            };
-          };
-        };
-        emptyInstallEntrypointCandidate = mutateClient "codex" {
-          install = baseCandidate.clients.codex.install // {
-            releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
-              x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
-                entrypoint = "";
-              };
-            };
-          };
-        };
-        packageTreeInstall = baseCandidate.clients.codex.install // {
-          layout = "package-tree";
-          releaseByArch = lib.mapAttrs (
-            _: release: release // { entrypoint = "bin/codex"; }
-          ) baseCandidate.clients.codex.install.releaseByArch;
-          requiredPaths = {
-            bin = {
-              kind = "directory";
-              executable = false;
-            };
-            "bin/codex" = {
-              kind = "file";
-              executable = true;
-            };
-          };
-        };
-        invalidInstallEntrypointCandidate =
-          entrypoint:
-          mutateClient "codex" {
-            install = baseCandidate.clients.codex.install // {
-              releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
-                x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
-                  inherit entrypoint;
-                };
-              };
-            };
-          };
-        invalidRequiredPathCandidate =
-          path:
-          mutateClient "codex" {
-            install = packageTreeInstall // {
-              requiredPaths = packageTreeInstall.requiredPaths // {
-                ${path} = {
-                  kind = "file";
-                  executable = false;
-                };
-              };
-            };
-          };
-        requiredInstallNegativeEvalCaseNames = [
-          "entrypoint-current-segment"
-          "entrypoint-empty-segment"
-          "invalid-kind"
-          "legacy-asset-by-arch"
-          "legacy-binary-in-archive"
-          "required-path-current-segment"
-          "required-path-empty-segment"
-        ];
-        installNegativeEvalCases = {
-          entrypoint-current-segment = invalidInstallEntrypointCandidate "bin/./codex";
-          entrypoint-empty-segment = invalidInstallEntrypointCandidate "bin//codex";
-          invalid-kind = mutateClient "claude" {
-            install = baseCandidate.clients.claude.install // {
-              kind = "invalid-kind";
-            };
-          };
-          legacy-asset-by-arch = mutateClient "codex" {
-            install = baseCandidate.clients.codex.install // {
-              assetByArch = {
-                x86_64 = "legacy-x86_64.tar.gz";
-                aarch64 = "legacy-aarch64.tar.gz";
-              };
-            };
-          };
-          legacy-binary-in-archive = mutateClient "codex" {
-            install = baseCandidate.clients.codex.install // {
-              binaryInArchive = "codex";
-            };
-          };
-          required-path-current-segment = invalidRequiredPathCandidate "bin/./share";
-          required-path-empty-segment = invalidRequiredPathCandidate "bin//share";
-        };
-        unexpectedlyValidInstallNegativeEvalCases = builtins.attrNames (
-          lib.filterAttrs (_: contractIsValid) installNegativeEvalCases
-        );
-        invalidInstallEntrypointCandidates = map invalidInstallEntrypointCandidate [
-          ""
-          "/codex"
-          "../codex"
-          "bin/../codex"
-          "bin//codex"
-          "bin/./codex"
-        ];
-        invalidRequiredPathCandidates = map invalidRequiredPathCandidate [
-          ""
-          "/share/codex"
-          "../share/codex"
-          "share/../codex"
-          "bin//share"
-          "bin/./share"
-        ];
-        nonSeedMigrationCandidate = mutateClient "opencode" {
-          managedFiles = baseCandidate.clients.opencode.managedFiles // {
-            config = baseCandidate.clients.opencode.managedFiles.config // {
-              seedMigrationCommand = fixtureSeedMigrationCommand;
-            };
-          };
-        };
-        invalidRulesDestinationCandidate = mutateClient "claude" {
-          rulesDestination = "../AGENTS.md";
-        };
-        invalidSkillsDestinationCandidate = mutateClient "claude" {
-          skillsDestination = ".claude//skills";
-        };
-        invalidSubagentsDestinationCandidate = mutateClient "claude" {
-          subagentsDestination = "/tmp/agents";
-        };
-        invalidMultipleSharedDestinationsCandidate = mutateClient "claude" {
-          rulesDestination = "../AGENTS.md";
-          skillsDestination = ".claude//skills";
-        };
+        renderedSubagents = name: baseCandidate.clients.${name}.subagents.rendered;
+        maximumTimerName = lib.concatStrings (lib.replicate 247 "a");
+        oversizedTimerName = lib.concatStrings (lib.replicate 248 "a");
+
+        rejected = candidates: builtins.all (candidate: !contractIsValid candidate) candidates;
       in
       {
-        agent-client-roster =
-          assert expected.required != [ ];
-          assert clients != { };
-          assert lib.sort builtins.lessThan hostConfig.dotfiles.agents.enabled == expected.required;
-          assert lib.sort builtins.lessThan (builtins.attrNames clients) == expected.required;
-          assert variantConfig.dotfiles.agents.enabled == expected.required;
-          assert lib.sort builtins.lessThan (builtins.attrNames variantClients) == expected.required;
-          assert actualContract == expected.clients;
-          assert optionMetadata == expectedOptionMetadata;
-          assert runtimeWrapperModeMetadata == expectedRuntimeWrapperModeMetadata;
-          assert lib.mapAttrs (_: client: client.runtimeWrapperMode) clients == expectedRuntimeWrapperModes;
-          assert !contractIsValid missingRuntimeWrapperModeCandidate;
-          assert !contractIsValid (mutateClient "claude" { runtimeWrapperMode = "invalid"; });
-          assert builtins.attrNames agentConfig.clientExecutables == builtins.attrNames clients;
-          assert agentConfig.clientExecutables == expectedClientExecutables;
+        agent-client-contract =
+          # adapter の登録は clients/ の directory と一対一で、採用集合とは別に保たれる
+          assert adapterNames == adapterDirectories;
+          assert builtins.attrNames agentConfig.clients == lib.sort builtins.lessThan agentConfig.enabled;
+          assert builtins.attrNames agentConfig.clientExecutables == builtins.attrNames agentConfig.clients;
           assert
-            runtimeWrapperModeVariantHome.home.file."${wrapperDirectory}/${clients.antigravity.binary}".executable;
-          assert !(runtimeWrapperModeVariantHome.home.file ? "${wrapperDirectory}/${clients.codex.binary}");
+            builtins.attrNames agentConfig.clientExecutionDependencies
+            == builtins.attrNames agentConfig.clients;
+          assert lib.all (
+            name:
+            agentConfig.clientExecutables.${name}
+            == "${agentConfig.supply.root}/${name}/profile/bin/${agentConfig.clients.${name}.binary}"
+          ) (builtins.attrNames agentConfig.clients);
+          # 公開 command は PATH の前に置く wrapper だけで、runtime の対応なしでも native profile を PATH へ出さない
+          assert lib.all (
+            name:
+            variantHome.home.file
+              ? "${wrapperDirectory}/${variantConfig.dotfiles.agents.clients.${name}.binary}"
+          ) (builtins.attrNames variantConfig.dotfiles.agents.clients);
+          # 正しい宣言は構築を通り、対応形式の枝、必須値、参照の不整合は構築で拒否される
           assert contractIsValid baseCandidate;
-          assert
-            !contractIsValid (
-              mutateClient "omp" {
-                install = baseCandidate.clients.omp.install // {
-                  layout = "package-tree";
-                };
-              }
-            );
-          assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = ""; });
-          assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad/name"; });
-          assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = "bad name"; });
-          assert !contractIsValid (mutateRuntimeTimer "projectCacheGc" { name = ".hidden"; });
-          assert contractIsValid (mutateRuntimeTimer "autoupdate" { name = maximumTimerName; });
-          assert !contractIsValid (mutateRuntimeTimer "autoupdate" { name = oversizedTimerName; });
-          assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = ""; });
-          assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = "   "; });
-          assert !contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = "daily\n"; });
-          assert contractIsValid (mutateRuntimeTimer "autoupdate" { onCalendar = "*-*-* 00/6:00:00"; });
-          assert !contractIsValid (baseCandidate // { clients = { }; });
-          assert !contractIsValid (renameClient "codex" ".");
-          assert !contractIsValid (renameClient "codex" "..");
-          assert !contractIsValid (renameClient "codex" "bad/name");
-          assert !contractIsValid (renameClient "codex" "bad name");
-          assert builtins.elem "agent client IDs must be safe basenames: ." (
-            failedContractMessages (renameClient "codex" ".")
-          );
-          assert builtins.all (valid: valid) (builtins.attrValues (requiredStringChecksFor baseCandidate));
-          assert contractIsValid (baseCandidate // { enabled = [ "claude" ]; });
+          assert contractIsValid (baseCandidate // { enabled = [ (builtins.head adapterNames) ]; });
           assert !contractIsValid (baseCandidate // { enabled = [ "missing" ]; });
+          assert !contractIsValid (baseCandidate // { enabled = [ ]; });
           assert !contractIsValid (baseCandidate // { automaticUpdates.clients = [ "missing" ]; });
           assert contractIsValid (
             baseCandidate
@@ -587,368 +210,213 @@
               automaticUpdates.clients = [ "omp" ];
             }
           );
-          assert !contractIsValid (mutateClient "claude" { subagentFormat = "toml"; });
+          assert !contractIsValid (baseCandidate // { clients = { }; });
+          assert !contractIsValid (renameClient "codex" ".");
+          assert !contractIsValid (renameClient "codex" "..");
+          assert !contractIsValid (renameClient "codex" "bad/name");
+          assert !contractIsValid (renameClient "codex" "bad name");
+          # 廃止した供給と mode の field は、型が持たない option として拒否する
+          assert rejected [
+            (mutateClient "omp" { install.kind = "github-release"; })
+            (mutateClient "omp" { runtimeWrapperMode = "managed"; })
+            (mutateClient "omp" { lspMode = "supported"; })
+            (mutateClient "omp" { capabilityManagedFiles.lsp = "lsp"; })
+            (mutateClient "omp" { subagentMode = "rendered"; })
+            (mutateClient "omp" { rulesDestination = ".omp/agent/AGENTS.md"; })
+          ];
+          # discriminated union の枝
+          assert rejected [
+            (replaceBranch "omp" "lsp" { enabled = { }; })
+            (replaceBranch "omp" "lsp" {
+              supported.managedFile = "lsp";
+              unsupported = { };
+            })
+            (replaceBranch "omp" "lsp" { supported = { }; })
+            (replaceBranch "omp" "lsp" { supported.managedFile = ""; })
+            (replaceBranch "omp" "lsp" { supported.extra = "untyped"; })
+            (replaceBranch "omp" "lsp" "supported")
+            (replaceBranch "claude" "telemetry" { supported = { }; })
+            (replaceBranch "claude" "projectMemory" { hooks = { }; })
+            (replaceBranch "claude" "projectMemory" { unknown.managedFile = "managed-settings"; })
+            (replaceBranch "omp" "runtime" { invalid = { }; })
+            (replaceBranch "omp" "runtime" {
+              managed = { };
+              unsupported = { };
+            })
+            (replaceBranch "omp" "rules" { file = { }; })
+            (replaceBranch "omp" "rules" { file.destination = ""; })
+            (replaceBranch "omp" "rules" { sometimes = { }; })
+            (replaceBranch "omp" "subagents" { rendered = { }; })
+            (replaceBranch "omp" "subagents" { sometimes = { }; })
+          ];
+          assert contractIsValid (replaceBranch "claude" "rules" { embedded = { }; });
+          assert contractIsValid (replaceBranch "omp" "lsp" { unsupported = { }; });
+          assert contractIsValid (replaceBranch "omp" "projectMemory" { unsupported = { }; });
+          # TOML の subagent は preload を表現できず、preload は frontmatter markdown の枝だけが選べる
+          assert rejected [
+            (replaceBranch "codex" "subagents" {
+              declared = baseCandidate.clients.codex.subagents.declared // {
+                skillProjection = "preload";
+              };
+            })
+            (replaceBranch "codex" "subagents" {
+              declared = baseCandidate.clients.codex.subagents.declared // {
+                format = "frontmatter-markdown";
+              };
+            })
+            (replaceBranch "codex" "subagents" {
+              native = {
+                destination = ".codex/agents";
+                sources = baseCandidate.clients.codex.subagents.declared.sources;
+                skillProjection = "preload";
+              };
+            })
+            (replaceBranch "omp" "subagents" {
+              rendered = (renderedSubagents "omp") // {
+                skillProjection = "unsupported";
+              };
+            })
+            (replaceBranch "omp" "subagents" {
+              rendered = (renderedSubagents "omp") // {
+                sources = { };
+              };
+            })
+            (replaceBranch "omp" "subagents" {
+              rendered = (renderedSubagents "omp") // {
+                destination = "/tmp/agents";
+              };
+            })
+            (replaceBranch "omp" "subagents" {
+              rendered = (renderedSubagents "omp") // {
+                format = "toml";
+              };
+            })
+          ];
+          assert contractIsValid (
+            replaceBranch "omp" "subagents" {
+              rendered = (renderedSubagents "omp") // {
+                skillProjection = "dynamic";
+              };
+            }
+          );
+          assert contractIsValid (replaceBranch "omp" "subagents" { unsupported = { }; });
+          # 枝の中の値と対応しない参照は、枝の形では表せないため構築の整合として拒否する
+          assert !contractIsValid (replaceBranch "omp" "lsp" { supported.managedFile = "missing"; });
+          assert !contractIsValid (replaceBranch "claude" "telemetry" { supported.managedFile = "missing"; });
+          assert !contractIsValid (replaceBranch "codex" "projectMemory" { hooks.managedFile = "missing"; });
           assert
             !contractIsValid (
-              mutateClient "antigravity" {
-                subagentsDestination = ".gemini/agents";
-                subagentFormat = "frontmatter-markdown";
-                subagents.fixture = fixtureSource;
+              mutateClient "claude" {
+                gatewayConfig = baseCandidate.clients.claude.gatewayConfig // {
+                  managedFile = "missing";
+                };
               }
             );
-          assert !contractIsValid (mutateClient "codex" { subagentFormat = null; });
           assert
             !contractIsValid (
               mutateClient "opencode" {
                 managedFiles = builtins.removeAttrs baseCandidate.clients.opencode.managedFiles [ "config" ];
               }
             );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                managedFiles = baseCandidate.clients.codex.managedFiles // {
-                  user = baseCandidate.clients.codex.managedFiles.user // {
-                    destination = baseCandidate.clients.claude.managedFiles.user-settings.destination;
-                  };
+          # destination と識別子
+          assert rejected [
+            (replaceBranch "claude" "rules" { file.destination = "../AGENTS.md"; })
+            (mutateClient "claude" { skillsDestination = ".claude//skills"; })
+            (mutateClient "claude" { skillsDestination = ""; })
+            (mutateManagedFile "codex" "user" { destination = "../outside-home.toml"; })
+            (mutateManagedFile "codex" "system" { destination = "/etc/outside.toml"; })
+            (mutateManagedFile "opencode" "config" { destination = ".config//opencode.json"; })
+            (mutateManagedFile "opencode" "config" { destination = ".config/./opencode.json"; })
+            (mutateManagedFile "antigravity" "mcp" { destination = ""; })
+            (mutateManagedFile "codex" "user" {
+              destination = baseCandidate.clients.claude.managedFiles.user-settings.destination;
+            })
+            (mutateManagedFile "claude" "managed-mcp" {
+              destination = baseCandidate.clients.claude.managedFiles.managed-settings.destination;
+            })
+            (mutateManagedFile "opencode" "config" { seedMigrationCommand = fixtureSeedMigrationCommand; })
+            (mutateManagedFile "claude" "managed-settings" { owner = "untyped"; })
+            (mutateClient "claude" {
+              managedFiles = baseCandidate.clients.claude.managedFiles // {
+                "" = baseCandidate.clients.claude.managedFiles.managed-settings // {
+                  destination = ".claude/empty-id.json";
                 };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                managedFiles = baseCandidate.clients.codex.managedFiles // {
-                  user = baseCandidate.clients.codex.managedFiles.user // {
-                    destination = baseCandidate.clients.opencode.managedFiles.config.destination;
-                  };
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateManagedDestination "codex" "user" ".config/opencode/../opencode/opencode.json"
-            );
-          assert !contractIsValid (mutateManagedDestination "antigravity" "mcp" "/tmp/antigravity.json");
-          assert !contractIsValid (mutateManagedDestination "opencode" "config" ".config//opencode.json");
-          assert !contractIsValid (mutateManagedDestination "opencode" "config" ".config/./opencode.json");
-          assert !contractIsValid (mutateManagedDestination "opencode" "config" ".config/../opencode.json");
-          assert !contractIsValid (mutateManagedDestination "codex" "user" "../outside-home.toml");
-          assert !contractIsValid (mutateManagedDestination "codex" "system" "../outside-etc.toml");
-          assert !contractIsValid invalidRulesDestinationCandidate;
-          assert builtins.elem
-            "agent shared destinations must be canonical home-relative paths: claude/rulesDestination (../AGENTS.md)"
-            (failedContractMessages invalidRulesDestinationCandidate);
-          assert !contractIsValid invalidSkillsDestinationCandidate;
-          assert builtins.elem
-            "agent shared destinations must be canonical home-relative paths: claude/skillsDestination (.claude//skills)"
-            (failedContractMessages invalidSkillsDestinationCandidate);
-          assert !contractIsValid invalidSubagentsDestinationCandidate;
-          assert builtins.elem
-            "agent shared destinations must be canonical home-relative paths: claude/subagentsDestination (/tmp/agents)"
-            (failedContractMessages invalidSubagentsDestinationCandidate);
-          assert builtins.elem
-            "agent shared destinations must be canonical home-relative paths: claude/rulesDestination (../AGENTS.md), claude/skillsDestination (.claude//skills)"
-            (failedContractMessages invalidMultipleSharedDestinationsCandidate);
-          assert !contractIsValid (mutateClient "antigravity" { lspMode = "supported"; });
-          assert
-            !contractIsValid (
-              mutateClient "antigravity" {
-                capabilityManagedFiles.lsp = "mcp";
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "opencode" {
-                managedFiles = builtins.removeAttrs baseCandidate.clients.opencode.managedFiles [
-                  "project-memory-plugin"
-                ];
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                capabilityManagedFiles.projectMemory = null;
-              }
-            );
-          assert !contractIsValid emptyBinaryCandidate;
-          assert builtins.all (candidate: !contractIsValid candidate) invalidBinaryCandidates;
-          assert !contractIsValid duplicateBinaryCandidate;
-          assert builtins.elem "agent client binaries must be unique" (
-            failedContractMessages duplicateBinaryCandidate
-          );
-          assert contractIsValid (binaryCandidateOfLength 127);
-          assert contractIsValid (binaryCandidateOfLength 128);
-          assert !contractIsValid (binaryCandidateOfLength 129);
-          assert !contractIsValid (mutateClient "codex" { versionArgs = [ ]; });
-          assert !contractIsValid (mutateClient "codex" { versionArgs = [ "" ]; });
-          assert !contractIsValid (mutateClient "claude" { rulesDestination = ""; });
-          assert !contractIsValid (mutateClient "claude" { skillsDestination = ""; });
-          assert !contractIsValid (mutateClient "claude" { subagentsDestination = ""; });
-          assert
-            !contractIsValid (
-              mutateClient "claude" {
-                subagents = baseCandidate.clients.claude.subagents // {
+              };
+            })
+            (mutateClient "omp" {
+              subagents.rendered = (renderedSubagents "omp") // {
+                sources = (renderedSubagents "omp").sources // {
                   "" = fixtureSource;
                 };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "antigravity" {
-                managedFiles.mcp = baseCandidate.clients.antigravity.managedFiles.mcp // {
-                  destination = "";
-                };
-              }
-            );
-          assert
-            !(requiredStringChecksFor (
-              mutateClient "antigravity" {
-                gatewayConfig = baseCandidate.clients.antigravity.gatewayConfig // {
-                  managedFile = "";
-                };
-              }
-            )).gatewayManagedFileReferences;
-          assert
-            !(requiredStringChecksFor (
-              mutateClient "claude" {
-                capabilityManagedFiles = baseCandidate.clients.claude.capabilityManagedFiles // {
-                  lsp = "";
-                };
-              }
-            )).capabilityManagedFileReferences;
-          assert
-            !(requiredStringChecksFor (
-              mutateClient "antigravity" {
-                managedFiles = baseCandidate.clients.antigravity.managedFiles // {
-                  "" = {
-                    source = fixtureSource;
-                    format = "json";
-                    deployment = "home";
-                    destination = ".gemini/antigravity-cli/empty-id.json";
-                  };
-                };
-              }
-            )).managedFileIds;
-          assert
-            !(requiredStringChecksFor (
-              baseCandidate // { enabled = [ "" ] ++ builtins.tail baseCandidate.enabled; }
-            )).enabledIds;
-          assert
-            !(requiredStringChecksFor (
+              };
+            })
+            (baseCandidate // { enabled = [ "" ] ++ builtins.tail baseCandidate.enabled; })
+            (
               baseCandidate
               // {
                 clients = baseCandidate.clients // {
                   "" = baseCandidate.clients.antigravity;
                 };
               }
-            )).clientIds;
-          assert
-            !contractIsValid (
+            )
+            (
               baseCandidate
               // {
                 shared = baseCandidate.shared // {
-                  skills = baseCandidate.shared.skills // {
-                    "" = fixtureSource;
-                  };
+                  skills."" = fixtureSource;
                 };
               }
-            );
-          assert
-            !contractIsValid (
+            )
+            (
               baseCandidate
               // {
                 shared = baseCandidate.shared // {
-                  subagents = baseCandidate.shared.subagents // {
-                    "" = fixtureSource;
-                  };
+                  subagents."" = fixtureSource;
                 };
               }
-            );
-          assert !contractIsValid emptyInstallScriptUrlCandidate;
-          assert lib.any (lib.hasInfix "installScriptUrls (claude)") (
-            failedContractMessages emptyInstallScriptUrlCandidate
+            )
+          ];
+          # binary と供給 package
+          assert rejected [
+            (mutateClient "claude" { binary = ""; })
+            (mutateClient "claude" { binary = "."; })
+            (mutateClient "claude" { binary = ".."; })
+            (mutateClient "claude" { binary = "bin/claude"; })
+            (mutateClient "claude" { binary = "bad name"; })
+            (mutateClient "codex" { binary = baseCandidate.clients.claude.binary; })
+            (mutateClient "codex" { versionArgs = [ ]; })
+            (mutateClient "codex" { versionArgs = [ "" ]; })
+            (mutateClient "claude" { supply.package = ""; })
+            (mutateClient "claude" { supply.package = "bad name"; })
+            (mutateClient "claude" { supply.package = "-leading-dash"; })
+            (mutateClient "claude" { supply = { }; })
+            (mutateClient "claude" {
+              supply = {
+                package = "claude-code";
+                repo = "untyped/source";
+              };
+            })
+            (mutateClient "codex" { supply.package = baseCandidate.clients.claude.supply.package; })
+          ];
+          assert contractIsValid (
+            mutateClient "claude" { binary = lib.concatStrings (lib.replicate 255 "a"); }
           );
-          assert !contractIsValid emptyInstallRepoCandidate;
-          assert lib.any (lib.hasInfix "installRepositories (codex)") (
-            failedContractMessages emptyInstallRepoCandidate
-          );
-          assert !contractIsValid emptyInstallAarch64AssetCandidate;
-          assert lib.any (lib.hasInfix "installAssetsAarch64 (codex)") (
-            failedContractMessages emptyInstallAarch64AssetCandidate
-          );
-          assert !contractIsValid emptyInstallX86AssetCandidate;
-          assert lib.any (lib.hasInfix "installAssetsX86_64 (codex)") (
-            failedContractMessages emptyInstallX86AssetCandidate
-          );
-          assert !contractIsValid emptyInstallEntrypointCandidate;
-          assert lib.any (lib.hasInfix "installEntrypointsX86_64 (codex)") (
-            failedContractMessages emptyInstallEntrypointCandidate
-          );
-          assert lib.assertMsg (
-            builtins.attrNames installNegativeEvalCases == requiredInstallNegativeEvalCaseNames
-          ) "agent install negative eval regression cases must be explicit and complete";
-          assert lib.assertMsg (unexpectedlyValidInstallNegativeEvalCases == [ ]) (
-            "invalid agent install evaluation succeeded: "
-            + lib.concatStringsSep ", " unexpectedlyValidInstallNegativeEvalCases
-          );
-          assert builtins.all (candidate: !contractIsValid candidate) invalidInstallEntrypointCandidates;
-          assert builtins.all (candidate: !contractIsValid candidate) invalidRequiredPathCandidates;
-          assert baseCandidate.clients.codex.install.retainedReleases == 2;
-          assert baseCandidate.clients.opencode.install.retainedReleases == 2;
           assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = baseCandidate.clients.codex.install // {
-                  retainedReleases = 1;
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = baseCandidate.clients.codex.install // {
-                  retainedReleases = 11;
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "claude" {
-                install = baseCandidate.clients.claude.install // {
-                  updateOwner = "dotfiles";
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = baseCandidate.clients.codex.install // {
-                  releaseByArch = baseCandidate.clients.codex.install.releaseByArch // {
-                    x86_64 = baseCandidate.clients.codex.install.releaseByArch.x86_64 // {
-                      unexpected = "untyped";
-                    };
-                  };
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = packageTreeInstall // {
-                  requiredPaths."bin/codex" = packageTreeInstall.requiredPaths."bin/codex" // {
-                    unexpected = "untyped";
-                  };
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "claude" {
-                install = baseCandidate.clients.claude.install // {
-                  layout = "single-binary";
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = baseCandidate.clients.codex.install // {
-                  updateOwner = "upstream-installer";
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = baseCandidate.clients.codex.install // {
-                  layout = "upstream-managed";
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = baseCandidate.clients.codex.install // {
-                  layout = "package-tree";
-                  requiredPaths = { };
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = packageTreeInstall // {
-                  requiredPaths = {
-                    "bin/other" = {
-                      kind = "file";
-                      executable = true;
-                    };
-                  };
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = packageTreeInstall // {
-                  requiredPaths."bin/codex" = {
-                    kind = "directory";
-                    executable = false;
-                  };
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = baseCandidate.clients.codex.install // {
-                  requiredPaths.codex = {
-                    kind = "file";
-                    executable = true;
-                  };
-                };
-              }
-            );
-          assert !contractIsValid nonSeedMigrationCandidate;
-          assert
-            !contractIsValid (
-              mutateClient "claude" {
-                install = baseCandidate.clients.claude.install // {
-                  repo = "invalid/extra";
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "claude" {
-                install = baseCandidate.clients.claude.install // {
-                  unexpected = "untyped";
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "codex" {
-                install = {
-                  kind = "github-release";
-                  repo = "openai/codex";
-                  updateOwner = "dotfiles";
-                  layout = "single-binary";
-                  releaseByArch.x86_64 = {
-                    asset = "only-one-architecture.tar.gz";
-                    entrypoint = "codex";
-                  };
-                };
-              }
-            );
-          assert
-            !contractIsValid (
-              mutateClient "claude" {
-                managedFiles.managed-settings = baseCandidate.clients.claude.managedFiles.managed-settings // {
-                  owner = "untyped";
-                };
-              }
-            );
-          pkgs.runCommandLocal "check-agent-client-roster" { } "touch $out";
+            !contractIsValid (mutateClient "claude" { binary = lib.concatStrings (lib.replicate 256 "a"); });
+          # runtime timer
+          assert rejected [
+            (mutateTimer "autoupdate" { name = ""; })
+            (mutateTimer "projectCacheGc" { name = "bad/name"; })
+            (mutateTimer "projectCacheGc" { name = "bad name"; })
+            (mutateTimer "projectCacheGc" { name = ".hidden"; })
+            (mutateTimer "autoupdate" { name = oversizedTimerName; })
+            (mutateTimer "autoupdate" { onCalendar = ""; })
+            (mutateTimer "autoupdate" { onCalendar = "   "; })
+            (mutateTimer "autoupdate" { onCalendar = "daily\n"; })
+          ];
+          assert contractIsValid (mutateTimer "autoupdate" { name = maximumTimerName; });
+          assert contractIsValid (mutateTimer "autoupdate" { onCalendar = "*-*-* 00/6:00:00"; });
+          pkgs.runCommandLocal "check-agent-client-contract" { } "touch $out";
       }
     )
   ];

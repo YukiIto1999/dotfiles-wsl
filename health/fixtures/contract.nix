@@ -63,25 +63,6 @@ let
       versionArgs = [ "--version" ];
       expectedSource = "/run/current-system/sw/bin/nix";
     };
-    "host/release-tree" = common "release-tree" // {
-      kind = "release-tree";
-      visiblePath = "/home/fixture/.local/bin/fixture";
-      visibleTarget = "../share/dotfiles/agents/fixture/current/bin/fixture";
-      currentLink = "/home/fixture/.local/share/dotfiles/agents/fixture/current";
-      releasesRoot = "/home/fixture/.local/share/dotfiles/agents/fixture/releases";
-      entrypoint = "bin/fixture";
-      requiredPaths = {
-        "bin/fixture" = {
-          kind = "file";
-          executable = true;
-        };
-        share = {
-          kind = "directory";
-          executable = false;
-        };
-      };
-      versionArgs = [ "--version" ];
-    };
     "host/deployed-path" = common "deployed-path" // {
       kind = "deployed-path";
       source = "/nix/store/fixture-source";
@@ -105,6 +86,7 @@ let
     };
     "host/systemd-service" = common "systemd-service" // {
       kind = "systemd-service";
+      manager = "system";
       unit = "fixture.service";
       loadStates = [ "loaded" ];
       activeStates = [ "active" ];
@@ -112,6 +94,7 @@ let
     };
     "host/systemd-socket" = common "systemd-socket" // {
       kind = "systemd-socket";
+      manager = "system";
       unit = "fixture.socket";
       loadStates = [ "loaded" ];
       activeStates = [ "active" ];
@@ -119,6 +102,7 @@ let
     };
     "host/systemd-timer" = common "systemd-timer" // {
       kind = "systemd-timer";
+      manager = "user";
       timer = "fixture.timer";
       service = "fixture.service";
       unitFileStates = [
@@ -130,6 +114,7 @@ let
     };
     "host/restart-counter" = common "restart-counter" // {
       kind = "restart-counter";
+      manager = "system";
       sourceKind = "systemd-service";
       target = "fixture.service";
       warningAt = 5;
@@ -216,17 +201,6 @@ in
         failureAt = 5;
       }
     );
-    unsafeRequiredPath = replace "host/release-tree" (
-      valid."host/release-tree"
-      // {
-        requiredPaths = {
-          "../escape" = {
-            kind = "file";
-            executable = true;
-          };
-        };
-      }
-    );
     freeformCommand = replace "host/numeric-command-threshold" (
       numericThreshold // { command = "printf 1"; }
     );
@@ -244,6 +218,16 @@ in
     );
     processSliceScopeUnit = replace "host/process-slice" (
       valid."host/process-slice" // { slice = "agents.scope"; }
+    );
+    unknownSystemdManager = replace "host/systemd-service" (
+      valid."host/systemd-service" // { manager = "root"; }
+    );
+    userManagerContainerRestart = replace "host/restart-counter" (
+      restartCounter
+      // {
+        sourceKind = "container";
+        manager = "user";
+      }
     );
     processSliceRelativeRoot = replace "host/process-slice" (
       valid."host/process-slice" // { executableRoots = [ "agents/fixture/releases" ]; }

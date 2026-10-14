@@ -23,6 +23,7 @@ let
   telemetryObservations = {
     "telemetry/service/${serviceName}" = {
       kind = "systemd-service";
+      manager = "system";
       checkId = "service/${serviceName}";
       resourceKey = null;
       timeoutSeconds = observationTimeoutSeconds;
@@ -34,6 +35,7 @@ let
     };
     "telemetry/service-restart/${serviceName}" = {
       kind = "restart-counter";
+      manager = "system";
       checkId = "restart/service/${serviceName}";
       resourceKey = null;
       timeoutSeconds = observationTimeoutSeconds;
@@ -78,9 +80,7 @@ in
   options.dotfiles.telemetry = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = lib.any (client: client.telemetryMode == "supported") (
-        builtins.attrValues cfg.agents.clients
-      );
+      default = lib.any (client: client.telemetry ? supported) (builtins.attrValues cfg.agents.clients);
       description = "採用clientの使用量をOpenTelemetry collectorへ収集するか。";
     };
     endpoint = lib.mkOption {

@@ -15,7 +15,7 @@ root ext4ではonline fstrimとdiscardを使わないことを要求する。
 | 対象 | 所在と扱い | 成功条件 |
 |---|---|---|
 | 設定 | commit済みcheckoutと`flake.lock` | 対象hostの評価と適用が成功する |
-| Agent CLI | upstream installerまたは管理release | 採用clientの版を確認し、実際に起動する |
+| Agent CLI | lockのbaselineと、client別profileの世代と供給revision | lockからの再構築はbaselineの版であり、更新後の版の復元と区別して、採用clientの版を確認し、実際に起動する |
 | 認証 | user-ownedのclient状態、SOPSのruntime配備物 | 新しいhostで再認証し、採用clientの接続を確認する |
 | Atuin | `~/.local/share/atuin/`と`~/.config/atuin/`。history DB、record DB、keyを含む | 既知の履歴を検索でき、同期が無効である |
 | OMP | `~/.omp/agent/`の可変DB、config、sessions | 引き継ぐsessionを開け、新しいsessionも起動できる |

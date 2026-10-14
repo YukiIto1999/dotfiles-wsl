@@ -12,7 +12,6 @@
         variantConfig,
         ...
       }:
-
       let
         inherit (helpers.execTokens) tokensOf;
 
@@ -126,6 +125,7 @@
             };
             observation = {
               kind = "systemd-timer";
+              manager = "system";
               checkId = "maintenance/${timerUnit}";
               resourceKey = null;
               timeoutSeconds = observationTimeoutSeconds;
@@ -195,6 +195,7 @@
                   common "service/${unit}" "${unit} is not operational"
                   // {
                     kind = "systemd-service";
+                    manager = "system";
                     inherit unit;
                     loadStates = [ "loaded" ];
                     activeStates = [ "active" ];
@@ -211,6 +212,7 @@
                   common "restart/service/${unit}" "could not observe restart count for ${unit}"
                   // {
                     kind = "restart-counter";
+                    manager = "system";
                     sourceKind = "systemd-service";
                     target = unit;
                     warningAt = restartWarningCount;

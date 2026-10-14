@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  self,
   ...
 }:
 
@@ -13,38 +14,102 @@ let
   isReferenceOnlySkill = import ./impl/skill-discovery.nix { inherit lib; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
+  inherit (agentContract)
+    modeOf
+    rulesDestinationOf
+    subagentDestinationOf
+    subagentSourcesOf
+    ;
   rawRouting = import ./subagents/routing.nix;
   selectedClients = lib.genAttrs (builtins.filter (
     name: builtins.hasAttr name agents.registry
   ) agents.enabled) (name: agents.registry.${name});
   clientNames = builtins.attrNames agents.clients;
+
+  # 供給元は flake.lock が採用した input と同じ参照から導き、baseline と更新で別の供給元を持たない
+  profileRootRelative = ".local/share/dotfiles/agent-profiles";
+  # 供給方式の切替前に旧 release writer が使った root。旧 writer との同時実行を避けるためだけに読む
+  legacyRootRelative = ".local/share/dotfiles/agents";
+  profileRoot = "${cfg.workstation.homeDir}/${profileRootRelative}";
+  supplyInput = (builtins.fromJSON (builtins.readFile ../flake.lock)).nodes.llm-agents.original;
+  supplySource = "${supplyInput.type}:${supplyInput.owner}/${supplyInput.repo}";
+  supplyPackages = self.inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
   clientExecutables = lib.mapAttrs (
-    _: client: "${cfg.workstation.homeDir}/.local/bin/${client.binary}"
+    name: client: "${profileRoot}/${name}/profile/bin/${client.binary}"
   ) agents.clients;
+  supplyManifest = map (
+    name:
+    let
+      client = agents.clients.${name};
+    in
+    {
+      inherit name;
+      inherit (client) binary versionArgs;
+      inherit (client.supply) package;
+      baseline = toString supplyPackages.${client.supply.package};
+      automatic = builtins.elem name agents.automaticUpdates.clients;
+    }
+  ) clientNames;
+  agentSupply = import ./impl/supply.nix { inherit lib pkgs mkCommand; } {
+    manifest = supplyManifest;
+    sourceRef = supplySource;
+    homeDir = cfg.workstation.homeDir;
+    inherit profileRootRelative legacyRootRelative;
+  };
+
   runtime = import ./package.nix {
     inherit lib pkgs runtimeContract;
     verificationEntry = cfg.toolchain.verification.entry;
+    executionPolicy = cfg.toolchain.execution.policy;
+    supervise = cfg.platform.supervise.package;
   };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (
-    name: agents.clients.${name}.runtimeWrapperMode == "managed"
+    name: modeOf agents.clients.${name}.runtime == "managed"
   ) clientNames;
-  runtimeWrappers = lib.listToAttrs (
+  /**
+    session と job が固定する当該 client の不変な配備依存の列挙
+    name: 採用済みの client ID
+    戻り値: 初回 seed を除く重複のない store path 一覧
+  */
+  executionDependenciesFor =
+    name:
+    lib.unique (
+      map (row: toString row.file.source) (
+        builtins.filter (row: row.clientName == name && row.file.deployment != "seed") deploymentRows
+      )
+      ++ [ (toString runtimeContract.packages.gate) ]
+      ++ lib.optional projectMemoryEnabled (toString cfg.capabilities.project-memory.runtime)
+    );
+  clientExecutionDependencies = lib.genAttrs clientNames executionDependenciesFor;
+  # 公開 command は PATH の前に置く wrapper だけで、native profile の bin は PATH へ出さない
+  publicCommand =
+    name:
+    let
+      client = agents.clients.${name};
+    in
+    if modeOf client.runtime == "managed" then
+      runtime.mkWrapper {
+        client = name;
+        inherit (client) binary;
+        targetExecutable = clientExecutables.${name};
+        executionDependencies = clientExecutionDependencies.${name};
+      }
+    else
+      pkgs.writeShellApplication {
+        name = client.binary;
+        text = ''
+          exec ${lib.escapeShellArg clientExecutables.${name}} "$@"
+        '';
+      };
+  publicCommands = lib.listToAttrs (
     map (
       name:
-      let
-        client = agents.clients.${name};
-        wrapper = runtime.mkWrapper {
-          client = name;
-          inherit (client) binary;
-          targetExecutable = clientExecutables.${name};
-        };
-      in
-      lib.nameValuePair "${runtimeWrapperDirectory}/${client.binary}" {
-        source = lib.getExe wrapper;
+      lib.nameValuePair "${runtimeWrapperDirectory}/${agents.clients.${name}.binary}" {
+        source = lib.getExe (publicCommand name);
         executable = true;
       }
-    ) runtimeClientNames
+    ) clientNames
   );
 
   allSkillNames = builtins.attrNames cfg.skills.registry;
@@ -144,9 +209,6 @@ let
     };
   sharedSubagents = lib.mapAttrs renderSubagent eligibleSubagents;
 
-  subagentFileName =
-    client: name: if client.subagentFormat == "toml" then "${name}.toml" else "${name}.md";
-
   policyRules = policy.render {
     template = ./policy/AGENTS.md;
     skills = enabledSkills;
@@ -167,31 +229,34 @@ let
     else
       source;
 
+  # subagent は native と rendered だけが home へ配備され、declared は client の config が source を直接参照する
   sharedDeploymentRows = lib.concatMap (
     clientName:
     let
       client = agents.clients.${clientName};
-      subagentRows = lib.optionals (client.subagentsDestination != null) (
+      rulesDestination = rulesDestinationOf client;
+      subagentDestination = subagentDestinationOf client;
+      subagentRows = lib.optionals (subagentDestination != null) (
         lib.mapAttrsToList (name: source: {
           inherit clientName;
           id = "subagents/${name}";
           file = {
             inherit source;
-            format = if client.subagentFormat == "toml" then "toml" else "markdown";
+            format = "markdown";
             deployment = "home";
-            destination = "${client.subagentsDestination}/${subagentFileName client name}";
+            destination = "${subagentDestination}/${name}.md";
           };
-        }) client.subagents
+        }) (subagentSourcesOf client)
       );
     in
-    lib.optional (client.rulesDestination != null) {
+    lib.optional (rulesDestination != null) {
       inherit clientName;
       id = "rules";
       file = {
         source = agents.shared.rules;
         format = "markdown";
         deployment = "home";
-        destination = client.rulesDestination;
+        destination = rulesDestination;
       };
     }
     ++ lib.mapAttrsToList (name: source: {
@@ -214,15 +279,16 @@ let
     }) agents.clients.${clientName}.managedFiles
   ) clientNames;
 
-  deploymentRows = map (
+  normalizeRow =
     row:
     row
     // {
       file = row.file // {
         source = normalizeSource row.file.source;
       };
-    }
-  ) (sharedDeploymentRows ++ managedFileRows);
+    };
+  managedDeploymentRows = map normalizeRow managedFileRows;
+  deploymentRows = map normalizeRow sharedDeploymentRows ++ managedDeploymentRows;
 
   homeManagedEntries = map (
     row: lib.nameValuePair row.file.destination { source = row.file.source; }
@@ -268,51 +334,6 @@ let
     ) deploymentRows
   );
 
-  installRecord =
-    name:
-    let
-      client = agents.clients.${name};
-    in
-    {
-      inherit name;
-      inherit (client) binary versionArgs;
-      inherit (client) install;
-    };
-
-  installManifestFor = names: builtins.toJSON (map installRecord names);
-  atomicPublish = import ./impl/atomic-publish.nix { inherit pkgs; };
-
-  mkInstaller =
-    name: names:
-    mkCommand {
-      inherit name;
-      src = ./impl/install-agents.sh;
-      vars = {
-        installManifest = installManifestFor names;
-        atomicPublishCommand = lib.escapeShellArg (
-          lib.getExe' atomicPublish "dotfiles-agent-atomic-publish"
-        );
-        probeEnvironment = "";
-        transactionHookCommand = lib.escapeShellArg "${pkgs.coreutils}/bin/true";
-        versionArgsDecoder = builtins.readFile ./impl/version-args.sh;
-      };
-      runtimeInputs = with pkgs; [
-        atomicPublish
-        bash
-        curl
-        diffutils
-        findutils
-        gawk
-        jq
-        gnutar
-        gzip
-        coreutils
-        util-linux
-      ];
-    };
-  installAgents = mkInstaller "dotfiles-install-agents" clientNames;
-  updateAgents = mkInstaller "dotfiles-update-agents" agents.automaticUpdates.clients;
-
   allHomeEntries = homeManagedEntries;
   homeDestinations = map (entry: entry.name) allHomeEntries;
   seedDestinations = map (row: row.file.destination) seedRows;
@@ -323,18 +344,13 @@ let
       observationTimeoutSeconds = 10;
       relativeCacheRoot = ".cache/dotfiles-wsl";
       relativeStateRoot = ".local/state/dotfiles-wsl";
-      releaseFor =
-        client:
-        if pkgs.stdenv.hostPlatform.isAarch64 then
-          client.install.releaseByArch.aarch64
-        else
-          client.install.releaseByArch.x86_64;
       commonObservation = checkId: resourceKey: failureMessage: {
         inherit checkId resourceKey failureMessage;
         timeoutSeconds = observationTimeoutSeconds;
       };
       timerObservation = timer: {
         kind = "systemd-timer";
+        manager = "system";
         checkId = "maintenance/${timer.name}.timer";
         resourceKey = null;
         timeoutSeconds = observationTimeoutSeconds;
@@ -348,50 +364,20 @@ let
         activeStates = [ "active" ];
         serviceResults = [ "success" ];
       };
-      releaseRootFor = name: "${cfg.workstation.homeDir}/.local/share/dotfiles/agents/${name}";
-      # launcher が起動する upstream の実体を置く directory。更新前の release で動き続ける process も含む
-      executableRootsFor =
-        name:
-        let
-          inherit (agents.clients.${name}) install;
-        in
-        if install.kind == "github-release" then
-          [ "${releaseRootFor name}/releases" ]
-        else
-          lib.optional (
-            install.executableRoot != null
-          ) "${cfg.workstation.homeDir}/${install.executableRoot}";
+      # profile の実体は /nix/store/<hash>-<package>-<version> にあるため、client process の識別は
+      # store 名の glob で行う。profile を更新しても、更新前の世代で動き続ける process を外さない
+      storeNameHash = lib.concatStrings (lib.replicate 32 "?");
+      executableRootFor = client: "${builtins.storeDir}/${storeNameHash}-${client.supply.package}-*";
       clientObservation =
         name: client:
-        let
-          visiblePath = clientExecutables.${name};
-          releaseRoot = releaseRootFor name;
-        in
         commonObservation "agent/${name}" null
           "${client.binary} is unavailable or its version command failed"
-        // (
-          if client.install.kind == "github-release" then
-            let
-              release = releaseFor client;
-            in
-            {
-              kind = "release-tree";
-              inherit visiblePath;
-              visibleTarget = "../share/dotfiles/agents/${name}/current/${release.entrypoint}";
-              currentLink = "${releaseRoot}/current";
-              releasesRoot = "${releaseRoot}/releases";
-              inherit (release) entrypoint;
-              inherit (client.install) requiredPaths;
-              inherit (client) versionArgs;
-            }
-          else
-            {
-              kind = "command-version";
-              path = visiblePath;
-              expectedSource = visiblePath;
-              inherit (client) versionArgs;
-            }
-        );
+        // {
+          kind = "command-version";
+          path = clientExecutables.${name};
+          expectedSource = clientExecutables.${name};
+          inherit (client) versionArgs;
+        };
     in
     rec {
       cache = rec {
@@ -428,7 +414,6 @@ let
         };
       };
       packages = {
-        inherit installAgents;
         inherit (runtime)
           gate
           gc
@@ -437,7 +422,7 @@ let
           ;
       };
       commands = {
-        autoupdate = lib.getExe updateAgents;
+        autoupdate = "${lib.getExe agentSupply} update --automatic";
         projectCacheGc = lib.getExe packages.gc;
       };
       observations = {
@@ -455,7 +440,7 @@ let
             "agent client processes run outside ${sliceUnit}"
           // {
             kind = "process-slice";
-            executableRoots = lib.concatMap executableRootsFor runtimeClientNames;
+            executableRoots = map (name: executableRootFor agents.clients.${name}) runtimeClientNames;
             slice = sliceUnit;
           };
       }
@@ -464,7 +449,7 @@ let
       }
       // lib.mapAttrs' (
         name: client: lib.nameValuePair "agents/client/${name}" (clientObservation name client)
-      ) (lib.filterAttrs (_: client: client.binary != "") agents.clients);
+      ) agents.clients;
     };
 in
 {
@@ -474,16 +459,33 @@ in
     ./clients/codex/module.nix
     ./clients/omp/module.nix
     ./clients/opencode/module.nix
+    ./job/module.nix
     ./journal/module.nix
     ./memory-harvest/module.nix
+    ./orca/module.nix
   ];
 
-  options.dotfiles.agents = agentContract.options;
+  options.dotfiles.agents = agentContract.options // {
+    lifecycle = lib.mkOption {
+      type = lib.types.raw;
+      readOnly = true;
+      internal = true;
+      description = "共通 runtime が供給する lifecycle の部品。`mkWrapper { client; binary; targetExecutable; executionDependencies; }` は共通の cache 方針を一度適用し、scope、管理 scratch、session の GC root を取ってから絶対 path の実行ファイルを起動する wrapper を作る。`protect` は `dotfiles-agent-protect [--resolved] ROOTS-DIRECTORY PATH...` で、profile の symlink を辿った先を含む store object へ GC root を取り、取れなければ非ゼロで終わる。`supervise` は子孫の終了を確認してから返す command。";
+    };
+  };
 
   config = {
     dotfiles.agents = {
       clients = selectedClients;
-      inherit clientExecutables;
+      inherit clientExecutables clientExecutionDependencies;
+      supply = {
+        root = profileRoot;
+        source = supplySource;
+      };
+      lifecycle = {
+        inherit (runtime) mkWrapper protect supervise;
+        wrapperDirectory = "${cfg.workstation.homeDir}/${runtimeWrapperDirectory}";
+      };
       packages = {
         projectCacheGc = runtimeContract.packages.gc;
         verification = runtimeContract.packages.verify;
@@ -512,7 +514,7 @@ in
     dotfiles.managedArtifacts = managedArtifacts;
     dotfiles.health.observations = runtimeContract.observations;
     dotfiles.platform.cli.commands = {
-      inherit (runtimeContract.packages) installAgents;
+      inherit agentSupply;
     };
 
     assertions = [
@@ -582,14 +584,6 @@ in
         message = "User manager memory limits must enclose the agent slice and keep MemoryHigh below MemoryMax";
       }
       {
-        assertion = lib.all (
-          name:
-          agents.clients.${name}.install.kind == "github-release"
-          || agents.clients.${name}.install.executableRoot != null
-        ) runtimeClientNames;
-        message = "Agent clients behind the runtime wrapper must declare where their executables live";
-      }
-      {
         assertion =
           map (timer: timer.name) (
             builtins.filter (timer: timer != null) (builtins.attrValues runtimeContract.timers)
@@ -617,10 +611,16 @@ in
       {
         home.file = lib.mkMerge [
           (lib.listToAttrs allHomeEntries)
-          runtimeWrappers
+          publicCommands
         ];
         home.sessionPath = lib.mkBefore [ "$HOME/${runtimeWrapperDirectory}" ];
         home.activation.seedAgentConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] seedScript;
+        # 存在しない profile だけを locked baseline から作る。activation は latest を取得せず、
+        # 既存 profile を baseline へ戻さない
+        home.activation.initAgentSupply = lib.hm.dag.entryAfter [
+          "writeBoundary"
+          "seedAgentConfigs"
+        ] "${lib.getExe agentSupply} init";
       };
 
     systemd.user.slices.${lib.removeSuffix ".slice" runtimeContract.sliceUnit} = {

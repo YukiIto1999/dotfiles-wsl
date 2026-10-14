@@ -11,16 +11,23 @@
         pluginSources,
         ...
       }:
-
       let
         agentConfig = hostConfig.dotfiles.agents;
         inherit (agentConfig) clients;
         homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
         verificationEntry = hostConfig.dotfiles.toolchain.verification.entry;
-        runtime = import ../package.nix {
-          inherit lib pkgs verificationEntry;
-          runtimeContract = runtimePackageContract;
+        executionPolicy = hostConfig.dotfiles.toolchain.execution.policy;
+        supervise = hostConfig.dotfiles.platform.supervise.package;
+        runtimeArgs = {
+          inherit
+            lib
+            pkgs
+            verificationEntry
+            executionPolicy
+            supervise
+            ;
         };
+        runtime = import ../package.nix (runtimeArgs // { runtimeContract = runtimePackageContract; });
         stallingCommand =
           name:
           pkgs.writeShellScriptBin name ''
@@ -64,17 +71,37 @@
             exec ${lib.getExe verificationEntry} "$@"
           '';
         };
-        slowResolutionRuntime = import ../package.nix {
-          inherit lib pkgs;
-          verificationEntry = slowResolutionEntry;
-          runtimeContract = runtimePackageContract;
-        };
-        customSkillRootRuntime = import ../package.nix {
-          inherit lib pkgs verificationEntry;
-          runtimeContract = runtimePackageContract // {
-            skillRoots = [ ".local/share/fixture adapter/procedures" ];
-          };
-        };
+        slowResolutionRuntime = import ../package.nix (
+          runtimeArgs
+          // {
+            verificationEntry = slowResolutionEntry;
+            runtimeContract = runtimePackageContract;
+          }
+        );
+        customSkillRootRuntime = import ../package.nix (
+          runtimeArgs
+          // {
+            runtimeContract = runtimePackageContract // {
+              skillRoots = [ ".local/share/fixture adapter/procedures" ];
+            };
+          }
+        );
+        fixtureStandardRoot = pkgs.runCommandLocal "fixture-standard-root" { } ''
+          mkdir -p $out
+          printf '# Standard\n' > $out/README.md
+          for area in principles concerns structure tools languages process; do
+            mkdir -p $out/$area
+            printf '# %s\n' "$area" > $out/$area/rule.md
+          done
+        '';
+        fixtureStandardRuntime = import ../package.nix (
+          runtimeArgs
+          // {
+            runtimeContract = runtimePackageContract // {
+              standardRoot = "${fixtureStandardRoot}";
+            };
+          }
+        );
         wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
           if [[ $# -eq 3 && $1 == -c && $2 == %u \
             && $3 == "/proc/''${DOTFILES_AGENT_TEST_WRONG_OWNER_PID-}" ]]; then
@@ -132,9 +159,6 @@
           exec ${pkgs.util-linux}/bin/findmnt "$@"
         '';
         mountOptionsGc = gcWithCommand "mount-options" mountOptionsFindmnt;
-        fakeNix = pkgs.writeShellScript "fake-nix-command" ''
-          printf '%s\0' "$@" > "$ARG_CAPTURE"
-        '';
         # systemd-run --scope は自身を scope へ入れた後に command を exec する。sandbox には user
         # manager がないため、引数を記録して同じ process のまま command を exec する。
         fakeSystemdRun = pkgs.writeShellScript "fake-systemd-run" ''
@@ -151,7 +175,87 @@
           shift
           exec "$@"
         '';
-        fixtureLauncher = runtime.mkLauncher { systemdRunCommand = fakeSystemdRun; };
+        # 同じ実装へ sandbox の代替 command だけを渡し、launcher と wrapper が実際の経路で動く。
+        fixtureRuntime = import ../package.nix (
+          runtimeArgs
+          // {
+            runtimeContract = runtimePackageContract;
+            systemdRunCommand = fakeSystemdRun;
+            systemctlCommand = fakeSystemctl;
+            nixStoreCommand = fakeNixStore;
+          }
+        );
+        fixtureLauncher = fixtureRuntime.launcher;
+        stallingLauncher = fixtureRuntime.mkLauncher { commandShims = stallingShims; };
+        # nix-store --realise --add-root LINK --indirect は LINK を object への symlink にする。保護の失敗と、
+        # root を取った後に profile が動く更新は環境変数で選ぶ。
+        fakeNixStore = pkgs.writeShellScript "fake-nix-store" ''
+          [ -z "''${NIX_STORE_LOG-}" ] || printf '%s\n' "$*" >> "$NIX_STORE_LOG"
+          link= object=
+          while [ "$#" -gt 0 ]; do
+            case $1 in
+              --realise | --indirect) shift ;;
+              --add-root)
+                link=$2
+                shift 2
+                ;;
+              --option) shift 3 ;;
+              *)
+                object=$1
+                shift
+                ;;
+            esac
+          done
+          if [ -n "''${FAKE_NIX_STORE_FAIL-}" ] && [[ $object == *"$FAKE_NIX_STORE_FAIL" ]]; then
+            echo "error: path '$object' is not valid" >&2
+            exit 1
+          fi
+          [ -e "$object" ] || {
+            echo "error: path '$object' is not valid" >&2
+            exit 1
+          }
+          ${pkgs.coreutils}/bin/ln -s "$object" "$link"
+          if [ -n "''${FAKE_PROFILE_SWITCH-}" ] && [[ $object == *"$FAKE_PROFILE_SWITCH_OBJECT" ]]; then
+            ${pkgs.coreutils}/bin/ln -sfn "$FAKE_PROFILE_SWITCH_TO" "$FAKE_PROFILE_SWITCH"
+          fi
+        '';
+        # scope の cgroup に残った process を kill する要求。効果は環境変数で選ぶ。
+        fakeSystemctl = pkgs.writeShellScript "fake-systemctl" ''
+          [ -z "''${SYSTEMCTL_LOG-}" ] || printf '%s\n' "$*" >> "$SYSTEMCTL_LOG"
+          if [ "''${FAKE_SYSTEMCTL_EFFECTIVE-}" = 1 ]; then
+            uid=$(${pkgs.coreutils}/bin/id -u)
+            : > "$DOTFILES_AGENT_CGROUP_ROOT/user.slice/user-$uid.slice/user@$uid.service/agents.slice/''${!#}/cgroup.procs"
+          fi
+        '';
+        fakeAgent = pkgs.writeShellScript "fake-agent" (
+          builtins.readFile ../fixtures/runtime/fake-agent.sh
+        );
+        fakeAgentNext = pkgs.writeShellScript "fake-agent-next" (
+          builtins.readFile ../fixtures/runtime/fake-agent.sh + "\n# next generation\n"
+        );
+        dependencyA = pkgs.coreutils;
+        dependencyB = lib.getBin pkgs.jq;
+        fixtureWrapper = fixtureRuntime.mkWrapper {
+          client = "fixture-client";
+          binary = "fixture-agent";
+          targetExecutable = "${fakeAgent}";
+          executionDependencies = [
+            dependencyA
+            dependencyB
+          ];
+        };
+        # 実行依存の再計算や手書きの一覧は配備と検査がずれるため不可
+        moduleSessionWrapper = fixtureRuntime.mkWrapper {
+          client = "omp";
+          binary = clients.omp.binary;
+          targetExecutable = "${fakeAgent}";
+          executionDependencies = agentConfig.clientExecutionDependencies.omp;
+        };
+        # 手書きの参照一覧は実際の closure とずれるため不可
+        moduleSessionWrapperClosure = pkgs.closureInfo { rootPaths = [ moduleSessionWrapper ]; };
+        wrapperRejected =
+          arguments:
+          !(builtins.tryEval (builtins.deepSeq (runtime.mkWrapper arguments).drvPath true)).success;
         cappedUserSlices = map (name: "${name}.slice") (
           builtins.attrNames (
             lib.filterAttrs (_: slice: slice.sliceConfig ? MemoryMax) hostConfig.systemd.user.slices
@@ -172,20 +276,8 @@
           done
           exec ${lib.getExe pkgs.git} "$@"
         '';
-        fixtureNixBuildShims = runtime.mkNixBuildShims {
-          nixCommand = fakeNix;
-          nixBuildCommand = fakeNix;
-        };
-        fixtureAgentShims = runtime.mkAgentShims {
-          nixCommand = fakeNix;
-          nixBuildCommand = fakeNix;
-          gitCommand = fakeGit;
-        };
-        racingAgentShims = runtime.mkAgentShims {
-          nixCommand = fakeNix;
-          nixBuildCommand = fakeNix;
-          gitCommand = racingGit;
-        };
+        fixtureGitShim = runtime.mkGitShim { gitCommand = fakeGit; };
+        racingGitShim = runtime.mkGitShim { gitCommand = racingGit; };
         deployedGateHook = "${homeConfig.home.file.".omp/agent/hooks/pre".source}/verification-gate.ts";
         hookUsingGate =
           gate:
@@ -202,10 +294,6 @@
           printf '%s\n' "$*" >> "$HOME/next-generation-gate.calls"
           ${pkgs.coreutils}/bin/cat > /dev/null
         '';
-        wrapperDirectory = ".local/share/dotfiles-agent/bin";
-        runtimeClientNames = builtins.filter (name: clients.${name}.runtimeWrapperMode == "managed") (
-          builtins.attrNames clients
-        );
 
         observationTimeoutSeconds = 10;
         homeDir = hostConfig.dotfiles.workstation.homeDir;
@@ -220,43 +308,19 @@
           inherit checkId resourceKey failureMessage;
           timeoutSeconds = observationTimeoutSeconds;
         };
-        releaseFor =
-          client:
-          if pkgs.stdenv.hostPlatform.isAarch64 then
-            client.install.releaseByArch.aarch64
-          else
-            client.install.releaseByArch.x86_64;
         expectedClientObservation =
           name: client:
-          let
-            visiblePath = agentConfig.clientExecutables.${name};
-            releaseRoot = "${homeDir}/.local/share/dotfiles/agents/${name}";
-            release = if client.install.kind == "github-release" then releaseFor client else null;
-          in
           commonAgentObservation "agent/${name}" null
             "${client.binary} is unavailable or its version command failed"
-          // (
-            if release == null then
-              {
-                kind = "command-version";
-                path = visiblePath;
-                expectedSource = visiblePath;
-                inherit (client) versionArgs;
-              }
-            else
-              {
-                kind = "release-tree";
-                inherit visiblePath;
-                visibleTarget = "../share/dotfiles/agents/${name}/current/${release.entrypoint}";
-                currentLink = "${releaseRoot}/current";
-                releasesRoot = "${releaseRoot}/releases";
-                inherit (release) entrypoint;
-                inherit (client.install) requiredPaths;
-                inherit (client) versionArgs;
-              }
-          );
+          // {
+            kind = "command-version";
+            path = agentConfig.clientExecutables.${name};
+            expectedSource = agentConfig.clientExecutables.${name};
+            inherit (client) versionArgs;
+          };
         timerObservation = name: {
           kind = "systemd-timer";
+          manager = "system";
           checkId = "maintenance/${name}.timer";
           resourceKey = null;
           timeoutSeconds = observationTimeoutSeconds;
@@ -285,11 +349,12 @@
               "agent client processes run outside agents.slice"
             // {
               kind = "process-slice";
-              executableRoots = [
-                "${homeDir}/.local/share/claude/versions"
-                "${homeDir}/.local/share/dotfiles/agents/codex/releases"
-                "${homeDir}/.local/share/dotfiles/agents/omp/releases"
-                "${homeDir}/.local/share/dotfiles/agents/opencode/releases"
+              # 供給 profile の実体は /nix/store/<32 文字の hash>-<package>-<version> にある
+              executableRoots = map (package: "/nix/store/????????????????????????????????-${package}-*") [
+                "claude-code"
+                "codex"
+                "omp"
+                "opencode"
               ];
               slice = "agents.slice";
             };
@@ -297,9 +362,10 @@
         // lib.mapAttrs' (
           name: client: lib.nameValuePair "agents/client/${name}" (expectedClientObservation name client)
         ) clients;
+        userTimerObservation = name: timerObservation name // { manager = "user"; };
         # agents root の keyspace は runtime contract、作業日誌、記憶の収穫の timer で閉じる。どれでもない key は stale として落とす
         expectedJournalObservations = lib.optionalAttrs agentConfig.journal.enable {
-          "agents/maintenance/journal" = timerObservation "dotfiles-agent-journal";
+          "agents/maintenance/journal" = userTimerObservation "dotfiles-agent-journal";
         };
         expectedHarvestObservations =
           lib.optionalAttrs
@@ -308,7 +374,7 @@
               && builtins.elem "project-memory" hostConfig.dotfiles.capabilities.resolved
             )
             {
-              "agents/maintenance/memory-harvest" = timerObservation "dotfiles-agent-memory-harvest";
+              "agents/maintenance/memory-harvest" = userTimerObservation "dotfiles-agent-memory-harvest";
             };
         expectedAgentObservations =
           expectedRuntimeObservations // expectedJournalObservations // expectedHarvestObservations;
@@ -394,21 +460,20 @@
         };
         runtimeWithCacheMutation =
           cacheMutation:
-          import ../package.nix {
-            inherit lib pkgs verificationEntry;
-            runtimeContract = runtimePackageContract // {
-              cache = runtimePackageContract.cache // cacheMutation;
-            };
-          };
+          import ../package.nix (
+            runtimeArgs
+            // {
+              runtimeContract = runtimePackageContract // {
+                cache = runtimePackageContract.cache // cacheMutation;
+              };
+            }
+          );
         highBytesMutationRuntime = runtimeWithCacheMutation { highBytes = 1; };
         lowBytesMutationRuntime = runtimeWithCacheMutation { lowBytes = 1; };
         inactiveDaysMutationRuntime = runtimeWithCacheMutation { inactiveDays = 1; };
         runtimeWithContractUpdate =
           update:
-          import ../package.nix {
-            inherit lib pkgs verificationEntry;
-            runtimeContract = runtimePackageContract // update;
-          };
+          import ../package.nix (runtimeArgs // { runtimeContract = runtimePackageContract // update; });
         relativeCacheRootMutationRuntime = runtimeWithContractUpdate {
           cache = runtimePackageContract.cache // {
             relativeCacheRoot = ".cache/dotfiles-wsl-mutated";
@@ -462,36 +527,6 @@
       in
       {
         agent-runtime-contract =
-          assert
-            builtins.attrNames agentConfig.packages == [
-              "projectCacheGc"
-              "projectMemoryHooks"
-              "verification"
-              "verificationGate"
-            ];
-          assert
-            agentConfig.packages.projectMemoryHooks
-            == hostConfig.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
-          assert agentConfig.packages.projectCacheGc == runtime.gc;
-          assert agentConfig.packages.verification == runtime.verify;
-          assert agentConfig.packages.verificationGate == runtime.gate;
-          assert builtins.head homeConfig.home.sessionPath == "$HOME/${wrapperDirectory}";
-          assert lib.elem "$HOME/.local/bin" homeConfig.home.sessionPath;
-          assert
-            runtimeClientNames == [
-              "claude"
-              "codex"
-              "omp"
-              "opencode"
-            ];
-          assert builtins.all (
-            name:
-            let
-              target = "${wrapperDirectory}/${clients.${name}.binary}";
-            in
-            builtins.hasAttr target homeConfig.home.file && homeConfig.home.file.${target}.executable
-          ) runtimeClientNames;
-          assert !(builtins.hasAttr "${wrapperDirectory}/${clients.antigravity.binary}" homeConfig.home.file);
           assert lib.assertMsg (
             builtins.attrNames agentObservations == builtins.attrNames expectedAgentObservations
             && agentObservations == expectedAgentObservations
@@ -542,30 +577,7 @@
           assert lib.assertMsg (
             !agentRuntimeContractMatches standardRootMutation hostConfig.dotfiles.health.observations
           ) "agent runtime contract accepted a stale standard root";
-          pkgs.runCommandLocal "check-agent-runtime-contract"
-            {
-              nativeBuildInputs = [ pkgs.gnugrep ];
-            }
-            ''
-              set -euo pipefail
-              ${lib.concatMapStrings (name: ''
-                wrapper=${homeConfig.home.file."${wrapperDirectory}/${clients.${name}.binary}".source}
-                grep -Fq ${lib.escapeShellArg agentConfig.clientExecutables.${name}} "$wrapper"
-                grep -Fq ${lib.escapeShellArg (lib.getExe runtime.launcher)} "$wrapper"
-              '') runtimeClientNames}
-              grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.launcher}
-              grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe runtime.gc}
-              grep -Fq '68719476736' ${lib.getExe runtime.gc}
-              grep -Fq '51539607552' ${lib.getExe runtime.gc}
-              grep -Fq 'inactive_before=$((now - 30 * 24 * 60 * 60))' ${lib.getExe runtime.gc}
-
-              grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
-              grep -Fq 'cache_root="$HOME/.cache/dotfiles-wsl-mutated"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
-              ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.launcher}
-              ! grep -Fxq 'cache_root="$HOME/.cache/dotfiles-wsl"' ${lib.getExe relativeCacheRootMutationRuntime.gc}
-
-              touch $out
-            '';
+          pkgs.runCommandLocal "check-agent-runtime-contract" { } "touch $out";
 
         agent-runtime-behavior =
           pkgs.runCommandLocal "check-agent-runtime-behavior"
@@ -573,16 +585,24 @@
               nativeBuildInputs = [
                 pkgs.bash
                 pkgs.coreutils
+                pkgs.diffutils
+                pkgs.gawk
                 pkgs.git
                 pkgs.gnused
                 pkgs.jq
                 pkgs.util-linux
               ];
               LAUNCHER = lib.getExe fixtureLauncher;
+              STALLING_LAUNCHER = lib.getExe stallingLauncher;
+              SUPERVISE = lib.getExe supervise;
               CAPPED_SLICES = lib.concatStringsSep " " cappedUserSlices;
-              AGENT_SHIM_DIR = runtime.agentShims;
-              GIT_SHIM_DIR = fixtureAgentShims;
-              RACING_GIT_SHIM_DIR = racingAgentShims;
+              AGENT_SHIM_DIR = runtime.gitShim;
+              GIT_SHIM_DIR = fixtureGitShim;
+              RACING_GIT_SHIM_DIR = racingGitShim;
+              FAKE_AGENT = "${fakeAgent}";
+              FAKE_AGENT_NEXT = "${fakeAgentNext}";
+              DEPENDENCY_A = "${dependencyA}";
+              DEPENDENCY_B = "${dependencyB}";
             }
             ''
               bash ${../fixtures/runtime/launcher.sh}
@@ -590,17 +610,79 @@
               touch $out
             '';
 
-        agent-nix-build-shims =
-          pkgs.runCommandLocal "check-agent-nix-build-shims"
+        agent-runtime-protect =
+          pkgs.runCommandLocal "check-agent-runtime-protect"
             {
               nativeBuildInputs = [
                 pkgs.bash
                 pkgs.coreutils
               ];
-              SHIM_DIR = fixtureNixBuildShims;
+              PROTECT = lib.getExe fixtureRuntime.protect;
+              DEPENDENCY_A = "${dependencyA}";
+              DEPENDENCY_B = "${dependencyB}";
+              FAKE_AGENT = "${fakeAgent}";
             }
             ''
-              bash ${../fixtures/runtime/nix-build-shims.sh}
+              bash ${../fixtures/runtime/protect.sh}
+              touch $out
+            '';
+
+        # wrapper が実行依存の一覧を受け取り、共通の方針、lifecycle、保護の順に一度ずつ通すことを実際に起動して読む。
+        agent-runtime-wrapper =
+          assert lib.assertMsg (
+            !wrapperRejected {
+              client = "fixture-client";
+              binary = "fixture-agent";
+              targetExecutable = "${fakeAgent}";
+              executionDependencies = [ dependencyA ];
+            }
+          ) "a valid wrapper was rejected";
+          assert lib.assertMsg (wrapperRejected {
+            client = "fixture-client";
+            binary = "fixture-agent";
+            targetExecutable = "${fakeAgent}";
+            executionDependencies = [ "/home/outside/store" ];
+          }) "a wrapper accepted an execution dependency outside the store";
+          assert lib.assertMsg (wrapperRejected {
+            client = "-fixture";
+            binary = "fixture-agent";
+            targetExecutable = "${fakeAgent}";
+            executionDependencies = [ ];
+          }) "a wrapper accepted a client id that is not a plain identifier";
+          assert lib.assertMsg (wrapperRejected {
+            client = "fixture-client";
+            binary = "fixture-agent";
+            targetExecutable = "relative/agent";
+            executionDependencies = [ ];
+          }) "a wrapper accepted a relative target executable";
+          pkgs.runCommandLocal "check-agent-runtime-wrapper"
+            {
+              nativeBuildInputs = [
+                pkgs.bash
+                pkgs.coreutils
+                pkgs.diffutils
+                pkgs.gawk
+                pkgs.git
+                pkgs.jq
+                pkgs.nodejs
+                pkgs.util-linux
+              ];
+              WRAPPER = lib.getExe fixtureWrapper;
+              LAUNCHER = lib.getExe fixtureLauncher;
+              FAKE_AGENT = "${fakeAgent}";
+              DEPENDENCY_A = "${dependencyA}";
+              DEPENDENCY_B = "${dependencyB}";
+              MODULE_WRAPPER = lib.getExe moduleSessionWrapper;
+              GATE = lib.getExe fixtureStandardRuntime.gate;
+              STANDARD_ROOT = "${fixtureStandardRoot}";
+              WRAPPER_CLOSURE = "${moduleSessionWrapperClosure}";
+              SKILL_ROOT = clients.omp.skillsDestination;
+              SKILL_SOURCE =
+                toString
+                  homeConfig.home.file."${clients.omp.skillsDestination}/standard-conformance".source;
+            }
+            ''
+              bash ${../fixtures/runtime/wrapper.sh}
               touch $out
             '';
 

@@ -74,16 +74,21 @@ upstream OCI image は digest を Nix 宣言へ固定し、containerを有効に
 
 ## Agent client の供給経路
 
-[`agents/impl/contract.nix`](../../agents/impl/contract.nix) は client binary の供給を `installer-script` と `github-release` に分ける。Claude Code と Antigravity は HTTPS で取得した upstream installer を実行し、配備 layout も upstream が所有する。この経路では dotfiles が payload の digest、archive 構造、原子的な公開を検証しない。信頼対象は installer の配布元、TLS 経路、実行時の upstream script である。
+[`agents/impl/contract.nix`](../../agents/impl/contract.nix)はclient binaryの供給をclientごとの`supply.package`で表す。
+供給元は[llm-agents.nix](https://github.com/numtide/llm-agents.nix)で、Nixの固定した依存と取得hash、署名付きbinary cacheに従う。
+信頼対象は供給元のflakeと固定した依存、`cache.numtide.com`の公開鍵、各packageが取得する上流のbinaryである。
+archiveのmemberやreleaseの公開をdotfiles独自のinstallerで検証しない。
 
-Codex、OpenCode、OMP は GitHub release を dotfiles が管理する。GitHub API が返す SHA-256 digest と download 内容を一致させる。asset が archive の場合は、展開する前に member の path、type、件数、論理 size、重複、衝突を拒否する。OMP のように asset が単一の実行 file の場合は、展開すべき構造を持たないため、path 成分を持たない entrypoint として payload へ置く。以降はどちらも同じ経路で symlink、hard link、special file、owner、mode、required path を検査し、固定した directory descriptor から entrypoint の version probe を実行する。検証済み tree は digest を名前にした release directory へ置き、`current` と visible binary の相対 symlink を identity 比較付きの rename で切り替える。通常の失敗では EXIT trap が旧状態へ戻し、曖昧な object は削除せず残す。
+`flake.lock` は初回 baseline と供給元の採用を固定し、日次更新は取得した供給元の exact revision から build と probe を行って、成功した版だけを client 別の native profile へ公開する。供給元 HEAD の取得成功を製品の最新版とは扱わず、供給元の package 化の遅れは更新の遅れとして受け入れている。Claude Code と Antigravity は unfree の binary であり、供給元が `free = true` の license 表記で評価可能にしている。
 
-単一実行 file の asset は、upstream の build 環境と loader の互換性に依存する。dotfiles は `programs.nix-ld` が供給する loader で entrypoint を probe し、probe を通らない release は公開しない。OMP の `config.yml` と `agent.db` は設定ユーザーだけが所有する可変状態であり、認証情報を Nix store や checkout へ取り込まない。
+profile の公開は `dotfiles-agent-supply` だけが行い、親 directory の identity、所有者、symlink、世代 link の対象、receipt、候補 root を更新の前後で検査して、自分の object でないものは変更も削除もしない。Nix の profile 切替は atomic だが、この検査を代替しない。client 別の flock が同じ client の writer を一つにし、旧 release writer の root が残る間は同じ client で並走しない。
+
+この検査は、同じ UID の悪意ある process が検査と更新の間に親 directory を差し替える攻撃までは防がない。`SIGKILL` や電源断で中断した公開は、次の更新が未公開の世代を除いて整合を戻す。起動した session は profile の実体と実行依存を自分の root で保持し、retention と GC の対象にしない。
+
+OMP の `config.yml` と `agent.db` は設定ユーザーだけが所有する可変状態であり、認証情報を Nix store や checkout へ取り込まない。
 
 採用clientの更新は互いに独立で、一つの失敗は他clientの取得と公開を止めず、失敗したclient名を集約して非ゼロで終える。
 自動更新を選んだclientだけがtimerから更新され、timerを採用した場合はdoctorで失敗を観測する。
-
-この publish は同じ client root の lock を守る installer 同士を直列化する。同じ UID の悪意ある process が private name または固定済み inode を syscall 間で改変する攻撃までは防がない。`SIGKILL` や電源断では EXIT trap を実行できず、durable transaction journal もないため、途中状態からの自動 rollback は保証しない。これは受け入れている境界であり、更新後の release tree は `dotfiles-doctor` で観測する。
 
 ## Codex sandbox
 
@@ -93,7 +98,7 @@ Codex、OpenCode、OMP は GitHub release を dotfiles が管理する。GitHub 
 subagent は親 session の permission profile を継ぐ。Codex の subagent override が運ぶのは model、reasoning、instructions、personality、service tier、feature 無効化、skill 選択だけであり、subagent file の `default_permissions` は読み捨てられる。read-only の subagent 定義にも独自の sandbox 境界はない。
 既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
 
-agent runtime の共有 cache は user 所有の directory `0700` と marker file `0600` で識別する。launcher と GC は同じ `gc.lock` を取り、共有 cache の型、所有者、symlink、mode、marker を検証する。GC は lock の下で rename だけを行い、計測と削除を lock の外で行う。削除する entry は同じ filesystem の `trash` へ rename してから消すので、lock を待つ launcher が削除の長さに従属しない。GC が allocated bytes 基準で共有 cache を空にするのは、使われていない Cargo の unit を先に回収しても容量上限を超え、active agent session が一件もない場合に限る。
+agent runtime の共有 cache は user 所有の directory `0700` と marker file `0600` で識別する。launcher と GC は同じ `gc.lock` を取り、共有 cache の型、所有者、symlink、mode、marker を検証する。launcher の `gc.lock` の待ちと台帳の書込みは合わせて 5 秒までで、超えた起動は client を起動せず拒否し、使用中の資源を回収して待ちを縮めない。session の GC root は session directory の `roots` に置き、全子孫の終了を確認した後に session directory と一緒に解放する。GC は lock の下で rename だけを行い、計測と削除を lock の外で行う。削除する entry は同じ filesystem の `trash` へ rename してから消すので、lock を待つ launcher が削除の長さに従属しない。GC が allocated bytes 基準で共有 cache を空にするのは、使われていない Cargo の unit を先に回収しても容量上限を超え、active agent session が一件もない場合に限る。
 GC は trash 内の自分が所有する directory にだけ読取・書込・実行権限を戻し、read-only の一時 directory も削除する。
 その際に symlink は辿らず、別の所有者の directory の権限は変更しない。
 Cargo の build-dir の root も user 所有の directory `0700` であり、symlink や別の所有者の root では launcher は起動を拒み、GC は失敗する。

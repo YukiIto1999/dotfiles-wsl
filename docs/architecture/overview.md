@@ -9,9 +9,9 @@
 [`flake.nix`](../../flake.nix)は責務rootのmoduleを明示し、各親moduleが子moduleを静的にimportして、NixOS-WSL、sops-nix、Home Managerと同じnative module評価へ渡す。
 [`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)のdirectory走査は検査用のmetadataを集めるだけであり、本番のmodule採用を決めない。
 検査は全hostのnative module graphとunit markerを照合して、importの取り残しを拒否する。
-[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加Capabilityを持つ。
+[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent client、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加の選択を持つ。
 Skillは選択したCapabilityとSkill依存から導く。
-`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
+host profileのファイル名は`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
 
 Nixpkgsのpackage setは`flake.nix`だけが所有し、nativeのread-only moduleを通して全hostとvariantへ渡す。
 hostからpackage set、config、overlay、platformを差し替えることは拒否する。
@@ -145,7 +145,9 @@ repository固有optionはownerに対応するnamespaceへ置く。
 
 MCP targetの型、front生成、gatewayは[`platform/mcp/`](../../platform/mcp)が所有する。container service contract、OCI image inventory、Docker network、image同期は[`platform/containers/`](../../platform/containers)が所有する。application固有のserver、database、credential、volume、health endpointは対応するCapability内に置く。project memoryでは[`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)がHindsight backend、`dotfiles-memory` runtime、memory MCP front、client integrationを分担する。
 
-project memoryのgeneric optionは`dotfiles.capabilities.project-memory.runtime`（`bin/dotfiles-memory`を含むpackage）、`dotfiles.capabilities.project-memory.clientIntegrations.hooks`、`dotfiles.capabilities.project-memory.clientIntegrations.opencodePlugin`である。clientの`projectMemoryMode`と`capabilityManagedFiles.projectMemory`は、hooksまたはpluginの入口とmanaged fileを表し、Hindsightのprovider名やbackend pathをclient contractへ漏らさない。
+project memoryのgeneric optionは`dotfiles.capabilities.project-memory.runtime`（`bin/dotfiles-memory`を含むpackage）、`dotfiles.capabilities.project-memory.clientIntegrations.hooks`、`dotfiles.capabilities.project-memory.clientIntegrations.opencodePlugin`である。
+clientの`projectMemory`は`hooks`、`plugin`、`unsupported`の判別可能な枝であり、対応する枝の`managedFile`が配備先を選ぶ。
+Hindsightのprovider名やbackend pathはclient contractへ漏らさない。
 
 memory MCPは`localhost:8774`のfrontから、`localhost:3111`のHindsight APIへ接続する。Hindsightのpersistent stateはnamed volume、宣言で固定したmultilingual embedding/reranker modelはread-only mount、LLM credentialは対応Capabilityのruntime secretであり、Nix storeやclient configへ保存しない。
 

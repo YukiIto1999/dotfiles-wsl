@@ -11,17 +11,17 @@ dotfiles-doctor --json
 
 ## 検査契約
 
-[`health/module.nix`](../../health/module.nix) は次の 19 種類の observation kind を閉じた union として受け付ける。
+[`health/impl/observation-registry.nix`](../../health/impl/observation-registry.nix)が受け付けるobservation kindは、次の対象を表す閉じたunionである。
 
 | 対象 | kind |
 |---|---|
-| roster と path | `roster`、`path-match`、`command-version`、`release-tree`、`deployed-path`、`path-metadata` |
+| roster と path | `roster`、`path-match`、`command-version`、`deployed-path`、`path-metadata` |
 | systemd、cgroup と再起動 | `systemd-service`、`systemd-socket`、`systemd-timer`、`restart-counter`、`process-slice` |
 | 容量と committed memory | `filesystem-threshold`、`numeric-command-threshold`、`numeric-command-threshold-set`、`swap-policy`、`journal-size` |
 | container と protocol | `container-image`、`http-health`、`normalized-protocol` |
 
 [`health/module.nix`](../../health/module.nix) は registry 全体を key 順の JSON に投影し、[`health/impl/doctor.sh`](../../health/impl/doctor.sh) が各 observation を同じ runner で処理する。
-個別 probe は宣言した timeout、許可した変数だけの環境、専用の一時 directory で動く。
+個別 probe は宣言した timeout、許可した変数（`HOME`、`USER`、`LOGNAME`、`XDG_RUNTIME_DIR`と固定した`PATH`）だけの環境、専用の一時 directory で動く。
 stdout は上限を設けた JSON fragment だけを受理し、stderr は捨てる。
 不正、過大、非ゼロ終了の結果は、owner が宣言した固定 failure message の `fail` に置き換える。
 宣言した timeout までに終わらない probe は、`observation did not finish within <秒数>s` という message の `warn` にする。
@@ -31,8 +31,17 @@ memory と I/O が逼迫すると、正常な service の probe も、swap と p
 
 観測する対象の数が実行時に決まる資源には `numeric-command-threshold-set` を使う。owner の command は 1 行に 1 つ `<名前> <百分率>` を返し、doctor は名前ごとに閾値を当てて `<checkId>/<名前>` の check を作る。1 行でも読めなければ、どの値も使わずに observation 全体を固定 failure message で失敗させる。
 
-`systemd-timer`はserviceの`Result`と最後の`ExecMainStatus`の両方を読み、どちらかが失敗を示せば`fail`にする。
-`Result`が`success`でも`ExecMainStatus`が非ゼロなら、最後の起動は失敗している。
+`systemd-service`、`systemd-socket`、`systemd-timer`と、systemdのunitを数える`restart-counter`は、読むmanagerを`system`か`user`で必ず宣言する。
+probeは`systemctl --system`か`systemctl --user`を明示し、宣言したmanagerだけを読む。
+`user`のobservationはdoctorを実行したuserのuser managerへ、doctorが渡す`XDG_RUNTIME_DIR`で接続する。
+接続できない場合、そのmanagerにunitがない場合、runtime directoryがない環境で実行した場合は観測を失敗にし、同名のsystem unitが正常でも代わりに読まない。
+`systemd-timer`はserviceの`LoadState`、`ActiveState`、`SubState`、`Result`、`ExecMainStatus`を一度の問い合わせで読む。
+`Result`と`ExecMainStatus`が成功を示し、状態が`inactive/dead`または`active/exited`なら`pass`にする。
+起動中、実行中、再読込み中、終了処理中は、完了をまだ観測していないため`warn`にする。
+ただし、`Result`または`ExecMainStatus`が失敗を示す場合は`fail`を優先する。
+`Result`が`success`でも`ExecMainStatus`が非ゼロなら、最後の実行は失敗している。
+`restart-counter`が出す`serviceRestarts`の行は`manager`、`unit`、`count`を持つので、同名のunitが両方のmanagerにあっても区別できる。
+日誌と収穫のtimerはuser managerのunitを宣言している。
 
 MCP gateway の initialize、tools/list、target probe は Platform MCP の `normalized-protocol` observer が行う。doctor 自体には MCP の状態機械を持たせない。
 
@@ -46,8 +55,9 @@ target の tools/call の故障は `fail` のまま、次の message で種類�
 | `MCP tools/call response violates the MCP contract` | 一つの JSON-RPC 応答として読めないか、result と error の形が MCP の規約に合わない応答 |
 | `MCP tools/call connection to the gateway failed` | 接続の拒否、切断、空の応答など、HTTP の応答を得られない失敗 |
 
-`process-slice` は、owner が宣言した directory の下の実行 file で動く process が、宣言した systemd slice の cgroup に入っているかを見る。
-probe は `/proc/<PID>/exe` の link 先を directory の前方一致で照合するので、更新後も旧 release で動き続ける process と、削除済みの実行 file で動く process も対象になる。
+`process-slice` は、owner が宣言した実行 file の位置で動く process が、宣言した systemd slice の cgroup に入っているかを見る。
+宣言する位置は directory か glob pattern で、native profile の client は `/nix/store/<hash>-<package>-<version>` の名前を glob で指す。
+probe は `/proc/<PID>/exe` の link 先を前方一致で照合するので、更新後も旧世代で動き続ける process と、削除済みの実行 file で動く process も対象になる。
 process の `environ` は、swap に出た page の読み戻しを誘発するので読まない。
 slice の外の process が一つでもあれば `fail` にし、slice の内と外の process 数を resource に出す。
 

@@ -6,7 +6,6 @@ exec "@python@" "@source@/journal.py" \
   --timezone "@timeZone@" \
   --start-hour "@startHour@" \
   --lookback-days "@lookbackDays@" \
-  --omp "@omp@" \
   --model "@model@" \
   --thinking "@thinking@" \
   "$@"

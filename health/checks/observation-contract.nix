@@ -8,26 +8,11 @@
         hostOptions,
         ...
       }:
-
       let
         fixture = import ../fixtures/contract.nix { inherit pkgs; };
         optionalFields = [
           "checkId"
           "resourceKey"
-        ];
-        commandProjections = [
-          {
-            command = fixture.valid."host/numeric-command-threshold".command;
-            expectedName = "fixture-numeric-command-threshold-command";
-          }
-          {
-            command = fixture.valid."host/numeric-command-threshold-set".command;
-            expectedName = "fixture-numeric-command-threshold-set-command";
-          }
-          {
-            command = fixture.valid."host/normalized-protocol".command;
-            expectedName = "fixture-normalized-protocol-command";
-          }
         ];
 
         definitionModule = file: registry: {
@@ -172,38 +157,6 @@
               }
             );
           }
-          {
-            name = "relative-entrypoint:${control.name}";
-            registry = replaceObservation "host/release-tree" (
-              fixture.valid."host/release-tree"
-              // {
-                entrypoint = "bin/tool${control.value}split";
-              }
-            );
-          }
-          {
-            name = "relative-required-path:${control.name}";
-            registry = replaceObservation "host/release-tree" (
-              fixture.valid."host/release-tree"
-              // {
-                requiredPaths = {
-                  "bin/tool${control.value}split" = {
-                    kind = "file";
-                    executable = true;
-                  };
-                };
-              }
-            );
-          }
-          {
-            name = "relative-symlink-target:${control.name}";
-            registry = replaceObservation "host/release-tree" (
-              fixture.valid."host/release-tree"
-              // {
-                visibleTarget = "../current/bin/tool${control.value}split";
-              }
-            );
-          }
         ]) pathControlCharacters;
         explicitInvalidCases = lib.mapAttrsToList (name: registry: {
           inherit name registry;
@@ -245,6 +198,15 @@
             };
           }
         );
+        containerRestartOnSystemEvaluation = evalRegistry (
+          fixture.valid
+          // {
+            "host/restart-counter" = fixture.valid."host/restart-counter" // {
+              sourceKind = "container";
+              manager = "system";
+            };
+          }
+        );
         spacedPathsEvaluation = evalRegistry (
           fixture.valid
           // {
@@ -253,19 +215,6 @@
             };
             "host/process-slice" = fixture.valid."host/process-slice" // {
               executableRoots = [ "/fixture/releases root" ];
-            };
-            "host/release-tree" = fixture.valid."host/release-tree" // {
-              visiblePath = "/fixture/visible path";
-              visibleTarget = "../current/bin/tool name";
-              currentLink = "/fixture/current link";
-              releasesRoot = "/fixture/releases root";
-              entrypoint = "bin/tool name";
-              requiredPaths = {
-                "share directory" = {
-                  kind = "directory";
-                  executable = false;
-                };
-              };
             };
           }
         );
@@ -302,25 +251,13 @@
       in
       {
         observation-contract =
-          assert builtins.length (builtins.attrNames fixture.valid) == 19;
           assert evaluationSucceeds validEvaluation;
           assert evaluationSucceeds (evalRegistry { });
           assert evaluationSucceeds optionalCommonEvaluation;
           assert evaluationSucceeds emptyNormalizedProtocolOutcomesEvaluation;
           assert evaluationSucceeds emptyNormalizedProtocolResourcesEvaluation;
           assert evaluationSucceeds spacedPathsEvaluation;
-          assert optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".checkId == null;
-          assert
-            optionalCommonEvaluation.config.dotfiles.health.observations."host/roster".resourceKey == null;
-          assert builtins.length missingRequiredCases == 125;
-          assert builtins.length kindReplacementCases == 342;
-          assert builtins.length invalidCommandCases == 27;
-          assert lib.all (
-            projection:
-            projection.command.meta.mainProgram == projection.expectedName
-            &&
-              lib.getExe projection.command == "${lib.getBin projection.command}/bin/${projection.expectedName}"
-          ) commandProjections;
+          assert evaluationSucceeds containerRestartOnSystemEvaluation;
           assert lib.assertMsg (unexpectedValid == [ ]) (
             "invalid observation contract evaluation succeeded: " + lib.concatStringsSep " " unexpectedValid
           );

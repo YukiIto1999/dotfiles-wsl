@@ -3,6 +3,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -15,6 +16,8 @@ import journal
 TZ = ZoneInfo("Asia/Tokyo")
 DAY = date(2026, 9, 23)
 HOST = "testhost"
+DAY_FILE = "2026/0923/testhost.md"
+DEADLINE = "DOTFILES_JOB_DEADLINE"
 SESSION_A = "01a0caa2-0000-7000-8000-000000000001"
 SESSION_B = "02b0cbb3-0000-7000-8000-000000000002"
 SESSION_C = "03c0ccc4-0000-7000-8000-000000000003"
@@ -127,9 +130,12 @@ class JournalTest(unittest.TestCase):
 
         self.prompts = self.workspace / "prompts.log"
         self.fake_omp = self.workspace / "omp"
+        self.argv_log = self.workspace / "argv.log"
         self.fake_omp.write_text(
             f"#!{sys.executable}\n"
-            "import os, sys\n"
+            "import json, os, sys\n"
+            f"with open({str(self.argv_log)!r}, 'a', encoding='utf-8') as log:\n"
+            "    log.write(json.dumps(sys.argv[1:]) + '\\n')\n"
             f"with open({str(self.prompts)!r}, 'a', encoding='utf-8') as log:\n"
             "    material = sys.stdin.read()\n"
             "    log.write(material + '\\n---\\n')\n"
@@ -162,6 +168,29 @@ class JournalTest(unittest.TestCase):
 
     def published(self) -> list[str]:
         return git("--git-dir", str(self.remote), "ls-tree", "-r", "--name-only", "main").splitlines()
+
+    def remote_file(self, relative: str) -> str | None:
+        shown = subprocess.run(
+            ["git", "--git-dir", str(self.remote), "show", f"main:{relative}"], capture_output=True, text=True
+        )
+        return shown.stdout if shown.returncode == 0 else None
+
+    def remote_commit(self, relative: str) -> str:
+        return git("--git-dir", str(self.remote), "log", "-1", "--format=%H", "main", "--", relative)
+
+    def local_commit(self, relative: str) -> str:
+        return git("log", "-1", "--format=%H", "--", relative, cwd=self.journal)
+
+    def committed(self, relative: str) -> bool:
+        return subprocess.run(
+            ["git", "-C", str(self.journal), "cat-file", "-e", f"HEAD:{relative}"], capture_output=True
+        ).returncode == 0
+
+    def model_calls(self, marker: str) -> int:
+        return self.prompts.read_text(encoding="utf-8").count(marker) if self.prompts.exists() else 0
+
+    def model_argv(self) -> list[list[str]]:
+        return [json.loads(line) for line in self.argv_log.read_text(encoding="utf-8").splitlines()]
 
     def test_day_is_summarized_from_its_window_and_published(self):
         self.run_journal("--date", DAY.isoformat())
@@ -207,16 +236,119 @@ class JournalTest(unittest.TestCase):
         self.run_journal("--date", DAY.isoformat(), status=1)
         self.assertFalse(self.prompts.exists())
 
-    def test_pending_days_end_at_the_last_completed_window(self):
-        before = journal.pending_days(local("2026-09-24T05:59:59"), TZ, 6, 2, self.journal, HOST)
-        at = journal.pending_days(local("2026-09-24T06:00:00"), TZ, 6, 2, self.journal, HOST)
+    def test_pending_days_end_at_the_last_completed_window_and_skip_only_published_days(self):
+        before = journal.pending_days(local("2026-09-24T05:59:59"), TZ, 6, 2, self.journal, HOST, "main")
+        at = journal.pending_days(local("2026-09-24T06:00:00"), TZ, 6, 2, self.journal, HOST, "main")
         self.assertEqual(before, [date(2026, 9, 21), date(2026, 9, 22)])
         self.assertEqual(at, [date(2026, 9, 22), DAY])
 
         existing = self.journal / "2026" / "0922" / f"{HOST}.md"
         existing.parent.mkdir(parents=True)
         existing.write_text("# 既存\n")
-        self.assertEqual(journal.pending_days(local("2026-09-24T06:00:00"), TZ, 6, 2, self.journal, HOST), [DAY])
+        self.assertEqual(
+            journal.pending_days(local("2026-09-24T06:00:00"), TZ, 6, 2, self.journal, HOST, "main"), [date(2026, 9, 22), DAY]
+        )
+
+        git("add", "--", "2026/0922", cwd=self.journal)
+        git("commit", "-q", "-m", "docs: 既存", cwd=self.journal)
+        self.assertEqual(
+            journal.pending_days(local("2026-09-24T06:00:00"), TZ, 6, 2, self.journal, HOST, "main"), [date(2026, 9, 22), DAY]
+        )
+
+        git("push", "-q", "origin", "HEAD:main", cwd=self.journal)
+        self.assertEqual(journal.pending_days(local("2026-09-24T06:00:00"), TZ, 6, 2, self.journal, HOST, "main"), [DAY])
+
+    def test_a_commit_failure_keeps_the_generated_day_and_the_next_ordinary_run_publishes_that_body(self):
+        hook = self.journal / ".git" / "hooks" / "pre-commit"
+        hook.write_text("#!/bin/sh\nexit 1\n")
+        hook.chmod(0o755)
+
+        self.run_journal("--date", DAY.isoformat(), status=1)
+
+        generated = self.journal / DAY_FILE
+        self.assertTrue(generated.is_file())
+        self.assertFalse(self.committed(DAY_FILE))
+        self.assertIsNone(self.remote_file(DAY_FILE))
+        edited = generated.read_text(encoding="utf-8") + "\n手で足した行\n"
+        generated.write_text(edited, encoding="utf-8")
+        calls = self.model_calls("境界の依頼")
+        hook.unlink()
+
+        self.run_journal(now=local("2026-09-24T06:00:00"))
+
+        self.assertEqual(self.model_calls("境界の依頼"), calls)
+        self.assertEqual(self.remote_file(DAY_FILE), edited)
+        self.assertEqual(self.local_commit(DAY_FILE), self.remote_commit(DAY_FILE))
+        self.assertEqual(len(git("log", "--format=%H", "--", DAY_FILE, cwd=self.journal).splitlines()), 1)
+
+    def test_a_push_failure_keeps_the_local_commit_and_the_next_ordinary_run_only_publishes_it(self):
+        git("config", "remote.origin.pushurl", str(self.workspace / "no-such-remote.git"), cwd=self.journal)
+
+        self.run_journal("--date", DAY.isoformat(), status=1)
+
+        self.assertTrue(self.committed(DAY_FILE))
+        self.assertIsNone(self.remote_file(DAY_FILE))
+        committed = self.local_commit(DAY_FILE)
+        calls = self.model_calls("境界の依頼")
+        git("config", "--unset", "remote.origin.pushurl", cwd=self.journal)
+
+        self.run_journal(now=local("2026-09-24T06:00:00"))
+
+        self.assertEqual(self.model_calls("境界の依頼"), calls)
+        self.assertEqual(self.remote_commit(DAY_FILE), committed)
+        self.assertEqual(self.remote_file(DAY_FILE), (self.journal / DAY_FILE).read_text(encoding="utf-8"))
+
+    def test_days_at_different_stages_are_isolated_and_each_resumes_from_its_own_stage(self):
+        hook = self.journal / ".git" / "hooks" / "pre-commit"
+        hook.write_text("#!/bin/sh\ngit diff --cached --name-only | grep -q 0922 && exit 1\nexit 0\n")
+        hook.chmod(0o755)
+        now = local("2026-09-24T06:00:00")
+
+        self.run_journal(now=now, status=1)
+
+        self.assertEqual(self.published(), ["2026/0921/testhost.md", "2026/0923/testhost.md"])
+        stuck = "2026/0922/testhost.md"
+        self.assertTrue((self.journal / stuck).is_file())
+        self.assertFalse(self.committed(stuck))
+        before = {day: self.remote_commit(f"2026/{day}/testhost.md") for day in ("0921", "0923")}
+        calls = self.model_calls("前日の依頼")
+        hook.unlink()
+
+        self.run_journal(now=now)
+
+        self.assertEqual(self.published(), ["2026/0921/testhost.md", "2026/0922/testhost.md", "2026/0923/testhost.md"])
+        self.assertEqual(self.model_calls("前日の依頼"), calls)
+        self.assertEqual(before, {day: self.remote_commit(f"2026/{day}/testhost.md") for day in ("0921", "0923")})
+
+    def test_an_unfinished_day_outside_the_lookback_is_resumed_from_its_file_without_the_model(self):
+        old = self.journal / "2026" / "0910" / f"{HOST}.md"
+        old.parent.mkdir(parents=True)
+        old.write_text("# 2026-09-10 testhost\n\n以前に生成した本文\n", encoding="utf-8")
+        git("add", "--", "2026/0910", cwd=self.journal)
+
+        self.run_journal(now=local("2026-09-24T06:00:00"))
+
+        self.assertEqual(self.remote_file("2026/0910/testhost.md"), old.read_text(encoding="utf-8"))
+        self.assertNotIn("以前に生成した本文", self.prompts.read_text(encoding="utf-8"))
+
+    def test_no_child_starts_after_the_job_deadline(self):
+        os.environ[DEADLINE] = str(time.time() - 1)
+        self.addCleanup(os.environ.pop, DEADLINE, None)
+
+        self.run_journal("--date", DAY.isoformat(), status=1)
+
+        self.assertFalse(self.prompts.exists())
+        self.assertFalse((self.journal / DAY_FILE).exists())
+
+    def test_the_job_deadline_bounds_the_model_it_is_passed_to(self):
+        os.environ[DEADLINE] = str(time.time() + 400)
+        self.addCleanup(os.environ.pop, DEADLINE, None)
+
+        self.run_journal("--date", DAY.isoformat())
+
+        limits = [int(argv[argv.index("--max-time") + 1]) for argv in self.model_argv()]
+        self.assertTrue(limits)
+        self.assertTrue(all(1 <= limit <= 340 for limit in limits), limits)
 
 
 if __name__ == "__main__":

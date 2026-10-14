@@ -56,6 +56,7 @@ let
         commonObservation "service/${service}" "${unit} is not operational"
         // {
           kind = "systemd-service";
+          manager = "system";
           inherit unit;
           loadStates = [ "loaded" ];
           activeStates = [ "active" ];
@@ -74,6 +75,7 @@ let
         commonObservation "restart/service/${service}" "could not observe restart count for ${unit}"
         // {
           kind = "restart-counter";
+          manager = "system";
           sourceKind = "systemd-service";
           target = unit;
           warningAt = restartWarningCount;

@@ -8,15 +8,11 @@
 
 ## Agent client の実行契約
 
-Agent client unitはclient IDごとに設定配備とruntime wrapper適用を所有する。binaryの供給契約は通常そのclient unitが所有するが、同じbinaryをAgent以外も必要とする場合は対応するCapabilityへ置く。
+client adapterは設定配備、供給するpackageと実行file名、runtime wrapperの適用を所有する。
+wrapperはclient名で分岐せず、defaultを持たない`runtime.managed`か`runtime.unsupported`の枝で選ぶ。
 
-- 配備する実行ファイルの絶対path
-- Agent runtime wrapperの対象か、非対応か
-- packageが提供する実行ファイル名
-
-wrapper対象はclient名で判定せず、defaultを持たない列挙値で宣言する。Claude Code、Codex、OMP、OpenCodeはwrapper対象、Antigravityは非対応とする。
-
-Codex binary の release contract は、その唯一の consumer である[`agents/clients/codex/module.nix`](../../agents/clients/codex/module.nix)が所有する。Agent、Skill、Capability の依存方向を逆転させず、Capability は Agent 設定を参照しない。
+client adapterの`supply.package`と`binary`が供給する実行fileを選び、profileの世代管理は`dotfiles-agent-supply`が所有する。
+Agent、Skill、Capabilityの依存方向を逆転させず、CapabilityはAgent設定を参照しない。
 
 ## Check file の境界
 
@@ -29,11 +25,12 @@ check名やfile名の別の手書き一覧は持たない。
 
 - client contract
 - configuration、artifact、subagent、LSPの配備
-- client installer
+- client binaryの供給
 - runtime wrapper、cache、verification
 - session resourceとworktree lifecycle
 
-`health/checks/` はregistry projectionとruntime probeを分ける。runtime fixtureは出力形式と失敗条件ごとに`fixtures/`へ置き、check本体へ生成処理を集めない。
+`health/checks/`はobservationの構築契約とruntime probeの振る舞いを分ける。
+runtime fixtureは出力形式と失敗条件ごとに`fixtures/`へ置き、check本体へ生成処理を集めない。
 
 `checks/checks/` はrepository structure、runtime registry、unit boundary、documentation、static analysisへ分ける。`checks/`はunit内で許可するlayer名へ追加するが、任意のdirectory名は許可しない。
 

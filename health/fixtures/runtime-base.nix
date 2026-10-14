@@ -75,6 +75,16 @@ let
       "/fixture/agents/claude/versions/2.0.0 (deleted)"
       "${agentSlice}/dotfiles-agent-claude.104.b.scope"
     ]
+    [
+      "105"
+      "/fixture/store/aaaaaaaa-omp-1.0/lib/omp/omp"
+      "${agentSlice}/dotfiles-agent-omp.105.c.scope"
+    ]
+    [
+      "107"
+      "/fixture/store/cccccccc-ompx-1.0/bin/other"
+      "/init.scope"
+    ]
   ];
   strayProcFixture = mkProcFixture "dotfiles-doctor-fixture-stray-proc" [
     [
@@ -275,33 +285,6 @@ let
     text = "kill -KILL $$";
   };
 
-  releaseFixture = pkgs.runCommandLocal "dotfiles-doctor-release-fixture" { } ''
-    mkdir -p "$out/bin" "$out/releases/sha256-pass/bin" "$out/releases/sha256-pass/share"
-    cp ${lib.getExe versionCommand} "$out/releases/sha256-pass/bin/tool"
-    ln -s releases/sha256-pass "$out/current"
-    ln -s ../current/bin/tool "$out/bin/tool"
-  '';
-  releaseEscapeFixture = pkgs.runCommandLocal "dotfiles-doctor-release-escape-fixture" { } ''
-    mkdir -p "$out/bin" "$out/releases/sha256-escape/bin" "$out/releases/sha256-escape/share"
-    cp ${lib.getExe versionCommand} "$out/outside-tool"
-    ln -s ../../../outside-tool "$out/releases/sha256-escape/bin/tool"
-    ln -s releases/sha256-escape "$out/current"
-    ln -s ../current/bin/tool "$out/bin/tool"
-  '';
-  releaseDirectoryFixture = pkgs.runCommandLocal "dotfiles-doctor-release-directory-fixture" { } ''
-    mkdir -p "$out/bin" "$out/releases/sha256-directory/bin/tool"
-    ln -s releases/sha256-directory "$out/current"
-    ln -s ../current/bin/tool "$out/bin/tool"
-  '';
-  releaseNonExecutableFixture =
-    pkgs.runCommandLocal "dotfiles-doctor-release-non-executable-fixture" { }
-      ''
-        mkdir -p "$out/bin" "$out/releases/sha256-non-executable/bin"
-        cp ${lib.getExe versionCommand} "$out/releases/sha256-non-executable/bin/tool"
-        chmod -x "$out/releases/sha256-non-executable/bin/tool"
-        ln -s releases/sha256-non-executable "$out/current"
-        ln -s ../current/bin/tool "$out/bin/tool"
-      '';
   deployedSource = pkgs.writeText "dotfiles-doctor-deployed-source" "fixture";
   deployedDestination = pkgs.writeText "dotfiles-doctor-deployed-destination" "fixture";
   pathFixture = pkgs.writeText "dotfiles-doctor-path-fixture" "fixture";
@@ -337,24 +320,6 @@ let
       expectedSource = lib.getExe versionCommand;
       versionArgs = [ "--version" ];
     };
-    "fixture/04-release-tree" = common "release-tree" "release-tree" // {
-      visiblePath = "${releaseFixture}/bin/tool";
-      visibleTarget = "../current/bin/tool";
-      currentLink = "${releaseFixture}/current";
-      releasesRoot = "${releaseFixture}/releases";
-      entrypoint = "bin/tool";
-      requiredPaths = {
-        "bin/tool" = {
-          kind = "file";
-          executable = true;
-        };
-        share = {
-          kind = "directory";
-          executable = false;
-        };
-      };
-      versionArgs = [ "--version" ];
-    };
     "fixture/05-deployed-path" = common "deployed-path" "deployed-path" // {
       source = toString deployedSource;
       destination = toString deployedDestination;
@@ -367,18 +332,21 @@ let
       mode = "0400";
     };
     "fixture/08-systemd-service" = common "systemd-service" "systemd-service" // {
+      manager = "system";
       unit = "service-ok.service";
       loadStates = [ "loaded" ];
       activeStates = [ "active" ];
       results = [ "success" ];
     };
     "fixture/08b-systemd-socket" = common "systemd-socket" "systemd-socket" // {
+      manager = "system";
       unit = "socket-ok.socket";
       loadStates = [ "loaded" ];
       activeStates = [ "active" ];
       results = [ "success" ];
     };
     "fixture/09-systemd-timer" = common "systemd-timer" "systemd-timer" // {
+      manager = "system";
       timer = "timer-ok.timer";
       service = "timer-ok.service";
       unitFileStates = [ "enabled" ];
@@ -386,6 +354,7 @@ let
       serviceResults = [ "success" ];
     };
     "fixture/09b-timer-exit" = common "timer-exit" "systemd-timer" // {
+      manager = "system";
       timer = "timer-ok.timer";
       service = "timer-ok.service";
       unitFileStates = [ "enabled" ];
@@ -393,12 +362,14 @@ let
       serviceResults = [ "success" ];
     };
     "fixture/10-restart-service" = common "restart-service" "restart-counter" // {
+      manager = "system";
       sourceKind = "systemd-service";
       target = "service-ok.service";
       warningAt = 5;
       failureAt = 20;
     };
     "fixture/11-restart-container" = common "restart-container" "restart-counter" // {
+      manager = "system";
       sourceKind = "container";
       target = "container-ok";
       warningAt = 5;
@@ -449,6 +420,7 @@ let
       executableRoots = [
         "/fixture/agents/omp/releases"
         "/fixture/agents/claude/versions"
+        "/fixture/store/????????-omp-*"
       ];
       slice = "agents.slice";
       resourceKey = "fixtureProcessSlice";
@@ -464,9 +436,6 @@ let
     };
     "fixture/03-command-version" = passValues."fixture/03-command-version" // {
       path = "/fixture/missing-command";
-    };
-    "fixture/04-release-tree" = passValues."fixture/04-release-tree" // {
-      visibleTarget = "../current/bin/wrong";
     };
     "fixture/05-deployed-path" = passValues."fixture/05-deployed-path" // {
       destination = "/fixture/missing-deployment";
@@ -690,54 +659,120 @@ let
       failureOnly = true;
     };
   };
-  releaseEscapeDoctor = mkFixtureDoctor {
-    "fixture/release-escape" = passValues."fixture/04-release-tree" // {
-      checkId = "fixture/release-escape";
-      visiblePath = "${releaseEscapeFixture}/bin/tool";
-      currentLink = "${releaseEscapeFixture}/current";
-      releasesRoot = "${releaseEscapeFixture}/releases";
-      requiredPaths = {
-        share = {
-          kind = "directory";
-          executable = false;
-        };
+  expectedStatuses =
+    overrides:
+    {
+      timer = "pass";
+      service = "pass";
+      restart = "pass";
+    }
+    // overrides;
+  managerCases = {
+    healthy = {
+      system = expectedStatuses { };
+      user = expectedStatuses { };
+    };
+    manager-down = {
+      system = expectedStatuses { };
+      user = expectedStatuses {
+        timer = "fail";
+        service = "fail";
+        restart = "fail";
+      };
+    };
+    status-split-user = {
+      system = expectedStatuses { };
+      user = expectedStatuses { timer = "fail"; };
+    };
+    status-split-system = {
+      system = expectedStatuses { timer = "fail"; };
+      user = expectedStatuses { };
+    };
+    result-split-user = {
+      system = expectedStatuses { };
+      user = expectedStatuses {
+        timer = "fail";
+        service = "fail";
+      };
+    };
+    only-user = {
+      system = expectedStatuses {
+        timer = "fail";
+        service = "fail";
+      };
+      user = expectedStatuses { };
+    };
+    only-system = {
+      system = expectedStatuses { };
+      user = expectedStatuses {
+        timer = "fail";
+        service = "fail";
       };
     };
   };
-  releaseDirectoryDoctor = mkFixtureDoctor {
-    "fixture/release-directory" = passValues."fixture/04-release-tree" // {
-      checkId = "fixture/release-directory";
-      visiblePath = "${releaseDirectoryFixture}/bin/tool";
-      currentLink = "${releaseDirectoryFixture}/current";
-      releasesRoot = "${releaseDirectoryFixture}/releases";
-      requiredPaths = { };
+  mkManagerDoctor =
+    caseName: manager:
+    mkFixtureDoctor {
+      "fixture/${caseName}-${manager}-timer" = common "${caseName}-${manager}-timer" "systemd-timer" // {
+        inherit manager;
+        timer = "shared-${caseName}.timer";
+        service = "shared-${caseName}.service";
+        unitFileStates = [ "enabled" ];
+        activeStates = [ "active" ];
+        serviceResults = [ "success" ];
+      };
+      "fixture/${caseName}-${manager}-service" =
+        common "${caseName}-${manager}-service" "systemd-service"
+        // {
+          inherit manager;
+          unit = "shared-${caseName}.service";
+          loadStates = [ "loaded" ];
+          activeStates = [ "active" ];
+          results = [ "success" ];
+        };
+      "fixture/${caseName}-${manager}-restart" =
+        common "${caseName}-${manager}-restart" "restart-counter"
+        // {
+          inherit manager;
+          sourceKind = "systemd-service";
+          target = "shared-${caseName}.service";
+          warningAt = 5;
+          failureAt = 20;
+        };
     };
-  };
-  releaseNonExecutableDoctor = mkFixtureDoctor {
-    "fixture/release-non-executable" = passValues."fixture/04-release-tree" // {
-      checkId = "fixture/release-non-executable";
-      visiblePath = "${releaseNonExecutableFixture}/bin/tool";
-      currentLink = "${releaseNonExecutableFixture}/current";
-      releasesRoot = "${releaseNonExecutableFixture}/releases";
-      requiredPaths = { };
-    };
-  };
-  releaseMissingLinkObservations = {
-    current = passValues."fixture/04-release-tree" // {
-      checkId = "fixture/release-missing-current";
-      currentLink = "${releaseFixture}/missing-current";
-    };
-    visible = passValues."fixture/04-release-tree" // {
-      checkId = "fixture/release-missing-visible";
-      visiblePath = "${releaseFixture}/bin/missing-visible";
-    };
-  };
-  releaseMissingLinkFixtures = lib.mapAttrs (name: observation: {
-    inherit observation;
-    doctor = mkFixtureDoctor {
-      "fixture/release-missing-${name}" = observation;
-    };
-  }) releaseMissingLinkObservations;
+  managerDoctors = lib.mapAttrs (
+    caseName: managers:
+    lib.mapAttrs (manager: expectation: {
+      inherit expectation;
+      doctor = mkManagerDoctor caseName manager;
+    }) managers
+  ) managerCases;
+  timerStateDoctors =
+    lib.mapAttrs
+      (state: status: {
+        inherit status;
+        doctor = mkFixtureDoctor {
+          "fixture/timer-state" = common "timer-state" "systemd-timer" // {
+            manager = "user";
+            timer = "timer-ok.timer";
+            service = "timer-state-${state}.service";
+            unitFileStates = [ "enabled" ];
+            activeStates = [ "active" ];
+            serviceResults = [ "success" ];
+          };
+        };
+      })
+      {
+        starting = "warn";
+        running = "warn";
+        draining = "warn";
+        completed = "pass";
+        retained = "pass";
+        failed-running = "fail";
+        failed-cleared = "fail";
+        failed-state = "fail";
+        inconsistent = "fail";
+      };
 
   invalidNormalizedCommands = {
     nonzero = normalizedNonzeroCommand;
@@ -854,6 +889,7 @@ in
     filesystemFreeDoctor
     invalidNormalizedDoctors
     killedProbeDoctor
+    managerDoctors
     numericNoiseDoctor
     numericOversizeDoctor
     numericSetInvalidDoctors
@@ -862,16 +898,13 @@ in
     zramPathDoctor
     passDoctor
     poisonDoctor
-    releaseDirectoryDoctor
-    releaseEscapeDoctor
-    releaseMissingLinkFixtures
-    releaseNonExecutableDoctor
     restartThresholdFailureDoctor
     rosterFailureOnlyDoctor
     rosterOmitDoctor
     strayProcessDoctor
     termTimeoutDoctor
     timeoutDoctor
+    timerStateDoctors
     unreadableProcessDoctor
     warningDoctor
     ;

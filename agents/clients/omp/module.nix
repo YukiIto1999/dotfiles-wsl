@@ -134,13 +134,15 @@ in
 {
   dotfiles.agents.registry.omp = {
     binary = "omp";
-    runtimeWrapperMode = "managed";
-    rulesDestination = ".omp/agent/AGENTS.md";
+    supply.package = "omp";
+    runtime.managed = { };
+    rules.file.destination = ".omp/agent/AGENTS.md";
     skillsDestination = ".omp/agent/skills";
-    subagentMode = "rendered";
-    subagentsDestination = ".omp/agent/agents";
-    subagentFormat = "frontmatter-markdown";
-    subagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+    subagents.rendered = {
+      destination = ".omp/agent/agents";
+      sources = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+      skillProjection = "preload";
+    };
     gatewayConfig = {
       source = gatewayConfig;
       format = "json";
@@ -178,32 +180,9 @@ in
         destination = ".omp/agent/hooks/pre";
       };
     };
-    capabilityManagedFiles = {
-      lsp = "lsp";
-      projectMemory = if projectMemoryEnabled then "hooks" else null;
-    };
-    lspMode = "supported";
-    telemetryMode = "unsupported";
-    projectMemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
-    skillProjectionMode = "preload";
-    install = {
-      kind = "github-release";
-      updateOwner = "dotfiles";
-      layout = "single-binary";
-      assetFormat = "raw";
-      repo = "can1357/oh-my-pi";
-      retainedReleases = 2;
-      releaseByArch = {
-        x86_64 = {
-          asset = "omp-linux-x64";
-          entrypoint = "omp";
-        };
-        aarch64 = {
-          asset = "omp-linux-arm64";
-          entrypoint = "omp";
-        };
-      };
-      requiredPaths = { };
-    };
+    lsp.supported.managedFile = "lsp";
+    telemetry.unsupported = { };
+    projectMemory =
+      if projectMemoryEnabled then { hooks.managedFile = "hooks"; } else { unsupported = { }; };
   };
 }

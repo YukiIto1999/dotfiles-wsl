@@ -14,9 +14,7 @@
         self,
         ...
       }:
-
       let
-        expected = builtins.fromJSON (builtins.readFile ../fixtures/client-contract.json);
         agentConfig = hostConfig.dotfiles.agents;
         inherit (agentConfig) clients;
         variantClients = variantConfig.dotfiles.agents.clients;
@@ -31,9 +29,17 @@
         gatewayPort = hostConfig.dotfiles.platform.mcp.gateway.port;
         variantGatewayUrl = variantConfig.dotfiles.platform.mcp.gateway.url;
         roster = hostConfig.dotfiles.toolchain.lsp;
-        installAgents = hostConfig.dotfiles.platform.cli.commands.installAgents;
-        installAgentsExe = lib.getExe installAgents;
-        atomicPublish = import ../impl/atomic-publish.nix { inherit pkgs; };
+        inherit (hostConfig.dotfiles.platform.cli.commands) agentSupply;
+        inherit (import ../impl/contract.nix { inherit lib; })
+          capabilityFileOf
+          modeOf
+          rulesDestinationOf
+          skillProjectionOf
+          subagentDestinationOf
+          subagentSourcesOf
+          ;
+        inherit (agentConfig) registry;
+        adapterNames = builtins.attrNames registry;
         restrictedAgentRules = projectMemoryDisabledConfig.dotfiles.agents.shared.rules;
         telemetryDisabledConfig =
           (mkProbeSystem [
@@ -51,73 +57,6 @@
               }
             )
           ]).config;
-        atomicPublishExe = lib.getExe' atomicPublish "dotfiles-agent-atomic-publish";
-
-        losslessVersionArgs = [
-          "trailing\n"
-          "\n"
-          "embedded\nline"
-          "  spaced  "
-          "pipe|value"
-        ];
-        losslessInstallManifest = builtins.toJSON [
-          {
-            name = "lossless-fixture";
-            binary = "argv-capture";
-            versionArgs = losslessVersionArgs;
-            install = {
-              kind = "installer-script";
-              updateOwner = "upstream-installer";
-              layout = "upstream-managed";
-              scriptUrl = "https://example.invalid/install.sh";
-            };
-          }
-        ];
-        losslessInstallerCurl = pkgs.writeShellScriptBin "curl" ''
-          exit 0
-        '';
-        losslessInstallAgents = pkgs.writeShellApplication {
-          name = "check-lossless-install-agents";
-          runtimeInputs = [
-            atomicPublish
-            losslessInstallerCurl
-          ]
-          ++ (with pkgs; [
-            bash
-            curl
-            diffutils
-            findutils
-            gawk
-            jq
-            gnutar
-            gzip
-            coreutils
-            util-linux
-          ]);
-          text =
-            builtins.replaceStrings
-              [
-                "@atomicPublishCommand@"
-                "@installManifest@"
-                "@probeEnvironment@"
-                "@transactionHookCommand@"
-                "@versionArgsDecoder@"
-              ]
-              [
-                (lib.escapeShellArg atomicPublishExe)
-                losslessInstallManifest
-                ""
-                (lib.escapeShellArg "${pkgs.coreutils}/bin/true")
-                (builtins.readFile ../impl/version-args.sh)
-              ]
-              (builtins.readFile ../impl/install-agents.sh);
-        };
-        losslessInstallAgentsExe = lib.getExe losslessInstallAgents;
-        atomicPublishHookSupport = import ./support/atomic-publish-hook.nix {
-          inherit pkgs;
-        };
-        inherit (atomicPublishHookSupport) atomicPublishTestHook;
-
         fixtureMigrateCodexConfig = pkgs.writeShellScript "fixture-migrate-codex-config" (
           builtins.replaceStrings
             [
@@ -143,10 +82,6 @@
             (builtins.readFile ../clients/codex/impl/migrate-config.sh)
         );
 
-        expectedInstallManifest = map (name: {
-          inherit name;
-          inherit (expected.clients.${name}) binary versionArgs install;
-        }) expected.required;
         projectMemoryHookCommand =
           harness: name: "/run/current-system/sw/bin/dotfiles-memory hook --harness ${harness} ${name}";
         expectedHook =
@@ -279,17 +214,20 @@
           clientName:
           let
             client = clients.${clientName};
+            rulesDestination = rulesDestinationOf client;
+            subagentDestination = subagentDestinationOf client;
+            subagentSources = subagentSourcesOf client;
             homePrefix = hostConfig.dotfiles.workstation.homeDir;
             rulesArtifact = artifacts."agents/${clientName}/rules" or null;
             rulesMatch =
-              if client.rulesDestination == null then
+              if rulesDestination == null then
                 rulesArtifact == null
               else
                 rulesArtifact.source == normalizeSource hostConfig.dotfiles.agents.shared.rules
                 && rulesArtifact.format == "markdown"
-                && rulesArtifact.deployedAt == "${homePrefix}/${client.rulesDestination}"
+                && rulesArtifact.deployedAt == "${homePrefix}/${rulesDestination}"
                 &&
-                  homeConfig.home.file.${client.rulesDestination}.source
+                  homeConfig.home.file.${rulesDestination}.source
                   == normalizeSource hostConfig.dotfiles.agents.shared.rules;
             skillsMatch = lib.all (
               name:
@@ -303,19 +241,17 @@
             subagentsMatch = lib.all (
               name:
               let
-                suffix = if client.subagentFormat == "toml" then "toml" else "md";
                 artifact = artifacts."agents/${clientName}/subagents/${name}";
-                expectedFormat = if client.subagentFormat == "toml" then "toml" else "markdown";
               in
-              if client.subagentsDestination == null then
+              if subagentDestination == null then
                 !(artifacts ? "agents/${clientName}/subagents/${name}")
               else
-                homeConfig.home.file."${client.subagentsDestination}/${name}.${suffix}".source
-                == normalizeSource client.subagents.${name}
-                && artifact.source == normalizeSource client.subagents.${name}
-                && artifact.format == expectedFormat
-                && artifact.deployedAt == "${homePrefix}/${client.subagentsDestination}/${name}.${suffix}"
-            ) (builtins.attrNames client.subagents);
+                homeConfig.home.file."${subagentDestination}/${name}.md".source
+                == normalizeSource subagentSources.${name}
+                && artifact.source == normalizeSource subagentSources.${name}
+                && artifact.format == "markdown"
+                && artifact.deployedAt == "${homePrefix}/${subagentDestination}/${name}.md"
+            ) (builtins.attrNames subagentSources);
           in
           lib.all (
             name:
@@ -333,17 +269,15 @@
             let
               client = clients.${clientName};
             in
-            lib.optional (client.rulesDestination != null) "agents/${clientName}/rules"
+            lib.optional (rulesDestinationOf client != null) "agents/${clientName}/rules"
             ++ map (name: "agents/${clientName}/skills/${name}") (
               builtins.attrNames hostConfig.dotfiles.agents.shared.skills
             )
-            ++ lib.optionals (client.subagentsDestination != null) (
-              map (name: "agents/${clientName}/subagents/${name}") (builtins.attrNames client.subagents)
+            ++ lib.optionals (subagentDestinationOf client != null) (
+              map (name: "agents/${clientName}/subagents/${name}") (builtins.attrNames (subagentSourcesOf client))
             )
-            ++ map (id: "agents/${clientName}/${id}") (
-              builtins.attrNames expected.clients.${clientName}.managedFiles
-            )
-          ) expected.required
+            ++ map (id: "agents/${clientName}/${id}") (builtins.attrNames client.managedFiles)
+          ) (builtins.attrNames clients)
         );
         actualAgentArtifactIds = lib.sort builtins.lessThan (
           builtins.filter (lib.hasPrefix "agents/") (builtins.attrNames artifacts)
@@ -397,11 +331,10 @@
             ) routingContract.subagentSkills
           )
         );
-        securitySubagentSource = hostConfig.dotfiles.agents.shared.subagents.security;
-        claudeSubagentSources = builtins.attrValues clients.claude.subagents;
-        codexSubagentSources = builtins.attrValues clients.codex.subagents;
-        ompSubagentSources = builtins.attrValues clients.omp.subagents;
-        opencodeSubagentSources = builtins.attrValues clients.opencode.subagents;
+        claudeSubagentSources = builtins.attrValues (subagentSourcesOf clients.claude);
+        codexSubagentSources = builtins.attrValues (subagentSourcesOf clients.codex);
+        ompSubagentSources = builtins.attrValues (subagentSourcesOf clients.omp);
+        opencodeSubagentSources = builtins.attrValues (subagentSourcesOf clients.opencode);
         sharedSubagentFarm = pkgs.linkFarm "shared-subagents" (
           lib.mapAttrsToList (name: path: {
             inherit name path;
@@ -439,6 +372,10 @@
             enabled = [ "antigravity" ];
             automaticUpdates = [ ];
           };
+          claude-only = {
+            enabled = [ "claude" ];
+            automaticUpdates = [ "claude" ];
+          };
         };
         selectionConfigs = lib.mapAttrs (
           _: selection:
@@ -455,7 +392,7 @@
           let
             selection = selectionCases.${name};
             selected = configuration.dotfiles.agents.clients;
-            unselected = builtins.filter (id: !(builtins.elem id selection.enabled)) expected.required;
+            unselected = builtins.filter (id: !(builtins.elem id selection.enabled)) adapterNames;
             home = configuration.home-manager.users.${configuration.dotfiles.workstation.username};
             artifactIds = builtins.filter (lib.hasPrefix "agents/") (
               builtins.attrNames configuration.dotfiles.managedArtifacts
@@ -469,11 +406,13 @@
                 client = configuration.dotfiles.agents.registry.${id};
               in
               !(builtins.hasAttr "${wrapperDirectory}/${client.binary}" home.home.file)
-              && (client.rulesDestination == null || !(builtins.hasAttr client.rulesDestination home.home.file))
+              && (
+                rulesDestinationOf client == null || !(builtins.hasAttr (rulesDestinationOf client) home.home.file)
+              )
               && !lib.any (lib.hasPrefix "${client.skillsDestination}/") (builtins.attrNames home.home.file)
               && (
-                client.subagentsDestination == null
-                || !lib.any (lib.hasPrefix "${client.subagentsDestination}/") (builtins.attrNames home.home.file)
+                subagentDestinationOf client == null
+                || !lib.any (lib.hasPrefix "${subagentDestinationOf client}/") (builtins.attrNames home.home.file)
               )
               && !(builtins.hasAttr "agents/${id}/rules" configuration.dotfiles.managedArtifacts)
               && !lib.any (lib.hasPrefix "agents/${id}/") artifactIds
@@ -490,19 +429,27 @@
           in
           lib.all (entry: entry.assertion) configuration.assertions
           && (
-            builtins.attrNames configuration.dotfiles.agents.registry == expected.required
+            builtins.attrNames configuration.dotfiles.agents.registry == adapterNames
             && builtins.attrNames selected == selection.enabled
             && builtins.attrNames configuration.dotfiles.agents.clientExecutables == selection.enabled
+            && builtins.attrNames configuration.dotfiles.agents.clientExecutionDependencies == selection.enabled
             && configuration.dotfiles.health.observations."agents/roster".members == selection.enabled
             && clientObservationIds == map (id: "agents/client/${id}") selection.enabled
             && builtins.all noClientDeployment unselected
             &&
               configuration.dotfiles.agents.runtime.skillRoots
-              == map (id: expected.clients.${id}.skillsDestination) selection.enabled
+              == map (id: registry.${id}.skillsDestination) selection.enabled
             && (configuration.dotfiles.agents.runtime.timers.autoupdate != null) == updatesEnabled
             && (configuration.systemd.services ? dotfiles-agent-autoupdate) == updatesEnabled
             && (configuration.systemd.timers ? dotfiles-agent-autoupdate) == updatesEnabled
+            && (
+              !updatesEnabled
+              ||
+                configuration.systemd.services.dotfiles-agent-autoupdate.serviceConfig.ExecStart
+                == "${lib.getExe configuration.dotfiles.platform.cli.commands.agentSupply} update --automatic"
+            )
             && (configuration.dotfiles.health.observations ? "agents/maintenance/autoupdate") == updatesEnabled
+            && !(configuration.dotfiles.platform.cli.commands ? installAgents)
             && !(configuration.dotfiles.agents.packages ? apm)
           );
         wrapperDirectory = ".local/share/dotfiles-agent/bin";
@@ -528,20 +475,16 @@
                 let
                   configuration = selectionConfigs.${name};
                   selection = selectionCases.${name};
-                  installer = lib.getExe configuration.dotfiles.platform.cli.commands.installAgents;
-                  updater = configuration.systemd.services.dotfiles-agent-autoupdate.serviceConfig.ExecStart or null;
+                  supply = lib.getExe configuration.dotfiles.platform.cli.commands.agentSupply;
                   policyFile = configuration.dotfiles.agents.shared.rules;
                   gate = lib.getExe configuration.dotfiles.agents.packages.verificationGate;
                 in
                 ''
-                  ${installer} --print-manifest > ${name}-manifest.json
+                  ${supply} manifest > ${name}-manifest.json
                   jq -e --argjson names ${lib.escapeShellArg (builtins.toJSON selection.enabled)} \
                     'map(.name) == $names' ${name}-manifest.json
-                  ${lib.optionalString (updater != null) ''
-                    ${updater} --print-manifest > ${name}-updates.json
-                    jq -e --argjson names ${lib.escapeShellArg (builtins.toJSON selection.automaticUpdates)} \
-                      'map(.name) == $names' ${name}-updates.json
-                  ''}
+                  jq -e --argjson names ${lib.escapeShellArg (builtins.toJSON selection.automaticUpdates)} \
+                    'map(select(.automatic) | .name) == $names' ${name}-manifest.json
                   ${lib.concatMapStrings (
                     id:
                     let
@@ -558,20 +501,16 @@
                           exit 1
                         fi
                       ''
-                  ) expected.required}
+                  ) adapterNames}
                   export HOME="$PWD/${name}-home"
                   mkdir -p "$HOME"
                   ${lib.concatMapStrings (id: ''
-                    mkdir -p "$HOME/${expected.clients.${id}.skillsDestination}/codebase-design"
-                  '') (builtins.filter (id: !(builtins.elem id selection.enabled)) expected.required)}
+                    mkdir -p "$HOME/${registry.${id}.skillsDestination}/codebase-design"
+                  '') (builtins.filter (id: !(builtins.elem id selection.enabled)) adapterNames)}
                   ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null
-                  mkdir -p "$HOME/${
-                    expected.clients.${builtins.head selection.enabled}.skillsDestination
-                  }/codebase-design"
+                  mkdir -p "$HOME/${registry.${builtins.head selection.enabled}.skillsDestination}/codebase-design"
                   cp ${configuration.dotfiles.agents.shared.skills.codebase-design}/SKILL.md \
-                    "$HOME/${
-                      expected.clients.${builtins.head selection.enabled}.skillsDestination
-                    }/codebase-design/SKILL.md"
+                    "$HOME/${registry.${builtins.head selection.enabled}.skillsDestination}/codebase-design/SKILL.md"
                   if ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null 2>&1; then
                     echo "selected Skill root did not enforce its discipline: ${name}" >&2
                     exit 1
@@ -584,7 +523,7 @@
             '';
 
         agent-claude-managed-policy =
-          assert clients.claude.rulesDestination == null;
+          assert clients.claude.rules ? embedded;
           assert !(homeConfig.home.file ? ".claude/CLAUDE.md");
           assert !(hostConfig.environment.etc ? "claude-code/CLAUDE.md");
           assert !(artifacts ? "agents/claude/rules");
@@ -653,7 +592,7 @@
 
         agent-artifact-contract =
           assert variantConfig.dotfiles.platform.mcp.gateway.port != gatewayPort;
-          assert lib.count (package: package == installAgents) hostConfig.environment.systemPackages == 1;
+          assert lib.count (package: package == agentSupply) hostConfig.environment.systemPackages == 1;
           assert builtins.all managedDeploymentMatches managedRows;
           assert sharedDeploymentMatches;
           assert expectedArtifactIds == actualAgentArtifactIds;
@@ -696,94 +635,11 @@
             ''
               set -euo pipefail
 
-              ${installAgentsExe} --print-manifest > install-manifest.json
-              jq --sort-keys . install-manifest.json > actual-install-manifest.json
-              printf '%s' ${lib.escapeShellArg (builtins.toJSON expectedInstallManifest)} \
-                | jq --sort-keys . > expected-install-manifest.json
-              diff --unified expected-install-manifest.json actual-install-manifest.json
-              if grep -Fq 'read -r -a args' ${installAgentsExe} || grep -Fq "IFS='|'" ${installAgentsExe}; then
-                echo "installer loses argument boundaries" >&2
-                exit 1
-              fi
-              grep -Fq 'decode_version_args() {' ${installAgentsExe}
-              grep -Fq 'run_version_check() {' ${installAgentsExe}
-              if rg -n 'source .*version-args\.sh|/(nix/store|home)/[^ ]*version-args\.sh' ${installAgentsExe}; then
-                echo "generated installer references an external versionArgs decoder" >&2
-                exit 1
-              fi
-
-              runtimeHome=$PWD/generated-installer-runtime-home
-              mkdir -p "$runtimeHome"
-              : > "$runtimeHome/.local"
-              if env -i HOME="$runtimeHome" ${installAgentsExe} \
-                > generated-installer-runtime.stdout 2> generated-installer-runtime.stderr; then
-                echo "generated installer unexpectedly accepted an invalid managed directory" >&2
-                exit 1
-              fi
-              grep -Fq 'managed directory must be a real directory' generated-installer-runtime.stderr
-              if grep -Fq 'not found in PATH' generated-installer-runtime.stderr; then
-                echo "generated installer runtime closure is incomplete" >&2
-                exit 1
-              fi
-              grep -Fq '${atomicPublishExe}' ${installAgentsExe}
-              grep -Fq '${pkgs.diffutils}/bin' ${installAgentsExe}
-              if rg -a -n 'FIXTURE_ATOMIC_HOOK_|@probeEnvironment@' ${installAgentsExe}; then
-                echo "production installer contains the fixture probe hook interface" >&2
-                exit 1
-              fi
-              test -x ${atomicPublishExe}
-              if grep -aFq '${lib.getExe atomicPublishTestHook}' ${atomicPublishExe}; then
-                echo "production atomic helper contains the fixture hook" >&2
-                exit 1
-              fi
-
-              cat > fake-version <<'SCRIPT'
-              #!${pkgs.runtimeShell}
-              printf '%s\0' "$@" > "$ARG_CAPTURE"
-              SCRIPT
-              chmod +x fake-version
-              export ARG_CAPTURE=$PWD/version-args
-              source ${../impl/version-args.sh}
-              # contract は空 argv を拒否する。decoder 単体では lossless transport の上位集合として空文字も保持する。
-              run_version_check "$PWD/fake-version" ${
-                lib.escapeShellArg (builtins.toJSON (losslessVersionArgs ++ [ "" ]))
-              }
-              mapfile -d $'\0' -t captured < "$ARG_CAPTURE"
-              test "''${#captured[@]}" -eq 6
-              test "''${captured[0]}" = $'trailing\n'
-              test "''${captured[1]}" = $'\n'
-              test "''${captured[2]}" = $'embedded\nline'
-              test "''${captured[3]}" = '  spaced  '
-              test "''${captured[4]}" = 'pipe|value'
-              test -z "''${captured[5]}"
-
-              fixtureHome=$PWD/installer-home
-              mkdir -p "$fixtureHome/.local/bin"
-              cat > "$fixtureHome/.local/bin/curl" <<'SCRIPT'
-              #!${pkgs.runtimeShell}
-              exit 0
-              SCRIPT
-              cat > "$fixtureHome/.local/bin/argv-capture" <<'SCRIPT'
-              #!${pkgs.runtimeShell}
-              printf '%s\0' "$@" > "$ARG_CAPTURE"
-              SCRIPT
-              chmod +x "$fixtureHome/.local/bin/curl" "$fixtureHome/.local/bin/argv-capture"
-              export HOME=$fixtureHome
-              export ARG_CAPTURE=$PWD/generated-installer-version-args
-              ${losslessInstallAgentsExe}
-              mapfile -d $'\0' -t generatedCaptured < "$ARG_CAPTURE"
-              test "''${#generatedCaptured[@]}" -eq 5
-              test "''${generatedCaptured[0]}" = $'trailing\n'
-              test "''${generatedCaptured[1]}" = $'\n'
-              test "''${generatedCaptured[2]}" = $'embedded\nline'
-              test "''${generatedCaptured[3]}" = '  spaced  '
-              test "''${generatedCaptured[4]}" = 'pipe|value'
-
               claudeCapabilities=${
-                clients.claude.managedFiles.${clients.claude.capabilityManagedFiles.projectMemory}.source
+                clients.claude.managedFiles.${capabilityFileOf clients.claude "projectMemory"}.source
               }
               test "$claudeCapabilities" = ${
-                clients.claude.managedFiles.${clients.claude.capabilityManagedFiles.telemetry}.source
+                clients.claude.managedFiles.${capabilityFileOf clients.claude "telemetry"}.source
               }
               jq --exit-status \
                 --arg endpoint ${lib.escapeShellArg hostConfig.dotfiles.telemetry.endpoint} \
@@ -798,7 +654,7 @@
               ' "$claudeCapabilities" > /dev/null
 
               codexCapabilities=${
-                clients.codex.managedFiles.${clients.codex.capabilityManagedFiles.projectMemory}.source
+                clients.codex.managedFiles.${capabilityFileOf clients.codex "projectMemory"}.source
               }
               remarshal -if toml -of json "$codexCapabilities" \
                 | jq --exit-status \
@@ -1163,8 +1019,10 @@
           assert !builtins.hasAttr "projectMemoryHooks" projectMemoryDisabledConfig.dotfiles.agents.packages;
           assert
             !builtins.hasAttr "agentMemoryHarvest" projectMemoryDisabledConfig.dotfiles.platform.cli.commands;
-          assert !builtins.hasAttr "dotfiles-agent-memory-harvest" projectMemoryDisabledConfig.systemd.timers;
-          assert lib.all (client: client.projectMemoryMode == "unsupported") (
+          assert
+            !builtins.hasAttr "dotfiles-agent-memory-harvest"
+              projectMemoryDisabledConfig.home-manager.users.${projectMemoryDisabledConfig.dotfiles.workstation.username}.systemd.user.timers;
+          assert lib.all (client: client.projectMemory ? unsupported) (
             builtins.attrValues projectMemoryDisabledConfig.dotfiles.agents.clients
           );
           assert
@@ -1200,9 +1058,10 @@
             transitiveCapabilityAgentConfig.dotfiles.agents.shared.skills;
           assert
             !builtins.hasAttr "browser-performance" transitiveCapabilityAgentConfig.dotfiles.agents.shared.skills;
-          assert clients.claude.subagents != hostConfig.dotfiles.agents.shared.subagents;
-          assert builtins.attrNames clients.claude.subagents == sharedSubagentNames;
-          assert clients.antigravity.subagents == { };
+          assert subagentSourcesOf clients.claude != hostConfig.dotfiles.agents.shared.subagents;
+          assert builtins.attrNames (subagentSourcesOf clients.claude) == sharedSubagentNames;
+          assert modeOf clients.antigravity.subagents == "unsupported";
+          assert subagentSourcesOf clients.antigravity == { };
           assert builtins.elem "filter-syntax" hostConfig.dotfiles.skills.enabled;
           assert isReferenceOnlySkill hostConfig.dotfiles.skills.registry.filter-syntax.source;
           assert !builtins.hasAttr "filter-syntax" hostConfig.dotfiles.agents.shared.skills;
@@ -1234,11 +1093,11 @@
           assert lib.all (
             route: builtins.elem route.from sharedSubagentNames && builtins.elem route.to sharedSubagentNames
           ) routingContract.subagentHandoffs;
-          assert clients.claude.skillProjectionMode == "preload";
-          assert clients.omp.skillProjectionMode == "preload";
-          assert clients.codex.skillProjectionMode == "dynamic";
-          assert clients.opencode.skillProjectionMode == "dynamic";
-          assert clients.antigravity.skillProjectionMode == "unsupported";
+          assert skillProjectionOf clients.claude == "preload";
+          assert skillProjectionOf clients.omp == "preload";
+          assert skillProjectionOf clients.codex == "dynamic";
+          assert skillProjectionOf clients.opencode == "dynamic";
+          assert skillProjectionOf clients.antigravity == "unsupported";
           assert sharedSubagentSources != [ ];
           assert claudeSubagentSources != [ ];
           assert codexSubagentSources != [ ];
@@ -1263,9 +1122,10 @@
               requiredSkillsJson = builtins.toJSON requiredSkillsBySubagent;
               routingJson = builtins.toJSON rawRoutingContract;
               inherit sharedSubagentFarm;
-              claudeSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.claude.subagents);
-              ompSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) clients.omp.subagents);
-              inherit securitySubagentSource;
+              claudeSubagentsJson = builtins.toJSON (
+                lib.mapAttrs (_: toString) (subagentSourcesOf clients.claude)
+              );
+              ompSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) (subagentSourcesOf clients.omp));
               sharedSources = sharedSubagentSources;
               claudeSources = claudeSubagentSources;
               codexSources = codexSubagentSources;
@@ -1397,41 +1257,6 @@
                 jq --exit-status '.developer_instructions | length > 0' subagent.json > /dev/null
               done
 
-              extract_subagent_section() {
-                local heading=$1 source=$2
-                awk -v heading="$heading" '
-                  $0 == heading { inside = 1; next }
-                  inside && /^## / { exit }
-                  inside { print }
-                ' "$source"
-              }
-              extract_subagent_section '## Scan' "$securitySubagentSource" > security-scan-section.md
-              for phase in security-review threat-model finding-discovery validation attack-path-analysis; do
-                grep -Fq "$phase" security-scan-section.md
-              done
-              grep -Fq 'security-review → threat-model → finding-discovery → validation → attack-path-analysis → 最終 report' \
-                security-scan-section.md
-              if grep -Fq 'fix-finding' security-scan-section.md; then
-                echo "security scan phase includes finding repair" >&2
-                exit 1
-              fi
-              extract_subagent_section '## Finding fix handoff' "$securitySubagentSource" \
-                > security-fix-handoff-section.md
-              grep -Fq 'fix-finding' security-fix-handoff-section.md
-              grep -Fq 'validated-finding-attack-path' security-fix-handoff-section.md
-              grep -Fq '修正を実装しない' security-fix-handoff-section.md
-              grep -Fq '$HOME/.local/state/dotfiles-wsl/security-scans/<repo_name>' \
-                "$securitySubagentSource"
-              grep -Fq '再現用の使い捨てdataだけを割り当て済み`TMPDIR`へ置き' \
-                "$securitySubagentSource"
-              grep -Fq 'plugin既定の`/tmp/codex-security-scans/<repo_name>`は使わない' \
-                "$securitySubagentSource"
-              security_frontmatter_end=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' \
-                "$securitySubagentSource")
-              sed -n "2,$((security_frontmatter_end - 1))p" "$securitySubagentSource" \
-                > security-frontmatter.yaml
-              yq --exit-status '.tools == ["Read", "Bash", "Grep", "Glob"]' \
-                security-frontmatter.yaml > /dev/null
 
               compare_subagent_bodies() {
                 local shared=$1 rendered=$2 shared_end rendered_end
@@ -1542,6 +1367,7 @@
               touch $out
             '';
 
+        # 採用 client が repository 内へ設定を生成せず、global な権限も足さない
         agent-no-checkout-deployment =
           let
             inherit (hostConfig.dotfiles.workstation) homeDir;

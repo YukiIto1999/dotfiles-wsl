@@ -65,6 +65,7 @@ in
   config.dotfiles.health.observations = {
     "host/nix-daemon" = {
       kind = "systemd-socket";
+      manager = "system";
       checkId = "nix-daemon";
       resourceKey = null;
       timeoutSeconds = observationTimeoutSeconds;
@@ -76,6 +77,7 @@ in
     };
     "host/nix-gc" = {
       kind = "systemd-timer";
+      manager = "system";
       checkId = "maintenance/${nixGc.timerName}.timer";
       resourceKey = null;
       timeoutSeconds = observationTimeoutSeconds;

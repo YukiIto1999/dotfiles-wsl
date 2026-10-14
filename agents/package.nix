@@ -3,32 +3,17 @@
   lib,
   runtimeContract,
   verificationEntry,
+  executionPolicy,
+  supervise,
+  # sandbox には user manager も Nix daemon も無いため、検査は同じ実装へ記録と代替の command を渡す。
+  systemdRunCommand ? lib.getExe' pkgs.systemd "systemd-run",
+  systemctlCommand ? lib.getExe' pkgs.systemd "systemctl",
+  nixStoreCommand ? "${lib.getBin pkgs.nix}/bin/nix-store",
 }:
 
 let
   cacheRootRelative = runtimeContract.cache.relativeCacheRoot;
-  mkNixBuildShims =
-    {
-      nixCommand,
-      nixBuildCommand,
-    }:
-    pkgs.symlinkJoin {
-      name = "dotfiles-agent-nix-build-shims";
-      paths = [
-        (pkgs.writeShellApplication {
-          name = "nix";
-          text = builtins.replaceStrings [ "@nixCommand@" ] [ (toString nixCommand) ] (
-            builtins.readFile ./impl/runtime/nix.sh
-          );
-        })
-        (pkgs.writeShellApplication {
-          name = "nix-build";
-          text = builtins.replaceStrings [ "@nixBuildCommand@" ] [ (toString nixBuildCommand) ] (
-            builtins.readFile ./impl/runtime/nix-build.sh
-          );
-        })
-      ];
-    };
+  defaultNixStoreCommand = nixStoreCommand;
   mkGitShim =
     { gitCommand }:
     pkgs.writeShellApplication {
@@ -37,50 +22,53 @@ let
         builtins.readFile ./impl/runtime/git.sh
       );
     };
-  mkAgentShims =
+  gitShim = mkGitShim { gitCommand = lib.getExe pkgs.git; };
+  mkProtect =
     {
-      nixCommand,
-      nixBuildCommand,
-      gitCommand,
+      nixStoreCommand ? defaultNixStoreCommand,
     }:
-    pkgs.symlinkJoin {
-      name = "dotfiles-agent-command-shims";
-      paths = [
-        (mkNixBuildShims { inherit nixCommand nixBuildCommand; })
-        (mkGitShim { inherit gitCommand; })
-      ];
+    pkgs.writeShellApplication {
+      name = "dotfiles-agent-protect";
+      runtimeInputs = [ pkgs.coreutils ];
+      text =
+        builtins.replaceStrings [ "@nixStoreCommand@" ] [ (lib.escapeShellArg (toString nixStoreCommand)) ]
+          (builtins.readFile ./impl/runtime/protect.sh);
     };
-  agentShims = mkAgentShims {
-    nixCommand = lib.getExe pkgs.nix;
-    nixBuildCommand = "${pkgs.nix}/bin/nix-build";
-    gitCommand = lib.getExe pkgs.git;
-  };
+  protect = mkProtect { };
   mkLauncher =
     {
-      systemdRunCommand ? lib.getExe' pkgs.systemd "systemd-run",
+      protectCommand ? protect,
+      commandShims ? null,
     }:
     pkgs.writeShellApplication {
       name = "dotfiles-agent-runtime";
-      runtimeInputs = with pkgs; [
-        coreutils
-        gawk
-        git
-        jq
-        taplo
-        util-linux
-      ];
+      runtimeInputs =
+        lib.optional (commandShims != null) commandShims
+        ++ (with pkgs; [
+          coreutils
+          gawk
+          git
+          jq
+          util-linux
+        ]);
       text =
         builtins.replaceStrings
           [
-            "@agentShimDirectory@"
+            "@gitShimDirectory@"
             "@cacheRootRelative@"
             "@systemdRunCommand@"
+            "@systemctlCommand@"
+            "@protectCommand@"
+            "@superviseCommand@"
             "@sliceUnit@"
           ]
           [
-            "${agentShims}/bin"
+            "${gitShim}/bin"
             cacheRootRelative
             (lib.escapeShellArg (toString systemdRunCommand))
+            (lib.escapeShellArg (toString systemctlCommand))
+            (lib.escapeShellArg (lib.getExe protectCommand))
+            (lib.escapeShellArg (lib.getExe supervise))
             runtimeContract.sliceUnit
           ]
           (builtins.readFile ./impl/runtime/launcher.sh);
@@ -197,26 +185,50 @@ let
       client,
       binary,
       targetExecutable,
+      executionDependencies,
     }:
+    let
+      dependencies = lib.unique (map toString executionDependencies);
+      outsideStore = builtins.filter (path: !(lib.hasPrefix "${builtins.storeDir}/" path)) dependencies;
+    in
+    assert lib.assertMsg (
+      builtins.match "[A-Za-z0-9._][A-Za-z0-9._-]*" client != null
+    ) "runtime wrapper client id is invalid: ${client}";
+    assert lib.assertMsg (
+      builtins.match "/[^[:space:]]+" targetExecutable != null
+    ) "runtime wrapper target is not an absolute path: ${targetExecutable}";
+    assert lib.assertMsg (
+      outsideStore == [ ]
+    ) "runtime wrapper execution dependencies must be store paths: ${toString outsideStore}";
+    # wrapper 自身と execution dependency を、起動時に確定した実行依存として launcher へ渡す。
+    # 共通の cache 方針は一度だけここで適用し、lifecycle へはその後に渡す。
     pkgs.writeShellApplication {
       name = binary;
+      runtimeInputs = [ pkgs.coreutils ];
       text = ''
-        exec ${lib.getExe launcher} ${lib.escapeShellArg client} ${lib.escapeShellArg targetExecutable} "$@"
+        exec ${lib.getExe executionPolicy} \
+          --shared-cache "$HOME/${cacheRootRelative}/shared" \
+          --build-root "$HOME/${cacheRootRelative}/cargo-build" \
+          -- ${lib.getExe launcher} --protect "$(realpath -e -- "$0")" \
+          ${lib.concatMapStrings (path: "--protect ${lib.escapeShellArg path} ") dependencies}\
+          ${lib.escapeShellArg client} ${lib.escapeShellArg targetExecutable} "$@"
       '';
     };
 in
 {
   inherit
-    agentShims
-    launcher
-    mkLauncher
-    mkVerify
     gate
     gc
-    mkAgentShims
-    mkNixBuildShims
+    gitShim
+    launcher
+    mkGitShim
+    mkLauncher
+    mkProtect
+    mkVerify
     mkWrapper
     projectCacheGcSource
+    protect
+    supervise
     verify
     ;
 }

@@ -14,6 +14,7 @@
 | Home Manager program | [`workstation/home/module.nix`](../../workstation/home/module.nix)の`programs`。Atuinは同期なしのローカル履歴 | 同じunitを参照する |
 | language server | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.lspRegistry`が登録を、profileの`dotfiles.toolchain.enabledLsp`が採用を持つ。PATHとclient設定へ配るのは採用した`dotfiles.toolchain.lsp`だけ | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.toolchain.lsp --apply builtins.attrNames` |
 | 保守用devShell | [`flake.nix`](../../flake.nix)の`devShells` | `nix develop --command echo`の後に`$PATH`を確認する |
+| projectのdevShellへの入口とOrcaへ貼る値 | [`toolchain/execution/`](../../toolchain/execution)の`dotfiles-project-run`と[`agents/orca/module.nix`](../../agents/orca/module.nix)の`dotfiles-orca-config`。手順は[Orcaからのclient起動](../operations/orca-launch.md) | `dotfiles-orca-config` |
 
 `nixfmt`はeditorと単一file、`nixfmt-tree`は`nix fmt`とrepository全体の検査を担当する。[Nixfmt README](https://github.com/NixOS/nixfmt/blob/master/README.md)
 
@@ -142,7 +143,7 @@ Skill、provider、backendはCapabilityから導出し、profileに直接列挙�
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
 | Agent adapter | [`agents/clients/`](../../agents/clients)が`dotfiles.agents.registry`へ登録し、`enabled`から採用済み`clients`を導く | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --apply builtins.attrNames` |
-| Client installer | 各clientの`install` contractと[`agents/impl/install-agents.sh`](../../agents/impl/install-agents.sh) | `nix run .#dotfiles-install-agents -- --print-manifest` |
+| Client supply | 各clientの`supply.package`と[`agents/impl/agent-supply.sh`](../../agents/impl/agent-supply.sh)。baselineは[`flake.lock`](../../flake.lock)の`llm-agents` | `nix run .#dotfiles-agent-supply -- manifest`、`dotfiles-agent-supply status` |
 | Agent runtime | [`agents/module.nix`](../../agents/module.nix)、[`agents/impl/runtime/`](../../agents/impl/runtime) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.runtime` |
 | 静的subagent | `agents/subagents/` | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.file --apply 'f: builtins.filter (n: builtins.match "\\.claude/agents/.*" n != null) (builtins.attrNames f)'` |
 | local Skill | [`skills/`](../../skills) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled` |

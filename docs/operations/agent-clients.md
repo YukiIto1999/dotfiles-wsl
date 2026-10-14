@@ -1,6 +1,6 @@
 # Agent client の選択と更新
 
-**読み手:** client の試用、交換、更新を行う運用者。
+**読み手:** client の試用、交換、更新、rollbackを行う運用者。
 作業中に読む。
 
 ## 試用と交換
@@ -21,91 +21,125 @@ OMP だけを使い、自動更新せずに試す場合は、host module の既�
 
 Claude Code を追加で試す場合は `enabled` を `[ "omp" "claude" ]` に、Codex へ交換する場合は `[ "codex" ]` に変更する。
 自動更新の対象を指定する場合は、同時に `automaticUpdates.clients` を採用済み ID の部分集合へ変更する。
-登録だけの client は rules、Skill、subagent、config、launcher、installer manifest、health observation、共通 policy の能力表に含まれない。
-client ごとの供給方式は adapter の `install` 宣言に従い、共通の package manager へ置き換えない。
+登録だけの client は rules、Skill、subagent、config、公開 command、供給の更新対象、health observation、共通 policy の能力表に含まれない。
 
 宣言を保存してから、[Rebuild](rebuild.md)の手順で plan の対象を確認し、差分を commit して適用する。
-新しい generation の installer manifest と doctor に目的の client だけが現れることを確認してから、installer を実行し、その client の認証と対話起動を行う。
+適用の Home Manager activation が、採用した client の存在しない profile だけを lock の baseline から作る。
+新しい generation の manifest と doctor に目的の client だけが現れることを確認してから、その client の認証と対話起動を行う。
 
 ```sh
 dotfiles-rebuild --plan
 # Rebuild の手順に従って commit と適用を行う
-dotfiles-install-agents --print-manifest | jq 'map(.name)'
-dotfiles-install-agents
+dotfiles-agent-supply manifest | jq 'map(.name)'
+dotfiles-agent-supply status
 dotfiles-doctor
 ```
 
-採用から外すと Home Manager と NixOS が管理する設定と launcher は次の適用で外れるが、installer が作成した binary、release tree、認証、会話履歴、初回 seed 後の対話設定は削除しない。
-既存 session は停止せず、これらの利用者データを残したまま再採用できる。
-不要になった upstream binary と利用者データの削除は、稼働中 session と各 client の uninstall 手順を確認して別途行う。
+## 供給
 
-## 更新方針
+各 client の binary は、供給元 [llm-agents.nix](https://github.com/numtide/llm-agents.nix) が package 化した版を、client 別の native Nix profile で受け取る。
+adapter の `supply.package` が供給元の package attribute を選び、`bin/<binary>` を実行 file とする。
+Claude Code、Codex、OMP、OpenCode、Antigravity は同じ供給元に package があり、供給元自身の固定 nixpkgs と Bun で build される。
+host の stable nixpkgs へは follows させない。
 
-採用済みの client を手動更新する場合は、現在の generation の command を使う。
+利用者は「製品の最新 release」ではなく「供給元が package 化した最新版」を日次で取得することを承認している。
+供給元の package 化に遅れがある間は、その遅れた版が最新である。
+供給元 HEAD の取得成功を製品の最新版と同一視しない。
+
+| 役割 | 正本 |
+|---|---|
+| 供給元の採用と初回 baseline | `flake.nix` の `llm-agents` input と `flake.lock`。baseline は採用 client の package だけを system closure へ含める |
+| 稼働中の版 | `~/.local/share/dotfiles/agent-profiles/<client>/profile` の世代。root の lock、Git HEAD、system generation は日次更新で書き換えない |
+| 更新、rollback、retention | `dotfiles-agent-supply` だけ。baseline 初期化、手動更新、timer、rollback が同じ owner を通る |
+| 公開 command | `~/.local/share/dotfiles-agent/bin/<binary>` の wrapper。profile の `bin` は PATH へ出さない |
+
+### 操作
 
 ```sh
-dotfiles-install-agents
-```
-
-checkout の宣言から実行する `nix run .#dotfiles-install-agents` は、flake の reference host である `nixos` の採用集合を使う。
-別 host の未適用宣言を使う場合は、その host の installer を指定し、次の例の `tcs-a295` を対象 host ID に置き換える。
-
-```sh
-nix run .#nixosConfigurations.tcs-a295.config.dotfiles.platform.cli.commands.installAgents -- --print-manifest
-nix run .#nixosConfigurations.tcs-a295.config.dotfiles.platform.cli.commands.installAgents
+dotfiles-agent-supply status              # 世代、store path、版、供給 revision
+dotfiles-agent-supply update              # 採用済みの全 client を最新へ
+dotfiles-agent-supply update omp codex    # 指定した client だけ
+dotfiles-agent-supply rollback omp        # omp だけを直前の世代へ戻す
 ```
 
 `automaticUpdates.clients` の既定は空であり、空なら自動更新 service、timer、health observation を配備しない。
 共通 workstation profile は OMP だけを日次更新の対象にしている。
-Claude Code の background updater は managed settings の `DISABLE_AUTOUPDATER=1` で、OpenCode の起動時 updater は配備する config の `autoupdate=false` で無効にし、dotfiles の更新対象とは別の自動更新経路を重ねない。
-対応する upstream の設定は [Claude Code の環境変数](https://code.claude.com/docs/en/env-vars)と[OpenCode の更新設定](https://opencode.ai/docs/config/#auto-update)を参照する。
-自動更新を採用する場合は必要な client だけをリストへ指定し、起動予定と直近の結果を systemd から確認する。
-service の command に `--print-manifest` を渡せば、自動更新の対象だけを表示できる。
+timer の service は `dotfiles-agent-supply update --automatic` を実行し、起動予定と直近の結果を systemd から確認する。
 
 ```sh
 systemctl status dotfiles-agent-autoupdate.timer
 systemctl status dotfiles-agent-autoupdate.service
 ```
 
-手動 installer は採用済みの全 client、自動更新 service は指定した部分集合の installer と version probe を実行する。
-一つの client の失敗は他の client の処理を止めず、失敗した client 名だけを終了時に報告する。
-Antigravity の bootstrap は既存の binary を更新しないため、導入済みの CLI は `agy update` で更新する。
-実行中の session は終了させず、新しい binary は次回起動から使う。
+Claude Code の background updater は供給元 package が `DISABLE_AUTOUPDATER=1` を設定し、managed settings も同じ値を置く。
+OpenCode の起動時 updater は配備する config の `autoupdate=false` で無効にする。
+供給の更新経路を `dotfiles-agent-supply` に一本化し、client 自身の更新経路を重ねない。
+Antigravity は `agy update` ではなく、同じ供給で更新する。
 
-## 宣言と release の確認
+### 更新の規則
 
-installer が受け取る manifest は次の command で表示でき、credential は含まない。
+1. 供給元の最新 revision を解決し、その exact revision から client の package を build する。
+2. build した候補に root を置き、空の環境で版を観測する。
+3. 観測に成功した候補だけを profile の新しい世代として公開する。
+4. current と直前の世代だけを残し、それ以前の世代 link を除く。
 
-```sh
-dotfiles-install-agents --print-manifest | jq .
-```
+取得、build、probe のどれかが失敗した client は旧版のまま残り、他の client の更新は続く。
+失敗した client 名は終了時に一度だけ報告され、service は非ゼロで終わる。
+外部からの取消は、実行中の子の終了を待ってから終了し、次の client を始めない。
+取消を記録した後は、新しい取得、build、probe、profile の切替、世代削除を始めない。
+開始済みの profile 切替は完了まで待ち、成功した切替の記録を残してから取消として終了する。
+同じ revision の再実行は再 build せず、current と同じ store path になる revision は公開しない。
+実行中の session は終了せず、新しい版は次回起動から使う。
 
-Codex、OpenCode、OMP の管理済み release は client ごとの directory にある。
-`current` と visible binary は相対 symlink であり、release 名は取得した asset の SHA-256 digest から決まる。
-OMP の asset は archive ではなく単一の実行 file なので、release tree は entrypoint だけを持つ。
+rollback は取得も build も行わず、直前の世代を probe してから切り替える。
+戻した版の store path は記録し、次の更新が同じ版を再公開しない。
+rollback の後は戻し済みの新しい世代を除くため、保持する世代が一つになり、続けての rollback は拒否される。
+rollback は対象 client の profile だけを戻し、他の client や system generation は戻さない。
+拒否記録は直近8件を保持し、同じ path を再び戻した場合は最新の拒否として扱う。
 
-```sh
-find ~/.local/share/dotfiles/agents -maxdepth 3 -mindepth 2 -print
-readlink ~/.local/share/dotfiles/agents/codex/current
-readlink ~/.local/bin/codex
-readlink ~/.local/share/dotfiles/agents/opencode/current
-readlink ~/.local/bin/opencode
-readlink ~/.local/share/dotfiles/agents/omp/current
-readlink ~/.local/bin/omp
-```
+system generation と client profile は別の正本であり、`dotfiles-rebuild --rollback` だけでは client の版は戻らない。
+system を戻した後は `dotfiles-agent-supply status` で、稼働する版が adapter の設定と合うことを確認する。
 
-GitHub release の取得、digest 照合、archive または raw asset の検査、required path 検査、version probe のどれかが失敗した場合は、新しい `current` へ切り替えない。
-publish 中の通常の失敗でも旧 `current` へ rollback する。
-所有または identity を確認できない object は削除せず、エラーとして残す。
-Claude Code と Antigravity の配置と rollback は upstream installer の責務である。
+### GC と稼働中の session
 
-`SIGKILL`、電源断、WSL の強制停止では自動 rollback を保証しない。
-中断後は installer を再実行し、同じ checkout の contract を使う `nix run .#dotfiles-doctor` で検査する。
-再実行が失敗するか `agent/<client>` check が `fail` になった場合は、残った object を手で削除しない。
-check ID から client を特定し、上記の client directory、`current`、visible binary を調査する。
+世代 link は Nix の GC root であり、候補の build 後は公開まで候補 root が実体を保持する。
+起動した session は、profile を解決した binary と、起動時に確定した managed config、hook、gate、runtime、Skill、rules、subagent の不変 source を、全子の終了まで自分の root で保持する。
+初回 seed はこの保護対象に含めない。
+そのため retention や `nix-collect-garbage` が、稼働中の session が使う旧版や旧 hook を消さない。
+保持する root の取得に失敗した起動は、保護なしでは続けず拒否される。
 
-client contract や timer を変えた後の system generation への反映は通常の [Rebuild](rebuild.md)に従う。
-配備方式と信頼境界は [AI tooling](../architecture/ai-tooling.md#client-binary)と[セキュリティ境界](../architecture/security.md#agent-client-の供給経路)を参照する。
+### Profile の安全
+
+`~/.local/share/dotfiles/agent-profiles/<client>` は利用者所有の real directory で、親も含めて symlink と group・other の書込を許さない。
+更新の前後で親 directory の identity を照合し、差し替わっていれば公開せずに失敗する。
+`profile`、世代 link、候補、receipt が自分の object でない場合は、変更も削除もせずに失敗する。
+native profile の切替は atomic だが、この確認を代替しない。
+同一 UID の悪意ある process が、検査と更新の間に親を差し替える攻撃は防がない。
+`SIGKILL` や電源断で中断した公開は、次の更新が未公開の世代を除いて整合を戻す。
+
+## 採用解除
+
+採用から外すと Home Manager と NixOS が管理する設定、公開 command、更新対象、通常の health は次の適用で外れる。
+client 別 profile、認証、会話履歴、初回 seed 後の対話設定、稼働中の session は削除しない。
+非公開に残る profile の世代は GC root として残り、容量を使う。
+既存 session は停止せず、これらの利用者 data を残したまま再採用でき、再採用では既存 profile を巻き戻さない。
+不要になった profile と利用者 data の削除は、稼働中 session と各 client の手順を確認して別途行う。
+
+## 供給方式の切替
+
+旧方式の release tree と upstream installer の binary は、`~/.local/share/dotfiles/agents/<client>`、`~/.local/bin/<binary>`、`~/.local/share/claude/versions` に残り、新方式は別の `agent-profiles` を使う。
+二つの方式は共有する書込 object を持たず、新方式は旧方式の object を変更も削除もしない。
+
+所有の移管は generation 単位で行う。
+
+1. 新しい generation を適用すると、公開 command は新しい profile を指す wrapper になり、profile は baseline から作られる。baseline は lock が固定した版であり、旧方式で稼働していた版より古いことがある。次の更新で最新へ進む。
+2. 稼働中の session は旧 binary のまま動き続け、新しい session から新しい profile を使う。
+3. 同じ client の旧 release writer が client root の flock を握っている間、新方式は同じ client を更新せずに失敗する。旧 root がない client では待たない。
+4. system generation を旧方式へ戻すと、旧 generation の writer と wrapper が旧 object を使い、新方式の timer と command は消える。実行中の更新 service は generation の切替で停止し、drain してから終わる。手動で起動した更新は、旧 root の lock で旧 writer と並走しない。
+5. 旧 writer が使った object と新 profile は互いに触れないため、どちらの方向へ戻しても版の巻き戻しは起きず、再度新方式へ進めば既存 profile を巻き戻さずに続ける。
+
+旧方式の object は、稼働中の session がないこと、旧 generation へ戻す予定がないことを確認してから、利用者が手動で削除する。
+source から旧 installer、旧 CLI、release tree 用の observation と fixture は除かれている。
 
 ## Claude Code の規律読込
 
@@ -113,7 +147,7 @@ client contract や timer を変えた後の system generation への反映は�
 公式資料の [Deploy organization-wide CLAUDE.md](https://code.claude.com/docs/en/memory#deploy-organization-wide-claude-md)では、`claudeMd` は managed または policy settings だけで有効になり、全 repository の session に user instructions より先に読み込まれる。
 project の `AGENTS.md` 対応には Claude Code v2.1.277 以降が必要だが、その対応だけで全 project 共通の規律を代替しない。
 
-Claude Code を採用して installer で更新し、generation を適用した後、別 file なしで共通 policy が読み込まれることを確認する。
+Claude Code を採用して供給で更新し、generation を適用した後、別 file なしで共通 policy が読み込まれることを確認する。
 
 ```sh
 claude --version

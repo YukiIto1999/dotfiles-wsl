@@ -1,6 +1,8 @@
 { lib, pkgs }:
 
 let
+  agentContract = import ./contract.nix { inherit lib; };
+  inherit (agentContract) modeOf skillProjectionOf;
   tsv = rows: lib.concatStringsSep "\n" (map (cells: lib.concatStringsSep "\t" cells) rows);
   code = value: "`${value}`";
   entries =
@@ -33,13 +35,14 @@ in
           (if entrySkills == [ ] then "なし" else lib.concatMapStringsSep " / " code entrySkills)
         ]
       ) capabilities;
+      # 能力表は adapter の枝から導き、client ごとの宣言を写した別の正本を持たない
       clientRows = lib.mapAttrsToList (id: client: [
         (code id)
-        (code client.subagentMode)
-        (code client.skillProjectionMode)
-        (code client.lspMode)
-        (code client.telemetryMode)
-        (code client.projectMemoryMode)
+        (code (modeOf client.subagents))
+        (code (skillProjectionOf client))
+        (code (modeOf client.lsp))
+        (code (modeOf client.telemetry))
+        (code (modeOf client.projectMemory))
       ]) clients;
       projectMemoryPolicy = lib.optionalString (builtins.elem "project-memory" capabilities) ''
         ### project-memory

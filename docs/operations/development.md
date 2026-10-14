@@ -47,7 +47,7 @@ nix run --no-write-lock-file .#verify-full
 dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
 ```
 
-同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、runtime が割り当てる Cargo の build-dir を使う。
+同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、[`toolchain/execution/`](../../toolchain/execution)の実行方針が割り当てる Cargo の build-dir を使う。
 
 配備済みの`dotfiles-agent-verify`がcheckoutの宣言より古い間は、同じ宣言から組み立てたwrapperをcheckoutから起動する。
 
@@ -76,7 +76,7 @@ pre-pushは検査前と検査後の`git status`と`git ls-files`の失敗も拒�
 nativeな`verify`自身も同じ`verify.seconds`で検査を止め、外側の期限や中断を内側のprocess groupへ転送して終了を待つが、wrapperを通さない実行は終了gateを開かない。
 T1は`flake.nix`の`t1Shards`で`source`と`configuration`を別の評価器へ分け、`dotfiles-run-each`が最大2つを同時に走らせる。
 `source`はhostやvariantを評価せず、sourceと固定した入力だけを使う検査を実現する。
-`configuration`はnative module graphと構成値を使う検査を実現し、全hostとvariantのsystem closureを評価する。
+`configuration`はnative module graphと構成値を使う検査を実現し、全hostとpositive variantのsystem closureを評価する。
 各unitの`checks.nix`はnative moduleの入口であり、leafが`source`のpackage集合か`configuration`のcallbackを宣言する。
 登録対象はsource内のcheck fileから導き、native module graphでimportとphaseの漏れを拒否するため、手書きの割当て一覧は不要である。
 check IDは両phaseとsystem closureを通して一意でなければならない。
@@ -84,8 +84,7 @@ check IDは両phaseとsystem closureを通して一意でなければならな�
 初期heapの値は実RSSの上限ではなく、評価器を合わせたメモリの必要量は実行条件とともに測る。
 最初に失敗したshardの終了statusを返し、動いている評価器を止めて終了を待つ。
 契約検査用のvariantは`mkProbeSystem`で構成し、検査対象と独立したNixOSのmanualとHome Managerのmanpageを生成しない。
-登録した全hostとgateway portを変えた既存variantは、従来どおりmanualを含む構成でtoplevelを評価する。
-`project-memory`を無効にするAgentとSkillの検査は、同じvariantのconfigを共有する。
+登録した全hostとgateway portを変えたvariantはmanualを含めて評価し、最小Capabilityと`project-memory`無効のpositive variantもsystem closureを評価する。
 基準hostのoption宣言一覧は一度だけ作り、root ownerの確認と宣言位置の確認で共有する。
 検査を変更したときは、予算を理由に必須の検査をT3へ移さず、Nixの依存と再利用を見直す。
 
@@ -102,6 +101,7 @@ checkの正本は各unitの検査と`flake.nix`の導出結果であり、件数
 文書間とsourceへのlinkは`docs-links`、文書が示すpathは`docs-path-labels`、読み手の明示は`docs-reader`が検査する。
 これらの成功を、手順の実行成功や文書の主張の正しさとは扱わない。
 ShellCheckはcheckoutと生成済みのshell scriptを静的に検査する。
+配備済みprofileやuser managerを必要とするCLIは、build sandboxで`--help`の出力有無を見る検査ではなく、隔離した実行環境で起動と終了を確認する。
 
 静的検査では、契約を介した依存の意味、文書種別の混在、宣言値の転記、fixtureと実装を同じ誤りへ変える変更までは判定できないため、レビューで確かめる。
 listenerのbind先、未宣言のlistener、portの空き、container image由来の公開、通信制限の効果は、宣言やunitのactiveだけで成功とせず、実際のprocessとtool呼出しを観測する。

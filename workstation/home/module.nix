@@ -15,6 +15,7 @@ in
   config.dotfiles.health.observations = {
     "host/home-manager" = {
       kind = "systemd-service";
+      manager = "system";
       checkId = "home-manager";
       resourceKey = null;
       timeoutSeconds = observationTimeoutSeconds;
@@ -26,6 +27,7 @@ in
     };
     "host/home-manager-restart" = {
       kind = "restart-counter";
+      manager = "system";
       checkId = "restart/service/${homeManagerUnit}";
       resourceKey = null;
       timeoutSeconds = observationTimeoutSeconds;

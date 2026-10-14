@@ -12,7 +12,6 @@
         normalMachineModule,
         ...
       }:
-
       let
         workstation = hostConfig.dotfiles.workstation;
         zram = hostConfig.zramSwap;
@@ -62,6 +61,7 @@
             checkId = "home-manager";
             failureMessage = "home-manager-${hostConfig.dotfiles.workstation.username}.service is not operational";
             kind = "systemd-service";
+            manager = "system";
             loadStates = [ "loaded" ];
             resourceKey = null;
             results = [ "success" ];
@@ -73,6 +73,7 @@
             failureAt = 20;
             failureMessage = "could not observe restart count for home-manager-${hostConfig.dotfiles.workstation.username}.service";
             kind = "restart-counter";
+            manager = "system";
             resourceKey = null;
             sourceKind = "systemd-service";
             target = "home-manager-${hostConfig.dotfiles.workstation.username}.service";
@@ -92,6 +93,7 @@
             checkId = "nix-daemon";
             failureMessage = "nix-daemon.socket is not operational";
             kind = "systemd-socket";
+            manager = "system";
             loadStates = [ "loaded" ];
             resourceKey = null;
             results = [ "success" ];
@@ -103,6 +105,7 @@
             checkId = "maintenance/nix-gc.timer";
             failureMessage = "nix-gc.timer or its service is not operational";
             kind = "systemd-timer";
+            manager = "system";
             resourceKey = null;
             service = "nix-gc.service";
             serviceResults = [ "success" ];

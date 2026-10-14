@@ -6,6 +6,7 @@ import argparse
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from journal import JournalError, Session, chunks, clip, project_root, sessions_in, summarize
+from journal import JournalError, Session, child_timeout, chunks, clip, project_root, sessions_in, summarize
 
 PROG = "dotfiles-agent-memory-harvest"
 PROMPT = Path(__file__).resolve().parent / "prompt.md"
@@ -45,12 +46,16 @@ class Message:
 
 def memory(options: argparse.Namespace, command: str, request: dict | None = None, *arguments: str) -> dict:
     try:
+        timeout = child_timeout(MEMORY_TIMEOUT_SECONDS)
+    except JournalError as error:
+        raise MemoryCommandError(command, "deadline", str(error)) from None
+    try:
         result = subprocess.run(
             [options.memory, command, *arguments],
             input="" if request is None else json.dumps(request, ensure_ascii=False),
             capture_output=True,
             text=True,
-            timeout=MEMORY_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise MemoryCommandError(command, "unavailable", str(error)) from None
@@ -94,9 +99,10 @@ def store_state(path: Path, state: dict) -> None:
         raise HarvestError(f"{path} could not be written: {error}") from None
 
 
-def report(receipt: dict) -> None:
+def report(options: argparse.Namespace, receipt: dict) -> None:
     identity = f"operation_id={receipt['operation_id']} document_id={receipt['document_id']}"
     if receipt["state"] == "saved":
+        options.saved += 1
         print(f"saved: {receipt['source']} {identity}")
     else:
         print(f"{receipt['state']}: {receipt['source']} {identity}（保存を確認していない）")
@@ -118,7 +124,7 @@ def confirm(options: argparse.Namespace, pending: list[dict]) -> tuple[list[dict
         if state not in ("saved", "pending"):
             raise HarvestError("dotfiles-memory status returned an unknown state")
         receipt = {**receipt, "state": state}
-        report(receipt)
+        report(options, receipt)
         if state != "saved":
             remaining.append(receipt)
     return remaining, failures
@@ -199,12 +205,12 @@ def receipt_of(value: dict, message: Message) -> dict:
     }
 
 
-def harvest_project(options: argparse.Namespace, sessions: list[Session], pending: list[dict]) -> None:
+def harvest_project(options: argparse.Namespace, sessions: list[Session], state: dict) -> None:
     cwd = sessions[0].cwd
     existing = curated(options, cwd)
     # 保存済みの発言は送り直さない。失敗した実行を繰り返しても同じ発言から記憶を二つ作らない
     stored = {item["source"] for item in existing if isinstance(item.get("source"), str)}
-    stored |= {receipt["source"] for receipt in pending}
+    stored |= {receipt["source"] for receipt in state["pending"]}
     known = {normalized(item["content"]) for item in existing}
     found = messages_of(sessions, stored)
     if not found:
@@ -254,9 +260,11 @@ def harvest_project(options: argparse.Namespace, sessions: list[Session], pendin
                 continue
             known.add(normalized(content))
             receipt = receipt_of(value, message)
-            report(receipt)
+            report(options, receipt)
             if receipt["state"] != "saved":
-                pending.append(receipt)
+                state["pending"].append(receipt)
+                # 実行末尾の一括 write では取消で receipt を失うため受け取りごとの write
+                store_state(options.state_file, state)
 
 
 def harvest(options: argparse.Namespace, state: dict, since: datetime, until: datetime) -> int:
@@ -277,7 +285,7 @@ def harvest(options: argparse.Namespace, state: dict, since: datetime, until: da
     failures = 0
     for sessions in projects.values():
         try:
-            harvest_project(options, sessions, state["pending"])
+            harvest_project(options, sessions, state)
         except (HarvestError, JournalError) as error:
             print(f"{PROG}: {sessions[0].cwd}: {error}", file=sys.stderr)
             failures += 1
@@ -300,6 +308,7 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     options = parse(argv)
+    options.saved = 0
     until = now or datetime.now(timezone.utc)
     try:
         state = load_state(options.state_file, until, options.lookback_days)
@@ -313,8 +322,14 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     except HarvestError as error:
         print(f"{PROG}: {error}", file=sys.stderr)
         return 1
+    print(
+        f"summary: extraction={'failed' if failed else 'succeeded'} "
+        f"backend-saved={options.saved} backend-unconfirmed={len(state['pending'])}"
+    )
     return 1 if unconfirmed or failed else 0
 
 
 if __name__ == "__main__":
+    # 既定の SIGTERM は一時 directory と model の子を残すため既定動作は不可
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
     sys.exit(main())

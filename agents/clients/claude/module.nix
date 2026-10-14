@@ -130,13 +130,15 @@ in
 {
   dotfiles.agents.registry.claude = {
     binary = "claude";
-    runtimeWrapperMode = "managed";
-    rulesDestination = null;
+    supply.package = "claude-code";
+    runtime.managed = { };
+    rules.embedded = { };
     skillsDestination = ".claude/skills";
-    subagentMode = "rendered";
-    subagentsDestination = ".claude/agents";
-    subagentFormat = "frontmatter-markdown";
-    subagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+    subagents.rendered = {
+      destination = ".claude/agents";
+      sources = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+      skillProjection = "preload";
+    };
     gatewayConfig = {
       source = managedMcp;
       format = "json";
@@ -162,21 +164,12 @@ in
         destination = ".claude/settings.json";
       };
     };
-    capabilityManagedFiles = {
-      lsp = "managed-settings";
-      telemetry = "managed-settings";
-      projectMemory = if projectMemoryEnabled then "managed-settings" else null;
-    };
-    lspMode = "supported";
-    telemetryMode = "supported";
-    projectMemoryMode = if projectMemoryEnabled then "hooks" else "unsupported";
-    skillProjectionMode = "preload";
-    install = {
-      kind = "installer-script";
-      updateOwner = "upstream-installer";
-      layout = "upstream-managed";
-      scriptUrl = "https://claude.ai/install.sh";
-      executableRoot = ".local/share/claude/versions";
-    };
+    lsp.supported.managedFile = "managed-settings";
+    telemetry.supported.managedFile = "managed-settings";
+    projectMemory =
+      if projectMemoryEnabled then
+        { hooks.managedFile = "managed-settings"; }
+      else
+        { unsupported = { }; };
   };
 }

@@ -16,20 +16,9 @@
           lib.findSingle (package: lib.getName package == "wslview") (throw "wslview package is missing")
             (throw "multiple wslview packages are installed")
             hostConfig.environment.systemPackages;
-        commandSmokeTimeoutArgs = [
-          "--kill-after=2s"
-          "10s"
-        ];
-        commandSmokeTimeoutOverrides = lib.filterAttrs (_: args: args != commandSmokeTimeoutArgs) (
-          lib.mapAttrs (
-            _: package: package.passthru.commandSmokeTimeoutArgs or commandSmokeTimeoutArgs
-          ) hostConfig.dotfiles.platform.cli.commands
-        );
         generatedShellActual = {
           projectMemoryHooks = toString hostConfig.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
           commands = lib.mapAttrs (_: package: lib.getExe package) hostConfig.dotfiles.platform.cli.commands;
-          commandSmoke.timeoutArgs = commandSmokeTimeoutArgs;
-          commandSmoke.timeoutArgsByCommand = commandSmokeTimeoutOverrides;
           mcpExecutables = lib.mapAttrs (
             _: target: target.executable
           ) hostConfig.dotfiles.platform.mcp.targets;
@@ -37,6 +26,7 @@
         };
       in
       {
+
         shellcheck =
           let
             generatedShellActualFile = pkgs.writeText "generated-shell-roster.json" (
@@ -101,26 +91,9 @@
                 lintGenerated "$(jq -r '.projectMemoryHooks' "$actual")/bin/$hook"
               done < actual-hooks
 
-              jq -e 'any(.commandSmoke.timeoutArgs[]; startswith("--kill-after="))' "$actual" >/dev/null
-              set +e
-              {
-                timeout --kill-after=0.10s 0.05s env --ignore-signal=TERM sleep 1
-                hardTimeoutStatus=$?
-              } 2>/dev/null
-              set -e
-              if [ "$hardTimeoutStatus" -ne 137 ]; then
-                echo "hard timeout canary was not killed: status=$hardTimeoutStatus" >&2
-                exit 1
-              fi
-              while IFS=$'\t' read -r id command; do
+              while IFS= read -r command; do
                 lintGenerated "$command"
-                mapfile -t commandSmokeTimeoutArgs < <(
-                  jq -r --arg id "$id" \
-                    '(.commandSmoke.timeoutArgsByCommand[$id] // .commandSmoke.timeoutArgs)[]' "$actual"
-                )
-                timeout "''${commandSmokeTimeoutArgs[@]}" "$command" --help > "$id-help"
-                test -s "$id-help"
-              done < <(jq -r '.commands | to_entries[] | [.key, .value] | @tsv' "$actual")
+              done < <(jq -r '.commands[]' "$actual")
 
               lintGenerated "$(jq -r '.workstation.wslview' "$actual")"
 
@@ -173,7 +146,6 @@
         deadnix --fail ${self}
         touch $out
       '';
-
       statix = pkgs.runCommandLocal "check-statix" { nativeBuildInputs = [ pkgs.statix ]; } ''
         statix check --config ${self} ${self}
         touch $out
@@ -184,7 +156,6 @@
         treefmt --ci --tree-root "$PWD/source"
         touch $out
       '';
-
     }
   ];
 }

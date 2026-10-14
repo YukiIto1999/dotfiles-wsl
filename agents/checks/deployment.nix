@@ -1578,6 +1578,105 @@
                 codex-system.json > /dev/null
               touch $out
             '';
+
+        # 同 ID の供給元差替と戻しは Skill registry の既存入口だけで行い、二つの client へ原文のまま届く
+        agent-skill-replacement =
+          let
+            skillFixtures = ../fixtures/skill-replacement;
+            replacement = {
+              source = skillFixtures + "/browser-operation";
+              requiresCapabilities = [ ];
+              requiresSkills = [ ];
+            };
+            external = {
+              source = skillFixtures + "/external-procedure";
+              requiresCapabilities = [ ];
+              requiresSkills = [ ];
+            };
+            replacedConfig =
+              (mkProbeSystem [
+                normalMachineModule
+                {
+                  dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ];
+                  dotfiles.skills.registry.browser-operation = lib.mkForce replacement;
+                  dotfiles.skills.registry.external-procedure = external;
+                }
+              ]).config;
+            conflictingConfig =
+              (mkProbeSystem [
+                normalMachineModule
+                { dotfiles.skills.registry.browser-operation = replacement; }
+              ]).config;
+            conflictAccepted =
+              (builtins.tryEval (builtins.deepSeq conflictingConfig.dotfiles.agents.shared.skills true)).success;
+            replacedHome = replacedConfig.home-manager.users.${replacedConfig.dotfiles.workstation.username};
+            projectedClients = [
+              "omp"
+              "claude"
+            ];
+            deployed =
+              clientName: skill:
+              replacedHome.home.file."${
+                replacedConfig.dotfiles.agents.clients.${clientName}.skillsDestination
+              }/${skill}".source;
+            routesTo =
+              configuration: skill:
+              lib.any (route: route.skill == skill) configuration.dotfiles.agents.shared.routing.subagentSkills;
+          in
+          # 差替先の依存宣言へ切り替わり、旧 source の Capability 要求は残らない
+          assert !(minimalCapabilityConfig.dotfiles.agents.shared.skills ? browser-operation);
+          assert !routesTo minimalCapabilityConfig "browser-operation";
+          assert replacedConfig.dotfiles.agents.shared.skills ? browser-operation;
+          assert routesTo replacedConfig "browser-operation";
+          assert replacedConfig.dotfiles.skills.registry.browser-operation.requiresCapabilities == [ ];
+          # 同優先度の競合する差替は拒否する
+          assert !conflictAccepted;
+          # reference-only の helper は全 client の named Skill へ出さない
+          assert !(replacedConfig.dotfiles.agents.shared.skills ? filter-syntax);
+          assert lib.all (
+            clientName:
+            !(
+              replacedHome.home.file
+                ? "${replacedConfig.dotfiles.agents.clients.${clientName}.skillsDestination}/filter-syntax"
+            )
+          ) (builtins.attrNames replacedConfig.dotfiles.agents.clients);
+          # 元へ戻す場合は差替定義を外すだけで、元の source へ戻る
+          assert
+            toString hostConfig.dotfiles.agents.shared.skills.browser-operation
+            == toString hostConfig.dotfiles.skills.registry.browser-operation.source;
+          assert
+            toString hostConfig.dotfiles.agents.shared.skills.browser-operation != toString replacement.source;
+          pkgs.runCommandLocal "check-agent-skill-replacement"
+            {
+              nativeBuildInputs = [
+                pkgs.bash
+                pkgs.coreutils
+              ];
+              replacementSources = lib.concatMapStringsSep " " (
+                clientName: "${deployed clientName "browser-operation"}"
+              ) projectedClients;
+              externalSources = lib.concatMapStringsSep " " (
+                clientName: "${deployed clientName "external-procedure"}"
+              ) projectedClients;
+              replacementFixture = "${replacement.source}";
+              externalFixture = "${external.source}";
+            }
+            ''
+              set -euo pipefail
+              for source in $replacementSources; do
+                cmp "$replacementFixture/SKILL.md" "$source/SKILL.md"
+              done
+              for source in $externalSources; do
+                cmp "$externalFixture/SKILL.md" "$source/SKILL.md"
+                cmp "$externalFixture/references/contract.txt" "$source/references/contract.txt"
+                mkdir projected
+                ln -s "$source" projected/external-procedure
+                test "$(bash projected/external-procedure/scripts/read-reference.sh)" \
+                  = "$(cat "$externalFixture/references/contract.txt")"
+                rm -r projected
+              done
+              touch $out
+            '';
       }
     )
   ];

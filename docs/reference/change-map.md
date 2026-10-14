@@ -54,6 +54,7 @@
 | Agent clientの設定または配備形式を変える | [`agents/clients/<id>/`](../../agents/clients)と[`agents/module.nix`](../../agents/module.nix) | client固有check、`dotfiles-rebuild` |
 | clientの`projectMemoryMode`または`capabilityManagedFiles.projectMemory`を変える | [`agents/impl/contract.nix`](../../agents/impl/contract.nix)と各[`agents/clients/<id>/module.nix`](../../agents/clients)のmode・managed file宣言 | `project-memory-client-integrations`、`agent-artifact-contract` |
 | client binaryの供給経路を変える | clientの`install` contract | `agent-client-roster`、installer checks、`dotfiles-install-agents` |
+| 外部Skillの供給元を同IDで差し替える、または元へ戻す | [`docs/architecture/repository-skills.md`](../architecture/repository-skills.md)の同IDの差替 | `skill-source-contract`、`agent-skill-replacement` |
 | subagentを追加・変更する | `agents/subagents/`と[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix) | `agent-subagent-rendering` |
 | Web検索とURL取得の入口、subagentのWeb tool許可を変える | [`skills/web-research/skill/`](../../skills/web-research/skill)、subagentの`tools`は[`agents/subagents/`](../../agents/subagents)、client別の変換は各[`agents/clients/<id>/module.nix`](../../agents/clients)、公開状況の表は[AI tooling](../architecture/ai-tooling.md#web調査) | `agent-subagent-rendering`、`skill-capability-gating`、`skill-frontmatter-contract` |
 | project memoryのruntime、client integration、engine、MCP、backendを変える | [`capabilities/project-memory/hindsight/`](../../capabilities/project-memory/hindsight/)とgeneric optionを宣言するCapability module | `project-memory-runtime-behavior`、`project-memory-client-integrations`、`hindsight-container`、`hindsight-front` |

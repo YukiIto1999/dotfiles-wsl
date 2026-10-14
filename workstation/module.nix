@@ -24,7 +24,7 @@ in
     dotfilesDir = lib.mkOption {
       type = lib.types.str;
       default = "${cfg.environmentDir}/dotfiles-wsl";
-      description = "out-of-store symlink と script が参照する checkout の絶対パス。";
+      description = "script と設定が実行時に読む checkout の絶対パス。";
     };
 
     environmentDir = lib.mkOption {

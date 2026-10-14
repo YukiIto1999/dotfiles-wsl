@@ -3,6 +3,8 @@
   pkgs,
   hostConfig,
   hostOptions,
+  mkProbeSystem,
+  normalMachineModule,
   ...
 }:
 
@@ -64,6 +66,23 @@ let
     name: file: lib.nameValuePair (lib.removePrefix hookPrefix name) file.source
   ) hookFiles;
   hooksDirectory = pkgs.linkFarm "git-hooks" deployedHooks;
+  deployedIgnore = homeFiles.".config/git/ignore".source;
+  checkoutOnlyPattern = "checkout-only-edit.generated";
+  editedCheckout = pkgs.runCommandLocal "dotfiles-checkout-with-edited-ignore" { } ''
+    mkdir -p $out/toolchain/git/assets
+    printf '%s\n' ${lib.escapeShellArg checkoutOnlyPattern} > $out/toolchain/git/assets/ignore
+  '';
+  editedCheckoutConfig =
+    (mkProbeSystem [
+      normalMachineModule
+      {
+        dotfiles.workstation.dotfilesDir = lib.mkForce (
+          builtins.unsafeDiscardStringContext (toString editedCheckout)
+        );
+      }
+    ]).config;
+  editedCheckoutDeployedIgnore =
+    editedCheckoutConfig.home-manager.users.${username}.home.file.".config/git/ignore".source;
   failingEntryHooks = import ./package.nix {
     inherit lib pkgs;
     verificationEntry = pkgs.writeShellApplication {
@@ -180,10 +199,29 @@ in
           gnugrep
         ];
         HOOKS = hooksDirectory;
-        GLOBAL_IGNORE = ./assets/ignore;
+        GLOBAL_IGNORE = deployedIgnore;
       }
       ''
         bash ${./fixtures/hooks.sh}
+        touch $out
+      '';
+
+  git-global-ignore-immutable =
+    pkgs.runCommandLocal "check-git-global-ignore-immutable"
+      {
+        nativeBuildInputs = with pkgs; [
+          bash
+          coreutils
+          git
+        ];
+        STORE_DIR = builtins.storeDir;
+        DEPLOYED_IGNORE = deployedIgnore;
+        EDITED_CHECKOUT_DEPLOYED_IGNORE = editedCheckoutDeployedIgnore;
+        EDITED_CHECKOUT_IGNORE = "${editedCheckout}/toolchain/git/assets/ignore";
+        CHECKOUT_ONLY_PATTERN = checkoutOnlyPattern;
+      }
+      ''
+        bash ${./fixtures/global-ignore.sh}
         touch $out
       '';
 

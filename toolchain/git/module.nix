@@ -85,7 +85,6 @@ in
 
   config.home-manager.users.${cfg.workstation.username} =
     {
-      config,
       lib,
       osConfig,
       ...
@@ -127,8 +126,8 @@ in
       };
 
       home.file = {
-        ".config/git/ignore".source =
-          config.lib.file.mkOutOfStoreSymlink "${dotfiles.workstation.dotfilesDir}/toolchain/git/assets/ignore";
+        # generation を作る時点の source を store へ複製する。checkout の編集は rebuild まで Git へ届かない
+        ".config/git/ignore".source = ./assets/ignore;
       }
       // lib.mapAttrs' (
         name: hook:

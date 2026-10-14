@@ -31,7 +31,7 @@ PAT の権限は用途に必要な repository と operation に限定する。�
 .NET の `bin/` は `Debug/` と `Release/` の下だけを除外し、独自の configuration や出力先は project の `.gitignore` に記す。
 lockfile、Gradle wrapper、Yarn の patches、plugins、releases、Pixi の config は追跡できる状態を保つ。
 project が生成物や cache を意図的に共有する場合は、その repository の `.gitignore` で対象の親 directory と内容を `!` で再包含する。
-正本は checkout への symlink なので変更はこの WSL ユーザーの Git に即時反映されるが、Windows 側の Git や設定を導入していない clone には適用されない。
+配備先はgenerationが持つstoreの複製であり、`dotfiles-rebuild`で反映する。checkoutの`toolchain/git/assets/ignore`だけを編集しても配備済みのignoreは変わらず、前のgenerationへ戻すと前の内容に戻る。Windows側のGitや設定を導入していないcloneには適用されない。
 ignore は既に追跡した file には効かず、`git add -f` でも迂回できるため、secret の保護を file 名だけに任せない。
 
 [`toolchain/git/assets/hooks/pre-commit`](../../toolchain/git/assets/hooks/pre-commit) は file 名によらず staged の追加行を検査する。

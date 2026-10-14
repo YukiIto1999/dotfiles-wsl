@@ -8,6 +8,7 @@ NixOSのgenerationは復旧対象を保持するが、switchの非ゼロ終了�
 ## 適用
 
 checkoutの変更を確認してcommitし、planを確認してから適用する。
+適用は標準の実行packageの更新を`flake.lock`のcommitとして自動で加え、planはその更新を反映してから破棄する。
 
 ```sh
 dotfiles-rebuild --plan

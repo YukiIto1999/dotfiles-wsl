@@ -82,6 +82,7 @@ consumerはpolicy rosterのraw source絶対pathを`Read`で開き、固定source
 architecture-standardの規範本文は、配備済みsourceからでなく、policyが案内する現行規範root（`dotfiles.agents.runtime.standardRoot`）から読む。
 同梱のreferenceとscriptは成功してReadした`SKILL.md`の実体のdirectoryから、規範文書のlinkは現行規範rootから解決する。
 配備済みsourceの標準本文、Git revision、`flake.lock`は実行packageの出典であり、現行規範の根拠にしない。
+`flake.lock`は`dotfiles-rebuild`が最新へ更新して配備したrevisionの記録であり、版を固定して更新を待つ仕組みではない。
 片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
 Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
 外部Skillのraw directoryを配ることと、同梱scriptの実行依存を供給することは別の契約である。

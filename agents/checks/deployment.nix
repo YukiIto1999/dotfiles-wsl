@@ -851,15 +851,6 @@ in
           (has("sandbox_mode") | not) and
           (has("sandbox_workspace_write") | not)
         ' codex-system.json > /dev/null
-        remarshal -if toml -of json ${artifactSource "agents/codex/project"} > codex-project.json
-        jq --exit-status \
-          --arg cacheRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.homeDir}/.cache/dotfiles-wsl"} \
-          --arg stateRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.homeDir}/.local/state/dotfiles-wsl"} \
-          --arg gitRoot ${lib.escapeShellArg "${hostConfig.dotfiles.workstation.dotfilesDir}/.git"} '
-          .permissions.dev.filesystem == {($gitRoot): "write"} and
-          (has("sandbox_mode") | not) and
-          (has("sandbox_workspace_write") | not)
-        ' codex-project.json > /dev/null
         remarshal -if toml -of json \
           ${clients.codex.managedFiles.user.source} > codex-user-seed.json
         grep -Fq '"@homeDir@/workspace"' ${self}/agents/clients/codex/assets/config.toml
@@ -1545,6 +1536,43 @@ in
           .plugins[0].source == "./lsp" and
           (.plugins[0].version | length) > 0
         ' "$marketplace/.claude-plugin/marketplace.json" > /dev/null
+        touch $out
+      '';
+
+  agent-no-checkout-deployment =
+    let
+      inherit (hostConfig.dotfiles.workstation) homeDir;
+      checkoutDir = hostConfig.dotfiles.workstation.dotfilesDir;
+      insideCheckout = path: path == checkoutDir || lib.hasPrefix "${checkoutDir}/" path;
+      deployedTargets =
+        map (name: "${homeDir}/${name}") (builtins.attrNames homeConfig.home.file)
+        ++ lib.concatMap (artifact: lib.optional (artifact.deployedAt != null) artifact.deployedAt) (
+          builtins.attrValues artifacts
+        );
+    in
+    assert !lib.any insideCheckout deployedTargets;
+    assert !(artifacts ? "agents/codex/project");
+    assert
+      builtins.attrNames clients.codex.managedFiles == [
+        "system"
+        "user"
+      ];
+    assert !lib.hasInfix "${checkoutDir}/.codex" seedActivation;
+    pkgs.runCommandLocal "check-agent-no-checkout-deployment"
+      {
+        nativeBuildInputs = [
+          pkgs.jq
+          pkgs.remarshal
+        ];
+      }
+      ''
+        set -euo pipefail
+        remarshal -if toml -of json ${artifactSource "agents/codex/system"} > codex-system.json
+        jq --exit-status \
+          --arg cacheRoot ${lib.escapeShellArg "${homeDir}/.cache/dotfiles-wsl"} \
+          --arg stateRoot ${lib.escapeShellArg "${homeDir}/.local/state/dotfiles-wsl"} \
+          '.permissions.dev.filesystem == {($cacheRoot): "write", ($stateRoot): "write"}' \
+          codex-system.json > /dev/null
         touch $out
       '';
 }

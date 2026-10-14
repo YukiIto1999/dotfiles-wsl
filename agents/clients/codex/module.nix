@@ -9,17 +9,6 @@ let
   cfg = config.dotfiles;
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   codexModel = "gpt-6-sol";
-  dotfilesHomeRelative = lib.removePrefix "${cfg.workstation.homeDir}/" cfg.workstation.dotfilesDir;
-  dotfilesPathComponents = lib.splitString "/" dotfilesHomeRelative;
-  dotfilesDirIsBelowHome =
-    lib.hasPrefix "${cfg.workstation.homeDir}/" cfg.workstation.dotfilesDir
-    && lib.all (
-      component: component != "" && component != "." && component != ".."
-    ) dotfilesPathComponents;
-  codexProjectHomePath = "${dotfilesHomeRelative}/.codex/config.toml";
-  codexProjectConfig = (pkgs.formats.toml { }).generate "codex-project-config.toml" {
-    permissions.dev.filesystem."${cfg.workstation.dotfilesDir}/.git" = "write";
-  };
   agentRuntimeWritableFilesystem = {
     "${cfg.workstation.homeDir}/.cache/dotfiles-wsl" = "write";
     "${cfg.workstation.homeDir}/.local/state/dotfiles-wsl" = "write";
@@ -156,12 +145,6 @@ in
         deployment = "system";
         destination = "codex/config.toml";
       };
-      project = {
-        source = codexProjectConfig;
-        format = "toml";
-        deployment = "home";
-        destination = codexProjectHomePath;
-      };
       user = {
         source = codexUserSeed;
         format = "toml";
@@ -221,10 +204,4 @@ in
     pkgs.bubblewrap
   ];
 
-  assertions = lib.optionals (builtins.elem "codex" cfg.agents.enabled) [
-    {
-      assertion = dotfilesDirIsBelowHome;
-      message = "dotfiles.workstation.dotfilesDir must be a normalized path below dotfiles.workstation.homeDir for Codex project config deployment";
-    }
-  ];
 }

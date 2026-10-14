@@ -148,11 +148,6 @@
         "managedFile": "system"
       },
       "managedFiles": {
-        "project": {
-          "format": "toml",
-          "deployment": "home",
-          "destination": "environment/dotfiles-wsl/.codex/config.toml"
-        },
         "system": {
           "format": "toml",
           "deployment": "system",

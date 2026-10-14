@@ -84,7 +84,7 @@ Codex、OpenCode、OMP は GitHub release を dotfiles が管理する。GitHub 
 
 [`agents/clients/codex/assets/config.toml`](../../agents/clients/codex/assets/config.toml) は既定の permission profile を `dev` とし、`:workspace` を継承して workspace roots、`~/projects`、`~/workspace` への書込と network access を許可する。approval policy は `never` なので、Codex の local command は profile の範囲内で対話承認なしに実行される。
 
-[`agents/clients/codex/module.nix`](../../agents/clients/codex/module.nix) は同名の `dev` profile を system config と project config で拡張する。system config は agent runtime の cache と state、dotfiles checkout の project config はその `.git` だけを書込対象に加える。permission profile と旧 `sandbox_mode`、`sandbox_workspace_write` は混在させない。
+[`agents/clients/codex/module.nix`](../../agents/clients/codex/module.nix) は同名の `dev` profile を system config で拡張し、agent runtime の cache と state だけを書込対象に加える。dotfiles checkout 内の project config は配備しない。permission profile と旧 `sandbox_mode`、`sandbox_workspace_write` は混在させない。
 subagent は親 session の permission profile を継ぐ。Codex の subagent override が運ぶのは model、reasoning、instructions、personality、service tier、feature 無効化、skill 選択だけであり、subagent file の `default_permissions` は読み捨てられる。read-only の subagent 定義にも独自の sandbox 境界はない。
 既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
 

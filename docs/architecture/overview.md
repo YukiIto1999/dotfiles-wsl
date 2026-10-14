@@ -8,6 +8,13 @@
 
 [`flake.nix`](../../flake.nix)は、`module.nix`を持つdirectoryを[`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)で収集し、NixOS-WSL、sops-nix、Home Managerと同じNixOS評価へ渡す。[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加Capabilityを持つ。Skillは選択したCapabilityとSkill依存から導く。`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
 
+Nixpkgsのpackage setは`flake.nix`だけが所有し、nativeのread-only moduleを通して全hostとvariantへ渡す。
+hostからpackage set、config、overlay、platformを差し替えることは拒否する。
+
+検証taskも[`flake.nix`](../../flake.nix)を正本とするNixの単一採用であり、architecture-standardの`tools/build/nx.md`を置き換える。
+標準が機械構成の実現方式を定めた場合、またはNix graphで必要な保証と検証予算を維持できなくなった場合は、この採用を再評価する。
+見直す場合も、検査を後段へ移して予算に合わせたり、二つの検証正本を恒久的に併置したりしない。
+
 host profileの値は型付きoptionを通してowner moduleへ渡す。
 WSL登録名、Windows準備用のVM資源、追加drive、DNS、VHD方針、Nixの並列度と空き容量reserveはhostで選ぶ。
 追加driveのmount宣言と、storageが実際のWSL mountから導くWindows driveの観測inventoryは別であり、観測対象をprofileへ写さない。
@@ -42,6 +49,7 @@ minとwatermarkの間隔を引き上げるとhigh watermarkに比例するboost�
 WSLのkernelはdistroの再起動を越えて旧世代の値を保つため、既定値も宣言する。
 効果はdoctorの`resource/wsl-memory/high-order-pages`と`vmbus-ring-failures`で確かめる。
 定期的な`drop_caches`は全セッションのディスク再読込みを誘発するため使用しない。
+Nixの自動GCの開始値と目標値はhost profileが所有し、全storeを走査する自動optimiseは行わない。
 Agent sessionのmemoryの上限とCPUの配分は、[AI tooling](ai-tooling.md)が示すとおりAgent runtimeが`agents.slice`で持つ。
 
 ## 責務root
@@ -65,6 +73,9 @@ Agent sessionのmemoryの上限とCPUの配分は、[AI tooling](ai-tooling.md)�
 | `docs/` | 利用者向け手順、設計、参照情報 |
 
 unitのmarkerは`module.nix`である。buildは`package.nix`または`package/`、unit固有の検証は`checks.nix`または`checks/`に置く。`impl/`、`assets/`、`fixtures/`、`skill/`は、それぞれ実装、入力資材、検査入力、配備するSkill本文だけを持つ。
+
+このrepositoryは設定の構築と配備が対象であり、application用の空のcoreやsurfaceは作らない。
+unit内部の許可集合は[`checks/checks/repository-structure.nix`](../../checks/checks/repository-structure.nix)が所有し、unit固有の資材名はその責務で説明できる場合だけ加える。
 
 ## 依存方向
 

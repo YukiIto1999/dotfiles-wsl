@@ -87,34 +87,22 @@ T1は`flake.nix`の`t1Shards`で検査を`systems`と`units`の二つに分け�
 検査を変更したときは、予算を理由に必須の検査をT3へ移さず、Nixの依存と再利用を見直す。
 
 `verify.seconds`は、必要な検査の範囲と実行環境の実測から決め、強制停止の上限として扱う。
-初回計測は600秒を有限の上限として、正規wrapperから全unitと全host・variantのT1を完走した。
-計測sourceのNAR hashは`sha256-WOE/qLsoAekfKkTlDlQCmLhFKR3nmujuO/YP9BlarXQ=`である。
-
-| 項目 | 初回の観測値 |
-|---|---|
-| wrapperの開始から証跡確定まで | 109.478秒 |
-| 終了status | 0 |
-| 計測scopeのCPU時間 | 109.641612秒 |
-| 計測scopeのピークメモリ | 9,981,075,456 bytes、約9.30GiB |
-
-計測は`agents.slice`内の専用scopeで行い、wrapper、最大2つの評価器とその子処理を含むが、Nix daemon側のbuilderは含まない。
-評価器の初期GC heapは各4GiBで、共有cacheには既存の成果物と、この走行でbuildした成果物の両方があった。
-cacheを消した初回起動、異なるCPU負荷と全体のピークメモリは未計測である。
-旧120秒の走行は121.29秒、終了status 124で打ち切られたが、cacheとsourceが異なるため、今回の成功を速度改善の証拠にはしない。
-
-このprojectの上限は300秒とし、今回の完走時間に約2.7倍の余裕を持たせる。
-余裕は未計測の初回buildと共有資源の競合に備える判断であり、それらが300秒以内に収まる実測保証ではない。
-同じ条件でのフィードバック目標は、今回の完走時間を基準に約110秒とする。
 必要な範囲、cache、並列数、実行環境または資源の競合が変わったときは、必要な検査を減らさず再計測して、次の走行前に上限と理由を更新する。
 失敗した走行の途中では上限を延ばさない。
-T2の900秒は従来のproject設定を引き継いだ値であり、今回のT1計測からT2の完走時間を推定しない。
 
 未追跡fileはNixのGit sourceに含まれないため、検証前に`git add`または`git add -N`で追跡する。
-checkの一覧は複製せず、どの制約がどの検査で守られているかは[機械検証に固定した制約](../reference/verified-constraints.md)を見る。
+checkの正本は各unitの検査と`flake.nix`の導出結果であり、件数やcheck名を文書の別一覧へ転記しない。
 
-check を足したら、緑を見る前に赤を見る。検査対象を意図的に壊し、期待した message で落ちることを確かめてから戻す。落ちなければその検査は無効である。一つの検査は一つの結果だけを確かめる。複数を束ねると、最初の失敗が残りを隠す。
+検査を変えるときは、利用側が依存する振る舞い、境界入力、状態遷移を意図的に壊すと失敗することを確かめる。
+件数、文言、既定値、source文字列、forwardingの写しを期待値として固定しない。
 
-新しい check は[機械検証に固定した制約](../reference/verified-constraints.md)へ載せる。載せ忘れも、実在しない check 名の記載も `docs-constraint-coverage` が落とす。文書を足したときの読み手の行は `docs-reader` が落とす。
+文書間とsourceへのlinkは`docs-links`、文書が示すpathは`docs-path-labels`、読み手の明示は`docs-reader`が検査する。
+これらの成功を、手順の実行成功や文書の主張の正しさとは扱わない。
+ShellCheckはcheckoutと生成済みのshell scriptを静的に検査する。
+
+静的検査では、契約を介した依存の意味、文書種別の混在、宣言値の転記、fixtureと実装を同じ誤りへ変える変更までは判定できないため、レビューで確かめる。
+listenerのbind先、未宣言のlistener、portの空き、container image由来の公開、通信制限の効果は、宣言やunitのactiveだけで成功とせず、実際のprocessとtool呼出しを観測する。
+commit hookも日本語の形態素を判定するものではないため、件名の名詞終わりは書き手が確認する。
 
 Markdown を含む作業ツリーの空白エラーは Git でも確認する。
 

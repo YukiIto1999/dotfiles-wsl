@@ -25,7 +25,7 @@ Codex binary の release contract は、その唯一の consumer である[`agen
 `agents/checks/` は次の責務へ分ける。
 
 - client contract
-- configuration、artifact、definition、LSPの配備
+- configuration、artifact、subagent、LSPの配備
 - client installer
 - runtime wrapper、cache、verification
 - session resourceとworktree lifecycle
@@ -53,7 +53,9 @@ MCP unit は secret の値、path、owner、mode、template を所有しない�
 
 ## 検証
 
-構造変更では、変更前に契約の重複と名前依存を再現する focused check を失敗させる。実装後は check ID 集合の完全一致、各 owner check、文書 link、構造 gate を確認する。
+構造変更では、利用側の契約、境界入力、状態遷移を壊すと失敗するfocused checkを使う。
+配線、既定値、件数、文言、source文字列を写した期待値で振る舞いの保証を代用しない。
+CLI、TUI、systemd、配備先の変更は実際の起動経路でも確かめ、Nix評価とbuildの成功と区別する。
 
 履歴変更では、全 commit について message hook、空 commit、merge、重複 subject、最終 tree、metadata を検査する。新しく作る中間 tree は、変更された Nix、shell、JSON をその commit から取り出して構文検査する。最終 source の全検証は一度だけ実行し、履歴だけの再生成では同じ source build を繰り返さない。
 
@@ -65,4 +67,4 @@ MCP unit は secret の値、path、owner、mode、template を所有しない�
 - 特定日付のスナップショットや作業ログを不変契約へ混入させない。
 - 将来の検討事項や未実装の言い訳を残さず、現在成立している責務境界のみを記録する。
 - 変更の直接の目的は、Gitのコミットメッセージ（`commit-writing`）およびPR説明（`change-writing`）へ完結させる。
-- 構造に影響する現在有効な判断は`docs/adr/`へ置き、過去の作業ログ、実測、置換済みの判断は非追跡の`work/`かGit履歴へ残す。
+- 保守に必要な判断の意味は対応するコード、振る舞いのテスト、契約、commit、ownerのWhy notへ残し、読み手に必要な説明だけを現在の文書へ投影する。

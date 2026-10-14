@@ -18,6 +18,11 @@ Git identity の template は設定ユーザーの `~/.config/git/identity.conf`
 
 [`identity/module.nix`](../../identity/module.nix) は account ごとの username と PAT を SOPS secret として宣言する。sops-nix template は `hosts.yml` を mode `0600` で user home に配備し、GitHub MCP wrapper は runtime の secret file から PAT を読んで子 process の環境へ渡す。secret value と実 account username は Nix source、doctor 出力、文書へ転記しない。
 
+登録済みaccountのIDと個数の正本は暗号化済み`secrets.json`のkey構造であり、`secrets/sops/module.nix`が公開する`dotfiles.secrets.paths`からidentityがrosterを導く。
+primaryはentryの`primary` keyの存在で選び、値は読まない。
+host宣言や別のJSON indexへrosterを写さず、accountの増減は暗号化済みstoreだけで行う。
+この導出はSOPSがkey構造を平文で残すことを前提にするため、key自体を隠す方式を採る場合は導出契約も変更する。
+
 HTTPS の Git は、`github.com` 全体で `gh` の credential helper を使い、primary の PAT を受け取る。store が owner の印を付けた account について、[`toolchain/git/module.nix`](../../toolchain/git/module.nix) は `https://github.com/<owner>` の helper を、その account の user 所有 `0400` の PAT file を読む helper へ置き換える。Git 設定と Nix store には PAT file の path だけが入り、PAT は remote URL、Git 設定、生成 artifact に書かない。helper は Git の保存と破棄の要求を無視し、SOPS 以外に credential の複製を作らない。
 
 PAT の権限は用途に必要な repository と operation に限定する。設定ユーザー、root、PAT を読む MCP process と Git credential helper は credential の信頼境界に含まれる。`gh auth login` や `gh auth switch` で別の credential store を作らず、SOPS の宣言経路へ集約する。
@@ -106,7 +111,7 @@ test は実行中に別の unit の `OUT_DIR` を読むので、実行中の fil
 GC を始めた時点で一度だけ調べると、その後に始まった test を見落とすので、lock を取った entry ごとに調べる。
 調べてから rename を終えるまでに始まった実行は、成果物の最終使用が 48 時間以内でない限り守れない。
 atime を更新しない mount では Cargo の使用が見えないので、GC は unit を回収せずに失敗する。
-launcher は build-dir に触れないので、GC は unit の rename に `gc.lock` を取らない。
+launcher は build-dir の root を検証して作るだけで中身に触れないので、GC は unit の rename に `gc.lock` を取らない。
 
 sandbox は gateway の client 認証、Docker daemon の権限、Windows interop の境界を代替しない。network access が有効なので、sandbox 内 process は到達可能な endpoint へ接続できる。MCP tool は gateway と各 server の user 権限、secret、backend 境界も合わせて評価する。
 

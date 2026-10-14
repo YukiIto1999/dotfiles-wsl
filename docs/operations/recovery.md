@@ -6,6 +6,10 @@ Gitと`flake.lock`は設定の正本であり、CLIの認証、Atuinの履歴、
 `dotfiles-rebuild --rollback`もこれらのdataを戻さない。
 新規構築は[セットアップ](getting-started.md)、generationの復旧は[Rebuild](rebuild.md)、Windows資源は[Doctor](doctor.md#windows-の準備)を使う。
 
+root ext4ではonline fstrimとdiscardを使わないことを要求する。
+定期fstrimの無効化だけではdiscard無効の証拠にならず、WSLがrootをdiscard付きでmountしたhostはこの要件を満たさない。
+稼働中に自動remountやVHDの容量回収を行わず、容量回収は全WSLを停止できる保守時にWindows側で行う。
+
 ## 復旧対象
 
 | 対象 | 所在と扱い | 成功条件 |

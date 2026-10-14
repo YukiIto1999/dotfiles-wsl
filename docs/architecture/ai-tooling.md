@@ -194,7 +194,10 @@ Dockerが起こす宣言外のcontainerは[containerの配置と上限](#contain
 
 ## Policy、subagent、Skill
 
-[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は全clientへ配るpolicyの正本である。静的subagentは`agents/subagents/`に置く。Claude CodeとOMPはfrontmatter Markdown、OpenCodeはSkill toolを許可するfrontmatter Markdown、CodexはTOMLへbuild時に変換する。Antigravityは未対応を明示する。
+[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は共通の作業規律を持つtemplateであり、Skill、subagent、Capabilityとclientの能力の一覧はNix宣言と各sourceのfrontmatterから生成する。
+説明文書は同じ一覧を手で維持せず、正本の場所と現在値の取得方法を示す。
+この環境ではAI CLIをclient、委譲先の定義をsubagentと呼び、`agents/subagents/`がその定義とroutingを所有する。
+client形式への変換はbuild時に行う。
 
 `native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<subagent>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
 OMPのhookは`~/.omp/agent/hooks/pre`をdirectoryごとhomeへ配備し、その中をNix storeの実fileにする。OMPはhook directory内のsymlinkを読み込まず、Home Managerがfileごとに張るsymlinkでは全hookが無視されるためである。

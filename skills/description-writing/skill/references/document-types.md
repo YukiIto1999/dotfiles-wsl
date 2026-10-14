@@ -6,7 +6,9 @@
 
 ## ADRとdecision record
 
-構造へ影響する決定について、当時のcontext、比較した選択肢、decision、consequenceを残す。commitの直接目的で代用しない。置き換える場合は過去の記録を消さず、supersededを示す。
+対象projectがADRを成果物に指定している場合は、その既存形式を使う。
+保守に必要な意味の所在と記録の寿命は、AGENTSが案内する現行規範rootの`principles/documentation/decision-records.md`に従う。
+置換や削除の前に、その記録だけが持つ要件や契約を移す。
 
 ## 仕様
 

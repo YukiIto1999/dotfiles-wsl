@@ -70,7 +70,7 @@ Nix unit は `module.nix` を marker にし、build がある場合は `package.
 URL、`flake.lock` のrevisionと内容hashは実行packageの出典であり、現行規範の正本ではない。
 `dotfiles-doctor` の配備driftのPASSは、配備物の同一性を示すだけで、現行規範への適合を示さない。
 
-採用の判断は [ADR 0001](docs/adr/0001-adopt-architecture-standard.md)、標準本文の参照と配備版の分離は [ADR 0002](docs/adr/0002-pin-standard-as-flake-input.md)、実行packageの最新への追従は [ADR 0015](docs/adr/0015-follow-the-latest-standard-package-at-rebuild.md) に記録する。
+標準を別のローカル原則へ写さず、現在の実現はコード、保証する振る舞いはテスト、変更の理由はcommit、現在も採れない実装の理由はそのownerのWhy notから辿る。
 
 ## ドキュメント
 

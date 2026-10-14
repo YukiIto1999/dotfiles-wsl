@@ -27,10 +27,12 @@ stdout は上限を設けた JSON fragment だけを受理し、stderr は捨て
 宣言した timeout までに終わらない probe は、`observation did not finish within <秒数>s` という message の `warn` にする。
 期限切れは観測が終わらなかったことだけを示し、対象の故障を示さないためである。
 memory と I/O が逼迫すると、正常な service の probe も、swap と page cache から追い出された process と binary の読み戻しだけで期限を超える。
-これを `fail` にすると恒常的な fail が出力を読み飛ばす習慣を作り、[ADR 0013](../adr/0013-drop-the-codex-mcp-session-capability.md) が避けた状態に戻る。
 `warn` は終了 status を変えないが、期限切れの check は結果に残る。
 
 観測する対象の数が実行時に決まる資源には `numeric-command-threshold-set` を使う。owner の command は 1 行に 1 つ `<名前> <百分率>` を返し、doctor は名前ごとに閾値を当てて `<checkId>/<名前>` の check を作る。1 行でも読めなければ、どの値も使わずに observation 全体を固定 failure message で失敗させる。
+
+`systemd-timer`はserviceの`Result`と最後の`ExecMainStatus`の両方を読み、どちらかが失敗を示せば`fail`にする。
+`Result`が`success`でも`ExecMainStatus`が非ゼロなら、最後の起動は失敗している。
 
 MCP gateway の initialize、tools/list、target probe は Platform MCP の `normalized-protocol` observer が行う。doctor 自体には MCP の状態機械を持たせない。
 
@@ -125,6 +127,8 @@ Windows の `%UserProfile%\.wslconfig` を backup してから表示した key �
 VHD 設定は次に作る VHD の準備であり、既存 VHD の容量や稼働中 VM の資源上限を変更したことにはならない。
 VM 資源設定の反映に停止が必要な場合は全 distribution の作業を記録し、利用者が停止を選べる保守時に行う。
 反映後は Windows で `wsl --list --verbose` の登録名、Linux で実 RAM、CPU 数、swap を確認し、doctor の容量と資源結果を合わせて判断する。
+`instanceIdleTimeout=-1`と`autoMemoryReclaim=gradual`を維持し、即時の`dropCache`は使わない。
+既定userとrootのlingerは`workstation/wsl/module.nix`が宣言するが、systemd serviceだけでWSL instanceの生存を保証できるとは扱わず、keepalive serviceを恒久対策にしない。
 
 ```sh
 free -h
@@ -205,10 +209,14 @@ export と import の終了 status だけで backup と復旧の成功を断定�
 Orcaの描画停止だけでOMP sessionの停止を断定しない。既存terminalが応答する場合はterminalを閉じず、`wsl --shutdown`も実行しない。これは全distributionと既存sessionを終了し、実行中状態とprompt cacheを失わせる。
 
 WSL内部では定期的な`drop_caches`を実行しない。clean page cacheの一括破棄は、複数のAgentが必要ファイルを同時に再読込みしてVHDのI/Oキューを急増させるためである。メモリ安定化はAgent runtimeの`agents.slice`の上限、zram、kernelの既定のwatermarkとcompactionで行う。
+自動保守はOMP、Orca、Docker、既存PTYを終了せず、dirty pageの強制書出しやclean page cacheの一括破棄を行わない。
 
 新規 session だけが停止し、kernel journal に `Relay` の `Waiting for abnormally long accept` や `SessionLeader` の `accept4 failed 110` がある場合も、Relay を定期走査して kill しない。
 VHDX を置いた Windows drive の空き、WSL 内の空き、root の読み書き可否をそれぞれ確認し、稼働中 session を記録したうえで障害を切り分ける。
 WSL 内の空きだけでは VHDX を収容する Windows 側の空きは分からない。
+Relayを手動cleanupの候補にする場合も、kernel warningに記録されたPIDだけに限り、同じwarningの再処理とPID再利用を拒否する。
+`SessionLeader`、`Relay(<pid>)`、実行fileが`/init`以外、親がPID 1以外、起動から5分未満、warning以降に起動したprocessは対象にしない。
+Windows側のrequest file、scheduled task、debug shellを追加してcleanupを駆動しない。
 
 ```sh
 df -h /

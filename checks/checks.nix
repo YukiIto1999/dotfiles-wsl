@@ -23,7 +23,6 @@ let
     "actionlint"
     "deadnix"
     "development-tool-ownership"
-    "docs-constraint-coverage"
     "docs-links"
     "docs-path-labels"
     "docs-reader"

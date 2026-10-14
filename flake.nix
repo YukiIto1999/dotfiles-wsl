@@ -288,7 +288,6 @@
         # 変更で再buildする静的検査を先に始めるため評価の重いunitsへの配置は不採用
         "actionlint"
         "deadnix"
-        "docs-constraint-coverage"
         "docs-links"
         "docs-path-labels"
         "docs-reader"

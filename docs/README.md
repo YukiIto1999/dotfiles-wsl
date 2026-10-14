@@ -38,13 +38,3 @@
 
 - [ツール構成](reference/tooling.md)では、導入済みCLI、Agent、Skill、Capability、MCP、serviceの正本が分かる。
 - [変更箇所](reference/change-map.md)では、変更目的ごとの正本と適用方法が分かる。
-- [機械検証に固定した制約](reference/verified-constraints.md)では、どの制約が build で守られ、どれが守られていないかが分かる。
-
-## 決定 — `adr/`
-
-構造に影響する判断の経緯を確かめたい人が、判断を見直すときに読む。
-
-構造に影響する現在有効な判断を、`docs/adr/`へ一件ずつ置く。
-ファイル名は4桁の連番と英語kebabのslugにする。
-Status、Context、Decision、Consequencesで現在の契約、比較した候補、採らない理由を示す。
-判断を置き換えた場合は、過去の記録を`work/`かGit履歴へ残し、追跡文書の本文と参照を新しい判断へ揃える。

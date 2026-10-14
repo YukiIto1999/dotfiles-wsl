@@ -2,7 +2,6 @@
   pkgs,
   self,
   pluginSources,
-  allCheckNames,
   ...
 }:
 
@@ -21,46 +20,6 @@
     fi
     touch $out
   '';
-
-  # 固定した制約の一覧が実際の check 集合と一致する
-  docs-constraint-coverage =
-    pkgs.runCommandLocal "check-docs-constraint-coverage"
-      {
-        checkNames = allCheckNames;
-      }
-      ''
-        set -euo pipefail
-        list=${self}/docs/reference/verified-constraints.md
-
-        # 文書のどこかに名前があれば通る形だと、制約行と対応していなくても
-        # 緑になる。表の最終列だけを対応表として読む
-        awk -F '|' '/^\|/ { print $(NF - 1) }' "$list" \
-          | grep -o '`[a-z][a-z0-9-]*`' | tr -d '`' | sort -u > documented
-
-        undocumented=""
-        for name in $checkNames; do
-          grep -qFx "$name" documented || undocumented="$undocumented $name"
-        done
-        if [ -n "$undocumented" ]; then
-          echo "checks missing from the verified constraint list:$undocumented" >&2
-          exit 1
-        fi
-
-        stale=""
-        for name in $(awk -F '|' '/^\|/ { print $(NF - 1) }' "$list" \
-          | grep -o '`[a-z][a-z0-9-]*`' | tr -d '`' | sort -u); do
-          case " $checkNames " in
-            *" $name "*) ;;
-            *) stale="$stale $name" ;;
-          esac
-        done
-        if [ -n "$stale" ]; then
-          echo "verified constraint list names a check that does not exist:$stale" >&2
-          exit 1
-        fi
-
-        touch $out
-      '';
 
   # 文書の相互参照。移動と参照切れを build で落とす
   docs-links = pkgs.testers.lycheeLinkCheck {

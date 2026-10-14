@@ -28,6 +28,14 @@ scanner の upstream license は [LGPL version 3](https://github.com/SonarSource
 運用条件は [公式 SonarScanner CLI](https://docs.sonarsource.com/sonarqube-server/analyzing-source-code/scanners/sonarscanner) を参照する。
 Maven、Gradle、.NET project は各 upstream build-specific scanner と project-owned 設定を使い、この CLI wrapper で置き換えない。
 
+## 採用の継続条件
+
+upstreamの対応version、license、公式MCPの取得契約、credential注入、解析入力の対応条件が変わった場合は、Capability ownerが採用条件を再評価する。
+常駐資源は宣言上限だけで可否を決めず、実際の解析負荷と同時利用下のRAM・CPUを測り、この環境の運用条件との適合を判断する。
+目的に必要な証拠を取得できない状態、保守不能な配布やlicenseの条件、運用資源との不適合が続く場合は、ownerが代替と撤退を判断する。
+SHAの相違、一時的な障害、Skillへの接続不足を撤退条件へ読み替えず、配備や呼出し側の不備を先に修正する。
+撤退する場合は、ownerがDB、解析履歴、credential、Skillとcallerの導線の扱いを決め、明示的な判断なしにvolumeを削除しない。
+
 ## Runtime と credential
 
 server は `127.0.0.1:9000`、DB は共通 backend network 内だけに配置する。

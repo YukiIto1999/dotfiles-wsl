@@ -84,6 +84,8 @@ let
   );
 in
 {
+  imports = [ ./gateway/module.nix ];
+
   options.dotfiles.platform.mcp = {
     enabledProviders = lib.mkOption {
       type = lib.types.listOf lib.types.str;

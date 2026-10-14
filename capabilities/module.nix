@@ -93,6 +93,19 @@ let
   ) enabledSkills;
 in
 {
+  imports = [
+    ./browser-automation/module.nix
+    ./browser-diagnostics/module.nix
+    ./browser-runtime/module.nix
+    ./code-quality/module.nix
+    ./github-resources/module.nix
+    ./heap-diagnostics/module.nix
+    ./library-documentation/module.nix
+    ./project-memory/module.nix
+    ./repository-search/module.nix
+    ./security-assessment/module.nix
+  ];
+
   options.dotfiles.capabilities = {
     registry = lib.mkOption {
       type = lib.types.attrsOf (

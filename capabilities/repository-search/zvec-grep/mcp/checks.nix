@@ -1,165 +1,170 @@
 {
-  hostConfig,
-  lib,
-  pkgs,
-  ...
-}:
-
-let
-  port = 8784;
-  zvecGrep = hostConfig.dotfiles.toolchain.packages.zvec-grep;
-  frontPackage = pkgs.callPackage ./package.nix {
-    inherit port zvecGrep;
-  };
-  target = hostConfig.dotfiles.platform.mcp.targets.zvec-grep;
-  front = hostConfig.dotfiles.platform.mcp.fronts.zvec-grep;
-  service = hostConfig.systemd.services.${front.service};
-  endpoint = "http://127.0.0.1:${toString port}/mcp";
-  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
-  staleLockPath = "${hostConfig.dotfiles.workstation.homeDir}/.zvec-grep/daemon/instance.lock";
-  staleLockRule = hostConfig.systemd.tmpfiles.settings."zvec-grep".${staleLockPath}."r!" or null;
-in
-{
-  zvec-grep-front =
-    assert target.provider == "zvec-grep";
-    assert target.executable == lib.getExe frontPackage;
-    assert target.serverTransport == "streamable-http";
-    assert target.serverLifecycle == "service";
-    assert target.port == port;
-    assert target.needsNetwork == false;
-    assert target.waitUnits == [ ];
-    assert front.url == endpoint;
-    assert service.serviceConfig.ExecStart == lib.getExe frontPackage;
-    assert homeConfig.home.sessionVariables.ZVEC_GREP_MODE == "auto";
-    assert homeConfig.home.sessionVariables.ZVEC_GREP_SERVER_URL == endpoint;
-    assert homeConfig.home.sessionVariables.ZVEC_GREP_MODEL_CACHE == "${frontPackage.modelCache}";
-    assert
-      staleLockRule == {
-        age = "-";
-        argument = "";
-        group = "-";
-        mode = "-";
-        type = "r!";
-        user = "-";
-      };
-    pkgs.runCommandLocal "check-zvec-grep-front"
+  configuration = [
+    (
       {
-        nativeBuildInputs = with pkgs; [
-          coreutils
-          curl
-          gawk
-          gnugrep
-          gnused
-          jq
-          systemd
-        ];
+        hostConfig,
+        lib,
+        pkgs,
+        ...
+      }:
+      let
+        port = 8784;
+        zvecGrep = hostConfig.dotfiles.toolchain.packages.zvec-grep;
+        frontPackage = pkgs.callPackage ./package.nix {
+          inherit port zvecGrep;
+        };
+        target = hostConfig.dotfiles.platform.mcp.targets.zvec-grep;
+        front = hostConfig.dotfiles.platform.mcp.fronts.zvec-grep;
+        service = hostConfig.systemd.services.${front.service};
+        endpoint = "http://127.0.0.1:${toString port}/mcp";
+        homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
+        staleLockPath = "${hostConfig.dotfiles.workstation.homeDir}/.zvec-grep/daemon/instance.lock";
+        staleLockRule = hostConfig.systemd.tmpfiles.settings."zvec-grep".${staleLockPath}."r!" or null;
+      in
+      {
+        zvec-grep-front =
+          assert target.provider == "zvec-grep";
+          assert target.executable == lib.getExe frontPackage;
+          assert target.serverTransport == "streamable-http";
+          assert target.serverLifecycle == "service";
+          assert target.port == port;
+          assert target.needsNetwork == false;
+          assert target.waitUnits == [ ];
+          assert front.url == endpoint;
+          assert service.serviceConfig.ExecStart == lib.getExe frontPackage;
+          assert homeConfig.home.sessionVariables.ZVEC_GREP_MODE == "auto";
+          assert homeConfig.home.sessionVariables.ZVEC_GREP_SERVER_URL == endpoint;
+          assert homeConfig.home.sessionVariables.ZVEC_GREP_MODEL_CACHE == "${frontPackage.modelCache}";
+          assert
+            staleLockRule == {
+              age = "-";
+              argument = "";
+              group = "-";
+              mode = "-";
+              type = "r!";
+              user = "-";
+            };
+          pkgs.runCommandLocal "check-zvec-grep-front"
+            {
+              nativeBuildInputs = with pkgs; [
+                coreutils
+                curl
+                gawk
+                gnugrep
+                gnused
+                jq
+                systemd
+              ];
+            }
+            ''
+              set -euo pipefail
+
+              grep -Fq ${lib.escapeShellArg endpoint} ${hostConfig.dotfiles.platform.mcp.gateway.source}
+
+              test_root=$TMPDIR/tmpfiles-root
+              mkdir -p "$test_root$(dirname ${lib.escapeShellArg staleLockPath})"
+              printf '{"pid":1}\n' > "$test_root${staleLockPath}"
+              printf 'r! %s - - - - -\n' ${lib.escapeShellArg staleLockPath} > zvec-grep.conf
+              systemd-tmpfiles --remove --root="$test_root" - < zvec-grep.conf
+              test -e "$test_root${staleLockPath}"
+              systemd-tmpfiles --remove --boot --root="$test_root" - < zvec-grep.conf
+              test ! -e "$test_root${staleLockPath}"
+
+              export HOME=$TMPDIR/home
+              mkdir -p "$HOME"
+              ${lib.getExe frontPackage} >server.log 2>&1 &
+              server_pid=$!
+              trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+
+              ready=false
+              for _ in $(seq 1 100); do
+                if curl --silent --output /dev/null --max-time 1 ${lib.escapeShellArg endpoint}; then
+                  ready=true
+                  break
+                fi
+                sleep 0.1
+              done
+              if [ "$ready" != true ]; then
+                cat server.log >&2
+                exit 1
+              fi
+
+              jq -cn '{
+                jsonrpc:"2.0",
+                id:1,
+                method:"initialize",
+                params:{
+                  protocolVersion:"2025-06-18",
+                  capabilities:{},
+                  clientInfo:{name:"zvec-grep-nix-check",version:"1"}
+                }
+              }' >initialize.request
+              curl --silent --show-error --fail-with-body --max-time 5 \
+                --request POST \
+                --dump-header initialize.headers \
+                --output initialize.body \
+                --header 'content-type: application/json' \
+                --header 'accept: application/json, text/event-stream' \
+                --data-binary @initialize.request \
+                ${lib.escapeShellArg endpoint}
+
+              session_id=$(awk '
+                tolower($1) == "mcp-session-id:" {gsub("\\r", "", $2); print $2}
+              ' initialize.headers)
+              test -n "$session_id"
+
+              jq -cn '{jsonrpc:"2.0",method:"notifications/initialized",params:{}}' >initialized.request
+              test "$(curl --silent --show-error --fail-with-body --max-time 5 \
+                --request POST \
+                --output initialized.body \
+                --write-out '%{http_code}' \
+                --header 'content-type: application/json' \
+                --header 'accept: application/json, text/event-stream' \
+                --header "mcp-session-id: $session_id" \
+                --header 'MCP-Protocol-Version: 2025-06-18' \
+                --data-binary @initialized.request \
+                ${lib.escapeShellArg endpoint})" = 202
+
+              jq -cn '{jsonrpc:"2.0",id:2,method:"tools/list",params:{}}' >tools.request
+              curl --silent --show-error --fail-with-body --max-time 5 \
+                --request POST \
+                --dump-header tools.headers \
+                --output tools.body \
+                --header 'content-type: application/json' \
+                --header 'accept: application/json, text/event-stream' \
+                --header "mcp-session-id: $session_id" \
+                --header 'MCP-Protocol-Version: 2025-06-18' \
+                --data-binary @tools.request \
+                ${lib.escapeShellArg endpoint}
+
+              if grep -qi '^content-type: application/json' tools.headers; then
+                cp tools.body tools.json
+              else
+                sed -n 's/^data: //p' tools.body | jq -c 'select(.id == 2)' >tools.json
+              fi
+              jq -e '[.result.tools[].name] == ["zvec_grep_search"]' tools.json >/dev/null
+
+              # build sandbox に network は無く HOME も空なので、index と query の成功は
+              # front と CLI が download せずに固定 model を読めることを示す
+              workspace=$TMPDIR/workspace
+              mkdir -p "$workspace"
+              printf '%s\n' 'export function parseDuration(text) { return Number.parseInt(text, 10) * 1000; }' > "$workspace/duration.js"
+              printf '%s\n' 'def render_markdown_table(rows): return "|".join(rows)' > "$workspace/table.py"
+              ZVEC_GREP_MODE=server ZVEC_GREP_SERVER_URL=${lib.escapeShellArg endpoint} \
+                ${lib.getExe zvecGrep} index "$workspace"
+              (
+                cd "$workspace"
+                ZVEC_GREP_MODEL_CACHE=${lib.escapeShellArg homeConfig.home.sessionVariables.ZVEC_GREP_MODEL_CACHE} \
+                  ${lib.getExe zvecGrep} query --mode direct --vector 'convert a time string to milliseconds' --limit 1
+              ) > direct-query.out
+              grep -Fq 'duration.js' direct-query.out
+
+              kill "$server_pid"
+              wait "$server_pid" || true
+              trap - EXIT
+              touch $out
+            '';
       }
-      ''
-        set -euo pipefail
-
-        grep -Fq ${lib.escapeShellArg endpoint} ${hostConfig.dotfiles.platform.mcp.gateway.source}
-
-        test_root=$TMPDIR/tmpfiles-root
-        mkdir -p "$test_root$(dirname ${lib.escapeShellArg staleLockPath})"
-        printf '{"pid":1}\n' > "$test_root${staleLockPath}"
-        printf 'r! %s - - - - -\n' ${lib.escapeShellArg staleLockPath} > zvec-grep.conf
-        systemd-tmpfiles --remove --root="$test_root" - < zvec-grep.conf
-        test -e "$test_root${staleLockPath}"
-        systemd-tmpfiles --remove --boot --root="$test_root" - < zvec-grep.conf
-        test ! -e "$test_root${staleLockPath}"
-
-        export HOME=$TMPDIR/home
-        mkdir -p "$HOME"
-        ${lib.getExe frontPackage} >server.log 2>&1 &
-        server_pid=$!
-        trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
-
-        ready=false
-        for _ in $(seq 1 100); do
-          if curl --silent --output /dev/null --max-time 1 ${lib.escapeShellArg endpoint}; then
-            ready=true
-            break
-          fi
-          sleep 0.1
-        done
-        if [ "$ready" != true ]; then
-          cat server.log >&2
-          exit 1
-        fi
-
-        jq -cn '{
-          jsonrpc:"2.0",
-          id:1,
-          method:"initialize",
-          params:{
-            protocolVersion:"2025-06-18",
-            capabilities:{},
-            clientInfo:{name:"zvec-grep-nix-check",version:"1"}
-          }
-        }' >initialize.request
-        curl --silent --show-error --fail-with-body --max-time 5 \
-          --request POST \
-          --dump-header initialize.headers \
-          --output initialize.body \
-          --header 'content-type: application/json' \
-          --header 'accept: application/json, text/event-stream' \
-          --data-binary @initialize.request \
-          ${lib.escapeShellArg endpoint}
-
-        session_id=$(awk '
-          tolower($1) == "mcp-session-id:" {gsub("\\r", "", $2); print $2}
-        ' initialize.headers)
-        test -n "$session_id"
-
-        jq -cn '{jsonrpc:"2.0",method:"notifications/initialized",params:{}}' >initialized.request
-        test "$(curl --silent --show-error --fail-with-body --max-time 5 \
-          --request POST \
-          --output initialized.body \
-          --write-out '%{http_code}' \
-          --header 'content-type: application/json' \
-          --header 'accept: application/json, text/event-stream' \
-          --header "mcp-session-id: $session_id" \
-          --header 'MCP-Protocol-Version: 2025-06-18' \
-          --data-binary @initialized.request \
-          ${lib.escapeShellArg endpoint})" = 202
-
-        jq -cn '{jsonrpc:"2.0",id:2,method:"tools/list",params:{}}' >tools.request
-        curl --silent --show-error --fail-with-body --max-time 5 \
-          --request POST \
-          --dump-header tools.headers \
-          --output tools.body \
-          --header 'content-type: application/json' \
-          --header 'accept: application/json, text/event-stream' \
-          --header "mcp-session-id: $session_id" \
-          --header 'MCP-Protocol-Version: 2025-06-18' \
-          --data-binary @tools.request \
-          ${lib.escapeShellArg endpoint}
-
-        if grep -qi '^content-type: application/json' tools.headers; then
-          cp tools.body tools.json
-        else
-          sed -n 's/^data: //p' tools.body | jq -c 'select(.id == 2)' >tools.json
-        fi
-        jq -e '[.result.tools[].name] == ["zvec_grep_search"]' tools.json >/dev/null
-
-        # build sandbox に network は無く HOME も空なので、index と query の成功は
-        # front と CLI が download せずに固定 model を読めることを示す
-        workspace=$TMPDIR/workspace
-        mkdir -p "$workspace"
-        printf '%s\n' 'export function parseDuration(text) { return Number.parseInt(text, 10) * 1000; }' > "$workspace/duration.js"
-        printf '%s\n' 'def render_markdown_table(rows): return "|".join(rows)' > "$workspace/table.py"
-        ZVEC_GREP_MODE=server ZVEC_GREP_SERVER_URL=${lib.escapeShellArg endpoint} \
-          ${lib.getExe zvecGrep} index "$workspace"
-        (
-          cd "$workspace"
-          ZVEC_GREP_MODEL_CACHE=${lib.escapeShellArg homeConfig.home.sessionVariables.ZVEC_GREP_MODEL_CACHE} \
-            ${lib.getExe zvecGrep} query --mode direct --vector 'convert a time string to milliseconds' --limit 1
-        ) > direct-query.out
-        grep -Fq 'duration.js' direct-query.out
-
-        kill "$server_pid"
-        wait "$server_pid" || true
-        trap - EXIT
-        touch $out
-      '';
+    )
+  ];
 }

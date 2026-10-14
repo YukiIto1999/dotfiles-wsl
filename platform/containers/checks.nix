@@ -1,1360 +1,1366 @@
 {
-  helpers,
-  pkgs,
-  lib,
-  hostConfig,
-  hostOptions,
-  mkProbeSystem,
-  normalMachineModule,
-  variantConfig,
-  ...
-}:
+  configuration = [
+    (
+      {
+        helpers,
+        pkgs,
+        lib,
+        hostConfig,
+        hostOptions,
+        mkProbeSystem,
+        normalMachineModule,
+        variantConfig,
+        ...
+      }:
 
-let
-  inherit (helpers.execTokens) tokensOf;
-
-  imageDefinitions = lib.concatMap (
-    service:
-    lib.mapAttrsToList (name: image: {
-      inherit name image;
-    }) service.images
-  ) (builtins.attrValues hostConfig.dotfiles.platform.containers.services);
-
-  imageContractIsValid =
-    definitions:
-    definitions != [ ]
-    && lib.all (
-      entry:
       let
-        inherit (entry) image;
-      in
-      image.container == entry.name
-      && (
-        if image.kind == "upstream" then
-          image.repository != null
-          && image.digest != null
-          && lib.hasPrefix "sha256:" image.digest
-          && lib.hasPrefix "${image.repository}:" image.image
-          && lib.hasSuffix "@${image.digest}" image.image
-        else
-          image.imageFile != null && image.repository == null && image.digest == null
-      )
-    ) definitions;
+        inherit (helpers.execTokens) tokensOf;
 
-  execRosterIsValid =
-    scripts: containerNames:
-    scripts != [ ]
-    && containerNames != [ ]
-    && builtins.length scripts == 3 * builtins.length containerNames;
+        imageDefinitions = lib.concatMap (
+          service:
+          lib.mapAttrsToList (name: image: {
+            inherit name image;
+          }) service.images
+        ) (builtins.attrValues hostConfig.dotfiles.platform.containers.services);
 
-  upstreamImages = map (entry: entry.image.image) (
-    builtins.filter (entry: entry.image.kind == "upstream") imageDefinitions
-  );
+        imageContractIsValid =
+          definitions:
+          definitions != [ ]
+          && lib.all (
+            entry:
+            let
+              inherit (entry) image;
+            in
+            image.container == entry.name
+            && (
+              if image.kind == "upstream" then
+                image.repository != null
+                && image.digest != null
+                && lib.hasPrefix "sha256:" image.digest
+                && lib.hasPrefix "${image.repository}:" image.image
+                && lib.hasSuffix "@${image.digest}" image.image
+              else
+                image.imageFile != null && image.repository == null && image.digest == null
+            )
+          ) definitions;
 
-  # prune から外すための tag。上流 tag と別 namespace にして他 project と競合させない
-  pinnedReference = image: "dotfiles-pinned/${lib.head (lib.splitString "@" image)}";
+        execRosterIsValid =
+          scripts: containerNames:
+          scripts != [ ]
+          && containerNames != [ ]
+          && builtins.length scripts == 3 * builtins.length containerNames;
 
-  systemUnits = hostConfig.environment.etc."systemd/system".source;
-
-  fakeDocker = pkgs.writeShellApplication {
-    name = "docker";
-    text = builtins.readFile ./fixtures/fake-docker.sh;
-  };
-  fakeSystemctl = pkgs.writeShellApplication {
-    name = "systemctl";
-    text = builtins.readFile ./fixtures/fake-systemctl.sh;
-  };
-
-  observationTimeoutSeconds = 10;
-  restartWarningCount = 5;
-  restartFailureCount = 20;
-
-  expectedBuildArtifactGc =
-    let
-      name = "docker-build-artifact-gc";
-      serviceUnit = "${name}.service";
-      timerUnit = "${name}.timer";
-    in
-    {
-      inherit name serviceUnit timerUnit;
-      daemonGc = {
-        enabled = true;
-        policy = [
-          {
-            keepDuration = "1440h";
-            maxUsedSpace = "30GB";
-            reservedSpace = "10GB";
-          }
-          {
-            maxUsedSpace = "30GB";
-            reservedSpace = "10GB";
-          }
-          {
-            all = true;
-            maxUsedSpace = "100GB";
-            reservedSpace = "10GB";
-          }
-        ];
-      };
-      reclaimProgram = "docker-reclaim-stopped-testcontainers";
-      pruneTokens = [
-        [
-          (lib.getExe pkgs.docker)
-          "image"
-          "prune"
-          "--force"
-        ]
-        [
-          (lib.getExe pkgs.docker)
-          "buildx"
-          "prune"
-          "--force"
-          "--all"
-          "--max-used-space"
-          "100GB"
-          "--reserved-space"
-          "10GB"
-        ]
-      ];
-      timerConfig = {
-        OnCalendar = "*-*-* 00/6:00:00";
-        Persistent = true;
-        Unit = serviceUnit;
-      };
-      observation = {
-        kind = "systemd-timer";
-        checkId = "maintenance/${timerUnit}";
-        resourceKey = null;
-        timeoutSeconds = observationTimeoutSeconds;
-        failureMessage = "${timerUnit} or its service is not operational";
-        timer = timerUnit;
-        service = serviceUnit;
-        unitFileStates = [
-          "enabled"
-          "enabled-runtime"
-        ];
-        activeStates = [ "active" ];
-        serviceResults = [ "success" ];
-      };
-    };
-
-  # 回収の中身は reclaim の振る舞いの check の担当のため store path の転記での照合は不可
-  isReclaimCommand =
-    tokens:
-    builtins.length tokens == 1
-    && lib.hasSuffix "/bin/${expectedBuildArtifactGc.reclaimProgram}" (builtins.head tokens);
-  gcCommandsMatch =
-    execStartTokens:
-    execStartTokens != [ ]
-    && isReclaimCommand (builtins.head execStartTokens)
-    && builtins.tail execStartTokens == expectedBuildArtifactGc.pruneTokens;
-
-  selectContainerObservations = lib.filterAttrs (name: _: lib.hasPrefix "containers/" name);
-  containerObservations = selectContainerObservations hostConfig.dotfiles.health.observations;
-  sampleApplication = builtins.head (
-    builtins.attrNames hostConfig.dotfiles.platform.containers.services
-  );
-  sampleService = hostConfig.dotfiles.platform.containers.services.${sampleApplication};
-  sampleUnit = builtins.head sampleService.units;
-  sampleSystemdService = lib.removeSuffix ".service" sampleUnit;
-  sampleContainerNames = map (image: image.container) (builtins.attrValues sampleService.images);
-  sampleContainer = builtins.head sampleContainerNames;
-  sampleObservationKeys = {
-    service = "containers/service/${sampleSystemdService}";
-    serviceRestart = "containers/service-restart/${sampleSystemdService}";
-    image = "containers/image/${sampleContainer}";
-    health = "containers/health/${sampleApplication}";
-  };
-  containerRestartObservationKeys = builtins.filter (
-    name: lib.hasPrefix "containers/container-restart/" name
-  ) (builtins.attrNames containerObservations);
-
-  expectedContainerObservationsFor =
-    services:
-    let
-      serviceEntries = lib.mapAttrsToList (application: service: {
-        inherit application service;
-      }) services;
-      imageEntries = lib.concatMap (
-        entry: lib.mapAttrsToList (_: image: { inherit image; }) entry.service.images
-      ) serviceEntries;
-      common = checkId: failureMessage: {
-        inherit checkId failureMessage;
-        resourceKey = null;
-        timeoutSeconds = observationTimeoutSeconds;
-      };
-      mkEntry = name: value: { inherit name value; };
-      serviceObservations = lib.concatMap (
-        entry:
-        map (
-          unit:
-          mkEntry "containers/service/${lib.removeSuffix ".service" unit}" (
-            common "service/${unit}" "${unit} is not operational"
-            // {
-              kind = "systemd-service";
-              inherit unit;
-              loadStates = [ "loaded" ];
-              activeStates = [ "active" ];
-              results = [ "success" ];
-            }
-          )
-        ) entry.service.units
-      ) serviceEntries;
-      serviceRestartObservations = lib.concatMap (
-        entry:
-        map (
-          unit:
-          mkEntry "containers/service-restart/${lib.removeSuffix ".service" unit}" (
-            common "restart/service/${unit}" "could not observe restart count for ${unit}"
-            // {
-              kind = "restart-counter";
-              sourceKind = "systemd-service";
-              target = unit;
-              warningAt = restartWarningCount;
-              failureAt = restartFailureCount;
-            }
-          )
-        ) entry.service.units
-      ) serviceEntries;
-      imageObservations = map (
-        entry:
-        let
-          inherit (entry.image) container image;
-        in
-        mkEntry "containers/image/${container}" (
-          common "container-image/${container}" "${container} is not running the declared image ${image}"
-          // {
-            kind = "container-image";
-            inherit container image;
-          }
-        )
-      ) imageEntries;
-      healthObservations = map (
-        entry:
-        let
-          inherit (entry) application service;
-          inherit (service) health;
-          url = "${service.endpoints.${health.endpoint}.url}${health.path}";
-        in
-        mkEntry "containers/health/${application}" {
-          checkId = "container-health/${application}";
-          resourceKey = null;
-          timeoutSeconds = health.timeout;
-          failureMessage = "${health.method} ${url} failed";
-          kind = "http-health";
-          inherit (health) method;
-          inherit url;
-        }
-      ) serviceEntries;
-      declaredContainers = map (entry: entry.image.container) imageEntries;
-    in
-    builtins.listToAttrs (
-      [
-        (mkEntry "containers/roster" (
-          common "container-roster" "container roster is empty"
-          // {
-            kind = "roster";
-            members = declaredContainers;
-            minimumCount = 1;
-            failureOnly = true;
-          }
-        ))
-        (mkEntry "containers/placement" (
-          common "container-placement" "could not observe container cgroup placement"
-          // {
-            kind = "normalized-protocol";
-            command = import ./impl/container-placement-package.nix {
-              inherit pkgs lib declaredContainers;
-            };
-            envelopeVersion = 1;
-            allowedOutcomeIds = [ "container-placement" ];
-            requiredOutcomeIds = [ "container-placement" ];
-            requiredResourceKeys = [ ];
-          }
-        ))
-        (mkEntry "containers/build-artifact-gc" expectedBuildArtifactGc.observation)
-      ]
-      ++ serviceObservations
-      ++ serviceRestartObservations
-      ++ imageObservations
-      ++ healthObservations
-    );
-
-  buildArtifactGcConfiguration = configuration: {
-    daemonSettings = configuration.virtualisation.docker.daemon.settings;
-    service = configuration.systemd.services.${expectedBuildArtifactGc.name} or null;
-    timer = configuration.systemd.timers.${expectedBuildArtifactGc.name} or null;
-  };
-
-  withBuildArtifactGcExecStart =
-    configuration: execStart:
-    configuration
-    // {
-      systemd = configuration.systemd // {
-        services = configuration.systemd.services // {
-          ${expectedBuildArtifactGc.name} =
-            configuration.systemd.services.${expectedBuildArtifactGc.name}
-            // {
-              serviceConfig = configuration.systemd.services.${expectedBuildArtifactGc.name}.serviceConfig // {
-                ExecStart = execStart;
-              };
-            };
-        };
-      };
-    };
-
-  containerContractMatches =
-    configuration: services: observations:
-    let
-      expected = expectedContainerObservationsFor services;
-      actual = selectContainerObservations observations;
-      gc = buildArtifactGcConfiguration configuration;
-      execStartTokens =
-        if gc.service == null then [ ] else map tokensOf gc.service.serviceConfig.ExecStart;
-    in
-    actual == expected
-    && lib.attrByPath [ "builder" "gc" ] null gc.daemonSettings == expectedBuildArtifactGc.daemonGc
-    && gc.service != null
-    && gcCommandsMatch execStartTokens
-    && gc.timer != null
-    && gc.timer.timerConfig == expectedBuildArtifactGc.timerConfig;
-
-  expectedContainerObservations = expectedContainerObservationsFor hostConfig.dotfiles.platform.containers.services;
-  containerObservationKeys = builtins.attrNames expectedContainerObservations;
-  containerObservationDefinitions = builtins.filter (
-    definition: lib.hasSuffix "/platform/containers/module.nix" (toString definition.file)
-  ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
-  containerDefinitionKeys = lib.unique (
-    lib.concatMap (definition: builtins.attrNames definition.value) containerObservationDefinitions
-  );
-  containerDefinitionKeysMatch = keys: keys == containerObservationKeys;
-  uniqueNonNull =
-    field: observations:
-    let
-      values = builtins.filter (value: value != null) (
-        map (observation: observation.${field}) (builtins.attrValues observations)
-      );
-    in
-    builtins.length values == builtins.length (lib.unique values);
-
-  removeObservation = name: builtins.removeAttrs containerObservations [ name ];
-  serviceRemovalMutation = removeObservation sampleObservationKeys.service;
-  serviceRestartRemovalMutation = removeObservation sampleObservationKeys.serviceRestart;
-  imageRemovalMutation = removeObservation sampleObservationKeys.image;
-  healthRemovalMutation = removeObservation sampleObservationKeys.health;
-  timerRemovalMutation = removeObservation "containers/build-artifact-gc";
-  rosterRemovalMutation = removeObservation "containers/roster";
-  placementRemovalMutation = removeObservation "containers/placement";
-  addStaleObservation =
-    source: name:
-    containerObservations
-    // {
-      ${name} = containerObservations.${source};
-    };
-  staleObservationMutations = [
-    (addStaleObservation sampleObservationKeys.service "containers/service/stale")
-    (addStaleObservation sampleObservationKeys.serviceRestart "containers/service-restart/stale")
-    (addStaleObservation sampleObservationKeys.serviceRestart "containers/container-restart/stale")
-    (addStaleObservation sampleObservationKeys.image "containers/image/stale")
-    (addStaleObservation sampleObservationKeys.health "containers/health/stale")
-    (addStaleObservation "containers/roster" "containers/stale-roster")
-    (addStaleObservation "containers/placement" "containers/stale-placement")
-    (addStaleObservation "containers/build-artifact-gc" "containers/stale-build-artifact-gc")
-  ];
-  daemonPolicyMutation = hostConfig // {
-    virtualisation = hostConfig.virtualisation // {
-      docker = hostConfig.virtualisation.docker // {
-        daemon = hostConfig.virtualisation.docker.daemon // {
-          settings = lib.recursiveUpdate hostConfig.virtualisation.docker.daemon.settings {
-            builder.gc.policy = [
-              {
-                keepDuration = "1439h";
-                maxUsedSpace = "30GB";
-                reservedSpace = "10GB";
-              }
-              {
-                maxUsedSpace = "30GB";
-                reservedSpace = "10GB";
-              }
-              {
-                all = true;
-                maxUsedSpace = "100GB";
-                reservedSpace = "10GB";
-              }
-            ];
-          };
-        };
-      };
-    };
-  };
-  hostGcExecStart = (buildArtifactGcConfiguration hostConfig).service.serviceConfig.ExecStart;
-  hostReclaimExec = builtins.head hostGcExecStart;
-  imagePruneExec = lib.escapeShellArgs (builtins.head expectedBuildArtifactGc.pruneTokens);
-  cachePruneExec = lib.escapeShellArgs (builtins.elemAt expectedBuildArtifactGc.pruneTokens 1);
-  imagePruneMutation = withBuildArtifactGcExecStart hostConfig [
-    hostReclaimExec
-    cachePruneExec
-  ];
-  cacheBudgetMutation = withBuildArtifactGcExecStart hostConfig [
-    hostReclaimExec
-    imagePruneExec
-    "${lib.getExe pkgs.docker} buildx prune --force --all --max-used-space 101GB --reserved-space 10GB"
-  ];
-  reclaimRemovalMutation = withBuildArtifactGcExecStart hostConfig [
-    imagePruneExec
-    cachePruneExec
-  ];
-  reclaimAfterPruneMutation = withBuildArtifactGcExecStart hostConfig [
-    imagePruneExec
-    cachePruneExec
-    hostReclaimExec
-  ];
-
-  foreignObservationDescriptionVariantConfig =
-    (mkProbeSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.health.observations."host/independent-container-observation" = {
-            kind = "roster";
-            members = [ "fixture" ];
-            minimumCount = 1;
-            failureOnly = false;
-            checkId = null;
-            resourceKey = null;
-            timeoutSeconds = observationTimeoutSeconds;
-            failureMessage = "independent foreign observation failed";
-          };
-          systemd.services.${sampleSystemdService}.description =
-            lib.mkForce "Descriptions must not select container observations";
-          systemd.services.${expectedBuildArtifactGc.name}.description =
-            lib.mkForce "Descriptions must not select the Docker build artifact GC observation";
-        }
-      )
-    ]).config;
-  foreignObservationDescriptionContainerObservations = selectContainerObservations foreignObservationDescriptionVariantConfig.dotfiles.health.observations;
-
-  fixtureRepository = "example.invalid/dotfiles-fixture";
-  fixtureDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
-  fixtureImage = "${fixtureRepository}:latest@${fixtureDigest}";
-  fixtureContainerModule =
-    { lib, ... }:
-    {
-      dotfiles.platform.containers = {
-        enabled = lib.mkForce (
-          lib.sort builtins.lessThan (hostConfig.dotfiles.platform.containers.enabled ++ [ "fixture" ])
+        upstreamImages = map (entry: entry.image.image) (
+          builtins.filter (entry: entry.image.kind == "upstream") imageDefinitions
         );
-        services.fixture = {
-          endpoints.http = {
-            protocol = "http";
-            address = "127.0.0.1";
-            port = 45678;
-            url = "http://127.0.0.1:45678";
-          };
-          units = [ "docker-fixture.service" ];
-          images.fixture = {
-            kind = "upstream";
-            container = "fixture";
-            image = fixtureImage;
-            repository = fixtureRepository;
-            digest = fixtureDigest;
-          };
-          health = {
-            endpoint = "http";
-            method = "GET";
-            path = "/health";
-            timeout = 5;
-          };
+
+        # prune から外すための tag。上流 tag と別 namespace にして他 project と競合させない
+        pinnedReference = image: "dotfiles-pinned/${lib.head (lib.splitString "@" image)}";
+
+        systemUnits = hostConfig.environment.etc."systemd/system".source;
+
+        fakeDocker = pkgs.writeShellApplication {
+          name = "docker";
+          text = builtins.readFile ./fixtures/fake-docker.sh;
         };
-      };
-      virtualisation.oci-containers.containers.fixture = {
-        image = fixtureImage;
-        pull = "never";
-        ports = [ "127.0.0.1:45678:45678" ];
-      };
-    };
-  extraContainerVariantConfig =
-    (mkProbeSystem [
-      normalMachineModule
-      fixtureContainerModule
-    ]).config;
-  extraContainerObservations = selectContainerObservations extraContainerVariantConfig.dotfiles.health.observations;
-
-  containerlessCapabilityIds = [
-    "browser-automation"
-    "browser-diagnostics"
-    "browser-runtime"
-    "github-resources"
-    "library-documentation"
-    "repository-search"
-  ];
-  containerlessVariantConfig =
-    (mkProbeSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.capabilities.enabled = lib.mkForce containerlessCapabilityIds;
-        }
-      )
-    ]).config;
-  runtimeOnlyVariantConfig =
-    (mkProbeSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.capabilities.enabled = lib.mkForce (
-            containerlessCapabilityIds ++ [ "security-assessment" ]
-          );
-        }
-      )
-    ]).config;
-  memoryOnlyCapabilityIds = containerlessCapabilityIds ++ [ "project-memory" ];
-  memoryOnlyVariantConfig =
-    (mkProbeSystem [
-      normalMachineModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.capabilities.enabled = lib.mkForce memoryOnlyCapabilityIds;
-        }
-      )
-    ]).config;
-  containerlessObservations = selectContainerObservations containerlessVariantConfig.dotfiles.health.observations;
-  disabledContainerTargets = [
-    "memory"
-  ];
-  disabledContainerServices = [
-    "docker-build-artifact-gc"
-    "docker-dotfiles-backends-network"
-    "docker-hindsight"
-  ];
-  disabledContainerTimers = [
-    "docker-build-artifact-gc"
-  ];
-  disabledContainerSecrets = [
-    "opencode/go_api_key"
-  ];
-  disabledContainerTemplates = [
-    "hindsight.env"
-  ];
-
-  removedContainerServices =
-    builtins.removeAttrs extraContainerVariantConfig.dotfiles.platform.containers.services
-      [
-        sampleApplication
-      ];
-  removedOciContainers = builtins.removeAttrs extraContainerVariantConfig.virtualisation.oci-containers.containers sampleContainerNames;
-  removedContainerVariantConfig =
-    (mkProbeSystem [
-      normalMachineModule
-      fixtureContainerModule
-      (
-        { lib, ... }:
-        {
-          dotfiles.platform.containers = {
-            enabled = lib.mkOverride 40 (builtins.attrNames removedContainerServices);
-            services = lib.mkOverride 40 removedContainerServices;
-          };
-          virtualisation.oci-containers.containers = lib.mkOverride 40 removedOciContainers;
-        }
-      )
-    ]).config;
-  removedContainerObservations = selectContainerObservations removedContainerVariantConfig.dotfiles.health.observations;
-  removedSampleObservationKeys =
-    map (unit: "containers/service/${lib.removeSuffix ".service" unit}") sampleService.units
-    ++ map (unit: "containers/service-restart/${lib.removeSuffix ".service" unit}") sampleService.units
-    ++ map (container: "containers/image/${container}") sampleContainerNames
-    ++ [ "containers/health/${sampleApplication}" ];
-in
-{
-  docker-build-artifact-gc-contract =
-    let
-      gc = buildArtifactGcConfiguration hostConfig;
-      actualDaemonGc = lib.attrByPath [ "builder" "gc" ] null gc.daemonSettings;
-      execStartTokens =
-        if gc.service == null then [ ] else map tokensOf gc.service.serviceConfig.ExecStart;
-      dependencyFields = [
-        "after"
-        "before"
-        "bindsTo"
-        "conflicts"
-        "joinsNamespaceOf"
-        "onFailure"
-        "onSuccess"
-        "partOf"
-        "propagatesReloadTo"
-        "reloadPropagatedFrom"
-        "requires"
-        "requisite"
-        "upholds"
-        "wants"
-      ];
-      gcDependents = lib.concatLists (
-        lib.mapAttrsToList (
-          name: service:
-          map (field: "${name}.${field}") (
-            builtins.filter (
-              field: lib.elem expectedBuildArtifactGc.serviceUnit (service.${field} or [ ])
-            ) dependencyFields
-          )
-        ) hostConfig.systemd.services
-      );
-    in
-    assert lib.assertMsg (
-      actualDaemonGc == expectedBuildArtifactGc.daemonGc
-    ) "Docker BuildKit GC policy changed: actual=${builtins.toJSON actualDaemonGc}";
-    assert lib.assertMsg (gc.service != null) "Docker build artifact GC service is missing";
-    assert lib.assertMsg (gc.service.after == [ "docker.service" ])
-      "Docker build artifact GC service must start after Docker: actual=${builtins.toJSON gc.service.after}";
-    assert lib.assertMsg (gc.service.wants == [ "docker.service" ])
-      "Docker build artifact GC service must use a soft Docker dependency: actual=${builtins.toJSON gc.service.wants}";
-    assert lib.assertMsg (
-      gc.service.requires == [ ] && gc.service.requiredBy == [ ]
-    ) "Docker build artifact GC failure must not propagate to Docker";
-    assert lib.assertMsg (gcDependents == [ ])
-      "system services must not depend on Docker build artifact GC: actual=${builtins.toJSON gcDependents}";
-    assert lib.assertMsg (
-      gc.service.serviceConfig.Type == "oneshot"
-    ) "Docker build artifact GC service must be oneshot";
-    assert lib.assertMsg (
-      gc.service.unitConfig.ConditionPathExists == "/var/run/docker.sock"
-    ) "Docker build artifact GC service must require the Docker socket";
-    assert lib.assertMsg (gcCommandsMatch execStartTokens)
-      "Docker build artifact GC commands changed: actual=${builtins.toJSON execStartTokens}";
-    assert lib.assertMsg (gc.timer != null) "Docker build artifact GC timer is missing";
-    assert lib.assertMsg (
-      gc.timer.wantedBy == [ "timers.target" ]
-    ) "Docker build artifact GC timer must be enabled: actual=${builtins.toJSON gc.timer.wantedBy}";
-    assert lib.assertMsg (
-      gc.timer.timerConfig == expectedBuildArtifactGc.timerConfig
-    ) "Docker build artifact GC timer must run persistently every six hours";
-    assert lib.assertMsg (containerContractMatches hostConfig
-      hostConfig.dotfiles.platform.containers.services
-      hostConfig.dotfiles.health.observations
-    ) "Docker build artifact GC settings and runtime observation must share one contract";
-    assert lib.assertMsg (
-      !(containerContractMatches daemonPolicyMutation hostConfig.dotfiles.platform.containers.services
-        containerObservations
-      )
-    ) "Docker BuildKit GC policy mutation escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches imagePruneMutation hostConfig.dotfiles.platform.containers.services
-        containerObservations
-      )
-    ) "Docker dangling image prune mutation escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches cacheBudgetMutation hostConfig.dotfiles.platform.containers.services
-        containerObservations
-      )
-    ) "Docker BuildKit cache budget mutation escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches reclaimRemovalMutation hostConfig.dotfiles.platform.containers.services
-        containerObservations
-      )
-    ) "stopped testcontainers reclaim removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches reclaimAfterPruneMutation
-        hostConfig.dotfiles.platform.containers.services
-        containerObservations
-      )
-    ) "stopped testcontainers reclaim after the image prune escaped the owner contract";
-    pkgs.runCommandLocal "check-docker-build-artifact-gc-contract"
-      {
-        nativeBuildInputs = [
-          pkgs.findutils
-          pkgs.gnugrep
-        ];
-      }
-      ''
-        set -euo pipefail
-
-        if grep -HnE '^(After|Before|BindsTo|Conflicts|JoinsNamespaceOf|OnFailure|OnSuccess|PartOf|PropagatesReloadTo|ReloadPropagatedFrom|Requires|Requisite|Upholds|Wants)=(.*[[:space:]])?docker-build-artifact-gc\.service([[:space:]]|$)' ${systemUnits}/*.service > service-dependencies; then
-          cat service-dependencies >&2
-          exit 1
-        fi
-
-        find ${systemUnits} -mindepth 2 -type l -lname '*docker-build-artifact-gc.service' -print > dependency-links
-        if [ -s dependency-links ]; then
-          cat dependency-links >&2
-          exit 1
-        fi
-
-        touch $out
-      '';
-
-  container-runtime-observation-contract =
-    assert lib.assertMsg (
-      containerRestartObservationKeys == [ ]
-    ) "Docker RestartCount observations must not duplicate systemd service restart observations";
-    assert lib.assertMsg (
-      containerObservations == expectedContainerObservations
-    ) "container runtime observation registry is incomplete";
-    assert lib.assertMsg (containerDefinitionKeysMatch containerDefinitionKeys)
-      "container observation definition keys must match the owner contract";
-    assert lib.assertMsg (
-      !(containerDefinitionKeysMatch (containerDefinitionKeys ++ [ "containers/stale-definition" ]))
-    ) "a stale container observation definition escaped the owner contract";
-    assert lib.assertMsg (uniqueNonNull "checkId" containerObservations)
-      "container runtime observation check IDs must be unique";
-    assert lib.assertMsg (uniqueNonNull "resourceKey" containerObservations)
-      "container runtime observation resource keys must be unique";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
-        serviceRemovalMutation
-      )
-    ) "container service observation removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
-        serviceRestartRemovalMutation
-      )
-    ) "container service restart observation removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
-        imageRemovalMutation
-      )
-    ) "container image observation removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
-        healthRemovalMutation
-      )
-    ) "container health observation removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
-        timerRemovalMutation
-      )
-    ) "Docker build artifact GC timer observation removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
-        rosterRemovalMutation
-      )
-    ) "container roster observation removal escaped the owner contract";
-    assert lib.assertMsg (
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
-        placementRemovalMutation
-      )
-    ) "container placement observation removal escaped the owner contract";
-    assert lib.assertMsg (lib.all (
-      observations:
-      !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services observations)
-    ) staleObservationMutations) "stale container runtime observations escaped the owner contract";
-    assert lib.assertMsg (
-      containerContractMatches foreignObservationDescriptionVariantConfig
-        foreignObservationDescriptionVariantConfig.dotfiles.platform.containers.services
-        foreignObservationDescriptionVariantConfig.dotfiles.health.observations
-      && foreignObservationDescriptionContainerObservations == expectedContainerObservations
-      && builtins.hasAttr "host/independent-container-observation" foreignObservationDescriptionVariantConfig.dotfiles.health.observations
-    ) "a foreign observation changed the containers runtime contract";
-    assert lib.assertMsg (
-      foreignObservationDescriptionContainerObservations == containerObservations
-    ) "service descriptions must not select container runtime observations";
-    assert lib.assertMsg (
-      containerContractMatches extraContainerVariantConfig
-        extraContainerVariantConfig.dotfiles.platform.containers.services
-        extraContainerVariantConfig.dotfiles.health.observations
-      && builtins.hasAttr "containers/image/fixture" extraContainerObservations
-      && builtins.hasAttr "containers/health/fixture" extraContainerObservations
-      && lib.elem "fixture" extraContainerObservations."containers/roster".members
-    ) "a new container service was not projected into runtime observations";
-    assert lib.assertMsg (
-      containerContractMatches removedContainerVariantConfig
-        removedContainerVariantConfig.dotfiles.platform.containers.services
-        removedContainerVariantConfig.dotfiles.health.observations
-      &&
-        removedContainerObservations
-        == expectedContainerObservationsFor removedContainerVariantConfig.dotfiles.platform.containers.services
-      && builtins.all (
-        name: !builtins.hasAttr name removedContainerObservations
-      ) removedSampleObservationKeys
-      && lib.all (
-        container: !lib.elem container removedContainerObservations."containers/roster".members
-      ) sampleContainerNames
-    ) "a removed container service remained in runtime observations";
-    pkgs.runCommandLocal "check-container-runtime-observation-contract" { } "touch $out";
-
-  container-backend-contract =
-    let
-      fixtures = [
-        (import ./fixtures/container-backend.nix { inherit lib; })
-        (import ./fixtures/container-backend-minimal.nix { inherit lib; })
-      ];
-      mkContainerBackend = import ./impl/container-backend.nix { inherit lib; };
-      actual = map (fixture: mkContainerBackend fixture.name fixture.args) fixtures;
-      expected = map (fixture: fixture.expected) fixtures;
-    in
-    assert lib.assertMsg (actual == expected) "container backend helper output changed";
-    pkgs.runCommandLocal "check-container-backend-contract" { } "touch $out";
-
-  container-application-registry =
-    let
-      enabled = hostConfig.dotfiles.platform.containers.enabled;
-      provided = builtins.attrNames hostConfig.dotfiles.platform.containers.services;
-      variantEnabled = variantConfig.dotfiles.platform.containers.enabled;
-      variantProvided = builtins.attrNames variantConfig.dotfiles.platform.containers.services;
-    in
-    assert enabled != [ ];
-    assert enabled == provided;
-    assert variantEnabled == variantProvided;
-    pkgs.runCommandLocal "check-container-application-registry" { } "touch $out";
-
-  container-capability-gating =
-    assert lib.all (entry: entry.assertion) memoryOnlyVariantConfig.assertions;
-    assert lib.all (entry: entry.assertion) containerlessVariantConfig.assertions;
-    assert lib.all (entry: entry.assertion) runtimeOnlyVariantConfig.assertions;
-    assert runtimeOnlyVariantConfig.virtualisation.docker.enable;
-    assert runtimeOnlyVariantConfig.dotfiles.platform.containers.enabled == [ ];
-    assert runtimeOnlyVariantConfig.dotfiles.platform.containers.services == { };
-    assert runtimeOnlyVariantConfig.virtualisation.oci-containers.containers == { };
-    assert
-      runtimeOnlyVariantConfig.dotfiles.platform.mcp.enabledProviders
-      == containerlessVariantConfig.dotfiles.platform.mcp.enabledProviders;
-    assert builtins.elem "docker"
-      runtimeOnlyVariantConfig.users.users.${runtimeOnlyVariantConfig.dotfiles.workstation.username}.extraGroups;
-    assert builtins.hasAttr "syncImages" runtimeOnlyVariantConfig.dotfiles.platform.cli.commands;
-    assert builtins.hasAttr "opencode/go_api_key" runtimeOnlyVariantConfig.sops.secrets;
-    assert !builtins.hasAttr "hindsight.env" runtimeOnlyVariantConfig.sops.templates;
-    assert !builtins.hasAttr "containers/roster" runtimeOnlyVariantConfig.dotfiles.health.observations;
-    assert memoryOnlyVariantConfig.dotfiles.capabilities.enabled == memoryOnlyCapabilityIds;
-    assert memoryOnlyVariantConfig.dotfiles.platform.containers.enabled == [ "hindsight" ];
-    assert
-      builtins.attrNames memoryOnlyVariantConfig.dotfiles.platform.containers.services == [ "hindsight" ];
-    assert
-      builtins.attrNames memoryOnlyVariantConfig.virtualisation.oci-containers.containers
-      == [ "hindsight" ];
-    assert memoryOnlyVariantConfig.virtualisation.docker.enable;
-    assert builtins.hasAttr "memory" memoryOnlyVariantConfig.dotfiles.platform.mcp.targets;
-    assert containerlessVariantConfig.dotfiles.capabilities.enabled == containerlessCapabilityIds;
-    assert containerlessVariantConfig.dotfiles.platform.containers.enabled == [ ];
-    assert containerlessVariantConfig.dotfiles.platform.containers.services == { };
-    assert containerlessVariantConfig.virtualisation.oci-containers.containers == { };
-    assert !containerlessVariantConfig.virtualisation.docker.enable;
-    assert
-      !builtins.elem "docker"
-        containerlessVariantConfig.users.users.${containerlessVariantConfig.dotfiles.workstation.username}.extraGroups;
-    assert !builtins.hasAttr "syncImages" containerlessVariantConfig.dotfiles.platform.cli.commands;
-    assert !builtins.hasAttr "imageDigest" containerlessVariantConfig.dotfiles.platform.cli.commands;
-    assert containerlessObservations == { };
-    assert lib.all (
-      name: !builtins.hasAttr name containerlessVariantConfig.dotfiles.platform.mcp.targets
-    ) disabledContainerTargets;
-    assert lib.all (
-      name: !builtins.hasAttr name containerlessVariantConfig.systemd.services
-    ) disabledContainerServices;
-    assert lib.all (
-      name: !builtins.hasAttr name containerlessVariantConfig.systemd.timers
-    ) disabledContainerTimers;
-    assert lib.all (
-      name: !builtins.hasAttr name containerlessVariantConfig.sops.secrets
-    ) disabledContainerSecrets;
-    assert lib.all (
-      name: !builtins.hasAttr name containerlessVariantConfig.sops.templates
-    ) disabledContainerTemplates;
-    pkgs.runCommandLocal "check-container-capability-gating" { } "touch $out";
-
-  # image は digest で固定し、参照が repository と digest に整合すること。
-  # 宣言を写した期待値は宣言と写しの一致しか見ない
-  oci-image-contract =
-    assert imageDefinitions != [ ];
-    assert imageContractIsValid imageDefinitions;
-    assert !(imageContractIsValid [ ]);
-    assert hostConfig.virtualisation.oci-containers.backend == "docker";
-    assert hostConfig.virtualisation.docker.enable;
-    # pull = never なので、宣言した image が事前に無いと container が起動しない
-    assert lib.all (c: c.pull == "never") (
-      builtins.attrValues hostConfig.virtualisation.oci-containers.containers
-    );
-    pkgs.runCommandLocal "check-oci-image-contract" { } "touch $out";
-
-  # 宣言済み image が docker image prune の dangling 判定に落ちないことは、
-  # 宣言を読んでも分からない。docker 境界を差し替えて sync の実挙動で確かめる
-  oci-image-sync-behavior =
-    assert upstreamImages != [ ];
-    pkgs.runCommandLocal "check-oci-image-sync-behavior"
-      {
-        nativeBuildInputs = [
-          hostConfig.dotfiles.platform.cli.commands.syncImages
-          pkgs.coreutils
-          pkgs.gnused
-        ];
-      }
-      ''
-        set -euo pipefail
-
-        fixture=$PWD/fixture
-        mkdir -p "$fixture/store"
-        export FAKE_STORE=$fixture/store
-
-        printf '#!%s\n' ${pkgs.runtimeShell} > "$fixture/docker"
-        cat >> "$fixture/docker" <<'FAKE'
-        set -euo pipefail
-        key() { printf '%s' "$1" | tr '/:@' '___'; }
-        printf '%s\n' "$*" >> "$FAKE_LOG"
-        case "$1 $2" in
-          'image inspect')
-            entry=$FAKE_STORE/$(key "$5")
-            [ -f "$entry" ] || exit 1
-            cat "$entry"
-            ;;
-          'pull --quiet')
-            printf 'sha256:%s\n' "$(printf '%s' "$3" | sha256sum | cut -c1-64)" \
-              > "$FAKE_STORE/$(key "$3")"
-            ;;
-          tag*)
-            cp "$FAKE_STORE/$(key "$2")" "$FAKE_STORE/$(key "$3")"
-            ;;
-          *) exit 2 ;;
-        esac
-        FAKE
-        chmod +x "$fixture/docker"
-
-        sed -e "s|${lib.escapeRegex (lib.getExe pkgs.docker)}|$fixture/docker|g" \
-          "$(type -P dotfiles-sync-images)" > "$fixture/dotfiles-sync-images"
-        chmod +x "$fixture/dotfiles-sync-images"
-
-        expect_line() {
-          grep -Fxq "$2" "$1" && return 0
-          echo "$1 does not contain: $2" >&2
-          exit 1
-        }
-
-        export FAKE_LOG=$fixture/empty-status.log
-        if "$fixture/dotfiles-sync-images" --status > empty-status.out; then
-          echo "status reported a synced state with no image present" >&2
-          exit 1
-        fi
-        ${lib.concatMapStrings (image: ''
-          expect_line empty-status.out ${lib.escapeShellArg "MISSING: ${image}"}
-        '') upstreamImages}
-
-        export FAKE_LOG=$fixture/pull.log
-        "$fixture/dotfiles-sync-images" > pull.out
-        ${lib.concatMapStrings (image: ''
-          expect_line "$fixture/pull.log" ${lib.escapeShellArg "pull --quiet ${image}"}
-          expect_line "$fixture/pull.log" ${lib.escapeShellArg "tag ${image} ${pinnedReference image}"}
-        '') upstreamImages}
-
-        export FAKE_LOG=$fixture/synced.log
-        "$fixture/dotfiles-sync-images" --status > synced.out
-        ${lib.concatMapStrings (image: ''
-          expect_line synced.out ${lib.escapeShellArg "OK: ${image}"}
-        '') upstreamImages}
-        if grep -qE '^(pull|tag) ' "$fixture/synced.log"; then
-          echo "a synced state still pulled or tagged" >&2
-          exit 1
-        fi
-
-        # digest だけで pull 済みの既存 image。pull なしで pin だけ回復する
-        rm "$FAKE_STORE"/dotfiles-pinned*
-        export FAKE_LOG=$fixture/unpinned-status.log
-        if "$fixture/dotfiles-sync-images" --status > unpinned-status.out; then
-          echo "status reported a synced state with an unpinned image" >&2
-          exit 1
-        fi
-        ${lib.concatMapStrings (image: ''
-          expect_line unpinned-status.out ${lib.escapeShellArg "UNPINNED: ${image}"}
-        '') upstreamImages}
-
-        export FAKE_LOG=$fixture/repin.log
-        "$fixture/dotfiles-sync-images" > repin.out
-        ${lib.concatMapStrings (image: ''
-          expect_line "$fixture/repin.log" ${lib.escapeShellArg "tag ${image} ${pinnedReference image}"}
-        '') upstreamImages}
-        if grep -q '^pull ' "$fixture/repin.log"; then
-          echo "an image that was already present was pulled again" >&2
-          exit 1
-        fi
-
-        touch $out
-      '';
-
-  container-argv-contract =
-    let
-      fixture = import ./fixtures/container-argv.nix { inherit lib pkgs; };
-      evaluate =
-        hostConfig:
-        import ./impl/container-argv.nix {
-          inherit lib hostConfig;
-          inherit (helpers) execTokens;
+        fakeSystemctl = pkgs.writeShellApplication {
+          name = "systemctl";
+          text = builtins.readFile ./fixtures/fake-systemctl.sh;
         };
-      valid = evaluate fixture.valid;
-      missingSecretReader = evaluate fixture.missingSecretReader;
-      missingVolumeOwner = evaluate fixture.missingVolumeOwner;
-      stopFixture =
-        value:
-        import ./fixtures/container-argv.nix {
-          inherit pkgs;
-          stopTimeout = value;
-        };
-      gracefulStop = evaluate (stopFixture "45").valid;
-      indefiniteStop = evaluate (stopFixture "-1").valid;
-      immediateStop = evaluate (stopFixture "0").valid;
-      placementFixture =
-        value:
-        import ./fixtures/container-argv.nix {
-          inherit pkgs;
-          cgroupParent = value;
-        };
-      boundedBackend = evaluate (placementFixture "containers.slice").valid;
-      unplacedBackend = evaluate (placementFixture null).valid;
-      optionFixture =
-        options:
-        evaluate
-          (import ./fixtures/container-argv.nix {
-            inherit pkgs;
-            extraOptions = options;
-          }).valid;
-      hardenedBackend = optionFixture [
-        "--memory=4g"
-        "--memory-swap=4g"
-        "--cpus=0.5"
-        "--pids-limit=256"
-        "--ulimit=core=0:0"
-        "--ulimit=nofile=8192:131072"
-        "--cap-drop=ALL"
-        "--cap-add=CHOWN"
-        "--security-opt=no-new-privileges"
-        "--read-only"
-        "--tmpfs=/tmp:rw,nosuid,nodev,size=64m,mode=1777"
-      ];
-      rejectedOptions = [
-        "--memory-swap=-1"
-        "--cpus=0"
-        "--pids-limit=-1"
-        "--ulimit=core=1:1"
-        "--ulimit=nofile=131072:8192"
-        "--cap-drop=NET_RAW"
-        "--cap-add=SYS_ADMIN"
-        "--security-opt=seccomp:unconfined"
-        "--tmpfs=/tmp:rw,size=64m"
-        "--tmpfs=/tmp:rw,nosuid,nodev,size=64m,size=1g"
-        "--tmpfs=/../tmp:rw,nosuid,nodev,size=64m"
-      ];
-      writableRoot = optionFixture [ "--read-only=false" ];
-    in
-    assert valid.secretReaders == fixture.expected.secretReaders;
-    assert valid.volumeOwners == fixture.expected.volumeOwners;
-    assert valid.wrongValues == [ ];
-    assert valid.missingFlags == [ ];
-    assert boundedBackend.wrongValues == [ "synthetic-backend:--cgroup-parent=containers.slice" ];
-    assert unplacedBackend.missingFlags == [ "synthetic-backend:--cgroup-parent" ];
-    assert gracefulStop.unexpectedTokens == [ ] && gracefulStop.wrongValues == [ ];
-    assert indefiniteStop.wrongValues == [ "synthetic-backend:--stop-timeout=-1" ];
-    assert immediateStop.wrongValues == [ "synthetic-backend:--stop-timeout=0" ];
-    assert hardenedBackend.unexpectedTokens == [ ] && hardenedBackend.wrongValues == [ ];
-    assert lib.all (
-      option: (optionFixture [ option ]).wrongValues == [ "synthetic-backend:${option}" ]
-    ) rejectedOptions;
-    assert writableRoot.unexpectedTokens == [ "synthetic-backend:--read-only=false" ];
-    assert
-      missingSecretReader.wrongValues
-      == [ "synthetic-backend:--env-file=/run/secrets/rendered/synthetic-secret.env" ];
-    assert missingVolumeOwner.wrongValues == [ "synthetic-backend:-v=synthetic-state:/data" ];
-    assert lib.assertMsg (helpers.containerArgv.staleSecretReaders == [ ]) (
-      "secret reader table names a template that does not exist: "
-      + lib.concatStringsSep " " helpers.containerArgv.staleSecretReaders
-    );
-    assert lib.assertMsg (helpers.containerArgv.stalePolicyContainers == [ ]) (
-      "container policy names a container that does not exist: "
-      + lib.concatStringsSep " " helpers.containerArgv.stalePolicyContainers
-    );
-    assert lib.assertMsg (helpers.containerArgv.unexpectedTokens == [ ]) (
-      "container run has tokens outside the allowed vocabulary: "
-      + lib.concatStringsSep " " helpers.containerArgv.unexpectedTokens
-    );
-    assert lib.assertMsg (helpers.containerArgv.wrongValues == [ ]) (
-      "container run passes a value outside its contract: "
-      + lib.concatStringsSep " " helpers.containerArgv.wrongValues
-    );
-    assert lib.assertMsg (helpers.containerArgv.missingFlags == [ ]) (
-      "container run omits a flag whose value must be checked: "
-      + lib.concatStringsSep " " helpers.containerArgv.missingFlags
-    );
-    assert lib.assertMsg (helpers.containerArgv.strayExec == [ ]) (
-      "container unit has Exec* outside the generated set: "
-      + lib.concatStringsSep " " helpers.containerArgv.strayExec
-    );
-    assert lib.assertMsg (helpers.containerArgv.sharedVolumes == [ ]) (
-      "named volume is mounted by more than one container: "
-      + lib.concatStringsSep " " helpers.containerArgv.sharedVolumes
-    );
-    pkgs.runCommandLocal "check-container-argv-contract" { } "touch $out";
 
-  # Exec* の key 集合だけでは、生成された script の中身までは見えない
-  container-exec-content =
-    let
-      containerNames = builtins.attrNames hostConfig.virtualisation.oci-containers.containers;
-      scripts = helpers.containerArgv.execScripts;
-    in
-    assert execRosterIsValid scripts containerNames;
-    assert !(execRosterIsValid [ ] containerNames);
-    assert !(execRosterIsValid [ ] [ ]);
-    pkgs.runCommandLocal "check-container-exec-content" { } ''
-      inspected=0
-      for script in ${lib.escapeShellArgs scripts}; do
-        inspected=$((inspected + 1))
-        [ "$(head -c 2 "$script")" = '#!' ] || { echo "not a script: $script"; exit 1; }
-        if grep -nE '(docker|podman)[^ ]* run ' "$script"; then
-          echo "container is started outside ExecStart: $script"
-          exit 1
-        fi
-      done
-      test "$inspected" -eq ${toString (builtins.length scripts)}
-      # 生成された Exec* は container ごとに ExecStart 以外が三つ。転記せず数から導く
-      test "$inspected" -eq ${toString (3 * builtins.length containerNames)}
-      touch $out
-    '';
+        observationTimeoutSeconds = 10;
+        restartWarningCount = 5;
+        restartFailureCount = 20;
 
-  # 宣言の転記では配置を確かめられないため docker の配置の規則を宣言に当てた導出で照合
-  container-cgroup-placement =
-    let
-      inherit (helpers.execTokens) valuesOf;
-      # cgroup-parent の無い daemon で systemd driver が container を置く slice
-      dockerDefaultParent = "system.slice";
-      sliceOf =
-        settings: argv:
-        let
-          flags = valuesOf argv "--cgroup-parent";
-        in
-        if flags != [ ] then lib.last flags else settings.cgroup-parent or dockerDefaultParent;
-      limitsOf =
-        configuration: slice:
-        (configuration.systemd.slices.${lib.removeSuffix ".slice" slice} or { sliceConfig = { }; })
-        .sliceConfig;
-      bounded =
-        configuration: slice:
-        lib.all (key: builtins.hasAttr key (limitsOf configuration slice)) [
-          "MemoryHigh"
-          "MemoryMax"
-          "MemorySwapMax"
-        ];
-      # systemd の slice 名は dash で親を表すため名前の一致だけの判定は不可
-      within =
-        parent: slice: slice == parent || lib.hasPrefix "${lib.removeSuffix ".slice" parent}-" slice;
-      undeclaredRun = [
-        "docker"
-        "run"
-        "--rm"
-        "example.invalid/test:1"
-      ];
-      undeclaredSliceOf =
-        configuration: sliceOf configuration.virtualisation.docker.daemon.settings undeclaredRun;
-      placementHolds =
-        configuration: argvs:
-        let
-          settings = configuration.virtualisation.docker.daemon.settings;
-          undeclared = undeclaredSliceOf configuration;
-        in
-        argvs != { }
-        && bounded configuration undeclared
-        && lib.all (argv: !(within undeclared (sliceOf settings argv))) (builtins.attrValues argvs);
-      hostArgv = helpers.containerArgv.containerArgv;
-      hostUndeclaredSlice = undeclaredSliceOf hostConfig;
-      withoutDaemonParent = hostConfig // {
-        virtualisation = hostConfig.virtualisation // {
-          docker = hostConfig.virtualisation.docker // {
-            daemon = hostConfig.virtualisation.docker.daemon // {
-              settings = builtins.removeAttrs hostConfig.virtualisation.docker.daemon.settings [
-                "cgroup-parent"
+        expectedBuildArtifactGc =
+          let
+            name = "docker-build-artifact-gc";
+            serviceUnit = "${name}.service";
+            timerUnit = "${name}.timer";
+          in
+          {
+            inherit name serviceUnit timerUnit;
+            daemonGc = {
+              enabled = true;
+              policy = [
+                {
+                  keepDuration = "1440h";
+                  maxUsedSpace = "30GB";
+                  reservedSpace = "10GB";
+                }
+                {
+                  maxUsedSpace = "30GB";
+                  reservedSpace = "10GB";
+                }
+                {
+                  all = true;
+                  maxUsedSpace = "100GB";
+                  reservedSpace = "10GB";
+                }
               ];
             };
+            reclaimProgram = "docker-reclaim-stopped-testcontainers";
+            pruneTokens = [
+              [
+                (lib.getExe pkgs.docker)
+                "image"
+                "prune"
+                "--force"
+              ]
+              [
+                (lib.getExe pkgs.docker)
+                "buildx"
+                "prune"
+                "--force"
+                "--all"
+                "--max-used-space"
+                "100GB"
+                "--reserved-space"
+                "10GB"
+              ]
+            ];
+            timerConfig = {
+              OnCalendar = "*-*-* 00/6:00:00";
+              Persistent = true;
+              Unit = serviceUnit;
+            };
+            observation = {
+              kind = "systemd-timer";
+              checkId = "maintenance/${timerUnit}";
+              resourceKey = null;
+              timeoutSeconds = observationTimeoutSeconds;
+              failureMessage = "${timerUnit} or its service is not operational";
+              timer = timerUnit;
+              service = serviceUnit;
+              unitFileStates = [
+                "enabled"
+                "enabled-runtime"
+              ];
+              activeStates = [ "active" ];
+              serviceResults = [ "success" ];
+            };
+          };
+
+        # 回収の中身は reclaim の振る舞いの check の担当のため store path の転記での照合は不可
+        isReclaimCommand =
+          tokens:
+          builtins.length tokens == 1
+          && lib.hasSuffix "/bin/${expectedBuildArtifactGc.reclaimProgram}" (builtins.head tokens);
+        gcCommandsMatch =
+          execStartTokens:
+          execStartTokens != [ ]
+          && isReclaimCommand (builtins.head execStartTokens)
+          && builtins.tail execStartTokens == expectedBuildArtifactGc.pruneTokens;
+
+        selectContainerObservations = lib.filterAttrs (name: _: lib.hasPrefix "containers/" name);
+        containerObservations = selectContainerObservations hostConfig.dotfiles.health.observations;
+        sampleApplication = builtins.head (
+          builtins.attrNames hostConfig.dotfiles.platform.containers.services
+        );
+        sampleService = hostConfig.dotfiles.platform.containers.services.${sampleApplication};
+        sampleUnit = builtins.head sampleService.units;
+        sampleSystemdService = lib.removeSuffix ".service" sampleUnit;
+        sampleContainerNames = map (image: image.container) (builtins.attrValues sampleService.images);
+        sampleContainer = builtins.head sampleContainerNames;
+        sampleObservationKeys = {
+          service = "containers/service/${sampleSystemdService}";
+          serviceRestart = "containers/service-restart/${sampleSystemdService}";
+          image = "containers/image/${sampleContainer}";
+          health = "containers/health/${sampleApplication}";
+        };
+        containerRestartObservationKeys = builtins.filter (
+          name: lib.hasPrefix "containers/container-restart/" name
+        ) (builtins.attrNames containerObservations);
+
+        expectedContainerObservationsFor =
+          services:
+          let
+            serviceEntries = lib.mapAttrsToList (application: service: {
+              inherit application service;
+            }) services;
+            imageEntries = lib.concatMap (
+              entry: lib.mapAttrsToList (_: image: { inherit image; }) entry.service.images
+            ) serviceEntries;
+            common = checkId: failureMessage: {
+              inherit checkId failureMessage;
+              resourceKey = null;
+              timeoutSeconds = observationTimeoutSeconds;
+            };
+            mkEntry = name: value: { inherit name value; };
+            serviceObservations = lib.concatMap (
+              entry:
+              map (
+                unit:
+                mkEntry "containers/service/${lib.removeSuffix ".service" unit}" (
+                  common "service/${unit}" "${unit} is not operational"
+                  // {
+                    kind = "systemd-service";
+                    inherit unit;
+                    loadStates = [ "loaded" ];
+                    activeStates = [ "active" ];
+                    results = [ "success" ];
+                  }
+                )
+              ) entry.service.units
+            ) serviceEntries;
+            serviceRestartObservations = lib.concatMap (
+              entry:
+              map (
+                unit:
+                mkEntry "containers/service-restart/${lib.removeSuffix ".service" unit}" (
+                  common "restart/service/${unit}" "could not observe restart count for ${unit}"
+                  // {
+                    kind = "restart-counter";
+                    sourceKind = "systemd-service";
+                    target = unit;
+                    warningAt = restartWarningCount;
+                    failureAt = restartFailureCount;
+                  }
+                )
+              ) entry.service.units
+            ) serviceEntries;
+            imageObservations = map (
+              entry:
+              let
+                inherit (entry.image) container image;
+              in
+              mkEntry "containers/image/${container}" (
+                common "container-image/${container}" "${container} is not running the declared image ${image}"
+                // {
+                  kind = "container-image";
+                  inherit container image;
+                }
+              )
+            ) imageEntries;
+            healthObservations = map (
+              entry:
+              let
+                inherit (entry) application service;
+                inherit (service) health;
+                url = "${service.endpoints.${health.endpoint}.url}${health.path}";
+              in
+              mkEntry "containers/health/${application}" {
+                checkId = "container-health/${application}";
+                resourceKey = null;
+                timeoutSeconds = health.timeout;
+                failureMessage = "${health.method} ${url} failed";
+                kind = "http-health";
+                inherit (health) method;
+                inherit url;
+              }
+            ) serviceEntries;
+            declaredContainers = map (entry: entry.image.container) imageEntries;
+          in
+          builtins.listToAttrs (
+            [
+              (mkEntry "containers/roster" (
+                common "container-roster" "container roster is empty"
+                // {
+                  kind = "roster";
+                  members = declaredContainers;
+                  minimumCount = 1;
+                  failureOnly = true;
+                }
+              ))
+              (mkEntry "containers/placement" (
+                common "container-placement" "could not observe container cgroup placement"
+                // {
+                  kind = "normalized-protocol";
+                  command = import ./impl/container-placement-package.nix {
+                    inherit pkgs lib declaredContainers;
+                  };
+                  envelopeVersion = 1;
+                  allowedOutcomeIds = [ "container-placement" ];
+                  requiredOutcomeIds = [ "container-placement" ];
+                  requiredResourceKeys = [ ];
+                }
+              ))
+              (mkEntry "containers/build-artifact-gc" expectedBuildArtifactGc.observation)
+            ]
+            ++ serviceObservations
+            ++ serviceRestartObservations
+            ++ imageObservations
+            ++ healthObservations
+          );
+
+        buildArtifactGcConfiguration = configuration: {
+          daemonSettings = configuration.virtualisation.docker.daemon.settings;
+          service = configuration.systemd.services.${expectedBuildArtifactGc.name} or null;
+          timer = configuration.systemd.timers.${expectedBuildArtifactGc.name} or null;
+        };
+
+        withBuildArtifactGcExecStart =
+          configuration: execStart:
+          configuration
+          // {
+            systemd = configuration.systemd // {
+              services = configuration.systemd.services // {
+                ${expectedBuildArtifactGc.name} =
+                  configuration.systemd.services.${expectedBuildArtifactGc.name}
+                  // {
+                    serviceConfig = configuration.systemd.services.${expectedBuildArtifactGc.name}.serviceConfig // {
+                      ExecStart = execStart;
+                    };
+                  };
+              };
+            };
+          };
+
+        containerContractMatches =
+          configuration: services: observations:
+          let
+            expected = expectedContainerObservationsFor services;
+            actual = selectContainerObservations observations;
+            gc = buildArtifactGcConfiguration configuration;
+            execStartTokens =
+              if gc.service == null then [ ] else map tokensOf gc.service.serviceConfig.ExecStart;
+          in
+          actual == expected
+          && lib.attrByPath [ "builder" "gc" ] null gc.daemonSettings == expectedBuildArtifactGc.daemonGc
+          && gc.service != null
+          && gcCommandsMatch execStartTokens
+          && gc.timer != null
+          && gc.timer.timerConfig == expectedBuildArtifactGc.timerConfig;
+
+        expectedContainerObservations = expectedContainerObservationsFor hostConfig.dotfiles.platform.containers.services;
+        containerObservationKeys = builtins.attrNames expectedContainerObservations;
+        containerObservationDefinitions = builtins.filter (
+          definition: lib.hasSuffix "/platform/containers/module.nix" (toString definition.file)
+        ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
+        containerDefinitionKeys = lib.unique (
+          lib.concatMap (definition: builtins.attrNames definition.value) containerObservationDefinitions
+        );
+        containerDefinitionKeysMatch = keys: keys == containerObservationKeys;
+        uniqueNonNull =
+          field: observations:
+          let
+            values = builtins.filter (value: value != null) (
+              map (observation: observation.${field}) (builtins.attrValues observations)
+            );
+          in
+          builtins.length values == builtins.length (lib.unique values);
+
+        removeObservation = name: builtins.removeAttrs containerObservations [ name ];
+        serviceRemovalMutation = removeObservation sampleObservationKeys.service;
+        serviceRestartRemovalMutation = removeObservation sampleObservationKeys.serviceRestart;
+        imageRemovalMutation = removeObservation sampleObservationKeys.image;
+        healthRemovalMutation = removeObservation sampleObservationKeys.health;
+        timerRemovalMutation = removeObservation "containers/build-artifact-gc";
+        rosterRemovalMutation = removeObservation "containers/roster";
+        placementRemovalMutation = removeObservation "containers/placement";
+        addStaleObservation =
+          source: name:
+          containerObservations
+          // {
+            ${name} = containerObservations.${source};
+          };
+        staleObservationMutations = [
+          (addStaleObservation sampleObservationKeys.service "containers/service/stale")
+          (addStaleObservation sampleObservationKeys.serviceRestart "containers/service-restart/stale")
+          (addStaleObservation sampleObservationKeys.serviceRestart "containers/container-restart/stale")
+          (addStaleObservation sampleObservationKeys.image "containers/image/stale")
+          (addStaleObservation sampleObservationKeys.health "containers/health/stale")
+          (addStaleObservation "containers/roster" "containers/stale-roster")
+          (addStaleObservation "containers/placement" "containers/stale-placement")
+          (addStaleObservation "containers/build-artifact-gc" "containers/stale-build-artifact-gc")
+        ];
+        daemonPolicyMutation = hostConfig // {
+          virtualisation = hostConfig.virtualisation // {
+            docker = hostConfig.virtualisation.docker // {
+              daemon = hostConfig.virtualisation.docker.daemon // {
+                settings = lib.recursiveUpdate hostConfig.virtualisation.docker.daemon.settings {
+                  builder.gc.policy = [
+                    {
+                      keepDuration = "1439h";
+                      maxUsedSpace = "30GB";
+                      reservedSpace = "10GB";
+                    }
+                    {
+                      maxUsedSpace = "30GB";
+                      reservedSpace = "10GB";
+                    }
+                    {
+                      all = true;
+                      maxUsedSpace = "100GB";
+                      reservedSpace = "10GB";
+                    }
+                  ];
+                };
+              };
+            };
           };
         };
-      };
-      withoutSliceLimits = hostConfig // {
-        systemd = hostConfig.systemd // {
-          slices = builtins.removeAttrs hostConfig.systemd.slices [
-            (lib.removeSuffix ".slice" hostUndeclaredSlice)
-          ];
-        };
-      };
-      unplacedArgv = lib.mapAttrs (
-        _: builtins.filter (token: !(lib.hasPrefix "--cgroup-parent" token))
-      ) hostArgv;
-      nestedArgv = lib.mapAttrs (
-        _: argv:
-        lib.take 2 argv
-        ++ [ "--cgroup-parent=${lib.removeSuffix ".slice" hostUndeclaredSlice}-backends.slice" ]
-        ++ lib.drop 2 argv
-      ) unplacedArgv;
-      daemonConfigFiles = map (lib.removePrefix "--config-file=") (
-        builtins.filter (token: builtins.isString token && lib.hasPrefix "--config-file=" token) (
-          builtins.split "[[:space:]]+" (toString hostConfig.systemd.services.docker.serviceConfig.ExecStart)
-        )
-      );
-      # builtins.split が string context を落とすため ExecStart から取り出した path の直接の参照は不可
-      daemonConfig =
-        (pkgs.formats.json { }).generate "daemon.json"
-          hostConfig.virtualisation.docker.daemon.settings;
-    in
-    assert lib.assertMsg (placementHolds hostConfig hostArgv)
-      "declared backends must stay outside, and other containers inside, the bounded container slice";
-    assert lib.assertMsg (
-      !(placementHolds withoutDaemonParent hostArgv)
-    ) "containers without a daemon cgroup parent escaped the placement contract";
-    assert lib.assertMsg (
-      !(placementHolds withoutSliceLimits hostArgv)
-    ) "an unbounded default container slice escaped the placement contract";
-    assert lib.assertMsg (
-      !(placementHolds hostConfig unplacedArgv)
-    ) "declared backends without --cgroup-parent escaped the placement contract";
-    assert lib.assertMsg (
-      !(placementHolds hostConfig nestedArgv)
-    ) "declared backends nested under the bounded slice escaped the placement contract";
-    assert lib.assertMsg (
-      daemonConfigFiles == [ "${daemonConfig}" ]
-    ) "docker.service must read exactly the daemon config generated from the declared settings";
-    pkgs.runCommandLocal "check-container-cgroup-placement" { } ''
-      set -euo pipefail
-      # 未知の key を持つ daemon config で docker が起動しないため dockerd 自身の検証
-      ${lib.getExe' hostConfig.virtualisation.docker.package "dockerd"} --validate \
-        --config-file=${daemonConfig}
-      touch $out
-    '';
-
-  # 回収の対象は docker が返す状態と label と作成時刻で決まるため docker 境界の差し替えで deploy する script を実行
-  docker-stopped-testcontainers-reclaim-behavior =
-    assert isReclaimCommand (tokensOf hostReclaimExec);
-    pkgs.runCommandLocal "check-docker-stopped-testcontainers-reclaim-behavior"
-      {
-        nativeBuildInputs = [
-          pkgs.coreutils
-          pkgs.diffutils
-          pkgs.gnugrep
-          pkgs.gnused
+        hostGcExecStart = (buildArtifactGcConfiguration hostConfig).service.serviceConfig.ExecStart;
+        hostReclaimExec = builtins.head hostGcExecStart;
+        imagePruneExec = lib.escapeShellArgs (builtins.head expectedBuildArtifactGc.pruneTokens);
+        cachePruneExec = lib.escapeShellArgs (builtins.elemAt expectedBuildArtifactGc.pruneTokens 1);
+        imagePruneMutation = withBuildArtifactGcExecStart hostConfig [
+          hostReclaimExec
+          cachePruneExec
         ];
-      }
-      ''
-        set -euo pipefail
-
-        sed -e "s|${lib.escapeRegex (lib.getExe pkgs.docker)}|${lib.getExe fakeDocker}|g" \
-          ${hostReclaimExec} > reclaim
-        chmod +x reclaim
-
-        export FAKE_CONTAINERS=$PWD/containers FAKE_DOCKER_LOG=$PWD/removed
-        label=org.testcontainers.managed-by
-        now=$(date +%s)
-        # docker の CreatedAt と同じ日時と offset と zone 名の形
-        created() { TZ=$1 date --date="@$((now - $2))" '+%Y-%m-%d %H:%M:%S %z %Z'; }
-        # 作成から start までの途中に当たる年齢と所有者の test が終わっている年齢
-        young=$((10 * 60))
-        old=$((3 * 24 * 60 * 60))
-
-        cat > containers <<EOF
-        exited-old|a|exited|$(created UTC0 "$old")|$label|testcontainers
-        created-old|b|created|$(created JST-9 "$old")|$label|testcontainers
-        dead-old|c|dead|$(created UTC0 "$old")|$label|testcontainers
-        running-old|d|running|$(created UTC0 "$old")|$label|testcontainers
-        paused-old|e|paused|$(created UTC0 "$old")|$label|testcontainers
-        restarting-old|f|restarting|$(created UTC0 "$old")|$label|testcontainers
-        removing-old|g|removing|$(created UTC0 "$old")|$label|testcontainers
-        created-young|h|created|$(created JST-9 "$young")|$label|testcontainers
-        exited-young|i|exited|$(created UTC0 "$young")|$label|testcontainers
-        exited-compose|j|exited|$(created UTC0 "$old")|com.docker.compose.project|locust
-        exited-declared|k|exited|$(created UTC0 "$old")||
-        exited-other-value|l|exited|$(created UTC0 "$old")|$label|the-time-wizard
-        EOF
-        ./reclaim > reclaim.out
-        printf '%s\n' --volumes exited-old created-old dead-old > expected
-        diff expected removed
-
-        rm removed
-        grep -Ev '^(exited|created|dead)-old\|' containers > survivors
-        mv survivors containers
-        ./reclaim > nothing.out
-        if [ -e removed ]; then
-          echo "docker rm ran with no stopped testcontainers container" >&2
-          exit 1
-        fi
-
-        if FAKE_DOCKER_LS_STATUS=1 ./reclaim > failed.out 2>&1; then
-          echo "a failed container listing was treated as an empty one" >&2
-          exit 1
-        fi
-
-        touch $out
-      '';
-
-  # 配置の判定は docker と systemd の答えで決まるため両方の境界の差し替えで observation を実行
-  container-placement-observation-behavior =
-    let
-      placement = import ./impl/cgroup-placement.nix;
-      inherit (containerObservations."containers/roster") members;
-      observe = import ./impl/container-placement-package.nix {
-        inherit pkgs lib;
-        declaredContainers = members;
-        dockerCommand = lib.getExe fakeDocker;
-        systemctlCommand = lib.getExe fakeSystemctl;
-      };
-    in
-    assert members != [ ];
-    pkgs.runCommandLocal "check-container-placement-observation-behavior"
-      {
-        nativeBuildInputs = [
-          pkgs.coreutils
-          pkgs.gnugrep
-          pkgs.jq
+        cacheBudgetMutation = withBuildArtifactGcExecStart hostConfig [
+          hostReclaimExec
+          imagePruneExec
+          "${lib.getExe pkgs.docker} buildx prune --force --all --max-used-space 101GB --reserved-space 10GB"
         ];
+        reclaimRemovalMutation = withBuildArtifactGcExecStart hostConfig [
+          imagePruneExec
+          cachePruneExec
+        ];
+        reclaimAfterPruneMutation = withBuildArtifactGcExecStart hostConfig [
+          imagePruneExec
+          cachePruneExec
+          hostReclaimExec
+        ];
+
+        foreignObservationDescriptionVariantConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            (
+              { lib, ... }:
+              {
+                dotfiles.health.observations."host/independent-container-observation" = {
+                  kind = "roster";
+                  members = [ "fixture" ];
+                  minimumCount = 1;
+                  failureOnly = false;
+                  checkId = null;
+                  resourceKey = null;
+                  timeoutSeconds = observationTimeoutSeconds;
+                  failureMessage = "independent foreign observation failed";
+                };
+                systemd.services.${sampleSystemdService}.description =
+                  lib.mkForce "Descriptions must not select container observations";
+                systemd.services.${expectedBuildArtifactGc.name}.description =
+                  lib.mkForce "Descriptions must not select the Docker build artifact GC observation";
+              }
+            )
+          ]).config;
+        foreignObservationDescriptionContainerObservations = selectContainerObservations foreignObservationDescriptionVariantConfig.dotfiles.health.observations;
+
+        fixtureRepository = "example.invalid/dotfiles-fixture";
+        fixtureDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+        fixtureImage = "${fixtureRepository}:latest@${fixtureDigest}";
+        fixtureContainerModule =
+          { lib, ... }:
+          {
+            dotfiles.platform.containers = {
+              enabled = lib.mkForce (
+                lib.sort builtins.lessThan (hostConfig.dotfiles.platform.containers.enabled ++ [ "fixture" ])
+              );
+              services.fixture = {
+                endpoints.http = {
+                  protocol = "http";
+                  address = "127.0.0.1";
+                  port = 45678;
+                  url = "http://127.0.0.1:45678";
+                };
+                units = [ "docker-fixture.service" ];
+                images.fixture = {
+                  kind = "upstream";
+                  container = "fixture";
+                  image = fixtureImage;
+                  repository = fixtureRepository;
+                  digest = fixtureDigest;
+                };
+                health = {
+                  endpoint = "http";
+                  method = "GET";
+                  path = "/health";
+                  timeout = 5;
+                };
+              };
+            };
+            virtualisation.oci-containers.containers.fixture = {
+              image = fixtureImage;
+              pull = "never";
+              ports = [ "127.0.0.1:45678:45678" ];
+            };
+          };
+        extraContainerVariantConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            fixtureContainerModule
+          ]).config;
+        extraContainerObservations = selectContainerObservations extraContainerVariantConfig.dotfiles.health.observations;
+
+        containerlessCapabilityIds = [
+          "browser-automation"
+          "browser-diagnostics"
+          "browser-runtime"
+          "github-resources"
+          "library-documentation"
+          "repository-search"
+        ];
+        containerlessVariantConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            (
+              { lib, ... }:
+              {
+                dotfiles.capabilities.enabled = lib.mkForce containerlessCapabilityIds;
+              }
+            )
+          ]).config;
+        runtimeOnlyVariantConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            (
+              { lib, ... }:
+              {
+                dotfiles.capabilities.enabled = lib.mkForce (
+                  containerlessCapabilityIds ++ [ "security-assessment" ]
+                );
+              }
+            )
+          ]).config;
+        memoryOnlyCapabilityIds = containerlessCapabilityIds ++ [ "project-memory" ];
+        memoryOnlyVariantConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            (
+              { lib, ... }:
+              {
+                dotfiles.capabilities.enabled = lib.mkForce memoryOnlyCapabilityIds;
+              }
+            )
+          ]).config;
+        containerlessObservations = selectContainerObservations containerlessVariantConfig.dotfiles.health.observations;
+        disabledContainerTargets = [
+          "memory"
+        ];
+        disabledContainerServices = [
+          "docker-build-artifact-gc"
+          "docker-dotfiles-backends-network"
+          "docker-hindsight"
+        ];
+        disabledContainerTimers = [
+          "docker-build-artifact-gc"
+        ];
+        disabledContainerSecrets = [
+          "opencode/go_api_key"
+        ];
+        disabledContainerTemplates = [
+          "hindsight.env"
+        ];
+
+        removedContainerServices =
+          builtins.removeAttrs extraContainerVariantConfig.dotfiles.platform.containers.services
+            [
+              sampleApplication
+            ];
+        removedOciContainers = builtins.removeAttrs extraContainerVariantConfig.virtualisation.oci-containers.containers sampleContainerNames;
+        removedContainerVariantConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            fixtureContainerModule
+            (
+              { lib, ... }:
+              {
+                dotfiles.platform.containers = {
+                  enabled = lib.mkOverride 40 (builtins.attrNames removedContainerServices);
+                  services = lib.mkOverride 40 removedContainerServices;
+                };
+                virtualisation.oci-containers.containers = lib.mkOverride 40 removedOciContainers;
+              }
+            )
+          ]).config;
+        removedContainerObservations = selectContainerObservations removedContainerVariantConfig.dotfiles.health.observations;
+        removedSampleObservationKeys =
+          map (unit: "containers/service/${lib.removeSuffix ".service" unit}") sampleService.units
+          ++ map (unit: "containers/service-restart/${lib.removeSuffix ".service" unit}") sampleService.units
+          ++ map (container: "containers/image/${container}") sampleContainerNames
+          ++ [ "containers/health/${sampleApplication}" ];
+      in
+      {
+        docker-build-artifact-gc-contract =
+          let
+            gc = buildArtifactGcConfiguration hostConfig;
+            actualDaemonGc = lib.attrByPath [ "builder" "gc" ] null gc.daemonSettings;
+            execStartTokens =
+              if gc.service == null then [ ] else map tokensOf gc.service.serviceConfig.ExecStart;
+            dependencyFields = [
+              "after"
+              "before"
+              "bindsTo"
+              "conflicts"
+              "joinsNamespaceOf"
+              "onFailure"
+              "onSuccess"
+              "partOf"
+              "propagatesReloadTo"
+              "reloadPropagatedFrom"
+              "requires"
+              "requisite"
+              "upholds"
+              "wants"
+            ];
+            gcDependents = lib.concatLists (
+              lib.mapAttrsToList (
+                name: service:
+                map (field: "${name}.${field}") (
+                  builtins.filter (
+                    field: lib.elem expectedBuildArtifactGc.serviceUnit (service.${field} or [ ])
+                  ) dependencyFields
+                )
+              ) hostConfig.systemd.services
+            );
+          in
+          assert lib.assertMsg (
+            actualDaemonGc == expectedBuildArtifactGc.daemonGc
+          ) "Docker BuildKit GC policy changed: actual=${builtins.toJSON actualDaemonGc}";
+          assert lib.assertMsg (gc.service != null) "Docker build artifact GC service is missing";
+          assert lib.assertMsg (gc.service.after == [ "docker.service" ])
+            "Docker build artifact GC service must start after Docker: actual=${builtins.toJSON gc.service.after}";
+          assert lib.assertMsg (gc.service.wants == [ "docker.service" ])
+            "Docker build artifact GC service must use a soft Docker dependency: actual=${builtins.toJSON gc.service.wants}";
+          assert lib.assertMsg (
+            gc.service.requires == [ ] && gc.service.requiredBy == [ ]
+          ) "Docker build artifact GC failure must not propagate to Docker";
+          assert lib.assertMsg (gcDependents == [ ])
+            "system services must not depend on Docker build artifact GC: actual=${builtins.toJSON gcDependents}";
+          assert lib.assertMsg (
+            gc.service.serviceConfig.Type == "oneshot"
+          ) "Docker build artifact GC service must be oneshot";
+          assert lib.assertMsg (
+            gc.service.unitConfig.ConditionPathExists == "/var/run/docker.sock"
+          ) "Docker build artifact GC service must require the Docker socket";
+          assert lib.assertMsg (gcCommandsMatch execStartTokens)
+            "Docker build artifact GC commands changed: actual=${builtins.toJSON execStartTokens}";
+          assert lib.assertMsg (gc.timer != null) "Docker build artifact GC timer is missing";
+          assert lib.assertMsg (
+            gc.timer.wantedBy == [ "timers.target" ]
+          ) "Docker build artifact GC timer must be enabled: actual=${builtins.toJSON gc.timer.wantedBy}";
+          assert lib.assertMsg (
+            gc.timer.timerConfig == expectedBuildArtifactGc.timerConfig
+          ) "Docker build artifact GC timer must run persistently every six hours";
+          assert lib.assertMsg (containerContractMatches hostConfig
+            hostConfig.dotfiles.platform.containers.services
+            hostConfig.dotfiles.health.observations
+          ) "Docker build artifact GC settings and runtime observation must share one contract";
+          assert lib.assertMsg (
+            !(containerContractMatches daemonPolicyMutation hostConfig.dotfiles.platform.containers.services
+              containerObservations
+            )
+          ) "Docker BuildKit GC policy mutation escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches imagePruneMutation hostConfig.dotfiles.platform.containers.services
+              containerObservations
+            )
+          ) "Docker dangling image prune mutation escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches cacheBudgetMutation hostConfig.dotfiles.platform.containers.services
+              containerObservations
+            )
+          ) "Docker BuildKit cache budget mutation escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches reclaimRemovalMutation hostConfig.dotfiles.platform.containers.services
+              containerObservations
+            )
+          ) "stopped testcontainers reclaim removal escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches reclaimAfterPruneMutation
+              hostConfig.dotfiles.platform.containers.services
+              containerObservations
+            )
+          ) "stopped testcontainers reclaim after the image prune escaped the owner contract";
+          pkgs.runCommandLocal "check-docker-build-artifact-gc-contract"
+            {
+              nativeBuildInputs = [
+                pkgs.findutils
+                pkgs.gnugrep
+              ];
+            }
+            ''
+              set -euo pipefail
+
+              if grep -HnE '^(After|Before|BindsTo|Conflicts|JoinsNamespaceOf|OnFailure|OnSuccess|PartOf|PropagatesReloadTo|ReloadPropagatedFrom|Requires|Requisite|Upholds|Wants)=(.*[[:space:]])?docker-build-artifact-gc\.service([[:space:]]|$)' ${systemUnits}/*.service > service-dependencies; then
+                cat service-dependencies >&2
+                exit 1
+              fi
+
+              find ${systemUnits} -mindepth 2 -type l -lname '*docker-build-artifact-gc.service' -print > dependency-links
+              if [ -s dependency-links ]; then
+                cat dependency-links >&2
+                exit 1
+              fi
+
+              touch $out
+            '';
+
+        container-runtime-observation-contract =
+          assert lib.assertMsg (
+            containerRestartObservationKeys == [ ]
+          ) "Docker RestartCount observations must not duplicate systemd service restart observations";
+          assert lib.assertMsg (
+            containerObservations == expectedContainerObservations
+          ) "container runtime observation registry is incomplete";
+          assert lib.assertMsg (containerDefinitionKeysMatch containerDefinitionKeys)
+            "container observation definition keys must match the owner contract";
+          assert lib.assertMsg (
+            !(containerDefinitionKeysMatch (containerDefinitionKeys ++ [ "containers/stale-definition" ]))
+          ) "a stale container observation definition escaped the owner contract";
+          assert lib.assertMsg (uniqueNonNull "checkId" containerObservations)
+            "container runtime observation check IDs must be unique";
+          assert lib.assertMsg (uniqueNonNull "resourceKey" containerObservations)
+            "container runtime observation resource keys must be unique";
+          assert lib.assertMsg (
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+              serviceRemovalMutation
+            )
+          ) "container service observation removal escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+              serviceRestartRemovalMutation
+            )
+          ) "container service restart observation removal escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+              imageRemovalMutation
+            )
+          ) "container image observation removal escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+              healthRemovalMutation
+            )
+          ) "container health observation removal escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+              timerRemovalMutation
+            )
+          ) "Docker build artifact GC timer observation removal escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+              rosterRemovalMutation
+            )
+          ) "container roster observation removal escaped the owner contract";
+          assert lib.assertMsg (
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services
+              placementRemovalMutation
+            )
+          ) "container placement observation removal escaped the owner contract";
+          assert lib.assertMsg (lib.all (
+            observations:
+            !(containerContractMatches hostConfig hostConfig.dotfiles.platform.containers.services observations)
+          ) staleObservationMutations) "stale container runtime observations escaped the owner contract";
+          assert lib.assertMsg (
+            containerContractMatches foreignObservationDescriptionVariantConfig
+              foreignObservationDescriptionVariantConfig.dotfiles.platform.containers.services
+              foreignObservationDescriptionVariantConfig.dotfiles.health.observations
+            && foreignObservationDescriptionContainerObservations == expectedContainerObservations
+            && builtins.hasAttr "host/independent-container-observation" foreignObservationDescriptionVariantConfig.dotfiles.health.observations
+          ) "a foreign observation changed the containers runtime contract";
+          assert lib.assertMsg (
+            foreignObservationDescriptionContainerObservations == containerObservations
+          ) "service descriptions must not select container runtime observations";
+          assert lib.assertMsg (
+            containerContractMatches extraContainerVariantConfig
+              extraContainerVariantConfig.dotfiles.platform.containers.services
+              extraContainerVariantConfig.dotfiles.health.observations
+            && builtins.hasAttr "containers/image/fixture" extraContainerObservations
+            && builtins.hasAttr "containers/health/fixture" extraContainerObservations
+            && lib.elem "fixture" extraContainerObservations."containers/roster".members
+          ) "a new container service was not projected into runtime observations";
+          assert lib.assertMsg (
+            containerContractMatches removedContainerVariantConfig
+              removedContainerVariantConfig.dotfiles.platform.containers.services
+              removedContainerVariantConfig.dotfiles.health.observations
+            &&
+              removedContainerObservations
+              == expectedContainerObservationsFor removedContainerVariantConfig.dotfiles.platform.containers.services
+            && builtins.all (
+              name: !builtins.hasAttr name removedContainerObservations
+            ) removedSampleObservationKeys
+            && lib.all (
+              container: !lib.elem container removedContainerObservations."containers/roster".members
+            ) sampleContainerNames
+          ) "a removed container service remained in runtime observations";
+          pkgs.runCommandLocal "check-container-runtime-observation-contract" { } "touch $out";
+
+        container-backend-contract =
+          let
+            fixtures = [
+              (import ./fixtures/container-backend.nix { inherit lib; })
+              (import ./fixtures/container-backend-minimal.nix { inherit lib; })
+            ];
+            mkContainerBackend = import ./impl/container-backend.nix { inherit lib; };
+            actual = map (fixture: mkContainerBackend fixture.name fixture.args) fixtures;
+            expected = map (fixture: fixture.expected) fixtures;
+          in
+          assert lib.assertMsg (actual == expected) "container backend helper output changed";
+          pkgs.runCommandLocal "check-container-backend-contract" { } "touch $out";
+
+        container-application-registry =
+          let
+            enabled = hostConfig.dotfiles.platform.containers.enabled;
+            provided = builtins.attrNames hostConfig.dotfiles.platform.containers.services;
+            variantEnabled = variantConfig.dotfiles.platform.containers.enabled;
+            variantProvided = builtins.attrNames variantConfig.dotfiles.platform.containers.services;
+          in
+          assert enabled != [ ];
+          assert enabled == provided;
+          assert variantEnabled == variantProvided;
+          pkgs.runCommandLocal "check-container-application-registry" { } "touch $out";
+
+        container-capability-gating =
+          assert lib.all (entry: entry.assertion) memoryOnlyVariantConfig.assertions;
+          assert lib.all (entry: entry.assertion) containerlessVariantConfig.assertions;
+          assert lib.all (entry: entry.assertion) runtimeOnlyVariantConfig.assertions;
+          assert runtimeOnlyVariantConfig.virtualisation.docker.enable;
+          assert runtimeOnlyVariantConfig.dotfiles.platform.containers.enabled == [ ];
+          assert runtimeOnlyVariantConfig.dotfiles.platform.containers.services == { };
+          assert runtimeOnlyVariantConfig.virtualisation.oci-containers.containers == { };
+          assert
+            runtimeOnlyVariantConfig.dotfiles.platform.mcp.enabledProviders
+            == containerlessVariantConfig.dotfiles.platform.mcp.enabledProviders;
+          assert builtins.elem "docker"
+            runtimeOnlyVariantConfig.users.users.${runtimeOnlyVariantConfig.dotfiles.workstation.username}.extraGroups;
+          assert builtins.hasAttr "syncImages" runtimeOnlyVariantConfig.dotfiles.platform.cli.commands;
+          assert builtins.hasAttr "opencode/go_api_key" runtimeOnlyVariantConfig.sops.secrets;
+          assert !builtins.hasAttr "hindsight.env" runtimeOnlyVariantConfig.sops.templates;
+          assert !builtins.hasAttr "containers/roster" runtimeOnlyVariantConfig.dotfiles.health.observations;
+          assert memoryOnlyVariantConfig.dotfiles.capabilities.enabled == memoryOnlyCapabilityIds;
+          assert memoryOnlyVariantConfig.dotfiles.platform.containers.enabled == [ "hindsight" ];
+          assert
+            builtins.attrNames memoryOnlyVariantConfig.dotfiles.platform.containers.services == [ "hindsight" ];
+          assert
+            builtins.attrNames memoryOnlyVariantConfig.virtualisation.oci-containers.containers
+            == [ "hindsight" ];
+          assert memoryOnlyVariantConfig.virtualisation.docker.enable;
+          assert builtins.hasAttr "memory" memoryOnlyVariantConfig.dotfiles.platform.mcp.targets;
+          assert containerlessVariantConfig.dotfiles.capabilities.enabled == containerlessCapabilityIds;
+          assert containerlessVariantConfig.dotfiles.platform.containers.enabled == [ ];
+          assert containerlessVariantConfig.dotfiles.platform.containers.services == { };
+          assert containerlessVariantConfig.virtualisation.oci-containers.containers == { };
+          assert !containerlessVariantConfig.virtualisation.docker.enable;
+          assert
+            !builtins.elem "docker"
+              containerlessVariantConfig.users.users.${containerlessVariantConfig.dotfiles.workstation.username}.extraGroups;
+          assert !builtins.hasAttr "syncImages" containerlessVariantConfig.dotfiles.platform.cli.commands;
+          assert !builtins.hasAttr "imageDigest" containerlessVariantConfig.dotfiles.platform.cli.commands;
+          assert containerlessObservations == { };
+          assert lib.all (
+            name: !builtins.hasAttr name containerlessVariantConfig.dotfiles.platform.mcp.targets
+          ) disabledContainerTargets;
+          assert lib.all (
+            name: !builtins.hasAttr name containerlessVariantConfig.systemd.services
+          ) disabledContainerServices;
+          assert lib.all (
+            name: !builtins.hasAttr name containerlessVariantConfig.systemd.timers
+          ) disabledContainerTimers;
+          assert lib.all (
+            name: !builtins.hasAttr name containerlessVariantConfig.sops.secrets
+          ) disabledContainerSecrets;
+          assert lib.all (
+            name: !builtins.hasAttr name containerlessVariantConfig.sops.templates
+          ) disabledContainerTemplates;
+          pkgs.runCommandLocal "check-container-capability-gating" { } "touch $out";
+
+        # image は digest で固定し、参照が repository と digest に整合すること。
+        # 宣言を写した期待値は宣言と写しの一致しか見ない
+        oci-image-contract =
+          assert imageDefinitions != [ ];
+          assert imageContractIsValid imageDefinitions;
+          assert !(imageContractIsValid [ ]);
+          assert hostConfig.virtualisation.oci-containers.backend == "docker";
+          assert hostConfig.virtualisation.docker.enable;
+          # pull = never なので、宣言した image が事前に無いと container が起動しない
+          assert lib.all (c: c.pull == "never") (
+            builtins.attrValues hostConfig.virtualisation.oci-containers.containers
+          );
+          pkgs.runCommandLocal "check-oci-image-contract" { } "touch $out";
+
+        # 宣言済み image が docker image prune の dangling 判定に落ちないことは、
+        # 宣言を読んでも分からない。docker 境界を差し替えて sync の実挙動で確かめる
+        oci-image-sync-behavior =
+          assert upstreamImages != [ ];
+          pkgs.runCommandLocal "check-oci-image-sync-behavior"
+            {
+              nativeBuildInputs = [
+                hostConfig.dotfiles.platform.cli.commands.syncImages
+                pkgs.coreutils
+                pkgs.gnused
+              ];
+            }
+            ''
+              set -euo pipefail
+
+              fixture=$PWD/fixture
+              mkdir -p "$fixture/store"
+              export FAKE_STORE=$fixture/store
+
+              printf '#!%s\n' ${pkgs.runtimeShell} > "$fixture/docker"
+              cat >> "$fixture/docker" <<'FAKE'
+              set -euo pipefail
+              key() { printf '%s' "$1" | tr '/:@' '___'; }
+              printf '%s\n' "$*" >> "$FAKE_LOG"
+              case "$1 $2" in
+                'image inspect')
+                  entry=$FAKE_STORE/$(key "$5")
+                  [ -f "$entry" ] || exit 1
+                  cat "$entry"
+                  ;;
+                'pull --quiet')
+                  printf 'sha256:%s\n' "$(printf '%s' "$3" | sha256sum | cut -c1-64)" \
+                    > "$FAKE_STORE/$(key "$3")"
+                  ;;
+                tag*)
+                  cp "$FAKE_STORE/$(key "$2")" "$FAKE_STORE/$(key "$3")"
+                  ;;
+                *) exit 2 ;;
+              esac
+              FAKE
+              chmod +x "$fixture/docker"
+
+              sed -e "s|${lib.escapeRegex (lib.getExe pkgs.docker)}|$fixture/docker|g" \
+                "$(type -P dotfiles-sync-images)" > "$fixture/dotfiles-sync-images"
+              chmod +x "$fixture/dotfiles-sync-images"
+
+              expect_line() {
+                grep -Fxq "$2" "$1" && return 0
+                echo "$1 does not contain: $2" >&2
+                exit 1
+              }
+
+              export FAKE_LOG=$fixture/empty-status.log
+              if "$fixture/dotfiles-sync-images" --status > empty-status.out; then
+                echo "status reported a synced state with no image present" >&2
+                exit 1
+              fi
+              ${lib.concatMapStrings (image: ''
+                expect_line empty-status.out ${lib.escapeShellArg "MISSING: ${image}"}
+              '') upstreamImages}
+
+              export FAKE_LOG=$fixture/pull.log
+              "$fixture/dotfiles-sync-images" > pull.out
+              ${lib.concatMapStrings (image: ''
+                expect_line "$fixture/pull.log" ${lib.escapeShellArg "pull --quiet ${image}"}
+                expect_line "$fixture/pull.log" ${lib.escapeShellArg "tag ${image} ${pinnedReference image}"}
+              '') upstreamImages}
+
+              export FAKE_LOG=$fixture/synced.log
+              "$fixture/dotfiles-sync-images" --status > synced.out
+              ${lib.concatMapStrings (image: ''
+                expect_line synced.out ${lib.escapeShellArg "OK: ${image}"}
+              '') upstreamImages}
+              if grep -qE '^(pull|tag) ' "$fixture/synced.log"; then
+                echo "a synced state still pulled or tagged" >&2
+                exit 1
+              fi
+
+              # digest だけで pull 済みの既存 image。pull なしで pin だけ回復する
+              rm "$FAKE_STORE"/dotfiles-pinned*
+              export FAKE_LOG=$fixture/unpinned-status.log
+              if "$fixture/dotfiles-sync-images" --status > unpinned-status.out; then
+                echo "status reported a synced state with an unpinned image" >&2
+                exit 1
+              fi
+              ${lib.concatMapStrings (image: ''
+                expect_line unpinned-status.out ${lib.escapeShellArg "UNPINNED: ${image}"}
+              '') upstreamImages}
+
+              export FAKE_LOG=$fixture/repin.log
+              "$fixture/dotfiles-sync-images" > repin.out
+              ${lib.concatMapStrings (image: ''
+                expect_line "$fixture/repin.log" ${lib.escapeShellArg "tag ${image} ${pinnedReference image}"}
+              '') upstreamImages}
+              if grep -q '^pull ' "$fixture/repin.log"; then
+                echo "an image that was already present was pulled again" >&2
+                exit 1
+              fi
+
+              touch $out
+            '';
+
+        container-argv-contract =
+          let
+            fixture = import ./fixtures/container-argv.nix { inherit lib pkgs; };
+            evaluate =
+              hostConfig:
+              import ./impl/container-argv.nix {
+                inherit lib hostConfig;
+                inherit (helpers) execTokens;
+              };
+            valid = evaluate fixture.valid;
+            missingSecretReader = evaluate fixture.missingSecretReader;
+            missingVolumeOwner = evaluate fixture.missingVolumeOwner;
+            stopFixture =
+              value:
+              import ./fixtures/container-argv.nix {
+                inherit pkgs;
+                stopTimeout = value;
+              };
+            gracefulStop = evaluate (stopFixture "45").valid;
+            indefiniteStop = evaluate (stopFixture "-1").valid;
+            immediateStop = evaluate (stopFixture "0").valid;
+            placementFixture =
+              value:
+              import ./fixtures/container-argv.nix {
+                inherit pkgs;
+                cgroupParent = value;
+              };
+            boundedBackend = evaluate (placementFixture "containers.slice").valid;
+            unplacedBackend = evaluate (placementFixture null).valid;
+            optionFixture =
+              options:
+              evaluate
+                (import ./fixtures/container-argv.nix {
+                  inherit pkgs;
+                  extraOptions = options;
+                }).valid;
+            hardenedBackend = optionFixture [
+              "--memory=4g"
+              "--memory-swap=4g"
+              "--cpus=0.5"
+              "--pids-limit=256"
+              "--ulimit=core=0:0"
+              "--ulimit=nofile=8192:131072"
+              "--cap-drop=ALL"
+              "--cap-add=CHOWN"
+              "--security-opt=no-new-privileges"
+              "--read-only"
+              "--tmpfs=/tmp:rw,nosuid,nodev,size=64m,mode=1777"
+            ];
+            rejectedOptions = [
+              "--memory-swap=-1"
+              "--cpus=0"
+              "--pids-limit=-1"
+              "--ulimit=core=1:1"
+              "--ulimit=nofile=131072:8192"
+              "--cap-drop=NET_RAW"
+              "--cap-add=SYS_ADMIN"
+              "--security-opt=seccomp:unconfined"
+              "--tmpfs=/tmp:rw,size=64m"
+              "--tmpfs=/tmp:rw,nosuid,nodev,size=64m,size=1g"
+              "--tmpfs=/../tmp:rw,nosuid,nodev,size=64m"
+            ];
+            writableRoot = optionFixture [ "--read-only=false" ];
+          in
+          assert valid.secretReaders == fixture.expected.secretReaders;
+          assert valid.volumeOwners == fixture.expected.volumeOwners;
+          assert valid.wrongValues == [ ];
+          assert valid.missingFlags == [ ];
+          assert boundedBackend.wrongValues == [ "synthetic-backend:--cgroup-parent=containers.slice" ];
+          assert unplacedBackend.missingFlags == [ "synthetic-backend:--cgroup-parent" ];
+          assert gracefulStop.unexpectedTokens == [ ] && gracefulStop.wrongValues == [ ];
+          assert indefiniteStop.wrongValues == [ "synthetic-backend:--stop-timeout=-1" ];
+          assert immediateStop.wrongValues == [ "synthetic-backend:--stop-timeout=0" ];
+          assert hardenedBackend.unexpectedTokens == [ ] && hardenedBackend.wrongValues == [ ];
+          assert lib.all (
+            option: (optionFixture [ option ]).wrongValues == [ "synthetic-backend:${option}" ]
+          ) rejectedOptions;
+          assert writableRoot.unexpectedTokens == [ "synthetic-backend:--read-only=false" ];
+          assert
+            missingSecretReader.wrongValues
+            == [ "synthetic-backend:--env-file=/run/secrets/rendered/synthetic-secret.env" ];
+          assert missingVolumeOwner.wrongValues == [ "synthetic-backend:-v=synthetic-state:/data" ];
+          assert lib.assertMsg (helpers.containerArgv.staleSecretReaders == [ ]) (
+            "secret reader table names a template that does not exist: "
+            + lib.concatStringsSep " " helpers.containerArgv.staleSecretReaders
+          );
+          assert lib.assertMsg (helpers.containerArgv.stalePolicyContainers == [ ]) (
+            "container policy names a container that does not exist: "
+            + lib.concatStringsSep " " helpers.containerArgv.stalePolicyContainers
+          );
+          assert lib.assertMsg (helpers.containerArgv.unexpectedTokens == [ ]) (
+            "container run has tokens outside the allowed vocabulary: "
+            + lib.concatStringsSep " " helpers.containerArgv.unexpectedTokens
+          );
+          assert lib.assertMsg (helpers.containerArgv.wrongValues == [ ]) (
+            "container run passes a value outside its contract: "
+            + lib.concatStringsSep " " helpers.containerArgv.wrongValues
+          );
+          assert lib.assertMsg (helpers.containerArgv.missingFlags == [ ]) (
+            "container run omits a flag whose value must be checked: "
+            + lib.concatStringsSep " " helpers.containerArgv.missingFlags
+          );
+          assert lib.assertMsg (helpers.containerArgv.strayExec == [ ]) (
+            "container unit has Exec* outside the generated set: "
+            + lib.concatStringsSep " " helpers.containerArgv.strayExec
+          );
+          assert lib.assertMsg (helpers.containerArgv.sharedVolumes == [ ]) (
+            "named volume is mounted by more than one container: "
+            + lib.concatStringsSep " " helpers.containerArgv.sharedVolumes
+          );
+          pkgs.runCommandLocal "check-container-argv-contract" { } "touch $out";
+
+        # Exec* の key 集合だけでは、生成された script の中身までは見えない
+        container-exec-content =
+          let
+            containerNames = builtins.attrNames hostConfig.virtualisation.oci-containers.containers;
+            scripts = helpers.containerArgv.execScripts;
+          in
+          assert execRosterIsValid scripts containerNames;
+          assert !(execRosterIsValid [ ] containerNames);
+          assert !(execRosterIsValid [ ] [ ]);
+          pkgs.runCommandLocal "check-container-exec-content" { } ''
+            inspected=0
+            for script in ${lib.escapeShellArgs scripts}; do
+              inspected=$((inspected + 1))
+              [ "$(head -c 2 "$script")" = '#!' ] || { echo "not a script: $script"; exit 1; }
+              if grep -nE '(docker|podman)[^ ]* run ' "$script"; then
+                echo "container is started outside ExecStart: $script"
+                exit 1
+              fi
+            done
+            test "$inspected" -eq ${toString (builtins.length scripts)}
+            # 生成された Exec* は container ごとに ExecStart 以外が三つ。転記せず数から導く
+            test "$inspected" -eq ${toString (3 * builtins.length containerNames)}
+            touch $out
+          '';
+
+        # 宣言の転記では配置を確かめられないため docker の配置の規則を宣言に当てた導出で照合
+        container-cgroup-placement =
+          let
+            inherit (helpers.execTokens) valuesOf;
+            # cgroup-parent の無い daemon で systemd driver が container を置く slice
+            dockerDefaultParent = "system.slice";
+            sliceOf =
+              settings: argv:
+              let
+                flags = valuesOf argv "--cgroup-parent";
+              in
+              if flags != [ ] then lib.last flags else settings.cgroup-parent or dockerDefaultParent;
+            limitsOf =
+              configuration: slice:
+              (configuration.systemd.slices.${lib.removeSuffix ".slice" slice} or { sliceConfig = { }; })
+              .sliceConfig;
+            bounded =
+              configuration: slice:
+              lib.all (key: builtins.hasAttr key (limitsOf configuration slice)) [
+                "MemoryHigh"
+                "MemoryMax"
+                "MemorySwapMax"
+              ];
+            # systemd の slice 名は dash で親を表すため名前の一致だけの判定は不可
+            within =
+              parent: slice: slice == parent || lib.hasPrefix "${lib.removeSuffix ".slice" parent}-" slice;
+            undeclaredRun = [
+              "docker"
+              "run"
+              "--rm"
+              "example.invalid/test:1"
+            ];
+            undeclaredSliceOf =
+              configuration: sliceOf configuration.virtualisation.docker.daemon.settings undeclaredRun;
+            placementHolds =
+              configuration: argvs:
+              let
+                settings = configuration.virtualisation.docker.daemon.settings;
+                undeclared = undeclaredSliceOf configuration;
+              in
+              argvs != { }
+              && bounded configuration undeclared
+              && lib.all (argv: !(within undeclared (sliceOf settings argv))) (builtins.attrValues argvs);
+            hostArgv = helpers.containerArgv.containerArgv;
+            hostUndeclaredSlice = undeclaredSliceOf hostConfig;
+            withoutDaemonParent = hostConfig // {
+              virtualisation = hostConfig.virtualisation // {
+                docker = hostConfig.virtualisation.docker // {
+                  daemon = hostConfig.virtualisation.docker.daemon // {
+                    settings = builtins.removeAttrs hostConfig.virtualisation.docker.daemon.settings [
+                      "cgroup-parent"
+                    ];
+                  };
+                };
+              };
+            };
+            withoutSliceLimits = hostConfig // {
+              systemd = hostConfig.systemd // {
+                slices = builtins.removeAttrs hostConfig.systemd.slices [
+                  (lib.removeSuffix ".slice" hostUndeclaredSlice)
+                ];
+              };
+            };
+            unplacedArgv = lib.mapAttrs (
+              _: builtins.filter (token: !(lib.hasPrefix "--cgroup-parent" token))
+            ) hostArgv;
+            nestedArgv = lib.mapAttrs (
+              _: argv:
+              lib.take 2 argv
+              ++ [ "--cgroup-parent=${lib.removeSuffix ".slice" hostUndeclaredSlice}-backends.slice" ]
+              ++ lib.drop 2 argv
+            ) unplacedArgv;
+            daemonConfigFiles = map (lib.removePrefix "--config-file=") (
+              builtins.filter (token: builtins.isString token && lib.hasPrefix "--config-file=" token) (
+                builtins.split "[[:space:]]+" (toString hostConfig.systemd.services.docker.serviceConfig.ExecStart)
+              )
+            );
+            # builtins.split が string context を落とすため ExecStart から取り出した path の直接の参照は不可
+            daemonConfig =
+              (pkgs.formats.json { }).generate "daemon.json"
+                hostConfig.virtualisation.docker.daemon.settings;
+          in
+          assert lib.assertMsg (placementHolds hostConfig hostArgv)
+            "declared backends must stay outside, and other containers inside, the bounded container slice";
+          assert lib.assertMsg (
+            !(placementHolds withoutDaemonParent hostArgv)
+          ) "containers without a daemon cgroup parent escaped the placement contract";
+          assert lib.assertMsg (
+            !(placementHolds withoutSliceLimits hostArgv)
+          ) "an unbounded default container slice escaped the placement contract";
+          assert lib.assertMsg (
+            !(placementHolds hostConfig unplacedArgv)
+          ) "declared backends without --cgroup-parent escaped the placement contract";
+          assert lib.assertMsg (
+            !(placementHolds hostConfig nestedArgv)
+          ) "declared backends nested under the bounded slice escaped the placement contract";
+          assert lib.assertMsg (
+            daemonConfigFiles == [ "${daemonConfig}" ]
+          ) "docker.service must read exactly the daemon config generated from the declared settings";
+          pkgs.runCommandLocal "check-container-cgroup-placement" { } ''
+            set -euo pipefail
+            # 未知の key を持つ daemon config で docker が起動しないため dockerd 自身の検証
+            ${lib.getExe' hostConfig.virtualisation.docker.package "dockerd"} --validate \
+              --config-file=${daemonConfig}
+            touch $out
+          '';
+
+        # 回収の対象は docker が返す状態と label と作成時刻で決まるため docker 境界の差し替えで deploy する script を実行
+        docker-stopped-testcontainers-reclaim-behavior =
+          assert isReclaimCommand (tokensOf hostReclaimExec);
+          pkgs.runCommandLocal "check-docker-stopped-testcontainers-reclaim-behavior"
+            {
+              nativeBuildInputs = [
+                pkgs.coreutils
+                pkgs.diffutils
+                pkgs.gnugrep
+                pkgs.gnused
+              ];
+            }
+            ''
+              set -euo pipefail
+
+              sed -e "s|${lib.escapeRegex (lib.getExe pkgs.docker)}|${lib.getExe fakeDocker}|g" \
+                ${hostReclaimExec} > reclaim
+              chmod +x reclaim
+
+              export FAKE_CONTAINERS=$PWD/containers FAKE_DOCKER_LOG=$PWD/removed
+              label=org.testcontainers.managed-by
+              now=$(date +%s)
+              # docker の CreatedAt と同じ日時と offset と zone 名の形
+              created() { TZ=$1 date --date="@$((now - $2))" '+%Y-%m-%d %H:%M:%S %z %Z'; }
+              # 作成から start までの途中に当たる年齢と所有者の test が終わっている年齢
+              young=$((10 * 60))
+              old=$((3 * 24 * 60 * 60))
+
+              cat > containers <<EOF
+              exited-old|a|exited|$(created UTC0 "$old")|$label|testcontainers
+              created-old|b|created|$(created JST-9 "$old")|$label|testcontainers
+              dead-old|c|dead|$(created UTC0 "$old")|$label|testcontainers
+              running-old|d|running|$(created UTC0 "$old")|$label|testcontainers
+              paused-old|e|paused|$(created UTC0 "$old")|$label|testcontainers
+              restarting-old|f|restarting|$(created UTC0 "$old")|$label|testcontainers
+              removing-old|g|removing|$(created UTC0 "$old")|$label|testcontainers
+              created-young|h|created|$(created JST-9 "$young")|$label|testcontainers
+              exited-young|i|exited|$(created UTC0 "$young")|$label|testcontainers
+              exited-compose|j|exited|$(created UTC0 "$old")|com.docker.compose.project|locust
+              exited-declared|k|exited|$(created UTC0 "$old")||
+              exited-other-value|l|exited|$(created UTC0 "$old")|$label|the-time-wizard
+              EOF
+              ./reclaim > reclaim.out
+              printf '%s\n' --volumes exited-old created-old dead-old > expected
+              diff expected removed
+
+              rm removed
+              grep -Ev '^(exited|created|dead)-old\|' containers > survivors
+              mv survivors containers
+              ./reclaim > nothing.out
+              if [ -e removed ]; then
+                echo "docker rm ran with no stopped testcontainers container" >&2
+                exit 1
+              fi
+
+              if FAKE_DOCKER_LS_STATUS=1 ./reclaim > failed.out 2>&1; then
+                echo "a failed container listing was treated as an empty one" >&2
+                exit 1
+              fi
+
+              touch $out
+            '';
+
+        # 配置の判定は docker と systemd の答えで決まるため両方の境界の差し替えで observation を実行
+        container-placement-observation-behavior =
+          let
+            placement = import ./impl/cgroup-placement.nix;
+            inherit (containerObservations."containers/roster") members;
+            observe = import ./impl/container-placement-package.nix {
+              inherit pkgs lib;
+              declaredContainers = members;
+              dockerCommand = lib.getExe fakeDocker;
+              systemctlCommand = lib.getExe fakeSystemctl;
+            };
+          in
+          assert members != [ ];
+          pkgs.runCommandLocal "check-container-placement-observation-behavior"
+            {
+              nativeBuildInputs = [
+                pkgs.coreutils
+                pkgs.gnugrep
+                pkgs.jq
+              ];
+            }
+            ''
+              set -euo pipefail
+
+              export FAKE_CONTAINERS=$PWD/containers FAKE_SCOPES=$PWD/scopes FAKE_SYSTEMCTL_LOG=$PWD/systemctl.log
+              declared=${lib.escapeShellArg (builtins.head members)}
+              protected=${placement.declared}
+              bounded=${placement.undeclared}
+
+              expect() {
+                local output=$1 status=$2 needle=$3
+                jq -e --arg status "$status" '
+                  .schemaVersion == 1
+                  and .resources == []
+                  and (.outcomes | length) == 1
+                  and .outcomes[0].id == "container-placement"
+                  and .outcomes[0].status == $status
+                ' "$output" > /dev/null || { cat "$output" >&2; exit 1; }
+                jq -r '.outcomes[0].message' "$output" | grep -Fq -- "$needle" || {
+                  echo "$output does not mention: $needle" >&2
+                  exit 1
+                }
+              }
+
+              cat > containers <<EOF
+              backend|$declared|running|||
+              testcase|sharp_kalam|running|||
+              finished|jolly_bhabha|exited|||
+              EOF
+              printf '%s\n' "docker-backend.scope|$protected" "docker-testcase.scope|$bounded" > scopes
+              ${lib.getExe observe} > placed.json
+              expect placed.json pass "2 running containers"
+
+              printf '%s\n' "docker-backend.scope|$protected" "docker-testcase.scope|$protected" > scopes
+              ${lib.getExe observe} > escaped.json
+              expect escaped.json fail "sharp_kalam in $protected instead of $bounded"
+
+              printf '%s\n' "docker-backend.scope|$bounded" "docker-testcase.scope|$bounded" > scopes
+              ${lib.getExe observe} > confined.json
+              expect confined.json fail "$declared in $bounded instead of $protected"
+
+              printf '%s\n' "docker-backend.scope|$protected" > scopes
+              ${lib.getExe observe} > vanished.json
+              expect vanished.json pass "1 running containers"
+
+              rm systemctl.log
+              printf '%s\n' "finished|jolly_bhabha|exited|||" > containers
+              ${lib.getExe observe} > idle.json
+              expect idle.json pass "0 running containers"
+              if [ -e systemctl.log ]; then
+                echo "systemctl was asked about scopes with no running container" >&2
+                exit 1
+              fi
+
+              if FAKE_DOCKER_LS_STATUS=1 ${lib.getExe observe} > failed.json 2>&1; then
+                echo "a failed container listing was reported as a placement" >&2
+                exit 1
+              fi
+
+              touch $out
+            '';
       }
-      ''
-        set -euo pipefail
-
-        export FAKE_CONTAINERS=$PWD/containers FAKE_SCOPES=$PWD/scopes FAKE_SYSTEMCTL_LOG=$PWD/systemctl.log
-        declared=${lib.escapeShellArg (builtins.head members)}
-        protected=${placement.declared}
-        bounded=${placement.undeclared}
-
-        expect() {
-          local output=$1 status=$2 needle=$3
-          jq -e --arg status "$status" '
-            .schemaVersion == 1
-            and .resources == []
-            and (.outcomes | length) == 1
-            and .outcomes[0].id == "container-placement"
-            and .outcomes[0].status == $status
-          ' "$output" > /dev/null || { cat "$output" >&2; exit 1; }
-          jq -r '.outcomes[0].message' "$output" | grep -Fq -- "$needle" || {
-            echo "$output does not mention: $needle" >&2
-            exit 1
-          }
-        }
-
-        cat > containers <<EOF
-        backend|$declared|running|||
-        testcase|sharp_kalam|running|||
-        finished|jolly_bhabha|exited|||
-        EOF
-        printf '%s\n' "docker-backend.scope|$protected" "docker-testcase.scope|$bounded" > scopes
-        ${lib.getExe observe} > placed.json
-        expect placed.json pass "2 running containers"
-
-        printf '%s\n' "docker-backend.scope|$protected" "docker-testcase.scope|$protected" > scopes
-        ${lib.getExe observe} > escaped.json
-        expect escaped.json fail "sharp_kalam in $protected instead of $bounded"
-
-        printf '%s\n' "docker-backend.scope|$bounded" "docker-testcase.scope|$bounded" > scopes
-        ${lib.getExe observe} > confined.json
-        expect confined.json fail "$declared in $bounded instead of $protected"
-
-        printf '%s\n' "docker-backend.scope|$protected" > scopes
-        ${lib.getExe observe} > vanished.json
-        expect vanished.json pass "1 running containers"
-
-        rm systemctl.log
-        printf '%s\n' "finished|jolly_bhabha|exited|||" > containers
-        ${lib.getExe observe} > idle.json
-        expect idle.json pass "0 running containers"
-        if [ -e systemctl.log ]; then
-          echo "systemctl was asked about scopes with no running container" >&2
-          exit 1
-        fi
-
-        if FAKE_DOCKER_LS_STATUS=1 ${lib.getExe observe} > failed.json 2>&1; then
-          echo "a failed container listing was reported as a placement" >&2
-          exit 1
-        fi
-
-        touch $out
-      '';
+    )
+  ];
 }

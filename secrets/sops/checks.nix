@@ -1,288 +1,293 @@
 {
-  pkgs,
-  lib,
-  self,
-  hostConfig,
-  hostNames,
-  hostOptions,
-  helpers,
-  ...
-}:
-
-let
-  sopsFile = "${self}/secrets/sops/assets/secrets.json";
-  sopsConfigFile = "${self}/secrets/sops/assets/.sops.yaml";
-  templates = hostConfig.sops.templates;
-  inHome = template: lib.hasPrefix hostConfig.dotfiles.workstation.homeDir template.path;
-  wrongTemplatesFor =
-    candidateTemplates:
-    builtins.filter (
-      template:
-      inHome template
-      && (template.mode != "0600" || template.owner != hostConfig.dotfiles.workstation.username)
-    ) (builtins.attrValues candidateTemplates);
-  templatePolicyIsValid =
-    candidateTemplates: candidateTemplates != { } && wrongTemplatesFor candidateTemplates == [ ];
-  normalTemplateEvaluation = builtins.tryEval (
-    assert templatePolicyIsValid templates;
-    true
-  );
-  emptyTemplateEvaluation = builtins.tryEval (
-    assert templatePolicyIsValid { };
-    true
-  );
-
-  secretObservationsFor =
-    secrets:
-    lib.mapAttrs' (
-      id: secret:
-      lib.nameValuePair "sops/${id}" {
-        kind = "path-metadata";
-        checkId = "secret/${id}";
-        resourceKey = null;
-        timeoutSeconds = 10;
-        failureMessage = "${secret.path} metadata does not match the declared secret metadata";
-        inherit (secret) path mode;
-        owner = if secret.owner == null then "root" else secret.owner;
-        group = if secret.group == null then "root" else secret.group;
-      }
-    ) secrets;
-  selectSopsObservations = lib.filterAttrs (name: _: lib.hasPrefix "sops/" name);
-  secrets = hostConfig.sops.secrets;
-  sopsObservations = selectSopsObservations hostConfig.dotfiles.health.observations;
-  expectedSopsObservations = secretObservationsFor secrets;
-  sopsObservationKeys = builtins.attrNames expectedSopsObservations;
-  sopsObservationDefinitions = builtins.filter (
-    definition: lib.hasSuffix "/secrets/sops/module.nix" (toString definition.file)
-  ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
-  sopsDefinitionKeys = lib.unique (
-    lib.concatMap (definition: builtins.attrNames definition.value) sopsObservationDefinitions
-  );
-  uniqueNonNull =
-    field: observations:
-    let
-      values = builtins.filter (value: value != null) (
-        map (observation: observation.${field}) (builtins.attrValues observations)
-      );
-    in
-    builtins.length values == builtins.length (lib.unique values);
-  sopsContractMatches =
-    candidateSecrets: candidateObservations:
-    selectSopsObservations candidateObservations == secretObservationsFor candidateSecrets;
-
-  secretIds = builtins.attrNames secrets;
-  sampleSecretId = builtins.head secretIds;
-  sampleObservationKey = "sops/${sampleSecretId}";
-  missingObservationMutation = builtins.removeAttrs sopsObservations [ sampleObservationKey ];
-  changedObservationMutation = sopsObservations // {
-    ${sampleObservationKey} = sopsObservations.${sampleObservationKey} // {
-      mode = "0440";
-    };
-  };
-  staleObservationMutation = sopsObservations // {
-    "sops/stale" = sopsObservations.${sampleObservationKey};
-  };
-  foreignObservationMutation = sopsObservations // {
-    "host/independent-sops-fixture" = sopsObservations.${sampleObservationKey};
-  };
-
-  sopsFixtureOptions =
-    { lib, ... }:
-    {
-      options = {
-        sops = {
-          defaultSopsFile = lib.mkOption { type = lib.types.path; };
-          age = {
-            keyFile = lib.mkOption { type = lib.types.str; };
-            generateKey = lib.mkOption { type = lib.types.bool; };
-          };
-          secrets = lib.mkOption {
-            type = lib.types.lazyAttrsOf (
-              lib.types.submodule (
-                { name, ... }:
-                {
-                  options = {
-                    path = lib.mkOption {
-                      type = lib.types.str;
-                      default = "/run/secrets/${name}";
-                    };
-                    owner = lib.mkOption {
-                      type = lib.types.nullOr lib.types.str;
-                      default = null;
-                    };
-                    group = lib.mkOption {
-                      type = lib.types.nullOr lib.types.str;
-                      default = null;
-                    };
-                    mode = lib.mkOption {
-                      type = lib.types.str;
-                      default = "0400";
-                    };
-                    content = lib.mkOption {
-                      type = lib.types.anything;
-                      default = null;
-                    };
-                    sopsFile = lib.mkOption {
-                      type = lib.types.str;
-                      default = "/nix/store/fixture-secret-source";
-                    };
-                  };
-                }
-              )
-            );
-            default = { };
-          };
-        };
-        systemd.tmpfiles.settings = lib.mkOption {
-          type = lib.types.attrsOf lib.types.anything;
-          default = { };
-        };
-        environment.systemPackages = lib.mkOption {
-          type = lib.types.listOf lib.types.package;
-          default = [ ];
-        };
-      };
-    };
-  evalSopsConfig =
-    candidateSecrets:
-    (lib.evalModules {
-      modules = [
-        helpers.observationRegistryModule
-        sopsFixtureOptions
-        ./module.nix
-        { sops.secrets = candidateSecrets; }
-      ];
-      specialArgs = { inherit pkgs; };
-    }).config;
-  fixtureSecrets."fixture/api_token" = {
-    path = "/run/secrets/fixture/api_token";
-    owner = "fixture";
-    group = "fixture";
-    mode = "0440";
-    content = throw "secret content was evaluated while projecting metadata";
-    sopsFile = "/nix/store/fixture-secret-source";
-  };
-  fixtureConfig = evalSopsConfig fixtureSecrets;
-  emptyFixtureConfig = evalSopsConfig { };
-  fixtureObservationJson = builtins.toJSON (
-    selectSopsObservations fixtureConfig.dotfiles.health.observations
-  );
-  observationFields = [
-    "checkId"
-    "failureMessage"
-    "group"
-    "kind"
-    "mode"
-    "owner"
-    "path"
-    "resourceKey"
-    "timeoutSeconds"
-  ];
-in
-{
-  # 鍵は root だけが読み、recipient は宣言と暗号文の両方で一致する
-  sops-policy =
-    assert toString hostConfig.sops.defaultSopsFile == sopsFile;
-    assert hostConfig.sops.age.keyFile == "/var/lib/sops-nix/key.txt";
-    assert !hostConfig.sops.age.generateKey;
-    assert hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z.mode == "0400";
-    pkgs.runCommandLocal "check-sops-policy"
+  configuration = [
+    (
       {
-        nativeBuildInputs = with pkgs; [
-          jq
-          yq-go
+        pkgs,
+        lib,
+        self,
+        hostConfig,
+        hostNames,
+        hostOptions,
+        helpers,
+        ...
+      }:
+      let
+        sopsFile = "${self}/secrets/sops/assets/secrets.json";
+        sopsConfigFile = "${self}/secrets/sops/assets/.sops.yaml";
+        templates = hostConfig.sops.templates;
+        inHome = template: lib.hasPrefix hostConfig.dotfiles.workstation.homeDir template.path;
+        wrongTemplatesFor =
+          candidateTemplates:
+          builtins.filter (
+            template:
+            inHome template
+            && (template.mode != "0600" || template.owner != hostConfig.dotfiles.workstation.username)
+          ) (builtins.attrValues candidateTemplates);
+        templatePolicyIsValid =
+          candidateTemplates: candidateTemplates != { } && wrongTemplatesFor candidateTemplates == [ ];
+        normalTemplateEvaluation = builtins.tryEval (
+          assert templatePolicyIsValid templates;
+          true
+        );
+        emptyTemplateEvaluation = builtins.tryEval (
+          assert templatePolicyIsValid { };
+          true
+        );
+
+        secretObservationsFor =
+          secrets:
+          lib.mapAttrs' (
+            id: secret:
+            lib.nameValuePair "sops/${id}" {
+              kind = "path-metadata";
+              checkId = "secret/${id}";
+              resourceKey = null;
+              timeoutSeconds = 10;
+              failureMessage = "${secret.path} metadata does not match the declared secret metadata";
+              inherit (secret) path mode;
+              owner = if secret.owner == null then "root" else secret.owner;
+              group = if secret.group == null then "root" else secret.group;
+            }
+          ) secrets;
+        selectSopsObservations = lib.filterAttrs (name: _: lib.hasPrefix "sops/" name);
+        secrets = hostConfig.sops.secrets;
+        sopsObservations = selectSopsObservations hostConfig.dotfiles.health.observations;
+        expectedSopsObservations = secretObservationsFor secrets;
+        sopsObservationKeys = builtins.attrNames expectedSopsObservations;
+        sopsObservationDefinitions = builtins.filter (
+          definition: lib.hasSuffix "/secrets/sops/module.nix" (toString definition.file)
+        ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
+        sopsDefinitionKeys = lib.unique (
+          lib.concatMap (definition: builtins.attrNames definition.value) sopsObservationDefinitions
+        );
+        uniqueNonNull =
+          field: observations:
+          let
+            values = builtins.filter (value: value != null) (
+              map (observation: observation.${field}) (builtins.attrValues observations)
+            );
+          in
+          builtins.length values == builtins.length (lib.unique values);
+        sopsContractMatches =
+          candidateSecrets: candidateObservations:
+          selectSopsObservations candidateObservations == secretObservationsFor candidateSecrets;
+
+        secretIds = builtins.attrNames secrets;
+        sampleSecretId = builtins.head secretIds;
+        sampleObservationKey = "sops/${sampleSecretId}";
+        missingObservationMutation = builtins.removeAttrs sopsObservations [ sampleObservationKey ];
+        changedObservationMutation = sopsObservations // {
+          ${sampleObservationKey} = sopsObservations.${sampleObservationKey} // {
+            mode = "0440";
+          };
+        };
+        staleObservationMutation = sopsObservations // {
+          "sops/stale" = sopsObservations.${sampleObservationKey};
+        };
+        foreignObservationMutation = sopsObservations // {
+          "host/independent-sops-fixture" = sopsObservations.${sampleObservationKey};
+        };
+
+        sopsFixtureOptions =
+          { lib, ... }:
+          {
+            options = {
+              sops = {
+                defaultSopsFile = lib.mkOption { type = lib.types.path; };
+                age = {
+                  keyFile = lib.mkOption { type = lib.types.str; };
+                  generateKey = lib.mkOption { type = lib.types.bool; };
+                };
+                secrets = lib.mkOption {
+                  type = lib.types.lazyAttrsOf (
+                    lib.types.submodule (
+                      { name, ... }:
+                      {
+                        options = {
+                          path = lib.mkOption {
+                            type = lib.types.str;
+                            default = "/run/secrets/${name}";
+                          };
+                          owner = lib.mkOption {
+                            type = lib.types.nullOr lib.types.str;
+                            default = null;
+                          };
+                          group = lib.mkOption {
+                            type = lib.types.nullOr lib.types.str;
+                            default = null;
+                          };
+                          mode = lib.mkOption {
+                            type = lib.types.str;
+                            default = "0400";
+                          };
+                          content = lib.mkOption {
+                            type = lib.types.anything;
+                            default = null;
+                          };
+                          sopsFile = lib.mkOption {
+                            type = lib.types.str;
+                            default = "/nix/store/fixture-secret-source";
+                          };
+                        };
+                      }
+                    )
+                  );
+                  default = { };
+                };
+              };
+              systemd.tmpfiles.settings = lib.mkOption {
+                type = lib.types.attrsOf lib.types.anything;
+                default = { };
+              };
+              environment.systemPackages = lib.mkOption {
+                type = lib.types.listOf lib.types.package;
+                default = [ ];
+              };
+            };
+          };
+        evalSopsConfig =
+          candidateSecrets:
+          (lib.evalModules {
+            modules = [
+              helpers.observationRegistryModule
+              sopsFixtureOptions
+              ./module.nix
+              { sops.secrets = candidateSecrets; }
+            ];
+            specialArgs = { inherit pkgs; };
+          }).config;
+        fixtureSecrets."fixture/api_token" = {
+          path = "/run/secrets/fixture/api_token";
+          owner = "fixture";
+          group = "fixture";
+          mode = "0440";
+          content = throw "secret content was evaluated while projecting metadata";
+          sopsFile = "/nix/store/fixture-secret-source";
+        };
+        fixtureConfig = evalSopsConfig fixtureSecrets;
+        emptyFixtureConfig = evalSopsConfig { };
+        fixtureObservationJson = builtins.toJSON (
+          selectSopsObservations fixtureConfig.dotfiles.health.observations
+        );
+        observationFields = [
+          "checkId"
+          "failureMessage"
+          "group"
+          "kind"
+          "mode"
+          "owner"
+          "path"
+          "resourceKey"
+          "timeoutSeconds"
         ];
+      in
+      {
+        # 鍵は root だけが読み、recipient は宣言と暗号文の両方で一致する
+        sops-policy =
+          assert toString hostConfig.sops.defaultSopsFile == sopsFile;
+          assert hostConfig.sops.age.keyFile == "/var/lib/sops-nix/key.txt";
+          assert !hostConfig.sops.age.generateKey;
+          assert hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z.mode == "0400";
+          pkgs.runCommandLocal "check-sops-policy"
+            {
+              nativeBuildInputs = with pkgs; [
+                jq
+                yq-go
+              ];
+            }
+            ''
+              set -euo pipefail
+
+              # 宣言した recipient と、暗号文が実際に持つ recipient が一致すること
+              # anchor は explode しないと alias 名のまま出る
+              yq -r 'explode(.) | .creation_rules[0].key_groups[0].age[]' ${sopsConfigFile} \
+                | sort > declared
+              jq -r '.sops.age[].recipient' ${sopsFile} | sort > actual
+              diff -u declared actual
+
+              # keys の宣言が creation_rules から漏れなく参照されること。
+              # 参照し忘れた鍵は宣言だけが残り、その host は復号できない
+              yq -r '.keys[]' ${sopsConfigFile} | sort > defined
+              diff -u defined declared
+
+              # anchor は alias の指す先を人が読んで確かめる唯一の手掛かり
+              yq -r '.keys[] | anchor' ${sopsConfigFile} | sort > anchors
+              if grep -qx "" anchors; then
+                echo 'every key needs an anchor' >&2
+                exit 1
+              fi
+              test "$(sort -u anchors | wc -l)" -eq "$(wc -l < anchors)"
+              test "$(sort -u declared | wc -l)" -eq "$(wc -l < declared)"
+
+              # recovery 鍵はちょうど一つ。無いと host 鍵を失った時に復旧できず、
+              # 複数あると外部媒体で保管すべき鍵が曖昧になる
+              test "$(grep -cx recovery anchors || true)" -eq 1
+
+              # host 鍵は一つ以上。複数の host が同じ暗号文を共有する
+              test "$(grep -c '^host-' anchors || true)" -ge 1
+
+              # profile と anchor の完全一致は要求しない。鍵の先行 enrollment と段階退役を妨げるため。
+              for anchor in ${
+                lib.concatMapStringsSep " " (hostName: lib.escapeShellArg "host-${hostName}") hostNames
+              }; do
+                if ! grep -qxF "$anchor" anchors; then
+                  echo "registered host has no SOPS recipient: $anchor" >&2
+                  exit 1
+                fi
+              done
+
+              # 暗号化されていない leaf が残っていないこと。sops の metadata は対象外
+              if jq -e 'del(.sops) | [paths(scalars) as $p | getpath($p)]
+                | map(select(startswith("ENC[") | not)) | length > 0' ${sopsFile} > /dev/null; then
+                echo 'the encrypted store holds a plaintext value' >&2
+                exit 1
+              fi
+              touch $out
+            '';
+
+        # secret file は user 所有で 0600。各 unit が mode を決めない
+        sops-secret-file-mode =
+          let
+            wrong = wrongTemplatesFor templates;
+          in
+          assert normalTemplateEvaluation.success;
+          assert !emptyTemplateEvaluation.success;
+          assert templates != { };
+          assert lib.assertMsg (wrong == [ ]) (
+            "sops template does not use the shared user secret file policy: "
+            + lib.concatStringsSep " " (map (t: t.path) wrong)
+          );
+          pkgs.runCommandLocal "check-sops-secret-file-mode" { } "touch $out";
+
+        sops-runtime-observation-contract =
+          assert secretIds != [ ];
+          assert lib.assertMsg (
+            sopsObservations == expectedSopsObservations
+          ) "SOPS runtime observation registry is incomplete";
+          assert lib.assertMsg (
+            sopsDefinitionKeys == sopsObservationKeys
+          ) "SOPS observations must be defined by the sops owner";
+          assert lib.assertMsg (uniqueNonNull "checkId" sopsObservations)
+            "SOPS runtime observation check IDs must be unique";
+          assert lib.assertMsg (uniqueNonNull "resourceKey" sopsObservations)
+            "SOPS runtime observation resource keys must be unique";
+          assert lib.all (observation: observation.resourceKey == null) (
+            builtins.attrValues sopsObservations
+          );
+          assert lib.all (observation: builtins.attrNames observation == observationFields) (
+            builtins.attrValues sopsObservations
+          );
+          assert !(sopsContractMatches secrets missingObservationMutation);
+          assert !(sopsContractMatches secrets changedObservationMutation);
+          assert !(sopsContractMatches secrets staleObservationMutation);
+          assert sopsContractMatches secrets foreignObservationMutation;
+          assert sopsContractMatches fixtureConfig.sops.secrets fixtureConfig.dotfiles.health.observations;
+          assert sopsContractMatches emptyFixtureConfig.sops.secrets
+            emptyFixtureConfig.dotfiles.health.observations;
+          assert !lib.hasInfix "fixture-secret-source" fixtureObservationJson;
+          assert !lib.hasInfix "/nix/store/" fixtureObservationJson;
+          pkgs.runCommandLocal "check-sops-runtime-observation-contract" { } "touch $out";
       }
-      ''
-        set -euo pipefail
-
-        # 宣言した recipient と、暗号文が実際に持つ recipient が一致すること
-        # anchor は explode しないと alias 名のまま出る
-        yq -r 'explode(.) | .creation_rules[0].key_groups[0].age[]' ${sopsConfigFile} \
-          | sort > declared
-        jq -r '.sops.age[].recipient' ${sopsFile} | sort > actual
-        diff -u declared actual
-
-        # keys の宣言が creation_rules から漏れなく参照されること。
-        # 参照し忘れた鍵は宣言だけが残り、その host は復号できない
-        yq -r '.keys[]' ${sopsConfigFile} | sort > defined
-        diff -u defined declared
-
-        # anchor は alias の指す先を人が読んで確かめる唯一の手掛かり
-        yq -r '.keys[] | anchor' ${sopsConfigFile} | sort > anchors
-        if grep -qx "" anchors; then
-          echo 'every key needs an anchor' >&2
-          exit 1
-        fi
-        test "$(sort -u anchors | wc -l)" -eq "$(wc -l < anchors)"
-        test "$(sort -u declared | wc -l)" -eq "$(wc -l < declared)"
-
-        # recovery 鍵はちょうど一つ。無いと host 鍵を失った時に復旧できず、
-        # 複数あると外部媒体で保管すべき鍵が曖昧になる
-        test "$(grep -cx recovery anchors || true)" -eq 1
-
-        # host 鍵は一つ以上。複数の host が同じ暗号文を共有する
-        test "$(grep -c '^host-' anchors || true)" -ge 1
-
-        # profile と anchor の完全一致は要求しない。鍵の先行 enrollment と段階退役を妨げるため。
-        for anchor in ${
-          lib.concatMapStringsSep " " (hostName: lib.escapeShellArg "host-${hostName}") hostNames
-        }; do
-          if ! grep -qxF "$anchor" anchors; then
-            echo "registered host has no SOPS recipient: $anchor" >&2
-            exit 1
-          fi
-        done
-
-        # 暗号化されていない leaf が残っていないこと。sops の metadata は対象外
-        if jq -e 'del(.sops) | [paths(scalars) as $p | getpath($p)]
-          | map(select(startswith("ENC[") | not)) | length > 0' ${sopsFile} > /dev/null; then
-          echo 'the encrypted store holds a plaintext value' >&2
-          exit 1
-        fi
-        touch $out
-      '';
-
-  # secret file は user 所有で 0600。各 unit が mode を決めない
-  sops-secret-file-mode =
-    let
-      wrong = wrongTemplatesFor templates;
-    in
-    assert normalTemplateEvaluation.success;
-    assert !emptyTemplateEvaluation.success;
-    assert templates != { };
-    assert lib.assertMsg (wrong == [ ]) (
-      "sops template does not use the shared user secret file policy: "
-      + lib.concatStringsSep " " (map (t: t.path) wrong)
-    );
-    pkgs.runCommandLocal "check-sops-secret-file-mode" { } "touch $out";
-
-  sops-runtime-observation-contract =
-    assert secretIds != [ ];
-    assert lib.assertMsg (
-      sopsObservations == expectedSopsObservations
-    ) "SOPS runtime observation registry is incomplete";
-    assert lib.assertMsg (
-      sopsDefinitionKeys == sopsObservationKeys
-    ) "SOPS observations must be defined by the sops owner";
-    assert lib.assertMsg (uniqueNonNull "checkId" sopsObservations)
-      "SOPS runtime observation check IDs must be unique";
-    assert lib.assertMsg (uniqueNonNull "resourceKey" sopsObservations)
-      "SOPS runtime observation resource keys must be unique";
-    assert lib.all (observation: observation.resourceKey == null) (
-      builtins.attrValues sopsObservations
-    );
-    assert lib.all (observation: builtins.attrNames observation == observationFields) (
-      builtins.attrValues sopsObservations
-    );
-    assert !(sopsContractMatches secrets missingObservationMutation);
-    assert !(sopsContractMatches secrets changedObservationMutation);
-    assert !(sopsContractMatches secrets staleObservationMutation);
-    assert sopsContractMatches secrets foreignObservationMutation;
-    assert sopsContractMatches fixtureConfig.sops.secrets fixtureConfig.dotfiles.health.observations;
-    assert sopsContractMatches emptyFixtureConfig.sops.secrets
-      emptyFixtureConfig.dotfiles.health.observations;
-    assert !lib.hasInfix "fixture-secret-source" fixtureObservationJson;
-    assert !lib.hasInfix "/nix/store/" fixtureObservationJson;
-    pkgs.runCommandLocal "check-sops-runtime-observation-contract" { } "touch $out";
+    )
+  ];
 }

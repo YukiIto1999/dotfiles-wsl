@@ -468,6 +468,16 @@ let
     };
 in
 {
+  imports = [
+    ./clients/antigravity/module.nix
+    ./clients/claude/module.nix
+    ./clients/codex/module.nix
+    ./clients/omp/module.nix
+    ./clients/opencode/module.nix
+    ./journal/module.nix
+    ./memory-harvest/module.nix
+  ];
+
   options.dotfiles.agents = agentContract.options;
 
   config = {

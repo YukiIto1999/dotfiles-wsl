@@ -90,7 +90,24 @@
       collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };
       units = collectUnits ./.;
 
-      unitModules = builtins.filter builtins.pathExists (map (unit: unit.path + "/module.nix") units);
+      # system closure の依存を Nix が所有するため Nx による task graph の二重管理は不採用
+      environmentModules = [
+        ./workstation/module.nix
+        ./toolchain/module.nix
+        ./agents/module.nix
+        ./skills/module.nix
+        ./capabilities/module.nix
+        ./platform/cli/module.nix
+        ./platform/containers/module.nix
+        ./platform/mcp/module.nix
+        ./maintenance/cleanup/module.nix
+        ./managed-artifacts/module.nix
+        ./secrets/sops/module.nix
+        ./identity/module.nix
+        ./health/module.nix
+        ./telemetry/module.nix
+        ./checks/module.nix
+      ];
 
       readOnlyPackageModule = "${nixpkgs}/nixos/modules/misc/nixpkgs/read-only.nix";
       packageOwnerModule = {
@@ -105,7 +122,7 @@
               inherit pluginSources self;
             };
             modules =
-              unitModules
+              environmentModules
               ++ [
                 readOnlyPackageModule
                 packageOwnerModule
@@ -186,69 +203,137 @@
         { nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel; }
       ];
 
-      unitChecks =
+      checkFiles = builtins.filter builtins.pathExists (map (unit: unit.path + "/checks.nix") units);
+      checkPartFiles = lib.concatMap (
+        unit:
         let
-          # 各 unit の checks.nix を集め、id の重複を拒否する
-          mergeChecks =
-            args: units:
-            let
-              files = builtins.filter builtins.pathExists (map (unit: unit.path + "/checks.nix") units);
-              # 名前は attrset の spine だけで決まるので、値が allCheckNames を参照しても循環しない
-              perUnit = map (file: import file (args // { inherit allCheckNames; })) files;
-              names = lib.concatMap builtins.attrNames perUnit;
-              allCheckNames = builtins.attrNames closureChecks ++ names;
-            in
-            if allCheckNames == lib.unique allCheckNames then
-              lib.foldl' (acc: set: acc // set) { } perUnit
-            else
-              throw "duplicate check id: ${
-                lib.concatStringsSep " " (
-                  lib.unique (lib.filter (n: lib.count (m: m == n) allCheckNames > 1) allCheckNames)
-                )
-              }";
-
-          hostConfig = machineConfigs.${referenceHostName};
-          inherit (nixosSystems.${referenceHostName}) pkgs;
-          inherit (pkgs) lib;
+          directory = unit.path + "/checks";
+          entries = if builtins.pathExists directory then builtins.readDir directory else { };
         in
-        mergeChecks {
-          inherit
-            pkgs
-            lib
-            self
-            hostConfig
-            hostNames
-            machineConfigs
-            machineOptions
-            minimalCapabilityConfig
-            projectMemoryDisabledConfig
-            mkProbeSystem
-            pluginSources
-            sops-nix
-            ;
-          inherit normalMachineModule;
-          hostOptions = nixosSystems.${referenceHostName}.options;
-          inherit units;
-          # checks が共有する eval 時 helper。unit の impl を path で直読みさせない
-          helpers = {
-            execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
-            inherit mergeCheckParts;
-            unitOwnership = import ./checks/impl/unit-ownership.nix { inherit lib; };
-            observationRegistryModule = {
-              options.dotfiles.health.observations = lib.mkOption {
-                type = nixosSystems.${referenceHostName}.options.dotfiles.health.observations.type;
-                default = { };
-                internal = true;
+        map (name: directory + "/${name}") (
+          builtins.filter (lib.hasSuffix ".nix") (builtins.attrNames entries)
+        )
+      ) units;
+      sourceCheckArgs = {
+        pkgs = systemPkgs;
+        inherit
+          lib
+          self
+          pluginSources
+          units
+          ;
+        helpers = {
+          execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
+          inherit mergeCheckParts;
+          unitOwnership = import ./checks/impl/unit-ownership.nix { inherit lib; };
+        };
+      };
+      checkEvaluation = lib.evalModules {
+        class = "dotfiles-checks";
+        specialArgs = sourceCheckArgs;
+        modules = [
+          {
+            _file = toString ./flake.nix;
+            options = {
+              source = lib.mkOption {
+                type = lib.types.listOf (lib.types.lazyAttrsOf lib.types.package);
+                default = [ ];
+              };
+              configuration = lib.mkOption {
+                type = lib.types.listOf (lib.types.functionTo (lib.types.lazyAttrsOf lib.types.package));
+                default = [ ];
               };
             };
-            containerArgv = import ./platform/containers/impl/container-argv.nix {
-              inherit lib hostConfig;
-              execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
+          }
+        ]
+        ++ checkFiles;
+      };
+      flattenModuleGraph = nodes: lib.concatMap (node: [ node ] ++ flattenModuleGraph node.imports) nodes;
+      checkModuleNodes = builtins.filter (node: !node.disabled) (
+        flattenModuleGraph checkEvaluation.graph
+      );
+      expectedCheckFiles = lib.sort builtins.lessThan (map toString (checkFiles ++ checkPartFiles));
+      invalidCheckFiles = builtins.filter (
+        file: (builtins.readDir (builtins.dirOf file)).${builtins.baseNameOf file} != "regular"
+      ) expectedCheckFiles;
+      registeredCheckFiles = lib.sort builtins.lessThan (
+        lib.unique (
+          map (node: node.file) (builtins.filter (node: node.file != toString ./flake.nix) checkModuleNodes)
+        )
+      );
+      classifiedCheckFiles = map (definition: definition.file) (
+        builtins.filter (definition: definition.value != [ ]) (
+          checkEvaluation.options.source.definitionsWithLocations
+          ++ checkEvaluation.options.configuration.definitionsWithLocations
+        )
+      );
+      unclassifiedCheckFiles = map (node: node.file) (
+        builtins.filter (
+          node:
+          builtins.elem node.file expectedCheckFiles
+          && node.imports == [ ]
+          && !(builtins.elem node.file classifiedCheckFiles)
+        ) checkModuleNodes
+      );
+      checkModuleCoverage =
+        assert lib.assertMsg (
+          invalidCheckFiles == [ ]
+        ) "check modules must be regular files: ${builtins.toJSON invalidCheckFiles}";
+        assert lib.assertMsg (registeredCheckFiles == expectedCheckFiles)
+          "check module imports do not cover check files: ${
+            builtins.toJSON {
+              expected = expectedCheckFiles;
+              registered = registeredCheckFiles;
+            }
+          }";
+        assert lib.assertMsg (unclassifiedCheckFiles == [ ])
+          "check modules must declare a source or configuration phase: ${builtins.toJSON unclassifiedCheckFiles}";
+        true;
+      sourceChecks =
+        assert checkModuleCoverage;
+        mergeCheckParts checkEvaluation.config.source;
+      configurationCheckArgs = sourceCheckArgs // {
+        inherit
+          hostNames
+          machineConfigs
+          machineOptions
+          minimalCapabilityConfig
+          projectMemoryDisabledConfig
+          mkProbeSystem
+          normalMachineModule
+          sops-nix
+          ;
+        hostConfig = machineConfigs.${referenceHostName};
+        hostOptions = nixosSystems.${referenceHostName}.options;
+        machineModuleGraphs = lib.mapAttrs (_: machine: machine.graph) nixosSystems;
+        variantConfig = artifactVariantConfig;
+        helpers = sourceCheckArgs.helpers // {
+          observationRegistryModule = {
+            options.dotfiles.health.observations = lib.mkOption {
+              type = nixosSystems.${referenceHostName}.options.dotfiles.health.observations.type;
+              default = { };
+              internal = true;
             };
           };
-          # gateway port を変えた第二の評価。artifact が宣言に追随することを示す
-          variantConfig = artifactVariantConfig;
-        } units;
+          containerArgv = import ./platform/containers/impl/container-argv.nix {
+            inherit lib;
+            hostConfig = machineConfigs.${referenceHostName};
+            inherit (sourceCheckArgs.helpers) execTokens;
+          };
+        };
+      };
+      configurationChecks =
+        assert checkModuleCoverage;
+        mergeCheckParts (map (checks: checks configurationCheckArgs) checkEvaluation.config.configuration);
+      unitChecks = mergeCheckParts [
+        sourceChecks
+        configurationChecks
+      ];
+      allChecks = mergeCheckParts [
+        closureChecks
+        sourceChecks
+        configurationChecks
+      ];
 
       unitChecksPackage = "verification-unit-checks";
       closureChecksPackage = "verification-host-closures";
@@ -282,40 +367,18 @@
       # 単一評価器でのT1予算超過のため逐次実行は不採用
       t1Evaluators = 2;
       t1EvaluatorHeapBytes = 4 * 1024 * 1024 * 1024;
-      # system評価の重複を避けるため共通systemを読む検査の別shard配置は不採用
-      t1SystemChecks = builtins.attrNames closureChecks ++ [
-        "nixos-system-negative-eval"
-        # 変更で再buildする静的検査を先に始めるため評価の重いunitsへの配置は不採用
-        "actionlint"
-        "deadnix"
-        "docs-links"
-        "docs-path-labels"
-        "docs-reader"
-        "dotfiles-option-namespace"
-        "nixfmt"
-        "shellcheck"
-        "statix"
-        "unit-boundary-name-only"
-      ];
+
       t1Shards = {
-        systems = t1SystemChecks;
-        units = builtins.filter (name: !(builtins.elem name t1SystemChecks)) (
-          builtins.attrNames unitChecks
+        source = systemPkgs.linkFarm (t1ShardPackage "source") sourceChecks;
+        configuration = builtins.deepSeq (builtins.attrNames allChecks) (
+          builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) closureChecks) (
+            systemPkgs.linkFarm (t1ShardPackage "configuration") configurationChecks
+          )
         );
       };
       t1ShardPackage = shard: "verification-t1-${shard}";
       t1ShardPackages = lib.mapAttrs' (
-        shard: names:
-        let
-          pick = lib.filterAttrs (name: _: builtins.elem name names);
-          unknown = builtins.filter (name: !(closureChecks ? ${name} || unitChecks ? ${name})) names;
-        in
-        lib.nameValuePair (t1ShardPackage shard) (
-          assert lib.assertMsg (unknown == [ ]) "T1 shard ${shard} names no check: ${toString unknown}";
-          builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) (pick closureChecks)) (
-            systemPkgs.linkFarm (t1ShardPackage shard) (pick unitChecks)
-          )
-        )
+        shard: package: lib.nameValuePair (t1ShardPackage shard) package
       ) t1Shards;
       t1Installables = lib.concatMapStringsSep " " (shard: packageRef (t1ShardPackage shard)) (
         builtins.attrNames t1Shards
@@ -404,6 +467,6 @@
 
       formatter.${system} = systemPkgs.nixfmt-tree;
 
-      checks.${system} = closureChecks // unitChecks;
+      checks.${system} = allChecks;
     };
 }

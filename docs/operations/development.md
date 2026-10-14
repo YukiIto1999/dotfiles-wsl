@@ -74,9 +74,12 @@ T1は入口の解決、指紋の取得、検査、証跡の保存を含めて`ve
 成功証跡は検査前のsourceへ固定して走行ごとに仮保存し、cacheの保存と後始末、証跡の公開が時間内に完了した場合だけwrapperが確定するため、公開途中の失敗や中断、sourceの差し替えでは未検査のsourceに対する終了を認めない。
 pre-pushは検査前と検査後の`git status`と`git ls-files`の失敗も拒否し、sourceを確認できなかった走行ではremoteのrefを更新しない。
 nativeな`verify`自身も同じ`verify.seconds`で検査を止め、外側の期限や中断を内側のprocess groupへ転送して終了を待つが、wrapperを通さない実行は終了gateを開かない。
-T1は`flake.nix`の`t1Shards`で検査を`systems`と`units`の二つに分け、`dotfiles-run-each`が評価器を最大2つ同時に走らせる。
-`systems`は全hostとvariantのtoplevel評価、それを再び強制する`nixos-system-negative-eval`、sourceの全体を読む静的検査と文書検査を受け持ち、`units`は残りの全unitの検査を受け持つ。
-同じsystemの評価を共有する検査は同じshardに置き、別の評価器で同じsystemを評価し直さない。割当てに無い検査は`units`へ入るため、新しい検査は宣言だけでT1に入り、shardの名前を挙げ忘れて検査が抜けることはない。
+T1は`flake.nix`の`t1Shards`で`source`と`configuration`を別の評価器へ分け、`dotfiles-run-each`が最大2つを同時に走らせる。
+`source`はhostやvariantを評価せず、sourceと固定した入力だけを使う検査を実現する。
+`configuration`はnative module graphと構成値を使う検査を実現し、全hostとvariantのsystem closureを評価する。
+各unitの`checks.nix`はnative moduleの入口であり、leafが`source`のpackage集合か`configuration`のcallbackを宣言する。
+登録対象はsource内のcheck fileから導き、native module graphでimportとphaseの漏れを拒否するため、手書きの割当て一覧は不要である。
+check IDは両phaseとsystem closureを通して一意でなければならない。
 評価器のBoehm GCの初期heapは4GiBとし、`GC_INITIAL_HEAP_SIZE`を設定済みの場合は上書きしない。
 初期heapの値は実RSSの上限ではなく、評価器を合わせたメモリの必要量は実行条件とともに測る。
 最初に失敗したshardの終了statusを返し、動いている評価器を止めて終了を待つ。

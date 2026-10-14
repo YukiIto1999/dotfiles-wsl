@@ -6,7 +6,12 @@
 
 ## System generation
 
-[`flake.nix`](../../flake.nix)は、`module.nix`を持つdirectoryを[`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)で収集し、NixOS-WSL、sops-nix、Home Managerと同じNixOS評価へ渡す。[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加Capabilityを持つ。Skillは選択したCapabilityとSkill依存から導く。`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
+[`flake.nix`](../../flake.nix)は責務rootのmoduleを明示し、各親moduleが子moduleを静的にimportして、NixOS-WSL、sops-nix、Home Managerと同じnative module評価へ渡す。
+[`checks/impl/collect-units.nix`](../../checks/impl/collect-units.nix)のdirectory走査は検査用のmetadataを集めるだけであり、本番のmodule採用を決めない。
+検査は全hostのnative module graphとunit markerを照合して、importの取り残しを拒否する。
+[`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のidentity、Agent、Capability、language serverを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有の事実と追加Capabilityを持つ。
+Skillは選択したCapabilityとSkill依存から導く。
+`flake.nix`はhost profileのファイル名を`nixosConfigurations`の属性名と`networking.hostName`へ同時に写す。
 
 Nixpkgsのpackage setは`flake.nix`だけが所有し、nativeのread-only moduleを通して全hostとvariantへ渡す。
 hostからpackage set、config、overlay、platformを差し替えることは拒否する。

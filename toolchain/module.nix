@@ -57,6 +57,12 @@ let
   };
 in
 {
+  imports = [
+    ./dev-shell/module.nix
+    ./git/module.nix
+    ./verification/module.nix
+  ];
+
   # 責務を持つ unit が所有しない、全 project 横断で使う実行ファイル
   options.dotfiles.toolchain.packages = lib.mkOption {
     type = lib.types.attrsOf lib.types.package;

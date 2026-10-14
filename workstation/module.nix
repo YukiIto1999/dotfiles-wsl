@@ -8,6 +8,18 @@ let
   cfg = config.dotfiles.workstation;
 in
 {
+  imports = [
+    ./activation/module.nix
+    ./fonts/module.nix
+    ./home/module.nix
+    ./locale/module.nix
+    ./nix/module.nix
+    ./stability/module.nix
+    ./storage/module.nix
+    ./user/module.nix
+    ./wsl/module.nix
+  ];
+
   options.dotfiles.workstation = {
     username = lib.mkOption {
       type = lib.types.str;

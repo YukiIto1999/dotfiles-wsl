@@ -20,7 +20,10 @@ Codex binary の release contract は、その唯一の consumer である[`agen
 
 ## Check file の境界
 
-各 unit 直下の `checks.nix` を flake からの入口として残す。入口は `checks/*.nix` を明示的に import し、check ID の重複を拒否してから attrset を合成する。公開 check ID と `allCheckNames` の意味は変えない。
+各unitの`checks.nix`はnative moduleとして`checks/*.nix`を明示的にimportする。
+各leafはmachineを評価しない`source`か、構成値を受け取るcallbackの`configuration`を宣言する。
+[`flake.nix`](../../flake.nix)はnative module graphから登録と分類の漏れを調べ、両phaseとsystem closureを通したcheck IDの重複を拒否する。
+check名やfile名の別の手書き一覧は持たない。
 
 `agents/checks/` は次の責務へ分ける。
 

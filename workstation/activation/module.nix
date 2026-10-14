@@ -1,4 +1,6 @@
 _: {
+  imports = [ ./rebuild/module.nix ];
+
   system.stateVersion = "25.11";
 
   dotfiles.health.observations."host/system-generation" = {

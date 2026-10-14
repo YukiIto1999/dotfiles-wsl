@@ -8,6 +8,53 @@
 
 let
   cfg = config.dotfiles;
+  selection = cfg.toolchain.enabledLsp;
+  unknownSelection = lib.unique (
+    builtins.filter (id: !builtins.hasAttr id cfg.toolchain.lspRegistry) selection
+  );
+  duplicateSelection = lib.unique (
+    builtins.filter (id: lib.count (candidate: candidate == id) selection > 1) selection
+  );
+
+  # 採用した registry の定義だけを渡す。未知 ID と重複は、package と client 設定へ渡る前にここで拒否する
+  selectedLsp =
+    assert lib.assertMsg (unknownSelection == [ ]) (
+      "dotfiles.toolchain.enabledLsp references unregistered language servers: "
+      + lib.concatStringsSep ", " unknownSelection
+    );
+    assert lib.assertMsg (duplicateSelection == [ ]) (
+      "dotfiles.toolchain.enabledLsp must not contain duplicate IDs: "
+      + lib.concatStringsSep ", " duplicateSelection
+    );
+    lib.genAttrs selection (id: cfg.toolchain.lspRegistry.${id});
+
+  lspServer = lib.types.submodule {
+    options = {
+      package = lib.mkOption {
+        type = lib.types.package;
+        description = "server binary を提供する package。";
+      };
+      command = lib.mkOption {
+        type = lib.types.str;
+        description = "PATH 上で起動する実行ファイル名。";
+      };
+      args = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = "server を LSP mode で起動する引数。";
+      };
+      extensions = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        description = "拡張子から language id への対応。拡張子は . から始める。";
+      };
+
+      initializationOptions = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        default = { };
+        description = "initialize 時に渡す option。server が定める形で、設定 section の接頭辞は付けない。";
+      };
+    };
+  };
 in
 {
   # 責務を持つ unit が所有しない、全 project 横断で使う実行ファイル
@@ -19,47 +66,26 @@ in
 
   options.dotfiles.toolchain.enabledLsp = lib.mkOption {
     type = lib.types.listOf lib.types.str;
-    description = "この host が必要とする language server ID。";
+    description = "この host が採用する language server ID。`dotfiles.toolchain.lspRegistry` に登録済みの ID を重複なく選び、空も許す。";
+  };
+
+  # 登録は採用と別に持つ。ここに載せるだけでは package も client 設定も配備しない
+  options.dotfiles.toolchain.lspRegistry = lib.mkOption {
+    type = lib.types.attrsOf lspServer;
+    internal = true;
+    description = "登録済みの language server。対象言語は checkout の実測で決める。";
   };
 
   # language server の binary。登録形式は各 CLI が持ち、PATH への配置はここが持つ
   options.dotfiles.toolchain.lsp = lib.mkOption {
-    type = lib.types.attrsOf (
-      lib.types.submodule {
-        options = {
-          package = lib.mkOption {
-            type = lib.types.package;
-            description = "server binary を提供する package。";
-          };
-          command = lib.mkOption {
-            type = lib.types.str;
-            description = "PATH 上で起動する実行ファイル名。";
-          };
-          args = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            default = [ ];
-            description = "server を LSP mode で起動する引数。";
-          };
-          extensions = lib.mkOption {
-            type = lib.types.attrsOf lib.types.str;
-            description = "拡張子から language id への対応。拡張子は . から始める。";
-          };
-
-          initializationOptions = lib.mkOption {
-            type = lib.types.attrsOf lib.types.anything;
-            default = { };
-            description = "initialize 時に渡す option。server が定める形で、設定 section の接頭辞は付けない。";
-          };
-        };
-      }
-    );
-    default = { };
+    type = lib.types.attrsOf lspServer;
+    readOnly = true;
     internal = true;
-    description = "AI CLI が接続する language server。対象言語は checkout の実測で決める。";
+    description = "AI CLI が接続し、PATH へ置く language server。`enabledLsp` が選んだ登録だけを持つ。";
   };
 
   # 使用量と、解決すべき symbol と型を持つかで選ぶ。file 数が多くても HTML と CSS は採らない
-  config.dotfiles.toolchain.lsp = {
+  config.dotfiles.toolchain.lspRegistry = {
     csharp = {
       package = pkgs.roslyn-ls;
       command = "Microsoft.CodeAnalysis.LanguageServer";
@@ -138,6 +164,8 @@ in
     };
   };
 
+  config.dotfiles.toolchain.lsp = selectedLsp;
+
   config.dotfiles.toolchain.packages = {
     actrun = self.inputs.actrun.packages.${pkgs.stdenv.hostPlatform.system}.default;
     similarity = pkgs.callPackage ./package/similarity.nix { };
@@ -181,16 +209,4 @@ in
       builtins.attrValues cfg.toolchain.packages
       ++ map (server: server.package) (builtins.attrValues cfg.toolchain.lsp);
   };
-
-  config.assertions = [
-    {
-      assertion =
-        cfg.toolchain.enabledLsp != [ ]
-        && cfg.toolchain.enabledLsp == lib.unique cfg.toolchain.enabledLsp
-        &&
-          lib.sort builtins.lessThan cfg.toolchain.enabledLsp
-          == lib.sort builtins.lessThan (builtins.attrNames cfg.toolchain.lsp);
-      message = "dotfiles.toolchain.enabledLsp must exactly match the declared LSP keys";
-    }
-  ];
 }

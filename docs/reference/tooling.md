@@ -12,7 +12,7 @@
 | system package | [`workstation/module.nix`](../../workstation/module.nix)と各ownerの`environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
 | 汎用ツール | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages`。devenvとactrunは[`flake.nix`](../../flake.nix)で固定した公式release inputから選ぶ | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
 | Home Manager program | [`workstation/home/module.nix`](../../workstation/home/module.nix)の`programs`。Atuinは同期なしのローカル履歴 | 同じunitを参照する |
-| language server | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.lsp` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.toolchain.lsp --apply builtins.attrNames` |
+| language server | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.lspRegistry`が登録を、profileの`dotfiles.toolchain.enabledLsp`が採用を持つ。PATHとclient設定へ配るのは採用した`dotfiles.toolchain.lsp`だけ | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.toolchain.lsp --apply builtins.attrNames` |
 | 保守用devShell | [`flake.nix`](../../flake.nix)の`devShells` | `nix develop --command echo`の後に`$PATH`を確認する |
 
 `nixfmt`はeditorと単一file、`nixfmt-tree`は`nix fmt`とrepository全体の検査を担当する。[Nixfmt README](https://github.com/NixOS/nixfmt/blob/master/README.md)

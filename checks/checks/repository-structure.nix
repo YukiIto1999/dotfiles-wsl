@@ -850,21 +850,11 @@ in
           };
         }
         {
-          name = "empty-lsp-roster";
-          module = { lib, ... }: {
-            dotfiles.toolchain.enabledLsp = lib.mkForce [ ];
-          };
-        }
-        {
-          name = "missing-lsp";
+          name = "duplicate-lsp";
           module = { lib, ... }: {
             dotfiles.toolchain.enabledLsp = lib.mkForce [
-              "bash"
-              "csharp"
-              "java"
               "nix"
-              "python"
-              "rust"
+              "nix"
             ];
           };
         }

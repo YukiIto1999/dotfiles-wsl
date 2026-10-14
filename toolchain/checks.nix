@@ -3,50 +3,120 @@
   lib,
   hostConfig,
   self,
+  mkProbeSystem,
+  normalMachineModule,
   ...
 }:
 
 let
-  homeConfig = hostConfig.home-manager.users.${hostConfig.dotfiles.workstation.username};
-  lspServers = builtins.attrValues hostConfig.dotfiles.toolchain.lsp;
-  expectedLspNames = [
-    "bash"
-    "csharp"
-    "java"
-    "nix"
-    "python"
-    "rust"
-    "typescript"
-  ];
-  lspRosterIsValid =
-    servers:
-    servers != { } && lib.sort builtins.lessThan (builtins.attrNames servers) == expectedLspNames;
-  normalLspEvaluation = builtins.tryEval (
-    assert lspRosterIsValid hostConfig.dotfiles.toolchain.lsp;
-    true
-  );
-  emptyLspEvaluation = builtins.tryEval (
-    assert lspRosterIsValid { };
-    true
-  );
+  inherit (hostConfig.dotfiles.workstation) username;
+  homePackagesOf = configuration: configuration.home-manager.users.${username}.home.packages;
+  registry = hostConfig.dotfiles.toolchain.lspRegistry;
+  registeredIds = builtins.attrNames registry;
+  registeredServers = builtins.attrValues registry;
   toolchain = hostConfig.dotfiles.toolchain.packages;
+  hostSelection = lib.sort builtins.lessThan hostConfig.dotfiles.toolchain.enabledLsp;
+  lspProbe =
+    selection:
+    (mkProbeSystem [
+      normalMachineModule
+      { dotfiles.toolchain.enabledLsp = lib.mkForce selection; }
+    ]).config;
+  selectedIdsOf = configuration: builtins.attrNames configuration.dotfiles.toolchain.lsp;
+  deployedIdsOf =
+    configuration:
+    builtins.filter (id: lib.elem registry.${id}.package (homePackagesOf configuration)) registeredIds;
+  rejected = value: !(builtins.tryEval value).success;
+  artifactSource = configuration: id: configuration.dotfiles.managedArtifacts.${id}.source;
+  expectedCommands = selection: builtins.toJSON (map (id: registry.${id}.command) selection);
+  subsetSelection = [
+    "nix"
+    "bash"
+  ];
+  subsetIds = lib.sort builtins.lessThan subsetSelection;
+  emptyProbe = lspProbe [ ];
+  subsetProbe = lspProbe subsetSelection;
+  unknownProbe = lspProbe [
+    "nix"
+    "missing-lsp"
+  ];
+  duplicateProbe = lspProbe [
+    "nix"
+    "bash"
+    "nix"
+  ];
+  projections = [
+    {
+      name = "empty";
+      selection = [ ];
+      probe = emptyProbe;
+    }
+    {
+      name = "subset";
+      selection = subsetSelection;
+      probe = subsetProbe;
+    }
+  ];
 in
 {
-  # 宣言した command が package に無いと、CLI 側は起動時まで気付かない
   lsp-command-present =
-    assert normalLspEvaluation.success;
-    assert !emptyLspEvaluation.success;
-    assert lspServers != [ ];
-    assert lib.all (server: lib.elem server.package homeConfig.home.packages) lspServers;
+    assert registeredServers != [ ];
     assert lib.all (
       server: lib.all (extension: lib.hasPrefix "." extension) (builtins.attrNames server.extensions)
-    ) lspServers;
+    ) registeredServers;
     pkgs.runCommandLocal "check-lsp-command-present" { nativeBuildInputs = [ pkgs.coreutils ]; } (
       lib.concatMapStrings (server: ''
         test -x ${server.package}/bin/${server.command}
-      '') lspServers
+      '') registeredServers
       + "touch $out"
     );
+
+  lsp-selection =
+    assert selectedIdsOf hostConfig == hostSelection;
+    assert deployedIdsOf hostConfig == selectedIdsOf hostConfig;
+    assert selectedIdsOf emptyProbe == [ ];
+    assert deployedIdsOf emptyProbe == [ ];
+    assert lib.all (package: lib.elem package (homePackagesOf emptyProbe)) (
+      builtins.attrValues toolchain
+    );
+    assert selectedIdsOf subsetProbe == subsetIds;
+    assert deployedIdsOf subsetProbe == selectedIdsOf subsetProbe;
+    assert subsetProbe.dotfiles.toolchain.lsp == lib.getAttrs subsetSelection registry;
+    assert builtins.attrNames subsetProbe.dotfiles.toolchain.lspRegistry == registeredIds;
+    assert rejected (selectedIdsOf unknownProbe);
+    assert rejected (builtins.length (homePackagesOf unknownProbe));
+    assert rejected (selectedIdsOf duplicateProbe);
+    assert rejected (builtins.length (homePackagesOf duplicateProbe));
+    pkgs.runCommandLocal "check-lsp-selection" { nativeBuildInputs = [ pkgs.jq ]; } ''
+      set -euo pipefail
+
+      expect_commands() {
+        local label=$1 expected=$2 filter=$3 file=$4
+        if ! jq --exit-status --argjson expected "$expected" \
+          "([$filter] | sort) == (\$expected | sort)" "$file" > /dev/null; then
+          echo "$label did not project exactly $expected:" >&2
+          jq -c "[$filter]" "$file" >&2
+          exit 1
+        fi
+      }
+
+      project() {
+        local label=$1 expected=$2 claudeSettings=$3 ompLsp=$4 opencodeConfig=$5 marketplace
+        marketplace=$(jq -r '.extraKnownMarketplaces.dotfiles.source.path' "$claudeSettings")
+        expect_commands "$label/claude" "$expected" '.[].command' "$marketplace/lsp/.lsp.json"
+        expect_commands "$label/omp" "$expected" '.[].command' "$ompLsp"
+        expect_commands "$label/opencode" "$expected" '.lsp[].command[0]' "$opencodeConfig"
+      }
+
+      ${lib.concatMapStrings (projection: ''
+        project ${lib.escapeShellArg projection.name} \
+          ${lib.escapeShellArg (expectedCommands projection.selection)} \
+          ${artifactSource projection.probe "agents/claude/managed-settings"} \
+          ${artifactSource projection.probe "agents/omp/lsp"} \
+          ${artifactSource projection.probe "agents/opencode/config"}
+      '') projections}
+      touch $out
+    '';
 
   # 上流 release の binary は同梱 library を欠くと build は通って実行時に落ちる
   toolchain-binary-runs =

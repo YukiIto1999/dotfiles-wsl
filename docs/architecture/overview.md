@@ -39,7 +39,7 @@ Nix storeのcandidate system
    └── current generationのdoctor command
 ```
 
-通常の適用入口は`dotfiles-rebuild`だけである。[`workstation/activation/rebuild/module.nix`](../../workstation/activation/rebuild/module.nix)はPATH上の直接の`nixos-rebuild`を拒否し、未commitの変更、candidate build、WSL再起動要否を同じ手順で扱う。世代とrollbackはNixOSが所有する。
+通常の適用入口は`dotfiles-rebuild`だけである。[`workstation/activation/rebuild/module.nix`](../../workstation/activation/rebuild/module.nix)はPATH上の直接の`nixos-rebuild`を拒否し、未commitの変更、隔離したsourceで作る候補のnative GC rootでの保持、確認した候補のstore pathの適用、WSL再起動要否を同じ手順で扱う。世代とrollbackはNixOSが所有し、rollbackは適用と同じ書き手で直列化する。
 
 `/run/current-system`は実行中のgeneration、`/nix/var/nix/profiles/system`はsystem profile、`/run/booted-system`はWSL起動時のgenerationを表す。`wsl.conf`とactivation interfaceの差分に応じて、live switchとWSL cold startを分ける。
 

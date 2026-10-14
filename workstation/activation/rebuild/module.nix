@@ -7,14 +7,34 @@
 
 let
   mkCommand = import ../../../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
+  childGraceSeconds = "10";
   rebuildVars = {
     configuredDotfiles = lib.escapeShellArg config.dotfiles.workstation.dotfilesDir;
-    hostName = config.networking.hostName;
+    hostName = lib.escapeShellArg config.networking.hostName;
     distroName = lib.escapeShellArg config.dotfiles.workstation.wsl.distroName;
     nixosRebuild = lib.escapeShellArg (lib.getExe config.system.build.nixos-rebuild);
     sudoCommand = lib.escapeShellArg "${config.security.wrapperDir}/sudo";
     nvd = lib.escapeShellArg (lib.getExe pkgs.nvd);
     wslRestartRequired = lib.escapeShellArg (lib.getExe wslRestartRequired);
+    verificationEntry = lib.escapeShellArg (lib.getExe config.dotfiles.toolchain.verification.entry);
+    agentVerify = lib.escapeShellArg (lib.getExe config.dotfiles.agents.packages.verification);
+    supervise = lib.escapeShellArg (lib.getExe config.dotfiles.platform.supervise.package);
+    lockUpdater = lib.escapeShellArg (lib.getExe lockUpdater);
+    # clientごとの配備先は別のstateであり、rollbackは戻さない。実際に指す先を報告するため選択済みの契約を渡す
+    clientExecutables = lib.escapeShellArg (
+      lib.concatStringsSep "\n" (
+        lib.mapAttrsToList (id: path: "${id}\t${path}") config.dotfiles.agents.clientExecutables
+      )
+    );
+    inherit childGraceSeconds;
+  };
+
+  lockUpdater = pkgs.writeShellApplication {
+    name = "dotfiles-commit-lock";
+    runtimeInputs = [ pkgs.git ];
+    text = ''
+      exec ${lib.getExe pkgs.python3} -I -S ${./impl/commit-lock.py} "$@"
+    '';
   };
 
   wslRestartRequired = mkCommand {
@@ -33,8 +53,11 @@ let
     runtimeInputs = with pkgs; [
       git
       coreutils
+      diffutils
+      jq
       nix
       nvd
+      util-linux
     ];
     vars = rebuildVars;
   };

@@ -1,63 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-rebuild=${1:?rebuild entrypoint is required}
-dependencies=${2:?fixture dependencies are required}
-restart_planner=${3:?restart planner is required}
-test_root=$(mktemp -d)
-trap 'rm -rf -- "$test_root"' EXIT
+# shellcheck source=/dev/null
+source "${1:?harness is required}"
+harness_init "${2:?rebuild entrypoint is required}" "${3:?fixture dependencies are required}" \
+  "${4:?restart planner is required}"
 
-export REBUILD_CHECKOUT="$test_root/checkout"
-export REBUILD_SYSTEM_PROFILE="$test_root/profiles/system"
-export REBUILD_CANDIDATE="$test_root/candidate"
-export REBUILD_BOOTED_SYSTEM="$test_root/booted"
-export REBUILD_RUNNING_SYSTEM="$test_root/running"
-export REBUILD_GENERATIONS="$test_root/generations"
-export REBUILD_CALL_LOG="$test_root/calls"
-export REBUILD_RESTART_PLANNER=$restart_planner
-export PATH="$dependencies/bin:$PATH"
-output=$test_root/output
-mkdir -p "$REBUILD_CHECKOUT" "${REBUILD_SYSTEM_PROFILE%/*}"
-for system in "$REBUILD_CANDIDATE" "$REBUILD_BOOTED_SYSTEM" "$REBUILD_RUNNING_SYSTEM"; do
-  mkdir -p "$system/etc"
-  printf '[user]\ndefault=nixos\n' > "$system/etc/wsl.conf"
-  printf '1\n' > "$system/init-interface-version"
-done
-previous=$test_root/previous
-cp -r "$REBUILD_CANDIDATE" "$previous"
-ln -s "$previous" "$REBUILD_SYSTEM_PROFILE-3-link"
-ln -s "$REBUILD_RUNNING_SYSTEM" "$REBUILD_SYSTEM_PROFILE-7-link"
-ln -s "$REBUILD_SYSTEM_PROFILE-7-link" "$REBUILD_SYSTEM_PROFILE"
-printf '3 2026-10-01 12:00:00\n7 2026-10-02 12:00:00 (current)\n10 2026-10-03 12:00:00\n' > "$REBUILD_GENERATIONS"
-
-git -C "$REBUILD_CHECKOUT" init -q
-git -C "$REBUILD_CHECKOUT" config user.name 'Rebuild fixture'
-git -C "$REBUILD_CHECKOUT" config user.email 'fixture@example.invalid'
-printf 'initial\n' > "$REBUILD_CHECKOUT/tracked"
-printf 'lock-1\n' > "$REBUILD_CHECKOUT/flake.lock"
-git -C "$REBUILD_CHECKOUT" add tracked flake.lock
-git -C "$REBUILD_CHECKOUT" commit -qm initial
-
-run_rebuild() {
-  local expected_status=$1 status=0
-  shift
-  : > "$REBUILD_CALL_LOG"
-  "$rebuild" "$@" > "$output" 2>&1 || status=$?
-  if [[ $status != "$expected_status" ]]; then
-    cat "$output" >&2
-    printf 'expected exit %s, got %s\n' "$expected_status" "$status" >&2
-    exit 1
-  fi
-}
-
-assert_no_switch() {
-  if grep -q '^nixos-rebuild ' "$REBUILD_CALL_LOG"; then
-    printf 'a read-only or rejected invocation switched the system\n' >&2
-    exit 1
-  fi
-}
-
-printf 'edited\n' >> "$REBUILD_CHECKOUT/tracked"
+# A tracked edit, a staged edit, an untracked file and an edit hidden by the index all keep
+# every mode from starting, before any command is run.
+printf 'edited\n' >>"$REBUILD_CHECKOUT/tracked"
 for option in '' --plan --rollback; do
   if [[ -n $option ]]; then
     run_rebuild 2 "$option"
@@ -65,109 +16,170 @@ for option in '' --plan --rollback; do
     run_rebuild 2
   fi
   [[ ! -s $REBUILD_CALL_LOG ]]
-  grep -Fq 'commit the working tree' "$output"
+  assert_output_has 'commit the working tree'
 done
-git -C "$REBUILD_CHECKOUT" add tracked
+checkout_git add tracked
 run_rebuild 2
 [[ ! -s $REBUILD_CALL_LOG ]]
-git -C "$REBUILD_CHECKOUT" commit -qm change
+checkout_git commit -qm change
 
+printf 'new\n' >"$REBUILD_CHECKOUT/untracked-source"
+run_rebuild 2
+[[ ! -s $REBUILD_CALL_LOG ]]
+assert_output_has 'untracked-source'
+rm -- "$REBUILD_CHECKOUT/untracked-source"
+
+checkout_git update-index --assume-unchanged tracked
+printf 'hidden\n' >>"$REBUILD_CHECKOUT/tracked"
+run_rebuild 2 --plan
+[[ ! -s $REBUILD_CALL_LOG ]]
+assert_output_has 'commit the working tree'
+checkout_git update-index --no-assume-unchanged tracked
+checkout_git checkout -- tracked
+
+# A plan builds a candidate and changes neither the checkout nor the system.
+lock_one=$(<"$REBUILD_CHECKOUT/flake.lock")
+candidate_one=$(system_for_lock "$lock_one")
+head_before=$(head_of)
+before=$(checkout_snapshot)
 run_rebuild 0 --plan
-grep -Fxq 'plan: switch' "$output"
+assert_output_has 'plan: switch'
+assert_output_has "candidate-path: $candidate_one"
+assert_called 'nix flake update architectureStandard'
 assert_no_switch
+[[ $(checkout_snapshot) == "$before" ]]
+assert_no_work_left
+planned=$(candidate_id_of_output)
+[[ $(readlink "$REBUILD_STATE/candidates/$planned/toplevel") == "$candidate_one" ]]
+
+# Applying switches to exactly the candidate. The native tool is given the built store path
+# and never resolves the flake again.
 run_rebuild 0
-grep -Fxq "nixos-rebuild switch --flake $REBUILD_CHECKOUT#fixture-host" "$REBUILD_CALL_LOG"
+assert_called "nixos-rebuild switch --no-reexec --store-path $candidate_one"
+assert_not_called 'nixos-rebuild switch --flake'
+assert_call_order 'agent-verify-head' 'nixos-rebuild'
+[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$candidate_one" ]]
+assert_output_has "system profile: $candidate_one (generation 11)"
+assert_output_has 'result: applied candidate'
+assert_no_terminate
+[[ $(head_of) == "$head_before" ]]
+[[ $(state_entries candidates) == "$planned" ]]
+run_rebuild 0 --discard "$planned"
+[[ -z $(state_entries candidates) ]]
 
-checkout_git() { git -C "$REBUILD_CHECKOUT" "$@"; }
-standard_subject='fix: 標準の実行 package の最新版への更新'
-assert_clean_tree() { [[ -z $(checkout_git status --porcelain --untracked-files=no) ]]; }
+# A new standard revision becomes one commit that changes only flake.lock.
+reset_profile
+lock_two=$(lock_json rev-2)
+head_before=$(head_of)
+REBUILD_LOCK_NEXT=$lock_two run_rebuild 0
+[[ $(head_of HEAD^) == "$head_before" ]]
+[[ $(checkout_git log -1 --format=%s) == "$REBUILD_STANDARD_SUBJECT" ]]
+[[ $(checkout_git diff-tree --no-commit-id --name-only -r HEAD) == flake.lock ]]
+[[ $(checkout_git show HEAD:flake.lock) == "$lock_two" ]]
+[[ -z $(checkout_git status --porcelain --untracked-files=all) ]]
+assert_called "nixos-rebuild switch --no-reexec --store-path $(system_for_lock "$lock_two")"
+assert_call_order 'nix flake update architectureStandard' 'nixos-rebuild'
+assert_output_has 'standard: rev-1 -> rev-2'
 
-head_before=$(checkout_git rev-parse HEAD)
-REBUILD_LOCK_NEXT=lock-2 run_rebuild 0 --plan
-grep -Fxq 'nix flake update architectureStandard' "$REBUILD_CALL_LOG"
-grep -Fxq 'plan: switch' "$output"
-assert_no_switch
-[[ $(checkout_git rev-parse HEAD) == "$head_before" ]]
-[[ $(<"$REBUILD_CHECKOUT/flake.lock") == lock-1 ]]
-assert_clean_tree
-
-REBUILD_LOCK_NEXT=lock-2 run_rebuild 0
-[[ $(head -n 1 "$REBUILD_CALL_LOG") == 'nix flake update architectureStandard' ]]
-[[ $(checkout_git log -1 --format=%s) == "$standard_subject" ]]
-[[ $(checkout_git show HEAD:flake.lock) == lock-2 ]]
-assert_clean_tree
-grep -Fxq "nixos-rebuild switch --flake $REBUILD_CHECKOUT#fixture-host" "$REBUILD_CALL_LOG"
-
-head_before=$(checkout_git rev-parse HEAD)
-run_rebuild 0
-[[ $(checkout_git rev-parse HEAD) == "$head_before" ]]
-
-REBUILD_UPDATE_STATUS=1 REBUILD_LOCK_NEXT=lock-3 run_rebuild 0
-grep -Fq 'WARN: could not update the standard input' "$output"
-[[ $(checkout_git rev-parse HEAD) == "$head_before" ]]
-grep -Fxq "nixos-rebuild switch --flake $REBUILD_CHECKOUT#fixture-host" "$REBUILD_CALL_LOG"
-
-printf '#!/bin/sh\nexit 1\n' > "$REBUILD_CHECKOUT/.git/hooks/pre-commit"
-chmod +x "$REBUILD_CHECKOUT/.git/hooks/pre-commit"
-REBUILD_LOCK_NEXT=lock-4 run_rebuild 2
-grep -Fq 'could not record the standard update' "$output"
-assert_no_switch
-[[ $(<"$REBUILD_CHECKOUT/flake.lock") == lock-2 ]]
-assert_clean_tree
-rm -f -- "$REBUILD_CHECKOUT/.git/hooks/pre-commit"
-
-export REBUILD_CANDIDATE=$previous
-run_rebuild 0 --rollback --plan
-grep -Fxq 'plan: switch' "$output"
-assert_no_switch
-if grep -q '^nix ' "$REBUILD_CALL_LOG"; then
-  printf 'rollback built a new flake instead of selecting an existing generation\n' >&2
-  exit 1
-fi
-run_rebuild 0 --rollback
-grep -Fxq 'nixos-rebuild switch --rollback' "$REBUILD_CALL_LOG"
-
-printf '\n[interop]\nappendWindowsPath=true\n' >> "$previous/etc/wsl.conf"
-run_rebuild 0 --plan --rollback
-grep -Fxq 'plan: switch-restart' "$output"
-assert_no_switch
-run_rebuild 0 --rollback
-grep -Fxq "  wsl.exe --terminate 'Fixture Distro'" "$output"
-
-printf '7 2026-10-02 12:00:00 (current)\n' > "$REBUILD_GENERATIONS"
-run_rebuild 2 --rollback
-assert_no_switch
-printf '3 2026-10-01 12:00:00\n7 2026-10-02 12:00:00 (current)\n' > "$REBUILD_GENERATIONS"
-REBUILD_HISTORY_STATUS=1 run_rebuild 2 --rollback
-assert_no_switch
-
-REBUILD_SWITCH_STATUS=1 run_rebuild 2
-assert_failure_guidance() {
-  grep -Fq 'readlink -f /run/current-system' "$output"
-  grep -Fq "readlink -f $REBUILD_SYSTEM_PROFILE" "$output"
-  grep -Fq 'systemctl --failed' "$output"
-  grep -Fq 'journalctl' "$output"
-  if grep -q 'previous generation is still active' "$output"; then
-    printf 'switch failure claimed an unobserved active generation\n' >&2
-    exit 1
-  fi
-}
-assert_failure_guidance
-REBUILD_PARTIAL_SWITCH=1 REBUILD_SWITCH_STATUS=1 run_rebuild 2
-[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$REBUILD_CANDIDATE" ]]
-assert_failure_guidance
-ln -sfn "$REBUILD_SYSTEM_PROFILE-7-link" "$REBUILD_SYSTEM_PROFILE"
-REBUILD_SWITCH_STATUS=1 run_rebuild 2 --rollback
-assert_failure_guidance
-
+# A failed build leaves the checkout and the system as they were.
+reset_profile
+before=$(checkout_snapshot)
 REBUILD_BUILD_STATUS=1 run_rebuild 2
 assert_no_switch
-for arguments in '--plan --plan' '--rollback --rollback' '--help --rollback' '--plan unexpected'; do
-  read -r -a argv <<< "$arguments"
+[[ $(checkout_snapshot) == "$before" ]]
+assert_no_work_left
+[[ -z $(state_entries candidates) ]]
+
+# A failed activation is reported as observed, never as restored.
+REBUILD_SWITCH_STATUS=1 run_rebuild 5
+assert_failure_guidance
+assert_output_has 'activation-failed'
+assert_output_lacks 'result: applied'
+reset_profile
+REBUILD_PARTIAL_SWITCH=1 REBUILD_SWITCH_STATUS=1 run_rebuild 5
+[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$(system_for_lock "$(<"$REBUILD_CHECKOUT/flake.lock")")" ]]
+assert_failure_guidance
+reset_profile
+REBUILD_SWITCH_NOOP=1 run_rebuild 5
+assert_output_has 'resolves to'
+assert_output_lacks 'result: applied'
+reset_profile
+
+# Rollback selects the previous generation that remains, without fetching or building. The
+# client binary moved to a newer revision on its own, and the rollback reports the combination
+# that results instead of claiming it moved the client back.
+printf 'client binary 2\n' >"$REBUILD_STORE_DIR/omp-binary-2"
+ln -sfn "$REBUILD_STORE_DIR/omp-binary-2" "$REBUILD_ROOT/clients/omp"
+run_rebuild 0 --rollback --plan
+assert_output_has 'plan: switch'
+assert_output_has "rollback: system generation 3 ($REBUILD_PREVIOUS)"
+assert_no_switch
+assert_not_called 'nix '
+run_rebuild 0 --rollback
+assert_called 'nixos-rebuild switch --no-reexec --rollback'
+assert_not_called 'nix '
+assert_output_has "system profile: $REBUILD_PREVIOUS (generation 3)"
+assert_output_has "omp: $REBUILD_ROOT/clients/omp -> $REBUILD_STORE_DIR/omp-binary-2"
+assert_output_has 'this command does not change them'
+assert_output_has 'result: rolled back the system generation to 3'
+reset_profile
+
+# A manifest change needs a restart but the switch is complete; the command is shown, not run.
+printf '\n[interop]\nappendWindowsPath=true\n' >>"$REBUILD_PREVIOUS/etc/wsl.conf"
+run_rebuild 0 --plan --rollback
+assert_output_has 'plan: switch-restart'
+assert_no_switch
+run_rebuild 0 --rollback
+assert_output_has "  wsl.exe --terminate 'Fixture Distro'"
+assert_no_terminate
+reset_profile
+
+# An interface change is a boot transition: not a completed switch, and WSL is not terminated.
+printf '[user]\ndefault=nixos\n' >"$REBUILD_PREVIOUS/etc/wsl.conf"
+printf 'incompatible\n' >>"$REBUILD_PREVIOUS/init-interface-version"
+run_rebuild 0 --rollback --plan
+assert_output_has 'plan: boot-restart'
+run_rebuild 3 --rollback
+assert_output_has 'boot-transition'
+assert_output_has "  wsl.exe --terminate 'Fixture Distro'"
+assert_output_lacks 'result: rolled back'
+assert_no_terminate
+[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$REBUILD_PREVIOUS" ]]
+printf '1\n' >"$REBUILD_PREVIOUS/init-interface-version"
+reset_profile
+
+printf '7 2026-10-02 12:00:00 (current)\n' >"$REBUILD_GENERATIONS"
+run_rebuild 2 --rollback
+assert_no_switch
+printf '3 2026-10-01 12:00:00\n7 2026-10-02 12:00:00 (current)\n' >"$REBUILD_GENERATIONS"
+REBUILD_HISTORY_STATUS=1 run_rebuild 2 --rollback
+assert_no_switch
+printf '3 2026-10-01 12:00:00\n7 2026-10-02 12:00:00 (current)\n10 2026-10-03 12:00:00\n' >"$REBUILD_GENERATIONS"
+
+REBUILD_SWITCH_STATUS=1 run_rebuild 5 --rollback
+assert_failure_guidance
+REBUILD_PARTIAL_SWITCH=1 REBUILD_SWITCH_STATUS=1 run_rebuild 5 --rollback
+[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$REBUILD_PREVIOUS" ]]
+assert_failure_guidance
+reset_profile
+REBUILD_SWITCH_NOOP=1 run_rebuild 5 --rollback
+assert_output_has 'resolves to'
+assert_output_lacks 'result: rolled back'
+reset_profile
+
+for arguments in '--plan --plan' '--rollback --rollback' '--help --rollback' '--plan unexpected' \
+  '--locked --locked' '--rollback --locked' '--candidate' '--candidate 1-2 --plan' \
+  '--candidate 1-2 --locked' '--candidate 1-2 --rollback' '--discard 1-2 --rollback' \
+  '--candidate 1-2 --discard 1-3' '--discard'; do
+  read -r -a argv <<<"$arguments"
   run_rebuild 2 "${argv[@]}"
   [[ ! -s $REBUILD_CALL_LOG ]]
 done
+run_rebuild 0 --help
+assert_output_has 'usage:'
+[[ ! -s $REBUILD_CALL_LOG ]]
 
-mv "$REBUILD_CHECKOUT/.git" "$test_root/git-hidden"
+mv "$REBUILD_CHECKOUT/.git" "$REBUILD_ROOT/git-hidden"
 run_rebuild 2
 [[ ! -s $REBUILD_CALL_LOG ]]
+mv "$REBUILD_ROOT/git-hidden" "$REBUILD_CHECKOUT/.git"

@@ -7,7 +7,6 @@
         hostConfig,
         ...
       }:
-
       let
         wslRestartRequired = hostConfig.dotfiles.platform.cli.commands.wslRestartRequired;
         wslConfig = hostConfig.environment.etc."wsl.conf".source;
@@ -29,33 +28,109 @@
           chmod u+w "$out/dependency"
           substituteInPlace "$out/dependency" --replace-fail '#!/usr/bin/env bash' '#!${pkgs.bash}/bin/bash'
           chmod +x "$out/dependency"
-          for name in nix nix-env nvd sudo nixos-rebuild; do
+          for name in nix nix-env nvd sudo nixos-rebuild dotfiles-verify-entry dotfiles-agent-verify wsl.exe; do
             ln -s ../dependency "$out/bin/$name"
           done
+        '';
+        interleavingGit = pkgs.writeShellScriptBin "git" ''
+          exec ${pkgs.bash}/bin/bash ${
+            pkgs.replaceVars ./fixtures/rebuild-git.sh {
+              git = "${pkgs.git}/bin/git";
+            }
+          } "$@"
         '';
         testRestartPlanner = pkgs.writeShellScript "test-restart-planner" ''
           exec "$REBUILD_RESTART_PLANNER" \
             --booted-system "$REBUILD_BOOTED_SYSTEM" \
             --current-system "$REBUILD_RUNNING_SYSTEM" "$@"
         '';
-        testRebuildScript = pkgs.replaceVars ./impl/rebuild.sh {
-          configuredDotfiles = ''"$REBUILD_CHECKOUT"'';
-          hostName = "fixture-host";
-          distroName = lib.escapeShellArg "Fixture Distro";
-          systemProfilePath = "$REBUILD_SYSTEM_PROFILE";
-          nixosRebuild = lib.escapeShellArg "${rebuildDependencies}/bin/nixos-rebuild";
-          sudoCommand = lib.escapeShellArg "${rebuildDependencies}/bin/sudo";
-          nvd = lib.escapeShellArg "${rebuildDependencies}/bin/nvd";
-          wslRestartRequired = lib.escapeShellArg testRestartPlanner;
-        };
-        testRebuild = pkgs.writeShellApplication {
-          name = "dotfiles-rebuild-test";
-          runtimeInputs = with pkgs; [
-            coreutils
-            git
-          ];
-          text = ''exec ${pkgs.bash}/bin/bash -euo pipefail ${testRebuildScript} "$@"'';
-        };
+        supervise = lib.getExe hostConfig.dotfiles.platform.supervise.package;
+        unconfirmedSupervise = pkgs.writeShellScript "supervise-unconfirmed" ''
+          args=("$@")
+          for ((index=0; index<''${#args[@]}; index++)); do
+            if [[ ''${args[index]} == --parent-death-cancels ]]; then
+              args[index+1]=$$
+            fi
+          done
+          result=
+          while [[ $# -gt 0 ]]; do
+            if [[ $1 == --result ]]; then
+              result=$2
+            fi
+            shift
+          done
+          ${supervise} "''${args[@]}"
+          status=$?
+          printf '{"version":1,"phase":"finished","spawned":true,"cancelled":false,"drained":false,"client_status":%s,"remaining":[1],"status":70}\n' "$status" >"$result"
+          exit "$status"
+        '';
+        testRebuildScript =
+          superviseCommand:
+          pkgs.replaceVars ./impl/rebuild.sh {
+            configuredDotfiles = ''"$REBUILD_CHECKOUT"'';
+            hostName = lib.escapeShellArg "fixture-host";
+            distroName = lib.escapeShellArg "Fixture Distro";
+            systemProfilePath = "$REBUILD_SYSTEM_PROFILE";
+            nixStoreDir = ''"$REBUILD_STORE_DIR"'';
+            nixosRebuild = lib.escapeShellArg "${rebuildDependencies}/bin/nixos-rebuild";
+            sudoCommand = lib.escapeShellArg "${rebuildDependencies}/bin/sudo";
+            nvd = lib.escapeShellArg "${rebuildDependencies}/bin/nvd";
+            wslRestartRequired = lib.escapeShellArg testRestartPlanner;
+            verificationEntry = lib.escapeShellArg "${rebuildDependencies}/bin/dotfiles-verify-entry";
+            agentVerify = lib.escapeShellArg "${rebuildDependencies}/bin/dotfiles-agent-verify";
+            supervise = lib.escapeShellArg superviseCommand;
+            lockUpdater = lib.escapeShellArg (
+              lib.getExe (
+                pkgs.writeShellApplication {
+                  name = "test-commit-lock";
+                  text = ''exec ${lib.getExe pkgs.python3} -I -S ${./impl/commit-lock.py} "$@"'';
+                }
+              )
+            );
+            clientExecutables = ''"$REBUILD_CLIENT_TABLE"'';
+            childGraceSeconds = "1";
+          };
+        testRebuildWith =
+          superviseCommand:
+          pkgs.writeShellApplication {
+            name = "dotfiles-rebuild-test";
+            runtimeInputs = [
+              interleavingGit
+            ]
+            ++ (with pkgs; [
+              coreutils
+              diffutils
+              git
+              jq
+              util-linux
+            ]);
+            text = ''exec ${pkgs.bash}/bin/bash -euo pipefail ${testRebuildScript superviseCommand} "$@"'';
+          };
+        testRebuild = testRebuildWith supervise;
+        testRebuildUnconfirmed = testRebuildWith unconfirmedSupervise;
+        rebuildTestInputs = with pkgs; [
+          bash
+          coreutils
+          git
+          gnugrep
+          jq
+          util-linux
+        ];
+        rebuildConcurrencyCheck =
+          group:
+          pkgs.runCommandLocal "check-rebuild-${group}"
+            {
+              nativeBuildInputs = rebuildTestInputs;
+            }
+            ''
+              bash ${./fixtures/rebuild-concurrency-test.sh} \
+                ${./fixtures/rebuild-harness.sh} \
+                ${lib.getExe testRebuild} \
+                ${rebuildDependencies} \
+                ${lib.getExe wslRestartRequired} \
+                ${group}
+              touch $out
+            '';
       in
       {
         wsl-restart-policy = pkgs.runCommandLocal "check-wsl-restart-policy" { } ''
@@ -201,20 +276,35 @@
         rebuild-entrypoint =
           pkgs.runCommandLocal "check-rebuild-entrypoint"
             {
-              nativeBuildInputs = with pkgs; [
-                bash
-                coreutils
-                git
-                gnugrep
-              ];
+              nativeBuildInputs = rebuildTestInputs;
             }
             ''
               bash ${./fixtures/rebuild-test.sh} \
+                ${./fixtures/rebuild-harness.sh} \
                 ${lib.getExe testRebuild} \
                 ${rebuildDependencies} \
                 ${lib.getExe wslRestartRequired}
               touch $out
             '';
+
+        rebuild-candidate =
+          pkgs.runCommandLocal "check-rebuild-candidate"
+            {
+              nativeBuildInputs = rebuildTestInputs;
+            }
+            ''
+              bash ${./fixtures/rebuild-candidate-test.sh} \
+                ${./fixtures/rebuild-harness.sh} \
+                ${lib.getExe testRebuild} \
+                ${rebuildDependencies} \
+                ${lib.getExe wslRestartRequired} \
+                ${lib.getExe testRebuildUnconfirmed}
+              touch $out
+            '';
+
+        rebuild-concurrent-edits = rebuildConcurrencyCheck "edits";
+        rebuild-concurrent-planners = rebuildConcurrencyCheck "planners";
+        rebuild-cancelled-plan = rebuildConcurrencyCheck "cancelled-plan";
 
         bootstrap-age-key =
           pkgs.runCommandLocal "check-bootstrap-age-key"

@@ -27,11 +27,11 @@ SonarQubeは[code-quality](docs/reference/code-quality.md)から必要な静的�
 ## 操作
 
 初回構築は[セットアップ手順](docs/operations/getting-started.md)、AI clientの採用と更新は[Agent client](docs/operations/agent-clients.md)を参照する。
-通常の変更は、sourceを検証してcommitした後、候補generationを確認して適用する。
+通常の変更は、sourceを検証してcommitした後、候補generationを確認して、確認した候補を適用する。
 
 ```bash
 dotfiles-rebuild --plan
-dotfiles-rebuild
+dotfiles-rebuild --candidate <ID>
 dotfiles-doctor
 ```
 
@@ -66,7 +66,8 @@ Nix unit は `module.nix` を marker にし、build がある場合は `package.
 適用は、標準の README の適用の4則と利用の手順に従う。
 
 `flake.nix` の `architectureStandard` input はURLにrevを書かず、標準の運用Skill、checker、設定は不変の実行packageとして配備する。
-`dotfiles-rebuild` は build の前にこの input を最新へ更新し、`flake.lock` の更新を commit するため、配備される実行packageは常に標準の最新である。
+通常の`dotfiles-rebuild`は、隔離したsourceでこのinputの最新を取得して検証し、lockが変わる場合だけ元のcheckoutへcommitして、確認した候補そのものを適用する。
+取得できない場合に旧版へ暗黙に留めず、修復用の明示した`--locked`は[別の経路](docs/operations/rebuild.md#標準の更新)として扱う。
 URL、`flake.lock` のrevisionと内容hashは実行packageの出典であり、現行規範の正本ではない。
 `dotfiles-doctor` の配備driftのPASSは、配備物の同一性を示すだけで、現行規範への適合を示さない。
 

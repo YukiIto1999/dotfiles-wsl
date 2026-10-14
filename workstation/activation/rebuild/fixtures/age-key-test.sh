@@ -195,7 +195,6 @@ bootstrap_output=$test_root/bootstrap-output.log
 containerless_output=$test_root/bootstrap-containerless-output.log
 CONTAINERS_ENABLED=true print_completion > "$bootstrap_output"
 
-dotfiles-install-agents() { :; }
 dotfiles-sync-images() { :; }
 dotfiles-rebuild() {
   [[ -z $(git status --porcelain --untracked-files=no) ]]

@@ -2,15 +2,16 @@
   config,
   lib,
   pkgs,
+  self,
   ...
 }:
 
 let
   enabled = builtins.elem "library-documentation" config.dotfiles.capabilities.resolved;
   mkMcpServer = pkgs.callPackage ../../../../platform/mcp/package/mk-server.nix { };
-  mkNpmMcp = pkgs.callPackage ../../../../platform/mcp/package/mk-npm.nix { };
   front = pkgs.callPackage ./package.nix {
-    inherit mkNpmMcp;
+    context7Mcp =
+      self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.context7-mcp;
     serverBuilder = mkMcpServer;
   };
 in

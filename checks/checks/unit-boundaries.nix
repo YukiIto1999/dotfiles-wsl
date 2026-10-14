@@ -35,7 +35,6 @@ let
     ];
     "capabilities/library-documentation/context7/mcp/module.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"
-      "../../../../platform/mcp/package/mk-npm.nix"
     ];
     "capabilities/project-memory/hindsight/mcp/checks.nix" = [
       "../../../../platform/mcp/package/mk-server.nix"

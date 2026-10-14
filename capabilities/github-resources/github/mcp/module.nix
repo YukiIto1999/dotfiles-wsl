@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  self,
   ...
 }:
 
@@ -31,6 +32,8 @@ let
       executable = lib.getExe (
         pkgs.callPackage ./package.nix {
           inherit toolsets;
+          githubMcpServer =
+            self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-mcp-server;
           serverBuilder = mkMcpServer;
           tokenFile = config.sops.secrets."accounts/${account}/token".path;
         }

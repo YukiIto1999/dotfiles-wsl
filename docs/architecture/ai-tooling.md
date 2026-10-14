@@ -242,6 +242,11 @@ clientごとに公開されるtoolは次のとおりである。使えるかは�
 
 各[`capabilities/`](../../capabilities)実装が`dotfiles.platform.mcp.targets`へprovider ID、executable、server transport、server lifecycle、port、通信要件、backend unit、probeを登録する。[`platform/mcp/module.nix`](../../platform/mcp/module.nix)はtargetからfrontを一度だけ導く。
 
+GitHubとContext7の実行fileは、rootの[`nixpkgs-unstable` input](../../flake.nix)で固定したleaf packageから受け取る。
+hostとHome Managerのpackage setはstableのまま変えず、providerごとのasset取得やnpm lockは持たない。
+各providerの`serverBuilder`による実行時credential読込、toolset、port、probe、secret変更時のrestartと、clientにはgatewayだけを配る契約は変えない。
+このpackage供給から同梱Skillの採用は導かず、Skillの採用と差替は既存のregistryが所有する。
+
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
 
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。

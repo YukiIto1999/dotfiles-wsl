@@ -2,7 +2,7 @@ modelRoles:
   tiny: opencode-go/deepseek-v4.1-flash:high
   judge: typesafe/jev-latest
   default: anthropic/claude-opus-5-5:xhigh
-  advisor: opencode-go/longcat-2.5-preview-free:high
+  advisor: opencode-go/deepseek-v4.1-flash:high
   dev: anthropic/claude-sonnet-5-5:xhigh
 disabledProviders:
   - openrouter
@@ -24,7 +24,7 @@ retry:
     tiny:
       - google-antigravity/gemini-3.8-flash:high
     advisor:
-      - opencode-go/deepseek-v4.1-flash:high
+      - opencode-go/longcat-2.5-preview-free:high
     judge: []
     dev:
       - openai-codex/gpt-6.1-sol:xhigh

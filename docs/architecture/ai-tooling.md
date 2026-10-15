@@ -126,6 +126,13 @@ clientの終了、PTY終了の`SIGHUP`、`SIGTERM`で終了を始め、その時
 `SIGINT`と`SIGQUIT`はclientの中の操作の取消であり、session全体の終了とは扱わない。
 sessionの実行時間には上限を置かず、終了を始めてからの猶予だけを区切る。
 
+子孫の終了確認を打ち切らずに待つ必要がある利用側は、supervisorへ`--require-drained`を明示する。
+この指定ではSIGKILL後の猶予が過ぎても所有を手放さず、`ECHILD`を確認するまで返らない。
+猶予の経過は完了とみなさず、stderrと`--result`の`draining`段階へ残るprocessの診断を出し続ける。
+signalを拒むprocessとprocess tableを読めない状態も完了とは扱わず、同じ診断へ出して待つ。
+`--hold-fd`はsupervisor自身が保持し続け、猶予後に切り離したholderは作らない。
+指定しない既存のcallerは、従来どおり猶予後に`drained=false`と非ゼロの終了statusで返る。
+
 取消後と開始途中の失敗ではclientを起動しない。
 scopeを作れない場合もclientを起動せず、別sessionとMCP frontは止めない。
 supervisorが先に消えた場合はscopeのcgroupが空になるまで残りを止め、終了を見届けてから解放する。
@@ -133,6 +140,11 @@ supervisorが先に消えた場合はscopeのcgroupが空になるまで残り�
 起動前にwrapper、当該clientの`executionDependencies`、lifecycle自身、profileの公開pathから解決したstore objectへsessionのGC rootを取り、一つでも取れなければclientを起動しない。
 その物理pathを実行するため、保護と起動の間にprofileが動いても別の版を実行しない。
 全子孫の終了後にだけGC root、管理scratch、session directoryを解放し、解放できなかった資源はGCに残して非ゼロで終わる。
+
+managed OMPを選択したhostは、評価の呼出し側が使うhost capabilityとして`~/.local/share/dotfiles-agent/evaluation-runtime.json`を読取専用で配備する。
+内容は`version`、managed OMP wrapperの絶対pathと空の先行引数、`supervise`の実行path、完了契約`require-drained`だけである。
+予算、model、保存先、資格情報、profileのnative binaryへの直接pathは持たない。
+呼出し側はこのfileを`--config`で明示した設定の層として参照し、PATHやstoreのgenerationを前提にしない。
 
 projectはGit repositoryではgit common directory、それ以外では作業directoryから決めるため、linked worktreeは元のcheckoutと同じprojectになる。
 session中の`git worktree add`はgit shimがpathと作成時のHEADを記録し、終了時にはHEAD不変のworktreeだけを`git worktree remove`へ渡す。

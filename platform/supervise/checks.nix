@@ -25,6 +25,16 @@
               bash ${./fixtures/supervise.sh}
               touch $out
             '';
+
+        supervise-drain-transition =
+          pkgs.runCommandLocal "check-supervise-drain-transition"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+            }
+            ''
+              python3 ${./fixtures/drain_transition.py} ${./impl/supervise.py}
+              touch $out
+            '';
       }
     )
   ];

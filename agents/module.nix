@@ -112,6 +112,22 @@ let
     ) clientNames
   );
 
+  evaluationRuntimeRelative = ".local/share/dotfiles-agent/evaluation-runtime.json";
+  evaluationRuntimeSelected =
+    builtins.hasAttr "omp" agents.clients && modeOf agents.clients.omp.runtime == "managed";
+  # profile の native binary は hook と gate を迂回するため omp.executable へ直接指す案は不可
+  evaluationRuntime = (pkgs.formats.json { }).generate "evaluation-runtime.json" {
+    version = 1;
+    omp = {
+      executable = "${cfg.workstation.homeDir}/${runtimeWrapperDirectory}/${agents.clients.omp.binary}";
+      arguments = [ ];
+    };
+    supervision = {
+      executable = lib.getExe cfg.platform.supervise.package;
+      completion = "require-drained";
+    };
+  };
+
   allSkillNames = builtins.attrNames cfg.skills.registry;
   rawSubagentSkillEdges = map (route: "${route.subagent}/${route.skill}") rawRouting.subagentSkills;
   rawSubagentHandoffEdges = map (
@@ -470,7 +486,7 @@ in
       type = lib.types.raw;
       readOnly = true;
       internal = true;
-      description = "共通 runtime が供給する lifecycle の部品。`mkWrapper { client; binary; targetExecutable; executionDependencies; }` は共通の cache 方針を一度適用し、scope、管理 scratch、session の GC root を取ってから絶対 path の実行ファイルを起動する wrapper を作る。`protect` は `dotfiles-agent-protect [--resolved] ROOTS-DIRECTORY PATH...` で、profile の symlink を辿った先を含む store object へ GC root を取り、取れなければ非ゼロで終わる。`supervise` は子孫の終了を確認してから返す command。";
+      description = "共通 runtime が供給する lifecycle の部品。`mkWrapper { client; binary; targetExecutable; executionDependencies; }` は共通の cache 方針を一度適用し、scope、管理 scratch、session の GC root を取ってから絶対 path の実行ファイルを起動する wrapper を作る。`protect` は `dotfiles-agent-protect [--resolved] ROOTS-DIRECTORY PATH...` で、profile の symlink を辿った先を含む store object へ GC root を取り、取れなければ非ゼロで終わる。`supervise` は子孫の終了を確認してから返す command。`--require-drained` を明示した呼び出しだけが、SIGKILL 後の猶予が過ぎても所有を手放さず ECHILD の確認まで返らない。";
     };
   };
 
@@ -511,7 +527,15 @@ in
       };
     };
 
-    dotfiles.managedArtifacts = managedArtifacts;
+    dotfiles.managedArtifacts =
+      managedArtifacts
+      // lib.optionalAttrs evaluationRuntimeSelected {
+        "agents/evaluation-runtime" = {
+          format = "json";
+          source = evaluationRuntime;
+          deployedAt = "${cfg.workstation.homeDir}/${evaluationRuntimeRelative}";
+        };
+      };
     dotfiles.health.observations = runtimeContract.observations;
     dotfiles.platform.cli.commands = {
       inherit agentSupply;
@@ -612,6 +636,9 @@ in
         home.file = lib.mkMerge [
           (lib.listToAttrs allHomeEntries)
           publicCommands
+          (lib.optionalAttrs evaluationRuntimeSelected {
+            ${evaluationRuntimeRelative}.source = evaluationRuntime;
+          })
         ];
         home.sessionPath = lib.mkBefore [ "$HOME/${runtimeWrapperDirectory}" ];
         home.activation.seedAgentConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] seedScript;

@@ -325,3 +325,143 @@ test "$(cat out/argv0)" = custom-name
 OUT=$fixture/out "$SUPERVISE" -- "$BASH" -c \
   'IFS= read -r -d "" first < /proc/self/cmdline; printf "%s\n" "$first" > "$OUT/argv0"'
 test "$(cat out/argv0)" = "$BASH"
+
+# Processes that outlive SIGKILL need an uninterruptible kernel state a sandbox cannot create, so the wait past
+# the SIGKILL grace is covered by drain_transition.py with injected failures and not by the cases below.
+result_lacks_strong_contract_fields() {
+  test "$(result_field result-stubborn.json 'has("completion") or has("kill_grace_expired")')" = false
+}
+
+option_after_separator_belongs_to_command() {
+  local status=0
+  "$SUPERVISE" --result "$fixture/result-flag-argv.json" -- "$BASH" -c 'test "$1" = --require-drained' bash --require-drained || status=$?
+  test "$status" -eq 0
+  test "$(result_field result-flag-argv.json 'has("completion")')" = false
+}
+
+require_drained_without_command_is_a_usage_error() {
+  local status=0
+  "$SUPERVISE" --require-drained 2>/dev/null || status=$?
+  test "$status" -eq 2
+}
+
+require_drained_healthy_command_is_joined() {
+  local status=0
+  "$SUPERVISE" --require-drained --result "$fixture/result-required-healthy.json" -- "$BASH" -c 'exit 0' || status=$?
+  test "$status" -eq 0
+  test "$(result_field result-required-healthy.json .phase)" = finished
+  test "$(result_field result-required-healthy.json .completion)" = require-drained
+  test "$(result_field result-required-healthy.json .drained)" = true
+  test "$(result_field result-required-healthy.json .kill_grace_expired)" = false
+}
+
+require_drained_leftovers_keep_the_client_status() {
+  local client_status status
+  for client_status in 0 9; do
+    rm -f child-a.pid child-b.pid grandchild.pid
+    status=0
+    CLIENT_STATUS=$client_status "$SUPERVISE" --require-drained --result "$fixture/result-required-leftovers.json" -- \
+      "$BASH" "$fixture/client-leftovers.sh" || status=$?
+    test "$status" -eq "$client_status"
+    assert_dead "$(cat child-a.pid)" "$(cat child-b.pid)" "$(cat grandchild.pid)"
+    test "$(result_field result-required-leftovers.json .drained)" = true
+    test "$(result_field result-required-leftovers.json .client_status)" = "$client_status"
+    test "$(result_field result-required-leftovers.json .completion)" = require-drained
+    test "$(result_field result-required-leftovers.json .kill_grace_expired)" = false
+  done
+}
+
+require_drained_awaits_slow_and_stubborn_processes() {
+  local started elapsed
+  rm -f slow.pid
+  started=$(now_ms)
+  "$SUPERVISE" --require-drained --term-grace 20 --result "$fixture/result-required-slow.json" -- \
+    "$BASH" "$fixture/client-slow-stop.sh"
+  elapsed=$(($(now_ms) - started))
+  assert_dead "$(cat slow.pid)"
+  test "$elapsed" -ge 1000 || fail "supervisor returned before the slow process stopped: ${elapsed}ms"
+  test "$elapsed" -lt 15000 || fail "supervisor waited for the grace period instead of the process: ${elapsed}ms"
+  test "$(result_field result-required-slow.json .kill_grace_expired)" = false
+
+  rm -f stubborn.pid
+  started=$(now_ms)
+  "$SUPERVISE" --require-drained --term-grace 1 --kill-grace 5 --result "$fixture/result-required-stubborn.json" -- \
+    "$BASH" "$fixture/client-stubborn.sh"
+  elapsed=$(($(now_ms) - started))
+  assert_dead "$(cat stubborn.pid)"
+  test "$elapsed" -ge 1000 || fail "SIGKILL arrived before the grace period ended: ${elapsed}ms"
+  test "$(result_field result-required-stubborn.json .drained)" = true
+  test "$(result_field result-required-stubborn.json .kill_grace_expired)" = false
+}
+
+require_drained_session_cancellation_joins_every_process() {
+  local supervisor_pid status=0
+  rm -f cancel.ready cancel-child.pid cancel-grandchild.pid
+  "$SUPERVISE" --require-drained --term-grace 5 --result "$fixture/result-required-cancel.json" -- \
+    "$BASH" "$fixture/client-wait.sh" &
+  supervisor_pid=$!
+  wait_for_file cancel.ready
+  kill -TERM "$supervisor_pid"
+  wait "$supervisor_pid" || status=$?
+  test "$status" -eq 143
+  assert_dead "$(cat cancel-child.pid)" "$(cat cancel-grandchild.pid)"
+  assert_dead "$supervisor_pid"
+  test "$(result_field result-required-cancel.json .cancelled)" = true
+  test "$(result_field result-required-cancel.json .drained)" = true
+  test "$(result_field result-required-cancel.json .completion)" = require-drained
+}
+
+require_drained_parent_death_cancels_and_joins() {
+  local hold_out=$fixture/required-parent-death-out runner_pid supervisor_pid
+  rm -rf "$hold_out"
+  mkdir -p "$hold_out"
+  OUT=$hold_out SUPERVISE=$SUPERVISE RESULT=$fixture/result-required-parent-death.json "$BASH" -c '
+    "$SUPERVISE" --require-drained --parent-death-cancels "$$" --result "$RESULT" -- "$BASH" "'"$fixture"'/client-hold.sh"
+    status=$?
+    exit "$status"
+  ' &
+  runner_pid=$!
+  wait_for_file "$hold_out/ready"
+  supervisor_pid=$(cat "$hold_out/supervisor.pid")
+  kill -KILL "$runner_pid"
+  wait "$runner_pid" 2>/dev/null || true
+  for _ in $(seq 1 200); do
+    alive "$supervisor_pid" || break
+    sleep 0.05
+  done
+  assert_dead "$supervisor_pid" "$(cat "$hold_out/client.pid")" "$(cat "$hold_out/grandchild.pid")"
+  test "$(result_field result-required-parent-death.json .cancelled)" = true
+  test "$(result_field result-required-parent-death.json .drained)" = true
+  test "$(result_field result-required-parent-death.json .completion)" = require-drained
+}
+
+require_drained_supervisor_holds_the_lock_until_the_join() {
+  local hold_out=$fixture/required-hold-out supervisor_pid status=0
+  rm -rf "$hold_out"
+  mkdir -p "$hold_out"
+  : > "$fixture/job.lock"
+  exec 8<>"$fixture/job.lock"
+  flock -x 8
+  OUT=$hold_out "$SUPERVISE" --require-drained --hold-fd 8 --result "$fixture/result-required-hold.json" -- \
+    "$BASH" "$fixture/client-hold.sh" &
+  supervisor_pid=$!
+  wait_for_file "$hold_out/ready"
+  exec 8>&-
+  assert_lock_held 'the lock was released while the supervised session was running'
+  : > "$hold_out/release"
+  wait "$supervisor_pid" || status=$?
+  test "$status" -eq 0
+  assert_dead "$(cat "$hold_out/grandchild.pid")"
+  assert_lock_free 'the lock outlived the supervised session'
+  test "$(result_field result-required-hold.json .drained)" = true
+}
+
+result_lacks_strong_contract_fields
+option_after_separator_belongs_to_command
+require_drained_without_command_is_a_usage_error
+require_drained_healthy_command_is_joined
+require_drained_leftovers_keep_the_client_status
+require_drained_awaits_slow_and_stubborn_processes
+require_drained_session_cancellation_joins_every_process
+require_drained_parent_death_cancels_and_joins
+require_drained_supervisor_holds_the_lock_until_the_join

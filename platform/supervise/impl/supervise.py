@@ -1,15 +1,16 @@
 """Run one command and own every process it leaves behind.
 
-The supervisor becomes a child subreaper, starts the command once, and returns
-only after the kernel reports that it has no child left (``waitpid(-1)`` fails
-with ECHILD).  A process the command orphans is reparented to the supervisor,
+The supervisor becomes a child subreaper, starts the command once, and counts only
+the kernel's report that it has no child left (``waitpid(-1)`` fails with ECHILD)
+as completion.  A process the command orphans is reparented to the supervisor,
 so a delayed grandchild is observed instead of assumed gone.
 
 Session-wide cancellation (SIGTERM, SIGHUP) and the end of the command both
 start termination: SIGTERM to every owned process, a grace period, then
 SIGKILL.  SIGINT and SIGQUIT only cancel one operation inside the command, so
 the supervisor never reacts to them.  Reaching a deadline is not completion;
-the supervisor reports failure when processes are still alive afterwards.
+the supervisor reports failure when processes are still alive afterwards.  By
+default it returns once the SIGKILL grace has passed, with ``drained`` false.
 
 ``--hold-fd N`` names a descriptor (typically a flock the caller holds) that the
 supervisor keeps open until every owned process is confirmed gone.  The command
@@ -20,6 +21,14 @@ processes survive SIGKILL, a detached holder keeps the descriptor until they end
 ``--parent-death-cancels PID`` cancels when the caller with that PID dies.
 The caller supplies its own PID so a death before supervisor startup also cancels.
 Without it, the session outlives the caller.
+
+``--require-drained`` keeps that ownership past the SIGKILL grace.  The supervisor goes on
+killing and waiting, reports periodically that the grace has passed (stderr and the
+``draining`` result phase), and returns only when ``waitpid(-1)`` fails with ECHILD, so
+``drained`` becomes true only on the kernel's confirmation.  A process that refuses a signal
+and a process table that cannot be read are reported the same way and never counted as gone.
+The supervisor itself then keeps ``--hold-fd``, so no detached holder exists.
+Forcibly terminating the supervisor abandons ownership without confirming completion.
 """
 
 import ctypes
@@ -39,6 +48,8 @@ SWEEP_SECONDS = 0.05
 HOLDER_POLL_SECONDS = 0.5
 DEFAULT_TERM_GRACE_SECONDS = 10.0
 DEFAULT_KILL_GRACE_SECONDS = 5.0
+OVERDUE_SWEEP_SECONDS = 0.5
+OVERDUE_REPORT_SECONDS = 30.0
 # Dispositions Python or a non-interactive parent shell may have changed and the
 # command must not inherit.
 RESET_TO_DEFAULT = (
@@ -64,6 +75,7 @@ class Options:
         self.hold_fd = None
         self.argv0 = None
         self.parent_pid = None
+        self.require_drained = False
         self.command = []
 
 
@@ -93,6 +105,10 @@ def parse_arguments(arguments):
             if not options.command or not os.path.isabs(options.command[0]):
                 raise UsageError("the command must be an absolute executable")
             return options
+        if argument == "--require-drained":
+            options.require_drained = True
+            index += 1
+            continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
@@ -165,6 +181,14 @@ def send_signal(pid, number):
         pass
 
 
+def diagnose(message):
+    """Write one diagnostic line; a closed stderr must not end a drain that is still owed."""
+    try:
+        print(f"dotfiles-supervise: {message}", file=sys.stderr)
+    except OSError:
+        pass
+
+
 def noop_handler(_number, _frame):
     pass
 
@@ -200,6 +224,11 @@ class Supervisor:
         self.killing = False
         self.term_deadline = None
         self.kill_deadline = None
+        self.kill_grace_expired = False
+        self.next_report = 0.0
+        self.last_owned = set()
+        self.unsignalable = set()
+        self.observation_error = None
         self.wakeup_read, self.wakeup_write = os.pipe()
         os.set_blocking(self.wakeup_read, False)
         os.set_blocking(self.wakeup_write, False)
@@ -208,6 +237,7 @@ class Supervisor:
         path = self.options.result_path
         if path is None:
             return
+        completion = {"completion": "require-drained"} if self.options.require_drained else {}
         temporary = f"{path}.{os.getpid()}.tmp"
         descriptor = os.open(
             temporary,
@@ -216,7 +246,7 @@ class Supervisor:
         )
         try:
             with os.fdopen(descriptor, "w") as stream:
-                json.dump({"version": 1, "phase": phase, **fields}, stream)
+                json.dump({"version": 1, "phase": phase, **completion, **fields}, stream)
                 stream.write("\n")
             os.rename(temporary, path)
         except BaseException:
@@ -267,13 +297,68 @@ class Supervisor:
         self.signal_owned_processes(signal.SIGTERM)
 
     def signal_owned_processes(self, number):
-        for pid in owned_processes():
-            send_signal(pid, number)
+        try:
+            owned = owned_processes()
+        except OSError as error:
+            # 例外の伝播は ECHILD の前に所有を手放すため --require-drained では不可
+            if not self.options.require_drained:
+                raise
+            self.observation_error = str(error)
+            return
+        self.observation_error = None
+        self.last_owned = set(owned)
+        for pid in owned:
+            self.send_to_owned(pid, number)
             if number == signal.SIGTERM:
-                send_signal(pid, signal.SIGCONT)
+                self.send_to_owned(pid, signal.SIGCONT)
+
+    def send_to_owned(self, pid, number):
+        """Send a signal; under --require-drained remember a pid that refuses it."""
+        try:
+            send_signal(pid, number)
+        except PermissionError:
+            if not self.options.require_drained:
+                raise
+            self.unsignalable.add(pid)
+        else:
+            self.unsignalable.discard(pid)
+
+    def report_overdue(self, now):
+        """Report that children outlived the SIGKILL grace and that the wait goes on."""
+        if now < self.next_report:
+            return
+        self.next_report = now + OVERDUE_REPORT_SECONDS
+        late = now - self.kill_deadline
+        remaining = sorted(self.last_owned)
+        unsignalable = sorted(self.unsignalable & self.last_owned)
+        diagnose(
+            f"children remain {late:.0f}s past the SIGKILL grace; waiting for the kernel to confirm exit of: "
+            + (" ".join(map(str, remaining)) or "none visible")
+        )
+        if unsignalable:
+            diagnose("cannot signal: " + " ".join(map(str, unsignalable)))
+        if self.observation_error is not None:
+            diagnose(f"cannot read the process table: {self.observation_error}")
+        try:
+            self.record(
+                "draining",
+                spawned=True,
+                cancelled=self.cancel_signal is not None,
+                drained=False,
+                client_status=self.client_status,
+                remaining=remaining,
+                unsignalable=unsignalable,
+                observation_error=self.observation_error,
+                seconds_past_kill_grace=round(late, 1),
+            )
+        except OSError as error:
+            diagnose(f"cannot record the draining state: {error}")
 
     def supervise(self):
-        """Return True when the kernel confirmed that no owned process is left."""
+        """Return True when the kernel confirmed that no owned process is left.
+
+        Return False only without --require-drained, once SIGKILL had its grace period.
+        """
         while True:
             children_exist = self.reap()
             if not self.terminating and (
@@ -286,14 +371,19 @@ class Supervisor:
             if not children_exist:
                 return True
             now = time.monotonic()
-            if self.killing and now >= self.kill_deadline:
+            overdue = self.killing and now >= self.kill_deadline
+            if overdue and not self.options.require_drained:
                 return False
+            if overdue:
+                self.kill_grace_expired = True
+                self.report_overdue(now)
             if not self.killing and now >= self.term_deadline:
                 self.killing = True
                 self.kill_deadline = now + self.options.kill_grace
             if self.killing:
                 self.signal_owned_processes(signal.SIGKILL)
-            self.wait_for_event(SWEEP_SECONDS)
+            # 猶予後の待ちには上限がなく SWEEP_SECONDS 間隔の全 process 走査は CPU を使い続けるため同間隔は不可
+            self.wait_for_event(OVERDUE_SWEEP_SECONDS if overdue else SWEEP_SECONDS)
 
     def exit_status(self, drained):
         status = self.client_status
@@ -307,6 +397,8 @@ class Supervisor:
 
     def prepare(self):
         """Take everything the session depends on before the command may start."""
+        if self.options.require_drained and os.getpid() not in process_table():
+            raise OSError(errno.ESRCH, "this process is absent from /proc, so owned children cannot be observed")
         prctl(PR_SET_CHILD_SUBREAPER, 1)
         if self.options.hold_fd is not None:
             os.fstat(self.options.hold_fd)
@@ -354,6 +446,7 @@ class Supervisor:
             print("dotfiles-supervise: processes still alive after SIGKILL: "
                   + " ".join(map(str, sorted(survivors))), file=sys.stderr)
         status = self.exit_status(drained)
+        expiry = {"kill_grace_expired": self.kill_grace_expired} if self.options.require_drained else {}
         self.record(
             "finished",
             spawned=True,
@@ -362,6 +455,7 @@ class Supervisor:
             client_status=self.client_status,
             remaining=sorted(survivors),
             status=status,
+            **expiry,
         )
         if survivors and self.options.hold_fd is not None:
             hold_until_gone(survivors)

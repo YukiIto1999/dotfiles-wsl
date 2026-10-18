@@ -456,6 +456,31 @@ require_drained_supervisor_holds_the_lock_until_the_join() {
   test "$(result_field result-required-hold.json .drained)" = true
 }
 
+# 明示選択したSIGINTによるsession取消完了の検査
+# 引数なし
+# 戻り値: SIGQUITで継続しSIGINTで子孫回収した場合の0
+# 副作用: fixture内のcommandと子孫の起動
+# 失敗: 取消方針か完了記録か子孫回収の不一致による検査終了
+interrupt_cancels_ends_the_session_on_sigint_only() {
+  local supervisor_pid status=0
+  rm -f cancel.ready cancel-child.pid cancel-grandchild.pid
+  "$SUPERVISE" --require-drained --interrupt-cancels --term-grace 5 --result "$fixture/result-interrupt-cancel.json" -- \
+    "$BASH" "$fixture/client-wait.sh" &
+  supervisor_pid=$!
+  wait_for_file cancel.ready
+  kill -QUIT "$supervisor_pid"
+  sleep 0.5
+  kill -0 "$supervisor_pid" || fail 'the supervisor ended the session on SIGQUIT'
+  test "$(result_field result-interrupt-cancel.json .phase)" = started
+  kill -INT "$supervisor_pid"
+  wait "$supervisor_pid" || status=$?
+  test "$status" -eq 143
+  assert_dead "$(cat cancel-child.pid)" "$(cat cancel-grandchild.pid)"
+  assert_dead "$supervisor_pid"
+  test "$(result_field result-interrupt-cancel.json .cancelled)" = true
+  test "$(result_field result-interrupt-cancel.json .drained)" = true
+}
+
 result_lacks_strong_contract_fields
 option_after_separator_belongs_to_command
 require_drained_without_command_is_a_usage_error
@@ -465,3 +490,4 @@ require_drained_awaits_slow_and_stubborn_processes
 require_drained_session_cancellation_joins_every_process
 require_drained_parent_death_cancels_and_joins
 require_drained_supervisor_holds_the_lock_until_the_join
+interrupt_cancels_ends_the_session_on_sigint_only

@@ -1,13 +1,20 @@
-# global の hooksPath に置く hook 一式。module と checks が同じ組み立てを使う。
+/**
+  全repositoryへ配るGit hookの構築
+  lib: 実行fileと引数を解決するNixpkgs library
+  pkgs: hookの実行入口を生成する固定済みpackage集合
+  verificationEntry: repositoryが宣言するT2の入口の解決command
+  supervise: 検証の所有子孫を回収するplatformのnative command
+  戻り値: hook名をkeyとする実行package集合
+*/
 {
   lib,
   pkgs,
-  # T2 の入口を repository の宣言から引く command
   verificationEntry,
+  supervise,
 }:
 
 let
-  verificationPrograms = import ../verification/package.nix { inherit pkgs; };
+  verificationPrograms = import ../verification/package.nix { inherit pkgs supervise; };
   # githooks(5) の client 側 hook のうち、repository が `.githooks/` に置いて使う名前。
   # reference-transaction と post-index-change は ref と index の更新ごとに起動されるため、
   # 置くだけで全 repository の git 操作に process の起動が加わる。配らない。

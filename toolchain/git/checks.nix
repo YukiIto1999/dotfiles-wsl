@@ -87,6 +87,7 @@
           editedCheckoutConfig.home-manager.users.${username}.home.file.".config/git/ignore".source;
         failingEntryHooks = import ./package.nix {
           inherit lib pkgs;
+          supervise = hostConfig.dotfiles.platform.supervise.package;
           verificationEntry = pkgs.writeShellApplication {
             name = "failing-verification-entry";
             text = ''
@@ -102,6 +103,7 @@
         );
         slowEntryHooks = import ./package.nix {
           inherit lib pkgs;
+          supervise = hostConfig.dotfiles.platform.supervise.package;
           verificationEntry = pkgs.writeShellApplication {
             name = "slow-verification-entry";
             runtimeInputs = [ pkgs.coreutils ];

@@ -829,6 +829,30 @@ expect_open_gate() {
   fi
 }
 
+# 別 session の孫が検証の返却時点でまだ動くかを判定する観測
+# 引数 $1: 当該 fixture が起動した Linux process 番号
+# 戻り値: 読取可能な非 zombie process なら0でそれ以外は1
+# 返却後の待ち直しは別 session の孫の回収を返却時点で検証できないため不可
+process_alive() {
+  local proc_stat
+  proc_stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  [[ ${proc_stat##*) } != [ZX]* ]]
+}
+
+# 終了待機前の観測情報による元 process の消滅判定
+# 引数 $1: 観測済みの Linux process 番号
+# 引数 $2: 同じ boot 内で観測した開始 tick
+# 戻り値: 観測不能か開始 tick の変化で0となる判定結果
+# zombie は回収前のため state だけによる完了判定は不可
+# pid の再利用があるため pid だけによる寿命の照合は不可
+process_reaped() {
+  local proc_stat
+  local -a proc_fields
+  proc_stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 0
+  read -r -a proc_fields <<<"${proc_stat##*) }"
+  [ "${proc_fields[19]}" != "$2" ]
+}
+
 expect_budget_refused() {
   local repository=$1 name=$2 status=0 litter receipts
   litter=$(stall_litter)
@@ -1789,6 +1813,10 @@ if [ "${DEADLINE_SLOW-}" = 1 ]; then
   (sleep 3; touch "$DEADLINE_LATE") &
   wait
 fi
+if [ "${DEADLINE_SLOW-}" = session ]; then
+  setsid bash -c 'printf "%s\n" "$$" >"$DEADLINE_PID"; sleep 4; touch "$DEADLINE_LATE"' </dev/null >/dev/null 2>&1 &
+  wait
+fi
 SCRIPT
 chmod +x "$fixture/budget-bin/devenv"
 sed -i "1c#!$BASH" "$fixture/budget-bin/devenv"
@@ -1808,6 +1836,30 @@ sleep 4
 test ! -e "$fixture/deadline-late"
 PATH="$fixture/budget-bin:$PATH" "$VERIFY" -- devenv shell -- verify
 "$GATE" check --repo "$budget_repo" >/dev/null
+
+escape_repo=$fixture/session-escape-budget-repo
+t1_repository "$escape_repo" 2
+cd "$escape_repo"
+rm -f "$fixture/escaped.pid" "$fixture/escaped-late"
+set +e
+PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=session DEADLINE_PID=$fixture/escaped.pid \
+  DEADLINE_LATE=$fixture/escaped-late "$VERIFY" -- devenv shell -- verify
+escape_status=$?
+set -e
+test "$escape_status" -eq 124
+if [ ! -s "$fixture/escaped.pid" ]; then
+  echo 'the T1 entry never started the delayed writer in its own session' >&2
+  exit 1
+fi
+if process_alive "$(<"$fixture/escaped.pid")"; then
+  echo 'T1 returned at its budget while a descendant in its own session was still running' >&2
+  exit 1
+fi
+if [ -e "$fixture/escaped-late" ]; then
+  echo 'a descendant in its own session wrote after T1 returned at its budget' >&2
+  exit 1
+fi
+expect_closed_gate "$escape_repo" 'descendant in its own session'
 
 long_budget_repo=$fixture/long-budget-repo
 t1_repository "$long_budget_repo" 10
@@ -1917,14 +1969,39 @@ printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2
 git -C "$stalled_repo" add verification-budget.json
 git -C "$stalled_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm budget
 litter_before=$(stall_litter)
-started=$SECONDS
 status=0
-NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
-  timeout 60 "$VERIFY" -- nix run --no-write-lock-file .#verify || status=$?
-if [ "$status" -ne 124 ] || [ "$((SECONDS - started))" -ge 30 ]; then
+# mock の待機は実 Nix の signal 応答を検査できないため不可
+real_nix=$(command -v nix)
+mkdir "$fixture/nix-observer-bin"
+cat >"$fixture/nix-observer-bin/nix" <<'SCRIPT'
+#!/usr/bin/env bash
+process_stat=$(<"/proc/$$/stat")
+read -r -a process_fields <<<"${process_stat##*) }"
+printf '%s %s\n' "$$" "${process_fields[19]}" >>"$OBSERVED_NIX_PROCESSES"
+exec "$OBSERVED_NIX" "$@"
+SCRIPT
+chmod +x "$fixture/nix-observer-bin/nix"
+sed -i "1c#!$BASH" "$fixture/nix-observer-bin/nix"
+rm -f "$fixture/stalled-nix.processes"
+# 外側 guard の既定の124は wrapper の期限終了と混同するため不可
+PATH="$fixture/nix-observer-bin:$PATH" OBSERVED_NIX=$real_nix \
+  OBSERVED_NIX_PROCESSES=$fixture/stalled-nix.processes \
+  NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
+  timeout --preserve-status 60 "$VERIFY" -- nix run --no-write-lock-file .#verify || status=$?
+if [ "$status" -ne 124 ]; then
   echo "T1 over a stalled Nix declaration exited $status instead of stopping at its budget" >&2
   exit 1
 fi
+if [ ! -s "$fixture/stalled-nix.processes" ]; then
+  echo 'T1 over a stalled Nix declaration never started the evaluator' >&2
+  exit 1
+fi
+while read -r observed_pid observed_start; do
+  if ! process_reaped "$observed_pid" "$observed_start"; then
+    echo 'T1 over a stalled Nix declaration returned before its evaluator was reaped' >&2
+    exit 1
+  fi
+done <"$fixture/stalled-nix.processes"
 expect_closed_gate_within() {
   local gate_status=0
   started=$SECONDS

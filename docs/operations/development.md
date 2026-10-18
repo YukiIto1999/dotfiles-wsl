@@ -70,10 +70,13 @@ fileの欠落と不正な値は、既定値でも無制限でも補わず拒否�
 Nix appを自動検出しないため、他projectがNixの検証入口を使うときもこの登録が必要である。
 登録済みの入口の予算が読めない場合は、終了gateとpre-pushも拒否する。
 追跡済みの登録fileを削除しても入口なしとして通さず、欠落として拒否する。
-T1は入口の解決、指紋の取得、検査、証跡の保存を含めて`verify.seconds`以内とし、wrapperが残り時間で停止して非ゼロ終了にする。
+T1は入口の解決、指紋の取得、検査、証跡の保存を`verify.seconds`で制限し、wrapperは残り時間を使い切った時点で取消を開始して非ゼロ終了にする。
 成功証跡は検査前のsourceへ固定して走行ごとに仮保存し、cacheの保存と後始末、証跡の公開が時間内に完了した場合だけwrapperが確定するため、公開途中の失敗や中断、sourceの差し替えでは未検査のsourceに対する終了を認めない。
 pre-pushは検査前と検査後の`git status`と`git ls-files`の失敗も拒否し、sourceを確認できなかった走行ではremoteのrefを更新しない。
-nativeな`verify`自身も同じ`verify.seconds`で検査を止め、外側の期限や中断を内側のprocess groupへ転送して終了を待つが、wrapperを通さない実行は終了gateを開かない。
+nativeな`verify`自身も同じ`verify.seconds`で検査を止め、外側の期限や中断を内側へ転送する。
+別sessionへ移った子孫も回収して終了を確認するため、後始末は予算を超えて続くことがある。
+native検査の公開PIDだけへの`SIGINT`も`SIGTERM`と同じ取消として扱い、所有する子孫の終了を確認してから非成功の130で返る。
+wrapperを通さない実行は終了gateを開かない。
 T1は`flake.nix`の`t1Shards`で`source`と`configuration`を別の評価器へ分け、`dotfiles-run-each`が最大2つを同時に走らせる。
 `source`はhostやvariantを評価せず、sourceと固定した入力だけを使う検査を実現する。
 `configuration`はnative module graphと構成値を使う検査を実現し、全hostとpositive variantのsystem closureを評価する。

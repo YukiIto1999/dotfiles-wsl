@@ -172,10 +172,12 @@ let
       ];
       text =
         builtins.replaceStrings
-          [ "@gate@" "@verificationCache@" ]
+          [ "@gate@" "@verificationCache@" "@supervise@" "@timeout@" ]
           [
             (lib.escapeShellArg (lib.getExe verifyGate))
             (lib.escapeShellArg (lib.getExe verifyCache))
+            (lib.escapeShellArg (lib.getExe supervise))
+            (lib.escapeShellArg (lib.getExe' pkgs.coreutils "timeout"))
           ]
           (builtins.readFile ./impl/runtime/verify.sh);
     };

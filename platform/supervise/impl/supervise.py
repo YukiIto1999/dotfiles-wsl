@@ -8,9 +8,14 @@ so a delayed grandchild is observed instead of assumed gone.
 Session-wide cancellation (SIGTERM, SIGHUP) and the end of the command both
 start termination: SIGTERM to every owned process, a grace period, then
 SIGKILL.  SIGINT and SIGQUIT only cancel one operation inside the command, so
-the supervisor never reacts to them.  Reaching a deadline is not completion;
+the supervisor ignores them by default.  Reaching a deadline is not completion;
 the supervisor reports failure when processes are still alive afterwards.  By
 default it returns once the SIGKILL grace has passed, with ``drained`` false.
+
+``--interrupt-cancels`` makes SIGINT cancel the session like SIGTERM, for a caller whose
+only handle on the session is this process and that already treats INT as cancellation.
+Termination and the exit status follow the same rules as for SIGTERM.  SIGQUIT stays an
+operation-level signal and is still ignored.
 
 ``--hold-fd N`` names a descriptor (typically a flock the caller holds) that the
 supervisor keeps open until every owned process is confirmed gone.  The command
@@ -68,7 +73,28 @@ class UsageError(Exception):
 
 
 class Options:
+    """native command一呼出し分の起動設定
+
+    Attributes:
+        term_grace: TERM送信からKILL送信までの猶予秒数
+        kill_grace: KILL送信後の終了確認猶予秒数
+        result_path: 完了記録の出力pathか記録無効のNone
+        hold_fd: 走行中に保持する継承済みlock descriptorか未指定のNone
+        argv0: commandに渡す先頭引数か実行file名を使うNone
+        parent_pid: 消失時に取消を開始する親PIDか監視無効のNone
+        require_drained: 子孫の回収完了まで返却を禁止する選択
+        interrupt_cancels: SIGINTを走行全体の取消へ渡す明示選択
+        command: 絶対実行pathを先頭に持つcommand引数列
+    """
+
     def __init__(self):
+        """session向け既定値による引数解釈前の設定生成
+
+        Args:
+            self: 解析中の一呼出し分の設定
+        Returns:
+            None: 初期設定の格納後の復帰値
+        """
         self.term_grace = DEFAULT_TERM_GRACE_SECONDS
         self.kill_grace = DEFAULT_KILL_GRACE_SECONDS
         self.result_path = None
@@ -76,6 +102,7 @@ class Options:
         self.argv0 = None
         self.parent_pid = None
         self.require_drained = False
+        self.interrupt_cancels = False
         self.command = []
 
 
@@ -96,6 +123,15 @@ def parse_descriptor(option, value):
 
 
 def parse_arguments(arguments):
+    """取消方針を含むnative command起動引数の解釈
+
+    Args:
+        arguments: 実行file名を除くsupervisorの引数列
+    Returns:
+        Options: commandの絶対pathと取消方針を持つ設定
+    Raises:
+        UsageError: 未知のoptionか値の不成立かcommandの欠落
+    """
     options = Options()
     index = 0
     while index < len(arguments):
@@ -107,6 +143,10 @@ def parse_arguments(arguments):
             return options
         if argument == "--require-drained":
             options.require_drained = True
+            index += 1
+            continue
+        if argument == "--interrupt-cancels":
+            options.interrupt_cancels = True
             index += 1
             continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels"):
@@ -257,13 +297,20 @@ class Supervisor:
             raise
 
     def install_signals(self):
+        """呼出し元の取消方針に従うprocess単位のsignal登録
+
+        Args:
+            self: wakeup pipeを準備済みのsupervisor
+        Returns:
+            None: signal handler登録後の復帰値
+        """
         signal.set_wakeup_fd(self.wakeup_write, warn_on_full_buffer=False)
         signal.signal(signal.SIGCHLD, noop_handler)
         signal.signal(signal.SIGTERM, self.request_cancel)
         signal.signal(signal.SIGHUP, self.request_cancel)
         # Operation-level cancellation belongs to the command, which receives
         # these from the terminal in the same foreground process group.
-        signal.signal(signal.SIGINT, noop_handler)
+        signal.signal(signal.SIGINT, self.request_cancel if self.options.interrupt_cancels else noop_handler)
         signal.signal(signal.SIGQUIT, noop_handler)
 
     def request_cancel(self, number, _frame):

@@ -174,6 +174,7 @@
       machineOptions = lib.mapAttrs (_: machine: machine.options) nixosSystems;
 
       systemPkgs = nixpkgs.legacyPackages.${system};
+      supervise = systemPkgs.callPackage ./platform/supervise/package.nix { };
 
       artifactVariantSystem = mkNixosSystem [
         normalMachineModule
@@ -229,6 +230,7 @@
           self
           pluginSources
           units
+          supervise
           ;
         helpers = {
           execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
@@ -345,7 +347,10 @@
 
       unitChecksPackage = "verification-unit-checks";
       closureChecksPackage = "verification-host-closures";
-      verificationPrograms = import ./toolchain/verification/package.nix { pkgs = systemPkgs; };
+      verificationPrograms = import ./toolchain/verification/package.nix {
+        inherit supervise;
+        pkgs = systemPkgs;
+      };
       inherit (verificationPrograms) runWithin runEach;
 
       # agent wrapperが同じfileを読むためflake内の秒数の直書きは不可

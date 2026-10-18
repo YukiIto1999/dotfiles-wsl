@@ -21,6 +21,9 @@ Agent、Skill、Capabilityの依存方向を逆転させず、CapabilityはAgent
 [`flake.nix`](../../flake.nix)はnative module graphから登録と分類の漏れを調べ、両phaseとsystem closureを通したcheck IDの重複を拒否する。
 check名やfile名の別の手書き一覧は持たない。
 
+子孫回収commandはplatformが構築し、source検査とnative検証入口には`flake.nix`が同じpackageを渡す。
+native moduleは`dotfiles.platform.supervise.package`を受け取り、検証package構築の引数へ渡す。
+
 `agents/checks/` は次の責務へ分ける。
 
 - client contract

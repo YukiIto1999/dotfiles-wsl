@@ -9,6 +9,8 @@ started_ms=$((${EPOCHREALTIME/[.,]/} / 1000))
 budget_seconds=
 budget_error=
 remaining=
+# supervise の猶予が timeout の --kill-after より短いと取消で command 自身の停止を先に切るため同値
+kill_after_seconds=30
 
 refresh_remaining() {
   local left=$((budget_seconds * 1000 - (${EPOCHREALTIME/[.,]/} / 1000 - started_ms)))
@@ -18,10 +20,21 @@ refresh_remaining() {
 
 bounded_pid=
 interrupted=false
+# T1の残り予算で取消を開始するcommandの実行
+# 引数 $1: timeout配下で実行するcommand名か実行path
+# 引数 $2以降: 当該commandへ渡す引数
+# 入力 remaining: refresh_remainingが確定した取消開始までの正の残秒
+# 入力 interrupted: signal trapが記録する当該走行の取消状態
+# 戻り値: 開始前取消の130か子孫回収後の監督器の終了監視で得たstatus
+# 副作用: signal転送先として起動中だけbounded_pidへ保持する監督器PID
+# 完了: 起動した監督器と所有子孫の回収後の返却
+# 制約: 取消開始の予算を超えても終了確認を打ち切らない待機
 run_bounded() {
   local status
   [ "$interrupted" = false ] || return 130
-  timeout --kill-after=30s "$remaining" "$@" <&0 &
+  # timeout の process group だけでは別 session の子孫を回収できないため supervise の下で起動
+  @supervise@ --require-drained --parent-death-cancels "$$" --term-grace "$kill_after_seconds" \
+    -- @timeout@ --kill-after="${kill_after_seconds}s" "$remaining" "$@" <&0 &
   bounded_pid=$!
   if [ "$interrupted" = true ]; then
     kill -s TERM "$bounded_pid" 2>/dev/null || true

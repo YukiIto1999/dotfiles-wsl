@@ -119,11 +119,13 @@ lifecycleはsession ID、開始したproject、owner process、boot IDをsession
 管理scratchと、`TMPDIR`を条件にする終了gateの除外は、`TMPDIR`が未指定のときだけ与え、空文字列を含む明示値はそのまま渡す。
 外側のsessionから管理scratchを引き継いだだけの`TMPDIR`は未指定として扱う。
 
-supervisorはchild subreaperとして全子孫を引き取り、kernelが子の残りを報告しない`waitpid`の`ECHILD`を確認してから返る。
+supervisorはchild subreaperとして全子孫を引き取り、kernelが子の残りを報告しない`waitpid`の`ECHILD`で回収完了を観測する。
 clientの終了、PTY終了の`SIGHUP`、`SIGTERM`で終了を始め、その時点の全子孫へ一度だけ`SIGTERM`を送る。
 猶予中に生まれる後始末の子は中断せず、猶予後は新しい子も含めて`SIGKILL`で回収する。
-残る子があれば失敗として返し、roots、scratch、sessionを解放しない。
-`SIGINT`と`SIGQUIT`はclientの中の操作の取消であり、session全体の終了とは扱わない。
+既定ではSIGKILL後の猶予を過ぎても子孫が残ると非成功として返し、利用側はroots、scratch、sessionを解放しない。
+`SIGINT`と`SIGQUIT`は既定ではclientの中の操作の取消であり、session全体の終了とは扱わない。
+公開PIDだけが取消の窓口である利用側は`--interrupt-cancels`を明示でき、この指定では`SIGINT`も`SIGTERM`と同じsession全体の取消になる。
+`SIGQUIT`に対するsupervisor自身の扱いは、この指定でも変わらない。
 sessionの実行時間には上限を置かず、終了を始めてからの猶予だけを区切る。
 
 子孫の終了確認を打ち切らずに待つ必要がある利用側は、supervisorへ`--require-drained`を明示する。
@@ -131,7 +133,7 @@ sessionの実行時間には上限を置かず、終了を始めてからの猶�
 猶予の経過は完了とみなさず、stderrと`--result`の`draining`段階へ残るprocessの診断を出し続ける。
 signalを拒むprocessとprocess tableを読めない状態も完了とは扱わず、同じ診断へ出して待つ。
 `--hold-fd`はsupervisor自身が保持し続け、猶予後に切り離したholderは作らない。
-指定しない既存のcallerは、従来どおり猶予後に`drained=false`と非ゼロの終了statusで返る。
+指定しない既存のcallerは、SIGKILL後の猶予を過ぎても子孫が残る場合に、従来どおり`drained=false`と非ゼロの終了statusで返る。
 
 取消後と開始途中の失敗ではclientを起動しない。
 scopeを作れない場合もclientを起動せず、別sessionとMCP frontは止めない。
@@ -157,7 +159,8 @@ Orcaが作るworktreeの寿命はOrcaが持つ。
 `dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
 fileごとのprocess起動を避けるため、tracked fileのmetadataと内容hashはコマンド行長の上限内でまとめて取得する。
 読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
-宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は検証processの子孫を止めて成功として扱わない。
+宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は取消を開始して成功として扱わない。
+別sessionへ移った子孫も`supervise --require-drained`で回収し、終了確認まで返らないため、後始末は予算を超えて続くことがある。
 予算はrepositoryの根の`verification-budget.json`の`verify.seconds`を正本とし、wrapperは走行開始後に共通providerの`dotfiles-verify-entry --snapshot verify`で静的な宣言を一度だけ読む。
 予算と入口は同じsnapshotを`--policy FILE`へ渡して解決するため、解決の間に登録を編集してもcanonicalな呼び出しが無期限のlocal cacheへ切り替わることはなく、snapshotの読取時間も走行開始から数える予算に含まれる。
 走行中に宣言を書き換えても、その走行の期限は延びない。
@@ -179,7 +182,8 @@ wrapperの生存はPID、boot ID、processの開始時刻で照合するため�
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
 OMP hook は write の本文と read の全文を JSON に含めたまま gate の stdin へ送り、read の証明を照合する Node process へも pipe で渡す。
 argv に本文を載せないため、1 引数や argv 全体の容量制限で検証前に失敗しない。
-20 秒の期限または中断では gate の process group 全体を停止し、編集や終了を拒否する。
+20 秒の期限または中断では gate の process group 全体へ SIGKILL を送り、起動した子と出力 pipe の処理の終了を確認してから編集や終了を拒否する。
+終了を確認できない間は診断を出して待ち続ける。
 OMPのhookは、配備時に`@gateBinary@`を`dotfiles.agents.packages.verificationGate`のstore executableへ置換し、各callで`/run/current-system`を再解決しない。
 具体的なstore executableを埋め込んだhookで開始したsessionは、generationを切り替えてもそのgateと成功して読んだ物理sourceのまま動き、新しいgateと実行packageは新しく始めたsessionへ届く。
 この配備より前に読み込まれ、`/run/current-system`を参照するhookは、呼出しごとに現在のgenerationのgateへ解決されるため、旧gateの保持を主張しない。

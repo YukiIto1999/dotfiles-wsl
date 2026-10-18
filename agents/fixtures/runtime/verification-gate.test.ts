@@ -69,14 +69,49 @@ async function expectBlockedForSkill(session: string, content = "x") {
   expect(outcome.reason).toContain("skill://ui-design");
 }
 
-function isRunning(pid: number): boolean {
+/** pid の再利用と元の process の消滅を区別する同一 boot 内の観測情報 */
+interface ProcessIdentity {
+  /** 観測した Linux process 番号 */
+  pid: number;
+  /** 同じ boot 内で照合する /proc の開始 tick */
+  started: string;
+}
+
+// comm の空白や括弧のため先頭からの field 分割は不可
+/**
+ * gate の親子関係と寿命を照合する Linux process 情報の観測
+ * @param pid - 観測対象の Linux process 番号
+ * @returns 状態と親 pid と開始 tick を持つ観測値または読取不能時の undefined
+ */
+function statOf(pid: number): { state: string; parent: number; started: string } | undefined {
   try {
     const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    const state = stat[stat.lastIndexOf(")") + 2];
-    return state !== "Z" && state !== "X";
+    const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    return { state: fields[0], parent: Number(fields[1]), started: fields[19] };
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+/**
+ * 返却時点にまだ動く子孫を検出する生存判定
+ * @param pid - 当該 fixture が起動した process 番号
+ * @returns 読取可能な非 zombie process なら true
+ */
+function isRunning(pid: number): boolean {
+  const stat = statOf(pid);
+  return stat !== undefined && stat.state !== "Z" && stat.state !== "X";
+}
+
+// pid だけの照合は再利用された別 process を同じ子と誤認するため不可
+/**
+ * 同じ pid の zombie を完了としない元 process の消滅判定
+ * @param identity - 終了待機前に取得した同一 boot 内の process 情報
+ * @returns 元の観測値が消失した場合か別の開始 tick へ変わった場合の true
+ */
+function isReaped(identity: ProcessIdentity): boolean {
+  const stat = statOf(identity.pid);
+  return stat === undefined || stat.started !== identity.started;
 }
 
 async function until(condition: () => boolean, what: string): Promise<void> {
@@ -91,6 +126,21 @@ async function descendantOf(cwd: string): Promise<number> {
   const file = join(cwd, "descendant.pid");
   await until(() => existsSync(file) && /^\d+$/.test(readFileSync(file, "utf8").trim()), "the gate's descendant");
   return Number(readFileSync(file, "utf8").trim());
+}
+
+/**
+ * 取消直前の gate と子孫の寿命を比較する観測情報の取得
+ * @param cwd - hanging gate が子孫の pid を記録する fixture directory
+ * @returns 呼出元が直接所有する gate の識別情報を含む観測値
+ * @throws {@link Error} 観測期限内に揃わない gate の識別情報
+ */
+async function hangingGateOf(cwd: string): Promise<{ gate: ProcessIdentity; descendant: number }> {
+  const descendant = await descendantOf(cwd);
+  const parent = statOf(descendant)?.parent;
+  const gate = parent === undefined ? undefined : statOf(parent);
+  if (parent === undefined || gate === undefined) throw new Error("the hanging gate ended before the hook was interrupted");
+  expect(gate.parent).toBe(process.pid);
+  return { gate: { pid: parent, started: gate.started }, descendant };
 }
 
 beforeAll(async () => {
@@ -149,7 +199,7 @@ test("only a complete read beyond the argv limit counts as reading the disciplin
   await expectBlockedForSkill("large-replayed", content);
 }, TEST_TIMEOUT_MS);
 
-test("an aborted stop hook takes the gate's descendants down with it", async () => {
+test("an aborted stop hook returns after the gate is reaped and its descendants have stopped", async () => {
   const cwd = join(home, "abort");
   mkdirSync(cwd, { recursive: true });
   const controller = new AbortController();
@@ -157,22 +207,28 @@ test("an aborted stop hook takes the gate's descendants down with it", async () 
     { signal: controller.signal, stop_hook_active: false },
     context("abort", cwd),
   );
-  const descendant = await descendantOf(cwd);
+  const { gate, descendant } = await hangingGateOf(cwd);
   expect(isRunning(descendant)).toBe(true);
   controller.abort();
-  expect(await pending).toMatchObject({ decision: "block", reason: expect.stringContaining("aborted") });
-  await until(() => !isRunning(descendant), "the descendant to stop");
+  const outcome = await pending;
+  // 返却後の待ち直しは返却時点の寿命を検証できないため不可
+  const returned = { gateReaped: isReaped(gate), descendantRunning: isRunning(descendant) };
+  expect(outcome).toMatchObject({ decision: "block" });
+  expect(returned).toEqual({ gateReaped: true, descendantRunning: false });
 }, TEST_TIMEOUT_MS);
 
-test("a gate that outlives its deadline blocks the edit and its descendants stop", async () => {
+test("a gate that outlives its deadline blocks the edit and the hook returns after the gate is reaped and its descendants have stopped", async () => {
   const cwd = join(home, "deadline");
   mkdirSync(cwd, { recursive: true });
   const started = performance.now();
-  const outcome = await write(hanging, "deadline", { path: FREE_PATH, content: "x" }, cwd);
+  const pending = write(hanging, "deadline", { path: FREE_PATH, content: "x" }, cwd);
+  const { gate, descendant } = await hangingGateOf(cwd);
+  expect(isRunning(descendant)).toBe(true);
+  const outcome = await pending;
+  const returned = { gateReaped: isReaped(gate), descendantRunning: isRunning(descendant) };
+  expect(outcome).toMatchObject({ block: true });
+  expect(returned).toEqual({ gateReaped: true, descendantRunning: false });
   expect(performance.now() - started).toBeGreaterThanOrEqual(19_000);
-  expect(outcome).toMatchObject({ block: true, reason: expect.stringContaining("timed out") });
-  const descendant = await descendantOf(cwd);
-  await until(() => !isRunning(descendant), "the descendant to stop");
 }, TEST_TIMEOUT_MS);
 
 test("a hook loaded for one generation keeps its own gate after the next generation's hook loads", async () => {

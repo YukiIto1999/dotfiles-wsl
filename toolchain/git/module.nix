@@ -20,6 +20,7 @@ let
 
   hooks = import ./package.nix {
     inherit lib pkgs;
+    supervise = cfg.platform.supervise.package;
     verificationEntry = cfg.toolchain.verification.entry;
   };
 

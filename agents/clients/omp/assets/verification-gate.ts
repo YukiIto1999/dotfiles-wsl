@@ -9,9 +9,45 @@ const SHELL_TOOLS: Record<string, true> = { bash: true, eval: true };
 type GateKind = "arm" | "edit" | "learn" | "observe" | "stop";
 
 const GATE_TIMEOUT_MS = 20_000;
+const DRAIN_REPORT_MS = 30_000;
+
+// 待機の上限と reader の cancel は子の終了の代用にならないため不可
+/**
+ * 取消した gate の終了監視と出力読取の全完了待ち
+ * @param pi - 終了を確認できない間の診断先
+ * @param kind - 診断に付ける hook の判定種別
+ * @param pid - 当該 gate の process group leader
+ * @param completion - 当該子の終了監視と出力読取の Promise 一覧
+ * @returns 全待機対象の settle 後の完了
+ */
+async function reclaim(pi: ExtensionAPI, kind: GateKind, pid: number, completion: readonly Promise<unknown>[]): Promise<void> {
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch (error) {
+    const missing = error && typeof error === "object" && "code" in error && error.code === "ESRCH";
+    if (!missing) pi.logger.warn("verification gate could not be signalled", { kind, pid, error: String(error) });
+  }
+  const report = setInterval(() => {
+    pi.logger.warn("verification gate has not ended; still waiting for it", { kind, pid });
+  }, DRAIN_REPORT_MS);
+  try {
+    await Promise.allSettled(completion);
+  } finally {
+    clearInterval(report);
+  }
+}
 
 // 本文が argv の長さ制限を超えるため stdin 非対応の pi.exec は不採用
 // 出力 pipe を持つ子孫が残るため単一 process の終了は不可
+/**
+ * hook の許可判定に用いる物理 gate の実行
+ * @param pi - 実行失敗と終了待機の診断先
+ * @param kind - gate に要求する判定種別
+ * @param payload - stdin に渡す当該 hook の JSON event
+ * @param cwd - 対象 repository を解決する作業 directory
+ * @param signal - 呼出側の取消通知
+ * @returns gate の終了 status と診断内容
+ */
 async function gate(
   pi: ExtensionAPI,
   kind: GateKind,
@@ -27,28 +63,28 @@ async function gate(
       stderr: "pipe",
       detached: true,
     });
-    const finished = Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-      child.exited,
-    ]);
-    finished.catch(() => undefined);
+    const completion = [new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited] as const;
+    const finished = Promise.all(completion);
     const deadline = AbortSignal.timeout(GATE_TIMEOUT_MS);
     const stop = signal ? AbortSignal.any([deadline, signal]) : deadline;
     const interrupted = new Promise<"interrupted">((resolve) => {
       if (stop.aborted) resolve("interrupted");
       else stop.addEventListener("abort", () => resolve("interrupted"), { once: true });
     });
-    const outcome = await Promise.race([finished, interrupted]);
+    let outcome: Awaited<typeof finished> | "interrupted";
+    try {
+      outcome = await Promise.race([finished, interrupted]);
+    } catch (error) {
+      await reclaim(pi, kind, child.pid, completion);
+      throw error;
+    }
     if (outcome === "interrupted") {
-      try {
-        process.kill(-child.pid, "SIGKILL");
-      } catch (error) {
-        if (!error || typeof error !== "object" || !("code" in error) || error.code !== "ESRCH") throw error;
-      }
+      // join 中に来た deadline による中断理由の上書きは不可
+      const timedOut = deadline.aborted;
+      await reclaim(pi, kind, child.pid, completion);
       return {
         code: -1,
-        text: deadline.aborted
+        text: timedOut
           ? `Verification gate ${kind} timed out after ${GATE_TIMEOUT_MS / 1000}s.`
           : `Verification gate ${kind} was aborted.`,
       };

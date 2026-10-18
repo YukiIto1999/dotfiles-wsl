@@ -5,12 +5,7 @@
 }:
 
 let
-  supervise = pkgs.writeShellApplication {
-    name = "dotfiles-supervise";
-    text = ''
-      exec ${lib.getExe pkgs.python3} -I -S ${./impl/supervise.py} "$@"
-    '';
-  };
+  supervise = pkgs.callPackage ./package.nix { };
 in
 {
   options.dotfiles.platform.supervise.package = lib.mkOption {
@@ -19,8 +14,10 @@ in
     internal = true;
     description = ''
       絶対pathのcommandを一度だけ起動し、子孫の終了をwaitpidのECHILDで観測する監督器である。
-      `dotfiles-supervise [--term-grace SEC] [--kill-grace SEC] [--result FILE] [--argv0 NAME] [--hold-fd N] [--parent-death-cancels PID] [--require-drained] -- COMMAND...`の形で呼ぶ。
-      SIGTERMとSIGHUPはsession全体の取消とし、SIGINTとSIGQUITはsession全体の取消として扱わない。
+      `dotfiles-supervise [--term-grace SEC] [--kill-grace SEC] [--result FILE] [--argv0 NAME] [--hold-fd N] [--parent-death-cancels PID] [--require-drained] [--interrupt-cancels] -- COMMAND...`の形で呼ぶ。
+      SIGTERMとSIGHUPはsession全体の取消とし、SIGINTとSIGQUITは既定ではsession全体の取消として扱わない。
+      `--interrupt-cancels`を明示した呼び出しだけは、SIGINTをSIGTERMと同じsession全体の取消として扱い、終了処理も終了statusも同じ規則に従う。
+      SIGQUITは`--interrupt-cancels`の有無にかかわらず取消として扱わない。
       commandの終了または取消で終了処理を始め、所有する全processへSIGTERM、猶予、SIGKILLの順に送る。
       commandの終了status（signalは128+n）を保つが、`--require-drained`なしでSIGKILL後の猶予が過ぎても所有processが残る場合は70、起動できない場合は126か127、使い方が不正な場合は2を返す。
       `--result`のJSONはstartedとfinishedの段階、client_status、drained、remainingを持つ。

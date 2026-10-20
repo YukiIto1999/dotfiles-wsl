@@ -174,6 +174,11 @@ export default function verificationGate(pi: ExtensionAPI): void {
       event.signal,
     );
     if (held.code === 0) return;
+    if (event.stop_hook_active === true) {
+      pi.logger.warn("verification gate remains unsatisfied after stop feedback", { reason: held.text });
+      ctx.ui.notify(held.text, "warning");
+      return;
+    }
     return { decision: "block" as const, reason: held.text };
   });
 }

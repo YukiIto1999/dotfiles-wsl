@@ -199,6 +199,33 @@ test("only a complete read beyond the argv limit counts as reading the disciplin
   await expectBlockedForSkill("large-replayed", content);
 }, TEST_TIMEOUT_MS);
 
+test("unsatisfied stop feedback returns control without accepting the audit and blocks a fresh stop again", async () => {
+  const session = "incomplete-conformance-feedback";
+  const body = join(home, ".omp/agent/skills/standard-conformance/SKILL.md");
+  const shown = "# standard-conformance\nAudit instructions.";
+  mkdirSync(dirname(body), { recursive: true });
+  writeFileSync(body, `${shown}\n`);
+  const event = readEvent(session, shown);
+  event.input.path = body;
+  event.details.resolvedPath = body;
+  const notices: { message: string; type: string }[] = [];
+  const ctx = {
+    ...context(session),
+    ui: { notify: (message: string, type: string) => notices.push({ message, type }) },
+  };
+  await handlerOf(real, "tool_result")(event, ctx);
+  const stop = handlerOf(real, "session_stop");
+  const first = (await stop({ stop_hook_active: false }, ctx)) as { decision: string; reason: string };
+  expect(first.decision).toBe("block");
+  const receipt = join(home, ".cache/dotfiles-wsl/verification/sessions", session, "conformance/receipt.json");
+  expect(existsSync(receipt)).toBe(false);
+
+  expect(await stop({ stop_hook_active: true }, ctx)).toBeUndefined();
+  expect(notices).toEqual([{ message: first.reason, type: "warning" }]);
+  expect(existsSync(receipt)).toBe(false);
+  expect(await stop({ stop_hook_active: false }, ctx)).toMatchObject({ decision: "block" });
+}, TEST_TIMEOUT_MS);
+
 test("an aborted stop hook returns after the gate is reaped and its descendants have stopped", async () => {
   const cwd = join(home, "abort");
   mkdirSync(cwd, { recursive: true });

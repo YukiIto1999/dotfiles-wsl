@@ -19,7 +19,8 @@ description: Writes or revises documentation comments for types, functions, meth
 
 標準本文は、callerが明示した`<standard-root>`、なければAGENTSが案内する現行規範rootから読む。
 配備済みSkillの所在から導いた固定版は使わない。
-正本を読めない場合は記憶で補わず、読めなかったrootまたはfileを示して止める。
+正本を読めない場合は、読めなかったrootまたはfileと標準に照らせなかった判断を報告し、repositoryのpolicyと既存の形式が定める範囲で仕上げる。
+記憶で正本の規則を補わない。
 
 ## 手順
 

@@ -16,16 +16,17 @@ dotfiles-rebuild --plan
 dotfiles-rebuild --candidate ID
 ```
 
-`--plan`はcommit済みのsourceを隔離した複製へ取り出し、その中で次を順に行う。
+`--plan`はcommit済みのsourceを隔離した複製へ取り出し、`flake.lock`をcommit済みのまま使って、その中で次を順に行う。
+どのinputも取得も更新もしない。
 
-1. 標準の実行packageである`architectureStandard`を最新へ更新し、`flake.lock`に固定する。
-2. 隔離したsourceで、`verification-budget.json`が宣言する`verify`の入口を宣言の予算内で通す。
-3. 対象hostのtoplevelをbuildし、native GC rootを`--out-link`で取得して候補として保持する。
-4. 候補とWSLの現在状態から再起動の分類を求め、差分とともに表示する。
+1. 隔離したsourceで、`verification-budget.json`が宣言する`verify`の入口を宣言の予算内で通す。
+2. 対象hostのtoplevelをbuildし、native GC rootを`--out-link`で取得して候補として保持する。
+3. 候補とWSLの現在状態から再起動の分類を求め、差分とともに表示する。
 
 planは元のcheckout、HEAD、index、`flake.lock`、配備済みのgenerationを変更しない。
 成功したplanは候補のIDを表示する。
 候補は、`--candidate ID`で適用するか、`--discard ID`で破棄するか、次のplanが置き換えるまでGCから守られる。
+`--candidate`と`--discard`のIDは、表示された数字とハイフンの組をそのまま渡し、空のIDや形式の異なるIDは、候補の準備も適用もせず終了status 2で拒否する。
 公開決定前のplanの失敗と取消は、保持中の候補を変えない。
 planの公開と、置き換える旧候補の解放は、一つの排他区間で行う。
 並行したplanはこの区間で直列になり、互いの候補を消し合って一つも残らない状態にはならない。
@@ -49,27 +50,16 @@ planの公開と、置き換える旧候補の解放は、一つの排他区間�
 書き手を取った後、次の順に進み、段ごとに元のsourceとprofileを読み直す。
 
 1. tracked、staged、non-ignoredの未追跡、`assume-unchanged`と`skip-worktree`の印を確認し、差分があれば終了status 2で止まる。
-2. `--candidate ID`では候補の記録を読み、GC rootとstore path、保存したlock、plan時のHEADとlockが今のcheckoutと一致することを確かめる。
+2. `--candidate ID`では候補の記録を読み、記録の形式、host、checkout、GC rootとstore path、plan時のHEADが今のcheckoutと一致することを確かめる。
+   別の形式、host、checkoutの記録は、別の候補をbuildせず、解放もせず、適用前に終了status 2で拒否する。
    失効または不一致なら別の候補をbuildせず、適用前に終了status 2で拒否し、その候補を解放する。
 3. 現在のsystem状態から再起動の分類を求め直す。
-4. 候補が新しいstandardのrevisionを含むときだけ、候補のlockを`flake.lock`へ書き、`fix: 標準の実行 package の最新版への更新`として一つのcommitにする。
-   Gitのref transactionで元のHEADと参照先を固定し、基点のcommitとcleanなworktreeを要求してからlockを書く。
-   書き込みはGitのtree更新（`git read-tree -m -u`）が行い、indexとworktreeの`flake.lock`が基点のbyteを保っている間だけ両方を更新する。
-   別の編集とstagedは上書きせず、基点が動いていれば何も書かずに終了status 4で止まる。
-   一時的なnative linked worktreeのprivate HEADで、元のworktreeとindexを使って`git commit`と設定済みのhookを実行する。
-   hookが参照するHEADはprivate HEADであり、元のbranch名を返すとは限らない。
-   元worktree固有の設定は、元の`config.worktree`をnative includeで参照し、相対includeの基準を変えずに引き継ぐ。
-   branchやGit directoryに依存する条件によって実効設定が変わる場合は、hookを別の設定で走らせず、lockを書く前に拒否する。
-   `--no-verify`、`core.hooksPath`の変更、`dotfiles.hooks.trusted`の付与は行わない。
-5. 公開前のcommitがlockだけを変え、そのlockが候補と一致し、基点直下に載り、worktreeがcleanであることを確かめる。
-   排他を解いた後、基点のcommit IDをold-oidに指定したnative `git update-ref`で元のHEADへ公開し、間に入った別のHEAD更新を上書きしない。
-   排他とold-oidの照合は、[`git update-ref`のtransactionとcompare-and-swap](https://git-scm.com/docs/git-update-ref)を使う。
-6. commit hook終了後のcheckoutを、既存のsource-bound検証である`dotfiles-agent-verify`で`verify`の入口へ通す。
+4. checkoutを、既存のsource-bound検証である`dotfiles-agent-verify`で`verify`の入口へ通す。
    隔離したsourceの成功証跡はこの段へ移さない。
    成功証跡はcheckoutのpathとHEADごとに取り直し、再利用はNixの不変な成果物とcacheだけが担う。
-7. 同じcheckoutのtoplevelを評価し、その結果が保持した候補のstore pathと一致する場合だけ進む。
+5. 同じcheckoutのtoplevelを評価し、その結果が保持した候補のstore pathと一致する場合だけ進む。
    file内容の一致では代用せず、Git metadataの影響も評価結果に含めて照合する。
-8. 評価と検証の間にHEADや作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path`へ候補のstore pathを渡す。
+6. 評価と検証の間にHEADや作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path`へ候補のstore pathを渡す。
    flakeを再び解決せず、nativeの`nixos-rebuild`は候補をbuildも評価もしない。
 
 nativeの`nixos-rebuild`は端末のforegroundで走る。
@@ -83,53 +73,29 @@ nativeの`nixos-rebuild`は端末のforegroundで走る。
 activationはこのsupervisorの下に置かない。
 取消のTERMとKILLがrootのactivationを途中で止め、profileとserviceを部分適用のまま残すためである。
 
-### 標準の更新
+### inputの固定
 
-通常の適用と`--plan`は`architectureStandard`だけを更新し、他のinputは変えない。
-更新を取得できない場合は警告で済ませず、終了status 2で止まり、checkoutとsystemを変えない。
-取得できた最新が既にlockの版なら、`flake.lock`は変わらずcommitも作らない。
-更新が`architectureStandard`の外のlockを変えた場合も、適用せずに止まる。
-
-オフラインなどで最新を取得できない場合の修復は、別の明示した操作として分ける。
-
-```sh
-dotfiles-rebuild --locked --plan
-dotfiles-rebuild --locked
-```
-
-`--locked`は取得もlockの更新もcommitもせず、`flake.lock`のrevisionでそのまま候補を作る。
-実行packageはlockの版のままであり、最新の標準を適用した証拠にならない。
-規範本文は現行規範のrootから読むため、この操作が古い本文の適用を許可するわけではない。
-実行packageが現行の本文を扱えなければ配送不足として失敗し、配備版の古い本文や別の写しへfallbackしない。
+適用と`--plan`は、inputを取得も更新もせず、`flake.lock`を書かず、commitも作らない。
+更新したinputは、[Inputの更新](#inputの更新)の手順で`flake.lock`をcommitしてから、同じ入口で適用する。
 
 ### 終了statusと結果
 
 | status | 結果 | checkoutとsystem |
 |---|---|---|
 | 0 | planの成功、または適用の完了。`switch`と`switch-restart`を含む | 適用の完了ではsystemは候補になっている |
-| 2 | 拒否または失敗。dirty、取得失敗、検証失敗、build失敗、失効した候補、書き手の競合、引数の誤りを含む | HEAD、index、作業木、systemは実行前のまま |
+| 2 | 拒否または失敗。dirty、検証失敗、build失敗、失効した候補、書き手の競合、引数の誤りを含む | HEAD、index、作業木、systemは実行前のまま |
 | 3 | 適用したが、WSLのboot移行が終わっていない | systemのprofileは切り替わっている |
-| 4 | checkoutが変わり、systemは切り替えていない | lockのcommitが残る、または作業木に差分が残る。適用の途中に入った別の編集は上書きされない |
+| 4 | 適用の途中にcheckoutが変わり、systemは切り替えていない | 別の書き手が残したHEADまたは作業木の変更が残る。このcommandはcheckoutへ書かないため、それを上書きも復元もしない |
 | 5 | activationが始まった後に失敗または中断した | profile、running system、serviceが部分適用のことがある |
 | 130 | 何も変える前に中断された | 実行前のまま |
 
 終了status 4は、結果の行に`source-changed`と表示し、基点のcommit、今のHEAD、残った差分を示す。
-lockのcommitが残った場合は、commit済みだが未適用であることを明示する。
-commit hookが`flake.lock`以外を変えた場合、検証の間に作業木が編集された場合、検証や評価の照合に失敗した場合がこれに当たる。
-hookが候補commitやworktreeを変えた場合、そのcommitは元のHEADへ公開せず、hookの編集を残して止まる。
-適用の途中で別の書き手がHEAD、index、作業木を変えた場合も、`flake.lock`を書く前に止まり、このcommandはcommitを作らず、その変更を残す。
-このcommandは、残った変更を一律には戻さない。
-戻すのは、commitを拒否されたときに、このcommandが書いた`flake.lock`のbyteがfileとindexにそのまま残っている場合のその一fileだけである。
-この確認と復元はGitの同じtree更新が一度に行うため、確認の後に入った編集を上書きしない。
-終了が確認できた一時worktreeはnative `git worktree remove`で登録ごと解放し、終了未確認の走行の登録は作業directoryと共に保持する。
-登録を解放するのはこのcommandの終了処理であり、lock更新のhelperが先に終了しても、hookが残した子孫の終了確認までは保持する。
+候補の用意、検証、評価の間に、別の書き手がHEAD、index、作業木を変えた場合がこれに当たり、候補の検証やbuildも同時に失敗した場合を含む。
+このcommandはcheckoutへ書かないため、その変更を戻さず、そのまま残して止まる。
+checkoutが基点のままで、検証や評価の照合が候補と食い違う場合は、終了status 2で止まる。
 
 終了status 5は、結果の行に`activation-failed`と表示し、観測したprofile、running system、clientの配備先を示す。
 復旧済みとは表示しない。
-lockのcommitがあれば、残っていることも示す。
-
-commit済みで未適用の状態からは、原因を直して引数なしの`dotfiles-rebuild`を再び実行する。
-lockは既にHEADにあるため、新しいcommitを作らず、同じ手順で候補を用意して適用する。
 
 ## WSLの再起動
 
@@ -155,13 +121,20 @@ inputやpackageを更新すると、MCP frontやcontainerを含むserviceがacti
 
 ## Inputの更新
 
-NixOS、WSL、Home Managerのstable branchを維持したまま、checkoutのrootで更新する。
+NixOS、WSL、Home Manager、sopsのstable branchを維持したまま、checkoutのrootで更新する。
 
 ```sh
 nix flake update nixpkgs nixos-wsl home-manager sops-nix
 ```
 
-`architectureStandard`は上の`dotfiles-rebuild`が更新するため、この手順に含めない。
+Skillの供給元として採用した外部sourceも、同じ入口を通る。
+URLにrevを書いたinputは`flake.nix`のrevを差し替えて`flake.lock`を更新し、書かない`architectureStandard`は最新を使う方針のまま、次で更新する。
+
+```sh
+nix flake update architectureStandard
+```
+
+どちらも`flake.lock`の差分をcommitしてから、`dotfiles-rebuild --plan`で確認して適用する。
 
 devenvとactrunは、`flake.nix`の公式release commitを差し替えた後に`nix flake lock`でupstreamの依存を固定する。
 hostのnixpkgsには追従させず、host全体のchannelを変えずに各公式packageのcompilerと依存を使う。
@@ -180,7 +153,7 @@ dotfiles-rebuild --rollback --plan
 dotfiles-rebuild --rollback
 ```
 
-rollbackは最新のstandardを取得せず、新しいflakeをbuildも評価もしない。
+rollbackはinputを取得せず、新しいflakeをbuildも評価もしない。
 書き手の排他は適用と共有し、rollbackの実行中は適用も別のrollbackも始められない。
 選んだgenerationのWSL metadataで再起動の分類を求め、`nixos-rebuild switch --no-reexec --rollback`へ委譲する。
 適用後は、system profileが選んだgenerationを指していることを確かめ、指していなければ`activation-failed`として終了status 5にする。
@@ -236,7 +209,7 @@ profileやserviceを変えずに復旧候補を調べるsmokeでは、cleanなch
 取消はsessionを離れた子孫の回収まで、実際のprocessで確認する。
 終了を確認できない場合に作業用directoryと候補のrootを残し、後続のplanとprune、`--candidate`が解放も適用もしない動作は、実際のsupervisorの結果を未確認へ置き換える代役で確認する。
 親のSIGKILLは、子孫が止まるまでpruneが待つ動作まで、実際のprocessで確認する。
-`rebuild-concurrent-edits`は候補の用意中、planの表示中、commit hookの実行中に別の書き手がcheckoutを編集またはcommitする場合、`rebuild-concurrent-planners`は並行したplanが公開する場合、`rebuild-cancelled-plan`はplanの表示中の取消を、書き手を同じ段で動かして確認する。
+`rebuild-concurrent-edits`は候補の用意中、planの表示中、source-bound検証中に別の書き手がcheckoutを編集またはcommitする場合、`rebuild-concurrent-planners`は並行したplanが公開する場合、`rebuild-cancelled-plan`はplanの表示中の取消を、書き手を同じ段で動かして確認する。
 Nix、`nixos-rebuild`、検証commandはfixtureの依存であり、toplevelはlockの内容から導く。
 このため、候補と評価はlockが一致するときだけ同じpathになる。
 

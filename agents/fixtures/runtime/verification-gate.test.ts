@@ -1,5 +1,6 @@
 import { beforeAll, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 type Handler = (event: Record<string, unknown>, ctx: unknown) => Promise<unknown>;
@@ -67,6 +68,39 @@ async function expectBlockedForSkill(session: string, content = "x") {
   const outcome = (await write(real, session, { path: GUARDED_PATH, content })) as { block: true; reason: string };
   expect(outcome.block).toBe(true);
   expect(outcome.reason).toContain("skill://ui-design");
+}
+
+const verificationRoot = join(home, ".cache/dotfiles-wsl/verification");
+
+function git(repository: string, ...args: string[]): void {
+  execFileSync("git", ["-C", repository, "-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", ...args], {
+    stdio: "ignore",
+  });
+}
+
+/**
+ * 宣言した T1 の入口を、いまの木に対してまだ通していない repository の作成
+ * @param name - home 直下に置く repository の directory 名
+ * @returns 作成した repository の根の絶対 path
+ */
+function unverifiedT1Repository(name: string): string {
+  const repository = join(home, name);
+  mkdirSync(repository, { recursive: true });
+  git(repository, "init", "-q");
+  writeFileSync(join(repository, "devenv.nix"), 'scripts.verify.exec = "true";\n');
+  writeFileSync(join(repository, "verification-budget.json"), '{"version":1,"verify":{"seconds":60}}\n');
+  writeFileSync(join(repository, "tracked"), "held\n");
+  git(repository, "add", "devenv.nix", "verification-budget.json", "tracked");
+  git(repository, "commit", "-q", "-m", "initial");
+  return repository;
+}
+
+/** gate が検証の完了または免除として残した証跡の一覧 */
+function settledReceipts(): string[] {
+  if (!existsSync(verificationRoot)) return [];
+  return readdirSync(verificationRoot, { recursive: true })
+    .map(String)
+    .filter((name) => name.endsWith(".verified") || name.endsWith(".waived"));
 }
 
 /** pid の再利用と元の process の消滅を区別する同一 boot 内の観測情報 */
@@ -199,30 +233,30 @@ test("only a complete read beyond the argv limit counts as reading the disciplin
   await expectBlockedForSkill("large-replayed", content);
 }, TEST_TIMEOUT_MS);
 
-test("unsatisfied stop feedback returns control without accepting the audit and blocks a fresh stop again", async () => {
-  const session = "incomplete-conformance-feedback";
-  const body = join(home, ".omp/agent/skills/standard-conformance/SKILL.md");
-  const shown = "# standard-conformance\nAudit instructions.";
-  mkdirSync(dirname(body), { recursive: true });
-  writeFileSync(body, `${shown}\n`);
-  const event = readEvent(session, shown);
-  event.input.path = body;
-  event.details.resolvedPath = body;
+test("an unverified T1 stop returns control on the repeated request without settling it and blocks a fresh stop again", async () => {
+  const session = "unverified-t1-feedback";
+  const repository = unverifiedT1Repository("unverified-t1");
+  const tracked = join(repository, "tracked");
+  writeFileSync(tracked, "edited\n");
   const notices: { message: string; type: string }[] = [];
   const ctx = {
     ...context(session),
     ui: { notify: (message: string, type: string) => notices.push({ message, type }) },
   };
-  await handlerOf(real, "tool_result")(event, ctx);
+  await handlerOf(real, "tool_result")(
+    { toolName: "write", toolCallId: `${session}-write`, input: { path: tracked }, isError: false },
+    ctx,
+  );
   const stop = handlerOf(real, "session_stop");
   const first = (await stop({ stop_hook_active: false }, ctx)) as { decision: string; reason: string };
   expect(first.decision).toBe("block");
-  const receipt = join(home, ".cache/dotfiles-wsl/verification/sessions", session, "conformance/receipt.json");
-  expect(existsSync(receipt)).toBe(false);
+  expect(first.reason).toContain(realpathSync(repository));
+  expect(first.reason).toContain("dotfiles-agent-verify -- devenv shell -- verify");
+  expect(settledReceipts()).toEqual([]);
 
   expect(await stop({ stop_hook_active: true }, ctx)).toBeUndefined();
   expect(notices).toEqual([{ message: first.reason, type: "warning" }]);
-  expect(existsSync(receipt)).toBe(false);
+  expect(settledReceipts()).toEqual([]);
   expect(await stop({ stop_hook_active: false }, ctx)).toMatchObject({ decision: "block" });
 }, TEST_TIMEOUT_MS);
 

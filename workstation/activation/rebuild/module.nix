@@ -19,7 +19,6 @@ let
     verificationEntry = lib.escapeShellArg (lib.getExe config.dotfiles.toolchain.verification.entry);
     agentVerify = lib.escapeShellArg (lib.getExe config.dotfiles.agents.packages.verification);
     supervise = lib.escapeShellArg (lib.getExe config.dotfiles.platform.supervise.package);
-    lockUpdater = lib.escapeShellArg (lib.getExe lockUpdater);
     # clientごとの配備先は別のstateであり、rollbackは戻さない。実際に指す先を報告するため選択済みの契約を渡す
     clientExecutables = lib.escapeShellArg (
       lib.concatStringsSep "\n" (
@@ -27,14 +26,6 @@ let
       )
     );
     inherit childGraceSeconds;
-  };
-
-  lockUpdater = pkgs.writeShellApplication {
-    name = "dotfiles-commit-lock";
-    runtimeInputs = [ pkgs.git ];
-    text = ''
-      exec ${lib.getExe pkgs.python3} -I -S ${./impl/commit-lock.py} "$@"
-    '';
   };
 
   wslRestartRequired = mkCommand {

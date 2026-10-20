@@ -25,9 +25,6 @@ usage: dotfiles-agent-gate <command> [options]
   skill --path PATH                     その綴りを触る前に読む skill の名を答える
   learned --session ID --path NAME      管理者が既存の配備済み skill 本文を明示的に承認する
   teach --session ID --path PATH        読んでいなければ理由を出して 1 で終わる
-  standard-root                         この gate に組み込まれた現行規範の root を解決して 1 行で答える。解決できなければ 1 で終わる
-  conformance --session ID --repo PROJECT --standard-root ROOT --report REPORT
-                                        ROOT が standard-root と一致し、成功 read した Skill package の checker が通った監査の receipt を保存する
   hook <arm|edit|learn|observe|stop>    client の hook から stdin の JSON で起こす
 USAGE
   exit 64
@@ -36,8 +33,6 @@ USAGE
 cache_root="$HOME/@cacheRootRelative@"
 verification_root="$cache_root/verification"
 sessions_root="$verification_root/sessions"
-# 環境変数と project 内の copy で規範の所在を差し替えられるため root の外部入力は不可
-compiled_standard_root=@standardRoot@
 
 fail() {
   printf '%s\n' "$*" >&2
@@ -521,7 +516,7 @@ try {
   requireProof(typeof actualPath === "string" && actualPath.length > 0);
   const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
   requireProof(fs.realpathSync(path.resolve(cwd, actualPath)) === physicalPath);
-  console.log(JSON.stringify({ digest: crypto.createHash("sha256").update(bytes).digest("hex"), physicalPath }));
+  console.log(JSON.stringify({ digest: crypto.createHash("sha256").update(bytes).digest("hex") }));
 } catch {
   process.exit(1);
 }
@@ -572,175 +567,8 @@ command_teach() {
   return 1
 }
 
-record_conformance_requirement() {
-  local session=$1 body=$2 cwd=$3 physical=$4 state
-  [ -n "$session" ] && [[ $body == */standard-conformance/SKILL.md ]] || return 0
-  state="$sessions_root/$session/conformance"
-  ensure_dir "$state"
-  cp "$sessions_root/$session/skills/standard-conformance" "$state/required"
-  printf '%s\n' "$physical" >>"$state/required"
-  printf '%s\n' "$cwd" >"$state/project-hint"
-}
-
-trusted_standard_root() {
-  local resolved
-  resolved=$(realpath -e -- "$compiled_standard_root" 2>/dev/null) || return 1
-  [ -d "$resolved" ] || return 1
-  printf '%s\n' "$resolved"
-}
-
-command_standard_root() {
-  trusted_standard_root ||
-    fail "現行規範の root を解決できない: $compiled_standard_root。固定 store 版へは戻さず canonical checkout を用意する"
-}
-
-skill_body_is_deployed() {
-  local root
-  local -a roots=(@skillRoots@)
-  for root in "${roots[@]}"; do
-    [ "$1" = "$HOME/$root/$2/SKILL.md" ] && return 0
-  done
-  return 1
-}
-
-# 配備先 symlink は generation の切替で別 package を指すため成功した読取の物理 path の再解決は不可
-learned_package_skill=
-learned_package_digest=
-learned_conformance_package() {
-  local session=$1 resolved current
-  local -a required learned
-  learned_package_skill=
-  learned_package_digest=
-  mapfile -t required <"$sessions_root/$session/conformance/required" || return 1
-  mapfile -t learned <"$sessions_root/$session/skills/standard-conformance" || return 1
-  [ "${#required[@]}" -eq 3 ] && [ "${#learned[@]}" -eq 2 ] || return 1
-  [ "${required[0]}" = "${learned[0]}" ] && [ "${required[1]}" = "${learned[1]}" ] || return 1
-  skill_body_is_deployed "${learned[1]}" standard-conformance || return 1
-  resolved=$(realpath -e -- "${required[2]}") || return 1
-  [ "$resolved" = "${required[2]}" ] && [ -f "$resolved" ] && [[ $resolved == /*/SKILL.md ]] || return 1
-  current=$(sha256sum <"$resolved" | cut -d ' ' -f 1) || return 1
-  [ "${learned[0]}" = "$current" ] || return 1
-  learned_package_skill=$resolved
-  learned_package_digest=$current
-}
-
-conformance_checker_of() {
-  local package=${1%/*} checker
-  checker=$(realpath -e -- "$package/scripts/check-coverage.mjs") || return 1
-  [ -f "$checker" ] && [[ $checker == "$package"/* ]] || return 1
-  printf '%s\n' "$checker"
-}
-
-command_conformance() {
-  local session=$1 repo=$2 requested=$3 report=$4 state trusted checker checker_digest report_digest inventory result status
-  [ -n "$session" ] && [ -n "$requested" ] && [ -n "$report" ] ||
-    fail 'conformance には --session、--repo、--standard-root、--report が要る'
-  state="$sessions_root/$session/conformance"
-  [ -f "$state/required" ] || fail 'この session で standard-conformance の本文を成功した読取で確認していない'
-  rm -f -- "$state/receipt.json"
-  trusted=$(trusted_standard_root) ||
-    fail "現行規範の root を解決できない: $compiled_standard_root。固定 store 版へは戻さず canonical checkout を用意する"
-  requested=$(realpath -e -- "$requested") || fail 'standard root を読めない'
-  [ "$requested" = "$trusted" ] ||
-    fail "--standard-root が現行規範の root と一致しない: $requested (現行: $trusted)。dotfiles-agent-gate standard-root の値を使う"
-  repo=$(realpath -e -- "$repo") || fail 'project root を読めない'
-  report=$(realpath -e -- "$report") || fail '監査報告を読めない'
-  learned_conformance_package "$session" ||
-    fail 'この session で成功readした Skill の物理 package が、読取時と同一のまま確認できない。skill://standard-conformance を読み直す'
-  checker=$(conformance_checker_of "$learned_package_skill") ||
-    fail 'coverage checker が成功readした Skill package の通常fileとしてないため source update が必要'
-  checker_digest=$(sha256sum <"$checker" | cut -d ' ' -f 1)
-  report_digest=$(sha256sum <"$report" | cut -d ' ' -f 1)
-  if ! inventory=$(node "$checker" inventory --standard-root "$trusted" --project-root "$repo"); then
-    printf '%s\n' "$inventory"
-    fail '成功readした Skill package の checker が現行規範または project を扱えない。配送不足のため package の source update が必要'
-  fi
-  if result=$(node "$checker" check --standard-root "$trusted" --project-root "$repo" --report "$report"); then
-    status=0
-  else
-    status=$?
-  fi
-  printf '%s\n' "$result"
-  [ "$status" -eq 0 ] || return "$status"
-  printf '%s' "$result" | jq -e '
-    (.status == "PASS" or .status == "WARN") and
-    (.standardDigest | type == "string" and test("^[0-9a-f]{64}$")) and
-    (.projectDigest | type == "string" and test("^[0-9a-f]{64}$"))
-  ' >/dev/null || fail 'coverage checker の成功結果に正本とprojectのdigestがないため source update が必要'
-  [ "$checker_digest" = "$(sha256sum <"$checker" | cut -d ' ' -f 1)" ] &&
-    [ "$report_digest" = "$(sha256sum <"$report" | cut -d ' ' -f 1)" ] ||
-    fail 'coverage check の走行中に checker または監査報告が変わった'
-  jq -n --argjson result "$result" --arg root "$trusted" --arg project "$repo" \
-    --arg report "$report" --arg skillPath "$learned_package_skill" --arg checker "$checker" \
-    --arg skill "$learned_package_digest" --arg reportDigest "$report_digest" \
-    --arg checkerDigest "$checker_digest" \
-    '{version:2,status:$result.status,standardRoot:$root,projectRoot:$project,
-      reportPath:$report,skillPath:$skillPath,checkerPath:$checker,skillDigest:$skill,
-      standardDigest:$result.standardDigest,projectDigest:$result.projectDigest,
-      reportDigest:$reportDigest,checkerDigest:$checkerDigest}' >"$state/receipt.json"
-}
-
-conformance_reason=
-conformance_receipt_holds() {
-  local session=$1 receipt=$2 trusted checker project report report_digest checker_digest inventory
-  conformance_reason='監査の完了が現在の標準とprojectに対して確認できない。'
-  trusted=$(trusted_standard_root) || {
-    conformance_reason='現行規範の root を解決できない。固定 store 版へは戻さず canonical checkout を用意する。監査は未確認である。'
-    return 1
-  }
-  learned_conformance_package "$session" || {
-    conformance_reason='成功readした Skill の物理 package が読取時と同一のまま確認できない。skill://standard-conformance を読み直す。監査は未確認である。'
-    return 1
-  }
-  checker=$(conformance_checker_of "$learned_package_skill") || {
-    conformance_reason='coverage checker が成功readした Skill package の通常fileとしてないため source update が必要。監査は未確認である。'
-    return 1
-  }
-  [ -f "$receipt" ] || return 1
-  project=$(jq -r '.projectRoot // empty' "$receipt") || return 1
-  report=$(jq -r '.reportPath // empty' "$receipt") || return 1
-  [ -n "$project" ] && [ -f "$report" ] || return 1
-  report_digest=$(sha256sum <"$report" | cut -d ' ' -f 1) || return 1
-  checker_digest=$(sha256sum <"$checker" | cut -d ' ' -f 1) || return 1
-  jq -e --arg root "$trusted" --arg skillPath "$learned_package_skill" --arg checker "$checker" \
-    --arg skill "$learned_package_digest" --arg report "$report_digest" --arg script "$checker_digest" '
-    .version == 2 and (.status == "PASS" or .status == "WARN") and
-    .standardRoot == $root and .skillPath == $skillPath and .checkerPath == $checker and
-    .skillDigest == $skill and .reportDigest == $report and .checkerDigest == $script
-  ' "$receipt" >/dev/null || return 1
-  inventory=$(node "$checker" inventory --standard-root "$trusted" --project-root "$project") || {
-    conformance_reason='成功readした Skill package の checker が現行規範または project を扱えない。配送不足のため package の source update が必要。監査は未確認である。'
-    return 1
-  }
-  jq -e --argjson inventory "$inventory" '
-    $inventory.status == "INVENTORY" and
-    .standardDigest == $inventory.standardDigest and .projectDigest == $inventory.projectDigest
-  ' "$receipt" >/dev/null
-}
-
-command_conformance_stop() {
-  local session=$1 state receipt trusted project="" report=""
-  state="$sessions_root/$session/conformance"
-  [ -f "$state/required" ] || return 0
-  receipt="$state/receipt.json"
-  conformance_receipt_holds "$session" "$receipt" && return 0
-  trusted=$(trusted_standard_root) || trusted=""
-  if [ -f "$receipt" ]; then
-    project=$(jq -r '.projectRoot // empty' "$receipt") || project=""
-    report=$(jq -r '.reportPath // empty' "$receipt") || report=""
-  fi
-  [ -n "$project" ] || project=$(cat "$state/project-hint")
-  {
-    printf '%s\n' "$conformance_reason"
-    printf '  実際の監査報告を Git checkout の外に置いて通す:\n'
-    printf '  dotfiles-agent-gate conformance --session %q --repo %q --standard-root %q --report %q\n' \
-      "$session" "${project:-PROJECT}" "${trusted:-ROOT}" "${report:-REPORT}"
-  } | tee /dev/stderr
-  return 1
-}
-
 command_hook() {
-  local kind=$1 payload session cwd path body proof digest physical marker held status=0
+  local kind=$1 payload session cwd path body proof digest marker held status=0
   payload=$(cat)
   session=$(printf '%s' "$payload" | jq -r '.session_id // empty')
   cwd=$(printf '%s' "$payload" | jq -r '.cwd // empty')
@@ -779,9 +607,7 @@ command_hook() {
     body=$(skill_read_in "$path") || exit 0
     proof=$(read_result_proof "$payload" "$body") || exit 0
     digest=$(printf '%s' "$proof" | jq -er '.digest | select(test("^[0-9a-f]{64}$"))') || exit 0
-    physical=$(printf '%s' "$proof" | jq -er '.physicalPath | select(length > 0)') || exit 0
     record_skill_read "$session" "$body" "$digest"
-    record_conformance_requirement "$session" "$body" "$cwd" "$physical"
     exit 0
     ;;
   edit)
@@ -804,7 +630,6 @@ command_hook() {
         command_check "$held" || status=2
       done
     fi
-    command_conformance_stop "$session" || status=2
     exit "$status"
     ;;
   *) usage ;;
@@ -816,7 +641,7 @@ main() {
   [ -n "$command" ] || usage
   shift || true
 
-  local repo=$PWD session="" reason="" text="" path="" standard_root="" report="" pending=""
+  local repo=$PWD session="" reason="" text="" path="" pending=""
   local -a policy_args=()
   while [ "$#" -gt 0 ]; do
     case $1 in
@@ -845,14 +670,6 @@ main() {
       path=$2
       shift 2
       ;;
-    --standard-root)
-      standard_root=$2
-      shift 2
-      ;;
-    --report)
-      report=$2
-      shift 2
-      ;;
     --pending)
       pending=$2
       shift 2
@@ -878,8 +695,6 @@ main() {
   snapshot) snapshot_of "$repo" ;;
   learned) command_learned "$session" "$path" ;;
   teach) command_teach "$session" "$path" ;;
-  standard-root) command_standard_root ;;
-  conformance) command_conformance "$session" "$repo" "$standard_root" "$report" ;;
   skill) skill_required_for "$path" ;;
   hook) command_hook "${1-}" ;;
   *) usage ;;

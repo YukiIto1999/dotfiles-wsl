@@ -79,10 +79,12 @@ Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skills�
 原版の起動flagも保持し、policy rosterがtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
 consumerはpolicy rosterのraw source絶対pathを`Read`で開き、固定source実体のsibling referenceを利用する。
-architecture-standardの規範本文は、配備済みsourceからでなく、policyが案内する現行規範root（`dotfiles.agents.runtime.standardRoot`）から読む。
+architecture-standardも他の外部sourceと同じregistryとoverrideの契約で配備し、agent runtimeとgateは標準の所在も存在も持たない。
+標準の規範本文は、配備済みsourceからでなく、policyが案内する現行規範rootから読む。
 同梱のreferenceとscriptは成功してReadした`SKILL.md`の実体のdirectoryから、規範文書のlinkは現行規範rootから解決する。
 配備済みsourceの標準本文、Git revision、`flake.lock`は実行packageの出典であり、現行規範の根拠にしない。
-`flake.lock`は`dotfiles-rebuild`が最新へ更新して配備したrevisionの記録であり、版を固定して更新を待つ仕組みではない。
+`flake.lock`は`nix flake update architectureStandard`で明示的に更新した最新revisionの記録であり、版を固定して更新を待つ仕組みではない。
+通常の`dotfiles-rebuild`はこのlockをそのまま使い、inputを取得も更新もしない。
 片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
 Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
 外部Skillのraw directoryを配ることと、同梱scriptの実行依存を供給することは別の契約である。
@@ -143,11 +145,6 @@ supervisorが先に消えた場合はscopeのcgroupが空になるまで残り�
 その物理pathを実行するため、保護と起動の間にprofileが動いても別の版を実行しない。
 全子孫の終了後にだけGC root、管理scratch、session directoryを解放し、解放できなかった資源はGCに残して非ゼロで終わる。
 
-managed OMPを選択したhostは、評価の呼出し側が使うhost capabilityとして`~/.local/share/dotfiles-agent/evaluation-runtime.json`を読取専用で配備する。
-内容は`version`、managed OMP wrapperの絶対pathと空の先行引数、`supervise`の実行path、完了契約`require-drained`だけである。
-予算、model、保存先、資格情報、profileのnative binaryへの直接pathは持たない。
-呼出し側はこのfileを`--config`で明示した設定の層として参照し、PATHやstoreのgenerationを前提にしない。
-
 projectはGit repositoryではgit common directory、それ以外では作業directoryから決めるため、linked worktreeは元のcheckoutと同じprojectになる。
 session中の`git worktree add`はgit shimがpathと作成時のHEADを記録し、終了時にはHEAD不変のworktreeだけを`git worktree remove`へ渡す。
 変更、untracked file、lockを持つworktreeは同commandが拒否し、削除できなくてもclientの終了statusは変えない。
@@ -198,28 +195,13 @@ metadataを持たない手作りのdirectory、別sessionの識別情報、不�
 記録には配備先のsymlinkを解決した本文のSHA-256を保存し、編集時に現在の本文と照合するため、配備内容が変わったら読み直す。
 `learned --session ID --path NAME`は、既存の配備済み本文を管理者が明示的に承認するための信頼された操作として残し、通常の読取hookの代わりには使わない。
 
-`standard-conformance`のcanonical本文を成功した読取eventで読んだsessionは、応答の終了要求時に監査完了を確認する。
-`standard-apply`だけの読取や管理者の`learned`操作から、この監査義務を推定しない。
-`dotfiles-agent-gate standard-root`は、compiled configurationが持つ信頼された現行規範rootを出力する。
-環境変数やproject内の写しで、このrootを置き換えない。
-`dotfiles-agent-gate conformance --session ID --repo PROJECT --standard-root ROOT --report REPORT`は、規範rootと実行packageを別々に検証する。
-ROOTは信頼された現行規範rootと物理pathが一致しなければならず、同じ物理rootを指すsymlinkは受理するが、同じ本文をコピーした別のrootは受理しない。
-実行packageは、成功read時に記録した`SKILL.md`のsymlink実体のdirectoryである。
-現在のSkill本文hashを照合してから、そのpackageの`scripts/check-coverage.mjs`をNodeで実行し、`--standard-root`へ現行規範rootを渡す。
-規範本文だけが更新された場合は、保存済みのinventoryとreceiptが失効し、実行packageは変わらず識別されたまま使われる。
-更新後の規範本文をそのpackageのcheckerが扱えない場合は、配送不足として失敗し、旧本文でPASSを作らない。
-報告は対象Git checkoutの外に置き、baselineの正本は対象projectのrootを表す`PROJECT`の下の`PROJECT/docs/conformance-baseline.json`とする。
-checkerがexit 0で`PASS`か`WARN`を返した場合だけ、観測した標準とprojectのdigest、報告とcheckerのhash、各pathをsessionのreceiptへ保存する。
-終了時は現在のinventoryとこれらのhashを照合し、同じ木の`check`を重複実行せずに、確認の欠落や後の変更を拒否する。
-旧配備のSkillにcheckerがなければ確認済みとして通さず、source updateと実session IDを含む実行commandを案内する。
-
 OMPのgate起動例外は説明付きの非ゼロ結果となり、編集前と初回の応答終了時の判定はgateが起動しない場合も処理を止める。
 停止hookの再指示中を示す`stop_hook_active`がtrueの終了要求で判定が再び失敗した場合は、警告とlogに結果を残し、追加の再指示を返さず利用者へ応答を返す。
-この返却を検証や監査の合格にはせず、CLIの非ゼロ終了と成功receiptの作成条件は変えない。
+この返却を検証の合格にはせず、gateの非ゼロ終了とT1の成功証跡の作成条件は変えない。
 利用者の新しい入力による終了要求では、再び初回の判定を行う。
 読取後の記録、編集後のrepository登録、shell実行後の変更観測は実行済みのtoolを取り消せず、後段hook自体が失敗すると記録が残らないこともある。
 終了時の検証gateが要求するのは、編集を記録したrepository自身が宣言するT1の`verify`入口だけであり、入口を持たないrepositoryには要求しない。
-このgateは通常のhook経路でtoolが返した全文とその鮮度、成功readした実行packageと現行規範rootの対応、文書単位の監査完了を確認するもので、悪意あるagentからの防御、注意や理解、後続compactionでの本文保持、正しい監査対象の選択、証拠やcheckの意味と真偽、標準全体への意味的な適合を保証しない。
+このgateは通常のhook経路でtoolが返した全文とその鮮度、編集したrepositoryのT1の完了を確認するもので、悪意あるagentからの防御、注意や理解、後続compactionでの本文保持、検査の意味と真偽、標準全体への意味的な適合を保証しない。
 `dotfiles-doctor`の配備driftのPASSは配備物の同一性の観測であり、現行規範への適合を示さない。
 
 ## 資源の上限

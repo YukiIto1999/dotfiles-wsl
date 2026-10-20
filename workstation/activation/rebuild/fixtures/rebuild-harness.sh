@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 # Shared setup for the dotfiles-rebuild behavior checks. The checks source this file.
 #
-# The Git checkout, its hooks and the state directory are real. Nix, nixos-rebuild, sudo and
+# The Git checkout and the state directory are real. Nix, nixos-rebuild, sudo and
 # the verification commands are the fixture dependencies, which model their results from
 # their inputs: a toplevel is named after the content of the flake.lock it was built from,
 # so a candidate and an evaluation agree only when they saw the same lock.
 set -euo pipefail
-
-export REBUILD_STANDARD_SUBJECT='fix: 標準の実行 package の最新版への更新'
 
 harness_init() {
   local system
@@ -66,10 +64,16 @@ harness_init() {
   git -C "$REBUILD_CHECKOUT" commit -qm initial
 }
 
-# A flake.lock with the architectureStandard node at revision $1 and one other input at $2.
+# A flake.lock with one input locked at revision $1.
 lock_json() {
-  printf '{"nodes":{"architectureStandard":{"locked":{"rev":"%s"}},"nixpkgs":{"locked":{"rev":"%s"}},"root":{"inputs":{"architectureStandard":"architectureStandard","nixpkgs":"nixpkgs"}}},"root":"root","version":7}\n' \
-    "$1" "${2:-nixpkgs-1}"
+  printf '{"nodes":{"source":{"locked":{"rev":"%s"}},"root":{"inputs":{"source":"source"}}},"root":"root","version":7}\n' "$1"
+}
+
+# Commits a flake.lock locked at revision $1, so that the checkout becomes a source whose toplevel
+# differs, the way an owner adopts a moved input.
+commit_lock() {
+  lock_json "$1" >"$REBUILD_CHECKOUT/flake.lock"
+  checkout_git commit -qam "lock $1"
 }
 
 # The toplevel the fixture nix builds from, or evaluates for, a flake.lock with this content.
@@ -97,15 +101,6 @@ head_of() { checkout_git rev-parse "${1:-HEAD}"; }
 checkout_snapshot() {
   checkout_git rev-parse HEAD
   sha256sum <"$REBUILD_CHECKOUT/.git/index"
-  sha256sum <"$REBUILD_CHECKOUT/flake.lock"
-  checkout_git --no-optional-locks status --porcelain --untracked-files=all
-}
-
-# What the index and the working tree mean, without the stat bytes of the index file. A run that
-# wrote flake.lock and took it back leaves the same content with different stat information.
-checkout_content() {
-  checkout_git rev-parse HEAD
-  checkout_git ls-files -s
   sha256sum <"$REBUILD_CHECKOUT/flake.lock"
   checkout_git --no-optional-locks status --porcelain --untracked-files=all
 }
@@ -278,18 +273,4 @@ wait_for_process_state() {
 signal_same_process() {
   [[ $(process_field "$2" 22) == "$3" ]] || return 0
   kill "-$1" "$2" 2>/dev/null || true
-}
-
-# apply が変更せず走らせる commit gate としての checkout の hook の設置
-#   $1: hook の名前
-#   $2: hook が実行する shell の本文
-install_hook() {
-  printf '#!/bin/sh\n%s\n' "$2" >"$REBUILD_CHECKOUT/.git/hooks/$1"
-  chmod +x "$REBUILD_CHECKOUT/.git/hooks/$1"
-}
-
-# install_hook が置く全 hook の削除
-remove_hooks() {
-  rm -f -- "$REBUILD_CHECKOUT"/.git/hooks/pre-commit "$REBUILD_CHECKOUT"/.git/hooks/commit-msg \
-    "$REBUILD_CHECKOUT"/.git/hooks/post-commit
 }

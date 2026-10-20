@@ -1,15 +1,15 @@
 usage() {
   cat <<'USAGE'
 usage:
-  dotfiles-rebuild [--locked] [--plan]
+  dotfiles-rebuild [--plan]
   dotfiles-rebuild --candidate ID
   dotfiles-rebuild --discard ID
   dotfiles-rebuild --rollback [--plan]
 
-Without options, copy the committed source into an isolated checkout, resolve the latest
-architectureStandard there, validate and build the result, commit only the flake.lock
-change to the checkout, verify the committed source, and switch to exactly the candidate
-that was built. Resolving the latest standard is required: a fetch failure stops the run.
+Without options, copy the committed source into an isolated checkout, validate and build it with
+flake.lock as committed, verify the committed source, and switch to exactly the candidate that
+was built. No input is fetched or updated and nothing is written to the checkout. To move an
+input, update it explicitly (nix flake update INPUT), commit flake.lock and run this command again.
 
 --plan stops after the candidate is built and held by a Nix GC root. The checkout, HEAD,
 index, flake.lock and the deployed system are not changed. The candidate is held until it
@@ -18,8 +18,6 @@ is applied with --candidate ID, released with --discard ID, or replaced by the n
 in its place, when the candidate expired or no longer matches the checkout.
 --discard ID also releases what a run kept because its supervisor could not confirm that every
 process of a command had ended; no later run releases it, so confirm first that none runs.
---locked is an explicit recovery: flake.lock is used as it is, nothing is fetched and no
-commit is made, so the executed standard package stays at the locked revision.
 --rollback selects the previous system generation that still exists. It never fetches
 or builds. Apply and rollback share one writer; a second one is refused while it runs.
 A failed activation can leave the profile and running services in different states;
@@ -30,7 +28,7 @@ Exit status:
   0    completed (or the plan was produced)
   2    refused or failed; the checkout and the system are as they were
   3    switched, but a WSL boot transition is pending; this is not a completed switch
-  4    the checkout changed (committed or left dirty) and the system was not switched
+  4    the checkout changed while the command ran and the system was not switched
   5    activation started and failed or was interrupted; the system may be partial
   130  interrupted before anything changed
 USAGE
@@ -41,23 +39,15 @@ active_pid=
 work_dir=
 cand_dir=
 cand_id=
-cand_kind=
 cand_path=
-cand_lock=
-standard_before=
-standard_after=
 retain_candidate=0
-committed_head=
 base_head=
-base_lock=
 checkout_real=
 restart_plan=
 verify_entry=
 verify_budget=
 child_result=
 child_unconfirmed=0
-written_tree=
-standard_subject='fix: 標準の実行 package の最新版への更新'
 
 dotfiles=@configuredDotfiles@
 system_profile="@systemProfilePath@"
@@ -71,13 +61,11 @@ wsl_restart_required=@wslRestartRequired@
 verification_entry=@verificationEntry@
 agent_verify=@agentVerify@
 supervise=@supervise@
-lock_updater=@lockUpdater@
 client_executables=@clientExecutables@
 child_grace_seconds=@childGraceSeconds@
 
 plan_only=0
 rollback=0
-locked=0
 candidate_id=
 discard_id=
 while [[ $# -gt 0 ]]; do
@@ -96,15 +84,8 @@ while [[ $# -gt 0 ]]; do
     }
     rollback=1
     ;;
-  --locked)
-    ((locked == 0)) || {
-      usage >&2
-      exit 2
-    }
-    locked=1
-    ;;
   --candidate)
-    [[ $# -ge 2 && -z $candidate_id ]] || {
+    [[ $# -ge 2 && $2 =~ ^[0-9]+-[0-9]+$ && -z $candidate_id ]] || {
       usage >&2
       exit 2
     }
@@ -112,7 +93,7 @@ while [[ $# -gt 0 ]]; do
     shift
     ;;
   --discard)
-    [[ $# -ge 2 && -z $discard_id ]] || {
+    [[ $# -ge 2 && $2 =~ ^[0-9]+-[0-9]+$ && -z $discard_id ]] || {
       usage >&2
       exit 2
     }
@@ -120,7 +101,7 @@ while [[ $# -gt 0 ]]; do
     shift
     ;;
   --help | -h)
-    [[ $# -eq 1 && $plan_only -eq 0 && $rollback -eq 0 && $locked -eq 0 && -z $candidate_id && -z $discard_id ]] ||
+    [[ $# -eq 1 && $plan_only -eq 0 && $rollback -eq 0 && -z $candidate_id && -z $discard_id ]] ||
       {
         usage >&2
         exit 2
@@ -136,19 +117,15 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-if [[ -n $candidate_id ]] && ((plan_only || rollback || locked)); then
+if [[ -n $candidate_id ]] && ((plan_only || rollback)); then
   usage >&2
   exit 2
 fi
-if [[ -n $discard_id ]] && ((plan_only || rollback || locked)); then
+if [[ -n $discard_id ]] && ((plan_only || rollback)); then
   usage >&2
   exit 2
 fi
 if [[ -n $discard_id && -n $candidate_id ]]; then
-  usage >&2
-  exit 2
-fi
-if ((rollback && locked)); then
   usage >&2
   exit 2
 fi
@@ -170,22 +147,12 @@ checkpoint() {
   [[ $interrupted -eq 0 ]] || die 130 "interrupted; nothing was changed"
 }
 
-# 走行が所有するworktree登録と作業directoryの解放
+# 走行が所有する作業directoryの解放
 # $1: 解放対象の作業directory
 # 前提: 子孫の終了確認または利用者による明示的なdiscard
-# 戻り値: 解放成功時の0または登録の解放を確認できないときの非0
+# 戻り値: 解放成功時の0または失敗時の非0
 release_work_dir() {
-  local dir=$1 private record
-  if [[ -e $dir/commit-worktree-requested ]]; then
-    private=$(realpath -m -- "$dir/commit-worktree") || return 1
-    if ! git -C "$dotfiles" worktree remove --force "$private" 2>/dev/null; then
-      git -C "$dotfiles" worktree list --porcelain -z >"$dir/registered-worktrees" || return 1
-      while IFS= read -r -d '' record; do
-        [[ $record != "worktree $private" ]] || return 1
-      done <"$dir/registered-worktrees"
-    fi
-  fi
-  rm -rf --one-file-system -- "$dir"
+  rm -rf --one-file-system -- "$1"
 }
 
 # 終了statusを保った走行資源の条件付き解放
@@ -201,7 +168,7 @@ cleanup() {
   fi
   if ((child_unconfirmed == 0)); then
     if [[ -n $work_dir ]]; then
-      release_work_dir "$work_dir" || printf 'WARN: could not release the owned worktree in %s\n' "$work_dir" >&2
+      release_work_dir "$work_dir" || printf 'WARN: could not release the work directory %s\n' "$work_dir" >&2
     fi
     if [[ -n $cand_dir && $retain_candidate -eq 0 ]]; then
       rm -rf --one-file-system -- "$cand_dir" || true
@@ -356,7 +323,7 @@ prune_dead_leftovers() {
     if [[ -e $entry/unconfirmed ]] || ! drain_confirmed "$state_root/work/$id/supervisor.json"; then
       continue
     fi
-    release_work_dir "$entry" || printf 'WARN: could not release the owned worktree in %s\n' "$entry" >&2
+    release_work_dir "$entry" || printf 'WARN: could not release the work directory %s\n' "$entry" >&2
   done
 }
 
@@ -395,7 +362,6 @@ require_clean_source() {
 read_base() {
   checkout_real=$(realpath -e -- "$dotfiles") || die 2 "cannot resolve $dotfiles"
   base_head=$(git -C "$dotfiles" rev-parse --verify 'HEAD^{commit}') || die 2 "the checkout has no commit"
-  base_lock=$(git -C "$dotfiles" rev-parse --verify 'HEAD:flake.lock') || die 2 "flake.lock is not tracked in HEAD"
 }
 
 # True while the checkout is still the clean base commit this run started from.
@@ -404,19 +370,6 @@ source_is_base() {
   head=$(git -C "$dotfiles" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || return 1
   [[ $head == "$base_head" ]] || return 1
   source_difference "$dotfiles" >/dev/null
-}
-
-locked_standard() {
-  jq -ceS '.nodes.architectureStandard.locked | select(. != null)' "$1"
-}
-
-standard_label() {
-  jq -r '.rev // .narHash // "unknown"' <<<"$1"
-}
-
-locks_differ_only_in_standard() {
-  jq -en --slurpfile before "$1" --slurpfile after "$2" \
-    '($before[0] | del(.nodes.architectureStandard)) == ($after[0] | del(.nodes.architectureStandard))' >/dev/null
 }
 
 # Resolves the declared verification entry and its time budget for the source in $1.
@@ -434,16 +387,11 @@ resolve_verification() {
 
 write_receipt() {
   {
-    printf 'version=1\n'
+    printf 'version=2\n'
     printf 'host=%s\n' "$host_name"
-    printf 'kind=%s\n' "$cand_kind"
     printf 'checkout=%s\n' "$checkout_real"
     printf 'base_head=%s\n' "$base_head"
-    printf 'base_lock=%s\n' "$base_lock"
-    printf 'candidate_lock=%s\n' "$cand_lock"
     printf 'toplevel=%s\n' "$cand_path"
-    printf 'standard_before=%s\n' "$standard_before"
-    printf 'standard_after=%s\n' "$standard_after"
   } >"$cand_dir/receipt.tmp" || die 2 "could not write the candidate receipt"
 }
 
@@ -471,70 +419,40 @@ publish_candidate() {
 }
 
 # Builds a candidate from an isolated copy of the committed source. Nothing in the checkout is
-# written. The candidate root is a native Nix GC root created by nix build --out-link, inside
-# the candidate directory; only a plan publishes the directory, by its receipt.
+# written, and flake.lock is used as committed: no input is fetched or updated. The candidate root
+# is a native Nix GC root created by nix build --out-link, inside the candidate directory; only a
+# plan publishes the directory, by its receipt.
 prepare_candidate() {
-  local source_dir difference status=0 locked_before locked_after
+  local source_dir status=0
   local -a entry_words
 
   ensure_work_dir
   cand_id=${work_dir##*/}
   cand_dir=$state_root/candidates/$cand_id
-  mkdir -- "$cand_dir" || die 2 "could not create the candidate directory"
+  mkdir -- "$cand_dir" || stop_before_activation "could not create the candidate directory"
   source_dir=$work_dir/source
 
   run_child "$work_dir" "" git -c core.hooksPath=/dev/null clone --quiet --local --no-checkout -- "$dotfiles" "$source_dir" ||
-    die 2 "could not copy the committed source for the candidate"
+    stop_before_activation "could not copy the committed source for the candidate"
   run_child "$source_dir" "" git -c core.hooksPath=/dev/null -c advice.detachedHead=false checkout --quiet --detach "$base_head" ||
-    die 2 "could not check out the base commit in the isolated source"
-  git -C "$source_dir" show "$base_head:flake.lock" >"$work_dir/base.lock" ||
-    die 2 "could not read flake.lock of the base commit"
-  locked_before=$(locked_standard "$work_dir/base.lock") ||
-    die 2 "flake.lock does not lock architectureStandard"
-  standard_before=$(standard_label "$locked_before")
-
-  if ((locked)); then
-    cand_kind=locked
-    standard_after=$standard_before
-  else
-    cand_kind=update
-    run_child "$source_dir" "" nix flake update architectureStandard ||
-      die 2 "could not resolve the latest architectureStandard; nothing was changed. To recover from the locked source, run: dotfiles-rebuild --locked"
-    locked_after=$(locked_standard "$source_dir/flake.lock") ||
-      die 2 "flake.lock does not lock architectureStandard after the update"
-    standard_after=$(standard_label "$locked_after")
-    if [[ $locked_after == "$locked_before" ]]; then
-      git -C "$source_dir" restore --source=HEAD --staged --worktree -- flake.lock ||
-        die 2 "could not restore flake.lock in the isolated source"
-    else
-      locks_differ_only_in_standard "$work_dir/base.lock" "$source_dir/flake.lock" ||
-        die 2 "the update changed flake.lock outside architectureStandard"
-      difference=$(git -C "$source_dir" status --porcelain --untracked-files=all) ||
-        die 2 "could not inspect the isolated source"
-      [[ $difference == ' M flake.lock' ]] ||
-        die 2 "the update changed more than flake.lock in the isolated source: $difference"
-    fi
-  fi
+    stop_before_activation "could not check out the base commit in the isolated source"
   checkpoint
 
-  resolve_verification "$source_dir" || die 2 "the isolated source declares no usable verification entry"
+  resolve_verification "$source_dir" || stop_before_activation "the isolated source declares no usable verification entry"
   read -r -a entry_words <<<"$verify_entry"
   printf 'validate: %s (budget %ss, isolated source)\n' "$verify_entry" "$verify_budget"
   run_child "$source_dir" "" timeout --kill-after=5s "$verify_budget" "${entry_words[@]}" || status=$?
   if ((status == 124)); then
-    die 2 "validation of the candidate exceeded its ${verify_budget}s budget"
+    stop_before_activation "validation of the candidate exceeded its ${verify_budget}s budget"
   fi
-  ((status == 0)) || die 2 "validation of the candidate failed (status $status)"
+  ((status == 0)) || stop_before_activation "validation of the candidate failed (status $status)"
 
   run_child "$source_dir" "" nix build --no-update-lock-file --out-link "$cand_dir/toplevel" \
     "$source_dir#nixosConfigurations.$host_name.config.system.build.toplevel" ||
-    die 2 "candidate build failed"
-  cand_path=$(readlink -e -- "$cand_dir/toplevel") || die 2 "the candidate build left no root"
-  [[ $cand_path == "$store_dir"/* ]] || die 2 "the candidate root does not resolve into $store_dir"
+    stop_before_activation "candidate build failed"
+  cand_path=$(readlink -e -- "$cand_dir/toplevel") || stop_before_activation "the candidate build left no root"
+  [[ $cand_path == "$store_dir"/* ]] || stop_before_activation "the candidate root does not resolve into $store_dir"
 
-  cp -- "$source_dir/flake.lock" "$cand_dir/flake.lock" || die 2 "could not keep the candidate flake.lock"
-  cand_lock=$(git -C "$dotfiles" hash-object -- "$cand_dir/flake.lock") ||
-    die 2 "could not identify the candidate flake.lock"
   checkpoint
   rm -rf --one-file-system -- "$work_dir/source" || true
 }
@@ -558,26 +476,20 @@ load_candidate() {
     receipt[$key]=$value
   done <"$cand_dir/receipt"
 
-  if [[ ${receipt[version]-} != 1 || ${receipt[host]-} != "$host_name" || ${receipt[checkout]-} != "$checkout_real" ]]; then
+  if [[ ${receipt[version]-} != 2 ]]; then
+    die 2 "candidate $id was written in another receipt format; run dotfiles-rebuild --plan again"
+  fi
+  if [[ ${receipt[host]-} != "$host_name" || ${receipt[checkout]-} != "$checkout_real" ]]; then
     die 2 "candidate $id belongs to another host or checkout"
   fi
-  cand_kind=${receipt[kind]-}
-  [[ $cand_kind == update || $cand_kind == locked ]] || die 2 "candidate $id has an unknown kind"
   cand_path=${receipt[toplevel]-}
-  cand_lock=${receipt[candidate_lock]-}
-  standard_before=${receipt[standard_before]-}
-  standard_after=${receipt[standard_after]-}
 
   resolved=$(readlink -e -- "$cand_dir/toplevel" 2>/dev/null) || resolved=
   if [[ -z $resolved || $resolved != "$cand_path" ]] || ! nix path-info "$cand_path" >/dev/null 2>&1; then
     retain_candidate=0
     die 2 "candidate $id expired: its GC root or store path is gone. No other candidate was substituted; run dotfiles-rebuild --plan again"
   fi
-  if [[ ! -f $cand_dir/flake.lock || $(git -C "$dotfiles" hash-object -- "$cand_dir/flake.lock") != "$cand_lock" ]]; then
-    retain_candidate=0
-    die 2 "candidate $id expired: its flake.lock record no longer matches. No other candidate was substituted; run dotfiles-rebuild --plan again"
-  fi
-  if [[ ${receipt[base_head]-} != "$base_head" || ${receipt[base_lock]-} != "$base_lock" ]]; then
+  if [[ ${receipt[base_head]-} != "$base_head" ]]; then
     retain_candidate=0
     die 2 "candidate $id is stale: it was prepared from ${receipt[base_head]-unknown} and HEAD is $base_head. No other candidate was substituted; run dotfiles-rebuild --plan again"
   fi
@@ -587,18 +499,6 @@ show_plan() {
   printf 'candidate: %s\n' "$cand_id"
   printf 'candidate-path: %s\n' "$cand_path"
   printf 'base: %s\n' "$base_head"
-  case $cand_kind in
-  update)
-    if [[ $standard_before == "$standard_after" ]]; then
-      printf 'standard: %s (already the latest; flake.lock does not change)\n' "$standard_after"
-    else
-      printf 'standard: %s -> %s (flake.lock changes; one commit at apply)\n' "$standard_before" "$standard_after"
-    fi
-    ;;
-  locked)
-    printf 'standard: %s (locked recovery; not resolved against the latest)\n' "$standard_before"
-    ;;
-  esac
   "$nvd" diff /run/current-system "$cand_path" || true
   printf 'plan: %s\n' "$restart_plan"
 }
@@ -639,8 +539,8 @@ print_terminate_command() {
   printf "  wsl.exe --terminate '%s'\n" "${distro_name//\'/\'\'}"
 }
 
-# The apply stopped before activation. Reports the checkout as observed, restores nothing
-# beyond what this run itself wrote and already took back, and exits.
+# The apply stopped before activation. Reports the checkout as observed and exits; this command
+# never writes to the checkout, so there is nothing of its own to take back.
 stop_before_activation() {
   local head difference status=0
   printf 'FATAL: %s\n' "$1" >&2
@@ -654,18 +554,14 @@ stop_before_activation() {
   difference=$(source_difference "$dotfiles") || status=$?
   printf 'result: source-changed. The deployed system was not switched.\n' >&2
   printf '  base commit: %s\n  HEAD now:    %s\n' "$base_head" "$head" >&2
-  if [[ -n $committed_head ]]; then
-    printf '  the commit made by this run stays in the checkout; this is committed but not applied.\n' >&2
-  else
-    printf '  this run made no commit.\n' >&2
-  fi
+  printf '  this run wrote nothing to the checkout; the change was made by something else.\n' >&2
   if [[ -n $difference ]]; then
     printf '  working tree differences, left as they are:\n%s\n' "$difference" >&2
   fi
   if ((status == 2)); then
     printf '  the working tree could not be inspected.\n' >&2
   fi
-  printf '  nothing was restored automatically; inspect git status and git log, then run dotfiles-rebuild again.\n' >&2
+  printf '  inspect git status and git log, then run dotfiles-rebuild again.\n' >&2
   exit 4
 }
 
@@ -676,9 +572,6 @@ activation_failed() {
   printf 'FATAL: %s\n' "$1" >&2
   printf 'result: activation-failed. Activation started and did not complete; the profile, the running system and services may be partially applied. Nothing was restored automatically.\n' >&2
   report_state >&2
-  if [[ -n $committed_head ]]; then
-    printf 'the flake.lock update commit %s stays in the checkout.\n' "$committed_head" >&2
-  fi
   print_inspection
   exit 5
 }
@@ -721,62 +614,14 @@ finish_activation() {
   esac
 }
 
-# この走行が書いたlockだけの条件付き復元
-# 前提: written_treeへのこの走行の書込みtreeの記録と子孫の終了確認
-# 保持条件: 基点の変更またはfileかindexの第三者による変更
-restore_written_lock() {
-  local head
-  head=$(git -C "$dotfiles" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || return 0
-  [[ $head == "$base_head" ]] || return 0
-  git -C "$dotfiles" read-tree -m -u "$written_tree" "$base_head" || true
-}
-
-
-# 候補lockだけを基点上のcommitとして確定する更新
-# 前提: 検証済み候補の保持
-# 副作用: native hookを通過したcommitの元checkoutへの公開
-# 失敗: 基点の変更またはGitの拒否によるactivation前の停止
-commit_lock_update() {
-  local status=0 candidate parent files blob
-  printf 'commit: %s\n' "$standard_subject"
-  source_is_base ||
-    stop_before_activation "the checkout changed while the candidate was prepared; flake.lock was not written"
-  run_child "$dotfiles" "" "$lock_updater" \
-    --source "$dotfiles" --work "$work_dir" --base "$base_head" \
-    --lock "$cand_dir/flake.lock" --blob "$cand_lock" --subject "$standard_subject" || status=$?
-  if [[ -f $work_dir/commit-id ]]; then
-    candidate=$(<"$work_dir/commit-id")
-    if git -C "$dotfiles" merge-base --is-ancestor "$candidate" HEAD; then
-      committed_head=$candidate
-    fi
-  fi
-  if ((status != 0)); then
-    if ((child_unconfirmed == 0)) && [[ -z $committed_head && -f $work_dir/lock-tree ]]; then
-      written_tree=$(<"$work_dir/lock-tree")
-      restore_written_lock
-    fi
-    stop_before_activation "the commit of the flake.lock update was refused by the commit gate or by Git"
-  fi
-  [[ -n $committed_head ]] || stop_before_activation "the candidate commit was not published at HEAD"
-  parent=$(git -C "$dotfiles" rev-parse --verify 'HEAD^' 2>/dev/null) || parent=
-  [[ $parent == "$base_head" ]] ||
-    stop_before_activation "the new commit does not sit directly on the base commit $base_head"
-  files=$(git -C "$dotfiles" diff-tree --no-commit-id --name-only -r HEAD) ||
-    stop_before_activation "could not read the files of the new commit"
-  [[ $files == flake.lock ]] || stop_before_activation "the new commit changes more than flake.lock: $files"
-  blob=$(git -C "$dotfiles" rev-parse --verify 'HEAD:flake.lock') ||
-    stop_before_activation "could not read the committed flake.lock"
-  [[ $blob == "$cand_lock" ]] || stop_before_activation "the committed flake.lock is not the candidate's flake.lock"
-}
-
-# Verifies the checkout as it is after the commit hooks, through the existing source-bound
-# verification, and requires that its evaluated toplevel is the held candidate. Nothing is
-# carried over from the isolated source: the verification runs again for this directory and
-# commit, and only Nix's immutable outputs and caches are reused.
+# Verifies the checkout through the existing source-bound verification, and requires that its
+# evaluated toplevel is the held candidate. Nothing is carried over from the isolated source:
+# the verification runs again for this directory and commit, and only Nix's immutable outputs
+# and caches are reused.
 verify_source() {
-  local expected_head head status=0 evaluated
+  local head status=0 evaluated
   local -a entry_words
-  source_difference "$dotfiles" >/dev/null || stop_before_activation "the working tree is not clean after the commit hooks"
+  source_is_base || stop_before_activation "the checkout changed while the candidate was prepared"
   resolve_verification "$dotfiles" || stop_before_activation "the checkout declares no usable verification entry"
   read -r -a entry_words <<<"$verify_entry"
   printf 'verify: %s (source-bound, committed source)\n' "$verify_entry"
@@ -789,11 +634,10 @@ verify_source() {
   ((status == 0)) || stop_before_activation "could not evaluate the toplevel of the committed source (status $status)"
   evaluated=$(<"$work_dir/evaluated")
   [[ $evaluated == "$cand_path" ]] ||
-    stop_before_activation "the committed source evaluates to $evaluated, not to the held candidate $cand_path (Git metadata or hook changes); activation was not started"
+    stop_before_activation "the committed source evaluates to $evaluated, not to the held candidate $cand_path (Git metadata changes); activation was not started"
 
-  expected_head=${committed_head:-$base_head}
   head=$(git -C "$dotfiles" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || head=
-  [[ $head == "$expected_head" ]] || stop_before_activation "HEAD moved from $expected_head during verification"
+  [[ $head == "$base_head" ]] || stop_before_activation "HEAD moved from $base_head during verification"
   source_difference "$dotfiles" >/dev/null || stop_before_activation "the working tree changed during verification"
   [[ $interrupted -eq 0 ]] || stop_before_activation "interrupted before activation"
 }
@@ -843,9 +687,6 @@ do_apply() {
   checkpoint
   restart_plan=$("$wsl_restart_required" --plan "$cand_path") || die 2 "could not classify the restart requirement"
   show_plan
-  if [[ $cand_kind == update && $cand_lock != "$base_lock" ]]; then
-    commit_lock_update
-  fi
   verify_source
   activate "$cand_path" switch --no-reexec --store-path "$cand_path"
   retain_candidate=0
@@ -875,7 +716,7 @@ do_rollback() {
   restart_plan=$("$wsl_restart_required" --plan "$target") ||
     die 2 "could not classify the restart requirement"
   checkpoint
-  printf 'rollback: system generation %s (%s); no latest standard is fetched and nothing is built\n' "$previous_generation" "$target"
+  printf 'rollback: system generation %s (%s); nothing is fetched or built\n' "$previous_generation" "$target"
   if ((plan_only)); then
     "$nvd" diff /run/current-system "$target" || true
     printf 'plan: %s\n' "$restart_plan"

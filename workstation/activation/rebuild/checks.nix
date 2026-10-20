@@ -32,13 +32,6 @@
             ln -s ../dependency "$out/bin/$name"
           done
         '';
-        interleavingGit = pkgs.writeShellScriptBin "git" ''
-          exec ${pkgs.bash}/bin/bash ${
-            pkgs.replaceVars ./fixtures/rebuild-git.sh {
-              git = "${pkgs.git}/bin/git";
-            }
-          } "$@"
-        '';
         testRestartPlanner = pkgs.writeShellScript "test-restart-planner" ''
           exec "$REBUILD_RESTART_PLANNER" \
             --booted-system "$REBUILD_BOOTED_SYSTEM" \
@@ -79,14 +72,6 @@
             verificationEntry = lib.escapeShellArg "${rebuildDependencies}/bin/dotfiles-verify-entry";
             agentVerify = lib.escapeShellArg "${rebuildDependencies}/bin/dotfiles-agent-verify";
             supervise = lib.escapeShellArg superviseCommand;
-            lockUpdater = lib.escapeShellArg (
-              lib.getExe (
-                pkgs.writeShellApplication {
-                  name = "test-commit-lock";
-                  text = ''exec ${lib.getExe pkgs.python3} -I -S ${./impl/commit-lock.py} "$@"'';
-                }
-              )
-            );
             clientExecutables = ''"$REBUILD_CLIENT_TABLE"'';
             childGraceSeconds = "1";
           };
@@ -94,16 +79,13 @@
           superviseCommand:
           pkgs.writeShellApplication {
             name = "dotfiles-rebuild-test";
-            runtimeInputs = [
-              interleavingGit
-            ]
-            ++ (with pkgs; [
+            runtimeInputs = with pkgs; [
               coreutils
               diffutils
               git
               jq
               util-linux
-            ]);
+            ];
             text = ''exec ${pkgs.bash}/bin/bash -euo pipefail ${testRebuildScript superviseCommand} "$@"'';
           };
         testRebuild = testRebuildWith supervise;

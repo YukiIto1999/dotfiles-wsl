@@ -34,7 +34,7 @@ clone しただけの repository の code を、commit や checkout のたびに
 ## 検証の段と入口
 
 repositoryは検証の段ごとに入口を宣言する。
-段の意味と予算を決める手順はarchitecture-standardの `process/verification.md` が定め、秒数は各repositoryの `verification-budget.json` に置く。
+段の意味と予算を決める手順はarchitecture-standardの[process/verification.md](https://github.com/YukiIto1999/architecture-standard/blob/main/process/verification.md)が定め、秒数は各repositoryの `verification-budget.json` に置く。
 
 | 段 | 入口の名前 | 実行する者 |
 |---|---|---|

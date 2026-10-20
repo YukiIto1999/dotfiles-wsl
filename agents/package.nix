@@ -122,13 +122,11 @@ let
             "@cacheRootRelative@"
             "@verificationEntry@"
             "@skillRoots@"
-            "@standardRoot@"
           ]
           [
             cacheRootRelative
             (lib.getExe verificationEntry)
             (lib.escapeShellArgs runtimeContract.skillRoots)
-            (lib.escapeShellArg runtimeContract.standardRoot)
           ]
           (builtins.readFile ./impl/runtime/gate.sh);
     };

@@ -49,7 +49,7 @@ SkillとCapabilityの対応、subagentごとのrouteは[`agents/subagents/routin
 ## 直接採用
 
 固定revisionの正本は[`flake.nix`](../../flake.nix)と[`flake.lock`](../../flake.lock)、採用IDとdirectory pathの正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)である。
-architecture-standardの`architectureStandard`だけはURLにrevを書かず、`dotfiles-rebuild`が`flake.lock`を最新へ更新して実行packageを配備する。
+architecture-standardの`architectureStandard`だけはURLにrevを書かず、最新を使う方針のまま、他のinputと同じ`nix flake update architectureStandard`と`flake.lock`のcommitで更新して実行packageを配備する。
 Orcaの操作Skillとarchitecture-standardの運用Skillに加え、次の固定sourceから個別Skillを採用する。
 sourceはrepository全体またはSkillを同梱したpublished package全体を保持し、rootのlicenseと同梱資材を残したままSkill directoryを配備先から参照する。
 
@@ -172,9 +172,9 @@ guideを独自Skillへ再編集せず、projectのbrowser supportと前提を照
 
 `property-testing`の正本はarchitecture-standardの`skills/property-testing/SKILL.md`であり、`requiresSkills = [ \"standard-apply\" ]`、`requiresCapabilities = [ ]`を使う。
 published revisionを`flake.lock`で固定してwhole sourceから直接採用し、architectとimplementerのdynamic routeへ登録する。
-CLIとterminalの公開契約は`standard-apply`から標準の`structure/surfaces/console/layout.md`へ進み、moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとshrinkingは`property-testing`、実装は既存の`tdd`が扱う。
+CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfaces/console/layout.md](https://github.com/YukiIto1999/architecture-standard/blob/main/structure/surfaces/console/layout.md)へ進み、moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとshrinkingは`property-testing`、実装は既存の`tdd`が扱う。
 標準の`skills/cli-design/`はwhole source内に保持するが、named discoveryとsubagent routeには登録しない。
-未commitのlocal checkoutを恒久sourceにせず、標準の公開後の最新を`dotfiles-rebuild`が取り込む。
+未commitのlocal checkoutを恒久sourceにせず、標準の公開後の最新を`nix flake update architectureStandard`で取り込み、`flake.lock`のcommitを経て`dotfiles-rebuild`で適用する。
 規範本文はこの配備済みsourceからでなく、policyが案内する現行規範rootから読むため、本文の改訂は`flake.lock`の更新を待たない。
 配備済みsourceはSkillとcheckerの実行packageの出典であり、現行規範の基準ではない。
 

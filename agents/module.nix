@@ -112,22 +112,6 @@ let
     ) clientNames
   );
 
-  evaluationRuntimeRelative = ".local/share/dotfiles-agent/evaluation-runtime.json";
-  evaluationRuntimeSelected =
-    builtins.hasAttr "omp" agents.clients && modeOf agents.clients.omp.runtime == "managed";
-  # profile の native binary は hook と gate を迂回するため omp.executable へ直接指す案は不可
-  evaluationRuntime = (pkgs.formats.json { }).generate "evaluation-runtime.json" {
-    version = 1;
-    omp = {
-      executable = "${cfg.workstation.homeDir}/${runtimeWrapperDirectory}/${agents.clients.omp.binary}";
-      arguments = [ ];
-    };
-    supervision = {
-      executable = lib.getExe cfg.platform.supervise.package;
-      completion = "require-drained";
-    };
-  };
-
   allSkillNames = builtins.attrNames cfg.skills.registry;
   rawSubagentSkillEdges = map (route: "${route.subagent}/${route.skill}") rawRouting.subagentSkills;
   rawSubagentHandoffEdges = map (
@@ -232,7 +216,6 @@ let
     capabilities = cfg.capabilities.resolved;
     inherit (agents) clients;
     inherit (cfg.workstation) dotfilesDir environmentDir;
-    inherit (runtimeContract) standardRoot;
   };
 
   normalizeSource =
@@ -408,7 +391,6 @@ let
         inactiveDays = 30;
       };
       sliceUnit = "agents.slice";
-      standardRoot = "${cfg.workstation.environmentDir}/architecture-standard";
       skillRoots = lib.unique (map (name: agents.clients.${name}.skillsDestination) clientNames);
       state = {
         root = "${cfg.workstation.homeDir}/${relativeStateRoot}";
@@ -511,12 +493,7 @@ in
         projectMemoryHooks = config.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
       };
       runtime = {
-        inherit (runtimeContract)
-          timers
-          state
-          skillRoots
-          standardRoot
-          ;
+        inherit (runtimeContract) timers state skillRoots;
         cache = builtins.removeAttrs runtimeContract.cache [ "relativeCacheRoot" ];
       };
       shared = {
@@ -527,15 +504,7 @@ in
       };
     };
 
-    dotfiles.managedArtifacts =
-      managedArtifacts
-      // lib.optionalAttrs evaluationRuntimeSelected {
-        "agents/evaluation-runtime" = {
-          format = "json";
-          source = evaluationRuntime;
-          deployedAt = "${cfg.workstation.homeDir}/${evaluationRuntimeRelative}";
-        };
-      };
+    dotfiles.managedArtifacts = managedArtifacts;
     dotfiles.health.observations = runtimeContract.observations;
     dotfiles.platform.cli.commands = {
       inherit agentSupply;
@@ -636,9 +605,6 @@ in
         home.file = lib.mkMerge [
           (lib.listToAttrs allHomeEntries)
           publicCommands
-          (lib.optionalAttrs evaluationRuntimeSelected {
-            ${evaluationRuntimeRelative}.source = evaluationRuntime;
-          })
         ];
         home.sessionPath = lib.mkBefore [ "$HOME/${runtimeWrapperDirectory}" ];
         home.activation.seedAgentConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] seedScript;

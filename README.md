@@ -62,12 +62,13 @@ Nix unit は `module.nix` を marker にし、build がある場合は `package.
 ## アーキテクチャ標準
 
 アーキテクチャの標準は [architecture-standard](https://github.com/YukiIto1999/architecture-standard) にあり、準拠の基準は、ownerが指定するcanonical checkoutの現在の標準本文である。
-現行規範のrootは `dotfiles.workstation.environmentDir` の下の `architecture-standard` から導き、`dotfiles.agents.runtime.standardRoot` に公開して、全clientのpolicyと `dotfiles-agent-gate standard-root` が案内する。
 適用は、標準の README の適用の4則と利用の手順に従う。
+agentが標準を読む場所は、環境系repositoryの作業checkoutの規約とともにagent policyが案内する。
+このrepositoryのbuild、rebuild、agent runtimeは、標準のcheckoutの有無にも標準のcheckerにも依存しない。
 
-`flake.nix` の `architectureStandard` input はURLにrevを書かず、標準の運用Skill、checker、設定は不変の実行packageとして配備する。
-通常の`dotfiles-rebuild`は、隔離したsourceでこのinputの最新を取得して検証し、lockが変わる場合だけ元のcheckoutへcommitして、確認した候補そのものを適用する。
-取得できない場合に旧版へ暗黙に留めず、修復用の明示した`--locked`は[別の経路](docs/operations/rebuild.md#標準の更新)として扱う。
+標準の運用Skill、checker、設定は、他の外部Skillと同じく`flake.nix`のinputを`skills/plugins/module.nix`の採用表から配備する不変の実行packageである。
+`architectureStandard` input はURLにrevを書かず、最新への更新は他のinputと同じ`nix flake update architectureStandard`と`flake.lock`のcommitで明示的に行う。
+通常の`dotfiles-rebuild`は`flake.lock`をそのまま使い、inputを取得も更新もしない。
 URL、`flake.lock` のrevisionと内容hashは実行packageの出典であり、現行規範の正本ではない。
 `dotfiles-doctor` の配備driftのPASSは、配備物の同一性を示すだけで、現行規範への適合を示さない。
 

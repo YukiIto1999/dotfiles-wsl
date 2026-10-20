@@ -278,7 +278,6 @@
             )
             ++ map (id: "agents/${clientName}/${id}") (builtins.attrNames client.managedFiles)
           ) (builtins.attrNames clients)
-          ++ lib.optional (clients ? omp && clients.omp.runtime ? managed) "agents/evaluation-runtime"
         );
         actualAgentArtifactIds = lib.sort builtins.lessThan (
           builtins.filter (lib.hasPrefix "agents/") (builtins.attrNames artifacts)
@@ -401,9 +400,6 @@
             clientObservationIds = builtins.filter (lib.hasPrefix "agents/client/") (
               builtins.attrNames configuration.dotfiles.health.observations
             );
-            ompSelected = builtins.elem "omp" selection.enabled;
-            evaluationRuntimeFile = builtins.hasAttr evaluationRuntimePath home.home.file;
-            evaluationRuntimeArtifact = builtins.hasAttr "agents/evaluation-runtime" configuration.dotfiles.managedArtifacts;
             noClientDeployment =
               id:
               let
@@ -439,8 +435,6 @@
             && builtins.attrNames configuration.dotfiles.agents.clientExecutionDependencies == selection.enabled
             && configuration.dotfiles.health.observations."agents/roster".members == selection.enabled
             && clientObservationIds == map (id: "agents/client/${id}") selection.enabled
-            && evaluationRuntimeFile == ompSelected
-            && evaluationRuntimeArtifact == ompSelected
             && builtins.all noClientDeployment unselected
             &&
               configuration.dotfiles.agents.runtime.skillRoots
@@ -459,7 +453,6 @@
             && !(configuration.dotfiles.agents.packages ? apm)
           );
         wrapperDirectory = ".local/share/dotfiles-agent/bin";
-        evaluationRuntimePath = ".local/share/dotfiles-agent/evaluation-runtime.json";
       in
       {
         agent-client-selection =

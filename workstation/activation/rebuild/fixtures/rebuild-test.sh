@@ -45,7 +45,7 @@ before=$(checkout_snapshot)
 run_rebuild 0 --plan
 assert_output_has 'plan: switch'
 assert_output_has "candidate-path: $candidate_one"
-assert_called 'nix flake update architectureStandard'
+assert_not_called 'nix flake update'
 assert_no_switch
 [[ $(checkout_snapshot) == "$before" ]]
 assert_no_work_left
@@ -67,19 +67,18 @@ assert_no_terminate
 run_rebuild 0 --discard "$planned"
 [[ -z $(state_entries candidates) ]]
 
-# A new standard revision becomes one commit that changes only flake.lock.
+# A flake.lock the owner committed is built and applied as it is: nothing is fetched and the
+# checkout is not written.
 reset_profile
+commit_lock rev-2
 lock_two=$(lock_json rev-2)
 head_before=$(head_of)
-REBUILD_LOCK_NEXT=$lock_two run_rebuild 0
-[[ $(head_of HEAD^) == "$head_before" ]]
-[[ $(checkout_git log -1 --format=%s) == "$REBUILD_STANDARD_SUBJECT" ]]
-[[ $(checkout_git diff-tree --no-commit-id --name-only -r HEAD) == flake.lock ]]
+run_rebuild 0
+assert_not_called 'nix flake update'
+[[ $(head_of) == "$head_before" ]]
 [[ $(checkout_git show HEAD:flake.lock) == "$lock_two" ]]
 [[ -z $(checkout_git status --porcelain --untracked-files=all) ]]
 assert_called "nixos-rebuild switch --no-reexec --store-path $(system_for_lock "$lock_two")"
-assert_call_order 'nix flake update architectureStandard' 'nixos-rebuild'
-assert_output_has 'standard: rev-1 -> rev-2'
 
 # A failed build leaves the checkout and the system as they were.
 reset_profile
@@ -168,11 +167,14 @@ assert_output_lacks 'result: rolled back'
 reset_profile
 
 for arguments in '--plan --plan' '--rollback --rollback' '--help --rollback' '--plan unexpected' \
-  '--locked --locked' '--rollback --locked' '--candidate' '--candidate 1-2 --plan' \
-  '--candidate 1-2 --locked' '--candidate 1-2 --rollback' '--discard 1-2 --rollback' \
+  '--candidate' '--candidate 1-2 --plan' '--candidate 1-2 --rollback' '--discard 1-2 --rollback' \
   '--candidate 1-2 --discard 1-3' '--discard'; do
   read -r -a argv <<<"$arguments"
   run_rebuild 2 "${argv[@]}"
+  [[ ! -s $REBUILD_CALL_LOG ]]
+done
+for option in --candidate --discard; do
+  run_rebuild 2 "$option" ""
   [[ ! -s $REBUILD_CALL_LOG ]]
 done
 run_rebuild 0 --help

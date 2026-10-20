@@ -115,9 +115,11 @@ upstreamの手順や簡潔化の提案によって、指定された要件、安
 
 ## 現行規範
 
-architecture-standardの現行規範rootは`@standardRoot@`であり、`dotfiles-agent-gate standard-root`も同じ値を出力する。
-標準本文の読取り、現行規範への適合の判断、`standard-conformance`の`--standard-root`は、このrootの現在の本文を使う。
+architecture-standardを現行規範として読むのは、利用者またはcallerが標準への適用、適合の確認、標準の改訂を求めた仕事と、標準を正本とする手順に限る。
+現行規範rootは、環境系repositoryの作業checkoutである`@environmentDir@/architecture-standard`である。
+標準本文の読取りと、`standard-conformance`による現行規範への適合の判断は、このrootの現在の本文を使う。
 callerが別のrootを明示した場合は、そのrootに対する判断として使ったrootを示し、現行規範への適合とは書き分ける。
+標準を求めていない仕事は、標準のcheckoutの有無で開始も完了も変えない。
 
 配備されたSkill、checker、設定のstore実体は、実行する手順の不変な供給物であり、規範の正本ではない。
 Skillの`SKILL.md`を成功してReadした実体のdirectoryを`<skill-package-root>`とし、同梱のreferenceとscriptはそこから解決する。
@@ -127,7 +129,7 @@ Git revision、`flake.lock`、gateのreceiptは、供給物と観測の出典で
 作業中のcheckoutの未commit差分とbranchは、ownerが受け入れる前の候補として扱う。
 `dotfiles-doctor`の配備driftのPASSは、配備物が宣言したsourceと一致したことだけを示し、現行規範への適合を示さない。
 
-現行規範rootか必要なfileを読めない場合は、見た場所と不足したfileを示して止める。
+標準を現行規範として読む仕事で現行規範rootか必要なfileを読めない場合は、見た場所と不足したfileを示し、標準に依存する判断だけを保留する。
 store上の写し、記憶、過去のrevisionで補わない。
 
 ## 基盤
@@ -161,6 +163,7 @@ agentがそれを直接起動したり、接続を個別に操作したりしな
 ## dotfiles
 
 - 通常 rebuild: `dotfiles-rebuild`
+- 外部 source（Skill の供給元を含む）の更新: `nix flake update <input>`、`flake.lock` の commit、検証、`dotfiles-rebuild` の順。`dotfiles-rebuild` は input を取得も更新もしない。
 - 実用状態検証: `dotfiles-doctor`
 - Agent client binary の更新と rollback: `dotfiles-agent-supply update`、`dotfiles-agent-supply rollback <client>`。版の確認は `dotfiles-agent-supply status`
 - Home Manager backup 整理: `dotfiles-cleanup --delete`

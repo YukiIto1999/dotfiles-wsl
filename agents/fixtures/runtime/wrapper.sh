@@ -94,13 +94,11 @@ test "$status" -ne 0
 test ! -e "$CAPTURE/agent-pid"
 test -z "$(ls -A "$cache/sessions")"
 
-: "${MODULE_WRAPPER:?}" "${WRAPPER_CLOSURE:?}" "${GATE:?}" "${STANDARD_ROOT:?}" "${SKILL_ROOT:?}" "${SKILL_SOURCE:?}"
+: "${MODULE_WRAPPER:?}" "${WRAPPER_CLOSURE:?}" "${GATE:?}" "${SKILL_ROOT:?}" "${SKILL_SOURCE:?}"
 store=$fixture/store
 gcroots=$fixture/gcroots
-audited=$fixture/audited
-report=$fixture/report.json
-deployed=$home/$SKILL_ROOT/standard-conformance
-mkdir -p "$store" "$gcroots" "$audited/docs" "$home/$SKILL_ROOT"
+deployed=$home/$SKILL_ROOT/codebase-design
+mkdir -p "$store" "$gcroots" "$home/$SKILL_ROOT"
 
 declare -A references=() live=()
 while read -r object && read -r _ && read -r _ && read -r _ && read -r count; do
@@ -180,26 +178,19 @@ skill_read_event() {
   ' | "$GATE" hook learn
 }
 
-# 読取済み Skill の conformance を含む session 終了可否の照会
-# 引数 $1: 終了可否を照会する当該 session の ID
-# 戻り値: 終了許可なら0でそれ以外は gate の拒否 status
-conformance_stop() {
-  jq -nc --arg session "$1" --arg cwd "$project" '{session_id: $session, cwd: $cwd}' |
-    "$GATE" hook stop
+# 読取済み Skill を要求する path への編集可否の照会
+# 引数 $1: 編集可否を照会する当該 session の ID
+# 戻り値: 編集許可なら0でそれ以外は gate の拒否 status
+guarded_edit() {
+  jq -nc --arg session "$1" --arg cwd "$project" --arg path /r/core/library.ts \
+    '{session_id: $session, cwd: $cwd, tool_name: "write", tool_input: {path: $path}}' |
+    "$GATE" hook edit >/dev/null 2>&1
 }
-
-git -C "$audited" init -q
-git -C "$audited" config user.name fixture
-git -C "$audited" config user.email fixture@example.invalid
-printf 'source\n' >"$audited/tracked"
-printf '{"violations":[]}\n' >"$audited/docs/conformance-baseline.json"
-git -C "$audited" add tracked docs/conformance-baseline.json
-git -C "$audited" commit -qm initial
 
 old_object=$(store_object "$SKILL_SOURCE")
 old_name=${old_object##*/}
 skill_relative=${SKILL_SOURCE#"$old_object"}
-new_name=$(printf '%s' "$old_name" | sha256sum | cut -c1-32)-standard-conformance
+new_name=$(printf '%s' "$old_name" | sha256sum | cut -c1-32)-codebase-design
 old_package=$store/$old_name$skill_relative
 cp -r --no-preserve=mode,ownership "$old_object" "$store/$old_name"
 ln -s "$old_package" "$deployed"
@@ -211,15 +202,12 @@ old_session_pid=$!
 wait_for_file "$fixture/old-session.ready"
 session_id=$(read_capture session-id)
 
+if guarded_edit "$session_id"; then
+  fail "the gate let the session edit a guarded path before it read the Skill"
+fi
 skill_read_event "$session_id" "$deployed/SKILL.md"
-status=0
-output=$(conformance_stop "$session_id" 2>&1) || status=$?
-test "$status" -eq 2 || fail "the gate did not require conformance after the session read the Skill ($status): $output"
-node "$old_package/scripts/check-coverage.mjs" inventory --standard-root "$STANDARD_ROOT" --project-root "$audited" |
-  jq '{violations: [], baseline: {file: "docs/conformance-baseline.json"},
-    coverage: {standardDigest, projectDigest, entries: [.documents[] |
-      {document: ., disposition: "checked", evidence: ["fixture:source-read"],
-        checks: [{kind: "review", status: "passed", evidence: "fixture:completed-review"}]}]}}' >"$report"
+guarded_edit "$session_id" || fail "the gate refused an edit after the session read the Skill"
+cp "$deployed/SKILL.md" "$fixture/read-body"
 
 cp -r --no-preserve=mode,ownership "$old_object" "$store/$new_name"
 printf '\nNext generation procedure.\n' >>"$store/$new_name$skill_relative/SKILL.md"
@@ -228,12 +216,14 @@ ln -sfn "/nix/store/$new_name" "$gcroots/generation"
 fixture_gc
 test -d "$store/$new_name"
 
-if ! output=$("$GATE" conformance --session "$session_id" --repo "$audited" \
-  --standard-root "$STANDARD_ROOT" --report "$report" 2>&1); then
-  fail "the old session lost the Skill package it read after the generation changed and a GC ran: $output"
+test -d "$store/$old_name" || fail "the old session lost the Skill source it read after the generation changed and a GC ran"
+cmp "$fixture/read-body" "$old_package/SKILL.md" ||
+  fail "the Skill source the old session read changed after the generation changed and a GC ran"
+if guarded_edit "$session_id"; then
+  fail "the gate kept a Skill read after the deployed body changed"
 fi
-printf '%s' "$output" | jq -e '.status == "PASS"' >/dev/null || fail "the old checker did not pass: $output"
-conformance_stop "$session_id" >/dev/null || fail "the gate did not accept the old session's conformance at its end"
+skill_read_event "$session_id" "$deployed/SKILL.md"
+guarded_edit "$session_id" || fail "the gate refused an edit after the session read the changed Skill"
 
 : > "$fixture/old-session.release"
 status=0

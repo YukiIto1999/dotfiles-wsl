@@ -1,7 +1,6 @@
 {
   pkgs,
   self,
-  pluginSources,
   ...
 }:
 {
@@ -30,8 +29,8 @@
       };
 
       # link 先が解決しても、表示名が移動前の path を名乗っていれば読み手は迷う。
-      # link destination だけでなく、表示した path の実在も検査する。決定の記録は標準本文の
-      # 規律を path で引用するため、宣言した source root のいずれかに実在すれば足りる。
+      # link destination だけでなく、表示した path の実在も検査する。他の repository が所有する
+      # path は所有者の repository を指す link で示し、この検査の対象にしない。
       docs-path-labels =
         pkgs.runCommandLocal "check-docs-path-labels"
           {
@@ -40,7 +39,6 @@
               gnugrep
               gnused
             ];
-            searchRoots = "${self} ${pluginSources.architecture-standard}";
           }
           ''
             set -euo pipefail
@@ -49,14 +47,7 @@
             while IFS= read -r doc; do
               # 大文字を含む token は NAME のような雛形なので対象にしない
               while IFS= read -r label; do
-                found=""
-                for root in $searchRoots; do
-                  if [ -e "$root/$label" ]; then
-                    found=1
-                    break
-                  fi
-                done
-                [ -n "$found" ] || missing="$missing ''${doc#${self}/}:$label"
+                [ -e "${self}/$label" ] || missing="$missing ''${doc#${self}/}:$label"
               done < <(
                 grep -ohE '`[a-z0-9_.-]+/[a-z0-9_./-]+\.(nix|sh|md|yaml|yml|json|py|ts)`' "$doc" \
                   | tr -d '`' | sort -u || true

@@ -100,7 +100,8 @@ Orcaのlegacy aliasである`linear-tickets`は`orca-linear`とroutingを分け�
 architecture-standardの規範本文は、配備済みsourceでなくpolicyが案内する現行規範rootから読み、配備するのはその運用Skillの実行packageである。
 `standard-feedback`は`github-resources`を要求する。
 
-`architectureStandard`は公開済みのsourceを取得し、供給元のローカルcheckoutの存在や作業状態をrebuildの条件にしない。
+`architectureStandard`は公開済みのsourceを`flake.lock`で取得し、供給元のローカルcheckoutの存在や作業状態をrebuildの条件にしない。
+rebuildとagent runtimeは、このsourceに専用の更新、gate、checkerを持たない。
 未公開の供給契約を使うdotfiles側の開発は別worktreeで行い、通常のrebuildは公開済みの契約だけで成立させる。
 
 architecture-standardの運用Skillは、同repositoryの`skills/<id>/`を正本とし、`standard-update`と`standard-audit`も既存の採用表から配備する。

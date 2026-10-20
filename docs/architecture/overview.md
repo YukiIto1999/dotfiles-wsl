@@ -16,7 +16,7 @@ host profileのファイル名は`nixosConfigurations`の属性名と`networking
 Nixpkgsのpackage setは`flake.nix`だけが所有し、nativeのread-only moduleを通して全hostとvariantへ渡す。
 hostからpackage set、config、overlay、platformを差し替えることは拒否する。
 
-検証taskも[`flake.nix`](../../flake.nix)を正本とするNixの単一採用であり、architecture-standardの`tools/build/nx.md`を置き換える。
+検証taskも[`flake.nix`](../../flake.nix)を正本とするNixの単一採用であり、architecture-standardの[tools/build/nx.md](https://github.com/YukiIto1999/architecture-standard/blob/main/tools/build/nx.md)を置き換える。
 標準が機械構成の実現方式を定めた場合、またはNix graphで必要な保証と検証予算を維持できなくなった場合は、この採用を再評価する。
 見直す場合も、検査を後段へ移して予算に合わせたり、二つの検証正本を恒久的に併置したりしない。
 

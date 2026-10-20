@@ -25,6 +25,7 @@
       flake = false;
     };
 
+    # 常に最新の標準を使う方針のためURLへのrev固定は不可
     architectureStandard = {
       url = "github:YukiIto1999/architecture-standard";
       flake = false;

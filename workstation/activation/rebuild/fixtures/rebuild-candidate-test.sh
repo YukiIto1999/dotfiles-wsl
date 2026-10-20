@@ -7,7 +7,6 @@ harness_init "${2:?rebuild entrypoint is required}" "${3:?fixture dependencies a
   "${4:?restart planner is required}"
 unconfirmed_rebuild=${5:?rebuild entrypoint with an unconfirming supervisor is required}
 
-export REBUILD_GATE_RECORD=$REBUILD_ROOT/gate-record
 lock_one=$(<"$REBUILD_CHECKOUT/flake.lock")
 base_head=$(head_of)
 
@@ -45,66 +44,46 @@ cancel_during() {
   assert_no_switch
 }
 
-# 1. A plan resolves the latest standard in an isolated source, validates and builds there, and
-# leaves the checkout and the system untouched, while a native GC root holds the candidate.
-lock_two=$(lock_json rev-2)
+# 1. A plan validates and builds the committed source in an isolated copy, with flake.lock as
+# committed, and leaves the checkout and the system untouched, while a native GC root holds the
+# candidate.
 before=$(checkout_snapshot)
 : >"$REBUILD_OBSERVED"
-REBUILD_LOCK_NEXT=$lock_two run_rebuild 0 --plan
+run_rebuild 0 --plan
 [[ $(checkout_snapshot) == "$before" ]]
-assert_output_has 'standard: rev-1 -> rev-2'
+assert_not_called 'nix flake update'
 assert_output_has 'result: planned'
 assert_no_switch
 assert_no_work_left
 first=$(candidate_id_of_output)
 first_dir=$REBUILD_STATE/candidates/$first
-[[ -L $first_dir/toplevel && $(readlink "$first_dir/toplevel") == "$(system_for_lock "$lock_two")" ]]
-[[ $(<"$first_dir/flake.lock") == "$lock_two" ]]
+[[ -L $first_dir/toplevel && $(readlink "$first_dir/toplevel") == "$(system_for_lock "$lock_one")" ]]
 mapfile -t observed <"$REBUILD_OBSERVED"
 [[ ${observed[0]} == "$base_head 0" ]]
-[[ ${observed[1]} == "$(printf '%s\n' "$lock_one" | sha256sum)" ]]
-[[ ${observed[2]} == "$(printf '%s\n' "$lock_two" | sha256sum)" ]]
-for stage in update-cwd verify-cwd build-cwd; do
+lock_one_sum=$(printf '%s\n' "$lock_one" | sha256sum)
+[[ ${observed[1]} == "$lock_one_sum" && ${observed[2]} == "$lock_one_sum" ]]
+for stage in verify-cwd build-cwd; do
   grep -q "^$stage " "$REBUILD_CALL_LOG"
   assert_not_called "$stage $REBUILD_CHECKOUT"
 done
-assert_call_order 'update-cwd' 'verify-cwd'
 assert_call_order 'verify-cwd' 'build-cwd'
 
-# 2. A failed fetch of the latest standard stops the run with a non-zero status and changes
-# nothing; the locked recovery is a different, explicit request.
+# 2. An input the owner moved is adopted by committing flake.lock. The next plan builds that lock
+# as committed and replaces the held candidate; nothing is fetched or written.
+commit_lock rev-2
+lock_two=$(lock_json rev-2)
 before=$(checkout_snapshot)
-REBUILD_UPDATE_STATUS=1 REBUILD_LOCK_NEXT=$(lock_json rev-3) run_rebuild 2 --plan
-assert_output_has 'dotfiles-rebuild --locked'
-assert_not_called 'nix run'
-assert_not_called 'nix build'
-assert_no_switch
-[[ $(checkout_snapshot) == "$before" ]]
-assert_no_work_left
-[[ $(state_entries candidates) == "$first" ]]
-REBUILD_UPDATE_STATUS=1 run_rebuild 2
-assert_not_called 'nix build'
-assert_no_switch
-[[ $(checkout_snapshot) == "$before" ]]
-assert_no_work_left
-
-# 3. The locked recovery fetches nothing and commits nothing, says it is not the latest, and
-# the plan it leaves replaces the previous held candidate.
-REBUILD_UPDATE_STATUS=1 run_rebuild 0 --locked --plan
+run_rebuild 0 --plan
 assert_not_called 'nix flake update'
-assert_output_has 'standard: rev-1 (locked recovery'
-locked_id=$(candidate_id_of_output)
-[[ $(state_entries candidates) == "$locked_id" ]]
-head_before=$(head_of)
-run_rebuild 0 --candidate "$locked_id"
-[[ $(head_of) == "$head_before" ]]
-assert_not_called 'nix flake update'
-assert_not_called 'nix build'
-assert_called "nixos-rebuild switch --no-reexec --store-path $(system_for_lock "$lock_one")"
+[[ $(checkout_snapshot) == "$before" ]]
+second=$(candidate_id_of_output)
+[[ $(readlink "$REBUILD_STATE/candidates/$second/toplevel") == "$(system_for_lock "$lock_two")" ]]
+[[ $(state_entries candidates) == "$second" ]]
+[[ ! -e $REBUILD_STATE/candidates/$first ]]
+run_rebuild 0 --discard "$second"
 [[ -z $(state_entries candidates) ]]
-reset_profile
 
-# 4. Each failed stage of the candidate stops before the next and leaves nothing behind.
+# 3. Each failed stage of the candidate stops before the next and leaves nothing behind.
 before=$(checkout_snapshot)
 REBUILD_VERIFY_STATUS=1 run_rebuild 2 --plan
 assert_output_has 'validation of the candidate failed'
@@ -120,17 +99,13 @@ assert_not_called 'nix run'
 assert_not_called 'nix build'
 REBUILD_BUILD_STATUS=1 run_rebuild 2 --plan
 assert_output_has 'candidate build failed'
-REBUILD_LOCK_NEXT=$(lock_json rev-9 nixpkgs-2) run_rebuild 2 --plan
-assert_output_has 'outside architectureStandard'
-assert_not_called 'nix build'
 assert_no_switch
 [[ $(checkout_snapshot) == "$before" ]]
 assert_no_work_left
 [[ -z $(state_entries candidates) ]]
 
-# 5. A cancel during a fetch, a validation or a build stops every child, with or without TERM
-# being honored, and leaves no candidate root, no source worktree and no change.
-cancel_during update
+# 4. A cancel during a validation or a build stops every child, with or without TERM being
+# honored, and leaves no candidate root, no source worktree and no change.
 cancel_during verify
 cancel_during build
 cancel_during build REBUILD_HANG_IGNORE_TERM=1
@@ -302,32 +277,30 @@ assert_no_work_left
   [[ ! -e $REBUILD_STATE/work/$orphan ]]
 )
 
-# 6. Applying a held candidate uses its root and its own lock. A newer upstream revision is not
-# resolved and nothing is built again, and the candidate is released afterwards.
+# 5. Applying a held candidate uses its root. Nothing is fetched or built again, the checkout is
+# not written, and the candidate is released afterwards.
+commit_lock rev-4
 lock_four=$(lock_json rev-4)
-REBUILD_LOCK_NEXT=$lock_four run_rebuild 0 --plan
+run_rebuild 0 --plan
 retained=$(candidate_id_of_output)
 retained_path=$(system_for_lock "$lock_four")
 [[ $(state_entries candidates) == "$retained" ]]
 head_before=$(head_of)
-REBUILD_LOCK_NEXT=$(lock_json rev-5) run_rebuild 0 --candidate "$retained"
+run_rebuild 0 --candidate "$retained"
 assert_not_called 'nix flake update'
 assert_not_called 'nix build'
-[[ $(head_of HEAD^) == "$head_before" ]]
-[[ $(checkout_git show HEAD:flake.lock) == "$lock_four" ]]
-[[ $(checkout_git log -1 --format=%s) == "$REBUILD_STANDARD_SUBJECT" ]]
-[[ $(checkout_git diff-tree --no-commit-id --name-only -r HEAD) == flake.lock ]]
-assert_called "agent-verify-head $(head_of)"
+[[ $(head_of) == "$head_before" ]]
+[[ -z $(checkout_git status --porcelain --untracked-files=all) ]]
+assert_called "agent-verify-head $head_before"
 assert_called "nixos-rebuild switch --no-reexec --store-path $retained_path"
 assert_call_order 'agent-verify-head' 'nixos-rebuild'
 [[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$retained_path" ]]
 [[ -z $(state_entries candidates) ]]
 reset_profile
 
-# 7. A candidate whose root or store path is gone is rejected before anything is written, and
+# 6. A candidate whose root or store path is gone is rejected before anything is written, and
 # no other candidate is built to take its place.
-lock_six=$(lock_json rev-6)
-REBUILD_LOCK_NEXT=$lock_six run_rebuild 0 --plan
+run_rebuild 0 --plan
 expired=$(candidate_id_of_output)
 rm -- "$REBUILD_STATE/candidates/$expired/toplevel"
 before=$(checkout_snapshot)
@@ -339,9 +312,9 @@ assert_not_called 'nix build'
 assert_no_switch
 [[ $(checkout_snapshot) == "$before" ]]
 [[ ! -e $REBUILD_STATE/candidates/$expired ]]
-REBUILD_LOCK_NEXT=$lock_six run_rebuild 0 --plan
+run_rebuild 0 --plan
 invalid=$(candidate_id_of_output)
-printf '%s\n' "$(system_for_lock "$lock_six")" >"$REBUILD_INVALID_PATHS"
+printf '%s\n' "$(system_for_lock "$lock_four")" >"$REBUILD_INVALID_PATHS"
 run_rebuild 2 --candidate "$invalid"
 assert_output_has 'expired'
 assert_not_called 'nix build'
@@ -349,8 +322,8 @@ assert_no_switch
 [[ $(checkout_snapshot) == "$before" ]]
 rm -f -- "$REBUILD_INVALID_PATHS"
 
-# 8. A candidate prepared from another HEAD is stale and is rejected the same way.
-REBUILD_LOCK_NEXT=$lock_six run_rebuild 0 --plan
+# 7. A candidate prepared from another HEAD is stale and is rejected the same way.
+run_rebuild 0 --plan
 stale=$(candidate_id_of_output)
 printf 'unrelated\n' >>"$REBUILD_CHECKOUT/tracked"
 checkout_git commit -qam unrelated
@@ -363,10 +336,10 @@ assert_no_switch
 [[ $(checkout_snapshot) == "$before" ]]
 [[ ! -e $REBUILD_STATE/candidates/$stale ]]
 
-# 9. A newer plan replaces the older candidate; the older id is then refused, not substituted.
-REBUILD_LOCK_NEXT=$(lock_json rev-7) run_rebuild 0 --plan
+# 8. A newer plan replaces the older candidate; the older id is then refused, not substituted.
+run_rebuild 0 --plan
 older=$(candidate_id_of_output)
-REBUILD_LOCK_NEXT=$(lock_json rev-8) run_rebuild 0 --plan
+run_rebuild 0 --plan
 newer=$(candidate_id_of_output)
 [[ $(state_entries candidates) == "$newer" ]]
 run_rebuild 2 --candidate "$older"
@@ -379,146 +352,69 @@ run_rebuild 2 --discard "$newer"
 run_rebuild 2 --discard not-an-id
 assert_no_switch
 
-# 10. The commit gate is the repository's own. A refusal takes back only what this run wrote,
-# keeps an explicit candidate, and a later apply of the same candidate succeeds.
-lock_ten=$(lock_json rev-10)
-before=$(checkout_content)
-install_hook pre-commit 'exit 1'
-REBUILD_LOCK_NEXT=$lock_ten run_rebuild 2
-assert_output_has 'refused by the commit gate'
-assert_output_has 'result: unchanged'
+# 9. A receipt written in another format is refused without building another candidate, and it
+# stays held until it is discarded.
+run_rebuild 0 --plan
+legacy=$(candidate_id_of_output)
+{
+  printf 'version=1\n'
+  grep -v '^version=' "$REBUILD_STATE/candidates/$legacy/receipt"
+} >"$REBUILD_ROOT/legacy-receipt"
+mv -- "$REBUILD_ROOT/legacy-receipt" "$REBUILD_STATE/candidates/$legacy/receipt"
+before=$(checkout_snapshot)
+run_rebuild 2 --candidate "$legacy"
+assert_output_has 'another receipt format'
+assert_not_called 'nix build'
 assert_no_switch
-[[ $(checkout_content) == "$before" ]]
+[[ $(checkout_snapshot) == "$before" ]]
+[[ $(state_entries candidates) == "$legacy" ]]
+run_rebuild 0 --discard "$legacy"
 [[ -z $(state_entries candidates) ]]
-REBUILD_LOCK_NEXT=$lock_ten run_rebuild 0 --plan
-gated=$(candidate_id_of_output)
-run_rebuild 2 --candidate "$gated"
-assert_output_has 'result: unchanged'
-assert_no_switch
-[[ $(checkout_content) == "$before" ]]
-[[ $(state_entries candidates) == "$gated" ]]
-remove_hooks
-install_hook commit-msg 'cat "$1" > "$REBUILD_GATE_RECORD"'
-head_before=$(head_of)
-run_rebuild 0 --candidate "$gated"
-[[ $(head_of HEAD^) == "$head_before" ]]
-[[ $(<"$REBUILD_GATE_RECORD") == "$REBUILD_STANDARD_SUBJECT" ]]
-assert_called "nixos-rebuild switch --no-reexec --store-path $(system_for_lock "$lock_ten")"
-reset_profile
-remove_hooks
 
-export REBUILD_HOOK_DRAIN_RECORD=$REBUILD_ROOT/hook-drain-record
-export REBUILD_HOOK_CHILD_READY=$REBUILD_ROOT/hook-child-ready
-install_hook post-commit "$(cat <<'HOOK'
-(
-  trap 'if test -d "$GIT_DIR"; then printf held; else printf released; fi >"$REBUILD_HOOK_DRAIN_RECORD"; exit 0' TERM
-  : >"$REBUILD_HOOK_CHILD_READY"
-  while :; do sleep 600; done
-) &
-while test ! -f "$REBUILD_HOOK_CHILD_READY"; do sleep 0.01; done
-HOOK
-)"
-REBUILD_LOCK_NEXT=$(lock_json rev-hook-lifetime) run_rebuild 0
-[[ $(<"$REBUILD_HOOK_DRAIN_RECORD") == held ]]
-assert_no_work_left
-reset_profile
-remove_hooks
-
-mkdir "$REBUILD_ROOT/include-hooks"
-install_hook pre-commit 'printf rejecting >"$REBUILD_GATE_RECORD"; exit 1'
-mv "$REBUILD_CHECKOUT/.git/hooks/pre-commit" "$REBUILD_ROOT/include-hooks/pre-commit"
-checkout_git config extensions.worktreeConfig true
-checkout_git config --file "$REBUILD_CHECKOUT/.git/required.conf" core.hooksPath "$REBUILD_ROOT/include-hooks"
-checkout_git config --worktree include.path required.conf
-rm -f -- "$REBUILD_GATE_RECORD"
-before=$(checkout_content)
-REBUILD_LOCK_NEXT=$(lock_json rev-relative-include) run_rebuild 2
-[[ $(checkout_content) == "$before" ]]
-[[ $(<"$REBUILD_GATE_RECORD") == rejecting ]]
-assert_no_switch
-assert_no_work_left
-checkout_git config --worktree --unset-all include.path
-checkout_git config --unset-all extensions.worktreeConfig
-rm -- "$REBUILD_CHECKOUT/.git/config.worktree"
-
-conditional_key="includeIf.onbranch:$(checkout_git symbolic-ref --short HEAD).path"
-checkout_git config "$conditional_key" "$REBUILD_CHECKOUT/.git/required.conf"
-rm -f -- "$REBUILD_GATE_RECORD"
-before=$(checkout_content)
-REBUILD_LOCK_NEXT=$(lock_json rev-conditional-include) run_rebuild 2
-[[ $(checkout_content) == "$before" ]]
-[[ ! -e $REBUILD_GATE_RECORD ]]
-assert_no_switch
-assert_no_work_left
-checkout_git config --unset-all "$conditional_key"
-rm -- "$REBUILD_CHECKOUT/.git/required.conf"
-
-base=$(head_of)
-install_hook pre-commit 'printf "hook\n" >> tracked; git add tracked'
-REBUILD_LOCK_NEXT=$(lock_json rev-11) run_rebuild 4
-assert_output_has 'source-changed'
-assert_no_switch
-[[ $(head_of) == "$base" ]]
-grep -Fxq hook "$REBUILD_CHECKOUT/tracked"
-remove_hooks
-checkout_reset "$base"
-install_hook post-commit 'printf "post\n" >> tracked'
-REBUILD_LOCK_NEXT=$(lock_json rev-12) run_rebuild 4
-assert_output_has 'source-changed'
-assert_no_switch
-[[ $(head_of) == "$base" ]]
-grep -Fxq post "$REBUILD_CHECKOUT/tracked"
-[[ -n $(checkout_git status --porcelain --untracked-files=all) ]]
-remove_hooks
-checkout_reset "$base"
-
-# 12. A failed verification of the committed source leaves a commit and no activation, and the
-# next plain rebuild applies that commit without committing again.
-lock_thirteen=$(lock_json rev-13)
-REBUILD_AGENT_VERIFY_STATUS=1 REBUILD_LOCK_NEXT=$lock_thirteen run_rebuild 4
+# 10. A failed verification of the committed source stops before activation and writes nothing,
+# and the next plain rebuild applies the same checkout.
+before=$(checkout_snapshot)
+REBUILD_AGENT_VERIFY_STATUS=1 run_rebuild 2
 assert_output_has 'verification of the committed source failed'
-assert_output_has 'committed but not applied'
+assert_output_has 'result: unchanged'
 assert_no_switch
-[[ $(head_of HEAD^) == "$base" ]]
-[[ $(checkout_git show HEAD:flake.lock) == "$lock_thirteen" ]]
+[[ $(checkout_snapshot) == "$before" ]]
 [[ -z $(state_entries candidates) ]]
-head_before=$(head_of)
 run_rebuild 0
-[[ $(head_of) == "$head_before" ]]
-assert_called "nixos-rebuild switch --no-reexec --store-path $(system_for_lock "$lock_thirteen")"
+assert_called "nixos-rebuild switch --no-reexec --store-path $(system_for_lock "$(<"$REBUILD_CHECKOUT/flake.lock")")"
 reset_profile
 
-# 13. A committed source that does not evaluate to the held candidate is not activated.
-base=$(head_of)
-REBUILD_EVAL_PATH=$REBUILD_STORE_DIR/elsewhere REBUILD_LOCK_NEXT=$(lock_json rev-14) run_rebuild 4
+# 11. A committed source that does not evaluate to the held candidate is not activated.
+before=$(checkout_snapshot)
+REBUILD_EVAL_PATH=$REBUILD_STORE_DIR/elsewhere run_rebuild 2
 assert_output_has 'not to the held candidate'
+assert_output_has 'result: unchanged'
 assert_no_switch
-[[ $(head_of HEAD^) == "$base" ]]
+[[ $(checkout_snapshot) == "$before" ]]
 
-# 14. An edit made while the source is being verified stops the apply, and the edit stays.
-base=$(head_of)
-REBUILD_AGENT_VERIFY_DIRTY=1 REBUILD_LOCK_NEXT=$(lock_json rev-15) run_rebuild 4
+# 12. An edit made while the source is being verified stops the apply, and the edit stays.
+REBUILD_AGENT_VERIFY_DIRTY=1 run_rebuild 4
 assert_output_has 'working tree'
+assert_output_has 'result: source-changed'
 assert_no_switch
 grep -Fxq edited-during-verify "$REBUILD_CHECKOUT/tracked"
 [[ -n $(checkout_git status --porcelain) ]]
 checkout_reset "$(head_of)"
 
-# 15. A failure after activation started is partial: the commit stays, the profile is reported
-# as observed, and nothing is said to be restored.
-REBUILD_PARTIAL_SWITCH=1 REBUILD_SWITCH_STATUS=1 REBUILD_LOCK_NEXT=$(lock_json rev-16) run_rebuild 5
-assert_output_has 'stays in the checkout'
+# 13. A failure after activation started is partial: the profile is reported as observed, and
+# nothing is said to be restored.
+REBUILD_PARTIAL_SWITCH=1 REBUILD_SWITCH_STATUS=1 run_rebuild 5
 assert_output_has 'activation-failed'
 assert_failure_guidance
-[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$(system_for_lock "$(lock_json rev-16)")" ]]
+[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$(system_for_lock "$(<"$REBUILD_CHECKOUT/flake.lock")")" ]]
 [[ -z $(state_entries candidates) ]]
 reset_profile
 
-# 16. One writer at a time: while an apply is inside the native tool, a rollback, a discard and
+# 14. One writer at a time: while an apply is inside the native tool, a rollback, a discard and
 # another apply are refused, and the tool is never run twice at once.
 : >"$REBUILD_CALL_LOG"
 rm -f -- "$REBUILD_SWITCH_STARTED" "$REBUILD_SWITCH_RELEASE" "$REBUILD_OVERLAP_LOG"
-REBUILD_SWITCH_HOLD=1 REBUILD_LOCK_NEXT=$(lock_json rev-17) \
+REBUILD_SWITCH_HOLD=1 \
   "$REBUILD_BIN" >"$REBUILD_ROOT/first-output" 2>&1 &
 first_pid=$!
 wait_for_file "$REBUILD_SWITCH_STARTED"
@@ -538,13 +434,13 @@ wait "$first_pid" || status=$?
 [[ $(grep -c '^nixos-rebuild ' "$REBUILD_CALL_LOG") == 1 ]]
 reset_profile
 
-# 17. A boot transition is switched but reported as unfinished, and WSL is not terminated.
+# 15. A boot transition is switched but reported as unfinished, and WSL is not terminated.
 printf 'incompatible\n' >>"$REBUILD_CANDIDATE/init-interface-version"
-REBUILD_LOCK_NEXT=$(lock_json rev-18) run_rebuild 3
+run_rebuild 3
 assert_output_has 'boot-transition'
 assert_output_has "  wsl.exe --terminate 'Fixture Distro'"
 assert_output_lacks 'result: applied'
 assert_no_terminate
-[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$(system_for_lock "$(lock_json rev-18)")" ]]
+[[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$(system_for_lock "$(<"$REBUILD_CHECKOUT/flake.lock")")" ]]
 printf '1\n' >"$REBUILD_CANDIDATE/init-interface-version"
 reset_profile

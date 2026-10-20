@@ -8,7 +8,6 @@
         hostOptions,
         mkProbeSystem,
         normalMachineModule,
-        pluginSources,
         ...
       }:
       let
@@ -83,22 +82,6 @@
           // {
             runtimeContract = runtimePackageContract // {
               skillRoots = [ ".local/share/fixture adapter/procedures" ];
-            };
-          }
-        );
-        fixtureStandardRoot = pkgs.runCommandLocal "fixture-standard-root" { } ''
-          mkdir -p $out
-          printf '# Standard\n' > $out/README.md
-          for area in principles concerns structure tools languages process; do
-            mkdir -p $out/$area
-            printf '# %s\n' "$area" > $out/$area/rule.md
-          done
-        '';
-        fixtureStandardRuntime = import ../package.nix (
-          runtimeArgs
-          // {
-            runtimeContract = runtimePackageContract // {
-              standardRoot = "${fixtureStandardRoot}";
             };
           }
         );
@@ -297,10 +280,7 @@
 
         observationTimeoutSeconds = 10;
         homeDir = hostConfig.dotfiles.workstation.homeDir;
-        runtimeContractSupport = import ./support/runtime-contract.nix {
-          inherit homeDir;
-          inherit (hostConfig.dotfiles.workstation) environmentDir;
-        };
+        runtimeContractSupport = import ./support/runtime-contract.nix { inherit homeDir; };
         inherit (runtimeContractSupport) expectedAgentRuntime runtimePackageContract;
         selectAgentObservations = lib.filterAttrs (name: _: lib.hasPrefix "agents/" name);
         agentObservations = selectAgentObservations hostConfig.dotfiles.health.observations;
@@ -479,13 +459,6 @@
             relativeCacheRoot = ".cache/dotfiles-wsl-mutated";
           };
         };
-        compiledStandardRootLine = root: "compiled_standard_root=${lib.escapeShellArg root}";
-        mutatedStandardRoot = "${expectedAgentRuntime.standardRoot}-mutated";
-        standardRootMutation = expectedRuntimeConfiguration // {
-          runtime = expectedRuntimeConfiguration.runtime // {
-            standardRoot = mutatedStandardRoot;
-          };
-        };
         packageTreeRequiredPathMutation = agentObservations // {
           "agents/client/codex" = agentObservations."agents/client/codex" or { } // {
             requiredPaths =
@@ -574,9 +547,6 @@
             && runtime.gc != relativeCacheRootMutationRuntime.gc
             && runtime.verify != relativeCacheRootMutationRuntime.verify
           ) "agent runtime packages ignored a relative cache root mutation";
-          assert lib.assertMsg (
-            !agentRuntimeContractMatches standardRootMutation hostConfig.dotfiles.health.observations
-          ) "agent runtime contract accepted a stale standard root";
           pkgs.runCommandLocal "check-agent-runtime-contract" { } "touch $out";
 
         agent-runtime-behavior =
@@ -664,7 +634,6 @@
                 pkgs.gawk
                 pkgs.git
                 pkgs.jq
-                pkgs.nodejs
                 pkgs.util-linux
               ];
               WRAPPER = lib.getExe fixtureWrapper;
@@ -673,13 +642,12 @@
               DEPENDENCY_A = "${dependencyA}";
               DEPENDENCY_B = "${dependencyB}";
               MODULE_WRAPPER = lib.getExe moduleSessionWrapper;
-              GATE = lib.getExe fixtureStandardRuntime.gate;
-              STANDARD_ROOT = "${fixtureStandardRoot}";
+              GATE = lib.getExe runtime.gate;
               WRAPPER_CLOSURE = "${moduleSessionWrapperClosure}";
               SKILL_ROOT = clients.omp.skillsDestination;
               SKILL_SOURCE =
                 toString
-                  homeConfig.home.file."${clients.omp.skillsDestination}/standard-conformance".source;
+                  homeConfig.home.file."${clients.omp.skillsDestination}/codebase-design".source;
             }
             ''
               bash ${../fixtures/runtime/wrapper.sh}
@@ -728,16 +696,13 @@
                 pkgs.bash
                 pkgs.coreutils
                 pkgs.git
-                pkgs.nodejs
                 pkgs.jq
               ];
               GATE = lib.getExe runtime.gate;
-              STANDARD_ROOT_LINE = compiledStandardRootLine expectedAgentRuntime.standardRoot;
               CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
               CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
               UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;
               DOMAIN_MODELING_SOURCE = hostConfig.dotfiles.agents.shared.skills.domain-modeling;
-              COVERAGE_CHECKER = "${pluginSources.architecture-standard}/skills/standard-conformance/scripts/check-coverage.mjs";
             }
             ''
               bash ${../fixtures/runtime/verify.sh} --skills-only
@@ -747,7 +712,10 @@
         agent-omp-verification-gate-hook =
           pkgs.runCommandLocal "check-agent-omp-verification-gate-hook"
             {
-              nativeBuildInputs = [ pkgs.bun ];
+              nativeBuildInputs = [
+                pkgs.bun
+                pkgs.git
+              ];
               GATE_HOOK = hookUsingGate (lib.getExe runtime.gate);
               HANGING_GATE_HOOK = hookUsingGate hangingGate;
               NEXT_GENERATION_GATE_HOOK = hookUsingGate recordingGate;
@@ -782,12 +750,10 @@
               STALLING_VERIFY = lib.getExe stallingVerify;
               SLOW_RESOLUTION_VERIFY = lib.getExe slowResolutionRuntime.verify;
               GATE = lib.getExe runtime.gate;
-              STANDARD_ROOT_LINE = compiledStandardRootLine expectedAgentRuntime.standardRoot;
               CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
               CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
               UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;
               DOMAIN_MODELING_SOURCE = hostConfig.dotfiles.agents.shared.skills.domain-modeling;
-              COVERAGE_CHECKER = "${pluginSources.architecture-standard}/skills/standard-conformance/scripts/check-coverage.mjs";
             }
             ''
               bash ${../fixtures/runtime/verify.sh}

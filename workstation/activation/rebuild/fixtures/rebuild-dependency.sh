@@ -77,15 +77,6 @@ apply_switch_effect() {
 case $command_name in
 nix)
   case ${1:-} in
-  flake)
-    [[ $* == 'flake update architectureStandard' ]]
-    printf 'update-cwd %s\n' "$PWD" >>"$REBUILD_CALL_LOG"
-    hang_at update
-    [[ ${REBUILD_UPDATE_STATUS:-0} == 0 ]] || exit "$REBUILD_UPDATE_STATUS"
-    if [[ -n ${REBUILD_LOCK_NEXT:-} ]]; then
-      printf '%s\n' "$REBUILD_LOCK_NEXT" >flake.lock
-    fi
-    ;;
   run)
     [[ $* == 'run --no-write-lock-file .#verify' ]]
     printf 'verify-cwd %s\n' "$PWD" >>"$REBUILD_CALL_LOG"
@@ -228,6 +219,7 @@ dotfiles-agent-verify)
   shift
   [[ $* == 'nix run --no-write-lock-file .#verify' && $PWD == "$REBUILD_CHECKOUT" ]]
   printf 'agent-verify-head %s\n' "$(git rev-parse HEAD)" >>"$REBUILD_CALL_LOG"
+  concurrent_edit agent-verify
   if [[ ${REBUILD_AGENT_VERIFY_DIRTY:-0} == 1 ]]; then
     printf 'edited-during-verify\n' >>tracked
   fi

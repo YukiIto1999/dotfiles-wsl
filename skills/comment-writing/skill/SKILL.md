@@ -17,7 +17,8 @@ description: Decides whether an implementation comment should exist and writes t
 
 標準本文は、callerが明示した`<standard-root>`、なければAGENTSが案内する現行規範rootから読む。
 配備済みSkillの所在から導いた固定版は使わない。
-正本を読めない場合は記憶で補わず、読めなかったrootまたはfileを示して止める。
+正本を読めない場合は、読めなかったrootまたはfileと標準に照らせなかった判断を報告し、repositoryのpolicyと既存の形式が定める範囲で仕上げる。
+記憶で正本の規則を補わない。
 
 reviewだけを依頼された場合は、残す、削除する、codeを直す、正本へ移す、のfindingだけを返す。
 編集が依頼範囲にある場合だけ変更する。

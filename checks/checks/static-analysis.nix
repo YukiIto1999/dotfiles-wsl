@@ -136,7 +136,12 @@
   source = [
     {
       actionlint = pkgs.runCommandLocal "check-actionlint" { nativeBuildInputs = [ pkgs.actionlint ]; } ''
-        workflow_dir=${self}/.github/workflows
+        workflow_dir=${
+          builtins.path {
+            path = "${self}/.github";
+            name = "github-workflow-source";
+          }
+        }/workflows
         test -n "$(find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print -quit)"
         find "$workflow_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -exec actionlint {} +
         touch $out

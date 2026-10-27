@@ -119,6 +119,7 @@
             withoutListener = [
               "dotfiles-agent-autoupdate"
               "dotfiles-agent-project-cache-gc"
+              "dotfiles-agent-reserve-swap"
               "dotfiles-zram-swap"
               "docker-build-artifact-gc"
               "docker-dotfiles-backends-network"

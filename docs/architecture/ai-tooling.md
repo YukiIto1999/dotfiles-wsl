@@ -217,6 +217,11 @@ WSL hostの`nixos`は[`profiles/hosts/nixos.nix`](../../profiles/hosts/nixos.nix
 `MemoryMax`は70%を維持する。
 複数のbuild、test、解析が共有する退避枠を、WSLのdisk swapとzramの構成に合わせるためである。
 
+追加の8 GiB swap fileは`/var/lib/dotfiles-agent-swap/reserve.swap`へ事前確保する。
+資源管理モジュールの専用serviceがこのパスを参照し、未確保のhostでは起動を省略する。
+起動時の専用serviceは利用中なら何も行わず、既存領域の初期化・解放を行わない。
+この枠は有限であり、全体のswapが不足する負荷まで保証しない。
+
 Chromiumはuser busから`app.slice`へscopeを作るため、agent scopeから抜ける場合がある。
 user manager全体にも`MemoryHigh` 67%、`MemoryMax` 75%を置き、agentとbrowserの合計を抑える。
 user managerのmaxはagent sliceのmaxより大きくし、基盤とkernelへRAMを残す。

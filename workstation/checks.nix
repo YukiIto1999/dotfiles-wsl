@@ -774,6 +774,45 @@
           ) "machine-specific memory policy did not reach runtime observations";
           pkgs.runCommandLocal "check-machine-profile-contract" { } "touch $out";
 
+        host-reserve-swap-contract =
+          assert lib.assertMsg (
+            let
+              service = hostConfig.systemd.services.dotfiles-agent-reserve-swap or { };
+            in
+            lib.elem "multi-user.target" (service.wantedBy or [ ])
+            && (service.restartIfChanged or true) == false
+            && (service.serviceConfig.RemainAfterExit or false)
+            && !(service.serviceConfig ? ExecStop)
+          ) "追加 swap の起動時有効化と停止回避の契約を満たしません";
+          pkgs.runCommandLocal "check-host-reserve-swap-contract" { nativeBuildInputs = [ pkgs.bash ]; } ''
+            mkdir -p mock
+            cat > mock/swapon <<'SH'
+            #!${pkgs.bash}/bin/bash
+            if [ "$1" = --show=NAME ]; then
+              case "$SWAP_STATE" in
+                active) echo /var/lib/dotfiles-agent-swap/reserve.swap ;;
+                failed) exit 42 ;;
+              esac
+              exit 0
+            fi
+            printf '%s\n' "$*" >> "$OPERATIONS"
+            SH
+            chmod +x mock/swapon
+            export PATH="$PWD/mock:$PATH" OPERATIONS="$PWD/operations"
+            : > "$OPERATIONS"
+            SWAP_STATE=active bash ${./stability/impl/reserve-swap.sh} /var/lib/dotfiles-agent-swap/reserve.swap
+            test ! -s "$OPERATIONS"
+            SWAP_STATE=inactive bash ${./stability/impl/reserve-swap.sh} /var/lib/dotfiles-agent-swap/reserve.swap
+            test "$(cat "$OPERATIONS")" = '--priority 10 /var/lib/dotfiles-agent-swap/reserve.swap'
+            : > "$OPERATIONS"
+            if SWAP_STATE=failed bash ${./stability/impl/reserve-swap.sh} /var/lib/dotfiles-agent-swap/reserve.swap; then
+              echo '利用状況の取得失敗後に有効化を続行しました' >&2
+              exit 1
+            fi
+            test ! -s "$OPERATIONS"
+            touch "$out"
+          '';
+
         host-stability-contract =
           assert lib.assertMsg (
             builtins.attrNames stabilityObservations == hostObservationKeys

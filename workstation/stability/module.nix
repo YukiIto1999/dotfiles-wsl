@@ -12,6 +12,7 @@ let
   zramAlgorithm = "lzo-rle";
   zramMemoryPercent = cfg.swap.zramMemoryPercent;
   zramPriority = 100;
+  reserveSwapFile = "/var/lib/dotfiles-agent-swap/reserve.swap";
   minimumSwapGiB = cfg.swap.minimumTotalGiB;
   pageblockKbytes = 2048;
   lowmemZones = 2;
@@ -150,6 +151,23 @@ in
         requiredResourceKeys
         envelopeVersion
         ;
+    };
+  };
+
+  config.systemd.services.dotfiles-agent-reserve-swap = {
+    description = "Activate provisioned agent swap reserve";
+    wantedBy = [ "multi-user.target" ];
+    restartIfChanged = false;
+    stopIfChanged = false;
+    unitConfig.ConditionPathExists = reserveSwapFile;
+    path = [
+      pkgs.util-linux
+      pkgs.gnugrep
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.writeShellScript "dotfiles-agent-reserve-swap" (builtins.readFile ./impl/reserve-swap.sh)} ${lib.escapeShellArg reserveSwapFile}";
     };
   };
 

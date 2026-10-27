@@ -84,6 +84,8 @@ T1は`flake.nix`の`t1Shards`で`source`と`configuration`を別の評価器へ�
 登録対象はsource内のcheck fileから導き、native module graphでimportとphaseの漏れを拒否するため、手書きの割当て一覧は不要である。
 check IDは両phaseとsystem closureを通して一意でなければならない。
 workflow の検査は設定を含む `.github/` だけを Nix の source 入力とし、他の原文の変更では成功した derivation を再利用する。
+Nix の静的検査と整形検査は全 `.nix` file を入力とし、`statix` だけが追加で `statix.toml` を読むため、文書や他言語の変更では成功した derivation を再利用する。
+Git hook の振る舞い検査も対応する hook の file を入力とし、無関係な checkout の変更では再実行しない。
 評価器のBoehm GCの初期heapは4GiBとし、`GC_INITIAL_HEAP_SIZE`を設定済みの場合は上書きしない。
 初期heapの値は実RSSの上限ではなく、評価器を合わせたメモリの必要量は実行条件とともに測る。
 最初に失敗したshardの終了statusを返し、動いている評価器を止めて終了を待つ。

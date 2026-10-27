@@ -1,4 +1,4 @@
-{ pkgs, self, ... }:
+{ pkgs, ... }:
 {
   configuration = [
     (
@@ -156,7 +156,7 @@
           ''
             set -euo pipefail
 
-            hook=${self}/toolchain/git/assets/hooks/commit-msg
+            hook=${./git/assets/hooks/commit-msg}
 
             expect_accept() {
               local name="$1"
@@ -297,7 +297,7 @@
           ''
             set -euo pipefail
 
-            hook=${self}/toolchain/git/assets/hooks/pre-commit
+            hook=${./git/assets/hooks/pre-commit}
             export HOME=$PWD/home GIT_CONFIG_NOSYSTEM=1
             mkdir -p "$HOME" repo
             cd repo

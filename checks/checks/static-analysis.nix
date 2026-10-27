@@ -1,4 +1,21 @@
-{ pkgs, self, ... }:
+{
+  pkgs,
+  lib,
+  self,
+  ...
+}:
+let
+  root = /. + builtins.unsafeDiscardStringContext (toString self);
+  nixFiles = lib.fileset.fileFilter (file: file.hasExt "nix") root;
+  nixSource = lib.fileset.toSource {
+    inherit root;
+    fileset = nixFiles;
+  };
+  statixSource = lib.fileset.toSource {
+    inherit root;
+    fileset = lib.fileset.union nixFiles (root + "/statix.toml");
+  };
+in
 {
   configuration = [
     (
@@ -148,16 +165,16 @@
       '';
 
       deadnix = pkgs.runCommandLocal "check-deadnix" { nativeBuildInputs = [ pkgs.deadnix ]; } ''
-        deadnix --fail ${self}
+        deadnix --fail ${nixSource}
         touch $out
       '';
       statix = pkgs.runCommandLocal "check-statix" { nativeBuildInputs = [ pkgs.statix ]; } ''
-        statix check --config ${self} ${self}
+        statix check --config ${statixSource} ${statixSource}
         touch $out
       '';
 
       nixfmt = pkgs.runCommandLocal "check-nixfmt" { nativeBuildInputs = [ pkgs.nixfmt-tree ]; } ''
-        cp -r --no-preserve=mode ${self} source
+        cp -r --no-preserve=mode ${nixSource} source
         treefmt --ci --tree-root "$PWD/source"
         touch $out
       '';

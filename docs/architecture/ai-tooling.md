@@ -213,6 +213,10 @@ wrapperから起動したclientは、launcherが`systemd-run --user --scope`で�
 swapの百分率はswap総量ではなく物理RAMに対する割合である。
 値の正本は`dotfiles.agents.slice`であり、highよりmaxを大きくする。
 
+WSL hostの`nixos`は[`profiles/hosts/nixos.nix`](../../profiles/hosts/nixos.nix)で`MemoryHigh`を65%、`MemorySwapMax`をRAMの60%へ上書きする。
+`MemoryMax`は70%を維持する。
+複数のbuild、test、解析が共有する退避枠を、WSLのdisk swapとzramの構成に合わせるためである。
+
 Chromiumはuser busから`app.slice`へscopeを作るため、agent scopeから抜ける場合がある。
 user manager全体にも`MemoryHigh` 67%、`MemoryMax` 75%を置き、agentとbrowserの合計を抑える。
 user managerのmaxはagent sliceのmaxより大きくし、基盤とkernelへRAMを残す。

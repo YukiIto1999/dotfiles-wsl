@@ -8,6 +8,10 @@
   dotfiles.agents.journal.machineName = "y-itoh";
   dotfiles.agents.journal.enable = true;
   dotfiles.agents.memoryHarvest.enable = true;
+  dotfiles.agents.slice = {
+    memoryHighPercent = 65;
+    memorySwapMaxPercent = 60;
+  };
   dotfiles.workstation = {
     wsl = {
       nameservers = [

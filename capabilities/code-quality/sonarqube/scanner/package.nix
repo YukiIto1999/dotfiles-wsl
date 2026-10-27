@@ -13,7 +13,7 @@ commandBuilder {
   runtimeInputs = [ git ];
   vars = {
     python = lib.getExe python3;
-    source = toString ./impl/scan.py;
+    source = "${./impl/scan.py}";
     scanner = lib.getExe sonar-scanner-cli;
     scannerPackageVersion = sonar-scanner-cli.version;
     inherit serverUrl;

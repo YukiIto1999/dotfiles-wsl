@@ -352,7 +352,7 @@
         inherit supervise;
         pkgs = systemPkgs;
       };
-      inherit (verificationPrograms) runWithin runEach;
+      inherit (verificationPrograms) runWithin;
 
       # agent wrapperが同じfileを読むためflake内の秒数の直書きは不可
       verificationBudget = builtins.fromJSON (builtins.readFile ./verification-budget.json);
@@ -378,24 +378,7 @@
       verifyBudgetSeconds = budgetSecondsFor "verify";
       pushBudgetSeconds = budgetSecondsFor "verify-push";
 
-      # 単一評価器でのT1予算超過のため逐次実行は不採用
-      t1Evaluators = 2;
       t1EvaluatorHeapBytes = 4 * 1024 * 1024 * 1024;
-      t1Shards = {
-        source = systemPkgs.linkFarm (t1ShardPackage "source") sourceChecks;
-        configuration = builtins.deepSeq (builtins.attrNames allChecks) (
-          builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) closureChecks) (
-            systemPkgs.linkFarm (t1ShardPackage "configuration") configurationChecks
-          )
-        );
-      };
-      t1ShardPackage = shard: "verification-t1-${shard}";
-      t1ShardPackages = lib.mapAttrs' (
-        shard: package: lib.nameValuePair (t1ShardPackage shard) package
-      ) t1Shards;
-      t1Installables = lib.concatMapStringsSep " " (shard: packageRef (t1ShardPackage shard)) (
-        builtins.attrNames t1Shards
-      );
 
       lockedSource = "path:${self}?narHash=${self.narHash}";
       sourceRef = lib.escapeShellArg lockedSource;
@@ -407,9 +390,8 @@
           # app の shell を残すと呼び出し側の signal で shell だけが先に終わり run-within の待機が見えなくなるため exec なしは不可
           commands = ''
             export GC_INITIAL_HEAP_SIZE="''${GC_INITIAL_HEAP_SIZE-${toString t1EvaluatorHeapBytes}}"
-            exec ${lib.getExe runWithin} ${toString verifyBudgetSeconds} ${lib.getExe runEach} ${toString t1Evaluators} \
-              nix build --no-link --no-write-lock-file -L -- \
-              ${t1Installables}
+            exec ${lib.getExe runWithin} ${toString verifyBudgetSeconds} \
+              nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
           '';
         };
         verify-push = {
@@ -465,12 +447,13 @@
           dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
           # 配備済みのagent wrapperはcli.commandsに登録が無いためcli.commands経由は不可
           dotfiles-agent-verify = hostConfig.dotfiles.agents.packages.verification;
-          ${unitChecksPackage} = builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) closureChecks) (
-            pkgs.linkFarm unitChecksPackage unitChecks
+          ${unitChecksPackage} = builtins.deepSeq (builtins.attrNames allChecks) (
+            builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) closureChecks) (
+              pkgs.linkFarm unitChecksPackage unitChecks
+            )
           );
           ${closureChecksPackage} = pkgs.linkFarm closureChecksPackage closureChecks;
-        }
-        // t1ShardPackages;
+        };
 
       apps.${system} = lib.mapAttrs verificationApp verificationTiers;
 

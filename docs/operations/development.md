@@ -80,9 +80,9 @@ nativeな`verify`自身も同じ`verify.seconds`で検査を止め、外側の�
 別sessionへ移った子孫も回収して終了を確認するため、後始末は予算を超えて続くことがある。
 native検査の公開PIDだけへの`SIGINT`も`SIGTERM`と同じ取消として扱い、所有する子孫の終了を確認してから非成功の130で返る。
 wrapperを通さない実行は終了gateを開かない。
-T1は`flake.nix`の`t1Shards`で`source`と`configuration`を別の評価器へ分け、`dotfiles-run-each`が最大2つを同時に走らせる。
-`source`はhostやvariantを評価せず、sourceと固定した入力だけを使う検査を実現する。
-`configuration`はnative module graphと構成値を使う検査を実現し、全hostとpositive variantのsystem closureを評価する。
+T1は全unitの検査をまとめた一つのNix derivationをbuildし、依存の並列実行と成果物の再利用をNixへ任せる。
+集約時に全check IDの一意性と全host・positive variantのsystem closureを評価し、評価器を分ける独自schedulerは持たない。
+`source`と`configuration`は検査が受け取る入力の区分であり、別の走行計画ではない。
 各unitの`checks.nix`はnative moduleの入口であり、leafが`source`のpackage集合か`configuration`のcallbackを宣言する。
 登録対象はsource内のcheck fileから導き、native module graphでimportとphaseの漏れを拒否するため、手書きの割当て一覧は不要である。
 check IDは両phaseとsystem closureを通して一意でなければならない。
@@ -90,8 +90,7 @@ workflow の検査は設定を含む `.github/` だけを Nix の source 入力�
 Nix の静的検査と整形検査は全 `.nix` file を入力とし、`statix` だけが追加で `statix.toml` を読むため、文書や他言語の変更では成功した derivation を再利用する。
 Git hook の振る舞い検査も対応する hook の file を入力とし、無関係な checkout の変更では再実行しない。
 評価器のBoehm GCの初期heapは4GiBとし、`GC_INITIAL_HEAP_SIZE`を設定済みの場合は上書きしない。
-初期heapの値は実RSSの上限ではなく、評価器を合わせたメモリの必要量は実行条件とともに測る。
-最初に失敗したshardの終了statusを返し、動いている評価器を止めて終了を待つ。
+初期heapの値は実RSSの上限ではなく、評価器のメモリの必要量は実行条件とともに測る。
 契約検査用のvariantは`mkProbeSystem`で構成し、検査対象と独立したNixOSのmanualとHome Managerのmanpageを生成しない。
 登録した全hostとgateway portを変えたvariantはmanualを含めて評価し、最小Capabilityと`project-memory`無効のpositive variantもsystem closureを評価する。
 基準hostのoption宣言一覧は一度だけ作り、root ownerの確認と宣言位置の確認で共有する。

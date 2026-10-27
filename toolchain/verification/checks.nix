@@ -34,20 +34,6 @@ in
             python3 ${./fixtures/run-within-interrupt.py}
             touch $out
           '';
-      verification-run-each =
-        pkgs.runCommandLocal "check-verification-run-each"
-          {
-            nativeBuildInputs = with pkgs; [
-              bash
-              coreutils
-              gnugrep
-            ];
-            EACH = lib.getExe programs.runEach;
-          }
-          ''
-            bash ${./fixtures/run-each.sh}
-            touch $out
-          '';
     }
   ];
   configuration = [

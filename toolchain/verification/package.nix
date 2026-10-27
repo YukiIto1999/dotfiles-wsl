@@ -2,7 +2,7 @@
   native検証の実行部品の構築
   pkgs: 実行入口を生成する固定済みpackage集合
   supervise: 子孫回収を所有するplatformのnative command
-  戻り値: 期限付き起動と並列起動を提供するpackage群
+  戻り値: 所有子孫の終了を待つ期限付き起動package
 */
 { pkgs, supervise }:
 
@@ -23,10 +23,5 @@ in
     text = ''
       exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 -- ${lib.getExe runWithinCore} "$@"
     '';
-  };
-
-  runEach = pkgs.writeShellApplication {
-    name = "dotfiles-run-each";
-    text = builtins.readFile ./impl/run-each.sh;
   };
 }

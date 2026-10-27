@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-# project の devShell を開いて client を起動する入口を、起動された client が見る環境と、拒否された入口の後に
-# 残る状態から読む。direnv と nix は sandbox にないため、direnv は承認状態を、nix は `nix develop` の
-# 文書化された挙動(TMP 系の書換えと devShell の PATH を host の PATH の前に置く)を再現する。
-# 実物の direnv と nix での確認は docs/operations/orca-launch.md の手順が受け持つ。
 set -euo pipefail
 
 fixture=$PWD/project-run-fixture

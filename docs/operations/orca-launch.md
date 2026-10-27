@@ -21,7 +21,11 @@ Orcaの起動commandはargvではなく一行の文字列である。
 dotfiles-project-run [--attr NAME] -- ABSOLUTE-EXECUTABLE [ARG...]
 ```
 
-利用者が `direnv allow` した project の `.envrc` を、信頼の記録として使う。入口は `direnv status --json` を読み、見つかった `.envrc` が許可済み(`allowed` が 0)のときだけ、その `.envrc` がある directory を flake として `nix develop --no-update-lock-file --no-write-lock-file DIRECTORY#NAME` で開く。`NAME` は既定で `default` である。devShell の中で `ABSOLUTE-EXECUTABLE` を絶対 path で起動し、Orca が後ろへ足した引数はそのまま渡る。
+利用者が`direnv allow`したprojectの`.envrc`を信頼の記録として使う。
+入口は`direnv status --json`を読み、見つかった`.envrc`が許可済み（`allowed`が0）のときだけ、そのdirectoryをflakeとして`nix develop --no-update-lock-file DIRECTORY#NAME`で開く。
+`NAME`は既定で`default`であり、`--attr`で別のdevShellを選べる。
+devShellの中で`ABSOLUTE-EXECUTABLE`を絶対pathで起動し、Orcaが後ろへ足した引数はそのまま渡る。
+`--no-write-lock-file`は併用せず、lockの更新が必要なら保存を省いて続行するのではなく、clientを起動する前に拒否する。
 
 既に`user.slice`の下にいるcommandは、agent scopeを含む現在の配置を保つ。
 通常のWSL shellなど外にいる場合は、user managerの`app.slice`へscopeを作ってからdevShellを開き、workloadの共通上限に含める。
@@ -56,12 +60,14 @@ command override を設定すると、その agent のどの workspace でも `d
 | 検査 | 確かめること |
 |---|---|
 | `toolchain-project-run` | 承認済みの directory の devShell だけを開き、承認の欠落、拒否、devShell の失敗で client を起動せず host の PATH へ戻らず、`TMPDIR` 系の状態、argv、終了値が保たれる |
+| `toolchain-project-run-native` | 実際のNixで既定と指定したdevShellの環境を区別し、lock更新が必要な入力ではclientを起動せず、lockfileを変更しないこと |
 | `toolchain-execution-policy` | cache の既定、明示値の優先、project の Cargo 設定の優先、checkout ごとの build-dir |
 | `supervise-child-ownership` | 子と遅い孫の終了確認、session 取消と操作の取消の区別、保持する lock descriptor |
 | `agent-runtime-behavior` | 台帳、GC root、scope、終了の順序、台帳と reaper lock の待ちの上限 |
 | `agent-runtime-wrapper`、`agent-runtime-protect` | wrapper の連鎖と保護の取得、世代変更と模擬 GC 後の読取済み Skill の利用継続、全子終了後の解放、失敗時に root を残さないこと |
 
-自動の検査は direnv、nix、systemd、Nix daemon を模している。実物での確認は次の手順で行う。
+direnvの承認状態やsystemd接続はfixtureで制御し、`toolchain-project-run-native`では隔離したstoreで実際のNixを動かす。
+Orca、user manager、Nix daemonを含む実環境での確認は次の手順で行う。
 
 ### 実機 smoke
 

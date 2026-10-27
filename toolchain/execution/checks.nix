@@ -43,10 +43,15 @@
           export PATH="$DEVSHELL_BIN:$PATH"
           exec "$@"
         '';
+        boundedCgroupFile = pkgs.writeText "bounded-project-cgroup" "0::/user.slice/user-1000.slice/user@1000.service/agents.slice/client.scope\n";
         fixtureProjectRun = programs.mkProjectRun {
           nixCommand = fakeNixDevelop;
           direnvCommand = fakeDirenv;
-          cgroupFile = pkgs.writeText "bounded-project-cgroup" "0::/user.slice/user-1000.slice/user@1000.service/agents.slice/client.scope\n";
+          cgroupFile = boundedCgroupFile;
+        };
+        nativeProjectRun = programs.mkProjectRun {
+          direnvCommand = fakeDirenv;
+          cgroupFile = boundedCgroupFile;
         };
         unboundedProjectRun = programs.mkProjectRun {
           nixCommand = fakeNixDevelop;
@@ -98,6 +103,23 @@
             }
             ''
               bash ${./fixtures/project-run.sh}
+              touch $out
+            '';
+
+        toolchain-project-run-native =
+          pkgs.runCommandLocal "check-toolchain-project-run-native"
+            {
+              nativeBuildInputs = with pkgs; [
+                bash
+                coreutils
+                jq
+                nix
+              ];
+              PROJECT_RUN = lib.getExe nativeProjectRun;
+              SYSTEM = pkgs.stdenv.hostPlatform.system;
+            }
+            ''
+              bash ${./fixtures/project-run-native.sh}
               touch $out
             '';
       }

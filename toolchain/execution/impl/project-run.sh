@@ -82,7 +82,7 @@ case "$cgroup_path" in
   *) die 'a unified cgroup hierarchy is required for the resource scope' ;;
 esac
 
-# lock を更新せず、評価の失敗や欠落は nix develop の失敗としてそのまま返す。
+# --no-update-lock-file へ --no-write-lock-file を足すと更新が要る lock を警告だけで通すため追加は不可
 # 実行ファイルは絶対 path で渡し、devShell の PATH の後ろにある host の PATH を引かない。
-exec "${scope[@]}" @nixCommand@ develop --no-update-lock-file --no-write-lock-file "$project_root#$attr" \
+exec "${scope[@]}" @nixCommand@ develop --no-update-lock-file "$project_root#$attr" \
   --command @envCommand@ "${restore_unset[@]}" "${restore_set[@]}" "$executable" "$@"

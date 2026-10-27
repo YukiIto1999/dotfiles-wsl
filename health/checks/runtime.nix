@@ -25,6 +25,7 @@
           restartThresholdFailureDoctor
           rosterFailureOnlyDoctor
           rosterOmitDoctor
+          servicePlacementDoctors
           strayProcessDoctor
           termTimeoutDoctor
           timeoutDoctor
@@ -231,6 +232,22 @@
                     exit 1
                   }
                 '') timerStateDoctors
+              )}
+              ${lib.concatStringsSep "\n" (
+                lib.mapAttrsToList (state: fixture: ''
+                  set +e
+                  placement_output=$(${lib.getExe fixture.doctor} --json)
+                  placement_status=$?
+                  set -e
+                  if [[ "$placement_status" != ${if fixture.status == "fail" then "1" else "0"} ]]; then
+                    printf 'service placement ${state}: unexpected exit %s\n' "$placement_status" >&2
+                    exit 1
+                  fi
+                  jq -e --arg expected ${lib.escapeShellArg fixture.status} '
+                    .checks == [{id:"fixture/service-placement",status:$expected}]
+                    and (.failures | map(.id)) == (if $expected == "fail" then ["fixture/service-placement"] else [] end)
+                  ' <<<"$placement_output" >/dev/null
+                '') servicePlacementDoctors
               )}
 
               set +e

@@ -773,6 +773,33 @@ let
         failed-state = "fail";
         inconsistent = "fail";
       };
+  servicePlacementDoctors =
+    lib.mapAttrs
+      (state: status: {
+        inherit status;
+        doctor = mkFixtureDoctor {
+          "fixture/service-placement" = common "service-placement" "systemd-service" // {
+            manager = "system";
+            unit = "placement-${state}.service";
+            slice = "fixture-workload.slice";
+            loadStates = [ "loaded" ];
+            activeStates = [
+              "active"
+              "inactive"
+            ];
+            results = [ "success" ];
+          };
+        };
+      })
+      {
+        inside = "pass";
+        nested = "pass";
+        outside = "fail";
+        prefix = "fail";
+        empty = "fail";
+        inactive = "pass";
+        inactive-outside = "fail";
+      };
 
   invalidNormalizedCommands = {
     nonzero = normalizedNonzeroCommand;
@@ -901,6 +928,7 @@ in
     restartThresholdFailureDoctor
     rosterFailureOnlyDoctor
     rosterOmitDoctor
+    servicePlacementDoctors
     strayProcessDoctor
     termTimeoutDoctor
     timeoutDoctor

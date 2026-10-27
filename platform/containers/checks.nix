@@ -209,6 +209,7 @@
                     kind = "systemd-service";
                     manager = "system";
                     inherit unit;
+                    slice = null;
                     loadStates = [ "loaded" ];
                     activeStates = [ "active" ];
                     results = [ "success" ];

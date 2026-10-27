@@ -41,6 +41,7 @@ case "$tool" in
         LoadState) printf 'loaded\n' ;;
         ActiveState)
           case "$target" in
+            *placement-inactive*) printf 'inactive\n' ;;
             *state-starting*) printf 'activating\n' ;;
             *state-draining*) printf 'deactivating\n' ;;
             *state-completed* | *state-failed-cleared* | *state-inconsistent*) printf 'inactive\n' ;;
@@ -74,6 +75,16 @@ case "$tool" in
             *warn*) printf '5\n' ;;
             *fail*) printf '20\n' ;;
             *) printf '0\n' ;;
+          esac
+          ;;
+        Slice) printf 'fixture-workload.slice\n' ;;
+        ControlGroup)
+          case "$target" in
+            placement-inside.service) printf '/fixture.slice/fixture-workload.slice/%s\n' "$target" ;;
+            placement-nested.service) printf '/fixture.slice/fixture-workload.slice/fixture-workload-child.slice/%s\n' "$target" ;;
+            placement-prefix.service) printf '/fixture.slice/fixture-workloads.slice/%s\n' "$target" ;;
+            placement-empty.service | placement-inactive.service) printf '\n' ;;
+            *) printf '/system.slice/%s\n' "$target" ;;
           esac
           ;;
         *) exit 64 ;;

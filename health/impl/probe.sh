@@ -252,15 +252,27 @@ systemd_show() {
 }
 
 probe_systemd_unit() {
-  local manager unit load active result
+  local manager unit slice snapshot property value
+  local load='' active='' result='' group=''
   manager=$($jq_command -r '.manager' <<<"$observation")
   unit=$($jq_command -r '.unit' <<<"$observation")
-  if load=$(systemd_show "$manager" "$unit" LoadState) \
-    && active=$(systemd_show "$manager" "$unit" ActiveState) \
-    && result=$(systemd_show "$manager" "$unit" Result) \
-    && value_is_allowed loadStates "$load" \
+  slice=$($jq_command -r '.slice // empty' <<<"$observation")
+  if ! snapshot=$(systemd_record "$manager" "$unit" --property=LoadState,ActiveState,Result,ControlGroup); then
+    emit_failure
+    return
+  fi
+  while IFS='=' read -r property value; do
+    case "$property" in
+      LoadState) load=$value ;;
+      ActiveState) active=$value ;;
+      Result) result=$value ;;
+      ControlGroup) group=$value ;;
+    esac
+  done <<<"$snapshot"
+  if value_is_allowed loadStates "$load" \
     && value_is_allowed activeStates "$active" \
-    && value_is_allowed results "$result"; then
+    && value_is_allowed results "$result" \
+    && { [[ -z $slice ]] || [[ $group/ == */"$slice"/* ]] || [[ $active == inactive && -z $group ]]; }; then
     emit_pass
   else
     emit_failure

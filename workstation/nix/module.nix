@@ -75,6 +75,22 @@ in
       activeStates = [ "active" ];
       results = [ "success" ];
     };
+    "host/nix-daemon-service" = {
+      kind = "systemd-service";
+      manager = "system";
+      checkId = "service/nix-daemon";
+      resourceKey = null;
+      timeoutSeconds = observationTimeoutSeconds;
+      failureMessage = "nix-daemon.service is not operational or is outside ${cfg.workload.slices.support}";
+      unit = "nix-daemon.service";
+      slice = cfg.workload.slices.support;
+      loadStates = [ "loaded" ];
+      activeStates = [
+        "active"
+        "inactive"
+      ];
+      results = [ "success" ];
+    };
     "host/nix-gc" = {
       kind = "systemd-timer";
       manager = "system";

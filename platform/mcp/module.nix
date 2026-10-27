@@ -58,6 +58,7 @@ let
           kind = "systemd-service";
           manager = "system";
           inherit unit;
+          slice = config.dotfiles.workstation.workload.slices.support;
           loadStates = [ "loaded" ];
           activeStates = [ "active" ];
           results = [ "success" ];

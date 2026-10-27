@@ -35,6 +35,10 @@ memory と I/O が逼迫すると、正常な service の probe も、swap と p
 probeは`systemctl --system`か`systemctl --user`を明示し、宣言したmanagerだけを読む。
 `user`のobservationはdoctorを実行したuserのuser managerへ、doctorが渡す`XDG_RUNTIME_DIR`で接続する。
 接続できない場合、そのmanagerにunitがない場合、runtime directoryがない環境で実行した場合は観測を失敗にし、同名のsystem unitが正常でも代わりに読まない。
+`systemd-service`に`slice`を宣言した場合は、unitの稼働状態と同時に取得した`ControlGroup`が、そのslice自身か配下にあることも要求する。
+設定上の`Slice`だけが変わり、processが旧cgroupに残っている状態は`fail`になる。
+socket activationを使うNix daemonは、許可された`inactive`状態でcgroupが空なら正常とするが、稼働中の空cgroupや別sliceへの配置は認めない。
+この判定は現在のunitのcgroupを対象とし、古いdaemonから孤児になったprocessまで正常と証明するものではない。
 `systemd-timer`はserviceの`LoadState`、`ActiveState`、`SubState`、`Result`、`ExecMainStatus`を一度の問い合わせで読む。
 `Result`と`ExecMainStatus`が成功を示し、状態が`inactive/dead`または`active/exited`なら`pass`にする。
 起動中、実行中、再読込み中、終了処理中は、完了をまだ観測していないため`warn`にする。

@@ -35,6 +35,7 @@
                 kind = "systemd-service";
                 manager = "system";
                 unit = serviceUnit;
+                slice = null;
                 loadStates = [ "loaded" ];
                 activeStates = [ "active" ];
                 results = [ "success" ];

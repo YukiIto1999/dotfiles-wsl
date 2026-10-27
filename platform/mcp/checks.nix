@@ -262,6 +262,7 @@
                     kind = "systemd-service";
                     manager = "system";
                     inherit unit;
+                    slice = configuration.dotfiles.workstation.workload.slices.support;
                     loadStates = [ "loaded" ];
                     activeStates = [ "active" ];
                     results = [ "success" ];

@@ -227,6 +227,10 @@ let
     loadStates = lib.mkOption { type = uniqueNonEmptyListOf loadState; };
     activeStates = lib.mkOption { type = uniqueNonEmptyListOf activeState; };
     results = lib.mkOption { type = uniqueNonEmptyListOf serviceResult; };
+    slice = lib.mkOption {
+      type = types.nullOr sliceUnit;
+      default = null;
+    };
   } (_: true);
 
   systemdSocketType = mkObservationType "systemd-socket" {

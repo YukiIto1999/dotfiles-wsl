@@ -37,6 +37,7 @@
           "host/home-manager-restart"
           "host/journald"
           "host/nix-daemon"
+          "host/nix-daemon-service"
           "host/nix-gc"
           "host/root-filesystem"
           "host/swap"
@@ -65,6 +66,7 @@
             loadStates = [ "loaded" ];
             resourceKey = null;
             results = [ "success" ];
+            slice = null;
             timeoutSeconds = 10;
             unit = "home-manager-${hostConfig.dotfiles.workstation.username}.service";
           };
@@ -99,6 +101,22 @@
             results = [ "success" ];
             timeoutSeconds = 10;
             unit = "nix-daemon.socket";
+          };
+          "host/nix-daemon-service" = {
+            activeStates = [
+              "active"
+              "inactive"
+            ];
+            checkId = "service/nix-daemon";
+            failureMessage = "nix-daemon.service is not operational or is outside ${workstation.workload.slices.support}";
+            kind = "systemd-service";
+            manager = "system";
+            loadStates = [ "loaded" ];
+            resourceKey = null;
+            results = [ "success" ];
+            slice = workstation.workload.slices.support;
+            timeoutSeconds = 10;
+            unit = "nix-daemon.service";
           };
           "host/nix-gc" = {
             activeStates = [ "active" ];

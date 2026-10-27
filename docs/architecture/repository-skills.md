@@ -115,7 +115,7 @@ Mattの`code-review`は`setup-matt-pocock-skills`を、`tdd`は`codebase-design`
 `improve-codebase-architecture`は`codebase-design`、`domain-modeling`、`grilling`を、`grill-with-docs`は`grilling`と`domain-modeling`を、`grill-me`は`grilling`を使う。
 `to-spec`と`to-tickets`はtracker設定の`setup-matt-pocock-skills`を、`retro`は`writing-for-agents`を使う。
 raw `research`とPonytailは配備せず、調査と実装・reviewの原則を既存の自立した手順へ統合する。
-Googleの二Skillとcustom `browser-performance`だけをbrowser-diagnosticsでgateし、Playwrightの`browser-operation`とnative診断を別に保つ。
+Googleの二Skillとcustom `browser-performance`だけをbrowser-diagnosticsでgateし、実行時にbrowser経路を選ぶ`browser-operation`とnative診断を別に保つ。
 .NET `run-tests`は`platform-detection`と`filter-syntax`をSkill依存に持ち、後者はfiltered runのreference-only helperとして扱う。
 .NETの実行前提は対象projectのSDKとrunnerであり、一般のbrowserやcloud Capabilityではない。
 原版の起動flagを維持し、policy rosterもfrontmatterから明示呼出しとreference-onlyを区別する。

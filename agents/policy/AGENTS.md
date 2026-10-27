@@ -48,6 +48,7 @@ Think in English. Respond in Japanese.
 - agent session 内で linked worktree を作るときは `git worktree add` を使う。session の終了時に runtime が削除するのは、その session の `git worktree add` で作った worktree のうち、HEAD が作成時のままで、変更、untracked file、lock を持たないものだけである。
 - runtime が削除しない worktree と、その session で作った branch は、作業を終える前に自分で片付け、回収の要否は利用者に問わず、中身が取り込み済みかを `git cherry` か blob の比較で実測して決める。
 - 取り込み済みの物は `git worktree remove` と `git branch -d` で回収し、未取り込みの commit や変更を持つ物は、先端と差分を追跡外の場所へ退避してから回収するか、残す理由を報告する。
+- Orca の worktree と terminal の作成、handoff は `orca-cli` が所有する。Orca が作った worktree の寿命は Orca が持つため、上の回収の対象にしない。
 - 自分が起動した server、container、background process と作成した一時資源を作業中に把握し、終了時に自分の所有物だけ停止、回収する。既存物や所有者不明の資源を削除しない。
 
 ## subagents
@@ -139,7 +140,8 @@ store上の写し、記憶、過去のrevisionで補わない。
 全clientは単一のgatewayからprovider実装を使う。
 container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
 agentはSkillを入口にし、下表でそのSkillに対応づけられたCapabilityだけを使う。
-browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とし、Playwrightで既知の経路を操作・検証するときは`browser-operation`を使う。
+browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とする。
+実browserで既知の経路を操作・検証するときは、Orca内蔵browser、標準browser tool、`browser-automation`のPlaywrightからrouteを選ぶ`browser-operation`を使い、routeの選択と未確認の扱いはそのSkillに任せる。
 native C#/Rustを含む一般診断は`diagnosing-bugs`が所有し、browser toolを使わないbranchにbrowser Capabilityを要求しない。
 @heapDiagnosticsPolicy@
 GitHub操作は`github-operations`、Webとrepository調査は対応するSkillなど、sessionが提供するCapability入口からtoolを呼ぶ。

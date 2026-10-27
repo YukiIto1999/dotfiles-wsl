@@ -1,7 +1,8 @@
 _: {
   config.dotfiles.skills.registry."browser-operation" = {
     source = ./skill;
-    requiresCapabilities = [ "browser-automation" ];
+    requiresCapabilities = [ ];
+    optionalCapabilities = [ "browser-automation" ];
     requiresSkills = [ ];
   };
 }

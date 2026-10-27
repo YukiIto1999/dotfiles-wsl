@@ -298,7 +298,9 @@ hostとHome Managerのpackage setはstableのまま変えず、providerごとの
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
 
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
-`browser-diagnostics`のSkill入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`であり、Playwright操作の入口は`browser-operation`である。
+`browser-diagnostics`のSkill入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`である。
+実画面の操作と受入確認は`browser-operation`が所有し、Orca、clientの標準tool、Playwrightの公開経路を実行時に選ぶ。
+OrcaとPlaywrightのどちらも、browserを使わない作業の前提にはしない。
 一般の`diagnosing-bugs`はbrowser Capabilityを要求せず、必要なbranchだけ専門入口へ渡す。
 heap-diagnosticsのregistryは[`capabilities/heap-diagnostics/module.nix`](../../capabilities/heap-diagnostics/module.nix)が所有し、providerは`memlab`だけ、backendとCapability依存は空である。
 入口の`heap-analysis`はheap-diagnosticsだけを要求し、heap artifactをproject-memoryへ送らず、ChromeまたはNode.jsのlocal snapshotと比較条件を扱う。

@@ -142,7 +142,8 @@ raw sourceの採用は`mizchi/explainer`に限り、donorとして調べた`mizc
 
 `browser-operation`は要求と変更pathから重要な実経路、状態遷移、contentと表示条件を選び、fresh DOM操作、実際に読んだrendered screenshot、業務結果を対応させる。
 関連する拒否、回復、契約が必要とする再取得までclaimごとに閉じ、未確認条件と証拠を返す。
-永久testの作成や専門監査は別ownerとし、配備ではbrowser-automationだけを要求する。
+永久testの作成や専門監査は別ownerとし、Orca、clientの標準browser tool、`browser-automation`のうち実行可能な経路を選ぶ。
+Orcaと`browser-automation`は配備の必須条件にせず、経路がない場合もSkillを残して未確認の条件を返す。
 browser-diagnosticsの入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面a11yの`a11y-debugging`とする。
 Googleの固定sourceは配備するChrome DevTools MCP 1.10.1に対応し、必要なreferenceを切り離さない。
 例の引数や値はsessionの実tool schemaで確認し、page IDを固定する。
@@ -201,7 +202,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 
 | 作業手順 | 公開入口 | 合成と引継ぎ |
 |---|---|---|
-| `browser-operation` | `browser-automation`のPlaywright MCP | 要求と変更pathから実画面と業務結果のmatrixを作り、観測した証拠と未確認条件を返す。専門監査や原因診断は別の依頼として渡す。 |
+| `browser-operation` | Orca内蔵browser、clientの標準browser tool、`browser-automation`のPlaywright MCP | 要求と変更pathから実画面と業務結果のmatrixを作り、実行した経路、証拠、未確認条件を返す。経路の選択と切替条件はSkillが所有し、専門監査や原因診断は別の依頼として渡す。 |
 | `browser-performance` | `browser-diagnostics`のChrome DevTools MCP | 固定した測定条件と観測をLCPの専門Skillや`heap-analysis`へ渡し、戻った証拠から診断を続ける。 |
 | `heap-analysis` | `heap-diagnostics`の公開MemLab MCP | browserのcaptureだけを`browser-performance`へ委譲し、返ったcaller所有のprivate fileを解析する。 |
 | `github-operations` | `github-resources`のaccount別GitHub MCP | accountと対象resourceを固定し、write前後の状態を確認する。 |
@@ -222,6 +223,7 @@ containerを背後に持つMCPも公開Capabilityから使い、Skillからprovi
 採用した外部原版は変更しない。
 phase referenceは同じdirectoryから解決し、別Skillのfrontmatterや特定clientだけのreport directiveを持たない。
 browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置く。
+browser操作の経路選択と安全な停止は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
 外部toolの統合は[`agents/fixtures/environment-integration-skill.json`](../../agents/fixtures/environment-integration-skill.json)の代表scenarioで、callerと実装、共通配備と現状調査を区別して評価する。
 
 ## Custom Skillの来歴

@@ -227,10 +227,10 @@
               sourceAdoptionModule
               { dotfiles.skills.registry.browser-operation = lib.mkForce replacementSkill; }
             ]);
-          assert !builtins.elem "browser-operation" noCapabilitiesBefore.dotfiles.skills.enabled;
+          assert builtins.elem "browser-operation" noCapabilitiesBefore.dotfiles.skills.enabled;
+          assert !builtins.elem "external-procedure" noCapabilitiesBefore.dotfiles.skills.enabled;
           assert builtins.elem "browser-operation" noCapabilitiesAfter.dotfiles.skills.enabled;
           assert !builtins.elem "external-procedure" noCapabilitiesAfter.dotfiles.skills.enabled;
-          assert noCapabilitiesAfter.dotfiles.skills.registry.browser-operation.requiresSkills == [ ];
           assert
             toString sourceConfig.dotfiles.agents.shared.skills.browser-operation
             == toString replacementSkill.source;

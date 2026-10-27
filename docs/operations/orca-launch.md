@@ -1,6 +1,6 @@
 # Orca からの client 起動
 
-**読み手:** Windows の Orca から WSL の managed client を起動する運用者と、起動経路を変える実装者。
+**読み手:** Windows の Orca から WSL の managed client と内蔵 browser を使う運用者。
 
 Orca は workspace、選択した client、PTY を持つ。WSL 側は、Orca が入力した command を `bash -l` が受け取り、`dotfiles-project-run` が project の devShell を開き、共通 runtime の wrapper が client を `agents.slice` の scope で起動する。この文書は、その各段の契約、Orca 側へ貼る値、実機での確かめ方を示す。
 
@@ -71,7 +71,16 @@ command override を設定すると、その agent のどの workspace でも `d
 
 この手順の結果を、既定経路の実測として扱うのは、override を適用して手順 5 の後半を実行した後だけである。
 
+## 内蔵 browser での画面確認
+
+client の起動とは独立した経路であり、Orca の設定や command override を変えない。
+
+実行 route と受入条件は [`browser-operation`](../../skills/browser-operation/skill/SKILL.md) が所有し、内蔵 browser の操作は `orca-cli` の版一致 guide と browser reference に従う。
+Orca は通常のローカル UI 確認の第一候補だが、他の browser を使う client の前提条件にはしない。
+browser command の既定対象は UI で active な worktree なので、この session の対象を特定し、一覧と作成には worktree id、作成後には page id を明示する。
+
 ## 未確認
 
 - Orca の command override を設定した既定の起動、`terminal wait --for tui-idle` などの状態検出が `dotfiles-project-run` を経由した process 構成でも働くか。
 - `.envrc` の承認が `flake.nix` の変更を信頼として含まない範囲の運用上の十分さ。
+- Orca 内蔵 browser の viewport を公開された手段で変更できるかは未確認である。

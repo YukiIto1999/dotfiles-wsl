@@ -1047,6 +1047,43 @@
             touch $out
           '';
 
+        # 実行時に選ぶ browser route の不足で操作 Skill の配備を落とすことは不可
+        agent-browser-route-contract =
+          let
+            diagnosticsSkills = [
+              "browser-performance"
+              "a11y-debugging"
+              "debug-optimize-lcp"
+            ];
+            routedTo =
+              configuration: subagent:
+              lib.any (
+                route: route.subagent == subagent && route.skill == "browser-operation"
+              ) configuration.dotfiles.agents.shared.routing.subagentSkills;
+          in
+          assert lib.all
+            (
+              configuration:
+              configuration.dotfiles.agents.shared.skills ? browser-operation
+              && lib.all (routedTo configuration) [
+                "designer"
+                "implementer"
+              ]
+            )
+            [
+              minimalCapabilityConfig
+              transitiveCapabilityAgentConfig
+              hostConfig
+            ];
+          assert lib.all (
+            skill:
+            !builtins.hasAttr skill minimalCapabilitySkills
+            && !builtins.hasAttr skill transitiveCapabilityAgentConfig.dotfiles.agents.shared.skills
+          ) diagnosticsSkills;
+          pkgs.runCommandLocal "check-agent-browser-route-contract" { } ''
+            touch $out
+          '';
+
         agent-subagent-rendering =
           assert builtins.elem "browser-automation"
             transitiveCapabilityAgentConfig.dotfiles.capabilities.resolved;
@@ -1449,12 +1486,8 @@
               configuration: skill:
               lib.any (route: route.skill == skill) configuration.dotfiles.agents.shared.routing.subagentSkills;
           in
-          # 差替先の依存宣言へ切り替わり、旧 source の Capability 要求は残らない
-          assert !(minimalCapabilityConfig.dotfiles.agents.shared.skills ? browser-operation);
-          assert !routesTo minimalCapabilityConfig "browser-operation";
           assert replacedConfig.dotfiles.agents.shared.skills ? browser-operation;
           assert routesTo replacedConfig "browser-operation";
-          assert replacedConfig.dotfiles.skills.registry.browser-operation.requiresCapabilities == [ ];
           # 同優先度の競合する差替は拒否する
           assert !conflictAccepted;
           # reference-only の helper は全 client の named Skill へ出さない

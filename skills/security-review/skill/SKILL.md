@@ -29,7 +29,7 @@ Strix is a conditional tool implementation, not a replacement Skill or an additi
 ## Operation Boundaries
 
 Keep exact file, symbol, diff, and history inspection as direct Read, Grep, Glob, LSP, and bounded Git operations.
-Use declared public Capability tools for remote, browser, or container-backed evidence; resolve the actual exposed name and current schema through the responsible Skill.
+Use declared public Capability tools for remote or container-backed evidence, and the execution route the responsible Skill selects for browser evidence; resolve the actual exposed name and current schema through that Skill.
 Do not inspect or control provider processes, Docker containers, databases, or private backend endpoints to recover a missing tool.
 Runtime reproduction and setup repair must stay within the caller's approved target, commands, resources, and side effects.
 Do not run exploit input against a real account, shared service, or third-party target without explicit authorization.

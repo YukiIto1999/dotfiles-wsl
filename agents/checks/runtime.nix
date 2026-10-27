@@ -110,6 +110,30 @@
             '';
           };
         wrongOwnerGc = gcWithCommand "wrong-owner" wrongOwnerStat;
+        # 旧 producer の cmdline を読めない状況を作る。読めない pid と awk の失敗は環境変数で選ぶ。
+        unreadableCmdlineAwk = pkgs.writeShellScriptBin "awk" ''
+          if [[ $* == *"/proc/"*"/cmdline"* ]]; then
+            if [[ -n ''${DOTFILES_AGENT_TEST_AWK_FAILS-} ]]; then
+              exit 2
+            fi
+            if [[ -n ''${DOTFILES_AGENT_TEST_UNREADABLE_CMDLINE_PIDS-} ]]; then
+              for pid in $DOTFILES_AGENT_TEST_UNREADABLE_CMDLINE_PIDS; do
+                printf 'unreadable /proc/%s/cmdline\n' "$pid"
+              done
+              exit 0
+            fi
+          fi
+          exec ${pkgs.gawk}/bin/awk "$@"
+        '';
+        unreadableProcGc = gcWithCommand "unreadable-proc" (
+          pkgs.symlinkJoin {
+            name = "dotfiles-agent-unreadable-proc-shims";
+            paths = [
+              unreadableCmdlineAwk
+              wrongOwnerStat
+            ];
+          }
+        );
         # trash の削除を止めて、GC がその間 gc.lock を握っていないことと、kill の後を再現する。
         slowTrashRm = pkgs.writeShellScriptBin "rm" ''
           target=''${!#}
@@ -681,6 +705,7 @@
               RACING_GC = lib.getExe racingGc;
               MOUNT_OPTIONS_GC = lib.getExe mountOptionsGc;
               WRONG_OWNER_GC = lib.getExe wrongOwnerGc;
+              UNREADABLE_PROC_GC = lib.getExe unreadableProcGc;
               LAUNCHER = lib.getExe fixtureLauncher;
             }
             ''
@@ -728,10 +753,10 @@
               touch $out
             '';
 
-        agent-verification-cache =
+        agent-verification-run =
           assert lib.count (package: package == runtime.verify) hostConfig.environment.systemPackages == 1;
           assert lib.count (package: package == runtime.gate) hostConfig.environment.systemPackages == 1;
-          pkgs.runCommandLocal "check-agent-verification-cache"
+          pkgs.runCommandLocal "check-agent-verification-run"
             {
               nativeBuildInputs = [
                 pkgs.bash

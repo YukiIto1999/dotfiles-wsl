@@ -112,6 +112,7 @@ let
         lib.optional (commandShims != null) commandShims
         ++ (with pkgs; [
           coreutils
+          diffutils
           git
           jq
           nodejs
@@ -131,36 +132,12 @@ let
           (builtins.readFile ./impl/runtime/gate.sh);
     };
   gate = mkGate { };
-  mkVerificationCache =
-    {
-      gateCommand,
-      commandShims ? null,
-    }:
-    pkgs.writeShellApplication {
-      name = "dotfiles-agent-verification-cache";
-      runtimeInputs =
-        lib.optional (commandShims != null) commandShims
-        ++ (with pkgs; [
-          coreutils
-          diffutils
-          git
-        ]);
-      text =
-        builtins.replaceStrings
-          [ "@cacheRootRelative@" "@gate@" ]
-          [ cacheRootRelative (lib.getExe gateCommand) ]
-          (builtins.readFile ./impl/runtime/verify-cache.sh);
-    };
   mkVerify =
     {
       commandShims ? null,
     }:
     let
       verifyGate = mkGate { inherit commandShims; };
-      verifyCache = mkVerificationCache {
-        gateCommand = verifyGate;
-        inherit commandShims;
-      };
     in
     pkgs.writeShellApplication {
       name = "dotfiles-agent-verify";
@@ -170,10 +147,10 @@ let
       ];
       text =
         builtins.replaceStrings
-          [ "@gate@" "@verificationCache@" "@supervise@" "@timeout@" ]
+          [ "@gate@" "@flock@" "@supervise@" "@timeout@" ]
           [
             (lib.escapeShellArg (lib.getExe verifyGate))
-            (lib.escapeShellArg (lib.getExe verifyCache))
+            (lib.escapeShellArg (lib.getExe' pkgs.util-linux "flock"))
             (lib.escapeShellArg (lib.getExe supervise))
             (lib.escapeShellArg (lib.getExe' pkgs.coreutils "timeout"))
           ]

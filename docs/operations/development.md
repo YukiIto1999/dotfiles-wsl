@@ -47,7 +47,9 @@ nix run --no-write-lock-file .#verify-full
 dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
 ```
 
-同じ source、command、環境で成功済みなら、`dotfiles-agent-verify` は保存した成功を返す。source か環境が変われば実行し直す。agent session ごとに新しい target directory を作らず、[`toolchain/execution/`](../../toolchain/execution)の実行方針が割り当てる Cargo の build-dir を使う。
+`dotfiles-agent-verify`は毎回commandを実行し、同じprojectのT1だけを直列化する。
+成果物はNixやCargoの依存に従って再利用する。
+agent sessionごとに新しいtarget directoryを作らず、[`toolchain/execution/`](../../toolchain/execution)の実行方針が割り当てるCargoのbuild-dirを使う。
 
 配備済みの`dotfiles-agent-verify`がcheckoutの宣言より古い間は、同じ宣言から組み立てたwrapperをcheckoutから起動する。
 
@@ -64,14 +66,15 @@ T1とT2の時間予算は、rootの[`verification-budget.json`](../../verificati
 このfileは`{"version":1,"frontend":"nix","entries":["verify","verify-push","verify-full"],"verify":{"seconds":N},"verify-push":{"seconds":M}}`の形で、NとMは1以上2147483647以下の整数である。
 `flake.nix`の各入口は評価時に、`dotfiles-agent-verify`とpre-pushは走行の開始時に、同じfileを読む。
 wrapperとpre-pushは静的な宣言を一度snapshotへ読み、同じsnapshotから時間予算と入口を解決する。
-解決の間に登録を編集しても、canonicalな呼び出しが無期限の局所cacheへ切り替わることはない。
+解決の間に登録を編集しても、canonicalな呼び出しが無制限の実行へ切り替わることはない。
 fileの欠落と不正な値は、既定値でも無制限でも補わず拒否する。
 共有resolverは`frontend`と`entries`から入口を解決し、入口の有無を調べるためにNixを取得、評価しない。
 Nix appを自動検出しないため、他projectがNixの検証入口を使うときもこの登録が必要である。
 登録済みの入口の予算が読めない場合は、終了gateとpre-pushも拒否する。
 追跡済みの登録fileを削除しても入口なしとして通さず、欠落として拒否する。
-T1は入口の解決、指紋の取得、検査、証跡の保存を`verify.seconds`で制限し、wrapperは残り時間を使い切った時点で取消を開始して非ゼロ終了にする。
-成功証跡は検査前のsourceへ固定して走行ごとに仮保存し、cacheの保存と後始末、証跡の公開が時間内に完了した場合だけwrapperが確定するため、公開途中の失敗や中断、sourceの差し替えでは未検査のsourceに対する終了を認めない。
+T1は入口の解決、projectのslot待ち、sourceの照合、検査、証跡の保存を`verify.seconds`で制限し、wrapperは残り時間を使い切った時点で取消を開始して非ゼロ終了にする。
+成功証跡は検査前のsourceへ固定して走行ごとに仮保存し、検査後のsourceとの一致、後始末、証跡の公開が時間内に確認できた場合だけwrapperが確定する。
+公開途中の失敗や中断、sourceの差し替えでは未検査のsourceに対する終了を認めない。
 pre-pushは検査前と検査後の`git status`と`git ls-files`の失敗も拒否し、sourceを確認できなかった走行ではremoteのrefを更新しない。
 nativeな`verify`自身も同じ`verify.seconds`で検査を止め、外側の期限や中断を内側へ転送する。
 別sessionへ移った子孫も回収して終了を確認するため、後始末は予算を超えて続くことがある。

@@ -118,6 +118,12 @@ GC を始めた時点で一度だけ調べると、その後に始まった test
 atime を更新しない mount では Cargo の使用が見えないので、GC は unit を回収せずに失敗する。
 launcher は build-dir の root を検証して作るだけで中身に触れないので、GC は unit の rename に `gc.lock` を取らない。
 
+`dotfiles-agent-project-cache-gc --dry-run`は、その時点で保持・回収する候補、allocated bytes、理由をtab区切りで返す。
+directoryの作成、権限変更、rename、削除を行わず、実行時の判断不能も非ゼロで返す。
+preview後にも利用状態は変わり得るため、削除の承認記録や後続実行への固定入力にはせず、実行時に同じ保護条件を判定し直す。
+旧verification cacheの`.fingerprint.*`は、旧producerが不在と確認できる場合だけ回収し、生存が不明なら保持する。
+形式を確認できた旧`.success`も回収するが、現在の検証枠、証跡、waiver、Skill読取記録はこの回収へ含めない。
+
 sandbox は gateway の client 認証、Docker daemon の権限、Windows interop の境界を代替しない。network access が有効なので、sandbox 内 process は到達可能な endpoint へ接続できる。MCP tool は gateway と各 server の user 権限、secret、backend 境界も合わせて評価する。
 
 ## Windows interop

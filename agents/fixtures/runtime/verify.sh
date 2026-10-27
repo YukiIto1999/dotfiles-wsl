@@ -3,9 +3,7 @@ set -euo pipefail
 
 fixture=$PWD/verify-fixture
 home=$fixture/home
-repo=$fixture/repo
-gitlink_repo=$fixture/gitlink-repo
-nested_gitlink_repo=$fixture/nested-gitlink-repo
+submodule_repo=$fixture/submodule-repo
 
 skill_edit() {
   jq -nc --arg session "$1" --arg cwd "$home" --arg path "$2" \
@@ -695,15 +693,13 @@ SCRIPT
     test "$(stall_litter)" = "$litter_before"
     test "$(stall_receipt_count)" = "$((receipts_before + 1))"
   done 3<<'SCENARIOS'
-save-before mv before *.success 1 2
-save-after mv after *.success 1 1
 staged-after mv after */.pending.* 0 1
-cleanup-after rm after */.fingerprint.* 1 1
-publish-before mv before *.verified 1 1
-publish-after mv after *.verified 1 1
+witness-cleanup-after rm after */.witness.* 0 1
+publish-before mv before *.verified 1 2
+publish-after mv after *.verified 1 2
 SCENARIOS
 
-  while read -r name utility when pattern initial_runs <&4; do
+  while read -r name utility when pattern initial_runs retry_runs <&4; do
     printf 'receipt cancellation: %s\n' "$name" >&2
     repository=$fixture/stall-$name
     t1_repository "$repository" 60
@@ -741,16 +737,14 @@ SCENARIOS
       echo "a T1 cancelled at $name left receipts or temporary state behind" >&2
       exit 1
     fi
-    # cache key に SHLVL を含むため同期起動での再試行は不可
-    "$STALLING_VERIFY" -- devenv shell -- verify &
-    wait "$!"
+    "$STALLING_VERIFY" -- devenv shell -- verify
     expect_open_gate "$repository" "retry after $name"
-    test "$(cat "$STALL_RUNS")" = 1
+    test "$(cat "$STALL_RUNS")" = "$retry_runs"
     test "$(stall_litter)" = "$litter_before"
     test "$(stall_receipt_count)" = "$((receipts_before + 1))"
   done 4<<'SCENARIOS'
-cancel-staged mv after */.pending.* 0
-cancel-published mv after *.verified 1
+cancel-staged mv after */.pending.* 0 1
+cancel-published mv after *.verified 1 2
 SCENARIOS
 
   for name in late-source capture-source; do
@@ -762,7 +756,7 @@ SCENARIOS
     git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
     litter_before=$(stall_litter)
     cd "$repository"
-    if [ "$name" = late-source ]; then pattern='*.success'; else pattern='*/.pending.*'; fi
+    if [ "$name" = late-source ]; then pattern='*.verified'; else pattern='*/.pending.*'; fi
     printf 'mv after %s\n' "$pattern" >"$control"
     rm -f "$control.ready" "$control.release"
     "$STALLING_VERIFY" -- make verify &
@@ -841,7 +835,12 @@ SCENARIOS
       wait "$wrapper"
     fi
     expect_open_gate "$repository" "$name completed run"
-    test "$(cat "$fixture/$name-result")" = once
+    # 成功した走行を再利用しないため、失敗した完了記録の後の再試行は command を実行し直す
+    if [ "$name" = partial-marker ]; then
+      test "$(cat "$fixture/$name-result")" = onceonce
+    else
+      test "$(cat "$fixture/$name-result")" = once
+    fi
 
     if [ "$name" = producer-identity ]; then
       proof=$(find "$home/.cache/dotfiles-wsl/verification" -type f -name "*.$wrapper.verified")
@@ -911,10 +910,474 @@ SCENARIOS
   "$STALLING_VERIFY" -- devenv shell -- verify
   "$STALLING_VERIFY" -- devenv shell -- verify
   expect_open_gate "$repository" "$name repeated runs"
-  test "$(cat "$STALL_RUNS")" = 1
+  # 公開で止めた二回目も含め、各走行は command を実行する
+  test "$(cat "$STALL_RUNS")" = 4
   test "$(stall_receipt_count)" = "$((receipts_before + 1))"
   test "$(stall_litter)" = "$litter_before"
 
+  cd "$previous"
+}
+
+# 宣言した入口でない呼び出しは、成功を保存せず毎回 command を実行する。
+# 外部の状態を観測する command が、repository と環境と argv の一致だけで省かれてはならない。
+check_wrapper_runs_every_time() {
+  local repository=$fixture/runs-every-time external=$fixture/external-state
+  local counter=$fixture/runs-every-time-count status output
+  mkdir "$repository"
+  git init -q "$repository"
+  git -C "$repository" config user.name fixture
+  git -C "$repository" config user.email fixture@example.invalid
+  cat >"$repository/observe.sh" <<'SCRIPT'
+read -r state <"$EXTERNAL_STATE"
+printf 'observed=%s\n' "$state"
+test "$state" = healthy
+SCRIPT
+  git -C "$repository" add observe.sh
+  git -C "$repository" commit -qm initial
+  printf 'healthy\n' >"$external"
+  output=$(cd "$repository" && EXTERNAL_STATE=$external "$VERIFY" -- "$BASH" observe.sh)
+  [ "$output" = observed=healthy ]
+  printf 'unhealthy\n' >"$external"
+  status=0
+  output=$(cd "$repository" && EXTERNAL_STATE=$external "$VERIFY" -- "$BASH" observe.sh) || status=$?
+  if [ "$status" -ne 1 ] || [ "$output" != observed=unhealthy ]; then
+    echo "verify reused a success for a command whose external state changed: $status $output" >&2
+    exit 1
+  fi
+
+  (cd "$repository" && COUNT=$counter "$VERIFY" -- "$fixture/check" first)
+  (cd "$repository" && COUNT=$counter "$VERIFY" -- "$fixture/check" first)
+  test "$(cat "$counter")" = 2
+  status=0
+  (cd "$repository" && COUNT=$counter CHECK_STATUS=7 "$VERIFY" -- "$fixture/check" first) || status=$?
+  test "$status" -eq 7
+  test "$(cat "$counter")" = 3
+
+  # stdin、argv、stdout、stderr、終了 status は command へも呼び出し側へもそのまま届く
+  status=0
+  printf 'input\n' | (cd "$repository" && "$VERIFY" -- "$BASH" -c 'cat; printf "%s|" "$@" >&2; exit 3' _ 'a b' '') \
+    >"$fixture/stdio-stdout" 2>"$fixture/stdio-stderr" || status=$?
+  test "$status" -eq 3
+  test "$(<"$fixture/stdio-stdout")" = input
+  test "$(<"$fixture/stdio-stderr")" = 'a b||'
+
+  # git の外でも、同じ呼び出しを保存した成功で省かない
+  mkdir "$fixture/outside"
+  (cd "$fixture/outside" && COUNT=$fixture/outside-count "$VERIFY" -- "$fixture/check" outside)
+  (cd "$fixture/outside" && COUNT=$fixture/outside-count "$VERIFY" -- "$fixture/check" outside)
+  test "$(cat "$fixture/outside-count")" = 2
+}
+
+# T1 の command の差し替え。slot は制御 file が許すまで走り続け、pass は何もせず、mutate は木を触る
+slot_bin=$fixture/slot-bin
+pass_bin=$fixture/pass-bin
+mutate_bin=$fixture/mutate-bin
+
+slot_commands() {
+  mkdir -p "$slot_bin" "$pass_bin" "$mutate_bin"
+  export PASS_LOG=$fixture/pass-log
+  : >>"$PASS_LOG"
+  cat >"$slot_bin/devenv" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'start %s %s\n' "$SLOT_NAME" "$(<tracked)" >>"$SLOT_LOG"
+printf '%s\n' "$$" >"$SLOT_DIR/$SLOT_NAME.pid"
+: >"$SLOT_DIR/$SLOT_NAME.started"
+while [ ! -e "$SLOT_DIR/$SLOT_NAME.release" ]; do
+  sleep 0.05
+done
+printf 'end %s\n' "$SLOT_NAME" >>"$SLOT_LOG"
+exit "$(cat "$SLOT_DIR/$SLOT_NAME.status" 2>/dev/null || printf 0)"
+SCRIPT
+  cat >"$pass_bin/devenv" <<'SCRIPT'
+#!/usr/bin/env bash
+printf 'run\n' >>"$PASS_LOG"
+SCRIPT
+  cat >"$mutate_bin/devenv" <<'SCRIPT'
+#!/usr/bin/env bash
+case $MUTATE in
+content) printf 'changed\n' >tracked ;;
+touch) touch tracked ;;
+artifact) printf 'output\n' >artifact ;;
+layout) mkdir -p sub/.layout ;;
+esac
+SCRIPT
+  chmod +x "$slot_bin/devenv" "$pass_bin/devenv" "$mutate_bin/devenv"
+  sed -i "1c#!$BASH" "$slot_bin/devenv" "$pass_bin/devenv" "$mutate_bin/devenv"
+}
+
+# 引数 $1: 場面の名前、$2: その repository の T1 の予算秒
+# 制御 directory と、tracked file を持つ T1 の repository を作り、その根へ移る
+slot_prepare() {
+  slot_repo=$fixture/slot-$1
+  slot_dir=$fixture/slot-$1-control
+  slot_log=$slot_dir/log
+  mkdir -p "$slot_dir"
+  : >"$slot_log"
+  t1_repository "$slot_repo" "$2"
+  printf 'original\n' >"$slot_repo/tracked"
+  git -C "$slot_repo" add tracked
+  git -C "$slot_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm tracked
+  slot_file=$("$GATE" slot --repo "$slot_repo")
+  cd "$slot_repo"
+}
+
+# 引数 $1: 走行の名前。制御 file の名にも使う。PID は slot_pid へ置く
+slot_start() {
+  SLOT_NAME=$1 SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
+    "$VERIFY" -- devenv shell -- verify 2>"$slot_dir/$1.stderr" &
+  slot_pid=$!
+}
+
+slot_await() {
+  local _
+  for _ in $(seq 1 400); do
+    [ ! -e "$1" ] || return 0
+    sleep 0.05
+  done
+  echo "timed out waiting for $1" >&2
+  exit 1
+}
+
+slot_await_waiting() {
+  local _
+  for _ in $(seq 1 400); do
+    if [ -s "$slot_dir/$1.stderr" ] && [[ $(<"$slot_dir/$1.stderr") == *実行枠* ]]; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "T1 $1 never reported that it waits for the slot" >&2
+  exit 1
+}
+
+slot_finish() {
+  slot_status=0
+  wait "$1" || slot_status=$?
+}
+
+slot_expect_free() {
+  if ! flock -n "$slot_file" true; then
+    echo "the slot is still held after $1" >&2
+    exit 1
+  fi
+}
+
+# agent session が launcher の証明付きで割り当てた scratch を作る。名前は slot_session_tmp へ置く
+slot_session() {
+  local sessions=$home/.cache/dotfiles-wsl/sessions
+  slot_session_id=fixture-slot-$1.omp.4300.AbCd1234
+  slot_session_tmp=$sessions/$slot_session_id/tmp
+  mkdir -p "$slot_session_tmp"
+  session_metadata "$slot_session_id" 1 >"$sessions/$slot_session_id/metadata.json"
+}
+
+# 同じ project の T1 は枠の中で一度に一つだけ走り、待った走行も自分の command を実行する
+check_slot_exclusive() {
+  local first second
+  slot_prepare exclusive 60
+  slot_start first
+  first=$slot_pid
+  slot_await "$slot_dir/first.started"
+  slot_start second
+  second=$slot_pid
+  slot_await_waiting second
+  sleep 0.3
+  if [ -e "$slot_dir/second.started" ]; then
+    echo 'a second T1 of the same project ran its command while the first one held the slot' >&2
+    exit 1
+  fi
+  : >"$slot_dir/first.release"
+  slot_finish "$first"
+  test "$slot_status" -eq 0
+  slot_await "$slot_dir/second.started"
+  : >"$slot_dir/second.release"
+  slot_finish "$second"
+  test "$slot_status" -eq 0
+  test "$(<"$slot_log")" = $'start first original\nend first\nstart second original\nend second'
+  expect_open_gate "$slot_repo" 'serialized runs'
+  slot_expect_free 'both T1 runs'
+}
+
+# 枠を待つ走行を取消しても、待った走行は command を実行せず何も残さず、枠を持つ走行へ影響しない
+check_slot_waiter_cancel() {
+  local first second litter
+  slot_prepare waiter-cancel 60
+  slot_start first
+  first=$slot_pid
+  slot_await "$slot_dir/first.started"
+  litter=$(stall_litter)
+  slot_start second
+  second=$slot_pid
+  slot_await_waiting second
+  kill -TERM "$second"
+  slot_finish "$second"
+  test "$slot_status" -ne 0
+  test ! -e "$slot_dir/second.started"
+  test "$(stall_litter)" = "$litter"
+  : >"$slot_dir/first.release"
+  slot_finish "$first"
+  test "$slot_status" -eq 0
+  test "$(<"$slot_log")" = $'start first original\nend first'
+  expect_open_gate "$slot_repo" 'holder after a cancelled waiter'
+  slot_expect_free 'a cancelled waiter'
+}
+
+# 先行の失敗は、待った走行の結果にも成功の根拠にもならない。待った走行が自分の command を実行する
+check_slot_producer_failure() {
+  local first second receipts
+  slot_prepare producer-failure 60
+  receipts=$(stall_receipt_count)
+  slot_start first
+  first=$slot_pid
+  slot_await "$slot_dir/first.started"
+  slot_start second
+  second=$slot_pid
+  slot_await_waiting second
+  printf '7\n' >"$slot_dir/first.status"
+  : >"$slot_dir/first.release"
+  slot_finish "$first"
+  test "$slot_status" -eq 7
+  slot_await "$slot_dir/second.started"
+  expect_closed_gate "$slot_repo" 'failed holder while the waiter runs'
+  : >"$slot_dir/second.release"
+  slot_finish "$second"
+  test "$slot_status" -eq 0
+  test "$(<"$slot_log")" = $'start first original\nend first\nstart second original\nend second'
+  test "$(stall_receipt_count)" = "$((receipts + 1))"
+  expect_open_gate "$slot_repo" 'waiter after a failed holder'
+}
+
+# 枠を待つ間に木が変わっても、待った走行は変わった木を実行して証跡もその木へ結ぶ。先行の証跡は借りない
+check_slot_source_edit_while_waiting() {
+  local first second receipts
+  slot_prepare source-edit 60
+  receipts=$(stall_receipt_count)
+  slot_start first
+  first=$slot_pid
+  slot_await "$slot_dir/first.started"
+  slot_start second
+  second=$slot_pid
+  slot_await_waiting second
+  printf 'edited\n' >"$slot_repo/tracked"
+  : >"$slot_dir/first.release"
+  slot_finish "$first"
+  test "$slot_status" -eq 0
+  [[ $(<"$slot_dir/first.stderr") == *木が変わった* ]]
+  test "$(stall_receipt_count)" = "$receipts"
+  slot_await "$slot_dir/second.started"
+  : >"$slot_dir/second.release"
+  slot_finish "$second"
+  test "$slot_status" -eq 0
+  test "$(<"$slot_log")" = $'start first original\nend first\nstart second edited\nend second'
+  expect_open_gate "$slot_repo" 'edited tree that the waiter ran'
+  git -C "$slot_repo" checkout -q -- tracked
+  expect_closed_gate "$slot_repo" 'original tree that no run verified'
+}
+
+# 枠の待ちは走行の予算に含まれる。予算を使い切った走行は command を実行せず、何も残さない
+check_slot_waiter_deadline() {
+  local holder status litter started _
+  slot_prepare waiter-deadline 3
+  "$BASH" -c 'exec {fd}>>"$1"; flock -x "$fd"; exec sleep 120' _ "$slot_file" &
+  holder=$!
+  for _ in $(seq 1 400); do
+    if ! flock -n "$slot_file" true; then break; fi
+    sleep 0.05
+  done
+  if flock -n "$slot_file" true; then
+    echo 'the native holder never took the slot' >&2
+    exit 1
+  fi
+  litter=$(stall_litter)
+  started=$SECONDS
+  status=0
+  SLOT_NAME=waiter SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
+    "$VERIFY" -- devenv shell -- verify 2>"$slot_dir/waiter.stderr" || status=$?
+  test "$status" -eq 124
+  test "$((SECONDS - started))" -lt 30
+  test ! -e "$slot_dir/waiter.started"
+  [[ $(<"$slot_dir/waiter.stderr") == *予算* ]]
+  test "$(stall_litter)" = "$litter"
+  expect_closed_gate "$slot_repo" 'run that waited out its budget'
+  kill "$holder"
+  wait "$holder" || true
+  : >"$slot_dir/retry.release"
+  SLOT_NAME=retry SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
+    "$VERIFY" -- devenv shell -- verify
+  expect_open_gate "$slot_repo" 'run after the holder released the slot'
+}
+
+# 走行の取消は、枠と木の外の一時 file と仮の控えを残さない。session の scratch も空に戻る
+check_slot_cancel_cleanup() {
+  local litter
+  local -x DOTFILES_AGENT_SESSION_ID TMPDIR
+  slot_prepare cancel-cleanup 60
+  slot_session cancel-cleanup
+  DOTFILES_AGENT_SESSION_ID=$slot_session_id
+  TMPDIR=$slot_session_tmp
+  litter=$(stall_litter)
+  slot_start running
+  slot_await "$slot_dir/running.started"
+  kill -TERM "$slot_pid"
+  slot_finish "$slot_pid"
+  test "$slot_status" -ne 0
+  if process_alive "$(<"$slot_dir/running.pid")"; then
+    echo 'a cancelled T1 returned while its command was still running' >&2
+    exit 1
+  fi
+  slot_expect_free 'a cancelled T1'
+  test "$(stall_litter)" = "$litter"
+  test -z "$(find "$slot_session_tmp" -mindepth 1 -print -quit)"
+  expect_closed_gate "$slot_repo" 'cancelled run'
+}
+
+# 呼び出し元が死んでも、枠は command の子孫が消えるまで残り、残った仮の控えは次の走行が捨てる
+check_slot_parent_death() {
+  local litter stale _
+  slot_prepare parent-death 60
+  litter=$(stall_litter)
+  slot_start orphaned
+  slot_await "$slot_dir/orphaned.started"
+  kill -KILL "$slot_pid"
+  slot_finish "$slot_pid"
+  for _ in $(seq 1 400); do
+    process_alive "$(<"$slot_dir/orphaned.pid")" || break
+    sleep 0.05
+  done
+  if process_alive "$(<"$slot_dir/orphaned.pid")"; then
+    echo 'the command outlived its killed caller' >&2
+    exit 1
+  fi
+  for _ in $(seq 1 400); do
+    ! flock -n "$slot_file" true || break
+    sleep 0.05
+  done
+  slot_expect_free 'the killed caller'
+  stale=$(find "$home/.cache/dotfiles-wsl/verification" -name '.pending.*' -print -quit)
+  if [ -z "$stale" ]; then
+    echo 'the killed caller left no pending receipt, so the next run has nothing to reap' >&2
+    exit 1
+  fi
+  : >"$slot_dir/next.release"
+  slot_start next
+  slot_finish "$slot_pid"
+  test "$slot_status" -eq 0
+  test "$(stall_litter)" = "$litter"
+  expect_open_gate "$slot_repo" 'run after the killed caller'
+}
+
+# 引数 $1: repository、$2: 説明。command は成功し、証跡は作られない
+slot_pass_refused() {
+  local status=0
+  PATH="$pass_bin:$PATH" "$VERIFY" -- devenv shell -- verify 2>"$fixture/refusal.stderr" || status=$?
+  test "$status" -eq 0
+  [[ $(<"$fixture/refusal.stderr") == *証跡を作らない* ]]
+  expect_closed_gate "$1" "$2"
+}
+
+# 走行の間に木が触られた、または照合できない木へは証跡を作らない。command の成功は変えない
+check_slot_refusals() {
+  local repository=$fixture/refusal mutation status receipts
+  t1_repository "$repository" 60
+  printf 'original\n' >"$repository/tracked"
+  git -C "$repository" add tracked
+  git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm tracked
+  cd "$repository"
+  receipts=$(stall_receipt_count)
+  for mutation in content touch artifact; do
+    status=0
+    MUTATE=$mutation PATH="$mutate_bin:$PATH" "$VERIFY" -- devenv shell -- verify \
+      2>"$fixture/refusal-$mutation.stderr" || status=$?
+    test "$status" -eq 0
+    [[ $(<"$fixture/refusal-$mutation.stderr") == *木が変わった* ]]
+    expect_closed_gate "$repository" "tree touched by T1 ($mutation)"
+    test "$(stall_receipt_count)" = "$receipts"
+    git -C "$repository" checkout -q -- tracked
+    rm -f "$repository/artifact"
+    expect_closed_gate "$repository" "restored tree after T1 ($mutation)"
+  done
+  MUTATE=none PATH="$mutate_bin:$PATH" "$VERIFY" -- devenv shell -- verify
+  expect_open_gate "$repository" 'T1 that left the tree alone'
+
+  # 汚れた gitlink、変更検出を偽る印、.git の無い gitlink は照合できない。gitlink の配置は照合値へ入らない
+  repository=$fixture/refusal-gitlink
+  t1_repository "$repository" 60
+  git -C "$repository" -c protocol.file.allow=always submodule add -q "$submodule_repo" sub
+  git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm submodule
+  cd "$repository"
+  printf 'dirty\n' >"$repository/sub/untracked"
+  slot_pass_refused "$repository" 'untracked file in a gitlink'
+  rm "$repository/sub/untracked"
+  git -C "$repository/sub" update-index --assume-unchanged tracked
+  printf 'changed\n' >"$repository/sub/tracked"
+  slot_pass_refused "$repository" 'assume-unchanged content in a gitlink'
+  git -C "$repository/sub" update-index --no-assume-unchanged tracked
+  git -C "$repository/sub" checkout -q -- tracked
+  mv "$repository/sub/.git" "$fixture/refusal-sub-dotgit"
+  slot_pass_refused "$repository" 'gitlink without its own repository'
+  mv "$fixture/refusal-sub-dotgit" "$repository/sub/.git"
+  MUTATE=layout PATH="$mutate_bin:$PATH" "$VERIFY" -- devenv shell -- verify
+  expect_open_gate "$repository" 'clean gitlink whose directory layout changed during T1'
+}
+
+# 一時 file が検査する木の中へ入る TMPDIR は、symlink 越しでも証跡を作らない。空の TMPDIR は未指定と同じである
+check_slot_tmpdir() {
+  local repository=$fixture/tmpdir status tmpdir
+  t1_repository "$repository" 60
+  mkdir "$repository/scratch"
+  ln -s "$repository/scratch" "$fixture/tmpdir-link"
+  cd "$repository"
+  for tmpdir in "$repository/scratch" "$fixture/tmpdir-link"; do
+    status=0
+    TMPDIR=$tmpdir PATH="$pass_bin:$PATH" "$VERIFY" -- devenv shell -- verify \
+      2>"$fixture/tmpdir.stderr" || status=$?
+    test "$status" -eq 0
+    [[ $(<"$fixture/tmpdir.stderr") == *TMPDIR* ]]
+    expect_closed_gate "$repository" "TMPDIR $tmpdir inside the tree"
+  done
+  TMPDIR='' PATH="$pass_bin:$PATH" "$VERIFY" -- devenv shell -- verify
+  expect_open_gate "$repository" 'empty TMPDIR'
+}
+
+# 検証の状態は自分だけが書ける実 directory に直し、symlink や他人の directory へは控えも枠も置かず command も実行しない
+check_slot_state_directories() {
+  local repository=$fixture/state-directories state foreign=$fixture/foreign-state status runs
+  t1_repository "$repository" 60
+  cd "$repository"
+  mkdir -p "$home/.cache/dotfiles-wsl/verification"
+  chmod 0777 "$home/.cache/dotfiles-wsl" "$home/.cache/dotfiles-wsl/verification"
+  PATH="$pass_bin:$PATH" "$VERIFY" -- devenv shell -- verify
+  state=$(dirname "$("$GATE" slot --repo "$repository")")
+  test "$(stat -c %a "$home/.cache/dotfiles-wsl")" = 700
+  test "$(stat -c %a "$home/.cache/dotfiles-wsl/verification")" = 700
+  test "$(stat -c %a "$state")" = 700
+  test "$(stat -c %a "$state/run.lock")" = 600
+  rm -rf "$state"
+  mkdir "$foreign"
+  ln -s "$foreign" "$state"
+  runs=$(wc -l <"$PASS_LOG")
+  status=0
+  PATH="$pass_bin:$PATH" "$VERIFY" -- devenv shell -- verify 2>"$fixture/state-symlink.stderr" || status=$?
+  test "$status" -ne 0
+  test "$(wc -l <"$PASS_LOG")" -eq "$runs"
+  test -z "$(find "$foreign" -mindepth 1 -print -quit)"
+  rm "$state"
+}
+
+check_verification_slot() {
+  local previous=$PWD
+  slot_commands
+  check_slot_exclusive
+  check_slot_waiter_cancel
+  check_slot_producer_failure
+  check_slot_source_edit_while_waiting
+  check_slot_waiter_deadline
+  check_slot_cancel_cleanup
+  check_slot_parent_death
+  check_slot_refusals
+  check_slot_tmpdir
+  check_slot_state_directories
   cd "$previous"
 }
 
@@ -931,42 +1394,13 @@ if [ "${1-}" = --skills-only ]; then
   check_large_read_proof
   exit 0
 fi
-mkdir -p "$home" "$repo" "$gitlink_repo" "$nested_gitlink_repo"
-git -C "$nested_gitlink_repo" init -q
-git -C "$nested_gitlink_repo" config user.name fixture
-git -C "$nested_gitlink_repo" config user.email fixture@example.invalid
-printf 'nested\n' >"$nested_gitlink_repo/tracked"
-git -C "$nested_gitlink_repo" add tracked
-git -C "$nested_gitlink_repo" commit -qm initial
-git -C "$gitlink_repo" init -q
-git -C "$gitlink_repo" config user.name fixture
-git -C "$gitlink_repo" config user.email fixture@example.invalid
-printf 'gitlink\n' >"$gitlink_repo/tracked"
-printf 'gitlink missing\n' >"$gitlink_repo/tracked-missing"
-printf 'gitlink special\n' >"$gitlink_repo/tracked-special"
-printf 'target one\n' >"$gitlink_repo/link-target-one"
-printf 'target two\n' >"$gitlink_repo/link-target-two"
-ln -s link-target-one "$gitlink_repo/tracked-link"
-printf '.layout/\n' >"$gitlink_repo/.gitignore"
-git -C "$gitlink_repo" add tracked tracked-missing tracked-special link-target-one \
-  link-target-two tracked-link .gitignore
-git -C "$gitlink_repo" commit -qm initial
-git -C "$gitlink_repo" -c protocol.file.allow=always submodule add -q \
-  "$nested_gitlink_repo" nested
-git -C "$gitlink_repo" commit -qam nested
-git -C "$repo" init -q
-git -C "$repo" config user.name fixture
-git -C "$repo" config user.email fixture@example.invalid
-printf 'tracked\n' > "$repo/tracked"
-printf 'tracked missing\n' > "$repo/tracked-missing"
-printf 'tracked special\n' > "$repo/tracked-special"
-printf 'link target one\n' > "$repo/link-target-one"
-printf 'link target two\n' > "$repo/link-target-two"
-ln -s link-target-one "$repo/tracked-link"
-printf 'ignored\n' > "$repo/.gitignore"
-git -C "$repo" add tracked tracked-missing tracked-special link-target-one link-target-two \
-  tracked-link .gitignore
-git -C "$repo" commit -qm initial
+mkdir -p "$home" "$submodule_repo"
+git -C "$submodule_repo" init -q
+git -C "$submodule_repo" config user.name fixture
+git -C "$submodule_repo" config user.email fixture@example.invalid
+printf 'nested\n' >"$submodule_repo/tracked"
+git -C "$submodule_repo" add tracked
+git -C "$submodule_repo" commit -qm initial
 
 cat > "$fixture/check" <<'SCRIPT'
 #!/usr/bin/env bash
@@ -980,364 +1414,7 @@ chmod +x "$fixture/check"
 sed -i "1c#!$BASH" "$fixture/check"
 
 export HOME=$home
-export COUNT=$fixture/count
 mkdir -p "$HOME/.cache/dotfiles-wsl/verification"
-chmod 0777 "$HOME/.cache/dotfiles-wsl" "$HOME/.cache/dotfiles-wsl/verification"
-cd "$repo"
-
-cat > "$fixture/environment-check" <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-count=0
-test ! -e "$ENV_COUNT" || count=$(cat "$ENV_COUNT")
-printf '%s\n' "$((count + 1))" > "$ENV_COUNT"
-test "${DOTFILES_ARBITRARY_INPUT-}" != fail || exit 42
-SCRIPT
-chmod +x "$fixture/environment-check"
-sed -i "1c#!$BASH" "$fixture/environment-check"
-export ENV_COUNT=$fixture/environment-count
-
-DOTFILES_ARBITRARY_INPUT=pass "$VERIFY" -- "$fixture/environment-check"
-set +e
-DOTFILES_ARBITRARY_INPUT=fail "$VERIFY" -- "$fixture/environment-check"
-environment_status=$?
-set -e
-if [ "$environment_status" -ne 42 ]; then
-  echo 'verify reused success after arbitrary environment changed' >&2
-  exit 1
-fi
-test "$(cat "$ENV_COUNT")" = 2
-project_state=$(find "$HOME/.cache/dotfiles-wsl/verification" -mindepth 1 -maxdepth 1 -type d)
-success_file=$(find "$project_state" -type f -name '*.success' -print -quit)
-chmod 0666 "$success_file"
-DOTFILES_ARBITRARY_INPUT=pass "$VERIFY" -- "$fixture/environment-check"
-test "$(cat "$ENV_COUNT")" = 2
-test "$(stat -c %a "$HOME/.cache/dotfiles-wsl")" = 700
-test "$(stat -c %a "$HOME/.cache/dotfiles-wsl/verification")" = 700
-test "$(stat -c %a "$project_state")" = 700
-test "$(stat -c %a "$success_file")" = 600
-
-"$VERIFY" -- "$fixture/check" first
-"$VERIFY" -- "$fixture/check" first
-test "$(cat "$COUNT")" = 1
-
-(
-  dense_repo=$fixture/dense-repo
-  dense_count=$fixture/dense-count
-  special_path=$'末尾\n\t\\name'
-  mkdir "$dense_repo"
-  git -C "$dense_repo" init -q
-  git -C "$dense_repo" config user.name fixture
-  git -C "$dense_repo" config user.email fixture@example.invalid
-  for ((i = 0; i < 513; i++)); do
-    printf 'tracked\n' >"$dense_repo/file-$i"
-  done
-  printf 'special\n' >"$dense_repo/$special_path"
-  git -C "$dense_repo" add --all
-  git -C "$dense_repo" commit -qm initial
-  cd "$dense_repo"
-  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
-  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
-  test "$(cat "$dense_count")" = 1
-  chmod 0444 -- "$special_path"
-  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
-  COUNT=$dense_count "$VERIFY" -- "$fixture/check" dense
-  test "$(cat "$dense_count")" = 2
-)
-
-original_count=$COUNT
-export COUNT=$fixture/mode-count
-"$VERIFY" -- "$fixture/check" mode
-"$VERIFY" -- "$fixture/check" mode
-test "$(cat "$COUNT")" = 1
-chmod 0444 tracked
-"$VERIFY" -- "$fixture/check" mode
-test "$(cat "$COUNT")" = 2
-"$VERIFY" -- "$fixture/check" mode
-test "$(cat "$COUNT")" = 2
-chmod 0644 tracked
-export COUNT=$original_count
-
-export COUNT=$fixture/atomic-rewrite-count
-"$VERIFY" -- "$fixture/check" atomic-rewrite
-"$VERIFY" -- "$fixture/check" atomic-rewrite
-if [ "$(cat "$COUNT")" != 1 ]; then
-  echo 'verify did not cache the initial atomic-rewrite check' >&2
-  exit 1
-fi
-tracked_inode=$(stat -c %i tracked)
-printf 'tracked\n' >"$fixture/tracked-replacement"
-chmod 0644 "$fixture/tracked-replacement"
-mv -T "$fixture/tracked-replacement" tracked
-test "$(stat -c %i tracked)" != "$tracked_inode"
-"$VERIFY" -- "$fixture/check" atomic-rewrite
-"$VERIFY" -- "$fixture/check" atomic-rewrite
-if [ "$(cat "$COUNT")" != 1 ]; then
-  echo 'verify invalidated identical content after an inode-only rewrite' >&2
-  exit 1
-fi
-
-export COUNT=$fixture/symlink-count
-"$VERIFY" -- "$fixture/check" symlink
-"$VERIFY" -- "$fixture/check" symlink
-test "$(cat "$COUNT")" = 1
-ln -sfn link-target-two tracked-link
-"$VERIFY" -- "$fixture/check" symlink
-"$VERIFY" -- "$fixture/check" symlink
-test "$(cat "$COUNT")" = 2
-
-export COUNT=$fixture/missing-count
-"$VERIFY" -- "$fixture/check" missing
-"$VERIFY" -- "$fixture/check" missing
-test "$(cat "$COUNT")" = 1
-rm tracked-missing
-"$VERIFY" -- "$fixture/check" missing
-"$VERIFY" -- "$fixture/check" missing
-if [ "$(cat "$COUNT")" != 2 ]; then
-  echo 'verify did not cache an explicit missing tracked-path state' >&2
-  exit 1
-fi
-printf 'tracked missing\n' > tracked-missing
-
-git -C "$repo" -c protocol.file.allow=always submodule add -q "$gitlink_repo" tracked-gitlink
-git -C "$repo" -c protocol.file.allow=always submodule update -q --init --recursive
-export COUNT=$fixture/gitlink-clean-count
-"$VERIFY" -- "$fixture/check" gitlink
-"$VERIFY" -- "$fixture/check" gitlink
-if [ "$(cat "$COUNT")" != 1 ]; then
-  echo 'verify did not cache a clean gitlink state' >&2
-  exit 1
-fi
-
-export COUNT=$fixture/gitlink-assume-unchanged-count
-"$VERIFY" -- "$fixture/check" gitlink-assume-unchanged
-"$VERIFY" -- "$fixture/check" gitlink-assume-unchanged
-test "$(cat "$COUNT")" = 1
-git -C tracked-gitlink update-index --assume-unchanged tracked
-printf 'changed\n' >tracked-gitlink/tracked
-"$VERIFY" -- "$fixture/check" gitlink-assume-unchanged
-"$VERIFY" -- "$fixture/check" gitlink-assume-unchanged
-printf 'mutated\n' >tracked-gitlink/tracked
-"$VERIFY" -- "$fixture/check" gitlink-assume-unchanged
-"$VERIFY" -- "$fixture/check" gitlink-assume-unchanged
-if [ "$(cat "$COUNT")" != 5 ]; then
-  echo 'verify reused a cache entry for assume-unchanged gitlink content' >&2
-  exit 1
-fi
-git -C tracked-gitlink update-index --no-assume-unchanged tracked
-git -C tracked-gitlink checkout -q -- tracked
-
-export COUNT=$fixture/gitlink-mode-count
-git -C tracked-gitlink config core.fileMode false
-"$VERIFY" -- "$fixture/check" gitlink-mode
-"$VERIFY" -- "$fixture/check" gitlink-mode
-test "$(cat "$COUNT")" = 1
-chmod 0444 tracked-gitlink/tracked
-"$VERIFY" -- "$fixture/check" gitlink-mode
-"$VERIFY" -- "$fixture/check" gitlink-mode
-if [ "$(cat "$COUNT")" != 2 ]; then
-  echo 'verify reused a cache entry for a gitlink mode-only change' >&2
-  exit 1
-fi
-chmod 0644 tracked-gitlink/tracked
-git -C tracked-gitlink config core.fileMode true
-
-export COUNT=$fixture/gitlink-symlink-count
-"$VERIFY" -- "$fixture/check" gitlink-symlink
-"$VERIFY" -- "$fixture/check" gitlink-symlink
-test "$(cat "$COUNT")" = 1
-git -C tracked-gitlink update-index --assume-unchanged tracked-link
-ln -sfn link-target-two tracked-gitlink/tracked-link
-"$VERIFY" -- "$fixture/check" gitlink-symlink
-"$VERIFY" -- "$fixture/check" gitlink-symlink
-if [ "$(cat "$COUNT")" != 3 ]; then
-  echo 'verify reused a cache entry for an assume-unchanged gitlink symlink' >&2
-  exit 1
-fi
-git -C tracked-gitlink update-index --no-assume-unchanged tracked-link
-git -C tracked-gitlink checkout -q -- tracked-link
-
-export COUNT=$fixture/gitlink-skip-missing-count
-"$VERIFY" -- "$fixture/check" gitlink-skip-missing
-"$VERIFY" -- "$fixture/check" gitlink-skip-missing
-test "$(cat "$COUNT")" = 1
-git -C tracked-gitlink update-index --skip-worktree tracked-missing
-rm tracked-gitlink/tracked-missing
-"$VERIFY" -- "$fixture/check" gitlink-skip-missing
-"$VERIFY" -- "$fixture/check" gitlink-skip-missing
-if [ "$(cat "$COUNT")" != 3 ]; then
-  echo 'verify reused a cache entry for a missing skip-worktree gitlink path' >&2
-  exit 1
-fi
-git -C tracked-gitlink update-index --no-skip-worktree tracked-missing
-git -C tracked-gitlink checkout -q -- tracked-missing
-
-export COUNT=$fixture/gitlink-special-count
-"$VERIFY" -- "$fixture/check" gitlink-special
-"$VERIFY" -- "$fixture/check" gitlink-special
-test "$(cat "$COUNT")" = 1
-git -C tracked-gitlink update-index --assume-unchanged tracked-special
-rm tracked-gitlink/tracked-special
-mkdir tracked-gitlink/tracked-special
-"$VERIFY" -- "$fixture/check" gitlink-special
-"$VERIFY" -- "$fixture/check" gitlink-special
-if [ "$(cat "$COUNT")" != 3 ]; then
-  echo 'verify cached an unverifiable special gitlink path' >&2
-  exit 1
-fi
-rmdir tracked-gitlink/tracked-special
-git -C tracked-gitlink update-index --no-assume-unchanged tracked-special
-git -C tracked-gitlink checkout -q -- tracked-special
-
-export COUNT=$fixture/gitlink-stage-conflict-count
-"$VERIFY" -- "$fixture/check" gitlink-stage-conflict
-"$VERIFY" -- "$fixture/check" gitlink-stage-conflict
-test "$(cat "$COUNT")" = 1
-gitlink_stage_oid=$(git -C tracked-gitlink rev-parse HEAD:tracked-special)
-gitlink_zero_oid=${gitlink_stage_oid//?/0}
-test "${#gitlink_zero_oid}" -eq "${#gitlink_stage_oid}"
-{
-  printf '0 %s\ttracked-special\n' "$gitlink_zero_oid"
-  printf '100644 %s 1\ttracked-special\n' "$gitlink_stage_oid"
-  printf '100644 %s 2\ttracked-special\n' "$gitlink_stage_oid"
-  printf '100644 %s 3\ttracked-special\n' "$gitlink_stage_oid"
-} | git -C tracked-gitlink update-index --index-info
-"$VERIFY" -- "$fixture/check" gitlink-stage-conflict
-"$VERIFY" -- "$fixture/check" gitlink-stage-conflict
-if [ "$(cat "$COUNT")" != 3 ]; then
-  echo 'verify cached an unmerged gitlink index' >&2
-  exit 1
-fi
-git -C tracked-gitlink reset -q HEAD -- tracked-special
-
-export COUNT=$fixture/gitlink-nested-count
-"$VERIFY" -- "$fixture/check" gitlink-nested
-"$VERIFY" -- "$fixture/check" gitlink-nested
-test "$(cat "$COUNT")" = 1
-git -C tracked-gitlink/nested update-index --assume-unchanged tracked
-printf 'mutate\n' >tracked-gitlink/nested/tracked
-"$VERIFY" -- "$fixture/check" gitlink-nested
-"$VERIFY" -- "$fixture/check" gitlink-nested
-if [ "$(cat "$COUNT")" != 3 ]; then
-  echo 'verify reused a cache entry for nested gitlink content' >&2
-  exit 1
-fi
-git -C tracked-gitlink/nested update-index --no-assume-unchanged tracked
-git -C tracked-gitlink/nested checkout -q -- tracked
-
-export COUNT=$fixture/gitlink-tracked-dirty-count
-printf 'changed\n' >tracked-gitlink/tracked
-"$VERIFY" -- "$fixture/check" gitlink-tracked-dirty
-"$VERIFY" -- "$fixture/check" gitlink-tracked-dirty
-printf 'mutated\n' >tracked-gitlink/tracked
-"$VERIFY" -- "$fixture/check" gitlink-tracked-dirty
-"$VERIFY" -- "$fixture/check" gitlink-tracked-dirty
-if [ "$(cat "$COUNT")" != 4 ]; then
-  echo 'verify reused a cache entry for dirty gitlink content' >&2
-  exit 1
-fi
-git -C tracked-gitlink checkout -q -- tracked
-
-export COUNT=$fixture/gitlink-untracked-dirty-count
-printf 'untracked\n' >tracked-gitlink/untracked
-"$VERIFY" -- "$fixture/check" gitlink-untracked-dirty
-"$VERIFY" -- "$fixture/check" gitlink-untracked-dirty
-if [ "$(cat "$COUNT")" != 2 ]; then
-  echo 'verify reused a cache entry for an untracked-dirty gitlink' >&2
-  exit 1
-fi
-rm tracked-gitlink/untracked
-
-export COUNT=$fixture/gitlink-unverifiable-count
-mv tracked-gitlink/.git "$fixture/tracked-gitlink-dotgit"
-"$VERIFY" -- "$fixture/check" gitlink-unverifiable
-"$VERIFY" -- "$fixture/check" gitlink-unverifiable
-if [ "$(cat "$COUNT")" != 2 ]; then
-  echo 'verify reused a cache entry for an unverifiable gitlink' >&2
-  exit 1
-fi
-mv "$fixture/tracked-gitlink-dotgit" tracked-gitlink/.git
-
-export COUNT=$fixture/gitlink-layout-count
-"$VERIFY" -- "$fixture/check" gitlink-layout
-"$VERIFY" -- "$fixture/check" gitlink-layout
-test "$(cat "$COUNT")" = 1
-mkdir tracked-gitlink/.layout
-"$VERIFY" -- "$fixture/check" gitlink-layout
-"$VERIFY" -- "$fixture/check" gitlink-layout
-if [ "$(cat "$COUNT")" != 1 ]; then
-  echo 'verify fingerprint depended on gitlink directory layout metadata' >&2
-  exit 1
-fi
-
-export COUNT=$fixture/special-count
-"$VERIFY" -- "$fixture/check" special
-"$VERIFY" -- "$fixture/check" special
-test "$(cat "$COUNT")" = 1
-rm tracked-special
-mkdir tracked-special
-"$VERIFY" -- "$fixture/check" special
-"$VERIFY" -- "$fixture/check" special
-test "$(cat "$COUNT")" = 3
-rm -r tracked-special
-printf 'tracked special\n' > tracked-special
-export COUNT=$original_count
-
-printf 'dirty\n' >> tracked
-"$VERIFY" -- "$fixture/check" first
-test "$(cat "$COUNT")" = 2
-
-printf 'untracked-1\n' > new-file
-"$VERIFY" -- "$fixture/check" first
-test "$(cat "$COUNT")" = 3
-printf 'untracked-2\n' > new-file
-"$VERIFY" -- "$fixture/check" first
-test "$(cat "$COUNT")" = 4
-
-printf 'ignored-change\n' > ignored
-"$VERIFY" -- "$fixture/check" first
-test "$(cat "$COUNT")" = 4
-
-RUSTFLAGS=-Cdebuginfo=0 "$VERIFY" -- "$fixture/check" first
-test "$(cat "$COUNT")" = 5
-"$VERIFY" -- "$fixture/check" second
-test "$(cat "$COUNT")" = 6
-
-set +e
-CHECK_STATUS=7 "$VERIFY" -- "$fixture/check" failure
-first_failure=$?
-CHECK_STATUS=7 "$VERIFY" -- "$fixture/check" failure
-second_failure=$?
-set -e
-test "$first_failure" -eq 7
-test "$second_failure" -eq 7
-test "$(cat "$COUNT")" = 8
-
-printf 'new head\n' > committed
-git add committed
-git commit -qm second
-"$VERIFY" -- "$fixture/check" first
-test "$(cat "$COUNT")" = 9
-
-cat > "$fixture/mutating-check" <<'SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-count=0
-test ! -e "$MUTATE_COUNT" || count=$(cat "$MUTATE_COUNT")
-printf '%s\n' "$((count + 1))" > "$MUTATE_COUNT"
-printf 'stable result\n' > tracked
-SCRIPT
-chmod +x "$fixture/mutating-check"
-sed -i "1c#!$BASH" "$fixture/mutating-check"
-export MUTATE_COUNT=$fixture/mutate-count
-"$VERIFY" -- "$fixture/mutating-check"
-"$VERIFY" -- "$fixture/mutating-check"
-"$VERIFY" -- "$fixture/mutating-check"
-test "$(cat "$MUTATE_COUNT")" = 2
-
-test -n "$(find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.success' -print -quit)"
-test -z "$(find "$home/.cache/dotfiles-wsl/verification" -type f \
-  ! -name '*.success' ! -name '*.verified' ! -name '*.waived' -print -quit)"
 
 # 門は、入口を宣言する repository でだけ「通っていない」と答える。
 # 宣言が無ければ何も要求しない。
@@ -1647,13 +1724,15 @@ SCRIPT
 chmod +x "$fixture/nix-observer-bin/nix"
 sed -i "1c#!$BASH" "$fixture/nix-observer-bin/nix"
 rm -f "$fixture/stalled-nix.processes"
-# 外側 guard の既定の124は wrapper の期限終了と混同するため不可
+# 外側 guard の取消を wrapper の期限と混同するため、終了statusだけの判定は不可
+started=$SECONDS
 PATH="$fixture/nix-observer-bin:$PATH" OBSERVED_NIX=$real_nix \
   OBSERVED_NIX_PROCESSES=$fixture/stalled-nix.processes \
   NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
   timeout --preserve-status 60 "$VERIFY" -- nix run --no-write-lock-file .#verify || status=$?
-if [ "$status" -ne 124 ]; then
-  echo "T1 over a stalled Nix declaration exited $status instead of stopping at its budget" >&2
+elapsed=$((SECONDS - started))
+if [ "$status" -eq 0 ] || [ "$elapsed" -lt 1 ] || [ "$elapsed" -ge 60 ]; then
+  echo "T1 over a stalled Nix declaration returned status $status after ${elapsed}s outside its cancellation window" >&2
   exit 1
 fi
 if [ ! -s "$fixture/stalled-nix.processes" ]; then
@@ -1691,10 +1770,6 @@ check_metadata_snapshot_boundary
 
 check_receipt_boundaries
 
+check_wrapper_runs_every_time
 
-outside=$fixture/outside
-mkdir "$outside"
-cd "$outside"
-"$VERIFY" -- "$fixture/check" outside
-"$VERIFY" -- "$fixture/check" outside
-test "$(cat "$COUNT")" = 11
+check_verification_slot

@@ -10,11 +10,39 @@ note() {
   printf 'dotfiles-agent-project-cache-gc: %s\n' "$1" >&2
 }
 
+dry_run=false
+usage() {
+  printf '%s\n' \
+    'usage: dotfiles-agent-project-cache-gc [--dry-run]' \
+    '  no argument: reclaim agent cache by the retention policy' \
+    '  --dry-run:   report on stdout what a run would retire or keep, and change nothing'
+}
+case "$#:${1-}" in
+  0:) ;;
+  1:--dry-run) dry_run=true ;;
+  1:-h | 1:--help)
+    usage
+    exit 0
+    ;;
+  *)
+    usage >&2
+    exit 64
+    ;;
+esac
+
+report() {
+  [ "$dry_run" = false ] || printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5"
+}
+
 validate_managed_directory() {
   local path=$1
   test ! -L "$path" || die "managed path is a symlink: $path"
   test -d "$path" || die "managed path is not a directory: $path"
   test "$(stat -c %u "$path")" = "$uid" || die "managed path has another owner: $path"
+  if [ "$dry_run" = true ]; then
+    test "$(stat -c %a "$path")" = 700 || note "managed directory mode is not 0700 and a run secures it: $path"
+    return
+  fi
   chmod 700 "$path" || die "cannot secure managed directory: $path"
   test "$(stat -c %a "$path")" = 700 || die "managed directory mode is not 0700: $path"
 }
@@ -24,6 +52,10 @@ validate_managed_file() {
   test ! -L "$path" || die "$description is a symlink: $path"
   test -f "$path" || die "$description is not a regular file: $path"
   test "$(stat -c %u "$path")" = "$uid" || die "$description has another owner: $path"
+  if [ "$dry_run" = true ]; then
+    test "$(stat -c %a "$path")" = 600 || note "$description mode is not 0600 and a run secures it: $path"
+    return
+  fi
   chmod 600 "$path" || die "cannot secure $description: $path"
   test "$(stat -c %a "$path")" = 600 || die "$description mode is not 0600: $path"
 }
@@ -102,7 +134,7 @@ session_state() {
   local session_id=$1 metadata=$2 state
   state=$(session_owner_state "$metadata")
   if [ "$state" = orphan ] && [ -d "$slice_cgroup/dotfiles-agent-${session_id#*.}.scope" ]; then
-    state=live
+    state=scope
   fi
   printf '%s\n' "$state"
 }
@@ -148,6 +180,10 @@ validate_shared_cache() {
 
 allocated_bytes() {
   local path=$1 output
+  [ -e "$path" ] || {
+    printf '0\n'
+    return
+  }
   # 計測中に live build が消した file による du の非ゼロ終了の許容。合計が減るだけで削除は増えない
   output=$(du -s -B1 -- "$path" 2>/dev/null) || true
   output=${output%%$'\t'*}
@@ -302,6 +338,23 @@ reclaim_units() {
   local entry=$1 root=$cargo_build_root/$1 trash group index member record kind used_exact bytes key ident
   local -a groups=("${@:2}") moving=()
   local -A current=() current_bytes=() by_directory=() trash_directories=()
+  # lock を持ったままの再走査は実行中の Cargo を待たせるため dry-run の再走査は不可
+  if [ "$dry_run" = true ]; then
+    if ! lock_entry "$root" || entry_runs_executable "$entry"; then
+      unlock_entry
+      busy_entries[$entry]=1
+      report keep cargo-entry - "$root" busy
+      return
+    fi
+    unlock_entry
+    for group in "${groups[@]}"; do
+      finished_groups[$group]=1
+      report retire "cargo-${group_kinds[group]}" "${group_bytes[group]}" "$root#${group_keys[group]}" "${group_reasons[group]}"
+      total_bytes=$((total_bytes - group_bytes[group]))
+      units_left=$((units_left - group_bytes[group]))
+    done
+    return
+  fi
   trash=$(mktemp -d "$trash_root/units.XXXXXXXX") || die "cannot create a trash entry for $root"
   for group in "${groups[@]}"; do
     for ((index = group_first[group]; index < group_first[group] + group_count[group]; index++)); do
@@ -350,12 +403,14 @@ reclaim_units() {
 
 reclaim_groups() {
   local group entry
-  local -a groups
+  local -a groups entries
   local -A by_entry=()
   for group in "$@"; do
     by_entry[${group_entries[group]}]+=" $group"
   done
-  for entry in "${!by_entry[@]}"; do
+  [ "${#by_entry[@]}" -gt 0 ] || return 0
+  mapfile -t entries < <(printf '%s\n' "${!by_entry[@]}" | sort)
+  for entry in "${entries[@]}"; do
     read -r -a groups <<<"${by_entry[$entry]}"
     reclaim_units "$entry" "${groups[@]}"
   done
@@ -365,6 +420,10 @@ reclaim_groups() {
 empty_trash() {
   local entry
   for entry in "$trash_root"/*; do
+    if [ "$dry_run" = true ]; then
+      report retire trash "$(allocated_bytes "$entry")" "$entry" interrupted-removal
+      continue
+    fi
     if ! find -P "$entry" -xdev -type d -uid "$EUID" ! -perm -u=rwx \
       -exec chmod u+rwx -- {} \; \
       || ! rm -rf --one-file-system -- "$entry"; then
@@ -382,6 +441,114 @@ any_session() {
   return 1
 }
 
+# verification-cache は scratch を cwd や fd に持たないため argv の script 名以外での生存判定は不可
+# 戻り値は 0 が生存、1 が不在、2 が判断不能。読めない cmdline は消えた process と自分の uid の process を分ける
+verification_runner_state() {
+  local verdict path pid owner observed unverifiable=false
+  local -a cmdlines=(/proc/[0-9]*/cmdline)
+  if [ "${#cmdlines[@]}" -eq 0 ] || [ ! -r "/proc/$$/cmdline" ]; then
+    return 2
+  fi
+  observed=$(awk -v runner="$verification_runner" '
+    BEGIN { RS = "\0" }
+    BEGINFILE { if (ERRNO != "") { print "unreadable", FILENAME; nextfile } }
+    ENDFILE { if (ERRNO != "") print "unreadable", FILENAME }
+    substr($0, length($0) - length(runner)) == "/" runner { print "alive"; exit }
+  ' "${cmdlines[@]}" </dev/null 2>/dev/null) || return 2
+  while IFS=' ' read -r verdict path; do
+    case $verdict in
+      alive) return 0 ;;
+      unreadable)
+        pid=${path#/proc/}
+        pid=${pid%%/*}
+        if ! owner=$(stat -c %u "/proc/$pid" 2>/dev/null); then
+          [ ! -d "/proc/$pid" ] || unverifiable=true
+          continue
+        fi
+        [ "$owner" != "$uid" ] || unverifiable=true
+        ;;
+    esac
+  done <<<"$observed"
+  [ "$unverifiable" = false ] || return 2
+  return 1
+}
+
+# receipt と waiver と gate の session 記録は再開に使われるため verification root 全体の一括回収は不可
+retire_verification_legacy() {
+  local path record name bytes runner_state
+  local -a scratch=() owned=() candidates=() records=() lines=()
+  [ -e "$verification_root" ] || [ -L "$verification_root" ] || return 0
+  validate_managed_directory "$verification_root"
+
+  find "$verification_root" -mindepth 1 -maxdepth 1 -name '.fingerprint.*' -print0 | sort -z |
+    mapfile -d '' -t scratch || die "cannot enumerate verification scratch: $verification_root"
+  for path in "${scratch[@]}"; do
+    if [ -L "$path" ] || [ ! -d "$path" ] || [ "$(stat -c %u "$path")" != "$uid" ]; then
+      note "verification scratch is not a directory owned by this user: $path"
+      report unresolved verification-scratch - "$path" not-owned-directory
+      unresolved=true
+      continue
+    fi
+    owned+=("$path")
+  done
+  runner_state=1
+  if [ "${#owned[@]}" -gt 0 ]; then
+    # snapshot より前の runner 確認では後から作られた scratch を回収するため不可
+    runner_state=0
+    verification_runner_state || runner_state=$?
+  fi
+  case $runner_state in
+    0)
+      for path in "${owned[@]}"; do
+        report keep verification-scratch - "$path" runner-alive
+      done
+      ;;
+    1)
+      for path in "${owned[@]}"; do
+        if [ "$dry_run" = true ]; then
+          report retire verification-scratch "$(allocated_bytes "$path")" "$path" no-runner
+        elif ! move_to_trash "$trash_root" "$path" verification && { [ -e "$path" ] || [ -L "$path" ]; }; then
+          note "cannot move verification scratch to trash: $path"
+          unresolved=true
+        fi
+      done
+      ;;
+    *)
+      note "cannot tell whether a legacy verification-cache still runs, so its scratch is kept: $verification_root"
+      unresolved=true
+      for path in "${owned[@]}"; do
+        report keep verification-scratch - "$path" runner-unverifiable
+      done
+      ;;
+  esac
+
+  find "$verification_root" -mindepth 2 -maxdepth 2 -type f -uid "$uid" -regextype posix-extended \
+    -regex '.*/[0-9a-f]{64}/[0-9a-f]{64}\.success' -print0 | sort -z |
+    mapfile -d '' -t candidates || die "cannot enumerate verification records: $verification_root"
+  for record in "${candidates[@]}"; do
+    name=${record##*/}
+    name=${name%.success}
+    mapfile -t lines <"$record" || continue
+    if [ "${#lines[@]}" -eq 2 ] && [[ ${lines[0]} =~ ^version=[0-9]+$ ]] && [ "${lines[1]}" = "fingerprint=$name" ]; then
+      records+=("$record")
+    else
+      report keep verification-success - "$record" unrecognized-record
+    fi
+  done
+  [ "${#records[@]}" -gt 0 ] || return 0
+  if [ "$dry_run" = true ]; then
+    bytes=$({ du -s -B1 -- "${records[@]}" 2>/dev/null || true; } | awk '{ sum += $1 } END { print sum + 0 }')
+    report retire verification-success "$bytes" "$verification_root" "legacy-record x${#records[@]}"
+  elif ! printf '%s\0' "${records[@]}" | xargs -0 rm -f --; then
+    note "cannot remove legacy verification records under: $verification_root"
+    unresolved=true
+  fi
+}
+
+report_summary() {
+  report summary cache "$total_bytes" "before=$cache_bytes_before high=$high_bytes low=$low_bytes" "active-sessions=$active_session_count"
+}
+
 high_bytes=${DOTFILES_AGENT_GC_HIGH_BYTES:-@gcHighBytes@}
 low_bytes=${DOTFILES_AGENT_GC_LOW_BYTES:-@gcLowBytes@}
 case "$high_bytes:$low_bytes" in
@@ -391,41 +558,56 @@ test "$low_bytes" -le "$high_bytes" || die 'GC low watermark exceeds high waterm
 
 uid=$(id -u)
 current_boot_id=$(cat /proc/sys/kernel/random/boot_id) || die 'cannot read boot id'
-cgroup_root=${DOTFILES_AGENT_GC_CGROUP_ROOT:-/sys/fs/cgroup}
+cgroup_root=${DOTFILES_AGENT_CGROUP_ROOT:-/sys/fs/cgroup}
 slice_cgroup="$cgroup_root/user.slice/user-$uid.slice/user@$uid.service/@sliceUnit@"
+verification_runner=dotfiles-agent-verification-cache
 
 cache_root="$HOME/@cacheRootRelative@"
 sessions_root="$cache_root/sessions"
 cargo_build_root="$cache_root/cargo-build"
 trash_root="$cache_root/trash"
-mkdir -p "$HOME/.cache"
-for path in "$cache_root" "$sessions_root" "$cargo_build_root" "$trash_root"; do
-  if ! mkdir -m 700 "$path" 2>/dev/null; then
-    validate_managed_directory "$path"
-  fi
-done
-
+verification_root="$cache_root/verification"
+shared_root="$cache_root/shared"
 lock_file="$cache_root/gc.lock"
-if (set -o noclobber; : > "$lock_file") 2>/dev/null; then
-  chmod 600 "$lock_file"
-fi
-validate_managed_file "$lock_file" 'GC lock'
-exec {lock_fd}<>"$lock_file"
 
 unresolved=false
+if [ "$dry_run" = true ]; then
+  for path in "$cache_root" "$sessions_root" "$cargo_build_root" "$trash_root"; do
+    if [ -e "$path" ] || [ -L "$path" ]; then
+      validate_managed_directory "$path"
+    fi
+  done
+else
+  mkdir -p "$HOME/.cache"
+  for path in "$cache_root" "$sessions_root" "$cargo_build_root" "$trash_root"; do
+    if ! mkdir -m 700 "$path" 2>/dev/null; then
+      validate_managed_directory "$path"
+    fi
+  done
+  if (set -o noclobber; : > "$lock_file") 2>/dev/null; then
+    chmod 600 "$lock_file"
+  fi
+  validate_managed_file "$lock_file" 'GC lock'
+  exec {lock_fd}<>"$lock_file"
+fi
+
 empty_trash
 
-# launcher は共有 cache の marker を lock の下で検証するので、作成も lock の下で行う。
-flock -x "$lock_fd"
-shared_root=$(create_shared_cache "$cache_root")
-flock -u "$lock_fd"
+if [ "$dry_run" = false ]; then
+  # launcher は共有 cache の marker を lock の下で検証するので、作成も lock の下で行う。
+  flock -x "$lock_fd"
+  shared_root=$(create_shared_cache "$cache_root")
+  flock -u "$lock_fd"
+fi
 
 declare -A dead_sessions=()
-declare -a unclaimed_sessions=()
+declare -a dead_list=() unclaimed_sessions=() sessions=()
 active_session_count=0
 
-find "$sessions_root" -mindepth 1 -maxdepth 1 -print0 | mapfile -d '' -t sessions \
-  || die 'cannot enumerate agent sessions'
+if [ -d "$sessions_root" ]; then
+  find "$sessions_root" -mindepth 1 -maxdepth 1 -print0 | sort -z | mapfile -d '' -t sessions \
+    || die 'cannot enumerate agent sessions'
+fi
 for session in "${sessions[@]}"; do
   session_id=${session##*/}
   metadata="$session/metadata.json"
@@ -440,18 +622,37 @@ for session in "${sessions[@]}"; do
     # be live. It is kept and blocks the shared cache purge, and the run fails.
     unresolved=true
     note "invalid session metadata: $metadata"
+    report unresolved session - "$session" invalid-metadata
     continue
   fi
-  if [ "$(session_state "$session_id" "$metadata")" = orphan ]; then
+  state=$(session_state "$session_id" "$metadata")
+  if [ "$state" = orphan ]; then
     dead_sessions[$session]=1
+    dead_list+=("$session")
   else
     active_session_count=$((active_session_count + 1))
+    case $state in
+      live) reason='owner-alive' ;;
+      scope) reason='scope-occupied' ;;
+      *) reason='owner-unverifiable' ;;
+    esac
+    report keep session - "$session" "$reason"
   fi
 done
 
 # 持ち主の死んだ session は生き返らない。metadata の無い session は、launcher が
 # lock を解く前に metadata を書くので、lock の下でもまだ無ければ持ち主がいない。
-for session in "${!dead_sessions[@]}" "${unclaimed_sessions[@]}"; do
+# lock を取る観測は launcher の登録を待たせるため dry-run の lock は不可
+for session in "${dead_list[@]}" "${unclaimed_sessions[@]}"; do
+  if [ -n "${dead_sessions[$session]+x}" ]; then
+    reason='owner-dead'
+  else
+    reason=unclaimed
+  fi
+  if [ "$dry_run" = true ]; then
+    report retire session "$(allocated_bytes "$session")" "$session" "$reason"
+    continue
+  fi
   flock -x "$lock_fd"
   if [ ! -L "$session" ] && [ -d "$session" ] &&
     { [ -n "${dead_sessions[$session]+x}" ] ||
@@ -464,22 +665,28 @@ for session in "${!dead_sessions[@]}" "${unclaimed_sessions[@]}"; do
 done
 
 # No cache is removed until every managed root and entry has passed validation.
-validate_shared_cache "$shared_root"
+if [ -e "$shared_root" ] || [ -L "$shared_root" ]; then
+  validate_shared_cache "$shared_root"
+fi
 total_bytes=$(($(allocated_bytes "$shared_root") + $(allocated_bytes "$cargo_build_root")))
-build_root_real=$(realpath -e -- "$cargo_build_root") || die "cannot resolve $cargo_build_root"
+cache_bytes_before=$total_bytes
 
-# noatime では fresh な build の読み込みが atime を動かさず使用が見えないため atime を更新しない mount での unit の回収は不可
 units_judgeable=true
-mount_options=$(findmnt -n -o OPTIONS --target "$cargo_build_root") || mount_options=''
-case ",$mount_options," in
-  ,,|*,noatime,*)
-    note "cannot judge when Cargo units were used: $cargo_build_root does not update atime (mount options: ${mount_options:-unknown})"
-    unresolved=true
-    units_judgeable=false
-    ;;
-esac
+build_root_real=$cargo_build_root
+if [ -d "$cargo_build_root" ]; then
+  build_root_real=$(realpath -e -- "$cargo_build_root") || die "cannot resolve $cargo_build_root"
+  # noatime では fresh な build の読み込みが atime を動かさず使用が見えないため atime を更新しない mount での unit の回収は不可
+  mount_options=$(findmnt -n -o OPTIONS --target "$cargo_build_root") || mount_options=''
+  case ",$mount_options," in
+    ,,|*,noatime,*)
+      note "cannot judge when Cargo units were used: $cargo_build_root does not update atime (mount options: ${mount_options:-unknown})"
+      unresolved=true
+      units_judgeable=false
+      ;;
+  esac
+fi
 
-declare -a group_kinds=() group_used=() group_used_exact=() group_bytes=() group_entries=()
+declare -a group_kinds=() group_used=() group_used_exact=() group_bytes=() group_entries=() group_reasons=()
 declare -a group_keys=() group_idents=() group_first=() group_count=() group_members=()
 declare -a entry_lock_fds=()
 while IFS= read -r -d '' record; do
@@ -517,7 +724,11 @@ declare -a inactive_groups=() pressure_groups=()
 
 for group in "${!group_kinds[@]}"; do
   [ "${group_used[group]}" -lt "$recent_before" ] || continue
-  if [ "${group_kinds[group]}" = orphan ] || [ "${group_used[group]}" -lt "$inactive_before" ]; then
+  if [ "${group_kinds[group]}" = orphan ]; then
+    group_reasons[group]=orphan
+    inactive_groups+=("$group")
+  elif [ "${group_used[group]}" -lt "$inactive_before" ]; then
+    group_reasons[group]=inactive
     inactive_groups+=("$group")
   fi
 done
@@ -530,6 +741,7 @@ if [ "$total_bytes" -gt "$high_bytes" ]; then
     projected_bytes=$total_bytes
     while IFS=' ' read -r _used group; do
       [ "$projected_bytes" -gt "$low_bytes" ] || break
+      group_reasons[group]=pressure
       pressure_groups+=("$group")
       projected_bytes=$((projected_bytes - group_bytes[group]))
     done < <(
@@ -545,34 +757,52 @@ if [ "$total_bytes" -gt "$high_bytes" ]; then
   done
 fi
 
-empty_trash
+retire_verification_legacy
+
+[ "$dry_run" = true ] || empty_trash
 
 if [ "$total_bytes" -gt "$high_bytes" ] && [ "$active_session_count" -eq 0 ]; then
   purged=false
-  flock -x "$lock_fd"
-  if ! any_session; then
-    validate_shared_cache "$shared_root"
-    if ! move_to_trash "$trash_root" "$shared_root/cargo-home" shared ||
-      ! move_to_trash "$trash_root" "$shared_root/xdg-cache" shared; then
-      die "cannot move the shared cache to trash: $shared_root"
+  if [ "$dry_run" = true ]; then
+    if [ -d "$shared_root/cargo-home" ]; then
+      shared_bytes=$(($(allocated_bytes "$shared_root/cargo-home") + $(allocated_bytes "$shared_root/xdg-cache")))
+      report retire shared-cache "$shared_bytes" "$shared_root" over-high-without-session
+      total_bytes=$((total_bytes - shared_bytes))
+      purged=true
     fi
-    mkdir -m 700 "$shared_root/cargo-home" "$shared_root/xdg-cache"
-    validate_shared_cache "$shared_root"
-    purged=true
+  else
+    flock -x "$lock_fd"
+    if ! any_session; then
+      validate_shared_cache "$shared_root"
+      if ! move_to_trash "$trash_root" "$shared_root/cargo-home" shared ||
+        ! move_to_trash "$trash_root" "$shared_root/xdg-cache" shared; then
+        die "cannot move the shared cache to trash: $shared_root"
+      fi
+      mkdir -m 700 "$shared_root/cargo-home" "$shared_root/xdg-cache"
+      validate_shared_cache "$shared_root"
+      purged=true
+    fi
+    flock -u "$lock_fd"
   fi
-  flock -u "$lock_fd"
   if [ "$purged" = true ]; then
-    empty_trash
-    total_bytes=$(($(allocated_bytes "$shared_root") + $(allocated_bytes "$cargo_build_root")))
+    if [ "$dry_run" = false ]; then
+      empty_trash
+      total_bytes=$(($(allocated_bytes "$shared_root") + $(allocated_bytes "$cargo_build_root")))
+    fi
     # 48 時間の保護と lock で見送った unit による超過は時間で解消するため共有 cache を空にした後の上限超過だけでの失敗は不可
-    test "$((total_bytes - units_left))" -le "$high_bytes" \
-      || die "cache content the GC cannot reclaim stays above the high watermark after shared purge"
+    if [ "$((total_bytes - units_left))" -gt "$high_bytes" ]; then
+      report_summary
+      die "cache content the GC cannot reclaim stays above the high watermark after shared purge"
+    fi
   fi
+elif [ "$total_bytes" -gt "$high_bytes" ]; then
+  report keep shared-cache - "$shared_root" active-session
 fi
 
 if [ "$total_bytes" -gt "$high_bytes" ]; then
   note "allocated cache bytes remain above the high watermark: $total_bytes > $high_bytes"
 fi
+report_summary
 
 if [ "$unresolved" = true ]; then
   die 'agent cache entries remain unresolved'

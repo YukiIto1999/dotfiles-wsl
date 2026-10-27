@@ -153,28 +153,34 @@ Orcaが作るworktreeの寿命はOrcaが持つ。
 
 共通のcache方針は、process寿命を持つruntimeではなく[`toolchain/execution/`](../../toolchain/execution)が持つ。managed commandのwrapperは`dotfiles-execution-policy`を一度だけ適用してからlifecycleへ渡し、clientごとのcacheは増やさない。`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Cargoの中間成果物は`CARGO_BUILD_BUILD_DIR`で全sessionが共有する一つのrootの下に置き、`{workspace-path-hash}`でcheckoutごとに分けるので、どのsessionからbuildしても同じcheckoutは同じbuild-dirを使う。最終成果物は各checkoutの`target`に残る。同じworkspaceのcheckoutどうしで中間成果物を共有すると、Cargoが別checkoutのbuildをfreshと判定するため、linked worktreeとも共有しない。利用者が明示した`CARGO_TARGET_DIR`と`CARGO_BUILD_BUILD_DIR`、project固有のCargo`target-dir`と`build-dir`は上書きしない。方針はdirectoryを作らず回収もしない。共有cacheとCargoのbuild root、sessionの台帳を作って検証するのはruntime、容量を回収するのはGCである。`nix build`と`nix-build`が結果linkを作らないshimも同じ方針が`PATH`の先頭へ置く。一時的な写しでbuildするtoolは、写しごとに中間成果物がbuild-dirのrootへ残るため、`CARGO_BUILD_BUILD_DIR`を外して起動する。
 
-`dotfiles-agent-verify`はHEAD、tracked diff、non-ignored untracked content、command、環境からfingerprintを作り、同一fingerprintの成功だけを再利用する。
-fileごとのprocess起動を避けるため、tracked fileのmetadataと内容hashはコマンド行長の上限内でまとめて取得する。
-読み取り前後のmetadataを照合し、gitlinkはその内容まで再帰的に検証する。
-宣言されたT1をrepositoryの根で呼ぶ場合は、入口解決、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は取消を開始して成功として扱わない。
+`dotfiles-agent-verify`は指定したcommandを毎回実行し、sourceや環境が同じでも過去の成功で省略しない。
+外部状態に依存するcommandの成否をwrapperで再利用せず、build成果物の再利用はNixやCargoへ任せる。
+宣言されたT1をrepositoryの根で呼ぶ場合は、Git common directoryを共有するprojectごとに一つの走行slotを取得する。
+排他は新しいwrapper同士に限り、旧wrapperで動くsessionを停止や移動しない。
+入口解決、slot待ち、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は取消を開始して成功として扱わない。
 別sessionへ移った子孫も`supervise --require-drained`で回収し、終了確認まで返らないため、後始末は予算を超えて続くことがある。
 予算はrepositoryの根の`verification-budget.json`の`verify.seconds`を正本とし、wrapperは走行開始後に共通providerの`dotfiles-verify-entry --snapshot verify`で静的な宣言を一度だけ読む。
-予算と入口は同じsnapshotを`--policy FILE`へ渡して解決するため、解決の間に登録を編集してもcanonicalな呼び出しが無期限のlocal cacheへ切り替わることはなく、snapshotの読取時間も走行開始から数える予算に含まれる。
+予算と入口は同じsnapshotを`--policy FILE`へ渡して解決するため、解決の間に登録を編集してもcanonicalな呼び出しが無制限の実行へ切り替わることはなく、snapshotの読取時間も走行開始から数える予算に含まれる。
 走行中に宣言を書き換えても、その走行の期限は延びない。
 Nixの入口は同じfileの`frontend: "nix"`と`entries`から解決し、入口の有無を調べるために評価器を起動しない。
 Nixの取得と評価は検査本体の実行時にだけ行い、その時間も残りの予算で止める。
 wrapperは固定の予算値を持たない。
 T1の入口を認識したrepositoryで宣言が無い、または不正なら、既定値も無制限も補わず、入口を実行せず証跡も作らずに終了status 78で失敗する。
-入口が無いrepository、入口の綴りに一致しないlocal command、根以外での実行は従来どおりcacheだけを使い、証跡を作らない。
-宣言を読めないrepositoryでは評価器を起動せず、`--candidates`が評価を要しない置き場とflake.nixから集めた入口になり得る綴りだけで判別する。その綴りと一致する根での呼び出しは実行せずに拒否し、一致しないlocal commandは宣言が読める場合と同じくcacheだけを使う。
+入口が無いrepository、入口の綴りに一致しないlocal command、根以外での実行は、commandを直接実行してそのstatusとstdioを返し、証跡を作らない。
+宣言を読めないrepositoryでは評価器を起動せず、`--candidates`が評価を要しない置き場とflake.nixから集めた入口になり得る綴りだけで判別する。
+その綴りと一致する根での呼び出しは実行せずに拒否し、一致しないlocal commandは直接実行する。
 終了gateは登録済みの入口の予算を要求し、宣言の不正と追跡済みfileの欠落を入口なしとして通さない。
-検証の証跡は走行tokenごとに、metadataの読み取り前後を照合した検査前のsourceへ固定し、時間内の保存と後始末を見届けたwrapperが完了を記す。
-T1の走行中のmetadata変化はcache keyとは別に照合し、検査後に編集されたsourceへ証跡を結び直さない。
+検証の証跡は走行tokenごとに検査前のsourceへ固定し、検査後にもHEAD、index、tracked diff、non-ignored untracked fileの内容とmetadataを照合する。
+tracked fileのmetadataと内容hashはまとめて取得して読み取り前後を照合し、gitlinkも内容まで再帰的に確認する。
+sourceが変わった走行では証跡を公開せず、時間内の保存と後始末を見届けたwrapperだけが完了を記す。
 公開途中の証跡やまだ動いているwrapperの証跡は終了gateを開かず、期限超過や中断では同じ走行tokenの証跡と一時fileだけを回収するため、別の完了済み走行の証跡は巻き込まない。
 wrapperの生存はPID、boot ID、processの開始時刻で照合するため、PIDの再利用や再起動で別のprocessが現れても完了済みの証跡を失効させない。
 同じbootに居るproducerの開始時刻を読めない場合は、生存状態を確定できないため終了を認めない。
 完了markerは末尾の改行まで揃った場合だけ受理し、file size制限による部分書込の失敗でも終了を認めない。
-古い証跡の整理はT1へ含めず、終了gateが同じ木の完了済み証跡を受理するときに行う。
+slotのlockはsupervisorが子孫の終了確認まで保持するため、wrapperだけが先に消えても次のT1と重ならない。
+証跡のscratchはlauncherが所有を確認したsessionの一時領域か、projectの検証state内に置き、repository内の一時領域へ証跡を作らない。
+次のT1は所有者が終了したpending、receipt、witnessを回収し、生存中や判定できないものは残す。
+終了gateは同じsourceの完了済み証跡を受理した後に古い完了済み証跡を整理する。
 
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
 OMP hook は write の本文と read の全文を JSON に含めたまま gate の stdin へ送り、read の証明を照合する Node process へも pipe で渡す。

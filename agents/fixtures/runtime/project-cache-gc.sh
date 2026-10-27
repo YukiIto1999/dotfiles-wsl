@@ -155,6 +155,51 @@ wait_for() {
   exit 1
 }
 
+# A dry run must leave every file, link and mode as it found them.
+tree_state() {
+  find "$1" -type f -printf '%p %s %T@\n' -o -type l -printf '%p -> %l\n' -o -type d -printf '%p/ %m\n' | sort
+}
+
+expect_report() {
+  local report=$1
+  shift
+  awk -F'\t' -v verdict="$1" -v kind="$2" -v subject="$3" -v reason="$4" '
+    $1 == verdict && $2 == kind && $4 == subject && $5 == reason { found = 1 }
+    END { exit !found }
+  ' "$report" || {
+    echo "dry-run report lacks: $*" >&2
+    cat "$report" >&2
+    exit 1
+  }
+}
+
+refute_report() {
+  local report=$1 subject=$2
+  if grep -Fq -- "$subject" "$report"; then
+    echo "dry-run report names a path it must not: $subject" >&2
+    cat "$report" >&2
+    exit 1
+  fi
+}
+
+# A script that carries the name of the retired verification-cache and runs until its release file exists.
+start_runner() {
+  local release=$1 index
+  mkdir -p "$fixture/runner"
+  printf '#!%s\nuntil [ -e "$1" ]; do sleep 0.05; done\n' "$BASH" > "$fixture/runner/dotfiles-agent-verification-cache"
+  chmod +x "$fixture/runner/dotfiles-agent-verification-cache"
+  "$fixture/runner/dotfiles-agent-verification-cache" "$release" < /dev/null > /dev/null 2>&1 &
+  runner_pid=$!
+  for ((index = 0; index < 200; index++)); do
+    if tr '\0' ' ' < "/proc/$runner_pid/cmdline" | grep -Fq dotfiles-agent-verification-cache; then
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo 'runner did not start' >&2
+  exit 1
+}
+
 first_entry_id=$(printf first-entry | sha256sum | cut -c 1-16)
 second_entry_id=$(printf second-entry | sha256sum | cut -c 1-16)
 locked_entry_id=$(printf locked-entry | sha256sum | cut -c 1-16)
@@ -269,11 +314,11 @@ scope_cgroup=$fixture/cgroup
 make_home "$scope_home"
 make_session_metadata "$scope_home" 4242.scoped "$missing_pid" "$current_boot_id" 0
 mkdir -p "$scope_cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/agents.slice/dotfiles-agent-fixture.4242.scoped.scope"
-HOME=$scope_home DOTFILES_AGENT_GC_CGROUP_ROOT=$scope_cgroup \
+HOME=$scope_home DOTFILES_AGENT_CGROUP_ROOT=$scope_cgroup \
   DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
 test -d "$(session_path "$scope_home" 4242.scoped)"
 rm -r "$scope_cgroup"
-HOME=$scope_home DOTFILES_AGENT_GC_CGROUP_ROOT=$scope_cgroup \
+HOME=$scope_home DOTFILES_AGENT_CGROUP_ROOT=$scope_cgroup \
   DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
 test ! -e "$(session_path "$scope_home" 4242.scoped)"
 
@@ -716,3 +761,223 @@ if HOME=$symlink_root_home DOTFILES_AGENT_GC_HIGH_BYTES=1 \
   exit 1
 fi
 test "$(cat "$fixture/symlink-root-target/payload")" = kept
+
+# ---- Observation never deletes. Help and unknown arguments act before anything exists or changes.
+absent_home=$fixture/absent-home
+mkdir -p "$absent_home"
+HOME=$absent_home "$GC" --help > "$fixture/usage"
+grep -Fq 'usage: dotfiles-agent-project-cache-gc [--dry-run]' "$fixture/usage"
+HOME=$absent_home "$GC" --dry-run > "$fixture/absent-report"
+awk -F'\t' '$1 == "summary" && $2 == "cache" && $3 == 0 { found = 1 } END { exit !found }' "$fixture/absent-report"
+status=0
+HOME=$absent_home "$GC" --purge 2> "$fixture/usage-error" || status=$?
+test "$status" -eq 64
+grep -Fq 'usage: dotfiles-agent-project-cache-gc' "$fixture/usage-error"
+status=0
+HOME=$absent_home "$GC" --dry-run extra 2> /dev/null || status=$?
+test "$status" -eq 64
+test ! -e "$absent_home/.cache"
+
+# ---- A dry run reports the verdict of every owned artifact and changes nothing. A real run of the same
+# tree then retires what was reported and keeps the rest: live and scoped sessions, a locked entry, recent
+# units, receipts and resumable verification state, build dirs the user chose, and recovery data.
+dry_home=$fixture/dry-home
+dry_cache=$dry_home/.cache/dotfiles-wsl
+dry_cgroup=$fixture/dry-cgroup
+dry_verification=$dry_cache/verification
+dry_project=$(printf dry-project | sha256sum | cut -d ' ' -f 1)
+dry_fingerprint=$(printf dry-fingerprint | sha256sum | cut -d ' ' -f 1)
+dry_other=$(printf dry-other | sha256sum | cut -d ' ' -f 1)
+make_home "$dry_home"
+make_shared_cache "$dry_home" 2
+make_session "$dry_home"
+make_session_metadata "$dry_home" orphan "$missing_pid" "$current_boot_id" 0
+make_session_metadata "$dry_home" 4242.scoped "$missing_pid" "$current_boot_id" 0
+mkdir -p "$dry_cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/agents.slice/dotfiles-agent-fixture.4242.scoped.scope"
+mkdir -p "$(session_path "$dry_home" unclaimed)/tmp"
+: > "$(session_path "$dry_home" orphan)/tmp/scratch"
+dry_entry=$(entry_path "$dry_home" "$first_entry_id")
+make_unit "$dry_entry" old '40 days ago' 4
+make_unit "$dry_entry" recent '1 day ago' 4
+printf 'allocated\n' > "$dry_entry/debug/deps/liborphan-0123456789abcdef.rlib"
+touch -d '3 days ago' "$dry_entry/debug/deps/liborphan-0123456789abcdef.rlib"
+dry_locked=$(entry_path "$dry_home" "$locked_entry_id")
+make_unit "$dry_locked" idle '40 days ago' 4
+mkdir -p "$dry_home/.cache/explicit-target/debug/deps" "$dry_home/work/recovery-bundle" "$dry_cache/recovery"
+printf 'allocated\n' > "$dry_home/.cache/explicit-target/debug/deps/libuser-0123456789abcdef.rlib"
+touch -d '90 days ago' "$dry_home/.cache/explicit-target/debug/deps/libuser-0123456789abcdef.rlib"
+printf '{}\n' > "$dry_home/work/recovery-bundle/manifest.json"
+: > "$dry_cache/recovery/bundle"
+mkdir -p "$dry_verification/.fingerprint.dead" "$dry_verification/$dry_project" \
+  "$dry_verification/sessions/resume-me" "$dry_cache/trash/units.interrupted"
+printf 'allocated\n' > "$dry_verification/.fingerprint.dead/tracked-index"
+printf 'version=6\nfingerprint=%s' "$dry_fingerprint" > "$dry_verification/$dry_project/$dry_fingerprint.success"
+printf 'version=6\nfingerprint=%s' "$dry_fingerprint" > "$dry_verification/$dry_project/$dry_other.success"
+: > "$dry_verification/$dry_project/$dry_fingerprint.1793000000000000.123.verified"
+: > "$dry_verification/$dry_project/$dry_other.waived"
+: > "$dry_verification/$dry_project/.pending.1793000000000000.124"
+: > "$dry_verification/$dry_project/run.lock"
+: > "$dry_verification/sessions/resume-me/armed"
+: > "$dry_cache/trash/units.interrupted/payload"
+exec {dry_lock_fd}<"$dry_locked/debug/.cargo-build-lock"
+flock -x "$dry_lock_fd"
+tree_state "$dry_home" > "$fixture/dry-before"
+HOME=$dry_home DOTFILES_AGENT_CGROUP_ROOT=$dry_cgroup DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC" --dry-run > "$fixture/dry-report"
+tree_state "$dry_home" > "$fixture/dry-after"
+cmp "$fixture/dry-before" "$fixture/dry-after"
+expect_report "$fixture/dry-report" keep session "$(session_path "$dry_home" live)" owner-alive
+expect_report "$fixture/dry-report" keep session "$(session_path "$dry_home" 4242.scoped)" scope-occupied
+expect_report "$fixture/dry-report" retire session "$(session_path "$dry_home" orphan)" owner-dead
+expect_report "$fixture/dry-report" retire session "$(session_path "$dry_home" unclaimed)" unclaimed
+expect_report "$fixture/dry-report" retire cargo-unit "$dry_entry#$(unit_hash "$dry_entry" old)" inactive
+expect_report "$fixture/dry-report" retire cargo-orphan "$dry_entry#0123456789abcdef" orphan
+expect_report "$fixture/dry-report" keep cargo-entry "$dry_locked" busy
+expect_report "$fixture/dry-report" retire verification-scratch "$dry_verification/.fingerprint.dead" no-runner
+expect_report "$fixture/dry-report" retire verification-success "$dry_verification" 'legacy-record x1'
+expect_report "$fixture/dry-report" keep verification-success \
+  "$dry_verification/$dry_project/$dry_other.success" unrecognized-record
+expect_report "$fixture/dry-report" retire trash "$dry_cache/trash/units.interrupted" interrupted-removal
+awk -F'\t' '$1 == "summary" && $2 == "cache" { found = 1 } END { exit !found }' "$fixture/dry-report"
+refute_report "$fixture/dry-report" "$dry_entry#$(unit_hash "$dry_entry" recent)"
+refute_report "$fixture/dry-report" "$dry_locked#"
+for untouched in "$dry_home/.cache/explicit-target" "$dry_home/work" "$dry_cache/recovery" \
+  "$dry_verification/sessions" .verified .waived .pending run.lock; do
+  refute_report "$fixture/dry-report" "$untouched"
+done
+HOME=$dry_home DOTFILES_AGENT_CGROUP_ROOT=$dry_cgroup DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+exec {dry_lock_fd}<&-
+test -d "$(session_path "$dry_home" live)"
+test -d "$(session_path "$dry_home" 4242.scoped)"
+test ! -e "$(session_path "$dry_home" orphan)"
+test ! -e "$(session_path "$dry_home" unclaimed)"
+expect_unit reclaimed "$dry_entry" old
+expect_unit kept "$dry_entry" recent
+expect_unit kept "$dry_locked" idle
+test ! -e "$dry_entry/debug/deps/liborphan-0123456789abcdef.rlib"
+test ! -e "$dry_verification/.fingerprint.dead"
+test ! -e "$dry_verification/$dry_project/$dry_fingerprint.success"
+test -f "$dry_verification/$dry_project/$dry_other.success"
+test -f "$dry_verification/$dry_project/$dry_fingerprint.1793000000000000.123.verified"
+test -f "$dry_verification/$dry_project/$dry_other.waived"
+test -f "$dry_verification/$dry_project/.pending.1793000000000000.124"
+test -f "$dry_verification/$dry_project/run.lock"
+test -f "$dry_verification/sessions/resume-me/armed"
+test -f "$dry_home/.cache/explicit-target/debug/deps/libuser-0123456789abcdef.rlib"
+test -f "$dry_home/work/recovery-bundle/manifest.json"
+test -f "$dry_cache/recovery/bundle"
+trash_is_empty "$dry_home"
+
+# A verification-cache that still runs may own any scratch directory, so none is retired while it runs.
+# The legacy success records have no reader left, so they go either way.
+runner_home=$fixture/runner-home
+runner_verification=$runner_home/.cache/dotfiles-wsl/verification
+make_home "$runner_home"
+mkdir -p "$runner_verification/.fingerprint.busy" "$runner_verification/$dry_project"
+: > "$runner_verification/.fingerprint.busy/tracked-index"
+printf 'version=6\nfingerprint=%s' "$dry_fingerprint" > "$runner_verification/$dry_project/$dry_fingerprint.success"
+start_runner "$fixture/runner.release"
+HOME=$runner_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+  "$GC" --dry-run > "$fixture/runner-report"
+expect_report "$fixture/runner-report" keep verification-scratch "$runner_verification/.fingerprint.busy" runner-alive
+expect_report "$fixture/runner-report" retire verification-success "$runner_verification" 'legacy-record x1'
+HOME=$runner_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+test -f "$runner_verification/.fingerprint.busy/tracked-index"
+test ! -e "$runner_verification/$dry_project/$dry_fingerprint.success"
+: > "$fixture/runner.release"
+wait "$runner_pid"
+HOME=$runner_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
+test ! -e "$runner_verification/.fingerprint.busy"
+trash_is_empty "$runner_home"
+
+# A cmdline the GC cannot read means it cannot tell whether a legacy verification-cache runs. It keeps the
+# scratch, says why, and fails the run. A process that vanished while it was read, or that belongs to
+# another user, does not make the answer unknown, and the legacy records go in every case.
+unverifiable_home=$fixture/unverifiable-home
+unverifiable_verification=$unverifiable_home/.cache/dotfiles-wsl/verification
+unverifiable_scratch=$unverifiable_verification/.fingerprint.unknown
+make_home "$unverifiable_home"
+mkdir -p "$unverifiable_scratch" "$unverifiable_verification/$dry_project"
+: > "$unverifiable_scratch/tracked-index"
+write_legacy_record() {
+  printf 'version=6\nfingerprint=%s' "$dry_fingerprint" > "$unverifiable_verification/$dry_project/$dry_fingerprint.success"
+}
+unverifiable_dry_run() {
+  HOME=$unverifiable_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+    "$UNREADABLE_PROC_GC" --dry-run > "$fixture/unverifiable-report" 2> /dev/null
+}
+write_legacy_record
+status=0
+DOTFILES_AGENT_TEST_UNREADABLE_CMDLINE_PIDS=$$ unverifiable_dry_run || status=$?
+test "$status" -eq 70
+expect_report "$fixture/unverifiable-report" keep verification-scratch "$unverifiable_scratch" runner-unverifiable
+expect_report "$fixture/unverifiable-report" retire verification-success "$unverifiable_verification" 'legacy-record x1'
+status=0
+DOTFILES_AGENT_TEST_AWK_FAILS=1 unverifiable_dry_run || status=$?
+test "$status" -eq 70
+expect_report "$fixture/unverifiable-report" keep verification-scratch "$unverifiable_scratch" runner-unverifiable
+test -f "$unverifiable_verification/$dry_project/$dry_fingerprint.success"
+if HOME=$unverifiable_home DOTFILES_AGENT_TEST_UNREADABLE_CMDLINE_PIDS=$$ DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$UNREADABLE_PROC_GC" 2> /dev/null; then
+  echo 'GC removed scratch although it could not tell whether a verification-cache runs' >&2
+  exit 1
+fi
+test -f "$unverifiable_scratch/tracked-index"
+test ! -e "$unverifiable_verification/$dry_project/$dry_fingerprint.success"
+DOTFILES_AGENT_TEST_UNREADABLE_CMDLINE_PIDS=$missing_pid unverifiable_dry_run
+expect_report "$fixture/unverifiable-report" retire verification-scratch "$unverifiable_scratch" no-runner
+DOTFILES_AGENT_TEST_UNREADABLE_CMDLINE_PIDS=$$ DOTFILES_AGENT_TEST_WRONG_OWNER_PID=$$ unverifiable_dry_run
+expect_report "$fixture/unverifiable-report" retire verification-scratch "$unverifiable_scratch" no-runner
+test -f "$unverifiable_scratch/tracked-index"
+
+# A scratch path that is a link is not the GC's to remove: it fails the run in both modes and what the link
+# points to stays.
+link_home=$fixture/link-scratch-home
+link_verification=$link_home/.cache/dotfiles-wsl/verification
+make_home "$link_home"
+mkdir -p "$link_verification" "$link_home/outside"
+: > "$link_home/outside/payload"
+ln -s "$link_home/outside" "$link_verification/.fingerprint.link"
+status=0
+HOME=$link_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+  "$GC" --dry-run > "$fixture/link-report" 2> /dev/null || status=$?
+test "$status" -eq 70
+expect_report "$fixture/link-report" unresolved verification-scratch "$link_verification/.fingerprint.link" not-owned-directory
+if HOME=$link_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC" 2> /dev/null; then
+  echo 'GC accepted a linked verification scratch path' >&2
+  exit 1
+fi
+test -L "$link_verification/.fingerprint.link"
+test -f "$link_home/outside/payload"
+
+# Metadata that no longer names an owner keeps its session and fails a dry run exactly as it fails a run.
+invalid_home=$fixture/invalid-metadata-home
+make_home "$invalid_home"
+mkdir -p "$(session_path "$invalid_home" invalid)/tmp"
+head -c 4096 /dev/zero > "$(session_path "$invalid_home" invalid)/metadata.json"
+status=0
+HOME=$invalid_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+  "$GC" --dry-run > "$fixture/invalid-report" 2> /dev/null || status=$?
+test "$status" -eq 70
+expect_report "$fixture/invalid-report" unresolved session "$(session_path "$invalid_home" invalid)" invalid-metadata
+test -d "$(session_path "$invalid_home" invalid)/tmp"
+
+# Above the high watermark the shared cache is reported as retired only without a session, and is
+# then removed by the run that was reported.
+purge_home=$fixture/purge-report-home
+make_home "$purge_home"
+make_shared_cache "$purge_home" 32
+purge_high=$(($(allocated_bytes "$purge_home/.cache/dotfiles-wsl/shared") - 1))
+HOME=$purge_home DOTFILES_AGENT_GC_HIGH_BYTES=$purge_high DOTFILES_AGENT_GC_LOW_BYTES=0 \
+  "$GC" --dry-run > "$fixture/purge-report"
+expect_report "$fixture/purge-report" retire shared-cache "$purge_home/.cache/dotfiles-wsl/shared" over-high-without-session
+test -e "$purge_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
+HOME=$purge_home DOTFILES_AGENT_GC_HIGH_BYTES=$purge_high DOTFILES_AGENT_GC_LOW_BYTES=0 "$GC"
+test ! -e "$purge_home/.cache/dotfiles-wsl/shared/cargo-home/payload"
+make_session "$purge_home"
+make_shared_cache "$purge_home" 32
+HOME=$purge_home DOTFILES_AGENT_GC_HIGH_BYTES=$purge_high DOTFILES_AGENT_GC_LOW_BYTES=0 \
+  "$GC" --dry-run > "$fixture/purge-active-report"
+expect_report "$fixture/purge-active-report" keep shared-cache "$purge_home/.cache/dotfiles-wsl/shared" active-session
+test -e "$purge_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"

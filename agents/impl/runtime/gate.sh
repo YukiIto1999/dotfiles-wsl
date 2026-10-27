@@ -11,9 +11,11 @@ usage() {
   cat >&2 <<'USAGE'
 usage: dotfiles-agent-gate <command> [options]
 
+  slot [--repo DIR]                     その project の検証の実行枠 file を安全に確保して答える。同じ project の T1 は flock で一度に一つ走る
   record --pending TOKEN [--repo DIR] [--command TEXT]
-                                        DIR が根で TEXT が検証入口の綴りなら公開しない仮の控えを作る
-  publish --pending TOKEN [--repo DIR]  仮の控えを木の控えとして公開する。deadline の下で呼ぶ
+                                        DIR が根で TEXT が検証入口の綴りなら、公開しない仮の控えを作り、その木の照合値を出す
+  publish --pending TOKEN --witness DIGEST [--repo DIR]
+                                        木が照合値のままなら仮の控えを木の控えとして公開する。deadline の下で呼ぶ
   discard --pending TOKEN             その走行の仮の控えと公開した控え、一時fileだけを捨てる
   arm --session ID [--path PATH]        その session が編集した repository を控える
   check [--repo DIR] [--session ID]     未検証なら理由を出して 1 で終わる
@@ -50,8 +52,6 @@ project_id_of() {
   printf '%s' "$common" | sha256sum | cut -d ' ' -f 1
 }
 
-# いまの木の指紋。HEAD と追跡済みの差分と未追跡の中身だけから採る。
-# verify の指紋と違い環境も argv も混ぜない。同じ木なら誰が測っても同じ値になることが要る。
 source_fingerprint() {
   local repo=$1 head path
   head=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || printf 'none')
@@ -71,6 +71,242 @@ source_fingerprint() {
         printf 'other\0'
       fi
     done < <(git -C "$repo" ls-files --others --exclude-standard -z)
+  } | sha256sum | cut -d ' ' -f 1
+}
+
+# 検証の走行の前後で木が触られていないことを示す照合値。source_fingerprint が「どの木か」を名指すのに対し、
+# こちらは HEAD と index、追跡 file の内容と lstat、gitlink の中身、未追跡 file の内容と lstat を採り、
+# 読む前後で食い違えば採取自体を失敗させる。同じ内容への書き戻しも mtime と ctime で区別する。
+# 採れない木には証跡を作らない。汚れた gitlink、特殊 file、採取中の変更がそれに当たる。
+# 一時 file は呼び出し側が用意した木の外の witness_scratch へ置く。
+witness_scratch=
+
+write_tracked_witness() {
+  local repository=$1 tracked=$2 namespace=$3
+  local record index_fields index_mode path absolute semantic_path
+  local index_oid index_stage metadata digest offset batch validation_guard
+  local -a paths=() regulars=()
+  local -A metadata_before=() guards_before=() hashes=()
+  local -A metadata_after=() guards_after=()
+
+  batch=$(mktemp -d "$witness_scratch/.tracked-batch.XXXXXXXX") || return 1
+  while IFS= read -r -d '' record; do
+    [[ $record == *$'\t'* ]] || return 1
+    index_fields=${record%%$'\t'*}
+    index_mode=${index_fields%% *}
+    index_stage=${index_fields##* }
+    [ "$index_stage" = 0 ] || return 1
+    path=${record#*$'\t'}
+    absolute=$repository/$path
+    if [ ! -e "$absolute" ] && [ ! -L "$absolute" ]; then
+      [ "$index_mode" != 160000 ] || return 1
+      continue
+    fi
+    paths+=("$absolute")
+    if [ "$index_mode" = 160000 ]; then
+      [ -d "$absolute" ] && [ ! -L "$absolute" ] || return 1
+    elif [ -L "$absolute" ]; then
+      continue
+    elif [ -f "$absolute" ]; then
+      regulars+=("$absolute")
+    else
+      return 1
+    fi
+  done <"$tracked"
+
+  : >"$batch/before"
+  for ((offset = 0; offset < ${#paths[@]}; offset += 128)); do
+    stat --printf '%n\0%f:%u:%g:%h:%s\0%d:%i:%f:%u:%g:%h:%s:%y:%z\0' \
+      -- "${paths[@]:offset:128}" >>"$batch/before" 2>/dev/null || return 1
+  done
+  while IFS= read -r -d '' absolute \
+    && IFS= read -r -d '' metadata \
+    && IFS= read -r -d '' record; do
+    metadata_before["$absolute"]=$metadata
+    guards_before["$absolute"]=$record
+  done <"$batch/before"
+
+  : >"$batch/hashes"
+  for ((offset = 0; offset < ${#regulars[@]}; offset += 128)); do
+    sha256sum --zero -- "${regulars[@]:offset:128}" >>"$batch/hashes" || return 1
+  done
+  while IFS= read -r -d '' record; do
+    digest=${record:0:64}
+    [[ $digest =~ ^[0-9a-f]{64}$ ]] || return 1
+    hashes["${record:66}"]=$digest
+  done <"$batch/hashes"
+
+  while IFS= read -r -d '' record; do
+    index_fields=${record%%$'\t'*}
+    index_mode=${index_fields%% *}
+    index_oid=${index_fields#* }
+    index_oid=${index_oid%% *}
+    path=${record#*$'\t'}
+    absolute=$repository/$path
+    semantic_path=$namespace$path
+    printf 'index\0%s\0path\0%s\0' "$index_fields" "$semantic_path"
+    if [ ! -e "$absolute" ] && [ ! -L "$absolute" ]; then
+      [ -z "${metadata_before["$absolute"]-}" ] || return 1
+      printf 'missing\0'
+      continue
+    fi
+    metadata=${metadata_before["$absolute"]-}
+    [ -n "$metadata" ] || return 1
+    validation_guard=${guards_before["$absolute"]}
+    # gitlink の directory 自体は、中の配置で変わる link 数と大きさ、時刻を照合値へ入れない
+    if [ "$index_mode" = 160000 ]; then
+      metadata=${metadata%:*}
+      metadata=${metadata%:*}
+      record=${validation_guard#*:}
+      validation_guard="${validation_guard%%:*}:${record%%:*}:$metadata"
+    fi
+    printf 'lstat\0%s\0guard\0%s\0' "$metadata" "$validation_guard"
+    if [ "$index_mode" = 160000 ]; then
+      [ -d "$absolute" ] && [ ! -L "$absolute" ] || return 1
+      write_clean_gitlink "$absolute" "$index_oid" "$semantic_path/" || return 1
+    elif [ -L "$absolute" ]; then
+      printf 'symlink\0'
+      readlink --zero -- "$absolute" || return 1
+    elif [ -f "$absolute" ]; then
+      digest=${hashes["$absolute"]-}
+      [ -n "$digest" ] || return 1
+      printf 'regular\0%s  -\n' "$digest"
+    else
+      return 1
+    fi
+  done <"$tracked"
+
+  : >"$batch/after"
+  for ((offset = 0; offset < ${#paths[@]}; offset += 128)); do
+    stat --printf '%n\0%f:%u:%g:%h:%s\0%d:%i:%f:%u:%g:%h:%s:%y:%z\0' \
+      -- "${paths[@]:offset:128}" >>"$batch/after" 2>/dev/null || return 1
+  done
+  while IFS= read -r -d '' absolute \
+    && IFS= read -r -d '' metadata \
+    && IFS= read -r -d '' record; do
+    metadata_after["$absolute"]=$metadata
+    guards_after["$absolute"]=$record
+  done <"$batch/after"
+  for absolute in "${paths[@]}"; do
+    [ "${metadata_after["$absolute"]-}" = "${metadata_before["$absolute"]}" ] || return 1
+    [ "${guards_after["$absolute"]-}" = "${guards_before["$absolute"]}" ] || return 1
+  done
+  while IFS= read -r -d '' record; do
+    path=${record#*$'\t'}
+    absolute=$repository/$path
+    if [ -z "${metadata_before["$absolute"]-}" ]; then
+      [ ! -e "$absolute" ] && [ ! -L "$absolute" ] || return 1
+    fi
+  done <"$tracked"
+}
+
+validate_index_flags() {
+  local flags=$1 record
+  while IFS= read -r -d '' record; do
+    [[ $record == 'H '* ]] || return 1
+  done <"$flags"
+}
+
+# gitlink は HEAD が index の記録と一致し、中の木が一切汚れていないときだけ中身まで照合する。
+# assume-unchanged や skip-worktree の印は git の変更検出を偽れるため受け付けない。
+write_clean_gitlink() {
+  local absolute=$1 expected_head=$2 namespace=$3
+  local canonical top head_before head_after
+  local index_before index_after flags_before flags_after status_before status_after
+
+  [[ $expected_head =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || return 1
+  canonical=$(realpath -e -- "$absolute") || return 1
+  top=$(git -C "$absolute" rev-parse --show-toplevel 2>/dev/null) || return 1
+  top=$(realpath -e -- "$top") || return 1
+  [ "$top" = "$canonical" ] || return 1
+  head_before=$(git -C "$absolute" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || return 1
+  [ "$head_before" = "$expected_head" ] || return 1
+
+  index_before=$(mktemp "$witness_scratch/.gitlink-index-before.XXXXXXXX") || return 1
+  index_after=$(mktemp "$witness_scratch/.gitlink-index-after.XXXXXXXX") || return 1
+  flags_before=$(mktemp "$witness_scratch/.gitlink-flags-before.XXXXXXXX") || return 1
+  flags_after=$(mktemp "$witness_scratch/.gitlink-flags-after.XXXXXXXX") || return 1
+  status_before=$(mktemp "$witness_scratch/.gitlink-status-before.XXXXXXXX") || return 1
+  status_after=$(mktemp "$witness_scratch/.gitlink-status-after.XXXXXXXX") || return 1
+
+  git -C "$absolute" ls-files --stage -z >"$index_before" || return 1
+  git -C "$absolute" ls-files -v -z >"$flags_before" || return 1
+  validate_index_flags "$flags_before" || return 1
+  git --no-optional-locks -C "$absolute" status --porcelain=v1 --untracked-files=all \
+    --ignore-submodules=all >"$status_before" 2>/dev/null || return 1
+  [ ! -s "$status_before" ] || return 1
+
+  printf 'gitlink\0head\0%s\0flags\0' "$head_before"
+  cat "$flags_before" || return 1
+  printf '\0tracked\0'
+  write_tracked_witness "$absolute" "$index_before" "$namespace" || return 1
+
+  git -C "$absolute" ls-files --stage -z >"$index_after" || return 1
+  git -C "$absolute" ls-files -v -z >"$flags_after" || return 1
+  cmp -s -- "$index_before" "$index_after" || return 1
+  cmp -s -- "$flags_before" "$flags_after" || return 1
+  validate_index_flags "$flags_after" || return 1
+  git --no-optional-locks -C "$absolute" status --porcelain=v1 --untracked-files=all \
+    --ignore-submodules=all >"$status_after" 2>/dev/null || return 1
+  [ ! -s "$status_after" ] || return 1
+  head_after=$(git -C "$absolute" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || return 1
+  [ "$head_after" = "$head_before" ] || return 1
+}
+
+write_untracked_guard() {
+  local repo=$1 list=$2 path
+  while IFS= read -r -d '' path; do
+    printf 'path\0%s\0' "$path"
+    stat --printf '%d:%i:%f:%u:%g:%h:%s:%y:%z\0' -- "$repo/$path" || return 1
+  done <"$list"
+}
+
+write_untracked_content() {
+  local repo=$1 list=$2 path link_target mode
+  while IFS= read -r -d '' path; do
+    printf 'path\0%s\0' "$path"
+    if [ -L "$repo/$path" ]; then
+      link_target=$(readlink -- "$repo/$path") || return 1
+      printf 'symlink\0%s\0' "$link_target"
+    elif [ -f "$repo/$path" ]; then
+      mode=$(stat -c %a "$repo/$path") || return 1
+      printf 'regular\0%s\0' "$mode"
+      sha256sum -- "$repo/$path" || return 1
+    else
+      return 1
+    fi
+  done <"$list"
+}
+
+# 照合値を出して 0 で返る。木が採取の間に変わった、または採れない種類を含むときは 1 で返る。
+source_witness() {
+  local repo=$1 dir=$witness_scratch head head_after
+  head=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null) || return 1
+  git -C "$repo" ls-files --stage -z >"$dir/tracked" || return 1
+  write_tracked_witness "$repo" "$dir/tracked" "" >"$dir/tracked-witness" || return 1
+  git -C "$repo" -c color.ui=false diff \
+    --binary --full-index --no-ext-diff --no-textconv HEAD -- >"$dir/tracked-diff" || return 1
+  git -C "$repo" ls-files --others --exclude-standard -z >"$dir/untracked" || return 1
+  write_untracked_guard "$repo" "$dir/untracked" >"$dir/untracked-guard" || return 1
+  write_untracked_content "$repo" "$dir/untracked" >"$dir/untracked-content" || return 1
+
+  git -C "$repo" ls-files --stage -z >"$dir/tracked-after" || return 1
+  cmp -s -- "$dir/tracked" "$dir/tracked-after" || return 1
+  head_after=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null) || return 1
+  [ "$head_after" = "$head" ] || return 1
+  git -C "$repo" ls-files --others --exclude-standard -z >"$dir/untracked-after" || return 1
+  cmp -s -- "$dir/untracked" "$dir/untracked-after" || return 1
+  write_untracked_guard "$repo" "$dir/untracked-after" >"$dir/untracked-guard-after" || return 1
+  cmp -s -- "$dir/untracked-guard" "$dir/untracked-guard-after" || return 1
+  {
+    printf 'dotfiles-agent-gate-witness-v1\0head\0%s\0tracked-diff\0' "$head"
+    cat "$dir/tracked-diff" || return 1
+    printf '\0tracked\0'
+    cat "$dir/tracked-witness" || return 1
+    printf '\0untracked-guard\0'
+    cat "$dir/untracked-guard" || return 1
+    printf '\0untracked-content\0'
+    cat "$dir/untracked-content" || return 1
   } | sha256sum | cut -d ' ' -f 1
 }
 
@@ -163,34 +399,186 @@ verified_receipt_exists() {
   [ -n "$verified_receipt_token" ]
 }
 
+# 検証の状態は cache root から project まで自分だけが書ける実 directory に限る。
+# symlink や他人の directory を辿って控え、実行枠、一時 file を置かない。
+ensure_state_directory() {
+  local path=$1
+  if mkdir -m 700 "$path" 2>/dev/null; then
+    return
+  fi
+  test ! -L "$path" || return 1
+  test -d "$path" || return 1
+  test "$(stat -c %u "$path")" = "$(id -u)" || return 1
+  chmod 700 "$path" || return 1
+  test "$(stat -c %a "$path")" = 700
+}
+
+ensure_project_state() {
+  mkdir -p -- "${cache_root%/*}" || return 1
+  ensure_state_directory "$cache_root" \
+    && ensure_state_directory "$verification_root" \
+    && ensure_state_directory "$1"
+}
+
+# 自分で作る一時 file が検査する木の中へ入ると、未追跡 file として照合値へ混ざる。
+# TMPDIR は空文字列でも symlink でも木の中を指し得るため、物理 path で比べる。
+scratch_is_outside_repo() {
+  local top physical path
+  top=$(realpath -e -- "$1") || return 1
+  for path in "${TMPDIR:-/tmp}" "$cache_root"; do
+    physical=$(realpath -m -- "$path") || return 1
+    case $physical/ in
+    "$top"/*) return 1 ;;
+    esac
+  done
+}
+
+# 照合の一時 directory。agent session では launcher が metadata で証明した session の scratch を使い、
+# session の終了で launcher が回収する。TMPDIR の値は呼び出し側が決められるため直接は信用しない。
+# session の外では、実行枠の中で走行 token を名に持つ project の状態 directory へ置く。
+# どちらも EXIT trap、gate discard、消えた producer の回収のいずれかで捨てる。
+# shellcheck disable=SC2329 # EXIT trap が関数を名前で呼ぶ。
+release_scratch() {
+  [ -z "$witness_scratch" ] || rm -rf --one-file-system -- "$witness_scratch" || true
+  [ -z "$receipt_scratch" ] || rm -f -- "$receipt_scratch" || true
+  witness_scratch=
+  receipt_scratch=
+}
+
+begin_scratch() {
+  local state=$1 token=$2 root
+  if root=$(runtime_scratch_root); then
+    witness_scratch=$(mktemp -d "$root/dotfiles-gate-witness.XXXXXXXX") || return 1
+  else
+    witness_scratch=$(mktemp -d "$state/.witness.$token.XXXXXXXX") || return 1
+  fi
+  trap release_scratch EXIT
+}
+
+# producer が消えたことが確かな場合だけ 0 で返る。開始時刻を読めないなど生死を確定できない場合は 1 で返り、捨てない。
+receipt_producer_is_gone() {
+  local pid=${1##*.} boot_id=${2-} start_time=${3-} current_boot_id current_start_time
+  IFS= read -r current_boot_id </proc/sys/kernel/random/boot_id || return 1
+  [ -z "$boot_id" ] || [ "$boot_id" = "$current_boot_id" ] || return 0
+  [ -e "/proc/$pid" ] || return 0
+  [ -n "$start_time" ] || return 1
+  current_start_time=$(producer_start_time "$pid") || return 1
+  [ "$start_time" != "$current_start_time" ]
+}
+
+# 走行の producer が消えた後に残った仮の控え、書込み途中の file、照合の一時 directory、
+# 完了印の無い公開済みの控えを捨てる。実行枠の中で呼ぶため、生きた producer の控えは公開を終える直前の走行だけである。
+reap_dead_receipts() {
+  local state=$1 file name token boot_id start_time
+  local -a record
+  for file in "$state"/.pending.* "$state"/*.verified; do
+    [ -f "$file" ] || continue
+    name=${file##*/}
+    case $name in
+    .pending.*) token=${name#.pending.} ;;
+    *.verified)
+      token=${name#*.}
+      token=${token%.verified}
+      ;;
+    esac
+    receipt_token_is_valid "$token" || continue
+    mapfile -t record <"$file" || continue
+    [ "${#record[@]}" -ge 6 ] && [ "${record[0]}" = version=4 ] || continue
+    [ "${record[6]-}" != completed=true ] || continue
+    boot_id=${record[4]#boot_id=}
+    start_time=${record[5]#producer_start_time=}
+    if receipt_producer_is_gone "$token" "$boot_id" "$start_time"; then
+      rm -f -- "$file"
+    fi
+  done
+  for file in "$state"/.receipt.*; do
+    [ -f "$file" ] || continue
+    token=${file##*/.receipt.}
+    token=${token%.*}
+    receipt_token_is_valid "$token" || continue
+    if receipt_producer_is_gone "$token"; then
+      rm -f -- "$file"
+    fi
+  done
+  for file in "$state"/.witness.*; do
+    [ -d "$file" ] && [ ! -L "$file" ] || continue
+    token=${file##*/.witness.}
+    token=${token%.*}
+    receipt_token_is_valid "$token" || continue
+    if receipt_producer_is_gone "$token"; then
+      rm -rf --one-file-system -- "$file"
+    fi
+  done
+}
+
+# 同じ project の T1 が一度に一つだけ走るための flock の相手。file は project の状態 directory に常に置く。
+command_slot() {
+  local repo=${1:-$PWD} top state slot
+  top=$(repo_top_of "$repo") || fail 'git の木の中で呼ぶ'
+  state=$(state_dir_of "$top") || fail 'git の木の中で呼ぶ'
+  ensure_project_state "$state" || fail "検証の状態 directory を安全に確保できない: $state"
+  slot=$state/run.lock
+  if [ -e "$slot" ] || [ -L "$slot" ]; then
+    if [ -L "$slot" ] || [ ! -f "$slot" ] || [ "$(stat -c %u "$slot")" != "$(id -u)" ]; then
+      fail "実行枠が自分の通常 file でない: $slot"
+    fi
+  else
+    : >>"$slot" || fail "実行枠を作れない: $slot"
+  fi
+  chmod 600 "$slot" || fail "実行枠の権限を閉じられない: $slot"
+  printf '%s\n' "$slot"
+}
+
 command_record() {
-  local repo=${1:-$PWD} text=${2:-} token=${3:-} top state fingerprint boot_id start_time
+  local repo=${1:-$PWD} text=${2:-} token=${3:-} top state before after witness boot_id start_time
   receipt_token_is_valid "$token" || fail 'record には正しい --pending が要る'
   top=$(repo_top_of "$repo") || return 0
   [ "$(realpath -e -- "$repo")" = "$(realpath -e -- "$top")" ] || return 0
   state=$(state_dir_of "$top") || return 0
-  # 後段の再採取でsourceが結び直されるため同じtokenへの上書きは不可
-  [ ! -f "$state/.pending.$token" ] || return 0
   [ -n "$text" ] && [ "$text" = "$(declared_entry_of "$top")" ] || return 0
   IFS= read -r boot_id </proc/sys/kernel/random/boot_id || return 0
   start_time=$(producer_start_time "${token##*.}") || return 0
-  ensure_dir "$state"
-  fingerprint=$(source_fingerprint "$top")
+  ensure_project_state "$state" || fail "検証の状態 directory を安全に確保できない: $state"
+  if ! scratch_is_outside_repo "$top"; then
+    printf 'dotfiles-agent-gate: TMPDIR か cache が検査する木の中にあり、一時 file が照合値へ混ざるため証跡を作らない: %s\n' "$top" >&2
+    return 0
+  fi
+  begin_scratch "$state" "$token" || fail '照合の一時 directory を作れない'
+  reap_dead_receipts "$state"
+  # 公開前に同じ token の控えを結び直さない
+  [ ! -f "$state/.pending.$token" ] || return 0
+  before=$(source_fingerprint "$top")
+  if ! witness=$(source_witness "$top"); then
+    printf 'dotfiles-agent-gate: 木を照合できないため、この走行の証跡を作らない: %s\n' "$top" >&2
+    return 0
+  fi
+  after=$(source_fingerprint "$top")
+  if [ "$before" != "$after" ]; then
+    printf 'dotfiles-agent-gate: 採取の間に木が変わったため、この走行の証跡を作らない: %s\n' "$top" >&2
+    return 0
+  fi
   receipt_scratch=$(mktemp "$state/.receipt.$token.XXXXXXXX")
-  trap 'rm -f -- "$receipt_scratch"' EXIT
   printf 'version=4\nsource=%s\ncommand=%s\nat=%s\nboot_id=%s\nproducer_start_time=%s\n' \
-    "$fingerprint" "$text" "$(date -Iseconds)" "$boot_id" "$start_time" >"$receipt_scratch"
+    "$before" "$text" "$(date -Iseconds)" "$boot_id" "$start_time" >"$receipt_scratch"
   mv -T -- "$receipt_scratch" "$state/.pending.$token"
-  trap - EXIT
+  receipt_scratch=
+  printf '%s\n' "$witness"
 }
 
 command_publish() {
-  local repo=${1:-$PWD} token=${2:-} top state pending source=
+  local repo=${1:-$PWD} token=${2:-} expected=${3:-} top state pending current source=
   receipt_token_is_valid "$token" || fail 'publish には正しい --pending が要る'
+  [[ $expected =~ ^[0-9a-f]{64}$ ]] || fail 'publish には正しい --witness が要る'
   top=$(repo_top_of "$repo") || return 0
   state=$(state_dir_of "$top") || return 0
   pending=$state/.pending.$token
   [ -f "$pending" ] || return 0
+  begin_scratch "$state" "$token" || fail '照合の一時 directory を作れない'
+  if ! current=$(source_witness "$top") || [ "$current" != "$expected" ]; then
+    rm -f -- "$pending"
+    printf 'dotfiles-agent-gate: 検査の間に木が変わったため、証跡を公開しない: %s\n' "$top" >&2
+    return 0
+  fi
   { IFS= read -r _ && IFS= read -r source; } <"$pending" || true
   source=${source#source=}
   if ! [[ $source =~ ^[0-9a-f]{64}$ ]]; then
@@ -206,7 +594,7 @@ command_discard() {
   receipt_token_is_valid "$token" || fail 'discard には正しい --pending が要る'
   rm -f -- "$verification_root"/*/.pending."$token" \
     "$verification_root"/*/*."$token".verified "$verification_root"/*/.receipt."$token".*
-  for scratch in "$verification_root"/.fingerprint."$token".*; do
+  for scratch in "$verification_root"/*/.witness."$token".*; do
     [ -d "$scratch" ] && [ ! -L "$scratch" ] || continue
     rm -rf --one-file-system -- "$scratch"
   done
@@ -641,7 +1029,7 @@ main() {
   [ -n "$command" ] || usage
   shift || true
 
-  local repo=$PWD session="" reason="" text="" path="" pending=""
+  local repo=$PWD session="" reason="" text="" path="" pending="" witness=""
   local -a policy_args=()
   while [ "$#" -gt 0 ]; do
     case $1 in
@@ -674,6 +1062,10 @@ main() {
       pending=$2
       shift 2
       ;;
+    --witness)
+      witness=$2
+      shift 2
+      ;;
     arm | stop | edit | learn | observe) break ;;
     *) usage ;;
     esac
@@ -683,8 +1075,9 @@ main() {
   fi
 
   case $command in
+  slot) command_slot "$repo" ;;
   record) command_record "$repo" "$text" "$pending" ;;
-  publish) command_publish "$repo" "$pending" ;;
+  publish) command_publish "$repo" "$pending" "$witness" ;;
   discard) command_discard "$pending" ;;
   arm) command_arm "$session" "${path:-$repo}" ;;
   check) command_check "$repo" ;;

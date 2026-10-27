@@ -1,7 +1,14 @@
+let
+  # 実 host と同じ slice 名では固定値を埋め込んだ検証も通ってしまうため実 host の名前は不可
+  slices = {
+    support = "synthetic-workload.slice";
+    containers = "synthetic-workload-containers.slice";
+  };
+in
 {
   pkgs,
   stopTimeout ? null,
-  cgroupParent ? "system.slice",
+  cgroupParent ? slices.support,
   extraOptions ? [ ],
   ...
 }:
@@ -23,6 +30,7 @@ let
     exit 0
   '';
   mkHostConfig = containerPolicy: {
+    dotfiles.workstation.workload = { inherit slices; };
     dotfiles.platform.containers.services.synthetic-service = {
       inherit containerPolicy;
     };
@@ -41,6 +49,7 @@ let
   };
 in
 {
+  inherit slices;
   expected = {
     secretReaders.${secretName} = [ containerName ];
     volumeOwners.${containerName} = [ volumeName ];

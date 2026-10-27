@@ -73,7 +73,16 @@ for name in TMPDIR TMP TEMP TEMPDIR; do
   fi
 done
 
+scope=()
+cgroup_path=$(<@cgroupFile@) || die 'cannot read the resource scope'
+# 既存 agent のより狭い上限を外す再配置は不可
+case "$cgroup_path" in
+  0::/user.slice | 0::/user.slice/*) ;;
+  0::/*) scope=(@systemdRunCommand@ --user --scope --collect --quiet --slice=app.slice --) ;;
+  *) die 'a unified cgroup hierarchy is required for the resource scope' ;;
+esac
+
 # lock を更新せず、評価の失敗や欠落は nix develop の失敗としてそのまま返す。
 # 実行ファイルは絶対 path で渡し、devShell の PATH の後ろにある host の PATH を引かない。
-exec @nixCommand@ develop --no-update-lock-file --no-write-lock-file "$project_root#$attr" \
+exec "${scope[@]}" @nixCommand@ develop --no-update-lock-file --no-write-lock-file "$project_root#$attr" \
   --command @envCommand@ "${restore_unset[@]}" "${restore_set[@]}" "$executable" "$@"

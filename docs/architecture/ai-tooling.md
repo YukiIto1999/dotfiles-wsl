@@ -230,12 +230,12 @@ WSL hostの`nixos`は[`profiles/hosts/nixos.nix`](../../profiles/hosts/nixos.nix
 
 Chromiumはuser busから`app.slice`へscopeを作るため、agent scopeから抜ける場合がある。
 user manager全体にも`MemoryHigh` 67%、`MemoryMax` 75%を置き、agentとbrowserの合計を抑える。
-user managerのmaxはagent sliceのmaxより大きくし、基盤とkernelへRAMを残す。
+user managerのmaxはagent sliceのmaxより大きくし、全workloadの合計は[共通の資源上限](overview.md#system-generation)で抑える。
 launcherはscopeを作れないとsupervisorもclientも起動せず、scope外のclientはdoctorの`agent/slice-placement`が報告する。
 MCP sessionのbrowserは[`dotfiles-supervise`](../../platform/supervise)の下で起動し、sessionの終了でそのsessionのbrowserと子だけを終了確認まで止める。別のsessionとMCP front本体は止めない。
 
 I/O上限やprojectの`CARGO_BUILD_JOBS`の上書きは加えず、memory上限でpage cacheとswapの圧迫を抑える。
-agentが起動したNix builderはnix-daemonの子としてsystem.sliceで動くため、`agents.slice`の上限を受けない。
+agentが起動したNix builderはnix-daemonの子として`user-workload.slice`で動き、`agents.slice`ではなく共通の`user.slice`の上限を受ける。
 [`workstation/nix/module.nix`](../../workstation/nix/module.nix)がhostのjobs、cores、空き容量reserveを持ち、nix-daemonのCPUWeightを50にする。
 Dockerが起こす宣言外のcontainerは[containerの配置と上限](#containerの配置と上限)で別に抑える。
 
@@ -359,19 +359,19 @@ Docker build artifact GCは停止済みのtestcontainersのcontainer、dangling 
 
 ### containerの配置と上限
 
-Docker daemonの`cgroup-parent`は`containers.slice`であり、`--cgroup-parent`を持たないcontainerはすべてこのsliceの`docker-<id>.scope`に入る。
+Docker daemonの`cgroup-parent`は`user-workload-containers.slice`であり、`--cgroup-parent`を持たないcontainerはすべてこのsliceの`docker-<id>.scope`に入る。
 agentのtestがtestcontainersで起こすcontainer、compose、手で起こしたcontainerがこれに当たる。
-宣言済みbackendは[`container-backend.nix`](../../platform/containers/impl/container-backend.nix)が`--cgroup-parent=system.slice`を付けるので、基盤のserviceと同じsystem.sliceに残り、このsliceの上限を受けない。
-[dockerd reference](https://docs.docker.com/reference/cli/dockerd/#default-cgroup-parent)によれば、containerごとの`--cgroup-parent`はdaemonの値より優先され、systemd driverではslice名がcgroup treeの位置を表すので、`containers.slice`はroot直下に作られる。
+宣言済みbackendは[`container-backend.nix`](../../platform/containers/impl/container-backend.nix)へworkload ownerが公開するsupport sliceを渡し、宣言外containerの上限とは分ける。
+[dockerd reference](https://docs.docker.com/reference/cli/dockerd/#default-cgroup-parent)によれば、containerごとの`--cgroup-parent`はdaemonの値より優先される。
 [systemd.slice(5)](https://www.freedesktop.org/software/systemd/man/latest/systemd.slice.html)によれば、sliceに置いた資源の上限はslice内の全unitのprocessに効く。
 [Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)によれば、`memory.current`と`memory.swap.current`は子孫のcgroupを含めて数えられ、`memory.max`に達して回収できなければそのcgroupの中でOOM killerが動く。
 
 宣言外のcontainerの上限は物理RAMの割合であり、`MemoryHigh` 7.5%、`MemoryMax` 10%、`MemorySwapMax` 10%、CPUWeight 50を使う。
-user managerとcontainerの上限を分け、system.sliceの基盤とkernelにRAMを残す。
+両方のsliceを`user.slice`の共通上限に含め、system.sliceの基盤とkernelへRAMを残す。
 system managerのdockerdはuser managerへ委譲したsubtreeにscopeを作れないため、containerを`agents.slice`へ入れない。
 testcontainersなどの呼出し元が個別の`--memory`を指定しない場合も、daemonのsliceで合計を抑える。
 
-doctorの`container-placement`は、runningのcontainerごとにscopeのsliceをsystemdに問い合わせ、宣言済みbackendがsystem.slice、それ以外が`containers.slice`にいなければfailにする。
+doctorの`container-placement`は、runningのcontainerごとにscopeのsliceをsystemdに問い合わせ、宣言済みbackendが`user-workload.slice`、それ以外が`user-workload-containers.slice`にいなければfailにする。
 
 ### 停止済みのtestcontainersの回収
 
@@ -380,7 +380,7 @@ processがSIGKILLされるか、docker APIの要求がclientの期限を超え�
 `docker-build-artifact-gc`は6時間ごとに、label `org.testcontainers.managed-by=testcontainers`を持ち、状態が`created`、`exited`、`dead`のいずれかで、作成から6時間を過ぎたcontainerを匿名volumeとともに削除する。
 6時間はtimerの周期と同じ値で、作成からstartまでの途中にあるcontainerを消さないための下限である。
 session単位で判定しないのは、`org.testcontainers.session-id`のlabelが`reusable-containers` featureを有効にしたときにしか付かないためである。
-`running`のcontainerは所有者の生死を判定できないので削除せず、`containers.slice`の上限の内に置いたまま、作ったprojectの破棄処理で直す。
+`running`のcontainerは所有者の生死を判定できないので削除せず、`user-workload-containers.slice`の上限の内に置いたまま、作ったprojectの破棄処理で直す。
 `docker rm`は`--force`なしではrunningのcontainerを拒むので、一覧を取った後にstartされたcontainerも削除されない。
 回収は`docker image prune`より前に走り、削除したcontainerだけが参照していたtagのないimageを同じ実行で回収する。
 

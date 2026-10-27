@@ -762,6 +762,10 @@
             front: (configOf front).Environment == [ "HOME=${hostConfig.dotfiles.workstation.homeDir}" ]
           ) fronts;
           assert lib.all (front: (configOf front).MemoryMax == "2G") fronts;
+          # user.slice 配下の root 所有 workload。system.slice の基盤と上限を分け合わない
+          assert lib.all (
+            front: (configOf front).Slice == hostConfig.dotfiles.workstation.workload.slices.support
+          ) fronts;
           assert lib.all (front: (configOf front).Restart == "always") fronts;
           assert lib.all (front: (configOf front).RestartSec == "5s") fronts;
           assert lib.all (front: services.${front.service}.wantedBy == [ "multi-user.target" ]) fronts;

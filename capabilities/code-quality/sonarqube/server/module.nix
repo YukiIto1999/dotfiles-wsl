@@ -8,6 +8,7 @@ let
   enabled = builtins.elem "code-quality" config.dotfiles.capabilities.resolved;
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
+    cgroupParent = config.dotfiles.workstation.workload.slices.support;
   };
   repository = "sonarqube";
   version = "26.7.0.124771-community";

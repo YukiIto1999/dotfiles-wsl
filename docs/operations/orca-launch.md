@@ -23,6 +23,10 @@ dotfiles-project-run [--attr NAME] -- ABSOLUTE-EXECUTABLE [ARG...]
 
 利用者が `direnv allow` した project の `.envrc` を、信頼の記録として使う。入口は `direnv status --json` を読み、見つかった `.envrc` が許可済み(`allowed` が 0)のときだけ、その `.envrc` がある directory を flake として `nix develop --no-update-lock-file --no-write-lock-file DIRECTORY#NAME` で開く。`NAME` は既定で `default` である。devShell の中で `ABSOLUTE-EXECUTABLE` を絶対 path で起動し、Orca が後ろへ足した引数はそのまま渡る。
 
+既に`user.slice`の下にいるcommandは、agent scopeを含む現在の配置を保つ。
+通常のWSL shellなど外にいる場合は、user managerの`app.slice`へscopeを作ってからdevShellを開き、workloadの共通上限に含める。
+user managerに接続できない場合は上限の外へfallbackせず、commandを起動しない。
+
 次の場合は executable を起動せず、非ゼロで終わる。host の PATH や基礎環境へは戻らない。
 
 - `.envrc` が無い、未承認、拒否、`.env`、direnv の状態を読めない。

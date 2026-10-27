@@ -1,4 +1,4 @@
-{ lib }:
+{ lib, cgroupParent }:
 
 name:
 {
@@ -12,7 +12,6 @@ name:
 }:
 let
   networkUnit = "docker-dotfiles-backends-network.service";
-  placement = import ./cgroup-placement.nix;
 in
 {
   containers."${name}" = {
@@ -29,7 +28,8 @@ in
     extraOptions = [
       "--init"
       "--network=dotfiles-backends"
-      "--cgroup-parent=${placement.declared}"
+      # daemon の既定の slice は宣言済みの backend と上限を分け合うため既定への依存は不可
+      "--cgroup-parent=${cgroupParent}"
     ]
     ++ extraOptions
     ++ lib.concatMap (port: [

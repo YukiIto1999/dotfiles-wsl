@@ -1,7 +1,8 @@
 { lib }:
 
-{
+rec {
   name = "fixture";
+  cgroupParent = "synthetic-workload.slice";
 
   args = {
     image = "registry.example.invalid/backend:1@sha256:fixture";
@@ -32,7 +33,7 @@
       extraOptions = [
         "--init"
         "--network=dotfiles-backends"
-        "--cgroup-parent=system.slice"
+        "--cgroup-parent=${cgroupParent}"
         "--memory=256m"
         "--label=fixture=true"
         "-p"

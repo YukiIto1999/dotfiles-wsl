@@ -612,6 +612,7 @@
           assert serviceConfig.RuntimeDirectoryMode == "0700";
           assert serviceConfig.LimitNOFILE == "4096:4096";
           assert serviceConfig.MemoryMax == "2G";
+          assert serviceConfig.Slice == hostConfig.dotfiles.workstation.workload.slices.support;
           assert serviceConfig.IPAddressDeny == "any";
           assert serviceConfig.IPAddressAllow == "localhost";
           assert serviceConfig.Restart == "always";

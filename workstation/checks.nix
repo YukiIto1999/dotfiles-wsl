@@ -350,6 +350,220 @@
               };
             })
           ]).config;
+        # user.slice は logind の user-<UID>.slice の祖先で、名前の dash が親を表すため user-workload.slice も同じ祖先に入る。
+        # init.scope と system.slice の基盤は祖先の外に残る
+        sliceStem = slice: lib.removeSuffix ".slice" slice;
+        sliceWithin = parent: slice: lib.hasPrefix "${sliceStem parent}-" slice;
+        slicePercent = value: lib.toInt (lib.removeSuffix "%" value);
+        workloadVariantConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            (
+              { lib, ... }:
+              {
+                dotfiles.workstation.workload = {
+                  hostReservePercent = lib.mkForce 20;
+                  reclaimMarginPercent = 8;
+                  memorySwapMaxPercent = lib.mkForce 65;
+                };
+              }
+            )
+          ]).config;
+        workloadConfigs = machineConfigs // {
+          workload-variant = workloadVariantConfig;
+        };
+        # 上限の外に残す基盤。docker は container の scope を作る daemon であり、container そのものではない
+        workloadEssentialServices = [
+          "docker"
+          "docker-build-artifact-gc"
+          "dotfiles-agent-reserve-swap"
+          "dotfiles-zram-swap"
+          "nix-gc"
+          "otel-collector"
+        ];
+        workloadViolations =
+          configuration:
+          let
+            options = configuration.dotfiles.workstation.workload;
+            inherit (options) slices;
+            services = configuration.systemd.services;
+            serviceSlice = name: services.${name}.serviceConfig.Slice or null;
+            insideAggregate =
+              slice: slice != null && (slice == slices.aggregate || sliceWithin slices.aggregate slice);
+            placed = lib.sort builtins.lessThan (
+              builtins.attrNames (
+                lib.filterAttrs (_: service: (service.serviceConfig.Slice or null) == slices.support) services
+              )
+            );
+            expectedPlaced = lib.sort builtins.lessThan (
+              [
+                "nix-daemon"
+                configuration.dotfiles.platform.mcp.gateway.service
+              ]
+              ++ map (front: front.service) (builtins.attrValues configuration.dotfiles.platform.mcp.fronts)
+            );
+            expectedLimits = {
+              MemoryHigh = "${toString options.memoryHighPercent}%";
+              MemoryMax = "${toString options.memoryMaxPercent}%";
+              MemorySwapMax = "${toString options.memorySwapMaxPercent}%";
+            };
+            agentSlice = configuration.dotfiles.agents.slice;
+            containersSlice = configuration.systemd.slices.${sliceStem slices.containers} or null;
+            declaredContainers = builtins.attrValues configuration.virtualisation.oci-containers.containers;
+            undeclaredBounded =
+              containersSlice != null
+              && (configuration.virtualisation.docker.daemon.settings.cgroup-parent or null) == slices.containers
+              && slicePercent containersSlice.sliceConfig.MemoryMax < options.memoryMaxPercent
+              && slicePercent containersSlice.sliceConfig.MemorySwapMax <= options.memorySwapMaxPercent;
+          in
+          lib.optional (
+            (configuration.systemd.slices.${sliceStem slices.aggregate}.sliceConfig or { }) != expectedLimits
+          ) "aggregate slice limits do not follow the workload options"
+          ++ lib.optional (
+            !(builtins.hasAttr (sliceStem slices.support) configuration.systemd.slices)
+          ) "the workload support slice is not declared"
+          ++ lib.optional (
+            !(sliceWithin slices.aggregate slices.support && sliceWithin slices.support slices.containers)
+          ) "workload slices are not nested by name under user.slice"
+          ++ lib.optional (
+            !(
+              options.memoryHighPercent < options.memoryMaxPercent
+              && options.memoryMaxPercent + options.hostReservePercent == 100
+            )
+          ) "workload MemoryHigh and MemoryMax do not leave the declared host reserve"
+          ++
+            lib.optional (placed != expectedPlaced)
+              "services placed in user-workload.slice differ from nix-daemon, the MCP fronts and the MCP gateway"
+          ++ lib.optional (lib.any (
+            name: insideAggregate (serviceSlice name)
+          ) workloadEssentialServices) "an essential host service moved inside user.slice"
+          ++ lib.optional (
+            (services."user@".serviceConfig or { }) ? Slice
+          ) "user@ was moved out of its canonical user-<UID>.slice"
+          # launcher、GC、doctor は /user.slice/user-<UID>.slice/user@<UID>.service/agents.slice/ の実 path を読む
+          ++ lib.optional (
+            !(configuration.systemd.user.slices ? agents)
+            || (configuration.systemd.user.slices.agents.sliceConfig ? Slice)
+          ) "the agents slice must stay a user-manager slice below user@<UID>.service"
+          ++ lib.optional (
+            !(lib.all (
+              container: lib.elem "--cgroup-parent=${slices.support}" container.extraOptions
+            ) declaredContainers)
+          ) "a declared container is outside user-workload.slice"
+          ++ lib.optional (
+            configuration.virtualisation.docker.enable && !undeclaredBounded
+          ) "undeclared containers are not bounded inside the workload envelope"
+          ++ lib.optional (
+            !(
+              agentSlice.userManager.memoryMaxPercent < options.memoryMaxPercent
+              && agentSlice.userManager.memoryHighPercent < options.memoryHighPercent
+              && agentSlice.memorySwapMaxPercent <= options.memorySwapMaxPercent
+            )
+          ) "agent user manager limits are not enclosed by the workload envelope";
+        # 実測（2026-10-27、nixos host）。基盤は kernel、init.scope と Docker daemon の最大、otel-collector の最大と
+        # journald などの概算。workload は同時に動いていた user.slice、nix-daemon、MCP front、宣言済みと宣言外の container の常駐量
+        observedWorkloadResources = {
+          physicalBytes = 42059022336;
+          hostBytes = 1237168128 + 859488256 + 4369203200 + 384303104 + 134217728;
+          workloadResidentBytes = 19298754560 + 1794834432 + 4541833216 + 4667039744 + 232697856;
+          workloadSwapBytes = 546754560 + 32141312 + 2940928;
+        };
+        observedReserveHolds =
+          configuration:
+          let
+            options = configuration.dotfiles.workstation.workload;
+            physical = observedWorkloadResources.physicalBytes;
+          in
+          observedWorkloadResources.hostBytes <= builtins.div (physical * options.hostReservePercent) 100
+          &&
+            observedWorkloadResources.workloadResidentBytes
+            <= builtins.div (physical * options.memoryHighPercent) 100
+          &&
+            observedWorkloadResources.workloadSwapBytes
+            <= builtins.div (physical * options.memorySwapMaxPercent) 100;
+        withWorkloadOptions =
+          configuration: update:
+          configuration
+          // {
+            dotfiles = configuration.dotfiles // {
+              workstation = configuration.dotfiles.workstation // {
+                workload = configuration.dotfiles.workstation.workload // update;
+              };
+            };
+          };
+        withServices =
+          configuration: update:
+          configuration
+          // {
+            systemd = configuration.systemd // {
+              services = update configuration.systemd.services;
+            };
+          };
+        withoutServiceSlice =
+          name: services:
+          services
+          // {
+            ${name} = services.${name} // {
+              serviceConfig = builtins.removeAttrs services.${name}.serviceConfig [ "Slice" ];
+            };
+          };
+        withServiceSlice =
+          name: slice: services:
+          services
+          // {
+            ${name} = services.${name} // {
+              serviceConfig = services.${name}.serviceConfig // {
+                Slice = slice;
+              };
+            };
+          };
+        withoutSlices =
+          names: configuration:
+          configuration
+          // {
+            systemd = configuration.systemd // {
+              slices = builtins.removeAttrs configuration.systemd.slices names;
+            };
+          };
+        referenceSlices = hostConfig.dotfiles.workstation.workload.slices;
+        workloadMutations = {
+          nix-daemon-outside = withServices hostConfig (withoutServiceSlice "nix-daemon");
+          mcp-front-outside = withServices hostConfig (
+            withoutServiceSlice (
+              lib.head (map (front: front.service) (builtins.attrValues hostConfig.dotfiles.platform.mcp.fronts))
+            )
+          );
+          mcp-gateway-outside = withServices hostConfig (
+            withoutServiceSlice hostConfig.dotfiles.platform.mcp.gateway.service
+          );
+          docker-daemon-inside = withServices hostConfig (withServiceSlice "docker" referenceSlices.support);
+          user-manager-relocated = withServices hostConfig (withServiceSlice "user@" referenceSlices.support);
+          agents-slice-missing = hostConfig // {
+            systemd = hostConfig.systemd // {
+              user = hostConfig.systemd.user // {
+                slices = builtins.removeAttrs hostConfig.systemd.user.slices [ "agents" ];
+              };
+            };
+          };
+          aggregate-unbounded = withoutSlices [ "user" ] hostConfig;
+          undeclared-unbounded = withoutSlices [ (sliceStem referenceSlices.containers) ] hostConfig;
+          declared-container-unplaced = hostConfig // {
+            virtualisation = hostConfig.virtualisation // {
+              oci-containers = hostConfig.virtualisation.oci-containers // {
+                containers = lib.mapAttrs (
+                  _: container:
+                  container
+                  // {
+                    extraOptions = builtins.filter (
+                      option: !(lib.hasPrefix "--cgroup-parent" option)
+                    ) container.extraOptions;
+                  }
+                ) hostConfig.virtualisation.oci-containers.containers;
+              };
+            };
+          };
+          reserve-drift = withWorkloadOptions hostConfig { memoryMaxPercent = 95; };
+        };
         powershellProbe = "[Console]::WriteLine(20)";
         mkWindowsPercentageObservation = import ./package.nix;
         mkFakePowerShell =
@@ -812,6 +1026,74 @@
             test ! -s "$OPERATIONS"
             touch "$out"
           '';
+
+        # 基盤の最大使用量を残し、同時に動く workload を MemoryHigh に収め、user.slice の一つの親で合計を抑える
+        workload-envelope-contract =
+          assert lib.assertMsg
+            (lib.all (violations: violations == [ ]) (
+              builtins.attrValues (lib.mapAttrs (_: workloadViolations) workloadConfigs)
+            ))
+            "workload envelope violations: ${
+              builtins.toJSON (lib.mapAttrs (_: workloadViolations) workloadConfigs)
+            }";
+          assert lib.assertMsg (
+            builtins.attrNames workloadConfigs
+            == lib.sort builtins.lessThan (hostNames ++ [ "workload-variant" ])
+          ) "every host and the reserve variant must be checked";
+          assert lib.assertMsg
+            (lib.all (mutation: workloadViolations mutation != [ ]) (builtins.attrValues workloadMutations))
+            "workload envelope mutations escaped the contract: ${
+              builtins.toJSON (
+                builtins.attrNames (
+                  lib.filterAttrs (_: mutation: workloadViolations mutation == [ ]) workloadMutations
+                )
+              )
+            }";
+          assert lib.assertMsg (observedReserveHolds hostConfig)
+            "the host reserve, MemoryHigh or swap limit does not accommodate the observed host and workload";
+          assert lib.assertMsg (
+            !(observedReserveHolds (
+              withWorkloadOptions hostConfig {
+                hostReservePercent = 5;
+                memoryHighPercent = 90;
+              }
+            ))
+          ) "a reserve below the observed host peak escaped the contract";
+          assert lib.assertMsg (
+            !(observedReserveHolds (withWorkloadOptions hostConfig { memoryHighPercent = 60; }))
+          ) "a MemoryHigh below the observed workload escaped the contract";
+          pkgs.runCommandLocal "check-workload-envelope-contract"
+            {
+              nativeBuildInputs = [ pkgs.gnugrep ];
+            }
+            ''
+              set -euo pipefail
+
+              units=${systemUnits}
+              aggregate_dropin=$units/${workstation.workload.slices.aggregate}.d/overrides.conf
+              test -f "$units/${workstation.workload.slices.support}"
+              test -f "$aggregate_dropin"
+              grep -Fxq 'MemoryHigh=${toString workstation.workload.memoryHighPercent}%' "$aggregate_dropin"
+              grep -Fxq 'MemoryMax=${toString workstation.workload.memoryMaxPercent}%' "$aggregate_dropin"
+              grep -Fxq 'MemorySwapMax=${toString workstation.workload.memorySwapMaxPercent}%' "$aggregate_dropin"
+
+              # logind の user-.slice の template は user- で始まる全 slice に TasksMax と StopWhenUnneeded を与える。
+              # NixOS が配備しない間だけ user-workload.slice の資源と寿命は宣言した値になる
+              test ! -e "$units/user-.slice.d"
+              if [ -e "$units/user@.service.d/overrides.conf" ]; then
+                if grep -Eq '^Slice=' "$units/user@.service.d/overrides.conf"; then
+                  echo 'user@.service must stay in its canonical user-<UID>.slice' >&2
+                  exit 1
+                fi
+              fi
+
+              runtime=$TMPDIR/systemd-analyze-runtime
+              mkdir -p "$runtime"
+              HOME=$TMPDIR XDG_RUNTIME_DIR="$runtime" SYSTEMD_UNIT_PATH="$units" \
+                ${lib.getExe' pkgs.systemd "systemd-analyze"} --user verify --man=no --generators=no \
+                  ${workstation.workload.slices.aggregate} ${workstation.workload.slices.support}
+              touch "$out"
+            '';
 
         host-stability-contract =
           assert lib.assertMsg (

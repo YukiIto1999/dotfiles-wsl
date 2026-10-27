@@ -124,6 +124,7 @@ in
       RuntimeDirectoryMode = "0700";
       LimitNOFILE = "4096:4096";
       MemoryMax = "2G";
+      Slice = cfg.workstation.workload.slices.support;
       IPAddressDeny = "any";
       IPAddressAllow = "localhost";
       ExecStart = "${agentgateway}/bin/agentgateway -f ${gateway.source}";

@@ -261,6 +261,7 @@ in
               inherit (cfg) sessionPolicy;
             };
         MemoryMax = "2G";
+        Slice = config.dotfiles.workstation.workload.slices.support;
       }
       // lib.optionalAttrs (!target.needsNetwork) {
         IPAddressDeny = "any";

@@ -58,6 +58,18 @@
 
         systemUnits = hostConfig.environment.etc."systemd/system".source;
 
+        hostSlices = hostConfig.dotfiles.workstation.workload.slices;
+        relocatedSlices = {
+          inherit (hostSlices) aggregate;
+          support = "user-relocated.slice";
+          containers = "user-relocated-containers.slice";
+        };
+        relocatedConfig =
+          (mkProbeSystem [
+            normalMachineModule
+            { dotfiles.workstation.workload.slices = relocatedSlices; }
+          ]).config;
+
         fakeDocker = pkgs.writeShellApplication {
           name = "docker";
           text = builtins.readFile ./fixtures/fake-docker.sh;
@@ -270,6 +282,8 @@
                   kind = "normalized-protocol";
                   command = import ./impl/container-placement-package.nix {
                     inherit pkgs lib declaredContainers;
+                    declaredSlice = hostSlices.support;
+                    undeclaredSlice = hostSlices.containers;
                   };
                   envelopeVersion = 1;
                   allowedOutcomeIds = [ "container-placement" ];
@@ -785,8 +799,13 @@
               (import ./fixtures/container-backend.nix { inherit lib; })
               (import ./fixtures/container-backend-minimal.nix { inherit lib; })
             ];
-            mkContainerBackend = import ./impl/container-backend.nix { inherit lib; };
-            actual = map (fixture: mkContainerBackend fixture.name fixture.args) fixtures;
+            mkContainerBackend =
+              fixture:
+              import ./impl/container-backend.nix {
+                inherit lib;
+                inherit (fixture) cgroupParent;
+              };
+            actual = map (fixture: mkContainerBackend fixture fixture.name fixture.args) fixtures;
             expected = map (fixture: fixture.expected) fixtures;
           in
           assert lib.assertMsg (actual == expected) "container backend helper output changed";
@@ -1001,7 +1020,8 @@
                 inherit pkgs;
                 cgroupParent = value;
               };
-            boundedBackend = evaluate (placementFixture "containers.slice").valid;
+            boundedBackend = evaluate (placementFixture fixture.slices.containers).valid;
+            hostPlacedBackend = evaluate (placementFixture hostSlices.support).valid;
             unplacedBackend = evaluate (placementFixture null).valid;
             optionFixture =
               options:
@@ -1042,7 +1062,10 @@
           assert valid.volumeOwners == fixture.expected.volumeOwners;
           assert valid.wrongValues == [ ];
           assert valid.missingFlags == [ ];
-          assert boundedBackend.wrongValues == [ "synthetic-backend:--cgroup-parent=containers.slice" ];
+          assert
+            boundedBackend.wrongValues == [ "synthetic-backend:--cgroup-parent=${fixture.slices.containers}" ];
+          assert
+            hostPlacedBackend.wrongValues == [ "synthetic-backend:--cgroup-parent=${hostSlices.support}" ];
           assert unplacedBackend.missingFlags == [ "synthetic-backend:--cgroup-parent" ];
           assert gracefulStop.unexpectedTokens == [ ] && gracefulStop.wrongValues == [ ];
           assert indefiniteStop.wrongValues == [ "synthetic-backend:--stop-timeout=-1" ];
@@ -1156,6 +1179,11 @@
               && lib.all (argv: !(within undeclared (sliceOf settings argv))) (builtins.attrValues argvs);
             hostArgv = helpers.containerArgv.containerArgv;
             hostUndeclaredSlice = undeclaredSliceOf hostConfig;
+            relocatedArgv = lib.mapAttrs (
+              _: container: container.extraOptions
+            ) relocatedConfig.virtualisation.oci-containers.containers;
+            relocatedUndeclaredSlice = undeclaredSliceOf relocatedConfig;
+            hasSlice = configuration: slice: configuration.systemd.slices ? ${lib.removeSuffix ".slice" slice};
             withoutDaemonParent = hostConfig // {
               virtualisation = hostConfig.virtualisation // {
                 docker = hostConfig.virtualisation.docker // {
@@ -1195,6 +1223,25 @@
           in
           assert lib.assertMsg (placementHolds hostConfig hostArgv)
             "declared backends must stay outside, and other containers inside, the bounded container slice";
+          assert lib.assertMsg (
+            hostUndeclaredSlice == hostSlices.containers
+            && lib.all (
+              argv: sliceOf hostConfig.virtualisation.docker.daemon.settings argv == hostSlices.support
+            ) (builtins.attrValues hostArgv)
+            && within hostSlices.support hostUndeclaredSlice
+          ) "container placement must follow the user.slice workload hierarchy";
+          assert lib.assertMsg (
+            relocatedArgv != { }
+            && relocatedUndeclaredSlice == relocatedSlices.containers
+            && lib.all (
+              argv: sliceOf relocatedConfig.virtualisation.docker.daemon.settings argv == relocatedSlices.support
+            ) (builtins.attrValues relocatedArgv)
+            && placementHolds relocatedConfig relocatedArgv
+            && hasSlice relocatedConfig relocatedSlices.support
+            && hasSlice relocatedConfig relocatedSlices.containers
+            && !(hasSlice relocatedConfig hostSlices.support)
+            && !(hasSlice relocatedConfig hostSlices.containers)
+          ) "container placement must follow the slices the workload owner publishes";
           assert lib.assertMsg (
             !(placementHolds withoutDaemonParent hostArgv)
           ) "containers without a daemon cgroup parent escaped the placement contract";
@@ -1284,11 +1331,12 @@
         # 配置の判定は docker と systemd の答えで決まるため両方の境界の差し替えで observation を実行
         container-placement-observation-behavior =
           let
-            placement = import ./impl/cgroup-placement.nix;
             inherit (containerObservations."containers/roster") members;
             observe = import ./impl/container-placement-package.nix {
               inherit pkgs lib;
               declaredContainers = members;
+              declaredSlice = relocatedSlices.support;
+              undeclaredSlice = relocatedSlices.containers;
               dockerCommand = lib.getExe fakeDocker;
               systemctlCommand = lib.getExe fakeSystemctl;
             };
@@ -1307,8 +1355,8 @@
 
               export FAKE_CONTAINERS=$PWD/containers FAKE_SCOPES=$PWD/scopes FAKE_SYSTEMCTL_LOG=$PWD/systemctl.log
               declared=${lib.escapeShellArg (builtins.head members)}
-              protected=${placement.declared}
-              bounded=${placement.undeclared}
+              protected=${relocatedSlices.support}
+              bounded=${relocatedSlices.containers}
 
               expect() {
                 local output=$1 status=$2 needle=$3
@@ -1341,6 +1389,12 @@
               printf '%s\n' "docker-backend.scope|$bounded" "docker-testcase.scope|$bounded" > scopes
               ${lib.getExe observe} > confined.json
               expect confined.json fail "$declared in $bounded instead of $protected"
+
+              # switch 前に起動した container は旧配置のまま残り、移るまで doctor が報告する
+              printf '%s\n' "docker-backend.scope|system.slice" "docker-testcase.scope|containers.slice" > scopes
+              ${lib.getExe observe} > legacy.json
+              expect legacy.json fail "$declared in system.slice instead of $protected"
+              expect legacy.json fail "sharp_kalam in containers.slice instead of $bounded"
 
               printf '%s\n' "docker-backend.scope|$protected" > scopes
               ${lib.getExe observe} > vanished.json

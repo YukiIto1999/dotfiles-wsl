@@ -12,6 +12,7 @@ let
     && config.dotfiles.capabilities.registry."project-memory".implementation == "hindsight";
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
+    cgroupParent = config.dotfiles.workstation.workload.slices.support;
   };
 
   repository = "ghcr.io/vectorize-io/hindsight";

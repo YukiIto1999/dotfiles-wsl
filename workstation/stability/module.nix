@@ -14,6 +14,9 @@ let
   zramPriority = 100;
   reserveSwapFile = "/var/lib/dotfiles-agent-swap/reserve.swap";
   minimumSwapGiB = cfg.swap.minimumTotalGiB;
+  inherit (cfg) workload;
+  workloadMemoryMaxPercent = 100 - workload.hostReservePercent;
+  workloadMemoryHighPercent = workloadMemoryMaxPercent - workload.reclaimMarginPercent;
   pageblockKbytes = 2048;
   lowmemZones = 2;
   migratetypes = 3;
@@ -110,6 +113,51 @@ in
         description = "Windows committed memory 使用率の異常値。";
       };
     };
+    workload = {
+      hostReservePercent = lib.mkOption {
+        type = lib.types.ints.between 1 99;
+        default = 20;
+        description = ''
+          物理 memory のうち user.slice の外へ残す割合。kernel、WSL の init と WSLg、systemd、
+          Docker daemon と基盤 service がこの残りで動く。user.slice の MemoryMax は 100 からこの値を引いた値になる。
+        '';
+      };
+      reclaimMarginPercent = lib.mkOption {
+        type = lib.types.ints.between 1 98;
+        default = 5;
+        description = "user.slice の MemoryHigh を MemoryMax より手前に置く幅（物理 memory の百分率）。";
+      };
+      memorySwapMaxPercent = lib.mkOption {
+        type = lib.types.ints.between 1 100;
+        default = 50;
+        description = "user.slice 全体の MemorySwapMax。swap 総量ではなく物理 memory に対する割合。";
+      };
+      memoryHighPercent = lib.mkOption {
+        type = lib.types.ints.between 1 99;
+        readOnly = true;
+        internal = true;
+        description = "user.slice の MemoryHigh。reserve と回収の幅から導く。";
+      };
+      memoryMaxPercent = lib.mkOption {
+        type = lib.types.ints.between 1 99;
+        readOnly = true;
+        internal = true;
+        description = "user.slice の MemoryMax。reserve から導く。";
+      };
+      slices = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        internal = true;
+        default = {
+          aggregate = "user.slice";
+          support = "user-workload.slice";
+          containers = "user-workload-containers.slice";
+        };
+        description = ''
+          資源の共通の祖先と、その下の root 所有 workload の slice 名。
+          container の配置、Nix、MCP の slice はこの値だけを参照する。
+        '';
+      };
+    };
   };
 
   config.assertions = [
@@ -117,7 +165,31 @@ in
       assertion = cfg.windowsMemoryCommit.warning < cfg.windowsMemoryCommit.failure;
       message = "Windows committed memory warning threshold must be below failure";
     }
+    {
+      assertion = workload.reclaimMarginPercent < workloadMemoryMaxPercent;
+      message = "Workload reclaim margin must be below the workload MemoryMax";
+    }
+    {
+      assertion =
+        workload.slices.aggregate == "user.slice"
+        && lib.hasPrefix "user-" workload.slices.support
+        && lib.hasPrefix "${lib.removeSuffix ".slice" workload.slices.support}-" workload.slices.containers;
+      message = "Workload slices must retain user.slice as the common ancestor of native user sessions and support workloads";
+    }
   ];
+
+  config.dotfiles.workstation.workload = {
+    memoryHighPercent = workloadMemoryHighPercent;
+    memoryMaxPercent = workloadMemoryMaxPercent;
+  };
+
+  config.systemd.slices.${lib.removeSuffix ".slice" workload.slices.aggregate}.sliceConfig = {
+    MemoryHigh = "${toString workloadMemoryHighPercent}%";
+    MemoryMax = "${toString workloadMemoryMaxPercent}%";
+    MemorySwapMax = "${toString workload.memorySwapMaxPercent}%";
+  };
+  config.systemd.slices.${lib.removeSuffix ".slice" workload.slices.support}.description =
+    "Root-owned development support inside the user slice";
 
   config.dotfiles.health.observations = {
     "host/swap" = {

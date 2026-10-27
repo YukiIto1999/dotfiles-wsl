@@ -1,7 +1,8 @@
 { lib }:
 
-{
+rec {
   name = "minimal";
+  cgroupParent = "synthetic-minimal.slice";
 
   args.image = "registry.example.invalid/minimal:1@sha256:fixture";
 
@@ -12,7 +13,7 @@
       extraOptions = [
         "--init"
         "--network=dotfiles-backends"
-        "--cgroup-parent=system.slice"
+        "--cgroup-parent=${cgroupParent}"
       ];
     };
 

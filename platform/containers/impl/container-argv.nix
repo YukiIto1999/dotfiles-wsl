@@ -6,7 +6,7 @@
 
 let
   inherit (execTokens) valuesOf argvOfScript;
-  placement = import ./cgroup-placement.nix;
+  declaredSlice = hostConfig.dotfiles.workstation.workload.slices.support;
 
   # 生成された start script が docker へ渡す argv。宣言のどの経路から来ても
   # ここに現れるので、extraOptions だけを見ると networks や user を取り逃す
@@ -62,7 +62,7 @@ let
     "--user" = _: value: builtins.match "[1-9][0-9]*:[1-9][0-9]*" value != null;
     "--env-file" = name: value: builtins.elem value (readableSecrets name);
     "--network" = _: value: value == "dotfiles-backends";
-    "--cgroup-parent" = _: value: value == placement.declared;
+    "--cgroup-parent" = _: value: value == declaredSlice;
     "--memory" = _: value: builtins.match "[0-9]+[mg]" value != null;
     "--memory-swap" = _: value: builtins.match "[1-9][0-9]*[mg]" value != null;
     "--cpus" = _: value: builtins.match "([1-9][0-9]*(\\.[0-9]+)?|0\\.[0-9]*[1-9][0-9]*)" value != null;

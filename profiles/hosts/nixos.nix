@@ -35,6 +35,10 @@
       minimumFreeGiB = 32;
       targetFreeGiB = 64;
     };
+    workload = {
+      hostReservePercent = 18;
+      memorySwapMaxPercent = 70;
+    };
     swap.minimumTotalGiB = 8;
   };
 }

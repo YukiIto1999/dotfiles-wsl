@@ -8,7 +8,7 @@ let
   targetNixFreeGiB = cfg.nix.targetFreeGiB;
   maxJobs = cfg.nix.maxJobs;
   buildCores = cfg.nix.cores;
-  # 同じ system.slice の journald、udevd、container、MCP front（既定 100）より build を後に回す。
+  # 同じ user-workload.slice の MCP front（既定 100）より build を後に回す。
   nixDaemonCpuWeight = 50;
   binaryCaches = import ./assets/nix-caches.nix;
   nixGc = {
@@ -119,5 +119,9 @@ in
 
   # crates.io が curl 既定 UA を 403 拒否するため指定する許可 UA
   config.systemd.services.nix-daemon.environment.NIX_CURL_FLAGS = "--user-agent=Nixpkgs";
-  config.systemd.services.nix-daemon.serviceConfig.CPUWeight = nixDaemonCpuWeight;
+  # build は nix-daemon の cgroup で動くため、aggregate の中へ置かないと上限の外で memory を使う
+  config.systemd.services.nix-daemon.serviceConfig = {
+    Slice = cfg.workload.slices.support;
+    CPUWeight = nixDaemonCpuWeight;
+  };
 }

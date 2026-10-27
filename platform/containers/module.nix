@@ -15,10 +15,10 @@ let
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
   restartFailureCount = 20;
-  containerPlacement = import ./impl/cgroup-placement.nix;
+  workloadSlices = myCfg.workstation.workload.slices;
 
   undeclaredContainerSlice = {
-    name = lib.removeSuffix ".slice" containerPlacement.undeclared;
+    name = lib.removeSuffix ".slice" workloadSlices.containers;
     # 値の根拠は docs/architecture/ai-tooling.md の「containerの配置と上限」
     sliceConfig = {
       MemoryHigh = "7.5%";
@@ -417,6 +417,8 @@ let
       declaredContainers = map (entry: entry.image.container) imageEntries;
       placementObservation = import ./impl/container-placement-package.nix {
         inherit pkgs lib declaredContainers;
+        declaredSlice = workloadSlices.support;
+        undeclaredSlice = workloadSlices.containers;
       };
     in
     builtins.listToAttrs (
@@ -489,7 +491,8 @@ in
           enable = true;
           daemon.settings = {
             builder.gc = buildArtifactGcContract.daemonGc;
-            cgroup-parent = containerPlacement.undeclared;
+            # docker の既定の system.slice は基盤の service と同じ上限なしの配置になるため既定のままは不可
+            cgroup-parent = workloadSlices.containers;
           };
         };
         oci-containers.backend = "docker";

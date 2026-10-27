@@ -46,6 +46,13 @@
         fixtureProjectRun = programs.mkProjectRun {
           nixCommand = fakeNixDevelop;
           direnvCommand = fakeDirenv;
+          cgroupFile = pkgs.writeText "bounded-project-cgroup" "0::/user.slice/user-1000.slice/user@1000.service/agents.slice/client.scope\n";
+        };
+        unboundedProjectRun = programs.mkProjectRun {
+          nixCommand = fakeNixDevelop;
+          direnvCommand = fakeDirenv;
+          cgroupFile = pkgs.writeText "unbounded-project-cgroup" "0::/init.scope\n";
+          systemdRunCommand = pkgs.writeShellScript "unavailable-user-manager" "exit 69";
         };
       in
       {
@@ -87,6 +94,7 @@
                 jq
               ];
               PROJECT_RUN = lib.getExe fixtureProjectRun;
+              UNBOUNDED_PROJECT_RUN = lib.getExe unboundedProjectRun;
             }
             ''
               bash ${./fixtures/project-run.sh}

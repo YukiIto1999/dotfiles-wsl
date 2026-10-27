@@ -579,6 +579,8 @@ in
                   "workstation.nix.cores"
                   "workstation.nix.minimumFreeGiB"
                   "workstation.nix.targetFreeGiB"
+                  "workstation.workload.hostReservePercent"
+                  "workstation.workload.memorySwapMaxPercent"
                 ];
 
             # module system の全 option leaf を辿る。dotfiles 配下だけを起点にすると、

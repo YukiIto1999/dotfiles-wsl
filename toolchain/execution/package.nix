@@ -43,6 +43,8 @@ let
     {
       nixCommand ? lib.getExe pkgs.nix,
       direnvCommand ? lib.getExe pkgs.direnv,
+      systemdRunCommand ? lib.getExe' pkgs.systemd "systemd-run",
+      cgroupFile ? "/proc/self/cgroup",
     }:
     pkgs.writeShellApplication {
       name = "dotfiles-project-run";
@@ -52,11 +54,13 @@ let
       ];
       text =
         builtins.replaceStrings
-          [ "@direnvCommand@" "@nixCommand@" "@envCommand@" ]
+          [ "@direnvCommand@" "@nixCommand@" "@envCommand@" "@systemdRunCommand@" "@cgroupFile@" ]
           [
             (lib.escapeShellArg (toString direnvCommand))
             (lib.escapeShellArg (toString nixCommand))
             (lib.escapeShellArg "${pkgs.coreutils}/bin/env")
+            (lib.escapeShellArg (toString systemdRunCommand))
+            (lib.escapeShellArg (toString cgroupFile))
           ]
           (builtins.readFile ./impl/project-run.sh);
     };

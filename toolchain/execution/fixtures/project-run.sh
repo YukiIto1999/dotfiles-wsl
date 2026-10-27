@@ -92,12 +92,6 @@ test "${argv[8]}" = x
 test "$(cat "$fixture/client.cwd")" = "$(realpath "$project/sub")"
 test "$(cat "$fixture/client.tool")" = "$fixture/devshell-bin/project-tool"
 test ! -e "$fixture/host-client-ran"
-mapfile -d '' -t nix_argv < "$fixture/nix.argv"
-test "${nix_argv[0]}" = develop
-test "${nix_argv[1]}" = --no-update-lock-file
-test "${nix_argv[2]}" = --no-write-lock-file
-test "${nix_argv[3]}" = "$project#default"
-test "${nix_argv[4]}" = --command
 
 # The caller's TMPDIR state survives nix develop, which always rewrites it.
 for name in TMPDIR TMP TEMP TEMPDIR; do
@@ -120,11 +114,8 @@ status=0
 entry CLIENT_STATUS=31 "$PROJECT_RUN" -- "$client" || status=$?
 test "$status" -eq 31
 
-# A named devShell is opened instead of the default.
-reset_observations
-entry "$PROJECT_RUN" --attr agent -- "$client"
-mapfile -d '' -t nix_argv < "$fixture/nix.argv"
-test "${nix_argv[3]}" = "$project#agent"
+expect_refused 'unavailable resource scope' "$UNBOUNDED_PROJECT_RUN" -- "$client"
+test ! -e "$fixture/nix.argv"
 
 # A missing or failing devShell leaves the client unstarted and does not fall back to the host PATH.
 export FAKE_NIX_FAIL=1

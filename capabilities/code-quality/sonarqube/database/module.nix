@@ -8,6 +8,7 @@ let
   enabled = builtins.elem "code-quality" config.dotfiles.capabilities.resolved;
   mkContainerBackend = import ../../../../platform/containers/impl/container-backend.nix {
     inherit lib;
+    cgroupParent = config.dotfiles.workstation.workload.slices.support;
   };
   inherit (import ../../../../platform/containers/impl/port-bindings.nix { inherit lib; })
     publishedPortBindings

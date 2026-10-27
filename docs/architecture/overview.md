@@ -21,9 +21,9 @@ hostからpackage set、config、overlay、platformを差し替えることは�
 見直す場合も、検査を後段へ移して予算に合わせたり、二つの検証正本を恒久的に併置したりしない。
 
 host profileの値は型付きoptionを通してowner moduleへ渡す。
-WSL登録名、Windows準備用のVM資源、追加drive、DNS、VHD方針、Nixの並列度と空き容量reserveはhostで選ぶ。
+WSL登録名、Windows準備用のVM資源、追加drive、DNS、VHD方針、Nixの並列度と空き容量reserve、workloadの外へ残すRAMの割合はhostで選ぶ。
 追加driveのmount宣言と、storageが実際のWSL mountから導くWindows driveの観測inventoryは別であり、観測対象をprofileへ写さない。
-zramとagentのmemory上限は物理RAMの割合で指定し、現在PCのRAM容量を共通moduleへ固定しない。
+zram、workload全体とagentのmemory上限は物理RAMの割合で指定し、現在PCのRAM容量を共通moduleへ固定しない。
 
 ```text
 checkout
@@ -46,7 +46,7 @@ Nix storeのcandidate system
 WSLのmemory安定性は[`workstation/stability/module.nix`](../../workstation/stability/module.nix)が所有する。
 新しいWSL sessionはVMBus ringに512 KiB、つまりorder 7の連続領域を`GFP_KERNEL`で確保し、order 3を超える確保は再試行されないため、一度の失敗で接続できなくなる。
 この確保は、zoneの空きがboostを含むmin watermarkを上回り、どれかのmigratetypeにorder 7以上の空きblockが残っていれば成功する。
-空きを使い切らないことはAgent runtimeの`agents.slice`の上限が受け持ち、空きblockはkernelの既定のcompactionとmigratetypeのfallbackが作る。
+宣言したworkloadの合計は`user.slice`で抑え、空きblockはkernelの既定のcompactionとmigratetypeのfallbackが作る。
 そのため`vm.min_free_kbytes`、`vm.watermark_scale_factor`、`vm.compaction_proactiveness`はkernelの既定値にする。
 minとwatermarkの間隔を引き上げるとhigh watermarkに比例するboostも大きくなり、空きblockがあってもwatermarkの検査で確保が落ちるためである。
 `vm.defrag_mode`は無効にする。
@@ -56,6 +56,25 @@ WSLのkernelはdistroの再起動を越えて旧世代の値を保つため、�
 定期的な`drop_caches`は全セッションのディスク再読込みを誘発するため使用しない。
 Nixの自動GCの開始値と目標値はhost profileが所有し、全storeを走査する自動optimiseは行わない。
 Agent sessionのmemoryの上限とCPUの配分は、[AI tooling](ai-tooling.md)が示すとおりAgent runtimeが`agents.slice`で持つ。
+
+全体の上限は`dotfiles.workstation.workload`が所有し、hostのreserveを引いた割合を`MemoryMax`、そこからmarginを引いた割合を`MemoryHigh`とする。
+`nixos` hostでは基盤の観測値から求めた16.6%を上回るreserveを18%とし、maxを82%、highを77%にする。
+swap上限の70%もswap総量ではなく物理RAMに対する割合である。
+
+```mermaid
+flowchart TD
+  aggregate["user.slice：workload合計"] --> user["user-UID.slice"]
+  user --> manager["user@UID.service"]
+  manager --> agents["agents.slice：managed agent"]
+  manager --> apps["app.slice：browser・project command"]
+  aggregate --> support["user-workload.slice：Nix・MCP・宣言済みbackend"]
+  support --> containers["user-workload-containers.slice：宣言外container"]
+```
+
+user managerをnativeな祖先から動かさず、logindのuser識別を保つ。
+kernel、`init.scope`、dockerdなどの基盤serviceはこの上限の外に残す。
+通常のWSL shellで直接起こした任意のprocessまで自動的に収容するものではなく、project commandには`dotfiles-project-run`を使う。
+実測を超える基盤負荷やmemory断片化まで防ぐ保証ではない。
 
 ## 責務root
 

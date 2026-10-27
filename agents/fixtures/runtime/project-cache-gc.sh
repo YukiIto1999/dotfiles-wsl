@@ -956,11 +956,23 @@ invalid_home=$fixture/invalid-metadata-home
 make_home "$invalid_home"
 mkdir -p "$(session_path "$invalid_home" invalid)/tmp"
 head -c 4096 /dev/zero > "$(session_path "$invalid_home" invalid)/metadata.json"
+make_shared_cache "$invalid_home" 32
+invalid_high=$(($(allocated_bytes "$invalid_home/.cache/dotfiles-wsl/shared") - 1))
 status=0
-HOME=$invalid_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+HOME=$invalid_home DOTFILES_AGENT_GC_HIGH_BYTES=$invalid_high DOTFILES_AGENT_GC_LOW_BYTES=0 \
   "$GC" --dry-run > "$fixture/invalid-report" 2> /dev/null || status=$?
 test "$status" -eq 70
 expect_report "$fixture/invalid-report" unresolved session "$(session_path "$invalid_home" invalid)" invalid-metadata
+expect_report "$fixture/invalid-report" keep shared-cache "$invalid_home/.cache/dotfiles-wsl/shared" active-session
+if grep -q $'^retire\tshared-cache\t' "$fixture/invalid-report"; then
+  echo 'GC preview retires shared cache despite an unknown session owner' >&2
+  exit 1
+fi
+status=0
+HOME=$invalid_home DOTFILES_AGENT_GC_HIGH_BYTES=$invalid_high DOTFILES_AGENT_GC_LOW_BYTES=0 \
+  "$GC" > /dev/null 2> /dev/null || status=$?
+test "$status" -eq 70
+test -f "$invalid_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
 test -d "$(session_path "$invalid_home" invalid)/tmp"
 
 # Above the high watermark the shared cache is reported as retired only without a session, and is

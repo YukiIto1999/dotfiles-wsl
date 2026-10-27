@@ -621,6 +621,7 @@ for session in "${sessions[@]}"; do
     # Invalid metadata no longer identifies the owner, so the session may still
     # be live. It is kept and blocks the shared cache purge, and the run fails.
     unresolved=true
+    active_session_count=$((active_session_count + 1))
     note "invalid session metadata: $metadata"
     report unresolved session - "$session" invalid-metadata
     continue

@@ -121,6 +121,7 @@ launcher は build-dir の root を検証して作るだけで中身に触れな
 `dotfiles-agent-project-cache-gc --dry-run`は、その時点で保持・回収する候補、allocated bytes、理由をtab区切りで返す。
 directoryの作成、権限変更、rename、削除を行わず、実行時の判断不能も非ゼロで返す。
 preview後にも利用状態は変わり得るため、削除の承認記録や後続実行への固定入力にはせず、実行時に同じ保護条件を判定し直す。
+metadataが不正で所有者を確定できないsessionも、previewと実削除の両方で共有cacheを保持する条件に数える。
 旧verification cacheの`.fingerprint.*`は、旧producerが不在と確認できる場合だけ回収し、生存が不明なら保持する。
 形式を確認できた旧`.success`も回収するが、現在の検証枠、証跡、waiver、Skill読取記録はこの回収へ含めない。
 

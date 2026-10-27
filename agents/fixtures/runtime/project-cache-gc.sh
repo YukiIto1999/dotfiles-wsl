@@ -993,3 +993,298 @@ HOME=$purge_home DOTFILES_AGENT_GC_HIGH_BYTES=$purge_high DOTFILES_AGENT_GC_LOW_
   "$GC" --dry-run > "$fixture/purge-active-report"
 expect_report "$fixture/purge-active-report" keep shared-cache "$purge_home/.cache/dotfiles-wsl/shared" active-session
 test -e "$purge_home/.cache/dotfiles-wsl/shared/cargo-home/payload/file-0"
+
+export GIT_AUTHOR_NAME=fixture GIT_AUTHOR_EMAIL=fixture@example.invalid
+export GIT_COMMITTER_NAME=fixture GIT_COMMITTER_EMAIL=fixture@example.invalid
+worktree_repo=$fixture/worktree-repo
+git init -q "$worktree_repo"
+printf 'tracked\n' > "$worktree_repo/tracked"
+git -C "$worktree_repo" add tracked
+git -C "$worktree_repo" commit -qm initial
+printf 'inner/\n' >> "$worktree_repo/.git/info/exclude"
+initial_head=$(git -C "$worktree_repo" rev-parse HEAD)
+
+gc_in() {
+  local home=$1
+  shift
+  HOME=$home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$@"
+}
+
+worktree_registered() {
+  git -C "$worktree_repo" worktree list --porcelain > "$fixture/worktree-list"
+  grep -Fxq "worktree $1" "$fixture/worktree-list"
+}
+
+add_recorded_worktree() {
+  local session=$1 path=$2
+  git -C "$worktree_repo" worktree add -q --detach "$path"
+  path=$(git -C "$path" rev-parse --show-toplevel)
+  printf '%s\0%s\0' "$path" "$(git -C "$path" rev-parse HEAD)" >> "$session/worktrees"
+}
+
+refute_retire() {
+  if awk -F'\t' -v subject="$2" '$1 == "retire" && $2 == "session" && $4 == subject { found = 1 } END { exit !found }' "$1"; then
+    echo "dry-run report retires a session that holds a kept worktree: $2" >&2
+    cat "$1" >&2
+    exit 1
+  fi
+}
+
+kept_home=$fixture/kept-worktree-home
+make_home "$kept_home"
+make_session "$kept_home"
+make_session_metadata "$kept_home" dead "$missing_pid" "$current_boot_id" 0
+make_session_metadata "$kept_home" clean "$missing_pid" "$current_boot_id" 0
+make_session_metadata "$kept_home" plain "$missing_pid" "$current_boot_id" 0
+kept_live=$(session_path "$kept_home" live)
+kept_dead=$(session_path "$kept_home" dead)
+kept_clean=$(session_path "$kept_home" clean)
+kept_plain=$(session_path "$kept_home" plain)
+kept_external=$fixture/kept-external
+add_recorded_worktree "$kept_dead" "$kept_dead/tmp/clean"
+add_recorded_worktree "$kept_dead" "$kept_dead/tmp/untracked"
+printf 'untracked\n' > "$kept_dead/tmp/untracked/sentinel"
+add_recorded_worktree "$kept_dead" "$kept_dead/tmp/modified"
+printf 'modified\n' > "$kept_dead/tmp/modified/tracked"
+add_recorded_worktree "$kept_dead" "$kept_dead/tmp/advanced"
+git -C "$kept_dead/tmp/advanced" commit -q --allow-empty -m advanced
+add_recorded_worktree "$kept_dead" "$kept_dead/tmp/locked"
+git -C "$worktree_repo" worktree lock "$kept_dead/tmp/locked"
+add_recorded_worktree "$kept_dead" "$kept_external"
+printf 'external\n' > "$kept_external/sentinel"
+printf 'scratch\n' > "$kept_dead/tmp/scratch"
+add_recorded_worktree "$kept_clean" "$kept_clean/tmp/clean"
+printf 'scratch\n' > "$kept_plain/tmp/scratch"
+add_recorded_worktree "$kept_live" "$kept_live/tmp/dirty"
+printf 'live\n' > "$kept_live/tmp/dirty/sentinel"
+mkdir -p "$kept_home/.cache/explicit-target/debug"
+: > "$kept_home/.cache/explicit-target/debug/artifact"
+
+tree_state "$kept_home" > "$fixture/kept-before"
+git -C "$worktree_repo" worktree list --porcelain > "$fixture/kept-list-before"
+gc_in "$kept_home" "$GC" --dry-run > "$fixture/kept-report"
+tree_state "$kept_home" > "$fixture/kept-after"
+git -C "$worktree_repo" worktree list --porcelain > "$fixture/kept-list-after"
+cmp "$fixture/kept-before" "$fixture/kept-after"
+cmp "$fixture/kept-list-before" "$fixture/kept-list-after"
+expect_report "$fixture/kept-report" keep session "$kept_dead" retained-worktree
+refute_retire "$fixture/kept-report" "$kept_dead"
+expect_report "$fixture/kept-report" keep session "$kept_live" owner-alive
+expect_report "$fixture/kept-report" retire session "$kept_clean" owner-dead
+expect_report "$fixture/kept-report" retire session "$kept_plain" owner-dead
+
+gc_in "$kept_home" "$GC"
+trash_is_empty "$kept_home"
+test -f "$kept_dead/metadata.json"
+test "$(cat "$kept_dead/tmp/scratch")" = scratch
+test ! -e "$kept_dead/tmp/clean"
+if worktree_registered "$kept_dead/tmp/clean"; then
+  echo 'the GC left a removed clean worktree registered' >&2
+  exit 1
+fi
+for name in untracked modified advanced locked; do
+  test -d "$kept_dead/tmp/$name"
+  worktree_registered "$kept_dead/tmp/$name"
+done
+test "$(cat "$kept_dead/tmp/untracked/sentinel")" = untracked
+test "$(cat "$kept_dead/tmp/modified/tracked")" = modified
+test "$(git -C "$kept_dead/tmp/advanced" log -1 --format=%s)" = advanced
+test -e "$(git -C "$kept_dead/tmp/locked" rev-parse --absolute-git-dir)/locked"
+test "$(cat "$kept_external/sentinel")" = external
+worktree_registered "$kept_external"
+test ! -e "$kept_clean"
+if worktree_registered "$kept_clean/tmp/clean"; then
+  echo 'the GC left the worktree of a collected session registered' >&2
+  exit 1
+fi
+test ! -e "$kept_plain"
+test "$(cat "$kept_live/tmp/dirty/sentinel")" = live
+worktree_registered "$kept_live/tmp/dirty"
+test -f "$kept_home/.cache/explicit-target/debug/artifact"
+
+git -C "$worktree_repo" worktree unlock "$kept_dead/tmp/locked"
+for name in untracked modified advanced locked; do
+  git -C "$worktree_repo" worktree remove --force "$kept_dead/tmp/$name"
+done
+gc_in "$kept_home" "$GC" --dry-run > "$fixture/kept-resolved-report"
+expect_report "$fixture/kept-resolved-report" retire session "$kept_dead" owner-dead
+gc_in "$kept_home" "$GC"
+test ! -e "$kept_dead"
+trash_is_empty "$kept_home"
+test "$(cat "$kept_external/sentinel")" = external
+worktree_registered "$kept_external"
+test "$(cat "$kept_live/tmp/dirty/sentinel")" = live
+
+enclosing_home=$fixture/enclosing-worktree-home
+make_home "$enclosing_home"
+make_session_metadata "$enclosing_home" enclosing "$missing_pid" "$current_boot_id" 0
+enclosing_session=$(session_path "$enclosing_home" enclosing)
+add_recorded_worktree "$enclosing_session" "$enclosing_session/tmp/outer"
+add_recorded_worktree "$enclosing_session" "$enclosing_session/tmp/outer/inner"
+printf 'inner\n' > "$enclosing_session/tmp/outer/inner/sentinel"
+gc_in "$enclosing_home" "$GC" --dry-run > "$fixture/enclosing-report"
+expect_report "$fixture/enclosing-report" keep session "$enclosing_session" retained-worktree
+gc_in "$enclosing_home" "$GC"
+test "$(cat "$enclosing_session/tmp/outer/inner/sentinel")" = inner
+worktree_registered "$enclosing_session/tmp/outer"
+worktree_registered "$enclosing_session/tmp/outer/inner"
+git -C "$worktree_repo" worktree remove --force "$enclosing_session/tmp/outer/inner"
+gc_in "$enclosing_home" "$GC"
+test ! -e "$enclosing_session"
+if worktree_registered "$enclosing_session/tmp/outer"; then
+  echo 'the GC left the outer worktree of a collected session registered' >&2
+  exit 1
+fi
+
+symlinked_home=$fixture/symlinked-worktree-home
+make_home "$symlinked_home"
+make_session_metadata "$symlinked_home" linked "$missing_pid" "$current_boot_id" 0
+symlinked_session=$(session_path "$symlinked_home" linked)
+git -C "$worktree_repo" worktree add -q --detach "$fixture/link-target"
+ln -s "$fixture/link-target" "$symlinked_session/tmp/link"
+printf '%s\0%s\0' "$(realpath "$symlinked_session")/tmp/link" "$initial_head" > "$symlinked_session/worktrees"
+gc_in "$symlinked_home" "$GC" --dry-run > "$fixture/symlinked-report"
+expect_report "$fixture/symlinked-report" keep session "$symlinked_session" retained-worktree
+gc_in "$symlinked_home" "$GC"
+test -L "$symlinked_session/tmp/link"
+test -d "$fixture/link-target"
+worktree_registered "$fixture/link-target"
+
+record_home=$fixture/unreadable-record-home
+make_home "$record_home"
+make_session "$record_home"
+make_session_metadata "$record_home" healthy "$missing_pid" "$current_boot_id" 0
+printf 'scratch\n' > "$(session_path "$record_home" healthy)/tmp/scratch"
+: > "$fixture/record-target"
+record_shapes=(truncated relative dotted badhead symlink)
+for shape in "${record_shapes[@]}"; do
+  make_session_metadata "$record_home" "record-$shape" "$missing_pid" "$current_boot_id" 0
+  record_session=$(session_path "$record_home" "record-$shape")
+  printf 'scratch\n' > "$record_session/tmp/sentinel"
+  case $shape in
+    truncated) printf '%s\0' /only/a/path > "$record_session/worktrees" ;;
+    relative) printf '%s\0%s\0' relative/path "$initial_head" > "$record_session/worktrees" ;;
+    dotted) printf '%s\0%s\0' /some/../path "$initial_head" > "$record_session/worktrees" ;;
+    badhead) printf '%s\0%s\0' /some/path not-a-commit > "$record_session/worktrees" ;;
+    symlink) ln -s "$fixture/record-target" "$record_session/worktrees" ;;
+  esac
+done
+status=0
+gc_in "$record_home" "$GC" --dry-run > "$fixture/record-report" 2> /dev/null || status=$?
+test "$status" -eq 70
+for shape in "${record_shapes[@]}"; do
+  expect_report "$fixture/record-report" unresolved session "$(session_path "$record_home" "record-$shape")" worktree-record
+done
+expect_report "$fixture/record-report" retire session "$(session_path "$record_home" healthy)" owner-dead
+expect_unresolved "$fixture/record-gc.log" gc_in "$record_home" "$GC"
+for shape in "${record_shapes[@]}"; do
+  test "$(cat "$(session_path "$record_home" "record-$shape")/tmp/sentinel")" = scratch
+done
+test ! -e "$(session_path "$record_home" healthy)"
+test -d "$(session_path "$record_home" live)"
+trash_is_empty "$record_home"
+
+launcher_home=$fixture/launcher-kept-home
+mkdir -p "$launcher_home"
+cat > "$fixture/launcher-client" <<SCRIPT
+#!$BASH
+set -eu
+git worktree add -q --detach "\$TMPDIR/kept"
+printf 'kept\n' > "\$TMPDIR/kept/sentinel"
+SCRIPT
+chmod +x "$fixture/launcher-client"
+(
+  cd "$worktree_repo"
+  env -u TMPDIR HOME="$launcher_home" SYSTEMD_RUN_CAPTURE="$fixture/systemd-run" \
+    "$LAUNCHER" fixture-client "$fixture/launcher-client"
+)
+launcher_session=$(find "$launcher_home/.cache/dotfiles-wsl/sessions" -mindepth 1 -maxdepth 1 -print -quit)
+test -n "$launcher_session"
+test "$(cat "$launcher_session/tmp/kept/sentinel")" = kept
+gc_in "$launcher_home" "$GC" --dry-run > "$fixture/launcher-kept-report"
+expect_report "$fixture/launcher-kept-report" keep session "$launcher_session" retained-worktree
+gc_in "$launcher_home" "$GC"
+test "$(cat "$launcher_session/tmp/kept/sentinel")" = kept
+worktree_registered "$launcher_session/tmp/kept"
+git -C "$worktree_repo" worktree remove --force "$launcher_session/tmp/kept"
+gc_in "$launcher_home" "$GC"
+test ! -e "$launcher_session"
+
+make_exit_home() {
+  local home=$1
+  make_home "$home"
+  make_session "$home"
+  printf 'working\n' > "$(session_path "$home" live)/tmp/work"
+  make_session_metadata "$home" ended "$$" "$current_boot_id" "$current_start_time"
+  make_session_metadata "$home" ending "$$" "$current_boot_id" "$current_start_time"
+  mkdir -p "$home/.cache/explicit-target/debug"
+  : > "$home/.cache/explicit-target/debug/artifact"
+}
+
+write_exit_action() {
+  local home=$1 action=$2
+  rm -f "$action" "$action.done"
+  printf 'rm -rf -- %q\nrm -f -- %q\n' "$(session_path "$home" ended)" \
+    "$(session_path "$home" ending)/metadata.json" > "$action"
+}
+
+exit_dry_home=$fixture/session-exit-dry-home
+exit_dry_action=$fixture/session-exit-dry.action
+make_exit_home "$exit_dry_home"
+write_exit_action "$exit_dry_home" "$exit_dry_action"
+gc_in "$exit_dry_home" env DOTFILES_AGENT_TEST_AFTER_SESSION_LISTING="$exit_dry_action" \
+  "$SESSION_EXIT_GC" --dry-run > "$fixture/session-exit-dry-report"
+test -e "$exit_dry_action.done"
+expect_report "$fixture/session-exit-dry-report" keep session "$(session_path "$exit_dry_home" live)" owner-alive
+expect_report "$fixture/session-exit-dry-report" retire session "$(session_path "$exit_dry_home" ending)" unclaimed
+refute_report "$fixture/session-exit-dry-report" "$(session_path "$exit_dry_home" ended)"
+test -d "$(session_path "$exit_dry_home" ending)"
+test "$(cat "$(session_path "$exit_dry_home" live)/tmp/work")" = working
+test -f "$exit_dry_home/.cache/explicit-target/debug/artifact"
+
+exit_home=$fixture/session-exit-home
+exit_action=$fixture/session-exit.action
+make_exit_home "$exit_home"
+write_exit_action "$exit_home" "$exit_action"
+gc_in "$exit_home" env DOTFILES_AGENT_TEST_AFTER_SESSION_LISTING="$exit_action" "$SESSION_EXIT_GC"
+test -e "$exit_action.done"
+test ! -e "$(session_path "$exit_home" ended)"
+test ! -e "$(session_path "$exit_home" ending)"
+test "$(cat "$(session_path "$exit_home" live)/tmp/work")" = working
+test -f "$exit_home/.cache/explicit-target/debug/artifact"
+trash_is_empty "$exit_home"
+
+exit_move_home=$fixture/session-move-home
+exit_move_action=$fixture/session-move.action
+make_home "$exit_move_home"
+make_session "$exit_move_home"
+make_session_metadata "$exit_move_home" reaped "$missing_pid" "$current_boot_id" 0
+rm -f "$exit_move_action" "$exit_move_action.done"
+printf 'rm -rf -- %q\n' "$(session_path "$exit_move_home" reaped)" > "$exit_move_action"
+gc_in "$exit_move_home" env DOTFILES_AGENT_TEST_BEFORE_SESSION_MOVE="$exit_move_action" "$SESSION_EXIT_GC"
+test -e "$exit_move_action.done"
+test ! -e "$(session_path "$exit_move_home" reaped)"
+test -d "$(session_path "$exit_move_home" live)"
+trash_is_empty "$exit_move_home"
+
+: > "$fixture/session-unsafe-target"
+for mode in dry real; do
+  exit_unsafe_home=$fixture/session-unsafe-$mode-home
+  exit_unsafe_action=$fixture/session-unsafe-$mode.action
+  make_exit_home "$exit_unsafe_home"
+  make_session_metadata "$exit_unsafe_home" symlinked "$$" "$current_boot_id" "$current_start_time"
+  rm -f "$(session_path "$exit_unsafe_home" symlinked)/metadata.json"
+  ln -s "$fixture/session-unsafe-target" "$(session_path "$exit_unsafe_home" symlinked)/metadata.json"
+  write_exit_action "$exit_unsafe_home" "$exit_unsafe_action"
+  gc_options=()
+  if [ "$mode" = dry ]; then
+    gc_options=(--dry-run)
+  fi
+  status=0
+  gc_in "$exit_unsafe_home" env DOTFILES_AGENT_TEST_AFTER_SESSION_LISTING="$exit_unsafe_action" \
+    "$SESSION_EXIT_GC" "${gc_options[@]}" > /dev/null 2> "$fixture/session-unsafe-$mode.log" || status=$?
+  test "$status" -eq 70
+  grep -Fq 'session metadata is a symlink' "$fixture/session-unsafe-$mode.log"
+  test -L "$(session_path "$exit_unsafe_home" symlinked)/metadata.json"
+  test "$(cat "$(session_path "$exit_unsafe_home" live)/tmp/work")" = working
+done

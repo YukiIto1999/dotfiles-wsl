@@ -157,6 +157,33 @@
           exec ${pkgs.coreutils}/bin/mktemp "$@"
         '';
         racingGc = gcWithCommand "racing" racingMktemp;
+        sessionExitSort = pkgs.writeShellScriptBin "sort" ''
+          action=''${DOTFILES_AGENT_TEST_AFTER_SESSION_LISTING-}
+          ${pkgs.coreutils}/bin/sort "$@"
+          status=$?
+          if [[ -n $action && ''${1-} == -z && ! -e $action.done ]]; then
+            : > "$action.done"
+            ${pkgs.bash}/bin/bash "$action"
+          fi
+          exit "$status"
+        '';
+        sessionExitMv = pkgs.writeShellScriptBin "mv" ''
+          action=''${DOTFILES_AGENT_TEST_BEFORE_SESSION_MOVE-}
+          if [[ -n $action && ''${*: -2:1} == */sessions/* && ! -e $action.done ]]; then
+            : > "$action.done"
+            ${pkgs.bash}/bin/bash "$action"
+          fi
+          exec ${pkgs.coreutils}/bin/mv "$@"
+        '';
+        sessionExitGc = gcWithCommand "session-exit" (
+          pkgs.symlinkJoin {
+            name = "dotfiles-agent-session-exit-shims";
+            paths = [
+              sessionExitSort
+              sessionExitMv
+            ];
+          }
+        );
         # sandbox の file system を変えずに atime を更新しない mount を GC に見せる。
         mountOptionsFindmnt = pkgs.writeShellScriptBin "findmnt" ''
           if [[ -n ''${DOTFILES_AGENT_TEST_MOUNT_OPTIONS-} ]]; then
@@ -695,6 +722,7 @@
                 pkgs.cargo
                 pkgs.coreutils
                 pkgs.findutils
+                pkgs.git
                 pkgs.jq
                 pkgs.rustc
                 pkgs.stdenv.cc
@@ -703,6 +731,7 @@
               GC = lib.getExe runtime.gc;
               SLOW_RM_GC = lib.getExe slowRmGc;
               RACING_GC = lib.getExe racingGc;
+              SESSION_EXIT_GC = lib.getExe sessionExitGc;
               MOUNT_OPTIONS_GC = lib.getExe mountOptionsGc;
               WRONG_OWNER_GC = lib.getExe wrongOwnerGc;
               UNREADABLE_PROC_GC = lib.getExe unreadableProcGc;

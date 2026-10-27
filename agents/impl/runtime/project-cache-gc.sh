@@ -34,30 +34,47 @@ report() {
   [ "$dry_run" = false ] || printf '%s\t%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$4" "$5"
 }
 
+absent() {
+  [ ! -e "$1" ] && [ ! -L "$1" ]
+}
+
+# launcher は gc.lock を取らずに session を消すため、列挙の後の消失を不正とする検査は不可
+gone_or_die() {
+  local path=$1 vanished_ok=$2 message=$3
+  if [ "$vanished_ok" = vanished-ok ] && absent "$path"; then
+    return 1
+  fi
+  die "$message"
+}
+
 validate_managed_directory() {
-  local path=$1
+  local path=$1 vanished_ok=${2-}
   test ! -L "$path" || die "managed path is a symlink: $path"
-  test -d "$path" || die "managed path is not a directory: $path"
-  test "$(stat -c %u "$path")" = "$uid" || die "managed path has another owner: $path"
+  test -d "$path" || gone_or_die "$path" "$vanished_ok" "managed path is not a directory: $path" || return 1
+  test "$(stat -c %u "$path" 2>/dev/null)" = "$uid" \
+    || gone_or_die "$path" "$vanished_ok" "managed path has another owner: $path" || return 1
   if [ "$dry_run" = true ]; then
-    test "$(stat -c %a "$path")" = 700 || note "managed directory mode is not 0700 and a run secures it: $path"
+    test "$(stat -c %a "$path" 2>/dev/null)" = 700 || note "managed directory mode is not 0700 and a run secures it: $path"
     return
   fi
-  chmod 700 "$path" || die "cannot secure managed directory: $path"
-  test "$(stat -c %a "$path")" = 700 || die "managed directory mode is not 0700: $path"
+  chmod 700 "$path" || gone_or_die "$path" "$vanished_ok" "cannot secure managed directory: $path" || return 1
+  test "$(stat -c %a "$path" 2>/dev/null)" = 700 \
+    || gone_or_die "$path" "$vanished_ok" "managed directory mode is not 0700: $path" || return 1
 }
 
 validate_managed_file() {
-  local path=$1 description=$2
+  local path=$1 description=$2 vanished_ok=${3-}
   test ! -L "$path" || die "$description is a symlink: $path"
-  test -f "$path" || die "$description is not a regular file: $path"
-  test "$(stat -c %u "$path")" = "$uid" || die "$description has another owner: $path"
+  test -f "$path" || gone_or_die "$path" "$vanished_ok" "$description is not a regular file: $path" || return 1
+  test "$(stat -c %u "$path" 2>/dev/null)" = "$uid" \
+    || gone_or_die "$path" "$vanished_ok" "$description has another owner: $path" || return 1
   if [ "$dry_run" = true ]; then
-    test "$(stat -c %a "$path")" = 600 || note "$description mode is not 0600 and a run secures it: $path"
+    test "$(stat -c %a "$path" 2>/dev/null)" = 600 || note "$description mode is not 0600 and a run secures it: $path"
     return
   fi
-  chmod 600 "$path" || die "cannot secure $description: $path"
-  test "$(stat -c %a "$path")" = 600 || die "$description mode is not 0600: $path"
+  chmod 600 "$path" || gone_or_die "$path" "$vanished_ok" "cannot secure $description: $path" || return 1
+  test "$(stat -c %a "$path" 2>/dev/null)" = 600 \
+    || gone_or_die "$path" "$vanished_ok" "$description mode is not 0600: $path" || return 1
 }
 
 # lock の下では rename だけを行う。削除は GC が lock を解いてから trash に対して行い、
@@ -139,6 +156,13 @@ session_state() {
   printf '%s\n' "$state"
 }
 
+# session の削除は scratch の中の worktree を壊すため、worktree の判定を抜いた session の回収は不可
+session_worktrees() {
+  local -a options=(--nested-only)
+  [ "$dry_run" = false ] || options+=(--preview)
+  @sessionWorktreesCommand@ "${options[@]}" "$1"
+}
+
 create_shared_cache() {
   local cache_root=$1 shared_root marker marker_tmp created=false
   shared_root="$cache_root/shared"
@@ -187,7 +211,10 @@ allocated_bytes() {
   # 計測中に live build が消した file による du の非ゼロ終了の許容。合計が減るだけで削除は増えない
   output=$(du -s -B1 -- "$path" 2>/dev/null) || true
   output=${output%%$'\t'*}
-  [[ "$output" =~ ^[0-9]+$ ]] || die "cannot measure allocated cache bytes: $path"
+  if [[ ! "$output" =~ ^[0-9]+$ ]]; then
+    [ ! -e "$path" ] || die "cannot measure allocated cache bytes: $path"
+    output=0
+  fi
   printf '%s\n' "$output"
 }
 
@@ -611,13 +638,16 @@ fi
 for session in "${sessions[@]}"; do
   session_id=${session##*/}
   metadata="$session/metadata.json"
-  validate_managed_directory "$session"
+  validate_managed_directory "$session" vanished-ok || continue
   if [ ! -e "$metadata" ] && [ ! -L "$metadata" ]; then
     unclaimed_sessions+=("$session")
     continue
   fi
-  validate_managed_file "$metadata" 'session metadata'
+  validate_managed_file "$metadata" 'session metadata' vanished-ok || continue
   if ! validate_session_metadata "$metadata" "$session_id"; then
+    if absent "$metadata"; then
+      continue
+    fi
     # Invalid metadata no longer identifies the owner, so the session may still
     # be live. It is kept and blocks the shared cache purge, and the run fails.
     unresolved=true
@@ -645,10 +675,25 @@ done
 # lock を解く前に metadata を書くので、lock の下でもまだ無ければ持ち主がいない。
 # lock を取る観測は launcher の登録を待たせるため dry-run の lock は不可
 for session in "${dead_list[@]}" "${unclaimed_sessions[@]}"; do
+  if absent "$session"; then
+    continue
+  fi
   if [ -n "${dead_sessions[$session]+x}" ]; then
     reason='owner-dead'
   else
     reason=unclaimed
+  fi
+  worktree_status=0
+  retained_worktrees=$(session_worktrees "$session") || worktree_status=$?
+  if [ "$worktree_status" -ne 0 ]; then
+    note "cannot verify the worktree record of a session, so it is kept: $session"
+    report unresolved session - "$session" worktree-record
+    unresolved=true
+    continue
+  fi
+  if [ -n "$retained_worktrees" ]; then
+    report keep session - "$session" retained-worktree
+    continue
   fi
   if [ "$dry_run" = true ]; then
     report retire session "$(allocated_bytes "$session")" "$session" "$reason"
@@ -658,7 +703,7 @@ for session in "${dead_list[@]}" "${unclaimed_sessions[@]}"; do
   if [ ! -L "$session" ] && [ -d "$session" ] &&
     { [ -n "${dead_sessions[$session]+x}" ] ||
       { [ ! -e "$session/metadata.json" ] && [ ! -L "$session/metadata.json" ]; }; } &&
-    ! move_to_trash "$trash_root" "$session" session; then
+    ! move_to_trash "$trash_root" "$session" session && ! absent "$session"; then
     note "cannot move orphan session to trash: $session"
     unresolved=true
   fi

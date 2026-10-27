@@ -98,7 +98,13 @@ OMP の `config.yml` と `agent.db` は設定ユーザーだけが所有する�
 subagent は親 session の permission profile を継ぐ。Codex の subagent override が運ぶのは model、reasoning、instructions、personality、service tier、feature 無効化、skill 選択だけであり、subagent file の `default_permissions` は読み捨てられる。read-only の subagent 定義にも独自の sandbox 境界はない。
 既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
 
-agent runtime の共有 cache は user 所有の directory `0700` と marker file `0600` で識別する。launcher と GC は同じ `gc.lock` を取り、共有 cache の型、所有者、symlink、mode、marker を検証する。launcher の `gc.lock` の待ちと台帳の書込みは合わせて 5 秒までで、超えた起動は client を起動せず拒否し、使用中の資源を回収して待ちを縮めない。session の GC root は session directory の `roots` に置き、全子孫の終了を確認した後に session directory と一緒に解放する。GC は lock の下で rename だけを行い、計測と削除を lock の外で行う。削除する entry は同じ filesystem の `trash` へ rename してから消すので、lock を待つ launcher が削除の長さに従属しない。GC が allocated bytes 基準で共有 cache を空にするのは、使われていない Cargo の unit を先に回収しても容量上限を超え、active agent session が一件もない場合に限る。
+agent runtimeの共有cacheはuser所有のdirectory `0700`とmarker file `0600`で識別する。
+launcherとGCは同じ`gc.lock`を取り、共有cacheの型、所有者、symlink、mode、markerを検証する。
+launcherの`gc.lock`の待ちと台帳の書込みは合わせて5秒までで、超えた起動はclientを起動せず拒否し、使用中の資源を回収して待ちを縮めない。
+sessionのGC rootはsession directoryの`roots`に置き、全子孫の終了後、session内に保持すべきworktreeがなければsession directoryと一緒に解放する。
+GCはlockの下でrenameだけを行い、計測と削除をlockの外で行う。
+削除するentryは同じfilesystemの`trash`へrenameしてから消すので、lockを待つlauncherが削除の長さに従属しない。
+GCがallocated bytes基準で共有cacheを空にするのは、使われていないCargoのunitを先に回収しても容量上限を超え、active agent sessionが一件もない場合に限る。
 GC は trash 内の自分が所有する directory にだけ読取・書込・実行権限を戻し、read-only の一時 directory も削除する。
 その際に symlink は辿らず、別の所有者の directory の権限は変更しない。
 Cargo の build-dir の root も user 所有の directory `0700` であり、symlink や別の所有者の root では launcher は起動を拒み、GC は失敗する。
@@ -121,6 +127,8 @@ launcher は build-dir の root を検証して作るだけで中身に触れな
 `dotfiles-agent-project-cache-gc --dry-run`は、その時点で保持・回収する候補、allocated bytes、理由をtab区切りで返す。
 directoryの作成、権限変更、rename、削除を行わず、実行時の判断不能も非ゼロで返す。
 preview後にも利用状態は変わり得るため、削除の承認記録や後続実行への固定入力にはせず、実行時に同じ保護条件を判定し直す。
+worktreeのpreviewは読取だけの予測であり、実行時にGitが削除を拒めばworktreeとsessionを保持する。
+列挙後にsession directoryが消えた場合は回収済みとして扱い、ほかのsessionの判定を続ける。
 metadataが不正で所有者を確定できないsessionも、previewと実削除の両方で共有cacheを保持する条件に数える。
 旧verification cacheの`.fingerprint.*`は、旧producerが不在と確認できる場合だけ回収し、生存が不明なら保持する。
 形式を確認できた旧`.success`も回収するが、現在の検証枠、証跡、waiver、Skill読取記録はこの回収へ含めない。

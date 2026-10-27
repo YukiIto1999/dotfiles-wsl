@@ -140,26 +140,6 @@ remove_session_directory() {
   rm -rf --one-file-system -- "$session_dir"
 }
 
-# session 中に git worktree add で作った worktree のうち、HEAD が作成時のままのものを削除する。
-# git worktree remove は変更、untracked file、lock を持つ worktree を拒むので、それらは残る。
-# Orca が作った worktree は記録されず、寿命は Orca が持つ。
-remove_session_worktrees() {
-  local record=$1 index path head
-  local -a fields=()
-
-  if [ ! -f "$record" ] || [ -L "$record" ]; then
-    return 0
-  fi
-  mapfile -d '' -t fields <"$record" || return 0
-  for ((index = 0; index + 1 < ${#fields[@]}; index += 2)); do
-    path=${fields[index]}
-    head=${fields[index + 1]}
-    if [ "$(git -C "$path" rev-parse --verify --quiet HEAD 2>/dev/null)" = "$head" ]; then
-      git -C "$path" worktree remove -- "$path" >/dev/null 2>&1 || true
-    fi
-  done
-}
-
 managed_session_directory() {
   [ -n "$session_dir" ] \
     && [[ "$session_dir" == "$sessions_root/"* ]] \
@@ -394,8 +374,17 @@ fi
 
 # 全子の終了を確認した後だけ、worktree、GC root、管理 scratch を解放する。確認できなければ GC に残す。
 if [ "$drained" = true ]; then
-  remove_session_worktrees "$DOTFILES_AGENT_WORKTREE_RECORD"
+  retained_worktrees=''
+  worktree_status=0
   if managed_session_directory; then
+    retained_worktrees=$(@sessionWorktreesCommand@ "$session_dir") || worktree_status=$?
+  fi
+  if [ "$worktree_status" -ne 0 ]; then
+    note "the worktree record cannot be verified, so the session stays: $session_dir"
+    drained=false
+  elif [ -n "$retained_worktrees" ]; then
+    note "Git kept worktrees inside the session, so the session stays: ${retained_worktrees//$'\n'/ }"
+  elif managed_session_directory; then
     cleanup_deadline=$(($(now_microseconds) + ledger_wait_seconds * 1000000))
     cleanup_status=0
     run_bounded "$cleanup_deadline" remove_session_directory || cleanup_status=$?

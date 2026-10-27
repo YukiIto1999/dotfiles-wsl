@@ -538,6 +538,7 @@ git -C "$worktree_repo" config user.email fixture@example.invalid
 printf 'tracked\n' > "$worktree_repo/tracked"
 git -C "$worktree_repo" add tracked
 git -C "$worktree_repo" commit -qm initial
+printf 'inner/\n' >> "$worktree_repo/.git/info/exclude"
 git -C "$worktree_repo" worktree add -q --detach "$fixture/preexisting"
 reset_capture
 cat > "$scripts/worktrees.sh" <<'SCRIPT'
@@ -566,6 +567,185 @@ git -C "$worktree_repo" worktree list --porcelain > "$fixture/worktree-list"
 if grep -Fxq "worktree $fixture/clean" "$fixture/worktree-list"; then
   fail 'removed worktree is still registered'
 fi
+
+worktree_registered() {
+  git -C "$worktree_repo" worktree list --porcelain > "$fixture/worktree-list"
+  grep -Fxq "worktree $1" "$fixture/worktree-list"
+}
+
+discard_session() {
+  local session=$1 path
+  shift
+  for path in "$@"; do
+    git -C "$worktree_repo" worktree unlock "$path" 2>/dev/null || true
+    git -C "$worktree_repo" worktree remove --force "$path"
+  done
+  rm -rf "$session"
+}
+
+cat > "$scripts/nested-worktrees.sh" <<'SCRIPT'
+set -euo pipefail
+git worktree add -q --detach "$TMPDIR/clean"
+git worktree add -q --detach "$TMPDIR/untracked"
+printf 'untracked\n' > "$TMPDIR/untracked/sentinel"
+git worktree add -q --detach "$TMPDIR/modified"
+printf 'modified\n' > "$TMPDIR/modified/tracked"
+git worktree add -q --detach "$TMPDIR/advanced"
+git -C "$TMPDIR/advanced" commit -q --allow-empty -m advanced
+git worktree add -q --detach "$TMPDIR/locked"
+git worktree lock "$TMPDIR/locked"
+git worktree add -q --detach "$EXTERNAL"
+printf 'external\n' > "$EXTERNAL/sentinel"
+printf 'scratch\n' > "$TMPDIR/scratch"
+SCRIPT
+reset_capture
+status=0
+(
+  cd "$worktree_repo"
+  EXTERNAL=$fixture/nested-external FAKE_STATUS=33 AGENT_ACTION="\"$BASH\" \"$scripts/nested-worktrees.sh\"" \
+    "$LAUNCHER" fixture-client "$local_agent" 2>"$fixture/stderr"
+) || status=$?
+test "$status" -eq 33
+nested_session=$(read_capture session-dir)
+nested_tmp=$nested_session/tmp
+grep -Fq 'Git kept worktrees inside the session' "$fixture/stderr"
+test -f "$nested_session/metadata.json"
+test "$(cat "$nested_tmp/scratch")" = scratch
+test ! -e "$nested_tmp/clean"
+if worktree_registered "$nested_tmp/clean"; then
+  fail 'removed nested worktree is still registered'
+fi
+for name in untracked modified advanced locked; do
+  test -d "$nested_tmp/$name" || fail "the session scratch lost the worktree $name"
+  worktree_registered "$nested_tmp/$name" || fail "Git lost the registration of the worktree $name"
+done
+test "$(cat "$nested_tmp/untracked/sentinel")" = untracked
+test "$(cat "$nested_tmp/modified/tracked")" = modified
+test "$(git -C "$nested_tmp/advanced" log -1 --format=%s)" = advanced
+test "$(cat "$nested_tmp/locked/tracked")" = tracked
+test -e "$(git -C "$nested_tmp/locked" rev-parse --absolute-git-dir)/locked"
+test "$(cat "$fixture/nested-external/sentinel")" = external
+worktree_registered "$fixture/nested-external"
+discard_session "$nested_session" "$nested_tmp/untracked" "$nested_tmp/modified" "$nested_tmp/advanced" \
+  "$nested_tmp/locked" "$fixture/nested-external"
+sessions_empty
+
+cat > "$scripts/nested-clean.sh" <<'SCRIPT'
+set -euo pipefail
+git worktree add -q --detach "$TMPDIR/only-clean"
+git worktree add -q --detach "$EXTERNAL"
+printf 'external\n' > "$EXTERNAL/sentinel"
+SCRIPT
+reset_capture
+(
+  cd "$worktree_repo"
+  EXTERNAL=$fixture/clean-nested-external AGENT_ACTION="\"$BASH\" \"$scripts/nested-clean.sh\"" \
+    "$LAUNCHER" fixture-client "$local_agent"
+)
+clean_nested=$(read_capture session-dir)/tmp/only-clean
+sessions_empty
+if worktree_registered "$clean_nested"; then
+  fail 'the removed clean nested worktree is still registered'
+fi
+test "$(cat "$fixture/clean-nested-external/sentinel")" = external
+worktree_registered "$fixture/clean-nested-external"
+git -C "$worktree_repo" worktree remove --force "$fixture/clean-nested-external"
+
+cat > "$scripts/term-worktree.sh" <<'SCRIPT'
+set -euo pipefail
+git worktree add -q --detach "$TMPDIR/term-retained"
+printf 'term\n' > "$TMPDIR/term-retained/sentinel"
+SCRIPT
+reset_capture
+(
+  cd "$worktree_repo"
+  HOLD_READY=$fixture/term.ready HOLD_RELEASE=$fixture/term.release \
+    AGENT_ACTION="\"$BASH\" \"$scripts/term-worktree.sh\"" \
+    exec "$LAUNCHER" fixture-client "$local_agent"
+) &
+launcher_pid=$!
+wait_for_file "$fixture/term.ready"
+term_session=$(read_capture session-dir)
+kill -TERM "$launcher_pid"
+status=0
+wait "$launcher_pid" || status=$?
+test "$status" -eq 143
+test -f "$term_session/metadata.json"
+test "$(cat "$term_session/tmp/term-retained/sentinel")" = term
+worktree_registered "$term_session/tmp/term-retained"
+discard_session "$term_session" "$term_session/tmp/term-retained"
+sessions_empty
+
+git -C "$worktree_repo" worktree add -q --detach "$fixture/symlink-target"
+cat > "$scripts/symlink-record.sh" <<'SCRIPT'
+set -euo pipefail
+ln -s "$TARGET" "$TMPDIR/link"
+printf '%s\0%s\0' "$(realpath "$TMPDIR")/link" "$(git -C "$TARGET" rev-parse HEAD)" >> "$DOTFILES_AGENT_WORKTREE_RECORD"
+SCRIPT
+reset_capture
+(
+  cd "$worktree_repo"
+  TARGET=$fixture/symlink-target AGENT_ACTION="\"$BASH\" \"$scripts/symlink-record.sh\"" \
+    "$LAUNCHER" fixture-client "$local_agent" 2>"$fixture/stderr"
+)
+link_session=$(read_capture session-dir)
+grep -Fq 'Git kept worktrees inside the session' "$fixture/stderr"
+test -L "$link_session/tmp/link"
+test -d "$fixture/symlink-target"
+worktree_registered "$fixture/symlink-target"
+discard_session "$link_session" "$fixture/symlink-target"
+sessions_empty
+
+cat > "$scripts/enclosing-worktrees.sh" <<'SCRIPT'
+set -euo pipefail
+git worktree add -q --detach "$TMPDIR/outer"
+git worktree add -q --detach "$TMPDIR/outer/inner"
+printf 'inner\n' > "$TMPDIR/outer/inner/sentinel"
+SCRIPT
+reset_capture
+(
+  cd "$worktree_repo"
+  AGENT_ACTION="\"$BASH\" \"$scripts/enclosing-worktrees.sh\"" \
+    "$LAUNCHER" fixture-client "$local_agent" 2>"$fixture/stderr"
+)
+enclosing_session=$(read_capture session-dir)
+grep -Fq 'Git kept worktrees inside the session' "$fixture/stderr"
+test "$(cat "$enclosing_session/tmp/outer/inner/sentinel")" = inner
+worktree_registered "$enclosing_session/tmp/outer"
+worktree_registered "$enclosing_session/tmp/outer/inner"
+discard_session "$enclosing_session" "$enclosing_session/tmp/outer/inner" "$enclosing_session/tmp/outer"
+sessions_empty
+
+cat > "$scripts/bad-record.sh" <<'SCRIPT'
+set -euo pipefail
+record=$DOTFILES_AGENT_WORKTREE_RECORD
+printf 'scratch\n' > "$TMPDIR/sentinel"
+case $RECORD_SHAPE in
+  truncated) printf '%s\0' /only/a/path > "$record" ;;
+  relative) printf '%s\0%s\0' relative/path "$RECORD_HEAD" > "$record" ;;
+  dotted) printf '%s\0%s\0' /some/../path "$RECORD_HEAD" > "$record" ;;
+  badhead) printf '%s\0%s\0' /some/path not-a-commit > "$record" ;;
+  symlink) ln -s "$RECORD_TARGET" "$record" ;;
+esac
+SCRIPT
+record_head=$(git -C "$worktree_repo" rev-parse HEAD)
+: > "$fixture/record-target"
+for shape in truncated relative dotted badhead symlink; do
+  reset_capture
+  status=0
+  (
+    cd "$worktree_repo"
+    RECORD_SHAPE=$shape RECORD_HEAD=$record_head RECORD_TARGET=$fixture/record-target \
+      AGENT_ACTION="\"$BASH\" \"$scripts/bad-record.sh\"" \
+      "$LAUNCHER" fixture-client "$local_agent" 2>"$fixture/stderr"
+  ) || status=$?
+  test "$status" -eq 70 || fail "a $shape worktree record ended the session with status $status"
+  bad_session=$(read_capture session-dir)
+  test "$(cat "$bad_session/tmp/sentinel")" = scratch || fail "a $shape worktree record lost the session scratch"
+  grep -Fq 'cannot be verified' "$fixture/stderr"
+  rm -rf "$bad_session"
+done
+sessions_empty
 
 # ---- A linked worktree belongs to the project of its main checkout.
 git -C "$repo" worktree add -qb linked "$fixture/linked"

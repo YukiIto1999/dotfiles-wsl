@@ -143,12 +143,17 @@ supervisorが先に消えた場合はscopeのcgroupが空になるまで残り�
 台帳のI/Oと`gc.lock`の待ちは起動と後始末で合計5秒までとし、超えた起動を拒否して使用中のsessionを回収しない。
 起動前にwrapper、当該clientの`executionDependencies`、lifecycle自身、profileの公開pathから解決したstore objectへsessionのGC rootを取り、一つでも取れなければclientを起動しない。
 その物理pathを実行するため、保護と起動の間にprofileが動いても別の版を実行しない。
-全子孫の終了後にだけGC root、管理scratch、session directoryを解放し、解放できなかった資源はGCに残して非ゼロで終わる。
+全子孫の終了後、保持すべきworktreeがsession内になければGC root、管理scratch、session directoryを解放する。
+解放を試みて失敗した資源はGCに残し、非ゼロで終わる。
 
 projectはGit repositoryではgit common directory、それ以外では作業directoryから決めるため、linked worktreeは元のcheckoutと同じprojectになる。
-session中の`git worktree add`はgit shimがpathと作成時のHEADを記録し、終了時にはHEAD不変のworktreeだけを`git worktree remove`へ渡す。
-変更、untracked file、lockを持つworktreeは同commandが拒否し、削除できなくてもclientの終了statusは変えない。
-同時に走った別の`git worktree add`と区別できないもの、session外で作られたもの、SIGKILLで終わったsessionのworktreeは回収しない。
+session中の`git worktree add`はgit shimがpathと作成時のHEADを記録する。
+通常終了時のlauncherと終了済みsessionのGCは、同じ判定を使い、HEAD、変更、untracked file、lock、内包する別worktreeを確認してから`git worktree remove`へ渡す。
+Gitが削除を拒んだ場合もworktreeを保持し、その保持だけではclientの終了statusを変えない。
+session内にworktreeを保持する場合は、親のsession directoryとGC rootも残す。
+台帳が読めない場合はsessionを保持し、失敗を報告する。
+通常終了時には記録したsession外のworktreeも対象にするが、GCはsession内だけを対象にし、外のworktreeには触れない。
+同時に走った別の`git worktree add`と区別できないものと、記録のないworktreeは対象にしない。
 Orcaが作るworktreeの寿命はOrcaが持つ。
 
 共通のcache方針は、process寿命を持つruntimeではなく[`toolchain/execution/`](../../toolchain/execution)が持つ。managed commandのwrapperは`dotfiles-execution-policy`を一度だけ適用してからlifecycleへ渡し、clientごとのcacheは増やさない。`CARGO_HOME`と`XDG_CACHE_HOME`が未設定なら共有cacheを使い、利用者が明示した値は空文字列も含めて変えない。Cargoの中間成果物は`CARGO_BUILD_BUILD_DIR`で全sessionが共有する一つのrootの下に置き、`{workspace-path-hash}`でcheckoutごとに分けるので、どのsessionからbuildしても同じcheckoutは同じbuild-dirを使う。最終成果物は各checkoutの`target`に残る。同じworkspaceのcheckoutどうしで中間成果物を共有すると、Cargoが別checkoutのbuildをfreshと判定するため、linked worktreeとも共有しない。利用者が明示した`CARGO_TARGET_DIR`と`CARGO_BUILD_BUILD_DIR`、project固有のCargo`target-dir`と`build-dir`は上書きしない。方針はdirectoryを作らず回収もしない。共有cacheとCargoのbuild root、sessionの台帳を作って検証するのはruntime、容量を回収するのはGCである。`nix build`と`nix-build`が結果linkを作らないshimも同じ方針が`PATH`の先頭へ置く。一時的な写しでbuildするtoolは、写しごとに中間成果物がbuild-dirのrootへ残るため、`CARGO_BUILD_BUILD_DIR`を外して起動する。

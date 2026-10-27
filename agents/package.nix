@@ -29,6 +29,14 @@ let
       builtins.replaceStrings [ "@nixStoreCommand@" ] [ (lib.escapeShellArg (toString nixStoreCommand)) ]
         (builtins.readFile ./impl/runtime/protect.sh);
   };
+  sessionWorktrees = pkgs.writeShellApplication {
+    name = "dotfiles-agent-session-worktrees";
+    runtimeInputs = with pkgs; [
+      coreutils
+      git
+    ];
+    text = builtins.readFile ./impl/runtime/session-worktrees.sh;
+  };
   mkLauncher =
     {
       protectCommand ? protect,
@@ -54,6 +62,7 @@ let
             "@systemctlCommand@"
             "@protectCommand@"
             "@superviseCommand@"
+            "@sessionWorktreesCommand@"
             "@sliceUnit@"
           ]
           [
@@ -63,6 +72,7 @@ let
             (lib.escapeShellArg (toString systemctlCommand))
             (lib.escapeShellArg (lib.getExe protectCommand))
             (lib.escapeShellArg (lib.getExe supervise))
+            (lib.escapeShellArg (lib.getExe sessionWorktrees))
             runtimeContract.sliceUnit
           ]
           (builtins.readFile ./impl/runtime/launcher.sh);
@@ -76,6 +86,7 @@ let
         "@gcLowBytes@"
         "@gcInactiveDays@"
         "@sliceUnit@"
+        "@sessionWorktreesCommand@"
       ]
       [
         cacheRootRelative
@@ -83,6 +94,7 @@ let
         (toString runtimeContract.cache.lowBytes)
         (toString runtimeContract.cache.inactiveDays)
         runtimeContract.sliceUnit
+        (lib.escapeShellArg (lib.getExe sessionWorktrees))
       ]
       (builtins.readFile ./impl/runtime/project-cache-gc.sh);
   gc = pkgs.writeShellApplication {

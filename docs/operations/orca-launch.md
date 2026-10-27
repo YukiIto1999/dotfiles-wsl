@@ -72,12 +72,23 @@ Orca、user manager、Nix daemonを含む実環境での確認は次の手順で
 ### 実機 smoke
 
 隔離した一時 directory を使い、実 client、既存 session、Windows の設定には触れない。
+検証用の実行fileの絶対pathを`PROBE`としてexportする。
+launcher自体はPATHへ公開しないため、検証対象のwrapperのclosureにある`dotfiles-agent-runtime/bin/dotfiles-agent-runtime`の絶対pathを`RUNTIME`としてexportする。
+配備済みOMPなら、`nix-store -qR "$(dirname "$(dirname "$(realpath ~/.local/share/dotfiles-agent/bin/omp)")")"`でそのclosureを確認できる。
 
 1. 承認とdevShell。一時Git projectに`devShells.<system>.default`と`.envrc`の`use flake`を用意し、inputの`flake.lock`も作って両方を追跡する。`XDG_DATA_HOME`を一時directoryに向け、承認前は`dotfiles-project-run -- "$PROBE"`が非ゼロでprobeを起動しないことを確かめる。`direnv allow`の後はdevShellのtool、argv、呼出し前の`TMPDIR`系の状態、終了値をprobeに記録させる。存在しないdevShell名でも非ゼロでprobeを起動しないことを確かめる。
-2. PTY と argv。`script -qefc 'dotfiles-agent-runtime fixture-client "$PROBE" "a b" "" "ユニコード"' /dev/null` の中で、`PROBE` が `[ -t 0 ]`、argv、cwd、終了値を記録すること。cwd は空白と Unicode を含む。
-3. scope と取消。`PROBE` が子と孫を残して待つとき、`systemctl --user list-units 'dotfiles-agent-*.scope'` に scope があり、launcher へ `SIGTERM` を送ると、戻った時点で scope の `cgroup.procs` が空、`~/.cache/dotfiles-wsl/sessions` が空であること。`SIGINT` では session が続くこと。同時に走らせた別の session が影響を受けないこと。
+2. PTYとargvを確認するため、`script -qefc '"$RUNTIME" fixture-client "$PROBE" "a b" "" "ユニコード"' /dev/null`でprobeを起動し、`[ -t 0 ]`、argv、cwd、終了値を記録する。
+   cwdは空白とUnicodeを含む。
+3. 子と孫を残して待つprobeで自分が起動したsessionのscopeを特定し、launcherへ`SIGTERM`を送ると、戻った時点でそのscopeの`cgroup.procs`が空であることを確認する。
+   保持すべきworktreeがない場合は、そのsession directoryも消えることを確認する。
+   `SIGINT`ではsessionが続くことと、同時に走らせた別sessionが影響を受けないことを確認し、共有のsessions directory全体が空になることは要求しない。
 4. GC root。自分が作ったsession directoryの`roots`だけを調べ、起動した実体と依存のstore pathを指すこと、終了後にそのsession directoryが無くなることを確認する。global GCや全rootの走査を検証の代わりにしない。
-5. Orca 経由。`orca-ide terminal create --worktree active --command 'dotfiles-project-run --attr default -- "$PROBE"' --json` で作った terminal の出力を `orca-ide terminal read` で読む。これは command override を通る既定の起動の代わりではない。override を適用した後は、`orca-ide worktree create --name NAME --agent omp --json` で既定の経路を実測する。
+5. Orca経由の起動では、`orca-cli`で実行fileと対象worktreeの完全なidを解決し、`terminal create --worktree "id:$WORKTREE" --command "$COMMAND" --json`で自分のterminalを作る。
+   `COMMAND`には、対象projectで`dotfiles-project-run --attr default --`から起動するprobeの絶対pathをshell quoteして埋め込み、実行後の`$?`もそのshellで出力させる。
+   呼出し側の`PROBE`変数が新しいterminalへ引き継がれるとは仮定しない。
+   返却された`result.terminal.handle`を`terminal read --terminal "$HANDLE" --screen --json`へ渡し、probeの出力と終了値を照合してから、同じhandleのterminalだけを閉じる。
+   createの成功、`wait.satisfied`、終了値不明の`stop_unverified`だけではprobeの成功とみなさない。
+   これはcommand overrideを通る既定の起動の代わりではなく、override適用後には`worktree create --name NAME --agent omp --json`で既定の経路を別に実測する。
 
 この手順の結果を、既定経路の実測として扱うのは、override を適用して手順 5 の後半を実行した後だけである。
 

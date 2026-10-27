@@ -45,10 +45,14 @@ Think in English. Respond in Japanese.
 - `nix build` は明示した out-link が必要な場合を除き `--no-link`、`nix-build` は `--no-out-link` を使う。agent runtime の shim を絶対 path で迂回しない。
 - 編集中は変更箇所に対応する focused check を使う。高コストな最終確認は `dotfiles-agent-verify -- COMMAND [ARG...]` から一度だけ実行する。同じ source、command、環境で成功済みの確認を繰り返さない。
 - 画面、CLI、TUI に現れる変更は、実際に起動して操作し、観測した結果を証拠として示すまで完了としない。型検査、単体・結合 test、lint、build は起動の代替にならない。起動できない事情があるときは完了と書かず、何を起こせなかったかと未検証である旨を述べる。
-- agent session 内で linked worktree を作るときは `git worktree add` を使う。session の終了時に runtime が削除するのは、その session の `git worktree add` で作った worktree のうち、HEAD が作成時のままで、変更、untracked file、lock を持たないものだけである。
+- Orcaの状態を扱わないagent自身のlinked worktreeは`git worktree add`で作る。
+  sessionの終了時にruntimeが削除するのは、そのsessionの`git worktree add`で作ったworktreeのうち、HEADが作成時のままで、変更、untracked file、lockを持たないものだけである。
 - runtime が削除しない worktree と、その session で作った branch は、作業を終える前に自分で片付け、回収の要否は利用者に問わず、中身が取り込み済みかを `git cherry` か blob の比較で実測して決める。
 - 取り込み済みの物は `git worktree remove` と `git branch -d` で回収し、未取り込みの commit や変更を持つ物は、先端と差分を追跡外の場所へ退避してから回収するか、残す理由を報告する。
-- Orca の worktree と terminal の作成、handoff は `orca-cli` が所有する。Orca が作った worktree の寿命は Orca が持つため、上の回収の対象にしない。
+- 通常の並列作業には、利用できるclientのsubagentを使う。
+  Orcaのworktreeとterminalの操作、別agentへの完全なhandoffには`orca-cli`を使う。
+  依頼がOrca workerの監督やtask DAGの協調実行まで含む場合は`orchestration`を使う。
+  Orcaが作ったworktreeの寿命はOrcaが持つため、上の回収の対象にしない。
 - 自分が起動した server、container、background process と作成した一時資源を作業中に把握し、終了時に自分の所有物だけ停止、回収する。既存物や所有者不明の資源を削除しない。
 
 ## subagents

@@ -1,12 +1,20 @@
+import errno
+import fcntl
+import io
 import json
 import os
+import resource
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
+from contextlib import contextmanager, redirect_stderr
 from datetime import date, datetime, timezone
 from pathlib import Path
+from unittest import mock
 from zoneinfo import ZoneInfo
 
 PACKAGE = Path(sys.argv.pop(1)).resolve()
@@ -79,6 +87,67 @@ def git(*args: str, cwd: Path | None = None, env: dict | None = None) -> str:
     return subprocess.run(
         ["git", *args], cwd=cwd, env=env, check=True, capture_output=True, text=True
     ).stdout.strip()
+
+
+SIZE_LIMIT = 16
+
+
+@contextmanager
+def file_size_limit(limit: int):
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (limit, hard))
+    try:
+        yield
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+
+
+PUBLISHER = """\
+import os, sys, time
+from pathlib import Path
+package, target, document, ready, release, started = sys.argv[1:7]
+sys.path.insert(0, package)
+import journal
+if ready:
+    replace = os.replace
+    def held(source, destination):
+        Path(ready).write_text(source, encoding="utf-8")
+        while not Path(release).exists():
+            time.sleep(0.01)
+        replace(source, destination)
+    os.replace = held
+if started:
+    Path(started).write_text("started", encoding="utf-8")
+journal.atomic_write(Path(target), document)
+"""
+
+
+def reap(process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        process.kill()
+    process.wait()
+
+
+def start_publisher(
+    test: unittest.TestCase, target: Path, document: str, ready: Path | None = None, release: Path | None = None, started: Path | None = None
+) -> subprocess.Popen:
+    process = subprocess.Popen([
+        sys.executable, "-c", PUBLISHER, str(PACKAGE), str(target), document,
+        str(ready or ""), str(release or ""), str(started or ""),
+    ])
+    test.addCleanup(reap, process)
+    return process
+
+
+def wait_for(path: Path, process: subprocess.Popen) -> str:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if path.exists() and path.stat().st_size > 0:
+            return path.read_text(encoding="utf-8")
+        if process.poll() is not None:
+            raise AssertionError(f"the publisher exited with {process.returncode} before writing {path}")
+        time.sleep(0.01)
+    raise AssertionError(f"{path} was not written")
 
 
 class JournalTest(unittest.TestCase):
@@ -349,6 +418,235 @@ class JournalTest(unittest.TestCase):
         limits = [int(argv[argv.index("--max-time") + 1]) for argv in self.model_argv()]
         self.assertTrue(limits)
         self.assertTrue(all(1 <= limit <= 340 for limit in limits), limits)
+
+    def test_a_day_file_that_cannot_be_written_is_not_published_and_the_next_run_recovers(self):
+        directory = self.journal / "2026" / "0923"
+        directory.mkdir(parents=True)
+        for name in ("other.md", "tmpkeep"):
+            (directory / name).write_text("neighbor\n", encoding="utf-8")
+        publish = journal.atomic_write
+
+        def constrained(path, document):
+            with file_size_limit(SIZE_LIMIT):
+                publish(path, document)
+
+        with mock.patch.object(journal, "atomic_write", constrained), self.assertRaises(OSError) as raised:
+            self.run_journal("--date", DAY.isoformat())
+
+        self.assertEqual(raised.exception.errno, errno.EFBIG)
+        self.assertEqual(sorted(path.name for path in directory.iterdir()), ["other.md", "tmpkeep"])
+        self.assertIsNone(self.remote_file(DAY_FILE))
+
+        self.run_journal(now=local("2026-09-24T06:00:00"))
+
+        self.assertEqual(sorted(path.name for path in directory.iterdir()), ["other.md", "testhost.md", "tmpkeep"])
+        self.assertEqual(self.remote_file(DAY_FILE), (self.journal / DAY_FILE).read_text(encoding="utf-8"))
+        self.assertEqual((directory / "other.md").read_text(encoding="utf-8"), "neighbor\n")
+        self.assertEqual((directory / "tmpkeep").read_text(encoding="utf-8"), "neighbor\n")
+
+    def test_the_next_run_recovers_a_killed_publication_of_a_day_outside_the_lookback(self):
+        old = self.journal / "2026" / "0910"
+        old.mkdir(parents=True)
+        legacy = old / "tmpabcdefgh"
+        other_machine = old / ".other-host.md.abcdefgh.tmp"
+        for path in (legacy, other_machine):
+            path.write_text("neighbor\n", encoding="utf-8")
+            path.chmod(0o600)
+        ready, release = self.workspace / "ready", self.workspace / "release"
+        child = start_publisher(self, old / f"{HOST}.md", "never published\n", ready, release)
+        temporary = Path(wait_for(ready, child))
+        child.kill()
+        child.wait()
+        self.assertTrue(temporary.is_file())
+
+        self.run_journal(now=local("2026-09-24T06:00:00"))
+
+        self.assertFalse(temporary.exists())
+        self.assertFalse((old / f"{HOST}.md").exists())
+        self.assertEqual(sorted(path.name for path in old.iterdir()), sorted([legacy.name, other_machine.name]))
+        self.assertEqual(legacy.read_text(encoding="utf-8"), "neighbor\n")
+        self.assertEqual(other_machine.read_text(encoding="utf-8"), "neighbor\n")
+        self.assertEqual(self.remote_file(DAY_FILE), (self.journal / DAY_FILE).read_text(encoding="utf-8"))
+
+    def test_an_abandoned_temporary_that_cannot_be_removed_fails_the_run_without_blocking_other_days(self):
+        old = self.journal / "2026" / "0910"
+        old.mkdir(parents=True)
+        leftover = old / f".{HOST}.md.abcdefgh.tmp"
+        leftover.write_text("abandoned\n", encoding="utf-8")
+        leftover.chmod(0o600)
+        old.chmod(0o555)
+        self.addCleanup(old.chmod, 0o755)
+        errors = io.StringIO()
+
+        with redirect_stderr(errors):
+            self.run_journal(now=local("2026-09-24T06:00:00"), status=1)
+
+        self.assertIn("could not remove an abandoned temporary", errors.getvalue())
+        self.assertTrue(leftover.exists())
+        self.assertEqual(self.remote_file(DAY_FILE), (self.journal / DAY_FILE).read_text(encoding="utf-8"))
+
+    def test_recovery_follows_no_symlinked_directory_and_skips_dates_that_do_not_exist(self):
+        external = self.workspace / "external"
+        sentinel = external / "0910" / f".{HOST}.md.abcdefgh.tmp"
+        impossible = [self.journal / "2026" / name / f".{HOST}.md.abcdefgh.tmp" for name in ("9999", "0230")]
+        (self.journal / "2025").mkdir()
+        (self.journal / "2024").symlink_to(external)
+        (self.journal / "2025" / "0910").symlink_to(external / "0910")
+        for path in (sentinel, *impossible):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("keep\n", encoding="utf-8")
+            path.chmod(0o600)
+
+        self.run_journal(now=local("2026-09-24T06:00:00"))
+
+        for path in (sentinel, *impossible):
+            self.assertEqual(path.read_text(encoding="utf-8"), "keep\n")
+        self.assertEqual(sorted(path.name for path in sentinel.parent.iterdir()), [sentinel.name])
+
+
+class AtomicWriteTest(unittest.TestCase):
+    def setUp(self):
+        workspace = tempfile.TemporaryDirectory(prefix="agent-journal-write-test-")
+        self.addCleanup(workspace.cleanup)
+        self.root = Path(workspace.name)
+
+    def populate(self) -> Path:
+        directory = self.root / "2026" / "0923"
+        directory.mkdir(parents=True)
+        target = directory / "host.md"
+        target.write_text("previous\n", encoding="utf-8")
+        target.chmod(0o644)
+        for name in ("other.md", "tmpkeep"):
+            (directory / name).write_text("neighbor\n", encoding="utf-8")
+        return target
+
+    @staticmethod
+    def names(directory: Path) -> list[str]:
+        return sorted(path.name for path in directory.iterdir())
+
+    def test_a_write_that_fails_keeps_the_previous_file_and_leaves_no_temporary(self):
+        target = self.populate()
+        listing = self.names(target.parent)
+
+        for label, document in (("flush at close", "a document longer than the limit\n"), ("direct write", "x" * (1 << 20))):
+            with self.subTest(label):
+                with file_size_limit(SIZE_LIMIT), self.assertRaises(OSError) as raised:
+                    journal.atomic_write(target, document)
+
+                self.assertEqual(raised.exception.errno, errno.EFBIG)
+                self.assertEqual(target.read_text(encoding="utf-8"), "previous\n")
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o644)
+                self.assertEqual(self.names(target.parent), listing)
+
+    def test_a_replacement_that_fails_keeps_the_destination_and_the_neighbors(self):
+        target = self.populate()
+        target.unlink()
+        target.mkdir()
+        (target / "inner").write_text("inner\n", encoding="utf-8")
+        listing = self.names(target.parent)
+
+        with self.assertRaises(IsADirectoryError):
+            journal.atomic_write(target, "replacement\n")
+
+        self.assertEqual(self.names(target), ["inner"])
+        self.assertEqual(self.names(target.parent), listing)
+
+    def test_a_first_publication_that_fails_leaves_no_file_and_the_next_one_succeeds(self):
+        target = self.root / "2026" / "0923" / "host.md"
+
+        with file_size_limit(SIZE_LIMIT), self.assertRaises(OSError):
+            journal.atomic_write(target, "x" * 100)
+
+        self.assertFalse(target.exists())
+        self.assertEqual(self.names(target.parent), [])
+
+        journal.atomic_write(target, "published\n")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "published\n")
+        self.assertEqual(self.names(target.parent), ["host.md"])
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+
+    def test_an_interruption_during_the_replacement_keeps_the_previous_file_and_leaves_no_temporary(self):
+        target = self.populate()
+        listing = self.names(target.parent)
+        previous = signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+        self.addCleanup(signal.signal, signal.SIGTERM, previous)
+        temporary_existed = []
+
+        def interrupt(source, _destination):
+            temporary_existed.append(Path(source).exists())
+            signal.raise_signal(signal.SIGTERM)
+
+        with mock.patch.object(os, "replace", interrupt), self.assertRaises(SystemExit) as raised:
+            journal.atomic_write(target, "replacement\n")
+
+        self.assertEqual(temporary_existed, [True])
+        self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
+        self.assertEqual(target.read_text(encoding="utf-8"), "previous\n")
+        self.assertEqual(self.names(target.parent), listing)
+
+    def test_a_publisher_killed_mid_publication_leaves_its_temporary_and_the_next_writer_removes_only_that(self):
+        target = self.populate()
+        directory = target.parent
+        stale = directory / ".host.md.stale001.tmp"
+        foreign_mode = directory / ".host.md.abcdefgh.tmp"
+        other_target = directory / ".other.md.abcdefgh.tmp"
+        short_token = directory / ".host.md.abc.tmp"
+        legacy = directory / "tmpabcdefgh"
+        symlink = directory / ".host.md.linkname.tmp"
+        folder = directory / ".host.md.dirnames.tmp"
+        kept = {foreign_mode: 0o644, other_target: 0o600, short_token: 0o600, legacy: 0o600}
+        for path, mode in {stale: 0o600, **kept}.items():
+            path.write_text(f"{path.name}\n", encoding="utf-8")
+            path.chmod(mode)
+        symlink.symlink_to("/elsewhere")
+        folder.mkdir()
+        ready, release = self.root / "ready", self.root / "release"
+        publisher = start_publisher(self, target, "never published\n", ready, release)
+        temporary = Path(wait_for(ready, publisher))
+
+        publisher.kill()
+        publisher.wait()
+
+        self.assertTrue(temporary.is_file())
+        self.assertEqual(target.read_text(encoding="utf-8"), "previous\n")
+        descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            os.close(descriptor)
+        leftover = self.names(directory)
+
+        journal.atomic_write(target, "after\n")
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "after\n")
+        self.assertEqual(self.names(directory), sorted(set(leftover) - {temporary.name, stale.name}))
+        for path, mode in kept.items():
+            self.assertEqual(path.read_text(encoding="utf-8"), f"{path.name}\n")
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), mode)
+        self.assertEqual(os.readlink(symlink), "/elsewhere")
+        self.assertTrue(folder.is_dir())
+
+    def test_a_live_publisher_keeps_its_temporary_and_the_next_one_waits_for_it(self):
+        target = self.populate()
+        listing = self.names(target.parent)
+        ready, release, started = self.root / "ready", self.root / "release", self.root / "started"
+        first = start_publisher(self, target, "first\n", ready, release)
+        temporary = Path(wait_for(ready, first))
+        second = start_publisher(self, target, "second\n", started=started)
+        wait_for(started, second)
+        time.sleep(0.5)
+
+        self.assertIsNone(second.poll())
+        self.assertTrue(temporary.is_file())
+        self.assertEqual(target.read_text(encoding="utf-8"), "previous\n")
+
+        release.touch()
+
+        self.assertEqual(first.wait(timeout=30), 0)
+        self.assertEqual(second.wait(timeout=30), 0)
+        self.assertEqual(target.read_text(encoding="utf-8"), "second\n")
+        self.assertEqual(self.names(target.parent), listing)
 
 
 if __name__ == "__main__":

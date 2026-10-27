@@ -49,6 +49,11 @@ summary: extraction=succeeded backend-saved=2 backend-unconfirmed=1
 
 読み終えた位置と確認待ちの receipt は `~/.local/state/dotfiles-wsl/memory-harvest.json` にある。receipt は`pending`を受け取った時点で書くので、実行の途中で取り消しても残る。file を消すと、次の実行は 7 日前から読み直し、確認待ちの receipt を確かめなくなる。
 
+状態は同じdirectoryの一時fileへ書き終えてから置換し、書込失敗では以前の状態を保つ。
+強制終了などで残った一時fileは、次に同じ状態fileを書くときに回収する。
+writerは親directoryの排他を保持し、この状態fileの一時fileの名前、所有者、通常file、mode 0600が一致するものだけを除去する。
+並走中のwriter、別の状態file、旧来の無名の一時fileは巻き込まない。
+
 ## 手動で実行する
 
 timer を待たずに実行する。timer の実行中に同じ command を呼ぶと、worker を始めず終了 status 75 で返る。

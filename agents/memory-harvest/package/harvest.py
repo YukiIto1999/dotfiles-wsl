@@ -4,18 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import signal
 import subprocess
 import sys
-import tempfile
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from journal import JournalError, Session, child_timeout, chunks, clip, project_root, sessions_in, summarize
+from journal import JournalError, Session, atomic_write, child_timeout, chunks, clip, project_root, sessions_in, summarize
 
 PROG = "dotfiles-agent-memory-harvest"
 PROMPT = Path(__file__).resolve().parent / "prompt.md"
@@ -91,10 +89,7 @@ def load_state(path: Path, now: datetime, lookback_days: int) -> dict:
 
 def store_state(path: Path, state: dict) -> None:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-            json.dump(state, handle, ensure_ascii=False, indent=2)
-        os.replace(handle.name, path)
+        atomic_write(path, json.dumps(state, ensure_ascii=False, indent=2))
     except OSError as error:
         raise HarvestError(f"{path} could not be written: {error}") from None
 

@@ -1,14 +1,17 @@
 import io
 import json
 import os
+import resource
 import signal
+import subprocess
 import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stderr, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 PACKAGE = Path(sys.argv.pop(1)).resolve()
 JOURNAL = Path(sys.argv.pop(1)).resolve()
@@ -193,6 +196,36 @@ elif command == "status":
     print(json.dumps({"state": "saved" if saved else "pending", **request}))
 else:
     fail("invalid_input")
+"""
+
+
+SIZE_LIMIT = 16
+
+
+@contextmanager
+def file_size_limit(limit: int):
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (limit, hard))
+    try:
+        yield
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+
+
+PUBLISHER = """\
+import os, sys, time
+from pathlib import Path
+sys.path[:0] = sys.argv[1:3]
+target, ready, release = (Path(argument) for argument in sys.argv[3:6])
+import harvest
+replace = os.replace
+def held(source, destination):
+    ready.write_text(source, encoding="utf-8")
+    while not release.exists():
+        time.sleep(0.01)
+    replace(source, destination)
+os.replace = held
+harvest.store_state(target, {"since": "2026-09-30T00:00:00+00:00", "pending": []})
 """
 
 
@@ -587,6 +620,136 @@ class HarvestTest(unittest.TestCase):
         output = self.run_harvest()
         self.assertIn(f"rejected: {self.locator('u0000001')}", output)
         self.assertEqual(self.cursor(), NOW.isoformat())
+
+    def previous_state(self) -> bytes:
+        """未確認の receipt を持つ state を置き、その bytes を返す。"""
+        self.environment({"FAKE_SAVE_PENDING": "1"})
+        self.run_harvest()
+        del os.environ["FAKE_SAVE_PENDING"]
+        return self.state.read_bytes()
+
+    def names(self) -> list[str]:
+        return sorted(path.name for path in self.state.parent.iterdir())
+
+    @staticmethod
+    def reap(process: subprocess.Popen) -> None:
+        if process.poll() is None:
+            process.kill()
+        process.wait()
+
+    @staticmethod
+    def wait_for(path: Path, process: subprocess.Popen) -> str:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            if path.exists() and path.stat().st_size > 0:
+                return path.read_text(encoding="utf-8")
+            if process.poll() is not None:
+                raise AssertionError(f"the publisher exited with {process.returncode} before writing {path}")
+            time.sleep(0.01)
+        raise AssertionError(f"{path} was not written")
+
+    @staticmethod
+    def constrained_publication():
+        publish = harvest.atomic_write
+
+        def limited(path, document):
+            with file_size_limit(SIZE_LIMIT):
+                publish(path, document)
+
+        return mock.patch.object(harvest, "atomic_write", limited)
+
+    def test_a_state_write_that_fails_keeps_the_previous_state_and_leaves_no_temporary(self):
+        previous = self.previous_state()
+        for name in ("tmpkeep", "other.json"):
+            (self.state.parent / name).write_text("neighbor\n", encoding="utf-8")
+        listing = self.names()
+
+        with self.constrained_publication():
+            self.run_harvest(now=NOW + timedelta(hours=1), status=1)
+
+        self.assertIn("could not be written", self.errors.getvalue())
+        self.assertEqual(self.state.read_bytes(), previous)
+        self.assertEqual(self.names(), listing)
+
+        self.backend_complete()
+        confirmed = self.run_harvest(now=NOW + timedelta(hours=2))
+
+        self.assertIn(f"saved: {self.locator('u0000001')}", confirmed)
+        self.assertEqual(self.receipts(), [])
+        self.assertEqual(self.names(), listing)
+        self.assertEqual((self.state.parent / "tmpkeep").read_text(encoding="utf-8"), "neighbor\n")
+
+    def test_a_first_state_write_that_fails_leaves_no_state_and_no_temporary(self):
+        self.state.parent.mkdir()
+        (self.state.parent / "tmpkeep").write_text("neighbor\n", encoding="utf-8")
+
+        with self.constrained_publication():
+            self.run_harvest(status=1)
+
+        self.assertFalse(self.state.exists())
+        self.assertEqual(self.names(), ["tmpkeep"])
+        self.assertEqual(self.calls("save"), [])
+
+        self.run_harvest()
+
+        self.assertEqual(self.cursor(), NOW.isoformat())
+        self.assertEqual(self.names(), ["memory-harvest.json", "tmpkeep"])
+
+    def test_an_interrupted_state_write_keeps_the_previous_state_and_leaves_no_temporary(self):
+        previous = self.previous_state()
+        listing = self.names()
+        handler = signal.signal(signal.SIGTERM, lambda *_: sys.exit(128 + signal.SIGTERM))
+        self.addCleanup(signal.signal, signal.SIGTERM, handler)
+        temporary_existed = []
+
+        def interrupt(source, _destination):
+            temporary_existed.append(Path(source).exists())
+            signal.raise_signal(signal.SIGTERM)
+
+        with mock.patch.object(os, "replace", interrupt), self.assertRaises(SystemExit) as raised:
+            self.run_harvest(now=NOW + timedelta(hours=1))
+
+        self.assertEqual(temporary_existed, [True])
+        self.assertEqual(raised.exception.code, 128 + signal.SIGTERM)
+        self.assertEqual(self.state.read_bytes(), previous)
+        self.assertEqual(self.names(), listing)
+
+        self.backend_complete()
+        confirmed = self.run_harvest(now=NOW + timedelta(hours=2))
+
+        self.assertIn(f"saved: {self.locator('u0000001')}", confirmed)
+        self.assertEqual(self.receipts(), [])
+        self.assertEqual(self.names(), listing)
+
+    def test_a_killed_state_publication_leaves_its_temporary_and_the_next_run_removes_only_that(self):
+        previous = self.previous_state()
+        lookalike = self.state.parent / ".memory-harvest.json.abcdefgh.tmp"
+        legacy = self.state.parent / "tmpkeep"
+        for path, mode in ((lookalike, 0o644), (legacy, 0o600)):
+            path.write_text("neighbor\n", encoding="utf-8")
+            path.chmod(mode)
+        ready, release = self.workspace / "ready", self.workspace / "release"
+        publisher = subprocess.Popen(
+            [sys.executable, "-c", PUBLISHER, str(PACKAGE), str(JOURNAL), str(self.state), str(ready), str(release)]
+        )
+        self.addCleanup(self.reap, publisher)
+        temporary = Path(self.wait_for(ready, publisher))
+
+        publisher.kill()
+        publisher.wait()
+
+        self.assertTrue(temporary.is_file())
+        self.assertEqual(self.state.read_bytes(), previous)
+        leftover = self.names()
+
+        self.backend_complete()
+        confirmed = self.run_harvest(now=NOW + timedelta(hours=1))
+
+        self.assertIn(f"saved: {self.locator('u0000001')}", confirmed)
+        self.assertEqual(self.receipts(), [])
+        self.assertEqual(self.names(), sorted(set(leftover) - {temporary.name}))
+        self.assertEqual(lookalike.stat().st_mode & 0o777, 0o644)
+        self.assertEqual(legacy.read_text(encoding="utf-8"), "neighbor\n")
 
 
 if __name__ == "__main__":

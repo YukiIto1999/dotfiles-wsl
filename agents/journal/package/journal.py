@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import re
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -392,11 +395,152 @@ def pending_days(
     return sorted(unpublished | set(unfinished_days(journal, machine, branch)))
 
 
-def write(path: Path, document: str) -> None:
+TEMPORARY_SUFFIX = ".tmp"
+TEMPORARY_TOKEN = "[a-z0-9_]{8}"
+
+
+@contextlib.contextmanager
+def directory_lock(directory: Path):
+    """directory の排他 flock の保持
+
+    directory: lock する directory
+    副作用: 保持の間の同じ directory の lock の待機
+    失敗: OSError の送出
+    不変条件: SIGKILL を含む process の終了での kernel による解放
+    """
+    descriptor = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def abandoned_temporaries(directory: Path, name: str) -> list[Path]:
+    """name の公開が強制終了で残した一時 file の列挙
+
+    directory: 公開先の directory
+    name: 公開先の file 名
+    戻り値: 名前が一時 file の形で通常 file かつ所有者が自分かつ mode が 0600 の file
+    """
+    pattern = re.compile(rf"\.{re.escape(name)}\.{TEMPORARY_TOKEN}{re.escape(TEMPORARY_SUFFIX)}")
+    uid = os.getuid()
+    found = []
+    with os.scandir(directory) as entries:
+        for entry in entries:
+            if pattern.fullmatch(entry.name) is None:
+                continue
+            status = entry.stat(follow_symlinks=False)
+            if stat.S_ISREG(status.st_mode) and status.st_uid == uid and stat.S_IMODE(status.st_mode) == 0o600:
+                found.append(Path(entry.path))
+    return found
+
+
+def discard_abandoned_temporaries(directory: Path, name: str) -> None:
+    """name の公開が強制終了で残した一時 file の除去
+
+    directory: 公開先の directory
+    name: 公開先の file 名
+    前提: directory の排他 flock の保持
+    副作用: 列挙した一時 file の削除
+    """
+    for abandoned in abandoned_temporaries(directory, name):
+        abandoned.unlink(missing_ok=True)
+
+
+def atomic_write(path: Path, document: str) -> None:
+    """path の内容の原子的な置換
+
+    path: 置換先の file
+    document: 置換後の本文
+    副作用: path の親 directory の作成
+    副作用: 公開の間の親 directory の排他 flock の保持
+    副作用: 同じ path の強制終了が残した一時 file の除去
+    失敗: OSError の送出
+    不変条件: 置換前か置換後の完全な内容だけの公開
+    不変条件: 例外と SIGTERM による中断での一時 file の削除の試行
+    不変条件: 残った一時 file の同じ path の次の公開での除去
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as handle:
-        handle.write(document)
-    os.replace(handle.name, path)
+    # 名前だけでの除去は並走する公開の一時 file を巻込むため強制終了でも kernel が放す親 directory の flock が必須
+    with directory_lock(path.parent):
+        discard_abandoned_temporaries(path.parent, path.name)
+        handle = tempfile.NamedTemporaryFile(
+            "w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=TEMPORARY_SUFFIX, delete=False
+        )
+        try:
+            with handle:
+                handle.write(document)
+            os.replace(handle.name, path)
+        except BaseException:
+            # 元の例外を隠すため後片付けの失敗の送出は不可
+            with contextlib.suppress(OSError):
+                os.unlink(handle.name)
+            raise
+
+
+def real_directories(parent: Path, pattern: str) -> list[Path]:
+    """名前が pattern に全て合う実 directory の列挙
+
+    parent: 列挙する directory
+    pattern: 子の名前に全て合う正規表現
+    戻り値: 名前順の子 directory
+    不変条件: symlink の子の除外
+    """
+    with os.scandir(parent) as entries:
+        return sorted(
+            Path(entry.path)
+            for entry in entries
+            if re.fullmatch(pattern, entry.name) and entry.is_dir(follow_symlinks=False)
+        )
+
+
+def is_calendar_day(year: str, month_day: str) -> bool:
+    """実在の暦日の判定
+
+    year: 年の 4 桁
+    month_day: 月日の 4 桁
+    戻り値: 実在の暦日のときの真
+    """
+    try:
+        date(int(year), int(month_day[:2]), int(month_day[2:]))
+    except ValueError:
+        return False
+    return True
+
+
+def recover_abandoned_days(journal: Path, machine: str) -> list[str]:
+    """日付 directory に残った machine の日誌の一時 file の除去
+
+    journal: 日誌の checkout の root
+    machine: 対象の機械名
+    戻り値: 除去に失敗した directory と原因の説明の列
+    副作用: lookback の外を含む実在の暦日の <yyyy>/<MMdd> の directory での強制終了が残した一時 file の除去
+    不変条件: symlink の年と日の directory の非追従
+    不変条件: 他の機械の日誌と名前の形が異なる file と旧来の無名の一時 file の維持
+    """
+    name = f"{machine}.md"
+    failures = []
+    try:
+        years = real_directories(journal, "[0-9]{4}")
+    except OSError as error:
+        return [f"{journal}: {error}"]
+    for year in years:
+        try:
+            days = real_directories(year, "[0-9]{4}")
+        except OSError as error:
+            failures.append(f"{year}: {error}")
+            continue
+        for directory in days:
+            if not is_calendar_day(year.name, directory.name):
+                continue
+            try:
+                if abandoned_temporaries(directory, name):
+                    with directory_lock(directory):
+                        discard_abandoned_temporaries(directory, name)
+            except OSError as error:
+                failures.append(f"{directory}: {error}")
+    return failures
 
 
 def commit(journal: Path, relative: str, day: date) -> None:
@@ -440,6 +584,9 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     except JournalError as error:
         print(f"dotfiles-agent-journal: {error}", file=sys.stderr)
         return 1
+    unrecovered = recover_abandoned_days(journal, machine)
+    for failure in unrecovered:
+        print(f"dotfiles-agent-journal: could not remove an abandoned temporary in {failure}", file=sys.stderr)
     failed = []
     for day in days:
         path = output_path(journal, day, machine)
@@ -454,7 +601,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
                 if not sessions:
                     print(f"{day}: omp の作業はない")
                     continue
-                write(path, compose(options, machine, day, start, end, sessions))
+                atomic_write(path, compose(options, machine, day, start, end, sessions))
                 recorded = len(sessions)
                 stage = stage_of(journal, relative, branch)
             if stage is Stage.GENERATED:
@@ -472,7 +619,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             print(f"{day}: 生成済みの日誌を commit して公開した")
         else:
             print(f"{day}: commit 済みの日誌を公開した")
-    return 1 if failed else 0
+    return 1 if failed or unrecovered else 0
 
 
 if __name__ == "__main__":

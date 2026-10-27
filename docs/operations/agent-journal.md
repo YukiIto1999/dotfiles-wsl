@@ -53,6 +53,12 @@ journalctl --user -u dotfiles-agent-journal.service -n 50
 
 公開済みと報告するのは、push の終了 status ではなく、push 後に`origin`の branch から同じ内容を読み戻せた日だけである。commit の hook が失敗した日は生成済みのまま残り、push が失敗した日は commit 済みのまま残る。どちらも総合の台帳を持たず、次の通常の実行が file と Git の状態から未完了の段を判定する。直近 7 日の窓の外にある未完了の file も、この機械の日誌なら同じ段から続ける。1 日の失敗は後の日を止めない。
 
+本文は同じdirectoryの一時fileへ書き終えてから置換するため、途中の本文を日誌として公開しない。
+書込や置換の失敗時は自分の一時fileの除去を試み、強制終了などで残った場合は次の実行で回収する。
+回収はこの機械の一時fileの名前、所有者、通常file、mode 0600を照合し、実在する日付の実directoryだけを対象にする。
+lookbackの外も回収するが、その日の日誌を再生成することはなく、別の機械、symlinkの年や日付directory、旧来の無名の一時fileは対象にしない。
+回収できないdirectoryは失敗として報告し、ほかの日の処理は続ける。
+
 ```sh
 journal=$(nix eval --raw .#nixosConfigurations.<host-id>.config.dotfiles.workstation.environmentDir)/agent-journal
 git -C "$journal" status --short

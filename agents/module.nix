@@ -333,8 +333,7 @@ let
     ) deploymentRows
   );
 
-  allHomeEntries = homeManagedEntries;
-  homeDestinations = map (entry: entry.name) allHomeEntries;
+  homeDestinations = map (entry: entry.name) homeManagedEntries;
   seedDestinations = map (row: row.file.destination) seedRows;
   systemDestinations = map (entry: entry.name) systemManagedEntries;
 
@@ -603,7 +602,7 @@ in
       { lib, ... }:
       {
         home.file = lib.mkMerge [
-          (lib.listToAttrs allHomeEntries)
+          (lib.listToAttrs homeManagedEntries)
           publicCommands
         ];
         home.sessionPath = lib.mkBefore [ "$HOME/${runtimeWrapperDirectory}" ];

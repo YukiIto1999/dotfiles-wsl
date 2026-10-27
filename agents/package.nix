@@ -13,7 +13,6 @@
 
 let
   cacheRootRelative = runtimeContract.cache.relativeCacheRoot;
-  defaultNixStoreCommand = nixStoreCommand;
   mkGitShim =
     { gitCommand }:
     pkgs.writeShellApplication {
@@ -23,18 +22,13 @@ let
       );
     };
   gitShim = mkGitShim { gitCommand = lib.getExe pkgs.git; };
-  mkProtect =
-    {
-      nixStoreCommand ? defaultNixStoreCommand,
-    }:
-    pkgs.writeShellApplication {
-      name = "dotfiles-agent-protect";
-      runtimeInputs = [ pkgs.coreutils ];
-      text =
-        builtins.replaceStrings [ "@nixStoreCommand@" ] [ (lib.escapeShellArg (toString nixStoreCommand)) ]
-          (builtins.readFile ./impl/runtime/protect.sh);
-    };
-  protect = mkProtect { };
+  protect = pkgs.writeShellApplication {
+    name = "dotfiles-agent-protect";
+    runtimeInputs = [ pkgs.coreutils ];
+    text =
+      builtins.replaceStrings [ "@nixStoreCommand@" ] [ (lib.escapeShellArg (toString nixStoreCommand)) ]
+        (builtins.readFile ./impl/runtime/protect.sh);
+  };
   mkLauncher =
     {
       protectCommand ? protect,
@@ -200,7 +194,6 @@ in
     launcher
     mkGitShim
     mkLauncher
-    mkProtect
     mkVerify
     mkWrapper
     projectCacheGcSource

@@ -70,6 +70,7 @@ lock_fd=
 legacy_fd=
 work_dir=
 candidate_pending=0
+receipt_temporary=
 probe_version=
 latest_revision=
 current_generation=
@@ -256,6 +257,16 @@ acquire_lock() {
   fi
 }
 
+# 前回が強制終了した場合の receipt の一時 file の除去
+# 前提: client root の lock の保持
+# 副作用: client root 直下で .receipt.XXXXXX の名前と自分の所有と mode 0600 を満たす通常 file の削除
+# 名前だけでの一括除去は利用者の file を巻込むため型と所有と mode の照合が必須
+discard_stale_receipt_temporaries() {
+  LC_ALL=C find "$client_root" -mindepth 1 -maxdepth 1 -type f -uid "$uid" -perm 600 \
+    -regextype posix-extended -regex '.*/\.receipt\.[A-Za-z0-9]{6}' -delete \
+    || client_fail "cannot remove an abandoned receipt temporary"
+}
+
 validate_generation_link() {
   local link=$1 target
   [[ -L $link ]] || foreign_object "$link"
@@ -315,6 +326,9 @@ worker_cleanup() {
   if ((candidate_pending == 1)) && [[ -L $candidate && $(stat -c %u -- "$candidate") == "$uid" ]]; then
     rm -f -- "$candidate"
   fi
+  if [[ -n $receipt_temporary ]]; then
+    rm -f -- "$receipt_temporary"
+  fi
   if [[ -n $work_dir && -d $work_dir && ! -L $work_dir ]]; then
     rm -rf -- "$work_dir"
   fi
@@ -345,11 +359,11 @@ read_receipt() {
 }
 
 write_receipt() {
-  local temporary
-  temporary=$(mktemp -p "$client_root" '.receipt.XXXXXX') \
+  receipt_temporary=$(mktemp -p "$client_root" '.receipt.XXXXXX') \
     || client_fail "cannot create the receipt"
-  printf '%s\n' "$1" >"$temporary"
-  mv -T -- "$temporary" "$receipt" || client_fail "cannot publish the receipt"
+  printf '%s\n' "$1" >"$receipt_temporary"
+  mv -T -- "$receipt_temporary" "$receipt" || client_fail "cannot publish the receipt"
+  receipt_temporary=
 }
 
 record_generation() {
@@ -485,6 +499,7 @@ op_init() {
   describe_client "$1"
   prepare_roots
   acquire_lock
+  discard_stale_receipt_temporaries
   prepare_work
   load_profile_state
   if [[ -n $current_generation ]]; then
@@ -506,6 +521,7 @@ op_update() {
   describe_client "$1"
   prepare_roots
   acquire_lock
+  discard_stale_receipt_temporaries
   prepare_work
   load_profile_state
   if [[ -z $current_generation ]]; then
@@ -569,6 +585,7 @@ op_rollback() {
   describe_client "$1"
   prepare_roots
   acquire_lock
+  discard_stale_receipt_temporaries
   prepare_work
   load_profile_state
   [[ -n $current_generation ]] || client_fail "no profile to roll back"

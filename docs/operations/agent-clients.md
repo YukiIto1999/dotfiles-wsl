@@ -116,6 +116,9 @@ system を戻した後は `dotfiles-agent-supply status` で、稼働する版�
 native profile の切替は atomic だが、この確認を代替しない。
 同一 UID の悪意ある process が、検査と更新の間に親を差し替える攻撃は防がない。
 `SIGKILL` や電源断で中断した公開は、次の更新が未公開の世代を除いて整合を戻す。
+receiptの書込や置換が失敗した場合は、自分が作った一時fileを後始末する。
+強制終了で残った`.receipt.<6文字の英数字>`は、次の初期化、更新、rollbackがlockを取得してから、自分所有の通常fileかつmode 0600のものだけを回収する。
+lockを取れなかった実行は回収せず、並走中のwriterや名前の異なるfileには触れない。
 
 ## 採用解除
 

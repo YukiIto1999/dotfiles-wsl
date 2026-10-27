@@ -22,6 +22,8 @@
           };
         fakeNix = fixtureShell "nix" (builtins.readFile ../fixtures/supply/fake-nix.sh);
         fakeNixEnv = fixtureShell "nix-env" (builtins.readFile ../fixtures/supply/fake-nix-env.sh);
+        fakeMv = fixtureShell "mv" (builtins.readFile ../fixtures/supply/fake-mv.sh);
+        fakeMktemp = fixtureShell "mktemp" (builtins.readFile ../fixtures/supply/fake-mktemp.sh);
         fixtureHook = fixtureShell "fixture-supply-hook" (
           builtins.readFile ../fixtures/supply/fixture-hook.sh
         );
@@ -99,6 +101,8 @@
             leadingInputs = [
               fakeNix
               fakeNixEnv
+              fakeMv
+              fakeMktemp
             ];
           };
       in

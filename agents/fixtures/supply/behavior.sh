@@ -801,3 +801,88 @@ supply_run 0 status --json
 jq -e '.[] | select(.client == "alpha") | .state == "ready" and .generation == 1 and .version == "alpha/1" and .revision == "baseline" and .previous == null' \
   "$case_root/stdout" >/dev/null || failure "status of an initialized client"
 
+# client root 直下の receipt の一時 file の名前一覧
+# 引数 $1: client 名
+receipt_temporaries() {
+  find "$(profile_dir "$1")" -mindepth 1 -maxdepth 1 -name '.receipt.*' -printf '%f\n' | sort
+}
+
+new_case receipt-publication-failure
+store_entry alpha 1 >/dev/null
+store_entry beta 1 >/dev/null
+supply_run 0 init
+set_revision 1
+register_build alpha 1 "$(store_entry alpha 2)"
+root=$(profile_dir alpha)
+printf 'keep\n' >"$root/notes.txt"
+cp -p -- "$root/receipt.json" "$case_root/receipt.before"
+FIXTURE_RECEIPT_FAULT=reject supply_run 1 update alpha
+grep -q 'alpha: cannot publish the receipt' "$case_root/stderr" || failure "the publication failure was not reported"
+assert_equal "$(sha256sum <"$root/receipt.json")" "$(sha256sum <"$case_root/receipt.before")" "a failed publication replaced the previous receipt"
+assert_equal "$(receipt_temporaries alpha)" "" "a failed publication left its temporary"
+assert_equal "$(cat "$root/notes.txt")" "keep" "an unrelated file beside the receipt"
+set_revision 2
+alpha_3=$(store_entry alpha 3)
+register_build alpha 2 "$alpha_3"
+supply_run 0 update alpha
+assert_equal "$(resolved alpha)" "$alpha_3" "the next update after a failed publication"
+jq -e --arg revision "$(revision 2)" '.generations["3"].revision == $revision' "$root/receipt.json" >/dev/null \
+  || failure "the receipt written after a failed publication"
+assert_equal "$(receipt_temporaries alpha)" "" "the recovered update left a temporary"
+
+new_case receipt-first-write-failure
+store_entry alpha 1 >/dev/null
+store_entry beta 1 >/dev/null
+root=$(profile_dir alpha)
+FIXTURE_RECEIPT_FAULT=unwritable supply_run 1 update alpha
+grep -q 'Permission denied' "$case_root/stderr" || failure "the write failure was not reported"
+assert_missing "$root/receipt.json"
+assert_equal "$(receipt_temporaries alpha)" "" "a failed first write left its temporary"
+set_revision 1
+alpha_2=$(store_entry alpha 2)
+register_build alpha 1 "$alpha_2"
+supply_run 0 update alpha
+assert_equal "$(resolved alpha)" "$alpha_2" "the next update after a failed first write"
+jq -e --arg revision "$(revision 1)" '.generations["2"].revision == $revision' "$root/receipt.json" >/dev/null \
+  || failure "the first receipt written after a failed write"
+assert_equal "$(receipt_temporaries alpha)" "" "the recovered first publication left a temporary"
+
+new_case receipt-abandoned-temporary
+store_entry alpha 1 >/dev/null
+store_entry beta 1 >/dev/null
+supply_run 0 init
+set_revision 1
+register_build alpha 1 "$(store_entry alpha 2)"
+root=$(profile_dir alpha)
+FIXTURE_RECEIPT_FAULT='kill' supply_run 1 update alpha
+abandoned=$(receipt_temporaries alpha)
+[[ $abandoned =~ ^\.receipt\.[A-Za-z0-9]{6}$ ]] || failure "a killed writer must leave exactly its own temporary: '$abandoned'"
+printf '{"stale":true}\n' >"$root/.receipt.STALE1"
+chmod 0600 "$root/.receipt.STALE1"
+printf '{"stale":true}\n' >"$(profile_dir beta)/.receipt.STALE1"
+chmod 0600 "$(profile_dir beta)/.receipt.STALE1"
+printf 'keep\n' >"$root/notes.txt"
+printf '{}\n' >"$root/.receipt.json.bak"
+: >"$root/.receipt.FOREIG"
+chmod 0644 "$root/.receipt.FOREIG"
+ln -s /elsewhere "$root/.receipt.LINKED"
+mkdir "$root/.receipt.DIRDIR"
+hold_lock "$root"
+supply_run 1 update alpha
+[[ -e $root/$abandoned && -e $root/.receipt.STALE1 ]] || failure "a run that could not take the lock removed a temporary"
+release_lock
+set_revision 2
+alpha_3=$(store_entry alpha 3)
+register_build alpha 2 "$alpha_3"
+supply_run 0 update alpha
+assert_equal "$(resolved alpha)" "$alpha_3" "the update after a killed writer"
+jq -e --arg revision "$(revision 2)" '.generations["3"].revision == $revision' "$root/receipt.json" >/dev/null \
+  || failure "the receipt written after a killed writer"
+assert_missing "$root/$abandoned"
+assert_missing "$root/.receipt.STALE1"
+[[ -e $(profile_dir beta)/.receipt.STALE1 ]] || failure "another client's file was removed"
+assert_equal "$(cat "$root/notes.txt")" "keep" "an unrelated file beside the receipt"
+[[ -f $root/.receipt.json.bak && -f $root/.receipt.FOREIG && -d $root/.receipt.DIRDIR ]] \
+  || failure "a file that is not a receipt temporary was removed"
+assert_equal "$(stat -c %a "$root/.receipt.FOREIG")" "644" "a foreign mode is kept"
+assert_equal "$(readlink "$root/.receipt.LINKED")" "/elsewhere" "a symlink with a temporary's name is kept"

@@ -6,6 +6,7 @@
   powershellCommand,
   timeoutSeconds,
   blockDevices ? "/sys/dev/block",
+  mountinfo ? "/proc/self/mountinfo",
   jqCommand ? lib.getExe pkgs.jq,
   statCommand ? "${pkgs.coreutils}/bin/stat",
   timeoutCommand ? "${pkgs.coreutils}/bin/timeout",
@@ -16,6 +17,7 @@ let
   outcomeIds = {
     capacity = "resource/wsl-vhd/capacity";
     wslconfig = "resource/wsl-vhd/wslconfig";
+    rootDiscard = "resource/wsl-vhd/root-discard";
   };
   contract = {
     envelopeVersion = 1;
@@ -33,8 +35,10 @@ let
     "@capacityOutcome@" = lib.escapeShellArg outcomeIds.capacity;
     "@envelopeVersion@" = toString contract.envelopeVersion;
     "@jqCommand@" = lib.escapeShellArg jqCommand;
+    "@mountinfo@" = lib.escapeShellArg mountinfo;
     "@powershellCommand@" = lib.escapeShellArg powershellCommand;
     "@powershellProbe@" = lib.escapeShellArg powershellProbe;
+    "@rootDiscardOutcome@" = lib.escapeShellArg outcomeIds.rootDiscard;
     "@sizeBytes@" = toString sizeBytes;
     "@sparse@" = lib.boolToString sparse;
     "@statCommand@" = lib.escapeShellArg statCommand;

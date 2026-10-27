@@ -33,6 +33,10 @@ let
     timeoutSeconds = observationTimeoutSeconds;
   };
   wslVhdContract = wslVhdObservation.dotfilesObservationContract;
+  # WSL では systemd-remount-fs が省略されるため同 unit での root 再 mount は不可
+  rootDiscard = {
+    bootCommand = "${lib.getExe' pkgs.util-linux "mount"} -o remount,nodiscard /";
+  };
 in
 {
   options.dotfiles.workstation.storage = {
@@ -113,6 +117,6 @@ in
     '';
   };
 
-  # WSL は root ext4 を discard 付きで mount するため、定期 TRIM を重ねて I/O を増やさない。
   config.services.fstrim.enable = false;
+  config.wsl.wslConf.boot.command = rootDiscard.bootCommand;
 }

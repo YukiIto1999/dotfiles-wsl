@@ -182,6 +182,7 @@
           "host/wsl-vhd" = {
             allowedOutcomeIds = [
               "resource/wsl-vhd/capacity"
+              "resource/wsl-vhd/root-discard"
               "resource/wsl-vhd/wslconfig"
             ];
             checkId = "resource/wsl-vhd";
@@ -190,6 +191,7 @@
             kind = "normalized-protocol";
             requiredOutcomeIds = [
               "resource/wsl-vhd/capacity"
+              "resource/wsl-vhd/root-discard"
               "resource/wsl-vhd/wslconfig"
             ];
             requiredResourceKeys = [ ];
@@ -665,9 +667,23 @@
           '';
         printWslconfig =
           name: content: mkWslconfigPowerShell name "printf '%s' ${lib.escapeShellArg content}";
+        # / に重なった最後の mount が見える root になり、discard は super block の option にだけ現れる
+        mkMountinfo = name: lines: pkgs.writeText name (lib.concatStringsSep "\n" lines + "\n");
+        mkRootMountinfo =
+          superOptions: "23 1 8:48 / / rw,relatime shared:1 - ext4 /dev/sdd ${superOptions}";
+        mkStoreMountinfo =
+          superOptions:
+          "24 23 8:48 /nix/store /nix/store ro,relatime shared:1 - ext4 /dev/sdd ${superOptions}";
+        wslRootOptions = "rw,errors=remount-ro,data=ordered";
+        wslRootDiscardOptions = "rw,discard,errors=remount-ro,data=ordered";
+        mountinfoWithoutDiscard = mkMountinfo "mountinfo-nodiscard" [
+          (mkRootMountinfo wslRootOptions)
+          (mkStoreMountinfo wslRootDiscardOptions)
+        ];
         mkWslVhdProbe =
           {
             blockDevices ? mkWslVhdBlockDevices "8:48" 1677721600,
+            mountinfo ? mountinfoWithoutDiscard,
             powershellCommand ? printWslconfig "wslconfig-declared" (
               "[wsl2]\r\ndefaultVhdSize=800GB\r\nmemory=40GB\r\n\r\n[general]\r\ninstanceIdleTimeout=-1\r\n\r\n"
               + "[experimental]\r\nautoMemoryReclaim=gradual\r\nsparseVhd=false\r\n"
@@ -680,6 +696,7 @@
               pkgs
               lib
               blockDevices
+              mountinfo
               powershellCommand
               ;
             inherit sizeBytes sparse;
@@ -747,6 +764,66 @@
             probe = mkWslVhdProbe { powershellCommand = mkWslconfigPowerShell "wslconfig-timeout" "sleep 30"; };
             capacity = "pass";
             wslconfig = "fail";
+          };
+        };
+        # root の online discard は容量や .wslconfig と独立に判定し、/ の super block の option だけを見る
+        wslRootDiscardCases = {
+          root-discard = {
+            mountinfo = mkMountinfo "mountinfo-discard" [ (mkRootMountinfo wslRootDiscardOptions) ];
+            status = "fail";
+          };
+          explicit-nodiscard = {
+            mountinfo = mkMountinfo "mountinfo-explicit-nodiscard" [
+              (mkRootMountinfo "rw,nodiscard,errors=remount-ro,data=ordered")
+            ];
+            status = "pass";
+          };
+          discard-argument = {
+            mountinfo = mkMountinfo "mountinfo-discard-argument" [
+              (mkRootMountinfo "rw,discard=1,errors=remount-ro,data=ordered")
+            ];
+            status = "fail";
+          };
+          source-named-discard = {
+            mountinfo = mkMountinfo "mountinfo-source-discard" [
+              "23 1 8:48 / / rw,relatime shared:1 - ext4 /dev/discard0 ${wslRootOptions}"
+            ];
+            status = "pass";
+          };
+          store-discard-only = {
+            mountinfo = mkMountinfo "mountinfo-store-discard" [
+              (mkRootMountinfo wslRootOptions)
+              (mkStoreMountinfo wslRootDiscardOptions)
+            ];
+            status = "pass";
+          };
+          overmounted-discard-hidden = {
+            mountinfo = mkMountinfo "mountinfo-overmount-hidden" [
+              (mkRootMountinfo wslRootDiscardOptions)
+              "25 23 8:64 / / rw,relatime shared:2 - ext4 /dev/sde ${wslRootOptions}"
+            ];
+            status = "pass";
+          };
+          overmounted-discard-visible = {
+            mountinfo = mkMountinfo "mountinfo-overmount-visible" [
+              (mkRootMountinfo wslRootOptions)
+              "25 23 8:64 / / rw,relatime shared:2 - ext4 /dev/sde ${wslRootDiscardOptions}"
+            ];
+            status = "fail";
+          };
+          non-ext4-root = {
+            mountinfo = mkMountinfo "mountinfo-overlay-root" [
+              "23 1 0:50 / / rw,relatime shared:1 - overlay overlay rw,lowerdir=/lower"
+            ];
+            status = "fail";
+          };
+          no-root-mount = {
+            mountinfo = mkMountinfo "mountinfo-no-root" [ (mkStoreMountinfo wslRootOptions) ];
+            status = "fail";
+          };
+          unreadable = {
+            mountinfo = "/nonexistent/mountinfo";
+            status = "fail";
           };
         };
         hostVhdVariant = {
@@ -1095,6 +1172,62 @@
               touch "$out"
             '';
 
+        # root は WSL の host service が discard 付きで mount し、systemd-remount-fs は WSL で動かず、fileSystems にも root が無い。
+        # 稼働中に remount せず、WSL init が起動時に一度だけ実行する wsl.conf の boot.command で外す
+        wsl-root-discard-boot-contract =
+          let
+            bootCommand = hostConfig.wsl.wslConf.boot.command;
+            commandTokens = lib.splitString " " bootCommand;
+            wslConfLines = lib.splitString "\n" hostConfig.environment.etc."wsl.conf".text;
+            headerIndex = lib.lists.findFirstIndex (line: line == "[boot]") null wslConfLines;
+            afterHeader = lib.drop (headerIndex + 1) wslConfLines;
+            bootSection = lib.take (lib.lists.findFirstIndex (
+              line: lib.hasPrefix "[" line
+            ) (builtins.length afterHeader) afterHeader) afterHeader;
+            rootDiscardUnits = builtins.filter (
+              name: (lib.hasInfix "discard" name || lib.hasInfix "remount" name) && name != "systemd-remount-fs"
+            ) (builtins.attrNames (hostConfig.systemd.services // hostConfig.systemd.timers));
+          in
+          assert lib.assertMsg (
+            builtins.length commandTokens == 4
+            && lib.hasPrefix "/nix/store/" (builtins.elemAt commandTokens 0)
+            && lib.hasSuffix "/bin/mount" (builtins.elemAt commandTokens 0)
+            && builtins.elemAt commandTokens 1 == "-o"
+            && builtins.elemAt commandTokens 2 == "remount,nodiscard"
+            && builtins.elemAt commandTokens 3 == "/"
+          ) "the WSL boot command must remount root with nodiscard through an absolute mount path";
+          assert lib.assertMsg (
+            lib.elem "command=${bootCommand}" bootSection
+            && lib.count (line: lib.hasPrefix "command=" line) bootSection == 1
+            && lib.elem "systemd=true" bootSection
+          ) "/etc/wsl.conf [boot] must carry exactly the declared boot command next to systemd=true";
+          assert lib.assertMsg (
+            !(hostConfig.fileSystems ? "/")
+          ) "an ordinary fileSystems root entry would be skipped on WSL and must not be the nodiscard route";
+          assert lib.assertMsg (
+            (hostConfig.systemd.services.systemd-remount-fs.unitConfig.ConditionVirtualization or null)
+            == "!container"
+          ) "systemd-remount-fs no longer skips WSL, so the boot command premise must be re-examined";
+          assert lib.assertMsg (rootDiscardUnits == [ ])
+            "root discard must not gain a unit next to the WSL boot command: ${builtins.toJSON rootDiscardUnits}";
+          assert lib.assertMsg (
+            !(hostConfig.services.fstrim.enable or false)
+          ) "online fstrim must stay disabled on WSL";
+          assert lib.assertMsg (lib.all
+            (
+              field:
+              lib.elem "resource/wsl-vhd/root-discard"
+                hostConfig.dotfiles.health.observations."host/wsl-vhd".${field}
+            )
+            [
+              "allowedOutcomeIds"
+              "requiredOutcomeIds"
+            ]
+          ) "the root discard outcome must be required from the WSL root VHD observation";
+          pkgs.runCommandLocal "check-wsl-root-discard-boot-contract" { } ''
+            touch "$out"
+          '';
+
         host-stability-contract =
           assert lib.assertMsg (
             builtins.attrNames stabilityObservations == hostObservationKeys
@@ -1269,21 +1402,26 @@
                         local command=$2
                         local capacity=$3
                         local wslconfig=$4
+                        local root_discard=$5
                         local stdout="$TMPDIR/wsl-vhd-$name.stdout"
 
                         if ! "$command" >"$stdout" 2>"$TMPDIR/wsl-vhd-$name.stderr"; then
                           echo "WSL VHD $name probe did not produce an envelope" >&2
                           return 1
                         fi
-                        if ! jq -e --arg capacity "$capacity" --arg wslconfig "$wslconfig" '
+                        if ! jq -e --arg capacity "$capacity" --arg wslconfig "$wslconfig" --arg rootDiscard "$root_discard" '
                           .schemaVersion == 1
                           and .resources == []
-                          and (.outcomes | length) == 2
+                          and (.outcomes | length) == 3
                           and (.outcomes | map({key: .id, value: .status}) | from_entries)
-                            == {"resource/wsl-vhd/capacity": $capacity, "resource/wsl-vhd/wslconfig": $wslconfig}
+                            == {
+                              "resource/wsl-vhd/capacity": $capacity,
+                              "resource/wsl-vhd/wslconfig": $wslconfig,
+                              "resource/wsl-vhd/root-discard": $rootDiscard
+                            }
                           and all(.outcomes[]; (.message | length) > 0)
                         ' "$stdout" >/dev/null; then
-                          echo "WSL VHD $name probe did not report capacity $capacity and .wslconfig $wslconfig" >&2
+                          echo "WSL VHD $name probe did not report capacity $capacity, .wslconfig $wslconfig and root discard $root_discard" >&2
                           cat "$stdout" >&2
                           return 1
                         fi
@@ -1291,10 +1429,21 @@
 
                       ${lib.concatStringsSep "\n" (
                         lib.mapAttrsToList (
-                          name: case: "assert_wsl_vhd ${name} ${lib.getExe case.probe} ${case.capacity} ${case.wslconfig}"
+                          name: case:
+                          "assert_wsl_vhd ${name} ${lib.getExe case.probe} ${case.capacity} ${case.wslconfig} pass"
                         ) wslVhdCases
                       )}
-                      assert_wsl_vhd host-policy ${lib.getExe hostVhdVariant.probe} ${hostVhdVariant.capacity} ${hostVhdVariant.wslconfig}
+                      ${lib.concatStringsSep "\n" (
+                        lib.mapAttrsToList (
+                          name: case:
+                          "assert_wsl_vhd root-${name} ${
+                            lib.getExe (mkWslVhdProbe {
+                              inherit (case) mountinfo;
+                            })
+                          } pass pass ${case.status}"
+                        ) wslRootDiscardCases
+                      )}
+                      assert_wsl_vhd host-policy ${lib.getExe hostVhdVariant.probe} ${hostVhdVariant.capacity} ${hostVhdVariant.wslconfig} pass
 
                       assert_wsl_memory() {
                         local name=$1

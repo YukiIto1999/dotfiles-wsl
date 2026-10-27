@@ -8,9 +8,11 @@ declared_size_bytes=@sizeBytes@
 declared_sparse=@sparse@
 envelope_version=@envelopeVersion@
 jq_command=@jqCommand@
+mountinfo=@mountinfo@
 powershell_command=@powershellCommand@
 powershell_probe=@powershellProbe@
 probe_timeout_seconds=@timeoutSeconds@
+root_discard_outcome=@rootDiscardOutcome@
 stat_command=@statCommand@
 timeout_command=@timeoutCommand@
 wslconfig_outcome=@wslconfigOutcome@
@@ -33,6 +35,25 @@ root_disk_bytes() {
   sectors=$(<"$size_file")
   [[ $sectors =~ ^(0|[1-9][0-9]{0,15})$ ]] || return 1
   printf '%s\n' "$((sectors * 512))"
+}
+
+# mountinfo は「root mount-point options [optional...] - fstype source super-options」の順で、
+# / に重なった mount のうち最後のものが見える root になる。discard は super block の option に出る
+root_filesystem() {
+  local line before after fstype super found=
+  local -a fields
+  [[ -f $mountinfo && -r $mountinfo ]] || return 1
+  while IFS= read -r line; do
+    [[ $line == *' - '* ]] || continue
+    before=${line%% - *}
+    after=${line#* - }
+    read -r -a fields <<<"$before"
+    [[ ${fields[4]-} == / ]] || continue
+    read -r fstype _ super <<<"$after"
+    found=$fstype$'\t'${super-}
+  done <"$mountinfo"
+  [[ -n $found ]] || return 1
+  printf '%s\n' "$found"
 }
 
 # WSL と同じく section と key の大文字小文字を区別せず、同じ key は最初の値を採る。
@@ -85,6 +106,19 @@ elif ((observed_bytes != declared_size_bytes)); then
   add_outcome "$capacity_outcome" fail "root disk capacity differs from the declared VHD size"
 else
   add_outcome "$capacity_outcome" pass "root disk capacity matches the declared VHD size"
+fi
+
+if ! root=$(root_filesystem); then
+  add_outcome "$root_discard_outcome" fail "could not observe the root filesystem mount options"
+else
+  IFS=$'\t' read -r root_type root_options <<<"$root"
+  if [[ $root_type != ext4 ]]; then
+    add_outcome "$root_discard_outcome" fail "the root filesystem is $root_type instead of ext4"
+  elif [[ ,$root_options, == *,discard,* || ,$root_options, == *,discard=* ]]; then
+    add_outcome "$root_discard_outcome" fail "the root ext4 is mounted with online discard; the declared WSL boot command removes it when the distribution next starts"
+  else
+    add_outcome "$root_discard_outcome" pass "the root ext4 is mounted without online discard"
+  fi
 fi
 
 if content=$(

@@ -190,6 +190,11 @@ Windows 側の `%UserProfile%\.wslconfig` の `defaultVhdSize` と `sparseVhd` �
 WSL は同じ key の二つ目以降を無視するため、重複した行も消す。
 この設定確認は既存の VHD と稼働中の session を変えないので、WSL を再起動せずに doctor を再実行できる。
 
+`resource/wsl-vhd/root-discard`がfailの場合、稼働中のroot mountでonline discardが有効か、mountの状態を読み取れていない。
+WSLがrootをmountした後、宣言した`wsl.conf`の`boot.command`が起動時に`nodiscard`へremountする。
+通常のswitchでは稼働中のmountを変えないため、[Rebuild](rebuild.md)の再起動手順に従い、全sessionを終了できる保守時に反映してからdoctorで確認する。
+この観測だけで過去のWSL停止の原因や、再発しないことを確定しない。
+
 `resource/wsl-vhd/capacity` が fail の場合は、root VHD が宣言と異なる設定で作られたか、後から resize されている。root disk の容量を byte 単位で確かめる。
 
 ```sh

@@ -70,15 +70,14 @@ in
                 (.workstation | length) > 0
               ' "$actual" >/dev/null
 
-              checkoutCount=0
+              sources=()
               while IFS= read -r -d "" source; do
-                shellcheck --severity=warning "$source"
-                checkoutCount=$((checkoutCount + 1))
+                sources+=("$source")
               done < <(
                 find ${self} -type f -not -path '*/.git/*' -exec \
                   sh -c 'head -c 2 "$1" | grep -q "^#!"' _ {} \; -print0
               )
-              test "$checkoutCount" -gt 0
+              test "''${#sources[@]}" -gt 0
 
               isGeneratedShell() {
                 local source=$1 shebang
@@ -90,10 +89,10 @@ in
                 esac
               }
 
-              lintGenerated() {
+              collectGeneratedShell() {
                 local source=$1
                 isGeneratedShell "$source"
-                shellcheck --severity=warning "$source"
+                sources+=("$source")
               }
 
               find "$(jq -r '.projectMemoryHooks' "$actual")/bin" \
@@ -105,22 +104,24 @@ in
                 exit 1
               }
               while IFS= read -r hook; do
-                lintGenerated "$(jq -r '.projectMemoryHooks' "$actual")/bin/$hook"
+                collectGeneratedShell "$(jq -r '.projectMemoryHooks' "$actual")/bin/$hook"
               done < actual-hooks
 
               while IFS= read -r command; do
-                lintGenerated "$command"
+                collectGeneratedShell "$command"
               done < <(jq -r '.commands[]' "$actual")
 
-              lintGenerated "$(jq -r '.workstation.wslview' "$actual")"
+              collectGeneratedShell "$(jq -r '.workstation.wslview' "$actual")"
 
               while IFS=$'\t' read -r id executable; do
                 if ! isGeneratedShell "$executable"; then
                   echo "MCP executable is not a generated shell wrapper: $id" >&2
                   exit 1
                 fi
-                lintGenerated "$executable"
+                collectGeneratedShell "$executable"
               done < <(jq -r '.mcpExecutables | to_entries[] | [.key, .value] | @tsv' "$actual")
+
+              printf '%s\0' "''${sources[@]}" | xargs -0 -r shellcheck --severity=warning
 
               touch $out
             '';

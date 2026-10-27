@@ -344,11 +344,6 @@ state_dir_of() {
   printf '%s/%s' "$verification_root" "$id"
 }
 
-ensure_dir() {
-  mkdir -p "$1"
-  chmod 700 "$1"
-}
-
 # 宣言した入口を repository の根で通した走行だけを控える。部分的な検査や下の directory での
 # 走行が通っても、入口がこの木で通ったことにはならない。
 receipt_scratch=
@@ -372,8 +367,9 @@ verified_receipt_exists() {
   local -a record
   IFS= read -r current_boot_id </proc/sys/kernel/random/boot_id || return 1
   verified_receipt_token=
+  project_state_is_private "$1" || return 1
   for candidate in "$1/$2".*.verified; do
-    [ -f "$candidate" ] || continue
+    state_file_is_private "$candidate" || continue
     mapfile record <"$candidate"
     [ "${#record[@]}" -eq 7 ] || continue
     [ "${record[0]}" = $'version=4\n' ] || continue
@@ -401,14 +397,20 @@ verified_receipt_exists() {
 
 # 検証の状態は cache root から project まで自分だけが書ける実 directory に限る。
 # symlink や他人の directory を辿って控え、実行枠、一時 file を置かない。
+state_directory_is_private() {
+  test ! -L "$1" && test -d "$1" && test "$(stat -c %u "$1")" = "$(id -u)"
+}
+
+state_file_is_private() {
+  test ! -L "$1" && test -f "$1" && test "$(stat -c %u "$1")" = "$(id -u)"
+}
+
 ensure_state_directory() {
   local path=$1
   if mkdir -m 700 "$path" 2>/dev/null; then
     return
   fi
-  test ! -L "$path" || return 1
-  test -d "$path" || return 1
-  test "$(stat -c %u "$path")" = "$(id -u)" || return 1
+  state_directory_is_private "$path" || return 1
   chmod 700 "$path" || return 1
   test "$(stat -c %a "$path")" = 700
 }
@@ -418,6 +420,52 @@ ensure_project_state() {
   ensure_state_directory "$cache_root" \
     && ensure_state_directory "$verification_root" \
     && ensure_state_directory "$1"
+}
+
+project_state_is_private() {
+  state_directory_is_private "$cache_root" \
+    && state_directory_is_private "$verification_root" \
+    && state_directory_is_private "$1"
+}
+
+session_name_is_valid() {
+  [ -n "$1" ] && [ "$1" != . ] && [ "$1" != .. ] && [[ $1 != */* ]]
+}
+
+walk_session_state() {
+  local step=$1 session=$2 child=${3-} path
+  local -a directories=("$cache_root" "$verification_root" "$sessions_root" "$sessions_root/$session")
+  [ -z "$child" ] || directories+=("$sessions_root/$session/$child")
+  for path in "${directories[@]}"; do
+    "$step" "$path" || return 1
+  done
+}
+
+ensure_session_state() {
+  if session_name_is_valid "$1" \
+    && mkdir -p -- "${cache_root%/*}" \
+    && walk_session_state ensure_state_directory "$@"; then
+    return 0
+  fi
+  printf 'dotfiles-agent-gate: session の状態 directory を安全に確保できないため控えない: %s\n' "$sessions_root/$1" >&2
+  return 1
+}
+
+session_state_is_private() {
+  if session_name_is_valid "$1" && walk_session_state state_directory_is_private "$@"; then
+    return 0
+  fi
+  printf 'dotfiles-agent-gate: session の状態が自分だけの実 directory でないため辿らない: %s\n' "$sessions_root/$1" >&2
+  return 1
+}
+
+store_state() {
+  local path=$1 content=$2
+  if { [ -e "$path" ] || [ -L "$path" ]; } && ! state_file_is_private "$path"; then
+    printf 'dotfiles-agent-gate: 控えの置き場所が自分の通常 file でないため控えない: %s\n' "$path" >&2
+    return 1
+  fi
+  printf '%s\n' "$content" >"$path"
 }
 
 # 自分で作る一時 file が検査する木の中へ入ると、未追跡 file として照合値へ混ざる。
@@ -519,9 +567,7 @@ command_slot() {
   ensure_project_state "$state" || fail "検証の状態 directory を安全に確保できない: $state"
   slot=$state/run.lock
   if [ -e "$slot" ] || [ -L "$slot" ]; then
-    if [ -L "$slot" ] || [ ! -f "$slot" ] || [ "$(stat -c %u "$slot")" != "$(id -u)" ]; then
-      fail "実行枠が自分の通常 file でない: $slot"
-    fi
+    state_file_is_private "$slot" || fail "実行枠が自分の通常 file でない: $slot"
   else
     : >>"$slot" || fail "実行枠を作れない: $slot"
   fi
@@ -629,8 +675,8 @@ command_arm() {
   [ -d "$path" ] || path=$(dirname -- "$path")
   top=$(repo_top_of "$path") || return 0
   id=$(project_id_of "$top") || return 0
-  ensure_dir "$sessions_root/$session"
-  printf '%s\n' "$top" >"$sessions_root/$session/$id"
+  ensure_session_state "$session" || return 1
+  store_state "$sessions_root/$session/$id" "$top"
 }
 
 # shell の呼び出しは綴りから書き込み先を読めない。呼ぶ前と後で作業場所の木の指紋を比べ、
@@ -646,11 +692,13 @@ command_observe() {
   PreToolUse)
     top=$(repo_top_of "$path") || return 0
     before=$(source_fingerprint "$top") || return 0
-    ensure_dir "$calls"
-    printf '%s\n%s\n' "$before" "$top" >"$state"
+    ensure_session_state "$session" calls || return 1
+    store_state "$state" "$before"$'\n'"$top"
     ;;
   PostToolUse | PostToolUseFailure)
-    [ -f "$state" ] || return 0
+    [ -e "$state" ] || [ -L "$state" ] || return 0
+    session_state_is_private "$session" calls || return 1
+    state_file_is_private "$state" || return 1
     mapfile -t held <"$state"
     rm -f -- "$state"
     before=${held[0]-} top=${held[1]-}
@@ -673,7 +721,7 @@ command_check() {
     command_settle "$top" "$verified_receipt_token" || true
     return 0
   fi
-  if [ -f "$state/$fingerprint.waived" ]; then
+  if project_state_is_private "$state" && state_file_is_private "$state/$fingerprint.waived"; then
     printf '%s を未検証のまま通した理由: %s\n' \
       "$top" "$(sed -n 's/^reason=//p' "$state/$fingerprint.waived")" >&2
     return 0
@@ -689,14 +737,14 @@ command_check() {
 }
 
 command_waive() {
-  local repo=${1:-$PWD} reason=$2 top state fingerprint
+  local repo=${1:-$PWD} reason=$2 top state fingerprint record
   [ -n "$reason" ] || fail 'waive には --reason が要る'
   top=$(repo_top_of "$repo") || fail 'git の木の中で呼ぶ'
   state=$(state_dir_of "$top") || fail 'git の木の中で呼ぶ'
-  ensure_dir "$state"
+  ensure_project_state "$state" || fail "検証の状態 directory を安全に確保できない: $state"
   fingerprint=$(source_fingerprint "$top")
-  printf 'version=1\nsource=%s\nreason=%s\nat=%s\n' \
-    "$fingerprint" "$reason" "$(date -Iseconds)" >"$state/$fingerprint.waived"
+  printf -v record 'version=1\nsource=%s\nreason=%s\nat=%s' "$fingerprint" "$reason" "$(date -Iseconds)"
+  store_state "$state/$fingerprint.waived" "$record" || return 1
   printf '%s を未検証のまま通す理由を控えた: %s\n' "$top" "$reason"
 }
 
@@ -920,8 +968,8 @@ record_skill_read() {
     resolved=$(realpath -e -- "$body") || return 1
     digest=$(sha256sum <"$resolved" | cut -d ' ' -f 1) || return 1
   fi
-  ensure_dir "$sessions_root/$session/skills"
-  printf '%s\n%s\n' "$digest" "$body" >"$sessions_root/$session/skills/$named"
+  ensure_session_state "$session" skills || return 1
+  store_state "$sessions_root/$session/skills/$named" "$digest"$'\n'"$body"
 }
 
 command_learned() {
@@ -939,7 +987,8 @@ command_teach() {
   skill_stands "$named" || return 0
   [ -n "$session" ] || return 0
   marker="$sessions_root/$session/skills/$named"
-  if [ -f "$marker" ] &&
+  if session_state_is_private "$session" skills &&
+    state_file_is_private "$marker" &&
     mapfile -t held <"$marker" &&
     [ "${#held[@]}" -eq 2 ] &&
     body=$(skill_read_in "${held[1]}") &&
@@ -956,7 +1005,7 @@ command_teach() {
 }
 
 command_hook() {
-  local kind=$1 payload session cwd path body proof digest marker held status=0
+  local kind=$1 payload session cwd path body proof digest marker held reason status=0
   payload=$(cat)
   session=$(printf '%s' "$payload" | jq -r '.session_id // empty')
   cwd=$(printf '%s' "$payload" | jq -r '.cwd // empty')
@@ -1007,16 +1056,32 @@ command_hook() {
     exit 0
     ;;
   stop)
-    if [ -n "$session" ] && [ -d "$sessions_root/$session" ]; then
-      # 前だけ控えて後が届かなかった呼び出し(他の hook や許可に止められたもの)の控えを捨てる。
-      rm -rf -- "$sessions_root/$session/calls"
-      for marker in "$sessions_root/$session"/*; do
-        [ -d "$marker" ] && continue
-        [ -f "$marker" ] || continue
-        held=$(cat "$marker")
-        [ -d "$held" ] || continue
-        command_check "$held" || status=2
-      done
+    if [ -n "$session" ] && { [ -e "$sessions_root/$session" ] || [ -L "$sessions_root/$session" ]; }; then
+      if reason=$(session_state_is_private "$session" 2>&1); then
+        for marker in "$sessions_root/$session"/*; do
+          [ -e "$marker" ] || [ -L "$marker" ] || continue
+          if case ${marker##*/} in
+            calls | skills) state_directory_is_private "$marker" ;;
+            *) state_file_is_private "$marker" ;;
+          esac; then
+            case ${marker##*/} in
+            calls) rm -rf -- "$marker"; continue ;;
+            skills) continue ;;
+            esac
+            held=$(cat "$marker")
+            [ -d "$held" ] || continue
+            command_check "$held" || status=2
+          else
+            printf 'dotfiles-agent-gate: 不正な状態の控えを検証済みと扱わない: %s\n' "$marker" | tee /dev/stderr
+            status=2
+          fi
+        done
+      else
+        reason=$(printf '%s\n  控えた repository を確かめられないため、検証済みとは扱わず止める。' "$reason")
+        printf '%s\n' "$reason"
+        printf '%s\n' "$reason" >&2
+        status=2
+      fi
     fi
     exit "$status"
     ;;

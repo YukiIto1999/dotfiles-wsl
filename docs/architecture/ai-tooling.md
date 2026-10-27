@@ -184,6 +184,8 @@ wrapperの生存はPID、boot ID、processの開始時刻で照合するため�
 完了markerは末尾の改行まで揃った場合だけ受理し、file size制限による部分書込の失敗でも終了を認めない。
 slotのlockはsupervisorが子孫の終了確認まで保持するため、wrapperだけが先に消えても次のT1と重ならない。
 証跡のscratchはlauncherが所有を確認したsessionの一時領域か、projectの検証state内に置き、repository内の一時領域へ証跡を作らない。
+gateの管理領域と状態fileは、読取、権限変更、書込、削除の前に、symlinkでない実体と所有者を確認する。
+不正な保存先では状態を記録せず、終了時に不正な状態領域が残っている場合も検証済みとは扱わない。
 次のT1は所有者が終了したpending、receipt、witnessを回収し、生存中や判定できないものは残す。
 終了gateは同じsourceの完了済み証跡を受理した後に古い完了済み証跡を整理する。
 

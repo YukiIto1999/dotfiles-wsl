@@ -1014,6 +1014,7 @@ command_hook() {
   arm)
     path=$(printf '%s' "$payload" |
       jq -r '.tool_input.file_path // .tool_input.path // .tool_input.filePath // empty')
+    case $path in xd://* | agent://* | proc://* | local://* | cfg://* | ssh://*) return 0 ;; esac
     [ -n "$path" ] || path=$cwd
     case $path in /*) ;; *) path="$cwd/$path" ;; esac
     command_arm "$session" "$path" || true
@@ -1051,6 +1052,7 @@ command_hook() {
     path=$(printf '%s' "$payload" |
       jq -r '.tool_input.path // .tool_input.file_path // .tool_input.filePath // empty')
     [ -n "$path" ] || exit 0
+    case $path in xd://* | agent://* | proc://* | local://* | cfg://* | ssh://*) return 0 ;; esac
     case $path in /*) ;; *) path="$cwd/$path" ;; esac
     command_teach "$session" "$path" || exit 2
     exit 0

@@ -810,6 +810,7 @@
               DOMAIN_MODELING_SOURCE = hostConfig.dotfiles.agents.shared.skills.domain-modeling;
             }
             ''
+              bash ${../fixtures/runtime/hook-paths.sh}
               bash ${../fixtures/runtime/verify.sh}
               touch $out
             '';

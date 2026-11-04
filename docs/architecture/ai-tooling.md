@@ -198,6 +198,7 @@ OMPのhookは、配備時に`@gateBinary@`を`dotfiles.agents.packages.verificat
 具体的なstore executableを埋め込んだhookで開始したsessionは、generationを切り替えてもそのgateと成功して読んだ物理sourceのまま動き、新しいgateと実行packageは新しく始めたsessionへ届く。
 この配備より前に読み込まれ、`/run/current-system`を参照するhookは、呼出しごとに現在のgenerationのgateへ解決されるため、旧gateの保持を主張しない。
 編集対象はsymlinkと`..`を解決したpathで判定する。
+`xd://`、`agent://`、`proc://`、`local://`、`cfg://`、`ssh://`へのwriteはlocal repositoryの編集として登録せず、fileの編集前に行うSkill読取の判定にも渡さない。
 agent runtimeが割り当てた`~/.cache/dotfiles-wsl/sessions/<session>/tmp`の内側にあり、祖先にGit metadataを持たない一時fileは対象から外す。
 割当ての確認には、canonical pathの`<session>`と`DOTFILES_AGENT_SESSION_ID`の一致に加え、同じsession directoryの`metadata.json`が実fileであり、`version`が1、`session_id`が`<session>`と一致することを要求する。
 metadataを持たない手作りのdirectory、別sessionの識別情報、不正なmetadataでは除外しない。

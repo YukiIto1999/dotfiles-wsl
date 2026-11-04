@@ -419,6 +419,11 @@ promptから既知の注入blockを除いた残りが空なら想起せず、残
 分類を詳しくしてもerror codeは`unavailable`のままであり、送信済みのsaveを確認できない場合の`indeterminate`は変えない。
 保存は明示的な`memory_save`と、有効にした[記憶の収穫](#記憶の収穫)が行う。
 
+OMPは同じ入力に対する`before_agent_start`の再入で想起の結果と失敗を共有し、停止hookによる内部継続では再取得しない。
+共有はprocess内の同じturnに限り、新しい利用者入力、継続のない`agent_end`、sessionの切替と終了で破棄する。
+session、cwd、入力のhashで結果を分離し、同じ本文でも新しい利用者入力では取得し直す。
+取得の30秒の期限は維持し、超過時には子のprocess groupを止めて出力pipeと子の終了を待つ。
+
 OpenCodeのrecall結果は同じturnのmodel呼出しで共有し、次のpromptで置き換え、idleで破棄する。title生成などの補助呼出しで消費しない。hook実行には30秒、警告通知には1秒のabort期限を設定する。event loopやhostが停止している時間を含めた実時間の上限は保証しない。
 
 既知のmemory/injection blockは決定的に除外するが、secretやPIIをすべて検出できる保証ではない。失敗時に別のmemory backendへfallbackしない。saveが`pending`または`indeterminate`なら保存済みと扱わず、返されたoperationとdocumentのIDを同じscopeの`memory_status`へ渡して確認する。`indeterminate`は送信後の通信断や期限切れで結果を確認できない状態で、runtimeはsaveを自動再送しない。

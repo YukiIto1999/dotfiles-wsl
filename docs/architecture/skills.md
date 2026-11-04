@@ -109,6 +109,18 @@ browserが必要なbranchだけ、その環境で利用可能な専門Skillへ�
 記事の本文は転載せず、既存のagentの計画と引渡しを改訂し、新しいSkillは設けない。
 記事固有のtool選定、100%のcoverage・mutation閾値、Red状態のcommitは採用せず、外部`tdd`の原文と既存の検証・commit規律を維持する。
 
+検証と実行制御について参照した資料は、既存の所有者と異なる機構を必要とするかで採否を分ける。
+
+| 資料 | この環境で使う判断と所有者 | 今回採用しないものと理由 |
+|---|---|---|
+| [E2Eテスト大全](https://blog.kuniwak.com/entry/e2ebok) | テストリストの誤実装と公開境界から検証層を選び、実画面の業務結果は既存の`browser-operation`で確かめる | 独自のテスト分類、探索runner、ケース連鎖の共通導入。状態モデルや独立性は対象projectの契約に依存し、全taskへ要求する根拠がない |
+| [ISUCON2026の当日記録](https://zenn.dev/luvtechno/articles/isucon2026-competition-day) | 仮説と実測を区別する診断は既存の`diagnosing-bugs`、変更の効果の比較は`skill-design`を使う | 時間で起動する監査hookと競技固有の最適化。記事の監査提案は改善を保証せず、検査の縮小や得点最大化は一般の業務契約を保証しない |
+| [Harness Designの比較研究](https://arxiv.org/html/2609.20804v1) | 条件を揃えた比較と要素を外す評価は既存の`skill-design`で行い、成立確認と改善量を区別する | bash-onlyへの切替とコンテキスト再取得機構の撤去。評価したmodel・課題・設定に依存し、tool比較は状態管理と診断も含む変更で、この環境の個別機構の不要性を示さない |
+
+計画手順を明示したJavaScriptの累計履歴とPythonのSQLite一括更新では、数値境界を関数で、保存と取消を実DBとCLIで検査する計画から実装までを確認した。
+この合成課題の成立を、手順なしとの改善量、自然な呼出し、別実行者間の引渡し、長時間作業での停滞対策の有効性へ一般化しない。
+追加機構を導入しない判断は、これらの未測定事項が解消したことを意味しない。
+
 `disable-model-invocation: true`を持つinterview、仕様化、ticket分割、retro、setup、architecture探索の原版は、利用者が明示的に呼ぶcommandとして使う。
 `filter-syntax`はこれに加えて`user-invocable: false`を保ち、`run-tests`がplatformとframeworkを確定したfiltered runで必要とした場合だけ読む。
 この二flagが両方あるhelperはenabled registryと依存closureには残すが、全clientのnamed Skill discovery directoryとsubagent routeから除外する。

@@ -1,4 +1,4 @@
-"""omp の session 記録から 1 日分の作業日誌を作り、agent-journal に記録する。"""
+"""omp の session 記録から 1 日分の技術的な知見を作り、agent-journal に記録する。"""
 
 from __future__ import annotations
 
@@ -13,19 +13,51 @@ import stat
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, tzinfo
 from enum import Enum
 from pathlib import Path
 from time import time as epoch_seconds
-from typing import Any
+from typing import Any, NamedTuple
 from zoneinfo import ZoneInfo
 
 PROMPTS = Path(__file__).resolve().parent / "prompts"
 MESSAGE_CHARS = 4000
 CHUNK_CHARS = 40000
+BACKGROUND_CHARS = 16000
+PIECE_CHARS = 8000
+SYNTHESIS_CHARS = 60000
+REDUCTION_ROUNDS = 4
 MODEL_TIMEOUT_SECONDS = 900
 DEADLINE_ENV = "DOTFILES_JOB_DEADLINE"
+FORMAT_MARKER = "<!-- agent-journal: technical-insights-v1 -->"
+NO_INSIGHTS = "この期間の記録から、根拠を引用できる技術的な知見は抽出されなかった。"
+LIMITATION = (
+    "各項目の根拠は、記録に残る利用者の発言とエージェントの応答・操作の意図からの引用である。"
+    "エージェントが報告した観察と数値は、独立に確かめたものではない。"
+)
+STATUS_LABELS = {
+    "supported": "記録から支持される（独立した検証ではない）",
+    "hypothesis": "仮説（記録にある根拠からの推測）",
+}
+INSIGHT_TEXTS = ("title", "finding", "explanation", "application", "caveats")
+INSIGHT_KEYS = {*INSIGHT_TEXTS, "status", "evidence"}
+INJECTED = re.compile(r"<(project_memory|system-reminder|task-notification)\b[^>]*>.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
+FENCED_JSON = re.compile(r"\A```[A-Za-z]*[ \t]*\n(.*)\n```\Z", re.DOTALL)
+HEADING_LINE = re.compile(r"(?m)^( {0,3})#")
+LINE_BREAK = re.compile(r"\r\n|\r|\n")
+BACKTICK_RUN = re.compile(r"`+")
+
+
+class Ground(NamedTuple):
+    text: str
+    current: bool
+    supported: bool
+
+
+Grounds = dict[str, list[Ground]]
 
 
 class JournalError(Exception):
@@ -64,6 +96,16 @@ class Prompt:
 
 
 @dataclass
+class Evidence:
+    """記録に見える一つの発言・応答・操作。source から session file の原文へ戻れ、current が偽なら対象の時間帯より前の背景。"""
+
+    source: str
+    text: str
+    current: bool
+    kind: str
+
+
+@dataclass
 class Session:
     id: str
     title: str
@@ -71,18 +113,26 @@ class Session:
     path: Path
     first: datetime
     last: datetime
-    lines: list[str] = field(default_factory=list)
+    evidence: list[Evidence] = field(default_factory=list)
     prompts: list[Prompt] = field(default_factory=list)
-    requests: int = 0
-    cost: float = 0.0
 
 
 @dataclass
-class Project:
-    root: str
-    sessions: list[Session]
-    commits: list[str]
-    body: str = ""
+class Citation:
+    source: str
+    quote: str
+    current: bool
+
+
+@dataclass
+class Insight:
+    title: str
+    finding: str
+    explanation: str
+    application: str
+    caveats: str
+    status: str
+    evidence: list[Citation]
 
 
 def window(day: date, tz: ZoneInfo, start_hour: int) -> tuple[datetime, datetime]:
@@ -127,12 +177,53 @@ def text_of(content: Any) -> str:
     return "\n".join(texts)
 
 
-def read_session(path: Path, start: datetime, end: datetime, tz: tzinfo) -> Session | None:
+def visible_evidence(source: str, message: dict, current: bool) -> list[Evidence]:
+    content = message.get("content")
+    if message.get("role") == "user":
+        text = INJECTED.sub("", text_of(content)).strip()
+        return [Evidence(source, text, current, "user")] if text else []
+    found = []
+    for part in content if isinstance(content, list) else []:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text" and isinstance(part.get("text"), str):
+            text = part["text"].strip()
+            if text:
+                found.append(Evidence(source, text, current, "assistant"))
+        elif part.get("type") == "toolCall":
+            arguments = part.get("arguments") if isinstance(part.get("arguments"), dict) else {}
+            intent = part.get("intent") or arguments.get("i")
+            name = part.get("name") or "tool"
+            found.append(Evidence(source, f"{name}: {intent}" if intent else str(name), current, "tool"))
+    return found
+
+
+def background_tail(items: list[Evidence], limit: int) -> list[Evidence]:
+    chosen: list[Evidence] = []
+    used = 0
+    for item in reversed(items):
+        room = limit - used
+        if len(item.text) <= room:
+            chosen.append(item)
+            used += len(item.text)
+            continue
+        if room > 0:
+            chosen.append(replace(item, text=item.text[-room:]))
+        break
+    chosen.reverse()
+    return chosen
+
+
+def read_session(path: Path, start: datetime, end: datetime, context_chars: int = 0) -> Session | None:
     header: dict | None = None
+    session_id = path.stem
     title = ""
     session: Session | None = None
+    active = False
+    before: deque[Evidence] = deque()
+    kept = 0
     with path.open(encoding="utf-8", errors="replace") as handle:
-        for line in handle:
+        for number, line in enumerate(handle, start=1):
             try:
                 entry = json.loads(line)
             except ValueError:
@@ -145,52 +236,51 @@ def read_session(path: Path, start: datetime, end: datetime, tz: tzinfo) -> Sess
                 continue
             if kind == "session":
                 header = entry
+                session_id = str(entry.get("id") or path.stem)
                 title = title or str(entry.get("title") or "")
                 continue
             if kind != "message" or header is None:
                 continue
             moment = entry_time(entry)
             message = entry.get("message")
-            if moment is None or not start <= moment < end or not isinstance(message, dict):
+            if moment is None or moment >= end or not isinstance(message, dict):
                 continue
             role = message.get("role")
-            if role not in ("user", "assistant"):
+            # agent が書いた指示は role が user でも attribution が agent になるため role だけでの利用者の判定は不可
+            if role not in ("user", "assistant") or (role == "user" and message.get("attribution") != "user"):
+                continue
+            current = moment >= start
+            entry_id = entry.get("id")
+            locator = entry_id if isinstance(entry_id, str) and entry_id else f"line-{number}"
+            found = visible_evidence(f"{session_id}#{locator}", message, current)
+            if not current:
+                if session is None and context_chars > 0:
+                    before.extend(found)
+                    kept += sum(len(item.text) for item in found)
+                    while len(before) > 1 and kept - len(before[0].text) >= context_chars:
+                        kept -= len(before.popleft().text)
                 continue
             if session is None:
-                session = Session(str(header.get("id") or path.stem), title, str(header.get("cwd") or ""), path, moment, moment)
+                session = Session(session_id, title, str(header.get("cwd") or ""), path, moment, moment)
+            session.first = min(session.first, moment)
             session.last = max(session.last, moment)
-            clock = moment.astimezone(tz).strftime("%H:%M")
-            content = message.get("content")
+            session.evidence.extend(found)
             if role == "user":
-                # agent が書いた指示は role が user でも attribution が agent になる。利用者の発言だけを残す
-                if message.get("attribution") == "user" and isinstance(entry.get("id"), str):
-                    session.prompts.append(Prompt(entry["id"], text_of(content)))
-                text = clip(text_of(content))
-                if text:
-                    session.lines.append(f"[{clock} 利用者] {text}")
-                continue
-            session.requests += 1
-            cost = ((message.get("usage") or {}).get("cost") or {}).get("total")
-            if isinstance(cost, (int, float)):
-                session.cost += cost
-            for part in content if isinstance(content, list) else []:
-                if not isinstance(part, dict):
-                    continue
-                if part.get("type") == "text" and isinstance(part.get("text"), str):
-                    text = clip(part["text"])
-                    if text:
-                        session.lines.append(f"[{clock} 応答] {text}")
-                elif part.get("type") == "toolCall":
-                    arguments = part.get("arguments") if isinstance(part.get("arguments"), dict) else {}
-                    intent = part.get("intent") or arguments.get("i")
-                    name = part.get("name") or "tool"
-                    session.lines.append(f"[{clock} 操作] {name}: {intent}" if intent else f"[{clock} 操作] {name}")
-    if session is not None:
-        session.title = title
+                raw = text_of(message.get("content"))
+                if isinstance(entry_id, str):
+                    session.prompts.append(Prompt(entry_id, raw))
+                active = active or bool(raw.strip())
+            else:
+                active = active or bool(found)
+    if session is None or not active:
+        return None
+    session.title = title
+    if context_chars > 0:
+        session.evidence[:0] = background_tail(list(before), context_chars)
     return session
 
 
-def sessions_in(root: Path, start: datetime, end: datetime, tz: tzinfo) -> list[Session]:
+def sessions_in(root: Path, start: datetime, end: datetime, tz: tzinfo, context_chars: int = 0) -> list[Session]:
     found = []
     for path in sorted(root.glob("*/*.jsonl")):
         try:
@@ -198,30 +288,24 @@ def sessions_in(root: Path, start: datetime, end: datetime, tz: tzinfo) -> list[
                 continue
         except OSError:
             continue
-        session = read_session(path, start, end, tz)
-        if session is not None and session.lines:
+        session = read_session(path, start, end, context_chars)
+        if session is not None:
             found.append(session)
     return sorted(found, key=lambda session: session.first)
+
+
+def active_sessions(root: Path, start: datetime, end: datetime, tz: tzinfo) -> list[Session]:
+    return [
+        session
+        for session in sessions_in(root, start, end, tz, BACKGROUND_CHARS)
+        if any(item.current for item in session.evidence)
+    ]
 
 
 def project_root(cwd: str) -> str:
     result = run(["git", "-C", cwd, "rev-parse", "--show-toplevel"], capture_output=True, text=True)
     root = result.stdout.strip()
     return root if result.returncode == 0 and root else cwd
-
-
-def commits_between(root: str, start: datetime, end: datetime) -> list[str]:
-    result = run(
-        [
-            "git", "-C", root, "log", "--all",
-            f"--since={start.isoformat()}",
-            f"--until={(end - timedelta(seconds=1)).isoformat()}",
-            "--format=%h %s",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.splitlines() if result.returncode == 0 else []
 
 
 def summarize(options: argparse.Namespace, prompt: Path, material: str) -> str:
@@ -235,7 +319,7 @@ def summarize(options: argparse.Namespace, prompt: Path, material: str) -> str:
         result = run(
             [
                 options.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules",
-                "--no-tools", "--no-lsp", "--no-title",
+                "--no-tools", "--no-lsp", "--no-title", "--no-context-files",
                 "--model", options.model, "--thinking", options.thinking,
                 "--max-time", f"{max(1, int(budget) - 60)}",
                 "--system-prompt", str(prompt),
@@ -267,55 +351,305 @@ def chunks(lines: list[str]) -> list[str]:
     return parts
 
 
-def summarize_session(options: argparse.Namespace, session: Session) -> str:
-    parts = chunks(session.lines)
-    summaries = []
-    for index, part in enumerate(parts, start=1):
-        material = f"session: {session.id}\ntitle: {session.title}\ncwd: {session.cwd}\n範囲: {index}/{len(parts)}\n\n{part}"
-        summaries.append(summarize(options, PROMPTS / "session.md", material))
-    return "\n\n".join(summaries)
+def dump(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def record_of(item: Evidence, text: str, part: str | None) -> dict[str, str]:
+    record = {"source": item.source, "scope": "target" if item.current else "background", "role": item.kind, "text": text}
+    if part is not None:
+        record["part"] = part
+    return record
+
+
+def record_size(record: dict[str, str]) -> int:
+    return len(dump(record)) + 1
+
+
+def settled(build: Callable[..., list], *fixed: Any) -> list:
+    # part と batch の表記の桁数が個数で変わるため一回の測定は不可
+    total = 1
+    while True:
+        found = build(*fixed, total)
+        if len(found) <= total:
+            return found
+        total = len(found)
+
+
+def longest_fit(text: str, fits: Callable[[str], bool]) -> int:
+    high = min(len(text), PIECE_CHARS)
+    if fits(text[:high]):
+        return high
+    low, high = 0, high - 1
+    while low < high:
+        middle = (low + high + 1) // 2
+        if fits(text[:middle]):
+            low = middle
+        else:
+            high = middle - 1
+    return low
+
+
+def split_text(item: Evidence, limit: int, total: int) -> list[str]:
+    part = f"{total}/{total}" if total > 1 else None
+    pieces: list[str] = []
+    rest = item.text
+    while rest:
+        size = longest_fit(rest, lambda piece: record_size(record_of(item, piece, part)) <= limit)
+        if size == 0:
+            raise JournalError(
+                f"{item.source}: the session information leaves no room for a record in the {CHUNK_CHARS} character extraction input"
+            )
+        newline = rest.rfind("\n", 0, size)
+        if size < len(rest) and newline >= size // 2:
+            size = newline + 1
+        pieces.append(rest[:size])
+        rest = rest[size:]
+    return pieces
+
+
+def records_of(items: list[Evidence], limit: int) -> list[dict[str, str]]:
+    records = []
+    for item in items:
+        pieces = settled(split_text, item, limit)
+        for number, text in enumerate(pieces, start=1):
+            records.append(record_of(item, text, f"{number}/{len(pieces)}" if len(pieces) > 1 else None))
+    return records
+
+
+def newest_within(records: list[dict[str, str]], limit: int) -> list[dict[str, str]]:
+    kept: list[dict[str, str]] = []
+    used = 0
+    for record in reversed(records):
+        used += record_size(record)
+        if used > limit:
+            break
+        kept.append(record)
+    kept.reverse()
+    return kept
+
+
+def grouped(
+    session: Session, background: list[Evidence], target: list[Evidence], total: int
+) -> list[list[dict[str, str]]]:
+    # batch 番号が詰める前は未定のため header は最大の total/total での測定
+    capacity = CHUNK_CHARS - len(extraction_material(session, total, total, []))
+    # 背景が上限を使い切ると対象の断片が極小になるため背景の無制限は不可
+    context = newest_within(records_of(background, capacity // 2), capacity // 2)
+    room = capacity - sum(map(record_size, context))
+    groups: list[list[dict[str, str]]] = []
+    size = 0
+    for record in records_of(target, room):
+        cost = record_size(record)
+        if not groups or size + cost > room:
+            groups.append([])
+            size = 0
+        groups[-1].append(record)
+        size += cost
+    return [context + group for group in groups]
+
+
+def batches(session: Session) -> list[list[dict[str, str]]]:
+    background = [item for item in session.evidence if not item.current]
+    target = [item for item in session.evidence if item.current]
+    return settled(grouped, session, background, target)
+
+
+def grounds_of(records: list[dict[str, str]]) -> Grounds:
+    grounds: Grounds = {}
+    for record in records:
+        grounds.setdefault(record["source"], []).append(Ground(record["text"], record["scope"] == "target", True))
+    return grounds
+
+
+def extraction_material(session: Session, number: int, total: int, records: list[dict[str, str]]) -> str:
+    header = {"session": session.id, "title": session.title, "cwd": session.cwd, "batch": f"{number}/{total}"}
+    return "\n".join(dump(item) for item in [header, *records]) + "\n"
+
+
+def parse_insights(output: str, origin: str) -> list[Any]:
+    text = output.strip()
+    fenced = FENCED_JSON.match(text)
+    if fenced:
+        text = fenced.group(1)
+    try:
+        data = json.loads(text)
+    except ValueError:
+        raise JournalError(f"{origin}: the model output is not JSON") from None
+    if not isinstance(data, dict) or set(data) != {"insights"} or not isinstance(data["insights"], list):
+        raise JournalError(f"{origin}: the model output is not an object with exactly an insights array")
+    return data["insights"]
+
+
+def cite(item: Any, grounds: Grounds, origin: str, supported_only: bool) -> Citation:
+    if not isinstance(item, dict) or set(item) != {"source", "quote"}:
+        raise JournalError(f"{origin}: an evidence item does not have exactly source and quote")
+    source, quote = item["source"], item["quote"]
+    if not isinstance(source, str) or not isinstance(quote, str):
+        raise JournalError(f"{origin}: an evidence source and quote must be strings")
+    if source not in grounds:
+        raise JournalError(f"{origin}: an evidence source was not among the supplied records")
+    quote = quote.strip()
+    if not quote:
+        raise JournalError(f"{origin}: an empty quotation for {source}")
+    for ground in grounds[source]:
+        if quote in ground.text and (ground.supported or not supported_only):
+            return Citation(source, quote, ground.current)
+    raise JournalError(f"{origin}: a quotation for {source} is not in the supplied text usable for its status")
+
+
+def insight_of(item: Any, grounds: Grounds, origin: str) -> Insight:
+    if not isinstance(item, dict) or set(item) != INSIGHT_KEYS:
+        raise JournalError(f"{origin}: an insight does not have exactly the keys {sorted(INSIGHT_KEYS)}")
+    texts = {}
+    for key in INSIGHT_TEXTS:
+        value = item[key]
+        if not isinstance(value, str):
+            raise JournalError(f"{origin}: insight {key} must be a string")
+        value = value.strip()
+        if not value and key != "caveats":
+            raise JournalError(f"{origin}: insight {key} is empty")
+        texts[key] = value
+    texts["title"] = " ".join(texts["title"].split())
+    if not isinstance(item["status"], str) or item["status"] not in STATUS_LABELS:
+        raise JournalError(f"{origin}: insight status must be supported or hypothesis")
+    if not isinstance(item["evidence"], list) or not item["evidence"]:
+        raise JournalError(f"{origin}: an insight has no evidence")
+    citations: list[Citation] = []
+    for raw in item["evidence"]:
+        citation = cite(raw, grounds, origin, item["status"] == "supported")
+        if citation not in citations:
+            citations.append(citation)
+    if not any(citation.current for citation in citations):
+        raise JournalError(f"{origin}: an insight cites only background records")
+    return Insight(status=item["status"], evidence=citations, **texts)
+
+
+def ask(options: argparse.Namespace, prompt: Path, material: str, grounds: Grounds, origin: str) -> list[Insight]:
+    items = parse_insights(summarize(options, prompt, material), origin)
+    return [insight_of(item, grounds, origin) for item in items]
+
+
+def extract(options: argparse.Namespace, sessions: list[Session]) -> list[Insight]:
+    found: list[Insight] = []
+    for session in sessions:
+        groups = batches(session)
+        for number, records in enumerate(groups, start=1):
+            origin = f"extract.md (session {session.id} batch {number}/{len(groups)})"
+            material = extraction_material(session, number, len(groups), records)
+            found += ask(options, PROMPTS / "extract.md", material, grounds_of(records), origin)
+    return found
+
+
+def synthesis_item(insight: Insight) -> dict[str, Any]:
+    return {
+        **{key: getattr(insight, key) for key in INSIGHT_TEXTS},
+        "status": insight.status,
+        "evidence": [
+            {"source": citation.source, "quote": citation.quote, "scope": "target" if citation.current else "background"}
+            for citation in insight.evidence
+        ],
+    }
+
+
+def listing(items: list[dict[str, Any]]) -> str:
+    return '{"insights": [\n' + ",\n".join(dump(item) for item in items) + "\n]}\n"
+
+
+def listing_size(insights: list[Insight]) -> int:
+    return len(listing([synthesis_item(insight) for insight in insights]))
+
+
+def packed(insights: list[Insight]) -> list[list[Insight]]:
+    budget = SYNTHESIS_CHARS - len(listing([]))
+    groups: list[list[Insight]] = []
+    size = 0
+    for number, insight in enumerate(insights, start=1):
+        cost = len(dump(synthesis_item(insight))) + 2
+        if cost > budget:
+            raise JournalError(f"insight candidate {number} alone exceeds the {SYNTHESIS_CHARS} character synthesis input")
+        if not groups or size + cost > budget:
+            groups.append([])
+            size = 0
+        groups[-1].append(insight)
+        size += cost
+    return groups
+
+
+def merge(options: argparse.Namespace, insights: list[Insight]) -> list[Insight]:
+    grounds: Grounds = {}
+    for insight in insights:
+        for citation in insight.evidence:
+            grounds.setdefault(citation.source, []).append(Ground(citation.quote, citation.current, insight.status == "supported"))
+    material = listing([synthesis_item(insight) for insight in insights])
+    return ask(options, PROMPTS / "synthesize.md", material, grounds, "synthesize.md")
+
+
+def synthesize(options: argparse.Namespace, insights: list[Insight]) -> list[Insight]:
+    rounds = 0
+    while insights:
+        groups = packed(insights)
+        if len(groups) == 1:
+            return merge(options, groups[0])
+        if rounds == REDUCTION_ROUNDS:
+            raise JournalError(f"the insight candidates did not fit one synthesis input within {REDUCTION_ROUNDS} reduction rounds")
+        rounds += 1
+        merged = [insight for group in groups for insight in merge(options, group)]
+        if listing_size(merged) >= listing_size(insights):
+            raise JournalError("the reduction of the insight candidates did not shrink them")
+        insights = merged
+    return []
+
+
+def prose(text: str) -> str:
+    return HEADING_LINE.sub(r"\1\\#", text)
+
+
+def quoted(citation: Citation) -> list[str]:
+    # 引用中の backtick の連なりより短い fence では引用が fence を閉じるため固定長の fence は不可
+    fence = "`" * max(3, max(map(len, BACKTICK_RUN.findall(citation.quote)), default=0) + 1)
+    # Markdown が行末とする CRLF CR LF 以外での分割は引用の改変のため splitlines は不可
+    body = [fence, *LINE_BREAK.split(citation.quote), fence]
+    scope = "" if citation.current else "（対象の時間帯より前の記録）"
+    return [*(f"> {line}" if line else ">" for line in body), ">", f"> — `{citation.source}`{scope}"]
+
+
+def article(insight: Insight) -> list[str]:
+    lines = ["", f"## {insight.title}", "", f"**状態**: {STATUS_LABELS[insight.status]}"]
+    for label, body in (
+        ("知見", insight.finding),
+        ("説明", insight.explanation),
+        ("適用", insight.application),
+        ("注意", insight.caveats),
+    ):
+        if body:
+            lines += ["", f"**{label}**: {prose(body)}"]
+    lines += ["", "**根拠**:"]
+    for citation in insight.evidence:
+        lines += ["", *quoted(citation)]
+    return lines
+
+
+def render(machine: str, day: date, start: datetime, end: datetime, insights: list[Insight]) -> str:
+    lines = [
+        FORMAT_MARKER,
+        f"# {day.isoformat()} {machine}",
+        "",
+        f"対象期間は {start:%Y-%m-%d %H:%M} から {end:%Y-%m-%d %H:%M} まで（{start.tzinfo}）である。",
+        "",
+        LIMITATION,
+    ]
+    if not insights:
+        lines += ["", NO_INSIGHTS]
+    for insight in insights:
+        lines += article(insight)
+    return "\n".join(lines) + "\n"
 
 
 def compose(
     options: argparse.Namespace, machine: str, day: date, start: datetime, end: datetime, sessions: list[Session]
 ) -> str:
-    projects: dict[str, Project] = {}
-    for session in sessions:
-        root = project_root(session.cwd)
-        projects.setdefault(root, Project(root, [], commits_between(root, start, end))).sessions.append(session)
-
-    for project in projects.values():
-        blocks = [f"project: {project.root}"]
-        for session in project.sessions:
-            blocks.append(f"## session {session.id[:8]} {session.title}\n{summarize_session(options, session)}")
-        blocks.append("## commit\n" + ("\n".join(project.commits) or "なし"))
-        project.body = summarize(options, PROMPTS / "project.md", "\n\n".join(blocks))
-
-    tz = start.tzinfo
-    lines = [
-        f"# {day.isoformat()} {machine}",
-        "",
-        f"対象は {start:%Y-%m-%d %H:%M} から {end:%Y-%m-%d %H:%M} まで（{tz}）の omp の作業である。",
-        "",
-        "| project | session | request | 費用 (USD) |",
-        "|---|---|---|---|",
-    ]
-    for project in projects.values():
-        cost = sum(session.cost for session in project.sessions)
-        requests = sum(session.requests for session in project.sessions)
-        lines.append(f"| {Path(project.root).name or project.root} | {len(project.sessions)} | {requests} | {cost:.3f} |")
-    lines.append(
-        f"| 合計 | {len(sessions)} | {sum(session.requests for session in sessions)} | {sum(session.cost for session in sessions):.3f} |"
-    )
-    for project in projects.values():
-        lines += ["", f"## {Path(project.root).name or project.root}", "", f"`{project.root}`", "", project.body, "", "### session", ""]
-        for session in project.sessions:
-            span = f"{session.first.astimezone(tz):%H:%M}–{session.last.astimezone(tz):%H:%M}"
-            # 本文の短い ID は近い時刻に始めた session 同士で重なり得るため、一覧は resume できる完全な ID を持つ
-            lines.append(f"- `{session.id}` {session.title}（{span}）")
-        lines += ["", "### commit", ""]
-        lines += [f"- `{commit}`" for commit in project.commits] or ["なし"]
-    return "\n".join(lines) + "\n"
+    return render(machine, day, start, end, synthesize(options, extract(options, sessions)))
 
 
 def git(journal: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -359,6 +693,10 @@ def stage_of(journal: Path, relative: str, branch: str) -> Stage:
     return Stage.GENERATED
 
 
+def day_file_pattern(machine: str) -> re.Pattern[str]:
+    return re.compile(rf"(\d{{4}})/(\d{{2}})(\d{{2}})/{re.escape(machine)}\.md")
+
+
 def unfinished_days(journal: Path, machine: str, branch: str) -> list[date]:
     candidates = {
         entry[3:]
@@ -367,7 +705,7 @@ def unfinished_days(journal: Path, machine: str, branch: str) -> list[date]:
     }
     if git(journal, "rev-parse", "--verify", "--quiet", f"origin/{branch}", check=False).returncode == 0:
         candidates |= set(filter(None, git(journal, "diff", "--name-only", "-z", f"origin/{branch}", "HEAD").stdout.split("\0")))
-    pattern = re.compile(rf"(\d{{4}})/(\d{{2}})(\d{{2}})/{re.escape(machine)}\.md")
+    pattern = day_file_pattern(machine)
     days = []
     for relative in sorted(candidates):
         match = pattern.fullmatch(relative)
@@ -556,6 +894,38 @@ def publish(journal: Path, branch: str, relative: str) -> None:
         raise JournalError(f"{relative} is not at origin/{branch} with the expected content after the push")
 
 
+def has_format_marker(body: bytes) -> bool:
+    return body.split(b"\n", 1)[0].strip() == FORMAT_MARKER.encode("utf-8")
+
+
+def legacy_error(relative: str) -> JournalError:
+    return JournalError(
+        f"{relative} is a legacy-format journal that is not published; "
+        "review a regenerated document with --preview --date and rebuild this day with --date"
+    )
+
+
+def require_current_format(journal: Path, relative: str) -> None:
+    if not has_format_marker((journal / relative).read_bytes()):
+        raise legacy_error(relative)
+
+
+def require_current_formats(journal: Path, branch: str) -> None:
+    # push が HEAD の未公開 commit を全て送るため公開する日だけの形式確認は不可
+    if git(journal, "rev-parse", "--verify", "--quiet", f"origin/{branch}", check=False).returncode == 0:
+        names = git(journal, "diff", "--name-only", "-z", f"origin/{branch}", "HEAD").stdout
+    else:
+        names = git(journal, "ls-tree", "-r", "--name-only", "-z", "HEAD").stdout
+    pattern = re.compile(r"([0-9]{4})/([0-9]{4})/[A-Za-z0-9][A-Za-z0-9._-]*\.md")
+    for relative in sorted(filter(None, names.split("\0"))):
+        match = pattern.fullmatch(relative)
+        if match is None or not is_calendar_day(*match.groups()):
+            continue
+        body = blob(journal, "HEAD", relative)
+        if body is not None and not has_format_marker(body):
+            raise legacy_error(relative)
+
+
 def parse(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="dotfiles-agent-journal", description=__doc__)
     parser.add_argument("--sessions-root", required=True, type=Path)
@@ -568,12 +938,36 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--model", required=True)
     parser.add_argument("--thinking", required=True)
     parser.add_argument("--date", type=date.fromisoformat, help="この日の日誌だけを作り直す（YYYY-MM-DD）")
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--preview", action="store_true", help="--date の日の日誌を標準出力へ出す。日誌の checkout には触れず、書込も公開もしない"
+    )
+    options = parser.parse_args(argv)
+    if options.preview and options.date is None:
+        parser.error("--preview requires --date")
+    return options
+
+
+def preview(options: argparse.Namespace, tz: ZoneInfo) -> int:
+    day = options.date
+    start, end = window(day, tz, options.start_hour)
+    try:
+        sessions = active_sessions(options.sessions_root, start, end, tz)
+        if not sessions:
+            print(f"{day}: omp の作業はない", file=sys.stderr)
+            return 0
+        document = compose(options, options.machine_name, day, start, end, sessions)
+    except JournalError as error:
+        print(f"dotfiles-agent-journal: {day}: {error}", file=sys.stderr)
+        return 1
+    sys.stdout.write(document)
+    return 0
 
 
 def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     options = parse(argv)
     tz = ZoneInfo(options.timezone)
+    if options.preview:
+        return preview(options, tz)
     journal = options.journal_dir
     machine = options.machine_name
     try:
@@ -595,26 +989,27 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
         try:
             stage = Stage.ABSENT if options.date else stage_of(journal, relative, branch)
             entered = stage
-            recorded = 0
             if stage is Stage.ABSENT:
-                sessions = sessions_in(options.sessions_root, start, end, tz)
+                sessions = active_sessions(options.sessions_root, start, end, tz)
                 if not sessions:
                     print(f"{day}: omp の作業はない")
                     continue
                 atomic_write(path, compose(options, machine, day, start, end, sessions))
-                recorded = len(sessions)
                 stage = stage_of(journal, relative, branch)
+            if stage in (Stage.GENERATED, Stage.COMMITTED):
+                require_current_format(journal, relative)
             if stage is Stage.GENERATED:
                 commit(journal, relative, day)
                 stage = Stage.COMMITTED
             if stage is Stage.COMMITTED:
+                require_current_formats(journal, branch)
                 publish(journal, branch, relative)
-        except JournalError as error:
+        except (JournalError, OSError) as error:
             print(f"dotfiles-agent-journal: {day}: {error}", file=sys.stderr)
             failed.append(day)
             continue
         if entered is Stage.ABSENT:
-            print(f"{day}: {recorded} session を記録した")
+            print(f"{day}: 技術的な知見を記録した")
         elif entered is Stage.GENERATED:
             print(f"{day}: 生成済みの日誌を commit して公開した")
         else:

@@ -16,13 +16,12 @@ let
     vars = {
       python = lib.getExe pkgs.python3;
       source = "${./package}";
-      # session 記録の読み方と model の呼び方は作業日誌と共有する
       journal = "${../journal/package}";
       sessionsRoot = "${cfg.workstation.homeDir}/.omp/agent/sessions";
       stateFile = "${cfg.agents.runtime.state.root}/memory-harvest.json";
       lookbackDays = "7";
       memory = lib.getExe cfg.capabilities.project-memory.runtime;
-      # 作業日誌と同じ定額の model を使い、従量課金の経路へ流さない
+      # 定額枠の利用を前提とするため従量課金 model への切替は不可
       model = "opencode-go/deepseek-v4.1-flash";
       thinking = "low";
     };

@@ -423,19 +423,30 @@ OpenCodeのrecall結果は同じturnのmodel呼出しで共有し、次のprompt
 
 LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有のruntime environment fileを経てcontainerへ渡し、client hookやMCP frontへは配らない。明示的な保存と記憶の収穫のretain入力が外部providerへ送られる信頼境界を持つ。
 
-## 作業日誌
+## 技術的な知見の集積
 
 `dotfiles.agents.journal.enable`で明示的に採用したOMP hostだけに配備する。
 
-[`agents/journal/`](../../agents/journal)は、omp の session 記録から日次の作業日誌を作る。project memory が判断を想起のために蓄えるのに対し、作業日誌は全 project の作業を日付順に読める記録として残す。入力は`~/.omp/agent/sessions/`直下の project ごとの session file で、親 session の隣に置かれる subagent の記録は親と内容が重なるため読まない。各 entry の時刻で 06:00 から翌日の 06:00 までを切り出し、利用者の指示、エージェントの応答、tool の名前と意図だけを model へ渡す。thinking、tool の結果、tool の引数は渡さない。project ごとの commit 一覧は Git から読む。
+[`agents/journal/`](../../agents/journal)は、OMP の原 session から技術的な知見や気づきを抽出し、人が根拠と適用条件を理解できる記事にまとめる。
+活動報告と業務仕様の保管ではなく、project memory による想起とも分ける。
+知見の採否、入力の境界、引用の検査、仮説、旧記録からの切替は [journal の仕様](agent-journal.md)、操作は [journal の運用](../operations/agent-journal.md)を正本とする。
 
-要約は omp の print mode で二段に行い、session ごとの要約を project ごとにまとめる。起動時は session file、rules、Skill、自動検出する extension、tool を読み込まない。project memory の hook は extension とは別に読み込まれることがあり、prompt ごとに cwd の Git common directory から決まる project の記憶を想起して注入する。このため要約は Git の work tree ではない一時 directory で実行し、一時 directory が work tree の中にあれば model を呼ばずにその日を失敗にする。この cwd では project が決まらず、記憶は model の入力に混ざらない。model は omp の`tiny`役割と同じ`opencode-go/deepseek-v4.1-flash`で、認証は omp が保持するものを使う。session の本文には secret や個人情報が混ざり得る。prompt は秘密に見えるものを書かないよう指示するが、検出を保証しない。日誌の repository への commit は全 repository 共通の Git hook を通るが、pre-commit hook が拒否するのは GitHub token の形だけである。
+抽出と編集は OMP の print mode で行い、session の保存、rules、Skill、自動検出する extension、tool を使わない。
+project memory の hook は extension と別に読み込まれることがあるため、model は Git work tree の外の一時 directory で呼ぶ。
+一時 directory が work tree 内なら呼出し前に失敗させ、別プロジェクトの記憶を生成の入力に混ぜない。
+model と thinking の宣言は [`agents/journal/module.nix`](../../agents/journal/module.nix)に置き、認証は OMP が保持するものを使う。
+可視の会話にも secret や個人情報が混ざり得る。
+prompt はそれらを記事へ書かないよう指示するが、入力からの完全な除去や出力での検出を保証しない。
+Git hook が拒否する資格情報の形も限定されるため、private repository の利用を前提とする。
 
-日誌の repository は`dotfiles.workstation.environmentDir`の下に置き、flake の入力にはしない。dotfiles が配備した timer が書き込む出力だからである。
+journal の repository は `dotfiles.workstation.environmentDir` の下に置き、flake の入力にはしない。
+dotfiles が配備した timer が書き込む出力だからである。
 
 ## 非対話 job の寿命
 
-日誌と収穫は、user manager の`agents.slice`に置く oneshot service と timer で定時に動く。手動の`dotfiles-agent-journal`と`dotfiles-agent-memory-harvest`も、同じ job entry を同じ worker へ向けて呼ぶ。timer の service は自身が寿命を持って job entry を直接呼び、manual command は共通 runtime が scope と一時領域を与えてから job entry を呼ぶので、対話用の wrapper は二重に挟まない。
+journal と記憶の収穫は、user manager の `agents.slice` に置く oneshot service と timer で定時に動く。
+手動の `dotfiles-agent-journal` と `dotfiles-agent-memory-harvest` も、同じ job entry を同じ worker へ向けて呼ぶ。
+timer の service は自身が寿命を持って job entry を直接呼び、manual command は共通 runtime が scope と一時領域を与えてから job entry を呼ぶので、対話用の wrapper は二重に挟まない。
 
 job entry の runner（[`agents/job/`](../../agents/job)）は、同じ job の writer を一つに絞る。排他は user の runtime directory の lock で、timer の実行中に手動で同じ job を呼ぶと worker を始めず非ゼロ（75）で返す。別の job は止めない。lock の fd は共通の supervisor（[`platform/supervise/`](../../platform/supervise)）が保持し、worker と子孫へは渡さない。runner が先に消えても、supervisor が全子孫の終了を kernel の観測で確かめるまで排他は保たれ、runner の死は job の取消として supervisor が子孫を回収する。
 
@@ -465,7 +476,10 @@ worker は受け取った物理 path だけで model を呼ぶので、profile �
 
 `dotfiles.agents.memoryHarvest.enable`を明示的に採用し、OMPとproject-memoryが有効なhostだけに配備する。
 
-[`agents/memory-harvest/`](../../agents/memory-harvest)は、omp の session 記録から利用者の訂正、決定、好みを取り出し、project memory へ保存する。session 記録の読み方と omp の呼び出しは作業日誌の package を読み込んで共有し、model も作業日誌と同じ定額の`opencode-go/deepseek-v4.1-flash`と thinking `low`を使う。作業の大半は omp で行うため、Claude Code、Codex、OpenCode の session 記録は読まない。
+[`agents/memory-harvest/`](../../agents/memory-harvest)は、OMP の session 記録から利用者の訂正、決定、好みを取り出し、project memory へ保存する。
+session 記録の読み方と OMP の呼出しは journal の package を読み込んで共有する。
+定額 model と thinking の宣言は [`agents/memory-harvest/module.nix`](../../agents/memory-harvest/module.nix)に置く。
+作業の大半は OMP で行うため、Claude Code、Codex、OpenCode の session 記録は読まない。
 
 入力は`~/.omp/agent/sessions/`直下の session file のうち、前回成功した実行から今回の開始までの entry である。attribution が`user`の発言だけを読み、`<project_memory>`と`<system-reminder>`の block を除く。エージェントの応答、tool の結果、注入した文脈、subagent の記録は model へ渡さない。cwd から Git project を決められない session は読まずに報告する。
 modelを呼ぶ前に`dotfiles-memory validate`へ発言の全文、保存済みの記憶のkindと本文、projectのpathを渡し、保存時と同じ既知の資格情報や個人情報の指標で検査する。
@@ -473,7 +487,7 @@ modelを呼ぶ前に`dotfiles-memory validate`へ発言の全文、保存済み�
 このcommandはbackendへ接続せず、検査対象の本文を返さない。
 発言と保存済みの記憶は不許可のrecord全体を除き、projectのpathが不許可なら見出しへ含めない。
 長い本文をclipするのは検査を通した後であり、不正な応答や検査失敗ではmodelを呼ばず、読み終えた位置も進めない。
-指標に合わないsecretや個人情報まで検出できる保証はなく、作業日誌の送信前検査には使っていない。
+指標に合わない secret や個人情報まで検出できる保証はなく、journal の送信前検査には使っていない。
 
 model には project ごとに、明示的に保存した記憶（`dotfiles-memory curated`）と利用者の発言を渡し、将来の別 session の判断を変える発言だけを候補にさせる。次の発言は候補にしない。今回の作業への依頼、計画、進捗の確認、質問、同意だけの返事、その場だけの許可や禁止、状況に依存する優先度や締切、人の名前を含むもの、利用者が標準、AGENTS、Skill、文書、hook、code へ入れるよう求めた規律、製品の仕様、現在の状態から分かること、保存済みの記憶と同じ内容、secret や個人情報を含むものである。正本に入るものを記憶に重ねないためである。
 

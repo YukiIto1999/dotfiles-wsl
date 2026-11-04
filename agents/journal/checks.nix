@@ -44,6 +44,7 @@
           pkgs.runCommandLocal "check-agent-journal-behavior"
             {
               nativeBuildInputs = [
+                pkgs.cmark
                 pkgs.git
                 pkgs.python3
               ];

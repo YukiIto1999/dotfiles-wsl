@@ -17,7 +17,7 @@
 - [doctor](operations/doctor.md)では、実用状態の検査項目と失敗時の調査先が分かる。
 - [Agent client](operations/agent-clients.md)では、採用と試用、供給元からの更新、native profileの世代、rollbackの扱いが分かる。
 - [Orca からの client 起動](operations/orca-launch.md)では、Orca の起動 command、project の devShell への入口、貼る値、実機での確かめ方が分かる。
-- [作業日誌](operations/agent-journal.md)では、omp の作業日誌の出力先、日次 timer、作り直し方が分かる。
+- [journal の運用](operations/agent-journal.md)では、技術的な知見の出力先、日次 timer、公開前のプレビュー、原記録からの作り直し方が分かる。
 - [記憶の収穫](operations/memory-harvest.md)では、omp の session 記録から訂正を project memory へ保存する timer、log の読み方、状態の扱いが分かる。
 - [Git hook](operations/git-hooks.md)では、dotfiles の検査と repository の hook の実行順序、repository の信頼、検証の段の入口、push 前の検証と省略の記録が分かる。
 - [開発](operations/development.md)では、devShell、整形、ローカル検査、CI の使い分けが分かる。
@@ -29,6 +29,7 @@
 - [構成概要](architecture/overview.md)では、Profile、Workstation、Agent、Skill、Capability、Platform、運用基盤の責務境界が分かる。
 - [責務と履歴の凝集](architecture/cohesion.md)では、unit、file、commitを分ける基準が分かる。
 - [AI tooling](architecture/ai-tooling.md)では、AgentからSkill、Capability、MCP/container Platformへ至る依存関係が分かる。
+- [journal の仕様](architecture/agent-journal.md)では、知見の採否、根拠と仮説、日付の境界、旧記録からの切替の契約が分かる。
 - [Skill source](architecture/repository-skills.md)では、固定した上流原版の直接登録と、供給元を明示的に差し替える契約が分かる。
 - [Skill portfolio](architecture/skills.md)では、直接採用する原版のIDと来歴、routing、残すcustom Skillの責務が分かる。
 - [セキュリティ設計](architecture/security.md)では、credential、host key、通信経路の信頼境界が分かる。

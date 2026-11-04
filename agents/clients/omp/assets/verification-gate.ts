@@ -10,6 +10,9 @@ type GateKind = "arm" | "edit" | "learn" | "observe" | "stop";
 
 const GATE_TIMEOUT_MS = 20_000;
 const DRAIN_REPORT_MS = 30_000;
+const SKILL_URL_PREFIX = "skill://";
+const SKILL_BODY_FILE = "SKILL.md";
+const SESSION_STOP_CONTINUATION = "session-stop-continuation";
 
 // 待機の上限と reader の cancel は子の終了の代用にならないため不可
 /**
@@ -101,6 +104,51 @@ async function gate(
   }
 }
 
+/**
+ * read の入力が skill の本文を指しうるかの判定
+ * @param input - tool_result event の read の入力
+ * @returns 本文を指しうる綴りか綴りを読めない入力なら true
+ */
+function mayNameSkillBody(input: unknown): boolean {
+  if (typeof input !== "object" || input === null) return true;
+  const path: unknown = Reflect.get(input, "path");
+  return typeof path !== "string" || path.startsWith(SKILL_URL_PREFIX) || path.endsWith(SKILL_BODY_FILE);
+}
+
+/**
+ * 会話履歴の 1 件が利用者の入力かの判定
+ * @param message - 会話履歴の 1 件
+ * @returns 利用者の入力なら true。agent が積んだ message と合成の message は false
+ */
+function isUserRequest(message: object): boolean {
+  const attribution: unknown = Reflect.get(message, "attribution");
+  switch (Reflect.get(message, "role")) {
+    case "user":
+      return attribution !== "agent" && Reflect.get(message, "synthetic") !== true;
+    case "custom":
+      return attribution === "user";
+    default:
+      return false;
+  }
+}
+
+// 終端 error で戻る stop_hook_active 単独による同一依頼の判定は不可
+/**
+ * 直近の利用者の依頼が、この hook の block による継続の後も続いているかの判定
+ * @param messages - session_stop event の会話履歴
+ * @returns 最新の利用者の依頼より後に継続の指示があれば true
+ */
+function continuesBlockedRequest(messages: unknown): boolean {
+  if (!Array.isArray(messages)) return false;
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message: unknown = messages[index];
+    if (typeof message !== "object" || message === null) continue;
+    if (Reflect.get(message, "customType") === SESSION_STOP_CONTINUATION) return true;
+    if (isUserRequest(message)) return false;
+  }
+  return false;
+}
+
 export default function verificationGate(pi: ExtensionAPI): void {
   // 設計の規律は決める時点で呼ばれなければ意味がない。読んでいない領域は触らせない。
   pi.on("tool_call", async (event, ctx: ExtensionContext) => {
@@ -143,7 +191,7 @@ export default function verificationGate(pi: ExtensionAPI): void {
       return;
     }
     if (READING_TOOLS[event.toolName] === true) {
-      if (event.isError) return;
+      if (event.isError || !mayNameSkillBody(event.input)) return;
       await gate(
         pi,
         "learn",
@@ -162,6 +210,12 @@ export default function verificationGate(pi: ExtensionAPI): void {
   });
 
   pi.on("session_stop", async (event, ctx: ExtensionContext) => {
+    // provider の異常終了を再試行 loop にするため再指示は不可
+    const stopReason = event.last_assistant_message?.stopReason;
+    if (stopReason === "error" || stopReason === "aborted") {
+      pi.logger.warn("verification gate skipped after the provider ended the turn abnormally", { stopReason });
+      return;
+    }
     const held = await gate(
       pi,
       "stop",
@@ -174,7 +228,7 @@ export default function verificationGate(pi: ExtensionAPI): void {
       event.signal,
     );
     if (held.code === 0) return;
-    if (event.stop_hook_active === true) {
+    if (event.stop_hook_active === true || continuesBlockedRequest(event.messages)) {
       pi.logger.warn("verification gate remains unsatisfied after stop feedback", { reason: held.text });
       ctx.ui.notify(held.text, "warning");
       return;

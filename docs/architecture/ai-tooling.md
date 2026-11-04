@@ -190,7 +190,7 @@ gateの管理領域と状態fileは、読取、権限変更、書込、削除の
 終了gateは同じsourceの完了済み証跡を受理した後に古い完了済み証跡を整理する。
 
 [`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
-OMP hook は write の本文と read の全文を JSON に含めたまま gate の stdin へ送り、read の証明を照合する Node process へも pipe で渡す。
+OMP hookはwriteの本文とSkill本文の候補に当たるreadの全文をJSONに含めたままgateのstdinへ送り、readの証明を照合するNode processへもpipeで渡す。
 argv に本文を載せないため、1 引数や argv 全体の容量制限で検証前に失敗しない。
 20 秒の期限または中断では gate の process group 全体へ SIGKILL を送り、起動した子と出力 pipe の処理の終了を確認してから失敗結果を返す。
 終了を確認できない間は診断を出して待ち続ける。
@@ -209,10 +209,11 @@ metadataを持たない手作りのdirectory、別sessionの識別情報、不�
 記録には配備先のsymlinkを解決した本文のSHA-256を保存し、編集時に現在の本文と照合するため、配備内容が変わったら読み直す。
 `learned --session ID --path NAME`は、既存の配備済み本文を管理者が明示的に承認するための信頼された操作として残し、通常の読取hookの代わりには使わない。
 
-OMPのgate起動例外は説明付きの非ゼロ結果となり、編集前と初回の応答終了時の判定はgateが起動しない場合も処理を止める。
-停止hookの再指示中を示す`stop_hook_active`がtrueの終了要求で判定が再び失敗した場合は、警告とlogに結果を残し、追加の再指示を返さず利用者へ応答を返す。
+OMPのgate起動例外は説明付きの非ゼロ結果となり、編集前と初回の正常な応答終了時の判定はgateが起動しない場合も処理を止める。
+停止hookの再指示中を示す`stop_hook_active`がtrueか、直近の利用者入力より後に停止hookの継続指示が残る終了要求では、判定が再び失敗しても警告とlogに結果を残し、追加の再指示を返さず利用者へ応答を返す。
 この返却を検証の合格にはせず、gateの非ゼロ終了とT1の成功証跡の作成条件は変えない。
 利用者の新しい入力による終了要求では、再び初回の判定を行う。
+providerの`error`と`aborted`による停止ではgateを実行せず、検証済みの証跡も免除も作らずに再指示を抑える。
 読取後の記録、編集後のrepository登録、shell実行後の変更観測は実行済みのtoolを取り消せず、後段hook自体が失敗すると記録が残らないこともある。
 終了時の検証gateが要求するのは、編集を記録したrepository自身が宣言するT1の`verify`入口だけであり、入口を持たないrepositoryには要求しない。
 このgateは通常のhook経路でtoolが返した全文とその鮮度、編集したrepositoryのT1の完了を確認するもので、悪意あるagentからの防御、注意や理解、後続compactionでの本文保持、検査の意味と真偽、標準全体への意味的な適合を保証しない。

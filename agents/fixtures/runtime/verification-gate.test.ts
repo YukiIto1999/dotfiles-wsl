@@ -13,6 +13,7 @@ const skillBody = join(home, ".omp/agent/skills/ui-design/SKILL.md");
 const GUARDED_PATH = "/r/surfaces/viewer/x.tsx";
 const FREE_PATH = "/r/docs/note.md";
 const LARGE_WRITE = 3 * 1024 * 1024;
+const nextGenerationGateCalls = join(home, "next-generation-gate.calls");
 const COMPLETE = `# ui-design\n${Array.from(
   { length: 6000 },
   (_, index) => `Discipline line ${index + 1} stays in the body so the read exceeds one argument.`,
@@ -101,6 +102,15 @@ function settledReceipts(): string[] {
   return readdirSync(verificationRoot, { recursive: true })
     .map(String)
     .filter((name) => name.endsWith(".verified") || name.endsWith(".waived"));
+}
+
+/**
+ * 再記録用の gate が受けた呼出しの一覧
+ * @returns 呼出し 1 回につき hook の引数を並べた 1 行の一覧
+ */
+function gateCalls(): string[] {
+  if (!existsSync(nextGenerationGateCalls)) return [];
+  return readFileSync(nextGenerationGateCalls, "utf8").split("\n").filter((line) => line !== "");
 }
 
 /** pid の再利用と元の process の消滅を区別する同一 boot 内の観測情報 */
@@ -294,11 +304,138 @@ test("a gate that outlives its deadline blocks the edit and the hook returns aft
 
 test("a hook loaded for one generation keeps its own gate after the next generation's hook loads", async () => {
   writeFileSync(skillBody, "# ui-design\nShort discipline.\n");
-  const calls = join(home, "next-generation-gate.calls");
   const next = await load(process.env.NEXT_GENERATION_GATE_HOOK as string);
   expect(await write(next, "next-session", { path: GUARDED_PATH, content: "x" })).toBeUndefined();
-  const recorded = readFileSync(calls, "utf8");
+  const recorded = readFileSync(nextGenerationGateCalls, "utf8");
   expect(recorded).toContain("hook edit");
   await expectBlockedForSkill("older-session");
-  expect(readFileSync(calls, "utf8")).toBe(recorded);
+  expect(readFileSync(nextGenerationGateCalls, "utf8")).toBe(recorded);
+}, TEST_TIMEOUT_MS);
+
+const finished = { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" };
+const failed = { role: "assistant", content: [], stopReason: "error", errorMessage: "usage limit reached" };
+const interrupted = { role: "assistant", content: [], stopReason: "aborted" };
+
+test("a provider failure stop returns control without consulting the gate or settling, and a normal stop still blocks", async () => {
+  const session = "provider-failure";
+  const repository = unverifiedT1Repository("provider-failure-t1");
+  const tracked = join(repository, "tracked");
+  writeFileSync(tracked, "edited\n");
+  const notices: { message: string; type: string }[] = [];
+  const ctx = {
+    ...context(session),
+    ui: { notify: (message: string, type: string) => notices.push({ message, type }) },
+  };
+  await handlerOf(real, "tool_result")(
+    { toolName: "write", toolCallId: `${session}-write`, input: { path: tracked }, isError: false },
+    ctx,
+  );
+  const stop = handlerOf(real, "session_stop");
+  const recording = handlerOf(await load(process.env.NEXT_GENERATION_GATE_HOOK as string), "session_stop");
+  const before = gateCalls();
+
+  for (const last_assistant_message of [failed, interrupted]) {
+    for (const stop_hook_active of [false, true]) {
+      expect(await stop({ stop_hook_active, last_assistant_message }, ctx)).toBeUndefined();
+      expect(await recording({ stop_hook_active, last_assistant_message }, ctx)).toBeUndefined();
+    }
+  }
+  expect(gateCalls()).toEqual(before);
+  expect(notices).toEqual([]);
+  expect(settledReceipts()).toEqual([]);
+
+  const blocked = (await stop({ stop_hook_active: false, last_assistant_message: finished }, ctx)) as {
+    decision: string;
+    reason: string;
+  };
+  expect(blocked.decision).toBe("block");
+  expect(blocked.reason).toContain(realpathSync(repository));
+  expect(settledReceipts()).toEqual([]);
+  await recording({ stop_hook_active: false, last_assistant_message: finished }, ctx);
+  expect(gateCalls()).toEqual([...before, "hook stop"]);
+}, TEST_TIMEOUT_MS);
+
+test("a block is not repeated for the same request once omp has reset its guard, and a new user request blocks again", async () => {
+  const session = "guard-reset";
+  const repository = unverifiedT1Repository("guard-reset-t1");
+  const tracked = join(repository, "tracked");
+  writeFileSync(tracked, "edited\n");
+  const notices: { message: string; type: string }[] = [];
+  const ctx = {
+    ...context(session),
+    ui: { notify: (message: string, type: string) => notices.push({ message, type }) },
+  };
+  await handlerOf(real, "tool_result")(
+    { toolName: "write", toolCallId: `${session}-write`, input: { path: tracked }, isError: false },
+    ctx,
+  );
+  const stop = handlerOf(real, "session_stop");
+  const request = { role: "user", content: [{ type: "text", text: "change the viewer" }], attribution: "user" };
+  const first = (await stop(
+    { stop_hook_active: false, last_assistant_message: finished, messages: [request, finished] },
+    ctx,
+  )) as { decision: string; reason: string };
+  expect(first.decision).toBe("block");
+
+  const continuation = {
+    role: "custom",
+    customType: "session-stop-continuation",
+    content: first.reason,
+    display: false,
+    attribution: "agent",
+  };
+  const history = [request, finished, continuation];
+  expect(
+    await stop({ stop_hook_active: false, last_assistant_message: failed, messages: [...history, failed] }, ctx),
+  ).toBeUndefined();
+  expect(notices).toEqual([]);
+
+  const sameRequest = [
+    { role: "custom", customType: "memory-recall-changes", content: "recalled", display: false, attribution: "agent" },
+    { role: "user", content: "note", synthetic: true },
+    { role: "user", content: "note", attribution: "agent" },
+  ];
+  for (const extra of sameRequest) {
+    const messages = [...history, extra, finished];
+    expect(await stop({ stop_hook_active: false, last_assistant_message: finished, messages }, ctx)).toBeUndefined();
+  }
+  expect(notices).toEqual(sameRequest.map(() => ({ message: first.reason, type: "warning" })));
+  expect(settledReceipts()).toEqual([]);
+
+  const newRequests = [
+    { role: "user", content: [{ type: "text", text: "another change" }], attribution: "user" },
+    { role: "custom", customType: "skill-prompt", content: "run the skill", attribution: "user" },
+  ];
+  for (const next of newRequests) {
+    const messages = [...history, finished, next, finished];
+    expect(await stop({ stop_hook_active: false, last_assistant_message: finished, messages }, ctx)).toMatchObject({
+      decision: "block",
+    });
+  }
+}, TEST_TIMEOUT_MS);
+
+test("a read that cannot name a skill body never starts the gate while one that can still does", async () => {
+  const read = handlerOf(await load(process.env.NEXT_GENERATION_GATE_HOOK as string), "tool_result");
+  const reads: { input: unknown; calls: string[] }[] = [
+    { input: { path: FREE_PATH }, calls: [] },
+    { input: { path: "src/main.ts:1-20" }, calls: [] },
+    { input: { path: "agent://main" }, calls: [] },
+    { input: { path: "/r/docs/" }, calls: [] },
+    { input: { path: "skill://ui-design" }, calls: ["hook learn"] },
+    { input: { path: "skill://ui-design/SKILL.md" }, calls: ["hook learn"] },
+    { input: { path: skillBody }, calls: ["hook learn"] },
+    { input: { path: "ui-design/SKILL.md" }, calls: ["hook learn"] },
+    { input: {}, calls: ["hook learn"] },
+    { input: { path: 1 }, calls: ["hook learn"] },
+    { input: null, calls: ["hook learn"] },
+    { input: undefined, calls: ["hook learn"] },
+  ];
+  for (const { input, calls } of reads) {
+    const before = gateCalls();
+    await read(
+      { toolName: "read", toolCallId: "prefilter-read", input, isError: false, content: [], details: undefined },
+      context("prefilter"),
+    );
+    expect(gateCalls()).toEqual([...before, ...calls]);
+  }
 }, TEST_TIMEOUT_MS);

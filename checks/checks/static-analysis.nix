@@ -70,13 +70,22 @@ in
                 (.workstation | length) > 0
               ' "$actual" >/dev/null
 
-              sources=()
-              while IFS= read -r -d "" source; do
-                sources+=("$source")
-              done < <(
-                find ${self} -type f -not -path '*/.git/*' -exec \
-                  sh -c 'head -c 2 "$1" | grep -q "^#!"' _ {} \; -print0
-              )
+              ${lib.getExe pkgs.python3} - ${self} > source-paths <<'PY'
+              import os
+              import stat
+              import sys
+
+              for directory, children, names in os.walk(sys.argv[1]):
+                  children[:] = [name for name in children if name != ".git"]
+                  for name in names:
+                      path = os.path.join(directory, name)
+                      if not stat.S_ISREG(os.lstat(path).st_mode):
+                          continue
+                      with open(path, "rb") as source:
+                          if source.read(2) == b"#!":
+                              sys.stdout.buffer.write(os.fsencode(path) + b"\0")
+              PY
+              mapfile -d "" -t sources < source-paths
               test "''${#sources[@]}" -gt 0
 
               isGeneratedShell() {

@@ -21,11 +21,11 @@ effort: xhigh
 
 ## Process
 
-1. 受入済みplan、変更behavior、変更禁止範囲を確認する。
+1. 受入済みplan、テストリスト、変更禁止範囲を確認し、期待値が未決の項目だけをcallerへ返す。
 2. taskに一致するSkillを読み、test-firstなら`tdd`のred → greenを使い、refactoringは確定したbehaviorとscopeを保つ実装作業として進める。
    CLIとterminalの契約は標準のconsole構造、property-based testの入力領域と独立oracleは`property-testing`で確定し、既存の実装loopへ渡す。
 3. obsoleteなcaller、compatibility path、scaffoldを残さずclean cutoverする。
-4. changed contractを実測する。
+4. テストリストの各契約へ実測した結果と証拠を対応付け、未検証の項目を区別して返す。
 
 ## Handoffs
 

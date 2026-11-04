@@ -103,6 +103,11 @@ rawのPonytailとMatt `research`は配備せず、その原則を既存workerと
 `diagnosing-bugs`はbrowserを使わないloopも成立するため、browser Capabilityへのhard依存を持たない。
 browserが必要なbranchだけ、その環境で利用可能な専門Skillへ渡す。
 `tdd`はtest seamへの事前合意を要求する。
+実装計画から検証への引渡しは、[共通policy](../../agents/policy/AGENTS.md)が定めるテストリストを使い、[planner](../../agents/subagents/planner.md)の`accepted-plan`から[implementer](../../agents/subagents/implementer.md)の実測結果へ契約を追跡する。
+回答待ちの仕様に依存する作業は保留し、確定した検証項目は計画に残す。
+この引渡しは[素のClaude CodeとTDDのセッション記録](https://t-wada.hatenablog.jp/entry/red-green-tdd-with-claude-code-202610)にある、仕様の例だけでは不足したテストリストを、境界と合意事項から補う判断を参考にしている。
+記事の本文は転載せず、既存のagentの計画と引渡しを改訂し、新しいSkillは設けない。
+記事固有のtool選定、100%のcoverage・mutation閾値、Red状態のcommitは採用せず、外部`tdd`の原文と既存の検証・commit規律を維持する。
 
 `disable-model-invocation: true`を持つinterview、仕様化、ticket分割、retro、setup、architecture探索の原版は、利用者が明示的に呼ぶcommandとして使う。
 `filter-syntax`はこれに加えて`user-invocable: false`を保ち、`run-tests`がplatformとframeworkを確定したfiltered runで必要とした場合だけ読む。

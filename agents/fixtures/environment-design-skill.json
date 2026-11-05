@@ -23,10 +23,42 @@
       ],
       "expected": {
         "findsExistingPolicyAndStandardText": true,
-        "addsNoNewProse": true,
-        "routesToEnforcementMechanismOwner": true,
+        "doesNotDuplicateTheExistingNorm": true,
+        "diagnosesTheApplicationGapBeforeChoosingAMechanism": true,
         "doesNotCopyRuleIntoMemory": true
       }
+    },
+    {
+      "id": "conflicting-instructions-after-prose-addition",
+      "prompt": "既知pathでも意味検索を繰り返すので、policyに注意書きを追記しましたが再発しました。policyは既知fileを直接Readするよう定め、検索Skillは調査の最初に必ず意味検索をするよう定めています。実行記録では検索Skillを読んでから意味検索しています。両方ともdotfiles-wslの正本です。根拠に沿って直す場所と手段を判断してください。今回は編集しません。",
+      "expectedSkills": ["environment-design"],
+      "expected": {
+        "identifiesTheConflictingInstructions": true,
+        "handsTheProcedureConflictToSkillDesign": true,
+        "doesNotRequireAHookBecauseTheFailureRecurred": true,
+        "doesNotDuplicateTheExistingPolicy": true
+      },
+      "critical": [
+        "identifiesTheConflictingInstructions",
+        "handsTheProcedureConflictToSkillDesign",
+        "doesNotRequireAHookBecauseTheFailureRecurred"
+      ]
+    },
+    {
+      "id": "unavailable-norm-independent-procedure",
+      "prompt": "共通のreview規範の本文は読めません。一方、dotfilesのpolicyには画面変更を実際に起動して観測する規定があり、localのreview Skillには型検査だけで完了と書かれています。実行記録でも画面変更後に型検査だけで完了しています。既存policyは変えず、読めた正本から直せる範囲と保留する範囲を判断してください。今回は判断だけです。",
+      "expectedSkills": ["environment-design"],
+      "expected": {
+        "withholdsOnlyTheUnavailableNormDecision": true,
+        "handsTheIndependentProcedureFixToSkillDesign": true,
+        "doesNotInventMissingNormContent": true,
+        "doesNotClaimChangesOrDelivery": true
+      },
+      "critical": [
+        "withholdsOnlyTheUnavailableNormDecision",
+        "handsTheIndependentProcedureFixToSkillDesign",
+        "doesNotInventMissingNormContent"
+      ]
     },
     {
       "id": "methodology-spanning-owners",

@@ -5,7 +5,8 @@ description: Routes changes to the agent working environment to their source own
 
 # 環境の改善を所有者へ振り分ける
 
-成果は、改善や訂正を構成する主張がそれぞれ一つの所有者に置かれ、その所有者の入口で変更され、agentに届くまで閉じた状態である。規律を足すこと自体は成果ではない。
+成果は、改善や訂正の根拠を確かめ、必要な変更だけを所有者の入口で扱い、許可された配送まで閉じた状態である。
+既存の内容で足りる場合は、変更しない判断を返す。
 
 ## 環境の所有者
 
@@ -39,25 +40,24 @@ agent-journalはtimerの出力であり、反映先にしない。
 
 ## 所有者を決める
 
-主張ごとに次の順で問い、最初に当てはまった所有者を選ぶ。
+変更理由と現行の正本を、上の所有者表へ対応付ける。
+既存のpolicy、Skill、基盤を変える主張は、その正本の所有者を優先し、dotfiles内の変更を「一つのprojectだけ」という理由で対象projectへ送らない。
+新しい規範については、人の開発者にもprojectをまたいで求めるものか、そのprojectだけの要件や逸脱かを分ける。
+所有者の選択が利用者の意図に依存し、既存の契約から決められない場合だけ確認する。
 
-1. 特定のprojectだけに成り立つか。成り立つなら対象project。標準から外れる採用なら、そのprojectの決定の記録に置く。
-2. agentの有無によらず、projectをまたいで人の開発者にも求める設計、実装、運用の規範か。標準のREADMEが定める領域のいずれかに置けるなら、architecture-standardの本文。
-3. agentの行動、成果物の形式、作業手順に関わるか。関わるなら、変える対象のpolicyやSkillを所有するrepository。AGENTSとlocal Skillはdotfiles-wslのagent能力、`standard-apply`など標準の運用Skillはarchitecture-standard、Orcaの操作Skillはupstreamが所有する。
-4. 配備、実行基盤、hook、client、外部sourceの採用と版に関わるか。関わるならdotfiles-wslの基盤。
-5. 理由と適用条件を記憶として残すだけか。それならmemory。
+所有者候補の現行本文と、それを呼び出す指示を読み、主張を満たす記述、重複、矛盾を照合する。
+既存の規律で足りるなら同じ規律を増やさず、実行記録から、導線、適用条件、指示の衝突、実行手段のどこに不足があるかを調べる。
+原因を特定できない場合は仮説として残し、判断を分ける観測を示す。
+追記後の再発だけで検査やhookを選ばず、原因と現行本文との差を所有者の入口へ渡し、修正、削除、手段の変更を比較させる。
+agentの方法は`skill-design`が選び、決定的な検査が必要と判断された場合は、その検査を所有する基盤へ渡す。
 
-どの所有者にも当てはまらない主張は、新しい置き場を作らずに未決として報告する。所有者の選択が利用者の意図に依存する場合、たとえば標準を改訂するかprojectの逸脱にするか、projectとglobalのどちらに適用するかは、一度だけ確認する。
-
-所有者を選んだら、その所有者の現行本文を作業checkoutで読む。既存の記述が主張を満たしていれば規律を増やさない。問題が起きた原因を、読まれなかった、適用されなかった、範囲を誤読された、のどれかに分け、原因のある箇所の所有者へ振り分け直す。読まれなかった原因がSkillのdescriptionやpolicyからの導線にあるなら、そのSkillやpolicyの所有者が受け取る。同じ訂正が文面の追加の後にも再発しているなら、文面ではなく、適用を強制する検査やhookの所有者を選ぶ。
-
-同じ主張は一つの所有者にだけ置く。他の所有者は参照するか、手順へ再構成し、本文を複製しない。
+同じ主張は一つの所有者に置き、他の所有者は参照するか手順へ再構成する。
 
 ## 入口へ渡す
 
 所有者の入口へ、主張、根拠のsource locator、現行本文との差、適用範囲、許可された変更、未確定事項を渡す。
-入口は主張を未採用の候補として受け取り、採否と文面を決める。
-採否、変更した正本と範囲、必要な配送手順、残る不足を受け取って「配送まで閉じる」へ戻り、このSkillが文面を決め直さない。
+入口が採否と文面を決め、変更した正本、検証結果、配送に必要な条件を返したら「配送まで閉じる」へ進む。
+所有者が確定済みの主張を振り分け直したり、入口の判断をこのSkillでやり直したりしない。
 
 - architecture-standardの変更: 作業checkoutの`skills/standard-update/SKILL.md`を読み、checkoutのrootを作業directoryにして従う。
   現在のprojectをrootにせず、正本の変更結果と配送に必要な版を受け取る。
@@ -74,7 +74,7 @@ agent-journalはtimerの出力であり、反映先にしない。
 所有者の入口が利用不能なら、渡す内容と不足する入口を返し、handoffや変更が済んだことにしない。
 `skill-design`や`memory`の分岐は、その所有者に該当する主張がある場合だけ使う。
 
-主張が複数の所有者へ分かれた場合は、参照される側から変える。標準の規範を手順へ再構成するSkillは、標準の変更が確定してから変える。
+複数の所有者へ分かれた変更は、参照される契約を先に確定する。
 
 ## 配送まで閉じる
 
@@ -82,27 +82,21 @@ agent-journalはtimerの出力であり、反映先にしない。
 commit、push、版更新、check、rebuildは現在の依頼とsessionの許可がある場合だけ行い、禁止された操作や他sessionを中断する操作を入口へのhandoffで正当化しない。
 配送が未許可なら変更済みsourceと未実施の配送段を返し、provider、service、containerへ直接接続して配備を代用しない。
 
-dotfiles-wslの変更は、commitして`dotfiles-rebuild`を実行した後に始めたsessionへ届く。
+dotfiles-wslの変更は、sourceを検証してcommitし、同repositoryの`docs/operations/rebuild.md`に従ってplan、適用、実状態の確認へ進める。
+sourceの変更と配備、新しいsessionへの反映は別の状態として確認する。
 
-architecture-standardの変更は、規範本文と、Skill、checker、設定の実行packageで、届く経路が異なる。
-規範本文は、ownerが受け入れてcanonical checkoutへ統合した時点から、現行規範rootを読む新しい読取りに現れる。
-規範本文も実行packageも、常に最新を適用する状態を保つ。
-実行packageは、他の外部sourceと同じく`nix flake update architectureStandard`で`flake.lock`を更新してcommitし、dotfilesの検証と`dotfiles-rebuild`で適用する。
-標準を統合したら同じ作業の中でここまで進め、実行packageを旧いまま残さない。
-固定した版や`flake.lock`は現行本文の確認に使わない。
-運用Skill、checker、設定は、標準のcommitとpush、`flake.lock`の更新とcommit、dotfilesの検証、`dotfiles-rebuild`を経て、新しく始めたsessionへ不変のpackageとして届く。
-`flake.lock`を更新するたびに、前回の更新以降のSkillとcheckerの差分がまとめて取り込まれる。
-その範囲は報告に示し、旧い版へ留める理由にしない。
-pushは実行直前に利用者へ確認し、`flake.lock`の更新とcommitは確認を待たない。
-具体的なgateを埋め込んだhookで開始したsessionは、そのgateと成功して読んだ実行packageのまま動く。
-配備前から動くsessionの旧hookは、この保持の対象にしない。
-更新した本文を配備済みの実行packageが扱えない場合は、配送不足として報告し、旧本文や旧packageの合格を代用しない。
-本文だけが届いた状態と、本文と実行packageの両方が届いた状態を区別して報告する。
-upstreamの変更も、upstreamでの反映とdotfilesの版の更新を経て届く。
+architecture-standardの規範本文は、ownerがcanonical checkoutへ統合した後、その現行規範rootを読む新しい読取りに現れる。
+Skill、checker、設定の実行packageは、標準のcommitとpush、dotfilesの`nix flake update architectureStandard`と`flake.lock`のcommit、検証とrebuildを経て新しいsessionへ届く。
+標準を統合したら同じ作業で実行packageも最新へ更新し、前回の更新以降に取り込む差分の範囲を報告する。
+pushは実行直前に確認し、許可済みの版更新やcommitを再確認で止めない。
+固定した版やlockは現行本文の代わりにせず、本文だけが届いた状態と実行packageも届いた状態を区別する。
+更新した本文を配備済みのpackageが扱えない場合は配送不足とし、旧本文や旧packageの合格を代用しない。
+upstreamの変更も、owner側での反映とdotfilesの採用版更新を経て届ける。
 
 ## 止める条件と報告
 
-現在のtaskが環境の変更を許可していなければ、振り分けの結果と入口へ渡す内容を報告して止める。標準については、`standard-feedback`でIssueにするかを利用者に確認してよい。所有者の現行本文を読めない場合は推測で振り分けない。
+現在のtaskが環境の変更を許可していなければ、振り分けの結果と入口へ渡す内容までを返す。
+所有者の現行本文や入口を利用できない場合は、その主張の判断や変更だけを保留し、読めた正本で独立に判断できる範囲を返す。
 
 報告は主張ごとに、所有者、使った入口、採否と変更の結果、配送の状態を示す。
 届いた、確認待ち、許可なしで未着手、入口または証拠が不足して未完了を区別し、sourceが変わっただけで配備済みとは書かない。

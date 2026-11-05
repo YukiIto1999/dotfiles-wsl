@@ -15,7 +15,8 @@
       "critical": [
         "comparesCallRelationshipsBeforeAndAfterAdoption",
         "doesNotRejectImplementationBecauseACallerExists",
-        "identifiesCallerRoutingAndDependencyUpdates"
+        "identifiesCallerRoutingAndDependencyUpdates",
+        "doesNotImplementOrClaimDeployment"
       ]
     },
     {
@@ -35,19 +36,21 @@
       ]
     },
     {
-      "id": "provider-replacement-caller-impact",
-      "prompt": "既存の検索機能の呼出し側は維持し、裏側の検索プロバイダーを差し替える案です。新候補は同じ検索要求に結果を返しますが、認証方式と制限が違います。既存の検索Skillがあることをどう評価し、供給元の差替えに伴ってどの入口と契約を更新するか整理してください。採用判断はまだ確定していません。",
+      "id": "replacement-without-demonstrated-benefit",
+      "prompt": "検索SkillはCapability経由でprovider Aを呼びます。置換候補Bも同じ要求に結果を返し、既存の認証・寿命・出力契約を満たします。AとBは同条件で必要な検索に成功しましたが、Bが速いという根拠は宣伝文だけです。移行には認証登録とcallerの失敗時手順の変更が要ります。重複の有無、現状維持を含む推奨、足りない証拠、採用時の変更先を示してください。今回は判断だけです。",
       "expectedSkills": ["environment-design"],
       "expected": {
-        "treatsTheExistingSkillAsACaller": true,
-        "evaluatesProviderInterfaceAndPermissions": true,
+        "distinguishesCallerFromReplacementImplementation": true,
+        "withholdsAdoptionWithoutDemonstratedBenefit": true,
         "includesCallerAndDeploymentContractUpdates": true,
-        "doesNotTreatCurrentAdoptionAsASelectionCriterion": true
+        "doesNotTreatAdvertisingAsMeasuredPerformance": true,
+        "doesNotImplementOrClaimDeployment": true
       },
       "critical": [
-        "treatsTheExistingSkillAsACaller",
-        "evaluatesProviderInterfaceAndPermissions",
-        "includesCallerAndDeploymentContractUpdates"
+        "distinguishesCallerFromReplacementImplementation",
+        "withholdsAdoptionWithoutDemonstratedBenefit",
+        "doesNotTreatAdvertisingAsMeasuredPerformance",
+        "doesNotImplementOrClaimDeployment"
       ]
     },
     {
@@ -93,7 +96,8 @@
       "critical": [
         "distinguishesRecoveryCallerFromBackupImplementation",
         "comparesCandidatesAfterCallerUpdates",
-        "verifiesSharedSupplyAndLifecycleMechanisms"
+        "verifiesSharedSupplyAndLifecycleMechanisms",
+        "separatesProposalFromAppliedState"
       ]
     }
   ]

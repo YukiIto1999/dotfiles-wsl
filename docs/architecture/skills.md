@@ -226,7 +226,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `memory` | `project-memory`の公開MCP | recallを一次資料で検証し、保存の受理と永続化を区別する。 |
 | `repository-research` | `repository-search`のZvec-Grep MCPとnative repository tools | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
 | `web-research` | clientのnativeなWeb検索とURL取得、`library-documentation`のContext7 MCP | 探索と本文取得をclientのtoolで行い、library docsはContext7へ渡す。native toolを持たないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
-| `environment-design` | ownerの正本と既存Skillの入口 | 外部toolの採用や差替えは、更新後のcallerと配備契約を確認してから変更を振り分ける。標準、dotfiles、upstream、対象project、memoryへ渡し、Skillの責務や手順の変更は`skill-design`へ渡す。 |
+| `environment-design` | ownerの正本と既存Skillの入口 | 変更理由と正本から所有者を選び、既存指示との重複や矛盾を確認する。再発だけでhookへ進めず、agentの改善方法は`skill-design`へ渡す。外部toolの採用や差替えは、更新後のcallerと配備契約を確認する。 |
 | `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 一つの目的に閉じた件名を作り、実際のhookを通す。 |
 
 `requiresSkills`は無条件に必要な配備前提だけを表す。
@@ -242,6 +242,8 @@ phase referenceは同じdirectoryから解決し、別Skillのfrontmatterや特�
 browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置く。
 browser操作の経路選択と安全な停止は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
 外部toolの統合は[`agents/fixtures/environment-integration-skill.json`](../../agents/fixtures/environment-integration-skill.json)の代表scenarioで、callerと実装、共通配備と現状調査を区別して評価する。
+環境改善の所有者選択は[`agents/fixtures/environment-design-skill.json`](../../agents/fixtures/environment-design-skill.json)で、既存指示の衝突、規律の重複追加、証拠不足の枝だけを保留する判断を評価する。
+これらのfixtureは期待する判断を定めるものであり、自然発火や配備成功の実測記録ではない。
 
 ### 日本語の執筆と推敲
 

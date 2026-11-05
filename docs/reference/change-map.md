@@ -2,7 +2,10 @@
 
 **読み手:** 変更する値の正本と検証入口を探す保守者。作業前に読む。
 
-同じ目的に複数の設定経路を作らない。profileは有効な機能を選び、各ownerのmoduleは意味、実装、runtime contractを持つ。変更後の通常適用は`dotfiles-rebuild --plan`、`dotfiles-rebuild`、`dotfiles-doctor`の順で行う。変更がこのrepositoryに属するか、architecture-standard、upstream、対象projectに属するかは`environment-design` Skillで決める。
+同じ目的に複数の設定経路を作らない。
+profileは有効な機能を選び、各ownerのmoduleは意味、実装、runtime contractを持つ。
+変更後の検証と適用は[Rebuildの適用手順](../operations/rebuild.md#適用)に従う。
+変更がこのrepositoryに属するか、architecture-standard、upstream、対象projectに属するかは`environment-design` Skillで決める。
 
 ## Workstationとtoolchain
 

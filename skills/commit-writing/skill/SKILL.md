@@ -33,8 +33,6 @@ description: Writes a commit message from the staged diff and repository policy.
 6. 正本の形で件名を書く。
    依頼文、issue、review、diffに現れた依頼者、作業者、参考にした人の名前は件名へ移さない。
 7. 構造判断の文脈、代替案、帰結は、repositoryがADRを採用していればADRへ置く。
-8. 日本語の語の選び方には、利用可能なら`ja-writing`を併用し、staged diffから確定した対象と変化を保つ。
-   `ja-writing`が扱う散文の文の形は件名の文末と句読点に当てず、利用できない場合も正本とrepository policyで件名を仕上げる。
 
 ## 完了前の確認
 

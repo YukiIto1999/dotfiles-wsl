@@ -64,7 +64,7 @@
     },
     {
       "id": "existing-skill-owns-job",
-      "prompt": "日本語READMEの空虚な導入と重複を除くSkillを新設してください。既にja-writingが同じtriggerと判断を所有しています。",
+      "prompt": "READMEの内容と構成を、読者の判断に必要な情報へ整理するSkillを新設してください。既にdescription-writingが同じtriggerと判断を所有しています。",
       "expectedSkills": [
         "skill-design"
       ],
@@ -132,8 +132,7 @@
       "id": "write-readme",
       "prompt": "既存の構成と事実に合わせて、このrepositoryの日本語READMEを書き直してください。Skill自体の作成や変更は不要です。",
       "expectedSkills": [
-        "description-writing",
-        "ja-writing"
+        "description-writing"
       ],
       "mustNotTrigger": [
         "skill-design"

@@ -205,14 +205,14 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 
 | 判断方法 | 所有する判断 | 必要時の導線 |
 |---|---|---|
-| `change-writing` | 明示した差分から変更の目的と利用者への影響を説明する判断 | 差分と検証記録を読み、日本語の表現を`ja-writing`へ渡す。 |
-| `comment-writing` | 実装commentを残す理由と最小の内容の判断 | 正本の標準と制約を読み、日本語の表現を`ja-writing`へ渡す。 |
-| `description-writing` | 一次資料に基づく内容と読者の問いに沿う構成の判断 | 再現する手順を`article-reproduction`、速習資料を原版`explainer`、独立した理解確認を原版`first-reader`へ条件付きで渡し、返却結果から編集を再開する。 |
+| `change-writing` | 明示した差分から変更の目的と利用者への影響を説明する判断 | 差分と検証記録を読み、日本語では`ja-writing`を本文の組立てから使う。目的、互換性、確度は対象diffと照合する。 |
+| `comment-writing` | 実装commentを残す理由と最小の内容の判断 | 正本の標準と制約を読み、残す内容と形式を一つの手順で決める。 |
+| `description-writing` | 一次資料に基づく内容と、読む場面・使い方に合う構成の判断 | 日本語では`ja-writing`と同じ執筆の中で構成・表現を整える。再現する手順を`article-reproduction`、速習資料を原版`explainer`、独立した理解確認を原版`first-reader`へ条件付きで渡す。 |
 | `article-reproduction` | 記事の開始条件と操作から到達点を再現できるかの判断 | 記述reviewと実行証拠を区別し、必要なbrowser操作や.NET testだけを専門入口へ渡す。 |
-| `documentation-writing` | 宣言の契約をdocumentation commentへ記す判断 | 宣言と実装と契約を調べ、日本語の表現を`ja-writing`へ渡す。 |
-| `ja-writing` | 日本語の表現と推敲の判断 | 正本の標準を読み、渡された文章を扱う。 |
+| `documentation-writing` | 宣言の契約をdocumentation commentへ記す判断 | 宣言、実装、契約を調べ、利用側が依存する保証と各行の形式を照合する。 |
 | `dependency-analysis` | nodeとedgeを固定して依存の事実を作る判断 | 未知の概念と関係だけ`repository-research`へ渡し、設計と診断を別の仕事として扱う。 |
 | `impact-analysis` | 一つの変更から契約と利用箇所と運用への影響を追う判断 | 不足する調査を`repository-research`へ渡し、設計や診断へ影響の証拠を引き継ぐ。 |
+| `ja-writing` | 読み手・状況・媒体・語り口に応じた日本語の内容選択、構成、展開と推敲 | 成果物担当から事実と専用形式を引き継ぎ、素材の選択、構成、執筆と通読、意味の照合を一つの手順で行う。事実調査や別の構成作成は重ねない。 |
 | `skill-design` | Skillの要否、責務と導線、実行結果に基づく採否の判断 | 固定したcriteriaとfresh実行で改訂し、規範や配備先の不足だけを`environment-design`へ渡す。 |
 | `ui-design` | 実contentと既存design systemに基づく実装前briefの判断 | 未知の構造は`repository-research`、必要な実surfaceの観測は`browser-operation`、実装構造は`codebase-design`へ渡す。 |
 | `security-review` | 脅威モデリングから候補の検証と攻撃経路へ進む判断 | 不足する証拠だけ調査や観測のSkillへ渡し、security判断とphaseの進行を引き取る。 |
@@ -227,10 +227,10 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `repository-research` | `repository-search`のZvec-Grep MCPとnative repository tools | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
 | `web-research` | clientのnativeなWeb検索とURL取得、`library-documentation`のContext7 MCP | 探索と本文取得をclientのtoolで行い、library docsはContext7へ渡す。native toolを持たないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
 | `environment-design` | ownerの正本と既存Skillの入口 | 外部toolの採用や差替えは、更新後のcallerと配備契約を確認してから変更を振り分ける。標準、dotfiles、upstream、対象project、memoryへ渡し、Skillの責務や手順の変更は`skill-design`へ渡す。 |
-| `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 一つの目的に閉じた件名を作り、実際のhookを通す。日本語の推敲は条件付きで`ja-writing`へ渡す。 |
+| `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 一つの目的に閉じた件名を作り、実際のhookを通す。 |
 
 `requiresSkills`は無条件に必要な配備前提だけを表す。
-言語に応じた推敲、追加の観測、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。
+追加の観測や、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。
 containerを背後に持つMCPも公開Capabilityから使い、Skillからproviderのprocessやdatabaseへ直接接続しない。
 既知のexact textとpathとsymbolはRead、Grep、LSPなどで、決定的なCLI操作は実binaryで直接扱い、一回のtool呼出しをSkillで包まない。
 本文の`xd://`入口はURI deviceを公開するclient用の例であり、MCPを直接呼ぶclientでは現在のネイティブな公開tool名とschemaへ対応させる。
@@ -243,25 +243,82 @@ browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.jso
 browser操作の経路選択と安全な停止は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
 外部toolの統合は[`agents/fixtures/environment-integration-skill.json`](../../agents/fixtures/environment-integration-skill.json)の代表scenarioで、callerと実装、共通配備と現状調査を区別して評価する。
 
+### 日本語の執筆と推敲
+
+`ja-writing`は、日本語の文章を成果物として執筆・改稿する段階で使う。
+内容を選び、読み進める理由を作り、章節、段落、一文、連続して読んだ語り口を整える。
+文書や変更説明の担当は事実と専用形式を所有し、構成を決める段階から同じ執筆へ合成する。
+完成後に一律の日本語文体へ変換する別工程にはしない。
+英語の校正や識別子だけの変更には発火させず、コメントや件名には担当が定める形式を保つ。
+
+共通の手順を一つの本体に置く。
+素材の選択、段落と見出しの構成、執筆後の通読、原資料との意味照合を分け、文章の滑らかさだけで内容の保持を判断しない。
+編集実例を条件付きで読む候補も比較したが、参照の有無による構成・語り口の安定した改善は確認できず、実行時の参照は外した。
+これは指示の負荷と責務の整理についての判断であり、短い本体が全用途で高品質な文章を返すという実証ではない。
+文書の読み方は、概念を順に学ぶ、判断の根拠をたどる、手順に沿って作業する、必要な項目を引くなど、文書内で果たす役目から選ぶ。
+README・小説・会話という形式名だけでSkillを分けず、短い返事や一場面に章立てを要求しない。
+見出しの名詞句・問い・行為・断定文にはそれぞれ使いどころがあり、文法を一種類へそろえない。
+反復も、追加の区別や操作、強調、余韻に働くかで判断する。
+読者へ伝える事実と、書き手が守るために使う背景・指示は分ける。
+比喩の誘いをサービスの否定へ変えず、実際の提供内容の変更や参加条件は読者に知らせる。
+
+旧版にあった一律の文形・整形、表現一般への標準読取、禁止語に近い置換処方は戻さない。
+以前の候補が安定して勝たなかったことを、日本語の品質改善を担う手順そのものの廃止で解決したとする判断も撤回した。
+Skillなしは比較対照として残し、相対順位の上位や指示の短さだけを完成の根拠にしない。
+共通policyの推奨・根拠・出典の要求は、引き続き作業説明と成果物本文を区別して適用する。
+
+比較課題は[`agents/fixtures/japanese-writing.json`](../../agents/fixtures/japanese-writing.json)で、意味、用途適合、構成、展開、情報選択、日本語、語り口を分けて判定する。
+意味は課題の素材と制約に照らし、素材の条件・確度・約束が本文に残るかと、本文の具体が素材に根拠を持つかを両方向で確かめる。
+語句の有無や差分量では意味保持を判定しない。
+各本文の欠陥・好み・入力の曖昧さを引用と読者への影響で記録し、全案要修正と同順位を認める。
+採点者のmodelは、[`agents/fixtures/japanese-writing-calibration.json`](../../agents/fixtures/japanese-writing-calibration.json)の較正対を元の順序と反転した順序で判定させ、基準を満たさなければ単独の品質判定に使わない。
+較正対は作者が差を制御した対比であり、人間の選好の正解ではない。
+較正の通過や合格数の閾値だけでは、品質改善も採用も認定しない。
+method-onlyの比較は、条件ごとのSkill本文と同梱参照をtool-freeな完了へ渡して行う。参照を持たない候補は本文だけを渡す。
+実環境での選択、読込み先、完成した本文は、同じfixtureのnative経路で別に観測し、method-onlyの結果を自然発火の証拠にしない。
+公開済み課題は開発用とし、未使用holdout、匿名比較、実model・usageを伴う実行記録は`work/ja-writing-reassessment/`に置く。
+モデルの診断は実読者の判断ではなく、実行成功、自然発火、文章品質、通常環境への配備も別々に確認する。
+fixtureの課題と較正対は評価の入力であり、品質改善や自然発火を測定した記録ではない。
+
+
 ## Custom Skillの来歴
 
-以下のdonorは、残すcustom Skillの異なる仕事に必要な判断材料である。
+以下に、custom Skillの採用元と比較に用いた資料を示す。
 上流Skill全体の直接採用とは区別し、参照元、license、採った内容と採らなかった内容を残す。
 
-### writing系で採用したdonor
+### writing系のdonorと比較資料
 
-| Donor | License | 採用した内容 | 採らなかった内容 |
+比較に用いた資料と、採らなかった処方を来歴として残す。
+以下の表は着想と非採用部分を示すものであり、各資料の効果を当環境で再現したという意味ではない。
+
+| 資料 | License | 参照した判断 | 採らなかった内容 |
 |---|---|---|---|
-| [architecture-standard](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | commitの直接目的、宣言の契約、実装commentのWhy not、文書種別と読者、記述の種類ごとの文末、定着した語、強調の絞り込み | 本文の複製。規則ごとに標準の所有fileを示し、Skillには読む時点、完了前の確認、失敗例だけを置いた |
+| [architecture-standard](https://github.com/YukiIto1999/architecture-standard/tree/88d7317dd5054e09f003f0bdca34295e158b40de) | repository rootに表示なし | commitの直接目的、宣言の契約、実装commentのWhy not、技術文書の種別と読者、記述の種類ごとの形式 | 本文の複製。形式は成果物のownerから読み、日本語表現一般の規則としては配布しない |
 | [japanese-tech-writing](https://gist.github.com/k16shikano/fd287c3133457c4fd8f5601d34aa817d/c7189cdc9c2520be50418209834145bdf3a46e97) | Gist本文に表示なし | 論証、段落、認知負荷、不確実性 | 書籍原稿向けの整形規則と本文の複製 |
 | [stop-ai-slop-jp](https://github.com/iKora128/stop-ai-slop-jp/tree/e09d32796f253a62693885757cea484c275d06f2)、[slop-nuki](https://github.com/chezou/slop-nuki/tree/1bdf627b5991f4f806069619c9bde407960feac7) | MIT | 空句と定型構成の発見、読者と媒体に応じた語調 | AI著者判定、score、毒や揺らぎの強制、禁止語の機械適用 |
 | [Anthropic doc-coauthoring](https://github.com/anthropics/skills/blob/f17010c9bb483898c1d9c9f42dde2b3a98889434/skills/doc-coauthoring/SKILL.md) | 該当directoryに個別表示なし | 読者、目的、既存template、重要文書のfresh-reader確認 | 全文書での質問数、brainstorm数、節ごとの固定workflow |
 | [Keep a Changelog](https://github.com/olivierlacan/keep-a-changelog/tree/bb8a60462d3f0c760ee56df312fcfdc60cf6e2f2) | MIT | 利用者が観測する変更の分類と破壊的変更の移行情報 | commit typeだけによる自動分類と固定template |
-| [natural-japanese](https://github.com/coji/natural-japanese/tree/0f1cc1c5a4e2aa7590598c88a15c213a60d9545a) | MIT | 一律改稿の禁止、地の文と箇条書きの使い分け、同型反復の打ち切り、英語統語の翻訳調 | 自然度score、見出しの結論化、文体憲法と文書型カタログの複製、形態素解析lint |
+| [natural-japanese](https://github.com/coji/natural-japanese/tree/aa9753b630c9d56894b2718578ec4202a5e9c503) | MIT | 意味と確度の保持、用途の判断、変更理由のない箇所の保持 | 自然度score、見出しや文長の固定処方、形態素解析lint、語句差分を意味保持の証明にすること |
+| [humanizer](https://github.com/blader/humanizer/tree/0ef9fe5bc3572734fd3ae6c448fe00a30cd5dcf0) | MIT | 語り口と周囲の文脈を重視する観点 | 英語patternの移植、禁止語一覧、感情の追加、英語のLLM審査結果を日本語へ一般化すること |
+| [yomiyasu](https://github.com/nanaism/yomiyasu/tree/8394e099486aaa2e28cf89992e46f5ebe5ed839d) | MIT。外部由来資材は個別条件 | 主張、比重、確度、発話の働きを分ける観点と、検査実行と文章品質を区別する評価上の注意 | 大型harness、辞書の移植、未評価の事実補完。本文や例文は転載しない |
 
-natural-japaneseは形態素解析による検出層を持つが、上流の[検証レポート](https://github.com/coji/natural-japanese/blob/0f1cc1c5a4e2aa7590598c88a15c213a60d9545a/corpus/reports/readability-sweep.md)は読みやすさ検出器の候補14件すべてを不採用にしている。上手な人間の文章に対するfalse positiveは表記ゆれ96.4%、句読点混在100%、冗長表現辞書25.5%である。弁別力が出た受身率、「が」の連鎖、こそあど密度は、下手な人間の文章をほとんど拾わないため撤回されている。残る弁別力はAI著者判定の指標であり、scoreを品質指標にしない方針と一致しない。このrepositoryにも検出器を置かず、規則だけを`ja-writing`へ入れた。
+日本語の照応は[Shibata・Kurohashi](https://aclanthology.org/P18-1054/)、読者知識と読み時間は[Asahara](https://aclanthology.org/Y17-1006/)を参照するが、省略率や文長の規範にはしない。
+品質の軸は[SummEval](https://aclanthology.org/2021.tacl-1.24/)、品質と集合的多様性の違いは[Doshi・Hauser](https://pmc.ncbi.nlm.nih.gov/articles/PMC11244532/)を参考にし、英語の実験結果を日本語の効果量として扱わない。
+[AnthropicのSkill設計指針](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices)の簡潔さと自由度、[OpenAIの評価指針](https://developers.openai.com/api/docs/guides/evaluation-best-practices)のtask別評価を用い、独自Skillの有効性は実行結果から判断する。
 
-見出しは`description-writing`が所有し、拾い読みで引ける簡潔なラベルにする。結論や説明を文にして詰めない。
+章構造と文章の運びは、次の公開本文と目次でも照合した。
+本文の複製や文体の模倣ではなく、内容の選択・順序・受け渡しを判断するための事例である。
+
+| 一次資料 | 確認した範囲と設計への示唆 |
+|---|---|
+| [ゼロからのOS自作入門](https://book.mynavi.jp/files/user/support/9784839975869/sample_75869.pdf)（2021） | 全目次と第0章。概念名だけでなく方針・作業・学び方が並ぶ。既知のアプリの起動から、OS自体には別の手順が必要な理由へつなぐ。 |
+| [独学大全](https://www.diamond.co.jp/_itempdf/0201_biz/10853-6/pdfViewer/)（2020） | 公開試読pp.56–65。対話で生じた問題を技法へ渡し、同じ経験を記録・影響・評価へ加工する。反復する素材と、同じ説明の繰り返しを区別する。 |
+| [数学ガールの秘密ノート／式とグラフ](https://note1.hyuki.net/)（2013） | 著者から案内された立ち読み版の第1章。場面と概念が章内の進行を分担し、正しい説明の後にも残る不納得を次の説明へつなぐ。 |
+| [JavaScript PrimerのAjaxアプリ](https://jsprimer.net/use-case/ajaxapp/) | 現行Web版の章入口、HTTP通信、データ表示。前の作業でできたことを短く受け、次に必要な処理へ進む。2020年の初版本文としては扱わない。 |
+| [クックパッドのレシピサービスのNext.jsへの移行](https://techlife.cookpad.com/entry/2020/12/01/093000) | 本文の背景・技術要素・構成・性能。名詞の見出しでも、本文が移行制約と選択理由を結ぶ。 |
+| [prhのREADME](https://github.com/prh/prh/blob/602794323a717b9511ea23e32c5b1e760cf16227/README.md)（2020年の固定版） | 初回利用とオプション参照。短い項目名が検索の入口として働き、本文で理由と例外を説明する。 |
+
+試読外の章、学習効果、一般読者の理解速度は、この事例調査からは判断しない。
 
 ### 技術記事と環境改善のdonor
 

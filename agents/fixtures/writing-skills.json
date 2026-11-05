@@ -25,7 +25,7 @@
           }
         ]
       },
-      "expectedSkills": ["commit-writing", "ja-writing"],
+      "expectedSkills": ["commit-writing"],
       "expected": {
         "onePurpose": true,
         "namesTargetAndChange": true,
@@ -62,7 +62,7 @@
           }
         ]
       },
-      "expectedSkills": ["commit-writing", "ja-writing"],
+      "expectedSkills": ["commit-writing"],
       "expected": {
         "onePurpose": true,
         "containsPersonalName": false,
@@ -93,7 +93,7 @@
           }
         ]
       },
-      "expectedSkills": ["commit-writing", "ja-writing"],
+      "expectedSkills": ["commit-writing"],
       "expected": {
         "writesMessage": false,
         "reportsSeparatePurposes": true,
@@ -123,7 +123,7 @@
           }
         ]
       },
-      "expectedSkills": ["change-writing", "ja-writing"],
+      "expectedSkills": ["change-writing"],
       "expected": {
         "usesExplicitRangeOnly": true,
         "containsOnlyVerifiedChecks": true,
@@ -185,10 +185,10 @@
     {
       "id": "description-routing",
       "prompt": "Write a README for trace-map. It reads local trace JSON and prints service-to-service edges. The reader is an engineer deciding whether to install it. The start command is nix run .#trace-map -- sample.json. It never uploads data. Architecture details are in docs/architecture.md.",
-      "expectedSkills": ["description-writing", "ja-writing", "article-reproduction"],
+      "expectedSkills": ["description-writing", "article-reproduction"],
       "nearMiss": {
         "prompt": "Write a PR body for the change.",
-        "expectedSkills": ["change-writing", "ja-writing"]
+        "expectedSkills": ["change-writing"]
       },
       "expected": {
         "includes": ["job", "local-only data boundary", "start command", "architecture link"],
@@ -227,18 +227,8 @@
       "prompt": "trace-mapのREADME日本語版に、英語版の次の段落と同じ内容の段落をMarkdownで書いてください。trace-map reads local trace JSON and prints service-to-service edges. It never uploads data, so traces from production can stay on the workstation.",
       "expectedSkills": ["description-writing", "ja-writing"],
       "expected": {
-        "readsStandardFiles": [
-          "principles/documentation/sentence-endings.md",
-          "principles/naming/unified-vocabulary.md",
-          "principles/documentation/minimal-high-signal.md",
-          "principles/documentation/separate-document-types.md"
-        ],
         "matchesEnglishCanonical": true,
-        "sentencesEndWithKuten": true,
-        "oneSentencePerLine": true,
-        "fragmentEndings": false,
-        "coinedTranslations": false,
-        "emphasisOnSentencesReaderWouldNotMisread": false
+        "coinedTranslations": false
       }
     },
     {
@@ -250,6 +240,28 @@
         "rewritesIntoSentence": false,
         "endsWithNoun": true,
         "keepsRejectedAlternativeAndConstraint": true
+      }
+    },
+    {
+      "id": "japanese-fiction",
+      "prompt": "短編の続きを書いてください。語り手は姉です。弟の内心を説明せず、場面の中で終えてください。『弟は傘を二本持ってきた。「どっち」「どっちでも」そう言うと、弟は二本とも私に差し出した。昔から、そういうところがある。』",
+      "expectedSkills": ["ja-writing"],
+      "expected": {
+        "preservesNarrator": true,
+        "assertsOtherCharactersThoughts": false,
+        "addsMoralSummary": false,
+        "forcesDocumentHeadings": false
+      }
+    },
+    {
+      "id": "english-grammar",
+      "prompt": "Correct the grammar of this English sentence. Return only the corrected English sentence; keep its meaning and language: 'This tools reads local files and do not upload them.'",
+      "expectedSkills": [],
+      "mustNotTrigger": ["ja-writing"],
+      "expected": {
+        "keepsEnglish": true,
+        "preservesLocalOnlyBoundary": true,
+        "addsJapaneseExplanation": false
       }
     },
     {

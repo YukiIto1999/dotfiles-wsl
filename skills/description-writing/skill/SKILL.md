@@ -1,6 +1,6 @@
 ---
 name: description-writing
-description: Writes or restructures substantial technical prose such as README, ADR, specification, proposal, report, guide, or article for a known audience. Owns source-backed content and reader-question structure, then hands runnable procedures to article-reproduction and requested reader-experience checks to first-reader. Uses explainer only for its specialized learning-material job. Does not verify command execution itself, change a domain glossary, or write code comments, declaration documentation, commit messages, changelogs, or PR-only summaries.
+description: Writes or restructures substantial technical prose such as README, ADR, specification, proposal, report, guide, or article for a known audience. Owns source-backed content and structure suited to how the document is read and used, composing Japanese prose with ja-writing. Hands runnable procedures to article-reproduction and requested reader-experience checks to first-reader. Uses explainer only for its specialized learning-material job. Does not verify command execution itself, change a domain glossary, or write code comments, declaration documentation, commit messages, changelogs, or PR-only summaries.
 ---
 
 # 構造的な技術文書を書く
@@ -31,15 +31,15 @@ description: Writes or restructures substantial technical prose such as README, 
    公開情報の調査は`web-research`、所在や関係が未知のrepository調査は`repository-research`が利用可能なら渡し、locator付きの根拠と未確定事項を受け取る。
    事実、解釈、提案を分け、結果を変える背景が資料から得られない場合だけ書き手に質問する。
    sourceの選定と記述の正確さは書き手が所有し、reader反応や再現性reviewで代用しない。
-2. 読者の問いに答える最小の構成を作り、種類に応じて[文書別の判断](references/document-types.md)を読む。
-   既知の説明、網羅のための節、後で使わない詳細を足さず、見出しを拾い読みで引ける簡潔なラベルにする。
+2. [文書別の判断](references/document-types.md)を読み、理解する順序、判断に必要な根拠、作業の依存、参照する項目から、その文書に合う構成を作る。
+   日本語で書く場合は、この段階で`ja-writing`を読み、以降の執筆と推敲に使う。構成を別工程で二度作らず、本文の選択・順序・つながりから整える。
+   網羅のための節や後で使わない詳細は足さず、既知の情報は今回の説明に使う範囲で受け直す。見出しはその節の役目と読み方に合わせ、一律に短いラベルや問いへそろえない。
 3. 一つの正本だけを置く。
    同期できない揮発値を転記せず、正本と取得方法を示す。
    手順では読者に必要な入力、開始状態、command、期待結果を揃え、期待結果と実行して観測した結果を区別する。
 4. 通読して矛盾、重複、未定義語、読者にだけ見えない前提を編集する。
-   正本に従って読者の理解や判断に必要な記述を残し、日本語なら`ja-writing`へ目的、読者、既存用語、事実と解釈を区別したdraftを渡す。
-   戻った文面で契約と不確実性が保たれていることを確認する。内容の判断が必要な箇所が返った場合は、書き手として判断する。
-   同Skillが利用不能ならrepositoryの表記規則で仕上げ、専門の推敲が未実施であることを区別する。
+   正本に従って読者の理解や判断に必要な記述を残し、repositoryの表記規則に合わせる。
+   編集後の文面を原資料と照合し、契約と不確実性が保たれていることを確認する。
 
 ## Reviewへ引き渡す
 

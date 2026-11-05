@@ -126,7 +126,6 @@ descriptionの修正は失敗queryの単語を足すのでなく、そのquery�
 本文を変えた場合はIteration 0の対応を更新する。
 
 packageを書く枝では`writing-for-agents`を読み、共通の手順を本文へ、特定の枝だけに必要な詳細を一段のreferenceへ置く。
-日本語の文を整える場合は`ja-writing`を使う。
 決定的な処理以外をscriptへ押し込まず、既存ownerの規範やtool schemaを複製しない。
 runtimeには自立した方法を書き、donorの紹介、作者名、来歴による実行指示を置かない。
 revision、license、採用理由、非採用部分は既存の保守文書へ残す。

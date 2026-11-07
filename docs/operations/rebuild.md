@@ -117,7 +117,9 @@ wsl.exe --distribution 'NixOS'
 ```
 
 inputやpackageを更新すると、MCP frontやcontainerを含むserviceがactivationで再起動することがある。
-別のsessionが作業中なら、planと検査までを先に済ませ、適用はその作業が終わってから実行する。
+sessionの有無だけで適用を止めず、候補で変わる参照先、activation処理、serviceの停止・再起動・reloadと、影響を受ける作業を確認する。
+参照先の切替だけで既存process・接続・使用中のstore objectを維持できる変更は、作業中でも適用できる。
+作業の中断や状態の破壊を伴う変更は、影響を受ける作業の終了または安全な切替条件が整うまで、planと検査に留める。
 
 ## Inputの更新
 

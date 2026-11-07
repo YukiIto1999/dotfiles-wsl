@@ -124,7 +124,7 @@ browserが必要なbranchだけ、その環境で利用可能な専門Skillへ�
 `disable-model-invocation: true`を持つinterview、仕様化、ticket分割、retro、setup、architecture探索の原版は、利用者が明示的に呼ぶcommandとして使う。
 `filter-syntax`はこれに加えて`user-invocable: false`を保ち、`run-tests`がplatformとframeworkを確定したfiltered runで必要とした場合だけ読む。
 この二flagが両方あるhelperはenabled registryと依存closureには残すが、全clientのnamed Skill discovery directoryとsubagent routeから除外する。
-registryの固定raw sourceは保持し、policy rosterが表示する絶対pathをconsumerが`Read`で開くため、native Skill起動toolによる名前解決に頼らない。
+registryの固定raw sourceは保持し、policyが参照する生成Skill一覧のSourceをconsumerが`Read`で開くため、native Skill起動toolによる名前解決に頼らない。
 `run-tests`のsource実体からも元のsibling referenceへ到達でき、helper用alias、wrapper、本文の書換えは作らない。
 片方のflagだけを持つ明示commandなどの投影は変更せず、原版のfrontmatterを各native clientへ渡す。
 

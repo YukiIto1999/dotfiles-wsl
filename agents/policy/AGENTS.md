@@ -69,11 +69,13 @@ subagent は文脈の再構築と報告の読み直しの分だけ高くつく�
 ## skills
 
 繰り返し作業は手で再現せず、対応するSkillを読む。
-下表の目的欄は配備元のfrontmatter descriptionをそのまま使い、外部Skillも原名、本文、付属資料、起動flagを保って配る。
+sessionが提示するSkillの名前とdescriptionから選び、該当する本文を読む。
+一覧が提示されない、必要なcommandや依存referenceの入口が見つからない、または配備内容を調べる場合だけ、Skill一覧 `@skillCatalog@`を読む。通常のtaskで一覧全体を追加読込しない。
+一覧は配備元のdescription、起動flag、sourceを保持し、外部Skillの原名、本文、付属資料は変えない。
 client固有またはplugin由来のSkillはsessionが提示した名前を使い、namespaceがある場合は省略しない。
-起動欄の「明示呼出しのみ」は利用者が呼んだcommandであり、一般taskの自動routingへ加えない。
+一覧の起動欄が「明示呼出しのみ」のSkillは利用者が呼んだcommandとして使い、一般taskの自動routingへ加えない。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、clientのnamed Skill discovery directoryとsubagent routeへ投影しない。
-起動欄の「依存referenceのみ」はconsumerが必要条件で読む原版sourceであり、表示された絶対pathを`Read`で開く。
+「依存referenceのみ」はconsumerが必要条件で読む原版sourceであり、一覧のSourceを`Read`で開く。native Skill入口がないclientも、必要なSkillのSourceを直接読む。
 `filter-syntax`はplatformとframeworkが確定したfiltered runで、`run-tests`が必要とした場合だけ読み、Skill起動toolで名前を解決しない。
 
 依存方向は `agent → Skill → Capability → provider / runtime` とする。agent は task の委譲、context、権限、成果物の引渡しを所有し、Skill は反復する判断と手順を所有し、Capability は consumer 非依存の意味、state、security、lifecycle を所有する。provider と runtime は Capability の実装詳細であり、agent や Skill が直接選ばない。
@@ -85,8 +87,6 @@ Read / Grep / Glob / Edit / Write / Bash、LSP、subagentのようなharness機�
 toolやSkillの追加では、供給元と実行依存だけでなく、発火する仕事、既存caller、渡す入力、返却結果を取り込む地点を同時に変更する。
 配備checkはsource、依存と投影を検査し、doctorは実状態とdriftを観測するが、自然な発火や成果の品質までは証明しない。
 追加した入口は、その仕事の実行と近接する非対象の両方で確かめる。
-
-@skillRoster@
 
 `codebase-design`はmodule、interface、seamを設計する共通語彙であり、`diagnosing-bugs`は故障と性能回帰のfeedback loopから修正、regression testまでを扱う。
 test-firstの実装には`tdd`のred → greenを使い、refactoringをそのloopへ混ぜない。

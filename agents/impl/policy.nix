@@ -55,6 +55,10 @@ in
     in
     pkgs.runCommandLocal "agents-policy.md"
       {
+        outputs = [
+          "out"
+          "catalog"
+        ];
         nativeBuildInputs = [
           pkgs.coreutils
           pkgs.gawk
@@ -62,7 +66,7 @@ in
           pkgs.gnused
           pkgs.yq
         ];
-        skillHeader = "目的\tSkill\t起動";
+        skillHeader = "目的\tSkill\t起動\tSource";
         subagentHeader = "目的\tsubagent";
         capabilityHeader = "Capability\t入口 Skill";
         clientHeader = "client\tsubagent\tSkill 投影\tLSP\tTelemetry\tProject memory";
@@ -132,23 +136,23 @@ in
                 elif .["user-invocable"] == false then "自動のみ"
                 else "task一致時" end
               ' frontmatter.yaml)
-              if [ "$invocation" = "依存referenceのみ" ]; then
-                invocation="$invocation: \`$source\` をRead"
-              fi
-              printf '%s\t`%s`\t%s\n' "$description" "$name" "$invocation"
+              printf '%s\t`%s`\t%s\t`%s`\n' "$description" "$name" "$invocation" "$source"
             else
               printf '%s\t`%s`\n' "$(description_of "$source")" "$name"
             fi
           done
         }
 
-        skillRoster=$(roster_rows "$skillHeader" $skillEntries | render_table)
+        {
+          printf '# Skill一覧\n\n'
+          roster_rows "$skillHeader" $skillEntries | render_table
+        } > "$catalog"
         subagentRoster=$(roster_rows "$subagentHeader" $subagentEntries | render_table)
         capabilityRoster=$(printf '%s\n%s\n' "$capabilityHeader" "$capabilityRows" | render_table)
         clientMatrix=$(printf '%s\n%s\n' "$clientHeader" "$clientRows" | render_table)
 
         substitute ${template} "$out" \
-          --subst-var-by skillRoster "$skillRoster" \
+          --subst-var-by skillCatalog "$catalog" \
           --subst-var-by subagentRoster "$subagentRoster" \
           --subst-var-by capabilityRoster "$capabilityRoster" \
           --subst-var-by clientMatrix "$clientMatrix" \

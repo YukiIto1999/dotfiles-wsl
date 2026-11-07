@@ -76,9 +76,9 @@ Agent clientへ配るのは、解決したSkill registryの`source` directoryと
 必要なSkillを失ったsubagentとそのhandoffも配備しない。
 Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsource差替えはNixの明示的なoverrideだけで行う。
 Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skills、mizchi explainerは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
-原版の起動flagも保持し、policy rosterがtask一致、明示command、consumerから読むreference-onlyを区別する。
+原版の起動flagも保持し、生成するSkill一覧がtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
-consumerはpolicy rosterのraw source絶対pathを`Read`で開き、固定source実体のsibling referenceを利用する。
+consumerはSkill一覧のSourceを`Read`で開き、固定source実体のsibling referenceを利用する。
 architecture-standardも他の外部sourceと同じregistryとoverrideの契約で配備し、agent runtimeとgateは標準の所在も存在も持たない。
 標準の規範本文は、配備済みsourceからでなく、policyが案内する現行規範rootから読む。
 同梱のreferenceとscriptは成功してReadした`SKILL.md`の実体のdirectoryから、規範文書のlinkは現行規範rootから解決する。
@@ -250,8 +250,11 @@ Dockerが起こす宣言外のcontainerは[containerの配置と上限](#contain
 
 ## Policy、subagent、Skill
 
-[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は共通の作業規律を持つtemplateであり、Skill、subagent、Capabilityとclientの能力の一覧はNix宣言と各sourceのfrontmatterから生成する。
-説明文書は同じ一覧を手で維持せず、正本の場所と現在値の取得方法を示す。
+[`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は共通の作業規律を持つtemplateであり、subagent、Capabilityとclientの能力の一覧はNix宣言から生成する。
+Skillのdescription、起動条件、raw sourceは、同じ[`renderer`](../../agents/impl/policy.nix)が別outputのSkill一覧へ生成し、policyから不変のstore pathを参照する。
+通常はsessionのnative Skill一覧から必要な本文だけを読み、一覧不在、commandや依存referenceの解決、配備監査の場合だけ生成一覧を使う。
+全Skillのdescriptionを共通policyへ重ねず、native discoveryとhelperの参照経路は維持する。
+説明文書は同じ一覧を手で維持しない。
 この環境ではAI CLIをclient、委譲先の定義をsubagentと呼び、`agents/subagents/`がその定義とroutingを所有する。
 client形式への変換はbuild時に行う。
 

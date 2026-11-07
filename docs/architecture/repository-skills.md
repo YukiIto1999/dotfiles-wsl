@@ -46,7 +46,7 @@ source directoryを直接渡すため、同梱のreferenceやscriptも上流の�
 repository内の別directoryを相対参照するSkillでは、その参照先を含む固定sourceを保ち、Skill directoryだけを切り出さない。
 `enabled`は依存を満たすsource集合であり、native discovery集合と同一ではない。
 `user-invocable: false`と`disable-model-invocation: true`の両方を持つhelperは、全clientのnamed Skill directoryとsubagent routeから除き、consumerが固定raw sourceを`Read`する。
-その絶対pathをpolicy rosterへ示し、whole sourceと元のsibling関係を保つため、helper名のaliasやwrapperは作らない。
+その絶対pathをpolicyが参照する生成Skill一覧へ示し、whole sourceと元のsibling関係を保つため、helper名のaliasやwrapperは作らない。
 
 同じ優先度で同IDのsourceを複数moduleが宣言すると、同じpathを指定していてもNix optionのmergeが失敗する。
 暗黙の後勝ちや同名aliasを使わず、意図した差替には既存の`lib.mkForce`を使う。
@@ -118,7 +118,7 @@ raw `research`とPonytailは配備せず、調査と実装・reviewの原則を�
 Googleの二Skillとcustom `browser-performance`だけをbrowser-diagnosticsでgateし、実行時にbrowser経路を選ぶ`browser-operation`とnative診断を別に保つ。
 .NET `run-tests`は`platform-detection`と`filter-syntax`をSkill依存に持ち、後者はfiltered runのreference-only helperとして扱う。
 .NETの実行前提は対象projectのSDKとrunnerであり、一般のbrowserやcloud Capabilityではない。
-原版の起動flagを維持し、policy rosterもfrontmatterから明示呼出しとreference-onlyを区別する。
+原版の起動flagを維持し、生成Skill一覧もfrontmatterから明示呼出しとreference-onlyを区別する。
 原版のcommandやtool例を合わせるために本文を書き換えず、安全規律、権限、gatewayへの接続は取込側が所有する。
 
 Modern Web GuidanceはSkill registryへ採らず、source全体をhome assetとして`~/.local/share/dotfiles-agent/references/modern-web-guidance/`へ参照させる。

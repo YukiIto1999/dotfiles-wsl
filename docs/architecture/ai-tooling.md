@@ -221,10 +221,10 @@ providerの`error`と`aborted`による停止ではgateを実行せず、検証�
 
 ## 資源の上限
 
-wrapperから起動したclientは、launcherが`systemd-run --user --scope`で作るsession単位のscopeの中で、supervisorが一度だけ起動して動き、そのscopeはsystemd userの`agents.slice`に属する。scope名は`dotfiles-agent-<client>.<pid>.<suffix>.scope`で、session directoryの名前から導く。clientが起動したbuild、test、browser、VMもscopeに入るため、slice全体で次の上限を共有する。値は`dotfiles.agents.slice`のoptionで変えられる。
+`runtime.managed`のclientは、launcherが`systemd-run --user --scope`で作るsession単位のscopeの中で、supervisorが一度だけ起動して動き、そのscopeはsystemd userの`agents.slice`に属する。scope名は`dotfiles-agent-<client>.<pid>.<suffix>.scope`で、session directoryの名前から導く。scope内の子processはslice全体で次の上限を共有するが、別のserviceやmanagerが起動するworkloadの配置は個別に確認する。値は`dotfiles.agents.slice`のoptionで変えられる。
 
 上限は物理RAMの割合で指定し、systemdが起動時のmemory容量から解決する。
-`agents.slice`の`MemoryHigh`は60%、`MemoryMax`は70%、`MemorySwapMax`はRAMの20%を既定とし、CPUWeightは50にする。
+`agents.slice`の`MemoryHigh`は60%、`MemoryMax`は70%、`MemorySwapMax`はRAMの20%を既定とし、CPUWeightは50にする。CPUWeightは競合時の相対的な配分であり、CPU使用率の上限ではない。
 swapの百分率はswap総量ではなく物理RAMに対する割合である。
 値の正本は`dotfiles.agents.slice`であり、highよりmaxを大きくする。
 
@@ -247,6 +247,8 @@ I/O上限やprojectの`CARGO_BUILD_JOBS`の上書きは加えず、memory上限�
 agentが起動したNix builderはnix-daemonの子として`user-workload.slice`で動き、`agents.slice`ではなく共通の`user.slice`の上限を受ける。
 [`workstation/nix/module.nix`](../../workstation/nix/module.nix)がhostのjobs、cores、空き容量reserveを持ち、nix-daemonのCPUWeightを50にする。
 Dockerが起こす宣言外のcontainerは[containerの配置と上限](#containerの配置と上限)で別に抑える。
+
+これらは資源と寿命の制御であり、agentの権限を隔離するsandboxではない。filesystem、credential、networkへの到達範囲は[セキュリティ境界](security.md#codex-sandbox)として別に扱う。
 
 ## Policy、subagent、Skill
 

@@ -54,8 +54,10 @@ listenerのbind addressとは別に、systemd serviceの`IPAddressDeny=any`とlo
 
 loopbackのgatewayとfrontへ到達できるprocessは、公開MCP toolを呼べる信頼境界に入る。
 Windows側からの到達性はWSLのnetwork modeと転送経路にも依存し、doctorのservice検査だけでは外部到達性を証明しない。
-gatewayのdeny ruleはtoolの公開制御であり、client認証の代わりにはならない。
+現在のgateway設定は、client認証もclientごとのtool認可も宣言しない。loopbackへの到達制限を、呼出し元の識別や操作の認可として扱わない。
 gatewayとfrontは設定ユーザーのserviceとして動き、読めるcheckout、home、runtime secretと、実行できるcommandがtool callの権限上限になる。
+
+PlaywrightのMCP adapterは[`package.nix`](../../capabilities/browser-automation/playwright/mcp/package.nix)で`--isolated`と`--no-sandbox`を同時に指定する。sessionごとのbrowser状態とprocess寿命は分けるが、Chromiumのsecurity sandboxは有効にしない。この境界はclientのnative browserやOrcaのbrowserとは別である。
 
 ## Docker
 
@@ -96,6 +98,7 @@ OMP の `config.yml` と `agent.db` は設定ユーザーだけが所有する�
 
 [`agents/clients/codex/module.nix`](../../agents/clients/codex/module.nix) は同名の `dev` profile を system config で拡張し、agent runtime の cache と state だけを書込対象に加える。dotfiles checkout 内の project config は配備しない。permission profile と旧 `sandbox_mode`、`sandbox_workspace_write` は混在させない。
 subagent は親 session の permission profile を継ぐ。Codex の subagent override が運ぶのは model、reasoning、instructions、personality、service tier、feature 無効化、skill 選択だけであり、subagent file の `default_permissions` は読み捨てられる。read-only の subagent 定義にも独自の sandbox 境界はない。
+managed runtimeのscopeとsupervisorは資源とprocess寿命を管理し、worktreeは作業状態を分けるが、filesystem、credential、networkの権限を分離しない。mode `0700`のscratchも同じUIDのprocessを排除しない。これらをclientのpermissionやOS sandboxの代わりに数えない。
 既存の user config に旧 top-level key が残る場合だけ、Home Manager activation が未知の設定を保持したまま `dev` profile へ一度移行する。移行は同一 directory 内の temporary file を検証してから原子的に置換する。symlink、non-regular file、不正 TOML は変更せず activation を失敗させる。
 
 agent runtimeの共有cacheはuser所有のdirectory `0700`とmarker file `0600`で識別する。
@@ -154,7 +157,9 @@ Linux pathはwslpathでWindows pathへ変換し、関連付けられたWindows a
 | user credential | 設定ユーザーと credential consumer | Git identity、PAT、CLI 設定 |
 | agentgateway と front | loopback の port へ到達する client、service user | prompt、tool argument、tool result |
 | Docker | root、docker group、daemon、container | backend request、volume data、環境 secret |
-| 外部 provider | provider と通信経路 | Hindsightのextraction input、LLM処理対象のretain内容 |
+| 外部 provider | provider と通信経路 | 各AI clientのmodel処理入力、補助judgeへの入力、Hindsightのextraction inputとretain処理入力 |
 | Windows interop | Linux 呼び出し元、Windows process | command argument、Windows filesystem data |
+
+modelとfallbackの送信先はclient設定が持ち、OMPには[`model roleとfallbackのseed`](../../agents/clients/omp/assets/config.seed.yml)と[`TypeSafeのendpoint`](../../agents/clients/omp/module.nix)がある。seedは現在の実効設定ではないため、実際の送信先とpayloadは[clientの可変設定](../operations/agent-clients.md)と実行経路で確認する。ここからproviderの保存・学習方針は推定しない。
 
 doctor は境界の一部について service 状態、file source、owner、mode、MCP lifecycle を観測するが、secret value、PAT scope、network firewall、Windows 側 policy、Hindsightの保存内容やLLM retention結果は検査しない。health/readinessが成功しても、LLMが利用できることやretainが保存済みであることは示さない。検査範囲と失敗時の調査は [Doctor](../operations/doctor.md)を参照する。

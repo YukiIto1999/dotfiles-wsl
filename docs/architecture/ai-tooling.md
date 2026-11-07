@@ -424,7 +424,9 @@ promptから既知の注入blockを除いた残りが空なら想起せず、残
 分類を詳しくしてもerror codeは`unavailable`のままであり、送信済みのsaveを確認できない場合の`indeterminate`は変えない。
 保存は明示的な`memory_save`と、有効にした[記憶の収穫](#記憶の収穫)が行う。
 
-OMPは同じ入力に対する`before_agent_start`の再入で想起の結果と失敗を共有し、停止hookによる内部継続では再取得しない。
+OMPは入力が重ならない区間で、同じ入力に対する`before_agent_start`の再入の想起結果と失敗を共有し、停止hookによる内部継続では再取得しない。
+先行する停止hookが継続を要求して後続の`session_stop`を呼ばない場合も、`agent_end.willContinue`で継続を捕捉する。
+処理中に別の入力が届くと開始通知と入力の対応を特定できないため、取得の抑止と再利用を止め、新しい入力の鮮度を優先する。継続も未処理messageもない終了で共有を再開する。
 共有はprocess内の同じturnに限り、新しい利用者入力、継続のない`agent_end`、sessionの切替と終了で破棄する。
 session、cwd、入力のhashで結果を分離し、同じ本文でも新しい利用者入力では取得し直す。
 取得の30秒の期限は維持し、超過時には子のprocess groupを止めて出力pipeと子の終了を待つ。

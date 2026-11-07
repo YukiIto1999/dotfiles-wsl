@@ -7,6 +7,7 @@ type Handler = (event: Record<string, unknown>, ctx: unknown) => unknown;
 interface Host {
   handlers: Map<string, Handler>;
   notices: string[];
+  pending: boolean;
 }
 
 interface Call {
@@ -139,7 +140,7 @@ afterEach(() => {
 async function load(hookPath: string): Promise<Host> {
   // 配備済み hook の path は実行時の環境変数で決まるため静的 import は不可
   const { default: projectMemory } = await import(hookPath);
-  const host: Host = { handlers: new Map(), notices: [] };
+  const host: Host = { handlers: new Map(), notices: [], pending: false };
   projectMemory({
     on: (name: string, handler: Handler) => host.handlers.set(name, handler),
     logger: { warn: () => undefined },
@@ -157,6 +158,7 @@ function emit(host: Host, name: string, event: Record<string, unknown>, session:
     { type: name, ...event },
     {
       cwd,
+      hasPendingMessages: () => host.pending,
       sessionManager: { getSessionId: () => session },
       ui: { notify: (message: string) => host.notices.push(message) },
     },
@@ -213,6 +215,53 @@ test("internal continuations after a stop neither spawn memory nor inject again,
     expect(await begin(host, "continuation", project, text)).toBeUndefined();
   }
   expect(calls().map((call) => call.prompt)).toEqual(["request one"]);
+}, TEST_TIMEOUT_MS);
+
+test("a continuation that bypasses the stop handler recalls nothing until a new input arrives", async () => {
+  reset();
+  const host = await load(process.env.FAKE_MEMORY_HOOK as string);
+  await submit(host, "blocked-before-hook", project, "request one");
+  expect(await begin(host, "blocked-before-hook", project, "request one")).toContain("call 1");
+  await settle(host, "blocked-before-hook", project, true);
+  expect(await begin(host, "blocked-before-hook", project, "gate continuation")).toBeUndefined();
+  expect(calls().map((call) => call.prompt)).toEqual(["request one"]);
+
+  await submit(host, "blocked-before-hook", project, "request two");
+  expect(await begin(host, "blocked-before-hook", project, "request two")).toContain("call 2");
+  expect(calls().map((call) => call.prompt)).toEqual(["request one", "request two"]);
+}, TEST_TIMEOUT_MS);
+
+test("a queued input still recalls after an internal prompt and a retry", async () => {
+  reset();
+  const host = await load(process.env.FAKE_MEMORY_HOOK as string);
+  await submit(host, "queued-retry", project, "same request");
+  const first = await begin(host, "queued-retry", project, "same request");
+  await settle(host, "queued-retry", project, true);
+  await submit(host, "queued-retry", project, "same request");
+  await begin(host, "queued-retry", project, "gate continuation");
+  await settle(host, "queued-retry", project, true);
+  const queued = await begin(host, "queued-retry", project, "same request");
+  expect(queued).not.toBe(first);
+  expect(calls().filter((call) => call.prompt === "same request")).toHaveLength(2);
+}, TEST_TIMEOUT_MS);
+
+test("pending queued work keeps recall fresh until a terminal settle drains it", async () => {
+  reset();
+  const host = await load(process.env.FAKE_MEMORY_HOOK as string);
+  await submit(host, "pending", project, "same request");
+  const first = await begin(host, "pending", project, "same request");
+  await submit(host, "pending", project, "same request");
+  host.pending = true;
+  await settle(host, "pending", project);
+  const queued = await begin(host, "pending", project, "same request");
+  expect(queued).not.toBe(first);
+  expect(calls().filter((call) => call.prompt === "same request")).toHaveLength(2);
+  host.pending = false;
+  await settle(host, "pending", project);
+  await submit(host, "pending", project, "next request");
+  await begin(host, "pending", project, "next request");
+  await settle(host, "pending", project, true);
+  expect(await begin(host, "pending", project, "gate continuation")).toBeUndefined();
 }, TEST_TIMEOUT_MS);
 
 test("a new user request recalls again and never reuses the previous result", async () => {

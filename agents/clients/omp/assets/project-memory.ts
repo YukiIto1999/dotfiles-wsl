@@ -13,8 +13,10 @@ interface Ingress {
   submitted: number;
   /** recall を始めた時点で処理済みとみなした submitted */
   handled: number;
-  /** session_stop の後で、終端の settle も新しい recall も来ていない間の true */
+  /** 停止からの再開に対する記憶の再取得を抑える継続待機の印 */
   stopped: boolean;
+  /** 開始通知と入力の対応を特定できない重複入力の印 */
+  overlapping: boolean;
 }
 
 function warn(pi: ExtensionAPI, ctx: ExtensionContext, message: string): void {
@@ -86,7 +88,7 @@ export default function projectMemory(pi: ExtensionAPI): void {
   function ingressOf(sessionId: string): Ingress {
     let state = ingress.get(sessionId);
     if (!state) {
-      state = { submitted: 0, handled: 0, stopped: false };
+      state = { submitted: 0, handled: 0, stopped: false, overlapping: false };
       ingress.set(sessionId, state);
     }
     return state;
@@ -104,7 +106,9 @@ export default function projectMemory(pi: ExtensionAPI): void {
   // prompt の同一性だけの再利用は同文の新しい入力へ古い記憶を返すため不可
   pi.on("input", (_event, ctx) => {
     const sessionId = sessionOf(ctx);
-    ingressOf(sessionId).submitted++;
+    const state = ingressOf(sessionId);
+    state.overlapping ||= state.stopped || state.submitted !== state.handled || recalls.has(sessionId);
+    state.submitted++;
     recalls.delete(sessionId);
   });
 
@@ -112,12 +116,15 @@ export default function projectMemory(pi: ExtensionAPI): void {
     ingressOf(sessionOf(ctx)).stopped = true;
   });
 
-  // 継続予定の settle での破棄は同じ turn の再開で再取得を起こすため不可
+  // 先行 hook の block で通知が途切れるため session_stop 単独による継続判定は不可
   pi.on("agent_end", (event, ctx) => {
-    if (event.willContinue === true) return;
     const sessionId = sessionOf(ctx);
-    ingressOf(sessionId).stopped = false;
-    recalls.delete(sessionId);
+    const state = ingressOf(sessionId);
+    state.stopped = event.willContinue === true;
+    if (!state.stopped) {
+      recalls.delete(sessionId);
+      if (!ctx.hasPendingMessages()) state.overlapping = false;
+    }
   });
 
   const forgetAll = () => {
@@ -132,21 +139,25 @@ export default function projectMemory(pi: ExtensionAPI): void {
     const sessionId = sessionOf(ctx);
     const state = ingressOf(sessionId);
     // prompt の本文だけの判定は文面が変わる再開を新しい要求として再取得するため不可
-    const resumption = state.stopped && state.submitted === state.handled;
+    const resumption = !state.overlapping && state.stopped && state.submitted === state.handled;
     if (resumption) return;
     state.stopped = false;
     state.handled = state.submitted;
 
-    let session = recalls.get(sessionId);
-    if (!session) {
-      session = new Map();
-      recalls.set(sessionId, session);
-    }
-    const key = `${ctx.cwd}\0${createHash("sha256").update(event.prompt).digest("hex")}`;
-    let context = session.get(key);
-    if (!context) {
+    let context: Promise<string>;
+    // 混在した入力と開始通知を対応づけられないため抑止と再利用による取得の省略は不可
+    if (state.overlapping) {
       context = recall(ctx, event.prompt);
-      session.set(key, context);
+    } else {
+      let session = recalls.get(sessionId);
+      if (!session) {
+        session = new Map();
+        recalls.set(sessionId, session);
+      }
+      const key = `${ctx.cwd}\0${createHash("sha256").update(event.prompt).digest("hex")}`;
+      const cached = session.get(key);
+      context = cached ?? recall(ctx, event.prompt);
+      if (!cached) session.set(key, context);
     }
     const text = await context;
     if (!text) return;

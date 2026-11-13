@@ -76,6 +76,7 @@ Agent clientへ配るのは、解決したSkill registryの`source` directoryと
 必要なSkillを失ったsubagentとそのhandoffも配備しない。
 Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsource差替えはNixの明示的なoverrideだけで行う。
 Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skills、mizchi explainerは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
+利用者が明示的に承認した適応の範囲に含まれる保守派生(現在は`codebase-design`と、それを使う`improve-codebase-architecture`)だけは例外であり、同じIDのlocal Skillを唯一の正本にして、来歴とlicenseを[Skill portfolio](skills.md#custom-skillの来歴)に置く。
 原版の起動flagも保持し、生成するSkill一覧がtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
 consumerはSkill一覧のSourceを`Read`で開き、固定source実体のsibling referenceを利用する。

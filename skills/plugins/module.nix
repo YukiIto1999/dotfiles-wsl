@@ -76,11 +76,6 @@ let
     matt-pocock = {
       source = pluginSources.matt-pocock;
       skills = {
-        codebase-design = {
-          directory = "skills/engineering/codebase-design";
-          requiresCapabilities = [ ];
-          requiresSkills = [ ];
-        };
         diagnosing-bugs = {
           directory = "skills/engineering/diagnosing-bugs";
           requiresCapabilities = [ ];
@@ -109,15 +104,6 @@ let
           requiresCapabilities = [ ];
           optionalCapabilities = [ "code-quality" ];
           requiresSkills = [ "setup-matt-pocock-skills" ];
-        };
-        improve-codebase-architecture = {
-          directory = "skills/engineering/improve-codebase-architecture";
-          requiresCapabilities = [ ];
-          requiresSkills = [
-            "codebase-design"
-            "domain-modeling"
-            "grilling"
-          ];
         };
         setup-matt-pocock-skills = {
           directory = "skills/engineering/setup-matt-pocock-skills";

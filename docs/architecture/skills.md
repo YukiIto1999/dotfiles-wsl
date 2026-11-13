@@ -3,7 +3,7 @@
 **読み手:** Skill の責務境界、選定根拠、現在の導入状態を理解したい人。学習中に読む。
 
 Skillは、反復する作業の判断と手順を必要時に読む単位とする。
-外部Skillを原文のまま採用する場合と、異なる仕事を持つcustom Skillの判断材料として参照する場合を区別する。
+外部Skillを原文のまま採用する場合、利用者が承認した範囲のSkillを保守派生へ切り替える場合、異なる仕事を持つcustom Skillの判断材料として参照する場合を区別する。
 以下は採用構成と責務の説明であり、今回の切替による行動や品質の改善を実測した報告ではない。
 
 ## 判断原則
@@ -27,6 +27,8 @@ local Skillの正本は[`skills/<id>/skill/`](../../skills)である。
 registryのsourceは`SKILL.md`があるdirectoryを指し、upstreamのrepository内での配置を共通化する必要はない。
 
 外部Skillは原名のIDで固定sourceを直接採用し、本文、reference、script、frontmatterの起動flagを書き換えない。
+承認済みの適応は、[保守派生の契約](repository-skills.md#承認済みの保守派生)に従って同IDのlocal正本へ切り替える。
+来歴とlicenseは[Custom Skillの来歴](#custom-skillの来歴)に示す。
 custom Skillの実行手順とreferenceは自立させ、donorの作者名や「原版に従う」という実行linkを持たせない。
 独立した専門仕事が必要な条件では、別Skillを実際に順次実行して証拠を受け渡す。
 供給元と依存metadataを選ぶowner、登録条件、差替手順は[外部リポジトリ所有Skillの構成](repository-skills.md)にまとめる。
@@ -44,7 +46,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 
 MCP専用の薄いwrapperは置かない。
 `repository-research`は探索経路とsource検証、`browser-operation`は要求と変更pathから実画面と業務結果へ至る受入判断、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。
-SkillとCapabilityの対応、subagentごとのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
+SkillとCapabilityの対応は各registry entryの`requiresCapabilities`と`optionalCapabilities`(localは各`module.nix`、外部は[`skills/plugins/module.nix`](../../skills/plugins/module.nix))、subagentごとのSkillのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
 
 ## 直接採用
 
@@ -65,13 +67,11 @@ Chrome MCPのruntimeと採用Skillは同じpublished packageを参照し、runti
 
 | ID | Source内のdirectory | 上流が所有する仕事 |
 |---|---|---|
-| `codebase-design` | Matt `skills/engineering/codebase-design` | deep module、interface、seam、testabilityの共通語彙と設計 |
 | `diagnosing-bugs` | Matt `skills/engineering/diagnosing-bugs` | 障害と性能regressionのfeedback loop、再現、仮説、修正、regression test |
 | `tdd` | Matt `skills/engineering/tdd` | 合意したpublic seamで、一つのtestと最小実装を進めるRED→GREEN |
 | `domain-modeling` | Matt `skills/engineering/domain-modeling` | domain語彙を問い直し、`GLOSSARY.md`、context map、ADRへ確定事項を記録 |
 | `grilling` | Matt `skills/productivity/grilling` | 明示的な依頼に対するdesign treeとfrontier単位の質問 |
 | `code-review` | Matt `skills/engineering/code-review` | fixed pointから`HEAD`までのStandardsとSpecの並列review |
-| `improve-codebase-architecture` | Matt `skills/engineering/improve-codebase-architecture` | deepening候補のHTML reportと、選んだ候補のgrilling |
 | `setup-matt-pocock-skills` | Matt `skills/engineering/setup-matt-pocock-skills` | projectごとのissue trackerとdomain文書の利用設定 |
 | `grill-with-docs` | Matt `skills/engineering/grill-with-docs` | `grilling`と`domain-modeling`を実行するstateful interview |
 | `grill-me` | Matt `skills/productivity/grill-me` | `grilling`を実行するstateless interview |
@@ -121,7 +121,7 @@ browserが必要なbranchだけ、その環境で利用可能な専門Skillへ�
 この合成課題の成立を、手順なしとの改善量、自然な呼出し、別実行者間の引渡し、長時間作業での停滞対策の有効性へ一般化しない。
 追加機構を導入しない判断は、これらの未測定事項が解消したことを意味しない。
 
-`disable-model-invocation: true`を持つinterview、仕様化、ticket分割、retro、setup、architecture探索の原版は、利用者が明示的に呼ぶcommandとして使う。
+`disable-model-invocation: true`を持つinterview、仕様化、ticket分割、retro、setupの原版と、architecture探索の保守派生は、利用者が明示的に呼ぶcommandとして使う。architecture探索の保守派生は、この起動flagとCodex向けの暗黙起動policy(`openai.yaml`)を原版から保つ。
 `filter-syntax`はこれに加えて`user-invocable: false`を保ち、`run-tests`がplatformとframeworkを確定したfiltered runで必要とした場合だけ読む。
 この二flagが両方あるhelperはenabled registryと依存closureには残すが、全clientのnamed Skill discovery directoryとsubagent routeから除外する。
 registryの固定raw sourceは保持し、policyが参照する生成Skill一覧のSourceをconsumerが`Read`で開くため、native Skill起動toolによる名前解決に頼らない。
@@ -212,6 +212,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `documentation-writing` | 宣言の契約をdocumentation commentへ記す判断 | 宣言、実装、契約を調べ、利用側が依存する保証と各行の形式を照合する。 |
 | `dependency-analysis` | nodeとedgeを固定して依存の事実を作る判断 | 未知の概念と関係だけ`repository-research`へ渡し、設計と診断を別の仕事として扱う。 |
 | `impact-analysis` | 一つの変更から契約と利用箇所と運用への影響を追う判断 | 不足する調査を`repository-research`へ渡し、設計や診断へ影響の証拠を引き継ぐ。 |
+| `codebase-design` | moduleの責務、隠す決定、権限、状態の寿命からinterfaceとseamを決める判断 | 既存の依存の事実は`dependency-analysis`、一つの変更の影響は`impact-analysis`、故障の診断は`diagnosing-bugs`へ渡す。別のinterface案は、必要な独立した問いごとの視点で作って比べる。 |
 | `ja-writing` | 読み手・状況・媒体・語り口に応じた日本語の内容選択、構成、展開と推敲 | 成果物担当から事実と専用形式を引き継ぎ、素材の選択、構成、執筆と通読、意味の照合を一つの手順で行う。事実調査や別の構成作成は重ねない。 |
 | `skill-design` | Skillの要否、責務と導線、実行結果に基づく採否の判断 | 変更の影響から構造確認とfresh実行を選び、固定したcriticalと対照で評価する。規範や配備先の不足だけを`environment-design`へ渡す。 |
 | `ui-design` | 実contentと既存design systemに基づく実装前briefの判断 | 未知の構造は`repository-research`、必要な実surfaceの観測は`browser-operation`、実装構造は`codebase-design`へ渡す。 |
@@ -228,6 +229,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `web-research` | clientのnativeなWeb検索とURL取得、`library-documentation`のContext7 MCP | 探索と本文取得をclientのtoolで行い、library docsはContext7へ渡す。native toolを持たないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
 | `environment-design` | ownerの正本と既存Skillの入口 | 変更理由と正本から所有者を選び、既存指示との重複や矛盾を確認する。再発だけでhookへ進めず、agentの改善方法は`skill-design`へ渡す。外部toolの採用や差替えは、更新後のcallerと配備契約を確認する。 |
 | `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 全repository共通の件名形式を持ち、意味と文末の正本を読んで一つの目的に閉じた件名を作り、実際のhookを通す。 |
+| `improve-codebase-architecture` | 利用者の明示呼出し | 探索で摩擦と候補を作り、統合や分割、seam、testの判断は`codebase-design`の基準に従う。HTML reportで候補を示して利用者の選択を待ち、選ばれた候補を`grilling`、用語とADRを`domain-modeling`で進める。 |
 
 `requiresSkills`は無条件に必要な配備前提だけを表す。
 追加の観測や、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。
@@ -237,7 +239,7 @@ containerを背後に持つMCPも公開Capabilityから使い、Skillからprovi
 
 独自Skillの本文と実行用referencesには、着想元の紹介やadoption rationaleを置かない。
 来歴とlicenseはこの文書の次節に置き、正本の標準への参照と実際の委譲先Skill名は実行に必要な導線として残す。
-採用した外部原版は変更しない。
+採用した外部原版は変更しない。承認済みの保守派生は原版の変更ではなく、同じIDのlocal正本への切替えとして扱う。
 phase referenceは同じdirectoryから解決し、別Skillのfrontmatterや特定clientだけのreport directiveを持たない。
 browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置く。
 browser操作の経路選択と安全な停止は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
@@ -447,10 +449,23 @@ legal情報と採否の記録はこの保守文書に置き、外部原版その
 browserのinteractionはinputから最初のpaintまでの指標と、非同期response後の結果表示までを分け、request、main-thread work、layout、paintを同じtraceとsourceへ対応させる。
 会話を再開してもproviderのpageとtraceの保持は保証されないため、現在の公開toolで可用性を確認し、取得済みartifactと新sessionの観測を区別する。
 
+### codebase-designとimprove-codebase-architectureの保守派生
+
+`codebase-design`と、その方法を呼ぶ`improve-codebase-architecture`は、固定したMatt Pocock skillsの原版を直接採用する構成から、利用者が明示した適応の範囲に含まれる同IDのlocal保守派生へ切り替えた。
+正本は[`skills/codebase-design/skill/`](../../skills/codebase-design/skill)と[`skills/improve-codebase-architecture/skill/`](../../skills/improve-codebase-architecture/skill)であり、`skills/plugins/module.nix`の採用表には登録しない。
+IDとfrontmatterの`name`を保つ。`codebase-design`は`requiresSkills`と`requiresCapabilities`を空に、`improve-codebase-architecture`は原版と同じ`codebase-design`、`domain-modeling`、`grilling`を`requiresSkills`に宣言する。`tdd`と`improve-codebase-architecture`の`requiresSkills`は、同じIDのlocal entryで満たされる。
+`improve-codebase-architecture`は原版の`disable-model-invocation: true`とCodex向けの暗黙起動policyを保ち、明示呼出しのcommandとして使う。
+派生元の更新は自動では追随せず、必要な差分を読んで取り込むかを判断する。
+
+| Donor | Revision | License | 採用した内容 | 変更した内容 |
+|---|---|---|---|---|
+| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/engineering/codebase-design) | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | [MIT・著作権表示と許諾文](../../skills/codebase-design/skill/LICENSE)を同梱 | deep moduleの語彙、deletion test、公開interfaceでの検証、依存の性質によるtest、複数のinterface案の比較 | processやadapter数でなく、責務・隠す決定・権限・状態の寿命でseamを決める。意味のある既存testと実dependencyの検証を維持し、固定3案・3agentを課さない。日本語化し、来歴は実行手順から分離 |
+| [Matt Pocock improve-codebase-architecture](https://github.com/mattpocock/skills/tree/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/engineering/improve-codebase-architecture) | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | [MIT・著作権表示と許諾文](../../skills/improve-codebase-architecture/skill/LICENSE)を同梱 | 明示呼出し、探索の範囲決定、glossaryとADR、摩擦の問い、HTML report、選ばれた候補のgrillingとdomain model更新 | 重複していた設計基準を除き、統合・seam・test・interface案の判断を`codebase-design`へ統一。探索の委譲は独立性と費用で決め、図を測定値と扱わない。日本語化 |
+
 ## Custom Skillの採用条件
 
-候補ごとに、Skillなしの代表scenarioで不足を観測する。
-Skillありの同種scenarioで成果、routing、process、restraint、compositionを比較し、内容、reference、script、Skill自体を除いて結果が変わらなければ削除する。
+候補ごとに、観測した不足と既存ownerとの差を示し、変更の影響に応じた評価の範囲を[`skill-design`](../../skills/skill-design/skill/SKILL.md)の手順で選ぶ。
+内容、reference、script、Skill自体の不要性は、原因が未確定な部分だけを外して比較する。差を観測しなかったことと、不要と判定できる入力範囲と証拠があることを区別し、Skill全体が不要と判断できれば、作らない、既存ownerへ統合する、またはretireする。全節を順に外すablationは求めない。
 
 sourceの分類や作者名をruntime構造に使わない。
 custom Skillの詳細な知識は一段のreferenceへ分け、`SKILL.md`には発火後に必要なprocedureと打ち切り条件を置く。

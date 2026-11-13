@@ -5,12 +5,14 @@
 外部Skillもlocal Skillも、`dotfiles.skills.registry`の一つのentryとして登録する。
 clientは`dotfiles.skills.enabled`から選んだentryのsourceを配備するだけであり、供給元ごとのregistryや取得処理を持たない。
 Skillのsourceは固定したrepositoryから直接参照し、本文や資材を`skills/<id>/skill/`へ複製、変換せず、原名のIDを使う。
+利用者が明示した承認の範囲に含まれる保守派生だけは例外であり、[承認済みの保守派生](#承認済みの保守派生)に従う同じIDのlocal Skillとして扱う。
 
 ## 所有
 
 | 主体 | 所有するもの |
 |---|---|
 | Skillのowner repository | `SKILL.md`、reference、script、同梱資材 |
+| 承認済みの保守派生Skill | `skills/<id>/skill/`の本文・資材・LICENSEと、`module.nix`の依存宣言。来歴は[Skill portfolio](skills.md#custom-skillの来歴)に置く |
 | `flake.nix`と`flake.lock` | 外部sourceの取得先とrevisionの固定、`specialArgs.pluginSources`への受け渡し |
 | 採用を宣言するNix module | 採用ID、source directory、`requiresCapabilities`、`requiresSkills` |
 | `skills/plugins/module.nix` | 既存pluginの採用表と、表内のID衝突の拒否 |
@@ -92,6 +94,21 @@ clientやroutingが使うIDは維持され、本文と資材の供給元だけ�
 元に戻すときは差替定義を取り除くか、元の採用moduleが指すsourceへ明示的に戻す。
 外部Skillへの恒久切替で旧local本文が不要になった場合は、旧登録と本文を削除し、同IDの配備経路を二つ残さない。
 
+## 承認済みの保守派生
+
+外部Skillの本文を局所的に適応させる必要があり、利用者が適応の範囲を明示的に承認した場合だけ、その範囲に含まれるSkillを同じIDのlocal Skillとして保守派生に置ける。
+承認の範囲は、同じ設計判断に関係するSkillと呼出し側を含められ、範囲内で再承認は求めない。適応方法まで指定されていない修正依頼を、保守派生への切替えの承認とみなさない。配備物の直接編集や同IDの二重配備は行わない。
+
+| 項目 | 契約 |
+|---|---|
+| 正本 | `skills/<id>/module.nix`と`skill/`の一つだけ。`skills/plugins/module.nix`の採用表から該当項目を外し、同じ優先度で同IDを二つ宣言しない |
+| ID | 原名を保つ。`requiresSkills`の参照元、routing、clientの配備先は変えない |
+| 依存宣言 | 派生した本文、reference、scriptを取込ownerが読んで見直す。原版の宣言を引き継ぐ根拠にしない |
+| 来歴とlicense | 派生元のrevisionと変更内容は[Skill portfolio](skills.md#custom-skillの来歴)に記録する。上流licenseの著作権表示と許諾文は`skills/<id>/skill/LICENSE`に置き、sourceと配備物の両方に同梱する。来歴を実行手順へ混ぜない |
+| 更新 | 上流のflake input更新は派生へ自動で反映されない。必要な差分を読み、承認の範囲内で取り込む |
+
+外部Skillへ戻す場合は、local正本とLICENSEを削除し、採用表へ項目を戻して、同IDの配備経路を二つ残さない。
+
 ## 現在のplugin
 
 採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skillsの固定sourceを使う。
@@ -110,9 +127,9 @@ clientごとの`.claude/skills/`などはadapterの投影先であり、正本�
 同梱のClaude Code専用evaluatorは任意のconsumerであり、通常のSkill利用のCapability要件にはしない。
 別repositoryから標準を変えるときは、`environment-design`から作業checkoutの`skills/standard-update/SKILL.md`へ渡し、配備済みsourceを編集しない。
 
-Mattの`code-review`は`setup-matt-pocock-skills`を、`tdd`は`codebase-design`と`code-review`をSkill依存に持つ。
+Mattの`code-review`は`setup-matt-pocock-skills`を、`tdd`は`codebase-design`と`code-review`をSkill依存に持つ。`codebase-design`は承認済みの保守派生として、同じIDのlocal entryがその依存を満たす。
 `diagnosing-bugs`はbrowserを使わないbranchも持つためbrowser Capabilityへのhard依存を持たず、architecture探索を常に呼ぶ依存も置かない。
-`improve-codebase-architecture`は`codebase-design`、`domain-modeling`、`grilling`を、`grill-with-docs`は`grilling`と`domain-modeling`を、`grill-me`は`grilling`を使う。
+`improve-codebase-architecture`は`codebase-design`の判断を使う同じ承認範囲の保守派生であり、`codebase-design`、`domain-modeling`、`grilling`を使う。`grill-with-docs`は`grilling`と`domain-modeling`を、`grill-me`は`grilling`を使う。
 `to-spec`と`to-tickets`はtracker設定の`setup-matt-pocock-skills`を、`retro`は`writing-for-agents`を使う。
 raw `research`とPonytailは配備せず、調査と実装・reviewの原則を既存の自立した手順へ統合する。
 Googleの二Skillとcustom `browser-performance`だけをbrowser-diagnosticsでgateし、実行時にbrowser経路を選ぶ`browser-operation`とnative診断を別に保つ。
@@ -130,6 +147,7 @@ managed-artifact登録によりsourceと配備先の関係を維持し、対象�
 [`skills/checks.nix`](../../skills/checks.nix)の`skill-source-contract`は、sourceの直接登録、同IDのentry差替、依存metadataの切替、client共有sourceへの反映を検査する。
 不存在source、fileをsourceにした指定、directoryの`SKILL.md`、不正ID、未知の依存、metadata未指定、無指定の同ID衝突、競合する差替も拒否する。
 frontmatterとIDの不一致は、このcheckと`skill-frontmatter-contract`が検査する。
+承認済みの保守派生も最終registryの一entryとして同じcheckで検査し、供給元で分岐しない。
 sourceの検査は優先度を解決した最終registryに対して行い、不採用になった旧sourceを別経路で検査しない。
 
 ```sh

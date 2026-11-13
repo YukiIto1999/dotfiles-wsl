@@ -15,7 +15,7 @@ description: Routes changes to the agent working environment to their source own
 | architecture-standard | projectをまたいで人の開発者にも求める設計、実装、運用の規範と、`standard-apply`など標準の運用Skill | 作業checkoutの`skills/standard-update/SKILL.md` |
 | dotfiles-wslのagent能力 | AGENTS、local Skill、reference、script、subagent | `skill-design` |
 | dotfiles-wslの基盤 | 配備、hook、client設定、Capability、MCP、toolchain、外部sourceの採用表と版 | dotfilesの`docs/reference/change-map.md` |
-| upstream | Orcaなど外部repositoryが所有するSkillとtoolの中身 | owner repositoryへの提案。dotfilesは採用表と版だけを持つ |
+| upstream | Orcaなど外部repositoryが所有するSkillとtoolの中身 | owner repositoryへの提案。dotfilesは採用表と版だけを持つ。利用者が明示的に承認した適応の範囲に含まれる保守派生は、dotfiles-wslのagent能力として扱う |
 | 対象project | そのprojectだけの要件、契約、不変条件、標準からの逸脱 | projectが宣言する正本と決定の記録 |
 | memory | 訂正の理由、適用条件、明示的に記憶だけへ残す方針 | `memory` |
 
@@ -67,6 +67,7 @@ agentの方法は`skill-design`が選び、決定的な検査が必要と判断�
 - dotfiles-wslの基盤: change-mapが示す正本と検証入口へ、変更契約と根拠を渡し、反映したsourceと配備上の不足を受け取る。
 - upstream: owner repositoryへの提案として扱い、配備物を手元で書き換えない。
   dotfiles側の変更は採用表と版に限り、owner側の採否と反映revisionを配送へ引き継ぐ。
+  利用者が明示的に承認した適応は、その範囲のSkillと呼出し側をまとめてdotfiles-wslのagent能力へ渡す。`docs/architecture/repository-skills.md`の保守派生の契約に従い、範囲内の再承認や配備物の直接編集は行わない。
 - 対象project: projectが宣言する正本と決定の記録へ、project固有の契約、根拠と逸脱理由を渡し、記録した場所と未確定事項を受け取る。
 - memory: 利用可能な`memory`へ保存候補、一次source、適用条件、確定したscopeを渡し、保存判断と実際のterminal stateを受け取る。
   ownershipを再判断する依頼にせず、同Skillが棄却した候補を別の保存先へ回さない。

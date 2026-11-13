@@ -13,10 +13,11 @@ APIの有無、引数、返却値は現在の公開schemaで確認し、以下�
 |---|---|
 | 評価のidentity | 対象sourceのpathと版、評価版、iteration、scenario、trial、mode、対照か候補か |
 | 入力 | 利用者のtask、必要なsource bundle、制約、初期状態、許可された副作用 |
-| 判定 | criterionのID、critical、達成の証拠、holdoutの区分、反復回数、停止条件 |
+| 判定 | criterionのID、critical、達成の証拠、holdoutの有無、反復回数、追加実行の条件と上限、受入と停止条件 |
 | 環境 | 要求したmodelとthinking、実際に解決したmodel、policy、利用可能なtoolとSkill、preload |
 | 実行結果 | request、返却結果、成果物、自己申告、tool記録、error、truncation、artifactのlocator |
 | 比較条件 | 差にした一要素、揃えられなかった条件、測れない項目 |
+| 集計範囲 | 対象taskの開始と受入、親子agent、失敗と再試行、人の手直しの観測範囲 |
 
 holdout、採点専用のrubric、対照以外の候補、失敗台帳は実行者から隠す。
 native taskの子は親と`local://`のrootを共有するため、fileを渡さないだけで読めない状態になったと主張しない。
@@ -85,16 +86,20 @@ native taskの完了後に返ったscenarioごとの`SingleResult`があれば�
 |---|---|---|
 | 所要時間 | 完了した個別結果の`durationMs`、または計測区間を固定した親の実測clock | 未測定とする |
 | tool-call数 | 完全なtraceのtool-call entryを一件ずつ数えた値 | 未測定とする |
-| provider usage | 返却された`usage`の実fieldと意味 | fieldを作らない |
+| provider usage | 返却された`usage`の実fieldと意味。入力・出力・cache読取・cache作成は区別する | 未取得をゼロとせず、費用へ換算する場合は適用した料金と時点も示す |
 | 実model | `resolvedModelIdentity`、`resolvedModel`、`resolvedThinkingLevel`、fallback情報など返却された値 | 要求値と実際の値を区別する |
 | 再判断の回数 | 実行者の自己申告と理由 | 未申告とする |
 | 発火 | preloadされていない対象本文を実行記録で読み込んだ証拠 | 未確認とする |
+| 再試行と手直し | 完全な実行記録の失敗・再実行、受入までに観測した人の修正 | 未観測とする |
 
 tool-call数にはRead、Grep、失敗した呼出しも含め、並列wrapperの数でなく個々の呼出しを同じ規則で数える。
 traceが部分的なら見えている件数を下限と表示し、完全な操作数として比較しない。
 `history://<id>`の簡略表示に全tool-callがあるとは限らないため、数えるときは完全な保存traceを使う。
 model request数、token数、自己申告の判断回数をtool-call数へ置き換えない。
 親のclockを使う場合はqueue、起動、tool待ちを含むwall-clockとして名前を付け、runtime metadataの時間と混ぜない。
+親子agentの利用量が重複集計済みか個別かを確かめ、片側だけの時間やtokenをtask全体として比較しない。
+成功した最後の試行だけでなく、受入までに発生した失敗、再試行、調整を同じ範囲で含める。
+cacheを含む利用量の内訳が異なる場合、コンテキスト長やtoken総数だけで費用の優劣を決めない。
 
 成果物、自己申告、`agent://<id>`の全出力、必要な保存traceを結び付け、criticalの判定ごとに証拠を示す。
 Causeは原因仮説として扱い、外から確認できるIssueと分ける。

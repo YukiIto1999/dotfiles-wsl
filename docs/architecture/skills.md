@@ -113,9 +113,9 @@ browserが必要なbranchだけ、その環境で利用可能な専門Skillへ�
 
 | 資料 | この環境で使う判断と所有者 | 今回採用しないものと理由 |
 |---|---|---|
-| [E2Eテスト大全](https://blog.kuniwak.com/entry/e2ebok) | テストリストの誤実装と公開境界から検証層を選び、実画面の業務結果は既存の`browser-operation`で確かめる | 独自のテスト分類、探索runner、ケース連鎖の共通導入。状態モデルや独立性は対象projectの契約に依存し、全taskへ要求する根拠がない |
-| [ISUCON2026の当日記録](https://zenn.dev/luvtechno/articles/isucon2026-competition-day) | 仮説と実測を区別する診断は既存の`diagnosing-bugs`、変更の効果の比較は`skill-design`を使う | 時間で起動する監査hookと競技固有の最適化。記事の監査提案は改善を保証せず、検査の縮小や得点最大化は一般の業務契約を保証しない |
-| [Harness Designの比較研究](https://arxiv.org/html/2609.20804v1) | 条件を揃えた比較と要素を外す評価は既存の`skill-design`で行い、成立確認と改善量を区別する | bash-onlyへの切替とコンテキスト再取得機構の撤去。評価したmodel・課題・設定に依存し、tool比較は状態管理と診断も含む変更で、この環境の個別機構の不要性を示さない |
+| [E2Eテスト大全](https://blog.kuniwak.com/entry/e2ebok) | 誤実装と公開境界から検証層を選ぶ。UIの実描画と全構成の結合を区別し、非同期処理は契約上の観測時点で判定する。検査割当は現行標準、実画面の業務結果は`browser-operation`が所有する | 独自の分類、探索runner、ケース連鎖の共通導入。状態モデルと結合範囲は対象projectの保証から選ぶ |
+| [ISUCON2026の準備記録](https://zenn.dev/luvtechno/articles/isucon2026-preparation)・[当日記録](https://zenn.dev/luvtechno/articles/isucon2026-competition-day) | 安全・隔離・復旧を残し、観測した失敗に関係しない手順と記録を減らす。診断は`diagnosing-bugs`、Skillの変更に対応する評価は`skill-design`へ渡す | 時間だけで起動する監査hook、継続通知の反復、競技得点を一般の成果品質とみなすこと。モデルや環境を同時に変えた成績を個別機構の効果にしない |
+| [Harness Designの比較研究](https://arxiv.org/html/2609.20804v1) | 条件を揃え、効果の原因が未確定な要素を外して比較する。Skillの評価は`skill-design`で変更の影響に合わせ、成立確認と改善量を区別する | bash-onlyへの一律切替、計画と記憶の一括撤去。評価したmodel・課題・設定に依存し、tool比較は状態管理と診断も含む変更で、個別機構の不要性を示さない |
 
 計画手順を明示したJavaScriptの累計履歴とPythonのSQLite一括更新では、数値境界を関数で、保存と取消を実DBとCLIで検査する計画から実装までを確認した。
 この合成課題の成立を、手順なしとの改善量、自然な呼出し、別実行者間の引渡し、長時間作業での停滞対策の有効性へ一般化しない。
@@ -213,7 +213,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `dependency-analysis` | nodeとedgeを固定して依存の事実を作る判断 | 未知の概念と関係だけ`repository-research`へ渡し、設計と診断を別の仕事として扱う。 |
 | `impact-analysis` | 一つの変更から契約と利用箇所と運用への影響を追う判断 | 不足する調査を`repository-research`へ渡し、設計や診断へ影響の証拠を引き継ぐ。 |
 | `ja-writing` | 読み手・状況・媒体・語り口に応じた日本語の内容選択、構成、展開と推敲 | 成果物担当から事実と専用形式を引き継ぎ、素材の選択、構成、執筆と通読、意味の照合を一つの手順で行う。事実調査や別の構成作成は重ねない。 |
-| `skill-design` | Skillの要否、責務と導線、実行結果に基づく採否の判断 | 固定したcriteriaとfresh実行で改訂し、規範や配備先の不足だけを`environment-design`へ渡す。 |
+| `skill-design` | Skillの要否、責務と導線、実行結果に基づく採否の判断 | 変更の影響から構造確認とfresh実行を選び、固定したcriticalと対照で評価する。規範や配備先の不足だけを`environment-design`へ渡す。 |
 | `ui-design` | 実contentと既存design systemに基づく実装前briefの判断 | 未知の構造は`repository-research`、必要な実surfaceの観測は`browser-operation`、実装構造は`codebase-design`へ渡す。 |
 | `security-review` | 脅威モデリングから候補の検証と攻撃経路へ進む判断 | 不足する証拠だけ調査や観測のSkillへ渡し、security判断とphaseの進行を引き取る。 |
 
@@ -377,19 +377,25 @@ fan-in、fan-out、cycle、transitive reachabilityは構造の事実であり、
 
 ### skill-designのdonor
 
-`skill-design`はempiricalな実行と振り返りを中心とする独立したOMP Skillへ置き換えた。
-Iteration 0、固定したcritical、fresh実行、Understanding / Planning / Execution / Formattingの診断、Issue / Cause / General Fix Rule、失敗台帳、一テーマの反復、holdoutと停止条件を一つの手順にした。
-旧版のmechanism gate、no-skill対照、natural trigger、near-miss、composition、restraint、ablation、retireは別の評価loopにせず、その手順へ組み込んだ。
+`skill-design`は、変更が影響する判断と保証に評価を対応させる。
+表記や参照の修正は構造確認で閉じ、trigger・判断・引渡し・停止条件の変更は対応する代表例と境界例を実行する。
+routingにはnear-miss、引渡しにはcompositionを割り当て、反復回数と追加条件は実行前に決める。
+全節のablationや定型のphase報告を必須にせず、不要性や原因が未確定な部分を比較し、詰まった箇所だけ診断する。
+固定したcritical、未使用のholdoutによる一般化の確認、対照と未測定の区別は維持する。
 
 共通手順は[SKILL.md](../../skills/skill-design/skill/SKILL.md)が持ち、評価の起動時だけ[fresh executionの契約](../../skills/skill-design/skill/references/fresh-execution.md)を読む。
 代表scenarioは[`agents/fixtures/skill-design-skill.json`](../../agents/fixtures/skill-design-skill.json)に置き、Skillを作らない判断と近接ownerへ渡す判断も成功として扱う。
 tool-freeなstateless completionのmethod-onlyと、実toolや自然発火を観測するfull-environmentを区別し、候補を除いた初期環境を作れない場合のbaselineは未測定とする。
 top-levelがdispatchと評価を所有し、workerは一つのscenarioの成果と診断を返すため、子から再帰的に評価者を起動しない。
 sourceの完成、形式validatorの成功、実測した発火と採否を別の状態として報告する。
+効率は受入までの親子agent、失敗と再試行、人の手直しの観測範囲を揃える。
+取得できた入力・出力・cache読取・cache作成を区別し、短いコンテキストや最後の成功試行だけで費用の改善を判断しない。
+この観点は[共有された環境論述](https://chatgpt.com/share/6af69d99-15d0-83ee-9414-1cf053326137)を材料とし、cacheの再作成は[Anthropicの実装説明](https://platform.claude.com/cookbook/tool-use-context-engineering-context-engineering-tools)、観測と対照実験は[ARC-AGI-3の実践報告](https://www.kaggle.com/competitions/arc-prize-2026-arc-agi-3/discussion/755795)で適用条件を確認した。
+生成された論述や競技の報告を、この環境での改善量の実測値にはしない。
 
 | Donor | Revision / date | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|---|
-| [empirical-prompt-tuning](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/empirical-prompt-tuning/SKILL.md) | `62f580819410cb1d398e4d7f234bbd0aad1c1a15` | 個別licenseなし。[root README](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/README.md#license)のMIT default宣言。本文は非転載 | Iteration 0、phase別の詰まり、固定critical、構造化した振り返り、失敗台帳、一テーマの反復、holdoutと停止 | raw本文、Claude Task専用contract、未取得usageの推定、自己採点の転記、作者の効率閾値の普遍化、別eval owner |
+| [empirical-prompt-tuning](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/empirical-prompt-tuning/SKILL.md) | `62f580819410cb1d398e4d7f234bbd0aad1c1a15` | 個別licenseなし。[root README](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/README.md#license)のMIT default宣言。本文は非転載 | Iteration 0、詰まった箇所と原因仮説の区別、固定critical、必要な振り返り、失敗台帳、一テーマの反復と停止 | raw本文、Claude Task専用contract、未取得usageの推定、自己採点の転記、一律の反復回数と全節ablation、成功phaseの定型報告、別eval owner |
 | [optimizing-descriptions](https://github.com/mizchi/skills/blob/62f580819410cb1d398e4d7f234bbd0aad1c1a15/optimizing-descriptions/SKILL.md)、[Agent Skills guidance](https://agentskills.io/skill-creation/optimizing-descriptions) | 固定revision、公式guidanceは2026-10-07取得 | donorはroot READMEのMIT default宣言。guidance本文は非転載 | 意図に基づくpositiveとnear-miss、freshな複数trial、trainとholdoutの分離、descriptionだけを変える枝 | 失敗queryの単語の列挙、見たholdoutを未使用と称すること、tool-free選択を実Skill discoveryと称すること |
 | [Codex skills](https://developers.openai.com/codex/skills/)、[Anthropic best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices)、[agent eval guidance](https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents) | 2026-10-07取得 | 公式本文は非転載 | triggerと本文の整合、現実的なtask、安定した環境、成果と実行記録を照合するgrader | 形式検査や自己申告だけの能力判定、provider専用harnessとviewer |
 | [Matt writing-for-agents](https://github.com/mattpocock/skills/blob/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/productivity/writing-for-agents/SKILL.md)、[Skill mechanics](https://github.com/mattpocock/skills/blob/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/productivity/writing-for-agents/SKILL-MECHANICS.md) | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | MIT | packageを書く枝でのcontext pointer、情報階層、明確な完了条件、削減 | 全構造判断や評価への必須preload、別のprompt改善loop |

@@ -17,6 +17,23 @@
       }
     },
     {
+      "id": "ordinary-change-keeps-the-design-system",
+      "set": "development",
+      "environment": "An existing screen and its design system are readable. No evaluation, audit or redesign is requested.",
+      "prompt": "既存の請求一覧に期間での絞り込みを加えます。既存の画面とdesign systemに合わせて、UI briefを作ってください。",
+      "expectedSkills": [
+        "ui-design"
+      ],
+      "expected": {
+        "inheritsTheExistingDesignSystemAsTheDefault": true,
+        "extendsOnlyConfirmedGaps": true,
+        "doesNotWidenIntoAnEvaluationOrRedesignOfTheScreen": true
+      },
+      "critical": [
+        "doesNotWidenIntoAnEvaluationOrRedesignOfTheScreen"
+      ]
+    },
+    {
       "id": "approval-interaction",
       "prompt": "権限申請を確認し、差分を理解して承認または差戻しするUIを設計してください。誤操作の予防、処理中、成功、競合、失敗からの回復を利用者にどう見せるかまで決めてください。",
       "expectedSkills": [
@@ -74,10 +91,69 @@
     },
     {
       "id": "rendered-ui-audit",
+      "set": "development",
+      "environment": "A product runs on localhost. A real browser route, an approved test account and fixture data are exposed. The accessibility specialist is available.",
       "prompt": "起動中の画面をbrowserで操作し、情報階層、操作性、responsive、accessibility、feedback、recoveryの問題を証拠付きで監査してください。再設計はまだしません。",
       "expectedSkills": ["browser-operation", "a11y-debugging"],
       "mustNotTrigger": [
         "ui-design"
+      ],
+      "expected": {
+        "gathersEvidenceByOperatingTheRealUi": true,
+        "separatesObservedBugsDesignHypothesesAndSpecificationGaps": true,
+        "reportsCoverageAndUnverifiedConditions": true,
+        "handsAccessibilityToTheSpecialistWithoutClaimingConformance": true,
+        "doesNotProduceARedesignOrVisualDirection": true
+      },
+      "critical": [
+        "gathersEvidenceByOperatingTheRealUi",
+        "separatesObservedBugsDesignHypothesesAndSpecificationGaps",
+        "doesNotProduceARedesignOrVisualDirection"
+      ]
+    },
+    {
+      "id": "evidence-to-redesign",
+      "set": "development",
+      "environment": "The prompt carries a prior browser audit report: observed problems with screenshot and snapshot locators, separated into bugs, design hypotheses and specification gaps, plus coverage and untested conditions. The repository's design system is readable. Source documents one shared-library dependency of the date picker; nothing documents a constraint on the rest of the system. No browser route is exposed.",
+      "prompt": "前回のbrowser監査の結果を渡します。これを根拠に、既存の予約管理画面を再設計してください。情報構造、visual、interaction、体験を評価し、既存design systemを変えるべき点があれば示してください。再度の画面操作は不要です。production codeは書かないでください。",
+      "expectedSkills": [
+        "ui-design"
+      ],
+      "mustNotTrigger": [
+        "browser-operation"
+      ],
+      "expected": {
+        "usesTheSuppliedEvidenceWithoutReopeningTheBrowser": true,
+        "evaluatesInformationStructureVisualInteractionAndExperienceSeparately": true,
+        "keepsObservedFactsDesignHypothesesAndUnknownRequirementsApart": true,
+        "treatsTheDesignSystemAsRevisableExceptSourcedConstraints": true,
+        "comparesKeepingExtendingAndRevisingByPurposeFitAndCost": true,
+        "includesALocalFixAmongTheAlternatives": true,
+        "doesNotCertifyAccessibilityDiagnoseCausesOrWriteCode": true
+      },
+      "critical": [
+        "usesTheSuppliedEvidenceWithoutReopeningTheBrowser",
+        "keepsObservedFactsDesignHypothesesAndUnknownRequirementsApart",
+        "treatsTheDesignSystemAsRevisableExceptSourcedConstraints"
+      ]
+    },
+    {
+      "id": "audit-then-redesign",
+      "set": "development",
+      "environment": "The top-level agent exposes a real browser route and an approved test account. A delegated designer has no browser route of its own. The requirements document covers booking and cancellation only.",
+      "prompt": "起動中のこの予約サービスを実際に操作して問題を洗い出し、その結果に基づいて再設計案まで作ってください。",
+      "expectedSkills": ["browser-operation", "ui-design"],
+      "expected": {
+        "collectsObservationsThroughTheBrowserOwnerBeforeAnyDesignJudgement": true,
+        "passesClassifiedObservationsLocatorsAndCoverageToTheDesignOwner": true,
+        "designOwnerDoesNotOperateTheBrowserOrRepeatTheAudit": true,
+        "carriesUnverifiedAreasAndSpecificationGapsIntoTheBrief": true,
+        "doesNotDuplicateTheJudgementAcrossBothSkills": true
+      },
+      "critical": [
+        "collectsObservationsThroughTheBrowserOwnerBeforeAnyDesignJudgement",
+        "passesClassifiedObservationsLocatorsAndCoverageToTheDesignOwner",
+        "designOwnerDoesNotOperateTheBrowserOrRepeatTheAudit"
       ]
     },
     {

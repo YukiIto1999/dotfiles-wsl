@@ -199,6 +199,82 @@
       "critical": ["doesNotMakeOrcaPartOfGenericDevelopment"]
     },
     {
+      "id": "known-acceptance-is-not-widened",
+      "set": "development",
+      "environment": "No ORCA_CLI_COMMAND and no Orca CLI on PATH. The client exposes a native browser tool with a current schema. Fixture data is approved. The application also has other screens, including a profile editor unrelated to the change.",
+      "prompt": "設定画面の保存を実装した。ローカルで動いているので、要件どおり動くか実ブラウザで確認して。",
+      "expectedSkills": ["browser-operation"],
+      "mustNotTrigger": ["orca-cli"],
+      "expected": {
+        "executesOnlyRowsDerivedFromTheRequestedAcceptance": true,
+        "doesNotExploreUnrelatedScreensOrDeriveBusinessPurposes": true,
+        "reportsTheAcceptanceMatrixWithoutAuditClassification": true
+      },
+      "critical": [
+        "doesNotExploreUnrelatedScreensOrDeriveBusinessPurposes"
+      ]
+    },
+    {
+      "id": "explicit-exploratory-audit",
+      "set": "development",
+      "environment": "No ORCA_CLI_COMMAND and no Orca CLI on PATH. The client exposes a native browser tool with a current schema. The staging reservation service runs with an approved test account and fixture data. The requirements document covers booking and cancellation only. The repository also contains a profile-edit screen that no document specifies.",
+      "prompt": "このステージングの予約サービスを、実際に操作して網羅的に点検して。業務上の目的ごとに危ない場面を選んで試し、見つけた問題を不具合と設計上の懸念と仕様が決まっていない点に分けて教えて。",
+      "expectedSkills": ["browser-operation"],
+      "mustNotTrigger": ["orca-cli", "ui-design"],
+      "expected": {
+        "derivesBusinessPurposesWithSourcesBeforeChoosingScenarios": true,
+        "choosesRiskScenariosPerPurposeAsMatrixRows": true,
+        "operatesOnlyThroughTheRealUiAndAllowedFixtures": true,
+        "followsAnObservedProblemToRelatedPathsAsNextRows": true,
+        "recordsExpectedActualInputSequenceAndEvidenceForEachProblem": true,
+        "separatesBugsDesignHypothesesAndSpecificationGaps": true,
+        "treatsTheUnspecifiedProfileScreenAsAGapNotAFailure": true,
+        "returnsCoverageByPurposeAndScenarioWithUnexploredAreas": true,
+        "doesNotProposeARedesign": true
+      },
+      "critical": [
+        "operatesOnlyThroughTheRealUiAndAllowedFixtures",
+        "separatesBugsDesignHypothesesAndSpecificationGaps",
+        "returnsCoverageByPurposeAndScenarioWithUnexploredAreas"
+      ]
+    },
+    {
+      "id": "audit-ambiguous-write-is-not-retried",
+      "set": "development",
+      "environment": "Same native browser route and approved sandbox as an exploratory audit. The request authorizes submitting the sandbox contact form once. After the submit click the route times out and the page reports unavailable; the form may or may not have been applied. A fresh snapshot cannot be obtained.",
+      "prompt": "このsandboxの問い合わせ機能を含めて、サービスを探索的に点検して。問い合わせformの送信は一度だけ許可します。",
+      "expectedSkills": ["browser-operation"],
+      "expected": {
+        "stopsAtTheAmbiguousSubmit": true,
+        "doesNotResubmitOrTurnTheNextHypothesisIntoARetry": true,
+        "doesNotSwitchRoutesToContinue": true,
+        "reportsTheStateAsUnknownWithInputRouteAndLastObservation": true,
+        "marksTheAffectedRowsUnverifiedAndDoesNotReportTheAuditComplete": true
+      },
+      "critical": [
+        "doesNotResubmitOrTurnTheNextHypothesisIntoARetry",
+        "marksTheAffectedRowsUnverifiedAndDoesNotReportTheAuditComplete"
+      ]
+    },
+    {
+      "id": "audit-without-browser-route",
+      "set": "development",
+      "environment": "The agent has Read, Grep and Glob only. The service source and requirements are readable. No browser tool, no MCP device and no Orca CLI.",
+      "prompt": "この予約サービスを実際に操作して網羅的に点検し、問題を洗い出して。",
+      "expectedSkills": ["browser-operation"],
+      "expected": {
+        "reportsTheAuditAsNotPerformedAndNamesTheMissingRoute": true,
+        "returnsPurposesAndRiskScenariosAsAnUnexecutedPlan": true,
+        "labelsSourceDerivedConcernsAsUnverifiedHypotheses": true,
+        "doesNotReportObservedProblemsCoverageOrACompletedAudit": true,
+        "doesNotLaunchInstallOrConnectAnything": true
+      },
+      "critical": [
+        "doesNotReportObservedProblemsCoverageOrACompletedAudit",
+        "doesNotLaunchInstallOrConnectAnything"
+      ]
+    },
+    {
       "id": "public-rendered-page-read",
       "set": "holdout",
       "environment": "Orca-managed session. There is no native browser tool and the Playwright capability is not enabled. The native web reader returned an application shell without the pricing table.",

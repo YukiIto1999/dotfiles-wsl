@@ -45,7 +45,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 共通policyのCapability入口表は両方から導き、toolの入口を作るためだけにSkill全体を必須依存へ変えない。
 
 MCP専用の薄いwrapperは置かない。
-`repository-research`は探索経路とsource検証、`browser-operation`は要求と変更pathから実画面と業務結果へ至る受入判断、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。
+`repository-research`は探索経路とsource検証、`browser-operation`は実画面と業務結果の受入確認および明示された探索監査、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。
 SkillとCapabilityの対応は各registry entryの`requiresCapabilities`と`optionalCapabilities`(localは各`module.nix`、外部は[`skills/plugins/module.nix`](../../skills/plugins/module.nix))、subagentごとのSkillのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
 
 ## 直接採用
@@ -160,8 +160,9 @@ architectの`explainer`と`article-reproduction`、implementerの`article-reprod
 raw sourceの採用は`mizchi/explainer`に限り、donorとして調べた`mizchi/skills`をwhole sourceの配備対象にはしない。
 外部scriptの実行入口と制約は[toolingの外部CLI](../reference/tooling.md#外部cli)が持つ。
 
-`browser-operation`は要求と変更pathから重要な実経路、状態遷移、contentと表示条件を選び、fresh DOM操作、実際に読んだrendered screenshot、業務結果を対応させる。
-関連する拒否、回復、契約が必要とする再取得までclaimごとに閉じ、未確認条件と証拠を返す。
+`browser-operation`は要求と変更pathから実経路、状態遷移、contentと表示条件を選び、fresh DOM操作、実際に読んだrendered screenshot、業務結果を対応させる。
+探索監査を明示された場合は、業務目的とriskから同じmatrixを作り、観測から次の仮説を選ぶ。既知経路の受入依頼を全面監査へ広げず、実際の不具合、設計上の仮説、仕様不足を分ける。
+関連する拒否、回復、契約が必要とする再取得までclaimごとに閉じ、coverageと未確認条件を返す。設計評価・再設計が依頼に含まれる場合は、証拠を`ui-design`へ渡す。
 永久testの作成や専門監査は別ownerとし、Orca、clientの標準browser tool、`browser-automation`のうち実行可能な経路を選ぶ。
 Orcaと`browser-automation`は配備の必須条件にせず、経路がない場合もSkillを残して未確認の条件を返す。
 browser-diagnosticsの入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面a11yの`a11y-debugging`とする。
@@ -218,12 +219,12 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `codebase-design` | moduleの責務、隠す決定、権限、状態の寿命からinterfaceとseamを決める判断 | 既存の依存の事実は`dependency-analysis`、一つの変更の影響は`impact-analysis`、故障の診断は`diagnosing-bugs`へ渡す。別のinterface案は、必要な独立した問いごとの視点で作って比べる。 |
 | `ja-writing` | 読み手・状況・媒体・語り口に応じた日本語の内容選択、構成、展開と推敲 | 成果物担当から事実と専用形式を引き継ぎ、素材の選択、構成、執筆と通読、意味の照合を一つの手順で行う。事実調査や別の構成作成は重ねない。 |
 | `skill-design` | Skillの要否、責務と導線、実行結果に基づく採否の判断 | 変更の影響から構造確認とfresh実行を選び、固定したcriticalと対照で評価する。規範や配備先の不足だけを`environment-design`へ渡す。 |
-| `ui-design` | 実contentと既存design systemに基づく実装前briefの判断 | 未知の構造は`repository-research`、必要な実surfaceの観測は`browser-operation`、実装構造は`codebase-design`へ渡す。 |
+| `ui-design` | 利用者の仕事と実contentに基づく実装前brief、および観測証拠に基づく既存UIの設計評価・再設計 | 必要な実surfaceの観測は`browser-operation`へ渡し、受け取った証拠を再取得しない。通常は既存design systemを活用し、明示された再設計では実制約と変更可能な体系を分ける。実装構造は`codebase-design`へ渡す。 |
 | `security-review` | 脅威モデリングから候補の検証と攻撃経路へ進む判断 | 不足する証拠だけ調査や観測のSkillへ渡し、security判断とphaseの進行を引き取る。 |
 
 | 作業手順 | 公開入口 | 合成と引継ぎ |
 |---|---|---|
-| `browser-operation` | Orca内蔵browser、clientの標準browser tool、`browser-automation`のPlaywright MCP | 要求と変更pathから実画面と業務結果のmatrixを作り、実行した経路、証拠、未確認条件を返す。経路の選択と切替条件はSkillが所有し、専門監査や原因診断は別の依頼として渡す。 |
+| `browser-operation` | Orca内蔵browser、clientの標準browser tool、`browser-automation`のPlaywright MCP | 既知経路の受入、または明示された目的からの探索監査を、実画面と業務結果で閉じる。設計判断が必要なら証拠とcoverageを`ui-design`へ、専門監査や原因診断は該当担当へ渡す。経路と安全な停止はこのSkillが所有する。 |
 | `browser-performance` | `browser-diagnostics`のChrome DevTools MCP | 固定した測定条件と観測をLCPの専門Skillや`heap-analysis`へ渡し、戻った証拠から診断を続ける。 |
 | `heap-analysis` | `heap-diagnostics`の公開MemLab MCP | browserのcaptureだけを`browser-performance`へ委譲し、返ったcaller所有のprivate fileを解析する。 |
 | `github-operations` | `github-resources`のaccount別GitHub MCP | accountと対象resourceを固定し、write前後の状態を確認する。 |
@@ -245,7 +246,7 @@ containerを背後に持つMCPも公開Capabilityから使い、Skillからprovi
 採用した外部原版は変更しない。承認済みの保守派生は原版の変更ではなく、同じIDのlocal正本への切替えとして扱う。
 phase referenceは同じdirectoryから解決し、別Skillのfrontmatterや特定clientだけのreport directiveを持たない。
 browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置く。
-browser操作の経路選択と安全な停止は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
+browser操作の経路選択、安全な停止、受入と探索監査の境界は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
 外部toolの統合は[`agents/fixtures/environment-integration-skill.json`](../../agents/fixtures/environment-integration-skill.json)の代表scenarioで、callerと実装、共通配備と現状調査を区別して評価する。
 環境改善の所有者選択は[`agents/fixtures/environment-design-skill.json`](../../agents/fixtures/environment-design-skill.json)で、既存指示の衝突、規律の重複追加、証拠不足の枝だけを保留する判断を評価する。
 これらのfixtureは入力と期待する判断を定めるものであり、評価日時や成功を記録するものではない。実測結果は、使ったfixtureの版と実行証拠を結んだ`work/`の評価記録に残す。
@@ -418,20 +419,21 @@ sourceの完成、形式validatorの成功、実測した発火と採否を別�
 | [Anthropic frontend-design](https://github.com/anthropics/claude-plugins-official/blob/ae21a9367949f92df4e31231d7efe43eaa08207c/plugins/frontend-design/skills/frontend-design/SKILL.md) | Apache-2.0 | purpose、audience、制約から一貫した方向を導くこと | 極端なaesthetic、特徴的font、motion、unexpected layout、code実装、毎回異なる外観の強制 |
 | [Addy Osmani frontend-ui-engineering](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/frontend-ui-engineering/SKILL.md) | MIT | design system、content-first layout、semantic token、意味のある状態 | React構造、固定breakpoint、行数threshold、実装workflow |
 | [WondelAI design-everyday-things](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/design-everyday-things/SKILL.md)、[microinteractions](https://github.com/wondelai/skills/blob/6bac1534f9f256a56fc2b4dd0e70b9a692758966/microinteractions/SKILL.md) | MIT | affordance、signifier、mapping、constraint、feedbackと、trigger、rule、feedback、recovery | score、固定時間、signature moment、review severity |
-| [Anthropic frontend-design](https://github.com/anthropics/skills/blob/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/frontend-design/SKILL.md) | [sourceのcomplete terms](https://github.com/anthropics/skills/blob/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/frontend-design/LICENSE.txt) | 実contentとproductの語彙、焦点を一箇所へ集めること、copyと状態の一貫性、briefとの比較 | 毎回異なるlook、固定palette、type scale、character count、実装workflow、記憶にある好みだけでdirectionを変えること |
+| [Anthropic frontend-design](https://github.com/anthropics/skills/blob/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/frontend-design/SKILL.md) | [sourceのcomplete terms](https://github.com/anthropics/skills/blob/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/frontend-design/LICENSE.txt) | 実contentとproductの語彙、copyと状態の一貫性、briefとの比較 | 個性を一箇所へ集中する一律の処方、毎回異なるlook、固定palette、type scale、character count、実装workflow、記憶にある好みだけでdirectionを変えること |
 | [Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/command.md) | [MIT](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/LICENSE) | native semantics、focus、form、content増幅、locale、motion、asset寸法をUI briefと指定axisのreviewで確認すること | 全listの固定virtualization閾値、全font preload、固定case、全stateのURL同期、概算やstatic codeから実画面合格を宣言すること |
 
 
-frontend-design原版は配備せず、前提が合う方法だけを実装前の`ui-design`へ統合する。
-承認済みbriefと既存design systemが、特徴的なlookやdonorの好みより優先する。
+frontend-design原版は配備せず、前提が合う方法だけを`ui-design`へ統合する。
+利用者の目的、承認済みbrief、守るべき業務・安全・accessibility要件が、特徴的なlookやdonorの好みより優先する。明示された再設計では既存design systemも評価対象であり、維持自体を目的にしない。
 frontend実装やreviewのためだけの同役割Skillは増やさない。
 
 代表scenarioは[`agents/fixtures/ui-design-skill.json`](../../agents/fixtures/ui-design-skill.json)に置く。
 
 
-### browser-operationの実画面受入
+### browser-operationの実画面受入と探索監査
 
 要求と変更path、状態遷移、表示条件、画像と業務結果のmatrixは、利用者が報告した実画面確認の不足を埋めるcustomの設計である。
+利用者が提示した総合監査・UI再設計の依頼文から、業務目的を起点にした探索と、情報・視覚・操作・体験の独立評価を既存の担当へ統合した。観測の担当は`browser-operation`、設計判断は`ui-design`とし、別の総合監査Skillや常時監査は設けない。
 以下のdonorが完全な受入方法を提供するとしたものではなく、永久test suiteやCIのownerも増やさない。
 
 | Donor | License | 採用した内容 | 採らなかった内容 |

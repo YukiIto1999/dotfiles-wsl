@@ -1,6 +1,6 @@
 ---
 name: browser-operation
-description: Executes a specified user task or verifies a known implemented surface in a real browser through the route the session actually offers, namely Orca's embedded browser in an Orca project, a native browser tool, or the configured Playwright capability. For acceptance verification, derives material scenarios, transitions, content and viewports from requirements and changed paths, inspects rendered screenshots, and checks user-visible business results, rejection, recovery and persistence with fresh DOM actions. Returns a claim-to-evidence matrix, the route used, and untested conditions. Does not design UI, author permanent test suites, audit accessibility or security, measure performance, diagnose root causes, or make unspecified changes in a real account.
+description: Operate a real browser to complete a user task, verify implemented behavior, or conduct an explicitly requested exploratory product audit. Check rendered appearance and business outcomes, including material rejection, recovery and persistence. Report evidence, coverage and unknowns; distinguish observed defects, design hypotheses and missing requirements. Not for UI design, permanent test suites, specialist accessibility/security audits, performance measurement or root-cause diagnosis.
 ---
 
 # 実画面と業務結果を対にして確かめる
@@ -12,6 +12,7 @@ DOMに文言があること、clickが成功したこと、HTTPが200である�
 実装のverificationでは、以下のmatrixを作り、選んだ経路を実行し、各主張を`pass`・`fail`・`未確認`で閉じる。
 検証に必要なscenarioの選択はこのSkillが所有し、利用者に画面確認や異常系を一つずつ指示させない。
 受入の判断、matrix、証拠、停止条件は実行routeによって変わらない。
+利用者が探索的・網羅的な監査を明示した場合だけ、「探索監査」で同じmatrixを目的から広げる。
 専門監査、性能計測、原因診断だけの依頼は、matrixや操作routeを選ぶ前に「境界とhandoff」の担当へ渡す。
 Orcaの有無で専門Capabilityを置き換えたり、専門作業を止めたりしない。
 
@@ -24,7 +25,7 @@ pathは検証範囲の根拠であって、期待値の正本ではない。
 
 URL、起動方法、test data、表示条件はrepositoryと現在のbrowser状態から解決する。
 確定できない期待結果は仕様不足、到達できない状態は前提不足として区別し、判定可能な行は続ける。
-既知surfaceの受入を、未知のproduct全体の探索へ広げない。
+指定taskと既知surfaceの受入は、「探索監査」が明示されない限り、未知のproduct全体の探索へ広げない。
 
 実行前に必要な行だけを次の形で固定する。
 行は操作回数でなく、一つの観測可能な保証を表す。
@@ -53,6 +54,41 @@ URL、起動方法、test data、表示条件はrepositoryと現在のbrowser状
 明示条件を代表例で省略したり、scenario数、全viewport、点数をcoverageの目標にしたりしない。
 幅のresizeだけを実端末、touch、software keyboard、別browserの確認として数えない。
 特定taskの実行依頼には、結果に不要な拒否操作やviewport変更を足さない。
+
+### 探索監査
+
+利用者が、実際に動くproductまたは指定範囲の探索的・網羅的な監査、点検、問題の洗い出しを明示した場合だけ使う。
+受入verificationや指定taskの依頼、変更後の確認は、この探索へ広げない。
+別のworkflowではなく、上のmatrixを既知の要求でなく目的から作る入口であり、routeと操作、証拠、外部結果の規則は2から5をそのまま使う。
+最初に対象environment、URL、許可されたaccountとdata、副作用の範囲、探索の上限を固定する。
+
+1. 目的を固定する。
+   productが利用者と事業のために果たす目的を、要求、repositoryの仕様、画面の文言、利用者の説明から特定し、出典を付ける。
+   出典がない目的は仮説と明記する。
+   画面やnavigationの探索は目的を知る手掛かりにし、部品と遷移の列挙だけで目的やcoverageを決めない。
+2. 目的ごとにrisk scenarioを選ぶ。
+   失敗すると目的の達成や事業の結果を損なう経路、状態遷移、入力、権限、content、viewportを、上のmatrixの行にする。
+   期待結果を決める要求がある行はそれを出典にし、ない行は期待を仮説と明記する。
+   選ばなかったmaterialな条件は理由とともに残す。
+3. 実際に操作し、各行を直後に照合する。
+   期待が仮説の行は`pass`・`fail`でなく観測した事実として記録し、次の区分へ入れる。
+4. 観測した問題から次の仮説を作る。
+   問題や予想外の挙動を観測したら、期待と実際、初期状態、入力列、viewport、前後のsnapshotと画像を残す。
+   同じ原因が及び得る関連経路、同種の別箇所、隣接する未観測の状態を次の行にする。
+   観測を根拠としない行を足す場合は、2へ戻って目的とrisk scenarioから選ぶ。
+   次の行は、通常のUI経路と許可済みfixtureだけで起こせる場合に実行する。
+   API、storage、network mock、結果不明の変更の再実行が必要なら、その行を未確認にする。
+
+観測した問題は次の三つに分け、一つの区分で他を隠さない。
+
+- 不具合: 要求、契約、画面自身が示す約束に反する観測。期待の出典と実際を示す。
+- 設計仮説: 要求の違反ではないが、目的の達成を妨げ得ると観測から推論した設計上の懸念。観測の根拠と、確かめる方法を付ける。見た目の好みを根拠にせず、代替のUI設計は作らない。
+- 仕様不足: 期待結果を決める要求がなく、不具合かどうかを判定できない観測。決める必要がある問いとして返す。
+
+matrixのすべての行が`pass`・`fail`・区分付きの観測・`未確認`のいずれかで閉じ、次の仮説に未処理が残らないとき、固定した範囲の探索監査を終える。
+画面数、操作回数、pass数をcoverageの目標にしない。
+browserのrouteがない、または実操作できなかった範囲は、source読みで代替せず未確認にする。
+sourceや文書から得た懸念は、実画面で未確認の仮説として分け、観測した問題や監査完了として報告しない。
 
 ## 2. 実行routeと所有するpageを固定する
 
@@ -132,7 +168,7 @@ browserをlaunch/connectし直す、contextや別pageを勝手に作る、`pages
 4. navigation、submit、route変更、dialog開閉、一覧更新、viewport変更などの後はsnapshotを取り直す。
    新しいrefまたは現在のDOMから次の操作を決める。
    値が同じでも別状態の古いrefを再利用しない。
-5. verificationでは、matrixで選んだmaterialな実画面checkpointをscreenshotで撮り、返された画像を実際に開いて読む。
+5. verificationと探索監査では、matrixで選んだmaterialな実画面checkpointをscreenshotで撮り、返された画像を実際に開いて読む。
    主要taskの操作面と業務結果、関連する拒否・回復や別layoutの代表状態を含める。
    保存したpath、DOM snapshot、画像比較のpassだけで目視済みとしない。
 6. 画像では要求に関係する内容と結果が読めるか、欠け・重なり・切れ・折り返し・画像欠落・sticky領域による隠れがないか、次のcontrolが見えるかを照合し、何がどこで見えた／見えなかったかを書く。
@@ -183,7 +219,7 @@ request成功を利用者の結果の代わりにせず、static resourceや不�
 ## 利用者accountと外部結果を守る
 
 閲覧、navigation、未送信入力と、accountや外部systemへ結果を残す操作を分ける。
-購入、課金、message・招待の送信、公開、削除、権限・security設定・profile変更、file upload、注文確定などは、verification依頼だけを実行許可と解釈しない。
+購入、課金、message・招待の送信、公開、削除、権限・security設定・profile変更、file upload、注文確定などは、verificationや探索監査の依頼だけを実行許可と解釈しない。
 許可されたsandboxまたは専用test accountを使い、実accountしかない場合は確定直前の安全な状態までを観測し、未実行の結果は未確認にする。
 
 現在の依頼で対象と結果が具体的に指定され、その結果の発生を明示的に求められた場合だけ、指定範囲内で一度実行する。
@@ -192,6 +228,7 @@ account、environment、数量、宛先が曖昧なら実行しない。
 
 状態変更の結果が不明（timeout、tool error、routeの切断、submit後のpageの消失など）なら、その場で止める。
 再送、別routeでの再実行、別routeへ切り替えた継続をしない。
+探索監査の次の仮説や追加の行も、この停止を越えて同じ操作を再実行する理由にしない。
 同じrouteで読み取り専用の観測（fresh snapshot、URL、対象requestの有無）ができるなら、適用済み・未適用・不明のどれかを先に決め、重複可能性が残れば止める。
 観測できなければ、状態を不明として、送った入力、route、最後の観測、確認に必要な読み取り専用の手順を返す。
 
@@ -203,8 +240,11 @@ fixtureや作成dataの削除も許可範囲内に限る。
 ## 5. 証拠と未確認を返し、所有物だけを閉じる
 
 結果は最初のmatrixに返す。
-各行に実行した初期状態・data・入力列、期待と実際、`pass`・`fail`・`未確認`、snapshot/DOMの該当結果、画像locatorと具体的なvisual観測を付ける。
+各行に実行した初期状態・data・入力列、期待と実際、判定（探索監査では区分付きの観測を含む）、snapshot/DOMの該当結果、画像locatorと具体的なvisual観測を付ける。
 業務値と見た目の結果が異なれば分けて報告し、一方のpassで他方を隠さない。
+
+探索監査では、matrixに加えて、目的とrisk scenarioの対応で示すcoverage、不具合・設計仮説・仕様不足を分けた所見、実行しなかった領域と理由を返す。
+監査した範囲は、固定した対象と観測した行の範囲で述べる。
 
 対象environment・URL・許可範囲、使ったroute、選んだ理由と切替、実viewportと入力方法、coverageの選択理由、実行しなかったmaterial条件と理由を添える。
 未確認は、仕様不足、data/環境不足、tool不足、安全上の停止、未選択を区別する。
@@ -221,12 +261,13 @@ cleanupが外部変更を増やす、または状態変更の結果が不明で�
 受入結果と専門監査は別の成果である。
 accessibility treeを操作に使ったこと、keyboardで一経路を通ったこと、見た目を読んだことはaccessibility適合を意味しない。
 待機して画面が出たことは性能閾値の達成、認証したことや拒否が一件出たことはsecurityの保証ではない。
+探索監査でも、操作で観測した事実をaccessibility適合、性能の実測、securityの保証として報告せず、それらの所見は専門へ渡す。
 
 別専門作業が依頼された場合だけ、利用可能なSkillへ次を渡し、元のmatrixと専門結果を区別してcallerへ返す。
 
 | 条件 | 引き渡す入力 | 受け取る結果 |
 |---|---|---|
-| 実装前のUI判断・未確定な設計を決める | `ui-design`へtask、実content、要件の不足、観測したstateと画像、既存制約 | UI briefと設計判断。今回の観測を設計入力へ戻す |
+| UI設計の評価・再設計、実装前のUI判断 | `ui-design`へtask、実content、観測した不具合・設計仮説・仕様不足、snapshotと画像のlocator、coverageと未確認条件、既存制約 | 軸別の設計評価やUI brief。観測は設計の入力であり、このSkillの結果を置き換えない |
 | 実画面のaccessibility監査 | `a11y-debugging`へsurface、入力方法、対象state、設計要件、snapshotと画像 | 所見、確認した基準、未確認。受入passへ混ぜない |
 | 機能不良の原因診断 | `diagnosing-bugs`へ期待と実際、入力列、前後の証拠、関連errorとsource | 原因を支える証拠と次の検証・修正判断 |
 | interaction、layout shift、networkなどの性能計測 | `browser-performance`へURL、経路、環境と測定条件、観測した遅延 | 実測値と不足。LCP・page loadなら`debug-optimize-lcp`へ同じ入力を渡す |
@@ -234,5 +275,6 @@ accessibility treeを操作に使ったこと、keyboardで一経路を通った
 | 脅威や脆弱性の調査 | `security-review`へscope、信頼境界、経路、観測証拠と関連source | 検証された所見と不足証拠 |
 
 利用不能な専門作業は未実施として返し、同じ操作をhandoffだけのために繰り返さない。
-このSkillは既知surfaceの実行と受入証拠を所有し、永久testの作成、CIの設定、全productの探索、API代替verification、credential管理、browser backendの導入と設定を所有しない。
+`ui-design`を使えない、またはこのSkillを動かすagentが設計判断を担当しない場合は、観測、区分、coverageをそのままcallerへ返し、callerが設計の担当へ渡す。
+このSkillは指定taskの実行、既知surfaceの受入証拠、明示された探索監査の観測と分類を所有し、永久testの作成、CIの設定、API代替verification、credential管理、browser backendの導入と設定、UIの設計判断を所有しない。
 新たな回帰testが必要なら、破った保証、再現入力列、観測証拠をcallerへ渡し、対象projectのtest ownerに実装を委ねる。

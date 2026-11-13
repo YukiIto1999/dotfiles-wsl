@@ -1,12 +1,12 @@
 ---
 name: commit-writing
-description: Writes a commit message from the staged diff and repository policy. Use when asked for a commit message or immediately before committing staged changes. Names the changed target in the reader's terms and what changed there as one change with one revert reason, writes a type-prefixed subject in the form owned by architecture-standard, runs the subject through the commit-msg hook before finishing, and never changes the index. Does not write PR bodies, changelogs, or release notes.
+description: Writes a commit message from the staged diff and repository policy. Use when asked for a commit message or immediately before committing staged changes. Names the changed target in the reader's terms and what changed there as one change with one revert reason, applies the shared subject format and architecture-standard rules, runs the subject through the commit-msg hook before finishing, and never changes the index. Does not write PR bodies, changelogs, or release notes.
 ---
 
 # Commit messageを書く
 
-件名の内容と形の規則と理由は、architecture-standardが所有する。
-このSkillは規則を写さず、正本を読んで件名へ当てる手順だけを持つ。
+件名の対象と変化、文末と句読点の規則と理由は、architecture-standardが所有する。
+このSkillはその規則を写さず、正本を読んで件名へ当てる手順と、正本が持たない全repository共通の形式だけを持つ。
 
 | 規則 | 正本 |
 |---|---|
@@ -15,13 +15,22 @@ description: Writes a commit message from the staged diff and repository policy.
 
 標準本文は、callerが明示した`<standard-root>`、なければAGENTSが案内する現行規範rootから読む。
 配備済みSkillの所在から導いた固定版は使わない。
-正本を読めない場合は、読めなかったrootまたはfileと標準に照らせなかった判断を報告し、repositoryのpolicyとhookが定める範囲でmessageを仕上げる。
+正本を読めない場合は、読めなかったrootまたはfileと標準に照らせなかった判断を報告し、共通の形式、repositoryのpolicy、hookが定める範囲でmessageを仕上げる。
 記憶や過去の履歴で正本の規則を補わない。
+
+## 全repository共通の形式
+
+件名は、repositoryにCONTRIBUTINGやhookがなくても次の形にする。
+local policyは使えるtypeなどの制約を足せるが、この形を緩めない。
+
+- `<type>: <日本語の要約>`の一行だけにする。type接頭辞はどのrepositoryでも省かず、scopeを付けない。
+- 全体を50文字以内にする。
+- 本文、trailer、AI attributionを付けない。
 
 ## 手順
 
 1. repository rootの`AGENTS.md`と`CONTRIBUTING.md`、`git rev-parse --git-path hooks/commit-msg`が示すhookを読む。
-   形式、type、長さ、bodyの可否はlocal policyに従い、type接頭辞はpolicyに記述がなくても省かない。
+   使えるtypeなど、local policyが足す制約に従い、共通の形式はpolicyに記述がなくても変えない。
 2. `git diff --staged`を読む。
    staged diffが空ならmessageを作らない。
 3. 変更の対象と、その対象で何がどう変わったかを一つに定める。
@@ -40,7 +49,7 @@ description: Writes a commit message from the staged diff and repository policy.
    `"$(git rev-parse --git-path hooks/commit-msg)" <(printf '%s\n' '<件名>')`で実行できる。
 2. hookが拒否したら、表示された規則と正本に従って件名を書き直し、通るまで繰り返す。
    `--no-verify`、hookの無効化、hookが判定しない語形への置き換えで通さない。
-3. hookが判定しない条件と、hookがないrepositoryでの全条件を、正本の完了条件で確かめる。
+3. hookが判定しない条件と、hookがないrepositoryでの全条件を、共通の形式と正本の完了条件で確かめる。
    一つの関心だけを述べているか、中黒が一つの関心を成す語だけを並べているか、個人名がないか、件名だけで対象と、そこで何がどう変わったかが読めるかを見る。
 4. 書き直しても関心が二つ残るなら、語を削って隠さず、commitを分ける対象とpathを報告する。
 5. 件名が規則に合うと報告するときは、実行したhookの結果と読んだ正本のfileを根拠にする。
@@ -77,4 +86,3 @@ repositoryが要求するcommit messageだけを出す。
 - 「更新」「修正」「整理」「採用」「整備」のような語だけで変化を隠さない。
 - file名、directory名、層の名前、変更操作の列挙を、対象と変化の代わりにしない。
 - 実行していない検証や、確認していないissueをmessageへ入れない。
-- repository policyが禁じるscope、body、trailer、AI attributionを足さない。

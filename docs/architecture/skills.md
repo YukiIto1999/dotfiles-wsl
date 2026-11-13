@@ -227,7 +227,7 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `repository-research` | `repository-search`のZvec-Grep MCPとnative repository tools | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
 | `web-research` | clientのnativeなWeb検索とURL取得、`library-documentation`のContext7 MCP | 探索と本文取得をclientのtoolで行い、library docsはContext7へ渡す。native toolを持たないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
 | `environment-design` | ownerの正本と既存Skillの入口 | 変更理由と正本から所有者を選び、既存指示との重複や矛盾を確認する。再発だけでhookへ進めず、agentの改善方法は`skill-design`へ渡す。外部toolの採用や差替えは、更新後のcallerと配備契約を確認する。 |
-| `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 一つの目的に閉じた件名を作り、実際のhookを通す。 |
+| `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 全repository共通の件名形式を持ち、意味と文末の正本を読んで一つの目的に閉じた件名を作り、実際のhookを通す。 |
 
 `requiresSkills`は無条件に必要な配備前提だけを表す。
 追加の観測や、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。

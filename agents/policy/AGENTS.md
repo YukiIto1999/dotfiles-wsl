@@ -166,4 +166,4 @@ Agent client の更新は `docs/operations/agent-clients.md`、構造は `docs/a
 - 資格情報を平文に書かない。GitHub PAT は SOPS + age の `@dotfilesDir@/secrets/sops/assets/secrets.json` に集約する。
 - repository の hook を信頼する `git config dotfiles.hooks.trusted true` は利用者だけが設定する。agent は信頼を与えず、repository 側で `core.hooksPath` を上書きしない。
 - commit と push の hook を迂回しない。`--no-verify` と、push 前の検証を省く `DOTFILES_VERIFY_PUSH_BYPASS` は利用者だけが使う。hook が失敗したら原因を直すか、直せない事情を利用者へ報告する。
-- commit message は scope なし、50 文字以内の `<type>: <日本語の要約>` 一行だけにし、type 接頭辞はどの repository でも省かない。要約は、変更の対象を読み手が扱う作業や物の名前(テーブル設計、注文の取消など)で示し、その対象に起きた操作(追加、削除など)と、それで成り立つ結果を一つだけ書く。repository の中の directory や層の名前を対象にせず、採用、整備、明確化のような評価だけの語で変化を代えず、個人名を含めず、「〜の追加」「〜の見直し」のような体言止めで終える。「…する」「…した」「…を直す」「…にする」「…しない」のような動詞や形容詞の終わり方、「…へ」「…に」のような助詞の終わり方、読点「、」、句点「。」は使わない。中黒（・）は語の簡潔な並置に限り許容する。これらの規則と AI attribution は commit-msg hook が block する。根拠と例は `commit-writing` と `@dotfilesDir@/CONTRIBUTING.md` のコミット節が持つ。本文・検査・参照更新を 1 つのコミットに閉じ、未検証の中間コミットを残さない。
+- commit を作る前と件名を求められたときは `commit-writing` を読み、全repository共通の形式と、同Skillが参照する正本の規則に従う。本文・検査・参照更新を 1 つのコミットに閉じ、未検証の中間コミットを残さない。

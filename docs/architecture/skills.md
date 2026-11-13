@@ -243,7 +243,7 @@ browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.jso
 browser操作の経路選択と安全な停止は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
 外部toolの統合は[`agents/fixtures/environment-integration-skill.json`](../../agents/fixtures/environment-integration-skill.json)の代表scenarioで、callerと実装、共通配備と現状調査を区別して評価する。
 環境改善の所有者選択は[`agents/fixtures/environment-design-skill.json`](../../agents/fixtures/environment-design-skill.json)で、既存指示の衝突、規律の重複追加、証拠不足の枝だけを保留する判断を評価する。
-これらのfixtureは期待する判断を定めるものであり、自然発火や配備成功の実測記録ではない。
+これらのfixtureは入力と期待する判断を定めるものであり、評価日時や成功を記録するものではない。実測結果は、使ったfixtureの版と実行証拠を結んだ`work/`の評価記録に残す。
 
 ### 日本語の執筆と推敲
 

@@ -83,6 +83,7 @@ optional D2、TALA、ELK、TLC、Apalacheなどのbackendはこのpackageで供�
 
 [`similarity.nix`](../../toolchain/package/similarity.nix)は[公式release v0.5.0](https://github.com/mizchi/similarity/releases/tag/v0.5.0)のhash固定archiveから、`similarity-ts`、`similarity-rs`、`similarity-generic`の原版binaryを供給する。
 現packageの対象は`x86_64-linux`であり、他言語のCLIやSDK、MCP providerを提供する構成ではない。
+実行前に、走査する対象と比較目的を固定する。
 
 | 対象 | 入口 |
 |---|---|
@@ -99,7 +100,7 @@ JSX / TSXの受理をReact componentやmarkupの堅牢な比較と同一視せ�
 ### Actrun
 
 `actrun`は既に[`flake.nix`](../../flake.nix)で固定したsourceから管理するCLIであり、今回新しいCI Skillやtask定義の正本を作るものではない。
-対象workflowの変更、local実行の依頼、互換性の調査がある場合だけ、実際のworkflowを入力にしてlintとplanを取る。
+対象workflowの変更、local実行の依頼、互換性の調査がある場合だけ、projectのtask正本を保ったまま、実際のworkflowを入力にしてlintとplanを取る。
 
 ```sh
 actrun lint .github/workflows/ci.yml
@@ -108,7 +109,7 @@ actrun workflow run .github/workflows/ci.yml --dry-run
 
 引数の根拠は[採用revisionのREADME](https://github.com/mizchi/actrun/blob/1db9aff5b364de6eacda68e3f2ce2238f9992272/README.md#L110-L118)と[linterの入口](https://github.com/mizchi/actrun/blob/1db9aff5b364de6eacda68e3f2ce2238f9992272/README.md#L215-L220)に置く。
 lint、dry-run、許可されたlocal実行、remote CIの結果は別の証拠であり、localでの成功をGitHub runner、token権限、OIDC、publicationの成功としない。
-実行前にeventと条件分岐、`uses`で取得するaction、実行trust、書込みとnetwork、secretの出典と受渡し範囲を確認する。
+実行前にeventと条件分岐、`uses`で取得するaction、実行trust、変更を含むworkspaceと保存先への書込み、network、secretの出典と受渡し範囲を確認する。
 原版の[secretのmasking](https://github.com/mizchi/actrun/blob/1db9aff5b364de6eacda68e3f2ce2238f9992272/README.md#L463-L480)は外部送信を防ぐ保証ではなく、worktreeや一時directoryもsecurity sandboxではない。
 実runは許可された対象と副作用だけで行い、dry-runから秘密情報の利用や第三者actionへの全trustを推定しない。
 

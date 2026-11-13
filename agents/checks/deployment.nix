@@ -134,10 +134,6 @@
           };
           PreToolUse = [
             (gateHook {
-              kind = "edit";
-              matcher = "Edit|Write|MultiEdit|NotebookEdit";
-            })
-            (gateHook {
               kind = "observe";
               matcher = "Bash";
             })
@@ -146,10 +142,6 @@
             (gateHook {
               kind = "arm";
               matcher = "Edit|Write|MultiEdit|NotebookEdit";
-            })
-            (gateHook {
-              kind = "learn";
-              matcher = "Read";
             })
             (gateHook {
               kind = "observe";
@@ -436,9 +428,6 @@
             && configuration.dotfiles.health.observations."agents/roster".members == selection.enabled
             && clientObservationIds == map (id: "agents/client/${id}") selection.enabled
             && builtins.all noClientDeployment unselected
-            &&
-              configuration.dotfiles.agents.runtime.skillRoots
-              == map (id: registry.${id}.skillsDestination) selection.enabled
             && (configuration.dotfiles.agents.runtime.timers.autoupdate != null) == updatesEnabled
             && (configuration.systemd.services ? dotfiles-agent-autoupdate) == updatesEnabled
             && (configuration.systemd.timers ? dotfiles-agent-autoupdate) == updatesEnabled
@@ -477,7 +466,6 @@
                   selection = selectionCases.${name};
                   supply = lib.getExe configuration.dotfiles.platform.cli.commands.agentSupply;
                   policyFile = configuration.dotfiles.agents.shared.rules;
-                  gate = lib.getExe configuration.dotfiles.agents.packages.verificationGate;
                 in
                 ''
                   ${supply} manifest > ${name}-manifest.json
@@ -502,21 +490,6 @@
                         fi
                       ''
                   ) adapterNames}
-                  export HOME="$PWD/${name}-home"
-                  mkdir -p "$HOME"
-                  ${lib.concatMapStrings (id: ''
-                    mkdir -p "$HOME/${registry.${id}.skillsDestination}/codebase-design"
-                  '') (builtins.filter (id: !(builtins.elem id selection.enabled)) adapterNames)}
-                  ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null
-                  mkdir -p "$HOME/${registry.${builtins.head selection.enabled}.skillsDestination}/codebase-design"
-                  cp ${configuration.dotfiles.agents.shared.skills.codebase-design}/SKILL.md \
-                    "$HOME/${registry.${builtins.head selection.enabled}.skillsDestination}/codebase-design/SKILL.md"
-                  if ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null 2>&1; then
-                    echo "selected Skill root did not enforce its discipline: ${name}" >&2
-                    exit 1
-                  fi
-                  ${gate} learned --session ${name} --path codebase-design
-                  ${gate} teach --session ${name} --path /r/core/library.ts >/dev/null
                 ''
               ) (builtins.attrNames selectionCases)}
               touch "$out"

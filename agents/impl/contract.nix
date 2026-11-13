@@ -292,11 +292,6 @@ in
       };
     };
     runtime = {
-      skillRoots = lib.mkOption {
-        type = types.listOf relativeDestinationType;
-        readOnly = true;
-        internal = true;
-      };
       cache = lib.mkOption {
         type = types.submodule {
           options = {

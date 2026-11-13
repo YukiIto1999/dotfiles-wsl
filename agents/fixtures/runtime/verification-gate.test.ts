@@ -1,6 +1,6 @@
 import { beforeAll, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 type Handler = (event: Record<string, unknown>, ctx: unknown) => Promise<unknown>;
@@ -9,15 +9,10 @@ type Handlers = Map<string, Handler>;
 const TEST_TIMEOUT_MS = 60_000;
 const home = process.env.HOME as string;
 const workDir = join(home, "work");
-const skillBody = join(home, ".omp/agent/skills/ui-design/SKILL.md");
-const GUARDED_PATH = "/r/surfaces/viewer/x.tsx";
-const FREE_PATH = "/r/docs/note.md";
 const LARGE_WRITE = 3 * 1024 * 1024;
 const nextGenerationGateCalls = join(home, "next-generation-gate.calls");
-const COMPLETE = `# ui-design\n${Array.from(
-  { length: 6000 },
-  (_, index) => `Discipline line ${index + 1} stays in the body so the read exceeds one argument.`,
-).join("\n")}\n`;
+// 以前は Skill の読取を編集の前提にしていた綴り。いまは通常の編集と同じく、検証の状態だけが終了を止める。
+const FORMERLY_GUARDED_PATHS = ["surfaces/viewer/App.tsx", "core/domain/Invoice.cs", "core/library.ts"];
 
 let real: Handlers;
 let hanging: Handlers;
@@ -46,30 +41,17 @@ const context = (session: string, cwd = workDir) => ({
 const write = (handlers: Handlers, session: string, input: Record<string, unknown>, cwd = workDir) =>
   handlerOf(handlers, "tool_call")({ toolName: "write", toolCallId: `${session}-write`, input }, context(session, cwd));
 
-function readEvent(session: string, shown: string) {
-  const lines = shown.split("\n");
-  return {
-    toolName: "read",
-    toolCallId: `${session}-read`,
-    input: { path: skillBody },
-    isError: false,
-    content: [{ type: "text", text: shown }],
-    details: {
-      resolvedPath: skillBody,
-      totalLines: lines.length,
-      displayContent: { text: shown, startLine: 1, lineNumbers: lines.map((_, index) => index + 1) },
-    },
-  };
-}
-
-const learn = (session: string, event: Record<string, unknown>) =>
-  handlerOf(real, "tool_result")(event, context(session));
-
-async function expectBlockedForSkill(session: string, content = "x") {
-  const outcome = (await write(real, session, { path: GUARDED_PATH, content })) as { block: true; reason: string };
-  expect(outcome.block).toBe(true);
-  expect(outcome.reason).toContain("skill://ui-design");
-}
+/**
+ * write の成功後に OMP が送る tool_result の呼出し
+ * @param session - hook へ渡す session の ID
+ * @param input - write の入力
+ * @returns hook の完了
+ */
+const writeSucceeded = (session: string, input: Record<string, unknown>) =>
+  handlerOf(real, "tool_result")(
+    { toolName: "write", toolCallId: `${session}-write`, input, isError: false },
+    context(session),
+  );
 
 const verificationRoot = join(home, ".cache/dotfiles-wsl/verification");
 
@@ -188,59 +170,50 @@ async function hangingGateOf(cwd: string): Promise<{ gate: ProcessIdentity; desc
 }
 
 beforeAll(async () => {
-  mkdirSync(dirname(skillBody), { recursive: true });
   mkdirSync(workDir, { recursive: true });
   real = await load(process.env.GATE_HOOK as string);
   hanging = await load(process.env.HANGING_GATE_HOOK as string);
 });
 
-test("small events keep refusing unread disciplines and accept read ones", async () => {
-  writeFileSync(skillBody, "# ui-design\nShort discipline.\n");
-  expect(await write(real, "small-free", { path: FREE_PATH, content: "note" })).toBeUndefined();
-  await expectBlockedForSkill("small");
-  await learn("small", readEvent("small", "# ui-design\nShort discipline."));
-  expect(await write(real, "small", { path: GUARDED_PATH, content: "x" })).toBeUndefined();
-}, TEST_TIMEOUT_MS);
-
-test("a write larger than the argv limits reaches the gate", async () => {
-  writeFileSync(skillBody, "# ui-design\nShort discipline.\n");
+test("a write larger than the argv limits still registers the repository it changed", async () => {
+  const session = "large-write";
+  const repository = unverifiedT1Repository("large-write-t1");
+  const tracked = join(repository, "tracked");
   const content = "x".repeat(LARGE_WRITE);
-  expect(await write(real, "large-write-free", { path: FREE_PATH, content })).toBeUndefined();
-  await expectBlockedForSkill("large-write-unread", content);
-}, TEST_TIMEOUT_MS);
-
-test("only a complete read beyond the argv limit counts as reading the discipline", async () => {
-  writeFileSync(skillBody, COMPLETE);
-  const shown = COMPLETE.slice(0, -1);
-  const content = "x".repeat(LARGE_WRITE);
-  const altered = `${shown.slice(0, 100_000)}§${shown.slice(100_001)}`;
-  const refused: Record<string, Record<string, unknown>> = {
-    truncated: readEvent("large-truncated", shown.slice(0, -2000)),
-    altered: readEvent("large-altered", altered),
-    "altered-rendered": {
-      ...readEvent("large-altered-rendered", shown),
-      content: [{ type: "text", text: altered }],
-    },
-    "no-display": {
-      ...readEvent("large-no-display", shown),
-      details: { resolvedPath: skillBody, totalLines: 6001 },
-    },
-    "no-result": { ...readEvent("large-no-result", shown), content: [], details: undefined },
+  writeFileSync(tracked, content);
+  await writeSucceeded(session, { path: tracked, content });
+  const blocked = (await handlerOf(real, "session_stop")({ stop_hook_active: false }, context(session))) as {
+    decision: string;
+    reason: string;
   };
-  for (const [name, event] of Object.entries(refused)) {
-    const session = `large-${name}`;
-    await learn(session, event);
-    await expectBlockedForSkill(session, content);
+  expect(blocked.decision).toBe("block");
+  expect(blocked.reason).toContain(realpathSync(repository));
+}, TEST_TIMEOUT_MS);
+
+test("an edit is never held for an unread Skill, and only the unverified tree holds the stop", async () => {
+  const session = "mechanical-edits";
+  const repository = unverifiedT1Repository("mechanical-edits-t1");
+  const files = FORMERLY_GUARDED_PATHS.map((path) => join(repository, path));
+  for (const file of files) {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "held\n");
   }
-
-  await expectBlockedForSkill("large-complete", content);
-  await learn("large-complete", readEvent("large-complete", shown));
-  expect(await write(real, "large-complete", { path: GUARDED_PATH, content })).toBeUndefined();
-
-  appendFileSync(skillBody, "Changed after the read.\n");
-  await expectBlockedForSkill("large-complete", content);
-  await learn("large-replayed", readEvent("large-replayed", shown));
-  await expectBlockedForSkill("large-replayed", content);
+  git(repository, "add", ...FORMERLY_GUARDED_PATHS);
+  git(repository, "commit", "-q", "-m", "formerly guarded paths");
+  for (const file of files) {
+    writeFileSync(file, "edited\n");
+    const input = { path: file, content: "edited\n" };
+    expect(await write(hanging, session, input)).toBeUndefined();
+    expect(await write(real, session, input)).toBeUndefined();
+    await writeSucceeded(session, input);
+  }
+  const blocked = (await handlerOf(real, "session_stop")({ stop_hook_active: false }, context(session))) as {
+    decision: string;
+    reason: string;
+  };
+  expect(blocked.decision).toBe("block");
+  expect(blocked.reason).toContain(realpathSync(repository));
+  expect(blocked.reason).toContain("dotfiles-agent-verify -- devenv shell -- verify");
 }, TEST_TIMEOUT_MS);
 
 test("an unverified T1 stop returns control on the repeated request without settling it and blocks a fresh stop again", async () => {
@@ -288,27 +261,35 @@ test("an aborted stop hook returns after the gate is reaped and its descendants 
   expect(returned).toEqual({ gateReaped: true, descendantRunning: false });
 }, TEST_TIMEOUT_MS);
 
-test("a gate that outlives its deadline blocks the edit and the hook returns after the gate is reaped and its descendants have stopped", async () => {
+test("a gate that outlives its deadline blocks the stop and the hook returns after the gate is reaped and its descendants have stopped", async () => {
   const cwd = join(home, "deadline");
   mkdirSync(cwd, { recursive: true });
   const started = performance.now();
-  const pending = write(hanging, "deadline", { path: FREE_PATH, content: "x" }, cwd);
+  const pending = handlerOf(hanging, "session_stop")({ stop_hook_active: false }, context("deadline", cwd));
   const { gate, descendant } = await hangingGateOf(cwd);
   expect(isRunning(descendant)).toBe(true);
   const outcome = await pending;
   const returned = { gateReaped: isReaped(gate), descendantRunning: isRunning(descendant) };
-  expect(outcome).toMatchObject({ block: true });
+  expect(outcome).toMatchObject({ decision: "block" });
   expect(returned).toEqual({ gateReaped: true, descendantRunning: false });
   expect(performance.now() - started).toBeGreaterThanOrEqual(19_000);
 }, TEST_TIMEOUT_MS);
 
 test("a hook loaded for one generation keeps its own gate after the next generation's hook loads", async () => {
-  writeFileSync(skillBody, "# ui-design\nShort discipline.\n");
+  const repository = unverifiedT1Repository("generation-t1");
+  const tracked = join(repository, "tracked");
+  writeFileSync(tracked, "edited\n");
   const next = await load(process.env.NEXT_GENERATION_GATE_HOOK as string);
-  expect(await write(next, "next-session", { path: GUARDED_PATH, content: "x" })).toBeUndefined();
+  await handlerOf(next, "tool_result")(
+    { toolName: "write", toolCallId: "next-session-write", input: { path: tracked }, isError: false },
+    context("next-session"),
+  );
   const recorded = readFileSync(nextGenerationGateCalls, "utf8");
-  expect(recorded).toContain("hook edit");
-  await expectBlockedForSkill("older-session");
+  expect(recorded).toContain("hook arm");
+  await writeSucceeded("older-session", { path: tracked });
+  expect(await handlerOf(real, "session_stop")({ stop_hook_active: false }, context("older-session"))).toMatchObject({
+    decision: "block",
+  });
   expect(readFileSync(nextGenerationGateCalls, "utf8")).toBe(recorded);
 }, TEST_TIMEOUT_MS);
 
@@ -414,28 +395,3 @@ test("a block is not repeated for the same request once omp has reset its guard,
   }
 }, TEST_TIMEOUT_MS);
 
-test("a read that cannot name a skill body never starts the gate while one that can still does", async () => {
-  const read = handlerOf(await load(process.env.NEXT_GENERATION_GATE_HOOK as string), "tool_result");
-  const reads: { input: unknown; calls: string[] }[] = [
-    { input: { path: FREE_PATH }, calls: [] },
-    { input: { path: "src/main.ts:1-20" }, calls: [] },
-    { input: { path: "agent://main" }, calls: [] },
-    { input: { path: "/r/docs/" }, calls: [] },
-    { input: { path: "skill://ui-design" }, calls: ["hook learn"] },
-    { input: { path: "skill://ui-design/SKILL.md" }, calls: ["hook learn"] },
-    { input: { path: skillBody }, calls: ["hook learn"] },
-    { input: { path: "ui-design/SKILL.md" }, calls: ["hook learn"] },
-    { input: {}, calls: ["hook learn"] },
-    { input: { path: 1 }, calls: ["hook learn"] },
-    { input: null, calls: ["hook learn"] },
-    { input: undefined, calls: ["hook learn"] },
-  ];
-  for (const { input, calls } of reads) {
-    const before = gateCalls();
-    await read(
-      { toolName: "read", toolCallId: "prefilter-read", input, isError: false, content: [], details: undefined },
-      context("prefilter"),
-    );
-    expect(gateCalls()).toEqual([...before, ...calls]);
-  }
-}, TEST_TIMEOUT_MS);

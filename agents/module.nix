@@ -390,7 +390,6 @@ let
         inactiveDays = 30;
       };
       sliceUnit = "agents.slice";
-      skillRoots = lib.unique (map (name: agents.clients.${name}.skillsDestination) clientNames);
       state = {
         root = "${cfg.workstation.homeDir}/${relativeStateRoot}";
       };
@@ -492,7 +491,7 @@ in
         projectMemoryHooks = config.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
       };
       runtime = {
-        inherit (runtimeContract) timers state skillRoots;
+        inherit (runtimeContract) timers state;
         cache = builtins.removeAttrs runtimeContract.cache [ "relativeCacheRoot" ];
       };
       shared = {

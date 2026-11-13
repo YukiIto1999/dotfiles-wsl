@@ -77,14 +77,6 @@
             runtimeContract = runtimePackageContract;
           }
         );
-        customSkillRootRuntime = import ../package.nix (
-          runtimeArgs
-          // {
-            runtimeContract = runtimePackageContract // {
-              skillRoots = [ ".local/share/fixture adapter/procedures" ];
-            };
-          }
-        );
         wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
           if [[ $# -eq 3 && $1 == -c && $2 == %u \
             && $3 == "/proc/''${DOTFILES_AGENT_TEST_WRONG_OWNER_PID-}" ]]; then
@@ -693,7 +685,6 @@
               DEPENDENCY_A = "${dependencyA}";
               DEPENDENCY_B = "${dependencyB}";
               MODULE_WRAPPER = lib.getExe moduleSessionWrapper;
-              GATE = lib.getExe runtime.gate;
               WRAPPER_CLOSURE = "${moduleSessionWrapperClosure}";
               SKILL_ROOT = clients.omp.skillsDestination;
               SKILL_SOURCE =
@@ -743,26 +734,6 @@
               touch $out
             '';
 
-        agent-skill-read-gate =
-          pkgs.runCommandLocal "check-agent-skill-read-gate"
-            {
-              nativeBuildInputs = [
-                pkgs.bash
-                pkgs.coreutils
-                pkgs.git
-                pkgs.jq
-              ];
-              GATE = lib.getExe runtime.gate;
-              CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
-              CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
-              UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;
-              DOMAIN_MODELING_SOURCE = hostConfig.dotfiles.agents.shared.skills.domain-modeling;
-            }
-            ''
-              bash ${../fixtures/runtime/verify.sh} --skills-only
-              touch $out
-            '';
-
         agent-omp-verification-gate-hook =
           pkgs.runCommandLocal "check-agent-omp-verification-gate-hook"
             {
@@ -796,7 +767,6 @@
                 pkgs.gnused
                 pkgs.jq
                 pkgs.nix
-                pkgs.nodejs
                 pkgs.strace
                 pkgs.util-linux
               ];
@@ -804,10 +774,6 @@
               STALLING_VERIFY = lib.getExe stallingVerify;
               SLOW_RESOLUTION_VERIFY = lib.getExe slowResolutionRuntime.verify;
               GATE = lib.getExe runtime.gate;
-              CUSTOM_SKILL_ROOT_GATE = lib.getExe customSkillRootRuntime.gate;
-              CODEBASE_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.codebase-design;
-              UI_DESIGN_SOURCE = hostConfig.dotfiles.agents.shared.skills.ui-design;
-              DOMAIN_MODELING_SOURCE = hostConfig.dotfiles.agents.shared.skills.domain-modeling;
             }
             ''
               bash ${../fixtures/runtime/hook-paths.sh}

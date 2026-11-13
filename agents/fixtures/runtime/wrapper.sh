@@ -94,7 +94,7 @@ test "$status" -ne 0
 test ! -e "$CAPTURE/agent-pid"
 test -z "$(ls -A "$cache/sessions")"
 
-: "${MODULE_WRAPPER:?}" "${WRAPPER_CLOSURE:?}" "${GATE:?}" "${SKILL_ROOT:?}" "${SKILL_SOURCE:?}"
+: "${MODULE_WRAPPER:?}" "${WRAPPER_CLOSURE:?}" "${SKILL_ROOT:?}" "${SKILL_SOURCE:?}"
 store=$fixture/store
 gcroots=$fixture/gcroots
 deployed=$home/$SKILL_ROOT/codebase-design
@@ -157,36 +157,6 @@ wait_for_file() {
   fail "timed out waiting for $path"
 }
 
-# 旧世代 Skill の実読取情報による gate の学習記録
-# 引数 $1: wrapper が発行した当該 session の ID
-# 引数 $2: 論理配備先から読み取る Skill 本文の path
-# 副作用: 指定 session の読取記録の更新
-# 戻り値: gate の学習 command の終了 status
-skill_read_event() {
-  local session=$1 body=$2 resolved
-  resolved=$(realpath -e -- "$body")
-  jq -nc --rawfile text "$body" --arg session "$session" --arg cwd "$project" --arg path "$body" \
-    --arg resolved "$resolved" '
-    ($text | gsub("\r\n?"; "\n") | sub("^\uFEFF"; "")) as $normalized |
-    ($normalized | sub("\n$"; "")) as $display |
-    ($normalized | split("\n") | if last == "" then .[:-1] else . end | length) as $lines |
-    {session_id: $session, cwd: $cwd, hook_event_name: "PostToolUse", tool_name: "read",
-      tool_input: {path: $path},
-      tool_result: {content: [{type: "text", text: $display}],
-        details: {resolvedPath: $resolved, totalLines: $lines,
-          displayContent: {text: $display, startLine: 1, lineNumbers: [range(1; $lines + 1)]}}}}
-  ' | "$GATE" hook learn
-}
-
-# 読取済み Skill を要求する path への編集可否の照会
-# 引数 $1: 編集可否を照会する当該 session の ID
-# 戻り値: 編集許可なら0でそれ以外は gate の拒否 status
-guarded_edit() {
-  jq -nc --arg session "$1" --arg cwd "$project" --arg path /r/core/library.ts \
-    '{session_id: $session, cwd: $cwd, tool_name: "write", tool_input: {path: $path}}' |
-    "$GATE" hook edit >/dev/null 2>&1
-}
-
 old_object=$(store_object "$SKILL_SOURCE")
 old_name=${old_object##*/}
 skill_relative=${SKILL_SOURCE#"$old_object"}
@@ -200,13 +170,7 @@ trap ': > "$fixture/old-session.release"' EXIT
 HOLD_READY=$fixture/old-session.ready HOLD_RELEASE=$fixture/old-session.release "$MODULE_WRAPPER" &
 old_session_pid=$!
 wait_for_file "$fixture/old-session.ready"
-session_id=$(read_capture session-id)
-
-if guarded_edit "$session_id"; then
-  fail "the gate let the session edit a guarded path before it read the Skill"
-fi
-skill_read_event "$session_id" "$deployed/SKILL.md"
-guarded_edit "$session_id" || fail "the gate refused an edit after the session read the Skill"
+# session が開始した時点で配備先から読める Skill 本文
 cp "$deployed/SKILL.md" "$fixture/read-body"
 
 cp -r --no-preserve=mode,ownership "$old_object" "$store/$new_name"
@@ -219,11 +183,9 @@ test -d "$store/$new_name"
 test -d "$store/$old_name" || fail "the old session lost the Skill source it read after the generation changed and a GC ran"
 cmp "$fixture/read-body" "$old_package/SKILL.md" ||
   fail "the Skill source the old session read changed after the generation changed and a GC ran"
-if guarded_edit "$session_id"; then
-  fail "the gate kept a Skill read after the deployed body changed"
+if cmp -s "$deployed/SKILL.md" "$old_package/SKILL.md"; then
+  fail "the deployed Skill did not move to the next generation"
 fi
-skill_read_event "$session_id" "$deployed/SKILL.md"
-guarded_edit "$session_id" || fail "the gate refused an edit after the session read the changed Skill"
 
 : > "$fixture/old-session.release"
 status=0

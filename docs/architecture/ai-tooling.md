@@ -184,39 +184,33 @@ wrapperの生存はPID、boot ID、processの開始時刻で照合するため�
 完了markerは末尾の改行まで揃った場合だけ受理し、file size制限による部分書込の失敗でも終了を認めない。
 slotのlockはsupervisorが子孫の終了確認まで保持するため、wrapperだけが先に消えても次のT1と重ならない。
 証跡のscratchはlauncherが所有を確認したsessionの一時領域か、projectの検証state内に置き、repository内の一時領域へ証跡を作らない。
+sessionの一時領域と認めるのは、canonical pathの`<session>`と`DOTFILES_AGENT_SESSION_ID`が一致し、同じsession directoryの`metadata.json`が実fileで、`version`が1、`session_id`が`<session>`と一致する場合だけである。
 gateの管理領域と状態fileは、読取、権限変更、書込、削除の前に、symlinkでない実体と所有者を確認する。
 不正な保存先では状態を記録せず、終了時に不正な状態領域が残っている場合も検証済みとは扱わない。
 次のT1は所有者が終了したpending、receipt、witnessを回収し、生存中や判定できないものは残す。
 終了gateは同じsourceの完了済み証跡を受理した後に古い完了済み証跡を整理する。
 
-[`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPの編集hookでfile pathに対応する配備済みSkillの読取記録を要求する。
-OMP hookはwriteの本文とSkill本文の候補に当たるreadの全文をJSONに含めたままgateのstdinへ送り、readの証明を照合するNode processへもpipeで渡す。
+[`dotfiles-agent-gate`](../../agents/impl/runtime/gate.sh)は、Claude CodeとOMPのhookで、編集したrepositoryの登録、shell実行によるsourceの変更の観測、終了時のT1の確認だけを行う。
+file pathから必要なSkillを推定せず、Skillの読取を編集の条件にしない。編集を行うtoolの前のhookはgateを呼ばないため、path、Skillの読取状態、gateの応答で編集を止めない。
+Skillを使うかどうかは、taskの目的に基づく通常のdiscoveryが決める。
+OMP hookはwriteの本文をJSONに含めたままgateのstdinへ送る。
 argv に本文を載せないため、1 引数や argv 全体の容量制限で検証前に失敗しない。
 20 秒の期限または中断では gate の process group 全体へ SIGKILL を送り、起動した子と出力 pipe の処理の終了を確認してから失敗結果を返す。
 終了を確認できない間は診断を出して待ち続ける。
 OMPのhookは、配備時に`@gateBinary@`を`dotfiles.agents.packages.verificationGate`のstore executableへ置換し、各callで`/run/current-system`を再解決しない。
-具体的なstore executableを埋め込んだhookで開始したsessionは、generationを切り替えてもそのgateと成功して読んだ物理sourceのまま動き、新しいgateと実行packageは新しく始めたsessionへ届く。
+具体的なstore executableを埋め込んだhookで開始したsessionは、generationを切り替えてもそのgateのまま動き、新しいgateと実行packageは新しく始めたsessionへ届く。
 この配備より前に読み込まれ、`/run/current-system`を参照するhookは、呼出しごとに現在のgenerationのgateへ解決されるため、旧gateの保持を主張しない。
-編集対象はsymlinkと`..`を解決したpathで判定する。
-`xd://`、`agent://`、`proc://`、`local://`、`cfg://`、`ssh://`へのwriteはlocal repositoryの編集として登録せず、fileの編集前に行うSkill読取の判定にも渡さない。
-agent runtimeが割り当てた`~/.cache/dotfiles-wsl/sessions/<session>/tmp`の内側にあり、祖先にGit metadataを持たない一時fileは対象から外す。
-割当ての確認には、canonical pathの`<session>`と`DOTFILES_AGENT_SESSION_ID`の一致に加え、同じsession directoryの`metadata.json`が実fileであり、`version`が1、`session_id`が`<session>`と一致することを要求する。
-metadataを持たない手作りのdirectory、別sessionの識別情報、不正なmetadataでは除外しない。
-空であると確認できる実directoryの`.git`はmetadataに数えないが、空でないdirectory、file、symlinkは除外を認めない。
-任意の`TMPDIR`、Git checkout内の一時file、checkoutへ向くsymlinkは対象から外さない。
-記録するのは、成功した読取後のeventで観測した`skill://NAME`、`skill://NAME/SKILL.md`、設定済みSkill rootの`NAME/SKILL.md`の本文読取だけであり、呼出し前、失敗、reference、部分読取、編集操作は証拠にしない。
-記録の前に、OMPの実resultが示すsourceと表示本文、Claudeの成功したtext resultが示すfile pathと本文を現在のcanonical本文へ照合し、省略、要約、token cap、途中のpage、本文を持たない結果は証拠にしない。
-記録には配備先のsymlinkを解決した本文のSHA-256を保存し、編集時に現在の本文と照合するため、配備内容が変わったら読み直す。
-`learned --session ID --path NAME`は、既存の配備済み本文を管理者が明示的に承認するための信頼された操作として残し、通常の読取hookの代わりには使わない。
+`xd://`、`agent://`、`proc://`、`local://`、`cfg://`、`ssh://`へのwriteはlocal repositoryの編集として登録しない。
+Skillの読取を記録していた旧generationがsessionの状態へ残した`skills` directoryは、読む者がいないため、終了時のgateが`calls`と同じく捨てる。
 
-OMPのgate起動例外は説明付きの非ゼロ結果となり、編集前と初回の正常な応答終了時の判定はgateが起動しない場合も処理を止める。
+OMPのgate起動例外は説明付きの非ゼロ結果となり、初回の正常な応答終了時の判定はgateが起動しない場合も処理を止める。
 停止hookの再指示中を示す`stop_hook_active`がtrueか、直近の利用者入力より後に停止hookの継続指示が残る終了要求では、判定が再び失敗しても警告とlogに結果を残し、追加の再指示を返さず利用者へ応答を返す。
 この返却を検証の合格にはせず、gateの非ゼロ終了とT1の成功証跡の作成条件は変えない。
 利用者の新しい入力による終了要求では、再び初回の判定を行う。
 providerの`error`と`aborted`による停止ではgateを実行せず、検証済みの証跡も免除も作らずに再指示を抑える。
-読取後の記録、編集後のrepository登録、shell実行後の変更観測は実行済みのtoolを取り消せず、後段hook自体が失敗すると記録が残らないこともある。
+編集後のrepository登録とshell実行後の変更観測は実行済みのtoolを取り消せず、後段hook自体が失敗すると記録が残らないこともある。
 終了時の検証gateが要求するのは、編集を記録したrepository自身が宣言するT1の`verify`入口だけであり、入口を持たないrepositoryには要求しない。
-このgateは通常のhook経路でtoolが返した全文とその鮮度、編集したrepositoryのT1の完了を確認するもので、悪意あるagentからの防御、注意や理解、後続compactionでの本文保持、検査の意味と真偽、標準全体への意味的な適合を保証しない。
+このgateは通常のhook経路で記録した編集と、そのrepositoryのT1の完了を確認するもので、悪意あるagentからの防御、Skillの適用や設計の質、検査の意味と真偽、標準全体への意味的な適合を保証しない。
 `dotfiles-doctor`の配備driftのPASSは配備物の同一性の観測であり、現行規範への適合を示さない。
 
 ## 資源の上限

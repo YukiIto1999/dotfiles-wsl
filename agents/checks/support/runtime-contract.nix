@@ -2,13 +2,6 @@
 
 let
   expectedAgentRuntime = {
-    skillRoots = [
-      ".gemini/antigravity-cli/skills"
-      ".claude/skills"
-      ".codex/skills"
-      ".omp/agent/skills"
-      ".config/opencode/skills"
-    ];
     cache = {
       root = "${homeDir}/.cache/dotfiles-wsl";
       cargoBuildRoot = "${homeDir}/.cache/dotfiles-wsl/cargo-build";

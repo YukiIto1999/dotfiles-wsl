@@ -134,7 +134,7 @@ worktreeのpreviewは読取だけの予測であり、実行時にGitが削除�
 列挙後にsession directoryが消えた場合は回収済みとして扱い、ほかのsessionの判定を続ける。
 metadataが不正で所有者を確定できないsessionも、previewと実削除の両方で共有cacheを保持する条件に数える。
 旧verification cacheの`.fingerprint.*`は、旧producerが不在と確認できる場合だけ回収し、生存が不明なら保持する。
-形式を確認できた旧`.success`も回収するが、現在の検証枠、証跡、waiver、Skill読取記録はこの回収へ含めない。
+形式を確認できた旧`.success`も回収するが、現在の検証枠、証跡、waiverはこの回収へ含めない。
 
 sandbox は gateway の client 認証、Docker daemon の権限、Windows interop の境界を代替しない。network access が有効なので、sandbox 内 process は到達可能な endpoint へ接続できる。MCP tool は gateway と各 server の user 権限、secret、backend 境界も合わせて評価する。
 

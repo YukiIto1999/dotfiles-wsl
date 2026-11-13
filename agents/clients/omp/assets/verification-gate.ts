@@ -2,16 +2,13 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 const GATE = "@gateBinary@";
 const EDITING_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: true };
-const READING_TOOLS: Record<string, true> = { read: true };
 // 書き込み先を入力から読めない tool。前後の木の指紋を比べて、変えた repository だけを門にかける。
 const SHELL_TOOLS: Record<string, true> = { bash: true, eval: true };
 
-type GateKind = "arm" | "edit" | "learn" | "observe" | "stop";
+type GateKind = "arm" | "observe" | "stop";
 
 const GATE_TIMEOUT_MS = 20_000;
 const DRAIN_REPORT_MS = 30_000;
-const SKILL_URL_PREFIX = "skill://";
-const SKILL_BODY_FILE = "SKILL.md";
 const SESSION_STOP_CONTINUATION = "session-stop-continuation";
 
 // 待機の上限と reader の cancel は子の終了の代用にならないため不可
@@ -105,17 +102,6 @@ async function gate(
 }
 
 /**
- * read の入力が skill の本文を指しうるかの判定
- * @param input - tool_result event の read の入力
- * @returns 本文を指しうる綴りか綴りを読めない入力なら true
- */
-function mayNameSkillBody(input: unknown): boolean {
-  if (typeof input !== "object" || input === null) return true;
-  const path: unknown = Reflect.get(input, "path");
-  return typeof path !== "string" || path.startsWith(SKILL_URL_PREFIX) || path.endsWith(SKILL_BODY_FILE);
-}
-
-/**
  * 会話履歴の 1 件が利用者の入力かの判定
  * @param message - 会話履歴の 1 件
  * @returns 利用者の入力なら true。agent が積んだ message と合成の message は false
@@ -150,27 +136,21 @@ function continuesBlockedRequest(messages: unknown): boolean {
 }
 
 export default function verificationGate(pi: ExtensionAPI): void {
-  // 設計の規律は決める時点で呼ばれなければ意味がない。読んでいない領域は触らせない。
   pi.on("tool_call", async (event, ctx: ExtensionContext) => {
-    const payload = {
-      session_id: ctx.sessionManager.getSessionId(),
-      cwd: ctx.cwd,
-      tool_name: event.toolName,
-      tool_input: event.input,
-    };
-    if (SHELL_TOOLS[event.toolName] === true) {
-      await gate(
-        pi,
-        "observe",
-        { ...payload, hook_event_name: "PreToolUse", tool_use_id: event.toolCallId },
-        ctx.cwd,
-      );
-      return;
-    }
-    if (EDITING_TOOLS[event.toolName] !== true) return;
-    const held = await gate(pi, "edit", payload, ctx.cwd);
-    if (held.code === 0) return;
-    return { block: true as const, reason: held.text };
+    if (SHELL_TOOLS[event.toolName] !== true) return;
+    await gate(
+      pi,
+      "observe",
+      {
+        session_id: ctx.sessionManager.getSessionId(),
+        cwd: ctx.cwd,
+        tool_name: event.toolName,
+        tool_input: event.input,
+        hook_event_name: "PreToolUse",
+        tool_use_id: event.toolCallId,
+      },
+      ctx.cwd,
+    );
   });
 
   pi.on("tool_result", async (event, ctx: ExtensionContext) => {
@@ -186,21 +166,6 @@ export default function verificationGate(pi: ExtensionAPI): void {
         pi,
         "observe",
         { ...payload, hook_event_name: "PostToolUse", tool_use_id: event.toolCallId },
-        ctx.cwd,
-      );
-      return;
-    }
-    if (READING_TOOLS[event.toolName] === true) {
-      if (event.isError || !mayNameSkillBody(event.input)) return;
-      await gate(
-        pi,
-        "learn",
-        {
-          ...payload,
-          hook_event_name: "PostToolUse",
-          is_error: false,
-          tool_result: { content: event.content, details: event.details },
-        },
         ctx.cwd,
       );
       return;

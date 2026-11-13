@@ -121,19 +121,16 @@ let
           diffutils
           git
           jq
-          nodejs
         ]);
       text =
         builtins.replaceStrings
           [
             "@cacheRootRelative@"
             "@verificationEntry@"
-            "@skillRoots@"
           ]
           [
             cacheRootRelative
             (lib.getExe verificationEntry)
-            (lib.escapeShellArgs runtimeContract.skillRoots)
           ]
           (builtins.readFile ./impl/runtime/gate.sh);
     };

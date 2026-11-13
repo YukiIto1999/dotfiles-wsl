@@ -5,463 +5,11 @@ fixture=$PWD/verify-fixture
 home=$fixture/home
 submodule_repo=$fixture/submodule-repo
 
-skill_edit() {
-  jq -nc --arg session "$1" --arg cwd "$home" --arg path "$2" \
-    '{session_id:$session,cwd:$cwd,tool_name:"write",tool_input:{path:$path}}' |
-    "$GATE" hook edit >/dev/null 2>&1
-}
-
-# argv の長さ制限を超える読取結果の jq --argjson 渡しは不可
-skill_read_payload() {
-  local extra=${5-} path relative resolved result_file=$fixture/skill-read-result.json
-  [ -n "$extra" ] || extra='{}'
-  printf '{}' >"$result_file"
-  path=$(printf '%s' "$4" | jq -r '.path // .file_path // .filePath // empty')
-  case $path in
-  skill://*)
-    relative=${path#skill://}
-    case $relative in */*) ;; *) relative="$relative/SKILL.md" ;; esac
-    path="$home/.omp/agent/skills/$relative"
-    ;;
-  /*) ;;
-  *) path="$home/$path" ;;
-  esac
-  if [ -f "$path" ] && { [ "$3" = read ] || [ "$3" = Read ]; }; then
-    resolved=$(realpath -e -- "$path")
-    jq -nc --rawfile body "$path" --arg resolved "$resolved" --arg tool "$3" '
-      ($body | gsub("\r\n?"; "\n") | sub("^\uFEFF"; "")) as $normalized |
-      ($normalized | sub("\n$"; "")) as $display |
-      ($normalized | split("\n") | if last == "" then .[:-1] else . end | length) as $lines |
-      if $tool == "read" then
-        {tool_result:{content:[{type:"text",text:$display}],
-          details:{resolvedPath:$resolved,totalLines:$lines,
-            displayContent:{text:$display,startLine:1,lineNumbers:[range(1;$lines+1)]}}}}
-      else
-        {tool_response:{type:"text",file:{filePath:$resolved,content:$display,
-          numLines:$lines,startLine:1,totalLines:$lines}}}
-      end' >"$result_file"
-  fi
-  jq -nc --arg session "$1" --arg event "$2" --arg tool "$3" \
-    --arg cwd "$home" --argjson input "$4" --argjson extra "$extra" --slurpfile result "$result_file" \
-    '($input | if $tool == "Read" and has("path") then .file_path = .path | del(.path) else . end) as $native |
-      {session_id:$session,cwd:$cwd,hook_event_name:$event,tool_name:$tool,tool_input:$native} * $result[0] * $extra'
-}
-
-skill_read_event() {
-  skill_read_payload "$@" | "$GATE" hook learn
-}
-
-expect_unread_skill() {
-  if skill_edit "$1" /r/core/library.ts; then
-    echo "gate accepted an incomplete Skill read: $1" >&2
-    exit 1
-  fi
-}
-
-edit_with_tmpdir() {
-  local tmpdir=$1
-  shift
-  TMPDIR=$tmpdir skill_edit "$@"
-}
-
-expect_edit_allowed() {
-  if ! edit_with_tmpdir "$1" "$2" "$3"; then
-    echo "gate blocked an edit that needs no Skill: $3 (TMPDIR=$1 DOTFILES_AGENT_SESSION_ID=${DOTFILES_AGENT_SESSION_ID-unset})" >&2
-    exit 1
-  fi
-}
-
-expect_edit_blocked() {
-  if edit_with_tmpdir "$1" "$2" "$3"; then
-    echo "gate accepted an unread Skill path: $3 (TMPDIR=$1 DOTFILES_AGENT_SESSION_ID=${DOTFILES_AGENT_SESSION_ID-unset})" >&2
-    exit 1
-  fi
-}
-
 session_metadata() {
   jq -nc --arg session_id "$1" --argjson version "$2" --argjson owner_pid "$$" \
     '{version: $version, session_id: $session_id, client: "omp",
       project_id: ($session_id | split(".")[0]), boot_id: "0",
       owner_pid: $owner_pid, owner_start_time: "0"}'
-}
-
-check_isolated_scratch() {
-  local sessions="$home/.cache/dotfiles-wsl/sessions" production="$fixture/scratch-production"
-  local scratch_session=fixture-scratch.omp.4242.AbCd1234 forged_session=fixture-forged.omp.4243.AbCd1234
-  local inside_session=fixture-inside-git.omp.4244.AbCd1234
-  local scratch="$sessions/$scratch_session/tmp" forged="$sessions/$forged_session" inside="$sessions/$inside_session"
-  local relative path tmpdir session variant
-  local ui_read='{"path":"skill://ui-design"}'
-  local -x DOTFILES_AGENT_SESSION_ID=$scratch_session
-
-  mkdir -p "$scratch/reproduction" "$scratch/existing/runtimes/web" "$forged" "$inside/tmp" \
-    "$fixture/forged-target" "$production/runtimes/web" "$production/surfaces/viewer" "$production/core"
-  git init -q "$production"
-  git init -q "$inside"
-  printf 'export {};\n' >"$production/runtimes/web/App.tsx"
-  printf 'export {};\n' >"$scratch/existing/runtimes/web/App.tsx"
-  session_metadata "$scratch_session" 1 >"$sessions/$scratch_session/metadata.json"
-  session_metadata "$forged_session" 1 >"$forged/metadata.json"
-  session_metadata "$inside_session" 1 >"$inside/metadata.json"
-  mkdir "$home/.cache/dotfiles-wsl/.git"
-  expect_edit_allowed "$scratch" fixture-empty-git-marker "$scratch/runtimes/web/App.tsx"
-  printf 'unrecognized metadata\n' >"$home/.cache/dotfiles-wsl/.git/config"
-  expect_edit_blocked "$scratch" fixture-unknown-git-marker "$scratch/runtimes/web/App.tsx"
-  rm "$home/.cache/dotfiles-wsl/.git/config"
-  rmdir "$home/.cache/dotfiles-wsl/.git"
-
-  for path in \
-    "$scratch/reproduction/runtimes/web/App.tsx" \
-    "$scratch/reproduction/surfaces/viewer/features/x.tsx" \
-    "$scratch/reproduction/core/library.ts" \
-    "$scratch/reproduction/b/domain/Invoice.cs" \
-    "$scratch/reproduction/fixtures/surfaces/viewer/x.tsx" \
-    "$scratch/reproduction/inner/../runtimes/web/Dotdot.tsx" \
-    "$scratch/existing/runtimes/web/App.tsx" \
-    ".cache/dotfiles-wsl/sessions/fixture-scratch.omp.4242.AbCd1234/tmp/relative/runtimes/web/App.tsx"; do
-    expect_edit_allowed "$scratch" fixture-scratch-unread "$path"
-  done
-  ln -s "$scratch/reproduction" "$scratch/alias"
-  expect_edit_allowed "$scratch" fixture-scratch-unread "$scratch/alias/runtimes/web/Aliased.tsx"
-  ln -s "$scratch" "$fixture/scratch-spelling"
-  expect_edit_allowed "$fixture/scratch-spelling" fixture-scratch-unread "$scratch/reproduction/runtimes/web/App.tsx"
-  test -z "$(TMPDIR=$scratch "$GATE" skill --path "$scratch/reproduction/runtimes/web/App.tsx")"
-  test "$(TMPDIR=$scratch "$GATE" skill --path "$production/runtimes/web/App.tsx")" = ui-design
-
-  for tmpdir in "" "$fixture" "$home" "$sessions" "${scratch%/tmp}" "$scratch/reproduction"; do
-    expect_edit_blocked "$tmpdir" fixture-scratch-foreign "$scratch/reproduction/runtimes/web/App.tsx"
-  done
-  ln -s "$fixture/forged-target" "$forged/tmp"
-  DOTFILES_AGENT_SESSION_ID=$forged_session expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$fixture/forged-target/runtimes/web/App.tsx"
-  DOTFILES_AGENT_SESSION_ID=$forged_session expect_edit_blocked "$forged/tmp" fixture-scratch-foreign "$forged/tmp/runtimes/web/App.tsx"
-  DOTFILES_AGENT_SESSION_ID=$inside_session expect_edit_blocked "$inside/tmp" fixture-scratch-foreign "$inside/tmp/runtimes/web/App.tsx"
-  for session in "$inside_session" ""; do
-    DOTFILES_AGENT_SESSION_ID=$session expect_edit_blocked "$scratch" fixture-scratch-foreign "$scratch/reproduction/runtimes/web/App.tsx"
-  done
-  for variant in handmade malformed foreign-id version linked; do
-    session=fixture-$variant.omp.4245.AbCd1234
-    mkdir -p "$sessions/$session/tmp"
-    case $variant in
-    malformed) printf 'not json\n' >"$sessions/$session/metadata.json" ;;
-    foreign-id) session_metadata "$scratch_session" 1 >"$sessions/$session/metadata.json" ;;
-    version) session_metadata "$session" 2 >"$sessions/$session/metadata.json" ;;
-    linked)
-      session_metadata "$session" 1 >"$fixture/linked-metadata.json"
-      ln -s "$fixture/linked-metadata.json" "$sessions/$session/metadata.json"
-      ;;
-    esac
-    DOTFILES_AGENT_SESSION_ID=$session expect_edit_blocked "$sessions/$session/tmp" fixture-scratch-foreign \
-      "$sessions/$session/tmp/runtimes/web/App.tsx"
-  done
-
-  for path in \
-    "$production/runtimes/web/App.tsx" \
-    "$production/runtimes/web/Created.tsx" \
-    "$production/core/library.ts" \
-    "$production/surfaces/viewer/fixtures/Page.ts" \
-    "$production/runtimes/web/fixtures/App.tsx" \
-    /r/core/fixtures/library.ts; do
-    expect_edit_blocked "$scratch" fixture-production-unread "$path"
-  done
-  skill_read_event fixture-production-read PostToolUse read "$ui_read"
-  expect_edit_allowed "$scratch" fixture-production-read "$production/runtimes/web/App.tsx"
-  expect_edit_blocked "$scratch" fixture-production-read "$production/core/library.ts"
-  skill_read_event fixture-scratch-partial PostToolUse read "$ui_read" '{"is_error":true}'
-  expect_edit_blocked "$scratch" fixture-scratch-partial "$production/runtimes/web/App.tsx"
-  expect_edit_allowed "$scratch" fixture-scratch-partial "$scratch/reproduction/runtimes/web/App.tsx"
-
-  relative=$(realpath -m --relative-to="$scratch" "$production/runtimes/web/App.tsx")
-  expect_edit_blocked "$scratch" fixture-traversal "$scratch/$relative"
-  expect_edit_blocked "$scratch" fixture-traversal "$scratch/missing/../$relative"
-  expect_edit_blocked "$scratch" fixture-traversal "$production/surfaces/viewer/tests/../Page.tsx"
-  expect_edit_blocked "$scratch" fixture-traversal /r/surfaces/viewer/tests/../x.tsx
-  ln -s "$production" "$scratch/production-link"
-  ln -s "$production/runtimes/web/Pending.tsx" "$scratch/pending.tsx"
-  ln -s "$production/core/library.ts" "$scratch/notes.md"
-  for path in \
-    "$scratch/production-link/runtimes/web/App.tsx" \
-    "$scratch/production-link/runtimes/web/Created.tsx" \
-    "$scratch/pending.tsx" \
-    "$scratch/notes.md"; do
-    expect_edit_blocked "$scratch" fixture-symlink "$path"
-  done
-
-  git init -q "$scratch/clone"
-  mkdir "$scratch/linked"
-  printf 'gitdir: %s\n' "$production/.git" >"$scratch/linked/.git"
-  for path in \
-    "$scratch/clone/runtimes/web/App.tsx" \
-    "$scratch/clone/new/surfaces/viewer/x.tsx" \
-    "$scratch/clone/core/library.ts" \
-    "$scratch/linked/runtimes/web/App.tsx"; do
-    expect_edit_blocked "$scratch" fixture-clone "$path"
-  done
-  skill_read_event fixture-clone-read PostToolUse read "$ui_read"
-  expect_edit_allowed "$scratch" fixture-clone-read "$scratch/clone/runtimes/web/App.tsx"
-
-  for path in \
-    /r/surfaces/viewer/x.test.tsx \
-    /r/surfaces/viewer/x.doubles.tsx \
-    /r/tests/conformance/small/viewer.ts \
-    "$production/surfaces/viewer/tests/small/Page.tsx"; do
-    expect_edit_allowed "$fixture" fixture-test-paths "$path"
-  done
-}
-
-check_skill_learning() {
-  local source="$fixture/skill-source" deployed="$home/.omp/agent/skills"
-  local body input session rejected status
-  local -a design_paths=(
-    /r/core/library.ts
-    /r/core/b/application/ports/IFoo.cs
-    /r/contracts/canonical/Order.cs
-    /r/contracts/types.tsp
-    /r/core/b/domain/OrderFailure.cs
-    /r/core/b/errors/cause.ts
-    /r/module.csproj
-    /r/libs/shared/codec.ts
-    /r/surfaces/cli/main.ts
-  )
-  mkdir -p "$source" "$deployed"
-  cp -R "$CODEBASE_DESIGN_SOURCE" "$source/codebase-design"
-  chmod -R u+w "$source/codebase-design"
-  ln -s "$source/codebase-design" "$deployed/codebase-design"
-  ln -s "$UI_DESIGN_SOURCE" "$deployed/ui-design"
-  ln -s "$DOMAIN_MODELING_SOURCE" "$deployed/domain-modeling"
-  body="$deployed/codebase-design/SKILL.md"
-
-  test "$("$GATE" skill --path /r/surfaces/viewer/features/x/y.tsx)" = ui-design
-  test "$("$GATE" skill --path /r/core/b/domain/Invoice.cs)" = domain-modeling
-  for rejected in "${design_paths[@]}"; do
-    test "$("$GATE" skill --path "$rejected")" = codebase-design
-    if skill_edit fixture-unread "$rejected"; then
-      echo "gate accepted an unread codebase-design path: $rejected" >&2
-      exit 1
-    fi
-  done
-  test -z "$("$GATE" skill --path /r/surfaces/viewer/x.test.tsx)"
-  test -z "$("$GATE" skill --path /r/docs/note.md)"
-  expect_unread_skill fixture-unread
-
-  input=$(jq -nc --arg path "$body" '{path:$path}')
-  for rejected in PreToolUse PostToolUseFailure ""; do
-    session="fixture-event-${rejected:-missing}"
-    skill_read_event "$session" "$rejected" read "$input"
-    expect_unread_skill "$session"
-  done
-  skill_read_event fixture-result-error PostToolUse read "$input" '{"is_error":true}'
-  expect_unread_skill fixture-result-error
-  skill_read_event fixture-response-error PostToolUse Read "$input" '{"tool_response":{"error":"read failed"}}'
-  expect_unread_skill fixture-response-error
-  skill_read_event fixture-response-failed PostToolUse Read "$input" '{"tool_response":{"success":false}}'
-  expect_unread_skill fixture-response-failed
-  skill_read_event fixture-result-truncated PostToolUse read "$input" \
-    '{"tool_result":{"details":{"truncation":{"truncated":true}}}}'
-  expect_unread_skill fixture-result-truncated
-  skill_read_event fixture-result-summary PostToolUse read "$input" \
-    '{"tool_result":{"details":{"summary":{"lines":1,"elidedSpans":1,"elidedLines":2}}}}'
-  expect_unread_skill fixture-result-summary
-  skill_read_event fixture-result-output-cap PostToolUse read "$input" \
-    '{"tool_result":{"details":{"meta":{"truncation":{"direction":"head","truncatedBy":"lines","totalLines":3,"totalBytes":80,"outputLines":1,"outputBytes":14}}}}}'
-  expect_unread_skill fixture-result-output-cap
-  skill_read_event fixture-result-columns PostToolUse read "$input" \
-    '{"tool_result":{"details":{"meta":{"limits":{"columnTruncated":{"maxColumn":40,"unit":"chars"}}}}}}'
-  expect_unread_skill fixture-result-columns
-  skill_read_event fixture-result-page PostToolUse read "$input" \
-    '{"tool_result":{"details":{"displayContent":{"lineNumbers":[1]}}}}'
-  expect_unread_skill fixture-result-page
-  skill_read_event fixture-result-body PostToolUse read "$input" \
-    '{"tool_result":{"content":[{"type":"text","text":"different returned body"}],"details":{"displayContent":{"text":"different returned body"}}}}'
-  expect_unread_skill fixture-result-body
-  skill_read_event fixture-result-rendered PostToolUse read "$input" \
-    '{"tool_result":{"content":[{"type":"text","text":"Only a notice was returned."}]}}'
-  expect_unread_skill fixture-result-rendered
-  cp "$body" "$fixture/other-code-skill.md"
-  skill_read_event fixture-result-source PostToolUse read "$input" \
-    "$(jq -nc --arg path "$fixture/other-code-skill.md" '{tool_result:{details:{resolvedPath:$path}}}')"
-  expect_unread_skill fixture-result-source
-  skill_read_event fixture-claude-token-cap PostToolUse Read "$input" \
-    '{"tool_response":{"file":{"truncatedByTokenCap":true}}}'
-  expect_unread_skill fixture-claude-token-cap
-  skill_read_event fixture-claude-page PostToolUse Read "$input" \
-    '{"tool_response":{"file":{"numLines":1}}}'
-  expect_unread_skill fixture-claude-page
-  skill_read_event fixture-claude-unchanged PostToolUse Read "$input" \
-    '{"tool_response":{"type":"file_unchanged"}}'
-  expect_unread_skill fixture-claude-unchanged
-  skill_read_event fixture-claude-body PostToolUse Read "$input" \
-    '{"tool_response":{"file":{"content":"different returned body"}}}'
-  expect_unread_skill fixture-claude-body
-  skill_read_event fixture-claude-source PostToolUse Read "$input" \
-    "$(jq -nc --arg path "$fixture/other-code-skill.md" '{tool_response:{file:{filePath:$path}}}')"
-  expect_unread_skill fixture-claude-source
-  skill_read_event fixture-write-event PostToolUse write "$input"
-  expect_unread_skill fixture-write-event
-
-  for rejected in \
-    "$deployed/codebase-design/nonexistent.md" \
-    "$deployed/codebase-design/DEEPENING.md" \
-    'skill://codebase-design/DEEPENING.md' \
-    "$body:1-2" 'skill://codebase-design:1-2' 'skill://codebase-design/SKILL.md:raw' \
-    "$deployed/codebase-design" "$source/codebase-design/SKILL.md"; do
-    session="fixture-path-$(printf '%s' "$rejected" | sha256sum | cut -d ' ' -f 1)"
-    input=$(jq -nc --arg path "$rejected" '{path:$path}')
-    skill_read_event "$session" PostToolUse read "$input"
-    expect_unread_skill "$session"
-  done
-  input=$(jq -nc --arg path "$body" '{file_path:$path,offset:1}')
-  skill_read_event fixture-offset PostToolUse Read "$input"
-  expect_unread_skill fixture-offset
-  input=$(jq -nc --arg path "$body" '{file_path:$path,limit:2}')
-  skill_read_event fixture-limit PostToolUse Read "$input"
-  expect_unread_skill fixture-limit
-  input=$(jq -nc --arg path "$deployed/codebase-design/nonexistent.md" '{path:$path}')
-  skill_read_event fixture-edit-bypass PreToolUse write "$input"
-  skill_edit fixture-edit-bypass "$deployed/codebase-design/nonexistent.md"
-  expect_unread_skill fixture-edit-bypass
-  skill_edit fixture-edit-body-bypass "$body"
-  expect_unread_skill fixture-edit-body-bypass
-
-  mkdir -p "$home/.cache/dotfiles-wsl/verification/sessions/fixture-old-marker/skills"
-  : >"$home/.cache/dotfiles-wsl/verification/sessions/fixture-old-marker/skills/codebase-design"
-  expect_unread_skill fixture-old-marker
-
-  cat "$body" >/dev/null
-  input=$(jq -nc --arg path "$body" '{path:$path}')
-  skill_read_event fixture-body PostToolUse read "$input"
-  for rejected in "${design_paths[@]}"; do
-    skill_edit fixture-body "$rejected"
-  done
-  input=$(jq -nc --arg path "$body" '{file_path:$path}')
-  skill_read_event fixture-claude PostToolUse Read "$input" '{"tool_response":{"type":"text"}}'
-  skill_edit fixture-claude /r/core/library.ts
-  for rejected in 'skill://codebase-design' 'skill://codebase-design/SKILL.md' \
-    '.omp/agent/skills/codebase-design/SKILL.md'; do
-    session="fixture-canonical-$(printf '%s' "$rejected" | sha256sum | cut -d ' ' -f 1)"
-    input=$(jq -nc --arg path "$rejected" '{path:$path}')
-    skill_read_event "$session" PostToolUse read "$input"
-    skill_edit "$session" /r/core/library.ts
-  done
-  printf '\nChanged fixture body digest.\n' >>"$source/codebase-design/SKILL.md"
-  expect_unread_skill fixture-body
-  expect_unread_skill fixture-claude
-  cat "$body" >/dev/null
-  input=$(jq -nc --arg path "$body" '{path:$path}')
-  skill_read_event fixture-body PostToolUse read "$input"
-  skill_edit fixture-body /r/core/library.ts
-
-  if "$GATE" teach --session fixture-skills --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1; then
-    echo 'gate let an unread discipline be edited' >&2
-    exit 1
-  fi
-  "$GATE" learned --session fixture-skills --path ui-design
-  "$GATE" teach --session fixture-skills --path /r/surfaces/viewer/x.tsx >/dev/null
-  if "$GATE" teach --session fixture-skills --path /r/core/b/domain/Invoice.cs >/dev/null 2>&1; then
-    echo 'gate accepted one discipline as a licence for another' >&2
-    exit 1
-  fi
-  "$GATE" learned --session fixture-skills --path codebase-design
-  for rejected in "${design_paths[@]}"; do
-    "$GATE" teach --session fixture-skills --path "$rejected" >/dev/null
-  done
-  if "$GATE" teach --session fixture-skills --path /r/core/b/domain/Invoice.cs >/dev/null 2>&1; then
-    echo 'gate accepted codebase-design as a licence for domain-modeling' >&2
-    exit 1
-  fi
-  rm "$source/codebase-design/SKILL.md"
-  set +e
-  "$GATE" learned --session fixture-empty-skill --path codebase-design >/dev/null 2>&1
-  status=$?
-  set -e
-  if [ "$status" -eq 0 ]; then
-    echo 'trusted learned command accepted a missing canonical Skill body' >&2
-    exit 1
-  fi
-  input='{"path":"skill://codebase-design"}'
-  skill_read_event fixture-missing-body PostToolUse read "$input"
-  if skill_edit fixture-missing-body /r/module.csproj; then
-    echo 'gate accepted a successful event without an existing canonical body' >&2
-    exit 1
-  fi
-  cp "$CODEBASE_DESIGN_SOURCE/SKILL.md" "$source/codebase-design/SKILL.md"
-
-  "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
-  body="$home/.local/share/fixture adapter/procedures/ui-design/SKILL.md"
-  mkdir -p "$(dirname "$body")"
-  cp "$UI_DESIGN_SOURCE/SKILL.md" "$body"
-  if "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1; then
-    echo 'gate ignored the contract skill root' >&2
-    exit 1
-  fi
-  cat "$body" >/dev/null
-  input=$(jq -nc --arg path "$body" '{path:$path}')
-  GATE="$CUSTOM_SKILL_ROOT_GATE" skill_read_event fixture-custom-root PostToolUse read "$input"
-  "$CUSTOM_SKILL_ROOT_GATE" teach --session fixture-custom-root --path /r/surfaces/viewer/x.tsx >/dev/null
-  check_isolated_scratch
-}
-
-large_read_teach() {
-  "$CUSTOM_SKILL_ROOT_GATE" teach --session "$1" --path /r/surfaces/viewer/x.tsx >/dev/null 2>&1
-}
-
-large_read_learn() {
-  jq -c --arg session "$2" ".session_id = \$session | $3" "$1" | "$CUSTOM_SKILL_ROOT_GATE" hook learn
-}
-
-expect_large_read_learned() {
-  large_read_learn "$1" "$2" .
-  if ! large_read_teach "$2"; then
-    echo "gate refused a complete Skill read beyond the argument limit: $2" >&2
-    exit 1
-  fi
-}
-
-expect_large_read_refused() {
-  large_read_learn "$1" "$2" "$3"
-  if large_read_teach "$2"; then
-    echo "gate accepted an incomplete or altered Skill read beyond the argument limit: $2" >&2
-    exit 1
-  fi
-}
-
-check_large_read_proof() {
-  local body="$home/.local/share/fixture adapter/procedures/ui-design/SKILL.md"
-  local omp=$fixture/large-read-omp.json claude=$fixture/large-read-claude.json input
-  local cut='.[:-2000]' alter='(.[:100000] + "§" + .[100001:])'
-  chmod u+w "$body"
-  seq -f 'Large discipline line %g keeps the whole read beyond one argument.' 1 4000 >>"$body"
-  test "$(wc -c <"$body")" -gt 131072
-  input=$(jq -nc --arg path "$body" '{path:$path}')
-  skill_read_payload large PostToolUse read "$input" >"$omp"
-  skill_read_payload large PostToolUse Read "$input" >"$claude"
-  test "$(wc -c <"$omp")" -gt 262144
-  test "$(wc -c <"$claude")" -gt 131072
-
-  expect_large_read_learned "$omp" large-omp-complete
-  expect_large_read_learned "$claude" large-claude-complete
-
-  expect_large_read_refused "$omp" large-omp-truncated "
-    (.tool_result.details.displayContent.text | $cut) as \$shown
-    | (\$shown | split(\"\\n\") | length) as \$lines
-    | .tool_result.content[0].text = \$shown
-    | .tool_result.details.displayContent = {text: \$shown, startLine: 1, lineNumbers: [range(1; \$lines + 1)]}
-    | .tool_result.details.totalLines = \$lines"
-  expect_large_read_refused "$omp" large-omp-altered \
-    ".tool_result.content[0].text |= $alter | .tool_result.details.displayContent.text |= $alter"
-  expect_large_read_refused "$omp" large-omp-altered-rendered ".tool_result.content[0].text |= $alter"
-  expect_large_read_refused "$omp" large-omp-altered-display ".tool_result.details.displayContent.text |= $alter"
-  expect_large_read_refused "$omp" large-omp-missing 'del(.tool_result.details.displayContent)'
-  expect_large_read_refused "$omp" large-omp-no-result 'del(.tool_result)'
-  expect_large_read_refused "$claude" large-claude-truncated ".tool_response.file.content |= $cut"
-  expect_large_read_refused "$claude" large-claude-altered ".tool_response.file.content |= $alter"
-  expect_large_read_refused "$claude" large-claude-missing 'del(.tool_response.file)'
-
-  printf 'Changed after the read.\n' >>"$body"
-  if large_read_teach large-omp-complete; then
-    echo 'gate kept a large Skill read after the body changed' >&2
-    exit 1
-  fi
-  expect_large_read_refused "$omp" large-omp-replayed .
 }
 
 stall_litter() {
@@ -1383,8 +931,7 @@ external_state() {
 
 reset_state_home() {
   rm -rf "$state_home" "$state_external" "$state_dangling"
-  mkdir -p "$state_home/.omp/agent/skills/writer-skill" "$state_external"
-  printf '# Writer skill\n' >"$state_home/.omp/agent/skills/writer-skill/SKILL.md"
+  mkdir -p "$state_home" "$state_external"
   printf 'sentinel\n' >"$state_external/sentinel"
   chmod 755 "$state_external"
   chmod 644 "$state_external/sentinel"
@@ -1410,8 +957,6 @@ state_writer() {
       "$GATE" hook arm
     ;;
   observe) state_observe PreToolUse ;;
-  learned) "$GATE" learned --session "$state_session" --path writer-skill ;;
-  learn-hook) skill_read_event "$state_session" PostToolUse read '{"path":"skill://writer-skill"}' ;;
   esac
 }
 
@@ -1425,16 +970,11 @@ expect_state_writer_refusal() {
 }
 
 expect_state_content() {
-  local writer=$1 file=$2 body=$state_home/.omp/agent/skills/writer-skill/SKILL.md
-  local -a held
+  local writer=$1 file=$2
   case $writer in
   waive) grep -qx 'version=1' "$file" && grep -qx 'reason=fixture reason' "$file" ;;
   arm | arm-hook) [ "$(<"$file")" = "$(realpath -e -- "$state_repository")" ] ;;
   observe) [ "$(wc -l <"$file")" -eq 2 ] ;;
-  learned | learn-hook)
-    mapfile -t held <"$file"
-    [ "${#held[@]}" -eq 2 ] && [ "${held[0]}" = "$(sha256sum <"$body" | cut -d ' ' -f 1)" ] && [ "${held[1]}" = "$body" ]
-    ;;
   esac || state_fail "$writer の控えの形が変わった: $file"
 }
 
@@ -1442,7 +982,7 @@ check_gate_state_writers() {
   local -x HOME=$state_home
   local home=$state_home state_session=fixture-writer
   local writer variant index status before state_file session_dir hash name previous_index
-  local -a chain files writers=(waive arm arm-hook observe learned learn-hook)
+  local -a chain files writers=(waive arm arm-hook observe)
 
   mkdir -p "$state_writers"
   t1_repository "$state_repository" 60
@@ -1519,7 +1059,7 @@ check_gate_state_writers() {
   done
 
   for state_session in .. . a/b ../escape; do
-    for writer in arm arm-hook observe learned learn-hook; do
+    for writer in arm arm-hook observe; do
       reset_state_home
       status=0
       state_writer "$writer" >/dev/null 2>"$state_writers/stderr" || status=$?
@@ -1631,6 +1171,67 @@ check_gate_state_writers() {
   [ "$status" -eq 2 ] && [ -f "$state_cache/verification/calls/keep" ] || state_fail "stop が名の外の directory を辿った($status)"
 }
 
+# Skill の読取は編集の前提ではない。以前は読取を要求した綴り(.tsx、domain、core)の編集も、読取の有無では止まらない。
+# 止めるのは編集した木へ検証入口がまだ通っていないことだけで、入口を通せば終了でき、再び編集すれば止まる。
+# 旧 generation が session へ残した Skill の読取記録は、読む者がいないため終了を止めず、捨てられる。
+freshness_edit() {
+  jq -nc --arg session "$1" --arg cwd "$2" --arg path "$3" \
+    '{session_id:$session,cwd:$cwd,hook_event_name:"PostToolUse",tool_name:"Edit",tool_input:{file_path:$path}}' |
+    "$GATE" hook arm
+}
+
+freshness_stop() {
+  jq -nc --arg session "$1" --arg cwd "$2" '{session_id:$session,cwd:$cwd}' | "$GATE" hook stop
+}
+
+check_edits_gate_on_freshness_only() {
+  local repository=$fixture/freshness-only-repo session=fixture-freshness-only
+  local session_dir=$home/.cache/dotfiles-wsl/verification/sessions/$session
+  local path status
+  local -a paths=(surfaces/viewer/App.tsx core/b/domain/Invoice.cs core/library.ts)
+
+  t1_repository "$repository" 60
+  for path in "${paths[@]}"; do
+    mkdir -p "$repository/${path%/*}"
+    printf 'held\n' >"$repository/$path"
+  done
+  git -C "$repository" add -- "${paths[@]}"
+  git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm paths
+
+  for path in "${paths[@]}"; do
+    printf 'edited\n' >>"$repository/$path"
+    freshness_edit "$session" "$repository" "$repository/$path"
+  done
+  status=0
+  freshness_stop "$session" "$repository" >"$fixture/freshness.stdout" 2>/dev/null || status=$?
+  if [ "$status" -ne 2 ] || [[ $(<"$fixture/freshness.stdout") != *'dotfiles-agent-verify -- devenv shell -- verify'* ]]; then
+    echo "stop did not hold edited sources the entrance never ran on ($status)" >&2
+    exit 1
+  fi
+
+  mkdir -p "$session_dir/skills"
+  printf '%s\n%s\n' "$(printf stale | sha256sum | cut -d ' ' -f 1)" "$home/.omp/agent/skills/ui-design/SKILL.md" \
+    >"$session_dir/skills/ui-design"
+  (cd "$repository" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+  if ! freshness_stop "$session" "$repository" >/dev/null 2>&1; then
+    echo 'stop held sources the entrance ran on, or a Skill read record an earlier generation left behind' >&2
+    exit 1
+  fi
+  if [ -e "$session_dir/skills" ]; then
+    echo 'stop kept the Skill read record nobody reads' >&2
+    exit 1
+  fi
+
+  printf 'edited again\n' >>"$repository/${paths[0]}"
+  freshness_edit "$session" "$repository" "$repository/${paths[0]}"
+  status=0
+  freshness_stop "$session" "$repository" >/dev/null 2>&1 || status=$?
+  if [ "$status" -ne 2 ]; then
+    echo "stop did not hold sources edited after the entrance ran ($status)" >&2
+    exit 1
+  fi
+}
+
 check_verification_slot() {
   local previous=$PWD
   slot_commands
@@ -1652,14 +1253,6 @@ if [ "${1-}" = --budget-boundary-only ]; then
   exit 0
 fi
 
-
-if [ "${1-}" = --skills-only ]; then
-  mkdir -p "$home"
-  export HOME=$home
-  check_skill_learning
-  check_large_read_proof
-  exit 0
-fi
 mkdir -p "$home" "$submodule_repo"
 git -C "$submodule_repo" init -q
 git -C "$submodule_repo" config user.name fixture
@@ -2039,5 +1632,7 @@ check_receipt_boundaries
 check_wrapper_runs_every_time
 
 check_gate_state_writers
+
+check_edits_gate_on_freshness_only
 
 check_verification_slot

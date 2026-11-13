@@ -50,16 +50,14 @@ Think in English. Respond in Japanese.
 
 ## subagents
 
-独立した視点が必要な作業（レビューやセキュリティ確認を含む）と、他の作業から独立して進められ、費用の大きい部分作業では subagent を使う。複雑さだけでは委譲の理由にならない。配備先の client は `## 基盤` の client の能力表が示す。
+subagentは、レビューやセキュリティ確認など独立した視点が必要な場合と、文脈の再構築・結果の検証を含めても委譲が有効な独立部分作業に使う。複雑さだけを理由にせず、数回のtool呼び出しで終わる調査、単一ファイルの編集、独立した視点を要さない自分の作業の検証は自分で行う。
+委譲結果は作業規律の裏取りに従って利用する。配備先clientの能力は `## 基盤` の表で確認する。
 Orcaのworktreeとterminalの操作や別agentへの完全なhandoffは`orca-cli`、Orca workerの監督やtask DAGの協調実行は`orchestration`を使う。
-
-subagent は文脈の再構築と報告の検証の分だけ高くつく。数回の tool 呼び出しで終わる調査、単一ファイルの編集、独立した視点を要さない自分の作業の検証は自分で行う。委譲した結果は、作業規律の裏取りに従って利用する。
 
 @subagentRoster@
 
 ## skills
 
-繰り返し作業は手で再現せず、対応するSkillを読む。
 sessionが提示するSkillの名前とdescriptionから選び、該当する本文を読む。
 一覧が提示されない、必要なcommandや依存referenceの入口が見つからない、または配備内容を調べる場合だけ、Skill一覧 `@skillCatalog@`を読む。通常のtaskで一覧全体を追加読込しない。
 一覧は配備元のdescription、起動flag、sourceを保持し、外部Skillの原名、本文、付属資料は変えない。
@@ -71,7 +69,7 @@ client固有またはplugin由来のSkillはsessionが提示した名前を使�
 依存方向は `agent → Skill → Capability → provider / runtime` とする。agent は task の委譲、context、権限、成果物の引渡しを所有し、Skill は反復する判断と手順を所有し、Capability は consumer 非依存の意味、state、security、lifecycle を所有する。provider と runtime は Capability の実装詳細であり、agent や Skill が直接選ばない。
 
 Read / Grep / Glob / Edit / Write / Bash、LSP、subagentのようなharness機能と、schemaを確認して使う汎用CLIは直接使う。
-反復する専門判断は一致するSkillから入り、providerを持つ能力はそのSkillが宣言するCapabilityへ渡す。
+反復する判断と手順は一致するSkillから入り、providerを持つ能力はそのSkillが宣言するCapabilityへ渡す。
 単一toolの呼出しを包むSkillは作らない。
 
 test-firstの実装は`tdd`のred → greenで進め、refactoringをそのloopへ混ぜない。

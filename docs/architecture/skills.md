@@ -115,6 +115,8 @@ browserが必要なbranchだけ、その環境で利用可能な専門Skillへ�
 | 資料 | この環境で使う判断と所有者 | 今回採用しないものと理由 |
 |---|---|---|
 | [E2Eテスト大全](https://blog.kuniwak.com/entry/e2ebok) | 誤実装と公開境界から検証層を選ぶ。UIの実描画と全構成の結合を区別し、非同期処理は契約上の観測時点で判定する。検査割当は現行標準、実画面の業務結果は`browser-operation`が所有する | 独自の分類、探索runner、ケース連鎖の共通導入。状態モデルと結合範囲は対象projectの保証から選ぶ |
+| [AI開発とテスト設計の記事](https://zenn.dev/ababup1192/articles/77b844dcfc1529) | 型、入力領域、操作列、実結合、利用者面の保証を分け、検出する誤実装から検証を選ぶ。判定規律は現行標準、agentの手順は既存Skillが所有する | 件数だけの網羅判定、型や生成schemaだけによる意味の保証、全変更へのmutationや形式手法の一律追加。確認する保証と実際の検出力を省略しない |
+| [TypeSpecと仕様保証の共有会話](https://chatgpt.com/share/6af70306-dc44-83ec-a5f5-ba55424d5227)・[TDD・BDD・SDDの共有会話](https://chatgpt.com/share/6af70319-4910-83ee-a2fc-38d3ba172509) | 要求の妥当性、仕様自体の整合、実装の適合、実行前提を分けて確認する。設計の判断は現行標準、受入条件から実測への引渡しは既存の計画・実装手順へ接続する | 汎用Verification IRの新設、TypeSpecの置換、別々の必須文書や儀式としてのTDD・BDD・SDD。共有会話を実証研究の一次資料とせず、モデル能力だけで独立した期待値や安全境界を撤去しない |
 | [ISUCON2026の準備記録](https://zenn.dev/luvtechno/articles/isucon2026-preparation)・[当日記録](https://zenn.dev/luvtechno/articles/isucon2026-competition-day) | 安全・隔離・復旧を残し、観測した失敗に関係しない手順と記録を減らす。診断は`diagnosing-bugs`、Skillの変更に対応する評価は`skill-design`へ渡す | 時間だけで起動する監査hook、継続通知の反復、競技得点を一般の成果品質とみなすこと。モデルや環境を同時に変えた成績を個別機構の効果にしない |
 | [Harness Designの比較研究](https://arxiv.org/html/2609.20804v1) | 条件を揃え、効果の原因が未確定な要素を外して比較する。Skillの評価は`skill-design`で変更の影響に合わせ、成立確認と改善量を区別する | bash-onlyへの一律切替、計画と記憶の一括撤去。評価したmodel・課題・設定に依存し、tool比較は状態管理と診断も含む変更で、個別機構の不要性を示さない |
 

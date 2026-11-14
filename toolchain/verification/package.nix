@@ -4,7 +4,11 @@
   supervise: 子孫回収を所有するplatformのnative command
   戻り値: 所有子孫の終了を待つ期限付き起動package
 */
-{ pkgs, supervise }:
+{
+  pkgs,
+  supervise,
+  resourcePolicy ? null,
+}:
 
 let
   inherit (pkgs) lib;
@@ -21,6 +25,13 @@ in
   runWithin = pkgs.writeShellApplication {
     name = "dotfiles-run-within";
     text = ''
+      ${lib.optionalString (resourcePolicy != null) ''
+        [ "$#" -ge 2 ] || { printf 'usage: dotfiles-run-within SECONDS COMMAND [ARG...]\n' >&2; exit 64; }
+        deadline=$(${lib.getExe pkgs.python3} -c 'import math,sys,time; s=float(sys.argv[1]); assert math.isfinite(s) and s>0; print(time.time()+s)' "$1")
+        exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 \
+          --resource-policy ${lib.escapeShellArg (toString resourcePolicy)} --resource-deadline "$deadline" \
+          -- ${lib.getExe runWithinCore} "$@"
+      ''}
       exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 -- ${lib.getExe runWithinCore} "$@"
     '';
   };

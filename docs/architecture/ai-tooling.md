@@ -138,6 +138,16 @@ signalを拒むprocessとprocess tableを読めない状態も完了とは扱わ
 `--hold-fd`はsupervisor自身が保持し続け、猶予後に切り離したholderは作らない。
 指定しない既存のcallerは、SIGKILL後の猶予を過ぎても子孫が残る場合に、従来どおり`drained=false`と非ゼロの終了statusで返る。
 
+supervisorの資源予約は、`--resource-policy FILE --resource-deadline EPOCH`を指定した呼出しに適用する。
+同じhost policyのregistryでCPUと物理memoryの将来消費を予約し、待機を含む絶対期限までに余裕がなければcommandを起動せず124で返す。
+圧迫を理由に稼働中の別のcommandを停止しない。
+観測済みの子孫PSSだけを予約の残量から控除し、共有backendなど帰属を確認できない消費を空きへ戻さない。
+入れ子は生存する祖先supervisorの予約内で動き、祖先を超える需要は外側の宣言を修正するまで拒否する。
+予約を持つ走行では子孫終了までの所有を必須とし、supervisor自体が強制終了して終了確認を失った記録は自動削除しない。
+この予約は需要の宣言であり、commandの機能や内部のworker数を削減するhard limitではない。
+policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-push、非対話jobと`dotfiles-workload-run`が同じregistryへ参加する。入口を通らない任意のcommandの将来消費を保証するものではない。
+Windowsの採取は独立したscheduled taskが行い、Linux側は期限内のsnapshotだけを読む。導入と待機理由の確認は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
+
 取消後と開始途中の失敗ではclientを起動しない。
 scopeを作れない場合もclientを起動せず、別sessionとMCP frontは止めない。
 supervisorが先に消えた場合はscopeのcgroupが空になるまで残りを止め、終了を見届けてから解放する。
@@ -510,6 +520,7 @@ modelは候補ごとに、将来の別sessionで同じ判断を迫られる場�
 
 language serverの登録とPATHへの配備は`toolchain/`が所有し、hostは`dotfiles.toolchain.enabledLsp`で登録済みIDを重複なく選ぶ。空集合と部分集合を選べ、未知IDと重複は評価で拒否する。
 client形式への写像は各[`agents/clients/`](../../agents/clients)のadapterが持つ。Claude Codeはplugin、OMPは`lsp.json`、OpenCodeはconfigの`lsp` blockへ、採用したserverだけを投影し、非採用または未対応clientには配らない。
+OMPのidle timeoutは有効にしない。調査した[18.20.0の`isIdleClient`](https://github.com/can1357/oh-my-pi/blob/v18.20.0/packages/coding-agent/src/lsp/client.ts#L175-L193)は未完了requestと最終activityだけを見ており、indexingのprogressやworkspace loadを終了条件へ含めない。時間設定だけでは作業中のserverを安全に回収できないため、上流の状態判定を直したreleaseが既存の供給経路へ届いてから再評価する。配備済みbinaryへの直接patchや、設定を分散する別fileは加えない。
 
 managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。
 

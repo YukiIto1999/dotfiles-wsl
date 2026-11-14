@@ -75,7 +75,7 @@ Windows drive の観測対象は宣言せず、WSL が drvfs として mount し
 mount table の source が drive の root を表す9p mountだけを先に選び、対象driveごとに `df` を実行するため、対象外の9p mountの測定失敗はdrive観測を止めない。
 対象driveの測定が一つでも失敗した場合は、部分的な空き率を公開せず観測全体を `fail` にする。
 未 mount の drive の空きと VHDX の配置先は、この結果だけでは分からない。
-Windows committed memory は host が選んだ PowerShell から使用率を得る。
+Windows committed memory は、Windows上のcollectorが`GetPerformanceInfo`で採取したsnapshotから読む。doctorの呼出しごとにPowerShellやWMIを起動しない。snapshotが欠落、不正、期限切れの場合は観測失敗として扱い、使用量0や空き容量へ置き換えない。
 root VHD は root disk の容量を `resource/wsl-vhd/capacity`、PowerShell で読んだ Windows 側の `.wslconfig` の VHD 設定を `resource/wsl-vhd/wslconfig` に出す。
 
 ## 結果
@@ -262,3 +262,33 @@ kernel log の走査が 20 秒で終わらない場合は、`vmbus-ring-failures
 sessionを復旧する場合は、利用者が明示したsession名と文面だけを使う。spinner、経過時間、最終出力から作業中か入力待ちかを推測して一括入力しない。
 
 宣言と実装の整合はNixの検証入口が検査し、doctorはactivation後の実状態だけを観測する。
+
+## 資源不足による開始待ち
+
+`dotfiles-observe-workload`は、Linuxの`MemAvailable`、祖先cgroupの上限とworking set、CPU affinityとquota、PSI、Windowsの物理空きとcommit余裕を同じ結果へまとめる。
+`.wslconfig`の宣言、Windowsのfile、稼働中VMの値は区別する。設定の差異は診断であり、開始判定には稼働中の値を使う。
+Windowsのsnapshotが必要なため、初回の配備ではcollectorを先に導入する。
+
+```sh
+dotfiles-windows-resource-collector install
+dotfiles-windows-resource-collector status
+dotfiles-observe-workload | jq '.outcomes, .resources'
+```
+
+collectorは現在のWindows利用者として登録し、権限昇格やexecution policyの変更はしない。
+同名でも他のtaskやfileは変更しない。install途中の失敗は、実施済みの段階をstderrへ出す。
+更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は新しい検証が観測不明で待機するため、予約を使う配備を戻してから撤去する。
+
+T1、pre-push、非対話agent jobは共通の予約へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
+待機は全体の期限に含み、期限切れは124で返る。開始後の期限切れも同じstatusなので、stderrの待機理由とcommandの出力を併せて確認する。
+同じ処理を別入口から追加投入して待機を迂回しない。
+
+予約値は物理memoryとCPUの需要宣言であり、processのhard limitではない。
+既定値は未計測の処理に対する開始条件で、ピークを保証しない。計測した処理は`--memory-gib`と`--cpus`で指定し、入れ子の処理は外側で合計需要を予約する。
+同じ所有者の予約は入れ子で二重計上しないが、外側を超える需要は拒否する。子孫の終了を確認できない予約も自動解放しない。
+wrapperを通らないcommandや共有backendの将来増加までは予約できない。
+Windowsの物理空きはreserveを割った場合の開始保留に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。
+
+重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。
+PSIが既存のwarning閾値を下回り、Linux・cgroup・Windowsの余裕が予約需要を満たせば、新規処理は待機から進む。
+稼働中の検証、session、PTYを停止したり、swapを外したりして空きを作らない。継続的に需要が容量を超える場合は、処理のピーク削減または実行先の容量増強が必要であり、予約の導入だけでは解消しない。

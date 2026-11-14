@@ -415,3 +415,17 @@ test "$(git -C "$PWD/scratch" config --type=bool --get core.bare)" = true \
   || fail 'verify-push did not reach its own scratch repository'
 test "$(remote_ref "$linked_main" refs/heads/linked)" = "$(git -C "$PWD/linked" rev-parse HEAD)" \
   || fail 'the push from a linked worktree did not reach the remote'
+
+resource_wait=$(new_repo resource-wait)
+printf 'verify-push:\n\tpwd >"$(MARKER)"\n' >"$resource_wait/Makefile"
+set_budget "$resource_wait" 1
+git -C "$resource_wait" add Makefile
+git -C "$resource_wait" commit -q -m 'test: 資源待機の検査の追加'
+rm -f "$MARKER"
+GIT_RESOURCE_PRESSURE=1 expect_refused 'push without resource headroom' "$HOOKS" "$resource_wait" refs/heads/main
+test ! -e "$MARKER" || fail 'verify-push ran while resource admission was blocked'
+set_budget "$resource_wait" 15
+push "$HOOKS" "$resource_wait" || fail 'push remained blocked after resource headroom recovered'
+test "$(cat "$MARKER")" = "$resource_wait" || fail 'the recovered push did not run verification'
+test "$(remote_ref "$resource_wait" refs/heads/main)" = "$(git -C "$resource_wait" rev-parse HEAD)" \
+  || fail 'the recovered push did not update the remote'

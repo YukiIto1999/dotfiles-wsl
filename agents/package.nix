@@ -5,6 +5,7 @@
   verificationEntry,
   executionPolicy,
   supervise,
+  resourcePolicy ? null,
   # sandbox には user manager も Nix daemon も無いため、検査は同じ実装へ記録と代替の command を渡す。
   systemdRunCommand ? lib.getExe' pkgs.systemd "systemd-run",
   systemctlCommand ? lib.getExe' pkgs.systemd "systemctl",
@@ -150,12 +151,13 @@ let
       ];
       text =
         builtins.replaceStrings
-          [ "@gate@" "@flock@" "@supervise@" "@timeout@" ]
+          [ "@gate@" "@flock@" "@supervise@" "@timeout@" "@resourcePolicy@" ]
           [
             (lib.escapeShellArg (lib.getExe verifyGate))
             (lib.escapeShellArg (lib.getExe' pkgs.util-linux "flock"))
             (lib.escapeShellArg (lib.getExe supervise))
             (lib.escapeShellArg (lib.getExe' pkgs.coreutils "timeout"))
+            (lib.escapeShellArg (if resourcePolicy == null then "" else toString resourcePolicy))
           ]
           (builtins.readFile ./impl/runtime/verify.sh);
     };

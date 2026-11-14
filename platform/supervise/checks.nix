@@ -32,7 +32,14 @@
               nativeBuildInputs = [ pkgs.python3 ];
             }
             ''
-              python3 ${./fixtures/drain_transition.py} ${./impl/supervise.py}
+              python3 ${./fixtures/drain_transition.py} ${./impl}/supervise.py
+              touch $out
+            '';
+
+        supervise-resource-admission =
+          pkgs.runCommandLocal "check-supervise-resource-admission" { nativeBuildInputs = [ pkgs.python3 ]; }
+            ''
+              python3 ${./fixtures/resource_admission.py} ${./impl}/supervise.py
               touch $out
             '';
       }

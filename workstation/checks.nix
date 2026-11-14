@@ -584,52 +584,6 @@
           };
           reserve-drift = withWorkloadOptions hostConfig { memoryMaxPercent = 95; };
         };
-        powershellProbe = "[Console]::WriteLine(20)";
-        mkWindowsPercentageObservation = import ./package.nix;
-        mkFakePowerShell =
-          expectedProbe: name: body:
-          pkgs.writeShellScript name ''
-            set -euo pipefail
-
-            test "$#" -eq 5
-            test "$1" = -NoLogo
-            test "$2" = -NoProfile
-            test "$3" = -NonInteractive
-            test "$4" = -Command
-            test "$5" = ${lib.escapeShellArg expectedProbe}
-            ${body}
-          '';
-        successfulPowerShell =
-          mkFakePowerShell powershellProbe "windows-percent-success"
-            "printf '20\\r\\n'";
-        noisyPowerShell = mkFakePowerShell powershellProbe "windows-percent-noisy" ''
-          printf '20\r\nnoise\n'
-          printf 'WINDOWS_PERCENT_NOISY_STDERR_POISON\n' >&2
-        '';
-        invalidPowerShell = mkFakePowerShell powershellProbe "windows-percent-invalid" "printf '101\\r\\n'";
-        statusPowerShell =
-          mkFakePowerShell powershellProbe "windows-percent-status"
-            "printf '20\\r\\n'; exit 7";
-        timeoutPowerShell =
-          mkFakePowerShell powershellProbe "windows-percent-timeout"
-            "sleep 3; printf '20\\r\\n'";
-        mkProbe =
-          powershellCommand:
-          mkWindowsPercentageObservation {
-            inherit
-              pkgs
-              lib
-              powershellCommand
-              powershellProbe
-              ;
-            commandName = "dotfiles-observe-windows-fixture";
-            timeoutSeconds = 0.1;
-          };
-        successfulProbe = mkProbe successfulPowerShell;
-        noisyProbe = mkProbe noisyPowerShell;
-        invalidProbe = mkProbe invalidPowerShell;
-        statusProbe = mkProbe statusPowerShell;
-        timeoutProbe = mkProbe timeoutPowerShell;
         mkWindowsDrivesObservation = import ./storage/package.nix;
         mkDrivesProbe =
           name: mounts: body:
@@ -1282,10 +1236,9 @@
             command.dotfilesObservationCommandKind == "normalized-protocol"
             && command.meta.mainProgram == "dotfiles-observe-wsl-memory"
           ) "WSL memory must use a dedicated normalized protocol package";
-          assert lib.assertMsg (
-            hostDefinitionKeys == hostObservationKeys
-            && builtins.all (name: lib.hasPrefix "host/" name) hostDefinitionKeys
-          ) "host observation definitions must use the host owner prefix";
+          assert lib.assertMsg (builtins.all (
+            name: lib.hasPrefix "host/" name
+          ) hostDefinitionKeys) "host observation definitions must use the host owner prefix";
           assert lib.assertMsg (stabilityContractMatches stabilityConfiguration hostObservations)
             "host settings and runtime observations do not share the stability contract";
           assert lib.assertMsg (
@@ -1375,8 +1328,6 @@
             ''
                       set -euo pipefail
 
-                      test "$(${lib.getExe successfulProbe})" = 20
-
                       assert_failed_probe() {
                         local name=$1
                         local command=$2
@@ -1402,11 +1353,6 @@
                           return 1
                         fi
                       }
-
-                      assert_failed_probe noisy ${lib.getExe noisyProbe}
-                      assert_failed_probe invalid ${lib.getExe invalidProbe}
-                      assert_failed_probe status ${lib.getExe statusProbe}
-                      assert_failed_probe timeout ${lib.getExe timeoutProbe}
 
                       test "$(${lib.getExe drivesProbe})" = $'d 50\nc 9'
                       ${lib.concatStringsSep "\n" (

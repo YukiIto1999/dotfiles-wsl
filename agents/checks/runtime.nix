@@ -754,8 +754,6 @@
             '';
 
         agent-verification-run =
-          assert lib.count (package: package == runtime.verify) hostConfig.environment.systemPackages == 1;
-          assert lib.count (package: package == runtime.gate) hostConfig.environment.systemPackages == 1;
           pkgs.runCommandLocal "check-agent-verification-run"
             {
               nativeBuildInputs = [

@@ -13,6 +13,8 @@ remaining=
 kill_after_seconds=30
 # 同じ project の T1 を一度に一つへ絞る flock の fd。取得するまで空
 slot_fd=
+resource_policy=@resourcePolicy@
+resource_args=()
 
 refresh_remaining() {
   local left=$((budget_seconds * 1000 - (${EPOCHREALTIME/[.,]/} / 1000 - started_ms)))
@@ -53,7 +55,7 @@ run_bounded() {
   [ "$interrupted" = false ] || return 130
   [ -z "$slot_fd" ] || hold=(--hold-fd "$slot_fd")
   # timeout の process group だけでは別 session の子孫を回収できないため supervise の下で起動
-  @supervise@ --require-drained --parent-death-cancels "$$" --term-grace "$kill_after_seconds" "${hold[@]}" \
+  @supervise@ --require-drained --parent-death-cancels "$$" --term-grace "$kill_after_seconds" "${hold[@]}" "${resource_args[@]}" \
     -- @timeout@ --kill-after="${kill_after_seconds}s" "$remaining" "$@" <&0 &
   bounded_pid=$!
   if [ "$interrupted" = true ]; then
@@ -164,7 +166,13 @@ if names_entry "$*" \
   if [ "$status" -eq 0 ]; then
     IFS= read -r witness <"$entry_file" || true
     if refresh_remaining; then
+      if [ -n "$resource_policy" ]; then
+        deadline_ms=$((started_ms + budget_seconds * 1000))
+        printf -v deadline '%d.%03d' "$((deadline_ms / 1000))" "$((deadline_ms % 1000))"
+        resource_args=(--resource-policy "$resource_policy" --resource-deadline "$deadline")
+      fi
       run_bounded "$@" || status=$?
+      resource_args=()
     else
       status=124
     fi

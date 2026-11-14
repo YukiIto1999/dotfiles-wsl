@@ -11,10 +11,13 @@
   pkgs,
   verificationEntry,
   supervise,
+  resourcePolicy ? null,
 }:
 
 let
-  verificationPrograms = import ../verification/package.nix { inherit pkgs supervise; };
+  verificationPrograms = import ../verification/package.nix {
+    inherit pkgs supervise resourcePolicy;
+  };
   # githooks(5) の client 側 hook のうち、repository が `.githooks/` に置いて使う名前。
   # reference-transaction と post-index-change は ref と index の更新ごとに起動されるため、
   # 置くだけで全 repository の git 操作に process の起動が加わる。配らない。

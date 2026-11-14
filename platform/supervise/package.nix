@@ -14,6 +14,6 @@
 writeShellApplication {
   name = "dotfiles-supervise";
   text = ''
-    exec ${lib.getExe python3} -I -S ${./impl/supervise.py} "$@"
+    exec ${lib.getExe python3} -I -S ${./impl}/supervise.py "$@"
   '';
 }

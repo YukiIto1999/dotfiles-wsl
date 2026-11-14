@@ -3,6 +3,7 @@
   pkgs,
   runner,
   lifecycle,
+  resourcePolicy,
 }:
 
 {
@@ -30,6 +31,7 @@ let
         --drain-seconds ${toString drainSeconds} \
         --supervise ${lib.getExe lifecycle.supervise} \
         --protect ${lib.getExe lifecycle.protect} \
+        --resource-policy ${lib.escapeShellArg (toString resourcePolicy)} \
         ${lib.concatMapStringsSep " " (path: "--hold ${lib.escapeShellArg (toString path)}") holds} \
         ${executableOptions} \
         -- ${lib.getExe worker} "$@"

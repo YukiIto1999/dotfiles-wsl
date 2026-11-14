@@ -22,6 +22,7 @@ let
     inherit lib pkgs;
     supervise = cfg.platform.supervise.package;
     verificationEntry = cfg.toolchain.verification.entry;
+    resourcePolicy = cfg.workstation.workload.admissionPolicy;
   };
 
   credentialTokenFile = pkgs.writeShellApplication {

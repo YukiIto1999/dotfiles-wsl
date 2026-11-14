@@ -46,6 +46,9 @@ import signal
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from admission import AdmissionError, LEASE_ENV, Reservation
+
 PR_SET_PDEATHSIG = 1
 PR_SET_CHILD_SUBREAPER = 36
 FAILURE_STATUS = 70
@@ -84,6 +87,10 @@ class Options:
         parent_pid: 消失時に取消を開始する親PIDか監視無効のNone
         require_drained: 子孫の回収完了まで返却を禁止する選択
         interrupt_cancels: SIGINTを走行全体の取消へ渡す明示選択
+        resource_policy: hostの資源観測と予約既定値のpathか無効のNone
+        resource_deadline: 待機を含む絶対期限か無効のNone
+        resource_memory: 物理memory予約の明示値か既定値を選ぶNone
+        resource_cpus: CPU予約の明示値か既定値を選ぶNone
         command: 絶対実行pathを先頭に持つcommand引数列
     """
 
@@ -104,6 +111,10 @@ class Options:
         self.require_drained = False
         self.interrupt_cancels = False
         self.command = []
+        self.resource_policy = None
+        self.resource_deadline = None
+        self.resource_memory = None
+        self.resource_cpus = None
 
 
 def parse_seconds(option, value):
@@ -140,6 +151,10 @@ def parse_arguments(arguments):
             options.command = arguments[index + 1:]
             if not options.command or not os.path.isabs(options.command[0]):
                 raise UsageError("the command must be an absolute executable")
+            if options.resource_policy is not None:
+                if options.resource_deadline is None:
+                    raise UsageError("--resource-policy requires --resource-deadline")
+                options.require_drained = True
             return options
         if argument == "--require-drained":
             options.require_drained = True
@@ -149,7 +164,8 @@ def parse_arguments(arguments):
             options.interrupt_cancels = True
             index += 1
             continue
-        if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels"):
+        if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels",
+                            "--resource-policy", "--resource-deadline", "--resource-memory", "--resource-cpus"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
             raise UsageError(f"{argument} needs a value")
@@ -166,6 +182,17 @@ def parse_arguments(arguments):
             options.parent_pid = int(value)
         elif argument == "--argv0":
             options.argv0 = value
+        elif argument == "--resource-policy":
+            options.resource_policy = value
+        elif argument == "--resource-deadline":
+            options.resource_deadline = parse_seconds(argument, value)
+        elif argument in ("--resource-memory", "--resource-cpus"):
+            if not value.isdecimal() or int(value) <= 0:
+                raise UsageError(f"{argument} needs a positive integer")
+            if argument == "--resource-memory":
+                options.resource_memory = int(value)
+            else:
+                options.resource_cpus = int(value)
         else:
             options.result_path = value
         index += 2
@@ -272,6 +299,9 @@ class Supervisor:
         self.wakeup_read, self.wakeup_write = os.pipe()
         os.set_blocking(self.wakeup_read, False)
         os.set_blocking(self.wakeup_write, False)
+        self.reservation = None
+        self.drained = True
+        self.deadline_expired = False
 
     def record(self, phase, **fields):
         path = self.options.result_path
@@ -408,12 +438,18 @@ class Supervisor:
         """
         while True:
             children_exist = self.reap()
+            if self.options.resource_deadline is not None and time.time() >= self.options.resource_deadline:
+                self.deadline_expired = True
+                self.request_cancel(signal.SIGTERM, None)
             if not self.terminating and (
                 self.cancel_signal is not None or self.client_status is not None
             ):
                 self.begin_termination()
             if not self.terminating:
-                self.wait_for_event(None)
+                self.wait_for_event(
+                    max(0, self.options.resource_deadline - time.time())
+                    if self.options.resource_deadline is not None else None
+                )
                 continue
             if not children_exist:
                 return True
@@ -433,6 +469,8 @@ class Supervisor:
             self.wait_for_event(OVERDUE_SWEEP_SECONDS if overdue else SWEEP_SECONDS)
 
     def exit_status(self, drained):
+        if self.deadline_expired:
+            return 124
         status = self.client_status
         if status is None:
             return FAILURE_STATUS
@@ -461,6 +499,15 @@ class Supervisor:
 
     def run(self):
         self.prepare()
+        if self.options.resource_policy is not None and self.cancel_signal is None:
+            self.reservation = Reservation(
+                self.options.resource_policy, self.options.resource_memory, self.options.resource_cpus
+            )
+            if not self.reservation.acquire(self, self.options.resource_deadline):
+                status = 128 + self.cancel_signal if self.cancel_signal is not None else 124
+                self.record("finished", spawned=False, deferred=True, drained=True,
+                            client_status=None, remaining=[], status=status)
+                return status
         if self.cancel_signal is not None:
             status = 128 + self.cancel_signal
             self.record("finished", spawned=False, cancelled=True, drained=True,
@@ -472,14 +519,18 @@ class Supervisor:
             # The executed file and the name it is told it has are separate: a multi-call binary reached through
             # a symlink chooses its behavior from that name.
             argv[0] = self.options.argv0
+        environment = dict(os.environ)
+        if self.reservation is not None:
+            environment[LEASE_ENV] = str(self.reservation.path)
         try:
             self.client_pid = os.posix_spawn(
                 command[0],
                 argv,
-                os.environ,
+                environment,
                 setsigmask=(),
                 setsigdef=RESET_TO_DEFAULT,
             )
+            self.drained = False
         except OSError as error:
             status = 127 if error.errno == errno.ENOENT else 126
             print(f"dotfiles-supervise: cannot execute {command[0]}: {error.strerror}",
@@ -488,6 +539,7 @@ class Supervisor:
                         client_status=None, remaining=[], status=status)
             return status
         drained = self.supervise()
+        self.drained = drained
         survivors = owned_processes() if not drained else {}
         if not drained:
             print("dotfiles-supervise: processes still alive after SIGKILL: "
@@ -515,11 +567,15 @@ def main(arguments):
     except UsageError as error:
         print(f"dotfiles-supervise: {error}", file=sys.stderr)
         return 2
+    supervisor = Supervisor(options)
     try:
-        return Supervisor(options).run()
-    except OSError as error:
+        return supervisor.run()
+    except (OSError, AdmissionError, ValueError, KeyError, TypeError) as error:
         print(f"dotfiles-supervise: {error}", file=sys.stderr)
         return FAILURE_STATUS
+    finally:
+        if supervisor.reservation is not None:
+            supervisor.reservation.close(supervisor.drained)
 
 
 if __name__ == "__main__":

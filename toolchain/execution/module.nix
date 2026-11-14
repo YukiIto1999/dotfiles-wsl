@@ -1,7 +1,20 @@
-{ lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   programs = import ./package.nix { inherit lib pkgs; };
+  workloadRun = pkgs.writeShellApplication {
+    name = "dotfiles-workload-run";
+    text = ''
+      exec ${lib.getExe pkgs.python3} -I -S ${./impl/workload-run.py} \
+        ${lib.getExe config.dotfiles.platform.supervise.package} \
+        ${lib.escapeShellArg (toString config.dotfiles.workstation.workload.admissionPolicy)} "$@"
+    '';
+  };
 in
 {
   # Cargo の cache と出力先、Nix の no-result-link、project の devShell への入口は、process の寿命を持つ runtime ではなく toolchain が決める。
@@ -26,4 +39,5 @@ in
 
   # 利用者が Orca の command override から呼ぶため PATH に置く。
   config.dotfiles.toolchain.packages.dotfiles-project-run = programs.projectRun;
+  config.dotfiles.toolchain.packages.dotfiles-workload-run = workloadRun;
 }

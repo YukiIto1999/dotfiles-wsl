@@ -24,5 +24,6 @@ in
   config.dotfiles.agents.job.mk = import ./impl/mk-job.nix {
     inherit lib pkgs runner;
     inherit (config.dotfiles.agents) lifecycle;
+    resourcePolicy = config.dotfiles.workstation.workload.jobAdmissionPolicy;
   };
 }

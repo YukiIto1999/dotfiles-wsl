@@ -15,6 +15,19 @@ let
   reserveSwapFile = "/var/lib/dotfiles-agent-swap/reserve.swap";
   minimumSwapGiB = cfg.swap.minimumTotalGiB;
   inherit (cfg) workload;
+  inherit (workload) reservation;
+  runtimeDirectory = "/run/dotfiles-workload/${cfg.username}";
+  admissionPolicy =
+    memoryGiB: cpus:
+    pkgs.writeText "dotfiles-workload-policy.json" (
+      builtins.toJSON {
+        inherit runtimeDirectory;
+        observation = [ (lib.getExe workload.observationPackage) ];
+        memoryBytes = memoryGiB * gibibyte;
+        cpuCount = cpus;
+        maximumObservationAgeSeconds = 10;
+      }
+    );
   workloadMemoryMaxPercent = 100 - workload.hostReservePercent;
   workloadMemoryHighPercent = workloadMemoryMaxPercent - workload.reclaimMarginPercent;
   pageblockKbytes = 2048;
@@ -41,29 +54,59 @@ let
     };
   };
   windowsMemoryCommit = {
-    powershellCommand = cfg.wsl.powershellCommand;
     metric = "used-percent";
     warning = cfg.windowsMemoryCommit.warning;
     failure = cfg.windowsMemoryCommit.failure;
   };
-  mkWindowsPercentageObservation = import ../package.nix;
-  windowsMemoryCommitObservation = mkWindowsPercentageObservation {
+  pressure = {
+    warning = 10;
+    failure = 40;
+  };
+  windowsSnapshotPolicy = {
+    collectorIntervalSeconds = 10;
+    maximumAgeSeconds = 60;
+    futureSkewSeconds = 5;
+    fileName = "windows-memory.json";
+  };
+  windowsSnapshotReader = import ./impl/windows-snapshot-package.nix {
     inherit pkgs lib;
-    commandName = "dotfiles-observe-windows-memory-commit";
-    powershellProbe = ''
-      $memory = Get-CimInstance Win32_PerfFormattedData_PerfOS_Memory; if ($null -eq $memory -or $memory.CommitLimit -le 0) { exit 1 }; [Console]::WriteLine([math]::Floor(($memory.CommittedBytes * 100) / $memory.CommitLimit))
-    '';
-    inherit (windowsMemoryCommit) powershellCommand;
-    timeoutSeconds = observationTimeoutSeconds;
+    snapshotPath = "${workload.windowsSnapshotDirectory}/${windowsSnapshotPolicy.fileName}";
+    inherit (windowsSnapshotPolicy) maximumAgeSeconds futureSkewSeconds;
+  };
+  windowsMemoryCommitObservation = import ./impl/windows-commit-package.nix {
+    inherit pkgs lib;
+    reader = windowsSnapshotReader;
+  };
+  windowsCollector = import ./impl/windows-collector-package.nix {
+    inherit pkgs lib;
+    reader = windowsSnapshotReader;
+    inherit (cfg.wsl) powershellCommand;
+    intervalSeconds = windowsSnapshotPolicy.collectorIntervalSeconds;
+  };
+  workloadObservation = import ./impl/workload-package.nix {
+    inherit pkgs lib;
+    reader = windowsSnapshotReader;
+    inherit (workload) hostReservePercent;
+    aggregateCgroup = "/${workload.slices.aggregate}";
+    pressureWarning = pressure.warning;
+    pressureFailure = pressure.failure;
+    windowsCommitWarning = windowsMemoryCommit.warning;
+    windowsCommitFailure = windowsMemoryCommit.failure;
+    windowsPhysicalReserveBytes = workload.windowsPhysicalReserveGiB * gibibyte;
+    declaredMemoryBytes = lib.mapNullable (
+      memoryGiB: memoryGiB * gibibyte
+    ) cfg.wsl.windowsConfig.memoryGiB;
+    declaredProcessors = cfg.wsl.windowsConfig.processors;
   };
   wslMemoryObservation = import ./impl/wsl-memory-package.nix {
     inherit pkgs lib;
     journalTimeoutSeconds = 20;
-    pressureWarning = 10;
-    pressureFailure = 40;
+    pressureWarning = pressure.warning;
+    pressureFailure = pressure.failure;
     relayMinimumAgeSeconds = 300;
   };
   wslMemoryContract = wslMemoryObservation.dotfilesObservationContract;
+  workloadContract = workloadObservation.dotfilesObservationContract;
   zramGenerator = "${pkgs.zram-generator.outPath}/lib/systemd/system-generators/zram-generator";
   zramSetup = pkgs.writeShellScript "dotfiles-zram-setup" ''
     set -euo pipefail
@@ -114,6 +157,40 @@ in
       };
     };
     workload = {
+      reservation = {
+        verificationMemoryGiB = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 16;
+          description = "未計測の全量検証へ予約する物理memoryのGiB。hard limitではなく開始前の需要宣言。";
+        };
+        verificationCpus = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = 2;
+          description = "検証一走行が予約するCPU数。commandの機能やworker数を変更しない需要宣言。";
+        };
+        jobMemoryGiB = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = reservation.verificationMemoryGiB;
+          description = "非対話agent job全体の物理memory需要GiB。入れ子の検証を含む需要を外側で予約する。";
+        };
+        jobCpus = lib.mkOption {
+          type = lib.types.ints.positive;
+          default = reservation.verificationCpus;
+          description = "非対話agent job全体のCPU需要。入れ子の処理を含む。";
+        };
+      };
+      admissionPolicy = lib.mkOption {
+        type = lib.types.path;
+        readOnly = true;
+        internal = true;
+        description = "同じhostの全検証で共有する資源予約policy。";
+      };
+      jobAdmissionPolicy = lib.mkOption {
+        type = lib.types.path;
+        readOnly = true;
+        internal = true;
+        description = "検証と同じregistryへ参加する非対話jobの予約policy。";
+      };
       hostReservePercent = lib.mkOption {
         type = lib.types.ints.between 1 99;
         default = 20;
@@ -157,6 +234,50 @@ in
           container の配置、Nix、MCP の slice はこの値だけを参照する。
         '';
       };
+      windowsSnapshotDirectory = lib.mkOption {
+        type = lib.types.strMatching "/mnt/[a-z]/ProgramData/[A-Za-z0-9._-]+";
+        default =
+          let
+            drive = builtins.match "/mnt/([a-z])/Windows/.+" cfg.wsl.powershellCommand;
+          in
+          if drive == null then
+            throw "dotfiles.workstation.workload.windowsSnapshotDirectory must be set when wsl.powershellCommand is not under /mnt/<drive>/Windows"
+          else
+            "/mnt/${builtins.head drive}/ProgramData/dotfiles-resource-observation";
+        description = ''
+          Windows 側の collector が memory の snapshot を置く directory を、この WSL から見た path。
+          Windows の ProgramData の直下に置き、利用者名は path に含めない。
+          既定は wsl.powershellCommand の drive から導く。
+        '';
+      };
+      windowsPhysicalReserveGiB = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 8;
+        description = ''
+          Windows の物理 memory の空きのうち、workload の admission が使わず Windows に残す GiB。
+          windowsPhysicalHeadroomBytes は空きからこの値を引いた余力で、実測で見直す方針値。
+        '';
+      };
+      observationPackage = lib.mkOption {
+        type = lib.types.package;
+        readOnly = true;
+        internal = true;
+        description = ''
+          dotfiles-observe-workload。Linux の memory と CPU の余力、祖先 cgroup の memory 制限の余力、PSI、
+          Windows 側 snapshot の memory を正規化 envelope の resource workload として返す。
+          passthru の dotfilesObservationContract が health と admission の共通の契約になる。
+
+          memoryLimits の headroomBytes は min(memory.high, memory.max) から working set
+          （memory.current から inactive_file を引いた値）を引いた値で、有限の memory.high に対する
+          保証ではない。inactive_file は圧迫時に回収される見込みの分で、直ちに回収できるとは限らない。
+          回収の見込みを数えない値は limitBytes と currentBytes から limitBytes - currentBytes で得る。
+
+          windowsCommitHeadroomBytes は windowsMemoryCommit.warning の割合までの余力で、
+          残りの commit 全量ではない。windowsPhysicalHeadroomBytes は物理 memory の空きから
+          windowsPhysicalReserveGiB を引いた余力。wsl-cap の outcome は宣言と .wslconfig と稼働中の VM の差を診断し、
+          admission は稼働中の VM の容量を測るため圧迫の判断には使わない。
+        '';
+      };
     };
   };
 
@@ -171,6 +292,15 @@ in
     }
     {
       assertion =
+        windowsSnapshotPolicy.collectorIntervalSeconds * 3 <= windowsSnapshotPolicy.maximumAgeSeconds;
+      message = "The Windows memory snapshot must stay fresh across two missed collector samples";
+    }
+    {
+      assertion = windowsSnapshotReader.dotfilesWindowsSnapshot.outerTimeout < observationTimeoutSeconds;
+      message = "Reading the Windows memory snapshot must finish before the observation timeout";
+    }
+    {
+      assertion =
         workload.slices.aggregate == "user.slice"
         && lib.hasPrefix "user-" workload.slices.support
         && lib.hasPrefix "${lib.removeSuffix ".slice" workload.slices.support}-" workload.slices.containers;
@@ -181,7 +311,19 @@ in
   config.dotfiles.workstation.workload = {
     memoryHighPercent = workloadMemoryHighPercent;
     memoryMaxPercent = workloadMemoryMaxPercent;
+    observationPackage = workloadObservation;
+    admissionPolicy = admissionPolicy reservation.verificationMemoryGiB reservation.verificationCpus;
+    jobAdmissionPolicy = admissionPolicy reservation.jobMemoryGiB reservation.jobCpus;
   };
+  config.dotfiles.platform.cli.commands = {
+    observeWorkload = workloadObservation;
+    windowsResourceCollector = windowsCollector;
+  };
+
+  config.systemd.tmpfiles.rules = [
+    "d /run/dotfiles-workload 0755 root root -"
+    "d ${runtimeDirectory} 0700 ${cfg.username} users -"
+  ];
 
   config.systemd.slices.${lib.removeSuffix ".slice" workload.slices.aggregate}.sliceConfig = {
     MemoryHigh = "${toString workloadMemoryHighPercent}%";
@@ -218,6 +360,20 @@ in
       failureMessage = "could not observe WSL memory health";
       command = wslMemoryObservation;
       inherit (wslMemoryContract)
+        allowedOutcomeIds
+        requiredOutcomeIds
+        requiredResourceKeys
+        envelopeVersion
+        ;
+    };
+    "host/workload" = {
+      kind = "normalized-protocol";
+      checkId = "resource/workload";
+      resourceKey = null;
+      timeoutSeconds = workloadContract.outerTimeout;
+      failureMessage = "could not observe workload resources";
+      command = workloadObservation;
+      inherit (workloadContract)
         allowedOutcomeIds
         requiredOutcomeIds
         requiredResourceKeys

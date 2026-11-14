@@ -35,6 +35,13 @@ in
       `--result`の全段階にcompletionが加わり、起動したcommandのfinished段階にはkill_grace_expiredも加わる。
       supervisor自身が`--hold-fd`を終了確認まで保持するので、切り離したholderは作らない。
       supervisor自体を強制終了した場合は、子孫の終了を確認していない。
+      `--resource-policy FILE --resource-deadline EPOCH`はhost共通のFIFO予約を取得してからcommandを起動する。
+      policyは観測commandと利用者専用のregistryとmemoryBytesとcpuCountと観測の有効秒数を持つ。
+      `--resource-memory BYTES`と`--resource-cpus COUNT`は同じpolicy内で当該呼出しの需要を明示する。
+      観測不能や圧迫では新規実行だけを待たせ、期限切れは未起動のdeferred記録と124で返す。
+      待機も実行も同じ絶対期限に含め、資源予約を持つ実行にはrequire-drainedを適用する。
+      入れ子は生存する祖先の予約内で実行し、祖先予約を超える需要と偽の継承は拒否する。
+      予約は子孫終了まで保持し、所有者不明の実行記録を空きとして自動削除しない。
     '';
   };
 

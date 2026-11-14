@@ -62,6 +62,7 @@ let
     verificationEntry = cfg.toolchain.verification.entry;
     executionPolicy = cfg.toolchain.execution.policy;
     supervise = cfg.platform.supervise.package;
+    resourcePolicy = cfg.workstation.workload.admissionPolicy;
   };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (

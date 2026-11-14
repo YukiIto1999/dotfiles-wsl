@@ -85,6 +85,44 @@
           ]).config;
         editedCheckoutDeployedIgnore =
           editedCheckoutConfig.home-manager.users.${username}.home.file.".config/git/ignore".source;
+        resourceObservation = pkgs.writeScript "git-resource-observation" ''
+          #!${pkgs.python3}/bin/python3
+          import json, os, time
+          print(json.dumps({
+              "schemaVersion": 1,
+              "outcomes": [{"id": "resource/fixture", "status": "warn" if os.environ.get("GIT_RESOURCE_PRESSURE") else "pass", "message": "fixture pressure"}],
+              "resources": [{"key": "workload", "value": {
+                  "observedAt": time.time(),
+                  "memoryTotalBytes": 68719476736,
+                  "memoryAvailableBytes": 68719476736,
+                  "hostMemoryHeadroomBytes": 68719476736,
+                  "memoryHeadroomBytes": 68719476736,
+                  "memoryLimits": [],
+                  "cpuCount": 12,
+                  "windowsCommitHeadroomBytes": 68719476736,
+                  "windowsPhysicalAvailableBytes": 17179869184,
+                  "windowsPhysicalHeadroomBytes": 8589934592
+              }}]
+          }))
+        '';
+        fixtureResourcePolicy = pkgs.writeText "git-resource-policy.json" (
+          builtins.toJSON {
+            runtimeDirectory = "/build/git-workload-leases";
+            observation = [ (toString resourceObservation) ];
+            memoryBytes = 1073741824;
+            cpuCount = 1;
+            maximumObservationAgeSeconds = 10;
+          }
+        );
+        resourceHooks = import ./package.nix {
+          inherit lib pkgs;
+          supervise = hostConfig.dotfiles.platform.supervise.package;
+          verificationEntry = hostConfig.dotfiles.toolchain.verification.entry;
+          resourcePolicy = fixtureResourcePolicy;
+        };
+        resourceHooksDirectory = pkgs.linkFarm "git-hooks-resource-fixture" (
+          lib.mapAttrs (_: lib.getExe) resourceHooks
+        );
         failingEntryHooks = import ./package.nix {
           inherit lib pkgs;
           supervise = hostConfig.dotfiles.platform.supervise.package;
@@ -242,7 +280,7 @@
                 jq
                 nix
               ];
-              HOOKS = hooksDirectory;
+              HOOKS = resourceHooksDirectory;
               FAILING_ENTRY_HOOKS = failingEntryHooksDirectory;
               SLOW_ENTRY_HOOKS = slowEntryHooksDirectory;
             }

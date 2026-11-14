@@ -20,7 +20,7 @@
       ];
       extraDrives = [ "G:" ];
       windowsConfig = {
-        memoryGiB = 40;
+        memoryGiB = 48;
         processors = 12;
         swapGiB = 16;
       };

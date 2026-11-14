@@ -266,6 +266,7 @@ sessionを復旧する場合は、利用者が明示したsession名と文面だ
 ## 資源不足による開始待ち
 
 `dotfiles-observe-workload`は、Linuxの`MemAvailable`、祖先cgroupの上限とworking set、CPU affinityとquota、PSI、Windowsの物理空きとcommit余裕を同じ結果へまとめる。
+VM設定の反映時期は[Rebuild](rebuild.md#WSLの再起動)で確認し、templateの一致をVMへの反映済みとは扱わない。
 `.wslconfig`の宣言、Windowsのfile、稼働中VMの値は区別する。設定の差異は診断であり、開始判定には稼働中の値を使う。
 Windowsのsnapshotが必要なため、初回の配備ではcollectorを先に導入する。
 

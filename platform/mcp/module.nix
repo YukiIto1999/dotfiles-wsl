@@ -18,6 +18,13 @@ let
     cfg.targets.${name}.serverTransport == "streamable-http"
     && cfg.targets.${name}.serverLifecycle != "service"
   ) targetNames;
+  invalidLazyDiscovery = builtins.filter (
+    name:
+    cfg.targets.${name}.lazyDiscovery
+    && !(
+      cfg.targets.${name}.serverLifecycle == "session" && cfg.targets.${name}.serverTransport == "stdio"
+    )
+  ) targetNames;
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
   restartFailureCount = 20;
@@ -121,6 +128,11 @@ in
                 "session"
               ];
               description = "server process を front service または downstream session のどちらが所有するか";
+            };
+            lazyDiscovery = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "session front が live session 2 回で一致した discovery 応答だけを再利用し、最初の実呼出しまで child の起動を遅らせる opt-in";
             };
             port = lib.mkOption {
               type = lib.types.ints.between 8770 8789;
@@ -257,7 +269,7 @@ in
             target.executable
           else
             frontCommand {
-              inherit (target) executable serverLifecycle;
+              inherit (target) executable serverLifecycle lazyDiscovery;
               inherit (front) port;
               inherit (cfg) sessionPolicy;
             };
@@ -305,6 +317,12 @@ in
     {
       assertion = invalidStreamableLifecycles == [ ];
       message = "Native Streamable HTTP MCP targets must use service lifecycle";
+    }
+    {
+      assertion = invalidLazyDiscovery == [ ];
+      message =
+        "MCP lazyDiscovery requires a stdio target with session lifecycle: "
+        + lib.concatStringsSep ", " invalidLazyDiscovery;
     }
   ];
 }

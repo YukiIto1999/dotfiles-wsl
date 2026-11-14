@@ -319,6 +319,8 @@ hostとHome Managerのpackage setはstableのまま変えず、providerごとの
 このpackage供給から同梱Skillの採用は導かず、Skillの採用と差替は既存のregistryが所有する。
 
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
+Playwright、Chrome DevTools、memlabのsession frontはagentgateway内の`lazy_discovery`を使う。同じ実行file・引数・clientのinitialize内容で二度一致したdiscovery応答だけを記憶し、未使用sessionでは子processを起動せずに返す。未確認または変動する応答は実serverから取得する。secretや実行時envでtool集合が変わるproviderには適用しない。
+最初のtool呼出しでsession専用serverを一度だけ起動し、initializeと通知を再送して、既に返したdiscoveryとの一致を確かめる。不一致は呼出しを失敗にし、記憶を無効化してlist変更を通知する。toolの結果やheap、tabをsession間で共有しない。起動済みのserverをidleという理由だけで破棄する変更ではなく、未起動sessionのDELETEや期限切れにも子processを作らない。
 
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
 

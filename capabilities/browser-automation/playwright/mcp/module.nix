@@ -19,6 +19,7 @@ in
       provider = "playwright";
       executable = lib.getExe front;
       serverLifecycle = "session";
+      lazyDiscovery = true;
       port = 8776;
       needsNetwork = true;
       probe = {

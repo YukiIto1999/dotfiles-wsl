@@ -26,6 +26,7 @@ in
       provider = "chrome-devtools";
       executable = lib.getExe front;
       serverLifecycle = "session";
+      lazyDiscovery = true;
       port = 8779;
       needsNetwork = true;
       probe = {

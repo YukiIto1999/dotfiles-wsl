@@ -22,6 +22,7 @@ rustPlatform.buildRustPackage rec {
     ./agentgateway/mcp-session-recovery.patch
     ./agentgateway/mcp-downstream-lifecycle.patch
     ./agentgateway/mcp-loopback-bind.patch
+    ./agentgateway/mcp-lazy-stdio-discovery.patch
   ];
 
   nativeBuildInputs = [
@@ -47,7 +48,10 @@ rustPlatform.buildRustPackage rec {
     "agentgateway"
     "--lib"
   ];
-  checkFlags = [ "downstream_lifecycle_" ];
+  checkFlags = [
+    "downstream_lifecycle_"
+    "lazy_stdio_"
+  ];
 
   meta.mainProgram = "agentgateway";
 }

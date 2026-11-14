@@ -6,11 +6,13 @@ in
 {
   executable,
   serverLifecycle,
+  lazyDiscovery ? false,
   port,
   sessionPolicy,
 }:
 
 if serverLifecycle == "service" then
+  assert lib.assertMsg (!lazyDiscovery) "lazy MCP discovery requires a session server lifecycle";
   "${lib.getExe pkgs.mcp-proxy} --host 127.0.0.1 --port ${toString port} --stateless -- ${executable}"
 else if serverLifecycle == "session" then
   let
@@ -35,7 +37,10 @@ else if serverLifecycle == "session" then
                       mcp.targets = [
                         {
                           name = "server";
-                          stdio.cmd = executable;
+                          stdio = {
+                            cmd = executable;
+                          }
+                          // lib.optionalAttrs lazyDiscovery { lazy_discovery = true; };
                         }
                       ];
                     }

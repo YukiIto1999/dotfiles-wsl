@@ -75,19 +75,37 @@
         sessionFixtureTokens = helpers.execTokens.tokensOf sessionFixtureExecStart;
         sessionFixtureFrontExecutable = builtins.head sessionFixtureTokens;
         sessionFixtureFrontConfig = sessionConfigOfExecStart sessionFixtureExecStart;
+        lazySessionFixtureExecStart = (pkgs.callPackage ./package/front-command.nix { }) {
+          executable = lib.getExe sessionFixtureServer;
+          serverLifecycle = "session";
+          lazyDiscovery = true;
+          port = 18780;
+          sessionPolicy = {
+            idleSeconds = 1;
+            frontGraceSeconds = 1;
+          };
+        };
+        lazySessionFixtureFrontConfig = sessionConfigOfExecStart lazySessionFixtureExecStart;
+        sessionFrontBehaviorInputs = with pkgs; [
+          coreutils
+          curl
+          diffutils
+          findutils
+          gawk
+          gnugrep
+          gnused
+          iproute2
+          jq
+        ];
         sessionFrontBehavior = pkgs.writeShellApplication {
           name = "mcp-session-front-behavior";
-          runtimeInputs = with pkgs; [
-            coreutils
-            curl
-            findutils
-            gawk
-            gnugrep
-            gnused
-            iproute2
-            jq
-          ];
+          runtimeInputs = sessionFrontBehaviorInputs;
           text = builtins.readFile ./fixtures/session-front-behavior.sh;
+        };
+        lazySessionFrontBehavior = pkgs.writeShellApplication {
+          name = "mcp-lazy-session-front-behavior";
+          runtimeInputs = sessionFrontBehaviorInputs;
+          text = builtins.readFile ./fixtures/lazy-session-front-behavior.sh;
         };
 
         missingWaits = lib.concatMap (
@@ -580,6 +598,15 @@
             streamableSession = updateTarget "http-adapter" (
               target: target // { serverLifecycle = "session"; }
             ) expectedTargets;
+            lazySession = updateTarget "session-adapter" (
+              target: target // { lazyDiscovery = true; }
+            ) expectedTargets;
+            lazyService = updateTarget "stdio-adapter" (
+              target: target // { lazyDiscovery = true; }
+            ) expectedTargets;
+            lazyStreamableHttp = updateTarget "http-adapter" (
+              target: target // { lazyDiscovery = true; }
+            ) expectedTargets;
 
             dependenciesValid =
               candidateServices:
@@ -647,6 +674,9 @@
           assert !(assertionsPass expectedProviders executableWithArguments);
           assert dependenciesValid services;
           assert !(assertionsPass expectedProviders streamableSession);
+          assert assertionsPass expectedProviders lazySession;
+          assert !(assertionsPass expectedProviders lazyService);
+          assert !(assertionsPass expectedProviders lazyStreamableHttp);
           assert !(dependenciesValid missingAfter);
           assert !(dependenciesValid missingRequires);
           assert networkPolicyValid services;
@@ -748,6 +778,18 @@
             }
             ''
               ${lib.getExe sessionFrontBehavior}
+              touch $out
+            '';
+
+        mcp-lazy-session-front-behavior =
+          pkgs.runCommandLocal "check-mcp-lazy-session-front-behavior"
+            {
+              MCP_SESSION_FRONT_EXECUTABLE = sessionFixtureFrontExecutable;
+              MCP_SESSION_FRONT_CONFIG = lazySessionFixtureFrontConfig;
+              MCP_SESSION_FRONT_PORT = "18780";
+            }
+            ''
+              ${lib.getExe lazySessionFrontBehavior}
               touch $out
             '';
 

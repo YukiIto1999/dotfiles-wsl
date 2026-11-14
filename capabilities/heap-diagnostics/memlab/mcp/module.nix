@@ -20,6 +20,7 @@ in
       provider = "memlab";
       executable = lib.getExe front;
       serverLifecycle = "session";
+      lazyDiscovery = true;
       port = 8777;
       needsNetwork = false;
       probe = {

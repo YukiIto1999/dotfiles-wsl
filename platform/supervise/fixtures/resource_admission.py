@@ -385,12 +385,13 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual(status, 70)
         self.assertIn("nested request exceeds its ancestor reservation", error)
 
-    def test_runs_that_are_cut_short_or_cancelled_leave_no_record(self):
-        """Status 124, a status of 128 or more, a cancellation and a deadline do not enter the record."""
-        status, _, _ = self.run_command("control", command=exits_with(3))
-        self.assertEqual(status, 3)
+    def test_runs_that_fail_are_cut_short_or_cancelled_leave_no_record(self):
+        """Only a run that ends by itself with status 0 is recorded; failures, 124, 128 or more, cancellation and the deadline are not."""
+        status, _, _ = self.run_command("control", command=exits_with(0))
+        self.assertEqual(status, 0)
         self.assertEqual(len(self.stored()), 1)
-        for status in (124, 130):
+        # A failure stops inside the entry with a peak below the demand, and recording it lowers the next reservation.
+        for status in (1, 3, 124, 130):
             with self.subTest(status=status):
                 self.assertEqual(self.run_command(f"status-{status}", command=exits_with(status))[0], status)
                 self.assertEqual(len(self.stored()), 1)
@@ -405,6 +406,18 @@ class ResourceAdmission(unittest.TestCase):
         expiring.communicate(timeout=5)
         self.assertEqual(expiring.returncode, 124)
         self.assertEqual(len(self.stored()), 1)
+
+    def test_a_failed_run_whose_peak_exceeded_the_reservation_is_recorded(self):
+        """A peak above the reservation is a lower bound of the demand even when the run fails, so it is kept."""
+        self.limit(MIB)
+        failing = [sys.executable, "-c", "import time; time.sleep(1.4); raise SystemExit(1)"]
+        status, error, _ = self.run_command("exceeding-failure", command=failing)
+        self.assertEqual(status, 1)
+        self.assertIn("exceeded the reservation", error)
+        records = self.stored()
+        self.assertEqual(len(records), 1)
+        self.assertIs(records[0]["exceeded"], True)
+        self.assertGreater(records[0]["peakBytes"], records[0]["reservedBytes"])
 
     def test_peak_above_the_reservation_is_reported_once_and_recorded(self):
         """A measured peak above the settled demand prints one line and sets exceeded in the record."""
@@ -453,8 +466,8 @@ class ResourceAdmission(unittest.TestCase):
                 path = self.demand_file()
                 path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 path.write_text(content)
-                status, error, result = self.run_command("unreadable", command=exits_with(3))
-                self.assertEqual(status, 3)
+                status, error, result = self.run_command("unreadable", command=exits_with(0))
+                self.assertEqual(status, 0)
                 self.assertEqual(result["memoryReservedBytes"], default)
                 self.assertEqual(len([line for line in error.splitlines()
                                       if line.startswith("dotfiles-supervise: cannot read the measured memory demand")]), 1)
@@ -465,8 +478,8 @@ class ResourceAdmission(unittest.TestCase):
         blocker = self.root / "blocker"
         blocker.write_text("")
         self.state = blocker / "state"
-        status, error, result = self.run_command("unwritable", command=exits_with(3))
-        self.assertEqual(status, 3)
+        status, error, result = self.run_command("unwritable", command=exits_with(0))
+        self.assertEqual(status, 0)
         self.assertEqual(result["memoryReservedBytes"], percent_of(MEMORY_PERCENT, 16 * GIB))
         self.assertEqual(len([line for line in error.splitlines() if "cannot read the measured memory demand" in line]), 1)
         self.assertEqual(len([line for line in error.splitlines() if "cannot record the measured memory peak" in line]), 1)

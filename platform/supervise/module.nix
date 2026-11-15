@@ -45,7 +45,7 @@ in
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
       `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesが加わる。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
-      commandが自分で終了しstatusが124でも128以上でもなく、取消も期限到達も無く、子孫の回収を確認できた走行だけを新しい順に10件まで残す。
+      子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。
       fingerprintはgit repositoryの根にある依存と検証入口の宣言のindexのsha256で、repositoryでなければ空文字列である。
       記録の読み書きの失敗はstderrへ一行を出し、commandの終了statusを変えず、読めない場合は既定値で予約する。
       観測不能や圧迫では新規実行だけを待たせ、期限切れは未起動のdeferred記録と124で返す。

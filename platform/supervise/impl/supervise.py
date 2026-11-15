@@ -577,20 +577,22 @@ class Supervisor:
             diagnose(f"cannot read the measured memory demand: {error}")
         return None
 
-    def records_peak(self, drained):
+    def records_peak(self, drained, exceeded):
         """測ったピークを記録してよい走行の判定
 
         Args:
             drained: 子孫の終了をkernelが確認した選択
+            exceeded: 測ったピークが予約を超えた選択
         Returns:
-            bool: commandが自分で終了した走行で、取消も期限到達も無く、子孫の回収を確認できた場合のTrue
-        制約: GNU timeoutの124はwrapperの予算切れで過小なピークになるため、124と128以上の終了statusは記録しない
+            bool: 子孫の回収を確認でき、commandが自分で0で終了した走行か、ピークが予約を超えた走行のTrue
+        制約: 失敗、予算切れ、取消の走行は入口の途中で止まり、ピークが需要を下回るため、記録すると次の予約を下げる。
+            予約を超えたピークは途中で止まった走行でも需要の下限であり、記録は次の予約を上げる向きにしか働かない
         """
-        status = self.client_status
-        return (
-            drained and self.cancel_signal is None and not self.deadline_expired
-            and status is not None and 0 <= status < 128 and status != 124
-        )
+        if not drained:
+            return False
+        if exceeded:
+            return True
+        return self.cancel_signal is None and not self.deadline_expired and self.client_status == 0
 
     def observe_memory(self, drained):
         """測ったピークの予約との照合と記録
@@ -608,7 +610,7 @@ class Supervisor:
         exceeded = peak > reserved
         if exceeded:
             diagnose(f"measured memory peak {peak} bytes exceeded the reservation {reserved} bytes")
-        if self.history is not None and peak > 0 and self.records_peak(drained):
+        if self.history is not None and peak > 0 and self.records_peak(drained, exceeded):
             try:
                 self.history.append({"at": int(time.time()), "peakBytes": peak, "reservedBytes": reserved,
                                      "fingerprint": self.fingerprint, "exceeded": exceeded})

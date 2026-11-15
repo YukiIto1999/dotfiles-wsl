@@ -677,7 +677,7 @@
                 '. == {mcp: {gateway: {type: "remote", url: $expected}}}' \
                 ${clients.opencode.gatewayConfig.source} > /dev/null
               jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
-                '. == {mcpServers: {gateway: {type: "http", url: $expected}}}' \
+                '. == {mcpServers: {gateway: {type: "http", url: $expected, instructions: false}}}' \
                 ${clients.omp.gatewayConfig.source} > /dev/null
 
               # 必須制約は全文に埋め込まれ、別 file で読む client の本文からは外れ、どちらにも marker を残さない
@@ -767,7 +767,7 @@
                 '.mcp.gateway.url == $expected and (.mcp | keys) == ["gateway"]' \
                 ${variantClients.opencode.managedFiles.config.source} > /dev/null
               jq --exit-status --arg expected ${lib.escapeShellArg variantGatewayUrl} \
-                '.mcpServers.gateway == {type: "http", url: $expected} and (.mcpServers | keys) == ["gateway"]' \
+                '.mcpServers.gateway == {type: "http", url: $expected, instructions: false} and (.mcpServers | keys) == ["gateway"]' \
                 ${variantClients.omp.managedFiles.mcp.source} > /dev/null
               remarshal -if toml -of json ${variantClients.codex.managedFiles.system.source} \
                 > codex-system-variant.json

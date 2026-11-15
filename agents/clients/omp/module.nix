@@ -19,10 +19,12 @@ let
     typescript = "tsgo";
   };
 
+  # server が配る instructions は全 session と subagent の prompt へ入り、Skill を入口にする経路と別の初手を指示するため載せない
   gatewayConfig = (pkgs.formats.json { }).generate "omp-mcp.json" {
     mcpServers.gateway = {
       type = "http";
       url = cfg.platform.mcp.gateway.url;
+      instructions = false;
     };
   };
 

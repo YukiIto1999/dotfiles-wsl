@@ -31,6 +31,7 @@ effort: xhigh
 6. 変更が満たすべき目的はrequest、issue、specから確定し、実装の形から逆算しない。
    全changed fileとsubsystemをaccountし、caller、dependency、error、ordering、concurrency、lifecycle、testまでbehaviorを追う。
    testがgreenでも、変更が目的や原因へ結び付かなければその不足を指摘する。
+   test、fixture、検証設定の差分では、期待値、assertion、閾値、基線、skip・隔離の変更ごとに、request、issue、specが定めた仕様変更に対応するかを確かめ、対応しない緩和や検出しなくなる変更をfindingにする。
    必要なprerequisite、test、docs、生成物と、独立したcleanupや推測上の改善を分ける。
    過剰な抽象を指摘するときは、現要件を既存owner、標準library、native機能で満たせるかを示し、行数削減を正しさの代わりにしない。
    UI sourceの変更が指定axisに含まれる場合は、native semanticsとaccessible name、keyboard/focus、状態とerrorの対応、content増幅、locale、motion、asset寸法、DOM read/writeと必要なbrowser supportを実codeで確認する。

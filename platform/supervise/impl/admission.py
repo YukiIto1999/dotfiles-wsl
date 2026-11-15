@@ -66,6 +66,19 @@ def descendants(pid, table):
         held.update(extra)
 
 
+def pss_bytes(pid):
+    """processのPSS取得
+
+    pid: 読取対象のPID
+    戻り値: /proc/<pid>/smaps_rollup の Pss のbyte数。値が無ければ0
+    失敗: 消失または読取不能なprocessによるOSErrorかValueError
+    """
+    for line in Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines():
+        if line.startswith("Pss:"):
+            return int(line.split()[1]) * 1024
+    return 0
+
+
 def resident_credit(entry, table, boundary=None):
     """観測済みの使用量を予約残量から控除するPSSの取得
 
@@ -86,10 +99,7 @@ def resident_credit(entry, table, boundary=None):
                 actual = Path(membership)
                 if actual != Path(boundary) and Path(boundary) not in actual.parents:
                     continue
-            for line in Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines():
-                if line.startswith("Pss:"):
-                    used += int(line.split()[1]) * 1024
-                    break
+            used += pss_bytes(pid)
         except (OSError, ValueError, StopIteration):
             continue
     return min(used, entry["memoryBytes"])
@@ -99,12 +109,14 @@ class Reservation:
     """単一hostの待機順と実行中の将来消費の所有
 
     policy_path: 不変な観測commandと予約既定値のJSON
-    memory_bytes: 明示された物理memory需要か既定値を選ぶNone
+    memory_bytes: 明示された物理memory需要か導出に任せるNone
     cpu_count: 明示されたCPU需要か既定値を選ぶNone
+    recorded_bytes: 実測の記録から導いた物理memory需要か記録なしのNone
     寿命: supervisorによる子孫終了確認まで
+    制約: 明示でない物理memory需要は最初の有効な観測か祖先の予約で確定し、それまでは未確定のNone
     """
 
-    def __init__(self, policy_path, memory_bytes=None, cpu_count=None):
+    def __init__(self, policy_path, memory_bytes=None, cpu_count=None, recorded_bytes=None):
         with open(policy_path) as stream:
             self.policy = json.load(stream)
         self.root = Path(self.policy["runtimeDirectory"])
@@ -114,7 +126,12 @@ class Reservation:
         info = self.root.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise AdmissionError("reservation directory must be private and owned by this user")
-        self.memory = positive(memory_bytes if memory_bytes is not None else self.policy["memoryBytes"], "memoryBytes")
+        self.percent = self.policy["memoryPercent"]
+        if type(self.percent) is not int or not 1 <= self.percent <= 100:
+            raise AdmissionError("memoryPercent must be an integer from 1 to 100")
+        self.explicit = positive(memory_bytes, "memory request") if memory_bytes is not None else None
+        self.recorded = recorded_bytes
+        self.memory = self.explicit
         self.cpus = positive(cpu_count if cpu_count is not None else self.policy["cpuCount"], "cpuCount")
         self.boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
         self.path = None
@@ -123,11 +140,30 @@ class Reservation:
         self.entry = None
         self.previous_reason = None
 
+    def settle_memory(self, value):
+        """観測した上限での物理memory需要の確定
+
+        value: 検証済みのworkload resource
+        戻り値: なし
+        制約: 上限は物理memory総量と全cgroupのlimitBytesの最小値。記録由来と既定値由来の需要は上限へ切り詰める
+        失敗: 上限を超える明示需要によるAdmissionError
+        """
+        ceiling = min([value["memoryTotalBytes"], *(limit["limitBytes"] for limit in value["memoryLimits"])])
+        if self.explicit is not None:
+            if self.explicit > ceiling:
+                raise AdmissionError(
+                    f"memory request of {self.explicit} bytes exceeds the tightest limit of {ceiling} bytes; "
+                    "command was not started")
+        elif self.memory is None:
+            demand = self.recorded if self.recorded is not None else -(-self.percent * ceiling // 100)
+            self.memory = positive(min(demand, ceiling), "memory demand")
+
     def snapshot(self, deadline):
         """待機期限内で取得する有限量の正規化資源観測
 
         deadline: 呼出し全体の絶対期限
         戻り値: workload resourceと入場保留理由
+        副作用: 最初の有効な観測での物理memory需要の確定
         """
         remaining = deadline - time.time()
         if remaining <= 0:
@@ -161,7 +197,10 @@ class Reservation:
                 return None, "Windows physical reserve is exhausted"
             if not isinstance(value["memoryLimits"], list):
                 return None, "cgroup memory limits are unknown"
-            if self.memory > value["memoryTotalBytes"] or self.cpus > value["cpuCount"]:
+            if any(type(limit["limitBytes"]) is not int or limit["limitBytes"] <= 0 for limit in value["memoryLimits"]):
+                return None, "resource observation has no valid limitBytes"
+            self.settle_memory(value)
+            if self.cpus > value["cpuCount"]:
                 raise AdmissionError("request exceeds machine capacity; command was not started")
             return value, None
         except (OSError, ValueError, KeyError, TypeError, StopIteration, subprocess.TimeoutExpired) as error:
@@ -207,8 +246,12 @@ class Reservation:
             valid = False
         if not valid:
             raise AdmissionError("inherited resource lease has no live ancestor owner")
-        if self.memory > entry["memoryBytes"] or self.cpus > entry["cpuCount"]:
+        ancestor = entry["memoryBytes"]
+        if self.explicit is not None and self.explicit > ancestor or self.cpus > entry["cpuCount"]:
             raise AdmissionError("nested request exceeds its ancestor reservation; declare the whole workload at its outer entry")
+        if self.explicit is None:
+            # 入れ子は観測を取らず上限は祖先の予約だけのため、既定値由来の需要は祖先の予約と同じになる
+            self.memory = ancestor if self.recorded is None else min(self.recorded, ancestor)
         self.inherited = True
         self.path = path
         return True
@@ -301,6 +344,7 @@ class Reservation:
                         reason = self.fits(snapshot, records, process_table())
                     if reason is None and supervisor.cancel_signal is None and time.time() < deadline:
                         self.entry["phase"] = "running"
+                        self.entry["memoryBytes"] = self.memory
                         self.persist()
                         return True
                 finally:

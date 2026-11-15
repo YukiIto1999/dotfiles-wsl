@@ -15,6 +15,8 @@ kill_after_seconds=30
 slot_fd=
 resource_policy=@resourcePolicy@
 resource_args=()
+# 資源予約の需要を実測の記録から決める鍵。repository の根と入口の command ごとに分ける
+resource_key=
 
 refresh_remaining() {
   local left=$((budget_seconds * 1000 - (${EPOCHREALTIME/[.,]/} / 1000 - started_ms)))
@@ -169,7 +171,8 @@ if names_entry "$*" \
       if [ -n "$resource_policy" ]; then
         deadline_ms=$((started_ms + budget_seconds * 1000))
         printf -v deadline '%d.%03d' "$((deadline_ms / 1000))" "$((deadline_ms % 1000))"
-        resource_args=(--resource-policy "$resource_policy" --resource-deadline "$deadline")
+        printf -v resource_key 'verify\n%s\n%s' "$top" "$*"
+        resource_args=(--resource-policy "$resource_policy" --resource-deadline "$deadline" --resource-key "$resource_key")
       fi
       run_bounded "$@" || status=$?
       resource_args=()

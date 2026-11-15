@@ -77,6 +77,43 @@
             runtimeContract = runtimePackageContract;
           }
         );
+        # sandbox には資源観測の実体が無いため、常に余裕を返す観測で実測の記録まで同じ経路を通す
+        resourceObservation = pkgs.writeScript "agent-resource-observation" ''
+          #!${pkgs.python3}/bin/python3
+          import json, time
+          print(json.dumps({
+              "schemaVersion": 1,
+              "outcomes": [{"id": "resource/fixture", "status": "pass", "message": "fixture"}],
+              "resources": [{"key": "workload", "value": {
+                  "observedAt": time.time(),
+                  "memoryTotalBytes": 68719476736,
+                  "memoryAvailableBytes": 68719476736,
+                  "hostMemoryHeadroomBytes": 68719476736,
+                  "memoryHeadroomBytes": 68719476736,
+                  "memoryLimits": [],
+                  "cpuCount": 12,
+                  "windowsCommitHeadroomBytes": 68719476736,
+                  "windowsPhysicalAvailableBytes": 17179869184,
+                  "windowsPhysicalHeadroomBytes": 8589934592
+              }}]
+          }))
+        '';
+        fixtureResourcePolicy = pkgs.writeText "agent-resource-policy.json" (
+          builtins.toJSON {
+            runtimeDirectory = "/build/agent-workload-leases";
+            observation = [ (toString resourceObservation) ];
+            memoryPercent = 2;
+            cpuCount = 1;
+            maximumObservationAgeSeconds = 10;
+          }
+        );
+        resourceRuntime = import ../package.nix (
+          runtimeArgs
+          // {
+            runtimeContract = runtimePackageContract;
+            resourcePolicy = fixtureResourcePolicy;
+          }
+        );
         wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
           if [[ $# -eq 3 && $1 == -c && $2 == %u \
             && $3 == "/proc/''${DOTFILES_AGENT_TEST_WRONG_OWNER_PID-}" ]]; then
@@ -770,6 +807,7 @@
               ];
               VERIFY = lib.getExe runtime.verify;
               STALLING_VERIFY = lib.getExe stallingVerify;
+              RESOURCE_VERIFY = lib.getExe resourceRuntime.verify;
               SLOW_RESOLUTION_VERIFY = lib.getExe slowResolutionRuntime.verify;
               GATE = lib.getExe runtime.gate;
             }

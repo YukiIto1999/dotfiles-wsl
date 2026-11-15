@@ -47,7 +47,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from admission import AdmissionError, LEASE_ENV, Reservation
+from admission import AdmissionError, LEASE_ENV, Reservation, pss_bytes
+from demand import DemandHistory, fingerprint
 
 PR_SET_PDEATHSIG = 1
 PR_SET_CHILD_SUBREAPER = 36
@@ -58,6 +59,7 @@ DEFAULT_TERM_GRACE_SECONDS = 10.0
 DEFAULT_KILL_GRACE_SECONDS = 5.0
 OVERDUE_SWEEP_SECONDS = 0.5
 OVERDUE_REPORT_SECONDS = 30.0
+MEASURE_SECONDS = 1.0
 # Dispositions Python or a non-interactive parent shell may have changed and the
 # command must not inherit.
 RESET_TO_DEFAULT = (
@@ -91,6 +93,7 @@ class Options:
         resource_deadline: 待機を含む絶対期限か無効のNone
         resource_memory: 物理memory予約の明示値か既定値を選ぶNone
         resource_cpus: CPU予約の明示値か既定値を選ぶNone
+        resource_key: 実測した需要の記録を読み書きする鍵か記録しないNone
         command: 絶対実行pathを先頭に持つcommand引数列
     """
 
@@ -115,6 +118,7 @@ class Options:
         self.resource_deadline = None
         self.resource_memory = None
         self.resource_cpus = None
+        self.resource_key = None
 
 
 def parse_seconds(option, value):
@@ -165,7 +169,8 @@ def parse_arguments(arguments):
             index += 1
             continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels",
-                            "--resource-policy", "--resource-deadline", "--resource-memory", "--resource-cpus"):
+                            "--resource-policy", "--resource-deadline", "--resource-memory", "--resource-cpus",
+                            "--resource-key"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
             raise UsageError(f"{argument} needs a value")
@@ -184,6 +189,10 @@ def parse_arguments(arguments):
             options.argv0 = value
         elif argument == "--resource-policy":
             options.resource_policy = value
+        elif argument == "--resource-key":
+            if not value:
+                raise UsageError(f"{argument} needs a non-empty value")
+            options.resource_key = value
         elif argument == "--resource-deadline":
             options.resource_deadline = parse_seconds(argument, value)
         elif argument in ("--resource-memory", "--resource-cpus"):
@@ -281,6 +290,50 @@ def hold_until_gone(survivors):
         time.sleep(HOLDER_POLL_SECONDS)
 
 
+class PeakMeter:
+    """所有する子孫のPSS合計の最大値の保持
+
+    Attributes:
+        peak: これまでに測った合計のbyte数。一度も測れなければ0
+        due: 次に測る単調時計の時刻
+    """
+
+    def __init__(self):
+        """測定前の状態の生成
+
+        Args:
+            self: 測定を始める前の保持者
+        Returns:
+            None: 初期状態の格納後の復帰値
+        """
+        self.peak = 0
+        self.due = 0.0
+
+    def sample(self):
+        """間隔が過ぎている場合だけの所有子孫のPSS合計の測定
+
+        Args:
+            self: 測定を保持する測定器
+        Returns:
+            float: 次の測定までの秒数
+        """
+        now = time.monotonic()
+        if now >= self.due:
+            self.due = now + MEASURE_SECONDS
+            total = 0
+            # 測定の失敗で所有の監督を終えないため、読めないprocessは飛ばす
+            try:
+                for pid in owned_processes():
+                    try:
+                        total += pss_bytes(pid)
+                    except (OSError, ValueError):
+                        continue
+            except (OSError, ValueError, IndexError):
+                return MEASURE_SECONDS
+            self.peak = max(self.peak, total)
+        return max(0.0, self.due - time.monotonic())
+
+
 class Supervisor:
     def __init__(self, options):
         self.options = options
@@ -302,6 +355,9 @@ class Supervisor:
         self.reservation = None
         self.drained = True
         self.deadline_expired = False
+        self.meter = PeakMeter() if options.resource_policy is not None else None
+        self.history = None
+        self.fingerprint = ""
 
     def record(self, phase, **fields):
         path = self.options.result_path
@@ -437,6 +493,7 @@ class Supervisor:
         Return False only without --require-drained, once SIGKILL had its grace period.
         """
         while True:
+            sampling = self.meter.sample() if self.meter is not None and not self.terminating else None
             children_exist = self.reap()
             if self.options.resource_deadline is not None and time.time() >= self.options.resource_deadline:
                 self.deadline_expired = True
@@ -446,10 +503,13 @@ class Supervisor:
             ):
                 self.begin_termination()
             if not self.terminating:
-                self.wait_for_event(
+                wait = (
                     max(0, self.options.resource_deadline - time.time())
                     if self.options.resource_deadline is not None else None
                 )
+                if sampling is not None:
+                    wait = sampling if wait is None else min(wait, sampling)
+                self.wait_for_event(wait)
                 continue
             if not children_exist:
                 return True
@@ -497,11 +557,71 @@ class Supervisor:
         if self.options.parent_pid is not None and os.getppid() != self.options.parent_pid:
             self.request_cancel(signal.SIGTERM, None)
 
+    def recorded_demand(self):
+        """鍵が示す実測の記録の準備と、記録からの物理memory需要の取得
+
+        Args:
+            self: 解析済みの設定を持つsupervisor
+        Returns:
+            int | None: 明示需要が無く、記録が使える場合の需要。それ以外はNone
+        副作用: 記録の読取に失敗した場合のstderrへの一行。走行は既定値の予約で続く
+        """
+        if self.options.resource_key is None:
+            return None
+        self.fingerprint = fingerprint()
+        try:
+            self.history = DemandHistory(self.options.resource_key)
+            if self.options.resource_memory is None:
+                return self.history.recorded_demand(self.fingerprint, time.time())
+        except (OSError, ValueError) as error:
+            diagnose(f"cannot read the measured memory demand: {error}")
+        return None
+
+    def records_peak(self, drained):
+        """測ったピークを記録してよい走行の判定
+
+        Args:
+            drained: 子孫の終了をkernelが確認した選択
+        Returns:
+            bool: commandが自分で終了した走行で、取消も期限到達も無く、子孫の回収を確認できた場合のTrue
+        制約: GNU timeoutの124はwrapperの予算切れで過小なピークになるため、124と128以上の終了statusは記録しない
+        """
+        status = self.client_status
+        return (
+            drained and self.cancel_signal is None and not self.deadline_expired
+            and status is not None and 0 <= status < 128 and status != 124
+        )
+
+    def observe_memory(self, drained):
+        """測ったピークの予約との照合と記録
+
+        Args:
+            drained: 子孫の終了をkernelが確認した選択
+        Returns:
+            dict: --resultへ足す測定の項目。資源予約のない走行は空
+        副作用: 予約の超過のstderrへの一行と、記録できる走行の実測の追記。追記の失敗はstderrへ一行を出し、終了statusを変えない
+        """
+        if self.reservation is None:
+            return {}
+        peak = self.meter.peak
+        reserved = self.reservation.memory
+        exceeded = peak > reserved
+        if exceeded:
+            diagnose(f"measured memory peak {peak} bytes exceeded the reservation {reserved} bytes")
+        if self.history is not None and peak > 0 and self.records_peak(drained):
+            try:
+                self.history.append({"at": int(time.time()), "peakBytes": peak, "reservedBytes": reserved,
+                                     "fingerprint": self.fingerprint, "exceeded": exceeded})
+            except (OSError, ValueError) as error:
+                diagnose(f"cannot record the measured memory peak: {error}")
+        return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved}
+
     def run(self):
         self.prepare()
         if self.options.resource_policy is not None and self.cancel_signal is None:
             self.reservation = Reservation(
-                self.options.resource_policy, self.options.resource_memory, self.options.resource_cpus
+                self.options.resource_policy, self.options.resource_memory, self.options.resource_cpus,
+                self.recorded_demand(),
             )
             if not self.reservation.acquire(self, self.options.resource_deadline):
                 status = 128 + self.cancel_signal if self.cancel_signal is not None else 124
@@ -546,6 +666,7 @@ class Supervisor:
                   + " ".join(map(str, sorted(survivors))), file=sys.stderr)
         status = self.exit_status(drained)
         expiry = {"kill_grace_expired": self.kill_grace_expired} if self.options.require_drained else {}
+        memory = self.observe_memory(drained)
         self.record(
             "finished",
             spawned=True,
@@ -555,6 +676,7 @@ class Supervisor:
             remaining=sorted(survivors),
             status=status,
             **expiry,
+            **memory,
         )
         if survivors and self.options.hold_fd is not None:
             hold_until_gone(survivors)

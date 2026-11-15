@@ -83,11 +83,19 @@ budget_left() {
   printf '%d' "$left"
 }
 
+# 引数: [--resource-key KEY] TOP COMMAND...
+# 鍵は資源予約の需要を実測の記録から決める検査にだけ渡し、無ければ未計測の既定値で予約する
 run_within_budget() {
-  local top=$1 pid status remaining
+  local -a resource_key=()
+  local top pid status remaining
+  if [ "$1" = --resource-key ]; then
+    resource_key=(--resource-key "$2")
+    shift 2
+  fi
+  top=$1
   shift
   remaining=$(budget_left) || return $?
-  (cd "$top" && without_git_environment && exec "$within" "$remaining" "$@") </dev/null &
+  (cd "$top" && without_git_environment && exec "$within" "${resource_key[@]}" "$remaining" "$@") </dev/null &
   pid=$!
   trap 'interrupted=1; kill -TERM "$pid" 2>/dev/null || true' INT TERM HUP
   while :; do
@@ -127,7 +135,7 @@ require_run_success() {
 }
 
 main() {
-  local top entry entry_file policy_file head ref object budget_error='' budget_result started=$SECONDS elapsed status=0 interrupted=0
+  local top entry entry_file policy_file head ref object budget_error='' budget_result started=$SECONDS elapsed status=0 interrupted=0 resource_key
   local -a command pushed=() stale=()
   top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
   # 削除refへのHEAD一致要求の不採用: Gitがlocal objectとして渡すゼロ値
@@ -181,7 +189,9 @@ main() {
 
   read -r -a command <<<"$entry"
   printf 'verify-push: %s を実行する(予算 %s)\n' "$entry" "$(duration "$budget_seconds")" >&2
-  run_within_budget "$top" "${command[@]}" || status=$?
+  # 入口の解決と検証後のsourceの確認は短い走行で、鍵を渡すと直近5件の実測を埋めて検査本体のピークを押し出すため、鍵は検査本体だけに渡す
+  printf -v resource_key 'verify-push\n%s\n%s' "$top" "${command[*]}"
+  run_within_budget --resource-key "$resource_key" "$top" "${command[@]}" || status=$?
   elapsed=$((SECONDS - started))
 
   require_run_success "$status" '検証'

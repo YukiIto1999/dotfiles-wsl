@@ -285,10 +285,24 @@ T1、pre-push、非対話agent jobは共通の予約へ参加する。それ以�
 同じ処理を別入口から追加投入して待機を迂回しない。
 
 予約値は物理memoryとCPUの需要宣言であり、processのhard limitではない。
-既定値は未計測の処理に対する開始条件で、ピークを保証しない。計測した処理は`--memory-gib`と`--cpus`で指定し、入れ子の処理は外側で合計需要を予約する。
-同じ所有者の予約は入れ子で二重計上しないが、外側を超える需要は拒否する。子孫の終了を確認できない予約も自動解放しない。
+物理memoryの需要は、明示した値、実測の記録から導いた値、未計測の既定値の順に決める。
+未計測の既定値は`dotfiles.workstation.workload.reservation`の`verificationMemoryPercent`（既定25）と、非対話jobの`jobMemoryPercent`で、最初の有効な観測のcgroup`limitBytes`の最小値（無ければ物理memory総量）に対する割合であり、ピークを保証しない。
+需要は最も厳しい上限へ切り詰める。明示した需要が上限を超える場合は、待たずにcommandを起動せず70で返す。明示は`dotfiles-workload-run`の`--memory-gib`と`--cpus`で行い、入れ子の処理は外側で合計需要を予約する。
+同じ所有者の予約は入れ子で二重計上しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。子孫の終了を確認できない予約も自動解放しない。
 wrapperを通らないcommandや共有backendの将来増加までは予約できない。
 Windowsの物理空きはreserveを割った場合の開始保留に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。
+
+実測した需要は、呼出し側が鍵を渡した走行だけが読み書きする。
+記録は`${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/<鍵のsha256>.json`に置き、directoryは0700である。
+T1は`verify`、repositoryの根、入口のcommandを、pre-pushは検査本体だけに`verify-push`、repositoryの根、入口のcommandを、それぞれ改行でつないだ文字列を鍵にする。
+pre-pushの入口の解決とsourceの確認は短い走行で、鍵を渡すと直近5件の窓を埋めて検査本体のピークを押し出すため、鍵を渡さず既定値で予約する。`dotfiles-workload-run`と非対話jobも鍵を渡さない。
+supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計を約1秒ごとに測ってピークを保つ。子孫でない共有backendの消費は測れない。
+記録に残すのは、commandが自分で終了し、終了statusが124でも128以上でもなく、取消も期限到達も無く、子孫の回収を確認できた走行だけで、新しい順に10件を保つ。GNU timeoutの124はwrapperの予算切れで過小なピークになるため捨てる。
+fingerprintは、repositoryの根で`git ls-files -s`に`*.lock`、`flake.nix`、`devenv.nix`、`devenv.yaml`、`package.json`、`pnpm-lock.yaml`、`package-lock.json`、`Cargo.toml`、`rust-toolchain`、`rust-toolchain.toml`、`global.json`、`Directory.Build.props`、`Directory.Packages.props`、`nx.json`、`verification-budget.json`、`justfile`、`Makefile`を渡した出力のsha256で、repositoryでなければ空文字列である。
+toolchain、依存、検証入口の宣言を表し、変わると過去の実測は使わない。
+需要は、fingerprintが現在と一致し30日以内の新しい5件のピークの最大に20%を足した値（切り上げ）で、該当する記録が無ければ未計測の既定値になる。
+測ったピークが予約を超えた走行は、stderrへ`dotfiles-supervise: measured memory peak N bytes exceeded the reservation M bytes`の一行を出し、記録の`exceeded`をtrueにする。`--result`のfinished段階にも`memoryPeakBytes`と`memoryReservedBytes`が入る。
+記録の読み書きの失敗はstderrへ一行を出すだけで、commandの終了statusを変えず、読めない場合は既定値で予約する。
 
 重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。
 PSIが既存のwarning閾値を下回り、Linux・cgroup・Windowsの余裕が予約需要を満たせば、新規処理は待機から進む。

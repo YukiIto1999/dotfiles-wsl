@@ -25,12 +25,29 @@ in
   runWithin = pkgs.writeShellApplication {
     name = "dotfiles-run-within";
     text = ''
+      usage() {
+        printf 'usage: dotfiles-run-within [--resource-key KEY] SECONDS COMMAND [ARG...]\n' >&2
+        exit 64
+      }
+      ${lib.optionalString (resourcePolicy == null) ''
+        # 資源予約の無い構成でも呼び出し側が同じ引数で呼べるように、鍵は受け取って使わない
+        if [ "$#" -ge 1 ] && [ "$1" = --resource-key ]; then
+          [ "$#" -ge 4 ] || usage
+          shift 2
+        fi
+      ''}
       ${lib.optionalString (resourcePolicy != null) ''
-        [ "$#" -ge 2 ] || { printf 'usage: dotfiles-run-within SECONDS COMMAND [ARG...]\n' >&2; exit 64; }
+        resource_key=()
+        if [ "$#" -ge 1 ] && [ "$1" = --resource-key ]; then
+          [ "$#" -ge 4 ] || usage
+          resource_key=(--resource-key "$2")
+          shift 2
+        fi
+        [ "$#" -ge 2 ] || usage
         deadline=$(${lib.getExe pkgs.python3} -c 'import math,sys,time; s=float(sys.argv[1]); assert math.isfinite(s) and s>0; print(time.time()+s)' "$1")
         exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 \
           --resource-policy ${lib.escapeShellArg (toString resourcePolicy)} --resource-deadline "$deadline" \
-          -- ${lib.getExe runWithinCore} "$@"
+          "''${resource_key[@]}" -- ${lib.getExe runWithinCore} "$@"
       ''}
       exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 -- ${lib.getExe runWithinCore} "$@"
     '';

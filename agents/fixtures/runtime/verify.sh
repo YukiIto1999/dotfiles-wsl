@@ -1437,6 +1437,22 @@ test ! -e "$fixture/deadline-late"
 PATH="$fixture/budget-bin:$PATH" "$VERIFY" -- devenv shell -- verify
 "$GATE" check --repo "$budget_repo" >/dev/null
 
+# 資源予約つきの T1 は、鍵 verify と repository の根と入口の command を改行でつないだ文字列で実測を記録する。
+# 記録は sandbox の HOME ではなくこの fixture 専用の directory へ書く
+resource_state=$fixture/resource-state
+resource_repo=$fixture/resource-key-repo
+t1_repository "$resource_repo" 60
+mkdir "$fixture/resource-bin"
+printf '#!%s\nsleep 0.3\n' "$BASH" >"$fixture/resource-bin/devenv"
+chmod +x "$fixture/resource-bin/devenv"
+(cd "$resource_repo" && XDG_STATE_HOME=$resource_state PATH="$fixture/resource-bin:$PATH" \
+  "$RESOURCE_VERIFY" -- devenv shell -- verify)
+resource_digest=$(printf 'verify\n%s\n%s' "$resource_repo" 'devenv shell -- verify' | sha256sum | cut -d' ' -f1)
+test -s "$resource_state/dotfiles-wsl/workload/demand/$resource_digest.json" || {
+  echo 'T1 under a resource policy did not record its memory peak under the verify key' >&2
+  exit 1
+}
+
 escape_repo=$fixture/session-escape-budget-repo
 t1_repository "$escape_repo" 2
 cd "$escape_repo"

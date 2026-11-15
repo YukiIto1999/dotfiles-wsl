@@ -109,7 +109,7 @@
           builtins.toJSON {
             runtimeDirectory = "/build/git-workload-leases";
             observation = [ (toString resourceObservation) ];
-            memoryBytes = 1073741824;
+            memoryPercent = 2;
             cpuCount = 1;
             maximumObservationAgeSeconds = 10;
           }

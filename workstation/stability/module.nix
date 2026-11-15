@@ -18,12 +18,11 @@ let
   inherit (workload) reservation;
   runtimeDirectory = "/run/dotfiles-workload/${cfg.username}";
   admissionPolicy =
-    memoryGiB: cpus:
+    memoryPercent: cpus:
     pkgs.writeText "dotfiles-workload-policy.json" (
       builtins.toJSON {
-        inherit runtimeDirectory;
+        inherit runtimeDirectory memoryPercent;
         observation = [ (lib.getExe workload.observationPackage) ];
-        memoryBytes = memoryGiB * gibibyte;
         cpuCount = cpus;
         maximumObservationAgeSeconds = 10;
       }
@@ -158,20 +157,28 @@ in
     };
     workload = {
       reservation = {
-        verificationMemoryGiB = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 16;
-          description = "未計測の全量検証へ予約する物理memoryのGiB。hard limitではなく開始前の需要宣言。";
+        verificationMemoryPercent = lib.mkOption {
+          type = lib.types.ints.between 1 100;
+          default = 25;
+          description = ''
+            計測の記録が無い走行だけに使う未計測の値。検証一走行が予約する物理memoryを、
+            最初の有効な資源観測の cgroup limitBytes の最小値（無ければ物理memory総量）に対する割合で表す。
+            記録のある走行は、直近の実測のピークから決めた需要を予約する。hard limitではなく開始前の需要宣言。
+          '';
         };
         verificationCpus = lib.mkOption {
           type = lib.types.ints.positive;
           default = 2;
           description = "検証一走行が予約するCPU数。commandの機能やworker数を変更しない需要宣言。";
         };
-        jobMemoryGiB = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = reservation.verificationMemoryGiB;
-          description = "非対話agent job全体の物理memory需要GiB。入れ子の検証を含む需要を外側で予約する。";
+        jobMemoryPercent = lib.mkOption {
+          type = lib.types.ints.between 1 100;
+          default = reservation.verificationMemoryPercent;
+          description = ''
+            計測の記録が無い走行だけに使う未計測の値。非対話agent job全体の物理memory需要を、
+            検証と同じ基準（cgroup limitBytes の最小値、無ければ物理memory総量）に対する割合で表す。
+            入れ子の検証を含む需要を外側で予約する。
+          '';
         };
         jobCpus = lib.mkOption {
           type = lib.types.ints.positive;
@@ -314,8 +321,8 @@ in
     memoryHighPercent = workloadMemoryHighPercent;
     memoryMaxPercent = workloadMemoryMaxPercent;
     observationPackage = workloadObservation;
-    admissionPolicy = admissionPolicy reservation.verificationMemoryGiB reservation.verificationCpus;
-    jobAdmissionPolicy = admissionPolicy reservation.jobMemoryGiB reservation.jobCpus;
+    admissionPolicy = admissionPolicy reservation.verificationMemoryPercent reservation.verificationCpus;
+    jobAdmissionPolicy = admissionPolicy reservation.jobMemoryPercent reservation.jobCpus;
   };
   config.dotfiles.platform.cli.commands = {
     observeWorkload = workloadObservation;

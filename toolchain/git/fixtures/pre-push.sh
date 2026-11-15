@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export HOME=$PWD/home GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=$PWD/home/.gitconfig
+# 資源予約の実測の記録は、sandbox の HOME や実 home の state ではなくこの fixture 専用の directory へ書く
+export HOME=$PWD/home XDG_STATE_HOME=$PWD/state GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=$PWD/home/.gitconfig
 mkdir -p "$HOME"
 git config --global user.name fixture
 git config --global user.email fixture@example.invalid
@@ -97,6 +98,27 @@ test "$(cat "$MARKER")" = "$declared" || fail 'verify-push did not run at the re
 test "$(remote_ref "$declared" refs/heads/main)" = "$head" || fail 'the accepted push did not reach the remote'
 grep -qF "refs/heads/main $head refs/heads/main " refs \
   || fail 'verify-push consumed the ref list meant for the repository hook'
+
+# 資源予約の鍵は検査本体だけに渡る。入口の解決と検証後のsourceの確認は記録を作らない
+demand=$XDG_STATE_HOME/dotfiles-wsl/workload/demand
+recorded_runs() {
+  local -a records=()
+  shopt -s nullglob
+  records=("$demand"/*.json)
+  shopt -u nullglob
+  printf '%d' "${#records[@]}"
+}
+keyed=$(new_repo keyed)
+set_budget "$keyed" 15
+printf 'verify-push:\n\tsleep 0.3\n' >"$keyed/Makefile"
+git -C "$keyed" add Makefile
+git -C "$keyed" commit -q -m 'test: 検査の追加'
+runs_before=$(recorded_runs)
+push "$HOOKS" "$keyed" || fail 'push of the verification that records its memory peak was refused'
+test "$(recorded_runs)" -eq "$((runs_before + 1))" \
+  || fail 'a run other than the verification itself recorded a memory peak'
+key_digest=$(printf 'verify-push\n%s\n%s' "$keyed" 'make verify-push' | sha256sum | cut -d' ' -f1)
+test -s "$demand/$key_digest.json" || fail 'the verification did not record its memory peak under the verify-push key'
 
 export INSPECTION_GIT
 INSPECTION_GIT=$(command -v git)

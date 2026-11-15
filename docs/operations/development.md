@@ -73,6 +73,7 @@ Nix appを自動検出しないため、他projectがNixの検証入口を使う
 登録済みの入口の予算が読めない場合は、終了gateとpre-pushも拒否する。
 追跡済みの登録fileを削除しても入口なしとして通さず、欠落として拒否する。
 T1は入口の解決、projectのslot待ち、機全体の資源待ち、sourceの照合、検査、証跡の保存を`verify.seconds`で制限し、wrapperは残り時間を使い切った時点で取消を開始して非ゼロ終了にする。
+T1の検査本体の資源予約は、repositoryの根と入口のcommandごとに残した実測のピークから需要を決め、記録が無い走行だけが未計測の既定値で予約する。仕組みは[Doctor](doctor.md#資源不足による開始待ち)を参照する。
 成功証跡は検査前のsourceへ固定して走行ごとに仮保存し、検査後のsourceとの一致、後始末、証跡の公開が時間内に確認できた場合だけwrapperが確定する。
 公開途中の失敗や中断、sourceの差し替えでは未検査のsourceに対する終了を認めない。
 pre-pushは検査前と検査後の`git status`と`git ls-files`の失敗も拒否し、sourceを確認できなかった走行ではremoteのrefを更新しない。

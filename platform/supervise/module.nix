@@ -36,11 +36,22 @@ in
       supervisor自身が`--hold-fd`を終了確認まで保持するので、切り離したholderは作らない。
       supervisor自体を強制終了した場合は、子孫の終了を確認していない。
       `--resource-policy FILE --resource-deadline EPOCH`はhost共通のFIFO予約を取得してからcommandを起動する。
-      policyは観測commandと利用者専用のregistryとmemoryBytesとcpuCountと観測の有効秒数を持つ。
+      policyは観測commandと利用者専用のregistryとmemoryPercentとcpuCountと観測の有効秒数を持つ。
       `--resource-memory BYTES`と`--resource-cpus COUNT`は同じpolicy内で当該呼出しの需要を明示する。
+      明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
+      上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
+      `--resource-key KEY`を渡した走行は、記録があればfingerprintが現在と一致し30日以内の新しい5件のピークの最大に20%を足した値を既定値の代わりに予約する。
+      明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。
+      資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
+      `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesが加わる。
+      記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
+      commandが自分で終了しstatusが124でも128以上でもなく、取消も期限到達も無く、子孫の回収を確認できた走行だけを新しい順に10件まで残す。
+      fingerprintはgit repositoryの根にある依存と検証入口の宣言のindexのsha256で、repositoryでなければ空文字列である。
+      記録の読み書きの失敗はstderrへ一行を出し、commandの終了statusを変えず、読めない場合は既定値で予約する。
       観測不能や圧迫では新規実行だけを待たせ、期限切れは未起動のdeferred記録と124で返す。
       待機も実行も同じ絶対期限に含め、資源予約を持つ実行にはrequire-drainedを適用する。
-      入れ子は生存する祖先の予約内で実行し、祖先予約を超える需要と偽の継承は拒否する。
+      入れ子は生存する祖先の予約内で実行し、明示した需要が祖先予約を超える場合と偽の継承は拒否する。
+      記録由来と既定値由来の需要は祖先の予約へ切り詰め、拒否しない。
       予約は子孫終了まで保持し、所有者不明の実行記録を空きとして自動削除しない。
     '';
   };

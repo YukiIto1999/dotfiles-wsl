@@ -247,6 +247,10 @@ let
       high ? "max",
       current ? 0,
       inactive ? 0,
+      active ? 0,
+      mapped ? 0,
+      dirty ? 0,
+      writeback ? 0,
       cpuMax ? "max 100000",
     }:
     {
@@ -254,7 +258,9 @@ let
       "${path}/memory.max" = "${toString max}\n";
       "${path}/memory.high" = "${toString high}\n";
       "${path}/memory.current" = "${toString current}\n";
-      "${path}/memory.stat" = "anon 1\ninactive_file ${toString inactive}\nactive_file 5\n";
+      "${path}/memory.stat" =
+        "anon 1\ninactive_file ${toString inactive}\nactive_file ${toString active}\n"
+        + "file_mapped ${toString mapped}\nfile_dirty ${toString dirty}\nfile_writeback ${toString writeback}\n";
       "${path}/cpu.max" = "${cpuMax}\n";
     };
   rootController = {
@@ -537,7 +543,7 @@ let
         (field "memoryHeadroomBytes" "0")
       ];
     };
-    # inactive_file は直ちに回収できるとは限らないため headroom を有限の memory.high の保証とみなす解釈は不可
+    # 回収が重くなった場合の歯止めは memory full pressure の閾値なので、headroom を有限の memory.high の保証とみなす解釈は不可
     inactive-file-is-credited-as-reclaimable = {
       probe = mkWorkloadProbe {
         cgroupRoot = mkChain {
@@ -561,6 +567,96 @@ let
         (field "memoryHeadroomBytes" "310000000")
         "(.resources[0].value.memoryLimits[0] | .limitBytes - .currentBytes) == 10000000"
       ];
+    };
+    # active な page cache を使用中と数えると、cache が上限まで増えた後は需要によらず入場できなくなる
+    clean-active-file-is-credited-as-reclaimable = {
+      probe = mkWorkloadProbe {
+        cgroupRoot = mkChain {
+          manager = {
+            current = 390000000;
+            inactive = 100000000;
+            active = 200000000;
+          };
+        };
+      };
+      expected = [
+        (field "memoryLimits" (limitsOf [
+          {
+            path = "/user.slice/user-1000.slice";
+            headroom = 310000000;
+            limit = 400000000;
+            current = 390000000;
+            workingSet = 90000000;
+          }
+          userSliceLimit
+        ]))
+      ];
+    };
+    # map 中、dirty、writeback 中の page は直ちに回収できないため、回収可能から引く
+    pinned-file-is-not-credited = {
+      probe = mkWorkloadProbe {
+        cgroupRoot = mkChain {
+          manager = {
+            current = 390000000;
+            inactive = 100000000;
+            active = 200000000;
+            mapped = 50000000;
+            dirty = 30000000;
+            writeback = 20000000;
+          };
+        };
+      };
+      expected = [
+        (field "memoryLimits" (limitsOf [
+          {
+            path = "/user.slice/user-1000.slice";
+            headroom = 210000000;
+            limit = 400000000;
+            current = 390000000;
+            workingSet = 190000000;
+          }
+          userSliceLimit
+        ]))
+      ];
+    };
+    # map 中の page が file LRU の合計を超える場合に回収可能を負にすると、working set が使用量を超えて headroom を過小にする
+    pinned-file-beyond-lru-credits-nothing = {
+      probe = mkWorkloadProbe {
+        cgroupRoot = mkChain {
+          manager = {
+            current = 390000000;
+            inactive = 10000000;
+            active = 10000000;
+            mapped = 50000000;
+          };
+        };
+      };
+      expected = [
+        (field "memoryLimits" (limitsOf [
+          {
+            path = "/user.slice/user-1000.slice";
+            headroom = 10000000;
+            limit = 400000000;
+            current = 390000000;
+            workingSet = 390000000;
+          }
+          userSliceLimit
+        ]))
+      ];
+    };
+    # 回収できない page の量が読めない階層を、全 cache を回収可能とみなして楽観にしない
+    limit-without-pinned-file-split = {
+      probe = mkWorkloadProbe {
+        cgroupRoot = mkChain {
+          files =
+            files:
+            files
+            // {
+              "user.slice/user-1000.slice/memory.stat" = "anon 1\ninactive_file 0\nactive_file 0\n";
+            };
+        };
+      };
+      expected = unknownLimits;
     };
     unknown-own-cgroup = {
       probe = mkWorkloadProbe { procCgroup = "/nonexistent/cgroup"; };

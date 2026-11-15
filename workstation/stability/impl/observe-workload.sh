@@ -101,14 +101,23 @@ full_pressure() {
   return 1
 }
 
-# 回収できる cache を含む memory.current の全量では headroom が常時 memory.high に張り付くため全量による算出は不可
+# page cache は上限まで増えるため、active な cache を使用中と数えると headroom が時間とともに 0 へ張り付き、
+# host 側の MemAvailable とも定義が食い違う。map 中、dirty、writeback 中の page は直ちに回収できないため控除しない
 usage_bytes() {
-  local current inactive
+  local current inactive active mapped dirty writeback reclaimable
   current=$(read_first_line "$1/memory.current") || return 1
   [[ $current =~ $bytes_pattern ]] || return 1
   inactive=$(stat_value "$1/memory.stat" inactive_file) || return 1
-  if ((current > inactive)); then
-    printf '%s %s\n' "$current" "$((current - inactive))"
+  active=$(stat_value "$1/memory.stat" active_file) || return 1
+  mapped=$(stat_value "$1/memory.stat" file_mapped) || return 1
+  dirty=$(stat_value "$1/memory.stat" file_dirty) || return 1
+  writeback=$(stat_value "$1/memory.stat" file_writeback) || return 1
+  reclaimable=$((inactive + active - mapped - dirty - writeback))
+  if ((reclaimable < 0)); then
+    reclaimable=0
+  fi
+  if ((current > reclaimable)); then
+    printf '%s %s\n' "$current" "$((current - reclaimable))"
   else
     printf '%s 0\n' "$current"
   fi

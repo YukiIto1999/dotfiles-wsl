@@ -267,9 +267,11 @@ in
           Windows 側 snapshot の memory を正規化 envelope の resource workload として返す。
           passthru の dotfilesObservationContract が health と admission の共通の契約になる。
 
-          memoryLimits の headroomBytes は min(memory.high, memory.max) から working set
-          （memory.current から inactive_file を引いた値）を引いた値で、有限の memory.high に対する
-          保証ではない。inactive_file は圧迫時に回収される見込みの分で、直ちに回収できるとは限らない。
+          memoryLimits の headroomBytes は min(memory.high, memory.max) から working set を引いた値で、
+          有限の memory.high に対する保証ではない。working set は memory.current から、回収できる page cache
+          （inactive_file と active_file の和から file_mapped、file_dirty、file_writeback を引いた値、負なら 0）を
+          引いた値で、host 側の MemAvailable と同じく map されていない clean な cache を回収可能と数える。
+          回収が重くなった場合は memory full pressure の閾値が入場を止める。
           回収の見込みを数えない値は limitBytes と currentBytes から limitBytes - currentBytes で得る。
 
           windowsCommitHeadroomBytes は windowsMemoryCommit.warning の割合までの余力で、

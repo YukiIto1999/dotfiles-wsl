@@ -1,6 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
-const GATE = "@gateBinary@";
+const GATE = "/run/current-system/sw/bin/dotfiles-agent-gate";
 const EDITING_TOOLS: Record<string, true> = { edit: true, write: true, ast_edit: true };
 // 書き込み先を入力から読めない tool。前後の木の指紋を比べて、変えた repository だけを門にかける。
 const SHELL_TOOLS: Record<string, true> = { bash: true, eval: true };

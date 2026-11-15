@@ -10,7 +10,7 @@ const TEST_TIMEOUT_MS = 60_000;
 const home = process.env.HOME as string;
 const workDir = join(home, "work");
 const LARGE_WRITE = 3 * 1024 * 1024;
-const nextGenerationGateCalls = join(home, "next-generation-gate.calls");
+const recordingGateCalls = join(home, "recording-gate.calls");
 // 以前は Skill の読取を編集の前提にしていた綴り。いまは通常の編集と同じく、検証の状態だけが終了を止める。
 const FORMERLY_GUARDED_PATHS = ["surfaces/viewer/App.tsx", "core/domain/Invoice.cs", "core/library.ts"];
 
@@ -91,8 +91,8 @@ function settledReceipts(): string[] {
  * @returns 呼出し 1 回につき hook の引数を並べた 1 行の一覧
  */
 function gateCalls(): string[] {
-  if (!existsSync(nextGenerationGateCalls)) return [];
-  return readFileSync(nextGenerationGateCalls, "utf8").split("\n").filter((line) => line !== "");
+  if (!existsSync(recordingGateCalls)) return [];
+  return readFileSync(recordingGateCalls, "utf8").split("\n").filter((line) => line !== "");
 }
 
 /** pid の再利用と元の process の消滅を区別する同一 boot 内の観測情報 */
@@ -275,24 +275,6 @@ test("a gate that outlives its deadline blocks the stop and the hook returns aft
   expect(performance.now() - started).toBeGreaterThanOrEqual(19_000);
 }, TEST_TIMEOUT_MS);
 
-test("a hook loaded for one generation keeps its own gate after the next generation's hook loads", async () => {
-  const repository = unverifiedT1Repository("generation-t1");
-  const tracked = join(repository, "tracked");
-  writeFileSync(tracked, "edited\n");
-  const next = await load(process.env.NEXT_GENERATION_GATE_HOOK as string);
-  await handlerOf(next, "tool_result")(
-    { toolName: "write", toolCallId: "next-session-write", input: { path: tracked }, isError: false },
-    context("next-session"),
-  );
-  const recorded = readFileSync(nextGenerationGateCalls, "utf8");
-  expect(recorded).toContain("hook arm");
-  await writeSucceeded("older-session", { path: tracked });
-  expect(await handlerOf(real, "session_stop")({ stop_hook_active: false }, context("older-session"))).toMatchObject({
-    decision: "block",
-  });
-  expect(readFileSync(nextGenerationGateCalls, "utf8")).toBe(recorded);
-}, TEST_TIMEOUT_MS);
-
 const finished = { role: "assistant", content: [{ type: "text", text: "done" }], stopReason: "stop" };
 const failed = { role: "assistant", content: [], stopReason: "error", errorMessage: "usage limit reached" };
 const interrupted = { role: "assistant", content: [], stopReason: "aborted" };
@@ -312,7 +294,7 @@ test("a provider failure stop returns control without consulting the gate or set
     ctx,
   );
   const stop = handlerOf(real, "session_stop");
-  const recording = handlerOf(await load(process.env.NEXT_GENERATION_GATE_HOOK as string), "session_stop");
+  const recording = handlerOf(await load(process.env.RECORDING_GATE_HOOK as string), "session_stop");
   const before = gateCalls();
 
   for (const last_assistant_message of [failed, interrupted]) {

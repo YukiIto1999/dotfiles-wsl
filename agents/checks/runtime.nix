@@ -346,15 +346,15 @@
           gate:
           pkgs.runCommandLocal "omp-verification-gate-hook.ts" { } ''
             substitute ${deployedGateHook} $out \
-              --replace-fail ${lib.getExe runtime.gate} ${gate}
+              --replace-fail /run/current-system/sw/bin/dotfiles-agent-gate ${gate}
           '';
         hangingGate = pkgs.writeShellScript "hanging-gate" ''
           ${pkgs.coreutils}/bin/sleep 300 &
           printf '%s\n' "$!" > descendant.pid
           wait
         '';
-        recordingGate = pkgs.writeShellScript "next-generation-gate" ''
-          printf '%s\n' "$*" >> "$HOME/next-generation-gate.calls"
+        recordingGate = pkgs.writeShellScript "recording-gate" ''
+          printf '%s\n' "$*" >> "$HOME/recording-gate.calls"
           ${pkgs.coreutils}/bin/cat > /dev/null
         '';
 
@@ -780,7 +780,7 @@
               ];
               GATE_HOOK = hookUsingGate (lib.getExe runtime.gate);
               HANGING_GATE_HOOK = hookUsingGate hangingGate;
-              NEXT_GENERATION_GATE_HOOK = hookUsingGate recordingGate;
+              RECORDING_GATE_HOOK = hookUsingGate recordingGate;
             }
             ''
               export HOME=$PWD/home

@@ -212,9 +212,10 @@ OMP hookはwriteの本文をJSONに含めたままgateのstdinへ送る。
 argv に本文を載せないため、1 引数や argv 全体の容量制限で検証前に失敗しない。
 20 秒の期限または中断では gate の process group 全体へ SIGKILL を送り、起動した子と出力 pipe の処理の終了を確認してから失敗結果を返す。
 終了を確認できない間は診断を出して待ち続ける。
-OMPのhookは、配備時に`@gateBinary@`を`dotfiles.agents.packages.verificationGate`のstore executableへ置換し、各callで`/run/current-system`を再解決しない。
-具体的なstore executableを埋め込んだhookで開始したsessionは、generationを切り替えてもそのgateのまま動き、新しいgateと実行packageは新しく始めたsessionへ届く。
-この配備より前に読み込まれ、`/run/current-system`を参照するhookは、呼出しごとに現在のgenerationのgateへ解決されるため、旧gateの保持を主張しない。
+OMPのhookはClaude Codeのhookと同じく`/run/current-system/sw/bin/dotfiles-agent-gate`を呼び、呼出しごとに現在のgenerationのgateへ解決する。
+agentがT1で起動する`dotfiles-agent-verify`も現在のgenerationのものであり、その証跡と終了時の照合を同じ版のgateで扱うためである。
+session開始時のgateへ固定すると、配備で変わった検証の宣言（宣言fileの名前など）を開始時の版が読めず、配備前に始まったsessionの終了を止める。
+配備前に読み込まれたhookとsessionの状態は新しいgateに引き継がれるため、gateを変える配備は、`hook arm|observe|stop`のJSONとsessionの状態の旧形式を読める状態に保つ。
 `xd://`、`agent://`、`proc://`、`local://`、`cfg://`、`ssh://`へのwriteはlocal repositoryの編集として登録しない。
 Skillの読取を記録していた旧generationがsessionの状態へ残した`skills` directoryは、読む者がいないため、終了時のgateが`calls`と同じく捨てる。
 

@@ -30,6 +30,7 @@ retry:
       - openai-codex/gpt-6.1-sol:xhigh
   modelFallback: true
   usageAwareFallback: true
+  waitForUsageReset: true
 dev:
   autoqaConsent: granted
 display:

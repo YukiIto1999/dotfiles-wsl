@@ -175,6 +175,8 @@ browser または device flow は OMP の案内に従い、API key ではなく�
 この参照により、親セッションのモデル選択を変えずに、`modelRoles.dev` で実装モデルを選べる。
 fallback は role の chain だけに置き、`provider/model` を鍵にした chain は置かない。
 model を鍵にすると、その model を使うすべての session と repository で別の model へ切り替わり、用途を限って使う model の利用枠を意図せず消費する。
+利用枠切れは `retry.waitForUsageReset: true` で扱い、provider が解除時刻を示した場合に限って、その時刻まで待ってから同じ session と subagent を続行する。
+待機は Esc で中断でき、解除時刻が分からない場合は従来どおり停止する。
 
 OpenRouter は `disabledProviders` で無効にし、Judge は `modelRoles.judge: typesafe/jev-latest` と `retry.fallbackChains.judge: []` で TypeSafe 公式 API へ固定する。
 Judge 未設定時の OMP 内蔵候補には OpenRouter が含まれるため、chat のモデル選択だけではその呼出しを防げない。

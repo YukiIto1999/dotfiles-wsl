@@ -292,7 +292,13 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.agents.clients --app
 `projectMemory`はclient固有の想起注入の入口を表し、明示的な検索、検証、保存の判断を代替しない。
 
 Claude CodeとCodexのuser configはclientが更新し得るため、Home Managerは配備先が存在しない場合だけseedを作る。seed は runtime drift の対象にしない。OMPの`config.yml`と`agent.db`もclient所有の可変fileとして残す。
-OMPのseedはBash interceptorを有効にし、直接の再帰検索を専用検索手段へ誘導する。既存の`config.yml`はOMP自身の設定commandで移行する。
+OMPのseedはBash interceptorを有効にし、規則を再帰grep、`sed -i`などのin-place編集、管理外の常駐やwatchの起動に絞る。
+既定の規則は、`cat`、`grep`、`find`、redirectによる書込みで始まる区切りを一つでも含むcommand全体を拒否する。
+pipelineの入力や集計、`/proc`の読取りのように専用toolで置き換えられない処理まで止まり、拒否のたびにmodelの往復が一回増えるため、この環境では採らない。
+再帰grepの誘導は、ignore境界を保つというpolicyの禁止をそのまま強制する。
+規則の一覧はglobalの設定層で既定を置き換えるので、OMPの更新で既定の規則が変わっても自動では追従しない。
+更新時に既定との差を確認する。
+既存の`config.yml`はOMP自身の設定commandで移行する。
 
 OMPのcompactionで利用者のmessageを要約と別に原文で残すのは、OpenAI ResponsesのV2 streaming compactionだけである。
 それ以外の方法は直近の範囲より前を要約かarchiveだけで渡すため、要約が利用者の常設の指示を落とすと、agentは指示があったこと自体を知る手段を失う。

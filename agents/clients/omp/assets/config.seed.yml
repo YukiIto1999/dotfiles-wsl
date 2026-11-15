@@ -43,6 +43,28 @@ prewalk:
   enabled: false
 bashInterceptor:
   enabled: true
+  patterns:
+    - pattern: ^\s*grep\s+(?:.*\s)?-(?!-)[A-Za-z]*[rR][A-Za-z]*(?:\s|$)|^\s*grep\s+.*--(?:dereference-)?recursive(?:\s|$)
+      tool: grep
+      message: Use the `grep` tool instead of recursive grep. It respects .gitignore; pass a path or glob to narrow the scope.
+    - pattern: ^\s*sed\s+(-i|--in-place)
+      tool: edit
+      message: Use the `edit` tool instead of sed -i. It provides diff preview and fuzzy matching.
+    - pattern: ^\s*perl\s+.*-[pn]?i
+      tool: edit
+      message: Use the `edit` tool instead of perl -i. It provides diff preview and fuzzy matching.
+    - pattern: ^\s*awk\s+.*-i\s+inplace
+      tool: edit
+      message: Use the `edit` tool instead of awk -i inplace. It provides diff preview and fuzzy matching.
+    - pattern: ^\s*nohup\s+|(?<!&)\&\s*$
+      tool: bash
+      message: Use `bash` with `name` instead of nohup or background shell syntax so the service stays observable and managed.
+    - pattern: ^\s*(?:(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?(?:dev|start)(?:\s|$)|(?:vite|next\s+dev|nuxt\s+dev|nodemon|lldb|gdb|tail\s+-f)(?:\s|$)|docker\s+compose\s+up(?!.*(?:\s-d(?:\s|$)|--detach))(?:\s|$))
+      tool: bash
+      message: Use `bash` with `name` for services, watchers, and debuggers; inspect with `read proc://<name>`.
+    - pattern: ^\s*(?:(?:bun|npm|pnpm|yarn)\s+(?:run\s+)?\S+|cargo\s+watch|watchexec|pytest|vitest|jest|tsc)(?:.|\n)*(?:--watch|-w)(?:\s|$)
+      tool: bash
+      message: Use `bash` with `name` for watch mode so its output, input, and lifecycle stay managed.
 task:
   prewalk: false
   agentModelOverrides:

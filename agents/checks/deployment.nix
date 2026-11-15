@@ -996,8 +996,15 @@
               test -s "$fixture/home/.codex/config.toml"
               test -s "$fixture/home/.omp/agent/config.yml"
               remarshal -if yaml -of json "$fixture/home/.omp/agent/config.yml" > omp-seed.json
-              jq --exit-status '.bashInterceptor.enabled == true' omp-seed.json \
-                > /dev/null
+              # 再帰 grep と in-place 編集、管理外の常駐だけを誘導し、読取や検索を含む複合 command は止めない
+              jq --exit-status '
+                .bashInterceptor.enabled == true
+                and (.bashInterceptor.patterns | map(.tool)) == ["grep", "edit", "edit", "edit", "bash", "bash", "bash"]
+                and (.bashInterceptor.patterns[0].pattern as $recursive
+                  | ("grep -rn needle ." | test($recursive))
+                  and ("grep --recursive needle ." | test($recursive))
+                  and ("grep -n needle notes.txt" | test($recursive) | not))
+              ' omp-seed.json > /dev/null
 
               rmdir "$fixture/home/.claude/settings.json"
               ${fixtureSeedActivation}

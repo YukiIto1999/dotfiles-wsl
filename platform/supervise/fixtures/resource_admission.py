@@ -21,7 +21,7 @@ MEMORY_PERCENT = 40
 # Files whose staged content the specification says identifies the toolchain, dependencies and verification entry.
 DECLARED = ("flake.nix", "devenv.nix", "devenv.yaml", "package.json", "pnpm-lock.yaml", "package-lock.json",
             "Cargo.toml", "rust-toolchain", "rust-toolchain.toml", "global.json", "Directory.Build.props",
-            "Directory.Packages.props", "nx.json", "verification-budget.json", "justfile", "Makefile")
+            "Directory.Packages.props", "nx.json", "tiergate.json", "justfile", "Makefile")
 # A command that lives long enough for the first measurement and ends by itself.
 QUICK = [sys.executable, "-c", "import time; time.sleep(0.3)"]
 # The first measurement can precede the interpreter's start-up, so a peak that must exceed a small reservation is

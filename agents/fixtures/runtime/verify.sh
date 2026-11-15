@@ -21,14 +21,14 @@ stall_receipt_count() {
 }
 
 declare_budget() {
-  printf '{"version":1,"verify":{"seconds":%s}}\n' "$2" >"$1/verification-budget.json"
+  printf '{"version":1,"verify":{"seconds":%s}}\n' "$2" >"$1/tiergate.json"
 }
 
 t1_repository() {
   git init -q "$1"
   printf 'scripts.verify.exec = "true";\n' >"$1/devenv.nix"
   declare_budget "$1" "$2"
-  git -C "$1" add devenv.nix verification-budget.json
+  git -C "$1" add devenv.nix tiergate.json
   git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
 }
 
@@ -81,7 +81,7 @@ expect_budget_refused() {
     echo "T1 with a $name budget exited $status instead of the configuration status" >&2
     exit 1
   fi
-  if [[ $(<"$fixture/refused-stderr") != *verification-budget.json* ]]; then
+  if [[ $(<"$fixture/refused-stderr") != *tiergate.json* ]]; then
     echo "T1 with a $name budget did not name the declaration it refused" >&2
     exit 1
   fi
@@ -127,10 +127,10 @@ check_metadata_snapshot_boundary() (
     git init -q "$repository"
     printf '{ outputs = { self }: {}; }\n' >"$repository/flake.nix"
     printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' \
-      >"$repository/verification-budget.json"
-    git -C "$repository" add flake.nix verification-budget.json
+      >"$repository/tiergate.json"
+    git -C "$repository" add flake.nix tiergate.json
     git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
-    export SNAPSHOT_METADATA=$repository/verification-budget.json SNAPSHOT_CHANGE=$name
+    export SNAPSHOT_METADATA=$repository/tiergate.json SNAPSHOT_CHANGE=$name
     export SNAPSHOT_PROOF=$fixture/snapshot-$name-proof SNAPSHOT_RUN=$fixture/snapshot-$name-run
     export SNAPSHOT_LATE=$fixture/snapshot-$name-late
     receipts=$(stall_receipt_count)
@@ -148,7 +148,7 @@ check_metadata_snapshot_boundary() (
     test ! -e "$SNAPSHOT_LATE"
     test "$(stall_receipt_count)" = "$receipts"
     test "$(stall_litter)" = "$litter"
-    git -C "$repository" restore --worktree -- verification-budget.json
+    git -C "$repository" restore --worktree -- tiergate.json
     expect_closed_gate "$repository" "$name snapshot race"
   done
   printf '#!%s\nprintf focused >"$SNAPSHOT_RUN"\n' "$BASH" >"$fixture/snapshot-bin/focused"
@@ -168,11 +168,11 @@ check_metadata_snapshot_boundary() (
       exit 1
     fi
     test ! -e "$SNAPSHOT_RUN"
-    [[ $(<"$fixture/snapshot-initial-$name-stderr") == *verification-budget.json* ]]
+    [[ $(<"$fixture/snapshot-initial-$name-stderr") == *tiergate.json* ]]
     (cd "$repository" && "$VERIFY" -- "$fixture/snapshot-bin/focused")
     test "$(cat "$SNAPSHOT_RUN")" = focused
     test "$(stall_receipt_count)" = "$receipts"
-    git -C "$repository" restore --worktree -- verification-budget.json
+    git -C "$repository" restore --worktree -- tiergate.json
     expect_closed_gate "$repository" "$name metadata refusal"
   done
 )
@@ -300,7 +300,7 @@ SCENARIOS
     git init -q "$repository"
     printf '.PHONY: verify\nverify:\n\tprintf old >> ../%s-result\n' "$name" >"$repository/Makefile"
     declare_budget "$repository" 60
-    git -C "$repository" add Makefile verification-budget.json
+    git -C "$repository" add Makefile tiergate.json
     git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
     litter_before=$(stall_litter)
     cd "$repository"
@@ -347,7 +347,7 @@ SCENARIOS
     git init -q "$repository"
     printf '.PHONY: verify\nverify:\n\tprintf once >> ../%s-result\n' "$name" >"$repository/Makefile"
     declare_budget "$repository" 60
-    git -C "$repository" add Makefile verification-budget.json
+    git -C "$repository" add Makefile tiergate.json
     git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
     cd "$repository"
     if [ "$name" = partial-marker ]; then
@@ -1285,7 +1285,7 @@ git -C "$gate_repo" config user.email fixture@example.invalid
 printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
 printf 'held\n' >"$gate_repo/tracked"
 declare_budget "$gate_repo" 60
-git -C "$gate_repo" add devenv.nix tracked verification-budget.json
+git -C "$gate_repo" add devenv.nix tracked tiergate.json
 git -C "$gate_repo" commit -qm initial
 test "$("$GATE" entry --repo "$gate_repo")" = 'devenv shell -- verify'
 if "$GATE" check --repo "$gate_repo" >/dev/null 2>&1; then
@@ -1353,7 +1353,7 @@ git -C "$shell_repo" config user.email fixture@example.invalid
 printf 'scripts.verify.exec = "true";\n' >"$shell_repo/devenv.nix"
 printf 'held\n' >"$shell_repo/tracked"
 declare_budget "$shell_repo" 60
-git -C "$shell_repo" add devenv.nix tracked verification-budget.json
+git -C "$shell_repo" add devenv.nix tracked tiergate.json
 git -C "$shell_repo" commit -qm initial
 shell_observe() {
   printf '{"session_id":"fixture-shell","hook_event_name":"%s","tool_use_id":"%s","cwd":"%s","tool_name":"bash","tool_input":%s}' \
@@ -1386,8 +1386,8 @@ native_budget_repo=$fixture/native-missing-budget-repo
 git init -q "$native_budget_repo"
 printf '{ outputs = { self }: { apps.x86_64-linux.verify = { type = "app"; program = "/bin/false"; }; }; }\n' \
   >"$native_budget_repo/flake.nix"
-printf '{"version":1,"frontend":"nix","entries":["verify"]}\n' >"$native_budget_repo/verification-budget.json"
-git -C "$native_budget_repo" add flake.nix verification-budget.json
+printf '{"version":1,"frontend":"nix","entries":["verify"]}\n' >"$native_budget_repo/tiergate.json"
+git -C "$native_budget_repo" add flake.nix tiergate.json
 "$GATE" arm --session fixture-native-budget --path "$native_budget_repo/flake.nix"
 set +e
 printf '{"session_id":"fixture-native-budget","cwd":"%s"}' "$native_budget_repo" |
@@ -1395,7 +1395,7 @@ printf '{"session_id":"fixture-native-budget","cwd":"%s"}' "$native_budget_repo"
 native_budget_stop_status=$?
 set -e
 test "$native_budget_stop_status" -eq 2
-rm "$native_budget_repo/verification-budget.json"
+rm "$native_budget_repo/tiergate.json"
 expect_closed_gate "$native_budget_repo" 'removed tracked native metadata'
 
 budget_repo=$fixture/budget-repo
@@ -1491,7 +1491,7 @@ t1_repository "$rewrite_repo" 2
 cd "$rewrite_repo"
 set +e
 PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=1 DEADLINE_LATE=$fixture/rewrite-late \
-  DEADLINE_REWRITE=$rewrite_repo/verification-budget.json "$VERIFY" -- devenv shell -- verify
+  DEADLINE_REWRITE=$rewrite_repo/tiergate.json "$VERIFY" -- devenv shell -- verify
 rewrite_status=$?
 set -e
 test "$rewrite_status" -eq 124
@@ -1523,7 +1523,7 @@ git -C "$undeclared_repo" add devenv.nix
 git -C "$undeclared_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
 expect_budget_refused "$undeclared_repo" absent
 while read -r name content <&5; do
-  printf '%s\n' "$content" >"$undeclared_repo/verification-budget.json"
+  printf '%s\n' "$content" >"$undeclared_repo/tiergate.json"
   expect_budget_refused "$undeclared_repo" "$name"
 done 5<<'BUDGETS'
 zero {"version":1,"verify":{"seconds":0}}
@@ -1572,7 +1572,7 @@ test "$(stall_receipt_count)" = "$receipts_before"
 status=0
 NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
   timeout 60 "$VERIFY" -- nix run --no-write-lock-file .#verify 2>"$fixture/stalled-refused-stderr" || status=$?
-if [ "$status" -ne 78 ] || [[ $(<"$fixture/stalled-refused-stderr") != *verification-budget.json* ]]; then
+if [ "$status" -ne 78 ] || [[ $(<"$fixture/stalled-refused-stderr") != *tiergate.json* ]]; then
   echo "T1 spelled as the native entry beside an unreadable budget exited $status instead of refusing" >&2
   exit 1
 fi
@@ -1581,8 +1581,8 @@ test -z "$(timeout 60 "$GATE" entry --repo "$stalled_repo")"
 test "$(timeout 60 "$GATE" candidates --repo "$stalled_repo")" = 'nix run --no-write-lock-file .#verify'
 timeout 60 "$GATE" check --repo "$stalled_repo" >/dev/null
 
-printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' >"$stalled_repo/verification-budget.json"
-git -C "$stalled_repo" add verification-budget.json
+printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' >"$stalled_repo/tiergate.json"
+git -C "$stalled_repo" add tiergate.json
 git -C "$stalled_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm budget
 litter_before=$(stall_litter)
 status=0
@@ -1633,7 +1633,7 @@ expect_closed_gate_within() {
 expect_closed_gate_within "$stalled_repo"
 test "$(stall_litter)" = "$litter_before"
 test "$(stall_receipt_count)" = "$receipts_before"
-rm "$stalled_repo/verification-budget.json"
+rm "$stalled_repo/tiergate.json"
 expect_closed_gate_within "$stalled_repo"
 status=0
 timeout 60 "$VERIFY" -- nix run --no-write-lock-file .#verify >/dev/null 2>&1 || status=$?

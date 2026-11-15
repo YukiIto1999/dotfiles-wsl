@@ -32,8 +32,8 @@ new_repo() {
 }
 
 set_budget() {
-  printf '{"version":1,"verify-push":{"seconds":%s}}\n' "$2" >"$1/verification-budget.json"
-  git -C "$1" add -- verification-budget.json
+  printf '{"version":1,"verify-push":{"seconds":%s}}\n' "$2" >"$1/tiergate.json"
+  git -C "$1" add -- tiergate.json
   git -C "$1" commit -q -m 'test: 検証予算の変更'
 }
 
@@ -150,10 +150,10 @@ check_push_metadata_snapshot() (
   repository=$(new_repo snapshot-native)
   printf '{ outputs = { self }: { apps.x86_64-linux.verify-push = { type = "app"; program = "/bin/false"; }; }; }\n' \
     >"$repository/flake.nix"
-  PUSH_SNAPSHOT_METADATA=$repository/verification-budget.json
+  PUSH_SNAPSHOT_METADATA=$repository/tiergate.json
   printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":15}}\n' \
     >"$PUSH_SNAPSHOT_METADATA"
-  git -C "$repository" add flake.nix verification-budget.json
+  git -C "$repository" add flake.nix tiergate.json
   git -C "$repository" commit -q -m 'test: 入口登録snapshotの検査'
   jq() {
     local result status=0
@@ -205,7 +205,7 @@ check_push_metadata_snapshot
 
 
 rm -f "$MARKER"
-git -C "$declared" rm -q verification-budget.json
+git -C "$declared" rm -q tiergate.json
 git -C "$declared" commit -q -m 'test: 予算欠落の検査'
 expect_refused 'push with no declared budget' "$HOOKS" "$declared" refs/heads/main
 test ! -e "$MARKER" || fail 'verify-push ran without a declared budget'
@@ -326,8 +326,8 @@ native=$(new_repo native)
 printf '{ outputs = { self }: { apps.x86_64-linux.verify-push = { type = "app"; program = "/bin/false"; }; }; }\n' \
   >"$native/flake.nix"
 printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":15}}\n' \
-  >"$native/verification-budget.json"
-git -C "$native" add flake.nix verification-budget.json
+  >"$native/tiergate.json"
+git -C "$native" add flake.nix tiergate.json
 git -C "$native" commit -q -m 'test: 検査の追加'
 printf 'untracked\n' >"$native/untracked"
 export NIX_REMOTE=$PWD/nix-store
@@ -339,17 +339,17 @@ test "$(remote_ref "$native" refs/heads/main)" = "$(git -C "$native" rev-parse H
   || fail 'the native bypass did not update the remote'
 grep -qF "repo=$native" "$bypass_log" || fail 'the native bypass was not recorded'
 grep -qF 'entry=未解決' "$bypass_log" || fail 'the native bypass lost its unresolved entry'
-printf '{"version":1,"frontend":false}\n' >"$native/verification-budget.json"
+printf '{"version":1,"frontend":false}\n' >"$native/tiergate.json"
 DOTFILES_VERIFY_PUSH_BYPASS='native fixture の登録不正' push "$HOOKS" "$native" HEAD:refs/heads/broken \
   || fail 'the native bypass was blocked by an invalid registration'
 grep -qF 'reason=native fixture の登録不正' "$bypass_log" || fail 'the invalid-registration bypass lost its reason'
 push "$HOOKS" "$native" --delete broken \
   || fail 'a source-free deletion was blocked by an invalid registration'
 test -z "$(remote_ref "$native" refs/heads/broken)" || fail 'the native deletion did not reach the remote'
-rm "$native/verification-budget.json"
+rm "$native/tiergate.json"
 expect_refused 'native push with removed tracked metadata' "$HOOKS" "$native" refs/heads/missing-budget \
   HEAD:refs/heads/missing-budget
-git -C "$native" restore --worktree -- verification-budget.json
+git -C "$native" restore --worktree -- tiergate.json
 unset NIX_REMOTE NIX_CONFIG
 
 push_bounded() {
@@ -397,8 +397,8 @@ test ! -e "$MARKER" || fail 'verify-push ran without a declared budget'
 
 set_budget "$stalled" 2
 printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":2}}\n' \
-  >"$stalled/verification-budget.json"
-git -C "$stalled" add verification-budget.json
+  >"$stalled/tiergate.json"
+git -C "$stalled" add tiergate.json
 git -C "$stalled" commit -q -m 'test: Nix 検証入口の登録'
 before=$(remote_ref "$stalled" refs/heads/main)
 started=$SECONDS

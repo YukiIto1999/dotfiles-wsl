@@ -10,7 +10,7 @@ git -C "$repository" init -q
 git -C "$repository" config user.name fixture
 git -C "$repository" config user.email fixture@example.invalid
 printf 'scripts.verify.exec = "true";\n' >"$repository/devenv.nix"
-printf '{"version":1,"verify":{"seconds":60}}\n' >"$repository/verification-budget.json"
+printf '{"version":1,"verify":{"seconds":60}}\n' >"$repository/tiergate.json"
 printf 'held\n' >"$repository/tracked"
 git -C "$repository" add .
 git -C "$repository" commit -qm initial

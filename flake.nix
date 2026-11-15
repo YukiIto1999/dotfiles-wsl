@@ -355,7 +355,7 @@
       inherit (verificationPrograms) runWithin;
 
       # agent wrapperが同じfileを読むためflake内の秒数の直書きは不可
-      verificationBudget = builtins.fromJSON (builtins.readFile ./verification-budget.json);
+      verificationBudget = builtins.fromJSON (builtins.readFile ./tiergate.json);
       # dotfiles-verify-entryの受理範囲と割れるため別の上限は不可
       maxBudgetSeconds = 2147483647;
       # 宣言の欠落を既定値で補うと予算の根拠を失うため既定値は不可
@@ -373,7 +373,7 @@
             && seconds <= maxBudgetSeconds
             && seconds == builtins.floor seconds
           )
-          "verification-budget.json must declare version 1 and an integral ${stage}.seconds from 1 to ${toString maxBudgetSeconds}";
+          "tiergate.json must declare version 1 and an integral ${stage}.seconds from 1 to ${toString maxBudgetSeconds}";
         builtins.floor seconds;
       verifyBudgetSeconds = budgetSecondsFor "verify";
       pushBudgetSeconds = budgetSecondsFor "verify-push";

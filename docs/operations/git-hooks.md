@@ -34,7 +34,7 @@ clone しただけの repository の code を、commit や checkout のたびに
 ## 検証の段と入口
 
 repositoryは検証の段ごとに入口を宣言する。
-段の意味と予算を決める手順はarchitecture-standardの[process/verification.md](https://github.com/YukiIto1999/architecture-standard/blob/main/process/verification.md)が定め、秒数は各repositoryの `verification-budget.json` に置く。
+段の意味と予算を決める手順はarchitecture-standardの[process/verification.md](https://github.com/YukiIto1999/architecture-standard/blob/main/process/verification.md)が定め、秒数は各repositoryの `tiergate.json` に置く。
 
 | 段 | 入口の名前 | 実行する者 |
 |---|---|---|
@@ -43,14 +43,14 @@ repositoryは検証の段ごとに入口を宣言する。
 | T3 | `verify-full` | project が選んだ契機。commit と push を止めない |
 
 共有resolverはrepositoryの正本を呼ぶ文字列と、宣言した段の予算を返し、検査の定義やcacheを別に持たない。
-Nixを正本にするrepositoryは、根の`verification-budget.json`に`frontend: "nix"`と段名の配列`entries`を登録する。
+Nixを正本にするrepositoryは、根の`tiergate.json`に`frontend: "nix"`と段名の配列`entries`を登録する。
 共有resolverはその登録だけを読み、入口の有無を調べるためにflakeを取得、評価しない。
 登録に無い段を他形式へ補完せず、登録の不正や追跡済みfileの欠落を入口未宣言として通さない。
 `--candidates`は登録を読めないときにも、評価せずに入口になり得る綴りを返す。
 
 | 置き場 | 宣言 | 呼び出し |
 |---|---|---|
-| `verification-budget.json`と`flake.nix` | `frontend: "nix"`と`entries`への段名登録、検査本体は`apps.<system>.verify-push` | `nix run --no-write-lock-file .#verify-push` |
+| `tiergate.json`と`flake.nix` | `frontend: "nix"`と`entries`への段名登録、検査本体は`apps.<system>.verify-push` | `nix run --no-write-lock-file .#verify-push` |
 | `devenv.nix` | `scripts.verify-push` | `devenv shell -- verify-push` |
 | `package.json` | script `verify:push` | lock fileに応じて`pnpm verify:push`または`npm run verify:push` |
 | `Makefile` | target `verify-push` | `make verify-push` |
@@ -67,7 +67,7 @@ annotated tagは参照するcommitで比較し、差分を隠すassume-unchanged
 検証後にHEAD、source、indexの印が変わっていれば、入口が成功してもpushを拒否する。
 入口を宣言しないrepositoryと、送信sourceのない削除だけのpushは検証を要求しない。
 
-予算はrootの`verification-budget.json`の`verify-push.seconds`を走行開始時に一度だけ読み、入口の解決、検査、最後のsourceの確認まで同じ上限で止める。
+予算はrootの`tiergate.json`の`verify-push.seconds`を走行開始時に一度だけ読み、入口の解決、検査、最後のsourceの確認まで同じ上限で止める。
 Nixの取得と評価は検査本体の実行時にだけ行い、その時間も予算へ含める。
 秒数の宣言は`{"version":1,"verify-push":{"seconds":N}}`の形とし、Nは1以上2147483647以下の整数である。
 Nixの入口を使う場合は、同じfileへ`frontend`と`entries`も登録する。

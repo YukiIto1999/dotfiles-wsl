@@ -32,7 +32,7 @@ FINGERPRINT_PATHSPECS = (
     "Directory.Build.props",
     "Directory.Packages.props",
     "nx.json",
-    "verification-budget.json",
+    "tiergate.json",
     "justfile",
     "Makefile",
 )

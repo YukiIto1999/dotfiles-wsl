@@ -19,7 +19,7 @@ dotfiles-rebuild --candidate ID
 `--plan`はcommit済みのsourceを隔離した複製へ取り出し、`flake.lock`をcommit済みのまま使って、その中で次を順に行う。
 どのinputも取得も更新もしない。
 
-1. 隔離したsourceで、`verification-budget.json`が宣言する`verify`の入口を宣言の予算内で通す。
+1. 隔離したsourceで、`tiergate.json`が宣言する`verify`の入口を宣言の予算内で通す。
 2. 対象hostのtoplevelをbuildし、native GC rootを`--out-link`で取得して候補として保持する。
 3. 候補とWSLの現在状態から再起動の分類を求め、差分とともに表示する。
 

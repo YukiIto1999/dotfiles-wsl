@@ -60,8 +60,8 @@ cat >"$native/flake.nix" <<'NIX'
 NIX
 printf 'verify:\n\tfalse\n' >"$native/Makefile"
 printf '{"version":1,"frontend":"nix","entries":["verify-push","verify-full"],"verify-push":{"seconds":900}}\n' \
-  >"$native/verification-budget.json"
-git -C "$native" add flake.nix Makefile verification-budget.json
+  >"$native/tiergate.json"
+git -C "$native" add flake.nix Makefile tiergate.json
 git -C "$native" -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m 'test: 検証入口の確認'
 expect "$native" verify-push 'nix run --no-write-lock-file .#verify-push'
 expect "$native" verify-full 'nix run --no-write-lock-file .#verify-full'
@@ -152,8 +152,8 @@ test "$actual" = $'make verify\nnix run --no-write-lock-file .#verify'
 actual=$("$ENTRY" --repo "$stalled" --candidates verify-push)
 test "$actual" = 'nix run --no-write-lock-file .#verify-push'
 
-printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' >"$stalled/verification-budget.json"
-git -C "$stalled" add verification-budget.json
+printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' >"$stalled/tiergate.json"
+git -C "$stalled" add tiergate.json
 expect_unevaluated "$stalled" verify 'nix run --no-write-lock-file .#verify'
 expect_unevaluated "$stalled" verify-push ''
 
@@ -166,12 +166,12 @@ expect_entry_refused() {
   test -s entry.stderr
 }
 
-git -C "$native" rm -q verification-budget.json
+git -C "$native" rm -q tiergate.json
 expect_entry_refused "$native" verify-push 'removed tracked native declaration'
-git -C "$native" restore --staged --worktree -- verification-budget.json
-printf 'not json\n' >"$native/verification-budget.json"
+git -C "$native" restore --staged --worktree -- tiergate.json
+printf 'not json\n' >"$native/tiergate.json"
 expect_entry_refused "$native" verify-push 'malformed native declaration'
-git -C "$native" restore --worktree -- verification-budget.json
+git -C "$native" restore --worktree -- tiergate.json
 expect "$native" verify-push 'nix run --no-write-lock-file .#verify-push'
 
 expect_budget() {
@@ -196,7 +196,7 @@ expect_budget_refused() {
 }
 
 budgeted=$(new_repo budgeted)
-printf '{"version":1,"verify":{"seconds":120},"verify-push":{"seconds":900}}\n' >"$budgeted/verification-budget.json"
+printf '{"version":1,"verify":{"seconds":120},"verify-push":{"seconds":900}}\n' >"$budgeted/tiergate.json"
 expect_budget "$budgeted" verify 120
 expect_budget "$budgeted" verify-push 900
 expect_budget_refused "$budgeted" verify-full 'stage without a declaration'
@@ -204,19 +204,19 @@ mkdir "$budgeted/nested"
 expect_budget "$budgeted/nested" verify 120
 
 larger=$(new_repo larger)
-printf '{"version":1,"verify":{"seconds":600}}\n' >"$larger/verification-budget.json"
+printf '{"version":1,"verify":{"seconds":600}}\n' >"$larger/tiergate.json"
 expect_budget "$larger" verify 600
 expect_budget "$budgeted" verify 120
 
 printf 'scripts.verify.exec = "true";\n' >"$larger/devenv.nix"
-printf 'not json\n' >"$larger/verification-budget.json"
+printf 'not json\n' >"$larger/tiergate.json"
 expect_entry_refused "$larger" verify 'malformed project declaration'
 expect_budget_refused "$larger" verify 'malformed declaration'
 
 invalid=$(new_repo invalid)
 expect_budget_refused "$invalid" verify 'missing declaration file'
 while read -r label content <&3; do
-  printf '%s\n' "$content" >"$invalid/verification-budget.json"
+  printf '%s\n' "$content" >"$invalid/tiergate.json"
   expect_budget_refused "$invalid" verify "$label"
 done 3<<'DECLARATIONS'
 zero {"version":1,"verify":{"seconds":0}}
@@ -230,7 +230,7 @@ seconds-missing {"version":1,"verify":{}}
 other-stage {"version":1,"verify-push":{"seconds":120}}
 array []
 DECLARATIONS
-printf '{"version":1,"verify":{"seconds":2147483647}}\n' >"$invalid/verification-budget.json"
+printf '{"version":1,"verify":{"seconds":2147483647}}\n' >"$invalid/tiergate.json"
 expect_budget "$invalid" verify 2147483647
 
 expect_budget_refused "$PWD/outside" verify 'declaration outside a git tree'
@@ -241,14 +241,14 @@ fi
 
 snapshot=$PWD/policy-snapshot.json
 printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":900}}\n' \
-  >"$native/verification-budget.json"
+  >"$native/tiergate.json"
 "$ENTRY" --repo "$native" --snapshot verify-push >"$snapshot"
 printf '{"version":1,"frontend":"nix","entries":[],"verify-push":{"seconds":1}}\n' \
-  >"$native/verification-budget.json"
+  >"$native/tiergate.json"
 test "$("$ENTRY" --repo "$native" --policy "$snapshot" --budget verify-push)" = 900
 test "$("$ENTRY" --repo "$native" --policy "$snapshot" verify-push)" = 'nix run --no-write-lock-file .#verify-push'
 expect "$native" verify-push ''
-rm "$native/verification-budget.json"
+rm "$native/tiergate.json"
 test "$("$ENTRY" --repo "$native" --policy "$snapshot" verify-push)" = 'nix run --no-write-lock-file .#verify-push'
 expect_entry_refused "$native" verify-push 'live declaration deleted after snapshot capture'
 printf 'not json\n' >"$snapshot"
@@ -266,14 +266,14 @@ fi
 test ! -s entry.stdout
 test -s entry.stderr
 expect_usage --repo "$native" --snapshot --policy "$snapshot" verify
-printf 'not json\n' >"$native/verification-budget.json"
+printf 'not json\n' >"$native/tiergate.json"
 if "$ENTRY" --repo "$native" --snapshot verify-push >entry.stdout 2>entry.stderr; then
   echo 'resolver captured malformed live metadata as a snapshot' >&2
   exit 1
 fi
 test ! -s entry.stdout
 test -s entry.stderr
-rm "$native/verification-budget.json"
+rm "$native/tiergate.json"
 if "$ENTRY" --repo "$native" --snapshot verify-push >entry.stdout 2>entry.stderr; then
   echo 'resolver captured deleted tracked metadata as an unenrolled snapshot' >&2
   exit 1

@@ -128,8 +128,8 @@ in
               "skills"
               "statix.toml"
               "telemetry"
+              "tiergate.json"
               "toolchain"
-              "verification-budget.json"
               "workstation"
             ];
             rootEntriesMatch = entries: builtins.attrNames entries == expectedRootEntries;

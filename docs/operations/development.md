@@ -62,7 +62,7 @@ nix run --no-write-lock-file .#dotfiles-agent-verify -- nix run --no-write-lock-
 T1の`verify`は全unitの検査と全hostおよび既存variantのtoplevel評価を行い、T2の`verify-push`はunitの検査とsystem closureを実現する。
 `verify-full`は既存の全量flake checkを呼び、CIと明示的な全量確認の経路を保つ。
 Nix buildの成功だけでは終了gateの証跡にならず、宣言した入口を既存wrapperで通した同じsourceに限り受理される。
-T1とT2の時間予算は、rootの[`verification-budget.json`](../../verification-budget.json)の`verify.seconds`と`verify-push.seconds`を唯一の正本とする。
+T1とT2の時間予算は、rootの[`tiergate.json`](../../tiergate.json)の`verify.seconds`と`verify-push.seconds`を唯一の正本とする。
 このfileは`{"version":1,"frontend":"nix","entries":["verify","verify-push","verify-full"],"verify":{"seconds":N},"verify-push":{"seconds":M}}`の形で、NとMは1以上2147483647以下の整数である。
 `flake.nix`の各入口は評価時に、`dotfiles-agent-verify`とpre-pushは走行の開始時に、同じfileを読む。
 wrapperとpre-pushは静的な宣言を一度snapshotへ読み、同じsnapshotから時間予算と入口を解決する。

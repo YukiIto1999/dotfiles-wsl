@@ -71,9 +71,9 @@ function unverifiedT1Repository(name: string): string {
   mkdirSync(repository, { recursive: true });
   git(repository, "init", "-q");
   writeFileSync(join(repository, "devenv.nix"), 'scripts.verify.exec = "true";\n');
-  writeFileSync(join(repository, "verification-budget.json"), '{"version":1,"verify":{"seconds":60}}\n');
+  writeFileSync(join(repository, "tiergate.json"), '{"version":1,"verify":{"seconds":60}}\n');
   writeFileSync(join(repository, "tracked"), "held\n");
-  git(repository, "add", "devenv.nix", "verification-budget.json", "tracked");
+  git(repository, "add", "devenv.nix", "tiergate.json", "tracked");
   git(repository, "commit", "-q", "-m", "initial");
   return repository;
 }

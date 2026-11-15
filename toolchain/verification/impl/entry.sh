@@ -36,7 +36,7 @@ parse_policy() {
 }
 
 read_policy() {
-  local top=$1 file=$1/verification-budget.json
+  local top=$1 file=$1/tiergate.json
   if [ -e "$file" ] || [ -L "$file" ]; then
     if ! parse_policy false "$file"; then
       printf '%s の検証宣言が不正である\n' "$file" >&2
@@ -44,8 +44,8 @@ read_policy() {
     fi
     return
   fi
-  if git -C "$top" ls-files --error-unmatch -- verification-budget.json >/dev/null 2>&1 \
-    || git -C "$top" cat-file -e HEAD:verification-budget.json 2>/dev/null; then
+  if git -C "$top" ls-files --error-unmatch -- tiergate.json >/dev/null 2>&1 \
+    || git -C "$top" cat-file -e HEAD:tiergate.json 2>/dev/null; then
     printf '%s が追跡中の宣言から削除されているため、入口未宣言として扱わない\n' "$file" >&2
     return 1
   fi
@@ -120,7 +120,7 @@ candidates_of() {
 # 予算の正本が project の宣言のため、宣言の無い段への既定値と無制限の補完は不可
 budget_of() {
   local top=$1 name=$2 file policy seconds
-  file=$top/verification-budget.json
+  file=$top/tiergate.json
   policy=$(policy_of "$top") || return $?
   if ! seconds=$(jq -e --arg stage "$name" '
     if type == "object" and (.[$stage] | type == "object")

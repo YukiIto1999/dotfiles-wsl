@@ -64,6 +64,8 @@
           supply = plain agentConfig.supply;
           shared = {
             rules = fixtureSource;
+            rulesCore = fixtureSource;
+            constraints = fixtureSource;
             skills.fixture = fixtureSource;
             subagents = lib.genAttrs (builtins.attrNames agentConfig.shared.subagents) (_: fixtureSource);
             routing = {
@@ -245,11 +247,19 @@
             })
             (replaceBranch "omp" "rules" { file = { }; })
             (replaceBranch "omp" "rules" { file.destination = ""; })
+            (replaceBranch "omp" "rules" {
+              file = {
+                destination = ".omp/agent/AGENTS.md";
+                constraintsDestination = "../RULES.md";
+              };
+            })
             (replaceBranch "omp" "rules" { sometimes = { }; })
             (replaceBranch "omp" "subagents" { rendered = { }; })
             (replaceBranch "omp" "subagents" { sometimes = { }; })
           ];
           assert contractIsValid (replaceBranch "claude" "rules" { embedded = { }; });
+          # 必須制約の別 file は任意であり、持たない client は本文へ埋め込んだ全文を読む
+          assert contractIsValid (replaceBranch "omp" "rules" { file.destination = ".omp/agent/AGENTS.md"; });
           assert contractIsValid (replaceBranch "omp" "lsp" { unsupported = { }; });
           assert contractIsValid (replaceBranch "omp" "projectMemory" { unsupported = { }; });
           # TOML の subagent は preload を表現できず、preload は frontmatter markdown の枝だけが選べる

@@ -12,6 +12,7 @@ in
   render =
     {
       template,
+      constraints,
       skills,
       subagents,
       capabilities,
@@ -55,8 +56,11 @@ in
     in
     pkgs.runCommandLocal "agents-policy.md"
       {
+        # out は必須制約を埋め込んだ全文、core は必須制約を別 file で読む client 向けの本文
         outputs = [
           "out"
+          "core"
+          "constraintsFile"
           "catalog"
         ];
         nativeBuildInputs = [
@@ -151,18 +155,28 @@ in
         capabilityRoster=$(printf '%s\n%s\n' "$capabilityHeader" "$capabilityRows" | render_table)
         clientMatrix=$(printf '%s\n%s\n' "$clientHeader" "$clientRows" | render_table)
 
-        substitute ${template} "$out" \
-          --subst-var-by skillCatalog "$catalog" \
-          --subst-var-by subagentRoster "$subagentRoster" \
-          --subst-var-by capabilityRoster "$capabilityRoster" \
-          --subst-var-by clientMatrix "$clientMatrix" \
-          --subst-var-by projectMemoryPolicy "$projectMemoryPolicy" \
-          --subst-var-by heapDiagnosticsPolicy "$heapDiagnosticsPolicy" \
-          --subst-var-by dotfilesDir "$dotfilesDir" \
-          --subst-var-by environmentDir "$environmentDir"
+        substitute ${constraints} "$constraintsFile" \
+          --subst-var-by dotfilesDir "$dotfilesDir"
+
+        render_policy() {
+          substitute ${template} "$1" \
+            --subst-var-by constraints "$2" \
+            --subst-var-by skillCatalog "$catalog" \
+            --subst-var-by subagentRoster "$subagentRoster" \
+            --subst-var-by capabilityRoster "$capabilityRoster" \
+            --subst-var-by clientMatrix "$clientMatrix" \
+            --subst-var-by projectMemoryPolicy "$projectMemoryPolicy" \
+            --subst-var-by heapDiagnosticsPolicy "$heapDiagnosticsPolicy" \
+            --subst-var-by dotfilesDir "$dotfilesDir" \
+            --subst-var-by environmentDir "$environmentDir"
+        }
+        render_policy "$out" "$(cat "$constraintsFile")"
+        # 別 file で読む client には同じ節を二重に載せない
+        render_policy core.raw ""
+        cat -s core.raw > "$core"
 
         # marker が残るのは template と生成器の対応が崩れた状態であり、静かに通さない
-        if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$out"; then
+        if grep -qE '@[a-zA-Z][a-zA-Z0-9]*@' "$out" "$core" "$constraintsFile"; then
           echo 'policy template has an unsubstituted marker' >&2
           exit 1
         fi

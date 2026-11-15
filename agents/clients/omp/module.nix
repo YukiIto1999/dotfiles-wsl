@@ -136,7 +136,11 @@ in
     binary = "omp";
     supply.package = "omp";
     runtime.managed = { };
-    rules.file.destination = ".omp/agent/AGENTS.md";
+    rules.file = {
+      destination = ".omp/agent/AGENTS.md";
+      # omp の task subagent は AGENTS.md を継承せず、RULES.md だけを読む
+      constraintsDestination = ".omp/agent/RULES.md";
+    };
     skillsDestination = ".omp/agent/skills";
     subagents.rendered = {
       destination = ".omp/agent/agents";

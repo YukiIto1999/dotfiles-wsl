@@ -34,6 +34,7 @@
           capabilityFileOf
           modeOf
           rulesDestinationOf
+          constraintsDestinationOf
           skillProjectionOf
           subagentDestinationOf
           subagentSourcesOf
@@ -207,20 +208,36 @@
           let
             client = clients.${clientName};
             rulesDestination = rulesDestinationOf client;
+            constraintsDestination = constraintsDestinationOf client;
             subagentDestination = subagentDestinationOf client;
             subagentSources = subagentSourcesOf client;
             homePrefix = hostConfig.dotfiles.workstation.homeDir;
             rulesArtifact = artifacts."agents/${clientName}/rules" or null;
+            constraintsArtifact = artifacts."agents/${clientName}/constraints" or null;
+            # 必須制約を別 file で読む client の本文は、その節を持たない core である
+            expectedRules = normalizeSource (
+              if constraintsDestination == null then
+                hostConfig.dotfiles.agents.shared.rules
+              else
+                hostConfig.dotfiles.agents.shared.rulesCore
+            );
+            expectedConstraints = normalizeSource hostConfig.dotfiles.agents.shared.constraints;
             rulesMatch =
               if rulesDestination == null then
                 rulesArtifact == null
               else
-                rulesArtifact.source == normalizeSource hostConfig.dotfiles.agents.shared.rules
+                rulesArtifact.source == expectedRules
                 && rulesArtifact.format == "markdown"
                 && rulesArtifact.deployedAt == "${homePrefix}/${rulesDestination}"
-                &&
-                  homeConfig.home.file.${rulesDestination}.source
-                  == normalizeSource hostConfig.dotfiles.agents.shared.rules;
+                && homeConfig.home.file.${rulesDestination}.source == expectedRules;
+            constraintsMatch =
+              if constraintsDestination == null then
+                constraintsArtifact == null
+              else
+                constraintsArtifact.source == expectedConstraints
+                && constraintsArtifact.format == "markdown"
+                && constraintsArtifact.deployedAt == "${homePrefix}/${constraintsDestination}"
+                && homeConfig.home.file.${constraintsDestination}.source == expectedConstraints;
             skillsMatch = lib.all (
               name:
               let
@@ -251,6 +268,7 @@
             == normalizeSource hostConfig.dotfiles.agents.shared.skills.${name}
           ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills)
           && rulesMatch
+          && constraintsMatch
           && skillsMatch
           && subagentsMatch
         ) (builtins.attrNames clients);
@@ -262,6 +280,7 @@
               client = clients.${clientName};
             in
             lib.optional (rulesDestinationOf client != null) "agents/${clientName}/rules"
+            ++ lib.optional (constraintsDestinationOf client != null) "agents/${clientName}/constraints"
             ++ map (name: "agents/${clientName}/skills/${name}") (
               builtins.attrNames hostConfig.dotfiles.agents.shared.skills
             )
@@ -400,6 +419,10 @@
               !(builtins.hasAttr "${wrapperDirectory}/${client.binary}" home.home.file)
               && (
                 rulesDestinationOf client == null || !(builtins.hasAttr (rulesDestinationOf client) home.home.file)
+              )
+              && (
+                constraintsDestinationOf client == null
+                || !(builtins.hasAttr (constraintsDestinationOf client) home.home.file)
               )
               && !lib.any (lib.hasPrefix "${client.skillsDestination}/") (builtins.attrNames home.home.file)
               && (
@@ -656,6 +679,18 @@
               jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
                 '. == {mcpServers: {gateway: {type: "http", url: $expected}}}' \
                 ${clients.omp.gatewayConfig.source} > /dev/null
+
+              # 必須制約は全文に埋め込まれ、別 file で読む client の本文からは外れ、どちらにも marker を残さない
+              constraintsHeading='## 必須制約'
+              grep -Fxq "$constraintsHeading" ${agentConfig.shared.rules}
+              grep -Fxq "$constraintsHeading" ${agentConfig.shared.constraints}
+              if grep -Fq "$constraintsHeading" ${agentConfig.shared.rulesCore}; then
+                echo "the core policy repeats the constraints that omp reads from RULES.md" >&2
+                exit 1
+              fi
+              # 空行は必須制約の file にも含まれるため、両側から除いて本文の行だけを比べる
+              diff <(grep -Fvx -f ${agentConfig.shared.constraints} ${agentConfig.shared.rules} | grep -v '^$') \
+                <(grep -v '^$' ${agentConfig.shared.rulesCore})
               remarshal -if toml -of json ${clients.codex.gatewayConfig.source} \
                 | jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
                   '. == {mcp_servers: {gateway: {url: $expected}}}' > /dev/null

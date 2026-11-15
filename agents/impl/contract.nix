@@ -111,6 +111,11 @@ let
   rulesType = types.attrTag {
     file = tag (branch {
       destination = lib.mkOption { type = relativeDestinationType; };
+      # subagent が本文を継承しない client では、必須制約を subagent も読む別 file へ配る
+      constraintsDestination = lib.mkOption {
+        type = types.nullOr relativeDestinationType;
+        default = null;
+      };
     });
     embedded = tag emptyBranch;
   };
@@ -233,6 +238,7 @@ let
     else
       (branchOf client.subagents).skillProjection;
   rulesDestinationOf = client: client.rules.file.destination or null;
+  constraintsDestinationOf = client: client.rules.file.constraintsDestination or null;
   capabilityFileOf = client: capability: (branchOf client.${capability}).managedFile or null;
 in
 {
@@ -243,6 +249,7 @@ in
     subagentDestinationOf
     skillProjectionOf
     rulesDestinationOf
+    constraintsDestinationOf
     capabilityFileOf
     ;
 
@@ -364,6 +371,16 @@ in
     };
     shared = {
       rules = lib.mkOption {
+        type = types.path;
+        readOnly = true;
+        internal = true;
+      };
+      rulesCore = lib.mkOption {
+        type = types.path;
+        readOnly = true;
+        internal = true;
+      };
+      constraints = lib.mkOption {
         type = types.path;
         readOnly = true;
         internal = true;

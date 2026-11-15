@@ -189,4 +189,4 @@ project の `disabledProviders` 配列は global の配列を置き換えるた�
 advisor は `opencode-go/deepseek-v4.1-flash:high` を主にし、期間限定の `opencode-go/longcat-2.5-preview-free:high` を fallback にする。
 モデルを変更するときは、新規環境用の `agents/clients/omp/assets/config.seed.yml` と既存環境の `~/.omp/agent/config.yml` をそれぞれ更新する。
 `config.yml` と `models.yml` の seed は配備先が存在しない場合だけ作成するため、rebuild では既存環境の可変設定を更新しない。
-対して `AGENTS.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。
+対して `AGENTS.md`、`RULES.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。

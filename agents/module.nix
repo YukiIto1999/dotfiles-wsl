@@ -17,6 +17,7 @@ let
   inherit (agentContract)
     modeOf
     rulesDestinationOf
+    constraintsDestinationOf
     subagentDestinationOf
     subagentSourcesOf
     ;
@@ -212,6 +213,7 @@ let
 
   policyRules = policy.render {
     template = ./policy/AGENTS.md;
+    constraints = ./policy/RULES.md;
     skills = enabledSkills;
     subagents = sharedSubagents;
     capabilities = cfg.capabilities.resolved;
@@ -235,6 +237,7 @@ let
     let
       client = agents.clients.${clientName};
       rulesDestination = rulesDestinationOf client;
+      constraintsDestination = constraintsDestinationOf client;
       subagentDestination = subagentDestinationOf client;
       subagentRows = lib.optionals (subagentDestination != null) (
         lib.mapAttrsToList (name: source: {
@@ -253,10 +256,20 @@ let
       inherit clientName;
       id = "rules";
       file = {
-        source = agents.shared.rules;
+        source = if constraintsDestination == null then agents.shared.rules else agents.shared.rulesCore;
         format = "markdown";
         deployment = "home";
         destination = rulesDestination;
+      };
+    }
+    ++ lib.optional (constraintsDestination != null) {
+      inherit clientName;
+      id = "constraints";
+      file = {
+        source = agents.shared.constraints;
+        format = "markdown";
+        deployment = "home";
+        destination = constraintsDestination;
       };
     }
     ++ lib.mapAttrsToList (name: source: {
@@ -497,6 +510,8 @@ in
       };
       shared = {
         rules = policyRules;
+        rulesCore = policyRules.core;
+        constraints = policyRules.constraintsFile;
         skills = allSkills;
         subagents = sharedSubagents;
         inherit routing;

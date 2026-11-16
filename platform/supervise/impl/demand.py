@@ -10,11 +10,10 @@ from pathlib import Path
 import subprocess
 
 RECORD_VERSION = 1
-# 古い実測を残す件数、需要の導出に使う新しい実測の件数、その実測を使う期間、ピークへ足す割合
+# 古い実測を残す件数、需要の導出に使う新しい実測の件数、その実測を使う期間
 KEPT_RECORDS = 10
 USED_RECORDS = 5
 USABLE_SECONDS = 30 * 24 * 60 * 60
-MARGIN_PERCENT = 20
 GIT_SECONDS = 10
 # toolchain、依存、検証入口の宣言。変わると過去の実測は使わない。`*.lock`は根直下だけを指す
 FINGERPRINT_PATHSPECS = (
@@ -109,14 +108,14 @@ class DemandHistory:
 
         current: 現在のfingerprint
         now: 現在のEPOCH秒
-        戻り値: fingerprintが現在と一致し30日以内の新しい5件のピークの最大に20%を足した値の切り上げ。該当が無ければNone
+        戻り値: fingerprintが現在と一致し30日以内の新しい5件のピークの最大。該当が無ければNone
         失敗: load と同じ
         """
         usable = [row for row in self.load() if row["fingerprint"] == current and now - row["at"] <= USABLE_SECONDS]
         newest = sorted(usable, key=lambda row: row["at"], reverse=True)[:USED_RECORDS]
         if not newest:
             return None
-        return -(-max(row["peakBytes"] for row in newest) * (100 + MARGIN_PERCENT) // 100)
+        return max(row["peakBytes"] for row in newest)
 
     def append(self, record):
         """記録の先頭への追加

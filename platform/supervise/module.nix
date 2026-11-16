@@ -41,7 +41,7 @@ in
       `--resource-memory BYTES`と`--resource-cpus COUNT`は同じpolicy内で当該呼出しの需要を明示する。
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
       上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
-      `--resource-key KEY`を渡した走行は、記録があればfingerprintが現在と一致し30日以内の新しい5件のピークの最大に20%を足した値を既定値の代わりに予約する。
+      `--resource-key KEY`を渡した走行は、記録があればfingerprintが現在と一致し30日以内の新しい5件のピークの最大を既定値の代わりに予約する。
       明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
       `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesが加わる。

@@ -186,6 +186,30 @@ class ResourceAdmission(unittest.TestCase):
             for index, limit in enumerate(limits)]
         self.snapshot.write_text(json.dumps(envelope))
 
+    def observe(self, **fields):
+        """Replace fields of the observed workload resource."""
+        envelope = json.loads(self.snapshot.read_text())
+        envelope["resources"][0]["value"].update(fields)
+        self.snapshot.write_text(json.dumps(envelope))
+
+    def bounded(self, limit, headroom):
+        """Observe one cgroup memory limit that leaves the given headroom."""
+        self.observe(memoryLimits=[{"path": "/fixture-0.slice", "headroomBytes": headroom, "limitBytes": limit,
+                                    "currentBytes": 0, "workingSetBytes": 0}])
+
+    def deferred(self, name):
+        """Start the keyed workload, cancel it once it says it waits, and return its stderr.
+
+        The run is judged and found not to fit before it is cancelled, so no deadline is timed.
+        """
+        process, started, _ = self.start(name, seconds=2 * HANG_SECONDS, arguments=["--resource-key", KEY], cwd=self.repo)
+        self.waiting(name, process)
+        process.send_signal(signal.SIGTERM)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 143)
+        self.assertFalse(started.exists())
+        return error
+
     def demand_file(self, key=KEY):
         """The record file the specification assigns to a key."""
         digest = hashlib.sha256(key.encode()).hexdigest()
@@ -324,22 +348,27 @@ class ResourceAdmission(unittest.TestCase):
         self.assertGreater(records[0]["at"], time.time() - 60)
         self.assertEqual(self.demand_file().parent.stat().st_mode & 0o777, 0o700)
 
-    def test_recorded_peaks_set_the_demand_from_the_newest_five_with_a_margin(self):
-        """The largest of the five newest peaks plus 20% is reserved; the older sixth peak is ignored."""
+    def test_recorded_peaks_set_the_demand_from_the_newest_five(self):
+        """The largest of the five newest peaks is reserved as it is; the older sixth peak is ignored."""
         peaks = [100_000_000, 300_000_000, 250_000_000, 200_000_000, 50_000_000]
         rows = [self.row(peak, age=index * 3600) for index, peak in enumerate(peaks)]
         rows.append(self.row(5_000_000_000, age=6 * 3600))
         self.seed(rows)
         status, _, result = self.run_command("recorded")
         self.assertEqual(status, 0)
-        self.assertEqual(result["memoryReservedBytes"], 360_000_000)
+        self.assertEqual(result["memoryReservedBytes"], 300_000_000)
         self.assertEqual(len(self.stored()), 7)
 
-    def test_a_peak_that_is_not_a_multiple_of_five_is_rounded_up(self):
-        """The margin is rounded up to a whole byte."""
-        self.seed([self.row(1_000_000_001)])
-        _, _, result = self.run_command("rounded")
-        self.assertEqual(result["memoryReservedBytes"], -(-1_000_000_001 * 6 // 5))
+    def test_a_recorded_peak_that_equals_the_cgroup_headroom_enters_and_one_byte_more_waits(self):
+        """No margin is added to a peak, so a run whose peak fits the headroom alone is never shut out by a margin."""
+        self.bounded(8 * GIB, 3 * GIB)
+        self.seed([self.row(3 * GIB)])
+        status, _, result = self.run_command("at-headroom")
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], 3 * GIB)
+        self.seed([self.row(3 * GIB + 1)])
+        error = self.deferred("over-headroom")
+        self.assertIn("waiting for resources: memory headroom is reserved at /fixture-0.slice", error)
 
     def test_the_ten_newest_records_are_kept(self):
         """A key keeps the ten newest records."""
@@ -368,7 +397,7 @@ class ResourceAdmission(unittest.TestCase):
         self.seed([self.row(100_000_000, age=29 * DAY), self.row(2_000_000_000, age=31 * DAY),
                    self.row(3_000_000_000, fingerprint="0" * 64)])
         _, _, result = self.run_command("boundary")
-        self.assertEqual(result["memoryReservedBytes"], 120_000_000)
+        self.assertEqual(result["memoryReservedBytes"], 100_000_000)
 
     def test_recorded_demand_is_truncated_to_the_tightest_limit(self):
         """A recorded demand above the smallest limitBytes is cut to it instead of failing or waiting."""
@@ -418,9 +447,8 @@ class ResourceAdmission(unittest.TestCase):
 
     def test_runs_that_fail_are_cut_short_or_cancelled_leave_no_record(self):
         """Only a run that ends by itself with status 0 is recorded; failures, 124, 128 or more, cancellation and the deadline are not."""
-        status, _, _ = self.run_command("control", command=exits_with(0))
-        self.assertEqual(status, 0)
-        self.assertEqual(len(self.stored()), 1)
+        # A reservation far above any peak of these runs keeps a peak that merely jitters above the last one from counting as exceeding it.
+        self.seed([self.row(GIB)])
         # A failure stops inside the entry with a peak below the demand, and recording it lowers the next reservation.
         for status in (1, 3, 124, 130):
             with self.subTest(status=status):
@@ -437,6 +465,10 @@ class ResourceAdmission(unittest.TestCase):
         expiring.communicate(timeout=5)
         self.assertEqual(expiring.returncode, 124)
         self.assertEqual(len(self.stored()), 1)
+        # The control: the same key and entry do record a run that ends by itself with status 0.
+        status, _, _ = self.run_command("control", command=exits_with(0))
+        self.assertEqual(status, 0)
+        self.assertEqual(len(self.stored()), 2)
 
     def test_a_failed_run_whose_peak_exceeded_the_reservation_is_recorded(self):
         """A peak above the reservation is a lower bound of the demand even when the run fails, so it is kept."""

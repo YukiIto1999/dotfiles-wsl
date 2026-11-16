@@ -238,6 +238,7 @@ version {"version":2,"verify":{"seconds":120}}
 stage-missing {"version":1}
 seconds-missing {"version":1,"verify":{}}
 other-stage {"version":1,"verify-push":{"seconds":120}}
+script-name {"version":1,"verify":{"seconds":120},"verify:push":{"seconds":900}}
 array []
 DECLARATIONS
 printf '{"version":1,"verify":{"seconds":2147483647}}\n' >"$invalid/tiergate.json"

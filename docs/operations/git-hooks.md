@@ -58,6 +58,7 @@ Nixを正本にするrepositoryは、根の`tiergate.json`に`frontend: "nix"`�
 Nixを登録しないrepositoryは、devenv、package.json、Makefileの順で既存の入口を解決する。
 `devenv.nix`を持つrepositoryでは、package.jsonとMakefileの入口も`devenv shell -- pnpm verify:push`のようにdevenvの中で呼ぶ。
 pushや別sessionの呼び出し側の環境は、projectが宣言した環境と一致しないためである。
+予算のkeyは段の名前で、package.jsonのscript名(`verify:push`など)をkeyにした宣言は不正として拒否する。
 これは他projectの入口への接続であり、dotfilesの検証taskの正本は`flake.nix`だけに置く。
 NixのGit sourceへ入らない未追跡fileを持つrepositoryは、先に追跡してから検証する。
 

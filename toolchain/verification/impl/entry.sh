@@ -35,13 +35,25 @@ parse_policy() {
   ' "$@"
 }
 
+# package.json の script 名を段の予算の key に置いた宣言は push の時まで黙って予算を欠くため受理は不可
+reject_script_keys() {
+  local label=$1 policy=$2 keys
+  keys=$(jq -r '[objects | keys[] | select(startswith("verify:"))] | join(" ")' <<<"$policy") || return 1
+  [ -n "$keys" ] || return 0
+  printf '%s の key %s は package.json の script 名で、段の予算は段の名前(verify、verify-push、verify-full)の key に置く\n' \
+    "$label" "$keys" >&2
+  return 1
+}
+
 read_policy() {
-  local top=$1 file=$1/tiergate.json
+  local top=$1 file=$1/tiergate.json policy
   if [ -e "$file" ] || [ -L "$file" ]; then
-    if ! parse_policy false "$file"; then
+    if ! policy=$(parse_policy false "$file"); then
       printf '%s の検証宣言が不正である\n' "$file" >&2
       return 1
     fi
+    reject_script_keys "$file" "$policy" || return 1
+    printf '%s\n' "$policy"
     return
   fi
   if git -C "$top" ls-files --error-unmatch -- tiergate.json >/dev/null 2>&1 \
@@ -52,11 +64,14 @@ read_policy() {
   printf 'null\n'
 }
 policy_of() {
+  local policy
   if [ -n "$policy_file" ]; then
-    if ! parse_policy true "$policy_file"; then
+    if ! policy=$(parse_policy true "$policy_file"); then
       printf '%s の検証宣言snapshotが読めない、または不正である\n' "$policy_file" >&2
       return 1
     fi
+    reject_script_keys "$policy_file" "$policy" || return 1
+    printf '%s\n' "$policy"
     return
   fi
   read_policy "$1"

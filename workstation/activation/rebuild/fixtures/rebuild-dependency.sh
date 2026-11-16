@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One program standing in for nix, nix-env, nvd, sudo, nixos-rebuild, wsl.exe and the two
-# verification commands. Each is a symlink to this file; the name selects the behavior and
+# One program standing in for nix, nix-env, nvd, sudo, nixos-rebuild, wsl.exe and the
+# verification entry resolver. Each is a symlink to this file; the name selects the behavior and
 # the REBUILD_* variables select the outcome.
 command_name=${0##*/}
 {
@@ -103,6 +103,7 @@ nix)
     ;;
   eval)
     [[ $# -eq 4 && $2 == --raw && $3 == --no-update-lock-file ]]
+    concurrent_edit eval
     [[ $4 == "$REBUILD_CHECKOUT#nixosConfigurations.fixture-host.config.system.build.toplevel.outPath" ]]
     printf '%s' "${REBUILD_EVAL_PATH:-$REBUILD_STORE_DIR/system-$(lock_sum "$REBUILD_CHECKOUT/flake.lock")}"
     ;;
@@ -213,17 +214,6 @@ dotfiles-verify-entry)
     exit 64
     ;;
   esac
-  ;;
-dotfiles-agent-verify)
-  [[ $1 == -- ]]
-  shift
-  [[ $* == 'nix run --no-write-lock-file .#verify' && $PWD == "$REBUILD_CHECKOUT" ]]
-  printf 'agent-verify-head %s\n' "$(git rev-parse HEAD)" >>"$REBUILD_CALL_LOG"
-  concurrent_edit agent-verify
-  if [[ ${REBUILD_AGENT_VERIFY_DIRTY:-0} == 1 ]]; then
-    printf 'edited-during-verify\n' >>tracked
-  fi
-  exit "${REBUILD_AGENT_VERIFY_STATUS:-0}"
   ;;
 wsl.exe)
   ;;

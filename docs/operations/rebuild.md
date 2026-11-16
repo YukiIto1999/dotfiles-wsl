@@ -54,13 +54,17 @@ planの公開と、置き換える旧候補の解放は、一つの排他区間�
    別の形式、host、checkoutの記録は、別の候補をbuildせず、解放もせず、適用前に終了status 2で拒否する。
    失効または不一致なら別の候補をbuildせず、適用前に終了status 2で拒否し、その候補を解放する。
 3. 現在のsystem状態から再起動の分類を求め直す。
-4. checkoutを、既存のsource-bound検証である`dotfiles-agent-verify`で`verify`の入口へ通す。
-   隔離したsourceの成功証跡はこの段へ移さない。
-   成功証跡はcheckoutのpathとHEADごとに取り直し、再利用はNixの不変な成果物とcacheだけが担う。
-5. 同じcheckoutのtoplevelを評価し、その結果が保持した候補のstore pathと一致する場合だけ進む。
+4. 同じcheckoutのtoplevelを評価し、その結果が保持した候補のstore pathと一致する場合だけ進む。
    file内容の一致では代用せず、Git metadataの影響も評価結果に含めて照合する。
-6. 評価と検証の間にHEADや作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path`へ候補のstore pathを渡す。
+5. 評価の間にHEADや作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path`へ候補のstore pathを渡す。
    flakeを再び解決せず、nativeの`nixos-rebuild`は候補をbuildも評価もしない。
+
+適用の段では`verify`の入口を再実行しない。
+候補は、planの段（引数なしでは同じ走行の候補の用意）が隔離したsourceで検証してからbuildしたものである。
+適用はplan時のHEAD、cleanな作業木、候補と一致する評価を要求するため、検証したcommitと適用するcommitは同じになる。
+`verify`の入口はflakeの評価とNixのbuildであり、結果はcommitの内容とlockだけで決まるので、同じcommitへの再実行は新しい失敗を検出しない。
+そのcommitの成果物の再利用は、Nixの不変な成果物とcacheが内容で担う。
+agentの終了gateが求める成功証跡は、commitまでの作業で通したT1が持ち、このcommandは作らない。
 
 nativeの`nixos-rebuild`は端末のforegroundで走る。
 このcommandだけに届いた取消は、activationの途中で子を止めず、終了を待ってから結果を報告する。
@@ -211,7 +215,8 @@ profileやserviceを変えずに復旧候補を調べるsmokeでは、cleanなch
 取消はsessionを離れた子孫の回収まで、実際のprocessで確認する。
 終了を確認できない場合に作業用directoryと候補のrootを残し、後続のplanとprune、`--candidate`が解放も適用もしない動作は、実際のsupervisorの結果を未確認へ置き換える代役で確認する。
 親のSIGKILLは、子孫が止まるまでpruneが待つ動作まで、実際のprocessで確認する。
-`rebuild-concurrent-edits`は候補の用意中、planの表示中、source-bound検証中に別の書き手がcheckoutを編集またはcommitする場合、`rebuild-concurrent-planners`は並行したplanが公開する場合、`rebuild-cancelled-plan`はplanの表示中の取消を、書き手を同じ段で動かして確認する。
+`rebuild-concurrent-edits`は候補の用意中、planの表示中、候補との照合の評価中に別の書き手がcheckoutを編集またはcommitする場合、`rebuild-concurrent-planners`は並行したplanが公開する場合、`rebuild-cancelled-plan`はplanの表示中の取消を、書き手を同じ段で動かして確認する。
+`rebuild-entrypoint`と`rebuild-candidate`は、引数なしの適用が`verify`の入口を一度だけ解決して走らせ、`--candidate ID`の適用がそれを解決も実行もしないことを確認する。
 Nix、`nixos-rebuild`、検証commandはfixtureの依存であり、toplevelはlockの内容から導く。
 このため、候補と評価はlockが一致するときだけ同じpathになる。
 

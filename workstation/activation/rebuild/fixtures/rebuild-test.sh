@@ -53,11 +53,14 @@ planned=$(candidate_id_of_output)
 [[ $(readlink "$REBUILD_STATE/candidates/$planned/toplevel") == "$candidate_one" ]]
 
 # Applying switches to exactly the candidate. The native tool is given the built store path
-# and never resolves the flake again.
+# and never resolves the flake again. The commit is verified once, in the isolated source, before
+# the candidate is built.
 run_rebuild 0
 assert_called "nixos-rebuild switch --no-reexec --store-path $candidate_one"
 assert_not_called 'nixos-rebuild switch --flake'
-assert_call_order 'agent-verify-head' 'nixos-rebuild'
+[[ $(grep -c '^nix run ' "$REBUILD_CALL_LOG") == 1 ]]
+[[ $(grep -c '^dotfiles-verify-entry .*--snapshot' "$REBUILD_CALL_LOG") == 1 ]]
+assert_call_order 'verify-cwd' 'nixos-rebuild'
 [[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$candidate_one" ]]
 assert_output_has "system profile: $candidate_one (generation 11)"
 assert_output_has 'result: applied candidate'

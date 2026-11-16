@@ -59,7 +59,6 @@ nixos_rebuild=@nixosRebuild@
 nvd=@nvd@
 wsl_restart_required=@wslRestartRequired@
 verification_entry=@verificationEntry@
-agent_verify=@agentVerify@
 supervise=@supervise@
 client_executables=@clientExecutables@
 child_grace_seconds=@childGraceSeconds@
@@ -614,21 +613,11 @@ finish_activation() {
   esac
 }
 
-# Verifies the checkout through the existing source-bound verification, and requires that its
-# evaluated toplevel is the held candidate. Nothing is carried over from the isolated source:
-# the verification runs again for this directory and commit, and only Nix's immutable outputs
-# and caches are reused.
-verify_source() {
+# 同じcommitの検証を候補の用意が済ませているため適用時のcheckoutでの検証の再実行は不可
+# checkoutが候補の基点のままで候補と同じtoplevelへ評価されることの照合
+confirm_source() {
   local head status=0 evaluated
-  local -a entry_words
   source_is_base || stop_before_activation "the checkout changed while the candidate was prepared"
-  resolve_verification "$dotfiles" || stop_before_activation "the checkout declares no usable verification entry"
-  read -r -a entry_words <<<"$verify_entry"
-  printf 'verify: %s (source-bound, committed source)\n' "$verify_entry"
-  run_child "$dotfiles" "" "$agent_verify" -- "${entry_words[@]}" || status=$?
-  ((status == 0)) || stop_before_activation "verification of the committed source failed (status $status)"
-
-  status=0
   run_child "$dotfiles" "$work_dir/evaluated" nix eval --raw --no-update-lock-file \
     "$dotfiles#nixosConfigurations.$host_name.config.system.build.toplevel.outPath" || status=$?
   ((status == 0)) || stop_before_activation "could not evaluate the toplevel of the committed source (status $status)"
@@ -637,8 +626,8 @@ verify_source() {
     stop_before_activation "the committed source evaluates to $evaluated, not to the held candidate $cand_path (Git metadata changes); activation was not started"
 
   head=$(git -C "$dotfiles" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || head=
-  [[ $head == "$base_head" ]] || stop_before_activation "HEAD moved from $base_head during verification"
-  source_difference "$dotfiles" >/dev/null || stop_before_activation "the working tree changed during verification"
+  [[ $head == "$base_head" ]] || stop_before_activation "HEAD moved from $base_head while the checkout was compared with the candidate"
+  source_difference "$dotfiles" >/dev/null || stop_before_activation "the working tree changed while the checkout was compared with the candidate"
   [[ $interrupted -eq 0 ]] || stop_before_activation "interrupted before activation"
 }
 
@@ -687,7 +676,7 @@ do_apply() {
   checkpoint
   restart_plan=$("$wsl_restart_required" --plan "$cand_path") || die 2 "could not classify the restart requirement"
   show_plan
-  verify_source
+  confirm_source
   activate "$cand_path" switch --no-reexec --store-path "$cand_path"
   retain_candidate=0
   finish_activation "applied candidate $cand_id"

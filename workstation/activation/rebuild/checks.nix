@@ -28,7 +28,7 @@
           chmod u+w "$out/dependency"
           substituteInPlace "$out/dependency" --replace-fail '#!/usr/bin/env bash' '#!${pkgs.bash}/bin/bash'
           chmod +x "$out/dependency"
-          for name in nix nix-env nvd sudo nixos-rebuild dotfiles-verify-entry dotfiles-agent-verify wsl.exe; do
+          for name in nix nix-env nvd sudo nixos-rebuild dotfiles-verify-entry wsl.exe; do
             ln -s ../dependency "$out/bin/$name"
           done
         '';
@@ -70,7 +70,6 @@
             nvd = lib.escapeShellArg "${rebuildDependencies}/bin/nvd";
             wslRestartRequired = lib.escapeShellArg testRestartPlanner;
             verificationEntry = lib.escapeShellArg "${rebuildDependencies}/bin/dotfiles-verify-entry";
-            agentVerify = lib.escapeShellArg "${rebuildDependencies}/bin/dotfiles-agent-verify";
             supervise = lib.escapeShellArg superviseCommand;
             clientExecutables = ''"$REBUILD_CLIENT_TABLE"'';
             childGraceSeconds = "1";

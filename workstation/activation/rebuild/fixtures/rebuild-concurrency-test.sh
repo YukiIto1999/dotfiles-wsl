@@ -74,18 +74,18 @@ commit_while_built() {
   checkout_reset "$base"
 }
 
-# source-bound検証中に作成した別commitを上書きしない未適用状態の検査
+# 候補との照合中に作成した別commitを上書きしない未適用状態の検査
 # 引数なし
 # 副作用: 検査終了時のcheckoutの基点への復元
-commit_while_verified() {
+commit_while_compared() {
   local base
   base=$(head_of)
-  REBUILD_EDIT_AT=agent-verify REBUILD_EDIT_RECORD=commit REBUILD_EDIT_FILE=tracked \
+  REBUILD_EDIT_AT=eval REBUILD_EDIT_RECORD=commit REBUILD_EDIT_FILE=tracked \
     REBUILD_EDIT_CONTENT=concurrent run_rebuild 4
   assert_output_has 'HEAD moved'
   assert_no_switch
-  expect_equal "$(checkout_git log -1 --format=%s)" 'concurrent edit' 'HEAD subject after a commit made while the source was verified'
-  expect_equal "$(head_of HEAD^)" "$base" 'parent of the commit made while the source was verified'
+  expect_equal "$(checkout_git log -1 --format=%s)" 'concurrent edit' 'HEAD subject after a commit made while the checkout was compared'
+  expect_equal "$(head_of HEAD^)" "$base" 'parent of the commit made while the checkout was compared'
   [[ -z $(state_entries candidates) ]]
   assert_no_work_left
   checkout_reset "$base"
@@ -230,7 +230,7 @@ edits)
   edit_while_built
   staged_edit_while_shown
   commit_while_built
-  commit_while_verified
+  commit_while_compared
   ;;
 planners)
   planners_publish_in_turn

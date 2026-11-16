@@ -277,8 +277,9 @@ assert_no_work_left
   [[ ! -e $REBUILD_STATE/work/$orphan ]]
 )
 
-# 5. Applying a held candidate uses its root. Nothing is fetched or built again, the checkout is
-# not written, and the candidate is released afterwards.
+# 5. Applying a held candidate uses its root. Nothing is fetched, built or verified again: the
+# plan verified the same commit, and the apply only compares the checkout with the candidate. The
+# checkout is not written, and the candidate is released afterwards.
 commit_lock rev-4
 lock_four=$(lock_json rev-4)
 run_rebuild 0 --plan
@@ -289,11 +290,12 @@ head_before=$(head_of)
 run_rebuild 0 --candidate "$retained"
 assert_not_called 'nix flake update'
 assert_not_called 'nix build'
+assert_not_called 'nix run'
+assert_not_called 'dotfiles-verify-entry'
 [[ $(head_of) == "$head_before" ]]
 [[ -z $(checkout_git status --porcelain --untracked-files=all) ]]
-assert_called "agent-verify-head $head_before"
 assert_called "nixos-rebuild switch --no-reexec --store-path $retained_path"
-assert_call_order 'agent-verify-head' 'nixos-rebuild'
+assert_call_order 'nix eval' 'nixos-rebuild'
 [[ $(readlink -f "$REBUILD_SYSTEM_PROFILE") == "$retained_path" ]]
 [[ -z $(state_entries candidates) ]]
 reset_profile
@@ -371,16 +373,22 @@ assert_no_switch
 run_rebuild 0 --discard "$legacy"
 [[ -z $(state_entries candidates) ]]
 
-# 10. A failed verification of the committed source stops before activation and writes nothing,
-# and the next plain rebuild applies the same checkout.
+# 10. A plain rebuild verifies its candidate once, before building it, and a failed verification
+# stops before the build and activation and writes nothing; the next plain rebuild applies the
+# same checkout.
 before=$(checkout_snapshot)
-REBUILD_AGENT_VERIFY_STATUS=1 run_rebuild 2
-assert_output_has 'verification of the committed source failed'
+REBUILD_VERIFY_STATUS=1 run_rebuild 2
+assert_output_has 'validation of the candidate failed'
 assert_output_has 'result: unchanged'
+assert_not_called 'nix build'
 assert_no_switch
 [[ $(checkout_snapshot) == "$before" ]]
 [[ -z $(state_entries candidates) ]]
 run_rebuild 0
+[[ $(grep -c '^nix run ' "$REBUILD_CALL_LOG") == 1 ]]
+[[ $(grep -c '^dotfiles-verify-entry .*--snapshot' "$REBUILD_CALL_LOG") == 1 ]]
+assert_call_order 'verify-cwd' 'build-cwd'
+assert_call_order 'build-cwd' 'nix eval'
 assert_called "nixos-rebuild switch --no-reexec --store-path $(system_for_lock "$(<"$REBUILD_CHECKOUT/flake.lock")")"
 reset_profile
 
@@ -392,12 +400,14 @@ assert_output_has 'result: unchanged'
 assert_no_switch
 [[ $(checkout_snapshot) == "$before" ]]
 
-# 12. An edit made while the source is being verified stops the apply, and the edit stays.
-REBUILD_AGENT_VERIFY_DIRTY=1 run_rebuild 4
+# 12. An edit made while the checkout is being compared with the candidate stops the apply, and
+# the edit stays.
+REBUILD_EDIT_AT=eval REBUILD_EDIT_FILE=tracked REBUILD_EDIT_CONTENT=edited-during-comparison \
+  run_rebuild 4
 assert_output_has 'working tree'
 assert_output_has 'result: source-changed'
 assert_no_switch
-grep -Fxq edited-during-verify "$REBUILD_CHECKOUT/tracked"
+grep -Fxq edited-during-comparison "$REBUILD_CHECKOUT/tracked"
 [[ -n $(checkout_git status --porcelain) ]]
 checkout_reset "$(head_of)"
 

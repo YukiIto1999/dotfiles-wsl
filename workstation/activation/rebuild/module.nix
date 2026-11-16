@@ -17,7 +17,6 @@ let
     nvd = lib.escapeShellArg (lib.getExe pkgs.nvd);
     wslRestartRequired = lib.escapeShellArg (lib.getExe wslRestartRequired);
     verificationEntry = lib.escapeShellArg (lib.getExe config.dotfiles.toolchain.verification.entry);
-    agentVerify = lib.escapeShellArg (lib.getExe config.dotfiles.agents.packages.verification);
     supervise = lib.escapeShellArg (lib.getExe config.dotfiles.platform.supervise.package);
     # clientごとの配備先は別のstateであり、rollbackは戻さない。実際に指す先を報告するため選択済みの契約を渡す
     clientExecutables = lib.escapeShellArg (

@@ -36,9 +36,9 @@ in
       supervisor自身が`--hold-fd`を終了確認まで保持するので、切り離したholderは作らない。
       supervisor自体を強制終了した場合は、子孫の終了を確認していない。
       `--resource-policy FILE --resource-deadline EPOCH`はhost共通のFIFO予約を取得してからcommandを起動する。
-      policyは走行の種類classと観測commandと利用者専用のregistryとmemoryPercentとcpuCountと観測の有効秒数を持つ。
+      policyは走行の種類classと観測commandと利用者専用のregistryとmemoryPercentと観測の有効秒数を持つ。
       classは待つ者のいる検証のacceptanceか、待つ者のいない検証のdeepで、計測の一行に残るだけで予約の規則は変えない。
-      `--resource-memory BYTES`と`--resource-cpus COUNT`は同じpolicy内で当該呼出しの需要を明示する。
+      `--resource-memory BYTES`は同じpolicy内で当該呼出しの物理memory需要を明示する。CPUは予約しない。
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
       上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
       `--resource-key KEY`を渡した走行は、記録があればfingerprintが現在と一致し30日以内の新しい5件のピークの最大を既定値の代わりに予約する。

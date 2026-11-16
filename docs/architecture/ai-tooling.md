@@ -139,7 +139,7 @@ signalを拒むprocessとprocess tableを読めない状態も完了とは扱わ
 指定しない既存のcallerは、SIGKILL後の猶予を過ぎても子孫が残る場合に、従来どおり`drained=false`と非ゼロの終了statusで返る。
 
 supervisorの資源予約は、`--resource-policy FILE --resource-deadline EPOCH`を指定した呼出しに適用する。
-同じhost policyのregistryでCPUと物理memoryの将来消費を予約し、待機を含む絶対期限までに余裕がなければcommandを起動せず124で返す。
+同じhost policyのregistryで物理memoryの将来消費を予約し、待機を含む絶対期限までに余裕がなければcommandを起動せず124で返す。CPUは予約しない。
 圧迫を理由に稼働中の別のcommandを停止しない。
 観測済みの子孫PSSだけを予約の残量から控除し、共有backendなど帰属を確認できない消費を空きへ戻さない。
 物理memoryの需要は、明示した値、`--resource-key`が示す実測の記録から導いた値、policyの`memoryPercent`による未計測の既定値の順に決め、最初の有効な観測の最も厳しい`limitBytes`（無ければ物理memory総量）へ切り詰める。

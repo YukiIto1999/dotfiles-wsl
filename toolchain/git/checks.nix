@@ -111,7 +111,6 @@
             runtimeDirectory = "/build/git-workload-leases";
             observation = [ (toString resourceObservation) ];
             memoryPercent = 2;
-            cpuCount = 1;
             maximumObservationAgeSeconds = 10;
           }
         );

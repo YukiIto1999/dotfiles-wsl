@@ -22,7 +22,6 @@ def main(arguments):
     )
     parser.add_argument("--seconds", type=float, required=True, help="total time budget, including resource wait")
     parser.add_argument("--memory-gib", type=float, help="expected peak physical memory of the whole workload; overrides host policy")
-    parser.add_argument("--cpus", type=int, help="CPU demand of the whole workload; overrides host policy")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="command and arguments after --")
     started = time.time()
     options = parser.parse_args(tokens)
@@ -42,10 +41,6 @@ def main(arguments):
         if not math.isfinite(options.memory_gib) or options.memory_gib <= 0:
             parser.error("--memory-gib must be finite and positive")
         demand += ["--resource-memory", str(math.ceil(options.memory_gib * 1073741824))]
-    if options.cpus is not None:
-        if options.cpus <= 0:
-            parser.error("--cpus must be positive")
-        demand += ["--resource-cpus", str(options.cpus)]
     os.execv(supervise, [supervise, "--require-drained", "--interrupt-cancels",
                         "--resource-policy", policy,
                         "--resource-deadline", str(started + options.seconds),

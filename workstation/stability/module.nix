@@ -19,12 +19,11 @@ let
   runtimeDirectory = "/run/dotfiles-workload/${cfg.username}";
   # class は走行が待つ者のいる検証か（acceptance）、いない検証か（deep）。計測の一行が持つ
   workloadPolicy =
-    class: memoryPercent: cpus:
+    class: memoryPercent:
     pkgs.writeText "dotfiles-workload-policy-${class}.json" (
       builtins.toJSON {
         inherit class runtimeDirectory memoryPercent;
         observation = [ (lib.getExe workload.observationPackage) ];
-        cpuCount = cpus;
         maximumObservationAgeSeconds = 10;
       }
     );
@@ -167,11 +166,6 @@ in
             記録のある走行は、直近の実測のピークから決めた需要を予約する。hard limitではなく開始前の需要宣言。
           '';
         };
-        verificationCpus = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = 2;
-          description = "検証一走行が予約するCPU数。commandの機能やworker数を変更しない需要宣言。";
-        };
         jobMemoryPercent = lib.mkOption {
           type = lib.types.ints.between 1 100;
           default = reservation.verificationMemoryPercent;
@@ -180,11 +174,6 @@ in
             検証と同じ基準（cgroup limitBytes の最小値、無ければ物理memory総量）に対する割合で表す。
             入れ子の検証を含む需要を外側で予約する。
           '';
-        };
-        jobCpus = lib.mkOption {
-          type = lib.types.ints.positive;
-          default = reservation.verificationCpus;
-          description = "非対話agent job全体のCPU需要。入れ子の処理を含む。";
         };
       };
       admissionPolicy = lib.mkOption {
@@ -328,13 +317,9 @@ in
     memoryHighPercent = workloadMemoryHighPercent;
     memoryMaxPercent = workloadMemoryMaxPercent;
     observationPackage = workloadObservation;
-    admissionPolicy =
-      workloadPolicy "acceptance" reservation.verificationMemoryPercent
-        reservation.verificationCpus;
-    deepAdmissionPolicy =
-      workloadPolicy "deep" reservation.verificationMemoryPercent
-        reservation.verificationCpus;
-    jobAdmissionPolicy = workloadPolicy "deep" reservation.jobMemoryPercent reservation.jobCpus;
+    admissionPolicy = workloadPolicy "acceptance" reservation.verificationMemoryPercent;
+    deepAdmissionPolicy = workloadPolicy "deep" reservation.verificationMemoryPercent;
+    jobAdmissionPolicy = workloadPolicy "deep" reservation.jobMemoryPercent;
   };
   config.dotfiles.platform.cli.commands = {
     observeWorkload = workloadObservation;

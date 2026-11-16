@@ -284,10 +284,10 @@ T1、pre-pushの検査本体、非対話agent jobは共通の予約へ参加す�
 待機は全体の期限に含み、期限切れは124で返る。開始後の期限切れも同じstatusなので、stderrの待機理由とcommandの出力を併せて確認する。
 同じ処理を別入口から追加投入して待機を迂回しない。
 
-予約値は物理memoryとCPUの需要宣言であり、processのhard limitではない。
+予約値は物理memoryの需要宣言であり、processのhard limitではない。CPUは予約せず、並列度はcommand自身が決める。
 物理memoryの需要は、明示した値、実測の記録から導いた値、未計測の既定値の順に決める。
 未計測の既定値は`dotfiles.workstation.workload.reservation`の`verificationMemoryPercent`（既定25）と、非対話jobの`jobMemoryPercent`で、最初の有効な観測のcgroup`limitBytes`の最小値（無ければ物理memory総量）に対する割合であり、ピークを保証しない。
-需要は最も厳しい上限へ切り詰める。明示した需要が上限を超える場合は、待たずにcommandを起動せず70で返す。明示は`dotfiles-workload-run`の`--memory-gib`と`--cpus`で行い、入れ子の処理は外側で合計需要を予約する。
+需要は最も厳しい上限へ切り詰める。明示した需要が上限を超える場合は、待たずにcommandを起動せず70で返す。明示は`dotfiles-workload-run`の`--memory-gib`で行い、入れ子の処理は外側で合計需要を予約する。
 同じ所有者の予約は入れ子で二重計上しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。子孫の終了を確認できない予約も自動解放しない。
 wrapperを通らないcommandや共有backendの将来増加までは予約できない。
 Windowsの物理空きはreserveを割った場合の開始保留に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。

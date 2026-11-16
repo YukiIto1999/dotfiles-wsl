@@ -93,7 +93,6 @@ class Options:
         resource_policy: hostの資源観測と予約既定値のpathか無効のNone
         resource_deadline: 待機を含む絶対期限か無効のNone
         resource_memory: 物理memory予約の明示値か既定値を選ぶNone
-        resource_cpus: CPU予約の明示値か既定値を選ぶNone
         resource_key: 実測した需要の記録を読み書きする鍵か記録しないNone
         command: 絶対実行pathを先頭に持つcommand引数列
     """
@@ -118,7 +117,6 @@ class Options:
         self.resource_policy = None
         self.resource_deadline = None
         self.resource_memory = None
-        self.resource_cpus = None
         self.resource_key = None
 
 
@@ -170,8 +168,7 @@ def parse_arguments(arguments):
             index += 1
             continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels",
-                            "--resource-policy", "--resource-deadline", "--resource-memory", "--resource-cpus",
-                            "--resource-key"):
+                            "--resource-policy", "--resource-deadline", "--resource-memory", "--resource-key"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
             raise UsageError(f"{argument} needs a value")
@@ -196,13 +193,10 @@ def parse_arguments(arguments):
             options.resource_key = value
         elif argument == "--resource-deadline":
             options.resource_deadline = parse_seconds(argument, value)
-        elif argument in ("--resource-memory", "--resource-cpus"):
+        elif argument == "--resource-memory":
             if not value.isdecimal() or int(value) <= 0:
                 raise UsageError(f"{argument} needs a positive integer")
-            if argument == "--resource-memory":
-                options.resource_memory = int(value)
-            else:
-                options.resource_cpus = int(value)
+            options.resource_memory = int(value)
         else:
             options.result_path = value
         index += 2
@@ -627,8 +621,7 @@ class Supervisor:
         self.prepare()
         if self.options.resource_policy is not None and self.cancel_signal is None:
             self.reservation = Reservation(
-                self.options.resource_policy, self.options.resource_memory, self.options.resource_cpus,
-                self.recorded_demand(),
+                self.options.resource_policy, self.options.resource_memory, self.recorded_demand(),
             )
             waiting_since = time.monotonic()
             try:

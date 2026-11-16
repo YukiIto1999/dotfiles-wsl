@@ -86,7 +86,6 @@ class ResourceAdmission(unittest.TestCase):
             "observation": [sys.executable, "-c", "import pathlib,sys;print(pathlib.Path(sys.argv[1]).read_text())", str(self.snapshot)],
             "runtimeDirectory": str(self.root / "leases"),
             "memoryPercent": MEMORY_PERCENT,
-            "cpuCount": 2,
             "maximumObservationAgeSeconds": 60,
         }))
         self.repo = self.root / "repo"

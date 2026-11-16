@@ -114,13 +114,12 @@ class Reservation:
 
     policy_path: 不変な観測commandと予約既定値のJSON
     memory_bytes: 明示された物理memory需要か導出に任せるNone
-    cpu_count: 明示されたCPU需要か既定値を選ぶNone
     recorded_bytes: 実測の記録から導いた物理memory需要か記録なしのNone
     寿命: supervisorによる子孫終了確認まで
     制約: 明示でない物理memory需要は最初の有効な観測か祖先の予約で確定し、それまでは未確定のNone
     """
 
-    def __init__(self, policy_path, memory_bytes=None, cpu_count=None, recorded_bytes=None):
+    def __init__(self, policy_path, memory_bytes=None, recorded_bytes=None):
         with open(policy_path) as stream:
             self.policy = json.load(stream)
         self.root = Path(self.policy["runtimeDirectory"])
@@ -139,7 +138,6 @@ class Reservation:
         self.explicit = positive(memory_bytes, "memory request") if memory_bytes is not None else None
         self.recorded = recorded_bytes
         self.memory = self.explicit
-        self.cpus = positive(cpu_count if cpu_count is not None else self.policy["cpuCount"], "cpuCount")
         self.boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
         self.path = None
         self.fd = None
@@ -198,7 +196,7 @@ class Reservation:
             if not math.isfinite(age) or age < -1 or age > self.policy["maximumObservationAgeSeconds"]:
                 return None, "resource observation is stale"
             for field in ("memoryTotalBytes", "memoryAvailableBytes", "memoryHeadroomBytes", "hostMemoryHeadroomBytes",
-                          "cpuCount", "windowsCommitHeadroomBytes", "windowsPhysicalAvailableBytes",
+                          "windowsCommitHeadroomBytes", "windowsPhysicalAvailableBytes",
                           "windowsPhysicalHeadroomBytes"):
                 if type(value[field]) is not int or value[field] < 0:
                     return None, f"resource observation has no valid {field}"
@@ -209,8 +207,6 @@ class Reservation:
             if any(type(limit["limitBytes"]) is not int or limit["limitBytes"] <= 0 for limit in value["memoryLimits"]):
                 return None, "resource observation has no valid limitBytes"
             self.settle_memory(value)
-            if self.cpus > value["cpuCount"]:
-                raise AdmissionError("request exceeds machine capacity; command was not started")
             return value, None
         except (OSError, ValueError, KeyError, TypeError, StopIteration, subprocess.TimeoutExpired) as error:
             return None, f"resource observation unavailable: {error}"
@@ -256,7 +252,7 @@ class Reservation:
         if not valid:
             raise AdmissionError("inherited resource lease has no live ancestor owner")
         ancestor = entry["memoryBytes"]
-        if self.explicit is not None and self.explicit > ancestor or self.cpus > entry["cpuCount"]:
+        if self.explicit is not None and self.explicit > ancestor:
             raise AdmissionError("nested request exceeds its ancestor reservation; declare the whole workload at its outer entry")
         if self.explicit is None:
             # 入れ子は観測を取らず上限は祖先の予約だけのため、既定値由来の需要は祖先の予約と同じになる
@@ -308,8 +304,6 @@ class Reservation:
         if min(waiting, key=lambda row: (row["order"], row["pid"]))["pid"] != os.getpid():
             return "an earlier workload is waiting"
         active = [row for row in entries if row["phase"] == "running"]
-        if self.cpus + sum(row["cpuCount"] for row in active) > snapshot["cpuCount"]:
-            return "CPU capacity is reserved"
         growth = self.memory + sum(row["memoryBytes"] - resident_credit(row, table) for row in active)
         if growth > min(snapshot["hostMemoryHeadroomBytes"], snapshot["windowsCommitHeadroomBytes"]):
             return "Linux memory or Windows commit headroom is reserved"
@@ -333,7 +327,7 @@ class Reservation:
             return True
         self.path = self.root / f"{os.getpid()}-{uuid.uuid4().hex}.json"
         self.entry = {"pid": os.getpid(), "start": table[os.getpid()][1], "boot": self.boot,
-                      "phase": "waiting", "order": time.monotonic_ns(), "memoryBytes": self.memory, "cpuCount": self.cpus}
+                      "phase": "waiting", "order": time.monotonic_ns(), "memoryBytes": self.memory}
         registry = os.open(self.root / "registry.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         try:
             while supervisor.cancel_signal is None and time.time() < deadline:

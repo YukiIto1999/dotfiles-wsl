@@ -104,7 +104,6 @@
             runtimeDirectory = "/build/agent-workload-leases";
             observation = [ (toString resourceObservation) ];
             memoryPercent = 2;
-            cpuCount = 1;
             maximumObservationAgeSeconds = 10;
           }
         );

@@ -298,9 +298,7 @@ T1は`verify`、repositoryの根、入口のcommandを、pre-pushは検査本体
 pre-pushの入口の解決とsourceの確認は数秒の短い走行で、鍵を渡さない。`dotfiles-run-within`は鍵を渡した呼出しだけを予約へ参加させ、鍵の無い短い段は予約の待ちに並ばない。`dotfiles-workload-run`と非対話jobも鍵を渡さない。
 supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計を約1秒ごとに測ってピークを保つ。子孫でない共有backendの消費は測れない。
 記録に残すのは、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけで、新しい順に10件を保つ。失敗、予算切れ、取消の走行は入口の途中で止まりピークが需要を下回るため、記録すると次の予約を下げる。予約を超えたピークは途中で止まった走行でも需要の下限なので、記録は予約を上げる向きにしか働かない。
-fingerprintは、repositoryの根で`git ls-files -s`に`*.lock`、`flake.nix`、`devenv.nix`、`devenv.yaml`、`package.json`、`pnpm-lock.yaml`、`package-lock.json`、`Cargo.toml`、`rust-toolchain`、`rust-toolchain.toml`、`global.json`、`Directory.Build.props`、`Directory.Packages.props`、`nx.json`、`tiergate.json`、`justfile`、`Makefile`を渡した出力のsha256で、repositoryでなければ空文字列である。
-toolchain、依存、検証入口の宣言を表し、変わると過去の実測は使わない。
-需要は、fingerprintが現在と一致し30日以内の新しい5件のピークの最大で、該当する記録が無ければ未計測の既定値になる。余裕は足さない。ピークを超えた走行は記録され、次回の需要が上がる。
+需要は、新しい5件のピークの最大で、記録が無ければ未計測の既定値になる。記録は古くなっても使い、余裕は足さない。ピークを超えた走行は記録され、次回の需要が上がる。
 測ったピークが予約を超えた走行は、stderrへ`dotfiles-supervise: measured memory peak N bytes exceeded the reservation M bytes`の一行を出し、記録の`exceeded`をtrueにする。`--result`のfinished段階にも`memoryPeakBytes`と`memoryReservedBytes`が入る。
 記録の読み書きの失敗はstderrへ一行を出すだけで、commandの終了statusを変えず、読めない場合は既定値で予約する。
 

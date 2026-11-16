@@ -48,7 +48,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from admission import AdmissionError, LEASE_ENV, Reservation, pss_bytes
-from demand import DemandHistory, fingerprint
+from demand import DemandHistory
 from measure import JOURNAL_SOCKET, emit
 
 PR_SET_PDEATHSIG = 1
@@ -352,7 +352,6 @@ class Supervisor:
         self.deadline_expired = False
         self.meter = PeakMeter() if options.resource_policy is not None else None
         self.history = None
-        self.fingerprint = ""
         # 計測の一行へ渡す入場の成否と、待機と走行の時間。単調時計で測り、待たなかった走行の待機は0
         self.admitted = False
         self.wait_seconds = 0.0
@@ -567,11 +566,10 @@ class Supervisor:
         """
         if self.options.resource_key is None:
             return None
-        self.fingerprint = fingerprint()
         try:
             self.history = DemandHistory(self.options.resource_key)
             if self.options.resource_memory is None:
-                return self.history.recorded_demand(self.fingerprint, time.time())
+                return self.history.recorded_demand()
         except (OSError, ValueError) as error:
             diagnose(f"cannot read the measured memory demand: {error}")
         return None
@@ -612,7 +610,7 @@ class Supervisor:
         if self.history is not None and peak > 0 and self.records_peak(drained, exceeded):
             try:
                 self.history.append({"at": int(time.time()), "peakBytes": peak, "reservedBytes": reserved,
-                                     "fingerprint": self.fingerprint, "exceeded": exceeded})
+                                     "exceeded": exceeded})
             except (OSError, ValueError) as error:
                 diagnose(f"cannot record the measured memory peak: {error}")
         return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved}

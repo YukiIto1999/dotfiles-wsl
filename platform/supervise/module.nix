@@ -41,7 +41,7 @@ in
       `--resource-memory BYTES`は同じpolicy内で当該呼出しの物理memory需要を明示する。CPUは予約しない。
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
       上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
-      `--resource-key KEY`を渡した走行は、記録があればfingerprintが現在と一致し30日以内の新しい5件のピークの最大を既定値の代わりに予約する。
+      `--resource-key KEY`を渡した走行は、記録があれば新しい5件のピークの最大を既定値の代わりに予約する。
       明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
       `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesが加わる。
@@ -50,7 +50,6 @@ in
       送れない場合はstderrへ一行を出すだけで、commandの終了statusを変えない。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
       子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。
-      fingerprintはgit repositoryの根にある依存と検証入口の宣言のindexのsha256で、repositoryでなければ空文字列である。
       記録の読み書きの失敗はstderrへ一行を出し、commandの終了statusを変えず、読めない場合は既定値で予約する。
       観測不能や圧迫では新規実行だけを待たせ、期限切れは未起動のdeferred記録と124で返す。
       待機も実行も同じ絶対期限に含め、資源予約を持つ実行にはrequire-drainedを適用する。

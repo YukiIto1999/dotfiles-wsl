@@ -39,10 +39,7 @@
         supervise-resource-admission =
           pkgs.runCommandLocal "check-supervise-resource-admission"
             {
-              nativeBuildInputs = with pkgs; [
-                git
-                python3
-              ];
+              nativeBuildInputs = [ pkgs.python3 ];
             }
             ''
               python3 ${./fixtures/resource_admission.py} ${./impl}/supervise.py

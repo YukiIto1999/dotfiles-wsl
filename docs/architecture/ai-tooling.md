@@ -145,7 +145,7 @@ supervisorの資源予約は、`--resource-policy FILE --resource-deadline EPOCH
 物理memoryの需要は、明示した値、`--resource-key`が示す実測の記録から導いた値、policyの`memoryPercent`による未計測の既定値の順に決め、最初の有効な観測の最も厳しい`limitBytes`（無ければ物理memory総量）へ切り詰める。
 明示した値がその上限を超える場合は、待たずにcommandを起動せず70で返す。
 supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1秒ごとに測り、鍵を渡した走行のうち、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了したものか、ピークが予約を超えたものだけを新しい順に10件まで記録する。
-記録の置き場、鍵、fingerprint、需要の導き方、予約を超えた走行のstderrの一行は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
+記録の置き場、鍵、需要の導き方、予約を超えた走行のstderrの一行は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 入れ子は生存する祖先supervisorの予約内で動き、明示した需要が祖先を超える場合は外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は祖先の予約へ切り詰め、拒否しない。
 予約を持つ走行では子孫終了までの所有を必須とし、supervisor自体が強制終了して終了確認を失った記録は自動削除しない。
 この予約は需要の宣言であり、commandの機能や内部のworker数を削減するhard limitではない。

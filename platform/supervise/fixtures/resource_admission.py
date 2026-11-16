@@ -25,10 +25,6 @@ HANG_SECONDS = 15
 # A deadline that lets a run be judged before it runs out, even on a loaded machine, and the slack the deadline is allowed.
 DEADLINE_SECONDS = 6
 DEADLINE_SLACK = 1
-# Files whose staged content the specification says identifies the toolchain, dependencies and verification entry.
-DECLARED = ("flake.nix", "devenv.nix", "devenv.yaml", "package.json", "pnpm-lock.yaml", "package-lock.json",
-            "Cargo.toml", "rust-toolchain", "rust-toolchain.toml", "global.json", "Directory.Build.props",
-            "Directory.Packages.props", "nx.json", "tiergate.json", "justfile", "Makefile")
 # A command that lives long enough for the first measurement and ends by itself.
 QUICK = [sys.executable, "-c", "import time; time.sleep(0.3)"]
 # The first measurement can precede the interpreter's start-up, so a peak that must exceed a small reservation is
@@ -88,32 +84,13 @@ class ResourceAdmission(unittest.TestCase):
             "memoryPercent": MEMORY_PERCENT,
             "maximumObservationAgeSeconds": 60,
         }))
+        # A directory to run in: the demand is keyed by the caller, not by what the working directory holds.
         self.repo = self.root / "repo"
-        (self.repo / "sub").mkdir(parents=True)
-        (self.root / "outside").mkdir()
-        self.git("init", "-q")
-        (self.repo / "Cargo.toml").write_text("[package]\n")
-        (self.repo / "flake.lock").write_text("{}\n")
-        (self.repo / "README.md").write_text("undeclared\n")
-        self.git("add", "-A")
-        self.declared = self.declared_fingerprint()
+        self.repo.mkdir()
 
     def environment(self):
-        """The environment of every launched process: a private state directory and a git that ignores the host."""
-        return {**os.environ, "XDG_STATE_HOME": str(self.state), "GIT_CONFIG_GLOBAL": os.devnull,
-                "GIT_CONFIG_NOSYSTEM": "1", "GIT_CEILING_DIRECTORIES": str(self.root)}
-
-    def git(self, *arguments):
-        """Run git in the fixture repository."""
-        subprocess.run(["git", *arguments], cwd=self.repo, env=self.environment(), check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    def declared_fingerprint(self):
-        """The sha256 of the staged declaration files listed by `git ls-files -s` at the repository root."""
-        listing = subprocess.run(
-            ["git", "ls-files", "-s", "--", ":(top,glob)*.lock", *DECLARED], cwd=self.repo, env=self.environment(),
-            check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
-        return hashlib.sha256(listing).hexdigest()
+        """The environment of every launched process: a private state directory."""
+        return {**os.environ, "XDG_STATE_HOME": str(self.state)}
 
     def measurements(self):
         """The journal entries the supervisors have sent so far, oldest first, as (fields, message record) pairs."""
@@ -220,10 +197,9 @@ class ResourceAdmission(unittest.TestCase):
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         path.write_text(json.dumps({"version": 1, "records": rows}))
 
-    def row(self, peak, age=0, fingerprint=None):
+    def row(self, peak, age=0):
         """A record of the given peak made `age` seconds ago."""
-        return {"at": int(time.time() - age), "peakBytes": peak, "reservedBytes": GIB,
-                "fingerprint": self.declared if fingerprint is None else fingerprint, "exceeded": False}
+        return {"at": int(time.time() - age), "peakBytes": peak, "reservedBytes": GIB, "exceeded": False}
 
     def stored(self, key=KEY):
         """The records kept for a key, newest first."""
@@ -340,7 +316,6 @@ class ResourceAdmission(unittest.TestCase):
         records = self.stored()
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["reservedBytes"], reserved)
-        self.assertEqual(records[0]["fingerprint"], self.declared)
         self.assertEqual(records[0]["peakBytes"], result["memoryPeakBytes"])
         self.assertGreater(records[0]["peakBytes"], 0)
         self.assertIs(records[0]["exceeded"], False)
@@ -378,25 +353,11 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual(records[0]["at"], max(record["at"] for record in records))
         self.assertNotIn(100_000_009, [record["peakBytes"] for record in records])
 
-    def test_records_of_another_fingerprint_or_older_than_thirty_days_are_not_used(self):
-        """A changed declaration or an old measurement returns the run to the default reservation."""
-        default = percent_of(MEMORY_PERCENT, 16 * GIB)
-        self.seed([self.row(2_000_000_000, age=31 * DAY)])
+    def test_recorded_peaks_are_used_however_old_they_are(self):
+        """No age limit: the five newest peaks set the demand even when they were measured months ago."""
+        self.seed([self.row(100_000_000, age=100 * DAY), self.row(300_000_000, age=200 * DAY)])
         _, _, result = self.run_command("old")
-        self.assertEqual(result["memoryReservedBytes"], default)
-
-        self.seed([self.row(2_000_000_000)])
-        (self.repo / "Cargo.toml").write_text("[package]\nname = \"changed\"\n")
-        self.git("add", "Cargo.toml")
-        self.assertNotEqual(self.declared_fingerprint(), self.declared)
-        _, _, result = self.run_command("changed")
-        self.assertEqual(result["memoryReservedBytes"], default)
-
-        self.declared = self.declared_fingerprint()
-        self.seed([self.row(100_000_000, age=29 * DAY), self.row(2_000_000_000, age=31 * DAY),
-                   self.row(3_000_000_000, fingerprint="0" * 64)])
-        _, _, result = self.run_command("boundary")
-        self.assertEqual(result["memoryReservedBytes"], 100_000_000)
+        self.assertEqual(result["memoryReservedBytes"], 300_000_000)
 
     def test_recorded_demand_is_truncated_to_the_tightest_limit(self):
         """A recorded demand above the smallest limitBytes is cut to it instead of failing or waiting."""
@@ -501,24 +462,6 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual((records[0]["peakBytes"], records[0]["reservedBytes"], records[0]["exceeded"]),
                          (peak, reserved, True))
-
-    def test_fingerprint_follows_the_declared_files_of_the_repository_root(self):
-        """The fingerprint is taken at the repository root and ignores undeclared files."""
-        def recorded(name, cwd):
-            self.run_command(name, cwd=cwd)
-            return self.stored()[0]["fingerprint"]
-
-        self.assertEqual(recorded("at-root", self.repo), self.declared)
-        self.assertEqual(recorded("below-root", self.repo / "sub"), self.declared)
-        (self.repo / "README.md").write_text("still undeclared\n")
-        self.git("add", "README.md")
-        self.assertEqual(recorded("undeclared-change", self.repo), self.declared)
-        (self.repo / "Cargo.toml").write_text("[package]\nname = \"changed\"\n")
-        self.git("add", "Cargo.toml")
-        changed = recorded("declared-change", self.repo)
-        self.assertNotEqual(changed, self.declared)
-        self.assertEqual(changed, self.declared_fingerprint())
-        self.assertEqual(recorded("outside-a-repository", self.root / "outside"), "")
 
     def test_unreadable_record_falls_back_to_the_default_and_keeps_the_exit_status(self):
         """A broken record file costs one stderr line and the default reservation, not the command's status."""

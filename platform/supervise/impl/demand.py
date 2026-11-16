@@ -7,51 +7,11 @@ import json
 import math
 import os
 from pathlib import Path
-import subprocess
 
 RECORD_VERSION = 1
-# 古い実測を残す件数、需要の導出に使う新しい実測の件数、その実測を使う期間
+# 古い実測を残す件数と、需要の導出に使う新しい実測の件数
 KEPT_RECORDS = 10
 USED_RECORDS = 5
-USABLE_SECONDS = 30 * 24 * 60 * 60
-GIT_SECONDS = 10
-# toolchain、依存、検証入口の宣言。変わると過去の実測は使わない。`*.lock`は根直下だけを指す
-FINGERPRINT_PATHSPECS = (
-    ":(top,glob)*.lock",
-    "flake.nix",
-    "devenv.nix",
-    "devenv.yaml",
-    "package.json",
-    "pnpm-lock.yaml",
-    "package-lock.json",
-    "Cargo.toml",
-    "rust-toolchain",
-    "rust-toolchain.toml",
-    "global.json",
-    "Directory.Build.props",
-    "Directory.Packages.props",
-    "nx.json",
-    "tiergate.json",
-    "justfile",
-    "Makefile",
-)
-
-
-def fingerprint():
-    """走行の宣言の識別子の取得
-
-    戻り値: 作業directoryが属するgit repositoryの根で、宣言fileの`git ls-files -s`の出力から得たsha256の16進数。
-        repositoryでない場合とgitの失敗は空文字列
-    """
-    try:
-        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], stdout=subprocess.PIPE,
-                             stderr=subprocess.DEVNULL, timeout=GIT_SECONDS, check=True).stdout
-        listing = subprocess.run(["git", "-C", os.fsdecode(top.rstrip(b"\n")), "ls-files", "-s", "--",
-                                  *FINGERPRINT_PATHSPECS], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                 timeout=GIT_SECONDS, check=True).stdout
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    return hashlib.sha256(listing).hexdigest()
 
 
 def well_formed(row):
@@ -64,7 +24,6 @@ def well_formed(row):
             and type(row.get("at")) in (int, float) and math.isfinite(row["at"])
             and type(row.get("peakBytes")) is int and row["peakBytes"] > 0
             and type(row.get("reservedBytes")) is int and row["reservedBytes"] > 0
-            and type(row.get("fingerprint")) is str
             and type(row.get("exceeded")) is bool)
 
 
@@ -103,16 +62,13 @@ class DemandHistory:
             raise ValueError(f"{self.path} is not a version {RECORD_VERSION} record")
         return [row for row in document["records"] if well_formed(row)]
 
-    def recorded_demand(self, current, now):
+    def recorded_demand(self):
         """記録から導く物理memory需要の取得
 
-        current: 現在のfingerprint
-        now: 現在のEPOCH秒
-        戻り値: fingerprintが現在と一致し30日以内の新しい5件のピークの最大。該当が無ければNone
+        戻り値: 新しい5件のピークの最大。記録が無ければNone
         失敗: load と同じ
         """
-        usable = [row for row in self.load() if row["fingerprint"] == current and now - row["at"] <= USABLE_SECONDS]
-        newest = sorted(usable, key=lambda row: row["at"], reverse=True)[:USED_RECORDS]
+        newest = sorted(self.load(), key=lambda row: row["at"], reverse=True)[:USED_RECORDS]
         if not newest:
             return None
         return max(row["peakBytes"] for row in newest)

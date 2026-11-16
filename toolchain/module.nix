@@ -211,6 +211,16 @@ in
       ;
   };
 
+  # 評価時に作る patch 済み nixpkgs は devenv の closure 外で GC 後の再作成が T1 の上限を超えるため root の省略は不可
+  # path 値の文字列化は source 全体を store へ写し直すため appendContext 以外での参照は不可
+  config.system.extraDependencies =
+    let
+      devenvNixpkgs =
+        toString
+          self.inputs.devenv.inputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.path;
+    in
+    [ (builtins.appendContext devenvNixpkgs { ${devenvNixpkgs}.path = true; }) ];
+
   config.home-manager.users.${cfg.workstation.username} = _: {
     home.packages =
       builtins.attrValues cfg.toolchain.packages

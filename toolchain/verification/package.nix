@@ -22,6 +22,7 @@ in
   # timeout の process group だけでは別 session へ移った子孫を止められないため supervise の下で起動
   # 猶予が run-within.sh の timeout --kill-after より短いと command 自身の停止を KILL が先に切るため不可
   # 公開 PID への INT を取消として扱ってきた呼び出し側のため supervise 既定の INT 無視は不可
+  # 資源予約の入場は鍵を渡した呼出し（検査本体）だけが受ける。鍵の無い短い段は予約の待ちへ並べず、数秒の処理が数分の待ちを負わない
   runWithin = pkgs.writeShellApplication {
     name = "dotfiles-run-within";
     text = ''
@@ -43,11 +44,13 @@ in
           resource_key=(--resource-key "$2")
           shift 2
         fi
-        [ "$#" -ge 2 ] || usage
-        deadline=$(${lib.getExe pkgs.python3} -c 'import math,sys,time; s=float(sys.argv[1]); assert math.isfinite(s) and s>0; print(time.time()+s)' "$1")
-        exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 \
-          --resource-policy ${lib.escapeShellArg (toString resourcePolicy)} --resource-deadline "$deadline" \
-          "''${resource_key[@]}" -- ${lib.getExe runWithinCore} "$@"
+        if [ "''${#resource_key[@]}" -gt 0 ]; then
+          [ "$#" -ge 2 ] || usage
+          deadline=$(${lib.getExe pkgs.python3} -c 'import math,sys,time; s=float(sys.argv[1]); assert math.isfinite(s) and s>0; print(time.time()+s)' "$1")
+          exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 \
+            --resource-policy ${lib.escapeShellArg (toString resourcePolicy)} --resource-deadline "$deadline" \
+            "''${resource_key[@]}" -- ${lib.getExe runWithinCore} "$@"
+        fi
       ''}
       exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 -- ${lib.getExe runWithinCore} "$@"
     '';

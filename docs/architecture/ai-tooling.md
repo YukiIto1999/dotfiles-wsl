@@ -149,7 +149,7 @@ supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1
 入れ子は生存する祖先supervisorの予約内で動き、明示した需要が祖先を超える場合は外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は祖先の予約へ切り詰め、拒否しない。
 予約を持つ走行では子孫終了までの所有を必須とし、supervisor自体が強制終了して終了確認を失った記録は自動削除しない。
 この予約は需要の宣言であり、commandの機能や内部のworker数を削減するhard limitではない。
-policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-push、非対話jobと`dotfiles-workload-run`が同じregistryへ参加する。実測の記録の鍵を渡すのはT1とpre-pushの検査本体だけである。入口を通らない任意のcommandの将来消費を保証するものではない。
+policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-pushの検査本体、非対話jobと`dotfiles-workload-run`が同じregistryへ参加する。実測の記録の鍵を渡すのはT1とpre-pushの検査本体だけで、鍵を渡さないpre-pushの短い段は参加しない。入口を通らない任意のcommandの将来消費を保証するものではない。
 Windowsの採取は独立したscheduled taskが行い、Linux側は期限内のsnapshotだけを読む。導入と待機理由の確認は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 
 取消後と開始途中の失敗ではclientを起動しない。

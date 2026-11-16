@@ -451,3 +451,9 @@ push "$HOOKS" "$resource_wait" || fail 'push remained blocked after resource hea
 test "$(cat "$MARKER")" = "$resource_wait" || fail 'the recovered push did not run verification'
 test "$(remote_ref "$resource_wait" refs/heads/main)" = "$(git -C "$resource_wait" rev-parse HEAD)" \
   || fail 'the recovered push did not update the remote'
+
+# 鍵の無い短い段(入口の解決)は資源の待ちに並ばない。圧迫の中でも入口は解決し、省いた検査の記録に解決した入口が残る
+GIT_RESOURCE_PRESSURE=1 DOTFILES_VERIFY_PUSH_BYPASS='資源待機中の入口の解決' push "$HOOKS" "$resource_wait" HEAD:refs/heads/short-stage \
+  || fail 'the bypassed push was held up while resource admission was blocked'
+grep -F "repo=$resource_wait" "$bypass_log" | grep -F 'reason=資源待機中の入口の解決' | grep -qF 'entry=make verify-push' \
+  || fail 'the entry resolution waited for resource admission instead of resolving at once'

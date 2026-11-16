@@ -280,7 +280,7 @@ collectorは現在のWindows利用者として登録し、権限昇格やexecuti
 同名でも他のtaskやfileは変更しない。install途中の失敗は、実施済みの段階をstderrへ出す。
 更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は新しい検証が観測不明で待機するため、予約を使う配備を戻してから撤去する。
 
-T1、pre-push、非対話agent jobは共通の予約へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
+T1、pre-pushの検査本体、非対話agent jobは共通の予約へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
 待機は全体の期限に含み、期限切れは124で返る。開始後の期限切れも同じstatusなので、stderrの待機理由とcommandの出力を併せて確認する。
 同じ処理を別入口から追加投入して待機を迂回しない。
 
@@ -295,7 +295,7 @@ Windowsの物理空きはreserveを割った場合の開始保留に使い、予
 実測した需要は、呼出し側が鍵を渡した走行だけが読み書きする。
 記録は`${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/<鍵のsha256>.json`に置き、directoryは0700である。
 T1は`verify`、repositoryの根、入口のcommandを、pre-pushは検査本体だけに`verify-push`、repositoryの根、入口のcommandを、それぞれ改行でつないだ文字列を鍵にする。
-pre-pushの入口の解決とsourceの確認は短い走行で、鍵を渡すと直近5件の窓を埋めて検査本体のピークを押し出すため、鍵を渡さず既定値で予約する。`dotfiles-workload-run`と非対話jobも鍵を渡さない。
+pre-pushの入口の解決とsourceの確認は数秒の短い走行で、鍵を渡さない。`dotfiles-run-within`は鍵を渡した呼出しだけを予約へ参加させ、鍵の無い短い段は予約の待ちに並ばない。`dotfiles-workload-run`と非対話jobも鍵を渡さない。
 supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計を約1秒ごとに測ってピークを保つ。子孫でない共有backendの消費は測れない。
 記録に残すのは、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけで、新しい順に10件を保つ。失敗、予算切れ、取消の走行は入口の途中で止まりピークが需要を下回るため、記録すると次の予約を下げる。予約を超えたピークは途中で止まった走行でも需要の下限なので、記録は予約を上げる向きにしか働かない。
 fingerprintは、repositoryの根で`git ls-files -s`に`*.lock`、`flake.nix`、`devenv.nix`、`devenv.yaml`、`package.json`、`pnpm-lock.yaml`、`package-lock.json`、`Cargo.toml`、`rust-toolchain`、`rust-toolchain.toml`、`global.json`、`Directory.Build.props`、`Directory.Packages.props`、`nx.json`、`tiergate.json`、`justfile`、`Makefile`を渡した出力のsha256で、repositoryでなければ空文字列である。

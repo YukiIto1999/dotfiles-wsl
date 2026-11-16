@@ -537,6 +537,26 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual((status, result["cancelled"]), (0, False))
         self.assertEqual(len(self.stored("deep key")), 1)
 
+    def test_i6_a_deep_run_whose_stop_the_manager_refused_keeps_its_own_status(self):
+        """A cancellation that never reached the scope is not one: the run ends by itself with 0 and records its peak."""
+        deep, deep_started, deep_release = self.start("deep", klass="deep",
+                                                      arguments=["--resource-key", "deep key", "--resource-memory", str(4 * GIB)])
+        self.wait_for(deep_started.exists, deep)
+        self.observe(hostMemoryHeadroomBytes=GIB, memoryHeadroomBytes=GIB)
+        refusing = self.write_policy("acceptance", name="policy-refusing.json", systemctl=["false"])
+        acceptance, started, _ = self.start("acceptance", policy=refusing, arguments=["--resource-memory", str(2 * GIB)])
+        self.keeps_waiting(acceptance)
+        # The acceptance is gone before the deep run ends, so no attempt of its is under way when the deep run looks.
+        acceptance.send_signal(signal.SIGTERM)
+        self.assertEqual(self.finish(acceptance), 143)
+        self.assertFalse(started.exists())
+        deep_release.touch()
+        self.assertEqual(self.finish(deep), 0)
+        result = json.loads((self.root / "deep.result").read_text())
+        self.assertEqual((result["status"], result["cancelled"]), (0, False))
+        self.assertEqual(len(self.stored("deep key")), 1)
+        self.assertEqual(sorted(path.name for path in (self.root / "run").iterdir()), ["acceptance.waiting", "registry.lock"])
+
     def test_i4_a_waiting_acceptance_leaves_the_running_acceptances_alone(self):
         """With no deep run to give way, a request that lacks memory only waits: nothing is stopped."""
         holder, held, holder_release = self.start("holder", arguments=["--resource-memory", str(9 * GIB)])

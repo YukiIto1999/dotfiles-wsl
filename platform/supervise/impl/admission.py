@@ -441,6 +441,13 @@ class Admission:
         os.close(descriptor)
         return True
 
+    def unmark_cancelled(self, scope):
+        """取り消しの要求が届かなかった scope の記録の撤回
+
+        scope: stop を manager が受けなかった deep の scope
+        """
+        (self.policy.runtime / f"{CANCEL_MARK}{scope.unit}").unlink(missing_ok=True)
+
     def prune_marks(self, scopes):
         """読まれないまま残った取消の記録の片付け。scope が無く一定の時間を過ぎた記録だけを消す
 
@@ -477,6 +484,8 @@ class Admission:
         scopes: 存在する scope
         副作用: 取消の記録を残してから取り消しの要求を出し、終了は待たない。次の観測で空きとして現れる
         制約: 記録は stop より前に残す。command が TERM を受けて 0 で終わっても、deep の supervisor は取消と判る。
+            manager が要求を受けなかった場合は記録を消す。届いていない取消で、自分で終わった走行を取消にしないため。
+            応答が期限内に無い場合は要求が届いたか分からないので、記録を残す。
             要求は scope ごとに一度。終わるまでの間は、manager が TimeoutStopSec で止めを刺す
         """
         self.prune_marks(scopes)
@@ -487,11 +496,17 @@ class Admission:
                 stopped = subprocess.run([*self.policy.systemctl, "--user", "stop", "--no-block", scope.unit],
                                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                          timeout=STOP_SECONDS, check=False)
-            except (OSError, subprocess.TimeoutExpired) as error:
+            except subprocess.TimeoutExpired as error:
                 print(f"dotfiles-supervise: cannot stop {scope.unit}: {error}", file=sys.stderr, flush=True)
+                continue
+            except OSError as error:
+                print(f"dotfiles-supervise: cannot stop {scope.unit}: {error}", file=sys.stderr, flush=True)
+                self.unmark_cancelled(scope)
                 continue
             if stopped.returncode == 0:
                 self.stopping.add(scope.unit)
+            else:
+                self.unmark_cancelled(scope)
 
     def scope_command(self):
         """走行ごとの scope を作って command を起動する前置 argv。需要は scope の memory.low か memory.high へ入る"""

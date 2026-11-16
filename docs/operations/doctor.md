@@ -284,7 +284,7 @@ T1、pre-pushの検査本体、非対話agent jobは共通の判定へ参加す�
 走行は、結果を同期に待つ者がいる受入（T1、pre-pushの検査本体）と、待つ者のいない深い検証（`dotfiles-workload-run`、非対話job）に分かれ、classごとに走行ごとのscopeを`agents-acceptance.slice`と`agents-deep.slice`の下に作る。
 受入は他の受入が待っていても止まらない。深い検証は受入が待つ間は入場せず、同時に一走行だけで、`CPUWeight=idle`により他が使わないCPUだけを使う。
 受入がmemoryで収まらず深い検証が動いていれば、深い検証だけが取り消される。受入とsessionは取り消されない。
-取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
+取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。managerがstopを受けなかった場合は、取り消す側がそのfileを消し、走行は自分の終了statusで終わる。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
 観測の圧迫は、受入はfailureだけで、深い検証はwarningでも止める。
 待機は走行の予算から分ける。入場の待ちには走行の予算と同じ秒数の上限があり、超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
 走行の予算は入場して起動した時から数え、超えれば取り消されて124で返る。待機の理由と待った秒数はjournaldの計測の一行と、stderrの待機理由で確認する。

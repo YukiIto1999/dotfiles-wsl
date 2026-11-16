@@ -291,6 +291,13 @@ in
           回収が重くなった場合は memory full pressure の閾値が入場を止める。
           回収の見込みを数えない値は limitBytes と currentBytes から limitBytes - currentBytes で得る。
 
+          引数を渡すと、祖先の上限は呼んだ process の cgroup ではなく、1 つ目の引数の cgroup から辿る。
+          これから process を置く先の slice を渡す用途で、cgroup がまだ無ければ存在する最も近い祖先から辿る。
+          2 つ目以降の引数の cgroup の直下の scope は、memoryScopes に path と currentBytes と workingSetBytes を載せる。
+          workingSetBytes は memoryLimits と同じ式で、この式を持つのは観測だけである。
+          supervise の入場は、走行中の scope の使い増せる量を、予約から memoryScopes の workingSetBytes を引いて求める。
+          使用量を読めない scope は載せず、載せない scope は予約の全部を未使用と見る。
+
           windowsCommitHeadroomBytes は windowsMemoryCommit.warning の割合までの余力で、
           残りの commit 全量ではない。windowsPhysicalHeadroomBytes は物理 memory の空きから
           windowsPhysicalReserveGiB を引いた余力。wsl-cap の outcome は宣言と .wslconfig と稼働中の VM の差を診断し、

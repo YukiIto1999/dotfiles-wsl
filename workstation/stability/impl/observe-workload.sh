@@ -103,6 +103,7 @@ full_pressure() {
 
 # page cache は上限まで増えるため、active な cache を使用中と数えると headroom が時間とともに 0 へ張り付き、
 # host 側の MemAvailable とも定義が食い違う。map 中、dirty、writeback 中の page は直ちに回収できないため控除しない
+# この式は memoryLimits の階層にも memoryScopes の scope にも使い、supervise の入場は scope の値をここから読む。他に同じ式を置かない
 usage_bytes() {
   local current inactive active mapped dirty writeback reclaimable
   current=$(read_first_line "$1/memory.current") || return 1
@@ -193,7 +194,12 @@ fi
 
 cgroup_known=1
 cpu_known=1
-cgroup_path=$(self_cgroup_path 2>/dev/null) || cgroup_path=
+# 引数は、これから process を置く cgroup。無ければ呼んだ process 自身の cgroup から辿る
+if (($# > 0)); then
+  cgroup_path=$1
+else
+  cgroup_path=$(self_cgroup_path 2>/dev/null) || cgroup_path=
+fi
 if [[ ! $cgroup_path =~ $cgroup_path_pattern || $cgroup_path =~ $dot_component_pattern ]]; then
   cgroup_known=0
   cpu_known=0
@@ -201,6 +207,14 @@ if [[ ! $cgroup_path =~ $cgroup_path_pattern || $cgroup_path =~ $dot_component_p
 elif ! read_first_line "$cgroup_root/cgroup.controllers" >/dev/null; then
   cgroup_known=0
   cpu_known=0
+elif (($# > 0)); then
+  # 置き先の slice は、中に scope が無い間は cgroup が存在しない。上限は存在する最も近い祖先から上に掛かる
+  while [[ $cgroup_path != / && ! -d $cgroup_root$cgroup_path ]]; do
+    cgroup_path=${cgroup_path%/*}
+    if [[ -z $cgroup_path ]]; then
+      cgroup_path=/
+    fi
+  done
 fi
 path=$cgroup_path
 while [[ $path != / ]]; do
@@ -217,6 +231,29 @@ if ((${#memory_limit_rows[@]} > 0)); then
   memory_limits=$(
     printf '%s\n' "${memory_limit_rows[@]}" \
       | "$jq_command" -Rcn '[inputs | split("\t") | {path: .[0], headroomBytes: (.[1] | tonumber), limitBytes: (.[2] | tonumber), currentBytes: (.[3] | tonumber), workingSetBytes: (.[4] | tonumber)}]'
+  )
+fi
+
+# 引数の 2 つ目以降は、直下の scope の使用量も求める cgroup。入場の判定が、走行中の scope の使い増せる量を求めるのに使う。
+# working set の式は usage_bytes だけが持ち、supervise はここで報告した値を読む。読めない scope は載せない
+memory_scope_rows=()
+for scope_parent in "${@:2}"; do
+  if [[ $scope_parent == / || ! $scope_parent =~ $cgroup_path_pattern || $scope_parent =~ $dot_component_pattern ]]; then
+    cgroup_known=0
+    continue
+  fi
+  for scope_directory in "$cgroup_root$scope_parent"/*.scope; do
+    [[ -d $scope_directory ]] || continue
+    usage=$(usage_bytes "$scope_directory") || continue
+    read -r current working <<<"$usage"
+    memory_scope_rows+=("$scope_parent/${scope_directory##*/}"$'\t'"$current"$'\t'"$working")
+  done
+done
+memory_scopes=[]
+if ((${#memory_scope_rows[@]} > 0)); then
+  memory_scopes=$(
+    printf '%s\n' "${memory_scope_rows[@]}" \
+      | "$jq_command" -Rcn '[inputs | split("\t") | {path: .[0], currentBytes: (.[1] | tonumber), workingSetBytes: (.[2] | tonumber)}]'
   )
 fi
 
@@ -319,6 +356,7 @@ fi
   --argjson memory_available "$(json_number "$memory_available")" \
   --argjson cgroup_known "$cgroup_known" \
   --argjson memory_limits "$memory_limits" \
+  --argjson memory_scopes "$memory_scopes" \
   --argjson reserve_bytes "$(json_number "$reserve_bytes")" \
   --argjson reserve_charged_bytes "$(json_number "$reserve_charged_bytes")" \
   --argjson host_headroom "$(json_number "$host_headroom")" \
@@ -455,6 +493,7 @@ fi
             hostReserveBytes: $reserve_bytes,
             hostReserveChargedBytes: $reserve_charged_bytes,
             memoryLimits: (if $cgroup_ok then $memory_limits else null end),
+            memoryScopes: (if $cgroup_ok then $memory_scopes else null end),
             windowsCommitHeadroomBytes:
               (if $window == "fresh"
                then ([(($snapshot.commitLimitBytes * $windows_commit_warning / 100 | floor) - $snapshot.commitUsedBytes), 0] | max)

@@ -326,30 +326,42 @@ let
       pressureRoot ? calmPressure,
       declaredMemoryBytes ? null,
       declaredProcessors ? null,
+      # the cgroup the observation is asked about: where a process is about to be placed, not where the caller is
+      destination ? null,
+      # the cgroups whose scopes' usage is asked for as well; they are given with a destination
+      scopeParents ? [ ],
     }:
-    mkWorkload {
-      inherit
-        pkgs
-        lib
-        reader
-        declaredMemoryBytes
-        declaredProcessors
-        ;
-      hostReservePercent = 20;
-      aggregateCgroup = "/user.slice";
-      pressureWarning = 10;
-      pressureFailure = 40;
-      windowsCommitWarning = 85;
-      windowsCommitFailure = 95;
-      windowsPhysicalReserveBytes = windowsPhysicalReserve;
-      dateCommand = fixedDate now;
-      meminfo = toString meminfo;
-      cgroupRoot = toString cgroupRoot;
-      procCgroup = toString procCgroup;
-      procStatus = toString procStatus;
-      cpuOnline = toString cpuOnline;
-      pressureRoot = toString pressureRoot;
-    };
+    let
+      probe = mkWorkload {
+        inherit
+          pkgs
+          lib
+          reader
+          declaredMemoryBytes
+          declaredProcessors
+          ;
+        hostReservePercent = 20;
+        aggregateCgroup = "/user.slice";
+        pressureWarning = 10;
+        pressureFailure = 40;
+        windowsCommitWarning = 85;
+        windowsCommitFailure = 95;
+        windowsPhysicalReserveBytes = windowsPhysicalReserve;
+        dateCommand = fixedDate now;
+        meminfo = toString meminfo;
+        cgroupRoot = toString cgroupRoot;
+        procCgroup = toString procCgroup;
+        procStatus = toString procStatus;
+        cpuOnline = toString cpuOnline;
+        pressureRoot = toString pressureRoot;
+      };
+    in
+    if destination == null then
+      probe
+    else
+      pkgs.writeShellScriptBin "workload-observation-for-destination" ''
+        exec ${lib.getExe probe} ${lib.escapeShellArgs ([ destination ] ++ scopeParents)}
+      '';
   contract = (mkWorkloadProbe { }).dotfilesObservationContract;
 
   outcome = id: ''(.outcomes[] | select(.id == "resource/workload/${id}") | .status)'';
@@ -418,6 +430,27 @@ let
     inherit expected;
   };
 
+  agentsSlice = "user.slice/user-1000.slice/agents.slice";
+  acceptanceSlice = "${agentsSlice}/agents-acceptance.slice";
+  # agents.slice と class の slice は上限を持たない階層で、その下に scope を置く
+  withScopes =
+    scopes: files:
+    files
+    // level agentsSlice { }
+    // level acceptanceSlice { }
+    // lib.foldl' (all: name: all // level "${acceptanceSlice}/${name}" scopes.${name}) { } (
+      builtins.attrNames scopes
+    );
+  scopesOf =
+    scopes:
+    builtins.toJSON (
+      map (scope: {
+        path = "/${acceptanceSlice}/${scope.name}";
+        currentBytes = scope.current;
+        workingSetBytes = scope.workingSet;
+      }) scopes
+    );
+
   workloadCases = {
     baseline = {
       probe = mkWorkloadProbe { };
@@ -430,6 +463,7 @@ let
         (field "hostReserveChargedBytes" "195200000")
         (field "hostMemoryHeadroomBytes" "419200000")
         (field "memoryLimits" baselineLimits)
+        (field "memoryScopes" "[]")
         (field "memoryHeadroomBytes" "320000000")
         (field "cpuCount" "8")
         (field "cpuAffinityCount" "8")
@@ -493,6 +527,134 @@ let
         (field "memoryHeadroomBytes" "419200000")
         (status "cgroup-budget" "pass")
       ];
+    };
+    # 引数の cgroup は呼んだ process の居る場所ではなく、これから process を置く先。呼んだ process の cgroup が観測できなくても置き先で決まる
+    destination-selects-the-chain = {
+      probe = mkWorkloadProbe {
+        procCgroup = pkgs.writeText "self-cgroup-elsewhere" "0::/system.slice/svc.service\n";
+        destination = "/user.slice/user-1000.slice/agents.slice/agents-acceptance.slice";
+      };
+      expected = [
+        (field "memoryLimits" baselineLimits)
+        (field "memoryHeadroomBytes" "320000000")
+        (status "cgroup-budget" "pass")
+      ];
+    };
+    # 置き先の祖先が持つ上限も数える。置き先の slice が無い間は、存在する最も近い祖先から辿る
+    destination-counts-the-limits-of-its-nearest-existing-ancestor = {
+      probe = mkWorkloadProbe {
+        cgroupRoot = mkChain {
+          files =
+            files:
+            files
+            // level "user.slice/user-1000.slice/agents.slice" {
+              high = 200000000;
+              current = 50000000;
+            };
+        };
+        destination = "/user.slice/user-1000.slice/agents.slice/agents-acceptance.slice";
+      };
+      expected = [
+        (field "memoryLimits" (limitsOf [
+          {
+            path = "/user.slice/user-1000.slice/agents.slice";
+            headroom = 150000000;
+            limit = 200000000;
+            current = 50000000;
+            workingSet = 50000000;
+          }
+          userManagerLimit
+          userSliceLimit
+        ]))
+        (field "memoryHeadroomBytes" "150000000")
+        (status "cgroup-budget" "pass")
+      ];
+    };
+    # 不正な置き先は、制限なしとみなさず上限不明として止める
+    destination-that-is-not-a-cgroup-path-is-unknown = {
+      probe = mkWorkloadProbe { destination = "/user.slice/../system.slice"; };
+      expected = unknownLimits;
+    };
+    # scope の working set は memoryLimits の階層と同じ式で求め、他に同じ式は置かない。負の reclaimable は 0 で、使用量を超えて引かない
+    scopes-below-a-slice-are-reported-with-their-working-set = {
+      probe = mkWorkloadProbe {
+        cgroupRoot = mkChain {
+          files = withScopes {
+            "a.scope" = {
+              current = 500000000;
+              inactive = 50000000;
+              active = 50000000;
+              mapped = 200000000;
+            };
+            "b.scope" = {
+              current = 300000000;
+              inactive = 100000000;
+              active = 100000000;
+            };
+            "c.scope" = { };
+          };
+        };
+        destination = "/${acceptanceSlice}";
+        scopeParents = [ "/${acceptanceSlice}" ];
+      };
+      expected = [
+        (field "memoryLimits" baselineLimits)
+        (field "memoryScopes" (scopesOf [
+          {
+            name = "a.scope";
+            current = 500000000;
+            workingSet = 500000000;
+          }
+          {
+            name = "b.scope";
+            current = 300000000;
+            workingSet = 100000000;
+          }
+          {
+            name = "c.scope";
+            current = 0;
+            workingSet = 0;
+          }
+        ]))
+        (status "cgroup-budget" "pass")
+      ];
+    };
+    # 使用量を読めない scope は載せない。載せない scope は、入場の判定が予約の全部を未使用と見る
+    scope-with-unreadable-usage-is-not-reported = {
+      probe = mkWorkloadProbe {
+        cgroupRoot = mkChain {
+          files =
+            files:
+            removeAttrs (withScopes {
+              "a.scope" = {
+                current = 500000000;
+              };
+              "d.scope" = {
+                current = 100000000;
+              };
+            } files) [ "${acceptanceSlice}/d.scope/memory.stat" ];
+        };
+        destination = "/${acceptanceSlice}";
+        scopeParents = [ "/${acceptanceSlice}" ];
+      };
+      expected = [
+        (field "memoryScopes" (scopesOf [
+          {
+            name = "a.scope";
+            current = 500000000;
+            workingSet = 500000000;
+          }
+        ]))
+        (status "cgroup-budget" "pass")
+      ];
+    };
+    # 不正な親は、scope の使用量を求められないので上限不明として止める
+    scope-parent-that-is-not-a-cgroup-path-is-unknown = {
+      probe = mkWorkloadProbe {
+        destination = "/${acceptanceSlice}";
+        scopeParents = [ "/user.slice/../system.slice" ];
+      };
+      expected = unknownLimits;
     };
     controller-disabled-level = {
       probe = mkWorkloadProbe {

@@ -65,6 +65,11 @@ let
     supervise = cfg.platform.supervise.package;
     resourcePolicy = cfg.workstation.workload.admissionPolicy;
   };
+  # 受入は session と同じ重みで CPU を分け合い、deep は他が使わない CPU だけを使う。memory の上限は agent の slice が持つ
+  classSliceConfig = {
+    acceptance.CPUWeight = 100;
+    deep.CPUWeight = "idle";
+  };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";
   runtimeClientNames = builtins.filter (
     name: modeOf agents.clients.${name}.runtime == "managed"
@@ -569,6 +574,24 @@ in
         message = "Agent system destinations must be unique";
       }
       {
+        assertion =
+          builtins.attrNames classSliceConfig == builtins.attrNames cfg.workstation.workload.classSlices;
+        message = "Every workload class needs a slice declaration, and every class slice a class";
+      }
+      {
+        assertion = lib.all (
+          unit:
+          let
+            child = lib.removePrefix "${lib.removeSuffix ".slice" runtimeContract.sliceUnit}-" (
+              lib.removeSuffix ".slice" unit
+            );
+          in
+          lib.hasPrefix "${lib.removeSuffix ".slice" runtimeContract.sliceUnit}-" unit
+          && !lib.hasInfix "-" child
+        ) (builtins.attrValues cfg.workstation.workload.classSlices);
+        message = "Workload class slices must be direct children of the agent slice so that its limits enclose them";
+      }
+      {
         assertion = seedDestinations == lib.unique seedDestinations;
         message = "Agent seed destinations must be unique";
       }
@@ -630,15 +653,24 @@ in
         ] "${lib.getExe agentSupply} init";
       };
 
-    systemd.user.slices.${lib.removeSuffix ".slice" runtimeContract.sliceUnit} = {
-      description = "Agent session の資源上限";
-      sliceConfig = {
-        MemoryHigh = "${toString agents.slice.memoryHighPercent}%";
-        MemoryMax = "${toString agents.slice.memoryMaxPercent}%";
-        MemorySwapMax = "${toString agents.slice.memorySwapMaxPercent}%";
-        CPUWeight = agents.slice.cpuWeight;
+    systemd.user.slices = {
+      ${lib.removeSuffix ".slice" runtimeContract.sliceUnit} = {
+        description = "Agent session の資源上限";
+        sliceConfig = {
+          MemoryHigh = "${toString agents.slice.memoryHighPercent}%";
+          MemoryMax = "${toString agents.slice.memoryMaxPercent}%";
+          MemorySwapMax = "${toString agents.slice.memorySwapMaxPercent}%";
+          CPUWeight = agents.slice.cpuWeight;
+        };
       };
-    };
+    }
+    // lib.mapAttrs' (
+      class: unit:
+      lib.nameValuePair (lib.removeSuffix ".slice" unit) {
+        description = "検証の走行の scope を置く ${class} の slice";
+        sliceConfig = classSliceConfig.${class};
+      }
+    ) cfg.workstation.workload.classSlices;
 
     # Chromium が自ら app.slice へ作る scope による agents.slice の迂回
     systemd.services."user@".serviceConfig = {

@@ -237,6 +237,20 @@ in
           container の配置、Nix、MCP の slice はこの値だけを参照する。
         '';
       };
+      classSlices = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        internal = true;
+        default = {
+          acceptance = "agents-acceptance.slice";
+          deep = "agents-deep.slice";
+        };
+        description = ''
+          検証の走行の class ごとの user slice 名。受入は待つ者のいる検証（T1とpre-push）、deepは待つ者のいない検証
+          （全量回帰、分析、`dotfiles-workload-run`）で、走行ごとの scope をこの slice の下に作る。
+          agent の slice の子として宣言し、memory の上限は agent の slice のものだけを受ける。
+          宣言は`agents/module.nix`が持ち、入場の policy はこの名前だけを参照する。
+        '';
+      };
       windowsSnapshotDirectory = lib.mkOption {
         type = lib.types.strMatching "/mnt/[a-z]/ProgramData/[A-Za-z0-9._-]+";
         default =

@@ -242,6 +242,11 @@ WSL hostの`nixos`は[`profiles/hosts/nixos.nix`](../../profiles/hosts/nixos.nix
 `MemoryMax`は70%を維持する。
 複数のbuild、test、解析が共有する退避枠を、WSLのdisk swapとzramの構成に合わせるためである。
 
+検証の走行のscopeを置く子sliceを、sessionのscopeとは別にclassごとに宣言する。
+`agents-acceptance.slice`は待つ者のいる検証（T1とpre-push）で、CPUWeightを100にしてsessionと同じ重みで分け合う。
+`agents-deep.slice`は待つ者のいない検証（全量回帰、分析、`dotfiles-workload-run`）で、`CPUWeight=idle`により、他が使わないCPUだけを使う。
+どちらもmemoryの上限を持たず、`agents.slice`の上限の内側に置かれる。名前は`dotfiles.workstation.workload.classSlices`、宣言は[`agents/module.nix`](../../agents/module.nix)が持つ。
+
 追加の8 GiB swap fileは`/var/lib/dotfiles-agent-swap/reserve.swap`へ事前確保する。
 資源管理モジュールの専用serviceがこのパスを参照し、未確保のhostでは起動を省略する。
 起動時の専用serviceは利用中なら何も行わず、既存領域の初期化・解放を行わない。

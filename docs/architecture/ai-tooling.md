@@ -192,6 +192,8 @@ Nixの入口は同じfileの`frontend: "nix"`と`entries`から解決し、入�
 Nixの取得と評価は検査本体の実行時にだけ行い、その時間も残りの予算で止める。
 wrapperは固定の予算値を持たない。
 T1の入口を認識したrepositoryで宣言が無い、または不正なら、既定値も無制限も補わず、入口を実行せず証跡も作らずに終了status 78で失敗する。
+同じsnapshotでT2の入口があるのに`verify-push`の予算を読めなければ、pushがpre-pushに拒否されることをstderrで知らせ、T1は止めない。
+T2の予算はpushの時だけ要るため、pushと関係の無い作業を止めず、宣言の欠けをpushの時より前の作業の終わりに表へ出す。
 入口が無いrepository、入口の綴りに一致しないlocal command、根以外での実行は、commandを直接実行してそのstatusとstdioを返し、証跡を作らない。
 宣言を読めないrepositoryでは評価器を起動せず、`--candidates`が評価を要しない置き場とflake.nixから集めた入口になり得る綴りだけで判別する。
 その綴りと一致する根での呼び出しは実行せずに拒否し、一致しないlocal commandは直接実行する。

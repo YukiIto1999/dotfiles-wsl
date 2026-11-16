@@ -165,6 +165,7 @@ if names_entry "$*" \
     printf 'verify: T1 の時間予算を入口解決で使い切った\n' >&2
     exit 124
   fi
+  run_bounded @gate@ push-declaration --repo "$top" --policy "$policy_file" || true
   receipt=${EPOCHREALTIME/[.,]/}.$$
   witness=
   published=

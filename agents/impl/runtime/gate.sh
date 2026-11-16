@@ -23,7 +23,9 @@ usage: dotfiles-agent-gate <command> [options]
   entry [--repo DIR] [--policy FILE]      repository が登録する検証入口の綴りを評価器を起動せずに答える
   candidates [--repo DIR]               予算が読めない間に、検証入口になり得る綴りを評価せずに一行ずつ答える
   budget [--repo DIR] [--policy FILE]     その repository の T1 の時間予算を秒で答える。宣言が無い、または不正なら理由を出して 1 で終わる
-  snapshot [--repo DIR]                 一度読んだ静的な検証宣言を JSON で答える。entry と budget の --policy に渡す
+  snapshot [--repo DIR]                 一度読んだ静的な検証宣言を JSON で答える。entry、budget、push-declaration の --policy に渡す
+  push-declaration [--repo DIR] [--policy FILE]
+                                        T2 の入口があるのに予算を読めない宣言を、push で拒否されると stderr で知らせる。常に 0 で終わる
   hook <arm|observe|stop>               client の hook から stdin の JSON で起こす
 USAGE
   exit 64
@@ -333,6 +335,21 @@ budget_of() {
 
 snapshot_of() {
   "@verificationEntry@" --repo "$1" --snapshot verify
+}
+
+# push の時に初めて拒否される T2 の宣言の欠けを作業の終わりに知らせる
+# T2 の予算は push の時だけ要るため push と関係の無い T1 を止める失敗扱いは不可
+command_push_declaration() {
+  local top entry problem
+  top=$(repo_top_of "$1") || return 0
+  if ! entry=$("@verificationEntry@" --repo "$top" "${policy_args[@]}" verify-push 2>&1); then
+    printf 'verify: T2 の入口を解決できないため、push は pre-push に拒否される\n%s\n' "$entry" >&2
+    return 0
+  fi
+  [ -n "$entry" ] || return 0
+  if ! problem=$("@verificationEntry@" --repo "$top" "${policy_args[@]}" --budget verify-push 2>&1 >/dev/null); then
+    printf 'verify: T2 の入口 %s の時間予算を読めないため、push は pre-push に拒否される\n%s\n' "$entry" "$problem" >&2
+  fi
 }
 
 state_dir_of() {
@@ -873,7 +890,8 @@ main() {
     *) usage ;;
     esac
   done
-  if [ "${#policy_args[@]}" -gt 0 ] && [ "$command" != entry ] && [ "$command" != budget ]; then
+  if [ "${#policy_args[@]}" -gt 0 ] && [ "$command" != entry ] && [ "$command" != budget ] \
+    && [ "$command" != push-declaration ]; then
     usage
   fi
 
@@ -889,6 +907,7 @@ main() {
   candidates) candidates_of "$(repo_top_of "$repo")" ;;
   budget) budget_of "$repo" ;;
   snapshot) snapshot_of "$repo" ;;
+  push-declaration) command_push_declaration "$repo" ;;
   hook) command_hook "${1-}" ;;
   *) usage ;;
   esac

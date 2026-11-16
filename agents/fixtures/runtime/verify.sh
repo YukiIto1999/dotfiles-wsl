@@ -1332,6 +1332,25 @@ printf 'scripts.verify-push.exec = "true";\nscripts.verify-full.exec = "true";\n
 test -z "$("$GATE" entry --repo "$gate_repo")"
 "$GATE" check --repo "$gate_repo" >/dev/null
 
+# T2 の予算の欠けは push の時に初めて拒否されるので、作業の終わりの T1 で知らせる。push と関係の無い T1 は止めない
+push_declared=$fixture/push-declared
+t1_repository "$push_declared" 60
+printf 'scripts.verify-push.exec = "true";\n' >>"$push_declared/devenv.nix"
+git -C "$push_declared" -c user.name=fixture -c user.email=fixture@example.invalid commit -qam 'test: T2 の入口の追加'
+(cd "$push_declared" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify) 2>"$fixture/push-declared-stderr"
+expect_open_gate "$push_declared" 'T1 in a repository whose T2 budget is undeclared'
+if ! grep -qF 'push は pre-push に拒否される' "$fixture/push-declared-stderr"; then
+  echo 'T1 did not warn that the push will be refused for the undeclared T2 budget' >&2
+  exit 1
+fi
+printf '{"version":1,"verify":{"seconds":60},"verify-push":{"seconds":60}}\n' >"$push_declared/tiergate.json"
+git -C "$push_declared" -c user.name=fixture -c user.email=fixture@example.invalid commit -qam 'test: T2 の予算の追加'
+(cd "$push_declared" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify) 2>"$fixture/push-declared-stderr"
+if grep -qF 'push は pre-push に拒否される' "$fixture/push-declared-stderr"; then
+  echo 'T1 warned about a T2 declaration that the push accepts' >&2
+  exit 1
+fi
+
 # 未追跡の綴りが増えた木も、通した木とは別物として扱う。
 printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
 git -C "$gate_repo" checkout -q -- tracked

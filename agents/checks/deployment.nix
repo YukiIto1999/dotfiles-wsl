@@ -1,4 +1,38 @@
 {
+  pkgs,
+  self,
+  ...
+}:
+{
+  # 旧 path と旧 runtime identity は新しい file にも残りうるため、checkout 全体を読む。
+  # 契約検査の本体と分け、この走査だけが他の file の変更で再実行される
+  source = [
+    {
+      agent-source-layout =
+        pkgs.runCommandLocal "check-agent-source-layout" { nativeBuildInputs = [ pkgs.ripgrep ]; }
+          ''
+            set -euo pipefail
+
+            test ! -e ${self}/clis
+            legacy_root=clis
+            legacy_role=cli
+            legacy_option=m
+            legacy_option+='y\.'
+            legacy_pattern="$legacy_option''${legacy_root}|dotfiles-install-''${legacy_root}|dotfiles-''${legacy_role}-autoupdate|''${legacy_root}/assets|''${legacy_root}/(antigravity|claude|codex|omp|opencode)"
+            if rg -n "$legacy_pattern" ${self}; then
+              echo "legacy clis path or runtime identity remains" >&2
+              exit 1
+            fi
+            test ! -e ${self}/agents/shared
+            test -f ${self}/agents/policy/AGENTS.md
+            test -f ${self}/agents/subagents/routing.nix
+            for client in antigravity claude codex omp opencode; do
+              test -f "${self}/agents/clients/$client/module.nix"
+            done
+            touch $out
+          '';
+    }
+  ];
   configuration = [
     (
       {
@@ -15,6 +49,16 @@
         ...
       }:
       let
+        root = /. + builtins.unsafeDiscardStringContext (toString self);
+        # 読む file だけを入力にし、他の file の変更では再実行しない
+        agentModuleSource = lib.fileset.toSource {
+          inherit root;
+          fileset = root + "/agents/module.nix";
+        };
+        codexSeedSource = lib.fileset.toSource {
+          inherit root;
+          fileset = root + "/agents/clients/codex/assets/config.toml";
+        };
         agentConfig = hostConfig.dotfiles.agents;
         inherit (agentConfig) clients;
         variantClients = variantConfig.dotfiles.agents.clients;
@@ -566,7 +610,7 @@
               set -euo pipefail
 
               if rg -n 'clientName[[:space:]]*==[[:space:]]*"codex"|clients\.codex|migrateCodexConfig' \
-                ${self}/agents/module.nix; then
+                ${agentModuleSource}/agents/module.nix; then
                 echo "root agent module contains a Codex-specific branch" >&2
                 exit 1
               fi
@@ -720,9 +764,9 @@
               ' codex-system.json > /dev/null
               remarshal -if toml -of json \
                 ${clients.codex.managedFiles.user.source} > codex-user-seed.json
-              grep -Fq '"@homeDir@/workspace"' ${self}/agents/clients/codex/assets/config.toml
-              grep -Fq '"@homeDir@/projects"' ${self}/agents/clients/codex/assets/config.toml
-              if rg -n '/home/nixos/(workspace|projects)' ${self}/agents/clients/codex/assets/config.toml; then
+              grep -Fq '"@homeDir@/workspace"' ${codexSeedSource}/agents/clients/codex/assets/config.toml
+              grep -Fq '"@homeDir@/projects"' ${codexSeedSource}/agents/clients/codex/assets/config.toml
+              if rg -n '/home/nixos/(workspace|projects)' ${codexSeedSource}/agents/clients/codex/assets/config.toml; then
                 echo "Codex seed hard-codes the host home directory" >&2
                 exit 1
               fi
@@ -1010,22 +1054,6 @@
               ${fixtureSeedActivation}
               test -s "$fixture/home/.claude/settings.json"
 
-              test ! -e ${self}/clis
-              legacy_root=clis
-              legacy_role=cli
-              legacy_option=m
-              legacy_option+='y\.'
-              legacy_pattern="$legacy_option''${legacy_root}|dotfiles-install-''${legacy_root}|dotfiles-''${legacy_role}-autoupdate|''${legacy_root}/assets|''${legacy_root}/(antigravity|claude|codex|omp|opencode)"
-              if rg -n "$legacy_pattern" ${self}; then
-                echo "legacy clis path or runtime identity remains" >&2
-                exit 1
-              fi
-              test ! -e ${self}/agents/shared
-              test -f ${self}/agents/policy/AGENTS.md
-              test -f ${self}/agents/subagents/routing.nix
-              for client in antigravity claude codex omp opencode; do
-                test -f "${self}/agents/clients/$client/module.nix"
-              done
               touch $out
             '';
 

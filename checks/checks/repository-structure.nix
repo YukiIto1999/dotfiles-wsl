@@ -70,6 +70,21 @@ let
     "sops"
   ];
 
+  # 各検査が読む範囲だけを入力にし、範囲外の file の変更では再実行しない
+  root = /. + builtins.unsafeDiscardStringContext (toString self);
+  nixSource = lib.fileset.toSource {
+    inherit root;
+    fileset = lib.fileset.fileFilter (file: file.hasExt "nix") root;
+  };
+  capabilityNixSource = lib.fileset.toSource {
+    inherit root;
+    fileset = lib.fileset.fileFilter (file: file.hasExt "nix") (root + "/capabilities");
+  };
+  moduleMarkerSource = lib.fileset.toSource {
+    inherit root;
+    fileset = lib.fileset.fileFilter (file: file.name == "module.nix") root;
+  };
+
 in
 {
   configuration = [
@@ -215,7 +230,7 @@ in
                 exit 1
               fi
               capability_reverse_pattern='dotfiles\.(agents|skills)|(\.\./)+(agents|skills)(/|"|$)'
-              if rg -n --glob '*.nix' "$capability_reverse_pattern" ${self}/capabilities; then
+              if rg -n --glob '*.nix' "$capability_reverse_pattern" ${capabilityNixSource}/capabilities; then
                 echo "Capability implementation depends on an Agent or Skill owner" >&2
                 exit 1
               fi
@@ -329,9 +344,9 @@ in
               set -euo pipefail
 
               printf '%s\n' ${lib.escapeShellArgs (map (unit: unit.id) units)} | sort > actual
-              find ${self} -type f -name module.nix -printf '%h\n' \
+              find ${moduleMarkerSource} -type f -name module.nix -printf '%h\n' \
                 | while IFS= read -r directory; do
-                  printf '%s\n' "''${directory#${self}/}"
+                  printf '%s\n' "''${directory#${moduleMarkerSource}/}"
                 done \
                 | sort > expected
 
@@ -960,7 +975,7 @@ in
             globalArgumentPath+='\.args'
             violations=$(rg -n --glob '*.nix' \
               "(^|[^A-Za-z0-9_])$legacyOptionPrefix|$globalArgumentPath" \
-              ${self} || true)
+              ${nixSource} || true)
             if [ -n "$violations" ]; then
               printf '%s\n' "$violations" >&2
               exit 1

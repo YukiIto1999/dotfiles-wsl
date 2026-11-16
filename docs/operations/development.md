@@ -91,8 +91,11 @@ workflow の検査は設定を含む `.github/` だけを Nix の source 入力�
 Nix の静的検査と整形検査は全 `.nix` file を入力とし、`statix` だけが追加で `statix.toml` を読むため、文書や他言語の変更では成功した derivation を再利用する。
 Git hook の振る舞い検査も対応する hook の file を入力とし、無関係な checkout の変更では再実行しない。
 SonarQube scannerは実行script単体をstore入力にし、無関係なREADMEの変更ではpackageを作り直さない。
+unit境界、option namespace、責務rootの検査は読む範囲の`.nix` fileだけを、unit moduleの検査は`module.nix`だけを、読み手の明示の検査は`docs/`の分類別の文書だけを、SOPSの検査は暗号文とrecipientの宣言だけを入力とする。
+Agentの契約検査は読むfileだけを入力とし、旧pathの残存はcheckout全体を読む別の検査が受け持つ。
 ShellCheckはcheckoutと生成済みwrapperの対象を集めて検査し、最初のfileの指摘だけで止めずに複数fileの診断を返す。
 checkoutの対象は一つのprocessで先頭の2 byteを読み取って列挙し、fileごとのshell起動を行わない。
+shebangの判定、linkの到達、表示したpathの実在はcheckout全体を読まないと確かめられないため、ShellCheck、`docs-links`、`docs-path-labels`は入力を狭めない。
 評価器のBoehm GCの初期heapは4GiBとし、`GC_INITIAL_HEAP_SIZE`を設定済みの場合は上書きしない。
 初期heapの値は実RSSの上限ではなく、評価器のメモリの必要量は実行条件とともに測る。
 契約検査用のvariantは`mkProbeSystem`で構成し、検査対象と独立したNixOSのmanualとHome Managerのmanpageを生成しない。

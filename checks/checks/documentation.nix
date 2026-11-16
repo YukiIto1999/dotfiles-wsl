@@ -1,16 +1,32 @@
 {
   pkgs,
+  lib,
   self,
   ...
 }:
+let
+  root = /. + builtins.unsafeDiscardStringContext (toString self);
+  # docs/README.md など読み手の明示を求めない文書の変更で再実行しない
+  readerDocKinds = [
+    "operations"
+    "reference"
+    "architecture"
+  ];
+  readerDocSource = lib.fileset.toSource {
+    inherit root;
+    fileset = lib.fileset.unions (
+      map (kind: lib.fileset.fileFilter (file: file.hasExt "md") (root + "/docs/${kind}")) readerDocKinds
+    );
+  };
+in
 {
   source = [
     {
       docs-reader = pkgs.runCommandLocal "check-docs-reader" { } ''
         set -euo pipefail
         missing=""
-        for kind in operations reference architecture; do
-          for doc in ${self}/docs/$kind/*.md; do
+        for kind in ${lib.escapeShellArgs readerDocKinds}; do
+          for doc in ${readerDocSource}/docs/$kind/*.md; do
             grep -q '^\*\*読み手:\*\*' "$doc" || missing="$missing $doc"
           done
         done

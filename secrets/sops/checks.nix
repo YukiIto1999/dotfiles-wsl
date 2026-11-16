@@ -12,8 +12,18 @@
         ...
       }:
       let
-        sopsFile = "${self}/secrets/sops/assets/secrets.json";
-        sopsConfigFile = "${self}/secrets/sops/assets/.sops.yaml";
+        root = /. + builtins.unsafeDiscardStringContext (toString self);
+        sopsAssets = root + "/secrets/sops/assets";
+        # 検査が読む暗号文と recipient 宣言だけを入力にし、他の file の変更では再実行しない
+        sopsSource = lib.fileset.toSource {
+          inherit root;
+          fileset = lib.fileset.unions [
+            (sopsAssets + "/secrets.json")
+            (sopsAssets + "/.sops.yaml")
+          ];
+        };
+        sopsFile = "${sopsSource}/secrets/sops/assets/secrets.json";
+        sopsConfigFile = "${sopsSource}/secrets/sops/assets/.sops.yaml";
         templates = hostConfig.sops.templates;
         inHome = template: lib.hasPrefix hostConfig.dotfiles.workstation.homeDir template.path;
         wrongTemplatesFor =
@@ -184,7 +194,7 @@
       {
         # 鍵は root だけが読み、recipient は宣言と暗号文の両方で一致する
         sops-policy =
-          assert toString hostConfig.sops.defaultSopsFile == sopsFile;
+          assert toString hostConfig.sops.defaultSopsFile == toString (sopsAssets + "/secrets.json");
           assert hostConfig.sops.age.keyFile == "/var/lib/sops-nix/key.txt";
           assert !hostConfig.sops.age.generateKey;
           assert hostConfig.systemd.tmpfiles.settings."sops-key"."/var/lib/sops-nix/key.txt".z.mode == "0400";

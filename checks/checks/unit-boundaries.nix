@@ -5,6 +5,13 @@
   units,
   ...
 }:
+let
+  root = /. + builtins.unsafeDiscardStringContext (toString self);
+  nixSource = lib.fileset.toSource {
+    inherit root;
+    fileset = lib.fileset.fileFilter (file: file.hasExt "nix") root;
+  };
+in
 {
   source = [
     (
@@ -142,7 +149,7 @@
               # comment や string の断片ではなく、reader と operand を Nix AST から取る。
               # operand が path literal でなければ、source ごとの許可件数と照合する
               (
-                cd ${self}
+                cd ${nixSource}
                 ast-grep run --lang nix --json=compact -p '$F $P' . --globs '*.nix' > "$workDir/applications.json"
                 ast-grep run --lang nix --json=compact -p 'let $A = $V; in {}' \
                   --selector binding . --globs '*.nix' > "$workDir/bindings.json"
@@ -236,14 +243,14 @@
                 violations="$violations reader-alias-binding=$readerAliasCount"
               fi
               for allowed in ${lib.escapeShellArgs (builtins.attrNames allowedPureHelperImports)}; do
-                [ -f "${self}/$allowed" ] || violations="$violations missing-allowlisted-source:$allowed"
+                [ -f "${nixSource}/$allowed" ] || violations="$violations missing-allowlisted-source:$allowed"
               done
               for approved in ${lib.escapeShellArgs (builtins.attrNames approvedExplicitHelperImports)}; do
-                [ -f "${self}/$approved" ] || violations="$violations missing-approved-helper-consumer:$approved"
+                [ -f "${nixSource}/$approved" ] || violations="$violations missing-approved-helper-consumer:$approved"
               done
 
               while IFS= read -r file; do
-                relative=''${file#${self}/}
+                relative=''${file#${nixSource}/}
                 [ "$relative" = "checks/checks/unit-boundaries.nix" ] && continue
                 owner=''${relative%%/*}
                 allowedTarget=""
@@ -371,14 +378,14 @@
                   [ "$target" = "$owner" ] && continue
                   for root in $roots; do
                     [ "$target" = "$root" ] || continue
-                    violations="$violations ''${file#${self}/}->$target"
+                    violations="$violations ''${file#${nixSource}/}->$target"
                   done
                 done < <(
                   printf '%s\n' "$source" \
                     | grep -ohE 'self \+ "/[a-z0-9-]+/|\$\{self\}/[a-z0-9-]+/|\.\./[a-z0-9-]+/' \
                     | sed -E 's|^self \+ "/||; s|^\$\{self\}/||; s|^\.\./||' || true
                 )
-              done < <(find ${self} -name '*.nix' -not -path '*/.git/*')
+              done < <(find ${nixSource} -name '*.nix' -not -path '*/.git/*')
 
               if [ -n "$violations" ]; then
                 echo "unit reads another unit through a path instead of a contract:$violations" >&2

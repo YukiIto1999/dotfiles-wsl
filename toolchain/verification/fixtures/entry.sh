@@ -114,6 +114,16 @@ expect "$make" verify-full 'devenv shell -- verify-full'
 mkdir -p "$make/nested"
 expect "$make/nested" verify-full 'devenv shell -- verify-full'
 
+# devenv を宣言した repository の package.json と Makefile の入口は、呼び出し側の環境に依存させず devenv の中で走らせる
+wrapped=$(new_repo wrapped)
+printf '{ }\n' >"$wrapped/devenv.nix"
+printf '{"scripts":{"verify":"true"}}\n' >"$wrapped/package.json"
+printf 'verify-push:\n\ttrue\n' >"$wrapped/Makefile"
+expect "$wrapped" verify 'devenv shell -- npm run verify'
+expect "$wrapped" verify-push 'devenv shell -- make verify-push'
+: >"$wrapped/pnpm-lock.yaml"
+expect "$wrapped" verify 'devenv shell -- pnpm verify'
+
 # git の木の外では何も答えない
 mkdir outside
 printf 'verify-full:\n\ttrue\n' >outside/Makefile

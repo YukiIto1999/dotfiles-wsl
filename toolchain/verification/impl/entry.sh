@@ -64,7 +64,7 @@ policy_of() {
 
 
 static_entry_of() {
-  local repo=$1 name=$2 script
+  local repo=$1 name=$2 script entry=
   if [ -f "$repo/devenv.nix" ] && grep -qE "scripts\\.${name}([^A-Za-z0-9_'-]|\$)" "$repo/devenv.nix"; then
     printf 'devenv shell -- %s' "$name"
     return 0
@@ -73,14 +73,19 @@ static_entry_of() {
   if [ -f "$repo/package.json" ] \
     && jq -e --arg script "$script" '.scripts[$script]' "$repo/package.json" >/dev/null 2>&1; then
     if [ -f "$repo/pnpm-lock.yaml" ]; then
-      printf 'pnpm %s' "$script"
+      entry="pnpm $script"
     else
-      printf 'npm run %s' "$script"
+      entry="npm run $script"
     fi
-    return 0
+  elif [ -f "$repo/Makefile" ] && grep -qE "^${name}[[:space:]]*:" "$repo/Makefile"; then
+    entry="make $name"
   fi
-  if [ -f "$repo/Makefile" ] && grep -qE "^${name}[[:space:]]*:" "$repo/Makefile"; then
-    printf 'make %s' "$name"
+  [ -n "$entry" ] || return 0
+  # devenv の環境を前提にする入口が push や別 session の呼び出し側の環境で失敗するため devenv 外での実行は不可
+  if [ -f "$repo/devenv.nix" ]; then
+    printf 'devenv shell -- %s' "$entry"
+  else
+    printf '%s' "$entry"
   fi
 }
 

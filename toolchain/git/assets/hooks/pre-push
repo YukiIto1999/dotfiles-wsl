@@ -138,15 +138,16 @@ require_run_success() {
     printf 'verify-push: %sを中断した(経過 %s)\n' "$phase" "$(duration "$elapsed")" >&2
     exit 130
   fi
-  if [ -n "$budget_seconds" ] && [ "$elapsed" -ge "$budget_seconds" ]; then
-    printf 'verify-push: %sが予算 %s を超えたため止めた(経過 %s)。必要な検査は減らさず、重複実行、影響範囲の過剰な拡大、起動と build の固定費を見直して実行計画を作り直す\n' \
-      "$phase" "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
-    exit 1
-  fi
+  # 入場できず未実行の走行は待ちの秒の丸めで経過が予算に届くため予算超過の判定を先に置くことは不可
   if [ "$status" -eq 75 ]; then
     printf 'verify-push: 資源の空きを待つ上限(予算と同じ %s)に達し、%sを実行しなかった(終了 75)。空いてから push し直す\n' \
       "$(duration "$budget_seconds")" "$phase" >&2
     exit 75
+  fi
+  if [ -n "$budget_seconds" ] && [ "$elapsed" -ge "$budget_seconds" ]; then
+    printf 'verify-push: %sが予算 %s を超えたため止めた(経過 %s)。必要な検査は減らさず、重複実行、影響範囲の過剰な拡大、起動と build の固定費を見直して実行計画を作り直す\n' \
+      "$phase" "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
+    exit 1
   fi
   if [ "$status" -ne 0 ]; then
     printf 'verify-push: %sに失敗した(終了 %d、経過 %s)\n' "$phase" "$status" "$(duration "$elapsed")" >&2

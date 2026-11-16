@@ -440,7 +440,8 @@ test "$(remote_ref "$linked_main" refs/heads/linked)" = "$(git -C "$PWD/linked" 
 
 resource_wait=$(new_repo resource-wait)
 printf 'verify-push:\n\tpwd >"$(MARKER)"\n' >"$resource_wait/Makefile"
-set_budget "$resource_wait" 1
+# 秒単位の経過で数える予算は 1 秒だと入口の解決だけで尽き得るため待ちの上限の検査に 1 秒は不可
+set_budget "$resource_wait" 5
 git -C "$resource_wait" add Makefile
 git -C "$resource_wait" commit -q -m 'test: 資源待機の検査の追加'
 rm -f "$MARKER"

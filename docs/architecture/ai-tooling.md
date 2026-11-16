@@ -343,6 +343,10 @@ Playwright、Chrome DevTools、memlabのsession frontはagentgateway内の`lazy_
 最初のtool呼出しでsession専用serverを一度だけ起動し、initializeと通知を再送して、既に返したdiscoveryとの一致を確かめる。不一致は呼出しを失敗にし、記憶を無効化してlist変更を通知する。toolの結果やheap、tabをsession間で共有しない。起動済みのserverをidleという理由だけで破棄する変更ではなく、未起動sessionのDELETEや期限切れにも子processを作らない。
 
 [`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
+gatewayのrouteは`backendRequestTimeout`を60秒にする。
+指定が無いとagentgatewayはupstreamの応答headerを10秒で打ち切り、待機を含むbrowser操作が`upstream call timeout`で失敗する。
+打ち切られた呼出しもbrowserの中では処理が続くため、失敗を見たagentが同じ操作を重ねて実行する。
+60秒は、応答の無いfrontを待つ上限でもある。
 
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
 `browser-diagnostics`のSkill入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`である。

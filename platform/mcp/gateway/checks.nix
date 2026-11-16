@@ -632,6 +632,7 @@
             test "$(yq -r '.binds[0].listeners | length' ${gateway.source})" = 1
             test "$(yq -r '.binds[0].listeners[0].routes[0].backends | length' ${gateway.source})" = 1
             test "$(yq -r '.binds[0].listeners[0].routes[0].backends[0].mcp.failureMode' ${gateway.source})" = failOpen
+            test "$(yq -r '.binds[0].listeners[0].routes[0].policies.timeout.backendRequestTimeout' ${gateway.source})" = 60s
             touch $out
           '';
 

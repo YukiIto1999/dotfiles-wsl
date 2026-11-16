@@ -30,6 +30,9 @@ let
           {
             routes = [
               {
+                # 指定が無いと gateway は upstream の応答 header を 10 秒で打ち切る。待機を含む browser 操作は
+                # それより長く、打ち切られても browser の中では処理が続く。この値は応答の無い front を待つ上限になる
+                policies.timeout.backendRequestTimeout = "60s";
                 backends = [
                   {
                     mcp.failureMode = "failOpen";

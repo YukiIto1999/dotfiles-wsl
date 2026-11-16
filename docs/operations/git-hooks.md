@@ -40,7 +40,7 @@ repositoryは検証の段ごとに入口を宣言する。
 |---|---|---|
 | T1 | `verify` | agent が作業を終える前の門(`dotfiles-agent-gate`) |
 | T2 | `verify-push` | push の前の pre-push |
-| T3 | `verify-full` | project が選んだ契機。commit と push を止めない |
+| T3 | `verify-full` | project が選んだ契機。commit と push を止めない。remote ができるまでは、段階の終わりと共有の道具の release の前に手動で起動し、結果を取込先へ戻す。remote を作るときに branch の戦略と統合の時の検証を一体で設計し、この手動の扱いを外す |
 
 共有resolverはrepositoryの正本を呼ぶ文字列と、宣言した段の予算を返し、検査の定義やcacheを別に持たない。
 Nixを正本にするrepositoryは、根の`tiergate.json`に`frontend: "nix"`と段名の配列`entries`を登録する。

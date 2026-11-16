@@ -56,7 +56,8 @@ source_fingerprint() {
   head=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || printf 'none')
   {
     printf 'dotfiles-agent-gate-v3\0head\0%s\0tracked\0' "$head"
-    git -C "$repo" -c color.ui=false diff --binary --full-index --no-ext-diff --no-textconv HEAD --
+    # porcelain の git diff は --no-optional-locks でも index を書き直して index.lock を取り hook の SIGKILL で lock を残すため不可
+    git -C "$repo" -c color.ui=false diff-index -p --binary --full-index --no-ext-diff --no-textconv HEAD --
     printf '\0untracked\0'
     while IFS= read -r -d '' path; do
       printf 'path\0%s\0' "$path"
@@ -283,7 +284,8 @@ source_witness() {
   head=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null) || return 1
   git -C "$repo" ls-files --stage -z >"$dir/tracked" || return 1
   write_tracked_witness "$repo" "$dir/tracked" "" >"$dir/tracked-witness" || return 1
-  git -C "$repo" -c color.ui=false diff \
+  # porcelain の git diff は --no-optional-locks でも index を書き直して index.lock を取り hook の SIGKILL で lock を残すため不可
+  git -C "$repo" -c color.ui=false diff-index -p \
     --binary --full-index --no-ext-diff --no-textconv HEAD -- >"$dir/tracked-diff" || return 1
   git -C "$repo" ls-files --others --exclude-standard -z >"$dir/untracked" || return 1
   write_untracked_guard "$repo" "$dir/untracked" >"$dir/untracked-guard" || return 1

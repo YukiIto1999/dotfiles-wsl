@@ -1351,6 +1351,22 @@ if grep -qF 'push は pre-push に拒否される' "$fixture/push-declared-stder
   exit 1
 fi
 
+# 門と T1 の照合は観察だけなので、作業木の stat が index と違っても index を書き直さない。
+# 書き直しは index.lock を取り、hook の期限の SIGKILL で lock が残ると、その repository の commit を止める。
+lock_repo=$fixture/lock-repo
+t1_repository "$lock_repo" 60
+printf 'held\n' >"$lock_repo/tracked"
+git -C "$lock_repo" add tracked
+git -C "$lock_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm 'test: 追跡する file の追加'
+touch -d '2000-01-01 00:00' "$lock_repo/tracked"
+index_before=$(stat -c '%i %y' "$lock_repo/.git/index")
+"$GATE" check --repo "$lock_repo" >/dev/null 2>&1 || true
+(cd "$lock_repo" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+if [ "$(stat -c '%i %y' "$lock_repo/.git/index")" != "$index_before" ]; then
+  echo 'the gate rewrote the index of a repository it only observes' >&2
+  exit 1
+fi
+
 # 未追跡の綴りが増えた木も、通した木とは別物として扱う。
 printf 'scripts.verify.exec = "true";\n' >"$gate_repo/devenv.nix"
 git -C "$gate_repo" checkout -q -- tracked

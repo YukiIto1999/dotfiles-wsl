@@ -13,6 +13,10 @@ import sys
 import uuid
 
 LEASE_ENV = "DOTFILES_WORKLOAD_LEASE"
+# 計測と規則が区別する走行の種類。受入は待つ者のいる検証、deepは待つ者のいない検証
+CLASSES = ("acceptance", "deep")
+# 一走行の計測へ残す待機理由の最大の件数
+MAXIMUM_REASONS = 8
 
 
 class AdmissionError(Exception):
@@ -129,6 +133,9 @@ class Reservation:
         self.percent = self.policy["memoryPercent"]
         if type(self.percent) is not int or not 1 <= self.percent <= 100:
             raise AdmissionError("memoryPercent must be an integer from 1 to 100")
+        self.klass = self.policy["class"]
+        if self.klass not in CLASSES:
+            raise AdmissionError(f"class must be one of {', '.join(CLASSES)}")
         self.explicit = positive(memory_bytes, "memory request") if memory_bytes is not None else None
         self.recorded = recorded_bytes
         self.memory = self.explicit
@@ -139,6 +146,8 @@ class Reservation:
         self.inherited = False
         self.entry = None
         self.previous_reason = None
+        # 待機した理由を最初に現れた順に重複なく残す。計測の一行へ渡す
+        self.reasons = []
 
     def settle_memory(self, value):
         """観測した上限での物理memory需要の確定
@@ -353,6 +362,8 @@ class Reservation:
                     supervisor.record("waiting", spawned=False, reason=reason, deadline=deadline)
                     print(f"dotfiles-supervise: waiting for resources: {reason}", file=sys.stderr, flush=True)
                     self.previous_reason = reason
+                    if reason is not None and reason not in self.reasons and len(self.reasons) < MAXIMUM_REASONS:
+                        self.reasons.append(reason)
                 supervisor.wait_for_event(min(0.5, max(0, deadline - time.time())))
             return False
         finally:

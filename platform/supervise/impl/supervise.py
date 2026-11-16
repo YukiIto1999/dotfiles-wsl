@@ -49,6 +49,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from admission import AdmissionError, LEASE_ENV, Reservation, pss_bytes
 from demand import DemandHistory, fingerprint
+from measure import JOURNAL_SOCKET, emit
 
 PR_SET_PDEATHSIG = 1
 PR_SET_CHILD_SUBREAPER = 36
@@ -358,6 +359,10 @@ class Supervisor:
         self.meter = PeakMeter() if options.resource_policy is not None else None
         self.history = None
         self.fingerprint = ""
+        # 計測の一行へ渡す入場の成否と、待機と走行の時間。単調時計で測り、待たなかった走行の待機は0
+        self.admitted = False
+        self.wait_seconds = 0.0
+        self.run_seconds = None
 
     def record(self, phase, **fields):
         path = self.options.result_path
@@ -625,7 +630,12 @@ class Supervisor:
                 self.options.resource_policy, self.options.resource_memory, self.options.resource_cpus,
                 self.recorded_demand(),
             )
-            if not self.reservation.acquire(self, self.options.resource_deadline):
+            waiting_since = time.monotonic()
+            try:
+                self.admitted = self.reservation.acquire(self, self.options.resource_deadline)
+            finally:
+                self.wait_seconds = time.monotonic() - waiting_since
+            if not self.admitted:
                 status = 128 + self.cancel_signal if self.cancel_signal is not None else 124
                 self.record("finished", spawned=False, deferred=True, drained=True,
                             client_status=None, remaining=[], status=status)
@@ -644,6 +654,7 @@ class Supervisor:
         environment = dict(os.environ)
         if self.reservation is not None:
             environment[LEASE_ENV] = str(self.reservation.path)
+        spawned_at = time.monotonic()
         try:
             self.client_pid = os.posix_spawn(
                 command[0],
@@ -661,6 +672,7 @@ class Supervisor:
                         client_status=None, remaining=[], status=status)
             return status
         drained = self.supervise()
+        self.run_seconds = time.monotonic() - spawned_at
         self.drained = drained
         survivors = owned_processes() if not drained else {}
         if not drained:
@@ -684,6 +696,34 @@ class Supervisor:
             hold_until_gone(survivors)
         return status
 
+    def report(self, status):
+        """資源予約を持つ走行一回の計測の journald への送出
+
+        status: この走行が返す終了status
+        戻り値: なし
+        副作用: 資源予約を持つ走行だけが一行を送る。送れない場合はstderrへ一行を出し、終了statusを変えない
+        """
+        reservation = self.reservation
+        if reservation is None:
+            return
+        record = {
+            "event": "workload",
+            "class": reservation.klass,
+            "key": self.options.resource_key,
+            "nested": reservation.inherited,
+            "admitted": self.admitted,
+            "waitSeconds": round(self.wait_seconds, 3),
+            "waitReasons": reservation.reasons,
+            "runSeconds": None if self.run_seconds is None else round(self.run_seconds, 3),
+            "status": status,
+            "peakBytes": self.meter.peak,
+            "reservedBytes": reservation.memory,
+        }
+        try:
+            emit(reservation.policy.get("journalSocket", JOURNAL_SOCKET), record)
+        except OSError as error:
+            diagnose(f"cannot record the measurement in the journal: {error}")
+
 
 def main(arguments):
     try:
@@ -692,14 +732,17 @@ def main(arguments):
         print(f"dotfiles-supervise: {error}", file=sys.stderr)
         return 2
     supervisor = Supervisor(options)
+    status = FAILURE_STATUS
     try:
-        return supervisor.run()
+        status = supervisor.run()
+        return status
     except (OSError, AdmissionError, ValueError, KeyError, TypeError) as error:
         print(f"dotfiles-supervise: {error}", file=sys.stderr)
         return FAILURE_STATUS
     finally:
         if supervisor.reservation is not None:
             supervisor.reservation.close(supervisor.drained)
+        supervisor.report(status)
 
 
 if __name__ == "__main__":

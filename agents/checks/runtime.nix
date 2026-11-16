@@ -100,6 +100,7 @@
         '';
         fixtureResourcePolicy = pkgs.writeText "agent-resource-policy.json" (
           builtins.toJSON {
+            class = "acceptance";
             runtimeDirectory = "/build/agent-workload-leases";
             observation = [ (toString resourceObservation) ];
             memoryPercent = 2;

@@ -304,6 +304,18 @@ toolchain、依存、検証入口の宣言を表し、変わると過去の実�
 測ったピークが予約を超えた走行は、stderrへ`dotfiles-supervise: measured memory peak N bytes exceeded the reservation M bytes`の一行を出し、記録の`exceeded`をtrueにする。`--result`のfinished段階にも`memoryPeakBytes`と`memoryReservedBytes`が入る。
 記録の読み書きの失敗はstderrへ一行を出すだけで、commandの終了statusを変えず、読めない場合は既定値で予約する。
 
+資源予約を持つ走行は、終了のたびに計測の一行をjournaldへ`dotfiles-supervise`の識別子で残す。
+入場の待ちの長さと、走行に要した時間、予約とピークの差を、資源の扱いを変える前後で比べるための記録である。
+
+```sh
+journalctl -t dotfiles-supervise -o cat | jq -c .
+```
+
+MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`と非対話job）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`を持つ。
+`nested`がtrueの行は外側の走行の中の入れ子で、外側とは別の行になるため、待機の集計では除く。
+`admitted`がfalseなら未起動で、124は待機の期限切れである。trueの124は入場後の期限切れである。
+記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。
+
 重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。
 PSIが既存のwarning閾値を下回り、Linux・cgroup・Windowsの余裕が予約需要を満たせば、新規処理は待機から進む。
 稼働中の検証、session、PTYを停止したり、swapを外したりして空きを作らない。継続的に需要が容量を超える場合は、処理のピーク削減または実行先の容量増強が必要であり、予約の導入だけでは解消しない。

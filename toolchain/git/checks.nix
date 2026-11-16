@@ -107,6 +107,7 @@
         '';
         fixtureResourcePolicy = pkgs.writeText "git-resource-policy.json" (
           builtins.toJSON {
+            class = "acceptance";
             runtimeDirectory = "/build/git-workload-leases";
             observation = [ (toString resourceObservation) ];
             memoryPercent = 2;

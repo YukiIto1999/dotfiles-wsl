@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,12 @@ GIB = 1024 ** 3
 DAY = 24 * 60 * 60
 KEY = "verify\n/repository\nmake verify"
 MEMORY_PERCENT = 40
+# How long a test waits for something that must happen before it calls the run hung.  It guards against a hang and decides
+# nothing: what a test asserts about a run never depends on how fast the machine is.
+HANG_SECONDS = 15
+# A deadline that lets a run be judged before it runs out, even on a loaded machine, and the slack the deadline is allowed.
+DEADLINE_SECONDS = 6
+DEADLINE_SLACK = 1
 # Files whose staged content the specification says identifies the toolchain, dependencies and verification entry.
 DECLARED = ("flake.nix", "devenv.nix", "devenv.yaml", "package.json", "pnpm-lock.yaml", "package-lock.json",
             "Cargo.toml", "rust-toolchain", "rust-toolchain.toml", "global.json", "Directory.Build.props",
@@ -67,8 +74,15 @@ class ResourceAdmission(unittest.TestCase):
                 "windowsPhysicalHeadroomBytes": 2 * GIB,
             }}],
         }))
+        # Stands in for journald's native socket; the supervisors' datagrams are read back from it.
+        self.journal = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        self.addCleanup(self.journal.close)
+        self.journal.bind(str(self.root / "journal.sock"))
+        self.journal.setblocking(False)
         self.policy = self.root / "policy.json"
         self.policy.write_text(json.dumps({
+            "class": "acceptance",
+            "journalSocket": str(self.root / "journal.sock"),
             "observation": [sys.executable, "-c", "import pathlib,sys;print(pathlib.Path(sys.argv[1]).read_text())", str(self.snapshot)],
             "runtimeDirectory": str(self.root / "leases"),
             "memoryPercent": MEMORY_PERCENT,
@@ -101,6 +115,17 @@ class ResourceAdmission(unittest.TestCase):
             ["git", "ls-files", "-s", "--", ":(top,glob)*.lock", *DECLARED], cwd=self.repo, env=self.environment(),
             check=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL).stdout
         return hashlib.sha256(listing).hexdigest()
+
+    def measurements(self):
+        """The journal entries the supervisors have sent so far, oldest first, as (fields, message record) pairs."""
+        entries = []
+        while True:
+            try:
+                datagram = self.journal.recv(65536).decode()
+            except BlockingIOError:
+                return entries
+            fields = dict(line.split("=", 1) for line in datagram.splitlines())
+            entries.append((fields, json.loads(fields["MESSAGE"])))
 
     def stop_owned(self):
         """Cancel only supervisors launched by this test and wait for their descendants."""
@@ -138,13 +163,19 @@ class ResourceAdmission(unittest.TestCase):
 
     def wait_for(self, predicate, process):
         """Wait a bounded interval for an observable transition or fail on early exit."""
-        until = time.monotonic() + 4
+        until = time.monotonic() + HANG_SECONDS
         while not predicate():
             if process.poll() is not None:
                 self.fail(f"supervisor exited {process.returncode}: {process.communicate()[1]}")
             if time.monotonic() >= until:
                 self.fail("transition did not occur")
             time.sleep(0.01)
+
+    def waiting(self, name, process):
+        """Wait until the named workload has told its result file that it waits for resources, and return the reason."""
+        result = self.root / (name + ".result")
+        self.wait_for(lambda: result.exists() and json.loads(result.read_text()).get("phase") == "waiting", process)
+        return json.loads(result.read_text())["reason"]
 
     def limit(self, *limits):
         """Observe cgroup memory limits with ample headroom, so that only the demand is under test."""
@@ -483,6 +514,89 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual(result["memoryReservedBytes"], percent_of(MEMORY_PERCENT, 16 * GIB))
         self.assertEqual(len([line for line in error.splitlines() if "cannot read the measured memory demand" in line]), 1)
         self.assertEqual(len([line for line in error.splitlines() if "cannot record the measured memory peak" in line]), 1)
+
+    def test_a_finished_run_sends_one_measurement_line_to_the_journal(self):
+        """One journal entry per run: class, key, wait, run seconds, status, peak and reservation, on a single line."""
+        requested = time.monotonic()
+        process, started, release = self.start("measured", seconds=2 * HANG_SECONDS, arguments=["--resource-key", KEY],
+                                               cwd=self.repo)
+        self.wait_for(started.exists, process)
+        # The command has run for at least this long when it is released.  Sleeping only ever makes that longer.
+        held = 0.2
+        time.sleep(held)
+        release.touch()
+        process.communicate(timeout=HANG_SECONDS)
+        elapsed = time.monotonic() - requested
+        self.assertEqual(process.returncode, 0)
+        result = json.loads((self.root / "measured.result").read_text())
+        entries = self.measurements()
+        self.assertEqual(len(entries), 1)
+        fields, record = entries[0]
+        self.assertEqual(fields["SYSLOG_IDENTIFIER"], "dotfiles-supervise")
+        self.assertNotIn("\n", fields["MESSAGE"])
+        self.assertEqual((record["class"], record["key"], record["nested"], record["admitted"], record["status"]),
+                         ("acceptance", KEY, False, True, 0))
+        self.assertEqual(record["waitReasons"], [])
+        self.assertGreaterEqual(record["waitSeconds"], 0)
+        self.assertGreaterEqual(record["runSeconds"], held)
+        self.assertLessEqual(record["runSeconds"], elapsed)
+        self.assertEqual(record["peakBytes"], result["memoryPeakBytes"])
+        self.assertEqual(record["reservedBytes"], result["memoryReservedBytes"])
+
+    def test_a_run_that_never_started_reports_its_wait_and_reason(self):
+        """A run that gave up while waiting says so: not admitted, no run seconds, the pressure as the reason."""
+        envelope = json.loads(self.snapshot.read_text())
+        envelope["outcomes"][0]["status"] = "warn"
+        self.snapshot.write_text(json.dumps(envelope))
+        process, started, _ = self.start("never-started", seconds=DEADLINE_SECONDS, arguments=["--resource-key", KEY], cwd=self.repo)
+        # It is judged and found not to fit before the deadline runs out, so at least one reason is on record.
+        self.waiting("never-started", process)
+        process.communicate(timeout=HANG_SECONDS)
+        self.assertFalse(started.exists())
+        (_, record), = self.measurements()
+        self.assertEqual((record["status"], record["admitted"], record["runSeconds"]), (124, False, None))
+        # The last observation before the deadline runs out of time and its diagnosis is the final reason; the first is the cause.
+        self.assertEqual(record["waitReasons"][0], "fixture")
+        # The deadline starts before the supervisor's interpreter does, so the wait it measures cannot be longer than the deadline.
+        self.assertGreater(record["waitSeconds"], 0)
+        self.assertLessEqual(record["waitSeconds"], DEADLINE_SECONDS + DEADLINE_SLACK)
+
+    def test_a_refused_run_reports_status_70(self):
+        """A demand above the tightest limit is refused at once and the measurement still says so."""
+        self.limit(4 * GIB, 2 * GIB)
+        process, _, _ = self.start("refused", arguments=["--resource-memory", str(3 * GIB)], cwd=self.repo)
+        process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 70)
+        (_, record), = self.measurements()
+        self.assertEqual((record["status"], record["admitted"]), (70, False))
+
+    def test_a_nested_run_is_reported_as_nested_without_a_wait(self):
+        """The inner supervisor of a nested run reports its own line, marked nested and with no wait."""
+        inner = [sys.executable, str(SOURCE), "--resource-policy", str(self.policy),
+                 "--resource-deadline", str(time.time() + 3), "--", *QUICK]
+        process, _, _ = self.start("nesting", command=inner)
+        process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 0)
+        records = [record for _, record in self.measurements()]
+        self.assertEqual(sorted(record["nested"] for record in records), [False, True])
+        (nested_reasons,) = [record["waitReasons"] for record in records if record["nested"]]
+        # A nested run is not admitted again, so it is never judged and has nothing to wait for.
+        self.assertEqual(nested_reasons, [])
+
+    def test_an_unreachable_journal_costs_one_stderr_line_and_not_the_exit_status(self):
+        """The measurement is evidence for a later comparison and never decides the command's status."""
+        policy = json.loads(self.policy.read_text())
+        policy["journalSocket"] = str(self.root / "no-such-journal.sock")
+        self.policy.write_text(json.dumps(policy))
+        status, error, _ = self.run_command("unreachable", command=exits_with(0))
+        self.assertEqual(status, 0)
+        self.assertEqual(len([line for line in error.splitlines()
+                              if line.startswith("dotfiles-supervise: cannot record the measurement in the journal")]), 1)
+
+    def test_a_run_without_a_reservation_sends_nothing(self):
+        """Only runs that took part in admission are measured."""
+        subprocess.run([sys.executable, str(SOURCE), "--", *QUICK], check=True, env=self.environment())
+        self.assertEqual(self.measurements(), [])
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@ let
     text = ''
       exec ${lib.getExe pkgs.python3} -I -S ${./impl/workload-run.py} \
         ${lib.getExe config.dotfiles.platform.supervise.package} \
-        ${lib.escapeShellArg (toString config.dotfiles.workstation.workload.admissionPolicy)} "$@"
+        ${lib.escapeShellArg (toString config.dotfiles.workstation.workload.deepAdmissionPolicy)} "$@"
     '';
   };
 in

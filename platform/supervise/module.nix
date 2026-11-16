@@ -36,7 +36,8 @@ in
       supervisor自身が`--hold-fd`を終了確認まで保持するので、切り離したholderは作らない。
       supervisor自体を強制終了した場合は、子孫の終了を確認していない。
       `--resource-policy FILE --resource-deadline EPOCH`はhost共通のFIFO予約を取得してからcommandを起動する。
-      policyは観測commandと利用者専用のregistryとmemoryPercentとcpuCountと観測の有効秒数を持つ。
+      policyは走行の種類classと観測commandと利用者専用のregistryとmemoryPercentとcpuCountと観測の有効秒数を持つ。
+      classは待つ者のいる検証のacceptanceか、待つ者のいない検証のdeepで、計測の一行に残るだけで予約の規則は変えない。
       `--resource-memory BYTES`と`--resource-cpus COUNT`は同じpolicy内で当該呼出しの需要を明示する。
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
       上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
@@ -44,6 +45,9 @@ in
       明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
       `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesが加わる。
+      資源予約を持つ走行は、終了のたびに計測の一行をjournaldのnative socket（policyのjournalSocket、既定は`/run/systemd/journal/socket`）へ`SYSLOG_IDENTIFIER=dotfiles-supervise`で送る。
+      MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、走行秒数、終了status、ピークと予約のbyteを持つ。
+      送れない場合はstderrへ一行を出すだけで、commandの終了statusを変えない。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
       子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。
       fingerprintはgit repositoryの根にある依存と検証入口の宣言のindexのsha256で、repositoryでなければ空文字列である。

@@ -17,11 +17,12 @@ let
   inherit (cfg) workload;
   inherit (workload) reservation;
   runtimeDirectory = "/run/dotfiles-workload/${cfg.username}";
-  admissionPolicy =
-    memoryPercent: cpus:
-    pkgs.writeText "dotfiles-workload-policy.json" (
+  # class は走行が待つ者のいる検証か（acceptance）、いない検証か（deep）。計測の一行が持つ
+  workloadPolicy =
+    class: memoryPercent: cpus:
+    pkgs.writeText "dotfiles-workload-policy-${class}.json" (
       builtins.toJSON {
-        inherit runtimeDirectory memoryPercent;
+        inherit class runtimeDirectory memoryPercent;
         observation = [ (lib.getExe workload.observationPackage) ];
         cpuCount = cpus;
         maximumObservationAgeSeconds = 10;
@@ -190,7 +191,13 @@ in
         type = lib.types.path;
         readOnly = true;
         internal = true;
-        description = "同じhostの全検証で共有する資源予約policy。";
+        description = "同じhostの全検証で共有する、待つ者のいる検証（T1とpre-push）の資源予約policy。";
+      };
+      deepAdmissionPolicy = lib.mkOption {
+        type = lib.types.path;
+        readOnly = true;
+        internal = true;
+        description = "同じregistryへ参加する、待つ者のいない検証（dotfiles-workload-run）の資源予約policy。";
       };
       jobAdmissionPolicy = lib.mkOption {
         type = lib.types.path;
@@ -321,8 +328,13 @@ in
     memoryHighPercent = workloadMemoryHighPercent;
     memoryMaxPercent = workloadMemoryMaxPercent;
     observationPackage = workloadObservation;
-    admissionPolicy = admissionPolicy reservation.verificationMemoryPercent reservation.verificationCpus;
-    jobAdmissionPolicy = admissionPolicy reservation.jobMemoryPercent reservation.jobCpus;
+    admissionPolicy =
+      workloadPolicy "acceptance" reservation.verificationMemoryPercent
+        reservation.verificationCpus;
+    deepAdmissionPolicy =
+      workloadPolicy "deep" reservation.verificationMemoryPercent
+        reservation.verificationCpus;
+    jobAdmissionPolicy = workloadPolicy "deep" reservation.jobMemoryPercent reservation.jobCpus;
   };
   config.dotfiles.platform.cli.commands = {
     observeWorkload = workloadObservation;

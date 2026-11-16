@@ -40,22 +40,25 @@ let
 
   # hook は git を呼んだ process の PATH で動く。systemd service など bash を持たない
   # 呼び出し元からも同じ検査を通すため、interpreter と使う command を hook 自身に固定する。
-  mkScript =
-    name: text:
+  # 全 hook が持つ command は最小に保ち、その hook だけが使う command は extraInputs で足す。
+  mkScriptWith =
+    extraInputs: name: text:
     pkgs.writeShellApplication {
       inherit name text;
       runtimeInputs = [
         pkgs.coreutils
         pkgs.git
         pkgs.gnugrep
-      ];
+      ]
+      ++ extraInputs;
     };
+  mkScript = mkScriptWith [ ];
 
   # dotfiles が全 repository に課す検査。ここに無い hook では repository 側だけが走る。
   globalChecks = {
     pre-commit = mkScript "git-global-pre-commit" (builtins.readFile ./assets/hooks/pre-commit);
     commit-msg = mkScript "git-global-commit-msg" (builtins.readFile ./assets/hooks/commit-msg);
-    pre-push = mkScript "git-global-pre-push" (
+    pre-push = mkScriptWith [ pkgs.jq ] "git-global-pre-push" (
       builtins.replaceStrings
         [ "@verificationEntry@" "@runWithin@" ]
         [ (lib.getExe verificationEntry) (lib.getExe verificationPrograms.runWithin) ]

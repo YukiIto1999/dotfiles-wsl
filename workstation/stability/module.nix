@@ -17,7 +17,18 @@ let
   inherit (cfg) workload;
   inherit (workload) reservation;
   runtimeDirectory = "/run/dotfiles-workload/${cfg.username}";
-  # class は走行が待つ者のいる検証か（acceptance）、いない検証か（deep）。計測の一行が持つ
+  # systemd は `a-b.slice` を `a.slice` の子として置く。class の slice の cgroup を user manager の下の相対 path で示す
+  slicePath =
+    unit:
+    let
+      parts = lib.splitString "-" (lib.removeSuffix ".slice" unit);
+    in
+    lib.concatStringsSep "/" (
+      lib.genList (index: "${lib.concatStringsSep "-" (lib.take (index + 1) parts)}.slice") (
+        lib.length parts
+      )
+    );
+  # class は走行が待つ者のいる検証か（acceptance）、いない検証か（deep）。走行ごとの scope は class の slice の下に作る
   workloadPolicy =
     class: memoryPercent:
     pkgs.writeText "dotfiles-workload-policy-${class}.json" (
@@ -25,6 +36,10 @@ let
         inherit class runtimeDirectory memoryPercent;
         observation = [ (lib.getExe workload.observationPackage) ];
         maximumObservationAgeSeconds = 10;
+        systemdRun = [ (lib.getExe' pkgs.systemd "systemd-run") ];
+        systemctl = [ (lib.getExe' pkgs.systemd "systemctl") ];
+        cgroupRoot = "/sys/fs/cgroup";
+        slices = lib.mapAttrs (_: slicePath) workload.classSlices;
       }
     );
   workloadMemoryMaxPercent = 100 - workload.hostReservePercent;

@@ -17,11 +17,23 @@ resource_policy=@resourcePolicy@
 resource_args=()
 # 資源予約の需要を実測の記録から決める鍵。repository の根と入口の command ごとに分ける
 resource_key=
+# 入場の待ちの秒数を supervise が残す --result の file。待ちを T1 の予算から外すために読む
+resource_result=
 
 refresh_remaining() {
   local left=$((budget_seconds * 1000 - (${EPOCHREALTIME/[.,]/} / 1000 - started_ms)))
   [ "$left" -gt 0 ] || return 1
   printf -v remaining '%d.%03d' "$((left / 1000))" "$((left % 1000))"
+}
+
+# 資源の入場に待った秒数を T1 の予算から外す。予算は走行の枠で、待ちは別の上限（予算と同じ秒数）で数える
+# 入力 resource_result: supervise が finished 段階に waitSeconds を残した file
+# 副作用: 予算の起点を待った秒数だけ進める。読めなければ進めない
+settle_wait() {
+  local waited_ms
+  waited_ms=$(jq -r '((.waitSeconds // 0) * 1000) | floor' "$resource_result" 2>/dev/null) || waited_ms=0
+  [[ $waited_ms =~ ^[0-9]+$ ]] || waited_ms=0
+  started_ms=$((started_ms + waited_ms))
 }
 
 bounded_pid=
@@ -120,7 +132,8 @@ fi
 trap 'interrupted=true; [ -z "$bounded_pid" ] || kill -s TERM "$bounded_pid" 2>/dev/null || true' HUP INT TERM XFSZ
 entry_file=$(mktemp)
 policy_file=$(mktemp)
-trap 'rm -f -- "$entry_file" "$policy_file"' EXIT
+resource_result=$(mktemp)
+trap 'rm -f -- "$entry_file" "$policy_file" "$resource_result"' EXIT
 status=0
 if @gate@ snapshot --repo "$top" >"$policy_file" 2>"$entry_file"; then
   if budget=$(@gate@ budget --repo "$top" --policy "$policy_file" 2>&1) && [[ $budget =~ ^[1-9][0-9]*$ ]]; then
@@ -169,13 +182,20 @@ if names_entry "$*" \
     IFS= read -r witness <"$entry_file" || true
     if refresh_remaining; then
       if [ -n "$resource_policy" ]; then
-        deadline_ms=$((started_ms + budget_seconds * 1000))
-        printf -v deadline '%d.%03d' "$((deadline_ms / 1000))" "$((deadline_ms % 1000))"
+        # 待ちの上限は走行の予算と同じ秒数。走行の枠は入場から数えるので、待った秒数は予算に入れない
+        printf -v wait_until '%d' "$((${EPOCHREALTIME%[.,]*} + budget_seconds))"
         printf -v resource_key 'verify\n%s\n%s' "$top" "$*"
-        resource_args=(--resource-policy "$resource_policy" --resource-deadline "$deadline" --resource-key "$resource_key")
+        resource_args=(--resource-policy "$resource_policy" --resource-wait-until "$wait_until"
+          --resource-run-seconds "$remaining" --resource-key "$resource_key" --result "$resource_result")
       fi
       run_bounded "$@" || status=$?
-      resource_args=()
+      if [ -n "$resource_policy" ]; then
+        settle_wait
+        resource_args=()
+        if [ "$status" -eq 75 ]; then
+          printf 'verify: 資源の空きを待つ上限（予算と同じ %s 秒）に達し、検証を実行しなかった(75)。同じ処理を重複投入せず、空いてから投入し直す\n' "$budget_seconds" >&2
+        fi
+      fi
     else
       status=124
     fi
@@ -190,7 +210,7 @@ if names_entry "$*" \
   if [ "$status" -eq 0 ]; then
     [ -z "$witness" ] || published=$(cat "$entry_file")
     if refresh_remaining; then
-      run_bounded rm -f -- "$entry_file" "$policy_file" || status=$?
+      run_bounded rm -f -- "$entry_file" "$policy_file" "$resource_result" || status=$?
       trap - EXIT
     else
       status=124
@@ -211,6 +231,6 @@ if names_entry "$*" \
   fi
   exit 0
 fi
-rm -f -- "$entry_file" "$policy_file"
+rm -f -- "$entry_file" "$policy_file" "$resource_result"
 trap - EXIT
 exec "$@"

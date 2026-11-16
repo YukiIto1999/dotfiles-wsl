@@ -90,7 +90,7 @@
           import json, os, time
           print(json.dumps({
               "schemaVersion": 1,
-              "outcomes": [{"id": "resource/fixture", "status": "warn" if os.environ.get("GIT_RESOURCE_PRESSURE") else "pass", "message": "fixture pressure"}],
+              "outcomes": [{"id": "resource/fixture", "status": os.environ.get("GIT_RESOURCE_PRESSURE", "pass"), "message": "fixture pressure"}],
               "resources": [{"key": "workload", "value": {
                   "observedAt": time.time(),
                   "memoryTotalBytes": 68719476736,
@@ -98,6 +98,7 @@
                   "hostMemoryHeadroomBytes": 68719476736,
                   "memoryHeadroomBytes": 68719476736,
                   "memoryLimits": [],
+                  "memoryScopes": [],
                   "cpuCount": 12,
                   "windowsCommitHeadroomBytes": 68719476736,
                   "windowsPhysicalAvailableBytes": 17179869184,
@@ -105,15 +106,12 @@
               }}]
           }))
         '';
-        fixtureResourcePolicy = pkgs.writeText "git-resource-policy.json" (
-          builtins.toJSON {
-            class = "acceptance";
-            runtimeDirectory = "/build/git-workload-leases";
-            observation = [ (toString resourceObservation) ];
-            memoryPercent = 2;
-            maximumObservationAgeSeconds = 10;
-          }
-        );
+        fixtureResourcePolicy = hostConfig.dotfiles.platform.supervise.package.sandboxPolicy {
+          class = "acceptance";
+          runtimeDirectory = "/build/git-workload-run";
+          cgroupRoot = "/build/git-workload-cgroup";
+          observation = [ (toString resourceObservation) ];
+        };
         resourceHooks = import ./package.nix {
           inherit lib pkgs;
           supervise = hostConfig.dotfiles.platform.supervise.package;

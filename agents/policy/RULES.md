@@ -9,7 +9,7 @@
 
 ### 資源
 
-- 編集中は変更箇所に対応する focused check を使う。高コストな最終確認は `dotfiles-agent-verify -- COMMAND [ARG...]`、それ以外の高コストな処理は `dotfiles-workload-run --seconds N -- COMMAND [ARG...]` から実行する。資源待ちも期限に含む。runtimeが開始を保留した場合は同じ処理を重複投入せず、`@dotfilesDir@/docs/operations/doctor.md` の資源観測で原因を確認する。同じ source、command、環境で成功済みの確認を繰り返さない。
+- 編集中は変更箇所に対応する focused check を使う。高コストな最終確認は `dotfiles-agent-verify -- COMMAND [ARG...]`、それ以外の高コストな処理は `dotfiles-workload-run --seconds N -- COMMAND [ARG...]` から実行する。`--seconds` は入場してからの走行の秒数で、資源の空きを待つ秒数は別に数え、同じ秒数で待ちを打ち切って command を起動せず status 75 で返す。75 は未実行であり、成功でも失敗でもないので、同じ処理を重複投入せず、`@dotfilesDir@/docs/operations/doctor.md` の資源観測で原因を確認して空いてから投入し直す。`dotfiles-workload-run` の処理は他の作業に譲る深い検証で、T1 や設計・実装の作業が memory を要するときは取り消され、status 143 で終わる。取り消された処理は未完了であり、結果として扱わない。同じ source、command、環境で成功済みの確認を繰り返さない。
 - `nix build` は明示した out-link が必要な場合を除き `--no-link`、`nix-build` は `--no-out-link` を使う。agent runtime の shim を絶対 path で迂回しない。
 - managed runtime wrapper を持つ client では、agent runtime が `TMPDIR`、共有の `CARGO_HOME` と `XDG_CACHE_HOME`、checkout ごとの Cargo の build-dir を割り当てる。利用者が明示した値は空文字列も含めて変更せず、project が明示する Cargo の `target-dir` と `build-dir` も上書きしない。session ごとの cache を `/tmp` に作らない。一時的な写しで build する tool を扱うときと割当の例外は、`@dotfilesDir@/docs/architecture/ai-tooling.md` の cache 方針に従う。
 - 自分が起動した server、container、background process と作成した一時資源を作業中に把握し、終了時に自分の所有物だけ停止、回収する。既存物や所有者不明の資源を削除しない。

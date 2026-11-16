@@ -280,15 +280,22 @@ collectorは現在のWindows利用者として登録し、権限昇格やexecuti
 同名でも他のtaskやfileは変更しない。install途中の失敗は、実施済みの段階をstderrへ出す。
 更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は新しい検証が観測不明で待機するため、予約を使う配備を戻してから撤去する。
 
-T1、pre-pushの検査本体、非対話agent jobは共通の予約へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
-待機は全体の期限に含み、期限切れは124で返る。開始後の期限切れも同じstatusなので、stderrの待機理由とcommandの出力を併せて確認する。
+T1、pre-pushの検査本体、非対話agent jobは共通の判定へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
+走行は、結果を同期に待つ者がいる受入（T1、pre-pushの検査本体）と、待つ者のいない深い検証（`dotfiles-workload-run`、非対話job）に分かれ、classごとに走行ごとのscopeを`agents-acceptance.slice`と`agents-deep.slice`の下に作る。
+受入は他の受入が待っていても止まらない。深い検証は受入が待つ間は入場せず、同時に一走行だけで、`CPUWeight=idle`により他が使わないCPUだけを使う。
+受入がmemoryで収まらず深い検証が動いていれば、深い検証だけが取り消される。受入とsessionは取り消されない。
+取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
+観測の圧迫は、受入はfailureだけで、深い検証はwarningでも止める。
+待機は走行の予算から分ける。入場の待ちには走行の予算と同じ秒数の上限があり、超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
+走行の予算は入場して起動した時から数え、超えれば取り消されて124で返る。待機の理由と待った秒数はjournaldの計測の一行と、stderrの待機理由で確認する。
+非対話のjobだけは例外で、serviceの絶対の期限が待ちを含めて残る。待ちの上限はその期限、走行の枠は起動した時点の残りの秒数なので、待った分だけ走行の枠が縮む。
 同じ処理を別入口から追加投入して待機を迂回しない。
 
 予約値は物理memoryの需要宣言であり、processのhard limitではない。CPUは予約せず、並列度はcommand自身が決める。
 物理memoryの需要は、明示した値、実測の記録から導いた値、未計測の既定値の順に決める。
 未計測の既定値は`dotfiles.workstation.workload.reservation`の`verificationMemoryPercent`（既定25）と、非対話jobの`jobMemoryPercent`で、最初の有効な観測のcgroup`limitBytes`の最小値（無ければ物理memory総量）に対する割合であり、ピークを保証しない。
 需要は最も厳しい上限へ切り詰める。明示した需要が上限を超える場合は、待たずにcommandを起動せず70で返す。明示は`dotfiles-workload-run`の`--memory-gib`で行い、入れ子の処理は外側で合計需要を予約する。
-同じ所有者の予約は入れ子で二重計上しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。子孫の終了を確認できない予約も自動解放しない。
+入れ子は、現在のprocessが走行のscopeの下にいれば、そのscopeの中で外側のclassのまま動き、二重に計上せず、待たず、昇格しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。
 wrapperを通らないcommandや共有backendの将来増加までは予約できない。
 Windowsの物理空きはreserveを割った場合の開始保留に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。
 
@@ -309,11 +316,11 @@ supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計�
 journalctl -t dotfiles-supervise -o cat | jq -c .
 ```
 
-MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`と非対話job）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`を持つ。
+MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`と非対話job。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`を持つ。
 `nested`がtrueの行は外側の走行の中の入れ子で、外側とは別の行になるため、待機の集計では除く。
-`admitted`がfalseなら未起動で、124は待機の期限切れである。trueの124は入場後の期限切れである。
+`admitted`がfalseなら未起動で、75は待機の上限に達した未実行である。trueの124は入場後の走行の期限切れで、143は取消である。
 記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。
 
 重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。
 PSIが既存のwarning閾値を下回り、Linux・cgroup・Windowsの余裕が予約需要を満たせば、新規処理は待機から進む。
-稼働中の検証、session、PTYを停止したり、swapを外したりして空きを作らない。継続的に需要が容量を超える場合は、処理のピーク削減または実行先の容量増強が必要であり、予約の導入だけでは解消しない。
+稼働中の受入、session、PTYを停止したり、swapを外したりして空きを作らない。例外は、受入がmemoryで収まらないときに取り消される深い検証だけである。継続的に需要が容量を超える場合は、処理のピーク削減または実行先の容量増強が必要であり、予約の導入だけでは解消しない。

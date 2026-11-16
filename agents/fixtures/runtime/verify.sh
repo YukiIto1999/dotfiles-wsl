@@ -1453,6 +1453,37 @@ test -s "$resource_state/dotfiles-wsl/workload/demand/$resource_digest.json" || 
   exit 1
 }
 
+# 入場の待ちは T1 の予算に数えず、走行の枠だけを予算で数える。待った後の走行は、待たなかった場合と同じ予算で完走する。
+# 待ちの上限は予算と同じ秒数で、超えると command を実行せず 75 を返し、証跡を公開しない
+mkdir "$fixture/resource-slow-bin"
+printf '#!%s\nsleep 3\n' "$BASH" >"$fixture/resource-slow-bin/devenv"
+chmod +x "$fixture/resource-slow-bin/devenv"
+pressure=$fixture/resource-pressure
+wait_repo=$fixture/resource-wait-repo
+t1_repository "$wait_repo" 5
+: >"$pressure"
+(cd "$wait_repo" && AGENT_RESOURCE_PRESSURE_FILE=$pressure XDG_STATE_HOME=$resource_state \
+  PATH="$fixture/resource-slow-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) &
+waiting_pid=$!
+sleep 3
+rm -f "$pressure"
+# 待ち約3秒と走行3秒は予算の5秒を超えるが、走行の枠は入場から数えるので完走する
+wait "$waiting_pid"
+expect_open_gate "$wait_repo" 'T1 that waited for resources and then ran inside its budget'
+limit_repo=$fixture/resource-limit-repo
+t1_repository "$limit_repo" 2
+: >"$pressure"
+limit_status=0
+(cd "$limit_repo" && AGENT_RESOURCE_PRESSURE_FILE=$pressure XDG_STATE_HOME=$resource_state \
+  PATH="$fixture/resource-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/limit.stderr" || limit_status=$?
+rm -f "$pressure"
+test "$limit_status" -eq 75 || {
+  echo "T1 that could not enter within its wait limit returned $limit_status instead of 75" >&2
+  exit 1
+}
+grep -qF '(75)' "$fixture/limit.stderr"
+expect_closed_gate "$limit_repo" 'T1 that was never started'
+
 escape_repo=$fixture/session-escape-budget-repo
 t1_repository "$escape_repo" 2
 cd "$escape_repo"

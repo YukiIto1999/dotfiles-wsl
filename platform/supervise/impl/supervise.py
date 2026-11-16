@@ -47,9 +47,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from admission import AdmissionError, LEASE_ENV, Reservation, pss_bytes
+from admission import AdmissionError, Admission
 from demand import DemandHistory
-from measure import JOURNAL_SOCKET, emit
+from measure import emit
 
 PR_SET_PDEATHSIG = 1
 PR_SET_CHILD_SUBREAPER = 36
@@ -61,6 +61,11 @@ DEFAULT_KILL_GRACE_SECONDS = 5.0
 OVERDUE_SWEEP_SECONDS = 0.5
 OVERDUE_REPORT_SECONDS = 30.0
 MEASURE_SECONDS = 1.0
+# 入場できないまま待機の上限に達した走行の終了status。commandは起動していない
+WAIT_EXPIRED_STATUS = 75
+# systemd-run が作った scope へ入るまでの猶予秒数
+SCOPE_ENTRY_SECONDS = 10.0
+ENTER_SCOPE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "enter_scope.py")
 # Dispositions Python or a non-interactive parent shell may have changed and the
 # command must not inherit.
 RESET_TO_DEFAULT = (
@@ -91,7 +96,8 @@ class Options:
         require_drained: 子孫の回収完了まで返却を禁止する選択
         interrupt_cancels: SIGINTを走行全体の取消へ渡す明示選択
         resource_policy: hostの資源観測と予約既定値のpathか無効のNone
-        resource_deadline: 待機を含む絶対期限か無効のNone
+        resource_wait_until: 入場を待つ絶対期限か無効のNone。走行の秒数とは別に数える
+        resource_run_seconds: 入場してから数える走行の秒数か無効のNone
         resource_memory: 物理memory予約の明示値か既定値を選ぶNone
         resource_key: 実測した需要の記録を読み書きする鍵か記録しないNone
         command: 絶対実行pathを先頭に持つcommand引数列
@@ -115,7 +121,8 @@ class Options:
         self.interrupt_cancels = False
         self.command = []
         self.resource_policy = None
-        self.resource_deadline = None
+        self.resource_wait_until = None
+        self.resource_run_seconds = None
         self.resource_memory = None
         self.resource_key = None
 
@@ -155,9 +162,11 @@ def parse_arguments(arguments):
             if not options.command or not os.path.isabs(options.command[0]):
                 raise UsageError("the command must be an absolute executable")
             if options.resource_policy is not None:
-                if options.resource_deadline is None:
-                    raise UsageError("--resource-policy requires --resource-deadline")
+                if options.resource_wait_until is None or options.resource_run_seconds is None:
+                    raise UsageError("--resource-policy requires --resource-wait-until and --resource-run-seconds")
                 options.require_drained = True
+            elif options.resource_wait_until is not None or options.resource_run_seconds is not None:
+                raise UsageError("--resource-wait-until and --resource-run-seconds require --resource-policy")
             return options
         if argument == "--require-drained":
             options.require_drained = True
@@ -168,7 +177,8 @@ def parse_arguments(arguments):
             index += 1
             continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels",
-                            "--resource-policy", "--resource-deadline", "--resource-memory", "--resource-key"):
+                            "--resource-policy", "--resource-wait-until", "--resource-run-seconds", "--resource-memory",
+                            "--resource-key"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
             raise UsageError(f"{argument} needs a value")
@@ -191,8 +201,10 @@ def parse_arguments(arguments):
             if not value:
                 raise UsageError(f"{argument} needs a non-empty value")
             options.resource_key = value
-        elif argument == "--resource-deadline":
-            options.resource_deadline = parse_seconds(argument, value)
+        elif argument == "--resource-wait-until":
+            options.resource_wait_until = parse_seconds(argument, value)
+        elif argument == "--resource-run-seconds":
+            options.resource_run_seconds = parse_seconds(argument, value)
         elif argument == "--resource-memory":
             if not value.isdecimal() or int(value) <= 0:
                 raise UsageError(f"{argument} needs a positive integer")
@@ -258,6 +270,20 @@ def diagnose(message):
         print(f"dotfiles-supervise: {message}", file=sys.stderr)
     except OSError:
         pass
+
+
+def pss_bytes(pid):
+    """processのPSS取得
+
+    pid: 読取対象のPID
+    戻り値: /proc/<pid>/smaps_rollup の Pss のbyte数。値が無ければ0
+    失敗: 消失または読取不能なprocessによるOSErrorかValueError
+    """
+    with open(f"/proc/{pid}/smaps_rollup") as stream:
+        for line in stream:
+            if line.startswith("Pss:"):
+                return int(line.split()[1]) * 1024
+    return 0
 
 
 def noop_handler(_number, _frame):
@@ -350,6 +376,11 @@ class Supervisor:
         self.reservation = None
         self.drained = True
         self.deadline_expired = False
+        # 受入が memory のために取り消した走行か。command の終了 status からは推し量らず、取り消した側の記録で知る
+        self.cancelled_externally = False
+        # 走行の枠を超えたと判定する時刻。入場して起動した時から数え、待機の秒数は含まない
+        self.run_deadline = None
+        self.spawned_at = None
         self.meter = PeakMeter() if options.resource_policy is not None else None
         self.history = None
         # 計測の一行へ渡す入場の成否と、待機と走行の時間。単調時計で測り、待たなかった走行の待機は0
@@ -493,7 +524,7 @@ class Supervisor:
         while True:
             sampling = self.meter.sample() if self.meter is not None and not self.terminating else None
             children_exist = self.reap()
-            if self.options.resource_deadline is not None and time.time() >= self.options.resource_deadline:
+            if self.run_deadline is not None and time.time() >= self.run_deadline:
                 self.deadline_expired = True
                 self.request_cancel(signal.SIGTERM, None)
             if not self.terminating and (
@@ -501,10 +532,7 @@ class Supervisor:
             ):
                 self.begin_termination()
             if not self.terminating:
-                wait = (
-                    max(0, self.options.resource_deadline - time.time())
-                    if self.options.resource_deadline is not None else None
-                )
+                wait = max(0, self.run_deadline - time.time()) if self.run_deadline is not None else None
                 if sampling is not None:
                     wait = sampling if wait is None else min(wait, sampling)
                 self.wait_for_event(wait)
@@ -529,6 +557,8 @@ class Supervisor:
     def exit_status(self, drained):
         if self.deadline_expired:
             return 124
+        if self.cancelled_externally:
+            return 128 + signal.SIGTERM
         status = self.client_status
         if status is None:
             return FAILURE_STATUS
@@ -587,6 +617,8 @@ class Supervisor:
         """
         if not drained:
             return False
+        if self.cancelled_externally:
+            return False
         if exceeded:
             return True
         return self.cancel_signal is None and not self.deadline_expired and self.client_status == 0
@@ -613,44 +645,78 @@ class Supervisor:
                                      "exceeded": exceeded})
             except (OSError, ValueError) as error:
                 diagnose(f"cannot record the measured memory peak: {error}")
-        return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved}
+        return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved, "waitSeconds": round(self.wait_seconds, 3)}
 
-    def run(self):
-        self.prepare()
-        if self.options.resource_policy is not None and self.cancel_signal is None:
-            self.reservation = Reservation(
-                self.options.resource_policy, self.options.resource_memory, self.recorded_demand(),
-            )
-            waiting_since = time.monotonic()
-            try:
-                self.admitted = self.reservation.acquire(self, self.options.resource_deadline)
-            finally:
-                self.wait_seconds = time.monotonic() - waiting_since
-            if not self.admitted:
-                status = 128 + self.cancel_signal if self.cancel_signal is not None else 124
-                self.record("finished", spawned=False, deferred=True, drained=True,
-                            client_status=None, remaining=[], status=status)
-                return status
-        if self.cancel_signal is not None:
-            status = 128 + self.cancel_signal
-            self.record("finished", spawned=False, cancelled=True, drained=True,
-                        client_status=None, remaining=[], status=status)
-            return status
+    def start_run_clock(self):
+        """走行の枠を、client を起動した時点から数え始める。待機の秒数は枠に数えない"""
+        self.spawned_at = time.monotonic()
+        if self.options.resource_run_seconds is not None:
+            self.run_deadline = time.time() + self.options.resource_run_seconds
+
+    def abandon_entry(self):
+        """scope へ入る前に止まっている client を殺して回収する"""
+        os.kill(self.client_pid, signal.SIGKILL)
+        os.waitpid(self.client_pid, 0)
+        self.client_pid = None
+        self.drained = True
+
+    def launch_in_scope(self, prefix, oom_score, wait_until):
+        """判定の排他の中で、走行ごとの scope を作り、その中で client を起動する
+
+        prefix: systemd-run で scope を作る argv。この後ろに -- と helper が続く
+        oom_score: scope の中の process へ設定する oom_score_adj
+        wait_until: 待機の絶対期限。scope を作る待ちも待機に数え、期限が来れば入場しない
+        戻り値: scope に入って起動した場合のTrue。scope へ入る前に取消された場合と待機の期限が来た場合のFalse
+        失敗: scope を作れない、または猶予内に入れない場合の AdmissionError
+        制約: helper は scope に入った後に自分を止め、ここで scope の存在を確かめてから再開する。
+            再開前の client は command を実行していないので、取消や失敗や期限切れでは何も実行されていない
+        """
+        command = self.options.command
+        argv0 = self.options.argv0 if self.options.argv0 is not None else command[0]
+        helper = [sys.executable, "-I", "-S", ENTER_SCOPE, str(oom_score), command[0], argv0, *command[1:]]
+        argv = [*prefix, "--", *helper]
+        try:
+            self.client_pid = os.posix_spawn(argv[0], argv, dict(os.environ), setsigmask=(), setsigdef=RESET_TO_DEFAULT)
+        except OSError as error:
+            raise AdmissionError(f"cannot create the scope: cannot execute {argv[0]}: {error.strerror}") from None
+        self.drained = False
+        until = time.monotonic() + SCOPE_ENTRY_SECONDS
+        while True:
+            pid, status = os.waitpid(self.client_pid, os.WNOHANG | os.WUNTRACED)
+            if pid:
+                if os.WIFSTOPPED(status):
+                    break
+                self.client_pid = None
+                self.drained = True
+                raise AdmissionError(
+                    f"cannot create the scope: {argv[0]} ended with status {os.waitstatus_to_exitcode(status)}")
+            if self.cancel_signal is not None or time.time() >= wait_until:
+                self.abandon_entry()
+                return False
+            if time.monotonic() >= until:
+                self.abandon_entry()
+                raise AdmissionError(f"cannot create the scope: {argv[0]} did not enter it within {SCOPE_ENTRY_SECONDS:.0f}s")
+            self.wait_for_event(0.01)
+        os.kill(self.client_pid, signal.SIGCONT)
+        self.start_run_clock()
+        return True
+
+    def spawn_plain(self):
+        """scope を作らずに client を起動する。入れ子の走行と、資源予約を持たない走行
+
+        戻り値: 起動した場合のNone、起動できなかった場合の終了status
+        """
         command = self.options.command
         argv = list(command)
         if self.options.argv0 is not None:
             # The executed file and the name it is told it has are separate: a multi-call binary reached through
             # a symlink chooses its behavior from that name.
             argv[0] = self.options.argv0
-        environment = dict(os.environ)
-        if self.reservation is not None:
-            environment[LEASE_ENV] = str(self.reservation.path)
-        spawned_at = time.monotonic()
         try:
             self.client_pid = os.posix_spawn(
                 command[0],
                 argv,
-                environment,
+                dict(os.environ),
                 setsigmask=(),
                 setsigdef=RESET_TO_DEFAULT,
             )
@@ -662,8 +728,49 @@ class Supervisor:
             self.record("finished", spawned=False, cancelled=False, drained=True,
                         client_status=None, remaining=[], status=status)
             return status
+        self.start_run_clock()
+        return None
+
+    def finish_unstarted(self):
+        """入場できないまま取消か待機の上限に達した走行の終了。command は起動していない
+
+        戻り値: 取消なら 128 に signal 番号を加えた値、待機の上限なら 75
+        """
+        if self.cancel_signal is not None:
+            status = 128 + self.cancel_signal
+        else:
+            status = WAIT_EXPIRED_STATUS
+            diagnose(f"gave up waiting for resources after {self.wait_seconds:.0f}s; the command was not started")
+        self.record("finished", spawned=False, deferred=True, drained=True, client_status=None, remaining=[],
+                    status=status, waitSeconds=round(self.wait_seconds, 3))
+        return status
+
+    def run(self):
+        self.prepare()
+        if self.options.resource_policy is not None and self.cancel_signal is None:
+            self.reservation = Admission(
+                self.options.resource_policy, self.options.resource_memory, self.recorded_demand(),
+            )
+            waiting_since = time.monotonic()
+            try:
+                self.admitted = self.reservation.acquire(self, self.options.resource_wait_until, self.launch_in_scope)
+            finally:
+                self.wait_seconds = time.monotonic() - waiting_since
+            if not self.admitted:
+                return self.finish_unstarted()
+        # 入れ子と資源予約の無い走行は scope を作らないので、ここで起動する。scope へ起動した走行は起動済み
+        if self.client_pid is None:
+            if self.cancel_signal is not None:
+                status = 128 + self.cancel_signal
+                self.record("finished", spawned=False, cancelled=True, drained=True,
+                            client_status=None, remaining=[], status=status)
+                return status
+            status = self.spawn_plain()
+            if status is not None:
+                return status
         drained = self.supervise()
-        self.run_seconds = time.monotonic() - spawned_at
+        self.cancelled_externally = self.reservation is not None and self.reservation.cancelled()
+        self.run_seconds = time.monotonic() - self.spawned_at
         self.drained = drained
         survivors = owned_processes() if not drained else {}
         if not drained:
@@ -675,7 +782,7 @@ class Supervisor:
         self.record(
             "finished",
             spawned=True,
-            cancelled=self.cancel_signal is not None,
+            cancelled=self.cancel_signal is not None or self.cancelled_externally,
             drained=drained,
             client_status=self.client_status,
             remaining=sorted(survivors),
@@ -699,7 +806,7 @@ class Supervisor:
             return
         record = {
             "event": "workload",
-            "class": reservation.klass,
+            "class": reservation.ran_as,
             "key": self.options.resource_key,
             "nested": reservation.inherited,
             "admitted": self.admitted,
@@ -711,7 +818,7 @@ class Supervisor:
             "reservedBytes": reservation.memory,
         }
         try:
-            emit(reservation.policy.get("journalSocket", JOURNAL_SOCKET), record)
+            emit(reservation.policy.journal, record)
         except OSError as error:
             diagnose(f"cannot record the measurement in the journal: {error}")
 
@@ -731,8 +838,6 @@ def main(arguments):
         print(f"dotfiles-supervise: {error}", file=sys.stderr)
         return FAILURE_STATUS
     finally:
-        if supervisor.reservation is not None:
-            supervisor.reservation.close(supervisor.drained)
         supervisor.report(status)
 
 

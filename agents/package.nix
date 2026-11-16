@@ -148,6 +148,7 @@ let
       runtimeInputs = with pkgs; [
         coreutils
         git
+        jq
       ];
       text =
         builtins.replaceStrings

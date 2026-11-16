@@ -3,17 +3,63 @@
   lib: 実行 file の解決に用いる Nixpkgs library
   python3: supervisor を動かす固定済み interpreter
   writeShellApplication: 実行入口を生成する Nixpkgs builder
-  戻り値: 子孫回収 command を公開する package
+  writeText: 検査用 policy を書く Nixpkgs builder
+  戻り値: 子孫回収 command を公開する package。passthru の sandboxPolicy は、user manager も cgroup も無い sandbox で
+    同じ supervisor へ渡す policy を作る関数で、systemd-run と systemctl の代わりに cgroup の木を directory に持つ代替を使う
 */
 {
   lib,
   python3,
   writeShellApplication,
+  writeText,
 }:
 
-writeShellApplication {
-  name = "dotfiles-supervise";
-  text = ''
-    exec ${lib.getExe python3} -I -S ${./impl}/supervise.py "$@"
-  '';
-}
+let
+  supervise = writeShellApplication {
+    name = "dotfiles-supervise";
+    text = ''
+      exec ${lib.getExe python3} -I -S ${./impl}/supervise.py "$@"
+    '';
+  };
+  fakeSystemd = ./fixtures/fake_systemd.py;
+in
+supervise.overrideAttrs (previous: {
+  passthru = (previous.passthru or { }) // {
+    sandboxPolicy =
+      {
+        class,
+        runtimeDirectory,
+        cgroupRoot,
+        observation,
+        memoryPercent ? 2,
+        maximumObservationAgeSeconds ? 10,
+      }:
+      let
+        fake = mode: [
+          (lib.getExe python3)
+          fakeSystemd
+          "--cgroup-root"
+          cgroupRoot
+          mode
+        ];
+      in
+      writeText "sandbox-workload-policy-${class}.json" (
+        builtins.toJSON {
+          inherit
+            class
+            runtimeDirectory
+            cgroupRoot
+            observation
+            memoryPercent
+            maximumObservationAgeSeconds
+            ;
+          systemdRun = fake "run";
+          systemctl = fake "ctl";
+          slices = {
+            acceptance = "agents.slice/agents-acceptance.slice";
+            deep = "agents.slice/agents-deep.slice";
+          };
+        }
+      );
+  };
+})

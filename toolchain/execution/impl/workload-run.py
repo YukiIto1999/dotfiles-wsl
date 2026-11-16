@@ -1,4 +1,7 @@
-"""通常のcommandを機全体の資源予約と有限の期限へ接続する公開入口"""
+"""待つ者のいない深い検証を機全体の資源予約と有限の期限へ接続する公開入口
+
+この入口で走らせる処理は常に深い検証である。受入（T1、pre-push）の class を選ぶ引数は持たず、他の処理の邪魔になれば取り消される。
+"""
 
 import argparse
 import math
@@ -18,9 +21,12 @@ def main(arguments):
     supervise, policy, *tokens = arguments
     parser = argparse.ArgumentParser(
         prog="dotfiles-workload-run", allow_abbrev=False,
-        description="Reserve host resources before running a command, without changing its internal parallelism.",
+        description="Run a command as a deep verification: it waits for free resources, runs only in what the work "
+                    "in front of it leaves, and is cancelled when that work needs the memory.",
     )
-    parser.add_argument("--seconds", type=float, required=True, help="total time budget, including resource wait")
+    parser.add_argument("--seconds", type=float, required=True,
+                        help="seconds the command may run, counted from admission; waiting for resources is counted "
+                             "separately and gives up with status 75, without running the command, after the same seconds")
     parser.add_argument("--memory-gib", type=float, help="expected peak physical memory of the whole workload; overrides host policy")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="command and arguments after --")
     started = time.time()
@@ -43,7 +49,8 @@ def main(arguments):
         demand += ["--resource-memory", str(math.ceil(options.memory_gib * 1073741824))]
     os.execv(supervise, [supervise, "--require-drained", "--interrupt-cancels",
                         "--resource-policy", policy,
-                        "--resource-deadline", str(started + options.seconds),
+                        "--resource-wait-until", str(started + options.seconds),
+                        "--resource-run-seconds", str(options.seconds),
                         *demand, "--", executable, *command[1:]])
 
 

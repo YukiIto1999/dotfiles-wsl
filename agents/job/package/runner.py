@@ -207,7 +207,13 @@ def supervise(run: Run, command: list[str], stdout: TextIO | None = None, stderr
     environment = {**os.environ, DEADLINE_ENV: f"{run.deadline:.3f}", NAME_ENV: run.options.name}
     admission = []
     if reserve and run.options.resource_policy:
-        admission = ["--resource-policy", run.options.resource_policy, "--resource-deadline", str(run.deadline)]
+        # job の寿命は service の絶対の期限で、待ちも走行もその中に収まる。待ちの上限と走行の枠はどちらも残りの秒数にする
+        remaining = max(run.deadline - time.time(), 0.001)
+        admission = [
+            "--resource-policy", run.options.resource_policy,
+            "--resource-wait-until", str(run.deadline),
+            "--resource-run-seconds", f"{remaining:.3f}",
+        ]
     try:
         supervisor = subprocess.Popen(
             [

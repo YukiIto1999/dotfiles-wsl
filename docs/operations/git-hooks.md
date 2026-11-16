@@ -68,6 +68,7 @@ annotated tagは参照するcommitで比較し、差分を隠すassume-unchanged
 入口を宣言しないrepositoryと、送信sourceのない削除だけのpushは検証を要求しない。
 
 予算はrootの`tiergate.json`の`verify-push.seconds`を走行開始時に一度だけ読み、入口の解決、検査、最後のsourceの確認まで同じ上限で止める。
+検査本体が機全体の資源の空きを待つ時間は予算に数えず、予算と同じ秒数の上限で打ち切る。上限に達すれば検査を実行せず75でpushを拒否し、検査の枠は入場して起動した時から数える。
 Nixの取得と評価は検査本体の実行時にだけ行い、その時間も予算へ含める。
 秒数の宣言は`{"version":1,"verify-push":{"seconds":N}}`の形とし、Nは1以上2147483647以下の整数である。
 Nixの入口を使う場合は、同じfileへ`frontend`と`entries`も登録する。

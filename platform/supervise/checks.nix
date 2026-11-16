@@ -42,7 +42,17 @@
               nativeBuildInputs = [ pkgs.python3 ];
             }
             ''
-              python3 ${./fixtures/resource_admission.py} ${./impl}/supervise.py
+              python3 ${./fixtures/resource_admission.py} ${./impl}/supervise.py ${./fixtures/fake_systemd.py}
+              touch $out
+            '';
+
+        supervise-admission-decision =
+          pkgs.runCommandLocal "check-supervise-admission-decision"
+            {
+              nativeBuildInputs = [ pkgs.python3 ];
+            }
+            ''
+              python3 ${./fixtures/decision_properties.py} ${./impl}
               touch $out
             '';
       }

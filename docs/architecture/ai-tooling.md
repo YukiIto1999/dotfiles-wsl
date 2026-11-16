@@ -138,18 +138,24 @@ signalを拒むprocessとprocess tableを読めない状態も完了とは扱わ
 `--hold-fd`はsupervisor自身が保持し続け、猶予後に切り離したholderは作らない。
 指定しない既存のcallerは、SIGKILL後の猶予を過ぎても子孫が残る場合に、従来どおり`drained=false`と非ゼロの終了statusで返る。
 
-supervisorの資源予約は、`--resource-policy FILE --resource-deadline EPOCH`を指定した呼出しに適用する。
-同じhost policyのregistryで物理memoryの将来消費を予約し、待機を含む絶対期限までに余裕がなければcommandを起動せず124で返す。CPUは予約しない。
-圧迫を理由に稼働中の別のcommandを停止しない。
-観測済みの子孫PSSだけを予約の残量から控除し、共有backendなど帰属を確認できない消費を空きへ戻さない。
+supervisorの資源予約は、`--resource-policy FILE --resource-wait-until EPOCH --resource-run-seconds SEC`を指定した呼出しに適用する。
+走行はclassを持つ。受入（T1、pre-pushの検査本体）は結果を同期に待つ者がいる検証で、deep（全量回帰、分析、実験、`dotfiles-workload-run`、非対話job）は待つ者のいない検証である。
+入場した走行は、classのslice（`agents-acceptance.slice`、`agents-deep.slice`）の下に、走行ごとのscopeを作って動く。受入はscopeのMemoryLowに、deepはMemoryHighに物理memoryの需要を書き、deepにはoom_score_adj 1000を与える。CPUは予約せず、受入はsessionと同じ重みで、deepは`CPUWeight=idle`で他が使わない分だけを使う。
+受入は他の受入が待っていても止まらない。deepは受入が待つ間は入場せず、同時に一走行だけである。deepの入場は、受入が待っていないことの確認から入場の完了まで、受入が待ちを始めるのを止める。
+動いている受入のscopeが予約まで使い増せる量を各上限の空きと比べ、収まらなければ待つ。各上限は、呼んだprocessの居る場所ではなく、scopeを置くclassのsliceから辿る祖先すべての上限で、観測へそのsliceを渡して求める。使い増せる量は予約から使用量を引いた量で、使用量は観測がclassのsliceの下のscopeごとに報告するworking setを読む。回収できるcacheを引く式は観測だけが持ち、supervisorは式を持たない。観測に載らないscopeは予約の全部を数える。
+受入がmemoryで収まらず、deepが動いていれば、deepのscopeだけを`systemctl --user stop`で取り消す。受入とsessionは取り消さない。
+取り消す側はstopの前に、scope名を持つ空のfileを状態directoryへ残す。deepのsupervisorは終了時にそれを読んで消し、commandがSIGTERMを受けて0で終わっても、取り消された未完了の走行として143で返し、実測の記録を残さない。入れ子のsupervisorは外側のscope名の記録を読むだけで消さず、同じく143で返す。
+観測の圧迫は、受入はfailureだけ、deepはwarningでも入場を止める。
+待機は走行の枠から分ける。待ちは`--resource-wait-until`までで、scopeを作る待ちも数え、入場できなければcommandを起動せず75で返す。走行の枠は入場して起動した時から数え、超えれば取り消して124で返す。呼び出し側は、待ちの上限をいまのところ走行の予算と同じ秒数にする。
+非対話のjobは例外で、serviceの絶対の期限が待ちを含めて残る。待ちの上限はその期限、走行の枠は起動した時点の残りの秒数なので、待った分だけ走行の枠が縮む。
 物理memoryの需要は、明示した値、`--resource-key`が示す実測の記録から導いた値、policyの`memoryPercent`による未計測の既定値の順に決め、最初の有効な観測の最も厳しい`limitBytes`（無ければ物理memory総量）へ切り詰める。
 明示した値がその上限を超える場合は、待たずにcommandを起動せず70で返す。
 supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1秒ごとに測り、鍵を渡した走行のうち、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了したものか、ピークが予約を超えたものだけを新しい順に10件まで記録する。
 記録の置き場、鍵、需要の導き方、予約を超えた走行のstderrの一行は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
-入れ子は生存する祖先supervisorの予約内で動き、明示した需要が祖先を超える場合は外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は祖先の予約へ切り詰め、拒否しない。
-予約を持つ走行では子孫終了までの所有を必須とし、supervisor自体が強制終了して終了確認を失った記録は自動削除しない。
+入れ子は、現在のprocessがclassのscopeの下にいれば、そのscopeの中で外側のclassのまま動く。入れ子で昇格せず、scopeも作らず、待たない。明示した需要が外側のscopeの需要を超える場合は、外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は外側の需要へ切り詰め、拒否しない。
+走行の所有と生死は、scopeのcgroupと`waitpid`の`ECHILD`が持ち、走行を表す記録fileは持たない。supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続ける。
 この予約は需要の宣言であり、commandの機能や内部のworker数を削減するhard limitではない。
-policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-pushの検査本体、非対話jobと`dotfiles-workload-run`が同じregistryへ参加する。実測の記録の鍵を渡すのはT1とpre-pushの検査本体だけで、鍵を渡さないpre-pushの短い段は参加しない。入口を通らない任意のcommandの将来消費を保証するものではない。
+policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-pushの検査本体、非対話jobと`dotfiles-workload-run`が同じ判定へ参加する。実測の記録の鍵を渡すのはT1とpre-pushの検査本体だけで、鍵を渡さないpre-pushの短い段は参加しない。入口を通らない任意のcommandの将来消費を保証するものではない。
 Windowsの採取は独立したscheduled taskが行い、Linux側は期限内のsnapshotだけを読む。導入と待機理由の確認は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 
 取消後と開始途中の失敗ではclientを起動しない。

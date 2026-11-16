@@ -1,10 +1,16 @@
-"""資源観測に基づく期限付き入場と所有子孫の終了までの予約"""
+"""資源観測に基づく class ごとの入場と、走行ごとの scope が持つ将来消費の読取
+
+受入（待つ者のいる検証）は他の受入に待たされず、deep（待つ者のいない検証）は受入が待つ間は入場せず、受入が
+memory で収まらないときは取り消される。走行の所有と生死は走行ごとの scope の cgroup が持ち、この module は
+記録 file を持たない。
+"""
 
 import fcntl
 import json
 import math
 import os
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 import stat
 import subprocess
 import tempfile
@@ -12,11 +18,30 @@ import time
 import sys
 import uuid
 
-LEASE_ENV = "DOTFILES_WORKLOAD_LEASE"
-# 計測と規則が区別する走行の種類。受入は待つ者のいる検証、deepは待つ者のいない検証
+from measure import JOURNAL_SOCKET
+
 CLASSES = ("acceptance", "deep")
 # 一走行の計測へ残す待機理由の最大の件数
 MAXIMUM_REASONS = 8
+# 入場を止めない観測の status。受入は警告まで通して failure だけで止め、deep は警告でも止める。未知の status はどちらも止める
+PASSING = {"acceptance": ("pass", "warn"), "deep": ("pass",)}
+# scope が持つ需要を書く file。受入は予約の記録の memory.low、deep は上限の memory.high。どちらも保護や hard limit にはしない
+DEMAND_FILES = {"acceptance": "memory.low", "deep": "memory.high"}
+DEMAND_PROPERTIES = {"acceptance": "MemoryLow", "deep": "MemoryHigh"}
+# deep は kernel の OOM で最初に選ばれる。受入と session は上げない
+OOM_SCORES = {"acceptance": 0, "deep": 1000}
+# 取り消された scope の SIGTERM から SIGKILL までの猶予。supervisor の既定の猶予と同じ
+STOP_TIMEOUT = "10s"
+STOP_SECONDS = 5
+REGISTRY_LOCK = "registry.lock"
+# 受入が待つ間だけ共有 lock を持つ file。deep は排他で試して取れなければ受入が待つと判る
+WAITING_LOCK = "acceptance.waiting"
+# 受入が deep の scope を取り消すときに残す記録の名前の前置。scope 名を続ける。deep の supervisor が終了時に読んで消す
+CANCEL_MARK = "cancel-"
+# 読まれないまま scope が消えた取消の記録を片付ける経過秒数。supervisor が強制終了されたときだけ残る
+STALE_MARK_SECONDS = 3600
+ADMIT, WAIT, CANCEL_DEEP = "admit", "wait", "cancel-deep"
+HEADROOM_REASON = "Linux memory or Windows commit headroom is reserved"
 
 
 class AdmissionError(Exception):
@@ -36,114 +61,191 @@ def positive(value, name):
     return value
 
 
-def process_table():
-    """現在の生存 process の親と開始時刻の取得
+@dataclass(frozen=True)
+class Scope:
+    """class の slice の下で動く走行一つの scope
 
-    戻り値: PID から親PIDと開始時刻への辞書
+    klass: 走行の class
+    unit: scope の unit 名
+    limit: 受入では memory.low、deep では memory.high の bytes。読めなければ0
+    working_set: 観測が報告した、回収できる cache を除いた使用量。報告が無い scope は0で、予約の全部がこれから使われると見る
     """
-    table = {}
-    for entry in os.scandir("/proc"):
-        if not entry.name.isdecimal():
-            continue
-        try:
-            data = Path(entry.path, "stat").read_text()
-            fields = data[data.rindex(")") + 2:].split()
-            if fields[0] != "Z":
-                table[int(entry.name)] = (int(fields[1]), fields[19])
-        except (FileNotFoundError, ProcessLookupError):
-            continue
-    return table
+
+    klass: str
+    unit: str
+    limit: int
+    working_set: int
 
 
-def descendants(pid, table):
-    """指定processを起点とする生存子孫の列挙
+@dataclass(frozen=True)
+class Observation:
+    """入場の判定に使う空きの観測
 
-    pid: 所有者のPID
-    table: 親と開始時刻の観測
-    戻り値: 起点を含むPID集合
+    headroom: host の空きと Windows の commit の余裕の小さい方
+    limits: 祖先の cgroup ごとの（path、空き）
+    usage: class の slice の下の scope ごとの、cgroup path から観測が求めた working set への対応
     """
-    held = {pid}
-    while True:
-        extra = {child for child, (parent, _) in table.items() if parent in held} - held
-        if not extra:
-            return held
-        held.update(extra)
+
+    headroom: int
+    limits: tuple
+    usage: dict
 
 
-def pss_bytes(pid):
-    """processのPSS取得
+@dataclass(frozen=True)
+class Decision:
+    """入場の判定の結果
 
-    pid: 読取対象のPID
-    戻り値: /proc/<pid>/smaps_rollup の Pss のbyte数。値が無ければ0
-    失敗: 消失または読取不能なprocessによるOSErrorかValueError
+    kind: ADMIT、WAIT、CANCEL_DEEP のいずれか
+    reason: ADMIT 以外で待つ理由
     """
-    for line in Path(f"/proc/{pid}/smaps_rollup").read_text().splitlines():
-        if line.startswith("Pss:"):
-            return int(line.split()[1]) * 1024
-    return 0
+
+    kind: str
+    reason: str = None
 
 
-def resident_credit(entry, table, boundary=None):
-    """観測済みの使用量を予約残量から控除するPSSの取得
+def growth(scope):
+    """走行中の受入の scope がこれから使い増せる量
 
-    entry: 稼働予約の記録
-    table: processの現在の所属
-    boundary: 控除を許すcgroup pathか物理全体のNone
-    戻り値: 読取確認できた子孫のPSS合計
-    制約: 消失または読取不能なprocessへの控除なし
+    scope: 受入の scope
+    戻り値: 予約と現在の使用量の差。すでに予約を超えている scope はこれ以上を要求しない
     """
-    if table.get(entry["pid"], (None, None))[1] != entry["start"]:
-        return 0
-    used = 0
-    for pid in descendants(entry["pid"], table):
-        try:
-            if boundary is not None:
-                memberships = Path(f"/proc/{pid}/cgroup").read_text().splitlines()
-                membership = next(line[3:] for line in memberships if line.startswith("0::"))
-                actual = Path(membership)
-                if actual != Path(boundary) and Path(boundary) not in actual.parents:
-                    continue
-            used += pss_bytes(pid)
-        except (OSError, ValueError, StopIteration):
-            continue
-    return min(used, entry["memoryBytes"])
+    return max(scope.limit - scope.working_set, 0)
 
 
-class Reservation:
-    """単一hostの待機順と実行中の将来消費の所有
+def cancellable(scopes):
+    """受入が memory を要るときに取り消してよい scope
 
-    policy_path: 不変な観測commandと予約既定値のJSON
+    scopes: 存在する scope
+    戻り値: deep の scope だけ。受入と session は含まない
+    """
+    return [scope for scope in scopes if scope.klass == "deep"]
+
+
+def shortfall(demand, scopes, observation):
+    """要求が、走行中の受入が使い増せる量を含めて空きに収まらない理由
+
+    demand: 要求する物理memory
+    scopes: 存在する scope
+    observation: 空きの観測
+    戻り値: 収まる場合は None、収まらない場合は理由。deep の scope の増分は数えない
+    """
+    claim = sum(growth(scope) for scope in scopes if scope.klass == "acceptance")
+    if demand + claim > observation.headroom:
+        return HEADROOM_REASON
+    for path, headroom in observation.limits:
+        if demand + claim > headroom:
+            return f"memory headroom is reserved at {path}"
+    return None
+
+
+def decide(klass, demand, scopes, observation, acceptance_waiting):
+    """入場の判定。観測と存在する scope だけで決まる
+
+    klass: 要求する走行の class
+    demand: 要求する物理memory
+    scopes: 存在する scope
+    observation: 空きの観測
+    acceptance_waiting: 待っている受入があるか
+    戻り値: 入場、待機、deep の取消のいずれか
+    不変条件:
+      受入の入場は他の受入が待つことで止まらない。
+      受入が待つ間は deep を入場させない。deep は同時に一走行だけ。
+      入場した受入の増分の合計は各空きを超えない。
+      受入が memory で収まらず deep の scope があれば、deep だけを取り消す。
+    """
+    if klass == "deep":
+        if acceptance_waiting:
+            return Decision(WAIT, "an acceptance verification is waiting")
+        if cancellable(scopes):
+            return Decision(WAIT, "another deep verification is running")
+    reason = shortfall(demand, scopes, observation)
+    if reason is None:
+        return Decision(ADMIT)
+    if klass == "acceptance" and cancellable(scopes):
+        return Decision(CANCEL_DEEP, reason)
+    return Decision(WAIT, reason)
+
+
+def cgroup_integer(path):
+    """memory controller の file が持つ bytes の読取
+
+    path: memory.low や memory.high などの file
+    戻り値: bytes。max は None
+    失敗: 読めない場合の OSError と、数でない内容の ValueError
+    """
+    text = path.read_text().strip()
+    return None if text == "max" else int(text)
+
+
+class Policy:
+    """class ごとの policy file の検証済みの値
+
+    寿命: 一呼出し
+    失敗: 欠落や不正な項目による AdmissionError か KeyError
+    """
+
+    def __init__(self, path):
+        with open(path) as stream:
+            document = json.load(stream)
+        self.klass = document["class"]
+        if self.klass not in CLASSES:
+            raise AdmissionError(f"class must be one of {', '.join(CLASSES)}")
+        self.runtime = Path(document["runtimeDirectory"])
+        if not self.runtime.is_absolute():
+            raise AdmissionError("reservation directory must be absolute")
+        self.percent = document["memoryPercent"]
+        if type(self.percent) is not int or not 1 <= self.percent <= 100:
+            raise AdmissionError("memoryPercent must be an integer from 1 to 100")
+        self.observation = document["observation"]
+        self.maximum_age = document["maximumObservationAgeSeconds"]
+        # systemd-run と systemctl は argv の前置として持ち、検査が代替を渡せる
+        self.systemd_run = document["systemdRun"]
+        self.systemctl = document["systemctl"]
+        self.cgroup_root = Path(document["cgroupRoot"])
+        self.slices = document["slices"]
+        self.proc_cgroup = Path(document.get("procCgroup", "/proc/self/cgroup"))
+        self.journal = document.get("journalSocket", JOURNAL_SOCKET)
+
+    def slice_directory(self, klass):
+        """class の slice の cgroup directory。利用者の systemd manager の下に置く"""
+        uid = os.getuid()
+        return self.cgroup_root / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service" / self.slices[klass]
+
+    def slice_unit(self, klass):
+        """class の slice の unit 名"""
+        return Path(self.slices[klass]).name
+
+
+class Admission:
+    """一走行の入場。待機、判定、scope の起動までを持つ
+
+    policy_path: class ごとの policy file
     memory_bytes: 明示された物理memory需要か導出に任せるNone
     recorded_bytes: 実測の記録から導いた物理memory需要か記録なしのNone
-    寿命: supervisorによる子孫終了確認まで
-    制約: 明示でない物理memory需要は最初の有効な観測か祖先の予約で確定し、それまでは未確定のNone
+    寿命: supervisor による子孫終了確認まで。持つ状態は scope の cgroup と、process が持つ flock だけ
+    制約: 明示でない物理memory需要は最初の有効な観測か外側の scope で確定し、それまでは未確定のNone
     """
 
     def __init__(self, policy_path, memory_bytes=None, recorded_bytes=None):
-        with open(policy_path) as stream:
-            self.policy = json.load(stream)
-        self.root = Path(self.policy["runtimeDirectory"])
-        if not self.root.is_absolute():
-            raise AdmissionError("reservation directory must be absolute")
-        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        info = self.root.lstat()
+        self.policy = Policy(policy_path)
+        self.klass = self.policy.klass
+        # 入れ子の走行は外側の class で走る
+        self.ran_as = self.klass
+        self.policy.runtime.mkdir(mode=0o700, parents=True, exist_ok=True)
+        info = self.policy.runtime.lstat()
         if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise AdmissionError("reservation directory must be private and owned by this user")
-        self.percent = self.policy["memoryPercent"]
-        if type(self.percent) is not int or not 1 <= self.percent <= 100:
-            raise AdmissionError("memoryPercent must be an integer from 1 to 100")
-        self.klass = self.policy["class"]
-        if self.klass not in CLASSES:
-            raise AdmissionError(f"class must be one of {', '.join(CLASSES)}")
         self.explicit = positive(memory_bytes, "memory request") if memory_bytes is not None else None
         self.recorded = recorded_bytes
         self.memory = self.explicit
-        self.boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
-        self.path = None
-        self.fd = None
         self.inherited = False
-        self.entry = None
         self.previous_reason = None
+        # 起動した scope の unit 名。受入が取り消したかをこの名前の記録で知る
+        self.unit = None
+        # 入れ子の走行が居る外側の scope の unit 名。外側が取り消されたかをこの名前の記録で知る
+        self.enclosing = None
+        # 取り消しを要求済みの scope の unit 名
+        self.stopping = set()
         # 待機した理由を最初に現れた順に重複なく残す。計測の一行へ渡す
         self.reasons = []
 
@@ -162,22 +264,33 @@ class Reservation:
                     f"memory request of {self.explicit} bytes exceeds the tightest limit of {ceiling} bytes; "
                     "command was not started")
         elif self.memory is None:
-            demand = self.recorded if self.recorded is not None else -(-self.percent * ceiling // 100)
+            demand = self.recorded if self.recorded is not None else -(-self.policy.percent * ceiling // 100)
             self.memory = positive(min(demand, ceiling), "memory demand")
+
+    def slice_path(self, klass):
+        """class の slice の cgroup path
+
+        戻り値: cgroup root からの path
+        """
+        return str(PurePosixPath("/") / self.policy.slice_directory(klass).relative_to(self.policy.cgroup_root))
 
     def snapshot(self, deadline):
         """待機期限内で取得する有限量の正規化資源観測
 
-        deadline: 呼出し全体の絶対期限
-        戻り値: workload resourceと入場保留理由
+        deadline: 待機の絶対期限
+        戻り値: 空きの観測と入場保留理由
         副作用: 最初の有効な観測での物理memory需要の確定
+        制約: class が通す status は PASSING。受入は警告で止まらず、deep は警告で止まる
+            上限は呼んだ process の居る cgroup ではなく、scope を置く class の slice から辿る。
+            scope ごとの working set は観測が求める。回収できる cache の式は観測だけが持つ
         """
         remaining = deadline - time.time()
         if remaining <= 0:
             return None, "deadline reached before observation"
         try:
             with tempfile.TemporaryFile() as output:
-                result = subprocess.run(self.policy["observation"], stdout=output, stderr=subprocess.DEVNULL,
+                command = [*self.policy.observation, self.slice_path(self.klass), *(self.slice_path(klass) for klass in CLASSES)]
+                result = subprocess.run(command, stdout=output, stderr=subprocess.DEVNULL,
                                         timeout=min(2.0, remaining), check=False)
                 output.seek(0)
                 raw = output.read(65537)
@@ -188,12 +301,14 @@ class Reservation:
                 return None, "unknown resource observation version"
             outcomes = [row for row in envelope["outcomes"]
                         if row["id"] != "resource/workload/wsl-cap" or row["status"] == "fail"]
-            if not outcomes or any(row["status"] != "pass" for row in outcomes):
-                failed = "; ".join(row["message"] for row in outcomes if row["status"] != "pass")
-                return None, failed or "resource observation is incomplete"
+            if not outcomes:
+                return None, "resource observation is incomplete"
+            blocking = [row for row in outcomes if row["status"] not in PASSING[self.klass]]
+            if blocking:
+                return None, "; ".join(row["message"] for row in blocking)
             value = next(row["value"] for row in envelope["resources"] if row["key"] == "workload")
             age = time.time() - value["observedAt"]
-            if not math.isfinite(age) or age < -1 or age > self.policy["maximumObservationAgeSeconds"]:
+            if not math.isfinite(age) or age < -1 or age > self.policy.maximum_age:
                 return None, "resource observation is stale"
             for field in ("memoryTotalBytes", "memoryAvailableBytes", "memoryHeadroomBytes", "hostMemoryHeadroomBytes",
                           "windowsCommitHeadroomBytes", "windowsPhysicalAvailableBytes",
@@ -207,171 +322,237 @@ class Reservation:
             if any(type(limit["limitBytes"]) is not int or limit["limitBytes"] <= 0 for limit in value["memoryLimits"]):
                 return None, "resource observation has no valid limitBytes"
             self.settle_memory(value)
-            return value, None
+            for limit in value["memoryLimits"]:
+                if type(limit["headroomBytes"]) is not int or limit["headroomBytes"] < 0:
+                    raise AdmissionError("invalid cgroup memory headroom")
+            if not isinstance(value["memoryScopes"], list):
+                return None, "cgroup memory usage of the scopes is unknown"
+            if any(type(row["workingSetBytes"]) is not int or row["workingSetBytes"] < 0 for row in value["memoryScopes"]):
+                return None, "resource observation has no valid workingSetBytes"
+            return Observation(
+                headroom=min(value["hostMemoryHeadroomBytes"], value["windowsCommitHeadroomBytes"]),
+                limits=tuple((limit["path"], limit["headroomBytes"]) for limit in value["memoryLimits"]),
+                usage={row["path"]: row["workingSetBytes"] for row in value["memoryScopes"]},
+            ), None
         except (OSError, ValueError, KeyError, TypeError, StopIteration, subprocess.TimeoutExpired) as error:
             return None, f"resource observation unavailable: {error}"
 
-    def persist(self):
-        """排他区間内での予約状態の保存
+    def inherit(self):
+        """今の process が class の scope の中にいる場合の、入れ子の入場の確認
 
-        戻り値: なし
-        前提: registry lockと当該予約descriptorの保持
+        戻り値: 外側の scope の中で走る場合のTrue。外側の class で走り、入れ子で昇格しない
+        失敗: 外側の需要を超える明示需要による AdmissionError
         """
-        assert self.fd is not None
-        data = (json.dumps(self.entry) + "\n").encode()
-        os.lseek(self.fd, 0, os.SEEK_SET)
-        os.write(self.fd, data)
-        os.ftruncate(self.fd, len(data))
-
-    def inherited_lease(self, table):
-        """祖先supervisorの予約内での入れ子実行の確認
-
-        table: 現在の親子関係
-        戻り値: 同じ予約を継承できる場合のTrue
-        失敗: 祖先予約を超える要求によるAdmissionError
-        """
-        token = os.environ.get(LEASE_ENV)
-        if not token:
+        own = None
+        for line in self.policy.proc_cgroup.read_text().splitlines():
+            if line.startswith("0::"):
+                own = PurePosixPath(line[3:])
+        if own is None:
             return False
-        path = Path(token)
-        if path.parent != self.root or not path.name.endswith(".json"):
-            raise AdmissionError("inherited resource lease belongs to another policy")
-        try:
-            with path.open() as stream:
-                entry = json.load(stream)
-            ancestors = set()
-            pid = os.getppid()
-            while pid in table and pid not in ancestors:
-                ancestors.add(pid)
-                pid = table[pid][0]
-            valid = (entry["phase"] == "running" and entry["boot"] == self.boot
-                     and entry["pid"] in ancestors
-                     and table[entry["pid"]][1] == entry["start"])
-        except (OSError, ValueError, KeyError):
-            valid = False
-        if not valid:
-            raise AdmissionError("inherited resource lease has no live ancestor owner")
-        ancestor = entry["memoryBytes"]
-        if self.explicit is not None and self.explicit > ancestor:
-            raise AdmissionError("nested request exceeds its ancestor reservation; declare the whole workload at its outer entry")
-        if self.explicit is None:
-            # 入れ子は観測を取らず上限は祖先の予約だけのため、既定値由来の需要は祖先の予約と同じになる
-            self.memory = ancestor if self.recorded is None else min(self.recorded, ancestor)
-        self.inherited = True
-        self.path = path
-        return True
-
-    def records(self):
-        """所有確認済みの実行予約と待機予約の取得
-
-        戻り値: 記録の一覧
-        制約: 所有者不明の実行予約の自動削除なし
-        """
-        records = []
-        for path in self.root.glob("*.json"):
-            if path == self.path:
-                records.append(self.entry)
-                continue
+        for klass in CLASSES:
+            directory = self.policy.slice_directory(klass)
+            base = PurePosixPath("/") / directory.relative_to(self.policy.cgroup_root)
             try:
-                descriptor = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+                relative = own.relative_to(base)
+            except ValueError:
+                continue
+            if not relative.parts or not relative.parts[0].endswith(".scope"):
+                continue
+            outer = cgroup_integer(directory / relative.parts[0] / DEMAND_FILES[klass])
+            if outer is None:
+                raise AdmissionError("the enclosing scope has no reservation to nest in")
+            if self.explicit is not None and self.explicit > outer:
+                raise AdmissionError("nested request exceeds its ancestor reservation; declare the whole workload at its outer entry")
+            if self.explicit is None:
+                # 入れ子は観測を取らず上限は外側の予約だけのため、既定値由来の需要は外側の予約と同じになる
+                self.memory = outer if self.recorded is None else min(self.recorded, outer)
+            self.inherited = True
+            self.enclosing = relative.parts[0]
+            self.ran_as = klass
+            return True
+        return False
+
+    def scopes(self, observation):
+        """class の slice の下にいる scope の、需要と使用量の読取
+
+        observation: 同じ判定の観測。scope ごとの使用量はここから読む
+        戻り値: 読めた scope。読む前に消えた scope は含まない。観測に使用量の無い scope は未使用と見る
+        """
+        found = []
+        for klass in CLASSES:
+            directory = self.policy.slice_directory(klass)
+            try:
+                names = sorted(entry.name for entry in os.scandir(directory) if entry.name.endswith(".scope") and entry.is_dir())
             except FileNotFoundError:
                 continue
-            try:
-                with os.fdopen(os.dup(descriptor)) as stream:
-                    entry = json.load(stream)
+            for name in names:
                 try:
-                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
-                    records.append(entry)
-                else:
-                    if entry["phase"] == "waiting" or entry["boot"] != self.boot:
-                        path.unlink(missing_ok=True)
-                    else:
-                        raise AdmissionError(f"unconfirmed workload owner: {path}; no new workload was started")
-            finally:
-                os.close(descriptor)
-        return records
+                    limit = cgroup_integer(directory / name / DEMAND_FILES[klass])
+                except (OSError, ValueError):
+                    continue
+                used = observation.usage.get(f"{self.slice_path(klass)}/{name}", 0)
+                found.append(Scope(klass, name, limit or 0, used))
+        return found
 
-    def fits(self, snapshot, entries, table):
-        """予約済みの将来増加を含めた入場可否の判定
+    def hold_no_acceptance_waiting(self):
+        """待っている受入が無いことの確認と、その状態の保持。排他 lock が取れれば誰も待っていない
 
-        snapshot: 同じhostの資源観測
-        entries: registry排他内の予約集合
-        table: 現在のprocess所属
-        戻り値: 入場可能時のNoneか待機理由
+        戻り値: 取れた lock を持つ descriptor。受入が待つ場合のNone
+        制約: 呼び側が閉じるまで、受入は待ちの印を付けられない。確認から入場の完了までを不可分にするため、
+            deep は判定から scope の起動が済むまで持つ
         """
-        waiting = [row for row in entries if row["phase"] == "waiting"]
-        if min(waiting, key=lambda row: (row["order"], row["pid"]))["pid"] != os.getpid():
-            return "an earlier workload is waiting"
-        active = [row for row in entries if row["phase"] == "running"]
-        growth = self.memory + sum(row["memoryBytes"] - resident_credit(row, table) for row in active)
-        if growth > min(snapshot["hostMemoryHeadroomBytes"], snapshot["windowsCommitHeadroomBytes"]):
-            return "Linux memory or Windows commit headroom is reserved"
-        for limit in snapshot["memoryLimits"]:
-            if type(limit["headroomBytes"]) is not int or limit["headroomBytes"] < 0:
-                raise AdmissionError("invalid cgroup memory headroom")
-            needed = self.memory + sum(row["memoryBytes"] - resident_credit(row, table, limit["path"]) for row in active)
-            if needed > limit["headroomBytes"]:
-                return f"memory headroom is reserved at {limit['path']}"
-        return None
+        descriptor = os.open(self.policy.runtime / WAITING_LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(descriptor)
+            return None
+        return descriptor
 
-    def acquire(self, supervisor, deadline):
-        """有限の期限内でのFIFO入場と取消の受付
+    def mark_waiting(self, supervisor, wait_until):
+        """受入が待つ印の共有 lock の取得。process が死ねば kernel が外す
+
+        戻り値: lock を持つ descriptor。取消か期限で取れなければ None
+        """
+        descriptor = os.open(self.policy.runtime / WAITING_LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        while True:
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                return descriptor
+            except BlockingIOError:
+                if supervisor.cancel_signal is not None or time.time() >= wait_until:
+                    os.close(descriptor)
+                    return None
+                supervisor.wait_for_event(min(0.02, max(0, wait_until - time.time())))
+
+    def mark_cancelled(self, scope):
+        """scope を取り消すと、その走行の supervisor が終了時に読める記録を残す
+
+        scope: 取り消す deep の scope
+        戻り値: 記録を残せた場合のTrue。残せなければ取り消さない
+        制約: 記録は状態 directory の scope 名を持つ空の file。走行を表す記録ではなく、command の status から取消を推し量らないための印
+        """
+        try:
+            descriptor = os.open(self.policy.runtime / f"{CANCEL_MARK}{scope.unit}",
+                                 os.O_CREAT | os.O_WRONLY | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        except OSError as error:
+            print(f"dotfiles-supervise: cannot record the cancellation of {scope.unit}: {error}", file=sys.stderr, flush=True)
+            return False
+        os.close(descriptor)
+        return True
+
+    def prune_marks(self, scopes):
+        """読まれないまま残った取消の記録の片付け。scope が無く一定の時間を過ぎた記録だけを消す
+
+        scopes: 存在する scope
+        """
+        live = {scope.unit for scope in scopes}
+        for mark in self.policy.runtime.glob(f"{CANCEL_MARK}*"):
+            try:
+                if mark.name[len(CANCEL_MARK):] not in live and time.time() - mark.stat().st_mtime > STALE_MARK_SECONDS:
+                    mark.unlink()
+            except OSError:
+                continue
+
+    def cancelled(self):
+        """この走行が受入に取り消されたかの確認
+
+        戻り値: 取り消された場合のTrue。command の終了 status にはよらない
+        制約: 自分の scope の記録は読んで消す。入れ子の走行は外側の scope の記録を読むだけで消さない。
+            消すのは、その scope を作った外側の supervisor
+        """
+        if self.inherited:
+            return self.enclosing is not None and (self.policy.runtime / f"{CANCEL_MARK}{self.enclosing}").exists()
+        if self.unit is None:
+            return False
+        try:
+            (self.policy.runtime / f"{CANCEL_MARK}{self.unit}").unlink()
+        except OSError:
+            return False
+        return True
+
+    def cancel(self, scopes):
+        """deep の scope を取り消す。native の stop が scope の全 process へ SIGTERM を送る
+
+        scopes: 存在する scope
+        副作用: 取消の記録を残してから取り消しの要求を出し、終了は待たない。次の観測で空きとして現れる
+        制約: 記録は stop より前に残す。command が TERM を受けて 0 で終わっても、deep の supervisor は取消と判る。
+            要求は scope ごとに一度。終わるまでの間は、manager が TimeoutStopSec で止めを刺す
+        """
+        self.prune_marks(scopes)
+        for scope in cancellable(scopes):
+            if scope.unit in self.stopping or not self.mark_cancelled(scope):
+                continue
+            try:
+                stopped = subprocess.run([*self.policy.systemctl, "--user", "stop", "--no-block", scope.unit],
+                                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                         timeout=STOP_SECONDS, check=False)
+            except (OSError, subprocess.TimeoutExpired) as error:
+                print(f"dotfiles-supervise: cannot stop {scope.unit}: {error}", file=sys.stderr, flush=True)
+                continue
+            if stopped.returncode == 0:
+                self.stopping.add(scope.unit)
+
+    def scope_command(self):
+        """走行ごとの scope を作って command を起動する前置 argv。需要は scope の memory.low か memory.high へ入る"""
+        unit = f"dotfiles-workload-{self.klass}-{os.getpid()}-{uuid.uuid4().hex[:8]}.scope"
+        self.unit = unit
+        return [*self.policy.systemd_run, "--user", "--scope", "--quiet", "--collect", "--expand-environment=no",
+                f"--slice={self.policy.slice_unit(self.klass)}", f"--unit={unit}",
+                "-p", f"{DEMAND_PROPERTIES[self.klass]}={self.memory}", "-p", f"TimeoutStopSec={STOP_TIMEOUT}"]
+
+    def acquire(self, supervisor, wait_until, launch):
+        """待機の上限内での入場と、入場した走行の scope での起動
 
         supervisor: signalと公開状態を所有する監督器
-        deadline: 待機を含む呼出し全体の絶対期限
-        戻り値: 入場成功のTrueか取消・期限切れのFalse
+        wait_until: 待機の絶対期限。走行の秒数とは別に数える
+        launch: scope の前置 argv、oom_score_adj、待機の絶対期限を受け、判定の排他の中で client を起動する関数
+        戻り値: 入場して起動した、または入れ子で外側の scope の中にいる場合のTrue。取消と期限切れはFalse
+        失敗: scope を作れない場合や明示需要が上限を超える場合の AdmissionError
         """
-        table = process_table()
-        if self.inherited_lease(table):
+        if self.inherit():
             return True
-        self.path = self.root / f"{os.getpid()}-{uuid.uuid4().hex}.json"
-        self.entry = {"pid": os.getpid(), "start": table[os.getpid()][1], "boot": self.boot,
-                      "phase": "waiting", "order": time.monotonic_ns(), "memoryBytes": self.memory}
-        registry = os.open(self.root / "registry.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        waiting = None
+        if self.klass == "acceptance":
+            waiting = self.mark_waiting(supervisor, wait_until)
+            if waiting is None:
+                return False
+        registry = os.open(self.policy.runtime / REGISTRY_LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
         try:
-            while supervisor.cancel_signal is None and time.time() < deadline:
-                snapshot, reason = self.snapshot(deadline)
+            while supervisor.cancel_signal is None and time.time() < wait_until:
+                observation, reason = self.snapshot(wait_until)
                 try:
                     fcntl.flock(registry, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
-                    supervisor.wait_for_event(min(0.05, max(0, deadline - time.time())))
+                    supervisor.wait_for_event(min(0.05, max(0, wait_until - time.time())))
                     continue
+                guard = None
                 try:
-                    if self.fd is None:
-                        self.fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_CLOEXEC, 0o600)
-                        fcntl.flock(self.fd, fcntl.LOCK_EX)
-                        self.persist()
-                    records = self.records()
-                    if snapshot is not None:
-                        reason = self.fits(snapshot, records, process_table())
-                    if reason is None and supervisor.cancel_signal is None and time.time() < deadline:
-                        self.entry["phase"] = "running"
-                        self.entry["memoryBytes"] = self.memory
-                        self.persist()
-                        return True
+                    if observation is not None:
+                        scopes = self.scopes(observation)
+                        if self.klass == "deep":
+                            guard = self.hold_no_acceptance_waiting()
+                        decision = decide(self.klass, self.memory, scopes, observation,
+                                          self.klass == "deep" and guard is None)
+                        reason = decision.reason
+                        if decision.kind == ADMIT and supervisor.cancel_signal is None and time.time() < wait_until:
+                            if launch(self.scope_command(), OOM_SCORES[self.klass], wait_until):
+                                return True
+                        if decision.kind == CANCEL_DEEP:
+                            self.cancel(scopes)
                 finally:
+                    if guard is not None:
+                        os.close(guard)
                     fcntl.flock(registry, fcntl.LOCK_UN)
                 if reason != self.previous_reason:
-                    supervisor.record("waiting", spawned=False, reason=reason, deadline=deadline)
+                    supervisor.record("waiting", spawned=False, reason=reason, deadline=wait_until)
                     print(f"dotfiles-supervise: waiting for resources: {reason}", file=sys.stderr, flush=True)
                     self.previous_reason = reason
                     if reason is not None and reason not in self.reasons and len(self.reasons) < MAXIMUM_REASONS:
                         self.reasons.append(reason)
-                supervisor.wait_for_event(min(0.5, max(0, deadline - time.time())))
+                supervisor.wait_for_event(min(0.5, max(0, wait_until - time.time())))
             return False
         finally:
             os.close(registry)
-
-    def close(self, drained):
-        """終了確認済み予約の解放
-
-        drained: 子孫の終了確認または未起動のTrue
-        制約: 終了未確認の記録の維持
-        戻り値: なし
-        """
-        if not self.inherited and self.fd is not None and self.path is not None:
-            if drained:
-                self.path.unlink(missing_ok=True)
-            os.close(self.fd)
-            self.fd = None
+            if waiting is not None:
+                os.close(waiting)

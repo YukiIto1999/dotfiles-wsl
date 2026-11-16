@@ -444,7 +444,8 @@ set_budget "$resource_wait" 1
 git -C "$resource_wait" add Makefile
 git -C "$resource_wait" commit -q -m 'test: 資源待機の検査の追加'
 rm -f "$MARKER"
-GIT_RESOURCE_PRESSURE=1 expect_refused 'push without resource headroom' "$HOOKS" "$resource_wait" refs/heads/main
+GIT_RESOURCE_PRESSURE=fail expect_refused 'push without resource headroom' "$HOOKS" "$resource_wait" refs/heads/main
+grep -qF '(終了 75)' stderr || fail 'the push that could not enter within its wait limit did not say it was not run (75)'
 test ! -e "$MARKER" || fail 'verify-push ran while resource admission was blocked'
 set_budget "$resource_wait" 15
 push "$HOOKS" "$resource_wait" || fail 'push remained blocked after resource headroom recovered'
@@ -452,8 +453,14 @@ test "$(cat "$MARKER")" = "$resource_wait" || fail 'the recovered push did not r
 test "$(remote_ref "$resource_wait" refs/heads/main)" = "$(git -C "$resource_wait" rev-parse HEAD)" \
   || fail 'the recovered push did not update the remote'
 
+# 警告の圧迫は待つ者のいる検証を止めない。止めるのは failure だけで、警告の中でも検証は走り、予算の外の待ちも生じない
+rm -f "$MARKER"
+GIT_RESOURCE_PRESSURE=warn push "$HOOKS" "$resource_wait" HEAD:refs/heads/at-warning \
+  || fail 'a warning of resource pressure held up the push of an acceptance verification'
+test "$(cat "$MARKER")" = "$resource_wait" || fail 'the push under a warning of resource pressure did not run verification'
+
 # 鍵の無い短い段(入口の解決)は資源の待ちに並ばない。圧迫の中でも入口は解決し、省いた検査の記録に解決した入口が残る
-GIT_RESOURCE_PRESSURE=1 DOTFILES_VERIFY_PUSH_BYPASS='資源待機中の入口の解決' push "$HOOKS" "$resource_wait" HEAD:refs/heads/short-stage \
+GIT_RESOURCE_PRESSURE=fail DOTFILES_VERIFY_PUSH_BYPASS='資源待機中の入口の解決' push "$HOOKS" "$resource_wait" HEAD:refs/heads/short-stage \
   || fail 'the bypassed push was held up while resource admission was blocked'
 grep -F "repo=$resource_wait" "$bypass_log" | grep -F 'reason=資源待機中の入口の解決' | grep -qF 'entry=make verify-push' \
   || fail 'the entry resolution waited for resource admission instead of resolving at once'

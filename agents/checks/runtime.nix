@@ -77,13 +77,15 @@
             runtimeContract = runtimePackageContract;
           }
         );
-        # sandbox には資源観測の実体が無いため、常に余裕を返す観測で実測の記録まで同じ経路を通す
+        # sandbox には資源観測の実体が無いため、常に余裕を返す観測で実測の記録まで同じ経路を通す。
+        # AGENT_RESOURCE_PRESSURE_FILE が指す file がある間だけ failure の圧迫を返し、入場の待ちを作る
         resourceObservation = pkgs.writeScript "agent-resource-observation" ''
           #!${pkgs.python3}/bin/python3
-          import json, time
+          import json, os, time
+          held = os.path.exists(os.environ.get("AGENT_RESOURCE_PRESSURE_FILE", "/nonexistent"))
           print(json.dumps({
               "schemaVersion": 1,
-              "outcomes": [{"id": "resource/fixture", "status": "pass", "message": "fixture"}],
+              "outcomes": [{"id": "resource/fixture", "status": "fail" if held else "pass", "message": "fixture"}],
               "resources": [{"key": "workload", "value": {
                   "observedAt": time.time(),
                   "memoryTotalBytes": 68719476736,
@@ -91,6 +93,7 @@
                   "hostMemoryHeadroomBytes": 68719476736,
                   "memoryHeadroomBytes": 68719476736,
                   "memoryLimits": [],
+                  "memoryScopes": [],
                   "cpuCount": 12,
                   "windowsCommitHeadroomBytes": 68719476736,
                   "windowsPhysicalAvailableBytes": 17179869184,
@@ -98,15 +101,12 @@
               }}]
           }))
         '';
-        fixtureResourcePolicy = pkgs.writeText "agent-resource-policy.json" (
-          builtins.toJSON {
-            class = "acceptance";
-            runtimeDirectory = "/build/agent-workload-leases";
-            observation = [ (toString resourceObservation) ];
-            memoryPercent = 2;
-            maximumObservationAgeSeconds = 10;
-          }
-        );
+        fixtureResourcePolicy = supervise.sandboxPolicy {
+          class = "acceptance";
+          runtimeDirectory = "/build/agent-workload-run";
+          cgroupRoot = "/build/agent-workload-cgroup";
+          observation = [ (toString resourceObservation) ];
+        };
         resourceRuntime = import ../package.nix (
           runtimeArgs
           // {

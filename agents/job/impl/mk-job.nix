@@ -3,7 +3,7 @@
   pkgs,
   runner,
   lifecycle,
-  resourcePolicy,
+  slice,
 }:
 
 {
@@ -31,7 +31,6 @@ let
         --drain-seconds ${toString drainSeconds} \
         --supervise ${lib.getExe lifecycle.supervise} \
         --protect ${lib.getExe lifecycle.protect} \
-        --resource-policy ${lib.escapeShellArg (toString resourcePolicy)} \
         ${lib.concatMapStringsSep " " (path: "--hold ${lib.escapeShellArg (toString path)}") holds} \
         ${executableOptions} \
         -- ${lib.getExe worker} "$@"
@@ -57,7 +56,7 @@ in
       Unit.Description = description;
       Service = {
         Type = "oneshot";
-        Slice = "agents.slice";
+        Slice = slice;
         ExecStart = lib.getExe entry;
         KillMode = "control-group";
         TimeoutStartSec = executionLimitSeconds + drainSeconds + stopMarginSeconds;

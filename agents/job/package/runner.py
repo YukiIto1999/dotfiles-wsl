@@ -181,14 +181,13 @@ def confirmed_drained(result: Path) -> bool:
     return report.get("phase") == "finished" and report.get("drained") is True
 
 
-def supervise(run: Run, command: list[str], stdout: TextIO | None = None, stderr: TextIO | None = None, reserve: bool = False) -> Ended:
+def supervise(run: Run, command: list[str], stdout: TextIO | None = None, stderr: TextIO | None = None) -> Ended:
     """supervisor 配下での command の実行
 
     run: lock と絶対の実行期限と取消の記録と result の path を持つ実行状態
     command: supervisor 配下で起動する command の argv
     stdout: command の標準出力の受け先で None は runner の標準出力
     stderr: command の標準エラーの受け先で None は runner の標準エラー
-    reserve: workerに共通の資源予約を適用する選択
     戻り値: 停止原因と子孫の終了確認を伴う command の結果
     前提: run.lock が排他済みの file descriptor
     前提: stdout と stderr が file descriptor を持つ open file
@@ -205,15 +204,6 @@ def supervise(run: Run, command: list[str], stdout: TextIO | None = None, stderr
         return Ended(EXIT_SOFTWARE, True, reason)
     run.result.unlink(missing_ok=True)
     environment = {**os.environ, DEADLINE_ENV: f"{run.deadline:.3f}", NAME_ENV: run.options.name}
-    admission = []
-    if reserve and run.options.resource_policy:
-        # job の寿命は service の絶対の期限で、待ちも走行もその中に収まる。待ちの上限と走行の枠はどちらも残りの秒数にする
-        remaining = max(run.deadline - time.time(), 0.001)
-        admission = [
-            "--resource-policy", run.options.resource_policy,
-            "--resource-wait-until", str(run.deadline),
-            "--resource-run-seconds", f"{remaining:.3f}",
-        ]
     try:
         supervisor = subprocess.Popen(
             [
@@ -222,7 +212,6 @@ def supervise(run: Run, command: list[str], stdout: TextIO | None = None, stderr
                 "--result", str(run.result),
                 "--hold-fd", str(run.lock),
                 "--parent-death-cancels", str(os.getpid()),
-                *admission,
                 "--", *command,
             ],
             env=environment,
@@ -327,7 +316,7 @@ def execute(run: Run, worker: Worker) -> tuple[int, bool]:
     ended, physical = hold(run, worker.executables)
     if ended.reason is None and ended.drained:
         # profile は保護の後も動くため設定 path のままの起動は不可
-        ended = supervise(run, worker.command(physical), reserve=True)
+        ended = supervise(run, worker.command(physical))
     return conclude(run, ended), ended.drained
 
 
@@ -427,7 +416,6 @@ def parse(argv: list[str] | None) -> tuple[argparse.Namespace, Worker]:
     parser.add_argument("--supervise", required=True)
     parser.add_argument("--protect", required=True)
     parser.add_argument("--hold", action="append", default=[])
-    parser.add_argument("--resource-policy")
     parser.add_argument("--executable", action="append", default=[], type=executable_declaration, metavar="NAME=PATH")
     options = parser.parse_args(arguments[:split])
     command = arguments[split + 1 :]

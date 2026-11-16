@@ -181,15 +181,6 @@ in
             記録のある走行は、直近の実測のピークから決めた需要を予約する。hard limitではなく開始前の需要宣言。
           '';
         };
-        jobMemoryPercent = lib.mkOption {
-          type = lib.types.ints.between 1 100;
-          default = reservation.verificationMemoryPercent;
-          description = ''
-            計測の記録が無い走行だけに使う未計測の値。非対話agent job全体の物理memory需要を、
-            検証と同じ基準（cgroup limitBytes の最小値、無ければ物理memory総量）に対する割合で表す。
-            入れ子の検証を含む需要を外側で予約する。
-          '';
-        };
       };
       admissionPolicy = lib.mkOption {
         type = lib.types.path;
@@ -202,12 +193,6 @@ in
         readOnly = true;
         internal = true;
         description = "同じregistryへ参加する、待つ者のいない検証（dotfiles-workload-run）の資源予約policy。";
-      };
-      jobAdmissionPolicy = lib.mkOption {
-        type = lib.types.path;
-        readOnly = true;
-        internal = true;
-        description = "検証と同じregistryへ参加する非対話jobの予約policy。";
       };
       hostReservePercent = lib.mkOption {
         type = lib.types.ints.between 1 99;
@@ -355,7 +340,6 @@ in
     observationPackage = workloadObservation;
     admissionPolicy = workloadPolicy "acceptance" reservation.verificationMemoryPercent;
     deepAdmissionPolicy = workloadPolicy "deep" reservation.verificationMemoryPercent;
-    jobAdmissionPolicy = workloadPolicy "deep" reservation.jobMemoryPercent;
   };
   config.dotfiles.platform.cli.commands = {
     observeWorkload = workloadObservation;

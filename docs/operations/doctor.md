@@ -280,20 +280,20 @@ collectorは現在のWindows利用者として登録し、権限昇格やexecuti
 同名でも他のtaskやfileは変更しない。install途中の失敗は、実施済みの段階をstderrへ出す。
 更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は新しい検証が観測不明で待機するため、予約を使う配備を戻してから撤去する。
 
-T1、pre-pushの検査本体、非対話agent jobは共通の判定へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
-走行は、結果を同期に待つ者がいる受入（T1、pre-pushの検査本体）と、待つ者のいない深い検証（`dotfiles-workload-run`、非対話job）に分かれ、classごとに走行ごとのscopeを`agents-acceptance.slice`と`agents-deep.slice`の下に作る。
+T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
+走行は、結果を同期に待つ者がいる受入（T1、pre-pushの検査本体）と、待つ者のいない深い検証（`dotfiles-workload-run`）に分かれ、classごとに走行ごとのscopeを`agents-acceptance.slice`と`agents-deep.slice`の下に作る。
 受入は他の受入が待っていても止まらない。深い検証は受入が待つ間は入場せず、同時に一走行だけで、`CPUWeight=idle`により他が使わないCPUだけを使う。
 受入がmemoryで収まらず深い検証が動いていれば、深い検証だけが取り消される。受入とsessionは取り消されない。
 取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。managerがstopを受けなかった場合は、取り消す側がそのfileを消し、走行は自分の終了statusで終わる。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
 観測の圧迫は、受入はfailureだけで、深い検証はwarningでも止める。
 待機は走行の予算から分ける。入場の待ちには走行の予算と同じ秒数の上限があり、超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
 走行の予算は入場して起動した時から数え、超えれば取り消されて124で返る。待機の理由と待った秒数はjournaldの計測の一行と、stderrの待機理由で確認する。
-非対話のjobだけは例外で、serviceの絶対の期限が待ちを含めて残る。待ちの上限はその期限、走行の枠は起動した時点の残りの秒数なので、待った分だけ走行の枠が縮む。
+非対話のjobは判定へ参加しない。serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけで、入場を待たず、受入に取り消されず、深い検証の一走行にも数えない。実測のピークが約0.3 GiBで、memoryの判定に並べる量ではないためである。
 同じ処理を別入口から追加投入して待機を迂回しない。
 
 予約値は物理memoryの需要宣言であり、processのhard limitではない。CPUは予約せず、並列度はcommand自身が決める。
 物理memoryの需要は、明示した値、実測の記録から導いた値、未計測の既定値の順に決める。
-未計測の既定値は`dotfiles.workstation.workload.reservation`の`verificationMemoryPercent`（既定25）と、非対話jobの`jobMemoryPercent`で、最初の有効な観測のcgroup`limitBytes`の最小値（無ければ物理memory総量）に対する割合であり、ピークを保証しない。
+未計測の既定値は`dotfiles.workstation.workload.reservation`の`verificationMemoryPercent`（既定25）で、最初の有効な観測のcgroup`limitBytes`の最小値（無ければ物理memory総量）に対する割合であり、ピークを保証しない。
 需要は最も厳しい上限へ切り詰める。明示した需要が上限を超える場合は、待たずにcommandを起動せず70で返す。明示は`dotfiles-workload-run`の`--memory-gib`で行い、入れ子の処理は外側で合計需要を予約する。
 入れ子は、現在のprocessが走行のscopeの下にいれば、そのscopeの中で外側のclassのまま動き、二重に計上せず、待たず、昇格しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。
 wrapperを通らないcommandや共有backendの将来増加までは予約できない。
@@ -302,7 +302,7 @@ Windowsの物理空きはreserveを割った場合の開始保留に使い、予
 実測した需要は、呼出し側が鍵を渡した走行だけが読み書きする。
 記録は`${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/<鍵のsha256>.json`に置き、directoryは0700である。
 T1は`verify`、repositoryの根、入口のcommandを、pre-pushは検査本体だけに`verify-push`、repositoryの根、入口のcommandを、それぞれ改行でつないだ文字列を鍵にする。
-pre-pushの入口の解決とsourceの確認は数秒の短い走行で、鍵を渡さない。`dotfiles-run-within`は鍵を渡した呼出しだけを予約へ参加させ、鍵の無い短い段は予約の待ちに並ばない。`dotfiles-workload-run`と非対話jobも鍵を渡さない。
+pre-pushの入口の解決とsourceの確認は数秒の短い走行で、鍵を渡さない。`dotfiles-run-within`は鍵を渡した呼出しだけを予約へ参加させ、鍵の無い短い段は予約の待ちに並ばない。`dotfiles-workload-run`も鍵を渡さない。
 supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計を約1秒ごとに測ってピークを保つ。子孫でない共有backendの消費は測れない。
 記録に残すのは、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけで、新しい順に10件を保つ。失敗、予算切れ、取消の走行は入口の途中で止まりピークが需要を下回るため、記録すると次の予約を下げる。予約を超えたピークは途中で止まった走行でも需要の下限なので、記録は予約を上げる向きにしか働かない。
 需要は、新しい5件のピークの最大で、記録が無ければ未計測の既定値になる。記録は古くなっても使い、余裕は足さない。ピークを超えた走行は記録され、次回の需要が上がる。
@@ -316,7 +316,7 @@ supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計�
 journalctl -t dotfiles-supervise -o cat | jq -c .
 ```
 
-MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`と非対話job。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`を持つ。
+MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`を持つ。
 `nested`がtrueの行は外側の走行の中の入れ子で、外側とは別の行になるため、待機の集計では除く。
 `admitted`がfalseなら未起動で、75は待機の上限に達した未実行である。trueの124は入場後の走行の期限切れで、143は取消である。
 記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。

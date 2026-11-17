@@ -64,6 +64,14 @@ class JournalError(Exception):
     pass
 
 
+class Unverifiable(JournalError):
+    """構造は正しいが、渡した記録で出典や引用を確かめられない知見候補。抽出では候補だけを捨て、編集では日の失敗になる。"""
+
+    def __init__(self, origin: str, reason: str):
+        super().__init__(f"{origin}: {reason}")
+        self.reason = reason
+
+
 def child_timeout(limit: float | None) -> float | None:
     value = os.environ.get(DEADLINE_ENV)
     if value is None:
@@ -481,21 +489,25 @@ def parse_insights(output: str, origin: str) -> list[Any]:
     return data["insights"]
 
 
-def cite(item: Any, grounds: Grounds, origin: str, supported_only: bool) -> Citation:
+def quotation(item: Any, origin: str) -> tuple[str, str]:
     if not isinstance(item, dict) or set(item) != {"source", "quote"}:
         raise JournalError(f"{origin}: an evidence item does not have exactly source and quote")
     source, quote = item["source"], item["quote"]
     if not isinstance(source, str) or not isinstance(quote, str):
         raise JournalError(f"{origin}: an evidence source and quote must be strings")
+    return source, quote
+
+
+def cite(source: str, quote: str, grounds: Grounds, origin: str, supported_only: bool) -> Citation:
     if source not in grounds:
-        raise JournalError(f"{origin}: an evidence source was not among the supplied records")
+        raise Unverifiable(origin, "an evidence source was not among the supplied records")
     quote = quote.strip()
     if not quote:
-        raise JournalError(f"{origin}: an empty quotation for {source}")
+        raise Unverifiable(origin, f"an empty quotation for {source}")
     for ground in grounds[source]:
         if quote in ground.text and (ground.supported or not supported_only):
             return Citation(source, quote, ground.current)
-    raise JournalError(f"{origin}: a quotation for {source} is not in the supplied text usable for its status")
+    raise Unverifiable(origin, f"a quotation for {source} is not in the supplied text usable for its status")
 
 
 def insight_of(item: Any, grounds: Grounds, origin: str) -> Insight:
@@ -515,29 +527,50 @@ def insight_of(item: Any, grounds: Grounds, origin: str) -> Insight:
         raise JournalError(f"{origin}: insight status must be supported or hypothesis")
     if not isinstance(item["evidence"], list) or not item["evidence"]:
         raise JournalError(f"{origin}: an insight has no evidence")
+    # 構造の不正を先に全て判定する。確かめられない引用が前にあっても、構造の不正のある候補は捨てずに日の失敗にする
+    quotations = [quotation(raw, origin) for raw in item["evidence"]]
     citations: list[Citation] = []
-    for raw in item["evidence"]:
-        citation = cite(raw, grounds, origin, item["status"] == "supported")
+    for source, quote in quotations:
+        citation = cite(source, quote, grounds, origin, item["status"] == "supported")
         if citation not in citations:
             citations.append(citation)
     if not any(citation.current for citation in citations):
-        raise JournalError(f"{origin}: an insight cites only background records")
+        raise Unverifiable(origin, "an insight cites only background records")
     return Insight(status=item["status"], evidence=citations, **texts)
 
 
-def ask(options: argparse.Namespace, prompt: Path, material: str, grounds: Grounds, origin: str) -> list[Insight]:
-    items = parse_insights(summarize(options, prompt, material), origin)
-    return [insight_of(item, grounds, origin) for item in items]
+def reply(options: argparse.Namespace, prompt: Path, material: str, origin: str) -> list[Any]:
+    return parse_insights(summarize(options, prompt, material), origin)
 
 
-def extract(options: argparse.Namespace, sessions: list[Session]) -> list[Insight]:
+def screened(items: list[Any], grounds: Grounds, origin: str) -> tuple[list[Insight], list[Unverifiable]]:
+    # 抽出は各入力範囲から零件以上の候補を取り出す段で、記録で確かめられない候補は候補ではない。応答の構造の不正は捨てずに失敗する
+    kept: list[Insight] = []
+    dropped: list[Unverifiable] = []
+    for item in items:
+        try:
+            kept.append(insight_of(item, grounds, origin))
+        except Unverifiable as error:
+            dropped.append(error)
+    return kept, dropped
+
+
+def extract(options: argparse.Namespace, day: date, sessions: list[Session]) -> list[Insight]:
     found: list[Insight] = []
     for session in sessions:
         groups = batches(session)
         for number, records in enumerate(groups, start=1):
             origin = f"extract.md (session {session.id} batch {number}/{len(groups)})"
             material = extraction_material(session, number, len(groups), records)
-            found += ask(options, PROMPTS / "extract.md", material, grounds_of(records), origin)
+            items = reply(options, PROMPTS / "extract.md", material, origin)
+            kept, dropped = screened(items, grounds_of(records), origin)
+            if dropped:
+                reasons = "; ".join(error.reason for error in dropped)
+                print(
+                    f"dotfiles-agent-journal: {day}: {origin}: dropped {len(dropped)} of {len(items)} insight candidates: {reasons}",
+                    file=sys.stderr,
+                )
+            found += kept
     return found
 
 
@@ -582,7 +615,8 @@ def merge(options: argparse.Namespace, insights: list[Insight]) -> list[Insight]
         for citation in insight.evidence:
             grounds.setdefault(citation.source, []).append(Ground(citation.quote, citation.current, insight.status == "supported"))
     material = listing([synthesis_item(insight) for insight in insights])
-    return ask(options, PROMPTS / "synthesize.md", material, grounds, "synthesize.md")
+    items = reply(options, PROMPTS / "synthesize.md", material, "synthesize.md")
+    return [insight_of(item, grounds, "synthesize.md") for item in items]
 
 
 def synthesize(options: argparse.Namespace, insights: list[Insight]) -> list[Insight]:
@@ -649,7 +683,7 @@ def render(machine: str, day: date, start: datetime, end: datetime, insights: li
 def compose(
     options: argparse.Namespace, machine: str, day: date, start: datetime, end: datetime, sessions: list[Session]
 ) -> str:
-    return render(machine, day, start, end, synthesize(options, extract(options, sessions)))
+    return render(machine, day, start, end, synthesize(options, extract(options, day, sessions)))
 
 
 def git(journal: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:

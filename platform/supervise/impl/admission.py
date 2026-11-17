@@ -298,8 +298,9 @@ class Admission:
         try:
             with tempfile.TemporaryFile() as output:
                 command = [*self.policy.observation, self.slice_path(self.klass), *(self.slice_path(klass) for klass in CLASSES)]
+                # 混んだ機械では観測が数秒かかり、待ちの上限まで観測不能が続くため固定の短い打切りは不可。使える観測の古さの上限で打ち切る
                 result = subprocess.run(command, stdout=output, stderr=subprocess.DEVNULL,
-                                        timeout=min(2.0, remaining), check=False)
+                                        timeout=min(self.policy.maximum_age, remaining), check=False)
                 output.seek(0)
                 raw = output.read(65537)
             if result.returncode or len(raw) > 65536:

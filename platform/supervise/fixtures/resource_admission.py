@@ -705,6 +705,16 @@ class ResourceAdmission(unittest.TestCase):
         reason, _ = self.held_back("stale")
         self.assertEqual(reason, "resource observation is stale")
 
+    def test_i6_an_observation_that_a_busy_machine_answers_slowly_still_admits(self):
+        """An answer that takes seconds is used as long as it is no older than the policy lets an observation be."""
+        slowly = [sys.executable, "-c",
+                  "import subprocess,sys,time; time.sleep(2.5); raise SystemExit(subprocess.run(sys.argv[1:]).returncode)"]
+        policy = self.write_policy("acceptance", name="policy-slow-observation.json",
+                                   observation=[*slowly, *OBSERVE, str(self.snapshot)])
+        status, error, _ = self.run_command("slowly-observed", policy=policy)
+        self.assertEqual(status, 0, error)
+        self.assertNotIn("resource observation unavailable", error)
+
     # I7: ownership is the scope and waitpid
 
     def test_i7_a_killed_supervisor_blocks_nobody_and_its_scope_keeps_counting(self):

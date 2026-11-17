@@ -24,12 +24,54 @@ declare_budget() {
   printf '{"version":1,"verify":{"seconds":%s}}\n' "$2" >"$1/tiergate.json"
 }
 
+# 完走を期待する走行の予算。wrapper の起動と後始末が混んだ機械で 10 秒かかっても通る
+completion_budget=60
+# 期限に達することを確かめる走行の予算（秒）。期限の前に起きるべきこと（evaluator の起動、入場の待ち、公開）へ
+# 届く前に期限が来た走行は不具合ではなく負荷の表れなので、その走行だけを倍の予算で最初からやり直す。
+# 静かな機械は最初の値で届く。次の場面の最初の値は、前の場面がやり直さずに済んだなら半分へ戻し、やり直したなら伸ばした値のままにする
+reach_floor=4
+reach_budget=$reach_floor
+reach_limit=64
+reach_retried=0
+# 印の file が現れるまで 0.05 秒間隔で待つ回数（60 秒）
+mark_polls=1200
+
+# 期限に達することを確かめる場面の最初の予算を決める
+# 入力 reach_retried: 前の場面が予算を伸ばしてやり直したか
+reach_begin() {
+  if [ "$reach_retried" -eq 0 ] && [ "$reach_budget" -gt "$reach_floor" ]; then
+    reach_budget=$((reach_budget / 2))
+  fi
+  reach_retried=0
+}
+
+# 期限が起きるべきことへ届く前に来た走行のやり直しに向けて reach_budget を倍にする
+# 引数 $1: 届かなかった場面の名前
+# 制約: reach_limit を超えても届かないなら、負荷ではなく不具合として止める
+reach_widen() {
+  reach_retried=1
+  reach_budget=$((reach_budget * 2))
+  if [ "$reach_budget" -gt "$reach_limit" ]; then
+    echo "$1 did not reach its stage inside a $reach_limit second budget" >&2
+    exit 1
+  fi
+}
+
 t1_repository() {
   git init -q "$1"
   printf 'scripts.verify.exec = "true";\n' >"$1/devenv.nix"
   declare_budget "$1" "$2"
   git -C "$1" add devenv.nix tiergate.json
   git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+}
+
+# 期限に達した走行の後に、完走を期待する再走のため予算の宣言を書き換えて commit する
+# 引数 $1: repository
+# 制約: 木が変わるので、同じ木の上で走行を重ねる場面には使わない。止めた走行が何も残さないことと、
+# 再走が証跡を一つ公開することは、木の同一性に依らない
+widen_budget() {
+  declare_budget "$1" "$completion_budget"
+  git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid commit -qam 'test: 再走の予算の拡大'
 }
 
 expect_closed_gate() {
@@ -100,8 +142,16 @@ check_metadata_snapshot_boundary() (
   export HOME=$home BOUNDARY_JQ
   BOUNDARY_JQ=$(command -v jq)
   mkdir -p "$home/.cache/dotfiles-wsl/verification" "$fixture/snapshot-bin"
-  printf '#!%s\nset -euo pipefail\nprintf run >"$SNAPSHOT_RUN"\n(sleep 3; touch "$SNAPSHOT_LATE") &\nwait\n' \
-    "$BASH" >"$fixture/snapshot-bin/nix"
+  # 取消されなければ期限より長く生きる孫を持つ nix の代役。孫の PID を残してから、起動した印を書く
+  cat >"$fixture/snapshot-bin/nix" <<'SCRIPT'
+#!/usr/bin/env bash
+set -euo pipefail
+sleep "$SNAPSHOT_CHILD_LIFE" &
+printf '%s\n' "$!" >"$SNAPSHOT_CHILD"
+printf run >"$SNAPSHOT_RUN"
+wait
+SCRIPT
+  sed -i "1c#!$BASH" "$fixture/snapshot-bin/nix"
   chmod +x "$fixture/snapshot-bin/nix"
   export PATH="$fixture/snapshot-bin:$PATH"
   jq() {
@@ -110,7 +160,7 @@ check_metadata_snapshot_boundary() (
       result=$("$BOUNDARY_JQ" "$@") || status=$?
       if [ "$status" -eq 0 ]; then
         case $SNAPSHOT_CHANGE in
-          removed-entry) printf '{"version":1,"frontend":"nix","entries":[],"verify":{"seconds":2}}\n' >"$SNAPSHOT_METADATA" ;;
+          removed-entry) printf '{"version":1,"frontend":"nix","entries":[],"verify":{"seconds":%s}}\n' "$SNAPSHOT_BUDGET" >"$SNAPSHOT_METADATA" ;;
           deleted) rm -- "$SNAPSHOT_METADATA" ;;
           malformed) printf 'not json\n' >"$SNAPSHOT_METADATA" ;;
         esac
@@ -123,29 +173,38 @@ check_metadata_snapshot_boundary() (
   }
   export -f jq
   for name in removed-entry deleted malformed; do
-    repository=$fixture/snapshot-$name
-    git init -q "$repository"
-    printf '{ outputs = { self }: {}; }\n' >"$repository/flake.nix"
-    printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' \
-      >"$repository/tiergate.json"
-    git -C "$repository" add flake.nix tiergate.json
-    git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
-    export SNAPSHOT_METADATA=$repository/tiergate.json SNAPSHOT_CHANGE=$name
-    export SNAPSHOT_PROOF=$fixture/snapshot-$name-proof SNAPSHOT_RUN=$fixture/snapshot-$name-run
-    export SNAPSHOT_LATE=$fixture/snapshot-$name-late
-    receipts=$(stall_receipt_count)
-    litter=$(stall_litter)
-    status=0
-    (cd "$repository" && timeout 15 "$VERIFY" -- nix run --no-write-lock-file .#verify) \
-      2>"$fixture/snapshot-$name-stderr" || status=$?
+    reach_begin
+    while :; do
+      repository=$fixture/snapshot-$name-$reach_budget
+      git init -q "$repository"
+      printf '{ outputs = { self }: {}; }\n' >"$repository/flake.nix"
+      printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":%s}}\n' "$reach_budget" \
+        >"$repository/tiergate.json"
+      git -C "$repository" add flake.nix tiergate.json
+      git -C "$repository" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
+      export SNAPSHOT_METADATA=$repository/tiergate.json SNAPSHOT_CHANGE=$name SNAPSHOT_BUDGET=$reach_budget
+      export SNAPSHOT_PROOF=$fixture/snapshot-$name-$reach_budget-proof SNAPSHOT_RUN=$fixture/snapshot-$name-$reach_budget-run
+      export SNAPSHOT_CHILD=$fixture/snapshot-$name-$reach_budget-child SNAPSHOT_CHILD_LIFE=$((reach_budget + 60))
+      receipts=$(stall_receipt_count)
+      litter=$(stall_litter)
+      status=0
+      (cd "$repository" && timeout "$((reach_budget + 60))" "$VERIFY" -- nix run --no-write-lock-file .#verify) \
+        2>"$fixture/snapshot-$name-stderr" || status=$?
+      # 期限が nix の起動より先に来た走行は、負荷の表れとして予算を伸ばしてやり直す
+      if [ "$status" -ne 124 ] || [ -e "$SNAPSHOT_RUN" ]; then break; fi
+      reach_widen "canonical T1 after a $name metadata edit"
+    done
     if [ "$status" -ne 124 ]; then
       echo "canonical T1 after a $name metadata edit exited $status instead of retaining its captured deadline" >&2
       exit 1
     fi
     test "$(cat "$SNAPSHOT_PROOF")" = after-budget
     test "$(cat "$SNAPSHOT_RUN")" = run
-    sleep 4
-    test ! -e "$SNAPSHOT_LATE"
+    # 期限で取消された nix の孫は、返却の時点で回収済みである
+    if process_alive "$(<"$SNAPSHOT_CHILD")"; then
+      echo "the descendant of the canonical T1 after a $name metadata edit outlived its captured deadline" >&2
+      exit 1
+    fi
     test "$(stall_receipt_count)" = "$receipts"
     test "$(stall_litter)" = "$litter"
     git -C "$repository" restore --worktree -- tiergate.json
@@ -161,7 +220,7 @@ check_metadata_snapshot_boundary() (
     esac
     rm -f "$SNAPSHOT_RUN"
     status=0
-    (cd "$repository" && timeout 15 "$VERIFY" -- nix run --no-write-lock-file .#verify) \
+    (cd "$repository" && timeout "$completion_budget" "$VERIFY" -- nix run --no-write-lock-file .#verify) \
       2>"$fixture/snapshot-initial-$name-stderr" || status=$?
     if [ "$status" -ne 78 ]; then
       echo "canonical T1 with $name metadata exited $status instead of refusing configuration" >&2
@@ -201,26 +260,30 @@ SCRIPT
 
   while read -r name utility when pattern initial_runs retry_runs <&3; do
     printf 'receipt boundary: %s\n' "$name" >&2
-    repository=$fixture/stall-$name
-    t1_repository "$repository" 3
-    STALL_RUNS=$fixture/stall-$name-runs
-    litter_before=$(stall_litter)
-    receipts_before=$(stall_receipt_count)
-    cd "$repository"
+    reach_begin
+    while :; do
+      repository=$fixture/stall-$name-$reach_budget
+      t1_repository "$repository" "$reach_budget"
+      STALL_RUNS=$fixture/stall-$name-$reach_budget-runs
+      litter_before=$(stall_litter)
+      receipts_before=$(stall_receipt_count)
+      cd "$repository"
 
-    printf '%s %s %s\n' "$utility" "$when" "$pattern" >"$control"
-    rm -f "$control.ready"
-    set +e
-    "$STALLING_VERIFY" -- devenv shell -- verify
-    status=$?
-    set -e
-    rm -f "$control"
+      printf '%s %s %s\n' "$utility" "$when" "$pattern" >"$control"
+      rm -f "$control.ready"
+      set +e
+      "$STALLING_VERIFY" -- devenv shell -- verify
+      status=$?
+      set -e
+      rm -f "$control"
+      # 期限が止める段階より先に来た走行は、負荷の表れとして予算を伸ばしてやり直す。印が無いまま 124 で返る場合のほか、
+      # 段階を通る前の取消の後始末が同じ command を止める印を書いて取消を待ち続け、猶予の後の KILL で 137 になる場合もある
+      if [ "$status" -eq 124 ] && [ -s "$control.ready" ]; then break; fi
+      if [ "$status" -ne 124 ] && [ "$status" -ne 137 ]; then break; fi
+      reach_widen "T1 stopped at $name"
+    done
     if [ "$status" -ne 124 ]; then
       echo "T1 stopped at $name exited $status instead of the deadline status" >&2
-      exit 1
-    fi
-    if [ ! -s "$control.ready" ]; then
-      echo "T1 never reached the stage to stop at: $name" >&2
       exit 1
     fi
     test "$(cat "$STALL_RUNS" 2>/dev/null || printf 0)" = "$initial_runs"
@@ -232,6 +295,7 @@ SCRIPT
       exit 1
     fi
 
+    widen_budget "$repository"
     "$STALLING_VERIFY" -- devenv shell -- verify
     expect_open_gate "$repository" "retry after $name"
     if [ "$(cat "$STALL_RUNS")" != "$retry_runs" ]; then
@@ -259,7 +323,7 @@ SCENARIOS
     rm -f "$control.ready"
     "$STALLING_VERIFY" -- devenv shell -- verify &
     wrapper=$!
-    for _ in $(seq 1 200); do
+    for _ in $(seq 1 "$mark_polls"); do
       [ ! -s "$control.ready" ] || break
       sleep 0.05
     done
@@ -309,7 +373,7 @@ SCENARIOS
     rm -f "$control.ready" "$control.release"
     "$STALLING_VERIFY" -- make verify &
     wrapper=$!
-    for _ in $(seq 1 200); do
+    for _ in $(seq 1 "$mark_polls"); do
       [ ! -s "$control.ready" ] || break
       sleep 0.05
     done
@@ -357,7 +421,7 @@ SCENARIOS
     "$STALLING_VERIFY" -- make verify &
     wrapper=$!
     if [ "$name" = partial-marker ]; then
-      for _ in $(seq 1 200); do
+      for _ in $(seq 1 "$mark_polls"); do
         [ ! -s "$control.ready" ] || break
         sleep 0.05
       done
@@ -433,30 +497,51 @@ SCENARIOS
   done
 
   name=survivor
-  repository=$fixture/stall-$name
-  t1_repository "$repository" 3
-  STALL_RUNS=$fixture/stall-$name-runs
-  litter_before=$(stall_litter)
-  receipts_before=$(stall_receipt_count)
-  cd "$repository"
-  "$STALLING_VERIFY" -- devenv shell -- verify
-  expect_open_gate "$repository" "$name completed run"
-  test "$(stall_receipt_count)" = "$((receipts_before + 1))"
-  printf 'mv after *.verified\n' >"$control"
-  rm -f "$control.ready"
-  set +e
-  "$STALLING_VERIFY" -- devenv shell -- verify
-  status=$?
-  set -e
-  rm -f "$control"
-  if [ "$status" -ne 124 ] || [ ! -s "$control.ready" ]; then
-    echo "the second T1 on the same tree was not stopped during publication: $status" >&2
-    exit 1
-  fi
-  expect_open_gate "$repository" "$name earlier completed receipt"
-  test "$(stall_receipt_count)" = "$((receipts_before + 1))"
-  "$STALLING_VERIFY" -- devenv shell -- verify
-  "$STALLING_VERIFY" -- devenv shell -- verify
+  reach_begin
+  while :; do
+    repository=$fixture/stall-$name-$reach_budget
+    t1_repository "$repository" "$reach_budget"
+    STALL_RUNS=$fixture/stall-$name-$reach_budget-runs
+    litter_before=$(stall_litter)
+    receipts_before=$(stall_receipt_count)
+    cd "$repository"
+    # 同じ木へ四度走らせるため、予算は書き換えられない。完走を期待する三走行のどれかが期限に達した、
+    # または止める一走行が公開の前に期限に達したなら、負荷の表れとして予算を伸ばして最初からやり直す
+    status=0
+    "$STALLING_VERIFY" -- devenv shell -- verify || status=$?
+    if [ "$status" -eq 124 ]; then
+      reach_widen "T1 on the same tree ($name)"
+      continue
+    fi
+    test "$status" -eq 0
+    expect_open_gate "$repository" "$name completed run"
+    test "$(stall_receipt_count)" = "$((receipts_before + 1))"
+    printf 'mv after *.verified\n' >"$control"
+    rm -f "$control.ready"
+    status=0
+    "$STALLING_VERIFY" -- devenv shell -- verify || status=$?
+    rm -f "$control"
+    if [ "$status" -eq 124 ] && [ ! -s "$control.ready" ]; then
+      reach_widen "T1 on the same tree ($name)"
+      continue
+    fi
+    if [ "$status" -ne 124 ]; then
+      echo "the second T1 on the same tree was not stopped during publication: $status" >&2
+      exit 1
+    fi
+    expect_open_gate "$repository" "$name earlier completed receipt"
+    test "$(stall_receipt_count)" = "$((receipts_before + 1))"
+    for _ in 1 2; do
+      status=0
+      "$STALLING_VERIFY" -- devenv shell -- verify || status=$?
+      if [ "$status" -eq 124 ]; then
+        reach_widen "T1 on the same tree ($name)"
+        continue 2
+      fi
+      test "$status" -eq 0
+    done
+    break
+  done
   expect_open_gate "$repository" "$name repeated runs"
   # 公開で止めた二回目も含め、各走行は command を実行する
   test "$(cat "$STALL_RUNS")" = 4
@@ -579,7 +664,7 @@ slot_start() {
 
 slot_await() {
   local _
-  for _ in $(seq 1 400); do
+  for _ in $(seq 1 "$mark_polls"); do
     [ ! -e "$1" ] || return 0
     sleep 0.05
   done
@@ -589,7 +674,7 @@ slot_await() {
 
 slot_await_waiting() {
   local _
-  for _ in $(seq 1 400); do
+  for _ in $(seq 1 "$mark_polls"); do
     if [ -s "$slot_dir/$1.stderr" ] && [[ $(<"$slot_dir/$1.stderr") == *実行枠* ]]; then
       return 0
     fi
@@ -617,7 +702,7 @@ slot_hold() {
   local _
   "$BASH" -c 'exec {fd}>>"$1"; flock -x "$fd"; exec sleep 120' _ "$slot_file" &
   slot_holder=$!
-  for _ in $(seq 1 400); do
+  for _ in $(seq 1 "$mark_polls"); do
     if ! flock -n "$slot_file" true; then break; fi
     sleep 0.05
   done
@@ -740,29 +825,37 @@ check_slot_source_edit_while_waiting() {
 }
 
 # 枠の待ちには予算と同じ秒数の上限がある。上限まで枠が空かなければ command を実行せず、未実行の 75 を返して何も残さない
-# 入口解決と枠の確保は混んだ機械で数秒かかり、それが予算を使い切ると待たずに 124 になるため、予算は待つ前の所要より十分大きく取る
+# 入口解決と枠の確保で予算を使い切り、枠の待ちを始める前に 124 で返った走行は、その走行だけを倍の予算でやり直す
 check_slot_waiter_deadline() {
-  local budget=8 status litter started
-  slot_prepare waiter-deadline "$budget"
-  slot_hold
-  litter=$(stall_litter)
-  started=$SECONDS
-  status=0
-  SLOT_NAME=waiter SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
-    "$VERIFY" -- devenv shell -- verify 2>"$slot_dir/waiter.stderr" || status=$?
+  local status litter started
+  reach_begin
+  while :; do
+    slot_prepare "waiter-deadline-$reach_budget" "$reach_budget"
+    slot_hold
+    litter=$(stall_litter)
+    started=$SECONDS
+    status=0
+    SLOT_NAME=waiter SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
+      "$VERIFY" -- devenv shell -- verify 2>"$slot_dir/waiter.stderr" || status=$?
+    if [ "$status" -ne 124 ] || [[ $(<"$slot_dir/waiter.stderr") == *実行枠* ]]; then break; fi
+    kill "$slot_holder"
+    wait "$slot_holder" || true
+    reach_widen 'T1 waiting for the slot'
+  done
   if [ "$status" -ne 75 ]; then
     echo "T1 that waited out its slot limit exited $status instead of 75" >&2
     exit 1
   fi
-  # 待ちは予算と同じ秒数をまるごと使ってから打ち切られ、その何倍も待たない
-  test "$((SECONDS - started))" -ge "$budget"
-  test "$((SECONDS - started))" -lt 30
+  # 待ちは予算と同じ秒数をまるごと使ってから打ち切られ、その後も長く待たない
+  test "$((SECONDS - started))" -ge "$reach_budget"
+  test "$((SECONDS - started))" -lt "$((reach_budget + 30))"
   test ! -e "$slot_dir/waiter.started"
   [[ $(<"$slot_dir/waiter.stderr") == *'(75)'* ]]
   test "$(stall_litter)" = "$litter"
   expect_closed_gate "$slot_repo" 'run that waited out its slot limit'
   kill "$slot_holder"
   wait "$slot_holder" || true
+  widen_budget "$slot_repo"
   : >"$slot_dir/retry.release"
   SLOT_NAME=retry SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
     "$VERIFY" -- devenv shell -- verify
@@ -770,26 +863,34 @@ check_slot_waiter_deadline() {
 }
 
 # 枠を待った時間は走行の予算に数えない。枠が空いた後の走行は、待たなかった場合と同じ予算の全量で自分の command を走らせる
-# 待ち 11 秒と走行 4 秒の合計は予算の 14 秒を超えるため、待ちを数える実装は 124 になる
-# 待ち以外の所要（入口解決、証跡の記録と公開）は混んだ機械で数秒に及ぶため、走行は予算より十分短くする
+# 待ちと走行 6 秒の合計は予算に等しく、待ち以外の所要が加わるので、待ちを数える実装は command を起動する前に 124 で返る
+# 待ち以外の所要（入口解決、証跡の記録と公開）は最初の予算（16 秒）なら 10 秒に及んでも収まる。
+# command を起動した後で予算を使い切った走行は、待ち以外の所要が重なった負荷の表れなので、倍の予算でやり直す
 check_slot_wait_outside_budget() {
-  local budget=14 waited=11 ran=4 waiter _
-  slot_prepare wait-budget "$budget"
-  slot_hold
-  slot_start waiter
-  waiter=$slot_pid
-  slot_await_waiting waiter
-  sleep "$waited"
-  kill "$slot_holder"
-  wait "$slot_holder" || true
-  for _ in $(seq 1 400); do
-    [ ! -e "$slot_dir/waiter.started" ] || break
-    kill -0 "$waiter" 2>/dev/null || break
-    sleep 0.05
+  local budget waited ran=6 waiter _
+  reach_begin
+  while :; do
+    budget=$((reach_budget * 4))
+    waited=$((budget - ran))
+    slot_prepare "wait-budget-$budget" "$budget"
+    slot_hold
+    slot_start waiter
+    waiter=$slot_pid
+    slot_await_waiting waiter
+    sleep "$waited"
+    kill "$slot_holder"
+    wait "$slot_holder" || true
+    for _ in $(seq 1 "$mark_polls"); do
+      [ ! -e "$slot_dir/waiter.started" ] || break
+      kill -0 "$waiter" 2>/dev/null || break
+      sleep 0.05
+    done
+    sleep "$ran"
+    : >"$slot_dir/waiter.release"
+    slot_finish "$waiter"
+    if [ "$slot_status" -ne 124 ] || [ ! -e "$slot_dir/waiter.started" ]; then break; fi
+    reach_widen 'T1 that waited for the slot'
   done
-  sleep "$ran"
-  : >"$slot_dir/waiter.release"
-  slot_finish "$waiter"
   if [ "$slot_status" -ne 0 ]; then
     echo "T1 that waited $waited seconds for the slot exited $slot_status instead of running with its whole $budget second budget" >&2
     exit 1
@@ -832,7 +933,7 @@ check_slot_parent_death() {
   slot_await "$slot_dir/orphaned.started"
   kill -KILL "$slot_pid"
   slot_finish "$slot_pid"
-  for _ in $(seq 1 400); do
+  for _ in $(seq 1 "$mark_polls"); do
     process_alive "$(<"$slot_dir/orphaned.pid")" || break
     sleep 0.05
   done
@@ -840,7 +941,7 @@ check_slot_parent_death() {
     echo 'the command outlived its killed caller' >&2
     exit 1
   fi
-  for _ in $(seq 1 400); do
+  for _ in $(seq 1 "$mark_polls"); do
     ! flock -n "$slot_file" true || break
     sleep 0.05
   done
@@ -1493,7 +1594,7 @@ if [ "${DEADLINE_SLOW-}" = 1 ]; then
   wait
 fi
 if [ "${DEADLINE_SLOW-}" = session ]; then
-  setsid bash -c 'printf "%s\n" "$$" >"$DEADLINE_PID"; sleep 4; touch "$DEADLINE_LATE"' </dev/null >/dev/null 2>&1 &
+  setsid bash -c 'printf "%s\n" "$$" >"$DEADLINE_PID"; sleep "${DEADLINE_SLEEP:-4}"; touch "$DEADLINE_LATE"' </dev/null >/dev/null 2>&1 &
   wait
 fi
 SCRIPT
@@ -1513,6 +1614,8 @@ if "$GATE" check --repo "$budget_repo" >/dev/null 2>&1; then
 fi
 sleep 4
 test ! -e "$fixture/deadline-late"
+# 期限に達した走行の後の再走は完走を期待するので、予算の宣言を書き換える
+widen_budget "$budget_repo"
 PATH="$fixture/budget-bin:$PATH" "$VERIFY" -- devenv shell -- verify
 "$GATE" check --repo "$budget_repo" >/dev/null
 
@@ -1533,28 +1636,56 @@ test -s "$resource_state/dotfiles-wsl/workload/demand/$resource_digest.json" || 
 }
 
 # 入場の待ちは T1 の予算に数えず、走行の枠だけを予算で数える。待った後の走行は、待たなかった場合と同じ予算で完走する。
+# 待ちと走行 6 秒の合計は予算に等しく、待ち以外の所要が加わるので、待ちを数える実装は command を起動する前に 124 で返る。
+# 待ち以外の所要は最初の予算（16 秒）なら 10 秒に及んでも収まる。command を起動した後で予算を使い切った走行は、
+# 待ち以外の所要が重なった負荷の表れなので、倍の予算でやり直す
 # 待ちの上限は予算と同じ秒数で、超えると command を実行せず 75 を返し、証跡を公開しない
 mkdir "$fixture/resource-slow-bin"
-printf '#!%s\nsleep 3\n' "$BASH" >"$fixture/resource-slow-bin/devenv"
+printf '#!%s\ntouch "$WAIT_STARTED"\nsleep 6\n' "$BASH" >"$fixture/resource-slow-bin/devenv"
 chmod +x "$fixture/resource-slow-bin/devenv"
 pressure=$fixture/resource-pressure
-wait_repo=$fixture/resource-wait-repo
-t1_repository "$wait_repo" 5
-: >"$pressure"
-(cd "$wait_repo" && AGENT_RESOURCE_PRESSURE_FILE=$pressure XDG_STATE_HOME=$resource_state \
-  PATH="$fixture/resource-slow-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) &
-waiting_pid=$!
-sleep 3
-rm -f "$pressure"
-# 待ち約3秒と走行3秒は予算の5秒を超えるが、走行の枠は入場から数えるので完走する
-wait "$waiting_pid"
+reach_begin
+while :; do
+  wait_budget=$((reach_budget * 4))
+  wait_repo=$fixture/resource-wait-repo-$wait_budget
+  t1_repository "$wait_repo" "$wait_budget"
+  : >"$pressure"
+  : >"$fixture/wait.stderr"
+  (cd "$wait_repo" && WAIT_STARTED=$fixture/wait-started-$wait_budget AGENT_RESOURCE_PRESSURE_FILE=$pressure \
+    XDG_STATE_HOME=$resource_state PATH="$fixture/resource-slow-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/wait.stderr" &
+  waiting_pid=$!
+  # 入場の待ちが始まったと分かってから、走行 6 秒を足して予算になる秒数だけ押さえる。入場を求めるまでの所要は待ちの長さに響かない
+  for _ in $(seq 1 "$mark_polls"); do
+    if [[ $(<"$fixture/wait.stderr") == *'waiting for resources'* ]]; then break; fi
+    sleep 0.05
+  done
+  if [[ $(<"$fixture/wait.stderr") != *'waiting for resources'* ]]; then
+    kill -TERM "$waiting_pid" 2>/dev/null || true
+    wait "$waiting_pid" || true
+    echo 'T1 under resource pressure never reported that it waits' >&2
+    exit 1
+  fi
+  sleep "$((wait_budget - 6))"
+  rm -f "$pressure"
+  wait_status=0
+  wait "$waiting_pid" || wait_status=$?
+  if [ "$wait_status" -ne 124 ] || [ ! -e "$fixture/wait-started-$wait_budget" ]; then break; fi
+  reach_widen 'T1 that waited for resources'
+done
+test "$wait_status" -eq 0
 expect_open_gate "$wait_repo" 'T1 that waited for resources and then ran inside its budget'
-limit_repo=$fixture/resource-limit-repo
-t1_repository "$limit_repo" 2
 : >"$pressure"
-limit_status=0
-(cd "$limit_repo" && AGENT_RESOURCE_PRESSURE_FILE=$pressure XDG_STATE_HOME=$resource_state \
-  PATH="$fixture/resource-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/limit.stderr" || limit_status=$?
+reach_begin
+while :; do
+  limit_repo=$fixture/resource-limit-repo-$reach_budget
+  t1_repository "$limit_repo" "$reach_budget"
+  limit_status=0
+  (cd "$limit_repo" && AGENT_RESOURCE_PRESSURE_FILE=$pressure XDG_STATE_HOME=$resource_state \
+    PATH="$fixture/resource-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/limit.stderr" || limit_status=$?
+  # 入場を求める前に予算を使い切った走行（124）は待ちの上限へ届いていないので、予算を伸ばしてやり直す
+  if [ "$limit_status" -ne 124 ] || [[ $(<"$fixture/limit.stderr") == *'waiting for resources'* ]]; then break; fi
+  reach_widen 'T1 waiting for resources'
+done
 rm -f "$pressure"
 test "$limit_status" -eq 75 || {
   echo "T1 that could not enter within its wait limit returned $limit_status instead of 75" >&2
@@ -1563,20 +1694,22 @@ test "$limit_status" -eq 75 || {
 grep -qF '(75)' "$fixture/limit.stderr"
 expect_closed_gate "$limit_repo" 'T1 that was never started'
 
-escape_repo=$fixture/session-escape-budget-repo
-t1_repository "$escape_repo" 2
-cd "$escape_repo"
-rm -f "$fixture/escaped.pid" "$fixture/escaped-late"
-set +e
-PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=session DEADLINE_PID=$fixture/escaped.pid \
-  DEADLINE_LATE=$fixture/escaped-late "$VERIFY" -- devenv shell -- verify
-escape_status=$?
-set -e
+reach_begin
+while :; do
+  escape_repo=$fixture/session-escape-budget-repo-$reach_budget
+  t1_repository "$escape_repo" "$reach_budget"
+  cd "$escape_repo"
+  rm -f "$fixture/escaped.pid" "$fixture/escaped-late"
+  set +e
+  PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=session DEADLINE_SLEEP=$((reach_budget + 2)) \
+    DEADLINE_PID=$fixture/escaped.pid DEADLINE_LATE=$fixture/escaped-late "$VERIFY" -- devenv shell -- verify
+  escape_status=$?
+  set -e
+  # 期限が別 session の遅延書込みの起動より先に来た走行は、負荷の表れとして予算を伸ばしてやり直す
+  if [ "$escape_status" -ne 124 ] || [ -s "$fixture/escaped.pid" ]; then break; fi
+  reach_widen 'T1 entry that starts a delayed writer in its own session'
+done
 test "$escape_status" -eq 124
-if [ ! -s "$fixture/escaped.pid" ]; then
-  echo 'the T1 entry never started the delayed writer in its own session' >&2
-  exit 1
-fi
 if process_alive "$(<"$fixture/escaped.pid")"; then
   echo 'T1 returned at its budget while a descendant in its own session was still running' >&2
   exit 1
@@ -1588,8 +1721,8 @@ fi
 expect_closed_gate "$escape_repo" 'descendant in its own session'
 
 long_budget_repo=$fixture/long-budget-repo
-t1_repository "$long_budget_repo" 10
-test "$("$GATE" budget --repo "$long_budget_repo")" = 10
+t1_repository "$long_budget_repo" "$completion_budget"
+test "$("$GATE" budget --repo "$long_budget_repo")" = "$completion_budget"
 cd "$long_budget_repo"
 PATH="$fixture/budget-bin:$PATH" DEADLINE_SLOW=1 DEADLINE_LATE=$fixture/long-deadline-late \
   "$VERIFY" -- devenv shell -- verify
@@ -1691,11 +1824,6 @@ test -z "$(timeout 60 "$GATE" entry --repo "$stalled_repo")"
 test "$(timeout 60 "$GATE" candidates --repo "$stalled_repo")" = 'nix run --no-write-lock-file .#verify'
 timeout 60 "$GATE" check --repo "$stalled_repo" >/dev/null
 
-printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":2}}\n' >"$stalled_repo/tiergate.json"
-git -C "$stalled_repo" add tiergate.json
-git -C "$stalled_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm budget
-litter_before=$(stall_litter)
-status=0
 # mock の待機は実 Nix の signal 応答を検査できないため不可
 real_nix=$(command -v nix)
 mkdir "$fixture/nix-observer-bin"
@@ -1708,15 +1836,27 @@ exec "$OBSERVED_NIX" "$@"
 SCRIPT
 chmod +x "$fixture/nix-observer-bin/nix"
 sed -i "1c#!$BASH" "$fixture/nix-observer-bin/nix"
-rm -f "$fixture/stalled-nix.processes"
 # 外側 guard の取消を wrapper の期限と混同するため、終了statusだけの判定は不可
-started=$SECONDS
-PATH="$fixture/nix-observer-bin:$PATH" OBSERVED_NIX=$real_nix \
-  OBSERVED_NIX_PROCESSES=$fixture/stalled-nix.processes \
-  NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
-  timeout --preserve-status 60 "$VERIFY" -- nix run --no-write-lock-file .#verify || status=$?
-elapsed=$((SECONDS - started))
-if [ "$status" -eq 0 ] || [ "$elapsed" -lt 1 ] || [ "$elapsed" -ge 60 ]; then
+reach_begin
+while :; do
+  printf '{"version":1,"frontend":"nix","entries":["verify"],"verify":{"seconds":%s}}\n' "$reach_budget" \
+    >"$stalled_repo/tiergate.json"
+  git -C "$stalled_repo" add tiergate.json
+  git -C "$stalled_repo" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm budget
+  litter_before=$(stall_litter)
+  rm -f "$fixture/stalled-nix.processes"
+  status=0
+  started=$SECONDS
+  PATH="$fixture/nix-observer-bin:$PATH" OBSERVED_NIX=$real_nix \
+    OBSERVED_NIX_PROCESSES=$fixture/stalled-nix.processes \
+    NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
+    timeout --preserve-status "$((reach_budget + 60))" "$VERIFY" -- nix run --no-write-lock-file .#verify || status=$?
+  elapsed=$((SECONDS - started))
+  # 期限が評価器の起動より先に来た走行は、負荷の表れとして予算を伸ばしてやり直す
+  if [ "$status" -ne 124 ] || [ -s "$fixture/stalled-nix.processes" ]; then break; fi
+  reach_widen 'T1 over a stalled Nix declaration'
+done
+if [ "$status" -eq 0 ] || [ "$elapsed" -lt 1 ] || [ "$elapsed" -ge "$((reach_budget + 60))" ]; then
   echo "T1 over a stalled Nix declaration returned status $status after ${elapsed}s outside its cancellation window" >&2
   exit 1
 fi
@@ -1734,8 +1874,8 @@ expect_closed_gate_within() {
   local gate_status=0
   started=$SECONDS
   NIX_REMOTE="$fixture/nix-store" NIX_CONFIG="experimental-features = nix-command flakes" \
-    timeout 60 "$GATE" check --repo "$1" >/dev/null 2>&1 || gate_status=$?
-  if [ "$gate_status" -eq 0 ] || [ "$((SECONDS - started))" -ge 30 ]; then
+    timeout "$((reach_budget + 60))" "$GATE" check --repo "$1" >/dev/null 2>&1 || gate_status=$?
+  if [ "$gate_status" -eq 0 ] || [ "$((SECONDS - started))" -ge "$((reach_budget + 30))" ]; then
     echo "gate over a stalled Nix declaration exited $gate_status instead of stopping at its budget" >&2
     exit 1
   fi

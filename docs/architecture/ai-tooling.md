@@ -146,6 +146,7 @@ supervisorの資源予約は、`--resource-policy FILE --resource-wait-until EPO
 受入がmemoryで収まらず、deepが動いていれば、deepのscopeだけを`systemctl --user stop`で取り消す。受入とsessionは取り消さない。
 取り消す側はstopの前に、scope名を持つ空のfileを状態directoryへ残す。deepのsupervisorは終了時にそれを読んで消し、commandがSIGTERMを受けて0で終わっても、取り消された未完了の走行として143で返し、実測の記録を残さない。managerがstopを受けなかった場合は取り消す側が記録を消し、届いていない取消で走行を143にしない。入れ子のsupervisorは外側のscope名の記録を読むだけで消さず、同じく143で返す。
 観測の圧迫は、受入はfailureだけ、deepはwarningでも入場を止める。
+受入がWindowsの物理空きのreserveを割ったために待つ間は、supervisorが利用者のuser managerのcgroupの`memory.reclaim`へ、需要とreserveに足りない量の合計を`swappiness=0`付きで10秒に1回まで書き、kernelにfile cacheだけをhostへ返させる。作業中のsessionをswapへ追い出さない。入場の条件は変えず、深い検証とWindows以外の待ちでは書かない。書けなくても待ちと走行の合否は変わらない。
 待機は走行の枠から分ける。待ちは`--resource-wait-until`までで、scopeを作る待ちも数え、入場できなければcommandを起動せず75で返す。走行の枠は入場して起動した時から数え、超えれば取り消して124で返す。呼び出し側は、待ちの上限をいまのところ走行の予算と同じ秒数にする。
 非対話のjobは資源予約を指定せず、serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけである。入場を待たず、deepの一走行にも数えず、受入に取り消されない。
 物理memoryの需要は、明示した値、`--resource-key`が示す実測の記録から導いた値、policyの`memoryPercent`による未計測の既定値の順に決め、最初の有効な観測の最も厳しい`limitBytes`（無ければ物理memory総量）へ切り詰める。

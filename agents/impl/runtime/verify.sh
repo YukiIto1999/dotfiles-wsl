@@ -80,13 +80,13 @@ run_bounded() {
 
 # 同じ project の T1 を一度に一つへ絞る実行枠の取得
 # 入力 top: 検査する repository の根
-# 入力 remaining: 呼び出しの直前に確定した待ちの上限秒
+# 入力 budget_seconds: 走行の予算秒。枠の待ちの上限秒にも使う
 # 入力 interrupted: signal trapが記録する当該走行の取消状態
-# 戻り値: 取得で0、予算内に取れなければ124、取消か枠の失敗でその終了status
-# 副作用: 取得後は slot_fd が枠を保持し、以降の supervise が子孫の回収まで同じ fd を握る
-# 制約: 待ちも走行の予算に含め、取消で待ちを止める。待った後も呼ばれた command を実行し、先行する走行の結果は借りない
+# 戻り値: 取得で0、待ちの上限に達すれば75、予算を使い切っていれば124、取消か枠の失敗でその終了status
+# 副作用: 取得後は slot_fd が枠を保持し、以降の supervise が子孫の回収まで同じ fd を握る。待った時間だけ予算の起点を進める
+# 制約: 待ちは走行の予算に数えず、別の上限（予算と同じ秒数）で数え、取消で待ちを止める。待った後も呼ばれた command を実行し、先行する走行の結果は借りない
 acquire_slot() {
-  local slot_file status=0
+  local slot_file status=0 waited_from_ms
   refresh_remaining || return 124
   run_bounded @gate@ slot --repo "$top" >"$entry_file" || return $?
   IFS= read -r slot_file <"$entry_file" || return 1
@@ -98,17 +98,20 @@ acquire_slot() {
   *) return "$status" ;;
   esac
   printf 'verify: 同じ project の検証が実行枠を使っている。終わるまで待つ\n' >&2
+  # 待つ前に予算を使い切っていれば、待った後も走れないため待たない
   refresh_remaining || return 124
-  @flock@ -w "$remaining" -E 124 -x "$slot_fd" &
+  waited_from_ms=$((${EPOCHREALTIME/[.,]/} / 1000))
+  @flock@ -w "$budget_seconds" -E 75 -x "$slot_fd" &
   bounded_pid=$!
   if [ "$interrupted" = true ]; then
     kill -s TERM "$bounded_pid" 2>/dev/null || true
   fi
   status=0
   await_bounded || status=$?
-  if [ "$status" -eq 124 ]; then
-    printf 'verify: T1 の時間予算を実行枠の待ちで使い切った\n' >&2
-  fi
+  case $status in
+  0) started_ms=$((started_ms + ${EPOCHREALTIME/[.,]/} / 1000 - waited_from_ms)) ;;
+  75) printf 'verify: 実行枠の空きを待つ上限（予算と同じ %s 秒）に達し、検証を実行しなかった(75)。同じ処理を重複投入せず、空いてから投入し直す\n' "$budget_seconds" >&2 ;;
+  esac
   return "$status"
 }
 

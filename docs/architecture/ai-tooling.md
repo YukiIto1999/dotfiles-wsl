@@ -185,7 +185,9 @@ Orcaが作るworktreeの寿命はOrcaが持つ。
 外部状態に依存するcommandの成否をwrapperで再利用せず、build成果物の再利用はNixやCargoへ任せる。
 宣言されたT1をrepositoryの根で呼ぶ場合は、Git common directoryを共有するprojectごとに一つの走行slotを取得する。
 排他は新しいwrapper同士に限り、旧wrapperで動くsessionを停止や移動しない。
-入口解決、slot待ち、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は取消を開始して成功として扱わない。
+入口解決、検査、成功証跡の保存と完了の記録を、走行開始から数えるprojectの予算で制限し、予算超過時は取消を開始して成功として扱わない。
+slotを待つ時間は予算に数えず、予算と同じ秒数の上限で打ち切る。
+上限に達した走行は検査を実行せず75で返り、slotを取った後は待った時間だけ予算の起点を進める。
 別sessionへ移った子孫も`supervise --require-drained`で回収し、終了確認まで返らないため、後始末は予算を超えて続くことがある。
 予算はrepositoryの根の`tiergate.json`の`verify.seconds`を正本とし、wrapperは走行開始後に共通providerの`dotfiles-verify-entry --snapshot verify`で静的な宣言を一度だけ読む。
 予算と入口は同じsnapshotを`--policy FILE`へ渡して解決するため、解決の間に登録を編集してもcanonicalな呼び出しが無制限の実行へ切り替わることはなく、snapshotの読取時間も走行開始から数える予算に含まれる。

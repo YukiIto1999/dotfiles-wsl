@@ -611,6 +611,22 @@ slot_expect_free() {
   fi
 }
 
+# 実行枠を T1 の外の process で握り、握ったと確かめてから返る。PID は slot_holder へ置く。解放は slot_holder を止める
+# 入力 slot_file: slot_prepare が確保した実行枠 file
+slot_hold() {
+  local _
+  "$BASH" -c 'exec {fd}>>"$1"; flock -x "$fd"; exec sleep 120' _ "$slot_file" &
+  slot_holder=$!
+  for _ in $(seq 1 400); do
+    if ! flock -n "$slot_file" true; then break; fi
+    sleep 0.05
+  done
+  if flock -n "$slot_file" true; then
+    echo 'the native holder never took the slot' >&2
+    exit 1
+  fi
+}
+
 # agent session が launcher の証明付きで割り当てた scratch を作る。名前は slot_session_tmp へ置く
 slot_session() {
   local sessions=$home/.cache/dotfiles-wsl/sessions
@@ -723,37 +739,64 @@ check_slot_source_edit_while_waiting() {
   expect_closed_gate "$slot_repo" 'original tree that no run verified'
 }
 
-# 枠の待ちは走行の予算に含まれる。予算を使い切った走行は command を実行せず、何も残さない
+# 枠の待ちには予算と同じ秒数の上限がある。上限まで枠が空かなければ command を実行せず、未実行の 75 を返して何も残さない
+# 入口解決と枠の確保は混んだ機械で数秒かかり、それが予算を使い切ると待たずに 124 になるため、予算は待つ前の所要より十分大きく取る
 check_slot_waiter_deadline() {
-  local holder status litter started _
-  slot_prepare waiter-deadline 3
-  "$BASH" -c 'exec {fd}>>"$1"; flock -x "$fd"; exec sleep 120' _ "$slot_file" &
-  holder=$!
-  for _ in $(seq 1 400); do
-    if ! flock -n "$slot_file" true; then break; fi
-    sleep 0.05
-  done
-  if flock -n "$slot_file" true; then
-    echo 'the native holder never took the slot' >&2
-    exit 1
-  fi
+  local budget=8 status litter started
+  slot_prepare waiter-deadline "$budget"
+  slot_hold
   litter=$(stall_litter)
   started=$SECONDS
   status=0
   SLOT_NAME=waiter SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
     "$VERIFY" -- devenv shell -- verify 2>"$slot_dir/waiter.stderr" || status=$?
-  test "$status" -eq 124
+  if [ "$status" -ne 75 ]; then
+    echo "T1 that waited out its slot limit exited $status instead of 75" >&2
+    exit 1
+  fi
+  # 待ちは予算と同じ秒数をまるごと使ってから打ち切られ、その何倍も待たない
+  test "$((SECONDS - started))" -ge "$budget"
   test "$((SECONDS - started))" -lt 30
   test ! -e "$slot_dir/waiter.started"
-  [[ $(<"$slot_dir/waiter.stderr") == *予算* ]]
+  [[ $(<"$slot_dir/waiter.stderr") == *'(75)'* ]]
   test "$(stall_litter)" = "$litter"
-  expect_closed_gate "$slot_repo" 'run that waited out its budget'
-  kill "$holder"
-  wait "$holder" || true
+  expect_closed_gate "$slot_repo" 'run that waited out its slot limit'
+  kill "$slot_holder"
+  wait "$slot_holder" || true
   : >"$slot_dir/retry.release"
   SLOT_NAME=retry SLOT_DIR=$slot_dir SLOT_LOG=$slot_log PATH="$slot_bin:$PATH" \
     "$VERIFY" -- devenv shell -- verify
   expect_open_gate "$slot_repo" 'run after the holder released the slot'
+}
+
+# 枠を待った時間は走行の予算に数えない。枠が空いた後の走行は、待たなかった場合と同じ予算の全量で自分の command を走らせる
+# 待ち 11 秒と走行 4 秒の合計は予算の 14 秒を超えるため、待ちを数える実装は 124 になる
+# 待ち以外の所要（入口解決、証跡の記録と公開）は混んだ機械で数秒に及ぶため、走行は予算より十分短くする
+check_slot_wait_outside_budget() {
+  local budget=14 waited=11 ran=4 waiter _
+  slot_prepare wait-budget "$budget"
+  slot_hold
+  slot_start waiter
+  waiter=$slot_pid
+  slot_await_waiting waiter
+  sleep "$waited"
+  kill "$slot_holder"
+  wait "$slot_holder" || true
+  for _ in $(seq 1 400); do
+    [ ! -e "$slot_dir/waiter.started" ] || break
+    kill -0 "$waiter" 2>/dev/null || break
+    sleep 0.05
+  done
+  sleep "$ran"
+  : >"$slot_dir/waiter.release"
+  slot_finish "$waiter"
+  if [ "$slot_status" -ne 0 ]; then
+    echo "T1 that waited $waited seconds for the slot exited $slot_status instead of running with its whole $budget second budget" >&2
+    exit 1
+  fi
+  test "$(<"$slot_log")" = $'start waiter original\nend waiter'
+  expect_open_gate "$slot_repo" 'run that waited for the slot and then used its whole budget'
+  slot_expect_free 'a run that waited for the slot'
 }
 
 # 走行の取消は、枠と木の外の一時 file と仮の控えを残さない。session の scratch も空に戻る
@@ -1240,6 +1283,7 @@ check_verification_slot() {
   check_slot_producer_failure
   check_slot_source_edit_while_waiting
   check_slot_waiter_deadline
+  check_slot_wait_outside_budget
   check_slot_cancel_cleanup
   check_slot_parent_death
   check_slot_refusals

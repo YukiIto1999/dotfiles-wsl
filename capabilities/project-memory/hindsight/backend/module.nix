@@ -83,7 +83,8 @@ in
         HINDSIGHT_API_LLM_API_KEY=${config.sops.placeholder."opencode/go_api_key"}
         HINDSIGHT_API_LLM_BASE_URL=https://opencode.ai/zen/go
         HINDSIGHT_API_LLM_MODEL=minimax-m3
-        HINDSIGHT_API_LLM_DEFAULT_HEADERS={"User-Agent":"hindsight/${version} (dotfiles-project-memory)"}
+        # Goはx-opencode-sessionの無い要求を400で拒否する。抽出は会話を持たないので配備で一つの値にする。
+        HINDSIGHT_API_LLM_DEFAULT_HEADERS={"User-Agent":"hindsight/${version} (dotfiles-project-memory)","x-opencode-session":"dotfiles-project-memory"}
         HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
         HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=/opt/hindsight/models/embedding
         HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE=false

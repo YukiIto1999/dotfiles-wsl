@@ -109,7 +109,9 @@ fi
 export LLM_API_KEY
 export LLM_API_BASE='https://opencode.ai/zen/go'
 export STRIX_LLM='anthropic/minimax-m3'
-export LLM_EXTRA_HEADERS='{"User-Agent":"strix/1.7.0 (dotfiles-security-assessment)"}'
+# Goはx-opencode-sessionの無い要求を400で拒否する。一回のassessmentを一つの会話として扱う。
+IFS= read -r llm_session < /proc/sys/kernel/random/uuid
+export LLM_EXTRA_HEADERS="{\"User-Agent\":\"strix/1.7.0 (dotfiles-security-assessment)\",\"x-opencode-session\":\"$llm_session\"}"
 export STRIX_RUNTIME_BACKEND=docker
 export STRIX_IMAGE='@image@'
 export STRIX_TELEMETRY=false

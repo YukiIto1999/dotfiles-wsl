@@ -64,12 +64,8 @@ class JournalError(Exception):
     pass
 
 
-class Unverifiable(JournalError):
-    """構造は正しいが、渡した記録で出典や引用を確かめられない知見候補。抽出では候補だけを捨て、編集では日の失敗になる。"""
-
-    def __init__(self, origin: str, reason: str):
-        super().__init__(f"{origin}: {reason}")
-        self.reason = reason
+class Rejected(Exception):
+    """知見の候補や記事の 1 件に閉じた不正の理由。その 1 件だけを捨てる。応答全体の不正は JournalError で、日の失敗になる。"""
 
 
 def child_timeout(limit: float | None) -> float | None:
@@ -489,91 +485,84 @@ def parse_insights(output: str, origin: str) -> list[Any]:
     return data["insights"]
 
 
-def quotation(item: Any, origin: str) -> tuple[str, str]:
+def cite(item: Any, grounds: Grounds, supported_only: bool) -> Citation:
     if not isinstance(item, dict) or set(item) != {"source", "quote"}:
-        raise JournalError(f"{origin}: an evidence item does not have exactly source and quote")
+        raise Rejected("an evidence item does not have exactly source and quote")
     source, quote = item["source"], item["quote"]
     if not isinstance(source, str) or not isinstance(quote, str):
-        raise JournalError(f"{origin}: an evidence source and quote must be strings")
-    return source, quote
-
-
-def cite(source: str, quote: str, grounds: Grounds, origin: str, supported_only: bool) -> Citation:
+        raise Rejected("an evidence source and quote must be strings")
     if source not in grounds:
-        raise Unverifiable(origin, "an evidence source was not among the supplied records")
+        raise Rejected("an evidence source was not among the supplied records")
     quote = quote.strip()
     if not quote:
-        raise Unverifiable(origin, f"an empty quotation for {source}")
+        raise Rejected(f"an empty quotation for {source}")
     for ground in grounds[source]:
         if quote in ground.text and (ground.supported or not supported_only):
             return Citation(source, quote, ground.current)
-    raise Unverifiable(origin, f"a quotation for {source} is not in the supplied text usable for its status")
+    raise Rejected(f"a quotation for {source} is not in the supplied text usable for its status")
 
 
-def insight_of(item: Any, grounds: Grounds, origin: str) -> Insight:
+def insight_of(item: Any, grounds: Grounds) -> Insight:
     if not isinstance(item, dict) or set(item) != INSIGHT_KEYS:
-        raise JournalError(f"{origin}: an insight does not have exactly the keys {sorted(INSIGHT_KEYS)}")
+        raise Rejected(f"an insight does not have exactly the keys {sorted(INSIGHT_KEYS)}")
     texts = {}
     for key in INSIGHT_TEXTS:
         value = item[key]
         if not isinstance(value, str):
-            raise JournalError(f"{origin}: insight {key} must be a string")
+            raise Rejected(f"insight {key} must be a string")
         value = value.strip()
         if not value and key != "caveats":
-            raise JournalError(f"{origin}: insight {key} is empty")
+            raise Rejected(f"insight {key} is empty")
         texts[key] = value
     texts["title"] = " ".join(texts["title"].split())
     if not isinstance(item["status"], str) or item["status"] not in STATUS_LABELS:
-        raise JournalError(f"{origin}: insight status must be supported or hypothesis")
+        raise Rejected("insight status must be supported or hypothesis")
     if not isinstance(item["evidence"], list) or not item["evidence"]:
-        raise JournalError(f"{origin}: an insight has no evidence")
-    # 構造の不正を先に全て判定する。確かめられない引用が前にあっても、構造の不正のある候補は捨てずに日の失敗にする
-    quotations = [quotation(raw, origin) for raw in item["evidence"]]
+        raise Rejected("an insight has no evidence")
     citations: list[Citation] = []
-    for source, quote in quotations:
-        citation = cite(source, quote, grounds, origin, item["status"] == "supported")
+    for raw in item["evidence"]:
+        citation = cite(raw, grounds, item["status"] == "supported")
         if citation not in citations:
             citations.append(citation)
     if not any(citation.current for citation in citations):
-        raise Unverifiable(origin, "an insight cites only background records")
+        raise Rejected("an insight cites only background records")
     return Insight(status=item["status"], evidence=citations, **texts)
 
 
-def reply(options: argparse.Namespace, prompt: Path, material: str, origin: str) -> list[Any]:
-    return parse_insights(summarize(options, prompt, material), origin)
-
-
-def screened(items: list[Any], grounds: Grounds, origin: str) -> tuple[list[Insight], list[Unverifiable]]:
-    # 抽出は各入力範囲から零件以上の候補を取り出す段で、記録で確かめられない候補は候補ではない。応答の構造の不正は捨てずに失敗する
+def ask(
+    options: argparse.Namespace, day: date, prompt: Path, material: str, grounds: Grounds, origin: str, kind: str
+) -> tuple[list[Insight], int]:
+    items = parse_insights(summarize(options, prompt, material), origin)
+    # 応答全体が読めるなら、不正は候補や記事の 1 件に閉じる。その 1 件だけを捨てて残りを採用する
     kept: list[Insight] = []
-    dropped: list[Unverifiable] = []
+    reasons: list[str] = []
     for item in items:
         try:
-            kept.append(insight_of(item, grounds, origin))
-        except Unverifiable as error:
-            dropped.append(error)
-    return kept, dropped
+            kept.append(insight_of(item, grounds))
+        except Rejected as error:
+            reasons.append(str(error))
+    if reasons:
+        print(
+            f"dotfiles-agent-journal: {day}: {origin}: dropped {len(reasons)} of {len(items)} {kind}: {'; '.join(reasons)}",
+            file=sys.stderr,
+        )
+    return kept, len(reasons)
 
 
 def extract(options: argparse.Namespace, day: date, sessions: list[Session]) -> tuple[list[Insight], int]:
     found: list[Insight] = []
-    discarded = 0
+    dropped = 0
     for session in sessions:
         groups = batches(session)
         for number, records in enumerate(groups, start=1):
             origin = f"extract.md (session {session.id} batch {number}/{len(groups)})"
             material = extraction_material(session, number, len(groups), records)
-            items = reply(options, PROMPTS / "extract.md", material, origin)
-            kept, dropped = screened(items, grounds_of(records), origin)
-            if dropped:
-                reasons = "; ".join(error.reason for error in dropped)
-                print(
-                    f"dotfiles-agent-journal: {day}: {origin}: dropped {len(dropped)} of {len(items)} insight candidates: {reasons}",
-                    file=sys.stderr,
-                )
+            kept, rejected = ask(
+                options, day, PROMPTS / "extract.md", material, grounds_of(records), origin, "insight candidates"
+            )
             found += kept
-            discarded += len(dropped)
-    return found, discarded
+            dropped += rejected
+    return found, dropped
 
 
 def synthesis_item(insight: Insight) -> dict[str, Any]:
@@ -611,30 +600,35 @@ def packed(insights: list[Insight]) -> list[list[Insight]]:
     return groups
 
 
-def merge(options: argparse.Namespace, insights: list[Insight]) -> list[Insight]:
+def merge(options: argparse.Namespace, day: date, insights: list[Insight]) -> tuple[list[Insight], int]:
     grounds: Grounds = {}
     for insight in insights:
         for citation in insight.evidence:
             grounds.setdefault(citation.source, []).append(Ground(citation.quote, citation.current, insight.status == "supported"))
     material = listing([synthesis_item(insight) for insight in insights])
-    items = reply(options, PROMPTS / "synthesize.md", material, "synthesize.md")
-    return [insight_of(item, grounds, "synthesize.md") for item in items]
+    return ask(options, day, PROMPTS / "synthesize.md", material, grounds, "synthesize.md", "articles")
 
 
-def synthesize(options: argparse.Namespace, insights: list[Insight]) -> list[Insight]:
+def synthesize(options: argparse.Namespace, day: date, insights: list[Insight]) -> tuple[list[Insight], int]:
     rounds = 0
+    dropped = 0
     while insights:
         groups = packed(insights)
         if len(groups) == 1:
-            return merge(options, groups[0])
+            articles, rejected = merge(options, day, groups[0])
+            return articles, dropped + rejected
         if rounds == REDUCTION_ROUNDS:
             raise JournalError(f"the insight candidates did not fit one synthesis input within {REDUCTION_ROUNDS} reduction rounds")
         rounds += 1
-        merged = [insight for group in groups for insight in merge(options, group)]
+        merged: list[Insight] = []
+        for group in groups:
+            kept, rejected = merge(options, day, group)
+            merged += kept
+            dropped += rejected
         if listing_size(merged) >= listing_size(insights):
             raise JournalError("the reduction of the insight candidates did not shrink them")
         insights = merged
-    return []
+    return [], dropped
 
 
 def prose(text: str) -> str:
@@ -666,7 +660,9 @@ def article(insight: Insight) -> list[str]:
     return lines
 
 
-def render(machine: str, day: date, start: datetime, end: datetime, insights: list[Insight], dropped: int) -> str:
+def render(
+    machine: str, day: date, start: datetime, end: datetime, insights: list[Insight], dropped_candidates: int, dropped_articles: int
+) -> str:
     lines = [
         FORMAT_MARKER,
         f"# {day.isoformat()} {machine}",
@@ -677,9 +673,10 @@ def render(machine: str, day: date, start: datetime, end: datetime, insights: li
     ]
     if not insights:
         lines += ["", NO_INSIGHTS]
-    # 理由や内訳は stderr にだけ残し、文書には日の合計だけを載せる
+    # 理由や内訳は stderr にだけ残し、文書には候補と記事ごとの日の合計だけを載せる
+    dropped = [f"{kind} {count} 件" for kind, count in (("候補", dropped_candidates), ("記事", dropped_articles)) if count]
     if dropped:
-        lines += ["", f"引用を記録で確かめられなかった候補 {dropped} 件は採用していない。"]
+        lines += ["", f"検査を通らなかった{'と'.join(dropped)}は採用していない。"]
     for insight in insights:
         lines += article(insight)
     return "\n".join(lines) + "\n"
@@ -688,8 +685,9 @@ def render(machine: str, day: date, start: datetime, end: datetime, insights: li
 def compose(
     options: argparse.Namespace, machine: str, day: date, start: datetime, end: datetime, sessions: list[Session]
 ) -> str:
-    insights, dropped = extract(options, day, sessions)
-    return render(machine, day, start, end, synthesize(options, insights), dropped)
+    candidates, dropped_candidates = extract(options, day, sessions)
+    articles, dropped_articles = synthesize(options, day, candidates)
+    return render(machine, day, start, end, articles, dropped_candidates, dropped_articles)
 
 
 def git(journal: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:

@@ -138,8 +138,30 @@ ROUTES = ((A_BOUNDARY[1], INSIGHT_0923), (A_PREVIOUS[1], INSIGHT_0922), (C_REQUE
 LEGACY = "# 2026-09-22 testhost\n\n| project | session | request | 費用 (USD) |\n|---|---|---|---|\n| sample | 1 | 3 | 0.875 |\n"
 
 
-def dropped_note(count: int) -> str:
-    return f"引用を記録で確かめられなかった候補 {count} 件は採用していない。"
+def dropped_note(*counts: str) -> str:
+    return f"検査を通らなかった{'と'.join(counts)}は採用していない。"
+
+
+def malformed_items(base: dict) -> dict[str, object]:
+    """知見の 1 件に閉じた形の不正。応答全体は読める"""
+    return {
+        "a missing field": {key: value for key, value in base.items() if key != "finding"},
+        "an extra field": {**base, "score": 1},
+        "a text that is not a string": {**base, "finding": 3},
+        "an empty explanation": {**base, "explanation": ""},
+        "an unknown status": {**base, "status": "verified"},
+        "a status that is not a string": {**base, "status": 1},
+        "no evidence": {**base, "evidence": []},
+        "evidence that is not an array": {**base, "evidence": "根拠"},
+        "an evidence item that is not an object": {**base, "evidence": ["根拠"]},
+        "an extra evidence field": {**base, "evidence": [{**base["evidence"][0], "note": "余分"}]},
+        "an evidence quote that is not a string": {**base, "evidence": [{"source": A_BOUNDARY[0], "quote": 1}]},
+        "an unverifiable citation next to a malformed one": {
+            **base,
+            "evidence": [{"source": A_BOUNDARY[0], "quote": "存在しない発言"}, {**base["evidence"][0], "note": "余分"}],
+        },
+        "an item that is not an object": "知見",
+    }
 
 
 # journal が呼ぶ omp の代わり。system prompt の file 名で extract と synthesize を区別し、
@@ -421,6 +443,22 @@ class JournalTest(unittest.TestCase):
         self.assertIn(DAY.isoformat(), errors.getvalue())
         self.assertEqual(self.state(), before)
         return errors.getvalue()
+
+    def edited(self, extract: list, articles: list) -> tuple[str, list[str]]:
+        """編集が返す記事の一覧を差し替えた DAY の生成が成功し、公開された本文と stderr の行を返す"""
+        self.script["extract"] = extract
+        self.script["synthesize"] = [{"when": None, "reply": {"insights": articles}}]
+        self.save_script()
+        self.calls_log.unlink(missing_ok=True)
+
+        status, _, errors = self.captured("--date", DAY.isoformat())
+
+        self.assertEqual(status, 0)
+        return self.remote_file(DAY_FILE), errors.splitlines()
+
+    @staticmethod
+    def notes(document: str) -> list[str]:
+        return [line for line in document.split("\n") if "採用していない" in line]
 
     def seed_legacy(self, committed: bool = False, published: bool = False) -> Path:
         path = self.journal / LEGACY_FILE
@@ -830,39 +868,64 @@ class JournalTest(unittest.TestCase):
                 self.assertEqual(document.count("\n## "), 1)
                 self.assertIn("\n## 統合された知見\n", document)
                 self.assertNotIn(fabricated[1], document)
+                self.assertEqual(self.notes(document), [dropped_note("候補 1 件")])
                 [report] = errors.splitlines()
                 for reported in (DAY.isoformat(), SESSION_A, "1/1"):
                     self.assertIn(reported, report)
 
-    def test_malformed_model_output_fails_the_day_and_keeps_the_published_day(self):
+    def test_a_model_output_that_cannot_be_read_as_insights_fails_the_day_and_keeps_the_published_day(self):
         self.run_journal("--date", DAY.isoformat())
-        found = INSIGHT_0923
         cases = {
             "prose instead of JSON": "技術的な知見は見つからなかった。",
-            "an array at the top level": [found],
+            "an array at the top level": [INSIGHT_0923],
             "an extra top-level key": {"insights": [], "note": "余分"},
             "no insights key": {"results": []},
-            "a missing field": {"insights": [{key: value for key, value in found.items() if key != "finding"}]},
-            "an extra field": {"insights": [{**found, "score": 1}]},
-            "an empty explanation": {"insights": [{**found, "explanation": ""}]},
-            "an unknown status": {"insights": [{**found, "status": "verified"}]},
-            "an extra evidence field": {"insights": [{**found, "evidence": [{**found["evidence"][0], "note": "余分"}]}]},
-            "no evidence": {"insights": [{**found, "evidence": []}]},
-            "an unverifiable candidate before a malformed one": {
-                "insights": [insight("検証できない候補", (A_BOUNDARY[0], "存在しない発言")), {**found, "status": "verified"}]
-            },
-            "an unverifiable citation before a malformed one": {
-                "insights": [{
-                    **found,
-                    "evidence": [{"source": A_BOUNDARY[0], "quote": "存在しない発言"}, {**found["evidence"][0], "note": "余分"}],
-                }]
-            },
+            "insights that is not an array": {"insights": "なし"},
         }
         for name, reply in cases.items():
             with self.subTest(f"extraction: {name}"):
                 self.refuses(self.route(A_BOUNDARY[1], reply))
             with self.subTest(f"synthesis: {name}"):
-                self.refuses(self.route(A_BOUNDARY[1], {"insights": [found]}), self.route(A_BOUNDARY[1], reply))
+                self.refuses(self.route(A_BOUNDARY[1], {"insights": [INSIGHT_0923]}), self.route(A_BOUNDARY[1], reply))
+
+    def test_a_malformed_candidate_is_dropped_by_itself_and_the_rest_of_its_batch_is_published(self):
+        kept = insight("残る候補", A_BOUNDARY)
+        base = insight("不正な候補", A_BOUNDARY)
+        self.script["synthesize"] = [{"when": None, "merge": "統合された知見"}]
+        for name, bad in malformed_items(base).items():
+            with self.subTest(name):
+                self.script["extract"] = self.route(A_BOUNDARY[1], {"insights": [bad, kept]})
+                self.save_script()
+                self.calls_log.unlink(missing_ok=True)
+
+                status, _, errors = self.captured("--date", DAY.isoformat())
+
+                self.assertEqual(status, 0)
+                [synthesis] = self.calls("synthesize")
+                self.assertIn(kept["title"], synthesis["material"])
+                self.assertNotIn(base["title"], synthesis["material"])
+                document = self.remote_file(DAY_FILE)
+                self.assertIn("\n## 統合された知見\n", document)
+                self.assertEqual(self.notes(document), [dropped_note("候補 1 件")])
+                [report] = errors.splitlines()
+                for reported in (DAY.isoformat(), SESSION_A, "1 of 2"):
+                    self.assertIn(reported, report)
+
+    def test_a_malformed_article_is_dropped_by_itself_and_the_other_articles_are_published(self):
+        extract = self.route(A_BOUNDARY[1], {"insights": [INSIGHT_0923]})
+        kept = insight("残る記事", A_BOUNDARY)
+        base = insight("不正な記事", A_BOUNDARY)
+        for name, bad in malformed_items(base).items():
+            with self.subTest(name):
+                document, reports = self.edited(extract, [bad, kept])
+
+                self.assertIn("\n## 残る記事\n", document)
+                self.assertNotIn(base["title"], document)
+                self.assertEqual(document.count("\n## "), 1)
+                self.assertEqual(self.notes(document), [dropped_note("記事 1 件")])
+                [report] = reports
+                for reported in (DAY.isoformat(), "synthesize.md", "1 of 2"):
+                    self.assertIn(reported, report)
 
     def test_one_malformed_session_batch_publishes_nothing_even_when_another_is_valid(self):
         self.script["extract"] = [
@@ -878,9 +941,8 @@ class JournalTest(unittest.TestCase):
         self.assertFalse((self.journal / "2026").exists())
         self.assertIsNone(self.remote_file(DAY_FILE))
 
-    def test_synthesis_cannot_cite_what_the_accepted_candidates_did_not_supply(self):
-        self.run_journal("--date", DAY.isoformat())
-        accepted = self.route(A_BOUNDARY[1], {"insights": [INSIGHT_0923]})
+    def test_synthesis_drops_an_article_that_cites_what_the_accepted_candidates_did_not_supply(self):
+        extract = self.route(A_BOUNDARY[1], {"insights": [INSIGHT_0923]})
         cases = {
             "another record of the same session": [A_INTERIM],
             "a record of another session": [B_REQUEST],
@@ -889,27 +951,41 @@ class JournalTest(unittest.TestCase):
             "an unknown entry": [(source(SESSION_A, "a9999999"), A_BOUNDARY[1])],
             "no citation": [],
         }
+        kept = insight("残る記事", A_BOUNDARY)
         for name, citations in cases.items():
             with self.subTest(name):
-                self.refuses(accepted, self.route(A_BOUNDARY[1], {"insights": [insight("統合した知見", *citations)]}))
+                document, reports = self.edited(extract, [insight("統合した知見", *citations), kept])
 
-    def test_synthesis_cannot_rest_an_article_on_background_records_alone(self):
-        self.run_journal("--date", DAY.isoformat())
-        mixed = insight("背景と対象", A_PREVIOUS, A_BOUNDARY)
+                self.assertIn("\n## 残る記事\n", document)
+                self.assertNotIn("統合した知見", document)
+                self.assertEqual(document.count("\n## "), 1)
+                for _, quote in citations:
+                    if quote != A_BOUNDARY[1]:
+                        self.assertNotIn(quote, document)
+                self.assertEqual(self.notes(document), [dropped_note("記事 1 件")])
+                [report] = reports
+                for reported in (DAY.isoformat(), "synthesize.md", "1 of 2"):
+                    self.assertIn(reported, report)
 
-        self.refuses(
-            self.route(A_BOUNDARY[1], {"insights": [mixed]}),
-            self.route(A_BOUNDARY[1], {"insights": [insight("背景だけ", A_PREVIOUS)]}),
-        )
+    def test_synthesis_drops_an_article_that_rests_on_background_records_alone(self):
+        extract = self.route(A_BOUNDARY[1], {"insights": [insight("背景と対象", A_PREVIOUS, A_BOUNDARY)]})
 
-    def test_synthesis_cannot_upgrade_a_hypothesis_to_a_supported_claim(self):
-        self.run_journal("--date", DAY.isoformat())
+        document, reports = self.edited(extract, [insight("背景だけの記事", A_PREVIOUS), insight("残る記事", A_BOUNDARY)])
+
+        self.assertIn("\n## 残る記事\n", document)
+        self.assertNotIn("背景だけの記事", document)
+        self.assertEqual(self.notes(document), [dropped_note("記事 1 件")])
+        self.assertEqual(len(reports), 1)
+
+    def test_synthesis_drops_an_article_that_upgrades_a_hypothesis_to_a_supported_claim(self):
         guess = insight("推測", A_BOUNDARY, status="hypothesis")
+        extract = self.route(A_BOUNDARY[1], {"insights": [guess]})
 
-        self.refuses(
-            self.route(A_BOUNDARY[1], {"insights": [guess]}),
-            self.route(A_BOUNDARY[1], {"insights": [{**guess, "status": "supported"}]}),
-        )
+        document, _ = self.edited(extract, [{**guess, "title": "格上げした記事", "status": "supported"}, {**guess, "title": "残る記事"}])
+
+        self.assertIn("\n## 残る記事\n", document)
+        self.assertNotIn("格上げした記事", document)
+        self.assertEqual(self.notes(document), [dropped_note("記事 1 件")])
 
     def test_synthesis_may_downgrade_a_supported_claim_to_a_hypothesis(self):
         downgraded = {**INSIGHT_0923, "status": "hypothesis"}
@@ -922,20 +998,16 @@ class JournalTest(unittest.TestCase):
         self.assertIn(f"\n## {INSIGHT_0923['title']}\n", self.remote_file(DAY_FILE))
 
     def test_a_merged_supported_claim_may_rest_only_on_the_quotes_of_supported_candidates(self):
-        self.run_journal("--date", DAY.isoformat())
         solid = insight("確かな部分", A_BOUNDARY)
         guess = insight("推測の部分", A_FINAL, status="hypothesis")
         extract = self.route(A_BOUNDARY[1], {"insights": [solid, guess]})
 
-        self.refuses(extract, self.route(A_BOUNDARY[1], {"insights": [insight("統合", A_BOUNDARY, A_FINAL)]}))
+        document, _ = self.edited(extract, [insight("混ぜた統合", A_BOUNDARY, A_FINAL), insight("確かな統合", A_BOUNDARY)])
 
-        merged = insight("統合", A_BOUNDARY)
-        self.script["synthesize"] = self.route(A_BOUNDARY[1], {"insights": [merged]})
-        self.save_script()
-        self.run_journal("--date", DAY.isoformat())
-        document = self.remote_file(DAY_FILE)
-        self.assertIn(f"\n## {merged['title']}\n", document)
+        self.assertIn("\n## 確かな統合\n", document)
+        self.assertNotIn("混ぜた統合", document)
         self.assertNotIn(A_FINAL[1], document)
+        self.assertEqual(self.notes(document), [dropped_note("記事 1 件")])
 
     def test_a_claim_may_cite_background_next_to_a_record_of_the_day_and_a_shorter_quote(self):
         mixed = insight("背景を踏まえた知見", A_PREVIOUS, A_BOUNDARY, A_FINAL, status="hypothesis")
@@ -989,6 +1061,62 @@ class JournalTest(unittest.TestCase):
         for found, quote in cited:
             self.assertIn(found, document)
             self.assertIn(quote, document)
+
+    def test_a_rejected_article_of_a_reduction_round_is_dropped_by_itself_and_the_rest_is_reduced_and_published(self):
+        cited = (A_BOUNDARY, A_INTERIM, A_FINAL, A_BESIDE)
+        padding = "detail " * (journal.SYNTHESIS_CHARS * 2 // 5 // 7)
+        candidates = [{**insight(f"候補{number}", evidence), "explanation": padding} for number, evidence in enumerate(cited)]
+        self.script["extract"] = self.route(A_BOUNDARY[1], {"insights": candidates})
+        # 候補 0 と 1 を受ける最初の縮約の応答だけが、渡していない引用を持つ
+        self.script["synthesize"] = [
+            {"when": "候補0", "reply": {"insights": [insight("引用の誤った統合", (A_BOUNDARY[0], "存在しない発言"))]}},
+            {"when": None, "merge": "統合された知見"},
+        ]
+        self.save_script()
+
+        status, _, errors = self.captured("--date", DAY.isoformat())
+
+        self.assertEqual(status, 0)
+        document = self.remote_file(DAY_FILE)
+        self.assertEqual(document.count("\n## "), 1)
+        for found, quote in (A_FINAL, A_BESIDE):
+            self.assertIn(found, document)
+            self.assertIn(quote, document)
+        for _, quote in (A_BOUNDARY, A_INTERIM):
+            self.assertNotIn(quote, document)
+        self.assertEqual(self.notes(document), [dropped_note("記事 1 件")])
+        [report] = errors.splitlines()
+        self.assertIn("1 of 1", report)
+
+    def test_a_day_whose_articles_were_all_dropped_is_a_dated_document_with_no_insights_and_the_count(self):
+        extract = self.route(A_BOUNDARY[1], {"insights": [INSIGHT_0923]})
+        invented = insight("引用の誤った記事", (A_BOUNDARY[0], "存在しない発言"))
+
+        document, reports = self.edited(extract, [invented, {**INSIGHT_0923, "status": "verified"}])
+
+        self.assertEqual(document.split("\n")[0], MARKER)
+        self.assertNotIn("\n## ", document)
+        self.assertIn("抽出されなかった", document)
+        self.assertEqual(self.notes(document), [dropped_note("記事 2 件")])
+        [report] = reports
+        self.assertIn("2 of 2", report)
+
+    def test_the_note_counts_dropped_candidates_and_dropped_articles_separately(self):
+        extract = self.route(A_BOUNDARY[1], {"insights": [
+            insight("引用の誤った候補", (A_BOUNDARY[0], "存在しない発言")),
+            INSIGHT_0923,
+            insight("出典の誤った候補", C_REQUEST),
+        ]})
+
+        document, reports = self.edited(extract, [insight("出典の誤った記事", B_REQUEST), insight("残る記事", A_BOUNDARY)])
+
+        self.assertIn("\n## 残る記事\n", document)
+        self.assertEqual(self.notes(document), [dropped_note("候補 2 件", "記事 1 件")])
+        [extraction, synthesis] = reports
+        for reported in (DAY.isoformat(), "extract.md", "2 of 3"):
+            self.assertIn(reported, extraction)
+        for reported in (DAY.isoformat(), "synthesize.md", "1 of 2"):
+            self.assertIn(reported, synthesis)
 
     def test_a_candidate_that_cannot_fit_a_synthesis_call_fails_the_day_instead_of_being_dropped(self):
         self.run_journal("--date", DAY.isoformat())
@@ -1079,8 +1207,8 @@ class JournalTest(unittest.TestCase):
         self.run_journal("--date", DAY.isoformat())
 
         document = self.remote_file(DAY_FILE)
-        self.assertEqual([line for line in document.split("\n") if "採用していない" in line], [dropped_note(3)])
-        self.assertLess(document.index(dropped_note(3)), document.index("\n## 統合された知見\n"))
+        self.assertEqual(self.notes(document), [dropped_note("候補 3 件")])
+        self.assertLess(document.index(dropped_note("候補 3 件")), document.index("\n## 統合された知見\n"))
 
     def test_a_day_whose_candidates_were_all_dropped_states_the_total_in_its_no_insights_document(self):
         self.script["extract"] = [
@@ -1098,7 +1226,7 @@ class JournalTest(unittest.TestCase):
         self.assertEqual(document.split("\n")[0], MARKER)
         self.assertNotIn("\n## ", document)
         self.assertIn("抽出されなかった", document)
-        self.assertEqual([line for line in document.split("\n") if "採用していない" in line], [dropped_note(3)])
+        self.assertEqual(self.notes(document), [dropped_note("候補 3 件")])
 
     def test_a_day_that_dropped_nothing_states_no_count(self):
         verified = self.script["extract"]
@@ -1118,7 +1246,7 @@ class JournalTest(unittest.TestCase):
         self.run_journal("--date", DAY.isoformat())
 
         self.assertEqual(status, 0)
-        self.assertIn(dropped_note(3), stdout.split("\n"))
+        self.assertIn(dropped_note("候補 3 件"), stdout.split("\n"))
         self.assertEqual(stdout, self.remote_file(DAY_FILE))
 
     def test_a_day_without_activity_keeps_no_document(self):
@@ -1711,7 +1839,7 @@ class QuotedEvidenceTest(unittest.TestCase):
         cited = journal.Citation(source(SESSION_A, "q0000001"), quote, current)
         found = journal.Insight("題", "知見", "説明", "適用", "", "supported", [cited])
         start = local("2026-09-23T06:00:00")
-        return journal.render(HOST, DAY, start, start + timedelta(days=1), [found], 0)
+        return journal.render(HOST, DAY, start, start + timedelta(days=1), [found], 0, 0)
 
     def test_a_quotation_is_rendered_as_the_literal_lines_of_one_code_block(self):
         for name, quote in self.CASES.items():

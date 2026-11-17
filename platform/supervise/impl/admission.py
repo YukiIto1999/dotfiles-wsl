@@ -222,11 +222,12 @@ class Admission:
     policy_path: class ごとの policy file
     memory_bytes: 明示された物理memory需要か導出に任せるNone
     recorded_bytes: 実測の記録から導いた物理memory需要か記録なしのNone
+    host_median_bytes: 鍵の記録が無い走行が、この host の他の鍵の実測から導いた物理memory需要か導けないNone。入れ子は使わない
     寿命: supervisor による子孫終了確認まで。持つ状態は scope の cgroup と、process が持つ flock だけ
     制約: 明示でない物理memory需要は最初の有効な観測か外側の scope で確定し、それまでは未確定のNone
     """
 
-    def __init__(self, policy_path, memory_bytes=None, recorded_bytes=None):
+    def __init__(self, policy_path, memory_bytes=None, recorded_bytes=None, host_median_bytes=None):
         self.policy = Policy(policy_path)
         self.klass = self.policy.klass
         # 入れ子の走行は外側の class で走る
@@ -237,6 +238,7 @@ class Admission:
             raise AdmissionError("reservation directory must be private and owned by this user")
         self.explicit = positive(memory_bytes, "memory request") if memory_bytes is not None else None
         self.recorded = recorded_bytes
+        self.host_median = host_median_bytes
         self.memory = self.explicit
         self.inherited = False
         self.previous_reason = None
@@ -254,7 +256,7 @@ class Admission:
 
         value: 検証済みのworkload resource
         戻り値: なし
-        制約: 上限は物理memory総量と全cgroupのlimitBytesの最小値。記録由来と既定値由来の需要は上限へ切り詰める
+        制約: 上限は物理memory総量と全cgroupのlimitBytesの最小値。記録由来、他の鍵の中央値由来、既定値由来の需要は上限へ切り詰める
         失敗: 上限を超える明示需要によるAdmissionError
         """
         ceiling = min([value["memoryTotalBytes"], *(limit["limitBytes"] for limit in value["memoryLimits"])])
@@ -264,7 +266,12 @@ class Admission:
                     f"memory request of {self.explicit} bytes exceeds the tightest limit of {ceiling} bytes; "
                     "command was not started")
         elif self.memory is None:
-            demand = self.recorded if self.recorded is not None else -(-self.policy.percent * ceiling // 100)
+            if self.recorded is not None:
+                demand = self.recorded
+            elif self.host_median is not None:
+                demand = self.host_median
+            else:
+                demand = -(-self.policy.percent * ceiling // 100)
             self.memory = positive(min(demand, ceiling), "memory demand")
 
     def slice_path(self, klass):

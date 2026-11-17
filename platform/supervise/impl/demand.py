@@ -27,6 +27,26 @@ def well_formed(row):
             and type(row.get("exceeded")) is bool)
 
 
+def read_records(path):
+    """記録file一つの読取
+
+    path: 鍵ごとの記録file
+    戻り値: 形式の正しい記録の一覧。fileが無ければ空
+    失敗: 読めないfileによるOSErrorと、壊れた内容によるValueError
+    """
+    try:
+        with open(path) as stream:
+            document = json.load(stream)
+    except FileNotFoundError:
+        return []
+    except ValueError as error:
+        raise ValueError(f"{path} is not valid JSON: {error}") from error
+    if (not isinstance(document, dict) or document.get("version") != RECORD_VERSION
+            or not isinstance(document.get("records"), list)):
+        raise ValueError(f"{path} is not a version {RECORD_VERSION} record")
+    return [row for row in document["records"] if well_formed(row)]
+
+
 class DemandHistory:
     """鍵ごとに保つ実測した物理memoryのピークの記録
 
@@ -50,17 +70,7 @@ class DemandHistory:
         戻り値: 形式の正しい記録の一覧。fileが無ければ空
         失敗: 読めないfileによるOSErrorと、壊れた内容によるValueError
         """
-        try:
-            with open(self.path) as stream:
-                document = json.load(stream)
-        except FileNotFoundError:
-            return []
-        except ValueError as error:
-            raise ValueError(f"{self.path} is not valid JSON: {error}") from error
-        if (not isinstance(document, dict) or document.get("version") != RECORD_VERSION
-                or not isinstance(document.get("records"), list)):
-            raise ValueError(f"{self.path} is not a version {RECORD_VERSION} record")
-        return [row for row in document["records"] if well_formed(row)]
+        return read_records(self.path)
 
     def recorded_demand(self):
         """記録から導く物理memory需要の取得
@@ -72,6 +82,28 @@ class DemandHistory:
         if not newest:
             return None
         return max(row["peakBytes"] for row in newest)
+
+    def host_demand(self):
+        """この host の他の鍵の実測から導く物理memory需要の取得
+
+        戻り値: 各鍵の最新の記録のピークの中央値。件数が偶数なら大きい側。使える記録が一つも無ければNone
+        制約: 読めない fileと形の不正な fileは、その鍵が無いものとして黙って無視する。失敗を呼び側へ返さない
+        """
+        try:
+            paths = list(self.directory.glob("*.json"))
+        except OSError:
+            return None
+        peaks = []
+        for path in paths:
+            try:
+                records = read_records(path)
+            except (OSError, ValueError):
+                continue
+            if records:
+                peaks.append(max(records, key=lambda row: row["at"])["peakBytes"])
+        if not peaks:
+            return None
+        return sorted(peaks)[len(peaks) // 2]
 
     def append(self, record):
         """記録の先頭への追加

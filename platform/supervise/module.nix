@@ -46,7 +46,7 @@ in
       `--resource-memory BYTES`は同じpolicy内で当該呼出しの物理memory需要を明示する。CPUは予約しない。入れ子では外側のscopeの需要を超える明示を70で拒否する。
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
       上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
-      `--resource-key KEY`を渡した走行は、記録があれば新しい5件のピークの最大を既定値の代わりに予約する。
+      `--resource-key KEY`を渡した走行は、記録があれば新しい5件のピークの最大を既定値の代わりに予約し、記録が無ければ記録directoryの他の鍵の最新のピークの中央値（件数が偶数なら大きい側）を、それも無ければ既定値を予約する。
       明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。scopeを作れない場合も70で、commandは起動しない。
       待機と走行は別に数える。`--resource-wait-until`までに入場できなければcommandを起動せず75で返し、`--resource-run-seconds`は入場して起動した時から数えて、超えれば取り消して124で返す。
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
@@ -56,7 +56,7 @@ in
       送れない場合はstderrへ一行を出すだけで、commandの終了statusを変えない。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
       子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。
-      記録の読み書きの失敗はstderrへ一行を出し、commandの終了statusを変えず、読めない場合は既定値で予約する。
+      記録の読み書きの失敗はstderrへ一行を出し、commandの終了statusを変えず、鍵の記録を読めない場合は記録の無い鍵と同じ需要で予約する。
       走行の所有と生死はscopeのcgroupとwaitpidのECHILDが持ち、走行を表す記録fileは持たない。状態directoryには、判定の排他のregistry.lockと、受入が待つ間だけ共有で持つacceptance.waitingのlockだけがある。
       取消の印のcancel-fileは走行の記録ではなく、supervisorが強制終了されて読まれなかったものだけが残り、scopeが無く一時間を過ぎたものを次の取消が消す。
       supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続け、他の走行を止めない。

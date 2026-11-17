@@ -1058,6 +1058,79 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual(result["memoryReservedBytes"], 2 * GIB)
         self.assertEqual(self.stored()[0]["reservedBytes"], 2 * GIB)
 
+    def test_a_key_without_records_reserves_the_median_of_the_newest_peak_of_each_other_key(self):
+        """The measurements of this host stand in for a percentage nobody measured; each key counts once, by its newest record."""
+        self.seed([self.row(2 * GIB), self.row(5 * GIB, age=DAY)], key="other a")
+        self.seed([self.row(GIB)], key="other b")
+        self.seed([self.row(3 * GIB)], key="other c")
+        status, _, result = self.run_command("odd")
+        self.assertEqual(status, 0)
+        # The newest peaks are 1, 2 and 3 GiB; counting every record of a key or taking their largest would make it 3.
+        self.assertEqual(result["memoryReservedBytes"], 2 * GIB)
+        self.assertEqual(len(self.stored()), 1)
+
+    def test_an_even_number_of_keys_reserves_the_larger_of_the_two_middle_peaks(self):
+        """With four peaks of 1, 2, 3 and 4 GiB the demand is 3 GiB, not 2."""
+        for index, peak in enumerate((GIB, 2 * GIB, 3 * GIB, 4 * GIB)):
+            self.seed([self.row(peak)], key=f"other {index}")
+        status, _, result = self.run_command("even")
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], 3 * GIB)
+
+    def test_a_key_with_records_of_its_own_ignores_the_other_keys(self):
+        """Only a key that has no record borrows: its own newest five peaks set the demand beside records of other keys."""
+        self.seed([self.row(300_000_000)])
+        self.seed([self.row(2 * GIB)], key="other a")
+        self.seed([self.row(3 * GIB)], key="other b")
+        status, _, result = self.run_command("own")
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], 300_000_000)
+
+    def test_the_median_of_the_other_keys_is_cut_to_the_tightest_limit(self):
+        """A demand borrowed from the host is cut like any other that is not explicit."""
+        self.limit(4 * GIB, 2 * GIB)
+        self.seed([self.row(3 * GIB)], key="other a")
+        status, _, result = self.run_command("borrowed-over")
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], 2 * GIB)
+
+    def test_a_run_without_a_key_or_with_an_explicit_demand_does_not_borrow_from_the_other_keys(self):
+        """Only a keyed run without a demand of its own takes the median; the default and the declared demand stand as they were."""
+        self.seed([self.row(GIB)], key="other a")
+        status, _, result = self.run_command("unkeyed-beside-records", key=None)
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], percent_of(MEMORY_PERCENT, 16 * GIB))
+        status, _, result = self.run_command("explicit-beside-records", arguments=["--resource-memory", str(2 * GIB)])
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], 2 * GIB)
+
+    def break_records(self):
+        """Leave files in the record directory that no key's record can be read from."""
+        directory = self.demand_file().parent
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        (directory / "garbage.json").write_text("{not json")
+        (directory / "version.json").write_text('{"version": 2, "records": []}')
+        (directory / "list.json").write_text("[]")
+        (directory / "no-peak.json").write_text(json.dumps({"version": 1, "records": [{"at": 1}, "text", 7]}))
+        (directory / "folder.json").mkdir()
+
+    def test_files_of_other_keys_that_cannot_be_read_do_not_count(self):
+        """A file that is unreadable or malformed is as good as no key: the run goes on, silently, on the keys that can be read."""
+        self.seed([self.row(2 * GIB)], key="other a")
+        self.break_records()
+        status, error, result = self.run_command("beside-broken")
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], 2 * GIB)
+        self.assertNotIn("cannot read the measured memory demand", error)
+
+    def test_a_host_with_no_readable_record_reserves_the_percentage(self):
+        """When no other key yields a peak the default stands, however many files lie in the directory."""
+        self.break_records()
+        status, error, result = self.run_command("only-broken")
+        self.assertEqual(status, 0)
+        self.assertEqual(result["memoryReservedBytes"], percent_of(MEMORY_PERCENT, 16 * GIB))
+        self.assertNotIn("cannot read the measured memory demand", error)
+
     def test_explicit_demand_above_the_tightest_limit_fails_without_waiting_or_starting(self):
         """An explicit demand is never cut: above the smallest limitBytes it fails at once and nothing is started."""
         self.limit(4 * GIB, 2 * GIB)

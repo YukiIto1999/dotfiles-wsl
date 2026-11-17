@@ -592,7 +592,7 @@ class Supervisor:
             self: 解析済みの設定を持つsupervisor
         Returns:
             int | None: 明示需要が無く、記録が使える場合の需要。それ以外はNone
-        副作用: 記録の読取に失敗した場合のstderrへの一行。走行は既定値の予約で続く
+        副作用: 記録の読取に失敗した場合のstderrへの一行。走行は鍵の記録が無い場合と同じ予約で続く
         """
         if self.options.resource_key is None:
             return None
@@ -603,6 +603,18 @@ class Supervisor:
         except (OSError, ValueError) as error:
             diagnose(f"cannot read the measured memory demand: {error}")
         return None
+
+    def host_demand(self):
+        """鍵の記録が無い走行が、この host の他の鍵の実測から導く物理memory需要の取得
+
+        Args:
+            self: recorded_demand を呼んだ後のsupervisor
+        Returns:
+            int | None: 鍵を渡した、明示需要の無い走行で、他の鍵に使える記録がある場合の需要。それ以外はNone
+        """
+        if self.history is None or self.options.resource_memory is not None:
+            return None
+        return self.history.host_demand()
 
     def records_peak(self, drained, exceeded):
         """測ったピークを記録してよい走行の判定
@@ -748,8 +760,10 @@ class Supervisor:
     def run(self):
         self.prepare()
         if self.options.resource_policy is not None and self.cancel_signal is None:
+            recorded = self.recorded_demand()
             self.reservation = Admission(
-                self.options.resource_policy, self.options.resource_memory, self.recorded_demand(),
+                self.options.resource_policy, self.options.resource_memory, recorded,
+                self.host_demand() if recorded is None else None,
             )
             waiting_since = time.monotonic()
             try:

@@ -504,7 +504,8 @@ dotfiles が配備した timer が書き込む出力だからである。
 
 ## 非対話 job の寿命
 
-journal と記憶の収穫は、user manager の `agents.slice` に置く oneshot service と timer で定時に動く。
+journal と記憶の収穫は、user manager の `agents-deep.slice` に置く oneshot service と timer で定時に動く。
+配備の切替は走行中の job を止めず、起こし直しもしない（`X-SwitchMethod=keep-old`）。変わった job は次の起動から新しい版で動く。
 手動の `dotfiles-agent-journal` と `dotfiles-agent-memory-harvest` も、同じ job entry を同じ worker へ向けて呼ぶ。
 timer の service は自身が寿命を持って job entry を直接呼び、manual command は共通 runtime が scope と一時領域を与えてから job entry を呼ぶので、対話用の wrapper は二重に挟まない。
 

@@ -53,7 +53,11 @@ in
 
   units = {
     services.${name} = {
-      Unit.Description = description;
+      Unit = {
+        Description = description;
+        # 配備の切替は変わった unit を止めて起こし直す。oneshot の起動は完了まで戻らず、走行中の job があると切替が期限で失敗するため不可
+        X-SwitchMethod = "keep-old";
+      };
       Service = {
         Type = "oneshot";
         Slice = slice;

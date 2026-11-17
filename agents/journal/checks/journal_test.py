@@ -137,6 +137,11 @@ ROUTES = ((A_BOUNDARY[1], INSIGHT_0923), (A_PREVIOUS[1], INSIGHT_0922), (C_REQUE
 # 旧形式の日誌。format marker を持たない
 LEGACY = "# 2026-09-22 testhost\n\n| project | session | request | 費用 (USD) |\n|---|---|---|---|\n| sample | 1 | 3 | 0.875 |\n"
 
+
+def dropped_note(count: int) -> str:
+    return f"引用を記録で確かめられなかった候補 {count} 件は採用していない。"
+
+
 # journal が呼ぶ omp の代わり。system prompt の file 名で extract と synthesize を区別し、
 # 試験が書いた script の最初に当てはまる rule の応答をそのまま返す。意味の良し悪しは判定しない
 FAKE_OMP = """\
@@ -1055,6 +1060,67 @@ class JournalTest(unittest.TestCase):
         self.assertIn("was not among the supplied records", report)
         self.assertIn(tail, self.remote_file("2026/0925/testhost.md"))
 
+    def script_three_dropped_candidates(self) -> None:
+        # session A は検証できる候補の隣で二件、session B は一件を捨てるため、日の合計は三件
+        self.script["extract"] = [
+            {"when": A_BOUNDARY[1], "reply": {"insights": [
+                insight("引用の誤った候補", (A_BOUNDARY[0], "存在しない発言")),
+                INSIGHT_0923,
+                insight("背景だけの候補", A_PREVIOUS),
+            ]}},
+            {"when": B_REQUEST[1], "reply": {"insights": [insight("出典の誤った候補", C_REQUEST)]}},
+        ]
+        self.script["synthesize"] = [{"when": None, "merge": "統合された知見"}]
+        self.save_script()
+
+    def test_a_day_that_dropped_candidates_states_their_total_once_before_its_articles(self):
+        self.script_three_dropped_candidates()
+
+        self.run_journal("--date", DAY.isoformat())
+
+        document = self.remote_file(DAY_FILE)
+        self.assertEqual([line for line in document.split("\n") if "採用していない" in line], [dropped_note(3)])
+        self.assertLess(document.index(dropped_note(3)), document.index("\n## 統合された知見\n"))
+
+    def test_a_day_whose_candidates_were_all_dropped_states_the_total_in_its_no_insights_document(self):
+        self.script["extract"] = [
+            {"when": A_BOUNDARY[1], "reply": {"insights": [
+                insight("引用の誤った候補", (A_BOUNDARY[0], "存在しない発言")),
+                insight("背景だけの候補", A_PREVIOUS),
+            ]}},
+            {"when": B_REQUEST[1], "reply": {"insights": [insight("出典の誤った候補", C_REQUEST)]}},
+        ]
+        self.save_script()
+
+        self.run_journal("--date", DAY.isoformat())
+
+        document = self.remote_file(DAY_FILE)
+        self.assertEqual(document.split("\n")[0], MARKER)
+        self.assertNotIn("\n## ", document)
+        self.assertIn("抽出されなかった", document)
+        self.assertEqual([line for line in document.split("\n") if "採用していない" in line], [dropped_note(3)])
+
+    def test_a_day_that_dropped_nothing_states_no_count(self):
+        verified = self.script["extract"]
+        for name, extract in {"every candidate verified": verified, "no candidates": []}.items():
+            with self.subTest(name):
+                self.script["extract"] = extract
+                self.save_script()
+
+                self.run_journal("--date", DAY.isoformat())
+
+                self.assertNotIn("採用していない", self.remote_file(DAY_FILE))
+
+    def test_the_preview_states_the_dropped_total_exactly_as_the_published_document(self):
+        self.script_three_dropped_candidates()
+
+        status, stdout, _ = self.captured("--preview", "--date", DAY.isoformat())
+        self.run_journal("--date", DAY.isoformat())
+
+        self.assertEqual(status, 0)
+        self.assertIn(dropped_note(3), stdout.split("\n"))
+        self.assertEqual(stdout, self.remote_file(DAY_FILE))
+
     def test_a_day_without_activity_keeps_no_document(self):
         self.run_journal("--date", "2026-09-20")
 
@@ -1645,7 +1711,7 @@ class QuotedEvidenceTest(unittest.TestCase):
         cited = journal.Citation(source(SESSION_A, "q0000001"), quote, current)
         found = journal.Insight("題", "知見", "説明", "適用", "", "supported", [cited])
         start = local("2026-09-23T06:00:00")
-        return journal.render(HOST, DAY, start, start + timedelta(days=1), [found])
+        return journal.render(HOST, DAY, start, start + timedelta(days=1), [found], 0)
 
     def test_a_quotation_is_rendered_as_the_literal_lines_of_one_code_block(self):
         for name, quote in self.CASES.items():

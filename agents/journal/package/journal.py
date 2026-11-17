@@ -555,8 +555,9 @@ def screened(items: list[Any], grounds: Grounds, origin: str) -> tuple[list[Insi
     return kept, dropped
 
 
-def extract(options: argparse.Namespace, day: date, sessions: list[Session]) -> list[Insight]:
+def extract(options: argparse.Namespace, day: date, sessions: list[Session]) -> tuple[list[Insight], int]:
     found: list[Insight] = []
+    discarded = 0
     for session in sessions:
         groups = batches(session)
         for number, records in enumerate(groups, start=1):
@@ -571,7 +572,8 @@ def extract(options: argparse.Namespace, day: date, sessions: list[Session]) -> 
                     file=sys.stderr,
                 )
             found += kept
-    return found
+            discarded += len(dropped)
+    return found, discarded
 
 
 def synthesis_item(insight: Insight) -> dict[str, Any]:
@@ -664,7 +666,7 @@ def article(insight: Insight) -> list[str]:
     return lines
 
 
-def render(machine: str, day: date, start: datetime, end: datetime, insights: list[Insight]) -> str:
+def render(machine: str, day: date, start: datetime, end: datetime, insights: list[Insight], dropped: int) -> str:
     lines = [
         FORMAT_MARKER,
         f"# {day.isoformat()} {machine}",
@@ -675,6 +677,9 @@ def render(machine: str, day: date, start: datetime, end: datetime, insights: li
     ]
     if not insights:
         lines += ["", NO_INSIGHTS]
+    # 理由や内訳は stderr にだけ残し、文書には日の合計だけを載せる
+    if dropped:
+        lines += ["", f"引用を記録で確かめられなかった候補 {dropped} 件は採用していない。"]
     for insight in insights:
         lines += article(insight)
     return "\n".join(lines) + "\n"
@@ -683,7 +688,8 @@ def render(machine: str, day: date, start: datetime, end: datetime, insights: li
 def compose(
     options: argparse.Namespace, machine: str, day: date, start: datetime, end: datetime, sessions: list[Session]
 ) -> str:
-    return render(machine, day, start, end, synthesize(options, extract(options, day, sessions)))
+    insights, dropped = extract(options, day, sessions)
+    return render(machine, day, start, end, synthesize(options, insights), dropped)
 
 
 def git(journal: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:

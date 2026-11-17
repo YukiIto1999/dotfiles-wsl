@@ -273,6 +273,7 @@ in
         description = ''
           Windows の物理 memory の空きのうち、workload の admission が使わず Windows に残す GiB。
           windowsPhysicalHeadroomBytes は空きからこの値を引いた余力で、実測で見直す方針値。
+          この余力が 0 の間、入場を待つのは deep だけで、受入は待たない。
         '';
       };
       observationPackage = lib.mkOption {

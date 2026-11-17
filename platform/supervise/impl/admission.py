@@ -5,7 +5,6 @@ memory で収まらないときは取り消される。走行の所有と生死�
 記録 file を持たない。
 """
 
-import errno
 import fcntl
 import json
 import math
@@ -43,11 +42,6 @@ CANCEL_MARK = "cancel-"
 STALE_MARK_SECONDS = 3600
 ADMIT, WAIT, CANCEL_DEEP = "admit", "wait", "cancel-deep"
 HEADROOM_REASON = "Linux memory or Windows commit headroom is reserved"
-# Windows 側の snapshot の更新と空いた page の host への返却に数秒かかるため判定ごとの要求は不可
-RECLAIM_INTERVAL_SECONDS = 10
-RECLAIM_FILE = "memory.reclaim"
-# memory.reclaim は anon も swap へ落とし得るため bytes だけの要求は不可
-RECLAIM_OPTION = "swappiness=0"
 
 
 class AdmissionError(Exception):
@@ -212,14 +206,10 @@ class Policy:
         self.proc_cgroup = Path(document.get("procCgroup", "/proc/self/cgroup"))
         self.journal = document.get("journalSocket", JOURNAL_SOCKET)
 
-    def manager_directory(self):
-        """利用者の systemd manager の cgroup directory"""
-        uid = os.getuid()
-        return self.cgroup_root / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service"
-
     def slice_directory(self, klass):
         """class の slice の cgroup directory。利用者の systemd manager の下に置く"""
-        return self.manager_directory() / self.slices[klass]
+        uid = os.getuid()
+        return self.cgroup_root / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service" / self.slices[klass]
 
     def slice_unit(self, klass):
         """class の slice の unit 名"""
@@ -227,7 +217,7 @@ class Policy:
 
 
 class Admission:
-    """一走行の入場。待機、判定、scope の起動と、受入が Windows の reserve で待つ間の cache の回収の要求までを持つ
+    """一走行の入場。待機、判定、scope の起動までを持つ
 
     policy_path: class ごとの policy file
     memory_bytes: 明示された物理memory需要か導出に任せるNone
@@ -258,12 +248,6 @@ class Admission:
         self.stopping = set()
         # 待機した理由を最初に現れた順に重複なく残す。計測の一行へ渡す
         self.reasons = []
-        # 受入が Windows の物理空きの reserve のために待つ観測での、reserve に足りない bytes。そうでない観測では None
-        self.windows_shortfall = None
-        # 最後に cache の回収を求め終えた単調時計の時刻。まだ求めていなければ None
-        self.reclaimed_at = None
-        # 回収の要求の失敗を stderr へ出したか
-        self.reclaim_reported = False
 
     def settle_memory(self, value):
         """観測した上限での物理memory需要の確定
@@ -295,12 +279,12 @@ class Admission:
 
         deadline: 待機の絶対期限
         戻り値: 空きの観測と入場保留理由
-        副作用: 最初の有効な観測での物理memory需要の確定。Windows の物理空きが reserve を割った観測では、reserve に足りない bytes の記録
-        制約: class が通す status は PASSING。受入は警告で止まらず、deep は警告で止まる
+        副作用: 最初の有効な観測での物理memory需要の確定
+        制約: class が通す status は PASSING。受入は警告で止まらず、deep は警告で止まる。
+            Windows の物理空きが reserve を割った観測は、deep だけが待ち、受入は通常の判定へ進む。
             上限は呼んだ process の居る cgroup ではなく、scope を置く class の slice から辿る。
             scope ごとの working set は観測が求める。回収できる cache の式は観測だけが持つ
         """
-        self.windows_shortfall = None
         remaining = deadline - time.time()
         if remaining <= 0:
             return None, "deadline reached before observation"
@@ -332,18 +316,15 @@ class Admission:
                           "windowsPhysicalHeadroomBytes"):
                 if type(value[field]) is not int or value[field] < 0:
                     return None, f"resource observation has no valid {field}"
+            # 物理空きの不足は Windows 側の paging の問題で枯渇の失敗は commit の余裕が守るため受入の待機は不可
+            # 受入の待ちの間に memory.reclaim で file cache を返させる方式は cache が繰り返し捨てられて機械全体が thrash するため不可
+            if value["windowsPhysicalHeadroomBytes"] == 0 and self.klass == "deep":
+                return None, "Windows physical reserve is exhausted"
             if not isinstance(value["memoryLimits"], list):
                 return None, "cgroup memory limits are unknown"
             if any(type(limit["limitBytes"]) is not int or limit["limitBytes"] <= 0 for limit in value["memoryLimits"]):
                 return None, "resource observation has no valid limitBytes"
             self.settle_memory(value)
-            # 回収の要求が走行の需要を含むため reserve を割った観測の判定を需要の確定より前に置くのは不可
-            if value["windowsPhysicalHeadroomBytes"] == 0:
-                reserve = value.get("windowsPhysicalReserveBytes")
-                if type(reserve) is not int or reserve < 0:
-                    return None, "resource observation has no valid windowsPhysicalReserveBytes"
-                self.windows_shortfall = max(reserve - value["windowsPhysicalAvailableBytes"], 0)
-                return None, "Windows physical reserve is exhausted"
             for limit in value["memoryLimits"]:
                 if type(limit["headroomBytes"]) is not int or limit["headroomBytes"] < 0:
                     raise AdmissionError("invalid cgroup memory headroom")
@@ -530,32 +511,6 @@ class Admission:
             else:
                 self.unmark_cancelled(scope)
 
-    def request_reclaim(self):
-        """受入が Windows の物理空きの reserve のために待つとき、cache を host へ返す回収を kernel へ求める
-
-        副作用: 利用者の user manager の cgroup の memory.reclaim へ、この走行の需要と reserve に足りない bytes の合計を、file cache だけの回収として書く
-        制約: 書くのは受入だけ。deep は待つ者がおらず、作業中の cache を捨てさせない。
-            swappiness=0 を付け、作業中の session の anon を swap へ追い出させない。
-            Windows 以外の待ちでは書かず、前の要求を終えてから RECLAIM_INTERVAL_SECONDS が経つまで書かない。
-            回収しきれない場合の EAGAIN は黙って捨て、他の失敗は一度だけ stderr へ出す。待ちと入場の扱いは変えない
-        """
-        if self.klass != "acceptance" or self.windows_shortfall is None:
-            return
-        if self.reclaimed_at is not None and time.monotonic() - self.reclaimed_at < RECLAIM_INTERVAL_SECONDS:
-            return
-        path = self.policy.manager_directory() / RECLAIM_FILE
-        try:
-            descriptor = os.open(path, os.O_WRONLY | os.O_CLOEXEC)
-            try:
-                os.write(descriptor, f"{self.memory + self.windows_shortfall} {RECLAIM_OPTION}".encode())
-            finally:
-                os.close(descriptor)
-        except OSError as error:
-            if error.errno != errno.EAGAIN and not self.reclaim_reported:
-                self.reclaim_reported = True
-                print(f"dotfiles-supervise: cannot request memory reclaim at {path}: {error}", file=sys.stderr, flush=True)
-        self.reclaimed_at = time.monotonic()
-
     def scope_command(self):
         """走行ごとの scope を作って command を起動する前置 argv。需要は scope の memory.low か memory.high へ入る"""
         unit = f"dotfiles-workload-{self.klass}-{os.getpid()}-{uuid.uuid4().hex[:8]}.scope"
@@ -584,7 +539,6 @@ class Admission:
         try:
             while supervisor.cancel_signal is None and time.time() < wait_until:
                 observation, reason = self.snapshot(wait_until)
-                self.request_reclaim()
                 try:
                     fcntl.flock(registry, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:

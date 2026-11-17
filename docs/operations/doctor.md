@@ -297,10 +297,12 @@ T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の�
 需要は最も厳しい上限へ切り詰める。明示した需要が上限を超える場合は、待たずにcommandを起動せず70で返す。明示は`dotfiles-workload-run`の`--memory-gib`で行い、入れ子の処理は外側で合計需要を予約する。
 入れ子は、現在のprocessが走行のscopeの下にいれば、そのscopeの中で外側のclassのまま動き、二重に計上せず、待たず、昇格しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。
 wrapperを通らないcommandや共有backendの将来増加までは予約できない。
-Windowsの物理空きはreserveを割った場合の開始保留と、受入が待つ間のcacheの回収の要求に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。
-受入がreserveを割ったために待つ間、supervisorは利用者のuser managerのcgroupの`memory.reclaim`へ、走行の需要とreserveに足りない量の合計のbyte数を`swappiness=0`付きで書き、kernelにfile cacheだけをhostへ返させる。作業中のsessionのanonymous memoryはswapへ追い出さない。待ちを短くするための要求であり、入場の条件は変わらない。余力が0の観測では入場せず、次の観測で正になってから従来どおり判定する。
-要求は10秒に1回までで、Windows側のsnapshotの更新と空いたpageのhostへの返却に数秒かかるためである。深い検証と、Windows以外の待ち（Linuxのmemory、cgroupの上限、圧迫、観測の失敗）は書かない。
-`memory.reclaim`が無い、書けない、求めた量を回収しきれない場合も、走行の合否と待ちは変わらない。回収しきれない場合のEAGAINは黙って無視し、それ以外の失敗は`dotfiles-supervise: cannot request memory reclaim at <path>: <原因>`の一行だけをstderrへ出し、同じ待ちの中で繰り返さない。
+Windowsの物理空きは、reserveを割った場合の深い検証の開始保留に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。
+受入は、reserveを割った観測でも待たずに通常の判定へ進む。
+物理空きの不足はWindows側のpagingの性能の問題で、枯渇による失敗はcommit余裕（`windowsCommitHeadroomBytes`）が守るためである。
+受入は人と次の作業が待つ検証で、その待ちだけを延ばしても、同じ機械で動く他の作業のmemory消費は止まらない。
+深い検証は、余力が0の間は入場せず、次の観測で正になってから従来どおり判定する。
+受入の待ちの間に`memory.reclaim`でfile cacheの回収を求める方式は、cacheの再読込みで機械全体の待ちを増やしたため採らない。
 
 実測した需要は、呼出し側が鍵を渡した走行だけが読み書きする。
 記録は`${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/<鍵のsha256>.json`に置き、directoryは0700である。

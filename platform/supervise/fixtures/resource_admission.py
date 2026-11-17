@@ -51,16 +51,6 @@ TINY_LIMIT = 1024
 # How many more times a run that says it waits must set about judging before it is taken to stay waiting.  Every attempt runs
 # the observation once, so the count of observations is the count of attempts and does not depend on how fast the machine is.
 ROUNDS = 10
-# How many more times a run that waits for the Windows reserve must set about judging before what it has asked of memory.reclaim
-# is counted.  The supervisor asks again only after ten seconds and a judgement takes half a second, so a few judgements pass
-# well inside one interval, while a request made at every judgement would show.  A test neither waits the interval out nor
-# shortens it.
-RECLAIM_ROUNDS = 3
-# The Windows physical memory that is to stay free, and the free amount that a test observes below it.
-WINDOWS_RESERVE = 8 * GIB
-WINDOWS_FREE_BELOW = 5 * GIB
-# The environment variable that names the fake memory.reclaim to the observation stand-in.
-RECLAIM_VARIABLE = "DOTFILES_FAKE_RECLAIM"
 # The janitor of the fake systemd polls and removes a scope once EMPTY_POLLS (3) polls in a row find no member of it; this many
 # polls would have removed a scope that has none many times over.
 JANITOR_POLLS = 20
@@ -71,9 +61,7 @@ OOM_SCORE = [sys.executable, "-c",
              "\nwhile not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)"]
 # Stands in for `dotfiles-observe-workload [CGROUP]`: the snapshot, with the limits of every ancestor of the cgroup the caller
 # asked about added (`destinationLimits`), as the real observation walks up from the cgroup it is given.  It also appends the
-# pid of its caller, the supervisor that judges, to `<snapshot>.observed`, so that a test can count the judgements.  A file keeps
-# only its last write, so it moves what was written to the fake memory.reclaim to `<snapshot>.reclaimed` as well: the supervisor
-# judges between two writes, and each write is a line of the log.
+# pid of its caller, the supervisor that judges, to `<snapshot>.observed`, so that a test can count the judgements.
 OBSERVE = [sys.executable, "-c",
            "import json,os,pathlib,sys\n"
            "snapshot=json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
@@ -82,10 +70,6 @@ OBSERVE = [sys.executable, "-c",
            "for limit in value.pop('destinationLimits',[]):\n"
            "    if where==limit['path'] or where.startswith(limit['path']+'/'): value['memoryLimits']=[*value['memoryLimits'],limit]\n"
            "with open(sys.argv[1]+'.observed','a') as log: log.write(str(os.getppid())+'\\n')\n"
-           "request=pathlib.Path(os.environ['DOTFILES_FAKE_RECLAIM'])\n"
-           "if request.is_file() and request.stat().st_size:\n"
-           "    with open(sys.argv[1]+'.reclaimed','a') as log: log.write(request.read_text().strip()+'\\n')\n"
-           "    request.write_text('')\n"
            "print(json.dumps(snapshot))"]
 # Run inside a scope: a descendant that outlives the command, then the command itself, which ends when released and says so.
 DESCENDANT = [sys.executable, "-c",
@@ -159,7 +143,6 @@ class ResourceAdmission(unittest.TestCase):
                 "windowsCommitHeadroomBytes": 20 * GIB,
                 "windowsPhysicalAvailableBytes": 10 * GIB,
                 "windowsPhysicalHeadroomBytes": 2 * GIB,
-                "windowsPhysicalReserveBytes": WINDOWS_RESERVE,
             }}],
         }))
         # Stands in for journald's native socket; the supervisors' datagrams are read back from it.
@@ -172,12 +155,6 @@ class ResourceAdmission(unittest.TestCase):
         # A directory to run in: the demand is keyed by the caller, not by what the working directory holds.
         self.repo = self.root / "repo"
         self.repo.mkdir()
-        # The user manager's cgroup, which is where the supervisor asks the kernel to give memory back, with the file it writes.
-        uid = os.getuid()
-        manager = self.cgroup / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service"
-        manager.mkdir(parents=True)
-        self.reclaim = manager / "memory.reclaim"
-        self.reclaim.touch()
 
     def write_policy(self, klass, name=None, fail=False, gate=None, **changes):
         """Write a policy file for a class: the real fields, with the fakes standing in for systemd and the cgroup tree."""
@@ -201,7 +178,7 @@ class ResourceAdmission(unittest.TestCase):
 
     def environment(self):
         """The environment of every launched process: a private state directory."""
-        return {**os.environ, "XDG_STATE_HOME": str(self.state), RECLAIM_VARIABLE: str(self.reclaim)}
+        return {**os.environ, "XDG_STATE_HOME": str(self.state)}
 
     def measurements(self):
         """The journal entries the supervisors have sent so far, oldest first, as (fields, message record) pairs."""
@@ -341,21 +318,18 @@ class ResourceAdmission(unittest.TestCase):
         log = Path(f"{self.snapshot}.observed")
         return log.read_text().split().count(str(process.pid)) if log.exists() else 0
 
-    def keeps_waiting(self, process, rounds=ROUNDS):
-        """Wait until the workload has set about judging `rounds` more times, so that what it waits for is known to last."""
+    def keeps_waiting(self, process):
+        """Wait until the workload has set about judging ROUNDS more times, so that what it waits for is known to last."""
         seen = self.judged(process)
-        self.wait_for(lambda: self.judged(process) >= seen + rounds, process)
+        self.wait_for(lambda: self.judged(process) >= seen + ROUNDS, process)
 
-    def held_back(self, name, rounds=0, **options):
+    def held_back(self, name, **options):
         """Start a workload that must not be admitted, cancel it once it says it waits, and return its reason and its stderr.
 
         The run is judged and found not to be admitted before it is cancelled, so no wait limit is timed and no run that
-        never got as far as a judgement passes for one that was refused.  It is judged `rounds` more times before it is cancelled,
-        and the reason returned is the one it has reached by then.
+        never got as far as a judgement passes for one that was refused.
         """
         process, started, _ = self.start(name, **options)
-        self.waiting(name, process)
-        self.keeps_waiting(process, rounds)
         reason = self.waiting(name, process)
         process.send_signal(signal.SIGTERM)
         _, error = process.communicate(timeout=HANG_SECONDS)
@@ -363,24 +337,13 @@ class ResourceAdmission(unittest.TestCase):
         self.assertFalse(started.exists())
         return reason, error
 
-    def requests(self):
-        """What the supervisors have written to memory.reclaim, one string per write, oldest first.
-
-        The observation has moved each write but the last to a log.  What was written after the last judgement is still in the
-        file and is counted as well; read after the run has ended, the count is exact.
-        """
-        log = Path(f"{self.snapshot}.reclaimed")
-        moved = log.read_text().splitlines() if log.exists() else []
-        pending = self.reclaim.read_text().strip() if self.reclaim.is_file() else ""
-        return [*moved, *([pending] if pending else [])]
-
     def exhaust_windows_reserve(self):
         """Observe the Windows physical memory below its reserve, so that no headroom is left."""
-        self.observe(windowsPhysicalAvailableBytes=WINDOWS_FREE_BELOW, windowsPhysicalHeadroomBytes=0)
+        self.observe(windowsPhysicalAvailableBytes=5 * GIB, windowsPhysicalHeadroomBytes=0)
 
     def restore_windows_reserve(self):
         """Observe the Windows physical memory above its reserve again."""
-        self.observe(windowsPhysicalAvailableBytes=WINDOWS_RESERVE + 2 * GIB, windowsPhysicalHeadroomBytes=2 * GIB)
+        self.observe(windowsPhysicalAvailableBytes=10 * GIB, windowsPhysicalHeadroomBytes=2 * GIB)
 
     def polls(self, scope):
         """How many times the janitor of the fake systemd has looked at the scope for a member."""
@@ -966,86 +929,28 @@ class ResourceAdmission(unittest.TestCase):
         process.communicate(timeout=HANG_SECONDS)
         self.assertEqual(process.returncode, 127)
 
-    # Giving cache back to the host
+    # The Windows physical reserve
 
-    def test_an_acceptance_that_waits_for_the_windows_reserve_asks_the_kernel_for_what_it_needs_and_lacks(self):
-        """The request is the demand of the run and the amount the free physical memory falls short of the reserve, for file cache only."""
+    def test_an_acceptance_enters_while_the_windows_reserve_is_exhausted(self):
+        """People wait for an acceptance, and low Windows physical memory costs paging only, which the commit headroom backs."""
         self.exhaust_windows_reserve()
-        process, started, release = self.start("reclaiming")
-        self.waiting("reclaiming", process)
-        self.keeps_waiting(process, RECLAIM_ROUNDS)
-        self.assertEqual(self.waiting("reclaiming", process), "Windows physical reserve is exhausted")
-        # The 40% of the sixteen GiB machine that a run without a demand reserves, and the 3 GiB by which 5 GiB fall short of 8.
-        # swappiness=0 keeps the kernel from pushing the anonymous memory of working sessions to swap to meet the amount.
-        expected = f"{percent_of(MEMORY_PERCENT, 16 * GIB) + 3 * GIB} swappiness=0"
-        self.assertEqual(self.requests(), [expected])
+        status, _, _ = self.run_command("windows-low", key=None)
+        self.assertEqual(status, 0)
+        (_, record), = self.measurements()
+        self.assertNotIn("Windows physical reserve is exhausted", record["waitReasons"])
+
+    def test_a_deep_run_waits_while_the_windows_reserve_is_exhausted_and_enters_when_it_is_back(self):
+        """Nobody waits for a deep run, so it does not enter on a reserve that is not kept."""
+        self.exhaust_windows_reserve()
+        process, started, release = self.start("deep", klass="deep")
+        self.waiting("deep", process)
+        self.keeps_waiting(process)
+        self.assertEqual(self.waiting("deep", process), "Windows physical reserve is exhausted")
         self.assertFalse(started.exists())
-        # The request changes no rule of entry: the run enters once the observation shows the headroom again.
         self.restore_windows_reserve()
         self.wait_for(started.exists, process)
         release.touch()
-        _, error = process.communicate(timeout=HANG_SECONDS)
-        self.assertEqual(process.returncode, 0)
-        self.assertEqual(self.requests(), [expected])
-        self.assertNotIn("memory reclaim", error)
-
-    def test_an_explicit_demand_is_what_the_request_adds_the_shortfall_to(self):
-        """The demand of the run is the one it declared, not the default for a run that declared none."""
-        self.exhaust_windows_reserve()
-        self.held_back("explicit", rounds=RECLAIM_ROUNDS, arguments=["--resource-memory", str(2 * GIB)])
-        self.assertEqual(self.requests(), [f"{2 * GIB + 3 * GIB} swappiness=0"])
-
-    def test_the_request_is_not_repeated_while_the_wait_goes_on(self):
-        """Windows reports and the host takes pages back only after seconds, so a request at every judgement asks for more than is lacking."""
-        self.exhaust_windows_reserve()
-        reason, _ = self.held_back("once", rounds=RECLAIM_ROUNDS)
-        self.assertEqual(reason, "Windows physical reserve is exhausted")
-        self.assertEqual(len(self.requests()), 1)
-
-    def test_a_deep_run_waiting_for_the_windows_reserve_asks_for_nothing(self):
-        """Nobody waits for a deep run, so it does not cost the runs that work the cache they hold."""
-        self.exhaust_windows_reserve()
-        reason, _ = self.held_back("deep", klass="deep", rounds=RECLAIM_ROUNDS)
-        self.assertEqual(reason, "Windows physical reserve is exhausted")
-        self.assertEqual(self.requests(), [])
-
-    def test_a_wait_for_anything_but_the_windows_reserve_asks_for_nothing(self):
-        """Cache given back to the host helps against none of Linux memory, a cgroup limit, pressure or an observation to distrust."""
-        healthy = self.snapshot.read_text()
-        cases = {
-            "linux-memory": (lambda: self.observe(hostMemoryHeadroomBytes=GIB),
-                             "Linux memory or Windows commit headroom is reserved"),
-            "cgroup-limit": (lambda: self.bounded(8 * GIB, GIB), "memory headroom is reserved at /fixture-0.slice"),
-            "pressure": (lambda: self.outcome("fail"), "fixture"),
-            "stale": (lambda: self.observe(observedAt=time.time() - OBSERVATION_AGE - 1), "resource observation is stale"),
-        }
-        for name, (setup, expected) in cases.items():
-            with self.subTest(name):
-                self.snapshot.write_text(healthy)
-                setup()
-                asked = self.requests()
-                reason, _ = self.held_back(name, rounds=RECLAIM_ROUNDS)
-                self.assertEqual(reason, expected)
-                self.assertEqual(self.requests(), asked)
-
-    def test_a_memory_reclaim_that_cannot_be_written_costs_one_stderr_line_and_not_the_wait_or_the_entry(self):
-        """A host without the file, or with something else in its place, is waited for and entered as it is without the request."""
-        for name, replace in (("absent", self.reclaim.unlink), ("directory", self.reclaim.mkdir)):
-            with self.subTest(name):
-                self.exhaust_windows_reserve()
-                replace()
-                process, started, release = self.start(name)
-                self.waiting(name, process)
-                self.keeps_waiting(process, RECLAIM_ROUNDS)
-                self.assertEqual(self.waiting(name, process), "Windows physical reserve is exhausted")
-                self.assertFalse(started.exists())
-                self.restore_windows_reserve()
-                self.wait_for(started.exists, process)
-                release.touch()
-                _, error = process.communicate(timeout=HANG_SECONDS)
-                self.assertEqual(process.returncode, 0)
-                lines = [line for line in error.splitlines() if line.startswith("dotfiles-supervise: cannot request memory reclaim")]
-                self.assertEqual(len(lines), 1, error)
+        self.assertEqual(self.finish(process), 0)
 
     # Nested runs
 

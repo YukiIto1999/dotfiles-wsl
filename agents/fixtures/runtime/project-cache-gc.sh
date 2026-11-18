@@ -818,6 +818,13 @@ printf 'version=6\nfingerprint=%s' "$dry_fingerprint" > "$dry_verification/$dry_
 : > "$dry_verification/$dry_project/.pending.1793000000000000.124"
 : > "$dry_verification/$dry_project/run.lock"
 : > "$dry_verification/sessions/resume-me/armed"
+# Gate records named by a launcher session go once that session directory is gone. A live session keeps its records,
+# and records named by a hook session are read again when the session resumes.
+dry_live_gate=$dry_verification/sessions/$(basename "$(session_path "$dry_home" live)")
+dry_gone_gate=$dry_verification/sessions/$session_project_id.fixture.gone
+mkdir -p "$dry_live_gate" "$dry_gone_gate"
+: > "$dry_live_gate/$dry_project"
+: > "$dry_gone_gate/$dry_project"
 : > "$dry_cache/trash/units.interrupted/payload"
 exec {dry_lock_fd}<"$dry_locked/debug/.cargo-build-lock"
 flock -x "$dry_lock_fd"
@@ -830,6 +837,7 @@ expect_report "$fixture/dry-report" keep session "$(session_path "$dry_home" liv
 expect_report "$fixture/dry-report" keep session "$(session_path "$dry_home" 4242.scoped)" scope-occupied
 expect_report "$fixture/dry-report" retire session "$(session_path "$dry_home" orphan)" owner-dead
 expect_report "$fixture/dry-report" retire session "$(session_path "$dry_home" unclaimed)" unclaimed
+expect_report "$fixture/dry-report" retire gate-session "$dry_gone_gate" session-gone
 expect_report "$fixture/dry-report" retire cargo-unit "$dry_entry#$(unit_hash "$dry_entry" old)" inactive
 expect_report "$fixture/dry-report" retire cargo-orphan "$dry_entry#0123456789abcdef" orphan
 expect_report "$fixture/dry-report" keep cargo-entry "$dry_locked" busy
@@ -842,7 +850,7 @@ awk -F'\t' '$1 == "summary" && $2 == "cache" { found = 1 } END { exit !found }' 
 refute_report "$fixture/dry-report" "$dry_entry#$(unit_hash "$dry_entry" recent)"
 refute_report "$fixture/dry-report" "$dry_locked#"
 for untouched in "$dry_home/.cache/explicit-target" "$dry_home/work" "$dry_cache/recovery" \
-  "$dry_verification/sessions" .verified .waived .pending run.lock; do
+  "$dry_verification/sessions/resume-me" "$dry_live_gate" .verified .waived .pending run.lock; do
   refute_report "$fixture/dry-report" "$untouched"
 done
 HOME=$dry_home DOTFILES_AGENT_CGROUP_ROOT=$dry_cgroup DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
@@ -864,6 +872,8 @@ test -f "$dry_verification/$dry_project/$dry_other.waived"
 test -f "$dry_verification/$dry_project/.pending.1793000000000000.124"
 test -f "$dry_verification/$dry_project/run.lock"
 test -f "$dry_verification/sessions/resume-me/armed"
+test -f "$dry_live_gate/$dry_project"
+test ! -e "$dry_gone_gate"
 test -f "$dry_home/.cache/explicit-target/debug/deps/libuser-0123456789abcdef.rlib"
 test -f "$dry_home/work/recovery-bundle/manifest.json"
 test -f "$dry_cache/recovery/bundle"

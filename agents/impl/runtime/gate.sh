@@ -17,7 +17,7 @@ usage: dotfiles-agent-gate <command> [options]
   publish --pending TOKEN --witness DIGEST [--repo DIR]
                                         木が照合値のままなら仮の控えを木の控えとして公開する。deadline の下で呼ぶ
   discard --pending TOKEN             その走行の仮の控えと公開した控え、一時fileだけを捨てる
-  arm --session ID [--path PATH]        その session が編集した repository を控える
+  arm --session ID [--path PATH]        その session が編集した repository を控える。DOTFILES_AGENT_SESSION_ID があれば、その下にも控える
   check [--repo DIR]                    未検証なら理由を出して 1 で終わる。免除は同じ DOTFILES_AGENT_SESSION_ID の持ち主のものだけを受け入れる
   waive --reason TEXT [--repo DIR]      理由を一行で残し、いまの木を DOTFILES_AGENT_SESSION_ID が同じ呼び出しだけに通す。木が変われば効かない
   entry [--repo DIR] [--policy FILE]      repository が登録する検証入口の綴りを評価器を起動せずに答える
@@ -854,15 +854,26 @@ command_settle() {
   done
 }
 
+# 控えを session の directory へ置く。引数 $1: session の名、$2: 控えの名、$3: repository の根。置けなければ 1 で返る
+arm_under() {
+  ensure_session_state "$1" && store_state "$sessions_root/$1/$2" "$3"
+}
+
+# repository を控える。hook の session の directory に加えて、launcher の session の directory(DOTFILES_AGENT_SESSION_ID)にも控える。
+# omp の subagent は自分の session ID で hook を呼ぶが、終了の hook は親にしか来ず、親は launcher の ID を共有する。
+# subagent だけが変えた repository を、親の終了が拾うためである。hook の session の控えは、再開が同じ ID で拾うため残す。
 command_arm() {
-  local session=$1 path=${2:-$PWD} top id
+  local session=$1 path=${2:-$PWD} owner=${DOTFILES_AGENT_SESSION_ID-} top id status=0
   [ -n "$session" ] || fail 'arm には --session が要る'
   [ -e "$path" ] || path=$(dirname -- "$path")
   [ -d "$path" ] || path=$(dirname -- "$path")
   top=$(repo_top_of "$path") || return 0
   id=$(project_id_of "$top") || return 0
-  ensure_session_state "$session" || return 1
-  store_state "$sessions_root/$session/$id" "$top"
+  arm_under "$session" "$id" "$top" || status=1
+  if [ "$owner" != "$session" ] && session_name_is_valid "$owner"; then
+    arm_under "$owner" "$id" "$top" || status=1
+  fi
+  return "$status"
 }
 
 # shell の呼び出しは綴りから書き込み先を読めない。呼ぶ前と後で作業場所の木の鍵を比べ、
@@ -1008,8 +1019,44 @@ runtime_scratch_root() {
   printf '%s\n' "$physical"
 }
 
+# session の directory が控えた repository を問い、未検証か、控えを確かめられなければ 2 で返る。
+# 同じ repository が hook の session と launcher の session の両方にあっても、一度だけ問う。
+# skills は Skill の読取を控えていた旧 generation の残りである。読む者がいないため calls と同じく捨てる。
+# 引数 $1: session の名
+declare -A asked_repositories=()
+check_session_markers() {
+  local session=$1 marker held reason status=0
+  [ -n "$session" ] && { [ -e "$sessions_root/$session" ] || [ -L "$sessions_root/$session" ]; } || return 0
+  if ! reason=$(session_state_is_private "$session" 2>&1); then
+    reason=$(printf '%s\n  控えた repository を確かめられないため、検証済みとは扱わず止める。' "$reason")
+    printf '%s\n' "$reason"
+    printf '%s\n' "$reason" >&2
+    return 2
+  fi
+  for marker in "$sessions_root/$session"/*; do
+    [ -e "$marker" ] || [ -L "$marker" ] || continue
+    if case ${marker##*/} in
+      calls | skills) state_directory_is_private "$marker" ;;
+      *) state_file_is_private "$marker" ;;
+    esac; then
+      case ${marker##*/} in
+      calls | skills) rm -rf -- "$marker"; continue ;;
+      esac
+      held=$(cat "$marker")
+      [ -d "$held" ] || continue
+      [ -z "${asked_repositories[$held]+x}" ] || continue
+      asked_repositories[$held]=1
+      command_check "$held" || status=2
+    else
+      printf 'dotfiles-agent-gate: 不正な状態の控えを検証済みと扱わない: %s\n' "$marker" | tee /dev/stderr
+      status=2
+    fi
+  done
+  return "$status"
+}
+
 command_hook() {
-  local kind=$1 payload session cwd path marker held reason status=0
+  local kind=$1 payload session cwd path owner=${DOTFILES_AGENT_SESSION_ID-} status=0
   payload=$(cat)
   session=$(printf '%s' "$payload" | jq -r '.session_id // empty')
   cwd=$(printf '%s' "$payload" | jq -r '.cwd // empty')
@@ -1035,32 +1082,9 @@ command_hook() {
     exit 0
     ;;
   stop)
-    if [ -n "$session" ] && { [ -e "$sessions_root/$session" ] || [ -L "$sessions_root/$session" ]; }; then
-      if reason=$(session_state_is_private "$session" 2>&1); then
-        # skills は Skill の読取を控えていた旧 generation の残りである。読む者がいないため calls と同じく捨てる。
-        for marker in "$sessions_root/$session"/*; do
-          [ -e "$marker" ] || [ -L "$marker" ] || continue
-          if case ${marker##*/} in
-            calls | skills) state_directory_is_private "$marker" ;;
-            *) state_file_is_private "$marker" ;;
-          esac; then
-            case ${marker##*/} in
-            calls | skills) rm -rf -- "$marker"; continue ;;
-            esac
-            held=$(cat "$marker")
-            [ -d "$held" ] || continue
-            command_check "$held" || status=2
-          else
-            printf 'dotfiles-agent-gate: 不正な状態の控えを検証済みと扱わない: %s\n' "$marker" | tee /dev/stderr
-            status=2
-          fi
-        done
-      else
-        reason=$(printf '%s\n  控えた repository を確かめられないため、検証済みとは扱わず止める。' "$reason")
-        printf '%s\n' "$reason"
-        printf '%s\n' "$reason" >&2
-        status=2
-      fi
+    check_session_markers "$session" || status=2
+    if [ "$owner" != "$session" ] && session_name_is_valid "$owner"; then
+      check_session_markers "$owner" || status=2
     fi
     exit "$status"
     ;;

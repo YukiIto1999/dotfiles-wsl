@@ -128,6 +128,18 @@ as_owner() {
   fi
 }
 
+# 引数 $1: 期待する status、$2: 持ち主、$3: hook の payload の session、$4: repository、$5: 場面の名前
+# 出力: gate の stdout を $fixture/stop-output へ、stderr を $fixture/stop-error へ残す
+expect_stop_status() {
+  local want=$1 owner=$2 payload=$3 repository=$4 status=0
+  jq -nc --arg session "$payload" --arg cwd "$repository" '{session_id:$session,cwd:$cwd}' |
+    as_owner "$owner" hook stop >"$fixture/stop-output" 2>"$fixture/stop-error" || status=$?
+  if [ "$status" -ne "$want" ]; then
+    echo "stop by owner '$owner' under payload session '$payload' exited $status instead of $want: $5" >&2
+    exit 1
+  fi
+}
+
 waiver_repository=
 waiver_payload=
 
@@ -137,8 +149,8 @@ expect_waiver_status() {
   local want=$1 owner=$2 kind=$3 status=0
   case $kind in
   stop)
-    jq -nc --arg session "$waiver_payload" --arg cwd "$waiver_repository" '{session_id:$session,cwd:$cwd}' |
-      as_owner "$owner" hook stop >"$fixture/waiver-output" 2>&1 || status=$?
+    expect_stop_status "$want" "$owner" "$waiver_payload" "$waiver_repository" "$4"
+    return
     ;;
   check) as_owner "$owner" check --repo "$waiver_repository" >"$fixture/waiver-output" 2>&1 || status=$? ;;
   esac
@@ -241,6 +253,57 @@ check_waiver_is_scoped_to_its_session() {
     echo 'waive left a file for a reason it refused' >&2
     exit 1
   fi
+}
+
+# subagent は自分の session ID で hook を呼ぶが、終了の hook は親にしか来ない。控えは launcher の session ID(持ち主)の下にも
+# 置かれ、親の終了が subagent だけの変更を拾う。hook の session の控えは、再開が同じ ID で拾うため残る。
+# launcher の ID は PROJECT_ID.CLIENT.PID.SUFFIX の形で、名として使える。
+check_stop_covers_subagent_changes() {
+  local repository=$fixture/subagent-held resumed=$fixture/subagent-resumed external=$fixture/subagent-external
+  local sessions=$home/.cache/dotfiles-wsl/verification/sessions count status=0 project l1 l2 l3
+  project=$(printf subagent | sha256sum | cut -d ' ' -f 1)
+  l1=$project.omp.1111.aaaaaaaaaaaa
+  l2=$project.omp.2222.bbbbbbbbbbbb
+  l3=$project.omp.3333.cccccccccccc
+
+  t1_repository "$repository" 60
+  as_owner "$l1" arm --session fixture-subagent --path "$repository"
+  expect_stop_status 2 "$l1" fixture-parent "$repository" 'parent stop after a subagent changed the repository'
+  expect_stop_status 0 "$l2" fixture-parent "$repository" 'stop under another launcher id'
+  expect_stop_status 0 '' fixture-parent "$repository" 'stop outside any launcher session'
+
+  # 同じ repository が二つの directory にあっても、一度だけ報告する
+  as_owner "$l1" arm --session fixture-parent --path "$repository"
+  expect_stop_status 2 "$l1" fixture-parent "$repository" 'repository armed under both directories'
+  count=$(grep -c 'の検証入口が' "$fixture/stop-output" || true)
+  if [ "$count" -ne 1 ]; then
+    echo "stop reported a repository armed under both directories $count times" >&2
+    exit 1
+  fi
+  (cd "$repository" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+  expect_stop_status 0 "$l1" fixture-parent "$repository" 'stop after the entrance ran'
+
+  # 再開では、別の launcher の下でも、hook の session の控えが同じ ID の stop を止める
+  t1_repository "$resumed" 60
+  as_owner "$l1" arm --session fixture-resume --path "$resumed"
+  expect_stop_status 2 "$l2" fixture-resume "$resumed" 'resume under another launcher id'
+
+  # launcher の directory にも、hook の directory と同じ実 directory の検査が掛かる。symlink の先へは控えず、通しても読まない
+  mkdir "$external"
+  ln -s "$external" "$sessions/$l3"
+  as_owner "$l3" arm --session fixture-linked --path "$resumed" 2>/dev/null || status=$?
+  if [ "$status" -eq 0 ] || [ -n "$(find "$external" -mindepth 1)" ]; then
+    echo "arm wrote through a launcher session directory that is a symlink, or reported success ($status)" >&2
+    exit 1
+  fi
+  expect_stop_status 2 "$l3" fixture-unarmed "$resumed" 'stop through a launcher session directory that is a symlink'
+
+  # 名として使えない launcher の ID は、状態を作らず、hook の session の控えだけを残す
+  as_owner 'a/b' arm --session fixture-plain --path "$resumed"
+  [ ! -e "$sessions/a" ] && [ -e "$sessions/fixture-plain" ] || {
+    echo 'arm under an unusable launcher id created state outside the session directories' >&2
+    exit 1
+  }
 }
 
 # 門は、入口を宣言する repository でだけ「通っていない」と答える。
@@ -427,3 +490,4 @@ expect_closed_gate "$native_budget_repo" 'removed tracked native metadata'
 check_wrapper_runs_every_time
 check_edits_gate_on_freshness_only
 check_waiver_is_scoped_to_its_session
+check_stop_covers_subagent_changes

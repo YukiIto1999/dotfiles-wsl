@@ -572,6 +572,34 @@ retire_verification_legacy() {
   fi
 }
 
+# gate が launcher の session 名で控えた repository の記録は、その session の directory が消えた後は読む者がいない。
+# launcher は client の終了で session の directory を消し、消せなければ GC が持ち主の死んだ session として消すため、
+# directory の無い名は終わった session である。hook の session 名の記録は再開で読まれるため、launcher の名の形
+# (PROJECT_ID.CLIENT.PID.SUFFIX)のものだけを回収する。
+retire_gate_session_records() {
+  local record name gate_sessions=$verification_root/sessions
+  [ -e "$gate_sessions" ] || [ -L "$gate_sessions" ] || return 0
+  validate_managed_directory "$verification_root"
+  validate_managed_directory "$gate_sessions"
+  for record in "$gate_sessions"/*; do
+    name=${record##*/}
+    [[ $name =~ ^[0-9a-f]{64}\.[A-Za-z0-9._-]+$ ]] || continue
+    absent "$sessions_root/$name" || continue
+    if [ -L "$record" ] || [ ! -d "$record" ] || [ "$(stat -c %u "$record" 2>/dev/null)" != "$uid" ]; then
+      note "gate session records are not a directory owned by this user, so they are kept: $record"
+      report unresolved gate-session - "$record" not-owned-directory
+      unresolved=true
+      continue
+    fi
+    if [ "$dry_run" = true ]; then
+      report retire gate-session "$(allocated_bytes "$record")" "$record" session-gone
+    elif ! move_to_trash "$trash_root" "$record" gate-session && ! absent "$record"; then
+      note "cannot move gate session records to trash: $record"
+      unresolved=true
+    fi
+  done
+}
+
 report_summary() {
   report summary cache "$total_bytes" "before=$cache_bytes_before high=$high_bytes low=$low_bytes" "active-sessions=$active_session_count"
 }
@@ -670,6 +698,8 @@ for session in "${sessions[@]}"; do
     report keep session - "$session" "$reason"
   fi
 done
+
+retire_gate_session_records
 
 # 持ち主の死んだ session は生き返らない。metadata の無い session は、launcher が
 # lock を解く前に metadata を書くので、lock の下でもまだ無ければ持ち主がいない。

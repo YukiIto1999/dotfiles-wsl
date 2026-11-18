@@ -7,13 +7,9 @@
 
 let
   programs = import ./package.nix { inherit lib pkgs; };
-  workloadRun = pkgs.writeShellApplication {
-    name = "dotfiles-workload-run";
-    text = ''
-      exec ${lib.getExe pkgs.python3} -I -S ${./impl/workload-run.py} \
-        ${lib.getExe config.dotfiles.platform.supervise.package} \
-        ${lib.escapeShellArg (toString config.dotfiles.workstation.workload.deepAdmissionPolicy)} "$@"
-    '';
+  workloadRun = programs.mkWorkloadRun {
+    supervise = lib.getExe config.dotfiles.platform.supervise.package;
+    policy = config.dotfiles.workstation.workload.deepAdmissionPolicy;
   };
 in
 {

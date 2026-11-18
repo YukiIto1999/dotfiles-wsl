@@ -64,12 +64,28 @@ let
           ]
           (builtins.readFile ./impl/project-run.sh);
     };
+  # git は鍵の repository の根を求める実行 file。利用者の PATH を変えずに、環境によらず同じ根を得るため、固定した path で渡す
+  mkWorkloadRun =
+    {
+      supervise,
+      policy,
+      gitCommand ? lib.getExe pkgs.git,
+    }:
+    pkgs.writeShellApplication {
+      name = "dotfiles-workload-run";
+      text = ''
+        exec ${lib.getExe pkgs.python3} -I -S ${./impl/workload-run.py} \
+          ${lib.escapeShellArg (toString supervise)} ${lib.escapeShellArg (toString policy)} \
+          ${lib.escapeShellArg (toString gitCommand)} "$@"
+      '';
+    };
 in
 {
   inherit
     mkNixBuildShims
     mkPolicy
     mkProjectRun
+    mkWorkloadRun
     nixBuildShims
     ;
   policy = mkPolicy { shims = nixBuildShims; };

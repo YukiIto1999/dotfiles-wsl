@@ -160,7 +160,7 @@ supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1
 入れ子は、現在のprocessがclassのscopeの下にいれば、そのscopeの中で外側のclassのまま動く。入れ子で昇格せず、scopeも作らず、待たない。明示した需要が外側のscopeの需要を超える場合は、外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は外側の需要へ切り詰め、拒否しない。
 走行の所有と生死は、scopeのcgroupと`waitpid`の`ECHILD`が持ち、走行を表す記録fileは持たない。supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続ける。
 この予約は需要の宣言であり、commandの機能や内部のworker数を削減するhard limitではない。
-policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-pushの検査本体、`dotfiles-workload-run`が同じ判定へ参加する。実測の記録の鍵を渡すのはT1とpre-pushの検査本体だけで、鍵を渡さないpre-pushの短い段は参加しない。入口を通らない任意のcommandの将来消費を保証するものではない。
+policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-pushの検査本体、`dotfiles-workload-run`が同じ判定へ参加する。実測の記録の鍵を渡すのはT1、pre-pushの検査本体、`dotfiles-workload-run`で、鍵を渡さないpre-pushの短い段は参加しない。`dotfiles-workload-run`の鍵は、`deep`、作業directoryのrepositoryの根（repositoryの外では作業directory）、commandの行を改行でつないだ文字列で、同じ根の同じcommandの走行が一つの記録を共有する。入口を通らない任意のcommandの将来消費を保証するものではない。
 Windowsの採取は独立したscheduled taskが行い、Linux側は期限内のsnapshotだけを読む。snapshotは診断の入力で、入場の条件にしない。導入と待機理由の確認は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 
 取消後と開始途中の失敗ではclientを起動しない。

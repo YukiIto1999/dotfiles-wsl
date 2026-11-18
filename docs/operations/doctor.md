@@ -310,7 +310,8 @@ collectorはVMのcommit済みbytes（`vmmemWSL`と`vmmem`のprivate bytesの合�
 実測した需要は、呼出し側が鍵を渡した走行だけが読み書きする。
 記録は`${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/<鍵のsha256>.json`に置き、directoryは0700である。
 T1は`verify`、repositoryの根、入口のcommandを、pre-pushは検査本体だけに`verify-push`、repositoryの根、入口のcommandを、それぞれ改行でつないだ文字列を鍵にする。
-pre-pushの入口の解決とsourceの確認は数秒の短い走行で、鍵を渡さない。`dotfiles-run-within`は鍵を渡した呼出しだけを予約へ参加させ、鍵の無い短い段は予約の待ちに並ばない。`dotfiles-workload-run`も鍵を渡さない。
+pre-pushの入口の解決とsourceの確認は数秒の短い走行で、鍵を渡さない。`dotfiles-run-within`は鍵を渡した呼出しだけを予約へ参加させ、鍵の無い短い段は予約の待ちに並ばない。
+`dotfiles-workload-run`は`deep`、作業directoryのrepositoryの根（`git rev-parse --show-toplevel`。repositoryの外では作業directory）、commandの行（引数を空白でつないだ文字列）を改行でつないだ文字列を鍵にする。同じ根の同じcommandの走行が一つの記録を共有し、T1とpre-pushの鍵とは混ざらない。`--memory-gib`で明示した需要は記録より優先する。
 supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計を約1秒ごとに測ってピークを保つ。子孫でない共有backendの消費は測れない。
 記録に残すのは、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけで、新しい順に10件を保つ。失敗、予算切れ、取消の走行は入口の途中で止まりピークが需要を下回るため、記録すると次の予約を下げる。予約を超えたピークは途中で止まった走行でも需要の下限なので、記録は予約を上げる向きにしか働かない。
 需要は、新しい5件のピークの最大である。

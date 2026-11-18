@@ -59,6 +59,20 @@
           cgroupFile = pkgs.writeText "unbounded-project-cgroup" "0::/init.scope\n";
           systemdRunCommand = pkgs.writeShellScript "unavailable-user-manager" "exit 69";
         };
+        # supervisor は引数を控えるだけの代替。鍵から需要を決める側は supervise の検査が持つ
+        fakeSupervise = pkgs.writeShellScript "fake-supervise-command" ''
+          printf '%s\0' "$@" > "$ARG_CAPTURE"
+        '';
+        deepPolicy = pkgs.writeText "fixture-deep-policy.json" "{}";
+        fixtureWorkloadRun = programs.mkWorkloadRun {
+          supervise = fakeSupervise;
+          policy = deepPolicy;
+        };
+        gitlessWorkloadRun = programs.mkWorkloadRun {
+          supervise = fakeSupervise;
+          policy = deepPolicy;
+          gitCommand = "/nonexistent/git";
+        };
       in
       {
         toolchain-execution-policy =
@@ -87,6 +101,23 @@
             }
             ''
               bash ${./fixtures/nix-build-shims.sh}
+              touch $out
+            '';
+
+        toolchain-workload-run =
+          pkgs.runCommandLocal "check-toolchain-workload-run"
+            {
+              nativeBuildInputs = with pkgs; [
+                bash
+                coreutils
+                git
+              ];
+              WORKLOAD_RUN = lib.getExe fixtureWorkloadRun;
+              GITLESS_WORKLOAD_RUN = lib.getExe gitlessWorkloadRun;
+              POLICY = "${deepPolicy}";
+            }
+            ''
+              bash ${./fixtures/workload-run.sh}
               touch $out
             '';
 

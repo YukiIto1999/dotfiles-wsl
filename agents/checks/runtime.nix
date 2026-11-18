@@ -78,7 +78,7 @@
           }
         );
         # sandbox には資源観測の実体が無いため、常に余裕を返す観測で実測の記録まで同じ経路を通す。
-        # AGENT_RESOURCE_PRESSURE_FILE が指す file がある間だけ failure の圧迫を返し、入場の待ちを作る
+        # AGENT_RESOURCE_PRESSURE_FILE が指す file がある間だけ failure の outcome を返し、入場の待ちを作る。この outcome は guest の値として全 class の入場を止める
         resourceObservation = pkgs.writeScript "agent-resource-observation" ''
           #!${pkgs.python3}/bin/python3
           import json, os, time
@@ -96,7 +96,6 @@
                   "memoryScopes": [],
                   "cpuCount": 12,
                   "windowsCommitHeadroomBytes": 68719476736,
-                  "windowsCommitGrowthBytes": None,
                   "windowsPhysicalAvailableBytes": 17179869184,
                   "windowsPhysicalHeadroomBytes": 8589934592
               }}]

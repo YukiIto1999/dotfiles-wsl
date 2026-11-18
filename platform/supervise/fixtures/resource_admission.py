@@ -34,6 +34,12 @@ DAY = 24 * 60 * 60
 KEY = "verify\n/repository\nmake verify"
 MEMORY_PERCENT = 40
 SLICES = {"acceptance": "agents.slice/agents-acceptance.slice", "deep": "agents.slice/agents-deep.slice"}
+CLASSES = tuple(SLICES)
+# The outcome ids the policy carries to admission, as the real observation reports them (workload-package.nix owns them).
+# The guest ones hold a run of either class, the pressure ones only a deep run and only at a failure; the Windows ones hold none.
+GUEST_OUTCOMES = ["resource/workload/linux-memory", "resource/workload/cgroup-budget", "resource/workload/cpu"]
+PRESSURE_OUTCOMES = ["resource/workload/memory-pressure", "resource/workload/io-pressure"]
+WINDOWS_OUTCOMES = ["resource/workload/windows-memory", "resource/workload/wsl-cap"]
 # How long a test waits for something that must happen before it calls the run hung.  It guards against a hang and decides
 # nothing: what a test asserts about a run never depends on how fast the machine is.
 HANG_SECONDS = 15
@@ -178,7 +184,9 @@ class ResourceAdmission(unittest.TestCase):
         self.snapshot = self.root / "snapshot.json"
         self.snapshot.write_text(json.dumps({
             "schemaVersion": 1,
-            "outcomes": [{"id": "resource/test", "status": "pass", "message": "fixture"}],
+            # The message of an outcome is its id, so that the reason a run waits for names what held it back.
+            "outcomes": [{"id": identifier, "status": "pass", "message": identifier}
+                         for identifier in (*GUEST_OUTCOMES, *PRESSURE_OUTCOMES, *WINDOWS_OUTCOMES)],
             "resources": [{"key": "workload", "value": {
                 "observedAt": time.time(),
                 "memoryTotalBytes": 16 * GIB,
@@ -189,7 +197,6 @@ class ResourceAdmission(unittest.TestCase):
                 "memoryScopes": [],
                 "cpuCount": 4,
                 "windowsCommitHeadroomBytes": 20 * GIB,
-                "windowsCommitGrowthBytes": None,
                 "windowsPhysicalAvailableBytes": 10 * GIB,
                 "windowsPhysicalHeadroomBytes": 2 * GIB,
             }}],
@@ -219,6 +226,8 @@ class ResourceAdmission(unittest.TestCase):
             "systemctl": [sys.executable, str(FAKE), "--cgroup-root", str(self.cgroup), "ctl"],
             "cgroupRoot": str(self.cgroup),
             "slices": SLICES,
+            "guestOutcomeIds": GUEST_OUTCOMES,
+            "pressureOutcomeIds": PRESSURE_OUTCOMES,
             **changes,
         }
         path = self.root / (name or f"policy-{klass}.json")
@@ -371,10 +380,17 @@ class ResourceAdmission(unittest.TestCase):
         self.observe(memoryScopes=[{"path": path, "currentBytes": working_set if current is None else current,
                                     "workingSetBytes": working_set}])
 
-    def outcome(self, status):
-        """Observe a pressure outcome of the given status next to the passing one."""
+    def outcome(self, identifier, status):
+        """Observe the outcome of the given id with the given status."""
         envelope = json.loads(self.snapshot.read_text())
-        envelope["outcomes"][0]["status"] = status
+        (row,) = [row for row in envelope["outcomes"] if row["id"] == identifier]
+        row["status"] = status
+        self.snapshot.write_text(json.dumps(envelope))
+
+    def without_outcomes(self, *identifiers):
+        """Observe without the outcomes of the given ids."""
+        envelope = json.loads(self.snapshot.read_text())
+        envelope["outcomes"] = [row for row in envelope["outcomes"] if row["id"] not in identifiers]
         self.snapshot.write_text(json.dumps(envelope))
 
     def judged(self, process):
@@ -401,13 +417,30 @@ class ResourceAdmission(unittest.TestCase):
         self.assertFalse(started.exists())
         return reason, error
 
-    def exhaust_windows_reserve(self):
+    def windows_unreadable(self, state):
+        """Observe the Windows snapshot as the observation reports it when it cannot use it, `unavailable` or `stale`."""
+        for identifier in WINDOWS_OUTCOMES:
+            self.outcome(identifier, "fail")
+        self.observe(windowsCommitHeadroomBytes=None, windowsPhysicalAvailableBytes=None, windowsPhysicalHeadroomBytes=None,
+                     windows={"state": state})
+
+    def windows_commit_at_failure(self):
+        """Observe the Windows commit at its failure level, so that no commit headroom is left."""
+        self.outcome(WINDOWS_OUTCOMES[0], "fail")
+        self.observe(windowsCommitHeadroomBytes=0)
+
+    def windows_reserve_exhausted(self):
         """Observe the Windows physical memory below its reserve, so that no headroom is left."""
         self.observe(windowsPhysicalAvailableBytes=5 * GIB, windowsPhysicalHeadroomBytes=0)
 
-    def restore_windows_reserve(self):
-        """Observe the Windows physical memory above its reserve again."""
-        self.observe(windowsPhysicalAvailableBytes=10 * GIB, windowsPhysicalHeadroomBytes=2 * GIB)
+    def assert_enters_at_once(self, label):
+        """A run of either class is admitted at its first judgement, so that it has nothing to wait for."""
+        for klass in CLASSES:
+            with self.subTest(case=label, klass=klass):
+                status, _, _ = self.run_command(f"{klass}-{label}", key=None, klass=klass)
+                self.assertEqual(status, 0)
+                (_, record), = self.measurements()
+                self.assertEqual(record["waitReasons"], [])
 
     def polls(self, scope):
         """How many times the janitor of the fake systemd has looked at the scope for a member."""
@@ -441,7 +474,7 @@ class ResourceAdmission(unittest.TestCase):
         first, started, release = self.start("first")
         self.wait_for(started.exists, first)
         second, second_started, second_release = self.start("second")
-        self.assertEqual(self.waiting("second", second), "Linux memory or Windows commit headroom is reserved")
+        self.assertEqual(self.waiting("second", second), "Linux memory headroom is reserved")
         self.assertFalse(second_started.exists())
         release.touch()
         self.assertEqual(self.finish(first), 0)
@@ -531,18 +564,36 @@ class ResourceAdmission(unittest.TestCase):
         large_release.touch()
         self.assertEqual(self.finish(large), 0)
 
-    def test_i3_pressure_stops_a_deep_run_at_a_warning_and_an_acceptance_only_at_a_failure(self):
-        """The warning level that holds a deep run back leaves an acceptance running; a failure stops both."""
-        self.outcome("warn")
-        status, _, _ = self.run_command("acceptance-at-warning", key=None)
-        self.assertEqual(status, 0)
-        # A run that must not be admitted is judged, and found to wait for the pressure, before it is cancelled.
-        reason, _ = self.held_back("deep-at-warning", klass="deep")
-        self.assertEqual(reason, "fixture")
-        self.outcome("fail")
-        for klass in ("acceptance", "deep"):
-            reason, _ = self.held_back(f"{klass}-at-failure", klass=klass)
-            self.assertEqual(reason, "fixture", klass)
+    def test_pressure_never_holds_an_acceptance(self):
+        """People wait for an acceptance and holding it for pressure does not lessen what else runs, so it enters at a failure too."""
+        for identifier in PRESSURE_OUTCOMES:
+            for level in ("warn", "fail"):
+                with self.subTest(outcome=identifier, level=level):
+                    self.outcome(identifier, level)
+                    status, _, _ = self.run_command(f"acceptance-{identifier.rsplit('/', 1)[1]}-{level}", key=None)
+                    self.assertEqual(status, 0)
+                    (_, record), = self.measurements()
+                    self.assertEqual(record["waitReasons"], [])
+            self.outcome(identifier, "pass")
+
+    def test_i3_a_deep_run_is_held_by_pressure_only_at_a_failure(self):
+        """A deep run enters at a pressure warning, waits for the pressure while it is at a failure and enters when it is back at a warning."""
+        for identifier in PRESSURE_OUTCOMES:
+            name = identifier.rsplit("/", 1)[1]
+            self.outcome(identifier, "warn")
+            status, _, _ = self.run_command(f"deep-{name}-warning", key=None, klass="deep")
+            self.assertEqual(status, 0)
+            self.outcome(identifier, "fail")
+            process, started, release = self.start(f"deep-{name}-failure", klass="deep")
+            self.assertEqual(self.waiting(f"deep-{name}-failure", process), identifier)
+            self.keeps_waiting(process)
+            self.assertFalse(started.exists())
+            # The run that waited is the one that enters, so what held it back was the pressure and nothing else.
+            self.outcome(identifier, "warn")
+            self.wait_for(started.exists, process)
+            release.touch()
+            self.assertEqual(self.finish(process), 0)
+            self.outcome(identifier, "pass")
 
     # I4: only an acceptance without memory cancels, and only deep runs
 
@@ -675,7 +726,7 @@ class ResourceAdmission(unittest.TestCase):
 
     def test_i6_the_wait_limit_returns_75_and_nothing_is_started(self):
         """A run that could not enter within the wait limit is reported unstarted, with its wait, and records nothing."""
-        self.outcome("fail")
+        self.outcome(GUEST_OUTCOMES[0], "fail")
         process, started, _ = self.start("never", wait=WAIT_LIMIT, arguments=["--resource-key", KEY], cwd=self.repo)
         # It is judged and found not to fit before the limit runs out; the limit then ends the wait.
         self.waiting("never", process)
@@ -753,15 +804,40 @@ class ResourceAdmission(unittest.TestCase):
         release.touch()
         self.assertEqual(self.finish(first), 0)
 
-    def test_i6_pressure_defers_without_starting(self):
-        """Pressure leaves a run waiting, with nothing started, rather than failing it."""
-        self.outcome("fail")
-        reason, _ = self.held_back("deferred")
-        self.assertEqual(reason, "fixture")
-        result = json.loads((self.root / "deferred.result").read_text())
-        self.assertTrue(result["deferred"])
-        self.assertFalse(result["spawned"])
-        self.assertEqual(self.scopes("acceptance"), [])
+    def test_i6_a_guest_outcome_that_does_not_hold_defers_without_starting(self):
+        """A run of either class waits, with nothing started, rather than failing when what the guest reports cannot be relied on."""
+        for klass in CLASSES:
+            for identifier in GUEST_OUTCOMES:
+                name = f"{klass}-{identifier.rsplit('/', 1)[1]}"
+                with self.subTest(klass=klass, outcome=identifier):
+                    self.outcome(identifier, "fail")
+                    reason, _ = self.held_back(name, klass=klass)
+                    self.assertEqual(reason, identifier)
+                    result = json.loads((self.root / f"{name}.result").read_text())
+                    self.assertTrue(result["deferred"])
+                    self.assertFalse(result["spawned"])
+                    self.assertEqual(self.scopes(klass), [])
+                    self.outcome(identifier, "pass")
+
+    def test_an_observation_without_an_outcome_that_admission_looks_at_is_incomplete(self):
+        """A missing guest outcome, or for a deep run a missing pressure outcome, is no basis for an admission; a Windows one is no concern of it."""
+        self.without_outcomes(*WINDOWS_OUTCOMES, *PRESSURE_OUTCOMES)
+        status, _, _ = self.run_command("acceptance-without-pressure", key=None)
+        self.assertEqual(status, 0)
+        reason, _ = self.held_back("deep-without-pressure", klass="deep")
+        self.assertEqual(reason, "resource observation is incomplete")
+        self.without_outcomes(GUEST_OUTCOMES[2])
+        reason, _ = self.held_back("acceptance-without-cpu")
+        self.assertEqual(reason, "resource observation is incomplete")
+
+    def test_a_policy_that_names_no_guest_outcome_is_refused_with_70(self):
+        """Without a guest outcome admission would be blind to the guest, so the policy is refused and nothing is started."""
+        blind = self.write_policy("acceptance", name="blind.json", guestOutcomeIds=[])
+        process, started, _ = self.start("blind-policy", policy=blind)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 70)
+        self.assertIn("guestOutcomeIds", error)
+        self.assertFalse(started.exists())
 
     def test_i6_a_stale_observation_never_authorizes_execution(self):
         """A stale successful envelope cannot admit a workload."""
@@ -1003,69 +1079,23 @@ class ResourceAdmission(unittest.TestCase):
         process.communicate(timeout=HANG_SECONDS)
         self.assertEqual(process.returncode, 127)
 
-    # The Windows physical reserve
+    # The Windows side of the observation is a diagnosis: no value of it holds a run of either class back
 
-    def test_an_acceptance_enters_while_the_windows_reserve_is_exhausted(self):
-        """People wait for an acceptance, and low Windows physical memory costs paging only, which the commit headroom backs."""
-        self.exhaust_windows_reserve()
-        status, _, _ = self.run_command("windows-low", key=None)
-        self.assertEqual(status, 0)
-        (_, record), = self.measurements()
-        self.assertNotIn("Windows physical reserve is exhausted", record["waitReasons"])
+    def test_a_run_of_either_class_enters_while_the_windows_snapshot_is_missing_or_stale(self):
+        """Without a usable snapshot the observation fails its Windows outcomes and has no value of them, and admission looks at the guest only."""
+        for state in ("unavailable", "stale"):
+            self.windows_unreadable(state)
+            self.assert_enters_at_once(f"snapshot-{state}")
 
-    def test_a_deep_run_waits_while_the_windows_reserve_is_exhausted_and_enters_when_it_is_back(self):
-        """Nobody waits for a deep run, so it does not enter on a reserve that is not kept."""
-        self.exhaust_windows_reserve()
-        process, started, release = self.start("deep", klass="deep")
-        self.waiting("deep", process)
-        self.keeps_waiting(process)
-        self.assertEqual(self.waiting("deep", process), "Windows physical reserve is exhausted")
-        self.assertFalse(started.exists())
-        self.restore_windows_reserve()
-        self.wait_for(started.exists, process)
-        release.touch()
-        self.assertEqual(self.finish(process), 0)
+    def test_a_run_of_either_class_enters_while_the_windows_commit_is_at_failure(self):
+        """The commit headroom is none and its outcome fails, and the guest has the room."""
+        self.windows_commit_at_failure()
+        self.assert_enters_at_once("commit-failure")
 
-    # The Windows commit headroom: a run is charged with what it can add to the commit, which the VM's room bounds
-
-    def commit_room(self, headroom, growth):
-        """Observe the Windows commit headroom and how far the VM can still raise the commit; None is a room that is unknown."""
-        self.observe(windowsCommitHeadroomBytes=headroom, windowsCommitGrowthBytes=growth)
-
-    def test_a_run_larger_than_the_commit_headroom_enters_when_the_vm_can_add_less_than_the_headroom(self):
-        """Pages the VM already holds need no new commit, so the room it has left, not the whole demand, is charged."""
-        self.commit_room(GIB, GIB // 2)
-        status, _, _ = self.run_command("vm-room", arguments=["--resource-memory", str(3 * GIB)], key=None)
-        self.assertEqual(status, 0)
-
-    def test_a_run_larger_than_the_commit_headroom_waits_when_the_vm_room_is_unknown(self):
-        """Without a measured room nothing bounds what the run can add, so the whole demand is charged."""
-        self.commit_room(GIB, None)
-        reason, _ = self.held_back("unknown-room", arguments=["--resource-memory", str(3 * GIB)])
-        self.assertEqual(reason, "Linux memory or Windows commit headroom is reserved")
-
-    def test_a_run_waits_when_the_vm_can_add_at_least_what_it_demands_and_the_commit_headroom_is_smaller(self):
-        """A room the demand does not exceed leaves the whole demand charged, so the smaller headroom holds the run back."""
-        self.commit_room(GIB, 5 * GIB)
-        reason, _ = self.held_back("large-room", arguments=["--resource-memory", str(3 * GIB)])
-        self.assertEqual(reason, "Linux memory or Windows commit headroom is reserved")
-
-    def test_a_room_that_equals_the_commit_headroom_enters_and_one_byte_more_waits(self):
-        """The charge is the room itself, so a room equal to the headroom fits and no margin shuts the run out."""
-        self.commit_room(GIB, GIB)
-        status, _, _ = self.run_command("room-at-headroom", arguments=["--resource-memory", str(3 * GIB)], key=None)
-        self.assertEqual(status, 0)
-        self.commit_room(GIB, GIB + 1)
-        reason, _ = self.held_back("room-over-headroom", arguments=["--resource-memory", str(3 * GIB)])
-        self.assertEqual(reason, "Linux memory or Windows commit headroom is reserved")
-
-    def test_a_commit_room_that_is_neither_unknown_nor_a_count_is_not_trusted(self):
-        """An observation whose room is negative, fractional or not a number is no basis for an admission."""
-        for index, growth in enumerate((-1, 1.5, "unknown", True)):
-            with self.subTest(growth=growth):
-                self.commit_room(20 * GIB, growth)
-                reason, _ = self.held_back(f"invalid-room-{index}")
-                self.assertEqual(reason, "resource observation has no valid windowsCommitGrowthBytes")
+    def test_a_run_of_either_class_enters_while_the_windows_reserve_is_exhausted(self):
+        """A deep run no longer waits for the Windows physical memory either."""
+        self.windows_reserve_exhausted()
+        self.assert_enters_at_once("reserve-exhausted")
 
     # Nested runs
 
@@ -1446,8 +1476,8 @@ class ResourceAdmission(unittest.TestCase):
                 self.assertIn(expected, run.stderr)
 
     def test_a_run_that_never_started_reports_its_wait_and_reason(self):
-        """A run that gave up while waiting says so: not admitted, no run seconds, the pressure as the reason."""
-        self.outcome("fail")
+        """A run that gave up while waiting says so: not admitted, no run seconds, the guest outcome that held it as the reason."""
+        self.outcome(GUEST_OUTCOMES[0], "fail")
         process, started, _ = self.start("never-started", wait=WAIT_LIMIT, arguments=["--resource-key", KEY], cwd=self.repo)
         # It is judged and found not to fit before the limit runs out, so at least one reason is on record.
         self.waiting("never-started", process)
@@ -1456,7 +1486,7 @@ class ResourceAdmission(unittest.TestCase):
         (_, record), = self.measurements()
         self.assertEqual((record["status"], record["admitted"], record["runSeconds"]), (75, False, None))
         # The last observation before the limit runs out of time and its diagnosis is the final reason; the first is the cause.
-        self.assertEqual(record["waitReasons"][0], "fixture")
+        self.assertEqual(record["waitReasons"][0], GUEST_OUTCOMES[0])
         # The limit starts before the supervisor's interpreter does, so the wait it measures cannot be longer than the limit.
         self.assertGreater(record["waitSeconds"], 0)
         self.assertLessEqual(record["waitSeconds"], WAIT_LIMIT + WAIT_SLACK)

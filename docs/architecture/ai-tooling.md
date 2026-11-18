@@ -143,12 +143,12 @@ supervisorの資源予約は、`--resource-policy FILE --resource-wait-until EPO
 走行はclassを持つ。受入（T1、pre-pushの検査本体）は結果を同期に待つ者がいる検証で、deep（全量回帰、分析、実験、`dotfiles-workload-run`）は待つ者のいない検証である。
 入場した走行は、classのslice（`agents-acceptance.slice`、`agents-deep.slice`）の下に、走行ごとのscopeを作って動く。受入はscopeのMemoryLowに、deepはMemoryHighに物理memoryの需要を書き、deepにはoom_score_adj 1000を与える。CPUは予約せず、受入はsessionと同じ重みで、deepは`CPUWeight=idle`で他が使わない分だけを使う。
 受入は他の受入が待っていても止まらない。deepは受入が待つ間は入場せず、同時に一走行だけである。deepの入場は、受入が待っていないことの確認から入場の完了まで、受入が待ちを始めるのを止める。
-動いている受入のscopeが予約まで使い増せる量を、要求の需要と合わせて、host、各上限、Windowsのcommit余裕の空きと比べ、収まらなければ待つ。Windowsのcommit余裕に対しては、この量と、VMが稼働中のmemoryまでにまだ増やせるcommitの小さい方だけを数え、増やせる量が不明なら全量を数える。各上限は、呼んだprocessの居る場所ではなく、scopeを置くclassのsliceから辿る祖先すべての上限で、観測へそのsliceを渡して求める。使い増せる量は予約から使用量を引いた量で、使用量は観測がclassのsliceの下のscopeごとに報告するworking setを読む。回収できるcacheを引く式は観測だけが持ち、supervisorは式を持たない。観測に載らないscopeは予約の全部を数える。
+動いている受入のscopeが予約まで使い増せる量を、要求の需要と合わせて、hostと各上限の空きと比べ、収まらなければ待つ。各上限は、呼んだprocessの居る場所ではなく、scopeを置くclassのsliceから辿る祖先すべての上限で、観測へそのsliceを渡して求める。使い増せる量は予約から使用量を引いた量で、使用量は観測がclassのsliceの下のscopeごとに報告するworking setを読む。回収できるcacheを引く式は観測だけが持ち、supervisorは式を持たない。観測に載らないscopeは予約の全部を数える。
 受入がmemoryで収まらず、deepが動いていれば、deepのscopeだけを`systemctl --user stop`で取り消す。受入とsessionは取り消さない。
 取り消す側はstopの前に、scope名を持つ空のfileを状態directoryへ残す。deepのsupervisorは終了時にそれを読んで消し、commandがSIGTERMを受けて0で終わっても、取り消された未完了の走行として143で返し、実測の記録を残さない。managerがstopを受けなかった場合は取り消す側が記録を消し、届いていない取消で走行を143にしない。入れ子のsupervisorは外側のscope名の記録を読むだけで消さず、同じく143で返す。
-観測の圧迫は、受入はfailureだけ、deepはwarningでも入場を止める。
-Windowsの物理空きがreserveを割った観測では、deepだけが入場を待つ。
-物理空きの不足はWindows側のpagingの問題で、枯渇による失敗はcommitの余裕が守るため、受入は待たずに通常の判定へ進む。
+入場を止める観測はguestの値だけである。`linux-memory`、`cgroup-budget`、`cpu`のoutcomeが成立しないか読めなければ、どちらのclassも待つ。
+`memory-pressure`と`io-pressure`は受入を止めず、deepはfailure（`full avg60`が40%以上）の時だけ止める。warningでは止めない。
+Windowsのcommit余裕、物理空き、`windows-memory`と`wsl-cap`のoutcome、snapshotの有無と鮮度は診断で、入場を止めない。同じ機械で動く他の作業のmemory消費は、Windows側の値で入場を止めても止まらず、待ちだけが延びるためである。
 待機は走行の枠から分ける。待ちは`--resource-wait-until`までで、scopeを作る待ちも数え、入場できなければcommandを起動せず75で返す。走行の枠は入場して起動した時から数え、超えれば取り消して124で返す。呼び出し側は、待ちの上限をいまのところ走行の予算と同じ秒数にする。
 非対話のjobは資源予約を指定せず、serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけである。入場を待たず、deepの一走行にも数えず、受入に取り消されない。
 物理memoryの需要は、明示した値、`--resource-key`が示す実測の記録から導いた値、鍵の記録が無い場合のこのhostの他の鍵の最新のピークの中央値、policyの`memoryPercent`による未計測の既定値の順に決め、最初の有効な観測の最も厳しい`limitBytes`（無ければ物理memory総量）へ切り詰める。
@@ -161,7 +161,7 @@ supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1
 走行の所有と生死は、scopeのcgroupと`waitpid`の`ECHILD`が持ち、走行を表す記録fileは持たない。supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続ける。
 この予約は需要の宣言であり、commandの機能や内部のworker数を削減するhard limitではない。
 policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-pushの検査本体、`dotfiles-workload-run`が同じ判定へ参加する。実測の記録の鍵を渡すのはT1とpre-pushの検査本体だけで、鍵を渡さないpre-pushの短い段は参加しない。入口を通らない任意のcommandの将来消費を保証するものではない。
-Windowsの採取は独立したscheduled taskが行い、Linux側は期限内のsnapshotだけを読む。導入と待機理由の確認は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
+Windowsの採取は独立したscheduled taskが行い、Linux側は期限内のsnapshotだけを読む。snapshotは診断の入力で、入場の条件にしない。導入と待機理由の確認は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 
 取消後と開始途中の失敗ではclientを起動しない。
 scopeを作れない場合もclientを起動せず、別sessionとMCP frontは止めない。

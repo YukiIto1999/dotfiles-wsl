@@ -11,7 +11,6 @@ let
   maximumAge = 60;
   futureSkew = 5;
   windowsPhysicalReserve = 8589934592;
-  wslVmCommitOverhead = 2147483648;
   fixedDate = time: pkgs.writeShellScript "date-${toString time}" "printf '%s\\n' ${toString time}";
   failingCommand = pkgs.writeShellScript "failing-command" "exit 1";
   jsonOf = value: if builtins.isString value then value else builtins.toJSON value;
@@ -387,7 +386,6 @@ let
         windowsCommitWarning = 85;
         windowsCommitFailure = 95;
         windowsPhysicalReserveBytes = windowsPhysicalReserve;
-        wslVmCommitOverheadBytes = wslVmCommitOverhead;
         dateCommand = fixedDate now;
         meminfo = toString meminfo;
         cgroupRoot = toString cgroupRoot;
@@ -443,7 +441,6 @@ let
   ];
   noWindows = [
     (field "windowsCommitHeadroomBytes" "null")
-    (field "windowsCommitGrowthBytes" "null")
     (field "windowsCommitRemainingBytes" "null")
     (field "windowsPhysicalAvailableBytes" "null")
     (field "windowsPhysicalHeadroomBytes" "null")
@@ -457,7 +454,6 @@ let
     (status "cgroup-budget" "fail")
   ];
   windowsFresh = [
-    (field "windowsCommitGrowthBytes" "null")
     (field "windowsCommitHeadroomBytes" "15032385536")
     (field "windowsCommitRemainingBytes" "21474836480")
     (field "windowsPhysicalAvailableBytes" "12884901888")
@@ -1187,90 +1183,6 @@ let
         (status "windows-memory" "pass")
       ];
     };
-    # VM が増やせる commit の上限は、稼働中の guest の MemTotal（この probe では 1024000000）に overhead の 2147483648 を足し、VM の commit を引いた値
-    commit-growth-from-the-running-vm = {
-      probe = mkWorkloadProbe { reader = readerFor "workload-vm-room" (vmCommitRecord 1500000000); };
-      expected = [
-        (field "windowsCommitGrowthBytes" "1671483648")
-        (field "windowsCommitHeadroomBytes" "15032385536")
-        (field "memoryTotalBytes" "1024000000")
-        (field "windows.state" ''"fresh"'')
-      ];
-    };
-    commit-growth-last-byte = {
-      probe = mkWorkloadProbe { reader = readerFor "workload-vm-last-byte" (vmCommitRecord 3171483647); };
-      expected = [ (field "windowsCommitGrowthBytes" "1") ];
-    };
-    commit-growth-clamps-at-zero = {
-      probe = mkWorkloadProbe { reader = readerFor "workload-vm-over" (vmCommitRecord 4000000000); };
-      expected = [
-        (field "windowsCommitGrowthBytes" "0")
-        (field "windowsCommitHeadroomBytes" "15032385536")
-      ];
-    };
-    # .wslconfig だけが先に下がった状態でも、稼働中の VM から求めた値は変わらない
-    commit-growth-ignores-a-lowered-wslconfig = {
-      probe = mkWorkloadProbe {
-        reader = readerFor "workload-vm-lowered-config" (
-          vmCommitRecord 1500000000
-          // {
-            wslConfig = wslConfigRead // {
-              memoryBytes = 536870912;
-            };
-          }
-        );
-      };
-      expected = [
-        (field "windowsCommitGrowthBytes" "1671483648")
-        (field "wslCap.configured.memoryBytes" "536870912")
-      ];
-    };
-    commit-growth-ignores-an-unreadable-wslconfig = {
-      probe = mkWorkloadProbe {
-        reader = readerFor "workload-vm-unreadable-config" (
-          vmCommitRecord 1500000000
-          // {
-            wslConfig = {
-              state = "unreadable";
-              memoryBytes = null;
-              processors = null;
-            };
-          }
-        );
-      };
-      expected = [
-        (field "windowsCommitGrowthBytes" "1671483648")
-        (field "wslCap.configured.state" ''"unreadable"'')
-      ];
-    };
-    commit-growth-unknown-without-the-vm-commit = {
-      probe = mkWorkloadProbe { reader = readerFor "workload-vm-null" (vmCommitRecord null); };
-      expected = [
-        (field "windowsCommitGrowthBytes" "null")
-        (field "windowsCommitHeadroomBytes" "15032385536")
-      ];
-    };
-    commit-growth-unknown-while-the-snapshot-is-stale = {
-      probe = mkWorkloadProbe {
-        reader = readerFor "workload-vm-stale" (
-          record (now - maximumAge - 1) // { wslVmCommitBytes = 1500000000; }
-        );
-      };
-      expected = [
-        (field "windowsCommitGrowthBytes" "null")
-        (field "windows.state" ''"stale"'')
-      ];
-    };
-    commit-growth-unknown-without-the-guest-memory = {
-      probe = mkWorkloadProbe {
-        reader = readerFor "workload-vm-no-guest-memory" (vmCommitRecord 1500000000);
-        meminfo = "/nonexistent/meminfo";
-      };
-      expected = [
-        (field "memoryTotalBytes" "null")
-        (field "windowsCommitGrowthBytes" "null")
-      ];
-    };
   };
 
   commitThresholdCase = used: limit: percent: wanted: safe: remaining: {
@@ -1523,7 +1435,7 @@ in
                 and (.resources[0].value | . as $value
                   | ["memoryAvailableBytes", "memoryTotalBytes", "cpuCount", "memoryHeadroomBytes",
                      "hostMemoryHeadroomBytes", "memoryLimits", "windowsCommitHeadroomBytes",
-                     "windowsCommitGrowthBytes", "windowsPhysicalAvailableBytes", "observedAt"]
+                     "windowsPhysicalAvailableBytes", "observedAt"]
                   | all(. as $key | $value | has($key)))
               ' "$stdout" >/dev/null; then
                 echo "workload $name violated the envelope contract" >&2

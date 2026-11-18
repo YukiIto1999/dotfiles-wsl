@@ -36,12 +36,12 @@ in
       supervisor自身が`--hold-fd`を終了確認まで保持するので、切り離したholderは作らない。
       supervisor自体を強制終了した場合は、子孫の終了を確認していない。
       `--resource-policy FILE --resource-wait-until EPOCH --resource-run-seconds SEC`はclassごとの入場を通ってからcommandを起動する。
-      policyはclass（待つ者のいる検証のacceptanceか、待つ者のいない検証のdeep）、観測command、利用者専用の状態directory、memoryPercent、観測の有効秒数、systemd-runとsystemctlのargv、cgroupの根、classごとのsliceの相対pathを持つ。
+      policyはclass（待つ者のいる検証のacceptanceか、待つ者のいない検証のdeep）、観測command、入場を止めるoutcomeのid（全classを止めるguestOutcomeIdsと、deepだけを止めるpressureOutcomeIds）、利用者専用の状態directory、memoryPercent、観測の有効秒数、systemd-runとsystemctlのargv、cgroupの根、classごとのsliceの相対pathを持つ。
       入場できた走行は、classのsliceの下の走行ごとのscopeで動く。受入はscopeのMemoryLowへ、deepはMemoryHighへ需要を書き、deepにはoom_score_adj 1000を与える。
       受入は他の受入が待っていても止まらない。deepは受入が待つ間は入場せず、同時に一走行だけである。受入がmemoryで収まらないときは、動いているdeepのscopeだけを`systemctl --user stop --no-block`で取り消す。受入とsessionは取り消さない。
       取り消す側は、stopの前にscope名を持つ`cancel-<scope名>`の空のfileを状態directoryへ残す。deepのsupervisorは終了時にそのfileを読んで消し、commandの終了statusにはよらず、取り消された走行として143で返し、実測を記録しない。fileを残せなければ取り消さない。
       受入の空きの判定は、動いている受入のscopeが予約まで使い増せる量（memory.lowから現在の使用量を引いた量）を各上限の空きと比べる。deepの増分は数えない。
-      観測の圧迫は、受入はfailureだけ、deepはwarningでも入場を止める。
+      入場を止める観測はguestの値だけで、guestOutcomeIdsのoutcomeが成立しないか読めなければどちらのclassも待つ。pressureOutcomeIdsのoutcomeは、受入を止めず、deepをfailureの時だけ止める。観測にあるWindowsの値は入場を止めない。
       入れ子は`/proc/self/cgroup`がclassのscopeの下にあれば、そのscopeの中で外側のclassのまま実行する。入れ子で昇格せず、scopeも作らず、待たない。
       `--resource-memory BYTES`は同じpolicy内で当該呼出しの物理memory需要を明示する。CPUは予約しない。入れ子では外側のscopeの需要を超える明示を70で拒否する。
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。

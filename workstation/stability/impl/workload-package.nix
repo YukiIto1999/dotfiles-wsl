@@ -9,7 +9,6 @@
   windowsCommitWarning,
   windowsCommitFailure,
   windowsPhysicalReserveBytes,
-  wslVmCommitOverheadBytes,
   declaredMemoryBytes ? null,
   declaredProcessors ? null,
   awkCommand ? lib.getExe pkgs.gawk,
@@ -39,6 +38,16 @@ let
   contract = {
     envelopeVersion = 1;
     allowedOutcomeIds = builtins.attrValues outcomeIds;
+    # admission が入場を止める根拠にする outcome。guest の値は全 class を、圧迫は deep を止める。Windows の outcome は診断で、入場を止めない
+    guestOutcomeIds = [
+      outcomeIds.linuxMemory
+      outcomeIds.cgroupBudget
+      outcomeIds.cpu
+    ];
+    pressureOutcomeIds = [
+      outcomeIds.memoryPressure
+      outcomeIds.ioPressure
+    ];
     requiredOutcomeIds = builtins.attrValues outcomeIds;
     requiredResourceKeys = [ "workload" ];
     outerTimeout = readerTimeoutSeconds + 5;
@@ -73,7 +82,6 @@ let
     "@windowsMemoryOutcome@" = lib.escapeShellArg outcomeIds.windowsMemory;
     "@windowsPhysicalReserveBytes@" = toString windowsPhysicalReserveBytes;
     "@wslCapOutcome@" = lib.escapeShellArg outcomeIds.wslCap;
-    "@wslVmCommitOverheadBytes@" = toString wslVmCommitOverheadBytes;
   };
 in
 assert lib.assertMsg (
@@ -88,9 +96,6 @@ assert lib.assertMsg (
 assert lib.assertMsg (
   builtins.isInt windowsPhysicalReserveBytes && windowsPhysicalReserveBytes > 0
 ) "the Windows physical memory reserve must be a positive byte count";
-assert lib.assertMsg (
-  builtins.isInt wslVmCommitOverheadBytes && wslVmCommitOverheadBytes > 0
-) "the WSL VM commit overhead must be a positive byte count";
 assert lib.assertMsg (
   builtins.match "/[A-Za-z0-9_.@:-]+(/[A-Za-z0-9_.@:-]+)*" aggregateCgroup != null
 ) "aggregate cgroup must be an absolute cgroup path below the root";

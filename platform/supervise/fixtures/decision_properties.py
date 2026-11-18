@@ -28,9 +28,7 @@ def generate(rng):
     ]
     limits = tuple((f"/limit-{index}", rng.randrange(0, 20 * GIB)) for index in range(rng.randrange(0, 4)))
     # The decision takes the scopes with their usage already attached, so the observation carries none.
-    observation = admission.Observation(
-        host_headroom=rng.randrange(0, 40 * GIB), commit_headroom=rng.randrange(0, 40 * GIB),
-        commit_growth=None if rng.random() < 0.3 else rng.randrange(0, 20 * GIB), limits=limits, usage={})
+    observation = admission.Observation(host_headroom=rng.randrange(0, 40 * GIB), limits=limits, usage={})
     return {"klass": rng.choice(admission.CLASSES), "demand": rng.randrange(1, 12 * GIB), "scopes": scopes,
             "observation": observation, "acceptance_waiting": rng.random() < 0.3}
 
@@ -50,15 +48,11 @@ def room(state):
 def fits(state):
     """Whether the request, with what the running acceptances may still claim, fits every free amount.
 
-    The host-wide free amount and each cgroup limit's take the whole request.  The Windows commit headroom takes only what
-    the VM can add to the commit: the request fits it if the request or, when the room is known, the VM's room is within it.
+    The host-wide free amount and each cgroup limit's take the whole request.
     """
     observation = state["observation"]
     needed = room(state)
-    commit_fits = needed <= observation.commit_headroom or (
-        observation.commit_growth is not None and observation.commit_growth <= observation.commit_headroom)
-    return (needed <= observation.host_headroom and commit_fits
-            and all(needed <= headroom for _, headroom in observation.limits))
+    return needed <= observation.host_headroom and all(needed <= headroom for _, headroom in observation.limits)
 
 
 def states():
@@ -140,18 +134,6 @@ class AdmissionDecision(unittest.TestCase):
                 klass="acceptance", unit="extra.scope", limit=rng.randrange(1, 4 * GIB), working_set=0)]}
             self.assertNotEqual(decide(larger).kind, admission.ADMIT)
             self.assertNotEqual(decide(busier).kind, admission.ADMIT)
-
-    def test_a_known_room_for_the_vm_to_grow_is_never_stricter_than_an_unknown_one_nor_a_smaller_than_a_larger(self):
-        """The Windows commit is charged with at most the whole request, so knowing how far the VM can grow can only admit more."""
-        rng = random.Random(SEED + 2)
-        for state in states():
-            larger = rng.randrange(0, 40 * GIB)
-            smaller = rng.randrange(0, larger + 1)
-            decisions = [decide(state, observation=dataclasses.replace(state["observation"], commit_growth=growth)).kind
-                         for growth in (None, larger, smaller)]
-            for stricter, looser in zip(decisions, decisions[1:]):
-                if stricter == admission.ADMIT:
-                    self.assertEqual(looser, admission.ADMIT, self.assert_state(state, "a known room refused"))
 
     def test_every_refusal_says_why(self):
         """A caller that waits reports the reason, so a refusal without one is a defect."""

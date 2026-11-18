@@ -268,7 +268,7 @@ sessionを復旧する場合は、利用者が明示したsession名と文面だ
 `dotfiles-observe-workload`は、Linuxの`MemAvailable`、祖先cgroupの上限とworking set、CPU affinityとquota、PSI、Windowsの物理空きとcommit余裕を同じ結果へまとめる。
 VM設定の反映時期は[Rebuild](rebuild.md#WSLの再起動)で確認し、templateの一致をVMへの反映済みとは扱わない。
 `.wslconfig`の宣言、Windowsのfile、稼働中VMの値は区別する。設定の差異は診断であり、開始判定には稼働中の値を使う。
-Windowsのsnapshotが必要なため、初回の配備ではcollectorを先に導入する。
+Windowsのsnapshotは診断の入力で、入場の判定には使わない。初回の配備でcollectorを導入すると、観測がWindowsの余裕を示す。
 
 ```sh
 dotfiles-windows-resource-collector install
@@ -278,14 +278,15 @@ dotfiles-observe-workload | jq '.outcomes, .resources'
 
 collectorは現在のWindows利用者として登録し、権限昇格やexecution policyの変更はしない。
 同名でも他のtaskやfileは変更しない。install途中の失敗は、実施済みの段階をstderrへ出す。
-更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は新しい検証が観測不明で待機するため、予約を使う配備を戻してから撤去する。
+更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は観測がWindowsのsnapshotを不明と示すが、検証の入場は待たない。
 
 T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
 走行は、結果を同期に待つ者がいる受入（T1、pre-pushの検査本体）と、待つ者のいない深い検証（`dotfiles-workload-run`）に分かれ、classごとに走行ごとのscopeを`agents-acceptance.slice`と`agents-deep.slice`の下に作る。
 受入は他の受入が待っていても止まらない。深い検証は受入が待つ間は入場せず、同時に一走行だけで、`CPUWeight=idle`により他が使わないCPUだけを使う。
 受入がmemoryで収まらず深い検証が動いていれば、深い検証だけが取り消される。受入とsessionは取り消されない。
 取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。managerがstopを受けなかった場合は、取り消す側がそのfileを消し、走行は自分の終了statusで終わる。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
-観測の圧迫は、受入はfailureだけで、深い検証はwarningでも止める。
+入場を止める観測はguestの値で、`linux-memory`、`cgroup-budget`、`cpu`のoutcomeが成立しないか読めなければ、どちらのclassも待つ。
+`memory-pressure`と`io-pressure`は受入を止めず、深い検証はfailure（`full avg60`が40%以上）の時だけ止める。warningでは止めない。
 待機は走行の予算から分ける。入場の待ちには走行の予算と同じ秒数の上限があり、超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
 走行の予算は入場して起動した時から数え、超えれば取り消されて124で返る。待機の理由と待った秒数はjournaldの計測の一行と、stderrの待機理由で確認する。
 非対話のjobは判定へ参加しない。serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけで、入場を待たず、受入に取り消されず、深い検証の一走行にも数えない。実測のピークが約0.3 GiBで、memoryの判定に並べる量ではないためである。
@@ -298,17 +299,12 @@ T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の�
 需要は最も厳しい上限へ切り詰める。明示した需要が上限を超える場合は、待たずにcommandを起動せず70で返す。明示は`dotfiles-workload-run`の`--memory-gib`で行い、入れ子の処理は外側で合計需要を予約する。
 入れ子は、現在のprocessが走行のscopeの下にいれば、そのscopeの中で外側のclassのまま動き、二重に計上せず、待たず、昇格しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。
 wrapperを通らないcommandや共有backendの将来増加までは予約できない。
-Windowsの物理空きは、reserveを割った場合の深い検証の開始保留に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。
-Windowsのcommit余裕（警告の割合までの余裕）に対して数える増分は、需要と、VMがこれから増やせるcommitの小さい方である。
-VMへ既にcommit済みのpageは新しいcommitを要さず、VMが増やせるcommitは、稼働中のVMのmemoryまでの残りに限られるためである。
-その上限は、稼働中のVMのmemory（guestの`MemTotal`）に`dotfiles.workstation.workload.wslVmCommitOverheadGiB`（既定2）を足した値から、VMのcommit済みbytes（collectorが報告する`vmmemWSL`と`vmmem`のprivate bytesの合計）を引いた値で、観測の`windowsCommitGrowthBytes`である。`.wslconfig`の宣言値は使わない。
+Windowsのcommit余裕（`windowsCommitHeadroomBytes`、警告の割合までの余裕）、物理空き（reserveを引いた`windowsPhysicalHeadroomBytes`）、`windows-memory`と`wsl-cap`のoutcome、snapshotの有無と鮮度は診断であり、入場を止めない。
+snapshotが無い、古い、commitがfailureの時も、受入と深い検証は同じ判定で入る。
+Windows側の値で入場を止めても、同じ機械で動く他の作業のmemory消費は止まらず、待ちだけが延びるため、入場の条件にしない。
+入場の判定が測るのはguestの空きとcgroupの上限で、VMがWindowsのcommitをどれだけ増やすかは測らない。Windows側の枯渇は、doctorと`dotfiles-observe-workload`の`windows-memory`のoutcomeで確認する。
+collectorはVMのcommit済みbytes（`vmmemWSL`と`vmmem`のprivate bytesの合計、`wslVmCommitBytes`）も報告する。容量の診断の入力で、入場には使わない。
 2026-11-18の実測では、VMのprivate bytesが設定値の付近にあるとき、3 GiBの確保で増えたWindowsのcommitは約0.6 GiBだった。
-VMのcommit済みbytesが不明な間（collectorが古い、`vmmem`のprocessが無い、読取りに失敗した、snapshotが期限外）は`windowsCommitGrowthBytes`がnullで、需要の全量を数える。
-この変更を配備した後は、`dotfiles-windows-resource-collector install`でWindows側のcollectorを更新する。更新するまでcollectorはVMのcommit済みbytesを報告せず、需要の全量が数えられる。
-受入は、reserveを割った観測でも待たずに通常の判定へ進む。
-物理空きの不足はWindows側のpagingの性能の問題で、枯渇による失敗はcommit余裕（`windowsCommitHeadroomBytes`）が守るためである。
-受入は人と次の作業が待つ検証で、その待ちだけを延ばしても、同じ機械で動く他の作業のmemory消費は止まらない。
-深い検証は、余力が0の間は入場せず、次の観測で正になってから従来どおり判定する。
 受入の待ちの間に`memory.reclaim`でfile cacheの回収を求める方式は、cacheの再読込みで機械全体の待ちを増やしたため採らない。
 
 実測した需要は、呼出し側が鍵を渡した走行だけが読み書きする。
@@ -345,6 +341,6 @@ scopeを持たない入れ子の走行と、読めない項目はnullで、読�
 `--result`のfinished段階にも、`runSeconds`と上の項目が入る。
 記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。
 
-重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。
-PSIが既存のwarning閾値を下回り、Linux・cgroup・Windowsの余裕が予約需要を満たせば、新規処理は待機から進む。
+重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。Windowsの値は診断で、待機の理由にならない。
+guestの余裕が予約需要を満たせば受入は待機から進み、深い検証はさらにPSIがfailure未満であれば進む。
 稼働中の受入、session、PTYを停止したり、swapを外したりして空きを作らない。例外は、受入がmemoryで収まらないときに取り消される深い検証だけである。継続的に需要が容量を超える場合は、処理のピーク削減または実行先の容量増強が必要であり、予約の導入だけでは解消しない。

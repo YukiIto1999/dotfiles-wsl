@@ -35,6 +35,7 @@ let
       builtins.toJSON {
         inherit class runtimeDirectory memoryPercent;
         observation = [ (lib.getExe workload.observationPackage) ];
+        inherit (workloadContract) guestOutcomeIds pressureOutcomeIds;
         maximumObservationAgeSeconds = 10;
         systemdRun = [ (lib.getExe' pkgs.systemd "systemd-run") ];
         systemctl = [ (lib.getExe' pkgs.systemd "systemctl") ];
@@ -107,7 +108,6 @@ let
     windowsCommitWarning = windowsMemoryCommit.warning;
     windowsCommitFailure = windowsMemoryCommit.failure;
     windowsPhysicalReserveBytes = workload.windowsPhysicalReserveGiB * gibibyte;
-    wslVmCommitOverheadBytes = workload.wslVmCommitOverheadGiB * gibibyte;
     declaredMemoryBytes = lib.mapNullable (
       memoryGiB: memoryGiB * gibibyte
     ) cfg.wsl.windowsConfig.memoryGiB;
@@ -274,21 +274,9 @@ in
         type = lib.types.ints.positive;
         default = 8;
         description = ''
-          Windows の物理 memory の空きのうち、workload の admission が使わず Windows に残す GiB。
+          Windows の物理 memory の空きのうち、診断のために Windows に残すものとして数える GiB。
           windowsPhysicalHeadroomBytes は空きからこの値を引いた余力で、実測で見直す方針値。
-          この余力が 0 の間、入場を待つのは deep だけで、受入は待たない。
-        '';
-      };
-      wslVmCommitOverheadGiB = lib.mkOption {
-        type = lib.types.ints.positive;
-        default = 2;
-        description = ''
-          稼働中の WSL VM が guest の MemTotal を超えて Windows に commit する量の見込みの GiB。
-          windowsCommitGrowthBytes は guest の MemTotal にこの値を足した値から VM の commit を引いた余地で、
-          admission はこの余地までしか commit の増分として数えない。
-          2026-11-18 の実測では、guest の MemTotal が 50,514,731,008 bytes（47.05 GiB）に対し、
-          VM の private bytes は 3 GiB の確保で 49,204 MiB（48.05 GiB）に達し、VM は MemTotal より約 1.0 GiB 多く commit した。
-          2 GiB は未計測の変動を覆う方針値で、実測で見直す。
+          admission は入場の判断に使わない。
         '';
       };
       observationPackage = lib.mkOption {
@@ -304,7 +292,7 @@ in
           有限の memory.high に対する保証ではない。working set は memory.current から、回収できる page cache
           （inactive_file と active_file の和から file_mapped、file_dirty、file_writeback を引いた値、負なら 0）を
           引いた値で、host 側の MemAvailable と同じく map されていない clean な cache を回収可能と数える。
-          回収が重くなった場合は memory full pressure の閾値が入場を止める。
+          回収が重くなった場合は、memory full pressure が failure の水準で deep の入場を止める。
           回収の見込みを数えない値は limitBytes と currentBytes から limitBytes - currentBytes で得る。
 
           引数を渡すと、祖先の上限は呼んだ process の cgroup ではなく、1 つ目の引数の cgroup から辿る。
@@ -316,13 +304,10 @@ in
 
           windowsCommitHeadroomBytes は windowsMemoryCommit.warning の割合までの余力で、
           残りの commit 全量ではない。windowsPhysicalHeadroomBytes は物理 memory の空きから
-          windowsPhysicalReserveGiB を引いた余力。wsl-cap の outcome は宣言と .wslconfig と稼働中の VM の差を診断し、
-          admission は稼働中の VM の容量を測るため圧迫の判断には使わない。
-
-          windowsCommitGrowthBytes は、稼働中の VM が Windows の commit をこれから増やせる量の上限で、
-          guest の MemTotal に wslVmCommitOverheadGiB を足した値から、VM の commit（snapshot の wslVmCommitBytes）を引いた値、
-          負なら 0。.wslconfig の宣言値ではなく稼働中の VM から求める。.wslconfig だけが先に下がった状態を 0 と数えないため。
-          snapshot が fresh でない間と、collector が VM の commit を報告しない間は null で、admission は需要の全量を commit の余力に数える。
+          windowsPhysicalReserveGiB を引いた余力。wsl-cap の outcome は宣言と .wslconfig と稼働中の VM の差を診断する。
+          これらと windows-memory の outcome は doctor の診断で、admission は入場の判断に使わない。
+          admission が入場を止める根拠にする outcome は、contract の guestOutcomeIds（全 class）と
+          pressureOutcomeIds（deep だけ。failure の時だけ止める）で、policy の同名の項目として運ぶ。
         '';
       };
     };

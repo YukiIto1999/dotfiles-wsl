@@ -23,8 +23,8 @@ from measure import JOURNAL_SOCKET
 CLASSES = ("acceptance", "deep")
 # 一走行の計測へ残す待機理由の最大の件数
 MAXIMUM_REASONS = 8
-# 入場を止めない観測の status。受入は警告まで通して failure だけで止め、deep は警告でも止める。未知の status はどちらも止める
-PASSING = {"acceptance": ("pass", "warn"), "deep": ("pass",)}
+# 入場を止めない観測の status。failure と未知の status は、見る outcome のどれにあっても止める
+PASSING = ("pass", "warn")
 # scope が持つ需要を書く file。受入は予約の記録の memory.low、deep は上限の memory.high。どちらも保護や hard limit にはしない
 DEMAND_FILES = {"acceptance": "memory.low", "deep": "memory.high"}
 DEMAND_PROPERTIES = {"acceptance": "MemoryLow", "deep": "MemoryHigh"}
@@ -41,11 +41,24 @@ CANCEL_MARK = "cancel-"
 # 読まれないまま scope が消えた取消の記録を片付ける経過秒数。supervisor が強制終了されたときだけ残る
 STALE_MARK_SECONDS = 3600
 ADMIT, WAIT, CANCEL_DEEP = "admit", "wait", "cancel-deep"
-HEADROOM_REASON = "Linux memory or Windows commit headroom is reserved"
+HEADROOM_REASON = "Linux memory headroom is reserved"
 
 
 class AdmissionError(Exception):
     """実行を開始できない資源契約の不成立"""
+
+
+def outcome_ids(value, name):
+    """policy が運ぶ outcome の id の一覧の確認
+
+    value: 確認対象の値
+    name: 診断用の項目名
+    戻り値: id の tuple
+    失敗: 文字列の一覧でない値による AdmissionError
+    """
+    if not isinstance(value, list) or not all(type(item) is str for item in value):
+        raise AdmissionError(f"{name} must be a list of outcome ids")
+    return tuple(value)
 
 
 def positive(value, name):
@@ -82,15 +95,11 @@ class Observation:
     """入場の判定に使う空きの観測
 
     host_headroom: host の空き
-    commit_headroom: Windows の commit の、警告の割合までの余裕
-    commit_growth: VM がこれから Windows の commit を増やせる量の上限。観測が求められないときは None
     limits: 祖先の cgroup ごとの（path、空き）
     usage: class の slice の下の scope ごとの、cgroup path から観測が求めた working set への対応
     """
 
     host_headroom: int
-    commit_headroom: int
-    commit_growth: int | None
     limits: tuple
     usage: dict
 
@@ -132,16 +141,11 @@ def shortfall(demand, scopes, observation):
     scopes: 存在する scope
     observation: 空きの観測
     戻り値: 収まる場合は None、収まらない場合は理由。deep の scope の増分は数えない
-    制約: Windows の commit の余裕には、必要量と VM が commit を増やせる量の小さい方を数える。
-        VM へ commit 済みの page は再利用されて新たな commit を要さず、VM が増やせる commit は稼働中の memory の残りまでに限られるため。
-        増やせる量が不明なら必要量の全量を数える
+    制約: 空きは host と祖先の cgroup の上限だけを数える。Windows の commit と物理の空きは入場を止める根拠にせず、診断にだけ使う
     """
     claim = sum(growth(scope) for scope in scopes if scope.klass == "acceptance")
     need = demand + claim
     if need > observation.host_headroom:
-        return HEADROOM_REASON
-    commit_charge = need if observation.commit_growth is None else min(need, observation.commit_growth)
-    if commit_charge > observation.commit_headroom:
         return HEADROOM_REASON
     for path, headroom in observation.limits:
         if need > headroom:
@@ -208,6 +212,11 @@ class Policy:
         if type(self.percent) is not int or not 1 <= self.percent <= 100:
             raise AdmissionError("memoryPercent must be an integer from 1 to 100")
         self.observation = document["observation"]
+        # 入場を止める outcome の id。guest の値は全 class の入場を、圧迫は deep の入場を止める。id は観測が持ち、policy が運ぶ
+        self.guest_outcomes = outcome_ids(document["guestOutcomeIds"], "guestOutcomeIds")
+        if not self.guest_outcomes:
+            raise AdmissionError("guestOutcomeIds must name at least one outcome")
+        self.pressure_outcomes = outcome_ids(document["pressureOutcomeIds"], "pressureOutcomeIds")
         self.maximum_age = document["maximumObservationAgeSeconds"]
         # systemd-run と systemctl は argv の前置として持ち、検査が代替を渡せる
         self.systemd_run = document["systemdRun"]
@@ -225,6 +234,10 @@ class Policy:
     def slice_unit(self, klass):
         """class の slice の unit 名"""
         return Path(self.slices[klass]).name
+
+    def holding_outcomes(self, klass):
+        """class の入場を止める outcome の id。guest の値は全 class、圧迫は deep だけ"""
+        return (*self.guest_outcomes, *(self.pressure_outcomes if klass == "deep" else ()))
 
 
 class Admission:
@@ -298,8 +311,9 @@ class Admission:
         deadline: 待機の絶対期限
         戻り値: 空きの観測と入場保留理由
         副作用: 最初の有効な観測での物理memory需要の確定
-        制約: class が通す status は PASSING。受入は警告で止まらず、deep は警告で止まる。
-            Windows の物理空きが reserve を割った観測は、deep だけが待ち、受入は通常の判定へ進む。
+        制約: 見る outcome は policy が class ごとに決める（Policy.holding_outcomes）。status が PASSING にない outcome が一つでもあれば待つ。
+            Windows の commit、物理の空き、wsl-cap は見ない。
+            受入の待ちの間に memory.reclaim で file cache を返させる方式は cache が繰り返し捨てられて機械全体が thrash するため不可。
             上限は呼んだ process の居る cgroup ではなく、scope を置く class の slice から辿る。
             scope ごとの working set は観測が求める。回収できる cache の式は観測だけが持つ
         """
@@ -319,30 +333,20 @@ class Admission:
             envelope = json.loads(raw)
             if envelope.get("schemaVersion") != 1:
                 return None, "unknown resource observation version"
-            outcomes = [row for row in envelope["outcomes"]
-                        if row["id"] != "resource/workload/wsl-cap" or row["status"] == "fail"]
-            if not outcomes:
+            reported = {row["id"]: row for row in envelope["outcomes"]}
+            holding = [reported.get(identifier) for identifier in self.policy.holding_outcomes(self.klass)]
+            if None in holding:
                 return None, "resource observation is incomplete"
-            blocking = [row for row in outcomes if row["status"] not in PASSING[self.klass]]
+            blocking = [row for row in holding if row["status"] not in PASSING]
             if blocking:
                 return None, "; ".join(row["message"] for row in blocking)
             value = next(row["value"] for row in envelope["resources"] if row["key"] == "workload")
             age = time.time() - value["observedAt"]
             if not math.isfinite(age) or age < -1 or age > self.policy.maximum_age:
                 return None, "resource observation is stale"
-            for field in ("memoryTotalBytes", "memoryAvailableBytes", "memoryHeadroomBytes", "hostMemoryHeadroomBytes",
-                          "windowsCommitHeadroomBytes", "windowsPhysicalAvailableBytes",
-                          "windowsPhysicalHeadroomBytes"):
+            for field in ("memoryTotalBytes", "memoryAvailableBytes", "memoryHeadroomBytes", "hostMemoryHeadroomBytes"):
                 if type(value[field]) is not int or value[field] < 0:
                     return None, f"resource observation has no valid {field}"
-            # 増分の上限は観測が求められない間は null で、その間は需要の全量を commit の余裕に数える
-            commit_growth = value["windowsCommitGrowthBytes"]
-            if commit_growth is not None and (type(commit_growth) is not int or commit_growth < 0):
-                return None, "resource observation has no valid windowsCommitGrowthBytes"
-            # 物理空きの不足は Windows 側の paging の問題で枯渇の失敗は commit の余裕が守るため受入の待機は不可
-            # 受入の待ちの間に memory.reclaim で file cache を返させる方式は cache が繰り返し捨てられて機械全体が thrash するため不可
-            if value["windowsPhysicalHeadroomBytes"] == 0 and self.klass == "deep":
-                return None, "Windows physical reserve is exhausted"
             if not isinstance(value["memoryLimits"], list):
                 return None, "cgroup memory limits are unknown"
             if any(type(limit["limitBytes"]) is not int or limit["limitBytes"] <= 0 for limit in value["memoryLimits"]):
@@ -357,8 +361,6 @@ class Admission:
                 return None, "resource observation has no valid workingSetBytes"
             return Observation(
                 host_headroom=value["hostMemoryHeadroomBytes"],
-                commit_headroom=value["windowsCommitHeadroomBytes"],
-                commit_growth=commit_growth,
                 limits=tuple((limit["path"], limit["headroomBytes"]) for limit in value["memoryLimits"]),
                 usage={row["path"]: row["workingSetBytes"] for row in value["memoryScopes"]},
             ), None

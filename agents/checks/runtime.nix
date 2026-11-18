@@ -101,11 +101,14 @@
               }}]
           }))
         '';
+        # 計測の一行を受ける journald の代わりの socket。fixture が受け手を置いて、走行の記録を読む
+        fixtureJournalSocket = "/build/agent-workload-journal.sock";
         fixtureResourcePolicy = supervise.sandboxPolicy {
           class = "acceptance";
           runtimeDirectory = "/build/agent-workload-run";
           cgroupRoot = "/build/agent-workload-cgroup";
           observation = [ (toString resourceObservation) ];
+          journalSocket = fixtureJournalSocket;
         };
         resourceRuntime = import ../package.nix (
           runtimeArgs
@@ -835,8 +838,16 @@
             };
 
         agent-verification-run-resource =
-          verificationCheck "resource" [ ../fixtures/runtime/verify-resource.sh ] [ ]
-            { RESOURCE_VERIFY = lib.getExe resourceRuntime.verify; };
+          verificationCheck "resource"
+            [ ../fixtures/runtime/verify-resource.sh ]
+            [
+              pkgs.python3
+              pkgs.util-linux
+            ]
+            {
+              RESOURCE_VERIFY = lib.getExe resourceRuntime.verify;
+              JOURNAL_SOCKET = fixtureJournalSocket;
+            };
 
         agent-verification-run-native =
           verificationCheck "native" [ ../fixtures/runtime/verify-native.sh ] [ pkgs.nix ]

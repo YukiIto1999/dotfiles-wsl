@@ -15,6 +15,8 @@ remaining=
 kill_after_seconds=30
 # 同じ project の T1 を一度に一つへ絞る flock の fd。取得するまで空
 slot_fd=
+# 実行枠の取得に待った ms。枠を待たなかった走行は 0。入口を実行する supervise の記録へ slotWaitSeconds として渡す
+slot_wait_ms=0
 resource_policy=@resourcePolicy@
 resource_args=()
 # 資源予約の需要を実測の記録から決める鍵。repository の根と入口の command ごとに分ける
@@ -108,7 +110,7 @@ run_bounded() {
 # 入力 budget_seconds: 走行の予算秒。枠の待ちの上限秒にも使う
 # 入力 interrupted: signal trapが記録する当該走行の取消状態
 # 戻り値: 取得で0、待ちの上限に達すれば75、予算を使い切っていれば124、取消か枠の失敗でその終了status
-# 副作用: 取得後は slot_fd が枠を保持し、以降の supervise が子孫の回収まで同じ fd を握る。待った時間だけ予算の起点を進める
+# 副作用: 取得後は slot_fd が枠を保持し、以降の supervise が子孫の回収まで同じ fd を握る。待った時間だけ予算の起点を進め、待った ms を slot_wait_ms へ残す
 # 制約: 待ちは走行の予算に数えず、別の上限（予算と同じ秒数）で数え、取消で待ちを止める。待った後も呼ばれた command を実行し、先行する走行の結果は借りない
 acquire_slot() {
   local slot_file status=0 waited_from_ms
@@ -134,7 +136,10 @@ acquire_slot() {
   status=0
   await_bounded || status=$?
   case $status in
-  0) started_ms=$((started_ms + ${EPOCHREALTIME/[.,]/} / 1000 - waited_from_ms)) ;;
+  0)
+    slot_wait_ms=$((${EPOCHREALTIME/[.,]/} / 1000 - waited_from_ms))
+    started_ms=$((started_ms + slot_wait_ms))
+    ;;
   75) printf 'verify: 実行枠の空きを待つ上限（予算と同じ %s 秒）に達し、検証を実行しなかった(75)。同じ処理を重複投入せず、空いてから投入し直す\n' "$budget_seconds" >&2 ;;
   esac
   return "$status"
@@ -222,8 +227,12 @@ if names_entry "$*" \
         # 待ちの上限は走行の予算と同じ秒数。走行の枠は入場から数えるので、待った秒数は予算に入れない
         printf -v wait_until '%d' "$((${EPOCHREALTIME%[.,]*} + budget_seconds))"
         printf -v resource_key 'verify\n%s\n%s' "$top" "$*"
+        # 壁時計が戻った場合の負の値は supervise が拒否して走行を止めるため、記録へは 0 を渡す
+        [ "$slot_wait_ms" -ge 0 ] || slot_wait_ms=0
+        printf -v slot_wait '%d.%03d' "$((slot_wait_ms / 1000))" "$((slot_wait_ms % 1000))"
         resource_args=(--resource-policy "$resource_policy" --resource-wait-until "$wait_until"
-          --resource-run-seconds "$remaining" --resource-key "$resource_key" --result "$resource_result")
+          --resource-run-seconds "$remaining" --resource-key "$resource_key" --resource-slot-wait "$slot_wait"
+          --result "$resource_result")
         [ -z "$feedback_target" ] || resource_args+=(--resource-target-seconds "$feedback_target")
       fi
       run_bounded "$@" || status=$?

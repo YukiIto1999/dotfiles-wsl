@@ -50,13 +50,14 @@ in
       明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。scopeを作れない場合も70で、commandは起動しない。
       待機と走行は別に数える。`--resource-wait-until`までに入場できなければcommandを起動せず75で返し、`--resource-run-seconds`は入場して起動した時から数えて、超えれば取り消して124で返す。
       `--resource-target-seconds SEC`は走行の秒数がSECに達した時点の読取を残す目標で、`--resource-run-seconds`と同じく入場して起動した時から数える。記録だけに使い、取消にも走行の枠にも使わず、`--resource-policy`が要る。
+      `--resource-slot-wait SEC`は呼び出し側が実行枠の取得に待った秒数（0を含む）で、supervisorは値を記録へ運ぶだけで枠を持たず、待機にも期限にも使わない。`--resource-policy`が要り、渡さない走行（枠を使わない走行）はnullである。
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
-      `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesとwaitSecondsが加わる。未起動の走行のfinished段階もwaitSecondsを持つ。
+      `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesとwaitSecondsとslotWaitSecondsが加わる。未起動の走行のfinished段階もwaitSecondsとslotWaitSecondsを持つ。
       起動した走行のfinished段階にはrunSecondsと、走行のscopeのcgroupから終了時に読んだcpuSeconds（cpu.statのusage_usec）、cpuStallSeconds（cpu.pressureのsome）、ioStallSeconds（io.pressureのfull）、memoryStallSeconds（memory.pressureのfull）の秒（ミリ秒精度）、targetSeconds、atTargetも加わる。
       終了時の読取は終了を始める時に行い、読めなかった項目は約1秒ごとの読取の直近の値で、一度も読めなければnullである。上限での取消と外からの取消でも読み、読めなくても終了statusは変えない。scopeを作らない入れ子の走行は全てnullである。
       目標が渡され、走行が目標の時点でなお動いていれば、atTargetがその時点の同じ四つの項目を持つ。目標より前に終わった走行と、目標の無い走行ではnullである。
       資源予約を持つ走行は、終了のたびに計測の一行をjournaldのnative socket（policyのjournalSocket、既定は`/run/systemd/journal/socket`）へ`SYSLOG_IDENTIFIER=dotfiles-supervise`で送る。
-      MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、走行秒数、終了status、ピークと予約のbyte、走行のscopeから読んだcpuSeconds、cpuStallSeconds、ioStallSeconds、memoryStallSeconds、targetSeconds、atTargetを持つ。
+      MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、実行枠の待ちの秒数（slotWaitSeconds）、走行秒数、終了status、ピークと予約のbyte、走行のscopeから読んだcpuSeconds、cpuStallSeconds、ioStallSeconds、memoryStallSeconds、targetSeconds、atTargetを持つ。
       送れない場合はstderrへ一行を出すだけで、commandの終了statusを変えない。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
       子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。

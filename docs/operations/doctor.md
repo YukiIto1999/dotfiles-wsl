@@ -331,7 +331,8 @@ supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計�
 journalctl -t dotfiles-supervise -o cat | jq -c .
 ```
 
-MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`、走行のscopeから読んだ`cpuSeconds`、`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`、渡された目標の`targetSeconds`と、目標の時点の読取の`atTarget`を持つ。
+MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`slotWaitSeconds`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`、走行のscopeから読んだ`cpuSeconds`、`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`、渡された目標の`targetSeconds`と、目標の時点の読取の`atTarget`を持つ。
+`slotWaitSeconds`はT1が同じprojectの実行枠（git common directoryごと）を待った秒数で、`waitSeconds`（資源の入場の待ち）とは別である。待たなかったT1は0、実行枠を使わない走行（pre-pushの検査本体、`dotfiles-workload-run`）はnullで、枠の待ちが長い走行を資源の待ちと取り違えないために残す。supervisorは枠を持たず、T1のwrapperが測った秒数を`--resource-slot-wait`で受けて記録へ運ぶだけで、枠の単位も待ちの上限も変えない。
 `nested`がtrueの行は外側の走行の中の入れ子で、外側とは別の行になるため、待機の集計では除く。
 `admitted`がfalseなら未起動で、75は待機の上限に達した未実行である。trueの124は入場後の走行の期限切れで、143は取消である。
 `cpuSeconds`はscopeの`cpu.stat`の`usage_usec`、`cpuStallSeconds`は`cpu.pressure`の`some`、`ioStallSeconds`は`io.pressure`の`full`、`memoryStallSeconds`は`memory.pressure`の`full`の`total=`で、いずれも秒（ミリ秒精度）である。

@@ -4,6 +4,47 @@ set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=verify-common.sh
 source "$VERIFY_COMMON"
 
+# 走行の計測の一行は journald の socket へ送られる。policy が指す代わりの socket を python が受け、MESSAGE を一行ずつ控える。
+# 走行の終了と受け手の書込みは非同期のため、読む側は記録が現れるまで待つ
+journal_log=$fixture/journal.log
+: >"$journal_log"
+python3 -c '
+import socket, sys
+journal = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+journal.bind(sys.argv[1])
+with open(sys.argv[2], "a", buffering=1) as log:
+    while True:
+        for line in journal.recv(65536).decode().split("\n"):
+            if line.startswith("MESSAGE="):
+                log.write(line[len("MESSAGE="):] + "\n")
+' "$JOURNAL_SOCKET" "$journal_log" &
+journal_pid=$!
+trap 'kill "$journal_pid" 2>/dev/null || true' EXIT
+for _ in $(seq 1 "$mark_polls"); do
+  if [ -S "$JOURNAL_SOCKET" ]; then break; fi
+  sleep 0.05
+done
+test -S "$JOURNAL_SOCKET" || {
+  echo 'the stand-in for the journal never started listening' >&2
+  exit 1
+}
+
+# 引数 $1: repository、$2: jq の式。その repository の T1 の走行の記録が journal に現れるまで待ち、式の値を返す
+journal_value() {
+  local key value _
+  key=$(printf 'verify\n%s\n%s' "$1" 'devenv shell -- verify')
+  for _ in $(seq 1 "$mark_polls"); do
+    value=$(jq -r --arg key "$key" "select(.key == \$key) | $2" "$journal_log")
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+    sleep 0.05
+  done
+  echo "no record of the T1 run in $1 reached the journal" >&2
+  return 1
+}
+
 # 資源予約つきの T1 は、鍵 verify と repository の根と入口の command を改行でつないだ文字列で実測を記録する。
 # 記録は sandbox の HOME ではなくこの fixture 専用の directory へ書く
 resource_state=$fixture/resource-state
@@ -19,6 +60,54 @@ test -s "$resource_state/dotfiles-wsl/workload/demand/$resource_digest.json" || 
   echo 'T1 under a resource policy did not record its memory peak under the verify key' >&2
   exit 1
 }
+# 実行枠を待たなかった走行の記録は、枠の待ちを 0 秒と持つ。枠を使わなかったことを表す null とは違う
+test "$(journal_value "$resource_repo" '.slotWaitSeconds == 0')" = true || {
+  echo 'the record of a T1 that did not wait for the slot does not say that it waited 0 seconds' >&2
+  exit 1
+}
+
+# 同じ project の別の走行が実行枠を握っている間に入った T1 は、枠を待った秒数を走行の記録へ残す
+slot_repo=$fixture/resource-slot-repo
+t1_repository "$slot_repo" "$completion_budget"
+slot_file=$("$GATE" slot --repo "$slot_repo")
+"$BASH" -c 'exec {fd}>>"$1"; flock -x "$fd"; exec sleep 120' _ "$slot_file" &
+slot_holder=$!
+for _ in $(seq 1 "$mark_polls"); do
+  if ! flock -n "$slot_file" true; then break; fi
+  sleep 0.05
+done
+if flock -n "$slot_file" true; then
+  echo 'the holder never took the slot' >&2
+  exit 1
+fi
+: >"$fixture/slot.stderr"
+(cd "$slot_repo" && XDG_STATE_HOME=$resource_state PATH="$fixture/resource-bin:$PATH" \
+  "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/slot.stderr" &
+slot_waiter=$!
+for _ in $(seq 1 "$mark_polls"); do
+  if [[ $(<"$fixture/slot.stderr") == *実行枠* ]]; then break; fi
+  sleep 0.05
+done
+if [[ $(<"$fixture/slot.stderr") != *実行枠* ]]; then
+  kill -TERM "$slot_waiter" "$slot_holder" 2>/dev/null || true
+  echo 'T1 never reported that it waits for the slot' >&2
+  exit 1
+fi
+# 待つと言ってから枠を 1 秒握り続け、待った秒数が 0 ではないと言える長さにする
+sleep 1
+kill "$slot_holder"
+wait "$slot_holder" || true
+slot_status=0
+wait "$slot_waiter" || slot_status=$?
+test "$slot_status" -eq 0 || {
+  echo "T1 that waited for the slot exited $slot_status instead of 0" >&2
+  exit 1
+}
+test "$(journal_value "$slot_repo" '.slotWaitSeconds > 0')" = true || {
+  echo 'the record of a T1 that waited for the slot does not carry the seconds it waited' >&2
+  exit 1
+}
+test "$(journal_value "$slot_repo" '.status')" = 0
 
 # 入場の待ちは T1 の予算に数えず、走行の枠だけを予算で数える。待った後の走行は、待たなかった場合と同じ予算で完走する。
 # 待ちと走行 6 秒の合計は予算に等しく、待ち以外の所要が加わるので、待ちを数える実装は command を起動する前に 124 で返る。

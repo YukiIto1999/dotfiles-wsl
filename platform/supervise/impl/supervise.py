@@ -102,6 +102,7 @@ class Options:
         resource_wait_until: 入場を待つ絶対期限か無効のNone。走行の秒数とは別に数える
         resource_run_seconds: 入場してから数える走行の秒数か無効のNone
         resource_target_seconds: 入場してから数える走行の秒数がこの値へ達した時点の読取を残す秒数か無効のNone。取消にも期限にも使わない
+        resource_slot_wait_seconds: 呼び出し側が実行枠の取得に待った秒数か枠を使わなかった走行のNone。supervisor は枠を持たず、値を記録へ運ぶだけで、待機にも期限にも使わない
         resource_memory: 物理memory予約の明示値か既定値を選ぶNone
         resource_key: 実測した需要の記録を読み書きする鍵か記録しないNone
         command: 絶対実行pathを先頭に持つcommand引数列
@@ -128,17 +129,18 @@ class Options:
         self.resource_wait_until = None
         self.resource_run_seconds = None
         self.resource_target_seconds = None
+        self.resource_slot_wait_seconds = None
         self.resource_memory = None
         self.resource_key = None
 
 
-def parse_seconds(option, value):
+def parse_seconds(option, value, allow_zero=False):
     try:
         seconds = float(value)
     except ValueError:
         raise UsageError(f"{option} needs a number: {value}") from None
-    if not math.isfinite(seconds) or seconds <= 0:
-        raise UsageError(f"{option} must be a positive number: {value}")
+    if not math.isfinite(seconds) or seconds < 0 or (seconds == 0 and not allow_zero):
+        raise UsageError(f"{option} must be {'zero or ' if allow_zero else ''}a positive number: {value}")
     return seconds
 
 
@@ -171,9 +173,10 @@ def parse_arguments(arguments):
                     raise UsageError("--resource-policy requires --resource-wait-until and --resource-run-seconds")
                 options.require_drained = True
             elif (options.resource_wait_until is not None or options.resource_run_seconds is not None
-                  or options.resource_target_seconds is not None):
+                  or options.resource_target_seconds is not None or options.resource_slot_wait_seconds is not None):
                 raise UsageError(
-                    "--resource-wait-until, --resource-run-seconds and --resource-target-seconds require --resource-policy")
+                    "--resource-wait-until, --resource-run-seconds, --resource-target-seconds and --resource-slot-wait "
+                    "require --resource-policy")
             return options
         if argument == "--require-drained":
             options.require_drained = True
@@ -185,7 +188,7 @@ def parse_arguments(arguments):
             continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels",
                             "--resource-policy", "--resource-wait-until", "--resource-run-seconds", "--resource-memory",
-                            "--resource-key", "--resource-target-seconds"):
+                            "--resource-key", "--resource-target-seconds", "--resource-slot-wait"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
             raise UsageError(f"{argument} needs a value")
@@ -214,6 +217,8 @@ def parse_arguments(arguments):
             options.resource_run_seconds = parse_seconds(argument, value)
         elif argument == "--resource-target-seconds":
             options.resource_target_seconds = parse_seconds(argument, value)
+        elif argument == "--resource-slot-wait":
+            options.resource_slot_wait_seconds = parse_seconds(argument, value, allow_zero=True)
         elif argument == "--resource-memory":
             if not value.isdecimal() or int(value) <= 0:
                 raise UsageError(f"{argument} needs a positive integer")
@@ -729,7 +734,13 @@ class Supervisor:
                                      "exceeded": exceeded})
             except (OSError, ValueError) as error:
                 diagnose(f"cannot record the measured memory peak: {error}")
-        return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved, "waitSeconds": round(self.wait_seconds, 3)}
+        return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved, "waitSeconds": round(self.wait_seconds, 3),
+                "slotWaitSeconds": self.slot_wait()}
+
+    def slot_wait(self):
+        """呼び出し側が実行枠の取得に待った秒数。--result と計測の一行が同じ値を持つ。枠を使わなかった走行はNone"""
+        seconds = self.options.resource_slot_wait_seconds
+        return None if seconds is None else round(seconds, 3)
 
     def scope_directory(self):
         """この走行の scope の cgroup directory。資源予約を持たない走行と、scope を作らない入れ子の走行はNone"""
@@ -875,7 +886,7 @@ class Supervisor:
             status = WAIT_EXPIRED_STATUS
             diagnose(f"gave up waiting for resources after {self.wait_seconds:.0f}s; the command was not started")
         self.record("finished", spawned=False, deferred=True, drained=True, client_status=None, remaining=[],
-                    status=status, waitSeconds=round(self.wait_seconds, 3))
+                    status=status, waitSeconds=round(self.wait_seconds, 3), slotWaitSeconds=self.slot_wait())
         return status
 
     def run(self):
@@ -947,6 +958,7 @@ class Supervisor:
             "nested": reservation.inherited,
             "admitted": self.admitted,
             "waitSeconds": round(self.wait_seconds, 3),
+            "slotWaitSeconds": self.slot_wait(),
             "waitReasons": reservation.reasons,
             "runSeconds": None if self.run_seconds is None else round(self.run_seconds, 3),
             "status": status,

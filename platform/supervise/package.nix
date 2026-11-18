@@ -33,6 +33,8 @@ supervise.overrideAttrs (previous: {
         observation,
         memoryPercent ? 2,
         maximumObservationAgeSeconds ? 10,
+        # 計測の一行を受ける journald の代わりの socket。省けば既定の journald の socket で、sandbox には無く送れない
+        journalSocket ? null,
       }:
       let
         fake = mode: [
@@ -44,25 +46,28 @@ supervise.overrideAttrs (previous: {
         ];
       in
       writeText "sandbox-workload-policy-${class}.json" (
-        builtins.toJSON {
-          inherit
-            class
-            runtimeDirectory
-            cgroupRoot
-            observation
-            memoryPercent
-            maximumObservationAgeSeconds
-            ;
-          systemdRun = fake "run";
-          systemctl = fake "ctl";
-          slices = {
-            acceptance = "agents.slice/agents-acceptance.slice";
-            deep = "agents.slice/agents-deep.slice";
-          };
-          # sandbox の観測が返す outcome は一つで、全 class の入場を止める guest の値の代わり。圧迫は持たない
-          guestOutcomeIds = [ "resource/fixture" ];
-          pressureOutcomeIds = [ ];
-        }
+        builtins.toJSON (
+          {
+            inherit
+              class
+              runtimeDirectory
+              cgroupRoot
+              observation
+              memoryPercent
+              maximumObservationAgeSeconds
+              ;
+            systemdRun = fake "run";
+            systemctl = fake "ctl";
+            slices = {
+              acceptance = "agents.slice/agents-acceptance.slice";
+              deep = "agents.slice/agents-deep.slice";
+            };
+            # sandbox の観測が返す outcome は一つで、全 class の入場を止める guest の値の代わり。圧迫は持たない
+            guestOutcomeIds = [ "resource/fixture" ];
+            pressureOutcomeIds = [ ];
+          }
+          // lib.optionalAttrs (journalSocket != null) { inherit journalSocket; }
+        )
       );
   };
 })

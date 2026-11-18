@@ -1462,23 +1462,45 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual({field: nested[field] for field in READINGS}, NO_READINGS)
         self.assertEqual((nested["targetSeconds"], nested["atTarget"]), (600, None))
 
-    def test_a_target_needs_a_policy_and_a_positive_number_of_seconds(self):
-        """The target is part of the resource options: alone it is a usage error, and so is a value that is no positive number."""
+    def test_a_target_and_a_slot_wait_need_a_policy_and_a_number_of_seconds(self):
+        """Both are part of the resource options: alone they are a usage error, and so is a value that is no number of seconds."""
+        policy = ["--resource-policy", str(self.policy), "--resource-wait-until", "9999999999", "--resource-run-seconds", "60"]
         for arguments, expected in ((["--resource-target-seconds", "5"], "require --resource-policy"),
-                                    (["--resource-policy", str(self.policy), "--resource-wait-until", "9999999999",
-                                      "--resource-run-seconds", "60", "--resource-target-seconds", "0"], "must be a positive number"),
-                                    (["--resource-policy", str(self.policy), "--resource-wait-until", "9999999999",
-                                      "--resource-run-seconds", "60", "--resource-target-seconds", "soon"], "needs a number")):
+                                    ([*policy, "--resource-target-seconds", "0"], "must be a positive number"),
+                                    ([*policy, "--resource-target-seconds", "soon"], "needs a number"),
+                                    (["--resource-slot-wait", "5"], "require --resource-policy"),
+                                    ([*policy, "--resource-slot-wait", "-1"], "must be zero or a positive number"),
+                                    ([*policy, "--resource-slot-wait", "nan"], "must be zero or a positive number"),
+                                    ([*policy, "--resource-slot-wait", "long"], "needs a number")):
             with self.subTest(arguments=arguments):
                 run = subprocess.run([sys.executable, str(SOURCE), *arguments, "--", *INSTANT], capture_output=True, text=True,
                                      env=self.environment())
                 self.assertEqual(run.returncode, 2)
                 self.assertIn(expected, run.stderr)
 
+    def test_the_wait_for_the_callers_slot_reaches_the_result_and_the_journal(self):
+        """The slot is the caller's, so the supervisor only carries the seconds the caller waited into the record of the run."""
+        status, _, result = self.run_command("slot-waited", arguments=["--resource-slot-wait", "1.25"])
+        self.assertEqual(status, 0)
+        (_, record), = self.measurements()
+        self.assertEqual((result["slotWaitSeconds"], record["slotWaitSeconds"]), (1.25, 1.25))
+
+    def test_a_run_that_did_not_wait_for_its_slot_reports_0_and_one_without_a_slot_reports_null(self):
+        """No wait is 0, a number the caller measured; a caller that has no slot passes nothing, and nothing is null, not 0."""
+        status, _, result = self.run_command("slot-free", arguments=["--resource-slot-wait", "0"])
+        self.assertEqual(status, 0)
+        (_, record), = self.measurements()
+        self.assertEqual((result["slotWaitSeconds"], record["slotWaitSeconds"]), (0, 0))
+        status, _, result = self.run_command("no-slot")
+        self.assertEqual(status, 0)
+        (_, record), = self.measurements()
+        self.assertEqual((result["slotWaitSeconds"], record["slotWaitSeconds"]), (None, None))
+
     def test_a_run_that_never_started_reports_its_wait_and_reason(self):
         """A run that gave up while waiting says so: not admitted, no run seconds, the guest outcome that held it as the reason."""
         self.outcome(GUEST_OUTCOMES[0], "fail")
-        process, started, _ = self.start("never-started", wait=WAIT_LIMIT, arguments=["--resource-key", KEY], cwd=self.repo)
+        process, started, _ = self.start("never-started", wait=WAIT_LIMIT, arguments=["--resource-key", KEY, "--resource-slot-wait", "2"],
+                                         cwd=self.repo)
         # It is judged and found not to fit before the limit runs out, so at least one reason is on record.
         self.waiting("never-started", process)
         process.communicate(timeout=HANG_SECONDS)
@@ -1490,6 +1512,9 @@ class ResourceAdmission(unittest.TestCase):
         # The limit starts before the supervisor's interpreter does, so the wait it measures cannot be longer than the limit.
         self.assertGreater(record["waitSeconds"], 0)
         self.assertLessEqual(record["waitSeconds"], WAIT_LIMIT + WAIT_SLACK)
+        # The slot the caller waited for before it asked for resources is on the record of a run that never started too.
+        self.assertEqual(record["slotWaitSeconds"], 2)
+        self.assertEqual(json.loads((self.root / "never-started.result").read_text())["slotWaitSeconds"], 2)
 
     def test_a_refused_run_reports_status_70(self):
         """A demand above the tightest limit is refused at once and the measurement still says so."""

@@ -140,6 +140,7 @@ signalを拒むprocessとprocess tableを読めない状態も完了とは扱わ
 
 supervisorの資源予約は、`--resource-policy FILE --resource-wait-until EPOCH --resource-run-seconds SEC`を指定した呼出しに適用する。
 `--resource-target-seconds SEC`を足すと、走行の秒数がSECに達した時点のscopeの読取を残す。目標は記録だけに使い、走行の枠にも取消にも使わない。
+`--resource-slot-wait SEC`を足すと、呼び出し側（T1のwrapper）が同じprojectの実行枠の取得に待った秒数を、`--result`とjournalの`slotWaitSeconds`へ残す。supervisorは枠を持たず、値を待機にも走行の枠にも使わない。枠を使わない走行はnullである。
 走行はclassを持つ。受入（T1、pre-pushの検査本体）は結果を同期に待つ者がいる検証で、deep（全量回帰、分析、実験、`dotfiles-workload-run`）は待つ者のいない検証である。
 入場した走行は、classのslice（`agents-acceptance.slice`、`agents-deep.slice`）の下に、走行ごとのscopeを作って動く。受入はscopeのMemoryLowに、deepはMemoryHighに物理memoryの需要を書き、deepにはoom_score_adj 1000を与える。CPUは予約せず、受入はsessionと同じ重みで、deepは`CPUWeight=idle`で他が使わない分だけを使う。
 受入は他の受入が待っていても止まらない。deepは受入が待つ間は入場せず、同時に一走行だけである。deepの入場は、受入が待っていないことの確認から入場の完了まで、受入が待ちを始めるのを止める。

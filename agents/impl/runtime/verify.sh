@@ -46,6 +46,7 @@ settle_wait() {
 # 入力 resource_result: supervise が finished 段階に走行の秒数と scope の CPU 時間と滞留と目標の時点の読取を残した file
 # 副作用: 走行が目標を超えていれば stderr へ一行。滞留の割合は走行の秒数に対する scope の滞留の秒数
 #   上限で取り消された走行（124）には、目標の時点から scope の CPU 時間が増えたかを添える。読めなければ何も出さない
+#   増えた CPU 時間が目標の後の秒数の一割に満たない走行は、待ち続けていた走行と区別できないため、進行中とは書かない
 # 制約: 報告は終了statusも判定も変えない
 report_target() {
   local line
@@ -54,8 +55,8 @@ report_target() {
     def share($stall): if $stall == null then "不明" else "\($stall / .runSeconds * 100 | round)%" end;
     def progress:
       if .atTarget.cpuSeconds == null or .cpuSeconds == null then "目標の時点からの scope の CPU 時間の増減は読めなかった"
-      elif .cpuSeconds > .atTarget.cpuSeconds then "目標の時点から scope の CPU 時間は増えていた(進行中)"
-      else "目標の時点から scope の CPU 時間は増えていない(進行の兆しが無い)" end;
+      elif (.cpuSeconds - .atTarget.cpuSeconds) >= (.runSeconds - $target) * 0.1 then "目標の時点から scope の CPU 時間は増えていた(進行中)"
+      else "目標の時点から scope の CPU 時間はほとんど増えていない(進行の兆しが無い)" end;
     select(.runSeconds != null and .runSeconds > $target)
     | "verify: 走行が時間の目標 \($target) 秒を超えた(走行 \(.runSeconds | round) 秒、滞留の割合は CPU \(share(.cpuStallSeconds))、IO \(share(.ioStallSeconds))、メモリ \(share(.memoryStallSeconds)))"
       + (if $status == "124" then "。上限で取り消された。\(progress)" else "" end)
@@ -67,13 +68,21 @@ report_target() {
 # 引数 $1: 走行の終了status
 # 入力 resource_result: supervise が finished 段階に走行の秒数と scope の CPU 時間を残した file。無い走行と読めない走行は数値を添えない
 # 副作用: 終了statusが 124 なら stderr へ一行。時間切れが検査の失敗と別であることと、次の作業を、宣言 file や文書を読んでいない agent へその場で伝える
+#   次の作業は scope の CPU 時間で分ける。CPU を使い続けた走行は所要が上限より長く、ほとんど使っていない走行は何かを待っていて、
+#   上限を延ばしても終わるとは限らない。境は走行の秒数の一割で、計算する走行は一 core 分(十割)前後かそれ以上を使い、
+#   待つ走行は零に近い。検査を scope の外(nix の daemon、container)へ委ねる走行は待つ側に入り、何を待ったかを調べる対象になる
 # 制約: 報告は終了statusも判定も変えない。wrapper の上限と入口の内側の時間制限は、どちらも 124 で区別できないため同じに扱う
 report_timeout() {
-  local facts
+  local line
   [ "$1" -eq 124 ] || return 0
-  facts=$(jq -r 'select(.runSeconds != null and .cpuSeconds != null)
-    | "(走行 \(.runSeconds | round) 秒、scope の CPU 時間 \(.cpuSeconds | round) 秒)"' "$resource_result" 2>/dev/null) || facts=
-  printf 'verify: 時間切れ(124)で止まった%s。CPU 時間が走行の間に増えていた走行は、止まっていたのではなく所要が上限より長い。検査の失敗として直さず、同じ上限で投入し直さない。止めた上限(tiergate.json の seconds か、入口の内側の時間制限)を、この走行の秒数を下限に見直す\n' "$facts" >&2
+  line=$(jq -r 'select(.runSeconds != null and .cpuSeconds != null)
+    | "(走行 \(.runSeconds | round) 秒、scope の CPU 時間 \(.cpuSeconds | round) 秒)。"
+      + (if .cpuSeconds >= .runSeconds * 0.1
+         then "scope は CPU を使い続けていて、止まっていたのではなく所要が上限より長い。検査の失敗として直さず、同じ上限で投入し直さない。止めた上限(tiergate.json の seconds か、入口の内側の時間制限)を、この走行の秒数を下限に見直す"
+         else "scope は CPU をほとんど使っていない。走行の外の処理(nix の daemon、container、他の process)か lock を待っていた見込みで、上限を延ばしても終わるとは限らない。上限を変える前に、何を待っていたかを調べる" end)' \
+    "$resource_result" 2>/dev/null) || line=
+  [ -n "$line" ] || line='。走行の記録が無く、CPU を使い続けていたか待っていたかは分からない。使い続けていた走行は所要が上限より長いので、止めた上限(tiergate.json の seconds か、入口の内側の時間制限)をこの走行の秒数を下限に見直す。待っていた走行は、上限を変える前に何を待っていたかを調べる'
+  printf 'verify: 時間切れ(124)で止まった%s\n' "$line" >&2
 }
 
 bounded_pid=

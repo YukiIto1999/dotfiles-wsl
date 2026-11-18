@@ -202,15 +202,16 @@ test "$(grep -c '時間の目標' "$fixture/within.stderr")" -eq 0
 
 # 上限で取り消された走行は 124 のまま、目標の時点から scope の CPU 時間が増えたかを添える。
 # command は目標の後に CPU 時間を書き足すか、書き足さずに止まり続ける。書き足す場面に届く前に上限が来た走行は負荷の表れなので、
-# その走行だけを倍の予算でやり直す
+# その走行だけを倍の予算でやり直す。進行の判定は秒数の一割が境なので、書き足す値は予算を倍にしても境を越える大きさ、
+# 書き足さない側の値は最小の予算でも境に届かない小ささにする
 limit_bin=$fixture/target-limit-bin
 mkdir "$limit_bin"
 cat >"$limit_bin/devenv" <<'SCRIPT'
 #!BASH
-printf 'usage_usec 1000000\n' >"$DOTFILES_FAKE_SCOPE/cpu.stat"
+printf 'usage_usec 10000\n' >"$DOTFILES_FAKE_SCOPE/cpu.stat"
 sleep 600 </dev/null >/dev/null 2>&1 &
 sleep 2.5
-[ "$PROGRESS" != 1 ] || printf 'usage_usec 3000000\n' >"$DOTFILES_FAKE_SCOPE/cpu.stat"
+[ "$PROGRESS" != 1 ] || printf 'usage_usec 600000000\n' >"$DOTFILES_FAKE_SCOPE/cpu.stat"
 touch "$PAST_TARGET"
 exec sleep 600
 SCRIPT
@@ -232,12 +233,13 @@ for progress in 1 0; do
   expect_closed_gate "$cancel_repo" 'T1 cancelled at its limit'
   test "$(grep -c '時間の目標' "$fixture/cancel.stderr")" -eq 1
   grep -qE '時間の目標 2 秒を超えた\(走行 [0-9]+ 秒、滞留の割合は CPU 不明、IO 不明、メモリ 不明\)。上限で取り消された。' "$fixture/cancel.stderr"
-  # 時間切れの一行は目標の宣言の有無によらず出て、走行の秒数と CPU 時間と次の作業を伝える
+  # 時間切れの一行は目標の宣言の有無によらず出て、走行の秒数と CPU 時間を示し、CPU を使い続けた走行と待っていた走行で次の作業を分ける
   test "$(grep -c '時間切れ(124)で止まった' "$fixture/cancel.stderr")" -eq 1
-  grep -qE '時間切れ\(124\)で止まった\(走行 [0-9]+ 秒、scope の CPU 時間 [0-9]+ 秒\)。.*この走行の秒数を下限に見直す$' "$fixture/cancel.stderr"
   if [ "$progress" -eq 1 ]; then
     grep -qF '目標の時点から scope の CPU 時間は増えていた(進行中)' "$fixture/cancel.stderr"
+    grep -qE '時間切れ\(124\)で止まった\(走行 [0-9]+ 秒、scope の CPU 時間 600 秒\)。scope は CPU を使い続けていて、.*この走行の秒数を下限に見直す$' "$fixture/cancel.stderr"
   else
-    grep -qF '目標の時点から scope の CPU 時間は増えていない(進行の兆しが無い)' "$fixture/cancel.stderr"
+    grep -qF '目標の時点から scope の CPU 時間はほとんど増えていない(進行の兆しが無い)' "$fixture/cancel.stderr"
+    grep -qE '時間切れ\(124\)で止まった\(走行 [0-9]+ 秒、scope の CPU 時間 0 秒\)。scope は CPU をほとんど使っていない。.*何を待っていたかを調べる$' "$fixture/cancel.stderr"
   fi
 done

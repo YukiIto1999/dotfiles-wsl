@@ -115,6 +115,134 @@ check_edits_gate_on_freshness_only() {
   fi
 }
 
+# 免除は書いた session だけに効く。持ち主は launcher が client へ渡す DOTFILES_AGENT_SESSION_ID で、同じ launcher の
+# session の hook は、payload の session が違っても同じ持ち主になる。agent の外の呼び出しは持ち主が空である。
+# 引数 $1: 持ち主(空なら変数を持たない)、以降: gate の引数
+as_owner() {
+  local owner=$1
+  shift
+  if [ -n "$owner" ]; then
+    DOTFILES_AGENT_SESSION_ID=$owner "$GATE" "$@"
+  else
+    env -u DOTFILES_AGENT_SESSION_ID "$GATE" "$@"
+  fi
+}
+
+waiver_repository=
+waiver_payload=
+
+# 引数 $1: 期待する status、$2: 持ち主、$3: stop か check、$4: 場面の名前
+# 制約: stop は waiver_payload の session の控えを問い、どちらも waiver_repository の木を調べる
+expect_waiver_status() {
+  local want=$1 owner=$2 kind=$3 status=0
+  case $kind in
+  stop)
+    jq -nc --arg session "$waiver_payload" --arg cwd "$waiver_repository" '{session_id:$session,cwd:$cwd}' |
+      as_owner "$owner" hook stop >"$fixture/waiver-output" 2>&1 || status=$?
+    ;;
+  check) as_owner "$owner" check --repo "$waiver_repository" >"$fixture/waiver-output" 2>&1 || status=$? ;;
+  esac
+  if [ "$status" -ne "$want" ]; then
+    echo "$kind by owner '$owner' exited $status instead of $want: $4" >&2
+    exit 1
+  fi
+}
+
+# 引数 $1: repository の名前。未検証の木を作り、payload の session がそれを控えた状態にする
+waiver_scene() {
+  waiver_repository=$fixture/waiver-$1
+  waiver_payload=fixture-waiver-$1
+  t1_repository "$waiver_repository" 60
+  as_owner '' arm --session "$waiver_payload" --path "$waiver_repository"
+}
+
+# 引数 $1: 持ち主。出力: その持ち主の名札
+waiver_tag() {
+  printf '%s' "$1" | sha256sum | cut -c 1-16
+}
+
+# 出力: waiver_repository の project の状態 directory
+waiver_state() {
+  printf '%s/.cache/dotfiles-wsl/verification/%s\n' "$home" \
+    "$(printf '%s' "$(realpath -e -- "$waiver_repository/.git")" | sha256sum | cut -d ' ' -f 1)"
+}
+
+check_waiver_is_scoped_to_its_session() {
+  local state key file count
+
+  # X の免除は X の stop と check だけを通す。別の持ち主と、持ち主が空の呼び出しは通らず、通らない理由を知らされる
+  waiver_scene owners
+  expect_waiver_status 2 X stop 'unverified tree before any waiver'
+  as_owner X waive --repo "$waiver_repository" --reason 'owner x' >/dev/null
+  expect_waiver_status 0 X stop 'stop of the owner that waived'
+  expect_waiver_status 0 X check 'check of the owner that waived'
+  expect_waiver_status 2 Y stop 'stop of another owner'
+  expect_waiver_status 1 Y check 'check of another owner'
+  if ! grep -qF '別の session が残した免除' "$fixture/waiver-output"; then
+    echo 'check did not say that another session waived the tree' >&2
+    exit 1
+  fi
+  expect_waiver_status 1 '' check 'check of an empty owner'
+  expect_waiver_status 2 '' stop 'stop of an empty owner'
+
+  # 同じ木を二つの session が免除しても、互いを上書きせず、それぞれが自分の分だけを通す
+  as_owner Y waive --repo "$waiver_repository" --reason 'owner y' >/dev/null
+  state=$(waiver_state)
+  count=$(find "$state" -name '*.waived' -type f | wc -l)
+  [ "$count" -eq 2 ] || { echo "two owners waiving one tree left $count files" >&2; exit 1; }
+  expect_waiver_status 0 X check 'owner x after owner y waived the same tree'
+  expect_waiver_status 0 Y check 'owner y that waived the same tree'
+  expect_waiver_status 1 Z check 'a third owner next to two waivers'
+
+  # 持ち主の行が名札と合わない記録は、他の持ち主の記録を自分の名札の名へ写しても通らない
+  file=$(find "$state" -name "*.$(waiver_tag X).waived" -type f)
+  key=${file##*/}
+  key=${key%%.*}
+  cp -- "$file" "$state/$key.$(waiver_tag Z).waived"
+  expect_waiver_status 1 Z check 'record of owner x copied to the name of owner z'
+  expect_waiver_status 2 Z stop 'record of owner x copied to the name of owner z'
+
+  # 持ち主が空の免除は、持ち主が空の呼び出しだけを通す
+  waiver_scene empty
+  as_owner '' waive --repo "$waiver_repository" --reason 'no owner' >/dev/null
+  expect_waiver_status 0 '' check 'check of an empty owner after an empty-owner waiver'
+  expect_waiver_status 0 '' stop 'stop of an empty owner after an empty-owner waiver'
+  expect_waiver_status 1 X check 'check of an owner next to an empty-owner waiver'
+  expect_waiver_status 2 X stop 'stop of an owner next to an empty-owner waiver'
+
+  # 旧い名の免除は、誰も通さない
+  waiver_scene legacy
+  as_owner X waive --repo "$waiver_repository" --reason 'to be renamed' >/dev/null
+  state=$(waiver_state)
+  file=$(find "$state" -name '*.waived' -type f)
+  key=${file##*/}
+  key=${key%%.*}
+  rm -- "$file"
+  printf 'version=1\nsource=%s\nreason=legacy\nat=then\n' "$key" >"$state/$key.waived"
+  expect_waiver_status 1 X check 'legacy waiver, check of an owner'
+  expect_waiver_status 1 '' check 'legacy waiver, check of an empty owner'
+  expect_waiver_status 2 X stop 'legacy waiver, stop of an owner'
+
+  # 同じ launcher の session は、payload の session が違っても同じ持ち主として免除を通す
+  waiver_scene payloads
+  as_owner X waive --repo "$waiver_repository" --reason 'shared launcher' >/dev/null
+  waiver_payload="fixture-waiver-payloads-other"
+  as_owner '' arm --session "$waiver_payload" --path "$waiver_repository"
+  expect_waiver_status 0 X stop 'same owner under another payload session'
+  expect_waiver_status 2 Y stop 'another owner under another payload session'
+
+  # 改行を含む理由は、読む側が行を取り違えるため控えない
+  waiver_scene multiline
+  if as_owner X waive --repo "$waiver_repository" --reason $'first\nsecond' >/dev/null 2>&1; then
+    echo 'waive accepted a reason that spans two lines' >&2
+    exit 1
+  fi
+  if [ -n "$(find "$(waiver_state)" -name '*.waived' 2>/dev/null)" ]; then
+    echo 'waive left a file for a reason it refused' >&2
+    exit 1
+  fi
+}
+
 # 門は、入口を宣言する repository でだけ「通っていない」と答える。
 # 宣言が無ければ何も要求しない。
 gate_repo=$fixture/gate-repo
@@ -298,3 +426,4 @@ expect_closed_gate "$native_budget_repo" 'removed tracked native metadata'
 
 check_wrapper_runs_every_time
 check_edits_gate_on_freshness_only
+check_waiver_is_scoped_to_its_session

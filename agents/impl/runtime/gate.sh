@@ -18,8 +18,8 @@ usage: dotfiles-agent-gate <command> [options]
                                         木が照合値のままなら仮の控えを木の控えとして公開する。deadline の下で呼ぶ
   discard --pending TOKEN             その走行の仮の控えと公開した控え、一時fileだけを捨てる
   arm --session ID [--path PATH]        その session が編集した repository を控える
-  check [--repo DIR] [--session ID]     未検証なら理由を出して 1 で終わる
-  waive --reason TEXT [--repo DIR]      理由を残していまの木を一度だけ通す
+  check [--repo DIR]                    未検証なら理由を出して 1 で終わる。免除は同じ DOTFILES_AGENT_SESSION_ID の持ち主のものだけを受け入れる
+  waive --reason TEXT [--repo DIR]      理由を一行で残し、いまの木を DOTFILES_AGENT_SESSION_ID が同じ呼び出しだけに通す。木が変われば効かない
   entry [--repo DIR] [--policy FILE]      repository が登録する検証入口の綴りを評価器を起動せずに答える
   candidates [--repo DIR]               予算が読めない間に、検証入口になり得る綴りを評価せずに一行ずつ答える
   budget [--repo DIR] [--policy FILE]     その repository の T1 の時間予算を秒で答える。宣言が無い、または不正なら理由を出して 1 で終わる
@@ -898,10 +898,44 @@ command_observe() {
   esac
 }
 
+# 免除の名札。持ち主は launcher が client へ渡す DOTFILES_AGENT_SESSION_ID で、同じ client の hook、shell の呼び出し、
+# subagent が共有する。持ち主が空(agent の外)は固定の語で、16 桁の 16 進と衝突しない。
+waiver_tag_of() {
+  if [ -z "$1" ]; then
+    printf none
+  else
+    printf '%s' "$1" | sha256sum | cut -c 1-16
+  fi
+}
+
+# 持ち主の行が呼び出し側と等しい免除だけを受け入れ、残された理由を waiver_reason へ置く。
+# 名札は持ち主の hash なので、他の持ち主の記録を自分の名札の名へ写しても持ち主の行で拒否される。
+# 引数 $1: 免除の file、$2: 呼び出し側の持ち主
+waiver_reason=
+waiver_is_honoured() {
+  local -a record
+  waiver_reason=
+  state_file_is_private "$1" || return 1
+  mapfile -t record <"$1" || return 1
+  [ "${#record[@]}" -eq 5 ] && [ "${record[0]}" = version=1 ] && [ "${record[2]}" = "owner=$2" ] \
+    && [[ ${record[3]} == reason=* ]] || return 1
+  waiver_reason=${record[3]#reason=}
+}
+
+# 自分の名札でない免除が同じ木にあるか。受け入れないことを呼び出し側へ説明するためだけに調べる。
+# 引数 $1: project の状態 directory、$2: 木の鍵、$3: 自分の免除の path
+other_waiver_exists() {
+  local candidate
+  for candidate in "$1/$2".*.waived; do
+    [ "$candidate" != "$3" ] && state_file_is_private "$candidate" && return 0
+  done
+  return 1
+}
+
 # 未検証なら理由を stdout と stderr の両方へ出して 1 で終わる。木の鍵を採れないときも未検証として、その理由を添える。
 # claude は stderr を、omp の拡張は stdout を読む。
 command_check() {
-  local repo=$1 top state entry fingerprint reason
+  local repo=$1 owner=${DOTFILES_AGENT_SESSION_ID-} top state entry fingerprint reason own
   top=$(repo_top_of "$repo") || return 0
   entry=$(declared_entry_of "$top") || return $?
   [ -n "$entry" ] || return 0
@@ -919,15 +953,18 @@ command_check() {
     command_settle "$top" "$verified_receipt_token" || true
     return 0
   fi
-  if project_state_is_private "$state" && state_file_is_private "$state/$fingerprint.waived"; then
-    printf '%s を未検証のまま通した理由: %s\n' \
-      "$top" "$(sed -n 's/^reason=//p' "$state/$fingerprint.waived")" >&2
+  own=$state/$fingerprint.$(waiver_tag_of "$owner").waived
+  if project_state_is_private "$state" && waiver_is_honoured "$own" "$owner"; then
+    printf '%s を未検証のまま通した理由: %s\n' "$top" "$waiver_reason" >&2
     return 0
   fi
   reason=$(
     printf '%s の検証入口が、いまの木に対して通っていない。\n' "$top"
     printf '  通す: cd %s && dotfiles-agent-verify -- %s\n' "$top" "$entry"
     printf '  通せない事情があるなら理由を残して抜ける: dotfiles-agent-gate waive --repo %s --reason "<理由>"\n' "$top"
+    if project_state_is_private "$state" && other_waiver_exists "$state" "$fingerprint" "$own"; then
+      printf '  別の session が残した免除はあるが、免除は書いた session にだけ効くため受け入れない\n'
+    fi
   )
   printf '%s\n' "$reason"
   printf '%s\n' "$reason" >&2
@@ -935,14 +972,17 @@ command_check() {
 }
 
 command_waive() {
-  local repo=${1:-$PWD} reason=$2 top state fingerprint record
+  local repo=${1:-$PWD} reason=$2 owner=${DOTFILES_AGENT_SESSION_ID-} top state fingerprint record
   [ -n "$reason" ] || fail 'waive には --reason が要る'
+  # 読む側は reason= の行を一つだけ読むため、改行を含む理由は控えない
+  [[ $reason != *$'\n'* ]] || fail 'waive の --reason は一行にする'
   top=$(repo_top_of "$repo") || fail 'git の木の中で呼ぶ'
   state=$(state_dir_of "$top") || fail 'git の木の中で呼ぶ'
   ensure_project_state "$state" || fail "検証の状態 directory を安全に確保できない: $state"
   fingerprint=$(source_fingerprint "$top" 2>&1) || fail "$top の木の鍵を採れないため、免除を控えない: $fingerprint"
-  printf -v record 'version=1\nsource=%s\nreason=%s\nat=%s' "$fingerprint" "$reason" "$(date -Iseconds)"
-  store_state "$state/$fingerprint.waived" "$record" || return 1
+  printf -v record 'version=1\nsource=%s\nowner=%s\nreason=%s\nat=%s' \
+    "$fingerprint" "$owner" "$reason" "$(date -Iseconds)"
+  store_state "$state/$fingerprint.$(waiver_tag_of "$owner").waived" "$record" || return 1
   printf '%s を未検証のまま通す理由を控えた: %s\n' "$top" "$reason"
 }
 

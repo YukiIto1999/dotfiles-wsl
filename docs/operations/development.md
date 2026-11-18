@@ -59,6 +59,7 @@ nix run --no-write-lock-file .#dotfiles-agent-verify -- nix run --no-write-lock-
 ```
 
 `nix run .#verify`の直接実行と`dotfiles-agent-gate waive`は、wrapperが確定した証跡の代わりにならない。
+`dotfiles-agent-gate waive`の免除は、書いたsession（`DOTFILES_AGENT_SESSION_ID`が同じ呼出し）のcheckと終了だけを、その時点の木に限って通し、別のsessionの終了は通さない。
 
 T1の`verify`は全unitの検査と全hostおよび既存variantのtoplevel評価を行い、T2の`verify-push`はunitの検査とsystem closureを実現する。
 `verify-full`は既存の全量flake checkを呼び、CIと明示的な全量確認の経路を保つ。

@@ -63,7 +63,7 @@ expect_state_writer_refusal() {
 expect_state_content() {
   local writer=$1 file=$2
   case $writer in
-  waive) grep -qx 'version=1' "$file" && grep -qx 'reason=fixture reason' "$file" ;;
+  waive) grep -qx 'version=1' "$file" && grep -qx 'owner=' "$file" && grep -qx 'reason=fixture reason' "$file" ;;
   arm | arm-hook) [ "$(<"$file")" = "$(realpath -e -- "$state_repository")" ] ;;
   observe) [ "$(wc -l <"$file")" -eq 2 ] ;;
   esac || state_fail "$writer の控えの形が変わった: $file"
@@ -224,6 +224,8 @@ check_gate_state_writers() {
     state_writer waive >/dev/null
     mapfile -t files < <(find "$state_cache" -name '*.waived' -type f)
     state_file=${files[0]}
+    [[ ${state_file##*/} == *.none.waived ]] || state_fail "waive が持ち主の名札を付けた名で控えなかった: $state_file"
+    "$GATE" check --repo "$state_repository" >/dev/null 2>&1 || state_fail 'check が通常の免除を受理しなかった'
     if [ "$variant" = file ]; then
       mv "$state_file" "$state_external/waiver"
       ln -s "$state_external/waiver" "$state_file"

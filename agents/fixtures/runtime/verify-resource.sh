@@ -191,6 +191,7 @@ test "$over_status" -eq 0
 expect_open_gate "$over_repo" 'T1 that exceeded its target and finished inside its limit'
 test "$(grep -c '時間の目標' "$fixture/over.stderr")" -eq 1
 grep -qE '時間の目標 1 秒を超えた\(走行 [0-9]+ 秒、滞留の割合は CPU [0-9]+%、IO 不明、メモリ 不明\)$' "$fixture/over.stderr"
+test "$(grep -c '時間切れ' "$fixture/over.stderr")" -eq 0
 # 目標の内に終わる走行は何も出さない
 within_repo=$fixture/resource-within-target-repo
 t1_repository "$within_repo" "$completion_budget" "$((completion_budget / 2))"
@@ -231,6 +232,9 @@ for progress in 1 0; do
   expect_closed_gate "$cancel_repo" 'T1 cancelled at its limit'
   test "$(grep -c '時間の目標' "$fixture/cancel.stderr")" -eq 1
   grep -qE '時間の目標 2 秒を超えた\(走行 [0-9]+ 秒、滞留の割合は CPU 不明、IO 不明、メモリ 不明\)。上限で取り消された。' "$fixture/cancel.stderr"
+  # 時間切れの一行は目標の宣言の有無によらず出て、走行の秒数と CPU 時間と次の作業を伝える
+  test "$(grep -c '時間切れ(124)で止まった' "$fixture/cancel.stderr")" -eq 1
+  grep -qE '時間切れ\(124\)で止まった\(走行 [0-9]+ 秒、scope の CPU 時間 [0-9]+ 秒\)。.*この走行の秒数を下限に見直す$' "$fixture/cancel.stderr"
   if [ "$progress" -eq 1 ]; then
     grep -qF '目標の時点から scope の CPU 時間は増えていた(進行中)' "$fixture/cancel.stderr"
   else

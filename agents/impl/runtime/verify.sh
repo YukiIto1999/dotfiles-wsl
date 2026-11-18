@@ -63,6 +63,19 @@ report_target() {
   [ -z "$line" ] || printf '%s\n' "$line" >&2
 }
 
+# 時間切れで止まった走行の報告
+# 引数 $1: 走行の終了status
+# 入力 resource_result: supervise が finished 段階に走行の秒数と scope の CPU 時間を残した file。無い走行と読めない走行は数値を添えない
+# 副作用: 終了statusが 124 なら stderr へ一行。時間切れが検査の失敗と別であることと、次の作業を、宣言 file や文書を読んでいない agent へその場で伝える
+# 制約: 報告は終了statusも判定も変えない。wrapper の上限と入口の内側の時間制限は、どちらも 124 で区別できないため同じに扱う
+report_timeout() {
+  local facts
+  [ "$1" -eq 124 ] || return 0
+  facts=$(jq -r 'select(.runSeconds != null and .cpuSeconds != null)
+    | "(走行 \(.runSeconds | round) 秒、scope の CPU 時間 \(.cpuSeconds | round) 秒)"' "$resource_result" 2>/dev/null) || facts=
+  printf 'verify: 時間切れ(124)で止まった%s。CPU 時間が走行の間に増えていた走行は、止まっていたのではなく所要が上限より長い。検査の失敗として直さず、同じ上限で投入し直さない。止めた上限(tiergate.json の seconds か、入口の内側の時間制限)を、この走行の秒数を下限に見直す\n' "$facts" >&2
+}
+
 bounded_pid=
 interrupted=false
 
@@ -255,6 +268,7 @@ if names_entry "$*" \
           printf 'verify: 資源の空きを待つ上限（予算と同じ %s 秒）に達し、検証を実行しなかった(75)。同じ処理を重複投入せず、空いてから投入し直す\n' "$budget_seconds" >&2
         fi
       fi
+      report_timeout "$status"
     else
       status=124
     fi

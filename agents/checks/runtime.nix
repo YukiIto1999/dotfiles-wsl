@@ -115,6 +115,30 @@
             resourcePolicy = fixtureResourcePolicy;
           }
         );
+        # 完了済みの場面を再利用するため全 fixture を一つの store 入力にする構成は不可
+        verificationCheck =
+          name: scripts: extraInputs: environment:
+          pkgs.runCommandLocal "check-agent-verification-run-${name}"
+            (
+              {
+                nativeBuildInputs = [
+                  pkgs.bash
+                  pkgs.coreutils
+                  pkgs.findutils
+                  pkgs.git
+                  pkgs.gnused
+                  pkgs.jq
+                ]
+                ++ extraInputs;
+                VERIFY_COMMON = ../fixtures/runtime/verify-common.sh;
+                GATE = lib.getExe runtime.gate;
+              }
+              // environment
+            )
+            ''
+              ${lib.concatMapStringsSep "\n" (script: "bash ${script}") scripts}
+              touch $out
+            '';
         wrongOwnerStat = pkgs.writeShellScriptBin "stat" ''
           if [[ $# -eq 3 && $1 == -c && $2 == %u \
             && $3 == "/proc/''${DOTFILES_AGENT_TEST_WRONG_OWNER_PID-}" ]]; then
@@ -791,32 +815,47 @@
               touch $out
             '';
 
-        agent-verification-run =
-          pkgs.runCommandLocal "check-agent-verification-run"
+        agent-verification-run-gate =
+          verificationCheck "gate"
+            [
+              ../fixtures/runtime/hook-paths.sh
+              ../fixtures/runtime/verify-gate.sh
+            ]
+            [ ]
+            { VERIFY = lib.getExe runtime.verify; };
+
+        agent-verification-run-state-writers =
+          verificationCheck "state-writers" [ ../fixtures/runtime/verify-state-writers.sh ] [ ]
+            { };
+
+        agent-verification-run-budget =
+          verificationCheck "budget" [ ../fixtures/runtime/verify-budget.sh ] [ pkgs.util-linux ]
             {
-              nativeBuildInputs = [
-                pkgs.bash
-                pkgs.coreutils
-                pkgs.findutils
-                pkgs.git
-                pkgs.gnumake
-                pkgs.gnused
-                pkgs.jq
-                pkgs.nix
-                pkgs.strace
-                pkgs.util-linux
-              ];
               VERIFY = lib.getExe runtime.verify;
-              STALLING_VERIFY = lib.getExe stallingVerify;
-              RESOURCE_VERIFY = lib.getExe resourceRuntime.verify;
               SLOW_RESOLUTION_VERIFY = lib.getExe slowResolutionRuntime.verify;
-              GATE = lib.getExe runtime.gate;
-            }
-            ''
-              bash ${../fixtures/runtime/hook-paths.sh}
-              bash ${../fixtures/runtime/verify.sh}
-              touch $out
-            '';
+            };
+
+        agent-verification-run-resource =
+          verificationCheck "resource" [ ../fixtures/runtime/verify-resource.sh ] [ ]
+            { RESOURCE_VERIFY = lib.getExe resourceRuntime.verify; };
+
+        agent-verification-run-native =
+          verificationCheck "native" [ ../fixtures/runtime/verify-native.sh ] [ pkgs.nix ]
+            { VERIFY = lib.getExe runtime.verify; };
+
+        agent-verification-run-receipt =
+          verificationCheck "receipt"
+            [ ../fixtures/runtime/verify-receipt.sh ]
+            [
+              pkgs.gnumake
+              pkgs.strace
+              pkgs.util-linux
+            ]
+            { STALLING_VERIFY = lib.getExe stallingVerify; };
+
+        agent-verification-run-slot =
+          verificationCheck "slot" [ ../fixtures/runtime/verify-slot.sh ] [ pkgs.util-linux ]
+            { VERIFY = lib.getExe runtime.verify; };
       }
     )
   ];

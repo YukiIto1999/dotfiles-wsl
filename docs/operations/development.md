@@ -94,6 +94,10 @@ Git hook の振る舞い検査も対応する hook の file を入力とし、�
 SonarQube scannerは実行script単体をstore入力にし、無関係なREADMEの変更ではpackageを作り直さない。
 unit境界、option namespace、責務rootの検査は読む範囲の`.nix` fileだけを、unit moduleの検査は`module.nix`だけを、読み手の明示の検査は`docs/`の分類別の文書だけを、SOPSの検査は暗号文とrecipientの宣言だけを入力とする。
 Agentの契約検査は読むfileだけを入力とし、旧pathの残存はcheckout全体を読む別の検査が受け持つ。
+T1 wrapperの振る舞い検査は、[runtimeの検査定義](../../agents/checks/runtime.nix)で独立したderivationに分ける。
+各場面は[共通のfixture](../../agents/fixtures/runtime/verify-common.sh)をsourceし、repositoryとHOMEを個別に作る。
+同じ木の前後を照合する走行は一つの場面に保ち、別のderivationが残す状態には依存しない。
+各derivationはその場面のscriptと共通fixture、必要なwrapperだけを入力とし、並列実行と完了済みの成果物の再利用をNixへ任せる。
 ShellCheckはcheckoutと生成済みwrapperの対象を集めて検査し、最初のfileの指摘だけで止めずに複数fileの診断を返す。
 checkoutの対象は一つのprocessで先頭の2 byteを読み取って列挙し、fileごとのshell起動を行わない。
 shebangの判定、linkの到達、表示したpathの実在はcheckout全体を読まないと確かめられないため、ShellCheck、`docs-links`、`docs-path-labels`は入力を狭めない。

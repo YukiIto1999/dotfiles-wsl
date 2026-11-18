@@ -343,6 +343,15 @@ scopeを持たない入れ子の走行と、読めない項目はnullで、読�
 `--result`のfinished段階にも、`runSeconds`と上の項目が入る。
 記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。
 
+repositoryとcommandごとの集計は、同じ記録を読む[`summarize-runs.py`](../../platform/supervise/impl/summarize-runs.py)を手で動かす。packageにも検査にも入れていない。
+
+```sh
+python3 platform/supervise/impl/summarize-runs.py '2 days ago'
+```
+
+出力はタブ区切りで、鍵（区分、repositoryの根、command）ごとに、走行の数、合格（status 0）、検査の失敗（0、75、124、143以外）、判定なし（75、124、143）、合格した走行の秒の中央値と最大、`waitSeconds`の合計、`slotWaitSeconds`の合計、時間の目標を超えた走行の数を出す。
+入れ子の走行と、鍵が三行でない走行（鍵を渡さない走行）は集計せず、最後の行に数を出す。実行枠の待ちを記録する前の走行しか無い鍵の`slotWaitSeconds`の合計は`-`である。
+
 重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。Windowsの値は診断で、待機の理由にならない。
 guestの余裕が予約需要を満たせば受入は待機から進み、深い検証はさらにPSIがfailure未満であれば進む。
 稼働中の受入、session、PTYを停止したり、swapを外したりして空きを作らない。例外は、受入がmemoryで収まらないときに取り消される深い検証だけである。継続的に需要が容量を超える場合は、処理のピーク削減または実行先の容量増強が必要であり、予約の導入だけでは解消しない。

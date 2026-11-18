@@ -9,6 +9,7 @@
   windowsCommitWarning,
   windowsCommitFailure,
   windowsPhysicalReserveBytes,
+  wslVmCommitOverheadBytes,
   declaredMemoryBytes ? null,
   declaredProcessors ? null,
   awkCommand ? lib.getExe pkgs.gawk,
@@ -72,6 +73,7 @@ let
     "@windowsMemoryOutcome@" = lib.escapeShellArg outcomeIds.windowsMemory;
     "@windowsPhysicalReserveBytes@" = toString windowsPhysicalReserveBytes;
     "@wslCapOutcome@" = lib.escapeShellArg outcomeIds.wslCap;
+    "@wslVmCommitOverheadBytes@" = toString wslVmCommitOverheadBytes;
   };
 in
 assert lib.assertMsg (
@@ -86,6 +88,9 @@ assert lib.assertMsg (
 assert lib.assertMsg (
   builtins.isInt windowsPhysicalReserveBytes && windowsPhysicalReserveBytes > 0
 ) "the Windows physical memory reserve must be a positive byte count";
+assert lib.assertMsg (
+  builtins.isInt wslVmCommitOverheadBytes && wslVmCommitOverheadBytes > 0
+) "the WSL VM commit overhead must be a positive byte count";
 assert lib.assertMsg (
   builtins.match "/[A-Za-z0-9_.@:-]+(/[A-Za-z0-9_.@:-]+)*" aggregateCgroup != null
 ) "aggregate cgroup must be an absolute cgroup path below the root";

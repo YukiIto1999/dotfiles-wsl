@@ -137,6 +137,24 @@ function Read-WslConfig {
     }
 }
 
+# 一部の process だけを合計すると VM の commit が小さく見えて増やせる余地が過大になるため、読取りに失敗した場合は合計せず $null を返す。
+# vmmem 系の process が無い場合も $null で、入場は需要の全量を数える。vmmemWSL と vmmem の両方を合計するのは、
+# 他の Hyper-V VM の分だけ余地が小さく見える保守側の誤差にするため
+function Read-WslVmCommitBytes {
+    try {
+        $total = [long]0
+        $count = 0
+        foreach ($process in @(Get-Process -Name 'vmmemWSL', 'vmmem' -ErrorAction SilentlyContinue)) {
+            $total += [long]$process.PrivateMemorySize64
+            $count++
+        }
+        if ($count -eq 0) { return $null }
+        return $total
+    } catch {
+        return $null
+    }
+}
+
 if (-not [IO.Directory]::Exists($Directory)) {
     [Console]::Error.WriteLine('the snapshot directory does not exist: ' + $Directory)
     exit 1
@@ -171,6 +189,7 @@ try {
                 commitUsedBytes        = [long]$sample[2]
                 commitLimitBytes       = [long]$sample[3]
                 wslConfig              = Read-WslConfig
+                wslVmCommitBytes       = Read-WslVmCommitBytes
             }
             Write-Snapshot -Path $target -Content ($record | ConvertTo-Json -Compress -Depth 4)
             $failures = 0

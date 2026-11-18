@@ -299,6 +299,12 @@ T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の�
 入れ子は、現在のprocessが走行のscopeの下にいれば、そのscopeの中で外側のclassのまま動き、二重に計上せず、待たず、昇格しない。入れ子で明示した需要が外側を超えれば拒否し、記録由来と既定値由来の需要は外側の予約へ切り詰めて拒否しない。
 wrapperを通らないcommandや共有backendの将来増加までは予約できない。
 Windowsの物理空きは、reserveを割った場合の深い検証の開始保留に使い、予約増分の上限には直接使わない。VMへ割当済みのpageを再利用する場合、新しいWindows物理空きが同量必要とは限らないためである。増分はLinux・cgroupの余裕とWindowsのcommit余裕で判定する。この観測だけではhost側の追加page-in量まで予測できない。
+Windowsのcommit余裕（警告の割合までの余裕）に対して数える増分は、需要と、VMがこれから増やせるcommitの小さい方である。
+VMへ既にcommit済みのpageは新しいcommitを要さず、VMが増やせるcommitは、稼働中のVMのmemoryまでの残りに限られるためである。
+その上限は、稼働中のVMのmemory（guestの`MemTotal`）に`dotfiles.workstation.workload.wslVmCommitOverheadGiB`（既定2）を足した値から、VMのcommit済みbytes（collectorが報告する`vmmemWSL`と`vmmem`のprivate bytesの合計）を引いた値で、観測の`windowsCommitGrowthBytes`である。`.wslconfig`の宣言値は使わない。
+2026-11-18の実測では、VMのprivate bytesが設定値の付近にあるとき、3 GiBの確保で増えたWindowsのcommitは約0.6 GiBだった。
+VMのcommit済みbytesが不明な間（collectorが古い、`vmmem`のprocessが無い、読取りに失敗した、snapshotが期限外）は`windowsCommitGrowthBytes`がnullで、需要の全量を数える。
+この変更を配備した後は、`dotfiles-windows-resource-collector install`でWindows側のcollectorを更新する。更新するまでcollectorはVMのcommit済みbytesを報告せず、需要の全量が数えられる。
 受入は、reserveを割った観測でも待たずに通常の判定へ進む。
 物理空きの不足はWindows側のpagingの性能の問題で、枯渇による失敗はcommit余裕（`windowsCommitHeadroomBytes`）が守るためである。
 受入は人と次の作業が待つ検証で、その待ちだけを延ばしても、同じ機械で動く他の作業のmemory消費は止まらない。

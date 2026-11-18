@@ -107,6 +107,7 @@ let
     windowsCommitWarning = windowsMemoryCommit.warning;
     windowsCommitFailure = windowsMemoryCommit.failure;
     windowsPhysicalReserveBytes = workload.windowsPhysicalReserveGiB * gibibyte;
+    wslVmCommitOverheadBytes = workload.wslVmCommitOverheadGiB * gibibyte;
     declaredMemoryBytes = lib.mapNullable (
       memoryGiB: memoryGiB * gibibyte
     ) cfg.wsl.windowsConfig.memoryGiB;
@@ -278,6 +279,18 @@ in
           この余力が 0 の間、入場を待つのは deep だけで、受入は待たない。
         '';
       };
+      wslVmCommitOverheadGiB = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 2;
+        description = ''
+          稼働中の WSL VM が guest の MemTotal を超えて Windows に commit する量の見込みの GiB。
+          windowsCommitGrowthBytes は guest の MemTotal にこの値を足した値から VM の commit を引いた余地で、
+          admission はこの余地までしか commit の増分として数えない。
+          2026-11-18 の実測では、guest の MemTotal が 50,514,731,008 bytes（47.05 GiB）に対し、
+          VM の private bytes は 3 GiB の確保で 49,204 MiB（48.05 GiB）に達し、VM は MemTotal より約 1.0 GiB 多く commit した。
+          2 GiB は未計測の変動を覆う方針値で、実測で見直す。
+        '';
+      };
       observationPackage = lib.mkOption {
         type = lib.types.package;
         readOnly = true;
@@ -305,6 +318,11 @@ in
           残りの commit 全量ではない。windowsPhysicalHeadroomBytes は物理 memory の空きから
           windowsPhysicalReserveGiB を引いた余力。wsl-cap の outcome は宣言と .wslconfig と稼働中の VM の差を診断し、
           admission は稼働中の VM の容量を測るため圧迫の判断には使わない。
+
+          windowsCommitGrowthBytes は、稼働中の VM が Windows の commit をこれから増やせる量の上限で、
+          guest の MemTotal に wslVmCommitOverheadGiB を足した値から、VM の commit（snapshot の wslVmCommitBytes）を引いた値、
+          負なら 0。.wslconfig の宣言値ではなく稼働中の VM から求める。.wslconfig だけが先に下がった状態を 0 と数えないため。
+          snapshot が fresh でない間と、collector が VM の commit を報告しない間は null で、admission は需要の全量を commit の余力に数える。
         '';
       };
     };

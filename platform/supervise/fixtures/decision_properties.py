@@ -28,7 +28,9 @@ def generate(rng):
     ]
     limits = tuple((f"/limit-{index}", rng.randrange(0, 20 * GIB)) for index in range(rng.randrange(0, 4)))
     # The decision takes the scopes with their usage already attached, so the observation carries none.
-    observation = admission.Observation(headroom=rng.randrange(0, 40 * GIB), limits=limits, usage={})
+    observation = admission.Observation(
+        host_headroom=rng.randrange(0, 40 * GIB), commit_headroom=rng.randrange(0, 40 * GIB),
+        commit_growth=None if rng.random() < 0.3 else rng.randrange(0, 20 * GIB), limits=limits, usage={})
     return {"klass": rng.choice(admission.CLASSES), "demand": rng.randrange(1, 12 * GIB), "scopes": scopes,
             "observation": observation, "acceptance_waiting": rng.random() < 0.3}
 
@@ -45,9 +47,18 @@ def room(state):
     return state["demand"] + claim
 
 
-def space(observation):
-    """Every free amount the request has to fit into: the host-wide one and each cgroup limit's."""
-    return [observation.headroom, *(headroom for _, headroom in observation.limits)]
+def fits(state):
+    """Whether the request, with what the running acceptances may still claim, fits every free amount.
+
+    The host-wide free amount and each cgroup limit's take the whole request.  The Windows commit headroom takes only what
+    the VM can add to the commit: the request fits it if the request or, when the room is known, the VM's room is within it.
+    """
+    observation = state["observation"]
+    needed = room(state)
+    commit_fits = needed <= observation.commit_headroom or (
+        observation.commit_growth is not None and observation.commit_growth <= observation.commit_headroom)
+    return (needed <= observation.host_headroom and commit_fits
+            and all(needed <= headroom for _, headroom in observation.limits))
 
 
 def states():
@@ -67,15 +78,15 @@ class AdmissionDecision(unittest.TestCase):
         """I1: after the request is admitted, the acceptance scopes together cannot outgrow any free amount."""
         for state in states():
             if decide(state).kind == admission.ADMIT:
-                self.assertLessEqual(room(state), min(space(state["observation"])), self.assert_state(state, "overcommitted"))
+                self.assertTrue(fits(state), self.assert_state(state, "overcommitted"))
 
     def test_i1_a_request_that_fits_and_breaks_no_class_rule_is_admitted(self):
         """The converse of I1: nothing but a class rule or a lack of room refuses a request."""
         for state in states():
             blocked = state["klass"] == "deep" and (
                 state["acceptance_waiting"] or any(scope.klass == "deep" for scope in state["scopes"]))
-            fits = room(state) <= min(space(state["observation"]))
-            if fits and not blocked:
+            fits_all = fits(state)
+            if fits_all and not blocked:
                 self.assertEqual(decide(state).kind, admission.ADMIT, self.assert_state(state, "refused without a reason"))
 
     def test_i2_an_acceptance_is_not_held_by_other_acceptances_that_wait(self):
@@ -96,7 +107,7 @@ class AdmissionDecision(unittest.TestCase):
         for state in states():
             decision = decide(state)
             deep = [scope for scope in state["scopes"] if scope.klass == "deep"]
-            lacks_room = room(state) > min(space(state["observation"]))
+            lacks_room = not fits(state)
             expected = state["klass"] == "acceptance" and lacks_room and bool(deep)
             self.assertEqual(decision.kind == admission.CANCEL_DEEP, expected, self.assert_state(state, "wrong cancellation"))
             targets = admission.cancellable(state["scopes"])
@@ -129,6 +140,18 @@ class AdmissionDecision(unittest.TestCase):
                 klass="acceptance", unit="extra.scope", limit=rng.randrange(1, 4 * GIB), working_set=0)]}
             self.assertNotEqual(decide(larger).kind, admission.ADMIT)
             self.assertNotEqual(decide(busier).kind, admission.ADMIT)
+
+    def test_a_known_room_for_the_vm_to_grow_is_never_stricter_than_an_unknown_one_nor_a_smaller_than_a_larger(self):
+        """The Windows commit is charged with at most the whole request, so knowing how far the VM can grow can only admit more."""
+        rng = random.Random(SEED + 2)
+        for state in states():
+            larger = rng.randrange(0, 40 * GIB)
+            smaller = rng.randrange(0, larger + 1)
+            decisions = [decide(state, observation=dataclasses.replace(state["observation"], commit_growth=growth)).kind
+                         for growth in (None, larger, smaller)]
+            for stricter, looser in zip(decisions, decisions[1:]):
+                if stricter == admission.ADMIT:
+                    self.assertEqual(looser, admission.ADMIT, self.assert_state(state, "a known room refused"))
 
     def test_every_refusal_says_why(self):
         """A caller that waits reports the reason, so a refusal without one is a defect."""

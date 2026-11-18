@@ -141,6 +141,7 @@ class ResourceAdmission(unittest.TestCase):
                 "memoryScopes": [],
                 "cpuCount": 4,
                 "windowsCommitHeadroomBytes": 20 * GIB,
+                "windowsCommitGrowthBytes": None,
                 "windowsPhysicalAvailableBytes": 10 * GIB,
                 "windowsPhysicalHeadroomBytes": 2 * GIB,
             }}],
@@ -961,6 +962,47 @@ class ResourceAdmission(unittest.TestCase):
         self.wait_for(started.exists, process)
         release.touch()
         self.assertEqual(self.finish(process), 0)
+
+    # The Windows commit headroom: a run is charged with what it can add to the commit, which the VM's room bounds
+
+    def commit_room(self, headroom, growth):
+        """Observe the Windows commit headroom and how far the VM can still raise the commit; None is a room that is unknown."""
+        self.observe(windowsCommitHeadroomBytes=headroom, windowsCommitGrowthBytes=growth)
+
+    def test_a_run_larger_than_the_commit_headroom_enters_when_the_vm_can_add_less_than_the_headroom(self):
+        """Pages the VM already holds need no new commit, so the room it has left, not the whole demand, is charged."""
+        self.commit_room(GIB, GIB // 2)
+        status, _, _ = self.run_command("vm-room", arguments=["--resource-memory", str(3 * GIB)], key=None)
+        self.assertEqual(status, 0)
+
+    def test_a_run_larger_than_the_commit_headroom_waits_when_the_vm_room_is_unknown(self):
+        """Without a measured room nothing bounds what the run can add, so the whole demand is charged."""
+        self.commit_room(GIB, None)
+        reason, _ = self.held_back("unknown-room", arguments=["--resource-memory", str(3 * GIB)])
+        self.assertEqual(reason, "Linux memory or Windows commit headroom is reserved")
+
+    def test_a_run_waits_when_the_vm_can_add_at_least_what_it_demands_and_the_commit_headroom_is_smaller(self):
+        """A room the demand does not exceed leaves the whole demand charged, so the smaller headroom holds the run back."""
+        self.commit_room(GIB, 5 * GIB)
+        reason, _ = self.held_back("large-room", arguments=["--resource-memory", str(3 * GIB)])
+        self.assertEqual(reason, "Linux memory or Windows commit headroom is reserved")
+
+    def test_a_room_that_equals_the_commit_headroom_enters_and_one_byte_more_waits(self):
+        """The charge is the room itself, so a room equal to the headroom fits and no margin shuts the run out."""
+        self.commit_room(GIB, GIB)
+        status, _, _ = self.run_command("room-at-headroom", arguments=["--resource-memory", str(3 * GIB)], key=None)
+        self.assertEqual(status, 0)
+        self.commit_room(GIB, GIB + 1)
+        reason, _ = self.held_back("room-over-headroom", arguments=["--resource-memory", str(3 * GIB)])
+        self.assertEqual(reason, "Linux memory or Windows commit headroom is reserved")
+
+    def test_a_commit_room_that_is_neither_unknown_nor_a_count_is_not_trusted(self):
+        """An observation whose room is negative, fractional or not a number is no basis for an admission."""
+        for index, growth in enumerate((-1, 1.5, "unknown", True)):
+            with self.subTest(growth=growth):
+                self.commit_room(20 * GIB, growth)
+                reason, _ = self.held_back(f"invalid-room-{index}")
+                self.assertEqual(reason, "resource observation has no valid windowsCommitGrowthBytes")
 
     # Nested runs
 

@@ -33,7 +33,8 @@ emit() {
           physicalAvailableBytes: (if $usable then $record.physicalAvailableBytes else null end),
           commitUsedBytes: (if $usable then $record.commitUsedBytes else null end),
           commitLimitBytes: (if $usable then $record.commitLimitBytes else null end),
-          wslConfig: (if $usable then $record.wslConfig else null end)
+          wslConfig: (if $usable then $record.wslConfig else null end),
+          wslVmCommitBytes: (if $usable then $record.wslVmCommitBytes else null end)
         }
     '
 }
@@ -57,15 +58,17 @@ if ((read_succeeded == 0)); then
 fi
 
 # 途中までの書込みと連結した record を通すため先頭 value だけの寛容な parse は不可
+# Windows 側の collector は NixOS 側の配備とは別の command で更新するため、wslVmCommitBytes を持たない旧い collector の record も有効とする
 if ((${#content} > maximum_bytes)) || ! record=$("$jq_command" -cse --argjson version "$schema_version" '
   def whole_count: type == "number" and . == floor and . >= 0 and . <= 9007199254740991;
   if length == 1
     and (.[0] | type) == "object"
-    and (.[0] | keys) == [
+    and (.[0] | del(.wslVmCommitBytes) | keys) == [
       "commitLimitBytes", "commitUsedBytes", "intervalSeconds", "physicalAvailableBytes",
       "physicalTotalBytes", "sampledAt", "schemaVersion", "sequence", "wslConfig"
     ]
-    and (.[0] | del(.wslConfig) | [.[]] | all(whole_count))
+    and (.[0] | del(.wslConfig, .wslVmCommitBytes) | [.[]] | all(whole_count))
+    and (.[0].wslVmCommitBytes == null or (.[0].wslVmCommitBytes | whole_count))
     and (.[0].wslConfig | type) == "object"
     and (.[0].wslConfig | keys) == ["memoryBytes", "processors", "state"]
     and (.[0].wslConfig.state | IN("read", "missing", "unreadable"))

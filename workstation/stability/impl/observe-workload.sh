@@ -31,6 +31,7 @@ windows_commit_warning=@windowsCommitWarning@
 windows_memory_outcome=@windowsMemoryOutcome@
 windows_physical_reserve_bytes=@windowsPhysicalReserveBytes@
 wsl_cap_outcome=@wslCapOutcome@
+wsl_vm_commit_overhead_bytes=@wslVmCommitOverheadBytes@
 
 bytes_pattern='^(0|[1-9][0-9]{0,17})$'
 cgroup_path_pattern='^/(([A-Za-z0-9_.@:\\-]+/)*[A-Za-z0-9_.@:\\-]+)?$'
@@ -373,6 +374,7 @@ fi
   --argjson windows_commit_warning "$windows_commit_warning" \
   --argjson windows_commit_failure "$windows_commit_failure" \
   --argjson windows_physical_reserve "$windows_physical_reserve_bytes" \
+  --argjson wsl_vm_commit_overhead "$wsl_vm_commit_overhead_bytes" \
   --argjson snapshot "$windows_snapshot" '
     def outcome($id; $status; $message): {id: $id, status: $status, message: $message};
     def pressure($id; $kind; $value):
@@ -497,6 +499,13 @@ fi
             windowsCommitHeadroomBytes:
               (if $window == "fresh"
                then ([(($snapshot.commitLimitBytes * $windows_commit_warning / 100 | floor) - $snapshot.commitUsedBytes), 0] | max)
+               else null end),
+            # VM が commit を増やせる量は、稼働中の guest の MemTotal に宣言した overhead を足した値までで、.wslconfig の宣言値には依らない。
+            # 再起動前に .wslconfig だけ下げた状態を、増やせる量 0 と誤って数えないため。
+            # collector が VM の commit を報告しない間は、不明を表す null
+            windowsCommitGrowthBytes:
+              (if $window == "fresh" and ($snapshot.wslVmCommitBytes | type) == "number" and $memory_total != null
+               then ([$memory_total + $wsl_vm_commit_overhead - $snapshot.wslVmCommitBytes, 0] | max)
                else null end),
             windowsCommitRemainingBytes:
               (if $window == "fresh" then ([$snapshot.commitLimitBytes - $snapshot.commitUsedBytes, 0] | max) else null end),

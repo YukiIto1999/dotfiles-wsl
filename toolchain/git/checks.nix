@@ -101,6 +101,7 @@
                   "memoryScopes": [],
                   "cpuCount": 12,
                   "windowsCommitHeadroomBytes": 68719476736,
+                  "windowsCommitGrowthBytes": None,
                   "windowsPhysicalAvailableBytes": 17179869184,
                   "windowsPhysicalHeadroomBytes": 8589934592
               }}]

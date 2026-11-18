@@ -81,12 +81,16 @@ class Scope:
 class Observation:
     """入場の判定に使う空きの観測
 
-    headroom: host の空きと Windows の commit の余裕の小さい方
+    host_headroom: host の空き
+    commit_headroom: Windows の commit の、警告の割合までの余裕
+    commit_growth: VM がこれから Windows の commit を増やせる量の上限。観測が求められないときは None
     limits: 祖先の cgroup ごとの（path、空き）
     usage: class の slice の下の scope ごとの、cgroup path から観測が求めた working set への対応
     """
 
-    headroom: int
+    host_headroom: int
+    commit_headroom: int
+    commit_growth: int | None
     limits: tuple
     usage: dict
 
@@ -128,12 +132,19 @@ def shortfall(demand, scopes, observation):
     scopes: 存在する scope
     observation: 空きの観測
     戻り値: 収まる場合は None、収まらない場合は理由。deep の scope の増分は数えない
+    制約: Windows の commit の余裕には、必要量と VM が commit を増やせる量の小さい方を数える。
+        VM へ commit 済みの page は再利用されて新たな commit を要さず、VM が増やせる commit は稼働中の memory の残りまでに限られるため。
+        増やせる量が不明なら必要量の全量を数える
     """
     claim = sum(growth(scope) for scope in scopes if scope.klass == "acceptance")
-    if demand + claim > observation.headroom:
+    need = demand + claim
+    if need > observation.host_headroom:
+        return HEADROOM_REASON
+    commit_charge = need if observation.commit_growth is None else min(need, observation.commit_growth)
+    if commit_charge > observation.commit_headroom:
         return HEADROOM_REASON
     for path, headroom in observation.limits:
-        if demand + claim > headroom:
+        if need > headroom:
             return f"memory headroom is reserved at {path}"
     return None
 
@@ -324,6 +335,10 @@ class Admission:
                           "windowsPhysicalHeadroomBytes"):
                 if type(value[field]) is not int or value[field] < 0:
                     return None, f"resource observation has no valid {field}"
+            # 増分の上限は観測が求められない間は null で、その間は需要の全量を commit の余裕に数える
+            commit_growth = value["windowsCommitGrowthBytes"]
+            if commit_growth is not None and (type(commit_growth) is not int or commit_growth < 0):
+                return None, "resource observation has no valid windowsCommitGrowthBytes"
             # 物理空きの不足は Windows 側の paging の問題で枯渇の失敗は commit の余裕が守るため受入の待機は不可
             # 受入の待ちの間に memory.reclaim で file cache を返させる方式は cache が繰り返し捨てられて機械全体が thrash するため不可
             if value["windowsPhysicalHeadroomBytes"] == 0 and self.klass == "deep":
@@ -341,7 +356,9 @@ class Admission:
             if any(type(row["workingSetBytes"]) is not int or row["workingSetBytes"] < 0 for row in value["memoryScopes"]):
                 return None, "resource observation has no valid workingSetBytes"
             return Observation(
-                headroom=min(value["hostMemoryHeadroomBytes"], value["windowsCommitHeadroomBytes"]),
+                host_headroom=value["hostMemoryHeadroomBytes"],
+                commit_headroom=value["windowsCommitHeadroomBytes"],
+                commit_growth=commit_growth,
                 limits=tuple((limit["path"], limit["headroomBytes"]) for limit in value["memoryLimits"]),
                 usage={row["path"]: row["workingSetBytes"] for row in value["memoryScopes"]},
             ), None

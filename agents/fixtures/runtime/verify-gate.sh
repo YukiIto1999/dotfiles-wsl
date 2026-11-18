@@ -129,10 +129,13 @@ as_owner() {
 }
 
 # 引数 $1: 期待する status、$2: 持ち主、$3: hook の payload の session、$4: repository、$5: 場面の名前
+# 入力: stop_hook_active が true なら、client が再指示の中であることを payload で伝える。gate はこの値で終了を変えない
 # 出力: gate の stdout を $fixture/stop-output へ、stderr を $fixture/stop-error へ残す
+stop_hook_active=false
 expect_stop_status() {
   local want=$1 owner=$2 payload=$3 repository=$4 status=0
-  jq -nc --arg session "$payload" --arg cwd "$repository" '{session_id:$session,cwd:$cwd}' |
+  jq -nc --arg session "$payload" --arg cwd "$repository" --argjson active "$stop_hook_active" \
+    '{session_id:$session,cwd:$cwd,stop_hook_active:$active}' |
     as_owner "$owner" hook stop >"$fixture/stop-output" 2>"$fixture/stop-error" || status=$?
   if [ "$status" -ne "$want" ]; then
     echo "stop by owner '$owner' under payload session '$payload' exited $status instead of $want: $5" >&2
@@ -179,6 +182,8 @@ waiver_state() {
     "$(printf '%s' "$(realpath -e -- "$waiver_repository/.git")" | sha256sum | cut -d ' ' -f 1)"
 }
 
+# 通った stop は控えを消すため、免除を受け入れない stop を先に問い、受け入れる stop は最後に問う。
+# 続く場面で控えが要るときは、通った stop の後に控え直す。
 check_waiver_is_scoped_to_its_session() {
   local state key file count
 
@@ -186,7 +191,6 @@ check_waiver_is_scoped_to_its_session() {
   waiver_scene owners
   expect_waiver_status 2 X stop 'unverified tree before any waiver'
   as_owner X waive --repo "$waiver_repository" --reason 'owner x' >/dev/null
-  expect_waiver_status 0 X stop 'stop of the owner that waived'
   expect_waiver_status 0 X check 'check of the owner that waived'
   expect_waiver_status 2 Y stop 'stop of another owner'
   expect_waiver_status 1 Y check 'check of another owner'
@@ -196,6 +200,8 @@ check_waiver_is_scoped_to_its_session() {
   fi
   expect_waiver_status 1 '' check 'check of an empty owner'
   expect_waiver_status 2 '' stop 'stop of an empty owner'
+  expect_waiver_status 0 X stop 'stop of the owner that waived'
+  as_owner '' arm --session "$waiver_payload" --path "$waiver_repository"
 
   # 同じ木を二つの session が免除しても、互いを上書きせず、それぞれが自分の分だけを通す
   as_owner Y waive --repo "$waiver_repository" --reason 'owner y' >/dev/null
@@ -218,9 +224,9 @@ check_waiver_is_scoped_to_its_session() {
   waiver_scene empty
   as_owner '' waive --repo "$waiver_repository" --reason 'no owner' >/dev/null
   expect_waiver_status 0 '' check 'check of an empty owner after an empty-owner waiver'
-  expect_waiver_status 0 '' stop 'stop of an empty owner after an empty-owner waiver'
   expect_waiver_status 1 X check 'check of an owner next to an empty-owner waiver'
   expect_waiver_status 2 X stop 'stop of an owner next to an empty-owner waiver'
+  expect_waiver_status 0 '' stop 'stop of an empty owner after an empty-owner waiver'
 
   # 旧い名の免除は、誰も通さない
   waiver_scene legacy
@@ -240,8 +246,8 @@ check_waiver_is_scoped_to_its_session() {
   as_owner X waive --repo "$waiver_repository" --reason 'shared launcher' >/dev/null
   waiver_payload="fixture-waiver-payloads-other"
   as_owner '' arm --session "$waiver_payload" --path "$waiver_repository"
-  expect_waiver_status 0 X stop 'same owner under another payload session'
   expect_waiver_status 2 Y stop 'another owner under another payload session'
+  expect_waiver_status 0 X stop 'same owner under another payload session'
 
   # 改行を含む理由は、読む側が行を取り違えるため控えない
   waiver_scene multiline
@@ -324,6 +330,173 @@ check_worktrees_of_one_project_are_held_apart() {
   fi
   (cd "$first" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
   expect_stop_status 0 '' "$session" "$first" 'stop after both worktrees were verified'
+}
+
+# 終了の確認に通った repository の控えは両方の directory から消え、通らなかった repository の控えは残る。
+# 控えが消えた後は、他の session が変えた木で終了が止まらず、その session が再び変えれば止まる。
+disarm_repository=
+disarm_payload=
+disarm_owner=
+
+# 引数 $1: 場面の名前。未検証の木を作り、session が編集した状態にする。hook の session と launcher の session は場面ごとに別にする
+disarm_scene() {
+  disarm_repository=$fixture/disarm-$1
+  disarm_payload=fixture-disarm-$1
+  disarm_owner=fixture-disarm-owner-$1
+  t1_repository "$disarm_repository" 60
+  disarm_arm "$disarm_repository"
+}
+
+# 引数 $1: repository。session の編集として控える
+disarm_arm() {
+  as_owner "$disarm_owner" arm --session "$disarm_payload" --path "$1"
+}
+
+# 引数 $1: 期待する status、$2: 場面の名前
+expect_disarm_stop() {
+  expect_stop_status "$1" "$disarm_owner" "$disarm_payload" "$disarm_repository" "$2"
+}
+
+# 引数 $1: directory の名前。出力: session のその directory にある控えの数
+marker_count() {
+  find "$home/.cache/dotfiles-wsl/verification/sessions/$1" -mindepth 1 -maxdepth 1 -type f 2>/dev/null | wc -l
+}
+
+# 引数 $1: 期待する数、$2: 場面の名前。hook の session と launcher の session の両方の directory を数える
+expect_markers() {
+  local directory
+  for directory in "$disarm_payload" "$disarm_owner"; do
+    if [ "$(marker_count "$directory")" -ne "$1" ]; then
+      echo "session directory '$directory' holds $(marker_count "$directory") markers instead of $1: $2" >&2
+      exit 1
+    fi
+  done
+}
+
+# 引数 $1: repository
+verify_tree() {
+  (cd "$1" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+}
+
+# 引数 $1: PreToolUse か PostToolUse。disarm_repository を作業場所にした shell の呼び出しの観察
+disarm_observe() {
+  jq -nc --arg session "$disarm_payload" --arg event "$1" --arg cwd "$disarm_repository" \
+    '{session_id:$session,hook_event_name:$event,tool_use_id:"disarm-call",cwd:$cwd,tool_name:"bash",tool_input:{command:"change"}}' |
+    as_owner "$disarm_owner" hook observe
+}
+
+check_marker_is_released_by_a_passing_stop() {
+  local second marker
+
+  # 通った stop の後に他の session が木を変えても止まらず、その session が再び編集するか shell で変えれば止まる
+  disarm_scene released
+  expect_markers 1 'repository armed by an edit'
+  verify_tree "$disarm_repository"
+  expect_disarm_stop 0 'verified tree'
+  expect_markers 0 'markers after the passing stop'
+  printf 'another session\n' >"$disarm_repository/foreign"
+  expect_disarm_stop 0 'tree changed by another session after the markers were released'
+  disarm_arm "$disarm_repository"
+  expect_disarm_stop 2 'own edit after the markers were released'
+  verify_tree "$disarm_repository"
+  expect_disarm_stop 0 'verified again'
+  disarm_observe PreToolUse
+  printf 'own shell change\n' >"$disarm_repository/own"
+  disarm_observe PostToolUse
+  expect_disarm_stop 2 'own shell change after the markers were released'
+
+  # 通らない stop は控えを残す。client が再指示の中であると伝えても、終了は 2 のまま控えが残る
+  disarm_scene failing
+  expect_disarm_stop 2 'first failing stop'
+  expect_markers 1 'markers after a failing stop'
+  stop_hook_active=true
+  expect_disarm_stop 2 'second failing stop with stop_hook_active'
+  stop_hook_active=false
+  expect_markers 1 'markers after a failing stop that was told it is inside a re-instruction'
+  verify_tree "$disarm_repository"
+  expect_disarm_stop 0 'verified after the failing stops'
+  expect_markers 0 'markers after the verified stop'
+
+  # 自分の免除で通った stop も控えを消す。通っていない木を他の session が変えても止まらず、自分が変えれば止まる
+  disarm_scene waived
+  as_owner "$disarm_owner" waive --repo "$disarm_repository" --reason 'own waiver' >/dev/null
+  expect_disarm_stop 0 'stop passed by own waiver'
+  expect_markers 0 'markers after the stop passed by own waiver'
+  printf 'another session\n' >"$disarm_repository/foreign"
+  expect_disarm_stop 0 'tree changed by another session after own waiver'
+  disarm_arm "$disarm_repository"
+  expect_disarm_stop 2 'own change after own waiver'
+
+  # 別の持ち主の免除では通らず、控えは残る
+  disarm_scene foreign-waiver
+  as_owner "$disarm_owner-other" waive --repo "$disarm_repository" --reason 'another session' >/dev/null
+  expect_disarm_stop 2 'stop with the waiver of another owner'
+  expect_markers 1 'markers after a stop the waiver of another owner did not pass'
+
+  # 入口を宣言しない repository では通り、控えは消える。入口が宣言された木を自分が編集すれば止まる
+  disarm_scene no-entry
+  rm "$disarm_repository/devenv.nix"
+  expect_disarm_stop 0 'repository without a declared entry'
+  expect_markers 0 'markers after the stop of a repository without a declared entry'
+  git -C "$disarm_repository" checkout -q -- devenv.nix
+  disarm_arm "$disarm_repository"
+  expect_disarm_stop 2 'entry declared again and edited'
+
+  # 木の鍵を採れない間は止まって控えが残り、直して検証すれば通って控えが消える
+  disarm_scene untakable
+  git init -q "$disarm_repository/nested"
+  expect_disarm_stop 2 'tree whose key cannot be taken'
+  expect_markers 1 'markers after a stop on a tree whose key cannot be taken'
+  rm -rf "$disarm_repository/nested"
+  verify_tree "$disarm_repository"
+  expect_disarm_stop 0 'tree readable and verified'
+  expect_markers 0 'markers after the stop that passed'
+
+  # 二つの repository のうち通った方の控えだけが消え、通らない方の控えは残る
+  disarm_scene two
+  second=$fixture/disarm-two-second
+  t1_repository "$second" 60
+  disarm_arm "$second"
+  verify_tree "$disarm_repository"
+  expect_disarm_stop 2 'one of two repositories verified'
+  expect_markers 1 'markers after one of two repositories passed'
+  marker=$(find "$home/.cache/dotfiles-wsl/verification/sessions/$disarm_payload" -mindepth 1 -maxdepth 1 -type f)
+  if [ "$(<"$marker")" != "$(realpath -e -- "$second")" ]; then
+    echo 'the marker that stayed does not name the repository that did not pass' >&2
+    exit 1
+  fi
+
+  # CLI の check は、通っても控えに触れない
+  disarm_scene cli
+  verify_tree "$disarm_repository"
+  as_owner "$disarm_owner" check --repo "$disarm_repository" >/dev/null
+  expect_markers 1 'markers after a passing CLI check'
+}
+
+# 検査の間に控え直された控えは、検査より後の変更を指すため、検査が通っても消さない。
+# 入口の解決の最初の呼び出しで gate の arm を呼ぶ入口を挟み、検査の途中の控え直しを再現する。
+check_marker_rearmed_during_the_check_is_kept() {
+  local repository=$fixture/disarm-rearm payload=fixture-rearm owner=fixture-rearm-owner status=0
+
+  t1_repository "$repository" 60
+  as_owner "$owner" arm --session "$payload" --path "$repository"
+  verify_tree "$repository"
+  jq -nc --arg session "$payload" --arg cwd "$repository" '{session_id:$session,cwd:$cwd}' |
+    REARM_SESSION=$payload REARM_PATH=$repository REARM_DONE=$fixture/rearm-done \
+      DOTFILES_AGENT_SESSION_ID=$owner "$REARMING_GATE" hook stop >/dev/null 2>&1 || status=$?
+  if [ "$status" -ne 0 ] || [ ! -e "$fixture/rearm-done" ]; then
+    echo "the stop did not pass the verified tree, or the re-arm never happened during the check: $status" >&2
+    exit 1
+  fi
+  if [ "$(marker_count "$payload")" -ne 1 ] || [ "$(marker_count "$owner")" -ne 1 ]; then
+    echo 'a stop released a marker that was armed again while it was checking' >&2
+    exit 1
+  fi
+  expect_stop_status 0 "$owner" "$payload" "$repository" 'stop after the re-arm, on the same verified tree'
+  if [ "$(marker_count "$payload")" -ne 0 ] || [ "$(marker_count "$owner")" -ne 0 ]; then
+    echo 'a stop that passed did not release the marker armed during the earlier check' >&2
+    exit 1
+  fi
 }
 
 # 門は、入口を宣言する repository でだけ「通っていない」と答える。
@@ -512,3 +685,5 @@ check_edits_gate_on_freshness_only
 check_waiver_is_scoped_to_its_session
 check_stop_covers_subagent_changes
 check_worktrees_of_one_project_are_held_apart
+check_marker_is_released_by_a_passing_stop
+check_marker_rearmed_during_the_check_is_kept

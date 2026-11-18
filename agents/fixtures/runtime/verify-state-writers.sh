@@ -192,6 +192,7 @@ check_gate_state_writers() {
   [ "$(find "$session_dir" -maxdepth 1 -type f | wc -l)" -eq 1 ] || state_fail 'stop が再開のための控えを捨てた'
   state_writer waive >/dev/null
   state_stop "$state_session" >/dev/null 2>&1 || state_fail 'stop が理由を残した木を止めた'
+  [ "$(find "$session_dir" -maxdepth 1 -type f | wc -l)" -eq 0 ] || state_fail 'stop が通った木の控えを残した'
 
   for variant in symlink dangling directory; do
     reset_state_home
@@ -209,6 +210,11 @@ check_gate_state_writers() {
     state_stop "$state_session" >/dev/null 2>&1 || status=$?
     [ "$status" -eq 2 ] || state_fail "stop が不正な控えを検証済みと扱った: $variant ($status)"
     [ -f "$state_external/marker" ] || state_fail 'stop が外の控えを削除した'
+    case $variant in
+    symlink) [ -L "$state_file" ] ;;
+    dangling) [ -L "$state_file" ] && [ ! -e "$state_dangling" ] ;;
+    directory) [ -d "$state_file" ] && [ ! -L "$state_file" ] ;;
+    esac || state_fail "stop が不正な控えそのものを消した: $variant"
   done
 
   reset_state_home

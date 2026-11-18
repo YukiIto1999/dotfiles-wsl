@@ -639,13 +639,19 @@ session_state_is_private() {
   return 1
 }
 
+# 控えは一時 file への書込みと rename で置く。書き直すたびに別の inode と更新時刻になるため、
+# stop は検査の間に控え直された控えを identity の変化で見分けられる。
 store_state() {
-  local path=$1 content=$2
+  local path=$1 content=$2 temporary
   if { [ -e "$path" ] || [ -L "$path" ]; } && ! state_file_is_private "$path"; then
     printf 'dotfiles-agent-gate: 控えの置き場所が自分の通常 file でないため控えない: %s\n' "$path" >&2
     return 1
   fi
-  printf '%s\n' "$content" >"$path"
+  temporary=$(mktemp "${path%/*}/.store.XXXXXXXX") || return 1
+  if ! printf '%s\n' "$content" >"$temporary" || ! mv -T -- "$temporary" "$path"; then
+    rm -f -- "$temporary"
+    return 1
+  fi
 }
 
 # 自分で作る一時 file が検査する木の中へ入ると、未追跡 file として照合値へ混ざる。
@@ -1022,13 +1028,26 @@ runtime_scratch_root() {
   printf '%s\n' "$physical"
 }
 
-# session の directory が控えた repository を問い、未検証か、控えを確かめられなければ 2 で返る。
-# 同じ repository が hook の session と launcher の session の両方にあっても、一度だけ問う。
+# 控えの identity。書き直された控えは別の inode と更新時刻を持つ。消えた控えは空を答える。
+marker_identity() {
+  stat -c '%i %y' -- "$1" 2>/dev/null || true
+}
+
+# 検査の間に控え直された控え(identity が変わった控え)は、検査より後の変更を指すため消さない。
+# 引数 $1: 控えの path、$2: 検査の前の identity
+release_marker() {
+  if [ "$(marker_identity "$1")" = "$2" ]; then
+    rm -f -- "$1"
+  fi
+}
+
+# session の directory が控えた repository を、控えの path と検査の前の identity とともに held_* へ集める。
+# 控えを確かめられなければ 2 で返り、その控えと directory は消さない。
 # skills は Skill の読取を控えていた旧 generation の残りである。読む者がいないため calls と同じく捨てる。
 # 引数 $1: session の名
-declare -A asked_repositories=()
-check_session_markers() {
-  local session=$1 marker held reason status=0
+declare -a held_markers=() held_repositories=() held_identities=()
+collect_session_markers() {
+  local session=$1 marker held reason identity status=0
   [ -n "$session" ] && { [ -e "$sessions_root/$session" ] || [ -L "$sessions_root/$session" ]; } || return 0
   if ! reason=$(session_state_is_private "$session" 2>&1); then
     reason=$(printf '%s\n  控えた repository を確かめられないため、検証済みとは扱わず止める。' "$reason")
@@ -1045,15 +1064,37 @@ check_session_markers() {
       case ${marker##*/} in
       calls | skills) rm -rf -- "$marker"; continue ;;
       esac
+      identity=$(marker_identity "$marker")
       held=$(cat "$marker")
       [ -d "$held" ] || continue
-      [ -z "${asked_repositories[$held]+x}" ] || continue
-      asked_repositories[$held]=1
-      command_check "$held" || status=2
+      held_markers+=("$marker")
+      held_repositories+=("$held")
+      held_identities+=("$identity")
     else
       printf 'dotfiles-agent-gate: 不正な状態の控えを検証済みと扱わない: %s\n' "$marker" | tee /dev/stderr
       status=2
     fi
+  done
+  return "$status"
+}
+
+# 集めた repository を一度ずつ問い、未検証なら 2 で返る。同じ repository が hook の session と launcher の session の
+# 両方にあっても一度だけ問う。通った repository の控えは両方の directory から消し、通らなかった repository の控えは残す。
+# 控えを残し続けると、一度でも変えた repository は、他の session が変えた木でもその session の終了を止め続ける。
+check_held_repositories() {
+  local repository index status=0
+  local -A checked=()
+  for repository in "${held_repositories[@]}"; do
+    [ -z "${checked[$repository]+x}" ] || continue
+    checked[$repository]=1
+    if ! command_check "$repository"; then
+      status=2
+      continue
+    fi
+    for index in "${!held_markers[@]}"; do
+      [ "${held_repositories[index]}" = "$repository" ] || continue
+      release_marker "${held_markers[index]}" "${held_identities[index]}"
+    done
   done
   return "$status"
 }
@@ -1085,10 +1126,11 @@ command_hook() {
     exit 0
     ;;
   stop)
-    check_session_markers "$session" || status=2
+    collect_session_markers "$session" || status=2
     if [ "$owner" != "$session" ] && session_name_is_valid "$owner"; then
-      check_session_markers "$owner" || status=2
+      collect_session_markers "$owner" || status=2
     fi
+    check_held_repositories || status=2
     exit "$status"
     ;;
   *) usage ;;

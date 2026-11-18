@@ -77,6 +77,26 @@
             runtimeContract = runtimePackageContract;
           }
         );
+        # 検査の間に控え直しが来た場面だけを再現する。入口の解決の最初の呼び出しで、一度だけ通常の gate の arm を呼ぶ。
+        # 他の呼び出しは実の入口へそのまま渡す。arm を呼ぶ側の gate は、この入口を持つ gate と別である。
+        rearmingEntry = pkgs.writeShellApplication {
+          name = "rearming-verification-entry";
+          runtimeInputs = [ pkgs.coreutils ];
+          text = ''
+            if [ -n "''${REARM_SESSION-}" ] && [ ! -e "$REARM_DONE" ]; then
+              : >"$REARM_DONE"
+              "$GATE" arm --session "$REARM_SESSION" --path "$REARM_PATH"
+            fi
+            exec ${lib.getExe verificationEntry} "$@"
+          '';
+        };
+        rearmingRuntime = import ../package.nix (
+          runtimeArgs
+          // {
+            verificationEntry = rearmingEntry;
+            runtimeContract = runtimePackageContract;
+          }
+        );
         # sandbox には資源観測の実体が無いため、常に余裕を返す観測で実測の記録まで同じ経路を通す。
         # AGENT_RESOURCE_PRESSURE_FILE が指す file がある間だけ failure の outcome を返し、入場の待ちを作る。この outcome は guest の値として全 class の入場を止める
         resourceObservation = pkgs.writeScript "agent-resource-observation" ''
@@ -824,7 +844,10 @@
               ../fixtures/runtime/verify-gate.sh
             ]
             [ ]
-            { VERIFY = lib.getExe runtime.verify; };
+            {
+              VERIFY = lib.getExe runtime.verify;
+              REARMING_GATE = lib.getExe rearmingRuntime.gate;
+            };
 
         agent-verification-run-key = verificationCheck "key" [ ../fixtures/runtime/verify-key.sh ] [ ] {
           VERIFY = lib.getExe runtime.verify;

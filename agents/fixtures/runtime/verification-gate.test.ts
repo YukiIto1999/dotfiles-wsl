@@ -87,6 +87,19 @@ function settledReceipts(): string[] {
 }
 
 /**
+ * hook の session ID の下に gate が控えた repository の一覧
+ * @param session - hook へ渡した session の ID
+ * @returns 控えの file 名の一覧。呼出しの途中の記録は含めない
+ */
+function armedMarkers(session: string): string[] {
+  const directory = join(verificationRoot, "sessions", session);
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && !entry.name.startsWith("."))
+    .map((entry) => entry.name);
+}
+
+/**
  * 再記録用の gate が受けた呼出しの一覧
  * @returns 呼出し 1 回につき hook の引数を並べた 1 行の一覧
  */
@@ -240,6 +253,8 @@ test("an unverified T1 stop returns control on the repeated request without sett
   expect(await stop({ stop_hook_active: true }, ctx)).toBeUndefined();
   expect(notices).toEqual([{ message: first.reason, type: "warning" }]);
   expect(settledReceipts()).toEqual([]);
+  // 再指示の中の返却は検証の合格ではないため、控えは残り、新しい終了要求はもう一度止まる
+  expect(armedMarkers(session)).toHaveLength(1);
   expect(await stop({ stop_hook_active: false }, ctx)).toMatchObject({ decision: "block" });
 }, TEST_TIMEOUT_MS);
 

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  printf 'usage: dotfiles-verify-entry [--repo DIR] [--policy FILE] [--budget | --candidates | --snapshot] verify|verify-push|verify-full\n' >&2
+  printf 'usage: dotfiles-verify-entry [--repo DIR] [--policy FILE] [--budget | --feedback-target | --candidates | --snapshot] verify|verify-push|verify-full\n' >&2
   exit 64
 }
 
@@ -138,11 +138,15 @@ candidates_of() {
 }
 
 # 予算の正本が project の宣言のため、宣言の無い段への既定値と無制限の補完は不可
-budget_of() {
-  local top=$1 name=$2 file policy seconds
+# 目標は上限と同じ宣言に置く値で、不正な目標を上限と同じく補完も無視もせず拒否する。無視すると目標の無い段と見分けが付かない
+# 出力 tier_seconds: 検証済みの上限の秒。tier_target: 検証済みの目標の秒。宣言が無ければ空
+tier_seconds=
+tier_target=
+tier_of() {
+  local top=$1 name=$2 file policy
   file=$top/tiergate.json
   policy=$(policy_of "$top") || return $?
-  if ! seconds=$(jq -e --arg stage "$name" '
+  if ! tier_seconds=$(jq -e --arg stage "$name" '
     if type == "object" and (.[$stage] | type == "object")
       and (.[$stage].seconds | type == "number" and . >= 1 and . <= 2147483647 and . == floor)
     then .[$stage].seconds | floor
@@ -152,7 +156,29 @@ budget_of() {
       "$file" "$name" "$name" >&2
     return 1
   fi
-  printf '%s\n' "$seconds"
+  # 上限を超える目標は上限が先に走行を止めるため目標として働かない
+  if ! tier_target=$(jq -e -r --arg stage "$name" --argjson seconds "$tier_seconds" '
+    .[$stage] as $tier
+    | if ($tier | has("feedbackTargetSeconds") | not) then ""
+      elif ($tier.feedbackTargetSeconds | type == "number" and . >= 1 and . <= $seconds and . == floor)
+      then $tier.feedbackTargetSeconds | floor
+      else empty end
+  ' <<<"$policy"); then
+    printf '%s の %s の feedbackTargetSeconds が不正である(省略するか、1 以上 seconds 以下の整数にする)\n' \
+      "$file" "$name" >&2
+    return 1
+  fi
+}
+
+budget_of() {
+  tier_of "$1" "$2" || return $?
+  printf '%s\n' "$tier_seconds"
+}
+
+# 目標を宣言していない段は何も出さない
+target_of() {
+  tier_of "$1" "$2" || return $?
+  [ -z "$tier_target" ] || printf '%s\n' "$tier_target"
 }
 
 
@@ -171,7 +197,7 @@ main() {
       [ -n "$policy_file" ] || usage
       shift 2
       ;;
-    --budget | --candidates | --snapshot)
+    --budget | --feedback-target | --candidates | --snapshot)
       [ "$mode" = entry ] || usage
       mode=${1#--}
       shift
@@ -185,19 +211,20 @@ main() {
     esac
   done
   [ -n "$name" ] || usage
-  if [ -n "$policy_file" ] && [ "$mode" != entry ] && [ "$mode" != budget ]; then
+  if [ -n "$policy_file" ] && [ "$mode" != entry ] && [ "$mode" != budget ] && [ "$mode" != feedback-target ]; then
     usage
   fi
   if ! top=$(git -C "$repo" rev-parse --show-toplevel 2>/dev/null); then
-    [ "$mode" != budget ] || {
+    if [ "$mode" = budget ] || [ "$mode" = feedback-target ]; then
       printf '%s は git の木の外にあり、時間予算の宣言が無い\n' "$repo" >&2
       return 1
-    }
+    fi
     [ "$mode" != snapshot ] || printf 'null\n'
     return 0
   fi
   case $mode in
   budget) budget_of "$top" "$name" ;;
+  feedback-target) target_of "$top" "$name" ;;
   entry) entry_of "$top" "$name" ;;
   candidates) candidates_of "$top" "$name" ;;
   snapshot) read_policy "$top" ;;

@@ -128,7 +128,7 @@ nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncI
 現在の一覧は`nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.cli.commands --apply builtins.attrNames`で確認する。
 
 管理runtimeの`dotfiles-agent-verify`は`cli.commands`に無く、flakeの`packages`から公開する。まだ配備されていないcheckoutからは`nix run --no-write-lock-file .#dotfiles-agent-verify -- nix run --no-write-lock-file .#verify`でT1を通す。
-T1の時間予算は呼び出し側の引数でなく、rootの`tiergate.json`の`verify.seconds`が決める。
+T1の時間予算は呼び出し側の引数でなく、rootの`tiergate.json`の`verify.seconds`が決める。同じ段の`feedbackTargetSeconds`が持つ目標は、wrapperが超過を報告するだけで、取消にも成否にも使わない。
 wrapperは[`dotfiles-verify-entry --snapshot verify`](../../toolchain/verification/impl/entry.sh)で静的な宣言を一度だけ読み、そのsnapshotを`--policy FILE`へ渡して予算と入口を解決する。
 snapshotの読取から検査と証跡の確定までを同じ走行の予算に含め、途中の登録変更でcanonicalな呼び出しを無期限のcacheへ切り替えない。
 `verify`のappも同じ設定fileから予算を読む。

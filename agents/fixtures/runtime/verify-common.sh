@@ -11,8 +11,13 @@ stall_receipt_count() {
   find "$home/.cache/dotfiles-wsl/verification" -type f -name '*.verified' -print | wc -l
 }
 
+# 引数 $1: repository、$2: 上限の秒、$3: 目標の秒。目標が空なら宣言しない
 declare_budget() {
-  printf '{"version":1,"verify":{"seconds":%s}}\n' "$2" >"$1/tiergate.json"
+  if [ -n "${3-}" ]; then
+    printf '{"version":1,"verify":{"seconds":%s,"feedbackTargetSeconds":%s}}\n' "$2" "$3" >"$1/tiergate.json"
+  else
+    printf '{"version":1,"verify":{"seconds":%s}}\n' "$2" >"$1/tiergate.json"
+  fi
 }
 
 # 完走を期待する走行の予算。wrapper の起動と後始末が混んだ機械で 10 秒かかっても通る
@@ -52,7 +57,7 @@ reach_widen() {
 t1_repository() {
   git init -q "$1"
   printf 'scripts.verify.exec = "true";\n' >"$1/devenv.nix"
-  declare_budget "$1" "$2"
+  declare_budget "$1" "$2" "${3-}"
   git -C "$1" add devenv.nix tiergate.json
   git -C "$1" -c user.name=fixture -c user.email=fixture@example.invalid commit -qm initial
 }

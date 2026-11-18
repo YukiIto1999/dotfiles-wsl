@@ -61,6 +61,9 @@ DEFAULT_KILL_GRACE_SECONDS = 5.0
 OVERDUE_SWEEP_SECONDS = 0.5
 OVERDUE_REPORT_SECONDS = 30.0
 MEASURE_SECONDS = 1.0
+# 走行の scope の cgroup から読む CPU時間と滞留の合計の項目。滞留は pressure file の total=（microseconds）で、
+# CPU は some、IO と memory は full の行を読む。--result と計測の一行はこの名前で秒（ミリ秒精度）を持つ
+SCOPE_READINGS = ("cpuSeconds", "cpuStallSeconds", "ioStallSeconds", "memoryStallSeconds")
 # 入場できないまま待機の上限に達した走行の終了status。commandは起動していない
 WAIT_EXPIRED_STATUS = 75
 # systemd-run が作った scope へ入るまでの猶予秒数
@@ -98,6 +101,7 @@ class Options:
         resource_policy: hostの資源観測と予約既定値のpathか無効のNone
         resource_wait_until: 入場を待つ絶対期限か無効のNone。走行の秒数とは別に数える
         resource_run_seconds: 入場してから数える走行の秒数か無効のNone
+        resource_target_seconds: 入場してから数える走行の秒数がこの値へ達した時点の読取を残す秒数か無効のNone。取消にも期限にも使わない
         resource_memory: 物理memory予約の明示値か既定値を選ぶNone
         resource_key: 実測した需要の記録を読み書きする鍵か記録しないNone
         command: 絶対実行pathを先頭に持つcommand引数列
@@ -123,6 +127,7 @@ class Options:
         self.resource_policy = None
         self.resource_wait_until = None
         self.resource_run_seconds = None
+        self.resource_target_seconds = None
         self.resource_memory = None
         self.resource_key = None
 
@@ -165,8 +170,10 @@ def parse_arguments(arguments):
                 if options.resource_wait_until is None or options.resource_run_seconds is None:
                     raise UsageError("--resource-policy requires --resource-wait-until and --resource-run-seconds")
                 options.require_drained = True
-            elif options.resource_wait_until is not None or options.resource_run_seconds is not None:
-                raise UsageError("--resource-wait-until and --resource-run-seconds require --resource-policy")
+            elif (options.resource_wait_until is not None or options.resource_run_seconds is not None
+                  or options.resource_target_seconds is not None):
+                raise UsageError(
+                    "--resource-wait-until, --resource-run-seconds and --resource-target-seconds require --resource-policy")
             return options
         if argument == "--require-drained":
             options.require_drained = True
@@ -178,7 +185,7 @@ def parse_arguments(arguments):
             continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels",
                             "--resource-policy", "--resource-wait-until", "--resource-run-seconds", "--resource-memory",
-                            "--resource-key"):
+                            "--resource-key", "--resource-target-seconds"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
             raise UsageError(f"{argument} needs a value")
@@ -205,6 +212,8 @@ def parse_arguments(arguments):
             options.resource_wait_until = parse_seconds(argument, value)
         elif argument == "--resource-run-seconds":
             options.resource_run_seconds = parse_seconds(argument, value)
+        elif argument == "--resource-target-seconds":
+            options.resource_target_seconds = parse_seconds(argument, value)
         elif argument == "--resource-memory":
             if not value.isdecimal() or int(value) <= 0:
                 raise UsageError(f"{argument} needs a positive integer")
@@ -355,6 +364,58 @@ class PeakMeter:
         return max(0.0, self.due - time.monotonic())
 
 
+def usage_microseconds(path):
+    """cpu.stat の usage_usec の読取
+
+    path: scope の cpu.stat
+    戻り値: 子孫の終了した分を含む CPU時間の microseconds
+    失敗: 読めない場合の OSError と、usage_usec の行が無い、または数でない場合の ValueError
+    """
+    for line in path.read_text().splitlines():
+        name, _, value = line.partition(" ")
+        if name == "usage_usec":
+            return int(value)
+    raise ValueError(f"{path} has no usage_usec")
+
+
+def stall_microseconds(path, kind):
+    """pressure file の滞留の合計の読取
+
+    path: scope の cpu.pressure、io.pressure、memory.pressure
+    kind: 読む行。some か full
+    戻り値: 作成からの滞留の microseconds
+    失敗: 読めない場合の OSError と、行か total= が無い、または数でない場合の ValueError か KeyError
+    """
+    for line in path.read_text().splitlines():
+        fields = line.split()
+        if fields[:1] == [kind]:
+            return int(dict(field.split("=", 1) for field in fields[1:])["total"])
+    raise ValueError(f"{path} has no {kind} line")
+
+
+def scope_readings(directory):
+    """走行の scope の cgroup が持つ CPU時間と滞留の合計の読取
+
+    directory: scope の cgroup directory。scope を作らない走行はNone
+    戻り値: SCOPE_READINGS の各項目を秒（ミリ秒精度）で持つ辞書。読めない項目と scope の無い走行はNone
+    制約: 項目ごとに読み、一つの失敗で他の項目を捨てない。失敗は走行の終了statusを変えない
+    """
+    readings = dict.fromkeys(SCOPE_READINGS)
+    if directory is None:
+        return readings
+    for field, read in (
+        ("cpuSeconds", lambda: usage_microseconds(directory / "cpu.stat")),
+        ("cpuStallSeconds", lambda: stall_microseconds(directory / "cpu.pressure", "some")),
+        ("ioStallSeconds", lambda: stall_microseconds(directory / "io.pressure", "full")),
+        ("memoryStallSeconds", lambda: stall_microseconds(directory / "memory.pressure", "full")),
+    ):
+        try:
+            readings[field] = round(read() / 1_000_000, 3)
+        except (OSError, ValueError, KeyError):
+            pass
+    return readings
+
+
 class Supervisor:
     def __init__(self, options):
         self.options = options
@@ -387,6 +448,12 @@ class Supervisor:
         self.admitted = False
         self.wait_seconds = 0.0
         self.run_seconds = None
+        # scope から読んだ直近の値。scope は最後の process の終了で消えるため、終了時の読取に失敗しても前の値を残す
+        self.readings = dict.fromkeys(SCOPE_READINGS)
+        self.reading_due = 0.0
+        # 走行の枠が目標へ達する単調時計の時刻と、その時点の読取。目標を持たない走行はNone、読取は目標の前に終えた走行でもNone
+        self.target_at = None
+        self.at_target = None
 
     def record(self, phase, **fields):
         path = self.options.result_path
@@ -454,6 +521,8 @@ class Supervisor:
 
     def begin_termination(self):
         self.terminating = True
+        # scope は最後の process の終了で消えるため、signal を送る前に終了時の値を読む
+        self.read_scope()
         self.term_deadline = time.monotonic() + self.options.term_grace
         # 後始末の子まで中断するため猶予中の SIGTERM 再走査は不採用
         self.signal_owned_processes(signal.SIGTERM)
@@ -523,6 +592,8 @@ class Supervisor:
         """
         while True:
             sampling = self.meter.sample() if self.meter is not None and not self.terminating else None
+            reading = self.sample_scope() if not self.terminating else None
+            self.record_at_target()
             children_exist = self.reap()
             if self.run_deadline is not None and time.time() >= self.run_deadline:
                 self.deadline_expired = True
@@ -533,8 +604,9 @@ class Supervisor:
                 self.begin_termination()
             if not self.terminating:
                 wait = max(0, self.run_deadline - time.time()) if self.run_deadline is not None else None
-                if sampling is not None:
-                    wait = sampling if wait is None else min(wait, sampling)
+                for due in (sampling, reading, self.until_target()):
+                    if due is not None:
+                        wait = due if wait is None else min(wait, due)
                 self.wait_for_event(wait)
                 continue
             if not children_exist:
@@ -659,11 +731,60 @@ class Supervisor:
                 diagnose(f"cannot record the measured memory peak: {error}")
         return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved, "waitSeconds": round(self.wait_seconds, 3)}
 
+    def scope_directory(self):
+        """この走行の scope の cgroup directory。資源予約を持たない走行と、scope を作らない入れ子の走行はNone"""
+        return None if self.reservation is None else self.reservation.scope_directory()
+
+    def read_scope(self):
+        """scope の読取の保持値への重ね書き。読めなかった項目は前の値を残す"""
+        for field, value in scope_readings(self.scope_directory()).items():
+            if value is not None:
+                self.readings[field] = value
+
+    def sample_scope(self):
+        """間隔が過ぎている場合だけの scope の読取。終了時に scope が残っていない場合の備え
+
+        戻り値: 次の読取までの秒数。scope を持たない走行はNone
+        """
+        if self.scope_directory() is None:
+            return None
+        now = time.monotonic()
+        if now >= self.reading_due:
+            self.reading_due = now + MEASURE_SECONDS
+            self.read_scope()
+        return max(0.0, self.reading_due - time.monotonic())
+
+    def until_target(self):
+        """走行の枠が目標へ達するまでの秒数。目標を持たない走行と、目標の時点の読取を終えた走行はNone"""
+        if self.target_at is None or self.at_target is not None:
+            return None
+        return max(0.0, self.target_at - time.monotonic())
+
+    def record_at_target(self):
+        """走行の枠が目標へ達した時点の scope の読取。一度だけ読み、取消にも期限の変更にも使わない"""
+        if self.target_at is not None and self.at_target is None and time.monotonic() >= self.target_at:
+            self.at_target = scope_readings(self.scope_directory())
+
+    def scope_report(self):
+        """終了時の読取と、目標と、目標の時点の読取。--result と計測の一行が同じ値を持つ"""
+        target = self.options.resource_target_seconds
+        if target is not None and target.is_integer():
+            target = int(target)
+        return {**self.readings, "targetSeconds": target, "atTarget": self.at_target}
+
+    def observe_scope(self):
+        """走行の秒数と scope の読取の --result への項目。資源予約のない走行は空"""
+        if self.reservation is None:
+            return {}
+        return {"runSeconds": round(self.run_seconds, 3), **self.scope_report()}
+
     def start_run_clock(self):
         """走行の枠を、client を起動した時点から数え始める。待機の秒数は枠に数えない"""
         self.spawned_at = time.monotonic()
         if self.options.resource_run_seconds is not None:
             self.run_deadline = time.time() + self.options.resource_run_seconds
+        if self.options.resource_target_seconds is not None:
+            self.target_at = self.spawned_at + self.options.resource_target_seconds
 
     def abandon_entry(self):
         """scope へ入る前に止まっている client を殺して回収する"""
@@ -803,6 +924,7 @@ class Supervisor:
             status=status,
             **expiry,
             **memory,
+            **self.observe_scope(),
         )
         if survivors and self.options.hold_fd is not None:
             hold_until_gone(survivors)
@@ -830,6 +952,7 @@ class Supervisor:
             "status": status,
             "peakBytes": self.meter.peak,
             "reservedBytes": reservation.memory,
+            **self.scope_report(),
         }
         try:
             emit(reservation.policy.journal, record)

@@ -72,6 +72,8 @@ annotated tagは参照するcommitで比較し、差分を隠すassume-unchanged
 
 予算はrootの`tiergate.json`の`verify-push.seconds`を走行開始時に一度だけ読み、入口の解決、検査、最後のsourceの確認まで同じ上限で止める。
 検査本体が機全体の資源の空きを待つ時間は予算に数えず、予算と同じ秒数の上限で打ち切る。上限に達すれば検査を実行せず75でpushを拒否し、検査の枠は入場して起動した時から数える。
+時間の目標は同じ段の`feedbackTargetSeconds`で、省略できる。同じsnapshotから読み、検査本体の走行のsupervisorへ渡し、走行の秒数が目標へ達した時点のscopeの読取をjournalへ残す。目標はpushを止めず、判定も変えない。
+宣言した目標が1以上`seconds`以下の整数でなければ、不正な上限と同じく検査を実行せずpushを拒否する。
 Nixの取得と評価は検査本体の実行時にだけ行い、その時間も予算へ含める。
 秒数の宣言は`{"version":1,"verify-push":{"seconds":N}}`の形とし、Nは1以上2147483647以下の整数である。
 Nixの入口を使う場合は、同じfileへ`frontend`と`entries`も登録する。

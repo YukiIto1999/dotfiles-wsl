@@ -8,6 +8,8 @@ usage() {
 started_ms=$((${EPOCHREALTIME/[.,]/} / 1000))
 budget_seconds=
 budget_error=
+# 走行の目標秒。目標を宣言していなければ空。目標は報告するだけで、取消にも判定にも使わない
+feedback_target=
 remaining=
 # supervise の猶予が timeout の --kill-after より短いと取消で command 自身の停止を先に切るため同値
 kill_after_seconds=30
@@ -34,6 +36,29 @@ settle_wait() {
   waited_ms=$(jq -r '((.waitSeconds // 0) * 1000) | floor' "$resource_result" 2>/dev/null) || waited_ms=0
   [[ $waited_ms =~ ^[0-9]+$ ]] || waited_ms=0
   started_ms=$((started_ms + waited_ms))
+}
+
+# 目標を超えた走行の報告
+# 引数 $1: 走行の終了status
+# 入力 feedback_target: 目標の秒か空
+# 入力 resource_result: supervise が finished 段階に走行の秒数と scope の CPU 時間と滞留と目標の時点の読取を残した file
+# 副作用: 走行が目標を超えていれば stderr へ一行。滞留の割合は走行の秒数に対する scope の滞留の秒数
+#   上限で取り消された走行（124）には、目標の時点から scope の CPU 時間が増えたかを添える。読めなければ何も出さない
+# 制約: 報告は終了statusも判定も変えない
+report_target() {
+  local line
+  [ -n "$feedback_target" ] || return 0
+  line=$(jq -r --argjson target "$feedback_target" --arg status "$1" '
+    def share($stall): if $stall == null then "不明" else "\($stall / .runSeconds * 100 | round)%" end;
+    def progress:
+      if .atTarget.cpuSeconds == null or .cpuSeconds == null then "目標の時点からの scope の CPU 時間の増減は読めなかった"
+      elif .cpuSeconds > .atTarget.cpuSeconds then "目標の時点から scope の CPU 時間は増えていた(進行中)"
+      else "目標の時点から scope の CPU 時間は増えていない(進行の兆しが無い)" end;
+    select(.runSeconds != null and .runSeconds > $target)
+    | "verify: 走行が時間の目標 \($target) 秒を超えた(走行 \(.runSeconds | round) 秒、滞留の割合は CPU \(share(.cpuStallSeconds))、IO \(share(.ioStallSeconds))、メモリ \(share(.memoryStallSeconds)))"
+      + (if $status == "124" then "。上限で取り消された。\(progress)" else "" end)
+  ' "$resource_result" 2>/dev/null) || return 0
+  [ -z "$line" ] || printf '%s\n' "$line" >&2
 }
 
 bounded_pid=
@@ -141,6 +166,14 @@ status=0
 if @gate@ snapshot --repo "$top" >"$policy_file" 2>"$entry_file"; then
   if budget=$(@gate@ budget --repo "$top" --policy "$policy_file" 2>&1) && [[ $budget =~ ^[1-9][0-9]*$ ]]; then
     budget_seconds=$budget
+    # 目標は上限と同じ snapshot から読む。不正な目標は上限の不正と同じく、補完も無視もせず予算を決められない扱いにする
+    if declared_target=$(@gate@ feedback-target --repo "$top" --policy "$policy_file" 2>&1) \
+      && [[ $declared_target =~ ^([1-9][0-9]*)?$ ]]; then
+      feedback_target=$declared_target
+    else
+      budget_seconds=
+      budget_error=$declared_target
+    fi
   else
     budget_error=$budget
   fi
@@ -191,10 +224,12 @@ if names_entry "$*" \
         printf -v resource_key 'verify\n%s\n%s' "$top" "$*"
         resource_args=(--resource-policy "$resource_policy" --resource-wait-until "$wait_until"
           --resource-run-seconds "$remaining" --resource-key "$resource_key" --result "$resource_result")
+        [ -z "$feedback_target" ] || resource_args+=(--resource-target-seconds "$feedback_target")
       fi
       run_bounded "$@" || status=$?
       if [ -n "$resource_policy" ]; then
         settle_wait
+        report_target "$status"
         resource_args=()
         if [ "$status" -eq 75 ]; then
           printf 'verify: 資源の空きを待つ上限（予算と同じ %s 秒）に達し、検証を実行しなかった(75)。同じ処理を重複投入せず、空いてから投入し直す\n' "$budget_seconds" >&2

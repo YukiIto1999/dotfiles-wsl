@@ -465,3 +465,34 @@ GIT_RESOURCE_PRESSURE=fail DOTFILES_VERIFY_PUSH_BYPASS='資源待機中の入口
   || fail 'the bypassed push was held up while resource admission was blocked'
 grep -F "repo=$resource_wait" "$bypass_log" | grep -F 'reason=資源待機中の入口の解決' | grep -qF 'entry=make verify-push' \
   || fail 'the entry resolution waited for resource admission instead of resolving at once'
+
+# 宣言した時間の目標は、検査本体の走行の supervisor へだけ渡る。入口の解決と検証後の source の確認は読取を残す意味が無い短い走行で、渡さない。
+# 検査本体の recipe が、自分の supervisor の起動引数を /proc から読んで残す。この行の grep は括弧で綴りを割り、自分の起動引数に一致しない
+export TARGET_SEEN=$PWD/target-seen
+set_target_budget() {
+  printf '{"version":1,"verify-push":{"seconds":%s,"feedbackTargetSeconds":%s}}\n' "$2" "$3" >"$1/tiergate.json"
+  git -C "$1" add -- tiergate.json
+  git -C "$1" commit -q -m 'test: 検証の目標の変更'
+}
+record_target() {
+  printf 'verify-push:\n\tfor file in /proc/[0-9]*/cmdline; do tr "\\0" " " <"$$file" 2>/dev/null; echo; done | grep -o -- "--resource-target-second[s] [0-9]*" | sort -u >"$(TARGET_SEEN)"\n' >"$1/Makefile"
+  git -C "$1" add Makefile
+  git -C "$1" commit -q -m 'test: 目標の観測の追加'
+}
+untargeted=$(new_repo untargeted)
+record_target "$untargeted"
+set_budget "$untargeted" 30
+push "$HOOKS" "$untargeted" || fail 'push of a stage without a target was refused'
+test -f "$TARGET_SEEN" && ! test -s "$TARGET_SEEN" || fail 'the supervisor of a stage without a target was given one'
+targeted=$(new_repo targeted)
+record_target "$targeted"
+set_target_budget "$targeted" 30 12
+rm -f "$TARGET_SEEN"
+push "$HOOKS" "$targeted" || fail 'push of a stage with a target was refused'
+test "$(cat "$TARGET_SEEN")" = '--resource-target-seconds 12' || fail 'the declared target did not reach the supervisor of the verification'
+# 不正な目標は上限の不正と同じく、補完も無視もせず入口を実行しない
+rm -f "$TARGET_SEEN"
+set_target_budget "$targeted" 30 31
+expect_refused 'push with a target above its limit' "$HOOKS" "$targeted" refs/heads/main HEAD:refs/heads/invalid-target
+grep -qF 'feedbackTargetSeconds' stderr || fail 'the refusal did not name the invalid target'
+test ! -e "$TARGET_SEEN" || fail 'verify-push ran with an invalid target'

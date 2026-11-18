@@ -328,15 +328,21 @@ supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計�
 記録の読み書きの失敗はstderrへ一行を出すだけで、commandの終了statusを変えず、鍵の記録を読めない場合は記録の無い鍵と同じ需要で予約する。
 
 資源予約を持つ走行は、終了のたびに計測の一行をjournaldへ`dotfiles-supervise`の識別子で残す。
-入場の待ちの長さと、走行に要した時間、予約とピークの差を、資源の扱いを変える前後で比べるための記録である。
+入場の待ちの長さと、走行に要した時間、予約とピークの差、走行のscopeが使ったCPU時間と滞留を、資源の扱いを変える前後で比べるための記録である。
 
 ```sh
 journalctl -t dotfiles-supervise -o cat | jq -c .
 ```
 
-MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`を持つ。
+MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`、走行のscopeから読んだ`cpuSeconds`、`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`、渡された目標の`targetSeconds`と、目標の時点の読取の`atTarget`を持つ。
 `nested`がtrueの行は外側の走行の中の入れ子で、外側とは別の行になるため、待機の集計では除く。
 `admitted`がfalseなら未起動で、75は待機の上限に達した未実行である。trueの124は入場後の走行の期限切れで、143は取消である。
+`cpuSeconds`はscopeの`cpu.stat`の`usage_usec`、`cpuStallSeconds`は`cpu.pressure`の`some`、`ioStallSeconds`は`io.pressure`の`full`、`memoryStallSeconds`は`memory.pressure`の`full`の`total=`で、いずれも秒（ミリ秒精度）である。
+終了時の値は、終了を始める時に読んだ値で、読めなかった項目は約1秒ごとの読取の直近の値になる。scopeは最後のprocessの終了で消えるためである。上限での取消と外からの取消でも残る。
+scopeを持たない入れ子の走行と、読めない項目はnullで、読めなくても終了statusは変わらない。Nixのbuildはnix-daemonのcgroupで動くため、Nixでbuildする入口ではscopeの値がbuildの分を含まない。
+`targetSeconds`は呼び出し側が`--resource-target-seconds`で渡した目標の秒で、渡さない走行ではnullである。
+走行が目標の時点でなお動いていれば、`atTarget`がその時点で読んだ同じ四つの項目を持つ。目標より前に終わった走行と、目標を持たない走行ではnullである。これは記録で、取消にも走行の枠にも使わない。
+`--result`のfinished段階にも、`runSeconds`と上の項目が入る。
 記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。
 
 重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。

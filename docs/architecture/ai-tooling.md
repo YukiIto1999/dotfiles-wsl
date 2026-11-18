@@ -139,6 +139,7 @@ signalを拒むprocessとprocess tableを読めない状態も完了とは扱わ
 指定しない既存のcallerは、SIGKILL後の猶予を過ぎても子孫が残る場合に、従来どおり`drained=false`と非ゼロの終了statusで返る。
 
 supervisorの資源予約は、`--resource-policy FILE --resource-wait-until EPOCH --resource-run-seconds SEC`を指定した呼出しに適用する。
+`--resource-target-seconds SEC`を足すと、走行の秒数がSECに達した時点のscopeの読取を残す。目標は記録だけに使い、走行の枠にも取消にも使わない。
 走行はclassを持つ。受入（T1、pre-pushの検査本体）は結果を同期に待つ者がいる検証で、deep（全量回帰、分析、実験、`dotfiles-workload-run`）は待つ者のいない検証である。
 入場した走行は、classのslice（`agents-acceptance.slice`、`agents-deep.slice`）の下に、走行ごとのscopeを作って動く。受入はscopeのMemoryLowに、deepはMemoryHighに物理memoryの需要を書き、deepにはoom_score_adj 1000を与える。CPUは予約せず、受入はsessionと同じ重みで、deepは`CPUWeight=idle`で他が使わない分だけを使う。
 受入は他の受入が待っていても止まらない。deepは受入が待つ間は入場せず、同時に一走行だけである。deepの入場は、受入が待っていないことの確認から入場の完了まで、受入が待ちを始めるのを止める。
@@ -153,6 +154,8 @@ Windowsの物理空きがreserveを割った観測では、deepだけが入場�
 物理memoryの需要は、明示した値、`--resource-key`が示す実測の記録から導いた値、鍵の記録が無い場合のこのhostの他の鍵の最新のピークの中央値、policyの`memoryPercent`による未計測の既定値の順に決め、最初の有効な観測の最も厳しい`limitBytes`（無ければ物理memory総量）へ切り詰める。
 明示した値がその上限を超える場合は、待たずにcommandを起動せず70で返す。
 supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1秒ごとに測り、鍵を渡した走行のうち、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了したものか、ピークが予約を超えたものだけを新しい順に10件まで記録する。
+同じ走行のscopeのcgroupから、終了時のCPU時間と滞留（`cpu.stat`、`cpu.pressure`、`io.pressure`、`memory.pressure`）を読み、目標を渡された走行が目標の時点でなお動いていれば、その時点の同じ値も読んで、`--result`とjournalへ残す。
+上限での取消と外からの取消でも残り、読めない値はnullで、終了statusは変えない。項目の定義と、Nixのbuildの分を含まないことは[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 記録の置き場、鍵、需要の導き方、予約を超えた走行のstderrの一行は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 入れ子は、現在のprocessがclassのscopeの下にいれば、そのscopeの中で外側のclassのまま動く。入れ子で昇格せず、scopeも作らず、待たない。明示した需要が外側のscopeの需要を超える場合は、外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は外側の需要へ切り詰め、拒否しない。
 走行の所有と生死は、scopeのcgroupと`waitpid`の`ECHILD`が持ち、走行を表す記録fileは持たない。supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続ける。
@@ -189,13 +192,15 @@ Orcaが作るworktreeの寿命はOrcaが持つ。
 slotを待つ時間は予算に数えず、予算と同じ秒数の上限で打ち切る。
 上限に達した走行は検査を実行せず75で返り、slotを取った後は待った時間だけ予算の起点を進める。
 別sessionへ移った子孫も`supervise --require-drained`で回収し、終了確認まで返らないため、後始末は予算を超えて続くことがある。
-予算はrepositoryの根の`tiergate.json`の`verify.seconds`を正本とし、wrapperは走行開始後に共通providerの`dotfiles-verify-entry --snapshot verify`で静的な宣言を一度だけ読む。
+予算は上限で、repositoryの根の`tiergate.json`の`verify.seconds`を正本とし、wrapperは走行開始後に共通providerの`dotfiles-verify-entry --snapshot verify`で静的な宣言を一度だけ読む。
 予算と入口は同じsnapshotを`--policy FILE`へ渡して解決するため、解決の間に登録を編集してもcanonicalな呼び出しが無制限の実行へ切り替わることはなく、snapshotの読取時間も走行開始から数える予算に含まれる。
 走行中に宣言を書き換えても、その走行の期限は延びない。
 Nixの入口は同じfileの`frontend: "nix"`と`entries`から解決し、入口の有無を調べるために評価器を起動しない。
 Nixの取得と評価は検査本体の実行時にだけ行い、その時間も残りの予算で止める。
 wrapperは固定の予算値を持たない。
 T1の入口を認識したrepositoryで宣言が無い、または不正なら、既定値も無制限も補わず、入口を実行せず証跡も作らずに終了status 78で失敗する。
+時間の目標は同じ段の`feedbackTargetSeconds`で、省略できる。宣言した場合は上限以下の正の整数でなければならず、不正な目標は不正な上限と同じく扱う。
+目標は同じsnapshotから読み、検査本体の走行のsupervisorへ渡す。目標を超えた走行はwrapperが一行を報告するだけで、取消も成否の変更もしない。
 同じsnapshotでT2の入口があるのに`verify-push`の予算を読めなければ、pushがpre-pushに拒否されることをstderrで知らせ、T1は止めない。
 T2の予算はpushの時だけ要るため、pushと関係の無い作業を止めず、宣言の欠けをpushの時より前の作業の終わりに表へ出す。
 入口が無いrepository、入口の綴りに一致しないlocal command、根以外での実行は、commandを直接実行してそのstatusとstdioを返し、証跡を作らない。

@@ -54,6 +54,16 @@ ROUNDS = 10
 # The janitor of the fake systemd polls and removes a scope once EMPTY_POLLS (3) polls in a row find no member of it; this many
 # polls would have removed a scope that has none many times over.
 JANITOR_POLLS = 20
+# The readings the supervisor takes of a scope's cgroup, as the result and the journal name them.
+READINGS = ("cpuSeconds", "cpuStallSeconds", "ioStallSeconds", "memoryStallSeconds")
+# The target the tests give a run, and how far beyond it a test lets the run go on before its command changes the scope's
+# files.  The reading at the target is taken when the target is reached; only a supervisor that is late by the whole margin
+# would take it after the change.
+TARGET_SECONDS = 1
+TARGET_MARGIN = 1.5
+# The supervisor samples the scope about once a second so that it has the readings when the scope is gone by the time the
+# command has ended; a test that needs a sample of its files lets the run go on for this long, and the margin, after writing them.
+SAMPLING_SECONDS = 1
 # Run inside a scope: write the scope's own oom_score_adj and wait until released.
 OOM_SCORE = [sys.executable, "-c",
              "import pathlib,sys,time;"
@@ -89,6 +99,44 @@ def graceful(marker, release):
             "pathlib.Path(sys.argv[1]).touch();"
             "\nwhile not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)",
             str(marker), str(release)]
+# Run inside a scope: write the files of the cgroup that the supervisor reads (the fake scope has none), tell the test, wait
+# until released, write the files again and end, or, with a fifth argument, go on until it is cancelled.  A descendant that
+# ends only when it is terminated keeps the scope alive after the command has ended, so the supervisor reads the scope as it
+# is when the command ends, whatever the load.
+SCOPE_FILES = [sys.executable, "-c",
+               "import json,os,pathlib,subprocess,sys,time\n"
+               "marker, release = map(pathlib.Path, sys.argv[1:3])\n"
+               "before, after = map(json.loads, sys.argv[3:5])\n"
+               "scope = pathlib.Path(os.environ['DOTFILES_FAKE_SCOPE'])\n"
+               "def write(files):\n"
+               "    for name, text in files.items(): (scope / name).write_text(text)\n"
+               "write(before)\n"
+               "subprocess.Popen([sys.executable, '-c', 'import time\\ntime.sleep(600)'], start_new_session=True,\n"
+               "                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
+               "marker.touch()\n"
+               "while not release.exists(): time.sleep(0.01)\n"
+               "write(after)\n"
+               "while len(sys.argv) > 5: time.sleep(1)"]
+
+
+def pressure(some, full):
+    """A pressure file as the kernel writes it: the `some` and the `full` line, each with its running total in microseconds."""
+    return f"some avg10=0.00 avg60=0.00 avg300=0.00 total={some}\nfull avg10=0.00 avg60=0.00 avg300=0.00 total={full}\n"
+
+
+def scope_files(cpu, cpu_stall, io_stall, memory_stall):
+    """The files of a scope that hold the given microseconds; the line of a pressure file that is not read carries 1."""
+    return {"cpu.stat": f"usage_usec {cpu}\nuser_usec 1\nsystem_usec 1\n",
+            "cpu.pressure": pressure(cpu_stall, 1),
+            "io.pressure": pressure(1, io_stall),
+            "memory.pressure": pressure(1, memory_stall)}
+
+
+EARLY_FILES = scope_files(1_500_000, 250_000, 100_000, 50_000)
+EARLY_READINGS = {"cpuSeconds": 1.5, "cpuStallSeconds": 0.25, "ioStallSeconds": 0.1, "memoryStallSeconds": 0.05}
+LATE_FILES = scope_files(2_500_000, 1_234_567, 2_000_000, 500_000)
+LATE_READINGS = {"cpuSeconds": 2.5, "cpuStallSeconds": 1.235, "ioStallSeconds": 2.0, "memoryStallSeconds": 0.5}
+NO_READINGS = dict.fromkeys(READINGS)
 # Run inside a scope: stand for the command's own nested call by finding the scope it runs in, telling the inner
 # supervisor so through its own-cgroup file, and running that supervisor.  It ignores SIGTERM, as a command that is
 # cancelled while it waits for a stage does, and leaves the inner supervisor's status in a file for the test to read.
@@ -248,6 +296,21 @@ class ResourceAdmission(unittest.TestCase):
             release.touch()
         _, error = process.communicate(timeout=HANG_SECONDS)
         return process.returncode, error, json.loads((self.root / (name + ".result")).read_text())
+
+    def run_scope_files(self, name, before, after, hold=0.0, arguments=(), stay=False, **options):
+        """Run a command that writes `before` into its scope, goes on for `hold` seconds, writes `after` and ends.
+
+        With `stay` the command goes on after writing `after` until it is cancelled.
+        Returns its status, its stderr and its result record.  Sleeping only ever makes the run longer.
+        """
+        marker, release = self.root / name, self.root / f"{name}.release"
+        command = [*SCOPE_FILES, str(marker), str(release), json.dumps(before), json.dumps(after), *(["stay"] if stay else [])]
+        process, _, _ = self.start(name, command=command, arguments=arguments, cwd=self.repo, **options)
+        self.wait_for(marker.exists, process)
+        time.sleep(hold)
+        release.touch()
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        return process.returncode, error, json.loads((self.root / f"{name}.result").read_text())
 
     def wait_for(self, predicate, process=None):
         """Wait a bounded interval for an observable transition or fail on early exit."""
@@ -1282,6 +1345,105 @@ class ResourceAdmission(unittest.TestCase):
         self.assertLessEqual(record["runSeconds"], elapsed)
         self.assertEqual(record["peakBytes"], result["memoryPeakBytes"])
         self.assertEqual(record["reservedBytes"], result["memoryReservedBytes"])
+
+    def assert_reported(self, result, readings, at_target, target):
+        """The result and the journal line of the one run say the same: its readings, its target and its reading at the target."""
+        (_, record), = self.measurements()
+        for report in (result, record):
+            self.assertEqual({field: report[field] for field in READINGS}, readings)
+            self.assertEqual((report["targetSeconds"], report["atTarget"]), (target, at_target))
+        self.assertEqual(record["runSeconds"], result["runSeconds"])
+
+    def test_a_run_that_ends_before_its_target_reports_the_scope_at_its_end_and_nothing_at_the_target(self):
+        """The scope's CPU time and stalls are those it has when the command ends; the target was not reached, so there is no reading of it."""
+        status, _, result = self.run_scope_files("before-target", EARLY_FILES, LATE_FILES, arguments=["--resource-target-seconds", "600"])
+        self.assertEqual(status, 0)
+        self.assert_reported(result, LATE_READINGS, None, 600)
+
+    def test_a_run_still_running_at_its_target_reports_the_scope_as_it_was_then_and_is_not_cancelled(self):
+        """The reading at the target is the scope's files at that moment, before the command changed them; the run goes on to its own end."""
+        status, _, result = self.run_scope_files("past-target", EARLY_FILES, LATE_FILES, hold=TARGET_SECONDS + TARGET_MARGIN,
+                                                 arguments=["--resource-target-seconds", str(TARGET_SECONDS)])
+        self.assertEqual(status, 0)
+        self.assert_reported(result, LATE_READINGS, EARLY_READINGS, TARGET_SECONDS)
+        self.assertGreaterEqual(result["runSeconds"], TARGET_SECONDS + TARGET_MARGIN)
+
+    def test_a_run_cancelled_at_its_limit_reports_the_scope_at_the_target_and_at_the_end_and_keeps_124(self):
+        """The limit ends the run as before; the scope was read when the target was reached and again when the limit stopped the command."""
+        # The limit lies beyond the moment the command changes the files, by the margin again.
+        status, _, result = self.run_scope_files("past-limit", EARLY_FILES, LATE_FILES, hold=TARGET_SECONDS + TARGET_MARGIN, stay=True,
+                                                 run=TARGET_SECONDS + 2 * TARGET_MARGIN,
+                                                 arguments=["--resource-target-seconds", str(TARGET_SECONDS)])
+        self.assertEqual(status, 124)
+        self.assertTrue(result["cancelled"])
+        self.assert_reported(result, LATE_READINGS, EARLY_READINGS, TARGET_SECONDS)
+        self.assertGreaterEqual(result["runSeconds"], TARGET_SECONDS + 2 * TARGET_MARGIN)
+
+    def test_a_run_cancelled_from_outside_reports_the_scope_it_had_and_keeps_143(self):
+        """The acceptance that needs the memory stops the deep run; the deep run still reports the scope's readings."""
+        marker, release = self.root / "deep", self.root / "deep.release"
+        deep, deep_started, _ = self.start("deep", klass="deep", cwd=self.repo,
+                                           command=[*SCOPE_FILES, str(marker), str(release), json.dumps(EARLY_FILES), "{}", "stay"],
+                                           arguments=["--resource-memory", str(4 * GIB)])
+        self.wait_for(deep_started.exists, deep)
+        # The sample of the scope's files is taken before the scope goes: the stop ends every process of the scope at once.
+        time.sleep(SAMPLING_SECONDS + TARGET_MARGIN)
+        self.observe(hostMemoryHeadroomBytes=GIB, memoryHeadroomBytes=GIB)
+        acceptance, started, acceptance_release = self.start("acceptance", arguments=["--resource-memory", str(2 * GIB)])
+        self.wait_for(lambda: deep.poll() is not None, acceptance)
+        self.observe(hostMemoryHeadroomBytes=10 * GIB, memoryHeadroomBytes=10 * GIB)
+        self.wait_for(started.exists, acceptance)
+        result = json.loads((self.root / "deep.result").read_text())
+        self.assertEqual((deep.returncode, result["status"], result["cancelled"]), (143, 143, True))
+        (_, record), = [entry for entry in self.measurements() if entry[1]["class"] == "deep"]
+        for report in (result, record):
+            self.assertEqual({field: report[field] for field in READINGS}, EARLY_READINGS)
+        acceptance_release.touch()
+        self.assertEqual(self.finish(acceptance), 0)
+
+    def test_a_run_without_a_target_reports_its_end_readings_and_no_target(self):
+        """Every scoped run reports the scope; a target is only recorded when one was given."""
+        status, _, result = self.run_scope_files("no-target", EARLY_FILES, LATE_FILES)
+        self.assertEqual(status, 0)
+        self.assert_reported(result, LATE_READINGS, None, None)
+
+    def test_scope_files_that_cannot_be_read_give_null_and_keep_the_exit_status(self):
+        """A scope without the files, or with files the supervisor cannot parse, costs the fields concerned and not the command's status."""
+        status, _, result = self.run_command("no-files", status=3)
+        self.assertEqual(status, 3)
+        self.assert_reported(result, NO_READINGS, None, None)
+        broken = {"cpu.stat": "usage_usec 4000000\n", "cpu.pressure": "some avg10=0.00\n", "io.pressure": "full avg10=0.00 total=x\n",
+                  "memory.pressure": "no totals at all\n"}
+        status, _, result = self.run_scope_files("broken-files", broken, broken, arguments=["--resource-target-seconds", "600"])
+        self.assertEqual(status, 0)
+        self.assert_reported(result, {**NO_READINGS, "cpuSeconds": 4.0}, None, 600)
+
+    def test_a_run_still_running_at_its_target_with_unreadable_scope_files_has_a_reading_of_nulls(self):
+        """The target was reached, so there is a reading of it; none of its fields could be read."""
+        status, _, result = self.run_scope_files("unreadable-at-target", {}, {}, hold=TARGET_SECONDS + TARGET_MARGIN,
+                                                 arguments=["--resource-target-seconds", str(TARGET_SECONDS)])
+        self.assertEqual(status, 0)
+        self.assert_reported(result, NO_READINGS, NO_READINGS, TARGET_SECONDS)
+
+    def test_a_nested_run_has_no_scope_to_read_and_so_reads_nothing(self):
+        """The inner supervisor runs in the outer run's scope without one of its own, so every reading of its line is null."""
+        self.assertEqual(self.nested("deep", "acceptance", "--resource-target-seconds", "600"), 0)
+        (nested,) = [record for _, record in self.measurements() if record["nested"]]
+        self.assertEqual({field: nested[field] for field in READINGS}, NO_READINGS)
+        self.assertEqual((nested["targetSeconds"], nested["atTarget"]), (600, None))
+
+    def test_a_target_needs_a_policy_and_a_positive_number_of_seconds(self):
+        """The target is part of the resource options: alone it is a usage error, and so is a value that is no positive number."""
+        for arguments, expected in ((["--resource-target-seconds", "5"], "require --resource-policy"),
+                                    (["--resource-policy", str(self.policy), "--resource-wait-until", "9999999999",
+                                      "--resource-run-seconds", "60", "--resource-target-seconds", "0"], "must be a positive number"),
+                                    (["--resource-policy", str(self.policy), "--resource-wait-until", "9999999999",
+                                      "--resource-run-seconds", "60", "--resource-target-seconds", "soon"], "needs a number")):
+            with self.subTest(arguments=arguments):
+                run = subprocess.run([sys.executable, str(SOURCE), *arguments, "--", *INSTANT], capture_output=True, text=True,
+                                     env=self.environment())
+                self.assertEqual(run.returncode, 2)
+                self.assertIn(expected, run.stderr)
 
     def test_a_run_that_never_started_reports_its_wait_and_reason(self):
         """A run that gave up while waiting says so: not admitted, no run seconds, the pressure as the reason."""

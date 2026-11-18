@@ -24,18 +24,19 @@ in
   # 公開 PID への INT を取消として扱ってきた呼び出し側のため supervise 既定の INT 無視は不可
   # 資源予約の入場は鍵を渡した呼出し（検査本体）だけが受ける。鍵の無い短い段は予約の待ちへ並べず、数秒の処理が数分の待ちを負わない
   # 待ちの上限と走行の枠はどちらも SECONDS で、走行の枠は入場から数える。待った秒数は --result の file に残り、呼び出し側が予算から外す
+  # 目標の秒は走行の枠とは別の記録で、走行が目標へ達した時点の scope の読取を --result と journal に残すだけで、取消にも走行の枠にも使わない
   runWithin = pkgs.writeShellApplication {
     name = "dotfiles-run-within";
     text = ''
       usage() {
-        printf 'usage: dotfiles-run-within [--resource-key KEY] [--result FILE] SECONDS COMMAND [ARG...]\n' >&2
+        printf 'usage: dotfiles-run-within [--resource-key KEY] [--result FILE] [--resource-target-seconds SEC] SECONDS COMMAND [ARG...]\n' >&2
         exit 64
       }
       ${lib.optionalString (resourcePolicy == null) ''
-        # 資源予約の無い構成でも呼び出し側が同じ引数で呼べるように、鍵と結果の file は受け取って使わない
+        # 資源予約の無い構成でも呼び出し側が同じ引数で呼べるように、鍵と結果の file と目標は受け取って使わない
         while [ "$#" -ge 1 ]; do
           case $1 in
-          --resource-key | --result)
+          --resource-key | --result | --resource-target-seconds)
             [ "$#" -ge 4 ] || usage
             shift 2
             ;;
@@ -46,6 +47,7 @@ in
       ${lib.optionalString (resourcePolicy != null) ''
         resource_key=()
         result=()
+        resource_target=()
         while [ "$#" -ge 1 ]; do
           case $1 in
           --resource-key)
@@ -58,6 +60,11 @@ in
             result=(--result "$2")
             shift 2
             ;;
+          --resource-target-seconds)
+            [ "$#" -ge 4 ] || usage
+            resource_target=(--resource-target-seconds "$2")
+            shift 2
+            ;;
           *) break ;;
           esac
         done
@@ -66,7 +73,7 @@ in
           wait_until=$(${lib.getExe pkgs.python3} -c 'import math,sys,time; s=float(sys.argv[1]); assert math.isfinite(s) and s>0; print(time.time()+s)' "$1")
           exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 \
             --resource-policy ${lib.escapeShellArg (toString resourcePolicy)} --resource-wait-until "$wait_until" \
-            --resource-run-seconds "$1" "''${resource_key[@]}" "''${result[@]}" -- ${lib.getExe runWithinCore} "$@"
+            --resource-run-seconds "$1" "''${resource_key[@]}" "''${result[@]}" "''${resource_target[@]}" -- ${lib.getExe runWithinCore} "$@"
         fi
       ''}
       exec ${lib.getExe supervise} --require-drained --interrupt-cancels --term-grace 10 -- ${lib.getExe runWithinCore} "$@"

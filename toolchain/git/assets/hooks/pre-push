@@ -5,6 +5,8 @@ set -euo pipefail
 verification_entry=@verificationEntry@
 within=@runWithin@
 budget_seconds=
+# 検査本体の走行が目標へ達した時点の読取を残す秒。宣言していなければ空。目標は記録するだけで、取消にも判定にも使わない
+feedback_target=
 bypass_log=$HOME/.local/state/dotfiles-wsl/git/verify-push-bypass.log
 difference_lines=10
 
@@ -95,12 +97,14 @@ settle_wait() {
 
 # 引数: [--resource-key KEY] TOP COMMAND...
 # 鍵を渡した呼出しだけが資源予約へ入場し、無ければ入場せず待たない。鍵は需要を実測の記録から決める検査本体にだけ渡す
+# 目標も鍵を渡した呼出しにだけ付ける。目標の時点の読取は資源予約を持つ走行の scope にしか無い
 run_within_budget() {
   local -a resource_key=()
   local top pid status remaining result=
   if [ "$1" = --resource-key ]; then
     result=$(mktemp)
     resource_key=(--resource-key "$2" --result "$result")
+    [ -z "$feedback_target" ] || resource_key+=(--resource-target-seconds "$feedback_target")
     shift 2
   fi
   top=$1
@@ -156,7 +160,7 @@ require_run_success() {
 }
 
 main() {
-  local top entry entry_file policy_file head ref object budget_error='' budget_result started=$SECONDS elapsed status=0 interrupted=0 resource_key
+  local top entry entry_file policy_file head ref object budget_error='' budget_result target_result started=$SECONDS elapsed status=0 interrupted=0 resource_key
   local -a command pushed=() stale=()
   top=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
   # 削除refへのHEAD一致要求の不採用: Gitがlocal objectとして渡すゼロ値
@@ -182,6 +186,14 @@ main() {
     if budget_result=$("$verification_entry" --repo "$top" --policy "$policy_file" --budget verify-push 2>&1) \
       && [[ $budget_result =~ ^[1-9][0-9]*$ ]]; then
       budget_seconds=$budget_result
+      # 目標は上限と同じ snapshot から読む。不正な目標は上限の不正と同じく、補完も無視もせず予算を決められない扱いにする
+      if target_result=$("$verification_entry" --repo "$top" --policy "$policy_file" --feedback-target verify-push 2>&1) \
+        && [[ $target_result =~ ^([1-9][0-9]*)?$ ]]; then
+        feedback_target=$target_result
+      else
+        budget_seconds=
+        budget_error=$target_result
+      fi
     else
       budget_error=$budget_result
     fi

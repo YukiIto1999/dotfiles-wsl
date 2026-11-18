@@ -544,6 +544,16 @@ class Admission:
                 f"--slice={self.policy.slice_unit(self.klass)}", f"--unit={unit}",
                 "-p", f"{DEMAND_PROPERTIES[self.klass]}={self.memory}", "-p", f"TimeoutStopSec={STOP_TIMEOUT}"]
 
+    def scope_directory(self):
+        """この走行が作った scope の cgroup directory
+
+        戻り値: classのsliceの下の scope の directory。scope を作らない入れ子の走行と、まだ作っていない走行はNone
+        制約: scope は最後の process の終了で消えるため、存在は呼び側が読取の成否で確かめる
+        """
+        if self.unit is None:
+            return None
+        return self.policy.slice_directory(self.klass) / self.unit
+
     def acquire(self, supervisor, wait_until, launch):
         """待機の上限内での入場と、入場した走行の scope での起動
 

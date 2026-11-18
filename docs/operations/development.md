@@ -62,8 +62,10 @@ nix run --no-write-lock-file .#dotfiles-agent-verify -- nix run --no-write-lock-
 T1の`verify`は全unitの検査と全hostおよび既存variantのtoplevel評価を行い、T2の`verify-push`はunitの検査とsystem closureを実現する。
 `verify-full`は既存の全量flake checkを呼び、CIと明示的な全量確認の経路を保つ。
 Nix buildの成功だけでは終了gateの証跡にならず、宣言した入口を既存wrapperで通した同じsourceに限り受理される。
-T1とT2の時間予算は、rootの[`tiergate.json`](../../tiergate.json)の`verify.seconds`と`verify-push.seconds`を唯一の正本とする。
-このfileは`{"version":1,"frontend":"nix","entries":["verify","verify-push","verify-full"],"verify":{"seconds":N},"verify-push":{"seconds":M}}`の形で、NとMは1以上2147483647以下の整数である。
+T1とT2の時間は、rootの[`tiergate.json`](../../tiergate.json)の各段（`verify`、`verify-push`）が持つ二つの値を唯一の正本とする。
+`seconds`は走行の上限、`feedbackTargetSeconds`は検証が返る目標である。
+このfileは`{"version":1,"frontend":"nix","entries":["verify","verify-push","verify-full"],"verify":{"seconds":N,"feedbackTargetSeconds":T,"basis":"..."},"verify-push":{...}}`の形で、Nは1以上2147483647以下の整数である。
+Tは省略でき、宣言した場合は1以上N以下の整数でなければならない。`basis`は値の根拠を書く文字列で、resolverは読まない。
 `flake.nix`の各入口は評価時に、`dotfiles-agent-verify`とpre-pushは走行の開始時に、同じfileを読む。
 wrapperとpre-pushは静的な宣言を一度snapshotへ読み、同じsnapshotから時間予算と入口を解決する。
 解決の間に登録を編集しても、canonicalな呼び出しが無制限の実行へ切り替わることはない。
@@ -75,6 +77,13 @@ Nix appを自動検出しないため、他projectがNixの検証入口を使う
 T1は入口の解決、sourceの照合、検査、証跡の保存を`verify.seconds`で制限し、wrapperは残り時間を使い切った時点で取消を開始して非ゼロ終了にする。
 同じprojectのslotと機全体の資源の空きを待つ時間は予算に数えず、それぞれ予算と同じ秒数の上限で打ち切って、検査を実行せず75で返す。検査の枠は資源に入場して起動した時から数える。
 T1の検査本体の資源予約は、repositoryの根と入口のcommandごとに残した実測のピークから需要を決め、記録が無い走行はこのhostの他の鍵の実測の中央値で、他の鍵の記録も無い走行だけが未計測の既定値で予約する。仕組みは[Doctor](doctor.md#資源不足による開始待ち)を参照する。
+上限は暴走した走行だけを止め、目標は取消にも成否の判定にも使わない。
+wrapperとpre-pushは目標を時間予算と同じsnapshotから読み、検査本体の走行のsupervisorへ`--resource-target-seconds`で渡す。不正な目標は不正な上限と同じく、補完も無視もせず拒否する。
+supervisorは資源予約を持つ走行の終了時に、走行のscopeのcgroupからCPU時間（`cpuSeconds`）と、CPU、IO、memoryの滞留（`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`）を読み、`--result`とjournalへ秒で残す。
+走行が目標の時点でなお動いていれば、同じ四つの値をその時点で読み、`atTarget`として残す。目標より前に終わった走行の`atTarget`はnullである。
+上限での取消と外からの取消でも終了時の値を残し、読めない値はnullで、終了statusは変えない。目標の時点の読取は、止まった走行を早く止める判断の根拠にするための記録で、何も止めない。
+走行が目標を超えると、wrapperはstderrへ一行を出す。目標、走行の秒数、走行の秒数に占める三つの滞留の割合を示し、終了statusは変えない。
+上限で取り消された走行（124）には、同じ行に、目標の時点から走行のscopeのCPU時間が増えたかを添える。
 成功証跡は検査前のsourceへ固定して走行ごとに仮保存し、検査後のsourceとの一致、後始末、証跡の公開が時間内に確認できた場合だけwrapperが確定する。
 公開途中の失敗や中断、sourceの差し替えでは未検査のsourceに対する終了を認めない。
 pre-pushは検査前と検査後の`git status`と`git ls-files`の失敗も拒否し、sourceを確認できなかった走行ではremoteのrefを更新しない。
@@ -108,9 +117,16 @@ shebangの判定、linkの到達、表示したpathの実在はcheckout全体を
 基準hostのoption宣言一覧は一度だけ作り、root ownerの確認と宣言位置の確認で共有する。
 検査を変更したときは、予算を理由に必須の検査をT3へ移さず、Nixの依存と再利用を見直す。
 
-`verify.seconds`は、必要な検査の範囲と実行環境の実測から決め、強制停止の上限として扱う。
-必要な範囲、cache、並列数、実行環境または資源の競合が変わったときは、必要な検査を減らさず再計測して、次の走行前に上限と理由を更新する。
+上限は暴走した走行だけを止める値で、他の処理が並走する条件で完走した最も遅い走行の実測に、宣言した定数を掛けて決める。
+目標は検証がその時間で返るように設計した値で、超えた走行は報告して見直し、取り消さない。
+値と、実測の日時と条件、定数は、同じ段の`basis`へ残す。
+必要な範囲、cache、並列数、実行環境または資源の競合が変わったときは、必要な検査を減らさず再計測して、次の走行前に上限、目標、理由を更新する。
 失敗した走行の途中では上限を延ばさない。
+
+上限で取り消された走行が、その時点でなお進んでいたかは、走行のscopeの`cpuSeconds`が目標の時点の読取（`atTarget`）から終了時の読取へ増えたかで判定する。
+増えていた走行は、必要な時間が上限より長い。次の走行の前に上限を見直すときは、その走行の経過秒数を必要な時間の下限として使う。
+増えていなかった走行は、進んでいなかった疑いがあり、上限を延ばす前に止まった原因を調べる。
+Nixのbuildはnix-daemonのcgroupで動くため、Nixでbuildする入口ではscopeのCPU時間が実際より小さく、滞留の読取もclientの分しか含まない。
 
 未追跡fileはNixのGit sourceに含まれないため、検証前に`git add`または`git add -N`で追跡する。
 checkの正本は各unitの検査と`flake.nix`の導出結果であり、件数やcheck名を文書の別一覧へ転記しない。

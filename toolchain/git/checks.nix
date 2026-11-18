@@ -129,7 +129,7 @@
             name = "failing-verification-entry";
             text = ''
               case " $* " in
-                *" --budget "*|*" --snapshot "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
+                *" --budget "*|*" --feedback-target "*|*" --snapshot "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
                 *) exit 70 ;;
               esac
             '';
@@ -146,7 +146,7 @@
             runtimeInputs = [ pkgs.coreutils ];
             text = ''
               case " $* " in
-                *" --budget "*|*" --snapshot "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
+                *" --budget "*|*" --feedback-target "*|*" --snapshot "*) exec ${lib.getExe hostConfig.dotfiles.toolchain.verification.entry} "$@" ;;
               esac
               (sleep 3; touch "$LATE") &
               wait

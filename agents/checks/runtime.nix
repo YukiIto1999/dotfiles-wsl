@@ -64,7 +64,7 @@
           runtimeInputs = [ pkgs.coreutils ];
           text = ''
             case " $* " in
-            *" --budget "*|*" --snapshot "*) ;;
+            *" --budget "*|*" --feedback-target "*|*" --snapshot "*) ;;
             *) sleep 3 ;;
             esac
             exec ${lib.getExe verificationEntry} "$@"

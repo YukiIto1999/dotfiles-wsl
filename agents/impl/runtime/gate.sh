@@ -23,7 +23,9 @@ usage: dotfiles-agent-gate <command> [options]
   entry [--repo DIR] [--policy FILE]      repository が登録する検証入口の綴りを評価器を起動せずに答える
   candidates [--repo DIR]               予算が読めない間に、検証入口になり得る綴りを評価せずに一行ずつ答える
   budget [--repo DIR] [--policy FILE]     その repository の T1 の時間予算を秒で答える。宣言が無い、または不正なら理由を出して 1 で終わる
-  snapshot [--repo DIR]                 一度読んだ静的な検証宣言を JSON で答える。entry、budget、push-declaration の --policy に渡す
+  feedback-target [--repo DIR] [--policy FILE]
+                                        その repository の T1 の時間の目標を秒で答える。宣言が無ければ何も出さず 0 で終わり、不正なら理由を出して 1 で終わる
+  snapshot [--repo DIR]                 一度読んだ静的な検証宣言を JSON で答える。entry、budget、feedback-target、push-declaration の --policy に渡す
   push-declaration [--repo DIR] [--policy FILE]
                                         T2 の入口があるのに予算を読めない宣言を、push で拒否されると stderr で知らせる。常に 0 で終わる
   hook <arm|observe|stop>               client の hook から stdin の JSON で起こす
@@ -333,6 +335,10 @@ candidates_of() {
 
 budget_of() {
   "@verificationEntry@" --repo "$1" "${policy_args[@]}" --budget verify
+}
+
+feedback_target_of() {
+  "@verificationEntry@" --repo "$1" "${policy_args[@]}" --feedback-target verify
 }
 
 snapshot_of() {
@@ -893,7 +899,7 @@ main() {
     esac
   done
   if [ "${#policy_args[@]}" -gt 0 ] && [ "$command" != entry ] && [ "$command" != budget ] \
-    && [ "$command" != push-declaration ]; then
+    && [ "$command" != feedback-target ] && [ "$command" != push-declaration ]; then
     usage
   fi
 
@@ -908,6 +914,7 @@ main() {
   entry) entry_of "$(repo_top_of "$repo")" ;;
   candidates) candidates_of "$(repo_top_of "$repo")" ;;
   budget) budget_of "$repo" ;;
+  feedback-target) feedback_target_of "$repo" ;;
   snapshot) snapshot_of "$repo" ;;
   push-declaration) command_push_declaration "$repo" ;;
   hook) command_hook "${1-}" ;;

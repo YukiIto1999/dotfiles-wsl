@@ -137,6 +137,7 @@ fi
 
 expect_usage --repo "$make"
 expect_usage --repo "$make" --budget --candidates verify
+expect_usage --repo "$make" --budget --feedback-target verify
 expect_usage --repo "$make" verify verify-push
 
 stalled=$(new_repo stalled)
@@ -249,6 +250,90 @@ if "$ENTRY" --repo "$budgeted" --budget verify-nightly >/dev/null 2>&1; then
   echo 'resolver accepted an unknown budget stage' >&2
   exit 1
 fi
+
+# 目標は上限と同じ段の宣言に置く。省略した段は目標が無く、宣言したなら 1 以上 seconds 以下の整数だけを受理する。
+# basis など他の key は上限も目標も変えず、拒否もしない
+expect_target() {
+  local repo=$1 name=$2 expected=$3 actual
+  actual=$("$ENTRY" --repo "$repo" --feedback-target "$name")
+  if [ "$actual" != "$expected" ]; then
+    printf '%s %s target: expected [%s], got [%s]\n' "$repo" "$name" "$expected" "$actual" >&2
+    exit 1
+  fi
+}
+
+# 目標を宣言していない段は、成功して何も出さない
+expect_no_target() {
+  local repo=$1 name=$2 label=$3
+  "$ENTRY" --repo "$repo" --feedback-target "$name" >target.stdout 2>target.stderr || {
+    printf '%s: resolver refused a declaration without a target\n' "$label" >&2
+    exit 1
+  }
+  if [ -s target.stdout ]; then
+    printf '%s: a stage without a target must print nothing\n' "$label" >&2
+    exit 1
+  fi
+}
+
+# 不正な目標は、目標の取得も上限の取得も拒む。上限の取得が通ると、不正な宣言のまま走行が始まる
+expect_target_refused() {
+  local repo=$1 name=$2 label=$3 mode
+  for mode in --feedback-target --budget; do
+    if "$ENTRY" --repo "$repo" "$mode" "$name" >target.stdout 2>target.stderr; then
+      printf '%s: resolver accepted the declaration with %s\n' "$label" "$mode" >&2
+      exit 1
+    fi
+    if [ -s target.stdout ] || [ ! -s target.stderr ]; then
+      printf '%s: refusal must leave stdout empty and explain on stderr (%s)\n' "$label" "$mode" >&2
+      exit 1
+    fi
+  done
+}
+
+targeted=$(new_repo targeted)
+while read -r label expected content <&3; do
+  printf '%s\n' "$content" >"$targeted/tiergate.json"
+  if [ "$expected" = - ]; then
+    expect_no_target "$targeted" verify "$label"
+  else
+    expect_target "$targeted" verify "$expected"
+  fi
+  expect_budget "$targeted" verify 300
+done 3<<'ACCEPTED'
+minimum 1 {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":1}}
+typical 120 {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":120}}
+equal-to-limit 300 {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":300}}
+integral-float 60 {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":60.0}}
+absent - {"version":1,"verify":{"seconds":300}}
+basis-only - {"version":1,"verify":{"seconds":300,"basis":"実測の根拠"}}
+basis-and-goal 120 {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":120,"basis":"実測の根拠","goalSeconds":60}}
+other-stage-invalid - {"version":1,"verify":{"seconds":300},"verify-push":{"seconds":900,"feedbackTargetSeconds":9999}}
+ACCEPTED
+while read -r label content <&3; do
+  printf '%s\n' "$content" >"$targeted/tiergate.json"
+  expect_target_refused "$targeted" verify "$label"
+done 3<<'REFUSED'
+zero {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":0}}
+negative {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":-1}}
+fractional {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":1.5}}
+string {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":"60"}}
+null {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":null}}
+boolean {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":true}}
+array {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":[60]}}
+above-limit {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":301}}
+oversized {"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":2147483647}}
+invalid-limit {"version":1,"verify":{"seconds":0,"feedbackTargetSeconds":1}}
+REFUSED
+printf '{"version":1,"verify":{"seconds":300},"verify-push":{"seconds":900,"feedbackTargetSeconds":9999}}\n' >"$targeted/tiergate.json"
+expect_target_refused "$targeted" verify-push 'invalid target of the stage asked for'
+expect_target_refused "$targeted" verify-full 'stage without a declaration'
+expect_target_refused "$PWD/outside" verify 'declaration outside a git tree'
+printf '{"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":120}}\n' >"$targeted/tiergate.json"
+target_snapshot=$PWD/target-snapshot.json
+"$ENTRY" --repo "$targeted" --snapshot verify >"$target_snapshot"
+printf '{"version":1,"verify":{"seconds":300,"feedbackTargetSeconds":5}}\n' >"$targeted/tiergate.json"
+expect_target "$targeted" verify 5
+test "$("$ENTRY" --repo "$targeted" --policy "$target_snapshot" --feedback-target verify)" = 120
 
 snapshot=$PWD/policy-snapshot.json
 printf '{"version":1,"frontend":"nix","entries":["verify-push"],"verify-push":{"seconds":900}}\n' \

@@ -18,6 +18,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -60,6 +61,21 @@ ROUNDS = 10
 # The janitor of the fake systemd polls and removes a scope once EMPTY_POLLS (3) polls in a row find no member of it; this many
 # polls would have removed a scope that has none many times over.
 JANITOR_POLLS = 20
+# How long the supervisor of a run whose command does not enter the scope that systemd-run made waits for it, as the policy's
+# scopeEntrySeconds; the default of 10 s would make a test wait as long.  It leaves the fake time to make the scope first.
+ENTRY_GRACE = 3
+# What cgroup.events says of a scope that holds a process and of one that holds none.
+HOLDING = "populated 1\nfrozen 0\n"
+EMPTY = "populated 0\nfrozen 0\n"
+# The reason a run gives while it waits for what the running acceptances may still claim.
+HEADROOM = "Linux memory headroom is reserved"
+# The helper the supervisor starts in the scope, started here by a parent that stays, so that a test can kill the parent while
+# the helper is stopped.
+ENTER_SCOPE = SOURCE.parent / "enter_scope.py"
+HELPER_PARENT = ("import os,subprocess,sys,time\n"
+                 "helper = subprocess.Popen([sys.executable, '-I', '-S', sys.argv[1], str(os.getpid()), '0', sys.executable, 'python', '-c', 'pass'])\n"
+                 "print(helper.pid, flush=True)\n"
+                 "time.sleep(600)")
 # The readings the supervisor takes of a scope's cgroup, as the result and the journal name them.
 READINGS = ("cpuSeconds", "cpuStallSeconds", "ioStallSeconds", "memoryStallSeconds")
 # The target the tests give a run, and how far beyond it a test lets the run go on before its command changes the scope's
@@ -105,7 +121,7 @@ def graceful(marker, release):
             "pathlib.Path(sys.argv[1]).touch();"
             "\nwhile not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)",
             str(marker), str(release)]
-# Run inside a scope: write the files of the cgroup that the supervisor reads (the fake scope has none), tell the test, wait
+# Run inside a scope: write the files of the cgroup that the supervisor reads (the fake scope has only cgroup.events), tell the test, wait
 # until released, write the files again and end, or, with a fifth argument, go on until it is cancelled.  A descendant that
 # ends only when it is terminated keeps the scope alive after the command has ended, so the supervisor reads the scope as it
 # is when the command ends, whatever the load.
@@ -169,6 +185,16 @@ def agents_path():
     return f"/user.slice/user-{uid}.slice/user@{uid}.service/agents.slice"
 
 
+
+def process_state(pid):
+    """The state letter /proc gives the process, or None when it is gone; Z is a process that has ended and is not collected yet."""
+    try:
+        data = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return None
+    return data[data.rindex(")") + 2]
+
+
 class ResourceAdmission(unittest.TestCase):
     """Concurrent callers sharing one machine policy and isolated temporary state."""
 
@@ -212,9 +238,15 @@ class ResourceAdmission(unittest.TestCase):
         self.repo = self.root / "repo"
         self.repo.mkdir()
 
-    def write_policy(self, klass, name=None, fail=False, gate=None, **changes):
-        """Write a policy file for a class: the real fields, with the fakes standing in for systemd and the cgroup tree."""
+    def write_policy(self, klass, name=None, fail=False, gate=None, strand=None, abort=False, refuse=False, **changes):
+        """Write a policy file for a class: the real fields, with the fakes standing in for systemd and the cgroup tree.
+
+        The fake systemd-run refuses to create the scope with `fail`, answers once `gate` exists, makes the scope and moves in
+        once `strand` exists, and ends with status 1 after it made the scope with `abort`; the fake systemctl refuses to stop
+        with `refuse`.
+        """
         slow = ["--gate", str(gate)] if gate else []
+        stranded = ["--strand", str(strand)] if strand else []
         policy = {
             "class": klass,
             "journalSocket": str(self.root / "journal.sock"),
@@ -222,8 +254,9 @@ class ResourceAdmission(unittest.TestCase):
             "runtimeDirectory": str(self.root / "run"),
             "memoryPercent": MEMORY_PERCENT,
             "maximumObservationAgeSeconds": OBSERVATION_AGE,
-            "systemdRun": [sys.executable, str(FAKE), "--cgroup-root", str(self.cgroup), *(["--fail"] if fail else []), *slow, "run"],
-            "systemctl": [sys.executable, str(FAKE), "--cgroup-root", str(self.cgroup), "ctl"],
+            "systemdRun": [sys.executable, str(FAKE), "--cgroup-root", str(self.cgroup), *(["--fail"] if fail else []), *slow,
+                           *stranded, *(["--abort"] if abort else []), "run"],
+            "systemctl": [sys.executable, str(FAKE), "--cgroup-root", str(self.cgroup), *(["--refuse"] if refuse else []), "ctl"],
             "cgroupRoot": str(self.cgroup),
             "slices": SLICES,
             "guestOutcomeIds": GUEST_OUTCOMES,
@@ -353,6 +386,27 @@ class ResourceAdmission(unittest.TestCase):
         log = self.cgroup / "calls.log"
         rows = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
         return [row["arguments"] for row in rows if row["tool"] == tool]
+
+    def stops(self):
+        """The units the supervisors asked the fake systemd to stop, in the order they asked."""
+        return [call[-1] for call in self.calls("ctl") if "stop" in call]
+
+    def asked_for(self):
+        """The unit of the one scope that a supervisor asked the fake systemd to create."""
+        (call,) = self.calls("run")
+        (unit,) = [argument.removeprefix("--unit=") for argument in call if argument.startswith("--unit=")]
+        return unit
+
+    def leave_scope(self, klass, name, events):
+        """Leave a scope below the class's slice as the manager can leave one: its reservation written, no janitor to remove it, and
+        `events` as its cgroup.events, or no such file when `events` is None."""
+        uid = os.getuid()
+        scope = self.cgroup / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service" / SLICES[klass] / name
+        scope.mkdir(parents=True)
+        (scope / ("memory.low" if klass == "acceptance" else "memory.high")).write_text(f"{9 * GIB}\n")
+        if events is not None:
+            (scope / "cgroup.events").write_text(events)
+        return scope
 
     def limit(self, *limits):
         """Observe cgroup memory limits with ample headroom, so that only the demand is under test."""
@@ -968,6 +1022,225 @@ class ResourceAdmission(unittest.TestCase):
         self.assertFalse(started.exists())
         self.assertFalse(json.loads((self.root / "slow.result").read_text())["spawned"])
         self.assertEqual(self.scopes("acceptance"), [])
+
+    # A scope that holds no process: the run that made it stops it, and a decision neither counts it nor leaves it
+
+    def stranded(self, name, wait=2 * HANG_SECONDS, gate=None, **changes):
+        """Start a run whose manager makes the scope but moves systemd-run into it only once `gate` exists, which is never unless
+        the test makes it, and return the run and its command's marker once the scope is there.
+
+        The command does not enter the scope, so the run ends by its wait limit, by a cancellation or by the grace it allows.
+        """
+        policy = self.write_policy("acceptance", name=f"{name}.json", strand=gate or self.root / f"{name}.gate", **changes)
+        process, started, _ = self.start(name, wait=wait, policy=policy)
+        self.wait_for(lambda: self.scopes("acceptance"), process)
+        return process, started
+
+    def assert_stopped_and_gone(self, started):
+        """The command never ran, the one scope that was asked for was stopped once, and nothing of it is left."""
+        self.assertFalse(started.exists())
+        self.assertEqual(self.stops(), [self.asked_for()])
+        self.assertEqual(self.scopes("acceptance"), [])
+
+    def test_a_run_that_reaches_its_wait_limit_before_it_enters_its_scope_stops_the_scope(self):
+        """A scope that never held a process is not removed by the manager, so the run that gave up has to stop it."""
+        process, started = self.stranded("limit", wait=WAIT_LIMIT)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 75, error)
+        self.assertFalse(json.loads((self.root / "limit.result").read_text())["spawned"])
+        self.assertNotIn("cannot stop", error)
+        self.assert_stopped_and_gone(started)
+
+    def test_a_run_that_is_cancelled_before_it_enters_its_scope_stops_the_scope(self):
+        """A cancellation ends the wait for the scope as the limit does, and leaves the scope in the same way."""
+        process, started = self.stranded("cancel")
+        process.send_signal(signal.SIGTERM)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 143, error)
+        self.assert_stopped_and_gone(started)
+
+    def test_a_run_that_does_not_enter_its_scope_within_the_grace_stops_the_scope(self):
+        """Neither the wait limit nor a cancellation is near, so the grace ends the run."""
+        process, started = self.stranded("grace", scopeEntrySeconds=ENTRY_GRACE)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 70, error)
+        self.assertIn(f"did not enter it within {ENTRY_GRACE}s", error)
+        self.assert_stopped_and_gone(started)
+
+    def test_a_run_whose_systemd_run_ends_after_making_the_scope_stops_the_scope(self):
+        """The manager made the scope and systemd-run failed afterwards: the status is the failure to create, and the scope goes."""
+        aborting = self.write_policy("acceptance", name="aborting.json", abort=True)
+        process, started, _ = self.start("aborting", policy=aborting)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 70, error)
+        self.assertIn("ended with status 1", error)
+        self.assert_stopped_and_gone(started)
+
+    def test_a_run_whose_systemd_run_made_no_scope_has_nothing_to_stop_and_says_nothing_of_it(self):
+        """The manager has no such unit, which is not a failure to stop: the one line is the failure to create the scope."""
+        broken = self.write_policy("acceptance", name="broken-stop.json", fail=True)
+        process, started, _ = self.start("broken-stop", policy=broken)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 70, error)
+        self.assertIn("cannot create the scope", error)
+        self.assertNotIn("cannot stop", error)
+        self.assert_stopped_and_gone(started)
+
+    def test_a_scope_that_cannot_be_stopped_is_one_diagnosis_and_the_status_stays(self):
+        """The run still ends as its wait limit makes it end, and its stderr names the scope it could not stop once."""
+        process, _ = self.stranded("refused", wait=WAIT_LIMIT, refuse=True)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 75, error)
+        unit = self.asked_for()
+        self.assertEqual(self.stops(), [unit])
+        self.assertEqual(error.count(f"cannot stop {unit}"), 1)
+
+    def test_an_empty_scope_reserves_nothing_and_the_same_scope_with_a_process_does(self):
+        """cgroup.events tells a scope that holds nothing from one whose reservation may still be used."""
+        left = self.leave_scope("acceptance", "dotfiles-workload-acceptance-1-left.scope", HOLDING)
+        arguments = ["--resource-memory", str(9 * GIB)]
+        # Nine GiB beside the nine GiB the scope reserves does not fit into ten.
+        reason, _ = self.held_back("populated", arguments=arguments)
+        self.assertEqual(reason, HEADROOM)
+        self.assertEqual(self.stops(), [])
+        self.measurements()
+        (left / "cgroup.events").write_text(EMPTY)
+        status, _, _ = self.run_command("empty", key=None, arguments=arguments)
+        self.assertEqual(status, 0)
+        (_, record), = self.measurements()
+        self.assertEqual(record["waitReasons"], [])
+        self.assertEqual(self.stops(), [left.name])
+        self.assertFalse(left.exists())
+
+    def test_an_empty_deep_scope_does_not_occupy_the_deep_slot(self):
+        """A deep run waits for the deep scope that holds a process and not for one that holds none."""
+        left = self.leave_scope("deep", "dotfiles-workload-deep-1-left.scope", HOLDING)
+        reason, _ = self.held_back("deep-populated", klass="deep")
+        self.assertEqual(reason, "another deep verification is running")
+        self.measurements()
+        (left / "cgroup.events").write_text(EMPTY)
+        status, _, _ = self.run_command("deep-empty", key=None, klass="deep")
+        self.assertEqual(status, 0)
+        # It was not held back even for one judgement: stopping the scope would have freed the slot for the next.
+        (_, record), = self.measurements()
+        self.assertEqual(record["waitReasons"], [])
+        self.assertEqual(self.stops(), [left.name])
+
+    def test_an_acceptance_without_room_neither_cancels_nor_marks_a_deep_scope_that_holds_nothing(self):
+        """It is no run to cancel, and it may be one that has just ended: a cancellation record would report the run 143."""
+        left = self.leave_scope("deep", "dotfiles-workload-deep-1-left.scope", EMPTY)
+        self.observe(hostMemoryHeadroomBytes=GIB, memoryHeadroomBytes=GIB)
+        acceptance, started, release = self.start("acceptance", arguments=["--resource-memory", str(2 * GIB)])
+        self.waiting("acceptance", acceptance)
+        self.keeps_waiting(acceptance)
+        self.assertEqual(self.stops(), [left.name])
+        self.assertEqual(sorted(path.name for path in (self.root / "run").iterdir()), ["acceptance.waiting", "registry.lock"])
+        self.observe(hostMemoryHeadroomBytes=10 * GIB, memoryHeadroomBytes=10 * GIB)
+        self.wait_for(started.exists, acceptance)
+        release.touch()
+        self.assertEqual(self.finish(acceptance), 0)
+
+    def test_a_scope_that_does_not_say_whether_it_holds_a_process_is_counted(self):
+        """What cannot be read is not taken for empty: the reservation stays held and nothing is stopped."""
+        for case in ("no-file", "a-directory", "no-populated-line"):
+            with self.subTest(case=case):
+                left = self.leave_scope("acceptance", f"dotfiles-workload-acceptance-1-{case}.scope",
+                                        "frozen 0\n" if case == "no-populated-line" else None)
+                if case == "a-directory":
+                    (left / "cgroup.events").mkdir()
+                reason, _ = self.held_back(f"unreadable-{case}", arguments=["--resource-memory", str(9 * GIB)])
+                self.assertEqual(reason, HEADROOM)
+                self.assertEqual(self.stops(), [])
+                shutil.rmtree(left)
+
+    def test_a_decision_stops_the_scope_that_holds_nothing_and_no_scope_that_holds_a_process(self):
+        """A run beside a running one and a scope that holds nothing stops that scope, and waits for the running one only."""
+        holder, held, holder_release = self.start("holder", arguments=["--resource-memory", str(9 * GIB)])
+        self.wait_for(held.exists, holder)
+        (holder_scope,) = self.scopes("acceptance")
+        left = self.leave_scope("acceptance", "dotfiles-workload-acceptance-1-left.scope", EMPTY)
+        large, large_started, large_release = self.start("large", arguments=["--resource-memory", str(9 * GIB)])
+        self.assertEqual(self.waiting("large", large), HEADROOM)
+        self.keeps_waiting(large)
+        self.assertEqual(self.stops(), [left.name])
+        self.assertFalse(left.exists())
+        self.assertTrue(holder_scope.exists())
+        holder_release.touch()
+        self.assertEqual(self.finish(holder), 0)
+        self.wait_for(large_started.exists, large)
+        large_release.touch()
+        self.assertEqual(self.finish(large), 0)
+
+    def test_a_refused_stop_of_an_empty_scope_is_asked_once_and_costs_one_line_and_the_decision_goes_on(self):
+        """However many judgements the run makes while it waits, it asks for the stop of the scope once, and it enters when it fits."""
+        holder, held, holder_release = self.start("holder", arguments=["--resource-memory", str(9 * GIB)])
+        self.wait_for(held.exists, holder)
+        left = self.leave_scope("acceptance", "dotfiles-workload-acceptance-1-left.scope", EMPTY)
+        refusing = self.write_policy("acceptance", name="policy-refusing-stop.json", refuse=True)
+        large, large_started, large_release = self.start("large", policy=refusing, arguments=["--resource-memory", str(9 * GIB)])
+        self.waiting("large", large)
+        self.keeps_waiting(large)
+        holder_release.touch()
+        self.assertEqual(self.finish(holder), 0)
+        self.wait_for(large_started.exists, large)
+        large_release.touch()
+        _, error = large.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(large.returncode, 0, error)
+        self.assertEqual(self.stops(), [left.name])
+        self.assertEqual(error.count(f"cannot stop {left.name}"), 1)
+
+    def test_a_run_between_the_making_of_its_scope_and_its_entry_is_not_stopped_by_a_run_that_judges(self):
+        """The scope exists and holds nothing yet, but the run that is making it holds the lock the judgement needs."""
+        gate = self.root / "attach.gate"
+        creating = self.write_policy("acceptance", name="creating.json", strand=gate)
+        first, first_started, first_release = self.start("creating", policy=creating, arguments=["--resource-memory", str(9 * GIB)])
+        self.wait_for(lambda: self.scopes("acceptance"), first)
+        second, second_started, second_release = self.start("judging", arguments=["--resource-memory", str(9 * GIB)])
+        self.keeps_waiting(second)
+        self.assertEqual(self.stops(), [])
+        gate.touch()
+        self.wait_for(first_started.exists, first)
+        self.assertEqual(self.waiting("judging", second), HEADROOM)
+        self.assertEqual(self.stops(), [])
+        first_release.touch()
+        self.assertEqual(self.finish(first), 0)
+        self.wait_for(second_started.exists, second)
+        second_release.touch()
+        self.assertEqual(self.finish(second), 0)
+
+    def end_scope_members(self):
+        """End what a scope of the fake cgroup tree still holds, so that a helper that failed to end does not outlive its test."""
+        for procs in (self.cgroup / "user.slice").rglob("cgroup.procs"):
+            try:
+                os.kill(int(procs.read_text()), signal.SIGKILL)
+            except (OSError, ValueError):
+                pass
+
+    def test_a_supervisor_killed_before_its_command_entered_the_scope_leaves_no_scope_and_runs_nothing(self):
+        """Nobody would resume the helper, so it must not wait for a supervisor that is gone: it would hold the scope for good."""
+        gate = self.root / "orphaned.gate"
+        first, started = self.stranded("orphaned", gate=gate)
+        self.addCleanup(self.end_scope_members)
+        first.kill()
+        first.wait()
+        first.stdout.close()
+        first.stderr.close()
+        gate.touch()
+        # The helper finds that its supervisor is gone and ends; with nothing left in it the scope is removed.
+        self.wait_for(lambda: not self.scopes("acceptance"))
+        self.assertFalse(started.exists())
+
+    def test_a_helper_that_waits_to_be_resumed_ends_with_its_supervisor(self):
+        """The helper stops itself in the scope; the supervisor that is killed there cannot resume it, and the death signal ends it."""
+        parent = subprocess.Popen([sys.executable, "-c", HELPER_PARENT, str(ENTER_SCOPE)], stdout=subprocess.PIPE, text=True)
+        self.addCleanup(parent.stdout.close)
+        self.addCleanup(parent.kill)
+        helper = int(parent.stdout.readline())
+        self.addCleanup(lambda: os.kill(helper, signal.SIGKILL) if process_state(helper) not in (None, "Z") else None)
+        self.wait_for(lambda: process_state(helper) == "T")
+        parent.kill()
+        parent.wait()
+        self.wait_for(lambda: process_state(helper) in (None, "Z"))
 
     def test_i3_no_acceptance_can_start_waiting_while_a_deep_run_is_being_admitted(self):
         """Between finding that no acceptance waits and the deep run being admitted, none can begin to wait."""

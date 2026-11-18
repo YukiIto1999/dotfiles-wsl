@@ -33,6 +33,10 @@ OOM_SCORES = {"acceptance": 0, "deep": 1000}
 # 取り消された scope の SIGTERM から SIGKILL までの猶予。supervisor の既定の猶予と同じ
 STOP_TIMEOUT = "10s"
 STOP_SECONDS = 5
+# systemctl が unit を持たないと答える終了 status。止める scope が無いので診断に出さない
+UNIT_NOT_LOADED = 5
+# systemd-run が作った scope へ command が入るまでの既定の猶予秒数。policy の scopeEntrySeconds で代えられる
+SCOPE_ENTRY_SECONDS = 10.0
 REGISTRY_LOCK = "registry.lock"
 # 受入が待つ間だけ共有 lock を持つ file。deep は排他で試して取れなければ受入が待つと判る
 WAITING_LOCK = "acceptance.waiting"
@@ -192,6 +196,21 @@ def cgroup_integer(path):
     return None if text == "max" else int(text)
 
 
+def unpopulated(directory):
+    """scope の cgroup が process を一つも持たないことの確認
+
+    directory: scope の cgroup directory
+    戻り値: cgroup.events の populated が 0 の場合だけTrue。読めない場合と populated の行が無い場合は、空と見なさずFalse
+    制約: 空の scope はこれから memory を使わない。scope の起動は判定の排他の中で helper が入るまで終わらないので、
+        排他の中で見える空の scope は、終わった直後の scope か、起動の途中で殺されて残った scope のどちらかである。
+        読めないものを空と見なすと、使っている scope の予約を空きへ戻して入場を誤るため、読めない scope は数える
+    """
+    try:
+        return "populated 0" in (directory / "cgroup.events").read_text().splitlines()
+    except (OSError, ValueError):
+        return False
+
+
 class Policy:
     """class ごとの policy file の検証済みの値
 
@@ -225,6 +244,9 @@ class Policy:
         self.slices = document["slices"]
         self.proc_cgroup = Path(document.get("procCgroup", "/proc/self/cgroup"))
         self.journal = document.get("journalSocket", JOURNAL_SOCKET)
+        self.entry_seconds = document.get("scopeEntrySeconds", SCOPE_ENTRY_SECONDS)
+        if type(self.entry_seconds) not in (int, float) or not 0 < self.entry_seconds < math.inf:
+            raise AdmissionError("scopeEntrySeconds must be a positive number")
 
     def slice_directory(self, klass):
         """class の slice の cgroup directory。利用者の systemd manager の下に置く"""
@@ -272,6 +294,8 @@ class Admission:
         self.enclosing = None
         # 取り消しを要求済みの scope の unit 名
         self.stopping = set()
+        # 空の scope の停止を一度求めた unit 名。同じ unit を一度の入場の間に繰り返し止めない
+        self.reclaimed = set()
         # 待機した理由を最初に現れた順に重複なく残す。計測の一行へ渡す
         self.reasons = []
 
@@ -406,9 +430,12 @@ class Admission:
         """class の slice の下にいる scope の、需要と使用量の読取
 
         observation: 同じ判定の観測。scope ごとの使用量はここから読む
-        戻り値: 読めた scope。読む前に消えた scope は含まない。観測に使用量の無い scope は未使用と見る
+        戻り値: 予約に数える scope の一覧と、process を持たない scope の cgroup directory の一覧。読む前に消えた scope は含まない。観測に使用量の無い scope は未使用と見る
+        制約: process を持たない scope（unpopulated）は前者に含めず、予約にも deep の一走行にも数えない。持つかどうかを読めない scope は数える。
+            呼び側は判定の排他の中で読む。排他の外では、他の supervisor が作っている途中の scope も空に見える
         """
         found = []
+        empty = []
         for klass in CLASSES:
             directory = self.policy.slice_directory(klass)
             try:
@@ -420,9 +447,12 @@ class Admission:
                     limit = cgroup_integer(directory / name / DEMAND_FILES[klass])
                 except (OSError, ValueError):
                     continue
+                if unpopulated(directory / name):
+                    empty.append(directory / name)
+                    continue
                 used = observation.usage.get(f"{self.slice_path(klass)}/{name}", 0)
                 found.append(Scope(klass, name, limit or 0, used))
-        return found
+        return found, empty
 
     def hold_no_acceptance_waiting(self):
         """待っている受入が無いことの確認と、その状態の保持。排他 lock が取れれば誰も待っていない
@@ -538,6 +568,42 @@ class Admission:
             else:
                 self.unmark_cancelled(scope)
 
+    def stop_scope(self, directory):
+        """scope の unit の停止の要求。終了は待たない
+
+        directory: 止める scope の cgroup directory。unit 名は directory の名前
+        副作用: 失敗は診断に一行出すだけで、入場も終了 status も変えない
+        制約: 止める物が無い場合は黙る。manager が unit を持たない（systemctl の終了 status 5）場合と、失敗した時に scope の
+            directory が既に無い場合である。process を持つ scope の取消は cancel が持ち、ここは process を持たない scope だけを止める
+        """
+        unit = directory.name
+        try:
+            stopped = subprocess.run([*self.policy.systemctl, "--user", "stop", "--no-block", unit],
+                                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                     text=True, errors="replace", timeout=STOP_SECONDS, check=False)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            detail = str(error)
+        else:
+            if stopped.returncode in (0, UNIT_NOT_LOADED):
+                return
+            detail = stopped.stderr.strip() or f"systemctl ended with status {stopped.returncode}"
+        if directory.exists():
+            print(f"dotfiles-supervise: cannot stop {unit}: {detail}", file=sys.stderr, flush=True)
+
+    def reclaim(self, directories):
+        """残った空の scope の停止の要求
+
+        directories: process を持たない scope の cgroup directory
+        副作用: unit ごとに、この supervisor が一度だけ停止を求める。失敗も数え、同じ unit の停止と診断を繰り返さない
+        制約: 取消の記録を残さず、cancel も通さない。終わった直後の deep の scope も一瞬は空で、取消と見なすとその走行が 143 で返る。
+            空かどうかは判定の排他の中で読み、停止はその後に求める。空の scope は存在する間に埋まらないので、排他を外した後でも
+            止めてよい。停止は manager が非同期に行い、消えるまでの間に次の判定が同じ scope を見ても繰り返さない
+        """
+        for directory in directories:
+            if directory.name not in self.reclaimed:
+                self.reclaimed.add(directory.name)
+                self.stop_scope(directory)
+
     def scope_command(self):
         """走行ごとの scope を作って command を起動する前置 argv。需要は scope の memory.low か memory.high へ入る"""
         unit = f"dotfiles-workload-{self.klass}-{os.getpid()}-{uuid.uuid4().hex[:8]}.scope"
@@ -582,9 +648,10 @@ class Admission:
                     supervisor.wait_for_event(min(0.05, max(0, wait_until - time.time())))
                     continue
                 guard = None
+                empty = []
                 try:
                     if observation is not None:
-                        scopes = self.scopes(observation)
+                        scopes, empty = self.scopes(observation)
                         if self.klass == "deep":
                             guard = self.hold_no_acceptance_waiting()
                         decision = decide(self.klass, self.memory, scopes, observation,
@@ -599,6 +666,7 @@ class Admission:
                     if guard is not None:
                         os.close(guard)
                     fcntl.flock(registry, fcntl.LOCK_UN)
+                    self.reclaim(empty)
                 if reason != self.previous_reason:
                     supervisor.record("waiting", spawned=False, reason=reason, deadline=wait_until)
                     print(f"dotfiles-supervise: waiting for resources: {reason}", file=sys.stderr, flush=True)

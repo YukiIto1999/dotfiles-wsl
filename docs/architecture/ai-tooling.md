@@ -160,6 +160,11 @@ supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1
 記録の置き場、鍵、需要の導き方、予約を超えた走行のstderrの一行は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 入れ子は、現在のprocessがclassのscopeの下にいれば、そのscopeの中で外側のclassのまま動く。入れ子で昇格せず、scopeも作らず、待たない。明示した需要が外側のscopeの需要を超える場合は、外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は外側の需要へ切り詰め、拒否しない。
 走行の所有と生死は、scopeのcgroupと`waitpid`の`ECHILD`が持ち、走行を表す記録fileは持たない。supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続ける。
+processを一つも持たないscopeは、空きの計算に数えない。`cgroup.events`が読めて`populated`が0のscopeだけを除き、読めないscopeと`populated`の行が無いscopeは従来どおり数える。除くのは受入の予約と、deepの一走行の数えである。
+scopeの起動は、判定の排他の中でhelperがscopeへ入るまで終わらず、判定も同じ排他の中でscopeを読むため、排他の中で見える空のscopeは、終わった直後のscopeか、起動の途中で殺されて残ったscopeのどちらかで、どちらもこれからmemoryを使わない。この前提は、classのsliceの下にscopeを作る全てのpolicyが、一つの状態directory（`runtimeDirectory`）の排他を共有する間だけ成り立つ。
+scopeへ入れなかった走行は、取消、待機の期限、猶予切れでclientを殺して回収した後と、`systemd-run`が入らずに終わった後に、判定の排他の中でその走行のscopeのunitを`systemctl --user stop --no-block`で止める。例外も同じ経路を通る。systemd 260は、`systemd-run`が殺されても回収されていない間にstart jobを処理すると、processの入らないscopeを残し得る。systemdは空になった通知でscopeを片付けるため、一度も埋まらなかったscopeは自分では消えず、予約を持ち続ける。managerがunitを持たない場合（`systemctl`の終了status 5）と、止められずにscopeのdirectoryも無い場合は黙り、それ以外の失敗はunit名を一行stderrへ出す。終了statusは変えない。
+入場の判定は、見つけた空のscopeを、判定の後に同じstopで止める。取消の記録は残さず、取消とは扱わない。終わった直後のdeepのscopeも一瞬は空で、取消と見なすとその走行が143で返るためである。止める要求は一つのsupervisorがunitごとに一度で、失敗も数えて繰り返さない。
+scopeの中で最初に動くhelperは、supervisorのPIDを受けてSIGKILLの死の通知を設定し、起動した時点で親がsupervisorでなければcommandを実行せずに終わる。supervisorだけが殺されると、止まったまま残るhelperがscopeの予約を持ち続けるためで、commandへ置き換わる前にこの設定を外すので、起動したcommandはsupervisorより長く生きる。
 この予約は需要の宣言であり、commandの機能や内部のworker数を削減するhard limitではない。
 policyと観測は[`workstation/stability/`](../../workstation/stability)が所有し、T1、pre-pushの検査本体、`dotfiles-workload-run`が同じ判定へ参加する。実測の記録の鍵を渡すのはT1、pre-pushの検査本体、`dotfiles-workload-run`で、鍵を渡さないpre-pushの短い段は参加しない。`dotfiles-workload-run`の鍵は、`deep`、作業directoryのrepositoryの根（repositoryの外では作業directory）、commandの行を改行でつないだ文字列で、同じ根の同じcommandの走行が一つの記録を共有する。入口を通らない任意のcommandの将来消費を保証するものではない。
 Windowsの採取は独立したscheduled taskが行い、Linux側は期限内のsnapshotだけを読む。snapshotは診断の入力で、入場の条件にしない。導入と待機理由の確認は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。

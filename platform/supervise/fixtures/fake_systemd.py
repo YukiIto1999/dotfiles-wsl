@@ -11,11 +11,18 @@ when its environment carries the scope's mark.  A detached janitor removes the s
 left, and `stop` ends every such process, as a stop job does.  The janitor adds a byte to `janitor.polls` in the scope for
 every poll, so a test can tell how often the scope has been looked at, which no length of time can say.
 
-    fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] run   SYSTEMD-RUN-ARGUMENTS...
-    fake_systemd.py --cgroup-root ROOT                             ctl   SYSTEMCTL-ARGUMENTS...
+The scope's `cgroup.events` says `populated 1` once systemd-run has moved itself in, as the kernel does.  It is not updated
+afterwards: the janitor removes the scope when it is empty.  `stop` removes the directory of a scope that has no member at
+all, as a stop job does to a scope that never held a process, and leaves one that has members to the janitor.
 
-`--fail` makes systemd-run refuse to create the scope; `--gate` makes it answer only once FILE exists.  Every call
-is appended to `ROOT/calls.log` as one JSON line, so a test can read what the caller asked for.
+    fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] [--strand FILE] [--abort]  run   SYSTEMD-RUN-ARGUMENTS...
+    fake_systemd.py --cgroup-root ROOT [--refuse]                                       ctl   SYSTEMCTL-ARGUMENTS...
+
+`--fail` makes systemd-run refuse to create the scope; `--gate` makes it answer only once FILE exists.  `--strand FILE`
+makes the manager create the scope, with `populated 0`, and systemd-run move itself into it and execute the command only once
+FILE exists: a systemd-run that is killed before that leaves the scope that holds nothing, as the real one can.  `--abort` makes
+systemd-run end with status 1 after the scope exists, with `populated 0`.  `--refuse` makes `stop` fail without doing anything.
+Every call is appended to `ROOT/calls.log` as one JSON line, so a test can read what the caller asked for.
 """
 
 import json
@@ -118,7 +125,7 @@ def collect_when_gone(scope, pid):
     os._exit(0)
 
 
-def run(root, fail, gate, arguments):
+def run(root, fail, gate, strand, abort, arguments):
     """The `systemd-run --scope` half: create the scope and execute the command inside it."""
     record(root, "run", arguments)
     if fail:
@@ -154,27 +161,41 @@ def run(root, fail, gate, arguments):
     for name, value in properties.items():
         if name in PROPERTY_FILES:
             (scope / PROPERTY_FILES[name]).write_text(value + "\n")
+    if strand is not None or abort:
+        (scope / "cgroup.events").write_text("populated 0\nfrozen 0\n")
+    if abort:
+        print("Failed to start transient scope unit: fixture gives up after it made the scope", file=sys.stderr)
+        return 1
+    while strand is not None and not strand.exists():
+        time.sleep(POLL_SECONDS)
     (scope / "cgroup.procs").write_text(f"{os.getpid()}\n")
+    (scope / "cgroup.events").write_text("populated 1\nfrozen 0\n")
     collect_when_gone(scope, os.getpid())
     os.environ[MEMBER_MARK] = str(scope)
     os.execvp(command[0], command)
 
 
-def control(root, arguments):
+def control(root, refuse, arguments):
     """The `systemctl --user stop --no-block UNIT` half: terminate every process of the scope, as a stop job does."""
     record(root, "ctl", arguments)
     if "stop" not in arguments:
         print("fake systemctl: only stop is supported", file=sys.stderr)
         return 64
+    if refuse:
+        print("Failed to stop the unit: fixture refuses to stop it", file=sys.stderr)
+        return 1
     units = [argument for argument in arguments if argument.endswith(".scope")]
     stopped = False
     for unit in units:
         for scope in manager_cgroup(root).rglob(unit):
-            for pid in members(scope):
+            found = members(scope)
+            for pid in found:
                 try:
                     os.kill(pid, signal.SIGTERM)
                 except ProcessLookupError:
                     pass
+            if not found:
+                shutil.rmtree(scope, ignore_errors=True)
             stopped = True
     return 0 if stopped else 5
 
@@ -183,6 +204,9 @@ def main(arguments):
     root = None
     fail = False
     gate = None
+    strand = None
+    abort = False
+    refuse = False
     while arguments and arguments[0].startswith("--"):
         if arguments[0] == "--cgroup-root":
             root = arguments[1]
@@ -193,14 +217,24 @@ def main(arguments):
         elif arguments[0] == "--gate":
             gate = Path(arguments[1])
             arguments = arguments[2:]
+        elif arguments[0] == "--strand":
+            strand = Path(arguments[1])
+            arguments = arguments[2:]
+        elif arguments[0] == "--abort":
+            abort = True
+            arguments = arguments[1:]
+        elif arguments[0] == "--refuse":
+            refuse = True
+            arguments = arguments[1:]
         else:
             break
     if root is None or not arguments or arguments[0] not in ("run", "ctl"):
-        print("usage: fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] run|ctl ARGUMENTS...", file=sys.stderr)
+        print("usage: fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] [--strand FILE] [--abort] [--refuse] run|ctl ARGUMENTS...",
+              file=sys.stderr)
         return 64
     if arguments[0] == "run":
-        return run(root, fail, gate, arguments[1:])
-    return control(root, arguments[1:])
+        return run(root, fail, gate, strand, abort, arguments[1:])
+    return control(root, refuse, arguments[1:])
 
 
 if __name__ == "__main__":

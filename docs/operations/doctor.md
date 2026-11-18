@@ -292,6 +292,17 @@ T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の�
 非対話のjobは判定へ参加しない。serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけで、入場を待たず、受入に取り消されず、深い検証の一走行にも数えない。実測のピークが約0.3 GiBで、memoryの判定に並べる量ではないためである。
 同じ処理を別入口から追加投入して待機を迂回しない。
 
+processを一つも持たないscopeが`agents-acceptance.slice`か`agents-deep.slice`の下に残ることがある。入場の判定は`cgroup.events`の`populated`が0のscopeを予約に数えず、次の入場がそのscopeを止める。止められなかった場合はstderrに`dotfiles-supervise: cannot stop <scope名>`が出るので、次で探して手で止める。
+
+```sh
+cd "/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/agents.slice"
+grep -l '^populated 0' agents-acceptance.slice/*.scope/cgroup.events agents-deep.slice/*.scope/cgroup.events
+systemctl --user stop <scope名>
+```
+
+`grep`が示すpathの`.scope`で終わるdirectory名がunit名で、止めてよいのは`populated 0`のscopeだけである。`populated 1`のscopeは走行中で、止めるとその走行を取り消す。
+`systemctl --user daemon-reload`でも、managerが`cgroup.events`を読み直して空のscopeを片付けると推測するが、確かめていない。
+
 予約値は物理memoryの需要宣言であり、processのhard limitではない。CPUは予約せず、並列度はcommand自身が決める。
 物理memoryの需要は、明示した値、実測の記録から導いた値、このhostの他の鍵の実測の中央値、未計測の既定値の順に決める。
 未計測の既定値は`dotfiles.workstation.workload.reservation`の`verificationMemoryPercent`（既定25）で、最初の有効な観測のcgroup`limitBytes`の最小値（無ければ物理memory総量）に対する割合であり、ピークを保証しない。

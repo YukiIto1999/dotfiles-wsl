@@ -169,7 +169,7 @@ grep -qF '(75)' "$fixture/limit.stderr"
 expect_closed_gate "$limit_repo" 'T1 that was never started'
 
 # 時間の目標は報告するだけで、走行を取り消さず、終了statusも変えない。滞留は走行の scope の cgroup の値で、
-# fixture の scope は cgroup の file を持たないため、command が書いた file だけが読める。scope は最後の processごと消えるので、
+# fixture の scope は cgroup.events のほかに cgroup の file を持たないため、command が書いた file だけが読める。scope は最後の processごと消えるので、
 # command の終了後も残る子を置き、終了時の読取がその scope を読めるようにする
 target_bin=$fixture/target-bin
 mkdir "$target_bin"

@@ -66,8 +66,6 @@ MEASURE_SECONDS = 1.0
 SCOPE_READINGS = ("cpuSeconds", "cpuStallSeconds", "ioStallSeconds", "memoryStallSeconds")
 # 入場できないまま待機の上限に達した走行の終了status。commandは起動していない
 WAIT_EXPIRED_STATUS = 75
-# systemd-run が作った scope へ入るまでの猶予秒数
-SCOPE_ENTRY_SECONDS = 10.0
 ENTER_SCOPE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "enter_scope.py")
 # Dispositions Python or a non-interactive parent shell may have changed and the
 # command must not inherit.
@@ -798,11 +796,46 @@ class Supervisor:
             self.target_at = self.spawned_at + self.options.resource_target_seconds
 
     def abandon_entry(self):
-        """scope へ入る前に止まっている client を殺して回収する"""
-        os.kill(self.client_pid, signal.SIGKILL)
-        os.waitpid(self.client_pid, 0)
-        self.client_pid = None
+        """scope へ入れなかった走行の client を殺して回収し、この走行の scope の unit を止める
+
+        制約: 殺して回収した後に止める。systemd 260 は、systemd-run が殺されても回収されていない間に start job を処理すると、
+            process の入らない scope を作る。回収した後なら manager は start を拒み、scope は残らない。
+            一度も process を持たなかった scope は、systemd が「空になった」通知で片付けるため自分では消えず、予約を持ち続ける。
+            判定の排他の中で呼び、終了 status は変えない
+        """
+        if self.client_pid is not None:
+            send_signal(self.client_pid, signal.SIGKILL)
+            try:
+                os.waitpid(self.client_pid, 0)
+            except ChildProcessError:
+                pass
+            self.client_pid = None
         self.drained = True
+        self.reservation.stop_scope(self.reservation.scope_directory())
+
+    def wait_for_entry(self, program, wait_until):
+        """helper が scope に入って自分を止めるまでの待ち
+
+        program: scope を作る command の名前。失敗の説明に使う
+        wait_until: 待機の絶対期限
+        戻り値: helper が止まった場合のTrue。scope へ入る前に取消された場合と待機の期限が来た場合のFalse
+        失敗: systemd-run が入らずに終わった場合と、猶予内に入れない場合の AdmissionError
+        """
+        until = time.monotonic() + self.reservation.policy.entry_seconds
+        while True:
+            pid, status = os.waitpid(self.client_pid, os.WNOHANG | os.WUNTRACED)
+            if pid:
+                if os.WIFSTOPPED(status):
+                    return True
+                self.client_pid = None
+                raise AdmissionError(
+                    f"cannot create the scope: {program} ended with status {os.waitstatus_to_exitcode(status)}")
+            if self.cancel_signal is not None or time.time() >= wait_until:
+                return False
+            if time.monotonic() >= until:
+                raise AdmissionError(
+                    f"cannot create the scope: {program} did not enter it within {self.reservation.policy.entry_seconds:g}s")
+            self.wait_for_event(0.01)
 
     def launch_in_scope(self, prefix, oom_score, wait_until):
         """判定の排他の中で、走行ごとの scope を作り、その中で client を起動する
@@ -813,37 +846,30 @@ class Supervisor:
         戻り値: scope に入って起動した場合のTrue。scope へ入る前に取消された場合と待機の期限が来た場合のFalse
         失敗: scope を作れない、または猶予内に入れない場合の AdmissionError
         制約: helper は scope に入った後に自分を止め、ここで scope の存在を確かめてから再開する。
-            再開前の client は command を実行していないので、取消や失敗や期限切れでは何も実行されていない
+            再開前の client は command を実行していないので、取消や失敗や期限切れでは何も実行されていない。
+            起動に至らない出方は、例外も含めて全て abandon_entry を通り、client を殺して回収し、この走行の scope の unit を止める。
+            helper には supervisor の PID を渡す。supervisor だけが殺されると、止まった helper は scope の中で予約を持ち続けるため
         """
         command = self.options.command
         argv0 = self.options.argv0 if self.options.argv0 is not None else command[0]
-        helper = [sys.executable, "-I", "-S", ENTER_SCOPE, str(oom_score), command[0], argv0, *command[1:]]
+        helper = [sys.executable, "-I", "-S", ENTER_SCOPE, str(os.getpid()), str(oom_score), command[0], argv0, *command[1:]]
         argv = [*prefix, "--", *helper]
         try:
             self.client_pid = os.posix_spawn(argv[0], argv, dict(os.environ), setsigmask=(), setsigdef=RESET_TO_DEFAULT)
         except OSError as error:
             raise AdmissionError(f"cannot create the scope: cannot execute {argv[0]}: {error.strerror}") from None
         self.drained = False
-        until = time.monotonic() + SCOPE_ENTRY_SECONDS
-        while True:
-            pid, status = os.waitpid(self.client_pid, os.WNOHANG | os.WUNTRACED)
-            if pid:
-                if os.WIFSTOPPED(status):
-                    break
-                self.client_pid = None
-                self.drained = True
-                raise AdmissionError(
-                    f"cannot create the scope: {argv[0]} ended with status {os.waitstatus_to_exitcode(status)}")
-            if self.cancel_signal is not None or time.time() >= wait_until:
+        started = False
+        try:
+            if self.wait_for_entry(argv[0], wait_until):
+                os.kill(self.client_pid, signal.SIGCONT)
+                started = True
+        finally:
+            if not started:
                 self.abandon_entry()
-                return False
-            if time.monotonic() >= until:
-                self.abandon_entry()
-                raise AdmissionError(f"cannot create the scope: {argv[0]} did not enter it within {SCOPE_ENTRY_SECONDS:.0f}s")
-            self.wait_for_event(0.01)
-        os.kill(self.client_pid, signal.SIGCONT)
-        self.start_run_clock()
-        return True
+        if started:
+            self.start_run_clock()
+        return started
 
     def spawn_plain(self):
         """scope を作らずに client を起動する。入れ子の走行と、資源予約を持たない走行

@@ -65,6 +65,10 @@ in
       走行の所有と生死はscopeのcgroupとwaitpidのECHILDが持ち、走行を表す記録fileは持たない。状態directoryには、判定の排他のregistry.lockと、受入が待つ間だけ共有で持つacceptance.waitingのlockだけがある。
       取消の印のcancel-fileは走行の記録ではなく、supervisorが強制終了されて読まれなかったものだけが残り、scopeが無く一時間を過ぎたものを次の取消が消す。
       supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続け、他の走行を止めない。
+      processを一つも持たないscope（`cgroup.events`が読めて`populated`が0）は空きの計算に数えず、読めないscopeは数える。判定は見つけた空のscopeを`systemctl --user stop --no-block`で一度ずつ止め、取消の記録は残さない。失敗はunit名を一行stderrへ出して判定を続ける。この前提は、classのsliceの下にscopeを作る全てのpolicyが同じ`runtimeDirectory`の排他を共有することである。
+      scopeへ入れなかった走行（取消、待機の上限、猶予切れ、systemd-runの終了）は、clientを殺して回収した後に自分のscopeのunitを同じstopで止め、終了statusは変えない。unitを持たない場合は黙る。
+      scopeの中で最初に動くhelperはsupervisorのPIDを受け、supervisorが死ねばSIGKILLを受け、起動した時に親が違えばcommandを実行せずに終わる。commandへ置き換わる前にこの設定を外すので、起動したcommandはsupervisorより長く生きる。
+      policyの`scopeEntrySeconds`（省略時10）は、systemd-runが作ったscopeへcommandが入るまでの猶予秒数で、過ぎれば70で終わる。
       資源予約を持つ実行にはrequire-drainedを適用する。
     '';
   };

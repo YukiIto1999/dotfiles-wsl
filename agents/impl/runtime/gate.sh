@@ -29,6 +29,12 @@ usage: dotfiles-agent-gate <command> [options]
   push-declaration [--repo DIR] [--policy FILE]
                                         T2 の入口があるのに予算を読めない宣言を、push で拒否されると stderr で知らせる。常に 0 で終わる
   hook <arm|observe|stop>               client の hook から stdin の JSON で起こす
+
+検証の控えは作業木の中身で照合する。中身は追跡 file、未追跡で ignore されていない file の内容、未追跡 file の path の一覧、
+submodule の中で、HEAD と commit の履歴は入らない。stage、commit、amend、件名の書換えの後も控えは残る。
+新しい file は検証の前に git add か git add -N で追跡する。検証の後に追跡すると、検査が見なかった file が加わるため別の木になる。
+ignore された file、assume-unchanged や skip-worktree の印の付いた file、git が改行の変換や clean フィルタの後に同じ内容とみなす変更は見えない。
+木の中身を読めない(読めない file、commit の無い入れ子の repository など)ときは、未検証として扱い、免除も控えない。
 USAGE
   exit 64
 }
@@ -53,27 +59,179 @@ project_id_of() {
   printf '%s' "$common" | sha256sum | cut -d ' ' -f 1
 }
 
+# 採れなかった理由を一行にして stderr へ出す。
+# 引数 $1: 失敗した段、$2: その段の git の stderr を控えた file(省略できる)。先頭の一行だけを添える
+key_failure() {
+  local first=
+  if [ -n "${2-}" ]; then
+    IFS= read -r first <"$2" || true
+  fi
+  printf '%s%s\n' "$1" "${first:+: $first}" >&2
+}
+
+# 検証の控えが指す「どの木か」を、作業木の中身だけから決める鍵。HEAD、index の stage、commit の履歴は入れない。
+# 追跡 file と未追跡 file の内容は、実の index の私的な写しへ git add -A して git write-tree した tree id で表す。
+# stage、commit、amend、件名の書換えは tree id を変えないため、検証した中身への控えはそれらの後も残る。
+# 未追跡 file の path は、実の index から別に鍵へ入れる。内容が tree に入っていても、検査は追跡 file の一覧を列挙して
+# 未追跡 file を見ていないため、検査の時に未追跡だった file が追跡された木は別の木として扱う。
+# gitlink は git add -A が HEAD しか記録せず、中の変更を見落とすため、中の repository の鍵を値として加える。
+# 実の index、object、ref の内容は書き換えない。実の object は alternates として読むだけで、新しい object は一時 directory へ置く
+# (同じ内容の既存 object は、git が更新時刻だけを新しくすることがある)。
+# 引数 $1: 木の根。出力: 鍵を一行。採れない木は何も出さず 1 で返り、理由を stderr へ一行だけ出す。
+# 制約: 採れない木を採れた木の鍵で扱わない。呼び出し側は失敗を未検証として扱う。
+# 一時 directory は witness_scratch があればその中(後始末は release_scratch)、無ければ検査する木の外の mktemp -d で、
+# 返る前に捨てる。途中で殺されても残るのは木の外の、launcher か OS が回収する場所だけである。
 source_fingerprint() {
-  local repo=$1 head path
-  head=$(git -C "$repo" rev-parse --verify HEAD 2>/dev/null || printf 'none')
+  local repo=$1
+  (
+    owned=
+    trap '[ -z "$owned" ] || rm -rf --one-file-system -- "$owned"' EXIT
+    if [ -n "$witness_scratch" ]; then
+      scratch=$(mktemp -d "$witness_scratch/.key.XXXXXXXX" 2>/dev/null) || {
+        key_failure '一時 directory を作れない'
+        exit 1
+      }
+    else
+      scratch_is_outside_repo "$repo" || {
+        key_failure 'TMPDIR か cache が検査する木の中にあり、一時 file が鍵へ混ざるため鍵を採らない'
+        exit 1
+      }
+      scratch=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gate-key.XXXXXXXX" 2>/dev/null) || {
+        key_failure '一時 directory を作れない'
+        exit 1
+      }
+      owned=$scratch
+    fi
+    working_tree_key "$repo" "$scratch"
+  )
+}
+
+# gitlink の値。中の repository が populated ならその鍵、missing か空の directory なら定数。
+# 中が populated でも空でもない directory と symlink は、中身を読めない種類として失敗する。
+# 引数 $1: 木の根、$2: gitlink の path。出力: 値を一行。失敗は 1 で返り、理由を stderr へ一行だけ出す。
+gitlink_value() {
+  local absolute=$1/$2 top nested
+  if [ -L "$absolute" ]; then
+    key_failure "gitlink $2 が symlink である"
+    return 1
+  fi
+  if [ ! -e "$absolute" ]; then
+    printf 'unpopulated\n'
+    return 0
+  fi
+  if [ ! -d "$absolute" ]; then
+    key_failure "gitlink $2 が directory でない"
+    return 1
+  fi
+  # 根の判定は write_clean_gitlink と同じ。空の directory は親の根を答えるため根にならない
+  if top=$(git -C "$absolute" rev-parse --show-toplevel 2>/dev/null) \
+    && top=$(realpath -e -- "$top") && [ "$top" = "$(realpath -e -- "$absolute")" ]; then
+    nested=$(source_fingerprint "$absolute" 2>&1) || {
+      printf 'gitlink %s: %s\n' "$2" "$nested" >&2
+      return 1
+    }
+    printf '%s\n' "$nested"
+    return 0
+  fi
+  nested=$(ls -A -- "$absolute" 2>/dev/null) || {
+    key_failure "gitlink $2 の中を読めない"
+    return 1
+  }
+  if [ -n "$nested" ]; then
+    key_failure "gitlink $2 が空でも repository の根でもない"
+    return 1
+  fi
+  printf 'unpopulated\n'
+}
+
+# 引数 $1: 木の根、$2: この木のための空の一時 directory。出力と失敗は source_fingerprint と同じ。
+# 実の index と object への別名は、一回の git の呼び出しごとの環境変数としてだけ渡し、この shell へは export しない。
+# GIT_OPTIONAL_LOCKS、core.splitIndex、core.fsmonitor は、観察だけの呼び出しが実の .git へ lock や共有 index を
+# 残さないための指定である。
+working_tree_key() {
+  local repo=$1 scratch=$2 index objects tree status=0 record path value digest
+  local -a staged=()
+
+  index=$(git -C "$repo" rev-parse --path-format=absolute --git-path index 2>"$scratch/err") || {
+    key_failure 'git rev-parse --git-path index が失敗した' "$scratch/err"
+    return 1
+  }
+  objects=$(git -C "$repo" rev-parse --path-format=absolute --git-path objects 2>"$scratch/err") || {
+    key_failure 'git rev-parse --git-path objects が失敗した' "$scratch/err"
+    return 1
+  }
+  mkdir -- "$scratch/objects" 2>"$scratch/err" || {
+    key_failure '一時 object directory を作れない' "$scratch/err"
+    return 1
+  }
+  # index が未作成の repository は、空の index から始める。時刻を保つのは、同じ秒の同じ大きさの書換えを git に再検査させるため
+  if [ -e "$index" ]; then
+    cp --preserve=timestamps -- "$index" "$scratch/index" 2>"$scratch/err" || {
+      key_failure 'index の写しを作れない' "$scratch/err"
+      return 1
+    }
+  fi
+  GIT_INDEX_FILE=$scratch/index GIT_OBJECT_DIRECTORY=$scratch/objects \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES=$objects GIT_OPTIONAL_LOCKS=0 \
+    git -c core.splitIndex=false -c core.fsmonitor=false -C "$repo" add -A . \
+    >/dev/null 2>"$scratch/err" || status=$?
+  if [ "$status" -ne 0 ]; then
+    key_failure "git add -A が $status で失敗した" "$scratch/err"
+    return 1
+  fi
+  tree=$(GIT_INDEX_FILE=$scratch/index GIT_OBJECT_DIRECTORY=$scratch/objects \
+    GIT_ALTERNATE_OBJECT_DIRECTORIES=$objects GIT_OPTIONAL_LOCKS=0 \
+    git -c core.splitIndex=false -c core.fsmonitor=false -C "$repo" write-tree 2>"$scratch/err") || {
+    key_failure 'git write-tree が失敗した' "$scratch/err"
+    return 1
+  }
+  [[ $tree =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || {
+    key_failure 'git write-tree が tree id を返さなかった'
+    return 1
+  }
+
+  GIT_OPTIONAL_LOCKS=0 git -c core.fsmonitor=false -C "$repo" ls-files --others --exclude-standard -z \
+    >"$scratch/untracked" 2>"$scratch/err" || {
+    key_failure 'git ls-files --others が失敗した' "$scratch/err"
+    return 1
+  }
+
+  GIT_INDEX_FILE=$scratch/index GIT_OPTIONAL_LOCKS=0 \
+    git -c core.fsmonitor=false -C "$repo" ls-files --stage -z >"$scratch/staged" 2>"$scratch/err" || {
+    key_failure 'git ls-files --stage が失敗した' "$scratch/err"
+    return 1
+  }
+  mapfile -d '' -t staged <"$scratch/staged" || {
+    key_failure '一時 index の一覧を読めない'
+    return 1
+  }
+  : >"$scratch/gitlinks" || return 1
+  for record in "${staged[@]}"; do
+    [[ $record == '160000 '* ]] || continue
+    path=${record#*$'\t'}
+    value=$(gitlink_value "$repo" "$path" 2>"$scratch/err") || {
+      key_failure "$(cat "$scratch/err")"
+      return 1
+    }
+    printf '%s\0%s\0' "$path" "$value" >>"$scratch/gitlinks" || return 1
+  done
+
+  # 各区画は空の要素で閉じる。path と値は空にならないため、区画の境目は他の綴りと衝突しない
   {
-    printf 'dotfiles-agent-gate-v3\0head\0%s\0tracked\0' "$head"
-    # porcelain の git diff は --no-optional-locks でも index を書き直して index.lock を取り hook の SIGKILL で lock を残すため不可
-    git -C "$repo" -c color.ui=false diff-index -p --binary --full-index --no-ext-diff --no-textconv HEAD --
-    printf '\0untracked\0'
-    while IFS= read -r -d '' path; do
-      printf 'path\0%s\0' "$path"
-      if [ -L "$repo/$path" ]; then
-        printf 'symlink\0'
-        readlink --zero -- "$repo/$path"
-      elif [ -f "$repo/$path" ]; then
-        printf 'regular\0'
-        sha256sum <"$repo/$path"
-      else
-        printf 'other\0'
-      fi
-    done < <(git -C "$repo" ls-files --others --exclude-standard -z)
-  } | sha256sum | cut -d ' ' -f 1
+    printf 'dotfiles-agent-gate-v4\0tree\0%s\0untracked\0' "$tree"
+    cat -- "$scratch/untracked"
+    printf '\0gitlinks\0'
+    cat -- "$scratch/gitlinks"
+    printf '\0'
+  } >"$scratch/material" 2>"$scratch/err" || {
+    key_failure '鍵の材料を書けない' "$scratch/err"
+    return 1
+  }
+  digest=$(sha256sum <"$scratch/material") || {
+    key_failure '鍵の材料を hash できない'
+    return 1
+  }
+  printf '%s\n' "${digest%% *}"
 }
 
 # 検証の走行の前後で木が触られていないことを示す照合値。source_fingerprint が「どの木か」を名指すのに対し、
@@ -615,12 +773,18 @@ command_record() {
   reap_dead_receipts "$state"
   # 公開前に同じ token の控えを結び直さない
   [ ! -f "$state/.pending.$token" ] || return 0
-  before=$(source_fingerprint "$top")
+  if ! before=$(source_fingerprint "$top" 2>&1); then
+    printf 'dotfiles-agent-gate: 木の鍵を採れないため、この走行の証跡を作らない: %s (%s)\n' "$top" "$before" >&2
+    return 0
+  fi
   if ! witness=$(source_witness "$top"); then
     printf 'dotfiles-agent-gate: 木を照合できないため、この走行の証跡を作らない: %s\n' "$top" >&2
     return 0
   fi
-  after=$(source_fingerprint "$top")
+  if ! after=$(source_fingerprint "$top" 2>&1); then
+    printf 'dotfiles-agent-gate: 採取の後に木の鍵を採れないため、この走行の証跡を作らない: %s (%s)\n' "$top" "$after" >&2
+    return 0
+  fi
   if [ "$before" != "$after" ]; then
     printf 'dotfiles-agent-gate: 採取の間に木が変わったため、この走行の証跡を作らない: %s\n' "$top" >&2
     return 0
@@ -701,11 +865,12 @@ command_arm() {
   store_state "$sessions_root/$session/$id" "$top"
 }
 
-# shell の呼び出しは綴りから書き込み先を読めない。呼ぶ前と後で作業場所の木の指紋を比べ、
-# 変わった repository だけを控える。読むだけの呼び出しは指紋が変わらないので stop を止めない。
+# shell の呼び出しは綴りから書き込み先を読めない。呼ぶ前と後で作業場所の木の鍵を比べ、
+# 変わった repository だけを控える。読むだけの呼び出しや、stage と commit だけの呼び出しは中身を変えず鍵が変わらないので
+# stop を止めない。鍵を採れない木は、呼び出しが木を変えたかを判定できないため、前の側で控える。
 # 後の側は前に控えた repository を測る。呼び出しの中で cwd が移っても、同じ木を比べる。
 command_observe() {
-  local session=$1 call=$2 phase=$3 path=$4 calls state top before
+  local session=$1 call=$2 phase=$3 path=$4 calls state top before after
   local -a held
   [ -n "$session" ] && [ -n "$call" ] || return 0
   calls="$sessions_root/$session/calls"
@@ -713,7 +878,10 @@ command_observe() {
   case $phase in
   PreToolUse)
     top=$(repo_top_of "$path") || return 0
-    before=$(source_fingerprint "$top") || return 0
+    if ! before=$(source_fingerprint "$top" 2>/dev/null); then
+      command_arm "$session" "$top"
+      return
+    fi
     ensure_session_state "$session" calls || return 1
     store_state "$state" "$before"$'\n'"$top"
     ;;
@@ -725,12 +893,12 @@ command_observe() {
     rm -f -- "$state"
     before=${held[0]-} top=${held[1]-}
     [ -n "$before" ] && [ -d "$top" ] || return 0
-    [ "$(source_fingerprint "$top")" = "$before" ] || command_arm "$session" "$top"
+    after=$(source_fingerprint "$top" 2>/dev/null) && [ "$after" = "$before" ] || command_arm "$session" "$top"
     ;;
   esac
 }
 
-# 未検証なら理由を stdout と stderr の両方へ出して 1 で終わる。
+# 未検証なら理由を stdout と stderr の両方へ出して 1 で終わる。木の鍵を採れないときも未検証として、その理由を添える。
 # claude は stderr を、omp の拡張は stdout を読む。
 command_check() {
   local repo=$1 top state entry fingerprint reason
@@ -738,7 +906,15 @@ command_check() {
   entry=$(declared_entry_of "$top") || return $?
   [ -n "$entry" ] || return 0
   state=$(state_dir_of "$top") || return 0
-  fingerprint=$(source_fingerprint "$top")
+  if ! fingerprint=$(source_fingerprint "$top" 2>&1); then
+    reason=$(
+      printf '%s の木の鍵を採れないため、検証済みとは扱えない: %s\n' "$top" "$fingerprint"
+      printf '  原因を取り除いてから通す: cd %s && dotfiles-agent-verify -- %s\n' "$top" "$entry"
+    )
+    printf '%s\n' "$reason"
+    printf '%s\n' "$reason" >&2
+    return 1
+  fi
   if verified_receipt_exists "$state" "$fingerprint"; then
     command_settle "$top" "$verified_receipt_token" || true
     return 0
@@ -764,7 +940,7 @@ command_waive() {
   top=$(repo_top_of "$repo") || fail 'git の木の中で呼ぶ'
   state=$(state_dir_of "$top") || fail 'git の木の中で呼ぶ'
   ensure_project_state "$state" || fail "検証の状態 directory を安全に確保できない: $state"
-  fingerprint=$(source_fingerprint "$top")
+  fingerprint=$(source_fingerprint "$top" 2>&1) || fail "$top の木の鍵を採れないため、免除を控えない: $fingerprint"
   printf -v record 'version=1\nsource=%s\nreason=%s\nat=%s' "$fingerprint" "$reason" "$(date -Iseconds)"
   store_state "$state/$fingerprint.waived" "$record" || return 1
   printf '%s を未検証のまま通す理由を控えた: %s\n' "$top" "$reason"

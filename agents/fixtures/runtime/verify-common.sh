@@ -85,6 +85,18 @@ expect_open_gate() {
   fi
 }
 
+# repository の .git の file の内容だけの digest。時刻は含めず、file の増減は含める
+# 引数 $1: repository
+git_content_digest() {
+  (cd "$1/.git" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum)
+}
+
+# 作業木の file の一覧。.git は含めない
+# 引数 $1: repository
+tree_listing() {
+  (cd "$1" && find . -path ./.git -prune -o -print | LC_ALL=C sort)
+}
+
 # 別 session の孫が検証の返却時点でまだ動くかを判定する観測
 # 引数 $1: 当該 fixture が起動した Linux process 番号
 # 戻り値: 読取可能な非 zombie process なら0でそれ以外は1

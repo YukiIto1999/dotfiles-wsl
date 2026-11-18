@@ -154,6 +154,16 @@ names_entry() {
   return 1
 }
 
+# 未追跡の file があるまま宣言した入口を走らせる呼び出しへの注意
+# 入力 top: 検査する repository の根
+# 副作用: 未追跡で ignore されていない file があれば stderr へ一行。終了statusも証跡も変えない
+# 制約: 証跡の鍵は未追跡 file の path の一覧を含み、検査は追跡 file の一覧を列挙するため、走行の後に追跡すると別の木になる。
+#   Nix の入口は未追跡 file があると入口の解決が拒否するため、この関数の呼び出しへは来ない
+warn_untracked() {
+  IFS= read -r -d '' _ < <(git -C "$top" ls-files --others --exclude-standard -z 2>/dev/null) || return 0
+  printf 'verify: 未追跡の file がある。走行の後に追跡すると証跡の鍵が変わり、通した木とは別の木になるため、先に git add か git add -N で追跡する\n' >&2
+}
+
 if [ "${1-}" = -- ]; then
   shift
 fi
@@ -214,6 +224,7 @@ if names_entry "$*" \
   # slot 待ちの間に source が変わり得るため取得前の検証証跡の記録は不可
   acquire_slot || status=$?
   if [ "$status" -eq 0 ]; then
+    warn_untracked
     if refresh_remaining; then
       run_bounded @gate@ record --repo "$top" --command "$*" --pending "$receipt" >"$entry_file" || status=$?
     else

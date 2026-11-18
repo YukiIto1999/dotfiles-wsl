@@ -826,6 +826,10 @@
             [ ]
             { VERIFY = lib.getExe runtime.verify; };
 
+        agent-verification-run-key = verificationCheck "key" [ ../fixtures/runtime/verify-key.sh ] [ ] {
+          VERIFY = lib.getExe runtime.verify;
+        };
+
         agent-verification-run-state-writers =
           verificationCheck "state-writers" [ ../fixtures/runtime/verify-state-writers.sh ] [ ]
             { };

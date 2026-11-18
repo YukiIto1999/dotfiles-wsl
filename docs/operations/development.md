@@ -50,6 +50,7 @@ dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
 `dotfiles-agent-verify`は毎回commandを実行し、同じprojectのT1だけを直列化する。
 成果物はNixやCargoの依存に従って再利用する。
 agent sessionごとに新しいtarget directoryを作らず、[`toolchain/execution/`](../../toolchain/execution)の実行方針が割り当てるCargoのbuild-dirを使う。
+新しいfileはT1の前に`git add`か`git add -N`で追跡する。証跡は作業木の中身に付き、通った後のstage、commit、amendは証跡を保つが、通った時に未追跡だったfileを後で追跡すると別の木になる。
 
 配備済みの`dotfiles-agent-verify`がcheckoutの宣言より古い間は、同じ宣言から組み立てたwrapperをcheckoutから起動する。
 
@@ -128,7 +129,7 @@ shebangの判定、linkの到達、表示したpathの実在はcheckout全体を
 増えていなかった走行は、進んでいなかった疑いがあり、上限を延ばす前に止まった原因を調べる。
 Nixのbuildはnix-daemonのcgroupで動くため、Nixでbuildする入口ではscopeのCPU時間が実際より小さく、滞留の読取もclientの分しか含まない。
 
-未追跡fileはNixのGit sourceに含まれないため、検証前に`git add`または`git add -N`で追跡する。
+未追跡fileはNixのGit sourceに含まれず、証跡の鍵にもpathの一覧として入るため、検証前に`git add`または`git add -N`で追跡する。
 checkの正本は各unitの検査と`flake.nix`の導出結果であり、件数やcheck名を文書の別一覧へ転記しない。
 
 検査を変えるときは、利用側が依存する振る舞い、境界入力、状態遷移を意図的に壊すと失敗することを確かめる。

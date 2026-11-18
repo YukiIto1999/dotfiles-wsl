@@ -208,6 +208,18 @@ T2の予算はpushの時だけ要るため、pushと関係の無い作業を止�
 宣言を読めないrepositoryでは評価器を起動せず、`--candidates`が評価を要しない置き場とflake.nixから集めた入口になり得る綴りだけで判別する。
 その綴りと一致する根での呼び出しは実行せずに拒否し、一致しないlocal commandは直接実行する。
 終了gateは登録済みの入口の予算を要求し、宣言の不正と追跡済みfileの欠落を入口なしとして通さない。
+検証の証跡の鍵は作業木の中身だけで決め、HEADとcommitの履歴を含めない。
+中身は、追跡fileとignoreされていない未追跡fileの内容とmodeを実のindexの私的な写しへ`git add -A`して得るtree id、実のindexから採る未追跡fileのpathの一覧、gitlinkごとの値である。
+`git add -A`はgitlinkのHEADしか記録せず中の変更を見落とすため、gitlinkの値には中のrepositoryの鍵を使い、未取得の空のdirectoryは定数とする。
+実のindex、object、refの内容は書き換えず、写しと一時objectは検査する木の外の一時directoryへ置いて返る前に捨てる。同じ内容の既存objectは、gitが更新時刻だけを新しくすることがある。
+stage、commit、amend、件名の書換え、中身が同じ別のlinked worktreeは鍵を変えないため、検証した中身への証跡はそれらの後も残る。
+中身、mode、削除、新しい未追跡file、submoduleの中の変更は別の木になる。
+検査は追跡fileの一覧を列挙するため、検証の時に未追跡だったfileを後で追跡すると、未追跡pathの一覧が変わって別の木になる。新しいfileは検証の前に`git add`か`git add -N`で追跡する。
+ignoreされたfile、`assume-unchanged`や`skip-worktree`の印の付いたfile、改行の変換やcleanフィルタの後でgitが同じ内容とみなす変更は見えない。
+読めないfileやcommitの無い入れ子のrepositoryなど、鍵を採れない木は理由を添えて未検証とし、waiveも受け付けず、T1は入口を通しても証跡を作らない。
+shellの呼び出しの観察は前後の同じ鍵を比べるため、stageとcommitだけの呼び出しは終了を止めず、呼ぶ前の鍵を採れない呼び出しは止める。
+`TMPDIR`かcacheが検査する木の中にあると一時fileが鍵へ混ざるため、鍵を採らない。
+鍵は版を持ち、版の違う控えは一致せず、移行は持たない。
 検証の証跡は走行tokenごとに検査前のsourceへ固定し、検査後にもHEAD、index、tracked diff、non-ignored untracked fileの内容とmetadataを照合する。
 tracked fileのmetadataと内容hashはまとめて取得して読み取り前後を照合し、gitlinkも内容まで再帰的に確認する。
 sourceが変わった走行では証跡を公開せず、時間内の保存と後始末を見届けたwrapperだけが完了を記す。

@@ -31,6 +31,7 @@ T1はunitの検査と全hostおよび既存variantの評価、T2の`verify-push`
 T1は一つのNix依存グラフで実行し、同一projectのT1はwrapperのslotで直列化する。
 予算を超えても必要な検査を後の段へ移さず、依存と実行計画を見直す。
 NixのGit sourceから漏れる未追跡fileは、検証前に`git add`または`git add -N`で追跡する。
+T1の証跡は作業木の中身に付くため、通った後のcommitとamendは証跡を保つ。通った時に未追跡だったfileを後で追跡すると別の木になる。
 
 ## コミット
 

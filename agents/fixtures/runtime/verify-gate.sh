@@ -306,6 +306,26 @@ check_stop_covers_subagent_changes() {
   }
 }
 
+# 同じ project の作業木は別の控えになる。片方の作業木だけを検証しても、もう片方を控えた session の終了は止まる。
+# 作業木の中身が同じだと証跡は共有されるため、二つ目の作業木には未追跡の file を足して別の木にする。
+check_worktrees_of_one_project_are_held_apart() {
+  local first=$fixture/worktree-first second=$fixture/worktree-second session=fixture-worktrees
+
+  t1_repository "$first" 60
+  git -C "$first" worktree add -q --detach "$second"
+  printf 'second only\n' >"$second/note"
+  as_owner '' arm --session "$session" --path "$first"
+  as_owner '' arm --session "$session" --path "$second"
+  (cd "$second" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+  expect_stop_status 2 '' "$session" "$first" 'stop after only the second worktree was verified'
+  if ! grep -qF "$(realpath -e -- "$first")" "$fixture/stop-output"; then
+    echo 'stop did not name the worktree that was not verified' >&2
+    exit 1
+  fi
+  (cd "$first" && PATH="$fixture/entry-bin:$PATH" "$VERIFY" -- devenv shell -- verify)
+  expect_stop_status 0 '' "$session" "$first" 'stop after both worktrees were verified'
+}
+
 # 門は、入口を宣言する repository でだけ「通っていない」と答える。
 # 宣言が無ければ何も要求しない。
 gate_repo=$fixture/gate-repo
@@ -491,3 +511,4 @@ check_wrapper_runs_every_time
 check_edits_gate_on_freshness_only
 check_waiver_is_scoped_to_its_session
 check_stop_covers_subagent_changes
+check_worktrees_of_one_project_are_held_apart

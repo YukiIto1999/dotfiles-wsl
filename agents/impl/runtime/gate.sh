@@ -862,16 +862,19 @@ arm_under() {
 # repository を控える。hook の session の directory に加えて、launcher の session の directory(DOTFILES_AGENT_SESSION_ID)にも控える。
 # omp の subagent は自分の session ID で hook を呼ぶが、終了の hook は親にしか来ず、親は launcher の ID を共有する。
 # subagent だけが変えた repository を、親の終了が拾うためである。hook の session の控えは、再開が同じ ID で拾うため残す。
+# 控えの名は作業木の根で決める。project の鍵で決めると、同じ project の別の作業木の控えが前の控えを上書きし、
+# 前の作業木を誰も問わなくなる。stop は名ではなく中身(根)を読むため、project の鍵の名の旧い控えも読まれる。
 command_arm() {
-  local session=$1 path=${2:-$PWD} owner=${DOTFILES_AGENT_SESSION_ID-} top id status=0
+  local session=$1 path=${2:-$PWD} owner=${DOTFILES_AGENT_SESSION_ID-} top physical name status=0
   [ -n "$session" ] || fail 'arm には --session が要る'
   [ -e "$path" ] || path=$(dirname -- "$path")
   [ -d "$path" ] || path=$(dirname -- "$path")
   top=$(repo_top_of "$path") || return 0
-  id=$(project_id_of "$top") || return 0
-  arm_under "$session" "$id" "$top" || status=1
+  physical=$(realpath -e -- "$top") || return 0
+  name=$(printf '%s' "$physical" | sha256sum | cut -d ' ' -f 1)
+  arm_under "$session" "$name" "$top" || status=1
   if [ "$owner" != "$session" ] && session_name_is_valid "$owner"; then
-    arm_under "$owner" "$id" "$top" || status=1
+    arm_under "$owner" "$name" "$top" || status=1
   fi
   return "$status"
 }

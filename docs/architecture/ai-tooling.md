@@ -259,6 +259,8 @@ providerの`error`と`aborted`による停止ではgateを実行せず、検証�
 編集を記録したrepositoryは、hookのsession IDの下に加えて、`DOTFILES_AGENT_SESSION_ID`（launcherのsession ID）の下にも控える。
 OMPのsubagentは自分のsession IDでhookを呼ぶが、終了のhookは親にしか来ず、親はlauncherのIDを共有する。subagentだけが変えたrepositoryも、親の終了が確認するためである。
 終了のhookは二つの下の控えを、同じrepositoryなら一度だけ問う。hookのsession IDの控えは、再開が同じIDで拾うため残す。
+控えの名は作業木の根のsha256で、同じprojectの別のworktreeは別の控えになる。projectの鍵で名付けると、後の控えが前の控えを上書きし、前のworktreeを誰も問わないためである。
+終了のhookは名ではなく控えの中身（根）を読むため、projectの鍵の名の旧い控えも読む。
 waiveは木の鍵ごとに、`DOTFILES_AGENT_SESSION_ID`（launcherがclientの起動ごとに与える値で、hook、shellの呼出し、subagentが共有する）を持ち主として、理由を一行で`<鍵>.<持ち主のsha256の先頭16桁>.waived`へ残す。
 checkと終了が受理するのは、自分の名札のfileで持ち主の行が自分と等しい免除だけである。別のsessionが残した免除で、自分の終了が未検証の木を通らないようにするためである。
 持ち主が空（agentの外）の免除は持ち主が空の呼出しだけを通し、他の持ち主の記録を自分の名札の名へ写しても受理しない。名札を持たない旧い`<鍵>.waived`は読まず、移行も持たない。

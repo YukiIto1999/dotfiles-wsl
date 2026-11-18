@@ -627,9 +627,11 @@ class Admission:
 
         supervisor: signalと公開状態を所有する監督器
         wait_until: 待機の絶対期限。走行の秒数とは別に数える
-        launch: scope の前置 argv、oom_score_adj、待機の絶対期限を受け、判定の排他の中で client を起動する関数
+        launch: scope の前置 argv、oom_score_adj、待機の絶対期限を受け、判定の排他の中で client を起動する関数。起動に至らなければFalse
         戻り値: 入場して起動した、または入れ子で外側の scope の中にいる場合のTrue。取消と期限切れはFalse
         失敗: scope を作れない場合や明示需要が上限を超える場合の AdmissionError
+        制約: 取消も期限も無いのに起動に至らなかったのは、command が猶予内に scope へ入れなかったためで、失敗にせず、
+            その理由を待機の理由に残して、期限まで入場をやり直す
         """
         if self.inherit():
             return True
@@ -660,6 +662,8 @@ class Admission:
                         if decision.kind == ADMIT and supervisor.cancel_signal is None and time.time() < wait_until:
                             if launch(self.scope_command(), OOM_SCORES[self.klass], wait_until):
                                 return True
+                            if supervisor.cancel_signal is None and time.time() < wait_until:
+                                reason = f"the command did not enter its scope within {self.policy.entry_seconds:g}s"
                         if decision.kind == CANCEL_DEEP:
                             self.cancel(scopes)
                 finally:

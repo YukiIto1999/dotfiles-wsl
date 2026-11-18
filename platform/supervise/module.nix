@@ -47,7 +47,7 @@ in
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
       上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
       `--resource-key KEY`を渡した走行は、記録があれば新しい5件のピークの最大を既定値の代わりに予約し、記録が無ければ記録directoryの他の鍵の最新のピークの中央値（件数が偶数なら大きい側）を、それも無ければ既定値を予約する。
-      明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。scopeを作れない場合も70で、commandは起動しない。
+      明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。`systemd-run`が自分で非ゼロで終わってscopeを作れない場合も70で、commandは起動しない。
       待機と走行は別に数える。`--resource-wait-until`までに入場できなければcommandを起動せず75で返し、`--resource-run-seconds`は入場して起動した時から数えて、超えれば取り消して124で返す。
       `--resource-target-seconds SEC`は走行の秒数がSECに達した時点の読取を残す目標で、`--resource-run-seconds`と同じく入場して起動した時から数える。記録だけに使い、取消にも走行の枠にも使わず、`--resource-policy`が要る。
       `--resource-slot-wait SEC`は呼び出し側が実行枠の取得に待った秒数（0を含む）で、supervisorは値を記録へ運ぶだけで枠を持たず、待機にも期限にも使わない。`--resource-policy`が要り、渡さない走行（枠を使わない走行）はnullである。
@@ -68,7 +68,7 @@ in
       processを一つも持たないscope（`cgroup.events`が読めて`populated`が0）は空きの計算に数えず、読めないscopeは数える。判定は見つけた空のscopeを`systemctl --user stop --no-block`で一度ずつ止め、取消の記録は残さない。失敗はunit名を一行stderrへ出して判定を続ける。この前提は、classのsliceの下にscopeを作る全てのpolicyが同じ`runtimeDirectory`の排他を共有することである。
       scopeへ入れなかった走行（取消、待機の上限、猶予切れ、systemd-runの終了）は、clientを殺して回収した後に自分のscopeのunitを同じstopで止め、終了statusは変えない。unitを持たない場合は黙る。
       scopeの中で最初に動くhelperはsupervisorのPIDを受け、supervisorが死ねばSIGKILLを受け、起動した時に親が違えばcommandを実行せずに終わる。commandへ置き換わる前にこの設定を外すので、起動したcommandはsupervisorより長く生きる。
-      policyの`scopeEntrySeconds`（省略時10）は、systemd-runが作ったscopeへcommandが入るまでの猶予秒数で、過ぎれば70で終わる。
+      policyの`scopeEntrySeconds`（省略時10）は、systemd-runが作ったscopeへcommandが入るまでの猶予秒数である。過ぎた走行は失敗にせず、そのscopeを止めて`--resource-wait-until`まで入場をやり直し、入れなければ75で返し、入れなかったことを待機の理由に残す。
       資源予約を持つ実行にはrequire-drainedを適用する。
     '';
   };

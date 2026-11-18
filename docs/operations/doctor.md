@@ -288,6 +288,7 @@ T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の�
 入場を止める観測はguestの値で、`linux-memory`、`cgroup-budget`、`cpu`のoutcomeが成立しないか読めなければ、どちらのclassも待つ。
 `memory-pressure`と`io-pressure`は受入を止めず、深い検証はfailure（`full avg60`が40%以上）の時だけ止める。warningでは止めない。
 待機は走行の予算から分ける。入場の待ちには走行の予算と同じ秒数の上限があり、超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
+commandがscopeへ猶予（10秒）内に入れなかった走行は、commandが一度も動いていないので失敗とせず、そのscopeを止めて入場をやり直し、上限までに入れなければ75で返る。load averageが高い時に起きやすい。入れなかったことは、計測の`waitReasons`とstderrの待機理由に`the command did not enter its scope within 10s`として残る。`systemd-run`が自分で非ゼロで終わってscopeを作れない場合だけ、70で返る。
 走行の予算は入場して起動した時から数え、超えれば取り消されて124で返る。待機の理由と待った秒数はjournaldの計測の一行と、stderrの待機理由で確認する。
 非対話のjobは判定へ参加しない。serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけで、入場を待たず、受入に取り消されず、深い検証の一走行にも数えない。実測のピークが約0.3 GiBで、memoryの判定に並べる量ではないためである。
 同じ処理を別入口から追加投入して待機を迂回しない。

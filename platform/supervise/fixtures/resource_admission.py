@@ -391,10 +391,13 @@ class ResourceAdmission(unittest.TestCase):
         """The units the supervisors asked the fake systemd to stop, in the order they asked."""
         return [call[-1] for call in self.calls("ctl") if "stop" in call]
 
+    def units_asked_for(self):
+        """The units of the scopes that supervisors asked the fake systemd to create, in the order they asked."""
+        return [argument.removeprefix("--unit=") for call in self.calls("run") for argument in call if argument.startswith("--unit=")]
+
     def asked_for(self):
         """The unit of the one scope that a supervisor asked the fake systemd to create."""
-        (call,) = self.calls("run")
-        (unit,) = [argument.removeprefix("--unit=") for argument in call if argument.startswith("--unit=")]
+        (unit,) = self.units_asked_for()
         return unit
 
     def leave_scope(self, klass, name, events):
@@ -1059,13 +1062,39 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual(process.returncode, 143, error)
         self.assert_stopped_and_gone(started)
 
-    def test_a_run_that_does_not_enter_its_scope_within_the_grace_stops_the_scope(self):
-        """Neither the wait limit nor a cancellation is near, so the grace ends the run."""
-        process, started = self.stranded("grace", scopeEntrySeconds=ENTRY_GRACE)
+    def test_a_run_that_does_not_enter_its_scope_within_the_grace_stops_it_tries_again_and_ends_75(self):
+        """The command never ran, so the delay that kept it out is no failure: each scope is stopped, the entry is tried again
+        until the wait limit, and the run is reported as not executed, with the reason."""
+        process, started = self.stranded("grace", wait=4 * ENTRY_GRACE, scopeEntrySeconds=ENTRY_GRACE)
         _, error = process.communicate(timeout=HANG_SECONDS)
-        self.assertEqual(process.returncode, 70, error)
-        self.assertIn(f"did not enter it within {ENTRY_GRACE}s", error)
-        self.assert_stopped_and_gone(started)
+        self.assertEqual(process.returncode, 75, error)
+        self.assertNotIn("cannot stop", error)
+        self.assertFalse(started.exists())
+        units = self.units_asked_for()
+        self.assertGreaterEqual(len(units), 2)
+        self.assertEqual(self.stops(), units)
+        self.assertEqual(self.scopes("acceptance"), [])
+        (_, record), = self.measurements()
+        self.assertEqual((record["status"], record["admitted"]), (75, False))
+        self.assertEqual(record["waitReasons"], [f"the command did not enter its scope within {ENTRY_GRACE}s"])
+
+    def test_a_command_that_enters_its_scope_on_a_later_attempt_runs_once_and_the_first_scope_is_gone(self):
+        """The grace costs a retry and not the run: the scope that was given up is stopped, and the next one is entered."""
+        gate = self.root / "later.gate"
+        process, started = self.stranded("later", gate=gate, scopeEntrySeconds=ENTRY_GRACE)
+        # The first attempt is given up after the grace, and the gate is open for the next.
+        self.wait_for(lambda: self.stops(), process)
+        gate.touch()
+        self.wait_for(started.exists, process)
+        (self.root / "later.release").touch()
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 0, error)
+        first, _ = self.units_asked_for()
+        self.assertEqual(self.stops(), [first])
+        self.assertTrue(json.loads((self.root / "later.result").read_text())["spawned"])
+        (_, record), = self.measurements()
+        self.assertEqual((record["status"], record["admitted"]), (0, True))
+        self.assertEqual(record["waitReasons"], [f"the command did not enter its scope within {ENTRY_GRACE}s"])
 
     def test_a_run_whose_systemd_run_ends_after_making_the_scope_stops_the_scope(self):
         """The manager made the scope and systemd-run failed afterwards: the status is the failure to create, and the scope goes."""

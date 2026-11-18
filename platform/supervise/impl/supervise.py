@@ -818,8 +818,10 @@ class Supervisor:
 
         program: scope を作る command の名前。失敗の説明に使う
         wait_until: 待機の絶対期限
-        戻り値: helper が止まった場合のTrue。scope へ入る前に取消された場合と待機の期限が来た場合のFalse
-        失敗: systemd-run が入らずに終わった場合と、猶予内に入れない場合の AdmissionError
+        戻り値: helper が止まった場合のTrue。scope へ入る前に取消された場合、待機の期限が来た場合、猶予内に入れなかった場合のFalse
+        失敗: systemd-run が入らずに自分で終わった場合の AdmissionError
+        制約: 猶予内に入れなかったことは失敗にしない。command は一度も動いていないので、負荷が高い時の遅れで検証が失敗にならないよう、
+            呼び側が入場をやり直せるようにする
         """
         until = time.monotonic() + self.reservation.policy.entry_seconds
         while True:
@@ -833,8 +835,7 @@ class Supervisor:
             if self.cancel_signal is not None or time.time() >= wait_until:
                 return False
             if time.monotonic() >= until:
-                raise AdmissionError(
-                    f"cannot create the scope: {program} did not enter it within {self.reservation.policy.entry_seconds:g}s")
+                return False
             self.wait_for_event(0.01)
 
     def launch_in_scope(self, prefix, oom_score, wait_until):
@@ -843,8 +844,8 @@ class Supervisor:
         prefix: systemd-run で scope を作る argv。この後ろに -- と helper が続く
         oom_score: scope の中の process へ設定する oom_score_adj
         wait_until: 待機の絶対期限。scope を作る待ちも待機に数え、期限が来れば入場しない
-        戻り値: scope に入って起動した場合のTrue。scope へ入る前に取消された場合と待機の期限が来た場合のFalse
-        失敗: scope を作れない、または猶予内に入れない場合の AdmissionError
+        戻り値: scope に入って起動した場合のTrue。scope へ入る前に取消された場合、待機の期限が来た場合、猶予内に入れなかった場合のFalse
+        失敗: scope を作れない場合の AdmissionError
         制約: helper は scope に入った後に自分を止め、ここで scope の存在を確かめてから再開する。
             再開前の client は command を実行していないので、取消や失敗や期限切れでは何も実行されていない。
             起動に至らない出方は、例外も含めて全て abandon_entry を通り、client を殺して回収し、この走行の scope の unit を止める。

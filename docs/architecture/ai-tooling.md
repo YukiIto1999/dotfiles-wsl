@@ -156,6 +156,7 @@ Windowsのcommit余裕、物理空き、`windows-memory`と`wsl-cap`のoutcome�
 明示した値がその上限を超える場合は、待たずにcommandを起動せず70で返す。
 supervisorは資源予約を持つ走行の所有する子孫のPSS合計を約1秒ごとに測り、鍵を渡した走行のうち、子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了したものか、ピークが予約を超えたものだけを新しい順に10件まで記録する。
 同じ走行のscopeのcgroupから、終了時のCPU時間と滞留（`cpu.stat`、`cpu.pressure`、`io.pressure`、`memory.pressure`）を読み、目標を渡された走行が目標の時点でなお動いていれば、その時点の同じ値も読んで、`--result`とjournalへ残す。
+終了時には走行のscopeのメモリ回収と祖先の`memory.high`の発火も記録する。祖先の発火はその下の走行で共有する値で、一走行の使用量には加えない。
 上限での取消と外からの取消でも残り、読めない値はnullで、終了statusは変えない。項目の定義と、Nixのbuildの分を含まないことは[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 記録の置き場、鍵、需要の導き方、予約を超えた走行のstderrの一行は[Doctor](../operations/doctor.md#資源不足による開始待ち)を参照する。
 入れ子は、現在のprocessがclassのscopeの下にいれば、そのscopeの中で外側のclassのまま動く。入れ子で昇格せず、scopeも作らず、待たない。明示した需要が外側のscopeの需要を超える場合は、外側の宣言を修正するまで拒否する。記録由来と既定値由来の需要は外側の需要へ切り詰め、拒否しない。

@@ -83,6 +83,7 @@ T1の検査本体の資源予約は、repositoryの根と入口のcommandごと�
 wrapperとpre-pushは目標を時間予算と同じsnapshotから読み、検査本体の走行のsupervisorへ`--resource-target-seconds`で渡す。不正な目標は不正な上限と同じく、補完も無視もせず拒否する。
 supervisorは資源予約を持つ走行の終了時に、走行のscopeのcgroupからCPU時間（`cpuSeconds`）と、CPU、IO、memoryの滞留（`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`）を読み、`--result`とjournalへ秒で残す。
 走行が目標の時点でなお動いていれば、同じ四つの値をその時点で読み、`atTarget`として残す。目標より前に終わった走行の`atTarget`はnullである。
+終了時には回収後の再fault・swap入出力・`memory.high`の発火も記録する。祖先の発火は同じ期間の他の走行を含むため、[Doctorの計測項目](doctor.md#資源不足による開始待ち)に従って読み分ける。
 上限での取消と外からの取消でも終了時の値を残し、読めない値はnullで、終了statusは変えない。目標の時点の読取は、止まった走行を早く止める判断の根拠にするための記録で、何も止めない。
 走行が目標を超えると、wrapperはstderrへ一行を出す。目標、走行の秒数、走行の秒数に占める三つの滞留の割合を示し、終了statusは変えない。
 上限で取り消された走行（124）には、同じ行に、目標の時点から走行のscopeのCPU時間が増えたかを添える。増えたCPU時間が目標の後の秒数の一割に満たない走行は、進行中とは書かない。

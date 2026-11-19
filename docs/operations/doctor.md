@@ -337,21 +337,33 @@ supervisorは資源予約を持つ走行の間、所有する子孫のPSS合計�
 記録の読み書きの失敗はstderrへ一行を出すだけで、commandの終了statusを変えず、鍵の記録を読めない場合は記録の無い鍵と同じ需要で予約する。
 
 資源予約を持つ走行は、終了のたびに計測の一行をjournaldへ`dotfiles-supervise`の識別子で残す。
-入場の待ちの長さと、走行に要した時間、予約とピークの差、走行のscopeが使ったCPU時間と滞留を、資源の扱いを変える前後で比べるための記録である。
+入場の待ちの長さと、走行に要した時間、予約とピークの差、走行のscopeが使ったCPU時間と滞留と回収の累計を、資源の扱いを変える前後で比べるための記録である。
 
 ```sh
 journalctl -t dotfiles-supervise -o cat | jq -c .
 ```
 
-MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`slotWaitSeconds`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`、走行のscopeから読んだ`cpuSeconds`、`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`、渡された目標の`targetSeconds`と、目標の時点の読取の`atTarget`を持つ。
+MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`slotWaitSeconds`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`、走行のscopeから読んだ`cpuSeconds`、`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`と、回収の累計の`memoryHighEvents`、`anonRefaultPages`、`fileRefaultPages`、`swapInPages`、`swapOutPages`、scopeの祖先の境界の`ancestorHighEvents`、渡された目標の`targetSeconds`と、目標の時点の読取の`atTarget`を持つ。
 `slotWaitSeconds`はT1が同じprojectの実行枠（git common directoryごと）を待った秒数で、`waitSeconds`（資源の入場の待ち）とは別である。待たなかったT1は0、実行枠を使わない走行（pre-pushの検査本体、`dotfiles-workload-run`）はnullで、枠の待ちが長い走行を資源の待ちと取り違えないために残す。supervisorは枠を持たず、T1のwrapperが測った秒数を`--resource-slot-wait`で受けて記録へ運ぶだけで、枠の単位も待ちの上限も変えない。
 `nested`がtrueの行は外側の走行の中の入れ子で、外側とは別の行になるため、待機の集計では除く。
 `admitted`がfalseなら未起動で、75は待機の上限に達した未実行である。trueの124は入場後の走行の期限切れで、143は取消である。
 `cpuSeconds`はscopeの`cpu.stat`の`usage_usec`、`cpuStallSeconds`は`cpu.pressure`の`some`、`ioStallSeconds`は`io.pressure`の`full`、`memoryStallSeconds`は`memory.pressure`の`full`の`total=`で、いずれも秒（ミリ秒精度）である。
 終了時の値は、終了を始める時に読んだ値で、読めなかった項目は約1秒ごとの読取の直近の値になる。scopeは最後のprocessの終了で消えるためである。上限での取消と外からの取消でも残る。
 scopeを持たない入れ子の走行と、読めない項目はnullで、読めなくても終了statusは変わらない。Nixのbuildはnix-daemonのcgroupで動くため、Nixでbuildする入口ではscopeの値がbuildの分を含まない。
+回収の累計は、scopeの`memory.events`の`high`（`memoryHighEvents`、回数）と、`memory.stat`の`workingset_refault_anon`（`anonRefaultPages`）、`workingset_refault_file`（`fileRefaultPages`）、`pswpin`（`swapInPages`）、`pswpout`（`swapOutPages`）である。
+`Pages`はkernelの基本pageの数で、supervisorはbyteへ換算しない。どれもscopeの子孫を含む。
+scopeは走行のために作るので、作成からの累計がそのまま走行の分である。
+再faultは、一度回収したページが再び必要になったことを示す。カウンターだけでは、どの入力を何秒後に読み直したかは特定できない。
+`memoryHighEvents`の読み元は階層込みの`memory.events`である。走行のscopeかその子孫で`memory.high`が発火した回数を表し、祖先の境界だけが発火してもこの値には現れない。
+回収の累計は上のCPU時間と滞留と同じ読取で読み、終了時の値と読めなかった項目の扱いも同じである。fileが無い、行が無い、数でない項目は0にせずnullにする。scopeを持たない入れ子の走行は全項目がnullである。読取を増やすfileは`memory.stat`と`memory.events`の二つで、常駐するprocessも周期も足さない。
+`ancestorHighEvents`は、scopeの祖先のうち有限の`memory.high`を持つcgroup（`agents.slice`、`user@<uid>.service`、`user.slice`など）ごとに、`memory.events.local`の`high`がcommandの再開の直前から終了を始める時までに増えた回数で、cgroupのunit名をキーにする。
+`memory.high`が`max`のcgroupは境界でないため含めない。階層込みの`memory.events`は下位のscopeが自分の境界を超えた回数を含むため読まず、そのcgroup自身の境界だけを数える`memory.events.local`を読む。
+この値は、そのcgroupの下で動く全てのprocess（他のscope、session、Dockerを含む）が数える共有の値である。この走行が回収に回された回数でも、この走行の使用量でもなく、増えていれば走行の間にその境界を超えたprocessがいたことだけを示す。
+前後のどちらかを読めない境界、`memory.high`を読めず境界かを確かめられないcgroup、回数が減った境界（cgroupの作り直し）はnullで、差を捏造しない。scopeを持たない入れ子の走行と、終了を始める読取に至らなかった走行は全体がnullである。
+読むfileは祖先ごとの`memory.high`と、境界の`memory.events.local`だけで、走行の前に一度、終了を始める時に境界の分を一度読む。
+Nixのbuildを動かすnix-daemonのcgroupは、複数の走行とbuildが共有するため、一走行へ帰属できる値がなく、記録しない。
 `targetSeconds`は呼び出し側が`--resource-target-seconds`で渡した目標の秒で、渡さない走行ではnullである。
-走行が目標の時点でなお動いていれば、`atTarget`がその時点で読んだ同じ四つの項目を持つ。目標より前に終わった走行と、目標を持たない走行ではnullである。これは記録で、取消にも走行の枠にも使わない。
+走行が目標の時点でなお動いていれば、`atTarget`がその時点で読んだ同じ四つの項目（CPU時間と三つの滞留。回収の累計と祖先の境界は含めない）を持つ。目標より前に終わった走行と、目標を持たない走行ではnullである。これは記録で、取消にも走行の枠にも使わない。
 `--result`のfinished段階にも、`runSeconds`と上の項目が入る。
 記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。
 

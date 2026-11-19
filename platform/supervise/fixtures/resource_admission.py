@@ -169,6 +169,44 @@ EARLY_READINGS = {"cpuSeconds": 1.5, "cpuStallSeconds": 0.25, "ioStallSeconds": 
 LATE_FILES = scope_files(2_500_000, 1_234_567, 2_000_000, 500_000)
 LATE_READINGS = {"cpuSeconds": 2.5, "cpuStallSeconds": 1.235, "ioStallSeconds": 2.0, "memoryStallSeconds": 0.5}
 NO_READINGS = dict.fromkeys(READINGS)
+# The counters the supervisor reads of a scope's memory.stat and memory.events, as the result and the journal name them.  The scope
+# is made for the run, so what it counts since it was made is what the run counts.
+COUNTERS = ("memoryHighEvents", "anonRefaultPages", "fileRefaultPages", "swapInPages", "swapOutPages")
+NO_COUNTERS = dict.fromkeys(COUNTERS)
+# What `get` gives for a field that a record does not carry, so that a missing field fails an assertion by its value.
+ABSENT = "absent from the record"
+# A memory.high that is a limit and not `max`: the boundary of a cgroup that has one.
+LIMIT = "33844867072"
+
+
+def events(high):
+    """A memory.events, or a memory.events.local, of a cgroup that has gone over its memory.high the given number of times."""
+    return f"low 0\nhigh {high}\nmax 0\noom 0\noom_kill 0\noom_group_kill 0\n"
+
+
+def counter_files(high, anon_refault, file_refault, swap_in, swap_out):
+    """The memory.stat and memory.events of a scope that hold the given counts; the lines that are not read carry other numbers,
+    among them the zero-page and the activation lines whose names begin like the ones that are read."""
+    return {"memory.stat": (f"anon 1\nfile 1\nworkingset_refault_anon {anon_refault}\nworkingset_refault_file {file_refault}\n"
+                            f"workingset_activate_anon 77\npswpin {swap_in}\npswpout {swap_out}\nswpin_zero 88\nswpout_zero 99\n"
+                            "pgscan_direct 123\n"),
+            "memory.events": events(high)}
+
+
+EARLY_COUNTER_FILES = counter_files(3, 10, 20, 30, 40)
+EARLY_COUNTERS = {"memoryHighEvents": 3, "anonRefaultPages": 10, "fileRefaultPages": 20, "swapInPages": 30, "swapOutPages": 40}
+LATE_COUNTER_FILES = counter_files(900, 7_989_617, 4_023_041, 7_982_586, 9_184_089)
+LATE_COUNTERS = {"memoryHighEvents": 900, "anonRefaultPages": 7_989_617, "fileRefaultPages": 4_023_041, "swapInPages": 7_982_586,
+                 "swapOutPages": 9_184_089}
+
+
+def ancestor_paths(root, klass):
+    """The cgroups above a scope of the class, nearest first and down to the one just below the root, by unit name."""
+    uid = os.getuid()
+    parts = (root / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service" / SLICES[klass]).relative_to(root).parts
+    return {parts[index]: root.joinpath(*parts[:index + 1]) for index in reversed(range(len(parts)))}
+
+
 # Run inside a scope: stand for the command's own nested call by finding the scope it runs in, telling the inner
 # supervisor so through its own-cgroup file, and running that supervisor.  It ignores SIGTERM, as a command that is
 # cancelled while it waits for a stage does, and leaves the inner supervisor's status in a file for the test to read.
@@ -1782,6 +1820,118 @@ class ResourceAdmission(unittest.TestCase):
         (nested,) = [record for _, record in self.measurements() if record["nested"]]
         self.assertEqual({field: nested[field] for field in READINGS}, NO_READINGS)
         self.assertEqual((nested["targetSeconds"], nested["atTarget"]), (600, None))
+
+    # The reclaim counters of the scope and the boundaries above it
+
+    def reports(self, result):
+        """The result and the journal line of the one run, which say the same."""
+        (_, record), = self.measurements()
+        return result, record
+
+    def lay_boundaries(self, klass, boundaries):
+        """Lay the cgroups above the class's scopes before a run: for each named unit its memory.high text and the count in its
+        memory.events.local, no file for a value that is None.  Returns the path of every cgroup above a scope, by unit name."""
+        paths = ancestor_paths(self.cgroup, klass)
+        for name, (limit, count) in boundaries.items():
+            paths[name].mkdir(parents=True, exist_ok=True)
+            if limit is not None:
+                (paths[name] / "memory.high").write_text(limit + "\n")
+            if count is not None:
+                (paths[name] / "memory.events.local").write_text(events(count))
+        return paths
+
+    def test_a_run_reports_the_reclaim_counters_its_scope_has_when_the_command_ends(self):
+        """The scope's own counts when the command ends are the run's; the cgroups above it carry other, larger counts that are no part of them."""
+        for path in ancestor_paths(self.cgroup, "acceptance").values():
+            path.mkdir(parents=True, exist_ok=True)
+            (path / "memory.stat").write_text(counter_files(7, 7_000_000, 7_000_000, 7_000_000, 7_000_000)["memory.stat"])
+            (path / "memory.events").write_text(events(777))
+        status, _, result = self.run_scope_files("counters", EARLY_COUNTER_FILES, LATE_COUNTER_FILES)
+        self.assertEqual(status, 0)
+        for report in self.reports(result):
+            self.assertEqual({field: report.get(field, ABSENT) for field in COUNTERS}, LATE_COUNTERS)
+
+    def test_a_run_cancelled_from_outside_reports_the_reclaim_counters_the_scope_had(self):
+        """The acceptance that needs the memory stops the deep run, and its scope is gone at once; the counters are those of the last sample."""
+        marker, release = self.root / "deep", self.root / "deep.release"
+        deep, deep_started, _ = self.start("deep", klass="deep", cwd=self.repo,
+                                           command=[*SCOPE_FILES, str(marker), str(release), json.dumps(EARLY_COUNTER_FILES), "{}", "stay"],
+                                           arguments=["--resource-memory", str(4 * GIB)])
+        self.wait_for(deep_started.exists, deep)
+        time.sleep(SAMPLING_SECONDS + TARGET_MARGIN)
+        self.observe(hostMemoryHeadroomBytes=GIB, memoryHeadroomBytes=GIB)
+        acceptance, started, acceptance_release = self.start("acceptance", arguments=["--resource-memory", str(2 * GIB)])
+        self.wait_for(lambda: deep.poll() is not None, acceptance)
+        self.observe(hostMemoryHeadroomBytes=10 * GIB, memoryHeadroomBytes=10 * GIB)
+        self.wait_for(started.exists, acceptance)
+        result = json.loads((self.root / "deep.result").read_text())
+        self.assertEqual((deep.returncode, result["status"], result["cancelled"]), (143, 143, True))
+        (_, record), = [entry for entry in self.measurements() if entry[1]["class"] == "deep"]
+        for report in (result, record):
+            self.assertEqual({field: report.get(field, ABSENT) for field in COUNTERS}, EARLY_COUNTERS)
+        acceptance_release.touch()
+        self.assertEqual(self.finish(acceptance), 0)
+
+    def test_reclaim_counters_that_cannot_be_read_are_null_and_never_zero(self):
+        """A scope without the files, a line that is missing and a value that is no number each cost the counter concerned and not the exit status."""
+        status, _, result = self.run_command("no-counter-files", status=3)
+        self.assertEqual(status, 3)
+        for report in self.reports(result):
+            self.assertEqual({field: report.get(field, ABSENT) for field in COUNTERS}, NO_COUNTERS)
+        partial = {"memory.stat": "anon 1\nworkingset_refault_anon x\nworkingset_refault_file 5\npswpout 4\n", "memory.events": "low 0\nmax 0\n"}
+        status, _, result = self.run_scope_files("partial-counter-files", partial, partial)
+        self.assertEqual(status, 0)
+        for report in self.reports(result):
+            self.assertEqual({field: report.get(field, ABSENT) for field in COUNTERS},
+                             {**NO_COUNTERS, "fileRefaultPages": 5, "swapOutPages": 4})
+        only_events = {"memory.events": events(2)}
+        status, _, result = self.run_scope_files("events-only", only_events, only_events)
+        self.assertEqual(status, 0)
+        for report in self.reports(result):
+            self.assertEqual({field: report.get(field, ABSENT) for field in COUNTERS}, {**NO_COUNTERS, "memoryHighEvents": 2})
+
+    def test_the_boundaries_above_a_scope_report_how_often_each_was_exceeded_during_the_run(self):
+        """Each cgroup above the scope with a memory.high reports how far its count rose from before the command started to when it ended.
+
+        The count is the cgroup's own (memory.events.local) and is shared by everything below it.  A cgroup with no memory.high is no boundary and is left out."""
+        uid = os.getuid()
+        manager, user = f"user@{uid}.service", "user.slice"
+        paths = self.lay_boundaries("acceptance", {
+            "agents-acceptance.slice": ("max", 9), "agents.slice": (LIMIT, 100), manager: (LIMIT, 40),
+            f"user-{uid}.slice": ("max", 0), user: (LIMIT, 1000)})
+
+        def counted(name):
+            return str(paths[name] / "memory.events.local")
+
+        # The command raises a count as soon as it runs, which is after the supervisor read the count that it subtracts.
+        started = {counted("agents.slice"): events(103)}
+        ended = {counted("agents.slice"): events(107), counted(user): events(1250), counted("agents-acceptance.slice"): events(50)}
+        status, _, result = self.run_scope_files("boundaries", started, ended)
+        self.assertEqual(status, 0)
+        for report in self.reports(result):
+            self.assertEqual(report.get("ancestorHighEvents", ABSENT), {"agents.slice": 7, manager: 0, user: 250})
+            self.assertEqual({field: report.get(field, ABSENT) for field in COUNTERS}, NO_COUNTERS)
+
+    def test_boundaries_that_cannot_be_read_are_null_and_hide_no_other_boundary(self):
+        """A memory.high that is missing or no number, a count that is missing and a count that went back each give null for that cgroup alone."""
+        uid = os.getuid()
+        manager, user = f"user@{uid}.service", "user.slice"
+        paths = self.lay_boundaries("acceptance", {
+            "agents.slice": (LIMIT, 100), manager: (LIMIT, None), f"user-{uid}.slice": ("not a number", 5), user: (LIMIT, 500)})
+        ended = {str(paths["agents.slice"] / "memory.events.local"): events(103),
+                 str(paths[user] / "memory.events.local"): events(3)}
+        status, _, result = self.run_scope_files("unreadable-boundaries", {}, ended)
+        self.assertEqual(status, 0)
+        for report in self.reports(result):
+            self.assertEqual(report.get("ancestorHighEvents", ABSENT),
+                             {"agents-acceptance.slice": None, "agents.slice": 3, manager: None, f"user-{uid}.slice": None, user: None})
+
+    def test_a_nested_run_has_no_reclaim_counters_and_no_boundaries(self):
+        """The inner supervisor has no scope of its own, so it counts nothing and subtracts nothing: its fields are null, not zero."""
+        self.assertEqual(self.nested("deep", "acceptance"), 0)
+        (nested,) = [record for _, record in self.measurements() if record["nested"]]
+        self.assertEqual({field: nested.get(field, ABSENT) for field in COUNTERS}, NO_COUNTERS)
+        self.assertIsNone(nested.get("ancestorHighEvents", ABSENT))
 
     def test_a_target_and_a_slot_wait_need_a_policy_and_a_number_of_seconds(self):
         """Both are part of the resource options: alone they are a usage error, and so is a value that is no number of seconds."""

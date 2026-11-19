@@ -47,7 +47,7 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from admission import AdmissionError, Admission
+from admission import AdmissionError, Admission, cgroup_integer
 from demand import DemandHistory
 from measure import emit
 
@@ -64,6 +64,13 @@ MEASURE_SECONDS = 1.0
 # 走行の scope の cgroup から読む CPU時間と滞留の合計の項目。滞留は pressure file の total=（microseconds）で、
 # CPU は some、IO と memory は full の行を読む。--result と計測の一行はこの名前で秒（ミリ秒精度）を持つ
 SCOPE_READINGS = ("cpuSeconds", "cpuStallSeconds", "ioStallSeconds", "memoryStallSeconds")
+SCOPE_COUNTERS = {
+    "memoryHighEvents": ("memory.events", "high"),
+    "anonRefaultPages": ("memory.stat", "workingset_refault_anon"),
+    "fileRefaultPages": ("memory.stat", "workingset_refault_file"),
+    "swapInPages": ("memory.stat", "pswpin"),
+    "swapOutPages": ("memory.stat", "pswpout"),
+}
 # 入場できないまま待機の上限に達した走行の終了status。commandは起動していない
 WAIT_EXPIRED_STATUS = 75
 ENTER_SCOPE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "enter_scope.py")
@@ -426,6 +433,105 @@ def scope_readings(directory):
     return readings
 
 
+def counter_values(path):
+    """「名前 数」の行を持つ cgroup の file の読取
+
+    path: scope の memory.stat、memory.events や、祖先の memory.events.local
+    戻り値: 行の名前から累計への辞書。数でない値の行は含めない
+    失敗: 読めない場合の OSError と、読めない文字を持つ場合の ValueError
+    """
+    values = {}
+    for line in path.read_text().splitlines():
+        name, _, value = line.partition(" ")
+        if value.isdecimal():
+            values[name] = int(value)
+    return values
+
+
+def scope_counters(directory):
+    """走行の scope の cgroup が持つ回収の累計の読取
+
+    directory: scope の cgroup directory。scope を作らない走行はNone
+    戻り値: SCOPE_COUNTERS の各項目の累計を持つ辞書。読めない項目と scope の無い走行はNone
+    制約: file ごとに一度だけ読み、一つの file の失敗で他の file の項目を捨てない。失敗は走行の終了statusを変えない
+    """
+    counters = dict.fromkeys(SCOPE_COUNTERS)
+    if directory is None:
+        return counters
+    for name in dict.fromkeys(file for file, _ in SCOPE_COUNTERS.values()):
+        try:
+            values = counter_values(directory / name)
+        except (OSError, ValueError):
+            continue
+        for field, (file, line) in SCOPE_COUNTERS.items():
+            if file == name and line in values:
+                counters[field] = values[line]
+    return counters
+
+
+def ancestor_directories(scope, root):
+    """scope の cgroup の祖先の directory
+
+    scope: scope の cgroup directory
+    root: cgroup の root。この directory は含めない
+    戻り値: scope の親から root の一つ下まで、近い順。root の下にない scope は空
+    """
+    parents = list(scope.parents)
+    return parents[:parents.index(root)] if root in parents else []
+
+
+def high_events(directory):
+    """cgroup 自身の memory.high を超えた回数の読取
+
+    directory: cgroup directory
+    戻り値: memory.events.local の high。子孫が自分の境界を超えた分は含まず、下にいる全員が数える共有の値
+    失敗: 読めない場合の OSError と、high の行が無い場合や読めない文字を持つ場合の ValueError
+    """
+    values = counter_values(directory / "memory.events.local")
+    if "high" not in values:
+        raise ValueError(f"{directory / 'memory.events.local'} has no high count")
+    return values["high"]
+
+
+def ancestor_counts(directories):
+    """祖先のうち有限の memory.high を持つ境界が、その時までに数えた high の回数の読取
+
+    directories: scope の祖先の cgroup directory
+    戻り値: 境界の directory から回数への辞書。memory.high が max の祖先は境界でないため含めない。
+        境界かを確かめられない祖先と、回数を読めない境界はNone
+    制約: 失敗は走行を止めない。読む file は祖先ごとに memory.high と、境界の memory.events.local の二つだけ
+    """
+    counts = {}
+    for directory in directories:
+        try:
+            if cgroup_integer(directory / "memory.high") is not None:
+                counts[directory] = high_events(directory)
+        except (OSError, ValueError):
+            counts[directory] = None
+    return counts
+
+
+def ancestor_increase(before):
+    """祖先の境界の high の回数の、前に読んだ回数からの増分
+
+    before: ancestor_counts が返した辞書
+    戻り値: 境界の unit 名から増分への辞書。前を読めなかった境界、今を読めない境界、
+        回数が減った境界（cgroup が作り直された）は、差を捏造せずNone
+    """
+    increase = {}
+    for directory, count in before.items():
+        increase[directory.name] = None
+        if count is None:
+            continue
+        try:
+            now = high_events(directory)
+        except (OSError, ValueError):
+            continue
+        if now >= count:
+            increase[directory.name] = now - count
+    return increase
+
+
 class Supervisor:
     def __init__(self, options):
         self.options = options
@@ -464,6 +570,12 @@ class Supervisor:
         # 走行の枠が目標へ達する単調時計の時刻と、その時点の読取。目標を持たない走行はNone、読取は目標の前に終えた走行でもNone
         self.target_at = None
         self.at_target = None
+        # scope から読んだ回収の累計の直近の値。scope と同じく終了時の読取に失敗しても前の値を残し、一度も読めない項目はNone
+        self.counters = dict.fromkeys(SCOPE_COUNTERS)
+        # command を再開する前に読んだ祖先の境界の high の回数と、終了を始める時のその増分。scope を作らない走行と読めなかった走行はNone。
+        # 増分は祖先の下にいる全員が数える共有の値で、この走行の使用量ではない
+        self.ancestor_before = None
+        self.ancestor_high = None
 
     def record(self, phase, **fields):
         path = self.options.result_path
@@ -533,6 +645,7 @@ class Supervisor:
         self.terminating = True
         # scope は最後の process の終了で消えるため、signal を送る前に終了時の値を読む
         self.read_scope()
+        self.read_ancestors()
         self.term_deadline = time.monotonic() + self.options.term_grace
         # 後始末の子まで中断するため猶予中の SIGTERM 再走査は不採用
         self.signal_owned_processes(signal.SIGTERM)
@@ -751,11 +864,23 @@ class Supervisor:
         """この走行の scope の cgroup directory。資源予約を持たない走行と、scope を作らない入れ子の走行はNone"""
         return None if self.reservation is None else self.reservation.scope_directory()
 
+    def ancestors(self):
+        """この走行の scope の祖先の cgroup directory。scope を持たない走行は空"""
+        scope = self.scope_directory()
+        return [] if scope is None else ancestor_directories(scope, self.reservation.policy.cgroup_root)
+
     def read_scope(self):
         """scope の読取の保持値への重ね書き。読めなかった項目は前の値を残す"""
-        for field, value in scope_readings(self.scope_directory()).items():
-            if value is not None:
-                self.readings[field] = value
+        directory = self.scope_directory()
+        for held, read in ((self.readings, scope_readings(directory)), (self.counters, scope_counters(directory))):
+            for field, value in read.items():
+                if value is not None:
+                    held[field] = value
+
+    def read_ancestors(self):
+        """終了を始める時の、祖先の境界の high の回数の、command の再開前からの増分。再開前を読んでいない走行は読まない"""
+        if self.ancestor_before is not None:
+            self.ancestor_high = ancestor_increase(self.ancestor_before)
 
     def sample_scope(self):
         """間隔が過ぎている場合だけの scope の読取。終了時に scope が残っていない場合の備え
@@ -786,7 +911,8 @@ class Supervisor:
         target = self.options.resource_target_seconds
         if target is not None and target.is_integer():
             target = int(target)
-        return {**self.readings, "targetSeconds": target, "atTarget": self.at_target}
+        return {**self.readings, **self.counters, "ancestorHighEvents": self.ancestor_high, "targetSeconds": target,
+                "atTarget": self.at_target}
 
     def observe_scope(self):
         """走行の秒数と scope の読取の --result への項目。資源予約のない走行は空"""
@@ -872,6 +998,7 @@ class Supervisor:
             if self.wait_for_entry(argv[0], wait_until):
                 # 要求した CPU の上限を scope が持たなければ command を再開しない。上限の無い scope では一度も動かさず畳む
                 self.reservation.verify_cpu_cap()
+                self.ancestor_before = ancestor_counts(self.ancestors())
                 os.kill(self.client_pid, signal.SIGCONT)
                 started = True
         finally:

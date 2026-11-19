@@ -61,8 +61,9 @@ in
       起動した走行のfinished段階にはrunSecondsと、走行のscopeのcgroupから終了時に読んだcpuSeconds（cpu.statのusage_usec）、cpuStallSeconds（cpu.pressureのsome）、ioStallSeconds（io.pressureのfull）、memoryStallSeconds（memory.pressureのfull）の秒（ミリ秒精度）、targetSeconds、atTargetも加わる。
       終了時の読取は終了を始める時に行い、読めなかった項目は約1秒ごとの読取の直近の値で、一度も読めなければnullである。上限での取消と外からの取消でも読み、読めなくても終了statusは変えない。scopeを作らない入れ子の走行は全てnullである。
       目標が渡され、走行が目標の時点でなお動いていれば、atTargetがその時点の同じ四つの項目を持つ。目標より前に終わった走行と、目標の無い走行ではnullである。
+      終了時にはscopeのhighイベント・匿名ページとファイルページのrefault・swap入出力も記録する。祖先の有限なmemory.highについては同じ期間のlocal high増分を別に持ち、この走行だけの回数とはみなさない。
       資源予約を持つ走行は、終了のたびに計測の一行をjournaldのnative socket（policyのjournalSocket、既定は`/run/systemd/journal/socket`）へ`SYSLOG_IDENTIFIER=dotfiles-supervise`で送る。
-      MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、実行枠の待ちの秒数（slotWaitSeconds）、走行秒数、終了status、ピークと予約のbyte、cpuCapPercent、走行のscopeから読んだcpuSeconds、cpuStallSeconds、ioStallSeconds、memoryStallSeconds、targetSeconds、atTargetを持つ。
+      MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、実行枠の待ちの秒数（slotWaitSeconds）、走行秒数、終了status、ピークと予約のbyte、cpuCapPercent、上記のCPU時間・滞留・メモリ回収・祖先の境界の計測値、targetSeconds、atTargetを持つ。
       送れない場合はstderrへ一行を出すだけで、commandの終了statusを変えない。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
       子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。

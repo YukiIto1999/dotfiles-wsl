@@ -67,6 +67,8 @@ for stage in verify-cwd build-cwd; do
   assert_not_called "$stage $REBUILD_CHECKOUT"
 done
 assert_call_order 'verify-cwd' 'build-cwd'
+# 検査の clone は、clone 自身ではなく元の checkout を保持の所有者として受け取る
+assert_called "verify-owner $REBUILD_CHECKOUT"
 
 # 2. An input the owner moved is adopted by committing flake.lock. The next plan builds that lock
 # as committed and replaces the held candidate; nothing is fetched or written.

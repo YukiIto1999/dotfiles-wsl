@@ -440,7 +440,8 @@ prepare_candidate() {
   resolve_verification "$source_dir" || stop_before_activation "the isolated source declares no usable verification entry"
   read -r -a entry_words <<<"$verify_entry"
   printf 'validate: %s (budget %ss, isolated source)\n' "$verify_entry" "$verify_budget"
-  run_child "$source_dir" "" timeout --kill-after=5s "$verify_budget" "${entry_words[@]}" || status=$?
+  # 検査の clone が自身の git-dir へ置く root は clone の削除で導線だけが残り、T1 と T2 が元の checkout に置いた root も更新できないため、元の checkout を所有者として名指す
+  run_child "$source_dir" "" env DOTFILES_VERIFICATION_OWNER="$dotfiles" timeout --kill-after=5s "$verify_budget" "${entry_words[@]}" || status=$?
   if ((status == 124)); then
     stop_before_activation "validation of the candidate exceeded its ${verify_budget}s budget"
   fi

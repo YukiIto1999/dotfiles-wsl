@@ -80,6 +80,7 @@ nix)
   run)
     [[ $* == 'run --no-write-lock-file .#verify' ]]
     printf 'verify-cwd %s\n' "$PWD" >>"$REBUILD_CALL_LOG"
+    printf 'verify-owner %s\n' "${DOTFILES_VERIFICATION_OWNER-}" >>"$REBUILD_CALL_LOG"
     hang_at verify
     exit "${REBUILD_VERIFY_STATUS:-0}"
     ;;

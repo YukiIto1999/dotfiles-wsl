@@ -66,6 +66,13 @@ planの公開と、置き換える旧候補の解放は、一つの排他区間�
 そのcommitの成果物の再利用は、Nixの不変な成果物とcacheが内容で担う。
 agentの終了gateが求める成功証跡は、commitまでの作業で通したT1が持ち、このcommandは作らない。
 
+T1/T2 は checkout ごとに、最後に成功した unit 検査と host closure 検査の出力を最大二つの Nix GC root で保持する。
+plan の隔離 clone も元の checkout の root を使う。
+root は過去の検査を合格とみなす記録ではなく、同じ derivation の成果物を Nix が再利用できるようにする。
+開始時の store の空きが `min-free` を下回るか、空きが確認できない場合、新たな root を追加せず検査は実行する。
+これは開始前の判定であり、build の領域を予約する仕組みではない。
+失敗した build は前の正常な root を置き換えない。
+
 nativeの`nixos-rebuild`は端末のforegroundで走る。
 このcommandだけに届いた取消は、activationの途中で子を止めず、終了を待ってから結果を報告する。
 

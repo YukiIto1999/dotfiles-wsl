@@ -34,6 +34,21 @@ in
             python3 ${./fixtures/run-within-interrupt.py}
             touch $out
           '';
+
+      verification-build-rooted =
+        pkgs.runCommandLocal "check-verification-build-rooted"
+          {
+            nativeBuildInputs = with pkgs; [
+              bash
+              coreutils
+              git
+            ];
+            BUILD = lib.getExe programs.buildRooted;
+          }
+          ''
+            bash ${./fixtures/build-rooted.sh}
+            touch $out
+          '';
     }
   ];
   configuration = [

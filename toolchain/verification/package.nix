@@ -2,7 +2,7 @@
   native検証の実行部品の構築
   pkgs: 実行入口を生成する固定済みpackage集合
   supervise: 子孫回収を所有するplatformのnative command
-  戻り値: 所有子孫の終了を待つ期限付き起動package
+  戻り値: 所有子孫の終了を待つ期限付き起動packageと、成功した検査出力を次の段まで保持するbuild package
 */
 {
   pkgs,
@@ -17,8 +17,19 @@ let
     runtimeInputs = [ pkgs.coreutils ];
     text = builtins.readFile ./impl/run-within.sh;
   };
+  # nix は runtimeInputs に入れず呼び出し側の PATH のものを使う。agent の shim の --no-link 方針を通した nix と同じ入口で build するため
+  buildRooted = pkgs.writeShellApplication {
+    name = "dotfiles-verification-build";
+    runtimeInputs = with pkgs; [
+      coreutils
+      git
+    ];
+    text = builtins.readFile ./impl/build-rooted.sh;
+  };
 in
 {
+  inherit buildRooted;
+
   # timeout の process group だけでは別 session へ移った子孫を止められないため supervise の下で起動
   # 猶予が run-within.sh の timeout --kill-after より短いと command 自身の停止を KILL が先に切るため不可
   # 公開 PID への INT を取消として扱ってきた呼び出し側のため supervise 既定の INT 無視は不可

@@ -352,7 +352,7 @@
         inherit supervise;
         pkgs = systemPkgs;
       };
-      inherit (verificationPrograms) runWithin;
+      inherit (verificationPrograms) runWithin buildRooted;
 
       # agent wrapperが同じfileを読むためflake内の秒数の直書きは不可
       verificationBudget = builtins.fromJSON (builtins.readFile ./tiergate.json);
@@ -384,6 +384,8 @@
       sourceRef = lib.escapeShellArg lockedSource;
       packageRef = name: lib.escapeShellArg "${lockedSource}#packages.${system}.${name}";
 
+      # unit の検査が先頭、host の closure が二番目の順は変えない。build の installable の位置が保持する link の名前を決め、T1 と T2 が同じ unit の link を置き換えるため
+      # 保持の可否と空き容量の下限は buildRooted が決める。ここで --no-link を直書きすると、次の段が使う成功出力が GC で消えて作り直しになるため不可
       verificationTiers = {
         verify = {
           description = "T1: unit の検査と全 host の評価";
@@ -391,14 +393,14 @@
           commands = ''
             export GC_INITIAL_HEAP_SIZE="''${GC_INITIAL_HEAP_SIZE-${toString t1EvaluatorHeapBytes}}"
             exec ${lib.getExe runWithin} ${toString verifyBudgetSeconds} \
-              nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage}
+              ${lib.getExe buildRooted} ${packageRef unitChecksPackage}
           '';
         };
         verify-push = {
           description = "T2: unit の検査と全 host の closure";
           commands = ''
             exec ${lib.getExe runWithin} ${toString pushBudgetSeconds} \
-              nix build --no-link --no-write-lock-file -L ${packageRef unitChecksPackage} ${packageRef closureChecksPackage}
+              ${lib.getExe buildRooted} ${packageRef unitChecksPackage} ${packageRef closureChecksPackage}
           '';
         };
         verify-full = {

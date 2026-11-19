@@ -327,7 +327,7 @@ Skillのdescription、起動条件、raw sourceは、同じ[`renderer`](../../ag
 この環境ではAI CLIをclient、委譲先の定義をsubagentと呼び、`agents/subagents/`がその定義とroutingを所有する。
 client形式への変換はbuild時に行う。
 
-共通policyのうち、完了の報告、資源、配備物、資格情報、Gitの必須制約は[`agents/policy/RULES.md`](../../agents/policy/RULES.md)を正本とする。
+再開・委譲時の合意の照合、期限つきの仕事で判断を返す時刻、完了の報告、資源、配備物、資格情報、Gitに関して親子ともに守る制約は、[`agents/policy/RULES.md`](../../agents/policy/RULES.md)を正本とする。
 OMPのtask subagentは`AGENTS.md`を継承せず、`RULES.md`だけを読む。
 そのためOMPへは必須制約を`~/.omp/agent/RULES.md`として配り、親のsessionが両方を読む`AGENTS.md`からはその節を外す。
 必須制約を別fileで読ませる経路を宣言しないclientには、同じ節を本文へ埋め込んだ全文を配る。

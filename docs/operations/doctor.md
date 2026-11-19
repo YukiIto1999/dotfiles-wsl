@@ -362,7 +362,9 @@ python3 platform/supervise/impl/summarize-runs.py '2 days ago'
 ```
 
 出力はタブ区切りで、鍵（区分、repositoryの根、command）ごとに、走行の数、合格（status 0）、検査の失敗（0、75、124、143以外）、判定なし（75、124、143）、合格した走行の秒の中央値と最大、`waitSeconds`の合計、`slotWaitSeconds`の合計、時間の目標を超えた走行の数を出す。
-入れ子の走行と、鍵が三行でない走行（鍵を渡さない走行）は集計せず、最後の行に数を出す。実行枠の待ちを記録する前の走行しか無い鍵の`slotWaitSeconds`の合計は`-`である。
+入れ子の走行と、鍵が三行でない走行は集計しない。末尾には鍵がない記録の件数を出す。
+`slot_wait_samples`は実行枠の待ちを計測した記録の件数で、`runs`と一致しなければ`slot_wait_total_s`は`-`になる。
+この集計に含まれるのはsupervisorに届いた走行だけである。T1が実行枠を取れずに終了した75は呼出元のstderrで確認する。
 
 重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。Windowsの値は診断で、待機の理由にならない。
 guestの余裕が予約需要を満たせば受入は待機から進み、深い検証はさらにPSIがfailure未満であれば進む。

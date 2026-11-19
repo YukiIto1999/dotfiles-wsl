@@ -18,7 +18,7 @@ from collections import defaultdict
 # 検査の合否を表さない終了status。75 は入場できなかった未実行、124 は走行の期限切れ、143 は取消。これ以外の0でない status は検査の失敗
 NO_VERDICT = (75, 124, 143)
 HEADER = ("stage", "repository", "command", "runs", "pass", "failure", "no_verdict", "pass_median_s", "pass_max_s",
-          "wait_total_s", "slot_wait_total_s", "target_overrun")
+          "wait_total_s", "slot_wait_total_s", "target_overrun", "slot_wait_samples")
 
 
 def is_number(value):
@@ -61,7 +61,7 @@ def summarize(keyed):
 
     keyed: read_records が返した（鍵の三行、記録）の一覧
     戻り値: HEADER と同じ並びの文字列の行を、repository、command、区分の順に並べた一覧
-    制約: 実行枠の待ちを持つ記録が無い鍵は - にする。枠の待ちを記録する前の走行を、待たなかった 0 と混ぜないため
+    制約: 全走行の実行枠の待ちを計測できた鍵に限る合計秒の表示
     """
     groups = defaultdict(list)
     for key, record in keyed:
@@ -80,8 +80,8 @@ def summarize(keyed):
             str(len(records) - len(passed) - len(no_verdict)), str(len(no_verdict)),
             seconds(statistics.median(run_times) if run_times else None), seconds(max(run_times) if run_times else None),
             seconds(sum(record["waitSeconds"] for record in records if is_number(record.get("waitSeconds")))),
-            seconds(sum(slot_waits) if slot_waits else None),
-            str(len(overrun)),
+            seconds(sum(slot_waits) if len(slot_waits) == len(records) else None),
+            str(len(overrun)), str(len(slot_waits)),
         ))
     return rows
 

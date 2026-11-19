@@ -99,6 +99,7 @@ let
       runtime.mkWrapper {
         client = name;
         inherit (client) binary;
+        inherit (client.runtime.managed) argumentGuard;
         targetExecutable = clientExecutables.${name};
         executionDependencies = clientExecutionDependencies.${name};
       }

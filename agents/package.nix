@@ -169,6 +169,7 @@ let
       binary,
       targetExecutable,
       executionDependencies,
+      argumentGuard ? null,
     }:
     let
       dependencies = lib.unique (map toString executionDependencies);
@@ -189,6 +190,7 @@ let
       name = binary;
       runtimeInputs = [ pkgs.coreutils ];
       text = ''
+        ${lib.optionalString (argumentGuard != null) argumentGuard}
         exec ${lib.getExe executionPolicy} \
           --shared-cache "$HOME/${cacheRootRelative}/shared" \
           --build-root "$HOME/${cacheRootRelative}/cargo-build" \

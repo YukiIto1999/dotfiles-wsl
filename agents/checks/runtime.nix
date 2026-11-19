@@ -359,6 +359,7 @@
           client = "omp";
           binary = clients.omp.binary;
           targetExecutable = "${fakeAgent}";
+          inherit (clients.omp.runtime.managed) argumentGuard;
           executionDependencies = agentConfig.clientExecutionDependencies.omp;
         };
         # 手書きの参照一覧は実際の closure とずれるため不可

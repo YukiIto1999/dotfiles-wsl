@@ -108,6 +108,15 @@ system を戻した後は `dotfiles-agent-supply status` で、稼働する版�
 そのため retention や `nix-collect-garbage` が、稼働中の session が使う旧版や旧 hook を消さない。
 保持する root の取得に失敗した起動は、保護なしでは続けず拒否される。
 
+OMP の `omp gc` は Nix の GC とは別の保守 command である。
+OMP の archive は稼働中の session の成果物も移し得るため、管理下の公開 `omp` は `gc --apply` を client の起動前に終了 status `77` で拒否する。
+稼働中かどうかをその場で判定して許可すると、新規起動との競合が残る。
+`--apply` を付けない preview は OMP に渡す。
+先行 option の後に `gc` と `--apply` があれば、launch の引数にも見える形を含めて拒否するため、これらを prompt として渡すときは `omp launch` を明示する。
+
+この保護は公開入口に限り、native binary を直接呼ぶ操作には及ばない。
+履歴を別に保管する必要があっても、稼働中の session が使う保存先に対して archive を実行しない。
+
 ### Profile の安全
 
 `~/.local/share/dotfiles/agent-profiles/<client>` は利用者所有の real directory で、親も含めて symlink と group・other の書込を許さない。

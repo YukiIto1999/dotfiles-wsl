@@ -95,6 +95,31 @@ test ! -e "$CAPTURE/agent-pid"
 test -z "$(ls -A "$cache/sessions")"
 
 : "${MODULE_WRAPPER:?}" "${WRAPPER_CLOSURE:?}" "${SKILL_ROOT:?}" "${SKILL_SOURCE:?}"
+refuse_omp_gc() {
+  local status=0
+  rm -f "$CAPTURE/agent-pid"
+  "$MODULE_WRAPPER" "$@" >"$fixture/gc.out" 2>"$fixture/gc.err" || status=$?
+  test "$status" -eq 77 || fail "managed OMP accepted a mutating GC request (status $status)"
+  test ! -s "$fixture/gc.out"
+  grep -Fq 'omp gc --apply' "$fixture/gc.err"
+  test ! -e "$CAPTURE/agent-pid"
+}
+
+refuse_omp_gc gc --apply
+refuse_omp_gc --profile work gc --archive --apply
+refuse_omp_gc --cwd "$project" --apply gc
+refuse_omp_gc --profile=work gc --apply=true
+
+"$MODULE_WRAPPER" gc --archive --json
+mapfile -d '' -t argv < "$CAPTURE/argv"
+test "${argv[*]}" = 'gc --archive --json'
+"$MODULE_WRAPPER" -- gc --apply
+mapfile -d '' -t argv < "$CAPTURE/argv"
+test "${argv[*]}" = '-- gc --apply'
+"$MODULE_WRAPPER" read gc --apply
+mapfile -d '' -t argv < "$CAPTURE/argv"
+test "${argv[*]}" = 'read gc --apply'
+
 store=$fixture/store
 gcroots=$fixture/gcroots
 deployed=$home/$SKILL_ROOT/codebase-design
@@ -170,6 +195,12 @@ trap ': > "$fixture/old-session.release"' EXIT
 HOLD_READY=$fixture/old-session.ready HOLD_RELEASE=$fixture/old-session.release "$MODULE_WRAPPER" &
 old_session_pid=$!
 wait_for_file "$fixture/old-session.ready"
+live_session=$(read_capture session-dir)
+live_pid=$(read_capture agent-pid)
+mkdir "$fixture/refused-while-live"
+CAPTURE=$fixture/refused-while-live refuse_omp_gc --profile work gc --archive --apply
+test -d "$live_session"
+kill -0 "$live_pid"
 # session が開始した時点で配備先から読める Skill 本文
 cp "$deployed/SKILL.md" "$fixture/read-body"
 

@@ -133,7 +133,7 @@ in
   dotfiles.agents.registry.omp = {
     binary = "omp";
     supply.package = "omp";
-    runtime.managed = { };
+    runtime.managed.argumentGuard = builtins.readFile ./assets/guard-arguments.sh;
     rules.file = {
       destination = ".omp/agent/AGENTS.md";
       # omp の task subagent は AGENTS.md を継承せず、RULES.md だけを読む

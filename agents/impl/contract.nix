@@ -121,7 +121,13 @@ let
   };
 
   runtimeType = types.attrTag {
-    managed = tag emptyBranch;
+    managed = tag (branch {
+      argumentGuard = lib.mkOption {
+        type = types.nullOr types.lines;
+        default = null;
+        description = "公開 command の引数を起動前に検査する Bash source。引数を書き換えず、拒否時は非ゼロで終了する。";
+      };
+    });
     unsupported = tag emptyBranch;
   };
 

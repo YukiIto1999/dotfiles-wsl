@@ -182,6 +182,26 @@ refute_report() {
   fi
 }
 
+# The dry run reports the bytes it counted before retiring anything as before=.
+expect_cache_before() {
+  local report=$1 bytes=$2
+  awk -F'\t' -v before="before=$bytes " '
+    $1 == "summary" && $2 == "cache" && index($4, before) == 1 { found = 1 }
+    END { exit !found }
+  ' "$report" || {
+    echo "dry-run report lacks the counted cache bytes: $bytes" >&2
+    cat "$report" >&2
+    exit 1
+  }
+}
+
+expect_no_du_walk() {
+  if grep -Fxq -- "$2" "$1"; then
+    echo "GC walked a tree with du that its unit scan had already read: $2" >&2
+    exit 1
+  fi
+}
+
 # A script that carries the name of the retired verification-cache and runs until its release file exists.
 start_runner() {
   local release=$1 index
@@ -283,12 +303,49 @@ partial_home=$fixture/partial-home
 make_home "$partial_home"
 partial_entry=$(entry_path "$partial_home" "$first_entry_id")
 make_unit "$partial_entry" recent '1 day ago' 2
+make_shared_cache "$partial_home" 2
 partial_unreadable=$partial_entry/debug/build/recent-$(unit_hash "$partial_entry" recent)/out/unreadable
 mkdir -m 000 "$partial_unreadable"
+partial_shared_unreadable=$partial_home/.cache/dotfiles-wsl/shared/xdg-cache/unreadable
+mkdir -m 000 "$partial_shared_unreadable"
 HOME=$partial_home DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
   DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$GC"
 expect_unit kept "$partial_entry" recent
-chmod 700 "$partial_unreadable"
+chmod 700 "$partial_unreadable" "$partial_shared_unreadable"
+
+# The unit scan already reads the allocated blocks of every inode in the build root, so a
+# run counts that tree from the scan and does not walk it again with du. What no unit owns,
+# and an inode that a unit shares with a file no unit owns, count once, as du counts them.
+total_home=$fixture/total-home
+total_log=$fixture/total-du.log
+total_cache=$total_home/.cache/dotfiles-wsl
+make_home "$total_home"
+make_shared_cache "$total_home" 2
+total_entry=$(entry_path "$total_home" "$first_entry_id")
+make_unit "$total_entry" old '40 days ago' 4
+make_unit "$total_entry" recent '1 day ago' 4
+ln "$total_entry/debug/deps/librecent-$(unit_hash "$total_entry" recent).rlib" \
+  "$total_entry/debug/deps/libshared.so"
+printf 'allocated\n' > "$total_entry/debug/libloose.so"
+for stray in "$total_entry/stray" "${total_entry%/*}/stray" "$total_cache/cargo-build/stray"; do
+  printf 'allocated\n' > "$stray"
+done
+total_expected=$(cache_bytes "$total_home")
+: > "$total_log"
+HOME=$total_home DOTFILES_AGENT_TEST_DU_LOG=$total_log DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$DU_TRACE_GC" --dry-run > "$fixture/total-report"
+expect_cache_before "$fixture/total-report" "$total_expected"
+grep -Fxq -- "$total_cache/shared" "$total_log"
+expect_no_du_walk "$total_log" "$total_cache/cargo-build"
+: > "$total_log"
+HOME=$total_home DOTFILES_AGENT_TEST_DU_LOG=$total_log DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 \
+  DOTFILES_AGENT_GC_LOW_BYTES=500000000 "$DU_TRACE_GC"
+grep -Fxq -- "$total_cache/shared" "$total_log"
+expect_no_du_walk "$total_log" "$total_cache/cargo-build"
+expect_unit reclaimed "$total_entry" old
+expect_unit kept "$total_entry" recent
+test -e "$total_entry/debug/deps/libshared.so"
+trash_is_empty "$total_home"
 
 orphan_home=$fixture/orphan-home
 make_home "$orphan_home"
@@ -626,6 +683,13 @@ HOME=$noatime_home DOTFILES_AGENT_TEST_MOUNT_OPTIONS=rw,noatime \
   expect_unresolved "$noatime_home/gc.log" "$MOUNT_OPTIONS_GC"
 grep -Fq 'atime' "$noatime_home/gc.log"
 expect_unit kept "$noatime_entry" old
+# With no unit scan the build root is still counted, by du, and the total stays the same.
+status=0
+HOME=$noatime_home DOTFILES_AGENT_TEST_MOUNT_OPTIONS=rw,noatime \
+  DOTFILES_AGENT_GC_HIGH_BYTES=1000000000 DOTFILES_AGENT_GC_LOW_BYTES=500000000 \
+  "$MOUNT_OPTIONS_GC" --dry-run > "$noatime_home/report" 2> /dev/null || status=$?
+test "$status" -eq 70
+expect_cache_before "$noatime_home/report" "$(cache_bytes "$noatime_home")"
 
 # A build that uses a unit after the GC chose it reads the unit's hash file. The GC
 # checks the unit again under Cargo's lock and keeps it, even with no capacity pressure.

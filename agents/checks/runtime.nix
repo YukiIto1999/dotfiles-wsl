@@ -269,6 +269,12 @@
           exec ${pkgs.util-linux}/bin/findmnt "$@"
         '';
         mountOptionsGc = gcWithCommand "mount-options" mountOptionsFindmnt;
+        # GC が du で数えた path を記録し、unit の走査が読んだ木をもう一度辿っていないことを検査する。
+        tracedDu = pkgs.writeShellScriptBin "du" ''
+          [[ -z ''${DOTFILES_AGENT_TEST_DU_LOG-} ]] || printf '%s\n' "$@" >> "$DOTFILES_AGENT_TEST_DU_LOG"
+          exec ${pkgs.coreutils}/bin/du "$@"
+        '';
+        tracedDuGc = gcWithCommand "traced-du" tracedDu;
         # systemd-run --scope は自身を scope へ入れた後に command を exec する。sandbox には user
         # manager がないため、引数を記録して同じ process のまま command を exec する。
         fakeSystemdRun = pkgs.writeShellScript "fake-systemd-run" ''
@@ -809,6 +815,7 @@
               RACING_GC = lib.getExe racingGc;
               SESSION_EXIT_GC = lib.getExe sessionExitGc;
               MOUNT_OPTIONS_GC = lib.getExe mountOptionsGc;
+              DU_TRACE_GC = lib.getExe tracedDuGc;
               WRONG_OWNER_GC = lib.getExe wrongOwnerGc;
               UNREADABLE_PROC_GC = lib.getExe unreadableProcGc;
               LAUNCHER = lib.getExe fixtureLauncher;

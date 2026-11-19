@@ -125,6 +125,9 @@ test は実行中に別の unit の `OUT_DIR` を読むので、実行中の fil
 GC を始めた時点で一度だけ調べると、その後に始まった test を見落とすので、lock を取った entry ごとに調べる。
 調べてから rename を終えるまでに始まった実行は、成果物の最終使用が 48 時間以内でない限り守れない。
 atime を更新しない mount では Cargo の使用が見えないので、GC は unit を回収せずに失敗する。
+GC は build-dir の allocated bytes を、unit の走査が読む各 inode の block 数から数え、同じ木を `du` でもう一度辿らない。
+inodeはdevice番号と組にして扱い、unitの内外で同じfileにhard linkがあっても一度だけ数える。リンク数が1のfileは重複判定表に残さない。
+unit を判定できない mount では走査しないので、build-dir を `du` で数える。
 launcher は build-dir の root を検証して作るだけで中身に触れないので、GC は unit の rename に `gc.lock` を取らない。
 
 `dotfiles-agent-project-cache-gc --dry-run`は、その時点で保持・回収する候補、allocated bytes、理由をtab区切りで返す。

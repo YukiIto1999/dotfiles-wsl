@@ -246,7 +246,7 @@ unlock_entry() {
 # 名前に hash を持たない成果物は持ち主の unit を決められないため回収は不可
 # rustc は incremental の directory に unit とは別の hash を付けるため fingerprint との照合は不可
 scan_units() {
-  local base=$cargo_build_root prefix='' lock_depth=4 item_depth=3 with_members=1
+  local base=$cargo_build_root prefix='' lock_depth=4 item_depth=0 with_members=1
   if [ "$#" -gt 0 ]; then
     base=$cargo_build_root/$1 prefix=$1/ lock_depth=2 item_depth=1 with_members=0
   fi
@@ -258,7 +258,14 @@ scan_units() {
       }
       next
     }
-    match($0, /^([0-9]+) ([0-9]+) ([0-9.]+) ([0-9.]+) (.) ([0-9a-f]{2}\/[0-9a-f]{14})\/(.+)$/, f) {
+    with_members {
+      saw_item = 1
+      if ($6 == 1 || !($1 in seen)) {
+        total += $2 * 512
+        if ($6 != 1) seen[$1] = "total"
+      }
+    }
+    match($0, /^([0-9]+:[0-9]+) ([0-9]+) ([0-9.]+) ([0-9.]+) (.) [0-9]+ ([0-9a-f]{2}\/[0-9a-f]{14})\/(.+)$/, f) {
       entry = f[6]
       count = split(f[7], part, "/")
       if ((entry, part[1]) in profiles) {
@@ -300,8 +307,8 @@ scan_units() {
       if (f[5] == "f" && (!(group in touched) || used > touched[group])) touched[group] = used
       members[group][member] = 1
       if (f[7] == member) identity[group, member] = f[1]
-      if (!(f[1] in counted)) {
-        counted[f[1]] = 1
+      if ($6 == 1 || seen[f[1]] != "unit") {
+        if ($6 != 1) seen[f[1]] = "unit"
         size[group] += f[2] * 512
       }
     }
@@ -321,11 +328,12 @@ scan_units() {
           for (member in members[group]) printf "M %s/%s%c", id[1], member, 0
         }
       }
+      if (saw_item) printf "T %d%c", total, 0
     }
   ' \
     <(find "$base" -mindepth "$lock_depth" -maxdepth "$((lock_depth + 1))" -type f \
       \( -name .cargo-build-lock -o -name .cargo-lock \) -printf "$prefix%P\\0" 2>/dev/null) \
-    <(find "$base" -mindepth "$item_depth" -printf "%i %b %A@ %T@ %y $prefix%P\\0" 2>/dev/null)
+    <(find "$base" -mindepth "$item_depth" -printf "%D:%i %b %A@ %T@ %y %n $prefix%P\\0" 2>/dev/null)
 }
 
 # 走査の後に directory が symlink へ置き換わると cd が build-dir の外を指すため検証の無い移動は不可
@@ -744,8 +752,7 @@ done
 if [ -e "$shared_root" ] || [ -L "$shared_root" ]; then
   validate_shared_cache "$shared_root"
 fi
-total_bytes=$(($(allocated_bytes "$shared_root") + $(allocated_bytes "$cargo_build_root")))
-cache_bytes_before=$total_bytes
+shared_cache_bytes=$(allocated_bytes "$shared_root")
 
 units_judgeable=true
 build_root_real=$cargo_build_root
@@ -765,6 +772,7 @@ fi
 declare -a group_kinds=() group_used=() group_used_exact=() group_bytes=() group_entries=() group_reasons=()
 declare -a group_keys=() group_idents=() group_first=() group_count=() group_members=()
 declare -a entry_lock_fds=()
+scanned_build_bytes=''
 while IFS= read -r -d '' record; do
   case $record in
     'G '*)
@@ -784,12 +792,20 @@ while IFS= read -r -d '' record; do
       group_members+=("${record#M }")
       group_count[group]=$((group_count[group] + 1))
       ;;
+    'T '*)
+      scanned_build_bytes=${record#T }
+      ;;
   esac
 done < <([ "$units_judgeable" = false ] || scan_units)
 units_left=0
 for bytes in "${group_bytes[@]}"; do
   units_left=$((units_left + bytes))
 done
+
+build_bytes=$scanned_build_bytes
+[ -n "$build_bytes" ] || build_bytes=$(allocated_bytes "$cargo_build_root")
+total_bytes=$((shared_cache_bytes + build_bytes))
+cache_bytes_before=$total_bytes
 
 now=$(date +%s)
 # Cargo は invocation の開始時だけ hash file を読み relatime はその atime を最大 24 時間古いまま残すため 24 時間までの invocation が使う unit に 48 時間より短い保護は不可

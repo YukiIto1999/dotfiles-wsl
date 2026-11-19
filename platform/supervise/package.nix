@@ -15,16 +15,22 @@
 }:
 
 let
+  runtimeSource = builtins.path {
+    path = ./impl;
+    name = "impl";
+    filter = path: _: baseNameOf path != "summarize-runs.py";
+  };
   supervise = writeShellApplication {
     name = "dotfiles-supervise";
     text = ''
-      exec ${lib.getExe python3} -I -S ${./impl}/supervise.py "$@"
+      exec ${lib.getExe python3} -I -S ${runtimeSource}/supervise.py "$@"
     '';
   };
   fakeSystemd = ./fixtures/fake_systemd.py;
 in
 supervise.overrideAttrs (previous: {
   passthru = (previous.passthru or { }) // {
+    inherit runtimeSource;
     sandboxPolicy =
       {
         class,

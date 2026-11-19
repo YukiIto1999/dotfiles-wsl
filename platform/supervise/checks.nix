@@ -32,7 +32,7 @@
               nativeBuildInputs = [ pkgs.python3 ];
             }
             ''
-              python3 ${./fixtures/drain_transition.py} ${./impl}/supervise.py
+              python3 ${./fixtures/drain_transition.py} ${supervise.runtimeSource}/supervise.py
               touch $out
             '';
 
@@ -42,7 +42,7 @@
               nativeBuildInputs = [ pkgs.python3 ];
             }
             ''
-              python3 ${./fixtures/resource_admission.py} ${./impl}/supervise.py ${./fixtures/fake_systemd.py}
+              python3 ${./fixtures/resource_admission.py} ${supervise.runtimeSource}/supervise.py ${./fixtures/fake_systemd.py}
               touch $out
             '';
 
@@ -52,7 +52,7 @@
               nativeBuildInputs = [ pkgs.python3 ];
             }
             ''
-              python3 ${./fixtures/decision_properties.py} ${./impl}
+              python3 ${./fixtures/decision_properties.py} ${supervise.runtimeSource}
               touch $out
             '';
       }

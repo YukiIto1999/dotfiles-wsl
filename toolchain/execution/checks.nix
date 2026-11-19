@@ -73,6 +73,11 @@
           policy = deepPolicy;
           gitCommand = "/nonexistent/git";
         };
+        cappedPolicy = pkgs.writeText "fixture-capped-policy.json" "{}";
+        fixtureCappedRun = programs.mkCappedRun {
+          supervise = fakeSupervise;
+          policy = cappedPolicy;
+        };
       in
       {
         toolchain-execution-policy =
@@ -118,6 +123,22 @@
             }
             ''
               bash ${./fixtures/workload-run.sh}
+              touch $out
+            '';
+
+        toolchain-capped-run =
+          pkgs.runCommandLocal "check-toolchain-capped-run"
+            {
+              nativeBuildInputs = with pkgs; [
+                bash
+                coreutils
+                git
+              ];
+              CAPPED_RUN = lib.getExe fixtureCappedRun;
+              POLICY = "${cappedPolicy}";
+            }
+            ''
+              bash ${./fixtures/capped-run.sh}
               touch $out
             '';
 

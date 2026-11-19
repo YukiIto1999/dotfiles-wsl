@@ -280,14 +280,14 @@ collectorは現在のWindows利用者として登録し、権限昇格やexecuti
 同名でも他のtaskやfileは変更しない。install途中の失敗は、実施済みの段階をstderrへ出す。
 更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は観測がWindowsのsnapshotを不明と示すが、検証の入場は待たない。
 
-T1とpre-pushの検査本体は共通の判定へ参加する。それ以外の高コストなcommandは`dotfiles-workload-run --help`で需要と期限を指定する。
-走行は、結果を同期に待つ者がいる受入（T1、pre-pushの検査本体）と、待つ者のいない深い検証（`dotfiles-workload-run`）に分かれ、classごとに走行ごとのscopeを`agents-acceptance.slice`と`agents-deep.slice`の下に作る。
+T1 と pre-push の受入は `agents-acceptance.slice`、待つ者のいない深い検証（`dotfiles-workload-run`）は `agents-deep.slice` の下に走行ごとの scope を作る。
+CPU 上限付きの走行は別の class で、指定方法は下の「CPU の上限付きで新しい走行を始める」を参照。
 受入は他の受入が待っていても止まらない。深い検証は受入が待つ間は入場せず、同時に一走行だけで、`CPUWeight=idle`により他が使わないCPUだけを使う。
-受入がmemoryで収まらず深い検証が動いていれば、深い検証だけが取り消される。受入とsessionは取り消されない。
+受入がmemoryで収まらず深い検証が動いていれば、深い検証だけが取り消される。受入、CPU 上限付きの走行、session は取り消されない。
 取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。managerがstopを受けなかった場合は、取り消す側がそのfileを消し、走行は自分の終了statusで終わる。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
-入場を止める観測はguestの値で、`linux-memory`、`cgroup-budget`、`cpu`のoutcomeが成立しないか読めなければ、どちらのclassも待つ。
+入場を止める観測はguestの値で、`linux-memory`、`cgroup-budget`、`cpu`のoutcomeが成立しないか読めなければ、すべてのclassが待つ。
 `memory-pressure`と`io-pressure`は受入を止めず、深い検証はfailure（`full avg60`が40%以上）の時だけ止める。warningでは止めない。
-待機は走行の予算から分ける。入場の待ちには走行の予算と同じ秒数の上限があり、超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
+待機は走行の予算から分ける。受入と深い検証では、入場の待ちにも走行と同じ秒数の上限がある。入場の上限を超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
 commandがscopeへ猶予（10秒）内に入れなかった走行は、commandが一度も動いていないので失敗とせず、そのscopeを止めて入場をやり直し、上限までに入れなければ75で返る。load averageが高い時に起きやすい。入れなかったことは、計測の`waitReasons`とstderrの待機理由に`the command did not enter its scope within 10s`として残る。`systemd-run`が自分で非ゼロで終わってscopeを作れない場合だけ、70で返る。
 走行の予算は入場して起動した時から数え、超えれば取り消されて124で返る。待機の理由と待った秒数はjournaldの計測の一行と、stderrの待機理由で確認する。
 非対話のjobは判定へ参加しない。serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけで、入場を待たず、受入に取り消されず、深い検証の一走行にも数えない。実測のピークが約0.3 GiBで、memoryの判定に並べる量ではないためである。
@@ -304,7 +304,7 @@ systemctl --user stop <scope名>
 `grep`が示すpathの`.scope`で終わるdirectory名がunit名で、止めてよいのは`populated 0`のscopeだけである。`populated 1`のscopeは走行中で、止めるとその走行を取り消す。
 `systemctl --user daemon-reload`でも、managerが`cgroup.events`を読み直して空のscopeを片付けると推測するが、確かめていない。
 
-予約値は物理memoryの需要宣言であり、processのhard limitではない。CPUは予約せず、並列度はcommand自身が決める。
+物理memoryの予約値は需要宣言であり、processのhard limitではない。受入と深い検証はCPUを予約せず、並列度はcommand自身が決める。
 物理memoryの需要は、明示した値、実測の記録から導いた値、このhostの他の鍵の実測の中央値、未計測の既定値の順に決める。
 未計測の既定値は`dotfiles.workstation.workload.reservation`の`verificationMemoryPercent`（既定25）で、最初の有効な観測のcgroup`limitBytes`の最小値（無ければ物理memory総量）に対する割合であり、ピークを保証しない。
 未計測の既定値を使うのは、鍵を渡さない走行と、このhostに他の鍵の記録も無い走行だけである。
@@ -367,3 +367,14 @@ python3 platform/supervise/impl/summarize-runs.py '2 days ago'
 重くなった場合は、上の観測を先に取り、PSIの`full avg60`、各cgroupの`headroomBytes`、Windows snapshotの鮮度と余裕を比較する。Windowsの値は診断で、待機の理由にならない。
 guestの余裕が予約需要を満たせば受入は待機から進み、深い検証はさらにPSIがfailure未満であれば進む。
 稼働中の受入、session、PTYを停止したり、swapを外したりして空きを作らない。例外は、受入がmemoryで収まらないときに取り消される深い検証だけである。継続的に需要が容量を超える場合は、処理のピーク削減または実行先の容量増強が必要であり、予約の導入だけでは解消しない。
+
+### CPU の上限付きで新しい走行を始める
+
+受入の入場を理由に中断してはならない新規の build・test に CPU 上限を付ける場合は、`dotfiles-capped-run` を使う。
+`--cpu-percent` は 1 論理 CPU を 100 とする一走行の上限で、`--wait-seconds` と `--run-seconds` は別々に指定する。
+走行の scope とその子は同じ CPU 上限を受け、同時に走る上限付き scope の合計は host の `workload.capped.cpuBudgetPercent` を超えない。
+空きを待ち切れなければ未実行の `75`、起動後の時間切れはその走行だけを取り消して `124` で返す。
+
+この上限は入口を通る新規走行にだけ効く。既に走る process は移さず、Nix daemon と共有 DB のような scope 外の service にも適用しない。
+`nixos` の初期設定は 12 論理 CPU のうち最大 6 CPU 相当を上限付きの走行に使う。対話と既存 service に余力を残すための初期値であり、検証の所要を測った最適値ではない。
+同じ検査を行い、待機を含む完了時間、対話の遅延、CPU PSI を比較して予算とランナー内部の並列度を見直す。

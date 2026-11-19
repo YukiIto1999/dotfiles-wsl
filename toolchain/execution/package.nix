@@ -65,23 +65,49 @@ let
           (builtins.readFile ./impl/project-run.sh);
     };
   # git は鍵の repository の根を求める実行 file。利用者の PATH を変えずに、環境によらず同じ根を得るため、固定した path で渡す
+  # 一つの python の入口を、program で deep（dotfiles-workload-run）と capped（dotfiles-capped-run）の二つの command に分ける
+  mkWorkloadEntry =
+    {
+      name,
+      program,
+      supervise,
+      policy,
+      gitCommand,
+    }:
+    pkgs.writeShellApplication {
+      inherit name;
+      text = ''
+        exec ${lib.getExe pkgs.python3} -I -S ${./impl/workload-run.py} \
+          ${program} ${lib.escapeShellArg (toString supervise)} ${lib.escapeShellArg (toString policy)} \
+          ${lib.escapeShellArg (toString gitCommand)} "$@"
+      '';
+    };
   mkWorkloadRun =
     {
       supervise,
       policy,
       gitCommand ? lib.getExe pkgs.git,
     }:
-    pkgs.writeShellApplication {
+    mkWorkloadEntry {
       name = "dotfiles-workload-run";
-      text = ''
-        exec ${lib.getExe pkgs.python3} -I -S ${./impl/workload-run.py} \
-          ${lib.escapeShellArg (toString supervise)} ${lib.escapeShellArg (toString policy)} \
-          ${lib.escapeShellArg (toString gitCommand)} "$@"
-      '';
+      program = "deep";
+      inherit supervise policy gitCommand;
+    };
+  mkCappedRun =
+    {
+      supervise,
+      policy,
+      gitCommand ? lib.getExe pkgs.git,
+    }:
+    mkWorkloadEntry {
+      name = "dotfiles-capped-run";
+      program = "capped";
+      inherit supervise policy gitCommand;
     };
 in
 {
   inherit
+    mkCappedRun
     mkNixBuildShims
     mkPolicy
     mkProjectRun

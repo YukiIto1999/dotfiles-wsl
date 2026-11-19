@@ -36,6 +36,7 @@
       targetFreeGiB = 64;
     };
     workload = {
+      capped.cpuBudgetPercent = 600;
       hostReservePercent = 18;
       memorySwapMaxPercent = 70;
     };

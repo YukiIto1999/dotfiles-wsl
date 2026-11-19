@@ -15,7 +15,7 @@ let
   reserveSwapFile = "/var/lib/dotfiles-agent-swap/reserve.swap";
   minimumSwapGiB = cfg.swap.minimumTotalGiB;
   inherit (cfg) workload;
-  inherit (workload) reservation;
+  inherit (workload) reservation capped;
   runtimeDirectory = "/run/dotfiles-workload/${cfg.username}";
   # systemd は `a-b.slice` を `a.slice` の子として置く。class の slice の cgroup を user manager の下の相対 path で示す
   slicePath =
@@ -28,20 +28,24 @@ let
         lib.length parts
       )
     );
-  # class は走行が待つ者のいる検証か（acceptance）、いない検証か（deep）。走行ごとの scope は class の slice の下に作る
+  # class は走行が待つ者のいる検証か（acceptance）、いない検証か（deep）、CPU の割合を予約する前景の走行か（capped）。
+  # 走行ごとの scope は class の slice の下に作る。extra は class だけが持つ項目で、capped の cpuBudgetPercent を運ぶ
   workloadPolicy =
-    class: memoryPercent:
+    class: memoryPercent: extra:
     pkgs.writeText "dotfiles-workload-policy-${class}.json" (
-      builtins.toJSON {
-        inherit class runtimeDirectory memoryPercent;
-        observation = [ (lib.getExe workload.observationPackage) ];
-        inherit (workloadContract) guestOutcomeIds pressureOutcomeIds;
-        maximumObservationAgeSeconds = 10;
-        systemdRun = [ (lib.getExe' pkgs.systemd "systemd-run") ];
-        systemctl = [ (lib.getExe' pkgs.systemd "systemctl") ];
-        cgroupRoot = "/sys/fs/cgroup";
-        slices = lib.mapAttrs (_: slicePath) workload.classSlices;
-      }
+      builtins.toJSON (
+        {
+          inherit class runtimeDirectory memoryPercent;
+          observation = [ (lib.getExe workload.observationPackage) ];
+          inherit (workloadContract) guestOutcomeIds pressureOutcomeIds;
+          maximumObservationAgeSeconds = 10;
+          systemdRun = [ (lib.getExe' pkgs.systemd "systemd-run") ];
+          systemctl = [ (lib.getExe' pkgs.systemd "systemctl") ];
+          cgroupRoot = "/sys/fs/cgroup";
+          slices = lib.mapAttrs (_: slicePath) workload.classSlices;
+        }
+        // extra
+      )
     );
   workloadMemoryMaxPercent = 100 - workload.hostReservePercent;
   workloadMemoryHighPercent = workloadMemoryMaxPercent - workload.reclaimMarginPercent;
@@ -185,6 +189,34 @@ in
           '';
         };
       };
+      capped = {
+        cpuBudgetPercent = lib.mkOption {
+          type = lib.types.nullOr lib.types.ints.positive;
+          default = null;
+          example = 400;
+          description = ''
+            CPU の割合を予約する前景の走行（`dotfiles-capped-run`）が合わせて予約できる CPU の割合で、CPU 一つ分を 100 とする。
+            動いている capped の scope の CPUQuota の合計と新しい走行の要求がこの値に収まるまで、新しい走行は待つ。
+            `agents-capped.slice` の CPUQuota にも同じ値を掛け、予約を外れた走行があっても合計はこの値を超えない。
+            値は同じ対象の同じ検査を現行と比べる測定で決め、一時点の観測を転記した既定値は持たない。
+            null の間は capped を使えない。slice は CPUWeight だけを持ち、`dotfiles-capped-run` は PATH に置かれない。
+          '';
+        };
+        sliceConfig = lib.mkOption {
+          type = lib.types.attrsOf (
+            lib.types.oneOf [
+              lib.types.int
+              lib.types.str
+            ]
+          );
+          readOnly = true;
+          internal = true;
+          description = ''
+            capped の slice の sliceConfig。CPUWeight は受入と同じ session の重みで、cpuBudgetPercent があれば同じ値を CPUQuota に掛ける。
+            memory の上限は持たず、agent の slice の上限だけを受ける。宣言は`agents/module.nix`が classSlices と同じ名前で持つ。
+          '';
+        };
+      };
       admissionPolicy = lib.mkOption {
         type = lib.types.path;
         readOnly = true;
@@ -196,6 +228,12 @@ in
         readOnly = true;
         internal = true;
         description = "同じregistryへ参加する、待つ者のいない検証（dotfiles-workload-run）の資源予約policy。";
+      };
+      cappedAdmissionPolicy = lib.mkOption {
+        type = lib.types.nullOr lib.types.path;
+        readOnly = true;
+        internal = true;
+        description = "同じregistryへ参加する、CPUの割合を予約する前景の走行（dotfiles-capped-run）の資源予約policy。capped.cpuBudgetPercentがnullの間はnull。";
       };
       hostReservePercent = lib.mkOption {
         type = lib.types.ints.between 1 99;
@@ -246,12 +284,14 @@ in
         default = {
           acceptance = "agents-acceptance.slice";
           deep = "agents-deep.slice";
+          capped = "agents-capped.slice";
         };
         description = ''
           検証の走行の class ごとの user slice 名。受入は待つ者のいる検証（T1とpre-push）、deepは待つ者のいない検証
-          （全量回帰、分析、`dotfiles-workload-run`）で、走行ごとの scope をこの slice の下に作る。
+          （全量回帰、分析、`dotfiles-workload-run`）、cappedは CPU の割合を予約する前景の走行（`dotfiles-capped-run`）で、
+          走行ごとの scope をこの slice の下に作る。
           agent の slice の子として宣言し、memory の上限は agent の slice のものだけを受ける。
-          宣言は`agents/module.nix`が持ち、入場の policy はこの名前だけを参照する。
+          宣言は`agents/module.nix`が持ち、capped の内容は`capped.sliceConfig`が決め、入場の policy はこの名前だけを参照する。
         '';
       };
       windowsSnapshotDirectory = lib.mkOption {
@@ -344,8 +384,18 @@ in
     memoryHighPercent = workloadMemoryHighPercent;
     memoryMaxPercent = workloadMemoryMaxPercent;
     observationPackage = workloadObservation;
-    admissionPolicy = workloadPolicy "acceptance" reservation.verificationMemoryPercent;
-    deepAdmissionPolicy = workloadPolicy "deep" reservation.verificationMemoryPercent;
+    admissionPolicy = workloadPolicy "acceptance" reservation.verificationMemoryPercent { };
+    deepAdmissionPolicy = workloadPolicy "deep" reservation.verificationMemoryPercent { };
+    cappedAdmissionPolicy = lib.mapNullable (
+      cpuBudgetPercent:
+      workloadPolicy "capped" reservation.verificationMemoryPercent { inherit cpuBudgetPercent; }
+    ) capped.cpuBudgetPercent;
+    capped.sliceConfig = {
+      CPUWeight = 100;
+    }
+    // lib.optionalAttrs (capped.cpuBudgetPercent != null) {
+      CPUQuota = "${toString capped.cpuBudgetPercent}%";
+    };
   };
   config.dotfiles.platform.cli.commands = {
     observeWorkload = workloadObservation;

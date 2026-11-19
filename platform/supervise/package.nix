@@ -35,6 +35,8 @@ supervise.overrideAttrs (previous: {
         maximumObservationAgeSeconds ? 10,
         # 計測の一行を受ける journald の代わりの socket。省けば既定の journald の socket で、sandbox には無く送れない
         journalSocket ? null,
+        # capped の policy が持つ、capped の走行が合わせて予約できる CPU の割合（CPU一つ分が100）。capped の policy では必須で、他の class は省く
+        cpuBudgetPercent ? null,
       }:
       let
         fake = mode: [
@@ -61,12 +63,14 @@ supervise.overrideAttrs (previous: {
             slices = {
               acceptance = "agents.slice/agents-acceptance.slice";
               deep = "agents.slice/agents-deep.slice";
+              capped = "agents.slice/agents-capped.slice";
             };
             # sandbox の観測が返す outcome は一つで、全 class の入場を止める guest の値の代わり。圧迫は持たない
             guestOutcomeIds = [ "resource/fixture" ];
             pressureOutcomeIds = [ ];
           }
           // lib.optionalAttrs (journalSocket != null) { inherit journalSocket; }
+          // lib.optionalAttrs (cpuBudgetPercent != null) { inherit cpuBudgetPercent; }
         )
       );
   };

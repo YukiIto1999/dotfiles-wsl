@@ -36,14 +36,19 @@ in
       supervisor自身が`--hold-fd`を終了確認まで保持するので、切り離したholderは作らない。
       supervisor自体を強制終了した場合は、子孫の終了を確認していない。
       `--resource-policy FILE --resource-wait-until EPOCH --resource-run-seconds SEC`はclassごとの入場を通ってからcommandを起動する。
-      policyはclass（待つ者のいる検証のacceptanceか、待つ者のいない検証のdeep）、観測command、入場を止めるoutcomeのid（全classを止めるguestOutcomeIdsと、deepだけを止めるpressureOutcomeIds）、利用者専用の状態directory、memoryPercent、観測の有効秒数、systemd-runとsystemctlのargv、cgroupの根、classごとのsliceの相対pathを持つ。
+      policyはclass（待つ者のいる検証のacceptance、待つ者のいない検証のdeep、CPUの割合を予約する前景の走行のcapped）、観測command、入場を止めるoutcomeのid（全classを止めるguestOutcomeIdsと、deepだけを止めるpressureOutcomeIds）、利用者専用の状態directory、memoryPercent、観測の有効秒数、systemd-runとsystemctlのargv、cgroupの根、全classのsliceの相対pathを持つ。cappedのpolicyだけがcpuBudgetPercent（cappedの走行が合わせて予約できるCPUの割合。CPU一つ分が100）を持つ。
       入場できた走行は、classのsliceの下の走行ごとのscopeで動く。受入はscopeのMemoryLowへ、deepはMemoryHighへ需要を書き、deepにはoom_score_adj 1000を与える。
       受入は他の受入が待っていても止まらない。deepは受入が待つ間は入場せず、同時に一走行だけである。受入がmemoryで収まらないときは、動いているdeepのscopeだけを`systemctl --user stop --no-block`で取り消す。受入とsessionは取り消さない。
       取り消す側は、stopの前にscope名を持つ`cancel-<scope名>`の空のfileを状態directoryへ残す。deepのsupervisorは終了時にそのfileを読んで消し、commandの終了statusにはよらず、取り消された走行として143で返し、実測を記録しない。fileを残せなければ取り消さない。
       受入の空きの判定は、動いている受入のscopeが予約まで使い増せる量（memory.lowから現在の使用量を引いた量）を各上限の空きと比べる。deepの増分は数えない。
       入場を止める観測はguestの値だけで、guestOutcomeIdsのoutcomeが成立しないか読めなければどちらのclassも待つ。pressureOutcomeIdsのoutcomeは、受入を止めず、deepをfailureの時だけ止める。観測にあるWindowsの値は入場を止めない。
       入れ子は`/proc/self/cgroup`がclassのscopeの下にあれば、そのscopeの中で外側のclassのまま実行する。入れ子で昇格せず、scopeも作らず、待たない。
-      `--resource-memory BYTES`は同じpolicy内で当該呼出しの物理memory需要を明示する。CPUは予約しない。入れ子では外側のscopeの需要を超える明示を70で拒否する。
+      `--resource-memory BYTES`は同じpolicy内で当該呼出しの物理memory需要を明示する。CPUは、cappedの`--resource-cpu`だけが予約する。入れ子では外側のscopeの需要を超える明示を70で拒否する。
+      `--resource-cpu PERCENT`はcappedの走行が掛けるCPUの割合（CPU一つ分が100の正の整数）で、`--resource-policy`が要る。cappedのpolicyでは必須で、他のclassのpolicyで渡すと、待たずにcommandを起動せず70で返す。
+      PERCENTはscopeのCPUQuotaへ入る。scopeを作ってhelperが入った後、commandを再開する前にscopeのcpu.maxを読み、PERCENTと一致するかを確かめる。読めないか一致しなければcommandを一度も実行せずscopeを畳んで70で返す。子孫は同じscopeに残るので、上限はscope全体に掛かる。
+      cappedの入場は、動いているcappedのscopeがcpu.maxで掛ける割合の合計とPERCENTが、policyのcpuBudgetPercentに収まる時だけである。cpu.maxが読めないscopeと上限の無いscopeはbudgetの全部を予約していると見る。PERCENTがbudgetを超える場合は待っても入れないので、待たずにcommandを起動せず70で返す。
+      cappedのmemoryは受入と同じくMemoryLowへ需要を書き、動いているcappedのscopeが使い増せる量も受入と同じく空きから引く。cappedは取り消されず、deepを取り消さず、待つ受入にも止められない。CPUかmemoryが収まらなければ待ち、`--resource-wait-until`までに入れなければ75で返す。
+      cappedの入れ子は、外側がcappedのscopeで、PERCENTがそのscopeのcpu.maxの割合と等しい時だけ、そのscopeの中で走る。外側がcappedでないscopeか、PERCENTが外側の上限と違う場合は、要求した上限を満たせないので70で返す。小さい上限が要るなら外側の入口で全体の上限として宣言する。cappedでないclassの入れ子が外側のcappedのscopeで走る場合は、外側の上限のままである。
       明示しない物理memoryの需要は最初の有効な観測で確定し、最も厳しい上限へ切り詰める。
       上限は物理memory総量と各cgroupのlimitBytesの最小値で、既定値はその上限のmemoryPercent%である。
       `--resource-key KEY`を渡した走行は、記録があれば新しい5件のピークの最大を既定値の代わりに予約し、記録が無ければ記録directoryの他の鍵の最新のピークの中央値（件数が偶数なら大きい側）を、それも無ければ既定値を予約する。
@@ -52,12 +57,12 @@ in
       `--resource-target-seconds SEC`は走行の秒数がSECに達した時点の読取を残す目標で、`--resource-run-seconds`と同じく入場して起動した時から数える。記録だけに使い、取消にも走行の枠にも使わず、`--resource-policy`が要る。
       `--resource-slot-wait SEC`は呼び出し側が実行枠の取得に待った秒数（0を含む）で、supervisorは値を記録へ運ぶだけで枠を持たず、待機にも期限にも使わない。`--resource-policy`が要り、渡さない走行（枠を使わない走行）はnullである。
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
-      `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesとwaitSecondsとslotWaitSecondsが加わる。未起動の走行のfinished段階もwaitSecondsとslotWaitSecondsを持つ。
+      `--result`のfinished段階には、その走行のmemoryPeakBytesとmemoryReservedBytesとwaitSecondsとslotWaitSecondsとcpuCapPercent（`--resource-cpu`の値で、渡さなければnull）が加わる。未起動の走行のfinished段階もwaitSecondsとslotWaitSecondsとcpuCapPercentを持つ。
       起動した走行のfinished段階にはrunSecondsと、走行のscopeのcgroupから終了時に読んだcpuSeconds（cpu.statのusage_usec）、cpuStallSeconds（cpu.pressureのsome）、ioStallSeconds（io.pressureのfull）、memoryStallSeconds（memory.pressureのfull）の秒（ミリ秒精度）、targetSeconds、atTargetも加わる。
       終了時の読取は終了を始める時に行い、読めなかった項目は約1秒ごとの読取の直近の値で、一度も読めなければnullである。上限での取消と外からの取消でも読み、読めなくても終了statusは変えない。scopeを作らない入れ子の走行は全てnullである。
       目標が渡され、走行が目標の時点でなお動いていれば、atTargetがその時点の同じ四つの項目を持つ。目標より前に終わった走行と、目標の無い走行ではnullである。
       資源予約を持つ走行は、終了のたびに計測の一行をjournaldのnative socket（policyのjournalSocket、既定は`/run/systemd/journal/socket`）へ`SYSLOG_IDENTIFIER=dotfiles-supervise`で送る。
-      MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、実行枠の待ちの秒数（slotWaitSeconds）、走行秒数、終了status、ピークと予約のbyte、走行のscopeから読んだcpuSeconds、cpuStallSeconds、ioStallSeconds、memoryStallSeconds、targetSeconds、atTargetを持つ。
+      MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、実行枠の待ちの秒数（slotWaitSeconds）、走行秒数、終了status、ピークと予約のbyte、cpuCapPercent、走行のscopeから読んだcpuSeconds、cpuStallSeconds、ioStallSeconds、memoryStallSeconds、targetSeconds、atTargetを持つ。
       送れない場合はstderrへ一行を出すだけで、commandの終了statusを変えない。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
       子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。
@@ -65,7 +70,7 @@ in
       走行の所有と生死はscopeのcgroupとwaitpidのECHILDが持ち、走行を表す記録fileは持たない。状態directoryには、判定の排他のregistry.lockと、受入が待つ間だけ共有で持つacceptance.waitingのlockだけがある。
       取消の印のcancel-fileは走行の記録ではなく、supervisorが強制終了されて読まれなかったものだけが残り、scopeが無く一時間を過ぎたものを次の取消が消す。
       supervisor自体が強制終了されても、commandが残る間はそのscopeが空きの計算に数えられ続け、他の走行を止めない。
-      processを一つも持たないscope（`cgroup.events`が読めて`populated`が0）は空きの計算に数えず、読めないscopeは数える。判定は見つけた空のscopeを`systemctl --user stop --no-block`で一度ずつ止め、取消の記録は残さない。失敗はunit名を一行stderrへ出して判定を続ける。この前提は、classのsliceの下にscopeを作る全てのpolicyが同じ`runtimeDirectory`の排他を共有することである。
+      processを一つも持たないscope（`cgroup.events`が読めて`populated`が0）は空きの計算に数えず、読めないscopeは数える。受入とdeepの判定は見つけた空のscopeを`systemctl --user stop --no-block`で一度ずつ止め、取消の記録は残さない。失敗はunit名を一行stderrへ出して判定を続ける。cappedの判定は空のscopeを数えないだけで、他の走行のscopeへ止めの要求を一切出さず、止めるのは自分のscopeへ入れなかった時の自分のunitだけである。この前提は、classのsliceの下にscopeを作る全てのpolicyが同じ`runtimeDirectory`の排他を共有することである。
       scopeへ入れなかった走行（取消、待機の上限、猶予切れ、systemd-runの終了）は、clientを殺して回収した後に自分のscopeのunitを同じstopで止め、終了statusは変えない。unitを持たない場合は黙る。
       scopeの中で最初に動くhelperはsupervisorのPIDを受け、supervisorが死ねばSIGKILLを受け、起動した時に親が違えばcommandを実行せずに終わる。commandへ置き換わる前にこの設定を外すので、起動したcommandはsupervisorより長く生きる。
       policyの`scopeEntrySeconds`（省略時10）は、systemd-runが作ったscopeへcommandが入るまでの猶予秒数である。過ぎた走行は失敗にせず、そのscopeを止めて`--resource-wait-until`まで入場をやり直し、入れなければ75で返し、入れなかったことを待機の理由に残す。

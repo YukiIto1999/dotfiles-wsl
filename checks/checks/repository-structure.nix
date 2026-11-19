@@ -594,6 +594,7 @@ in
                   "workstation.nix.cores"
                   "workstation.nix.minimumFreeGiB"
                   "workstation.nix.targetFreeGiB"
+                  "workstation.workload.capped.cpuBudgetPercent"
                   "workstation.workload.hostReservePercent"
                   "workstation.workload.memorySwapMaxPercent"
                 ];

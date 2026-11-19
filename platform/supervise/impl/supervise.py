@@ -102,6 +102,7 @@ class Options:
         resource_target_seconds: 入場してから数える走行の秒数がこの値へ達した時点の読取を残す秒数か無効のNone。取消にも期限にも使わない
         resource_slot_wait_seconds: 呼び出し側が実行枠の取得に待った秒数か枠を使わなかった走行のNone。supervisor は枠を持たず、値を記録へ運ぶだけで、待機にも期限にも使わない
         resource_memory: 物理memory予約の明示値か既定値を選ぶNone
+        resource_cpu: capped の走行が掛ける CPU の割合（CPU一つ分が100）か、指定の無いNone。capped の policy が要り、他の class の policy では起動せず断る
         resource_key: 実測した需要の記録を読み書きする鍵か記録しないNone
         command: 絶対実行pathを先頭に持つcommand引数列
     """
@@ -129,6 +130,7 @@ class Options:
         self.resource_target_seconds = None
         self.resource_slot_wait_seconds = None
         self.resource_memory = None
+        self.resource_cpu = None
         self.resource_key = None
 
 
@@ -171,10 +173,11 @@ def parse_arguments(arguments):
                     raise UsageError("--resource-policy requires --resource-wait-until and --resource-run-seconds")
                 options.require_drained = True
             elif (options.resource_wait_until is not None or options.resource_run_seconds is not None
-                  or options.resource_target_seconds is not None or options.resource_slot_wait_seconds is not None):
+                  or options.resource_target_seconds is not None or options.resource_slot_wait_seconds is not None
+                  or options.resource_cpu is not None):
                 raise UsageError(
-                    "--resource-wait-until, --resource-run-seconds, --resource-target-seconds and --resource-slot-wait "
-                    "require --resource-policy")
+                    "--resource-wait-until, --resource-run-seconds, --resource-target-seconds, --resource-slot-wait "
+                    "and --resource-cpu require --resource-policy")
             return options
         if argument == "--require-drained":
             options.require_drained = True
@@ -186,7 +189,7 @@ def parse_arguments(arguments):
             continue
         if argument not in ("--term-grace", "--kill-grace", "--result", "--hold-fd", "--argv0", "--parent-death-cancels",
                             "--resource-policy", "--resource-wait-until", "--resource-run-seconds", "--resource-memory",
-                            "--resource-key", "--resource-target-seconds", "--resource-slot-wait"):
+                            "--resource-key", "--resource-target-seconds", "--resource-slot-wait", "--resource-cpu"):
             raise UsageError(f"unknown option: {argument}")
         if index + 1 >= len(arguments):
             raise UsageError(f"{argument} needs a value")
@@ -221,6 +224,10 @@ def parse_arguments(arguments):
             if not value.isdecimal() or int(value) <= 0:
                 raise UsageError(f"{argument} needs a positive integer")
             options.resource_memory = int(value)
+        elif argument == "--resource-cpu":
+            if not value.isdecimal() or int(value) <= 0:
+                raise UsageError(f"{argument} needs a positive integer percent of one CPU")
+            options.resource_cpu = int(value)
         else:
             options.result_path = value
         index += 2
@@ -733,7 +740,7 @@ class Supervisor:
             except (OSError, ValueError) as error:
                 diagnose(f"cannot record the measured memory peak: {error}")
         return {"memoryPeakBytes": peak, "memoryReservedBytes": reserved, "waitSeconds": round(self.wait_seconds, 3),
-                "slotWaitSeconds": self.slot_wait()}
+                "slotWaitSeconds": self.slot_wait(), "cpuCapPercent": self.reservation.cpu}
 
     def slot_wait(self):
         """呼び出し側が実行枠の取得に待った秒数。--result と計測の一行が同じ値を持つ。枠を使わなかった走行はNone"""
@@ -863,6 +870,8 @@ class Supervisor:
         started = False
         try:
             if self.wait_for_entry(argv[0], wait_until):
+                # 要求した CPU の上限を scope が持たなければ command を再開しない。上限の無い scope では一度も動かさず畳む
+                self.reservation.verify_cpu_cap()
                 os.kill(self.client_pid, signal.SIGCONT)
                 started = True
         finally:
@@ -913,7 +922,8 @@ class Supervisor:
             status = WAIT_EXPIRED_STATUS
             diagnose(f"gave up waiting for resources after {self.wait_seconds:.0f}s; the command was not started")
         self.record("finished", spawned=False, deferred=True, drained=True, client_status=None, remaining=[],
-                    status=status, waitSeconds=round(self.wait_seconds, 3), slotWaitSeconds=self.slot_wait())
+                    status=status, waitSeconds=round(self.wait_seconds, 3), slotWaitSeconds=self.slot_wait(),
+                    cpuCapPercent=self.reservation.cpu)
         return status
 
     def run(self):
@@ -922,7 +932,7 @@ class Supervisor:
             recorded = self.recorded_demand()
             self.reservation = Admission(
                 self.options.resource_policy, self.options.resource_memory, recorded,
-                self.host_demand() if recorded is None else None,
+                self.host_demand() if recorded is None else None, self.options.resource_cpu,
             )
             waiting_since = time.monotonic()
             try:
@@ -991,6 +1001,7 @@ class Supervisor:
             "status": status,
             "peakBytes": self.meter.peak,
             "reservedBytes": reservation.memory,
+            "cpuCapPercent": reservation.cpu,
             **self.scope_report(),
         }
         try:

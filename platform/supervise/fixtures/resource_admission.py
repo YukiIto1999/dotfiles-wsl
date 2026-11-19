@@ -1,6 +1,6 @@
 """Exercise admission through the real supervisor, a fake systemd and a fake cgroup tree, without allocating the declared memory.
 
-The invariants under test (the design's I1 to I7):
+The invariants under test (the design's I1 to I9):
 
   I1  The future growth of the running acceptance scopes, together with a new request, never exceeds a free amount.
   I2  An acceptance is not held back because other acceptances wait.
@@ -10,6 +10,9 @@ The invariants under test (the design's I1 to I7):
   I6  A run that did not run, was cancelled or ran past its limit is neither a success nor a record of demand.
   I7  Who owns a run is decided by its scope and by waitpid, never by a record file: a supervisor that is killed
       neither blocks the others nor releases what its command still holds.
+  I8  The CPU that the capped scopes that exist have been capped to never exceeds the budget together; a capped run waits for room
+      and neither cancels another run nor is cancelled, and a request above the budget is refused at once.
+  I9  A command never runs in a scope whose CPU cap differs from the one the capped run asked for, whether the run is nested or not.
 """
 
 import fcntl
@@ -34,8 +37,15 @@ GIB = 1024 ** 3
 DAY = 24 * 60 * 60
 KEY = "verify\n/repository\nmake verify"
 MEMORY_PERCENT = 40
-SLICES = {"acceptance": "agents.slice/agents-acceptance.slice", "deep": "agents.slice/agents-deep.slice"}
-CLASSES = tuple(SLICES)
+SLICES = {"acceptance": "agents.slice/agents-acceptance.slice", "deep": "agents.slice/agents-deep.slice",
+          "capped": "agents.slice/agents-capped.slice"}
+# The classes of runs that ask for memory alone.  The capped class asks for CPU too, so its tests name it and pass the CPU.
+CLASSES = ("acceptance", "deep")
+CAPPED = "capped"
+# What the policy of the capped class lets the capped runs reserve together, in percent of one CPU, and the reason a run gives
+# while it waits for that.
+CPU_BUDGET = 400
+CPU_REASON = "the CPU budget of the capped class is reserved"
 # The outcome ids the policy carries to admission, as the real observation reports them (workload-package.nix owns them).
 # The guest ones hold a run of either class, the pressure ones only a deep run and only at a failure; the Windows ones hold none.
 GUEST_OUTCOMES = ["resource/workload/linux-memory", "resource/workload/cgroup-budget", "resource/workload/cpu"]
@@ -234,16 +244,18 @@ class ResourceAdmission(unittest.TestCase):
         self.journal.setblocking(False)
         self.policy = self.write_policy("acceptance")
         self.deep_policy = self.write_policy("deep")
+        self.capped_policy = self.write_policy(CAPPED)
         # A directory to run in: the demand is keyed by the caller, not by what the working directory holds.
         self.repo = self.root / "repo"
         self.repo.mkdir()
 
-    def write_policy(self, klass, name=None, fail=False, gate=None, strand=None, abort=False, refuse=False, **changes):
+    def write_policy(self, klass, name=None, fail=False, gate=None, strand=None, abort=False, refuse=False, cpu=None, **changes):
         """Write a policy file for a class: the real fields, with the fakes standing in for systemd and the cgroup tree.
 
         The fake systemd-run refuses to create the scope with `fail`, answers once `gate` exists, makes the scope and moves in
         once `strand` exists, and ends with status 1 after it made the scope with `abort`; the fake systemctl refuses to stop
-        with `refuse`.
+        with `refuse`.  It leaves `CPUQuota` unapplied with `cpu="ignore"` and gives the scope no cpu.max with `cpu="absent"`.
+        The policy of the capped class carries the budget CPU_BUDGET unless `changes` says otherwise.
         """
         slow = ["--gate", str(gate)] if gate else []
         stranded = ["--strand", str(strand)] if strand else []
@@ -255,12 +267,13 @@ class ResourceAdmission(unittest.TestCase):
             "memoryPercent": MEMORY_PERCENT,
             "maximumObservationAgeSeconds": OBSERVATION_AGE,
             "systemdRun": [sys.executable, str(FAKE), "--cgroup-root", str(self.cgroup), *(["--fail"] if fail else []), *slow,
-                           *stranded, *(["--abort"] if abort else []), "run"],
+                           *stranded, *(["--abort"] if abort else []), *(["--cpu", cpu] if cpu else []), "run"],
             "systemctl": [sys.executable, str(FAKE), "--cgroup-root", str(self.cgroup), *(["--refuse"] if refuse else []), "ctl"],
             "cgroupRoot": str(self.cgroup),
             "slices": SLICES,
             "guestOutcomeIds": GUEST_OUTCOMES,
             "pressureOutcomeIds": PRESSURE_OUTCOMES,
+            **({"cpuBudgetPercent": CPU_BUDGET} if klass == CAPPED else {}),
             **changes,
         }
         path = self.root / (name or f"policy-{klass}.json")
@@ -312,7 +325,7 @@ class ResourceAdmission(unittest.TestCase):
         process = subprocess.Popen([
             sys.executable, str(SOURCE), "--require-drained", "--interrupt-cancels",
             "--result", str(self.root / (name + ".result")),
-            "--resource-policy", str(policy or (self.policy if klass == "acceptance" else self.deep_policy)),
+            "--resource-policy", str(policy or {"acceptance": self.policy, "deep": self.deep_policy, CAPPED: self.capped_policy}[klass]),
             "--resource-wait-until", str(time.time() + wait),
             "--resource-run-seconds", str(run),
             *arguments,
@@ -322,6 +335,10 @@ class ResourceAdmission(unittest.TestCase):
         # Whatever the test did, a command that is still waiting for its release must be able to end.
         self.addCleanup(release.touch)
         return process, marker, release
+
+    def cap(self, cpu, memory=100 * MIB):
+        """The arguments of a capped run: its CPU cap and an explicit memory demand small enough that only the CPU is under test."""
+        return ["--resource-cpu", str(cpu), "--resource-memory", str(memory)]
 
     def run_command(self, name, command=None, status=0, key=KEY, arguments=(), cwd=None, **options):
         """Run a command that ends by itself and return its status, its stderr and its result record.
@@ -400,15 +417,17 @@ class ResourceAdmission(unittest.TestCase):
         (unit,) = self.units_asked_for()
         return unit
 
-    def leave_scope(self, klass, name, events):
-        """Leave a scope below the class's slice as the manager can leave one: its reservation written, no janitor to remove it, and
-        `events` as its cgroup.events, or no such file when `events` is None."""
+    def leave_scope(self, klass, name, events, cpu=None):
+        """Leave a scope below the class's slice as the manager can leave one: its reservation written, no janitor to remove it,
+        `events` as its cgroup.events, or no such file when `events` is None, and `cpu` as its cpu.max, or no such file when None."""
         uid = os.getuid()
         scope = self.cgroup / "user.slice" / f"user-{uid}.slice" / f"user@{uid}.service" / SLICES[klass] / name
         scope.mkdir(parents=True)
-        (scope / ("memory.low" if klass == "acceptance" else "memory.high")).write_text(f"{9 * GIB}\n")
+        (scope / ("memory.high" if klass == "deep" else "memory.low")).write_text(f"{9 * GIB}\n")
         if events is not None:
             (scope / "cgroup.events").write_text(events)
+        if cpu is not None:
+            (scope / "cpu.max").write_text(cpu)
         return scope
 
     def limit(self, *limits):
@@ -1848,6 +1867,307 @@ class ResourceAdmission(unittest.TestCase):
         """Only runs that took part in admission are measured."""
         subprocess.run([sys.executable, str(SOURCE), "--", *INSTANT], check=True, env=self.environment())
         self.assertEqual(self.measurements(), [])
+
+    # The capped class: a CPU cap on the run's own scope, and a budget of CPU that all capped runs share
+
+    def test_i8_a_capped_run_gets_its_own_scope_with_the_cap_in_the_capped_slice(self):
+        """The cap is the scope's CPUQuota, the memory is reserved as for an acceptance, and both reports carry the cap."""
+        process, started, release = self.start("capped", klass=CAPPED, arguments=self.cap(150, GIB))
+        self.wait_for(started.exists, process)
+        (scope,) = self.scopes(CAPPED)
+        self.assertEqual((scope / "cpu.max").read_text().strip(), "150000 100000")
+        self.assertEqual((scope / "memory.low").read_text().strip(), str(GIB))
+        (call,) = self.calls("run")
+        self.assertIn("--slice=agents-capped.slice", call)
+        self.assertEqual([argument for argument in call if argument.startswith("CPUQuota=")], ["CPUQuota=150%"])
+        self.assertIn(f"MemoryLow={GIB}", call)
+        self.assertEqual([self.scopes(klass) for klass in CLASSES], [[], []])
+        release.touch()
+        self.assertEqual(self.finish(process), 0)
+        result = json.loads((self.root / "capped.result").read_text())
+        (_, record), = self.measurements()
+        self.assertEqual((result["cpuCapPercent"], record["cpuCapPercent"]), (150, 150))
+        self.assertEqual((record["class"], record["nested"], record["admitted"], record["status"]), (CAPPED, False, True, 0))
+
+    def test_a_run_that_asks_for_no_cap_reports_none(self):
+        """The field is null, not 0, for a run of another class, so that no cap is not read as a cap of nothing."""
+        status, _, result = self.run_command("uncapped", key=None)
+        self.assertEqual(status, 0)
+        (_, record), = self.measurements()
+        self.assertEqual((result["cpuCapPercent"], record["cpuCapPercent"]), (None, None))
+
+    def test_i8_capped_runs_share_the_budget_and_the_one_that_does_not_fit_enters_when_room_is_free(self):
+        """Two runs of half the budget fill it; a third waits for the budget, not for memory, and enters once one ends."""
+        half = CPU_BUDGET // 2
+        first, first_started, first_release = self.start("first", klass=CAPPED, arguments=self.cap(half))
+        self.wait_for(first_started.exists, first)
+        second, second_started, second_release = self.start("second", klass=CAPPED, arguments=self.cap(half))
+        self.wait_for(second_started.exists, second)
+        third, third_started, third_release = self.start("third", klass=CAPPED, arguments=self.cap(100))
+        self.assertEqual(self.waiting("third", third), CPU_REASON)
+        self.keeps_waiting(third)
+        self.assertFalse(third_started.exists())
+        caps = [(scope / "cpu.max").read_text().strip() for scope in self.scopes(CAPPED)]
+        self.assertEqual(caps, [f"{half * 1000} 100000"] * 2)
+        first_release.touch()
+        self.assertEqual(self.finish(first), 0)
+        self.wait_for(third_started.exists, third)
+        for release, process in ((second_release, second), (third_release, third)):
+            release.touch()
+            self.assertEqual(self.finish(process), 0)
+
+    def test_i8_four_runs_that_each_ask_for_the_whole_budget_run_one_after_the_other(self):
+        """Four runs cannot each take the whole CPU budget: they take it in turn, and only one scope holds it at a time."""
+        pending = {f"whole-{index}": self.start(f"whole-{index}", klass=CAPPED, arguments=self.cap(CPU_BUDGET))
+                   for index in range(4)}
+        while pending:
+            self.wait_for(lambda: any(marker.exists() for _, marker, _ in pending.values()))
+            running = [name for name, (_, marker, _) in pending.items() if marker.exists()]
+            self.assertEqual(len(running), 1, running)
+            caps = [(scope / "cpu.max").read_text().strip() for scope in self.scopes(CAPPED)]
+            self.assertEqual(caps, [f"{CPU_BUDGET * 1000} 100000"])
+            process, _, release = pending.pop(running[0])
+            release.touch()
+            self.assertEqual(self.finish(process), 0)
+
+    def test_i8_a_request_above_the_budget_is_refused_at_once_and_one_at_the_budget_is_admitted(self):
+        """A request that no amount of waiting could admit fails with 70 without a wait, a scope or a command."""
+        process, started, _ = self.start("above", klass=CAPPED, arguments=self.cap(CPU_BUDGET + 1))
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 70)
+        self.assertIn("exceeds the capped budget", error)
+        self.assertNotIn("waiting for resources", error)
+        self.assertFalse(started.exists())
+        self.assertEqual((self.calls("run"), self.scopes(CAPPED)), ([], []))
+        (_, record), = self.measurements()
+        self.assertEqual((record["status"], record["admitted"], record["cpuCapPercent"]), (70, False, CPU_BUDGET + 1))
+        status, _, result = self.run_command("at-budget", key=None, klass=CAPPED, arguments=self.cap(CPU_BUDGET))
+        self.assertEqual(status, 0)
+        self.assertEqual(result["cpuCapPercent"], CPU_BUDGET)
+
+    def test_the_cpu_request_belongs_to_the_capped_class_and_the_capped_class_needs_one(self):
+        """No request is a refusal for the capped class and a request is one for the others, before anything starts."""
+        cases = ((CAPPED, [], "needs a CPU request"),
+                 ("acceptance", ["--resource-cpu", "100"], "needs the policy of the capped class"),
+                 ("deep", ["--resource-cpu", "100"], "needs the policy of the capped class"))
+        for klass, arguments, expected in cases:
+            with self.subTest(klass=klass):
+                process, started, _ = self.start(f"refused-{klass}", klass=klass, arguments=arguments)
+                _, error = process.communicate(timeout=HANG_SECONDS)
+                self.assertEqual(process.returncode, 70)
+                self.assertIn(expected, error)
+                self.assertFalse(started.exists())
+        self.assertEqual(self.calls("run"), [])
+
+    def test_a_cpu_request_needs_a_policy_and_a_positive_whole_number(self):
+        """Without a policy the request would be dropped silently, so it is a usage error, and so is a value that is no percentage."""
+        policy = ["--resource-policy", str(self.capped_policy), "--resource-wait-until", "9999999999", "--resource-run-seconds", "60"]
+        for arguments, expected in ((["--resource-cpu", "100"], "require --resource-policy"),
+                                    ([*policy, "--resource-cpu", "0"], "needs a positive integer"),
+                                    ([*policy, "--resource-cpu", "-1"], "needs a positive integer"),
+                                    ([*policy, "--resource-cpu", "1.5"], "needs a positive integer"),
+                                    ([*policy, "--resource-cpu", "many"], "needs a positive integer")):
+            with self.subTest(arguments=arguments):
+                run = subprocess.run([sys.executable, str(SOURCE), *arguments, "--", *INSTANT], capture_output=True, text=True,
+                                     env=self.environment())
+                self.assertEqual(run.returncode, 2)
+                self.assertIn(expected, run.stderr)
+
+    def test_i8_a_capped_run_and_a_deep_run_neither_cancel_nor_count_as_each_other(self):
+        """A capped scope is not the deep run a deep one waits for, and a deep scope is not cancelled for a capped run to enter."""
+        capped, capped_started, capped_release = self.start("capped-one", klass=CAPPED, arguments=self.cap(100))
+        self.wait_for(capped_started.exists, capped)
+        deep, deep_started, deep_release = self.start("deep", klass="deep", arguments=["--resource-memory", str(100 * MIB)])
+        self.wait_for(deep_started.exists, deep)
+        again, again_started, again_release = self.start("capped-two", klass=CAPPED, arguments=self.cap(100))
+        self.wait_for(again_started.exists, again)
+        self.assertEqual(self.stops(), [])
+        self.assertEqual((len(self.scopes("deep")), len(self.scopes(CAPPED))), (1, 2))
+        for release, process in ((capped_release, capped), (deep_release, deep), (again_release, again)):
+            release.touch()
+            self.assertEqual(self.finish(process), 0)
+        self.assertEqual(json.loads((self.root / "deep.result").read_text())["status"], 0)
+
+    def test_i8_a_capped_run_that_lacks_memory_waits_and_never_cancels_the_deep_run(self):
+        """An acceptance in its place would stop the deep run; a capped run only waits, and the deep run ends as itself."""
+        deep, deep_started, deep_release = self.start("deep", klass="deep", arguments=["--resource-memory", str(4 * GIB)])
+        self.wait_for(deep_started.exists, deep)
+        self.observe(hostMemoryHeadroomBytes=GIB, memoryHeadroomBytes=GIB)
+        capped, capped_started, capped_release = self.start("capped", klass=CAPPED, arguments=self.cap(100, 2 * GIB))
+        self.assertEqual(self.waiting("capped", capped), HEADROOM)
+        self.keeps_waiting(capped)
+        self.assertFalse(capped_started.exists())
+        self.assertIsNone(deep.poll())
+        self.assertEqual(self.stops(), [])
+        self.assertEqual(list((self.root / "run").glob("cancel-*")), [])
+        deep_release.touch()
+        self.assertEqual(self.finish(deep), 0)
+        self.assertEqual(json.loads((self.root / "deep.result").read_text())["status"], 0)
+        self.observe(hostMemoryHeadroomBytes=10 * GIB, memoryHeadroomBytes=10 * GIB)
+        self.wait_for(capped_started.exists, capped)
+        capped_release.touch()
+        self.assertEqual(self.finish(capped), 0)
+
+    def test_i8_a_capped_run_reserves_its_memory_growth_against_an_acceptance_and_is_never_cancelled_for_one(self):
+        """The acceptance that does not fit beside the capped run waits for it, and the capped run is neither stopped nor marked."""
+        capped, capped_started, capped_release = self.start("capped", klass=CAPPED, arguments=self.cap(100, 6 * GIB))
+        self.wait_for(capped_started.exists, capped)
+        acceptance, started, release = self.start("acceptance", arguments=["--resource-memory", str(6 * GIB)])
+        self.assertEqual(self.waiting("acceptance", acceptance), HEADROOM)
+        self.keeps_waiting(acceptance)
+        self.assertFalse(started.exists())
+        self.assertIsNone(capped.poll())
+        self.assertEqual(self.stops(), [])
+        capped_release.touch()
+        self.assertEqual(self.finish(capped), 0)
+        self.wait_for(started.exists, acceptance)
+        release.touch()
+        self.assertEqual(self.finish(acceptance), 0)
+
+    def test_i8_a_waiting_acceptance_does_not_hold_a_capped_run_as_it_holds_a_deep_run(self):
+        """The capped run is judged by its own room alone, so it enters where a deep run of the same size waits."""
+        holder, held, holder_release = self.start("holder", arguments=["--resource-memory", str(9 * GIB)])
+        self.wait_for(held.exists, holder)
+        large, large_started, large_release = self.start("large", arguments=["--resource-memory", str(9 * GIB)])
+        self.waiting("large", large)
+        capped, capped_started, capped_release = self.start("capped", klass=CAPPED, arguments=self.cap(100))
+        self.wait_for(capped_started.exists, capped)
+        self.assertFalse(large_started.exists())
+        capped_release.touch()
+        self.assertEqual(self.finish(capped), 0)
+        holder_release.touch()
+        self.assertEqual(self.finish(holder), 0)
+        self.wait_for(large_started.exists, large)
+        large_release.touch()
+        self.assertEqual(self.finish(large), 0)
+
+    def test_i8_a_capped_scope_whose_cap_cannot_be_read_reserves_the_whole_budget(self):
+        """A scope with no cpu.max, and one that says max, hold the budget; the cap it really has is what it reserves."""
+        stray = self.leave_scope(CAPPED, "stray.scope", HOLDING)
+        process, started, release = self.start("capped", klass=CAPPED, arguments=self.cap(100))
+        self.assertEqual(self.waiting("capped", process), CPU_REASON)
+        self.keeps_waiting(process)
+        self.assertFalse(started.exists())
+        (stray / "cpu.max").write_text("max 100000\n")
+        self.keeps_waiting(process)
+        self.assertFalse(started.exists())
+        (stray / "cpu.max").write_text(f"{(CPU_BUDGET - 100) * 1000} 100000\n")
+        self.wait_for(started.exists, process)
+        release.touch()
+        self.assertEqual(self.finish(process), 0)
+
+    def test_i8_an_empty_scope_reserves_nothing_and_a_capped_run_never_asks_to_stop_it(self):
+        """A scope that holds no process runs nothing, so the whole budget is free beside it; it is left to the classes that reclaim it."""
+        empty = [self.leave_scope(klass, f"gone-{klass}.scope", EMPTY) for klass in (*CLASSES, CAPPED)]
+        status, _, _ = self.run_command("after-empty", key=None, klass=CAPPED, arguments=self.cap(CPU_BUDGET))
+        self.assertEqual(status, 0)
+        (_, record), = self.measurements()
+        self.assertEqual(record["waitReasons"], [])
+        # A capped run asks the manager to stop no scope at all: its own is stopped only when its command could not enter it.
+        self.assertEqual(self.stops(), [])
+        self.assertTrue(all(scope.exists() for scope in empty))
+
+    def test_i9_a_scope_without_the_requested_cap_runs_nothing_and_is_stopped(self):
+        """Whether the manager leaves the quota unapplied or the scope has no cpu.max, the command never runs and the scope goes."""
+        for index, mode in enumerate(("ignore", "absent")):
+            with self.subTest(mode=mode):
+                policy = self.write_policy(CAPPED, name=f"cap-{mode}.json", cpu=mode)
+                process, started, _ = self.start(f"uncapped-{mode}", klass=CAPPED, policy=policy, arguments=self.cap(150))
+                _, error = process.communicate(timeout=HANG_SECONDS)
+                self.assertEqual(process.returncode, 70)
+                self.assertIn("CPU cap", error)
+                self.assertIn("command was not started", error)
+                self.assertFalse(started.exists())
+                self.assertEqual(self.stops(), self.units_asked_for())
+                self.assertEqual(len(self.stops()), index + 1)
+                self.assertEqual(self.scopes(CAPPED), [])
+                (_, record), = self.measurements()
+                self.assertEqual((record["status"], record["admitted"], record["cpuCapPercent"]), (70, False, 150))
+
+    def test_a_capped_run_that_cannot_enter_reports_its_wait_and_no_run(self):
+        """Waiting for the budget is a wait: it ends with 75, names what held it back, has no run seconds and never starts."""
+        holder, held, holder_release = self.start("holder", klass=CAPPED, arguments=self.cap(CPU_BUDGET))
+        self.wait_for(held.exists, holder)
+        process, started, _ = self.start("starved", klass=CAPPED, wait=WAIT_LIMIT, arguments=self.cap(100))
+        self.assertEqual(self.waiting("starved", process), CPU_REASON)
+        _, error = process.communicate(timeout=HANG_SECONDS)
+        self.assertEqual(process.returncode, 75)
+        self.assertFalse(started.exists())
+        self.assertIn("gave up waiting for resources", error)
+        result = json.loads((self.root / "starved.result").read_text())
+        self.assertEqual((result["phase"], result["spawned"], result["status"], result["cpuCapPercent"]), ("finished", False, 75, 100))
+        (_, record), = self.measurements()
+        self.assertEqual((record["class"], record["status"], record["admitted"], record["runSeconds"], record["cpuCapPercent"]),
+                         (CAPPED, 75, False, None, 100))
+        self.assertEqual(record["waitReasons"][0], CPU_REASON)
+        self.assertGreater(record["waitSeconds"], 0)
+        self.assertLessEqual(record["waitSeconds"], WAIT_LIMIT + WAIT_SLACK)
+        self.assertIsNone(holder.poll())
+        holder_release.touch()
+        self.assertEqual(self.finish(holder), 0)
+
+    def test_a_capped_run_past_its_run_limit_ends_with_124_and_reports_a_run_apart_from_its_wait(self):
+        """The run limit counts from admission: a run that did not wait is cancelled at it with 124 and has run seconds."""
+        status, _, result = self.run_command("overrun", key=None, klass=CAPPED, run=0.6, arguments=self.cap(100),
+                                             command=[sys.executable, "-c", "import time; time.sleep(30)"])
+        self.assertEqual(status, 124)
+        self.assertTrue(result["spawned"])
+        (_, record), = self.measurements()
+        self.assertEqual((record["status"], record["admitted"], record["waitReasons"], record["cpuCapPercent"]),
+                         (124, True, [], 100))
+        self.assertIsNotNone(record["runSeconds"])
+
+    def test_i9_a_nested_capped_request_must_equal_the_cap_of_the_capped_scope_it_is_in(self):
+        """It runs in that scope without one of its own, so only the cap that scope has is the cap it can honour: a smaller or a larger request fails with 70."""
+        for cpu, expected in (("100", 70), ("200", 0), ("300", 70)):
+            with self.subTest(cpu=cpu):
+                self.assertEqual(self.nested(CAPPED, CAPPED, "--resource-cpu", cpu, outer=self.cap(200)), expected)
+        # One scope for each of the three outer runs and none for the inner ones.
+        self.assertEqual(len([call for call in self.calls("run") if "--slice=agents-capped.slice" in call]), 3)
+
+    def test_i9_a_capped_request_nested_in_a_scope_without_a_cap_is_refused_and_makes_no_scope(self):
+        """Running it there would drop the cap it asks for, and a scope of its own would leave the reservation of the scope it is in."""
+        for outer in ("acceptance", "deep"):
+            with self.subTest(outer=outer):
+                self.assertEqual(self.nested(outer, CAPPED, "--resource-cpu", "100"), 70)
+        self.assertEqual([call for call in self.calls("run") if "--slice=agents-capped.slice" in call], [])
+        self.assertEqual(self.scopes(CAPPED), [])
+
+    def test_i9_a_nested_request_of_another_class_runs_under_the_cap_of_the_capped_scope(self):
+        """A call inside a capped run that asks for no cap stays in that scope, so it keeps the cap, and reports the class it runs as."""
+        self.assertEqual(self.nested(CAPPED, "acceptance", outer=self.cap(200)), 0)
+        records = [record for _, record in self.measurements()]
+        self.assertEqual(sorted((record["nested"], record["class"]) for record in records), [(False, CAPPED), (True, CAPPED)])
+        self.assertEqual([call for call in self.calls("run") if "--slice=agents-acceptance.slice" in call], [])
+
+    def test_a_policy_carries_a_cpu_budget_for_the_capped_class_only_and_a_slice_for_every_class(self):
+        """A budget that is missing or no positive whole number, a budget on another class and a missing slice all fail with 70."""
+        without_capped = {name: path for name, path in SLICES.items() if name != CAPPED}
+        cases = ((CAPPED, {"cpuBudgetPercent": None}, "cpuBudgetPercent must be a positive integer"),
+                 (CAPPED, {"cpuBudgetPercent": 0}, "cpuBudgetPercent must be a positive integer"),
+                 (CAPPED, {"cpuBudgetPercent": 2.5}, "cpuBudgetPercent must be a positive integer"),
+                 ("acceptance", {"cpuBudgetPercent": 300}, "belongs to the policy of the capped class"),
+                 ("deep", {"cpuBudgetPercent": 300}, "belongs to the policy of the capped class"),
+                 ("acceptance", {"slices": without_capped}, "slices must name the slice of every class"))
+        for index, (klass, changes, expected) in enumerate(cases):
+            with self.subTest(klass=klass, changes=changes):
+                policy = self.write_policy(klass, name=f"invalid-{index}.json", **changes)
+                process, started, _ = self.start(f"invalid-{index}", klass=klass, policy=policy,
+                                                 arguments=self.cap(100) if klass == CAPPED else [])
+                _, error = process.communicate(timeout=HANG_SECONDS)
+                self.assertEqual(process.returncode, 70)
+                self.assertIn(expected, error)
+                self.assertFalse(started.exists())
+
+    def test_a_capped_run_is_not_made_the_first_for_the_kernel_to_kill(self):
+        """oom_score_adj is left alone for a capped run, as for an acceptance."""
+        seen = self.root / "capped.score"
+        process, _, _ = self.start("capped", klass=CAPPED, arguments=self.cap(100),
+                                   command=[*OOM_SCORE, str(seen), str(self.root / "capped.release")])
+        self.wait_for(seen.exists, process)
+        (self.root / "capped.release").touch()
+        self.assertEqual(self.finish(process), 0)
+        self.assertEqual(seen.read_text().strip(), "0")
 
 
 if __name__ == "__main__":

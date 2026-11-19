@@ -20,16 +20,20 @@ import uuid
 
 from measure import JOURNAL_SOCKET
 
-CLASSES = ("acceptance", "deep")
+# capped は CPU の割合を予約し、走行ごとの scope の CPUQuota に掛ける前景の走行。受入と同じく取り消されず、他の class の走行を取り消さない
+CAPPED = "capped"
+CLASSES = ("acceptance", "deep", CAPPED)
+# memory の使い増しを空きから引く class。取り消されない走行で、増分は予約として他の入場の判定に数える
+RESERVING = ("acceptance", CAPPED)
 # 一走行の計測へ残す待機理由の最大の件数
 MAXIMUM_REASONS = 8
 # 入場を止めない観測の status。failure と未知の status は、見る outcome のどれにあっても止める
 PASSING = ("pass", "warn")
-# scope が持つ需要を書く file。受入は予約の記録の memory.low、deep は上限の memory.high。どちらも保護や hard limit にはしない
-DEMAND_FILES = {"acceptance": "memory.low", "deep": "memory.high"}
-DEMAND_PROPERTIES = {"acceptance": "MemoryLow", "deep": "MemoryHigh"}
-# deep は kernel の OOM で最初に選ばれる。受入と session は上げない
-OOM_SCORES = {"acceptance": 0, "deep": 1000}
+# scope が持つ需要を書く file。受入と capped は予約の記録の memory.low、deep は上限の memory.high。どれも保護や hard limit にはしない
+DEMAND_FILES = {"acceptance": "memory.low", "deep": "memory.high", CAPPED: "memory.low"}
+DEMAND_PROPERTIES = {"acceptance": "MemoryLow", "deep": "MemoryHigh", CAPPED: "MemoryLow"}
+# deep は kernel の OOM で最初に選ばれる。受入と capped と session は上げない
+OOM_SCORES = {"acceptance": 0, "deep": 1000, CAPPED: 0}
 # 取り消された scope の SIGTERM から SIGKILL までの猶予。supervisor の既定の猶予と同じ
 STOP_TIMEOUT = "10s"
 STOP_SECONDS = 5
@@ -46,6 +50,9 @@ CANCEL_MARK = "cancel-"
 STALE_MARK_SECONDS = 3600
 ADMIT, WAIT, CANCEL_DEEP = "admit", "wait", "cancel-deep"
 HEADROOM_REASON = "Linux memory headroom is reserved"
+# capped の scope が CPU の上限を持つ cgroup の file。quota と period の二つの値を持つ
+CPU_MAX = "cpu.max"
+CPU_REASON = "the CPU budget of the capped class is reserved"
 
 
 class AdmissionError(Exception):
@@ -84,14 +91,16 @@ class Scope:
 
     klass: 走行の class
     unit: scope の unit 名
-    limit: 受入では memory.low、deep では memory.high の bytes。読めなければ0
+    limit: 受入と capped では memory.low、deep では memory.high の bytes。読めなければ0
     working_set: 観測が報告した、回収できる cache を除いた使用量。報告が無い scope は0で、予約の全部がこれから使われると見る
+    cpu: capped の scope が cpu.max で掛ける CPU の割合（CPU一つ分が100）。上限を読めない scope と上限の無い scope は budget の全部。他の class は0
     """
 
     klass: str
     unit: str
     limit: int
     working_set: int
+    cpu: int = 0
 
 
 @dataclass(frozen=True)
@@ -121,9 +130,9 @@ class Decision:
 
 
 def growth(scope):
-    """走行中の受入の scope がこれから使い増せる量
+    """走行中の受入と capped の scope がこれから使い増せる量
 
-    scope: 受入の scope
+    scope: 受入か capped の scope
     戻り値: 予約と現在の使用量の差。すでに予約を超えている scope はこれ以上を要求しない
     """
     return max(scope.limit - scope.working_set, 0)
@@ -139,7 +148,7 @@ def cancellable(scopes):
 
 
 def shortfall(demand, scopes, observation):
-    """要求が、走行中の受入が使い増せる量を含めて空きに収まらない理由
+    """要求が、走行中の受入と capped が使い増せる量を含めて空きに収まらない理由
 
     demand: 要求する物理memory
     scopes: 存在する scope
@@ -147,7 +156,7 @@ def shortfall(demand, scopes, observation):
     戻り値: 収まる場合は None、収まらない場合は理由。deep の scope の増分は数えない
     制約: 空きは host と祖先の cgroup の上限だけを数える。Windows の commit と物理の空きは入場を止める根拠にせず、診断にだけ使う
     """
-    claim = sum(growth(scope) for scope in scopes if scope.klass == "acceptance")
+    claim = sum(growth(scope) for scope in scopes if scope.klass in RESERVING)
     need = demand + claim
     if need > observation.host_headroom:
         return HEADROOM_REASON
@@ -157,7 +166,20 @@ def shortfall(demand, scopes, observation):
     return None
 
 
-def decide(klass, demand, scopes, observation, acceptance_waiting):
+def cpu_shortfall(request, budget, scopes):
+    """要求する CPU が、走行中の capped の予約を含めて budget に収まらない理由
+
+    request: 要求する CPU の割合（CPU一つ分が100）
+    budget: capped の走行が合わせて予約できる CPU の割合
+    scopes: 存在する scope
+    戻り値: 収まる場合は None、収まらない場合は理由。capped でない scope は数えない
+    制約: 理由の文は予約の量を含めない。量が変わるたびに待機の理由が変わると、一走行の記録が理由で埋まるため
+    """
+    reserved = sum(scope.cpu for scope in scopes if scope.klass == CAPPED)
+    return CPU_REASON if request + reserved > budget else None
+
+
+def decide(klass, demand, scopes, observation, acceptance_waiting, cpu_request=0, cpu_budget=0):
     """入場の判定。観測と存在する scope だけで決まる
 
     klass: 要求する走行の class
@@ -165,13 +187,20 @@ def decide(klass, demand, scopes, observation, acceptance_waiting):
     scopes: 存在する scope
     observation: 空きの観測
     acceptance_waiting: 待っている受入があるか
+    cpu_request: capped が要求する CPU の割合。他の class は使わない
+    cpu_budget: capped の走行が合わせて予約できる CPU の割合。他の class は使わない
     戻り値: 入場、待機、deep の取消のいずれか
     不変条件:
       受入の入場は他の受入が待つことで止まらない。
       受入が待つ間は deep を入場させない。deep は同時に一走行だけ。
-      入場した受入の増分の合計は各空きを超えない。
+      入場した受入と capped の増分の合計は各空きを超えない。
       受入が memory で収まらず deep の scope があれば、deep だけを取り消す。
+      入場した capped の CPU の予約の合計は budget を超えない。
+      capped の入場は、待つ受入にも走行中の deep にも止められず、何も取り消さない。収まらなければ待つだけである。
     """
+    if klass == CAPPED:
+        reason = cpu_shortfall(cpu_request, cpu_budget, scopes) or shortfall(demand, scopes, observation)
+        return Decision(ADMIT) if reason is None else Decision(WAIT, reason)
     if klass == "deep":
         if acceptance_waiting:
             return Decision(WAIT, "an acceptance verification is waiting")
@@ -194,6 +223,23 @@ def cgroup_integer(path):
     """
     text = path.read_text().strip()
     return None if text == "max" else int(text)
+
+
+def cpu_percent(path):
+    """cpu.max が掛ける上限の読取
+
+    path: scope の cpu.max
+    戻り値: CPU一つ分を100とする割合。切り上げる。quota が max の場合は None
+    失敗: 読めない場合の OSError と、形式が不正な場合の ValueError
+    """
+    fields = path.read_text().split()
+    if len(fields) != 2 or not fields[1].isdecimal() or int(fields[1]) <= 0:
+        raise ValueError(f"{path} is not a cpu.max")
+    if fields[0] == "max":
+        return None
+    if not fields[0].isdecimal() or int(fields[0]) <= 0:
+        raise ValueError(f"{path} has no valid quota")
+    return -(-int(fields[0]) * 100 // int(fields[1]))
 
 
 def unpopulated(directory):
@@ -247,6 +293,15 @@ class Policy:
         self.entry_seconds = document.get("scopeEntrySeconds", SCOPE_ENTRY_SECONDS)
         if type(self.entry_seconds) not in (int, float) or not 0 < self.entry_seconds < math.inf:
             raise AdmissionError("scopeEntrySeconds must be a positive number")
+        missing = [klass for klass in CLASSES if klass not in self.slices]
+        if missing:
+            raise AdmissionError(f"slices must name the slice of every class, missing {', '.join(missing)}")
+        # CPU の budget は capped の policy だけが持つ。他の class の policy が持つと、使われない宣言が残る
+        self.cpu_budget = document.get("cpuBudgetPercent")
+        if self.klass == CAPPED:
+            self.cpu_budget = positive(self.cpu_budget, "cpuBudgetPercent")
+        elif self.cpu_budget is not None:
+            raise AdmissionError("cpuBudgetPercent belongs to the policy of the capped class")
 
     def slice_directory(self, klass):
         """class の slice の cgroup directory。利用者の systemd manager の下に置く"""
@@ -269,11 +324,12 @@ class Admission:
     memory_bytes: 明示された物理memory需要か導出に任せるNone
     recorded_bytes: 実測の記録から導いた物理memory需要か記録なしのNone
     host_median_bytes: 鍵の記録が無い走行が、この host の他の鍵の実測から導いた物理memory需要か導けないNone。入れ子は使わない
+    cpu_percent: capped の走行が掛ける CPU の割合（CPU一つ分が100）か、CPU の指定の無いNone。capped は必須で、他の class は指定できない
     寿命: supervisor による子孫終了確認まで。持つ状態は scope の cgroup と、process が持つ flock だけ
     制約: 明示でない物理memory需要は最初の有効な観測か外側の scope で確定し、それまでは未確定のNone
     """
 
-    def __init__(self, policy_path, memory_bytes=None, recorded_bytes=None, host_median_bytes=None):
+    def __init__(self, policy_path, memory_bytes=None, recorded_bytes=None, host_median_bytes=None, cpu_percent=None):
         self.policy = Policy(policy_path)
         self.klass = self.policy.klass
         # 入れ子の走行は外側の class で走る
@@ -286,6 +342,7 @@ class Admission:
         self.recorded = recorded_bytes
         self.host_median = host_median_bytes
         self.memory = self.explicit
+        self.cpu = positive(cpu_percent, "CPU request") if cpu_percent is not None else None
         self.inherited = False
         self.previous_reason = None
         # 起動した scope の unit 名。受入が取り消したかをこの名前の記録で知る
@@ -395,7 +452,7 @@ class Admission:
         """今の process が class の scope の中にいる場合の、入れ子の入場の確認
 
         戻り値: 外側の scope の中で走る場合のTrue。外側の class で走り、入れ子で昇格しない
-        失敗: 外側の需要を超える明示需要による AdmissionError
+        失敗: 外側の需要を超える明示需要と、外側の scope が持たない CPU の上限を求める要求による AdmissionError
         """
         own = None
         for line in self.policy.proc_cgroup.read_text().splitlines():
@@ -417,6 +474,8 @@ class Admission:
                 raise AdmissionError("the enclosing scope has no reservation to nest in")
             if self.explicit is not None and self.explicit > outer:
                 raise AdmissionError("nested request exceeds its ancestor reservation; declare the whole workload at its outer entry")
+            if self.cpu is not None:
+                self.nest_cpu(klass, directory / relative.parts[0])
             if self.explicit is None:
                 # 入れ子は観測を取らず上限は外側の予約だけのため、既定値由来の需要は外側の予約と同じになる
                 self.memory = outer if self.recorded is None else min(self.recorded, outer)
@@ -451,7 +510,9 @@ class Admission:
                     empty.append(directory / name)
                     continue
                 used = observation.usage.get(f"{self.slice_path(klass)}/{name}", 0)
-                found.append(Scope(klass, name, limit or 0, used))
+                # CPU の予約を使うのは capped の入場だけで、他の class の入場は cpu.max を読まない
+                cpu = self.reserved_cpu(directory / name) if self.klass == CAPPED and klass == CAPPED else 0
+                found.append(Scope(klass, name, limit or 0, used, cpu))
         return found, empty
 
     def hold_no_acceptance_waiting(self):
@@ -605,12 +666,14 @@ class Admission:
                 self.stop_scope(directory)
 
     def scope_command(self):
-        """走行ごとの scope を作って command を起動する前置 argv。需要は scope の memory.low か memory.high へ入る"""
+        """走行ごとの scope を作って command を起動する前置 argv。需要は scope の memory.low か memory.high へ入り、capped の CPU は CPUQuota へ入る"""
         unit = f"dotfiles-workload-{self.klass}-{os.getpid()}-{uuid.uuid4().hex[:8]}.scope"
         self.unit = unit
+        properties = ["-p", f"{DEMAND_PROPERTIES[self.klass]}={self.memory}", "-p", f"TimeoutStopSec={STOP_TIMEOUT}"]
+        if self.cpu is not None:
+            properties += ["-p", f"CPUQuota={self.cpu}%"]
         return [*self.policy.systemd_run, "--user", "--scope", "--quiet", "--collect", "--expand-environment=no",
-                f"--slice={self.policy.slice_unit(self.klass)}", f"--unit={unit}",
-                "-p", f"{DEMAND_PROPERTIES[self.klass]}={self.memory}", "-p", f"TimeoutStopSec={STOP_TIMEOUT}"]
+                f"--slice={self.policy.slice_unit(self.klass)}", f"--unit={unit}", *properties]
 
     def scope_directory(self):
         """この走行が作った scope の cgroup directory
@@ -622,6 +685,79 @@ class Admission:
             return None
         return self.policy.slice_directory(self.klass) / self.unit
 
+    def check_cpu_request(self):
+        """CPU の指定が class に合うことの確認。待つ前に断る
+
+        失敗: capped で指定が無い場合と budget を超える場合、capped でない class で指定がある場合の AdmissionError
+        制約: budget を超える要求は待っても入れないので、待たずに command を起動せず断る。入れ子でも同じ上限で断る
+        """
+        if self.klass != CAPPED:
+            if self.cpu is not None:
+                raise AdmissionError("a CPU request needs the policy of the capped class; command was not started")
+            return
+        if self.cpu is None:
+            raise AdmissionError("the capped class needs a CPU request; command was not started")
+        if self.cpu > self.policy.cpu_budget:
+            raise AdmissionError(
+                f"CPU request of {self.cpu} percent exceeds the capped budget of {self.policy.cpu_budget} percent; "
+                "command was not started")
+
+    def nest_cpu(self, klass, directory):
+        """入れ子の CPU の要求が、外側の scope が既に持つ上限と等しいことの確認
+
+        klass: 外側の scope の class
+        directory: 外側の scope の cgroup directory
+        失敗: 外側が capped でない場合と、外側の上限と違う場合と、外側の上限を読めない場合の AdmissionError
+        制約: 入れ子は scope を作らず外側の scope で走るため、要求した上限をその scope が持つ時だけ満たされる。
+            上限の無い scope では要求した上限が黙って外れ、要求より大きい上限の scope では要求より多い CPU を使えてしまうので、
+            外側の上限と等しい要求だけを通す。小さい上限が要るなら、外側の入口で全体の上限として宣言する
+        """
+        unbounded = "the enclosing scope has no CPU cap to nest the request in; declare the CPU cap at the outer entry"
+        if klass != CAPPED:
+            raise AdmissionError(unbounded)
+        try:
+            outer = cpu_percent(directory / CPU_MAX)
+        except (OSError, ValueError) as error:
+            raise AdmissionError(f"cannot read the CPU cap of the enclosing scope: {error}") from None
+        if outer is None:
+            raise AdmissionError(unbounded)
+        if outer != self.cpu:
+            raise AdmissionError(
+                f"nested CPU request of {self.cpu} percent differs from the cap of {outer} percent of its enclosing scope; "
+                "declare the whole workload at its outer entry")
+
+    def reserved_cpu(self, directory):
+        """capped の scope が予約する CPU の割合の読取
+
+        directory: capped の scope の cgroup directory
+        戻り値: cpu.max の上限の割合。上限が無い scope と読めない scope は、budget の全部
+        制約: 読めないものを小さく見ると、上限の無い走行が使う CPU を他の入場へ譲るため、予約の全部と見る。
+            消えた scope を読めなかった場合も一度の判定の間だけ全部と見て、次の判定で外れる
+        """
+        try:
+            percent = cpu_percent(directory / CPU_MAX)
+        except (OSError, ValueError):
+            percent = None
+        return self.policy.cpu_budget if percent is None else percent
+
+    def verify_cpu_cap(self):
+        """起動した scope が、要求した CPU の上限を kernel に持つことの確認
+
+        失敗: 上限を読めない場合と、要求と違う場合の AdmissionError
+        制約: helper が scope へ入って止まっている間、command を再開する前に呼ぶ。上限の無い scope では command を一度も実行せず、
+            呼び側が scope を畳む。CPU の指定の無い走行は何も確かめない
+        """
+        if self.cpu is None:
+            return
+        try:
+            applied = cpu_percent(self.scope_directory() / CPU_MAX)
+        except (OSError, ValueError) as error:
+            raise AdmissionError(f"cannot read the CPU cap of the scope: {error}; command was not started") from None
+        if applied != self.cpu:
+            shown = "none" if applied is None else f"{applied} percent"
+            raise AdmissionError(
+                f"the scope has a CPU cap of {shown}, not the requested {self.cpu} percent; command was not started")
+
     def acquire(self, supervisor, wait_until, launch):
         """待機の上限内での入場と、入場した走行の scope での起動
 
@@ -629,10 +765,11 @@ class Admission:
         wait_until: 待機の絶対期限。走行の秒数とは別に数える
         launch: scope の前置 argv、oom_score_adj、待機の絶対期限を受け、判定の排他の中で client を起動する関数。起動に至らなければFalse
         戻り値: 入場して起動した、または入れ子で外側の scope の中にいる場合のTrue。取消と期限切れはFalse
-        失敗: scope を作れない場合や明示需要が上限を超える場合の AdmissionError
+        失敗: scope を作れない場合、明示需要が上限を超える場合、CPU の要求が class や budget や外側の scope の上限に合わない場合の AdmissionError
         制約: 取消も期限も無いのに起動に至らなかったのは、command が猶予内に scope へ入れなかったためで、失敗にせず、
             その理由を待機の理由に残して、期限まで入場をやり直す
         """
+        self.check_cpu_request()
         if self.inherit():
             return True
         waiting = None
@@ -656,8 +793,8 @@ class Admission:
                         scopes, empty = self.scopes(observation)
                         if self.klass == "deep":
                             guard = self.hold_no_acceptance_waiting()
-                        decision = decide(self.klass, self.memory, scopes, observation,
-                                          self.klass == "deep" and guard is None)
+                        decision = decide(self.klass, self.memory, scopes, observation, self.klass == "deep" and guard is None,
+                                          self.cpu or 0, self.policy.cpu_budget or 0)
                         reason = decision.reason
                         if decision.kind == ADMIT and supervisor.cancel_signal is None and time.time() < wait_until:
                             if launch(self.scope_command(), OOM_SCORES[self.klass], wait_until):
@@ -670,7 +807,9 @@ class Admission:
                     if guard is not None:
                         os.close(guard)
                     fcntl.flock(registry, fcntl.LOCK_UN)
-                    self.reclaim(empty)
+                    # capped は他の走行の scope へ止めの要求を出さない。空の scope は予約に数えないだけで、止めるのは受入と deep の入場が持つ
+                    if self.klass != CAPPED:
+                        self.reclaim(empty)
                 if reason != self.previous_reason:
                     supervisor.record("waiting", spawned=False, reason=reason, deadline=wait_until)
                     print(f"dotfiles-supervise: waiting for resources: {reason}", file=sys.stderr, flush=True)

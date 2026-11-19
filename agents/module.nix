@@ -68,6 +68,7 @@ let
   # 受入は session と同じ重みで CPU を分け合い、deep は他が使わない CPU だけを使う。memory の上限は agent の slice が持つ
   classSliceConfig = {
     acceptance.CPUWeight = 100;
+    capped = cfg.workstation.workload.capped.sliceConfig;
     deep.CPUWeight = "idle";
   };
   runtimeWrapperDirectory = ".local/share/dotfiles-agent/bin";

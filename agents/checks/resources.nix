@@ -12,6 +12,7 @@
         limits = slices.agents.sliceConfig;
         classSlices = hostConfig.dotfiles.workstation.workload.classSlices;
         classConfig = class: slices.${lib.removeSuffix ".slice" classSlices.${class}}.sliceConfig;
+        cappedBudget = hostConfig.dotfiles.workstation.workload.capped.cpuBudgetPercent;
         observed = {
           physicalBytes = 42059018240;
           residentBytes = 24101044224;
@@ -35,6 +36,10 @@
           assert lib.assertMsg (
             (classConfig "acceptance").CPUWeight >= 100
           ) "受入の slice の CPUWeight は session の既定の重み以上である必要があります";
+          assert lib.assertMsg (
+            ((classConfig "capped").CPUQuota or null)
+            == (if cappedBudget == null then null else "${toString cappedBudget}%")
+          ) "上限付きの slice の CPUQuota は入場の予算と一致する必要があります";
           assert lib.assertMsg (lib.all
             (class: !(lib.any (name: lib.hasPrefix "Memory" name) (builtins.attrNames (classConfig class))))
             (builtins.attrNames classSlices)

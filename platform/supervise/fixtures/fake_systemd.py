@@ -15,13 +15,15 @@ The scope's `cgroup.events` says `populated 1` once systemd-run has moved itself
 afterwards: the janitor removes the scope when it is empty.  `stop` removes the directory of a scope that has no member at
 all, as a stop job does to a scope that never held a process, and leaves one that has members to the janitor.
 
-    fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] [--strand FILE] [--abort]  run   SYSTEMD-RUN-ARGUMENTS...
+    fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] [--strand FILE] [--abort] [--cpu MODE]  run   SYSTEMD-RUN-ARGUMENTS...
     fake_systemd.py --cgroup-root ROOT [--refuse]                                       ctl   SYSTEMCTL-ARGUMENTS...
 
 `--fail` makes systemd-run refuse to create the scope; `--gate` makes it answer only once FILE exists.  `--strand FILE`
 makes the manager create the scope, with `populated 0`, and systemd-run move itself into it and execute the command only once
 FILE exists: a systemd-run that is killed before that leaves the scope that holds nothing, as the real one can.  `--abort` makes
 systemd-run end with status 1 after the scope exists, with `populated 0`.  `--refuse` makes `stop` fail without doing anything.
+`--cpu ignore` makes the manager leave `CPUQuota` unapplied, so that `cpu.max` keeps `max`; `--cpu absent` gives the scope no `cpu.max`, as a
+tree without the cpu controller does.  A scope given `CPUQuota=N%` otherwise shows `cpu.max` as systemd writes it: N * 1000 over 100000.
 Every call is appended to `ROOT/calls.log` as one JSON line, so a test can read what the caller asked for.
 """
 
@@ -39,7 +41,10 @@ PROPERTY_FILES = {"MemoryLow": "memory.low", "MemoryHigh": "memory.high"}
 IDLE_FILES = {
     "memory.low": "0\n",
     "memory.high": "max\n",
+    "cpu.max": "max 100000\n",
 }
+# The period systemd gives a scope that sets no CPUQuotaPeriodSec.
+CPU_PERIOD = 100000
 # The environment variable that marks a process as a member of the scope named by its value.
 MEMBER_MARK = "DOTFILES_FAKE_SCOPE"
 POLL_SECONDS = 0.03
@@ -125,7 +130,7 @@ def collect_when_gone(scope, pid):
     os._exit(0)
 
 
-def run(root, fail, gate, strand, abort, arguments):
+def run(root, fail, gate, strand, abort, cpu, arguments):
     """The `systemd-run --scope` half: create the scope and execute the command inside it."""
     record(root, "run", arguments)
     if fail:
@@ -161,6 +166,11 @@ def run(root, fail, gate, strand, abort, arguments):
     for name, value in properties.items():
         if name in PROPERTY_FILES:
             (scope / PROPERTY_FILES[name]).write_text(value + "\n")
+    if cpu == "absent":
+        (scope / "cpu.max").unlink()
+    elif cpu == "apply" and "CPUQuota" in properties:
+        percent = int(properties["CPUQuota"].removesuffix("%"))
+        (scope / "cpu.max").write_text(f"{percent * CPU_PERIOD // 100} {CPU_PERIOD}\n")
     if strand is not None or abort:
         (scope / "cgroup.events").write_text("populated 0\nfrozen 0\n")
     if abort:
@@ -207,6 +217,7 @@ def main(arguments):
     strand = None
     abort = False
     refuse = False
+    cpu = "apply"
     while arguments and arguments[0].startswith("--"):
         if arguments[0] == "--cgroup-root":
             root = arguments[1]
@@ -226,14 +237,17 @@ def main(arguments):
         elif arguments[0] == "--refuse":
             refuse = True
             arguments = arguments[1:]
+        elif arguments[0] == "--cpu":
+            cpu = arguments[1]
+            arguments = arguments[2:]
         else:
             break
     if root is None or not arguments or arguments[0] not in ("run", "ctl"):
-        print("usage: fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] [--strand FILE] [--abort] [--refuse] run|ctl ARGUMENTS...",
+        print("usage: fake_systemd.py --cgroup-root ROOT [--fail] [--gate FILE] [--strand FILE] [--abort] [--refuse] [--cpu MODE] run|ctl ARGUMENTS...",
               file=sys.stderr)
         return 64
     if arguments[0] == "run":
-        return run(root, fail, gate, strand, abort, arguments[1:])
+        return run(root, fail, gate, strand, abort, cpu, arguments[1:])
     return control(root, refuse, arguments[1:])
 
 

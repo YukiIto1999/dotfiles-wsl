@@ -134,6 +134,18 @@ sessionの有無だけで適用を止めず、候補で変わる参照先、acti
 
 ## Inputの更新
 
+更新候補だけを調べるには、checkoutで `python3 maintenance/upstreams/check.py` を実行する。
+rootのflake inputと、スクリプトに登録した単独固定のCLI・MCPを公開元へ匿名で照会する。
+固定版と比較先が異なる場合は `different`、取得失敗は `unknown` と表示する。
+終了値は全件一致なら0、不一致があれば1、未確認があれば2。
+異なるcommitを無条件に新しい版とはみなさない。
+インストール、lockの書換え、サービスの再起動は行わない。
+
+同じ照合を[GitHub Actions](../../.github/workflows/upstreams.yml)で毎週月曜10:19（日本時間）に行う。
+default branchへの反映とActionsの有効化が必要で、結果は`upstreams`の実行ログで確認する。
+WSLの稼働版、Windowsアプリ、コンテナイメージはこの照合の対象外である。
+エージェントの稼働版は `dotfiles-agent-supply status`、Windowsアプリの候補は `winget list --upgrade-available` で別に確認する。
+
 NixOS、WSL、Home Manager、sopsのstable branchを維持したまま、checkoutのrootで更新する。
 
 ```sh

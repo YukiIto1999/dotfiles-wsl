@@ -35,13 +35,12 @@ in
       };
     };
 
-    # `r` は同一 boot の switch でも走って live lock を消すため、boot 限定の `r!` にする。
+    # workspaceの排他と異なりdaemonの所有記録は別プロセスのPID再利用を区別できないため起動時だけ回収
     systemd.tmpfiles.settings."zvec-grep".${staleLockPath}."r!" = { };
 
     home-manager.users.${config.dotfiles.workstation.username}.home.sessionVariables = {
       ZVEC_GREP_MODE = "auto";
       ZVEC_GREP_SERVER_URL = endpoint;
-      # direct mode の CLI も front と同じ固定 model を読む
       ZVEC_GREP_MODEL_CACHE = "${front.modelCache}";
     };
   };

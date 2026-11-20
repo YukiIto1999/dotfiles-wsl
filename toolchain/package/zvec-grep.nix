@@ -1,37 +1,30 @@
 {
   lib,
   stdenv,
-  fetchFromGitHub,
-  buildNpmPackage,
+  fetchurl,
   autoPatchelfHook,
 }:
 
-buildNpmPackage rec {
+stdenv.mkDerivation rec {
   pname = "zvec-grep";
-  version = "0.2.2";
+  version = "0.3.1";
 
-  src = fetchFromGitHub {
-    owner = "zvec-ai";
-    repo = "zvec-grep";
-    rev = "v${version}";
-    hash = "sha256-TDEK7ioPJWShJr5Ch3S6ObwgKqNnP8p9JTWYE2QZ3Z4=";
+  src = fetchurl {
+    url = "https://registry.npmjs.org/@zvec/zvec-grep-linux-x64-gnu/-/zvec-grep-linux-x64-gnu-${version}.tgz";
+    hash = "sha256-bNqxaSvSDh5Qd5f9ermCRNZ/DsofshVi7m5+zWJFVmU=";
   };
-
-  npmDepsHash = "sha256-ykSQ5aTt/pgow6GIJAZ6Vo8MqasrLhtKAagHcQgdI4s=";
-  npmFlags = [ "--ignore-scripts" ];
   nativeBuildInputs = [ autoPatchelfHook ];
   buildInputs = [ stdenv.cc.cc.lib ];
+  dontConfigure = true;
+  dontBuild = true;
 
-  postInstall = ''
-    modules=$out/lib/node_modules/@zvec/zvec-grep/node_modules
-    rm -rf \
-      "$modules/@img/sharp-linuxmusl-x64" \
-      "$modules/@img/sharp-libvips-linuxmusl-x64" \
-      "$modules/@node-llama-cpp/linux-x64-cuda" \
-      "$modules/@node-llama-cpp/linux-x64-cuda-ext" \
-      "$modules/@node-llama-cpp/linux-x64-vulkan" \
-      "$modules/@reflink/reflink-linux-x64-musl" \
-      "$modules/@zvec/bindings-linux-x64-musl"
+  installPhase = ''
+    runHook preInstall
+    mkdir -p "$out"
+    cp -a bin lib "$out/"
+    install -Dm644 LICENSE "$out/share/licenses/zvec-grep/LICENSE"
+    install -Dm644 README.md "$out/share/doc/zvec-grep/README.md"
+    runHook postInstall
   '';
 
   meta = {

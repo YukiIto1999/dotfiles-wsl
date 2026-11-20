@@ -134,7 +134,7 @@
               set -euo pipefail
 
               printf '%s\n' 'semantic search needle' > zg-fixture
-              ${lib.getExe toolchain.zvec-grep} query --rg -n -F 'semantic search needle' zg-fixture > zg-exact
+              ${lib.getExe toolchain.zvec-grep} --rg -n -F 'semantic search needle' zg-fixture > zg-exact
               grep -Fq 'semantic search needle' zg-exact
               touch $out
             '';

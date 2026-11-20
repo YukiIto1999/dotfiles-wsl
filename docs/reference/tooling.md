@@ -24,6 +24,19 @@
 決定的な操作はCLIを直接使い、候補や証拠の意味判断が必要な場合だけ該当Skillを使うため、一commandのための新しいSkillは置かない。
 以下はsourceの構成と利用契約であり、この文書を更新しただけで配備や全用途の実行を確認したことにはならない。
 
+### Zvec-Grep
+
+`zg`とMCP frontは[同じLinux用バイナリ](../../toolchain/package/zvec-grep.nix)を使う。
+意味検索に使うPotion Codeモデルは[frontのパッケージ](../../capabilities/repository-search/zvec-grep/mcp/package.nix)でハッシュを固定し、初回検索時にダウンロードしない。
+agent向けの公開ツールは検索、呼出し元、呼出し先の3件で、索引管理は公開しない。
+呼出し関係の検索には`--graph`で作った索引が必要になる。
+
+0.2系の索引は0.3系でそのまま読めない。
+移行では旧`.zvec-grep/`を保持し、同じ絶対パスに見える隔離コピーで、新しい空の索引へ `zg --index "$PWD" --mode direct --embedding local/potion-code-16m-v2 --device cpu --graph` を実行する。
+同じ読取専用モデルキャッシュを指定し、意味検索と排他を確認してから、旧frontの書込みが止まった状態で索引とfrontを一緒に切り替える。
+切戻しではバイナリだけでなく対応する索引も戻す。
+workspaceのファイルロックとdaemonの`~/.zvec-grep/daemon/instance.lock`は別物なので、稼働中の所有記録を消して復旧しない。
+
 ### Semgrep
 
 [`toolchain/package/semgrep.nix`](../../toolchain/package/semgrep.nix)がSemgrep `1.180.0`のCLI sourceと同版のpublished wheelから取得するcoreを固定し、nixpkgs全体を更新せずNixOS用に組み立てる。

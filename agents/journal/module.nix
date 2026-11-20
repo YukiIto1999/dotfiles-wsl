@@ -11,11 +11,12 @@ let
   name = "dotfiles-agent-journal";
   # 日付の区切り。深夜の作業を前日へ含めるため、暦日ではなく朝で切る
   startHour = 6;
+  modelConfig = import ../job/impl/omp-model-routing.nix { inherit pkgs; };
   worker = mkCommand {
     name = "${name}-worker";
     src = ./package/entry.sh;
     runtimeInputs = [ pkgs.git ];
-    vars = {
+    vars = modelConfig // {
       python = lib.getExe pkgs.python3;
       source = "${./package}";
       zoneinfo = "${pkgs.tzdata}/share/zoneinfo";
@@ -25,8 +26,6 @@ let
       timeZone = config.time.timeZone;
       startHour = toString startHour;
       lookbackDays = "7";
-      model = "opencode-go/deepseek-v4.1-flash";
-      thinking = "low";
     };
     extra.meta.mainProgram = "${name}-worker";
   };

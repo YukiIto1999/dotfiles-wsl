@@ -22,6 +22,10 @@ nix eval --raw .#nixosConfigurations.<host-id>.config.dotfiles.workstation.envir
 commit は Git の既定 identity で作り、`origin` へ push する。
 出典の引用には非公開プロジェクトの記録も入るため、`origin` は private repository にする。
 
+生成は OMP に登録済みの OpenCode Go を先に使い、失敗時は CommandCode GOAT に切り替える。
+どちらも DeepSeek v4.1 Flash を使う。
+生成先の repository が private でも、要約対象は利用可能な provider に送られる。
+
 ## 出力
 
 日誌は `<yyyy>/<MMdd>/<機械名>.md` に書く。

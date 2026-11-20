@@ -9,40 +9,12 @@ let
   cfg = config.dotfiles;
   mkCommand = import ../../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   name = "dotfiles-agent-memory-harvest";
-  model = "opencode-go/deepseek-v4.1-flash";
-  fallback = "commandcode/deepseek/deepseek-v4.1-flash";
-  thinking = "low";
-  modelRouting = (pkgs.formats.yaml { }).generate "omp-memory-harvest-routing.yml" {
-    enabledProviders = [
-      "opencode-go"
-      "commandcode"
-    ];
-    enabledModels = [
-      model
-      fallback
-    ];
-    advisor.enabled = false;
-    retry = {
-      enabled = true;
-      modelFallback = true;
-      fallbackOn = "any";
-      maxRetries = 1;
-      maxDelayMs = 1000;
-      rateLimitWalksChain = true;
-      waitForUsageReset = false;
-      usageAwareFallback = false;
-      fallbackChains = {
-        "${model}:${thinking}" = [ "${fallback}:${thinking}" ];
-        "${fallback}:${thinking}" = [ ];
-        default = [ ];
-      };
-    };
-  };
+  modelConfig = import ../job/impl/omp-model-routing.nix { inherit pkgs; };
   worker = mkCommand {
     name = "${name}-worker";
     src = ./package/entry.sh;
     runtimeInputs = [ pkgs.git ];
-    vars = {
+    vars = modelConfig // {
       python = lib.getExe pkgs.python3;
       source = "${./package}";
       journal = "${../journal/package}";
@@ -50,8 +22,6 @@ let
       stateFile = "${cfg.agents.runtime.state.root}/memory-harvest.json";
       lookbackDays = "7";
       memory = lib.getExe cfg.capabilities.project-memory.runtime;
-      inherit model thinking;
-      modelRouting = toString modelRouting;
     };
     extra.meta.mainProgram = "${name}-worker";
   };

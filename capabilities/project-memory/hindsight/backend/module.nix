@@ -22,6 +22,8 @@ let
   httpPort = "3111";
 
   hindsight = pkgs.callPackage ./package.nix { };
+  commandCodeKey = "commandcode/api_key";
+  commandCodeEnrolled = builtins.elem commandCodeKey config.dotfiles.secrets.paths;
 
   backend = mkContainerBackend "hindsight" {
     inherit image;
@@ -67,6 +69,7 @@ in
     };
 
     sops.secrets."opencode/go_api_key" = { };
+    sops.secrets.${commandCodeKey} = lib.mkIf commandCodeEnrolled { };
 
     sops.templates."hindsight.env" = {
       mode = "0400";
@@ -85,6 +88,10 @@ in
         HINDSIGHT_API_LLM_MODEL=minimax-m3
         # Goはx-opencode-sessionの無い要求を400で拒否する。抽出は会話を持たないので配備で一つの値にする。
         HINDSIGHT_API_LLM_DEFAULT_HEADERS={"User-Agent":"hindsight/${version} (dotfiles-project-memory)","x-opencode-session":"dotfiles-project-memory"}
+        HINDSIGHT_API_RETAIN_LLM_PROVIDER=openai
+        HINDSIGHT_API_RETAIN_LLM_MODEL=deepseek-v4.1-flash
+        HINDSIGHT_API_RETAIN_LLM_BASE_URL=https://opencode.ai/inference/go/openai/v1
+        HINDSIGHT_API_FAIL_ON_EXTRACTION_ERRORS=true
         HINDSIGHT_API_EMBEDDINGS_PROVIDER=local
         HINDSIGHT_API_EMBEDDINGS_LOCAL_MODEL=/opt/hindsight/models/embedding
         HINDSIGHT_API_EMBEDDINGS_LOCAL_TRUST_REMOTE_CODE=false
@@ -97,6 +104,16 @@ in
         HINDSIGHT_ENABLE_CP=false
         HF_HUB_OFFLINE=1
         TRANSFORMERS_OFFLINE=1
+      ''
+      + lib.optionalString commandCodeEnrolled ''
+        HINDSIGHT_API_RETAIN_LLM_STRATEGY={"mode":"failover"}
+        HINDSIGHT_API_RETAIN_LLM_MAX_RETRIES=0
+        HINDSIGHT_API_RETAIN_LLM_1_PROVIDER=openai
+        HINDSIGHT_API_RETAIN_LLM_1_API_KEY=${config.sops.placeholder.${commandCodeKey}}
+        HINDSIGHT_API_RETAIN_LLM_1_BASE_URL=https://api.commandcode.ai/provider/v1
+        HINDSIGHT_API_RETAIN_LLM_1_MODEL=deepseek/deepseek-v4.1-flash
+        HINDSIGHT_API_RETAIN_LLM_1_DEFAULT_HEADERS={"User-Agent":"hindsight/${version} (dotfiles-project-memory)"}
+        HINDSIGHT_API_RETAIN_LLM_1_MAX_RETRIES=1
       '';
     };
 

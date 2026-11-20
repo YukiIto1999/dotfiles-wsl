@@ -508,7 +508,11 @@ project scopeのidentityは、`dotfiles-memory`が絶対cwdからGit common dire
 
 Hindsightの原文書類はnamed volume `hindsight-data:/home/hindsight/.pg0`に保持する。宣言で固定したmultilingual embeddingとrerankerのmodel mountはNix storeからread-onlyで渡し、retain時のextraction inputはSOPSから展開したcredentialで設定する外部LLMへ送られる。
 
-抽出modelは定額のOpenCode Goで呼べる`minimax-m3`であり、保存すべき内容の判断を抽出modelへ委ねない。
+保存時の抽出は OpenCode Go の DeepSeek v4.1 Flash を使う。
+`commandcode/api_key` を SOPS に登録した host では、主経路に失敗すると Hindsight 内で CommandCode GOAT の同じモデルへ切り替える。
+未登録時は主経路のみを使う。
+抽出エラーで処理を終えた保存は失敗として扱い、client は保存要求を再送しない。
+保存する内容の判断は抽出モデルへ委ねず、保存以外の LLM 処理は従来の `minimax-m3` を使う。
 client連携はsession開始とprompt送信で想起結果を注入し、会話turnをHindsightへ保存しない。
 promptから既知の注入blockを除いた残りが空なら想起せず、残った利用者発言にだけprivacyと長さの検査を行う。
 通信失敗は接続、読取り、書込み、pool、protocolの固定した分類で報告し、query、接続先、応答本文、例外の表示は報告へ含めない。
@@ -539,7 +543,9 @@ LLM処理は外部endpointを使う。API keyはSOPS templateからroot所有の
 抽出と編集は OMP の print mode で行い、session の保存、rules、Skill、自動検出する extension、tool を使わない。
 project memory の hook は extension と別に読み込まれることがあるため、model は Git work tree の外の一時 directory で呼ぶ。
 一時 directory が work tree 内なら呼出し前に失敗させ、別プロジェクトの記憶を生成の入力に混ぜない。
-model と thinking の宣言は [`agents/journal/module.nix`](../../agents/journal/module.nix)に置き、認証は OMP が保持するものを使う。
+日誌と記憶の収穫は、[非対話 job のモデル経路](../../agents/job/impl/omp-model-routing.nix)を共有する。
+DeepSeek v4.1 Flash を OpenCode Go → CommandCode GOAT の順で使い、利用枠の回復を待たない。
+認証には OMP が保持する資格情報を使う。
 可視の会話にも secret や個人情報が混ざり得る。
 prompt はそれらを記事へ書かないよう指示するが、入力からの完全な除去や出力での検出を保証しない。
 Git hook が拒否する資格情報の形も限定されるため、private repository の利用を前提とする。
@@ -584,9 +590,7 @@ worker は受け取った物理 path だけで model を呼ぶので、profile �
 
 [`agents/memory-harvest/`](../../agents/memory-harvest)は、OMP の session 記録から利用者の訂正、決定、好みを取り出し、project memory へ保存する。
 session 記録の読み方と OMP の呼出しは journal の package を読み込んで共有する。
-抽出モデル、思考レベル、代替経路は [`agents/memory-harvest/module.nix`](../../agents/memory-harvest/module.nix) が宣言する。
-収穫専用の OMP 設定で、対話セッションや日誌のモデル選択から分離する。
-抽出先は OpenCode Go と Command Code GOAT の DeepSeek V4.1 Flash に限り、利用枠の回復を待たない。
+抽出は日誌と同じ非対話 job 用の経路を使い、対話セッションのモデル選択とは分ける。候補を保存する際のモデル切替は、別に [Hindsight](#project-memory) が所有する。
 作業の大半は OMP で行うため、Claude Code、Codex、OpenCode の session 記録は読まない。
 
 入力は`~/.omp/agent/sessions/`直下の session file のうち、前回成功した実行から今回の開始までの entry である。attribution が`user`の発言だけを読み、`<project_memory>`と`<system-reminder>`の block を除く。エージェントの応答、tool の結果、注入した文脈、subagent の記録は model へ渡さない。cwd から Git project を決められない session は読まずに報告する。

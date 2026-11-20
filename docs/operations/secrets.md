@@ -51,6 +51,8 @@ sudo SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt \
 ## Hindsight
 
 HindsightのLLM provider用credentialは[`capabilities/project-memory/hindsight/backend/module.nix`](../../capabilities/project-memory/hindsight/backend/module.nix)が宣言する`hindsight.env` templateからenvironment fileへ配備する。templateはroot所有のmode `0400`で、更新時に`docker-hindsight.service`を再起動する。既存の`opencode/go_api_key`をcredentialとして使い、endpoint、model、named volume、local model mountはsecret inventoryへ入れず、設定変更はconsumer moduleで行う。
+保存時の抽出に CommandCode GOAT を予備経路として有効にするには、同じ暗号化済み store に `commandcode/api_key` を追加する。
+Hindsight は OMP の認証 DB を読まないため、OMP で CommandCode に接続済みでも、SOPS に未登録なら Hindsight の予備経路は有効にならない。
 
 HindsightのAPIは`127.0.0.1:3111`、memory MCP frontは`127.0.0.1:8774`である。client integrationのhookとOpenCode pluginはcredentialを所有せず、`dotfiles-memory`を経由してAPIへ接続する。credentialの値をclient設定、Nix source、ログへ書かない。
 

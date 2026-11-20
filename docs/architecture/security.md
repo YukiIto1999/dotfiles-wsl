@@ -48,9 +48,8 @@ ignore は既に追跡した file には効かず、`git add -f` でも迂回で
 
 ## agentgateway
 
-[`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)のlistenerはportだけを指定し、client認証を設けない。
-listenerのbind addressとは別に、systemd serviceの`IPAddressDeny=any`とloopbackの`IPAddressAllow`でcgroupの通信をloopbackに制限する。
-設定した通信制限はserviceの境界であり、CLIの接続URLがlocalhostであることだけを制限の根拠にしない。
+[`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)のlistenerはIPv4 loopback `127.0.0.1` にbindし、client認証は設けない。
+別の境界として、systemd serviceの`IPAddressDeny=any`とloopbackの`IPAddressAllow`でcgroupの通信もloopbackに制限する。
 
 loopbackのgatewayとfrontへ到達できるprocessは、公開MCP toolを呼べる信頼境界に入る。
 Windows側からの到達性はWSLのnetwork modeと転送経路にも依存し、doctorのservice検査だけでは外部到達性を証明しない。

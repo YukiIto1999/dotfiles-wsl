@@ -26,6 +26,7 @@ let
     binds = [
       {
         inherit (gateway) port;
+        address = "127.0.0.1";
         listeners = [
           {
             routes = [

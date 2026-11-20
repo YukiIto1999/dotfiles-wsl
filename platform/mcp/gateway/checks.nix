@@ -627,6 +627,7 @@
             test "$(yq -r '.config.statsAddr' ${gateway.source})" = 127.0.0.1:15020
             test "$(yq -r '.config.readinessAddr' ${gateway.source})" = 127.0.0.1:15021
               test "$(yq -r '.binds | length' ${gateway.source})" = 1
+              test "$(yq -r '.binds[0].address' ${gateway.source})" = 127.0.0.1
               test "$(yq -r '.binds[0].port' ${gateway.source})" = ${toString gateway.port}
               test "$(yq -r '.binds[0].port' ${variantGateway.source})" = ${toString variantGateway.port}
             test "$(yq -r '.binds[0].listeners | length' ${gateway.source})" = 1

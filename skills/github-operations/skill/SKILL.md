@@ -43,6 +43,7 @@ mergeの直前確認後は、`merge_pull_request`へ対象PR、確認した`merg
 5. pre-read、write、結果確認は同じaccount targetで行う。選択したtargetに権限がなければ別accountへ黙って切り替えない。
 
 対象または実行identityが一意にならない場合は、候補と曖昧な項目を示して止める。lookupのためにbranch、comment、draft reviewなどを作成してはならない。
+「職場」「個人」などは依頼者の呼称であり、target番号、Gitの既定identity、`owner/repo`、過去の利用頻度からloginを決めない。呼称とloginを対応付ける根拠がなければ、`get_me`で確認した候補から依頼者に実行loginを選んでもらう。
 
 ## readとwriteを分ける
 

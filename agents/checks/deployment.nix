@@ -600,6 +600,7 @@
             map (row: "${row.clientName}/${row.id}") managedRowsWithSeedMigration == [
               "codex/user"
               "omp/config"
+              "omp/models"
             ];
           assert fixtureGenericSeedActivation != fixtureSeedActivation;
           pkgs.runCommandLocal "check-agent-config-migration"
@@ -1107,6 +1108,27 @@
               before=$(sha256sum "$ompConfig")
               ${fixtureSeedActivation}
               test "$(sha256sum "$ompConfig")" = "$before"
+
+              ompModels="$fixture/home/.omp/agent/models.yml"
+              cat > "$ompModels" <<'YAML'
+              providers:
+                typesafe:
+                  baseUrl: https://judge.example.test
+                orcarouter:
+                  baseUrl: https://router.example.test/v1
+                  apiKey: "!custom-key"
+              YAML
+              ${fixtureSeedActivation}
+              yq --exit-status '
+                .providers.typesafe == {baseUrl: "https://judge.example.test"}
+                and .providers.orcarouter == {baseUrl: "https://router.example.test/v1", apiKey: "!custom-key"}
+                and .providers.refuseless.baseUrl == "https://api.refuseless.com/v1"
+                and .providers.arliai.baseUrl == "https://api.arliai.com/v1"
+              ' "$ompModels" > /dev/null
+              test "$(stat -c %a "$ompModels")" = 600
+              before=$(sha256sum "$ompModels")
+              ${fixtureSeedActivation}
+              test "$(sha256sum "$ompModels")" = "$before"
 
               cat > "$ompConfig" <<'YAML'
               modelRoles:

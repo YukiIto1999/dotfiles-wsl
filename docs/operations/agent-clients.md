@@ -202,10 +202,18 @@ command は非対話の `sudo` で host key を使うため、実行権限がな
 native Judge を使う `find.enabled` は既定の `auto` に任せる。
 project の `disabledProviders` 配列は global の配列を置き換えるため、project 側に指定する場合も `openrouter` を含める。
 
+Refuseless は認証後にモデル一覧を取得する。
+OrcaRouter は一覧 API に画像や動画のモデルも含まれるため、チャットに使えるモデルだけを個別に登録する。
+Arli AI はテキストモデル用の一覧 API が OMP 標準の探索先と異なるため、`DeepSeek-V4.1-Flash-1017` と `Qwen3.8-27B` を登録する。
+認証にはそれぞれ `REFUSELESS_API_KEY`、`ORCAROUTER_API_KEY`、`ARLIAI_API_KEY` を OMP の起動環境に渡す。
+キーを設定ファイルに書かず、設定後は `omp models <provider>` で確認し、`/model` から選ぶ。
+これらのプロバイダーを既定のロールや fallback には追加しない。
+
 Advisor は既定でオフとし、作業途中の軌道修正が有益なときに `/advisor on` で有効にする。
 候補のモデルと fallback は `config.seed.yml` の Advisor 設定に置く。
 `config.yml` と `models.yml` の seed は配備先がない場合に作成する。
 既存の `config.yml` では、rebuild 時に旧 `@dev` 経路の実装モデルと fallback を `implementer` の設定へ移す。
 旧独自レビュー・監査の既定のモデル指定と、常時待機する旧 Advisor の既定値を取り除く。
 既存のメインモデルなど、移行と関係のない設定値は保持する。
+既存の `models.yml` には、Refuseless、OrcaRouter、Arli AI のうち未登録のプロバイダーだけを追加する。
 対して `AGENTS.md`、`RULES.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。

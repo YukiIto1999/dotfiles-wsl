@@ -14,6 +14,15 @@
       }
     },
     {
+      "id": "focused-unknown-local-entrypoint",
+      "prompt": "Where does this checkout decide whether a journal day is ready to publish? The name of the function is unknown.",
+      "expectedSkills": ["repository-research"],
+      "expected": {
+        "locatesAndChecksCurrentSource": true,
+        "doesNotInvokeZvecIfNativeDiscoveryIsSufficient": true
+      }
+    },
+    {
       "id": "browser-validation-without-submit",
       "prompt": "Verify a settings form validation message in a user's real-account tab without submitting. The SPA rerenders after input.",
       "expectedSkills": ["browser-operation"],

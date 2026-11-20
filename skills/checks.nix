@@ -51,6 +51,7 @@
             modules = [
               ./impl/contract.nix
               ./browser-operation/module.nix
+              ./repository-research/module.nix
               { dotfiles.skills.registry.codebase-design = registry.codebase-design; }
               {
                 options = {
@@ -62,6 +63,7 @@
                     type = lib.types.attrsOf lib.types.raw;
                     default = {
                       browser-automation = { };
+                      repository-search = { };
                     };
                   };
                   dotfiles.capabilities.resolved = lib.mkOption {
@@ -267,6 +269,7 @@
 
         skill-capability-gating =
           assert builtins.elem "repository-research" enabledSkills;
+          assert builtins.elem "repository-research" noCapabilitiesBefore.dotfiles.skills.enabled;
           assert builtins.elem "code-review" enabledSkills;
           assert !builtins.elem "memory" enabledSkills;
           assert builtins.elem "web-research" enabledSkills;

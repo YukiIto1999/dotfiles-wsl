@@ -1,7 +1,8 @@
 _: {
   config.dotfiles.skills.registry."repository-research" = {
     source = ./skill;
-    requiresCapabilities = [ "repository-search" ];
+    requiresCapabilities = [ ];
+    optionalCapabilities = [ "repository-search" ];
     requiresSkills = [ ];
   };
 }

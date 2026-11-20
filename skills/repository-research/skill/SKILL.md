@@ -1,6 +1,6 @@
 ---
 name: repository-research
-description: Researches local repository concepts, relationships, and multi-file behavior when their wording or location is unknown. Routes semantic discovery through the configured Zvec-Grep MCP and falls back to native repository tools when no current index is available, then verifies every material claim in source. Routes exact text, paths, and symbols directly to native tools. Does not manage indexes, analyze dependency graphs or a concrete change's blast radius, or research the external Web.
+description: Traces local repository behavior and relationships when the wording or location is unknown. Starts with native discovery and uses an existing index when wider discovery still needs candidates. Verifies material claims in source. Known text, paths, and symbols go directly to native tools. Does not manage indexes, map full dependency graphs, assess a change's blast radius, or research the Web.
 ---
 
 # Repositoryを調査する
@@ -21,19 +21,20 @@ description: Researches local repository concepts, relationships, and multi-file
 - exactなfile名、directory、path patternを探すなら`Glob`
 - exact text、error、設定key、literal、regex、網羅的な出現箇所なら`Grep`または`rg`
 - 既知symbolの定義、参照、型、call hierarchyならLSP
-- 表現や所在が不明な概念、複数component間の関係、複数fileからのbehaviorやrationaleの統合ならZvec-Grep
+- 表現や所在が不明な箇所を絞るなら、clientが公開する意味探索（OMPでは`find`）を使う。専用入口がなければ、既知の入口・関連語から`Read`と`Grep`で追う。
 
 semantic探索とexact anchorの両方が必要なら、概念と関係を保った問いで候補を得てから、`Read`、`Grep`、`Glob`、LSP、`rg`で定義と経路を絞る。既知symbol一件の参照列挙や、literalの完全一致をZvec-Grepへ迂回させない。
 
 ## Zvec-Grepを使う条件
 
-semanticまたはmixedなrepository調査では、`repository-search` Capabilityが公開する`zvec_grep_search`を先に使う。
+native探索だけで候補が足りず、広い範囲や複数componentへ探索を広げる場合に、公開された`repository-search`の既存索引を使う。
+すでに十分な根拠があれば同じ問いをZvec-Grepに投げ直さない。
 URI deviceを公開するclientでは`xd://mcp__gateway_zvec_grep_zvec_grep_search`などが入口となり、MCP toolを直接公開するclientではそのネイティブな呼出し形式を使う。
 現在公開された実tool名とschemaを確認し、`root`へdaemonに見えるworkspaceの絶対path、`query`へ問い、`autoUpdate: false`を渡す。
 複数の問いは`queries`、確認済みexact anchorは補助の`fts`、補助の意味検索は`vector`へ分けられ、一つの順位へ統合する場合だけ`fuse: true`を使う。
 これらは検索経路であり、hard filterとは扱わない。
 応答のroot、scope、freshness、`background_refresh`を読み、current indexから返った十分なsnippetは直ちに使い、更新中という理由だけでstatus確認や再検索を足さない。
-公開入口が利用不能、またはindexがない場合はnativeなrepository toolへ戻り、その探索経路を結果に記す。
+公開入口が利用不能、indexがない、または古い候補から現在のsourceを確かめられない場合はnativeなrepository toolへ戻り、その探索経路を結果に記す。
 
 queryには調査対象の概念、期待する関係、制約をそのまま含める。
 確認済みのsymbolや用語はanchorとして追加できるが、それだけでsemantic intentを狭めない。

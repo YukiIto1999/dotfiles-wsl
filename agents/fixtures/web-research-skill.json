@@ -105,6 +105,24 @@
         "usesContext7QueryDocs": true,
         "keepsQueryToOneTopic": true
       }
+    },
+    {
+      "id": "canonical-tagged-library-doc",
+      "prompt": "Use the pinned Playwright project source at https://github.com/microsoft/playwright/blob/v1.51.0/docs/src/api/class-locator.md to verify whether Locator.filter supports visible in v1.51.0.",
+      "expectedSkills": ["web-research"],
+      "expected": {
+        "citesPinnedPrimarySource": true,
+        "doesNotResolveLibraryAgainWhenGivenAnAdequatePrimarySource": true
+      }
+    },
+    {
+      "id": "unsupported-library-index-version",
+      "prompt": "The docs index lists Playwright v1.51.0 but not v1.51.1. Check whether Locator.filter supports visible in exactly v1.51.1.",
+      "expectedSkills": ["web-research"],
+      "expected": {
+        "verifiesTheRequestedTagOrReportsItUnverified": true,
+        "doesNotSubstituteOtherVersion": true
+      }
     }
   ]
 }

@@ -72,62 +72,84 @@ let
     ''
   );
 
-  requiredSkillsFor =
-    name:
-    map (route: route.skill) (
-      builtins.filter (
-        route: route.subagent == name && route.activation == "required"
-      ) cfg.agents.shared.routing.subagentSkills
-    );
+  implementer = pkgs.writeText "omp-agent-implementer.md" ''
+    ---
+    name: implementer
+    description: 受入条件と変更範囲が確定した実装を別のモデル経路で実行する。
+    tools: [read, grep, glob, edit, write, bash]
+    ---
 
-  buildSubagent =
-    name: srcPath:
-    let
-      requiredSkills = builtins.toJSON (requiredSkillsFor name);
-    in
-    pkgs.runCommand "omp-agent-${name}.md"
-      {
-        nativeBuildInputs = [
-          pkgs.coreutils
-          pkgs.gawk
-          pkgs.gnused
-          pkgs.yq
-        ];
-        inherit requiredSkills;
+    親から受け取った対象、変更範囲、守る契約、受入条件に従って実装する。
+    実装と検証は該当する Skill に従い、親が担当する統合と最終判定は親に残す。
+    範囲や期待値の変更が必要なら、実装せず根拠を親へ返す。
+    差分、実測した確認結果、未確認事項を親へ返す。
+  '';
+
+  migrateConfig = pkgs.writeShellApplication {
+    name = "dotfiles-migrate-omp-config";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.diffutils
+      pkgs.yq
+    ];
+    text = ''
+      target=$1
+      directory=''${target%/*}
+      die() {
+        printf 'dotfiles-migrate-omp-config: %s\n' "$1" >&2
+        exit 70
       }
-      ''
-        test "$(head -n 1 ${srcPath})" = '---'
-        closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' ${srcPath})
-        test -n "$closing"
-        sed -n "2,$((closing - 1))p" ${srcPath} > frontmatter.yaml
-        tail -n "+$((closing + 1))" ${srcPath} > body.md
-
-        rendered=$(yq -y --argjson requiredSkills "$requiredSkills" '
-          .tools |= map(
-            if . == "Read" then "read"
-            elif . == "Grep" then "grep"
-            elif . == "Glob" then "glob"
-            elif . == "WebSearch" then "web_search"
-            elif . == "WebFetch" then empty
-            elif . == "Edit" then "edit"
-            elif . == "Write" then "write"
-            elif . == "Bash" then "bash"
-            else error("unsupported OMP agent tool: " + .)
-            end
-          )
-          | if has("effort") then .["thinking-level"] = .effort | del(.effort) else . end
-          | if ($requiredSkills | length) > 0
-            then .autoloadSkills = $requiredSkills
-            else del(.autoloadSkills)
-            end
-        ' frontmatter.yaml)
-        {
-          printf '%s\n' '---'
-          printf '%s\n' "$rendered"
-          printf '%s\n' '---'
-          cat body.md
-        } > "$out"
-      '';
+      if [[ ! -e $target && ! -L $target ]]; then exit 0; fi
+      [[ ! -L $directory && -d $directory && -O $directory ]] \
+        || die 'unsafe configuration directory'
+      [[ ! -L $target && -f $target && -O $target ]] \
+        || die 'unsafe configuration file'
+      identity=$(stat -c '%d:%i:%u:%a' -- "$directory" "$target")
+      scratch=$(mktemp -d -- "$directory/.omp-config.XXXXXXXX")
+      trap 'rm -rf -- "$scratch"' EXIT
+      cp -- "$target" "$scratch/original"
+      yq -cs '
+        if length == 1 and (.[0] | type) == "object" then .[0]
+        else error("expected one configuration object") end
+      ' "$scratch/original" > "$scratch/input"
+      cat > "$scratch/migration.jq" <<'JQ'
+        def legacy:
+          (.modelRoles | has("dev")) or .task.agentModelOverrides.implementer == "@dev"
+          or (.retry.fallbackChains | has("dev"))
+          or .task.agentModelOverrides.reviewer == $oldReview
+          or .task.agentModelOverrides.security == $oldReview;
+        if legacy then
+            if .task.agentModelOverrides.implementer == "@dev" then
+              .modelRoles.dev as $primary
+              | (.retry.fallbackChains.dev // []) as $fallback
+              | if ($primary | type) == "string" and ($fallback | type) == "array"
+                then .task.agentModelOverrides.implementer = ([$primary] + $fallback)
+                else error("cannot resolve the legacy implementation model route") end
+            else . end
+            | del(.modelRoles.dev, .retry.fallbackChains.dev)
+            | if any(.. | scalars; . == "@dev" or . == "pi/dev")
+              or ((.cycleOrder // []) | any(. == "dev"))
+              then error("the retired dev role still has a separate reference") else . end
+            | if .task.agentModelOverrides.reviewer == $oldReview
+              then del(.task.agentModelOverrides.reviewer) else . end
+            | if .task.agentModelOverrides.security == $oldReview
+              then del(.task.agentModelOverrides.security) else . end
+            | if .advisor.enabled == true and .advisor.syncBacklog == "1"
+              then .advisor.enabled = false | del(.advisor.syncBacklog) else . end
+          else . end
+      JQ
+      yq -cf "$scratch/migration.jq" --arg oldReview 'openai-codex/gpt-6.1-sol:xhigh' \
+        "$scratch/input" > "$scratch/migrated"
+      if cmp -s "$scratch/input" "$scratch/migrated"; then exit 0; fi
+      yq -y '.' "$scratch/migrated" > "$scratch/output"
+      chmod 600 "$scratch/output"
+      if [[ -L $directory || -L $target || $(stat -c '%d:%i:%u:%a' -- "$directory" "$target") != "$identity" ]] \
+        || ! cmp -s "$target" "$scratch/original"; then
+        die 'configuration changed while preparing migration'
+      fi
+      mv -T -- "$scratch/output" "$target"
+    '';
+  };
 in
 {
   dotfiles.agents.registry.omp = {
@@ -142,7 +164,7 @@ in
     skillsDestination = ".omp/agent/skills";
     subagents.rendered = {
       destination = ".omp/agent/agents";
-      sources = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+      sources = { inherit implementer; };
       skillProjection = "preload";
     };
     gatewayConfig = {
@@ -156,6 +178,7 @@ in
         format = "yaml";
         deployment = "seed";
         destination = ".omp/agent/config.yml";
+        seedMigrationCommand = migrateConfig;
       };
       models = {
         source = modelsConfig;

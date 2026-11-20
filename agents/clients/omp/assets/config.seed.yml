@@ -3,7 +3,6 @@ modelRoles:
   judge: typesafe/jev-latest
   default: anthropic/claude-opus-5-5:xhigh
   advisor: opencode-go/deepseek-v4.1-flash:high
-  dev: anthropic/claude-sonnet-5-5:xhigh
 disabledProviders:
   - openrouter
 symbolPreset: nerd
@@ -26,8 +25,6 @@ retry:
     advisor:
       - opencode-go/longcat-2.5-preview-free:high
     judge: []
-    dev:
-      - openai-codex/gpt-6.1-sol:xhigh
   modelFallback: true
   usageAwareFallback: true
   waitForUsageReset: true
@@ -37,8 +34,7 @@ display:
   showTokenUsage: true
   cacheMissMarker: true
 advisor:
-  enabled: true
-  syncBacklog: "1"
+  enabled: false
 prewalk:
   enabled: false
 bashInterceptor:
@@ -68,9 +64,9 @@ bashInterceptor:
 task:
   prewalk: false
   agentModelOverrides:
-    implementer: "@dev"
-    reviewer: openai-codex/gpt-6.1-sol:xhigh
-    security: openai-codex/gpt-6.1-sol:xhigh
+    implementer:
+      - anthropic/claude-sonnet-5-5:xhigh
+      - openai-codex/gpt-6.1-sol:xhigh
   showResolvedModelBadge: true
   enableLsp: true
 model:

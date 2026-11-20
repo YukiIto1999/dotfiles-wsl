@@ -48,6 +48,11 @@ Think in English. Respond in Japanese.
 
 subagentは、レビューやセキュリティ確認など独立した視点が必要な場合と、文脈の再構築・結果の検証を含めても委譲が有効な独立部分作業に使う。複雑さだけを理由にせず、数回のtool呼び出しで終わる調査、単一ファイルの編集、独立した視点を要さない自分の作業の検証は自分で行う。
 委譲結果は作業規律の裏取りに従って利用する。配備先clientの能力は `## 基盤` の表で確認する。
+OMPでは、短い証拠収集に`scout`、判断を伴わない作業に`sonic`、独立した汎用作業に`task`を使う。
+要件・設計・検証の判断が連続する仕事や、親が待つだけの小修正はメインが続ける。
+親と別のモデルに任せる利点があり、変更範囲と受入条件が確定した実装だけ`implementer`に渡す。
+並列の書き込みは担当範囲と依存順を先に分け、別の作業木で実行して統合結果を検証する。
+外部操作の許可は実行環境と承認で制御し、作業木の分離で代用しない。
 Orcaのworktreeとterminalの操作や別agentへの完全なhandoffは`orca-cli`、Orca workerの監督やtask DAGの協調実行は`orchestration`を使う。
 
 @subagentRoster@
@@ -71,8 +76,14 @@ Read / Grep / Glob / Edit / Write / Bash、LSP、subagentのようなharness機�
 test-firstの実装は`tdd`のred → greenで進め、refactoringをそのloopへ混ぜない。
 CLIとterminalの契約は`standard-apply`が読む標準のconsole構造に従い、moduleのinterfaceとseamを`codebase-design`で設計する。
 実装とrefactoringでは、新規機構より不要な処理の削除、既存owner、標準library、native機能、導入済みdependencyを先に比較し、要件と安全性を削減対象にしない。
-通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecのworkerへ渡す。raw upstreamの`code-review`にstaged / unstaged diffを代入しない。
-worker側の責務は`reviewer`が持つ。SonarQubeの保存済み解析やquality gateを補助根拠にする場合は、callerが`code-quality`で取得と現在sourceへの適用を判断し、axis briefへ渡す。
+通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecの別々の新規セッションへ渡す。
+raw upstreamの`code-review`にstaged / unstaged diffを代入しない。
+OMPでは短い証拠照合を`scout`に渡し、深い判断には案件に合うモデルの新規セッションを用意する。
+組み込みの`reviewer`は差分が持ち込んだ不具合の確認に用いる。
+他clientで共通の独自`reviewer`が配備されている場合は、二軸の各workerに使う。
+軸ごとの指示に、変更された公開契約とcaller、テストや検証の緩和を仕様で正当化できるかの確認を含める。
+SonarQubeの保存済み解析やquality gateを補助根拠にする場合は、callerが`code-quality`で現在sourceへの適用を確認し、解析時点も軸ごとの指示に添える。
+セキュリティ監査の独立性が必要なら、OMPでは実装者と別のセッションで`security-review`を実行する。
 `prototype`はdesign questionを動かして確かめる場合だけ使い、既存の実装依頼を試作品へ置き換えない。
 速習資料や章立て教材は原版の`explainer`または`explainer-book`、初見の読み手の体験は原版の`first-reader`、一般文書は`description-writing`、実行手順の記事の再現性は独自の`article-reproduction`が所有し、同じ執筆・読解・再現を重ねない。
 

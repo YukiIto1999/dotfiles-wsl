@@ -218,7 +218,7 @@ let
     };
   sharedSubagents = lib.mapAttrs renderSubagent eligibleSubagents;
 
-  policyRules = policy.render {
+  policyInputs = {
     template = ./policy/AGENTS.md;
     constraints = ./policy/RULES.md;
     skills = enabledSkills;
@@ -227,6 +227,7 @@ let
     inherit (agents) clients;
     inherit (cfg.workstation) dotfilesDir environmentDir;
   };
+  policyRules = policy.render policyInputs;
 
   normalizeSource =
     source:
@@ -246,6 +247,15 @@ let
       rulesDestination = rulesDestinationOf client;
       constraintsDestination = constraintsDestinationOf client;
       subagentDestination = subagentDestinationOf client;
+      subagentSources = subagentSourcesOf client;
+      clientPolicyRules =
+        if
+          subagentDestination != null
+          && builtins.attrNames subagentSources != builtins.attrNames sharedSubagents
+        then
+          policy.render (policyInputs // { subagents = subagentSources; })
+        else
+          policyRules;
       subagentRows = lib.optionals (subagentDestination != null) (
         lib.mapAttrsToList (name: source: {
           inherit clientName;
@@ -256,14 +266,14 @@ let
             deployment = "home";
             destination = "${subagentDestination}/${name}.md";
           };
-        }) (subagentSourcesOf client)
+        }) subagentSources
       );
     in
     lib.optional (rulesDestination != null) {
       inherit clientName;
       id = "rules";
       file = {
-        source = if constraintsDestination == null then agents.shared.rules else agents.shared.rulesCore;
+        source = if constraintsDestination == null then clientPolicyRules else clientPolicyRules.core;
         format = "markdown";
         deployment = "home";
         destination = rulesDestination;

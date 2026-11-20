@@ -258,7 +258,6 @@
             homePrefix = hostConfig.dotfiles.workstation.homeDir;
             rulesArtifact = artifacts."agents/${clientName}/rules" or null;
             constraintsArtifact = artifacts."agents/${clientName}/constraints" or null;
-            # 必須制約を別 file で読む client の本文は、その節を持たない core である
             expectedRules = normalizeSource (
               if constraintsDestination == null then
                 hostConfig.dotfiles.agents.shared.rules
@@ -270,10 +269,10 @@
               if rulesDestination == null then
                 rulesArtifact == null
               else
-                rulesArtifact.source == expectedRules
+                (clientName == "omp" || rulesArtifact.source == expectedRules)
                 && rulesArtifact.format == "markdown"
                 && rulesArtifact.deployedAt == "${homePrefix}/${rulesDestination}"
-                && homeConfig.home.file.${rulesDestination}.source == expectedRules;
+                && homeConfig.home.file.${rulesDestination}.source == rulesArtifact.source;
             constraintsMatch =
               if constraintsDestination == null then
                 constraintsArtifact == null
@@ -597,7 +596,11 @@
             '';
 
         agent-config-migration =
-          assert map (row: "${row.clientName}/${row.id}") managedRowsWithSeedMigration == [ "codex/user" ];
+          assert
+            map (row: "${row.clientName}/${row.id}") managedRowsWithSeedMigration == [
+              "codex/user"
+              "omp/config"
+            ];
           assert fixtureGenericSeedActivation != fixtureSeedActivation;
           pkgs.runCommandLocal "check-agent-config-migration"
             {
@@ -667,6 +670,7 @@
                 pkgs.coreutils
                 pkgs.jq
                 pkgs.remarshal
+                pkgs.yq
                 pkgs.ripgrep
                 pkgs.taplo
               ];
@@ -1040,6 +1044,15 @@
               test -s "$fixture/home/.codex/config.toml"
               test -s "$fixture/home/.omp/agent/config.yml"
               remarshal -if yaml -of json "$fixture/home/.omp/agent/config.yml" > omp-seed.json
+              jq --exit-status '
+                (.modelRoles | has("dev") | not)
+                and (.retry.fallbackChains | has("dev") | not)
+                and (.task.agentModelOverrides | keys) == ["implementer"]
+                and (.task.agentModelOverrides.implementer | length) == 2
+                and .advisor.enabled == false
+                and .prewalk.enabled == false
+                and .task.prewalk == false
+              ' omp-seed.json > /dev/null
               # 再帰 grep と in-place 編集、管理外の常駐だけを誘導し、読取や検索を含む複合 command は止めない
               jq --exit-status '
                 .bashInterceptor.enabled == true
@@ -1053,6 +1066,66 @@
               rmdir "$fixture/home/.claude/settings.json"
               ${fixtureSeedActivation}
               test -s "$fixture/home/.claude/settings.json"
+
+              fixture=$PWD/seed-omp-legacy-fixture
+              mkdir -p "$fixture/home/.omp/agent"
+              ompConfig="$fixture/home/.omp/agent/config.yml"
+              cat > "$ompConfig" <<'YAML'
+              modelRoles:
+                default: fixture/user-main:medium
+                dev: fixture/user-implementation:high
+              retry:
+                fallbackChains:
+                  dev: [fixture/user-backup:medium]
+                  judge: []
+              task:
+                agentModelOverrides:
+                  implementer: "@dev"
+                  reviewer: openai-codex/gpt-6.1-sol:xhigh
+                  security: openai-codex/gpt-6.1-sol:xhigh
+                  task: fixture/user-task
+              advisor:
+                enabled: true
+                syncBacklog: "1"
+              dev:
+                autoqaConsent: granted
+              YAML
+              ${fixtureSeedActivation}
+              yq --exit-status '
+                .modelRoles == {default: "fixture/user-main:medium"}
+                and .retry.fallbackChains == {judge: []}
+                and .task.agentModelOverrides == {
+                  implementer: ["fixture/user-implementation:high", "fixture/user-backup:medium"],
+                  task: "fixture/user-task"
+                }
+                and .advisor == {enabled: false}
+                and .dev == {autoqaConsent: "granted"}
+              ' "$ompConfig" > /dev/null
+              test "$(stat -c %a "$ompConfig")" = 600
+              yq -y '.advisor.enabled = true' "$ompConfig" > changed-omp.yml
+              mv changed-omp.yml "$ompConfig"
+              before=$(sha256sum "$ompConfig")
+              ${fixtureSeedActivation}
+              test "$(sha256sum "$ompConfig")" = "$before"
+
+              cat > "$ompConfig" <<'YAML'
+              modelRoles:
+                dev: fixture/user-implementation:high
+              cycleOrder: [default, dev]
+              YAML
+              before=$(sha256sum "$ompConfig")
+              if ${lib.getExe clients.omp.managedFiles.config.seedMigrationCommand} "$ompConfig"; then
+                echo 'OMP migration accepted a separate reference to the retired dev role' >&2
+                exit 1
+              fi
+              test "$(sha256sum "$ompConfig")" = "$before"
+              mv "$ompConfig" "$ompConfig.actual"
+              ln -s "$ompConfig.actual" "$ompConfig"
+              if ${lib.getExe clients.omp.managedFiles.config.seedMigrationCommand} "$ompConfig"; then
+                echo 'OMP migration accepted a symlink' >&2
+                exit 1
+              fi
+              test -L "$ompConfig"
 
               touch $out
             '';
@@ -1175,6 +1248,7 @@
           ) routingContract.subagentHandoffs;
           assert skillProjectionOf clients.claude == "preload";
           assert skillProjectionOf clients.omp == "preload";
+          assert builtins.attrNames (subagentSourcesOf clients.omp) == [ "implementer" ];
           assert skillProjectionOf clients.codex == "dynamic";
           assert skillProjectionOf clients.opencode == "dynamic";
           assert skillProjectionOf clients.antigravity == "unsupported";
@@ -1205,7 +1279,8 @@
               claudeSubagentsJson = builtins.toJSON (
                 lib.mapAttrs (_: toString) (subagentSourcesOf clients.claude)
               );
-              ompSubagentsJson = builtins.toJSON (lib.mapAttrs (_: toString) (subagentSourcesOf clients.omp));
+              ompRules = artifactSource "agents/omp/rules";
+              ompSource = (subagentSourcesOf clients.omp).implementer;
               sharedSources = sharedSubagentSources;
               claudeSources = claudeSubagentSources;
               codexSources = codexSubagentSources;
@@ -1317,21 +1392,21 @@
                     . == "websearch" or . == "webfetch" or . == "skill"))
                 ' frontmatter.yaml > /dev/null
               done
-              while IFS=$'\t' read -r name source; do
-                check_frontmatter "$source"
-                expected=$(jq -c --arg name "$name" '.[$name]' <<<"$requiredSkillsJson")
-                actual=$(yq -c '.autoloadSkills // []' frontmatter.yaml)
-                test "$actual" = "$expected"
-                yq --exit-status '
-                  (.name | length) > 0 and
-                  (.description | length) > 0 and
-                  .["thinking-level"] == "xhigh" and
-                  (has("effort") | not) and
-                  (.tools | all(. == "read" or . == "grep" or . == "glob" or
-                    . == "edit" or . == "write" or . == "bash" or
-                    . == "web_search"))
-                ' frontmatter.yaml > /dev/null
-              done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$ompSubagentsJson")
+              check_frontmatter "$ompSource"
+              yq --exit-status '
+                .name == "implementer" and
+                (.description | length) > 0 and
+                (has("thinking-level") | not) and
+                (.tools | index("edit")) != null and
+                (.tools | index("task")) == null
+              ' frontmatter.yaml > /dev/null
+              roster=$(awk '/^[|] 目的 [|] subagent [|]$/ { roster = 1; next } roster && /^$/ { exit } roster' "$ompRules")
+              test "$(printf '%s\n' "$roster" | wc -l)" -eq 2
+              grep -Fq '| `implementer` |' <<<"$roster"
+              if grep -Fxq '## 必須制約' "$ompRules"; then
+                echo 'OMP policy repeats separately deployed constraints' >&2
+                exit 1
+              fi
               for source in $codexSources; do
                 remarshal -if toml -of json "$source" > subagent.json
                 jq --exit-status '.developer_instructions | length > 0' subagent.json > /dev/null
@@ -1351,12 +1426,6 @@
                 <(printf '%s\n' $claudeSources) \
                 | while IFS=$'\t' read -r shared claude; do
                     compare_subagent_bodies "$shared" "$claude"
-                  done
-              paste \
-                <(printf '%s\n' $sharedSources) \
-                <(printf '%s\n' $ompSources) \
-                | while IFS=$'\t' read -r shared omp; do
-                    compare_subagent_bodies "$shared" "$omp"
                   done
 
               touch $out

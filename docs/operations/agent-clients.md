@@ -178,12 +178,19 @@ OMP を対話起動し、`/login openai-codex` と `/login anthropic` を順に�
 browser または device flow は OMP の案内に従い、API key ではなく各サービスの subscription account を使う。
 
 認証情報は OMP が `~/.omp/agent/agent.db` に保存する。
-この file と、OMP が対話設定を書き込む `~/.omp/agent/config.yml` は dotfiles 管理外である。
+認証 DB は dotfiles 管理外である。
+`~/.omp/agent/config.yml` は OMP が対話設定を書き込む可変ファイルである。
 
-`dev` は `anthropic/claude-sonnet-5-5:xhigh` を主モデル、`retry.fallbackChains.dev` の `openai-codex/gpt-6.1-sol:xhigh` を fallback にし、`task.agentModelOverrides.implementer` の `@dev` 参照で実装エージェントへ接続する。
-この参照により、親セッションのモデル選択を変えずに、`modelRoles.dev` で実装モデルを選べる。
-fallback は role の chain だけに置き、`provider/model` を鍵にした chain は置かない。
-model を鍵にすると、その model を使うすべての session と repository で別の model へ切り替わり、用途を限って使う model の利用枠を意図せず消費する。
+## OMP の委譲とモデル経路
+
+メインのモデルは案件ごとに選び、`default` は起動時の既定値とする。
+`plan` は固定せず、計画中もそのセッションで選んだモデルを使う。
+小修正や要件・設計と不可分の変更はメインで進め、独立して進められる調査は組み込みの `scout` や `task` に渡す。
+独自に配備するのは、親と別のモデルに任せる利点があり、変更範囲と受入条件が確定した実装に使う `implementer` だけである。
+
+`task.agentModelOverrides.implementer` に主モデルと fallback を順に置く。
+この指定は汎用の `task`、`@task`、親のモデル選択を変えない。
+機能別のモデルロールの fallback はその role の chain に置き、同じモデルを使う他の経路に波及する `provider/model` を鍵にした chain は置かない。
 利用枠切れは `retry.waitForUsageReset: true` で扱い、provider が解除時刻を示した場合に限って、その時刻まで待ってから同じ session と subagent を続行する。
 待機は Esc で中断でき、解除時刻が分からない場合は従来どおり停止する。
 
@@ -195,7 +202,10 @@ command は非対話の `sudo` で host key を使うため、実行権限がな
 native Judge を使う `find.enabled` は既定の `auto` に任せる。
 project の `disabledProviders` 配列は global の配列を置き換えるため、project 側に指定する場合も `openrouter` を含める。
 
-advisor は `opencode-go/deepseek-v4.1-flash:high` を主にし、期間限定の `opencode-go/longcat-2.5-preview-free:high` を fallback にする。
-モデルを変更するときは、新規環境用の `agents/clients/omp/assets/config.seed.yml` と既存環境の `~/.omp/agent/config.yml` をそれぞれ更新する。
-`config.yml` と `models.yml` の seed は配備先が存在しない場合だけ作成するため、rebuild では既存環境の可変設定を更新しない。
+Advisor は既定でオフとし、作業途中の軌道修正が有益なときに `/advisor on` で有効にする。
+候補のモデルと fallback は `config.seed.yml` の Advisor 設定に置く。
+`config.yml` と `models.yml` の seed は配備先がない場合に作成する。
+既存の `config.yml` では、rebuild 時に旧 `@dev` 経路の実装モデルと fallback を `implementer` の設定へ移す。
+旧独自レビュー・監査の既定のモデル指定と、常時待機する旧 Advisor の既定値を取り除く。
+既存のメインモデルなど、移行と関係のない設定値は保持する。
 対して `AGENTS.md`、`RULES.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。

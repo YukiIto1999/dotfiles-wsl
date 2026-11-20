@@ -137,15 +137,16 @@ registryの固定raw sourceは保持し、policyが参照する生成Skill一覧
 `code-review`の対象は`git diff <fixed-point>...HEAD`で得るcommitted rangeであり、任意のstaged/unstaged差分を読む旧local reviewではない。
 `verified-committed-range`には解決したfixed pointと対象`HEAD`のcommit SHA、Specの所在、実行済み検証の証拠を含める。
 上流`code-review`のworkflowはtop-level callerが所有し、commit範囲の確認、StandardsとSpecの並列委譲、二軸を分けた集計を行う。
-native subagentは再帰的にsubagentを起動できないため、`reviewer`は原版のStandardsまたはSpecのbriefと根拠を受け取る、read-onlyの単一軸workerとする。
-`reviewer`の`code-review` routeは必須workflowではなくdynamicな参照であり、自分では再委譲や軸間の統合、順位付けをしない。
+OMPでは短い二軸の証拠照合に標準の`scout`を使い、深い判断には案件に合うモデルの新規セッションを使う。
+標準の`reviewer`は差分が持ち込んだ不具合を判定する別の入口で、Standards・Specの各workerには使わない。
+他clientへ配備する独自`reviewer`は、一つの軸のbriefと証拠を受け取るread-only workerであり、再委譲や軸間の統合を行わない。
 対象projectのissue tracker設定がない場合は上流の`setup-matt-pocock-skills`を使うため、`code-review`のSkill依存にも登録する。
 SonarQubeの補助根拠が必要なbranchだけ、callerが`code-quality`で取得と現在sourceへの適用を確認してaxis briefへ渡す。
 `code-review`の`optionalCapabilities`に登録するが、原版本文を変更せず、SonarQubeの未配備で一般のreviewを止めない。
 未commit差分をreview対象へ含めるために無断でcommitせず、別sessionが作業中のcheckoutでは`HEAD`を動かさない。
-reviewerは目的をrequest、issue、specから固定し、全changed subsystemのbehaviorをcallerとtestまで追う。
-testがgreenでも目的との因果関係がない変更を指摘し、unrelated cleanupを同じ修正へ混ぜない。
-findingは発生条件、影響、最小のchanged rangeと根拠を持ち、指定したaxis内だけで返す。
+callerは各軸の指示に、request、issue、specで定めた目的、追うべき公開契約とcaller、テストの変更を評価する条件を含める。
+検証の期待値、閾値、基線、skip・隔離を緩めた場合は、対応する仕様変更がないものを指摘する。
+findingは発生条件、影響、最小のchanged rangeと根拠を持ち、指定した軸内だけで返す。
 
 `description-writing`は、一次資料に基づく内容、読者の問いに沿う構成、返った所見を採用する編集判断を所有する。
 READMEの開始手順、setup、tutorialなど再現する操作がある場合だけ、独立したcustom [`article-reproduction`](../../skills/article-reproduction/skill/SKILL.md)へ渡す。

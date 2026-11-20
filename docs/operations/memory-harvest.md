@@ -9,6 +9,10 @@ omp の session 記録から、利用者の訂正、決定、好みのうち将�
 `dotfiles.agents.memoryHarvest.enable = true`を宣言し、`project-memory` CapabilityとOMPを採用したhostだけに配備する。
 既定では無効であり、新しいPCで利用者発言の外部modelへの送信を自動で始めない。
 保存先はsessionのcwdから決まるproject scopeで、cwdがGitのworktreeでないsessionは読まない。
+抽出には OpenCode Go を優先し、利用枠不足や認証エラーなどで続けられない場合は、OMP が Command Code GOAT の同じ DeepSeek V4.1 Flash に切り替える。
+両方の資格情報を OMP が利用できるようにしておく。
+契約枠だけに収めるにはサービス側の追加利用や従量課金を無効にし、利用枠を超えた要求が拒否されるようにする。
+抽出先の切替は Hindsight の保存や確認を再送する仕組みではない。
 
 ## timer
 

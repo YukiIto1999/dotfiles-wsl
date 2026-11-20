@@ -9,6 +9,35 @@ let
   cfg = config.dotfiles;
   mkCommand = import ../../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   name = "dotfiles-agent-memory-harvest";
+  model = "opencode-go/deepseek-v4.1-flash";
+  fallback = "commandcode/deepseek/deepseek-v4.1-flash";
+  thinking = "low";
+  modelRouting = (pkgs.formats.yaml { }).generate "omp-memory-harvest-routing.yml" {
+    enabledProviders = [
+      "opencode-go"
+      "commandcode"
+    ];
+    enabledModels = [
+      model
+      fallback
+    ];
+    advisor.enabled = false;
+    retry = {
+      enabled = true;
+      modelFallback = true;
+      fallbackOn = "any";
+      maxRetries = 1;
+      maxDelayMs = 1000;
+      rateLimitWalksChain = true;
+      waitForUsageReset = false;
+      usageAwareFallback = false;
+      fallbackChains = {
+        "${model}:${thinking}" = [ "${fallback}:${thinking}" ];
+        "${fallback}:${thinking}" = [ ];
+        default = [ ];
+      };
+    };
+  };
   worker = mkCommand {
     name = "${name}-worker";
     src = ./package/entry.sh;
@@ -21,9 +50,8 @@ let
       stateFile = "${cfg.agents.runtime.state.root}/memory-harvest.json";
       lookbackDays = "7";
       memory = lib.getExe cfg.capabilities.project-memory.runtime;
-      # 定額枠の利用を前提とするため従量課金 model への切替は不可
-      model = "opencode-go/deepseek-v4.1-flash";
-      thinking = "low";
+      inherit model thinking;
+      modelRouting = toString modelRouting;
     };
     extra.meta.mainProgram = "${name}-worker";
   };

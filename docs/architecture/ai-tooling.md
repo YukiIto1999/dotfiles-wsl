@@ -584,7 +584,9 @@ worker は受け取った物理 path だけで model を呼ぶので、profile �
 
 [`agents/memory-harvest/`](../../agents/memory-harvest)は、OMP の session 記録から利用者の訂正、決定、好みを取り出し、project memory へ保存する。
 session 記録の読み方と OMP の呼出しは journal の package を読み込んで共有する。
-定額 model と thinking の宣言は [`agents/memory-harvest/module.nix`](../../agents/memory-harvest/module.nix)に置く。
+抽出モデル、思考レベル、代替経路は [`agents/memory-harvest/module.nix`](../../agents/memory-harvest/module.nix) が宣言する。
+収穫専用の OMP 設定で、対話セッションや日誌のモデル選択から分離する。
+抽出先は OpenCode Go と Command Code GOAT の DeepSeek V4.1 Flash に限り、利用枠の回復を待たない。
 作業の大半は OMP で行うため、Claude Code、Codex、OpenCode の session 記録は読まない。
 
 入力は`~/.omp/agent/sessions/`直下の session file のうち、前回成功した実行から今回の開始までの entry である。attribution が`user`の発言だけを読み、`<project_memory>`と`<system-reminder>`の block を除く。エージェントの応答、tool の結果、注入した文脈、subagent の記録は model へ渡さない。cwd から Git project を決められない session は読まずに報告する。

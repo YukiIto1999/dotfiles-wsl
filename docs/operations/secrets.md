@@ -20,7 +20,9 @@ git diff -- secrets/sops/assets/secrets.json
 
 secret を追加するときは、先に値を消費する module に取得方法を宣言し、同じ key path を SOPS で追加する。
 平文 file を配備する場合は `sops.secrets` と必要な template または file owner を宣言し、consumer を確認してから `dotfiles-rebuild --plan` と `dotfiles-rebuild` を実行する。
-OMP の TypeSafe credential は [`agents/clients/omp/module.nix`](../../agents/clients/omp/module.nix) が宣言する native command で `typesafe/api_key` だけを復号し、取得結果を平文 file や OMP の認証 DB へ保存しない。
+OMP は [`agents/clients/omp/module.nix`](../../agents/clients/omp/module.nix) が宣言する native command で `typesafe/api_key`、`keenable/api_key`、`exa/api_key` を必要に応じて個別に復号する。
+Web 検索を切り替える前に、SOPS の編集でトップレベルの `keenable` と `exa` にそれぞれ `api_key` を設定する。
+キーはチャットやコマンド引数に貼らず、`models.yml` や OMP の認証 DB にも複製しない。
 
 MCP front が既存の secret file を起動時に読む場合は、その secret の `restartUnits` に front service を加える。所有境界は [AI tooling](../architecture/ai-tooling.md#container-platform) に従う。
 

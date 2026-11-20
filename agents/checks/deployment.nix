@@ -1046,14 +1046,36 @@
               test -s "$fixture/home/.omp/agent/config.yml"
               remarshal -if yaml -of json "$fixture/home/.omp/agent/config.yml" > omp-seed.json
               jq --exit-status '
-                (.modelRoles | has("dev") | not)
-                and (.retry.fallbackChains | has("dev") | not)
-                and (.task.agentModelOverrides | keys) == ["implementer"]
-                and (.task.agentModelOverrides.implementer | length) == 2
-                and .advisor.enabled == false
-                and .prewalk.enabled == false
-                and .task.prewalk == false
-              ' omp-seed.json > /dev/null
+                .modelRoles == {
+                  default: "openai-codex/gpt-6.2-sol:high",
+                  smol: "opencode-go/deepseek-v4.1-flash:high",
+                  slow: "openai-codex/gpt-6.2-sol:xhigh",
+                  tiny: "opencode-go/deepseek-v4.1-flash:high",
+                  advisor: "commandcode/deepseek/deepseek-v4.1-flash:high",
+                  commit: "opencode-go/deepseek-v4.1-flash",
+                  widget: "opencode-go/deepseek-v4.1-flash",
+                  judge: "typesafe/jev-latest",
+                  web: "web/keenable",
+                  image: "openai-codex/gpt-image-2"
+                }
+                and .retry.fallbackChains == {
+                  smol: ["commandcode/deepseek/deepseek-v4.1-flash:high"],
+                  slow: ["anthropic/claude-opus-5-5:xhigh"],
+                  tiny: ["commandcode/deepseek/deepseek-v4.1-flash:high"],
+                  advisor: ["opencode-go/deepseek-v4.1-flash:high"],
+                  commit: ["commandcode/deepseek/deepseek-v4.1-flash"],
+                  widget: ["commandcode/deepseek/deepseek-v4.1-flash"],
+                  judge: [],
+                  web: ["web/exa"],
+                  image: []
+                }
+                and .task.agentModelOverrides == {
+                  scout: "@smol", sonic: "@smol", reviewer: "@slow",
+                  implementer: ["anthropic/claude-opus-5-5:high", "openai-codex/gpt-6.2-sol:high"]
+                }
+                and .advisor.enabled and (.generate_image.enabled == false)
+                and (.prewalk.enabled == false) and (.task.prewalk == false)
+              ' omp-seed.json > /dev/null || { echo 'Incorrect OMP seed routes' >&2; exit 1; }
               # 再帰 grep と in-place 編集、管理外の常駐だけを誘導し、読取や検索を含む複合 command は止めない
               jq --exit-status '
                 .bashInterceptor.enabled == true
@@ -1075,10 +1097,13 @@
               modelRoles:
                 default: fixture/user-main:medium
                 dev: fixture/user-implementation:high
+                plan: fixture/old-plan
               retry:
                 fallbackChains:
                   dev: [fixture/user-backup:medium]
                   judge: []
+                  default: [fixture/user-default-backup]
+                  "web/*": [web/keenable]
               task:
                 agentModelOverrides:
                   implementer: "@dev"
@@ -1090,20 +1115,21 @@
                 syncBacklog: "1"
               dev:
                 autoqaConsent: granted
+              theme:
+                dark: user-theme
               YAML
               ${fixtureSeedActivation}
-              yq --exit-status '
-                .modelRoles == {default: "fixture/user-main:medium"}
-                and .retry.fallbackChains == {judge: []}
-                and .task.agentModelOverrides == {
-                  implementer: ["fixture/user-implementation:high", "fixture/user-backup:medium"],
-                  task: "fixture/user-task"
-                }
-                and .advisor == {enabled: false}
+              yq -c . "$ompConfig" | jq --exit-status --slurpfile seed omp-seed.json '
+                .modelRoles == ($seed[0].modelRoles + {default: "fixture/user-main:medium"})
+                and .retry.fallbackChains == ($seed[0].retry.fallbackChains + {default: ["fixture/user-default-backup"]})
+                and .task.agentModelOverrides == $seed[0].task.agentModelOverrides
+                and .advisor == {enabled: true}
+                and .generate_image == {enabled: false}
                 and .dev == {autoqaConsent: "granted"}
-              ' "$ompConfig" > /dev/null
+                and .theme == {dark: "user-theme"}
+              ' > /dev/null || { echo 'Incorrect migrated OMP routes' >&2; exit 1; }
               test "$(stat -c %a "$ompConfig")" = 600
-              yq -y '.advisor.enabled = true' "$ompConfig" > changed-omp.yml
+              yq -y '.advisor.enabled = false | .modelRoles.slow = "fixture/user-slow:high"' "$ompConfig" > changed-omp.yml
               mv changed-omp.yml "$ompConfig"
               before=$(sha256sum "$ompConfig")
               ${fixtureSeedActivation}
@@ -1124,6 +1150,8 @@
                 and .providers.orcarouter == {baseUrl: "https://router.example.test/v1", apiKey: "!custom-key"}
                 and .providers.refuseless.baseUrl == "https://api.refuseless.com/v1"
                 and .providers.arliai.baseUrl == "https://api.arliai.com/v1"
+                and (.providers.keenable.apiKey | contains("[\"keenable\"][\"api_key\"]"))
+                and (.providers.exa.apiKey | contains("[\"exa\"][\"api_key\"]"))
               ' "$ompModels" > /dev/null
               test "$(stat -c %a "$ompModels")" = 600
               before=$(sha256sum "$ompModels")

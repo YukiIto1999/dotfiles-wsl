@@ -1,8 +1,16 @@
 modelRoles:
+  default: openai-codex/gpt-6.2-sol:high
+  smol: opencode-go/deepseek-v4.1-flash:high
+  slow: openai-codex/gpt-6.2-sol:xhigh
   tiny: opencode-go/deepseek-v4.1-flash:high
+  advisor: commandcode/deepseek/deepseek-v4.1-flash:high
+  commit: opencode-go/deepseek-v4.1-flash
+  widget: opencode-go/deepseek-v4.1-flash
   judge: typesafe/jev-latest
-  default: anthropic/claude-opus-5-5:xhigh
-  advisor: opencode-go/deepseek-v4.1-flash:high
+  web: web/keenable
+  image: openai-codex/gpt-image-2
+x-dotfiles:
+  model-routing: true
 disabledProviders:
   - openrouter
 symbolPreset: nerd
@@ -14,17 +22,26 @@ setupVersion: 2
 memory:
   backend: off
 providers:
-  webSearchOrder:
-    []
   anthropic:
     serverSideFallback: false
 retry:
   fallbackChains:
+    smol:
+      - commandcode/deepseek/deepseek-v4.1-flash:high
+    slow:
+      - anthropic/claude-opus-5-5:xhigh
     tiny:
-      - google-antigravity/gemini-3.8-flash:high
+      - commandcode/deepseek/deepseek-v4.1-flash:high
     advisor:
-      - opencode-go/longcat-2.5-preview-free:high
+      - opencode-go/deepseek-v4.1-flash:high
+    commit:
+      - commandcode/deepseek/deepseek-v4.1-flash
+    widget:
+      - commandcode/deepseek/deepseek-v4.1-flash
     judge: []
+    web:
+      - web/exa
+    image: []
   modelFallback: true
   usageAwareFallback: true
   waitForUsageReset: true
@@ -34,6 +51,8 @@ display:
   showTokenUsage: true
   cacheMissMarker: true
 advisor:
+  enabled: true
+generate_image:
   enabled: false
 prewalk:
   enabled: false
@@ -64,9 +83,12 @@ bashInterceptor:
 task:
   prewalk: false
   agentModelOverrides:
+    scout: "@smol"
+    sonic: "@smol"
+    reviewer: "@slow"
     implementer:
-      - anthropic/claude-sonnet-5-5:xhigh
-      - openai-codex/gpt-6.1-sol:xhigh
+      - anthropic/claude-opus-5-5:high
+      - openai-codex/gpt-6.2-sol:high
   showResolvedModelBadge: true
   enableLsp: true
 model:

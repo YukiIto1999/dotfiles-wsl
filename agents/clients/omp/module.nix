@@ -103,18 +103,30 @@ let
     };
   };
 
+  keyFromSops =
+    provider:
+    "!sudo -n env SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt "
+    + "${lib.getExe pkgs.sops} --config "
+    + lib.escapeShellArg "${cfg.workstation.dotfilesDir}/secrets/sops/assets/.sops.yaml"
+    + " decrypt --extract "
+    + lib.escapeShellArg ''["${provider}"]["api_key"]''
+    + " "
+    + lib.escapeShellArg "${cfg.workstation.dotfilesDir}/secrets/sops/assets/secrets.json";
+
+  webCredentials = lib.genAttrs [ "keenable" "exa" ] (provider: {
+    apiKey = keyFromSops provider;
+  });
+  configSeed = ./assets/config.seed.yml;
   modelsConfig = (pkgs.formats.yaml { }).generate "omp-models.yml" {
-    providers = optionalModelProviders // {
-      typesafe = {
-        baseUrl = "https://api.typesafe.ai";
-        apiKey =
-          "!sudo -n env SOPS_AGE_KEY_FILE=/var/lib/sops-nix/key.txt "
-          + "${lib.getExe pkgs.sops} --config "
-          + lib.escapeShellArg "${cfg.workstation.dotfilesDir}/secrets/sops/assets/.sops.yaml"
-          + " decrypt --extract '[\"typesafe\"][\"api_key\"]' "
-          + lib.escapeShellArg "${cfg.workstation.dotfilesDir}/secrets/sops/assets/secrets.json";
+    providers =
+      optionalModelProviders
+      // webCredentials
+      // {
+        typesafe = {
+          baseUrl = "https://api.typesafe.ai";
+          apiKey = keyFromSops "typesafe";
+        };
       };
-    };
   };
 
   lspConfig = (pkgs.formats.json { }).generate "omp-lsp.json" (
@@ -205,44 +217,52 @@ let
     };
 
   migrateConfig = mkSeedMigration "config" ''
+    yq -c . ${configSeed} > "$scratch/seed"
     cat > "$scratch/migration.jq" <<'JQ'
-      def legacy:
-        (.modelRoles | has("dev")) or .task.agentModelOverrides.implementer == "@dev"
-        or (.retry.fallbackChains | has("dev"))
-        or .task.agentModelOverrides.reviewer == $oldReview
-        or .task.agentModelOverrides.security == $oldReview;
-      if legacy then
-          if .task.agentModelOverrides.implementer == "@dev" then
-            .modelRoles.dev as $primary
-            | (.retry.fallbackChains.dev // []) as $fallback
-            | if ($primary | type) == "string" and ($fallback | type) == "array"
-              then .task.agentModelOverrides.implementer = ([$primary] + $fallback)
-              else error("cannot resolve the legacy implementation model route") end
-          else . end
-          | del(.modelRoles.dev, .retry.fallbackChains.dev)
-          | if any(.. | scalars; . == "@dev" or . == "pi/dev")
+      if .["x-dotfiles"]["model-routing"] == true then .
+      else
+        $seed[0] as $routes
+        | del(
+            .modelRoles.dev, .modelRoles.plan, .modelRoles.task, .modelRoles.vision,
+            .modelRoles.memory, .modelRoles.speech, .modelRoles.dictation,
+            .retry.fallbackChains.dev, .retry.fallbackChains.plan, .retry.fallbackChains.task,
+            .retry.fallbackChains.vision, .retry.fallbackChains.memory, .retry.fallbackChains.speech,
+            .retry.fallbackChains.dictation, .retry.fallbackChains["web/*"],
+            .task.agentModelOverrides.task,
+            .providers.webSearch, .providers.webSearchOrder, .providers.webSearchExclude,
+            .providers.webSearchGeminiModel
+          )
+        | if .task.agentModelOverrides.security == $oldReview
+          then del(.task.agentModelOverrides.security) else . end
+        | .modelRoles |= ({default: $routes.modelRoles.default} + . + ($routes.modelRoles | del(.default)))
+        | .retry.fallbackChains += $routes.retry.fallbackChains
+        | .retry.modelFallback = $routes.retry.modelFallback
+        | .task.agentModelOverrides += $routes.task.agentModelOverrides
+        | if .advisor.syncBacklog == "1" then del(.advisor.syncBacklog) else . end
+        | .advisor.enabled = $routes.advisor.enabled
+        | .generate_image.enabled = $routes.generate_image.enabled
+        | if any(.. | scalars; . == "@dev" or . == "pi/dev")
             or ((.cycleOrder // []) | any(. == "dev"))
-            then error("the retired dev role still has a separate reference") else . end
-          | if .task.agentModelOverrides.reviewer == $oldReview
-            then del(.task.agentModelOverrides.reviewer) else . end
-          | if .task.agentModelOverrides.security == $oldReview
-            then del(.task.agentModelOverrides.security) else . end
-          | if .advisor.enabled == true and .advisor.syncBacklog == "1"
-            then .advisor.enabled = false | del(.advisor.syncBacklog) else . end
-        else . end
+          then error("the retired dev role still has a separate reference") else . end
+        | .["x-dotfiles"]["model-routing"] = $routes["x-dotfiles"]["model-routing"]
+      end
     JQ
-    yq -cf "$scratch/migration.jq" --arg oldReview 'openai-codex/gpt-6.1-sol:xhigh' \
+    jq -cf "$scratch/migration.jq" --arg oldReview 'openai-codex/gpt-6.1-sol:xhigh' --slurpfile seed "$scratch/seed" \
       "$scratch/input" > "$scratch/migrated"
   '';
 
   migrateModels = mkSeedMigration "models" ''
-    jq -c --argjson optional ${lib.escapeShellArg (builtins.toJSON optionalModelProviders)} '
-      if .providers != null and (.providers | type) != "object"
-      then error("OMP model providers must be a mapping")
-      else (.providers // {}) as $existing
-        | .providers = ($existing + ($optional | with_entries(.key as $id | select($existing | has($id) | not))))
-      end
-    ' "$scratch/input" > "$scratch/migrated"
+    jq -c \
+      --argjson optional ${lib.escapeShellArg (builtins.toJSON optionalModelProviders)} \
+      --argjson web ${lib.escapeShellArg (builtins.toJSON webCredentials)} '
+        if .providers != null and (.providers | type) != "object"
+        then error("OMP model providers must be a mapping")
+        else (.providers // {}) as $existing
+          | .providers = ($optional + $existing)
+          | reduce ($web | to_entries[]) as $provider (.;
+              .providers[$provider.key].apiKey = $provider.value.apiKey)
+        end
+      ' "$scratch/input" > "$scratch/migrated"
   '';
 in
 {
@@ -268,7 +288,7 @@ in
     };
     managedFiles = {
       config = {
-        source = ./assets/config.seed.yml;
+        source = configSeed;
         format = "yaml";
         deployment = "seed";
         destination = ".omp/agent/config.yml";

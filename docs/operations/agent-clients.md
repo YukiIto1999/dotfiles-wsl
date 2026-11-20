@@ -184,6 +184,7 @@ browser または device flow は OMP の案内に従い、API key ではなく�
 ## OMP の委譲とモデル経路
 
 メインのモデルは案件ごとに選び、`default` は起動時の既定値とする。
+新規環境の `default` は GPT‑6.2 Sol `high` とし、既存環境のメインモデル指定は移行で上書きしない。
 `plan` は固定せず、計画中もそのセッションで選んだモデルを使う。
 小修正や要件・設計と不可分の変更はメインで進め、独立して進められる調査は組み込みの `scout` や `task` に渡す。
 独自に配備するのは、親と別のモデルに任せる利点があり、変更範囲と受入条件が確定した実装に使う `implementer` だけである。
@@ -209,11 +210,14 @@ Arli AI はテキストモデル用の一覧 API が OMP 標準の探索先と�
 キーを設定ファイルに書かず、設定後は `omp models <provider>` で確認し、`/model` から選ぶ。
 これらのプロバイダーを既定のロールや fallback には追加しない。
 
-Advisor は既定でオフとし、作業途中の軌道修正が有益なときに `/advisor on` で有効にする。
-候補のモデルと fallback は `config.seed.yml` の Advisor 設定に置く。
+Advisor は既定でオンとし、一時的に止めるときは `/advisor off` を使う。
+ロールの主モデルと fallback は [`config.seed.yml`](../../agents/clients/omp/assets/config.seed.yml) を正本とする。
+通常の `web_search` は Keenable を使い、失敗時は Exa に切り替える。
+Web 検索のキーは [SOPS の編集](secrets.md#編集)から登録する。
+画像生成モデルは指定するが、`generate_image` ツールは既定で無効とする。
+
 `config.yml` と `models.yml` の seed は配備先がない場合に作成する。
-既存の `config.yml` では、rebuild 時に旧 `@dev` 経路の実装モデルと fallback を `implementer` の設定へ移す。
-旧独自レビュー・監査の既定のモデル指定と、常時待機する旧 Advisor の既定値を取り除く。
-既存のメインモデルなど、移行と関係のない設定値は保持する。
-既存の `models.yml` には、Refuseless、OrcaRouter、Arli AI のうち未登録のプロバイダーだけを追加する。
+既存の `config.yml` では rebuild 時に旧 `dev` 参照を取り除き、合意したロールと subagent の経路へ一度だけ切り替える。
+移行と関係のない設定値、および移行後に利用者が変更したロール設定は保持する。
+既存の `models.yml` には Refuseless、OrcaRouter、Arli AI のうち未登録のプロバイダーを追加し、Web 検索のキー取得先を SOPS に揃える。
 対して `AGENTS.md`、`RULES.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。

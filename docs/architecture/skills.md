@@ -167,6 +167,7 @@ raw sourceの採用は`mizchi/explainer`に限り、donorとして調べた`mizc
 `browser-operation`は要求と変更pathから実経路、状態遷移、contentと表示条件を選び、fresh DOM操作、実際に読んだrendered screenshot、業務結果を対応させる。
 探索監査を明示された場合は、業務目的とriskから同じmatrixを作り、観測から次の仮説を選ぶ。既知経路の受入依頼を全面監査へ広げず、実際の不具合、設計上の仮説、仕様不足を分ける。
 関連する拒否、回復、契約が必要とする再取得までclaimごとに閉じ、coverageと未確認条件を返す。設計評価・再設計が依頼に含まれる場合は、証拠を`ui-design`へ渡す。
+`designer`は親が観測した証拠から設計を判断する。観測が足りなければ必要な状態と操作を親へ返し、実画面操作と専門監査は親から該当Skillへ渡す。
 永久testの作成や専門監査は別ownerとし、Orca、clientの標準browser tool、`browser-automation`のうち実行可能な経路を選ぶ。
 Orcaと`browser-automation`は配備の必須条件にせず、経路がない場合もSkillを残して未確認の条件を返す。
 browser-diagnosticsの入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面a11yの`a11y-debugging`とする。

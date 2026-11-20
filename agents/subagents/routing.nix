@@ -57,21 +57,6 @@
     }
     {
       subagent = "designer";
-      skill = "browser-operation";
-      activation = "dynamic";
-    }
-    {
-      subagent = "designer";
-      skill = "a11y-debugging";
-      activation = "dynamic";
-    }
-    {
-      subagent = "designer";
-      skill = "browser-performance";
-      activation = "dynamic";
-    }
-    {
-      subagent = "designer";
       skill = "codebase-design";
       activation = "dynamic";
     }

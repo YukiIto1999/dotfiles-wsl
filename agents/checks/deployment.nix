@@ -1222,19 +1222,17 @@
               "debug-optimize-lcp"
             ];
             routedTo =
-              configuration: subagent:
+              configuration: subagent: skill:
               lib.any (
-                route: route.subagent == subagent && route.skill == "browser-operation"
+                route: route.subagent == subagent && route.skill == skill
               ) configuration.dotfiles.agents.shared.routing.subagentSkills;
           in
           assert lib.all
             (
               configuration:
               configuration.dotfiles.agents.shared.skills ? browser-operation
-              && lib.all (routedTo configuration) [
-                "designer"
-                "implementer"
-              ]
+              && routedTo configuration "implementer" "browser-operation"
+              && !lib.any (routedTo configuration "designer") ([ "browser-operation" ] ++ diagnosticsSkills)
             )
             [
               minimalCapabilityConfig

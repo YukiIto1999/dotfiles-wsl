@@ -45,23 +45,6 @@ workspaceのファイルロックとdaemonの`~/.zvec-grep/daemon/instance.lock`
 remote ruleの取得を含む通信を遮断する仕組みではない。
 この版ではQL ruleが廃止され、binary targetは既定で走査対象から外れるため、その用途をCLI更新の互換性に含めない。
 
-### Strix
-
-[`security-assessment/strix/runtime`](../../capabilities/security-assessment/strix/runtime/module.nix)は、[公式release 1.7.0](https://github.com/usestrix/strix/releases/tag/v1.7.0)のhash固定native binaryをNixOS向けに組み立てる。
-`strix`と`dotfiles-strix-runtime`を共通の`platform/cli`から配備し、固定sandbox imageは常駐serviceを作らず共通のimage同期へ登録する。
-後者は記録した所有runのinspectとcleanupだけを受け付け、containerの環境変数、reportの削除、imageの全体pruneを公開しない。
-
-`strix`のassessmentは管理下のOpenCode Go資格情報とprovider設定を使い、`--help`や`--version`ではその資格情報を読まない。
-上流がAPI keyをconfigへ保存するため、呼出しごとにuser-owned tmpfsの私有directoryへconfigを移し、終了時に回収する。
-native CLIは呼出し専用のprocess groupで起動し、終了時にTERMを送り、2秒の猶予後に残ったgroupへKILLを送って直接の子をwaitしてから私有configを回収する。
-通常の終了statusとINT・TERM取消のstatusを保ち、この回収猶予をassessment全体の制限時間やDocker sandboxの回収と混同しない。
-homeや永続configへkeyを書かないための境界であり、RAM上の一時fileにもkeyを書かないという保証ではない。
-自動updateは拒否し、版の更新はpackageの固定sourceと通常の配備から行う。
-
-使用条件と結果の扱いは[`security-review`のStrix契約](../../skills/security-review/skill/references/strix-runtime.md)に集約する。
-bundled toolの存在だけで実行済みとは扱わず、Trivyが必要な評価では実行された版、入力、DBの鮮度を証拠へ残す。
-CLIの配備、helpの成功、modelへの接続、対象を使ったassessmentの成功は別の証拠として扱う。
-
 ### Explainer
 
 raw sourceは[`explainerSkills`](../../flake.nix)の[`578defba7249fde5366689424ed6017f76b5598b`](https://github.com/mizchi/explainer/tree/578defba7249fde5366689424ed6017f76b5598b)であり、registryは`skills/explainer`、`skills/explainer-book`、`skills/first-reader`を直接参照する。

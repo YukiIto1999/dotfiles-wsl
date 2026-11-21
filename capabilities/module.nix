@@ -103,7 +103,6 @@ in
     ./library-documentation/module.nix
     ./project-memory/module.nix
     ./repository-search/module.nix
-    ./security-assessment/module.nix
   ];
 
   options.dotfiles.capabilities = {

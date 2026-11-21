@@ -559,9 +559,8 @@
             (
               { lib, ... }:
               {
-                dotfiles.capabilities.enabled = lib.mkForce (
-                  containerlessCapabilityIds ++ [ "security-assessment" ]
-                );
+                dotfiles.capabilities.enabled = lib.mkForce containerlessCapabilityIds;
+                dotfiles.platform.containers.runtimeImages.fixture = fixtureImage;
               }
             )
           ]).config;
@@ -1000,7 +999,6 @@
           assert builtins.elem "docker"
             runtimeOnlyVariantConfig.users.users.${runtimeOnlyVariantConfig.dotfiles.workstation.username}.extraGroups;
           assert builtins.hasAttr "syncImages" runtimeOnlyVariantConfig.dotfiles.platform.cli.commands;
-          assert builtins.hasAttr "opencode/go_api_key" runtimeOnlyVariantConfig.sops.secrets;
           assert !builtins.hasAttr "hindsight.env" runtimeOnlyVariantConfig.sops.templates;
           assert !builtins.hasAttr "containers/roster" runtimeOnlyVariantConfig.dotfiles.health.observations;
           assert memoryOnlyVariantConfig.dotfiles.capabilities.enabled == memoryOnlyCapabilityIds;

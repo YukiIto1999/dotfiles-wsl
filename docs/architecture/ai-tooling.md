@@ -52,10 +52,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.registry --ap
 
 Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置く規則ではない。選択したSkill本文はclientへ配備する一方、Capability実装はtransport、service lifecycle、network、credential、永続dataを所有するため、`capabilities/`に置く。
 
-`security-assessment`は[`Strix runtime`](../../capabilities/security-assessment/strix/runtime/module.nix)を通し、`security-review`が許可された隔離対象のruntime evidenceを必要とする場合だけ使う。
 OMPで独立した監査が必要な場合は、実装者とは別のセッションで`security-review`を実行する。
-MCP endpointや常駐backendを追加せず、CLIは共通の`platform/cli`、sandbox imageの同期は共通の`platform/containers`が所有する。
-実行の許可、予算、結果の検証、所有するrunの回収は[Skillの利用契約](../../skills/security-review/skill/references/strix-runtime.md)に従う。
 
 `code-quality`は[SonarQubeの契約](../reference/code-quality.md)を通し、保存済みissueとquality gate、新規scanの出典を提供する。
 取得と現在sourceへの適用判断は同名Skill、通常の二軸reviewは原版`code-review`のcallerが所有する。

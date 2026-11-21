@@ -20,6 +20,8 @@ let
   image = "${repository}:${version}@${digest}";
   backend = mkContainerBackend "sonarqube-db" {
     inherit image;
+    # PostgreSQL が自分で子を回収するため UID をまたぐ signal 転送用の CAP_KILL は不要
+    init = false;
     environmentFiles = [ config.sops.templates."sonarqube-db.env".path ];
     volumes = [
       "sonarqube-db:/var/lib/postgresql/data"

@@ -40,6 +40,8 @@ SHAの相違、一時的な障害、Skillへの接続不足を撤退条件へ読
 
 server は `127.0.0.1:9000`、DB は共通 backend network 内だけに配置する。
 DB には host port を公開せず、`sonarqube-db` の network alias と `sonarqube` database/user を使う。
+PostgreSQLをDBコンテナのPID 1にし、上流イメージの`SIGINT`でfast shutdownする。
+これにより、別UIDへのsignal転送に必要な`CAP_KILL`をコンテナへ追加せずに停止できる。
 各 image の取得は共通 `dotfiles-sync-images` が所有し、service の起動時は pull しない。
 server の Elasticsearch bootstrap checks は無効化しない。
 [Linux の公式前提](https://docs.sonarsource.com/sonarqube-community-build/server-installation/pre-installation/linux) に従い、host の `vm.max_map_count >= 524288`、`fs.file-max >= 131072` と seccomp を満たす必要がある。
@@ -94,6 +96,7 @@ Server、DB、MCP frontはOS起動や通常のdoctorで起動しない。
 作業終了後はscanner、ブラウザ、他の利用者が作業中でないことを確認し、`sudo systemctl start sonarqube-stop.service`を実行する。
 管理対象scannerが稼働中か、Compute Engineに待機中・処理中の解析があるか、進行状況を確認できない場合、停止入口は対象unitを止めずに失敗する。
 Project固有のscannerを使う場合は、解析の送信から完了まで終わったことを利用者が確認する。
+停止コマンドが成功を返すのは、対象unitがすべて`inactive`になったときだけである。
 停止によってvolume、解析履歴、credentialは削除しない。
 
 ## 承認された project の解析

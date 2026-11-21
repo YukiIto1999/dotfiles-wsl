@@ -103,4 +103,11 @@ case $state in
 esac
 
 systemctl stop -- "${stop_units[@]}"
+for unit in "${stop_units[@]}"; do
+  state=$(systemctl show --property=ActiveState --value -- "$unit") || state=''
+  if [[ $state != inactive ]]; then
+    printf 'SonarQube shutdown did not complete cleanly: %s is %s\n' "$unit" "${state:-unobservable}" >&2
+    exit 1
+  fi
+done
 echo "SonarQube backend stopped; named volumes and analysis history are kept"

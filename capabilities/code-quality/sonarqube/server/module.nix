@@ -123,6 +123,8 @@ in
     systemd.services = backend.systemdServices // {
       docker-sonarqube = backend.systemdServices.docker-sonarqube // {
         serviceConfig = backend.systemdServices.docker-sonarqube.serviceConfig // {
+          # SonarQube の image は停止に SIGINT を使うため TERM の終了値 143 ではなく 130
+          SuccessExitStatus = lib.mkForce "130";
           TimeoutStopSec = lib.mkForce "75s";
         };
       };

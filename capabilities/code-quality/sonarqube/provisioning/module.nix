@@ -58,10 +58,10 @@ let
     ];
     vars = {
       serverUnit = lib.escapeShellArg serverUnit;
-      # front は app と DB を Requires するため app の停止で連鎖して止まる
       stopUnits = lib.escapeShellArgs (
         [
           lifecycle.startUnit
+          frontUnit
           provisionUnit
         ]
         ++ backend.units

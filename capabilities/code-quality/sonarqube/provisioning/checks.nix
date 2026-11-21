@@ -21,6 +21,7 @@
         provision = serviceOf "sonarqube-provision.service";
         stopUnits = [
           lifecycle.startUnit
+          frontUnit
           "sonarqube-provision.service"
         ]
         ++ backend.units;
@@ -70,7 +71,15 @@
               show)
                 [[ $2 == --property=ActiveState && $3 == --value && $4 == -- && $# -eq 5 ]] || exit 64
                 [[ ''${FAKE_SHOW_STATUS:-0} == 0 ]] || exit "$FAKE_SHOW_STATUS"
-                printf '%s\n' "$FAKE_STATE"
+                if [[ -e $FAKE_STOP_LOG ]]; then
+                  if [[ $5 == docker-sonarqube.service ]]; then
+                    printf '%s\n' "''${FAKE_POST_STOP_STATE:-inactive}"
+                  else
+                    printf 'inactive\n'
+                  fi
+                else
+                  printf '%s\n' "$FAKE_STATE"
+                fi
                 ;;
               stop) printf '%s\n' "$*" >>"$FAKE_STOP_LOG" ;;
               *) exit 64 ;;
@@ -219,6 +228,10 @@
 
               export FAKE_STATUS=UP
               FAKE_ACTIVITY='{"pending":0,"inProgress":0,"failing":3}' stops "idle Compute Engine"
+              FAKE_ACTIVITY='{"pending":0,"inProgress":0}' FAKE_POST_STOP_STATE=failed run
+              [ "$status" -eq 1 ] || { echo 'stop succeeded with a failed container unit' >&2; exit 1; }
+              grep -Fxq -- "$expected_stop" stop.log
+              grep -Fq 'docker-sonarqube.service is failed' err
               FAKE_ACTIVITY='{"pending":2,"inProgress":0}' refuses "pending task" "2 pending and 0 in-progress"
               FAKE_ACTIVITY='{"pending":0,"inProgress":1}' refuses "running task" "0 pending and 1 in-progress"
               FAKE_ACTIVITY='{"pending":1e0,"inProgress":0}' refuses "exponent count" "1 pending and 0 in-progress"

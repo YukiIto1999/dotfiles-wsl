@@ -99,6 +99,7 @@ let
     "run"
     "--rm"
     "--init"
+    "--init=false"
     "--read-only"
   ];
 

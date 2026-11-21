@@ -20,7 +20,8 @@ let
     account: readOnly:
     lib.getExe (
       pkgs.callPackage ./package.nix {
-        inherit toolsets readOnly;
+        inherit readOnly;
+        toolsets = toolsets ++ lib.optional readOnly "actions";
         githubMcpServer =
           self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-mcp-server;
         serverBuilder = mkMcpServer;

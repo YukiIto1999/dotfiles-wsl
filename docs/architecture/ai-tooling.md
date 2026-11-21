@@ -397,6 +397,8 @@ GitHubとContext7の実行fileは、rootの[`nixpkgs-unstable` input](../../flak
 hostとHome Managerのpackage setはstableのまま変えず、providerごとのasset取得やnpm lockは持たない。
 各providerの`serverBuilder`が実行時の資格情報を読む。
 共有するGitHub adapterはサーバーの読取専用モードで動き、書込は選んだアカウントの公式stdioだけを明示的なセッションに渡す。
+Actionsの実行・job・ログの調査は共有の読取専用adapterにだけ公開し、書込用stdioにはActionsを加えない。
+PRの調査では、対象commitのSHAを確認してから対応するrunとjobの証拠を取得する。
 このpackage供給から同梱Skillの採用は導かず、Skillの採用と差替は既存のregistryが所有する。
 
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。

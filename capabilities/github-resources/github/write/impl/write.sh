@@ -59,11 +59,7 @@ fail() {
 }
 
 # 呼出し元の GitHub 用の環境は別 account の token や host を運び得る。ここで渡す値だけを gh へ残す
-while IFS= read -r name; do
-  case ${name} in
-    GH_* | GITHUB_* | DEBUG) unset "${name}" ;;
-  esac
-done < <(compgen -e)
+unset DEBUG "${!GH_@}" "${!GITHUB_@}"
 
 declare -A options=()
 draft=false

@@ -222,6 +222,8 @@ def run(name, args, expect_status, expect_requests, stdin="", env=None, receipt=
 
     if completed.returncode != expect_status:
         failed(f"exit {completed.returncode}, expected {expect_status}")
+    if expect_status == 0 and completed.stderr:
+        failed("unexpected diagnostic on successful write")
     actual = [
         {key: value for key, value in record.items() if key != "authorization"} for record in seen
     ]

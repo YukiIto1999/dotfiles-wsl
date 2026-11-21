@@ -126,6 +126,22 @@ lint、dry-run、許可されたlocal実行、remote CIの結果は別の証拠�
 原版の[secretのmasking](https://github.com/mizchi/actrun/blob/1db9aff5b364de6eacda68e3f2ce2238f9992272/README.md#L463-L480)は外部送信を防ぐ保証ではなく、worktreeや一時directoryもsecurity sandboxではない。
 実runは許可された対象と副作用だけで行い、dry-runから秘密情報の利用や第三者actionへの全trustを推定しない。
 
+### .NETの実行時診断
+
+[`dotnet-diagnostics.nix`](../../toolchain/package/dotnet-diagnostics.nix)はMicrosoft公式の診断CLIを3本だけ供給する。各CLIは専用の.NETランタイムで動き、プロジェクトの`dotnet`、SDKの選択や`PATH`を変えない。
+
+| 調べたいこと | CLI |
+|---|---|
+| CPU使用率・GC・例外率の変化 | [`dotnet-counters monitor`](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-counters#dotnet-counters-monitor) |
+| 遅い処理の時間経過と内訳 | [`dotnet-trace collect`](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-trace#dotnet-trace-collect)でEventPipeトレースを採取 |
+| ハング中に各スレッドがどこで待っているか | [`dotnet-stack report`](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/dotnet-stack#dotnet-stack-report)でマネージドスタックを表示 |
+
+採取を許可されたローカルプロセスに限り、対象と同じユーザー・`TMPDIR`で、PIDを指定して接続する。
+Linuxの[既定診断socket](https://learn.microsoft.com/en-us/dotnet/core/diagnostics/diagnostic-port#default-diagnostic-port)にはpath長の上限があり、管理セッションが割り当てる長い`TMPDIR`では接続できないことがある。
+その場合は、再起動してよい検証用プロセスに限り、`mktemp -d "$XDG_RUNTIME_DIR/dn.XXXXXX"`で作った短い私有directoryを、その起動commandと診断commandの`TMPDIR`にだけ指定する。
+既存のプロセス、セッション全体の環境変数、明示されたprojectの設定は変えない。
+トレース、メトリクス、スタックには内部情報が含まれ得る。保存する場合は作業ツリー外に自分だけがアクセスできるディレクトリ（`0700`）を作り、`umask 077`で新規ファイルへ出力する。トレースには`--output`で保存先を明示し、生データはコミットや共有ログに残さない。
+
 
 ## 運用command
 

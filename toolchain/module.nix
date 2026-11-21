@@ -8,6 +8,7 @@
 
 let
   cfg = config.dotfiles;
+  dotnetDiagnostics = pkgs.callPackage ./package/dotnet-diagnostics.nix { };
   selection = cfg.toolchain.enabledLsp;
   unknownSelection = lib.unique (
     builtins.filter (id: !builtins.hasAttr id cfg.toolchain.lspRegistry) selection
@@ -182,6 +183,7 @@ in
     zvec-grep = pkgs.callPackage ./package/zvec-grep.nix { };
     semgrep = pkgs.callPackage ./package/semgrep.nix { };
     devenv = self.inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.default;
+    inherit (dotnetDiagnostics) dotnet-counters dotnet-trace dotnet-stack;
 
     inherit (pkgs)
       # 言語 runtime

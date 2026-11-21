@@ -57,6 +57,7 @@ Windows側からの到達性はWSLのnetwork modeと転送経路にも依存し�
 gatewayとfrontは設定ユーザーのserviceとして動き、読めるcheckout、home、runtime secretと、実行できるcommandがtool callの権限上限になる。
 GitHubの共有経路とfrontは公式serverの読取専用モードを使う。
 書込権限を持つ公式stdioは、明示されたアカウントのセッションにだけ渡し、共有HTTPには登録しない。
+通常のGitHub書込は`dotfiles-github-write`が指定のアカウントだけを使い、実loginを照合してから、許可された一つの操作を公式`gh`へ渡す。共有HTTPの読取権限はこれで変わらない。
 この分離は、資格情報を読める同じOSユーザーの任意プロセスを隔離するものではない。
 
 PlaywrightのMCP adapterは[`package.nix`](../../capabilities/browser-automation/playwright/mcp/package.nix)で`--isolated`と`--no-sandbox`を同時に指定する。sessionごとのbrowser状態とprocess寿命は分けるが、Chromiumのsecurity sandboxは有効にしない。この境界はclientのnative browserやOrcaのbrowserとは別である。

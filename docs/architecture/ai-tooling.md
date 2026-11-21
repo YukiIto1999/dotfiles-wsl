@@ -397,7 +397,7 @@ clientごとに公開されるtoolは次のとおりである。使えるかは�
 GitHubとContext7の実行fileは、rootの[`nixpkgs-unstable` input](../../flake.nix)で固定したleaf packageから受け取る。
 hostとHome Managerのpackage setはstableのまま変えず、providerごとのasset取得やnpm lockは持たない。
 各providerの`serverBuilder`が実行時の資格情報を読む。
-共有するGitHub adapterはサーバーの読取専用モードで動き、書込は選んだアカウントの公式stdioだけを明示的なセッションに渡す。
+共有するGitHub adapterはサーバーの読取専用モードで動く。通常の書込は現在のセッションからアカウントとloginを指定して`dotfiles-github-write`を一度実行する。merge・削除・履歴変更とcommandが持たない操作だけは、選んだアカウントに限定したstdioへ渡す。
 Actionsの実行・job・ログの調査は共有の読取専用adapterにだけ公開し、書込用stdioにはActionsを加えない。
 PRの調査では、対象commitのSHAを確認してから対応するrunとjobの証拠を取得する。
 このpackage供給から同梱Skillの採用は導かず、Skillの採用と差替は既存のregistryが所有する。

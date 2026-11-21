@@ -22,12 +22,20 @@ let
       pkgs.callPackage ./package.nix {
         inherit readOnly;
         toolsets = toolsets ++ lib.optional readOnly "actions";
+        excludeTools = lib.optionals (!readOnly) commandOwnedTools;
         githubMcpServer =
           self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-mcp-server;
         serverBuilder = mkMcpServer;
         tokenFile = config.sops.secrets."accounts/${account}/token".path;
       }
     );
+
+  # 起動中のセッションの命令だけで全入力を扱える tool は書込用セッションに重ねない
+  commandOwnedTools = [
+    "add_issue_comment"
+    "create_branch"
+    "update_issue_comment"
+  ];
 
   toolsets = [
     "context"

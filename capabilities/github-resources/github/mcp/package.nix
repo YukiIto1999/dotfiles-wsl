@@ -5,6 +5,7 @@
   toolsets,
   serverBuilder,
   readOnly,
+  excludeTools ? [ ],
 }:
 
 serverBuilder {
@@ -19,5 +20,9 @@ serverBuilder {
       (lib.concatStringsSep "," toolsets)
     ]
     ++ lib.optional readOnly "--read-only"
+    ++ lib.optionals (excludeTools != [ ]) [
+      "--exclude-tools"
+      (lib.concatStringsSep "," excludeTools)
+    ]
   );
 }

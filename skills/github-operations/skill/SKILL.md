@@ -1,38 +1,77 @@
 ---
 name: github-operations
-description: Safely performs account-scoped GitHub reads and requested writes through configured GitHub MCP targets. Use when an agent must inspect or change a GitHub repository, issue, pull request, review, or branch. Resolves the acting identity and exact target, reads current state before writing, avoids duplicate retries, and requires last-moment confirmation for merges, deletions, and history-changing operations. Does not compose change descriptions, judge code reviews, write commit messages, search local repositories, or change GitHub authentication.
+description: Safely performs account-scoped GitHub reads and requested writes through per-account GitHub MCP read targets, the local `dotfiles-github-write` command, and a dedicated write session. Use when an agent must inspect or change a GitHub repository, issue, pull request, review, or branch. Resolves the acting identity and exact target, reads current state before writing, avoids duplicate retries, and requires last-moment confirmation for merges, deletions, and history-changing operations. Does not compose change descriptions, judge code reviews, write commit messages, search local repositories, or change GitHub authentication.
 ---
 
 # GitHub上の操作を安全に実行する
 
-GitHub MCPは実行手段である。このSkillは、誰としてどのresourceを操作するか、どのreadを根拠にwriteしてよいか、結果をどう確定するかを所有する。GitHub上で操作できることを、ユーザーがその副作用を依頼した証拠にはしない。
+GitHub MCPと`dotfiles-github-write`は実行手段である。このSkillは、誰としてどのresourceを操作するか、どのreadを根拠にwriteしてよいか、結果をどう確定するかを所有する。GitHub上で操作できることを、ユーザーがその副作用を依頼した証拠にはしない。
 
 ## 公開操作を解決する
 
-通常の共有Gatewayはaccount別の読取専用targetを公開する。
-書込が許可されたら、選んだaccountに対応する`github-write-<account>`だけを`dotfiles-tool-session`で追加した専用セッションを使う。
-未接続なら必要なaccountと操作を利用者に示し、共有経路や別accountに書込を迂回させない。
-選んだ接続で現在公開されているtool名とschemaを確認する。resourceのownerからaccount名を組み立てない。
+readは共有Gatewayがaccountごとに公開する読取専用target `github-<account>`で行う。
+Gatewayはtoolを`github-<account>_<tool>`として公開し、clientは接頭辞を足して`-`を`_`に置き換えた名前で見せることがある（例: `mcp__gateway_github_account_1_get_me`はtarget `github-account-1`、account ID `account-1`）。
+account IDは小文字の英数字とhyphenだけなので、client上の名前からtarget名とaccount IDを一意に戻せる。resourceのownerからaccount名を組み立てない。
+選んだ接続で現在公開されているtool名とschemaを確認する。
 
-| 操作 | 現在のschemaで渡す入力 | 確認する返却値 |
+| read | 現在のschemaで渡す入力 | 確認する返却値 |
 |---|---|---|
 | identity | 選んだtargetの`get_me`へ`{}` | 実行login |
 | issueの現state | `issue_read`へ`method: "get"`、`owner`、`repo`、`issue_number` | canonical URL、番号、state、変更するfield |
 | PRの現stateとdiff | `pull_request_read`へ`method: "get"`または`"get_diff"`、`owner`、`repo`、`pullNumber` | PR identity、head/baseとSHA、stateまたは実diff |
 | branchの解決 | `list_branches`へ`owner`、`repo`と必要なpagination | exactなbranch名とhead SHA |
-| issueの依頼された更新 | `issue_write`へ`method: "update"`、同じtarget、`issue_number`と変更するfieldだけ | 更新されたID、URL、state |
-| 指定されたreviewの送信 | `pull_request_review_write`へ対象、`method`、確定した`event`、本文、必要な`commitID` | review ID、送信state、対象commit |
 
 branchは一覧の一ページで不存在と決めず、対象のexact名を確認するまで必要なpageを読む。
-reviewの`create`で`event`を省くとpending reviewを作るため、送信済みとは扱わない。
+
+作成、通常の更新、comment、review、新しいbranchの作成は、起動中のセッションのshellから`dotfiles-github-write`を一回実行して行う。
+`--account`へreadに使ったtargetのaccount ID、`--login`へそのtargetの`get_me`で確認したloginを渡す。
+命令はそのaccountのtokenだけで公式`gh`を呼び、tokenが名乗るloginと完全に一致しなければ書かない。
+操作ごとにendpointが固定され、任意のAPI呼出しは受け付けない。
+本文はfile、または`-`で標準入力から渡し、一覧はJSONの文字列配列で渡す。
+
+| 依頼された書込 | `dotfiles-github-write --account ID --login LOGIN`に続ける引数 | 確認する返却値 |
+|---|---|---|
+| issueの作成 | `issue-create --repo OWNER/REPO --title TITLE [--body-file FILE]` | `number`、`html_url`、`state` |
+| issueの更新、PRのlabel・assignee・milestone | `issue-update --repo OWNER/REPO --number N`と`--title`、`--body-file`、`--state open\|closed`、`--state-reason`、`--labels-json`、`--assignees-json`、`--milestone N\|none`の変更するものだけ | `state`、`state_reason`、`title`、`labels`、`assignees`、`milestone` |
+| issueまたはPRの会話へのcomment | `comment --repo OWNER/REPO --number N --body-file FILE` | comment `id`、`html_url` |
+| 会話commentの編集 | `comment-edit --repo OWNER/REPO --comment-id ID --body-file FILE` | `id`、`updated_at` |
+| PRの作成 | `pr-create --repo OWNER/REPO --title TITLE --head [OWNER:]BRANCH --base BRANCH [--body-file FILE] [--draft]` | `number`、`html_url`、head/baseのrefとSHA |
+| PRのtitle、本文、open/close、base、maintainer編集可否 | `pr-update --repo OWNER/REPO --number N`と`--title`、`--body-file`、`--state open\|closed`、`--base`、`--maintainer-can-modify true\|false`の変更するものだけ | `state`、`title`、head/baseのrefとSHA |
+| PRのreviewer依頼 | `pr-reviewers --repo OWNER/REPO --number N`と`--reviewers-json`、`--team-reviewers-json`の一方または両方 | `requested_reviewers`、`requested_teams` |
+| 指定されたreviewの送信 | `review --repo OWNER/REPO --number N --commit SHA --event APPROVE\|REQUEST_CHANGES\|COMMENT [--body-file FILE] [--comments-file FILE]` | review `id`、`state`、`commit_id` |
+| review commentへの返信 | `review-reply --repo OWNER/REPO --number N --comment-id ID --body-file FILE` | 返信の`id`、`in_reply_to_id` |
+| 新しいbranchの作成 | `branch-create --repo OWNER/REPO --branch BRANCH --from-sha SHA` | 作成した`ref`と`sha` |
+
+`--labels-json`と`--assignees-json`は現在の集合を置き換えるため、pre-readした集合へ依頼された差分だけを適用した全体を渡す。
+`--state-reason`は`completed`、`not_planned`、`duplicate`、`reopened`のいずれかを渡す。
+reviewの`--commit`には直前のreadで確認したPRのhead SHAを渡し、`--comments-file`にはline commentの配列`[{path, body, line|position, side?, start_line?, start_side?}]`を一つだけ置く。
+reviewは確定した`event`で送信まで行い、pending reviewは作らない。
+branch作成では、確認したsource branchのhead SHAを`--from-sha`へ渡す。既存branchは上書きされず、同名があれば失敗する。
+成功すると標準出力へ`account`、`login`、`operation`、`result`を持つJSONを一行返す。
+終了status 2は入力の不備で何も送っておらず、3はtokenかloginを確認できず書いていない。
+4は書込を送ったが結果を確定できていない状態であり、同じ命令を再実行せず、後述の再試行規則でexact resourceを読む。
+
+上表にない書込は、選んだaccountに対応する`github-write-<account>`だけを`dotfiles-tool-session`で追加した専用セッションで行う。
+上表で実行できる範囲は現在のセッションの命令で行う。書込用セッションに同じtool名がある場合は、命令が扱えない入力だけに使う。
+未接続なら必要なaccountと操作を利用者に示し、共有経路や別accountに書込を迂回させない。
+
+| 書込用セッションの操作 | 現在のschemaで渡す入力 | 確認する返却値 |
+|---|---|---|
+| 命令が持たないissue fieldの更新（issue type、duplicate先など） | `issue_write`へ`method: "update"`、同じtarget、`issue_number`と変更するfieldだけ | 更新されたID、URL、state |
+| sub-issueの関係 | `sub_issue_write`へ対象issueと`sub_issue_id` | 親子関係の状態 |
+| PRのdraft状態の切替 | `update_pull_request`へ対象PRと`draft`だけ | PRのdraft状態 |
+| 既存pending reviewの送信、threadの操作 | `pull_request_review_write`へ対象、`method`、確定した`event`、必要な`threadId` | review IDまたはthreadの状態 |
+| 既存pending reviewへの行コメントまたはreview commentへのリアクション | `add_comment_to_pending_review`または`add_reply_to_pull_request_comment`に、確認した対象とschemaで選べる操作だけを明示 | 追加したコメントまたはリアクションと対象ID |
+| 命令が扱わない設定を含むPRの作成 | `create_pull_request`へ確定したhead、base、title、追加設定を渡す | PR番号、URL、head/base |
+
 `submit_pending`は同じidentityのpending reviewを現stateで確認した場合だけ使い、thread操作には現reviewから得た`threadId`を使う。
 他の操作も選んだtargetのschemaへ同じidentityとresource識別子を対応させる。
-tool未公開、認証失敗、権限不足ではその境界を返し、provider、container、別account、認証を変更して回避しない。
+tool未公開、命令の拒否、認証失敗、権限不足ではその境界を返し、provider、container、別account、認証を変更して回避しない。
 
-branch作成が依頼された場合は、確認したsource branchを`create_branch`の`from_branch`、新branchを`branch`へ明示する。
 file更新では同じbranchを`get_file_contents`の`ref`へ渡して現blob SHAを取得し、直前確認後に`create_or_update_file`へ`branch`、`path`、raw `content`、確定した`message`、既存fileなら`sha`を渡す。
 mergeの直前確認後は、`merge_pull_request`へ対象PR、確認した`merge_method`と`expectedHeadSha`を渡し、結果のSHAとstateを確定する。
-これらは選んだaccount targetに実際に公開されている場合だけ使い、secret設定など対応する公開操作がないwriteをproviderの直接APIで補わない。
+`delete_file`、`push_files`、`update_pull_request_branch`も次節の直前確認を経てから書込用セッションで実行する。
+これらは選んだaccount targetに実際に公開されている場合だけ使い、secret設定など対応する公開操作がないwriteをproviderの直接APIや`gh`で補わない。
 
 ## identityとtargetを固定する
 
@@ -40,8 +79,8 @@ mergeの直前確認後は、`merge_pull_request`へ対象PR、確認した`merg
 2. 完全修飾された指定、canonical URL、選択済みrepositoryやbranchのcontextを優先する。複数の根拠が食い違う場合は、一方を黙って採用しない。
 3. 足りない値だけをread-only lookupで補う。候補account targetのidentityは`get_me`相当のreadで確認し、repository、issue、PR、branchはexact lookupの返り値で存在、種別、canonical owner/nameを確定する。広い一覧や曖昧なtitle検索は、exact lookupへ絞るために必要な場合だけ使う。
 4. `account target`はresourceの`owner`とは別に固定する。明示された実行identityと一致するtargetを使い、明示がなければ既存contextとread結果から一意になるtargetだけを選ぶ。複数accountが同じ操作を行えることは選択理由にならない。
-5. 読取専用targetから書込用セッションへ引き継ぐ場合は、書込側の`get_me`で同じloginを確認する。
-   pre-read、write、結果確認はその書込接続で行い、権限がなければ別accountへ黙って切り替えない。
+5. 書込は、readに使ったtargetと同じaccountで行う。命令には同じaccount IDと`get_me`で確認したloginを渡し、照合の失敗を別accountで補わない。
+   書込用セッションへ引き継ぐ場合は、書込側の`get_me`で同じloginを確認し、pre-read、write、結果確認をその接続で行う。権限がなければ別accountへ黙って切り替えない。
 
 対象または実行identityが一意にならない場合は、候補と曖昧な項目を示して止める。lookupのためにbranch、comment、draft reviewなどを作成してはならない。
 「職場」「個人」などは依頼者の呼称であり、target番号、Gitの既定identity、`owner/repo`、過去の利用頻度からloginを決めない。呼称とloginを対応付ける根拠がなければ、`get_me`で確認した候補から依頼者に実行loginを選んでもらう。
@@ -72,7 +111,7 @@ merge、resource・file・branchのdelete、commitを生成するcontent変更�
 ## idempotencyと再試行
 
 - 各writeはtarget、変更前state、postconditionの組として扱う。更新は可能なら直前に読んだstateまたはSHAをpreconditionにする。
-- timeout、接続切断、5xxなどでwrite結果が不明な場合は、同じwriteを直ちに再送しない。exact resourceをreadし、postcondition、新しいID、commit、comment、reviewなど前回の効果を確認する。
+- timeout、接続切断、5xx、`dotfiles-github-write`の終了status 4などでwrite結果が不明な場合は、同じwriteを直ちに再送しない。exact resourceをreadし、postcondition、新しいID、commit、comment、reviewなど前回の効果を確認する。
 - 効果が確認できれば再試行せず成功として確定する。実行されていないと証明でき、preconditionも変わっていない場合だけ同じwriteを一度再試行できる。証明できなければ重複を避けて止め、結果が不明であることを報告する。
 - 新しいresourceを作るwriteは、同じtitleや本文でも別resourceになり得る。titleや本文の一致だけで同一性を決めず、返却されたID・URL、対象、実行identity、head/baseなど、その操作を一意にする値で確認する。
 - conflictやstale stateでは再読して差分を作り直す。確認対象のmerge、delete、historyが変わるなら、再試行前に改めて確認を得る。writeを並列送信しない。

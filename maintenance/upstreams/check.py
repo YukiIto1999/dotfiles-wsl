@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[2]
 API = "https://api.github.com/repos/"
 # A fixed release revision follows releases, not the repository's default branch.
-RELEASE_INPUTS = {"devenv", "actrun", "orca"}
+RELEASE_INPUTS = {"devenv", "orca"}
 BRANCH_FOR_PIN = {"nixpkgs-unstable": "nixpkgs-unstable"}
 PACKAGES = {
     "zvec-grep": ("toolchain/package/zvec-grep.nix", "npm", "@zvec/zvec-grep-linux-x64-gnu"),
@@ -19,7 +19,6 @@ PACKAGES = {
     "aspire-cli": ("toolchain/package/aspire-cli.nix", "release", "microsoft/aspire"),
     "memlab-mcp": ("capabilities/heap-diagnostics/memlab/mcp/package.nix", "npm", "@memlab/mcp-server"),
     "semgrep": ("toolchain/package/semgrep.nix", "pypi", "semgrep"),
-    "similarity": ("toolchain/package/similarity.nix", "release", "mizchi/similarity"),
     "agentgateway": ("platform/mcp/package/agentgateway.nix", "release", "agentgateway/agentgateway"),
 }
 

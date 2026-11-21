@@ -180,8 +180,6 @@ in
       inherit (cfg.workstation.wsl) powershellCommand;
     };
     context-dev-scrape = pkgs.callPackage ./package/context-dev-scrape.nix { };
-    actrun = self.inputs.actrun.packages.${pkgs.stdenv.hostPlatform.system}.default;
-    similarity = pkgs.callPackage ./package/similarity.nix { };
     explainer = pkgs.callPackage ./package/explainer/package.nix {
       explainerSource = self.inputs.explainerSkills;
     };

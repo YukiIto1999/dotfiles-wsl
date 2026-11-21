@@ -15,7 +15,6 @@
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
 
     devenv.url = "github:cachix/devenv/b904dcb51fe48c30db250038241507f60752f222";
-    actrun.url = "github:mizchi/actrun/1db9aff5b364de6eacda68e3f2ce2238f9992272";
 
     # client binary の供給元。provider 自身の固定 nixpkgs と Bun を使うため、host の nixpkgs へ follows させない
     llm-agents.url = "github:numtide/llm-agents.nix";

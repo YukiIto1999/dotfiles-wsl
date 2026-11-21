@@ -10,7 +10,7 @@
 | 区分 | 正本 | 現在の値 |
 |---|---|---|
 | system package | [`workstation/module.nix`](../../workstation/module.nix)と各ownerの`environment.systemPackages` | `nix eval --json .#nixosConfigurations.nixos.config.environment.systemPackages --apply 'map (p: p.name)'` |
-| 汎用ツール | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages`。devenvとactrunは[`flake.nix`](../../flake.nix)で固定した公式release inputから選ぶ | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
+| 汎用ツール | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.packages`。devenvは[`flake.nix`](../../flake.nix)で固定した公式release inputから選ぶ | `nix eval --json .#nixosConfigurations.nixos.config.home-manager.users.nixos.home.packages --apply 'map (p: p.name)'` |
 | Home Manager program | [`workstation/home/module.nix`](../../workstation/home/module.nix)の`programs`。Atuinは同期なしのローカル履歴 | 同じunitを参照する |
 | language server | [`toolchain/module.nix`](../../toolchain/module.nix)の`dotfiles.toolchain.lspRegistry`が登録を、profileの`dotfiles.toolchain.enabledLsp`が採用を持つ。PATHとclient設定へ配るのは採用した`dotfiles.toolchain.lsp`だけ | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.toolchain.lsp --apply builtins.attrNames` |
 | 保守用devShell | [`flake.nix`](../../flake.nix)の`devShells` | `nix develop --command echo`の後に`$PATH`を確認する |
@@ -90,40 +90,6 @@ wrapperのCWD変更や`NODE_PATH`だけでは、祖先packageが選ばれる挙�
 既知の非zero subprocessでも`VERIFIED`になるため、wrapperのexit 0と`VERIFIED`だけを実行成功の証明にせず、custom `article-reproduction`がcommandごとのexit、個別stream、到達stateを記事の期待と照合する。
 optional D2、TALA、ELK、TLC、Apalacheなどのbackendはこのpackageで供給せず、実行に必要なら別の許可済み前提として扱う。
 `first-reader`はraw source内のPython 3 stdlib scriptを使い、模擬readerやrecall-from-logを実command再現や実際の翌日の人間の記憶測定へ置き換えない。
-
-### Similarity
-
-[`similarity.nix`](../../toolchain/package/similarity.nix)は[公式release v0.5.0](https://github.com/mizchi/similarity/releases/tag/v0.5.0)のhash固定archiveから、`similarity-ts`、`similarity-rs`、`similarity-generic`の原版binaryを供給する。
-現packageの対象は`x86_64-linux`であり、他言語のCLIやSDK、MCP providerを提供する構成ではない。
-実行前に、走査する対象と比較目的を固定する。
-
-| 対象 | 入口 |
-|---|---|
-| TypeScript / JavaScript | `similarity-ts <path>` |
-| Rust | `similarity-rs <path>` |
-| C# | `similarity-generic --language csharp <path>` |
-
-結果は構造の似た候補であり、型、API、用途、変更理由、振る舞いの等価性や共通化の正当性は元のsourceとcallerから判断する。
-候補ゼロを重複なしの証明にせず、通常のTypeScriptでもfalse negativeがあり得る。
-JSX / TSXの受理をReact componentやmarkupの堅牢な比較と同一視せず、検出されなかったJSXの重複を既知の制約として扱う。
-言語ごとの実装差、比較treeへの縮約、parse errorの扱いは[一次sourceに基づく調査対象](https://github.com/mizchi/similarity/blob/8fa7879ac88e80f2c98c00e331f8ad19aa1a33bc/crates/core/src/function_extractor.rs#L440-L468)であり、調査したmainのSHAを配備releaseと同一視しない。
-自動共通化やmerge gateには使わず、実際の引数は各binaryの`--help`を読む。
-
-### Actrun
-
-`actrun`は既に[`flake.nix`](../../flake.nix)で固定したsourceから管理するCLIであり、今回新しいCI Skillやtask定義の正本を作るものではない。
-対象workflowの変更、local実行の依頼、互換性の調査がある場合だけ、projectのtask正本を保ったまま、実際のworkflowを入力にしてlintとplanを取る。
-
-```sh
-actrun lint .github/workflows/ci.yml
-actrun workflow run .github/workflows/ci.yml --dry-run
-```
-
-引数の根拠は[採用revisionのREADME](https://github.com/mizchi/actrun/blob/1db9aff5b364de6eacda68e3f2ce2238f9992272/README.md#L110-L118)と[linterの入口](https://github.com/mizchi/actrun/blob/1db9aff5b364de6eacda68e3f2ce2238f9992272/README.md#L215-L220)に置く。
-lint、dry-run、許可されたlocal実行、remote CIの結果は別の証拠であり、localでの成功をGitHub runner、token権限、OIDC、publicationの成功としない。
-実行前にeventと条件分岐、`uses`で取得するaction、実行trust、変更を含むworkspaceと保存先への書込み、network、secretの出典と受渡し範囲を確認する。
-原版の[secretのmasking](https://github.com/mizchi/actrun/blob/1db9aff5b364de6eacda68e3f2ce2238f9992272/README.md#L463-L480)は外部送信を防ぐ保証ではなく、worktreeや一時directoryもsecurity sandboxではない。
-実runは許可された対象と副作用だけで行い、dry-runから秘密情報の利用や第三者actionへの全trustを推定しない。
 
 ### .NETの実行時診断
 

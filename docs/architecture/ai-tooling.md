@@ -401,7 +401,7 @@ PRの調査では、対象commitのSHAを確認してから対応するrunとjob
 通常経路に公開する遅延起動のstdio targetは、対応protocolごとのdiscovery応答をNix storeに持つ。固定したローカル実行fileの応答はnetworkなしで採取し、外部資料用の応答は匿名で採取して正本へ固定する。最初の通常セッションでも、一覧の取得だけでは専門backendを起動しない。
 最初に利用したセッションのserverだけを起動し、実際のinitializeと一覧応答を事前に返した内容と照合する。不一致なら呼び出したtoolをproviderへ送らず、そのprotocolの固定応答を無効にして一覧の変更を通知する。以降は該当protocolだけ実serverから一覧を取得する。
 これでtool schemaを共有しても、toolの結果、heap、tabはセッション間で共有しない。未起動セッションのDELETEや期限切れにも子processを作らない。
-公開MCPの定義を更新する場合は、固定URL用のprovider executableを使い、[`discovery-seed.py`](../../platform/mcp/package/discovery-seed.py)の`capture`で新しい匿名の応答を取得する。`check --public`で利用者のpathを含まないことを確認し、[`discovery/`](../../capabilities/library-documentation/remote/mcp/discovery/)の対象だけを置き換える。
+公開MCPの定義を更新する場合は、固定URL用のprovider executableを使い、[`discovery-seed.py`](../../platform/mcp/package/discovery-seed.py)の`capture`で新しい匿名の応答を取得する。`check --public`で利用者のpathを含まないことを確認し、[`assets/`](../../capabilities/library-documentation/remote/mcp/assets/)の対象だけを置き換える。
 
 一つの[Gateway](../../platform/mcp/gateway/module.nix)が通常経路`/mcp`と、追加を明示したtarget用の`/mcp/<target>`を公開する。doctorはGitHubとHindsightのprobeだけを含む`/probe/mcp`を使う。専門MCPを通常セッションへ公開しても、doctorからそのbackendは起動しない。
 追加経路は[セッションの起動入口](../reference/tooling.md#通常の利用と書込用セッション)から対応clientへ一時的に渡し、永続設定を更新しない。

@@ -461,7 +461,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.targets
 application固有のcontainer、endpoint、credential、volume、provisioningは対応するCapabilityが所有する。Hindsightをgeneric Platformへ列挙しない。
 
 Capability実装はregistry metadataを常に宣言し、backend、MCP target、credential、永続data、health observation、client integrationを`dotfiles.capabilities.resolved`で条件化する。
-container backendもruntime imageも選択しない場合、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
+container backendを選択しない場合、Container PlatformはDocker daemon、共通network、image同期command、GC timerを配備しない。
 
 全containerは暗黙pullを無効にする。upstream imageはdigest固定の宣言と、containerを有効にしたhostへ配備する`dotfiles-sync-images`が取得を担当し、Nix生成imageは`imageFile`が取得を担当する。
 Docker build artifact GCは停止済みのtestcontainersのcontainer、dangling image、BuildKit cacheを扱い、tagged image、named volume、それ以外のcontainerは削除しない。

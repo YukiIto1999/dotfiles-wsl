@@ -8,7 +8,7 @@
 let
   myCfg = config.dotfiles;
   cfg = config.dotfiles.platform.containers;
-  hasContainers = cfg.enabled != [ ] || cfg.runtimeImages != { };
+  hasContainers = cfg.enabled != [ ];
   mkCommand = import ../cli/impl/mk-command.nix { inherit config lib pkgs; };
   portBindings = import ./impl/port-bindings.nix { inherit lib; };
   configuredContainers = config.virtualisation.oci-containers.containers;
@@ -342,9 +342,9 @@ let
 
   imageDefinitions = map (entry: entry.image) imageEntries;
 
-  upstreamImages =
-    map (image: image.image) (builtins.filter (image: image.kind == "upstream") imageDefinitions)
-    ++ builtins.attrValues cfg.runtimeImages;
+  upstreamImages = map (image: image.image) (
+    builtins.filter (image: image.kind == "upstream") imageDefinitions
+  );
 
   syncImages = mkCommand {
     name = "dotfiles-sync-images";
@@ -591,16 +591,6 @@ in
     enabled = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       description = "この host に配備する container application の一覧。";
-    };
-    runtimeImages = lib.mkOption {
-      type = lib.types.attrsOf (
-        lib.types.addCheck lib.types.str (
-          reference: builtins.match ".+:[A-Za-z0-9_][A-Za-z0-9_.-]*@sha256:[0-9a-f]{64}" reference != null
-        )
-      );
-      default = { };
-      internal = true;
-      description = "Native runtime が必要時だけ起動する digest 固定 image。常駐 endpoint や OCI service は持たない";
     };
     services = lib.mkOption {
       type = lib.types.attrsOf serviceType;

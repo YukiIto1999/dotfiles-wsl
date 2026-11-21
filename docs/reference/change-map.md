@@ -89,7 +89,7 @@ profileは有効な機能を選び、各ownerのmoduleは意味、実装、runti
 | container共通schema、network、image同期を変える | [`platform/containers/module.nix`](../../platform/containers/module.nix)と[`platform/containers/impl/container-backend.nix`](../../platform/containers/impl/container-backend.nix) | Platform container checks、`dotfiles-rebuild` |
 | application backend、endpoint、volumeを変える | 対応するCapability内のbackend/server/database unit | Capability固有check、`dotfiles-doctor` |
 | hostでcontainer applicationを有効化・無効化する | [`profiles/hosts/`](../../profiles/hosts)の`dotfiles.capabilities.enabled`。container名ではなく所有するCapability IDを選ぶ | `container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |
-| upstream OCI imageを更新する | 常駐applicationはCapability実装の`dotfiles.platform.containers.services.<name>.images`、必要時だけ使うsandboxは`dotfiles.platform.containers.runtimeImages`のdigest固定参照 | imageを選択した対象hostで、checkoutから`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status`または`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages`を実行し、適用後は同hostの`dotfiles-sync-images`と`dotfiles-rebuild`を使う |
+| upstream OCI imageを更新する | Capability実装の`dotfiles.platform.containers.services.<name>.images` | imageを選択した対象hostで、checkoutから`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status`または`nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages`を実行し、適用後は同hostの`dotfiles-sync-images`と`dotfiles-rebuild`を使う |
 | Capability実装が取得するpackageのhashを更新する | 対応するCapabilityの`package.nix`。flake inputのarchive hashは[`flake.lock`](../../flake.lock) | `nix store prefetch-file --hash-type sha256 --json <url>`、`verify`、`verify-push` |
 
 ## Secretとidentity

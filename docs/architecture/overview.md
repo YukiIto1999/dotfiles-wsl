@@ -157,8 +157,7 @@ repository固有optionはownerに対応するnamespaceへ置く。
 | `browser-runtime` | Chromium |
 | `browser-automation` | Playwright MCP |
 | `browser-diagnostics` | Chrome DevTools MCP |
-| `repository-search` | Zvec-Grep MCP |
-| `library-documentation` | Context7 MCP |
+| `library-documentation` | Context7、Microsoft Learn、DeepWiki |
 | `github-resources` | GitHub MCPとaccount credential |
 | `project-memory` | Hindsight MCP、backend、runtime、client integration |
 

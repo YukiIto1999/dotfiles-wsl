@@ -97,12 +97,11 @@ in
     ./browser-automation/module.nix
     ./browser-diagnostics/module.nix
     ./browser-runtime/module.nix
-    ./code-quality/module.nix
+    ./build-diagnostics/module.nix
     ./github-resources/module.nix
     ./heap-diagnostics/module.nix
     ./library-documentation/module.nix
     ./project-memory/module.nix
-    ./repository-search/module.nix
   ];
 
   options.dotfiles.capabilities = {

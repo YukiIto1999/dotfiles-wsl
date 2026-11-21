@@ -63,7 +63,6 @@
                     type = lib.types.attrsOf lib.types.raw;
                     default = {
                       browser-automation = { };
-                      repository-search = { };
                     };
                   };
                   dotfiles.capabilities.resolved = lib.mkOption {

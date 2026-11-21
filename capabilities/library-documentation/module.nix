@@ -1,9 +1,16 @@
 _: {
-  imports = [ ./context7/mcp/module.nix ];
+  imports = [
+    ./context7/mcp/module.nix
+    ./remote/mcp/module.nix
+  ];
 
   config.dotfiles.capabilities.registry."library-documentation" = {
-    implementation = "context7";
-    providers = [ "context7" ];
+    implementation = "public-documentation";
+    providers = [
+      "context7"
+      "deepwiki"
+      "microsoft-learn"
+    ];
     backends = [ ];
     requiresCapabilities = [ ];
   };

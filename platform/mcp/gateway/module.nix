@@ -11,13 +11,16 @@ let
   inherit (mcp) gateway;
   agentgateway = pkgs.callPackage ../package/agentgateway.nix { };
   defaultTargets = lib.filterAttrs (_: target: target.exposure == "default") mcp.targets;
+  # lazy front は未確定の discovery で child を起こすため、doctor は lazy 以外の既定 target だけを初期化する
+  probedTargets = lib.filterAttrs (_: target: !target.lazyDiscovery) defaultTargets;
   optionalTargets = lib.filterAttrs (_: target: target.exposure == "session") mcp.targets;
   baseUrl = "http://127.0.0.1:${toString gateway.port}";
   defaultPath = "/mcp";
+  probePath = "/probe${defaultPath}";
   optionalPath = name: "${defaultPath}/${name}";
   protocolObserver = pkgs.callPackage ./impl/observer-package.nix {
-    gatewayUrl = gateway.url;
-    probes = lib.mapAttrs (_: target: target.probe) defaultTargets;
+    gatewayUrl = gateway.probeUrl;
+    probes = lib.mapAttrs (_: target: target.probe) probedTargets;
   };
   protocolContract = protocolObserver.dotfilesObservationContract;
 
@@ -26,7 +29,7 @@ let
     policies.timeout.backendRequestTimeout = "60s";
     backends = [
       {
-        mcp.failureMode = if path == defaultPath then "failOpen" else "failClosed";
+        mcp.failureMode = if path == defaultPath || path == probePath then "failOpen" else "failClosed";
         mcp.targets = lib.mapAttrsToList (name: _: {
           inherit name;
           mcp.host = mcp.fronts.${name}.url;
@@ -48,6 +51,7 @@ let
           {
             routes = [
               (route defaultPath defaultTargets)
+              (route probePath probedTargets)
             ]
             ++ lib.mapAttrsToList (
               name: target: route (optionalPath name) { ${name} = target; }
@@ -80,6 +84,11 @@ in
       readOnly = true;
       description = "対象を選んだセッションにだけ追加する MCP endpoint";
     };
+    probeUrl = lib.mkOption {
+      type = lib.types.str;
+      readOnly = true;
+      description = "doctor が lazy target の child を起こさずに既定 target を照合する probe 専用 endpoint。AI CLI へは配布しない";
+    };
     service = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
@@ -105,6 +114,7 @@ in
   config.dotfiles.platform.mcp.gateway = {
     id = "default";
     url = baseUrl + defaultPath;
+    probeUrl = baseUrl + probePath;
     optionalUrls = lib.mapAttrs (name: _: baseUrl + optionalPath name) optionalTargets;
     service = "agentgateway-default";
     runtimeDirectory = "agentgateway-default";
@@ -114,8 +124,8 @@ in
 
   config.assertions = [
     {
-      assertion = defaultTargets != { };
-      message = "The default MCP gateway route must have at least one target";
+      assertion = probedTargets != { };
+      message = "The default MCP gateway route must have at least one target that doctor can probe without lazyDiscovery";
     }
     {
       assertion = lib.intersectLists gateway.targets (builtins.attrNames mcp.privateServers) == [ ];

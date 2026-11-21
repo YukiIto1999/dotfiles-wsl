@@ -183,7 +183,6 @@ in
     explainer = pkgs.callPackage ./package/explainer/package.nix {
       explainerSource = self.inputs.explainerSkills;
     };
-    zvec-grep = pkgs.callPackage ./package/zvec-grep.nix { };
     semgrep = pkgs.callPackage ./package/semgrep.nix { };
     gdb = pkgs.callPackage ./package/gdb.nix { };
     nix-locate = pkgs.callPackage ./package/nix-locate.nix { };

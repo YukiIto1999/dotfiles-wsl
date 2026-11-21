@@ -48,6 +48,7 @@ socket activationを使うNix daemonは、許可された`inactive`状態でcgro
 日誌と収穫のtimerはuser managerのunitを宣言している。
 
 MCP gateway の initialize、tools/list、target probe は Platform MCP の `normalized-protocol` observer が行う。doctor 自体には MCP の状態機械を持たせない。
+通常の`/mcp`とは別の`/probe/mcp`を使い、明示的にprobeを宣言したGitHubの読取接続とHindsightだけを実際に呼ぶ。専門MCPの子processや外部サービスへの接続をdoctorから起こさない。
 
 observer は要求ごとに期限を持ち、期限内に終わらない要求を、その期限の秒数を示す `observation did not finish within <秒数>s` の `warn` にする。
 target の tools/call の期限は target の probe が宣言した timeout、それ以外の要求の期限は全 target の timeout の最大値である。

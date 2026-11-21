@@ -54,11 +54,6 @@ Skill-firstはrouting規則であり、MCPやcontainerをSkill directoryへ置�
 
 OMPで独立した監査が必要な場合は、実装者とは別のセッションで`security-review`を実行する。
 
-`code-quality`は[SonarQubeの契約](../reference/code-quality.md)を通し、保存済みissueとquality gate、新規scanの出典を提供する。
-取得と現在sourceへの適用判断は同名Skill、通常の二軸reviewは原版`code-review`のcallerが所有する。
-callerが証拠bundleをaxis briefへ渡し、レビューを委譲した先へbackend権限を追加しない。
-Git revisionの一致だけで結果を捨てず、逆に保存済みのgateを現在の合格へ読み替えない。
-
 ## Profileとregistry
 
 [`profiles/workstation.nix`](../../profiles/workstation.nix)は全host共通のAgent client、Capability、language server、identityを選び、[`profiles/hosts/`](../../profiles/hosts)はhost固有のCapabilityをsemantic IDで加える。MCP providerやcontainer backendはprofileへ直接列挙しない。
@@ -333,8 +328,6 @@ OMPのtask subagentは`AGENTS.md`を継承せず、`RULES.md`だけを読む。
 どちらの形で配るかは各clientの`rules.file.constraintsDestination`が決め、本文と必須制約の二つの正本を作らない。
 
 OMPのgateway登録は`instructions: false`とし、MCP serverが配るinstructionsをpromptへ載せない。
-zvec-grepのinstructionsは全sessionとsubagentへ意味検索を最初に使うよう指示するが、indexを持たないrepositoryでは最初の呼出しが失敗し、Skillを入口にする経路やclient自身の探索手順とも別の初手になる。
-semantic searchの入口が`repository-research`であることと、toolの公開は変えない。
 
 `native`と`rendered`のsubagentはhome配下へ配備する。Codexの`declared` subagentはhomeへsymlinkせず、`config.toml`の`[agents.<subagent>]`からNix storeの実体を`config_file`で指す。Codexがsubagent fileを`O_NOFOLLOW`で開き、symlinkを拒否するためである。
 OMPのhookは`~/.omp/agent/hooks/pre`をdirectoryごとhomeへ配備し、その中をNix storeの実fileにする。OMPはhook directory内のsymlinkを読み込まず、Home Managerがfileごとに張るsymlinkでは全hookが無視されるためである。
@@ -365,7 +358,7 @@ AGENTSにある、過去の利用者指示を会話の原文で確かめる規�
 ## Web調査
 
 Web検索と通常のURL取得は、各clientが公開するnative toolを使う。
-Web検索用のMCP providerもbackendも配備せず、ライブラリ資料のMCPは `library-documentation`（Context7）を使う。
+Web検索用のMCP providerもbackendも配備しない。`library-documentation`のContext7は対象版の資料候補、Microsoft Learnは公式資料の横断、DeepWikiは公開リポジトリのソースを辿る入口に使う。
 [`web-research`](../../skills/web-research/skill/SKILL.md)が問いの分解、source選択、根拠評価を所有し、検索の順位、snippet、生成された回答文をclaimの根拠にしない。
 
 SearXNGとCrawl4AIは配備せず、検索と本文取得のための常設backendを持たない。
@@ -405,16 +398,13 @@ PRの調査では、対象commitのSHAを確認してから対応するrunとjob
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
 `exposure`は通常経路に掲載するかを、`activation`はfrontをOS起動時に立てるかを決める。
 手動起動のfrontは通常経路へ登録できない。
-Playwright、Chrome DevTools、MemLab、Context7のsession frontはagentgateway内の`lazy_discovery`を使う。
-同じ実行file・引数・clientのinitialize内容で二度一致したdiscovery応答だけを記憶し、未使用sessionでは子processを起動せずに返す。
-未確認または変動する応答は実serverから取得する。
-secretや実行時envでtool集合が変わるproviderには適用しない。
-最初のtool呼出しでsession専用serverを一度だけ起動し、initializeと通知を再送して、既に返したdiscoveryとの一致を確かめる。不一致は呼出しを失敗にし、記憶を無効化してlist変更を通知する。toolの結果やheap、tabをsession間で共有しない。起動済みのserverをidleという理由だけで破棄する変更ではなく、未起動sessionのDELETEや期限切れにも子processを作らない。
+通常経路に公開する遅延起動のstdio targetは、対応protocolごとのdiscovery応答をNix storeに持つ。固定したローカル実行fileの応答はnetworkなしで採取し、外部資料用の応答は匿名で採取して正本へ固定する。最初の通常セッションでも、一覧の取得だけでは専門backendを起動しない。
+最初に利用したセッションのserverだけを起動し、実際のinitializeと一覧応答を事前に返した内容と照合する。不一致なら呼び出したtoolをproviderへ送らず、そのprotocolの固定応答を無効にして一覧の変更を通知する。以降は該当protocolだけ実serverから一覧を取得する。
+これでtool schemaを共有しても、toolの結果、heap、tabはセッション間で共有しない。未起動セッションのDELETEや期限切れにも子processを作らない。
+公開MCPの定義を更新する場合は、固定URL用のprovider executableを使い、[`discovery-seed.py`](../../platform/mcp/package/discovery-seed.py)の`capture`で新しい匿名の応答を取得する。`check --public`で利用者のpathを含まないことを確認し、[`discovery/`](../../capabilities/library-documentation/remote/mcp/discovery/)の対象だけを置き換える。
 
-一つの[Gateway](../../platform/mcp/gateway/module.nix)が通常経路`/mcp`と、選択したtargetだけの`/mcp/<target>`を公開する。
-Gateway自身はfrontを起動せず、通常のdoctorは既定経路だけを使ってtoolを呼ぶ。
-専門経路の接続は[セッションの起動入口](../reference/tooling.md#セッションにツールを追加する)から各clientの標準設定へ渡し、既存のuser設定を更新しない。
-Claude Codeの専用管理設定とAntigravity CLIの永続設定は変更しない。この二つのclientでは既定経路だけを使い、追加が必要な仕事は対応clientに引き継ぐ。
+一つの[Gateway](../../platform/mcp/gateway/module.nix)が通常経路`/mcp`と、追加を明示したtarget用の`/mcp/<target>`を公開する。doctorはGitHubとHindsightのprobeだけを含む`/probe/mcp`を使う。専門MCPを通常セッションへ公開しても、doctorからそのbackendは起動しない。
+追加経路は[セッションの起動入口](../reference/tooling.md#通常の利用と書込用セッション)から対応clientへ一時的に渡し、永続設定を更新しない。
 経路を分けるだけでは認可にならないため、書込権限を持つstdioを共有HTTPに登録しない。
 gatewayのrouteは`backendRequestTimeout`を60秒にする。
 指定が無いとagentgatewayはupstreamの応答headerを10秒で打ち切り、待機を含むbrowser操作が`upstream call timeout`で失敗する。

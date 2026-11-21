@@ -24,16 +24,12 @@ in
     # 異なる観測契約を持つ trace・heap・Lighthouse の Playwright 統合禁止
     dotfiles.platform.mcp.targets.chrome-devtools = {
       provider = "chrome-devtools";
+      exposure = "default";
       executable = lib.getExe front;
       serverLifecycle = "session";
       lazyDiscovery = true;
       port = 8779;
       needsNetwork = true;
-      probe = {
-        tool = "list_pages";
-        args = { };
-        timeout = 30;
-      };
     };
   };
 }

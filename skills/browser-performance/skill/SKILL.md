@@ -13,7 +13,7 @@ description: Measures and diagnoses browser loading, responsiveness, layout shif
 
 `browser-diagnostics` Capabilityのgatewayに公開されたChrome DevTools toolを入口にし、呼出し前に現在のschemaを読む。
 本文の短い操作名を、現在のclientが公開した実tool名とschemaへ対応させる。
-公開されていなければ、`dotfiles-tool-session list`の`chrome-devtools`を選ぶセッションへ測定条件と取得対象を引き継ぐ。
+このtoolは通常の接続に含まれ、現在のclientに公開されていなければ測定条件と取得対象を呼出し元へ返す。
 MCP toolを直接公開するclientでは、そのネイティブな呼出し形式を使い、URI deviceがあると仮定しない。
 Chromeを別processとして起動したり、MCPやcontainerの設定、接続先、packageを追加しない。
 `list_pages`へ`{}`を渡してURL、title、page IDを確認し、`pageId`を要求する呼出しにはそのIDを渡す。

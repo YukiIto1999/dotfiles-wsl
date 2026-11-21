@@ -541,7 +541,6 @@
           "browser-runtime"
           "github-resources"
           "library-documentation"
-          "repository-search"
         ];
         containerlessVariantConfig =
           (mkProbeSystem [
@@ -972,6 +971,61 @@
 
               touch $out
             '';
+
+        # 停止中の manual backend を起動させる経路は module の assertion が拒否すること
+        container-manual-activation-contract =
+          let
+            manualFixtureModule =
+              { lib, ... }:
+              {
+                imports = [ fixtureContainerModule ];
+                dotfiles.platform.containers.services.fixture.activation = "manual";
+                virtualisation.oci-containers.containers.fixture.autoStart = lib.mkForce false;
+              };
+            failedAssertionsOf =
+              modules:
+              map (assertion: assertion.message) (
+                builtins.filter (assertion: !assertion.assertion) (mkProbeSystem modules).config.assertions
+              );
+            manualFailures = failedAssertionsOf [
+              normalMachineModule
+              manualFixtureModule
+            ];
+            wakingFailures = failedAssertionsOf [
+              normalMachineModule
+              manualFixtureModule
+              {
+                sops.templates."fixture.env" = {
+                  content = "";
+                  restartUnits = [ "docker-fixture.service" ];
+                };
+                systemd.timers.fixture-wake = {
+                  wantedBy = [ "timers.target" ];
+                  timerConfig = {
+                    OnBootSec = "2min";
+                    Unit = "docker-fixture.service";
+                  };
+                };
+                systemd.services.fixture-dependent = {
+                  wantedBy = [ "multi-user.target" ];
+                  requires = [ "docker-fixture.service" ];
+                  script = "true";
+                };
+              }
+            ];
+            wakePrefixes = [
+              "secret restartUnits must reach manually activated units"
+              "timers must not start manually activated container units"
+              "manually activated container units and their dependents must not be wanted"
+            ];
+            rejects = failures: prefix: lib.any (message: lib.hasPrefix prefix message) failures;
+          in
+          assert lib.assertMsg (
+            !lib.any (rejects manualFailures) wakePrefixes
+          ) "the manual fixture without wake-up paths was rejected: ${builtins.toJSON manualFailures}";
+          assert lib.assertMsg (lib.all (rejects wakingFailures) wakePrefixes)
+            "a wake-up path for a stopped manual backend escaped the assertions: ${builtins.toJSON wakingFailures}";
+          pkgs.runCommandLocal "check-container-manual-activation-contract" { } "touch $out";
 
         container-application-registry =
           let

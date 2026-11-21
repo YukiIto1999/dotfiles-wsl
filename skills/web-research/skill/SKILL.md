@@ -21,7 +21,7 @@ description: Researches public facts, version-specific library APIs, and primary
 Web検索と通常のURL取得はclient native toolを使い、この環境はWeb検索用のMCP providerもproxyも配備しない。
 tool名、引数、返り値の形はclientごとに違うため、現在公開されたtool一覧とschemaへ対応させて使う。
 subagentはtool allowlistにあるtoolだけを持つので、許可されていないWeb toolを使えると仮定しない。
-`context7`は`library-documentation`のGateway toolであり、未接続で必要なときは`dotfiles-tool-session list`の`context7`を選ぶセッションへライブラリ名、対象版と問いを引き継ぐ。
+`context7`、Microsoft Learn、DeepWikiは`library-documentation`のGateway toolで通常の接続に含まれる。現在のclientに公開されていなければ、ライブラリ名・製品名・repository、対象版と問いを呼出し元へ渡す。
 MCP toolを直接公開するclientでは、そのネイティブな呼出し形式で実tool名とschemaへJSON引数を対応させる。
 toolの説明に別toolやHTTP endpointが書かれていても、その名前が公開されていることの証拠にはしない。
 問いに必要な検索またはURL取得のtoolが公開されていなければ、上位の呼出し元へ具体的なquery、URL、必要な範囲を渡して実行を依頼し、返された原応答だけを根拠にする。
@@ -57,6 +57,12 @@ GitHub repositoryのtree、blob、releaseは、利用可能な`github-operations
 利用者が`/org/project[/version]`を指定した場合だけ解決を省く。
 各toolは一つの問いにつき3回までにする。
 返った抜粋を候補として扱い、対象versionの公式docs・release・型定義に照らす。指定versionが候補にない、情報が抜粋にない、別言語の例しかない場合は、現行版や別の言語環境で補わない。
+
+Microsoftの公式資料を横断して該当記事を探す場合は、`library-documentation` の Microsoft Learn MCP に公開の製品名・API名・対象版を渡す。
+Microsoft Learn MCP はライブラリの対象版と公式資料を照合する手順を置き換えない。
+公開OSSの構成を把握し、読むべき実装箇所を絞る場合は DeepWiki を使う。
+DeepWikiへ渡すのは公開repositoryと公開情報から作った問いだけで、返った構造や説明は対象commitまたはreleaseのsourceで確かめる。
+いずれもtoolが公開されない、または応答がない場合は公式資料・公開sourceの直接取得に戻る。
 
 ### sourceが未知か、複数sourceの比較が必要
 

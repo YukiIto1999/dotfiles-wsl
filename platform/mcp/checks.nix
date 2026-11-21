@@ -86,6 +86,50 @@
           };
         };
         lazySessionFixtureFrontConfig = sessionConfigOfExecStart lazySessionFixtureExecStart;
+        discoverySeeds = pkgs.callPackage ./package/discovery-seed.nix { };
+        # module と同じ入力から同じ derivation を導き、front が参照する seed の取り違えを検出する
+        expectedDiscoverySeedOf =
+          name: target:
+          if !target.lazyDiscovery then
+            ""
+          else if target.discoverySeed != null then
+            discoverySeeds.committed {
+              inherit name;
+              seed = target.discoverySeed;
+            }
+          else
+            discoverySeeds.capture {
+              inherit name;
+              inherit (target) executable;
+            };
+        # front と同じ fixture server を build sandbox で起動して作る seed と、live と食い違う tool 説明に変えた seed
+        fixtureDiscoverySeed = discoverySeeds.capture {
+          name = "session-state-fixture";
+          executable = lib.getExe sessionFixtureServer;
+        };
+        driftedFixtureDiscoverySeed = "${pkgs.runCommandLocal "mcp-discovery-seed-drifted-fixture.json"
+          { nativeBuildInputs = [ pkgs.jq ]; }
+          ''
+            jq '.protocols |= map_values(map(
+              if .method == "tools/list" then .result.tools[0].description = "Drifted seed description." else . end
+            ))' ${fixtureDiscoverySeed} >"$out"
+          ''
+        }";
+        seededSessionFixtureConfig =
+          seed: port:
+          sessionConfigOfExecStart (
+            (pkgs.callPackage ./package/front-command.nix { }) {
+              executable = lib.getExe sessionFixtureServer;
+              serverLifecycle = "session";
+              lazyDiscovery = true;
+              discoverySeed = seed;
+              inherit port;
+              sessionPolicy = {
+                idleSeconds = 60;
+                frontGraceSeconds = 1;
+              };
+            }
+          );
         sessionFrontBehaviorInputs = with pkgs; [
           coreutils
           curl
@@ -106,6 +150,11 @@
           name = "mcp-lazy-session-front-behavior";
           runtimeInputs = sessionFrontBehaviorInputs;
           text = builtins.readFile ./fixtures/lazy-session-front-behavior.sh;
+        };
+        seededSessionFrontBehavior = pkgs.writeShellApplication {
+          name = "mcp-seeded-session-front-behavior";
+          runtimeInputs = sessionFrontBehaviorInputs;
+          text = builtins.readFile ./fixtures/seeded-session-front-behavior.sh;
         };
 
         missingWaits = lib.concatMap (
@@ -268,11 +317,11 @@
             );
             candidateObservations = selectMcpObservations configuration.dotfiles.health.observations;
             candidateProtocol = candidateObservations."mcp/protocol/default" or null;
-            defaultTargetNames = builtins.filter (
-              name: candidateTargets.${name}.exposure == "default"
+            probedTargetNames = builtins.filter (
+              name: candidateTargets.${name}.exposure == "default" && !candidateTargets.${name}.lazyDiscovery
             ) candidateTargetNames;
             gatewayTimeout = lib.foldl' lib.max 0 (
-              map (name: candidateTargets.${name}.probe.timeout) defaultTargetNames
+              map (name: candidateTargets.${name}.probe.timeout) probedTargetNames
             );
             serviceObservations = builtins.listToAttrs (
               map (
@@ -334,7 +383,7 @@
                 "mcp-session"
                 "mcp-tools"
               ]
-              ++ map (name: "mcp-target/${name}") defaultTargetNames;
+              ++ map (name: "mcp-target/${name}") probedTargetNames;
               requiredOutcomeIds = [ "mcp-session" ];
               requiredResourceKeys = [ ];
               envelopeVersion = 1;
@@ -454,15 +503,9 @@
           pkgs.runCommandLocal "check-mcp-provider-registry" { } "touch $out";
 
         mcp-capability-gating =
-          let
-            home =
-              minimalCapabilityConfig.home-manager.users.${minimalCapabilityConfig.dotfiles.workstation.username};
-          in
           assert minimalCapabilityConfig.system.build.toplevel.drvPath != "";
           assert builtins.attrNames minimalCapabilityConfig.dotfiles.platform.mcp.targets == [ "memory" ];
           assert minimalCapabilityConfig.dotfiles.platform.mcp.enabledProviders == [ "memory" ];
-          assert !(home.home.sessionVariables ? ZVEC_GREP_MODE);
-          assert !(home.home.sessionVariables ? ZVEC_GREP_SERVER_URL);
           pkgs.runCommandLocal "check-mcp-capability-gating" { } "touch $out";
 
         mcp-target-contract =
@@ -605,8 +648,53 @@
             streamableSession = updateTarget "http-adapter" (
               target: target // { serverLifecycle = "session"; }
             ) expectedTargets;
+            # 評価だけで内容を読まない、store 内の repository file
+            committedSeed = ./fixtures/target-contract.json;
             lazySession = updateTarget "session-adapter" (
+              target: builtins.removeAttrs target [ "probe" ] // { lazyDiscovery = true; }
+            ) expectedTargets;
+            lazySessionWithProbe = updateTarget "session-adapter" (
               target: target // { lazyDiscovery = true; }
+            ) expectedTargets;
+            committedLazySession = updateTarget "session-adapter" (
+              target:
+              builtins.removeAttrs target [ "probe" ]
+              // {
+                lazyDiscovery = true;
+                discoverySeed = committedSeed;
+              }
+            ) expectedTargets;
+            seedWithoutLazy = updateTarget "session-adapter" (
+              target: target // { discoverySeed = committedSeed; }
+            ) expectedTargets;
+            seedOutsideStore = updateTarget "session-adapter" (
+              target:
+              builtins.removeAttrs target [ "probe" ]
+              // {
+                lazyDiscovery = true;
+                discoverySeed = "/var/lib/discovery-seed.json";
+              }
+            ) expectedTargets;
+            outsideSeedEvaluation = builtins.tryEval (
+              (evaluateTargets expectedProviders seedOutsideStore)
+              .config.dotfiles.platform.mcp.targets."session-adapter".discoverySeed
+            );
+            lazyDefault = updateTarget "session-adapter" (
+              target:
+              builtins.removeAttrs target [ "probe" ]
+              // {
+                exposure = "default";
+                lazyDiscovery = true;
+              }
+            ) expectedTargets;
+            lazyDefaultOutcomes =
+              (evaluateTargets expectedProviders lazyDefault)
+              .config.dotfiles.health.observations."mcp/protocol/default".allowedOutcomeIds;
+            probelessSession = updateTarget "session-adapter" (
+              target: builtins.removeAttrs target [ "probe" ]
+            ) expectedTargets;
+            probelessDefault = updateTarget "stdio-adapter" (
+              target: builtins.removeAttrs target [ "probe" ]
             ) expectedTargets;
             lazyService = updateTarget "stdio-adapter" (
               target: target // { lazyDiscovery = true; }
@@ -682,6 +770,19 @@
           assert dependenciesValid services;
           assert !(assertionsPass expectedProviders streamableSession);
           assert assertionsPass expectedProviders lazySession;
+          assert !(assertionsPass expectedProviders lazySessionWithProbe);
+          assert assertionsPass expectedProviders committedLazySession;
+          assert !(assertionsPass expectedProviders seedWithoutLazy);
+          assert !outsideSeedEvaluation.success;
+          assert assertionsPass expectedProviders lazyDefault;
+          assert
+            lazyDefaultOutcomes == [
+              "mcp-session"
+              "mcp-tools"
+              "mcp-target/stdio-adapter"
+            ];
+          assert assertionsPass expectedProviders probelessSession;
+          assert !(assertionsPass expectedProviders probelessDefault);
           assert !(assertionsPass expectedProviders lazyService);
           assert !(assertionsPass expectedProviders lazyStreamableHttp);
           assert !(dependenciesValid missingAfter);
@@ -762,7 +863,8 @@
                 sessionConfig = sessionFrontConfigOf name;
               in
               ''
-                EXPECTED_EXECUTABLE=${lib.escapeShellArg target.executable} yq -e '
+                EXPECTED_EXECUTABLE=${lib.escapeShellArg target.executable} \
+                EXPECTED_DISCOVERY_SEED=${lib.escapeShellArg (expectedDiscoverySeedOf name target)} yq -e '
                   .config.mcp.sessionTtl == "1860s"
                   and .config.adminAddr == "off"
                   and .config.statsAddr == "off"
@@ -771,6 +873,7 @@
                   and .binds[0].address == "127.0.0.1"
                   and (.binds[0].listeners[0].routes[0].backends[0].mcp.targets | length) == 1
                   and .binds[0].listeners[0].routes[0].backends[0].mcp.targets[0].stdio.cmd == strenv(EXPECTED_EXECUTABLE)
+                  and (.binds[0].listeners[0].routes[0].backends[0].mcp.targets[0].stdio.discovery_seed // "") == strenv(EXPECTED_DISCOVERY_SEED)
                 ' ${sessionConfig} >/dev/null
               ''
             ) sessionTargetNames}
@@ -797,6 +900,20 @@
             }
             ''
               ${lib.getExe lazySessionFrontBehavior}
+              touch $out
+            '';
+
+        mcp-seeded-session-front-behavior =
+          pkgs.runCommandLocal "check-mcp-seeded-session-front-behavior"
+            {
+              MCP_SESSION_FRONT_EXECUTABLE = sessionFixtureFrontExecutable;
+              MCP_SEEDED_FRONT_CONFIG = seededSessionFixtureConfig fixtureDiscoverySeed 18781;
+              MCP_SEEDED_FRONT_PORT = "18781";
+              MCP_DRIFTED_FRONT_CONFIG = seededSessionFixtureConfig driftedFixtureDiscoverySeed 18782;
+              MCP_DRIFTED_FRONT_PORT = "18782";
+            }
+            ''
+              ${lib.getExe seededSessionFrontBehavior}
               touch $out
             '';
 

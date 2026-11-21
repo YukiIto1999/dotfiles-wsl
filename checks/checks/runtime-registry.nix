@@ -126,11 +126,6 @@
               "nix-daemon"
               "user@"
             ]
-            ++ lib.optionals (builtins.elem "code-quality" hostConfig.dotfiles.capabilities.resolved) [
-              "sonarqube-provision"
-              "sonarqube-start-guard"
-              "sonarqube-stop"
-            ]
             ++ lib.optional (lib.any (service: service.activation == "manual") (
               builtins.attrValues hostConfig.dotfiles.platform.containers.services
             )) "dotfiles-try-restart@";

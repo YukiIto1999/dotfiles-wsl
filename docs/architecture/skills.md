@@ -141,8 +141,6 @@ OMPでは短い二軸の証拠照合に標準の`scout`を使い、深い判断�
 標準の`reviewer`は差分が持ち込んだ不具合を判定する別の入口で、Standards・Specの各workerには使わない。
 他clientへ配備する独自`reviewer`は、一つの軸のbriefと証拠を受け取るread-only workerであり、再委譲や軸間の統合を行わない。
 対象projectのissue tracker設定がない場合は上流の`setup-matt-pocock-skills`を使うため、`code-review`のSkill依存にも登録する。
-SonarQubeの補助根拠が必要なbranchだけ、callerが`code-quality`で取得と現在sourceへの適用を確認してaxis briefへ渡す。
-`code-review`の`optionalCapabilities`に登録するが、原版本文を変更せず、SonarQubeの未配備で一般のreviewを止めない。
 未commit差分をreview対象へ含めるために無断でcommitせず、別sessionが作業中のcheckoutでは`HEAD`を動かさない。
 callerは各軸の指示に、request、issue、specで定めた目的、追うべき公開契約とcaller、テストの変更を評価する条件を含める。
 検証の期待値、閾値、基線、skip・隔離を緩めた場合は、対応する仕様変更がないものを指摘する。
@@ -234,8 +232,8 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 | `heap-analysis` | `heap-diagnostics`の公開MemLab MCP | browserのcaptureだけを`browser-performance`へ委譲し、返ったcaller所有のprivate fileを解析する。 |
 | `github-operations` | `github-resources`のaccount別GitHub MCP | accountと対象resourceを固定し、write前後の状態を確認する。 |
 | `memory` | `project-memory`の公開MCP | recallを一次資料で検証し、保存の受理と永続化を区別する。 |
-| `repository-research` | native repository tools。候補を広げるときの補助に`repository-search`のZvec-Grep MCP | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。索引がない環境でも配備する。 |
-| `web-research` | clientのWeb検索とURL取得、`library-documentation`のContext7 MCP | 対象版の公式資料へ直接進み、所在や版の候補を探すとき、またはContext7のIDを指定されたときにContext7を使う。native toolを持たないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
+| `repository-research` | native repository tools（未知の所在はclientの意味探索、OMPでは`find`） | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
+| `web-research` | clientのWeb検索とURL取得、`library-documentation`のContext7、Microsoft Learn、DeepWiki | Context7でライブラリ資料の版や所在、Microsoft Learnで公式記事、DeepWikiで公開リポジトリ内の実装箇所を探し、対象版の原資料と照合する。必要なtoolがないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
 | `environment-design` | ownerの正本と既存Skillの入口 | 変更理由と正本から所有者を選び、既存指示との重複や矛盾を確認する。再発だけでhookへ進めず、agentの改善方法は`skill-design`へ渡す。外部toolの採用や差替えは、更新後のcallerと配備契約を確認する。 |
 | `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 全repository共通の件名形式を持ち、意味と文末の正本を読んで一つの目的に閉じた件名を作り、実際のhookを通す。 |
 | `improve-codebase-architecture` | 利用者の明示呼出し | 探索で摩擦と候補を作り、統合や分割、seam、testの判断は`codebase-design`の基準に従う。HTML reportで候補を示して利用者の選択を待ち、選ばれた候補を`grilling`、用語とADRを`domain-modeling`で進める。 |

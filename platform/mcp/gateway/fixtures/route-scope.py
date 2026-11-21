@@ -91,17 +91,26 @@ def session(url):
             assert response.status == 202
 
 
-def verify(gateway, config):
+def verify(gateway, config, expectation):
     config['config'].update(adminAddr='off', statsAddr='off', readinessAddr='off')
     binding = config['binds'][0]
     listener = binding['listeners'][0]
     routes = {route['matches'][0]['path']['exact']: route for route in listener['routes']}
-    default_path = '/mcp'
-    selected_path = next(path for path in routes if path.startswith(default_path + '/'))
-    listener['routes'] = [routes[default_path], routes[selected_path]]
-    with server('ordinary') as (ordinary_url, ordinary_calls), server('selected') as (selected_url, selected_calls):
-        for path, name, endpoint in ((default_path, 'ordinary', ordinary_url), (selected_path, 'selected', selected_url)):
-            routes[path]['backends'][0]['mcp']['targets'] = [{'name': name, 'mcp': {'host': endpoint}}]
+    members = {
+        path: [target['name'] for target in route['backends'][0]['mcp']['targets']]
+        for path, route in routes.items()
+    }
+    default_path, probe_path = expectation['default'], expectation['probe']
+    lazy = set(expectation['lazy'])
+    assert lazy and lazy <= set(members[default_path]), members
+    assert not lazy & set(members[probe_path]), members
+    names = sorted({name for route_members in members.values() for name in route_members})
+    with contextlib.ExitStack() as stack:
+        upstreams = {name: stack.enter_context(server(name)) for name in names}
+        for path, route in routes.items():
+            route['backends'][0]['mcp']['targets'] = [
+                {'name': name, 'mcp': {'host': upstreams[name][0]}} for name in members[path]
+            ]
         with socket.socket() as reservation:
             reservation.bind(('127.0.0.1', 0))
             binding['port'] = reservation.getsockname()[1]
@@ -109,6 +118,17 @@ def verify(gateway, config):
         scenario = os.path.join(os.environ['TMPDIR'], 'route-scope.json')
         with open(scenario, 'w') as stream:
             json.dump(config, stream)
+
+        def exposed(path, name):
+            return name if len(members[path]) == 1 else f'{name}_{name}'
+
+        def contacted():
+            return sorted(name for name, (_, calls) in upstreams.items() if calls)
+
+        def call(url, headers, request_id, name):
+            result, _ = rpc(url, headers, 'tools/call', request_id, name=name, arguments={})
+            return result
+
         with subprocess.Popen([gateway, '-f', scenario]) as process:
             try:
                 for _ in range(80):
@@ -119,29 +139,42 @@ def verify(gateway, config):
                         if process.poll() is not None:
                             raise RuntimeError('agentgateway exited during startup')
                         time.sleep(0.05)
-                for path, name in ((default_path, 'ordinary'), (selected_path, 'selected')):
+                for path in sorted(routes):
+                    for _, calls in upstreams.values():
+                        calls.clear()
                     url = base_url + path
+                    # probe 経路は doctor と同じく全 target を呼び、既定経路は lazy target だけを呼ぶ
+                    called = sorted(lazy) if path == default_path else members[path]
                     with session(url) as headers:
                         result, _ = rpc(url, headers, 'tools/list', 2)
-                        assert [tool['name'] for tool in result['result']['tools']] == [name], result
-                        result, _ = rpc(url, headers, 'tools/call', 3, name=name, arguments={})
-                        assert result['result']['content'] == [{'type': 'text', 'text': name}], result
+                        tools = sorted(tool['name'] for tool in result['result']['tools'])
+                        assert tools == sorted(exposed(path, name) for name in members[path]), result
+                        for request_id, name in enumerate(called, start=3):
+                            result = call(url, headers, request_id, exposed(path, name))
+                            assert result['result']['content'] == [{'type': 'text', 'text': name}], result
                         if path == default_path:
-                            assert selected_calls == [], selected_calls
-                            rejected, _ = rpc(url, headers, 'tools/call', 4, name='selected', arguments={})
-                            assert 'error' in rejected or rejected['result'].get('isError'), rejected
-                            assert selected_calls == [], selected_calls
-                assert ordinary_calls.count('tools/call') == selected_calls.count('tools/call') == 1
+                            for name in sorted(set(names) - set(members[path])):
+                                try:
+                                    rejected = call(url, headers, 99, f'{name}_{name}')
+                                except urllib.error.HTTPError:
+                                    continue
+                                assert 'error' in rejected or rejected['result'].get('isError'), rejected
+                    # 初期化・一覧・呼出しのどれも経路外の target へ届かないこと
+                    assert contacted() == sorted(members[path]), (path, contacted())
+                    for name in called:
+                        assert upstreams[name][1].count('tools/call') == 1, (path, name)
                 try:
-                    with session(base_url + selected_path + '/unlisted'):
+                    with session(base_url + default_path + '/unlisted'):
                         raise AssertionError('an unlisted route connected')
                 except urllib.error.HTTPError as e:
                     assert e.code == 404, e
-                print('ordinary and explicitly selected routes isolated; unlisted route rejected')
+                print('probe route never reaches lazy targets; default route calls them; '
+                      'selected routes isolated; unlisted route rejected')
             finally:
                 process.terminate()
                 process.wait(timeout=5)
 
 
 if __name__ == '__main__':
-    verify(sys.argv[1], json.load(sys.stdin))
+    with open(sys.argv[2]) as stream:
+        verify(sys.argv[1], json.load(sys.stdin), json.load(stream))

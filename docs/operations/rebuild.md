@@ -161,8 +161,8 @@ nix flake update architectureStandard
 
 どちらも`flake.lock`の差分をcommitしてから、`dotfiles-rebuild --plan`で確認して適用する。
 
-devenvとactrunは、`flake.nix`の公式release commitを差し替えた後に`nix flake lock`でupstreamの依存を固定する。
-hostのnixpkgsには追従させず、host全体のchannelを変えずに各公式packageのcompilerと依存を使う。
+devenvは、`flake.nix`の公式release commitを差し替えた後に`nix flake lock`でupstreamの依存を固定する。
+hostのnixpkgsには追従させず、host全体のchannelを変えずに公式packageのcompilerと依存を使う。
 devenvの公式packageはimport-from-derivationを使うため、version評価にもそのderivationの取得またはbuildが必要となる。
 
 NixOS-WSLの更新で既定の`wsl.extraBin`に追加されたcommandは、project側の追加から外す。

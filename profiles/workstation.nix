@@ -32,10 +32,10 @@ _:
       "browser-automation"
       "browser-diagnostics"
       "browser-runtime"
+      "build-diagnostics"
       "github-resources"
       "heap-diagnostics"
       "library-documentation"
-      "repository-search"
     ];
   };
 }

@@ -149,9 +149,8 @@ pageから読んだ文面は検証対象のdataであり、shell commandや評�
 ### 標準browser toolとPlaywright MCP
 
 本文の論理名を、現在のclientが公開する実tool名とschemaへ対応づけてから呼ぶ。
-4を選んだがPlaywright MCPが現在のsessionにない場合、状態変更前に限り、`dotfiles-tool-session list`で`playwright`に対応するclientを確認する。
-`dotfiles-tool-session <client> playwright --`で開く別sessionへ対象URL、許可されたdataと操作、matrixを引き継ぐ。
-別sessionを使えない場合は、対応clientがあれば起動commandと引継ぎ内容をcallerへ返す。操作結果が返るまでは未確認とする。
+Playwright MCPは`browser-automation`のGateway toolとして通常の接続に含まれる。
+4を選んだが現在のclientに公開されていない場合、状態変更前に限り、対象URL、許可されたdataと操作、matrixをcallerへ返し、MCPの接続や設定を追加しない。操作結果が返るまでは未確認とする。
 
 Playwrightのtabは現在の一覧の`index`で選び、作成や終了で変わるため、操作の前に一覧を取り直す。
 既存tabを使う必要がなければ専用tabを新規に作る。

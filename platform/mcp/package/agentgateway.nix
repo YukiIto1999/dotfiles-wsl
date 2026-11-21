@@ -23,6 +23,7 @@ rustPlatform.buildRustPackage rec {
     ./agentgateway/mcp-downstream-lifecycle.patch
     ./agentgateway/mcp-loopback-bind.patch
     ./agentgateway/mcp-lazy-stdio-discovery.patch
+    ./agentgateway/mcp-lazy-stdio-discovery-seed.patch
   ];
 
   nativeBuildInputs = [

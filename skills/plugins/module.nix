@@ -102,7 +102,6 @@ let
         code-review = {
           directory = "skills/engineering/code-review";
           requiresCapabilities = [ ];
-          optionalCapabilities = [ "code-quality" ];
           requiresSkills = [ "setup-matt-pocock-skills" ];
         };
         setup-matt-pocock-skills = {
@@ -169,6 +168,7 @@ let
         msbuild = {
           directory = "plugins/dotnet/skills/msbuild";
           requiresCapabilities = [ ];
+          optionalCapabilities = [ "build-diagnostics" ];
           requiresSkills = [ ];
         };
         run-tests = {

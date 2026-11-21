@@ -82,7 +82,6 @@ OMPでは短い証拠照合を`scout`に渡し、深い判断には案件に合�
 組み込みの`reviewer`は差分が持ち込んだ不具合の確認に用いる。
 他clientで共通の独自`reviewer`が配備されている場合は、二軸の各workerに使う。
 軸ごとの指示に、変更された公開契約とcaller、テストや検証の緩和を仕様で正当化できるかの確認を含める。
-SonarQubeの保存済み解析やquality gateを補助根拠にする場合は、callerが`code-quality`で現在sourceへの適用を確認し、解析時点も軸ごとの指示に添える。
 セキュリティ監査の独立性が必要なら、OMPでは実装者と別のセッションで`security-review`を実行する。
 `prototype`はdesign questionを動かして確かめる場合だけ使い、既存の実装依頼を試作品へ置き換えない。
 速習資料や章立て教材は原版の`explainer`または`explainer-book`、初見の読み手の体験は原版の`first-reader`、一般文書は`description-writing`、実行手順の記事の再現性は独自の`article-reproduction`が所有し、同じ執筆・読解・再現を重ねない。
@@ -116,7 +115,7 @@ store上の写し、記憶、過去のrevisionで補わない。
 
 ### MCP
 
-通常セッションは共有Gatewayの既定経路だけに接続する。専門MCPが必要で未接続なら`dotfiles-tool-session list`で入口を確かめ、`@dotfilesDir@/docs/reference/tooling.md`の「セッションにツールを追加する」に従う。
+通常の共有Gatewayは、専門MCPを使うための再起動を要求しない。対応するSkillから公開されたtoolを選ぶ。GitHubの通常の書込と専用stdioの使い分けは`github-operations`が持つ。
 container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
 agentはSkillを入口にし、下表でそのSkillに対応づけられたCapabilityだけを使う。
 browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とする。

@@ -132,18 +132,6 @@
             touch $out
           '';
 
-        # 上流 release の binary は同梱 library を欠くと build は通って実行時に落ちる
-        toolchain-binary-runs =
-          pkgs.runCommandLocal "check-toolchain-binary-runs" { nativeBuildInputs = [ pkgs.coreutils ]; }
-            ''
-              set -euo pipefail
-
-              printf '%s\n' 'semantic search needle' > zg-fixture
-              ${lib.getExe toolchain.zvec-grep} --rg -n -F 'semantic search needle' zg-fixture > zg-exact
-              grep -Fq 'semantic search needle' zg-exact
-              touch $out
-            '';
-
       }
     )
   ];

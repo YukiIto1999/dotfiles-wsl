@@ -3,13 +3,12 @@
   "cases": [
     {
       "id": "semantic-repository-lifecycle",
-      "prompt": "Explain how the runtime wrapper safely cleans up linked worktrees. Symbol names and locations are unknown; the Zvec-Grep index may be absent or stale.",
+      "prompt": "Explain how the runtime wrapper safely cleans up linked worktrees. Symbol names and locations are unknown.",
       "expectedSkills": ["repository-research"],
       "expected": {
         "fixesRepositoryRevisionAndScope": true,
         "usesSemanticDiscoveryBeforeExactVerification": true,
-        "treatsIndexResultsAsCandidates": true,
-        "fallsBackWithoutManagingTheIndex": true,
+        "treatsSearchResultsAsCandidates": true,
         "verifiesMaterialClaimsInCurrentSource": true
       }
     },
@@ -19,7 +18,7 @@
       "expectedSkills": ["repository-research"],
       "expected": {
         "locatesAndChecksCurrentSource": true,
-        "doesNotInvokeZvecIfNativeDiscoveryIsSufficient": true
+        "stopsOnceCurrentSourceAnswersTheQuestion": true
       }
     },
     {

@@ -19,19 +19,13 @@ in
   config = lib.mkIf enabled {
     dotfiles.platform.mcp.targets.context7 = {
       provider = "context7";
+      exposure = "default";
       executable = lib.getExe front;
       serverLifecycle = "session";
+      # stdio の tool 登録は API key に依らず、discovery seed は key も network も無い sandbox で生成できる
       lazyDiscovery = true;
       port = 8771;
       needsNetwork = true;
-      probe = {
-        tool = "resolve-library-id";
-        args = {
-          libraryName = "nixpkgs";
-          query = "Nix option types";
-        };
-        timeout = 30;
-      };
     };
   };
 }

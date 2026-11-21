@@ -94,6 +94,36 @@
         };
         gateway = hostConfig.dotfiles.platform.mcp.gateway;
         fronts = hostConfig.dotfiles.platform.mcp.fronts;
+        mcpTargets = hostConfig.dotfiles.platform.mcp.targets;
+        defaultTargetNames = builtins.attrNames (
+          lib.filterAttrs (_: target: target.exposure == "default") mcpTargets
+        );
+        lazyDefaultTargetNames = builtins.filter (
+          name: mcpTargets.${name}.lazyDiscovery
+        ) defaultTargetNames;
+        probedTargetNames = lib.subtractLists lazyDefaultTargetNames defaultTargetNames;
+        optionalTargetNames = builtins.attrNames (
+          lib.filterAttrs (_: target: target.exposure == "session") mcpTargets
+        );
+        pathOf = lib.removePrefix "http://127.0.0.1:${toString gateway.port}";
+        routeEntry = path: failureMode: names: {
+          inherit path failureMode;
+          targets = lib.sort builtins.lessThan (map (name: "${name} ${fronts.${name}.url}") names);
+        };
+        expectedRoutes = [
+          (routeEntry (pathOf gateway.url) "failOpen" defaultTargetNames)
+          (routeEntry (pathOf gateway.probeUrl) "failOpen" probedTargetNames)
+        ]
+        ++ map (
+          name: routeEntry (pathOf gateway.optionalUrls.${name}) "failClosed" [ name ]
+        ) optionalTargetNames;
+        routeExpectation = builtins.toFile "mcp-route-scope-expectation.json" (
+          builtins.toJSON {
+            default = pathOf gateway.url;
+            probe = pathOf gateway.probeUrl;
+            lazy = lazyDefaultTargetNames;
+          }
+        );
         service = hostConfig.systemd.services.${gateway.service};
         inherit (service) serviceConfig;
         frontServices = map (front: front.service) (builtins.attrValues fronts);
@@ -512,10 +542,19 @@
           assert syntheticContract.targets == builtins.attrNames fixtureProbes;
           assert gateway.targets == expected.targets;
           assert gateway.targets == builtins.attrNames fronts;
+          assert builtins.attrNames gateway.optionalUrls == optionalTargetNames;
           assert
-            builtins.attrNames gateway.optionalUrls == builtins.attrNames (
-              lib.filterAttrs (_: target: target.exposure == "session") hostConfig.dotfiles.platform.mcp.targets
+            lib.sort builtins.lessThan (defaultTargetNames ++ optionalTargetNames) == builtins.attrNames fronts;
+          # 通常セッションへ lazy target を載せても doctor の照合経路には載せない
+          assert lazyDefaultTargetNames != [ ];
+          assert probedTargetNames != [ ];
+          assert
+            builtins.attrNames (lib.filterAttrs (_: target: target.probe != null) mcpTargets)
+            == lib.sort builtins.lessThan (
+              probedTargetNames ++ builtins.filter (name: mcpTargets.${name}.probe != null) optionalTargetNames
             );
+          assert pathOf gateway.url == "/mcp";
+          assert pathOf gateway.probeUrl == "/probe/mcp";
           assert lib.all (front: front.url == "http://127.0.0.1:${toString front.port}/mcp") (
             builtins.attrValues fronts
           );
@@ -532,24 +571,22 @@
             ''
               set -euo pipefail
 
-              yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | .name + " " + .mcp.host] | sort | .[]' \
-                ${gateway.source} > actual-targets
-              printf '%s' ${
-                lib.escapeShellArg (
-                  lib.concatStringsSep "\n" (
-                    lib.sort builtins.lessThan (lib.mapAttrsToList (name: front: "${name} ${front.url}") fronts)
-                  )
-                )
-              } > expected-targets
-              printf '\n' >> expected-targets
-              diff --unified expected-targets actual-targets
+              yq -o=json '[.binds[].listeners[].routes[] | {
+                  "path": .matches[0].path.exact,
+                  "failureMode": .backends[0].mcp.failureMode,
+                  "targets": ([.backends[0].mcp.targets[] | .name + " " + .mcp.host] | sort)
+                }]' ${gateway.source} | jq -S 'sort_by(.path)' > actual-routes
+              jq -S 'sort_by(.path)' ${builtins.toFile "mcp-gateway-routes.json" (builtins.toJSON expectedRoutes)} \
+                > expected-routes
+              diff --unified expected-routes actual-routes
               test "$(yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | select(.stdio)] | length' ${gateway.source})" = 0
               test "$(yq -r '.binds[0].listeners[0].routes[0].matches[0].path.exact' ${gateway.source})" = /mcp
-              jq -n --argjson urls ${lib.escapeShellArg (builtins.toJSON gateway.optionalUrls)} \
-                '$urls | to_entries | map(.value | sub("^http://[^/]+"; "")) | sort' > expected-paths
-              yq -o=json '[.binds[0].listeners[0].routes[1:][].matches[0].path.exact] | sort' \
-                ${gateway.source} > actual-paths
-              diff --unified expected-paths actual-paths
+              observer=${lib.getExe hostConfig.dotfiles.health.observations."mcp/protocol/${gateway.id}".command}
+              grep -Fqx ${lib.escapeShellArg "gateway_url=${lib.escapeShellArg gateway.probeUrl}"} "$observer"
+              if grep -Fqx ${lib.escapeShellArg "gateway_url=${lib.escapeShellArg gateway.url}"} "$observer"; then
+                echo "doctor observer initializes the default route with lazy targets" >&2
+                exit 1
+              fi
               touch $out
             '';
 
@@ -564,7 +601,7 @@
             ''
               set -euo pipefail
               yq -o=json '.' ${gateway.source} \
-                | python3 ${./fixtures/route-scope.py} ${lib.getExe agentgateway}
+                | python3 ${./fixtures/route-scope.py} ${lib.getExe agentgateway} ${routeExpectation}
               touch "$out"
             '';
 
@@ -587,6 +624,7 @@
               "id"
               "optionalUrls"
               "port"
+              "probeUrl"
               "runtimeDirectory"
               "service"
               "source"
@@ -597,6 +635,7 @@
           assert !(hostOptions.dotfiles.platform.mcp.gateway.port.readOnly or false);
           assert hostOptions.dotfiles.platform.mcp.gateway.url.readOnly;
           assert hostOptions.dotfiles.platform.mcp.gateway.optionalUrls.readOnly;
+          assert hostOptions.dotfiles.platform.mcp.gateway.probeUrl.readOnly;
           assert hostOptions.dotfiles.platform.mcp.gateway.service.readOnly;
           assert hostOptions.dotfiles.platform.mcp.gateway.runtimeDirectory.readOnly;
           assert hostOptions.dotfiles.platform.mcp.gateway.source.readOnly;

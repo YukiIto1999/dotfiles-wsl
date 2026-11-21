@@ -8,6 +8,23 @@
 let
   cfg = config.dotfiles.platform.mcp;
   frontCommand = pkgs.callPackage ./package/front-command.nix { };
+  discoverySeeds = pkgs.callPackage ./package/discovery-seed.nix { };
+  # lazy target の seed は既定で executable を network の無い build sandbox で起動して作り、配備後の最初の session から
+  # child を起こさない。sandbox で取得できない target だけが repository に置いた seed を渡す
+  discoverySeedOf =
+    name: target:
+    if !target.lazyDiscovery then
+      null
+    else if target.discoverySeed != null then
+      discoverySeeds.committed {
+        inherit name;
+        seed = target.discoverySeed;
+      }
+    else
+      discoverySeeds.capture {
+        inherit name;
+        inherit (target) executable;
+      };
   targetNames = builtins.attrNames cfg.targets;
   isExecutable = value: builtins.match "/[^[:space:]]+" value != null;
   invalidExecutables = builtins.filter (
@@ -24,6 +41,19 @@ let
     && !(
       cfg.targets.${name}.serverLifecycle == "session" && cfg.targets.${name}.serverTransport == "stdio"
     )
+  ) targetNames;
+  strayDiscoverySeeds = builtins.filter (
+    name: !cfg.targets.${name}.lazyDiscovery && cfg.targets.${name}.discoverySeed != null
+  ) targetNames;
+  # doctor が初期化する経路は既定公開の非 lazy target だけで、lazy target の probe は実行されない
+  missingProbes = builtins.filter (
+    name:
+    cfg.targets.${name}.exposure == "default"
+    && !cfg.targets.${name}.lazyDiscovery
+    && cfg.targets.${name}.probe == null
+  ) targetNames;
+  unexecutedProbes = builtins.filter (
+    name: cfg.targets.${name}.lazyDiscovery && cfg.targets.${name}.probe != null
   ) targetNames;
   observationTimeoutSeconds = 10;
   restartWarningCount = 5;
@@ -152,7 +182,12 @@ in
             lazyDiscovery = lib.mkOption {
               type = lib.types.bool;
               default = false;
-              description = "session front が live session 2 回で一致した discovery 応答だけを再利用し、最初の実呼出しまで child の起動を遅らせる opt-in";
+              description = "session front が discovery seed の応答を child 無しで返し、最初の実呼出しまで child の起動を遅らせる opt-in。child の起動時に seed と live の discovery を照合し、不一致はその呼出しを失敗させる";
+            };
+            discoverySeed = lib.mkOption {
+              type = lib.types.nullOr lib.types.pathInStore;
+              default = null;
+              description = "network の無い build sandbox で executable から生成できない lazyDiscovery target に渡す、repository 内の公開 discovery seed。null の lazy target は platform が sandbox で生成する。lazyDiscovery 以外では禁止";
             };
             port = lib.mkOption {
               type = lib.types.ints.between 8770 8789;
@@ -169,24 +204,29 @@ in
               description = "front の起動と存続に必要な backend unit の一覧";
             };
             probe = lib.mkOption {
-              readOnly = true;
-              type = lib.types.submodule {
-                options = {
-                  tool = lib.mkOption {
-                    type = lib.types.str;
-                    description = "target の生存確認と契約照合に使う副作用のない tool 名";
+              default = null;
+              type = lib.types.nullOr (
+                lib.types.submodule {
+                  options = {
+                    tool = lib.mkOption {
+                      readOnly = true;
+                      type = lib.types.str;
+                      description = "target の生存確認と契約照合に使う副作用のない tool 名";
+                    };
+                    args = lib.mkOption {
+                      readOnly = true;
+                      type = lib.types.attrsOf lib.types.anything;
+                      description = "tool の契約照合に使う JSON 引数";
+                    };
+                    timeout = lib.mkOption {
+                      readOnly = true;
+                      type = lib.types.ints.between 1 120;
+                      description = "失敗判定まで許容する probe の最大待機秒数";
+                    };
                   };
-                  args = lib.mkOption {
-                    type = lib.types.attrsOf lib.types.anything;
-                    description = "tool の契約照合に使う JSON 引数";
-                  };
-                  timeout = lib.mkOption {
-                    type = lib.types.ints.between 1 120;
-                    description = "失敗判定まで許容する probe の最大待機秒数";
-                  };
-                };
-              };
-              description = "doctor による target の tool 契約照合に使う読み取り専用 probe";
+                }
+              );
+              description = "doctor による target の tool 契約照合に使う読み取り専用 probe。既定経路の非 lazy target では必須、lazyDiscovery の target では child を起こすため禁止";
             };
           };
         }
@@ -303,7 +343,12 @@ in
             target.executable
           else
             frontCommand {
-              inherit (target) executable serverLifecycle lazyDiscovery;
+              inherit (target)
+                executable
+                serverLifecycle
+                lazyDiscovery
+                ;
+              discoverySeed = discoverySeedOf name target;
               inherit (front) port;
               inherit (cfg) sessionPolicy;
             };
@@ -370,6 +415,23 @@ in
       message =
         "MCP lazyDiscovery requires a stdio target with session lifecycle: "
         + lib.concatStringsSep ", " invalidLazyDiscovery;
+    }
+    {
+      assertion = strayDiscoverySeeds == [ ];
+      message =
+        "MCP discoverySeed requires lazyDiscovery: " + lib.concatStringsSep ", " strayDiscoverySeeds;
+    }
+    {
+      assertion = missingProbes == [ ];
+      message =
+        "Default MCP targets without lazyDiscovery need a doctor probe: "
+        + lib.concatStringsSep ", " missingProbes;
+    }
+    {
+      assertion = unexecutedProbes == [ ];
+      message =
+        "MCP lazyDiscovery targets must not declare a doctor probe: "
+        + lib.concatStringsSep ", " unexecutedProbes;
     }
   ];
 }

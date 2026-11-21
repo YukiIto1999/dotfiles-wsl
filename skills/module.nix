@@ -6,7 +6,6 @@
     ./browser-operation/module.nix
     ./browser-performance/module.nix
     ./change-writing/module.nix
-    ./code-quality/module.nix
     ./codebase-design/module.nix
     ./comment-writing/module.nix
     ./commit-writing/module.nix

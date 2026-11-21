@@ -18,16 +18,12 @@ in
   config = lib.mkIf enabled {
     dotfiles.platform.mcp.targets.memlab = {
       provider = "memlab";
+      exposure = "default";
       executable = lib.getExe front;
       serverLifecycle = "session";
       lazyDiscovery = true;
       port = 8777;
       needsNetwork = false;
-      probe = {
-        tool = "memlab_server_status";
-        args = { };
-        timeout = 30;
-      };
     };
   };
 }

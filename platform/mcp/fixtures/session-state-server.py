@@ -6,16 +6,25 @@ import sys
 from pathlib import Path
 
 
-marker_root = Path(os.environ["MCP_SESSION_FIXTURE_ROOT"])
-marker_root.mkdir(parents=True, exist_ok=True)
+# discovery seed の生成は利用者の環境を渡さないため、marker の置き場が無い起動では記録しない
+marker_root = os.environ.get("MCP_SESSION_FIXTURE_ROOT")
 pid = os.getpid()
-(marker_root / f"start.{pid}").touch()
+calls = 0
 state = []
+
+
+def mark(name):
+    if marker_root is not None:
+        Path(marker_root).mkdir(parents=True, exist_ok=True)
+        (Path(marker_root) / name).touch()
+
+
+mark(f"start.{pid}")
 
 
 @atexit.register
 def mark_exit():
-    (marker_root / f"exit.{pid}").touch()
+    mark(f"exit.{pid}")
 
 
 def terminate(signum, _frame):
@@ -27,7 +36,11 @@ signal.signal(signal.SIGINT, terminate)
 
 
 def respond(request, result):
-    json.dump({"jsonrpc": "2.0", "id": request["id"], "result": result}, sys.stdout)
+    send({"jsonrpc": "2.0", "id": request["id"], "result": result})
+
+
+def send(message):
+    json.dump(message, sys.stdout)
     sys.stdout.write("\n")
     sys.stdout.flush()
 
@@ -67,6 +80,9 @@ for line in sys.stdin:
             },
         )
     elif method == "tools/call":
+        # 呼出しが child へ届いたことの記録。discovery の不一致で止めた呼出しは残さない
+        calls += 1
+        mark(f"call.{pid}.{calls}")
         arguments = request.get("params", {}).get("arguments", {})
         if arguments.get("action") == "add":
             state.append(arguments["value"])
@@ -74,11 +90,13 @@ for line in sys.stdin:
             request,
             {"content": [{"type": "text", "text": json.dumps(state)}], "isError": False},
         )
+    elif method == "ping":
+        respond(request, {})
     else:
-        respond(
-            request,
+        send(
             {
-                "content": [{"type": "text", "text": f"unsupported method: {method}"}],
-                "isError": True,
-            },
+                "jsonrpc": "2.0",
+                "id": request["id"],
+                "error": {"code": -32601, "message": f"unsupported method: {method}"},
+            }
         )

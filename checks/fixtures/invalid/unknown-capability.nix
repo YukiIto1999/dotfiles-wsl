@@ -8,7 +8,6 @@
     "github-resources"
     "library-documentation"
     "project-memory"
-    "repository-search"
     "unknown-capability"
   ];
 }

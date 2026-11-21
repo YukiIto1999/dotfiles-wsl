@@ -107,6 +107,10 @@ Linuxの[既定診断socket](https://learn.microsoft.com/en-us/dotnet/core/diagn
 既存のプロセス、セッション全体の環境変数、明示されたprojectの設定は変えない。
 トレース、メトリクス、スタックには内部情報が含まれ得る。保存する場合は作業ツリー外に自分だけがアクセスできるディレクトリ（`0700`）を作り、`umask 077`で新規ファイルへ出力する。トレースには`--output`で保存先を明示し、生データはコミットや共有ログに残さない。
 
+MSBuildの失敗やビルド時間を調べるときは実行時診断と分ける。
+[Microsoft Binlog MCP](https://devblogs.microsoft.com/dotnet/msbuild-binlog-mcp-server/)は、利用を許可されたローカルの`.binlog`を通常セッションから解析する。
+`msbuild`の手順を入口とし、コマンド実行の終了値とbinlogに記録された結果は区別する。
+このfrontには外部接続を許可せず、テレメトリを無効にする。
 
 ### Aspire Dashboard
 
@@ -221,18 +225,9 @@ credential、container、host processの境界は[セキュリティ設計](../a
 
 構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に`dotfiles-doctor`で宣言と実状態の収束を確認する。
 
-### セッションにツールを追加する
+### 通常の利用と書込用セッション
 
-`dotfiles-tool-session list`で、追加できるtarget IDと対応するclientを確認する。
-一覧取得は、接続、サービス起動、資格情報の読取りを行わない。
-専門MCPが必要な作業では、選んだclientとtargetで新しいセッションを起動する。
+Playwright、Chrome DevTools、MemLab、Context7、Microsoft Learn、DeepWiki、Binlog MCPは通常の`/mcp`に含まれる。操作・診断・資料調査を使い分ける入口は各Skillであり、専用の再起動は必要ない。
 
-```sh
-dotfiles-tool-session omp context7 --
-```
-
-OMP・Codex・OpenCodeでは、専門MCPを追加した接続がその起動の間だけ有効になる。通常の接続は維持する。読取や観測用の経路だけを選んだ場合、`--`の後ろにclientの引数を渡せる。
-Claude Codeの管理設定は起動引数による追加を禁止している。Antigravity CLIには起動単位の追加機構がない。両方とも通常経路は維持し、追加のために設定ファイルを書き換えない。
-SonarQubeを選ぶ前には[明示起動](code-quality.md#起動と停止)が必要である。
-GitHubの書込は、実行loginを確認してからOMPまたはCodexで対応する`github-write-<account>`を一つだけ選ぶ。エージェントの内側ではなく、利用者の端末から起動し、`--`の後ろは空にする。OpenCodeでは専門MCPの追加はできるが、書込用接続は追加できない。
-書込は[GitHub操作の手順](../../skills/github-operations/skill/SKILL.md)に沿って対象と操作を確認してから承認する。
+通常のGitHub起票、PR作成、更新、コメント、レビューは現在のセッションで`dotfiles-github-write`を使う。[GitHub操作の手順](../../skills/github-operations/skill/SKILL.md)に従い、事前読取で確定したアカウントIDと実行loginを対応させる。
+共有HTTPは読取専用のまま。merge・削除・履歴変更と、共通commandが持たない操作だけは、利用者の端末から`dotfiles-tool-session list`で対象を選び、OMPまたはCodexで`dotfiles-tool-session <client> github-write-<account> --`を起動する。そのうち不可逆な変更には実行直前の確認が必要である。

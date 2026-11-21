@@ -675,10 +675,10 @@
                 discoverySeed = "/var/lib/discovery-seed.json";
               }
             ) expectedTargets;
-            outsideSeedEvaluation = builtins.tryEval (
-              (evaluateTargets expectedProviders seedOutsideStore)
-              .config.dotfiles.platform.mcp.targets."session-adapter".discoverySeed
-            );
+            outsideSeedConfig = (evaluateTargets expectedProviders seedOutsideStore).config;
+            outsideSeedEvaluation =
+              builtins.tryEval
+                outsideSeedConfig.dotfiles.platform.mcp.targets."session-adapter".discoverySeed;
             lazyDefault = updateTarget "session-adapter" (
               target:
               builtins.removeAttrs target [ "probe" ]

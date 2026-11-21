@@ -1,0 +1,10 @@
+name: template-injection
+on:
+  issues:
+    types: [opened]
+permissions: {}
+jobs:
+  echo-title:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "${{ github.event.issue.title }}"

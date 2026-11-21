@@ -1,5 +1,10 @@
 { pkgs, ... }:
 {
+  imports = [
+    ./checks/aspire-dashboard.nix
+    ./checks/cli-supply.nix
+  ];
+
   configuration = [
     (
       {

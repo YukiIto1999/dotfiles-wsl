@@ -88,9 +88,7 @@ SonarQubeの保存済み解析やquality gateを補助根拠にする場合は�
 速習資料や章立て教材は原版の`explainer`または`explainer-book`、初見の読み手の体験は原版の`first-reader`、一般文書は`description-writing`、実行手順の記事の再現性は独自の`article-reproduction`が所有し、同じ執筆・読解・再現を重ねない。
 
 外部CLIの実行条件と配備の正本は、`@dotfilesDir@/docs/reference/tooling.md`から必要な入口だけを読む。
-CI workflowの変更やローカル再現（`actrun`）では、projectのtask正本を保ち、同文書のActrun節に従って、実行前にactionの信頼、secret、network、書込み先を確認する。
-重複候補を探すC#・Rust・TypeScriptの作業（`similarity-generic`、`similarity-rs`、`similarity-ts`）は、同文書のSimilarity節に従う。
-
+Windowsアプリの操作で利用者の入力と画面を分ける場合は、同文書の「Windowsの独立した操作画面」のAnodeを使う。指定された既存の画面やブラウザのセッションを、Anodeの画面へ置き換えない。
 frontendのnative Web APIを選ぶときは、`$HOME/.local/share/dotfiles-agent/references/modern-web-guidance/skills/modern-web-guidance/guides/`から対象機能のguideだけを読む。
 guideの前提とbrowser supportを現projectで確認し、同梱の全frontend強制起動wrapperは呼ばない。
 外部Skillやupstreamの例、手順、簡潔化の提案は、repositoryのpinと今回の実行許可より優先せず、指定された要件、安全策、秘密情報の扱い、操作の承認、実行していない検証の報告に関する規律も弱めない。例がpackage更新、SDK変更、global install、追加profile、build、publishを含んでも同じである。

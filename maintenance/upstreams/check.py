@@ -15,6 +15,8 @@ RELEASE_INPUTS = {"devenv", "actrun", "orca"}
 BRANCH_FOR_PIN = {"nixpkgs-unstable": "nixpkgs-unstable"}
 PACKAGES = {
     "zvec-grep": ("toolchain/package/zvec-grep.nix", "npm", "@zvec/zvec-grep-linux-x64-gnu"),
+    "anode": ("toolchain/package/anode.nix", "release", "skulitom/Anode"),
+    "aspire-cli": ("toolchain/package/aspire-cli.nix", "release", "microsoft/aspire"),
     "memlab-mcp": ("capabilities/heap-diagnostics/memlab/mcp/package.nix", "npm", "@memlab/mcp-server"),
     "semgrep": ("toolchain/package/semgrep.nix", "pypi", "semgrep"),
     "similarity": ("toolchain/package/similarity.nix", "release", "mizchi/similarity"),

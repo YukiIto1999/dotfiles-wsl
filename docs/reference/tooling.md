@@ -24,18 +24,34 @@
 決定的な操作はCLIを直接使い、候補や証拠の意味判断が必要な場合だけ該当Skillを使うため、一commandのための新しいSkillは置かない。
 以下はsourceの構成と利用契約であり、この文書を更新しただけで配備や全用途の実行を確認したことにはならない。
 
-### Zvec-Grep
+### CIと秘密情報の検査
 
-`zg`とMCP frontは[同じLinux用バイナリ](../../toolchain/package/zvec-grep.nix)を使う。
-意味検索に使うPotion Codeモデルは[frontのパッケージ](../../capabilities/repository-search/zvec-grep/mcp/package.nix)でハッシュを固定し、初回検索時にダウンロードしない。
-agent向けの公開ツールは検索、呼出し元、呼出し先の3件で、索引管理は公開しない。
-呼出し関係の検索には`--graph`で作った索引が必要になる。
+GitHub Actionsの構文・式は`actionlint`、workflowとローカルactionの安全性は`zizmor --offline .`で調べる。構文検査だけでは権限やcredentialの扱いを判定できない。
+コミット前の既存hookは維持する。ステージ済み差分を追加で調べるときは`betterleaks git --staged --validation=false --redact .`で対象を限定する。履歴を調べる場合は調査範囲を別途指定する。
+検出値は出力に残さず、credentialをネットワークへ送る検証は有効にしない。
+履歴全体の走査、ネットワークを利用するcredential検証、リリースのSBOM・脆弱性検査・署名は共通hookへ追加しない。
 
-0.2系の索引は0.3系でそのまま読めない。
-移行では旧`.zvec-grep/`を保持し、同じ絶対パスに見える隔離コピーで、新しい空の索引へ `zg --index "$PWD" --mode direct --embedding local/potion-code-16m-v2 --device cpu --graph` を実行する。
-同じ読取専用モデルキャッシュを指定し、意味検索と排他を確認してから、旧frontの書込みが止まった状態で索引とfrontを一緒に切り替える。
-切戻しではバイナリだけでなく対応する索引も戻す。
-workspaceのファイルロックとdaemonの`~/.zvec-grep/daemon/instance.lock`は別物なので、稼働中の所有記録を消して復旧しない。
+### LinuxプロセスとNixの診断
+
+実行を許可された子プロセスのみを対象に、syscallは`strace`、CPUの内訳は`perf`、停止位置とスレッドは`gdb`を使う。`hyperfine`はCLIやビルドの所要時間を反復比較する道具であり、関数やsyscallごとの観測とは分ける。カーネルの制限で計測できない場合は、共通のsysctlを下げずに不足を報告する。
+
+| 調べたいこと | 入口 |
+|---|---|
+| 評価された設定 | `nix eval` |
+| ファイルを提供するパッケージ | `nix-locate`。固定したstable-small索引を用いるため、無結果を不存在とみなさない |
+| 世代のパッケージ差分・含まれる理由・derivationの差分 | `nvd diff`、`nix why-depends`、`nix-diff`を順に使い分ける |
+| 保存済みビルドログ | `nix log` |
+
+Nixの編集支援は`nixd`、整形は`nixfmt`、静的検査は`statix`と`deadnix`を使う。複数言語で整形の入口を揃えるプロジェクトは`treefmt`でformatterを束ね、lintは混ぜない。
+
+### Windowsの独立した操作画面
+
+通常のWeb操作は端末の入力を奪わないブラウザ経路を使う。Windowsアプリの実画面が必要で利用者の入力と分ける場合は[Anode](https://github.com/skulitom/Anode/tree/v0.11.4)のWindows子セッションを使う。同じ利用者のファイルとネットワークを共有するため、セキュリティ sandbox にはしない。
+
+`nix build --no-link --print-out-paths .#anode-windows`で固定した公式配布物を取得できる。`share/anode/`のアーカイブ・チェックサム・上流インストーラをWindowsの一時ディレクトリにコピーしてから、`install.ps1 -PackagePath <zip> -ChecksumPath <SHA256SUMS> -Client None -NoPath`で利用者の`LocalAppData`に導入する。インストーラはWSLのUNCパスからzipを展開できない。Nixの切替はWindowsへの書込み、RDPの変更、seatの起動を行わない。
+
+`anode doctor --json`がreadyなら`setup`を省く。必要な場合は、RDPとWindows子セッションを有効化し、既存接続を切断し得るため実行前に影響と承認を確認する。
+`anode start --hidden --no-background-rendering`でseatを始め、WSLの`anode` CLIで操作する。複数セッションで使う場合はseatのleaseで順番を決める。WSL経由のMCP初期化は成功を確認できていないため、共有Gatewayには登録しない。
 
 ### Semgrep
 
@@ -124,6 +140,51 @@ Linuxの[既定診断socket](https://learn.microsoft.com/en-us/dotnet/core/diagn
 その場合は、再起動してよい検証用プロセスに限り、`mktemp -d "$XDG_RUNTIME_DIR/dn.XXXXXX"`で作った短い私有directoryを、その起動commandと診断commandの`TMPDIR`にだけ指定する。
 既存のプロセス、セッション全体の環境変数、明示されたprojectの設定は変えない。
 トレース、メトリクス、スタックには内部情報が含まれ得る。保存する場合は作業ツリー外に自分だけがアクセスできるディレクトリ（`0700`）を作り、`umask 077`で新規ファイルへ出力する。トレースには`--output`で保存先を明示し、生データはコミットや共有ログに残さない。
+
+
+### Aspire Dashboard
+
+開発中に再現できる問題を、OpenTelemetryのログ・trace・metricで調べるときだけ使う。本番監視や、起動前に起きた障害の遡及調査には使わない。
+常駐service、AppHost、containerは持たず、複数のprojectで一つのDashboardを共有する。
+
+[`aspire-cli.nix`](../../toolchain/package/aspire-cli.nix)は、[Aspire `17.0.0`](https://github.com/microsoft/aspire/releases/tag/v17.0.0)の公式release archiveを公開されたsha512で固定し、[上流のNixパッケージ](https://github.com/microsoft/aspire/blob/v17.0.0/eng/nix/package.nix)と同じ手順で`aspire`を組み立てる。
+上流flakeのmanifestはreleaseより古い版を指すため、flake inputにはしない。
+Dashboard本体はCLIに埋め込まれたbundleで、初回の`dashboard run`が`ASPIRE_HOME`（既定`~/.aspire`）へ展開する。実行時にダウンロードはしない。
+展開された実行ファイルはNixOSのnix-ldで動く。
+package wrapperは`ASPIRE_CLI_TELEMETRY_OPTOUT`と`ASPIRE_DASHBOARD_TELEMETRY_OPTOUT`を`true`、`features__updateNotificationsEnabled`を`false`の既定値にし、Microsoftへの利用telemetryとNuGetへの更新確認を止める。明示した環境変数はこの既定値を上書きする。
+
+[`aspire-dashboard`](../../toolchain/package/aspire-dashboard.sh)が起動、資格情報、一時データを管理する。
+
+| command | 用途 |
+|---|---|
+| `aspire-dashboard run [--browser-token-stdin]` | 前景で起動する。Ctrl+Cまたは`stop`で止めるとデータを削除する |
+| `aspire-dashboard status` | 今回の起動のbrowser tokenをDashboard自身が受理すれば0、未起動なら1、起動中なら3で終わる |
+| `aspire-dashboard otel logs\|spans\|traces [option...]` | 公式の[`aspire otel`](https://aspire.dev/reference/cli/commands/aspire-otel/)で読む。`--format Json`などはそのまま渡す |
+| `aspire-dashboard exec [--service NAME] -- COMMAND` | COMMANDのtelemetryだけをDashboardへ送る |
+| `aspire-dashboard stop` | 別の端末やセッションから止め、削除の完了まで待つ |
+
+UIは`http://127.0.0.1:18888`、OTLPはgRPCが`18889`、HTTPが`18890`で、いずれもloopbackだけで受ける。`4317`と`4318`はAI CLIの利用量を集める[telemetry collector](../../telemetry/module.nix)が使うため、Dashboardには使わない。
+lockで一つのinstanceに限り、二重に起動すると失敗する。
+`exec`と`otel`は受付可能になるまで拒否するため、`run`を起動した後は`status`が0になってから送信と読取を始める。エージェントが`run`をbackground jobで起動した場合は、作業の終了時にそのjobか`stop`で止める。
+
+既定では起動のたびにbrowser tokenとOTLP API keyを生成する。いずれも通常のファイルに書かず、起動したCLIとDashboardの環境変数で渡す。telemetry API keyは公式CLIが生成する。
+他のsubcommandは、記録したpidの環境に今回のrun IDがあることを確かめてから、同じuserだけが読める`/proc/<pid>/environ`から値を取り出す。引数や端末出力には出さない。
+匿名accessは使わない。
+`status`はbrowser tokenを`/api/telemetry/validateToken`へ標準入力から送り、200だけを受付とみなす。返されたAPI keyは捨てる。
+`otel`は公式CLIの[login URLを渡す方式](https://aspire.dev/reference/cli/commands/aspire-otel/)を使い、CLIがtokenをAPI keyへ交換する。URLはLinuxの匿名メモリファイルを通して渡し、CLIが複数回読み直しても引数やディスクには残らない。
+CLIはlogと表示でURLのqueryを消すため、`otel`のlogは既定の`ASPIRE_HOME`の下に残る。
+wrapperが強制終了してもCLIはparent death signalで止まり、残った一時directoryは次の`run`か`stop`が消す。
+
+保存は`--persistence None`の一時SQLiteで、起動ごとの`${TMPDIR:-/tmp}/aspire-dashboard.*`に置き、停止時にdirectoryごと削除する。CLIとDashboardのlogも同じdirectoryに置く。
+ASP.NET Coreのrequest logはlogin URLのqueryを記録するため、Dashboardの`Microsoft.AspNetCore`のlog levelをWarningに絞る。個々のrequestの記録はこのlogに残らない。
+保持数の上限はログ10,000件、trace 10,000件、metricは次元ごとに10,000点とし、属性値は8,192文字、span eventは128件で切り詰める。
+
+ブラウザを使う場合は、`aspire-dashboard run --browser-token-stdin`の非表示プロンプトに、新しく生成した64桁の16進乱数を入力する。`http://127.0.0.1:18888/login`へ同じ値を入力する。値をコマンド引数や保存ファイルへ書かない。ブラウザが不要なら既定の`run`と`otel`で読み取れる。
+
+`exec`は`OTEL_EXPORTER_OTLP_ENDPOINT`、`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`、API keyを含む`OTEL_EXPORTER_OTLP_HEADERS`を設定し、信号別の`OTEL_EXPORTER_OTLP_*_ENDPOINT`・`_HEADERS`・`_PROTOCOL`を外す。
+`service.name`は`--service`、既存の`OTEL_SERVICE_NAME`、Gitのtop-level directory名の順で決める。
+`OTEL_RESOURCE_ATTRIBUTES`に無い場合だけ、`service.namespace`にproject名、`service.instance.id`に起動ごとの乱数を足す。
+OTLPを出力しないアプリや、OTLP設定を環境変数で上書きできないアプリはこの経路で観測できない。
 
 
 ## 運用command

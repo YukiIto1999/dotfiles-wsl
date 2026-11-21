@@ -438,6 +438,7 @@
         in
         {
           inherit (pkgs) age sops;
+          anode-windows = pkgs.callPackage ./toolchain/package/anode.nix { };
           sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
             mkdir -p "$out"
             cp -R --preserve=mode ${self}/. "$out/"

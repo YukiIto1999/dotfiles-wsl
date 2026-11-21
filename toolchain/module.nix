@@ -9,6 +9,7 @@
 let
   cfg = config.dotfiles;
   dotnetDiagnostics = pkgs.callPackage ./package/dotnet-diagnostics.nix { };
+  aspireCli = pkgs.callPackage ./package/aspire-cli.nix { };
   selection = cfg.toolchain.enabledLsp;
   unknownSelection = lib.unique (
     builtins.filter (id: !builtins.hasAttr id cfg.toolchain.lspRegistry) selection
@@ -175,6 +176,9 @@ in
   config.dotfiles.toolchain.lsp = selectedLsp;
 
   config.dotfiles.toolchain.packages = {
+    anode = pkgs.callPackage ./package/anode-interop.nix {
+      inherit (cfg.workstation.wsl) powershellCommand;
+    };
     context-dev-scrape = pkgs.callPackage ./package/context-dev-scrape.nix { };
     actrun = self.inputs.actrun.packages.${pkgs.stdenv.hostPlatform.system}.default;
     similarity = pkgs.callPackage ./package/similarity.nix { };
@@ -183,8 +187,18 @@ in
     };
     zvec-grep = pkgs.callPackage ./package/zvec-grep.nix { };
     semgrep = pkgs.callPackage ./package/semgrep.nix { };
+    gdb = pkgs.callPackage ./package/gdb.nix { };
+    nix-locate = pkgs.callPackage ./package/nix-locate.nix { };
     devenv = self.inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.default;
     inherit (dotnetDiagnostics) dotnet-counters dotnet-trace dotnet-stack;
+    # 必要時だけ前景で起動する Aspire Dashboard。起動ごとの資格情報と一時データは aspire-dashboard が持つ
+    aspire-cli = aspireCli;
+    aspire-dashboard = pkgs.callPackage ./package/aspire-dashboard.nix { inherit aspireCli; };
+    # 採用した版より古い版を stable が持つため pkgs からの供給は不可
+    inherit (self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system})
+      betterleaks
+      zizmor
+      ;
 
     inherit (pkgs)
       # 言語 runtime
@@ -202,6 +216,10 @@ in
       shfmt
       nixfmt
       ruff
+      actionlint
+      statix
+      deadnix
+      treefmt
       # 構文 pattern の検索と一括書き換え、pattern は自分で書く
       ast-grep
       # 環境の観測と実行
@@ -211,6 +229,10 @@ in
       wget
       curl
       vim
+      # 性能と system call と derivation の差の調査
+      perf
+      strace
+      nix-diff
       ;
   };
 

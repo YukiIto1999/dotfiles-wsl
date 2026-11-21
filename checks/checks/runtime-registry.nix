@@ -66,8 +66,7 @@
           assert !updaterNamesValid serviceNames (builtins.filter (timer: timer != updaterName) timerNames);
           pkgs.runCommandLocal "check-runtime-identity" { } "touch $out";
 
-        # 全登録簿に共通する保険。各 owner の check も、自分が検査する集合の非空を
-        # 独立して要求する
+        # 必須の登録簿が空になる退行を検出する。経路追加は必要な対象があるhostだけに配備する
         registries-non-empty =
           let
             walk =
@@ -91,7 +90,11 @@
               );
 
             empty = walk [ "dotfiles" ] hostOptions.dotfiles;
-            unexpectedEmpty = builtins.filter (path: path != "dotfiles.health.observations") empty;
+            allowedEmpty = [
+              "dotfiles.health.observations"
+              "dotfiles.platform.mcp.gateway.optionalUrls"
+            ];
+            unexpectedEmpty = lib.subtractLists allowedEmpty empty;
           in
           assert unexpectedEmpty == [ ];
           pkgs.runCommandLocal "check-registries-non-empty" { } "touch $out";

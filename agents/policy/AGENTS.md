@@ -118,7 +118,7 @@ store上の写し、記憶、過去のrevisionで補わない。
 
 ### MCP
 
-全clientは単一のgatewayからprovider実装を使う。
+通常セッションは共有Gatewayの既定経路だけに接続する。専門MCPが必要で未接続なら`dotfiles-tool-session list`で入口を確かめ、`@dotfilesDir@/docs/reference/tooling.md`の「セッションにツールを追加する」に従う。
 container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
 agentはSkillを入口にし、下表でそのSkillに対応づけられたCapabilityだけを使う。
 browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とする。

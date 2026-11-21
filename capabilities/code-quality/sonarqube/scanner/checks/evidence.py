@@ -1,3 +1,4 @@
+import fcntl
 import json
 import os
 from contextlib import ExitStack, suppress
@@ -40,6 +41,8 @@ class ScanEvidence(unittest.TestCase):
             subprocess.run(["git", "-C", str(self.root), *arguments], check=True)
         self.token = base / "token"
         self.token.write_text("fixture-token-not-a-credential")
+        self.lifecycle_lock = base / "scan.lock"
+        self.lifecycle_lock.write_text("")
         self.upstream = base / "scanner"
         self.upstream.write_text(
             "#!" + sys.executable + "\n"
@@ -78,6 +81,7 @@ class ScanEvidence(unittest.TestCase):
         return [
             sys.executable, SCANNER_WRAPPER, "--scanner", str(self.upstream),
             "--scanner-package-version", "fixture", "--server-url", "http://127.0.0.1:9000",
+            "--lifecycle-lock", str(self.lifecycle_lock),
             "--cwd", str(self.root), "--project-key", "fixture",
             "--token-file", str(token or self.token),
         ]
@@ -411,6 +415,62 @@ class ScanEvidence(unittest.TestCase):
                     os.close(ready_descriptor)
                 finally:
                     os.close(release_descriptor)
+
+    def test_operator_stop_lock_refuses_scan_before_native_execution(self):
+        """Guarded backend stop in progress without a started scan or receipt
+
+        Args:
+            self: Current regression fixture
+        Returns:
+            None
+        """
+        marker = Path(self.directory.name) / "native-finished"
+        with open(self.lifecycle_lock) as stop_lock:
+            fcntl.flock(stop_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self.scan(POST_SCAN_MARKER=str(marker))
+        self.assertEqual(result.returncode, 75)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("being stopped by its operator", result.stderr)
+        self.assertFalse(marker.exists(), "native scanner ran while the stop lock was held")
+        self.assertFalse((Path(self.directory.name) / "state").exists(), "a refused scan created run state")
+
+    def test_missing_lifecycle_lock_is_a_setup_failure(self):
+        """Unpublished lifecycle lock rejection before native execution
+
+        Args:
+            self: Current regression fixture
+        Returns:
+            None
+        """
+        self.lifecycle_lock.unlink()
+        result = self.scan()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("analysis lock", result.stderr)
+
+    def test_running_scan_blocks_an_exclusive_stop_lock(self):
+        """Shared lock held for the native run and released at wrapper exit
+
+        Args:
+            self: Current regression fixture
+        Returns:
+            None
+        """
+        process = subprocess.Popen(
+            self.scan_argv(), env={**self.environment, "WAIT_FOR_CANCEL": "1"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+        try:
+            self.wait_native_ready(process)
+            with open(self.lifecycle_lock) as stop_lock:
+                with self.assertRaises(BlockingIOError):
+                    fcntl.flock(stop_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            process.send_signal(signal.SIGTERM)
+            process.communicate(timeout=5)
+            with open(self.lifecycle_lock) as stop_lock:
+                fcntl.flock(stop_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            self.collect_process(process)
 
     def test_credential_inside_analyzed_source_is_rejected(self):
         """Source-contained credential rejection before native execution

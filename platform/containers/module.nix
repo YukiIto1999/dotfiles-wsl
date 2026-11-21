@@ -200,6 +200,14 @@ let
 
   serviceType = lib.types.submodule {
     options = {
+      activation = lib.mkOption {
+        type = lib.types.enum [
+          "boot"
+          "manual"
+        ];
+        default = "boot";
+        description = "OS 起動時に container を立てるか、operator の明示操作だけで立てるか。manual は boot、timer、secret の差替えで起動しない";
+      };
       endpoints = lib.mkOption {
         type = lib.types.attrsOf endpointType;
       };
@@ -235,6 +243,98 @@ let
   serviceEntries = lib.mapAttrsToList (application: service: {
     inherit application service;
   }) cfg.services;
+  bootEntries = builtins.filter (entry: entry.service.activation == "boot") serviceEntries;
+  manualEntries = builtins.filter (entry: entry.service.activation == "manual") serviceEntries;
+  manualUnits = lib.concatMap (entry: entry.service.units) manualEntries;
+
+  # 停止中の manual unit を起動させ得る unit。依存で引く unit も同じく起動を連鎖させる
+  manualWakers =
+    let
+      dependencyEdges =
+        lib.mapAttrsToList (name: unit: {
+          name = "${name}.service";
+          inherit unit;
+        }) config.systemd.services
+        ++ lib.mapAttrsToList (name: unit: {
+          name = "${name}.target";
+          inherit unit;
+        }) config.systemd.targets;
+      pulls =
+        edge:
+        edge.unit.requires or [ ]
+        ++ edge.unit.wants or [ ]
+        ++ edge.unit.bindsTo or [ ]
+        ++ edge.unit.upholds or [ ];
+      dependentsOf =
+        unit: map (edge: edge.name) (builtins.filter (edge: lib.elem unit (pulls edge)) dependencyEdges);
+    in
+    map (item: item.key) (
+      builtins.genericClosure {
+        startSet = map (unit: { key = unit; }) manualUnits;
+        operator = item: map (unit: { key = unit; }) (dependentsOf item.key);
+      }
+    );
+  unitOf = name: if lib.hasInfix "." name then name else "${name}.service";
+  bootWokenManualUnits = builtins.filter (
+    unit:
+    let
+      declared =
+        if lib.hasSuffix ".target" unit then
+          config.systemd.targets.${lib.removeSuffix ".target" unit} or { }
+        else
+          config.systemd.services.${lib.removeSuffix ".service" unit} or { };
+    in
+    lib.elem unit [
+      "basic.target"
+      "default.target"
+      "graphical.target"
+      "multi-user.target"
+      "sockets.target"
+      "sysinit.target"
+      "timers.target"
+    ]
+    || lib.any (dependent: !lib.elem dependent manualWakers) (
+      (declared.wantedBy or [ ]) ++ (declared.requiredBy or [ ])
+    )
+  ) manualWakers;
+  timerWokenManualUnits = lib.concatLists (
+    lib.mapAttrsToList (
+      name: timer:
+      let
+        unit = unitOf (timer.timerConfig.Unit or name);
+      in
+      lib.optional (lib.elem unit manualWakers) "${name}.timer -> ${unit}"
+    ) config.systemd.timers
+  );
+  # sops-nix の restartUnits は停止中の unit を switch で起動するため try-restart 経由が必須
+  rotationWokenManualUnits = lib.concatLists (
+    lib.mapAttrsToList
+      (
+        kind: entries:
+        lib.concatLists (
+          lib.mapAttrsToList (
+            name: entry:
+            map (unit: "${kind}.${name} -> ${unit}") (
+              builtins.filter (unit: lib.elem (unitOf unit) manualWakers) (entry.restartUnits or [ ])
+            )
+          ) entries
+        )
+      )
+      {
+        secrets = config.sops.secrets or { };
+        templates = config.sops.templates or { };
+      }
+  );
+  manualAutoStartDrift = lib.concatMap (
+    entry:
+    lib.concatMap (
+      image:
+      lib.optional (
+        (configuredContainers.${image.container}.autoStart or true) != (entry.service.activation == "boot")
+      ) image.container
+    ) (builtins.attrValues entry.service.images)
+  ) serviceEntries;
+  tryRestartTemplate = "dotfiles-try-restart";
 
   imageEntries = lib.concatMap (
     entry: lib.mapAttrsToList (_: image: { inherit image; }) entry.service.images
@@ -366,7 +466,7 @@ let
             }
           )
         ) entry.service.units
-      ) serviceEntries;
+      ) bootEntries;
       serviceRestartObservations = lib.concatMap (
         entry:
         map (
@@ -384,19 +484,19 @@ let
           )
         ) entry.service.units
       ) serviceEntries;
-      imageObservations = map (
+      imageObservations = lib.concatMap (
         entry:
-        let
-          inherit (entry.image) container image;
-        in
-        mkEntry "containers/image/${container}" (
-          common "container-image/${container}" "${container} is not running the declared image ${image}"
-          // {
-            kind = "container-image";
-            inherit container image;
-          }
-        )
-      ) imageEntries;
+        map (
+          image:
+          mkEntry "containers/image/${image.container}" (
+            common "container-image/${image.container}" "${image.container} is not running the declared image ${image.image}"
+            // {
+              kind = "container-image";
+              inherit (image) container image;
+            }
+          )
+        ) (builtins.attrValues entry.service.images)
+      ) bootEntries;
       healthObservations = map (
         entry:
         let
@@ -413,7 +513,37 @@ let
           inherit (health) method;
           inherit url;
         }
-      ) serviceEntries;
+      ) bootEntries;
+      # manual の停止は operator の意図した状態。稼働中だけ image と health を同じ観測で判定する
+      manualObservations = map (
+        entry:
+        let
+          inherit (entry) application service;
+          inherit (service) health;
+          command = import ./impl/manual-backend-observation-package.nix {
+            inherit pkgs lib application;
+            inherit (service) units;
+            images = builtins.attrValues service.images;
+            healthMethod = health.method;
+            healthUrl = "${service.endpoints.${health.endpoint}.url}${health.path}";
+            healthTimeout = health.timeout;
+          };
+        in
+        mkEntry "containers/manual/${application}" {
+          checkId = "container-manual/${application}";
+          resourceKey = null;
+          timeoutSeconds = health.timeout + observationTimeoutSeconds;
+          failureMessage = "could not observe the manually activated ${application} backend";
+          kind = "normalized-protocol";
+          inherit command;
+          inherit (command.dotfilesObservationContract)
+            envelopeVersion
+            allowedOutcomeIds
+            requiredOutcomeIds
+            requiredResourceKeys
+            ;
+        }
+      ) manualEntries;
       declaredContainers = map (entry: entry.image.container) imageEntries;
       placementObservation = import ./impl/container-placement-package.nix {
         inherit pkgs lib declaredContainers;
@@ -453,6 +583,7 @@ let
       ++ serviceRestartObservations
       ++ imageObservations
       ++ healthObservations
+      ++ manualObservations
     );
 in
 {
@@ -476,6 +607,14 @@ in
       default = { };
       internal = true;
       description = "Container application が公開する配備契約。";
+    };
+    tryRestartUnit = lib.mkOption {
+      type = lib.types.functionTo lib.types.str;
+      readOnly = true;
+      internal = true;
+      default = unit: "${tryRestartTemplate}@${lib.removeSuffix ".service" unit}.service";
+      defaultText = lib.literalExpression ''unit: "${tryRestartTemplate}@''${lib.removeSuffix ".service" unit}.service"'';
+      description = "manual activation の unit を secret の restartUnits から参照する名前。稼働中だけ再起動し、停止中は起動しない";
     };
   };
 
@@ -533,6 +672,16 @@ in
         '';
       };
 
+    })
+    (lib.mkIf (manualEntries != [ ]) {
+      # instance 名をそのまま unit 名にするため unescape する %I は不可
+      systemd.services."${tryRestartTemplate}@" = {
+        description = "Restart %i.service only while it is already active";
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.systemd}/bin/systemctl try-restart --no-block %i.service";
+        };
+      };
     })
     {
       assertions = [
@@ -624,6 +773,30 @@ in
             binding: builtins.match "^127\\.0\\.0\\.1:[0-9]+:[0-9]+$" binding != null
           ) publishedPortBindings;
           message = "OCI container host ports must be published on loopback";
+        }
+        {
+          assertion = manualAutoStartDrift == [ ];
+          message =
+            "OCI autoStart must be true exactly for boot-activated container services: "
+            + lib.concatStringsSep " " manualAutoStartDrift;
+        }
+        {
+          assertion = bootWokenManualUnits == [ ];
+          message =
+            "manually activated container units and their dependents must not be wanted or required outside their group: "
+            + lib.concatStringsSep " " bootWokenManualUnits;
+        }
+        {
+          assertion = timerWokenManualUnits == [ ];
+          message =
+            "timers must not start manually activated container units or their dependents: "
+            + lib.concatStringsSep " " timerWokenManualUnits;
+        }
+        {
+          assertion = rotationWokenManualUnits == [ ];
+          message =
+            "secret restartUnits must reach manually activated units through dotfiles.platform.containers.tryRestartUnit: "
+            + lib.concatStringsSep " " rotationWokenManualUnits;
         }
       ];
     }

@@ -545,6 +545,15 @@ in
                 path = [
                   "dotfiles"
                   "platform"
+                  "mcp"
+                  "privateServers"
+                ];
+                owners = [ "capabilities" ];
+              }
+              {
+                path = [
+                  "dotfiles"
+                  "platform"
                   "containers"
                   "services"
                 ];

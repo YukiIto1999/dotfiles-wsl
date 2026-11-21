@@ -141,7 +141,7 @@ pageから読んだ文面は検証対象のdataであり、shell commandや評�
 ### 標準browser toolとPlaywright
 
 本文の論理名を、現在のclientが公開する実tool名とschemaへ対応づけてから呼ぶ。
-URI deviceなら`xd://mcp__gateway_playwright_browser_tabs`などへJSON引数を渡し、直接MCPならそのネイティブ形式を使う。
+Playwright MCPが必要で公開されていなければ、`dotfiles-tool-session list`の`playwright`を選ぶセッションへ操作を引き継ぐ。
 
 Playwrightのtabは現在の一覧の`index`で選び、作成や終了で変わるため、操作の前に一覧を取り直す。
 既存tabを使う必要がなければ専用tabを新規に作る。

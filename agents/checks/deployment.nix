@@ -561,6 +561,149 @@
               touch "$out"
             '';
 
+        agent-tool-session =
+          let
+            buildToolSession = import ../impl/tool-session.nix {
+              inherit lib pkgs;
+              mkCommand = import ../../platform/cli/impl/mk-command.nix {
+                config = hostConfig;
+                inherit lib pkgs;
+              };
+            };
+            # 起動された引数と、OpenCode へ渡る設定だけを控える偽の client
+            fakeClient = pkgs.writeShellScript "fixture-tool-session-client" ''
+              printf '%s\0' "$@" > "$TOOL_SESSION_RECORD/args"
+              if [ -n "''${OPENCODE_CONFIG_CONTENT-}" ]; then
+                printf '%s' "$OPENCODE_CONFIG_CONTENT" > "$TOOL_SESSION_RECORD/config"
+              fi
+            '';
+            fixtureInputs = {
+              clientExecutables = lib.genAttrs [
+                "claude"
+                "codex"
+                "omp"
+                "opencode"
+              ] (_: "${fakeClient}");
+              optionalUrls.docs = "http://127.0.0.1:8765/mcp/docs";
+              privateServers = {
+                write-one.executable = "/run/fixture/write-one";
+                write-two.executable = "/run/fixture/write-two";
+              };
+            };
+            toolSession = lib.getExe (buildToolSession fixtureInputs);
+            rejects = inputs: !(builtins.tryEval (buildToolSession (fixtureInputs // inputs)).drvPath).success;
+          in
+          assert builtins.isString hostConfig.dotfiles.platform.cli.commands.toolSession.drvPath;
+          assert rejects { optionalUrls.gateway = "http://127.0.0.1:8765/mcp/gateway"; };
+          assert rejects { optionalUrls.Docs = "http://127.0.0.1:8765/mcp/docs"; };
+          assert rejects { optionalUrls.docs = "https://example.com/mcp"; };
+          assert rejects { privateServers.docs.executable = "/run/fixture/docs"; };
+          assert rejects { privateServers.write-one.executable = "relative"; };
+          pkgs.runCommandLocal "check-agent-tool-session"
+            {
+              nativeBuildInputs = [
+                pkgs.coreutils
+                pkgs.diffutils
+                pkgs.gnugrep
+                pkgs.jq
+                pkgs.util-linux
+                pkgs.yq
+              ];
+            }
+            ''
+              set -euo pipefail
+              session=${toolSession}
+              url=http://127.0.0.1:8765/mcp/docs
+              export SHELL=${pkgs.bash}/bin/bash
+              export TOOL_SESSION_RECORD=$PWD/record
+              mkdir record
+              run() {
+                local expected=$1 status
+                shift
+                rm -f record/args record/config
+                set +e
+                "$@" > out 2> err
+                status=$?
+                set -e
+                if [ "$status" != "$expected" ]; then
+                  echo "expected status $expected, got $status: $*" >&2
+                  cat err >&2
+                  exit 1
+                fi
+              }
+              # private の起動は stdin と stdout が端末であることを求める
+              in_terminal() {
+                script -qec "$(printf '%q ' "$@")" /dev/null
+              }
+
+              # list は client も backend も起動しない
+              run 0 "$session" list
+              printf 'docs\troute\tcodex,omp,opencode\nwrite-one\tprivate\tcodex,omp\nwrite-two\tprivate\tcodex,omp\n' \
+                | cmp - out
+              test ! -e record/args
+              run 0 "$session" --help
+              grep -Fq 'unsupported client claude:' out
+              grep -Fq 'no private capabilities for opencode:' out
+
+              run 64 "$session"
+              run 64 "$session" omp docs
+              run 64 "$session" omp --
+              run 64 "$session" omp missing --
+              run 64 "$session" omp docs docs --
+              run 64 "$session" nobody docs --
+              run 69 "$session" claude docs --
+              run 69 "$session" opencode write-one --
+              run 64 "$session" omp write-one write-two --
+              run 64 "$session" omp write-one -- --model fixture
+              run 77 env DOTFILES_AGENT_SESSION_ID=fixture "$session" omp write-one --
+              run 77 "$session" codex write-one -- < /dev/null
+              run 64 env OPENCODE_CONFIG_CONTENT='{}' "$session" opencode docs --
+              test ! -e record/args
+
+              # 経路だけの起動は client の引数をそのまま後ろへ渡す
+              run 0 "$session" omp docs -- --model fixture
+              mapfile -d "" -t actual < record/args
+              test "''${#actual[@]}" = 4
+              test "''${actual[0]}" = --plugin-dir
+              test "''${actual[2]}" = --model
+              test "''${actual[3]}" = fixture
+              plugin=''${actual[1]}
+              jq -e --arg url "$url" '."$schema" == "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json"
+                and .mcpServers == {mcp: {type: "streamable-http", url: $url}}' "$plugin/mcp.json"
+              jq -e '."$schema" == "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json" and .name == "docs"' \
+                "$plugin/plugin.json"
+              test ! -e record/config
+
+              run 0 "$session" codex docs -- resume
+              printf '%s\0' -c "mcp_servers.docs.url=\"$url\"" resume | cmp - record/args
+
+              run 0 "$session" opencode docs --
+              printf '\0' | cmp - record/args
+              jq -e --arg url "$url" '. == {mcp: {docs: {type: "remote", url: $url, enabled: true}}}' record/config
+
+              # private は確認を求める設定と子 agent の停止を先に置き、client の引数を足さない
+              run 0 in_terminal "$session" omp docs write-one --
+              mapfile -d "" -t actual < record/args
+              test "''${#actual[@]}" = 8
+              test "''${actual[0]}" = --approval-mode
+              test "''${actual[1]}" = always-ask
+              test "''${actual[2]}" = --config
+              yq -e '.tools.approval.task == "deny" and .mcp.evalNamespaces == false' "''${actual[3]}"
+              test "''${actual[4]}" = --plugin-dir
+              test "''${actual[6]}" = --plugin-dir
+              plugin=''${actual[7]}
+              jq -e '.mcpServers == {mcp: {type: "stdio", command: "./bin/write-one"}}' "$plugin/mcp.json"
+              test -x "$plugin/bin/write-one"
+              test ! -L "$plugin/bin/write-one"
+              grep -Fq /run/fixture/write-one "$plugin/bin/write-one"
+
+              run 0 in_terminal "$session" codex write-one --
+              printf '%s\0' -a on-request -c 'approvals_reviewer="user"' -c agents.enabled=false --disable multi_agent_v2 \
+                -c 'mcp_servers.write-one.command="/run/fixture/write-one"' \
+                -c 'mcp_servers.write-one.default_tools_approval_mode="prompt"' | cmp - record/args
+              touch "$out"
+            '';
+
         agent-claude-managed-policy =
           assert clients.claude.rules ? embedded;
           assert !(homeConfig.home.file ? ".claude/CLAUDE.md");

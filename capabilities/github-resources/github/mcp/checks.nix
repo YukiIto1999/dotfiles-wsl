@@ -36,6 +36,10 @@
                         type = lib.types.attrsOf lib.types.raw;
                         default = { };
                       };
+                      dotfiles.platform.mcp.privateServers = lib.mkOption {
+                        type = lib.types.attrsOf lib.types.raw;
+                        default = { };
+                      };
                       assertions = lib.mkOption {
                         type = lib.types.listOf lib.types.raw;
                         default = [ ];
@@ -76,6 +80,8 @@
           lib.filterAttrs (_: target: target.provider == "github") hostConfig.dotfiles.platform.mcp.targets
         );
         expectedTargetNames = lib.sort builtins.lessThan (map (account: "github-${account}") accounts);
+        writers = hostConfig.dotfiles.platform.mcp.privateServers;
+        writerNames = lib.sort builtins.lessThan (map (account: "github-write-${account}") accounts);
       in
       {
         github-account-target-contract =
@@ -84,6 +90,7 @@
           assert !(assertionsPass fixtureAccounts missingTarget);
           assert !(assertionsPass fixtureAccounts extraTarget);
           assert !(assertionsPass fixtureAccounts renamedTarget);
+          assert builtins.attrNames writers == writerNames;
           pkgs.runCommandLocal "check-github-account-target-contract" { } "touch $out";
       }
     )

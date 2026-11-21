@@ -35,6 +35,7 @@
       "waitUnits": []
     },
     "stdio-adapter": {
+      "exposure": "default",
       "needsNetwork": false,
       "port": 8771,
       "probe": {

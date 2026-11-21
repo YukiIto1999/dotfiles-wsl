@@ -53,8 +53,11 @@ ignore は既に追跡した file には効かず、`git add -f` でも迂回で
 
 loopbackのgatewayとfrontへ到達できるprocessは、公開MCP toolを呼べる信頼境界に入る。
 Windows側からの到達性はWSLのnetwork modeと転送経路にも依存し、doctorのservice検査だけでは外部到達性を証明しない。
-現在のgateway設定は、client認証もclientごとのtool認可も宣言しない。loopbackへの到達制限を、呼出し元の識別や操作の認可として扱わない。
+通常経路と専門経路の分割は一覧と接続範囲を制限するが、呼出し元の識別や操作の認可にはならない。
 gatewayとfrontは設定ユーザーのserviceとして動き、読めるcheckout、home、runtime secretと、実行できるcommandがtool callの権限上限になる。
+GitHubの共有経路とfrontは公式serverの読取専用モードを使う。
+書込権限を持つ公式stdioは、明示されたアカウントのセッションにだけ渡し、共有HTTPには登録しない。
+この分離は、資格情報を読める同じOSユーザーの任意プロセスを隔離するものではない。
 
 PlaywrightのMCP adapterは[`package.nix`](../../capabilities/browser-automation/playwright/mcp/package.nix)で`--isolated`と`--no-sandbox`を同時に指定する。sessionごとのbrowser状態とprocess寿命は分けるが、Chromiumのsecurity sandboxは有効にしない。この境界はclientのnative browserやOrcaのbrowserとは別である。
 

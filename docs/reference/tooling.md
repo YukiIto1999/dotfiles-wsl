@@ -188,6 +188,25 @@ owner moduleは意味と観測値を持ち、`health`は型、実行、集約だ
 | MCP front | [`platform/mcp/module.nix`](../../platform/mcp/module.nix)がtargetから導く`dotfiles.platform.mcp.fronts` | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.platform.mcp.fronts`。稼働は`systemctl status mcp-front-<name>` |
 | telemetry | [`telemetry/module.nix`](../../telemetry/module.nix) | `nix eval --json .#nixosConfigurations.nixos.config.dotfiles.telemetry` |
 
-MCP targetはprovider、executable、transport、lifecycle、port、backend unit、probeを持つ。generic Platformはprovider IDとapplication IDを列挙せず、Capability実装から登録値を受ける。公開agentgatewayは全frontを一つのURLへ束ねるが、front serviceの起動依存は持たない。credential、container、host processの境界は[セキュリティ設計](../architecture/security.md)を参照する。
+MCP targetはprovider、executable、transport、lifecycle、公開範囲、起動方式、port、backend unit、probeを持つ。
+generic Platformはprovider IDとapplication IDを列挙せず、Capability実装から登録値を受ける。
+一つのGatewayが通常経路とセッション向けの追加経路を提供するが、front serviceの起動依存は持たない。
+credential、container、host processの境界は[セキュリティ設計](../architecture/security.md)を参照する。
 
 構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に`dotfiles-doctor`で宣言と実状態の収束を確認する。
+
+### セッションにツールを追加する
+
+`dotfiles-tool-session list`で、追加できるtarget IDと対応するclientを確認する。
+一覧取得は、接続、サービス起動、資格情報の読取りを行わない。
+専門MCPが必要な作業では、選んだclientとtargetで新しいセッションを起動する。
+
+```sh
+dotfiles-tool-session omp context7 --
+```
+
+OMP・Codex・OpenCodeでは、専門MCPを追加した接続がその起動の間だけ有効になる。通常の接続は維持する。読取や観測用の経路だけを選んだ場合、`--`の後ろにclientの引数を渡せる。
+Claude Codeの管理設定は起動引数による追加を禁止している。Antigravity CLIには起動単位の追加機構がない。両方とも通常経路は維持し、追加のために設定ファイルを書き換えない。
+SonarQubeを選ぶ前には[明示起動](code-quality.md#起動と停止)が必要である。
+GitHubの書込は、実行loginを確認してからOMPまたはCodexで対応する`github-write-<account>`を一つだけ選ぶ。エージェントの内側ではなく、利用者の端末から起動し、`--`の後ろは空にする。OpenCodeでは専門MCPの追加はできるが、書込用接続は追加できない。
+書込は[GitHub操作の手順](../../skills/github-operations/skill/SKILL.md)に沿って対象と操作を確認してから承認する。

@@ -10,13 +10,30 @@ let
   mcp = config.dotfiles.platform.mcp;
   inherit (mcp) gateway;
   agentgateway = pkgs.callPackage ../package/agentgateway.nix { };
+  defaultTargets = lib.filterAttrs (_: target: target.exposure == "default") mcp.targets;
+  optionalTargets = lib.filterAttrs (_: target: target.exposure == "session") mcp.targets;
+  baseUrl = "http://127.0.0.1:${toString gateway.port}";
+  defaultPath = "/mcp";
+  optionalPath = name: "${defaultPath}/${name}";
   protocolObserver = pkgs.callPackage ./impl/observer-package.nix {
     gatewayUrl = gateway.url;
-    probes = lib.mapAttrs (_: target: target.probe) mcp.targets;
+    probes = lib.mapAttrs (_: target: target.probe) defaultTargets;
   };
   protocolContract = protocolObserver.dotfilesObservationContract;
 
-  upstream = front: { mcp.host = front.url; };
+  route = path: targets: {
+    matches = [ { path.exact = path; } ];
+    policies.timeout.backendRequestTimeout = "60s";
+    backends = [
+      {
+        mcp.failureMode = if path == defaultPath then "failOpen" else "failClosed";
+        mcp.targets = lib.mapAttrsToList (name: _: {
+          inherit name;
+          mcp.host = mcp.fronts.${name}.url;
+        }) targets;
+      }
+    ];
+  };
 
   gatewayConfig = (pkgs.formats.yaml { }).generate "agentgateway-default-config.yaml" {
     config.mcp.sessionTtl = "${toString mcp.sessionPolicy.idleSeconds}s";
@@ -30,18 +47,11 @@ let
         listeners = [
           {
             routes = [
-              {
-                # 指定が無いと gateway は upstream の応答 header を 10 秒で打ち切る。待機を含む browser 操作は
-                # それより長く、打ち切られても browser の中では処理が続く。この値は応答の無い front を待つ上限になる
-                policies.timeout.backendRequestTimeout = "60s";
-                backends = [
-                  {
-                    mcp.failureMode = "failOpen";
-                    mcp.targets = lib.mapAttrsToList (name: front: { inherit name; } // upstream front) mcp.fronts;
-                  }
-                ];
-              }
-            ];
+              (route defaultPath defaultTargets)
+            ]
+            ++ lib.mapAttrsToList (
+              name: target: route (optionalPath name) { ${name} = target; }
+            ) optionalTargets;
           }
         ];
       }
@@ -58,12 +68,17 @@ in
     port = lib.mkOption {
       type = lib.types.port;
       default = 8765;
-      description = "AI CLI が接続する単一 agentgateway endpoint の待ち受け port";
+      description = "AI CLI が接続する agentgateway の待ち受け port";
     };
     url = lib.mkOption {
       type = lib.types.str;
       readOnly = true;
-      description = "AI CLI に配布する公開 MCP endpoint URL";
+      description = "通常セッションへ配布する MCP endpoint URL";
+    };
+    optionalUrls = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      readOnly = true;
+      description = "対象を選んだセッションにだけ追加する MCP endpoint";
     };
     service = lib.mkOption {
       type = lib.types.str;
@@ -89,12 +104,24 @@ in
 
   config.dotfiles.platform.mcp.gateway = {
     id = "default";
-    url = "http://127.0.0.1:${toString gateway.port}/mcp";
+    url = baseUrl + defaultPath;
+    optionalUrls = lib.mapAttrs (name: _: baseUrl + optionalPath name) optionalTargets;
     service = "agentgateway-default";
     runtimeDirectory = "agentgateway-default";
     source = gatewayConfig;
     targets = builtins.attrNames mcp.targets;
   };
+
+  config.assertions = [
+    {
+      assertion = defaultTargets != { };
+      message = "The default MCP gateway route must have at least one target";
+    }
+    {
+      assertion = lib.intersectLists gateway.targets (builtins.attrNames mcp.privateServers) == [ ];
+      message = "Private MCP server IDs must not overlap gateway target IDs";
+    }
+  ];
 
   config.dotfiles.managedArtifacts."mcp/gateway/default/config" = {
     format = "yaml";

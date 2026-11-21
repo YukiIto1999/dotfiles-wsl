@@ -13,6 +13,7 @@ let
   inherit (import ../../../../platform/containers/impl/port-bindings.nix { inherit lib; })
     publishedPortBindings
     ;
+  inherit (config.dotfiles.platform.containers) tryRestartUnit;
   repository = "postgres";
   version = "17.10-alpine3.24";
   digest = "sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193";
@@ -42,6 +43,7 @@ let
       "--tmpfs=/tmp:rw,nosuid,nodev,size=64m,mode=1777"
       "--stop-timeout=45"
     ];
+    activation = "manual";
   };
 in
 {
@@ -69,7 +71,7 @@ in
       mode = "0400";
       owner = "root";
       group = "root";
-      restartUnits = [ "docker-sonarqube-db.service" ];
+      restartUnits = [ (tryRestartUnit "docker-sonarqube-db.service") ];
       content = ''
         POSTGRES_USER=sonarqube
         POSTGRES_PASSWORD_FILE=/run/secrets/sonarqube-db-password
@@ -80,7 +82,7 @@ in
       mode = "0400";
       owner = "root";
       group = "root";
-      restartUnits = [ "docker-sonarqube-db.service" ];
+      restartUnits = [ (tryRestartUnit "docker-sonarqube-db.service") ];
       content = config.sops.placeholder."sonarqube/db_password";
     };
     assertions = [

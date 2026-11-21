@@ -27,6 +27,8 @@ read-only reviewer に MCP が公開されていない場合も、渡された b
 `code-quality` Capability の `sonarqube` provider が公開する公式 MCP tool を使う。
 現在公開された schema を読んで引数を合わせる。
 URI device の client では、公開一覧にある `...sonarqube...` tool の `xd://` schema が入口である。
+未接続なら`dotfiles-tool-session list`の`sonarqube`を選ぶセッションへ対象と必要な証拠を引き継ぐ。
+停止中なら利用者に `sudo systemctl start sonarqube.target` を案内し、収集できる他の証拠を先に集める。
 
 - 生存状態は `get_system_status` であり、`UP` は今回の source が解析済みである証拠ではない。
 - project key の確認には `search_my_sonarqube_projects` を使い、見えない project は不存在と権限不足を区別できる範囲までにする。

@@ -57,6 +57,13 @@ let
     homeDir = cfg.workstation.homeDir;
     inherit profileRootRelative legacyRootRelative;
   };
+  toolSession = import ./impl/tool-session.nix { inherit lib pkgs mkCommand; } {
+    clientExecutables = lib.mapAttrs (
+      _: client: "${agents.lifecycle.wrapperDirectory}/${client.binary}"
+    ) agents.clients;
+    inherit (cfg.platform.mcp.gateway) optionalUrls;
+    inherit (cfg.platform.mcp) privateServers;
+  };
 
   runtime = import ./package.nix {
     inherit lib pkgs runtimeContract;
@@ -538,7 +545,7 @@ in
     dotfiles.managedArtifacts = managedArtifacts;
     dotfiles.health.observations = runtimeContract.observations;
     dotfiles.platform.cli.commands = {
-      inherit agentSupply;
+      inherit agentSupply toolSession;
     };
 
     assertions = [

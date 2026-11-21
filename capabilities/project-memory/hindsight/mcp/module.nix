@@ -19,6 +19,7 @@ in
   config = lib.mkIf enabled {
     dotfiles.platform.mcp.targets.memory = {
       provider = "memory";
+      exposure = "default";
       executable = lib.getExe front;
       serverLifecycle = "service";
       port = 8774;

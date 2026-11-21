@@ -20,10 +20,11 @@ in
   config = lib.mkIf enabled {
     dotfiles.platform.mcp.targets.sonarqube = {
       provider = "sonarqube";
+      activation = "manual";
       executable = lib.getExe front;
       serverLifecycle = "service";
       port = 8778;
-      waitUnits = backend.units;
+      waitUnits = backend.units ++ [ "sonarqube-provision.service" ];
       probe = {
         tool = "get_system_status";
         args = { };

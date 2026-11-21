@@ -10,6 +10,7 @@ let
     inherit lib;
     cgroupParent = config.dotfiles.workstation.workload.slices.support;
   };
+  inherit (config.dotfiles.platform.containers) tryRestartUnit;
   repository = "sonarqube";
   version = "26.7.0.124771-community";
   digest = "sha256:160bd2f6a3485bd09b655ef22dd63c02bd1fa7ba82aa5d9973fd010b8bcca0b3";
@@ -39,6 +40,7 @@ let
     ];
     ports = [ "9000" ];
     deps = [ "docker-sonarqube-db.service" ];
+    activation = "manual";
   };
 in
 {
@@ -59,6 +61,7 @@ in
       tokenFile = config.sops.secrets."sonarqube/token".path;
     };
     dotfiles.platform.containers.services.sonarqube = {
+      activation = "manual";
       endpoints.http = {
         protocol = "http";
         address = "127.0.0.1";
@@ -91,20 +94,20 @@ in
       mode = "0400";
       owner = "root";
       group = "root";
-      # API 側の password は file 差替えで変わらないため自動 rotation は不可
-      restartUnits = [ ];
+      # API 側の password は file 差替えで変わらない。稼働中だけ provisioning を再実行し、不一致を失敗として示す
+      restartUnits = [ (tryRestartUnit "sonarqube-provision.service") ];
     };
     sops.secrets."sonarqube/token" = {
       mode = "0400";
       owner = config.dotfiles.workstation.username;
       group = "users";
-      restartUnits = [ "mcp-front-sonarqube.service" ];
+      restartUnits = [ (tryRestartUnit config.dotfiles.platform.mcp.fronts.sonarqube.service) ];
     };
     sops.templates."sonarqube.properties" = {
       mode = "0440";
       owner = "root";
       group = "root";
-      restartUnits = [ "docker-sonarqube.service" ];
+      restartUnits = [ (tryRestartUnit "docker-sonarqube.service") ];
       content = ''
         sonar.jdbc.url=jdbc:postgresql://sonarqube-db:5432/sonarqube
         sonar.jdbc.username=sonarqube

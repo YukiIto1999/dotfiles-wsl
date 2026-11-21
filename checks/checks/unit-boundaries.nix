@@ -71,6 +71,10 @@ in
             target = commandHelper;
             line = "  mkCommand = import ${commandHelper} { inherit config lib pkgs; };";
           };
+          "agents/checks/deployment.nix" = {
+            target = nestedCommandHelper;
+            line = "              mkCommand = import ${nestedCommandHelper} {";
+          };
           "agents/checks/supply.nix" = {
             target = nestedCommandHelper;
             line = "        mkCommand = import ${nestedCommandHelper} {";

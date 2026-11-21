@@ -20,7 +20,8 @@ in
     dotfiles.platform.mcp.targets.context7 = {
       provider = "context7";
       executable = lib.getExe front;
-      serverLifecycle = "service";
+      serverLifecycle = "session";
+      lazyDiscovery = true;
       port = 8771;
       needsNetwork = true;
       probe = {

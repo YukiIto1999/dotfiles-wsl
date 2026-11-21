@@ -5,6 +5,7 @@
   sonar-scanner-cli,
   commandBuilder,
   serverUrl,
+  lifecycleLock,
 }:
 
 commandBuilder {
@@ -16,6 +17,6 @@ commandBuilder {
     source = "${./impl/scan.py}";
     scanner = lib.getExe sonar-scanner-cli;
     scannerPackageVersion = sonar-scanner-cli.version;
-    inherit serverUrl;
+    inherit serverUrl lifecycleLock;
   };
 }

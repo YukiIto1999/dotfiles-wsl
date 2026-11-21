@@ -9,10 +9,10 @@ GitHub MCPは実行手段である。このSkillは、誰としてどのresource
 
 ## 公開操作を解決する
 
-`github-resources` Capabilityが公開するaccount別のgateway targetを使う。
-操作名を推測せず、選んだtargetで現在公開されているtoolのschemaを読む。
-URI deviceを公開するclientのaccount-1なら`xd://mcp__gateway_github_account_1_get_me`などへJSON引数を渡し、MCP toolを直接公開するclientではそのネイティブな呼出し形式を使う。
-どちらも選んだtargetの実tool名とschemaへ対応させ、account名をresourceのownerから組み立てない。
+通常の共有Gatewayはaccount別の読取専用targetを公開する。
+書込が許可されたら、選んだaccountに対応する`github-write-<account>`だけを`dotfiles-tool-session`で追加した専用セッションを使う。
+未接続なら必要なaccountと操作を利用者に示し、共有経路や別accountに書込を迂回させない。
+選んだ接続で現在公開されているtool名とschemaを確認する。resourceのownerからaccount名を組み立てない。
 
 | 操作 | 現在のschemaで渡す入力 | 確認する返却値 |
 |---|---|---|
@@ -40,7 +40,8 @@ mergeの直前確認後は、`merge_pull_request`へ対象PR、確認した`merg
 2. 完全修飾された指定、canonical URL、選択済みrepositoryやbranchのcontextを優先する。複数の根拠が食い違う場合は、一方を黙って採用しない。
 3. 足りない値だけをread-only lookupで補う。候補account targetのidentityは`get_me`相当のreadで確認し、repository、issue、PR、branchはexact lookupの返り値で存在、種別、canonical owner/nameを確定する。広い一覧や曖昧なtitle検索は、exact lookupへ絞るために必要な場合だけ使う。
 4. `account target`はresourceの`owner`とは別に固定する。明示された実行identityと一致するtargetを使い、明示がなければ既存contextとread結果から一意になるtargetだけを選ぶ。複数accountが同じ操作を行えることは選択理由にならない。
-5. pre-read、write、結果確認は同じaccount targetで行う。選択したtargetに権限がなければ別accountへ黙って切り替えない。
+5. 読取専用targetから書込用セッションへ引き継ぐ場合は、書込側の`get_me`で同じloginを確認する。
+   pre-read、write、結果確認はその書込接続で行い、権限がなければ別accountへ黙って切り替えない。
 
 対象または実行identityが一意にならない場合は、候補と曖昧な項目を示して止める。lookupのためにbranch、comment、draft reviewなどを作成してはならない。
 「職場」「個人」などは依頼者の呼称であり、target番号、Gitの既定identity、`owner/repo`、過去の利用頻度からloginを決めない。呼称とloginを対応付ける根拠がなければ、`get_me`で確認した候補から依頼者に実行loginを選んでもらう。

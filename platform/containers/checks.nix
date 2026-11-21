@@ -193,6 +193,11 @@
             imageEntries = lib.concatMap (
               entry: lib.mapAttrsToList (_: image: { inherit image; }) entry.service.images
             ) serviceEntries;
+            bootEntries = builtins.filter (entry: entry.service.activation == "boot") serviceEntries;
+            manualEntries = builtins.filter (entry: entry.service.activation == "manual") serviceEntries;
+            bootImageEntries = lib.concatMap (
+              entry: lib.mapAttrsToList (_: image: { inherit image; }) entry.service.images
+            ) bootEntries;
             common = checkId: failureMessage: {
               inherit checkId failureMessage;
               resourceKey = null;
@@ -216,7 +221,7 @@
                   }
                 )
               ) entry.service.units
-            ) serviceEntries;
+            ) bootEntries;
             serviceRestartObservations = lib.concatMap (
               entry:
               map (
@@ -246,7 +251,7 @@
                   inherit container image;
                 }
               )
-            ) imageEntries;
+            ) bootImageEntries;
             healthObservations = map (
               entry:
               let
@@ -263,7 +268,35 @@
                 inherit (health) method;
                 inherit url;
               }
-            ) serviceEntries;
+            ) bootEntries;
+            # 停止中の manual backend は fault にせず、稼働中だけ image と health を判定する
+            manualObservations = map (
+              entry:
+              let
+                inherit (entry) application service;
+                inherit (service) health;
+                command = import ./impl/manual-backend-observation-package.nix {
+                  inherit pkgs lib application;
+                  inherit (service) units;
+                  images = builtins.attrValues service.images;
+                  healthMethod = health.method;
+                  healthUrl = "${service.endpoints.${health.endpoint}.url}${health.path}";
+                  healthTimeout = health.timeout;
+                };
+              in
+              mkEntry "containers/manual/${application}" {
+                checkId = "container-manual/${application}";
+                resourceKey = null;
+                timeoutSeconds = health.timeout + observationTimeoutSeconds;
+                failureMessage = "could not observe the manually activated ${application} backend";
+                kind = "normalized-protocol";
+                inherit command;
+                envelopeVersion = 1;
+                allowedOutcomeIds = [ "container-manual/${application}" ];
+                requiredOutcomeIds = [ "container-manual/${application}" ];
+                requiredResourceKeys = [ ];
+              }
+            ) manualEntries;
             declaredContainers = map (entry: entry.image.container) imageEntries;
           in
           builtins.listToAttrs (
@@ -298,6 +331,7 @@
             ++ serviceRestartObservations
             ++ imageObservations
             ++ healthObservations
+            ++ manualObservations
           );
 
         buildArtifactGcConfiguration = configuration: {
@@ -799,6 +833,7 @@
             fixtures = [
               (import ./fixtures/container-backend.nix { inherit lib; })
               (import ./fixtures/container-backend-minimal.nix { inherit lib; })
+              (import ./fixtures/container-backend-manual.nix { inherit lib; })
             ];
             mkContainerBackend =
               fixture:
@@ -811,6 +846,133 @@
           in
           assert lib.assertMsg (actual == expected) "container backend helper output changed";
           pkgs.runCommandLocal "check-container-backend-contract" { } "touch $out";
+
+        # 停止と稼働の判定は systemd、docker、HTTP の答えで決まるため三つの境界の差し替えで実行
+        container-manual-observation-behavior =
+          let
+            fakeManualSystemctl = pkgs.writeShellApplication {
+              name = "systemctl";
+              text = ''
+                [[ $1 == show ]] || exit 64
+                shift
+                [[ $1 == --property=Id && $2 == --property=ActiveState && $3 == --property=Result && $4 == -- ]] || exit 64
+                shift 4
+                separator=""
+                for unit in "$@"; do
+                  printf '%s' "$separator"
+                  separator=$'\n'
+                  while IFS='|' read -r known state result; do
+                    [[ $known == "$unit" ]] || continue
+                    printf 'Result=%s\nId=%s\nActiveState=%s\n' "$result" "$unit" "$state"
+                  done <"$FAKE_UNITS"
+                done
+              '';
+            };
+            fakeManualDocker = pkgs.writeShellApplication {
+              name = "docker";
+              text = ''
+                case "$1 $2" in
+                  'image inspect') printf '%s\n' "$FAKE_DECLARED_ID" ;;
+                  "inspect fixture") printf '%s\n' "$FAKE_RUNNING_ID" ;;
+                  *) exit 64 ;;
+                esac
+              '';
+            };
+            fakeCurl = pkgs.writeShellApplication {
+              name = "curl";
+              text = ''
+                printf '%s\n' "$*" >>"$FAKE_CURL_LOG"
+                exit "''${FAKE_CURL_STATUS:-0}"
+              '';
+            };
+            observe = import ./impl/manual-backend-observation-package.nix {
+              inherit pkgs lib;
+              application = "fixture";
+              units = [
+                "docker-fixture-db.service"
+                "docker-fixture.service"
+              ];
+              images = [
+                {
+                  container = "fixture";
+                  image = "example.invalid/fixture:1@sha256:0000000000000000000000000000000000000000000000000000000000000000";
+                }
+              ];
+              healthMethod = "GET";
+              healthUrl = "http://127.0.0.1:45678/health";
+              healthTimeout = 5;
+              curlCommand = lib.getExe fakeCurl;
+              dockerCommand = lib.getExe fakeManualDocker;
+              systemctlCommand = lib.getExe fakeManualSystemctl;
+            };
+          in
+          pkgs.runCommandLocal "check-container-manual-observation-behavior"
+            {
+              nativeBuildInputs = [
+                pkgs.coreutils
+                pkgs.gnugrep
+                pkgs.jq
+              ];
+            }
+            ''
+              set -euo pipefail
+
+              export FAKE_UNITS=$PWD/units FAKE_CURL_LOG=$PWD/curl.log
+              export FAKE_DECLARED_ID=sha256:declared FAKE_RUNNING_ID=sha256:declared
+
+              expect() {
+                local output=$1 status=$2 needle=$3
+                jq -e --arg status "$status" '
+                  .schemaVersion == 1
+                  and .resources == []
+                  and (.outcomes | length) == 1
+                  and .outcomes[0].id == "container-manual/fixture"
+                  and .outcomes[0].status == $status
+                ' "$output" > /dev/null || { cat "$output" >&2; exit 1; }
+                jq -r '.outcomes[0].message' "$output" | grep -Fq -- "$needle" || {
+                  echo "$output does not mention: $needle" >&2
+                  exit 1
+                }
+              }
+
+              # operator の停止は fault ではなく、停止中の backend へ HTTP で触れない
+              printf '%s\n' "docker-fixture-db.service|inactive|success" "docker-fixture.service|inactive|success" > units
+              ${lib.getExe observe} > stopped.json
+              expect stopped.json pass "stopped (manual activation)"
+              if [ -e curl.log ]; then
+                echo "a stopped manual backend was probed over HTTP" >&2
+                exit 1
+              fi
+
+              printf '%s\n' "docker-fixture-db.service|active|success" "docker-fixture.service|active|success" > units
+              ${lib.getExe observe} > running.json
+              expect running.json pass "running the declared images"
+              grep -Fq -- "--max-time 5" curl.log
+
+              FAKE_CURL_STATUS=22 ${lib.getExe observe} > unhealthy.json
+              expect unhealthy.json fail "GET http://127.0.0.1:45678/health failed"
+
+              FAKE_RUNNING_ID=sha256:stale ${lib.getExe observe} > stale.json
+              expect stale.json fail "fixture is not running the declared image"
+
+              printf '%s\n' "docker-fixture-db.service|active|success" "docker-fixture.service|activating|success" > units
+              ${lib.getExe observe} > starting.json
+              expect starting.json warn "docker-fixture.service activating"
+
+              printf '%s\n' "docker-fixture-db.service|active|success" "docker-fixture.service|inactive|success" > units
+              ${lib.getExe observe} > partial.json
+              expect partial.json warn "docker-fixture.service inactive"
+
+              printf '%s\n' "docker-fixture-db.service|inactive|success" "docker-fixture.service|failed|exit-code" > units
+              ${lib.getExe observe} > failed.json
+              expect failed.json fail "docker-fixture.service failed/exit-code"
+
+              printf '%s\n' "docker-fixture.service|inactive|success" > units
+              ${lib.getExe observe} > unobserved.json
+              expect unobserved.json fail "could not observe every unit"
+
+              touch $out
+            '';
 
         container-application-registry =
           let

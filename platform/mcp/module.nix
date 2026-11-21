@@ -38,7 +38,9 @@ let
     url = "http://127.0.0.1:${toString target.port}/mcp";
   }) cfg.targets;
 
-  targetsWithDelimiter = builtins.filter (name: builtins.match ".*_.*" name != null) targetNames;
+  invalidTargetNames = builtins.filter (
+    name: builtins.match "[a-z0-9]+(-[a-z0-9]+)*" name == null
+  ) targetNames;
   prefixCollisions = builtins.filter (
     name: builtins.any (other: other != name && lib.hasPrefix name other) targetNames
   ) targetNames;
@@ -47,7 +49,9 @@ let
   observedServices = [
     cfg.gateway.service
   ]
-  ++ map (front: front.service) (builtins.attrValues fronts);
+  ++ lib.mapAttrsToList (_: front: front.service) (
+    lib.filterAttrs (name: _: cfg.targets.${name}.activation == "boot") fronts
+  );
   commonObservation = checkId: failureMessage: {
     inherit checkId failureMessage;
     resourceKey = null;
@@ -106,6 +110,22 @@ in
       type = lib.types.attrsOf (
         lib.types.submodule {
           options = {
+            exposure = lib.mkOption {
+              type = lib.types.enum [
+                "default"
+                "session"
+              ];
+              default = "session";
+              description = "通常の接続と明示的に選んだセッションのどちらへ公開するか";
+            };
+            activation = lib.mkOption {
+              type = lib.types.enum [
+                "boot"
+                "manual"
+              ];
+              default = "boot";
+              description = "MCP front をOS起動時に立てるか、利用者が起動するか";
+            };
             provider = lib.mkOption {
               type = lib.types.str;
               description = "target の責務を所有する Capability MCP adapter ID";
@@ -174,6 +194,20 @@ in
       default = { };
       internal = true;
       description = "公開 gateway が束ねる MCP target の実行契約";
+    };
+
+    privateServers = lib.mkOption {
+      type = lib.types.attrsOf (
+        lib.types.submodule {
+          options.executable = lib.mkOption {
+            type = lib.types.addCheck lib.types.str isExecutable;
+            description = "明示的なセッションにだけ渡す stdio server の実行ファイル";
+          };
+        }
+      );
+      default = { };
+      internal = true;
+      description = "共有 HTTP 経路に登録しない MCP server";
     };
 
     fronts = lib.mkOption {
@@ -258,7 +292,7 @@ in
       description = "MCP front (${name})";
       after = [ "network.target" ] ++ target.waitUnits;
       requires = target.waitUnits;
-      wantedBy = [ "multi-user.target" ];
+      wantedBy = lib.optionals (target.activation == "boot") [ "multi-user.target" ];
       serviceConfig = {
         User = config.dotfiles.workstation.username;
         RuntimeDirectory = front.runtimeDirectory;
@@ -298,9 +332,22 @@ in
       message = "dotfiles.platform.mcp.enabledProviders and target providers must match exactly";
     }
     {
-      assertion = targetsWithDelimiter == [ ];
+      assertion = invalidTargetNames == [ ];
       message =
-        "MCP target names must not contain '_': " + lib.concatStringsSep ", " targetsWithDelimiter;
+        "MCP target names must be lowercase hyphen-separated IDs: "
+        + lib.concatStringsSep ", " invalidTargetNames;
+    }
+    {
+      assertion = lib.all (name: builtins.match "[a-z0-9]+(-[a-z0-9]+)*" name != null) (
+        builtins.attrNames cfg.privateServers
+      );
+      message = "Private MCP server names must be lowercase hyphen-separated IDs";
+    }
+    {
+      assertion = lib.all (target: target.activation != "manual" || target.exposure == "session") (
+        builtins.attrValues cfg.targets
+      );
+      message = "Manually activated MCP targets must not be connected by default";
     }
     {
       assertion = prefixCollisions == [ ];

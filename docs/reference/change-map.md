@@ -86,6 +86,7 @@ profileは有効な機能を選び、各ownerのmoduleは意味、実装、runti
 | MCP providerまたはtargetを追加・削除する | 対応する[`capabilities/<id>/`](../../capabilities)実装が`dotfiles.platform.mcp.targets`へ登録する。Capability registryとprofileを同じ変更に含める | target、probe、Capability closureのcheck |
 | MCP frontのtransport、lifecycle、port、backend依存を変える | 対応するCapabilityのMCP adapter。front生成は[`platform/mcp/module.nix`](../../platform/mcp/module.nix) | adapter固有check、`dotfiles-rebuild --plan` |
 | gatewayのport、YAML、protocol観測を変える | [`platform/mcp/gateway/`](../../platform/mcp/gateway) | gateway checks、`dotfiles-doctor` |
+| セッションに専門MCPを追加する入口を変える | Gatewayの追加経路とCapabilityのprivate stdio宣言をclient起動時に投影する`dotfiles-tool-session` | 通常経路の一覧、選択した経路の呼出し、未選択経路の拒否、終了後の設定不変を実clientで確かめる |
 | container共通schema、network、image同期を変える | [`platform/containers/module.nix`](../../platform/containers/module.nix)と[`platform/containers/impl/container-backend.nix`](../../platform/containers/impl/container-backend.nix) | Platform container checks、`dotfiles-rebuild` |
 | application backend、endpoint、volumeを変える | 対応するCapability内のbackend/server/database unit | Capability固有check、`dotfiles-doctor` |
 | hostでcontainer applicationを有効化・無効化する | [`profiles/hosts/`](../../profiles/hosts)の`dotfiles.capabilities.enabled`。container名ではなく所有するCapability IDを選ぶ | `container-capability-gating`、対象hostのtoplevel check、`dotfiles-rebuild --plan` |

@@ -395,14 +395,24 @@ clientごとに公開されるtoolは次のとおりである。使えるかは�
 
 GitHubとContext7の実行fileは、rootの[`nixpkgs-unstable` input](../../flake.nix)で固定したleaf packageから受け取る。
 hostとHome Managerのpackage setはstableのまま変えず、providerごとのasset取得やnpm lockは持たない。
-各providerの`serverBuilder`による実行時credential読込、toolset、port、probe、secret変更時のrestartと、clientにはgatewayだけを配る契約は変えない。
+各providerの`serverBuilder`が実行時の資格情報を読む。
+共有するGitHub adapterはサーバーの読取専用モードで動き、書込は選んだアカウントの公式stdioだけを明示的なセッションに渡す。
 このpackage供給から同梱Skillの採用は導かず、Skillの採用と差替は既存のregistryが所有する。
 
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
-Playwright、Chrome DevTools、memlabのsession frontはagentgateway内の`lazy_discovery`を使う。同じ実行file・引数・clientのinitialize内容で二度一致したdiscovery応答だけを記憶し、未使用sessionでは子processを起動せずに返す。未確認または変動する応答は実serverから取得する。secretや実行時envでtool集合が変わるproviderには適用しない。
+`exposure`は通常経路に掲載するかを、`activation`はfrontをOS起動時に立てるかを決める。
+手動起動のfrontは通常経路へ登録できない。
+Playwright、Chrome DevTools、MemLab、Context7のsession frontはagentgateway内の`lazy_discovery`を使う。
+同じ実行file・引数・clientのinitialize内容で二度一致したdiscovery応答だけを記憶し、未使用sessionでは子processを起動せずに返す。
+未確認または変動する応答は実serverから取得する。
+secretや実行時envでtool集合が変わるproviderには適用しない。
 最初のtool呼出しでsession専用serverを一度だけ起動し、initializeと通知を再送して、既に返したdiscoveryとの一致を確かめる。不一致は呼出しを失敗にし、記憶を無効化してlist変更を通知する。toolの結果やheap、tabをsession間で共有しない。起動済みのserverをidleという理由だけで破棄する変更ではなく、未起動sessionのDELETEや期限切れにも子processを作らない。
 
-[`platform/mcp/gateway/module.nix`](../../platform/mcp/gateway/module.nix)は単一endpointのID、port、URL、service、runtime directory、YAML source、target名を公開する。gatewayは全frontへloopback HTTPで接続するが、front serviceを起動依存に持たず、子processも作らない。各AI CLIが知る接続先はこのURLだけである。
+一つの[Gateway](../../platform/mcp/gateway/module.nix)が通常経路`/mcp`と、選択したtargetだけの`/mcp/<target>`を公開する。
+Gateway自身はfrontを起動せず、通常のdoctorは既定経路だけを使ってtoolを呼ぶ。
+専門経路の接続は[セッションの起動入口](../reference/tooling.md#セッションにツールを追加する)から各clientの標準設定へ渡し、既存のuser設定を更新しない。
+Claude Codeの専用管理設定とAntigravity CLIの永続設定は変更しない。この二つのclientでは既定経路だけを使い、追加が必要な仕事は対応clientに引き継ぐ。
+経路を分けるだけでは認可にならないため、書込権限を持つstdioを共有HTTPに登録しない。
 gatewayのrouteは`backendRequestTimeout`を60秒にする。
 指定が無いとagentgatewayはupstreamの応答headerを10秒で打ち切り、待機を含むbrowser操作が`upstream call timeout`で失敗する。
 打ち切られた呼出しもbrowserの中では処理が続くため、失敗を見たagentが同じ操作を重ねて実行する。

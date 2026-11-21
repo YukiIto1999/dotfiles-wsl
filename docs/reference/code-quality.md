@@ -54,7 +54,7 @@ MCP の local analysis/IDE/Vortex toolset は有効にせず、保存済み証�
 
 | SOPS key | 値と使用条件 | Runtime reader |
 |---|---|---|
-| `sonarqube/admin_password` | default と異なる単一行 password。末尾改行を含めない | root。provisioning service へ `LoadCredential` で渡す |
+| `sonarqube/admin_password` | default と異なる単一行 password。末尾改行を含めない | provisioning と停止用の service へ `LoadCredential` で渡す |
 | `sonarqube/db_password` | 32 文字以上の `[A-Za-z0-9_-]` password。properties escape を不要にするための入力制約 | root の runtime template と、container の読み手 |
 | `sonarqube/token` | 専用 evidence user が発行した User token | host user の MCP process |
 
@@ -66,6 +66,7 @@ MCP は User token が必要であり、project/global analysis token を流用�
 scanner は別の project analysis token を、source tree 外の private runtime file として caller が渡す。
 project ごとの SOPS key の命名と権限は project owner が管理し、この Capability は全 project の global analysis token を作らない。
 secret の差替えだけで server の admin/DB password は変更されないため、rotation は API/DB と store の整合を owner が取る。
+差替え時は稼働中の関係unitだけを再起動し、停止中のSonarQubeを起動しない。
 
 DB の `.env` は接続 user/database と `POSTGRES_PASSWORD_FILE` path だけを渡し、password を Docker の Env/config に展開しない。
 DB は upstream の `POSTGRES_PASSWORD_FILE` で root `0400` の runtime template を読む。
@@ -82,6 +83,18 @@ owner が同じ digest、file 注入契約、最終 volume を使う専用 boots
 専用 evidence user と real User token を作成し、API response から token を直接 SOPS へ暗号化してから bootstrap を停止し、私有 network を回収する。
 通常配備は完成した三 key と同じ volume を使う。
 bootstrap と通常 container が同じ DB/data volume を同時に書き込むことを許可しない。
+
+## 起動と停止
+
+Server、DB、MCP frontはOS起動や通常のdoctorで起動しない。
+利用者が`sudo systemctl start sonarqube.target`を実行し、Sonar APIの`UP`とprovisioning成功を待つ。
+保存結果をMCPで調べる場合は、その後で`dotfiles-tool-session`の`sonarqube`をセッションに追加する。
+起動に失敗した場合は `systemctl status sonarqube-provision.service` で原因を確認する。
+
+作業終了後はscanner、ブラウザ、他の利用者が作業中でないことを確認し、`sudo systemctl start sonarqube-stop.service`を実行する。
+管理対象scannerが稼働中か、Compute Engineに待機中・処理中の解析があるか、進行状況を確認できない場合、停止入口は対象unitを止めずに失敗する。
+Project固有のscannerを使う場合は、解析の送信から完了まで終わったことを利用者が確認する。
+停止によってvolume、解析履歴、credentialは削除しない。
 
 ## 承認された project の解析
 
@@ -113,7 +126,7 @@ scan の upload と解析処理の完了は別であり、待機しない場合�
 この手順は配備 owner が実行する受入契約である。
 共有 project や他 session の container を対象にせず、新しい所有 fixture を使う。
 
-1. 完成した三 key で配備し、doctor の native `get_system_status` protocol probe と server `UP` を確認する。
+1. 完成した三 key で配備し、通常のdoctorでは停止を維持すること、明示起動後は選択したMCPの`get_system_status`が`UP`を返すことを確認する。
 2. 一意の fixture project key を作り、evidence user へその project の Browse/See Source Code、別 scanner principal へ Execute Analysis を付与する。
    その project の analysis token を source tree 外の private runtime file に直接渡す。
 3. 新しいfixture rootを`<fixture-root>`とし、`<fixture-root>/src/example.py`と`<fixture-root>/sonar-project.properties`へ次の内容を置く。

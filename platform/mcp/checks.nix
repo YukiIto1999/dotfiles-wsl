@@ -237,6 +237,7 @@
         restartWarningCount = 5;
         restartFailureCount = 20;
         targetNames = builtins.attrNames targets;
+        bootTargetNames = builtins.filter (name: targets.${name}.activation == "boot") targetNames;
         gatewayService = hostConfig.dotfiles.platform.mcp.gateway.service;
         gatewayServiceObservation = "mcp/service/${gatewayService}";
         gatewayRestartObservation = "mcp/service-restart/${gatewayService}";
@@ -262,11 +263,16 @@
             candidateServiceNames = [
               configuration.dotfiles.platform.mcp.gateway.service
             ]
-            ++ map (front: front.service) candidateFronts;
+            ++ map (front: front.service) (
+              builtins.filter (front: candidateTargets.${front.name}.activation == "boot") candidateFronts
+            );
             candidateObservations = selectMcpObservations configuration.dotfiles.health.observations;
             candidateProtocol = candidateObservations."mcp/protocol/default" or null;
+            defaultTargetNames = builtins.filter (
+              name: candidateTargets.${name}.exposure == "default"
+            ) candidateTargetNames;
             gatewayTimeout = lib.foldl' lib.max 0 (
-              map (name: candidateTargets.${name}.probe.timeout) candidateTargetNames
+              map (name: candidateTargets.${name}.probe.timeout) defaultTargetNames
             );
             serviceObservations = builtins.listToAttrs (
               map (
@@ -328,7 +334,7 @@
                 "mcp-session"
                 "mcp-tools"
               ]
-              ++ map (name: "mcp-target/${name}") candidateTargetNames;
+              ++ map (name: "mcp-target/${name}") defaultTargetNames;
               requiredOutcomeIds = [ "mcp-session" ];
               requiredResourceKeys = [ ];
               envelopeVersion = 1;
@@ -406,7 +412,8 @@
       {
         mcp-runtime-observation-contract =
           assert builtins.length targetNames > 0;
-          assert builtins.length (builtins.attrNames mcpObservations) == 2 * builtins.length targetNames + 4;
+          assert
+            builtins.length (builtins.attrNames mcpObservations) == 2 * builtins.length bootTargetNames + 4;
           assert protocolObservation != null;
           assert mcpObservations == expectedMcpObservations;
           assert protocolObservation.command.meta.mainProgram == "dotfiles-mcp-gateway-observer";
@@ -424,11 +431,11 @@
               builtins.attrNames (
                 selectMcpObservations extraTargetDescriptionVariantConfig.dotfiles.health.observations
               )
-            ) == 2 * (builtins.length targetNames + 1) + 4;
+            ) == 2 * (builtins.length bootTargetNames + 1) + 4;
           assert
             builtins.length (
               builtins.attrNames (selectMcpObservations removedTargetVariantConfig.dotfiles.health.observations)
-            ) == 2 * (builtins.length targetNames - 1) + 4;
+            ) == 2 * (builtins.length bootTargetNames - 1) + 4;
           assert !timeout121Evaluation.success;
           assert mcpDefinitionKeys == builtins.attrNames expectedMcpObservations;
           assert lib.all (observation: observation.resourceKey == null) (builtins.attrValues mcpObservations);
@@ -811,7 +818,11 @@
           ) fronts;
           assert lib.all (front: (configOf front).Restart == "always") fronts;
           assert lib.all (front: (configOf front).RestartSec == "5s") fronts;
-          assert lib.all (front: services.${front.service}.wantedBy == [ "multi-user.target" ]) fronts;
+          assert lib.all (
+            front:
+            services.${front.service}.wantedBy
+            == lib.optionals (targets.${front.name}.activation == "boot") [ "multi-user.target" ]
+          ) fronts;
           assert missingWaits == [ ];
           assert boundElsewhere == [ ];
           assert unrestricted == [ ];

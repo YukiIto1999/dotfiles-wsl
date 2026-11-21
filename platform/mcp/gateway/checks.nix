@@ -512,29 +512,61 @@
           assert syntheticContract.targets == builtins.attrNames fixtureProbes;
           assert gateway.targets == expected.targets;
           assert gateway.targets == builtins.attrNames fronts;
+          assert
+            builtins.attrNames gateway.optionalUrls == builtins.attrNames (
+              lib.filterAttrs (_: target: target.exposure == "session") hostConfig.dotfiles.platform.mcp.targets
+            );
           assert lib.all (front: front.url == "http://127.0.0.1:${toString front.port}/mcp") (
             builtins.attrValues fronts
           );
           assert lib.all (front: hostConfig.systemd.services ? ${front.service}) (builtins.attrValues fronts);
           assert dependencyFree service;
           assert lib.all (candidate: !(dependencyFree candidate)) dependencyMutations;
-          pkgs.runCommandLocal "check-gateway-front-contract" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
-            set -euo pipefail
+          pkgs.runCommandLocal "check-gateway-front-contract"
+            {
+              nativeBuildInputs = [
+                pkgs.jq
+                pkgs.yq-go
+              ];
+            }
+            ''
+              set -euo pipefail
 
-            yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | .name + " " + .mcp.host] | sort | .[]' \
-              ${gateway.source} > actual-targets
-            printf '%s' ${
-              lib.escapeShellArg (
-                lib.concatStringsSep "\n" (
-                  lib.sort builtins.lessThan (lib.mapAttrsToList (name: front: "${name} ${front.url}") fronts)
+              yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | .name + " " + .mcp.host] | sort | .[]' \
+                ${gateway.source} > actual-targets
+              printf '%s' ${
+                lib.escapeShellArg (
+                  lib.concatStringsSep "\n" (
+                    lib.sort builtins.lessThan (lib.mapAttrsToList (name: front: "${name} ${front.url}") fronts)
+                  )
                 )
-              )
-            } > expected-targets
-            printf '\n' >> expected-targets
-            diff --unified expected-targets actual-targets
-            test "$(yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | select(.stdio)] | length' ${gateway.source})" = 0
-            touch $out
-          '';
+              } > expected-targets
+              printf '\n' >> expected-targets
+              diff --unified expected-targets actual-targets
+              test "$(yq -r '[.binds[].listeners[].routes[].backends[].mcp.targets[] | select(.stdio)] | length' ${gateway.source})" = 0
+              test "$(yq -r '.binds[0].listeners[0].routes[0].matches[0].path.exact' ${gateway.source})" = /mcp
+              jq -n --argjson urls ${lib.escapeShellArg (builtins.toJSON gateway.optionalUrls)} \
+                '$urls | to_entries | map(.value | sub("^http://[^/]+"; "")) | sort' > expected-paths
+              yq -o=json '[.binds[0].listeners[0].routes[1:][].matches[0].path.exact] | sort' \
+                ${gateway.source} > actual-paths
+              diff --unified expected-paths actual-paths
+              touch $out
+            '';
+
+        mcp-gateway-route-scope =
+          pkgs.runCommandLocal "check-mcp-gateway-route-scope"
+            {
+              nativeBuildInputs = [
+                pkgs.yq-go
+                pkgs.python3
+              ];
+            }
+            ''
+              set -euo pipefail
+              yq -o=json '.' ${gateway.source} \
+                | python3 ${./fixtures/route-scope.py} ${lib.getExe agentgateway}
+              touch "$out"
+            '';
 
         gateway-artifact-contract =
           let
@@ -553,6 +585,7 @@
           assert
             builtins.attrNames gateway == [
               "id"
+              "optionalUrls"
               "port"
               "runtimeDirectory"
               "service"
@@ -563,6 +596,7 @@
           assert hostOptions.dotfiles.platform.mcp.gateway.id.readOnly;
           assert !(hostOptions.dotfiles.platform.mcp.gateway.port.readOnly or false);
           assert hostOptions.dotfiles.platform.mcp.gateway.url.readOnly;
+          assert hostOptions.dotfiles.platform.mcp.gateway.optionalUrls.readOnly;
           assert hostOptions.dotfiles.platform.mcp.gateway.service.readOnly;
           assert hostOptions.dotfiles.platform.mcp.gateway.runtimeDirectory.readOnly;
           assert hostOptions.dotfiles.platform.mcp.gateway.source.readOnly;

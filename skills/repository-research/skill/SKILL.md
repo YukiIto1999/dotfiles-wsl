@@ -29,7 +29,7 @@ semantic探索とexact anchorの両方が必要なら、概念と関係を保っ
 
 native探索だけで候補が足りず、広い範囲や複数componentへ探索を広げる場合に、公開された`repository-search`の既存索引を使う。
 すでに十分な根拠があれば同じ問いをZvec-Grepに投げ直さない。
-URI deviceを公開するclientでは`xd://mcp__gateway_zvec_grep_zvec_grep_search`などが入口となり、MCP toolを直接公開するclientではそのネイティブな呼出し形式を使う。
+未接続で既存索引が必要なときだけ、`dotfiles-tool-session list`の`zvec-grep`を選ぶセッションへ調査範囲を引き継ぐ。
 現在公開された実tool名とschemaを確認し、`root`へdaemonに見えるworkspaceの絶対path、`query`へ問い、`autoUpdate: false`を渡す。
 複数の問いは`queries`、確認済みexact anchorは補助の`fts`、補助の意味検索は`vector`へ分けられ、一つの順位へ統合する場合だけ`fuse: true`を使う。
 これらは検索経路であり、hard filterとは扱わない。

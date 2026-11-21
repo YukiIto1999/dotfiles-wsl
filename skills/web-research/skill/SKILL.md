@@ -21,7 +21,7 @@ description: Researches public facts, version-specific library APIs, and primary
 Web検索とURL取得はclient native toolであり、この環境はMCP providerもproxyも配備しない。
 tool名、引数、返り値の形はclientごとに違うため、現在公開されたtool一覧とschemaへ対応させて使う。
 subagentはtool allowlistにあるtoolだけを持つので、許可されていないWeb toolを使えると仮定しない。
-`context7`は`library-documentation`のgateway toolであり、URI deviceを公開するclientでは`xd://mcp__gateway_context7_resolve_library_id`などの入口を読む。
+`context7`は`library-documentation`のGateway toolであり、未接続で必要なときは`dotfiles-tool-session list`の`context7`を選ぶセッションへライブラリ名、対象版と問いを引き継ぐ。
 MCP toolを直接公開するclientでは、そのネイティブな呼出し形式で実tool名とschemaへJSON引数を対応させる。
 toolの説明に別toolやHTTP endpointが書かれていても、その名前が公開されていることの証拠にはしない。
 問いに必要な検索またはURL取得のtoolが公開されていなければ、上位の呼出し元へ具体的なquery、URL、必要な範囲を渡して実行を依頼し、返された原応答だけを根拠にする。

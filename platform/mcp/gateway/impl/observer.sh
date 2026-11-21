@@ -349,11 +349,8 @@ if ((tools_curl_status == 0)) \
       and (has("error") | not)
       and all($probes | to_entries[];
         . as $probe
-        | any($response.result.tools[];
-            (.name | type == "string")
-            and (.name | startswith($probe.key + "_")))
-          and any($response.result.tools[];
-            .name == ($probe.key + "_" + $probe.value.tool)))
+        | (if ($probes | length) == 1 then $probe.value.tool else $probe.key + "_" + $probe.value.tool end) as $name
+        | any($response.result.tools[]; .name == $name))
   ' "$tools_json" >/dev/null 2>&1; then
   set_outcome mcp-tools pass "MCP tools/list covers every target probe"
 else
@@ -383,7 +380,7 @@ run_target() {
         id:$rpc_id,
         method:"tools/call",
         params:{
-          name:($target_id + "_" + $probes[$target_id].tool),
+          name:(if ($probes | length) == 1 then $probes[$target_id].tool else $target_id + "_" + $probes[$target_id].tool end),
           arguments:$probes[$target_id].args
         }
       }

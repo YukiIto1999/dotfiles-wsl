@@ -16,6 +16,17 @@ let
     map (account: "github-${account}") cfg.accounts
   );
   mkMcpServer = pkgs.callPackage ../../../../platform/mcp/package/mk-server.nix { };
+  accountServer =
+    account: readOnly:
+    lib.getExe (
+      pkgs.callPackage ./package.nix {
+        inherit toolsets readOnly;
+        githubMcpServer =
+          self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-mcp-server;
+        serverBuilder = mkMcpServer;
+        tokenFile = config.sops.secrets."accounts/${account}/token".path;
+      }
+    );
 
   toolsets = [
     "context"
@@ -29,15 +40,8 @@ let
     index: account:
     lib.nameValuePair "github-${account}" {
       provider = "github";
-      executable = lib.getExe (
-        pkgs.callPackage ./package.nix {
-          inherit toolsets;
-          githubMcpServer =
-            self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-mcp-server;
-          serverBuilder = mkMcpServer;
-          tokenFile = config.sops.secrets."accounts/${account}/token".path;
-        }
-      );
+      executable = accountServer account true;
+      exposure = "default";
       serverLifecycle = "service";
       # 環境変数の PAT と両立しないリクエスト単位 OAuth の HTTP モード不採用
       port = 8780 + index;
@@ -52,6 +56,11 @@ in
 {
   config = lib.mkIf enabled {
     dotfiles.platform.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
+    dotfiles.platform.mcp.privateServers = lib.listToAttrs (
+      map (
+        account: lib.nameValuePair "github-write-${account}" { executable = accountServer account false; }
+      ) cfg.accounts
+    );
 
     # 起動後のトークン再読込に対応しない github-mcp-server の制約
     sops.secrets = lib.listToAttrs (

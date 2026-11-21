@@ -1,4 +1,5 @@
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -74,6 +75,34 @@ def observe_input(root):
     return observed
 
 
+class LifecycleRefusal(Exception):
+    """Backend lifecycle state that forbids starting a scan, with message and CLI exit code"""
+
+
+def hold_lifecycle_lock(path):
+    """Shared analysis lock that the guarded backend stop takes exclusively
+
+    Args:
+        path: Root-owned lock file published by the backend lifecycle
+    Returns:
+        Non-inheritable descriptor holding the shared lock until process exit
+    Raises:
+        LifecycleRefusal: Unavailable lock file or an operator stop in progress
+    """
+    try:
+        descriptor = os.open(path, os.O_RDONLY)
+    except OSError:
+        raise LifecycleRefusal(f"SonarQube analysis lock {path} is unavailable", 1) from None
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(descriptor)
+        raise LifecycleRefusal(
+            "SonarQube is being stopped by its operator; retry after `sudo systemctl start sonarqube.target`", 75
+        ) from None
+    return descriptor
+
+
 def run_scan(arguments):
     """Authorized native scan with private execution evidence
 
@@ -94,6 +123,8 @@ def run_scan(arguments):
     token = token_path.read_text().rstrip("\n")
     if not token or "\n" in token or "\r" in token:
         raise ValueError("scanner token file must contain a non-empty single-line value")
+    # 停止の入口は排他で取るため、保持中の native scan と CE 送信の途中で backend は止まらない
+    hold_lifecycle_lock(arguments.lifecycle_lock)
 
     os.umask(0o077)
     run_id = "scan-" + str(uuid4())
@@ -264,6 +295,7 @@ def main():
     parser.add_argument("--scanner", required=True, help=argparse.SUPPRESS)
     parser.add_argument("--scanner-package-version", required=True, help=argparse.SUPPRESS)
     parser.add_argument("--server-url", required=True, help=argparse.SUPPRESS)
+    parser.add_argument("--lifecycle-lock", required=True, help=argparse.SUPPRESS)
     parser.add_argument("--cwd", required=True, help="project root with sonar-project.properties")
     parser.add_argument("--project-key", required=True)
     parser.add_argument("--token-file", required=True, help="project analysis token file; never a token value")
@@ -273,6 +305,10 @@ def main():
     signal.signal(signal.SIGINT, terminate_scan)
     try:
         return run_scan(arguments)
+    except LifecycleRefusal as refusal:
+        message, exit_code = refusal.args
+        print(message, file=sys.stderr)
+        return exit_code
     except (OSError, ValueError):
         print("SonarScanner setup or input observation failed; check project and credential paths", file=sys.stderr)
         return 1

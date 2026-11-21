@@ -9,15 +9,22 @@ name:
   extraOptions ? [ ],
   ports ? [ ],
   deps ? [ ],
+  activation ? "boot",
 }:
+assert lib.assertOneOf "activation" activation [
+  "boot"
+  "manual"
+];
 let
   networkUnit = "docker-dotfiles-backends-network.service";
+  manual = activation == "manual";
 in
 {
   containers."${name}" = {
     inherit image;
     pull = "never";
   }
+  // lib.optionalAttrs manual { autoStart = false; }
   // lib.optionalAttrs (imageFile != null) { inherit imageFile; }
   // lib.optionalAttrs (environmentFiles != [ ]) { inherit environmentFiles; }
   // lib.optionalAttrs (volumes != [ ]) { inherit volumes; }
@@ -41,9 +48,21 @@ in
   systemdServices."docker-${name}" = {
     after = [ networkUnit ] ++ deps;
     requires = [ networkUnit ] ++ deps;
+  }
+  // lib.optionalAttrs manual {
+    # 稼働中の backend は operator の停止まで維持する。switch による再起動は処理中の解析を中断するため不可。
+    # 新しい定義は次の operator 起動で適用され、それまでの image の相違は doctor が示す
+    restartIfChanged = false;
+  }
+  // {
     serviceConfig = {
       Restart = lib.mkForce "always";
       RestartSec = "5s";
+    }
+    // lib.optionalAttrs manual {
+      # 明示停止の docker stop で TERM を受けた application は 128+15 で終わる。
+      # 失敗扱いにすると意図した停止が doctor の fault と区別できない
+      SuccessExitStatus = "143";
     };
   };
 }

@@ -11,6 +11,7 @@ let
   scanner = pkgs.callPackage ./package.nix {
     commandBuilder = mkCommand;
     serverUrl = config.dotfiles.platform.containers.services.sonarqube.endpoints.http.url;
+    lifecycleLock = config.dotfiles.capabilities.code-quality.sonarqube.lifecycle.scanLockFile;
   };
 in
 {

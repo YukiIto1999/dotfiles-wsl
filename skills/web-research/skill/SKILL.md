@@ -18,7 +18,7 @@ description: Researches public facts, version-specific library APIs, and primary
 
 ## 公開入口
 
-Web検索とURL取得はclient native toolであり、この環境はMCP providerもproxyも配備しない。
+Web検索と通常のURL取得はclient native toolを使い、この環境はWeb検索用のMCP providerもproxyも配備しない。
 tool名、引数、返り値の形はclientごとに違うため、現在公開されたtool一覧とschemaへ対応させて使う。
 subagentはtool allowlistにあるtoolだけを持つので、許可されていないWeb toolを使えると仮定しない。
 `context7`は`library-documentation`のGateway toolであり、未接続で必要なときは`dotfiles-tool-session list`の`context7`を選ぶセッションへライブラリ名、対象版と問いを引き継ぐ。
@@ -38,7 +38,9 @@ GitHubのrepository、issue、PRの読取・変更は`github-operations`が所�
 取得toolが原文でなく要約や抽出を返す場合は、返り値を原文の根拠にせず、「記載がない」という結果も原文に無いことの証拠にしない。
 
 成功状態だけでなく、title、主見出し、主要節が取得できたかを原文と照合する。空、application shell、同意画面、navigationだけの本文、または見えるはずの項目（著者、表の列、注記）の欠落は、取得toolがJavaScript描画後の内容を返していない可能性を示す。
-利用可能な`browser-operation`へURLと確認したい項目を渡し、実ページから読んだ内容を受け取る。使えなければ未取得と明示する。
+利用可能な`browser-operation`へURLと確認したい項目を渡し、実ページから読んだ内容を受け取る。
+それでも必要な本文を取得できず、利用者が公開URLとContext.devへの送信を承認している場合に限り、`context-dev-scrape <URL>`で取得する。
+最終URLと必要な本文を照合し、対象を越えた結果、取得失敗、資格情報なしでは未取得と明示する。
 既存PDFは、取得toolが全頁の抽出を示す場合だけ本文として使い、部分抽出の警告があれば部分取得として扱う。
 
 ### 正規の一次資料が分かっている

@@ -367,11 +367,15 @@ AGENTSにある、過去の利用者指示を会話の原文で確かめる規�
 
 ## Web調査
 
-Web検索とURL取得は、各clientが公開するnative toolを使う。この環境はWeb検索用のMCP providerもbackendも配備せず、公開するMCPはlibrary docsの`library-documentation`（Context7）だけである。
+Web検索と通常のURL取得は、各clientが公開するnative toolを使う。
+Web検索用のMCP providerもbackendも配備せず、ライブラリ資料のMCPは `library-documentation`（Context7）を使う。
 [`web-research`](../../skills/web-research/skill/SKILL.md)が問いの分解、source選択、根拠評価を所有し、検索の順位、snippet、生成された回答文をclaimの根拠にしない。
 
 SearXNGとCrawl4AIは配備せず、検索と本文取得のための常設backendを持たない。
 native readerがJavaScript描画後の内容を取得できない場合は、既存の`browser-operation`へ必要な項目の取得を渡す。
+既知の公開URLから本文を取り出す用途では、利用者が対象URLと送信先を承認した場合だけ、`context-dev-scrape` でContext.devの公式Scrape APIを一回呼べる。
+このcommandは専用のAPI keyを実行時に受け取り、Markdownと最終URLを返す。
+内部・認証付き・署名付きのURLや文書を送らず、Web検索のproviderやContext7を置き換えない。
 検索系のbackendを追加または代替する場合は、標準toolと既存ブラウザで得られる成果を明確に上回るかを実測し、RAM、CPU、secret、image、lifecycleの保守負担とあわせて判断する。
 
 clientごとに公開されるtoolは次のとおりである。使えるかは配備したsessionのtool一覧で確かめる。

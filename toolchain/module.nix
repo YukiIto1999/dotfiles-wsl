@@ -175,6 +175,7 @@ in
   config.dotfiles.toolchain.lsp = selectedLsp;
 
   config.dotfiles.toolchain.packages = {
+    context-dev-scrape = pkgs.callPackage ./package/context-dev-scrape.nix { };
     actrun = self.inputs.actrun.packages.${pkgs.stdenv.hostPlatform.system}.default;
     similarity = pkgs.callPackage ./package/similarity.nix { };
     explainer = pkgs.callPackage ./package/explainer/package.nix {

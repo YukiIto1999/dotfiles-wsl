@@ -399,8 +399,8 @@
           "dotfiles-agent-reserve-swap"
           "dotfiles-zram-swap"
           "nix-gc"
-          "otel-collector"
-        ];
+        ]
+        ++ lib.optional hostConfig.dotfiles.telemetry.enable hostConfig.dotfiles.telemetry.service;
         workloadViolations =
           configuration:
           let

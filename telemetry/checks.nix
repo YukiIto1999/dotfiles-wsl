@@ -5,17 +5,23 @@
         helpers,
         pkgs,
         lib,
-        hostConfig,
-        hostOptions,
         mkProbeSystem,
         normalMachineModule,
         ...
       }:
       let
         inherit (helpers.execTokens) tokensOf onlyValue valuesOf;
-        contract = hostConfig.dotfiles.telemetry;
-        collectorConfig = hostConfig.dotfiles.managedArtifacts."telemetry/collector".source;
-        service = hostConfig.systemd.services.${contract.service}.serviceConfig;
+        enabledProbe = {
+          dotfiles.telemetry.enable = true;
+        };
+        enabledSystem = mkProbeSystem [
+          normalMachineModule
+          enabledProbe
+        ];
+        inherit (enabledSystem) config options;
+        contract = config.dotfiles.telemetry;
+        collectorConfig = config.dotfiles.managedArtifacts."telemetry/collector".source;
+        service = config.systemd.services.${contract.service}.serviceConfig;
 
         telemetryObservationsFor =
           telemetryContract:
@@ -52,12 +58,12 @@
               };
           };
         selectTelemetryObservations = lib.filterAttrs (name: _: lib.hasPrefix "telemetry/" name);
-        telemetryObservations = selectTelemetryObservations hostConfig.dotfiles.health.observations;
+        telemetryObservations = selectTelemetryObservations config.dotfiles.health.observations;
         expectedTelemetryObservations = telemetryObservationsFor contract;
         telemetryObservationKeys = builtins.attrNames expectedTelemetryObservations;
         telemetryObservationDefinitions = builtins.filter (
           definition: lib.hasSuffix "/telemetry/module.nix" (toString definition.file)
-        ) hostOptions.dotfiles.health.observations.definitionsWithLocations;
+        ) options.dotfiles.health.observations.definitionsWithLocations;
         telemetryDefinitionKeys = lib.unique (
           lib.concatMap (definition: builtins.attrNames definition.value) telemetryObservationDefinitions
         );
@@ -92,6 +98,7 @@
         descriptionVariantConfig =
           (mkProbeSystem [
             normalMachineModule
+            enabledProbe
             (
               { lib, ... }:
               {
@@ -149,7 +156,7 @@
             '';
 
         telemetry-runtime-observation-contract =
-          assert builtins.hasAttr contract.service hostConfig.systemd.services;
+          assert builtins.hasAttr contract.service config.systemd.services;
           assert lib.assertMsg (
             telemetryObservations == expectedTelemetryObservations
           ) "telemetry runtime observation registry is incomplete";

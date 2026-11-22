@@ -80,7 +80,7 @@ in
   options.dotfiles.telemetry = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = lib.any (client: client.telemetry ? supported) (builtins.attrValues cfg.agents.clients);
+      default = false;
       description = "採用clientの使用量をOpenTelemetry collectorへ収集するか。";
     };
     endpoint = lib.mkOption {

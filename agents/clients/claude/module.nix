@@ -114,6 +114,7 @@ let
               .env.CLAUDE_CODE_ENABLE_TELEMETRY = "0"
               | .env.OTEL_METRICS_EXPORTER = "none"
               | .env.OTEL_LOGS_EXPORTER = "none"
+              | del(.env.OTEL_EXPORTER_OTLP_ENDPOINT, .env.OTEL_EXPORTER_OTLP_PROTOCOL)
             end
           | if $projectMemoryEnabled then . else
               .hooks |= (

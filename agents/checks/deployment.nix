@@ -86,10 +86,10 @@
         inherit (agentConfig) registry;
         adapterNames = builtins.attrNames registry;
         restrictedAgentRules = projectMemoryDisabledConfig.dotfiles.agents.shared.rules;
-        telemetryDisabledConfig =
+        telemetryEnabledConfig =
           (mkProbeSystem [
             normalMachineModule
-            { dotfiles.telemetry.enable = false; }
+            { dotfiles.telemetry.enable = true; }
           ]).config;
         minimalCapabilitySkills = minimalCapabilityConfig.dotfiles.agents.shared.skills;
         transitiveCapabilityAgentConfig =
@@ -709,12 +709,12 @@
           assert !(homeConfig.home.file ? ".claude/CLAUDE.md");
           assert !(hostConfig.environment.etc ? "claude-code/CLAUDE.md");
           assert !(artifacts ? "agents/claude/rules");
-          assert !(telemetryDisabledConfig.systemd.services ? otel-collector);
-          assert !(telemetryDisabledConfig.dotfiles.managedArtifacts ? "telemetry/collector");
+          assert !hostConfig.dotfiles.telemetry.enable;
+          assert !(hostConfig.systemd.services ? otel-collector);
+          assert !(hostConfig.dotfiles.managedArtifacts ? "telemetry/collector");
           assert
-            lib.filterAttrs (
-              name: _: lib.hasPrefix "telemetry/" name
-            ) telemetryDisabledConfig.dotfiles.health.observations == { };
+            lib.filterAttrs (name: _: lib.hasPrefix "telemetry/" name) hostConfig.dotfiles.health.observations
+            == { };
           pkgs.runCommandLocal "check-agent-claude-managed-policy"
             {
               nativeBuildInputs = [
@@ -732,9 +732,10 @@
                 ${selectionConfigs.trial.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
               jq -e --rawfile policy ${restrictedAgentRules} '.claudeMd == $policy' \
                 ${projectMemoryDisabledConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
-              jq -e '.env.CLAUDE_CODE_ENABLE_TELEMETRY == "0"
-                and .env.OTEL_METRICS_EXPORTER == "none" and .env.OTEL_LOGS_EXPORTER == "none"' \
-                ${telemetryDisabledConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
+              jq -e --arg endpoint ${lib.escapeShellArg telemetryEnabledConfig.dotfiles.telemetry.endpoint} '
+                .env.CLAUDE_CODE_ENABLE_TELEMETRY == "1" and .env.OTEL_METRICS_EXPORTER == "otlp"
+                and .env.OTEL_EXPORTER_OTLP_ENDPOINT == $endpoint' \
+                ${telemetryEnabledConfig.dotfiles.managedArtifacts."agents/claude/managed-settings".source}
               touch "$out"
             '';
 
@@ -830,14 +831,11 @@
                 clients.claude.managedFiles.${capabilityFileOf clients.claude "telemetry"}.source
               }
               jq --exit-status \
-                --arg endpoint ${lib.escapeShellArg hostConfig.dotfiles.telemetry.endpoint} \
-                --arg protocol ${lib.escapeShellArg hostConfig.dotfiles.telemetry.protocol} \
                 --argjson hooks ${lib.escapeShellArg (builtins.toJSON expectedClaudeHooks)} '
-                .env.CLAUDE_CODE_ENABLE_TELEMETRY == "1" and
-                .env.OTEL_METRICS_EXPORTER == "otlp" and
-                .env.OTEL_LOGS_EXPORTER == "otlp" and
-                .env.OTEL_EXPORTER_OTLP_ENDPOINT == $endpoint and
-                .env.OTEL_EXPORTER_OTLP_PROTOCOL == $protocol and
+                .env.CLAUDE_CODE_ENABLE_TELEMETRY == "0" and
+                .env.OTEL_METRICS_EXPORTER == "none" and
+                .env.OTEL_LOGS_EXPORTER == "none" and
+                (.env | has("OTEL_EXPORTER_OTLP_ENDPOINT") or has("OTEL_EXPORTER_OTLP_PROTOCOL") | not) and
                 .hooks == $hooks
               ' "$claudeCapabilities" > /dev/null
 

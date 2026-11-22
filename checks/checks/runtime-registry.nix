@@ -110,12 +110,14 @@
             telemetry = hostConfig.dotfiles.telemetry;
 
             declaredHere = lib.unique (
-              lib.concatMap (
-                definition:
-                lib.optionals (lib.hasPrefix (toString self) (toString definition.file)) (
-                  builtins.attrNames definition.value
-                )
-              ) hostOptions.systemd.services.definitionsWithLocations
+              lib.filter (name: builtins.hasAttr name hostConfig.systemd.services) (
+                lib.concatMap (
+                  definition:
+                  lib.optionals (lib.hasPrefix (toString self) (toString definition.file)) (
+                    builtins.attrNames definition.value
+                  )
+                ) hostOptions.systemd.services.definitionsWithLocations
+              )
             );
 
             # port を持たないと宣言した unit。増えるときは必ずこの表に現れる
@@ -137,7 +139,7 @@
               lib.unique (
                 map (front: front.service) (builtins.attrValues mcp.fronts)
                 ++ [ mcp.gateway.service ]
-                ++ [ telemetry.service ]
+                ++ lib.optional telemetry.enable telemetry.service
                 ++ map (name: "docker-${name}") (
                   builtins.attrNames hostConfig.virtualisation.oci-containers.containers
                 )
@@ -184,10 +186,12 @@
                   port = 15021;
                 }
               ]
-              ++ lib.mapAttrsToList (_: port: {
-                owner = telemetry.service;
-                inherit port;
-              }) telemetry.ports
+              ++ lib.optionals telemetry.enable (
+                lib.mapAttrsToList (_: port: {
+                  owner = telemetry.service;
+                  inherit port;
+                }) telemetry.ports
+              )
               ++ map (entry: {
                 inherit (entry) owner;
                 port = lib.toInt (builtins.elemAt (lib.splitString ":" entry.value) 1);

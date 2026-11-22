@@ -133,7 +133,7 @@ package wrapperは`ASPIRE_CLI_TELEMETRY_OPTOUT`と`ASPIRE_DASHBOARD_TELEMETRY_OP
 | `aspire-dashboard exec [--service NAME] -- COMMAND` | COMMANDのtelemetryだけをDashboardへ送る |
 | `aspire-dashboard stop` | 別の端末やセッションから止め、削除の完了まで待つ |
 
-UIは`http://127.0.0.1:18888`、OTLPはgRPCが`18889`、HTTPが`18890`で、いずれもloopbackだけで受ける。`4317`と`4318`はAI CLIの利用量を集める[telemetry collector](../../telemetry/module.nix)が使うため、Dashboardには使わない。
+UIは`http://127.0.0.1:18888`、OTLPはgRPCが`18889`、HTTPが`18890`で、いずれもloopbackだけで受ける。任意で有効にできるAI CLIの[telemetry collector](../../telemetry/module.nix)のport `4317`と`4318`とは分ける。
 lockで一つのinstanceに限り、二重に起動すると失敗する。
 `exec`と`otel`は受付可能になるまで拒否するため、`run`を起動した後は`status`が0になってから送信と読取を始める。エージェントが`run`をbackground jobで起動した場合は、作業の終了時にそのjobか`stop`で止める。
 

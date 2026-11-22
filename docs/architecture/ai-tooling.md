@@ -625,7 +625,6 @@ OMPのidle timeoutは有効にしない。調査した[18.20.0の`isIdleClient`]
 
 managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。
 
-telemetry collectorは対応するclientの採用時に有効となり、`dotfiles.telemetry.enable`で無効にできる。
-OMP-onlyなどtelemetry未対応の採用集合では、collector、配備物、health観測を配備しない。
-有効なcollectorはOTLPをloopbackで受け、生recordを残す。
+AI CLI使用量のcollectorは共通配備で起動しない。明示的に`dotfiles.telemetry.enable`を有効にしたhostだけがcollector、配備物、health観測を持ち、OTLPをloopbackで受けて生recordを残す。
+既存の記録は配備の切替では削除しない。Windows資源の観測とproject開発向けAspire Dashboardは別の経路である。
 CLIはendpointを`dotfiles.telemetry`から読み、portを重複して宣言しない。

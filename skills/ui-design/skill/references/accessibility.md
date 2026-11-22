@@ -6,7 +6,7 @@ productや法令が準拠水準を定めている場合は、その要件を優�
 
 - 見出し、領域、list、table、formの関係を見た目だけで表さない。
 - native controlで表せる操作は、そのroleとkeyboard behaviorを基準にする。
-- controlのaccessible name、説明、error、対象との対応を決める。iconや位置だけを名前にしない。
+- 文字のある操作は、見えるラベルをaccessible nameに含める。同じ「編集」が並ぶときは、どの行を編集するかも識別できる名前にする。補足やerrorは該当項目に関連付け、省く場合は空の参照を残さない。
 - 読み順と操作順をtaskの順序に合わせる。visual orderだけをCSSで入れ替えない。
 
 ## Keyboardとfocus
@@ -28,7 +28,7 @@ productや法令が準拠水準を定めている場合は、その要件を優�
 - 通常textは4.5:1、大きなtextは3:1、操作部品と意味を持つgraphicは隣接色に対して3:1を基準に確認する。例外は該当する達成基準で判断する。
 - 状態や選択を色だけで伝えず、文言、形、icon、programmatic stateのうち文脈に合う手掛かりを併用する。
 - targetは少なくとも24×24 CSS px相当か、隣接targetとの間隔を含むWCAG 2.2の例外条件を満たす設計にする。productがより大きい基準を持つ場合はそちらを使う。
-- zoom、text拡大、長い翻訳でcontrolやcontentが欠落しない再配置を決める。
+- Webでは[文字を200%まで拡大した場合](https://www.w3.org/WAI/WCAG22/Understanding/resize-text.html)と[縦スクロールの内容を幅320 CSS px相当で表示した場合](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html)を別の条件として扱う。どちらも重要な名前、値、操作が欠けないようにする。表や地図など、意味や操作に二次元配置が必要な部分の横スクロールを、画面全体の例外にしない。
 
 ## Motionと時間
 

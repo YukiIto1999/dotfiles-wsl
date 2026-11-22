@@ -34,6 +34,23 @@
       ]
     },
     {
+      "id": "copy-at-the-point-of-decision",
+      "set": "development",
+      "environment": "交付先の選択画面。見出しは「交付先」、直下に「交付先を選択します」。同名の支所が二つあり、名称の下の住所が異なる。各行の「選択」は確認へ進むだけ。確認画面の「選択」で発行を依頼する。応答は受付までで、応答を受け取れない場合も二重発行の恐れがある。",
+      "prompt": "交付先を選んで発行を依頼する流れを見直してください。仕様は変えません。",
+      "expectedSkills": ["ui-design"],
+      "expected": {
+        "removesTheHeadingEchoButKeepsTheAddressAtSelection": true,
+        "distinguishesReviewFromRequestingIssue": true,
+        "doesNotClaimIssueOrEncourageResubmissionOnUnknownOutcome": true
+      },
+      "critical": [
+        "removesTheHeadingEchoButKeepsTheAddressAtSelection",
+        "distinguishesReviewFromRequestingIssue",
+        "doesNotClaimIssueOrEncourageResubmissionOnUnknownOutcome"
+      ]
+    },
+    {
       "id": "approval-interaction",
       "prompt": "権限申請を確認し、差分を理解して承認または差戻しするUIを設計してください。誤操作の予防、処理中、成功、競合、失敗からの回復を利用者にどう見せるかまで決めてください。",
       "expectedSkills": [

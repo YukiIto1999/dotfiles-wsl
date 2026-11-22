@@ -433,7 +433,7 @@ sourceの完成、形式validatorの成功、実測した発火と採否を別�
 | [Anthropic frontend-design](https://github.com/anthropics/skills/blob/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/frontend-design/SKILL.md) | [sourceのcomplete terms](https://github.com/anthropics/skills/blob/683bc88e56f3e09ba94f7055977f3d3aa499f202/skills/frontend-design/LICENSE.txt) | 実contentとproductの語彙、copyと状態の一貫性、briefとの比較 | 個性を一箇所へ集中する一律の処方、毎回異なるlook、固定palette、type scale、character count、実装workflow、記憶にある好みだけでdirectionを変えること |
 | [Web Interface Guidelines](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/command.md) | [MIT](https://github.com/vercel-labs/web-interface-guidelines/blob/434b7f91364665f2f733b310ec54809bf8f37937/LICENSE) | native semantics、focus、form、content増幅、locale、motion、asset寸法をUI briefと指定axisのreviewで確認すること | 全listの固定virtualization閾値、全font preload、固定case、全stateのURL同期、概算やstatic codeから実画面合格を宣言すること |
 
-
+判断の粒度は [Astryx の Design Conventions](https://github.com/meta/astryx/wiki/Design-Conventions) と[デジタル庁のローカルデザインシステム](https://design.digital.go.jp/dads/guidance/local-design-system/)を参考にする。引き継ぐのは token の用途、部品の状態、業務固有の構成を分ける考え方で、外観や部品ライブラリではない。[GOV.UK のエラー要約](https://design-system.service.gov.uk/components/error-summary/)は、同じ文言でも発見と訂正の両方に必要な例であり、重複数を削減目標にしない理由になる。
 frontend-design原版は配備せず、前提が合う方法だけを`ui-design`へ統合する。
 利用者の目的、承認済みbrief、守るべき業務・安全・accessibility要件が、特徴的なlookやdonorの好みより優先する。明示された再設計では既存design systemも評価対象であり、維持自体を目的にしない。
 frontend実装やreviewのためだけの同役割Skillは増やさない。

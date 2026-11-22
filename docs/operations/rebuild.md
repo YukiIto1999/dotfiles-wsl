@@ -26,7 +26,7 @@ dotfiles-rebuild --candidate ID
 planは元のcheckout、HEAD、index、`flake.lock`、配備済みのgenerationを変更しない。
 成功したplanは候補のIDを表示する。
 候補は、`--candidate ID`で適用するか、`--discard ID`で破棄するか、次のplanが置き換えるまでGCから守られる。
-`--candidate`と`--discard`のIDは、表示された数字とハイフンの組をそのまま渡し、空のIDや形式の異なるIDは、候補の準備も適用もせず終了status 2で拒否する。
+`--candidate`と`--discard`には、対象の候補に表示されたIDをそのまま渡す。IDが足りない場合や、数字をハイフンで結んだ形式でない場合は、指定したオプションと必要な形式を表示し、候補の準備も適用もせず終了status 2で止まる。
 公開決定前のplanの失敗と取消は、保持中の候補を変えない。
 planの公開と、置き換える旧候補の解放は、一つの排他区間で行う。
 並行したplanはこの区間で直列になり、互いの候補を消し合って一つも残らない状態にはならない。

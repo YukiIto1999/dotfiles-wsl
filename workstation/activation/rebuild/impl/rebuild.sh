@@ -84,20 +84,19 @@ while [[ $# -gt 0 ]]; do
     }
     rollback=1
     ;;
-  --candidate)
-    [[ $# -ge 2 && $2 =~ ^[0-9]+-[0-9]+$ && -z $candidate_id ]] || {
-      usage >&2
+  --candidate | --discard)
+    [[ $# -ge 2 && $2 =~ ^[0-9]+-[0-9]+$ ]] || {
+      printf 'dotfiles-rebuild: %s requires the printed candidate ID (two numbers separated by a hyphen).\n' "$1" >&2
       exit 2
     }
-    candidate_id=$2
-    shift
-    ;;
-  --discard)
-    [[ $# -ge 2 && $2 =~ ^[0-9]+-[0-9]+$ && -z $discard_id ]] || {
+    if [[ $1 == --candidate && -z $candidate_id ]]; then
+      candidate_id=$2
+    elif [[ $1 == --discard && -z $discard_id ]]; then
+      discard_id=$2
+    else
       usage >&2
       exit 2
-    }
-    discard_id=$2
+    fi
     shift
     ;;
   --help | -h)

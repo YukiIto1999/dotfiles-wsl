@@ -364,7 +364,10 @@ Web検索用のMCP providerもbackendも配備しない。`library-documentation
 SearXNGとCrawl4AIは配備せず、検索と本文取得のための常設backendを持たない。
 native readerがJavaScript描画後の内容を取得できない場合は、既存の`browser-operation`へ必要な項目の取得を渡す。
 既知の公開URLから本文を取り出す用途では、利用者が対象URLと送信先を承認した場合だけ、`context-dev-scrape` でContext.devの公式Scrape APIを一回呼べる。
-このcommandは専用のAPI keyを実行時に受け取り、Markdownと最終URLを返す。
+このcommandはMarkdownと最終URLを返す。
+API keyはSOPSの`contextdev/api_key`を正本とし、[`toolchain/module.nix`](../../toolchain/module.nix)が登録済みのhostだけで主user所有のmode `0400`のfileとして配備する。
+curlはこのfileを直接読み、keyを環境変数、引数、Nix storeへ渡さない。
+未登録のhostでも配備は通り、commandは未登録を示して終了する。
 内部・認証付き・署名付きのURLや文書を送らず、Web検索のproviderやContext7を置き換えない。
 検索系のbackendを追加または代替する場合は、標準toolと既存ブラウザで得られる成果を明確に上回るかを実測し、RAM、CPU、secret、image、lifecycleの保守負担とあわせて判断する。
 

@@ -1,7 +1,9 @@
 {
+  lib,
   writeShellApplication,
   curl,
   jq,
+  apiKeyFile,
 }:
 
 writeShellApplication {
@@ -11,7 +13,7 @@ writeShellApplication {
     jq
   ];
   text = ''
-    usage() { printf 'Usage: context-dev-scrape <public HTTPS URL>\nRequires CONTEXT_DEV_API_KEY in this process.\n'; }
+    usage() { printf 'Usage: context-dev-scrape <public HTTPS URL>\nReads the Context.dev API key from the SOPS secret contextdev/api_key.\n'; }
     if [[ $# == 1 && $1 == --help ]]; then
       usage
       exit 0
@@ -31,11 +33,19 @@ writeShellApplication {
         exit 2
         ;;
     esac
-    : "''${CONTEXT_DEV_API_KEY:?context-dev-scrape requires a Context.dev API key}"
+    key_file=${lib.escapeShellArg (if apiKeyFile == null then "" else apiKeyFile)}
+    if [[ -z $key_file ]]; then
+      printf 'context-dev-scrape: contextdev/api_key is not in the SOPS store; add it and run dotfiles-rebuild\n' >&2
+      exit 1
+    fi
+    if [[ ! -r $key_file || ! -s $key_file ]]; then
+      printf 'context-dev-scrape: cannot read a non-empty Context.dev API key from %s; run dotfiles-rebuild\n' "$key_file" >&2
+      exit 1
+    fi
 
     jq -nc --arg url "$1" '{url:$url, formats:{markdown:true}, sharedParams:{mainContentOnly:true}}' |
       curl --disable --silent --show-error --fail --proto '=https' --connect-timeout 5 --max-time 40 --max-filesize 4194304 \
-        --variable '%CONTEXT_DEV_API_KEY' --expand-header 'Authorization: Bearer {{CONTEXT_DEV_API_KEY}}' \
+        --variable "api_key@$key_file" --expand-header 'Authorization: Bearer {{api_key:trim}}' \
         --header 'Content-Type: application/json' --data-binary @- https://api.context.dev/v1/web/scrape |
       jq -e 'if .markdown.success == true and (.markdown.data | type == "string" and length > 0) then
         {url, title:.metadata.title, markdown:.markdown.data}

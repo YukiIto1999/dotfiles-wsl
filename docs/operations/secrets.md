@@ -23,6 +23,9 @@ secret を追加するときは、先に値を消費する module に取得方�
 OMP は [`agents/clients/omp/module.nix`](../../agents/clients/omp/module.nix) が宣言する native command で `typesafe/api_key`、`keenable/api_key`、`exa/api_key` を必要に応じて個別に復号する。
 Web 検索を切り替える前に、SOPS の編集でトップレベルの `keenable` と `exa` にそれぞれ `api_key` を設定する。
 キーはチャットやコマンド引数に貼らず、`models.yml` や OMP の認証 DB にも複製しない。
+`context-dev-scrape` は、トップレベルの `contextdev` に `api_key` を設定して rebuild したhostでだけ key を読める。
+[`toolchain/module.nix`](../../toolchain/module.nix) が key file を主 user 所有の mode `0400` で `/run/secrets/contextdev/api_key` へ配備し、command の curl がその file を直接読む。
+未登録の host は rebuild でき、command は未登録を示して終了する。
 
 MCP front が既存の secret file を起動時に読む場合は、その secret の `restartUnits` に front service を加える。所有境界は [AI tooling](../architecture/ai-tooling.md#container-platform) に従う。
 

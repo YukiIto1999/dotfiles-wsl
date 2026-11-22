@@ -10,6 +10,8 @@ let
   cfg = config.dotfiles;
   dotnetDiagnostics = pkgs.callPackage ./package/dotnet-diagnostics.nix { };
   aspireCli = pkgs.callPackage ./package/aspire-cli.nix { };
+  contextDevKey = "contextdev/api_key";
+  contextDevEnrolled = builtins.elem contextDevKey cfg.secrets.paths;
   selection = cfg.toolchain.enabledLsp;
   unknownSelection = lib.unique (
     builtins.filter (id: !builtins.hasAttr id cfg.toolchain.lspRegistry) selection
@@ -179,7 +181,9 @@ in
     anode = pkgs.callPackage ./package/anode-interop.nix {
       inherit (cfg.workstation.wsl) powershellCommand;
     };
-    context-dev-scrape = pkgs.callPackage ./package/context-dev-scrape.nix { };
+    context-dev-scrape = pkgs.callPackage ./package/context-dev-scrape.nix {
+      apiKeyFile = if contextDevEnrolled then config.sops.secrets.${contextDevKey}.path else null;
+    };
     explainer = pkgs.callPackage ./package/explainer/package.nix {
       explainerSource = self.inputs.explainerSkills;
     };
@@ -242,6 +246,11 @@ in
           self.inputs.devenv.inputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.path;
     in
     [ (builtins.appendContext devenvNixpkgs { ${devenvNixpkgs}.path = true; }) ];
+
+  # context-dev-scrape の curl が主 user で直接読む。環境変数と引数へ key を渡さない
+  config.sops.secrets.${contextDevKey} = lib.mkIf contextDevEnrolled {
+    owner = cfg.workstation.username;
+  };
 
   config.home-manager.users.${cfg.workstation.username} = _: {
     home.packages =

@@ -418,7 +418,7 @@ gatewayのrouteは`backendRequestTimeout`を60秒にする。
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
 `browser-diagnostics`のChrome DevTools MCPは専門診断の入口であり、通常の実画面操作の代替にはしない。Skill入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`である。
 実画面の操作と受入確認は[`browser-operation`](../../skills/browser-operation/skill/SKILL.md)が所有する。通常はOrcaかclientの標準toolを使い、対象を扱える経路がなければ独立した閲覧・検証にPlaywright MCPを使う。明示されたログイン済みtabは公開元のOMP RelayまたはOrcaだけで扱う。
-繰り返し実行するブラウザ回帰testは対象projectがPlaywright Testと検証入口を管理する。実画面の受入証拠は回帰testの結果とは分ける。
+繰り返し実行するブラウザ回帰testの振り分けは[`browser-operation`の引き渡し手順](../../skills/browser-operation/skill/SKILL.md#ブラウザ回帰testを引き渡す)を参照する。
 OrcaとPlaywrightのどちらも、browserを使わない作業の前提にはしない。
 一般の`diagnosing-bugs`はbrowser Capabilityを要求せず、必要なbranchだけ専門入口へ渡す。
 heap-diagnosticsのregistryは[`capabilities/heap-diagnostics/module.nix`](../../capabilities/heap-diagnostics/module.nix)が所有し、providerは`memlab`だけ、backendとCapability依存は空である。

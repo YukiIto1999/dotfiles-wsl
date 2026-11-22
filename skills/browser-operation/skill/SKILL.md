@@ -1,6 +1,6 @@
 ---
 name: browser-operation
-description: Operate a real browser to complete a user task, verify implemented behavior, or conduct an explicitly requested exploratory product audit. Check rendered appearance and business outcomes, including material rejection, recovery and persistence. Report evidence, coverage and unknowns; distinguish observed defects, design hypotheses and missing requirements. Not for UI design, permanent test suites, specialist accessibility/security audits, performance measurement or root-cause diagnosis.
+description: Operate a real browser to complete a user task, verify implemented behavior, or conduct an explicitly requested exploratory product audit. Check rendered appearance and business outcomes, including material rejection, recovery and persistence. For persistent real-browser tests, select the test boundary and hand off to the project test workflow without authoring the suite here. Not for UI design, specialist audits, performance measurement or root-cause diagnosis.
 ---
 
 # 実画面と業務結果を対にして確かめる
@@ -13,8 +13,9 @@ DOMに文言があること、clickが成功したこと、HTTPが200である�
 検証に必要なscenarioの選択はこのSkillが所有し、利用者に画面確認や異常系を一つずつ指示させない。
 受入の判断、matrix、証拠、停止条件は実行routeによって変わらない。
 利用者が探索的・網羅的な監査を明示した場合だけ、「探索監査」で同じmatrixを目的から広げる。
-繰り返し実行するブラウザ回帰testは対象projectが所有する。回帰testの追加・実行だけの依頼はmatrixを作る前にprojectのtest ownerへ渡し、projectの規約、Playwright Testの設定、fixture、検証入口に従う。
-実画面の受入も求められた場合はこのSkillで別に実施し、Playwright Testの結果と操作で得た受入証拠を分けて返す。Playwright MCPによる単発操作を回帰testに数えない。
+ブラウザ回帰testの追加・実行だけの依頼は、受入のmatrixを作る前に「ブラウザ回帰testを引き渡す」に進む。
+実画面の受入も必要ならこのSkillで別に実施し、操作で得た受入証拠と回帰testの実行結果を分けて返す。
+Playwright MCPによる単発操作を回帰testに数えない。
 専門監査、性能計測、原因診断だけの依頼は、matrixや操作routeを選ぶ前に「境界とhandoff」の担当へ渡す。
 Orcaの有無で専門Capabilityを置き換えたり、専門作業を止めたりしない。
 
@@ -286,4 +287,17 @@ accessibility treeを操作に使ったこと、keyboardで一経路を通った
 利用不能な専門作業は未実施として返し、同じ操作をhandoffだけのために繰り返さない。
 `ui-design`を使えない、またはこのSkillを動かすagentが設計判断を担当しない場合は、観測、区分、coverageをそのままcallerへ返し、callerが設計の担当へ渡す。
 このSkillは指定taskの実行、既知surfaceの受入証拠、明示された探索監査の観測と分類を所有し、永久testの作成、CIの設定、API代替verification、credential管理、browser backendの導入と設定、UIの設計判断を所有しない。
-新たな回帰testが必要なら、破った保証、再現入力列、観測証拠をcallerへ渡し、対象projectのtest ownerに実装を委ねる。
+
+### ブラウザ回帰testを引き渡す
+
+繰り返し実行するtestは、壊れうる保証がどの境界で決まるかで分ける。
+
+- TypeScriptのcomponentまたはpageの内側で完結し、実際の描画や入力が必要な保証にはVitest Browser Modeを選ぶ。対象projectの既存設定からbrowser project、provider、検証入口を特定する。
+- routeの遷移、認証、実serverの応答まで通して初めて判定できる保証は、対象projectのPlaywright Testの経路へ渡す。用意した応答だけでその保証を判定しない。
+
+callerへ、保証、初期状態と入力、期待する観測結果、選んだ境界、既存の実行入口とfixture、得られていれば再現時の証拠を返す。
+callerが対象projectのtestを実装・実行し、実際の検証入口で対象testが発見され、意図した結果を観測できたことを確かめる。
+既存の回帰testを別runnerへ移さない。
+Browser Modeの設定がない場合は、projectのテスト設定と供給されるブラウザでの実行条件を確認し、設定も変更範囲に含まれる場合にだけ追加する。
+Node向けのmutation runnerがBrowser Modeを実行できない構成では、browser testをそのmutationの対象へ混ぜない。
+回帰testではrunnerが起動したブラウザを使い、利用者の既存tabを借りない。

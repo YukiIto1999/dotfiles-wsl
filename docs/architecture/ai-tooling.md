@@ -77,8 +77,9 @@ architecture-standardも他の外部sourceと同じregistryとoverrideの契約�
 標準の規範本文は、配備済みsourceからでなく、policyが案内する現行規範rootから読む。
 同梱のreferenceとscriptは成功してReadした`SKILL.md`の実体のdirectoryから、規範文書のlinkは現行規範rootから解決する。
 配備済みsourceの標準本文、Git revision、`flake.lock`は実行packageの出典であり、現行規範の根拠にしない。
-`flake.lock`は`nix flake update architectureStandard`で明示的に更新した最新revisionの記録であり、版を固定して更新を待つ仕組みではない。
-通常の`dotfiles-rebuild`はこのlockをそのまま使い、inputを取得も更新もしない。
+`flake.lock`は明示的に更新した標準の実行packageのrevisionを記録する。
+通常の`dotfiles-rebuild`は候補の作成前と適用前に、標準の実行packageのrevisionを上流の現在の参照先と照合する。
+最新と一致しないか照合できない場合は止まり、標準の更新は[Inputの更新](../operations/rebuild.md#inputの更新)の手順に従う。
 片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
 Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
 外部Skillのraw directoryを配ることと、同梱scriptの実行依存を供給することは別の契約である。

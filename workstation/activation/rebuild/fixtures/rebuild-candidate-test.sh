@@ -279,9 +279,8 @@ assert_no_work_left
   [[ ! -e $REBUILD_STATE/work/$orphan ]]
 )
 
-# 5. Applying a held candidate uses its root. Nothing is fetched, built or verified again: the
-# plan verified the same commit, and the apply only compares the checkout with the candidate. The
-# checkout is not written, and the candidate is released afterwards.
+# Applying a held candidate rechecks upstream but does not build or verify it again.
+# The checkout is not written, and the candidate is released after applying it.
 commit_lock rev-4
 lock_four=$(lock_json rev-4)
 run_rebuild 0 --plan
@@ -289,6 +288,14 @@ retained=$(candidate_id_of_output)
 retained_path=$(system_for_lock "$lock_four")
 [[ $(state_entries candidates) == "$retained" ]]
 head_before=$(head_of)
+before=$(checkout_snapshot)
+REBUILD_STANDARD_REVISION=rev-new run_rebuild 2 --candidate "$retained"
+assert_output_has 'does not match the latest upstream package (rev-new)'
+assert_not_called 'nix build'
+assert_not_called 'nix run'
+assert_no_switch
+[[ $(checkout_snapshot) == "$before" ]]
+
 run_rebuild 0 --candidate "$retained"
 assert_not_called 'nix flake update'
 assert_not_called 'nix build'

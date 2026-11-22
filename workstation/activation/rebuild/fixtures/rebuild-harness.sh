@@ -64,9 +64,9 @@ harness_init() {
   git -C "$REBUILD_CHECKOUT" commit -qm initial
 }
 
-# A flake.lock with one input locked at revision $1.
+# A flake.lock with the fixture's standard package at revision $1.
 lock_json() {
-  printf '{"nodes":{"source":{"locked":{"rev":"%s"}},"root":{"inputs":{"source":"source"}}},"root":"root","version":7}\n' "$1"
+  printf '{"nodes":{"standard":{"original":{"type":"github","owner":"fixture","repo":"standard"},"locked":{"rev":"%s"}},"root":{"inputs":{"architectureStandard":"standard"}}},"root":"root","version":7}\n' "$1"
 }
 
 # Commits a flake.lock locked at revision $1, so that the checkout becomes a source whose toplevel

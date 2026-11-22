@@ -16,12 +16,12 @@ dotfiles-rebuild --plan
 dotfiles-rebuild --candidate ID
 ```
 
-`--plan`はcommit済みのsourceを隔離した複製へ取り出し、`flake.lock`をcommit済みのまま使って、その中で次を順に行う。
-どのinputも取得も更新もしない。
+`--plan`は次の順に行う。
 
-1. 隔離したsourceで、`tiergate.json`が宣言する`verify`の入口を宣言の予算内で通す。
-2. 対象hostのtoplevelをbuildし、native GC rootを`--out-link`で取得して候補として保持する。
-3. 候補とWSLの現在状態から再起動の分類を求め、差分とともに表示する。
+1. `flake.lock`の標準の実行packageを上流と照合し、revisionが一致しないか照合できないときは終了status 2で止まる。
+2. commit済みのsourceを隔離した複製へ取り出し、そのlockで`verify`を宣言の予算内で通す。
+3. 対象hostのtoplevelをbuildし、native GC rootを`--out-link`で取得して候補として保持する。
+4. 候補とWSLの現在状態から再起動の分類を求め、差分とともに表示する。
 
 planは元のcheckout、HEAD、index、`flake.lock`、配備済みのgenerationを変更しない。
 成功したplanは候補のIDを表示する。
@@ -56,7 +56,7 @@ planの公開と、置き換える旧候補の解放は、一つの排他区間�
 3. 現在のsystem状態から再起動の分類を求め直す。
 4. 同じcheckoutのtoplevelを評価し、その結果が保持した候補のstore pathと一致する場合だけ進む。
    file内容の一致では代用せず、Git metadataの影響も評価結果に含めて照合する。
-5. 評価の間にHEADや作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path`へ候補のstore pathを渡す。
+5. 標準の実行packageが引き続き最新で、照合中にHEADや作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path`へ候補のstore pathを渡す。
    flakeを再び解決せず、nativeの`nixos-rebuild`は候補をbuildも評価もしない。
 
 適用の段では`verify`の入口を再実行しない。
@@ -86,7 +86,9 @@ activationはこのsupervisorの下に置かない。
 
 ### inputの固定
 
-適用と`--plan`は、inputを取得も更新もせず、`flake.lock`を書かず、commitも作らない。
+適用と`--plan`で上流と照合するのは`architectureStandard`だけである。
+照合はlockを更新せず、他のinputも更新せず、commitも作らない。
+上流へ接続できないときに旧版を通常適用せず、復旧には保持している世代へのrollbackを使う。
 更新したinputは、[Inputの更新](#inputの更新)の手順で`flake.lock`をcommitしてから、同じ入口で適用する。
 
 ### 終了statusと結果
@@ -156,7 +158,7 @@ Skillの供給元として採用した外部sourceも、同じ入口を通る。
 URLにrevを書いたinputは`flake.nix`のrevを差し替えて`flake.lock`を更新し、書かない`architectureStandard`は最新を使う方針のまま、次で更新する。
 
 ```sh
-nix flake update architectureStandard
+nix flake update --refresh architectureStandard
 ```
 
 どちらも`flake.lock`の差分をcommitしてから、`dotfiles-rebuild --plan`で確認して適用する。

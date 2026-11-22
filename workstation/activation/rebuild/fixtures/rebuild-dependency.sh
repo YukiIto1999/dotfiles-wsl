@@ -120,6 +120,12 @@ nix)
     ;;
   esac
   ;;
+curl)
+  [[ ${!#} == https://api.github.com/repos/fixture/standard/commits/HEAD ]]
+  [[ ${REBUILD_STANDARD_STATUS:-0} == 0 ]] || exit "$REBUILD_STANDARD_STATUS"
+  latest=${REBUILD_STANDARD_REVISION-$(jq -er '.nodes.standard.locked.rev' "$REBUILD_CHECKOUT/flake.lock")}
+  jq -nc --arg revision "$latest" '{sha:$revision}'
+  ;;
 nix-env)
   [[ $* == "--list-generations --profile $REBUILD_SYSTEM_PROFILE" ]]
   [[ ${REBUILD_HISTORY_STATUS:-0} == 0 ]] || exit "$REBUILD_HISTORY_STATUS"

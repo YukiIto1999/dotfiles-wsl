@@ -8,8 +8,9 @@ usage:
 
 Without options, copy the committed source into an isolated checkout, validate and build it with
 flake.lock as committed, verify the committed source, and switch to exactly the candidate that
-was built. No input is fetched or updated and nothing is written to the checkout. To move an
-input, update it explicitly (nix flake update INPUT), commit flake.lock and run this command again.
+was built. The committed standard package must match upstream before building and switching.
+No checkout files are changed. Update inputs explicitly with nix flake update INPUT and
+commit flake.lock before rebuilding.
 
 --plan stops after the candidate is built and held by a Nix GC root. The checkout, HEAD,
 index, flake.lock and the deployed system are not changed. The candidate is held until it
@@ -394,6 +395,27 @@ write_receipt() {
   } >"$cand_dir/receipt.tmp" || die 2 "could not write the candidate receipt"
 }
 
+require_latest_standard() {
+  local standard url pinned_revision upstream_revision
+  standard=$(git -C "$dotfiles" show "$base_head:flake.lock" | jq -er '
+    .nodes as $nodes | $nodes[$nodes[.root].inputs.architectureStandard]
+    | select(.original.type == "github" and (.original.rev == null))
+    | [.original.owner, .original.repo, (.original.ref // "HEAD"), .locked.rev]
+    | select(all(.[]; type == "string" and length > 0))
+    | ["https://api.github.com/repos/\(.[0] | @uri)/\(.[1] | @uri)/commits/\(.[2] | @uri)", .[3]]
+    | @tsv
+  ') || stop_before_activation "could not read the standard package source from the committed flake.lock"
+  IFS=$'\t' read -r url pinned_revision <<<"$standard"
+  run_child "$dotfiles" "$work_dir/latest-standard" curl --disable --fail --silent --show-error \
+    --proto '=https' --max-time 15 --header 'Cache-Control: no-cache' "$url" ||
+    stop_before_activation "could not confirm the latest architectureStandard; the locked package will not be deployed"
+  upstream_revision=$(jq -er '.sha | select(type == "string" and length > 0)' "$work_dir/latest-standard") ||
+    stop_before_activation "the upstream architectureStandard response did not identify a revision"
+  if [[ $pinned_revision != "$upstream_revision" ]]; then
+    stop_before_activation "the locked architectureStandard ($pinned_revision) does not match the latest upstream package ($upstream_revision); run: nix flake update --refresh architectureStandard, then commit flake.lock and prepare a new candidate"
+  fi
+}
+
 # 並行した plan が互いの receipt を消すため公開と旧候補解放の分割は不可
 # 適用中の候補が消えるため writer lock を取れない間の旧候補解放は不可
 # 引数なしでのplan候補の条件付き公開
@@ -418,9 +440,8 @@ publish_candidate() {
 }
 
 # Builds a candidate from an isolated copy of the committed source. Nothing in the checkout is
-# written, and flake.lock is used as committed: no input is fetched or updated. The candidate root
-# is a native Nix GC root created by nix build --out-link, inside the candidate directory; only a
-# plan publishes the directory, by its receipt.
+# written; the standard package is checked against upstream without updating the lock.
+# The native Nix GC root is published only by a plan's receipt.
 prepare_candidate() {
   local source_dir status=0
   local -a entry_words
@@ -429,6 +450,7 @@ prepare_candidate() {
   cand_id=${work_dir##*/}
   cand_dir=$state_root/candidates/$cand_id
   mkdir -- "$cand_dir" || stop_before_activation "could not create the candidate directory"
+  require_latest_standard
   source_dir=$work_dir/source
 
   run_child "$work_dir" "" git -c core.hooksPath=/dev/null clone --quiet --local --no-checkout -- "$dotfiles" "$source_dir" ||
@@ -625,6 +647,7 @@ confirm_source() {
   evaluated=$(<"$work_dir/evaluated")
   [[ $evaluated == "$cand_path" ]] ||
     stop_before_activation "the committed source evaluates to $evaluated, not to the held candidate $cand_path (Git metadata changes); activation was not started"
+  require_latest_standard
 
   head=$(git -C "$dotfiles" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) || head=
   [[ $head == "$base_head" ]] || stop_before_activation "HEAD moved from $base_head while the checkout was compared with the candidate"

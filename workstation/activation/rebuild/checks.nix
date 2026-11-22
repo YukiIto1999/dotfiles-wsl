@@ -28,7 +28,7 @@
           chmod u+w "$out/dependency"
           substituteInPlace "$out/dependency" --replace-fail '#!/usr/bin/env bash' '#!${pkgs.bash}/bin/bash'
           chmod +x "$out/dependency"
-          for name in nix nix-env nvd sudo nixos-rebuild dotfiles-verify-entry wsl.exe; do
+          for name in nix nix-env nvd curl sudo nixos-rebuild dotfiles-verify-entry wsl.exe; do
             ln -s ../dependency "$out/bin/$name"
           done
         '';

@@ -65,8 +65,10 @@ agentが標準を読む場所は、環境系repositoryの作業checkoutの規約
 このrepositoryのbuild、rebuild、agent runtimeは、標準のcheckoutの有無にも標準のcheckerにも依存しない。
 
 標準の運用Skill、checker、設定は、他の外部Skillと同じく`flake.nix`のinputを`skills/plugins/module.nix`の採用表から配備する不変の実行packageである。
-`architectureStandard` input はURLにrevを書かず、最新への更新は他のinputと同じ`nix flake update architectureStandard`と`flake.lock`のcommitで明示的に行う。
-通常の`dotfiles-rebuild`は`flake.lock`をそのまま使い、inputを取得も更新もしない。
+`architectureStandard` inputはURLにrevを書かない。
+最新への更新は[Inputの更新](docs/operations/rebuild.md#inputの更新)の手順に従う。
+通常の`dotfiles-rebuild`は上流の標準packageと照合し、`flake.lock`と一致する場合だけ候補を作成・適用する。
+候補の検証と適用は同じlockを使い、`dotfiles-rebuild`がlockを書き換えることはない。
 URL、`flake.lock` のrevisionと内容hashは実行packageの出典であり、現行規範の正本ではない。
 `dotfiles-doctor` の配備driftのPASSは、配備物の同一性を示すだけで、現行規範への適合を示さない。
 

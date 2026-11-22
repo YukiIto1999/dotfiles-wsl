@@ -6,6 +6,9 @@
 profileは有効な機能を選び、各ownerのmoduleは意味、実装、runtime contractを持つ。
 変更後の検証と適用は[Rebuildの適用手順](../operations/rebuild.md#適用)に従う。
 変更がこのrepositoryに属するか、architecture-standard、upstream、対象projectに属するかは`environment-design` Skillで決める。
+標準へ置くのは、この環境を使わないプロジェクトにも求める設計・開発・検証・運用の契約である。
+Skillはエージェントがその契約を適用する手順を、dotfilesはこの環境で使える道具の供給元、起動、認証を持つ。
+同じ道具が複数に現れる場合も、別々の判断を所有し、標準はこの環境の配備に依存しない。
 
 ## Workstationとtoolchain
 

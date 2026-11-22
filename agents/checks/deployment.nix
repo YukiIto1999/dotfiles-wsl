@@ -1371,9 +1371,9 @@
           assert lib.all
             (
               configuration:
-              configuration.dotfiles.agents.shared.skills ? browser-operation
-              && routedTo configuration "implementer" "browser-operation"
-              && !lib.any (routedTo configuration "designer") ([ "browser-operation" ] ++ diagnosticsSkills)
+              configuration.dotfiles.agents.shared.skills ? surface-operation
+              && routedTo configuration "implementer" "surface-operation"
+              && !lib.any (routedTo configuration "designer") ([ "surface-operation" ] ++ diagnosticsSkills)
             )
             [
               minimalCapabilityConfig
@@ -1396,7 +1396,7 @@
             transitiveCapabilityAgentConfig.dotfiles.capabilities.resolved;
           assert
             !(builtins.elem "browser-diagnostics" transitiveCapabilityAgentConfig.dotfiles.capabilities.resolved);
-          assert builtins.hasAttr "browser-operation"
+          assert builtins.hasAttr "surface-operation"
             transitiveCapabilityAgentConfig.dotfiles.agents.shared.skills;
           assert
             !builtins.hasAttr "browser-performance" transitiveCapabilityAgentConfig.dotfiles.agents.shared.skills;
@@ -1407,8 +1407,8 @@
           assert builtins.elem "filter-syntax" hostConfig.dotfiles.skills.enabled;
           assert isReferenceOnlySkill hostConfig.dotfiles.skills.registry.filter-syntax.source;
           assert !builtins.hasAttr "filter-syntax" hostConfig.dotfiles.agents.shared.skills;
-          assert !(isReferenceOnlySkill hostConfig.dotfiles.skills.registry.grill-me.source);
-          assert builtins.hasAttr "grill-me" hostConfig.dotfiles.agents.shared.skills;
+          assert !(isReferenceOnlySkill hostConfig.dotfiles.skills.registry.to-spec.source);
+          assert builtins.hasAttr "to-spec" hostConfig.dotfiles.agents.shared.skills;
           assert lib.all (
             clientName:
             !(builtins.hasAttr "${clients.${clientName}.skillsDestination}/filter-syntax" homeConfig.home.file)
@@ -1748,7 +1748,7 @@
           let
             skillFixtures = ../fixtures/skill-replacement;
             replacement = {
-              source = skillFixtures + "/browser-operation";
+              source = skillFixtures + "/surface-operation";
               requiresCapabilities = [ ];
               requiresSkills = [ ];
             };
@@ -1762,14 +1762,14 @@
                 normalMachineModule
                 {
                   dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ];
-                  dotfiles.skills.registry.browser-operation = lib.mkForce replacement;
+                  dotfiles.skills.registry.surface-operation = lib.mkForce replacement;
                   dotfiles.skills.registry.external-procedure = external;
                 }
               ]).config;
             conflictingConfig =
               (mkProbeSystem [
                 normalMachineModule
-                { dotfiles.skills.registry.browser-operation = replacement; }
+                { dotfiles.skills.registry.surface-operation = replacement; }
               ]).config;
             conflictAccepted =
               (builtins.tryEval (builtins.deepSeq conflictingConfig.dotfiles.agents.shared.skills true)).success;
@@ -1787,8 +1787,8 @@
               configuration: skill:
               lib.any (route: route.skill == skill) configuration.dotfiles.agents.shared.routing.subagentSkills;
           in
-          assert replacedConfig.dotfiles.agents.shared.skills ? browser-operation;
-          assert routesTo replacedConfig "browser-operation";
+          assert replacedConfig.dotfiles.agents.shared.skills ? surface-operation;
+          assert routesTo replacedConfig "surface-operation";
           # 同優先度の競合する差替は拒否する
           assert !conflictAccepted;
           # reference-only の helper は全 client の named Skill へ出さない
@@ -1802,10 +1802,10 @@
           ) (builtins.attrNames replacedConfig.dotfiles.agents.clients);
           # 元へ戻す場合は差替定義を外すだけで、元の source へ戻る
           assert
-            toString hostConfig.dotfiles.agents.shared.skills.browser-operation
-            == toString hostConfig.dotfiles.skills.registry.browser-operation.source;
+            toString hostConfig.dotfiles.agents.shared.skills.surface-operation
+            == toString hostConfig.dotfiles.skills.registry.surface-operation.source;
           assert
-            toString hostConfig.dotfiles.agents.shared.skills.browser-operation != toString replacement.source;
+            toString hostConfig.dotfiles.agents.shared.skills.surface-operation != toString replacement.source;
           pkgs.runCommandLocal "check-agent-skill-replacement"
             {
               nativeBuildInputs = [
@@ -1813,7 +1813,7 @@
                 pkgs.coreutils
               ];
               replacementSources = lib.concatMapStringsSep " " (
-                clientName: "${deployed clientName "browser-operation"}"
+                clientName: "${deployed clientName "surface-operation"}"
               ) projectedClients;
               externalSources = lib.concatMapStringsSep " " (
                 clientName: "${deployed clientName "external-procedure"}"

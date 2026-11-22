@@ -47,12 +47,12 @@
       "id": "native-csharp-latency-near-miss",
       "prompt": "A C# worker now takes longer to process the same queue items after a refactor. There is no browser or web UI. Diagnose the regression.",
       "expectedSkills": ["diagnosing-bugs"],
-      "mustNotTrigger": ["browser-performance", "browser-operation", "debug-optimize-lcp"]
+      "mustNotTrigger": ["browser-performance", "surface-operation", "debug-optimize-lcp"]
     },
     {
       "id": "known-form-validation-near-miss",
       "prompt": "Verify that this form displays its specified validation message after an empty input without submitting in the user's signed-in tab. No performance investigation is requested.",
-      "expectedSkills": ["browser-operation"],
+      "expectedSkills": ["surface-operation"],
       "mustNotTrigger": ["browser-performance", "debug-optimize-lcp"]
     },
     {

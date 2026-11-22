@@ -29,7 +29,7 @@
     "trialsPerCase": 3,
     "observe": ["解決された読込みpath", "実際に使われたmodelと終了状態", "完成した本文"],
     "cases": [
-      {"id": "native-explanation", "prompt": "社内の短い技術記事を書いてください。ファイルの作成、コマンド実行、新しい調査は不要です。読者はSQLを使う開発者で、普段の画面を知っています。調べた記録は次のとおりです。検索画面に一秒ほどかかる。SQLを疑ったが、検証環境の10回の測定ではSQLは約30ミリ秒で、画面全体は中央値1.2秒だった。結果の20行それぞれで担当者名を逐次取得していた。一括取得にした試作では同じ条件で中央値0.25秒だった。SQLは変更していない。本番では未計測で、一括取得が失敗した場合の表示も未決である。次はこの二点を確かめる。なぜ調べる先を変えたかが追える本文を、見出しを付けて450字程度で書いてください。本文だけを返してください。", "expectedSkills": ["ja-writing", "description-writing"]},
+      {"id": "native-explanation", "prompt": "社内の短い技術記事を書いてください。ファイルの作成、コマンド実行、新しい調査は不要です。読者はSQLを使う開発者で、普段の画面を知っています。調べた記録は次のとおりです。検索画面に一秒ほどかかる。SQLを疑ったが、検証環境の10回の測定ではSQLは約30ミリ秒で、画面全体は中央値1.2秒だった。結果の20行それぞれで担当者名を逐次取得していた。一括取得にした試作では同じ条件で中央値0.25秒だった。SQLは変更していない。本番では未計測で、一括取得が失敗した場合の表示も未決である。次はこの二点を確かめる。なぜ調べる先を変えたかが追える本文を、見出しを付けて450字程度で書いてください。本文だけを返してください。", "expectedSkills": ["ja-writing", "technical-writing"]},
       {"id": "native-light-edit", "prompt": "同僚への返信を軽く整えてください。返事の距離感はそのまま、完成文だけください。「水曜の相談、15時からなら行けます。資料はざっと見るくらいになるけど、それでもよければ。細かい数字は担当の人にも確認してもらったほうがよさそうです。」", "expectedSkills": ["ja-writing"]},
       {"id": "native-non-japanese", "prompt": "Correct this English sentence without translating or explaining it: \"The scripts reads local files and does not upload them.\" Return only the corrected sentence.", "expectedSkills": [], "mustNotTrigger": ["ja-writing"]}
     ],

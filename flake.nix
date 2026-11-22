@@ -35,6 +35,11 @@
       flake = false;
     };
 
+    pstackSkills = {
+      url = "github:cursor/plugins/7a583913eb1b8d1a0ee76753d1a2cf072e7b54f9";
+      flake = false;
+    };
+
     chromeDevtoolsMcp = {
       url = "tarball+https://registry.npmjs.org/chrome-devtools-mcp/-/chrome-devtools-mcp-1.10.1.tgz";
       flake = false;
@@ -66,6 +71,7 @@
       orca,
       architectureStandard,
       mattSkills,
+      pstackSkills,
       chromeDevtoolsMcp,
       dotnetSkills,
       explainerSkills,
@@ -86,6 +92,7 @@
         matt-pocock = mattSkills;
         architecture-standard = architectureStandard;
         chrome-devtools = chromeDevtoolsMcp;
+        pstack = pstackSkills;
         dotnet = dotnetSkills;
         explainer = explainerSkills;
         modern-web-guidance = modernWebGuidance;
@@ -459,8 +466,18 @@
 
       apps.${system} = lib.mapAttrs verificationApp verificationTiers;
 
-      devShells.${system}.default = systemPkgs.mkShellNoCC {
-        packages = machineConfigs.${referenceHostName}.dotfiles.toolchain.devShellPackages;
+      devShells.${system} = {
+        default = systemPkgs.mkShellNoCC {
+          packages = machineConfigs.${referenceHostName}.dotfiles.toolchain.devShellPackages;
+        };
+        statechart = systemPkgs.mkShellNoCC {
+          packages = [ systemPkgs.nodejs_24 ];
+          JAVA = lib.getExe' systemPkgs.jdk "java";
+          TLA2TOOLS = systemPkgs.fetchurl {
+            url = "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar";
+            hash = "sha256-k2omIGHJFGlN/WaaVDviRXPEXVqg/yCouWsj0B4FDog=";
+          };
+        };
       };
 
       formatter.${system} = systemPkgs.nixfmt-tree;

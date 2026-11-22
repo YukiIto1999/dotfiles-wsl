@@ -79,14 +79,14 @@ sourceをNix storeへ取り込む前に、秘密情報、認証資格情報、�
 entry全体を置き換えると、旧sourceの依存listが差替先へ暗黙に残らない。
 clientやroutingが使うIDは維持され、本文と資材の供給元だけを交換できる。
 
-次のmoduleは、同梱fixtureで`browser-operation`を同IDの別sourceへ差し替える登録契約の例である。
+次のmoduleは、同梱fixtureで`surface-operation`を同IDの別sourceへ差し替える登録契約の例である。
 空の依存listはこのfixtureの宣言であり、実際の上流Skillについて依存がないと主張する例ではない。
 例の相対pathは`profiles/hosts/`のhost moduleへ書く場合の指定であり、fixtureを恒久的なSkillの供給元にはしない。
 
 ```nix
 { lib, ... }: {
-  dotfiles.skills.registry.browser-operation = lib.mkForce {
-    source = ../../skills/fixtures/external-source/procedures/browser-operation;
+  dotfiles.skills.registry.surface-operation = lib.mkForce {
+    source = ../../skills/fixtures/external-source/procedures/surface-operation;
     requiresCapabilities = [ ];
     requiresSkills = [ ];
   };
@@ -116,9 +116,8 @@ clientやroutingが使うIDは維持され、本文と資材の供給元だけ�
 
 ## 現在のplugin
 
-採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)であり、Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skillsの固定sourceを使う。
+採用するSkillと依存宣言の正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)である。
 採用ID、directory path、revision、licenseとroutingの違いは[Skill portfolio](skills.md#直接採用)にまとめる。
-Orcaのlegacy aliasである`linear-tickets`は`orca-linear`とroutingを分けるため採用しない。
 architecture-standardの規範本文は、配備済みsourceでなくpolicyが案内する現行規範rootから読み、配備するのはその運用Skillの実行packageである。
 `standard-feedback`は`github-resources`を要求する。
 
@@ -132,12 +131,12 @@ clientごとの`.claude/skills/`などはadapterの投影先であり、正本�
 同梱のClaude Code専用evaluatorは任意のconsumerであり、通常のSkill利用のCapability要件にはしない。
 別repositoryから標準を変えるときは、`environment-design`から作業checkoutの`skills/standard-update/SKILL.md`へ渡し、配備済みsourceを編集しない。
 
-Mattの`code-review`は`setup-matt-pocock-skills`を、`tdd`は`codebase-design`と`code-review`をSkill依存に持つ。`codebase-design`は承認済みの保守派生として、同じIDのlocal entryがその依存を満たす。
+Mattの`code-review`は`setup-matt-pocock-skills`を使う。共通実装の順序は`standard-apply`から標準へ進み、外部TDDを併設しない。
 `diagnosing-bugs`はbrowserを使わないbranchも持つためbrowser Capabilityへのhard依存を持たず、architecture探索を常に呼ぶ依存も置かない。
-`improve-codebase-architecture`は`codebase-design`の判断を使う同じ承認範囲の保守派生であり、`codebase-design`、`domain-modeling`、`grilling`を使う。`grill-with-docs`は`grilling`と`domain-modeling`を、`grill-me`は`grilling`を使う。
+`improve-codebase-architecture`は`codebase-design`、`domain-modeling`、`grilling`を使う。`grill-with-docs`は`grilling`と`domain-modeling`を使う。
 `to-spec`と`to-tickets`はtracker設定の`setup-matt-pocock-skills`を、`retro`は`writing-for-agents`を使う。
 raw `research`とPonytailは配備せず、調査と実装・reviewの原則を既存の自立した手順へ統合する。
-Googleの二Skillとcustom `browser-performance`だけをbrowser-diagnosticsでgateし、実行時にbrowser経路を選ぶ`browser-operation`とnative診断を別に保つ。
+Googleの二Skillと独自の`browser-performance`をbrowser-diagnosticsでgateし、実行時に画面操作の経路を選ぶ`surface-operation`やnative診断と分ける。
 .NET `run-tests`は`platform-detection`と`filter-syntax`をSkill依存に持ち、後者はfiltered runのreference-only helperとして扱う。
 .NETの実行前提は対象projectのSDKとrunnerであり、一般のbrowserやcloud Capabilityではない。
 原版の起動flagを維持し、生成Skill一覧もfrontmatterから明示呼出しとreference-onlyを区別する。

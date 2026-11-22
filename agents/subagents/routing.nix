@@ -2,12 +2,7 @@
   subagentSkills = [
     {
       subagent = "architect";
-      skill = "dependency-analysis";
-      activation = "dynamic";
-    }
-    {
-      subagent = "architect";
-      skill = "description-writing";
+      skill = "technical-writing";
       activation = "dynamic";
     }
     {
@@ -72,17 +67,12 @@
     }
     {
       subagent = "explorer";
-      skill = "dependency-analysis";
-      activation = "dynamic";
-    }
-    {
-      subagent = "explorer";
       skill = "repository-research";
       activation = "required";
     }
     {
       subagent = "implementer";
-      skill = "browser-operation";
+      skill = "surface-operation";
       activation = "dynamic";
     }
     {
@@ -97,12 +87,12 @@
     }
     {
       subagent = "implementer";
-      skill = "comment-writing";
+      skill = "code-annotation";
       activation = "dynamic";
     }
     {
       subagent = "implementer";
-      skill = "documentation-writing";
+      skill = "change-verification";
       activation = "dynamic";
     }
     {
@@ -127,7 +117,12 @@
     }
     {
       subagent = "implementer";
-      skill = "tdd";
+      skill = "local-development";
+      activation = "dynamic";
+    }
+    {
+      subagent = "implementer";
+      skill = "runtime-observation";
       activation = "dynamic";
     }
     {
@@ -158,11 +153,6 @@
     {
       subagent = "implementer";
       skill = "nuget-trusted-publishing";
-      activation = "dynamic";
-    }
-    {
-      subagent = "planner";
-      skill = "dependency-analysis";
       activation = "dynamic";
     }
     {

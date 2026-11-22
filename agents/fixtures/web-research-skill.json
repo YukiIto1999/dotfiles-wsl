@@ -74,7 +74,7 @@
     {
       "id": "local-change-description",
       "prompt": "Write release notes from the local staged diff.",
-      "expectedSkills": ["change-writing"],
+      "expectedSkills": ["technical-writing"],
       "mustNotTrigger": ["web-research"]
     },
     {

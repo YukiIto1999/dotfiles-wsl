@@ -45,7 +45,7 @@ nix eval --json .#nixosConfigurations.nixos.config.dotfiles.skills.enabled
 共通policyのCapability入口表は両方から導き、toolの入口を作るためだけにSkill全体を必須依存へ変えない。
 
 MCP専用の薄いwrapperは置かない。
-`repository-research`は探索経路とsource検証、`browser-operation`は実画面と業務結果の受入確認および明示された探索監査、`github-operations`はidentity、pre-read、idempotency、不可逆操作、`memory`はrecallの検証、保存admission、privacy、failure fallbackを所有する。
+`repository-research`は既存コードと依存関係の証拠、`surface-operation`はWeb・Windows GUI・CLI/TUIの実操作と公開境界での結果、`github-operations`は主体と対象を特定したGitHub操作、`memory`は記憶の照合と保存を所有する。
 SkillとCapabilityの対応は各registry entryの`requiresCapabilities`と`optionalCapabilities`(localは各`module.nix`、外部は[`skills/plugins/module.nix`](../../skills/plugins/module.nix))、subagentごとのSkillのrouteは[`agents/subagents/routing.nix`](../../agents/subagents/routing.nix)を正本にする。
 
 ## 直接採用
@@ -61,6 +61,7 @@ sourceはrepository全体またはSkillを同梱したpublished package全体を
 | [Chrome DevTools MCP](https://registry.npmjs.org/chrome-devtools-mcp/-/chrome-devtools-mcp-1.10.1.tgz) | `chromeDevtoolsMcp` | `1.10.1`（gitHead `e52c6b59b476c5e04d8dd9fd4bd017ba3b3d65df`） | [Apache-2.0](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/e52c6b59b476c5e04d8dd9fd4bd017ba3b3d65df/LICENSE) |
 | [.NET skills](https://github.com/dotnet/skills/tree/0dcd43ceb15e15a2c45dd54075fbcf3a30632154) | `dotnetSkills` | `0dcd43ceb15e15a2c45dd54075fbcf3a30632154` | [MIT](https://github.com/dotnet/skills/blob/0dcd43ceb15e15a2c45dd54075fbcf3a30632154/LICENSE) |
 | [mizchi explainer](https://github.com/mizchi/explainer/tree/578defba7249fde5366689424ed6017f76b5598b) | `explainerSkills` | `578defba7249fde5366689424ed6017f76b5598b` | [MIT](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/LICENSE)。同梱`first-reader`は[Apache-2.0とNOTICE](https://github.com/mizchi/explainer/blob/578defba7249fde5366689424ed6017f76b5598b/skills/first-reader/NOTICE)を保持 |
+| [Cursor pstack](https://github.com/cursor/plugins/tree/7a583913eb1b8d1a0ee76753d1a2cf072e7b54f9/pstack) | `pstackSkills` | [`flake.lock`](../../flake.lock) | [MIT](https://github.com/cursor/plugins/blob/7a583913eb1b8d1a0ee76753d1a2cf072e7b54f9/pstack/LICENSE) |
 
 次のpathは各固定sourceのrootからの相対pathであり、directoryの配置やSkill名をlocalの命名体系へ変換しない。
 Chrome MCPのruntimeと採用Skillは同じpublished packageを参照し、runtimeのversionもその`package.json`から取得する。
@@ -68,13 +69,13 @@ Chrome MCPのruntimeと採用Skillは同じpublished packageを参照し、runti
 | ID | Source内のdirectory | 上流が所有する仕事 |
 |---|---|---|
 | `diagnosing-bugs` | Matt `skills/engineering/diagnosing-bugs` | 障害と性能regressionのfeedback loop、再現、仮説、修正、regression test |
-| `tdd` | Matt `skills/engineering/tdd` | 合意したpublic seamで、一つのtestと最小実装を進めるRED→GREEN |
 | `domain-modeling` | Matt `skills/engineering/domain-modeling` | domain語彙を問い直し、`GLOSSARY.md`、context map、ADRへ確定事項を記録 |
 | `grilling` | Matt `skills/productivity/grilling` | 明示的な依頼に対するdesign treeとfrontier単位の質問 |
 | `code-review` | Matt `skills/engineering/code-review` | fixed pointから`HEAD`までのStandardsとSpecの並列review |
+| `codebase-design` | Matt `skills/engineering/codebase-design` | moduleの境界、interface、seamと検査 |
+| `improve-codebase-architecture` | Matt `skills/engineering/improve-codebase-architecture` | repositoryの摩擦を調べ、構造改善の候補を見つけて議論 |
 | `setup-matt-pocock-skills` | Matt `skills/engineering/setup-matt-pocock-skills` | projectごとのissue trackerとdomain文書の利用設定 |
 | `grill-with-docs` | Matt `skills/engineering/grill-with-docs` | `grilling`と`domain-modeling`を実行するstateful interview |
-| `grill-me` | Matt `skills/productivity/grill-me` | `grilling`を実行するstateless interview |
 | `to-spec` | Matt `skills/engineering/to-spec` | 確定した会話の仕様化、test seamの合意、trackerへの発行 |
 | `to-tickets` | Matt `skills/engineering/to-tickets` | 承認したtracer-bullet ticketとblocking edgeの発行 |
 | `prototype` | Matt `skills/engineering/prototype` | design questionへ答えるlogicまたはUIの実行可能な試作 |
@@ -82,6 +83,11 @@ Chrome MCPのruntimeと採用Skillは同じpublished packageを参照し、runti
 | `writing-for-agents` | Matt `skills/productivity/writing-for-agents` | agent文書のcontext pointer、情報階層、完了条件、削減 |
 | `a11y-debugging` | Google `skills/a11y-debugging` | Lighthouse、semantics、keyboard、focus、target、contrastの実画面監査 |
 | `debug-optimize-lcp` | Google `skills/debug-optimize-lcp` | traceからLCP subpart、element、requestを調べて比較 |
+| `benchmark-checklist` | Cursor pstack `skills/benchmark-checklist` | 測定条件と結果の妥当性の確認 |
+| `correct` | Cursor pstack `skills/correct` | 反復する誤りを構造や検査で防止 |
+| `maintain-verification-skill` | Cursor pstack `skills/maintain-verification-skill` | 対象アプリの既存検証手順と証拠の保守 |
+| `create-formal-verification-skill` / `maintain-formal-verification-skill` | Cursor pstack `skills/`の各同名directory | 形式検証の作成・保守 |
+| `statechart` | Cursor pstack `skills/statechart` | 状態遷移と不変条件をモデル化し、TLCで検査 |
 | `msbuild` | .NET `plugins/dotnet/skills/msbuild` | build failure、binlog、build性能、既存XMLとextension contract |
 | `run-tests` | .NET `plugins/dotnet-test/skills/run-tests` | repositoryとSDK modeに一致するtest command、filter、report |
 | `platform-detection` | .NET `plugins/dotnet-test/skills/platform-detection` | import precedenceからtest platformとframeworkを識別 |
@@ -94,7 +100,8 @@ Chrome MCPのruntimeと採用Skillは同じpublished packageを参照し、runti
 
 ## Routing
 
-codingの共通設計は`codebase-design`、一般の故障とnative性能regressionは`diagnosing-bugs`、test-firstの実装は`tdd`を使う。
+共通設計は`codebase-design`、一般の故障とnative性能regressionは`diagnosing-bugs`を使う。
+共通実装の順序は`standard-apply`から標準の[実装の順序](https://github.com/YukiIto1999/architecture-standard/blob/main/process/implementation.md)へ進む。
 refactoringは確定したbehaviorとscopeを保つ実装作業とし、そのためだけの汎用Skillは置かない。
 実装者とreviewerは、不要な処理を消せるか、既存owner、標準library、native機能、導入済みdependencyで要件を満たせるかを比較する。
 短いdiffやline数の削減で要件、安全性、外部契約を弱めない。
@@ -102,19 +109,18 @@ rawのPonytailとMatt `research`は配備せず、その原則を既存workerと
 
 `diagnosing-bugs`はbrowserを使わないloopも成立するため、browser Capabilityへのhard依存を持たない。
 browserが必要なbranchだけ、その環境で利用可能な専門Skillへ渡す。
-`tdd`はtest seamへの事前合意を要求する。
 実装計画から検証への引渡しは、[共通policy](../../agents/policy/AGENTS.md)が定めるテストリストを使い、[planner](../../agents/subagents/planner.md)の`accepted-plan`から[implementer](../../agents/subagents/implementer.md)の実測結果へ契約を追跡する。
 回答待ちの仕様に依存する作業は保留し、確定した検証項目は計画に残す。
 共通policyがテストリストの品質を定め、plannerは作成と引渡し、implementerは受領と実測結果の返却を担う。同じ語が現れることを重複とみなして、担当間の入出力まで削らない。
 この引渡しは[素のClaude CodeとTDDのセッション記録](https://t-wada.hatenablog.jp/entry/red-green-tdd-with-claude-code-202610)にある、仕様の例だけでは不足したテストリストを、境界と合意事項から補う判断を参考にしている。
 記事の本文は転載せず、既存のagentの計画と引渡しを改訂し、新しいSkillは設けない。
-記事固有のtool選定、100%のcoverage・mutation閾値、Red状態のcommitは採用せず、外部`tdd`の原文と既存の検証・commit規律を維持する。
+記事固有のtool選定、100%のcoverage・mutation閾値、Red状態のcommitは採用しない。
 
 検証と実行制御について参照した資料は、既存の所有者と異なる機構を必要とするかで採否を分ける。
 
 | 資料 | この環境で使う判断と所有者 | 今回採用しないものと理由 |
 |---|---|---|
-| [E2Eテスト大全](https://blog.kuniwak.com/entry/e2ebok) | 誤実装と公開境界から検証層を選ぶ。UIの実描画と全構成の結合を区別し、非同期処理は契約上の観測時点で判定する。検査割当は現行標準、実画面の業務結果は`browser-operation`が所有する | 独自の分類、探索runner、ケース連鎖の共通導入。状態モデルと結合範囲は対象projectの保証から選ぶ |
+| [E2Eテスト大全](https://blog.kuniwak.com/entry/e2ebok) | 誤実装と公開境界から検証層を選ぶ。UIの実描画と全構成の結合を区別し、非同期処理は契約上の観測時点で判定する。検査の割当は標準、実画面の業務結果は`surface-operation`が所有する | 独自の分類、探索runner、ケース連鎖の共通導入。状態モデルと結合範囲は対象projectの保証から選ぶ |
 | [AI開発とテスト設計の記事](https://zenn.dev/ababup1192/articles/77b844dcfc1529) | 型、入力領域、操作列、実結合、利用者面の保証を分け、検出する誤実装から検証を選ぶ。判定規律は現行標準、agentの手順は既存Skillが所有する | 件数だけの網羅判定、型や生成schemaだけによる意味の保証、全変更へのmutationや形式手法の一律追加。確認する保証と実際の検出力を省略しない |
 | [TypeSpecと仕様保証の共有会話](https://chatgpt.com/share/6af70306-dc44-83ec-a5f5-ba55424d5227)・[TDD・BDD・SDDの共有会話](https://chatgpt.com/share/6af70319-4910-83ee-a2fc-38d3ba172509) | 要求の妥当性、仕様自体の整合、実装の適合、実行前提を分けて確認する。設計の判断は現行標準、受入条件から実測への引渡しは既存の計画・実装手順へ接続する | 汎用Verification IRの新設、TypeSpecの置換、別々の必須文書や儀式としてのTDD・BDD・SDD。共有会話を実証研究の一次資料とせず、モデル能力だけで独立した期待値や安全境界を撤去しない |
 | [ISUCON2026の準備記録](https://zenn.dev/luvtechno/articles/isucon2026-preparation)・[当日記録](https://zenn.dev/luvtechno/articles/isucon2026-competition-day) | 安全・隔離・復旧を残し、観測した失敗に関係しない手順と記録を減らす。診断は`diagnosing-bugs`、Skillの変更に対応する評価は`skill-design`へ渡す | 時間だけで起動する監査hook、継続通知の反復、競技得点を一般の成果品質とみなすこと。モデルや環境を同時に変えた成績を個別機構の効果にしない |
@@ -127,7 +133,7 @@ browserが必要なbranchだけ、その環境で利用可能な専門Skillへ�
 この合成課題の成立を、手順なしとの改善量、自然な呼出し、別実行者間の引渡し、長時間作業での停滞対策の有効性へ一般化しない。
 追加機構を導入しない判断は、これらの未測定事項が解消したことを意味しない。
 
-`disable-model-invocation: true`を持つinterview、仕様化、ticket分割、retro、setupの原版と、architecture探索の保守派生は、利用者が明示的に呼ぶcommandとして使う。architecture探索の保守派生は、この起動flagとCodex向けの暗黙起動policy(`openai.yaml`)を原版から保つ。
+原版が`disable-model-invocation: true`を持つ場合は、利用者が明示的に呼ぶcommandとして使う。
 `filter-syntax`はこれに加えて`user-invocable: false`を保ち、`run-tests`がplatformとframeworkを確定したfiltered runで必要とした場合だけ読む。
 この二flagが両方あるhelperはenabled registryと依存closureには残すが、全clientのnamed Skill discovery directoryとsubagent routeから除外する。
 registryの固定raw sourceは保持し、policyが参照する生成Skill一覧のSourceをconsumerが`Read`で開くため、native Skill起動toolによる名前解決に頼らない。
@@ -146,7 +152,7 @@ callerは各軸の指示に、request、issue、specで定めた目的、追う�
 検証の期待値、閾値、基線、skip・隔離を緩めた場合は、対応する仕様変更がないものを指摘する。
 findingは発生条件、影響、最小のchanged rangeと根拠を持ち、指定した軸内だけで返す。
 
-`description-writing`は、一次資料に基づく内容、読者の問いに沿う構成、返った所見を採用する編集判断を所有する。
+`technical-writing`は、一次資料に基づく内容、読者に沿う構成、差分から読み取れる変更の効果、返った所見を採用する編集判断を所有する。
 READMEの開始手順、setup、tutorialなど再現する操作がある場合だけ、独立したcustom [`article-reproduction`](../../skills/article-reproduction/skill/SKILL.md)へ渡す。
 完成した記事と添付のrevision、読者と到達点、環境と開始状態、順序付き操作、入力、期待exitと個別streamと生成物、既存証拠、許可範囲を渡し、判定とlocator付きblocking点を受け取って修正へ戻る。
 書き手側では同じ再現性loopを重ねず、変更した手順や前提だけを同じownerへ戻す。
@@ -162,12 +168,12 @@ architectの`explainer`と`article-reproduction`、implementerの`article-reprod
 raw sourceの採用は`mizchi/explainer`に限り、donorとして調べた`mizchi/skills`をwhole sourceの配備対象にはしない。
 外部scriptの実行入口と制約は[toolingの外部CLI](../reference/tooling.md#外部cli)が持つ。
 
-`browser-operation`は要求と変更pathから実経路、状態遷移、contentと表示条件を選び、fresh DOM操作、実際に読んだrendered screenshot、業務結果を対応させる。
+`surface-operation`は要求から観測すべき操作・状態・結果を選び、Webではfresh DOM操作と表示、Windowsでは分離したGUI、CLI/TUIでは公開commandや端末の操作から結果を確かめる。
 探索監査を明示された場合は、業務目的とriskから同じmatrixを作り、観測から次の仮説を選ぶ。既知経路の受入依頼を全面監査へ広げず、実際の不具合、設計上の仮説、仕様不足を分ける。
 関連する拒否、回復、契約が必要とする再取得までclaimごとに閉じ、coverageと未確認条件を返す。設計評価・再設計が依頼に含まれる場合は、証拠を`ui-design`へ渡す。
 `designer`は親が観測した証拠から設計を判断する。観測が足りなければ必要な状態と操作を親へ返し、実画面操作と専門監査は親から該当Skillへ渡す。
-永久testの作成や専門監査は別ownerとし、Orca、clientの標準browser tool、`browser-automation`のうち実行可能な経路を選ぶ。
-Orcaと`browser-automation`は配備の必須条件にせず、経路がない場合もSkillを残して未確認の条件を返す。
+永続する検査の入口は`change-verification`、専門診断と実行時の観測はそれぞれの専門Skillが所有する。
+Orcaやブラウザ経路を必須の配備条件にせず、必要な操作経路がなければ未確認の結果を返す。
 browser-diagnosticsの入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面a11yの`a11y-debugging`とする。
 Googleの固定sourceは配備するChrome DevTools MCP 1.10.1に対応し、必要なreferenceを切り離さない。
 例の引数や値はsessionの実tool schemaで確認し、page IDを固定する。
@@ -197,7 +203,8 @@ guideを独自Skillへ再編集せず、projectのbrowser supportと前提を照
 
 `property-testing`の正本はarchitecture-standardの`skills/property-testing/SKILL.md`であり、`requiresSkills = [ \"standard-apply\" ]`、`requiresCapabilities = [ ]`を使う。
 published revisionを`flake.lock`で固定してwhole sourceから直接採用し、architectとimplementerのdynamic routeへ登録する。
-CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfaces/console/layout.md](https://github.com/YukiIto1999/architecture-standard/blob/main/structure/surfaces/console/layout.md)へ進み、moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとshrinkingは`property-testing`、実装は既存の`tdd`が扱う。
+CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfaces/console/layout.md](https://github.com/YukiIto1999/architecture-standard/blob/main/structure/surfaces/console/layout.md)へ進む。
+moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとshrinkingは`property-testing`、実装順序は標準が所有する。
 標準の`skills/cli-design/`はwhole source内に保持するが、named discoveryとsubagent routeには登録しない。
 未commitのlocal checkoutを恒久sourceにせず、標準の公開後の最新を`nix flake update architectureStandard`で取り込み、`flake.lock`のcommitを経て`dotfiles-rebuild`で適用する。
 規範本文はこの配備済みsourceからでなく、policyが案内する現行規範rootから読むため、本文の改訂は`flake.lock`の更新を待たない。
@@ -212,31 +219,31 @@ CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfac
 
 | 判断方法 | 所有する判断 | 必要時の導線 |
 |---|---|---|
-| `change-writing` | 明示した差分から変更の目的と利用者への影響を説明する判断 | 差分と検証記録を読み、日本語では`ja-writing`を本文の組立てから使う。目的、互換性、確度は対象diffと照合する。 |
-| `comment-writing` | 実装commentを残す理由と最小の内容の判断 | 正本の標準と制約を読み、残す内容と形式を一つの手順で決める。 |
-| `description-writing` | 一次資料に基づく内容と、読む場面・使い方に合う構成の判断 | 日本語では`ja-writing`と同じ執筆の中で構成・表現を整える。再現する手順を`article-reproduction`、速習資料を原版`explainer`、独立した理解確認を原版`first-reader`へ条件付きで渡す。 |
+| `technical-writing` | 技術文書の内容と構成、差分に基づく変更の目的と読者への影響 | 日本語は`ja-writing`と組み合わせ、実行手順は`article-reproduction`、速習資料と初見読解は各外部Skillへ渡す。 |
+| `code-annotation` | 公開宣言の利用契約と実装コメントに残す制約を分けて判断 | 正本の標準と近傍のコードを読み、型・名前・testで表せる情報を重ねない。 |
 | `article-reproduction` | 記事の開始条件と操作から到達点を再現できるかの判断 | 記述reviewと実行証拠を区別し、必要なbrowser操作や.NET testだけを専門入口へ渡す。 |
-| `documentation-writing` | 宣言の契約をdocumentation commentへ記す判断 | 宣言、実装、契約を調べ、利用側が依存する保証と各行の形式を照合する。 |
-| `dependency-analysis` | nodeとedgeを固定して依存の事実を作る判断 | 未知の概念と関係だけ`repository-research`へ渡し、設計と診断を別の仕事として扱う。 |
 | `impact-analysis` | 一つの変更から契約と利用箇所と運用への影響を追う判断 | 不足する調査を`repository-research`へ渡し、設計や診断へ影響の証拠を引き継ぐ。 |
-| `codebase-design` | moduleの責務、隠す決定、権限、状態の寿命からinterfaceとseamを決める判断 | 既存の依存の事実は`dependency-analysis`、一つの変更の影響は`impact-analysis`、故障の診断は`diagnosing-bugs`へ渡す。別のinterface案は、必要な独立した問いごとの視点で作って比べる。 |
 | `ja-writing` | 読み手・状況・媒体・語り口に応じた日本語の内容選択、構成、展開と推敲 | 成果物担当から事実と専用形式を引き継ぎ、素材の選択、構成、執筆と通読、意味の照合を一つの手順で行う。事実調査や別の構成作成は重ねない。 |
 | `skill-design` | Skillの要否、責務と導線、実行結果に基づく採否の判断 | 変更の影響から構造確認とfresh実行を選び、固定したcriticalと対照で評価する。規範や配備先の不足だけを`environment-design`へ渡す。 |
-| `ui-design` | 利用者の仕事と実contentに基づく実装前brief、および観測証拠に基づく既存UIの設計評価・再設計 | 必要な実surfaceの観測は`browser-operation`へ渡し、受け取った証拠を再取得しない。通常は既存design systemを活用し、明示された再設計では実制約と変更可能な体系を分ける。実装構造は`codebase-design`へ渡す。 |
+| `ui-design` | 利用者と実contentに基づく実装前brief、既存UIの評価・再設計 | 実surfaceの観測は`surface-operation`へ渡し、受け取った証拠を再取得しない。実装の境界は`codebase-design`へ渡す。 |
 | `security-review` | 脅威モデリングから候補の検証と攻撃経路へ進む判断 | 不足する証拠だけ調査や観測のSkillへ渡し、security判断とphaseの進行を引き取る。 |
 
 | 作業手順 | 公開入口 | 合成と引継ぎ |
 |---|---|---|
-| `browser-operation` | Orca内蔵browser、clientの標準browser tool、`browser-automation`のPlaywright MCP | 既知経路の受入、または明示された目的からの探索監査を、実画面と業務結果で閉じる。設計判断が必要なら証拠とcoverageを`ui-design`へ、専門監査や原因診断は該当担当へ渡す。経路と安全な停止はこのSkillが所有する。 |
+| `surface-operation` | Orca、clientのbrowser tool、Playwright MCP、Anode、PTY・CLI | 操作前提と許可を固定し、表示や終了結果だけでなく依頼された業務結果を確かめる。 |
+| `runtime-observation` | .NET診断CLI、`perf`、`strace`、GDB、Hyperfine、Node、Aspire Dashboard | 実行のどの境界を測るか選び、条件をそろえて生の証拠を採る。 |
+| `change-verification` | projectの入口、.NET test、Vitest Browser Mode、Playwright Test、Testcontainers、静的検査 | 確定した契約を検査層へ割り当て、実行、観測結果と未確認条件を返す。 |
+| `local-development` | `devenv`、project実行入口、`orca-cli` | 開発用の依存、起動、readiness、所有するprocessとデータの回収。 |
+| `workstation-operations` | Nix、`nix-locate`、`nvd`、`nix-diff`、dotfilesの診断・配備入口 | 候補と実稼働世代を区別し、許可された環境操作と前後観測を行う。 |
+| `release-artifacts` | projectが固定するSyft、OSV-Scanner、Cosign | artifact digest、部品表、脆弱性の検査と署名検証を対応させる。 |
 | `browser-performance` | `browser-diagnostics`のChrome DevTools MCP | 固定した測定条件と観測をLCPの専門Skillや`heap-analysis`へ渡し、戻った証拠から診断を続ける。 |
 | `heap-analysis` | `heap-diagnostics`の公開MemLab MCP | browserのcaptureだけを`browser-performance`へ委譲し、返ったcaller所有のprivate fileを解析する。 |
 | `github-operations` | `github-resources`のaccount別GitHub MCP | accountと対象resourceを固定し、write前後の状態を確認する。 |
 | `memory` | `project-memory`の公開MCP | recallを一次資料で検証し、保存の受理と永続化を区別する。 |
-| `repository-research` | native repository tools（未知の所在はclientの意味探索、OMPでは`find`） | 未知の概念を探索し、graphと具体的変更の影響をそれぞれの判断方法へ渡す。 |
+| `repository-research` | native repository tools（OMPの`find`、Grep、LSP、AST、Git） | 未知の概念と依存関係を一次資料から検証する。具体的な変更の影響判断は`impact-analysis`へ渡す。 |
 | `web-research` | clientのWeb検索とURL取得、`library-documentation`のContext7、Microsoft Learn、DeepWiki | Context7でライブラリ資料の版や所在、Microsoft Learnで公式記事、DeepWikiで公開リポジトリ内の実装箇所を探し、対象版の原資料と照合する。必要なtoolがないsubagentは呼出し元へ実行を依頼する。localの問いは`repository-research`へ渡す。 |
 | `environment-design` | ownerの正本と既存Skillの入口 | 変更理由と正本から所有者を選び、既存指示との重複や矛盾を確認する。再発だけでhookへ進めず、agentの改善方法は`skill-design`へ渡す。外部toolの採用や差替えは、更新後のcallerと配備契約を確認する。 |
 | `commit-writing` | Gitのstaged diffと対象repositoryのcommit-msg hook | 全repository共通の件名形式を持ち、意味と文末の正本を読んで一つの目的に閉じた件名を作り、実際のhookを通す。 |
-| `improve-codebase-architecture` | 利用者の明示呼出し | 探索で摩擦と候補を作り、統合や分割、seam、testの判断は`codebase-design`の基準に従う。HTML reportで候補を示して利用者の選択を待ち、選ばれた候補を`grilling`、用語とADRを`domain-modeling`で進める。 |
 
 `requiresSkills`は無条件に必要な配備前提だけを表す。
 追加の観測や、対象が別の仕事だった場合のhandoffは条件付きの導線として本文へ残す。
@@ -249,7 +256,7 @@ containerを背後に持つMCPも公開Capabilityから使い、Skillからprovi
 採用した外部原版は変更しない。承認済みの保守派生は原版の変更ではなく、同じIDのlocal正本への切替えとして扱う。
 phase referenceは同じdirectoryから解決し、別Skillのfrontmatterや特定clientだけのreport directiveを持たない。
 browser性能の代表scenarioは[`agents/fixtures/browser-performance-skill.json`](../../agents/fixtures/browser-performance-skill.json)に置く。
-browser操作の経路選択、安全な停止、受入と探索監査の境界は[`agents/fixtures/browser-operation-skill.json`](../../agents/fixtures/browser-operation-skill.json)のscenarioで評価し、実際の画面操作の証拠とは区別する。
+ブラウザの実操作と公開境界の観測は[`agents/fixtures/surface-operation-skill.json`](../../agents/fixtures/surface-operation-skill.json)のscenarioを使って評価し、実際の操作結果とは区別する。
 外部toolの統合は[`agents/fixtures/environment-integration-skill.json`](../../agents/fixtures/environment-integration-skill.json)の代表scenarioで、callerと実装、共通配備と現状調査を区別して評価する。
 環境改善の所有者選択は[`agents/fixtures/environment-design-skill.json`](../../agents/fixtures/environment-design-skill.json)で、既存指示の衝突、規律の重複追加、証拠不足の枝だけを保留する判断を評価する。
 これらのfixtureは入力と期待する判断を定めるものであり、評価日時や成功を記録するものではない。実測結果は、使ったfixtureの版と実行証拠を結んだ`work/`の評価記録に残す。
@@ -356,7 +363,7 @@ fixtureの課題と較正対は評価の入力であり、品質改善や自然�
 代表scenarioと期待する探索経路は[`agents/fixtures/web-research-skill.json`](../../agents/fixtures/web-research-skill.json)に置く。
 
 
-### dependency-analysisで採用したdonor
+### repository-researchの依存分析で採用したdonor
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
 |---|---|---|---|
@@ -364,11 +371,12 @@ fixtureの課題と較正対は評価の入力であり、品質改善や自然�
 | [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/8b78b531ab965735c5dc74f6f7a219e1e37326df/skills/engineering/codebase-design) | MIT | dependencyの性質によってseam、substitution、testの意味が変わること | deep module化、adapter分類、HTML report、grillingを依存分析の成果にすること |
 | [decomplect coupling](https://github.com/shanev/skills/blob/8fd6aaf4d16e9c1e6caa5bfd9ba8d3bb52864c7f/decomplect/references/coupling.md) | MIT | explicitで安定した依存は必要であり得ること、cycleや結合を具体的な変更、build、test、deploy costで確かめること | architecture finding、confidence閾値、修正案を依存分析が所有すること |
 
-`dependency-analysis`は、node、edge、方向、granularityを先に定義し、source、call、data、runtime、build、deployment、ownershipの依存を型なしの一graphへ潰さない。
+`repository-research`は、node、edge、方向、粒度を先に定義し、異種の依存を無名の一graphへ潰さない。
 fan-in、fan-out、cycle、transitive reachabilityは構造の事実であり、数値だけで欠陥とは判定しない。
 具体的な変更から影響を追う仕事は`impact-analysis`、依存方向やseamの設計は`codebase-design`へ渡す。
 
-代表scenarioは[`agents/fixtures/dependency-analysis-skill.json`](../../agents/fixtures/dependency-analysis-skill.json)に置く。正規のmanifest、compiler、AST、service定義、runtime traceを優先する。表現や所在が不明な候補は`repository-research`へ渡し、exact textや構文patternの候補は`rg`や`ast-grep`で直接探索してsourceで確かめる。言語横断の抽出を装う専用scriptは作らず、repositoryが持つtoolを使う。
+依存構造の代表scenarioは[`agents/fixtures/repository-dependency-scenarios.json`](../../agents/fixtures/repository-dependency-scenarios.json)に置く。
+言語横断の抽出を装う専用scriptは作らず、対象repositoryとclientが提供するtoolを使う。
 
 
 ### impact-analysisで採用したdonor
@@ -377,7 +385,7 @@ fan-in、fan-out、cycle、transitive reachabilityは構造の事実であり、
 |---|---|---|---|
 | [WondelAI working-with-legacy-code](https://github.com/wondelai/skills/tree/6bac1534f9f256a56fc2b4dd0e70b9a692758966/working-with-legacy-code) | MIT | change pointからobservableへ外向きに辿るeffect sketch、影響が収束するpinch point、compilerをimpact evidenceとして使うこと | legacy codeの変更手順、characterization test、dependency breaking、refactoring実装 |
 | [Addy Osmani deprecation-and-migration](https://github.com/addyosmani/agent-skills/blob/be42637c5af93fdc8526b68ec2f2651b930f316c/skills/deprecation-and-migration/SKILL.md) | MIT | active consumerとtouchpointの確認、old/new共存、利用状況の観測、additive準備とdestructive除去の境界 | migration方式の選択、deadline、実行手順、無条件のdown migrationや固定pattern |
-| [`dependency-analysis`](../../skills/dependency-analysis/skill/SKILL.md) | local | 型付きdependency graphを具体的変更のeffect pathの証拠として使うこと | repository全体のgraph作成を毎回やり直すこと |
+| [`repository-research`](../../skills/repository-research/skill/SKILL.md) | local | 型付きdependency graphを具体的変更のeffect pathの証拠として使うこと | repository全体のgraph作成を毎回やり直すこと |
 
 `impact-analysis`は一つの変更前後を固定し、consumerが観測する契約差からcode、data、runtime、deployment、operation、test、docs、ownerへ外向きに影響を追う。確実な影響、条件付きの影響、未観測の外部consumerやdynamic edgeを分ける。変更fileの列挙、一般的なdependency map、migration実装、新しい設計は所有しない。
 
@@ -433,10 +441,10 @@ frontend実装やreviewのためだけの同役割Skillは増やさない。
 代表scenarioは[`agents/fixtures/ui-design-skill.json`](../../agents/fixtures/ui-design-skill.json)に置く。
 
 
-### browser-operationの実画面受入と探索監査
+### surface-operationの実画面受入と探索監査
 
 要求と変更path、状態遷移、表示条件、画像と業務結果のmatrixは、利用者が報告した実画面確認の不足を埋めるcustomの設計である。
-利用者が提示した総合監査・UI再設計の依頼文から、業務目的を起点にした探索と、情報・視覚・操作・体験の独立評価を既存の担当へ統合した。観測の担当は`browser-operation`、設計判断は`ui-design`とし、別の総合監査Skillや常時監査は設けない。
+利用者が提示した総合監査・UI再設計の依頼文から、業務目的を起点にした探索と情報・視覚・操作・体験の独立評価を取り入れた。観測を`surface-operation`、設計判断を`ui-design`が担当し、総合監査を常時は行わない。
 以下のdonorが完全な受入方法を提供するとしたものではなく、永久test suiteやCIのownerも増やさない。
 
 | Donor | License | 採用した内容 | 採らなかった内容 |
@@ -457,18 +465,11 @@ legal情報と採否の記録はこの保守文書に置き、外部原版その
 browserのinteractionはinputから最初のpaintまでの指標と、非同期response後の結果表示までを分け、request、main-thread work、layout、paintを同じtraceとsourceへ対応させる。
 会話を再開してもproviderのpageとtraceの保持は保証されないため、現在の公開toolで可用性を確認し、取得済みartifactと新sessionの観測を区別する。
 
-### codebase-designとimprove-codebase-architectureの保守派生
+### create-verification-skillの同名調整
 
-`codebase-design`と、その方法を呼ぶ`improve-codebase-architecture`は、固定したMatt Pocock skillsの原版を直接採用する構成から、利用者が明示した適応の範囲に含まれる同IDのlocal保守派生へ切り替えた。
-正本は[`skills/codebase-design/skill/`](../../skills/codebase-design/skill)と[`skills/improve-codebase-architecture/skill/`](../../skills/improve-codebase-architecture/skill)であり、`skills/plugins/module.nix`の採用表には登録しない。
-IDとfrontmatterの`name`を保つ。`codebase-design`は`requiresSkills`と`requiresCapabilities`を空に、`improve-codebase-architecture`は原版と同じ`codebase-design`、`domain-modeling`、`grilling`を`requiresSkills`に宣言する。`tdd`と`improve-codebase-architecture`の`requiresSkills`は、同じIDのlocal entryで満たされる。
-`improve-codebase-architecture`は原版の`disable-model-invocation: true`とCodex向けの暗黙起動policyを保ち、明示呼出しのcommandとして使う。
-派生元の更新は自動では追随せず、必要な差分を読んで取り込むかを判断する。
-
-| Donor | Revision | License | 採用した内容 | 変更した内容 |
-|---|---|---|---|---|
-| [Matt Pocock codebase-design](https://github.com/mattpocock/skills/tree/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/engineering/codebase-design) | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | [MIT・著作権表示と許諾文](../../skills/codebase-design/skill/LICENSE)を同梱 | deep moduleの語彙、deletion test、公開interfaceでの検証、依存の性質によるtest、複数のinterface案の比較 | processやadapter数でなく、責務・隠す決定・権限・状態の寿命でseamを決める。意味のある既存testと実dependencyの検証を維持し、固定3案・3agentを課さない。日本語化し、来歴は実行手順から分離 |
-| [Matt Pocock improve-codebase-architecture](https://github.com/mattpocock/skills/tree/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d/skills/engineering/improve-codebase-architecture) | `4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d` | [MIT・著作権表示と許諾文](../../skills/improve-codebase-architecture/skill/LICENSE)を同梱 | 明示呼出し、探索の範囲決定、glossaryとADR、摩擦の問い、HTML report、選ばれた候補のgrillingとdomain model更新 | 重複していた設計基準を除き、統合・seam・test・interface案の判断を`codebase-design`へ統一。探索の委譲は独立性と費用で決め、図を測定値と扱わない。日本語化 |
+Cursor pstack原版の専用生成先を外し、検証対象projectが採用するSkillの正本へ生成する。
+既存ハーネスの再利用、実物の操作、証拠の記録は原版の手順を保つ。
+供給元と差分の記録は[`skills/create-verification-skill`](../../skills/create-verification-skill)に置く。
 
 ## Custom Skillの採用条件
 

@@ -21,14 +21,14 @@
           requiresSkills = [ "codebase-design" ];
         };
         replacementSkill = {
-          source = ./fixtures/external-source/procedures/browser-operation;
+          source = ./fixtures/external-source/procedures/surface-operation;
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
         sourceAdoptionModule = {
           dotfiles.skills.registry = {
             external-procedure = externalSkill;
-            browser-operation = lib.mkForce replacementSkill;
+            surface-operation = lib.mkForce replacementSkill;
           };
         };
         sourceConfig =
@@ -39,7 +39,7 @@
         sourceManifest = pkgs.writeText "skill-source-manifest.json" (
           builtins.toJSON {
             external-procedure = "${sourceConfig.dotfiles.agents.shared.skills.external-procedure}";
-            browser-operation = "${sourceConfig.dotfiles.agents.shared.skills.browser-operation}";
+            surface-operation = "${sourceConfig.dotfiles.agents.shared.skills.surface-operation}";
           }
         );
         mismatchedManifest = pkgs.writeText "skill-mismatched-name-manifest.json" (
@@ -50,7 +50,7 @@
           (lib.evalModules {
             modules = [
               ./impl/contract.nix
-              ./browser-operation/module.nix
+              ./surface-operation/module.nix
               ./repository-research/module.nix
               { dotfiles.skills.registry.codebase-design = registry.codebase-design; }
               {
@@ -217,30 +217,30 @@
             ]);
           assert
             !(sourceContractPasses [
-              { dotfiles.skills.registry.browser-operation = replacementSkill; }
+              { dotfiles.skills.registry.surface-operation = replacementSkill; }
             ]);
           assert
             !(sourceContractPasses [
-              { dotfiles.skills.registry.browser-operation.source = ./browser-operation/skill; }
+              { dotfiles.skills.registry.surface-operation.source = ./surface-operation/skill; }
             ]);
           assert
             !(sourceContractPasses [
               sourceAdoptionModule
-              { dotfiles.skills.registry.browser-operation = lib.mkForce replacementSkill; }
+              { dotfiles.skills.registry.surface-operation = lib.mkForce replacementSkill; }
             ]);
-          assert builtins.elem "browser-operation" noCapabilitiesBefore.dotfiles.skills.enabled;
+          assert builtins.elem "surface-operation" noCapabilitiesBefore.dotfiles.skills.enabled;
           assert !builtins.elem "external-procedure" noCapabilitiesBefore.dotfiles.skills.enabled;
-          assert builtins.elem "browser-operation" noCapabilitiesAfter.dotfiles.skills.enabled;
+          assert builtins.elem "surface-operation" noCapabilitiesAfter.dotfiles.skills.enabled;
           assert !builtins.elem "external-procedure" noCapabilitiesAfter.dotfiles.skills.enabled;
           assert
-            toString sourceConfig.dotfiles.agents.shared.skills.browser-operation
+            toString sourceConfig.dotfiles.agents.shared.skills.surface-operation
             == toString replacementSkill.source;
           assert
             toString sourceConfig.dotfiles.agents.shared.skills.external-procedure
             == toString externalSkill.source;
           assert
-            toString sourceConfig.dotfiles.agents.shared.skills.browser-operation
-            != toString hostConfig.dotfiles.skills.registry.browser-operation.source;
+            toString sourceConfig.dotfiles.agents.shared.skills.surface-operation
+            != toString hostConfig.dotfiles.skills.registry.surface-operation.source;
           pkgs.runCommandLocal "check-skill-source-contract"
             {
               nativeBuildInputs = [ pkgs.python3 ];

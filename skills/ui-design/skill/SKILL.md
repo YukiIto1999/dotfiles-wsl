@@ -10,7 +10,7 @@ description: Design UI before implementation, or evaluate and redesign an existi
 ## 現在の文脈を確認する
 
 productの目的、利用者、利用場面、主要task、実データと値の範囲、表示文言、端末、入力方法、技術上と運用上の制約を確認する。repositoryがある場合は、既存画面、design system、token、shared primitive、content規約、accessibility要件を先に読む。
-実装済みsurfaceの状態や実contentが設計判断を変える場合だけ、利用可能な`browser-operation`へURL、観測するtaskとstate、viewport、許可されたaccountと操作を渡す。
+実装済みsurfaceの状態や実contentが設計判断を変える場合だけ、利用可能な`surface-operation`へURL、観測するtaskとstate、viewport、許可されたaccountと操作を渡す。
 返されたsnapshot、必要なappearanceの証拠、未確認事項を設計入力へ戻し、観測を理由に設計やaccount変更を委ねない。
 呼び出し側が観測結果をすでに渡している場合は、それを入力として使い、同じ観測を依頼し直さない。
 repository内のdesign system、token、shared primitiveの所在や関係が不明な場合だけ、利用可能な`repository-research`へroot、問いと既知のanchorを渡し、source locator付きの関係と制約を受け取る。
@@ -71,7 +71,7 @@ notchやsoftware keyboard、sticky領域でcontentとfocusが隠れない配置�
 利用者が既存UIの評価、問題点の指摘、再設計を明示した場合だけ、この節を加える。通常の画面追加や変更は上の既定を保ち、評価や再設計へ広げない。
 
 証拠を入力にする。判断の根拠は、呼び出し側が渡した観測（snapshot、画像、操作記録、coverageと未確認条件）、source、利用者の説明である。実画面について根拠がなければ、見ていない状態を判断せず、必要な観測を対象state、content、viewport、操作として依頼条件に書く。
-実画面の探索的・網羅的な監査は、利用者の明示依頼で`browser-operation`が行う仕事であり、このSkillから始めない。未実施ならcallerへ依頼条件を返し、実画面に依存する結論を保留する。
+実画面の探索的・網羅的な監査は、利用者の明示依頼で`surface-operation`が行う仕事であり、このSkillから始めない。未実施ならcallerへ依頼条件を返し、実画面に依存する結論を保留する。
 
 目的から評価する。利用者と事業にとってのproductの目的を、要求、source、画面の文言、利用者の説明から特定し、出典のない目的は仮定として明示する。現状の画面構成を目的と同一視せず、目的への影響で所見の重みを決める。
 

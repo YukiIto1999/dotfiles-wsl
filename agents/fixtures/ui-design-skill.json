@@ -94,7 +94,7 @@
       "set": "development",
       "environment": "A product runs on localhost. A real browser route, an approved test account and fixture data are exposed. The accessibility specialist is available.",
       "prompt": "起動中の画面をbrowserで操作し、情報階層、操作性、responsive、accessibility、feedback、recoveryの問題を証拠付きで監査してください。再設計はまだしません。",
-      "expectedSkills": ["browser-operation", "a11y-debugging"],
+      "expectedSkills": ["surface-operation", "a11y-debugging"],
       "mustNotTrigger": [
         "ui-design"
       ],
@@ -120,7 +120,7 @@
         "ui-design"
       ],
       "mustNotTrigger": [
-        "browser-operation"
+        "surface-operation"
       ],
       "expected": {
         "usesTheSuppliedEvidenceWithoutReopeningTheBrowser": true,
@@ -142,7 +142,7 @@
       "set": "development",
       "environment": "The top-level agent exposes a real browser route and an approved test account. A delegated designer has no browser route of its own. The requirements document covers booking and cancellation only.",
       "prompt": "起動中のこの予約サービスを実際に操作して問題を洗い出し、その結果に基づいて再設計案まで作ってください。",
-      "expectedSkills": ["browser-operation", "ui-design"],
+      "expectedSkills": ["surface-operation", "ui-design"],
       "expected": {
         "collectsObservationsThroughTheBrowserOwnerBeforeAnyDesignJudgement": true,
         "passesClassifiedObservationsLocatorsAndCoverageToTheDesignOwner": true,

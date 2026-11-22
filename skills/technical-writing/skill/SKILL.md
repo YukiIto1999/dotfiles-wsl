@@ -1,0 +1,96 @@
+---
+name: technical-writing
+description: Writes or restructures technical prose for a known human audience, such as a README, guide, ADR, specification of decided contracts, proposal, report, onboarding document, or an explanation of an existing change in a pull request description, changelog, or release note. Owns source-backed content and structure suited to how the text is read and used; for change descriptions, derives purpose, compatibility, migration, and evidence from an explicit diff range without inventing motivation. Composes Japanese prose with ja-writing, and hands runnable procedures to article-reproduction, requested reader checks to first-reader, specialized learning material to explainer, and term decisions to domain-modeling. Does not write agent instructions, code comments, or commit messages, or publish text to GitHub.
+---
+
+# 技術文書と変更説明を書く
+
+成果は、決まった読者が読後に必要な判断や行動をとれる、根拠付きの本文である。
+文書の役目と読み方から構成を決め、固定した節数やtemplateの空欄から作らない。
+
+## 執筆契約
+
+最初に成果物の種類、読者、読書中か作業中か、読後に必要な判断や行動を定める。
+読者について依頼から分かる事実と推測を分け、既存template、同種文書、用語の正本を読む。
+文書の役目が終わる条件も定める。
+
+成果物が既存の変更を説明するもの（pull requestの説明、changelog、release note）なら、執筆の前に[変更説明](references/change-descriptions.md)を読み、基準点と対象範囲を確定する。
+それ以外の一般の技術文書は、[文書別の判断](references/document-types.md)から該当する種類だけを読む。
+
+次の仕事は、通常の執筆と分ける。
+
+- sourceに照らす図、出力注釈、HTMLを含む速習資料、または明示的に`explainer`が求められた場合は、利用可能な原版を読み、その仕事を引き渡す。
+  読者の既知と未知、読後の問い、source locator、draftまたは対象、成果物の形式、実行許可、既存の検証記録を渡す。
+  「内容を成立させる」のsource調査を先に終え、資料の生成と専用の検査を原版へ渡した後は「Reviewへ引き渡す」から再開する。
+  戻る資料と検査範囲、未検証の主張を受け取り、同じ構成作成やreader試行をこちらでも繰り返さない。
+  原版の広いtriggerを、すべての短い説明や変更説明へ広げない。
+- 用語の意味、context、canonical term、`GLOSSARY.md`、domainのADRを確定または変更する必要がある場合は、利用可能な`domain-modeling`へ候補語、使用箇所、既存定義、矛盾するsourceと未決事項を渡す。
+  確定した用語と記録のlocatorを受け取って執筆へ戻り、用語集の別ownerを作らない。
+  既存用語を読むだけなら、そのまま執筆を続ける。
+- 未決の契約を決めることは執筆の仕事ではない。
+  会話から仕様を合成してissue trackerへ発行する仕事は利用者が呼び出す`to-spec`が持ち、ここでは決定済みの契約だけを文書にする。
+- agentが読むSkill、`AGENTS.md`、`CLAUDE.md`、agent向けの指示文書は`writing-for-agents`、commit messageは`commit-writing`、code内の宣言の契約と実装commentは`code-annotation`が持つ。
+- 書いた本文をpull request、release、issueへ反映する操作は`github-operations`が持つ。
+  ここでは本文と、反映先として確定した対象を返す。
+
+必要なSkillが利用不能な枝は、その仕事を未実施として返す。
+別のSkillを模倣して、引渡し済みとは書かない。
+
+## 内容を成立させる
+
+1. source、code、test、decision record、変更説明では対象diffと検証記録から、書く主張に必要な事実を集める。
+   公開情報の調査は`web-research`、所在や関係が未知のrepository調査は`repository-research`が利用可能なら渡し、locator付きの根拠と未確定事項を受け取る。
+   事実、解釈、提案を分け、結果を変える背景が資料から得られない場合だけ書き手に質問する。
+   sourceの選定と記述の正確さは書き手が所有し、reader反応や再現性reviewで代用しない。
+2. 理解する順序、判断に必要な根拠、作業の依存、参照する項目から、その文書に合う構成を作る。
+   日本語で書く場合は、本文を組み立てる前に`ja-writing`を読み、情報の選択、展開、語調の推敲を同じ執筆の中で行う。
+   目的と事実はここで確定したものを引き継ぎ、構成を別工程で二度作らない。
+   網羅のための節や後で使わない詳細は足さず、既知の情報は今回の説明に使う範囲で受け直す。
+   見出しはその節の役目と読み方に合わせ、一律に短いラベルや問いへそろえない。
+3. 一つの正本だけを置く。
+   同期できない揮発値を転記せず、正本と取得方法を示す。
+   手順では読者に必要な入力、開始状態、command、期待結果を揃え、期待結果と実行して観測した結果を区別する。
+   実行していない検証を完了済みにせず、command名やcheck名は正本で確認する。
+4. 通読して矛盾、重複、未定義語、読者にだけ見えない前提を編集する。
+   正本に従って読者の理解や判断に必要な記述を残し、repositoryの表記規則に合わせる。
+   編集後の文面を原資料（変更説明では対象diff）と照合し、目的、契約、互換性、検証の確度と不確実性が保たれていることを確認する。
+
+## Reviewへ引き渡す
+
+執筆中に判断した期待結果を、検証の成功と扱わない。
+本文と必要な添付が揃ったrevisionを渡し、次の二つの判断を分ける。
+
+### 手順の再現性
+
+setup、tutorial、操作guide、READMEの開始手順、release noteの移行手順など、読者がcommandや操作で結果へ到達する部分がある場合、または「動いた」と主張する場合は、利用可能な`article-reproduction`へ渡す。
+再現対象のない概念説明、ADRの背景、単なる参照表には発火しない。
+
+入力の形は、同Skillを読んで到達する`references/reproduction-contract.md`で定める。
+記事と添付のrevision、読者と到達点、環境と開始状態、順序付きcommand、codeとconfig、sample入力、期待exitとstdoutとstderr、必要な生成物、source locator、既存の実行証拠、未実施事項、許可された副作用を揃える。
+不足した値は空欄を推測で埋めず、不足として渡す。
+
+返る判定、blocking箇所の引用とlocator、検証種別、commandごとの証拠、未実施範囲を採用して本文を修正する。
+書き手は同じcommand実行や想像上の再現reviewを重ねず、変更した手順、期待結果、または前提だけを同じownerへ戻す。
+既存の有効な証拠を再利用し、本文や環境が変わった範囲の再検証も実行許可がある場合に限る。
+Skillが利用不能ならdraftは返せるが、再現性reviewは未実施であり、再現済みとは書かない。
+
+### 読者の理解
+
+beta readが依頼された場合、または大きな公開資料や重要な判断文書で、読み進め方、誤解、読後に残る判断を独立に確かめる必要がある場合は、利用可能な原版`first-reader`へ渡す。
+完成したdraftのpathとrevision、読者、媒体と読む場面、読む時間、読後の問い、意図する要点を渡す。
+書き手が既に全文を知っていることを伝え、初見の読みは原版が定めるfreshな実行contextで行う。
+原版を独立したreader担当に渡す場合は、記事本文や書き手の解答をreaderの初期contextへ混ぜず、原版のfeedとlogの分離を保つ。
+freshなreaderの起動が許可されていないworkerは、この入力と未実施理由をtop-level callerへ戻し、既に全文を知る自分の読みで代用しない。
+
+引用付きの読者反応、離脱箇所、要点の受け取り、reportのlocatorを受け取り、修正の判断は書き手が行う。
+模擬readerの反応やlogからのrecallを、人間による読解実測、翌日の記憶測定、commandの実行証拠とは呼ばない。
+`explainer`が同じrevisionでこの仕事を既に行った場合は、その結果を受け取り、二度起動しない。
+原版が利用不能なら理解検査は未実施とし、自前のreader simulationで補ったことにしない。
+
+## 文書を閉じる
+
+各読者の問いに本文または正しい入口があり、主張に根拠があり、返ったblocking点が解消されたrevisionを渡す。
+再現性は「記述reviewのみ」「実行で再現」「実行失敗」「前提または権限不足」を区別し、未実施の検査を本文と報告から読み取れる形にする。
+記述reviewだけで終えた記事は、手順の不足を調べたdraftとして渡せるが、実行で再現済みとは書かない。
+実行による証明が依頼された場合は、その判定が成立するか、不足する環境と許可を明示するまで閉じない。
+再現性ownerの判定をpublish許可や全claimの正しさへ広げず、reader反応を直すために根拠、契約、不確実性を変えない。

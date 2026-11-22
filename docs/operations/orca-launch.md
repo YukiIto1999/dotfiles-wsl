@@ -96,7 +96,7 @@ launcher自体はPATHへ公開しないため、検証対象のwrapperのclosure
 
 client の起動とは独立した経路であり、Orca の設定や command override を変えない。
 
-実行 route と受入条件は [`browser-operation`](../../skills/browser-operation/skill/SKILL.md) が所有し、内蔵 browser の操作は `orca-cli` の版一致 guide と browser reference に従う。
+実行経路と受入条件は[`surface-operation`](../../skills/surface-operation/skill/SKILL.md)が所有し、内蔵browserの操作は`orca-cli`の版一致guideとbrowser referenceに従う。
 Orca は通常のローカル UI 確認の第一候補だが、他の browser を使う client の前提条件にはしない。
 browser command の既定対象は UI で active な worktree なので、この session の対象を特定し、一覧と作成には worktree id、作成後には page id を明示する。
 

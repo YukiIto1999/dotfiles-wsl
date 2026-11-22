@@ -68,8 +68,8 @@ hard依存は主要手順の必須条件であり、条件付きbrowserやcloud 
 Agent clientへ配るのは、解決したSkill registryの`source` directoryとその本文、reference、scriptである。
 必要なSkillを失ったsubagentとそのhandoffも配備しない。
 Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsource差替えはNixの明示的なoverrideだけで行う。
-Orca、architecture-standard、Matt Pocock、Chrome DevTools MCP、.NET skills、mizchi explainerは固定source内の任意のSkill directoryを直接参照し、本文や資材を変換、複製しない。
-利用者が明示的に承認した適応の範囲に含まれる保守派生(現在は`codebase-design`と、それを使う`improve-codebase-architecture`)だけは例外であり、同じIDのlocal Skillを唯一の正本にして、来歴とlicenseを[Skill portfolio](skills.md#custom-skillの来歴)に置く。
+外部Skillは固定source内のSkill directoryを直接参照し、本文や資材を変換、複製しない。
+利用者が明示的に承認した同名調整だけは例外とし、一つのlocal正本へ切り替える。対象と変更内容、licenseは[Skill portfolio](skills.md#custom-skillの来歴)に置く。
 原版の起動flagも保持し、生成するSkill一覧がtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
 consumerはSkill一覧のSourceを`Read`で開き、固定source実体のsibling referenceを利用する。
@@ -87,7 +87,7 @@ explainerのraw sourceとsibling配置はそのまま保持し、別ownerの[`to
 package作成時に置き換えるのはruntime用manifestとlockだけであり、upstreamのSkill本文やscriptは変更しない。
 wrapperは書込み可能な一時CWDへ管理下のpackageと依存を参照させるが、upstreamが記事側の祖先packageを優先する条件やcheckerの限界を消さないため、対象directoryと証拠の制約は[外部CLI](../reference/tooling.md#外部cli)へ集約する。
 任意shell、外部送信、model課金の許可や、optional D2とformal backendの供給をraw採用から推定しない。
-`description-writing`とcustom `article-reproduction`は単独で成立する判断を持ち、raw `explainer`、`first-reader`、browserや.NET実行への引渡しを該当branchだけで行う。
+`technical-writing`と`article-reproduction`は単独で成立する判断を持ち、`explainer`、`first-reader`、browserや.NET実行への引渡しを該当する分岐だけで行う。
 これらを一般の執筆やcodingのhard依存へ広げず、返却証拠から同じownerの仕事を再開し、writer側の再現性loopやreader試行を重ねない。
 採用IDとpath、revision、licenseの関係は[Skill portfolio](skills.md#直接採用)、登録と差替の契約は[外部リポジトリ所有Skillの構成](repository-skills.md)を参照する。
 
@@ -363,7 +363,7 @@ Web検索用のMCP providerもbackendも配備しない。`library-documentation
 [`web-research`](../../skills/web-research/skill/SKILL.md)が問いの分解、source選択、根拠評価を所有し、検索の順位、snippet、生成された回答文をclaimの根拠にしない。
 
 SearXNGとCrawl4AIは配備せず、検索と本文取得のための常設backendを持たない。
-native readerがJavaScript描画後の内容を取得できない場合は、既存の`browser-operation`へ必要な項目の取得を渡す。
+native readerがJavaScript描画後の内容を取得できない場合は、`surface-operation`へ必要な項目の取得を渡す。
 既知の公開URLから本文を取り出す用途では、利用者が対象URLと送信先を承認した場合だけ、`context-dev-scrape` でContext.devの公式Scrape APIを一回呼べる。
 このcommandはMarkdownと最終URLを返す。
 API keyはSOPSの`contextdev/api_key`を正本とし、[`toolchain/module.nix`](../../toolchain/module.nix)が登録済みのhostだけで主user所有のmode `0400`のfileとして配備する。
@@ -417,8 +417,8 @@ gatewayのrouteは`backendRequestTimeout`を60秒にする。
 
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
 `browser-diagnostics`のChrome DevTools MCPは専門診断の入口であり、通常の実画面操作の代替にはしない。Skill入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`である。
-実画面の操作と受入確認は[`browser-operation`](../../skills/browser-operation/skill/SKILL.md)が所有する。通常はOrcaかclientの標準toolを使い、対象を扱える経路がなければ独立した閲覧・検証にPlaywright MCPを使う。明示されたログイン済みtabは公開元のOMP RelayまたはOrcaだけで扱う。
-繰り返し実行するブラウザ回帰testの振り分けは[`browser-operation`の引き渡し手順](../../skills/browser-operation/skill/SKILL.md#ブラウザ回帰testを引き渡す)を参照する。
+実画面の操作と受入確認は[`surface-operation`](../../skills/surface-operation/skill/SKILL.md)が所有する。利用者のログイン済み画面と隔離した操作の経路を分ける。
+永続化するブラウザ回帰testは[`change-verification`](../../skills/change-verification/skill/SKILL.md)から、対象projectの検査入口へ進む。
 OrcaとPlaywrightのどちらも、browserを使わない作業の前提にはしない。
 一般の`diagnosing-bugs`はbrowser Capabilityを要求せず、必要なbranchだけ専門入口へ渡す。
 heap-diagnosticsのregistryは[`capabilities/heap-diagnostics/module.nix`](../../capabilities/heap-diagnostics/module.nix)が所有し、providerは`memlab`だけ、backendとCapability依存は空である。

@@ -82,7 +82,7 @@
         "type": "staged-diff",
         "changes": [
           {
-            "path": "skills/comment-writing/skill/SKILL.md",
+            "path": "skills/code-annotation/skill/SKILL.md",
             "before": "file absent",
             "after": "adds implementation-comment decision guidance"
           },
@@ -112,18 +112,18 @@
             "after": "commit-writing reports mixed purposes without changing the index"
           },
           {
-            "path": "skills/change-writing/skill/SKILL.md",
+            "path": "skills/technical-writing/skill/SKILL.md",
             "before": "separate PR and changelog templates",
             "after": "one change-description method with artifact-specific reference"
           },
           {
-            "path": "skills/comment-writing/skill/SKILL.md",
+            "path": "skills/code-annotation/skill/SKILL.md",
             "before": "file absent",
             "after": "implementation comments preserve only a rejected alternative and its current constraint"
           }
         ]
       },
-      "expectedSkills": ["change-writing"],
+      "expectedSkills": ["technical-writing"],
       "expected": {
         "usesExplicitRangeOnly": true,
         "containsOnlyVerifiedChecks": true,
@@ -138,8 +138,8 @@
         "implementation": "Decide whether to comment a retry loop that deliberately does not add exponential backoff because the upstream Retry-After value is authoritative."
       },
       "expectedSkills": {
-        "documentation": ["documentation-writing"],
-        "implementation": ["comment-writing"]
+        "documentation": ["code-annotation"],
+        "implementation": ["code-annotation"]
       },
       "expected": {
         "documentationIncludes": ["purpose summary", "input parameter", "return value", "precondition", "idempotency", "side effect", "known failure"],
@@ -166,7 +166,7 @@
           "function idempotencyKey(order: Order): string"
         ]
       },
-      "expectedSkills": ["documentation-writing"],
+      "expectedSkills": ["code-annotation"],
       "expected": {
         "readsStandardFiles": [
           "principles/comment/declaration-contracts.md",
@@ -185,10 +185,10 @@
     {
       "id": "description-routing",
       "prompt": "Write a README for trace-map. It reads local trace JSON and prints service-to-service edges. The reader is an engineer deciding whether to install it. The start command is nix run .#trace-map -- sample.json. It never uploads data. Architecture details are in docs/architecture.md.",
-      "expectedSkills": ["description-writing", "article-reproduction"],
+      "expectedSkills": ["technical-writing", "article-reproduction"],
       "nearMiss": {
         "prompt": "Write a PR body for the change.",
-        "expectedSkills": ["change-writing"]
+        "expectedSkills": ["technical-writing"]
       },
       "expected": {
         "includes": ["job", "local-only data boundary", "start command", "architecture link"],
@@ -225,7 +225,7 @@
     {
       "id": "japanese-markdown-prose",
       "prompt": "trace-mapのREADME日本語版に、英語版の次の段落と同じ内容の段落をMarkdownで書いてください。trace-map reads local trace JSON and prints service-to-service edges. It never uploads data, so traces from production can stay on the workstation.",
-      "expectedSkills": ["description-writing", "ja-writing"],
+      "expectedSkills": ["technical-writing", "ja-writing"],
       "expected": {
         "matchesEnglishCanonical": true,
         "coinedTranslations": false
@@ -234,7 +234,7 @@
     {
       "id": "japanese-label-boundary",
       "prompt": "この実装コメントを日本語として自然にしてください。// 上流の Retry-After が待機時間の正本のため指数バックオフは不採用",
-      "expectedSkills": ["comment-writing", "ja-writing"],
+      "expectedSkills": ["code-annotation", "ja-writing"],
       "expected": {
         "addsKuten": false,
         "rewritesIntoSentence": false,
@@ -268,7 +268,7 @@
       "id": "comment-near-miss",
       "prompt": "Rename vague variables in code.",
       "expectedSkills": [],
-      "mustNotTrigger": ["comment-writing", "documentation-writing", "ja-writing"]
+      "mustNotTrigger": ["code-annotation", "ja-writing"]
     }
   ]
 }

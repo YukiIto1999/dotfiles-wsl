@@ -3,27 +3,28 @@
     ./impl/contract.nix
     ./plugins/module.nix
     ./article-reproduction/module.nix
-    ./browser-operation/module.nix
     ./browser-performance/module.nix
-    ./change-writing/module.nix
-    ./codebase-design/module.nix
-    ./comment-writing/module.nix
+    ./change-verification/module.nix
+    ./code-annotation/module.nix
     ./commit-writing/module.nix
-    ./dependency-analysis/module.nix
-    ./description-writing/module.nix
-    ./documentation-writing/module.nix
+    ./create-verification-skill/module.nix
     ./environment-design/module.nix
     ./github-operations/module.nix
     ./heap-analysis/module.nix
     ./impact-analysis/module.nix
-    ./improve-codebase-architecture/module.nix
     ./ja-writing/module.nix
+    ./local-development/module.nix
     ./memory/module.nix
+    ./release-artifacts/module.nix
     ./repository-research/module.nix
+    ./runtime-observation/module.nix
     ./security-review/module.nix
     ./skill-design/module.nix
+    ./surface-operation/module.nix
+    ./technical-writing/module.nix
     ./ui-design/module.nix
     ./web-research/module.nix
+    ./workstation-operations/module.nix
   ];
 
 }

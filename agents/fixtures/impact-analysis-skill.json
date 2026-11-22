@@ -44,7 +44,7 @@
       "id": "general-dependency-map",
       "prompt": "repository全体のmodule dependencyとcycleを可視化してください。具体的な変更はありません。",
       "expectedSkills": [
-        "dependency-analysis"
+        "repository-research"
       ],
       "mustNotTrigger": [
         "impact-analysis"

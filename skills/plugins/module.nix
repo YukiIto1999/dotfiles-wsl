@@ -19,26 +19,6 @@ let
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
-        computer-use = {
-          requiresCapabilities = [ ];
-          requiresSkills = [ ];
-        };
-        orca-emulator = {
-          requiresCapabilities = [ ];
-          requiresSkills = [ ];
-        };
-        orca-emulator-android = {
-          requiresCapabilities = [ ];
-          requiresSkills = [ ];
-        };
-        orca-linear = {
-          requiresCapabilities = [ ];
-          requiresSkills = [ ];
-        };
-        orca-per-workspace-env = {
-          requiresCapabilities = [ ];
-          requiresSkills = [ ];
-        };
       };
     };
     architecture-standard = {
@@ -81,14 +61,6 @@ let
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
-        tdd = {
-          directory = "skills/engineering/tdd";
-          requiresCapabilities = [ ];
-          requiresSkills = [
-            "codebase-design"
-            "code-review"
-          ];
-        };
         domain-modeling = {
           directory = "skills/engineering/domain-modeling";
           requiresCapabilities = [ ];
@@ -109,6 +81,20 @@ let
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
+        codebase-design = {
+          directory = "skills/engineering/codebase-design";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        improve-codebase-architecture = {
+          directory = "skills/engineering/improve-codebase-architecture";
+          requiresCapabilities = [ ];
+          requiresSkills = [
+            "codebase-design"
+            "domain-modeling"
+            "grilling"
+          ];
+        };
         grill-with-docs = {
           directory = "skills/engineering/grill-with-docs";
           requiresCapabilities = [ ];
@@ -116,11 +102,6 @@ let
             "grilling"
             "domain-modeling"
           ];
-        };
-        grill-me = {
-          directory = "skills/productivity/grill-me";
-          requiresCapabilities = [ ];
-          requiresSkills = [ "grilling" ];
         };
         to-spec = {
           directory = "skills/engineering/to-spec";
@@ -144,6 +125,42 @@ let
         };
         writing-for-agents = {
           directory = "skills/productivity/writing-for-agents";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+      };
+    };
+    pstack = {
+      source = pluginSources.pstack;
+      skills = {
+        benchmark-checklist = {
+          directory = "pstack/skills/benchmark-checklist";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        correct = {
+          directory = "pstack/skills/correct";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        maintain-verification-skill = {
+          directory = "pstack/skills/maintain-verification-skill";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        # TLA+ の検査結果は statechart で読む手順のため、相対参照先の statechart を同じ固定 source から配備する
+        create-formal-verification-skill = {
+          directory = "pstack/skills/create-formal-verification-skill";
+          requiresCapabilities = [ ];
+          requiresSkills = [ "statechart" ];
+        };
+        maintain-formal-verification-skill = {
+          directory = "pstack/skills/maintain-formal-verification-skill";
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        statechart = {
+          directory = "pstack/skills/statechart";
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };

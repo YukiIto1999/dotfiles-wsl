@@ -105,7 +105,7 @@ captureの間にpageを停止させる影響と、snapshotに秘密情報が含�
 capture不能ならその境界と不足する配備契約を返し、未取得のsnapshotを渡したことにしない。
 
 実画面のaccessibility監査が必要なら`a11y-debugging`へ対象page、入力方法、該当controlと観測証拠を渡し、検証された問題と未確認事項を受け取る。
-既知の受入条件のverificationが必要なら`browser-operation`へURL、許可されたaccountと操作、経路、期待結果を渡し、条件ごとの観測結果を受け取る。
+既知の受入条件のverificationが必要なら`surface-operation`へURL、許可されたaccountと操作、経路、期待結果を渡し、条件ごとの観測結果を受け取る。
 .NETの比較microbenchmarkは`microbenchmarking`へ対象、baseline、workloadと実行条件、MSBuild性能は`msbuild`へprojectと遅いcommand、logと環境を渡す。
 native codeや一般の故障の原因診断は`diagnosing-bugs`へ症状、再現経路、期待と実際、関連sourceを渡す。
 これらの別専門作業は依頼に含まれ、Skillが利用可能な場合だけ行い、結果をcallerへ返して元の測定scopeへ戻る。

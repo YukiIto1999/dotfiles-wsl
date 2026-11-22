@@ -1,6 +1,6 @@
 ---
 name: repository-research
-description: Traces local repository behavior and relationships when the wording or location is unknown. Narrows candidates with the client's semantic discovery and native tools, then verifies material claims in source. Known text, paths, and symbols go directly to native tools. Does not map full dependency graphs, assess a change's blast radius, or research the Web.
+description: Traces how local code works and maps source, runtime, build, or deployment dependencies. Use for unknown repository behavior, cross-file evidence, cycles, and transitive paths. Known text, paths, and symbols go directly to native tools. Does not assess the blast radius of a proposed change, design new boundaries, or research the Web.
 ---
 
 # Repositoryを調査する
@@ -21,6 +21,7 @@ description: Traces local repository behavior and relationships when the wording
 - exactなfile名、directory、path patternを探すなら`Glob`
 - exact text、error、設定key、literal、regex、網羅的な出現箇所なら`Grep`または`rg`
 - 既知symbolの定義、参照、型、call hierarchyならLSP
+- ASTの構造patternは`ast-grep`、変更や所有の履歴は対象pathに絞ったGit。文字列をsemanticな参照の代わりにしない。
 - 表現や所在が不明な箇所を絞るなら、clientが公開する意味探索（OMPでは`find`）を使う。専用入口がなければ、既知の入口・関連語から`Read`と`Grep`で追う。
 
 semantic探索とexact anchorの両方が必要なら、概念と関係を保った問いで候補を得てから、`Read`、`Grep`、`Glob`、LSP、`rg`で定義と経路を絞る。
@@ -47,6 +48,14 @@ materialなclaimごとに次を行う。
 名前の類似、snippet内の共起、検索順位だけから関係を断定しない。
 必要なsourceがsnippetにも直接の読取りにもなければ、候補を証拠へ昇格させない。
 
+## 依存構造を確かめる
+
+抽出前にnodeの粒度、edgeの意味と方向、対象revisionと実行条件、test・生成物を含めるかを決める。例として`A -> B`は「AがBを必要とする」を表す。参照、呼出し、データの生成と消費、build順序、同時deploy、共変更は別の関係として扱う。
+
+言語resolver、compiler、manifest、schema、service定義、LSP、AST、実行traceを問いに合わせて使う。既知の依存と非依存をsourceに照合してから集計し、直接edgeと推移経路を分ける。cycleは同じedge種別・粒度で互いに到達できる集合を指す。具体的な初期化、build、test、deployの制約を示せないなら、cycleやfan-in/outの値だけで欠陥と判定しない。
+
+条件付きimport、re-export、生成物、feature flag、反射、共有状態・暗黙の順序は調べた条件を添える。Gitの共変更は所有や変更理由の候補であり、実行時依存の証明ではない。実行時の証拠はprojectが宣言するcommandまたは公開Capabilityから採り、未観測のedgeは不明とする。
+
 ## 停止条件
 
 問いの各部分に直接sourceの根拠があり、追加候補が結論や未確定事項を変えなくなったら停止する。網羅性が必要なexact searchは、対象scopeを明示してnative toolで完了させる。
@@ -67,7 +76,6 @@ native toolで到達できる範囲を調べ、dynamic behavior、生成物、�
 
 ## Handoffとnon-goals
 
-依存graph、cycle、fan-in、fan-out、transitive reachabilityの分析が必要な場合は、利用可能な`dependency-analysis`へ問い、scope、検証済みのnodeとedgeの候補、source locatorを渡し、graphの定義と根拠付きの分析を受け取る。
 具体的な変更のblast radiusが必要なら`impact-analysis`へ変更契約、revision、確認したconsumerと境界、未確定事項を渡し、互換性、rollout、rollbackへの影響を受け取る。
 公開URL、最新情報、外部仕様が必要なら`web-research`へ外部の問い、versionと時点、確認済みURLを渡し、一次source付きの結果を受け取る。
 専門結果を元の問いへ結び付けて返し、利用不能な枝は不足する専門作業と証拠を明示する。

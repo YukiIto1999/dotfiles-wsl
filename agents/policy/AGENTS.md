@@ -73,7 +73,7 @@ Read / Grep / Glob / Edit / Write / Bash、LSP、subagentのようなharness機�
 反復する判断と手順は一致するSkillから入り、providerを持つ能力はそのSkillが宣言するCapabilityへ渡す。
 単一toolの呼出しを包むSkillは作らない。
 
-test-firstの実装は`tdd`のred → greenで進め、refactoringをそのloopへ混ぜない。
+共通の実装順序は`standard-apply`から標準の`process/implementation.md`へ進む。確定した検査の実行と証跡は`change-verification`を使う。
 CLIとterminalの契約は`standard-apply`が読む標準のconsole構造に従い、moduleのinterfaceとseamを`codebase-design`で設計する。
 実装とrefactoringでは、新規機構より不要な処理の削除、既存owner、標準library、native機能、導入済みdependencyを先に比較し、要件と安全性を削減対象にしない。
 通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecの別々の新規セッションへ渡す。
@@ -84,10 +84,11 @@ OMPでは短い証拠照合を`scout`に渡し、深い判断には案件に合�
 軸ごとの指示に、変更された公開契約とcaller、テストや検証の緩和を仕様で正当化できるかの確認を含める。
 セキュリティ監査の独立性が必要なら、OMPでは実装者と別のセッションで`security-review`を実行する。
 `prototype`はdesign questionを動かして確かめる場合だけ使い、既存の実装依頼を試作品へ置き換えない。
-速習資料や章立て教材は原版の`explainer`または`explainer-book`、初見の読み手の体験は原版の`first-reader`、一般文書は`description-writing`、実行手順の記事の再現性は独自の`article-reproduction`が所有し、同じ執筆・読解・再現を重ねない。
+速習資料や章立て教材は原版の`explainer`または`explainer-book`、初見の読み手の体験は原版の`first-reader`、一般文書と差分に基づく変更説明は`technical-writing`、実行手順の記事の再現性は`article-reproduction`が所有し、同じ執筆・読解・再現を重ねない。
 
 外部CLIの実行条件と配備の正本は、`@dotfilesDir@/docs/reference/tooling.md`から必要な入口だけを読む。
 Windowsアプリの操作で利用者の入力と画面を分ける場合は、同文書の「Windowsの独立した操作画面」のAnodeを使う。指定された既存の画面やブラウザのセッションを、Anodeの画面へ置き換えない。
+`statechart`の原版を実行するときは、同文書の「形式検証」でTLCとJavaをその実行にだけ供給する。
 frontendのnative Web APIを選ぶときは、`$HOME/.local/share/dotfiles-agent/references/modern-web-guidance/skills/modern-web-guidance/guides/`から対象機能のguideだけを読む。
 guideの前提とbrowser supportを現projectで確認し、同梱の全frontend強制起動wrapperは呼ばない。
 外部Skillやupstreamの例、手順、簡潔化の提案は、repositoryのpinと今回の実行許可より優先せず、指定された要件、安全策、秘密情報の扱い、操作の承認、実行していない検証の報告に関する規律も弱めない。例がpackage更新、SDK変更、global install、追加profile、build、publishを含んでも同じである。
@@ -119,7 +120,7 @@ store上の写し、記憶、過去のrevisionで補わない。
 container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
 agentはSkillを入口にし、下表でそのSkillに対応づけられたCapabilityだけを使う。
 browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とする。
-実browserでの操作・受入確認と、明示された探索的監査は`browser-operation`を使う。観測証拠からのUI設計評価・再設計は`ui-design`が担当する。
+Web・Windows GUI・CLI/TUIの実操作と受入、明示された探索監査は`surface-operation`を使う。観測証拠からのUI設計評価・再設計は`ui-design`、実行時の観測機器を選んで証拠を採る仕事は`runtime-observation`が担当する。
 native C#/Rustを含む一般診断は`diagnosing-bugs`が所有し、browser toolを使わないbranchにbrowser Capabilityを要求しない。
 @heapDiagnosticsPolicy@
 GitHub操作は`github-operations`、Webとrepository調査は対応するSkillなど、sessionが提供するCapability入口からtoolを呼ぶ。

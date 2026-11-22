@@ -30,7 +30,7 @@ effort: xhigh
 
 @handoffs@
 
-実画面の観測はcallerが`browser-operation`へ渡し、このagentは返された証拠を設計入力として受け取る。限定したstateの確認と、明示された探索監査を区別して依頼条件を書く。
+実画面の観測はcallerが`surface-operation`へ渡し、このagentは返された証拠を設計入力として受け取る。限定したstateの確認と、明示された探索監査を区別して依頼条件を書く。
 
 ## Output format
 

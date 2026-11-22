@@ -49,7 +49,7 @@ commandや操作で再現する対象がない説明なら、再現性の対象�
 許可された副作用だけを実行し、delete、install、deploy、publish、権限付与、秘密情報の利用、外部への送信を「記事の確認」から推測して許可しない。
 必要なtoolや環境がない場合はその前提を不足として返し、追加installやproviderの内部への接続で回避しない。
 
-browser上の操作が到達点なら、利用可能な`browser-operation`へURL、開始状態、手順、期待する画面とstate、実行許可を渡す。
+browser上の操作が到達点なら、利用可能な`surface-operation`へURL、開始状態、手順、期待する画面とstate、実行許可を渡す。
 操作記録、観測した画面またはstate、未実施範囲を受け取り、この判定へ戻す。
 .NETのtest commandが手順なら、そのSDKとproject、記載command、期待結果、許可を利用可能な`run-tests`へ渡す。
 必要なSkillまたは実行能力が利用不能なら、その枝を未実施にし、別providerや自己流の成功判定で補わない。

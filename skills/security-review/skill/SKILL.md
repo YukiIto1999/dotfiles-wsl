@@ -18,7 +18,7 @@ Use the following handoffs only when their evidence job is needed and the Skill 
 | Unknown local relationship | `repository-research`: absolute repository root, revision, boundary or flow question, known anchors | Source locators, verified relationships, and unresolved edges; use them in the current phase |
 | Public advisory or version context | `web-research`: advisory ID or public URL, package/version, exact claim to check | Primary-source text, applicability, and uncertainty; preserve seeds and validate against local code |
 | GitHub resource | `github-operations`: account context, canonical owner/repo, resource kind and number or ref, requested read | Exact identity, state, SHA, diff or comments; use the evidence without posting or changing the resource |
-| Authorized browser-interface reproduction | `browser-operation`: URL, test account, approved interaction and crafted input, expected invariant and observable result | Observed route, before/after state and request evidence when needed; resume validation, not a separate security scan |
+| Authorized browser-interface verification | `surface-operation`: URL, test account, permitted interaction, expected invariant and public observation | Observed route, before/after state and relevant requests; no authorization to develop or run exploit payloads |
 
 If a needed Skill or public operation is unavailable, retain the evidence gap and continue only where the phase can reach a supported conclusion.
 These jobs do not change scan scope, transfer security judgment, or grant external write permissions.
@@ -27,6 +27,7 @@ These jobs do not change scan scope, transfer security judgment, or grant extern
 
 Keep exact file, symbol, diff, and history inspection as direct Read, Grep, Glob, LSP, and bounded Git operations.
 Use declared public Capability tools for remote or container-backed evidence, and the execution route the responsible Skill selects for browser evidence; resolve the actual exposed name and current schema through that Skill.
+For defensive candidate discovery, use `semgrep scan` with a repository-owned or explicitly selected local `--config` and paths within scope. Use `zizmor --offline` for GitHub Actions workflows and local actions; use `actionlint` only for syntax and expressions. For secret scanning, use `betterleaks git --staged --validation=false --redact .` for a staged diff, or scope `betterleaks dir --validation=false --redact <path>` to agreed files. Do not send secrets to a provider, verify credential validity online, or include raw findings containing credentials in an artifact. Match the tool exit and findings to the pinned CLI; a clean report is not coverage of paths or rules the tool did not scan.
 Do not inspect or control provider processes, Docker containers, databases, or private backend endpoints to recover a missing tool.
 Runtime reproduction and setup repair must stay within the caller's approved target, commands, resources, and side effects.
 Do not run exploit input against a real account, shared service, or third-party target without explicit authorization.

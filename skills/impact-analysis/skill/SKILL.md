@@ -29,8 +29,8 @@ source diffだけでなく、consumerが観測できるものを起点にする�
 ## Consumerを外向きに追う
 
 変更点からeffect sketchを外向きに描く。
-`dependency-analysis`の結果があれば証拠として使い、具体的な変更に関係するpathだけを辿る。
-複数種類の依存構造を先に整理する必要がある場合だけ、scope、変更点、必要なnodeとedgeの意味を`dependency-analysis`へ渡す。
+`repository-research`による依存の証拠があれば、具体的な変更に関係するpathだけを辿る。
+複数種類の依存構造を先に確認する場合は、scope、変更点、必要なnodeとedgeの意味を`repository-research`へ渡す。
 返った型付きgraphのsourceと未解決edgeを確認してconsumer追跡へ戻り、repository全体のgraph作成を前提にしない。
 
 1. 定義、writer、producer、ownerを確認する。

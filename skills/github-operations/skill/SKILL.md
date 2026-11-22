@@ -118,7 +118,7 @@ merge、resource・file・branchのdelete、commitを生成するcontent変更�
 
 ## 隣接Skillへ引き渡す
 
-PR本文、changelog、release noteの作成が必要なら、利用可能な`change-writing`へ成果物、読者、exactな差分範囲、issue、互換性と実行済み検証を渡し、確定した変更説明を受け取る。
+PR本文、changelog、release noteの作成が必要なら、利用可能な`technical-writing`へ成果物、読者、exactな差分範囲、issue、互換性と実行済み検証を渡し、確定した変更説明を受け取る。
 commit済み差分のreviewが必要なら、`code-review`へ利用者が指定したfixed pointとHEADのSHA、`git diff <fixed-point>...HEAD`で表す範囲、spec sourceと標準sourceを渡し、StandardsとSpecの所見を受け取る。
 そのcommitted-range契約をstaged・unstaged差分のreviewや、approve、comment、request changesの判断へ広げない。
 reviewの送信種別は利用者の指定または明示的に委ねられたreview判断から確定する。

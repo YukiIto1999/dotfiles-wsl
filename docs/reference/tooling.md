@@ -91,6 +91,17 @@ wrapperのCWD変更や`NODE_PATH`だけでは、祖先packageが選ばれる挙�
 optional D2、TALA、ELK、TLC、Apalacheなどのbackendはこのpackageで供給せず、実行に必要なら別の許可済み前提として扱う。
 `first-reader`はraw source内のPython 3 stdlib scriptを使い、模擬readerやrecall-from-logを実command再現や実際の翌日の人間の記憶測定へ置き換えない。
 
+### 形式検証
+
+`statechart`の原版が示す`TLA2TOOLS`と`JAVA`は、この環境の[`statechart` devShell](../../flake.nix)から実行時にだけ供給する。
+TLA+モデルの作業directoryで次を実行する。`statechart_script`には、読んだ原版Skillに同梱の`scripts/statechart`の絶対pathを指定する。
+
+```sh
+nix develop "$HOME/environment/dotfiles-wsl#statechart" --command "$statechart_script" model.tla
+```
+
+これは原版のスクリプトを実行する経路であり、`mise`、Javaの全sessionへの追加設定、原版の書換えを行わない。
+
 ### .NETの実行時診断
 
 [`dotnet-diagnostics.nix`](../../toolchain/package/dotnet-diagnostics.nix)はMicrosoft公式の診断CLIを3本だけ供給する。各CLIは専用の.NETランタイムで動き、プロジェクトの`dotnet`、SDKの選択や`PATH`を変えない。

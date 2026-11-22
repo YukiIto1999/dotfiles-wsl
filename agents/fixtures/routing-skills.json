@@ -24,7 +24,7 @@
     {
       "id": "browser-validation-without-submit",
       "prompt": "Verify a settings form validation message in a user's real-account tab without submitting. The SPA rerenders after input.",
-      "expectedSkills": ["browser-operation"],
+      "expectedSkills": ["surface-operation"],
       "expected": {
         "identifiesTheExactTabAndEnvironment": true,
         "invalidatesRefsAfterRerender": true,

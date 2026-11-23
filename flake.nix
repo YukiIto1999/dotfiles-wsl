@@ -468,7 +468,16 @@
 
       devShells.${system} = {
         default = systemPkgs.mkShellNoCC {
-          packages = machineConfigs.${referenceHostName}.dotfiles.toolchain.devShellPackages;
+          packages = with systemPkgs; [
+            actionlint
+            deadnix
+            jq
+            nixfmt-tree
+            shellcheck
+            statix
+            taplo
+            yq
+          ];
         };
         statechart = systemPkgs.mkShellNoCC {
           packages = [ systemPkgs.nodejs_24 ];

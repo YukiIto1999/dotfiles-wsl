@@ -20,7 +20,8 @@ direnv を使わない場合は同じ devShell へ明示的に入る。
 nix develop
 ```
 
-devShell に含める保守 command の正本は `flake.nix` の `devShells` である。個々の package をこの文書へ転記しない。
+保守 command は `flake.nix` の `devShells` で選ぶ。
+ホストの設定を評価できないときも、同じ devShell を起動して修正に使える。
 
 ## 整形
 

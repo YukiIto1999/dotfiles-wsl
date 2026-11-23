@@ -62,7 +62,6 @@ let
 in
 {
   imports = [
-    ./dev-shell/module.nix
     ./execution/module.nix
     ./git/module.nix
     ./verification/module.nix

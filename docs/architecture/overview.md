@@ -84,7 +84,7 @@ kernel、`init.scope`、dockerdなどの基盤serviceはこの上限の外に残
 | `workstation/` | user、WSL、Nix、Home Manager、font、時刻とlocale、storage、安定性、activation |
 | `identity/` | Git authorとGitHub account identity |
 | `secrets/` | secretの意味的なroot。SOPS実装は`secrets/sops/` |
-| `toolchain/` | PATH上の開発ツール、language server、Git設定、検証の段の入口解決、dev shell |
+| `toolchain/` | PATH上の開発ツール、language server、Git設定、検証の段の入口解決、projectのdevShellを使うコマンドの起動 |
 | `agents/` | Agent client、subagent、policy、runtime、delegation、Skill 配備、技術的な知見の集積、記憶の収穫 |
 | `skills/` | task procedureとSkill間・Capabilityへの依存metadata |
 | `capabilities/` | consumer非依存の機能contract、provider adapter、backend、state、credential、lifecycle |

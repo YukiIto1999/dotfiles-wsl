@@ -248,13 +248,16 @@ findmnt -no SOURCE,OPTIONS /
 
 | check | 観測 | 判定 |
 |---|---|---|
-| `vmbus-ring-failures` | この boot の kernel log にある `vmbus_alloc_ring` の確保失敗の件数 | 1 件以上で `fail` |
-| `stuck-relays` | 親を失って PID 1 の子として 300 秒以上残る `Relay` の数 | 1 個以上で `fail` |
+| `vmbus-ring-failures` | 現在のカーネル起動以降のログに残る `vmbus_alloc_ring` のスタック行数 | 1 行以上で `fail`。失敗した接続の総数ではない |
+| `stuck-relays` | 起動から 300 秒以上経ち、観測時点で PID 1 の子になっている `Relay` の数 | 1 個以上で `fail`。孤児になった時刻は測っていない |
 | `high-order-pages` | 空きが boost を含む min と Normal への lowmem reserve を超える zone にある、order 7 以上と order 9 以上の空き block の数 | order 7 以上が 0 で `fail`、order 9 以上が 0 で `warn` |
 | `memory-pressure`、`io-pressure` | PSI の `full` の 60 秒平均 | 10% 以上で `warn`、40% 以上で `fail` |
 
-新しい session は VMBus の ring に 512 KiB、つまり order 7 の連続領域を確保し、確保に失敗すると `Relay` が accept を待ったまま残る。
-`vmbus-ring-failures` と `stuck-relays` は、WSL を再起動するまで `fail` のまま残る。
+VMBus の ring 用に 512 KiB（order 7）の連続領域を確保できないと、新規接続に失敗することがある。
+`vmbus-ring-failures` は過去の記録、`stuck-relays` は現在残っているプロセスで、どちらも新規接続の成否を直接試してはいない。
+ディストリビューションを終了して `Relay` が消えても、WSL 2 の仮想マシンが動き続ければ、同じカーネル起動のログが引き続き判定対象になる。
+接続の復旧に仮想マシンの再起動が必要な場合だけ、すべてのディストリビューションの作業を保存して終了し、利用者が Windows 側で `wsl --shutdown` を実行する。
+WSL を再び起動したら `/proc/sys/kernel/random/boot_id` が変わったことと、新しいセッションが実際につながることを確かめる。
 `high-order-pages` の order 9 は空いた pageblock 一つ分に当たり、これが無くなると高次の確保は他の用途の block を分割するしかない。
 PSI の `full` は、実行可能な全 task が memory または I/O を待って止まっていた時間の割合である。
 40% を超えた時間帯には、正常な service に対する doctor の probe と MCP の呼出しも期限を超えた。

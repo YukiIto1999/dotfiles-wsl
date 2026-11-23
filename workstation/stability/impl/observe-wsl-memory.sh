@@ -163,16 +163,16 @@ json_number() {
          elif $vmbus == null then
            outcome($vmbus_outcome; "fail"; "could not read the kernel log of this boot")
          elif $vmbus > 0 then
-           outcome($vmbus_outcome; "fail"; "\($vmbus) VMBus ring allocations failed in this boot")
+           outcome($vmbus_outcome; "fail"; "the kernel log of this boot contains \($vmbus) vmbus_alloc_ring stack frames; this is not a count of failed connections")
          else
-           outcome($vmbus_outcome; "pass"; "no VMBus ring allocation failed in this boot")
+           outcome($vmbus_outcome; "pass"; "no vmbus_alloc_ring stack frame was found in the kernel log of this boot")
          end),
         (if $relays == null then
            outcome($relay_outcome; "fail"; "could not list processes")
          elif $relays > 0 then
-           outcome($relay_outcome; "fail"; "\($relays) WSL Relay processes have been orphaned for at least \($relay_age)s")
+           outcome($relay_outcome; "fail"; "\($relays) WSL Relay processes at least \($relay_age)s old currently have PID 1 as their parent")
          else
-           outcome($relay_outcome; "pass"; "no WSL Relay process is orphaned")
+           outcome($relay_outcome; "pass"; "no WSL Relay process at least \($relay_age)s old currently has PID 1 as its parent")
          end),
         (if $ring_blocks == null then
            outcome($high_order_outcome; "fail"; "could not read free page blocks")

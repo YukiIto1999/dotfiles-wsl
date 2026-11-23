@@ -90,6 +90,7 @@ git -C "$journal" log '@{upstream}..HEAD' --oneline
 ## 排他と実行の上限
 
 timer と手動の実行は同じ job entry を通り、同じ日誌の writer は一つだけである。timer の実行中に手動で呼ぶと、worker を始めず終了 status 75 で返る。1 回の実行は開始から 6 時間までで、期限、取消の signal、worker の突然死のいずれでも、子 process が全て終わってから排他を解く。期限は 124、取消は 128 に signal 番号を足した値で終わり、成功にならない。
+日付を指定しない実行では、未生成の日に残り時間を配分する。割当内に生成できなかった日は失敗として報告し、使わなかった時間は後の日に回す。`--date` と `--preview --date` は全体の期限まで使える。
 
 ## 旧 system timer からの切替
 

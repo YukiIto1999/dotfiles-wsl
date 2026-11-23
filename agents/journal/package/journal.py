@@ -31,6 +31,8 @@ PIECE_CHARS = 8000
 SYNTHESIS_CHARS = 60000
 REDUCTION_ROUNDS = 4
 MODEL_TIMEOUT_SECONDS = 900
+MODEL_SHUTDOWN_SECONDS = 60
+DIAGNOSTIC_CHARS = 500
 DEADLINE_ENV = "DOTFILES_JOB_DEADLINE"
 FORMAT_MARKER = "<!-- agent-journal: technical-insights-v1 -->"
 NO_INSIGHTS = "この期間の記録から、根拠を引用できる技術的な知見は抽出されなかった。"
@@ -68,21 +70,31 @@ class Rejected(Exception):
     """知見の候補や記事の 1 件に閉じた不正の理由。その 1 件だけを捨てる。応答全体の不正は JournalError で、日の失敗になる。"""
 
 
-def child_timeout(limit: float | None) -> float | None:
+def job_deadline() -> float | None:
     value = os.environ.get(DEADLINE_ENV)
     if value is None:
-        return limit
+        return None
     try:
-        remaining = float(value) - epoch_seconds()
+        return float(value)
     except ValueError:
         raise JournalError(f"{DEADLINE_ENV} is not a number: {value!r}") from None
-    if remaining <= 0:
+
+
+def child_timeout(limit: float | None, *, before: float | None = None) -> float | None:
+    deadline = job_deadline()
+    if deadline is None and before is None:
+        return limit
+    now = epoch_seconds()
+    if deadline is not None and deadline <= now:
         raise JournalError("the job deadline was reached; no new child process is started")
+    if before is not None and before <= now:
+        raise JournalError("this day's share of the job deadline was reached; no new child process is started")
+    remaining = min(value for value in (deadline, before) if value is not None) - now
     return remaining if limit is None else min(limit, remaining)
 
 
-def run(command: list[str], *, limit: float | None = None, **options: Any) -> subprocess.CompletedProcess:
-    timeout = child_timeout(limit)
+def run(command: list[str], *, limit: float | None = None, before: float | None = None, **options: Any) -> subprocess.CompletedProcess:
+    timeout = child_timeout(limit, before=before)
     try:
         return subprocess.run(command, timeout=timeout, **options)
     except subprocess.TimeoutExpired:
@@ -312,31 +324,44 @@ def project_root(cwd: str) -> str:
     return root if result.returncode == 0 and root else cwd
 
 
+def model_diagnostic(stderr: str) -> str:
+    detail = " | ".join(line for raw in stderr.splitlines() if (line := raw.strip()) and line != "Working...")
+    if not detail:
+        return "omp wrote no diagnostic"
+    return detail if len(detail) <= DIAGNOSTIC_CHARS else "…" + detail[-DIAGNOSTIC_CHARS:]
+
+
 def summarize(options: argparse.Namespace, prompt: Path, material: str) -> str:
     # cwd を Git の外に置く。project memory の hook が動いても想起先の project を決められず、記憶を model の入力へ混ぜない。
     # 一時 directory の場所は TMPDIR で変わるため、work tree の中なら model を呼ばずに止める
+    deadline = getattr(options, "generation_deadline", None)
     with tempfile.TemporaryDirectory(prefix="agent-journal-") as workdir:
-        inside = run(["git", "-C", workdir, "rev-parse", "--is-inside-work-tree"], capture_output=True)
+        inside = run(["git", "-C", workdir, "rev-parse", "--is-inside-work-tree"], before=deadline, capture_output=True)
         if inside.returncode == 0:
             raise JournalError(f"{workdir} is inside a Git work tree; set TMPDIR outside any repository")
-        budget = child_timeout(MODEL_TIMEOUT_SECONDS)
+        max_time = int(child_timeout(MODEL_TIMEOUT_SECONDS, before=deadline)) - MODEL_SHUTDOWN_SECONDS
+        if max_time < 1:
+            raise JournalError(f"{prompt.name}: the time left for this day leaves no room for a model call; the model is not started")
         result = run(
             [
                 options.omp, "-p", "--no-session", "--no-extensions", "--no-skills", "--no-rules",
                 "--no-tools", "--no-lsp", "--no-title", "--no-context-files",
                 "--model", options.model, "--thinking", options.thinking,
-                "--max-time", f"{max(1, int(budget) - 60)}",
+                "--max-time", str(max_time),
                 "--system-prompt", str(prompt),
             ],
             limit=MODEL_TIMEOUT_SECONDS,
+            before=deadline,
             input=material,
             capture_output=True,
             text=True,
             cwd=workdir,
         )
+    if result.returncode != 0:
+        raise JournalError(f"{prompt.name}: the model failed with exit {result.returncode}: {model_diagnostic(result.stderr)}")
     summary = result.stdout.strip()
-    if result.returncode != 0 or not summary:
-        raise JournalError(f"{prompt.name}: the model failed: {result.stderr.strip()[-500:]}")
+    if not summary:
+        raise JournalError(f"{prompt.name}: the model returned no output: {model_diagnostic(result.stderr)}")
     return summary
 
 
@@ -1013,6 +1038,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
         days = [options.date] if options.date else pending_days(
             now or datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, machine, branch
         )
+        deadline = job_deadline() if options.date is None else None
     except JournalError as error:
         print(f"dotfiles-agent-journal: {error}", file=sys.stderr)
         return 1
@@ -1020,10 +1046,12 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
     for failure in unrecovered:
         print(f"dotfiles-agent-journal: could not remove an abandoned temporary in {failure}", file=sys.stderr)
     failed = []
+    generation_left = sum(not output_path(journal, day, machine).is_file() for day in days) if deadline is not None else 0
     for day in days:
         path = output_path(journal, day, machine)
         relative = str(path.relative_to(journal))
         start, end = window(day, tz, options.start_hour)
+        was_missing = generation_left > 0 and not path.is_file()
         try:
             stage = Stage.ABSENT if options.date else stage_of(journal, relative, branch)
             entered = stage
@@ -1032,7 +1060,14 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
                 if not sessions:
                     print(f"{day}: omp の作業はない")
                     continue
-                atomic_write(path, compose(options, machine, day, start, end, sessions))
+                if was_missing:
+                    now_epoch = epoch_seconds()
+                    # 一日の生成が後の日の時間を使い切るのを防ぐため残りの日へ等分
+                    daily_deadline = now_epoch + (deadline - now_epoch) / generation_left
+                    generation_options = argparse.Namespace(**vars(options), generation_deadline=daily_deadline)
+                else:
+                    generation_options = options
+                atomic_write(path, compose(generation_options, machine, day, start, end, sessions))
                 stage = stage_of(journal, relative, branch)
             if stage in (Stage.GENERATED, Stage.COMMITTED):
                 require_current_format(journal, relative)
@@ -1046,6 +1081,8 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             print(f"dotfiles-agent-journal: {day}: {error}", file=sys.stderr)
             failed.append(day)
             continue
+        finally:
+            generation_left -= was_missing
         if entered is Stage.ABSENT:
             print(f"{day}: 技術的な知見を記録した")
         elif entered is Stage.GENERATED:

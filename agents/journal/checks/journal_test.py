@@ -198,7 +198,14 @@ def merged(title):
 for rule in json.loads(Path(os.environ["FAKE_OMP_SCRIPT"]).read_text(encoding="utf-8")).get(stage, []):
     if rule.get("when") is not None and not present(rule["when"]):
         continue
+    if rule.get("stall"):
+        Path(os.environ["FAKE_ELAPSED"]).write_text(argv[argv.index("--max-time") + 1])
+        sys.exit("Working...\\nDeadline exceeded")
     if rule.get("fail"):
+        if isinstance(rule["fail"], dict):
+            sys.stdout.write(rule["fail"].get("stdout", ""))
+            sys.stderr.write(rule["fail"]["stderr"])
+            sys.exit(rule["fail"].get("status", 1))
         sys.exit("model unavailable")
     reply = merged(rule["merge"]) if rule.get("merge") else rule["reply"]
     print(reply if isinstance(reply, str) else json.dumps(reply, ensure_ascii=False))
@@ -650,6 +657,50 @@ class JournalTest(unittest.TestCase):
         self.assertEqual({call["stage"] for call in self.calls()}, {"extract", "synthesize"})
         limits = [int(call["argv"][call["argv"].index("--max-time") + 1]) for call in self.calls()]
         self.assertTrue(all(1 <= limit <= 340 for limit in limits), limits)
+
+    def test_no_model_starts_when_only_the_shutdown_reserve_remains(self):
+        with mock.patch.dict(os.environ, {DEADLINE: str(time.time() + 30)}):
+            status, _, errors = self.captured("--date", DAY.isoformat())
+
+        self.assertEqual(status, 1)
+        self.assertEqual(self.calls(), [])
+        self.assertIn("the time left for this day leaves no room for a model call", errors)
+        self.assertFalse((self.journal / DAY_FILE).exists())
+
+    def test_a_stalled_early_day_leaves_time_to_publish_later_days(self):
+        elapsed = self.workspace / "elapsed"
+        started = 1000
+        self.script["extract"].insert(0, {"when": C_REQUEST[1], "stall": True})
+        self.save_script()
+
+        def simulated_clock():
+            return started + (int(elapsed.read_text()) if elapsed.exists() else 0)
+
+        with mock.patch.dict(os.environ, {DEADLINE: str(started + 195), "FAKE_ELAPSED": str(elapsed)}):
+            with mock.patch.object(journal, "epoch_seconds", side_effect=simulated_clock):
+                status, _, errors = self.captured("--lookback-days", "3", now=local("2026-09-24T06:00:00"))
+
+        self.assertEqual(status, 1)
+        self.assertIn("dotfiles-agent-journal: 2026-09-21: extract.md: the model failed with exit 1: Deadline exceeded", errors)
+        self.assertEqual(self.published(), ["2026/0922/testhost.md", "2026/0923/testhost.md"])
+
+    def test_a_model_failure_keeps_the_last_error_without_publishing_the_model_output(self):
+        self.script["extract"] = [{"when": None, "fail": {
+            "stdout": A_BOUNDARY[1],
+            "stderr": "Working...\nRetrying (1/2): " + "x" * 2000 + "\n401 invalid API key\n",
+            "status": 1,
+        }}]
+        self.save_script()
+
+        status, _, errors = self.captured("--date", DAY.isoformat())
+
+        self.assertEqual(status, 1)
+        failure = [line for line in errors.splitlines() if f"{DAY}: extract.md: the model failed" in line]
+        self.assertEqual(len(failure), 1, errors)
+        self.assertTrue(failure[0].endswith("| 401 invalid API key"), errors)
+        self.assertNotIn("Working...", errors)
+        self.assertNotIn(A_BOUNDARY[1], errors)
+        self.assertFalse((self.journal / DAY_FILE).exists())
 
     def test_a_day_file_that_cannot_be_written_is_not_published_and_the_next_run_recovers(self):
         directory = self.journal / "2026" / "0923"

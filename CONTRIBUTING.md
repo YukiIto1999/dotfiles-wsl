@@ -14,7 +14,7 @@
 
 ## 検証
 
-編集中は変更した unit の check だけを実行する。
+編集中は[開発手順](docs/operations/development.md)に従い、変更した契約を検査する項目を選ぶ。
 
 ```bash
 nix build --no-link .#checks.x86_64-linux.<check>

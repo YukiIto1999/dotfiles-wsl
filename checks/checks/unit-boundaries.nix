@@ -128,6 +128,15 @@ in
               backendSuffix=$(tr -d '\n' < ${../fixtures/unit-boundary-target.txt})
               workDir=$PWD
 
+              literalWithGaps() {
+                jq -nr --arg literal "$1" --arg gap "$2" \
+                  '$literal | split("") | map("\\Q" + . + "\\E") | join($gap)'
+              }
+              readerGap='[[:space:]()]*'
+              importPattern="\\A$readerGap$(literalWithGaps import "$readerGap")$readerGap\\z"
+              readFilePattern="\\A$readerGap$(literalWithGaps builtins.readFile "$readerGap")$readerGap\\z"
+              targetPattern=$(literalWithGaps "$backendSuffix" '[[:space:]()+"]*')
+
               # comment や string の断片ではなく、reader と operand を Nix AST から取る。
               # operand が path literal でなければ、source ごとの許可件数と照合する
               (
@@ -136,28 +145,26 @@ in
                 ast-grep run --lang nix --json=compact -p 'let $A = $V; in {}' \
                   --selector binding . --globs '*.nix' > "$workDir/bindings.json"
               )
-              jq '[
+              jq --arg reader "$importPattern" '[
                 .[]
-                | select((.metaVariables.single.F.text | gsub("[[:space:]()]"; "")) == "import")
+                | select(.metaVariables.single.F.text | test($reader))
               ]' "$workDir/applications.json" > "$workDir/imports.json"
-              jq '[
+              jq --arg reader "$readFilePattern" '[
                 .[]
-                | select((.metaVariables.single.F.text | gsub("[[:space:]()]"; "")) == "builtins.readFile")
+                | select(.metaVariables.single.F.text | test($reader))
               ]' "$workDir/applications.json" > "$workDir/read-files.json"
 
               resolveTargets() {
                 local applications=$1 bindings=$2 output=$3
-                jq --slurpfile bindings "$bindings" --arg suffix "$backendSuffix" '
+                jq --slurpfile bindings "$bindings" --arg target "$targetPattern" '
                   (reduce $bindings[0][] as $binding ({};
                     .[$binding.file][$binding.metaVariables.single.A.text] +=
                       [ $binding.metaVariables.single.V.text ]
                   )) as $bindings_by_file
                   |
-                  def compact: gsub("[[:space:]()+\\\"]"; "");
                   def identifier: test("^[A-Za-z_][A-Za-z0-9_\\u0027-]*$");
                   def resolves_target($file; $expression; $seen):
-                    ($expression | compact) as $value
-                    | if ($value | contains($suffix)) then true
+                    if ($expression | test($target)) then true
                       elif (($expression | identifier) and (($seen | index($expression)) == null)) then
                         any(($bindings_by_file[$file][$expression] // [])[];
                           resolves_target($file; .; $seen + [ $expression ]))
@@ -176,6 +183,24 @@ in
                 "$workDir/target-imports.json"
               resolveTargets "$workDir/read-files.json" "$workDir/bindings.json" \
                 "$workDir/target-read-files.json"
+
+              jq -n --raw-output0 '
+                def dynamic: select(.metaVariables.single.P.text | test("^\\.{1,2}/") | not);
+                def tally(rows; column): reduce rows as $row (.; .[$row.file][column] += 1);
+                {}
+                | tally(input[] | dynamic; 0)
+                | tally(input[] | dynamic; 1)
+                | tally(input[]; 2)
+                | tally(input[]; 3)
+                | tally(input[]; 4)
+                | to_entries[]
+                | .key, ([range(5) as $i | .value[$i] // 0] | join(" "))
+              ' "$workDir/imports.json" "$workDir/read-files.json" "$workDir/target-imports.json" \
+                "$workDir/target-read-files.json" "$workDir/target-applications.json" > "$workDir/counts"
+              declare -A astCountsByFile=()
+              while IFS= read -r -d "" file && IFS= read -r -d "" counts; do
+                astCountsByFile["$file"]=$counts
+              done < "$workDir/counts"
 
               mutationSource="$workDir/unit-boundary-target-applications.nix"
               cp ${../fixtures/unit-boundary-target-applications.txt} "$mutationSource"
@@ -200,11 +225,9 @@ in
                 | select(.range.start.line == 6)
               ] | length' "$workDir/mutation-target-applications.json")
 
-              readerAliasCount=$(jq '[
+              readerAliasCount=$(jq --arg reader "$importPattern|$readFilePattern" '[
                 .[]
-                | .metaVariables.single.V.text
-                | gsub("[[:space:]()]"; "")
-                | select(. == "import" or . == "builtins.readFile")
+                | select(.metaVariables.single.V.text | test($reader))
               ] | length' "$workDir/bindings.json")
               targetImportTotal=$(jq 'length' "$workDir/target-imports.json")
 
@@ -287,25 +310,8 @@ in
                 esac
 
                 source=$(cat "$file")
-                dynamicImportCount=$(jq --arg file "$relative" '[
-                  .[]
-                  | select(.file == $file)
-                  | select(.metaVariables.single.P.text | test("^\\.{1,2}/") | not)
-                ] | length' "$workDir/imports.json")
-                dynamicFileReadCount=$(jq --arg file "$relative" '[
-                  .[]
-                  | select(.file == $file)
-                  | select(.metaVariables.single.P.text | test("^\\.{1,2}/") | not)
-                ] | length' "$workDir/read-files.json")
-                targetImportCount=$(jq --arg file "$relative" '[
-                  .[] | select(.file == $file)
-                ] | length' "$workDir/target-imports.json")
-                targetFileReadCount=$(jq --arg file "$relative" '[
-                  .[] | select(.file == $file)
-                ] | length' "$workDir/target-read-files.json")
-                targetApplicationCount=$(jq --arg file "$relative" '[
-                  .[] | select(.file == $file)
-                ] | length' "$workDir/target-applications.json")
+                read -r dynamicImportCount dynamicFileReadCount targetImportCount \
+                  targetFileReadCount targetApplicationCount <<< "''${astCountsByFile[$relative]:-0 0 0 0 0}"
                 if [ -n "$approvedTarget" ]; then
                   approvedImportCount=$(printf '%s\n' "$source" | grep -Fxc -- "$approvedImport" || true)
                   approvedTargetCount=$(printf '%s\n' "$source" | grep -Fo -- "$approvedTarget" | wc -l || true)

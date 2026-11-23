@@ -41,7 +41,8 @@ formatter の正本は `flake.nix` の `formatter` であり、CI の整形検�
 nix run --no-write-lock-file .#verify-full
 ```
 
-編集中は変更したunitのcheckだけを`nix build --no-link .#checks.x86_64-linux.<check>`で実行する。
+編集中は、変更した契約を検査する check を `nix build --no-link .#checks.x86_64-linux.<check>` で実行する。
+たとえば別の unit が持つ値の受け取り方を変えるときは、編集した unit の検査に加えて、[unit 間の参照を調べる検査](../../checks/checks/unit-boundaries.nix)を単独で実行できる。
 最後のsource変更後には、repositoryの根でT1を一度実行する。
 
 ```bash

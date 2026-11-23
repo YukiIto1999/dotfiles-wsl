@@ -601,8 +601,9 @@ def synthesis_item(insight: Insight) -> dict[str, Any]:
     }
 
 
-def listing(items: list[dict[str, Any]]) -> str:
-    return '{"insights": [\n' + ",\n".join(dump(item) for item in items) + "\n]}\n"
+def listing(items: list[dict[str, Any]], *, reduce: bool = False) -> str:
+    header = '{"reduce": [\n' if reduce else '{"insights": [\n'
+    return header + ",\n".join(dump(item) for item in items) + "\n]}\n"
 
 
 def listing_size(insights: list[Insight]) -> int:
@@ -625,12 +626,12 @@ def packed(insights: list[Insight]) -> list[list[Insight]]:
     return groups
 
 
-def merge(options: argparse.Namespace, day: date, insights: list[Insight]) -> tuple[list[Insight], int]:
+def merge(options: argparse.Namespace, day: date, insights: list[Insight], *, reduce: bool) -> tuple[list[Insight], int]:
     grounds: Grounds = {}
     for insight in insights:
         for citation in insight.evidence:
             grounds.setdefault(citation.source, []).append(Ground(citation.quote, citation.current, insight.status == "supported"))
-    material = listing([synthesis_item(insight) for insight in insights])
+    material = listing([synthesis_item(insight) for insight in insights], reduce=reduce)
     return ask(options, day, PROMPTS / "synthesize.md", material, grounds, "synthesize.md", "articles")
 
 
@@ -640,14 +641,14 @@ def synthesize(options: argparse.Namespace, day: date, insights: list[Insight]) 
     while insights:
         groups = packed(insights)
         if len(groups) == 1:
-            articles, rejected = merge(options, day, groups[0])
+            articles, rejected = merge(options, day, groups[0], reduce=False)
             return articles, dropped + rejected
         if rounds == REDUCTION_ROUNDS:
             raise JournalError(f"the insight candidates did not fit one synthesis input within {REDUCTION_ROUNDS} reduction rounds")
         rounds += 1
         merged: list[Insight] = []
         for group in groups:
-            kept, rejected = merge(options, day, group)
+            kept, rejected = merge(options, day, group, reduce=True)
             merged += kept
             dropped += rejected
         if listing_size(merged) >= listing_size(insights):

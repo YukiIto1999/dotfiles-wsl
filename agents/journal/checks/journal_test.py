@@ -182,7 +182,8 @@ def present(marker):
 
 
 def merged(title):
-    supplied = json.loads(material[material.index("{"):])["insights"]
+    envelope = json.loads(material)
+    supplied = envelope["reduce"] if "reduce" in envelope else envelope["insights"]
     evidence = []
     for found in supplied:
         for item in found["evidence"]:
@@ -1108,10 +1109,47 @@ class JournalTest(unittest.TestCase):
         synthesis = self.calls("synthesize")
         self.assertGreater(len(synthesis), 1)
         self.assertTrue(all(len(call["material"]) <= journal.SYNTHESIS_CHARS for call in synthesis))
+        for call in synthesis[:-1]:
+            self.assertEqual(set(json.loads(call["material"])), {"reduce"})
+        self.assertEqual(set(json.loads(synthesis[-1]["material"])), {"insights"})
         document = self.remote_file(DAY_FILE)
         for found, quote in cited:
             self.assertIn(found, document)
             self.assertIn(quote, document)
+
+    def test_preview_refuses_partial_articles_if_reduction_still_needs_multiple_groups(self):
+        def candidate(label, evidence, round_no):
+            return {
+                **insight(f"{label} revision {round_no}", evidence),
+                "explanation": "x" * (journal.SYNTHESIS_CHARS // 2 - round_no),
+            }
+
+        original = []
+        rules = []
+        for label, evidence in (("first", A_BOUNDARY), ("second", A_FINAL)):
+            item = candidate(label, evidence, 0)
+            original.append(item)
+            for round_no in range(1, journal.REDUCTION_ROUNDS + 1):
+                shorter = candidate(label, evidence, round_no)
+                rules.append({"when": item["title"], "reply": {"insights": [shorter]}})
+                item = shorter
+        self.script["extract"] = self.route(A_BOUNDARY[1], {"insights": original})
+        self.script["synthesize"] = rules
+        self.save_script()
+
+        unused = self.workspace / "no-journal"
+        result = subprocess.run(
+            [sys.executable, str(PACKAGE / "journal.py"), *self.arguments("--preview", "--date", DAY.isoformat(), journal_dir=unused)],
+            capture_output=True, text=True,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn(f"did not fit one synthesis input within {journal.REDUCTION_ROUNDS} reduction rounds", result.stderr)
+        self.assertEqual(result.stdout, "")
+        self.assertFalse(unused.exists())
+        synthesis = self.calls("synthesize")
+        self.assertEqual(len(synthesis), len(original) * journal.REDUCTION_ROUNDS)
+        self.assertTrue(all(set(json.loads(call["material"])) == {"reduce"} for call in synthesis))
 
     def test_a_rejected_article_of_a_reduction_round_is_dropped_by_itself_and_the_rest_is_reduced_and_published(self):
         cited = (A_BOUNDARY, A_INTERIM, A_FINAL, A_BESIDE)

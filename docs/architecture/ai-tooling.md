@@ -65,7 +65,7 @@ OMPで独立した監査が必要な場合は、実装者とは別のセッシ�
 [`skills/module.nix`](../../skills/module.nix)はSkill ID、Skill依存、hard Capability依存から、選択したCapabilityで実行できるSkillを導く。[`capabilities/module.nix`](../../capabilities/module.nix)はCapability依存closure、provider owner、backend ownerを検証し、`dotfiles.capabilities.resolved`、`dotfiles.platform.mcp.enabledProviders`、`dotfiles.platform.containers.enabled`を導く。現在のconsumer数はownershipの判断に使わない。
 hard依存は主要手順の必須条件であり、条件付きbrowserやcloud branchで一般Skill全体をgateしない。
 
-Agent clientへ配るのは、解決したSkill registryの`source` directoryとその本文、reference、scriptである。
+Agent client へは、解決した Skill registry から native の入口を投影する。
 必要なSkillを失ったsubagentとそのhandoffも配備しない。
 Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsource差替えはNixの明示的なoverrideだけで行う。
 外部Skillは固定source内のSkill directoryを直接参照し、本文や資材を変換、複製しない。
@@ -73,13 +73,9 @@ Nix module、依存metadata、fixtureは配備先へ混ぜず、同じIDのsourc
 原版の起動flagも保持し、生成するSkill一覧がtask一致、明示command、consumerから読むreference-onlyを区別する。
 `user-invocable: false`と`disable-model-invocation: true`が両方あるhelperは、enabled registryに残して依存を満たすが、shared discovery source、clientのnamed Skill directory、subagent routeへは投影しない。
 consumerはSkill一覧のSourceを`Read`で開き、固定source実体のsibling referenceを利用する。
-architecture-standardも他の外部sourceと同じregistryとoverrideの契約で配備し、agent runtimeとgateは標準の所在も存在も持たない。
-標準の規範本文は、配備済みsourceからでなく、policyが案内する現行規範rootから読む。
-同梱のreferenceとscriptは成功してReadした`SKILL.md`の実体のdirectoryから、規範文書のlinkは現行規範rootから解決する。
-配備済みsourceの標準本文、Git revision、`flake.lock`は実行packageの出典であり、現行規範の根拠にしない。
-`flake.lock`は明示的に更新した標準の実行packageのrevisionを記録する。
-通常の`dotfiles-rebuild`は候補の作成前と適用前に、標準の実行packageのrevisionを上流の現在の参照先と照合する。
-最新と一致しないか照合できない場合は止まり、標準の更新は[Inputの更新](../operations/rebuild.md#inputの更新)の手順に従う。
+標準の運用 Skill は[作業開始時の公開版の照合](repository-skills.md#現在のplugin)を入口で行う。
+client の起動や host の rebuild はこの照合を待たない。
+規範本文は owner の現行規範 root から、原版の手順に同梱された reference と script はその作業で開いた不変の package から読む。
 片方だけを持つ明示commandなどのnative投影は変えず、原版の起動flagを保持する。
 Modern Web Guidanceは外部source全体のhome assetとして保持し、対象guideを原文で読むが、全frontendへ起動するwrapperはSkill registryに採らない。
 外部Skillのraw directoryを配ることと、同梱scriptの実行依存を供給することは別の契約である。
@@ -315,7 +311,7 @@ Dockerが起こす宣言外のcontainerは[containerの配置と上限](#contain
 ## Policy、subagent、Skill
 
 [`agents/policy/AGENTS.md`](../../agents/policy/AGENTS.md)は共通の作業規律を持つtemplateであり、subagent、Capabilityとclientの能力の一覧はNix宣言から生成する。
-Skillのdescription、起動条件、raw sourceは、同じ[`renderer`](../../agents/impl/policy.nix)が別outputのSkill一覧へ生成し、policyから不変のstore pathを参照する。
+Skill の description、起動条件、読取り先は同じ [renderer](../../agents/impl/policy.nix) が一覧へ生成する。標準 Skill の入口は同じ世代の公開版照合コマンドを直接指す。
 通常はsessionのnative Skill一覧から必要な本文だけを読み、一覧不在、commandや依存referenceの解決、配備監査の場合だけ生成一覧を使う。
 全Skillのdescriptionを共通policyへ重ねず、native discoveryとhelperの参照経路は維持する。
 説明文書は同じ一覧を手で維持しない。

@@ -12,7 +12,7 @@ description: Routes changes to the agent working environment to their source own
 
 | 所有者 | 所有するもの | 入口 |
 |---|---|---|
-| architecture-standard | projectをまたいで人の開発者にも求める設計、実装、運用の規範と、`standard-apply`など標準の運用Skill | 作業checkoutの`skills/standard-update/SKILL.md` |
+| architecture-standard | project をまたいで人の開発者にも求める規範と、標準の運用 Skill | `standard-update` |
 | dotfiles-wslのagent能力 | AGENTS、local Skill、reference、script、subagent | `skill-design` |
 | dotfiles-wslの基盤 | 配備、hook、client設定、Capability、MCP、toolchain、外部sourceの採用表と版 | dotfilesの`docs/reference/change-map.md` |
 | upstream | Orcaなど外部repositoryが所有するSkillとtoolの中身 | owner repositoryへの提案。dotfilesは採用表と版だけを持つ。利用者が明示的に承認した適応の範囲に含まれる保守派生は、dotfiles-wslのagent能力として扱う |
@@ -59,7 +59,7 @@ agentの方法は`skill-design`が選び、決定的な検査が必要と判断�
 入口が採否と文面を決め、変更した正本、検証結果、配送に必要な条件を返したら「配送まで閉じる」へ進む。
 所有者が確定済みの主張を振り分け直したり、入口の判断をこのSkillでやり直したりしない。
 
-- architecture-standardの変更: 作業checkoutの`skills/standard-update/SKILL.md`を読み、checkoutのrootを作業directoryにして従う。
+- architecture-standard の変更: この作業で確定した `standard-update` の原版を使い、編集対象は上流の作業 checkout にする。新しい作業なら native 入口から始める。
   現在のprojectをrootにせず、正本の変更結果と配送に必要な版を受け取る。
   変更でなくIssueへの記録が依頼された場合だけ、利用可能な`standard-feedback`へ規律、具体的な不足と根拠を渡し、作成結果のURLまたは未投稿の理由を受け取る。
 - dotfiles-wslのagent能力: 利用可能な`skill-design`へ具体的なscenario、反復した不足、既存policyとSkill、制約を渡す。
@@ -87,12 +87,10 @@ dotfiles-wslの変更は、sourceを検証してcommitし、同repositoryの`doc
 sourceの変更と配備、新しいsessionへの反映は別の状態として確認する。
 
 architecture-standardの規範本文は、ownerがcanonical checkoutへ統合した後、その現行規範rootを読む新しい読取りに現れる。
-Skill、checker、設定の実行packageは、標準のcommitとpush、dotfilesの`nix flake update architectureStandard`と`flake.lock`のcommit、検証とrebuildを経て新しいsessionへ届く。
-標準を統合したら同じ作業で実行packageも最新へ更新し、前回の更新以降に取り込む差分の範囲を報告する。
-pushは実行直前に確認し、許可済みの版更新やcommitを再確認で止めない。
-固定した版やlockは現行本文の代わりにせず、本文だけが届いた状態と実行packageも届いた状態を区別する。
-更新した本文を配備済みのpackageが扱えない場合は配送不足とし、旧本文や旧packageの合格を代用しない。
-upstreamの変更も、owner側での反映とdotfilesの採用版更新を経て届ける。
+運用 Skill の互換な改訂は、上流に公開してから新しい標準作業の入口を実行し、取得できた版と実体を確かめる。
+公開と使用可能は別の結果であり、起動条件や必要な権限まで変わる場合だけ、ホストの採用宣言と配備も変更する。
+確認できない公開版を作業 checkout や旧い検査結果で補わない。
+push は実行直前に確認し、許可済みの操作を同じ理由で止めない。
 
 ## 止める条件と報告
 

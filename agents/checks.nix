@@ -5,5 +5,6 @@
     ./checks/runtime.nix
     ./checks/resources.nix
     ./checks/supply.nix
+    ./checks/standard-package.nix
   ];
 }

@@ -33,10 +33,9 @@ ID や差分を確認できなければ適用しない。
 
 `--plan`は次の順に行う。
 
-1. `flake.lock`の標準の実行packageを上流と照合し、revisionが一致しないか照合できないときは終了status 2で止まる。
-2. commit済みのsourceを隔離した複製へ取り出し、そのlockで`verify`を宣言の予算内で通す。
-3. 対象hostのtoplevelをbuildし、native GC rootを`--out-link`で取得して候補として保持する。
-4. 候補とWSLの現在状態から再起動の分類を求め、差分とともに表示する。
+1. commit 済みの source を隔離した複製へ取り出し、その lock で `verify` を宣言の予算内で通す。
+2. 対象 host の toplevel を build し、native GC root を `--out-link` で取得して候補として保持する。
+3. 候補と WSL の現在状態から再起動の分類を求め、差分とともに表示する。
 
 planは元のcheckout、HEAD、index、`flake.lock`、配備済みのgenerationを変更しない。
 成功したplanは候補のIDを表示する。
@@ -71,7 +70,7 @@ planの公開と、置き換える旧候補の解放は、一つの排他区間�
 3. 現在のsystem状態から再起動の分類を求め直す。
 4. 同じcheckoutのtoplevelを評価し、その結果が保持した候補のstore pathと一致する場合だけ進む。
    file内容の一致では代用せず、Git metadataの影響も評価結果に含めて照合する。
-5. 標準の実行packageが引き続き最新で、照合中にHEADや作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path`へ候補のstore pathを渡す。
+5. 照合中に HEAD や作業木が動いていないことを確かめ、`nixos-rebuild switch --no-reexec --store-path` へ候補の store path を渡す。
    flakeを再び解決せず、nativeの`nixos-rebuild`は候補をbuildも評価もしない。
 
 適用の段では`verify`の入口を再実行しない。
@@ -101,9 +100,7 @@ activationはこのsupervisorの下に置かない。
 
 ### inputの固定
 
-適用と`--plan`で上流と照合するのは`architectureStandard`だけである。
-照合はlockを更新せず、他のinputも更新せず、commitも作らない。
-上流へ接続できないときに旧版を通常適用せず、復旧には保持している世代へのrollbackを使う。
+`--plan` と適用が照合するのは commit 済みの lock と成果物であり、標準 Skill の公開先が応答できるかどうかは判定に使わない。
 更新したinputは、[Inputの更新](#inputの更新)の手順で`flake.lock`をcommitしてから、同じ入口で適用する。
 
 ### 終了statusと結果
@@ -155,7 +152,7 @@ sessionの有無だけで適用を止めず、候補で変わる参照先、acti
 rootのflake inputと、スクリプトに登録した単独固定のCLI・MCPを公開元へ匿名で照会する。
 固定版と比較先が異なる場合は `different`、取得失敗は `unknown` と表示する。
 終了値は全件一致なら0、不一致があれば1、未確認があれば2。
-異なるcommitを無条件に新しい版とはみなさない。
+`different` は稼働版の遅れを表さない。たとえば `architectureStandard` では、ホストが審査した契約と公開先の revision を比較しており、作業が実際に開いた版は検査していない。
 インストール、lockの書換え、サービスの再起動は行わない。
 
 同じ照合を[GitHub Actions](../../.github/workflows/upstreams.yml)で毎週月曜10:19（日本時間）に行う。
@@ -169,8 +166,9 @@ NixOS、WSL、Home Manager、sopsのstable branchを維持したまま、checkou
 nix flake update nixpkgs nixos-wsl home-manager sops-nix
 ```
 
-Skillの供給元として採用した外部sourceも、同じ入口を通る。
-URLにrevを書いたinputは`flake.nix`のrevを差し替えて`flake.lock`を更新し、書かない`architectureStandard`は最新を使う方針のまま、次で更新する。
+固定 source の変更は `flake.nix` と `flake.lock` に行う。
+標準 Skill の[ホスト側の採用契約](../architecture/repository-skills.md#現在のplugin)を変えるときは、次で検査基準を取り込む。互換な公開版を新しい標準作業で使うだけなら、この操作は不要である。
+対応する ABI が変わる場合は lock の更新だけでは足りない。ホスト側の検証器 `agents/impl/standard-package/validate.sh` が新契約を検査できるようにし、非互換な版を引き続き拒否することを確かめる。追従先は公開 repository の既定 branch または明示した `refs/heads/...` に限る。
 
 ```sh
 nix flake update --refresh architectureStandard

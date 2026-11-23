@@ -2,6 +2,7 @@
   config,
   lib,
   pkgs,
+  pluginSources,
   self,
   ...
 }:
@@ -32,7 +33,8 @@ let
   # 供給方式の切替前に旧 release writer が使った root。旧 writer との同時実行を避けるためだけに読む
   legacyRootRelative = ".local/share/dotfiles/agents";
   profileRoot = "${cfg.workstation.homeDir}/${profileRootRelative}";
-  supplyInput = (builtins.fromJSON (builtins.readFile ../flake.lock)).nodes.llm-agents.original;
+  flakeLock = builtins.fromJSON (builtins.readFile ../flake.lock);
+  supplyInput = flakeLock.nodes.llm-agents.original;
   supplySource = "${supplyInput.type}:${supplyInput.owner}/${supplyInput.repo}";
   supplyPackages = self.inputs.llm-agents.packages.${pkgs.stdenv.hostPlatform.system};
   clientExecutables = lib.mapAttrs (
@@ -172,7 +174,38 @@ let
   enabledSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name});
   discoverableSkills = lib.filterAttrs (_: skill: !isReferenceOnlySkill skill.source) enabledSkills;
   discoverableSkillNames = builtins.attrNames discoverableSkills;
-  allSkills = lib.mapAttrs (_: skill: skill.source) discoverableSkills;
+
+  # 原版のまま採用した標準 Skill だけを原版を開く入口へ置き換える。差替えた source は原文のまま配り、registry は変えない
+  standardSources = lib.mapAttrs (_: skill: skill.source) (
+    lib.filterAttrs (
+      name: skill: toString skill.source == "${pluginSources.architecture-standard}/skills/${name}"
+    ) discoverableSkills
+  );
+  # 問い合わせ先は host が採用した flake.lock の original から導き、作業中の checkout や起動中の client から選ばない
+  standardInput =
+    flakeLock.nodes.${flakeLock.nodes.${flakeLock.root}.inputs.architectureStandard}.original;
+  standardChecker = "${pluginSources.architecture-standard}/skills/standard-update/scripts/skill-package-check.sh";
+  standardPackage = import ./impl/standard-package/package.nix {
+    inherit lib pkgs;
+    reviewed = lib.mapAttrs (_: source: "${source}") standardSources;
+    checker = standardChecker;
+    origin = {
+      inherit (standardInput) owner repo;
+      ref = standardInput.ref or null;
+    };
+    stateRelative = lib.removePrefix "${cfg.workstation.homeDir}/" runtimeContract.state.root;
+    nixPackage = config.nix.package;
+    inherit (config.security.pki) caBundle;
+  };
+  # native 入口は同じホスト世代の resolver を指し、解決済みの原版は使われた公開版ごとに保持する
+  standardRoutes = import ./impl/standard-package/routes.nix { inherit lib pkgs; } {
+    sources = standardSources;
+    command = standardPackage;
+  };
+  projectedSourceOf =
+    name: skill:
+    if builtins.hasAttr name standardSources then "${standardRoutes}/${name}" else skill.source;
+  allSkills = lib.mapAttrs projectedSourceOf discoverableSkills;
 
   subagentsRoot = ./subagents;
   allSharedSubagents =
@@ -228,7 +261,10 @@ let
   policyInputs = {
     template = ./policy/AGENTS.md;
     constraints = ./policy/RULES.md;
-    skills = enabledSkills;
+    # 一覧の Source も native 入口と同じ投影を指し、原版 store への直接の経路を一覧から開かない
+    skills = lib.mapAttrs (
+      name: skill: skill // { source = projectedSourceOf name skill; }
+    ) enabledSkills;
     subagents = sharedSubagents;
     capabilities = cfg.capabilities.resolved;
     inherit (agents) clients;
@@ -527,6 +563,9 @@ in
       }
       // lib.optionalAttrs projectMemoryEnabled {
         projectMemoryHooks = config.dotfiles.capabilities.project-memory.clientIntegrations.hooks;
+      }
+      // lib.optionalAttrs (standardSources != { }) {
+        inherit standardPackage;
       };
       runtime = {
         inherit (runtimeContract) timers state;
@@ -643,6 +682,26 @@ in
           );
         message = "Agent runtime timer names must be unique";
       }
+    ]
+    ++ lib.optionals (standardSources != { }) [
+      {
+        assertion =
+          standardInput.type or null == "github"
+          && !(standardInput ? rev)
+          && lib.all (value: builtins.match "[A-Za-z0-9._-]+" value != null) [
+            standardInput.owner
+            standardInput.repo
+          ]
+          && (
+            (standardInput.ref or "HEAD") == "HEAD"
+            || builtins.match "refs/heads/[A-Za-z0-9._/-]+" standardInput.ref != null
+          );
+        message = "architectureStandard must follow a GitHub default branch or an explicit refs/heads/ branch, without rev";
+      }
+      {
+        assertion = builtins.pathExists standardChecker;
+        message = "the host-pinned architecture-standard has no package checker: ${standardChecker}";
+      }
     ];
 
     environment.etc = lib.listToAttrs systemManagedEntries;
@@ -653,6 +712,9 @@ in
     ]
     ++ lib.optionals projectMemoryEnabled [
       config.dotfiles.agents.packages.projectMemoryHooks
+    ]
+    ++ lib.optionals (standardSources != { }) [
+      config.dotfiles.agents.packages.standardPackage
     ];
 
     home-manager.users.${cfg.workstation.username} =

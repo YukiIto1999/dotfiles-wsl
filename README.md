@@ -14,7 +14,7 @@ OS、Home Manager、開発ツール、AIコーディング環境、暗号化済�
 - compiler、language server、formatter、Gitと、`btop`、`hyperfine`などのCLIを配備する。
 - Bashの履歴はAtuinでローカルに保存し、自動同期を有効にしない。
 - AI clientはregistryのadapterから選び、採用したclientだけに設定、Skill、subagentを配備する。
-- Skillはrepository内の自立したcustom正本と、revisionを固定したOrca、architecture-standard、Matt Pocock、Google、.NETの個別原版から採用する。
+- Skill はこの repository の正本と、採用した外部の原版から供給する。
 - MCP server、Docker backend、GitHub PAT、backend credentialを宣言する。
 
 生成済みの設定ファイルは直接編集しない。
@@ -62,14 +62,12 @@ Nix unit は `module.nix` を marker にし、build がある場合は `package.
 アーキテクチャの標準は [architecture-standard](https://github.com/YukiIto1999/architecture-standard) にあり、準拠の基準は、ownerが指定するcanonical checkoutの現在の標準本文である。
 適用は、標準の README の適用の4則と利用の手順に従う。
 agentが標準を読む場所は、環境系repositoryの作業checkoutの規約とともにagent policyが案内する。
-このrepositoryのbuild、rebuild、agent runtimeは、標準のcheckoutの有無にも標準のcheckerにも依存しない。
+ホストの build、rebuild、client の起動は標準の作業 checkout を必要とせず、標準の公開先へ最新版を問い合わせない。
 
-標準の運用Skill、checker、設定は、他の外部Skillと同じく`flake.nix`のinputを`skills/plugins/module.nix`の採用表から配備する不変の実行packageである。
-`architectureStandard` inputはURLにrevを書かない。
-最新への更新は[Inputの更新](docs/operations/rebuild.md#inputの更新)の手順に従う。
-通常の`dotfiles-rebuild`は上流の標準packageと照合し、`flake.lock`と一致する場合だけ候補を作成・適用する。
-候補の検証と適用は同じlockを使い、`dotfiles-rebuild`がlockを書き換えることはない。
-URL、`flake.lock` のrevisionと内容hashは実行packageの出典であり、現行規範の正本ではない。
+標準の運用 Skill は、標準を使う作業を始めたときに、公開版を照合してから読む。
+同じ作業では本文、参照資料、検査器を同じ不変のパスから使う。
+通常の改訂にプロジェクトごとの更新やホストの再配備は要らない。
+公開版を確認できなければ新しい標準作業だけ止める。ホストで許可した依存や起動条件を変える場合は、[採用と配備の契約](docs/architecture/repository-skills.md#現在のplugin)を更新する。
 `dotfiles-doctor` の配備driftのPASSは、配備物の同一性を示すだけで、現行規範への適合を示さない。
 
 標準を別のローカル原則へ写さず、現在の実現はコード、保証する振る舞いはテスト、変更の理由はcommit、現在も採れない実装の理由はそのownerのWhy notから辿る。

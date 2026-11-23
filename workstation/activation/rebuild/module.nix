@@ -43,7 +43,6 @@ let
     runtimeInputs = with pkgs; [
       git
       coreutils
-      curl
       diffutils
       jq
       nix

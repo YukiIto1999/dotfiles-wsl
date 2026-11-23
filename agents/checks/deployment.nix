@@ -360,12 +360,20 @@
         sharedSubagentSources = builtins.attrValues hostConfig.dotfiles.agents.shared.subagents;
         sharedSubagentNames = builtins.attrNames hostConfig.dotfiles.agents.shared.subagents;
         sharedSkillNames = builtins.attrNames hostConfig.dotfiles.agents.shared.skills;
+        # 原版のまま採用した標準 Skill だけが原版を開く入口へ投影され、registry はその原版を指し続ける
+        isStandardOriginal =
+          configuration: name:
+          toString configuration.dotfiles.skills.registry.${name}.source
+          == "${self.inputs.architectureStandard}/skills/${name}";
+        isProjected =
+          configuration: name:
+          toString configuration.dotfiles.agents.shared.skills.${name}
+          != toString configuration.dotfiles.skills.registry.${name}.source;
+        standardIds = builtins.filter (isStandardOriginal hostConfig) sharedSkillNames;
         registrySkillSourcesMatch = lib.all (
           name:
           builtins.hasAttr name hostConfig.dotfiles.skills.registry
-          &&
-            toString hostConfig.dotfiles.agents.shared.skills.${name}
-            == toString hostConfig.dotfiles.skills.registry.${name}.source
+          && isProjected hostConfig name == isStandardOriginal hostConfig name
         ) sharedSkillNames;
         rawRoutingContract = import ../subagents/routing.nix;
         routingContract = hostConfig.dotfiles.agents.shared.routing;
@@ -1450,6 +1458,8 @@
             builtins.attrValues hostConfig.dotfiles.agents.shared.skills
           );
           assert registrySkillSourcesMatch;
+          assert builtins.elem "standard-apply" standardIds;
+          assert builtins.elem agentConfig.packages.standardPackage hostConfig.environment.systemPackages;
           pkgs.runCommandLocal "check-agent-subagent-rendering"
             {
               nativeBuildInputs = [
@@ -1484,11 +1494,41 @@
               skillEntries = lib.concatStringsSep " " (
                 lib.mapAttrsToList (name: skill: "${name}=${skill.source}/SKILL.md") policySkills
               );
+              standardCommand = lib.getExe agentConfig.packages.standardPackage;
+              standardIds = lib.concatStringsSep " " standardIds;
+              standardEntries = lib.concatMapStringsSep " " (
+                name:
+                "${name}=${hostConfig.dotfiles.skills.registry.${name}.source}=${
+                  hostConfig.dotfiles.agents.shared.skills.${name}
+                }"
+              ) standardIds;
             }
             ''
               set -euo pipefail
 
               test -s "$rulesSource"
+              # 標準 Skill の入口と一覧は原版の frontmatter と開き方だけを持ち、原版の path と未採用の Skill を出さない
+              catalog=$(grep -oE '${builtins.storeDir}/[a-z0-9]{32}-agents-policy.md-catalog' "$rulesSource" | head -n 1)
+              for entry in $standardEntries; do
+                IFS='=' read -r id original route <<<"$entry"
+                closing=$(awk 'NR > 1 && $0 == "---" { print NR; exit }' "$original/SKILL.md")
+                cmp <(head -n "$closing" "$original/SKILL.md") <(head -n "$closing" "$route/SKILL.md")
+                # native 入口は PATH で別世代の resolver を選ばない
+                grep -Fq "\`$standardCommand open $id\`" "$route/SKILL.md"
+                grep -F "| \`$id\` |" "$catalog" | grep -Fq "\`$route/SKILL.md\` |"
+                if grep -Fq "$original" "$catalog" "$route/SKILL.md"; then
+                  echo "standard entry exposes its original: $id" >&2
+                  exit 1
+                fi
+                tail -n "+$((closing + 1))" "$route/SKILL.md" > route-body.md
+                for candidate in "''${original%/skills/*}"/skills/*/; do
+                  name=$(basename "$candidate")
+                  if [[ " $standardIds " != *" $name "* ]] && grep -Fq "\`$name\`" route-body.md; then
+                    echo "standard entry admits an unadopted Skill: $id/$name" >&2
+                    exit 1
+                  fi
+                done
+              done
               mkdir projected-skills
               for consumerSource in $consumerSources; do
                 ln -s "$consumerSource" projected-skills/run-tests
@@ -1757,6 +1797,7 @@
               requiresCapabilities = [ ];
               requiresSkills = [ ];
             };
+            standardReplacement = skillFixtures + "/standard-apply";
             replacedConfig =
               (mkProbeSystem [
                 normalMachineModule
@@ -1764,6 +1805,7 @@
                   dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ];
                   dotfiles.skills.registry.surface-operation = lib.mkForce replacement;
                   dotfiles.skills.registry.external-procedure = external;
+                  dotfiles.skills.registry.standard-apply.source = lib.mkForce standardReplacement;
                 }
               ]).config;
             conflictingConfig =
@@ -1806,6 +1848,11 @@
             == toString hostConfig.dotfiles.skills.registry.surface-operation.source;
           assert
             toString hostConfig.dotfiles.agents.shared.skills.surface-operation != toString replacement.source;
+          # source を差替えた標準 Skill と無効な標準 Skill は原版の入口から外れ、他の原版の入口は残る
+          assert !(isProjected replacedConfig "standard-apply");
+          assert isProjected replacedConfig "property-testing";
+          assert !builtins.elem "standard-feedback" replacedConfig.dotfiles.skills.enabled;
+          assert !(replacedConfig.dotfiles.agents.shared.skills ? standard-feedback);
           pkgs.runCommandLocal "check-agent-skill-replacement"
             {
               nativeBuildInputs = [
@@ -1818,13 +1865,28 @@
               externalSources = lib.concatMapStringsSep " " (
                 clientName: "${deployed clientName "external-procedure"}"
               ) projectedClients;
+              standardReplacementSources = lib.concatMapStringsSep " " (
+                clientName: "${deployed clientName "standard-apply"}"
+              ) projectedClients;
+              dependentStandardRoute = "${replacedConfig.dotfiles.agents.shared.skills.property-testing}";
               replacementFixture = "${replacement.source}";
               externalFixture = "${external.source}";
+              standardReplacementFixture = "${standardReplacement}";
             }
             ''
               set -euo pipefail
               for source in $replacementSources; do
                 cmp "$replacementFixture/SKILL.md" "$source/SKILL.md"
+              done
+              for source in $standardReplacementSources; do
+                cmp "$standardReplacementFixture/SKILL.md" "$source/SKILL.md"
+              done
+              awk 'body; NR > 1 && $0 == "---" { body = 1 }' "$dependentStandardRoute/SKILL.md" > dependent-body.md
+              for excluded in standard-apply standard-feedback; do
+                if grep -Fq "\`$excluded\`" dependent-body.md; then
+                  echo "standard entry admits a replaced or disabled Skill: $excluded" >&2
+                  exit 1
+                fi
               done
               for source in $externalSources; do
                 cmp "$externalFixture/SKILL.md" "$source/SKILL.md"

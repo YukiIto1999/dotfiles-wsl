@@ -37,26 +37,6 @@ assert_output_has 'commit the working tree'
 checkout_git update-index --no-assume-unchanged tracked
 checkout_git checkout -- tracked
 
-# アップストリームが進んだか確認できない場合は旧版を候補にしない
-before=$(checkout_snapshot)
-REBUILD_STANDARD_REVISION=rev-new run_rebuild 2 --plan
-assert_output_has 'does not match the latest upstream package (rev-new)'
-assert_output_has 'nix flake update --refresh architectureStandard'
-assert_not_called 'nix build'
-assert_no_switch
-[[ $(checkout_snapshot) == "$before" ]]
-REBUILD_STANDARD_REVISION='' run_rebuild 2 --plan
-assert_output_has 'response did not identify a revision'
-assert_not_called 'nix build'
-assert_no_switch
-[[ $(checkout_snapshot) == "$before" ]]
-REBUILD_STANDARD_STATUS=1 run_rebuild 2
-assert_output_has 'could not confirm the latest architectureStandard'
-assert_not_called 'nix build'
-assert_no_switch
-assert_no_work_left
-[[ $(checkout_snapshot) == "$before" ]]
-
 # A plan builds a candidate and changes neither the checkout nor the system.
 lock_one=$(<"$REBUILD_CHECKOUT/flake.lock")
 candidate_one=$(system_for_lock "$lock_one")

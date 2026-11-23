@@ -3,7 +3,7 @@
 **読み手:** 外部Skillの登録と供給元の差替を保守する人が、作業中に契約を参照する。
 
 外部Skillもlocal Skillも、`dotfiles.skills.registry`の一つのentryとして登録する。
-clientは`dotfiles.skills.enabled`から選んだentryのsourceを配備するだけであり、供給元ごとのregistryや取得処理を持たない。
+client は `dotfiles.skills.enabled` から選んだ入口を投影し、供給元ごとの registry や取得処理を持たない。
 Skillのsourceは固定したrepositoryから直接参照し、本文や資材を`skills/<id>/skill/`へ複製、変換せず、原名のIDを使う。
 利用者が明示した承認の範囲に含まれる保守派生だけは例外であり、[承認済みの保守派生](#承認済みの保守派生)に従う同じIDのlocal Skillとして扱う。
 
@@ -121,9 +121,14 @@ clientやroutingが使うIDは維持され、本文と資材の供給元だけ�
 architecture-standardの規範本文は、配備済みsourceでなくpolicyが案内する現行規範rootから読み、配備するのはその運用Skillの実行packageである。
 `standard-feedback`は`github-resources`を要求する。
 
-`architectureStandard`は公開済みのsourceを`flake.lock`で取得し、供給元のローカルcheckoutの存在や作業状態をrebuildの条件にしない。
-rebuildとagent runtimeは、このsourceに専用の更新、gate、checkerを持たない。
-未公開の供給契約を使うdotfiles側の開発は別worktreeで行い、通常のrebuildは公開済みの契約だけで成立させる。
+`architectureStandard` の lock は、ホストが審査した起動条件と検査器の基準であり、次の標準作業で使う版を指定するものではない。
+採用した標準 Skill の native 入口は、原版の frontmatter と、原版を開く手順だけを持つ。
+新しい標準作業ではその入口から `dotfiles-standard-package open ID` を一度実行する。
+成功時の出力は上流原版の `SKILL.md` の絶対パスである。同じ作業で使う参照資料・検査器・委譲先はそこから辿り、可変の入口へ戻らない。
+原版はセッションではなく使った公開版ごとに Nix の GC root を持つ。送信元の終了後も同じパスを読める。`~/.local/state/dotfiles-wsl/standard-package/revisions/<commit>` は自動削除しない。その版を使う仕事・引継ぎ・再開がなく、`last-good` の指す版でもないと確認してから、そのリンクだけを外せば通常の Nix GC で回収できる。
+公開版の照合や互換性の検査に失敗したら新しい標準作業だけを止める。
+`dotfiles-standard-package status` は最後に検証した版の観測であり、現在の公開版を使う許可ではない。
+新しい権限・依存・起動条件が必要な改訂は、ホストの採用宣言と検査の基準を更新してから使う。
 
 architecture-standardの運用Skillは、同repositoryの`skills/<id>/`を正本とし、`standard-update`と`standard-audit`も既存の採用表から配備する。
 clientごとの`.claude/skills/`などはadapterの投影先であり、正本の所有先ではない。
@@ -131,7 +136,7 @@ clientごとの`.claude/skills/`などはadapterの投影先であり、正本�
 外部事実が採否を分ける場合だけ使う`web-research`を、ローカルの本文で完結する改訂の配備前提にしない。
 改訂判断の評価では、上流が所有する試問を使い、新しい実行者への入力と採点を`skill-design`で分ける。
 配備検査はこの実行評価を代替しない。
-別repositoryから標準を変えるときは、`environment-design`から作業checkoutの`skills/standard-update/SKILL.md`へ渡し、配備済みsourceを編集しない。
+標準を改訂するときも `standard-update` の入口から始める。実行する原版とは別に、変更は上流の作業 checkout へ行う。
 
 Mattの`code-review`は`setup-matt-pocock-skills`を使う。共通実装の順序は`standard-apply`から標準へ進み、外部TDDを併設しない。
 `diagnosing-bugs`はbrowserを使わないbranchも持つためbrowser Capabilityへのhard依存を持たず、architecture探索を常に呼ぶ依存も置かない。

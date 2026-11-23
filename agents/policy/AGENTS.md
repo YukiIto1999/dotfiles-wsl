@@ -61,7 +61,7 @@ Orcaのworktreeとterminalの操作や別agentへの完全なhandoffは`orca-cli
 
 sessionが提示するSkillの名前とdescriptionから選び、該当する本文を読む。
 一覧が提示されない、必要なcommandや依存referenceの入口が見つからない、または配備内容を調べる場合だけ、Skill一覧 `@skillCatalog@`を読む。通常のtaskで一覧全体を追加読込しない。
-一覧は配備元のdescription、起動flag、sourceを保持し、外部Skillの原名、本文、付属資料は変えない。
+一覧は配備元のdescriptionと起動flagを保持し、外部Skillの原名、本文、付属資料は変えない。一覧のSourceはclientのnative Skill入口と同じ投影を指す。
 client固有またはplugin由来のSkillはsessionが提示した名前を使い、namespaceがある場合は省略しない。
 一覧の起動欄が「明示呼出しのみ」のSkillは利用者が呼んだcommandとして使い、一般taskの自動routingへ加えない。
 「依存referenceのみ」は`user-invocable: false`と`disable-model-invocation: true`を併せ持つhelperで、clientのnamed Skill discovery directoryとsubagent routeへ投影されない。consumerが必要条件で読む原版sourceであり、一覧のSourceを`Read`で開き、Skill起動toolで名前を解決しない。native Skill入口がないclientも、必要なSkillのSourceを直接読む。`filter-syntax`は`run-tests`がfiltered runで必要とした場合だけ読む。
@@ -101,8 +101,10 @@ architecture-standardを現行規範として読むのは、利用者またはca
 callerが別のrootを明示した場合は、そのrootに対する判断として使ったrootを示し、現行規範への適合とは書き分ける。
 標準を求めていない仕事は、標準のcheckoutの有無で開始も完了も変えない。
 
-配備されたSkill、checker、設定のstore実体は、実行する手順の不変な供給物であり、規範の正本ではない。
-Skillの`SKILL.md`を成功してReadした実体のdirectoryを`<skill-package-root>`とし、同梱のreferenceとscriptはそこから解決する。
+配備されたSkill、checker、設定のstore実体と、`dotfiles-standard-package open`が返す原版は、実行する手順の不変な供給物であり、規範の正本ではない。
+手順の本文を持つSkillの`SKILL.md`を成功してReadした実体のdirectoryを`<skill-package-root>`とし、同梱のreferenceとscriptはそこから解決する。
+原版のまま採用した標準Skillのnative入口と一覧のSourceは、frontmatterと原版を開く案内だけを持つ。その`<skill-package-root>`は入口ではなく、`open`が返した原版`SKILL.md`のdirectoryである。
+一つの標準の仕事は一つの原版rootを使い、続き、再開、handoffでもそのrootを引き継ぐ。同じrootから読む別のSkillは、そのhostが原版のまま採用した標準SkillのIDに限り、rootに含まれることを採用とみなさない。
 規範文書のlinkと標準本文の参照は、`<skill-package-root>`や固定したGit revisionから導かず、現行規範rootから解決する。
 
 Git revision、`flake.lock`、gateのreceiptは、供給物と観測の出典であり、現行規範への適合やownerが受け入れた決定の証拠にならない。
@@ -145,6 +147,7 @@ agentがそれを直接起動したり、接続を個別に操作したりしな
 
 - 通常 rebuild: `dotfiles-rebuild`
 - 外部 source（Skill の供給元を含む）の更新: `nix flake update <input>`、`flake.lock` の commit、検証、`dotfiles-rebuild` の順。`dotfiles-rebuild` は input を取得も更新もしない。
+- `architectureStandard` の lock は host が審査した採用 ID、依存、権限、起動条件と検査器の基準である。基準と互換な公開版の Skill 改訂は lock を更新せず、次の標準の仕事で `dotfiles-standard-package open` が選ぶ。採用 ID、依存、権限、起動条件を変える改訂だけ、上の順で基準を更新する。
 - 実用状態検証: `dotfiles-doctor`
 - Agent client binary の更新と rollback: `dotfiles-agent-supply update`、`dotfiles-agent-supply rollback <client>`。版の確認は `dotfiles-agent-supply status`
 - Home Manager backup 整理: `dotfiles-cleanup --delete`

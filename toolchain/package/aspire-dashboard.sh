@@ -21,6 +21,7 @@ usage() {
     'otel    Run the official aspire otel reader against the running dashboard.' \
     'exec    Run COMMAND with OTEL_* variables that send its telemetry to the dashboard.' \
     'stop    Stop the running dashboard and wait until its data is deleted.' \
+    '        If an interrupted run left data behind, delete it without starting a dashboard.' \
     '' \
     'Credentials stay in process memory; never pass a browser token in a command argument.'
 }
@@ -55,6 +56,7 @@ run_child=''
 run_signalled=0
 # locate_run が検証した、資格情報を環境に持つ CLI process
 run_pid=''
+located_id=''
 
 random_hex() {
   od -An -N"$1" -tx1 /dev/urandom | tr -d ' \n'
@@ -95,6 +97,26 @@ locate_run() {
   [[ $pid =~ ^[0-9]+$ && $id =~ ^[0-9a-f]{32}$ ]] || return 2
   [[ $(env_value "$pid" ASPIRE_DASHBOARD_RUN_ID 2>/dev/null) == "$id" ]] || return 2
   run_pid=$pid
+  located_id=$id
+}
+
+terminate_run() {
+  # 照合後の PID 再利用で無関係な process に届くため通常の kill は不可
+  python3 -I -c '
+import os
+import signal
+import sys
+
+pid, run_id = int(sys.argv[1]), sys.argv[2]
+try:
+    fd = os.pidfd_open(pid)
+    with open(f"/proc/{pid}/environ", "rb") as f:
+        if ("ASPIRE_DASHBOARD_RUN_ID=" + run_id).encode() not in f.read().split(b"\0"):
+            sys.exit(1)
+    signal.pidfd_send_signal(fd, signal.SIGTERM)
+except OSError:
+    sys.exit(1)
+' "$1" "$2"
 }
 
 # 今回の browser token を受理した応答だけを、自分の Dashboard の受付とみなす。応答の API key は捨てる
@@ -157,7 +179,7 @@ remove_previous_run() {
   local previous
   if [[ -f $state/data-dir ]]; then
     previous=$(<"$state/data-dir")
-    if [[ ${previous##*/} == aspire-dashboard.* && -d $previous && -O $previous ]]; then
+    if [[ ${previous##*/} == aspire-dashboard.???????? && -d $previous && ! -L $previous && -O $previous ]]; then
       rm -rf -- "$previous"
     fi
   fi
@@ -236,7 +258,7 @@ cmd_run() {
     fi
     kill -0 "$run_child" 2>/dev/null || break
   done
-  if ((run_signalled)) || [[ -e $state/stop-requested ]]; then
+  if ((run_signalled)) || [[ -e $state/stop-$run_id ]]; then
     exit 0
   fi
   exit "$status"
@@ -329,27 +351,44 @@ cmd_exec() {
 }
 
 cmd_stop() {
-  local status fd attempt
+  local status=1 fd attempt stopping
   [[ $# == 0 ]] || usage_error
-  # 起動直後は記録の検証が済むまで待ち、検証できない pid には送らない
+  umask 077
+  exec {fd}>>"$lock"
+  # 稼働中に状態を消すと別の run を起動できるため回収には lock の取得が必須
   for ((attempt = 0; attempt < 100; attempt++)); do
+    if flock -n "$fd"; then
+      if [[ -e $state ]]; then
+        remove_previous_run
+        printf 'aspire-dashboard: not running; removed data left by an interrupted run\n'
+      else
+        printf 'aspire-dashboard: not running\n'
+      fi
+      return 0
+    fi
     status=0
     locate_run || status=$?
-    ((status == 2)) || break
+    ((status != 0)) || break
     sleep 0.1
   done
-  if ((status == 1)); then
-    printf 'aspire-dashboard: not running\n'
-    return 0
-  fi
   ((status == 0)) || die 'could not verify the running dashboard process'
-  : >"$state/stop-requested"
-  kill -TERM -- "-$run_pid" 2>/dev/null || kill -TERM "$run_pid" 2>/dev/null || true
-  exec {fd}>>"$lock"
-  flock -w 30 "$fd" || die 'dashboard did not stop within 30 seconds'
-  remove_previous_run
-  exec {fd}>&-
-  printf 'aspire-dashboard: stopped\n'
+  stopping=$located_id
+  { : >"$state/stop-$stopping"; } 2>/dev/null || true
+  terminate_run "$run_pid" "$stopping" || true
+  for ((attempt = 0; attempt < 300; attempt++)); do
+    if flock -n "$fd"; then
+      remove_previous_run
+      printf 'aspire-dashboard: stopped\n'
+      return 0
+    fi
+    # 再起動した run まで待つと先の stop が失敗したと誤報するため ID で分離
+    if locate_run && [[ $located_id != "$stopping" ]]; then
+      printf 'aspire-dashboard: stopped\n'
+      return 0
+    fi
+    sleep 0.1
+  done
+  die 'dashboard did not stop within 30 seconds'
 }
 
 command=$1

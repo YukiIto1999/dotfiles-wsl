@@ -179,6 +179,14 @@
               [ -z "$(ls -A "$TMPDIR")" ] || fail 'per-run data remained after stop'
               run 1 status-after-stop "$dash" status
 
+              mkdir -m 700 -- "$state"
+              abandoned=$(mktemp -d "$TMPDIR/aspire-dashboard.XXXXXXXX")
+              unrelated=$(mktemp -d "$TMPDIR/other.XXXXXXXX")
+              printf '%s\n' "$abandoned" > "$state/data-dir"
+              run 0 reclaim-stopped "$dash" stop
+              [ ! -e "$state" ] && [ ! -e "$abandoned" ] && [ -d "$unrelated" ] \
+                || fail 'stop did not reclaim exactly the abandoned run'
+
               touch "$out"
             '';
       }

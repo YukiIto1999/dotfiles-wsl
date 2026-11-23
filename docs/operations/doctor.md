@@ -278,8 +278,11 @@ dotfiles-observe-workload | jq '.outcomes, .resources'
 ```
 
 collectorは現在のWindows利用者として登録し、権限昇格やexecution policyの変更はしない。
+タスクはコンソールを割り当てずにコレクターを起動するため、Windows Terminal を開かない。
 同名でも他のtaskやfileは変更しない。install途中の失敗は、実施済みの段階をstderrへ出す。
-更新は同じ`install`、撤去は`dotfiles-windows-resource-collector uninstall`を使う。撤去後は観測がWindowsのsnapshotを不明と示すが、検証の入場は待たない。
+ターミナルが開く旧版からの更新も同じ`install`を使い、`status`で`collector.taskCurrent`が`true`かつ`snapshot.state`が`fresh`であることを確認する。
+撤去は`dotfiles-windows-resource-collector uninstall`を使う。
+撤去後は観測がWindowsのsnapshotを不明と示すが、検証の入場は待たない。
 
 T1 と pre-push の受入は `agents-acceptance.slice`、待つ者のいない深い検証（`dotfiles-workload-run`）は `agents-deep.slice` の下に走行ごとの scope を作る。
 CPU 上限付きの走行は別の class で、指定方法は下の「CPU の上限付きで新しい走行を始める」を参照。

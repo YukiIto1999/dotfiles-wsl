@@ -81,15 +81,17 @@ read_snapshot() {
 }
 
 install_collector() {
-  local collector_windows started_at deadline snapshot
+  local collector_windows started_at previous_write deadline snapshot
   collector_windows=$(windows_path "$collector_source") || fail 'could not convert the collector path' || return 1
   printf -v started_at '%(%s)T' -1
-  run_manage install "$collector_windows" >/dev/null || fail 'the Windows installation did not complete' || return 1
+  previous_write=$(run_manage install "$collector_windows") || fail 'the Windows installation did not complete' || return 1
+  previous_write=${previous_write%$'\r'}
+  [[ $previous_write =~ ^(0|[1-9][0-9]{0,14})$ ]] || fail 'the Windows installation did not report the previous snapshot timestamp' || return 1
   deadline=$((SECONDS + publish_wait_seconds))
   while :; do
     snapshot=$(read_snapshot)
-    if "$jq_command" -e --argjson started "$started_at" \
-      '.state == "fresh" and .observedAt >= $started' <<<"$snapshot" >/dev/null 2>&1; then
+    if "$jq_command" -e --argjson started "$started_at" --argjson previous "$previous_write" \
+      '.state == "fresh" and .observedAt >= $started and .observedAt > $previous' <<<"$snapshot" >/dev/null 2>&1; then
       printf '%s\n' "$snapshot"
       return 0
     fi
@@ -115,6 +117,7 @@ collector_status() {
     and .collector.collectorCurrent == true
     and .collector.taskRegistered == true
     and .collector.taskOwned == true
+    and .collector.taskCurrent == true
     and .collector.taskState == "Running"
     and .snapshot.state == "fresh"
   ' <<<"$combined" >/dev/null

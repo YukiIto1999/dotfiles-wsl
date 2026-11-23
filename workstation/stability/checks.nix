@@ -1323,15 +1323,33 @@ let
     collectorCurrent = true;
     taskRegistered = true;
     taskOwned = true;
+    taskCurrent = true;
     taskState = "Running";
   };
-  healthyPowerShell = mkFakePowerShell "powershell-healthy" "printf '%s\\r\\n' ${lib.escapeShellArg (builtins.toJSON healthyStatus)}";
+  healthyPowerShell = mkFakePowerShell "powershell-healthy" ''
+    if [[ $* == *"-Action 'install'"* ]]; then
+      printf '0\r\n'
+    else
+      printf '%s\r\n' ${lib.escapeShellArg (builtins.toJSON healthyStatus)}
+    fi
+  '';
+  legacyPowerShell = mkFakePowerShell "powershell-legacy" "printf '%s\\r\\n' ${
+    lib.escapeShellArg (builtins.toJSON (healthyStatus // { taskCurrent = false; }))
+  }";
   hangingPowerShell = mkFakePowerShell "powershell-hanging" "exec ${pkgs.coreutils}/bin/sleep 30";
   healthyCli = mkCli {
     reader = publishedReader;
     powershell = healthyPowerShell;
   };
   cliVariants = {
+    legacy = mkCli {
+      reader = publishedReader;
+      powershell = legacyPowerShell;
+    };
+    unchanged = mkCli {
+      reader = publishedReader;
+      powershell = mkFakePowerShell "powershell-unchanged" "printf '%s\\r\\n' ${toString collectorFutureTime}";
+    };
     preexisting = mkCli {
       reader = preexistingReader;
       powershell = healthyPowerShell;
@@ -1536,10 +1554,13 @@ in
             jq -e '.state == "fresh"' "$TMPDIR/install.stdout" >/dev/null
 
             run install-leftover-snapshot 1 ${lib.getExe cliVariants.preexisting} install
+            run install-unchanged-snapshot 1 ${lib.getExe cliVariants.unchanged} install
             run install-hanging 1 timeout 30 ${lib.getExe cliVariants.hanging} install
 
             run status-stale 1 ${lib.getExe cliVariants.stale} status
             jq -e '.snapshot.state == "stale"' "$TMPDIR/status-stale.stdout" >/dev/null
+            run status-legacy-launcher 1 ${lib.getExe cliVariants.legacy} status
+            jq -e '.snapshot.state == "fresh" and .collector.taskOwned and (.collector.taskCurrent | not)' "$TMPDIR/status-legacy-launcher.stdout" >/dev/null
             touch "$out"
           '';
     }

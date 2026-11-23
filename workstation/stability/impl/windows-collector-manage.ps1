@@ -27,11 +27,13 @@ $ErrorActionPreference = 'Stop'
 
 $collectorName = 'collector.ps1'
 $stagedCollectorName = 'collector.ps1.new'
+$launcherName = 'collector-launcher.exe'
+$stagedLauncherName = 'collector-launcher.new.exe'
 $installLockName = 'install.lock'
 $collectorLockName = 'collector.lock'
 $taskMarker = 'dotfiles-windows-resource-collector'
 $stopWaitSeconds = 15
-$ownedNames = @($collectorName, $stagedCollectorName, $installLockName, $collectorLockName, $SnapshotName, ($SnapshotName + '.tmp'))
+$ownedNames = @($collectorName, $stagedCollectorName, $launcherName, $stagedLauncherName, $installLockName, $collectorLockName, $SnapshotName, ($SnapshotName + '.tmp'))
 
 $userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
 $systemSid = New-Object Security.Principal.SecurityIdentifier([Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
@@ -168,9 +170,10 @@ function Get-TaskOwnershipProblem {
     if ((ConvertTo-SidValue -Identity ([string]$Task.Principal.UserId)) -ne $userSid.Value) { return 'it runs as another principal' }
     if (-not ([string]$Task.Description).StartsWith($taskMarker + ':')) { return 'its description does not carry the collector marker' }
     $actions = @($Task.Actions)
-    $executable = Join-Path $PSHOME 'powershell.exe'
-    if ($actions.Count -ne 1 -or -not [string]::Equals([string]$actions[0].Execute, $executable, [StringComparison]::OrdinalIgnoreCase)) {
-        return 'its action is not this PowerShell'
+    $legacyExecutable = Join-Path $PSHOME 'powershell.exe'
+    $launcherPath = Join-Path $SnapshotDirectory $launcherName
+    if ($actions.Count -ne 1 -or @($legacyExecutable, $launcherPath) -notcontains [string]$actions[0].Execute) {
+        return 'its action is not this collector launcher or PowerShell'
     }
     $arguments = [string]$actions[0].Arguments
     if (-not $arguments.Contains('-File "' + $CollectorPath + '"') -or -not $arguments.Contains('-Directory "' + $SnapshotDirectory + '"')) {
@@ -190,20 +193,30 @@ function Assert-TaskOwnedOrAbsent {
     }
 }
 
-function Test-OwnTaskRunning {
-    $task = Find-TaskByName
-    return ($null -ne $task -and [string]$task.State -eq 'Running')
-}
-
 function Stop-OwnTask {
-    if (-not (Test-OwnTaskRunning)) { return }
+    param([string]$SnapshotDirectory)
+
     Stop-ScheduledTask -TaskName $TaskName -TaskPath '\'
     $deadline = [DateTime]::UtcNow.AddSeconds($stopWaitSeconds)
-    while ([DateTime]::UtcNow -lt $deadline) {
-        if (-not (Test-OwnTaskRunning)) { return }
+    $collectorLockPath = Join-Path $SnapshotDirectory $collectorLockName
+    do {
+        $task = Find-TaskByName
+        if ($null -eq $task -or $task.State -ne 'Running') {
+            try {
+                $writer = [IO.File]::Open($collectorLockPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+                $writer.Dispose()
+                return
+            } catch [IO.FileNotFoundException] {
+                return
+            } catch [IO.DirectoryNotFoundException] {
+                return
+            } catch [IO.IOException] {
+                if (($_.Exception.HResult -band 0xFFFF) -notin @(32, 33)) { throw }
+            }
+        }
         Start-Sleep -Milliseconds 250
-    }
-    throw 'the collector task did not stop in time'
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw 'the collector task or its snapshot writer did not stop in time'
 }
 
 function Enter-InstallLock {
@@ -218,12 +231,105 @@ function Enter-InstallLock {
     }
 }
 
+function New-CollectorLauncher {
+    param([string]$Path)
+
+    Add-Type -OutputAssembly $Path -OutputType WindowsApplication -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime.InteropServices;
+
+internal static class CollectorLauncher
+{
+    private const int ExtendedLimitInformation = 9;
+    private const uint KillOnJobClose = 0x2000;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BasicJobLimits
+    {
+        public long PerProcessUserTimeLimit, PerJobUserTimeLimit;
+        public uint LimitFlags;
+        public UIntPtr MinimumWorkingSetSize, MaximumWorkingSetSize;
+        public uint ActiveProcessLimit;
+        public UIntPtr Affinity;
+        public uint PriorityClass, SchedulingClass;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ExtendedJobLimits
+    {
+        public BasicJobLimits Basic;
+        public ulong ReadOperations, WriteOperations, OtherOperations;
+        public ulong ReadBytes, WriteBytes, OtherBytes;
+        public UIntPtr ProcessMemoryLimit, JobMemoryLimit, PeakProcessMemoryUsed, PeakJobMemoryUsed;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateJobObject(IntPtr attributes, string name);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool SetInformationJobObject(IntPtr job, int kind, ref ExtendedJobLimits limits, int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GetCurrentProcess();
+
+    private static void BindCollectorToLauncherLifetime()
+    {
+        var limits = new ExtendedJobLimits();
+        limits.Basic.LimitFlags = KillOnJobClose;
+        var job = CreateJobObject(IntPtr.Zero, null);
+        if (job == IntPtr.Zero ||
+            !SetInformationJobObject(job, ExtendedLimitInformation, ref limits, Marshal.SizeOf(limits)) ||
+            !AssignProcessToJobObject(job, GetCurrentProcess()))
+            throw new Win32Exception();
+        // Closing the job before process exit would terminate the launcher before it returns the collector's exit code
+    }
+
+    private static int Main()
+    {
+        try
+        {
+            // Forward the original argument tail without decoding and re-quoting Windows paths
+            var commandLine = Environment.CommandLine;
+            int end = 0;
+            if (commandLine[0] == '"')
+                end = commandLine.IndexOf('"', 1) + 1;
+            while (end < commandLine.Length && !char.IsWhiteSpace(commandLine[end]))
+                end++;
+            var start = new ProcessStartInfo
+            {
+                FileName = Path.Combine(Environment.SystemDirectory, @"WindowsPowerShell\v1.0\powershell.exe"),
+                Arguments = commandLine.Substring(end),
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            };
+            BindCollectorToLauncherLifetime();
+            using (var collector = Process.Start(start))
+            {
+                collector.WaitForExit();
+                return collector.ExitCode;
+            }
+        }
+        catch (Exception error)
+        {
+            return error.HResult;
+        }
+    }
+}
+'@
+}
+
 function New-TaskDefinition {
     param([string]$CollectorPath, [string]$SnapshotDirectory)
 
     $escape = { param([string]$Text) [Security.SecurityElement]::Escape($Text) }
-    $executable = & $escape (Join-Path $PSHOME 'powershell.exe')
-    $arguments = & $escape ('-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -File "{0}" -Directory "{1}" -SnapshotName "{3}" -IntervalSeconds {2}' -f $CollectorPath, $SnapshotDirectory, $IntervalSeconds, $SnapshotName)
+    $executable = & $escape (Join-Path $SnapshotDirectory $launcherName)
+    $arguments = & $escape ('-NoLogo -NoProfile -NonInteractive -File "{0}" -Directory "{1}" -SnapshotName "{3}" -IntervalSeconds {2}' -f $CollectorPath, $SnapshotDirectory, $IntervalSeconds, $SnapshotName)
     $sid = $userSid.Value
     return @"
 <?xml version="1.0" encoding="UTF-16"?>
@@ -287,8 +393,11 @@ function Get-CollectorStatus {
     if ($installed -and $ExpectedSha256) { $current = (Get-Digest -Path $collectorPath) -eq $ExpectedSha256.ToLowerInvariant() }
     $task = Find-TaskByName
     $taskOwned = $false
+    $taskCurrent = $false
     if ($null -ne $task) {
         $taskOwned = $null -eq (Get-TaskOwnershipProblem -Task $task -CollectorPath $collectorPath -SnapshotDirectory $full)
+        $launcherPath = Join-Path $full $launcherName
+        $taskCurrent = $taskOwned -and [IO.File]::Exists($launcherPath) -and $task.Actions[0].Execute -eq $launcherPath
     }
     return [ordered]@{
         directoryTrusted   = $owned
@@ -296,6 +405,7 @@ function Get-CollectorStatus {
         collectorCurrent   = $current
         taskRegistered     = ($null -ne $task)
         taskOwned          = $taskOwned
+        taskCurrent        = $taskCurrent
         taskState          = $(if ($null -ne $task) { [string]$task.State } else { $null })
     }
 }
@@ -327,6 +437,8 @@ function Install-Collector {
     $full = Resolve-SnapshotDirectory
     $collectorPath = Join-Path $full $collectorName
     $stagedCollector = Join-Path $full $stagedCollectorName
+    $launcherPath = Join-Path $full $launcherName
+    $stagedLauncher = Join-Path $full $stagedLauncherName
     $definition = Invoke-Step 'build the scheduled task definition' {
         $text = New-TaskDefinition -CollectorPath $collectorPath -SnapshotDirectory $full
         [void][xml]$text
@@ -334,6 +446,7 @@ function Install-Collector {
     }
     Assert-TaskOwnedOrAbsent -CollectorPath $collectorPath -SnapshotDirectory $full
     $lock = $null
+    $resumeTask = $false
     try {
         if ([IO.Directory]::Exists($full)) {
             Assert-DirectoryOwned -Path $full
@@ -352,7 +465,24 @@ function Install-Collector {
             $lock = Invoke-Step 'take the installation lock' { Enter-InstallLock -Path $full }
         }
         Assert-TaskOwnedOrAbsent -CollectorPath $collectorPath -SnapshotDirectory $full
-        if (Test-OwnTaskRunning) { Invoke-Step 'stop the running collector task' -Applies { Stop-OwnTask } }
+        Invoke-Step 'build the windowless collector launcher' {
+            if ([IO.File]::Exists($stagedLauncher)) { [IO.File]::Delete($stagedLauncher) }
+            New-CollectorLauncher -Path $stagedLauncher
+        }
+        $existing = Find-TaskByName
+        if ($null -ne $existing) {
+            if ($existing.Settings.Enabled) {
+                Invoke-Step 'suspend the collector schedule' -Applies {
+                    Disable-ScheduledTask -InputObject $existing | Out-Null
+                }
+                $resumeTask = $true
+            }
+            Invoke-Step 'stop the running collector and drain its writer' -Applies { Stop-OwnTask -SnapshotDirectory $full }
+        }
+        $snapshot = Join-Path $full $SnapshotName
+        $previousWrite = if ([IO.File]::Exists($snapshot)) {
+            ([DateTimeOffset]([IO.File]::GetLastWriteTimeUtc($snapshot))).ToUnixTimeSeconds()
+        } else { 0 }
         if ([IO.File]::Exists($stagedCollector)) {
             Invoke-Step 'install collector.ps1' -Applies {
                 if ([IO.File]::Exists($collectorPath)) {
@@ -362,13 +492,31 @@ function Install-Collector {
                 }
             }
         }
+        Invoke-Step 'install the windowless collector launcher' -Applies {
+            if ([IO.File]::Exists($launcherPath)) {
+                [IO.File]::Replace($stagedLauncher, $launcherPath, [NullString]::Value)
+            } else {
+                [IO.File]::Move($stagedLauncher, $launcherPath)
+            }
+        }
         Invoke-Step 'register the scheduled task' -Applies {
             [void](Register-ScheduledTask -TaskName $TaskName -TaskPath '\' -Xml $definition -Force)
         }
+        $resumeTask = $false
         Invoke-Step 'start the scheduled task' -Applies { Start-ScheduledTask -TaskName $TaskName -TaskPath '\' }
+        return $previousWrite
     } finally {
         if ($null -ne $lock) {
+            if ($resumeTask) {
+                try {
+                    Enable-ScheduledTask -TaskName $TaskName -TaskPath '\' | Out-Null
+                    Start-ScheduledTask -TaskName $TaskName -TaskPath '\'
+                } catch {
+                    [Console]::Error.WriteLine('could not resume the previous collector task: ' + $_.Exception.Message)
+                }
+            }
             if ([IO.File]::Exists($stagedCollector)) { [IO.File]::Delete($stagedCollector) }
+            if ([IO.File]::Exists($stagedLauncher)) { [IO.File]::Delete($stagedLauncher) }
             $lock.Dispose()
         }
     }
@@ -388,14 +536,17 @@ function Uninstall-Collector {
             Assert-TaskOwnedOrAbsent -CollectorPath $collectorPath -SnapshotDirectory $full
         }
         if ($null -ne (Find-TaskByName)) {
+            Invoke-Step 'suspend the collector schedule' -Applies {
+                Disable-ScheduledTask -TaskName $TaskName -TaskPath '\' | Out-Null
+            }
             Invoke-Step 'stop and unregister the collector task' -Applies {
-                Stop-OwnTask
+                Stop-OwnTask -SnapshotDirectory $full
                 Unregister-ScheduledTask -TaskName $TaskName -TaskPath '\' -Confirm:$false
             }
         }
         if ($exists) {
             Invoke-Step 'remove the collector files' -Applies {
-                foreach ($name in @($collectorName, $stagedCollectorName, $collectorLockName, $SnapshotName, ($SnapshotName + '.tmp'))) {
+                foreach ($name in @($collectorName, $stagedCollectorName, $launcherName, $stagedLauncherName, $collectorLockName, $SnapshotName, ($SnapshotName + '.tmp'))) {
                     $file = Join-Path $full $name
                     if ([IO.File]::Exists($file)) { [IO.File]::Delete($file) }
                 }
@@ -415,10 +566,10 @@ function Uninstall-Collector {
 
 try {
     switch ($Action) {
-        'install' { Install-Collector }
+        'install' { [Console]::Out.WriteLine((Install-Collector)) }
         'uninstall' { Uninstall-Collector }
     }
-    if ($Action -ne 'uninstall') {
+    if ($Action -eq 'status') {
         [Console]::Out.WriteLine((Get-CollectorStatus | ConvertTo-Json -Compress))
     }
     exit 0

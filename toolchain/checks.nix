@@ -38,7 +38,9 @@
         # 評価が拒否されたことだけを観測する
         rejected = value: !(builtins.tryEval value).success;
         artifactSource = configuration: id: configuration.dotfiles.managedArtifacts.${id}.source;
-        expectedCommands = selection: builtins.toJSON (map (id: registry.${id}.command) selection);
+        expectedCommands =
+          { probe, selection, ... }:
+          builtins.toJSON (map (id: probe.dotfiles.toolchain.lspRegistry.${id}.command) selection);
 
         subsetSelection = [
           "nix"
@@ -66,6 +68,18 @@
             name = "subset";
             selection = subsetSelection;
             probe = subsetProbe;
+          }
+          {
+            name = "new-registration";
+            selection = [ "shell-feature" ];
+            probe =
+              (mkProbeSystem [
+                normalMachineModule
+                {
+                  dotfiles.toolchain.lspRegistry.shell-feature = registry.bash;
+                  dotfiles.toolchain.enabledLsp = lib.mkForce [ "shell-feature" ];
+                }
+              ]).config;
           }
         ];
       in
@@ -124,7 +138,7 @@
 
             ${lib.concatMapStrings (projection: ''
               project ${lib.escapeShellArg projection.name} \
-                ${lib.escapeShellArg (expectedCommands projection.selection)} \
+                ${lib.escapeShellArg (expectedCommands projection)} \
                 ${artifactSource projection.probe "agents/claude/managed-settings"} \
                 ${artifactSource projection.probe "agents/omp/lsp"} \
                 ${artifactSource projection.probe "agents/opencode/config"}

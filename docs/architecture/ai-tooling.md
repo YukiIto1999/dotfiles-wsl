@@ -627,6 +627,10 @@ modelは候補ごとに、将来の別sessionで同じ判断を迫られる場�
 
 language serverの登録とPATHへの配備は`toolchain/`が所有し、hostは`dotfiles.toolchain.enabledLsp`で登録済みIDを重複なく選ぶ。空集合と部分集合を選べ、未知IDと重複は評価で拒否する。
 client形式への写像は各[`agents/clients/`](../../agents/clients)のadapterが持つ。Claude Codeはplugin、OMPは`lsp.json`、OpenCodeはconfigの`lsp` blockへ、採用したserverだけを投影し、非採用または未対応clientには配らない。
+新しいserverはregistryに登録してhostで選べば、3つのclientに届く。
+OMPでは既存serverの登録名を保ち、新規登録には`dotfiles-<登録ID>`を使う。
+起動設定の項目を増やしたときは、その項目を受け取らないclientの設定生成が評価エラーになる。
+packageは配備用なので、clientに渡す起動設定には含めない。
 OMPのidle timeoutは有効にしない。調査した[18.20.0の`isIdleClient`](https://github.com/can1357/oh-my-pi/blob/v18.20.0/packages/coding-agent/src/lsp/client.ts#L175-L193)は未完了requestと最終activityだけを見ており、indexingのprogressやworkspace loadを終了条件へ含めない。時間設定だけでは作業中のserverを安全に回収できないため、上流の状態判定を直したreleaseが既存の供給経路へ届いてから再評価する。配備済みbinaryへの直接patchや、設定を分散する別fileは加えない。
 
 managed file は artifact owner が observation を登録し、doctor が current source との不一致を検査する。

@@ -22,18 +22,21 @@ let
   userSettingsSeed = ./assets/settings.json;
 
   # settings.json に lspServers は無く、登録経路は plugin だけである
+  encodeLsp =
+    {
+      command,
+      args,
+      extensions,
+      initializationOptions,
+    }:
+    {
+      inherit command;
+      extensionToLanguage = extensions;
+    }
+    // lib.optionalAttrs (args != [ ]) { inherit args; }
+    // lib.optionalAttrs (initializationOptions != { }) { inherit initializationOptions; };
   lspJson = (pkgs.formats.json { }).generate "claude-lsp.json" (
-    lib.mapAttrs (
-      _: server:
-      {
-        inherit (server) command;
-        extensionToLanguage = server.extensions;
-      }
-      // lib.optionalAttrs (server.args != [ ]) { inherit (server) args; }
-      // lib.optionalAttrs (server.initializationOptions != { }) {
-        inherit (server) initializationOptions;
-      }
-    ) cfg.toolchain.lsp
+    lib.mapAttrs (_: server: encodeLsp (removeAttrs server [ "package" ])) cfg.toolchain.lsp
   );
 
   # directory source の marketplace は git を持たないので version を明示する。

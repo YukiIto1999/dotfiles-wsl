@@ -404,15 +404,19 @@
         );
         # 生成側とは独立に期待値を持つ。OMP は実装が同一の server だけ上流名を使い、OpenCode は
         # built-in id との衝突を避けるため所有者を前置する
-        ompLspNames = {
-          bash = "bashls";
-          csharp = "roslyn-ls";
-          java = "jdtls";
-          nix = "nixd";
-          python = "ty";
-          rust = "rust-analyzer";
-          typescript = "tsgo";
-        };
+        ompLspNames = lib.mapAttrs (
+          name: _:
+          {
+            bash = "bashls";
+            csharp = "roslyn-ls";
+            java = "jdtls";
+            nix = "nixd";
+            python = "ty";
+            rust = "rust-analyzer";
+            typescript = "tsgo";
+          }
+          .${name} or "dotfiles-${name}"
+        ) roster;
         opencodeLspName = name: "dotfiles-${name}";
         selectionCases = {
           omp-only = {

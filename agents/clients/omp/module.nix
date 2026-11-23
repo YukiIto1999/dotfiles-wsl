@@ -9,7 +9,7 @@ let
   cfg = config.dotfiles;
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   # tsgo と roslyn-ls の別実装向け設定継承を避けるため上流名の流用は不可
-  lspNames = {
+  compatibleLspNames = {
     bash = "bashls";
     csharp = "roslyn-ls";
     java = "jdtls";
@@ -129,18 +129,24 @@ let
       };
   };
 
+  encodeLsp =
+    {
+      command,
+      args,
+      extensions,
+      initializationOptions,
+    }:
+    {
+      inherit command args;
+      fileTypes = builtins.attrNames extensions;
+      rootMarkers = [ "." ];
+    }
+    // lib.optionalAttrs (initializationOptions != { }) { initOptions = initializationOptions; };
   lspConfig = (pkgs.formats.json { }).generate "omp-lsp.json" (
     lib.mapAttrs' (
       name: server:
-      lib.nameValuePair lspNames.${name} (
-        {
-          inherit (server) command args;
-          fileTypes = builtins.attrNames server.extensions;
-          rootMarkers = [ "." ];
-        }
-        // lib.optionalAttrs (server.initializationOptions != { }) {
-          initOptions = server.initializationOptions;
-        }
+      lib.nameValuePair (compatibleLspNames.${name} or "dotfiles-${name}") (
+        encodeLsp (removeAttrs server [ "package" ])
       )
     ) cfg.toolchain.lsp
   );

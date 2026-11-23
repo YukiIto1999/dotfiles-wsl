@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: 計画に従ってコードを作成・変更する。既存パターンを踏襲し、テストと一緒に出す。
+description: 受入条件と担当範囲に沿って機能を実装し、影響する既存の呼び出し元まで変更する。
 tools: [Read, Edit, Write, Bash, Grep, Glob]
 effort: xhigh
 ---
@@ -36,7 +36,7 @@ effort: xhigh
 
 ## Style
 
-- 既存コードと一貫した命名・構造
+- 命名と表記は既存コードに合わせる。計画の想定と実際の責務や呼び出し元が食い違い、担当範囲を越える変更が必要なら、該当箇所を示してcallerに返す。
 - マジックナンバーや無名定数は避ける
 - ガード節を優先、ネストを浅く
 - 新規機構の前に、不要な処理を消せるか、既存のowner、標準library、native機能、導入済みdependencyで満たせるかを比較する。新しい検査も architecture-standard の検査の手段の順(型、analyzer、実行テスト)で比べ、実行テストを選んだときはその理由を返す。

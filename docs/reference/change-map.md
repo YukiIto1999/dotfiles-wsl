@@ -56,7 +56,7 @@ Skillはエージェントがその契約を適用する手順を、dotfilesは�
 | observationの実行順、timeout、出力集約を変える | [`health/module.nix`](../../health/module.nix)、[`health/impl/doctor.sh`](../../health/impl/doctor.sh) | `doctor-coverage`、`doctor-runtime` |
 | 生成artifactの配備先、owner、mode、drift観測を変える | [`managed-artifacts/module.nix`](../../managed-artifacts/module.nix)の`dotfiles.managedArtifacts`と登録owner | `managed-artifact-*`、`dotfiles-doctor` |
 | 利用者向けcommandを追加する | owner moduleから[`platform/cli/impl/mk-command.nix`](../../platform/cli/impl/mk-command.nix)を使い`dotfiles.platform.cli.commands`へ登録する | command固有check、`dotfiles-rebuild` |
-| 起動中のセッションで使うGitHub書込の範囲・identity照合を変える | [`capabilities/github-resources/github/write/`](../../capabilities/github-resources/github/write/)と[`github-operations`](../../skills/github-operations/skill/SKILL.md) | `github-write-contract`、`github-write-wiring`、`github-account-tool-surface` |
+| GitHub MCPの公開操作やアカウントの選択方法を変える | [`capabilities/github-resources/github/mcp/`](../../capabilities/github-resources/github/mcp/)と[`github-operations`](../../skills/github-operations/skill/SKILL.md) | `github-account-tool-surface`、選んだアカウントからの操作と結果の確認 |
 
 ## Agent client
 

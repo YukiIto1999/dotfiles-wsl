@@ -118,14 +118,14 @@ store上の写し、記憶、過去のrevisionで補わない。
 
 ### MCP
 
-通常の共有Gatewayは、専門MCPを使うための再起動を要求しない。対応するSkillから公開されたtoolを選ぶ。GitHubの通常の書込と専用stdioの使い分けは`github-operations`が持つ。
+通常の共有Gatewayは、専門MCPを使うための再起動を要求しない。
 container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
-agentはSkillを入口にし、下表でそのSkillに対応づけられたCapabilityだけを使う。
+Skillは、依頼に合う道具と結果の確かめ方を選ぶ。
 browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とする。
 Web・Windows GUI・CLI/TUIの実操作と受入、明示された探索監査は`surface-operation`を使う。観測証拠からのUI設計評価・再設計は`ui-design`、実行時の観測機器を選んで証拠を採る仕事は`runtime-observation`が担当する。
 native C#/Rustを含む一般診断は`diagnosing-bugs`が所有し、browser toolを使わないbranchにbrowser Capabilityを要求しない。
 @heapDiagnosticsPolicy@
-GitHub操作は`github-operations`、Webとrepository調査は対応するSkillなど、sessionが提供するCapability入口からtoolを呼ぶ。
+GitHub操作では`github-operations`から利用可能なGitHub MCP、`gh`、Gitへ進む。Webとrepositoryの調査は対応するSkillから利用可能な検索・取得へ進む。
 upstreamがCLIや直接接続を例示していても、provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。
 
 入口Skillを持たないCapabilityは、他のCapabilityの依存である。

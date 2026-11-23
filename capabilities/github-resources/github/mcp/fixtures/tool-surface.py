@@ -1,4 +1,4 @@
-"""配備する GitHub MCP の起動 script から実 server を network なしで起動し、公開 tool を数える。
+"""配備する GitHub MCP が、従来の標準 toolset の全 schema と Actions の読取を公開することを確かめる。
 
 script が読む token file の代わりに合成の token を渡し、exec 行の argv だけをそのまま使う。
 """
@@ -22,10 +22,14 @@ def argv_of(script):
     return shlex.split(lines[0][len("exec ") : -len(' "$@"')])
 
 
-def tools_of(script):
-    home = tempfile.mkdtemp()
+def tools_of(argv):
+    with tempfile.TemporaryDirectory() as home:
+        return discover_tools(argv, home)
+
+
+def discover_tools(argv, home):
     process = subprocess.Popen(
-        argv_of(script),
+        argv,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -64,25 +68,29 @@ def tools_of(script):
         process.kill()
         process.wait()
     if tools is None:
-        raise SystemExit(f"{script}: no tools/list reply")
-    return {tool["name"]: tool.get("annotations", {}).get("readOnlyHint") is True for tool in tools}
+        raise SystemExit(f"{argv}: no tools/list reply")
+    return {tool["name"]: tool for tool in tools}
 
 
-for server in spec["servers"]:
-    tools = tools_of(server["script"])
-    if not tools:
-        failures.append(f"{server['name']}: no tools")
-    if server["readOnly"]:
-        writes = sorted(name for name, read_only in tools.items() if not read_only)
-        if writes:
-            failures.append(f"{server['name']}: shared read target exposes writes {writes}")
-    else:
-        owned = sorted(set(spec["commandOwned"]) & set(tools))
-        if owned:
-            failures.append(f"{server['name']}: writer still exposes command-owned tools {owned}")
-        missing = sorted(set(spec["retained"]) - set(tools))
-        if missing:
-            failures.append(f"{server['name']}: writer lost retained tools {missing}")
+actions = {"actions_get", "actions_list", "get_job_logs"}
+baseline = [
+    "stdio",
+    "--toolsets",
+    "context,issues,pull_requests,repos,users",
+]
+for server in spec:
+    command = argv_of(server["script"])
+    native = tools_of([command[0], *baseline])
+    exposed = tools_of(command)
+    differences = sorted(name for name, schema in native.items() if exposed.get(name) != schema)
+    if differences:
+        failures.append(f"{server['name']}: baseline schemas missing or changed: {differences}")
+    extra = set(exposed) - set(native)
+    if extra != actions:
+        failures.append(f"{server['name']}: added operations {sorted(extra)}, expected {sorted(actions)}")
+    for name in extra:
+        if exposed[name].get("annotations", {}).get("readOnlyHint") is not True:
+            failures.append(f"{server['name']}: unexpected write in added operation {name}")
 
 if failures:
     print("\n".join(failures), file=sys.stderr)

@@ -93,6 +93,7 @@
             allowedEmpty = [
               "dotfiles.health.observations"
               "dotfiles.platform.mcp.gateway.optionalUrls"
+              "dotfiles.platform.mcp.privateServers"
             ];
             unexpectedEmpty = lib.subtractLists allowedEmpty empty;
           in

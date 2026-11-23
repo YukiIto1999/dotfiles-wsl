@@ -390,9 +390,7 @@ clientごとに公開されるtoolは次のとおりである。使えるかは�
 GitHubとContext7の実行fileは、rootの[`nixpkgs-unstable` input](../../flake.nix)で固定したleaf packageから受け取る。
 hostとHome Managerのpackage setはstableのまま変えず、providerごとのasset取得やnpm lockは持たない。
 各providerの`serverBuilder`が実行時の資格情報を読む。
-共有するGitHub adapterはサーバーの読取専用モードで動く。通常の書込は現在のセッションからアカウントとloginを指定して`dotfiles-github-write`を一度実行する。merge・削除・履歴変更とcommandが持たない操作だけは、選んだアカウントに限定したstdioへ渡す。
-Actionsの実行・job・ログの調査は共有の読取専用adapterにだけ公開し、書込用stdioにはActionsを加えない。
-PRの調査では、対象commitのSHAを確認してから対応するrunとjobの証拠を取得する。
+共有経路のGitHub adapterはアカウントごとに公式serverの読み書きを供給する。Actionsはworkflow run・job・ログの読取だけを同じadapterに加える。利用する操作の選択と結果の照合は[GitHub操作の手順](../../skills/github-operations/skill/SKILL.md)が担う。
 このpackage供給から同梱Skillの採用は導かず、Skillの採用と差替は既存のregistryが所有する。
 
 `stdio`の`service` lifecycleは一つのstdio serverをfront serviceの寿命で共有する。`session` lifecycleはagentgatewayがdownstream sessionごとにstdio serverを生成する。`streamable-http`はproviderのforeground serverをfront serviceとして起動する。backendを持つtargetは`waitUnits`をfrontの`requires`と`after`へ設定する。
@@ -404,8 +402,8 @@ PRの調査では、対象commitのSHAを確認してから対応するrunとjob
 公開MCPの定義を更新する場合は、固定URL用のprovider executableを使い、[`discovery-seed.py`](../../platform/mcp/package/discovery-seed.py)の`capture`で新しい匿名の応答を取得する。`check --public`で利用者のpathを含まないことを確認し、[`assets/`](../../capabilities/library-documentation/remote/mcp/assets/)の対象だけを置き換える。
 
 一つの[Gateway](../../platform/mcp/gateway/module.nix)が通常経路`/mcp`と、追加を明示したtarget用の`/mcp/<target>`を公開する。doctorはGitHubとHindsightのprobeだけを含む`/probe/mcp`を使う。専門MCPを通常セッションへ公開しても、doctorからそのbackendは起動しない。
-追加経路は[セッションの起動入口](../reference/tooling.md#通常の利用と書込用セッション)から対応clientへ一時的に渡し、永続設定を更新しない。
-経路を分けるだけでは認可にならないため、書込権限を持つstdioを共有HTTPに登録しない。
+追加経路は[セッションの起動入口](../reference/tooling.md#通常の利用とセッションへの追加)から対応clientへ一時的に渡し、永続設定を更新しない。
+経路の分離は認可ではない。共有経路の[信頼境界](security.md#agentgateway)を変えない。
 gatewayのrouteは`backendRequestTimeout`を60秒にする。
 指定が無いとagentgatewayはupstreamの応答headerを10秒で打ち切り、待機を含むbrowser操作が`upstream call timeout`で失敗する。
 打ち切られた呼出しもbrowserの中では処理が続くため、失敗を見たagentが同じ操作を重ねて実行する。

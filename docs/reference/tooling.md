@@ -236,9 +236,9 @@ credential、container、host processの境界は[セキュリティ設計](../a
 
 構成を変更するときは[変更箇所](change-map.md)で正本を特定し、適用後に`dotfiles-doctor`で宣言と実状態の収束を確認する。
 
-### 通常の利用と書込用セッション
+### 通常の利用とセッションへの追加
 
 Playwright、Chrome DevTools、MemLab、Context7、Microsoft Learn、DeepWiki、Binlog MCPは通常の`/mcp`に含まれる。操作・診断・資料調査を使い分ける入口は各Skillであり、専用の再起動は必要ない。
 
-通常のGitHub起票、PR作成、更新、コメント、レビューは現在のセッションで`dotfiles-github-write`を使う。[GitHub操作の手順](../../skills/github-operations/skill/SKILL.md)に従い、事前読取で確定したアカウントIDと実行loginを対応させる。
-共有HTTPは読取専用のまま。merge・削除・履歴変更と、共通commandが持たない操作だけは、利用者の端末から`dotfiles-tool-session list`で対象を選び、OMPまたはCodexで`dotfiles-tool-session <client> github-write-<account> --`を起動する。そのうち不可逆な変更には実行直前の確認が必要である。
+GitHubは現在のセッションからアカウント別の公式MCP、`gh`、Gitを使う。[GitHub操作の手順](../../skills/github-operations/skill/SKILL.md)で実行主体と対象を確かめる。
+通常経路に含めないMCPを宣言したhostでは、`dotfiles-tool-session list`で対象と対応clientを確かめ、必要なセッションだけに追加できる。

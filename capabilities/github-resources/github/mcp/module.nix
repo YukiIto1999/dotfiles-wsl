@@ -16,25 +16,13 @@ let
     map (account: "github-${account}") cfg.accounts
   );
   mkMcpServer = pkgs.callPackage ../../../../platform/mcp/package/mk-server.nix { };
-  accountServer =
-    account: readOnly:
-    lib.getExe (
-      pkgs.callPackage ./package.nix {
-        inherit readOnly;
-        toolsets = toolsets ++ lib.optional readOnly "actions";
-        excludeTools = lib.optionals (!readOnly) commandOwnedTools;
-        githubMcpServer =
-          self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-mcp-server;
-        serverBuilder = mkMcpServer;
-        tokenFile = config.sops.secrets."accounts/${account}/token".path;
-      }
-    );
+  githubMcpServer =
+    self.inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-mcp-server;
 
-  # 起動中のセッションの命令だけで全入力を扱える tool は書込用セッションに重ねない
-  commandOwnedTools = [
-    "add_issue_comment"
-    "create_branch"
-    "update_issue_comment"
+  actionsReadTools = [
+    "actions_get"
+    "actions_list"
+    "get_job_logs"
   ];
 
   toolsets = [
@@ -49,7 +37,14 @@ let
     index: account:
     lib.nameValuePair "github-${account}" {
       provider = "github";
-      executable = accountServer account true;
+      executable = lib.getExe (
+        pkgs.callPackage ./package.nix {
+          inherit githubMcpServer toolsets;
+          tools = actionsReadTools;
+          serverBuilder = mkMcpServer;
+          tokenFile = config.sops.secrets."accounts/${account}/token".path;
+        }
+      );
       exposure = "default";
       serverLifecycle = "service";
       # 環境変数の PAT と両立しないリクエスト単位 OAuth の HTTP モード不採用
@@ -65,11 +60,6 @@ in
 {
   config = lib.mkIf enabled {
     dotfiles.platform.mcp.targets = lib.listToAttrs (lib.imap0 mkTarget cfg.accounts);
-    dotfiles.platform.mcp.privateServers = lib.listToAttrs (
-      map (
-        account: lib.nameValuePair "github-write-${account}" { executable = accountServer account false; }
-      ) cfg.accounts
-    );
 
     # 起動後のトークン再読込に対応しない github-mcp-server の制約
     sops.secrets = lib.listToAttrs (

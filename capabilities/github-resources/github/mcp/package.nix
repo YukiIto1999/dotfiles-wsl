@@ -4,8 +4,7 @@
   tokenFile,
   toolsets,
   serverBuilder,
-  readOnly,
-  excludeTools ? [ ],
+  tools,
 }:
 
 serverBuilder {
@@ -19,10 +18,9 @@ serverBuilder {
       "--toolsets"
       (lib.concatStringsSep "," toolsets)
     ]
-    ++ lib.optional readOnly "--read-only"
-    ++ lib.optionals (excludeTools != [ ]) [
-      "--exclude-tools"
-      (lib.concatStringsSep "," excludeTools)
+    ++ lib.optionals (tools != [ ]) [
+      "--tools"
+      (lib.concatStringsSep "," tools)
     ]
   );
 }

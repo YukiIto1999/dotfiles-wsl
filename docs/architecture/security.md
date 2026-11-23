@@ -55,10 +55,7 @@ loopbackのgatewayとfrontへ到達できるprocessは、公開MCP toolを呼べ
 Windows側からの到達性はWSLのnetwork modeと転送経路にも依存し、doctorのservice検査だけでは外部到達性を証明しない。
 通常経路と専門経路の分割は一覧と接続範囲を制限するが、呼出し元の識別や操作の認可にはならない。
 gatewayとfrontは設定ユーザーのserviceとして動き、読めるcheckout、home、runtime secretと、実行できるcommandがtool callの権限上限になる。
-GitHubの共有経路とfrontは公式serverの読取専用モードを使う。
-書込権限を持つ公式stdioは、明示されたアカウントのセッションにだけ渡し、共有HTTPには登録しない。
-通常のGitHub書込は`dotfiles-github-write`が指定のアカウントだけを使い、実loginを照合してから、許可された一つの操作を公式`gh`へ渡す。共有HTTPの読取権限はこれで変わらない。
-この分離は、資格情報を読める同じOSユーザーの任意プロセスを隔離するものではない。
+共有経路のGitHub操作は、targetが指す登録済みアカウントのPAT権限で実行される。GitHub frontへ到達できるローカルprocessも、その権限で公開操作を呼べる。アカウントごとの区別は実行主体の選択であり、呼出し元ごとの認可ではない。
 
 PlaywrightのMCP adapterは[`package.nix`](../../capabilities/browser-automation/playwright/mcp/package.nix)で`--isolated`と`--no-sandbox`を同時に指定する。sessionごとのbrowser状態とprocess寿命は分けるが、Chromiumのsecurity sandboxは有効にしない。この境界はclientのnative browserやOrcaのbrowserとは別である。
 

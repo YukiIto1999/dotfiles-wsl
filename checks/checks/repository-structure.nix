@@ -549,6 +549,7 @@ in
                   "privateServers"
                 ];
                 owners = [ "capabilities" ];
+                allowEmptyDefault = true;
               }
               {
                 path = [
@@ -670,6 +671,7 @@ in
                         [
                           {
                             inherit here;
+                            declarations = option.declarations or [ ];
                             definitions = repositoryDefinitions (option.definitionsWithLocations or [ ]);
                           }
                         ]
@@ -693,7 +695,13 @@ in
                     if registryRule == null then
                       expectedOwner != null && rootOf definition.file == expectedOwner
                     else
-                      registryRule.owners == null || builtins.elem (rootOf definition.file) registryRule.owners;
+                      registryRule.owners == null
+                      || builtins.elem (rootOf definition.file) registryRule.owners
+                      || (
+                        (registryRule.allowEmptyDefault or false)
+                        && builtins.elem definition.file entry.declarations
+                        && definition.value == { }
+                      );
                 in
                 builtins.length entry.definitions > 0 && !lib.all definitionAllowed entry.definitions
               ) (definitionLeavesFor options);
@@ -779,6 +787,18 @@ in
               optionType = lib.types.attrsOf lib.types.str;
               definitionValue.fixture = "fixture";
             };
+            nonemptyPrivateRegistryFromPlatform = definitionFixture {
+              declarationFile = "platform/mcp/module.nix";
+              definitionFile = "platform/mcp/module.nix";
+              optionPath = [
+                "dotfiles"
+                "platform"
+                "mcp"
+                "privateServers"
+              ];
+              optionType = lib.types.attrsOf lib.types.str;
+              definitionValue.fixture = "fixture";
+            };
             declarationViolations = map describe (declarationViolationsFor repositoryOptions);
             definitionViolations = lib.concatLists (
               lib.mapAttrsToList (
@@ -796,6 +816,7 @@ in
           assert definitionViolationsFor correctDefinitionFixture == [ ];
           assert definitionViolationsFor wrongDefinitionFixture != [ ];
           assert definitionViolationsFor sharedRegistryDefinitionFixture == [ ];
+          assert definitionViolationsFor nonemptyPrivateRegistryFromPlatform != [ ];
           assert lib.assertMsg (declarationViolations == [ ]) (
             "option declaration namespace: " + lib.concatStringsSep " " declarationViolations
           );

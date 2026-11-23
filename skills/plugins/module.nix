@@ -42,10 +42,7 @@ let
         };
         standard-update = {
           requiresCapabilities = [ ];
-          requiresSkills = [
-            "standard-audit"
-            "web-research"
-          ];
+          requiresSkills = [ "standard-audit" ];
         };
         property-testing = {
           requiresCapabilities = [ ];

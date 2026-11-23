@@ -127,8 +127,10 @@ rebuildとagent runtimeは、このsourceに専用の更新、gate、checkerを�
 
 architecture-standardの運用Skillは、同repositoryの`skills/<id>/`を正本とし、`standard-update`と`standard-audit`も既存の採用表から配備する。
 clientごとの`.claude/skills/`などはadapterの投影先であり、正本の所有先ではない。
-`standard-update`は最後のscoped auditに`standard-audit`を、外部Web調査に`web-research`を使うため、この二つをSkill依存として宣言する。
-同梱のClaude Code専用evaluatorは任意のconsumerであり、通常のSkill利用のCapability要件にはしない。
+`standard-update`は改訂後の監査に`standard-audit`を使う。
+外部事実が採否を分ける場合だけ使う`web-research`を、ローカルの本文で完結する改訂の配備前提にしない。
+改訂判断の評価では、上流が所有する試問を使い、新しい実行者への入力と採点を`skill-design`で分ける。
+配備検査はこの実行評価を代替しない。
 別repositoryから標準を変えるときは、`environment-design`から作業checkoutの`skills/standard-update/SKILL.md`へ渡し、配備済みsourceを編集しない。
 
 Mattの`code-review`は`setup-matt-pocock-skills`を使う。共通実装の順序は`standard-apply`から標準へ進み、外部TDDを併設しない。

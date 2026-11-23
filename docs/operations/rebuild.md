@@ -16,6 +16,21 @@ dotfiles-rebuild --plan
 dotfiles-rebuild --candidate ID
 ```
 
+配備の結果を待っているとき、候補準備はバックグラウンドの全量検査ではない。
+`dotfiles-capped-run` を採用した host では、上の一行目だけを、例えば次で実行できる。
+
+```sh
+dotfiles-capped-run --cpu-percent 100 --wait-seconds 60 --run-seconds 1200 -- dotfiles-rebuild --plan
+```
+
+深い検証の終了ではなく、要求した CPU とメモリの空きを待つ。
+CPU 上限の対象はこの走行の子孫であり、別サービスの Nix daemon ではない（[資源予約](doctor.md#cpu-の上限付きで新しい走行を始める)）。
+75 なら候補準備は起動していない。
+124 は走行中の時間切れで、候補の公開と行き違うことがある。
+再実行の前に出力の `candidate:` を `${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/rebuild/candidates/ID/receipt` の `base_head`、`toplevel` と照合する。
+ID や差分を確認できなければ適用しない。
+適用（引数なしまたは `--candidate ID`）と rollback は、activation を途中で殺さないよう、時間切れで子を取り消す wrapper に入れず実行する。
+
 `--plan`は次の順に行う。
 
 1. `flake.lock`の標準の実行packageを上流と照合し、revisionが一致しないか照合できないときは終了status 2で止まる。

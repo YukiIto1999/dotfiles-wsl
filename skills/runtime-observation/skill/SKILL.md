@@ -15,12 +15,12 @@ description: Captures runtime evidence that locates where a local process spends
 2. 対象を、自分が起動してよい command か、所有者が採取を許可した PID のどちらかに固定する。
    版、build 構成、環境変数、入力、実行 wrapper を記録する。
    `dotfiles-workload-run` は CPU weight を idle に、`dotfiles-capped-run` は CPU 上限を付けるため、wrapper の違う走行の時間を比べない。
-3. 問いが別の担当に属する場合は、ここで採らずに渡す。
+3. 問いが別の担当に属する場合は、下の表の扱いに従う。
 
 | 問い | 担当 |
 |---|---|
 | 壊れた挙動を再現して直す一連の作業 | `diagnosing-bugs`。そこから必要な採取だけを受け、結果を返して戻す |
-| 変更前後の速さの比較が妥当か、改善を何 % と言えるか | `benchmark-checklist`。こちらは条件を固定した計測値を渡す |
+| 変更前後の実測値または差 | 「前後を比べて測る」。比較の方法や結論の監査に `benchmark-checklist` が明示された場合は、計測条件と結果を渡す |
 | .NET の関数単位の micro benchmark | `microbenchmarking` |
 | MSBuild の失敗や build の遅さ | `msbuild` |
 | browser の page の読込み、操作の遅さ、layout | `browser-performance` |
@@ -46,8 +46,8 @@ JIT した関数の名前を `perf` で解く必要があれば、自分が起�
 
 ## 採取の範囲を守る
 
-- `strace`、`perf`、`gdb` は自分が起動した子だけに使う。
-  この環境は既存 process への attach 用の `gcore`、`gstack`、`gdbserver` を配らず、kernel も子孫以外の ptrace を拒む。
+- `strace`、`perf`、`gdb` は自分で起動する方法を既定にする。すでに動いている対象を採る必要があり許可がある場合は、道具が公開する PID 指定を使う。`gdb` の attach は対象を停止させるため、その停止も許可された場合だけ使う。
+  この host で `ptrace_scope=1` のときは、対象が tracer を許可していない限り、子孫以外への ptrace は通常拒否される。`perf` は採取する event と kernel の制約を確認する。
 - .NET の 3 CLI は、採取を許可された local process に限り、対象と同じ user と `TMPDIR` で PID を指定して接続する。
   長い `TMPDIR` で診断 socket に接続できない場合は、再起動してよい検証用の process に限り、`mktemp -d "$XDG_RUNTIME_DIR/dn.XXXXXX"` で作った短い私有 directory をその起動 command と診断 command の `TMPDIR` にだけ渡す。
   既存 process、session 全体の環境変数、project の設定は変えない。
@@ -75,10 +75,18 @@ Node.js では OpenTelemetry SDK を project が既に組み込んでいるこ�
 4. `aspire-dashboard otel traces --format Json --limit 50` で候補を探し、`--trace-id ID` で span の木を、`aspire-dashboard otel logs --format Json` で同じ時間帯の log を読む。
    失敗だけを見る場合は `--has-error true` を付ける。
    browser の token や API key を引数、file、出力へ書かない。
+   metric は `aspire otel` では読めない。必要なら Dashboard UI の `Metrics` を使う。
 5. 自分が起動した Dashboard だけを `aspire-dashboard stop` で止める。
    停止すると一時保存された telemetry は削除されるため、必要な trace と log を先に私有 directory へ保存する。
 
 開発中に再現できる問題だけを対象にし、起動前に起きた障害の遡及調査や本番監視に使わない。
+
+## 前後を比べて測る
+
+変更の前後や二つの案の速さを比べる依頼では、変更そのもの以外の実行条件を揃える。同じ wrapper、build 構成、依存の版、入力と data、環境変数で同じ回数ずつ走らせる。依存の変更を測るなら、それ以外を揃える。
+起動の順が片側に偏らないよう両側を交互に走らせ、各回の所要時間、終了 status、出力または生成物の確認結果を保存する。
+失敗した回と、対象の処理が実行されたと確かめられない回は、所要時間の集計に混ぜず件数として返す。
+両側の回数、中央値と範囲、失敗の件数を並べ、求められた差は何を割った値かを明示する。観測した範囲を越える性能保証とは区別する。
 
 ## 解釈して返す
 

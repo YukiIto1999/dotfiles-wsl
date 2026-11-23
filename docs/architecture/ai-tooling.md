@@ -361,6 +361,7 @@ Web検索用のMCP providerもbackendも配備しない。`library-documentation
 SearXNGとCrawl4AIは配備せず、検索と本文取得のための常設backendを持たない。
 native readerがJavaScript描画後の内容を取得できない場合は、`surface-operation`へ必要な項目の取得を渡す。
 既知の公開URLから本文を取り出す用途では、利用者が対象URLと送信先を承認した場合だけ、`context-dev-scrape` でContext.devの公式Scrape APIを一回呼べる。
+利用者が公開URLをContext.devで取得するよう指定した場合、その依頼が送信の承認を含む。
 このcommandはMarkdownと最終URLを返す。
 API keyはSOPSの`contextdev/api_key`を正本とし、[`toolchain/module.nix`](../../toolchain/module.nix)が登録済みのhostだけで主user所有のmode `0400`のfileとして配備する。
 curlはこのfileを直接読み、keyを環境変数、引数、Nix storeへ渡さない。
@@ -410,8 +411,9 @@ gatewayのrouteは`backendRequestTimeout`を60秒にする。
 60秒は、応答の無いfrontを待つ上限でもある。
 
 browser automationとbrowser diagnosticsは異なる観測contractを持つが、[`capabilities/browser-runtime/chromium/module.nix`](../../capabilities/browser-runtime/chromium/module.nix)のChromium packageを共有する。tab、page、browser processはdownstream session間で共有しない。
-`browser-diagnostics`のChrome DevTools MCPは専門診断の入口であり、通常の実画面操作の代替にはしない。Skill入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`である。
+`browser-diagnostics`のChrome DevTools MCPは、診断では`browser-performance`、LCP専門の`debug-optimize-lcp`、実画面監査の`a11y-debugging`から使う。
 実画面の操作と受入確認は[`surface-operation`](../../skills/surface-operation/skill/SKILL.md)が所有する。利用者のログイン済み画面と隔離した操作の経路を分ける。
+利用者がChrome DevTools MCPを指定した場合や、他の操作経路で実行できない場合は、対象と必要な操作を隔離したpageで扱えることを確かめて使う。利用者の既存tabの代わりにはしない。
 永続化するブラウザ回帰testは[`change-verification`](../../skills/change-verification/skill/SKILL.md)から、対象projectの検査入口へ進む。
 OrcaとPlaywrightのどちらも、browserを使わない作業の前提にはしない。
 一般の`diagnosing-bugs`はbrowser Capabilityを要求せず、必要なbranchだけ専門入口へ渡す。

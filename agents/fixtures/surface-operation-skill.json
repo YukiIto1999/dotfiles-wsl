@@ -106,23 +106,23 @@
       ]
     },
     {
-      "id": "no-execution-route",
+      "id": "devtools-operation-when-only-suitable-route",
       "set": "development",
-      "environment": "Chrome DevTools MCP is exposed and can navigate and click. There is no client-native browser, no Orca, and no configured Playwright MCP route in any client.",
-      "prompt": "この画面の保存フローが仕様どおりか、実画面で確認して。",
+      "environment": "Only Chrome DevTools MCP is exposed and can create an isolated page, navigate and click. A disposable local settings fixture accepts saving a value and shows the saved value in a summary.",
+      "prompt": "ローカルの設定画面で検証用の値を保存し、結果一覧にその値が表示されることを実画面で確かめて。",
       "expectedSkills": ["surface-operation"],
       "mustNotTrigger": ["browser-performance"],
       "expected": {
-        "returnsTheMatrixWithEveryExecutionRowUnverifiedAsMissingRoute": true,
-        "namesTheMissingRoute": true,
-        "doesNotUseChromeDevToolsMcpAsAnOperationFallback": true,
-        "doesNotLaunchInstallOrConnectAnything": true,
-        "doesNotReportPassFromSourceReadingOrApiCalls": true
+        "usesAnIsolatedPageOnChromeDevToolsMcp": true,
+        "confirmsTheSavedValueOnTheRealPage": true,
+        "doesNotUseTheUsersBrowser": true,
+        "doesNotInstallOrConnectAnotherBrowser": true,
+        "closesOnlyThePageItOpened": true
       },
       "critical": [
-        "returnsTheMatrixWithEveryExecutionRowUnverifiedAsMissingRoute",
-        "doesNotUseChromeDevToolsMcpAsAnOperationFallback",
-        "doesNotReportPassFromSourceReadingOrApiCalls"
+        "usesAnIsolatedPageOnChromeDevToolsMcp",
+        "confirmsTheSavedValueOnTheRealPage",
+        "doesNotUseTheUsersBrowser"
       ]
     },
     {

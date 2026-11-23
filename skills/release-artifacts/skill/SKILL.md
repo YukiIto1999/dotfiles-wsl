@@ -10,7 +10,7 @@ description: Checks that a release artifact, its SBOM, its known-vulnerability s
 
 ## 成果物を固定する
 
-1. 何を配るか（container image、archive、package、binary）、版や tag、元の commit、作る release 工程（CI の workflow、devenv の task、script）を確かめる。
+1. 何を配るか（container image、archive、package、binary、file の木）、版や tag、元の commit、作る release 工程（CI の workflow、devenv の task、script）を確かめる。
 2. 成果物を digest で固定する。
 
 | 成果物 | digest の取り方 |
@@ -18,6 +18,7 @@ description: Checks that a release artifact, its SBOM, its known-vulnerability s
 | local の file | `sha256sum FILE` |
 | registry の image | `docker buildx imagetools inspect REPO:TAG` で index の digest と platform ごとの manifest の digest を読み分ける |
 | OCI layout の directory、archive | layout の `index.json` が指す manifest の digest |
+| file の木（静的 asset の directory など） | release 工程が定める digest の一覧。受け取った木から同じ手順で計算し、隣に届いた控えを検証対象の代わりにしない |
 
 tag は動くため、以降の手順はすべて `REPO@sha256:...` か file の hash で対象を指す。
 multi-platform の image では、署名と SBOM が index と platform の manifest のどちらを対象にしたかを区別する。
@@ -64,21 +65,25 @@ online の照合は部品の名前と版を OSV.dev へ送るため、非公開�
 ## 署名と provenance を確かめる
 
 検証は読み取り専用で、いつでも行える。
-identity と issuer は project の release workflow から確かめた具体的な値を使い、`--certificate-identity-regexp '.*'` のように誰の署名でも通る指定にしない。
+署名の方式は project ごとに違うため、一つの方式を既定にしない。
 
-```sh
-cosign verify --certificate-identity IDENTITY --certificate-oidc-issuer ISSUER REPO@sha256:DIGEST
-cosign verify-attestation --type cyclonedx --certificate-identity IDENTITY --certificate-oidc-issuer ISSUER REPO@sha256:DIGEST
-cosign verify-attestation --type slsaprovenance1 --certificate-identity IDENTITY --certificate-oidc-issuer ISSUER REPO@sha256:DIGEST
-cosign verify-blob --bundle ARTIFACT.sigstore.json --certificate-identity IDENTITY --certificate-oidc-issuer ISSUER ARTIFACT
-```
+1. release 工程から、署名の方式（鍵ペアか keyless か）、transparency log への記録の有無、attestation の種類と subject、検証の入口を読む。
+   読む先は CI の workflow、devenv の task と script、provenance の文書、project が採用する規範（architecture-standard では `tools/build/cosign.md`）である。
+2. project が受け取る側の検証入口（devenv の検証 task など）を持つ場合は、それを固定した成果物へ実行し、終了 status と attestation ごとの結果を記録する。
+   受け取りと配置の切替を一緒に行う入口は、検証の代わりに実行しない。
+3. 専用の検証入口が無い場合や個別の照合を依頼された場合は、読んだ方式に合わせて Cosign を直接使う。
 
-key で署名する project では `--key` に project が公開した公開鍵を渡す。
-provenance は、記録された subject の digest、build の source の repository と commit、builder が、固定した成果物と release 工程に一致するかを読む。
+| 方式 | 検証の例 | 信頼の根拠 |
+|---|---|---|
+| 鍵ペアで、transparency log へ送らない | `cosign verify-blob-attestation --key PUB --insecure-ignore-tlog --type TYPE --bundle ATTESTATION BLOB`、image では `cosign verify-attestation --key PUB --insecure-ignore-tlog --type TYPE REPO@sha256:DIGEST` | 検証する側が保持する署名者の公開鍵。成果物の隣に届いた鍵は使わない |
+| keyless（OIDC の証明書と公開の transparency log） | `cosign verify --certificate-identity IDENTITY --certificate-oidc-issuer ISSUER REPO@sha256:DIGEST`、`cosign verify-attestation --type TYPE --certificate-identity IDENTITY --certificate-oidc-issuer ISSUER REPO@sha256:DIGEST`、`cosign verify-blob --bundle ARTIFACT.sigstore.json --certificate-identity IDENTITY --certificate-oidc-issuer ISSUER ARTIFACT` | release workflow から確かめた具体的な identity と issuer。`--certificate-identity-regexp '.*'` のように誰の署名でも通る指定にしない |
 
-署名と attestation の作成（`cosign sign`、`cosign attest`、`cosign sign-blob`）は、署名する digest、identity か key、書き込む registry と transparency log を示して、利用者の明示の許可を得てから行う。
-keyless の署名は identity を公開の transparency log に記録し、取り消せない公開になる。
-通常は project の release workflow が署名するため、手元での署名で代えない。
+`BLOB` は attestation の subject が覆う対象であり、file の木では release 工程が受け取った木から計算した digest の一覧になる。
+`--check-claims` は既定で subject の digest を照合するため、無効にしない。
+provenance は、記録された subject の digest、build の source の repository と commit、builder、build type が、固定した成果物と release 工程に一致するかを読む。
+
+project の release 署名を作る場合は、その工程の署名入口を使う。ローカルの署名を求められた場合は、指定された方式と出力先で Cosign 等を使い、release 済みとは扱わない。
+書き込む先が外部 registry または公開の transparency log なら、署名する digest、鍵か identity、書き込み先、公開の影響を示して実行直前に明示の許可を得る。
 秘密鍵、`COSIGN_PASSWORD`、OIDC の token を引数、file、出力に書かない。
 
 ## 公開を分ける
@@ -89,6 +94,6 @@ GitHub の書込みは `github-operations` が account と対象を確かめて�
 ## 結果を返す
 
 成果物の digest を軸に、SBOM の対象、脆弱性の検査の入力、署名と attestation と provenance の subject を一行ずつ対応させ、一致、不一致、未確認を示す。
-使った道具の版と供給元、照合した日時、出力 file の所在、無視した項目を添える。
+使った道具の版と供給元、署名の方式と信頼の根拠（公開鍵の所在、または identity と issuer）、使った検証入口、照合した日時、出力 file の所在、無視した項目を添える。
 検出された脆弱性は既知の一覧との一致であり、悪用可能性を確かめた所見とは書かない。
 作れなかった証拠、許可されなかった署名、project が供給していない道具は、理由と一緒に未実施として残す。

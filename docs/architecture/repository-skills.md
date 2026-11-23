@@ -144,6 +144,7 @@ Mattの`code-review`は`setup-matt-pocock-skills`を使う。共通実装の順�
 `to-spec`と`to-tickets`はtracker設定の`setup-matt-pocock-skills`を、`retro`は`writing-for-agents`を使う。
 raw `research`とPonytailは配備せず、調査と実装・reviewの原則を既存の自立した手順へ統合する。
 Googleの二Skillと独自の`browser-performance`をbrowser-diagnosticsでgateし、実行時に画面操作の経路を選ぶ`surface-operation`やnative診断と分ける。
+`surface-operation`は、Chrome DevTools MCPが指定された場合や、他の適切な操作経路がなく、隔離したpageで対象を扱える場合に、このtoolを使う。
 .NET `run-tests`は`platform-detection`と`filter-syntax`をSkill依存に持ち、後者はfiltered runのreference-only helperとして扱う。
 .NETの実行前提は対象projectのSDKとrunnerであり、一般のbrowserやcloud Capabilityではない。
 原版の起動flagを維持し、生成Skill一覧もfrontmatterから明示呼出しとreference-onlyを区別する。

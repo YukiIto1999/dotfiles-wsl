@@ -119,9 +119,9 @@ Linuxの[既定診断socket](https://learn.microsoft.com/en-us/dotnet/core/diagn
 既存のプロセス、セッション全体の環境変数、明示されたprojectの設定は変えない。
 トレース、メトリクス、スタックには内部情報が含まれ得る。保存する場合は作業ツリー外に自分だけがアクセスできるディレクトリ（`0700`）を作り、`umask 077`で新規ファイルへ出力する。トレースには`--output`で保存先を明示し、生データはコミットや共有ログに残さない。
 
-MSBuildの失敗やビルド時間を調べるときは実行時診断と分ける。
-[Microsoft Binlog MCP](https://devblogs.microsoft.com/dotnet/msbuild-binlog-mcp-server/)は、利用を許可されたローカルの`.binlog`を通常セッションから解析する。
-`msbuild`の手順を入口とし、コマンド実行の終了値とbinlogに記録された結果は区別する。
+MSBuildの失敗やビルド時間を調べるときは`msbuild`の切り分け手順を使う。
+手元の`.binlog`から記録された値、埋め込みsource、importやターゲットの関係を調べるときは、通常セッションの[Microsoft Binlog MCP](https://devblogs.microsoft.com/dotnet/msbuild-binlog-mcp-server/)へ対象の絶対pathを渡す。概要は `binlog_overview`、埋め込みsourceは `binlog_search_files`／`binlog_files`、importは `binlog_imports` から辿る。
+ログの解析に成功したことと、記録されたビルドが成功したことを分けて返す。元のビルドコマンドは、再現が必要な場合に使う。
 このfrontには外部接続を許可せず、テレメトリを無効にする。
 
 ### Aspire Dashboard
@@ -142,6 +142,7 @@ package wrapperは`ASPIRE_CLI_TELEMETRY_OPTOUT`と`ASPIRE_DASHBOARD_TELEMETRY_OP
 | `aspire-dashboard run [--browser-token-stdin]` | 前景で起動する。Ctrl+Cまたは`stop`で止めるとデータを削除する |
 | `aspire-dashboard status` | 今回の起動のbrowser tokenをDashboard自身が受理すれば0、未起動なら1、起動中なら3で終わる |
 | `aspire-dashboard otel logs\|spans\|traces [option...]` | 公式の[`aspire otel`](https://aspire.dev/reference/cli/commands/aspire-otel/)で読む。`--format Json`などはそのまま渡す |
+| Dashboard UI の `Metrics` | metric とその次元を確認する。`aspire otel` は metric を読まない |
 | `aspire-dashboard exec [--service NAME] -- COMMAND` | COMMANDのtelemetryだけをDashboardへ送る |
 | `aspire-dashboard stop` | 別の端末やセッションから止め、削除の完了まで待つ |
 

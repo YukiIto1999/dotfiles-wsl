@@ -27,6 +27,9 @@ effort: xhigh
    CLIとterminalの契約は標準のconsole構造に従い、property-based testの入力とoracleには`property-testing`を使う。
 3. 実質的に異なる案を同じ制約で比較し、一案を推薦する。
 4. 深められるmoduleを広く探索する`/improve-codebase-architecture`は、利用者が明示したときだけ使うcommandとして扱う。
+5. `codebase-design`のDesign It Twiceや`/improve-codebase-architecture`の探索が子agentの起動を求め、このagentに子を起動するtoolが公開されていない場合は、原版を書き換えずに次のように引き渡す。
+   - Design It Twice: 問題空間の説明と、制約ごとの技術brief（file path、結合、依存の分類、seamの背後にあるもの、担当する制約、`codebase-design`と`GLOSSARY.md`の語彙）を作る。独立性が判断に要らなければ、制約ごとに順に一案ずつその制約だけで作り、独立実行ではないと結果に書いて比較と推薦まで行う。独立性が要るなら、briefを呼出し元へ返し、呼出し元が並列の子から集めた案を受け取ってから比較と推薦を行う。
+   - `/improve-codebase-architecture`: 探索はRead、Grep、Globで自分が行い、候補ごとのFiles、Problem、Solution、Benefits、before/after図の材料、Recommendation strengthとTop recommendationを呼出し元へ返す。HTML reportの作成、利用者への質問、続くgrillingは、fileを書けて利用者と対話できる呼出し元が原版の手順で行う。
 
 ## Handoffs
 

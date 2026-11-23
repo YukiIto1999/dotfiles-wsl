@@ -123,7 +123,9 @@ container、service、databaseを背後に持つ実装は、対応するCapabili
 Skillは、依頼に合う道具と結果の確かめ方を選ぶ。
 browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とする。
 Web・Windows GUI・CLI/TUIの実操作と受入、明示された探索監査は`surface-operation`を使う。観測証拠からのUI設計評価・再設計は`ui-design`、実行時の観測機器を選んで証拠を採る仕事は`runtime-observation`が担当する。
+操作に Chrome DevTools MCP が指定された場合も、`surface-operation`で指定の tool へ進む。
 native C#/Rustを含む一般診断は`diagnosing-bugs`が所有し、browser toolを使わないbranchにbrowser Capabilityを要求しない。
+既存の`.binlog`から記録値や埋め込みsourceを調べるときは、`@dotfilesDir@/docs/reference/tooling.md`の「.NETの実行時診断」からBinlog MCPへ進む。ビルドの再現や修正の判断は`msbuild`が担当する。
 @heapDiagnosticsPolicy@
 GitHub操作では`github-operations`から利用可能なGitHub MCP、`gh`、Gitへ進む。Webとrepositoryの調査は対応するSkillから利用可能な検索・取得へ進む。
 upstreamがCLIや直接接続を例示していても、provider targetの内側にあるhost process、container、databaseは起動や接続を個別に操作しない。

@@ -12,12 +12,15 @@
 | 2 | clientの標準browser tool | 対象を扱えるtoolをsessionが現在のschemaとともに公開している |
 | 3 | Orcaの内蔵browser | 2で対象を扱えず、Orca CLIの読み取りcommandが現在のcwdのworktreeを返し、対象が利用者の既存tabや実accountを必要としない |
 | 4 | `browser-automation`のPlaywright MCP | 上の操作routeで対象を扱えず、独立したbrowser sessionで検証できる |
-| 5 | なし | 上の条件を満たすrouteがない |
+| 5 | `browser-diagnostics`のChrome DevTools MCP | 上の経路では実行できず、現在のtoolが対象と必要な操作を隔離したpageで扱える |
+| 6 | なし | 上の条件を満たすrouteがない |
 
 OMPで利用者のbrowserを必要としない操作には、標準browser toolで管理browserを明示し、既定のRelayに委ねない。
 
 別のbrowser、provider、containerの起動、既存processへの接続、Orcaやbrowserの導入・起動・pairing・設定変更、画面全体の操作による代替は行わない。
-`browser-diagnostics`のChrome DevTools MCPはLCP、通信・応答、browserのheap取得などを扱う専門Skillの入口であり、唯一公開されたbrowser toolでも操作routeの代わりにしない。
+利用者がChrome DevTools MCPを指定し、そのtoolが対象を扱える場合は、上の優先順にかかわらず使う。
+Chrome DevTools MCPでは、現在のschemaで公開された専用pageの作成、snapshot、操作、待機、screenshotを使う。
+既存tabと実accountの条件は緩めない。fileの保存先は`browser-performance`の非公開artifactの受け渡しに従う。
 Orcaが無い、使えないことは次のrouteへ進む条件であり、Orcaの利用や導入を要求しない。
 Windows上のbrowserでしか判定できない要求でなければ、WebをWindowsのseatで操作しない。
 

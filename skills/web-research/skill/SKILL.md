@@ -9,7 +9,7 @@ description: Researches public facts, version-specific library APIs, and primary
 
 - URL探索は、そのclientが公開するWeb検索toolを使う。
 - 公開ページの本文取得は、そのclientが公開するURL取得toolを使う。
-- libraryやframeworkの仕様は対象versionの公式docs・release・sourceを優先し、所在が曖昧なときは`context7`で候補を絞る。
+- libraryやframeworkの仕様は対象versionの公式docs・release・sourceを優先し、所在が曖昧なとき、または利用者がContext7を指定したときは`context7`を使う。
 - sourceの意味、権威、矛盾、適用範囲はagentが判断する。
 
 検索と取得のtoolを呼ぶだけで終わらせず、問いの分解、source選択、根拠評価、統合までを所有する。
@@ -22,6 +22,7 @@ Web検索と通常のURL取得はclient native toolを使い、この環境はWe
 tool名、引数、返り値の形はclientごとに違うため、現在公開されたtool一覧とschemaへ対応させて使う。
 subagentはtool allowlistにあるtoolだけを持つので、許可されていないWeb toolを使えると仮定しない。
 `context7`、Microsoft Learn、DeepWikiは`library-documentation`のGateway toolで通常の接続に含まれる。現在のclientに公開されていなければ、ライブラリ名・製品名・repository、対象版と問いを呼出し元へ渡す。
+利用者がこれらのtoolを名指しした場合は、公式資料の所在が既知でもそのtoolを使い、返った内容は下の各経路の手順で対象versionの原典と照合する。
 MCP toolを直接公開するclientでは、そのネイティブな呼出し形式で実tool名とschemaへJSON引数を対応させる。
 toolの説明に別toolやHTTP endpointが書かれていても、その名前が公開されていることの証拠にはしない。
 問いに必要な検索またはURL取得のtoolが公開されていなければ、上位の呼出し元へ具体的なquery、URL、必要な範囲を渡して実行を依頼し、返された原応答だけを根拠にする。
@@ -35,6 +36,7 @@ GitHubのrepository、issue、PRの読取・変更は`github-operations`が所�
 ### 指定されたURLを読む
 
 検索せず、そのURLを直接取得する。忠実な要約では別sourceの内容を混ぜない。
+利用者が公開HTTPS URLの本文取得にContext.devを指定した場合、その依頼が対象URLと送信先の承認を含むため、確認を重ねずに`context-dev-scrape <URL>`で一度取得し、下の照合を同じく行う。非公開、認証付き、内部のURLには指定があっても使わない。
 取得toolが原文でなく要約や抽出を返す場合は、返り値を原文の根拠にせず、「記載がない」という結果も原文に無いことの証拠にしない。
 
 成功状態だけでなく、title、主見出し、主要節が取得できたかを原文と照合する。空、application shell、同意画面、navigationだけの本文、または見えるはずの項目（著者、表の列、注記）の欠落は、取得toolがJavaScript描画後の内容を返していない可能性を示す。
@@ -50,7 +52,7 @@ GitHub repositoryのtree、blob、releaseは、利用可能な`github-operations
 
 ### libraryまたはframeworkの仕様を調べる
 
-対象versionの公式資料や同梱の型定義を特定できていれば、直接照合する。`context7`は該当箇所やversionの候補が不明なとき、または利用者がContext7のlibrary IDを指定したときに使う。
+対象versionの公式資料や同梱の型定義を特定できていれば、直接照合する。`context7`は該当箇所やversionの候補が不明なとき、または利用者がContext7かそのlibrary IDを指定したときに使う。
 
 `context7`の`resolve-library-id`へ公式の`libraryName`と問いを表す`query`を渡し、返されたlibrary IDとversion候補を確認する。
 そのIDを`query-docs`の`libraryId`へ、versionを含む一つのtopicを`query`へ渡す。

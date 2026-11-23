@@ -50,6 +50,9 @@ case "${0##*/}" in
       echo "error: the archive does not name revision $revision: $archive" >&2
       exit 1
     fi
+    if [ -f "$control/build-status" ]; then
+      exit "$(<"$control/build-status")"
+    fi
     if [ -e "$control/hold-$revision" ]; then
       touch "$control/building-$revision"
       while [ ! -e "$control/release-$revision" ]; do

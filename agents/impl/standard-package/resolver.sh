@@ -88,7 +88,7 @@ open_package() {
   mkdir -p -- "$package_dir/revisions"
   exec {lock_fd}>>"$package_dir/writer.lock"
   if ! flock -w "$lock_seconds" -x "$lock_fd"; then
-    fail_new_work 75 "another standard work unit held the resolver for ${lock_seconds}s"
+    fail_new_work 75 "could not acquire the resolver lock (wait limit ${lock_seconds}s)"
   fi
 
   # 利用者と repository の Git 設定、credential、hook を読まない匿名の問い合わせ。CA だけを host から渡す
@@ -108,7 +108,7 @@ open_package() {
   fi
 
   # root 登録に失敗して Nix が out-link だけを残す場合も、last-good は動かさない。
-  output=$(timeout --kill-after=10 "$build_seconds" "$nix_build_command" \
+  output=$(@supervise@ --interrupt-cancels --term-grace 10 --resource-run-seconds "$build_seconds" -- "$nix_build_command" \
     --out-link "$package_dir/revisions/$revision" \
     --option netrc-file /dev/null \
     --option access-tokens '' \
@@ -118,7 +118,7 @@ open_package() {
     --argstr revision "$revision") || status=$?
   case "$status" in
     0) ;;
-    124 | 137) fail_new_work 75 "revision $revision was not fetched and validated within ${build_seconds}s" ;;
+    124 | 137) fail_new_work 75 "revision $revision could not be fetched and validated (status $status, limit ${build_seconds}s)" ;;
     *) fail_new_work 65 "revision $revision could not be fetched, validated, and retained" ;;
   esac
   output=$(tail -n 1 <<<"$output")

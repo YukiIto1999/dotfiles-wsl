@@ -27,6 +27,10 @@ processes survive SIGKILL, a detached holder keeps the descriptor until they end
 The caller supplies its own PID so a death before supervisor startup also cancels.
 Without it, the session outlives the caller.
 
+``--resource-run-seconds SEC`` sets a monotonic deadline from client launch, with or without resource
+admission. Admission waiting is separate. On expiry the supervisor requests cancellation and returns 124.
+The deadline diagnostic is emitted only after all owned processes have been reaped.
+
 ``--require-drained`` keeps that ownership past the SIGKILL grace.  The supervisor goes on
 killing and waiting, reports periodically that the grace has passed (stderr and the
 ``draining`` result phase), and returns only when ``waitpid(-1)`` fails with ECHILD, so
@@ -105,7 +109,7 @@ class Options:
         interrupt_cancels: SIGINTを走行全体の取消へ渡す明示選択
         resource_policy: hostの資源観測と予約既定値のpathか無効のNone
         resource_wait_until: 入場を待つ絶対期限か無効のNone。走行の秒数とは別に数える
-        resource_run_seconds: 入場してから数える走行の秒数か無効のNone
+        resource_run_seconds: client の起動から単調時計で測る走行の上限秒か無効のNone
         resource_target_seconds: 入場してから数える走行の秒数がこの値へ達した時点の読取を残す秒数か無効のNone。取消にも期限にも使わない
         resource_slot_wait_seconds: 呼び出し側が実行枠の取得に待った秒数か枠を使わなかった走行のNone。supervisor は枠を持たず、値を記録へ運ぶだけで、待機にも期限にも使わない
         resource_memory: 物理memory予約の明示値か既定値を選ぶNone
@@ -179,11 +183,11 @@ def parse_arguments(arguments):
                 if options.resource_wait_until is None or options.resource_run_seconds is None:
                     raise UsageError("--resource-policy requires --resource-wait-until and --resource-run-seconds")
                 options.require_drained = True
-            elif (options.resource_wait_until is not None or options.resource_run_seconds is not None
+            elif (options.resource_wait_until is not None
                   or options.resource_target_seconds is not None or options.resource_slot_wait_seconds is not None
                   or options.resource_cpu is not None):
                 raise UsageError(
-                    "--resource-wait-until, --resource-run-seconds, --resource-target-seconds, --resource-slot-wait "
+                    "--resource-wait-until, --resource-target-seconds, --resource-slot-wait "
                     "and --resource-cpu require --resource-policy")
             return options
         if argument == "--require-drained":
@@ -718,7 +722,8 @@ class Supervisor:
             reading = self.sample_scope() if not self.terminating else None
             self.record_at_target()
             children_exist = self.reap()
-            if self.run_deadline is not None and time.time() >= self.run_deadline:
+            if (children_exist and not self.terminating and self.cancel_signal is None and
+                    self.run_deadline is not None and time.monotonic() >= self.run_deadline):
                 self.deadline_expired = True
                 self.request_cancel(signal.SIGTERM, None)
             if not self.terminating and (
@@ -726,7 +731,7 @@ class Supervisor:
             ):
                 self.begin_termination()
             if not self.terminating:
-                wait = max(0, self.run_deadline - time.time()) if self.run_deadline is not None else None
+                wait = max(0, self.run_deadline - time.monotonic()) if self.run_deadline is not None else None
                 for due in (sampling, reading, self.until_target()):
                     if due is not None:
                         wait = due if wait is None else min(wait, due)
@@ -924,7 +929,7 @@ class Supervisor:
         """走行の枠を、client を起動した時点から数え始める。待機の秒数は枠に数えない"""
         self.spawned_at = time.monotonic()
         if self.options.resource_run_seconds is not None:
-            self.run_deadline = time.time() + self.options.resource_run_seconds
+            self.run_deadline = self.spawned_at + self.options.resource_run_seconds
         if self.options.resource_target_seconds is not None:
             self.target_at = self.spawned_at + self.options.resource_target_seconds
 
@@ -1093,6 +1098,7 @@ class Supervisor:
             "finished",
             spawned=True,
             cancelled=self.cancel_signal is not None or self.cancelled_externally,
+            deadlineExpired=self.deadline_expired,
             drained=drained,
             client_status=self.client_status,
             remaining=sorted(survivors),
@@ -1101,6 +1107,8 @@ class Supervisor:
             **memory,
             **self.observe_scope(),
         )
+        if self.deadline_expired and drained:
+            diagnose(f"run deadline reached ({self.options.resource_run_seconds:g}s)")
         if survivors and self.options.hold_fd is not None:
             hold_until_gone(survivors)
         return status
@@ -1126,6 +1134,9 @@ class Supervisor:
             "waitReasons": reservation.reasons,
             "runSeconds": None if self.run_seconds is None else round(self.run_seconds, 3),
             "status": status,
+            "cancelled": self.cancel_signal is not None or self.cancelled_externally,
+            "deadlineExpired": self.deadline_expired,
+            "client_status": self.client_status,
             "peakBytes": self.meter.peak,
             "reservedBytes": reservation.memory,
             "cpuCapPercent": reservation.cpu,

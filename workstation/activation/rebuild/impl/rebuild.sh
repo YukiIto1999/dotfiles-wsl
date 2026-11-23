@@ -181,13 +181,17 @@ cleanup() {
 # 共通supervisor配下でのcommandの非同期起動
 # $1: 子の作業directory
 # $2: 標準出力の保存先または保存しないときの空文字列
-# $3以降: 実行fileの名前またはpathと引数
+# $3以降: 任意の --budget 秒と、実行fileの名前またはpathと引数
 # 副作用: active_pidとchild_resultへの起動状態の記録
 # 戻り値: 起動時の0または取消時の130または実行fileの探索失敗時の127
 start_child() {
   local dir=$1 out=$2 executable
-  local -a supervised
+  local -a supervised deadline=()
   shift 2
+  if [[ $1 == --budget ]]; then
+    deadline=(--resource-run-seconds "$2")
+    shift 2
+  fi
   [[ $interrupted -eq 0 ]] || return 130
   executable=$(type -P "$1") || {
     printf 'FATAL: cannot find the executable %s\n' "$1" >&2
@@ -196,7 +200,7 @@ start_child() {
   shift
   child_result=$work_dir/supervisor.json
   rm -f -- "$child_result"
-  supervised=("$supervise" --term-grace "$child_grace_seconds" --parent-death-cancels "$$" --result "$child_result" -- "$executable" "$@")
+  supervised=("$supervise" --term-grace "$child_grace_seconds" --parent-death-cancels "$$" --result "$child_result" "${deadline[@]}" -- "$executable" "$@")
   if [[ -n $out ]]; then
     (
       cd -- "$dir" || exit 126
@@ -438,10 +442,7 @@ prepare_candidate() {
   read -r -a entry_words <<<"$verify_entry"
   printf 'validate: %s (budget %ss, isolated source)\n' "$verify_entry" "$verify_budget"
   # 検査の clone が自身の git-dir へ置く root は clone の削除で導線だけが残り、T1 と T2 が元の checkout に置いた root も更新できないため、元の checkout を所有者として名指す
-  run_child "$source_dir" "" env DOTFILES_VERIFICATION_OWNER="$dotfiles" timeout --kill-after=5s "$verify_budget" "${entry_words[@]}" || status=$?
-  if ((status == 124)); then
-    stop_before_activation "validation of the candidate exceeded its ${verify_budget}s budget"
-  fi
+  run_child "$source_dir" "" --budget "$verify_budget" env DOTFILES_VERIFICATION_OWNER="$dotfiles" "${entry_words[@]}" || status=$?
   ((status == 0)) || stop_before_activation "validation of the candidate failed (status $status)"
 
   run_child "$source_dir" "" nix build --no-update-lock-file --out-link "$cand_dir/toplevel" \

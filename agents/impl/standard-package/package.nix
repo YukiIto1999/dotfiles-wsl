@@ -9,6 +9,7 @@
   checker,
   # host の nix-daemon と同じ版の Nix
   nixPackage,
+  supervise,
   # 版ごとの GC root と最後の検証結果を置く host state（HOME からの相対 path）
   stateRelative,
   # build 時にだけ選べる archive の取得元。未公開の source での実地確認だけが変える
@@ -58,6 +59,7 @@ let
     "@validationExpression@" = lib.escapeShellArg "${./validation.nix}";
     "@gitCommand@" = lib.escapeShellArg (toString gitCommand);
     "@nixBuildCommand@" = lib.escapeShellArg (toString nixBuildCommand);
+    "@supervise@" = lib.escapeShellArg (lib.getExe supervise);
     "@lookupSeconds@" = toString lookupSeconds;
     "@buildSeconds@" = toString buildSeconds;
     "@lockSeconds@" = toString lockSeconds;

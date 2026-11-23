@@ -88,10 +88,18 @@ run_rebuild 0 --discard "$second"
 # 3. Each failed stage of the candidate stops before the next and leaves nothing behind.
 before=$(checkout_snapshot)
 REBUILD_VERIFY_STATUS=1 run_rebuild 2 --plan
-assert_output_has 'validation of the candidate failed'
+assert_output_has 'validation of the candidate failed (status 1)'
 assert_not_called 'nix build'
 REBUILD_VERIFY_STATUS=124 run_rebuild 2 --plan
-assert_output_has 'exceeded its 300s budget'
+assert_output_has 'validation of the candidate failed (status 124)'
+if grep -qF 'run deadline reached' "$REBUILD_OUTPUT"; then
+  printf 'the candidate reported a deadline that did not expire\n' >&2
+  exit 1
+fi
+assert_not_called 'nix build'
+LC_ALL=C REBUILD_HANG_AT=verify REBUILD_VERIFY_BUDGET=1 run_rebuild 2 --plan
+assert_output_has 'run deadline reached'
+assert_output_has 'validation of the candidate failed (status 124)'
 assert_not_called 'nix build'
 REBUILD_BUDGET_STATUS=1 run_rebuild 2 --plan
 assert_not_called 'nix run'

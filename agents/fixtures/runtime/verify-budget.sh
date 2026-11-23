@@ -61,8 +61,7 @@ deadline_status=$?
 set -e
 cat "$fixture/deadline.stderr" >&2
 test "$deadline_status" -eq 124
-# 時間切れの一行は、資源の記録を持たない走行でも数値を添えずに出る
-test "$(grep -c '時間切れ(124)で止まった。' "$fixture/deadline.stderr")" -eq 1
+grep -qF 'dotfiles-supervise: run deadline reached' "$fixture/deadline.stderr"
 if "$GATE" check --repo "$budget_repo" >/dev/null 2>&1; then
   echo 'the timed-out T1 left an accepted source receipt' >&2
   exit 1

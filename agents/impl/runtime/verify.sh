@@ -11,8 +11,6 @@ budget_error=
 # 走行の目標秒。目標を宣言していなければ空。目標は報告するだけで、取消にも判定にも使わない
 feedback_target=
 remaining=
-# supervise の猶予が timeout の --kill-after より短いと取消で command 自身の停止を先に切るため同値
-kill_after_seconds=30
 # 同じ project の T1 を一度に一つへ絞る flock の fd。取得するまで空
 slot_fd=
 # 実行枠の取得に待った ms。枠を待たなかった走行は 0。入口を実行する supervise の記録へ slotWaitSeconds として渡す
@@ -21,7 +19,7 @@ resource_policy=@resourcePolicy@
 resource_args=()
 # 資源予約の需要を実測の記録から決める鍵。repository の根と入口の command ごとに分ける
 resource_key=
-# 入場の待ちの秒数を supervise が残す --result の file。待ちを T1 の予算から外すために読む
+# 検査入口の完了と資源を待った時間を supervisor が記録する --result の file
 resource_result=
 
 refresh_remaining() {
@@ -40,49 +38,22 @@ settle_wait() {
   started_ms=$((started_ms + waited_ms))
 }
 
-# 目標を超えた走行の報告
-# 引数 $1: 走行の終了status
-# 入力 feedback_target: 目標の秒か空
-# 入力 resource_result: supervise が finished 段階に走行の秒数と scope の CPU 時間と滞留と目標の時点の読取を残した file
-# 副作用: 走行が目標を超えていれば stderr へ一行。滞留の割合は走行の秒数に対する scope の滞留の秒数
-#   上限で取り消された走行（124）には、目標の時点から scope の CPU 時間が増えたかを添える。読めなければ何も出さない
-#   増えた CPU 時間が目標の後の秒数の一割に満たない走行は、待ち続けていた走行と区別できないため、進行中とは書かない
-# 制約: 報告は終了statusも判定も変えない
-report_target() {
+# 目標超過時と走行期限到達時の scope 計測値の報告
+# 入力 resource_result: 当該走行の supervisor の計測結果
+# 制約: scope 外の処理と空転を区別できないため作業の進捗判定には不使用
+report_measurements() {
   local line
-  [ -n "$feedback_target" ] || return 0
-  line=$(jq -r --argjson target "$feedback_target" --arg status "$1" '
+  line=$(jq -r '
     def share($stall): if $stall == null then "不明" else "\($stall / .runSeconds * 100 | round)%" end;
-    def progress:
-      if .atTarget.cpuSeconds == null or .cpuSeconds == null then "目標の時点からの scope の CPU 時間の増減は読めなかった"
-      elif (.cpuSeconds - .atTarget.cpuSeconds) >= (.runSeconds - $target) * 0.1 then "目標の時点から scope の CPU 時間は増えていた(進行中)"
-      else "目標の時点から scope の CPU 時間はほとんど増えていない(進行の兆しが無い)" end;
-    select(.runSeconds != null and .runSeconds > $target)
-    | "verify: 走行が時間の目標 \($target) 秒を超えた(走行 \(.runSeconds | round) 秒、滞留の割合は CPU \(share(.cpuStallSeconds))、IO \(share(.ioStallSeconds))、メモリ \(share(.memoryStallSeconds)))"
-      + (if $status == "124" then "。上限で取り消された。\(progress)" else "" end)
+    def seconds: if . == null then "不明" else "\(. | round) 秒" end;
+    select(.phase == "finished" and .runSeconds != null)
+    | if .targetSeconds != null and .runSeconds > .targetSeconds then
+        "verify: 走行が時間の目標 \(.targetSeconds) 秒を超えた(走行 \(.runSeconds | seconds)、滞留の割合は CPU \(share(.cpuStallSeconds))、IO \(share(.ioStallSeconds))、メモリ \(share(.memoryStallSeconds)))"
+        + (if .deadlineExpired then "。scope の CPU 時間 \(.cpuSeconds | seconds)、目標時点 \(.atTarget.cpuSeconds | seconds)" else "" end)
+      elif .deadlineExpired then "verify: 走行 \(.runSeconds | seconds)、scope の CPU 時間 \(.cpuSeconds | seconds)"
+      else empty end
   ' "$resource_result" 2>/dev/null) || return 0
   [ -z "$line" ] || printf '%s\n' "$line" >&2
-}
-
-# 時間切れで止まった走行の報告
-# 引数 $1: 走行の終了status
-# 入力 resource_result: supervise が finished 段階に走行の秒数と scope の CPU 時間を残した file。無い走行と読めない走行は数値を添えない
-# 副作用: 終了statusが 124 なら stderr へ一行。時間切れが検査の失敗と別であることと、次の作業を、宣言 file や文書を読んでいない agent へその場で伝える
-#   次の作業は scope の CPU 時間で分ける。CPU を使い続けた走行は所要が上限より長く、ほとんど使っていない走行は何かを待っていて、
-#   上限を延ばしても終わるとは限らない。境は走行の秒数の一割で、計算する走行は一 core 分(十割)前後かそれ以上を使い、
-#   待つ走行は零に近い。検査を scope の外(nix の daemon、container)へ委ねる走行は待つ側に入り、何を待ったかを調べる対象になる
-# 制約: 報告は終了statusも判定も変えない。wrapper の上限と入口の内側の時間制限は、どちらも 124 で区別できないため同じに扱う
-report_timeout() {
-  local line
-  [ "$1" -eq 124 ] || return 0
-  line=$(jq -r 'select(.runSeconds != null and .cpuSeconds != null)
-    | "(走行 \(.runSeconds | round) 秒、scope の CPU 時間 \(.cpuSeconds | round) 秒)。"
-      + (if .cpuSeconds >= .runSeconds * 0.1
-         then "scope は CPU を使い続けていて、止まっていたのではなく所要が上限より長い。検査の失敗として直さず、同じ上限で投入し直さない。止めた上限(tiergate.json の seconds か、入口の内側の時間制限)を、この走行の秒数を下限に見直す"
-         else "scope は CPU をほとんど使っていない。走行の外の処理(nix の daemon、container、他の process)か lock を待っていた見込みで、上限を延ばしても終わるとは限らない。上限を変える前に、何を待っていたかを調べる" end)' \
-    "$resource_result" 2>/dev/null) || line=
-  [ -n "$line" ] || line='。走行の記録が無く、CPU を使い続けていたか待っていたかは分からない。使い続けていた走行は所要が上限より長いので、止めた上限(tiergate.json の seconds か、入口の内側の時間制限)をこの走行の秒数を下限に見直す。待っていた走行は、上限を変える前に何を待っていたかを調べる'
-  printf 'verify: 時間切れ(124)で止まった%s\n' "$line" >&2
 }
 
 bounded_pid=
@@ -104,7 +75,7 @@ await_bounded() {
 }
 
 # T1の残り予算で取消を開始するcommandの実行
-# 引数 $1: timeout配下で実行するcommand名か実行path
+# 引数 $1: 実行する command 名か実行 path
 # 引数 $2以降: 当該commandへ渡す引数
 # 入力 remaining: refresh_remainingが確定した取消開始までの正の残秒
 # 入力 interrupted: signal trapが記録する当該走行の取消状態
@@ -117,9 +88,8 @@ run_bounded() {
   local -a hold=()
   [ "$interrupted" = false ] || return 130
   [ -z "$slot_fd" ] || hold=(--hold-fd "$slot_fd")
-  # timeout の process group だけでは別 session の子孫を回収できないため supervise の下で起動
-  @supervise@ --require-drained --parent-death-cancels "$$" --term-grace "$kill_after_seconds" "${hold[@]}" "${resource_args[@]}" \
-    -- @timeout@ --kill-after="${kill_after_seconds}s" "$remaining" "$@" <&0 &
+  @supervise@ --require-drained --parent-death-cancels "$$" --term-grace 30 --resource-run-seconds "$remaining" \
+    "${hold[@]}" "${resource_args[@]}" -- @env@ -- "$@" <&0 &
   bounded_pid=$!
   if [ "$interrupted" = true ]; then
     kill -s TERM "$bounded_pid" 2>/dev/null || true
@@ -256,6 +226,7 @@ if names_entry "$*" \
   if [ "$status" -eq 0 ]; then
     IFS= read -r witness <"$entry_file" || true
     if refresh_remaining; then
+      resource_args=(--result "$resource_result")
       if [ -n "$resource_policy" ]; then
         # 待ちの上限は走行の予算と同じ秒数。走行の枠は入場から数えるので、待った秒数は予算に入れない
         printf -v wait_until '%d' "$((${EPOCHREALTIME%[.,]*} + budget_seconds))"
@@ -263,21 +234,23 @@ if names_entry "$*" \
         # 壁時計が戻った場合の負の値は supervise が拒否して走行を止めるため、記録へは 0 を渡す
         [ "$slot_wait_ms" -ge 0 ] || slot_wait_ms=0
         printf -v slot_wait '%d.%03d' "$((slot_wait_ms / 1000))" "$((slot_wait_ms % 1000))"
-        resource_args=(--resource-policy "$resource_policy" --resource-wait-until "$wait_until"
-          --resource-run-seconds "$remaining" --resource-key "$resource_key" --resource-slot-wait "$slot_wait"
-          --result "$resource_result")
+        resource_args+=(--resource-policy "$resource_policy" --resource-wait-until "$wait_until"
+          --resource-key "$resource_key" --resource-slot-wait "$slot_wait")
         [ -z "$feedback_target" ] || resource_args+=(--resource-target-seconds "$feedback_target")
       fi
       run_bounded "$@" || status=$?
+      if [ "$status" -ne 0 ]; then printf 'verify: 検証入口の呼び出しが終了 %d で戻った\n' "$status" >&2; fi
       if [ -n "$resource_policy" ]; then
         settle_wait
-        report_target "$status"
-        resource_args=()
-        if [ "$status" -eq 75 ]; then
-          printf 'verify: 資源の空きを待つ上限（予算と同じ %s 秒）に達し、検証を実行しなかった(75)。同じ処理を重複投入せず、空いてから投入し直す\n' "$budget_seconds" >&2
-        fi
+        report_measurements
       fi
-      report_timeout "$status"
+      resource_args=()
+      if [ "$status" -eq 0 ] && ! jq -es '
+        length == 1 and (.[0] | .phase == "finished" and .spawned == true and .drained == true
+          and .cancelled == false and .client_status == 0 and .status == 0)' "$resource_result" >/dev/null; then
+        printf 'verify: 監督器は終了 0 で戻ったが、取消のない正常終了を確認できず、成功証跡を確定しない\n' >&2
+        status=1
+      fi
     else
       status=124
     fi

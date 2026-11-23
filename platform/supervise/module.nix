@@ -14,7 +14,7 @@ in
     internal = true;
     description = ''
       絶対pathのcommandを一度だけ起動し、子孫の終了をwaitpidのECHILDで観測する監督器である。
-      `dotfiles-supervise [--term-grace SEC] [--kill-grace SEC] [--result FILE] [--argv0 NAME] [--hold-fd N] [--parent-death-cancels PID] [--require-drained] [--interrupt-cancels] -- COMMAND...`の形で呼ぶ。
+      `dotfiles-supervise [--term-grace SEC] [--kill-grace SEC] [--result FILE] [--argv0 NAME] [--hold-fd N] [--parent-death-cancels PID] [--require-drained] [--interrupt-cancels] [--resource-run-seconds SEC] -- COMMAND...`の形で呼ぶ。
       SIGTERMとSIGHUPはsession全体の取消とし、SIGINTとSIGQUITは既定ではsession全体の取消として扱わない。
       `--interrupt-cancels`を明示した呼び出しだけは、SIGINTをSIGTERMと同じsession全体の取消として扱い、終了処理も終了statusも同じ規則に従う。
       SIGQUITは`--interrupt-cancels`の有無にかかわらず取消として扱わない。
@@ -54,6 +54,7 @@ in
       `--resource-key KEY`を渡した走行は、記録があれば新しい5件のピークの最大を既定値の代わりに予約し、記録が無ければ記録directoryの他の鍵の最新のピークの中央値（件数が偶数なら大きい側）を、それも無ければ既定値を予約する。
       明示した物理memoryが上限を超える場合は、待たずにcommandを起動せず70で返す。`systemd-run`が自分で非ゼロで終わってscopeを作れない場合も70で、commandは起動しない。
       待機と走行は別に数える。`--resource-wait-until`までに入場できなければcommandを起動せず75で返し、`--resource-run-seconds`は入場して起動した時から数えて、超えれば取り消して124で返す。
+      `--resource-run-seconds SEC`は資源の予約がない呼び出しにも単独で指定できる。どちらもclient起動からの単調時計で計る。期限の診断 `run deadline reached` は子孫を回収した後にだけ出す。子が自分で124を返してもこの診断は出ない。
       `--resource-target-seconds SEC`は走行の秒数がSECに達した時点の読取を残す目標で、`--resource-run-seconds`と同じく入場して起動した時から数える。記録だけに使い、取消にも走行の枠にも使わず、`--resource-policy`が要る。
       `--resource-slot-wait SEC`は呼び出し側が実行枠の取得に待った秒数（0を含む）で、supervisorは値を記録へ運ぶだけで枠を持たず、待機にも期限にも使わない。`--resource-policy`が要り、渡さない走行（枠を使わない走行）はnullである。
       資源予約を持つ走行は所有する子孫のPSS合計を約1秒ごとに測り、ピークが予約を超えるとstderrへ一行を出す。
@@ -64,6 +65,7 @@ in
       終了時にはscopeのhighイベント・匿名ページとファイルページのrefault・swap入出力も記録する。祖先の有限なmemory.highについては同じ期間のlocal high増分を別に持ち、この走行だけの回数とはみなさない。
       資源予約を持つ走行は、終了のたびに計測の一行をjournaldのnative socket（policyのjournalSocket、既定は`/run/systemd/journal/socket`）へ`SYSLOG_IDENTIFIER=dotfiles-supervise`で送る。
       MESSAGEはJSON一行で、class、key、入れ子か、入場したか、待機秒数とその理由、実行枠の待ちの秒数（slotWaitSeconds）、走行秒数、終了status、ピークと予約のbyte、cpuCapPercent、上記のCPU時間・滞留・メモリ回収・祖先の境界の計測値、targetSeconds、atTargetを持つ。
+      deadlineExpiredは監督器が走行期限に達したか、cancelledは取消を観測したか、client_statusは直接の子の終了値（signalは負、得られなければnull）である。起動済みのfinished段階にも同じ項目がある。子の内側で同じstatusを返しても監督器の期限切れや未入場とは区別する。
       送れない場合はstderrへ一行を出すだけで、commandの終了statusを変えない。
       記録は`''${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-wsl/workload/demand/`へ鍵のsha256ごとに置き、鍵を渡した走行だけが読み書きする。
       子孫の回収を確認でき、commandが取消も期限到達も無く自分で0で終了した走行と、ピークが予約を超えた走行だけを新しい順に10件まで残す。

@@ -66,6 +66,46 @@ test "$(journal_value "$resource_repo" '.slotWaitSeconds == 0')" = true || {
   exit 1
 }
 
+mkdir "$fixture/exit-bin"
+printf '#!%s\nprintf "ran\\n" >>"$MARKER"\nexit "$CHILD_EXIT"\n' "$BASH" >"$fixture/exit-bin/devenv"
+chmod +x "$fixture/exit-bin/devenv"
+for code in 75 124 143; do
+  exit_repo=$fixture/resource-exit-$code
+  t1_repository "$exit_repo" "$completion_budget"
+  status=0
+  (cd "$exit_repo" && MARKER=$fixture/marker-$code CHILD_EXIT=$code XDG_STATE_HOME=$resource_state \
+    PATH="$fixture/exit-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/exit.stderr" || status=$?
+  test "$status" -eq "$code"
+  test "$(cat "$fixture/marker-$code")" = ran
+  test "$(journal_value "$exit_repo" '.client_status == .status and .admitted and (.cancelled | not)')" = true
+  if grep -Eq '実行しなかった|時間切れ|not started|run deadline reached' "$fixture/exit.stderr"; then
+    echo "child exit $code was attributed to the wrapper" >&2
+    exit 1
+  fi
+  expect_closed_gate "$exit_repo" "entry that returned $code"
+done
+
+cancelled_zero=$fixture/resource-cancelled-zero
+t1_repository "$cancelled_zero" "$completion_budget"
+mkdir "$fixture/cancelled-bin"
+cat >"$fixture/cancelled-bin/devenv" <<'SCRIPT'
+#!BASH
+set -eu
+grep -zEq '/supervise\.py$' "/proc/$PPID/cmdline"
+trap 'printf stopped >"$MARKER"; exit 0' TERM
+kill -TERM "$PPID"
+while :; do sleep 0.05; done
+SCRIPT
+sed -i "1c#!$BASH" "$fixture/cancelled-bin/devenv"
+chmod +x "$fixture/cancelled-bin/devenv"
+status=0
+(cd "$cancelled_zero" && MARKER=$fixture/cancelled-marker XDG_STATE_HOME=$resource_state \
+  PATH="$fixture/cancelled-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) || status=$?
+test "$status" -ne 0
+test "$(cat "$fixture/cancelled-marker")" = stopped
+test "$(journal_value "$cancelled_zero" '.status == 0 and .client_status == 0 and .cancelled')" = true
+expect_closed_gate "$cancelled_zero" 'cancelled entry that stopped cleanly'
+
 # 同じ project の別の走行が実行枠を握っている間に入った T1 は、枠を待った秒数を走行の記録へ残す
 slot_repo=$fixture/resource-slot-repo
 t1_repository "$slot_repo" "$completion_budget"
@@ -155,7 +195,8 @@ while :; do
   t1_repository "$limit_repo" "$reach_budget"
   limit_status=0
   (cd "$limit_repo" && AGENT_RESOURCE_PRESSURE_FILE=$pressure XDG_STATE_HOME=$resource_state \
-    PATH="$fixture/resource-bin:$PATH" "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/limit.stderr" || limit_status=$?
+    MARKER=$fixture/rejected-marker CHILD_EXIT=75 PATH="$fixture/exit-bin:$PATH" \
+    "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/limit.stderr" || limit_status=$?
   # 入場を求める前に予算を使い切った走行（124）は待ちの上限へ届いていないので、予算を伸ばしてやり直す
   if [ "$limit_status" -ne 124 ] || [[ $(<"$fixture/limit.stderr") == *'waiting for resources'* ]]; then break; fi
   reach_widen 'T1 waiting for resources'
@@ -165,7 +206,8 @@ test "$limit_status" -eq 75 || {
   echo "T1 that could not enter within its wait limit returned $limit_status instead of 75" >&2
   exit 1
 }
-grep -qF '(75)' "$fixture/limit.stderr"
+grep -qF 'the command was not started' "$fixture/limit.stderr"
+test ! -e "$fixture/rejected-marker"
 expect_closed_gate "$limit_repo" 'T1 that was never started'
 
 # 時間の目標は報告するだけで、走行を取り消さず、終了statusも変えない。滞留は走行の scope の cgroup の値で、
@@ -200,10 +242,7 @@ t1_repository "$within_repo" "$completion_budget" "$((completion_budget / 2))"
 expect_open_gate "$within_repo" 'T1 that finished inside its target'
 test "$(grep -c '時間の目標' "$fixture/within.stderr")" -eq 0
 
-# 上限で取り消された走行は 124 のまま、目標の時点から scope の CPU 時間が増えたかを添える。
-# command は目標の後に CPU 時間を書き足すか、書き足さずに止まり続ける。書き足す場面に届く前に上限が来た走行は負荷の表れなので、
-# その走行だけを倍の予算でやり直す。進行の判定は秒数の一割が境なので、書き足す値は予算を倍にしても境を越える大きさ、
-# 書き足さない側の値は最小の予算でも境に届かない小ささにする
+# 同じ期限切れでも scope の CPU 使用量は異なるため進捗判定の期待値には不採用
 limit_bin=$fixture/target-limit-bin
 mkdir "$limit_bin"
 cat >"$limit_bin/devenv" <<'SCRIPT'
@@ -211,35 +250,47 @@ cat >"$limit_bin/devenv" <<'SCRIPT'
 printf 'usage_usec 10000\n' >"$DOTFILES_FAKE_SCOPE/cpu.stat"
 sleep 600 </dev/null >/dev/null 2>&1 &
 sleep 2.5
-[ "$PROGRESS" != 1 ] || printf 'usage_usec 600000000\n' >"$DOTFILES_FAKE_SCOPE/cpu.stat"
+[ "$CPU_INCREASE" != 1 ] || printf 'usage_usec 600000000\n' >"$DOTFILES_FAKE_SCOPE/cpu.stat"
 touch "$PAST_TARGET"
 exec sleep 600
 SCRIPT
 sed -i "1c#!$BASH" "$limit_bin/devenv"
 chmod +x "$limit_bin/devenv"
-for progress in 1 0; do
+for increase in 1 0; do
   reach_begin
   while :; do
-    cancel_repo=$fixture/resource-cancel-repo-$progress-$reach_budget
+    cancel_repo=$fixture/resource-cancel-repo-$increase-$reach_budget
     t1_repository "$cancel_repo" "$reach_budget" 2
     cancel_status=0
-    (cd "$cancel_repo" && PROGRESS=$progress PAST_TARGET=$fixture/past-target-$progress-$reach_budget \
+    (cd "$cancel_repo" && CPU_INCREASE=$increase PAST_TARGET=$fixture/past-target-$increase-$reach_budget \
       XDG_STATE_HOME=$resource_state PATH="$limit_bin:$PATH" \
       "$RESOURCE_VERIFY" -- devenv shell -- verify) 2>"$fixture/cancel.stderr" || cancel_status=$?
-    [ ! -e "$fixture/past-target-$progress-$reach_budget" ] || break
+    [ ! -e "$fixture/past-target-$increase-$reach_budget" ] || break
     reach_widen 'T1 cancelled at its limit after its target'
   done
   test "$cancel_status" -eq 124
   expect_closed_gate "$cancel_repo" 'T1 cancelled at its limit'
   test "$(grep -c '時間の目標' "$fixture/cancel.stderr")" -eq 1
-  grep -qE '時間の目標 2 秒を超えた\(走行 [0-9]+ 秒、滞留の割合は CPU 不明、IO 不明、メモリ 不明\)。上限で取り消された。' "$fixture/cancel.stderr"
-  # 時間切れの一行は目標の宣言の有無によらず出て、走行の秒数と CPU 時間を示し、CPU を使い続けた走行と待っていた走行で次の作業を分ける
-  test "$(grep -c '時間切れ(124)で止まった' "$fixture/cancel.stderr")" -eq 1
-  if [ "$progress" -eq 1 ]; then
-    grep -qF '目標の時点から scope の CPU 時間は増えていた(進行中)' "$fixture/cancel.stderr"
-    grep -qE '時間切れ\(124\)で止まった\(走行 [0-9]+ 秒、scope の CPU 時間 600 秒\)。scope は CPU を使い続けていて、.*この走行の秒数を下限に見直す$' "$fixture/cancel.stderr"
-  else
-    grep -qF '目標の時点から scope の CPU 時間はほとんど増えていない(進行の兆しが無い)' "$fixture/cancel.stderr"
-    grep -qE '時間切れ\(124\)で止まった\(走行 [0-9]+ 秒、scope の CPU 時間 0 秒\)。scope は CPU をほとんど使っていない。.*何を待っていたかを調べる$' "$fixture/cancel.stderr"
+  grep -qF 'run deadline reached' "$fixture/cancel.stderr"
+  test "$(journal_value "$cancel_repo" '.deadlineExpired and .cancelled')" = true
+  grep -qE "scope の CPU 時間 $((increase * 600)) 秒" "$fixture/cancel.stderr"
+  if grep -Eq '進行中|進行の兆し|上限を.*見直す' "$fixture/cancel.stderr"; then
+    echo 'resource counters alone were interpreted as useful progress' >&2
+    exit 1
   fi
 done
+
+python3 - "$SUMMARIZE_RUNS" "$journal_log" "$resource_repo" "$limit_repo" "$cancel_repo" "$exit_repo" <<'PY'
+import pathlib, runpy, sys
+summary = runpy.run_path(sys.argv[1])
+keyed, _ = summary["read_records"](pathlib.Path(sys.argv[2]).read_text())
+counts = {row[1]: row[4:7] for row in summary["summarize"](keyed)}
+normal, rejected, expired, child_exit = sys.argv[3:]
+assert counts[normal] == ("1", "0", "0"), counts
+assert counts[rejected] == counts[expired] == ("0", "0", "1"), counts
+for code in (75, 124, 143):
+    assert counts[child_exit.rsplit("-", 1)[0] + f"-{code}"] == ("0", "1", "0"), counts
+key, record = next((k, r) for k, r in keyed if k[1] == child_exit)
+legacy = {k: v for k, v in record.items() if k not in ("cancelled", "deadlineExpired", "client_status")}
+assert summary["summarize"]([(key, legacy)])[0][4:7] == ("0", "0", "1")
+PY

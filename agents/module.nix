@@ -187,6 +187,7 @@ let
   standardChecker = "${pluginSources.architecture-standard}/skills/standard-update/scripts/skill-package-check.sh";
   standardPackage = import ./impl/standard-package/package.nix {
     inherit lib pkgs;
+    supervise = cfg.platform.supervise.package;
     reviewed = lib.mapAttrs (_: source: "${source}") standardSources;
     checker = standardChecker;
     origin = {

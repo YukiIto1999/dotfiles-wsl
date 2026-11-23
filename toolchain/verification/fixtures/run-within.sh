@@ -7,7 +7,7 @@ fail() {
 }
 
 cat >command.sh <<'SH'
-trap 'sleep 1; touch stopped; exit 0' TERM
+trap 'sleep 1; touch stopped; echo child-stopped >&2; exit 0' TERM
 (sleep 4; touch late) &
 wait
 SH
@@ -22,11 +22,17 @@ test ! -e late || fail 'a descendant outlived the caller deadline'
 
 rm -f stopped late
 status=0
-"$WITHIN" 2 bash command.sh || status=$?
+"$WITHIN" 2 bash command.sh 2>deadline.stderr || status=$?
 [ "$status" -eq 124 ] || fail "the standalone budget ended with status $status instead of 124"
 test -e stopped || fail 'the standalone budget returned before the command finished stopping'
+[[ $(<deadline.stderr) == *child-stopped*'run deadline reached'* ]] || fail 'deadline not reported after the child stopped'
 sleep 3
 test ! -e late || fail 'a descendant outlived the standalone budget'
+
+status=0
+"$WITHIN" 60 bash -c 'touch child-started; exit 124' 2>child.stderr || status=$?
+test -f child-started && [ "$status" -eq 124 ] || fail 'the child status was not preserved'
+if grep -q 'run deadline reached' child.stderr; then fail 'child exit 124 reported as a supervisor deadline'; fi
 
 cat >command.sh <<'SH'
 (

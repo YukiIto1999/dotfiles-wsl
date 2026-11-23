@@ -2,6 +2,7 @@
   pkgs,
   lib,
   pluginSources,
+  supervise,
   ...
 }:
 
@@ -30,21 +31,28 @@ let
     done
   '';
 
-  resolver = import ../impl/standard-package/package.nix {
-    inherit pkgs lib;
-    origin = {
-      owner = "standard-owner";
-      repo = "standard";
-      ref = null;
+  resolver =
+    buildSeconds:
+    import ../impl/standard-package/package.nix {
+      inherit
+        pkgs
+        lib
+        buildSeconds
+        supervise
+        ;
+      origin = {
+        owner = "standard-owner";
+        repo = "standard";
+        ref = null;
+      };
+      reviewed = lib.genAttrs admittedIds (id: "${baseline}/skills/${id}");
+      checker = "${baseline}/skills/standard-update/scripts/skill-package-check.sh";
+      nixPackage = pkgs.nix;
+      gitCommand = "${boundaries}/bin/git";
+      nixBuildCommand = "${boundaries}/bin/nix-build";
+      inherit stateRelative;
+      lockSeconds = 3;
     };
-    reviewed = lib.genAttrs admittedIds (id: "${baseline}/skills/${id}");
-    checker = "${baseline}/skills/standard-update/scripts/skill-package-check.sh";
-    nixPackage = pkgs.nix;
-    gitCommand = "${boundaries}/bin/git";
-    nixBuildCommand = "${boundaries}/bin/nix-build";
-    inherit stateRelative;
-    lockSeconds = 3;
-  };
 
   # host が固定した版を元に、ABI を宣言した公開候補とその改変を作る
   candidate =
@@ -79,6 +87,7 @@ let
       builtins.replaceStrings
         [
           "@resolver@"
+          "@shortResolver@"
           "@stateRelative@"
           "@candidateA@"
           "@candidateB@"
@@ -86,7 +95,8 @@ let
           "@rejectedCandidates@"
         ]
         [
-          (lib.escapeShellArg (lib.getExe resolver))
+          (lib.escapeShellArg (lib.getExe (resolver 900)))
+          (lib.escapeShellArg (lib.getExe (resolver 1)))
           (lib.escapeShellArg stateRelative)
           (lib.escapeShellArg "${candidate "a" ""}")
           (lib.escapeShellArg "${candidate "b" "printf '\\nB\\n' >>skills/standard-apply/references/recovery.md"}")

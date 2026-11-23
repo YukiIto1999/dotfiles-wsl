@@ -31,6 +31,7 @@ in
 supervise.overrideAttrs (previous: {
   passthru = (previous.passthru or { }) // {
     inherit runtimeSource;
+    summarizeRuns = ./impl/summarize-runs.py;
     sandboxPolicy =
       {
         class,

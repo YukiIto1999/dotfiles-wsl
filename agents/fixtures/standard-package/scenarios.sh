@@ -4,6 +4,7 @@
 set -euo pipefail
 
 resolver=@resolver@
+short_resolver=@shortResolver@
 state_relative=@stateRelative@
 candidate_a=@candidateA@
 candidate_b=@candidateB@
@@ -131,6 +132,22 @@ expect_open 75 standard-apply
 flock -u "$held"
 exec {held}>&-
 expect_last_good "$revision_b" "$candidate_b"
+
+printf '124\n' >"$control/build-status"
+expect_open 75 standard-apply
+grep -qF 'status 124' "$work/err" || fail 'the build exit status was lost'
+if grep -qF 'run deadline reached' "$work/err"; then
+  fail 'an immediate build exit was reported as a deadline'
+fi
+expect_last_good "$revision_b" "$candidate_b"
+rm "$control/build-status"
+
+touch "$control/hold-$revision_c"
+resolver="$short_resolver" expect_open 75 standard-apply
+[ -f "$control/building-$revision_c" ] || fail 'the validation build did not start'
+grep -qF 'run deadline reached' "$work/err" || fail 'the validation deadline was not reported'
+expect_last_good "$revision_b" "$candidate_b"
+rm "$control/hold-$revision_c" "$control/building-$revision_c"
 
 # Nix が C の out-link を作った後で登録に失敗しても、B を公表したままにする。
 touch "$control/registration-failure"

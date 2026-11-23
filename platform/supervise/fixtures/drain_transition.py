@@ -166,6 +166,22 @@ class DrainTransition(unittest.TestCase):
         self.assertEqual(final["status"], 0)
         return pid
 
+    def test_late_observation_preserves_an_already_exited_client(self):
+        observe = supervise.Supervisor.supervise
+
+        def observe_late(owner):
+            os.waitid(os.P_PID, owner.client_pid, os.WEXITED | os.WNOWAIT)
+            with mock.patch.object(time, "monotonic", return_value=owner.run_deadline + 1):
+                return observe(owner)
+
+        with mock.patch.object(supervise.Supervisor, "supervise", observe_late):
+            status = supervise.main(["--result", str(self.result), "--resource-run-seconds", "10",
+                                     "--", sys.executable, "-c", "raise SystemExit(124)"])
+        final = self.report("finished")
+        self.assertEqual((status, final["client_status"]), (124, 124))
+        self.assertIs(final["cancelled"], False)
+        self.assertIs(final["deadlineExpired"], False)
+
     def test_sigkill_without_effect_keeps_ownership_until_the_kernel_confirms(self):
         status, stderr = self.supervise_until_released(mock.patch.object(supervise, "send_signal", self.drop_sigkill))
         pid = self.check_joined_after_overdue_wait(status)

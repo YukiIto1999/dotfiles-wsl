@@ -882,6 +882,7 @@
             {
               RESOURCE_VERIFY = lib.getExe resourceRuntime.verify;
               JOURNAL_SOCKET = fixtureJournalSocket;
+              SUMMARIZE_RUNS = supervise.summarizeRuns;
             };
 
         agent-verification-run-native =

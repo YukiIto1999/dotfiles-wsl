@@ -81,7 +81,10 @@ without_git_environment() {
 
 budget_left() {
   local left=$((budget_seconds - (SECONDS - started)))
-  [ "$left" -gt 0 ] || return 124
+  if [ "$left" -le 0 ]; then
+    printf 'verify-push: 次の処理を始める前に時間予算を使い切った\n' >&2
+    return 124
+  fi
   printf '%d' "$left"
 }
 
@@ -101,6 +104,7 @@ settle_wait() {
 run_within_budget() {
   local -a resource_key=()
   local top pid status remaining result=
+  remaining=$(budget_left) || return $?
   if [ "$1" = --resource-key ]; then
     result=$(mktemp)
     resource_key=(--resource-key "$2" --result "$result")
@@ -109,7 +113,6 @@ run_within_budget() {
   fi
   top=$1
   shift
-  remaining=$(budget_left) || return $?
   (cd "$top" && without_git_environment && exec "$within" "${resource_key[@]}" "$remaining" "$@") </dev/null &
   pid=$!
   trap 'interrupted=1; kill -TERM "$pid" 2>/dev/null || true' INT TERM HUP
@@ -122,6 +125,12 @@ run_within_budget() {
   trap - INT TERM HUP
   if [ -n "$result" ]; then
     settle_wait "$result"
+    if [ "$status" -eq 0 ] && ! jq -es 'length == 1 and (.[0] |
+      .phase == "finished" and .spawned == true and .drained == true and
+      .cancelled == false and .client_status == 0 and .status == 0)' "$result" >/dev/null; then
+      rm -f -- "$result"
+      refuse '監督器の記録で取消のない正常終了を確認できないため push を認めない'
+    fi
     rm -f -- "$result"
   fi
   return "$status"
@@ -142,20 +151,14 @@ require_run_success() {
     printf 'verify-push: %sを中断した(経過 %s)\n' "$phase" "$(duration "$elapsed")" >&2
     exit 130
   fi
-  # 入場できず未実行の走行は待ちの秒の丸めで経過が予算に届くため予算超過の判定を先に置くことは不可
-  if [ "$status" -eq 75 ]; then
-    printf 'verify-push: 資源の空きを待つ上限(予算と同じ %s)に達し、%sを実行しなかった(終了 75)。空いてから push し直す\n' \
-      "$(duration "$budget_seconds")" "$phase" >&2
-    exit 75
+  if [ "$status" -ne 0 ]; then
+    printf 'verify-push: %sの呼び出しが終了 %d で戻った(経過 %s)\n' "$phase" "$status" "$(duration "$elapsed")" >&2
+    exit "$status"
   fi
   if [ -n "$budget_seconds" ] && [ "$elapsed" -ge "$budget_seconds" ]; then
-    printf 'verify-push: %sが予算 %s を超えたため止めた(経過 %s)。必要な検査は減らさず、重複実行、影響範囲の過剰な拡大、起動と build の固定費を見直して実行計画を作り直す\n' \
+    printf 'verify-push: %sの終了時には予算 %s に達していた(経過 %s)。push を認めない\n' \
       "$phase" "$(duration "$budget_seconds")" "$(duration "$elapsed")" >&2
     exit 1
-  fi
-  if [ "$status" -ne 0 ]; then
-    printf 'verify-push: %sに失敗した(終了 %d、経過 %s)\n' "$phase" "$status" "$(duration "$elapsed")" >&2
-    exit "$status"
   fi
 }
 

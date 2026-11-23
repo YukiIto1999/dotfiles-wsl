@@ -1,8 +1,6 @@
 """supervisor の計測の一行を repository と command ごとに集計する、手で呼ぶ script
 
-journald の dotfiles-supervise の計測を読み、鍵（区分、repository の根、command）ごとに、走行の数、合格、検査の失敗、判定なし、
-合格した走行の秒の中央値と最大、待ちの合計、実行枠の待ちの合計、時間の目標を超えた走行の数を、タブ区切りで出す。
-package にも検査にも入れず、資源の扱いを変える前後を比べるときに手元で動かす。
+journald の dotfiles-supervise の計測を鍵ごとに集計する。子プロセスの終了と監督器の取消を分け、検査の合否は判定しない。
 
 使い方: python3 summarize-runs.py SINCE
   SINCE: journalctl の --since へ渡す値。例は '2026-11-18'、'2 days ago'
@@ -15,9 +13,7 @@ import subprocess
 import sys
 from collections import defaultdict
 
-# 検査の合否を表さない終了status。75 は入場できなかった未実行、124 は走行の期限切れ、143 は取消。これ以外の0でない status は検査の失敗
-NO_VERDICT = (75, 124, 143)
-HEADER = ("stage", "repository", "command", "runs", "pass", "failure", "no_verdict", "pass_median_s", "pass_max_s",
+HEADER = ("stage", "repository", "command", "runs", "client_zero", "client_nonzero", "other_or_unknown", "zero_median_s", "zero_max_s",
           "wait_total_s", "slot_wait_total_s", "target_overrun", "slot_wait_samples")
 
 
@@ -68,16 +64,19 @@ def summarize(keyed):
         groups[key].append(record)
     rows = []
     for (stage, repository, command), records in sorted(groups.items(), key=lambda item: (item[0][1], item[0][2], item[0][0])):
-        passed = [record for record in records if record.get("status") == 0]
-        no_verdict = [record for record in records if record.get("status") in NO_VERDICT]
-        run_times = [record["runSeconds"] for record in passed if is_number(record.get("runSeconds"))]
+        completed = [record for record in records
+                     if record.get("admitted") is True and record.get("cancelled") is False
+                     and type(record.get("client_status")) is int
+                     and record.get("status") == (record["client_status"] if record["client_status"] >= 0 else 128 - record["client_status"])]
+        zero = [record for record in completed if record["client_status"] == 0]
+        run_times = [record["runSeconds"] for record in zero if is_number(record.get("runSeconds"))]
         slot_waits = [record["slotWaitSeconds"] for record in records if is_number(record.get("slotWaitSeconds"))]
         overrun = [record for record in records
                    if is_number(record.get("targetSeconds")) and is_number(record.get("runSeconds"))
                    and record["runSeconds"] > record["targetSeconds"]]
         rows.append((
-            stage, repository, command, str(len(records)), str(len(passed)),
-            str(len(records) - len(passed) - len(no_verdict)), str(len(no_verdict)),
+            stage, repository, command, str(len(records)), str(len(zero)),
+            str(len(completed) - len(zero)), str(len(records) - len(completed)),
             seconds(statistics.median(run_times) if run_times else None), seconds(max(run_times) if run_times else None),
             seconds(sum(record["waitSeconds"] for record in records if is_number(record.get("waitSeconds")))),
             seconds(sum(slot_waits) if len(slot_waits) == len(records) else None),

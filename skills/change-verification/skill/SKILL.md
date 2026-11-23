@@ -72,10 +72,9 @@ description: Runs a repository's registered verification entry or durable regres
   mutation の道具（`mutation-dotnet`、`cargo-mutants`、`@mizchi/mutator`）は project が固定した版と設定で動かし、対象の選び方と結果の分類は採用する規範の言語別の文書に従う。
   mutation の結果は report と終了 status を生のまま残し、変更の受入の完了条件に混ぜない。
 
-終了 status は次のように読む。
-75 は資源の待ちの上限による未実行、124 は時間の上限による取消、143 は取消、78 は予算の宣言を読めず未実行であり、どれも合格でも検査の失敗でもない。
-75 では同じ処理を重ねて投入せず、`dotfiles-observe-workload` で資源を確かめてから投入し直す。
-124 は wrapper が stderr に出す CPU 時間の行で、所要が上限を超えたのか、何かを待っていたのかを分けてから扱う。
+終了値はそのまま記録し、どこまで実行したかは、その走行の監督器の診断と検査自身の出力で確かめる。
+入場待ちで未起動なら重複投入せず、`dotfiles-observe-workload` で空きを確かめる。検査が始まっていれば、同じ終了値でも未実行とは報告しない。
+期限で取り消された検査は未完了である。再実行や上限変更を決める前に、最後に終えた検査単位と残りを調べる。終了理由や進捗を特定できないときは、不明とする。
 
 ## 結果を返す
 

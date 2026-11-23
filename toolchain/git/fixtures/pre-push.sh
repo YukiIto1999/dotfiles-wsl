@@ -203,6 +203,20 @@ done
 [ "${1-}" != --inspection-only ] || exit 0
 check_push_metadata_snapshot
 
+mkdir "$PWD/exit-bin"
+printf '#!%s\npwd >"$MARKER"\nexit "$ENTRY_EXIT"\n' "$BASH" >"$PWD/exit-bin/make"
+chmod +x "$PWD/exit-bin/make"
+for code in 75 124; do
+  rm -f "$MARKER"
+  ENTRY_EXIT=$code PATH="$PWD/exit-bin:$PATH" expect_refused "push with entry exit $code" \
+    "$HOOKS" "$declared" "refs/heads/exit-$code" "HEAD:refs/heads/exit-$code"
+  test "$(cat "$MARKER")" = "$declared" || fail 'the entry did not run'
+  grep -qF "検証の呼び出しが終了 $code" stderr || fail 'the hook did not preserve the entry status'
+  if grep -Eq '実行しなかった|not started|run deadline reached|予算 .* に達し' stderr; then
+    fail 'the hook misattributed the entry status'
+  fi
+done
+
 
 rm -f "$MARKER"
 git -C "$declared" rm -q tiergate.json
@@ -446,7 +460,7 @@ git -C "$resource_wait" add Makefile
 git -C "$resource_wait" commit -q -m 'test: 資源待機の検査の追加'
 rm -f "$MARKER"
 GIT_RESOURCE_PRESSURE=fail expect_refused 'push without resource headroom' "$HOOKS" "$resource_wait" refs/heads/main
-grep -qF '(終了 75)' stderr || fail 'the push that could not enter within its wait limit did not say it was not run (75)'
+grep -qF 'the command was not started' stderr || fail 'admission did not report the unstarted command'
 test ! -e "$MARKER" || fail 'verify-push ran while resource admission was blocked'
 set_budget "$resource_wait" 15
 push "$HOOKS" "$resource_wait" || fail 'push remained blocked after resource headroom recovered'

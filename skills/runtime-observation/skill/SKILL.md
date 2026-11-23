@@ -56,7 +56,7 @@ JIT した関数の名前を `perf` で解く必要があれば、自分が起�
   `umask 077` で作業木の外に私有 directory を作って出力先を明示し、repository、共有 log、履歴 memory へ生の出力を置かない。
   共有する抜粋は秘匿化する。
 - 高負荷の再現や長い計測は `dotfiles-workload-run --seconds N -- COMMAND` から起動する。
-  終了 status 75 は未実行、143 は取消であり、計測結果として扱わない。
+  監督器が報告した未起動と、起動後に採れた途中の計測を分ける。終了値だけから採取範囲を決めない。
 
 ## Aspire Dashboard で OTLP を読む
 

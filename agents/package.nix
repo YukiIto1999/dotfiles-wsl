@@ -152,12 +152,12 @@ let
       ];
       text =
         builtins.replaceStrings
-          [ "@gate@" "@flock@" "@supervise@" "@timeout@" "@resourcePolicy@" ]
+          [ "@gate@" "@flock@" "@supervise@" "@env@" "@resourcePolicy@" ]
           [
             (lib.escapeShellArg (lib.getExe verifyGate))
             (lib.escapeShellArg (lib.getExe' pkgs.util-linux "flock"))
             (lib.escapeShellArg (lib.getExe supervise))
-            (lib.escapeShellArg (lib.getExe' pkgs.coreutils "timeout"))
+            (lib.escapeShellArg (lib.getExe' pkgs.coreutils "env"))
             (lib.escapeShellArg (if resourcePolicy == null then "" else toString resourcePolicy))
           ]
           (builtins.readFile ./impl/runtime/verify.sh);

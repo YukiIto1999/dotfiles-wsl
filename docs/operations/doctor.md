@@ -288,7 +288,7 @@ CPU 上限付きの走行は別の class で、指定方法は下の「CPU の�
 取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。managerがstopを受けなかった場合は、取り消す側がそのfileを消し、走行は自分の終了statusで終わる。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
 入場を止める観測はguestの値で、`linux-memory`、`cgroup-budget`、`cpu`のoutcomeが成立しないか読めなければ、すべてのclassが待つ。
 `memory-pressure`と`io-pressure`は受入を止めず、深い検証はfailure（`full avg60`が40%以上）の時だけ止める。warningでは止めない。
-待機は走行の予算から分ける。受入と深い検証では、入場の待ちにも走行と同じ秒数の上限がある。入場の上限を超えると75で返り、commandは起動していない。75は未実行で、成功でも失敗でもない。
+待機は走行の予算から分ける。受入と深い検証では、入場の待ちにも走行と同じ秒数の上限がある。supervisorが `the command was not started` と報告した75は入場できなかった走行で、検査結果はない。起動済みのcommandも75を返せるため、番号だけでは未実行と決められない。
 commandがscopeへ猶予（10秒）内に入れなかった走行は、commandが一度も動いていないので失敗とせず、そのscopeを止めて入場をやり直し、上限までに入れなければ75で返る。load averageが高い時に起きやすい。入れなかったことは、計測の`waitReasons`とstderrの待機理由に`the command did not enter its scope within 10s`として残る。`systemd-run`が自分で非ゼロで終わってscopeを作れない場合だけ、70で返る。
 走行の予算は入場して起動した時から数え、超えれば取り消されて124で返る。待機の理由と待った秒数はjournaldの計測の一行と、stderrの待機理由で確認する。
 非対話のjobは判定へ参加しない。serviceを`agents-deep.slice`に置いて`CPUWeight=idle`を受けるだけで、入場を待たず、受入に取り消されず、深い検証の一走行にも数えない。実測のピークが約0.3 GiBで、memoryの判定に並べる量ではないためである。
@@ -347,7 +347,7 @@ journalctl -t dotfiles-supervise -o cat | jq -c .
 MESSAGEはJSON一行で、`class`（`acceptance`は待つ者のいる検証のT1とpre-push、`deep`は待つ者のいない検証の`dotfiles-workload-run`。入れ子は外側のclass）、`key`、`nested`、`admitted`、`waitSeconds`と`waitReasons`、`slotWaitSeconds`、`runSeconds`、`status`、`peakBytes`と`reservedBytes`、走行のscopeから読んだ`cpuSeconds`、`cpuStallSeconds`、`ioStallSeconds`、`memoryStallSeconds`と、回収の累計の`memoryHighEvents`、`anonRefaultPages`、`fileRefaultPages`、`swapInPages`、`swapOutPages`、scopeの祖先の境界の`ancestorHighEvents`、渡された目標の`targetSeconds`と、目標の時点の読取の`atTarget`を持つ。
 `slotWaitSeconds`はT1が同じprojectの実行枠（git common directoryごと）を待った秒数で、`waitSeconds`（資源の入場の待ち）とは別である。待たなかったT1は0、実行枠を使わない走行（pre-pushの検査本体、`dotfiles-workload-run`）はnullで、枠の待ちが長い走行を資源の待ちと取り違えないために残す。supervisorは枠を持たず、T1のwrapperが測った秒数を`--resource-slot-wait`で受けて記録へ運ぶだけで、枠の単位も待ちの上限も変えない。
 `nested`がtrueの行は外側の走行の中の入れ子で、外側とは別の行になるため、待機の集計では除く。
-`admitted`がfalseなら未起動で、75は待機の上限に達した未実行である。trueの124は入場後の走行の期限切れで、143は取消である。
+入場の有無は `admitted`、supervisorが走行期限に達したかは `deadlineExpired`、取消を観測したかは `cancelled` で読む。`status` はsupervisorの返却値で、直接の子の終了は `client_status`（signalは負、取得できない場合はnull）である。75、124、143は子自身の終了値にもなる。記録のない段階や子の内側の失敗理由まで、これらの値からは分からない。
 `cpuSeconds`はscopeの`cpu.stat`の`usage_usec`、`cpuStallSeconds`は`cpu.pressure`の`some`、`ioStallSeconds`は`io.pressure`の`full`、`memoryStallSeconds`は`memory.pressure`の`full`の`total=`で、いずれも秒（ミリ秒精度）である。
 終了時の値は、終了を始める時に読んだ値で、読めなかった項目は約1秒ごとの読取の直近の値になる。scopeは最後のprocessの終了で消えるためである。上限での取消と外からの取消でも残る。
 scopeを持たない入れ子の走行と、読めない項目はnullで、読めなくても終了statusは変わらない。Nixのbuildはnix-daemonのcgroupで動くため、Nixでbuildする入口ではscopeの値がbuildの分を含まない。
@@ -368,13 +368,14 @@ Nixのbuildを動かすnix-daemonのcgroupは、複数の走行とbuildが共有
 `--result`のfinished段階にも、`runSeconds`と上の項目が入る。
 記録できなかった場合はstderrへ一行を出すだけで、commandの終了statusは変わらない。
 
-repositoryとcommandごとの集計は、同じ記録を読む[`summarize-runs.py`](../../platform/supervise/impl/summarize-runs.py)を手で動かす。packageにも検査にも入れていない。
+repositoryとcommandごとの集計は、同じ記録を読む[`summarize-runs.py`](../../platform/supervise/impl/summarize-runs.py)を手で動かす。
 
 ```sh
 python3 platform/supervise/impl/summarize-runs.py '2 days ago'
 ```
 
-出力はタブ区切りで、鍵（区分、repositoryの根、command）ごとに、走行の数、合格（status 0）、検査の失敗（0、75、124、143以外）、判定なし（75、124、143）、合格した走行の秒の中央値と最大、`waitSeconds`の合計、`slotWaitSeconds`の合計、時間の目標を超えた走行の数を出す。
+タブ区切りの集計は、区分・repositoryの根・commandの組ごとに、取消のない子のゼロ終了（`client_zero`）と非ゼロ終了（`client_nonzero`）を数える。未入場、取消、子の終了に帰属できない記録は `other_or_unknown` に含める。以前の記録にない項目はstatusから補わない。以前の `pass`、`failure`、`no_verdict` 列は使わない。これは入口を呼び出した結果の集計であり、製品の合否でも、検査本体がすべての段を実行した証明でもない。
+ほかにゼロ終了した走行時間の中央値と最大、資源の待ち時間の合計、実行枠の待ち時間の合計、目標を超えた件数が分かる。
 入れ子の走行と、鍵が三行でない走行は集計しない。末尾には鍵がない記録の件数を出す。
 `slot_wait_samples`は実行枠の待ちを計測した記録の件数で、`runs`と一致しなければ`slot_wait_total_s`は`-`になる。
 この集計に含まれるのはsupervisorに届いた走行だけである。T1が実行枠を取れずに終了した75は呼出元のstderrで確認する。
@@ -388,7 +389,7 @@ guestの余裕が予約需要を満たせば受入は待機から進み、深い
 受入の入場を理由に中断してはならない新規の build・test に CPU 上限を付ける場合は、`dotfiles-capped-run` を使う。
 `--cpu-percent` は 1 論理 CPU を 100 とする一走行の上限で、`--wait-seconds` と `--run-seconds` は別々に指定する。
 走行の scope とその子は同じ CPU 上限を受け、同時に走る上限付き scope の合計は host の `workload.capped.cpuBudgetPercent` を超えない。
-空きを待ち切れなければ未実行の `75`、起動後の時間切れはその走行だけを取り消して `124` で返す。
+入場の期限切れはsupervisorが未起動と報告して `75` で返す。走行の期限に達すればその走行を取り消して `124` を返す。返却値が同じでも、子の終了とsupervisorの期限到達は[走行の記録](#資源不足による開始待ち)で区別する。
 
 この上限は入口を通る新規走行にだけ効く。既に走る process は移さず、Nix daemon と共有 DB のような scope 外の service にも適用しない。
 `nixos` の初期設定は 12 論理 CPU のうち最大 6 CPU 相当を上限付きの走行に使う。対話と既存 service に余力を残すための初期値であり、検証の所要を測った最適値ではない。

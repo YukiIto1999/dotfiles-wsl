@@ -826,6 +826,17 @@
               touch $out
             '';
 
+        agent-work-brief =
+          pkgs.runCommandLocal "check-agent-work-brief"
+            {
+              nativeBuildInputs = [ pkgs.git ];
+              BRIEF = lib.getExe hostConfig.dotfiles.platform.cli.commands.agentBrief;
+            }
+            ''
+              bash ${../fixtures/runtime/work-brief.sh}
+              touch "$out"
+            '';
+
         agent-omp-verification-gate-hook =
           pkgs.runCommandLocal "check-agent-omp-verification-gate-hook"
             {

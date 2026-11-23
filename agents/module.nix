@@ -586,6 +586,15 @@ in
     dotfiles.health.observations = runtimeContract.observations;
     dotfiles.platform.cli.commands = {
       inherit agentSupply toolSession;
+      agentBrief = mkCommand {
+        name = "dotfiles-agent-brief";
+        src = ./impl/work-brief.sh;
+        runtimeInputs = [ pkgs.git ];
+        vars = {
+          python = lib.getExe pkgs.python3;
+          script = "${./impl/work-brief.py}";
+        };
+      };
     };
 
     assertions = [

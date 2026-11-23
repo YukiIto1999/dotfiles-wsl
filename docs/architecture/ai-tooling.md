@@ -33,6 +33,16 @@ Capabilityはconsumerに依存しない機能contractである。
 provider adapter、container、database、credential、stateはCapabilityの実装詳細であり、AgentやSkillへ逆依存しない。
 
 Read、Grep、Glob、Edit、Write、Bash、LSP、subagentのようなharness機能と、決定的な操作を担うmanaged CLIはAgentが直接使う。
+
+`dotfiles-agent-brief` は、既存の案件票がない実装で、依頼された成果を作業計画から独立して保持する。
+作業を組み替えても、各成果の番号と原文の参照は変わらない。
+`show ID` は未割当を含む全件を返し、再開先は直近の要約から残件を推定しなくてよい。
+記録は同じ利用者の `${XDG_STATE_HOME:-$HOME/.local/state}/dotfiles-agent/briefs/` にあり、リポジトリにも project memory にも送らない。
+`list` は同じ Git リポジトリ（作業木間で共通）、Git 外では同じディレクトリの未完案件だけを返す。
+別の作業木やクライアントには必要な案件の ID を渡し、別ホストや読取専用の担当には許可された項目だけを渡す。
+終了した案件は `forget ID` で消せる。
+登録した成果が依頼を尽くしているか、根拠が受入に足りるかは親が原文と現物で判断する。
+
 repositoryに配備するproviderは次のCapabilityを通し、公開契約を確認せず内部processやcontainerへ接続しない。
 
 Capability実装の正本は各`capabilities/<id>/module.nix`にあり、Task入口はlocalまたはpluginの採用moduleが宣言する。

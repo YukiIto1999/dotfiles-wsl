@@ -630,6 +630,7 @@
           pkgs.writeShellScript name ''
             set -euo pipefail
 
+            test "$PWD" != "$UNC_WORKING_DIRECTORY"
             test "$#" -eq 5
             test "$1" = -NoLogo
             test "$2" = -NoProfile
@@ -1369,7 +1370,7 @@
                         local root_discard=$5
                         local stdout="$TMPDIR/wsl-vhd-$name.stdout"
 
-                        if ! "$command" >"$stdout" 2>"$TMPDIR/wsl-vhd-$name.stderr"; then
+                        if ! UNC_WORKING_DIRECTORY="$PWD" "$command" >"$stdout" 2>"$TMPDIR/wsl-vhd-$name.stderr"; then
                           echo "WSL VHD $name probe did not produce an envelope" >&2
                           return 1
                         fi

@@ -122,6 +122,7 @@ else
 fi
 
 if content=$(
+  cd -- "${powershell_command%/*}" || exit 1
   "$timeout_command" --signal=TERM --kill-after=2s "${probe_timeout_seconds}s" \
     "$powershell_command" -NoLogo -NoProfile -NonInteractive -Command "$powershell_probe" 2>/dev/null
 ); then

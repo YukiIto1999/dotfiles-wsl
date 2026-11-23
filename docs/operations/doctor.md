@@ -191,8 +191,8 @@ root VHD の容量上限と sparse 設定の期待値は、`dotfiles.workstation
 Windows 側の `%UserProfile%\.wslconfig` の `defaultVhdSize` と `sparseVhd` は新規 VHD の作成条件であり、既存の root VHD の sparse 属性までは doctor が検査していない。
 既定の non-sparse 方針を維持し、Windows drive の空き率と容量差の fail を確認する。
 
-`resource/wsl-vhd/wslconfig` が fail の場合は、Windows 準備入口の本文を確認して、`.wslconfig` の `[wsl2]` の `defaultVhdSize` と `[experimental]` の `sparseVhd` を host の宣言値に合わせる。
-WSL は同じ key の二つ目以降を無視するため、重複した行も消す。
+`resource/wsl-vhd/wslconfig` の `could not read` は、Windows 側の設定を読み取れなかったという意味で、設定値の不一致ではない。doctor は WSL 側の作業ディレクトリを Windows に引き継がず、PowerShell のあるディレクトリから読み取る。
+`lacks the declared` と表示された場合は、Windows 準備入口の宣言と `.wslconfig` の `[wsl2] defaultVhdSize`、`[experimental] sparseVhd` を照合する。WSL は同じキーの二つ目以降を無視するため、値を直すときは重複した行も消す。
 この設定確認は既存の VHD と稼働中の session を変えないので、WSL を再起動せずに doctor を再実行できる。
 
 `resource/wsl-vhd/root-discard`がfailの場合、稼働中のroot mountでonline discardが有効か、mountの状態を読み取れていない。

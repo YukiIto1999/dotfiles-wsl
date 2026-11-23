@@ -121,9 +121,9 @@ store上の写し、記憶、過去のrevisionで補わない。
 通常の共有Gatewayは、専門MCPを使うための再起動を要求しない。
 container、service、databaseを背後に持つ実装は、対応するCapabilityの内側に置く。
 Skillは、依頼に合う道具と結果の確かめ方を選ぶ。
-browser-diagnosticsの入口は`browser-performance`、LCP専門は`debug-optimize-lcp`、実画面のaccessibility監査は`a11y-debugging`とする。
+Chrome DevTools MCPの専門診断には`browser-performance`、LCPには`debug-optimize-lcp`、実画面のaccessibility監査には`a11y-debugging`を使う。
 Web・Windows GUI・CLI/TUIの実操作と受入、明示された探索監査は`surface-operation`を使う。観測証拠からのUI設計評価・再設計は`ui-design`、実行時の観測機器を選んで証拠を採る仕事は`runtime-observation`が担当する。
-操作に Chrome DevTools MCP が指定された場合も、`surface-operation`で指定の tool へ進む。
+Chrome DevTools MCPを実画面の操作に使う場合も、`surface-operation`の経路選択と隔離条件に従う。
 native C#/Rustを含む一般診断は`diagnosing-bugs`が所有し、browser toolを使わないbranchにbrowser Capabilityを要求しない。
 既存の`.binlog`から記録値や埋め込みsourceを調べるときは、`@dotfilesDir@/docs/reference/tooling.md`の「.NETの実行時診断」からBinlog MCPへ進む。ビルドの再現や修正の判断は`msbuild`が担当する。
 @heapDiagnosticsPolicy@

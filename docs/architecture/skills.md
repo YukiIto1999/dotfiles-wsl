@@ -174,7 +174,8 @@ raw sourceの採用は`mizchi/explainer`に限り、donorとして調べた`mizc
 `designer`は親が観測した証拠から設計を判断する。観測が足りなければ必要な状態と操作を親へ返し、実画面操作と専門監査は親から該当Skillへ渡す。
 永続する検査の入口は`change-verification`、専門診断と実行時の観測はそれぞれの専門Skillが所有する。
 Orcaやブラウザ経路を必須の配備条件にせず、必要な操作経路がなければ未確認の結果を返す。
-browser-diagnosticsの入口はcustom `browser-performance`、LCP専門の`debug-optimize-lcp`、実画面a11yの`a11y-debugging`とする。
+Chrome DevTools MCP の専門診断には `browser-performance`、`debug-optimize-lcp`、`a11y-debugging` を使う。
+実画面の操作では [`surface-operation` の経路選択](../../skills/surface-operation/skill/references/web.md#routeを選ぶ) に従う。
 Googleの固定sourceは配備するChrome DevTools MCP 1.10.1に対応し、必要なreferenceを切り離さない。
 例の引数や値はsessionの実tool schemaで確認し、page IDを固定する。
 Lighthouseや概算contrast snippetをWCAGの全合格判定にせず、lab traceをfield CWVに置き換えない。
@@ -229,7 +230,7 @@ moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとsh
 
 | 作業手順 | 公開入口 | 合成と引継ぎ |
 |---|---|---|
-| `surface-operation` | Orca、clientのbrowser tool、Playwright MCP、Anode、PTY・CLI | 操作前提と許可を固定し、表示や終了結果だけでなく依頼された業務結果を確かめる。 |
+| `surface-operation` | Orca、client の browser tool、Playwright MCP、Chrome DevTools MCP、Anode、PTY・CLI | 操作前提と許可を固定し、表示や終了結果だけでなく依頼された業務結果を確かめる。 |
 | `runtime-observation` | .NET診断CLI、`perf`、`strace`、GDB、Hyperfine、Node、Aspire Dashboard | 実行のどの境界を測るか選び、条件をそろえて生の証拠を採る。 |
 | `change-verification` | projectの入口、.NET test、Vitest Browser Mode、Playwright Test、Testcontainers、静的検査 | 確定した契約を検査層へ割り当て、実行、観測結果と未確認条件を返す。 |
 | `local-development` | `devenv`、project実行入口、`orca-cli` | 開発用の依存、起動、readiness、所有するprocessとデータの回収。 |

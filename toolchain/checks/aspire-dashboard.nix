@@ -70,6 +70,7 @@
                 pkgs.findutils
                 pkgs.gnugrep
                 pkgs.gnused
+                pkgs.git
               ];
             }
             ''
@@ -158,6 +159,25 @@
                 "$dash" exec -- bash -c 'printf "%s\n" "''${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT-unset}" "$OTEL_RESOURCE_ATTRIBUTES"' > exec-override.txt
               [ "$(sed -n 1p exec-override.txt)" = unset ] || fail 'signal-specific endpoint was not removed'
               sed -n 2p exec-override.txt | grep -Eq '^service\.instance\.id=fixed,service\.namespace=[^,]+$' || fail 'explicit instance id was not kept'
+
+              checkouts=(one/app two/app 'three/a b' three/a-b)
+              for checkout in "''${checkouts[@]}"; do
+                git init -q "$checkout"
+                (
+                  cd "$checkout"
+                  unset OTEL_SERVICE_NAME OTEL_RESOURCE_ATTRIBUTES
+                  first=$("$dash" exec -- bash -c 'printf "%s\n" "$OTEL_SERVICE_NAME"')
+                  again=$("$dash" exec -- bash -c 'printf "%s\n" "$OTEL_SERVICE_NAME"')
+                  [ "$first" = "$again" ] || fail 'checkout identity changed across runs'
+                  printf '%s\n' "$first"
+                )
+              done > checkouts.txt
+              [ "$(sort -u checkouts.txt | wc -l)" = 4 ] || fail 'different checkouts share an identity'
+              OTEL_RESOURCE_ATTRIBUTES='service.name=explicit, service.namespace=team' \
+                "$dash" exec -- bash -c 'printf "%s\n" "''${OTEL_SERVICE_NAME-unset}" "$OTEL_RESOURCE_ATTRIBUTES"' > exec-resource.txt
+              [ "$(sed -n 1p exec-resource.txt)" = unset ] || fail 'default name overrode explicit resource attribute'
+              sed -n 2p exec-resource.txt | grep -Eq '^service\.name=explicit, service\.namespace=team,service\.instance\.id=[0-9a-f]{16}$' \
+                || fail 'explicit namespace or generated instance id was not kept'
 
               # 生成した資格情報は file、argv、端末出力に出さない
               for secret in "$browser_token" "$otlp_key"; do

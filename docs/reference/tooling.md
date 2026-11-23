@@ -163,8 +163,9 @@ ASP.NET Coreのrequest logはlogin URLのqueryを記録するため、Dashboard�
 ブラウザを使う場合は、`aspire-dashboard run --browser-token-stdin`の非表示プロンプトに、新しく生成した64桁の16進乱数を入力する。`http://127.0.0.1:18888/login`へ同じ値を入力する。値をコマンド引数や保存ファイルへ書かない。ブラウザが不要なら既定の`run`と`otel`で読み取れる。
 
 `exec`は`OTEL_EXPORTER_OTLP_ENDPOINT`、`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`、API keyを含む`OTEL_EXPORTER_OTLP_HEADERS`を設定し、信号別の`OTEL_EXPORTER_OTLP_*_ENDPOINT`・`_HEADERS`・`_PROTOCOL`を外す。
-`service.name`は`--service`、既存の`OTEL_SERVICE_NAME`、Gitのtop-level directory名の順で決める。
-`OTEL_RESOURCE_ATTRIBUTES`に無い場合だけ、`service.namespace`にproject名、`service.instance.id`に起動ごとの乱数を足す。
+`service.name` は `--service`、既存の `OTEL_SERVICE_NAME`、`OTEL_RESOURCE_ATTRIBUTES` の `service.name`、checkout 識別子の順に選ぶ。
+`OTEL_RESOURCE_ATTRIBUTES` に無い場合だけ、`service.namespace` に checkout 識別子、`service.instance.id` に送信プロセスごとの乱数を足す。
+checkout 識別子は Git の top-level directory（Git の外なら現在の directory）の名前とパスの hash から作る。同名の checkout を区別するために用い、絶対パスを属性へ入れない。
 OTLPを出力しないアプリや、OTLP設定を環境変数で上書きできないアプリはこの経路で観測できない。
 
 

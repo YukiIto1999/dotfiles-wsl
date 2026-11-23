@@ -20,6 +20,7 @@ usage() {
     '        1 when it is not running, 3 while starting.' \
     'otel    Run the official aspire otel reader against the running dashboard.' \
     'exec    Run COMMAND with OTEL_* variables that send its telemetry to the dashboard.' \
+    '        By default, telemetry identifies the checkout by its name and a hash of its path.' \
     'stop    Stop the running dashboard and wait until its data is deleted.' \
     '        If an interrupted run left data behind, delete it without starting a dashboard.' \
     '' \
@@ -307,8 +308,22 @@ os.execvp("aspire", ["aspire", "otel", sys.argv[1], "--nologo", "--non-interacti
 ' "$signal" "$@"
 }
 
+has_resource_attribute() {
+  local entry key
+  local -a entries
+  IFS=, read -r -a entries <<<"$1"
+  for entry in "${entries[@]}"; do
+    [[ $entry == *=* ]] || continue
+    key=${entry%%=*}
+    key=${key#"${key%%[![:space:]]*}"}
+    key=${key%"${key##*[![:space:]]}"}
+    [[ $key != "$2" ]] || return 0
+  done
+  return 1
+}
+
 cmd_exec() {
-  local service='' root project attributes key
+  local service='' root name digest checkout attributes key
   while [[ $# -gt 0 ]]; do
     case $1 in
       --service)
@@ -327,14 +342,16 @@ cmd_exec() {
   require_ready
   key=$(env_value "$run_pid" DASHBOARD__OTLP__PRIMARYAPIKEY) || die 'could not read the OTLP key of this run'
 
-  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$PWD
-  project=${root##*/}
-  project=${project//[^A-Za-z0-9._-]/-}
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || root=$(pwd -P)
+  name=${root##*/}
+  name=${name//[^A-Za-z0-9._-]/-}
+  digest=$(printf '%s' "$root" | sha256sum)
+  checkout=${name:-root}-${digest:0:12}
   attributes=${OTEL_RESOURCE_ATTRIBUTES-}
-  if [[ ,$attributes != *,service.namespace=* ]]; then
-    attributes+=${attributes:+,}service.namespace=$project
+  if ! has_resource_attribute "$attributes" service.namespace; then
+    attributes+=${attributes:+,}service.namespace=$checkout
   fi
-  if [[ ,$attributes != *,service.instance.id=* ]]; then
+  if ! has_resource_attribute "$attributes" service.instance.id; then
     attributes+=,service.instance.id=$(random_hex 8)
   fi
 
@@ -345,8 +362,12 @@ cmd_exec() {
   export OTEL_EXPORTER_OTLP_HEADERS="x-otlp-api-key=$key"
   export OTEL_EXPORTER_OTLP_ENDPOINT=$otlp_http_url
   export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-  export OTEL_SERVICE_NAME=${service:-${OTEL_SERVICE_NAME:-$project}}
   export OTEL_RESOURCE_ATTRIBUTES=$attributes
+  if [[ -n $service ]]; then
+    export OTEL_SERVICE_NAME=$service
+  elif [[ -z ${OTEL_SERVICE_NAME-} ]] && ! has_resource_attribute "$attributes" service.name; then
+    export OTEL_SERVICE_NAME=$checkout
+  fi
   exec -- "$@"
 }
 

@@ -101,6 +101,7 @@ nix develop "$HOME/environment/dotfiles-wsl#statechart" --command "$statechart_s
 ```
 
 これは原版のスクリプトを実行する経路であり、`mise`、Javaの全sessionへの追加設定、原版の書換えを行わない。
+原版の手順で SVG が必要なら、同じ devShell で `node --input-type=module` を実行し、`const { render } = await import(process.env.PELE_MODULE)` で Pele 1.9.0 を読み込む。原版のオプションで `render(source, options).svg` を取得する。別の場所への npm インストールは不要である。
 
 ### .NETの実行時診断
 

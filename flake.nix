@@ -477,6 +477,19 @@
             url = "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar";
             hash = "sha256-k2omIGHJFGlN/WaaVDviRXPEXVqg/yCouWsj0B4FDog=";
           };
+          PELE_MODULE = "${
+            systemPkgs.runCommand "pele-1.9.0"
+              {
+                src = systemPkgs.fetchurl {
+                  url = "https://registry.npmjs.org/pele/-/pele-1.9.0.tgz";
+                  hash = "sha512-KUmBt7P5JduVKQaP6FKfXiRgH3LBVIKsmdgPJZU7jD3ye6F+Z8fbms+OjivE7rWY09Qx+5X65VKe/9ywKFJ9Sw==";
+                };
+              }
+              ''
+                mkdir -p "$out"
+                tar -xzf "$src" --strip-components=1 -C "$out"
+              ''
+          }/dist/pele.js";
         };
       };
 

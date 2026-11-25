@@ -64,8 +64,12 @@ JIT した関数の名前を `perf` で解く必要があれば、自分が起�
 OTLP を出さない app や、OTLP の設定を環境変数で上書きできない app はこの経路で観測できないため、project の依存や code に計装を足すのは編集を許可された場合に限る。
 Node.js では OpenTelemetry SDK を project が既に組み込んでいることを確認し、無ければ計装の不足として返す。
 
+metric が要るかを起動前に決める。
+metric は `aspire otel` では読めず Dashboard UI の `Metrics` でだけ見え、UI の login token は `aspire-dashboard run --browser-token-stdin` で起動するときにしか決められない。既定の `run` の token は誰も知らない。
+metric が要る場合は、token を自分の引数や出力に出さずに入力できる利用者へ、その起動と UI での login を依頼して、その Dashboard を使う。依頼できなければ metric の行を未確認にする。trace と log だけなら既定の `run` で足りる。
+
 1. `aspire-dashboard status` を実行する。
-   0 なら既に動いている Dashboard を使い、自分が起動したものでなければ停止しない。
+   0 なら既に動いている Dashboard を使い、自分が起動したものでなければ停止しない。その UI の token は、起動した人が `--browser-token-stdin` で決めた場合だけその人が持つ。
    1 なら未起動なので自分で起動し、3 なら起動中のため 0 になるまで待つ。
 2. 自分で起動する場合、`aspire-dashboard run` は前景で動き続けるため、名前を付けた background service として起動する。
    `aspire-dashboard status` が 0 になってから送信と読取を始める。
@@ -75,7 +79,7 @@ Node.js では OpenTelemetry SDK を project が既に組み込んでいるこ�
 4. `aspire-dashboard otel traces --format Json --limit 50` で候補を探し、`--trace-id ID` で span の木を、`aspire-dashboard otel logs --format Json` で同じ時間帯の log を読む。
    失敗だけを見る場合は `--has-error true` を付ける。
    browser の token や API key を引数、file、出力へ書かない。
-   metric は `aspire otel` では読めない。必要なら Dashboard UI の `Metrics` を使う。
+   metric は上で決めた UI の経路でだけ読む。
 5. 自分が起動した Dashboard だけを `aspire-dashboard stop` で止める。
    停止すると一時保存された telemetry は削除されるため、必要な trace と log を先に私有 directory へ保存する。
 

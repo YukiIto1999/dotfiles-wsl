@@ -48,7 +48,7 @@ WAITING_LOCK = "acceptance.waiting"
 CANCEL_MARK = "cancel-"
 # 読まれないまま scope が消えた取消の記録を片付ける経過秒数。supervisor が強制終了されたときだけ残る
 STALE_MARK_SECONDS = 3600
-ADMIT, WAIT, CANCEL_DEEP = "admit", "wait", "cancel-deep"
+ADMIT, WAIT, CANCEL_DEEP, OBSERVE = "admit", "wait", "cancel-deep", "observe"
 HEADROOM_REASON = "Linux memory headroom is reserved"
 # capped の scope が CPU の上限を持つ cgroup の file。quota と period の二つの値を持つ
 CPU_MAX = "cpu.max"
@@ -121,7 +121,7 @@ class Observation:
 class Decision:
     """入場の判定の結果
 
-    kind: ADMIT、WAIT、CANCEL_DEEP のいずれか
+    kind: ADMIT、WAIT、CANCEL_DEEP、または判定に資源観測が必要な OBSERVE
     reason: ADMIT 以外で待つ理由
     """
 
@@ -185,11 +185,11 @@ def decide(klass, demand, scopes, observation, acceptance_waiting, cpu_request=0
     klass: 要求する走行の class
     demand: 要求する物理memory
     scopes: 存在する scope
-    observation: 空きの観測
+    observation: 空きの観測。未取得なら class の条件だけを判定
     acceptance_waiting: 待っている受入があるか
     cpu_request: capped が要求する CPU の割合。他の class は使わない
     cpu_budget: capped の走行が合わせて予約できる CPU の割合。他の class は使わない
-    戻り値: 入場、待機、deep の取消のいずれか
+    戻り値: 入場、待機、deep の取消、または新しい観測の要求
     不変条件:
       受入の入場は他の受入が待つことで止まらない。
       受入が待つ間は deep を入場させない。deep は同時に一走行だけ。
@@ -199,13 +199,16 @@ def decide(klass, demand, scopes, observation, acceptance_waiting, cpu_request=0
       capped の入場は、待つ受入にも走行中の deep にも止められず、何も取り消さない。収まらなければ待つだけである。
     """
     if klass == CAPPED:
-        reason = cpu_shortfall(cpu_request, cpu_budget, scopes) or shortfall(demand, scopes, observation)
-        return Decision(ADMIT) if reason is None else Decision(WAIT, reason)
+        reason = cpu_shortfall(cpu_request, cpu_budget, scopes)
+        if reason is not None:
+            return Decision(WAIT, reason)
     if klass == "deep":
         if acceptance_waiting:
             return Decision(WAIT, "an acceptance verification is waiting")
         if cancellable(scopes):
             return Decision(WAIT, "another deep verification is running")
+    if observation is None:
+        return Decision(OBSERVE)
     reason = shortfall(demand, scopes, observation)
     if reason is None:
         return Decision(ADMIT)
@@ -488,14 +491,14 @@ class Admission:
     def scopes(self, observation):
         """class の slice の下にいる scope の、需要と使用量の読取
 
-        observation: 同じ判定の観測。scope ごとの使用量はここから読む
+        observation: 同じ判定の観測。未取得なら自分の class の枠だけを確認
         戻り値: 予約に数える scope の一覧と、process を持たない scope の cgroup directory の一覧。読む前に消えた scope は含まない。観測に使用量の無い scope は未使用と見る
         制約: process を持たない scope（unpopulated）は前者に含めず、予約にも deep の一走行にも数えない。持つかどうかを読めない scope は数える。
             呼び側は判定の排他の中で読む。排他の外では、他の supervisor が作っている途中の scope も空に見える
         """
         found = []
         empty = []
-        for klass in CLASSES:
+        for klass in CLASSES if observation is not None else (self.klass,):
             directory = self.policy.slice_directory(klass)
             try:
                 names = sorted(entry.name for entry in os.scandir(directory) if entry.name.endswith(".scope") and entry.is_dir())
@@ -509,7 +512,7 @@ class Admission:
                 if unpopulated(directory / name):
                     empty.append(directory / name)
                     continue
-                used = observation.usage.get(f"{self.slice_path(klass)}/{name}", 0)
+                used = observation.usage.get(f"{self.slice_path(klass)}/{name}", 0) if observation is not None else 0
                 # CPU の予約を使うのは capped の入場だけで、他の class の入場は cpu.max を読まない
                 cpu = self.reserved_cpu(directory / name) if self.klass == CAPPED and klass == CAPPED else 0
                 found.append(Scope(klass, name, limit or 0, used, cpu))
@@ -778,29 +781,32 @@ class Admission:
             if waiting is None:
                 return False
         registry = os.open(self.policy.runtime / REGISTRY_LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        observation = None
+        validate_demand = self.explicit is not None
         try:
             while supervisor.cancel_signal is None and time.time() < wait_until:
-                observation, reason = self.snapshot(wait_until)
                 try:
                     fcntl.flock(registry, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except BlockingIOError:
+                    observation = None
                     supervisor.wait_for_event(min(0.05, max(0, wait_until - time.time())))
                     continue
                 guard = None
                 empty = []
                 try:
-                    if observation is not None:
+                    if observation is None and (validate_demand or self.klass == "acceptance"):
+                        decision = Decision(OBSERVE)
+                    else:
                         scopes, empty = self.scopes(observation)
                         if self.klass == "deep":
                             guard = self.hold_no_acceptance_waiting()
                         decision = decide(self.klass, self.memory, scopes, observation, self.klass == "deep" and guard is None,
                                           self.cpu or 0, self.policy.cpu_budget or 0)
-                        reason = decision.reason
                         if decision.kind == ADMIT and supervisor.cancel_signal is None and time.time() < wait_until:
                             if launch(self.scope_command(), OOM_SCORES[self.klass], wait_until):
                                 return True
                             if supervisor.cancel_signal is None and time.time() < wait_until:
-                                reason = f"the command did not enter its scope within {self.policy.entry_seconds:g}s"
+                                decision = Decision(WAIT, f"the command did not enter its scope within {self.policy.entry_seconds:g}s")
                         if decision.kind == CANCEL_DEEP:
                             self.cancel(scopes)
                 finally:
@@ -810,13 +816,21 @@ class Admission:
                     # capped は他の走行の scope へ止めの要求を出さない。空の scope は予約に数えないだけで、止めるのは受入と deep の入場が持つ
                     if self.klass != CAPPED:
                         self.reclaim(empty)
+                observation = None
+                if decision.kind == OBSERVE:
+                    observation, reason = self.snapshot(wait_until)
+                    if observation is not None:
+                        validate_demand = False
+                        continue
+                else:
+                    reason = decision.reason
                 if reason != self.previous_reason:
                     supervisor.record("waiting", spawned=False, reason=reason, deadline=wait_until)
                     print(f"dotfiles-supervise: waiting for resources: {reason}", file=sys.stderr, flush=True)
                     self.previous_reason = reason
                     if reason is not None and reason not in self.reasons and len(self.reasons) < MAXIMUM_REASONS:
                         self.reasons.append(reason)
-                supervisor.wait_for_event(min(0.5, max(0, wait_until - time.time())))
+                supervisor.wait_for_retry(min(0.5, max(0, wait_until - time.time())))
             return False
         finally:
             os.close(registry)

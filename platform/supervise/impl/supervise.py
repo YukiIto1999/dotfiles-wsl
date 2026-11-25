@@ -633,6 +633,12 @@ class Supervisor:
             except BlockingIOError:
                 pass
 
+    def wait_for_retry(self, timeout):
+        """入場の再試行までの取消可能な待機。観測の子が終了した通知は再試行の合図ではない"""
+        deadline = time.monotonic() + timeout
+        while self.cancel_signal is None and (remaining := deadline - time.monotonic()) > 0:
+            self.wait_for_event(remaining)
+
     def reap(self):
         """Collect exited children; return whether any child remains."""
         while True:

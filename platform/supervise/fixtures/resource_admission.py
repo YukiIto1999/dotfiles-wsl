@@ -65,8 +65,7 @@ INSTANT = [sys.executable, "-c", "pass"]
 # A limit so small that the reservation taken from it lies below the memory of any process.  One sample of a live process then
 # exceeds it, so the peak a test expects does not depend on where the samples, about a second apart, happen to fall.
 TINY_LIMIT = 1024
-# How many more times a run that says it waits must set about judging before it is taken to stay waiting.  Every attempt runs
-# the observation once, so the count of observations is the count of attempts and does not depend on how fast the machine is.
+# Repeated observations while a run is waiting for a change in measured resources.
 ROUNDS = 10
 # The janitor of the fake systemd polls and removes a scope once EMPTY_POLLS (3) polls in a row find no member of it; this many
 # polls would have removed a scope that has none many times over.
@@ -103,7 +102,7 @@ OOM_SCORE = [sys.executable, "-c",
              "\nwhile not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)"]
 # Stands in for `dotfiles-observe-workload [CGROUP]`: the snapshot, with the limits of every ancestor of the cgroup the caller
 # asked about added (`destinationLimits`), as the real observation walks up from the cgroup it is given.  It also appends the
-# pid of its caller, the supervisor that judges, to `<snapshot>.observed`, so that a test can count the judgements.
+# pid of its caller to `<snapshot>.observed`, so that a test can count full observations rather than admission attempts.
 OBSERVE = [sys.executable, "-c",
            "import json,os,pathlib,sys\n"
            "snapshot=json.loads(pathlib.Path(sys.argv[1]).read_text())\n"
@@ -508,12 +507,12 @@ class ResourceAdmission(unittest.TestCase):
         self.snapshot.write_text(json.dumps(envelope))
 
     def judged(self, process):
-        """How many times the workload has set about judging whether it may enter: its observation runs once for each."""
+        """How many full observations this workload has requested."""
         log = Path(f"{self.snapshot}.observed")
         return log.read_text().split().count(str(process.pid)) if log.exists() else 0
 
     def keeps_waiting(self, process):
-        """Wait until the workload has set about judging ROUNDS more times, so that what it waits for is known to last."""
+        """Wait for ROUNDS more observations of the resource the run is waiting for."""
         seen = self.judged(process)
         self.wait_for(lambda: self.judged(process) >= seen + ROUNDS, process)
 
@@ -666,7 +665,7 @@ class ResourceAdmission(unittest.TestCase):
         self.waiting("large", large)
         deep, deep_started, deep_release = self.start("deep", klass="deep", arguments=["--resource-memory", str(100 * MIB)])
         self.assertEqual(self.waiting("deep", deep), "an acceptance verification is waiting")
-        self.keeps_waiting(deep)
+        self.assertEqual(self.judged(deep), 1)  # The explicit demand must be checked even while the slot is occupied.
         self.assertFalse(deep_started.exists())
         holder_release.touch()
         self.assertEqual(self.finish(holder), 0)
@@ -826,12 +825,16 @@ class ResourceAdmission(unittest.TestCase):
         """A second deep run waits for the first, however much memory is free."""
         first, first_started, first_release = self.start("first", klass="deep", arguments=["--resource-memory", str(100 * MIB)])
         self.wait_for(first_started.exists, first)
-        second, second_started, second_release = self.start("second", klass="deep", arguments=["--resource-memory", str(100 * MIB)])
+        second, second_started, second_release = self.start("second", klass="deep")
         self.assertEqual(self.waiting("second", second), "another deep verification is running")
-        self.keeps_waiting(second)
+        self.assertEqual(self.judged(second), 0)
         self.assertFalse(second_started.exists())
+        self.observe(hostMemoryHeadroomBytes=0)
         first_release.touch()
         self.assertEqual(self.finish(first), 0)
+        self.wait_for(lambda: json.loads((self.root / "second.result").read_text()).get("reason") == HEADROOM, second)
+        self.assertFalse(second_started.exists())
+        self.observe(hostMemoryHeadroomBytes=10 * GIB)
         self.wait_for(second_started.exists, second)
         second_release.touch()
         self.assertEqual(self.finish(second), 0)
@@ -846,6 +849,7 @@ class ResourceAdmission(unittest.TestCase):
         self.waiting("never", process)
         _, error = process.communicate(timeout=HANG_SECONDS)
         self.assertEqual(process.returncode, 75)
+        self.assertLessEqual(self.judged(process), 1 + 2 * WAIT_LIMIT, "the observer's exit triggered an immediate retry")
         self.assertFalse(started.exists())
         self.assertIn("gave up waiting for resources", error)
         result = json.loads((self.root / "never.result").read_text())
@@ -1002,7 +1006,7 @@ class ResourceAdmission(unittest.TestCase):
         first.stderr.close()
         second, second_started, second_release = self.start("second", klass="deep", arguments=["--resource-memory", str(100 * MIB)])
         self.assertEqual(self.waiting("second", second), "another deep verification is running")
-        self.keeps_waiting(second)
+        self.assertEqual(self.judged(second), 1)
         self.assertFalse(second_started.exists())
         release.touch()
         self.wait_for(second_started.exists, second)
@@ -1282,7 +1286,10 @@ class ResourceAdmission(unittest.TestCase):
         first, first_started, first_release = self.start("creating", policy=creating, arguments=["--resource-memory", str(9 * GIB)])
         self.wait_for(lambda: self.scopes("acceptance"), first)
         second, second_started, second_release = self.start("judging", arguments=["--resource-memory", str(9 * GIB)])
-        self.keeps_waiting(second)
+        # Both acceptances must have registered before the attaching one lets go of the registry.
+        registry = str(self.root / "run" / "registry.lock")
+        self.wait_for(lambda: any(os.path.realpath(fd) == registry for fd in Path(f"/proc/{second.pid}/fd").iterdir()), second)
+        self.assertEqual(self.judged(second), 0)
         self.assertEqual(self.stops(), [])
         gate.touch()
         self.wait_for(first_started.exists, first)
@@ -2055,7 +2062,7 @@ class ResourceAdmission(unittest.TestCase):
         self.wait_for(second_started.exists, second)
         third, third_started, third_release = self.start("third", klass=CAPPED, arguments=self.cap(100))
         self.assertEqual(self.waiting("third", third), CPU_REASON)
-        self.keeps_waiting(third)
+        self.assertEqual(self.judged(third), 1)
         self.assertFalse(third_started.exists())
         caps = [(scope / "cpu.max").read_text().strip() for scope in self.scopes(CAPPED)]
         self.assertEqual(caps, [f"{half * 1000} 100000"] * 2)
@@ -2194,12 +2201,11 @@ class ResourceAdmission(unittest.TestCase):
     def test_i8_a_capped_scope_whose_cap_cannot_be_read_reserves_the_whole_budget(self):
         """A scope with no cpu.max, and one that says max, hold the budget; the cap it really has is what it reserves."""
         stray = self.leave_scope(CAPPED, "stray.scope", HOLDING)
+        reason, _ = self.held_back("missing-cap", klass=CAPPED, arguments=self.cap(100))
+        self.assertEqual(reason, CPU_REASON)
+        (stray / "cpu.max").write_text("max 100000\n")
         process, started, release = self.start("capped", klass=CAPPED, arguments=self.cap(100))
         self.assertEqual(self.waiting("capped", process), CPU_REASON)
-        self.keeps_waiting(process)
-        self.assertFalse(started.exists())
-        (stray / "cpu.max").write_text("max 100000\n")
-        self.keeps_waiting(process)
         self.assertFalse(started.exists())
         (stray / "cpu.max").write_text(f"{(CPU_BUDGET - 100) * 1000} 100000\n")
         self.wait_for(started.exists, process)
@@ -2242,6 +2248,7 @@ class ResourceAdmission(unittest.TestCase):
         self.assertEqual(self.waiting("starved", process), CPU_REASON)
         _, error = process.communicate(timeout=HANG_SECONDS)
         self.assertEqual(process.returncode, 75)
+        self.assertEqual(self.judged(process), 1, "CPU-only waiting kept launching the full observer")
         self.assertFalse(started.exists())
         self.assertIn("gave up waiting for resources", error)
         result = json.loads((self.root / "starved.result").read_text())

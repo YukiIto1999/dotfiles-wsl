@@ -293,6 +293,8 @@ CPU 上限付きの走行は別の class で、指定方法は下の「CPU の�
 受入がmemoryで収まらず深い検証が動いていれば、深い検証だけが取り消される。受入、CPU 上限付きの走行、session は取り消されない。
 取り消す側は、stopの前に`cancel-<scope名>`の空のfileを状態directory（`/run/dotfiles-workload/<利用者>`）へ残す。取り消された走行はそれを読んで消し、commandの終了statusにかかわらず143で終わる。未完了として扱い、実測の記録を残さない。managerがstopを受けなかった場合は、取り消す側がそのfileを消し、走行は自分の終了statusで終わる。supervisorが強制終了されて読まれなかったfileは、scopeが無く一時間を過ぎたものを次の取消が消す。
 入場を止める観測はguestの値で、`linux-memory`、`cgroup-budget`、`cpu`のoutcomeが成立しないか読めなければ、すべてのclassが待つ。
+深い検証の枠や CPU 上限付き走行の CPU 枠が塞がっている間は、資源観測を繰り返さない。明示した memory 需要が上限内かは最初の観測で確認する。
+枠が空いたら改めて観測し、起動前に枠と予約を再確認する。memory や PSI を待つときは、観測コマンドの終了通知では再試行せず、次の観測まで 0.5 秒以上空ける。
 `memory-pressure`と`io-pressure`は受入を止めず、深い検証はfailure（`full avg60`が40%以上）の時だけ止める。warningでは止めない。
 待機は走行の予算から分ける。受入と深い検証では、入場の待ちにも走行と同じ秒数の上限がある。supervisorが `the command was not started` と報告した75は入場できなかった走行で、検査結果はない。起動済みのcommandも75を返せるため、番号だけでは未実行と決められない。
 commandがscopeへ猶予（10秒）内に入れなかった走行は、commandが一度も動いていないので失敗とせず、そのscopeを止めて入場をやり直し、上限までに入れなければ75で返る。load averageが高い時に起きやすい。入れなかったことは、計測の`waitReasons`とstderrの待機理由に`the command did not enter its scope within 10s`として残る。`systemd-run`が自分で非ゼロで終わってscopeを作れない場合だけ、70で返る。

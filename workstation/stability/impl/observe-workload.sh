@@ -36,21 +36,9 @@ bytes_pattern='^(0|[1-9][0-9]{0,17})$'
 cgroup_path_pattern='^/(([A-Za-z0-9_.@:\\-]+/)*[A-Za-z0-9_.@:\\-]+)?$'
 dot_component_pattern='(^|/)\.\.?(/|$)'
 
-json_number() {
-  if [[ -n $1 ]]; then printf '%s\n' "$1"; else printf 'null\n'; fi
-}
-
 read_first_line() {
-  local line=
-  { IFS= read -r line || [[ -n $line ]]; } 2>/dev/null <"$1" || return 1
-  printf '%s\n' "$line"
-}
-
-stat_value() {
-  "$awk_command" -v key="$2" '
-    $1 == key && $2 ~ /^(0|[1-9][0-9]{0,17})$/ { print $2; found = 1; exit }
-    END { exit !found }
-  ' "$1" 2>/dev/null
+  local -n line=$2
+  { IFS= read -r line || [[ -n $line ]]; } 2>/dev/null <"$1"
 }
 
 cpu_list_count() {
@@ -104,30 +92,33 @@ full_pressure() {
 # page cache は上限まで増えるため、active な cache を使用中と数えると headroom が時間とともに 0 へ張り付き、
 # host 側の MemAvailable とも定義が食い違う。map 中、dirty、writeback 中の page は直ちに回収できないため控除しない
 # この式は memoryLimits の階層にも memoryScopes の scope にも使い、supervise の入場は scope の値をここから読む。他に同じ式を置かない
+usage_current=
+usage_working=
 usage_bytes() {
-  local current inactive active mapped dirty writeback reclaimable
-  current=$(read_first_line "$1/memory.current") || return 1
-  [[ $current =~ $bytes_pattern ]] || return 1
-  inactive=$(stat_value "$1/memory.stat" inactive_file) || return 1
-  active=$(stat_value "$1/memory.stat" active_file) || return 1
-  mapped=$(stat_value "$1/memory.stat" file_mapped) || return 1
-  dirty=$(stat_value "$1/memory.stat" file_dirty) || return 1
-  writeback=$(stat_value "$1/memory.stat" file_writeback) || return 1
-  reclaimable=$((inactive + active - mapped - dirty - writeback))
+  local key value reclaimable
+  local -A file=()
+  read_first_line "$1/memory.current" usage_current && [[ $usage_current =~ $bytes_pattern ]] || return 1
+  while read -r key value _ || [[ -n $key ]]; do
+    case $key in
+      inactive_file|active_file|file_mapped|file_dirty|file_writeback)
+        [[ $value =~ $bytes_pattern ]] || return 1
+        file[$key]=$value
+        ((${#file[@]} == 5)) && break
+        ;;
+    esac
+  done 2>/dev/null <"$1/memory.stat" || return 1
+  ((${#file[@]} == 5)) || return 1
+  reclaimable=$((file[inactive_file] + file[active_file] - file[file_mapped] - file[file_dirty] - file[file_writeback]))
   if ((reclaimable < 0)); then
     reclaimable=0
   fi
-  if ((current > reclaimable)); then
-    printf '%s %s\n' "$current" "$((current - reclaimable))"
-  else
-    printf '%s 0\n' "$current"
-  fi
+  usage_working=$((usage_current > reclaimable ? usage_current - reclaimable : 0))
 }
 
 # 読めない階層を制限なしとみなす楽観のため読取り失敗の無視は不可
 controller_disabled() {
   local controllers
-  controllers=$(read_first_line "$1/cgroup.controllers") || return 1
+  read_first_line "$1/cgroup.controllers" controllers || return 1
   [[ " $controllers " != *" $2 "* ]]
 }
 
@@ -135,14 +126,15 @@ memory_limit_rows=()
 cpu_quota_rows=()
 
 memory_level() {
-  local directory=$1 path=$2 value limit usage current working headroom
+  local directory=$1 path=$2 file value limit headroom
   [[ -d $directory ]] || return 1
   if [[ ! -e $directory/memory.max && ! -e $directory/memory.high ]]; then
     controller_disabled "$directory" memory
     return
   fi
   limit=
-  for value in "$(read_first_line "$directory/memory.max")" "$(read_first_line "$directory/memory.high")"; do
+  for file in memory.max memory.high; do
+    read_first_line "$directory/$file" value || return 1
     if [[ $value == max ]]; then
       continue
     fi
@@ -154,13 +146,12 @@ memory_level() {
   if [[ -z $limit ]]; then
     return 0
   fi
-  usage=$(usage_bytes "$directory") || return 1
-  read -r current working <<<"$usage"
+  usage_bytes "$directory" || return 1
   headroom=0
-  if ((limit > working)); then
-    headroom=$((limit - working))
+  if ((limit > usage_working)); then
+    headroom=$((limit - usage_working))
   fi
-  memory_limit_rows+=("$path"$'\t'"$headroom"$'\t'"$limit"$'\t'"$current"$'\t'"$working")
+  memory_limit_rows+=("$path"$'\t'"$headroom"$'\t'"$limit"$'\t'"$usage_current"$'\t'"$usage_working")
 }
 
 cpu_level() {
@@ -169,7 +160,7 @@ cpu_level() {
     controller_disabled "$directory" cpu
     return
   fi
-  value=$(read_first_line "$directory/cpu.max") || return 1
+  read_first_line "$directory/cpu.max" value || return 1
   read -r quota period <<<"$value"
   [[ ${period-} =~ ^[1-9][0-9]{0,9}$ ]] || return 1
   if [[ $quota == max ]]; then
@@ -204,7 +195,7 @@ if [[ ! $cgroup_path =~ $cgroup_path_pattern || $cgroup_path =~ $dot_component_p
   cgroup_known=0
   cpu_known=0
   cgroup_path=/
-elif ! read_first_line "$cgroup_root/cgroup.controllers" >/dev/null; then
+elif ! read_first_line "$cgroup_root/cgroup.controllers" controllers; then
   cgroup_known=0
   cpu_known=0
 elif (($# > 0)); then
@@ -244,9 +235,8 @@ for scope_parent in "${@:2}"; do
   fi
   for scope_directory in "$cgroup_root$scope_parent"/*.scope; do
     [[ -d $scope_directory ]] || continue
-    usage=$(usage_bytes "$scope_directory") || continue
-    read -r current working <<<"$usage"
-    memory_scope_rows+=("$scope_parent/${scope_directory##*/}"$'\t'"$current"$'\t'"$working")
+    usage_bytes "$scope_directory" || continue
+    memory_scope_rows+=("$scope_parent/${scope_directory##*/}"$'\t'"$usage_current"$'\t'"$usage_working")
   done
 done
 memory_scopes=[]
@@ -264,11 +254,10 @@ host_headroom=
 if [[ -n $memory_total && -n $memory_available ]]; then
   reserve_bytes=$(((memory_total * host_reserve_percent + 99) / 100))
   reserve_charged_bytes=$reserve_bytes
-  if usage=$(usage_bytes "$cgroup_root$aggregate_cgroup"); then
-    read -r _ aggregate_working_set <<<"$usage"
+  if usage_bytes "$cgroup_root$aggregate_cgroup"; then
     outside_bytes=$((memory_total - memory_available))
-    if ((outside_bytes > aggregate_working_set)); then
-      outside_bytes=$((outside_bytes - aggregate_working_set))
+    if ((outside_bytes > usage_working)); then
+      outside_bytes=$((outside_bytes - usage_working))
     else
       outside_bytes=0
     fi
@@ -292,7 +281,7 @@ affinity_list=$(
   ' "$proc_status" 2>/dev/null
 ) || affinity_list=
 cpu_affinity=$(cpu_list_count <<<"$affinity_list" 2>/dev/null) || cpu_affinity=
-online_list=$(read_first_line "$cpu_online") || online_list=
+read_first_line "$cpu_online" online_list || online_list=
 online_processors=$(cpu_list_count <<<"$online_list" 2>/dev/null) || online_processors=
 
 cpu_quota=
@@ -351,23 +340,23 @@ fi
   --arg io_pressure_outcome "$io_pressure_outcome" \
   --arg windows_memory_outcome "$windows_memory_outcome" \
   --arg wsl_cap_outcome "$wsl_cap_outcome" \
-  --argjson observed_at "$(json_number "$observed_at")" \
-  --argjson memory_total "$(json_number "$memory_total")" \
-  --argjson memory_available "$(json_number "$memory_available")" \
+  --argjson observed_at "${observed_at:-null}" \
+  --argjson memory_total "${memory_total:-null}" \
+  --argjson memory_available "${memory_available:-null}" \
   --argjson cgroup_known "$cgroup_known" \
   --argjson memory_limits "$memory_limits" \
   --argjson memory_scopes "$memory_scopes" \
-  --argjson reserve_bytes "$(json_number "$reserve_bytes")" \
-  --argjson reserve_charged_bytes "$(json_number "$reserve_charged_bytes")" \
-  --argjson host_headroom "$(json_number "$host_headroom")" \
-  --argjson cpu_count "$(json_number "$cpu_count")" \
-  --argjson cpu_affinity "$(json_number "$cpu_affinity")" \
-  --argjson cpu_quota "$(json_number "$cpu_quota")" \
-  --argjson online_processors "$(json_number "$online_processors")" \
-  --argjson declared_memory "$(json_number "$declared_memory_bytes")" \
-  --argjson declared_processors "$(json_number "$declared_processors")" \
-  --argjson memory_full "$(json_number "$memory_full")" \
-  --argjson io_full "$(json_number "$io_full")" \
+  --argjson reserve_bytes "${reserve_bytes:-null}" \
+  --argjson reserve_charged_bytes "${reserve_charged_bytes:-null}" \
+  --argjson host_headroom "${host_headroom:-null}" \
+  --argjson cpu_count "${cpu_count:-null}" \
+  --argjson cpu_affinity "${cpu_affinity:-null}" \
+  --argjson cpu_quota "${cpu_quota:-null}" \
+  --argjson online_processors "${online_processors:-null}" \
+  --argjson declared_memory "${declared_memory_bytes:-null}" \
+  --argjson declared_processors "${declared_processors:-null}" \
+  --argjson memory_full "${memory_full:-null}" \
+  --argjson io_full "${io_full:-null}" \
   --argjson pressure_warning "$pressure_warning" \
   --argjson pressure_failure "$pressure_failure" \
   --argjson windows_commit_warning "$windows_commit_warning" \

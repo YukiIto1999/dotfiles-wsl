@@ -22,8 +22,8 @@ effort: xhigh
 ## Process
 
 1. 受入済みplan、テストリスト、変更禁止範囲を確認し、期待値が未決の項目だけをcallerへ返す。
-2. 共通の実装順序は`standard-apply`から標準の`process/implementation.md`へ進み、変更契約に対応する最小の検査と実装を行う。検査の実行と証跡は`change-verification`を使う。
-   CLIとterminalの契約は標準のconsole構造、property-based testの入力領域と独立oracleは`property-testing`で確定し、既存の実装loopへ渡す。
+2. 変更契約に対応する最小の検査と実装を行う。callerが標準の適用を指定した仕事では、`standard-apply`から標準の`process/implementation.md`へ進み、CLIとterminalの契約は標準のconsole構造に従う。検査の実行と証跡は`change-verification`を使う。
+   property-based testの入力領域と独立oracleは`property-testing`で確定し、既存の実装loopへ渡す。
 3. obsoleteなcaller、compatibility path、scaffoldを残さずclean cutoverする。
 4. テストリストの各契約へ実測した結果と証拠を対応付け、未検証の項目を区別して返す。
 

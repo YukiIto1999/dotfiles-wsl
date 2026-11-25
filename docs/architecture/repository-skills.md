@@ -138,7 +138,7 @@ clientごとの`.claude/skills/`などはadapterの投影先であり、正本�
 配備検査はこの実行評価を代替しない。
 標準を改訂するときも `standard-update` の入口から始める。実行する原版とは別に、変更は上流の作業 checkout へ行う。
 
-Mattの`code-review`は`setup-matt-pocock-skills`を使う。共通実装の順序は`standard-apply`から標準へ進み、外部TDDを併設しない。
+Mattの`code-review`は`setup-matt-pocock-skills`を使う。標準を適用する仕事の実装順序は`standard-apply`から標準へ進み、外部TDDを併設しない。
 `diagnosing-bugs`はbrowserを使わないbranchも持つためbrowser Capabilityへのhard依存を持たず、architecture探索を常に呼ぶ依存も置かない。
 `improve-codebase-architecture`は`codebase-design`、`domain-modeling`、`grilling`を使う。`grill-with-docs`は`grilling`と`domain-modeling`を使う。
 `to-spec`と`to-tickets`はtracker設定の`setup-matt-pocock-skills`を、`retro`は`writing-for-agents`を使う。

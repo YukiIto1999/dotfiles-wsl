@@ -102,7 +102,7 @@ Chrome MCPのruntimeと採用Skillは同じpublished packageを参照し、runti
 ## Routing
 
 共通設計は`codebase-design`、一般の故障とnative性能regressionは`diagnosing-bugs`を使う。
-共通実装の順序は`standard-apply`から標準の[実装の順序](https://github.com/YukiIto1999/architecture-standard/blob/main/process/implementation.md)へ進む。
+標準を適用する仕事の実装順序は`standard-apply`から標準の[実装の順序](https://github.com/YukiIto1999/architecture-standard/blob/main/process/implementation.md)へ進み、標準を求めていない仕事を標準の取得可否で止めない。
 refactoringは確定したbehaviorとscopeを保つ実装作業とし、そのためだけの汎用Skillは置かない。
 実装者とreviewerは、不要な処理を消せるか、既存owner、標準library、native機能、導入済みdependencyで要件を満たせるかを比較する。
 短いdiffやline数の削減で要件、安全性、外部契約を弱めない。
@@ -205,7 +205,7 @@ guideを独自Skillへ再編集せず、projectのbrowser supportと前提を照
 
 `property-testing`の正本はarchitecture-standardの`skills/property-testing/SKILL.md`であり、`requiresSkills = [ \"standard-apply\" ]`、`requiresCapabilities = [ ]`を使う。
 同じ ID で dynamic route へ登録し、選択した作業では上流原版を使う。
-CLIとterminalの公開契約は`standard-apply`から標準の[structure/surfaces/console/layout.md](https://github.com/YukiIto1999/architecture-standard/blob/main/structure/surfaces/console/layout.md)へ進む。
+標準を適用する仕事のCLIとterminalの公開契約は`standard-apply`から標準の[structure/surfaces/console/layout.md](https://github.com/YukiIto1999/architecture-standard/blob/main/structure/surfaces/console/layout.md)へ進む。
 moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとshrinkingは`property-testing`、実装順序は標準が所有する。
 標準の`skills/cli-design/`はwhole source内に保持するが、named discoveryとsubagent routeには登録しない。
 規範本文はこの配備済みsourceからでなく、policyが案内する現行規範rootから読むため、本文の改訂は`flake.lock`の更新を待たない。

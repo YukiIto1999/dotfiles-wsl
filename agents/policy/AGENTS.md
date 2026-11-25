@@ -73,8 +73,8 @@ Read / Grep / Glob / Edit / Write / Bash、LSP、subagentのようなharness機�
 反復する判断と手順は一致するSkillから入り、providerを持つ能力はそのSkillが宣言するCapabilityへ渡す。
 単一toolの呼出しを包むSkillは作らない。
 
-共通の実装順序は`standard-apply`から標準の`process/implementation.md`へ進む。確定した検査の実行と証跡は`change-verification`を使う。
-CLIとterminalの契約は`standard-apply`が読む標準のconsole構造に従い、moduleのinterfaceとseamを`codebase-design`で設計する。
+「現行規範」の範囲の仕事の実装順序は`standard-apply`から標準の`process/implementation.md`へ進み、CLIとterminalの契約は同じSkillが読む標準のconsole構造に従う。確定した検査の実行と証跡は`change-verification`を使う。
+moduleのinterfaceとseamは`codebase-design`で設計する。
 実装とrefactoringでは、新規機構より不要な処理の削除、既存owner、標準library、native機能、導入済みdependencyを先に比較し、要件と安全性を削減対象にしない。
 通常の`code-review`はtop-level coordinatorが読み、callerのfixed pointからHEADまでのcommitted rangeをStandardsとSpecの別々の新規セッションへ渡す。
 raw upstreamの`code-review`にstaged / unstaged diffを代入しない。

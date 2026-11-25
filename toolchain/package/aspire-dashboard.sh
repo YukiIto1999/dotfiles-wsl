@@ -154,14 +154,16 @@ stop_group() {
   kill -KILL -- "-$pgid" 2>/dev/null || true
 }
 
+# data の所在の記録は data を消せた後に消し、消せなかった data を次の run か stop が回収できるようにする
 run_cleanup() {
   if [[ -n $run_child ]]; then
     stop_group "$run_child"
   fi
-  rm -rf -- "$state"
-  if [[ -n $run_data ]]; then
-    rm -rf -- "$run_data"
+  if [[ -n $run_data ]] && ! rm -rf -- "$run_data"; then
+    printf 'aspire-dashboard: could not delete %s; aspire-dashboard stop retries it\n' "$run_data" >&2
+    exit 1
   fi
+  rm -rf -- "$state"
 }
 
 # setsid が session を作る前は process group が無いため、子の pid へ直接送る
@@ -182,7 +184,7 @@ remove_previous_run() {
   if [[ -f $state/data-dir ]]; then
     previous=$(<"$state/data-dir")
     if [[ ${previous##*/} == aspire-dashboard.???????? && -d $previous && ! -L $previous && -O $previous ]]; then
-      rm -rf -- "$previous"
+      rm -rf -- "$previous" || return 1
     fi
   fi
   rm -rf -- "$state"
@@ -206,7 +208,7 @@ cmd_run() {
   umask 077
   exec 9>>"$lock"
   flock -n 9 || die 'already running; use aspire-dashboard status, otel, exec or stop'
-  remove_previous_run
+  remove_previous_run || die 'could not delete the data left by an interrupted run; aspire-dashboard stop retries it'
   trap run_cleanup EXIT
   trap run_signal INT TERM HUP
   mkdir -m 700 -- "$state"
@@ -381,7 +383,7 @@ cmd_stop() {
   for ((attempt = 0; attempt < 100; attempt++)); do
     if flock -n "$fd"; then
       if [[ -e $state ]]; then
-        remove_previous_run
+        remove_previous_run || die 'could not delete the data left by an interrupted run; retry aspire-dashboard stop'
         printf 'aspire-dashboard: not running; removed data left by an interrupted run\n'
       else
         printf 'aspire-dashboard: not running\n'
@@ -399,7 +401,7 @@ cmd_stop() {
   terminate_run "$run_pid" "$stopping" || true
   for ((attempt = 0; attempt < 300; attempt++)); do
     if flock -n "$fd"; then
-      remove_previous_run
+      remove_previous_run || die 'stopped, but could not delete its data; retry aspire-dashboard stop'
       printf 'aspire-dashboard: stopped\n'
       return 0
     fi

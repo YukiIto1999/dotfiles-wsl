@@ -40,6 +40,12 @@
             "dashboard run")
               pwd > "$FAKE_LOG/run.cwd"
               printf '%s\n' "$TMPDIR" > "$FAKE_LOG/run.tmpdir"
+              # 消せない data を作り、所在の記録が data より先に消えないことを確かめる
+              if [ -n "''${FAKE_UNDELETABLE-}" ]; then
+                mkdir "$TMPDIR/locked"
+                touch "$TMPDIR/locked/file"
+                chmod 500 "$TMPDIR/locked"
+              fi
               env | ${pkgs.gnugrep}/bin/grep -E '^(DASHBOARD__[A-Z_]+MODE|ASPIRE_DASHBOARD_SUPPRESS_BROWSER_TOKEN_IN_OUTPUT)=' | sort > "$FAKE_LOG/run.env"
               exec ${lib.getExe pkgs.python3} ${fakeServer}
               ;;
@@ -211,6 +217,25 @@
               run 0 reclaim-stopped "$dash" stop
               [ ! -e "$state" ] && [ ! -e "$abandoned" ] && [ -d "$unrelated" ] \
                 || fail 'stop did not reclaim exactly the abandoned run'
+
+              FAKE_UNDELETABLE=1 "$dash" run > undeletable.out 2> undeletable.err &
+              wrapper=$!
+              for _ in $(seq 100); do
+                "$dash" status > /dev/null 2>&1 && break
+                sleep 0.1
+              done
+              undeletable=$(cat "$state/data-dir")
+              run 1 stop-undeletable "$dash" stop
+              status=0
+              wait "$wrapper" || status=$?
+              [ "$status" -ne 0 ] || fail 'run reported success although its data could not be deleted'
+              [ -f "$state/data-dir" ] && [ -d "$undeletable" ] \
+                || fail 'the record of undeleted data was removed before the data'
+              run 1 run-over-undeletable "$dash" run
+              chmod -R u+w "$undeletable"
+              run 0 stop-after-repair "$dash" stop
+              [ ! -e "$state" ] && [ ! -e "$undeletable" ] \
+                || fail 'stop did not reclaim the data once it became deletable'
 
               touch "$out"
             '';

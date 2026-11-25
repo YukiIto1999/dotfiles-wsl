@@ -157,7 +157,7 @@ lockで一つのinstanceに限り、二重に起動すると失敗する。
 `status`はbrowser tokenを`/api/telemetry/validateToken`へ標準入力から送り、200だけを受付とみなす。返されたAPI keyは捨てる。この要求は利用者のcurl設定を読まないため、trace、proxy、追加headerの設定でtokenが記録・転送されない。
 `otel`は公式CLIの[login URLを渡す方式](https://aspire.dev/reference/cli/commands/aspire-otel/)を使い、CLIがtokenをAPI keyへ交換する。URLはLinuxの匿名メモリファイルを通して渡し、CLIが複数回読み直しても引数やディスクには残らない。
 CLIはlogと表示でURLのqueryを消すため、`otel`のlogは既定の`ASPIRE_HOME`の下に残る。
-wrapperが強制終了してもCLIはparent death signalで止まり、残った一時directoryは次の`run`か`stop`が消す。
+wrapperが強制終了してもCLIはparent death signalで止まり、残った一時directoryは次の`run`か`stop`が消す。一時directoryを消せなかった間は所在の記録を残し、`stop`は失敗を返して再試行でき、`run`は起動しない。
 
 保存は`--persistence None`の一時SQLiteで、起動ごとの`${TMPDIR:-/tmp}/aspire-dashboard.*`に置き、停止時にdirectoryごと削除する。CLIとDashboardのlogも同じdirectoryに置く。
 ASP.NET Coreのrequest logはlogin URLのqueryを記録するため、Dashboardの`Microsoft.AspNetCore`のlog levelをWarningに絞る。個々のrequestの記録はこのlogに残らない。

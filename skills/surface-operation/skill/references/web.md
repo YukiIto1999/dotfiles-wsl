@@ -11,7 +11,7 @@
 | 1 | Orcaの内蔵browser | Orca projectの中でOrca CLIの読み取りcommandが現在のcwdのworktreeを返し、対象が開発server、fixture、localhostなどのlocal UIである |
 | 2 | clientの標準browser tool | 対象を扱えるtoolをsessionが現在のschemaとともに公開している |
 | 3 | Orcaの内蔵browser | 2で対象を扱えず、Orca CLIの読み取りcommandが現在のcwdのworktreeを返し、対象が利用者の既存tabや実accountを必要としない |
-| 4 | `browser-automation`のPlaywright MCP | 上の操作routeで対象を扱えず、独立したbrowser sessionで検証できる |
+| 4 | `browser-automation`のPlaywright MCP | 上の操作routeで対象を扱えず、Playwright MCPが現在のclientに公開されていて、独立したbrowser sessionで検証できる |
 | 5 | `browser-diagnostics`のChrome DevTools MCP | 上の経路では実行できず、現在のtoolが対象と必要な操作を隔離したpageで扱える |
 | 6 | なし | 上の条件を満たすrouteがない |
 
@@ -45,7 +45,8 @@ Windows上のbrowserでしか判定できない要求でなければ、WebをWin
 
 本文の論理名を、現在のclientが公開する実tool名とschemaへ対応づけてから呼ぶ。
 Playwright MCPは`browser-automation`のGateway toolとして通常の接続に含まれる。
-4を選んだが現在のclientに公開されていない場合、状態変更前に限り、対象URL、許可されたdataと操作、matrixをcallerへ返し、MCPの接続や設定を追加しない。操作結果が返るまでは未確認とする。
+Playwright MCPが現在のclientに公開されていなければ、4は使えないrouteとして5へ進む。
+5も使えない場合だけ、状態変更前に限り、対象URL、許可されたdataと操作、matrixをcallerへ返し、MCPの接続や設定を追加しない。操作結果が返るまでは未確認とする。
 
 Playwrightのtabは現在の一覧の`index`で選び、作成や終了で変わるため、操作の前に一覧を取り直す。
 既存tabを使う必要がなければ専用tabを新規に作る。

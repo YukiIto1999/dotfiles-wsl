@@ -41,7 +41,7 @@ GitHubのrepository、issue、PRの読取・変更は`github-operations`が所�
 
 成功状態だけでなく、title、主見出し、主要節が取得できたかを原文と照合する。空、application shell、同意画面、navigationだけの本文、または見えるはずの項目（著者、表の列、注記）の欠落は、取得toolがJavaScript描画後の内容を返していない可能性を示す。
 利用可能な`surface-operation`へURLと確認したい項目を渡し、実ページから読んだ内容を受け取る。
-それでも必要な本文を取得できず、利用者が公開URLとContext.devへの送信を承認している場合に限り、`context-dev-scrape <URL>`で取得する。
+それでも必要な本文を取得できず、そのURLをまだContext.devへ送っておらず、利用者が公開URLとContext.devへの送信を承認している場合に限り、`context-dev-scrape <URL>`で一度だけ取得する。既に送った結果で足りなければ、送り直さずに不足として返す。
 最終URLと必要な本文を照合し、対象を越えた結果、取得失敗、資格情報なしでは未取得と明示する。
 既存PDFは、取得toolが全頁の抽出を示す場合だけ本文として使い、部分抽出の警告があれば部分取得として扱う。
 

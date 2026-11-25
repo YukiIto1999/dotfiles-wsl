@@ -128,10 +128,14 @@ let
           [
             "@cacheRootRelative@"
             "@verificationEntry@"
+            "@python@"
+            "@treeKey@"
           ]
           [
             cacheRootRelative
             (lib.getExe verificationEntry)
+            (lib.getExe pkgs.python3)
+            "${./impl/runtime/tree-key.py}"
           ]
           (builtins.readFile ./impl/runtime/gate.sh);
     };

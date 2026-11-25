@@ -225,6 +225,7 @@ stage、commit、amend、件名の書換え、中身が同じ別のlinked worktr
 ignoreされたfile、`assume-unchanged`や`skip-worktree`の印の付いたfile、改行の変換やcleanフィルタの後でgitが同じ内容とみなす変更は見えない。
 読めないfileやcommitの無い入れ子のrepositoryなど、鍵を採れない木は理由を添えて未検証とし、waiveも受け付けず、T1は入口を通しても証跡を作らない。
 shellの呼び出しの観察は前後の同じ鍵を比べるため、stageとcommitだけの呼び出しは終了を止めず、呼ぶ前の鍵を採れない呼び出しは止める。
+フックはイベントの JSON を一度だけ読む。作業木の鍵は検証時と観察時で同じ実装を使い、Git から取得した tree id、未追跡のパス、gitlink の鍵を一つのプロセスでハッシュする。
 `TMPDIR`かcacheが検査する木の中にあると一時fileが鍵へ混ざるため、鍵を採らない。
 鍵は版を持ち、版の違う控えは一致せず、移行は持たない。
 検証の証跡は走行tokenごとに検査前のsourceへ固定し、検査後にもHEAD、index、tracked diff、non-ignored untracked fileの内容とmetadataを照合する。

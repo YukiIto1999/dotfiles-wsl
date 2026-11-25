@@ -59,179 +59,13 @@ project_id_of() {
   printf '%s' "$common" | sha256sum | cut -d ' ' -f 1
 }
 
-# 採れなかった理由を一行にして stderr へ出す。
-# 引数 $1: 失敗した段、$2: その段の git の stderr を控えた file(省略できる)。先頭の一行だけを添える
-key_failure() {
-  local first=
-  if [ -n "${2-}" ]; then
-    IFS= read -r first <"$2" || true
-  fi
-  printf '%s%s\n' "$1" "${first:+: $first}" >&2
-}
-
-# 検証の控えが指す「どの木か」を、作業木の中身だけから決める鍵。HEAD、index の stage、commit の履歴は入れない。
-# 追跡 file と未追跡 file の内容は、実の index の私的な写しへ git add -A して git write-tree した tree id で表す。
-# stage、commit、amend、件名の書換えは tree id を変えないため、検証した中身への控えはそれらの後も残る。
-# 未追跡 file の path は、実の index から別に鍵へ入れる。内容が tree に入っていても、検査は追跡 file の一覧を列挙して
-# 未追跡 file を見ていないため、検査の時に未追跡だった file が追跡された木は別の木として扱う。
-# gitlink は git add -A が HEAD しか記録せず、中の変更を見落とすため、中の repository の鍵を値として加える。
-# 実の index、object、ref の内容は書き換えない。実の object は alternates として読むだけで、新しい object は一時 directory へ置く
-# (同じ内容の既存 object は、git が更新時刻だけを新しくすることがある)。
-# 引数 $1: 木の根。出力: 鍵を一行。採れない木は何も出さず 1 で返り、理由を stderr へ一行だけ出す。
-# 制約: 採れない木を採れた木の鍵で扱わない。呼び出し側は失敗を未検証として扱う。
-# 一時 directory は witness_scratch があればその中(後始末は release_scratch)、無ければ検査する木の外の mktemp -d で、
-# 返る前に捨てる。途中で殺されても残るのは木の外の、launcher か OS が回収する場所だけである。
+# 検証の控えと shell 呼び出しの前後で共有する作業木の鍵
 source_fingerprint() {
-  local repo=$1
-  (
-    owned=
-    trap '[ -z "$owned" ] || rm -rf --one-file-system -- "$owned"' EXIT
-    if [ -n "$witness_scratch" ]; then
-      scratch=$(mktemp -d "$witness_scratch/.key.XXXXXXXX" 2>/dev/null) || {
-        key_failure '一時 directory を作れない'
-        exit 1
-      }
-    else
-      scratch_is_outside_repo "$repo" || {
-        key_failure 'TMPDIR か cache が検査する木の中にあり、一時 file が鍵へ混ざるため鍵を採らない'
-        exit 1
-      }
-      scratch=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-gate-key.XXXXXXXX" 2>/dev/null) || {
-        key_failure '一時 directory を作れない'
-        exit 1
-      }
-      owned=$scratch
-    fi
-    working_tree_key "$repo" "$scratch"
-  )
-}
-
-# gitlink の値。中の repository が populated ならその鍵、missing か空の directory なら定数。
-# 中が populated でも空でもない directory と symlink は、中身を読めない種類として失敗する。
-# 引数 $1: 木の根、$2: gitlink の path。出力: 値を一行。失敗は 1 で返り、理由を stderr へ一行だけ出す。
-gitlink_value() {
-  local absolute=$1/$2 top nested
-  if [ -L "$absolute" ]; then
-    key_failure "gitlink $2 が symlink である"
+  if [ -z "$witness_scratch" ] && ! scratch_is_outside_repo "$1"; then
+    printf '%s\n' 'TMPDIR か cache が検査する木の中にあり、一時 file が鍵へ混ざるため鍵を採らない' >&2
     return 1
   fi
-  if [ ! -e "$absolute" ]; then
-    printf 'unpopulated\n'
-    return 0
-  fi
-  if [ ! -d "$absolute" ]; then
-    key_failure "gitlink $2 が directory でない"
-    return 1
-  fi
-  # 根の判定は write_clean_gitlink と同じ。空の directory は親の根を答えるため根にならない
-  if top=$(git -C "$absolute" rev-parse --show-toplevel 2>/dev/null) \
-    && top=$(realpath -e -- "$top") && [ "$top" = "$(realpath -e -- "$absolute")" ]; then
-    nested=$(source_fingerprint "$absolute" 2>&1) || {
-      printf 'gitlink %s: %s\n' "$2" "$nested" >&2
-      return 1
-    }
-    printf '%s\n' "$nested"
-    return 0
-  fi
-  nested=$(ls -A -- "$absolute" 2>/dev/null) || {
-    key_failure "gitlink $2 の中を読めない"
-    return 1
-  }
-  if [ -n "$nested" ]; then
-    key_failure "gitlink $2 が空でも repository の根でもない"
-    return 1
-  fi
-  printf 'unpopulated\n'
-}
-
-# 引数 $1: 木の根、$2: この木のための空の一時 directory。出力と失敗は source_fingerprint と同じ。
-# 実の index と object への別名は、一回の git の呼び出しごとの環境変数としてだけ渡し、この shell へは export しない。
-# GIT_OPTIONAL_LOCKS、core.splitIndex、core.fsmonitor は、観察だけの呼び出しが実の .git へ lock や共有 index を
-# 残さないための指定である。
-working_tree_key() {
-  local repo=$1 scratch=$2 index objects tree status=0 record path value digest
-  local -a staged=()
-
-  index=$(git -C "$repo" rev-parse --path-format=absolute --git-path index 2>"$scratch/err") || {
-    key_failure 'git rev-parse --git-path index が失敗した' "$scratch/err"
-    return 1
-  }
-  objects=$(git -C "$repo" rev-parse --path-format=absolute --git-path objects 2>"$scratch/err") || {
-    key_failure 'git rev-parse --git-path objects が失敗した' "$scratch/err"
-    return 1
-  }
-  mkdir -- "$scratch/objects" 2>"$scratch/err" || {
-    key_failure '一時 object directory を作れない' "$scratch/err"
-    return 1
-  }
-  # index が未作成の repository は、空の index から始める。時刻を保つのは、同じ秒の同じ大きさの書換えを git に再検査させるため
-  if [ -e "$index" ]; then
-    cp --preserve=timestamps -- "$index" "$scratch/index" 2>"$scratch/err" || {
-      key_failure 'index の写しを作れない' "$scratch/err"
-      return 1
-    }
-  fi
-  GIT_INDEX_FILE=$scratch/index GIT_OBJECT_DIRECTORY=$scratch/objects \
-    GIT_ALTERNATE_OBJECT_DIRECTORIES=$objects GIT_OPTIONAL_LOCKS=0 \
-    git -c core.splitIndex=false -c core.fsmonitor=false -C "$repo" add -A . \
-    >/dev/null 2>"$scratch/err" || status=$?
-  if [ "$status" -ne 0 ]; then
-    key_failure "git add -A が $status で失敗した" "$scratch/err"
-    return 1
-  fi
-  tree=$(GIT_INDEX_FILE=$scratch/index GIT_OBJECT_DIRECTORY=$scratch/objects \
-    GIT_ALTERNATE_OBJECT_DIRECTORIES=$objects GIT_OPTIONAL_LOCKS=0 \
-    git -c core.splitIndex=false -c core.fsmonitor=false -C "$repo" write-tree 2>"$scratch/err") || {
-    key_failure 'git write-tree が失敗した' "$scratch/err"
-    return 1
-  }
-  [[ $tree =~ ^([0-9a-f]{40}|[0-9a-f]{64})$ ]] || {
-    key_failure 'git write-tree が tree id を返さなかった'
-    return 1
-  }
-
-  GIT_OPTIONAL_LOCKS=0 git -c core.fsmonitor=false -C "$repo" ls-files --others --exclude-standard -z \
-    >"$scratch/untracked" 2>"$scratch/err" || {
-    key_failure 'git ls-files --others が失敗した' "$scratch/err"
-    return 1
-  }
-
-  GIT_INDEX_FILE=$scratch/index GIT_OPTIONAL_LOCKS=0 \
-    git -c core.fsmonitor=false -C "$repo" ls-files --stage -z >"$scratch/staged" 2>"$scratch/err" || {
-    key_failure 'git ls-files --stage が失敗した' "$scratch/err"
-    return 1
-  }
-  mapfile -d '' -t staged <"$scratch/staged" || {
-    key_failure '一時 index の一覧を読めない'
-    return 1
-  }
-  : >"$scratch/gitlinks" || return 1
-  for record in "${staged[@]}"; do
-    [[ $record == '160000 '* ]] || continue
-    path=${record#*$'\t'}
-    value=$(gitlink_value "$repo" "$path" 2>"$scratch/err") || {
-      key_failure "$(cat "$scratch/err")"
-      return 1
-    }
-    printf '%s\0%s\0' "$path" "$value" >>"$scratch/gitlinks" || return 1
-  done
-
-  # 各区画は空の要素で閉じる。path と値は空にならないため、区画の境目は他の綴りと衝突しない
-  {
-    printf 'dotfiles-agent-gate-v4\0tree\0%s\0untracked\0' "$tree"
-    cat -- "$scratch/untracked"
-    printf '\0gitlinks\0'
-    cat -- "$scratch/gitlinks"
-    printf '\0'
-  } >"$scratch/material" 2>"$scratch/err" || {
-    key_failure '鍵の材料を書けない' "$scratch/err"
-    return 1
-  }
-  digest=$(sha256sum <"$scratch/material") || {
-    key_failure '鍵の材料を hash できない'
-    return 1
-  }
-  printf '%s\n' "${digest%% *}"
+  "@python@" -I "@treeKey@" "$1" "${witness_scratch:-${TMPDIR:-/tmp}}"
 }
 
 # 検証の走行の前後で木が触られていないことを示す照合値。source_fingerprint が「どの木か」を名指すのに対し、
@@ -578,19 +412,20 @@ verified_receipt_exists() {
 # 検証の状態は cache root から project まで自分だけが書ける実 directory に限る。
 # symlink や他人の directory を辿って控え、実行枠、一時 file を置かない。
 state_directory_is_private() {
-  test ! -L "$1" && test -d "$1" && test "$(stat -c %u "$1")" = "$(id -u)"
+  [[ ! -L $1 && -d $1 && -O $1 ]]
 }
 
 state_file_is_private() {
-  test ! -L "$1" && test -f "$1" && test "$(stat -c %u "$1")" = "$(id -u)"
+  [[ ! -L $1 && -f $1 && -O $1 ]]
 }
 
 ensure_state_directory() {
   local path=$1
-  if mkdir -m 700 "$path" 2>/dev/null; then
+  if [[ ! -e $path && ! -L $path ]] && mkdir -m 700 -- "$path" 2>/dev/null; then
     return
   fi
   state_directory_is_private "$path" || return 1
+  [ "$(stat -c %a -- "$path")" != 700 ] || return 0
   chmod 700 "$path" || return 1
   test "$(stat -c %a "$path")" = 700
 }
@@ -1100,15 +935,21 @@ check_held_repositories() {
 }
 
 command_hook() {
-  local kind=$1 payload session cwd path owner=${DOTFILES_AGENT_SESSION_ID-} status=0
-  payload=$(cat)
-  session=$(printf '%s' "$payload" | jq -r '.session_id // empty')
-  cwd=$(printf '%s' "$payload" | jq -r '.cwd // empty')
+  local kind=$1 session cwd path selector owner=${DOTFILES_AGENT_SESSION_ID-} status=0
+  local -a fields
+  case $kind in
+  arm) selector='(.tool_input.file_path // .tool_input.path // .tool_input.filePath)' ;;
+  observe) selector='.tool_input.cwd, .tool_use_id, .hook_event_name' ;;
+  stop) selector='empty' ;;
+  *) usage ;;
+  esac
+  shopt -s lastpipe
+  jq --raw-output0 "(.session_id, .cwd, $selector) | . // \"\"" | mapfile -d '' -t fields
+  session=${fields[0]-} cwd=${fields[1]-}
 
   case $kind in
   arm)
-    path=$(printf '%s' "$payload" |
-      jq -r '.tool_input.file_path // .tool_input.path // .tool_input.filePath // empty')
+    path=${fields[2]-}
     case $path in xd://* | agent://* | proc://* | local://* | cfg://* | ssh://*) return 0 ;; esac
     [ -n "$path" ] || path=$cwd
     case $path in /*) ;; *) path="$cwd/$path" ;; esac
@@ -1116,13 +957,10 @@ command_hook() {
     ;;
   observe)
     # 作業場所は tool の cwd を先に採る。omp の bash は session の cwd からの相対も許す。
-    path=$(printf '%s' "$payload" | jq -r '.tool_input.cwd // empty')
+    path=${fields[2]-}
     [ -n "$path" ] || path=$cwd
     case $path in /*) ;; *) path="$cwd/$path" ;; esac
-    command_observe "$session" \
-      "$(printf '%s' "$payload" | jq -r '.tool_use_id // empty')" \
-      "$(printf '%s' "$payload" | jq -r '.hook_event_name // empty')" \
-      "$path" || true
+    command_observe "$session" "${fields[3]-}" "${fields[4]-}" "$path" || true
     exit 0
     ;;
   stop)
@@ -1133,7 +971,6 @@ command_hook() {
     check_held_repositories || status=2
     exit "$status"
     ;;
-  *) usage ;;
   esac
 }
 

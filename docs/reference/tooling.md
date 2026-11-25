@@ -154,7 +154,7 @@ lockで一つのinstanceに限り、二重に起動すると失敗する。
 既定では起動のたびにbrowser tokenとOTLP API keyを生成する。いずれも通常のファイルに書かず、起動したCLIとDashboardの環境変数で渡す。telemetry API keyは公式CLIが生成する。
 他のsubcommandは、記録したpidの環境に今回のrun IDがあることを確かめてから、同じuserだけが読める`/proc/<pid>/environ`から値を取り出す。引数や端末出力には出さない。
 匿名accessは使わない。
-`status`はbrowser tokenを`/api/telemetry/validateToken`へ標準入力から送り、200だけを受付とみなす。返されたAPI keyは捨てる。
+`status`はbrowser tokenを`/api/telemetry/validateToken`へ標準入力から送り、200だけを受付とみなす。返されたAPI keyは捨てる。この要求は利用者のcurl設定を読まないため、trace、proxy、追加headerの設定でtokenが記録・転送されない。
 `otel`は公式CLIの[login URLを渡す方式](https://aspire.dev/reference/cli/commands/aspire-otel/)を使い、CLIがtokenをAPI keyへ交換する。URLはLinuxの匿名メモリファイルを通して渡し、CLIが複数回読み直しても引数やディスクには残らない。
 CLIはlogと表示でURLのqueryを消すため、`otel`のlogは既定の`ASPIRE_HOME`の下に残る。
 wrapperが強制終了してもCLIはparent death signalで止まり、残った一時directoryは次の`run`か`stop`が消す。

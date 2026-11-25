@@ -121,11 +121,12 @@ except OSError:
 }
 
 # 今回の browser token を受理した応答だけを、自分の Dashboard の受付とみなす。応答の API key は捨てる
+# 利用者の curlrc の trace や proxy が token を記録・転送しないよう、既定設定を読まない
 dashboard_accepts() {
   local token code
   token=$(env_value "$run_pid" DASHBOARD__FRONTEND__BROWSERTOKEN) || return 1
   code=$(printf '{"token":"%s"}' "$token" |
-    curl --silent --output /dev/null --write-out '%{http_code}' --max-time 2 \
+    curl --disable --silent --output /dev/null --write-out '%{http_code}' --max-time 2 \
       --header 'Content-Type: application/json' --data-binary @- \
       "$frontend_url/api/telemetry/validateToken") || return 1
   [[ $code == 200 ]]

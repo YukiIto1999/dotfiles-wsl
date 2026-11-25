@@ -99,6 +99,9 @@
                 tr '\0' '\n' < "/proc/$1/environ" | sed -n "s/^$2=//p"
               }
 
+              # 利用者の curlrc が通信を記録する設定でも、準備確認は browser token を渡さない
+              printf 'trace-ascii = "%s"\n' "$PWD/curl-trace.txt" > "$HOME/.curlrc"
+
               run 2 no-arguments "$dash"
               run 0 help "$dash" --help
               run 2 invalid-browser-token "$dash" run --browser-token-stdin <<< invalid
@@ -190,6 +193,8 @@
                   fail 'credential was written to the runtime or data directory'
                 fi
               done
+              # trace は行を折り返して記録するため token の文字列照合では漏れを検出できない
+              [ ! -e curl-trace.txt ] || fail 'the readiness check followed the user curlrc, which traced the request carrying the browser token'
 
               run 0 stop "$dash" stop
               status=0

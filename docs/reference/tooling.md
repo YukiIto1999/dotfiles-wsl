@@ -33,7 +33,7 @@ GitHub Actionsの構文・式は`actionlint`、workflowとローカルactionの�
 
 ### LinuxプロセスとNixの診断
 
-実行を許可された子プロセスのみを対象に、syscallは`strace`、CPUの内訳は`perf`、停止位置とスレッドは`gdb`を使う。`hyperfine`はCLIやビルドの所要時間を反復比較する道具であり、関数やsyscallごとの観測とは分ける。カーネルの制限で計測できない場合は、共通のsysctlを下げずに不足を報告する。
+syscallは`strace`、CPUの内訳は`perf`、停止位置とスレッドは`gdb`を使い、対象にできるprocessと採取の許可は[`runtime-observation`](../../skills/runtime-observation/skill/SKILL.md)の「採取の範囲を守る」が持つ。`hyperfine`はCLIやビルドの所要時間を反復比較する道具であり、関数やsyscallごとの観測とは分ける。カーネルの制限で計測できない場合は、共通のsysctlを下げずに不足を報告する。
 
 | 調べたいこと | 入口 |
 |---|---|

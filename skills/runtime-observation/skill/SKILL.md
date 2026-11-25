@@ -75,7 +75,7 @@ metric が要る場合は、token を自分の引数や出力に出さずに入�
    `aspire-dashboard status` が 0 になってから送信と読取を始める。
    instance は一つだけで、二重の起動は失敗する。
 3. `aspire-dashboard exec --service NAME -- COMMAND` で対象を起動する。
-   OTLP の送り先は wrapper が `127.0.0.1` の `18890` へ設定し、`4317` と `4318` は AI CLI の telemetry collector が使うため対象へ渡さない。
+   OTLP の送り先は wrapper が `127.0.0.1` の `18890` へ設定する。`4317` と `4318` は有効にした host で AI CLI の telemetry collector が使うため対象へ渡さない。
 4. `aspire-dashboard otel traces --format Json --limit 50` で候補を探し、`--trace-id ID` で span の木を、`aspire-dashboard otel logs --format Json` で同じ時間帯の log を読む。
    失敗だけを見る場合は `--has-error true` を付ける。
    browser の token や API key を引数、file、出力へ書かない。

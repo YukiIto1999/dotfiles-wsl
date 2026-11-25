@@ -41,7 +41,8 @@ test が起動して破棄する container（Testcontainers など）は test �
 
 - port は project が受け付ける変数や引数で明示し、devenv では `--strict-ports` で使用中の port を自動で別の値へずらさせない。
   `127.0.0.1` に bind させ、外部へ公開しない。
-- Aspire Dashboard の `18888`〜`18890` と、AI CLI の telemetry collector の `4317`、`4318` は使わない。
+- Aspire Dashboard の `18888`〜`18890` は、起動中の app を観測するときに同時に使うため project に割り当てない。
+  AI CLI の telemetry collector は有効にした host でだけ `4317`、`4318` を使うため、他の使用中の port と同じく listen の確認と `--strict-ports` で避ける。
 - data は checkout の `.devenv/state`（devenv の `DEVENV_STATE`）か、project が宣言した local の領域に置く。
   共有や本番の database、他 project の data directory、利用者の既存 data を接続先にしない。
 - seed、migration、reset のうち既存 data を消す操作は、この作業で作った data に限るか、利用者の承認を得てから行う。

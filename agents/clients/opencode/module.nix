@@ -22,9 +22,21 @@ let
       extensions = builtins.attrNames extensions;
     }
     // lib.optionalAttrs (initializationOptions != { }) { initialization = initializationOptions; };
+  # OpenCode は disable-model-invocation を読まない。skill の deny は model の候補と skill tool から外し、slash command には残す
+  # 後に一致した rule が勝ち、key は名前順に並ぶため、先頭になる `*` に全体の許可を置く
+  opencodePermission = {
+    "*" = opencodeBase.permission;
+  }
+  // lib.optionalAttrs (cfg.agents.shared.explicitSkills != [ ]) {
+    skill = {
+      "*" = opencodeBase.permission;
+    }
+    // lib.genAttrs cfg.agents.shared.explicitSkills (_: "deny");
+  };
   opencodeBaseWithLsp = (pkgs.formats.json { }).generate "opencode-base-with-lsp.json" (
     opencodeBase
     // {
+      permission = opencodePermission;
       # 同名 built-in の root 解決を継承するため登録 ID の共用は不可
       lsp = lib.mapAttrs' (
         name: server: lib.nameValuePair "dotfiles-${name}" (encodeLsp (removeAttrs server [ "package" ]))
@@ -59,7 +71,13 @@ let
         sed -n "2,$((closing - 1))p" ${srcPath} > frontmatter.yaml
         tail -n "+$((closing + 1))" ${srcPath} > body.md
 
-        tools=$(yq -y '.tools |= (((. + ["Skill"]) | unique) | map({(ascii_downcase):true}) | add)' frontmatter.yaml)
+        # frontmatter の tools.skill は agent 側で skill を一括許可する rule になり全体の deny より後に効くため、同じ deny を agent にも置く
+        tools=$(yq -y --argjson skill ${
+          lib.escapeShellArg (builtins.toJSON (opencodePermission.skill or null))
+        } '
+          .tools |= (((. + ["Skill"]) | unique) | map({(ascii_downcase):true}) | add)
+          | if $skill == null then . else .permission.skill = $skill end
+        ' frontmatter.yaml)
         {
           printf '%s\n' '---'
           printf '%s\n' "$tools"

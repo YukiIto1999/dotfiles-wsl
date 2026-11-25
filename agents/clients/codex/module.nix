@@ -8,6 +8,7 @@
 let
   cfg = config.dotfiles;
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
+  skillDiscovery = import ../../impl/skill-discovery.nix { inherit lib; };
   codexModel = "gpt-6-sol";
   agentRuntimeWritableFilesystem = {
     "${cfg.workstation.homeDir}/.cache/dotfiles-wsl" = "write";
@@ -123,6 +124,48 @@ let
         } >> "$out"
       '';
   codexSubagents = lib.mapAttrs buildSubagent cfg.agents.shared.subagents;
+  # Codex は disable-model-invocation を読まず、agents/openai.yaml の policy だけで自動選択を止める。
+  # 原版が policy を持てばそのまま配る。持たなければ SKILL.md を実 file で写し、原版の source root から Skill までの
+  # 各階層を symlink で再現する。Codex は symlink の SKILL.md を読まず、本文の相対参照は物理的な親を辿るため
+  codexSkillSource =
+    name: source:
+    let
+      implicitInvocation = skillDiscovery.openaiImplicitInvocationOf cfg.skills.registry.${name}.source;
+      located = builtins.match "(${builtins.storeDir}/[^/]+)(/(.*))?" "${source}";
+      # match は string context を落とすため、source の store path への依存を戻す
+      root = lib.addContextFrom "${source}" (builtins.elemAt located 0);
+      relative = builtins.elemAt located 2;
+      mirror = pkgs.runCommandLocal "codex-skill-${name}" { } ''
+        source=${lib.escapeShellArg root}
+        target=$out
+        mkdir "$target"
+        for part in ${
+          lib.escapeShellArgs (if relative == null then [ ] else lib.splitString "/" relative)
+        }; do
+          find "$source" -mindepth 1 -maxdepth 1 ! -name "$part" -exec ln -s {} "$target/" \;
+          source=$source/$part
+          target=$target/$part
+          mkdir "$target"
+        done
+        find "$source" -mindepth 1 -maxdepth 1 ! -name SKILL.md ! -name agents -exec ln -s {} "$target/" \;
+        cp "$source/SKILL.md" "$target/SKILL.md"
+        mkdir "$target/agents"
+        if [ -d "$source/agents" ]; then
+          find "$source/agents" -mindepth 1 -maxdepth 1 -exec ln -s {} "$target/agents/" \;
+        fi
+        printf 'policy:\n  allow_implicit_invocation: false\n' > "$target/agents/openai.yaml"
+      '';
+    in
+    if !(builtins.elem name cfg.agents.shared.explicitSkills) then
+      source
+    else if implicitInvocation != null then
+      assert lib.assertMsg (!implicitInvocation)
+        "${name}: agents/openai.yaml allows implicit invocation of a skill whose frontmatter disables model invocation";
+      source
+    else if relative == null then
+      mirror
+    else
+      "${mirror}/${relative}";
 in
 {
   dotfiles.agents.registry.codex = {
@@ -131,6 +174,7 @@ in
     runtime.managed = { };
     rules.file.destination = ".codex/AGENTS.md";
     skillsDestination = ".codex/skills";
+    skillSource = codexSkillSource;
     subagents.declared = {
       sources = codexSubagents;
       skillProjection = "dynamic";

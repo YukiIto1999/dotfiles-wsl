@@ -66,7 +66,7 @@
         policySkills = lib.genAttrs hostConfig.dotfiles.skills.enabled (
           name: hostConfig.dotfiles.skills.registry.${name}
         );
-        isReferenceOnlySkill = import ../impl/skill-discovery.nix { inherit lib; };
+        isReferenceOnlySkill = (import ../impl/skill-discovery.nix { inherit lib; }).referenceOnly;
         artifacts = hostConfig.dotfiles.managedArtifacts;
         artifactSource = id: artifacts.${id}.source;
         gatewayUrl = hostConfig.dotfiles.platform.mcp.gateway.url;
@@ -286,7 +286,8 @@
               let
                 artifact = artifacts."agents/${clientName}/skills/${name}";
               in
-              artifact.source == normalizeSource hostConfig.dotfiles.agents.shared.skills.${name}
+              artifact.source
+              == normalizeSource (client.skillSource name hostConfig.dotfiles.agents.shared.skills.${name})
               && artifact.format == "directory"
               && artifact.deployedAt == "${homePrefix}/${client.skillsDestination}/${name}"
             ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills);
@@ -308,7 +309,7 @@
           lib.all (
             name:
             homeConfig.home.file."${client.skillsDestination}/${name}".source
-            == normalizeSource hostConfig.dotfiles.agents.shared.skills.${name}
+            == normalizeSource (client.skillSource name hostConfig.dotfiles.agents.shared.skills.${name})
           ) (builtins.attrNames hostConfig.dotfiles.agents.shared.skills)
           && rulesMatch
           && constraintsMatch
@@ -900,6 +901,27 @@
               jq --exit-status --arg expected ${lib.escapeShellArg gatewayUrl} \
                 '.mcp == {gateway: {type: "remote", url: $expected}}' \
                 ${artifactSource "agents/opencode/config"} > /dev/null
+              # OpenCode は明示呼出しの Skill を skill tool で拒み、他の Skill と tool の許可は変えない
+              jq --exit-status --argjson explicit ${lib.escapeShellArg (builtins.toJSON agentConfig.shared.explicitSkills)} '
+                .permission["*"] == "allow" and
+                (.permission.skill | keys_unsorted | first) == "*" and
+                .permission.skill == ({"*": "allow"} + ($explicit | map({(.): "deny"}) | add))
+              ' ${artifactSource "agents/opencode/config"} > /dev/null
+              # Codex は原版に policy の無い明示呼出しの Skill にだけ自動選択を止める policy を足し、本文は原版の tree から読ませる
+              for skill in ${
+                lib.escapeShellArgs [
+                  "${clients.codex.skillSource "create-verification-skill" agentConfig.shared.skills.create-verification-skill}"
+                  "${clients.codex.skillSource "to-spec" agentConfig.shared.skills.to-spec}"
+                ]
+              }; do
+                grep -Eq '^[[:space:]]+allow_implicit_invocation:[[:space:]]*false[[:space:]]*$' "$skill/agents/openai.yaml"
+                test -f "$skill/SKILL.md"
+              done
+              formal=${clients.codex.skillSource "create-formal-verification-skill" agentConfig.shared.skills.create-formal-verification-skill}
+              # Codex は symlink の SKILL.md を読まないため実 file で写し、本文が辿る同じ source の sibling Skill へ物理的に届く
+              [ -f "$formal/SKILL.md" ] && [ ! -L "$formal/SKILL.md" ]
+              cmp -s "$formal/SKILL.md" ${agentConfig.shared.skills.create-formal-verification-skill}/SKILL.md
+              test -f "$formal/../statechart/SKILL.md"
               codex_mcp_matches() {
                 local expected=$1
                 jq --exit-status --arg expected "$expected" \
@@ -1421,6 +1443,23 @@
           assert !builtins.hasAttr "filter-syntax" hostConfig.dotfiles.agents.shared.skills;
           assert !(isReferenceOnlySkill hostConfig.dotfiles.skills.registry.to-spec.source);
           assert builtins.hasAttr "to-spec" hostConfig.dotfiles.agents.shared.skills;
+          assert lib.all (name: builtins.elem name agentConfig.shared.explicitSkills) [
+            "to-spec"
+            "create-verification-skill"
+          ];
+          assert lib.all (name: !builtins.elem name agentConfig.shared.explicitSkills) [
+            "filter-syntax"
+            "surface-operation"
+          ];
+          assert
+            clients.codex.skillSource "surface-operation" agentConfig.shared.skills.surface-operation
+            == agentConfig.shared.skills.surface-operation;
+          assert
+            clients.codex.skillSource "to-spec" agentConfig.shared.skills.to-spec
+            == agentConfig.shared.skills.to-spec;
+          assert
+            clients.codex.skillSource "create-verification-skill" agentConfig.shared.skills.create-verification-skill
+            != agentConfig.shared.skills.create-verification-skill;
           assert lib.all (
             clientName:
             !(builtins.hasAttr "${clients.${clientName}.skillsDestination}/filter-syntax" homeConfig.home.file)
@@ -1618,11 +1657,14 @@
               done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<<"$claudeSubagentsJson")
               for source in $opencodeSources; do
                 check_frontmatter "$source"
-                yq --exit-status '
+                # tools.skill は agent 側の一括許可になるため、明示呼出しの Skill の deny を agent にも持つ
+                yq --exit-status --argjson explicit ${lib.escapeShellArg (builtins.toJSON agentConfig.shared.explicitSkills)} '
                   .tools.skill == true and
                   (.tools | keys | all(. == "read" or . == "grep" or . == "glob" or
                     . == "edit" or . == "write" or . == "bash" or
-                    . == "websearch" or . == "webfetch" or . == "skill"))
+                    . == "websearch" or . == "webfetch" or . == "skill")) and
+                  .permission.skill == ({"*": "allow"} + ($explicit | map({(.): "deny"}) | add)) and
+                  (.permission.skill | keys_unsorted | first) == "*"
                 ' frontmatter.yaml > /dev/null
               done
               check_frontmatter "$ompSource"

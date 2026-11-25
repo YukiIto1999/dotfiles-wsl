@@ -200,6 +200,11 @@ let
       };
       rules = lib.mkOption { type = rulesType; };
       skillsDestination = lib.mkOption { type = relativeDestinationType; };
+      skillSource = lib.mkOption {
+        type = types.functionTo (types.functionTo types.path);
+        default = _: source: source;
+        description = "Skill ID と共通 source から、この client へ配る directory を返す。client が frontmatter で表せない起動条件を独自の file で表す場合だけ置き換える。";
+      };
       subagents = lib.mkOption { type = subagentsType; };
       gatewayConfig = lib.mkOption {
         type = types.submodule {
@@ -395,6 +400,12 @@ in
         type = types.attrsOf types.path;
         readOnly = true;
         internal = true;
+      };
+      explicitSkills = lib.mkOption {
+        type = types.listOf types.str;
+        readOnly = true;
+        internal = true;
+        description = "利用者が明示的に呼ぶ command として配り、model の自動選択の候補にしない Skill ID。";
       };
       subagents = lib.mkOption {
         type = types.attrsOf types.path;

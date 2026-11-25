@@ -139,7 +139,10 @@ browserが必要なbranchだけ、その環境で利用可能な専門Skillへ�
 この二flagが両方あるhelperはenabled registryと依存closureには残すが、全clientのnamed Skill discovery directoryとsubagent routeから除外する。
 registryの固定raw sourceは保持し、policyが参照する生成Skill一覧のSourceをconsumerが`Read`で開くため、native Skill起動toolによる名前解決に頼らない。
 `run-tests`のsource実体からも元のsibling referenceへ到達でき、helper用alias、wrapper、本文の書換えは作らない。
-片方のflagだけを持つ明示commandなどの投影は変更せず、原版のfrontmatterを各native clientへ渡す。
+`disable-model-invocation: true`だけを持つ明示commandは、原版のfrontmatterを変えずに各clientの方式で自動選択から外す。
+Claude CodeとOMPはfrontmatterを読む。OpenCodeは読まないため、生成configとrendered subagentの`permission.skill`でそのIDだけを拒み、slash commandには残す。subagentの`tools.skill`はagent側でSkillを一括で許すruleになり、configのdenyより後に効くためである。
+Codexも読まないため、Skill directoryに[agents/openai.yaml](https://github.com/openai/codex/blob/rust-v0.170.0/codex-rs/skills/src/metadata.rs)が無い明示commandだけ、各entryを原版へのsymlinkにした入口へ`policy.allow_implicit_invocation: false`を足して配る。本文の相対参照は原版のtreeで解決される。自動選択を許すpolicyを持つ原版は配備の評価を止める。
+Antigravityの[公式のSkill metadata](https://antigravity.google/docs/skills)は`name`と`description`だけで自動選択を止める手段がなく、明示commandも自動選択の候補に残る。
 
 `code-review`の対象は`git diff <fixed-point>...HEAD`で得るcommitted rangeであり、任意のstaged/unstaged差分を読む旧local reviewではない。
 `verified-committed-range`には解決したfixed pointと対象`HEAD`のcommit SHA、Specの所在、実行済み検証の証拠を含める。

@@ -12,7 +12,7 @@ let
   projectMemoryEnabled = builtins.elem "project-memory" cfg.capabilities.resolved;
   mkCommand = import ../platform/cli/impl/mk-command.nix { inherit config lib pkgs; };
   policy = import ./impl/policy.nix { inherit lib pkgs; };
-  isReferenceOnlySkill = import ./impl/skill-discovery.nix { inherit lib; };
+  skillDiscovery = import ./impl/skill-discovery.nix { inherit lib; };
   inherit (cfg) agents;
   agentContract = import ./impl/contract.nix { inherit lib; };
   inherit (agentContract)
@@ -172,8 +172,13 @@ let
 
   enabledSkillNames = cfg.skills.enabled;
   enabledSkills = lib.genAttrs enabledSkillNames (name: cfg.skills.registry.${name});
-  discoverableSkills = lib.filterAttrs (_: skill: !isReferenceOnlySkill skill.source) enabledSkills;
+  discoverableSkills = lib.filterAttrs (
+    _: skill: !skillDiscovery.referenceOnly skill.source
+  ) enabledSkills;
   discoverableSkillNames = builtins.attrNames discoverableSkills;
+  explicitSkillNames = builtins.attrNames (
+    lib.filterAttrs (_: skill: skillDiscovery.explicitOnly skill.source) discoverableSkills
+  );
 
   # 原版のまま採用した標準 Skill だけを原版を開く入口へ置き換える。差替えた source は原文のまま配り、registry は変えない
   standardSources = lib.mapAttrs (_: skill: skill.source) (
@@ -337,7 +342,7 @@ let
       inherit clientName;
       id = "skills/${name}";
       file = {
-        inherit source;
+        source = client.skillSource name source;
         format = "directory";
         deployment = "home";
         destination = "${client.skillsDestination}/${name}";
@@ -577,6 +582,7 @@ in
         rulesCore = policyRules.core;
         constraints = policyRules.constraintsFile;
         skills = allSkills;
+        explicitSkills = explicitSkillNames;
         subagents = sharedSubagents;
         inherit routing;
       };

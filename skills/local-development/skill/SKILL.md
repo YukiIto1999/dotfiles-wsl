@@ -13,8 +13,9 @@ description: Brings a project checkout up in its own development environment so 
 1. checkout の絶対 path、branch または worktree、起動する app や service、呼出し元が必要とする URL や port、使う data（空、seed、既存）、使う期間を確かめる。
    Orca の worktree の作成や terminal の操作が要る場合は `orca-cli` に任せ、渡された worktree の path で続ける。
 2. 同じ checkout で既に動いている instance を確かめる。
-   devenv の project では `devenv processes list`、port は `ss -Hltnp 'sport = :PORT'` で listen している process を読む。
+   devenv の project では `devenv processes list` で、background の process manager の有無と起動前から動いている process 名を記録し、port は `ss -Hltnp 'sport = :PORT'` で listen している process を読む。
    既存の instance が使えるならそれを返し、利用者や他 session が起動した process を止めたり再起動したりしない。
+   別の terminal の foreground の `devenv up` が process を所有していて追加起動を拒まれた場合も、既存の instance として扱う。
 3. 起動方法を、project の README、`devenv.nix`、`devenv.yaml`、`flake.nix` の devShell、`package.json` の script、`Procfile` などの宣言から選ぶ。
    宣言にない起動 command や port を推測で作らず、宣言が無い場合は不足として返す。
 
@@ -22,7 +23,7 @@ description: Brings a project checkout up in its own development environment so 
 
 | project の宣言 | 入口 |
 |---|---|
-| `devenv.nix` の `processes` や `services` | `devenv up -d --strict-ports [PROCESS...]`、続けて `devenv processes wait --timeout 120` |
+| `devenv.nix` の `processes` や `services` | `devenv up -d --strict-ports [PROCESS...]`（manager が既にあれば起動する process 名を明示する）、続けて `devenv processes wait --timeout 120` |
 | `devenv.nix` の環境で動かす単発の command | `devenv shell -- COMMAND ARG...` |
 | `.envrc` の `use flake` と flake の devShell | `dotfiles-project-run [--attr NAME] -- /usr/bin/env COMMAND ARG...` |
 
@@ -65,6 +66,8 @@ UI の受入は `surface-operation`、実行時の遅延や停止の観測は `r
 host の Nix、systemd、WSL の資源が原因で起動できない場合は、観測した error を `workstation-operations` へ渡す。
 
 作業の終了時は、自分が起動したものだけを止める。
-devenv は `devenv processes down`、container は起動に使った同じ project 名の `docker compose -p 名前 down`、harness の service は自分が付けた名前の service を止める。
+devenv は、起動前に manager が無く、終了時の `devenv processes list` に自分が起動した process しか動いていない場合だけ `devenv processes down` で manager ごと止める。
+既存の manager へ process を追加した場合や、自分が起動していない process が同じ manager で動いている場合は、自分が起動した process を一つずつ `devenv processes stop NAME` で止め、manager は残す。`stop` は名前を省くと全 process を止めるため、必ず名前を渡す。
+container は起動に使った同じ project 名の `docker compose -p 名前 down`、harness の service は自分が付けた名前の service を止める。
 volume や state directory は、この作業で作り、呼出し元が残すことを求めていない場合だけ消す。
 既存の instance、他者の process、起動前からあった data は止めず、消さない。

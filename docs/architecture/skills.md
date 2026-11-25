@@ -52,6 +52,7 @@ SkillとCapabilityの対応は各registry entryの`requiresCapabilities`と`opti
 
 固定revisionの正本は[`flake.nix`](../../flake.nix)と[`flake.lock`](../../flake.lock)、採用IDとdirectory pathの正本は[`skills/plugins/module.nix`](../../skills/plugins/module.nix)である。
 `architectureStandard` の lock はホストの採用契約を固定し、標準作業の入口は[互換な公開版](repository-skills.md#現在のplugin)を選ぶ。
+OrcaのSkillはapp本体が持つ版一致guideを読む入口であり、Windows上の既存window、Android端末、Apple Simulator、Linear、workspace環境のように別々の仕事を持つため、hostで実行できるかでなく仕事ごとに採否を決める。互換用の旧名（`linear-tickets`、`jira-tickets`）は現行名と重なるため採用しない。
 Orcaの操作Skillとarchitecture-standardの運用Skillに加え、次の固定sourceから個別Skillを採用する。
 sourceはrepository全体またはSkillを同梱したpublished package全体を保持し、rootのlicenseと同梱資材を残したままSkill directoryを配備先から参照する。
 
@@ -230,7 +231,7 @@ moduleのinterfaceとseamは`codebase-design`、入力領域と独立oracleとsh
 
 | 作業手順 | 公開入口 | 合成と引継ぎ |
 |---|---|---|
-| `surface-operation` | Orca、client の browser tool、Playwright MCP、Chrome DevTools MCP、Anode、PTY・CLI | 操作前提と許可を固定し、表示や終了結果だけでなく依頼された業務結果を確かめる。 |
+| `surface-operation` | Orca（内蔵browserとComputer Use）、client の browser tool、Playwright MCP、Chrome DevTools MCP、Anode、PTY・CLI | 操作前提と許可を固定し、表示や終了結果だけでなく依頼された業務結果を確かめる。 |
 | `runtime-observation` | .NET診断CLI、`perf`、`strace`、GDB、Hyperfine、Node、Aspire Dashboard | 実行のどの境界を測るか選び、条件をそろえて生の証拠を採る。 |
 | `change-verification` | projectの入口、.NET test、Vitest Browser Mode、Playwright Test、Testcontainers、静的検査 | 確定した契約を検査層へ割り当て、実行、観測結果と未確認条件を返す。 |
 | `local-development` | `devenv`、project実行入口、`orca-cli` | 開発用の依存、起動、readiness、所有するprocessとデータの回収。 |

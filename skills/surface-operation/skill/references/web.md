@@ -2,7 +2,7 @@
 
 ## Routeを選ぶ
 
-利用者のログイン済みtabを指定された場合は、通常の優先順より先に、明示されたtabを公開しているOMP RelayまたはOrcaを選ぶ。
+利用者のログイン済みtabを指定された場合は、通常の優先順より先に、明示されたtabを公開しているOMP RelayまたはOrcaの内蔵browserを選ぶ。どちらも公開せず、そのtabがWindows上の利用者のbrowser windowにある場合は、[Windows](windows.md)のroute 2で既存のwindowとして扱う。
 対象のtab、account、profileを照合できなければ未確認にする。隔離されたPlaywright MCPで別tabを開いたり、別profileへログインし直したりしない。
 それ以外の既存tab、実account、Orcaの外のbrowser profile、Orca appの画面も、その対象を公開するrouteだけで扱う。
 

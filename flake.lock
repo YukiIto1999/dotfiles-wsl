@@ -543,17 +543,17 @@
     "orca": {
       "flake": false,
       "locked": {
-        "lastModified": 1791088227,
-        "narHash": "sha256-1UP7svWbm9f9Af004weRc2QScPO/AF+YqQEZ5yjJuug=",
+        "lastModified": 1795558695,
+        "narHash": "sha256-XKEFOvHvuKQljWI5sHq1wTmRzM772zUxFOSu/1kkBeI=",
         "owner": "stablyai",
         "repo": "orca",
-        "rev": "a7927b28ce45cbb044add478d957abe36c99ccd8",
+        "rev": "48fcb4dfa59a0b145779a98f6d92c2890ef58262",
         "type": "github"
       },
       "original": {
         "owner": "stablyai",
         "repo": "orca",
-        "rev": "a7927b28ce45cbb044add478d957abe36c99ccd8",
+        "rev": "48fcb4dfa59a0b145779a98f6d92c2890ef58262",
         "type": "github"
       }
     },

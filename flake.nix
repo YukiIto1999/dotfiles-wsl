@@ -20,7 +20,7 @@
     llm-agents.url = "github:numtide/llm-agents.nix";
 
     orca = {
-      url = "github:stablyai/orca/a7927b28ce45cbb044add478d957abe36c99ccd8";
+      url = "github:stablyai/orca/48fcb4dfa59a0b145779a98f6d92c2890ef58262";
       flake = false;
     };
 

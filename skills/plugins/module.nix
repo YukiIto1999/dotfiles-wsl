@@ -15,6 +15,26 @@ let
           requiresCapabilities = [ ];
           requiresSkills = [ ];
         };
+        orca-computer-use = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        orca-emulator = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        orca-emulator-android = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        orca-linear = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
+        orca-per-workspace-env = {
+          requiresCapabilities = [ ];
+          requiresSkills = [ ];
+        };
         orchestration = {
           requiresCapabilities = [ ];
           requiresSkills = [ ];

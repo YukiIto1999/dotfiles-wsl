@@ -4,11 +4,13 @@
 
 | 順 | route | 使う条件 |
 |---|---|---|
-| 1 | AnodeのWindows子session（seat）をWSLの`anode` CLIで操作する | 対象がWindowsのapp、またはWindows上のbrowserでしか判定できない要求で、利用者の入力と画面から分けて操作できる |
-| 2 | なし | `anode`が導入されていない、seatがreadyでない、または対象が利用者自身のdesktopにある |
+| 1 | AnodeのWindows子session（seat）をWSLの`anode` CLIで操作する | 対象がWindowsのapp、またはWindows上のbrowserでしか判定できない要求で、利用者が指定した既存のwindowではなく、利用者の入力と画面から分けて操作できる |
+| 2 | Orca Computer Use（`orca-computer-use`）で利用者のdesktopの既存windowを背景から操作する | 利用者が自身のdesktopにある既存のwindowやappを指定し、下の「既存のwindowを扱う」の前提を満たす |
+| 3 | なし | 上の条件を満たすrouteがない |
 
-利用者自身のdesktopにある既存のwindowやappを指定された場合、それを操作するrouteはこのSkillにない。
-seatで同じappを開き直して代用せず、その行を未確認にする。
+利用者自身のdesktopにある既存のwindowやappを指定された場合は、route 2だけを使う。
+seatで同じappを開き直して代用せず、route 2が使えなければその行を未確認にする。
+「既存のwindowを扱う」より前の節はroute 1の手順である。
 
 導入、配備、機械の設定の正本は、dotfilesの`docs/reference/tooling.md`の「Windowsの独立した操作画面」である。
 installer、`anode setup`、`anode configure`は利用者の作業であり、このSkillからは実行しない。
@@ -62,3 +64,16 @@ screenshotの保存pathはWindows側のprocessが解釈する。
 `anode lease release`でleaseを解放する。
 既存または他の作業に利用され得るseatは終了しない。`anode kill`はseatのすべてのappを閉じるため、排他的な所有と安全な停止を確認した今回の専用seat以外に使わない。
 表示条件を変えた場合は開始値へ戻す。
+
+## 既存のwindowを扱う
+
+- 実行ファイルの解決は`orca-cli`の入口に従い、その実行ファイルの`skills get orca-computer-use`が返す版一致guideを読んでから操作する。
+  command、引数、出力の形はそのguideと`--help`を正とする。
+  Orcaが起動していない、接続が拒否された、guideを取得できない場合はroute 2なしとし、`open`でOrcaを起動しない。
+- `computer capabilities --json`で、対象platformがwindowの一覧、状態の取得、必要な操作を公開していることを確かめる。
+  `list-windows`で利用者が指定したwindowを照合し、選んだwindowの識別子を以降のすべての操作へ渡す。照合できなければ未確認にする。
+- 利用者の画面、keyboard focus、pointerを取らない背景の操作だけを使い、各結果の`delivery`を記録する。
+  foregroundを要する操作は、必要な理由を示して利用者の同意を得るまで送らず、その行を未確認にする。
+- 対象のdataを変える操作（保存、送信、削除、設定変更）は依頼された範囲に限り、操作後に状態を読み直して結果を確かめる。
+- screenshotは、返されたpathをWSL側から開けることを確かめてから本文の保存先へcopyする。開けなければ取得できた範囲と永続化できなかったことを記録する。
+- 利用者のappとwindowは閉じない。表示や値を開始時から変えた場合は、変えた内容を結果へ記録する。

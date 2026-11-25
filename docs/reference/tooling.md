@@ -47,6 +47,7 @@ Nixの編集支援は`nixd`、整形は`nixfmt`、静的検査は`statix`と`dea
 ### Windowsの独立した操作画面
 
 通常のWeb操作は端末の入力を奪わないブラウザ経路を使う。Windowsアプリの実画面が必要で利用者の入力と分ける場合は[Anode](https://github.com/skulitom/Anode/tree/v0.11.4)のWindows子セッションを使う。同じ利用者のファイルとネットワークを共有するため、セキュリティ sandbox にはしない。
+利用者が指定した、自分のdesktopで開いている既存のwindowは、別のseatで開き直せないため、Orcaの`orca computer`（`orca-computer-use`）で背景から扱う。Windowsではkeyboard入力や実pointerを要する操作がforegroundを必要とするため、その操作は利用者の同意を得てからにする。
 
 `nix build --no-link --print-out-paths .#anode-windows`で固定した公式配布物を取得できる。`share/anode/`のアーカイブ・チェックサム・上流インストーラをWindowsの一時ディレクトリにコピーしてから、`install.ps1 -PackagePath <zip> -ChecksumPath <SHA256SUMS> -Client None -NoPath`で利用者の`LocalAppData`に導入する。インストーラはWSLのUNCパスからzipを展開できない。Nixの切替はWindowsへの書込み、RDPの変更、seatの起動を行わない。
 

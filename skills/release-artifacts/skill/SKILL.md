@@ -26,9 +26,15 @@ multi-platform の image では、署名と SBOM が index と platform の mani
 ## project の道具を確かめる
 
 Syft、OSV-Scanner、Cosign は共通の PATH に無く、対象 project が devShell（`devenv.nix` の `packages`、flake の devShell）か、release の workflow で版を固定して供給する。
-`devenv shell -- syft version`、`devenv shell -- osv-scanner --version`、`devenv shell -- cosign version` のように project の環境から版を読み、release 工程が使う版と照合する。
-flake の devShell では `dotfiles-project-run -- /usr/bin/env syft version` のように起動する。
-project が道具を供給していない場合は不足として返す。
+project の環境から版を読み、release 工程が使う版と照合する。入口は project の宣言で選ぶ。
+
+| project の宣言 | 入口 |
+|---|---|
+| `devenv.nix` の `packages` | `devenv shell -- syft version`、`devenv shell -- osv-scanner --version`、`devenv shell -- cosign version` |
+| `.envrc` の `use flake` と flake の devShell | `dotfiles-project-run [--attr NAME] -- /usr/bin/env syft version` |
+
+`dotfiles-project-run` は承認済みの `.envrc` が無ければ起動しない。`.envrc` が無い、または未承認の flake は、devShell を評価して起動することが project を信頼する判断になるため、承認が必要な点を利用者へ示して待ち、`direnv allow` を代わりに実行しない。
+release の workflow だけが版を固定し、手元で同じ版を起動できる project の入口が無い場合と、project が道具を供給していない場合は、不足として返す。
 `nix profile install`、`go install`、`curl | sh`、package manager の global install で補わず、project への追加は利用者がその変更を許可した場合だけ project の宣言へ行う。
 release 工程と違う版で作った証拠は、その release の証拠として扱わない。
 

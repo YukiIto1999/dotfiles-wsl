@@ -1,3 +1,26 @@
+diff --git a/crates/agentgateway/src/mcp/handler.rs b/crates/agentgateway/src/mcp/handler.rs
+--- a/crates/agentgateway/src/mcp/handler.rs
++++ b/crates/agentgateway/src/mcp/handler.rs
+@@ -256,6 +256,10 @@
+ 	}
+ }
+ 
++/// Prefix of the ids of the list requests the gateway sends on its own to find the target serving
++/// a name; their replies never reach the client.
++pub(crate) const RESOLVE_ID_PREFIX: &str = "agw-resolve-";
++
+ /// What kind of name is being resolved to a target (`prefixMode: never`).
+ #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+ pub(crate) enum ResolveKind {
+@@ -526,7 +530,7 @@
+ 		for _ in 0..MAX_LIST_PAGES {
+ 			let seq = RESOLVE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+ 			let req = JsonRpcRequest::new(
+-				RequestId::String(format!("agw-resolve-{seq}").into()),
++				RequestId::String(format!("{RESOLVE_ID_PREFIX}{seq}").into()),
+ 				kind.list_request(cursor, meta),
+ 			);
+ 			let Some(result) =
 diff --git a/crates/agentgateway/src/mcp/mcp_tests.rs b/crates/agentgateway/src/mcp/mcp_tests.rs
 --- a/crates/agentgateway/src/mcp/mcp_tests.rs
 +++ b/crates/agentgateway/src/mcp/mcp_tests.rs
@@ -70,7 +93,8 @@ diff --git a/crates/agentgateway/src/mcp/upstream/discovery.rs b/crates/agentgat
 +//! live observations; a response observed to differ is no longer memoised. The memo lives in the
  //! gateway process, whose environment every child inherits, and never outlives it.
  
- use std::collections::HashMap;
+-use std::collections::HashMap;
++use std::collections::{HashMap, HashSet};
 +use std::fmt;
 +use std::sync::atomic::{AtomicBool, Ordering};
  use std::sync::{Arc, LazyLock, Mutex};
@@ -78,8 +102,8 @@ diff --git a/crates/agentgateway/src/mcp/upstream/discovery.rs b/crates/agentgat
 -use rmcp::model::{ClientRequest, ServerResult};
 +use anyhow::{Context, anyhow, bail};
 +use rmcp::model::{
-+	ClientRequest, ErrorCode, ErrorData, InitializeResult, RequestId, ServerJsonRpcMessage,
-+	ServerResult,
++	ClientRequest, ErrorCode, ErrorData, InitializeResult, Reference, RequestId,
++	ServerJsonRpcMessage, ServerResult,
 +};
 +use serde::Deserialize;
  use serde_json::Value;
@@ -418,7 +442,229 @@ diff --git a/crates/agentgateway/src/mcp/upstream/discovery.rs b/crates/agentgat
  #[derive(Debug, Default)]
  pub(crate) struct TargetMemo {
  	clients: Mutex<HashMap<String, ClientMemo>>,
-@@ -232,4 +569,192 @@
+@@ -143,6 +480,221 @@
+ 	}
+ }
+ 
++/// A list whose entries are what other requests name.
++#[derive(Debug)]
++struct Listed {
++	method: &'static str,
++	/// The result field holding the entries.
++	entries: &'static str,
++	/// The entry field a request names an entry by.
++	key: &'static str,
++	/// Whether a key is a URI template, naming every URI it could expand to.
++	template: bool,
++}
++
++static LISTED: [Listed; 4] = [
++	Listed {
++		method: "tools/list",
++		entries: "tools",
++		key: "name",
++		template: false,
++	},
++	Listed {
++		method: "prompts/list",
++		entries: "prompts",
++		key: "name",
++		template: false,
++	},
++	Listed {
++		method: "resources/list",
++		entries: "resources",
++		key: "uri",
++		template: false,
++	},
++	Listed {
++		method: "resources/templates/list",
++		entries: "resourceTemplates",
++		key: "uriTemplate",
++		template: true,
++	},
++];
++
++/// Lists that name the target of a resource request.
++const RESOURCE_LISTS: [&str; 2] = ["resources/list", "resources/templates/list"];
++
++impl Listed {
++	/// The entries of a canonical reply by their key; an error reply has none.
++	fn entries<'a>(&self, reply: &'a Value) -> impl Iterator<Item = (&'a str, &'a Value)> + use<'a> {
++		let key = self.key;
++		reply["result"][self.entries]
++			.as_array()
++			.into_iter()
++			.flatten()
++			.filter_map(move |entry| Some((entry[key].as_str()?, entry)))
++	}
++}
++
++/// Listed entries whose definition in the discovery a session was served differs from what its
++/// started server lists, including entries only one of them lists: tools and prompts by name,
++/// resources by URI, resource templates by URI template. A request naming one is refused until
++/// the session's client lists it again, so no call reaches the server under a definition the
++/// client was not given; any other request may reach the server.
++#[derive(Debug, Default)]
++pub(crate) struct Contradicted {
++	lists: Vec<ContradictedList>,
++}
++
++#[derive(Debug)]
++struct ContradictedList {
++	listed: &'static Listed,
++	keys: HashSet<String>,
++	/// Set once the client asked for the first page again, so its last page leaves nothing of the
++	/// list contradicted.
++	relisting: bool,
++}
++
++impl Contradicted {
++	/// Compares each list reply a session was served with the started server's reply to the same
++	/// request; `live` holds those replies in the order of `served`.
++	pub(crate) fn between(served: &[(ClientRequest, Value)], live: &[Option<Value>]) -> Self {
++		let lists = LISTED
++			.iter()
++			.filter_map(|listed| {
++				let mut served_entries: HashMap<&str, Vec<&Value>> = HashMap::new();
++				let mut live_entries: HashMap<&str, Vec<&Value>> = HashMap::new();
++				for ((request, served), live) in served.iter().zip(live) {
++					if request.method() != listed.method {
++						continue;
++					}
++					for (key, entry) in listed.entries(served) {
++						served_entries.entry(key).or_default().push(entry);
++					}
++					for (key, entry) in live.iter().flat_map(|live| listed.entries(live)) {
++						live_entries.entry(key).or_default().push(entry);
++					}
++				}
++				let keys: HashSet<String> = served_entries
++					.keys()
++					.chain(live_entries.keys())
++					.filter(|key| served_entries.get(**key) != live_entries.get(**key))
++					.map(|key| key.to_string())
++					.collect();
++				(!keys.is_empty()).then_some(ContradictedList {
++					listed,
++					keys,
++					relisting: false,
++				})
++			})
++			.collect();
++		Self { lists }
++	}
++
++	pub(crate) fn is_empty(&self) -> bool {
++		self.lists.is_empty()
++	}
++
++	/// The list whose contradicted entry `request` names, if any. A resource URI is also named by
++	/// a contradicted template that could expand to it.
++	pub(crate) fn refusal(&self, request: &ClientRequest) -> Option<&'static str> {
++		let (methods, name): (&[&str], &str) = match request {
++			ClientRequest::CallToolRequest(call) => (&["tools/list"], &call.params.name),
++			ClientRequest::GetPromptRequest(get) => (&["prompts/list"], &get.params.name),
++			ClientRequest::CompleteRequest(complete) => match &complete.params.r#ref {
++				Reference::Prompt(prompt) => (&["prompts/list"], &prompt.name),
++				Reference::Resource(resource) => (&RESOURCE_LISTS, &resource.uri),
++				_ => return None,
++			},
++			ClientRequest::ReadResourceRequest(read) => (&RESOURCE_LISTS, &read.params.uri),
++			ClientRequest::SubscribeRequest(subscribe) => (&RESOURCE_LISTS, &subscribe.params.uri),
++			ClientRequest::UnsubscribeRequest(unsubscribe) => (&RESOURCE_LISTS, &unsubscribe.params.uri),
++			_ => return None,
++		};
++		self
++			.lists
++			.iter()
++			.find(|list| methods.contains(&list.listed.method) && list.names(name))
++			.map(|list| list.listed.method)
++	}
++
++	/// Whether `request` lists contradicted entries.
++	pub(crate) fn lists(&self, request: &ClientRequest) -> bool {
++		let method = request.method();
++		self.lists.iter().any(|list| list.listed.method == method)
++	}
++
++	/// Takes the live reply to a list request the client sent as what the client now holds. An
++	/// error reply leaves the client holding what it held.
++	pub(crate) fn relisted(&mut self, request: &ClientRequest, reply: &Value) {
++		let method = request.method();
++		let Some(index) = self
++			.lists
++			.iter()
++			.position(|list| list.listed.method == method)
++		else {
++			return;
++		};
++		let Some(result) = reply.get("result") else {
++			return;
++		};
++		let list = &mut self.lists[index];
++		list.relisting |= cursor(request).is_none();
++		for (key, _) in list.listed.entries(reply) {
++			list.keys.remove(key);
++		}
++		let last_page = result.get("nextCursor").is_none_or(Value::is_null);
++		if list.keys.is_empty() || (list.relisting && last_page) {
++			self.lists.swap_remove(index);
++		}
++	}
++}
++
++impl ContradictedList {
++	fn names(&self, name: &str) -> bool {
++		if self.listed.template {
++			self
++				.keys
++				.iter()
++				.any(|template| could_expand(template, name))
++		} else {
++			self.keys.contains(name)
++		}
++	}
++}
++
++/// The cursor of a list request; `None` asks for the first page.
++fn cursor(request: &ClientRequest) -> Option<&str> {
++	let params = match request {
++		ClientRequest::ListToolsRequest(list) => list.params.as_ref(),
++		ClientRequest::ListPromptsRequest(list) => list.params.as_ref(),
++		ClientRequest::ListResourcesRequest(list) => list.params.as_ref(),
++		ClientRequest::ListResourceTemplatesRequest(list) => list.params.as_ref(),
++		_ => None,
++	};
++	params?.cursor.as_deref()
++}
++
++/// Whether `uri` could expand the URI `template`: its literal text in order, any text in place of
++/// each expression.
++fn could_expand(template: &str, uri: &str) -> bool {
++	let mut parts = template.split('{');
++	let Some(mut rest) = uri.strip_prefix(parts.next().unwrap_or_default()) else {
++		return false;
++	};
++	let literals: Vec<&str> = parts
++		.map(|part| part.split_once('}').map_or("", |(_, literal)| literal))
++		.collect();
++	let Some((last, middle)) = literals.split_last() else {
++		return rest.is_empty();
++	};
++	for literal in middle {
++		let Some(at) = rest.find(literal) else {
++			return false;
++		};
++		rest = &rest[at + literal.len()..];
++	}
++	rest.ends_with(last)
++}
++
+ #[cfg(test)]
+ mod tests {
+ 	use super::*;
+@@ -232,4 +784,352 @@
  		assert_ne!(base, identity("/bin/server", &[], true));
  		assert_ne!(base, identity("/bin/other", &[], false));
  	}
@@ -610,6 +856,166 @@ diff --git a/crates/agentgateway/src/mcp/upstream/discovery.rs b/crates/agentgat
 +			assert!(parse(&document).is_err(), "{reason}");
 +		}
 +	}
++
++	fn client_request(body: Value) -> ClientRequest {
++		serde_json::from_value(body).expect("client request")
++	}
++
++	fn listed(method: &str, params: Value, result: Value) -> (ClientRequest, Value) {
++		(
++			client_request(serde_json::json!({ "method": method, "params": params })),
++			serde_json::json!({ "result": result }),
++		)
++	}
++
++	#[test]
++	fn lazy_stdio_contradicted_names_changed_prompts_resources_and_templates() {
++		let served = [
++			listed(
++				"prompts/list",
++				Value::Null,
++				serde_json::json!({ "prompts": [{ "name": "same" }, { "name": "changed", "description": "old" }] }),
++			),
++			listed(
++				"resources/list",
++				Value::Null,
++				serde_json::json!({ "resources": [
++					{ "uri": "file:///same", "name": "same" },
++					{ "uri": "file:///gone", "name": "gone" }
++				] }),
++			),
++			listed(
++				"resources/templates/list",
++				Value::Null,
++				serde_json::json!({ "resourceTemplates": [
++					{ "uriTemplate": "db://{table}/rows{?limit}", "name": "rows" },
++					{ "uriTemplate": "log://{day}", "name": "log" }
++				] }),
++			),
++		];
++		let live = [
++			serde_json::json!({ "prompts": [{ "name": "same" }, { "name": "changed", "description": "new" }] }),
++			serde_json::json!({ "resources": [{ "uri": "file:///same", "name": "same" }] }),
++			serde_json::json!({ "resourceTemplates": [
++				{ "uriTemplate": "db://{table}/rows{?limit}", "name": "rows", "mimeType": "application/json" },
++				{ "uriTemplate": "log://{day}", "name": "log" }
++			] }),
++		]
++		.map(|result| Some(serde_json::json!({ "result": result })));
++		let contradicted = Contradicted::between(&served, &live);
++		let refusal = |body: Value| contradicted.refusal(&client_request(body));
++		let on_uri = |method: &str, uri: &str| {
++			refusal(serde_json::json!({ "method": method, "params": { "uri": uri } }))
++		};
++		let complete = |reference: Value| {
++			refusal(serde_json::json!({
++				"method": "completion/complete",
++				"params": { "ref": reference, "argument": { "name": "a", "value": "" } }
++			}))
++		};
++
++		let prompt = |name: &str| {
++			refusal(serde_json::json!({ "method": "prompts/get", "params": { "name": name } }))
++		};
++		assert_eq!(prompt("changed"), Some("prompts/list"));
++		assert_eq!(prompt("same"), None);
++		assert_eq!(
++			complete(serde_json::json!({ "type": "ref/prompt", "name": "changed" })),
++			Some("prompts/list")
++		);
++		assert_eq!(
++			on_uri("resources/read", "file:///gone"),
++			Some("resources/list")
++		);
++		assert_eq!(on_uri("resources/read", "file:///same"), None);
++		assert_eq!(
++			on_uri("resources/read", "db://users/rows?limit=1"),
++			Some("resources/templates/list")
++		);
++		assert_eq!(
++			on_uri("resources/subscribe", "db://users/rows"),
++			Some("resources/templates/list")
++		);
++		assert_eq!(
++			on_uri("resources/unsubscribe", "file:///gone"),
++			Some("resources/list")
++		);
++		assert_eq!(on_uri("resources/read", "db://users/columns"), None);
++		assert_eq!(on_uri("resources/read", "log://monday"), None);
++		assert_eq!(
++			complete(serde_json::json!({ "type": "ref/resource", "uri": "db://{table}/rows{?limit}" })),
++			Some("resources/templates/list")
++		);
++		assert_eq!(
++			refusal(serde_json::json!({ "method": "tools/call", "params": { "name": "changed" } })),
++			None,
++			"a contradicted prompt names no tool"
++		);
++	}
++
++	#[test]
++	fn lazy_stdio_contradicted_clears_what_the_client_lists_again() {
++		let tool =
++			|name: &str, kind: &str| serde_json::json!({ "name": name, "inputSchema": { "type": kind } });
++		let first = |result: Value| listed("tools/list", Value::Null, result);
++		let next = |result: Value| {
++			listed(
++				"tools/list",
++				serde_json::json!({ "cursor": "page-2" }),
++				result,
++			)
++		};
++		let served = [
++			first(
++				serde_json::json!({ "tools": [tool("a", "object"), tool("b", "object")], "nextCursor": "page-2" }),
++			),
++			next(serde_json::json!({ "tools": [tool("c", "object")] })),
++		];
++		let live_first = first(
++			serde_json::json!({ "tools": [tool("a", "string"), tool("b", "object")], "nextCursor": "page-2" }),
++		);
++		let live_next = next(serde_json::json!({ "tools": [tool("d", "object")] }));
++		let mut contradicted = Contradicted::between(
++			&served,
++			&[Some(live_first.1.clone()), Some(live_next.1.clone())],
++		);
++		let refused = |contradicted: &Contradicted, name: &str| {
++			contradicted
++				.refusal(&client_request(
++					serde_json::json!({ "method": "tools/call", "params": { "name": name } }),
++				))
++				.is_some()
++		};
++		for (name, changed) in [("a", true), ("b", false), ("c", true), ("d", true)] {
++			assert_eq!(refused(&contradicted, name), changed, "{name}");
++		}
++
++		contradicted.relisted(
++			&live_first.0,
++			&serde_json::json!({ "error": method_not_found() }),
++		);
++		assert!(
++			refused(&contradicted, "a"),
++			"an error reply gives the client nothing"
++		);
++		contradicted.relisted(&live_next.0, &live_next.1);
++		assert!(
++			!refused(&contradicted, "d"),
++			"the client now holds the listed definition"
++		);
++		assert!(
++			refused(&contradicted, "c"),
++			"a last page reached without the first leaves the rest contradicted"
++		);
++		contradicted.relisted(&live_first.0, &live_first.1);
++		assert!(!refused(&contradicted, "a"));
++		assert!(refused(&contradicted, "c"));
++		contradicted.relisted(&live_next.0, &live_next.1);
++		assert!(
++			contradicted.is_empty(),
++			"listing every page again leaves nothing contradicted"
++		);
++	}
  }
 diff --git a/crates/agentgateway/src/mcp/upstream/mod.rs b/crates/agentgateway/src/mcp/upstream/mod.rs
 --- a/crates/agentgateway/src/mcp/upstream/mod.rs
@@ -651,7 +1057,12 @@ diff --git a/crates/agentgateway/src/mcp/upstream/mod.rs b/crates/agentgateway/s
 diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs
 --- a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs
 +++ b/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs
-@@ -11,7 +11,7 @@
+@@ -1,3 +1,4 @@
++use std::collections::HashMap;
+ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+ use std::sync::{Arc, Mutex};
+ 
+@@ -11,7 +12,7 @@
  use tokio::time::{Duration, timeout};
  
  use super::*;
@@ -660,7 +1071,16 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
  
  /// A scripted MCP server shared by every child the test starts.
  #[derive(Clone)]
-@@ -27,6 +27,7 @@
+@@ -19,6 +20,8 @@
+ 	spawns: Arc<AtomicUsize>,
+ 	messages: Arc<Mutex<Vec<(usize, Value)>>>,
+ 	tools: Arc<Mutex<Vec<String>>>,
++	/// Input schemas of the tools that do not take the default one.
++	schemas: Arc<Mutex<HashMap<String, Value>>>,
+ 	paginate: Arc<AtomicBool>,
+ 	progress_on_call: Arc<AtomicBool>,
+ 	reject_initialize: Arc<AtomicBool>,
+@@ -27,6 +30,7 @@
  	call_gate: Gate,
  	ask_roots: Arc<AtomicBool>,
  	roots_answered: Arc<Notify>,
@@ -668,7 +1088,15 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
  }
  
  impl Script {
-@@ -43,6 +44,7 @@
+@@ -35,6 +39,7 @@
+ 			spawns: Arc::new(AtomicUsize::new(0)),
+ 			messages: Arc::default(),
+ 			tools: Arc::new(Mutex::new(tools.iter().map(|tool| tool.to_string()).collect())),
++			schemas: Arc::default(),
+ 			paginate: Arc::new(AtomicBool::new(false)),
+ 			progress_on_call: Arc::new(AtomicBool::new(false)),
+ 			reject_initialize: Arc::new(AtomicBool::new(false)),
+@@ -43,6 +48,7 @@
  			call_gate: Gate::default(),
  			ask_roots: Arc::new(AtomicBool::new(false)),
  			roots_answered: Arc::new(Notify::new()),
@@ -676,7 +1104,68 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
  		}
  	}
  
-@@ -164,12 +166,14 @@
+@@ -54,6 +60,14 @@
+ 		*self.tools.lock().unwrap() = tools.iter().map(|tool| tool.to_string()).collect();
+ 	}
+ 
++	fn set_schema(&self, tool: &str, schema: Value) {
++		self
++			.schemas
++			.lock()
++			.unwrap()
++			.insert(tool.to_string(), schema);
++	}
++
+ 	/// Methods one child received, in order.
+ 	fn methods(&self, spawn: usize) -> Vec<String> {
+ 		self
+@@ -81,6 +95,7 @@
+ 	script: Script,
+ 	index: usize,
+ 	tools: Vec<String>,
++	schemas: HashMap<String, Value>,
+ }
+ 
+ struct Scripted {
+@@ -108,6 +123,7 @@
+ 			script: script.clone(),
+ 			index,
+ 			tools: script.tools.lock().unwrap().clone(),
++			schemas: script.schemas.lock().unwrap().clone(),
+ 		};
+ 		tokio::spawn(async move {
+ 			while let Some(item) = inbox_rx.recv().await {
+@@ -124,17 +140,26 @@
+ }
+ 
+ impl ScriptedServer {
++	fn tool(&self, name: &str) -> Value {
++		match self.schemas.get(name) {
++			Some(schema) => json!({ "name": name, "inputSchema": schema }),
++			None => tool(name),
++		}
++	}
++
+ 	fn tools_page(&self, request: &ClientRequest) -> Value {
+ 		let cursor = serde_json::to_value(request)
+ 			.ok()
+ 			.and_then(|value| value["params"]["cursor"].as_str().map(str::to_string));
+ 		if self.script.paginate.load(Ordering::SeqCst) && self.tools.len() > 1 {
+ 			return match cursor {
+-				None => json!({ "tools": [tool(&self.tools[0])], "nextCursor": "page-2" }),
+-				Some(_) => json!({ "tools": self.tools[1..].iter().map(|name| tool(name)).collect::<Vec<_>>() }),
++				None => json!({ "tools": [self.tool(&self.tools[0])], "nextCursor": "page-2" }),
++				Some(_) => {
++					json!({ "tools": self.tools[1..].iter().map(|name| self.tool(name)).collect::<Vec<_>>() })
++				},
+ 			};
+ 		}
+-		json!({ "tools": self.tools.iter().map(|name| tool(name)).collect::<Vec<_>>() })
++		json!({ "tools": self.tools.iter().map(|name| self.tool(name)).collect::<Vec<_>>() })
+ 	}
+ 
+ 	fn gate_for(&self, req: &JsonRpcRequest<ClientRequest>) -> Option<Gate> {
+@@ -164,12 +189,14 @@
  					.expect("error response"),
  				]
  			},
@@ -696,7 +1185,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
  			"tools/call" => {
  				let mut replies = Vec::new();
  				if self.script.progress_on_call.load(Ordering::SeqCst) {
-@@ -250,11 +254,59 @@
+@@ -250,9 +277,57 @@
  	}
  }
  
@@ -723,8 +1212,8 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
 +		move || Ok(Scripted::new(&script)),
 +		Source::Memo(memo.clone()),
 +	)
- }
- 
++}
++
 +/// A seed of what the scripted server answers, with the tools each offered protocol lists.
 +fn seed(tools: impl Fn(&str) -> Vec<&'static str>, logging: bool) -> Arc<DiscoverySeed> {
 +	let protocols: serde_json::Map<String, Value> =
@@ -752,12 +1241,10 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
 +		move || Ok(Scripted::new(&script)),
 +		Source::Seed(seed.clone()),
 +	)
-+}
-+
- fn ctx() -> IncomingRequestContext {
- 	IncomingRequestContext::empty()
  }
-@@ -267,10 +319,14 @@
+ 
+ fn ctx() -> IncomingRequestContext {
+@@ -267,10 +342,14 @@
  }
  
  fn initialize(client: &str) -> Value {
@@ -773,7 +1260,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
  			"capabilities": { "roots": {} },
  			"clientInfo": { "name": client, "version": "1" }
  		}
-@@ -575,7 +631,7 @@
+@@ -575,7 +654,7 @@
  				}
  				Ok(Scripted::new(&script))
  			},
@@ -782,7 +1269,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
  		)
  	};
  
-@@ -622,7 +678,7 @@
+@@ -622,7 +701,7 @@
  				}
  				Ok(Scripted::new(&script))
  			},
@@ -791,7 +1278,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
  		)
  	};
  	handshake(&process, "client").await;
-@@ -883,3 +939,218 @@
+@@ -883,3 +962,338 @@
  	assert!(matches!(rejected, Err(UpstreamError::Send)));
  	assert_eq!(script.spawns(), 2);
  }
@@ -954,6 +1441,126 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
 +	assert_eq!(script.spawns(), 2, "other recorded protocols stay seeded");
 +}
 +
++async fn call_tool(process: &Process, id: i64, name: &str) -> ServerJsonRpcMessage {
++	process
++		.send_message(
++			request(
++				id,
++				json!({ "method": "tools/call", "params": { "name": name, "arguments": {} } }),
++			),
++			&ctx(),
++		)
++		.await
++		.expect("tools/call")
++}
++
++/// The tools one child was asked to call, in order.
++fn called(script: &Script, spawn: usize) -> Vec<String> {
++	received(script, spawn, "tools/call")
++		.iter()
++		.map(|call| {
++			call["params"]["name"]
++				.as_str()
++				.expect("tool name")
++				.to_string()
++		})
++		.collect()
++}
++
++#[tokio::test]
++async fn lazy_stdio_seed_drift_refuses_changed_tools_until_the_client_lists_them_again() {
++	let script = Script::new(&["alpha", "beta", "delta"]);
++	script.set_schema(
++		"beta",
++		json!({ "type": "object", "properties": { "path": { "type": "string" } }, "required": ["path"] }),
++	);
++	let seed = seed(|_| vec!["alpha", "beta", "gamma"], false);
++	let session = seeded_process(&script, &seed);
++	let mut events = session
++		.get_event_stream()
++		.await
++		.expect("event stream while dormant");
++	assert_eq!(
++		handshake(&session, "client").await,
++		["alpha", "beta", "gamma"]
++	);
++
++	let first = error_of(call_tool(&session, 3, "alpha").await);
++	assert_eq!(first.id, Some(RequestId::Number(3)));
++	assert!(
++		first.error.message.contains("tools/list"),
++		"{}",
++		first.error.message
++	);
++	let announced = timeout(Duration::from_secs(1), events.next())
++		.await
++		.expect("the drift must be announced")
++		.expect("the event stream must stay open")
++		.expect("event");
++	assert_eq!(
++		serde_json::to_value(&announced).expect("event")["method"],
++		"notifications/tools/list_changed"
++	);
++	// A list the gateway sends on its own to resolve a name never reaches the client
++	let resolve = JsonRpcRequest::new(
++		RequestId::String(format!("{RESOLVE_ID_PREFIX}0").into()),
++		serde_json::from_value(json!({ "method": "tools/list" })).expect("tools/list"),
++	);
++	session
++		.send_message(resolve, &ctx())
++		.await
++		.expect("resolve list");
++
++	// Before the client lists the tools again only a tool it was served as the server defines it
++	// is called: a changed schema, a removed and an added tool are refused like the first call
++	for (id, name) in [(4, "beta"), (5, "gamma"), (6, "delta")] {
++		let refused = error_of(call_tool(&session, id, name).await);
++		assert_eq!(refused.id, Some(RequestId::Number(id)));
++		assert_eq!(refused.error.code, first.error.code, "{name}");
++		assert!(
++			refused.error.message.contains("tools/list"),
++			"{name}: {}",
++			refused.error.message
++		);
++	}
++	assert_eq!(
++		result_of(call_tool(&session, 7, "alpha").await)["content"][0]["text"],
++		"spawn-1"
++	);
++	assert_eq!(
++		called(&script, 1),
++		["alpha"],
++		"a changed tool must not reach the server before the client lists it again"
++	);
++
++	assert_eq!(list_tools(&session).await, ["alpha", "beta", "delta"]);
++	for (id, name) in [(8, "beta"), (9, "delta")] {
++		assert!(
++			matches!(
++				call_tool(&session, id, name).await,
++				ServerJsonRpcMessage::Response(_)
++			),
++			"{name} must be called once the client holds its definition"
++		);
++	}
++	assert_eq!(called(&script, 1), ["alpha", "beta", "delta"]);
++	assert!(
++		session.lazy.as_ref().expect("lazy process").is_live(),
++		"a client holding the server's tools takes the hot path again"
++	);
++
++	let other = seeded_process(&script, &seed);
++	assert_eq!(
++		handshake(&other, "client").await,
++		["alpha", "beta", "delta"]
++	);
++	assert_eq!(
++		script.spawns(),
++		2,
++		"another session discovers the server's tools"
++	);
++}
++
 +#[tokio::test]
 +async fn lazy_stdio_seed_holds_the_log_level_the_served_initialize_advertised() {
 +	let script = Script::new(&["alpha"]);
@@ -1013,7 +1620,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio/lazy_tests.rs b/crates/a
 diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway/src/mcp/upstream/stdio.rs
 --- a/crates/agentgateway/src/mcp/upstream/stdio.rs
 +++ b/crates/agentgateway/src/mcp/upstream/stdio.rs
-@@ -9,14 +9,14 @@
+@@ -9,14 +9,15 @@
  use rmcp::model::{
  	ClientJsonRpcMessage, ClientNotification, ClientRequest, InitializedNotification, JsonRpcMessage,
  	JsonRpcRequest, PromptListChangedNotification, RequestId, ResourceListChangedNotification,
@@ -1024,13 +1631,14 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  use tokio::sync::{mpsc, oneshot};
  use tracing::{debug, error, warn};
  
++use crate::mcp::handler::RESOLVE_ID_PREFIX;
  use crate::mcp::mergestream::Messages;
 -use crate::mcp::upstream::discovery::{self, TargetMemo};
-+use crate::mcp::upstream::discovery::{self, Reply, Source};
++use crate::mcp::upstream::discovery::{self, Contradicted, Reply, Source};
  use crate::mcp::upstream::{IncomingRequestContext, UpstreamError};
  
  /// Longest wait for a lazily started server to initialize and confirm the discovery it served.
-@@ -48,9 +48,10 @@
+@@ -48,14 +49,16 @@
  
  /// State of a process whose server starts on the first request that needs it.
  struct Lazy {
@@ -1044,7 +1652,25 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  	/// Set once the transport runs, including while the start replays; client responses to server
  	/// requests are forwarded from then on.
  	started: AtomicBool,
-@@ -80,30 +81,34 @@
+-	/// Set once the server is ready for requests, so they skip the start lock; only the start path
+-	/// clears or sets it.
++	/// Set once the server is ready for requests and its client holds no discovery the server
++	/// contradicted, so requests skip the start lock; only paths holding the start lock set or
++	/// clear it.
+ 	live: AtomicBool,
+ 	/// Held while the server starts and while a request that started it is handed over, so concurrent
+ 	/// first requests start it once and nothing sent afterwards overtakes them.
+@@ -64,6 +67,9 @@
+ 
+ enum LazyState {
+ 	Dormant(Box<Dormant>),
++	/// Started while the client may still hold listed entries the server contradicted; a request
++	/// naming one is refused until the client lists it again.
++	Contradicted(Box<Contradicted>),
+ 	Live,
+ 	Closed,
+ }
+@@ -80,30 +86,36 @@
  struct Session {
  	initialize: Option<ClientRequest>,
  	initialize_served: Option<serde_json::Value>,
@@ -1061,6 +1687,8 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
 +/// Discovery served without the server that the started server did not confirm.
  struct Mismatch {
  	methods: Vec<String>,
++	/// What of the served lists the client must not call before listing them again.
++	contradicted: Contradicted,
  }
  
  impl Lazy {
@@ -1087,7 +1715,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  		}
  	}
  
-@@ -123,18 +128,53 @@
+@@ -123,18 +135,53 @@
  		self.started.store(started, Ordering::Release);
  	}
  
@@ -1146,7 +1774,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  	fn serve(
  		&self,
  		dormant: &mut Dormant,
-@@ -143,21 +183,24 @@
+@@ -143,21 +190,41 @@
  		is_initialize: bool,
  	) -> Option<ServerJsonRpcMessage> {
  		let exchange = exchange?;
@@ -1177,13 +1805,30 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  		} else {
 -			dormant.session.served.push((req.request.clone(), canonical));
 +			session.served.push((req.request.clone(), canonical));
++		}
++		Some(reply.into_message(req.id.clone()))
++	}
++
++	/// Takes a list the client asked for again as what it holds; once it holds nothing the server
++	/// contradicted, requests skip the start lock again.
++	async fn relisted(&self, request: &ClientRequest, response: &ServerJsonRpcMessage) {
++		let Some(reply) = Reply::canonical_of(response) else {
++			return;
++		};
++		let mut state = self.state.lock().await;
++		let LazyState::Contradicted(contradicted) = &mut *state else {
++			return;
++		};
++		contradicted.relisted(request, &reply);
++		if contradicted.is_empty() {
++			*state = LazyState::Live;
++			self.set_live(true);
  		}
 -		Some(ServerJsonRpcMessage::response(result, req.id.clone()))
-+		Some(reply.into_message(req.id.clone()))
  	}
  }
  
-@@ -207,19 +250,20 @@
+@@ -207,19 +274,20 @@
  	) -> Result<ServerJsonRpcMessage, UpstreamError> {
  		let observed = match &self.lazy {
  			None => None,
@@ -1207,7 +1852,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  		}
  		Ok(response)
  	}
-@@ -283,7 +327,7 @@
+@@ -283,7 +351,7 @@
  		Ok(receiver)
  	}
  
@@ -1216,7 +1861,15 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  	async fn send_lazy(
  		&self,
  		lazy: &Lazy,
-@@ -300,14 +344,20 @@
+@@ -292,6 +360,7 @@
+ 	) -> Result<ServerJsonRpcMessage, UpstreamError> {
+ 		enum Action {
+ 			Served(ServerJsonRpcMessage),
++			Refused(&'static str),
+ 			StartForInitialize,
+ 			Activate,
+ 			Forward,
+@@ -300,14 +369,24 @@
  		let exchange = discovery::exchange_key(&req.request);
  		let is_initialize = matches!(req.request, ClientRequest::InitializeRequest(_));
  		if is_initialize {
@@ -1231,6 +1884,10 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  		let action = match &mut *state {
  			LazyState::Closed => return Err(UpstreamError::Send),
  			LazyState::Live => Action::Forward,
++			LazyState::Contradicted(contradicted) => match contradicted.refusal(&req.request) {
++				Some(list) => Action::Refused(list),
++				None => Action::Forward,
++			},
  			LazyState::Dormant(dormant) => {
 -				if let Some(served) = lazy.serve(dormant, &req, exchange.as_deref(), is_initialize) {
 +				if let Some(local) = Lazy::answer_locally(dormant, &req) {
@@ -1239,7 +1896,49 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  					Action::Served(served)
  				} else if is_initialize {
  					Action::StartForInitialize
-@@ -349,9 +399,8 @@
+@@ -318,6 +397,7 @@
+ 		};
+ 		match action {
+ 			Action::Served(served) => return Ok(served),
++			Action::Refused(list) => return Ok(contradicted_error(list, req.id)),
+ 			Action::Forward => {},
+ 			Action::StartForInitialize => {
+ 				if let LazyState::Dormant(dormant) = &mut *state {
+@@ -328,30 +408,34 @@
+ 			},
+ 			Action::Activate => {
+ 				if let Some(mismatch) = self.activate(lazy, &mut state, ctx).await? {
+-					return Ok(ServerJsonRpcMessage::error(
+-						rmcp::ErrorData::internal_error(
+-							format!(
+-								"stdio discovery served for {} no longer matches the server; it was invalidated, list it again",
+-								mismatch.methods.join(", ")
+-							),
+-							None,
+-						),
+-						Some(req.id),
+-					));
++					return Ok(contradicted_error(&mismatch.methods.join(", "), req.id));
+ 				}
+ 			},
+ 		}
+ 		let observed = lazy.observed_key(&exchange, is_initialize);
++		// The client's own list replaces what it holds of a contradicted list
++		let relisted = match &*state {
++			LazyState::Contradicted(contradicted)
++				if contradicted.lists(&req.request) && !sent_by_gateway(&req.id) =>
++			{
++				Some(req.request.clone())
++			},
++			_ => None,
++		};
+ 		// Queued before the start lock is released and before the live flag is published, so
+ 		// nothing sent afterwards on the hot path or behind the lock overtakes this request
+ 		let enqueued = self.enqueue(req, ctx).await;
+-		lazy.set_live(true);
++		if matches!(*state, LazyState::Live) {
++			lazy.set_live(true);
++		}
  		let receiver = enqueued?;
  		drop(state);
  		let response = receiver.await.map_err(|_| UpstreamError::Recv)?;
@@ -1248,10 +1947,48 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
 -			lazy.memo.observe(&client, &exchange, &live.result);
 +		if let (Some((scope, exchange)), ServerJsonRpcMessage::Response(live)) = (observed, &response) {
 +			lazy.source.observe(&scope, &exchange, &live.result);
++		}
++		if let Some(request) = relisted {
++			lazy.relisted(&request, &response).await;
  		}
  		Ok(response)
  	}
-@@ -399,7 +448,7 @@
+@@ -378,17 +462,24 @@
+ 			)),
+ 		};
+ 		match outcome {
+-			Ok(mismatch) => {
++			Ok(None) => {
+ 				*state = LazyState::Live;
+-				if let Some(mismatch) = &mismatch {
+-					warn!(
+-						"stdio discovery served for {} does not match the started server; invalidating it",
+-						mismatch.methods.join(", ")
+-					);
+-					lazy.invalidate();
+-					self.announce_list_changes(mismatch);
+-				}
+-				Ok(mismatch)
++				Ok(None)
++			},
++			Ok(Some(mut mismatch)) => {
++				warn!(
++					"stdio discovery served for {} does not match the started server; invalidating it",
++					mismatch.methods.join(", ")
++				);
++				lazy.invalidate();
++				self.announce_list_changes(&mismatch);
++				let contradicted = std::mem::take(&mut mismatch.contradicted);
++				*state = if contradicted.is_empty() {
++					LazyState::Live
++				} else {
++					LazyState::Contradicted(Box::new(contradicted))
++				};
++				Ok(Some(mismatch))
+ 			},
+ 			Err(err) => {
+ 				*state = LazyState::Closed;
+@@ -399,7 +490,7 @@
  		}
  	}
  
@@ -1260,7 +1997,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  	async fn replay_session(
  		&self,
  		session: &Session,
-@@ -407,13 +456,13 @@
+@@ -407,13 +498,13 @@
  	) -> Result<Option<Mismatch>, UpstreamError> {
  		let mut methods: Vec<String> = Vec::new();
  		if let Some(initialize) = &session.initialize {
@@ -1281,7 +2018,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  				methods.push("initialize".to_string());
  			}
  			if session.client_initialized {
-@@ -423,6 +472,12 @@
+@@ -423,38 +514,44 @@
  				});
  				self.send_live_notification(initialized, ctx).await?;
  			}
@@ -1294,19 +2031,26 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  		}
  		for notification in &session.queued {
  			self
-@@ -431,30 +486,24 @@
+ 				.send_live_notification(notification.clone(), ctx)
+ 				.await?;
  		}
++		let mut live_replies = Vec::with_capacity(session.served.len());
  		for (index, (request, expected)) in session.served.iter().enumerate() {
  			let live = self
 -				.replayed_result(request.clone(), &format!("served-{index}"), ctx)
 +				.replayed(request.clone(), &format!("served-{index}"), ctx)
  				.await?;
--			if live.as_ref() != Some(expected) {
-+			if Reply::canonical_of(&live).as_ref() != Some(expected) {
++			let live = Reply::canonical_of(&live);
+ 			if live.as_ref() != Some(expected) {
  				methods.push(request.method().to_string());
  			}
++			live_replies.push(live);
  		}
- 		Ok((!methods.is_empty()).then_some(Mismatch { methods }))
+-		Ok((!methods.is_empty()).then_some(Mismatch { methods }))
++		Ok((!methods.is_empty()).then(|| Mismatch {
++			methods,
++			contradicted: Contradicted::between(&session.served, &live_replies),
++		}))
  	}
  
 -	/// The result of a request the gateway sends on its own; `None` when the server answered with an error.
@@ -1331,7 +2075,52 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  	}
  
  	/// Tells the client's event stream which lists it must fetch again.
-@@ -605,10 +654,11 @@
+@@ -529,7 +626,7 @@
+ 		let mut state = lazy.state.lock().await;
+ 		let forward = match &mut *state {
+ 			LazyState::Closed => return Err(UpstreamError::Send),
+-			LazyState::Live => req,
++			LazyState::Live | LazyState::Contradicted(_) => req,
+ 			LazyState::Dormant(dormant) => match req {
+ 				ClientNotification::InitializedNotification(_) => {
+ 					dormant.session.client_initialized = true;
+@@ -554,7 +651,9 @@
+ 		// Sent before the start lock is released and before the live flag is published, so the
+ 		// notification keeps its place behind the replay
+ 		let sent = self.send_live_notification(forward, ctx).await;
+-		lazy.set_live(true);
++		if matches!(*state, LazyState::Live) {
++			lazy.set_live(true);
++		}
+ 		sent
+ 	}
+ 
+@@ -598,6 +697,24 @@
+ 	}
+ }
+ 
++/// Whether the gateway sent the request on its own, so its reply never reaches the client.
++fn sent_by_gateway(id: &RequestId) -> bool {
++	matches!(id, RequestId::String(id) if id.starts_with(RESOLVE_ID_PREFIX))
++}
++
++/// The reply to a request the discovery its client holds no longer describes.
++fn contradicted_error(lists: &str, id: RequestId) -> ServerJsonRpcMessage {
++	ServerJsonRpcMessage::error(
++		rmcp::ErrorData::internal_error(
++			format!(
++				"stdio discovery served for {lists} no longer matches the server; it was invalidated, list it again"
++			),
++			None,
++		),
++		Some(id),
++	)
++}
++
+ impl Process {
+ 	pub fn new(proc: impl MCPTransport) -> Self {
+ 		let (process, parts) = Self::with_channels();
+@@ -605,10 +722,11 @@
  		process
  	}
  
@@ -1345,7 +2134,7 @@ diff --git a/crates/agentgateway/src/mcp/upstream/stdio.rs b/crates/agentgateway
  	) -> Self {
  		let starter: Starter = Box::new(move |parts: &mut Option<TaskParts>| {
  			let proc = transport()?;
-@@ -618,8 +668,8 @@
+@@ -618,8 +736,8 @@
  		});
  		let (mut process, parts) = Self::with_channels();
  		process.lazy = Some(Lazy {

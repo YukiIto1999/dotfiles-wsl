@@ -126,7 +126,7 @@ architecture-standardの規範本文は、配備済みsourceでなくpolicyが�
 新しい標準作業ではその入口から `dotfiles-standard-package open ID` を一度実行する。
 成功時の出力は上流原版の `SKILL.md` の絶対パスである。同じ作業で使う参照資料・検査器・委譲先はそこから辿り、可変の入口へ戻らない。
 原版はセッションではなく使った公開版ごとに Nix の GC root を持つ。送信元の終了後も同じパスを読める。`~/.local/state/dotfiles-wsl/standard-package/revisions/<commit>` は自動削除しない。その版を使う仕事・引継ぎ・再開がなく、`last-good` の指す版でもないと確認してから、そのリンクだけを外せば通常の Nix GC で回収できる。
-公開版の照合や互換性の検査に失敗したら新しい標準作業だけを止める。
+公開版の照合や互換性の検査に失敗したら新しい標準作業だけを止める。互換性の検査は、採用した各 `SKILL.md` が `<skill-package-root>` 起点、相対 link、`references/` や `scripts/` の表記で名指しする同梱 file が source 内にあることも含む。
 `dotfiles-standard-package status` は最後に検証した版の観測であり、現在の公開版を使う許可ではない。
 新しい権限・依存・起動条件が必要な改訂は、ホストの採用宣言と検査の基準を更新してから使う。
 

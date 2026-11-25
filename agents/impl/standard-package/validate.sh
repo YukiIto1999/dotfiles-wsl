@@ -14,6 +14,22 @@ frontmatter() {
   awk 'NR == 1 && $0 != "---" { exit 1 } { print } NR > 1 && $0 == "---" { closed = 1; exit } END { exit !closed }' "$1"
 }
 
+# SKILL.md が手順で開く同梱 file の path。<skill-package-root> 起点、相対 link、code 表記の相対 path を読み、brace や glob の表記は除く
+asset_references() {
+  gawk '{
+    line = $0
+    while (match(line, /<skill-package-root>\/[^`[:space:])"'"'"'{}*<>]+|\]\([^]()#:[:space:]]+[)#]|`(references|scripts|assets|templates)\/[^`[:space:]{}*<>]+`/)) {
+      reference = substr(line, RSTART, RLENGTH)
+      line = substr(line, RSTART + RLENGTH)
+      sub(/^<skill-package-root>\//, "", reference)
+      sub(/^\]\(/, "", reference)
+      sub(/[)#]$/, "", reference)
+      gsub(/`/, "", reference)
+      print reference
+    }
+  }' "$1" | sort -u
+}
+
 source=$1
 revision=$2
 
@@ -35,6 +51,19 @@ while IFS=$'\t' read -r id reviewed; do
     fail "$id: SKILL.md frontmatter differs from the host-reviewed source"
   fi
 done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' "$reviewed_manifest")
+
+# 手順が開く file を欠いた候補は、利用者の作業を始める前に拒む
+while IFS= read -r id; do
+  root=$source/skills/$id
+  while IFS= read -r reference; do
+    target=$(realpath -m -- "$root/$reference")
+    case $target in
+      "$source"/*) ;;
+      *) fail "$id: SKILL.md refers outside the source: $reference" ;;
+    esac
+    [ -e "$target" ] || fail "$id: SKILL.md refers to a file the source lacks: $reference"
+  done < <(asset_references "$root/SKILL.md")
+done < <(jq -r 'keys[]' "$reviewed_manifest")
 
 bash "$checker" --standard-root "$source" >&2 || fail 'the host-pinned package checker rejected the source'
 

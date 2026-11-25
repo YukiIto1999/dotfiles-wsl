@@ -72,6 +72,7 @@ let
     frontmatter = "sed -i '3s/^description: /description: changed /' skills/standard-audit/SKILL.md";
     missing-skill = "rm -r skills/property-testing";
     escaping-symlink = "ln -s /etc/passwd skills/standard-apply/references/escape.md";
+    missing-asset = "rm skills/standard-update/scripts/verify.sh";
     checker-rejection = "printf 'if then\\n' >skills/standard-update/scripts/broken.sh";
   };
 

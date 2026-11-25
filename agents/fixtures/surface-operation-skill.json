@@ -88,13 +88,13 @@
       ]
     },
     {
-      "id": "playwright-handoff-from-unsupported-client",
+      "id": "browser-handoff-when-no-route-is-exposed",
       "set": "development",
-      "environment": "The current client has no native browser, no Orca, and cannot add a per-session MCP. The configured tool-session list offers playwright for another client. A local fixture is reachable and no application data has been changed.",
+      "environment": "The current client exposes no native browser tool, no Orca, no Playwright MCP, and no Chrome DevTools MCP, and cannot add an MCP connection. A local fixture is reachable and no application data has been changed.",
       "prompt": "ローカルで動く設定画面を開いて、空入力が拒否されることを専用fixtureで確認して。",
       "expectedSkills": ["surface-operation"],
       "expected": {
-        "identifiesAClientListedForThePlaywrightRouteAndSuppliesItsLaunchCommand": true,
+        "checksEveryWebRouteBeforeHandingOff": true,
         "handsOffTheUrlApprovedFixtureAndActionsAndAcceptanceMatrix": true,
         "leavesCurrentClientConfigurationAndApplicationStateUnchanged": true,
         "doesNotClaimTheBrowserResultBeforeExecution": true
@@ -232,20 +232,40 @@
       "critical": ["doesNotMakeOrcaPartOfGenericDevelopment"]
     },
     {
-      "id": "project-playwright-regression-near-miss",
+      "id": "project-playwright-regression-handoff",
       "set": "development",
       "environment": "The project already ships Playwright Test, approved fixtures, and a checked-in verification script used in CI. Orca and the Playwright MCP are also available.",
       "prompt": "前回の空入力の不具合がまた起きないよう、毎回CIで動く回帰テストを追加して、そのテストを実行して。",
-      "expectedSkills": [],
-      "mustNotTrigger": ["surface-operation"],
+      "expectedSkills": ["surface-operation"],
       "expected": {
+        "choosesThePlaywrightTestBoundaryForTheServerBackedGuarantee": true,
         "addsTheRegressionToTheProjectsPlaywrightTestSuiteUsingItsFixtures": true,
         "runsTheProjectsExistingVerificationEntryAndReportsTheResult": true,
         "doesNotSubstituteASingleOrcaOrPlaywrightMcpOperationForTheTest": true
       },
       "critical": [
         "addsTheRegressionToTheProjectsPlaywrightTestSuiteUsingItsFixtures",
-        "runsTheProjectsExistingVerificationEntryAndReportsTheResult"
+        "runsTheProjectsExistingVerificationEntryAndReportsTheResult",
+        "doesNotSubstituteASingleOrcaOrPlaywrightMcpOperationForTheTest"
+      ]
+    },
+    {
+      "id": "existing-windows-window-via-orca-computer-use",
+      "set": "development",
+      "environment": "Orca is running and ORCA_CLI_COMMAND resolves its CLI. `computer capabilities` on win32 lists windows, captures screenshots, and offers UI Automation element actions, but keyboard input needs the foreground. Anode is ready too. The user has an unsaved Notepad window open on their own desktop.",
+      "prompt": "いま開いているメモ帳の未保存の文章の3行目にある誤字を直して。保存はしないで。",
+      "expectedSkills": ["surface-operation", "orca-computer-use"],
+      "expected": {
+        "operatesTheUsersSpecifiedWindowInsteadOfReopeningItInASeat": true,
+        "usesBackgroundElementActionsAndRecordsTheirDelivery": true,
+        "asksTheUserBeforeAnyForegroundAction": true,
+        "confirmsTheCorrectedLineFromTheWindowState": true,
+        "doesNotSaveOrCloseTheWindow": true
+      },
+      "critical": [
+        "operatesTheUsersSpecifiedWindowInsteadOfReopeningItInASeat",
+        "asksTheUserBeforeAnyForegroundAction",
+        "doesNotSaveOrCloseTheWindow"
       ]
     },
     {

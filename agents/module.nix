@@ -35,14 +35,7 @@ let
     builtins.attrNames checkoutSkills
   );
 
-  ompExecutable = pkgs.writeShellScript "dotfiles-omp" ''
-    # 日次の更新が検証済みの世代を置く profile を優先し、無ければ flake の固定版を使う
-    profile_omp=${lib.escapeShellArg "${ws.homeDir}/.local/state/nix/profiles/omp/bin/omp"}
-    if [ -x "$profile_omp" ]; then
-      exec "$profile_omp" "$@"
-    fi
-    exec ${lib.getExe' llmAgents.omp "omp"} "$@"
-  '';
+  profileRoot = "${ws.homeDir}/.local/state/nix/profiles";
 
   # OMP の managed browser が起動する Chromium。指定が無いと OMP は Chrome for Testing を取得するが、
   # NixOS では共有 library が無く起動しない。omp の package が自分用に足す LD_LIBRARY_PATH は子 process にも残り、
@@ -55,30 +48,41 @@ let
   clients = {
     omp = {
       binary = "omp";
-      executable = ompExecutable;
-      # 版の更新は dotfiles-omp-update が行う
+      package = "omp";
       environment = {
+        # 版の更新は dotfiles-agent-update が行う
         PI_SKIP_VERSION_CHECK = "1";
         PUPPETEER_EXECUTABLE_PATH = "${ompBrowser}";
       };
     };
     claude = {
       binary = "claude";
-      executable = lib.getExe' llmAgents.claude-code "claude";
+      package = "claude-code";
     };
     codex = {
       binary = "codex";
-      executable = lib.getExe' llmAgents.codex "codex";
+      package = "codex";
     };
     opencode = {
       binary = "opencode";
-      executable = lib.getExe' llmAgents.opencode "opencode";
+      package = "opencode";
     };
     antigravity = {
       binary = "agy";
-      executable = lib.getExe' llmAgents.antigravity-cli "agy";
+      package = "antigravity-cli";
     };
   };
+
+  # 日次の更新が検証済みの世代を置く profile を優先し、無ければ flake の固定版を使う
+  clientExecutable =
+    name: client:
+    pkgs.writeShellScript "dotfiles-${name}" ''
+      profile_binary=${lib.escapeShellArg "${profileRoot}/${name}/bin/${client.binary}"}
+      if [ -x "$profile_binary" ]; then
+        exec "$profile_binary" "$@"
+      fi
+      exec ${lib.getExe' llmAgents.${client.package} client.binary} "$@"
+    '';
 
   # client の process tree を memory の会計と上限のためだけに agents.slice の scope へ置く。
   # user manager に届かないときも起動は拒まない
@@ -97,10 +101,10 @@ let
         )}
         if ${systemd}/bin/systemctl --user show --property=Version >/dev/null 2>&1; then
           exec ${systemd}/bin/systemd-run --user --scope --quiet --collect --slice=agents.slice \
-            --unit="${name}-$$-$RANDOM.scope" -- ${client.executable} "$@"
+            --unit="${name}-$$-$RANDOM.scope" -- ${clientExecutable name client} "$@"
         fi
         echo "${client.binary}: systemd user manager is unreachable; starting outside agents.slice" >&2
-        exec ${client.executable} "$@"
+        exec ${clientExecutable name client} "$@"
       '';
     };
 
@@ -157,6 +161,53 @@ let
     };
     Install.WantedBy = [ "timers.target" ];
   };
+
+  # 日次で各 client を最新へ更新し、起動できない世代は戻す。一つの失敗で他の client の更新を止めない
+  agentUpdate = pkgs.writeShellApplication {
+    name = "dotfiles-agent-update";
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.git
+      config.nix.package
+    ];
+    text = ''
+      profile_root=${lib.escapeShellArg profileRoot}
+      mkdir -p -- "$profile_root"
+      update() {
+        local name=$1 package=$2 binary=$3
+        local profile="$profile_root/$name" existed=0
+        if [ -e "$profile" ]; then
+          existed=1
+          nix profile upgrade --profile "$profile" --all || return 1
+        else
+          nix profile install --profile "$profile" "github:numtide/llm-agents.nix#$package" || return 1
+        fi
+        if ! "$profile/bin/$binary" --version; then
+          echo "dotfiles-agent-update: the new $name generation does not start; reverting" >&2
+          if [ "$existed" = 1 ]; then
+            nix profile rollback --profile "$profile"
+          else
+            rm -f -- "$profile"
+          fi
+          return 1
+        fi
+        nix profile wipe-history --profile "$profile" --older-than 14d
+      }
+      status=0
+      ${lib.concatStrings (
+        lib.mapAttrsToList (name: client: ''
+          update ${
+            lib.escapeShellArgs [
+              name
+              client.package
+              client.binary
+            ]
+          } || status=1
+        '') clients
+      )}
+      exit "$status"
+    '';
+  };
 in
 {
   imports = [
@@ -184,7 +235,7 @@ in
   };
 
   config = {
-    dotfiles.agents.ompExecutable = ompExecutable;
+    dotfiles.agents.ompExecutable = clientExecutable "omp" clients.omp;
 
     assertions = [
       {
@@ -240,7 +291,9 @@ in
         // skillFiles ".omp/agent/skills"
         // skillFiles ".claude/skills"
         // skillFiles ".codex/skills"
-        // skillFiles ".config/opencode/skills";
+        // skillFiles ".config/opencode/skills"
+        # Antigravity の App と CLI が共通に読む個人の skill directory
+        // skillFiles ".gemini/config/skills";
 
         systemd.user.services.dotfiles-standard-sync = {
           Unit.Description = "architecture-standard の clone を既定 branch へ fast-forward";
@@ -251,6 +304,25 @@ in
           };
         };
         systemd.user.timers.dotfiles-standard-sync = dailyTimer "architecture-standard の日次同期";
+
+        systemd.user.services.dotfiles-agent-update = {
+          Unit.Description = "agent client を最新へ更新";
+          Service = {
+            Type = "oneshot";
+            Environment = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ];
+            ExecStart = lib.getExe agentUpdate;
+          };
+        };
+        systemd.user.timers.dotfiles-agent-update = {
+          Unit.Description = "agent client の日次更新";
+          Timer = {
+            OnCalendar = "daily";
+            # 配備直後は profile の無い client が flake の固定版で起動するため、timer の開始から間を置かずに最新を入れる
+            OnActiveSec = "1min";
+            Persistent = true;
+          };
+          Install.WantedBy = [ "timers.target" ];
+        };
       };
   };
 }

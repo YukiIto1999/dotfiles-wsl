@@ -9,7 +9,6 @@ let
   cfg = config.dotfiles;
   ws = cfg.workstation;
   ompDirectory = "${ws.homeDir}/.omp/agent";
-  profile = "${ws.homeDir}/.local/state/nix/profiles/omp";
 
   # tsgo と roslyn-ls の別実装向け設定継承を避けるため上流名の流用は不可
   compatibleLspNames = {
@@ -186,37 +185,6 @@ let
       fi
     '';
   };
-
-  # 日次で最新の omp を専用 profile へ入れ、起動できない世代は戻す
-  ompUpdate = pkgs.writeShellApplication {
-    name = "dotfiles-omp-update";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.git
-      config.nix.package
-    ];
-    text = ''
-      profile=${lib.escapeShellArg profile}
-      mkdir -p -- "$(dirname -- "$profile")"
-      if [ -e "$profile" ]; then
-        existed=1
-        nix profile upgrade --profile "$profile" --all
-      else
-        existed=0
-        nix profile install --profile "$profile" github:numtide/llm-agents.nix#omp
-      fi
-      if ! PI_SKIP_VERSION_CHECK=1 "$profile/bin/omp" --version; then
-        echo "dotfiles-omp-update: the new omp generation does not start; reverting" >&2
-        if [ "$existed" = 1 ]; then
-          nix profile rollback --profile "$profile"
-        else
-          rm -f -- "$profile"
-        fi
-        exit 1
-      fi
-      nix profile wipe-history --profile "$profile" --older-than 14d
-    '';
-  };
 in
 {
   home-manager.users.${ws.username} =
@@ -227,24 +195,5 @@ in
         ".omp/agent/WATCHDOG.yml".source = ./watchdog.yml;
       };
       home.activation.ompFiles = lib.hm.dag.entryAfter [ "writeBoundary" ] (lib.getExe installOmpFiles);
-
-      systemd.user.services.dotfiles-omp-update = {
-        Unit.Description = "omp を最新へ更新";
-        Service = {
-          Type = "oneshot";
-          Environment = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ];
-          ExecStart = lib.getExe ompUpdate;
-        };
-      };
-      systemd.user.timers.dotfiles-omp-update = {
-        Unit.Description = "omp の日次更新";
-        Timer = {
-          OnCalendar = "daily";
-          # 配備直後は profile が無く flake の固定版で起動するため、timer の開始から間を置かずに最新を入れる
-          OnActiveSec = "1min";
-          Persistent = true;
-        };
-        Install.WantedBy = [ "timers.target" ];
-      };
     };
 }

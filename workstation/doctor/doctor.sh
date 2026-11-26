@@ -120,4 +120,24 @@ else
   warn "architecture-standard clone missing at $standard_clone" "dotfiles-standard-sync"
 fi
 
+# 11. Test containers left by interrupted tests. testcontainers-rs has no reaper (Ryuk), so a killed, aborted or
+#     failed-to-start test leaves its containers running or stopped, and nothing removes them on its own.
+#     Six hours is longer than any test run here; younger containers may still belong to a running test.
+if command -v docker >/dev/null 2>&1; then
+  now=$(date +%s)
+  stale_ids=()
+  while read -r id created; do
+    created_at=$(date -d "$created" +%s 2>/dev/null) || continue
+    if [ $((now - created_at)) -ge 21600 ]; then
+      stale_ids+=("${id:0:12}")
+    fi
+  done < <(docker ps -aq --filter label=org.testcontainers.managed-by=testcontainers 2>/dev/null |
+    xargs -r docker inspect -f '{{.Id}} {{.Created}}' 2>/dev/null)
+  if [ ${#stale_ids[@]} -eq 0 ]; then
+    pass "no test container older than 6h"
+  else
+    warn "${#stale_ids[@]} test container(s) older than 6h were left by interrupted tests" "docker rm -f -v ${stale_ids[*]}"
+  fi
+fi
+
 exit $((failures > 0))

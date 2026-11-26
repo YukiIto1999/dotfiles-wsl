@@ -165,6 +165,12 @@
         memory-runtime =
           runCheck "memory-runtime" [ pkgs.git ]
             "${memoryRuntime.python}/bin/python ${./knowledge/memory/runtime_test.py} ${./knowledge/memory/package}";
+        # OMP が読む hook を bun で動かし、想起が session の最初の依頼だけで起き、失敗が停止しないことを確かめる
+        memory-hook = runCheck "memory-hook" [ pkgs.bun ] ''
+          cp -r --no-preserve=mode ${./knowledge/memory} hook
+          cd hook
+          bun test ./project-memory.test.ts
+        '';
         journal =
           runCheck "journal"
             [

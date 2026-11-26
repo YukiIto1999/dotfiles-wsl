@@ -44,7 +44,7 @@ Windows上のbrowserでしか判定できない要求でなければ、WebをWin
 ### 標準browser toolとPlaywright MCP
 
 本文の論理名を、現在のclientが公開する実tool名とschemaへ対応づけてから呼ぶ。
-Playwright MCPは`browser-automation`のGateway toolとして通常の接続に含まれる。
+OMPは、標準browser toolを公開するsessionでPlaywright MCPを読み込まない（harnessが同種のbrowser serverを除外する）。
 Playwright MCPが現在のclientに公開されていなければ、4は使えないrouteとして5へ進む。
 5も使えない場合だけ、状態変更前に限り、対象URL、許可されたdataと操作、matrixをcallerへ返し、MCPの接続や設定を追加しない。操作結果が返るまでは未確認とする。
 

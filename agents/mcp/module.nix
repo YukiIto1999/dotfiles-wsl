@@ -32,51 +32,6 @@ let
         --toolsets context,issues,pull_requests,repos,users,actions "$@"
     '';
 
-  # context 単位の userAgent 上書きが UA-CH の brand metadata を消すため native option は不採用
-  playwrightConfig = pkgs.writeText "playwright-mcp-config.json" (
-    builtins.toJSON {
-      browser.launchOptions.args = [
-        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${lib.versions.major chromium.version}.0.0.0 Safari/537.36"
-        "--disable-dev-shm-usage"
-      ];
-    }
-  );
-  playwright = pkgs.writeShellScript "playwright-mcp" ''
-    session_dir=$(${lib.getExe' pkgs.coreutils "mktemp"} -d -- "''${XDG_RUNTIME_DIR:-/tmp}/playwright-mcp.XXXXXXXXXX")
-    child_pid=
-    cleanup() {
-      rm -rf -- "$session_dir"
-    }
-    forward_signal() {
-      if [ -n "$child_pid" ] && kill -0 "$child_pid" 2>/dev/null; then
-        kill -s "$1" "$child_pid" 2>/dev/null || true
-        wait "$child_pid" 2>/dev/null || true
-      fi
-      exit "$2"
-    }
-    trap cleanup EXIT
-    trap 'forward_signal HUP 129' HUP
-    # 非対話 shell 配下の子プロセスが無視する SIGINT
-    trap 'forward_signal TERM 130' INT
-    trap 'forward_signal TERM 143' TERM
-
-    # session の出力は session の終了で消す
-    ${pkgs.playwright-mcp}/bin/playwright-mcp \
-      --browser chromium \
-      --executable-path ${chromium}/bin/chromium \
-      --headless \
-      --isolated \
-      --no-sandbox \
-      --config ${playwrightConfig} \
-      --output-dir "$session_dir" \
-      "$@" <&0 &
-    child_pid=$!
-    status=0
-    wait "$child_pid" || status=$?
-    child_pid=
-    exit "$status"
-  '';
-
   chromeDevtoolsSource = inputs.chromeDevtoolsMcp;
   chromeDevtoolsPackage = mkNpmMcp {
     pname = "chrome-devtools-mcp";
@@ -120,8 +75,6 @@ let
 in
 {
   dotfiles.agents.mcpServers = {
-    playwright = stdio playwright;
-    # 異なる観測契約を持つ trace・heap・Lighthouse の Playwright 統合禁止
     chrome-devtools = stdio chromeDevtools;
     context7 = stdio (lib.getExe unstable.context7-mcp);
     deepwiki = {

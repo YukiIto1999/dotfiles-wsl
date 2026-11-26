@@ -23,7 +23,7 @@ If a critical field is missing, inspect the repository to fill it from code evid
 Use this guidance whenever reproducing the finding, running tests, or validating the fix:
 
 Fixing and runtime validation require the caller's explicit permission and retain the Operation Boundaries in `../SKILL.md`.
-Resolve remote and container-backed dependencies only through declared public Capability tools; setup repair is not permission to control provider services, containers, or databases.
+Resolve remote and container-backed dependencies only through the declared MCP tools; setup repair is not permission to control provider services, containers, or databases.
 Inspect progress only for this task's own build, test, or reproduction jobs, and preserve unrelated sessions.
 
 - Try hard to make runtime validation run before falling back to code inspection.

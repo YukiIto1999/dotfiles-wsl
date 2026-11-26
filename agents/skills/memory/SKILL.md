@@ -1,6 +1,6 @@
 ---
 name: memory
-description: Recalls historical project memory, verifies relevant claims against current primary sources, and admits only non-sensitive knowledge through the project-memory Capability. Distinguishes queued, persisted, and currently verified information. Does not decide which owner receives a correction, own policy design, the scheduled harvest, or backend operations.
+description: Recalls historical project memory, verifies relevant claims against current primary sources, and admits only non-sensitive knowledge through the `memory` MCP server (Hindsight). Distinguishes queued, persisted, and currently verified information. Does not decide which owner receives a correction, own policy design, the scheduled harvest, or backend operations.
 ---
 
 # Project memoryを扱う

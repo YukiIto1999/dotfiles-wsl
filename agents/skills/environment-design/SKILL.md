@@ -14,7 +14,7 @@ description: Routes changes to the agent working environment to their source own
 |---|---|---|
 | architecture-standard | project をまたいで人の開発者にも求める規範と、標準の運用 Skill | `standard-update` |
 | dotfiles-wslのagent能力 | AGENTS、local Skill、reference、script、subagent | `skill-design` |
-| dotfiles-wslの基盤 | 配備、hook、client設定、Capability、MCP、toolchain、外部sourceの採用表と版 | dotfilesの`docs/reference/change-map.md` |
+| dotfiles-wslの基盤 | 配備、hook、client設定、MCP、toolchain、外部sourceの採用と版 | dotfilesの`docs/design.md`（持つものと持たないもの）と`docs/operations.md`（変更と適用） |
 | upstream | Orcaなど外部repositoryが所有するSkillとtoolの中身 | owner repositoryへの提案。dotfilesは採用表と版だけを持つ。利用者が明示的に承認した適応の範囲に含まれる保守派生は、dotfiles-wslのagent能力として扱う |
 | 対象project | そのprojectだけの要件、契約、不変条件、標準からの逸脱 | projectが宣言する正本と決定の記録 |
 | memory | 訂正の理由、適用条件、明示的に記憶だけへ残す方針 | `memory` |
@@ -64,10 +64,10 @@ agentの方法は`skill-design`が選び、決定的な検査が必要と判断�
   変更でなくIssueへの記録が依頼された場合だけ、利用可能な`standard-feedback`へ規律、具体的な不足と根拠を渡し、作成結果のURLまたは未投稿の理由を受け取る。
 - dotfiles-wslのagent能力: 利用可能な`skill-design`へ具体的なscenario、反復した不足、既存policyとSkill、制約を渡す。
   何もしない、policy、reference、script、既存Skill、新しいSkillの選択と、採用した場合の変更結果を受け取る。
-- dotfiles-wslの基盤: change-mapが示す正本と検証入口へ、変更契約と根拠を渡し、反映したsourceと配備上の不足を受け取る。
+- dotfiles-wslの基盤: `docs/design.md`が示す所有の場所と`nix flake check`へ、変更契約と根拠を渡し、反映したsourceと配備上の不足を受け取る。
 - upstream: owner repositoryへの提案として扱い、配備物を手元で書き換えない。
   dotfiles側の変更は採用表と版に限り、owner側の採否と反映revisionを配送へ引き継ぐ。
-  利用者が明示的に承認した適応は、その範囲のSkillと呼出し側をまとめてdotfiles-wslのagent能力へ渡す。`docs/architecture/repository-skills.md`の保守派生の契約に従い、範囲内の再承認や配備物の直接編集は行わない。
+  利用者が明示的に承認した適応は、その範囲のSkillと呼出し側をまとめてdotfiles-wslのagent能力へ渡す。保守派生は原名のまま`agents/skills/<id>/`に一つだけ置き、`agents/skills.nix`の upstream の採用から外す。派生元のrevisionと変更点、上流のLICENSEを同じdirectoryに置き、上流の更新は差分を読んで承認の範囲内で取り込む。範囲内の再承認や配備物の直接編集は行わない。
 - 対象project: projectが宣言する正本と決定の記録へ、project固有の契約、根拠と逸脱理由を渡し、記録した場所と未確定事項を受け取る。
 - memory: 利用可能な`memory`へ保存候補、一次source、適用条件、確定したscopeを渡し、保存判断と実際のterminal stateを受け取る。
   ownershipを再判断する依頼にせず、同Skillが棄却した候補を別の保存先へ回さない。
@@ -83,7 +83,7 @@ agentの方法は`skill-design`が選び、決定的な検査が必要と判断�
 commit、push、版更新、check、rebuildは現在の依頼とsessionの許可がある場合だけ行い、禁止された操作や他sessionを中断する操作を入口へのhandoffで正当化しない。
 配送が未許可なら変更済みsourceと未実施の配送段を返し、provider、service、containerへ直接接続して配備を代用しない。
 
-dotfiles-wslの変更は、sourceを検証してcommitし、同repositoryの`docs/operations/rebuild.md`に従ってplan、適用、実状態の確認へ進める。
+dotfiles-wslの変更は、sourceを検証してcommitし、同repositoryの`docs/operations.md`の「変更と適用」に従ってbuild、適用、実状態の確認へ進める。
 sourceの変更と配備、新しいsessionへの反映は別の状態として確認する。
 
 architecture-standardの規範本文は、ownerがcanonical checkoutへ統合した後、その現行規範rootを読む新しい読取りに現れる。

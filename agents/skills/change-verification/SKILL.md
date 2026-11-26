@@ -30,7 +30,7 @@ description: Runs a repository's registered verification entry or durable regres
 
 ## 入口を解決する
 
-対象projectの文書・CIと、それを実際に読むresolverから入口を確認する。この環境の段、予算、入口の仕様が必要なら、共通policyが案内するdotfiles-wslの`docs/operations/development.md`の「検査」を読む。
+対象projectの文書・CIと、それを実際に読むresolverから入口を確認する。dotfiles-wslの環境は、検査の段、時間の予算、入口を課さない。
 対象projectが採用する入口だけを使う。Nxなどを自分から足さない。
 入口が未登録なら、CIや文書が示す検査を個別に実行し、正規のT1を通したとは報告しない。不正・欠落と明示された宣言を無視した代替実行はしない。
 

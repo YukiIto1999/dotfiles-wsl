@@ -26,7 +26,7 @@ These jobs do not change scan scope, transfer security judgment, or grant extern
 ## Operation Boundaries
 
 Keep exact file, symbol, diff, and history inspection as direct Read, Grep, Glob, LSP, and bounded Git operations.
-Use declared public Capability tools for remote or container-backed evidence, and the execution route the responsible Skill selects for browser evidence; resolve the actual exposed name and current schema through that Skill.
+Use the declared MCP tools for remote or container-backed evidence, and the execution route the responsible Skill selects for browser evidence; resolve the actual exposed name and current schema through that Skill.
 For defensive candidate discovery, use `semgrep scan` with a repository-owned or explicitly selected local `--config` and paths within scope. Use `zizmor --offline` for GitHub Actions workflows and local actions; use `actionlint` only for syntax and expressions. For secret scanning, use `betterleaks git --staged --validation=false --redact .` for a staged diff, or scope `betterleaks dir --validation=false --redact <path>` to agreed files. Do not send secrets to a provider, verify credential validity online, or include raw findings containing credentials in an artifact. Match the tool exit and findings to the pinned CLI; a clean report is not coverage of paths or rules the tool did not scan.
 Do not inspect or control provider processes, Docker containers, databases, or private backend endpoints to recover a missing tool.
 Runtime reproduction and setup repair must stay within the caller's approved target, commands, resources, and side effects.

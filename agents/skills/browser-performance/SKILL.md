@@ -1,6 +1,6 @@
 ---
 name: browser-performance
-description: Measures and diagnoses browser loading, responsiveness, layout shifts, and network bottlenecks through the browser-diagnostics Capability. Use for a rendered page's non-LCP performance audit, slow interactions, CLS, request chains, or a mixed browser-performance problem whose bottleneck is not yet known. Links trace evidence to the real resource and source, distinguishes laboratory from field data, and delegates identified LCP and heap work to their specialists. Does not own native .NET/Rust profiling, .NET microbenchmarks, accessibility audits, generic bug diagnosis, or browser/account setup.
+description: Measures and diagnoses browser loading, responsiveness, layout shifts, and network bottlenecks through Chrome DevTools MCP. Use for a rendered page's non-LCP performance audit, slow interactions, CLS, request chains, or a mixed browser-performance problem whose bottleneck is not yet known. Links trace evidence to the real resource and source, distinguishes laboratory from field data, and delegates identified LCP and heap work to their specialists. Does not own native .NET/Rust profiling, .NET microbenchmarks, accessibility audits, generic bug diagnosis, or browser/account setup.
 ---
 
 # Browserの性能を測定し、原因へ結び付ける
@@ -94,7 +94,7 @@ LCPの原因と比較結果を受け取り、元の性能結果へ統合する�
 
 heap保持、detached DOM、操作反復後のmemory増加が疑われる場合は、利用可能な`heap-analysis`へ操作と終了sequence、比較条件、取得済みlocal snapshotを渡し、保持経路と実装上の寿命の結果を受け取る。
 snapshotが不足する場合は次のcapture手順で許可された分だけ取得する。
-heap-diagnostics Capabilityまたは専門Skillが利用不能なら、取得済みの観測を返し、heap原因は未確認とする。
+memlab MCPまたは専門Skillが利用不能なら、取得済みの観測を返し、heap原因は未確認とする。
 heap用toolの不足をLCPやnetworkの測定で埋めない。
 
 browserのheap captureを依頼された場合は、対象page、取得許可、操作sequence、GCと終了条件を固定し、`take_heapsnapshot`の現在のschemaへ`pageId`と非公開staging内の絶対`filePath`を渡す。

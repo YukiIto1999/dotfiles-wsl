@@ -20,7 +20,7 @@ description: Carries out GitHub requests using the available GitHub MCP, gh, or 
 
 表は例であり、操作の一覧ではない。MCPに該当操作がなければ、同じ主体の `gh`（専用subcommand、次いで公式APIを呼ぶ `gh api`）や Git を使う。CLIで入力を表せない場合はMCPも調べる。未公開のtoolとGitHubの権限不足は区別する。
 
-`gh` で別アカウントを使う場合は、サブシェルで継承した `GH_TOKEN`、`GITHUB_TOKEN`、`GH_HOST` を外し、`gh auth token --hostname github.com --user "$login"` の結果をコマンド置換で受ける。値を表示せず `GH_TOKEN` としてそのサブシェルの子プロセスにだけ渡し、`GH_HOST=github.com` を指定する。書き込み前に同じ環境の `gh api user --jq .login` が選んだ login と一致することを確かめる。HTTPS の Git は対象 owner に対応する[既存の credential 設定](../../../docs/operations/secrets.md#github-account)を使う。
+`gh` で別アカウントを使う場合は、サブシェルで継承した `GH_TOKEN`、`GITHUB_TOKEN`、`GH_HOST` を外し、`gh auth token --hostname github.com --user "$login"` の結果をコマンド置換で受ける。値を表示せず `GH_TOKEN` としてそのサブシェルの子プロセスにだけ渡し、`GH_HOST=github.com` を指定する。書き込み前に同じ環境の `gh api user --jq .login` が選んだ login と一致することを確かめる。HTTPS の Git は対象 owner に対応する[既存の credential 設定](../../../docs/secrets.md#github-account)を使う。
 
 ## identityとtargetを固定する
 

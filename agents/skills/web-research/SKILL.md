@@ -21,7 +21,7 @@ description: Researches public facts, version-specific library APIs, and primary
 Web検索と通常のURL取得はclient native toolを使い、この環境はWeb検索用のMCP providerもproxyも配備しない。
 tool名、引数、返り値の形はclientごとに違うため、現在公開されたtool一覧とschemaへ対応させて使う。
 subagentはtool allowlistにあるtoolだけを持つので、許可されていないWeb toolを使えると仮定しない。
-`context7`、Microsoft Learn、DeepWikiは`library-documentation`のGateway toolで通常の接続に含まれる。現在のclientに公開されていなければ、ライブラリ名・製品名・repository、対象版と問いを呼出し元へ渡す。
+`context7`、Microsoft Learn、DeepWikiはMCP serverとして設定済みで、使うときにclientが起動する。現在のclientに公開されていなければ、ライブラリ名・製品名・repository、対象版と問いを呼出し元へ渡す。
 利用者がこれらのtoolを名指しした場合は、公式資料の所在が既知でもそのtoolを使い、返った内容は下の各経路の手順で対象versionの原典と照合する。
 MCP toolを直接公開するclientでは、そのネイティブな呼出し形式で実tool名とschemaへJSON引数を対応させる。
 toolの説明に別toolやHTTP endpointが書かれていても、その名前が公開されていることの証拠にはしない。

@@ -44,9 +44,9 @@ compilerやtype checkerは到達可能な参照を列挙する証拠になり得
 既知のpathは`Read`、file名は`Glob`、symbolの定義と参照は利用可能なLSP、exact textは`Grep`や`rg`で直接調べる。
 consumerの所在や関係が不明な場合だけ、変更前後、repositoryのscope、既知のanchor、探すreaderやwriterを`repository-research`へ渡す。
 返ったsource-backedな経路と未確定事項を、consumerごとの契約差へ照合する。
-repository commandや公開Capabilityでresolver、trace、利用状況を取得する場合は、実際の操作と引数をその契約で確認する。
-container-backedな証拠も公開Capabilityから取得し、providerのprocess、database、containerへの直接accessで補わない。
-補助SkillやCapabilityを使えない場合はnative toolで確認できる経路を進め、残るconsumerとobservableはUnknownとして必要な証拠を示す。
+repository commandや公開されたMCP toolでresolver、trace、利用状況を取得する場合は、実際の操作と引数をその契約で確認する。
+container-backedな証拠も公開されたtoolから取得し、providerのprocess、database、containerへの直接accessで補わない。
+補助SkillやMCP toolを使えない場合はnative toolで確認できる経路を進め、残るconsumerとobservableはUnknownとして必要な証拠を示す。
 
 ## 互換性と状態を確認する
 

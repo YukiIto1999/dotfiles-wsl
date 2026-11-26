@@ -1,6 +1,6 @@
 ---
 name: heap-analysis
-description: Investigates JavaScript heap retention in authorized Chrome or Node.js snapshots through the heap-diagnostics Capability. Uses matched workload and lifecycle captures, snapshot-scoped identities, dominators and retainer paths to distinguish persistent accumulation from temporary allocation, bounded caches, and development artifacts. Does not analyze native .NET or Rust dumps, equate RSS growth with a JavaScript leak, own historical memory, or implement speculative fixes.
+description: Investigates JavaScript heap retention in authorized Chrome or Node.js snapshots through the memlab MCP server. Uses matched workload and lifecycle captures, snapshot-scoped identities, dominators and retainer paths to distinguish persistent accumulation from temporary allocation, bounded caches, and development artifacts. Does not analyze native .NET or Rust dumps, equate RSS growth with a JavaScript leak, own historical memory, or implement speculative fixes.
 ---
 
 # JavaScript heap の保持原因を調べる
@@ -41,7 +41,7 @@ header の許可は負荷や完了の保証ではなく、full load は追加の
 環境の公開入口は old-space の上限を 1 GiB に設定しており、Node.js の上限と front 全体の資源上限は別である。
 同じ session の操作は一つずつ行い、重い walk や複数の load を並行させない。
 
-許容量を超える場合は、小さい同条件の capture を選ぶか、必要な資源の変更を Capability の所有者へ渡す。
+許容量を超える場合は、小さい同条件の capture を選ぶか、必要な資源の変更を環境の所有者（dotfiles-wsl の利用者）へ渡す。
 `force`、上限の引上げ、server の再起動で拒否を回避しない。
 同期的な parse や regex も provider が期限を監視し、超過した session は未完了のまま閉じる。
 その場合は保持中の graph も失われるため、結果や解放の成功へ読み替えず、失敗した操作を記録する。

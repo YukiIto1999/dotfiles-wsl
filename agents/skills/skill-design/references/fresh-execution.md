@@ -63,7 +63,7 @@ agentの定義、tools、preload、modelを読むことで、専門agentの隠�
 実行記録で対象の`SKILL.md`を読み込んだかを観測し、本文をpreloadしていたtrialは自然発火の標本から外す。
 Skill名が最終回答にあるだけでは発火の証拠にならない。
 実際のtool名、入力、返却結果と、その結果を使った成果を保存する。
-Capabilityが使えない枝では、独立した成果と未取得の証拠を分ける挙動を測り、返却結果をmockで補わない。
+MCP serverなどの外部の道具が使えない枝では、独立した成果と未取得の証拠を分ける挙動を測り、返却結果をmockで補わない。
 
 native taskは会話履歴を継承しなくても、workspace、Skill、context file、親の共有artifactや設定の影響を受ける。
 `isolated: true`はworkspaceの分離であり、Skillやpolicyを除いたbaselineの指定ではない。

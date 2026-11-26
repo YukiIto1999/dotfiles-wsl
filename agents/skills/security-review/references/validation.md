@@ -12,7 +12,7 @@ If a required input is still missing, stop and ask the user for it before contin
 Use the shared scan artifact path conventions in `scan-artifacts.md`.
 
 Before dynamic validation, identify the authorized target, test data, permitted effects, resource bound, and output location.
-The Operation Boundaries in `../SKILL.md` apply to setup and reproduction; a missing service or Capability does not authorize provider/backend access or infrastructure changes.
+The Operation Boundaries in `../SKILL.md` apply to setup and reproduction; a missing service or tool does not authorize provider/backend access or infrastructure changes.
 When this reference is used on its own, carry those boundaries with the candidate input.
 
 ## Workflow

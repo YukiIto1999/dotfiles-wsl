@@ -15,6 +15,7 @@ let
   # 本文は checkout から link し、編集を rebuild なしで反映する
   checkoutPath = relative: "${ws.dotfilesDir}/agents/${relative}";
   standardClone = "${ws.homeDir}/.local/share/dotfiles-agent/architecture-standard";
+  wrapperDirectory = ".local/share/dotfiles-agent/bin";
 
   localSkills = lib.mapAttrs (name: _: checkoutPath "skills/${name}") (
     lib.filterAttrs (_: type: type == "directory") (builtins.readDir ./skills)
@@ -196,10 +197,13 @@ in
           ) upstreamSkills;
       in
       {
-        home.packages = lib.mapAttrsToList wrapper clients ++ [
+        home.packages = [
           brief
           standardSync
         ];
+        # client の native installer や古い供給の残りが ~/.local/bin に同名の command を置くため、
+        # wrapper はそれより前の専用 directory から引く（2026-11-26 の切替で ~/.local/bin/omp が旧版の 18.10.4 を起動した）
+        home.sessionPath = lib.mkBefore [ "$HOME/${wrapperDirectory}" ];
 
         home.file = {
           ".omp/agent/AGENTS.md".source = policy;
@@ -215,6 +219,12 @@ in
           ".config/opencode/AGENTS.md".source = policy;
           ".gemini/GEMINI.md".source = policy;
           ".local/share/dotfiles-agent/references/modern-web-guidance".source = inputs.modernWebGuidance;
+          ${wrapperDirectory}.source =
+            pkgs.symlinkJoin {
+              name = "dotfiles-agent-wrappers";
+              paths = lib.mapAttrsToList wrapper clients;
+            }
+            + "/bin";
         }
         // skillFiles ".omp/agent/skills"
         // skillFiles ".claude/skills"

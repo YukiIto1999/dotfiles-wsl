@@ -44,12 +44,23 @@ let
     exec ${lib.getExe' llmAgents.omp "omp"} "$@"
   '';
 
+  # OMP の managed browser が起動する Chromium。指定が無いと OMP は Chrome for Testing を取得するが、
+  # NixOS では共有 library が無く起動しない。omp の package が自分用に足す LD_LIBRARY_PATH は子 process にも残り、
+  # 別の glibc で build された libpulseaudio などを Chromium に読ませて起動を壊すため外す（2026-11-26 の実測）
+  ompBrowser = pkgs.writeShellScript "omp-chromium" ''
+    unset LD_LIBRARY_PATH
+    exec ${lib.getExe pkgs.chromium} "$@"
+  '';
+
   clients = {
     omp = {
       binary = "omp";
       executable = ompExecutable;
       # 版の更新は dotfiles-omp-update が行う
-      environment.PI_SKIP_VERSION_CHECK = "1";
+      environment = {
+        PI_SKIP_VERSION_CHECK = "1";
+        PUPPETEER_EXECUTABLE_PATH = "${ompBrowser}";
+      };
     };
     claude = {
       binary = "claude";

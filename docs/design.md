@@ -52,6 +52,7 @@ Orcaのpane → bash -l → omp（wrapper）→ systemd-run --user --scope（age
 - clientが終わった後もscopeに残ったprocessは`dotfiles-doctor`が示す。MSBuildのnode再利用は環境変数で止めている（14時間残った例がある）。
 - 過負荷では`agents.slice`の`MemoryMax`によりそのslice内でOOMが起き、systemd-oomdがpressureの高いcgroupを止める。hostは止まらない。
 - memoryの上限はどの層（`user.slice`、user manager、`agents.slice`、containerのslice）も`MemoryMax`だけにし、`MemoryHigh`を置かない。2026-11-26の計測で、`agents.slice`の30.4 GiBのうち20.3 GiBは回収できるpage cacheで、high到達は起動後約23時間で`user.slice`が3,414,763回、`agents.slice`が2,285,613回、`agents.slice`のmemory PSIはfull avg60で約11%だった。`MemoryHigh`は超過分に応じてprocessを待たせるため、cacheの量でagentを減速させていた。守りたい失敗（2026-11-01のswap thrashによる停止）は、`MemoryMax`（到達時はcacheから回収し、回収できなければその層の中でOOM）、小さいswap上限、oomdで防ぐ。
+- 上限は物理memoryに対して`user.slice` 82%、user manager 80%、`agents.slice` 78%とする。`agents.slice`は当初70%だったが、2026-11-26の計測でcacheが上限で回収され続けた（上限到達の回収が毎分約680回、回収したfile pageの読み直しが約5.6時間で65 GiB相当）ため広げた。`user.slice`の外に残す18%は、kernel、zram（当日の圧縮後2.2 GiB）、system.sliceのprocessの分である。広げた効果は、同じ指標（`agents.slice`の`memory.events`の`max`と`memory.stat`の`workingset_refault_file`の増え方、`memory.pressure`）で比べて確かめる。
 
 ## 記憶と知識
 

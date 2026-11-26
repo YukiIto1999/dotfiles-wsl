@@ -73,9 +73,13 @@ in
       };
     };
     agents = {
+      # 2026-11-26 の計測では、agents.slice の page cache が上限（当時 70%）で回収され続け、上限到達の回収は毎分約680回、
+      # 回収した file page の読み直しは約5.6時間で 65 GiB 相当だった。host 全体の cache 27 GiB のうち 25 GiB は active で、
+      # 物理 memory の残りの大半を cache が占めていたため、上限を上げて cache の置き場を広げる。
+      # anon の暴走は user.slice の上限、swap の上限、systemd-oomd が止める
       memoryMaxPercent = lib.mkOption {
         type = lib.types.ints.between 1 99;
-        default = 70;
+        default = 78;
         description = "agents.slice の MemoryMax を物理 RAM の百分率で指定する。";
       };
       # 11-01 の凍結は agent の作業が swap へ溢れ続けた thrash だった。swap の上限を低く置き、
@@ -91,9 +95,10 @@ in
         description = "agents.slice の CPUWeight。同じ user manager の他の slice の既定 100 より低くする。";
       };
     };
+    # Chromium が自ら app.slice へ作る scope の分だけ agents.slice より広く取る
     userManager.memoryMaxPercent = lib.mkOption {
       type = lib.types.ints.between 1 99;
-      default = 75;
+      default = 80;
       description = "user manager 全体の MemoryMax を物理 RAM の百分率で指定する。";
     };
     supportSlice = lib.mkOption {

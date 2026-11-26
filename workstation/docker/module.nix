@@ -9,11 +9,13 @@ in
 {
   users.users.${cfg.username}.extraGroups = [ "docker" ];
 
-  # live-restore が無いため、daemon.json と docker.service の変更は switch で dockerd を再起動し、
-  # 動いている project の container を止める。設定を変えるときは停止を計画して適用する
   virtualisation.docker = {
     enable = true;
     daemon.settings = {
+      # daemon.json や Docker の更新で switch が dockerd を再起動しても、project が起動した container を止めない。
+      # systemd の unit が起動する Hindsight は unit の再起動で作り直される。Docker の版を一つ以上飛ばす更新では、
+      # 再起動後の daemon が container とつながらないことがある
+      live-restore = true;
       # 古い build cache から順に、共有されない cache と全体の上限まで BuildKit の cache を回収する
       builder.gc = {
         enabled = true;

@@ -102,3 +102,4 @@ SVG が必要なら、同じ devShell で `node --input-type=module` を実行�
 - Testcontainers for .NET は Ryuk が後片付けする。Ryuk を無効にしない。
 - testcontainers-rs は Ryuk を持たない。SIGINT と SIGTERM で止めた test の container は、crate の `watchdog` feature を有効にすれば消える（0.28.0 は container を一つずつ止めるため、test runner の猶予を超えると止まったまま残ることがある）。SIGKILL、abort、`static` に置いた container、起動の失敗では残る。`dotfiles-doctor` が 6 時間より古いものを示すので、示された command で消す。
 - BuildKit の cache は、daemon の GC 設定（`workstation/docker/module.nix`）が上限まで回収する。停止した container と volume は自動では消さない。project のデータを含み得るためである。
+- Docker は live-restore を有効にしている。rebuild などで dockerd が再起動しても、project が起動した container は動き続ける。

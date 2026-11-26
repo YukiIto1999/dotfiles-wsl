@@ -43,6 +43,7 @@ Windows の `.wslconfig` はこのrepoからは書き換えない。`dotfiles-ws
 1. checkout で変更し、`nix flake check` を通して commit する。
 2. `dotfiles-rebuild` を実行する。既定では commit 済みの HEAD を build して切り替える。共有 checkout に他 session の未 commit の変更があっても入らない。未 commit の変更を試すときは `--worktree` を付ける。
 3. 表示された closure の差分と、WSLの再起動が必要かの案内を確かめる。`/etc/wsl.conf` が変わったときだけ、作業中の session が無い時に `wsl.exe --shutdown` する。
+4. service、timer、slice の宣言を消す変更では、switch がそれらを止める。slice を止めると、その中で動いている command（他 session の build や検証）も止まる。消す前に `systemctl --user status <slice>` で中の処理が無いことを確かめ、残っていれば宣言を一度残して、中が空になってから消す（2026-11 の切替で、他 session の走行が2つ止まった）。
 
 | 目的 | command |
 |---|---|

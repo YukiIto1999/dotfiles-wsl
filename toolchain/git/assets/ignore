@@ -206,6 +206,7 @@ CLAUDE.local.md
 .kiro/
 .serena/
 .playwright-mcp/
+.zvec-grep/
 
 # Secret
 .env

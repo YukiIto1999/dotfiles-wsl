@@ -211,6 +211,8 @@ Arli AI はテキストモデル用の一覧 API が OMP 標準の探索先と�
 これらのプロバイダーを既定のロールや fallback には追加しない。
 
 Advisor は既定でオンとし、一時的に止めるときは `/advisor off` を使う。
+Advisor のレビューは [`WATCHDOG.yml`](../../agents/clients/omp/assets/watchdog.yml) で run の最終応答ごとに一度とし、primary の推論を除いた操作と tool の入出力だけを渡す。
+1 手ごとに推論込みで渡す既定では、advisor の要求数が primary の手数の約半分になり、定額枠を数日で使い切った。
 ロールの主モデルと fallback は [`config.seed.yml`](../../agents/clients/omp/assets/config.seed.yml) を正本とする。
 通常の `web_search` は Keenable を使い、失敗時は Exa に切り替える。
 Web 検索のキーは [SOPS の編集](secrets.md#編集)から登録する。
@@ -220,4 +222,4 @@ Web 検索のキーは [SOPS の編集](secrets.md#編集)から登録する。
 既存の `config.yml` では rebuild 時に旧 `dev` 参照を取り除き、合意したロールと subagent の経路へ一度だけ切り替える。
 移行と関係のない設定値、および移行後に利用者が変更したロール設定は保持する。
 既存の `models.yml` には Refuseless、OrcaRouter、Arli AI のうち未登録のプロバイダーを追加し、Web 検索のキー取得先を SOPS に揃える。
-対して `AGENTS.md`、`RULES.md`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。
+対して `AGENTS.md`、`RULES.md`、`WATCHDOG.yml`、`skills/`、`agents/`、`mcp.json`、`lsp.json`、`hooks/` は Home Manager 管理なので、OMP 内から恒久変更せず正本を編集して rebuild する。

@@ -319,6 +319,12 @@ in
         deployment = "home";
         destination = ".omp/agent/lsp.json";
       };
+      watchdog = {
+        source = ./assets/watchdog.yml;
+        format = "yaml";
+        deployment = "home";
+        destination = ".omp/agent/WATCHDOG.yml";
+      };
       hooks = {
         source = hookDirectory;
         format = "directory";

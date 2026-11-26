@@ -1,0 +1,6 @@
+# advisor は run の最終応答ごとに一度、primary の推論を除いた操作と tool の入出力だけを読む。
+# 1 手ごとに推論込みで読む既定では、advisor の要求が primary の手数の半分に達し、定額枠を数日で使い切った
+advisors:
+  - name: Reviewer
+    reviewMode: agent-end
+    includeReasoning: false

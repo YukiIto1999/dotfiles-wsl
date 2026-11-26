@@ -71,7 +71,7 @@ Windows の `.wslconfig` はこのrepoからは書き換えない。`dotfiles-ws
 
 ## 旧構成からの移行（2026-11 の再設計）
 
-再設計より前に起動した OMP session は、開始時に読み込んだ hook と MCP 接続先（gateway）を使い続ける。
+再設計より前に起動した OMP session は、開始時に読み込んだ hook と MCP の接続先（gateway）を持ち続ける。gateway は切替で止めたので、その session では MCP が使えない。
 各 session で `/exit` してから `omp --resume` すると新しい構成で続きから再開する。MCP だけなら `/mcp reload` でもよい。
 旧 session の停止 hook が呼ぶ `dotfiles-agent-gate` と、旧方針が指示する `dotfiles-agent-verify`・`dotfiles-workload-run`・`dotfiles-capped-run` は、何もしないか引数の command をそのまま実行する互換 command として残してある（`agents/transition.nix`）。
-`dotfiles-doctor` が旧 runtime の session が無いと示したら、`agents/transition.nix` を削除して rebuild し、旧 cache（`~/.cache/dotfiles-wsl`）を消す。
+`dotfiles-doctor` が旧 runtime の session が無いと示したら、`agents/transition.nix` を削除して rebuild し、旧 cache（`~/.cache/dotfiles-wsl`、約 80 GB）と旧 client の profile（`~/.local/share/dotfiles/agent-profiles`）を消す。

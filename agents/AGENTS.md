@@ -33,6 +33,7 @@ push、deploy、release、公開、課金、外部への送信、履歴の書換
 
 - 開発機は `~/environment/dotfiles-wsl`（NixOS-WSL と Home Manager の flake）が宣言する。設定はそこで変え、`dotfiles-rebuild` で適用する。`~/.omp/agent` などの生成された設定を直接編集しない。この方針とskillの本文は同repoの `agents/` にあり、編集すると次の読込から反映される。
 - 開発ツールはprojectのdevShell（`devenv shell -- …`、`nix develop`）から使い、global installしない。
+- 使い方に条件がある道具（browser、Windows の画面操作、Explainer、形式検証、.NET の診断、Aspire Dashboard、Docker の後片付け）は、使う前に `~/environment/dotfiles-wsl/docs/tools.md` の該当節を読む。
 - 秘密情報は sops（`secrets/sops/assets/secrets.json`）に置き、平文で書かない。
 - commitの件名は `<type>: <日本語の要約>`（50字以内、体言止め、本文なし）。commit-msg hook が検査する。
 - 過去の決定と知見は Hindsight にある（`memory` skill）。sessionの最初の依頼には関係する記憶が自動で添えられる。「記憶して」と言われたとき、または複数projectで使える知見を確かめたときは保存し、上書きされる古い記憶は失効させる。

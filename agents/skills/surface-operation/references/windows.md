@@ -12,10 +12,10 @@
 seatで同じappを開き直して代用せず、route 2が使えなければその行を未確認にする。
 「既存のwindowを扱う」より前の節はroute 1の手順である。
 
-導入、配備、機械の設定の正本は、dotfilesの`docs/reference/tooling.md`の「Windowsの独立した操作画面」である。
+導入、配備、機械の設定の正本は、dotfilesの`docs/tools.md`の「Windows の独立した操作画面（Anode）」である。
 installer、`anode setup`、`anode configure`は利用者の作業であり、このSkillからは実行しない。
 `setup`は既存のRemote Desktop接続を切断し得るため、必要な場合は影響を添えてcallerへ返す。
-WSLからのMCP初期化は確認されておらず、共有Gatewayにも登録されていないため、CLIだけを使う。
+WSLからのMCP初期化は確認されておらず、MCP serverとしても登録していないため、CLIだけを使う。
 
 subcommand、引数、出力の形は、導入済みの版の`anode guide --json`と`--help`、および同じ文書が固定する上流版の文書を正とする。
 本文に名前がない操作のcommandを推測しない。

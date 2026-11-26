@@ -9,4 +9,6 @@ exec "@python@" "@source@/journal.py" \
   --lookback-days "@lookbackDays@" \
   --model "@model@" \
   --thinking "@thinking@" \
+  --memory "@memory@" \
+  --memory-state "@memoryState@" \
   "$@"

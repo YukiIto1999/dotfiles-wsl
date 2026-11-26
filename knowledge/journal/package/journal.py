@@ -51,6 +51,11 @@ FENCED_JSON = re.compile(r"\A```[A-Za-z]*[ \t]*\n(.*)\n```\Z", re.DOTALL)
 HEADING_LINE = re.compile(r"(?m)^( {0,3})#")
 LINE_BREAK = re.compile(r"\r\n|\r|\n")
 BACKTICK_RUN = re.compile(r"`+")
+MEMORY_TIMEOUT_SECONDS = 120
+# 再び確かめても結果が変わらない dotfiles-memory の失敗。receipt を捨て、失敗として一度だけ報告する
+TERMINAL_MEMORY_FAILURES = ("invalid_input", "not_found", "not_verified", "retain_failed")
+# 日誌の記事が記憶に入るときの種類。記録から得た、他の場面でも使える技術的な知見
+JOURNAL_MEMORY_KIND = "pattern"
 
 
 class Ground(NamedTuple):
@@ -64,6 +69,12 @@ Grounds = dict[str, list[Ground]]
 
 class JournalError(Exception):
     pass
+
+
+class MemoryCommandError(JournalError):
+    def __init__(self, command: str, code: str, detail: str):
+        self.code = code
+        super().__init__(f"dotfiles-memory {command} failed: {detail}")
 
 
 class Rejected(Exception):
@@ -710,10 +721,177 @@ def render(
 
 def compose(
     options: argparse.Namespace, machine: str, day: date, start: datetime, end: datetime, sessions: list[Session]
-) -> str:
+) -> tuple[str, list[Insight]]:
     candidates, dropped_candidates = extract(options, day, sessions)
     articles, dropped_articles = synthesize(options, day, candidates)
-    return render(machine, day, start, end, articles, dropped_candidates, dropped_articles)
+    return render(machine, day, start, end, articles, dropped_candidates, dropped_articles), articles
+
+
+def memory(options: argparse.Namespace, command: str, request: dict | None = None, *arguments: str) -> dict:
+    """dotfiles-memory の一回の実行。保存は runtime と同じ入口を通り、資格情報と個人情報の検査を受ける"""
+    try:
+        timeout = child_timeout(MEMORY_TIMEOUT_SECONDS)
+    except JournalError as error:
+        raise MemoryCommandError(command, "deadline", str(error)) from None
+    try:
+        result = subprocess.run(
+            [options.memory, command, *arguments],
+            input="" if request is None else json.dumps(request, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise MemoryCommandError(command, "unavailable", str(error)) from None
+    if result.returncode != 0:
+        detail = result.stderr.strip()
+        # dotfiles-memory は失敗を `project-memory: <code>: <detail>` の形で書く
+        code = detail.splitlines()[0].removeprefix("project-memory: ").split(":", 1)[0] if detail else ""
+        raise MemoryCommandError(command, code, detail[-500:])
+    try:
+        value = json.loads(result.stdout)
+    except ValueError:
+        value = None
+    if not isinstance(value, dict):
+        raise JournalError(f"dotfiles-memory {command} did not print one JSON object")
+    return value
+
+
+def memory_requests(relative: str, articles: list[Insight], sessions: list[Session]) -> list[dict]:
+    """記事ごとの保存の要求。記事は最初に引いた対象の時間帯の記録の session の project へ入る。
+
+    鍵は日誌の file と記事の順番で、同じ日の作り直しや再実行は同じ記憶を置き換え、増やさない
+    """
+    by_id = {session.id: session for session in sessions}
+    requests = []
+    for number, article in enumerate(articles, start=1):
+        # 記事は対象の時間帯の引用を必ず持つ（insight_of の検査）
+        home = by_id[next(citation for citation in article.evidence if citation.current).source.rsplit("#", 1)[0]]
+        locators = []
+        for citation in article.evidence:
+            session_id, entry = citation.source.rsplit("#", 1)
+            cited = by_id.get(session_id)
+            locators.append(f"{cited.path}#{entry}" if cited else citation.source)
+        lines = [article.title]
+        if article.status == "hypothesis":
+            lines.append("状態: 仮説（記録にある根拠からの推測で、確かめていない）")
+        lines += [f"知見: {article.finding}", f"適用: {article.application}"]
+        if article.caveats:
+            lines.append(f"注意: {article.caveats}")
+        lines.append("根拠: " + ", ".join(dict.fromkeys(locators)))
+        locator = f"agent-journal:{relative}#{number}"
+        requests.append({
+            "cwd": home.cwd,
+            "content": "\n".join(lines),
+            "source": locator,
+            "scope": "project",
+            "kind": JOURNAL_MEMORY_KIND,
+            "key": locator,
+        })
+    return requests
+
+
+def load_memory_state(path: Path) -> dict:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"queue": [], "pending": []}
+    except (OSError, ValueError) as error:
+        raise JournalError(f"{path} could not be read: {error}") from None
+    if not isinstance(state, dict) or not isinstance(state.get("queue"), list) or not isinstance(state.get("pending"), list):
+        raise JournalError(f"{path} is not a journal memory state")
+    return state
+
+
+def store_memory_state(path: Path, state: dict) -> None:
+    try:
+        atomic_write(path, json.dumps(state, ensure_ascii=False, indent=2))
+    except OSError as error:
+        raise JournalError(f"{path} could not be written: {error}") from None
+
+
+def enqueue_memories(path: Path, state: dict, requests: list[dict]) -> None:
+    """日誌を書く前の保存の予約。書いた後の強制終了でも次の実行が保存する。同じ鍵の古い予約は新しい要求に替える"""
+    if not requests:
+        return
+    keys = {request["key"] for request in requests}
+    queue = [request for request in state["queue"] if request.get("key") not in keys] + requests
+    store_memory_state(path, {**state, "queue": queue})
+    state["queue"] = queue
+
+
+def memory_failure(source: str, error: Exception) -> None:
+    print(f"dotfiles-agent-journal: memory: {source}: {error}", file=sys.stderr)
+
+
+def remember(options: argparse.Namespace, state: dict) -> int:
+    """前の実行の保存の確認と、予約した保存の送信
+
+    戻り値: 失敗の数。処理中の保存は失敗に数えず、次の実行で確かめる
+    """
+    failures = 0
+    waiting = []
+    for receipt in state["pending"]:
+        request = {key: receipt[key] for key in ("cwd", "scope", "operation_id", "document_id")}
+        try:
+            checked = memory(options, "status", request).get("state")
+        except MemoryCommandError as error:
+            memory_failure(receipt["source"], error)
+            failures += 1
+            if error.code not in TERMINAL_MEMORY_FAILURES:
+                waiting.append(receipt)
+            continue
+        if checked == "saved":
+            print(f"memory saved: {receipt['source']} document_id={receipt['document_id']}")
+        elif checked == "pending":
+            waiting.append(receipt)
+        else:
+            raise JournalError("dotfiles-memory status returned an unknown state")
+    if waiting != state["pending"]:
+        state["pending"] = waiting
+        store_memory_state(options.memory_state, state)
+    for request in list(state["queue"]):
+        try:
+            memory(options, "project", None, request["cwd"])
+        except MemoryCommandError as error:
+            if error.code != "invalid_input":
+                memory_failure(request["source"], error)
+                failures += 1
+                continue
+            print(f"memory skipped: {request['source']}: {request['cwd']} は Git の project ではない")
+        else:
+            try:
+                receipt = memory(options, "save", request)
+            except MemoryCommandError as error:
+                if error.code == "privacy":
+                    # 資格情報や個人情報に見える記事は送らない。次の実行でも同じ理由で拒まれる
+                    print(f"memory rejected: {request['source']}: privacy")
+                else:
+                    memory_failure(request["source"], error)
+                    failures += 1
+                    if error.code not in TERMINAL_MEMORY_FAILURES:
+                        continue
+            else:
+                if receipt.get("state") not in ("saved", "pending", "indeterminate") or not all(
+                    isinstance(receipt.get(key), str) for key in ("operation_id", "document_id")
+                ):
+                    raise JournalError("dotfiles-memory save returned an invalid receipt")
+                identity = f"document_id={receipt['document_id']}"
+                if receipt["state"] == "saved":
+                    print(f"memory saved: {request['source']} {identity}")
+                else:
+                    print(f"memory {receipt['state']}: {request['source']} {identity}（保存を確認していない）")
+                    state["pending"].append({
+                        "source": request["source"],
+                        "cwd": request["cwd"],
+                        "scope": request["scope"],
+                        "operation_id": receipt["operation_id"],
+                        "document_id": receipt["document_id"],
+                    })
+        state["queue"].remove(request)
+        # 実行末尾の一括 write では取消で receipt を失うため要求ごとの write
+        store_memory_state(options.memory_state, state)
+    return failures
 
 
 def git(journal: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
@@ -1001,6 +1179,8 @@ def parse(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--omp", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--thinking", required=True)
+    parser.add_argument("--memory", required=True, help="記事を project memory へ保存する dotfiles-memory")
+    parser.add_argument("--memory-state", required=True, type=Path, help="未送信と未確認の保存を次の実行へ渡す file")
     parser.add_argument("--date", type=date.fromisoformat, help="この日の日誌だけを作り直す（YYYY-MM-DD）")
     parser.add_argument(
         "--preview", action="store_true", help="--date の日の日誌を標準出力へ出す。日誌の checkout には触れず、書込も公開もしない"
@@ -1019,7 +1199,7 @@ def preview(options: argparse.Namespace, tz: ZoneInfo) -> int:
         if not sessions:
             print(f"{day}: omp の作業はない", file=sys.stderr)
             return 0
-        document = compose(options, options.machine_name, day, start, end, sessions)
+        document, _ = compose(options, options.machine_name, day, start, end, sessions)
     except JournalError as error:
         print(f"dotfiles-agent-journal: {day}: {error}", file=sys.stderr)
         return 1
@@ -1040,6 +1220,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             now or datetime.now(tz), tz, options.start_hour, options.lookback_days, journal, machine, branch
         )
         deadline = job_deadline() if options.date is None else None
+        memory_state = load_memory_state(options.memory_state)
     except JournalError as error:
         print(f"dotfiles-agent-journal: {error}", file=sys.stderr)
         return 1
@@ -1068,7 +1249,9 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
                     generation_options = argparse.Namespace(**vars(options), generation_deadline=daily_deadline)
                 else:
                     generation_options = options
-                atomic_write(path, compose(generation_options, machine, day, start, end, sessions))
+                document, articles = compose(generation_options, machine, day, start, end, sessions)
+                enqueue_memories(options.memory_state, memory_state, memory_requests(relative, articles, sessions))
+                atomic_write(path, document)
                 stage = stage_of(journal, relative, branch)
             if stage in (Stage.GENERATED, Stage.COMMITTED):
                 require_current_format(journal, relative)
@@ -1090,7 +1273,13 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
             print(f"{day}: 生成済みの日誌を commit して公開した")
         else:
             print(f"{day}: commit 済みの日誌を公開した")
-    return 1 if failed or unrecovered else 0
+    # 公開の成否に依らず、予約済みの記事を保存する。保存の失敗も job の失敗として残す
+    try:
+        memory_failures = remember(options, memory_state)
+    except JournalError as error:
+        memory_failure("state", error)
+        memory_failures = 1
+    return 1 if failed or unrecovered or memory_failures else 0
 
 
 if __name__ == "__main__":

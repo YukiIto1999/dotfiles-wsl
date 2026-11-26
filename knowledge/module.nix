@@ -105,6 +105,8 @@ let
         timeZone = config.time.timeZone;
         startHour = toString journalStartHour;
         lookbackDays = "7";
+        memory = lib.getExe memory;
+        memoryState = "${ws.homeDir}/.local/state/dotfiles-wsl/journal-memory.json";
       }
     );
   };

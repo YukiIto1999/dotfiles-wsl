@@ -65,8 +65,8 @@ Windows の `.wslconfig` はこのrepoからは書き換えない。`dotfiles-ws
 - **新しいWSL端末が開かない・固まる**: doctor の `vmbus_alloc_ring` と stuck Relay を見る。guest の memory に大きな連続領域が無いと、新しい接続の ring を確保できず Relay が待ち続ける。不要な session を閉じて memory を空ける。直らなければ作業中の session が無い時に WSL を再起動する。Windows Update の停止は WSL 側からは操作しない。
 - **memory が逼迫する**: `systemd-cgtop -m` で大きい cgroup を探す。agent の session は `agents.slice` の scope にあり、上限を超えるとその中で OOM が起き、systemd-oomd が pressure の高い cgroup を止める。
 - **MCP の tool が使えない**: OMP が server を必要時に起動する（`/mcp` で状態を確認、`/mcp reload` で設定を読み直す）。GitHub の token は `/run/secrets` の file から server の起動時に読む。
-- **記憶が返らない**: `curl http://127.0.0.1:3111/health` と `systemctl status docker-hindsight.service`。
-- **日誌・収穫が失敗する**: `journalctl --user -u dotfiles-agent-journal -n 50`。model の認証（401）か利用枠（429）かを区別する。
+- **記憶が返らない・保存できない**: `curl http://127.0.0.1:3111/health` と `systemctl status docker-hindsight.service`。保存は Hindsight 自身の LLM 抽出を通るため、その provider の利用枠が尽きると `retain_failed` になる。
+- **日誌・収穫が失敗する**: `journalctl --user -u dotfiles-agent-journal -n 50`。model の認証（401）か利用枠（429）かを区別する。401 は、OMP の認証 DB（`~/.omp/agent/agent.db`）に残った古い key が先に選ばれて起きることがある（2026-11 に OpenCode Go で発生）。古い資格情報を OMP の認証設定から外す。
 
 ## 旧構成からの移行（2026-11 の再設計）
 

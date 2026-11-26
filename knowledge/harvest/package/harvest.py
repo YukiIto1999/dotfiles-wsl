@@ -6,33 +6,35 @@ import argparse
 import json
 import re
 import signal
-import subprocess
 import sys
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from journal import JournalError, Session, atomic_write, child_timeout, chunks, clip, project_root, sessions_in, summarize
+from journal import (
+    TERMINAL_MEMORY_FAILURES,
+    JournalError,
+    MemoryCommandError,
+    Session,
+    atomic_write,
+    chunks,
+    clip,
+    memory,
+    project_root,
+    sessions_in,
+    summarize,
+)
 
 PROG = "dotfiles-agent-memory-harvest"
 PROMPT = Path(__file__).resolve().parent / "prompt.md"
 KINDS = ("correction", "decision", "preference")
-MEMORY_TIMEOUT_SECONDS = 120
 # client が利用者の発言へ差し込む block。利用者の言葉ではないため model へ渡さない
 INJECTED = re.compile(r"<(project_memory|system-reminder)\b[^>]*>.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
-# 再び確かめても結果が変わらない status の失敗。receipt を捨て、失敗として一度だけ報告する
-TERMINAL = ("invalid_input", "not_found", "not_verified", "retain_failed")
 
 
 class HarvestError(Exception):
     pass
-
-
-class MemoryCommandError(HarvestError):
-    def __init__(self, command: str, code: str, detail: str):
-        self.code = code
-        super().__init__(f"dotfiles-memory {command} failed: {detail}")
 
 
 @dataclass
@@ -40,35 +42,6 @@ class Message:
     source: str
     cwd: str
     text: str
-
-
-def memory(options: argparse.Namespace, command: str, request: dict | None = None, *arguments: str) -> dict:
-    try:
-        timeout = child_timeout(MEMORY_TIMEOUT_SECONDS)
-    except JournalError as error:
-        raise MemoryCommandError(command, "deadline", str(error)) from None
-    try:
-        result = subprocess.run(
-            [options.memory, command, *arguments],
-            input="" if request is None else json.dumps(request, ensure_ascii=False),
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise MemoryCommandError(command, "unavailable", str(error)) from None
-    if result.returncode != 0:
-        detail = result.stderr.strip()
-        # dotfiles-memory は失敗を `project-memory: <code>: <detail>` の形で書く
-        code = detail.splitlines()[0].removeprefix("project-memory: ").split(":", 1)[0] if detail else ""
-        raise MemoryCommandError(command, code, detail[-500:])
-    try:
-        value = json.loads(result.stdout)
-    except ValueError:
-        value = None
-    if not isinstance(value, dict):
-        raise HarvestError(f"dotfiles-memory {command} did not print one JSON object")
-    return value
 
 
 def load_state(path: Path, now: datetime, lookback_days: int) -> dict:
@@ -113,7 +86,7 @@ def confirm(options: argparse.Namespace, pending: list[dict]) -> tuple[list[dict
         except MemoryCommandError as error:
             print(f"{PROG}: {receipt['source']}: {error}", file=sys.stderr)
             failures += 1
-            if error.code not in TERMINAL:
+            if error.code not in TERMINAL_MEMORY_FAILURES:
                 remaining.append(receipt)
             continue
         if state not in ("saved", "pending"):
@@ -130,7 +103,8 @@ def normalized(text: str) -> str:
 
 
 def curated(options: argparse.Namespace, cwd: str) -> list[dict]:
-    memories = memory(options, "curated", {"cwd": cwd, "scope": "project"}).get("memories")
+    # 日誌の記事など収穫が作らない種類は重複の判定に要らず、model の入力を膨らませるだけのため読まない
+    memories = memory(options, "curated", {"cwd": cwd, "scope": "project", "kinds": list(KINDS)}).get("memories")
     if not isinstance(memories, list) or not all(
         isinstance(item, dict) and isinstance(item.get("content"), str) for item in memories
     ):
@@ -314,7 +288,7 @@ def main(argv: list[str] | None = None, now: datetime | None = None) -> int:
         if not failed:
             state["since"] = until.isoformat()
             store_state(options.state_file, state)
-    except HarvestError as error:
+    except (HarvestError, JournalError) as error:
         print(f"{PROG}: {error}", file=sys.stderr)
         return 1
     print(

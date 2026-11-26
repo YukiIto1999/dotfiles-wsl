@@ -215,6 +215,47 @@ else:
     print(json.dumps({"insights": []}))
 """
 
+# journal が呼ぶ dotfiles-memory の代わり。鍵ごとに一つの document を持ち、環境変数で失敗と処理中を再現する
+FAKE_MEMORY = """\
+import hashlib, json, os, sys
+from pathlib import Path
+
+command = sys.argv[1]
+request = json.loads(sys.stdin.read() or "null")
+with open(os.environ["FAKE_MEMORY_LOG"], "a", encoding="utf-8") as log:
+    log.write(json.dumps({"command": command, "argv": sys.argv[2:], "request": request}, ensure_ascii=False) + "\\n")
+
+
+def fail(code):
+    print(f"project-memory: {code}: fixture failure", file=sys.stderr)
+    sys.exit(1)
+
+
+store_path = Path(os.environ["FAKE_MEMORY_STORE"])
+store = json.loads(store_path.read_text(encoding="utf-8")) if store_path.exists() else {"documents": {}, "operations": {}}
+pending = bool(os.environ.get("FAKE_MEMORY_PENDING"))
+if command == "project":
+    if not (Path(sys.argv[2]) / ".git").exists():
+        fail("invalid_input")
+    print(json.dumps({"bank_id": "project-fixture"}))
+elif command == "save":
+    if os.environ.get("FAKE_MEMORY_FAIL"):
+        fail(os.environ["FAKE_MEMORY_FAIL"])
+    document_id = "keyed/" + hashlib.sha256(request["key"].encode()).hexdigest()[:16]
+    operation_id = "operation-" + hashlib.sha256((document_id + request["content"]).encode()).hexdigest()[:16]
+    store["operations"][operation_id] = document_id
+    store["documents"][document_id] = request
+    store_path.write_text(json.dumps(store, ensure_ascii=False), encoding="utf-8")
+    state = "pending" if pending else "saved"
+    print(json.dumps({"state": state, "scope": "project", "operation_id": operation_id, "document_id": document_id}))
+elif command == "status":
+    if request["operation_id"] not in store["operations"]:
+        fail("not_found")
+    print(json.dumps({"state": "pending" if pending else "saved", **request}))
+else:
+    fail("invalid_input")
+"""
+
 
 def git(*args: str, cwd: Path | None = None, env: dict | None = None) -> str:
     return subprocess.run(
@@ -335,12 +376,25 @@ class JournalTest(unittest.TestCase):
 
         self.calls_log = self.workspace / "calls.jsonl"
         self.script_file = self.workspace / "script.json"
-        for name, value in (("FAKE_OMP_LOG", self.calls_log), ("FAKE_OMP_SCRIPT", self.script_file)):
+        self.memory_log = self.workspace / "memory.jsonl"
+        self.memory_store = self.workspace / "memory-store.json"
+        self.memory_state = self.workspace / "state" / "journal-memory.json"
+        for name, value in (
+            ("FAKE_OMP_LOG", self.calls_log),
+            ("FAKE_OMP_SCRIPT", self.script_file),
+            ("FAKE_MEMORY_LOG", self.memory_log),
+            ("FAKE_MEMORY_STORE", self.memory_store),
+        ):
             os.environ[name] = str(value)
+            self.addCleanup(os.environ.pop, name, None)
+        for name in ("FAKE_MEMORY_FAIL", "FAKE_MEMORY_PENDING"):
             self.addCleanup(os.environ.pop, name, None)
         self.fake_omp = self.workspace / "omp"
         self.fake_omp.write_text(f"#!{sys.executable}\n{FAKE_OMP}")
         self.fake_omp.chmod(0o755)
+        self.fake_memory = self.workspace / "dotfiles-memory"
+        self.fake_memory.write_text(f"#!{sys.executable}\n{FAKE_MEMORY}")
+        self.fake_memory.chmod(0o755)
         self.script = {
             stage: [{"when": marker, "reply": {"insights": [found]}} for marker, found in ROUTES]
             for stage in ("extract", "synthesize")
@@ -363,6 +417,8 @@ class JournalTest(unittest.TestCase):
             "--omp", str(self.fake_omp),
             "--model", "fake/model",
             "--thinking", "low",
+            "--memory", str(self.fake_memory),
+            "--memory-state", str(self.memory_state),
             *extra,
         ]
 
@@ -392,6 +448,18 @@ class JournalTest(unittest.TestCase):
 
     def mentions(self, marker: str) -> int:
         return sum(marker in call["material"] for call in self.calls())
+
+    def memory_calls(self, command: str) -> list[dict]:
+        if not self.memory_log.exists():
+            return []
+        found = [json.loads(line) for line in self.memory_log.read_text(encoding="utf-8").splitlines() if line]
+        return [call["request"] for call in found if call["command"] == command]
+
+    def memory_documents(self) -> dict:
+        return json.loads(self.memory_store.read_text(encoding="utf-8"))["documents"] if self.memory_store.exists() else {}
+
+    def memory_queue(self) -> dict:
+        return json.loads(self.memory_state.read_text(encoding="utf-8"))
 
     @staticmethod
     def parts(call: dict) -> tuple[dict, list[dict]]:
@@ -519,6 +587,76 @@ class JournalTest(unittest.TestCase):
         commits = git("--git-dir", str(self.remote), "rev-list", "--count", "main")
         self.run_journal("--date", DAY.isoformat())
         self.assertEqual(git("--git-dir", str(self.remote), "rev-list", "--count", "main"), commits)
+
+    def test_each_article_is_saved_into_the_memory_of_its_project_and_a_rebuild_replaces_it(self):
+        self.run_journal("--date", DAY.isoformat())
+
+        [request] = self.memory_calls("save")
+        locator = f"agent-journal:{DAY_FILE}#1"
+        self.assertEqual(
+            {key: request[key] for key in ("cwd", "source", "key", "kind", "scope")},
+            {"cwd": str(self.project), "source": locator, "key": locator, "kind": "pattern", "scope": "project"},
+        )
+        session_file = next(self.sessions.glob(f"-projects-sample/*{SESSION_A}.jsonl"))
+        for part in (
+            INSIGHT_0923["title"], f"知見: {INSIGHT_0923['finding']}", f"適用: {INSIGHT_0923['application']}",
+            f"{session_file}#a0000002", f"{session_file}#a0000005",
+        ):
+            self.assertIn(part, request["content"])
+        self.assertNotIn(INSIGHT_0923["explanation"], request["content"])
+
+        self.run_journal("--date", DAY.isoformat())
+        self.assertEqual(len(self.memory_calls("save")), 2)
+        self.assertEqual(len(self.memory_documents()), 1)
+        self.assertEqual(self.memory_queue(), {"queue": [], "pending": []})
+
+    def test_an_article_of_a_session_outside_any_git_project_is_not_saved(self):
+        elsewhere = insight("別の作業の知見", B_REQUEST)
+        self.edited(
+            [*self.route(A_BOUNDARY[1], {"insights": [INSIGHT_0923]}), *self.route(B_REQUEST[1], {"insights": [elsewhere]})],
+            [elsewhere, INSIGHT_0923],
+        )
+        self.assertEqual([request["source"] for request in self.memory_calls("save")], [f"agent-journal:{DAY_FILE}#2"])
+        self.assertEqual(self.memory_queue()["queue"], [])
+
+    def test_a_failed_save_fails_the_run_and_the_next_run_saves_it_without_the_model(self):
+        now = local("2026-09-24T06:00:00")
+        os.environ["FAKE_MEMORY_FAIL"] = "unavailable"
+        status, _, errors = self.captured(now=now)
+
+        self.assertEqual(status, 1)
+        self.assertIn(f"dotfiles-agent-journal: memory: agent-journal:{DAY_FILE}#1: dotfiles-memory save failed", errors)
+        self.assertEqual(self.published(), ["2026/0921/testhost.md", "2026/0922/testhost.md", DAY_FILE])
+        self.assertEqual(len(self.memory_queue()["queue"]), 3)
+        calls = len(self.calls())
+
+        del os.environ["FAKE_MEMORY_FAIL"]
+        self.run_journal(now=now)
+
+        self.assertEqual(len(self.calls()), calls)
+        self.assertEqual(len(self.memory_documents()), 3)
+        self.assertEqual(self.memory_queue(), {"queue": [], "pending": []})
+
+    def test_an_article_refused_for_privacy_is_dropped_without_failing_the_run(self):
+        os.environ["FAKE_MEMORY_FAIL"] = "privacy"
+        status, stdout, _ = self.captured("--date", DAY.isoformat())
+
+        self.assertEqual(status, 0)
+        self.assertIn(f"memory rejected: agent-journal:{DAY_FILE}#1: privacy", stdout)
+        self.assertEqual(self.memory_queue()["queue"], [])
+
+    def test_a_pending_save_is_confirmed_by_the_next_run(self):
+        os.environ["FAKE_MEMORY_PENDING"] = "1"
+        self.run_journal("--date", DAY.isoformat())
+        [receipt] = self.memory_queue()["pending"]
+        self.assertEqual(receipt["source"], f"agent-journal:{DAY_FILE}#1")
+
+        del os.environ["FAKE_MEMORY_PENDING"]
+        # 作業のない日だけを指定しても、前の実行の保存は確かめる
+        status, stdout, _ = self.captured("--date", "2026-09-10")
+        self.assertEqual(status, 0)
+        self.assertIn(f"memory saved: agent-journal:{DAY_FILE}#1", stdout)
+        self.assertEqual(self.memory_queue(), {"queue": [], "pending": []})
 
     def test_a_failed_day_does_not_block_other_days(self):
         self.script["extract"].insert(0, {"when": C_REQUEST[1], "fail": True})

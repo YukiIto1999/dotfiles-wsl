@@ -24,7 +24,7 @@ upstreamのskillはflake inputの固定sourceから配る。architecture-standar
 
 ## 持たないもの
 
-次は過去に持っていたが、目的に対して害が大きいと分かったので持たない。数字は2026-10-12〜11-26のsession記録と実機の計測による（`work/redesign-20261126/`は追跡外）。
+次は過去に持っていたが、目的に対して害が大きいと分かったので持たない。数字は2026-10-12〜11-26のsession記録と実機の計測による（計測の記録は追跡外の`~/.local/share/dotfiles-wsl-archive/redesign-20261126/`）。
 
 - **session終了の検証gateとT1証跡**: 再指示4,198件、そのうち4,077件は作業のない応答。gateを満たすこと自体が目的になった事例があり、欠陥を捕まえた事例は見つからなかった。検証は各projectのcommandを直接実行し、依頼の成果ごとに報告する。
 - **資源の入場制御**（acceptance/deep、`capped-run`、`workload-run`）: 未起動140回、待ち合計47.7時間。hostは cgroup の上限と systemd-oomd で守り、仕事を待たせない。

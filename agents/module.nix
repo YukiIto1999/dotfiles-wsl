@@ -38,8 +38,8 @@ let
   profileRoot = "${ws.homeDir}/.local/state/nix/profiles";
 
   # OMP の managed browser が起動する Chromium。指定が無いと OMP は Chrome for Testing を取得するが、
-  # NixOS では共有 library が無く起動しない。omp の package が自分用に足す LD_LIBRARY_PATH は子 process にも残り、
-  # 別の glibc で build された libpulseaudio などを Chromium に読ませて起動を壊すため外す（2026-11-26 の実測）
+  # NixOS では共有 library が無く起動しない。下の omp の起動より前から動く session と共有 daemon は
+  # LD_LIBRARY_PATH を持ったままで、Chromium の起動を壊すため外す（2026-11-26 の実測）
   ompBrowser = pkgs.writeShellScript "omp-chromium" ''
     unset LD_LIBRARY_PATH
     exec ${lib.getExe pkgs.chromium} "$@"
@@ -49,6 +49,12 @@ let
     omp = {
       binary = "omp";
       package = "omp";
+      # package の bin/omp は本体の native library のために LD_LIBRARY_PATH を足し、agent が起動する command、
+      # MCP server、browser にも漏らした。別の glibc で build された pulseaudio などを読み込み、Chromium や qemu が
+      # `GLIBC_2.43 not found` で止まった事例が 2026-10-27〜11-26 に 7 project の 21 session であったため、
+      # 本体を直接起動する。本体が必要とする library は RUNPATH で解決され、足していた pulseaudio と pipewire は
+      # 音声出力（say）と Wayland の画面取得が dlopen するだけで、その二つは使えなくなる（直近30日の say の利用は0回）
+      unwrapped = "lib/omp/omp";
       environment = {
         # 版の更新は dotfiles-agent-update が行う
         PI_SKIP_VERSION_CHECK = "1";
@@ -73,16 +79,32 @@ let
     };
   };
 
-  # 日次の更新が検証済みの世代を置く profile を優先し、無ければ flake の固定版を使う
+  # 日次の更新が検証済みの世代を置く profile を優先し、無ければ flake の固定版を使う。
+  # unwrapped を持つ client は、package の wrapper の代わりに本体を起動する（本体が無い版では wrapper へ戻る）
   clientExecutable =
     name: client:
-    pkgs.writeShellScript "dotfiles-${name}" ''
-      profile_binary=${lib.escapeShellArg "${profileRoot}/${name}/bin/${client.binary}"}
-      if [ -x "$profile_binary" ]; then
-        exec "$profile_binary" "$@"
-      fi
-      exec ${lib.getExe' llmAgents.${client.package} client.binary} "$@"
-    '';
+    pkgs.writeShellScript "dotfiles-${name}" (
+      ''
+        profile_binary=${lib.escapeShellArg "${profileRoot}/${name}/bin/${client.binary}"}
+        if [ -x "$profile_binary" ]; then
+          binary=$profile_binary
+        else
+          binary=${lib.getExe' llmAgents.${client.package} client.binary}
+        fi
+      ''
+      + lib.optionalString (client ? unwrapped) ''
+        package=$(${lib.getExe' pkgs.coreutils "readlink"} -f -- "$binary")
+        package=''${package%/bin/${client.binary}}
+        if [ -x "$package/${client.unwrapped}" ]; then
+          # package の wrapper が設定していた値。版の更新は dotfiles-agent-update が行う
+          export PI_SKIP_VERSION_CHECK=1
+          exec "$package/${client.unwrapped}" "$@"
+        fi
+      ''
+      + ''
+        exec "$binary" "$@"
+      ''
+    );
 
   # client の process tree を memory の会計と上限のためだけに agents.slice の scope へ置く。
   # user manager に届かないときも起動は拒まない

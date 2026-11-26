@@ -8,7 +8,7 @@
 - 標準 browser の managed Chromium は Nix の Chromium である。omp の wrapper が `PUPPETEER_EXECUTABLE_PATH` で渡す。OMP は project の directory ごとに一つ起動し、tab は session と subagent で分け合う。
 - performance、Lighthouse、memory の診断には Chrome DevTools MCP を使う（`browser-performance`、`heap-analysis`）。
 - Playwright MCP は置かない。OMP は標準 browser がある session で、名前や command が Playwright の MCP server を読み込まない。公式の解除方法は標準 browser を無効にすることだけで、両方は同時に使えない。Playwright の API で書く回帰 test は project の Playwright Test に置く。
-- omp の package は、自分の native library のために `LD_LIBRARY_PATH` を設定し、子 process もそれを継ぐ。別の glibc で build された library を読み込むと、Chromium は `GLIBC_2.xx not found` で起動できない。標準 browser と Chrome DevTools MCP は、Chromium を起動する wrapper で外している（`mcp.json` の `env` に空の値を書いても OMP は上書きしない）。agent の bash から Nix の Chromium などを起動して同じ error が出たら、`env -u LD_LIBRARY_PATH` を付けて起動する。
+- omp の package の `bin/omp` は、本体の library のために `LD_LIBRARY_PATH` を設定し、子 process もそれを継いだ。別の glibc で build された library を読み込んだ Chromium や qemu は、`GLIBC_2.xx not found` で起動できなかった。`omp` の wrapper は package の本体を直接起動するので、新しい session の command には渡らない。代わりに、OMP の音声出力（`say`）と Wayland の画面取得は使えない。この変更より前に起動した session と、それが始めた共有 daemon は値を持ったままなので、標準 browser と Chrome DevTools MCP は Chromium を起動する wrapper でも外している。古い session の bash で同じ error が出たら、`env -u LD_LIBRARY_PATH` を付けて起動する。
 
 ## Windows の独立した操作画面（Anode）
 

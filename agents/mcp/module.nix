@@ -41,8 +41,9 @@ let
     npmDepsHash = "sha256-f2NTg/ijemxWlSpVranPCYQo11N4hcj1uW0KAt1ZCOw=";
   };
   # trace と screenshot の書き出し先。agent が後から読むため session をまたいで残す。
-  # OMP は server を自分の環境で起動し、omp の package が自分用に足す LD_LIBRARY_PATH が残る。別の glibc で build された
-  # library を Chromium が読んで起動できなかったため外す（mcp.json の env に空の値を書いても OMP は上書きしない。2026-11-26 の実測）
+  # OMP は server を共有 daemon の環境で起動する。omp の package の wrapper から起動した session と、それが始めた daemon は
+  # LD_LIBRARY_PATH を持ち、別の glibc で build された library を Chromium が読んで起動できなかったため外す
+  # （mcp.json の env に空の値を書いても OMP は上書きしない。2026-11-26 の実測）
   chromeDevtools = pkgs.writeShellScript "chrome-devtools-mcp" ''
     unset LD_LIBRARY_PATH
     root="''${XDG_RUNTIME_DIR:-/tmp}/chrome-devtools-mcp"

@@ -5,7 +5,7 @@ import os
 import sys
 
 from hooks import run_hook
-from memory import Client, MemoryFailure, canonical, project_bank, validate_texts
+from memory import CURATED_KINDS, Client, MemoryFailure, canonical, project_bank, validate_texts
 from server import dispatch, run_server
 
 
@@ -26,7 +26,7 @@ async def main() -> None:
     commands.add_parser("health")
     for name in ("recall", "save", "verify", "status"):
         commands.add_parser(name, help="Read arguments as one JSON object from stdin")
-    commands.add_parser("curated", help="List explicitly saved memories of one scope; reads cwd and scope as one JSON object from stdin")
+    commands.add_parser("curated", help="List explicitly saved memories of one scope; reads cwd, scope and optional kinds as one JSON object from stdin")
     commands.add_parser(
         "validate",
         help="Check texts for credential and personal-data indicators without contacting the backend; "
@@ -56,9 +56,12 @@ async def main() -> None:
             return
         if arguments.command == "curated":
             request = input_object()
-            if set(request) != {"cwd", "scope"}:
-                raise MemoryFailure("invalid_input", "curated requires exactly cwd and scope")
-            result = await client.curated(request["cwd"], request["scope"])
+            if not {"cwd", "scope"} <= set(request) <= {"cwd", "scope", "kinds"}:
+                raise MemoryFailure("invalid_input", "curated requires cwd and scope and accepts only kinds besides them")
+            kinds = request.get("kinds", list(CURATED_KINDS))
+            if not isinstance(kinds, list) or not all(isinstance(kind, str) for kind in kinds):
+                raise MemoryFailure("invalid_input", "kinds must be a list of memory kinds")
+            result = await client.curated(request["cwd"], request["scope"], tuple(kinds))
         else:
             result = await dispatch(client, arguments.command, {} if arguments.command == "health" else input_object())
         print(canonical(result))

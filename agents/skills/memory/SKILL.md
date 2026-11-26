@@ -57,13 +57,17 @@ memoryには再発防止に必要な理由と正本への参照を残し、正�
 `memory_save`へ`cwd`、一つの主張を表す`content`、一次source locatorを表す`source`、確定した`scope`と適合する`kind`を渡す。
 scopeの既定値を利用者のglobal保存への同意に読み替えない。
 
+決定や訂正を保存する前に、同じscopeで関連する記憶を`memory_recall`で読む。新しい主張が置き換える事実のIDを`supersedes`へ渡すと、保存の確定後にそれらが失効し、以後のrecallに出なくなる。observationのIDは受け付けないので、`memory_verify`で元の事実のIDを確かめて渡す。置き換えるかどうか確定できない記憶は`supersedes`へ入れない。
+
+利用者が「覚えて」「記憶して」と求めたら、上の確認を満たす範囲で保存する。常に守らせる必要がある決定は、検索に依存するmemoryだけに置かない。利用者全体の方針はAGENTS.md、projectの決定はそのprojectの文書が正本であると利用者へ伝え、反映先を提案する。
+
 `memory_save`の応答が`pending`なら処理中、`indeterminate`なら送信後の通信断や期限切れで保存結果を確認できていない。どちらもsavedとは言わない。返された`operation_id`と`document_id`を同じ絶対`cwd`と明示scopeで`memory_status`へ渡し、terminal operationの完了、persisted documentの存在、document checksumの一致を確認して初めてsavedと扱う。statusがpending、failed、unavailable、またはchecksumを確認できない場合は保存済みと報告せず、saveの再送やfallbackを勝手に追加しない。
 
 ## 自動の想起と定期収穫
 
-session開始とprompt送信の想起はclient integrationが所有し、このSkillは操作しない。想起して注入された情報にも、明示的なrecallと同じ検証規律を適用する。clientは会話のturnを保存しない。
+memoryの想起はclient integrationが所有し、sessionで最初に依頼を受けたときに一度だけ注入される。以後に必要になった記憶は`memory_recall`で明示的に読む。注入された情報にも、明示的なrecallと同じ検証規律を適用する。clientは会話のturnを保存しない。
 
-omp の session 記録からの定期収穫は、利用者の発言だけを読み、上の梯子で訂正、決定、好みを選び、保存済みの記憶と重ならないものを`project` scopeへsource `<session file>#<entry id>`付きで保存する。収穫した記憶も、明示的に保存した記憶と同じく一次sourceで確かめてから使う。確定した訂正を次のsessionまでに使う必要があれば、収穫を待たずに`memory_save`で保存する。
+omp の session 記録からの定期収穫は、利用者の発言だけを読み、上の梯子で訂正、決定、好みを選び、保存済みの記憶と重ならないものを`project` scopeへsource `<session file>#<entry id>`付きで保存する。日誌の記事も、引用した session の project へ`pattern`として保存される。どちらも明示的に保存した記憶と同じく一次sourceで確かめてから使う。確定した訂正を次のsessionまでに使う必要があれば、収穫を待たずに`memory_save`で保存する。
 
 保存入力はlocalの原文documentに残り、抽出時には設定された外部LLMへ送られる。明示的な保存では送信前の採否判断を省略しない。
 

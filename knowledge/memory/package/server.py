@@ -19,12 +19,33 @@ OPERATIONS = {
         ["cwd", "query", "scope"],
     ),
     "save": (
-        "Retain one verified durable correction, decision, preference or pattern with its source. Pending and indeterminate are NOT saved; check the returned IDs with memory_status, do not resend automatically. Never submit secrets, raw conversation or transient task state.",
-        {"cwd": CWD, "content": {"type": "string", "minLength": 1, "maxLength": 16000}, "source": {"type": "string", "minLength": 1, "maxLength": 1000}, "scope": SAVE_SCOPE, "kind": {"type": "string", "enum": ["correction", "decision", "pattern", "preference"], "default": "correction"}},
+        "Retain one verified durable correction, decision, preference or pattern with its source. Pending and indeterminate are NOT saved; check the returned IDs with memory_status, do not resend automatically. Never submit secrets, raw conversation or transient task state. "
+        "List in supersedes the recalled fact IDs this claim replaces; they are invalidated in the same scope once the save is confirmed.",
+        {
+            "cwd": CWD,
+            "content": {"type": "string", "minLength": 1, "maxLength": 16000},
+            "source": {"type": "string", "minLength": 1, "maxLength": 1000},
+            "scope": SAVE_SCOPE,
+            "kind": {"type": "string", "enum": ["correction", "decision", "pattern", "preference"], "default": "correction"},
+            "supersedes": {
+                "type": "array",
+                "items": {"type": "string", "minLength": 1, "maxLength": 100},
+                "maxItems": 20,
+                "uniqueItems": True,
+                "description": "IDs of world or experience facts in the same scope that this claim replaces. Observations are rejected; pass the facts they came from.",
+            },
+            "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000,
+                "description": "Stable identity of the claim. A later save with the same key and scope replaces this one instead of adding another.",
+            },
+        },
         ["cwd", "content", "source"],
     ),
     "status": (
-        "Check a retain operation. Saved requires completed extraction and a matching persisted document checksum, not just an accepted request.",
+        "Check a retain operation. Saved requires completed extraction and a matching persisted document checksum, not just an accepted request. "
+        "Once saved, applies any invalidation the save listed in supersedes.",
         {"cwd": CWD, "operation_id": {"type": "string"}, "document_id": {"type": "string"}, "scope": SCOPE},
         ["cwd", "operation_id", "document_id", "scope"],
     ),
@@ -67,7 +88,7 @@ async def run_server(url: str) -> None:
                     name="memory_" + name,
                     description=description,
                     inputSchema=VALIDATORS[name].schema,
-                    annotations=mcp_types.ToolAnnotations(readOnlyHint=name != "save", destructiveHint=False, idempotentHint=True),
+                    annotations=mcp_types.ToolAnnotations(readOnlyHint=name not in ("save", "status"), destructiveHint=False, idempotentHint=True),
                 )
                 for name, (description, properties, required) in OPERATIONS.items()
             ]

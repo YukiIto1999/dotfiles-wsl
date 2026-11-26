@@ -26,6 +26,12 @@ SAVE_STATUS_WAIT_SECONDS = 8
 # 明示的な保存が document へ付ける種類。一覧はこの tag を持つ document だけを読み、過去の自動取り込みを含めない
 CURATED_KINDS = ("correction", "decision", "pattern", "preference")
 DOCUMENT_PAGE_SIZE = 100
+# 一つの主張が置き換える記憶は少数。上限は誤って一覧を丸ごと渡した保存を拒むため
+SUPERSEDE_LIMIT = 20
+# Hindsight が失効を受け付ける事実の種類。observation は事実から導かれ、元の事実の失効で除かれる
+CURATABLE_TYPES = ("world", "experience")
+# 呼び出し側の鍵で決まる document の接頭辞。同じ鍵の保存は前の内容を置き換え、記憶を増やさない
+KEYED_DOCUMENTS = "keyed/"
 
 INJECTED_BLOCKS = re.compile(
     r"<(hindsight_memory|hindsight_memories|project_memory|memories|mental_models|"
@@ -101,6 +107,27 @@ def safe_text(value: object, field: str, maximum: int = 16000) -> str:
     if sensitive(value):
         raise MemoryFailure("privacy", f"{field} contains credential or personal-data indicators; not transmitted")
     return value
+
+
+def superseded_ids(value: object) -> list[str]:
+    if value is None:
+        return []
+    if (
+        not isinstance(value, list)
+        or len(value) > SUPERSEDE_LIMIT
+        or not all(isinstance(item, str) and item.strip() and len(item) <= 100 for item in value)
+        or len(set(value)) != len(value)
+    ):
+        raise MemoryFailure("invalid_input", f"supersedes must list at most {SUPERSEDE_LIMIT} distinct memory IDs")
+    return value
+
+
+def operation_identity(bank: str, document_id: str, content_hash: str) -> str:
+    # 同じ operation_id の再送は前の operation を返すため、内容が変わる鍵の document では内容を含める
+    name = bank + "\n" + document_id
+    if document_id.startswith(KEYED_DOCUMENTS):
+        name += "\n" + content_hash
+    return str(uuid.uuid5(uuid.NAMESPACE_URL, name))
 
 
 def strip_injection(text: str) -> str:
@@ -241,7 +268,9 @@ class Client:
             raise MemoryFailure("protocol_error", "document identity does not match requested scope")
         return result
 
-    async def curated(self, cwd: str, scope: Scope) -> dict:
+    async def curated(self, cwd: str, scope: Scope, kinds: tuple[str, ...] = CURATED_KINDS) -> dict:
+        if not kinds or not set(kinds) <= set(CURATED_KINDS):
+            raise MemoryFailure("invalid_input", "kinds must name explicitly saved memory kinds")
         bank = bank_for(cwd, scope)
         result = {"scope": scope, "bank_id": bank, "memories": []}
         if not await self.bank_exists(bank):
@@ -252,7 +281,7 @@ class Client:
                 "GET",
                 self.route(bank, "/documents"),
                 params={
-                    "tags": ["kind:" + kind for kind in CURATED_KINDS],
+                    "tags": ["kind:" + kind for kind in kinds],
                     "tags_match": "any_strict",
                     "limit": DOCUMENT_PAGE_SIZE,
                     "offset": offset,
@@ -269,7 +298,7 @@ class Client:
                 document = await self.document(bank, identifier)
                 metadata = document.get("document_metadata") or {}
                 content = document.get("original_text")
-                if metadata.get("kind") not in CURATED_KINDS or not isinstance(content, str):
+                if metadata.get("kind") not in kinds or not isinstance(content, str):
                     raise MemoryFailure("protocol_error", "listed document is not an explicitly saved memory")
                 result["memories"].append({
                     "document_id": identifier,
@@ -280,6 +309,62 @@ class Client:
             offset += len(items)
             if not items or offset >= total:
                 return result
+
+    async def memory_unit(self, bank: str, memory_id: str) -> dict:
+        result = await self.request("GET", self.route(bank, "/memories/" + quote(memory_id, safe="")))
+        if result.get("id") != memory_id:
+            raise MemoryFailure("protocol_error", "memory identity does not match request")
+        return result
+
+    async def require_replaceable(self, bank: str, supersedes: list[str]) -> None:
+        for memory_id in supersedes:
+            try:
+                unit = await self.memory_unit(bank, memory_id)
+            except MemoryFailure as error:
+                if error.code == "not_found":
+                    raise MemoryFailure("invalid_input", f"superseded memory {memory_id} is not in this scope") from None
+                raise
+            kind = unit.get("type", unit.get("fact_type"))
+            if kind not in CURATABLE_TYPES:
+                sources = ", ".join(str(item) for item in unit.get("source_memory_ids") or [])
+                raise MemoryFailure(
+                    "invalid_input",
+                    f"memory {memory_id} is a derived {kind}; supersede the facts it came from instead: {sources or 'none listed'}",
+                )
+
+    async def supersede(self, bank: str, document_id: str, content: str, metadata: dict) -> list[str]:
+        """保存済みの document が置き換えると記した記憶の失効
+
+        戻り値: 失効済みか存在しない記憶を含む、document が記した全 ID
+        不変条件: 失効済みの記憶は再び更新しないため、同じ document での再実行は冪等
+        """
+        listed = metadata.get("supersedes")
+        if listed is None:
+            return []
+        try:
+            identifiers = json.loads(listed)
+        except (TypeError, ValueError):
+            identifiers = None
+        if not isinstance(identifiers, list) or not all(isinstance(item, str) for item in identifiers):
+            raise MemoryFailure("protocol_error", "document lists superseded memories in an unknown form")
+        reason = f"superseded by {document_id}: {' '.join(content.split())[:120]}"
+        for memory_id in identifiers:
+            path = self.route(bank, "/memories/" + quote(memory_id, safe=""))
+            try:
+                if (await self.memory_unit(bank, memory_id)).get("invalidated_at"):
+                    continue
+                await self.request("PATCH", path, body={"state": "invalidated", "reason": reason})
+                if not (await self.memory_unit(bank, memory_id)).get("invalidated_at"):
+                    raise MemoryFailure("not_verified", "the backend did not record the invalidation")
+            except MemoryFailure as error:
+                if error.code == "not_found":
+                    continue
+                raise MemoryFailure(
+                    error.code,
+                    f"saved {document_id}, but superseded memory {memory_id} is not invalidated ({error}); "
+                    "checking the save status again retries it",
+                ) from None
+        return identifiers
 
     async def operation(self, bank: str, operation_id: str) -> dict:
         result = await self.request("GET", self.route(bank, "/operations/" + quote(operation_id, safe="")))
@@ -294,8 +379,9 @@ class Client:
 
     async def status(self, cwd: str, operation_id: str, document_id: str, scope: Scope) -> dict:
         bank = bank_for(cwd, scope)
-        expected = str(uuid.uuid5(uuid.NAMESPACE_URL, bank + "\n" + document_id))
-        if operation_id != expected:
+        keyed = document_id.startswith(KEYED_DOCUMENTS)
+        # 鍵の document の operation は内容に依るため、対応は完了後に保存された内容から確かめる
+        if not keyed and operation_id != operation_identity(bank, document_id, ""):
             raise MemoryFailure("invalid_input", "operation and document do not belong to the same save")
         operation = await self.operation(bank, operation_id)
         receipt = {"scope": scope, "operation_id": operation_id, "document_id": document_id}
@@ -306,7 +392,13 @@ class Client:
         metadata = document.get("document_metadata") or {}
         if not isinstance(content, str) or metadata.get("content_sha256") != digest(content):
             raise MemoryFailure("not_verified", "completed operation has no matching durable document checksum")
-        return {"state": "saved", "memory_count": document["memory_unit_count"], **receipt}
+        if keyed and operation_id != operation_identity(bank, document_id, metadata["content_sha256"]):
+            raise MemoryFailure("not_verified", "the keyed document now holds the content of another save")
+        result = {"state": "saved", "memory_count": document["memory_unit_count"], **receipt}
+        superseded = await self.supersede(bank, document_id, content, metadata)
+        if superseded:
+            result["superseded"] = superseded
+        return result
 
     async def save(
         self,
@@ -315,19 +407,30 @@ class Client:
         source: str,
         scope: Scope = "project",
         kind: str = "correction",
+        supersedes: list[str] | None = None,
+        key: str | None = None,
     ) -> dict:
         if kind not in CURATED_KINDS:
             raise MemoryFailure("invalid_input", "unsupported memory kind")
         content = safe_text(content, "content")
         source = safe_text(source, "source", 1000)
+        supersedes = superseded_ids(supersedes)
         bank = bank_for(cwd, scope)
         content_hash = digest(content)
-        document_id = kind + "/" + digest(source + "\n" + content)
-        operation_id = str(uuid.uuid5(uuid.NAMESPACE_URL, bank + "\n" + document_id))
+        if key is None:
+            document_id = kind + "/" + digest(source + "\n" + content)
+        else:
+            document_id = KEYED_DOCUMENTS + digest(safe_text(key, "key", 1000))
+        operation_id = operation_identity(bank, document_id, content_hash)
         receipt = {"scope": scope, "operation_id": operation_id, "document_id": document_id}
+        metadata = {"source": source, "kind": kind, "content_sha256": content_hash}
+        if supersedes:
+            # 失効は保存の確定後。status が document から読み、確定を確かめた呼出しのどれもが適用する
+            metadata["supersedes"] = canonical(supersedes)
         submitted = False
         try:
             async with asyncio.timeout(RETAIN_DEADLINE_SECONDS):
+                await self.require_replaceable(bank, supersedes)
                 await self.configure(bank)
                 submitted = True
                 try:
@@ -339,7 +442,7 @@ class Client:
                                 "content": content,
                                 "context": "Durable coding knowledge; source evidence must be checked before reuse",
                                 "document_id": document_id,
-                                "metadata": {"source": source, "kind": kind, "content_sha256": content_hash},
+                                "metadata": metadata,
                                 "tags": ["kind:" + kind],
                                 "observation_scopes": "shared",
                             }],

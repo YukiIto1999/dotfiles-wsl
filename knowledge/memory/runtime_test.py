@@ -141,6 +141,9 @@ class Backend(BaseHTTPRequestHandler):
                 self.respond(200, document)
         elif path.endswith("/history"):
             self.respond(200, self.state["history"])
+        elif "/memories/" in path and self.state.get("units") is not None:
+            unit = self.state["units"].get(path.rsplit("/", 1)[1])
+            self.respond(200, unit) if unit else self.respond(404, {})
         elif "/memories/" in path:
             self.respond(200, self.state["memory"])
         elif path == "/health/ready":
@@ -154,6 +157,12 @@ class Backend(BaseHTTPRequestHandler):
         self.state["requests"].append(("PATCH", self.path))
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         bank = self.path.split("/")[4]
+        if "/memories/" in self.path:
+            unit = self.state["units"][unquote(self.path).rsplit("/", 1)[1]]
+            self.state["invalidations"].append((unit["id"], body))
+            unit.update(state=body["state"], invalidation_reason=body["reason"], invalidated_at="2026-11-26T00:00:00Z")
+            self.respond(200, unit)
+            return
         self.state["banks"].add(bank)
         self.respond(200, {"bank_id": bank, "overrides": body["updates"]})
 
@@ -208,7 +217,7 @@ class RuntimeContract(unittest.TestCase):
         return subprocess.run(["git", *arguments], check=True, capture_output=True, text=True)
 
     def setUp(self):
-        Backend.state = {"requests": [], "banks": set(), "operation_state": "completed", "documents": {}, "items": [], "recalls": [], "retain_status": 200, "recall_status": 200}
+        Backend.state = {"requests": [], "banks": set(), "operation_state": "completed", "documents": {}, "items": [], "recalls": [], "retain_status": 200, "recall_status": 200, "invalidations": []}
 
     def command(self, command, payload=None, *arguments):
         result = subprocess.run(
@@ -438,6 +447,93 @@ class RuntimeContract(unittest.TestCase):
             {"document_id": "correction/a", "kind": "correction", "source": "correction/a#source", "content": "検証は focused check を先に通す。"},
             {"document_id": "preference/c", "kind": "preference", "source": "preference/c#source", "content": "報告は日本語で書く。"},
         ])
+
+    def test_curated_lists_only_the_requested_kinds(self):
+        bank = self.bank()
+        Backend.state["banks"].add(bank)
+        Backend.state["documents"] = {"decision/a": {
+            "id": "decision/a", "bank_id": bank, "tags": ["kind:decision"], "original_text": "決定",
+            "document_metadata": {"kind": "decision", "source": "s", "content_sha256": "fixture"}, "memory_unit_count": 1,
+        }}
+        result = self.command("curated", {"cwd": str(self.repo), "scope": "project", "kinds": ["pattern"]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["memories"], [])
+        refused = self.command("curated", {"cwd": str(self.repo), "scope": "project", "kinds": ["capture"]})
+        self.assertIn("invalid_input", refused.stderr)
+
+    @staticmethod
+    def fact(identifier, kind="world", sources=()):
+        return {"id": identifier, "type": kind, "text": identifier, "state": "valid", "invalidated_at": None, "source_memory_ids": list(sources)}
+
+    def save_superseding(self, *identifiers):
+        return self.command("save", {
+            "cwd": str(self.repo), "content": "実装担当は Opus 5.5 high と Sol 6.2 に変える。",
+            "source": "user-confirmed:supersede", "kind": "decision", "supersedes": list(identifiers),
+        })
+
+    def status_of(self, receipt):
+        return self.command("status", {"cwd": str(self.repo), **{key: receipt[key] for key in ("scope", "operation_id", "document_id")}})
+
+    def test_a_confirmed_save_invalidates_the_facts_it_supersedes_once(self):
+        Backend.state["units"] = {"old": self.fact("old"), "kept": self.fact("kept")}
+        result = self.save_superseding("old")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual((receipt["state"], receipt["superseded"]), ("saved", ["old"]))
+        [(identifier, body)] = Backend.state["invalidations"]
+        self.assertEqual((identifier, body["state"]), ("old", "invalidated"))
+        self.assertTrue(body["reason"].startswith(f"superseded by {receipt['document_id']}: 実装担当は"))
+        self.assertIsNone(Backend.state["units"]["kept"]["invalidated_at"])
+        # 失効は retain の確定より後
+        requests = [f"{method} {path}" for method, path in Backend.state["requests"]]
+        retained = next(index for index, line in enumerate(requests) if line.startswith("POST") and line.endswith("/memories"))
+        patched = next(index for index, line in enumerate(requests) if line.startswith("PATCH") and "/memories/" in line)
+        self.assertLess(retained, patched)
+        again = self.status_of(receipt)
+        self.assertEqual(again.returncode, 0, again.stderr)
+        self.assertEqual(len(Backend.state["invalidations"]), 1)
+
+    def test_a_pending_save_invalidates_nothing_until_its_status_confirms_it(self):
+        Backend.state["units"] = {"old": self.fact("old")}
+        Backend.state["operation_state"] = "pending"
+        saved = self.save_superseding("old")
+        self.assertEqual(saved.returncode, 0, saved.stderr)
+        receipt = json.loads(saved.stdout)
+        self.assertEqual(receipt["state"], "pending")
+        self.assertEqual(Backend.state["invalidations"], [])
+        Backend.state["operation_state"] = "completed"
+        checked = self.status_of(receipt)
+        self.assertEqual(checked.returncode, 0, checked.stderr)
+        self.assertEqual(json.loads(checked.stdout)["superseded"], ["old"])
+        self.assertEqual([identifier for identifier, _ in Backend.state["invalidations"]], ["old"])
+
+    def test_supersedes_must_name_facts_of_the_same_scope_before_anything_is_retained(self):
+        Backend.state["units"] = {"derived": self.fact("derived", "observation", ["source-fact"])}
+        for identifiers, expected in ((["derived"], "source-fact"), (["missing"], "missing"), (["a", "a"], "contract")):
+            with self.subTest(identifiers=identifiers):
+                result = self.save_superseding(*identifiers)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("invalid_input", result.stderr)
+                self.assertIn(expected, result.stderr)
+        self.assertEqual(Backend.state["items"], [])
+        self.assertEqual(Backend.state["invalidations"], [])
+
+    def test_a_keyed_save_replaces_its_document_and_the_older_receipt_is_not_saved(self):
+        def save(content):
+            result = self.command("save", {"cwd": str(self.repo), "content": content, "source": "journal#1", "kind": "pattern", "key": "journal#1"})
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return json.loads(result.stdout)
+
+        first = save("最初の知見")
+        second = save("作り直した知見")
+        self.assertEqual(first["document_id"], second["document_id"])
+        self.assertTrue(first["document_id"].startswith("keyed/"))
+        self.assertNotEqual(first["operation_id"], second["operation_id"])
+        self.assertEqual(list(Backend.state["documents"]), [first["document_id"]])
+        self.assertEqual(second["state"], "saved")
+        stale = self.status_of(first)
+        self.assertNotEqual(stale.returncode, 0)
+        self.assertIn("not_verified", stale.stderr)
 
     def validate(self, payload, *, url=None, timeout=25):
         environment = {key: value for key, value in os.environ.items() if key != "PROJECT_MEMORY_URL"}

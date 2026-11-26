@@ -2,7 +2,9 @@ import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 
 const MEMORY_BINARY = "@memoryBinary@";
 const MEMORY_HARNESS = "omp";
-const RECALL_TIMEOUT_MS = 30_000;
+// 想起は最初の依頼の応答を待たせる。Hindsight の rerank は CPU の負荷で遅れ、load 27 では 15〜26 秒かかったため、
+// 8 秒で諦めて警告だけを出し、依頼の処理を先に進める（2026-11-26 の実測）
+const RECALL_TIMEOUT_MS = 8_000;
 
 type Recalled = { context: string } | { warning: string };
 

@@ -1,5 +1,4 @@
 {
-  config,
   lib,
   pkgs,
   ...
@@ -18,19 +17,6 @@ let
   storePaths = lib.sort builtins.lessThan (
     flattenPaths [ ] (builtins.removeAttrs (builtins.fromJSON (builtins.readFile store)) [ "sops" ])
   );
-  secretObservations = lib.mapAttrs' (
-    id: secret:
-    lib.nameValuePair "sops/${id}" {
-      kind = "path-metadata";
-      checkId = "secret/${id}";
-      resourceKey = null;
-      timeoutSeconds = 10;
-      failureMessage = "${secret.path} metadata does not match the declared secret metadata";
-      inherit (secret) path mode;
-      owner = if secret.owner == null then "root" else secret.owner;
-      group = if secret.group == null then "root" else secret.group;
-    }
-  ) config.sops.secrets;
 in
 {
   options.dotfiles.secrets.paths = lib.mkOption {
@@ -65,6 +51,4 @@ in
     sops
     age
   ];
-
-  config.dotfiles.health.observations = secretObservations;
 }

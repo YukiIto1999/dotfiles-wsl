@@ -124,11 +124,6 @@ in
         description = "Windows .wslconfig template の disk swap 容量 GiB null は WSL 既定";
       };
     };
-    windowsConfigTemplate = lib.mkOption {
-      type = lib.types.str;
-      readOnly = true;
-      description = "host 選択から生成した Windows .wslconfig の準備用本文";
-    };
   };
 
   config.assertions = [
@@ -148,9 +143,6 @@ in
       message = "Nix maxJobs * cores must not exceed the declared WSL processor count";
     }
   ];
-
-  config.dotfiles.workstation.wsl.windowsConfigTemplate = windowsConfigTemplate;
-  config.dotfiles.platform.cli.commands.wslConfig = wslConfig;
 
   config.wsl = {
     enable = true;
@@ -219,5 +211,8 @@ in
 
   config.networking.nameservers = wsl.nameservers;
 
-  config.environment.systemPackages = [ wslview ];
+  config.environment.systemPackages = [
+    wslview
+    wslConfig
+  ];
 }

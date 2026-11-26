@@ -5,33 +5,22 @@
 ## 変更
 
 - 一つの commit には一つの目的だけを入れる。
-- [変更箇所](docs/reference/change-map.md)から責務の所有者を特定し、生成先ではなく正本を直す。
+- 責務の場所は[設計](docs/design.md)の「持つもの」で探し、生成先ではなく正本を直す。
 - secret、token、鍵、個人情報を平文で追加しない。
-- 振る舞いを変える場合は、変更前に対応する focused check が意図した理由で失敗することを確認する。
+- 新しい仕組みを足す前に、同じ失敗を起こさない構造を先に考える。検査を足すときは、過去の実際の失敗を再現して落ちることを確かめる。
 - rebuild、deploy、push は、source の検証と差分確認が終わってから別の操作として行う。
-- `docs/`は現在の手順、構造、契約に同期させ、過去の実測や検討過程を非追跡の`work/`へ置く。
-- `work/`に残した記録を共有する場合は、credentialや個人情報を除き、必要な部分だけを渡す。
+- `docs/`は現在の手順と構造に同期させ、過去の実測や検討過程は非追跡の`work/`へ置く。
 
 ## 検証
 
-編集中は[開発手順](docs/operations/development.md)に従い、変更した契約を検査する項目を選ぶ。
+最後の source 変更の後に一度実行する。format、lint、shellcheck、host の評価、残した script の振る舞い検査を含む。
 
 ```bash
-nix build --no-link .#checks.x86_64-linux.<check>
+nix flake check
 ```
 
-最後のsource変更後に、repositoryの根でT1を一度実行する。
-
-```bash
-dotfiles-agent-verify -- nix run --no-write-lock-file .#verify
-```
-
-検査項目の正本は各unitの`checks.nix`で、段の集約と実行は`flake.nix`が所有する。
-T1はunitの検査と全hostおよび既存variantの評価、T2の`verify-push`はそれらのsystem closureの実現、T3の`verify-full`は全量のflake checkを実行する。
-T1は一つのNix依存グラフで実行し、同一projectのT1はwrapperのslotで直列化する。
-予算を超えても必要な検査を後の段へ移さず、依存と実行計画を見直す。
-NixのGit sourceから漏れる未追跡fileは、検証前に`git add`または`git add -N`で追跡する。
-T1の証跡は作業木の中身に付くため、通った後のcommitとamendは証跡を保つ。通った時に未追跡だったfileを後で追跡すると別の木になる。
+Nix の Git source に入らない未追跡 file は、検査の前に`git add`または`git add -N`で追跡する。
+配備したら`dotfiles-doctor`と、変えた機能を実際に使って確かめる。検査の合格だけでは配備の成立とみなさない。
 
 ## コミット
 

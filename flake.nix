@@ -24,12 +24,6 @@
       flake = false;
     };
 
-    # 常に最新の標準を使う方針のためURLへのrev固定は不可
-    architectureStandard = {
-      url = "github:YukiIto1999/architecture-standard";
-      flake = false;
-    };
-
     mattSkills = {
       url = "github:mattpocock/skills/4588b32ecab9ecc9fc8cc6b6c5e7d675b6004b0d";
       flake = false;
@@ -68,407 +62,128 @@
       nixos-wsl,
       home-manager,
       sops-nix,
-      orca,
-      architectureStandard,
-      mattSkills,
-      pstackSkills,
-      chromeDevtoolsMcp,
-      dotnetSkills,
-      explainerSkills,
-      modernWebGuidance,
       ...
-    }:
+    }@inputs:
     let
       system = "x86_64-linux";
       inherit (nixpkgs) lib;
-      referenceHostName = "nixos";
-      hostProfileDirectory = ./profiles/hosts;
-      hostProfileEntries = lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".nix" name) (
-        builtins.readDir hostProfileDirectory
-      );
-      hostNames = map (lib.removeSuffix ".nix") (builtins.attrNames hostProfileEntries);
-      pluginSources = {
-        inherit orca;
-        matt-pocock = mattSkills;
-        architecture-standard = architectureStandard;
-        chrome-devtools = chromeDevtoolsMcp;
-        pstack = pstackSkills;
-        dotnet = dotnetSkills;
-        explainer = explainerSkills;
-        modern-web-guidance = modernWebGuidance;
-      };
-      collectUnits = import ./checks/impl/collect-units.nix { inherit (nixpkgs) lib; };
-      units = collectUnits ./.;
+      pkgs = nixpkgs.legacyPackages.${system};
 
-      # system closure の依存を Nix が所有するため Nx による task graph の二重管理は不採用
-      environmentModules = [
-        ./workstation/module.nix
-        ./toolchain/module.nix
-        ./agents/module.nix
-        ./skills/module.nix
-        ./capabilities/module.nix
-        ./platform/cli/module.nix
-        ./platform/containers/module.nix
-        ./platform/mcp/module.nix
-        ./platform/supervise/module.nix
-        ./maintenance/cleanup/module.nix
-        ./managed-artifacts/module.nix
-        ./secrets/sops/module.nix
-        ./identity/module.nix
-        ./health/module.nix
-        ./telemetry/module.nix
-        ./checks/module.nix
-      ];
-
-      readOnlyPackageModule = "${nixpkgs}/nixos/modules/misc/nixpkgs/read-only.nix";
-      packageOwnerModule = {
-        _file = toString ./flake.nix;
-        nixpkgs.pkgs = systemPkgs;
-      };
-      mkNixosSystem =
-        machineModules:
-        let
-          machine = lib.nixosSystem {
-            specialArgs = {
-              inherit pluginSources self;
-            };
-            modules =
-              environmentModules
-              ++ [
-                readOnlyPackageModule
-                packageOwnerModule
-                nixos-wsl.nixosModules.default
-                sops-nix.nixosModules.sops
-                home-manager.nixosModules.home-manager
-              ]
-              ++ lib.toList machineModules;
-          };
-        in
-        assert lib.assertMsg (lib.all (definition: definition.file == packageOwnerModule._file)
-          machine.options.nixpkgs.pkgs.definitionsWithLocations
-        ) "Nixpkgs package set must be declared in flake.nix";
-        assert lib.assertMsg (lib.all
-          (
-            option:
-            lib.all (definition: definition.file == readOnlyPackageModule) option.definitionsWithLocations
+      # hosts/ の file 名が host 名と networking.hostName になる
+      hostNames = map (lib.removeSuffix ".nix") (
+        builtins.attrNames (
+          lib.filterAttrs (name: type: type == "regular" && lib.hasSuffix ".nix" name) (
+            builtins.readDir ./hosts
           )
-          [
-            machine.options.nixpkgs.config
-            machine.options.nixpkgs.overlays
-            machine.options.nixpkgs.hostPlatform
-            machine.options.nixpkgs.buildPlatform
-          ]
-        ) "Nixpkgs config, overlays and platforms must be declared in flake.nix";
-        machine;
-
-      # 検査用 system ごとの manual 評価が T1 の予算を圧迫するため host と同一構成のままは不可
-      probeModule = {
-        documentation.nixos.enable = false;
-        home-manager.sharedModules = [ { manual.manpages.enable = false; } ];
-      };
-      mkProbeSystem = machineModules: mkNixosSystem (lib.toList machineModules ++ [ probeModule ]);
-
-      mkMachineModule = hostName: {
-        imports = [
-          ./profiles/workstation.nix
-          (hostProfileDirectory + "/${hostName}.nix")
-        ];
-        networking.hostName = hostName;
-      };
-      normalMachineModule = mkMachineModule referenceHostName;
-      nixosSystems = lib.genAttrs hostNames (hostName: mkNixosSystem (mkMachineModule hostName));
-      machineConfigs = lib.mapAttrs (_: machine: machine.config) nixosSystems;
-      machineOptions = lib.mapAttrs (_: machine: machine.options) nixosSystems;
-
-      systemPkgs = nixpkgs.legacyPackages.${system};
-      supervise = systemPkgs.callPackage ./platform/supervise/package.nix { };
-
-      artifactVariantSystem = mkNixosSystem [
-        normalMachineModule
-        { dotfiles.platform.mcp.gateway.port = 9876; }
-      ];
-      artifactVariantConfig = artifactVariantSystem.config;
-      minimalCapabilityConfig =
-        (mkProbeSystem [
-          normalMachineModule
-          { dotfiles.capabilities.enabled = lib.mkForce [ "project-memory" ]; }
-        ]).config;
-      projectMemoryDisabledConfig =
-        (mkProbeSystem [
-          normalMachineModule
-          {
-            dotfiles.capabilities.enabled = lib.mkForce (
-              builtins.filter (
-                name: name != "project-memory"
-              ) machineConfigs.${referenceHostName}.dotfiles.capabilities.enabled
-            );
-          }
-        ]).config;
-
-      mergeCheckParts = import ./checks/impl/merge-check-parts.nix { inherit lib; };
-      hostToplevelChecks = lib.mapAttrs' (
-        hostName: machine: lib.nameValuePair "${hostName}-toplevel" machine.config.system.build.toplevel
-      ) nixosSystems;
-
-      closureChecks = mergeCheckParts [
-        hostToplevelChecks
-        {
-          nixos-variant-toplevel = artifactVariantConfig.system.build.toplevel;
-          nixos-minimal-capability-toplevel = minimalCapabilityConfig.system.build.toplevel;
-          nixos-project-memory-disabled-toplevel = projectMemoryDisabledConfig.system.build.toplevel;
-        }
-      ];
-
-      checkFiles = builtins.filter builtins.pathExists (map (unit: unit.path + "/checks.nix") units);
-      checkPartFiles = lib.concatMap (
-        unit:
-        let
-          directory = unit.path + "/checks";
-          entries = if builtins.pathExists directory then builtins.readDir directory else { };
-        in
-        map (name: directory + "/${name}") (
-          builtins.filter (lib.hasSuffix ".nix") (builtins.attrNames entries)
-        )
-      ) units;
-      sourceCheckArgs = {
-        pkgs = systemPkgs;
-        inherit
-          lib
-          self
-          pluginSources
-          units
-          supervise
-          ;
-        helpers = {
-          execTokens = import ./checks/impl/exec-tokens.nix { inherit lib; };
-          inherit mergeCheckParts;
-          unitOwnership = import ./checks/impl/unit-ownership.nix { inherit lib; };
-        };
-      };
-      checkEvaluation = lib.evalModules {
-        class = "dotfiles-checks";
-        specialArgs = sourceCheckArgs;
-        modules = [
-          {
-            _file = toString ./flake.nix;
-            options = {
-              source = lib.mkOption {
-                type = lib.types.listOf (lib.types.lazyAttrsOf lib.types.package);
-                default = [ ];
-              };
-              configuration = lib.mkOption {
-                type = lib.types.listOf (lib.types.functionTo (lib.types.lazyAttrsOf lib.types.package));
-                default = [ ];
-              };
-            };
-          }
-        ]
-        ++ checkFiles;
-      };
-      flattenModuleGraph = nodes: lib.concatMap (node: [ node ] ++ flattenModuleGraph node.imports) nodes;
-      checkModuleNodes = builtins.filter (node: !node.disabled) (
-        flattenModuleGraph checkEvaluation.graph
-      );
-      expectedCheckFiles = lib.sort builtins.lessThan (map toString (checkFiles ++ checkPartFiles));
-      invalidCheckFiles = builtins.filter (
-        file: (builtins.readDir (builtins.dirOf file)).${builtins.baseNameOf file} != "regular"
-      ) expectedCheckFiles;
-      registeredCheckFiles = lib.sort builtins.lessThan (
-        lib.unique (
-          map (node: node.file) (builtins.filter (node: node.file != toString ./flake.nix) checkModuleNodes)
         )
       );
-      classifiedCheckFiles = map (definition: definition.file) (
-        builtins.filter (definition: definition.value != [ ]) (
-          checkEvaluation.options.source.definitionsWithLocations
-          ++ checkEvaluation.options.configuration.definitionsWithLocations
-        )
+      mkHost =
+        hostName:
+        lib.nixosSystem {
+          specialArgs = { inherit self inputs; };
+          modules = [
+            { nixpkgs.pkgs = pkgs; }
+            nixos-wsl.nixosModules.default
+            sops-nix.nixosModules.sops
+            home-manager.nixosModules.home-manager
+            ./workstation/module.nix
+            ./secrets/sops/module.nix
+            ./identity/module.nix
+            ./toolchain/module.nix
+            ./agents/module.nix
+            ./knowledge/module.nix
+            ./hosts/${hostName}.nix
+            { networking.hostName = hostName; }
+          ];
+        };
+      nixosConfigurations = lib.genAttrs hostNames mkHost;
+      hostConfig = nixosConfigurations.nixos.config;
+
+      source = self;
+      gitHooks = pkgs.linkFarm "git-hooks" (
+        lib.mapAttrs (_: lib.getExe) (import ./toolchain/git/package.nix { inherit lib pkgs; })
       );
-      unclassifiedCheckFiles = map (node: node.file) (
-        builtins.filter (
-          node:
-          builtins.elem node.file expectedCheckFiles
-          && node.imports == [ ]
-          && !(builtins.elem node.file classifiedCheckFiles)
-        ) checkModuleNodes
-      );
-      checkModuleCoverage =
-        assert lib.assertMsg (
-          invalidCheckFiles == [ ]
-        ) "check modules must be regular files: ${builtins.toJSON invalidCheckFiles}";
-        assert lib.assertMsg (registeredCheckFiles == expectedCheckFiles)
-          "check module imports do not cover check files: ${
-            builtins.toJSON {
-              expected = expectedCheckFiles;
-              registered = registeredCheckFiles;
-            }
-          }";
-        assert lib.assertMsg (unclassifiedCheckFiles == [ ])
-          "check modules must declare a source or configuration phase: ${builtins.toJSON unclassifiedCheckFiles}";
-        true;
-      sourceChecks =
-        assert checkModuleCoverage;
-        mergeCheckParts checkEvaluation.config.source;
-      configurationCheckArgs = sourceCheckArgs // {
-        inherit
-          hostNames
-          machineConfigs
-          machineOptions
-          minimalCapabilityConfig
-          projectMemoryDisabledConfig
-          mkProbeSystem
-          normalMachineModule
-          sops-nix
-          ;
-        hostConfig = machineConfigs.${referenceHostName};
-        hostOptions = nixosSystems.${referenceHostName}.options;
-        machineModuleGraphs = lib.mapAttrs (_: machine: machine.graph) nixosSystems;
-        variantConfig = artifactVariantConfig;
-        helpers = sourceCheckArgs.helpers // {
-          observationRegistryModule = {
-            options.dotfiles.health.observations = lib.mkOption {
-              type = nixosSystems.${referenceHostName}.options.dotfiles.health.observations.type;
-              default = { };
-              internal = true;
-            };
-          };
-          containerArgv = import ./platform/containers/impl/container-argv.nix {
-            inherit lib;
-            hostConfig = machineConfigs.${referenceHostName};
-            inherit (sourceCheckArgs.helpers) execTokens;
-          };
-        };
-      };
-      configurationChecks =
-        assert checkModuleCoverage;
-        mergeCheckParts (map (checks: checks configurationCheckArgs) checkEvaluation.config.configuration);
-      unitChecks = mergeCheckParts [
-        sourceChecks
-        configurationChecks
-      ];
-      allChecks = mergeCheckParts [
-        closureChecks
-        sourceChecks
-        configurationChecks
-      ];
-
-      unitChecksPackage = "verification-unit-checks";
-      closureChecksPackage = "verification-host-closures";
-      verificationPrograms = import ./toolchain/verification/package.nix {
-        inherit supervise;
-        pkgs = systemPkgs;
-      };
-      inherit (verificationPrograms) runWithin buildRooted;
-
-      # agent wrapperが同じfileを読むためflake内の秒数の直書きは不可
-      verificationBudget = builtins.fromJSON (builtins.readFile ./tiergate.json);
-      # dotfiles-verify-entryの受理範囲と割れるため別の上限は不可
-      maxBudgetSeconds = 2147483647;
-      # 宣言の欠落を既定値で補うと予算の根拠を失うため既定値は不可
-      budgetSecondsFor =
-        stage:
-        let
-          version = verificationBudget.version or null;
-          seconds = verificationBudget.${stage}.seconds or null;
-        in
-        assert lib.assertMsg
-          (
-            version == 1
-            && (builtins.isInt seconds || builtins.isFloat seconds)
-            && seconds >= 1
-            && seconds <= maxBudgetSeconds
-            && seconds == builtins.floor seconds
-          )
-          "tiergate.json must declare version 1 and an integral ${stage}.seconds from 1 to ${toString maxBudgetSeconds}";
-        builtins.floor seconds;
-      verifyBudgetSeconds = budgetSecondsFor "verify";
-      pushBudgetSeconds = budgetSecondsFor "verify-push";
-
-      t1EvaluatorHeapBytes = 4 * 1024 * 1024 * 1024;
-
-      lockedSource = "path:${self}?narHash=${self.narHash}";
-      sourceRef = lib.escapeShellArg lockedSource;
-      packageRef = name: lib.escapeShellArg "${lockedSource}#packages.${system}.${name}";
-
-      # unit の検査が先頭、host の closure が二番目の順は変えない。build の installable の位置が保持する link の名前を決め、T1 と T2 が同じ unit の link を置き換えるため
-      # 保持の可否と空き容量の下限は buildRooted が決める。ここで --no-link を直書きすると、次の段が使う成功出力が GC で消えて作り直しになるため不可
-      verificationTiers = {
-        verify = {
-          description = "T1: unit の検査と全 host の評価";
-          # app の shell を残すと呼び出し側の signal で shell だけが先に終わり run-within の待機が見えなくなるため exec なしは不可
-          commands = ''
-            export GC_INITIAL_HEAP_SIZE="''${GC_INITIAL_HEAP_SIZE-${toString t1EvaluatorHeapBytes}}"
-            exec ${lib.getExe runWithin} ${toString verifyBudgetSeconds} \
-              ${lib.getExe buildRooted} ${packageRef unitChecksPackage}
-          '';
-        };
-        verify-push = {
-          description = "T2: unit の検査と全 host の closure";
-          commands = ''
-            exec ${lib.getExe runWithin} ${toString pushBudgetSeconds} \
-              ${lib.getExe buildRooted} ${packageRef unitChecksPackage} ${packageRef closureChecksPackage}
-          '';
-        };
-        verify-full = {
-          description = "T3: flake の全量 check";
-          commands = ''
-            nix flake check --no-write-lock-file -L ${sourceRef}
-          '';
-        };
-      };
-
-      verificationApp = name: tier: {
-        type = "app";
-        program = lib.getExe (
-          systemPkgs.writeShellApplication {
-            name = "dotfiles-${name}";
-            text = ''
-              if [ "$#" -ne 0 ]; then
-                echo "usage: dotfiles-${name}" >&2
-                exit 64
-              fi
-              ${tier.commands}
-            '';
-          }
-        );
-        meta.description = tier.description;
+      runCheck =
+        name: nativeBuildInputs: script:
+        pkgs.runCommandLocal "check-${name}" { inherit nativeBuildInputs; } ''
+          set -euo pipefail
+          export HOME="$TMPDIR/home"
+          mkdir -p "$HOME"
+          ${script}
+          touch "$out"
+        '';
+      memoryRuntime = hostConfig.dotfiles.knowledge.memory.override {
+        apiUrl = "http://127.0.0.1:18082";
       };
     in
     {
-      nixosConfigurations = nixosSystems;
+      inherit nixosConfigurations;
 
-      packages.${system} =
-        let
-          hostConfig = machineConfigs.${referenceHostName};
-          inherit (nixosSystems.${referenceHostName}) pkgs;
-        in
-        {
-          inherit (pkgs) age sops;
-          anode-windows = pkgs.callPackage ./toolchain/package/anode.nix { };
-          sourceSnapshot = pkgs.runCommand "dotfiles-source-snapshot" { } ''
-            mkdir -p "$out"
-            cp -R --preserve=mode ${self}/. "$out/"
-            test -x "$out/workstation/activation/rebuild/impl/bootstrap.sh"
-          '';
-          # 初回の adoption と current generation の command 更新前に checkout から呼ぶ
-          dotfiles-agent-supply = hostConfig.dotfiles.platform.cli.commands.agentSupply;
-          dotfiles-doctor = hostConfig.dotfiles.platform.cli.commands.doctor;
-          dotfiles-rebuild = hostConfig.dotfiles.platform.cli.commands.rebuild;
-          # 配備済みのagent wrapperはcli.commandsに登録が無いためcli.commands経由は不可
-          dotfiles-agent-verify = hostConfig.dotfiles.agents.packages.verification;
-          ${unitChecksPackage} = builtins.deepSeq (builtins.attrNames allChecks) (
-            builtins.deepSeq (lib.mapAttrs (_: check: check.drvPath) closureChecks) (
-              pkgs.linkFarm unitChecksPackage unitChecks
-            )
-          );
-          ${closureChecksPackage} = pkgs.linkFarm closureChecksPackage closureChecks;
-        };
+      packages.${system}.anode-windows = pkgs.callPackage ./toolchain/package/anode.nix { };
 
-      apps.${system} = lib.mapAttrs verificationApp verificationTiers;
+      checks.${system} = {
+        format = runCheck "format" [ pkgs.nixfmt-tree ] ''
+          cp -r --no-preserve=mode ${source} src
+          cd src
+          treefmt --ci --no-cache
+        '';
+        statix = runCheck "statix" [ pkgs.statix ] "statix check --config ${source}/statix.toml ${source}";
+        deadnix = runCheck "deadnix" [ pkgs.deadnix ] "deadnix --fail ${source}";
+        shellcheck = runCheck "shellcheck" [ pkgs.shellcheck ] ''
+          cd ${source}
+          shellcheck --shell=bash \
+            workstation/memory/reserve-swap.sh \
+            workstation/wsl/impl/wslview.sh \
+            workstation/wsl/impl/smoke-windows.sh \
+            workstation/rebuild/rebuild.sh \
+            workstation/doctor/doctor.sh \
+            toolchain/git/assets/hooks/* \
+            toolchain/git/assets/credential-token-file \
+            toolchain/git/fixtures/hooks.sh \
+            toolchain/package/aspire-dashboard.sh \
+            knowledge/journal/package/entry.sh \
+            knowledge/harvest/package/entry.sh
+        '';
+        # host 構成の評価だけを強制し、system は build しない
+        evaluation = pkgs.writeText "nixos-toplevel-drv-path" (
+          builtins.unsafeDiscardStringContext hostConfig.system.build.toplevel.drvPath
+        );
+        git-hooks =
+          runCheck "git-hooks"
+            [
+              pkgs.age
+              pkgs.bash
+              pkgs.coreutils
+              pkgs.git
+              pkgs.gnugrep
+            ]
+            ''
+              HOOKS=${gitHooks} \
+              GLOBAL_IGNORE=${./toolchain/git/assets/ignore} \
+                bash ${./toolchain/git/fixtures/hooks.sh}
+            '';
+        memory-runtime =
+          runCheck "memory-runtime" [ pkgs.git ]
+            "${memoryRuntime.python}/bin/python ${./knowledge/memory/runtime_test.py} ${./knowledge/memory/package}";
+        journal =
+          runCheck "journal"
+            [
+              pkgs.cmark
+              pkgs.git
+              pkgs.python3
+            ]
+            ''
+              export PYTHONTZPATH=${pkgs.tzdata}/share/zoneinfo
+              python3 ${./knowledge/journal/journal_test.py} ${./knowledge/journal/package}
+            '';
+        harvest =
+          runCheck "harvest" [ pkgs.git ]
+            "${pkgs.python3}/bin/python ${./knowledge/harvest/harvest_test.py} ${./knowledge/harvest/package} ${./knowledge/journal/package} ${lib.getExe memoryRuntime}";
+      };
 
       devShells.${system} = {
-        default = systemPkgs.mkShellNoCC {
-          packages = with systemPkgs; [
+        default = pkgs.mkShellNoCC {
+          packages = with pkgs; [
             actionlint
             deadnix
             jq
@@ -479,17 +194,17 @@
             yq
           ];
         };
-        statechart = systemPkgs.mkShellNoCC {
-          packages = [ systemPkgs.nodejs_24 ];
-          JAVA = lib.getExe' systemPkgs.jdk "java";
-          TLA2TOOLS = systemPkgs.fetchurl {
+        statechart = pkgs.mkShellNoCC {
+          packages = [ pkgs.nodejs_24 ];
+          JAVA = lib.getExe' pkgs.jdk "java";
+          TLA2TOOLS = pkgs.fetchurl {
             url = "https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar";
             hash = "sha256-k2omIGHJFGlN/WaaVDviRXPEXVqg/yCouWsj0B4FDog=";
           };
           PELE_MODULE = "${
-            systemPkgs.runCommand "pele-1.9.0"
+            pkgs.runCommand "pele-1.9.0"
               {
-                src = systemPkgs.fetchurl {
+                src = pkgs.fetchurl {
                   url = "https://registry.npmjs.org/pele/-/pele-1.9.0.tgz";
                   hash = "sha512-KUmBt7P5JduVKQaP6FKfXiRgH3LBVIKsmdgPJZU7jD3ye6F+Z8fbms+OjivE7rWY09Qx+5X65VKe/9ywKFJ9Sw==";
                 };
@@ -502,8 +217,6 @@
         };
       };
 
-      formatter.${system} = systemPkgs.nixfmt-tree;
-
-      checks.${system} = allChecks;
+      formatter.${system} = pkgs.nixfmt-tree;
     };
 }

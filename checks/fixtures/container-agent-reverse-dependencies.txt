@@ -1,4 +1,0 @@
-config.dotfiles.agents.clients.omp
-import ../../agents/module.nix
-builtins.readFile ${self}/agents/module.nix
-builtins.readFile (self + "/agents/module.nix")

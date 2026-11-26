@@ -1,97 +1,37 @@
 # dotfiles-wsl
 
-WSL2上のNixOS環境を、別のPCでも構築し、日常運用するための個人用dotfilesである。
-OS、Home Manager、開発ツール、AIコーディング環境、暗号化済みsecretsを一つのflakeで管理する。
+WSL2 上の NixOS で、AI agent と一緒に開発するための個人用の開発機を、一つの flake で宣言する。
+対象は x86_64 の NixOS-WSL で、主ユーザーの既定名は `nixos`。他の所有者が使う場合は、Git の身元、アカウント、secret を自分のものに置き換える。
 
-対象はx86_64のNixOS-WSLで、主ユーザーの既定名は`nixos`である。
-ユーザー名、checkoutの場所、Windows側の資源、追加ドライブ、Nixの並列度はhost profileで宣言する。
-別のPCで同じ所有者の環境を再現する場合は、[セットアップ手順](docs/operations/getting-started.md)に従い、SOPSの復旧鍵か登録済みhost keyを用意する。
-他の所有者が使う場合は、Git identity、アカウント、secretsを自分のものに置き換える。
+## 持つもの
 
-## 管理対象
-
-- NixOS-WSL、Home Manager、WSLg、font、locale、systemdを管理する。
-- compiler、language server、formatter、Gitと、`btop`、`hyperfine`などのCLIを配備する。
-- Bashの履歴はAtuinでローカルに保存し、自動同期を有効にしない。
-- AI clientはregistryのadapterから選び、採用したclientだけに設定、Skill、subagentを配備する。
-- Skill はこの repository の正本と、採用した外部の原版から供給する。
-- MCP server、Docker backend、GitHub PAT、backend credentialを宣言する。
-
-生成済みの設定ファイルは直接編集しない。
-配備宣言はこのcheckout内のNix、asset、暗号化済みsecretが所有し、外部Skillの本文と資材は固定sourceの任意directoryを原名のIDで直接参照する。
-本文変換や旧名のaliasは作らず、sourceと責務の違いは[Skill portfolio](docs/architecture/skills.md)にまとめる。
-Modern Web Guidanceは対象機能の原文guideを読む外部reference assetとして保持し、全frontendへ起動するwrapperは配備しない。
-
-## 操作
-
-初回構築は[セットアップ手順](docs/operations/getting-started.md)、AI clientの採用と更新は[Agent client](docs/operations/agent-clients.md)を参照する。
-通常の変更は、sourceを検証してcommitした後、候補generationを確認して、確認した候補を適用する。
-
-```bash
-dotfiles-rebuild --plan
-dotfiles-rebuild --candidate <ID>
-dotfiles-doctor
-```
-
-復旧が必要な場合は`dotfiles-rebuild --rollback`で直前のgenerationへ戻す。
-containerを有効にしたhostでは、rebuild後に`dotfiles-sync-images --status`で状態を確認し、必要な場合に`dotfiles-sync-images`を実行する。
-secretの編集、鍵の追加、中断後の再開は、対応するrunbookに従う。
-
-checkoutから対象hostを明示して実行する場合は、次のhost構成を直接指定する。
-
-```bash
-nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages -- --status
-nix run .#nixosConfigurations.<host>.config.dotfiles.platform.cli.commands.syncImages
-```
-
-containerを選ばないhostには `dotfiles-sync-images` を配備しないため、これらのcommandは実行しない。
-
-## 構成
-
-| root | 責務 |
+| 場所 | 内容 |
 |---|---|
-| `profiles/`、`workstation/`、`identity/`、`secrets/` | machine profile、WSL/Nix/Home Manager、identity、secret |
-| `agents/`、`skills/`、`capabilities/` | AI clientとrole、手順、consumer非依存の機能contractと実装 |
-| `platform/`、`managed-artifacts/`、`health/`、`telemetry/` | MCP/container/CLI基盤、配備物、runtime observation、使用量観測 |
-| `toolchain/`、`maintenance/`、`checks/`、`docs/` | 開発ツール、明示的な整理、repository横断制約、文書 |
+| `hosts/` | host ごとの事実（WSLの資源、drive、nixの並列度、memoryの上限） |
+| `workstation/` | NixOS-WSL、nix、user、locale、font、storage、memoryの保護、Docker、`dotfiles-rebuild`、`dotfiles-doctor` |
+| `secrets/`、`identity/` | sops で暗号化した secret、GitHub account と Git の身元 |
+| `toolchain/` | CLI、language server、Git の設定と global hook |
+| `agents/` | agent client と起動 wrapper、OMP の設定、MCP server、方針（`AGENTS.md`、`RULES.md`）、skill、`dotfiles-agent-brief` |
+| `knowledge/` | Hindsight（記憶）、記憶の MCP、日誌、訂正の収穫 |
+| `docs/` | [設計](docs/design.md)と[運用](docs/operations.md) |
 
-Nix unit は `module.nix` を marker にし、build がある場合は `package.nix`、検査がある場合は `checks.nix` を持つ。`impl/`、`assets/`、`fixtures/`、`skill/` は必要な unit だけが使う。境界と依存方向は[構成概要](docs/architecture/overview.md)に記載する。
+`agents/` の方針と local skill はcheckoutへのlinkで配備し、編集すれば次の読込から効く。
+生成された設定（`~/.omp/agent/*.json` など）は直接編集しない。
 
-## アーキテクチャ標準
+## よく使う操作
 
-アーキテクチャの標準は [architecture-standard](https://github.com/YukiIto1999/architecture-standard) にあり、準拠の基準は、ownerが指定するcanonical checkoutの現在の標準本文である。
-適用は、標準の README の適用の4則と利用の手順に従う。
-agentが標準を読む場所は、環境系repositoryの作業checkoutの規約とともにagent policyが案内する。
-ホストの build、rebuild、client の起動は標準の作業 checkout を必要とせず、標準の公開先へ最新版を問い合わせない。
+```bash
+nix flake check            # 変更の検査
+dotfiles-rebuild           # commit 済みの HEAD を build して切り替える
+dotfiles-rebuild rollback  # 直前の世代へ戻す
+dotfiles-doctor            # 状態の点検と対処の案内
+```
 
-標準の運用 Skill は、標準を使う作業を始めたときに、公開版を照合してから読む。
-同じ作業では本文、参照資料、検査器を同じ不変のパスから使う。
-通常の改訂にプロジェクトごとの更新やホストの再配備は要らない。
-公開版を確認できなければ新しい標準作業だけ止める。ホストで許可した依存や起動条件を変える場合は、[採用と配備の契約](docs/architecture/repository-skills.md#現在のplugin)を更新する。
-`dotfiles-doctor` の配備driftのPASSは、配備物の同一性を示すだけで、現行規範への適合を示さない。
-
-標準を別のローカル原則へ写さず、現在の実現はコード、保証する振る舞いはテスト、変更の理由はcommit、現在も採れない実装の理由はそのownerのWhy notから辿る。
-
-## ドキュメント
-
-[ドキュメント索引](docs/README.md)から、目的に合う文書を選ぶ。
-
-追跡する`docs/`には、現在の構成と有効な手順を置く。
-作業計画、実測ログ、過去の調査は、Gitの追跡対象外である`work/`へ置く。
-`work/`はPC間で再現される成果物ではなく、引き継ぐ場合は秘密情報を除いた必要な記録を別途渡す。
-
-- [operations](docs/README.md#手順--operations): セットアップ、rebuild、secrets、doctor、更新手順
-- [architecture](docs/README.md#説明--architecture): 責務境界、AI tooling、security
-- [reference](docs/README.md#参照--reference): 正本の場所、変更箇所、機械検証
-
-## 開発
-
-保守方針、検証方法、コミット形式は[CONTRIBUTING.md](CONTRIBUTING.md)に従う。
-CIは`main`へのpushとpull requestで、Nixの`verify-full`入口を実行する。
+新しいPCへの導入、更新、不調の調べ方は[運用](docs/operations.md)にある。
 
 ## セキュリティ
 
-credential を平文で commit しない。host key、recovery key、PAT、loopback service の信頼境界は[セキュリティ設計](docs/architecture/security.md)に記載する。
+credential を平文で commit しない。secret は `secrets/sops/assets/secrets.json` に sops で暗号化して置く。手順は [secrets](docs/secrets.md) と [SOPSの鍵](docs/sops-enrollment.md)。
 
 ## License
 

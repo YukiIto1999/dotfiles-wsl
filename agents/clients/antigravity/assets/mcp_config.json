@@ -1,7 +1,0 @@
-{
-  "mcpServers": {
-    "gateway": {
-      "serverUrl": "@gatewayUrl@"
-    }
-  }
-}

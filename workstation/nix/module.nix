@@ -3,28 +3,9 @@
 let
   cfg = config.dotfiles.workstation;
   gibibyte = 1073741824;
-  observationTimeoutSeconds = 10;
-  minimumNixFreeGiB = cfg.nix.minimumFreeGiB;
-  targetNixFreeGiB = cfg.nix.targetFreeGiB;
-  maxJobs = cfg.nix.maxJobs;
-  buildCores = cfg.nix.cores;
-  # 同じ user-workload.slice の MCP front（既定 100）より build を後に回す。
+  # 同じ support slice の他の service（既定 100）より build を後に回す。
   nixDaemonCpuWeight = 50;
   binaryCaches = import ./assets/nix-caches.nix;
-  nixGc = {
-    timerName = "nix-gc";
-    serviceName = "nix-gc";
-    storageReserve = {
-      minimumBytes = minimumNixFreeGiB * gibibyte;
-      targetBytes = targetNixFreeGiB * gibibyte;
-    };
-    settings = {
-      automatic = true;
-      dates = "weekly";
-      persistent = true;
-      options = "--delete-older-than 14d";
-    };
-  };
 in
 {
   options.dotfiles.workstation.nix = {
@@ -61,54 +42,6 @@ in
     }
   ];
 
-  config.dotfiles.workstation.binaryCaches = binaryCaches;
-  config.dotfiles.health.observations = {
-    "host/nix-daemon" = {
-      kind = "systemd-socket";
-      manager = "system";
-      checkId = "nix-daemon";
-      resourceKey = null;
-      timeoutSeconds = observationTimeoutSeconds;
-      failureMessage = "nix-daemon.socket is not operational";
-      unit = "nix-daemon.socket";
-      loadStates = [ "loaded" ];
-      activeStates = [ "active" ];
-      results = [ "success" ];
-    };
-    "host/nix-daemon-service" = {
-      kind = "systemd-service";
-      manager = "system";
-      checkId = "service/nix-daemon";
-      resourceKey = null;
-      timeoutSeconds = observationTimeoutSeconds;
-      failureMessage = "nix-daemon.service is not operational or is outside ${cfg.workload.slices.support}";
-      unit = "nix-daemon.service";
-      slice = cfg.workload.slices.support;
-      loadStates = [ "loaded" ];
-      activeStates = [
-        "active"
-        "inactive"
-      ];
-      results = [ "success" ];
-    };
-    "host/nix-gc" = {
-      kind = "systemd-timer";
-      manager = "system";
-      checkId = "maintenance/${nixGc.timerName}.timer";
-      resourceKey = null;
-      timeoutSeconds = observationTimeoutSeconds;
-      failureMessage = "${nixGc.timerName}.timer or its service is not operational";
-      timer = "${nixGc.timerName}.timer";
-      service = "${nixGc.serviceName}.service";
-      unitFileStates = [
-        "enabled"
-        "enabled-runtime"
-      ];
-      activeStates = [ "active" ];
-      serviceResults = [ "success" ];
-    };
-  };
-
   config.programs.nix-ld.enable = true;
   config.nix.settings = {
     experimental-features = [
@@ -121,23 +54,28 @@ in
       "root"
       cfg.username
     ];
-    min-free = nixGc.storageReserve.minimumBytes;
-    max-free = nixGc.storageReserve.targetBytes;
-    max-jobs = maxJobs;
-    cores = buildCores;
+    min-free = cfg.nix.minimumFreeGiB * gibibyte;
+    max-free = cfg.nix.targetFreeGiB * gibibyte;
+    max-jobs = cfg.nix.maxJobs;
+    inherit (cfg.nix) cores;
   };
 
   # 常時起動でない WSL で取りこぼした GC を次回起動で補完
-  config.nix.gc = nixGc.settings;
+  config.nix.gc = {
+    automatic = true;
+    dates = "weekly";
+    persistent = true;
+    options = "--delete-older-than 14d";
+  };
   # 大規模store走査はAgentのビルドI/Oと競合してVHDを長時間停止させるため、
   # 自動optimiseは実行しない。必要な場合だけ全session停止後の保守で行う。
   config.nix.optimise.automatic = false;
 
   # crates.io が curl 既定 UA を 403 拒否するため指定する許可 UA
   config.systemd.services.nix-daemon.environment.NIX_CURL_FLAGS = "--user-agent=Nixpkgs";
-  # build は nix-daemon の cgroup で動くため、aggregate の中へ置かないと上限の外で memory を使う
+  # build は nix-daemon の cgroup で動くため、user.slice の中へ置かないと上限の外で memory を使う
   config.systemd.services.nix-daemon.serviceConfig = {
-    Slice = cfg.workload.slices.support;
+    Slice = config.dotfiles.workstation.memory.supportSlice;
     CPUWeight = nixDaemonCpuWeight;
   };
 }

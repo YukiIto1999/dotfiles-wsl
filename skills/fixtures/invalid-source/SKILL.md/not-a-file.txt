@@ -1,1 +1,0 @@
-SKILL.md is a directory rather than a Skill document.

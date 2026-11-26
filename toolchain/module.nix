@@ -61,11 +61,7 @@ let
   };
 in
 {
-  imports = [
-    ./execution/module.nix
-    ./git/module.nix
-    ./verification/module.nix
-  ];
+  imports = [ ./git/module.nix ];
 
   # 責務を持つ unit が所有しない、全 project 横断で使う実行ファイル
   options.dotfiles.toolchain.packages = lib.mkOption {
@@ -76,7 +72,9 @@ in
 
   options.dotfiles.toolchain.enabledLsp = lib.mkOption {
     type = lib.types.listOf lib.types.str;
-    description = "この host が採用する language server ID。`dotfiles.toolchain.lspRegistry` に登録済みの ID を重複なく選び、空も許す。";
+    default = builtins.attrNames cfg.toolchain.lspRegistry;
+    defaultText = lib.literalExpression "builtins.attrNames config.dotfiles.toolchain.lspRegistry";
+    description = "この host が採用する language server ID。`dotfiles.toolchain.lspRegistry` に登録済みの ID を重複なく選び、空も許す。既定は登録済みの全 server。";
   };
 
   # 登録は採用と別に持つ。ここに載せるだけでは package も client 設定も配備しない
@@ -235,16 +233,6 @@ in
       nix-diff
       ;
   };
-
-  # 評価時に作る patch 済み nixpkgs は devenv の closure 外で GC 後の再作成が T1 の上限を超えるため root の省略は不可
-  # path 値の文字列化は source 全体を store へ写し直すため appendContext 以外での参照は不可
-  config.system.extraDependencies =
-    let
-      devenvNixpkgs =
-        toString
-          self.inputs.devenv.inputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.path;
-    in
-    [ (builtins.appendContext devenvNixpkgs { ${devenvNixpkgs}.path = true; }) ];
 
   # context-dev-scrape の curl が主 user で直接読む。環境変数と引数へ key を渡さない
   config.sops.secrets.${contextDevKey} = lib.mkIf contextDevEnrolled {

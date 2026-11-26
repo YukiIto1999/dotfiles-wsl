@@ -72,7 +72,7 @@ in
       type = lib.types.listOf accountIdType;
       readOnly = true;
       internal = true;
-      description = "暗号化済み store から導出した GitHub account id。gh host user と github MCP target に対応する。";
+      description = "暗号化済み store から導出した GitHub account id。gh host user と github-<account> MCP server に対応する。";
     };
     primary = lib.mkOption {
       type = lib.types.str;
@@ -101,7 +101,7 @@ in
           name = "accounts/${a}/username";
           value = { };
         }
-        # github front と Git の credential helper が主 user で読む token file
+        # github MCP server と Git の credential helper が主 user で読む token file
         {
           name = "accounts/${a}/token";
           value = {
@@ -118,13 +118,6 @@ in
       "identity/work/name" = { };
       "identity/work/email" = { };
     };
-
-  config.dotfiles.managedArtifacts = lib.optionalAttrs (cfg.accounts != [ ]) {
-    "accounts/gh-hosts" = {
-      format = "yaml";
-      source = ghHostsTemplate;
-    };
-  };
 
   config.sops.templates =
     lib.optionalAttrs (cfg.accounts != [ ]) {

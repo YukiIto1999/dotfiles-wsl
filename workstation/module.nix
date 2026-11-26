@@ -9,12 +9,14 @@ let
 in
 {
   imports = [
-    ./activation/module.nix
+    ./docker/module.nix
+    ./doctor/module.nix
     ./fonts/module.nix
     ./home/module.nix
     ./locale/module.nix
+    ./memory/module.nix
     ./nix/module.nix
-    ./stability/module.nix
+    ./rebuild/module.nix
     ./storage/module.nix
     ./user/module.nix
     ./wsl/module.nix
@@ -44,22 +46,8 @@ in
       default = "${cfg.homeDir}/environment";
       description = "dotfiles と一緒に手入れする環境系 repository を並べる directory の絶対パス。";
     };
-
-    binaryCaches = lib.mkOption {
-      type = lib.types.listOf (
-        lib.types.submodule {
-          options = {
-            name = lib.mkOption { type = lib.types.str; };
-            substituter = lib.mkOption { type = lib.types.str; };
-            publicKey = lib.mkOption { type = lib.types.str; };
-          };
-        }
-      );
-      readOnly = true;
-      internal = true;
-      description = "Nix が利用する binary cache の型付き contract。";
-    };
   };
 
   config.dotfiles.workstation.homeDir = "/home/${cfg.username}";
+  config.system.stateVersion = "25.11";
 }

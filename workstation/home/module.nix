@@ -13,6 +13,9 @@ in
   config.home-manager.useGlobalPkgs = true;
   config.home-manager.useUserPackages = true;
   config.home-manager.backupFileExtension = "hm-back";
+  # 退避先が既にあると Home Manager は activation を止める。旧構成は dotfiles-cleanup で古い退避を消して解いていたため、
+  # 同じ結果を標準の option で自動にし、最新の退避を一つだけ残す
+  config.home-manager.overwriteBackup = true;
 
   config.home-manager.users.${cfg.username} = _: {
     home.stateVersion = "25.11";

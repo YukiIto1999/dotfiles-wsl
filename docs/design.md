@@ -32,7 +32,7 @@ upstreamのskillはflake inputの固定sourceから配る。architecture-standar
 - **session supervisor、GC rootの保護、session台帳**: 起動1回に約10秒と321 process。OMP 19の共有daemonを1つのsessionの終了で殺す所有の衝突もあった。
 - **MCP gatewayと常駐front**: OMPがserverを必要時に起動し、共有し、5分で止める。常駐約0.85 GBを使わない。
 - **registry群**（capability、managed artifact、health observation、CLI）と437項目のdoctor: 消費者のいない間接層と、常に失敗する警報だった。
-- **利用していないclientのadapter**: Claude Code、Codex、OpenCode、Antigravityは、OMPが使えないときの予備としてbinary、方針、skill、日次の更新だけを持つ。subagent定義、hook、MCPの設定は持たない（2026-10-27〜11-26に利用者が使ったsessionは0件）。旧構成がCodexのために入れていたbubblewrapは、codex 0.171のsandboxがPATHに無くても書込みを制限することを確かめたので持たない。
+- **OMP以外のagent client**（Claude Code、Codex、OpenCode、Antigravity）: 2026-11-26の確認で4つとも認証が切れているか無く、使えなかった。2026-10-27〜11-26に利用者が使ったsessionも0件だった。OMPはAnthropicやOpenAIのmodelを自分のproviderで使い、版の不具合は日次更新の巻き戻しで戻せるので、予備のclientは持たない。
 - **Playwright MCP**: OMPは標準browserがあるsessionでPlaywright MCPを読み込まず、解除の方法は標準browserを無効にすることだけである。旧構成ではgatewayの名前の陰で読み込まれていた（直近30日に案件のsessionで469回）。画面の操作は標準browserへ、Playwrightで書く回帰testはprojectのPlaywright Testへ寄せる（`docs/tools.md`）。
 - **停止したtest containerの定期回収**: 回収の対象は停止したものだけで、2026-11-16〜26の41回の記録に回収したものは無かった。testcontainers-rsが残すのは主に動いたままのcontainerで、この回収では消えない。後片付けはprojectのtest（`watchdog` feature）が持ち、`dotfiles-doctor`は6時間より古いものを示すだけにする。
 - **後片付けのcommand**（`dotfiles-cleanup`）: Home Managerの退避の衝突は`home-manager.overwriteBackup`、VS Code Serverの古い版はVS Code自身が片付ける。

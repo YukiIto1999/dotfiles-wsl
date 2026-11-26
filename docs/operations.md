@@ -56,7 +56,7 @@ Windows の `.wslconfig` はこのrepoからは書き換えない。`dotfiles-ws
 ## 更新
 
 - flake input: `nix flake update [INPUT]` → `nix flake check` → commit → `dotfiles-rebuild`。
-- agent client（omp、claude、codex、opencode、agy）: `dotfiles-agent-update.timer` が毎日 client ごとの profile（`~/.local/state/nix/profiles/<client>`）を最新へ更新し、起動確認に失敗した client は元へ戻す。手動では `systemctl --user start dotfiles-agent-update.service`。profile が無い間は flake input `llm-agents` の固定版で起動する。
+- OMP: `dotfiles-omp-update.timer` が毎日 profile（`~/.local/state/nix/profiles/omp`）を最新へ更新し、起動確認に失敗すれば元へ戻す。手動では `systemctl --user start dotfiles-omp-update.service`。profile が無い間は flake input `llm-agents` の固定版で起動する。
 - architecture-standard の skill: `dotfiles-standard-sync.timer` が毎日公開版を取り込む。すぐに取り込むときは `dotfiles-standard-sync`。
 
 ## 不調の調べ方

@@ -11,7 +11,7 @@ WSL2 上の NixOS で、AI agent と一緒に開発するための個人用の�
 | `workstation/` | NixOS-WSL、nix、user、locale、font、storage、memoryの保護、Docker、`dotfiles-rebuild`、`dotfiles-doctor` |
 | `secrets/`、`identity/` | sops で暗号化した secret、GitHub account と Git の身元 |
 | `toolchain/` | CLI、language server、Git の設定と global hook |
-| `agents/` | agent client と起動 wrapper、OMP の設定、MCP server、方針（`AGENTS.md`、`RULES.md`）、skill、`dotfiles-agent-brief` |
+| `agents/` | OMP と起動 wrapper、OMP の設定、MCP server、方針（`AGENTS.md`、`RULES.md`）、skill、`dotfiles-agent-brief` |
 | `knowledge/` | Hindsight（記憶）、記憶の MCP、日誌、訂正の収穫 |
 | `docs/` | [設計](docs/design.md)と[運用](docs/operations.md) |
 

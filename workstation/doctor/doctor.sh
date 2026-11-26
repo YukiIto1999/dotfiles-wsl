@@ -76,7 +76,7 @@ if [ -n "$slice_cgroup" ]; then
     comms=$(xargs -r -I{} cat /proc/{}/comm <"$procs" 2>/dev/null | sort -u | paste -sd' ')
     [ -n "$comms" ] || continue
     case " $comms " in
-      *" omp "* | *" claude "* | *" codex "* | *" opencode "* | *" agy "*) continue ;;
+      *" omp "*) continue ;;
     esac
     # The OMP worker daemon is shared by all sessions and stays in the scope of the session that started it.
     if xargs -r -I{} cat /proc/{}/cmdline <"$procs" 2>/dev/null | tr '\0' ' ' | grep -q __omp_worker_daemon; then

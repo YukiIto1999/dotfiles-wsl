@@ -130,7 +130,7 @@ in
     # Chromium が自ら app.slice へ作る scope による agents.slice の迂回
     systemd.services."user@".serviceConfig.MemoryMax = percent cfg.userManager.memoryMaxPercent;
 
-    # agent client の wrapper が session ごとの scope をこの slice の直下へ置く。
+    # omp の wrapper が session ごとの scope をこの slice の直下へ置く。
     # 防ぎたい 2026-11-01 の凍結は anon と swap の thrash で、それは MemoryMax の上限、小さい swap の上限、
     # systemd-oomd の kill が、待たせずに止める
     systemd.user.slices.agents = {

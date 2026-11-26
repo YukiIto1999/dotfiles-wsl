@@ -42,7 +42,7 @@ host 側の原因が見つかった場合だけ、ここで続ける。
 - 資源: `/proc/pressure/memory`、`systemd-cgtop -m`、`systemctl --user status agents.slice`、`journalctl -u systemd-oomd`。
   agent の session は `agents.slice` の下の scope で動き、memory の上限を超えた scope は systemd-oomd か kernel の OOM が止める。
 - Windows 側の設定の期待値は `dotfiles-wsl-config` が表示する。
-- agent client と定期 job: `systemctl --user list-timers 'dotfiles-*'`、`systemctl --user status dotfiles-agent-update.service`、`nix profile history --profile ~/.local/state/nix/profiles/<client>`（client は omp、claude、codex、opencode、antigravity）。
+- OMP と定期 job: `systemctl --user list-timers 'dotfiles-*'`、`systemctl --user status dotfiles-omp-update.service`、`nix profile history --profile ~/.local/state/nix/profiles/omp`。
 
 `memory-pressure` や `io-pressure` が高い間は、正常な service の probe も期限を超えるため、資源の観測を先に読む。
 
@@ -61,7 +61,7 @@ host 側の原因が見つかった場合だけ、ここで続ける。
 |---|---|---|
 | 新しい世代の適用 | `dotfiles-rebuild build` で package の差を得て、許可後に `dotfiles-rebuild switch`（または次の WSL 起動で切り替える `dotfiles-rebuild boot`） | activation で止まる、再起動する service と影響を受ける作業 |
 | 前の世代へ戻す | 許可後に `dotfiles-rebuild rollback` | 戻るのは system の世代だけで、client の profile、data、Windows の設定は戻らないこと |
-| agent client の更新と戻し | `systemctl --user start dotfiles-agent-update.service`、`nix profile rollback --profile ~/.local/state/nix/profiles/<client>` | 動いている session は起動時の版のまま動くこと |
+| OMP の更新と戻し | `systemctl --user start dotfiles-omp-update.service`、`nix profile rollback --profile ~/.local/state/nix/profiles/omp` | 動いている session は起動時の版のまま動くこと |
 | Windows 側 | `.wslconfig` の編集、WSL の停止 | 利用者が PowerShell や Windows の設定で行う操作として示す |
 
 `dotfiles-rebuild` は既定で commit 済みの HEAD を build する。`build` は checkout と配備済みの世代を変えないため、許可の判断材料を作るために実行してよい。

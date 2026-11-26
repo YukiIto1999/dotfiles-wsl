@@ -35,7 +35,7 @@ let
     builtins.attrNames checkoutSkills
   );
 
-  profileRoot = "${ws.homeDir}/.local/state/nix/profiles";
+  ompProfile = "${ws.homeDir}/.local/state/nix/profiles/omp";
 
   # OMP の managed browser が起動する Chromium。指定が無いと OMP は Chrome for Testing を取得するが、
   # NixOS では共有 library が無く起動しない。下の omp の起動より前から動く session と共有 daemon は
@@ -45,90 +45,45 @@ let
     exec ${lib.getExe pkgs.chromium} "$@"
   '';
 
-  clients = {
-    omp = {
-      binary = "omp";
-      package = "omp";
-      # package の bin/omp は本体の native library のために LD_LIBRARY_PATH を足し、agent が起動する command、
-      # MCP server、browser にも漏らした。別の glibc で build された pulseaudio などを読み込み、Chromium や qemu が
-      # `GLIBC_2.43 not found` で止まった事例が 2026-10-27〜11-26 に 7 project の 21 session であったため、
-      # 本体を直接起動する。本体が必要とする library は RUNPATH で解決され、足していた pulseaudio と pipewire は
-      # 音声出力（say）と Wayland の画面取得が dlopen するだけで、その二つは使えなくなる（直近30日の say の利用は0回）
-      unwrapped = "lib/omp/omp";
-      environment = {
-        # 版の更新は dotfiles-agent-update が行う
-        PI_SKIP_VERSION_CHECK = "1";
-        PUPPETEER_EXECUTABLE_PATH = "${ompBrowser}";
-      };
-    };
-    claude = {
-      binary = "claude";
-      package = "claude-code";
-    };
-    codex = {
-      binary = "codex";
-      package = "codex";
-    };
-    opencode = {
-      binary = "opencode";
-      package = "opencode";
-    };
-    antigravity = {
-      binary = "agy";
-      package = "antigravity-cli";
-    };
-  };
-
   # 日次の更新が検証済みの世代を置く profile を優先し、無ければ flake の固定版を使う。
-  # unwrapped を持つ client は、package の wrapper の代わりに本体を起動する（本体が無い版では wrapper へ戻る）
-  clientExecutable =
-    name: client:
-    pkgs.writeShellScript "dotfiles-${name}" (
-      ''
-        profile_binary=${lib.escapeShellArg "${profileRoot}/${name}/bin/${client.binary}"}
-        if [ -x "$profile_binary" ]; then
-          binary=$profile_binary
-        else
-          binary=${lib.getExe' llmAgents.${client.package} client.binary}
-        fi
-      ''
-      + lib.optionalString (client ? unwrapped) ''
-        package=$(${lib.getExe' pkgs.coreutils "readlink"} -f -- "$binary")
-        package=''${package%/bin/${client.binary}}
-        if [ -x "$package/${client.unwrapped}" ]; then
-          # package の wrapper が設定していた値。版の更新は dotfiles-agent-update が行う
-          export PI_SKIP_VERSION_CHECK=1
-          exec "$package/${client.unwrapped}" "$@"
-        fi
-      ''
-      + ''
-        exec "$binary" "$@"
-      ''
-    );
+  # package の bin/omp は本体の native library のために LD_LIBRARY_PATH を足し、agent が起動する command、
+  # MCP server、browser にも漏らした。別の glibc で build された pulseaudio などを読み込み、Chromium や qemu が
+  # `GLIBC_2.43 not found` で止まった事例が 2026-10-27〜11-26 に 7 project の 21 session であったため、
+  # 本体を直接起動する。本体が必要とする library は RUNPATH で解決され、足していた pulseaudio と pipewire は
+  # 音声出力（say）と Wayland の画面取得が dlopen するだけで、その二つは使わない（利用者が不要と判断）
+  ompExecutable = pkgs.writeShellScript "dotfiles-omp" ''
+    if [ -x ${lib.escapeShellArg "${ompProfile}/bin/omp"} ]; then
+      wrapped=${lib.escapeShellArg "${ompProfile}/bin/omp"}
+    else
+      wrapped=${lib.getExe' llmAgents.omp "omp"}
+    fi
+    package=$(${lib.getExe' pkgs.coreutils "readlink"} -f -- "$wrapped")
+    package=''${package%/bin/omp}
+    # package の wrapper が設定していた値。版の更新は dotfiles-omp-update が行う
+    export PI_SKIP_VERSION_CHECK=1
+    if [ -x "$package/lib/omp/omp" ]; then
+      exec "$package/lib/omp/omp" "$@"
+    fi
+    exec "$wrapped" "$@"
+  '';
 
-  # client の process tree を memory の会計と上限のためだけに agents.slice の scope へ置く。
+  # OMP の process tree を memory の会計と上限のためだけに agents.slice の scope へ置く。
   # user manager に届かないときも起動は拒まない
-  wrapper =
-    name: client:
-    pkgs.writeShellApplication {
-      name = client.binary;
-      text = ''
-        # MSBuild の node と build server は session の終了後も数時間残ったため再利用させない
-        export MSBUILDDISABLENODEREUSE=1
-        export DOTNET_CLI_USE_MSBUILD_SERVER=0
-        ${lib.concatStrings (
-          lib.mapAttrsToList (key: value: "export ${key}=${lib.escapeShellArg value}\n") (
-            client.environment or { }
-          )
-        )}
-        if ${systemd}/bin/systemctl --user show --property=Version >/dev/null 2>&1; then
-          exec ${systemd}/bin/systemd-run --user --scope --quiet --collect --slice=agents.slice \
-            --unit="${name}-$$-$RANDOM.scope" -- ${clientExecutable name client} "$@"
-        fi
-        echo "${client.binary}: systemd user manager is unreachable; starting outside agents.slice" >&2
-        exec ${clientExecutable name client} "$@"
-      '';
-    };
+  ompWrapper = pkgs.writeShellApplication {
+    name = "omp";
+    text = ''
+      # MSBuild の node と build server は session の終了後も数時間残ったため再利用させない
+      export MSBUILDDISABLENODEREUSE=1
+      export DOTNET_CLI_USE_MSBUILD_SERVER=0
+      export PUPPETEER_EXECUTABLE_PATH=${ompBrowser}
+      if ${systemd}/bin/systemctl --user show --property=Version >/dev/null 2>&1; then
+        exec ${systemd}/bin/systemd-run --user --scope --quiet --collect --slice=agents.slice \
+          --unit="omp-$$-$RANDOM.scope" -- ${ompExecutable} "$@"
+      fi
+      echo "omp: systemd user manager is unreachable; starting outside agents.slice" >&2
+      exec ${ompExecutable} "$@"
+    '';
+  };
 
   hookDirectory = pkgs.runCommandLocal "omp-hooks-pre" { } (
     ''
@@ -184,50 +139,34 @@ let
     Install.WantedBy = [ "timers.target" ];
   };
 
-  # 日次で各 client を最新へ更新し、起動できない世代は戻す。一つの失敗で他の client の更新を止めない
-  agentUpdate = pkgs.writeShellApplication {
-    name = "dotfiles-agent-update";
+  # 日次で最新の omp を profile へ入れ、起動できない世代は戻す
+  ompUpdate = pkgs.writeShellApplication {
+    name = "dotfiles-omp-update";
     runtimeInputs = [
       pkgs.coreutils
       pkgs.git
       config.nix.package
     ];
     text = ''
-      profile_root=${lib.escapeShellArg profileRoot}
-      mkdir -p -- "$profile_root"
-      update() {
-        local name=$1 package=$2 binary=$3
-        local profile="$profile_root/$name" existed=0
-        if [ -e "$profile" ]; then
-          existed=1
-          nix profile upgrade --profile "$profile" --all || return 1
+      profile=${lib.escapeShellArg ompProfile}
+      mkdir -p -- "$(dirname -- "$profile")"
+      if [ -e "$profile" ]; then
+        existed=1
+        nix profile upgrade --profile "$profile" --all
+      else
+        existed=0
+        nix profile install --profile "$profile" github:numtide/llm-agents.nix#omp
+      fi
+      if ! PI_SKIP_VERSION_CHECK=1 "$profile/bin/omp" --version; then
+        echo "dotfiles-omp-update: the new omp generation does not start; reverting" >&2
+        if [ "$existed" = 1 ]; then
+          nix profile rollback --profile "$profile"
         else
-          nix profile install --profile "$profile" "github:numtide/llm-agents.nix#$package" || return 1
+          rm -f -- "$profile"
         fi
-        if ! "$profile/bin/$binary" --version; then
-          echo "dotfiles-agent-update: the new $name generation does not start; reverting" >&2
-          if [ "$existed" = 1 ]; then
-            nix profile rollback --profile "$profile"
-          else
-            rm -f -- "$profile"
-          fi
-          return 1
-        fi
-        nix profile wipe-history --profile "$profile" --older-than 14d
-      }
-      status=0
-      ${lib.concatStrings (
-        lib.mapAttrsToList (name: client: ''
-          update ${
-            lib.escapeShellArgs [
-              name
-              client.package
-              client.binary
-            ]
-          } || status=1
-        '') clients
-      )}
-      exit "$status"
+        exit 1
+      fi
+      nix profile wipe-history --profile "$profile" --older-than 14d
     '';
   };
 in
@@ -257,7 +196,7 @@ in
   };
 
   config = {
-    dotfiles.agents.ompExecutable = clientExecutable "omp" clients.omp;
+    dotfiles.agents.ompExecutable = ompExecutable;
 
     assertions = [
       {
@@ -298,24 +237,10 @@ in
           # omp は hook directory の中の symlink を読み込まない。Home Manager は file ごとに symlink を張るため、
           # directory ごと配備し、その中を実 file にする
           ".omp/agent/hooks/pre".source = hookDirectory;
-          ".claude/CLAUDE.md".source = policy;
-          ".codex/AGENTS.md".source = policy;
-          ".config/opencode/AGENTS.md".source = policy;
-          ".gemini/GEMINI.md".source = policy;
           ".local/share/dotfiles-agent/references/modern-web-guidance".source = inputs.modernWebGuidance;
-          ${wrapperDirectory}.source =
-            pkgs.symlinkJoin {
-              name = "dotfiles-agent-wrappers";
-              paths = lib.mapAttrsToList wrapper clients;
-            }
-            + "/bin";
+          ${wrapperDirectory}.source = "${ompWrapper}/bin";
         }
-        // skillFiles ".omp/agent/skills"
-        // skillFiles ".claude/skills"
-        // skillFiles ".codex/skills"
-        // skillFiles ".config/opencode/skills"
-        # Antigravity の App と CLI が共通に読む個人の skill directory
-        // skillFiles ".gemini/config/skills";
+        // skillFiles ".omp/agent/skills";
 
         systemd.user.services.dotfiles-standard-sync = {
           Unit.Description = "architecture-standard の clone を既定 branch へ fast-forward";
@@ -327,19 +252,19 @@ in
         };
         systemd.user.timers.dotfiles-standard-sync = dailyTimer "architecture-standard の日次同期";
 
-        systemd.user.services.dotfiles-agent-update = {
-          Unit.Description = "agent client を最新へ更新";
+        systemd.user.services.dotfiles-omp-update = {
+          Unit.Description = "omp を最新へ更新";
           Service = {
             Type = "oneshot";
             Environment = [ "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt" ];
-            ExecStart = lib.getExe agentUpdate;
+            ExecStart = lib.getExe ompUpdate;
           };
         };
-        systemd.user.timers.dotfiles-agent-update = {
-          Unit.Description = "agent client の日次更新";
+        systemd.user.timers.dotfiles-omp-update = {
+          Unit.Description = "omp の日次更新";
           Timer = {
             OnCalendar = "daily";
-            # 配備直後は profile の無い client が flake の固定版で起動するため、timer の開始から間を置かずに最新を入れる
+            # 配備直後は profile が無く flake の固定版で起動するため、timer の開始から間を置かずに最新を入れる
             OnActiveSec = "1min";
             Persistent = true;
           };

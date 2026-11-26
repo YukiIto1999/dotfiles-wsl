@@ -95,13 +95,15 @@ else
 fi
 
 # 9. Scheduled agent jobs: a failed last run is a failure until the next success.
+#    Result is reset to success when a deploy reloads the unit, while ExecMainStatus keeps the last exit code.
 for unit in $(systemctl --user list-units --all --no-legend --plain 'dotfiles-*.service' 2>/dev/null | awk '{print $1}'); do
   result=$(systemctl --user show -P Result "$unit")
+  status=$(systemctl --user show -P ExecMainStatus "$unit")
   last=$(systemctl --user show -P ExecMainStartTimestamp "$unit")
-  if [ "$result" = success ]; then
+  if [ "$result" = success ] && [ "${status:-0}" = 0 ]; then
     pass "$unit last run ${last:-never}: success"
   else
-    fail "$unit last run $last: $result" "journalctl --user -u $unit -n 20"
+    fail "$unit last run $last: result $result, exit status $status" "journalctl --user -u $unit -n 20"
   fi
 done
 

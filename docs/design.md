@@ -56,13 +56,13 @@ Orcaのpane → bash -l → omp（wrapper）→ systemd-run --user --scope（age
 
 ## ネットワーク
 
-WSL は NAT モードで動かす。計測の記録は追跡外の`~/.local/share/dotfiles-wsl-archive/network-20261127/`にある。
+WSL は NAT モードで動かす。
 
 - WSL の NAT（WinNAT）は、外側の port を 100 個ずつ区画で確保する。新しい flow が区画を使い切ると、次の区画を確保させたその flow の最初の packet が捨てられる。2026-11-27 の pktmon では、捨てた理由は `IPSNPI client drop` で、場所は Windows の TCP/IP が WSL 側から受け取った直後だった。捨てた主体の名前は記録に出ないが、そのたびに外側の port が次の区画へ飛んでいた。落ちる割合は新しい flow の約 1% で、TCP は SYN の再送で約 1 秒遅れ、公開 resolver を直接引いていた名前解決は glibc の待ちで 5 秒止まっていた。Windows 自身の接続では 1,000 回中 0 回だった。
 - WSL の名前解決は systemd-resolved がキャッシュし、上流には WSL の DNS tunneling（`10.255.255.254`）を先頭に置く。DNS tunneling は hvsocket で Windows の DNS client へ渡すので WinNAT を通らず、上の計測でも取りこぼしが無かった。
 - `nixos` host が公開 resolver を後ろに残すのは、DNS tunneling が応答しなくなった 2026-09 の障害に備えるためである。resolved は UDP で 5 秒応答が無いと次の上流へ切り替え、以後はその上流を使い続ける。切り替わっている間は Windows と VPN の DNS 設定が効かない。
 - mirrored モードにすれば WinNAT を通らなくなるが、まだ採らない。WSL 2.7 では、動的ポートが細切れだと Linux 用のポートを予約できず、ネットワークの無い状態へ戻る（3.0.4 で修正）。また、Realtek の NetAdapterCx の NIC で TCP が通らない報告（microsoft/WSL#40998）と、VPN のアダプターを足したときに止まる報告（#41622）が、まだ閉じていない。試すのは、WSL を 3.0 系に上げた後に、作業中の session が無い時にする。
-- Windows の TCP/IP、DNS client、有線 NIC は OS の既定値で使い、このrepoは書き換えない。2026-11-27 に、次の古い調整を既定値へ戻し、有線 NIC の IPv6 を有効に戻した。戻す前の値と戻し方は Windows の`%LOCALAPPDATA%\network-tuning-20261127\`にある。
+- Windows の TCP/IP、DNS client、有線 NIC は OS の既定値で使い、このrepoは書き換えない。2026-11-27 に、次の古い調整を既定値へ戻し、有線 NIC の IPv6 を有効に戻した。
   - `MaxUserPort=15000`。動的ポートを 1024〜15000 にし、WinNAT の区画が 3469〜3668 と 8978〜10278 の開発用ポートを塞いでいた。
   - DNS client の否定キャッシュの無効化、`Tcp1323Opts`、`EnablePMTUBHDetect`。
 - IPv4 は光BBユニットが IPv6 の上へ包んで運ぶので、経路の MTU は 1460 になる。PMTU の探索と MSS の書き換えが効いているため、MTU は変えない。

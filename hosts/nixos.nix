@@ -13,7 +13,9 @@
 
     workstation = {
       wsl = {
+        # WSL の DNS tunneling が応答しなくなったとき（2026-09 に nix の取得が失敗した）に公開 resolver へ切り替える
         nameservers = [
+          "10.255.255.254"
           "1.1.1.1"
           "8.8.8.8"
         ];

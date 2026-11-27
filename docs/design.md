@@ -54,6 +54,13 @@ Orcaのpane → bash -l → omp（wrapper）→ systemd-run --user --scope（age
 - memoryの上限はどの層（`user.slice`、user manager、`agents.slice`、containerのslice）も`MemoryMax`だけにし、`MemoryHigh`を置かない。2026-11-26の計測で、`agents.slice`の30.4 GiBのうち20.3 GiBは回収できるpage cacheで、high到達は起動後約23時間で`user.slice`が3,414,763回、`agents.slice`が2,285,613回、`agents.slice`のmemory PSIはfull avg60で約11%だった。`MemoryHigh`は超過分に応じてprocessを待たせるため、cacheの量でagentを減速させていた。守りたい失敗（2026-11-01のswap thrashによる停止）は、`MemoryMax`（到達時はcacheから回収し、回収できなければその層の中でOOM）、小さいswap上限、oomdで防ぐ。
 - 上限は物理memoryに対して`user.slice` 82%、user manager 80%、`agents.slice` 78%とする。`agents.slice`は当初70%だったが、2026-11-26の計測でcacheが上限で回収され続けた（上限到達の回収が毎分約680回、回収したfile pageの読み直しが約5.6時間で65 GiB相当）ため広げた。`user.slice`の外に残す18%は、kernel、zram（当日の圧縮後2.2 GiB）、system.sliceのprocessの分である。広げた効果は、同じ指標（`agents.slice`の`memory.events`の`max`と`memory.stat`の`workingset_refault_file`の増え方、`memory.pressure`）で比べて確かめる。
 
+## ネットワーク
+
+WSL は NAT モードで動かす。計測の記録は追跡外の`~/.local/share/dotfiles-wsl-archive/network-20261127/`にある。
+
+- WSL の名前解決は systemd-resolved がキャッシュし、上流には WSL の DNS tunneling（`10.255.255.254`）を先頭に置く。2026-11-27 の計測で、WSL から NAT を通る新しい flow は、最初の packet が 0.2〜0.8% の割合で Windows 側で落ちていた（同じ宛先への Windows 自身の接続では 1,000 回中 0 回）。公開 resolver を直接引いていた構成では、名前解決の約 1% が glibc の 5 秒の待ちになっていた。DNS tunneling は NAT の UDP を通らないため、同じ計測で取りこぼしが無かった。
+- `nixos` host が公開 resolver を後ろに残すのは、DNS tunneling が応答しなくなった 2026-09 の障害に備えるためである。resolved は UDP で 5 秒応答が無いと次の上流へ切り替え、以後はその上流を使い続ける。切り替わっている間は Windows と VPN の DNS 設定が効かない。
+
 ## 記憶と知識
 
 Hindsightの検索は機能するが、使い方に問題があった（古い決定が新しい決定より上位に返る、毎回の注入に3〜5秒かかる、必ず守るべき決定を確率的な検索に置いていた）。現在の使い方は次のとおり。

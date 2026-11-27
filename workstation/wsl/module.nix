@@ -97,9 +97,10 @@ in
       description = "Windows 相互操作に使用する PowerShell executable の絶対 path";
     };
     nameservers = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
-      description = "WSL 自動 DNS を置き換える resolver の一覧 空なら WSL 生成設定";
+      type = lib.types.nonEmptyListOf lib.types.str;
+      # WSL の DNS tunneling の受付。Windows の DNS client へ hvsocket で渡すため NAT の UDP を通らず、Windows と VPN の DNS 設定に従う
+      default = [ "10.255.255.254" ];
+      description = "systemd-resolved が先頭から使い、応答が無ければ次へ切り替える上流 resolver の一覧";
     };
     extraDrives = lib.mkOption {
       type = lib.types.listOf (lib.types.strMatching "[A-Z]:");
@@ -184,7 +185,8 @@ in
     wslConf = {
       boot.systemd = true;
       interop.appendWindowsPath = false;
-      network.generateResolvConf = wsl.nameservers == [ ];
+      # /etc/resolv.conf は systemd-resolved の stub が持つ
+      network.generateResolvConf = false;
     };
   };
 
@@ -209,7 +211,17 @@ in
     }) wsl.extraDrives
   );
 
+  # WSL の NAT は新しい flow の最初の packet を時々落とし（2026-11-27 の計測で 0.2〜0.8%）、glibc はその度に 5 秒待っていた。
+  # nsncd はキャッシュしないので、キャッシュする systemd-resolved を前に置き、上流は NAT を通らない WSL の DNS tunneling を先頭にする
   config.networking.nameservers = wsl.nameservers;
+  config.services.resolved = {
+    enable = true;
+    settings.Resolve = {
+      # NAT の内側には応答する相手がいないので、multicast の名前解決は送らない
+      LLMNR = false;
+      MulticastDNS = false;
+    };
+  };
 
   config.environment.systemPackages = [
     wslview
